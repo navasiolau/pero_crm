@@ -16,6 +16,12 @@ importers:
       '@base-ui/react':
         specifier: ^1.6.0
         version: 1.6.0(@types/react@19.2.17)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
+      '@pero/plugin-demo':
+        specifier: workspace:*
+        version: link:../../packages/plugins/demo
+      '@pero/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
       '@prisma/client':
         specifier: 6.19.3
         version: 6.19.3(prisma@6.19.3(typescript@5.9.3))(typescript@5.9.3)
@@ -107,6 +113,29 @@ importers:
       typescript:
         specifier: ^5
         version: 5.9.3
+
+  packages/plugin-sdk:
+    dependencies:
+      react:
+        specifier: ^19
+        version: 19.1.0
+    devDependencies:
+      '@types/react':
+        specifier: ^19
+        version: 19.2.17
+
+  packages/plugins/demo:
+    dependencies:
+      '@pero/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../plugin-sdk
+      react:
+        specifier: ^19
+        version: 19.1.0
+    devDependencies:
+      '@types/react':
+        specifier: ^19
+        version: 19.2.17
 
 packages:
 

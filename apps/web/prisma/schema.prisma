@@ -40,3 +40,96 @@ model User {
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 }
+
+// ─── Плагинное ядро (§14) ────────────────────────────────────────────────────
+
+// Установленный модуль. Строка синхронизируется с манифестом пакета
+// packages/plugins/<id> при старте приложения; enabled переключается из UI.
+model Plugin {
+  id          String          @id // = id из манифеста, напр. "demo"
+  name        String
+  version     String
+  apiVersion  Int
+  description String?
+  permissions String[] // запрошенные права из манифеста
+  enabled     Boolean         @default(false)
+  installedAt DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  settings    PluginSetting[]
+  runLogs     PluginRunLog[]
+  apiTokens   ApiToken[]
+}
+
+// Настройки модуля (key-value, значения по settingsSchema манифеста).
+model PluginSetting {
+  pluginId String
+  key      String
+  value    Json
+  plugin   Plugin @relation(fields: [pluginId], references: [id], onDelete: Cascade)
+
+  @@id([pluginId, key])
+}
+
+// Журнал запусков плагина: вызовы хуков, команд, рендеры слотов, обращения к API.
+model PluginRunLog {
+  id         String   @id @default(cuid())
+  pluginId   String
+  kind       String // hook | command | slot | api
+  ref        String? // имя команды/хука/слота
+  status     String // ok | error
+  message    String?
+  durationMs Int?
+  createdAt  DateTime @default(now())
+  plugin     Plugin   @relation(fields: [pluginId], references: [id], onDelete: Cascade)
+
+  @@index([pluginId, createdAt])
+}
+
+// Шина доменных событий — outbox. Писатели добавляют запись в той же
+// транзакции, что и изменение данных; диспетчер разносит по подписчикам.
+model DomainEvent {
+  id          String    @id @default(cuid())
+  type        String // "project.created", "task.statusChanged", "plugin.toggled", ...
+  payload     Json
+  actor       String    @default("system") // userId | plugin:<id> | system
+  createdAt   DateTime  @default(now())
+  processedAt DateTime?
+  attempts    Int       @default(0)
+  lastError   String?
+
+  @@index([processedAt, createdAt])
+}
+
+// Токены публичного REST API (/api/v1) — для плагинов и внешних интеграций.
+model ApiToken {
+  id          String    @id @default(cuid())
+  name        String
+  prefix      String // первые символы токена — для отображения в UI
+  tokenHash   String    @unique // sha256 от токена
+  scopes      String[] // "read", "write", "plugins:manage", ...
+  pluginId    String?
+  plugin      Plugin?   @relation(fields: [pluginId], references: [id], onDelete: SetNull)
+  createdById String?
+  createdAt   DateTime  @default(now())
+  lastUsedAt  DateTime?
+  revokedAt   DateTime?
+}
+
+// Журнал изменений (§5): каждый чих в CRM.
+model ChangeLog {
+  id        String   @id @default(cuid())
+  actorType String // user | plugin | system
+  actorId   String // userId | plugin:<id> | system
+  actorName String? // отображаемое имя на момент записи
+  entity    String // plugin, priceItem, task, ...
+  entityId  String
+  action    String // create | update | delete | toggle | command | ...
+  field     String? // изменённое поле (для update)
+  oldValue  Json?
+  newValue  Json?
+  source    String   @default("web") // web | telegram | plugin | api
+  createdAt DateTime @default(now())
+
+  @@index([entity, entityId, createdAt])
+  @@index([createdAt])
+}

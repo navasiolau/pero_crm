@@ -28,10 +28,15 @@ PERO CRM v2 — CRM для производства корпусной мебе�
   - `src/auth.ts` + `src/auth.config.ts` — Auth.js v5 (credentials + JWT); `src/middleware.ts` — защита роутов и ролевые ограничения (`/finance`, `/changelog`, `/settings` — только ADMIN/DIRECTOR)
   - `src/app/(app)/` — защищённые разделы с app shell; `src/app/login/` — вход
   - `src/lib/nav.ts` — навигация: видимость пунктов по ролям + группы сайдбара (`main`/`manage`)
-  - `src/components/` — оболочка на официальных блоках shadcn (`dashboard-01`, `login-03`, стиль base-nova): `app-shell.tsx` (SidebarProvider), `app-sidebar.tsx`, `nav-main.tsx`, `site-header.tsx`, `nav-user.tsx`, `theme-toggle.tsx` (бинарный light/dark), `logo.tsx` (фирменное перо на лаймовом квадрате, как в v1), виджеты дашборда `section-cards.tsx`, `chart-area-interactive.tsx` (recharts), `recent-projects.tsx`, `login-form.tsx`, `stub-page.tsx` (empty-state заглушек)
+  - `src/components/` — оболочка на официальных блоках shadcn (`dashboard-01`, `login-03`, стиль base-nova): `app-shell.tsx` (SidebarProvider), `app-sidebar.tsx`, `nav-main.tsx`, `site-header.tsx`, `nav-user.tsx`, `theme-toggle.tsx` (бинарный light/dark), `logo.tsx` (фирменное перо v1, currentColor, без подложки), виджеты дашборда `section-cards.tsx`, `chart-area-interactive.tsx` (recharts), `recent-projects.tsx`, `login-form.tsx`, `stub-page.tsx` (empty-state заглушек)
   - `src/components/ui/` — примитивы shadcn (sidebar, card, table, chart, field и т.д.), ставить через `pnpm dlx shadcn@latest add <name>` из `apps/web`
-  - `prisma/` — схема (пока только `User`), миграции, seed
-- `packages/` — будущие пакеты/плагины (§14 плана)
+  - `src/server/plugins/` — плагинное ядро (§14): `registry.ts` (статический реестр манифестов — ручная установка), `sync.ts` (upsert Plugin при старте, вызов из `src/instrumentation.ts`), `slots.ts` + `src/components/plugins/plugin-slot.tsx` (UI-слоты через next/dynamic, ErrorBoundary на вклад), `events.ts` (шина DomainEvent — outbox, синхронная доставка + `dispatchPendingEvents` для cron), `context.ts` (PluginContext: db, logger, audit, emit, requirePermission), `changelog.ts` (журнал изменений §5), `tokens.ts` (Bearer-токены API), `actions.ts` (server actions: toggle/settings/command/token)
+  - `src/app/api/v1/` — публичный REST API (Bearer pero_…, scope read/write/admin): `/`, `/plugins`, `/plugins/:id/commands/:cmd` (POST), `/events`, `/events/dispatch` (POST), `/openapi.json`. **Исключён из middleware-матчера** — при добавлении роутов не забывать проверять scope.
+  - `src/app/(app)/settings/` — настройки (ADMIN/DIRECTOR): `modules/` (список + `[id]` детальная: автоформа настроек, команды, журнал запусков), `api/` (токены + документация)
+  - `src/app/(app)/changelog/` — журнал изменений (ADMIN/DIRECTOR)
+  - `prisma/` — схема (User + ядро: Plugin, PluginSetting, PluginRunLog, DomainEvent, ApiToken, ChangeLog), миграции, seed
+- `packages/plugin-sdk` (`@pero/plugin-sdk`) — SDK плагинов: манифест `definePlugin`, слоты (`dashboard.widget`, `project.tab`, `project.action`, `task.action`, `settings.page`), PluginContext, CURRENT_API_VERSION (совместимость N и N-1)
+- `packages/plugins/<id>` — плагины; сейчас `demo` (виджет, вкладка в проекте, команда «Пинг», хуки). Новый плагин: пакет с `plugin.ts` → workspace-зависимость в apps/web → `transpilePackages` → реестр `src/server/plugins/registry.ts`
 
 ## Конвенции
 

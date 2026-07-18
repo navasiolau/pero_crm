@@ -59,16 +59,30 @@ pero_crm_v2/
 │       └── src/
 │           ├── app/
 │           │   ├── (app)/    # защищённая группа роутов (app shell)
+│           │   │   ├── settings/    # Настройки: modules/ (плагины), api/ (токены)
+│           │   │   └── changelog/   # журнал изменений (§5)
+│           │   ├── api/v1/   # публичный REST API (Bearer-токены) + openapi.json
 │           │   └── login/    # страница входа
-│           ├── components/   # app shell + shadcn/ui
+│           ├── components/   # app shell + shadcn/ui + plugins/ (рендер слотов)
+│           ├── server/       # plugins/ (плагинное ядро §14), api/, require-role
 │           ├── lib/          # prisma-синглтон, навигация, утилиты
+│           ├── instrumentation.ts # синхронизация реестра плагинов при старте
 │           ├── auth.ts       # Auth.js (credentials)
 │           ├── auth.config.ts# edge-safe конфиг Auth.js
 │           └── middleware.ts # защита роутов + ролевые ограничения
-├── packages/                 # будущие пакеты (плагины и пр.)
+├── packages/
+│   ├── plugin-sdk/           # @pero/plugin-sdk — SDK: манифест, слоты, контекст
+│   └── plugins/              # плагины (§14); demo — эталонный
 ├── docker-compose.yml        # postgres (5433) + app + caddy (профиль prod)
 └── Caddyfile
 ```
+
+## Модули (плагины, §14)
+
+- Управление: **Настройки → Модули** (админ/директор) — вкл/выкл одной кнопкой, автоформа настроек, команды, журнал запусков.
+- Точки расширения: UI-слоты (`dashboard.widget`, `project.tab`, `project.action`, `task.action`, `settings.page`), шина доменных событий (outbox), команды (UI/cron/REST).
+- REST API `/api/v1` с Bearer-токенами: **Настройки → API и токены**; OpenAPI — `/api/v1/openapi.json`.
+- Установка ручная: пакет в `packages/plugins/<id>/` + запись в `apps/web/src/server/plugins/registry.ts`. Эталон — `packages/plugins/demo`.
 
 ## Prod (docker)
 

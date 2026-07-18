@@ -18,6 +18,8 @@ const withSerwist = withSerwistInit({
 const isWindows = process.platform === "win32";
 
 const nextConfig: NextConfig = {
+  // Плагины и SDK — TS-пакеты монорепо без отдельной сборки (§14: общая сборка)
+  transpilePackages: ["@pero/plugin-sdk", "@pero/plugin-demo"],
   ...(isWindows
     ? {}
     : {
