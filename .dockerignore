@@ -1,0 +1,21 @@
+# Docker-контекст: только то, что нужно для сборки образа
+.git
+**/node_modules
+**/.next
+**/dist
+**/out
+**/*.tsbuildinfo
+.turbo
+
+# Локальные env и артефакты
+.env
+apps/web/.env
+apps/web/.env.local
+apps/web/.env.production
+.playwright-mcp
+uploads
+
+# Соседние проекты/артефакты, не нужные для сборки
+legacy_export
+research
+*.log

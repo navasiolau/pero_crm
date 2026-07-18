@@ -1,0 +1,40 @@
+# Зависимости
+node_modules/
+.pnpm-store/
+
+# Сборка
+.next/
+dist/
+out/
+*.tsbuildinfo
+.turbo/
+
+# Env
+.env
+.env.local
+.env.production
+apps/web/.env
+apps/web/.env.local
+apps/web/.env.production
+
+# Serwist (генерируются при сборке)
+apps/web/public/sw.js
+apps/web/public/swe-worker-*.js
+
+# Загрузки пользователей
+uploads/
+apps/web/uploads/
+
+# Playwright MCP артефакты сессии
+.playwright-mcp/
+
+# Прочее
+*.log
+.DS_Store
+Thumbs.db
+
+legacy_export
+research
+packages
+
+b_plus_creds.md

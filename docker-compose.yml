@@ -1,0 +1,56 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: pero_crm_pg
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: pero_crm
+      POSTGRES_USER: pero
+      POSTGRES_PASSWORD: pero_crm_dev
+    ports:
+      # Порт 5433: 5432 может быть занят postgres проекта legacy_export
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pero -d pero_crm"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    container_name: pero_crm_app
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://pero:pero_crm_dev@postgres:5432/pero_crm
+    depends_on:
+      postgres:
+        condition: service_healthy
+    profiles: ["prod"]
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: pero_crm_caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    environment:
+      CADDY_DOMAIN: ${CADDY_DOMAIN:-localhost}
+    depends_on:
+      - app
+    profiles: ["prod"]
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

@@ -1,0 +1,19 @@
+{
+  "name": "pero-crm-v2",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm --filter @pero/web dev",
+    "build": "pnpm --filter @pero/web build",
+    "start": "pnpm --filter @pero/web start",
+    "lint": "pnpm --filter @pero/web lint",
+    "db:migrate": "pnpm --filter @pero/web db:migrate",
+    "db:seed": "pnpm --filter @pero/web db:seed",
+    "db:generate": "pnpm --filter @pero/web db:generate",
+    "db:deploy": "pnpm --filter @pero/web db:deploy"
+  },
+  "engines": {
+    "node": ">=22",
+    "pnpm": ">=11"
+  }
+}

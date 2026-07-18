@@ -1,0 +1,42 @@
+// PERO CRM v2 — схема данных (Фаза 1: каркас)
+// Полная доменная модель — см. §8 плана, добавляется в следующих фазах.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  DIRECTOR
+  MANAGER
+  ENGINEER
+  WORKER
+  MOUNTER
+}
+
+enum PayScheme {
+  PIECE
+  PERCENT_PROJECT
+  PERCENT_TURNOVER
+  NONE
+}
+
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  name         String
+  passwordHash String
+  role         Role
+  payScheme    PayScheme @default(NONE)
+  payPercent   Decimal?  @db.Decimal(5, 2)
+  active       Boolean   @default(true)
+  legacyId     String?
+  legacyTable  String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+}

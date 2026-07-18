@@ -1,0 +1,31 @@
+# syntax=docker/dockerfile:1
+
+FROM node:22-alpine AS base
+RUN apk add --no-cache libc6-compat && corepack enable pnpm
+WORKDIR /app
+
+# --- Сборка ---
+FROM base AS build
+COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
+COPY apps/web/package.json apps/web/
+RUN pnpm install --frozen-lockfile
+COPY apps/web apps/web
+# Значения-заглушки: нужны только на время сборки (prerender), в образ не попадают
+ENV DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy" \
+    AUTH_SECRET="build-time-dummy"
+RUN pnpm --filter @pero/web exec prisma generate \
+    && pnpm --filter @pero/web build
+
+# --- Рантайм ---
+FROM base AS runner
+ENV NODE_ENV=production \
+    HOSTNAME=0.0.0.0 \
+    PORT=3000
+# prisma CLI — для `migrate deploy` при старте контейнера
+RUN npm i -g prisma@6.19.3
+COPY --from=build /app/apps/web/.next/standalone ./
+COPY --from=build /app/apps/web/.next/static ./apps/web/.next/static
+COPY --from=build /app/apps/web/public ./apps/web/public
+COPY apps/web/prisma apps/web/prisma
+EXPOSE 3000
+CMD ["sh", "-c", "prisma migrate deploy --schema apps/web/prisma/schema.prisma && node apps/web/server.js"]
