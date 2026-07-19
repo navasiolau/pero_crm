@@ -1,8 +1,8 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Camera, Check, Play, Plus } from "lucide-react";
+import { Check, Play, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -17,6 +17,10 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ConfirmDeleteDialog } from "@/components/confirm-delete-dialog";
+import { ActualTimeDialog } from "@/components/actual-time-dialog";
+import { PhotoUploadButton } from "@/components/photo-upload-button";
+import { QuantityStepper } from "@/components/quantity-stepper";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import {
   Select,
@@ -32,25 +36,48 @@ import {
   taskStatusLabels,
   type TaskDetails,
 } from "@/components/task-dialog";
+import { formatAmount } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { changeTaskStatus, createTask } from "@/server/tasks/actions";
+import { addWork, removeWork } from "@/server/works/actions";
 
 import type { SelectOption } from "../projects-view";
+
+export interface WorkRow {
+  id: string;
+  title: string;
+  quantity: string;
+  allocated: string;
+  priceSnapshot: string;
+  total: string;
+  linkedTask: { id: string; title: string; status: string } | null;
+}
+
+export interface PriceOption {
+  id: string;
+  name: string;
+  unit: string;
+  price: string;
+}
 
 function tomorrow(): string {
   return new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
-// Вкладка «Работы и задачи». Клик по задаче — карточка (просмотр/правка).
-// Замер = типовая задача с обязательными фото (§6.2).
+// Вкладка «Работы и задачи». Работы — расценка × количество со снимком цены (§9).
+// Клик по задаче — карточка (просмотр/правка). Замер — с фото (§6.2).
 export function TasksTab({
   projectId,
   tasks,
+  works,
+  priceItems,
   canManage,
   workers,
 }: {
   projectId: string;
   tasks: TaskDetails[];
+  works: WorkRow[];
+  priceItems: PriceOption[];
   canManage: boolean;
   workers: SelectOption[];
 }) {
@@ -61,43 +88,89 @@ export function TasksTab({
   const [title, setTitle] = useState("");
   const [type, setType] = useState("Производство");
   const [assigneeId, setAssigneeId] = useState("");
+  const [workId, setWorkId] = useState("");
+  const [estimate, setEstimate] = useState("");
   const [dueAt, setDueAt] = useState(tomorrow);
-  const fileInputs = useRef<Record<string, HTMLInputElement | null>>({});
+  const [workOpen, setWorkOpen] = useState(false);
+  const [deleteWorkFor, setDeleteWorkFor] = useState<WorkRow | null>(null);
+  const [actualFor, setActualFor] = useState<TaskDetails | null>(null);
+  const [priceItemId, setPriceItemId] = useState("");
+  const [quantity, setQuantity] = useState("1");
 
-  function uploadFile(taskId: string, file: File) {
-    const form = new FormData();
-    form.append("file", file);
-    form.append("projectId", projectId);
-    form.append("taskId", taskId);
-    form.append("category", "MEASUREMENT");
-    startTransition(async () => {
-      const response = await fetch("/api/files/upload", {
-        method: "POST",
-        body: form,
-      });
-      if (response.ok) {
-        toast.success("Фото приложено");
-        router.refresh();
-      } else {
-        const data = await response.json().catch(() => ({}));
-        toast.error(data.error ?? "Ошибка загрузки");
-      }
-    });
-  }
+  const worksTotal = works.reduce((sum, work) => sum + Number(work.total), 0);
 
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex justify-between">
-        <p className="text-sm text-muted-foreground">
-          Клик по задаче — просмотр{canManage ? " и редактирование" : ""}.
-          Замер требует фото при выполнении (§6.2).
-        </p>
-        {canManage ? (
-          <Button size="sm" onClick={() => setOpen(true)}>
-            <Plus className="size-4" /> Задача
-          </Button>
+    <div className="flex flex-col gap-5">
+      {/* Работы (§9): расценка × количество, цена — снимок на момент назначения */}
+      <div className="flex flex-col gap-2">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-medium">
+            Работы · итого {formatAmount(worksTotal, "BYN")}
+          </h3>
+          {canManage ? (
+            <Button size="sm" variant="outline" onClick={() => setWorkOpen(true)}>
+              <Plus className="size-4" /> Работа
+            </Button>
+          ) : null}
+        </div>
+        {works.map((work) => {
+          const remaining = Number(work.quantity) - Number(work.allocated);
+          return (
+            <div
+              key={work.id}
+              className="flex items-center gap-3 rounded-xl border px-3 py-2 text-sm"
+            >
+              <span className="flex-1">
+                {work.title}
+                {remaining > 0 ? (
+                  <Badge variant="secondary" className="ml-2">
+                    свободно {remaining} из {work.quantity}
+                  </Badge>
+                ) : (
+                  <Badge variant="outline" className="ml-2">
+                    распределена полностью
+                  </Badge>
+                )}
+              </span>
+              <span className="text-muted-foreground">
+                {formatAmount(work.priceSnapshot, "BYN")} × {work.quantity}
+              </span>
+              <span className="font-medium">
+                {formatAmount(work.total, "BYN")}
+              </span>
+            {canManage ? (
+              <Button
+                size="icon-xs"
+                variant="ghost"
+                aria-label="Удалить работу"
+                disabled={pending}
+                onClick={() => setDeleteWorkFor(work)}
+              >
+                <Trash2 className="size-3.5" />
+              </Button>
+            ) : null}
+            </div>
+          );
+        })}
+        {works.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            Работ не назначено — добавляются из прайса со снимком цены.
+          </p>
         ) : null}
       </div>
+
+      <div className="flex flex-col gap-3">
+        <div className="flex justify-between">
+          <p className="text-sm text-muted-foreground">
+            Клик по задаче — просмотр{canManage ? " и редактирование" : ""}.
+            Замер требует фото при выполнении.
+          </p>
+          {canManage ? (
+            <Button size="sm" onClick={() => setOpen(true)}>
+              <Plus className="size-4" /> Задача
+            </Button>
+          ) : null}
+        </div>
 
       {tasks.map((task) => (
         <Card
@@ -154,34 +227,22 @@ export function TasksTab({
               {task.status === "NEW" || task.status === "IN_PROGRESS" ? (
                 <>
                   {task.requiresPhoto ? (
-                    <>
-                      <input
-                        ref={(el) => {
-                          fileInputs.current[task.id] = el;
-                        }}
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        onChange={(event) => {
-                          const file = event.target.files?.[0];
-                          if (file) uploadFile(task.id, file);
-                          event.target.value = "";
-                        }}
-                      />
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={pending}
-                        onClick={() => fileInputs.current[task.id]?.click()}
-                      >
-                        <Camera className="size-4" /> Фото
-                      </Button>
-                    </>
+                    <PhotoUploadButton
+                      taskId={task.id}
+                      projectId={projectId}
+                      filesCount={task.files.length}
+                      size="sm"
+                    />
                   ) : null}
                   <Button
                     size="sm"
                     disabled={pending}
-                    onClick={() =>
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      if (task.spentMinutes === 0) {
+                        setActualFor(task);
+                        return;
+                      }
                       startTransition(async () => {
                         const result = await changeTaskStatus(task.id, "DONE");
                         if (result.ok) {
@@ -189,8 +250,8 @@ export function TasksTab({
                         } else {
                           toast.error(result.error ?? "Ошибка");
                         }
-                      })
-                    }
+                      });
+                    }}
                   >
                     <Check className="size-4" /> Выполнена
                   </Button>
@@ -205,6 +266,7 @@ export function TasksTab({
           Задач пока нет
         </div>
       ) : null}
+      </div>
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>
@@ -266,6 +328,65 @@ export function TasksTab({
                 onChange={(event) => setDueAt(event.target.value)}
               />
             </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="est">Оценка времени, мин</Label>
+              <Input
+                id="est"
+                type="number"
+                min="0"
+                value={estimate}
+                onChange={(event) => setEstimate(event.target.value)}
+                placeholder="пусто — среднее из истории"
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>Работа (оплата)</Label>
+              <SearchableSelect
+                options={works.map((work) => {
+                  const remaining =
+                    Number(work.quantity) - Number(work.allocated);
+                  return {
+                    value: work.id,
+                    label: `${work.title} · ${formatAmount(work.priceSnapshot, "BYN")}/${"ед."}`,
+                    hint:
+                      remaining > 0
+                        ? `свободно ${remaining} из ${work.quantity}`
+                        : "распределена полностью",
+                    disabled: remaining <= 0,
+                  };
+                })}
+                value={workId}
+                onChange={(value) => {
+                  setWorkId(value);
+                  const work = works.find((item) => item.id === value);
+                  const remaining = work
+                    ? Number(work.quantity) - Number(work.allocated)
+                    : 0;
+                  setQuantity(remaining > 0 ? String(remaining) : "");
+                }}
+                placeholder="без работы"
+                searchPlaceholder="Поиск работы…"
+                allowClear
+              />
+            </div>
+            {workId ? (
+              <div className="flex flex-col gap-1.5">
+                <Label>Количество из работы</Label>
+                <QuantityStepper
+                  value={quantity}
+                  onChange={setQuantity}
+                  remaining={(() => {
+                    const work = works.find((item) => item.id === workId);
+                    return work
+                      ? Number(work.quantity) - Number(work.allocated)
+                      : 0;
+                  })()}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Сдельная оплата = цена-снимок × количество.
+                </p>
+              </div>
+            ) : null}
             {!assigneeId ? (
               <p className="text-xs text-muted-foreground">
                 Без исполнителя задача создаётся черновиком — будет подписана
@@ -274,7 +395,7 @@ export function TasksTab({
             ) : null}
             {type === "Замер" ? (
               <p className="text-xs text-muted-foreground">
-                Замер (§6.2): при выполнении система потребует приложить
+                Замер: при выполнении система потребует приложить
                 фото/замерный лист — файлы попадут в проект с категорией
                 «Замер».
               </p>
@@ -293,7 +414,14 @@ export function TasksTab({
                     title: title.trim(),
                     type,
                     assigneeId: assigneeId || undefined,
+                    workId: workId || undefined,
+                    quantity:
+                      workId && quantity.trim() !== ""
+                        ? Number(quantity)
+                        : undefined,
                     dueAt,
+                    estimateMinutes:
+                      estimate.trim() === "" ? undefined : Number(estimate),
                     requiresPhoto: type === "Замер",
                   });
                   if (result.ok) {
@@ -302,6 +430,8 @@ export function TasksTab({
                     setTitle("");
                     setType("Производство");
                     setAssigneeId("");
+                    setWorkId("");
+                    setEstimate("");
                     setDueAt(tomorrow());
                     router.refresh();
                   } else {
@@ -320,8 +450,117 @@ export function TasksTab({
         task={selected}
         workers={workers}
         canEdit={canManage}
+        projectTasks={tasks.map((task) => ({
+          id: task.id,
+          title: task.title,
+          status: task.status,
+        }))}
+        works={works.map((work) => ({
+          id: work.id,
+          title: work.title,
+          total: work.total,
+          quantity: work.quantity,
+          allocated: work.allocated,
+        }))}
         open={!!selected}
         onOpenChange={(next) => !next && setSelected(null)}
+      />
+
+      {/* Добавление работы из прайса (§9) */}
+      <Dialog open={workOpen} onOpenChange={setWorkOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Новая работа</DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-1.5">
+              <Label>Расценка из прайса *</Label>
+              <SearchableSelect
+                options={priceItems.map((item) => ({
+                  value: item.id,
+                  label: item.name,
+                  hint: `${formatAmount(item.price, "BYN")} / ${item.unit}`,
+                }))}
+                value={priceItemId}
+                onChange={setPriceItemId}
+                placeholder="Выберите расценку…"
+                searchPlaceholder="Поиск расценки…"
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="work-qty">Количество *</Label>
+              <Input
+                id="work-qty"
+                type="number"
+                min="0.01"
+                step="0.01"
+                value={quantity}
+                onChange={(event) => setQuantity(event.target.value)}
+              />
+            </div>
+            {priceItemId && Number(quantity) > 0 ? (
+              <p className="text-sm text-muted-foreground">
+                Итого:{" "}
+                {formatAmount(
+                  Number(
+                    priceItems.find((item) => item.id === priceItemId)?.price,
+                  ) * Number(quantity),
+                  "BYN",
+                )}{" "}
+                — цена зафиксируется снимком (смена прайса её не изменит).
+              </p>
+            ) : null}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setWorkOpen(false)}>
+              Отмена
+            </Button>
+            <Button
+              disabled={!priceItemId || !(Number(quantity) > 0) || pending}
+              onClick={() =>
+                startTransition(async () => {
+                  const result = await addWork({
+                    projectId,
+                    priceItemId,
+                    quantity: Number(quantity),
+                  });
+                  if (result.ok) {
+                    toast.success("Работа добавлена");
+                    setWorkOpen(false);
+                    setPriceItemId("");
+                    setQuantity("1");
+                    router.refresh();
+                  } else {
+                    toast.error(result.error ?? "Ошибка");
+                  }
+                })
+              }
+            >
+              Добавить
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <ConfirmDeleteDialog
+        entityLabel={`работу «${deleteWorkFor?.title ?? ""}»`}
+        open={!!deleteWorkFor}
+        onOpenChange={(open) => !open && setDeleteWorkFor(null)}
+        onConfirm={async () => {
+          const result = await removeWork(deleteWorkFor!.id);
+          if (result.ok) {
+            toast.success("Работа удалена");
+            return true;
+          }
+          toast.error(result.error ?? "Ошибка");
+          return false;
+        }}
+      />
+
+      <ActualTimeDialog
+        task={actualFor}
+        open={!!actualFor}
+        onOpenChange={(open) => !open && setActualFor(null)}
+        onDone={() => router.refresh()}
       />
     </div>
   );

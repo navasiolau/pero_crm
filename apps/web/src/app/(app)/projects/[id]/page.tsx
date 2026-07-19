@@ -14,6 +14,7 @@ import { prisma } from "@/lib/prisma";
 import { getPluginSettings } from "@/server/plugins/run-log";
 import { getSlotContributions } from "@/server/plugins/slots";
 import { getProjectFor, listClients, listManagers, listWorkers } from "@/server/projects/queries";
+import { mapTaskDetails } from "@/server/tasks/queries";
 
 import { CommunicationsTab } from "./communications-tab";
 import { FilesTab } from "./files-tab";
@@ -43,7 +44,7 @@ export default async function ProjectPage({
   const showFinance = ["ADMIN", "DIRECTOR"].includes(role);
   const showAmount = showFinance || canManage || role === "ENGINEER";
 
-  const [clients, managers, workers, changeLogs, contributions] =
+  const [clients, managers, workers, changeLogs, contributions, priceItems] =
     await Promise.all([
       listClients(),
       listManagers(),
@@ -59,6 +60,10 @@ export default async function ProjectPage({
         take: 50,
       }),
       getSlotContributions("project.tab"),
+      prisma.priceItem.findMany({
+        where: { active: true },
+        orderBy: { name: "asc" },
+      }),
     ]);
 
   const pluginTabs = await Promise.all(
@@ -142,27 +147,25 @@ export default async function ProjectPage({
         <TabsContent value="tasks" className="mt-4">
           <TasksTab
             projectId={project.id}
-            tasks={project.tasks.map((task) => ({
-              id: task.id,
-              title: task.title,
-              type: task.type,
-              status: task.status,
-              dueAt: task.dueAt?.toISOString() ?? null,
-              assigneeId: task.assigneeId,
-              assigneeName: task.assignee?.name ?? null,
-              requiresPhoto: task.requiresPhoto,
-              projectId: project.id,
-              projectNumber: project.number,
-              projectTitle: project.title,
-              files: task.files,
-              createdAt: task.createdAt.toISOString(),
-              doneAt: task.doneAt?.toISOString() ?? null,
-              doneByName: task.doneById
-                ? (uploaderNames.get(task.doneById) ?? null)
+            tasks={await mapTaskDetails(project.tasks)}
+            works={project.works.map((work) => ({
+              id: work.id,
+              title: work.title,
+              quantity: work.quantity.toString(),
+              allocated: work.tasks
+                .reduce((sum, task) => sum + Number(task.quantity ?? 0), 0)
+                .toString(),
+              priceSnapshot: work.priceSnapshot.toString(),
+              total: work.total.toString(),
+              linkedTask: work.tasks[0]
+                ? { id: work.tasks[0].id, title: work.tasks[0].title, status: work.tasks[0].status }
                 : null,
-              createdByName: task.createdById
-                ? (uploaderNames.get(task.createdById) ?? null)
-                : null,
+            }))}
+            priceItems={priceItems.map((item) => ({
+              id: item.id,
+              name: item.name,
+              unit: item.unit,
+              price: item.price.toString(),
             }))}
             canManage={canManage}
             workers={workers.map((worker) => ({

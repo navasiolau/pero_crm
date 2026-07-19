@@ -129,7 +129,7 @@ export function OverviewTab({
               placeholder="Материалы, размеры, особенности…"
             />
             <p className="text-xs text-muted-foreground">
-              Тех. блок правит и инженер (§4)
+              Тех. блок правит и инженер
             </p>
           </div>
           {canManage || canEditTech ? (

@@ -1,6 +1,7 @@
 import type { Role } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
+import { taskDetailsInclude } from "@/server/tasks/queries";
 
 // Правила видимости (§4): офисные роли — все проекты;
 // работник/монтажник — только проекты со своими задачами.
@@ -35,11 +36,14 @@ export async function getProjectFor(
       client: true,
       manager: { select: { id: true, name: true } },
       tasks: {
-        include: {
-          assignee: { select: { id: true, name: true } },
-          files: { select: { id: true, fileName: true, hasThumb: true, mimeType: true } },
-        },
+        include: taskDetailsInclude,
         orderBy: { createdAt: "desc" },
+      },
+      works: {
+        include: {
+          tasks: { select: { id: true, title: true, status: true, quantity: true } },
+        },
+        orderBy: { createdAt: "asc" },
       },
       files: { orderBy: { createdAt: "desc" } },
       communications: { orderBy: { happenedAt: "desc" } },

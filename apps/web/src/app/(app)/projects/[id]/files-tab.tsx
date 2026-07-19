@@ -18,6 +18,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useFileViewer } from "@/components/file-viewer";
+import { ConfirmDeleteDialog } from "@/components/confirm-delete-dialog";
 import { deleteFile } from "@/server/files/actions";
 
 export interface FileRow {
@@ -61,6 +62,7 @@ export function FilesTab({
   const [pending, startTransition] = useTransition();
   const [category, setCategory] = useState<FileCategory>("PHOTO");
   const [caption, setCaption] = useState("");
+  const [deleteFor, setDeleteFor] = useState<FileRow | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const fileViewer = useFileViewer();
 
@@ -175,13 +177,7 @@ export function FilesTab({
                       variant="ghost"
                       aria-label="Удалить"
                       disabled={pending}
-                      onClick={() =>
-                        startTransition(async () => {
-                          const result = await deleteFile(file.id);
-                          if (result.ok) toast.success("Файл удалён");
-                          else toast.error(result.error ?? "Ошибка");
-                        })
-                      }
+                      onClick={() => setDeleteFor(file)}
                     >
                       <Trash2 className="size-3.5" />
                     </Button>
@@ -222,13 +218,10 @@ export function FilesTab({
                 variant="ghost"
                 aria-label="Удалить"
                 disabled={pending}
-                onClick={() =>
-                  startTransition(async () => {
-                    const result = await deleteFile(file.id);
-                    if (result.ok) toast.success("Файл удалён");
-                    else toast.error(result.error ?? "Ошибка");
-                  })
-                }
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setDeleteFor(file);
+                }}
               >
                 <Trash2 className="size-4" />
               </Button>
@@ -243,6 +236,20 @@ export function FilesTab({
         </div>
       ) : null}
       {fileViewer.viewer}
+      <ConfirmDeleteDialog
+        entityLabel={`файл «${deleteFor?.fileName ?? ""}»`}
+        open={!!deleteFor}
+        onOpenChange={(open) => !open && setDeleteFor(null)}
+        onConfirm={async () => {
+          const result = await deleteFile(deleteFor!.id);
+          if (result.ok) {
+            toast.success("Файл удалён");
+            return true;
+          }
+          toast.error(result.error ?? "Ошибка");
+          return false;
+        }}
+      />
     </div>
   );
 }

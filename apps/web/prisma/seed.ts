@@ -112,17 +112,35 @@ async function main() {
   // Демо-данные фазы 2: клиенты, проекты по этапам, замер (§6.2).
   // Идемпотентно: создаём, только если клиентов ещё нет.
   const clientsCount = await prisma.client.count();
-  if (clientsCount > 0) {
-    console.log("✔ демо-данные проектов уже есть — пропуск");
-    return;
-  }
-
   const manager = await prisma.user.findUniqueOrThrow({
     where: { email: "manager@pero.local" },
   });
   const worker = await prisma.user.findUniqueOrThrow({
     where: { email: "worker@pero.local" },
   });
+
+  // Демо-расценки (§9) — независимо от демо-проектов, идемпотентно
+  const pricesCount = await prisma.priceItem.count();
+  if (pricesCount === 0) {
+    await prisma.priceItem.createMany({
+      data: [
+        { name: "Распил ЛДСП", unit: "м²", price: 12.5, category: "Заготовка" },
+        { name: "Кромление", unit: "м.п.", price: 3.2, category: "Заготовка" },
+        { name: "Присадка (сверловка)", unit: "шт", price: 1.8, category: "Заготовка" },
+        { name: "Сборка корпуса", unit: "м²", price: 45, category: "Сборка" },
+        { name: "Установка фасадов", unit: "шт", price: 15, category: "Сборка" },
+        { name: "Замер", unit: "услуга", price: 50, category: "Выезд" },
+        { name: "Монтаж кухни", unit: "м.п.", price: 120, category: "Монтаж" },
+        { name: "Монтаж шкафа-купе", unit: "м²", price: 85, category: "Монтаж" },
+      ],
+    });
+    console.log("✔ расценки (8 шт.)");
+  }
+
+  if (clientsCount > 0) {
+    console.log("✔ демо-данные проектов уже есть — пропуск");
+    return;
+  }
 
   const ivanova = await prisma.client.create({
     data: {
@@ -193,18 +211,23 @@ async function main() {
   const kitchen = await prisma.project.findUniqueOrThrow({
     where: { number: `П-${year}-001` },
   });
-  await prisma.task.create({
-    data: {
-      projectId: kitchen.id,
-      title: "Замер на объекте",
-      type: "Замер",
-      assigneeId: worker.id,
-      requiresPhoto: true,
-      dueAt: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000),
-      createdById: manager.id,
-    },
+  const zamExists = await prisma.task.count({
+    where: { projectId: kitchen.id, type: "Замер" },
   });
-  console.log("✔ задача «Замер» работнику");
+  if (zamExists === 0) {
+    await prisma.task.create({
+      data: {
+        projectId: kitchen.id,
+        title: "Замер на объекте",
+        type: "Замер",
+        assigneeId: worker.id,
+        requiresPhoto: true,
+        dueAt: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000),
+        createdById: manager.id,
+      },
+    });
+    console.log("✔ задача «Замер» работнику");
+  }
 }
 
 main()

@@ -131,7 +131,11 @@ export function DataTable<TRow extends { id: string }>({
                   {column.sortable && column.sortValue ? (
                     <button
                       type="button"
-                      className="flex items-center gap-1 hover:text-foreground"
+                      className={cn(
+                        "flex items-center gap-1 hover:text-foreground",
+                        column.headerClassName?.includes("text-right") &&
+                          "w-full justify-end",
+                      )}
                       onClick={() => toggleSort(column)}
                     >
                       {column.header}

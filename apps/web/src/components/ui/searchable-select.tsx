@@ -16,6 +16,7 @@ export interface SearchableOption {
   value: string;
   label: string;
   hint?: string; // вторая строка (телефон, должность…)
+  disabled?: boolean; // занято/недоступно (напр. работа уже в задаче)
 }
 
 // Выпадающий список с поиском: поле ввода над списком фильтрует значения.
@@ -106,11 +107,14 @@ export function SearchableSelect({
             <button
               key={option.value}
               type="button"
+              disabled={option.disabled}
               className={cn(
                 "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent",
                 option.value === value && "bg-accent/60",
+                option.disabled && "cursor-not-allowed opacity-45 hover:bg-transparent",
               )}
               onClick={() => {
+                if (option.disabled) return;
                 onChange(option.value);
                 setOpen(false);
               }}

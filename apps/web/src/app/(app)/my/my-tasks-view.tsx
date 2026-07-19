@@ -1,28 +1,50 @@
 "use client";
 
-import { useRef, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Camera, Check, Play } from "lucide-react";
+import { Check, Play, Plus, Square, Timer } from "lucide-react";
 import { toast } from "sonner";
-import type { TaskStatus } from "@prisma/client";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { PhotoUploadButton } from "@/components/photo-upload-button";
+import { ActualTimeDialog } from "@/components/actual-time-dialog";
 import { changeTaskStatus } from "@/server/tasks/actions";
+import { addManualTime, startTimer, stopTimer } from "@/server/time/actions";
+import type { TaskDetails } from "@/components/task-dialog";
 
-interface MyTask {
-  id: string;
-  title: string;
-  type: string | null;
-  status: TaskStatus;
-  dueAt: string | null;
-  requiresPhoto: boolean;
-  filesCount: number;
-  projectId: string;
+interface ActiveTimer {
+  taskId: string;
+  taskTitle: string;
   projectNumber: string;
-  projectTitle: string;
-  clientName: string;
+  startedAt: string;
+}
+
+function useElapsed(startedAt: string | null): string {
+  const [, tick] = useState(0);
+  useEffect(() => {
+    if (!startedAt) return;
+    const interval = setInterval(() => tick((n) => n + 1), 1000);
+    return () => clearInterval(interval);
+  }, [startedAt]);
+  if (!startedAt) return "";
+  const total = Math.max(0, Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = total % 60;
+  return hours > 0
+    ? `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
+    : `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
 function isOverdue(dueAt: string | null): boolean {
@@ -32,42 +54,45 @@ function isOverdue(dueAt: string | null): boolean {
   return due.getTime() < Date.now();
 }
 
-// «Мои задачи»: увидел → выполнил (одна кнопка). Замер — с фото (§6.2).
+// «Мои задачи»: увидел → таймер (серверный, §9) → стоп → выполнил → фото (§6.2).
 export function MyTasksView({
   active,
   done,
   userName,
+  timer,
 }: {
-  active: MyTask[];
-  done: MyTask[];
+  active: TaskDetails[];
+  done: TaskDetails[];
   userName: string;
+  timer: ActiveTimer | null;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const fileInputs = useRef<Record<string, HTMLInputElement | null>>({});
+  const [manualFor, setManualFor] = useState<string | null>(null);
+  const [manualMinutes, setManualMinutes] = useState("60");
+  const [actualFor, setActualFor] = useState<TaskDetails | null>(null);
+  const elapsed = useElapsed(timer?.startedAt ?? null);
 
-  function uploadPhoto(task: MyTask, file: File) {
-    const form = new FormData();
-    form.append("file", file);
-    form.append("projectId", task.projectId);
-    form.append("taskId", task.id);
-    form.append("category", "MEASUREMENT");
+  // «Выполнено»: если фактического времени нет — спросим обязательно (§9)
+  function completeTask(task: TaskDetails) {
+    if (task.spentMinutes === 0) {
+      setActualFor(task);
+      return;
+    }
     startTransition(async () => {
-      const response = await fetch("/api/files/upload", {
-        method: "POST",
-        body: form,
-      });
-      if (response.ok) {
-        toast.success("Фото приложено");
+      const result = await changeTaskStatus(task.id, "DONE");
+      if (result.ok) {
+        toast.success("Выполнено!");
         router.refresh();
       } else {
-        const data = await response.json().catch(() => ({}));
-        toast.error(data.error ?? "Ошибка загрузки");
+        toast.error(result.error ?? "Ошибка");
       }
     });
   }
 
-  function renderTask(task: MyTask, faded = false) {
+  function renderTask(task: TaskDetails, faded = false) {
+    const timerHere = timer?.taskId === task.id;
+    const timerElsewhere = timer && !timerHere;
     return (
       <Card key={task.id} className={faded ? "opacity-60" : ""}>
         <CardContent className="flex flex-wrap items-center gap-3 p-4">
@@ -82,70 +107,103 @@ export function MyTasksView({
               ) : null}
             </div>
             <div className="text-sm text-muted-foreground">
-              {task.projectNumber} · {task.projectTitle} · {task.clientName}
+              {task.projectNumber} · {task.projectTitle}
               {task.dueAt
                 ? ` · до ${new Date(task.dueAt).toLocaleDateString("ru-RU")}`
                 : ""}
             </div>
+            <div className="mt-0.5 text-xs text-muted-foreground">
+              Время: {task.estimateMinutes ?? "—"} / {task.spentMinutes} мин
+              (оценка / факт)
+            </div>
           </div>
-          {task.status === "NEW" ? (
-            <Button
-              variant="outline"
-              disabled={pending}
-              onClick={() =>
-                startTransition(async () => {
-                  const result = await changeTaskStatus(task.id, "IN_PROGRESS");
-                  if (!result.ok) toast.error(result.error ?? "Ошибка");
-                })
-              }
-            >
-              <Play className="size-4" /> В работу
-            </Button>
-          ) : null}
-          {task.status === "NEW" || task.status === "IN_PROGRESS" ? (
-            <>
+
+          {task.status !== "DONE" ? (
+            <div className="flex flex-wrap items-center gap-2">
+              {timerHere ? (
+                <Button
+                  size="lg"
+                  variant="destructive"
+                  disabled={pending}
+                  onClick={() =>
+                    startTransition(async () => {
+                      const result = await stopTimer();
+                      if (result.ok) {
+                        toast.success(`Записано ${result.minutes} мин`);
+                        router.refresh();
+                      } else {
+                        toast.error(result.error ?? "Ошибка");
+                      }
+                    })
+                  }
+                >
+                  <Square className="size-4" /> Стоп {elapsed}
+                </Button>
+              ) : (
+                <Button
+                  variant="outline"
+                  disabled={pending || !!timerElsewhere}
+                  title={
+                    timerElsewhere ? "Сначала остановите другой таймер" : undefined
+                  }
+                  onClick={() =>
+                    startTransition(async () => {
+                      const result = await startTimer(task.id);
+                      if (result.ok) {
+                        toast.success("Таймер запущен");
+                        router.refresh();
+                      } else {
+                        toast.error(result.error ?? "Ошибка");
+                      }
+                    })
+                  }
+                >
+                  <Timer className="size-4" /> Старт
+                </Button>
+              )}
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={pending}
+                title="Внести время вручную"
+                onClick={() => {
+                  setManualFor(task.id);
+                  setManualMinutes("60");
+                }}
+              >
+                <Plus className="size-4" /> мин
+              </Button>
+
+              {task.status === "NEW" ? (
+                <Button
+                  variant="outline"
+                  disabled={pending}
+                  onClick={() =>
+                    startTransition(async () => {
+                      const result = await changeTaskStatus(task.id, "IN_PROGRESS");
+                      if (!result.ok) toast.error(result.error ?? "Ошибка");
+                    })
+                  }
+                >
+                  <Play className="size-4" /> В работу
+                </Button>
+              ) : null}
               {task.requiresPhoto ? (
-                <>
-                  <input
-                    ref={(el) => {
-                      fileInputs.current[task.id] = el;
-                    }}
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={(event) => {
-                      const file = event.target.files?.[0];
-                      if (file) uploadPhoto(task, file);
-                      event.target.value = "";
-                    }}
-                  />
-                  <Button
-                    variant="outline"
-                    disabled={pending}
-                    onClick={() => fileInputs.current[task.id]?.click()}
-                  >
-                    <Camera className="size-4" />
-                    {task.filesCount > 0 ? `Фото (${task.filesCount})` : "Фото"}
-                  </Button>
-                </>
+                <PhotoUploadButton
+                  taskId={task.id}
+                  projectId={task.projectId}
+                  filesCount={task.files.length}
+                  size="default"
+                />
               ) : null}
               <Button
                 size="lg"
                 disabled={pending}
-                onClick={() =>
-                  startTransition(async () => {
-                    const result = await changeTaskStatus(task.id, "DONE");
-                    if (result.ok) {
-                      toast.success("Выполнено!");
-                    } else {
-                      toast.error(result.error ?? "Ошибка");
-                    }
-                  })
-                }
+                onClick={() => completeTask(task)}
               >
                 <Check className="size-4" /> Выполнено
               </Button>
-            </>
+            </div>
           ) : null}
         </CardContent>
       </Card>
@@ -160,6 +218,39 @@ export function MyTasksView({
           {userName}, у вас активных задач: {active.length}
         </p>
       </div>
+
+      {timer ? (
+        <Card className="border-primary/50 bg-primary/5">
+          <CardContent className="flex flex-wrap items-center gap-3 p-3">
+            <Timer className="size-5 animate-pulse text-primary" />
+            <div className="flex-1">
+              <div className="text-sm font-medium">
+                Идёт таймер: {timer.taskTitle}
+              </div>
+              <div className="text-xs text-muted-foreground">
+                {timer.projectNumber} · {elapsed}
+              </div>
+            </div>
+            <Button
+              variant="destructive"
+              disabled={pending}
+              onClick={() =>
+                startTransition(async () => {
+                  const result = await stopTimer();
+                  if (result.ok) {
+                    toast.success(`Записано ${result.minutes} мин`);
+                    router.refresh();
+                  } else {
+                    toast.error(result.error ?? "Ошибка");
+                  }
+                })
+              }
+            >
+              <Square className="size-4" /> Стоп
+            </Button>
+          </CardContent>
+        </Card>
+      ) : null}
 
       <div className="flex flex-col gap-2">
         {active.map((task) => renderTask(task))}
@@ -183,6 +274,61 @@ export function MyTasksView({
           </div>
         </>
       ) : null}
+
+      {/* Ручной ввод времени (§9) */}
+      <Dialog open={!!manualFor} onOpenChange={(open) => !open && setManualFor(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Внести время вручную</DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="manual-min">Минуты</Label>
+            <Input
+              id="manual-min"
+              type="number"
+              min="1"
+              max="1440"
+              value={manualMinutes}
+              onChange={(event) => setManualMinutes(event.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">
+              Для случаев, когда таймер забыли запустить.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setManualFor(null)}>
+              Отмена
+            </Button>
+            <Button
+              disabled={!(Number(manualMinutes) >= 1) || pending}
+              onClick={() =>
+                startTransition(async () => {
+                  const result = await addManualTime({
+                    taskId: manualFor!,
+                    minutes: Number(manualMinutes),
+                  });
+                  if (result.ok) {
+                    toast.success("Время записано");
+                    setManualFor(null);
+                    router.refresh();
+                  } else {
+                    toast.error(result.error ?? "Ошибка");
+                  }
+                })
+              }
+            >
+              Записать
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <ActualTimeDialog
+        task={actualFor}
+        open={!!actualFor}
+        onOpenChange={(open) => !open && setActualFor(null)}
+        onDone={() => router.refresh()}
+      />
     </div>
   );
 }

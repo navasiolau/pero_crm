@@ -137,6 +137,9 @@ export function TasksPageView({
         task={selected}
         workers={workers}
         canEdit={canEdit}
+        projectTasks={tasks
+          .filter((task) => task.projectId === selected?.projectId)
+          .map((task) => ({ id: task.id, title: task.title, status: task.status }))}
         open={!!selected}
         onOpenChange={(open) => !open && setSelected(null)}
       />

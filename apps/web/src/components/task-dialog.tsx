@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Pencil } from "lucide-react";
+import { Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import type { TaskStatus } from "@prisma/client";
 
@@ -28,8 +28,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useFileViewer } from "@/components/file-viewer";
+import { ConfirmDeleteDialog } from "@/components/confirm-delete-dialog";
+import { QuantityStepper } from "@/components/quantity-stepper";
 import { cn } from "@/lib/utils";
-import { updateTask } from "@/server/tasks/actions";
+import { deleteTask, updateTask } from "@/server/tasks/actions";
 
 export interface TaskDetails {
   id: string;
@@ -40,6 +42,14 @@ export interface TaskDetails {
   assigneeId: string | null;
   assigneeName: string | null;
   requiresPhoto: boolean;
+  estimateMinutes: number | null;
+  spentMinutes: number;
+  workId: string | null;
+  workTitle: string | null;
+  workTotal: string | null; // итого по всей работе
+  workPriceSnapshot: string | null; // цена-снимок за единицу
+  quantity: string | null; // часть работы, которую берёт задача
+  dependencies: { id: string; title: string; status: TaskStatus }[];
   projectId: string;
   projectNumber: string;
   projectTitle: string;
@@ -74,22 +84,37 @@ export function TaskDialog({
   canEdit,
   open,
   onOpenChange,
+  projectTasks = [],
+  works = [],
 }: {
   task: TaskDetails | null;
   workers: { id: string; name: string; hint?: string }[];
   canEdit: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  projectTasks?: { id: string; title: string; status: TaskStatus }[];
+  works?: {
+    id: string;
+    title: string;
+    total: string;
+    quantity: string;
+    allocated: string;
+  }[];
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [editing, setEditing] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const fileViewer = useFileViewer();
   const [form, setForm] = useState({
     title: "",
     type: "Производство",
     assigneeId: "",
+    workId: "",
+    quantity: "",
     dueAt: "",
+    estimateMinutes: "",
+    dependencyIds: [] as string[],
   });
 
   if (!task) return null;
@@ -101,7 +126,11 @@ export function TaskDialog({
       title: task.title,
       type: task.type ?? "Производство",
       assigneeId: task.assigneeId ?? "",
+      workId: task.workId ?? "",
+      quantity: task.quantity ?? "",
       dueAt: task.dueAt ? task.dueAt.slice(0, 10) : "",
+      estimateMinutes: task.estimateMinutes?.toString() ?? "",
+      dependencyIds: task.dependencies.map((dep) => dep.id),
     });
     setEditing(true);
   }
@@ -203,6 +232,108 @@ export function TaskDialog({
                 }
               />
             </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="flex flex-col gap-1.5">
+                <Label>Работа (оплата)</Label>
+                <SearchableSelect
+                  options={works.map((work) => {
+                    const own =
+                      work.id === task.workId && task.quantity
+                        ? Number(task.quantity)
+                        : 0;
+                    const remaining =
+                      Number(work.quantity) - Number(work.allocated) + own;
+                    return {
+                      value: work.id,
+                      label: `${work.title} · ${work.total} BYN`,
+                      hint:
+                        remaining > 0
+                          ? `свободно ${remaining} из ${work.quantity}`
+                          : "распределена полностью",
+                      disabled: remaining <= 0,
+                    };
+                  })}
+                  value={form.workId}
+                  onChange={(value) =>
+                    setForm((prev) => ({ ...prev, workId: value }))
+                  }
+                  placeholder="без работы"
+                  searchPlaceholder="Поиск работы…"
+                  allowClear
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="td-est">Оценка, мин</Label>
+                <Input
+                  id="td-est"
+                  type="number"
+                  min="0"
+                  value={form.estimateMinutes}
+                  onChange={(event) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      estimateMinutes: event.target.value,
+                    }))
+                  }
+                  placeholder="—"
+                />
+              </div>
+            </div>
+            {form.workId ? (
+              <div className="flex flex-col gap-1.5">
+                <Label>Количество из работы</Label>
+                <QuantityStepper
+                  value={form.quantity}
+                  onChange={(value) =>
+                    setForm((prev) => ({ ...prev, quantity: value }))
+                  }
+                  remaining={(() => {
+                    const work = works.find((item) => item.id === form.workId);
+                    if (!work) return 0;
+                    const own =
+                      work.id === task.workId && task.quantity
+                        ? Number(task.quantity)
+                        : 0;
+                    return (
+                      Number(work.quantity) - Number(work.allocated) + own
+                    );
+                  })()}
+                />
+              </div>
+            ) : null}
+            {projectTasks.length > 0 ? (
+              <div className="flex flex-col gap-1.5">
+                <Label>Зависит от (блокируется, пока те не выполнены)</Label>
+                <div className="flex max-h-32 flex-col gap-1 overflow-y-auto rounded-lg border p-2">
+                  {projectTasks
+                    .filter((item) => item.id !== task.id)
+                    .map((item) => (
+                      <label
+                        key={item.id}
+                        className="flex items-center gap-2 text-sm"
+                      >
+                        <input
+                          type="checkbox"
+                          className="size-4"
+                          checked={form.dependencyIds.includes(item.id)}
+                          onChange={(event) =>
+                            setForm((prev) => ({
+                              ...prev,
+                              dependencyIds: event.target.checked
+                                ? [...prev.dependencyIds, item.id]
+                                : prev.dependencyIds.filter((id) => id !== item.id),
+                            }))
+                          }
+                        />
+                        <span>{item.title}</span>
+                        <span className="text-xs text-muted-foreground">
+                          ({taskStatusLabels[item.status]})
+                        </span>
+                      </label>
+                    ))}
+                </div>
+              </div>
+            ) : null}
           </div>
         ) : (
           <div className="flex flex-col gap-4 text-sm">
@@ -241,7 +372,50 @@ export function TaskDialog({
                 <div className="text-xs text-muted-foreground">Создана</div>
                 <div>{new Date(task.createdAt).toLocaleDateString("ru-RU")}</div>
               </div>
+              <div>
+                <div className="text-xs text-muted-foreground">Время (оценка / факт)</div>
+                <div>
+                  {task.estimateMinutes ?? "—"} / {task.spentMinutes} мин
+                </div>
+              </div>
+              {task.workTitle ? (
+                <div>
+                  <div className="text-xs text-muted-foreground">Работа (оплата)</div>
+                  <div>
+                    {task.workTitle}
+                    {task.quantity && task.workPriceSnapshot
+                      ? ` · ${task.quantity} ед. × ${task.workPriceSnapshot} = ${(
+                          Number(task.quantity) * Number(task.workPriceSnapshot)
+                        ).toLocaleString("ru-RU")} руб.`
+                      : ""}
+                  </div>
+                </div>
+              ) : null}
             </div>
+            {task.dependencies.length > 0 ? (
+              <div>
+                <div className="mb-1 text-xs text-muted-foreground">
+                  Зависит от:
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {task.dependencies.map((dep) => (
+                    <Badge
+                      key={dep.id}
+                      variant="outline"
+                      className={cn(
+                        "border-transparent",
+                        dep.status === "DONE"
+                          ? taskStatusBadge.DONE
+                          : "bg-amber-500/15 text-amber-700 dark:text-amber-400",
+                      )}
+                    >
+                      {dep.title}
+                      {dep.status !== "DONE" ? " (не выполнена)" : ""}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            ) : null}
             {task.status === "DONE" ? (
               <div className="rounded-lg bg-emerald-500/10 p-2.5 text-emerald-700 dark:text-emerald-400">
                 Выполнена {task.doneAt
@@ -252,7 +426,7 @@ export function TaskDialog({
             ) : null}
             {task.requiresPhoto ? (
               <div className="text-muted-foreground">
-                Замер: фото обязательны при выполнении (§6.2)
+                Замер: фото обязательны при выполнении
               </div>
             ) : null}
             {task.files.length > 0 ? (
@@ -307,7 +481,17 @@ export function TaskDialog({
                       title: form.title.trim(),
                       type: form.type,
                       assigneeId: form.assigneeId || null,
+                      workId: form.workId || null,
+                      quantity:
+                        form.workId && form.quantity.trim() !== ""
+                          ? Number(form.quantity)
+                          : null,
                       dueAt: form.dueAt,
+                      estimateMinutes:
+                        form.estimateMinutes.trim() === ""
+                          ? null
+                          : Number(form.estimateMinutes),
+                      dependencyIds: form.dependencyIds,
                     });
                     if (result.ok) {
                       toast.success("Задача обновлена");
@@ -325,14 +509,39 @@ export function TaskDialog({
             </>
           ) : (
             !readOnly && (
-              <Button variant="outline" onClick={startEdit}>
-                <Pencil className="size-4" /> Редактировать
-              </Button>
+              <div className="flex w-full items-center justify-between">
+                <Button
+                  variant="destructive"
+                  onClick={() => setDeleteOpen(true)}
+                >
+                  <Trash2 className="size-4" /> Удалить
+                </Button>
+                <Button variant="outline" onClick={startEdit}>
+                  <Pencil className="size-4" /> Редактировать
+                </Button>
+              </div>
             )
           )}
         </DialogFooter>
       </DialogContent>
       {fileViewer.viewer}
+      <ConfirmDeleteDialog
+        entityLabel="задачу"
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        warning="Время по ней будет удалено, файлы останутся в проекте."
+        onConfirm={async () => {
+          const result = await deleteTask(task.id);
+          if (result.ok) {
+            toast.success("Задача удалена");
+            onOpenChange(false);
+            router.refresh();
+            return true;
+          }
+          toast.error(result.error ?? "Ошибка");
+          return false;
+        }}
+      />
     </Dialog>
   );
 }

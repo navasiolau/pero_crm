@@ -4,6 +4,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { getUserPreference } from "@/server/preferences";
 import { listWorkers } from "@/server/projects/queries";
+import { mapTaskDetails, taskDetailsInclude } from "@/server/tasks/queries";
 
 import { TasksPageView } from "./tasks-page-view";
 
@@ -20,13 +21,7 @@ export default async function TasksPage() {
 
   const [tasks, workers, view] = await Promise.all([
     prisma.task.findMany({
-      include: {
-        project: {
-          select: { id: true, number: true, title: true },
-        },
-        assignee: { select: { id: true, name: true } },
-        files: { select: { id: true, fileName: true, hasThumb: true, mimeType: true } },
-      },
+      include: taskDetailsInclude,
       orderBy: [{ status: "asc" }, { dueAt: "asc" }, { createdAt: "desc" }],
       take: 300,
     }),
@@ -34,41 +29,11 @@ export default async function TasksPage() {
     getUserPreference(session.user.id, "tasks.view"),
   ]);
 
-  const authorIds = [
-    ...new Set(
-      tasks.flatMap((task) =>
-        [task.createdById, task.doneById].filter((v): v is string => !!v),
-      ),
-    ),
-  ];
-  const authors = await prisma.user.findMany({
-    where: { id: { in: authorIds } },
-    select: { id: true, name: true },
-  });
-  const authorNames = new Map(authors.map((user) => [user.id, user.name]));
+  const mapped = await mapTaskDetails(tasks);
 
   return (
     <TasksPageView
-      tasks={tasks.map((task) => ({
-        id: task.id,
-        title: task.title,
-        type: task.type,
-        status: task.status,
-        dueAt: task.dueAt?.toISOString() ?? null,
-        assigneeId: task.assigneeId,
-        assigneeName: task.assignee?.name ?? null,
-        requiresPhoto: task.requiresPhoto,
-        projectId: task.project.id,
-        projectNumber: task.project.number,
-        projectTitle: task.project.title,
-        files: task.files,
-        createdAt: task.createdAt.toISOString(),
-        doneAt: task.doneAt?.toISOString() ?? null,
-        doneByName: task.doneById ? (authorNames.get(task.doneById) ?? null) : null,
-        createdByName: task.createdById
-          ? (authorNames.get(task.createdById) ?? null)
-          : null,
-      }))}
+      tasks={mapped}
       canEdit={["ADMIN", "DIRECTOR", "MANAGER"].includes(role)}
       initialView={view === "table" ? "table" : "kanban"}
       workers={workers.map((worker) => ({
