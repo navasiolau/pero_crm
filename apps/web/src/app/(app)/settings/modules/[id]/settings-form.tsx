@@ -78,7 +78,9 @@ export function SettingsForm({
                     onValueChange={(selected) => set(field.key, selected)}
                   >
                     <SelectTrigger id={field.key}>
-                      <SelectValue placeholder="Выберите…" />
+                      <SelectValue placeholder="Выберите…">
+                        {field.options?.find((option) => option.value === value)?.label}
+                      </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       {(field.options ?? []).map((option) => (

@@ -1,5 +1,7 @@
 "use client"
 
+import Link from "next/link"
+
 import { Badge } from "@/components/ui/badge"
 import {
   Card,
@@ -16,52 +18,25 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { cn } from "@/lib/utils"
 
-// Демо-строки до появления реальных проектов (фаза 2)
-const projects = [
-  {
-    id: "П-2026-014",
-    client: "Иванова Анна",
-    product: "Кухня «Модерн»",
-    status: "В производстве",
-    sum: "385 000 ₽",
-  },
-  {
-    id: "П-2026-013",
-    client: "Петров Сергей",
-    product: "Шкаф-купе",
-    status: "Монтаж",
-    sum: "142 000 ₽",
-  },
-  {
-    id: "П-2026-012",
-    client: "ООО «Альфа»",
-    product: "Офисная мебель",
-    status: "Замер",
-    sum: "96 500 ₽",
-  },
-  {
-    id: "П-2026-011",
-    client: "Сидорова Елена",
-    product: "Гардеробная",
-    status: "Завершён",
-    sum: "210 000 ₽",
-  },
-]
-
-const statusVariants: Record<string, "default" | "secondary" | "outline"> = {
-  "В производстве": "default",
-  "Монтаж": "secondary",
-  "Замер": "outline",
-  "Завершён": "outline",
+export interface RecentProjectRow {
+  id: string
+  number: string
+  client: string
+  product: string
+  status: string
+  statusClass: string
+  sum: string
 }
 
-export function RecentProjects() {
+// Последние проекты на дашборде (реальные данные с фазы 2)
+export function RecentProjects({ projects }: { projects: RecentProjectRow[] }) {
   return (
     <Card>
       <CardHeader>
         <CardTitle>Последние проекты</CardTitle>
-        <CardDescription>Демо-данные — реальный список появится в фазе 2</CardDescription>
+        <CardDescription>Свежие карточки из воронки</CardDescription>
       </CardHeader>
       <CardContent>
         <Table>
@@ -69,29 +44,45 @@ export function RecentProjects() {
             <TableRow>
               <TableHead>Номер</TableHead>
               <TableHead>Клиент</TableHead>
-              <TableHead className="hidden md:table-cell">Изделие</TableHead>
-              <TableHead>Статус</TableHead>
+              <TableHead>Изделие</TableHead>
+              <TableHead>Этап</TableHead>
               <TableHead className="text-right">Сумма</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {projects.map((project) => (
               <TableRow key={project.id}>
-                <TableCell className="font-medium">{project.id}</TableCell>
-                <TableCell>{project.client}</TableCell>
-                <TableCell className="hidden md:table-cell">
-                  {project.product}
+                <TableCell className="font-medium">
+                  <Link
+                    href={`/projects/${project.id}`}
+                    className="underline-offset-2 hover:underline"
+                  >
+                    {project.number}
+                  </Link>
                 </TableCell>
+                <TableCell>{project.client}</TableCell>
+                <TableCell>{project.product}</TableCell>
                 <TableCell>
-                  <Badge variant={statusVariants[project.status] ?? "outline"}>
+                  <Badge
+                    variant="outline"
+                    className={cn("border-transparent", project.statusClass)}
+                  >
                     {project.status}
                   </Badge>
                 </TableCell>
-                <TableCell className="text-right tabular-nums">
-                  {project.sum}
-                </TableCell>
+                <TableCell className="text-right">{project.sum}</TableCell>
               </TableRow>
             ))}
+            {projects.length === 0 ? (
+              <TableRow>
+                <TableCell
+                  colSpan={5}
+                  className="py-8 text-center text-muted-foreground"
+                >
+                  Проектов пока нет — создайте первый в разделе «Проекты»
+                </TableCell>
+              </TableRow>
+            ) : null}
           </TableBody>
         </Table>
       </CardContent>

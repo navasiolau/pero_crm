@@ -7,9 +7,11 @@ import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
 
 export function AppShell({
   user,
+  headerExtras,
   children,
 }: {
   user: ShellUser
+  headerExtras?: React.ReactNode
   children: React.ReactNode
 }) {
   return (
@@ -23,7 +25,7 @@ export function AppShell({
     >
       <AppSidebar role={user.role} variant="inset" />
       <SidebarInset>
-        <SiteHeader user={user} />
+        <SiteHeader user={user} extras={headerExtras} />
         <main className="@container/main flex flex-1 flex-col px-4 py-4 md:py-6 lg:px-6">
           {children}
         </main>

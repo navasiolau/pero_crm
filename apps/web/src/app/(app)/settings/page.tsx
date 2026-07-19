@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Blocks, KeyRound } from "lucide-react";
+import { Blocks, KeyRound, Users } from "lucide-react";
 
 import {
   Card,
@@ -9,6 +9,12 @@ import {
 } from "@/components/ui/card";
 
 const sections = [
+  {
+    href: "/settings/users",
+    icon: Users,
+    title: "Пользователи",
+    description: "Сотрудники: ФИО, должность, контакты, роли, схемы оплаты",
+  },
   {
     href: "/settings/modules",
     icon: Blocks,

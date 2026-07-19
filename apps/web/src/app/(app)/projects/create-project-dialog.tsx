@@ -1,0 +1,253 @@
+"use client";
+
+import { useState, useTransition } from "react";
+import { toast } from "sonner";
+
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { SearchableSelect } from "@/components/ui/searchable-select";
+import { Textarea } from "@/components/ui/textarea";
+import { createClient } from "@/server/clients/actions";
+import { createProject } from "@/server/projects/actions";
+
+import type { SelectOption } from "./projects-view";
+
+// Создание проекта (§6): минимум — клиент и изделие; остальное дозаполняется в карточке.
+export function CreateProjectDialog({
+  open,
+  onOpenChange,
+  clients,
+  managers,
+  onCreated,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  clients: SelectOption[];
+  managers: SelectOption[];
+  onCreated: (id: string) => void;
+}) {
+  const [pending, startTransition] = useTransition();
+  const [title, setTitle] = useState("");
+  const [clientId, setClientId] = useState("");
+  const [expectedPrice, setExpectedPrice] = useState("");
+  const [managerId, setManagerId] = useState("");
+  const [address, setAddress] = useState("");
+  const [description, setDescription] = useState("");
+  // Мини-форма нового клиента
+  const [newClientOpen, setNewClientOpen] = useState(false);
+  const [newClientName, setNewClientName] = useState("");
+  const [newClientPhone, setNewClientPhone] = useState("");
+  const [localClients, setLocalClients] = useState(clients);
+
+  function reset() {
+    setTitle("");
+    setClientId("");
+    setExpectedPrice("");
+    setManagerId("");
+    setAddress("");
+    setDescription("");
+    setNewClientOpen(false);
+    setNewClientName("");
+    setNewClientPhone("");
+  }
+
+  const price = expectedPrice.trim() === "" ? undefined : Number(expectedPrice);
+  const valid =
+    title.trim().length > 0 &&
+    clientId.length > 0 &&
+    (price === undefined || (!Number.isNaN(price) && price >= 0));
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) reset();
+        onOpenChange(next);
+      }}
+    >
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Новый проект</DialogTitle>
+          <DialogDescription>
+            Проект появится в колонке «Лид» на канбане.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="title">Изделие / описание *</Label>
+            <Input
+              id="title"
+              value={title}
+              onChange={(event) => setTitle(event.target.value)}
+              placeholder="Кухня «Модерн», шкаф-купе…"
+            />
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <Label>Клиент *</Label>
+            {newClientOpen ? (
+              <div className="flex flex-col gap-2 rounded-lg border p-3">
+                <Input
+                  placeholder="Имя клиента *"
+                  value={newClientName}
+                  onChange={(event) => setNewClientName(event.target.value)}
+                />
+                <Input
+                  placeholder="Телефон *"
+                  value={newClientPhone}
+                  onChange={(event) => setNewClientPhone(event.target.value)}
+                />
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    disabled={
+                      pending || !newClientName.trim() || !newClientPhone.trim()
+                    }
+                    onClick={() =>
+                      startTransition(async () => {
+                        const result = await createClient({
+                          name: newClientName.trim(),
+                          phone: newClientPhone.trim(),
+                        });
+                        if (result.ok && result.id) {
+                          setLocalClients((prev) => [
+                            ...prev,
+                            { id: result.id!, name: newClientName.trim() },
+                          ]);
+                          setClientId(result.id);
+                          setNewClientOpen(false);
+                          toast.success("Клиент создан");
+                        } else {
+                          toast.error(result.error ?? "Ошибка");
+                        }
+                      })
+                    }
+                  >
+                    Добавить клиента
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setNewClientOpen(false)}
+                  >
+                    Отмена
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <SearchableSelect
+                    options={localClients.map((client) => ({
+                      value: client.id,
+                      label: client.name,
+                    }))}
+                    value={clientId}
+                    onChange={setClientId}
+                    placeholder="Выберите клиента…"
+                    searchPlaceholder="Поиск клиента…"
+                  />
+                </div>
+                <Button
+                  variant="outline"
+                  onClick={() => setNewClientOpen(true)}
+                >
+                  Новый
+                </Button>
+              </div>
+            )}
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="price">Ожидаемая цена, BYN</Label>
+              <Input
+                id="price"
+                type="number"
+                min="0"
+                value={expectedPrice}
+                onChange={(event) => setExpectedPrice(event.target.value)}
+                placeholder="не обязательно"
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>Менеджер</Label>
+              <SearchableSelect
+                options={managers.map((manager) => ({
+                  value: manager.id,
+                  label: manager.name,
+                }))}
+                value={managerId}
+                onChange={setManagerId}
+                placeholder="не назначен"
+                searchPlaceholder="Поиск менеджера…"
+                allowClear
+              />
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="address">Адрес</Label>
+            <Input
+              id="address"
+              value={address}
+              onChange={(event) => setAddress(event.target.value)}
+              placeholder="Адрес объекта"
+            />
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="description">Технический блок</Label>
+            <Textarea
+              id="description"
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+              placeholder="Материалы, размеры, особенности…"
+            />
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Отмена
+          </Button>
+          <Button
+            disabled={!valid || pending}
+            onClick={() =>
+              startTransition(async () => {
+                const result = await createProject({
+                  title: title.trim(),
+                  clientId,
+                  expectedPrice: price,
+                  managerId: managerId || undefined,
+                  address: address.trim() || undefined,
+                  description: description.trim() || undefined,
+                });
+                if (result.ok && result.id) {
+                  toast.success("Проект создан");
+                  onOpenChange(false);
+                  reset();
+                  onCreated(result.id);
+                } else {
+                  toast.error(result.error ?? "Ошибка");
+                }
+              })
+            }
+          >
+            {pending ? "Создание…" : "Создать проект"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}

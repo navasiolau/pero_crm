@@ -27,18 +27,219 @@ enum PayScheme {
 }
 
 model User {
-  id           String    @id @default(cuid())
-  email        String    @unique
-  name         String
-  passwordHash String
-  role         Role
-  payScheme    PayScheme @default(NONE)
-  payPercent   Decimal?  @db.Decimal(5, 2)
-  active       Boolean   @default(true)
+  id              String         @id @default(cuid())
+  email           String         @unique
+  name            String // ФИО
+  position        String? // должность (столяр, монтажник, менеджер проектов…)
+  phone           String?
+  telegram        String? // @username
+  passwordHash    String
+  role            Role
+  payScheme       PayScheme      @default(NONE)
+  payPercent      Decimal?       @db.Decimal(5, 2)
+  active          Boolean        @default(true)
+  legacyId        String?
+  legacyTable     String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  managedProjects Project[]      @relation("ProjectManager")
+  assignedTasks   Task[]         @relation("TaskAssignee")
+  notifications   Notification[]
+}
+
+// ─── Проекты и клиенты (фаза 2, §6) ──────────────────────────────────────────
+
+enum ProjectStage {
+  LEAD // Лид
+  ESTIMATE // Просчёт
+  CONTRACT // Договор
+  IN_WORK // В работе
+  DONE // Завершён
+  REFUSED // Отказ
+  PAUSED // Пауза
+  RECLAMATION // Рекламация
+}
+
+enum TaskStatus {
+  DRAFT // Черновик (без исполнителя)
+  NEW // Новая
+  IN_PROGRESS // В работе
+  DONE // Выполнена
+}
+
+enum FileCategory {
+  PHOTO // фото
+  DRAWING // чертёж
+  QUOTE // КП
+  MEASUREMENT // замер
+  DOCUMENT // документ
+  OTHER // прочее
+}
+
+enum CommunicationType {
+  CALL // звонок
+  EMAIL // письмо
+  MESSENGER // мессенджер
+  MEETING // встреча
+  NOTE // заметка
+}
+
+model Client {
+  id             String          @id @default(cuid())
+  name           String // Имя (или название для юрлица, напр. «ООО Альфа»)
+  lastName       String? // Фамилия
+  middleName     String? // Отчество
+  phone          String
+  email          String?
+  address        String?
+  comment        String?
+  legacyId       String?
+  legacyTable    String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  projects       Project[]
+  communications Communication[]
+}
+
+model Project {
+  id                     String       @id @default(cuid())
+  number                 String       @unique // П-2026-001
+  title                  String // изделие / краткое описание
+  stage                  ProjectStage @default(LEAD)
+  stageChangedAt         DateTime     @default(now())
+  expectedPrice          Decimal?     @db.Decimal(12, 2)
+  currency               String       @default("BYN")
+  description            String? // тех. блок (правит и инженер, §4)
+  address                String?
+  refusalReason          String?
+  refusalComment         String?
+  reclamationReason      String?
+  reclamationDescription String?
+  reclamationFault       String?
+  managerId              String?
+  manager                User?        @relation("ProjectManager", fields: [managerId], references: [id], onDelete: SetNull)
+  clientId               String
+  client                 Client       @relation(fields: [clientId], references: [id])
+  createdById            String?
+  legacyId               String?
+  legacyTable            String?
+  createdAt              DateTime     @default(now())
+  updatedAt              DateTime     @updatedAt
+  stageHistory           ProjectStageHistory[]
+  tasks                  Task[]
+  files                  File[]
+  communications         Communication[]
+
+  @@index([stage, stageChangedAt])
+}
+
+model ProjectStageHistory {
+  id          String       @id @default(cuid())
+  projectId   String
+  project     Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  fromStage   ProjectStage?
+  toStage     ProjectStage
+  comment     String?
+  changedById String?
+  createdAt   DateTime     @default(now())
+
+  @@index([projectId, createdAt])
+}
+
+// Задача (базовая версия фазы 2 — замер задачей с фото, §6.2;
+// работы, прайсы, зависимости, время — фаза 3, §9).
+model Task {
+  id            String     @id @default(cuid())
+  projectId     String
+  project       Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  title         String
+  type          String? // "Замер" и др.; шаблоны — фаза 3
+  status        TaskStatus @default(NEW)
+  assigneeId    String?
+  assignee      User?      @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  dueAt         DateTime?
+  requiresPhoto Boolean    @default(false) // при выполнении просим приложить файлы (§6.2)
+  doneAt        DateTime?
+  doneById      String?
+  createdById   String?
+  legacyId      String?
+  legacyTable   String?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+  files         File[]
+
+  @@index([assigneeId, status])
+}
+
+model File {
+  id           String       @id @default(cuid())
+  projectId    String
+  project      Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  taskId       String?
+  task         Task?        @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  category     FileCategory @default(OTHER)
+  caption      String? // пояснение
+  fileName     String // оригинальное имя
+  storedName   String // имя на диске
+  mimeType     String
+  size         Int
+  hasThumb     Boolean      @default(false)
+  uploadedById String?
   legacyId     String?
   legacyTable  String?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  createdAt    DateTime     @default(now())
+
+  @@index([projectId, category])
+}
+
+model Communication {
+  id          String            @id @default(cuid())
+  projectId   String
+  project     Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  clientId    String?
+  client      Client?           @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  type        CommunicationType
+  text        String
+  happenedAt  DateTime          @default(now())
+  createdById String?
+  createdAt   DateTime          @default(now())
+
+  @@index([projectId, happenedAt])
+}
+
+// ─── Уведомления (§6.1) ──────────────────────────────────────────────────────
+
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String // project.created, project.stageChanged, task.assigned, ...
+  title     String
+  body      String?
+  link      String?
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, readAt, createdAt])
+}
+
+// Настройка типов уведомлений — только админ/директор/менеджер (§6.1);
+// работник/монтажник/инженер всегда получают свои.
+model NotificationPreference {
+  userId  String
+  type    String
+  enabled Boolean @default(true)
+
+  @@id([userId, type])
+}
+
+// UI-предпочтения (§7): вид разделов (канбан/таблица) и пр., per user.
+model UserPreference {
+  userId String
+  key    String
+  value  String
+
+  @@id([userId, key])
 }
 
 // ─── Плагинное ядро (§14) ────────────────────────────────────────────────────

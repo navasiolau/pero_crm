@@ -33,8 +33,21 @@ PERO CRM v2 — CRM для производства корпусной мебе�
   - `src/server/plugins/` — плагинное ядро (§14): `registry.ts` (статический реестр манифестов — ручная установка), `sync.ts` (upsert Plugin при старте, вызов из `src/instrumentation.ts`), `slots.ts` + `src/components/plugins/plugin-slot.tsx` (UI-слоты через next/dynamic, ErrorBoundary на вклад), `events.ts` (шина DomainEvent — outbox, синхронная доставка + `dispatchPendingEvents` для cron), `context.ts` (PluginContext: db, logger, audit, emit, requirePermission), `changelog.ts` (журнал изменений §5), `tokens.ts` (Bearer-токены API), `actions.ts` (server actions: toggle/settings/command/token)
   - `src/app/api/v1/` — публичный REST API (Bearer pero_…, scope read/write/admin): `/`, `/plugins`, `/plugins/:id/commands/:cmd` (POST), `/events`, `/events/dispatch` (POST), `/openapi.json`. **Исключён из middleware-матчера** — при добавлении роутов не забывать проверять scope.
   - `src/app/(app)/settings/` — настройки (ADMIN/DIRECTOR): `modules/` (список + `[id]` детальная: автоформа настроек, команды, журнал запусков), `api/` (токены + документация)
-  - `src/app/(app)/changelog/` — журнал изменений (ADMIN/DIRECTOR)
-  - `prisma/` — схема (User + ядро: Plugin, PluginSetting, PluginRunLog, DomainEvent, ApiToken, ChangeLog), миграции, seed
+  - `src/app/(app)/changelog/` — журнал изменений с фильтрами (ADMIN/DIRECTOR)
+  - `src/app/(app)/projects/` — проекты (фаза 2): канбан (`kanban-board.tsx`, dnd-kit, оптимистично с откатом) / таблица, вид в UserPreference; `[id]/` — карточка со вкладками (Общее, Работы и задачи, Файлы, Коммуникации, Финансы*, История + project.tab-слоты); `stage-form-dialog.tsx` — мини-формы Отказа/Рекламации при dnd (§6)
+  - `src/app/(app)/clients/` — клиенты; `my/` — «Мои задачи» работника; `notifications/` — лента + настройка типов (§6.1)
+  - `src/server/` — доменные действия: `projects/`, `clients/`, `tasks/`, `files/`, `communications/`, `notifications/` (notify.ts — фан-аут по §6.1), `preferences.ts` (UserPreference §7), `require-role.ts`, `plugins/` (ядро §14)
+  - `src/app/api/files/` — загрузка (upload, sharp-превью) и отдача ([id], проверка прав); хранилище `apps/web/uploads/<projectId>/` (§13, gitignored)
+  - `src/lib/stages.ts` — этапы воронки §6 + «дней на этапе» + `stageStyles` (цветовая дифференциация: служебные состояния — Рекламация amber, Пауза slate, Отказ red — вне нормального воркфлоу, выделяются всегда); `src/lib/format.ts` — суммы; `src/lib/uploads.ts` — корень хранилища
+  - `src/components/ui/searchable-select.tsx` — комбобокс с поиском (поле фильтра над списком) — ОБЯЗАТЕЛЕН для длинных списков (клиенты, сотрудники); у селектов должны быть дефолты
+  - `src/components/ui/data-table.tsx` — универсальная таблица: поиск, сортировка по клику на заголовок, пагинация (10/20/50/100 + стрелки). Применять для ВСЕХ табличных списков сущностей
+  - `src/components/omnisearch.tsx` — глобальный поиск (Ctrl+K, палитра как в IDE) по `/api/search`: проекты, задачи, клиенты с учётом видимости §4
+  - `src/components/file-viewer.tsx` — просмотрщик вложений: изображения/видео — лайтбокс, PDF — новая вкладка, прочие форматы (b3d и т.п.) — только скачивание; хук `useFileViewer()`
+  - `src/components/task-dialog.tsx` — карточка задачи (max-w-2xl, подписанные поля: тип, срок, исполнитель, создатель, создана; файлы кликабельны через FileViewer; просмотр/правка для ADMIN/DIRECTOR/MANAGER; выполненная — только просмотр); задачи кликабельны везде; без исполнителя = «Черновик» со значком, тип и срок обязательны
+  - `src/app/(app)/settings/users/` — управление сотрудниками (ФИО, должность, телефон, telegram — действия и журнал привязываются к ЧЕЛОВЕКУ, не к роли)
+  - Клиент: `name` = Имя (или «ООО Альфа» для юрлица), `lastName`, `middleName`; поля «Компания» НЕТ; отображение через `displayClientName` из `src/lib/labels.ts` («Фамилия Имя Отчество»); окно просмотра по клику на строку — обязательно для всех сущностей
+  - «use server»-файлы экспортируют ТОЛЬКО async-функции — подписи/константы выносить в `src/lib/labels.ts` и подобные
+  - `prisma/` — схема (User, Plugin-ядро, Client, Project, ProjectStageHistory, Task, File, Communication, Notification(+Preference), UserPreference, ChangeLog), миграции, seed (6 ролей + демо-проекты)
 - `packages/plugin-sdk` (`@pero/plugin-sdk`) — SDK плагинов: манифест `definePlugin`, слоты (`dashboard.widget`, `project.tab`, `project.action`, `task.action`, `settings.page`), PluginContext, CURRENT_API_VERSION (совместимость N и N-1)
 - `packages/plugins/<id>` — плагины; сейчас `demo` (виджет, вкладка в проекте, команда «Пинг», хуки). Новый плагин: пакет с `plugin.ts` → workspace-зависимость в apps/web → `transpilePackages` → реестр `src/server/plugins/registry.ts`
 

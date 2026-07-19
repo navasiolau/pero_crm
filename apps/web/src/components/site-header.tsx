@@ -3,12 +3,19 @@
 import { usePathname } from "next/navigation"
 
 import { NavUser, type ShellUser } from "@/components/nav-user"
+import { Omnisearch } from "@/components/omnisearch"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { Separator } from "@/components/ui/separator"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import { sectionTitle } from "@/lib/nav"
 
-export function SiteHeader({ user }: { user: ShellUser }) {
+export function SiteHeader({
+  user,
+  extras,
+}: {
+  user: ShellUser
+  extras?: React.ReactNode
+}) {
   const pathname = usePathname()
 
   return (
@@ -23,6 +30,8 @@ export function SiteHeader({ user }: { user: ShellUser }) {
           {sectionTitle(pathname)}
         </h1>
         <div className="ml-auto flex items-center gap-1">
+          <Omnisearch />
+          {extras}
           <ThemeToggle />
           <NavUser user={user} />
         </div>

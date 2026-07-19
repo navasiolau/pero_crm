@@ -1,4 +1,4 @@
-import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -6,36 +6,46 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { Input } from "@/components/ui/input";
 import { prisma } from "@/lib/prisma";
+
+import { ChangelogTable } from "./changelog-table";
 
 export const dynamic = "force-dynamic";
 
-function formatValue(value: unknown): string {
-  if (value === null || value === undefined) return "—";
-  const text = typeof value === "string" ? value : JSON.stringify(value);
-  return text.length > 60 ? `${text.slice(0, 60)}…` : text;
-}
-
-const ACTOR_TYPE_LABELS: Record<string, string> = {
-  user: "пользователь",
-  plugin: "плагин",
-  system: "система",
-};
-
-// Журнал изменений (§5): кто, что, когда, было → стало, источник.
+// Журнал изменений (§5): фильтры по сотруднику, сущности, периоду.
 // Доступ ограничен middleware (ADMIN/DIRECTOR).
-export default async function ChangelogPage() {
+export default async function ChangelogPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ actor?: string; entity?: string; from?: string; to?: string }>;
+}) {
+  const { actor, entity, from, to } = await searchParams;
+
+  const where = {
+    ...(actor
+      ? {
+          OR: [
+            { actorName: { contains: actor, mode: "insensitive" as const } },
+            { actorId: { contains: actor, mode: "insensitive" as const } },
+          ],
+        }
+      : {}),
+    ...(entity ? { entity: { contains: entity, mode: "insensitive" as const } } : {}),
+    ...(from || to
+      ? {
+          createdAt: {
+            ...(from ? { gte: new Date(from) } : {}),
+            ...(to ? { lte: new Date(`${to}T23:59:59`) } : {}),
+          },
+        }
+      : {}),
+  };
+
   const entries = await prisma.changeLog.findMany({
+    where,
     orderBy: { createdAt: "desc" },
-    take: 100,
+    take: 200,
   });
 
   return (
@@ -44,81 +54,81 @@ export default async function ChangelogPage() {
         <h1 className="text-2xl font-semibold">Журнал изменений</h1>
         <p className="text-sm text-muted-foreground">
           Каждое действие в системе: кто, что, когда, было → стало, источник.
-          Последние 100 записей.
         </p>
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">Записи</CardTitle>
-          <CardDescription>
-            Фильтры по сотруднику, сущности и периоду появятся в фазе 2
-          </CardDescription>
+          <CardTitle className="text-lg">Записи ({entries.length})</CardTitle>
+          <CardDescription>До 200 последних по фильтру</CardDescription>
         </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Время</TableHead>
-                <TableHead>Кто</TableHead>
-                <TableHead>Сущность</TableHead>
-                <TableHead>Действие</TableHead>
-                <TableHead>Было → стало</TableHead>
-                <TableHead>Источник</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {entries.map((entry) => (
-                <TableRow key={entry.id}>
-                  <TableCell className="whitespace-nowrap text-muted-foreground">
-                    {entry.createdAt.toLocaleString("ru-RU")}
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex flex-col gap-0.5">
-                      <span>{entry.actorName ?? entry.actorId}</span>
-                      <Badge variant="outline" className="w-fit">
-                        {ACTOR_TYPE_LABELS[entry.actorType] ?? entry.actorType}
-                      </Badge>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <code>
-                      {entry.entity}:{entry.entityId}
-                    </code>
-                  </TableCell>
-                  <TableCell>
-                    {entry.action}
-                    {entry.field ? (
-                      <span className="text-muted-foreground">
-                        {" "}
-                        ({entry.field})
-                      </span>
-                    ) : null}
-                  </TableCell>
-                  <TableCell className="max-w-72">
-                    <span className="text-muted-foreground">
-                      {formatValue(entry.oldValue)}
-                    </span>
-                    {" → "}
-                    <span>{formatValue(entry.newValue)}</span>
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant="secondary">{entry.source}</Badge>
-                  </TableCell>
-                </TableRow>
-              ))}
-              {entries.length === 0 ? (
-                <TableRow>
-                  <TableCell
-                    colSpan={6}
-                    className="text-center text-muted-foreground"
-                  >
-                    Записей пока нет — они появятся при первых действиях
-                  </TableCell>
-                </TableRow>
-              ) : null}
-            </TableBody>
-          </Table>
+        <CardContent className="flex flex-col gap-4">
+          <form className="flex flex-wrap items-end gap-3" action="/changelog">
+            <div className="flex flex-col gap-1">
+              <label htmlFor="actor" className="text-xs text-muted-foreground">
+                Сотрудник / автор
+              </label>
+              <Input
+                id="actor"
+                name="actor"
+                defaultValue={actor ?? ""}
+                placeholder="Имя или id"
+                className="w-44"
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label htmlFor="entity" className="text-xs text-muted-foreground">
+                Сущность
+              </label>
+              <Input
+                id="entity"
+                name="entity"
+                defaultValue={entity ?? ""}
+                placeholder="project, task, plugin…"
+                className="w-40"
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label htmlFor="from" className="text-xs text-muted-foreground">
+                С
+              </label>
+              <Input id="from" name="from" type="date" defaultValue={from ?? ""} />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label htmlFor="to" className="text-xs text-muted-foreground">
+                По
+              </label>
+              <Input id="to" name="to" type="date" defaultValue={to ?? ""} />
+            </div>
+            <Button type="submit" variant="outline">
+              Применить
+            </Button>
+            <Button
+              type="submit"
+              variant="ghost"
+              formAction="/changelog"
+              name="reset"
+              value="1"
+            >
+              Сбросить
+            </Button>
+          </form>
+
+          <ChangelogTable
+            entries={entries.map((entry) => ({
+              id: entry.id,
+              createdAt: entry.createdAt.toISOString(),
+              actorName: entry.actorName ?? entry.actorId,
+              actorType: entry.actorType,
+              entity: entry.entity,
+              entityId: entry.entityId,
+              action: entry.action,
+              field: entry.field,
+              oldValue: entry.oldValue,
+              newValue: entry.newValue,
+              source: entry.source,
+            }))}
+          />
         </CardContent>
       </Card>
     </div>
