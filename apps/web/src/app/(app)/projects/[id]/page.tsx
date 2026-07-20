@@ -2,7 +2,7 @@ import nextDynamic from "next/dynamic";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import type { ComponentType } from "react";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, TriangleAlert } from "lucide-react";
 
 import { auth } from "@/auth";
 import { Badge } from "@/components/ui/badge";
@@ -16,11 +16,13 @@ import { getSlotContributions } from "@/server/plugins/slots";
 import { getProjectEconomics } from "@/server/finance/queries";
 import { getProjectFor, listClients, listEngineers, listManagers, listWorkers } from "@/server/projects/queries";
 import { mapTaskDetails } from "@/server/tasks/queries";
+import { getProjectMaterials, listMaterialOptions } from "@/server/warehouse/queries";
 
 import { CommunicationsTab } from "./communications-tab";
 import { FilesTab } from "./files-tab";
 import { FinanceTab } from "./finance-tab";
 import { HistoryTab } from "./history-tab";
+import { MaterialsTab } from "./materials-tab";
 import { OverviewTab } from "./overview-tab";
 import { TasksTab } from "./tasks-tab";
 
@@ -45,8 +47,11 @@ export default async function ProjectPage({
   const canEditTech = canManage || role === "ENGINEER";
   const showFinance = ["ADMIN", "DIRECTOR"].includes(role);
   const showAmount = showFinance || canManage || role === "ENGINEER";
+  // Склад (§12): вкладка «Материалы» — офисные роли; правки — canManage; цены — showMoney
+  const showMaterials = ["ADMIN", "DIRECTOR", "MANAGER", "ENGINEER"].includes(role);
+  const showMoney = showFinance;
 
-  const [clients, managers, engineers, workers, changeLogs, contributions, priceItems, economics, cashAccounts, expenseArticles] =
+  const [clients, managers, engineers, workers, changeLogs, contributions, priceItems, economics, cashAccounts, expenseArticles, materialsData, materialOptions] =
     await Promise.all([
       listClients(),
       listManagers(),
@@ -81,6 +86,9 @@ export default async function ProjectPage({
             orderBy: { createdAt: "asc" },
           })
         : Promise.resolve([]),
+      // Данные вкладки «Материалы» (§12) — офисным ролям; опции диалога — canManage
+      showMaterials ? getProjectMaterials(project.id) : Promise.resolve(null),
+      showMaterials && canManage ? listMaterialOptions() : Promise.resolve([]),
     ]);
 
   const pluginTabs = await Promise.all(
@@ -130,6 +138,12 @@ export default async function ProjectPage({
         >
           {stageLabels[project.stage]}
         </Badge>
+        {showMaterials && materialsData?.hasShortage ? (
+          <Badge variant="destructive">
+            <TriangleAlert />
+            Нехватка материалов
+          </Badge>
+        ) : null}
       </div>
 
       <Tabs defaultValue="overview">
@@ -139,6 +153,11 @@ export default async function ProjectPage({
             Работы и задачи ({project.tasks.length})
           </TabsTrigger>
           <TabsTrigger value="files">Файлы ({project.files.length})</TabsTrigger>
+          {showMaterials ? (
+            <TabsTrigger value="materials">
+              Материалы{materialsData && materialsData.lines.length > 0 ? ` (${materialsData.lines.length})` : ""}
+            </TabsTrigger>
+          ) : null}
           <TabsTrigger value="communications">
             Коммуникации ({project.communications.length})
           </TabsTrigger>
@@ -230,6 +249,20 @@ export default async function ProjectPage({
             canEdit={canEditTech}
           />
         </TabsContent>
+
+        {showMaterials && materialsData ? (
+          <TabsContent value="materials" className="mt-4">
+            <MaterialsTab
+              projectId={project.id}
+              lines={materialsData.lines}
+              movements={materialsData.movements}
+              materialsTotalByn={materialsData.materialsTotalByn}
+              options={materialOptions}
+              canManage={canManage}
+              showMoney={showMoney}
+            />
+          </TabsContent>
+        ) : null}
 
         {showFinance && economics ? (
           <TabsContent value="finance" className="mt-4">

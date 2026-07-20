@@ -1,0 +1,307 @@
+import { prisma } from "@/lib/prisma";
+
+// ─── Склад (§12, фаза 6): номенклатура, остатки из движений, потребность ──
+// Остатки не хранятся: остаток = Σ INCOME + Σ RETURN − Σ EXPENSE.
+// Потребность проекта (ProjectMaterial) создаётся без проверки остатка;
+// нехватка вычисляется: debt = quantity − issuedQty, строка «в нехватке»,
+// если debt > 0 и остаток < debt.
+
+export type MaterialCategoryView = {
+  id: string;
+  name: string;
+  comment: string | null;
+  active: boolean;
+};
+
+export async function listCategories(): Promise<MaterialCategoryView[]> {
+  const categories = await prisma.materialCategory.findMany({
+    orderBy: { createdAt: "asc" },
+  });
+  return categories.map((category) => ({
+    id: category.id,
+    name: category.name,
+    comment: category.comment,
+    active: category.active,
+  }));
+}
+
+// Остатки по всем материалам одним groupBy: materialId → количество
+async function stockByMaterial(
+  materialIds?: string[],
+): Promise<Map<string, number>> {
+  const grouped = await prisma.stockMovement.groupBy({
+    by: ["materialId", "type"],
+    where: materialIds ? { materialId: { in: materialIds } } : undefined,
+    _sum: { quantity: true },
+  });
+  const stock = new Map<string, number>();
+  for (const row of grouped) {
+    const sign = row.type === "EXPENSE" ? -1 : 1;
+    stock.set(
+      row.materialId,
+      (stock.get(row.materialId) ?? 0) + sign * Number(row._sum.quantity ?? 0),
+    );
+  }
+  return stock;
+}
+
+// Открытая потребность (долг) по материалам: Σ max(0, quantity − issuedQty)
+async function debtByMaterial(): Promise<Map<string, number>> {
+  const lines = await prisma.projectMaterial.findMany({
+    select: { materialId: true, quantity: true, issuedQty: true },
+  });
+  const debt = new Map<string, number>();
+  for (const line of lines) {
+    const value = Number(line.quantity) - Number(line.issuedQty);
+    if (value > 0) {
+      debt.set(line.materialId, (debt.get(line.materialId) ?? 0) + value);
+    }
+  }
+  return debt;
+}
+
+export type MaterialView = {
+  id: string;
+  name: string;
+  sku: string | null;
+  unit: string;
+  categoryId: string | null;
+  categoryName: string | null;
+  purchasePrice: number | null; // учётная цена, BYN
+  minStock: number | null;
+  active: boolean;
+  comment: string | null;
+  stock: number; // остаток из движений
+  shortByProjects: number; // сколько не хватает по всем открытым потребностям
+};
+
+export async function listMaterials(): Promise<MaterialView[]> {
+  const [materials, stock, debt] = await Promise.all([
+    prisma.material.findMany({
+      orderBy: { name: "asc" },
+      include: { category: { select: { name: true } } },
+    }),
+    stockByMaterial(),
+    debtByMaterial(),
+  ]);
+  return materials.map((material) => {
+    const onStock = stock.get(material.id) ?? 0;
+    const need = debt.get(material.id) ?? 0;
+    return {
+      id: material.id,
+      name: material.name,
+      sku: material.sku,
+      unit: material.unit,
+      categoryId: material.categoryId,
+      categoryName: material.category?.name ?? null,
+      purchasePrice:
+        material.purchasePrice === null ? null : Number(material.purchasePrice),
+      minStock: material.minStock === null ? null : Number(material.minStock),
+      active: material.active,
+      comment: material.comment,
+      stock: onStock,
+      shortByProjects: Math.max(0, need - onStock),
+    };
+  });
+}
+
+// Остатки — та же выборка, что listMaterials (страница «Остатки»)
+export const listStock = listMaterials;
+
+export type StockMovementView = {
+  id: string;
+  type: "INCOME" | "EXPENSE" | "RETURN";
+  materialId: string;
+  materialName: string;
+  materialUnit: string;
+  quantity: number;
+  unitPrice: number | null;
+  totalByn: number | null;
+  projectId: string | null;
+  projectNumber: string | null;
+  comment: string | null;
+  createdByName: string | null;
+  createdAt: string; // ISO
+};
+
+export async function listMovements(filter?: {
+  materialId?: string;
+  projectId?: string;
+  type?: "INCOME" | "EXPENSE" | "RETURN";
+}): Promise<StockMovementView[]> {
+  const movements = await prisma.stockMovement.findMany({
+    where: {
+      materialId: filter?.materialId || undefined,
+      projectId: filter?.projectId || undefined,
+      type: filter?.type || undefined,
+    },
+    orderBy: { createdAt: "desc" },
+    take: 500,
+    include: {
+      material: { select: { name: true, unit: true } },
+      project: { select: { number: true } },
+    },
+  });
+  const userIds = [
+    ...new Set(movements.map((m) => m.createdById).filter(Boolean)),
+  ] as string[];
+  const users = await prisma.user.findMany({
+    where: { id: { in: userIds } },
+    select: { id: true, name: true },
+  });
+  const userName = new Map(users.map((user) => [user.id, user.name]));
+  return movements.map((movement) => ({
+    id: movement.id,
+    type: movement.type,
+    materialId: movement.materialId,
+    materialName: movement.material.name,
+    materialUnit: movement.material.unit,
+    quantity: Number(movement.quantity),
+    unitPrice: movement.unitPrice === null ? null : Number(movement.unitPrice),
+    totalByn: movement.totalByn === null ? null : Number(movement.totalByn),
+    projectId: movement.projectId,
+    projectNumber: movement.project?.number ?? null,
+    comment: movement.comment,
+    createdByName: movement.createdById
+      ? (userName.get(movement.createdById) ?? null)
+      : null,
+    createdAt: movement.createdAt.toISOString(),
+  }));
+}
+
+export type ProjectMaterialLineStatus = "FULFILLED" | "AVAILABLE" | "SHORTAGE";
+
+export type ProjectMaterialLine = {
+  id: string;
+  materialId: string;
+  materialName: string;
+  materialSku: string | null;
+  unit: string;
+  purchasePrice: number | null;
+  quantity: number; // сколько нужно
+  issuedQty: number; // сколько уже выдано
+  debt: number; // quantity − issuedQty
+  available: number; // остаток на складе
+  status: ProjectMaterialLineStatus;
+  comment: string | null;
+};
+
+export type ProjectMaterialsData = {
+  lines: ProjectMaterialLine[];
+  movements: StockMovementView[];
+  materialsTotalByn: number; // Σ EXPENSE − Σ RETURN (для A/D)
+  hasShortage: boolean;
+};
+
+export async function getProjectMaterials(
+  projectId: string,
+): Promise<ProjectMaterialsData> {
+  const [rows, movements] = await Promise.all([
+    prisma.projectMaterial.findMany({
+      where: { projectId },
+      orderBy: { createdAt: "asc" },
+      include: {
+        material: {
+          select: { id: true, name: true, sku: true, unit: true, purchasePrice: true },
+        },
+      },
+    }),
+    listMovements({ projectId }),
+  ]);
+  const stock = await stockByMaterial(rows.map((row) => row.materialId));
+
+  let hasShortage = false;
+  const lines: ProjectMaterialLine[] = rows.map((row) => {
+    const quantity = Number(row.quantity);
+    const issuedQty = Number(row.issuedQty);
+    const debt = Math.max(0, quantity - issuedQty);
+    const available = stock.get(row.materialId) ?? 0;
+    const status: ProjectMaterialLineStatus =
+      debt <= 0 ? "FULFILLED" : available >= debt ? "AVAILABLE" : "SHORTAGE";
+    if (status === "SHORTAGE") hasShortage = true;
+    return {
+      id: row.id,
+      materialId: row.materialId,
+      materialName: row.material.name,
+      materialSku: row.material.sku,
+      unit: row.material.unit,
+      purchasePrice:
+        row.material.purchasePrice === null
+          ? null
+          : Number(row.material.purchasePrice),
+      quantity,
+      issuedQty,
+      debt,
+      available,
+      status,
+      comment: row.comment,
+    };
+  });
+
+  const materialsTotalByn = movements.reduce(
+    (sum, movement) =>
+      sum +
+      (movement.type === "RETURN" ? -1 : 1) * (movement.totalByn ?? 0),
+    0,
+  );
+
+  return {
+    lines,
+    movements: movements.filter((movement) => movement.type !== "INCOME"),
+    materialsTotalByn: Math.round(materialsTotalByn * 100) / 100,
+    hasShortage,
+  };
+}
+
+// Флаги нехватки для списков проектов (канбан/таблица): проект помечается,
+// если у него есть строка потребности, которую не покрывает остаток.
+export async function listProjectShortages(
+  projectIds: string[],
+): Promise<Set<string>> {
+  if (projectIds.length === 0) return new Set();
+  const lines = await prisma.projectMaterial.findMany({
+    where: { projectId: { in: projectIds } },
+    select: {
+      projectId: true,
+      materialId: true,
+      quantity: true,
+      issuedQty: true,
+    },
+  });
+  if (lines.length === 0) return new Set();
+  const stock = await stockByMaterial([
+    ...new Set(lines.map((line) => line.materialId)),
+  ]);
+  const result = new Set<string>();
+  for (const line of lines) {
+    const debt = Number(line.quantity) - Number(line.issuedQty);
+    if (debt > 0 && (stock.get(line.materialId) ?? 0) < debt) {
+      result.add(line.projectId);
+    }
+  }
+  return result;
+}
+
+// Материалы для диалогов (SearchableSelect): активные, с остатком в hint
+export type MaterialOption = {
+  id: string;
+  name: string;
+  sku: string | null;
+  unit: string;
+  purchasePrice: number | null;
+  stock: number;
+};
+
+export async function listMaterialOptions(): Promise<MaterialOption[]> {
+  const materials = await listMaterials();
+  return materials
+    .filter((material) => material.active)
+    .map((material) => ({
+      id: material.id,
+      name: material.name,
+      sku: material.sku,
+      unit: material.unit,
+      purchasePrice: material.purchasePrice,
+      stock: material.stock,
+    }));
+}

@@ -10,6 +10,31 @@ export const communicationTypeLabels: Record<CommunicationType, string> = {
   NOTE: "Заметка",
 };
 
+// Склад (§12): типы движений и статусы строк потребности проекта
+export const stockMovementTypeLabels: Record<string, string> = {
+  INCOME: "Приход",
+  EXPENSE: "Списание",
+  RETURN: "Возврат",
+};
+
+export const projectMaterialStatusLabels: Record<string, string> = {
+  FULFILLED: "Обеспечено",
+  AVAILABLE: "Можно запросить",
+  SHORTAGE: "Нет на складе",
+};
+
+// Единицы измерения номенклатуры (из legacy 1421, MVP-набор)
+export const MATERIAL_UNITS = [
+  "шт",
+  "м²",
+  "м.п.",
+  "лист",
+  "кг",
+  "м",
+  "компл",
+  "упак",
+] as const;
+
 // Схемы оплаты сотрудника (§10)
 export const paySchemeLabels: Record<string, string> = {
   PIECE: "Сдельная",

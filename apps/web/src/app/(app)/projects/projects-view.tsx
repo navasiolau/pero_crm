@@ -25,6 +25,7 @@ export interface ProjectCard {
   managerName: string | null;
   tasksCount: number;
   filesCount: number;
+  hasMaterialShortage: boolean; // бейдж «Нехватка материалов» (§12)
 }
 
 export interface SelectOption {

@@ -14,7 +14,7 @@ import {
   type DragStartEvent,
 } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
-import { ClipboardList, Paperclip } from "lucide-react";
+import { ClipboardList, Paperclip, TriangleAlert } from "lucide-react";
 import { toast } from "sonner";
 import type { ProjectStage } from "@prisma/client";
 
@@ -62,6 +62,12 @@ function ProjectCardView({
         </div>
         <div className="text-sm">{project.title}</div>
         <div className="text-xs text-muted-foreground">{project.clientName}</div>
+        {project.hasMaterialShortage ? (
+          <Badge variant="destructive" className="text-xs">
+            <TriangleAlert />
+            Нехватка материалов
+          </Badge>
+        ) : null}
         <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
           {showAmount ? (
             <span>{formatAmount(project.expectedPrice, project.currency)}</span>

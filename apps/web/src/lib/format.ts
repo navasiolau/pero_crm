@@ -15,3 +15,11 @@ export function formatAmount(
   if (Number.isNaN(value)) return "—";
   return `${new Intl.NumberFormat("ru-RU").format(value)} ${CURRENCY_SYMBOLS[currency] ?? currency}`;
 }
+
+// Форматирование количества на складе (до 3 знаков, без хвостовых нулей)
+export function formatQty(quantity: string | number | null | undefined): string {
+  if (quantity === null || quantity === undefined || quantity === "") return "—";
+  const value = Number(quantity);
+  if (Number.isNaN(value)) return "—";
+  return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 3 }).format(value);
+}

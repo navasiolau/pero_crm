@@ -138,6 +138,8 @@ model Project {
   files                  File[]
   communications         Communication[]
   payments               Payment[]
+  stockMovements         StockMovement[]
+  projectMaterials       ProjectMaterial[]
 
   @@index([stage, stageChangedAt])
 }
@@ -371,6 +373,98 @@ model OrgSetting {
   key       String   @id
   value     String
   updatedAt DateTime @updatedAt
+}
+
+// ─── Склад (§12, фаза 6) ────────────────────────────────────────────────
+// Остатки не хранятся — вычисляются из StockMovement
+// (остаток = Σ INCOME + Σ RETURN − Σ EXPENSE).
+
+// Тип движения по складу: приход на склад / списание на проект /
+// возврат с проекта обратно на склад.
+enum StockMovementType {
+  INCOME
+  EXPENSE
+  RETURN
+}
+
+// Категория номенклатуры (аналог legacy 1411 «Номенклатурные группы», плоско).
+model MaterialCategory {
+  id        String     @id @default(cuid())
+  name      String
+  comment   String?
+  active    Boolean    @default(true)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  materials Material[]
+}
+
+// Номенклатура (аналог legacy 1441 «Склад номенклатуры», MVP-набор полей).
+// purchasePrice — учётная цена в BYN: подставляется в списание как снимок
+// (в диалоге её можно поправить на конкретное движение).
+model Material {
+  id               String            @id @default(cuid())
+  name             String
+  sku              String? // артикул
+  unit             String            @default("шт") // из MATERIAL_UNITS (src/lib/labels.ts)
+  categoryId       String?
+  category         MaterialCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  purchasePrice    Decimal?          @db.Decimal(12, 2) // учётная цена, BYN
+  minStock         Decimal?          @db.Decimal(12, 3) // подсветка низкого остатка
+  active           Boolean           @default(true)
+  comment          String?
+  legacyId         String?
+  legacyTable      String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  movements        StockMovement[]
+  projectMaterials ProjectMaterial[]
+}
+
+// Потребность проекта в материале (аналог legacy 1531 «Номенклатура в заказах»).
+// Она же — простой резерв (§12): количество фиксируется за проектом
+// БЕЗ проверки остатка (строки в будущем создаёт скриптом плагин
+// «Базис-Мебельщик»). Нехватка вычисляется: debt = quantity − issuedQty,
+// строка «в нехватке», если debt > 0 и остаток на складе < debt.
+model ProjectMaterial {
+  id          String          @id @default(cuid())
+  projectId   String
+  project     Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  materialId  String
+  material    Material        @relation(fields: [materialId], references: [id], onDelete: Restrict)
+  quantity    Decimal         @db.Decimal(12, 3) // сколько нужно
+  issuedQty   Decimal         @default(0) @db.Decimal(12, 3) // сколько уже выдано со склада
+  comment     String?
+  createdById String?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  movements   StockMovement[]
+
+  @@unique([projectId, materialId]) // повторное добавление того же материала наращивает quantity
+  @@index([materialId])
+}
+
+// Единый журнал движений (аналог legacy 1641 «Учёт движения»).
+// EXPENSE/RETURN — всегда с проектом и ценой: totalByn идёт в экономику
+// проекта (getProjectEconomics, строка «Материалы (склад)» в расходах).
+model StockMovement {
+  id                String            @id @default(cuid())
+  materialId        String
+  material          Material          @relation(fields: [materialId], references: [id], onDelete: Restrict)
+  type              StockMovementType
+  quantity          Decimal           @db.Decimal(12, 3)
+  unitPrice         Decimal?          @db.Decimal(12, 2) // BYN/ед., снимок (обязателен для EXPENSE/RETURN)
+  totalByn          Decimal?          @db.Decimal(12, 2) // quantity × unitPrice, снимок
+  projectId         String?
+  project           Project?          @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  projectMaterialId String?
+  projectMaterial   ProjectMaterial?  @relation(fields: [projectMaterialId], references: [id], onDelete: SetNull)
+  comment           String?
+  createdById       String?
+  createdAt         DateTime          @default(now())
+
+  @@index([materialId])
+  @@index([projectId])
+  @@index([createdAt])
 }
 
 model File {

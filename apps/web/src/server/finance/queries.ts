@@ -66,17 +66,19 @@ export type ProjectEconomics = {
   currency: string;
   expectedPrice: number | null;
   paidTotal: number; // приходы, в валюте проекта
-  expensesTotal: number; // расходы (статьи), в валюте проекта
+  expensesTotal: number; // расходы (статьи + материалы склада), в валюте проекта
   payrollTotal: number; // ЗП по проекту (начисления), в валюте проекта
   margin: number; // paidTotal − expensesTotal − payrollTotal
   marginAtFullPrice: number | null; // expectedPrice − расходы − ЗП
-  expenseBreakdown: { label: string; amount: number }[]; // по статьям + ЗП
+  expenseBreakdown: { label: string; amount: number }[]; // по статьям + ЗП + материалы
 };
 
 // Экономика проекта (§11): ожидаемая цена, оплаты, расходы (ЗП + материалы +
 // прочее), маржа. Все суммы — в валюте проекта (платежи хранят projectAmount;
-// начисления ЗП — в валюте ЗП, при отличии конвертируем по текущему курсу
-// НБ РБ — редкий случай, в типовой установке валюты совпадают).
+// начисления ЗП — в валюте ЗП, материалы склада — в BYN; при отличии
+// конвертируем по текущему курсу НБ РБ — редкий случай, в типовой установке
+// валюты совпадают). Материалы склада (§12) — безденежный расход:
+// Σ StockMovement.totalByn (EXPENSE − RETURN), без кассы и платежа.
 export async function getProjectEconomics(
   projectId: string,
 ): Promise<ProjectEconomics | null> {
@@ -87,7 +89,7 @@ export async function getProjectEconomics(
   if (!project) return null;
   const currency = project.currency;
 
-  const [payments, payrollEntries] = await Promise.all([
+  const [payments, payrollEntries, stockMovements] = await Promise.all([
     prisma.payment.findMany({
       where: { projectId },
       select: {
@@ -99,6 +101,11 @@ export async function getProjectEconomics(
     prisma.payrollEntry.findMany({
       where: { projectId },
       select: { amount: true, currency: true },
+    }),
+    // Списания материалов со склада (§12): цены хранятся в BYN (totalByn)
+    prisma.stockMovement.findMany({
+      where: { projectId, type: { in: ["EXPENSE", "RETURN"] } },
+      select: { type: true, totalByn: true },
     }),
   ]);
 
@@ -138,6 +145,24 @@ export async function getProjectEconomics(
     }
   }
 
+  // Материалы склада: BYN → валюта проекта тем же курсом, что и ЗП
+  let materialsByn = 0;
+  for (const movement of stockMovements) {
+    materialsByn +=
+      (movement.type === "RETURN" ? -1 : 1) * Number(movement.totalByn ?? 0);
+  }
+  let materialsTotal = 0;
+  if (materialsByn !== 0) {
+    if (currency === "BYN") {
+      materialsTotal = materialsByn;
+    } else {
+      const rate = await getNbrbRate(currency).catch(() => null);
+      // НБ РБ недоступен — не искажаем маржу: показываем как есть
+      materialsTotal = rate ? materialsByn / rate.rate : materialsByn;
+    }
+    expensesTotal += materialsTotal;
+  }
+
   const round = (value: number) => Math.round(value * 100) / 100;
   paidTotal = round(paidTotal);
   expensesTotal = round(expensesTotal);
@@ -149,6 +174,12 @@ export async function getProjectEconomics(
   const expenseBreakdown = [...byArticle.entries()]
     .map(([label, amount]) => ({ label, amount: round(amount) }))
     .sort((a, b) => b.amount - a.amount);
+  if (materialsTotal > 0) {
+    expenseBreakdown.unshift({
+      label: "Материалы (склад)",
+      amount: round(materialsTotal),
+    });
+  }
   if (payrollTotal > 0) {
     expenseBreakdown.unshift({ label: "Зарплата", amount: payrollTotal });
   }

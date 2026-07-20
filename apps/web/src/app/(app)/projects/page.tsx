@@ -39,6 +39,7 @@ export default async function ProjectsPage() {
         managerName: project.manager?.name ?? null,
         tasksCount: project._count.tasks,
         filesCount: project._count.files,
+        hasMaterialShortage: project.hasMaterialShortage,
       }))}
       initialView={view === "table" ? "table" : "kanban"}
       canManage={canManage}

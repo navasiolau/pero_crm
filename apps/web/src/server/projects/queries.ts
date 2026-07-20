@@ -2,6 +2,7 @@ import type { Role } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
 import { taskDetailsInclude } from "@/server/tasks/queries";
+import { listProjectShortages } from "@/server/warehouse/queries";
 
 // Правила видимости (§4): офисные роли — все проекты;
 // работник/монтажник — только проекты со своими задачами.
@@ -14,7 +15,7 @@ function projectVisibilityFilter(userId: string, role: Role) {
 }
 
 export async function listProjects(userId: string, role: Role) {
-  return prisma.project.findMany({
+  const projects = await prisma.project.findMany({
     where: projectVisibilityFilter(userId, role),
     include: {
       client: { select: { id: true, name: true, lastName: true, middleName: true } },
@@ -23,6 +24,12 @@ export async function listProjects(userId: string, role: Role) {
     },
     orderBy: [{ stage: "asc" }, { stageChangedAt: "asc" }],
   });
+  // Бейдж «Нехватка материалов» на канбане/в таблице (§12) — один запрос на список
+  const shortages = await listProjectShortages(projects.map((project) => project.id));
+  return projects.map((project) => ({
+    ...project,
+    hasMaterialShortage: shortages.has(project.id),
+  }));
 }
 
 export async function getProjectFor(

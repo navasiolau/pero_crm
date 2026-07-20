@@ -44,6 +44,7 @@ export function DataTable<TRow extends { id: string }>({
   searchPlaceholder = "Поиск…",
   emptyText = "Ничего не найдено",
   onRowClick,
+  rowClassName,
   defaultPageSize = 10,
 }: {
   columns: DataColumn<TRow>[];
@@ -51,6 +52,8 @@ export function DataTable<TRow extends { id: string }>({
   searchPlaceholder?: string;
   emptyText?: string;
   onRowClick?: (row: TRow) => void;
+  /** Доп. класс строки по условию (напр. подсветка нехватки материалов) */
+  rowClassName?: (row: TRow) => string | undefined;
   defaultPageSize?: number;
 }) {
   const [query, setQuery] = useState("");
@@ -160,7 +163,7 @@ export function DataTable<TRow extends { id: string }>({
             {pageRows.map((row) => (
               <TableRow
                 key={row.id}
-                className={cn(onRowClick && "cursor-pointer")}
+                className={cn(onRowClick && "cursor-pointer", rowClassName?.(row))}
                 onClick={() => onRowClick?.(row)}
               >
                 {columns.map((column) => (

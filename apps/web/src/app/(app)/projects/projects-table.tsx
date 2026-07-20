@@ -1,5 +1,7 @@
 "use client";
 
+import { TriangleAlert } from "lucide-react";
+
 import { Badge } from "@/components/ui/badge";
 import { DataTable, type DataColumn } from "@/components/ui/data-table";
 import { cn } from "@/lib/utils";
@@ -46,12 +48,20 @@ export function ProjectsTable({
       sortable: true,
       sortValue: (row) => stageLabels[row.stage],
       cell: (row) => (
-        <Badge
-          variant="outline"
-          className={cn("border-transparent", stageStyles[row.stage].badge)}
-        >
-          {stageLabels[row.stage]} · {daysOnStage(row.stageChangedAt)} дн.
-        </Badge>
+        <span className="flex flex-col items-start gap-1">
+          <Badge
+            variant="outline"
+            className={cn("border-transparent", stageStyles[row.stage].badge)}
+          >
+            {stageLabels[row.stage]} · {daysOnStage(row.stageChangedAt)} дн.
+          </Badge>
+          {row.hasMaterialShortage ? (
+            <Badge variant="destructive" className="text-xs">
+              <TriangleAlert />
+              Нехватка материалов
+            </Badge>
+          ) : null}
+        </span>
       ),
     },
     {

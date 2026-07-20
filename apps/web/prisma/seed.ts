@@ -180,8 +180,11 @@ async function main() {
 
   if (clientsCount > 0) {
     console.log("✔ демо-данные проектов уже есть — пропуск");
-    return;
   }
+  // Демо-проекты вынесены в функцию, чтобы складской seed (ниже) работал
+  // и на уже заполненной базе (ранний выход из main недопустим)
+  const seedDemoProjects = async () => {
+    if (clientsCount > 0) return;
 
   const ivanova = await prisma.client.create({
     data: {
@@ -332,6 +335,193 @@ async function main() {
     },
   });
   console.log("✔ демо-расход (материалы 40 000)");
+  };
+  await seedDemoProjects();
+
+  // ─── Демо-данные склада (§12, фаза 6) — идемпотентно ──────────────────
+  // Категории/номенклатура — upsert по фиксированным id; движения и
+  // потребность — только если журналы пусты (иначе количества задвоятся).
+  const warehouseYear = new Date().getFullYear();
+  for (const category of [
+    { id: "seed-cat-ldsp", name: "ЛДСП и плиты" },
+    { id: "seed-cat-kromka", name: "Кромка" },
+    { id: "seed-cat-furnitura", name: "Фурнитура" },
+    { id: "seed-cat-krepezh", name: "Крепёж" },
+  ]) {
+    await prisma.materialCategory.upsert({
+      where: { id: category.id },
+      update: { name: category.name },
+      create: category,
+    });
+  }
+  for (const material of [
+    {
+      id: "seed-mat-ldsp16",
+      name: "ЛДСП 16 мм Белый (2750×1830)",
+      sku: "LDSP-16-W",
+      unit: "лист",
+      categoryId: "seed-cat-ldsp",
+      purchasePrice: 145,
+      minStock: 5,
+    },
+    {
+      id: "seed-mat-kromka2",
+      name: "Кромка ПВХ 2 мм белая",
+      sku: "KRM-2-W",
+      unit: "м.п.",
+      categoryId: "seed-cat-kromka",
+      purchasePrice: 1.2,
+      minStock: 200,
+    },
+    {
+      id: "seed-mat-petlya",
+      name: "Петля накладная с доводчиком",
+      sku: "FRN-HINGE-SC",
+      unit: "шт",
+      categoryId: "seed-cat-furnitura",
+      purchasePrice: 8.5,
+      minStock: 20,
+    },
+    {
+      id: "seed-mat-napr450",
+      name: "Направляющие шариковые 450 мм",
+      sku: "FRN-SLIDE-450",
+      unit: "компл",
+      categoryId: "seed-cat-furnitura",
+      purchasePrice: 12,
+      minStock: 10,
+    },
+    {
+      id: "seed-mat-konfirmat",
+      name: "Конфирмат 7×50",
+      sku: "KRP-CONF-750",
+      unit: "шт",
+      categoryId: "seed-cat-krepezh",
+      purchasePrice: 0.35,
+      minStock: 500,
+    },
+  ]) {
+    await prisma.material.upsert({
+      where: { id: material.id },
+      update: {
+        name: material.name,
+        sku: material.sku,
+        unit: material.unit,
+        categoryId: material.categoryId,
+        purchasePrice: material.purchasePrice,
+        minStock: material.minStock,
+      },
+      create: material,
+    });
+  }
+  console.log("✔ категории и номенклатура склада (4 + 5)");
+
+  if ((await prisma.stockMovement.count()) === 0) {
+    await prisma.stockMovement.createMany({
+      data: [
+        {
+          materialId: "seed-mat-ldsp16",
+          type: "INCOME",
+          quantity: 20,
+          unitPrice: 145,
+          totalByn: 2900,
+          comment: "Закупка по накладной",
+          createdById: manager.id,
+        },
+        {
+          materialId: "seed-mat-kromka2",
+          type: "INCOME",
+          quantity: 500,
+          unitPrice: 1.2,
+          totalByn: 600,
+          createdById: manager.id,
+        },
+        {
+          materialId: "seed-mat-petlya",
+          type: "INCOME",
+          quantity: 100,
+          unitPrice: 8.5,
+          totalByn: 850,
+          createdById: manager.id,
+        },
+        {
+          materialId: "seed-mat-napr450",
+          type: "INCOME",
+          quantity: 20,
+          unitPrice: 12,
+          totalByn: 240,
+          createdById: manager.id,
+        },
+      ],
+    });
+    console.log("✔ приходы на склад (4 позиции)");
+  }
+
+  // Демо-потребность и выдача — на П-****-002 «Шкаф-купе» (НЕ трогаем
+  // П-****-001: его экономика зафиксирована e2e-проверками фазы 5).
+  // ЛДСП: нужно 12, выдано 8 → «Можно запросить»; петли: 16 из 16 →
+  // «Обеспечено»; кромка: нужно 600 при остатке 500 → «Нет на складе»
+  // (красная строка + бейдж нехватки на проекте).
+  const shkafProject = await prisma.project.findUnique({
+    where: { number: `П-${warehouseYear}-002` },
+  });
+  if (shkafProject && (await prisma.projectMaterial.count()) === 0) {
+    const [ldspLine, petlyaLine] = await Promise.all([
+      prisma.projectMaterial.create({
+        data: {
+          projectId: shkafProject.id,
+          materialId: "seed-mat-ldsp16",
+          quantity: 12,
+          issuedQty: 8,
+          createdById: manager.id,
+        },
+      }),
+      prisma.projectMaterial.create({
+        data: {
+          projectId: shkafProject.id,
+          materialId: "seed-mat-petlya",
+          quantity: 16,
+          issuedQty: 16,
+          createdById: manager.id,
+        },
+      }),
+      prisma.projectMaterial.create({
+        data: {
+          projectId: shkafProject.id,
+          materialId: "seed-mat-kromka2",
+          quantity: 600,
+          comment: "Кромление всех деталей",
+          createdById: manager.id,
+        },
+      }),
+    ]);
+    await prisma.stockMovement.createMany({
+      data: [
+        {
+          materialId: "seed-mat-ldsp16",
+          type: "EXPENSE",
+          quantity: 8,
+          unitPrice: 145,
+          totalByn: 1160,
+          projectId: shkafProject.id,
+          projectMaterialId: ldspLine.id,
+          comment: "Заготовка корпуса",
+          createdById: manager.id,
+        },
+        {
+          materialId: "seed-mat-petlya",
+          type: "EXPENSE",
+          quantity: 16,
+          unitPrice: 8.5,
+          totalByn: 136,
+          projectId: shkafProject.id,
+          projectMaterialId: petlyaLine.id,
+          createdById: manager.id,
+        },
+      ],
+    });
+    console.log("✔ потребность и выдача по П-002 (3 строки, 2 списания)");
+  }
 }
 
 main()

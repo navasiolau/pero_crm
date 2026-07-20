@@ -11,6 +11,7 @@ export const NOTIFICATION_TYPES = [
   { id: "file.added", label: "Новый файл", kind: "org" },
   { id: "payment.added", label: "Новый приход по проекту", kind: "org" },
   { id: "expense.added", label: "Новый расход по проекту", kind: "org" },
+  { id: "stock.expense", label: "Списание материала на проект", kind: "org" },
   { id: "task.assigned", label: "Вам назначена задача", kind: "personal" },
   { id: "task.statusChanged", label: "Изменение по вашей задаче", kind: "personal" },
   { id: "payroll.accrued", label: "Начисление зарплаты", kind: "personal" },
