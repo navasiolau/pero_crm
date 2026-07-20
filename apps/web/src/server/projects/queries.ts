@@ -47,7 +47,13 @@ export async function getProjectFor(
       },
       files: { orderBy: { createdAt: "desc" } },
       communications: { orderBy: { happenedAt: "desc" } },
-      payments: { orderBy: { paidAt: "desc" } },
+      payments: {
+        include: {
+          cashAccount: { select: { name: true } },
+          expenseArticle: { select: { name: true } },
+        },
+        orderBy: { paidAt: "desc" },
+      },
       stageHistory: { orderBy: { createdAt: "desc" } },
     },
   });

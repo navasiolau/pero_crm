@@ -140,6 +140,44 @@ async function main() {
     console.log("✔ расценки (8 шт.)");
   }
 
+  // Кассы (§11) — идемпотентно по фиксированным id. Основная касса BYN
+  // совпадает с id из миграции фазы 5 (туда бэкфилнуты старые платежи).
+  for (const account of [
+    {
+      id: "seed-cash-main",
+      name: "Основная касса",
+      currency: "BYN",
+      comment: "Касса по умолчанию",
+    },
+    {
+      id: "seed-cash-usd",
+      name: "Валютный счёт",
+      currency: "USD",
+      comment: "Для платежей в долларах",
+    },
+  ]) {
+    await prisma.cashAccount.upsert({
+      where: { id: account.id },
+      update: { name: account.name, currency: account.currency, comment: account.comment },
+      create: account,
+    });
+  }
+  console.log("✔ кассы (2 шт.)");
+
+  // Статьи расходов (§8/§11) — идемпотентно по фиксированным id
+  for (const article of [
+    { id: "seed-article-materials", name: "Материалы", comment: "ЛДСП, фурнитура, кромка" },
+    { id: "seed-article-logistics", name: "Логистика", comment: "Доставка, выезд" },
+    { id: "seed-article-other", name: "Прочее", comment: null },
+  ]) {
+    await prisma.expenseArticle.upsert({
+      where: { id: article.id },
+      update: { name: article.name, comment: article.comment },
+      create: article,
+    });
+  }
+  console.log("✔ статьи расходов (3 шт.)");
+
   if (clientsCount > 0) {
     console.log("✔ демо-данные проектов уже есть — пропуск");
     return;
@@ -250,7 +288,8 @@ async function main() {
   });
   console.log("✔ начисление инженеру (5% от стоимости)");
 
-  // Демо-приходы (§10): оборот месяца для «% от оборота» — сумма приходов.
+  // Демо-приходы (§10/§11): оборот месяца для «% от оборота» — сумма
+  // приходов. BYN, курс 1, основная касса (эквиваленты = сумме).
   const shkaf = await prisma.project.findUniqueOrThrow({
     where: { number: `П-${year}-002` },
   });
@@ -259,18 +298,40 @@ async function main() {
       {
         projectId: kitchen.id,
         amount: 150000,
+        bynAmount: 150000,
+        projectAmount: 150000,
+        cashAccountId: "seed-cash-main",
         comment: "Аванс по договору",
         createdById: manager.id,
       },
       {
         projectId: shkaf.id,
         amount: 50000,
+        bynAmount: 50000,
+        projectAmount: 50000,
+        cashAccountId: "seed-cash-main",
         comment: "Аванс по договору",
         createdById: manager.id,
       },
     ],
   });
   console.log("✔ демо-приходы (150 000 + 50 000)");
+
+  // Демо-расход (§11): материалы на кухню — уменьшает маржу проекта
+  await prisma.payment.create({
+    data: {
+      projectId: kitchen.id,
+      direction: "EXPENSE",
+      amount: 40000,
+      bynAmount: 40000,
+      projectAmount: 40000,
+      cashAccountId: "seed-cash-main",
+      expenseArticleId: "seed-article-materials",
+      comment: "ЛДСП и фурнитура",
+      createdById: manager.id,
+    },
+  });
+  console.log("✔ демо-расход (материалы 40 000)");
 }
 
 main()

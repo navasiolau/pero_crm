@@ -299,22 +299,70 @@ model Payout {
   @@index([month])
 }
 
-// Приход (платёж) по проекту: оборот организации для «% от оборота» (§10)
-// считается как сумма приходов за месяц в рамках проектов.
-// Кассы, курсы НБ РБ и маржа — фаза 5 (§11).
+// Направление платежа (§11): приход от клиента / расход на проект
+// (материалы, прочее — уменьшают маржу, см. экономику проекта).
+enum PaymentDirection {
+  INCOME
+  EXPENSE
+}
+
+// Касса организации (§11): каждая в своей валюте. Баланс = сумма своих
+// операций (приходы − расходы); операция проводится по кассе только
+// в валюте кассы (конвертация фиксируется курсом в самой операции).
+model CashAccount {
+  id        String    @id @default(cuid())
+  name      String
+  currency  String    @default("BYN")
+  comment   String?
+  active    Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  payments  Payment[]
+}
+
+// Статья расходов (§8): справочник для расходов по проектам
+// (Материалы, Логистика, Прочее…). ЗП в статьях нет — она считается
+// из PayrollEntry (§10).
+model ExpenseArticle {
+  id        String    @id @default(cuid())
+  name      String
+  comment   String?
+  active    Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  payments  Payment[]
+}
+
+// Платёж по проекту (§11): приход или расход в любой из 4 валют.
+// Курс подтягивается с НБ РБ в момент внесения и СОХРАНЯЕТСЯ в записи
+// (курс, дата курса, эквиваленты) — отдельного кэша курсов нет,
+// историчность обеспечивается самими записями. Курс можно поправить вручную.
+//   rate — BYN за 1 единицу валюты операции (как на сайте НБ РБ; 1 для BYN);
+//   bynAmount — эквивалент в BYN (оборот для «% от оборота», баланс орг.);
+//   projectAmount — эквивалент в валюте проекта (экономика проекта, маржа).
 model Payment {
-  id          String   @id @default(cuid())
-  projectId   String
-  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  amount      Decimal  @db.Decimal(12, 2)
-  currency    String   @default("BYN")
-  paidAt      DateTime @default(now())
-  comment     String?
-  createdById String?
-  createdAt   DateTime @default(now())
+  id               String           @id @default(cuid())
+  projectId        String
+  project          Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  direction        PaymentDirection @default(INCOME)
+  amount           Decimal          @db.Decimal(12, 2) // в валюте операции
+  currency         String           @default("BYN")
+  rate             Decimal          @default(1) @db.Decimal(14, 6) // BYN за ед. валюты (НБ РБ)
+  rateDate         DateTime? // дата курса НБ РБ
+  bynAmount        Decimal          @db.Decimal(12, 2) // эквивалент в BYN
+  projectAmount    Decimal          @db.Decimal(12, 2) // эквивалент в валюте проекта
+  cashAccountId    String?
+  cashAccount      CashAccount?     @relation(fields: [cashAccountId], references: [id], onDelete: SetNull)
+  expenseArticleId String?
+  expenseArticle   ExpenseArticle?  @relation(fields: [expenseArticleId], references: [id], onDelete: SetNull)
+  paidAt           DateTime         @default(now())
+  comment          String?
+  createdById      String?
+  createdAt        DateTime         @default(now())
 
   @@index([projectId])
   @@index([paidAt])
+  @@index([cashAccountId])
 }
 
 // Настройки организации (§10): key-value, сейчас — payrollCurrency

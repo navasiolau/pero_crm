@@ -1,6 +1,7 @@
 import type { PayScheme } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
+import { convertFromByn } from "@/server/finance/nbrb";
 
 // ─── Зарплата (§10): запросы для страниц «Моя зарплата» и «Финансы → Зарплата»
 
@@ -250,21 +251,22 @@ export async function getPayrollSummary(month: string) {
 }
 
 // Оборот организации за расчётный месяц (§10) — база для «% от оборота».
-// Определение: сумма приходов (платежей) по проектам за месяц в валюте
-// зарплаты. Платежи в других валютах пока не конвертируются — курсы
-// НБ РБ появятся в фазе 5 (§11).
+// Определение: сумма ПРИХОДОВ (платежей-INCOME) по проектам за месяц
+// в валюте зарплаты. С фазы 5 (§11) платежи мультивалютны: каждый хранит
+// BYN-эквивалент по курсу НБ РБ на момент внесения — суммируем его;
+// при валюте ЗП ≠ BYN итог конвертируется по текущему курсу НБ РБ.
 export async function getMonthTurnover(
   month: string,
 ): Promise<{ total: number; paymentsCount: number; currency: string }> {
   const currency = await getPayrollCurrency();
   const { start, end } = monthRange(month);
   const agg = await prisma.payment.aggregate({
-    where: { paidAt: { gte: start, lt: end }, currency },
-    _sum: { amount: true },
+    where: { paidAt: { gte: start, lt: end }, direction: "INCOME" },
+    _sum: { bynAmount: true },
     _count: { _all: true },
   });
   return {
-    total: Number(agg._sum.amount ?? 0),
+    total: await convertFromByn(Number(agg._sum.bynAmount ?? 0), currency),
     paymentsCount: agg._count._all,
     currency,
   };
@@ -286,18 +288,28 @@ export function round2(value: number): number {
   return Math.round(value * 100) / 100;
 }
 
-// Баланс организации: приходы (в валюте ЗП) минус выплаты зарплаты,
-// за всё время. Физический потолок для выплат. Расходы и кассы — фаза 5.
+// Баланс организации: приходы минус расходы минус выплаты зарплаты,
+// за всё время. Физический потолок для выплат. С фазы 5 (§11) приходы
+// и расходы — мультивалютные, суммируются по BYN-эквиваленту (курс НБ РБ
+// сохранён в каждой операции); при валюте ЗП ≠ BYN итог конвертируется
+// по текущему курсу. Кассовые остатки — см. listCashAccounts (§11).
 export async function getOrgBalance(): Promise<number> {
   const currency = await getPayrollCurrency();
-  const [income, paid] = await Promise.all([
+  const [income, expense, paid] = await Promise.all([
     prisma.payment.aggregate({
-      where: { currency },
-      _sum: { amount: true },
+      where: { direction: "INCOME" },
+      _sum: { bynAmount: true },
+    }),
+    prisma.payment.aggregate({
+      where: { direction: "EXPENSE" },
+      _sum: { bynAmount: true },
     }),
     prisma.payout.aggregate({ _sum: { amount: true } }),
   ]);
-  return round2(Number(income._sum.amount ?? 0) - Number(paid._sum.amount ?? 0));
+  const cashByn =
+    Number(income._sum.bynAmount ?? 0) - Number(expense._sum.bynAmount ?? 0);
+  const cash = await convertFromByn(cashByn, currency);
+  return round2(cash - Number(paid._sum.amount ?? 0));
 }
 
 export type EmployeeDue = { userId: string; name: string; due: number };

@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 import { prisma } from "@/lib/prisma";
 import { getPluginSettings } from "@/server/plugins/run-log";
 import { getSlotContributions } from "@/server/plugins/slots";
+import { getProjectEconomics } from "@/server/finance/queries";
 import { getProjectFor, listClients, listEngineers, listManagers, listWorkers } from "@/server/projects/queries";
 import { mapTaskDetails } from "@/server/tasks/queries";
 
@@ -45,7 +46,7 @@ export default async function ProjectPage({
   const showFinance = ["ADMIN", "DIRECTOR"].includes(role);
   const showAmount = showFinance || canManage || role === "ENGINEER";
 
-  const [clients, managers, engineers, workers, changeLogs, contributions, priceItems] =
+  const [clients, managers, engineers, workers, changeLogs, contributions, priceItems, economics, cashAccounts, expenseArticles] =
     await Promise.all([
       listClients(),
       listManagers(),
@@ -66,6 +67,20 @@ export default async function ProjectPage({
         where: { active: true },
         orderBy: { name: "asc" },
       }),
+      // Данные вкладки «Финансы» (§11) — только админу/директору
+      showFinance ? getProjectEconomics(project.id) : Promise.resolve(null),
+      showFinance
+        ? prisma.cashAccount.findMany({
+            where: { active: true },
+            orderBy: { createdAt: "asc" },
+          })
+        : Promise.resolve([]),
+      showFinance
+        ? prisma.expenseArticle.findMany({
+            where: { active: true },
+            orderBy: { createdAt: "asc" },
+          })
+        : Promise.resolve([]),
     ]);
 
   const pluginTabs = await Promise.all(
@@ -216,22 +231,43 @@ export default async function ProjectPage({
           />
         </TabsContent>
 
-        {showFinance ? (
+        {showFinance && economics ? (
           <TabsContent value="finance" className="mt-4">
             <FinanceTab
               projectId={project.id}
               currency={project.currency}
-              expectedPrice={
-                project.expectedPrice ? Number(project.expectedPrice) : null
-              }
+              economics={{
+                expectedPrice: economics.expectedPrice,
+                paidTotal: economics.paidTotal,
+                expensesTotal: economics.expensesTotal,
+                payrollTotal: economics.payrollTotal,
+                margin: economics.margin,
+                marginAtFullPrice: economics.marginAtFullPrice,
+                expenseBreakdown: economics.expenseBreakdown,
+              }}
               payments={project.payments.map((payment) => ({
                 id: payment.id,
+                direction: payment.direction,
                 amount: Number(payment.amount),
+                currency: payment.currency,
+                rate: Number(payment.rate),
+                projectAmount: Number(payment.projectAmount),
                 paidAt: payment.paidAt.toISOString(),
                 comment: payment.comment,
+                cashAccountName: payment.cashAccount?.name ?? null,
+                expenseArticleName: payment.expenseArticle?.name ?? null,
                 createdByName: payment.createdById
                   ? (uploaderNames.get(payment.createdById) ?? "—")
                   : "—",
+              }))}
+              cashAccounts={cashAccounts.map((account) => ({
+                id: account.id,
+                name: account.name,
+                currency: account.currency,
+              }))}
+              expenseArticles={expenseArticles.map((article) => ({
+                id: article.id,
+                name: article.name,
               }))}
             />
           </TabsContent>
