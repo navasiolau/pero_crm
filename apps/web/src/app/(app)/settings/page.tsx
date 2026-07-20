@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Blocks, KeyRound, Users } from "lucide-react";
+import { Blocks, KeyRound, Users, Wallet } from "lucide-react";
 
 import {
   Card,
@@ -14,6 +14,12 @@ const sections = [
     icon: Users,
     title: "Пользователи",
     description: "Сотрудники: ФИО, должность, контакты, роли, схемы оплаты",
+  },
+  {
+    href: "/settings/payroll",
+    icon: Wallet,
+    title: "Зарплата",
+    description: "Валюта зарплаты — единая для начислений и расчётников",
   },
   {
     href: "/settings/modules",

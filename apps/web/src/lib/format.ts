@@ -1,5 +1,5 @@
 const CURRENCY_SYMBOLS: Record<string, string> = {
-  BYN: "руб.", // белорусский рубль — реальное обозначение, а не аббревиатура ISO
+  BYN: "BYN", // по требованию владельца — код ISO, а не «руб.»
   RUB: "₽",
   USD: "$",
   EUR: "€",

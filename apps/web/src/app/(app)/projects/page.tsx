@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { displayClientName } from "@/lib/labels";
 import { getUserPreference } from "@/server/preferences";
-import { listClients, listManagers, listProjects } from "@/server/projects/queries";
+import { listClients, listEngineers, listManagers, listProjects } from "@/server/projects/queries";
 
 import { ProjectsView } from "./projects-view";
 
@@ -16,11 +16,12 @@ export default async function ProjectsPage() {
   if (!session?.user) redirect("/login");
 
   const role = session.user.role;
-  const [projects, view, clients, managers] = await Promise.all([
+  const [projects, view, clients, managers, engineers] = await Promise.all([
     listProjects(session.user.id, role),
     getUserPreference(session.user.id, "projects.view"),
     listClients(),
     listManagers(),
+    listEngineers(),
   ]);
   const canManage = ["ADMIN", "DIRECTOR", "MANAGER"].includes(role);
 
@@ -44,6 +45,7 @@ export default async function ProjectsPage() {
       showAmount={["ADMIN", "DIRECTOR", "MANAGER", "ENGINEER"].includes(role)}
       clients={clients.map((client) => ({ id: client.id, name: client.name }))}
       managers={managers.map((manager) => ({ id: manager.id, name: manager.name }))}
+      engineers={engineers.map((engineer) => ({ id: engineer.id, name: engineer.name }))}
     />
   );
 }

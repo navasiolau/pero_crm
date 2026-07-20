@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import type { Role } from "@prisma/client";
 import { z } from "zod";
 
 import { auth } from "@/auth";
@@ -100,12 +101,24 @@ const manualSchema = z.object({
   minutes: z.number().int().min(1, "Минимум 1 минута").max(24 * 60, "Больше суток?"),
 });
 
-// Ручной ввод времени (§9) — на случай забытого таймера.
+// Ручной ввод времени (§9) — только офисные роли и менеджмент.
+// Работнику и монтажнику ручной ввод закрыт (требование владельца):
+// их время считается только таймером — иначе можно обмануть руководство.
+// Забыли таймер — правку вносит менеджер (с записью в журнал, §19).
+const MANUAL_TIME_FORBIDDEN: Role[] = ["WORKER", "MOUNTER"];
+
 export async function addManualTime(
   input: z.infer<typeof manualSchema>,
 ): Promise<{ ok: boolean; error?: string }> {
   const session = await auth();
   if (!session?.user) throw new Error("Не авторизован");
+  if (MANUAL_TIME_FORBIDDEN.includes(session.user.role)) {
+    return {
+      ok: false,
+      error:
+        "Ручной ввод времени недоступен — время считается таймером автоматически. Если таймер забыли, обратитесь к менеджеру",
+    };
+  }
   const parsed = manualSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Ошибка данных" };

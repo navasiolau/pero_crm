@@ -47,6 +47,7 @@ export async function getProjectFor(
       },
       files: { orderBy: { createdAt: "desc" } },
       communications: { orderBy: { happenedAt: "desc" } },
+      payments: { orderBy: { paidAt: "desc" } },
       stageHistory: { orderBy: { createdAt: "desc" } },
     },
   });
@@ -63,6 +64,16 @@ export async function listClients() {
 export async function listManagers() {
   return prisma.user.findMany({
     where: { active: true, role: { in: ["ADMIN", "DIRECTOR", "MANAGER"] } },
+    select: { id: true, name: true, role: true, position: true },
+    orderBy: { name: "asc" },
+  });
+}
+
+// Инженеры-проектировщики: на назначенного инженера проекта начисляется
+// % от стоимости при переходе «В работе» (§10).
+export async function listEngineers() {
+  return prisma.user.findMany({
+    where: { active: true, role: "ENGINEER" },
     select: { id: true, name: true, role: true, position: true },
     orderBy: { name: "asc" },
   });

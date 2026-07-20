@@ -386,7 +386,7 @@ export function TaskDialog({
                     {task.quantity && task.workPriceSnapshot
                       ? ` · ${task.quantity} ед. × ${task.workPriceSnapshot} = ${(
                           Number(task.quantity) * Number(task.workPriceSnapshot)
-                        ).toLocaleString("ru-RU")} руб.`
+                        ).toLocaleString("ru-RU")} BYN`
                       : ""}
                   </div>
                 </div>

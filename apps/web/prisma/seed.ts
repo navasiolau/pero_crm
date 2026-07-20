@@ -118,6 +118,9 @@ async function main() {
   const worker = await prisma.user.findUniqueOrThrow({
     where: { email: "worker@pero.local" },
   });
+  const engineer = await prisma.user.findUniqueOrThrow({
+    where: { email: "engineer@pero.local" },
+  });
 
   // Демо-расценки (§9) — независимо от демо-проектов, идемпотентно
   const pricesCount = await prisma.priceItem.count();
@@ -170,6 +173,7 @@ async function main() {
       stage: "IN_WORK" as const,
       expectedPrice: 385000,
       clientId: ivanova.id,
+      engineerId: engineer.id, // на него — % от стоимости (§10)
     },
     {
       number: `П-${year}-002`,
@@ -228,6 +232,45 @@ async function main() {
     });
     console.log("✔ задача «Замер» работнику");
   }
+
+  // Демо-данные фазы 4 (§10): проект создан сразу «В работе», минуя
+  // changeProjectStage, поэтому начисление инженеру (5% от стоимости)
+  // вносим явно. Демо-выплат НЕТ: деньги платятся только за прошлый
+  // месяц, а все начисления в seed — текущего (правило владельца).
+  const month = new Date().toISOString().slice(0, 7);
+  await prisma.payrollEntry.create({
+    data: {
+      userId: engineer.id,
+      projectId: kitchen.id,
+      amount: 19250, // 385 000 × 5%
+      scheme: "PERCENT_PROJECT",
+      month,
+      comment: `5% от стоимости · ${kitchen.number}`,
+    },
+  });
+  console.log("✔ начисление инженеру (5% от стоимости)");
+
+  // Демо-приходы (§10): оборот месяца для «% от оборота» — сумма приходов.
+  const shkaf = await prisma.project.findUniqueOrThrow({
+    where: { number: `П-${year}-002` },
+  });
+  await prisma.payment.createMany({
+    data: [
+      {
+        projectId: kitchen.id,
+        amount: 150000,
+        comment: "Аванс по договору",
+        createdById: manager.id,
+      },
+      {
+        projectId: shkaf.id,
+        amount: 50000,
+        comment: "Аванс по договору",
+        createdById: manager.id,
+      },
+    ],
+  });
+  console.log("✔ демо-приходы (150 000 + 50 000)");
 }
 
 main()

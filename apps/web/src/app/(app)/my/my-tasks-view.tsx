@@ -2,8 +2,29 @@
 
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Check, Play, Plus, Square, Timer } from "lucide-react";
+import {
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  useDraggable,
+  useDroppable,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DragStartEvent,
+} from "@dnd-kit/core";
+import { CSS } from "@dnd-kit/utilities";
+import {
+  Check,
+  LayoutGrid,
+  List,
+  Play,
+  Plus,
+  Square,
+  Timer,
+} from "lucide-react";
 import { toast } from "sonner";
+import type { Role, TaskStatus } from "@prisma/client";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -17,11 +38,30 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { PhotoUploadButton } from "@/components/photo-upload-button";
 import { ActualTimeDialog } from "@/components/actual-time-dialog";
+import { cn } from "@/lib/utils";
+import { saveViewPreference } from "@/server/preferences-actions";
 import { changeTaskStatus } from "@/server/tasks/actions";
 import { addManualTime, startTimer, stopTimer } from "@/server/time/actions";
 import type { TaskDetails } from "@/components/task-dialog";
+
+// Работнику и монтажнику ручной ввод времени закрыт (требование владельца) —
+// их время считается только таймером, который сам стартует при «В работе».
+const SHOP_FLOOR: Role[] = ["WORKER", "MOUNTER"];
+
+const KANBAN_COLUMNS: { id: TaskStatus; label: string }[] = [
+  { id: "NEW", label: "Новая" },
+  { id: "IN_PROGRESS", label: "В работе" },
+  { id: "DONE", label: "Выполнена" },
+];
+
+// Разрешённые переходы для перетаскивания (как на сервере)
+const DRAG_FLOW: Partial<Record<TaskStatus, TaskStatus[]>> = {
+  NEW: ["IN_PROGRESS", "DONE"],
+  IN_PROGRESS: ["DONE"],
+};
 
 interface ActiveTimer {
   taskId: string;
@@ -54,28 +94,56 @@ function isOverdue(dueAt: string | null): boolean {
   return due.getTime() < Date.now();
 }
 
-// «Мои задачи»: увидел → таймер (серверный, §9) → стоп → выполнил → фото (§6.2).
+// «Мои задачи»: список или канбан (вид сохраняется, §7). Статусы видны всегда.
+// Таймер автоматический: «В работу» — старт, «Выполнено» — стоп (§9).
 export function MyTasksView({
   active,
   done,
   userName,
   timer,
+  role,
+  initialView,
 }: {
   active: TaskDetails[];
   done: TaskDetails[];
   userName: string;
   timer: ActiveTimer | null;
+  role: Role;
+  initialView: "list" | "kanban";
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
+  const [view, setView] = useState(initialView);
+  const [tasks, setTasks] = useState<TaskDetails[]>([...active, ...done]);
+  const [dragId, setDragId] = useState<string | null>(null);
   const [manualFor, setManualFor] = useState<string | null>(null);
   const [manualMinutes, setManualMinutes] = useState("60");
   const [actualFor, setActualFor] = useState<TaskDetails | null>(null);
   const elapsed = useElapsed(timer?.startedAt ?? null);
+  const canManualTime = !SHOP_FLOOR.includes(role);
 
-  // «Выполнено»: если фактического времени нет — спросим обязательно (§9)
+  // После router.refresh() подтягиваем свежие данные в локальное состояние
+  useEffect(() => {
+    setTasks([...active, ...done]);
+  }, [active, done]);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+  );
+
+  const activeTasks = tasks.filter((task) => task.status !== "DONE");
+  const doneTasks = tasks.filter((task) => task.status === "DONE");
+
+  function moveLocal(taskId: string, to: TaskStatus) {
+    setTasks((prev) =>
+      prev.map((task) => (task.id === taskId ? { ...task, status: to } : task)),
+    );
+  }
+
+  // «Выполнено»: у работника без записей времени сервер сам откажет с
+  // подсказкой; офисным ролям показываем форму фактического времени (§9).
   function completeTask(task: TaskDetails) {
-    if (task.spentMinutes === 0) {
+    if (task.spentMinutes === 0 && canManualTime) {
       setActualFor(task);
       return;
     }
@@ -94,15 +162,20 @@ export function MyTasksView({
     const timerHere = timer?.taskId === task.id;
     const timerElsewhere = timer && !timerHere;
     return (
-      <Card key={task.id} className={faded ? "opacity-60" : ""}>
+      <Card className={faded ? "opacity-60" : ""}>
         <CardContent className="flex flex-wrap items-center gap-3 p-4">
           <div className="min-w-40 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <span className="font-medium">{task.title}</span>
               {task.type ? <Badge variant="outline">{task.type}</Badge> : null}
-              {task.status === "DONE" ? (
+              {task.status === "IN_PROGRESS" ? (
+                <Badge>В работе</Badge>
+              ) : task.status === "NEW" ? (
+                <Badge variant="outline">Новая</Badge>
+              ) : task.status === "DONE" ? (
                 <Badge variant="secondary">Выполнена</Badge>
-              ) : isOverdue(task.dueAt) ? (
+              ) : null}
+              {task.status !== "DONE" && isOverdue(task.dueAt) ? (
                 <Badge variant="destructive">Просрочена</Badge>
               ) : null}
             </div>
@@ -161,27 +234,35 @@ export function MyTasksView({
                   <Timer className="size-4" /> Старт
                 </Button>
               )}
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={pending}
-                title="Внести время вручную"
-                onClick={() => {
-                  setManualFor(task.id);
-                  setManualMinutes("60");
-                }}
-              >
-                <Plus className="size-4" /> мин
-              </Button>
+              {canManualTime ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={pending}
+                  title="Внести время вручную"
+                  onClick={() => {
+                    setManualFor(task.id);
+                    setManualMinutes("60");
+                  }}
+                >
+                  <Plus className="size-4" /> мин
+                </Button>
+              ) : null}
 
               {task.status === "NEW" ? (
                 <Button
                   variant="outline"
                   disabled={pending}
+                  title="Таймер запустится автоматически"
                   onClick={() =>
                     startTransition(async () => {
                       const result = await changeTaskStatus(task.id, "IN_PROGRESS");
-                      if (!result.ok) toast.error(result.error ?? "Ошибка");
+                      if (result.ok) {
+                        toast.success("В работе — таймер запущен");
+                        router.refresh();
+                      } else {
+                        toast.error(result.error ?? "Ошибка");
+                      }
                     })
                   }
                 >
@@ -210,13 +291,118 @@ export function MyTasksView({
     );
   }
 
+  function DraggableTask({ task }: { task: TaskDetails }) {
+    const { attributes, listeners, setNodeRef, transform, isDragging } =
+      useDraggable({ id: task.id, disabled: task.status === "DONE" });
+    return (
+      <div
+        ref={setNodeRef}
+        style={{ transform: CSS.Translate.toString(transform) }}
+        className={cn(
+          "cursor-grab touch-none select-none",
+          isDragging && "opacity-40",
+          task.status === "DONE" && "cursor-default",
+        )}
+        {...(task.status !== "DONE" ? { ...listeners, ...attributes } : {})}
+      >
+        {renderTask(task, task.status === "DONE")}
+      </div>
+    );
+  }
+
+  function KanbanColumn({
+    column,
+    columnTasks,
+  }: {
+    column: (typeof KANBAN_COLUMNS)[number];
+    columnTasks: TaskDetails[];
+  }) {
+    const { setNodeRef, isOver } = useDroppable({ id: column.id });
+    return (
+      <div
+        ref={setNodeRef}
+        className={cn(
+          "flex w-80 shrink-0 flex-col gap-2 rounded-xl border p-2 transition-colors",
+          isOver && "border-primary/60 bg-accent/40",
+        )}
+      >
+        <div className="flex items-center justify-between px-1 pt-1">
+          <span className="text-sm font-medium">{column.label}</span>
+          <Badge variant="secondary">{columnTasks.length}</Badge>
+        </div>
+        <div className="flex min-h-24 flex-col gap-2">
+          {columnTasks.map((task) => (
+            <DraggableTask key={task.id} task={task} />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  function onDragStart(event: DragStartEvent) {
+    setDragId(String(event.active.id));
+  }
+
+  function onDragEnd(event: DragEndEvent) {
+    const { active: dragActive, over } = event;
+    setDragId(null);
+    if (!over) return;
+    const task = tasks.find((item) => item.id === String(dragActive.id));
+    const to = over.id as TaskStatus;
+    if (!task || task.status === to || task.status === "DONE") return;
+    if (!(DRAG_FLOW[task.status] ?? []).includes(to)) {
+      toast.error("Недопустимый переход статуса");
+      return;
+    }
+    const from = task.status;
+    moveLocal(task.id, to);
+    startTransition(async () => {
+      // Форма фактического времени — только офисным ролям
+      if (to === "DONE" && task.spentMinutes === 0 && canManualTime) {
+        moveLocal(task.id, from);
+        setActualFor(task);
+        return;
+      }
+      const result = await changeTaskStatus(task.id, to as "IN_PROGRESS" | "DONE");
+      if (!result.ok) {
+        moveLocal(task.id, from); // откат оптимистичного обновления
+        toast.error(result.error ?? "Ошибка");
+      } else {
+        toast.success(to === "IN_PROGRESS" ? "В работе — таймер запущен" : "Выполнено!");
+        router.refresh();
+      }
+    });
+  }
+
+  const dragTask = tasks.find((task) => task.id === dragId);
+
   return (
     <div className="flex flex-col gap-4">
-      <div>
-        <h1 className="text-2xl font-semibold">Мои задачи</h1>
-        <p className="text-sm text-muted-foreground">
-          {userName}, у вас активных задач: {active.length}
-        </p>
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <h1 className="text-2xl font-semibold">Мои задачи</h1>
+          <p className="text-sm text-muted-foreground">
+            {userName}, у вас активных задач: {activeTasks.length}
+          </p>
+        </div>
+        <ToggleGroup
+          value={[view]}
+          onValueChange={(value) => {
+            const next = value[0] as "list" | "kanban" | undefined;
+            if (!next) return;
+            setView(next);
+            startTransition(async () => {
+              await saveViewPreference("my.view", next);
+            });
+          }}
+        >
+          <ToggleGroupItem value="list" aria-label="Список">
+            <List className="size-4" />
+          </ToggleGroupItem>
+          <ToggleGroupItem value="kanban" aria-label="Канбан">
+            <LayoutGrid className="size-4" />
+          </ToggleGroupItem>
+        </ToggleGroup>
       </div>
 
       {timer ? (
@@ -252,76 +438,110 @@ export function MyTasksView({
         </Card>
       ) : null}
 
-      <div className="flex flex-col gap-2">
-        {active.map((task) => renderTask(task))}
-        {active.length === 0 ? (
-          <div className="rounded-xl border border-dashed p-12 text-center">
-            <div className="text-lg font-medium">Все задачи выполнены 🎉</div>
-            <div className="text-sm text-muted-foreground">
-              Новые задачи появятся здесь, когда менеджер их назначит
-            </div>
-          </div>
-        ) : null}
-      </div>
-
-      {done.length > 0 ? (
+      {view === "list" ? (
         <>
-          <h2 className="text-sm font-medium text-muted-foreground">
-            Недавно выполненные
-          </h2>
           <div className="flex flex-col gap-2">
-            {done.map((task) => renderTask(task, true))}
+            {activeTasks.map((task) => (
+              <div key={task.id}>{renderTask(task)}</div>
+            ))}
+            {activeTasks.length === 0 ? (
+              <div className="rounded-xl border border-dashed p-12 text-center">
+                <div className="text-lg font-medium">Все задачи выполнены 🎉</div>
+                <div className="text-sm text-muted-foreground">
+                  Новые задачи появятся здесь, когда менеджер их назначит
+                </div>
+              </div>
+            ) : null}
           </div>
-        </>
-      ) : null}
 
-      {/* Ручной ввод времени (§9) */}
-      <Dialog open={!!manualFor} onOpenChange={(open) => !open && setManualFor(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Внести время вручную</DialogTitle>
-          </DialogHeader>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="manual-min">Минуты</Label>
-            <Input
-              id="manual-min"
-              type="number"
-              min="1"
-              max="1440"
-              value={manualMinutes}
-              onChange={(event) => setManualMinutes(event.target.value)}
-            />
-            <p className="text-xs text-muted-foreground">
-              Для случаев, когда таймер забыли запустить.
-            </p>
+          {doneTasks.length > 0 ? (
+            <>
+              <h2 className="text-sm font-medium text-muted-foreground">
+                Недавно выполненные
+              </h2>
+              <div className="flex flex-col gap-2">
+                {doneTasks.map((task) => (
+                  <div key={task.id}>{renderTask(task, true)}</div>
+                ))}
+              </div>
+            </>
+          ) : null}
+        </>
+      ) : (
+        <DndContext
+          sensors={sensors}
+          onDragStart={onDragStart}
+          onDragEnd={onDragEnd}
+          onDragCancel={() => setDragId(null)}
+        >
+          <div className="flex gap-3 overflow-x-auto pb-4">
+            {KANBAN_COLUMNS.map((column) => (
+              <KanbanColumn
+                key={column.id}
+                column={column}
+                columnTasks={tasks.filter((task) => task.status === column.id)}
+              />
+            ))}
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setManualFor(null)}>
-              Отмена
-            </Button>
-            <Button
-              disabled={!(Number(manualMinutes) >= 1) || pending}
-              onClick={() =>
-                startTransition(async () => {
-                  const result = await addManualTime({
-                    taskId: manualFor!,
-                    minutes: Number(manualMinutes),
-                  });
-                  if (result.ok) {
-                    toast.success("Время записано");
-                    setManualFor(null);
-                    router.refresh();
-                  } else {
-                    toast.error(result.error ?? "Ошибка");
-                  }
-                })
-              }
-            >
-              Записать
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          <DragOverlay>
+            {dragTask ? (
+              <div className="w-80 rotate-2 shadow-lg">
+                {renderTask(dragTask, dragTask.status === "DONE")}
+              </div>
+            ) : null}
+          </DragOverlay>
+        </DndContext>
+      )}
+
+      {/* Ручной ввод времени (§9) — только офисные роли */}
+      {canManualTime ? (
+        <Dialog open={!!manualFor} onOpenChange={(open) => !open && setManualFor(null)}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Внести время вручную</DialogTitle>
+            </DialogHeader>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="manual-min">Минуты</Label>
+              <Input
+                id="manual-min"
+                type="number"
+                min="1"
+                max="1440"
+                value={manualMinutes}
+                onChange={(event) => setManualMinutes(event.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">
+                Для случаев, когда таймер забыли запустить.
+              </p>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setManualFor(null)}>
+                Отмена
+              </Button>
+              <Button
+                disabled={!(Number(manualMinutes) >= 1) || pending}
+                onClick={() =>
+                  startTransition(async () => {
+                    const result = await addManualTime({
+                      taskId: manualFor!,
+                      minutes: Number(manualMinutes),
+                    });
+                    if (result.ok) {
+                      toast.success("Время записано");
+                      setManualFor(null);
+                      router.refresh();
+                    } else {
+                      toast.error(result.error ?? "Ошибка");
+                    }
+                  })
+                }
+              >
+                Записать
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      ) : null}
 
       <ActualTimeDialog
         task={actualFor}

@@ -24,6 +24,7 @@ export function OverviewTab({
   showAmount,
   clients,
   managers,
+  engineers,
 }: {
   project: Project & { client: { name: string; phone: string } };
   canManage: boolean;
@@ -31,6 +32,7 @@ export function OverviewTab({
   showAmount: boolean;
   clients: SelectOption[];
   managers: SelectOption[];
+  engineers: SelectOption[];
 }) {
   const [pending, startTransition] = useTransition();
   const [form, setForm] = useState({
@@ -40,6 +42,7 @@ export function OverviewTab({
     description: project.description ?? "",
     clientId: project.clientId,
     managerId: project.managerId ?? "",
+    engineerId: project.engineerId ?? "",
   });
 
   function set(key: keyof typeof form) {
@@ -114,6 +117,26 @@ export function OverviewTab({
                 disabled={ro}
               />
             </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>Инженер</Label>
+              <SearchableSelect
+                options={engineers.map((engineer) => ({
+                  value: engineer.id,
+                  label: engineer.name,
+                }))}
+                value={form.engineerId}
+                onChange={(value) =>
+                  setForm((prev) => ({ ...prev, engineerId: value }))
+                }
+                placeholder="не назначен"
+                searchPlaceholder="Поиск инженера…"
+                allowClear
+                disabled={ro}
+              />
+              <p className="text-xs text-muted-foreground">
+                На инженера начисляется % при переходе «В работе»
+              </p>
+            </div>
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="address">Адрес</Label>
@@ -146,6 +169,7 @@ export function OverviewTab({
                       description: form.description.trim() || null,
                       clientId: form.clientId,
                       managerId: form.managerId || null,
+                      engineerId: form.engineerId || null,
                     });
                     if (result.ok) {
                       toast.success("Сохранено");

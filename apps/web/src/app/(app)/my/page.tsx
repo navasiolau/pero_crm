@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { getUserPreference } from "@/server/preferences";
 import { getActiveTimer } from "@/server/time/actions";
 import { mapTaskDetails, taskDetailsInclude } from "@/server/tasks/queries";
 
@@ -10,12 +11,12 @@ import { MyTasksView } from "./my-tasks-view";
 export const dynamic = "force-dynamic";
 
 // «Мои задачи» — главный экран работника/монтажника (§4, §15):
-// увидел → таймер → стоп → выполнил → фото (§9).
+// увидел → «В работу» (таймер сам стартует) → выполнил (таймер сам стоп) → фото.
 export default async function MyTasksPage() {
   const session = await auth();
   if (!session?.user) redirect("/login");
 
-  const [tasks, activeTimer] = await Promise.all([
+  const [tasks, activeTimer, view] = await Promise.all([
     prisma.task.findMany({
       where: { assigneeId: session.user.id },
       include: taskDetailsInclude,
@@ -27,6 +28,7 @@ export default async function MyTasksPage() {
       take: 100,
     }),
     getActiveTimer(session.user.id),
+    getUserPreference(session.user.id, "my.view"),
   ]);
 
   const mapped = await mapTaskDetails(tasks);
@@ -38,6 +40,8 @@ export default async function MyTasksPage() {
       active={active}
       done={done}
       userName={session.user.name ?? ""}
+      role={session.user.role}
+      initialView={view === "kanban" ? "kanban" : "list"}
       timer={
         activeTimer
           ? {

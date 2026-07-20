@@ -1,7 +1,35 @@
-import { Wallet } from "lucide-react"
+import { redirect } from "next/navigation";
 
-import { StubPage } from "@/components/stub-page"
+import { auth } from "@/auth";
+import {
+  currentMonth,
+  getMyPayroll,
+  getPayrollCurrency,
+  isValidMonth,
+} from "@/server/payroll/queries";
 
-export default function Page() {
-  return <StubPage title="Моя зарплата" icon={Wallet} />
+import { PayrollView } from "./payroll-view";
+
+export const dynamic = "force-dynamic";
+
+// «Моя зарплата» (§10): расчётник real-time — начислено за месяц
+// + детализация − выплаченное. Директору зарплата не считается (§4).
+export default async function PayrollPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ month?: string }>;
+}) {
+  const session = await auth();
+  if (!session?.user) redirect("/login");
+  if (session.user.role === "DIRECTOR") redirect("/");
+
+  const { month: param } = await searchParams;
+  const month = isValidMonth(param) ? param : currentMonth();
+
+  const [data, currency] = await Promise.all([
+    getMyPayroll(session.user.id, month),
+    getPayrollCurrency(),
+  ]);
+
+  return <PayrollView month={month} currency={currency} {...data} />;
 }

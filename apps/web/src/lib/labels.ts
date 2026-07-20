@@ -10,6 +10,21 @@ export const communicationTypeLabels: Record<CommunicationType, string> = {
   NOTE: "Заметка",
 };
 
+// Схемы оплаты сотрудника (§10)
+export const paySchemeLabels: Record<string, string> = {
+  PIECE: "Сдельная",
+  PERCENT_PROJECT: "% от стоимости",
+  PERCENT_TURNOVER: "% от оборота",
+  NONE: "Без расчёта",
+};
+
+// Подписи схем в начислениях (короткие, для таблиц расчётника)
+export const entrySchemeLabels: Record<string, string> = {
+  PIECE: "Сдельно",
+  PERCENT_PROJECT: "% от стоимости",
+  PERCENT_TURNOVER: "% от оборота",
+};
+
 // Отображаемое имя клиента: «Фамилия Имя Отчество», а если заполнено
 // только имя — как есть (подходит и юрлицам: «ООО Альфа»).
 export function displayClientName(client: {

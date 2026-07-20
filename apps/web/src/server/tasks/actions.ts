@@ -11,6 +11,7 @@ import { emitDomainEvent } from "@/server/plugins/events";
 import { notifyOrg, notifyPerson } from "@/server/notifications/notify";
 
 import { MANAGER_ROLES } from "@/server/projects/queries";
+import { getPayrollCurrency } from "@/server/payroll/queries";
 
 const createSchema = z.object({
   projectId: z.string(),
@@ -313,8 +314,46 @@ async function hasCycle(taskId: string, dependencyIds: string[]) {
 // Для requiresPhoto-задачи (замер, §6.2) при «Выполнена» нужен хотя бы один файл.
 // Задача блокируется, пока предшественники не выполнены (§9).
 // Начисление денег — при «Выполнена» (сдельная схема: работа × доля исполнителя).
-// ФАКТИЧЕСКОЕ ВРЕМЯ при «Выполнена» обязательно: таймер/ручной ввод (работник,
-// инженер) или actualMinutes при закрытии (админ/менеджер без таймера).
+// ТАЙМЕР АВТОМАТИЧЕСКИ (требование владельца, защита от обмана): переход
+// «В работе» запускает таймер исполнителя, «Выполнена» — останавливает.
+// ФАКТИЧЕСКОЕ ВРЕМЯ при «Выполнена» обязательно: таймер (все роли) или
+// ручной ввод — но работнику/монтажнику ручной ввод закрыт: нет записей →
+// ошибка с подсказкой взять задачу в работу; правку вносит менеджер (§19).
+
+// Автостарт таймера при «В работе»: прежний активный таймер исполнителя
+// останавливаем (один таймер на пользователя), по этой задаче — создаём,
+// если ещё не запущен вручную.
+async function autoStartTimer(taskId: string, assigneeId: string) {
+  const existing = await prisma.timeEntry.findFirst({
+    where: { taskId, userId: assigneeId, stoppedAt: null },
+    select: { id: true },
+  });
+  if (existing) return;
+  await prisma.timeEntry.updateMany({
+    where: { userId: assigneeId, stoppedAt: null },
+    data: { stoppedAt: new Date() },
+  });
+  await prisma.$executeRaw`
+    UPDATE "TimeEntry" SET "minutes" = GREATEST(1, FLOOR(EXTRACT(EPOCH FROM ("stoppedAt" - "startedAt")) / 60)::int)
+    WHERE "userId" = ${assigneeId} AND "stoppedAt" IS NOT NULL AND "minutes" = 0
+  `;
+  await prisma.timeEntry.create({
+    data: { taskId, userId: assigneeId, source: "timer" },
+  });
+}
+
+// Автостоп таймера задачи при «Выполнена» — пишет фактические минуты.
+async function autoStopTimer(taskId: string) {
+  await prisma.timeEntry.updateMany({
+    where: { taskId, stoppedAt: null },
+    data: { stoppedAt: new Date() },
+  });
+  await prisma.$executeRaw`
+    UPDATE "TimeEntry" SET "minutes" = GREATEST(1, FLOOR(EXTRACT(EPOCH FROM ("stoppedAt" - "startedAt")) / 60)::int)
+    WHERE "taskId" = ${taskId} AND "stoppedAt" IS NOT NULL AND "minutes" = 0
+  `;
+}
+
 export async function changeTaskStatus(
   taskId: string,
   toStatus: "IN_PROGRESS" | "DONE",
@@ -359,14 +398,29 @@ export async function changeTaskStatus(
     };
   }
 
+  // Автостарт таймера при переходе «В работе» (исполнителя, не нажавшего)
+  if (toStatus === "IN_PROGRESS" && task.assigneeId) {
+    await autoStartTimer(task.id, task.assigneeId);
+  }
+
   // Обязательное фактическое время при «Выполнена»
   if (toStatus === "DONE") {
+    // Автостоп таймера задачи — его минуты и есть факт
+    await autoStopTimer(taskId);
     const spent = await prisma.timeEntry.aggregate({
       where: { taskId, stoppedAt: { not: null } },
       _sum: { minutes: true },
     });
     const recorded = spent._sum.minutes ?? 0;
     if (recorded === 0) {
+      // Работнику/монтажнику ручной ввод закрыт — только таймер
+      if (role === "WORKER" || role === "MOUNTER") {
+        return {
+          ok: false,
+          error:
+            "Нет записей времени. Возьмите задачу «В работу» — время посчитается таймером автоматически",
+        };
+      }
       if (!actualMinutes || actualMinutes < 1) {
         // UI по этому флагу показывает форму ввода фактического времени
         return { ok: false, error: "Укажите фактическое время (мин)", timeRequired: true };
@@ -423,6 +477,7 @@ export async function changeTaskStatus(
             workId: task.work.id,
             projectId: task.project.id,
             amount,
+            currency: await getPayrollCurrency(),
             scheme: "PIECE",
             month: doneAt.toISOString().slice(0, 7),
             comment: `${task.title} · ${task.project.number}`,

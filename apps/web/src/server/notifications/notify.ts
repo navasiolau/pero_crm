@@ -9,8 +9,11 @@ export const NOTIFICATION_TYPES = [
   { id: "project.stageChanged", label: "Смена этапа проекта", kind: "org" },
   { id: "communication.added", label: "Новая коммуникация", kind: "org" },
   { id: "file.added", label: "Новый файл", kind: "org" },
+  { id: "payment.added", label: "Новый приход по проекту", kind: "org" },
   { id: "task.assigned", label: "Вам назначена задача", kind: "personal" },
   { id: "task.statusChanged", label: "Изменение по вашей задаче", kind: "personal" },
+  { id: "payroll.accrued", label: "Начисление зарплаты", kind: "personal" },
+  { id: "payroll.payout", label: "Выплата зарплаты", kind: "personal" },
 ] as const;
 
 export type NotificationKind = "org" | "personal";

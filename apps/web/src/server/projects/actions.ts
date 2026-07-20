@@ -6,10 +6,12 @@ import { z } from "zod";
 
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { formatAmount } from "@/lib/format";
 import { stageLabels as STAGE_LABELS } from "@/lib/stages";
 import { writeChangeLog } from "@/server/plugins/changelog";
 import { emitDomainEvent } from "@/server/plugins/events";
-import { notifyOrg } from "@/server/notifications/notify";
+import { notifyOrg, notifyPerson } from "@/server/notifications/notify";
+import { getPayrollCurrency } from "@/server/payroll/queries";
 
 import { MANAGER_ROLES } from "./queries";
 
@@ -42,6 +44,7 @@ const createSchema = z.object({
   address: z.string().optional(),
   description: z.string().optional(),
   managerId: z.string().optional(),
+  engineerId: z.string().optional(),
 });
 
 export async function createProject(
@@ -66,6 +69,7 @@ export async function createProject(
       address: data.address,
       description: data.description,
       managerId: data.managerId,
+      engineerId: data.engineerId,
       createdById: session.user.id,
       stageHistory: {
         create: { toStage: "LEAD", changedById: session.user.id },
@@ -102,6 +106,7 @@ const updateSchema = z.object({
   address: z.string().nullable().optional(),
   description: z.string().nullable().optional(),
   managerId: z.string().nullable().optional(),
+  engineerId: z.string().nullable().optional(),
   clientId: z.string().optional(),
 });
 
@@ -226,6 +231,62 @@ export async function changeProjectStage(
       },
     }),
   ]);
+
+  // Начисление «% от стоимости» инженеру (§10): этап начисления — передача
+  // проекта в производство (первый переход «В работе»). Повторные переходы
+  // (пауза, рекламация) не начисляют — запись одна на проект.
+  if (toStage === "IN_WORK" && project.engineerId && project.expectedPrice) {
+    const engineer = await prisma.user.findUnique({
+      where: { id: project.engineerId },
+      select: { name: true, payScheme: true, payPercent: true },
+    });
+    if (
+      engineer?.payScheme === "PERCENT_PROJECT" &&
+      engineer.payPercent &&
+      Number(engineer.payPercent) > 0
+    ) {
+      const existing = await prisma.payrollEntry.findFirst({
+        where: { projectId, scheme: "PERCENT_PROJECT" },
+        select: { id: true },
+      });
+      if (!existing) {
+        const percent = Number(engineer.payPercent);
+        const amount =
+          Math.round(((Number(project.expectedPrice) * percent) / 100) * 100) / 100;
+        if (amount > 0) {
+          const currency = await getPayrollCurrency();
+          await prisma.payrollEntry.create({
+            data: {
+              userId: project.engineerId,
+              projectId,
+              amount,
+              currency,
+              scheme: "PERCENT_PROJECT",
+              month: new Date().toISOString().slice(0, 7),
+              comment: `${percent}% от стоимости · ${project.number}`,
+            },
+          });
+          await emitDomainEvent(
+            "payroll.accrued",
+            {
+              userId: project.engineerId,
+              scheme: "PERCENT_PROJECT",
+              amount,
+              projectId,
+            },
+            session.user.id,
+          );
+          await notifyPerson({
+            userId: project.engineerId,
+            type: "payroll.accrued",
+            title: `Начислена зарплата: ${formatAmount(amount, currency)}`,
+            body: `${percent}% от стоимости проекта ${project.number}`,
+            link: "/payroll",
+          });
+        }
+      }
+    }
+  }
 
   await writeChangeLog({
     actorType: "user",

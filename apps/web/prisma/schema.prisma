@@ -43,8 +43,11 @@ model User {
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
   managedProjects Project[]      @relation("ProjectManager")
+  engineeredProjects Project[]   @relation("ProjectEngineer")
   assignedTasks   Task[]         @relation("TaskAssignee")
   notifications   Notification[]
+  payrollEntries  PayrollEntry[]
+  payouts         Payout[]
 }
 
 // ─── Проекты и клиенты (фаза 2, §6) ──────────────────────────────────────────
@@ -118,6 +121,10 @@ model Project {
   reclamationFault       String?
   managerId              String?
   manager                User?        @relation("ProjectManager", fields: [managerId], references: [id], onDelete: SetNull)
+  // Инженер-проектировщик: на него начисляется % от стоимости при
+  // передаче проекта в производство (переход «В работе», §10)
+  engineerId             String?
+  engineer               User?        @relation("ProjectEngineer", fields: [engineerId], references: [id], onDelete: SetNull)
   clientId               String
   client                 Client       @relation(fields: [clientId], references: [id])
   createdById            String?
@@ -130,6 +137,7 @@ model Project {
   works                  Work[]
   files                  File[]
   communications         Communication[]
+  payments               Payment[]
 
   @@index([stage, stageChangedAt])
 }
@@ -250,17 +258,20 @@ model TimeEntry {
   @@index([taskId])
 }
 
-// ─── Начисления (механика §9, UI — фаза 4) ───────────────────────────────────
+// ─── Начисления и выплаты (§10) ──────────────────────────────────────────────
 
-// Начисление сдельной оплаты: расценка × количество × доля исполнителя,
-// возникает при переходе задачи в «Выполнена».
+// Начисление оплаты. Сдельно: расценка × количество × доля исполнителя,
+// возникает при переходе задачи в «Выполнена». % от стоимости (инженер) —
+// при переходе проекта «В работе». % от оборота — при закрытии месяца.
 model PayrollEntry {
   id         String   @id @default(cuid())
   userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   taskId     String?
   task       Task?    @relation(fields: [taskId], references: [id], onDelete: SetNull)
   workId     String?
-  projectId  String
+  // Проект необязателен: начисление «% от оборота» — на организацию целиком
+  projectId  String?
   amount     Decimal  @db.Decimal(12, 2)
   currency   String   @default("BYN")
   scheme     String   @default("PIECE") // PIECE | PERCENT_PROJECT | PERCENT_TURNOVER
@@ -270,6 +281,48 @@ model PayrollEntry {
 
   @@index([userId, month])
   @@index([projectId])
+}
+
+// Выплата зарплаты (§10): вносит администратор, история по месяцам.
+// month — расчётный месяц, к которому относится выплата.
+model Payout {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amount      Decimal  @db.Decimal(12, 2)
+  month       String // YYYY-MM расчётного месяца
+  comment     String?
+  createdById String?
+  createdAt   DateTime @default(now())
+
+  @@index([userId, month])
+  @@index([month])
+}
+
+// Приход (платёж) по проекту: оборот организации для «% от оборота» (§10)
+// считается как сумма приходов за месяц в рамках проектов.
+// Кассы, курсы НБ РБ и маржа — фаза 5 (§11).
+model Payment {
+  id          String   @id @default(cuid())
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  amount      Decimal  @db.Decimal(12, 2)
+  currency    String   @default("BYN")
+  paidAt      DateTime @default(now())
+  comment     String?
+  createdById String?
+  createdAt   DateTime @default(now())
+
+  @@index([projectId])
+  @@index([paidAt])
+}
+
+// Настройки организации (§10): key-value, сейчас — payrollCurrency
+// (единая валюта зарплаты, по умолчанию BYN; задаёт администратор).
+model OrgSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
 }
 
 model File {

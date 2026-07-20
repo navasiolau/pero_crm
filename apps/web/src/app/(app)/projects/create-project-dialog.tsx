@@ -27,12 +27,14 @@ export function CreateProjectDialog({
   onOpenChange,
   clients,
   managers,
+  engineers,
   onCreated,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   clients: SelectOption[];
   managers: SelectOption[];
+  engineers: SelectOption[];
   onCreated: (id: string) => void;
 }) {
   const [pending, startTransition] = useTransition();
@@ -40,6 +42,7 @@ export function CreateProjectDialog({
   const [clientId, setClientId] = useState("");
   const [expectedPrice, setExpectedPrice] = useState("");
   const [managerId, setManagerId] = useState("");
+  const [engineerId, setEngineerId] = useState("");
   const [address, setAddress] = useState("");
   const [description, setDescription] = useState("");
   // Мини-форма нового клиента
@@ -53,6 +56,7 @@ export function CreateProjectDialog({
     setClientId("");
     setExpectedPrice("");
     setManagerId("");
+    setEngineerId("");
     setAddress("");
     setDescription("");
     setNewClientOpen(false);
@@ -194,6 +198,20 @@ export function CreateProjectDialog({
                 allowClear
               />
             </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>Инженер</Label>
+              <SearchableSelect
+                options={engineers.map((engineer) => ({
+                  value: engineer.id,
+                  label: engineer.name,
+                }))}
+                value={engineerId}
+                onChange={setEngineerId}
+                placeholder="не назначен"
+                searchPlaceholder="Поиск инженера…"
+                allowClear
+              />
+            </div>
           </div>
 
           <div className="flex flex-col gap-1.5">
@@ -230,6 +248,7 @@ export function CreateProjectDialog({
                   clientId,
                   expectedPrice: price,
                   managerId: managerId || undefined,
+                  engineerId: engineerId || undefined,
                   address: address.trim() || undefined,
                   description: description.trim() || undefined,
                 });

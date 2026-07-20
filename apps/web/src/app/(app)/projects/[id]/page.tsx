@@ -13,11 +13,12 @@ import { cn } from "@/lib/utils";
 import { prisma } from "@/lib/prisma";
 import { getPluginSettings } from "@/server/plugins/run-log";
 import { getSlotContributions } from "@/server/plugins/slots";
-import { getProjectFor, listClients, listManagers, listWorkers } from "@/server/projects/queries";
+import { getProjectFor, listClients, listEngineers, listManagers, listWorkers } from "@/server/projects/queries";
 import { mapTaskDetails } from "@/server/tasks/queries";
 
 import { CommunicationsTab } from "./communications-tab";
 import { FilesTab } from "./files-tab";
+import { FinanceTab } from "./finance-tab";
 import { HistoryTab } from "./history-tab";
 import { OverviewTab } from "./overview-tab";
 import { TasksTab } from "./tasks-tab";
@@ -44,10 +45,11 @@ export default async function ProjectPage({
   const showFinance = ["ADMIN", "DIRECTOR"].includes(role);
   const showAmount = showFinance || canManage || role === "ENGINEER";
 
-  const [clients, managers, workers, changeLogs, contributions, priceItems] =
+  const [clients, managers, engineers, workers, changeLogs, contributions, priceItems] =
     await Promise.all([
       listClients(),
       listManagers(),
+      listEngineers(),
       listWorkers(),
       prisma.changeLog.findMany({
         where: {
@@ -82,6 +84,7 @@ export default async function ProjectPage({
       [
         ...project.files.map((f) => f.uploadedById),
         ...project.communications.map((c) => c.createdById),
+        ...project.payments.map((p) => p.createdById),
         ...project.stageHistory.map((h) => h.changedById),
         ...project.tasks.flatMap((t) => [t.createdById, t.doneById]),
       ].filter((v): v is string => !!v),
@@ -141,6 +144,7 @@ export default async function ProjectPage({
             showAmount={showAmount}
             clients={clients.map((client) => ({ id: client.id, name: client.name }))}
             managers={managers.map((manager) => ({ id: manager.id, name: manager.name }))}
+            engineers={engineers.map((engineer) => ({ id: engineer.id, name: engineer.name }))}
           />
         </TabsContent>
 
@@ -214,11 +218,22 @@ export default async function ProjectPage({
 
         {showFinance ? (
           <TabsContent value="finance" className="mt-4">
-            <div className="rounded-xl border border-dashed p-6 text-sm text-muted-foreground">
-              Экономика проекта (платежи, расходы, маржа с индикатором)
-              появится в фазе 5. Ожидаемая цена редактируется на вкладке
-              «Общее».
-            </div>
+            <FinanceTab
+              projectId={project.id}
+              currency={project.currency}
+              expectedPrice={
+                project.expectedPrice ? Number(project.expectedPrice) : null
+              }
+              payments={project.payments.map((payment) => ({
+                id: payment.id,
+                amount: Number(payment.amount),
+                paidAt: payment.paidAt.toISOString(),
+                comment: payment.comment,
+                createdByName: payment.createdById
+                  ? (uploaderNames.get(payment.createdById) ?? "—")
+                  : "—",
+              }))}
+            />
           </TabsContent>
         ) : null}
 

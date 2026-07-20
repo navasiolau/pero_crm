@@ -41,6 +41,7 @@ export function ProjectsView({
   showAmount,
   clients,
   managers,
+  engineers,
 }: {
   projects: ProjectCard[];
   initialView: "kanban" | "table";
@@ -48,6 +49,7 @@ export function ProjectsView({
   showAmount: boolean;
   clients: SelectOption[];
   managers: SelectOption[];
+  engineers: SelectOption[];
 }) {
   const router = useRouter();
   const [view, setView] = useState(initialView);
@@ -109,6 +111,7 @@ export function ProjectsView({
         onOpenChange={setCreateOpen}
         clients={clients}
         managers={managers}
+        engineers={engineers}
         onCreated={(id) => router.push(`/projects/${id}`)}
       />
     </div>
