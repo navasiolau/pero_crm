@@ -2,7 +2,9 @@
 
 import { useTransition } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -28,13 +30,25 @@ interface Pref {
 
 export function NotificationsView({
   items,
+  page,
+  pageSize,
+  total,
   prefs,
 }: {
   items: Item[];
-  prefs: Pref[] | null;
+  page: number;
+  pageSize: number;
+  total: number;
+  prefs: Pref[];
 }) {
+  const router = useRouter();
   const [pending, startTransition] = useTransition();
   const unread = items.filter((item) => !item.read).length;
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+
+  const goToPage = (next: number) => {
+    router.push(`/notifications?page=${next}`);
+  };
 
   return (
     <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
@@ -95,6 +109,32 @@ export function NotificationsView({
             Уведомлений пока нет
           </div>
         ) : null}
+
+        {pageCount > 1 ? (
+          <div className="flex items-center justify-center gap-3 pt-1">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={page <= 1}
+              onClick={() => goToPage(page - 1)}
+            >
+              <ChevronLeft className="size-4" />
+              Назад
+            </Button>
+            <span className="text-sm text-muted-foreground">
+              Стр. {page} из {pageCount}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={page >= pageCount}
+              onClick={() => goToPage(page + 1)}
+            >
+              Вперёд
+              <ChevronRight className="size-4" />
+            </Button>
+          </div>
+        ) : null}
       </div>
 
       <div>
@@ -103,33 +143,24 @@ export function NotificationsView({
             <CardTitle className="text-lg">Настройка уведомлений</CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
-            {prefs ? (
-              prefs.map((pref) => (
-                <div key={pref.id} className="flex items-center justify-between gap-3">
-                  <span className="text-sm">{pref.label}</span>
-                  <Switch
-                    checked={pref.enabled}
-                    disabled={pending}
-                    onCheckedChange={(checked) =>
-                      startTransition(async () => {
-                        const result = await setPreference(pref.id, checked);
-                        if (!result.ok) toast.error(result.error ?? "Ошибка");
-                      })
-                    }
-                  />
-                </div>
-              ))
-            ) : (
-              <p className="text-sm text-muted-foreground">
-                Для вашей роли уведомления всегда включены — вы гарантированно
-                получаете назначения задач, дедлайны и изменения по ним.
-              </p>
-            )}
-            {prefs ? (
-              <Badge variant="outline" className="w-fit">
-                по умолчанию всё включено
-              </Badge>
-            ) : null}
+            {prefs.map((pref) => (
+              <div key={pref.id} className="flex items-center justify-between gap-3">
+                <span className="text-sm">{pref.label}</span>
+                <Switch
+                  checked={pref.enabled}
+                  disabled={pending}
+                  onCheckedChange={(checked) =>
+                    startTransition(async () => {
+                      const result = await setPreference(pref.id, checked);
+                      if (!result.ok) toast.error(result.error ?? "Ошибка");
+                    })
+                  }
+                />
+              </div>
+            ))}
+            <Badge variant="outline" className="w-fit">
+              по умолчанию всё включено
+            </Badge>
           </CardContent>
         </Card>
       </div>

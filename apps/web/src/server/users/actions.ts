@@ -7,6 +7,9 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/server/require-role";
 import { writeChangeLog } from "@/server/plugins/changelog";
+import { notifyPerson } from "@/server/notifications/notify";
+import { paySchemeLabels } from "@/lib/labels";
+import { roleLabels } from "@/lib/nav";
 
 const ROLES = ["ADMIN", "DIRECTOR", "MANAGER", "ENGINEER", "WORKER", "MOUNTER", "ACCOUNTANT"] as const;
 const PAY_SCHEMES = ["PIECE", "PERCENT_PROJECT", "PERCENT_TURNOVER", "NONE"] as const;
@@ -62,6 +65,13 @@ export async function createUser(
     entityId: user.id,
     action: "create",
     newValue: { email: user.email, name: user.name, role: user.role },
+  });
+  // Уведомление человеку о создании его учётной записи (§6.1)
+  await notifyPerson({
+    userId: user.id,
+    type: "user.accountChanged",
+    title: "Для вас создана учётная запись",
+    body: `Роль: ${roleLabels[user.role]} · схема оплаты: ${paySchemeLabels[user.payScheme] ?? user.payScheme}`,
   });
   revalidatePath("/settings/users");
   return { ok: true };
@@ -126,6 +136,35 @@ export async function updateUser(
       passwordChanged: !!data.password,
     },
   });
+
+  // Уведомление человеку об изменениях его учётной записи (§6.1) —
+  // всё, КРОМЕ пароля (и его собственных настроек, которые меняет он сам).
+  const changes: string[] = [];
+  if (before.name !== data.name) changes.push(`ФИО: ${before.name} → ${data.name}`);
+  if (before.email !== data.email) changes.push(`Email: ${before.email} → ${data.email}`);
+  if (before.role !== data.role)
+    changes.push(`Роль: ${roleLabels[before.role]} → ${roleLabels[data.role]}`);
+  if (before.payScheme !== data.payScheme)
+    changes.push(
+      `Схема оплаты: ${paySchemeLabels[before.payScheme] ?? before.payScheme} → ${paySchemeLabels[data.payScheme] ?? data.payScheme}`,
+    );
+  if (Number(before.payPercent ?? 0) !== (data.payPercent ?? 0))
+    changes.push(`Процент: ${before.payPercent ?? 0}% → ${data.payPercent ?? 0}%`);
+  if ((before.position ?? "") !== (data.position ?? ""))
+    changes.push(`Должность: ${before.position ?? "—"} → ${data.position || "—"}`);
+  if ((before.phone ?? "") !== (data.phone ?? "")) changes.push("Телефон изменён");
+  if ((before.telegram ?? "") !== (data.telegram ?? "")) changes.push("Telegram изменён");
+  if (before.active !== data.active)
+    changes.push(data.active ? "Учётная запись активирована" : "Учётная запись деактивирована");
+  if (changes.length > 0) {
+    await notifyPerson({
+      userId,
+      type: "user.accountChanged",
+      title: "Изменена ваша учётная запись",
+      body: changes.join(" · "),
+    });
+  }
+
   revalidatePath("/settings/users");
   return { ok: true };
 }

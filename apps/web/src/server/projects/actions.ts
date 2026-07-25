@@ -283,6 +283,13 @@ export async function changeProjectStage(
             body: `${percent}% от стоимости проекта ${project.number}`,
             link: "/payroll",
           });
+          await notifyOrg({
+            type: "payroll.orgAccrued",
+            title: `Начислено ${engineer.name}: ${formatAmount(amount, currency)}`,
+            body: `${percent}% от стоимости проекта ${project.number}`,
+            link: "/finance/payroll",
+            exceptUserId: session.user.id,
+          });
         }
       }
     }

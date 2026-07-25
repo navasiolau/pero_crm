@@ -7,7 +7,7 @@ import { prisma } from "@/lib/prisma";
 import { formatAmount } from "@/lib/format";
 import { writeChangeLog } from "@/server/plugins/changelog";
 import { emitDomainEvent } from "@/server/plugins/events";
-import { notifyPerson } from "@/server/notifications/notify";
+import { notifyOrg, notifyPerson } from "@/server/notifications/notify";
 import { requireAdmin, requireFinance } from "@/server/require-role";
 
 import {
@@ -118,6 +118,14 @@ export async function addPayout(
       : `Выплата зарплаты: ${formatAmount(amount, currency)}`,
     body: data.comment?.trim() || `Расчётный месяц ${month}`,
     link: "/payroll",
+  });
+  // ЗП-событие для финансовых ролей (админ/директор/бухгалтер), кроме автора
+  await notifyOrg({
+    type: "payroll.orgPayout",
+    title: `${isAdvance ? "Аванс" : "Выплата"}: ${user.name}, ${formatAmount(amount, currency)}`,
+    body: data.comment?.trim() || `Расчётный месяц ${month}`,
+    link: "/finance/payroll",
+    exceptUserId: session.user.id,
   });
 
   revalidatePayroll();
@@ -235,6 +243,16 @@ export async function accrueTurnover(
     });
   }
 
+  if (accruedCount > 0) {
+    await notifyOrg({
+      type: "payroll.orgAccrued",
+      title: `Начислено % от оборота за ${month}: ${accruedCount} сотр.`,
+      body: `Оборот ${formatAmount(total, currency)}`,
+      link: "/finance/payroll",
+      exceptUserId: session.user.id,
+    });
+  }
+
   revalidatePayroll();
   return { ok: true, accruedCount };
 }
@@ -320,6 +338,16 @@ export async function settleAll(
       title: `Выплата зарплаты: ${formatAmount(amount, currency)}`,
       body: `Выплата зарплаты от ${dateStr}`,
       link: "/payroll",
+    });
+  }
+
+  if (paidCount > 0) {
+    await notifyOrg({
+      type: "payroll.orgPayout",
+      title: `Рассчитать всех: выплачено ${formatAmount(totalPaid, currency)} (${paidCount} сотр.)`,
+      body: `Выплата зарплаты от ${dateStr}`,
+      link: "/finance/payroll",
+      exceptUserId: session.user.id,
     });
   }
 

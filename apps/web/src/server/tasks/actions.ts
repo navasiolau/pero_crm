@@ -6,6 +6,7 @@ import { z } from "zod";
 
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { formatAmount } from "@/lib/format";
 import { writeChangeLog } from "@/server/plugins/changelog";
 import { emitDomainEvent } from "@/server/plugins/events";
 import { notifyOrg, notifyPerson } from "@/server/notifications/notify";
@@ -460,7 +461,7 @@ export async function changeTaskStatus(
   if (doneAt && task.assigneeId && task.work) {
     const assignee = await prisma.user.findUnique({
       where: { id: task.assigneeId },
-      select: { payScheme: true },
+      select: { name: true, payScheme: true },
     });
     if (assignee?.payScheme === "PIECE") {
       const qty = task.quantity ? Number(task.quantity) : 1;
@@ -470,6 +471,7 @@ export async function changeTaskStatus(
       });
       const amount = Number(workRow?.priceSnapshot ?? 0) * qty * Number(task.executorShare);
       if (amount > 0) {
+        const currency = await getPayrollCurrency();
         await prisma.payrollEntry.create({
           data: {
             userId: task.assigneeId,
@@ -477,11 +479,19 @@ export async function changeTaskStatus(
             workId: task.work.id,
             projectId: task.project.id,
             amount,
-            currency: await getPayrollCurrency(),
+            currency,
             scheme: "PIECE",
             month: doneAt.toISOString().slice(0, 7),
             comment: `${task.title} · ${task.project.number}`,
           },
+        });
+        // ЗП-событие для финансовых ролей (админ/директор/бухгалтер)
+        await notifyOrg({
+          type: "payroll.orgAccrued",
+          title: `Начислено ${assignee.name}: ${formatAmount(amount, currency)}`,
+          body: `Сдельно · ${task.title} · ${task.project.number}`,
+          link: "/finance/payroll",
+          exceptUserId: session.user.id,
         });
       }
     }

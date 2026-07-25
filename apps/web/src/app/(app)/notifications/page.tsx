@@ -1,39 +1,39 @@
 import { redirect } from "next/navigation";
 
 import { auth } from "@/auth";
-import { prisma } from "@/lib/prisma";
-import { getMyPreferences } from "@/server/notifications/actions";
+import {
+  getMyPreferences,
+  listMyNotifications,
+} from "@/server/notifications/actions";
 
 import { NotificationsView } from "./notifications-view";
 
 export const dynamic = "force-dynamic";
 
-// Уведомления: лента + настройка типов (настройка — админ/директор/менеджер, §6.1).
-export default async function NotificationsPage() {
+// Уведомления: лента с пагинацией (новые сверху) + настройка типов (все роли, §6.1).
+export default async function NotificationsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ page?: string }>;
+}) {
   const session = await auth();
   if (!session?.user) redirect("/login");
 
-  const [items, prefs] = await Promise.all([
-    prisma.notification.findMany({
-      where: { userId: session.user.id },
-      orderBy: { createdAt: "desc" },
-      take: 50,
-    }),
+  const { page: param } = await searchParams;
+  const page = Math.max(1, Number(param) || 1);
+
+  const [data, prefs] = await Promise.all([
+    listMyNotifications(page),
     getMyPreferences(),
   ]);
 
   return (
     <NotificationsView
-      items={items.map((item) => ({
-        id: item.id,
-        type: item.type,
-        title: item.title,
-        body: item.body,
-        link: item.link,
-        read: !!item.readAt,
-        createdAt: item.createdAt.toISOString(),
-      }))}
-      prefs={prefs.configurable ? prefs.prefs : null}
+      items={data.items}
+      page={data.page}
+      pageSize={data.pageSize}
+      total={data.total}
+      prefs={prefs.prefs}
     />
   );
 }
