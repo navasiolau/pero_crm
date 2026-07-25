@@ -6,7 +6,7 @@ import { listProjectShortages } from "@/server/warehouse/queries";
 
 // Правила видимости (§4): офисные роли — все проекты;
 // работник/монтажник — только проекты со своими задачами.
-export const OFFICE_ROLES: Role[] = ["ADMIN", "DIRECTOR", "MANAGER", "ENGINEER"];
+export const OFFICE_ROLES: Role[] = ["ADMIN", "DIRECTOR", "MANAGER", "ENGINEER", "ACCOUNTANT"];
 export const MANAGER_ROLES: Role[] = ["ADMIN", "DIRECTOR", "MANAGER"];
 
 function projectVisibilityFilter(userId: string, role: Role) {

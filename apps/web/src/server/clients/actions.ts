@@ -8,7 +8,7 @@ import { prisma } from "@/lib/prisma";
 import { writeChangeLog } from "@/server/plugins/changelog";
 
 // Клиенты и коммуникации — админ/директор/менеджер/инженер (§4).
-const ALLOWED = ["ADMIN", "DIRECTOR", "MANAGER", "ENGINEER"];
+const ALLOWED = ["ADMIN", "DIRECTOR", "MANAGER", "ENGINEER", "ACCOUNTANT"];
 
 const clientSchema = z.object({
   name: z.string().min(1, "Укажите имя"),

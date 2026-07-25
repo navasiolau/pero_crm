@@ -8,7 +8,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 
-// Финансы (§11) — только администратор и директор (middleware + nav).
+// Финансы (§11) — администратор, директор и бухгалтер (middleware + nav).
 export default function FinancePage() {
   return (
     <div className="flex flex-col gap-6">

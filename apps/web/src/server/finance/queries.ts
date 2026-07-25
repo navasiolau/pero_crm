@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getNbrbRate } from "./nbrb";
 
 // ─── Финансы (§11): кассы, статьи расходов, экономика проекта ───────────────
-// Раздел доступен только администратору и директору (middleware + requireAdmin).
+// Раздел доступен администратору, директору и бухгалтеру (middleware + requireFinance).
 
 export type CashAccountView = {
   id: string;

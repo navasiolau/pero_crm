@@ -45,11 +45,12 @@ export default async function ProjectPage({
 
   const canManage = ["ADMIN", "DIRECTOR", "MANAGER"].includes(role);
   const canEditTech = canManage || role === "ENGINEER";
-  const showFinance = ["ADMIN", "DIRECTOR"].includes(role);
+  const showFinance = ["ADMIN", "DIRECTOR", "ACCOUNTANT"].includes(role);
   const showAmount = showFinance || canManage || role === "ENGINEER";
-  // Склад (§12): вкладка «Материалы» — офисные роли; правки — canManage; цены — showMoney
-  const showMaterials = ["ADMIN", "DIRECTOR", "MANAGER", "ENGINEER"].includes(role);
-  const showMoney = showFinance;
+  // Склад (§12): вкладка «Материалы» — офисные роли (+ бухгалтер на просмотр);
+  // правки — canManage; цены — только админ/директор
+  const showMaterials = ["ADMIN", "DIRECTOR", "MANAGER", "ENGINEER", "ACCOUNTANT"].includes(role);
+  const showMoney = ["ADMIN", "DIRECTOR"].includes(role);
 
   const [clients, managers, engineers, workers, changeLogs, contributions, priceItems, economics, cashAccounts, expenseArticles, materialsData, materialOptions] =
     await Promise.all([
@@ -72,7 +73,7 @@ export default async function ProjectPage({
         where: { active: true },
         orderBy: { name: "asc" },
       }),
-      // Данные вкладки «Финансы» (§11) — только админу/директору
+      // Данные вкладки «Финансы» (§11) — админу/директору/бухгалтеру
       showFinance ? getProjectEconomics(project.id) : Promise.resolve(null),
       showFinance
         ? prisma.cashAccount.findMany({

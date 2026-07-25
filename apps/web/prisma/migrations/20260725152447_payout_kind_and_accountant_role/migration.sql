@@ -1,0 +1,5 @@
+-- AlterEnum
+ALTER TYPE "Role" ADD VALUE 'ACCOUNTANT';
+
+-- AlterTable
+ALTER TABLE "Payout" ADD COLUMN     "kind" TEXT NOT NULL DEFAULT 'SALARY';

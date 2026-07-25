@@ -8,7 +8,7 @@ import { formatAmount } from "@/lib/format";
 import { writeChangeLog } from "@/server/plugins/changelog";
 import { emitDomainEvent } from "@/server/plugins/events";
 import { notifyPerson } from "@/server/notifications/notify";
-import { requireAdmin } from "@/server/require-role";
+import { requireAdmin, requireFinance } from "@/server/require-role";
 
 import {
   currentMonth,
@@ -27,24 +27,28 @@ function revalidatePayroll() {
   revalidatePath("/finance/payroll");
 }
 
-// ─── Выплаты (§10): вносит администратор, история по месяцам ────────────────
+// ─── Выплаты (§10): вносят админ/директор/бухгалтер, история по месяцам ──────
 
 const payoutSchema = z.object({
   userId: z.string().min(1, "Выберите сотрудника"),
   amount: z.number().positive("Сумма должна быть больше нуля"),
   month: z.string().regex(MONTH_RE, "Месяц в формате ГГГГ-ММ"),
+  kind: z.enum(["SALARY", "ADVANCE"]).default("SALARY"),
   comment: z.string().optional(),
 });
 
 export async function addPayout(
   input: z.input<typeof payoutSchema>,
 ): Promise<{ ok: boolean; error?: string }> {
-  const session = await requireAdmin();
+  const session = await requireFinance();
   const parsed = payoutSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Ошибка данных" };
   }
   const data = parsed.data;
+  const isAdvance = data.kind === "ADVANCE";
+  // Аванс — всегда текущим расчётным месяцем (начислений под него ещё нет)
+  const month = isAdvance ? currentMonth() : data.month;
   const user = await prisma.user.findUnique({
     where: { id: data.userId },
     select: { id: true, name: true },
@@ -57,22 +61,23 @@ export async function addPayout(
 
   // Потолки выплаты: задолженность перед сотрудником (за всё время)
   // и баланс организации — больше физически выплатить нельзя.
-  const [balance, dues] = await Promise.all([
-    getOrgBalance(),
-    getEmployeeDues(),
-  ]);
-  const due = dues.find((row) => row.userId === data.userId)?.due ?? 0;
-  if (due <= 0) {
-    return {
-      ok: false,
-      error: "Долга за прошлые месяцы перед сотрудником нет — текущий месяц ещё не закрыт",
-    };
-  }
-  if (amount > due) {
-    return {
-      ok: false,
-      error: `Больше долга за прошлые месяцы — к выплате сейчас ${formatAmount(due, currency)}`,
-    };
+  // Аванс долга не требует: единственный потолок — баланс организации.
+  const balance = await getOrgBalance();
+  if (!isAdvance) {
+    const dues = await getEmployeeDues();
+    const due = dues.find((row) => row.userId === data.userId)?.due ?? 0;
+    if (due <= 0) {
+      return {
+        ok: false,
+        error: "Долга за прошлые месяцы перед сотрудником нет — текущий месяц ещё не закрыт",
+      };
+    }
+    if (amount > due) {
+      return {
+        ok: false,
+        error: `Больше долга за прошлые месяцы — к выплате сейчас ${formatAmount(due, currency)}`,
+      };
+    }
   }
   if (amount > balance) {
     return {
@@ -84,8 +89,9 @@ export async function addPayout(
     data: {
       userId: data.userId,
       amount,
-      month: data.month,
-      comment: data.comment?.trim() || null,
+      month,
+      kind: data.kind,
+      comment: data.comment?.trim() || (isAdvance ? "Аванс" : null),
       createdById: session.user.id,
     },
   });
@@ -97,18 +103,20 @@ export async function addPayout(
     entity: "payout",
     entityId: payout.id,
     action: "create",
-    newValue: { user: user.name, amount, month: data.month },
+    newValue: { user: user.name, amount, month, kind: data.kind },
   });
   await emitDomainEvent(
     "payroll.payout",
-    { payoutId: payout.id, userId: data.userId, amount, month: data.month },
+    { payoutId: payout.id, userId: data.userId, amount, month, kind: data.kind },
     session.user.id,
   );
   await notifyPerson({
     userId: data.userId,
     type: "payroll.payout",
-    title: `Выплата зарплаты: ${formatAmount(amount, currency)}`,
-    body: data.comment?.trim() || `Расчётный месяц ${data.month}`,
+    title: isAdvance
+      ? `Аванс: ${formatAmount(amount, currency)}`
+      : `Выплата зарплаты: ${formatAmount(amount, currency)}`,
+    body: data.comment?.trim() || `Расчётный месяц ${month}`,
     link: "/payroll",
   });
 
@@ -119,7 +127,7 @@ export async function addPayout(
 export async function deletePayout(
   payoutId: string,
 ): Promise<{ ok: boolean; error?: string }> {
-  const session = await requireAdmin();
+  const session = await requireFinance();
   const payout = await prisma.payout.findUnique({
     where: { id: payoutId },
     include: { user: { select: { name: true } } },
@@ -155,7 +163,7 @@ export async function deletePayout(
 export async function accrueTurnover(
   month: string,
 ): Promise<{ ok: boolean; error?: string; accruedCount?: number }> {
-  const session = await requireAdmin();
+  const session = await requireFinance();
   if (!isValidMonth(month)) return { ok: false, error: "Некорректный месяц" };
   if (month >= currentMonth()) {
     return {
@@ -245,7 +253,7 @@ export async function settleAll(
   totalPaid?: number;
   shortPaid?: string[];
 }> {
-  const session = await requireAdmin();
+  const session = await requireFinance();
   if (!isValidMonth(month)) return { ok: false, error: "Некорректный месяц" };
 
   const balance = await getOrgBalance();

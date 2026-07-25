@@ -17,15 +17,21 @@ export const authConfig = {
       }
 
       const { pathname } = request.nextUrl;
-      const adminOnlyPrefixes = ["/finance", "/changelog", "/settings"];
+      const { role } = auth.user;
+      // Финансы — админ/директор/бухгалтер; журнал и настройки — только админ/директор
+      if (
+        pathname.startsWith("/finance") &&
+        role !== "ADMIN" &&
+        role !== "DIRECTOR" &&
+        role !== "ACCOUNTANT"
+      ) {
+        return Response.redirect(new URL("/", request.nextUrl));
+      }
+      const adminOnlyPrefixes = ["/changelog", "/settings"];
       const isAdminOnly = adminOnlyPrefixes.some((prefix) =>
         pathname.startsWith(prefix),
       );
-      if (
-        isAdminOnly &&
-        auth.user.role !== "ADMIN" &&
-        auth.user.role !== "DIRECTOR"
-      ) {
+      if (isAdminOnly && role !== "ADMIN" && role !== "DIRECTOR") {
         return Response.redirect(new URL("/", request.nextUrl));
       }
 

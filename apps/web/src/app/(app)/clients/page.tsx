@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 export default async function ClientsPage() {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  if (!["ADMIN", "DIRECTOR", "MANAGER", "ENGINEER"].includes(session.user.role)) {
+  if (!["ADMIN", "DIRECTOR", "MANAGER", "ENGINEER", "ACCOUNTANT"].includes(session.user.role)) {
     redirect("/");
   }
 

@@ -11,7 +11,7 @@ import {
 // Разделитель «;» и BOM — чтобы русский Excel открывал корректно.
 export async function GET(request: Request) {
   const session = await auth();
-  if (!session?.user || !["ADMIN", "DIRECTOR"].includes(session.user.role)) {
+  if (!session?.user || !["ADMIN", "DIRECTOR", "ACCOUNTANT"].includes(session.user.role)) {
     return new Response("Недостаточно прав", { status: 403 });
   }
 
@@ -26,15 +26,16 @@ export async function GET(request: Request) {
   const fmt = (value: number) => value.toFixed(2).replace(".", ",");
   const escape = (cell: string) => `"${cell.replaceAll('"', '""')}"`;
   const lines = [
-    ["ФИО", "Схема оплаты", `Начислено (${currency})`, `Выплачено (${currency})`, `Долг к выплате (${currency})`],
+    ["ФИО", "Схема оплаты", `Начислено (${currency})`, `Выплачено (${currency})`, `Аванс (${currency})`, `Долг к выплате (${currency})`],
     ...summary.rows.map((row) => [
       row.name,
       `${paySchemeLabels[row.payScheme] ?? row.payScheme}${row.payPercent ? ` ${row.payPercent}%` : ""}`,
       fmt(row.accrued),
       fmt(row.paid),
+      fmt(row.advance),
       fmt(row.due),
     ]),
-    ["ИТОГО", "", fmt(summary.totals.accrued), fmt(summary.totals.paid), fmt(summary.totals.due)],
+    ["ИТОГО", "", fmt(summary.totals.accrued), fmt(summary.totals.paid), fmt(summary.totals.advance), fmt(summary.totals.due)],
   ];
   // BOM первым символом — Excel без него ломает кириллицу
   const csv =

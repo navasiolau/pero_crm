@@ -21,6 +21,7 @@ export const roleLabels: Record<Role, string> = {
   ENGINEER: "Инженер",
   WORKER: "Работник",
   MOUNTER: "Монтажник",
+  ACCOUNTANT: "Бухгалтер",
 };
 
 // Группы навигации в сайдбаре: «Основное» и «Управление»
@@ -34,8 +35,11 @@ export type NavItem = {
   group: NavGroup;
 };
 
-const OFFICE_ROLES: Role[] = ["ADMIN", "DIRECTOR", "MANAGER", "ENGINEER"];
+// Бухгалтер — офисная роль на просмотр (проекты/клиенты нужны для приходов
+// и расходов); правок у него нет, кроме финансовых
+const OFFICE_ROLES: Role[] = ["ADMIN", "DIRECTOR", "MANAGER", "ENGINEER", "ACCOUNTANT"];
 const ADMIN_ROLES: Role[] = ["ADMIN", "DIRECTOR"];
+const FINANCE_ROLES: Role[] = ["ADMIN", "DIRECTOR", "ACCOUNTANT"];
 const ALL_ROLES: Role[] = [
   "ADMIN",
   "DIRECTOR",
@@ -43,9 +47,10 @@ const ALL_ROLES: Role[] = [
   "ENGINEER",
   "WORKER",
   "MOUNTER",
+  "ACCOUNTANT",
 ];
 // Директору зарплата не считается (§4 плана)
-const PAYROLL_ROLES: Role[] = ["ADMIN", "MANAGER", "ENGINEER", "WORKER", "MOUNTER"];
+const PAYROLL_ROLES: Role[] = ["ADMIN", "MANAGER", "ENGINEER", "WORKER", "MOUNTER", "ACCOUNTANT"];
 
 export const navItems: NavItem[] = [
   // У работника и монтажника дашборда нет — их главный экран «Мои задачи»
@@ -57,7 +62,7 @@ export const navItems: NavItem[] = [
   { href: "/tasks", label: "Задачи", icon: ListChecks, roles: OFFICE_ROLES, group: "manage" },
   { href: "/prices", label: "Прайсы", icon: Receipt, roles: OFFICE_ROLES, group: "manage" },
   { href: "/warehouse", label: "Склад", icon: Warehouse, roles: OFFICE_ROLES, group: "manage" },
-  { href: "/finance", label: "Финансы", icon: Banknote, roles: ADMIN_ROLES, group: "manage" },
+  { href: "/finance", label: "Финансы", icon: Banknote, roles: FINANCE_ROLES, group: "manage" },
   { href: "/changelog", label: "Журнал", icon: History, roles: ADMIN_ROLES, group: "manage" },
   { href: "/settings", label: "Настройки", icon: Settings, roles: ADMIN_ROLES, group: "manage" },
 ];

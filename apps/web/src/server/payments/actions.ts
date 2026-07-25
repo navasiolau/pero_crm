@@ -8,11 +8,11 @@ import { formatAmount } from "@/lib/format";
 import { writeChangeLog } from "@/server/plugins/changelog";
 import { emitDomainEvent } from "@/server/plugins/events";
 import { notifyOrg } from "@/server/notifications/notify";
-import { requireAdmin } from "@/server/require-role";
+import { requireFinance } from "@/server/require-role";
 
 import { equivalents, getNbrbRate, isCurrency } from "@/server/finance/nbrb";
 
-// Платежи по проектам (§11, только админ/директор): приходы от клиентов
+// Платежи по проектам (§11, админ/директор/бухгалтер): приходы от клиентов
 // и расходы на проект в любой из 4 валют. Курс подтягивается с НБ РБ
 // в момент внесения и сохраняется в записи (rate/rateDate/bynAmount/
 // projectAmount); можно поправить вручную. Приходы — оборот для
@@ -40,7 +40,7 @@ function round2(value: number): number {
 export async function addPayment(
   input: z.input<typeof paymentSchema>,
 ): Promise<{ ok: boolean; error?: string }> {
-  const session = await requireAdmin();
+  const session = await requireFinance();
   const parsed = paymentSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Ошибка данных" };
@@ -194,7 +194,7 @@ export async function addPayment(
 export async function deletePayment(
   paymentId: string,
 ): Promise<{ ok: boolean; error?: string }> {
-  const session = await requireAdmin();
+  const session = await requireFinance();
   const payment = await prisma.payment.findUnique({
     where: { id: paymentId },
     include: { project: { select: { id: true, number: true } } },

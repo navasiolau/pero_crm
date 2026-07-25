@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 export default async function FinanceAccountsPage() {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  if (!["ADMIN", "DIRECTOR"].includes(session.user.role)) redirect("/");
+  if (!["ADMIN", "DIRECTOR", "ACCOUNTANT"].includes(session.user.role)) redirect("/");
 
   const accounts = await listCashAccounts();
   return <AccountsView accounts={accounts} />;

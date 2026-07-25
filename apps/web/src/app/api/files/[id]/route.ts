@@ -7,7 +7,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { UPLOADS_ROOT } from "@/lib/uploads";
 
-const OFFICE: Role[] = ["ADMIN", "DIRECTOR", "MANAGER", "ENGINEER"];
+const OFFICE: Role[] = ["ADMIN", "DIRECTOR", "MANAGER", "ENGINEER", "ACCOUNTANT"];
 
 // GET /api/files/:id — отдача файла с проверкой прав (§4, §13).
 // ?thumb=1 — превью (для изображений), иначе оригинал.

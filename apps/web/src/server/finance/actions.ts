@@ -5,7 +5,7 @@ import { z } from "zod";
 
 import { prisma } from "@/lib/prisma";
 import { writeChangeLog } from "@/server/plugins/changelog";
-import { requireAdmin } from "@/server/require-role";
+import { requireFinance } from "@/server/require-role";
 
 import { getNbrbRate, isCurrency } from "./nbrb";
 
@@ -17,7 +17,7 @@ export async function fetchNbrbRate(
   currency: string,
   date?: string,
 ): Promise<{ ok: boolean; rate?: number; date?: string; error?: string }> {
-  await requireAdmin();
+  await requireFinance();
   if (!isCurrency(currency)) return { ok: false, error: "Неизвестная валюта" };
   try {
     const parsed = date ? new Date(`${date}T12:00:00`) : undefined;
@@ -42,7 +42,7 @@ const cashAccountSchema = z.object({
 export async function addCashAccount(
   input: z.input<typeof cashAccountSchema>,
 ): Promise<{ ok: boolean; error?: string }> {
-  const session = await requireAdmin();
+  const session = await requireFinance();
   const parsed = cashAccountSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Ошибка данных" };
@@ -75,7 +75,7 @@ export async function addCashAccount(
 export async function toggleCashAccount(
   accountId: string,
 ): Promise<{ ok: boolean; error?: string }> {
-  const session = await requireAdmin();
+  const session = await requireFinance();
   const account = await prisma.cashAccount.findUnique({
     where: { id: accountId },
   });
@@ -109,7 +109,7 @@ const articleSchema = z.object({
 export async function addExpenseArticle(
   input: z.input<typeof articleSchema>,
 ): Promise<{ ok: boolean; error?: string }> {
-  const session = await requireAdmin();
+  const session = await requireFinance();
   const parsed = articleSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Ошибка данных" };
@@ -136,7 +136,7 @@ export async function addExpenseArticle(
 export async function toggleExpenseArticle(
   articleId: string,
 ): Promise<{ ok: boolean; error?: string }> {
-  const session = await requireAdmin();
+  const session = await requireFinance();
   const article = await prisma.expenseArticle.findUnique({
     where: { id: articleId },
   });

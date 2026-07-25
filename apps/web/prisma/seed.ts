@@ -75,6 +75,16 @@ const users: SeedUser[] = [
     role: Role.MOUNTER,
     payScheme: PayScheme.PIECE,
   },
+  {
+    email: "accountant@pero.local",
+    name: "Захарова Елена Владимировна",
+    position: "Бухгалтер",
+    phone: "+375 29 700-80-90",
+    telegram: "@ezakharova",
+    role: Role.ACCOUNTANT,
+    // Схему оплаты владелец задаст в настройках; демо-экономику не трогаем
+    payScheme: PayScheme.NONE,
+  },
 ];
 
 async function main() {

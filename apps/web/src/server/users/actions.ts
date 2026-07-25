@@ -8,7 +8,7 @@ import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/server/require-role";
 import { writeChangeLog } from "@/server/plugins/changelog";
 
-const ROLES = ["ADMIN", "DIRECTOR", "MANAGER", "ENGINEER", "WORKER", "MOUNTER"] as const;
+const ROLES = ["ADMIN", "DIRECTOR", "MANAGER", "ENGINEER", "WORKER", "MOUNTER", "ACCOUNTANT"] as const;
 const PAY_SCHEMES = ["PIECE", "PERCENT_PROJECT", "PERCENT_TURNOVER", "NONE"] as const;
 
 const userSchema = z.object({

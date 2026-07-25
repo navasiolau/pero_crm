@@ -4,7 +4,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { displayClientName } from "@/lib/labels";
 
-const OFFICE = ["ADMIN", "DIRECTOR", "MANAGER", "ENGINEER"];
+const OFFICE = ["ADMIN", "DIRECTOR", "MANAGER", "ENGINEER", "ACCOUNTANT"];
 
 // GET /api/search?q=… — глобальный поиск (omnisearch): проекты, задачи, клиенты.
 // Видимость как в разделах (§4): работник/монтажник — только своё.

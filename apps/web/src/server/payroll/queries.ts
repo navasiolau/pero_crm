@@ -44,6 +44,7 @@ export type PayoutView = {
   userId?: string;
   userName?: string;
   amount: number;
+  kind: string; // SALARY | ADVANCE
   comment: string | null;
   createdByName: string | null;
   createdAt: string;
@@ -110,6 +111,7 @@ export async function getMyPayroll(userId: string, month: string) {
       (payout): PayoutView => ({
         id: payout.id,
         amount: Number(payout.amount),
+        kind: payout.kind,
         comment: payout.comment,
         createdByName: payout.createdById
           ? (creatorNames.get(payout.createdById) ?? "—")
@@ -126,7 +128,8 @@ export type PayrollSummaryRow = {
   payScheme: PayScheme;
   payPercent: number | null;
   accrued: number; // начислено за просматриваемый месяц
-  paid: number; // выплачено за просматриваемый месяц
+  paid: number; // выплачено за просматриваемый месяц (зарплата + авансы)
+  advance: number; // из «Выплачено» — сумма авансов за месяц
   due: number; // текущий долг: начислено за прошлые месяцы − все выплаты
 };
 
@@ -136,7 +139,7 @@ export type PayrollSummaryRow = {
 // (деньги платятся только за прошлый месяц — правило владельца).
 export async function getPayrollSummary(month: string) {
   const now = currentMonth();
-  const [accruedByUser, paidByUser, schemeUsers, entryUsers, payoutUsers, payouts, pastAccrued, totalPaidByUser] =
+  const [accruedByUser, paidByUser, advanceByUser, schemeUsers, entryUsers, payoutUsers, payouts, pastAccrued, totalPaidByUser] =
     await Promise.all([
       prisma.payrollEntry.groupBy({
         by: ["userId"],
@@ -146,6 +149,12 @@ export async function getPayrollSummary(month: string) {
       prisma.payout.groupBy({
         by: ["userId"],
         where: { month },
+        _sum: { amount: true },
+      }),
+      // авансы месяца — отдельной колонкой в сводке
+      prisma.payout.groupBy({
+        by: ["userId"],
+        where: { month, kind: "ADVANCE" },
         _sum: { amount: true },
       }),
       prisma.user.findMany({
@@ -194,6 +203,9 @@ export async function getPayrollSummary(month: string) {
   const paidMap = new Map(
     paidByUser.map((row) => [row.userId, Number(row._sum.amount ?? 0)]),
   );
+  const advanceMap = new Map(
+    advanceByUser.map((row) => [row.userId, Number(row._sum.amount ?? 0)]),
+  );
   const pastAccruedMap = new Map(
     pastAccrued.map((row) => [row.userId, Number(row._sum.amount ?? 0)]),
   );
@@ -214,6 +226,7 @@ export async function getPayrollSummary(month: string) {
       payPercent: user.payPercent ? Number(user.payPercent) : null,
       accrued,
       paid,
+      advance: advanceMap.get(user.id) ?? 0,
       due: debt, // текущий долг к выплате (за прошлые месяцы)
     };
   });
@@ -232,6 +245,7 @@ export async function getPayrollSummary(month: string) {
     totals: {
       accrued: rows.reduce((sum, row) => sum + row.accrued, 0),
       paid: rows.reduce((sum, row) => sum + row.paid, 0),
+      advance: rows.reduce((sum, row) => sum + row.advance, 0),
       due: rows.reduce((sum, row) => sum + row.due, 0),
     },
     payouts: payouts.map(
@@ -240,6 +254,7 @@ export async function getPayrollSummary(month: string) {
         userId: payout.userId,
         userName: payout.user.name,
         amount: Number(payout.amount),
+        kind: payout.kind,
         comment: payout.comment,
         createdByName: payout.createdById
           ? (creatorNames.get(payout.createdById) ?? "—")
@@ -281,6 +296,21 @@ export async function listPayrollUsers() {
     orderBy: { name: "asc" },
   });
   return users;
+}
+
+// Приблизительная зарплата текущего месяца по сотрудникам (начислено
+// за текущий месяц) — для предупреждения в диалоге аванса, что сумма
+// превышает уже набежавшую оценку. Аванс выдаётся в пределах баланса
+// организации, это мягкая подсказка, а не потолок.
+export async function getCurrentMonthEstimates(): Promise<Record<string, number>> {
+  const rows = await prisma.payrollEntry.groupBy({
+    by: ["userId"],
+    where: { month: currentMonth() },
+    _sum: { amount: true },
+  });
+  return Object.fromEntries(
+    rows.map((row) => [row.userId, Number(row._sum.amount ?? 0)]),
+  );
 }
 
 // Округление до копеек — единая точка для всех расчётов зарплаты

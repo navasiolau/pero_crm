@@ -20,8 +20,8 @@ export const NOTIFICATION_TYPES = [
 
 export type NotificationKind = "org" | "personal";
 
-const CONFIGURABLE_ROLES: Role[] = ["ADMIN", "DIRECTOR", "MANAGER"];
-const ORG_ROLES: Role[] = ["ADMIN", "DIRECTOR", "MANAGER"];
+const CONFIGURABLE_ROLES: Role[] = ["ADMIN", "DIRECTOR", "MANAGER", "ACCOUNTANT"];
+const ORG_ROLES: Role[] = ["ADMIN", "DIRECTOR", "MANAGER", "ACCOUNTANT"];
 
 function typeKind(type: string): NotificationKind {
   return (

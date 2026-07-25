@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import {
   currentMonth,
+  getCurrentMonthEstimates,
   getEmployeeDues,
   getMonthTurnover,
   getOrgBalance,
@@ -26,12 +27,12 @@ export default async function FinancePayrollPage({
 }) {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  if (!["ADMIN", "DIRECTOR"].includes(session.user.role)) redirect("/");
+  if (!["ADMIN", "DIRECTOR", "ACCOUNTANT"].includes(session.user.role)) redirect("/");
 
   const { month: param } = await searchParams;
   const month = isValidMonth(param) ? param : currentMonth();
 
-  const [summary, currency, turnover, turnoverAccruals, users, orgBalance, dues] =
+  const [summary, currency, turnover, turnoverAccruals, users, orgBalance, dues, estimates] =
     await Promise.all([
       getPayrollSummary(month),
       getPayrollCurrency(),
@@ -40,6 +41,7 @@ export default async function FinancePayrollPage({
       listPayrollUsers(),
       getOrgBalance(),
       getEmployeeDues(),
+      getCurrentMonthEstimates(),
     ]);
 
   return (
@@ -54,6 +56,7 @@ export default async function FinancePayrollPage({
       users={users}
       orgBalance={orgBalance}
       dues={dues}
+      estimates={estimates}
     />
   );
 }

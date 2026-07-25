@@ -8,7 +8,7 @@ import { prisma } from "@/lib/prisma";
 import { writeChangeLog } from "@/server/plugins/changelog";
 import { notifyOrg } from "@/server/notifications/notify";
 
-const ALLOWED = ["ADMIN", "DIRECTOR", "MANAGER", "ENGINEER"];
+const ALLOWED = ["ADMIN", "DIRECTOR", "MANAGER", "ENGINEER", "ACCOUNTANT"];
 
 const schema = z.object({
   projectId: z.string(),

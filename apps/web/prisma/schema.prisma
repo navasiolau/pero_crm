@@ -17,6 +17,7 @@ enum Role {
   ENGINEER
   WORKER
   MOUNTER
+  ACCOUNTANT
 }
 
 enum PayScheme {
@@ -287,12 +288,16 @@ model PayrollEntry {
 
 // Выплата зарплаты (§10): вносит администратор, история по месяцам.
 // month — расчётный месяц, к которому относится выплата.
+// kind: SALARY — обычная выплата по долгу за прошлые месяцы,
+// ADVANCE — аванс текущим месяцем (потолок — только баланс организации;
+// учитывается формулой долга автоматически: долг = начислено − ВСЕ выплаты).
 model Payout {
   id          String   @id @default(cuid())
   userId      String
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   amount      Decimal  @db.Decimal(12, 2)
   month       String // YYYY-MM расчётного месяца
+  kind        String   @default("SALARY") // SALARY | ADVANCE
   comment     String?
   createdById String?
   createdAt   DateTime @default(now())

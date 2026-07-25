@@ -38,7 +38,7 @@ export default async function DashboardPage() {
     }),
   ]);
 
-  const showAmount = ["ADMIN", "DIRECTOR", "MANAGER", "ENGINEER"].includes(
+  const showAmount = ["ADMIN", "DIRECTOR", "MANAGER", "ENGINEER", "ACCOUNTANT"].includes(
     session?.user.role ?? "",
   );
 

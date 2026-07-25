@@ -1,13 +1,14 @@
 "use client";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import {
   DataTable,
   type DataColumn,
 } from "@/components/ui/data-table";
 import { MonthSwitcher, monthLabel } from "@/components/month-switcher";
 import { formatAmount } from "@/lib/format";
-import { entrySchemeLabels } from "@/lib/labels";
+import { entrySchemeLabels, payoutKindLabels } from "@/lib/labels";
 import type { PayrollEntryView, PayoutView } from "@/server/payroll/queries";
 
 function formatDate(iso: string): string {
@@ -80,6 +81,18 @@ export function PayrollView({
       sortable: true,
       sortValue: (row) => row.createdAt,
       cell: (row) => formatDate(row.createdAt),
+    },
+    {
+      id: "kind",
+      header: "Тип",
+      sortable: true,
+      sortValue: (row) => row.kind,
+      cell: (row) =>
+        row.kind === "ADVANCE" ? (
+          <Badge variant="secondary">{payoutKindLabels.ADVANCE}</Badge>
+        ) : (
+          <Badge variant="outline">{payoutKindLabels.SALARY}</Badge>
+        ),
     },
     {
       id: "comment",

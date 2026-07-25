@@ -18,7 +18,7 @@ export default async function WarehousePage() {
   const session = await auth();
   if (!session?.user) redirect("/login");
   if (
-    !["ADMIN", "DIRECTOR", "MANAGER", "ENGINEER"].includes(session.user.role)
+    !["ADMIN", "DIRECTOR", "MANAGER", "ENGINEER", "ACCOUNTANT"].includes(session.user.role)
   ) {
     redirect("/");
   }

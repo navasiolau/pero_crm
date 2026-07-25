@@ -7,7 +7,7 @@ import { prisma } from "@/lib/prisma";
 
 import { NOTIFICATION_TYPES } from "./notify";
 
-const CONFIGURABLE = ["ADMIN", "DIRECTOR", "MANAGER"];
+const CONFIGURABLE = ["ADMIN", "DIRECTOR", "MANAGER", "ACCOUNTANT"];
 
 export async function listMyNotifications(take = 30) {
   const session = await auth();

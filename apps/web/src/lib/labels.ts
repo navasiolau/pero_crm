@@ -50,6 +50,12 @@ export const entrySchemeLabels: Record<string, string> = {
   PERCENT_TURNOVER: "% от оборота",
 };
 
+// Типы выплат (§10): обычная выплата по долгу / аванс текущим месяцем
+export const payoutKindLabels: Record<string, string> = {
+  SALARY: "Зарплата",
+  ADVANCE: "Аванс",
+};
+
 // Отображаемое имя клиента: «Фамилия Имя Отчество», а если заполнено
 // только имя — как есть (подходит и юрлицам: «ООО Альфа»).
 export function displayClientName(client: {
