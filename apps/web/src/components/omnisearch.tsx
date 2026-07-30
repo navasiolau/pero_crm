@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ClipboardList, FolderKanban, Search, User, X } from "lucide-react";
+import { ClipboardList, FolderKanban, Package, Search, User, X } from "lucide-react";
 
 import {
   Dialog,
@@ -20,6 +20,14 @@ interface SearchResults {
     client: string;
     stage: string;
   }[];
+  products: {
+    id: string;
+    number: string;
+    title: string;
+    status: string;
+    projectNumber: string;
+    client: string;
+  }[];
   tasks: {
     id: string;
     title: string;
@@ -27,6 +35,8 @@ interface SearchResults {
     projectId: string;
     projectNumber: string;
     projectTitle: string;
+    productId: string | null;
+    productNumber: string | null;
     assignee: string | null;
   }[];
   clients: { id: string; name: string; phone: string }[];
@@ -34,8 +44,8 @@ interface SearchResults {
 
 interface FlatItem {
   key: string;
-  group: "Проекты" | "Задачи" | "Клиенты";
-  icon: "project" | "task" | "client";
+  group: "Проекты" | "Изделия" | "Задачи" | "Клиенты";
+  icon: "project" | "product" | "task" | "client";
   title: string;
   hint: string;
   href: string;
@@ -88,13 +98,23 @@ export function Omnisearch() {
           hint: project.client,
           href: `/projects/${project.id}`,
         })),
+        ...(results.products ?? []).map((product) => ({
+          key: `pr-${product.id}`,
+          group: "Изделия" as const,
+          icon: "product" as const,
+          title: `${product.number} · ${product.title}`,
+          hint: `${product.projectNumber} · ${product.client}`,
+          href: `/products/${product.id}`,
+        })),
         ...results.tasks.map((task) => ({
           key: `t-${task.id}`,
           group: "Задачи" as const,
           icon: "task" as const,
           title: task.title,
-          hint: `${task.projectNumber} · ${task.assignee ?? ""}`,
-          href: `/projects/${task.projectId}`,
+          hint: `${task.projectNumber}${task.productNumber ? ` · ${task.productNumber}` : ""} · ${task.assignee ?? ""}`,
+          href: task.productId
+            ? `/products/${task.productId}`
+            : `/projects/${task.projectId}`,
         })),
         ...results.clients.map((client) => ({
           key: `c-${client.id}`,
@@ -129,6 +149,7 @@ export function Omnisearch() {
 
   const icons = {
     project: <FolderKanban className="size-4 shrink-0 text-muted-foreground" />,
+    product: <Package className="size-4 shrink-0 text-muted-foreground" />,
     task: <ClipboardList className="size-4 shrink-0 text-muted-foreground" />,
     client: <User className="size-4 shrink-0 text-muted-foreground" />,
   };
@@ -174,7 +195,7 @@ export function Omnisearch() {
                 search(event.target.value);
               }}
               onKeyDown={onInputKeyDown}
-              placeholder="Проект, задача, клиент…"
+              placeholder="Проект, изделие, задача, клиент…"
               className="border-0 shadow-none focus-visible:ring-0"
             />
             <button

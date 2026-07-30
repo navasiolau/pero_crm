@@ -20,14 +20,21 @@ export async function listProjects(userId: string, role: Role) {
     include: {
       client: { select: { id: true, name: true, lastName: true, middleName: true } },
       manager: { select: { id: true, name: true } },
-      _count: { select: { tasks: true, files: true } },
+      products: { select: { id: true, expectedPrice: true } },
+      _count: { select: { tasks: true, files: true, products: true } },
     },
     orderBy: [{ stage: "asc" }, { stageChangedAt: "asc" }],
   });
-  // Бейдж «Нехватка материалов» на канбане/в таблице (§12) — один запрос на список
+  // Бейдж «Нехватка материалов» на канбане/в таблице (§12) — агрегат
+  // по изделиям проекта, один запрос на весь список
   const shortages = await listProjectShortages(projects.map((project) => project.id));
   return projects.map((project) => ({
     ...project,
+    // Стоимость проекта = Σ цен изделий (в валюте проекта)
+    totalPrice: project.products.reduce(
+      (sum, product) => sum + Number(product.expectedPrice ?? 0),
+      0,
+    ),
     hasMaterialShortage: shortages.has(project.id),
   }));
 }
@@ -42,6 +49,13 @@ export async function getProjectFor(
     include: {
       client: true,
       manager: { select: { id: true, name: true } },
+      engineer: { select: { id: true, name: true } },
+      products: {
+        include: {
+          statusHistory: { orderBy: { createdAt: "desc" } },
+        },
+        orderBy: { number: "asc" },
+      },
       tasks: {
         include: taskDetailsInclude,
         orderBy: { createdAt: "desc" },
@@ -83,7 +97,7 @@ export async function listManagers() {
 }
 
 // Инженеры-проектировщики: на назначенного инженера проекта начисляется
-// % от стоимости при переходе «В работе» (§10).
+// % от стоимости (Σ цен изделий) при переходе «В работе» (§10).
 export async function listEngineers() {
   return prisma.user.findMany({
     where: { active: true, role: "ENGINEER" },

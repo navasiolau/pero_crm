@@ -4,6 +4,7 @@ import type { TaskDetails } from "@/components/task-dialog";
 // Общий select задачи для карточек/списков (§9: работа, зависимости, файлы).
 export const taskDetailsInclude = {
   project: { select: { id: true, number: true, title: true } },
+  product: { select: { id: true, number: true, title: true } },
   assignee: { select: { id: true, name: true } },
   work: { select: { id: true, title: true, total: true, priceSnapshot: true } },
   files: { select: { id: true, fileName: true, hasThumb: true, mimeType: true } },
@@ -30,6 +31,7 @@ type TaskWithIncludes = {
   doneById: string | null;
   createdById: string | null;
   project: { id: string; number: string; title: string };
+  product: { id: string; number: string; title: string } | null;
   assignee: { id: string; name: string } | null;
   work: { id: string; title: string; total: unknown; priceSnapshot: unknown } | null;
   files: { id: string; fileName: string; hasThumb: boolean; mimeType: string }[];
@@ -92,6 +94,9 @@ export async function mapTaskDetails(
     projectId: task.project.id,
     projectNumber: task.project.number,
     projectTitle: task.project.title,
+    productId: task.product?.id ?? null,
+    productNumber: task.product?.number ?? null,
+    productTitle: task.product?.title ?? null,
     files: task.files,
     createdAt: task.createdAt.toISOString(),
     doneAt: task.doneAt?.toISOString() ?? null,

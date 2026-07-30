@@ -133,17 +133,17 @@ export function MovementsView({
 
   columns.push(
     {
-      id: "project",
-      header: "Проект",
+      id: "product",
+      header: "Изделие",
       sortable: true,
-      sortValue: (row) => row.projectNumber ?? "",
+      sortValue: (row) => row.productNumber ?? "",
       cell: (row) =>
-        row.projectId && row.projectNumber ? (
+        row.productId && row.productNumber ? (
           <Link
-            href={`/projects/${row.projectId}`}
+            href={`/products/${row.productId}`}
             className="text-primary hover:underline"
           >
-            {row.projectNumber}
+            {row.productNumber}
           </Link>
         ) : (
           <span className="text-muted-foreground">—</span>
@@ -175,7 +175,7 @@ export function MovementsView({
       <div>
         <h1 className="text-2xl font-semibold">Движения</h1>
         <p className="text-sm text-muted-foreground">
-          Приходы, списания на проекты и возвраты — последние 500 операций
+          Приходы, списания на изделия и возвраты — последние 500 операций
         </p>
       </div>
 

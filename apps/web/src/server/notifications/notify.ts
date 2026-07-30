@@ -8,6 +8,7 @@ import { prisma } from "@/lib/prisma";
 export const NOTIFICATION_TYPES = [
   { id: "project.created", label: "Новый проект", kind: "org" },
   { id: "project.stageChanged", label: "Смена этапа проекта", kind: "org" },
+  { id: "product.statusChanged", label: "Смена статуса изделия", kind: "org" },
   { id: "communication.added", label: "Новая коммуникация", kind: "org" },
   { id: "file.added", label: "Новый файл", kind: "org" },
   { id: "payment.added", label: "Новый приход по проекту", kind: "org" },

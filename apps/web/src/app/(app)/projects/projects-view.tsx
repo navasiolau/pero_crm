@@ -19,10 +19,12 @@ export interface ProjectCard {
   title: string;
   stage: ProjectStage;
   stageChangedAt: string;
-  expectedPrice: string | null;
+  totalPrice: string | null; // Σ цен изделий, в валюте проекта
   currency: string;
+  clientId: string;
   clientName: string;
   managerName: string | null;
+  productsCount: number;
   tasksCount: number;
   filesCount: number;
   hasMaterialShortage: boolean; // бейдж «Нехватка материалов» (§12)

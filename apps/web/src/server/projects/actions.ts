@@ -37,16 +37,16 @@ async function nextProjectNumber(): Promise<string> {
 }
 
 const createSchema = z.object({
-  title: z.string().min(1, "Укажите изделие/описание"),
+  title: z.string().min(1, "Укажите название проекта"),
   clientId: z.string().min(1, "Выберите клиента"),
-  expectedPrice: z.number().nonnegative().optional(),
   currency: z.string().default("BYN"),
   address: z.string().optional(),
-  description: z.string().optional(),
   managerId: z.string().optional(),
   engineerId: z.string().optional(),
 });
 
+// Проект = заказ клиента (§6): название, клиент, менеджер, инженер, адрес,
+// валюта. Цены — на изделиях, создаются в карточке проекта.
 export async function createProject(
   input: z.input<typeof createSchema>,
 ): Promise<{ ok: boolean; id?: string; error?: string }> {
@@ -64,10 +64,8 @@ export async function createProject(
       number,
       title: data.title,
       clientId: data.clientId,
-      expectedPrice: data.expectedPrice,
       currency: data.currency,
       address: data.address,
-      description: data.description,
       managerId: data.managerId,
       engineerId: data.engineerId,
       createdById: session.user.id,
@@ -101,36 +99,24 @@ export async function createProject(
 
 const updateSchema = z.object({
   title: z.string().min(1).optional(),
-  expectedPrice: z.number().nonnegative().nullable().optional(),
   currency: z.string().optional(),
   address: z.string().nullable().optional(),
-  description: z.string().nullable().optional(),
   managerId: z.string().nullable().optional(),
   engineerId: z.string().nullable().optional(),
   clientId: z.string().optional(),
 });
 
-// Редактирование карточки (§4): полностью — админ/директор/менеджер;
-// инженер — только тех. блок (description).
+// Редактирование карточки проекта (§4) — админ/директор/менеджер.
+// (Тех. блок живёт на изделии — его правит и инженер, см. products/actions.)
 export async function updateProject(
   projectId: string,
   input: z.infer<typeof updateSchema>,
 ): Promise<{ ok: boolean; error?: string }> {
   const session = await requireUser();
-  const role = session.user.role;
-  if (![...MANAGER_ROLES, "ENGINEER" as Role].includes(role)) {
-    throw new Error("Недостаточно прав");
-  }
+  requireRoles(session.user.role, MANAGER_ROLES);
   const parsed = updateSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "Ошибка данных" };
   const data = parsed.data;
-
-  if (role === "ENGINEER") {
-    const keys = Object.keys(data);
-    if (keys.some((k) => k !== "description")) {
-      return { ok: false, error: "Инженер правит только технический блок" };
-    }
-  }
 
   const before = await prisma.project.findUnique({ where: { id: projectId } });
   if (!before) return { ok: false, error: "Проект не найден" };
@@ -235,7 +221,8 @@ export async function changeProjectStage(
   // Начисление «% от стоимости» инженеру (§10): этап начисления — передача
   // проекта в производство (первый переход «В работе»). Повторные переходы
   // (пауза, рекламация) не начисляют — запись одна на проект.
-  if (toStage === "IN_WORK" && project.engineerId && project.expectedPrice) {
+  // Стоимость проекта = Σ цен изделий на момент перехода.
+  if (toStage === "IN_WORK" && project.engineerId) {
     const engineer = await prisma.user.findUnique({
       where: { id: project.engineerId },
       select: { name: true, payScheme: true, payPercent: true },
@@ -250,9 +237,13 @@ export async function changeProjectStage(
         select: { id: true },
       });
       if (!existing) {
+        const priceAgg = await prisma.product.aggregate({
+          where: { projectId },
+          _sum: { expectedPrice: true },
+        });
+        const totalPrice = Number(priceAgg._sum.expectedPrice ?? 0);
         const percent = Number(engineer.payPercent);
-        const amount =
-          Math.round(((Number(project.expectedPrice) * percent) / 100) * 100) / 100;
+        const amount = Math.round(((totalPrice * percent) / 100) * 100) / 100;
         if (amount > 0) {
           const currency = await getPayrollCurrency();
           await prisma.payrollEntry.create({

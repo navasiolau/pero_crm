@@ -27,7 +27,7 @@ function sanitizeFileName(name: string): string {
 }
 
 // POST /api/files/upload — multipart/form-data:
-// file, projectId, category?, caption?, taskId?
+// file, projectId, productId?, category?, caption?, taskId?
 export async function POST(request: Request) {
   const session = await auth();
   if (!session?.user) {
@@ -54,6 +54,23 @@ export async function POST(request: Request) {
   });
   if (!project) {
     return NextResponse.json({ error: "Проект не найден" }, { status: 404 });
+  }
+
+  const productIdRaw = form.get("productId");
+  const productId =
+    typeof productIdRaw === "string" && productIdRaw ? productIdRaw : null;
+  // Изделие должно принадлежать проекту
+  if (productId) {
+    const product = await prisma.product.findFirst({
+      where: { id: productId, projectId },
+      select: { id: true },
+    });
+    if (!product) {
+      return NextResponse.json(
+        { error: "Изделие не найдено в этом проекте" },
+        { status: 400 },
+      );
+    }
   }
 
   const categoryRaw = form.get("category");
@@ -88,6 +105,7 @@ export async function POST(request: Request) {
   const row = await prisma.file.create({
     data: {
       projectId,
+      productId,
       taskId,
       category,
       caption,
@@ -113,7 +131,7 @@ export async function POST(request: Request) {
     type: "file.added",
     title: `Файл к проекту ${project.number}`,
     body: file.name,
-    link: `/projects/${projectId}`,
+    link: productId ? `/products/${productId}` : `/projects/${projectId}`,
     exceptUserId: session.user.id,
   });
 

@@ -45,5 +45,6 @@ export async function deleteFile(
     oldValue: { fileName: file.fileName },
   });
   revalidatePath(`/projects/${file.projectId}`);
+  if (file.productId) revalidatePath(`/products/${file.productId}`);
   return { ok: true };
 }

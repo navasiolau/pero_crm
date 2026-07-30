@@ -32,6 +32,7 @@ import { ConfirmDeleteDialog } from "@/components/confirm-delete-dialog";
 import { QuantityStepper } from "@/components/quantity-stepper";
 import { cn } from "@/lib/utils";
 import { deleteTask, updateTask } from "@/server/tasks/actions";
+import { fetchProductOptions } from "@/server/products/actions";
 
 export interface TaskDetails {
   id: string;
@@ -53,6 +54,9 @@ export interface TaskDetails {
   projectId: string;
   projectNumber: string;
   projectTitle: string;
+  productId: string | null; // изделие проекта (необязательно)
+  productNumber: string | null;
+  productTitle: string | null;
   files: { id: string; fileName: string; hasThumb: boolean; mimeType: string }[];
   createdAt: string;
   doneAt: string | null;
@@ -76,7 +80,7 @@ export const taskStatusBadge: Record<TaskStatus, string> = {
   DONE: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
 };
 
-// Карточка задачи (клик по задаче в проекте или в разделе «Задачи»).
+// Карточка задачи (клик по задаче в проекте, изделии или в разделе «Задачи»).
 // Админ/менеджер — просмотр + редактирование; выполненная — только просмотр.
 export function TaskDialog({
   task,
@@ -86,6 +90,7 @@ export function TaskDialog({
   onOpenChange,
   projectTasks = [],
   works = [],
+  products,
 }: {
   task: TaskDetails | null;
   workers: { id: string; name: string; hint?: string }[];
@@ -100,16 +105,21 @@ export function TaskDialog({
     quantity: string;
     allocated: string;
   }[];
+  // Изделия проекта для поля «Изделие»; если не переданы — подгружаются
+  // с сервера при входе в редактирование
+  products?: { id: string; number: string; title: string }[];
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [editing, setEditing] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [productOptions, setProductOptions] = useState(products ?? []);
   const fileViewer = useFileViewer();
   const [form, setForm] = useState({
     title: "",
     type: "Производство",
     assigneeId: "",
+    productId: "",
     workId: "",
     quantity: "",
     dueAt: "",
@@ -126,6 +136,7 @@ export function TaskDialog({
       title: task.title,
       type: task.type ?? "Производство",
       assigneeId: task.assigneeId ?? "",
+      productId: task.productId ?? "",
       workId: task.workId ?? "",
       quantity: task.quantity ?? "",
       dueAt: task.dueAt ? task.dueAt.slice(0, 10) : "",
@@ -133,6 +144,10 @@ export function TaskDialog({
       dependencyIds: task.dependencies.map((dep) => dep.id),
     });
     setEditing(true);
+    // Изделия проекта — если родитель не передал список, подгружаем сами
+    if (!products) {
+      void fetchProductOptions(task.projectId).then(setProductOptions);
+    }
   }
 
   const valid = form.title.trim() && form.type && form.dueAt;
@@ -163,6 +178,18 @@ export function TaskDialog({
             >
               {task.projectNumber} · {task.projectTitle}
             </Link>
+            {task.productId && task.productNumber ? (
+              <>
+                {" · изделие "}
+                <Link
+                  href={`/products/${task.productId}`}
+                  className="underline-offset-2 hover:underline"
+                >
+                  {task.productNumber}
+                  {task.productTitle ? ` · ${task.productTitle}` : ""}
+                </Link>
+              </>
+            ) : null}
           </DialogDescription>
         </DialogHeader>
 
@@ -230,6 +257,22 @@ export function TaskDialog({
                 onChange={(event) =>
                   setForm((prev) => ({ ...prev, dueAt: event.target.value }))
                 }
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>Изделие</Label>
+              <SearchableSelect
+                options={productOptions.map((product) => ({
+                  value: product.id,
+                  label: `${product.number} · ${product.title}`,
+                }))}
+                value={form.productId}
+                onChange={(value) =>
+                  setForm((prev) => ({ ...prev, productId: value }))
+                }
+                placeholder="весь проект"
+                searchPlaceholder="Поиск изделия…"
+                allowClear
               />
             </div>
             <div className="grid grid-cols-2 gap-3">
@@ -369,6 +412,22 @@ export function TaskDialog({
                 <div>{task.createdByName ?? "—"}</div>
               </div>
               <div>
+                <div className="text-xs text-muted-foreground">Изделие</div>
+                <div>
+                  {task.productId && task.productNumber ? (
+                    <Link
+                      href={`/products/${task.productId}`}
+                      className="underline-offset-2 hover:underline"
+                    >
+                      {task.productNumber}
+                      {task.productTitle ? ` · ${task.productTitle}` : ""}
+                    </Link>
+                  ) : (
+                    "весь проект"
+                  )}
+                </div>
+              </div>
+              <div>
                 <div className="text-xs text-muted-foreground">Создана</div>
                 <div>{new Date(task.createdAt).toLocaleDateString("ru-RU")}</div>
               </div>
@@ -481,6 +540,7 @@ export function TaskDialog({
                       title: form.title.trim(),
                       type: form.type,
                       assigneeId: form.assigneeId || null,
+                      productId: form.productId || null,
                       workId: form.workId || null,
                       quantity:
                         form.workId && form.quantity.trim() !== ""

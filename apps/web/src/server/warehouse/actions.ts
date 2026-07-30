@@ -21,13 +21,15 @@ const WAREHOUSE_MANAGERS = ["ADMIN", "DIRECTOR", "MANAGER"] as const;
 // a transaction» при прогретом пуле соединений
 const TX_OPTIONS = { maxWait: 10_000, timeout: 15_000 } as const;
 
-function revalidateWarehouse(projectId?: string | null) {
+function revalidateWarehouse(productId?: string | null, projectId?: string | null) {
   revalidatePath("/warehouse");
   revalidatePath("/warehouse/stock");
   revalidatePath("/warehouse/items");
   revalidatePath("/warehouse/movements");
   revalidatePath("/projects"); // бейдж нехватки на канбане/в таблице
+  revalidatePath("/products");
   if (projectId) revalidatePath(`/projects/${projectId}`);
+  if (productId) revalidatePath(`/products/${productId}`);
 }
 
 function round2(value: number): number {
@@ -288,10 +290,10 @@ export async function addStockIncome(
   return { ok: true };
 }
 
-// ─── Потребность проекта (простой резерв, без проверки остатка) ──────────
+// ─── Потребность изделия (простой резерв, без проверки остатка) ──────────
 
 const projectMaterialSchema = z.object({
-  projectId: z.string().min(1),
+  productId: z.string().min(1),
   materialId: z.string().min(1, "Выберите материал"),
   quantity: z.number().positive("Количество должно быть больше нуля"),
   comment: z.string().optional(),
@@ -306,14 +308,14 @@ export async function addProjectMaterial(
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Ошибка данных" };
   }
   const data = parsed.data;
-  const [project, material] = await Promise.all([
-    prisma.project.findUnique({
-      where: { id: data.projectId },
-      select: { id: true, number: true },
+  const [product, material] = await Promise.all([
+    prisma.product.findUnique({
+      where: { id: data.productId },
+      select: { id: true, number: true, projectId: true },
     }),
     prisma.material.findUnique({ where: { id: data.materialId } }),
   ]);
-  if (!project) return { ok: false, error: "Проект не найден" };
+  if (!product) return { ok: false, error: "Изделие не найдено" };
   if (!material || !material.active) {
     return { ok: false, error: "Материал не найден" };
   }
@@ -321,10 +323,10 @@ export async function addProjectMaterial(
   // может создавать скрипт плагина; дубли недопустимы)
   const line = await prisma.projectMaterial.upsert({
     where: {
-      projectId_materialId: { projectId: project.id, materialId: material.id },
+      productId_materialId: { productId: product.id, materialId: material.id },
     },
     create: {
-      projectId: project.id,
+      productId: product.id,
       materialId: material.id,
       quantity: data.quantity,
       comment: data.comment?.trim() || null,
@@ -340,12 +342,12 @@ export async function addProjectMaterial(
     entityId: line.id,
     action: "create",
     newValue: {
-      project: project.number,
+      product: product.number,
       material: material.name,
       quantity: data.quantity,
     },
   });
-  revalidateWarehouse(project.id);
+  revalidateWarehouse(product.id, product.projectId);
   return { ok: true };
 }
 
@@ -365,6 +367,7 @@ export async function updateProjectMaterial(
   }
   const line = await prisma.projectMaterial.findUnique({
     where: { id: parsed.data.id },
+    include: { product: { select: { projectId: true } } },
   });
   if (!line) return { ok: false, error: "Строка не найдена" };
   const issuedQty = Number(line.issuedQty);
@@ -392,7 +395,7 @@ export async function updateProjectMaterial(
     oldValue: Number(line.quantity),
     newValue: parsed.data.quantity,
   });
-  revalidateWarehouse(line.projectId);
+  revalidateWarehouse(line.productId, line.product.projectId);
   return { ok: true };
 }
 
@@ -402,7 +405,10 @@ export async function deleteProjectMaterial(
   const session = await requireRole([...WAREHOUSE_MANAGERS]);
   const line = await prisma.projectMaterial.findUnique({
     where: { id },
-    include: { material: { select: { name: true } } },
+    include: {
+      material: { select: { name: true } },
+      product: { select: { projectId: true } },
+    },
   });
   if (!line) return { ok: false, error: "Строка не найдена" };
   if (Number(line.issuedQty) > 0) {
@@ -424,7 +430,7 @@ export async function deleteProjectMaterial(
       quantity: Number(line.quantity),
     },
   });
-  revalidateWarehouse(line.projectId);
+  revalidateWarehouse(line.productId, line.product.projectId);
   return { ok: true };
 }
 
@@ -453,7 +459,7 @@ export async function requestMaterial(
         where: { id: data.projectMaterialId },
         include: {
           material: { select: { id: true, name: true, unit: true, purchasePrice: true } },
-          project: { select: { id: true, number: true } },
+          product: { select: { id: true, number: true, projectId: true } },
         },
       });
       if (!line) throw new Error("Строка потребности не найдена");
@@ -491,7 +497,7 @@ export async function requestMaterial(
           quantity: data.quantity,
           unitPrice,
           totalByn: unitPrice === null ? null : round2(data.quantity * unitPrice),
-          projectId: line.projectId,
+          productId: line.productId,
           projectMaterialId: line.id,
           comment: data.comment?.trim() || null,
           createdById: session.user.id,
@@ -514,7 +520,7 @@ export async function requestMaterial(
       action: "create",
       newValue: {
         type: "EXPENSE",
-        project: line.project.number,
+        product: line.product.number,
         material: line.material.name,
         quantity: data.quantity,
         unitPrice,
@@ -526,7 +532,7 @@ export async function requestMaterial(
         movementId: movement.id,
         type: "EXPENSE",
         materialId: line.materialId,
-        projectId: line.projectId,
+        productId: line.productId,
         quantity: data.quantity,
         totalByn: movement.totalByn === null ? null : Number(movement.totalByn),
       },
@@ -534,15 +540,15 @@ export async function requestMaterial(
     );
     await notifyOrg({
       type: "stock.expense",
-      title: `Списание: ${line.material.name} × ${formatQty(data.quantity)} · ${line.project.number}`,
+      title: `Списание: ${line.material.name} × ${formatQty(data.quantity)} · ${line.product.number}`,
       body:
         unitPrice === null
           ? undefined
           : `Сумма: ${formatAmount(round2(data.quantity * unitPrice), "BYN")}`,
-      link: `/projects/${line.projectId}`,
+      link: `/products/${line.productId}`,
       exceptUserId: session.user.id,
     });
-    revalidateWarehouse(line.projectId);
+    revalidateWarehouse(line.productId, line.product.projectId);
     return { ok: true };
   } catch (error) {
     return {
@@ -577,7 +583,7 @@ export async function returnMaterial(
         where: { id: data.projectMaterialId },
         include: {
           material: { select: { id: true, name: true, unit: true, purchasePrice: true } },
-          project: { select: { id: true, number: true } },
+          product: { select: { id: true, number: true, projectId: true } },
         },
       });
       if (!line) throw new Error("Строка потребности не найдена");
@@ -599,7 +605,7 @@ export async function returnMaterial(
           quantity: data.quantity,
           unitPrice,
           totalByn: unitPrice === null ? null : round2(data.quantity * unitPrice),
-          projectId: line.projectId,
+          productId: line.productId,
           projectMaterialId: line.id,
           comment: data.comment?.trim() || null,
           createdById: session.user.id,
@@ -621,7 +627,7 @@ export async function returnMaterial(
       action: "create",
       newValue: {
         type: "RETURN",
-        project: line.project.number,
+        product: line.product.number,
         material: line.material.name,
         quantity: data.quantity,
       },
@@ -632,12 +638,12 @@ export async function returnMaterial(
         movementId: movement.id,
         type: "RETURN",
         materialId: line.materialId,
-        projectId: line.projectId,
+        productId: line.productId,
         quantity: data.quantity,
       },
       session.user.id,
     );
-    revalidateWarehouse(line.projectId);
+    revalidateWarehouse(line.productId, line.product.projectId);
     return { ok: true };
   } catch (error) {
     return {

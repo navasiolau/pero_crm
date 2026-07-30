@@ -14,7 +14,7 @@ import {
   type DragStartEvent,
 } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
-import { ClipboardList, Paperclip, TriangleAlert } from "lucide-react";
+import { ClipboardList, Package, Paperclip, TriangleAlert } from "lucide-react";
 import { toast } from "sonner";
 import type { ProjectStage } from "@prisma/client";
 
@@ -70,11 +70,14 @@ function ProjectCardView({
         ) : null}
         <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
           {showAmount ? (
-            <span>{formatAmount(project.expectedPrice, project.currency)}</span>
+            <span>{formatAmount(project.totalPrice, project.currency)}</span>
           ) : (
             <span />
           )}
           <span className="flex items-center gap-2">
+            <span className="flex items-center gap-0.5">
+              <Package className="size-3.5" /> {project.productsCount}
+            </span>
             <span className="flex items-center gap-0.5">
               <ClipboardList className="size-3.5" /> {project.tasksCount}
             </span>

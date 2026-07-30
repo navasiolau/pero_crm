@@ -1,34 +1,70 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import Link from "next/link";
 import { toast } from "sonner";
-import type { Project } from "@prisma/client";
+import type { ProjectStage } from "@prisma/client";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SearchableSelect } from "@/components/ui/searchable-select";
-import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { formatAmount } from "@/lib/format";
+import { displayClientName } from "@/lib/labels";
 import { stageLabels } from "@/lib/stages";
 import { updateProject } from "@/server/projects/actions";
 
 import type { SelectOption } from "../projects-view";
 
-// Вкладка «Общее»: просмотр + редактирование по правам (§4).
+const CURRENCIES = ["BYN", "RUB", "USD", "EUR"];
+
+export interface OverviewProject {
+  id: string;
+  number: string;
+  title: string;
+  stage: ProjectStage;
+  stageChangedAt: Date;
+  currency: string;
+  address: string | null;
+  clientId: string;
+  managerId: string | null;
+  engineerId: string | null;
+  createdAt: Date;
+  refusalReason: string | null;
+  refusalComment: string | null;
+  reclamationReason: string | null;
+  reclamationDescription: string | null;
+  reclamationFault: string | null;
+  client: { id: string; name: string; lastName: string | null; middleName: string | null; phone: string };
+}
+
+// Вкладка «Общее» карточки проекта: заказ (клиент, менеджер, инженер,
+// адрес, валюта) + служебные данные. Цены — на изделиях (вкладка
+// «Изделия»), сумма изделий показана справочно.
 export function OverviewTab({
   project,
+  totalPrice,
+  createdByName,
+  doneAt,
   canManage,
-  canEditTech,
   showAmount,
   clients,
   managers,
   engineers,
 }: {
-  project: Project & { client: { name: string; phone: string } };
+  project: OverviewProject;
+  totalPrice: number;
+  createdByName: string | null;
+  doneAt: string | null; // дата перехода в «Завершён» из истории этапов
   canManage: boolean;
-  canEditTech: boolean;
   showAmount: boolean;
   clients: SelectOption[];
   managers: SelectOption[];
@@ -37,9 +73,8 @@ export function OverviewTab({
   const [pending, startTransition] = useTransition();
   const [form, setForm] = useState({
     title: project.title,
-    expectedPrice: project.expectedPrice?.toString() ?? "",
     address: project.address ?? "",
-    description: project.description ?? "",
+    currency: project.currency,
     clientId: project.clientId,
     managerId: project.managerId ?? "",
     engineerId: project.engineerId ?? "",
@@ -50,7 +85,7 @@ export function OverviewTab({
       setForm((prev) => ({ ...prev, [key]: event.target.value }));
   }
 
-  const ro = !canManage; // read-only для не-менеджеров (кроме тех. блока)
+  const ro = !canManage; // read-only для не-менеджеров
 
   return (
     <div className="grid gap-4 lg:grid-cols-2">
@@ -64,7 +99,7 @@ export function OverviewTab({
             <Input value={stageLabels[project.stage]} disabled />
           </div>
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="title">Изделие / описание</Label>
+            <Label htmlFor="title">Название заказа</Label>
             <Input id="title" value={form.title} onChange={set("title")} readOnly={ro} />
           </div>
           <div className="flex flex-col gap-1.5">
@@ -81,27 +116,13 @@ export function OverviewTab({
               disabled={ro}
             />
             <p className="text-xs text-muted-foreground">
-              Телефон: {project.client.phone}
+              <Link href="/clients" className="underline-offset-2 hover:underline">
+                {displayClientName(project.client)}
+              </Link>
+              {" · "}Телефон: {project.client.phone}
             </p>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="price">
-                Ожидаемая цена{showAmount ? `, ${project.currency}` : ""}
-              </Label>
-              {showAmount ? (
-                <Input
-                  id="price"
-                  type="number"
-                  min="0"
-                  value={form.expectedPrice}
-                  onChange={set("expectedPrice")}
-                  readOnly={ro}
-                />
-              ) : (
-                <Input value="скрыто правами" disabled />
-              )}
-            </div>
             <div className="flex flex-col gap-1.5">
               <Label>Менеджер</Label>
               <SearchableSelect
@@ -134,39 +155,47 @@ export function OverviewTab({
                 disabled={ro}
               />
               <p className="text-xs text-muted-foreground">
-                На инженера начисляется % при переходе «В работе»
+                На инженера начисляется % от суммы изделий при переходе «В работе»
               </p>
             </div>
           </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="address">Адрес</Label>
-            <Input id="address" value={form.address} onChange={set("address")} readOnly={ro} />
+          <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="address">Адрес</Label>
+              <Input id="address" value={form.address} onChange={set("address")} readOnly={ro} />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>Валюта</Label>
+              <Select
+                value={form.currency}
+                onValueChange={(value) =>
+                  setForm((prev) => ({ ...prev, currency: value ?? "BYN" }))
+                }
+                disabled={ro}
+              >
+                <SelectTrigger>
+                  <SelectValue>{form.currency}</SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {CURRENCIES.map((item) => (
+                    <SelectItem key={item} value={item}>
+                      {item}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="description">Технический блок</Label>
-            <Textarea
-              id="description"
-              value={form.description}
-              onChange={set("description")}
-              readOnly={!canEditTech}
-              placeholder="Материалы, размеры, особенности…"
-            />
-            <p className="text-xs text-muted-foreground">
-              Тех. блок правит и инженер
-            </p>
-          </div>
-          {canManage || canEditTech ? (
+          {canManage ? (
             <div>
               <Button
                 disabled={pending}
                 onClick={() =>
                   startTransition(async () => {
-                    const price = form.expectedPrice.trim();
                     const result = await updateProject(project.id, {
                       title: form.title.trim(),
-                      expectedPrice: price === "" ? null : Number(price),
                       address: form.address.trim() || null,
-                      description: form.description.trim() || null,
+                      currency: form.currency,
                       clientId: form.clientId,
                       managerId: form.managerId || null,
                       engineerId: form.engineerId || null,
@@ -201,11 +230,18 @@ export function OverviewTab({
           <div>
             <span className="text-muted-foreground">Создан:</span>{" "}
             {new Date(project.createdAt).toLocaleString("ru-RU")}
+            {createdByName ? ` · ${createdByName}` : ""}
           </div>
+          {doneAt ? (
+            <div>
+              <span className="text-muted-foreground">Завершён:</span>{" "}
+              {new Date(doneAt).toLocaleString("ru-RU")}
+            </div>
+          ) : null}
           {showAmount ? (
             <div>
-              <span className="text-muted-foreground">Ожидаемая цена:</span>{" "}
-              {formatAmount(project.expectedPrice?.toString() ?? null, project.currency)}
+              <span className="text-muted-foreground">Сумма изделий:</span>{" "}
+              {formatAmount(totalPrice > 0 ? String(totalPrice) : null, project.currency)}
             </div>
           ) : null}
           {project.stage === "REFUSED" ? (

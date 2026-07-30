@@ -60,14 +60,24 @@ export interface PriceOption {
   price: string;
 }
 
+export interface ProductOption {
+  id: string;
+  number: string;
+  title: string;
+}
+
 function tomorrow(): string {
   return new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
 // Вкладка «Работы и задачи». Работы — расценка × количество со снимком цены (§9).
 // Клик по задаче — карточка (просмотр/правка). Замер — с фото (§6.2).
+// Используется и в карточке проекта (все задачи, изделие — выбор),
+// и в карточке изделия (productId зафиксирован).
 export function TasksTab({
   projectId,
+  productId,
+  products = [],
   tasks,
   works,
   priceItems,
@@ -75,6 +85,8 @@ export function TasksTab({
   workers,
 }: {
   projectId: string;
+  productId?: string; // зафиксированное изделие (карточка изделия)
+  products?: ProductOption[]; // изделия проекта — выбор в диалоге задачи
   tasks: TaskDetails[];
   works: WorkRow[];
   priceItems: PriceOption[];
@@ -88,6 +100,7 @@ export function TasksTab({
   const [title, setTitle] = useState("");
   const [type, setType] = useState("Производство");
   const [assigneeId, setAssigneeId] = useState("");
+  const [taskProductId, setTaskProductId] = useState(productId ?? "");
   const [workId, setWorkId] = useState("");
   const [estimate, setEstimate] = useState("");
   const [dueAt, setDueAt] = useState(tomorrow);
@@ -183,6 +196,11 @@ export function TasksTab({
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-sm font-medium">{task.title}</span>
                 {task.type ? <Badge variant="outline">{task.type}</Badge> : null}
+                {!productId && task.productNumber ? (
+                  <Badge variant="secondary" className="text-xs">
+                    {task.productNumber}
+                  </Badge>
+                ) : null}
                 {task.status === "DRAFT" ? (
                   <Badge
                     variant="outline"
@@ -340,6 +358,21 @@ export function TasksTab({
               />
             </div>
             <div className="flex flex-col gap-1.5">
+              <Label>Изделие</Label>
+              <SearchableSelect
+                options={products.map((product) => ({
+                  value: product.id,
+                  label: `${product.number} · ${product.title}`,
+                }))}
+                value={taskProductId}
+                onChange={setTaskProductId}
+                placeholder="весь проект"
+                searchPlaceholder="Поиск изделия…"
+                allowClear
+                disabled={!!productId}
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
               <Label>Работа (оплата)</Label>
               <SearchableSelect
                 options={works.map((work) => {
@@ -411,6 +444,7 @@ export function TasksTab({
                 startTransition(async () => {
                   const result = await createTask({
                     projectId,
+                    productId: taskProductId || undefined,
                     title: title.trim(),
                     type,
                     assigneeId: assigneeId || undefined,
@@ -430,6 +464,7 @@ export function TasksTab({
                     setTitle("");
                     setType("Производство");
                     setAssigneeId("");
+                    setTaskProductId(productId ?? "");
                     setWorkId("");
                     setEstimate("");
                     setDueAt(tomorrow());
@@ -450,6 +485,7 @@ export function TasksTab({
         task={selected}
         workers={workers}
         canEdit={canManage}
+        products={products}
         projectTasks={tasks.map((task) => ({
           id: task.id,
           title: task.title,
@@ -521,6 +557,7 @@ export function TasksTab({
                 startTransition(async () => {
                   const result = await addWork({
                     projectId,
+                    productId: productId || undefined,
                     priceItemId,
                     quantity: Number(quantity),
                   });

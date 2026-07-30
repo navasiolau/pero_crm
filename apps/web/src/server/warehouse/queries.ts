@@ -2,9 +2,9 @@ import { prisma } from "@/lib/prisma";
 
 // ─── Склад (§12, фаза 6): номенклатура, остатки из движений, потребность ──
 // Остатки не хранятся: остаток = Σ INCOME + Σ RETURN − Σ EXPENSE.
-// Потребность проекта (ProjectMaterial) создаётся без проверки остатка;
+// Потребность изделия (ProjectMaterial) создаётся без проверки остатка;
 // нехватка вычисляется: debt = quantity − issuedQty, строка «в нехватке»,
-// если debt > 0 и остаток < debt.
+// если debt > 0 и остаток < debt. Бейдж проекта — агрегат по его изделиям.
 
 export type MaterialCategoryView = {
   id: string;
@@ -117,8 +117,8 @@ export type StockMovementView = {
   quantity: number;
   unitPrice: number | null;
   totalByn: number | null;
-  projectId: string | null;
-  projectNumber: string | null;
+  productId: string | null;
+  productNumber: string | null;
   comment: string | null;
   createdByName: string | null;
   createdAt: string; // ISO
@@ -126,20 +126,20 @@ export type StockMovementView = {
 
 export async function listMovements(filter?: {
   materialId?: string;
-  projectId?: string;
+  productId?: string;
   type?: "INCOME" | "EXPENSE" | "RETURN";
 }): Promise<StockMovementView[]> {
   const movements = await prisma.stockMovement.findMany({
     where: {
       materialId: filter?.materialId || undefined,
-      projectId: filter?.projectId || undefined,
+      productId: filter?.productId || undefined,
       type: filter?.type || undefined,
     },
     orderBy: { createdAt: "desc" },
     take: 500,
     include: {
       material: { select: { name: true, unit: true } },
-      project: { select: { number: true } },
+      product: { select: { number: true } },
     },
   });
   const userIds = [
@@ -159,8 +159,8 @@ export async function listMovements(filter?: {
     quantity: Number(movement.quantity),
     unitPrice: movement.unitPrice === null ? null : Number(movement.unitPrice),
     totalByn: movement.totalByn === null ? null : Number(movement.totalByn),
-    projectId: movement.projectId,
-    projectNumber: movement.project?.number ?? null,
+    productId: movement.productId,
+    productNumber: movement.product?.number ?? null,
     comment: movement.comment,
     createdByName: movement.createdById
       ? (userName.get(movement.createdById) ?? null)
@@ -194,11 +194,11 @@ export type ProjectMaterialsData = {
 };
 
 export async function getProjectMaterials(
-  projectId: string,
+  productId: string,
 ): Promise<ProjectMaterialsData> {
   const [rows, movements] = await Promise.all([
     prisma.projectMaterial.findMany({
-      where: { projectId },
+      where: { productId },
       orderBy: { createdAt: "asc" },
       include: {
         material: {
@@ -206,7 +206,7 @@ export async function getProjectMaterials(
         },
       },
     }),
-    listMovements({ projectId }),
+    listMovements({ productId }),
   ]);
   const stock = await stockByMaterial(rows.map((row) => row.materialId));
 
@@ -253,16 +253,16 @@ export async function getProjectMaterials(
   };
 }
 
-// Флаги нехватки для списков проектов (канбан/таблица): проект помечается,
-// если у него есть строка потребности, которую не покрывает остаток.
-export async function listProjectShortages(
-  projectIds: string[],
+// Флаги нехватки для списков изделий: изделие помечается, если у него есть
+// строка потребности, которую не покрывает остаток.
+export async function listProductShortages(
+  productIds: string[],
 ): Promise<Set<string>> {
-  if (projectIds.length === 0) return new Set();
+  if (productIds.length === 0) return new Set();
   const lines = await prisma.projectMaterial.findMany({
-    where: { projectId: { in: projectIds } },
+    where: { productId: { in: productIds } },
     select: {
-      projectId: true,
+      productId: true,
       materialId: true,
       quantity: true,
       issuedQty: true,
@@ -276,7 +276,36 @@ export async function listProjectShortages(
   for (const line of lines) {
     const debt = Number(line.quantity) - Number(line.issuedQty);
     if (debt > 0 && (stock.get(line.materialId) ?? 0) < debt) {
-      result.add(line.projectId);
+      result.add(line.productId);
+    }
+  }
+  return result;
+}
+
+// Бейдж «Нехватка материалов» для списков проектов (канбан/таблица):
+// агрегат по всем изделиям проекта.
+export async function listProjectShortages(
+  projectIds: string[],
+): Promise<Set<string>> {
+  if (projectIds.length === 0) return new Set();
+  const lines = await prisma.projectMaterial.findMany({
+    where: { product: { projectId: { in: projectIds } } },
+    select: {
+      materialId: true,
+      quantity: true,
+      issuedQty: true,
+      product: { select: { projectId: true } },
+    },
+  });
+  if (lines.length === 0) return new Set();
+  const stock = await stockByMaterial([
+    ...new Set(lines.map((line) => line.materialId)),
+  ]);
+  const result = new Set<string>();
+  for (const line of lines) {
+    const debt = Number(line.quantity) - Number(line.issuedQty);
+    if (debt > 0 && (stock.get(line.materialId) ?? 0) < debt) {
+      result.add(line.product.projectId);
     }
   }
   return result;

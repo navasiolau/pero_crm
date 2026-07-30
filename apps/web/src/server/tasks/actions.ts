@@ -16,6 +16,7 @@ import { getPayrollCurrency } from "@/server/payroll/queries";
 
 const createSchema = z.object({
   projectId: z.string(),
+  productId: z.string().optional(), // изделие проекта (необязательно)
   title: z.string().min(1, "Укажите название задачи"),
   // Тип и срок обязательны (без исполнителя — черновик, §4/§9)
   type: z.string().min(1, "Укажите тип задачи"),
@@ -96,6 +97,15 @@ export async function createTask(
   });
   if (!project) return { ok: false, error: "Проект не найден" };
 
+  // Изделие должно принадлежать проекту задачи
+  if (data.productId) {
+    const product = await prisma.product.findFirst({
+      where: { id: data.productId, projectId: data.projectId },
+      select: { id: true },
+    });
+    if (!product) return { ok: false, error: "Изделие не найдено в этом проекте" };
+  }
+
   const estimateMinutes =
     data.estimateMinutes ?? (await estimateFromHistory(data.type)) ?? null;
   // Оценка времени обязательна для любой задачи (§9)
@@ -116,6 +126,7 @@ export async function createTask(
   const task = await prisma.task.create({
     data: {
       projectId: data.projectId,
+      productId: data.productId || null,
       title: data.title,
       type: data.type,
       assigneeId: data.assigneeId || null,
@@ -156,6 +167,7 @@ export async function createTask(
     });
   }
   revalidatePath(`/projects/${data.projectId}`);
+  if (data.productId) revalidatePath(`/products/${data.productId}`);
   revalidatePath("/my");
   return { ok: true };
 }
@@ -169,6 +181,7 @@ const updateSchema = z.object({
   title: z.string().min(1, "Укажите название задачи").optional(),
   type: z.string().min(1, "Укажите тип задачи").optional(),
   assigneeId: z.string().nullable().optional(),
+  productId: z.string().nullable().optional(), // изделие проекта (можно очистить)
   workId: z.string().nullable().optional(),
   quantity: z.number().positive().nullable().optional(),
   dueAt: z.string().min(1, "Укажите срок").optional(),
@@ -203,6 +216,15 @@ export async function updateTask(
     return { ok: false, error: "Выполненная задача — только просмотр" };
   }
 
+  // Изделие должно принадлежать проекту задачи
+  if (data.productId) {
+    const product = await prisma.product.findFirst({
+      where: { id: data.productId, projectId: task.project.id },
+      select: { id: true },
+    });
+    if (!product) return { ok: false, error: "Изделие не найдено в этом проекте" };
+  }
+
   const becameAssigned =
     data.assigneeId && data.assigneeId !== task.assigneeId;
   const newStatus =
@@ -231,6 +253,7 @@ export async function updateTask(
       title: data.title,
       type: data.type,
       assigneeId: data.assigneeId === undefined ? undefined : data.assigneeId,
+      productId: data.productId === undefined ? undefined : data.productId,
       workId: data.workId === undefined ? undefined : data.workId,
       quantity: quantityValue,
       dueAt: data.dueAt ? new Date(data.dueAt) : undefined,
@@ -287,6 +310,8 @@ export async function updateTask(
   }
 
   revalidatePath(`/projects/${task.project.id}`);
+  if (task.productId) revalidatePath(`/products/${task.productId}`);
+  if (data.productId) revalidatePath(`/products/${data.productId}`);
   revalidatePath("/tasks");
   revalidatePath("/my");
   return { ok: true };
@@ -366,6 +391,7 @@ export async function changeTaskStatus(
     where: { id: taskId },
     include: {
       project: { select: { id: true, number: true } },
+      product: { select: { id: true, number: true } },
       files: { select: { id: true } },
       work: { select: { id: true, total: true } },
       dependencies: {
@@ -526,11 +552,12 @@ export async function changeTaskStatus(
     type: "task.statusChanged",
     title: `Задача «${task.title}»: ${toStatus === "DONE" ? "выполнена" : "в работе"}`,
     body: `${projectLabel(task.project.number)} · ${session.user.name ?? ""}`,
-    link: `/projects/${task.project.id}`,
+    link: task.product ? `/products/${task.product.id}` : `/projects/${task.project.id}`,
     exceptUserId: session.user.id,
   });
 
   revalidatePath(`/projects/${task.project.id}`);
+  if (task.product) revalidatePath(`/products/${task.product.id}`);
   revalidatePath("/my");
   return { ok: true };
 }
@@ -580,6 +607,7 @@ export async function deleteTask(
     oldValue: { title: task.title, project: task.project.number },
   });
   revalidatePath(`/projects/${task.project.id}`);
+  if (task.productId) revalidatePath(`/products/${task.productId}`);
   revalidatePath("/tasks");
   revalidatePath("/my");
   return { ok: true };

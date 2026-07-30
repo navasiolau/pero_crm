@@ -32,6 +32,7 @@ export default async function DashboardPage() {
     prisma.project.findMany({
       include: {
         client: { select: { name: true, lastName: true, middleName: true } },
+        products: { select: { expectedPrice: true } },
       },
       orderBy: { createdAt: "desc" },
       take: 5,
@@ -79,20 +80,26 @@ export default async function DashboardPage() {
       />
       <ChartAreaInteractive />
       <RecentProjects
-        projects={recent.map((project) => ({
-          id: project.id,
-          number: project.number,
-          client: displayClientName(project.client),
-          product: project.title,
-          status: stageLabels[project.stage],
-          statusClass: stageStyles[project.stage].badge,
-          sum: showAmount
-            ? formatAmount(
-                project.expectedPrice?.toString() ?? null,
-                project.currency,
-              )
-            : "—",
-        }))}
+        projects={recent.map((project) => {
+          const totalPrice = project.products.reduce(
+            (sum, product) => sum + Number(product.expectedPrice ?? 0),
+            0,
+          );
+          return {
+            id: project.id,
+            number: project.number,
+            client: displayClientName(project.client),
+            product: project.title,
+            status: stageLabels[project.stage],
+            statusClass: stageStyles[project.stage].badge,
+            sum: showAmount
+              ? formatAmount(
+                  totalPrice > 0 ? String(totalPrice) : null,
+                  project.currency,
+                )
+              : "—",
+          };
+        })}
       />
       <p className="text-xs text-muted-foreground">
         График — демо-данные; реальная динамика появится в следующих фазах.

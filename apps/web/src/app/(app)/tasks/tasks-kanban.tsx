@@ -57,6 +57,7 @@ function TaskCardView({ task, dragging }: { task: TaskDetails; dragging?: boolea
         </div>
         <div className="text-xs text-muted-foreground">
           {task.projectNumber} · {task.projectTitle}
+          {task.productNumber ? ` · ${task.productNumber}` : ""}
         </div>
         <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
           <span>{task.assigneeName ?? "без исполнителя"}</span>

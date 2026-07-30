@@ -181,6 +181,7 @@ export function MyTasksView({
             </div>
             <div className="text-sm text-muted-foreground">
               {task.projectNumber} · {task.projectTitle}
+              {task.productNumber ? ` · изделие ${task.productNumber}` : ""}
               {task.dueAt
                 ? ` · до ${new Date(task.dueAt).toLocaleDateString("ru-RU")}`
                 : ""}

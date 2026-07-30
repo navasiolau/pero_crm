@@ -44,7 +44,7 @@ export function RecentProjects({ projects }: { projects: RecentProjectRow[] }) {
             <TableRow>
               <TableHead>Номер</TableHead>
               <TableHead>Клиент</TableHead>
-              <TableHead>Изделие</TableHead>
+              <TableHead>Заказ</TableHead>
               <TableHead>Этап</TableHead>
               <TableHead className="text-right">Сумма</TableHead>
             </TableRow>

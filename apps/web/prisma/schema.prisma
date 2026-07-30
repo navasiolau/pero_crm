@@ -105,15 +105,16 @@ model Client {
   communications Communication[]
 }
 
+// Проект = заказ клиента (может включать десятки изделий, напр. ремонт
+// целого дома). Этапы воронки — на проекте (§6); платежи, маржа и
+// экономика — тоже на проекте (§11). Стоимость проекта = Σ цен изделий.
 model Project {
   id                     String       @id @default(cuid())
   number                 String       @unique // П-2026-001
-  title                  String // изделие / краткое описание
+  title                  String // название заказа
   stage                  ProjectStage @default(LEAD)
   stageChangedAt         DateTime     @default(now())
-  expectedPrice          Decimal?     @db.Decimal(12, 2)
-  currency               String       @default("BYN")
-  description            String? // тех. блок (правит и инженер, §4)
+  currency               String       @default("BYN") // валюта проекта и его изделий
   address                String?
   refusalReason          String?
   refusalComment         String?
@@ -122,8 +123,8 @@ model Project {
   reclamationFault       String?
   managerId              String?
   manager                User?        @relation("ProjectManager", fields: [managerId], references: [id], onDelete: SetNull)
-  // Инженер-проектировщик: на него начисляется % от стоимости при
-  // передаче проекта в производство (переход «В работе», §10)
+  // Инженер-проектировщик: на него начисляется % от стоимости проекта
+  // (Σ цен изделий) при первом переходе «В работе» (§10)
   engineerId             String?
   engineer               User?        @relation("ProjectEngineer", fields: [engineerId], references: [id], onDelete: SetNull)
   clientId               String
@@ -133,16 +134,68 @@ model Project {
   legacyTable            String?
   createdAt              DateTime     @default(now())
   updatedAt              DateTime     @updatedAt
+  products               Product[]
   stageHistory           ProjectStageHistory[]
   tasks                  Task[]
   works                  Work[]
   files                  File[]
   communications         Communication[]
   payments               Payment[]
-  stockMovements         StockMovement[]
-  projectMaterials       ProjectMaterial[]
 
   @@index([stage, stageChangedAt])
+}
+
+// Статусы изделия — проще этапов проекта: производственная цепочка
+// от проектирования до готовности + служебная «Рекламация».
+enum ProductStatus {
+  DESIGN // Проектирование
+  PRODUCTION // В производстве
+  DELIVERY // Доставка
+  INSTALLATION // Установка
+  DONE // Готово
+  RECLAMATION // Рекламация
+}
+
+// Изделие — единица производства внутри проекта (бывшая сущность
+// «Проект» до рефактора). Цена — на изделии (в валюте проекта);
+// задачи/работы и потребность в материалах привязаны к изделию.
+model Product {
+  id               String       @id @default(cuid())
+  projectId        String
+  project          Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  number           String       @unique // П-2026-001-1
+  title            String // название изделия
+  status           ProductStatus @default(DESIGN)
+  statusChangedAt  DateTime     @default(now())
+  expectedPrice    Decimal?     @db.Decimal(12, 2)
+  description      String? // тех. блок (правит и инженер, §4)
+  createdById      String?
+  legacyId         String?
+  legacyTable      String?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  statusHistory    ProductStatusHistory[]
+  tasks            Task[]
+  works            Work[]
+  files            File[]
+  projectMaterials ProjectMaterial[]
+  stockMovements   StockMovement[]
+
+  @@index([projectId])
+  @@index([status, statusChangedAt])
+}
+
+model ProductStatusHistory {
+  id          String        @id @default(cuid())
+  productId   String
+  product     Product       @relation(fields: [productId], references: [id], onDelete: Cascade)
+  fromStatus  ProductStatus?
+  toStatus    ProductStatus
+  comment     String?
+  changedById String?
+  createdAt   DateTime      @default(now())
+
+  @@index([productId, createdAt])
 }
 
 model ProjectStageHistory {
@@ -160,10 +213,13 @@ model ProjectStageHistory {
 
 // Задача (§9): статусы Черновик → Новая → В работе → Выполнена;
 // зависимости DAG; оценка времени из истории + факт из TimeEntry.
+// Привязка: всегда к проекту, опционально — к конкретному изделию.
 model Task {
   id             String     @id @default(cuid())
   projectId      String
   project        Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  productId      String?
+  product        Product?   @relation(fields: [productId], references: [id], onDelete: SetNull)
   title          String
   type           String? // "Замер" и др.; шаблоны — плагин Базиса
   status         TaskStatus @default(NEW)
@@ -190,6 +246,7 @@ model Task {
   payrollEntries PayrollEntry[]
 
   @@index([assigneeId, status])
+  @@index([productId])
 }
 
 // Зависимость задач (DAG, §9): задача блокируется,
@@ -221,11 +278,14 @@ model PriceItem {
   works       Work[]
 }
 
-// Работа в проекте: расценка × количество, цена — снимок на момент назначения.
+// Работа: расценка × количество, цена — снимок на момент назначения.
+// Привязка: всегда к проекту, опционально — к конкретному изделию.
 model Work {
   id            String    @id @default(cuid())
   projectId     String
   project       Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  productId     String?
+  product       Product?  @relation(fields: [productId], references: [id], onDelete: SetNull)
   priceItemId   String?
   priceItem     PriceItem? @relation(fields: [priceItemId], references: [id], onDelete: SetNull)
   title         String
@@ -239,6 +299,7 @@ model Work {
   tasks         Task[]
 
   @@index([projectId])
+  @@index([productId])
 }
 
 // ─── Время по задачам (§9) ───────────────────────────────────────────────────
@@ -425,15 +486,15 @@ model Material {
   projectMaterials ProjectMaterial[]
 }
 
-// Потребность проекта в материале (аналог legacy 1531 «Номенклатура в заказах»).
-// Она же — простой резерв (§12): количество фиксируется за проектом
+// Потребность изделия в материале (аналог legacy 1531 «Номенклатура в заказах»).
+// Она же — простой резерв (§12): количество фиксируется за изделием
 // БЕЗ проверки остатка (строки в будущем создаёт скриптом плагин
 // «Базис-Мебельщик»). Нехватка вычисляется: debt = quantity − issuedQty,
 // строка «в нехватке», если debt > 0 и остаток на складе < debt.
 model ProjectMaterial {
   id          String          @id @default(cuid())
-  projectId   String
-  project     Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  productId   String
+  product     Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
   materialId  String
   material    Material        @relation(fields: [materialId], references: [id], onDelete: Restrict)
   quantity    Decimal         @db.Decimal(12, 3) // сколько нужно
@@ -444,13 +505,14 @@ model ProjectMaterial {
   updatedAt   DateTime        @updatedAt
   movements   StockMovement[]
 
-  @@unique([projectId, materialId]) // повторное добавление того же материала наращивает quantity
+  @@unique([productId, materialId]) // повторное добавление того же материала наращивает quantity
   @@index([materialId])
 }
 
 // Единый журнал движений (аналог legacy 1641 «Учёт движения»).
-// EXPENSE/RETURN — всегда с проектом и ценой: totalByn идёт в экономику
-// проекта (getProjectEconomics, строка «Материалы (склад)» в расходах).
+// EXPENSE/RETURN — всегда с изделием и ценой: totalByn идёт в экономику
+// проекта (getProjectEconomics, строка «Материалы (склад)» в расходах)
+// через изделия этого проекта.
 model StockMovement {
   id                String            @id @default(cuid())
   materialId        String
@@ -459,8 +521,8 @@ model StockMovement {
   quantity          Decimal           @db.Decimal(12, 3)
   unitPrice         Decimal?          @db.Decimal(12, 2) // BYN/ед., снимок (обязателен для EXPENSE/RETURN)
   totalByn          Decimal?          @db.Decimal(12, 2) // quantity × unitPrice, снимок
-  projectId         String?
-  project           Project?          @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  productId         String?
+  product           Product?          @relation(fields: [productId], references: [id], onDelete: SetNull)
   projectMaterialId String?
   projectMaterial   ProjectMaterial?  @relation(fields: [projectMaterialId], references: [id], onDelete: SetNull)
   comment           String?
@@ -468,7 +530,7 @@ model StockMovement {
   createdAt         DateTime          @default(now())
 
   @@index([materialId])
-  @@index([projectId])
+  @@index([productId])
   @@index([createdAt])
 }
 
@@ -476,6 +538,8 @@ model File {
   id           String       @id @default(cuid())
   projectId    String
   project      Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  productId    String?
+  product      Product?     @relation(fields: [productId], references: [id], onDelete: SetNull)
   taskId       String?
   task         Task?        @relation(fields: [taskId], references: [id], onDelete: SetNull)
   category     FileCategory @default(OTHER)

@@ -217,41 +217,63 @@ async function main() {
   });
 
   const year = new Date().getFullYear();
+  // Проект = заказ клиента с изделиями (цены — на изделиях).
   const projects = [
     {
       number: `П-${year}-001`,
-      title: "Кухня «Модерн»",
+      title: "Кухня и шкаф для Ивановой",
       stage: "IN_WORK" as const,
-      expectedPrice: 385000,
       clientId: ivanova.id,
-      engineerId: engineer.id, // на него — % от стоимости (§10)
+      engineerId: engineer.id, // на него — % от стоимости (Σ изделий, §10)
+      products: [
+        {
+          title: "Кухня «Модерн»",
+          status: "PRODUCTION" as const,
+          expectedPrice: 385000,
+        },
+        { title: "Шкаф-купе", status: "DESIGN" as const, expectedPrice: null },
+      ],
     },
     {
       number: `П-${year}-002`,
-      title: "Шкаф-купе",
+      title: "Шкаф-купе для Петрова",
       stage: "CONTRACT" as const,
-      expectedPrice: 142000,
       clientId: petrov.id,
+      engineerId: null,
+      products: [
+        { title: "Шкаф-купе", status: "DESIGN" as const, expectedPrice: 142000 },
+      ],
     },
     {
       number: `П-${year}-003`,
       title: "Офисная мебель",
       stage: "LEAD" as const,
-      expectedPrice: 96500,
       clientId: alpha.id,
+      engineerId: null,
+      products: [
+        { title: "Офисная мебель", status: "DESIGN" as const, expectedPrice: 96500 },
+      ],
     },
     {
       number: `П-${year}-004`,
       title: "Прихожая «Лофт»",
       stage: "ESTIMATE" as const,
       clientId: ivanova.id,
+      engineerId: null,
+      products: [
+        { title: "Прихожая «Лофт»", status: "DESIGN" as const, expectedPrice: null },
+      ],
     },
   ];
 
   for (const project of projects) {
     const created = await prisma.project.create({
       data: {
-        ...project,
+        number: project.number,
+        title: project.title,
+        stage: project.stage,
+        clientId: project.clientId,
+        engineerId: project.engineerId,
         managerId: manager.id,
         createdById: manager.id,
         stageHistory: {
@@ -259,10 +281,27 @@ async function main() {
         },
       },
     });
-    console.log(`✔ проект ${created.number} (${created.stage})`);
+    let suffix = 0;
+    for (const product of project.products) {
+      suffix += 1;
+      await prisma.product.create({
+        data: {
+          projectId: created.id,
+          number: `${project.number}-${suffix}`,
+          title: product.title,
+          status: product.status,
+          expectedPrice: product.expectedPrice,
+          createdById: manager.id,
+          statusHistory: {
+            create: { toStatus: product.status, changedById: manager.id },
+          },
+        },
+      });
+    }
+    console.log(`✔ проект ${created.number} (${created.stage}, изделий: ${suffix})`);
   }
 
-  // Замер — типовая задача с обязательными фото (§6.2)
+  // Замер — типовая задача с обязательными фото (§6.2), на весь заказ
   const kitchen = await prisma.project.findUniqueOrThrow({
     where: { number: `П-${year}-001` },
   });
@@ -285,9 +324,10 @@ async function main() {
   }
 
   // Демо-данные фазы 4 (§10): проект создан сразу «В работе», минуя
-  // changeProjectStage, поэтому начисление инженеру (5% от стоимости)
-  // вносим явно. Демо-выплат НЕТ: деньги платятся только за прошлый
-  // месяц, а все начисления в seed — текущего (правило владельца).
+  // changeProjectStage, поэтому начисление инженеру (5% от стоимости =
+  // Σ цен изделий = 385 000) вносим явно. Демо-выплат НЕТ: деньги платятся
+  // только за прошлый месяц, а все начисления в seed — текущего (правило
+  // владельца).
   const month = new Date().toISOString().slice(0, 7);
   await prisma.payrollEntry.create({
     data: {
@@ -302,7 +342,8 @@ async function main() {
   console.log("✔ начисление инженеру (5% от стоимости)");
 
   // Демо-приходы (§10/§11): оборот месяца для «% от оборота» — сумма
-  // приходов. BYN, курс 1, основная касса (эквиваленты = сумме).
+  // приходов. BYN, курс 1, основная касса; USD-приход 1000 по курсу
+  // 2.8938 (эквивалент 2 893,8 BYN) — зафиксированная экономика П-001.
   const shkaf = await prisma.project.findUniqueOrThrow({
     where: { number: `П-${year}-002` },
   });
@@ -318,6 +359,18 @@ async function main() {
         createdById: manager.id,
       },
       {
+        projectId: kitchen.id,
+        amount: 1000,
+        currency: "USD",
+        rate: 2.8938,
+        rateDate: new Date(),
+        bynAmount: 2893.8,
+        projectAmount: 2893.8,
+        cashAccountId: "seed-cash-usd",
+        comment: "Предоплата в долларах",
+        createdById: manager.id,
+      },
+      {
         projectId: shkaf.id,
         amount: 50000,
         bynAmount: 50000,
@@ -328,7 +381,7 @@ async function main() {
       },
     ],
   });
-  console.log("✔ демо-приходы (150 000 + 50 000)");
+  console.log("✔ демо-приходы (150 000 + 1 000 $ + 50 000)");
 
   // Демо-расход (§11): материалы на кухню — уменьшает маржу проекта
   await prisma.payment.create({
@@ -467,19 +520,19 @@ async function main() {
     console.log("✔ приходы на склад (4 позиции)");
   }
 
-  // Демо-потребность и выдача — на П-****-002 «Шкаф-купе» (НЕ трогаем
-  // П-****-001: его экономика зафиксирована e2e-проверками фазы 5).
+  // Демо-потребность и выдача — на изделии «Шкаф-купе» проекта П-****-002
+  // (НЕ трогаем П-****-001: его экономика зафиксирована e2e-проверками).
   // ЛДСП: нужно 12, выдано 8 → «Можно запросить»; петли: 16 из 16 →
   // «Обеспечено»; кромка: нужно 600 при остатке 500 → «Нет на складе»
   // (красная строка + бейдж нехватки на проекте).
-  const shkafProject = await prisma.project.findUnique({
-    where: { number: `П-${warehouseYear}-002` },
+  const shkafProduct = await prisma.product.findUnique({
+    where: { number: `П-${warehouseYear}-002-1` },
   });
-  if (shkafProject && (await prisma.projectMaterial.count()) === 0) {
+  if (shkafProduct && (await prisma.projectMaterial.count()) === 0) {
     const [ldspLine, petlyaLine] = await Promise.all([
       prisma.projectMaterial.create({
         data: {
-          projectId: shkafProject.id,
+          productId: shkafProduct.id,
           materialId: "seed-mat-ldsp16",
           quantity: 12,
           issuedQty: 8,
@@ -488,7 +541,7 @@ async function main() {
       }),
       prisma.projectMaterial.create({
         data: {
-          projectId: shkafProject.id,
+          productId: shkafProduct.id,
           materialId: "seed-mat-petlya",
           quantity: 16,
           issuedQty: 16,
@@ -497,7 +550,7 @@ async function main() {
       }),
       prisma.projectMaterial.create({
         data: {
-          projectId: shkafProject.id,
+          productId: shkafProduct.id,
           materialId: "seed-mat-kromka2",
           quantity: 600,
           comment: "Кромление всех деталей",
@@ -513,7 +566,7 @@ async function main() {
           quantity: 8,
           unitPrice: 145,
           totalByn: 1160,
-          projectId: shkafProject.id,
+          productId: shkafProduct.id,
           projectMaterialId: ldspLine.id,
           comment: "Заготовка корпуса",
           createdById: manager.id,
@@ -524,13 +577,13 @@ async function main() {
           quantity: 16,
           unitPrice: 8.5,
           totalByn: 136,
-          projectId: shkafProject.id,
+          productId: shkafProduct.id,
           projectMaterialId: petlyaLine.id,
           createdById: manager.id,
         },
       ],
     });
-    console.log("✔ потребность и выдача по П-002 (3 строки, 2 списания)");
+    console.log("✔ потребность и выдача по П-002-1 (3 строки, 2 списания)");
   }
 }
 

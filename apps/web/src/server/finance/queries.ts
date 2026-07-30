@@ -73,18 +73,23 @@ export type ProjectEconomics = {
   expenseBreakdown: { label: string; amount: number }[]; // по статьям + ЗП + материалы
 };
 
-// Экономика проекта (§11): ожидаемая цена, оплаты, расходы (ЗП + материалы +
-// прочее), маржа. Все суммы — в валюте проекта (платежи хранят projectAmount;
-// начисления ЗП — в валюте ЗП, материалы склада — в BYN; при отличии
-// конвертируем по текущему курсу НБ РБ — редкий случай, в типовой установке
-// валюты совпадают). Материалы склада (§12) — безденежный расход:
-// Σ StockMovement.totalByn (EXPENSE − RETURN), без кассы и платежа.
+// Экономика проекта (§11): ожидаемая цена (Σ цен изделий), оплаты, расходы
+// (ЗП + материалы + прочее), маржа. Все суммы — в валюте проекта (платежи
+// хранят projectAmount; начисления ЗП — в валюте ЗП, материалы склада — в BYN;
+// при отличии конвертируем по текущему курсу НБ РБ — редкий случай, в типовой
+// установке валюты совпадают). Материалы склада (§12) — безденежный расход:
+// Σ StockMovement.totalByn (EXPENSE − RETURN) по изделиям проекта,
+// без кассы и платежа.
 export async function getProjectEconomics(
   projectId: string,
 ): Promise<ProjectEconomics | null> {
   const project = await prisma.project.findUnique({
     where: { id: projectId },
-    select: { id: true, currency: true, expectedPrice: true },
+    select: {
+      id: true,
+      currency: true,
+      products: { select: { expectedPrice: true } },
+    },
   });
   if (!project) return null;
   const currency = project.currency;
@@ -102,9 +107,10 @@ export async function getProjectEconomics(
       where: { projectId },
       select: { amount: true, currency: true },
     }),
-    // Списания материалов со склада (§12): цены хранятся в BYN (totalByn)
+    // Списания материалов со склада (§12): цены хранятся в BYN (totalByn),
+    // привязка — к изделиям этого проекта
     prisma.stockMovement.findMany({
-      where: { projectId, type: { in: ["EXPENSE", "RETURN"] } },
+      where: { product: { projectId }, type: { in: ["EXPENSE", "RETURN"] } },
       select: { type: true, totalByn: true },
     }),
   ]);
@@ -167,9 +173,11 @@ export async function getProjectEconomics(
   paidTotal = round(paidTotal);
   expensesTotal = round(expensesTotal);
   payrollTotal = round(payrollTotal);
-  const expectedPrice = project.expectedPrice
-    ? Number(project.expectedPrice)
-    : null;
+  const expectedRaw = project.products.reduce(
+    (sum, product) => sum + Number(product.expectedPrice ?? 0),
+    0,
+  );
+  const expectedPrice = expectedRaw > 0 ? round(expectedRaw) : null;
 
   const expenseBreakdown = [...byArticle.entries()]
     .map(([label, amount]) => ({ label, amount: round(amount) }))

@@ -33,10 +33,12 @@ export default async function ProjectsPage() {
         title: project.title,
         stage: project.stage,
         stageChangedAt: project.stageChangedAt.toISOString(),
-        expectedPrice: project.expectedPrice?.toString() ?? null,
+        totalPrice: project.totalPrice > 0 ? String(project.totalPrice) : null,
         currency: project.currency,
+        clientId: project.client.id,
         clientName: displayClientName(project.client),
         managerName: project.manager?.name ?? null,
+        productsCount: project._count.products,
         tasksCount: project._count.tasks,
         filesCount: project._count.files,
         hasMaterialShortage: project.hasMaterialShortage,
@@ -44,7 +46,7 @@ export default async function ProjectsPage() {
       initialView={view === "table" ? "table" : "kanban"}
       canManage={canManage}
       showAmount={["ADMIN", "DIRECTOR", "MANAGER", "ENGINEER", "ACCOUNTANT"].includes(role)}
-      clients={clients.map((client) => ({ id: client.id, name: client.name }))}
+      clients={clients.map((client) => ({ id: client.id, name: displayClientName(client) }))}
       managers={managers.map((manager) => ({ id: manager.id, name: manager.name }))}
       engineers={engineers.map((engineer) => ({ id: engineer.id, name: engineer.name }))}
     />

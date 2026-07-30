@@ -58,6 +58,19 @@ export function TasksPageView({
       ),
     },
     {
+      id: "product",
+      header: "Изделие",
+      sortable: true,
+      sortValue: (row) => row.productNumber ?? "",
+      cell: (row) => (
+        <span className="text-muted-foreground">
+          {row.productNumber
+            ? `${row.productNumber}${row.productTitle ? ` · ${row.productTitle}` : ""}`
+            : "—"}
+        </span>
+      ),
+    },
+    {
       id: "assignee",
       header: "Исполнитель",
       sortable: true,

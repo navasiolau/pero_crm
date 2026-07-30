@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { TriangleAlert } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -29,18 +30,26 @@ export function ProjectsTable({
       cell: (row) => <span className="font-medium">{row.number}</span>,
     },
     {
+      id: "title",
+      header: "Название",
+      sortable: true,
+      sortValue: (row) => row.title,
+      cell: (row) => row.title,
+    },
+    {
       id: "client",
       header: "Клиент",
       sortable: true,
       sortValue: (row) => row.clientName,
-      cell: (row) => row.clientName,
-    },
-    {
-      id: "title",
-      header: "Изделие",
-      sortable: true,
-      sortValue: (row) => row.title,
-      cell: (row) => row.title,
+      cell: (row) => (
+        <Link
+          href="/clients"
+          className="underline-offset-2 hover:underline"
+          onClick={(event) => event.stopPropagation()}
+        >
+          {row.clientName}
+        </Link>
+      ),
     },
     {
       id: "stage",
@@ -65,6 +74,15 @@ export function ProjectsTable({
       ),
     },
     {
+      id: "products",
+      header: "Изделий",
+      sortable: true,
+      sortValue: (row) => row.productsCount,
+      className: "text-right",
+      headerClassName: "text-right",
+      cell: (row) => row.productsCount,
+    },
+    {
       id: "manager",
       header: "Менеджер",
       sortable: true,
@@ -77,12 +95,12 @@ export function ProjectsTable({
       ? [
           {
             id: "amount",
-            header: "Сумма",
+            header: "Сумма изделий",
             sortable: true,
-            sortValue: (row: ProjectCard) => Number(row.expectedPrice ?? 0),
+            sortValue: (row: ProjectCard) => Number(row.totalPrice ?? 0),
             headerClassName: "text-right",
             className: "text-right",
-            cell: (row: ProjectCard) => formatAmount(row.expectedPrice, row.currency),
+            cell: (row: ProjectCard) => formatAmount(row.totalPrice, row.currency),
           } satisfies DataColumn<ProjectCard>,
         ]
       : []),

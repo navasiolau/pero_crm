@@ -51,10 +51,12 @@ function formatSize(size: number): string {
 // превью фото, оригинал доступен всегда, число вложений не ограничено.
 export function FilesTab({
   projectId,
+  productId,
   files,
   canEdit,
 }: {
   projectId: string;
+  productId?: string; // изделие — файлы привязываются ещё и к нему
   files: FileRow[];
   canEdit: boolean;
 }) {
@@ -70,6 +72,7 @@ export function FilesTab({
     const form = new FormData();
     form.append("file", file);
     form.append("projectId", projectId);
+    if (productId) form.append("productId", productId);
     form.append("category", category);
     if (caption.trim()) form.append("caption", caption.trim());
     startTransition(async () => {

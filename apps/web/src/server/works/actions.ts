@@ -11,6 +11,7 @@ import { MANAGER_ROLES } from "@/server/projects/queries";
 
 const addSchema = z.object({
   projectId: z.string(),
+  productId: z.string().optional(), // изделие проекта (необязательно)
   priceItemId: z.string().min(1, "Выберите расценку"),
   quantity: z.number().positive("Количество должно быть больше нуля"),
 });
@@ -38,10 +39,20 @@ export async function addWork(
   if (!priceItem) return { ok: false, error: "Расценка не найдена" };
   if (!priceItem.active) return { ok: false, error: "Расценка неактивна" };
 
+  // Изделие должно принадлежать проекту работы
+  if (data.productId) {
+    const product = await prisma.product.findFirst({
+      where: { id: data.productId, projectId: data.projectId },
+      select: { id: true },
+    });
+    if (!product) return { ok: false, error: "Изделие не найдено в этом проекте" };
+  }
+
   const total = Number(priceItem.price) * data.quantity;
   const work = await prisma.work.create({
     data: {
       projectId: data.projectId,
+      productId: data.productId || null,
       priceItemId: priceItem.id,
       title: priceItem.name,
       quantity: data.quantity,
@@ -67,6 +78,7 @@ export async function addWork(
     },
   });
   revalidatePath(`/projects/${data.projectId}`);
+  if (data.productId) revalidatePath(`/products/${data.productId}`);
   return { ok: true };
 }
 
@@ -95,5 +107,6 @@ export async function removeWork(
     oldValue: { title: work.title, total: work.total.toString() },
   });
   revalidatePath(`/projects/${work.projectId}`);
+  if (work.productId) revalidatePath(`/products/${work.productId}`);
   return { ok: true };
 }

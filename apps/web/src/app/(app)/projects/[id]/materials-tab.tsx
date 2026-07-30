@@ -57,8 +57,8 @@ export type StockMovementRow = {
   quantity: number;
   unitPrice: number | null;
   totalByn: number | null;
-  projectId: string | null;
-  projectNumber: string | null;
+  productId: string | null;
+  productNumber: string | null;
   comment: string | null;
   createdByName: string | null;
   createdAt: string; // ISO
@@ -78,10 +78,10 @@ type DialogState =
   | { kind: "request" | "return" | "edit" | "delete"; line: ProjectMaterialLineView }
   | null;
 
-// Вкладка «Материалы» проекта (§12): потребность со статусами обеспечения
+// Вкладка «Материалы» изделия (§12): потребность со статусами обеспечения
 // (нехватка подсвечена красным), запрос/возврат со склада и журнал движений.
 export function MaterialsTab({
-  projectId,
+  productId,
   lines,
   movements,
   materialsTotalByn,
@@ -89,7 +89,7 @@ export function MaterialsTab({
   canManage,
   showMoney,
 }: {
-  projectId: string;
+  productId: string;
   lines: ProjectMaterialLineView[];
   movements: StockMovementRow[];
   materialsTotalByn: number;
@@ -396,7 +396,7 @@ export function MaterialsTab({
         onOpenChange={(open) => {
           if (!open) setDialog(null);
         }}
-        projectId={projectId}
+        productId={productId}
         options={options}
       />
 
@@ -438,17 +438,17 @@ export function MaterialsTab({
   );
 }
 
-// Диалог добавления материала в потребность проекта (§12): фиксируется без
+// Диалог добавления материала в потребность изделия (§12): фиксируется без
 // проверки остатка — нехватка подсветится красным в таблице.
 function AddMaterialDialog({
   open,
   onOpenChange,
-  projectId,
+  productId,
   options,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  projectId: string;
+  productId: string;
   options: MaterialOptionView[];
 }) {
   const [pending, startTransition] = useTransition();
@@ -531,7 +531,7 @@ function AddMaterialDialog({
             onClick={() =>
               startTransition(async () => {
                 const result = await addProjectMaterial({
-                  projectId,
+                  productId,
                   materialId,
                   quantity: parsedQuantity,
                   comment: comment.trim() || undefined,
@@ -627,7 +627,7 @@ function LineActionDialog({
             {kind === "request"
               ? ` · доступно на складе: ${formatQty(line.available)} ${line.unit}`
               : kind === "return"
-                ? ` · выдано на проект: ${formatQty(line.issuedQty)} ${line.unit}`
+                ? ` · выдано на изделие: ${formatQty(line.issuedQty)} ${line.unit}`
                 : ` · уже выдано: ${formatQty(line.issuedQty)} ${line.unit} — меньше поставить нельзя`}
           </DialogDescription>
         </DialogHeader>
@@ -707,7 +707,7 @@ function LineActionDialog({
                 if (result.ok) {
                   toast.success(
                     kind === "request"
-                      ? "Материал списан на проект"
+                      ? "Материал списан на изделие"
                       : kind === "return"
                         ? "Материал возвращён на склад"
                         : "Потребность обновлена",

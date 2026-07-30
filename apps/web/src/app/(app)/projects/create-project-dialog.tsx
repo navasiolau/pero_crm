@@ -15,13 +15,22 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SearchableSelect } from "@/components/ui/searchable-select";
-import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { createClient } from "@/server/clients/actions";
 import { createProject } from "@/server/projects/actions";
 
 import type { SelectOption } from "./projects-view";
 
-// Создание проекта (§6): минимум — клиент и изделие; остальное дозаполняется в карточке.
+const CURRENCIES = ["BYN", "RUB", "USD", "EUR"];
+
+// Создание проекта (§6): проект = заказ клиента; изделия с ценами
+// добавляются позже в карточке проекта (вкладка «Изделия»).
 export function CreateProjectDialog({
   open,
   onOpenChange,
@@ -40,11 +49,10 @@ export function CreateProjectDialog({
   const [pending, startTransition] = useTransition();
   const [title, setTitle] = useState("");
   const [clientId, setClientId] = useState("");
-  const [expectedPrice, setExpectedPrice] = useState("");
   const [managerId, setManagerId] = useState("");
   const [engineerId, setEngineerId] = useState("");
   const [address, setAddress] = useState("");
-  const [description, setDescription] = useState("");
+  const [currency, setCurrency] = useState("BYN");
   // Мини-форма нового клиента
   const [newClientOpen, setNewClientOpen] = useState(false);
   const [newClientName, setNewClientName] = useState("");
@@ -54,21 +62,16 @@ export function CreateProjectDialog({
   function reset() {
     setTitle("");
     setClientId("");
-    setExpectedPrice("");
     setManagerId("");
     setEngineerId("");
     setAddress("");
-    setDescription("");
+    setCurrency("BYN");
     setNewClientOpen(false);
     setNewClientName("");
     setNewClientPhone("");
   }
 
-  const price = expectedPrice.trim() === "" ? undefined : Number(expectedPrice);
-  const valid =
-    title.trim().length > 0 &&
-    clientId.length > 0 &&
-    (price === undefined || (!Number.isNaN(price) && price >= 0));
+  const valid = title.trim().length > 0 && clientId.length > 0;
 
   return (
     <Dialog
@@ -82,18 +85,19 @@ export function CreateProjectDialog({
         <DialogHeader>
           <DialogTitle>Новый проект</DialogTitle>
           <DialogDescription>
-            Проект появится в колонке «Лид» на канбане.
+            Проект появится в колонке «Лид» на канбане. Изделия с ценами
+            добавляются в карточке проекта.
           </DialogDescription>
         </DialogHeader>
 
         <div className="flex flex-col gap-3">
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="title">Изделие / описание *</Label>
+            <Label htmlFor="title">Название заказа *</Label>
             <Input
               id="title"
               value={title}
               onChange={(event) => setTitle(event.target.value)}
-              placeholder="Кухня «Модерн», шкаф-купе…"
+              placeholder="Кухня и шкаф для Ивановой…"
             />
           </div>
 
@@ -174,17 +178,6 @@ export function CreateProjectDialog({
 
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="price">Ожидаемая цена, BYN</Label>
-              <Input
-                id="price"
-                type="number"
-                min="0"
-                value={expectedPrice}
-                onChange={(event) => setExpectedPrice(event.target.value)}
-                placeholder="не обязательно"
-              />
-            </div>
-            <div className="flex flex-col gap-1.5">
               <Label>Менеджер</Label>
               <SearchableSelect
                 options={managers.map((manager) => ({
@@ -214,24 +207,34 @@ export function CreateProjectDialog({
             </div>
           </div>
 
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="address">Адрес</Label>
-            <Input
-              id="address"
-              value={address}
-              onChange={(event) => setAddress(event.target.value)}
-              placeholder="Адрес объекта"
-            />
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="description">Технический блок</Label>
-            <Textarea
-              id="description"
-              value={description}
-              onChange={(event) => setDescription(event.target.value)}
-              placeholder="Материалы, размеры, особенности…"
-            />
+          <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="address">Адрес</Label>
+              <Input
+                id="address"
+                value={address}
+                onChange={(event) => setAddress(event.target.value)}
+                placeholder="Адрес объекта"
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>Валюта</Label>
+              <Select
+                value={currency}
+                onValueChange={(value) => setCurrency(value ?? "BYN")}
+              >
+                <SelectTrigger>
+                  <SelectValue>{currency}</SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {CURRENCIES.map((item) => (
+                    <SelectItem key={item} value={item}>
+                      {item}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
         </div>
 
@@ -246,11 +249,10 @@ export function CreateProjectDialog({
                 const result = await createProject({
                   title: title.trim(),
                   clientId,
-                  expectedPrice: price,
                   managerId: managerId || undefined,
                   engineerId: engineerId || undefined,
                   address: address.trim() || undefined,
-                  description: description.trim() || undefined,
+                  currency,
                 });
                 if (result.ok && result.id) {
                   toast.success("Проект создан");
