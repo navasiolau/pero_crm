@@ -1,14 +1,15 @@
 import type { Metadata, Viewport } from "next";
-import { Onest } from "next/font/google";
+import { Roboto } from "next/font/google";
 
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import "./globals.css";
 
-const onest = Onest({
-  variable: "--font-onest",
+const roboto = Roboto({
+  variable: "--font-roboto",
   subsets: ["latin", "cyrillic"],
+  weight: ["300", "400", "500", "700", "900"],
 });
 
 export const metadata: Metadata = {
@@ -34,7 +35,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="ru" className={onest.variable} suppressHydrationWarning>
+    <html lang="ru" className={roboto.variable} suppressHydrationWarning>
       <body className="antialiased">
         <ThemeProvider
           attribute="class"
