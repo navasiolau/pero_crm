@@ -45,6 +45,7 @@ model User {
   updatedAt       DateTime       @updatedAt
   managedProjects Project[]      @relation("ProjectManager")
   engineeredProjects Project[]   @relation("ProjectEngineer")
+  surveyedProducts Product[]    @relation("ProductSurveyor")
   assignedTasks   Task[]         @relation("TaskAssignee")
   notifications   Notification[]
   payrollEntries  PayrollEntry[]
@@ -167,16 +168,23 @@ enum ProductStatus {
 // Изделие — единица производства внутри проекта (бывшая сущность
 // «Проект» до рефактора). Цена — на изделии (в валюте проекта);
 // задачи/работы и потребность в материалах привязаны к изделию.
+// Данные клиента (ФИО, адрес, телефон) подтягиваются из проекта —
+// на уровне проекта они и вносятся.
 model Product {
   id               String       @id @default(cuid())
   projectId        String
   project          Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
   number           String       @unique // П-2026-001-1
   title            String // название изделия
+  kind             String? // вид изделия (текстовое поле, из legacy f2641)
   status           ProductStatus @default(DESIGN)
   statusChangedAt  DateTime     @default(now())
   expectedPrice    Decimal?     @db.Decimal(12, 2)
-  description      String? // тех. блок (правит и инженер, §4)
+  description      String? // тех. описание (большое текстовое поле, правит и инженер, §4)
+  surveyorId       String? // замерщик — сотрудник, произведший замер (legacy f4061)
+  surveyor         User?        @relation("ProductSurveyor", fields: [surveyorId], references: [id], onDelete: SetNull)
+  sketchFileId     String? @unique // эскиз изделия — изображение (показ в детальном просмотре)
+  sketchFile       File?        @relation("ProductSketch", fields: [sketchFileId], references: [id], onDelete: SetNull)
   createdById      String?
   legacyId         String?
   legacyTable      String?
@@ -562,6 +570,7 @@ model File {
   legacyId     String?
   legacyTable  String?
   createdAt    DateTime     @default(now())
+  sketchForProduct Product?  @relation("ProductSketch")
 
   @@index([projectId, category])
   @@index([projectId, stage])

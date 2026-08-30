@@ -29,6 +29,7 @@ function revalidateProduct(product: { id: string; projectId: string }) {
 const createSchema = z.object({
   projectId: z.string().min(1),
   title: z.string().min(1, "Укажите название изделия"),
+  kind: z.string().optional(),
   expectedPrice: z.number().nonnegative("Цена не может быть отрицательной").optional(),
   description: z.string().optional(),
 });
@@ -78,6 +79,7 @@ export async function createProduct(
       projectId: project.id,
       number,
       title: data.title,
+      kind: data.kind?.trim() || null,
       expectedPrice: data.expectedPrice,
       description: data.description?.trim() || null,
       createdById: session.user.id,
@@ -103,6 +105,7 @@ export async function createProduct(
 
 const updateSchema = z.object({
   title: z.string().min(1, "Укажите название изделия").optional(),
+  kind: z.string().nullable().optional(),
   expectedPrice: z.number().nonnegative("Цена не может быть отрицательной").nullable().optional(),
   description: z.string().nullable().optional(),
 });

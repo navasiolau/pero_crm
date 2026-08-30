@@ -46,11 +46,20 @@ const emptyForm = {
 
 // Справочник клиентов: таблица с поиском/сортировкой/пагинацией,
 // окно просмотра по клику (в таблице — не вся информация), создание/редактирование.
-export function ClientsView({ clients }: { clients: ClientRow[] }) {
+// focusClientId — открыть карточку сразу (ссылки из карточек изделий).
+export function ClientsView({
+  clients,
+  focusClientId,
+}: {
+  clients: ClientRow[];
+  focusClientId?: string;
+}) {
   const [pending, startTransition] = useTransition();
   const [editOpen, setEditOpen] = useState(false);
   const [editing, setEditing] = useState<ClientRow | null>(null);
-  const [viewing, setViewing] = useState<ClientRow | null>(null);
+  const [viewing, setViewing] = useState<ClientRow | null>(
+    focusClientId ? (clients.find((c) => c.id === focusClientId) ?? null) : null,
+  );
   const [form, setForm] = useState(emptyForm);
 
   function openCreate() {

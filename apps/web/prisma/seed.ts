@@ -1,5 +1,5 @@
 import { PrismaClient, Role, PayScheme } from "@prisma/client";
-import bcrypt from "bcryptjs";
+import { hashPassword } from "../src/lib/password";
 
 const prisma = new PrismaClient();
 
@@ -88,7 +88,7 @@ const users: SeedUser[] = [
 ];
 
 async function main() {
-  const passwordHash = await bcrypt.hash(DEMO_PASSWORD, 10);
+  const passwordHash = await hashPassword(DEMO_PASSWORD);
 
   for (const user of users) {
     await prisma.user.upsert({

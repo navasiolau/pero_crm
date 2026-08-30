@@ -1,10 +1,10 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import bcrypt from "bcryptjs";
 import { z } from "zod";
 
 import { prisma } from "@/lib/prisma";
+import { hashPassword } from "@/lib/password";
 import { requireAdmin } from "@/server/require-role";
 import { writeChangeLog } from "@/server/plugins/changelog";
 import { notifyPerson } from "@/server/notifications/notify";
@@ -54,7 +54,7 @@ export async function createUser(
       payScheme: data.payScheme,
       payPercent: data.payPercent ?? null,
       active: data.active,
-      passwordHash: await bcrypt.hash(data.password, 10),
+      passwordHash: await hashPassword(data.password),
     },
   });
   await writeChangeLog({
@@ -111,7 +111,7 @@ export async function updateUser(
       payPercent: data.payPercent ?? null,
       active: data.active,
       ...(data.password
-        ? { passwordHash: await bcrypt.hash(data.password, 10) }
+        ? { passwordHash: await hashPassword(data.password) }
         : {}),
     },
   });

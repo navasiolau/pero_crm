@@ -198,6 +198,7 @@ export function ProductsTab({
   const [activeId, setActiveId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [title, setTitle] = useState("");
+  const [kind, setKind] = useState("");
   const [price, setPrice] = useState("");
   const [description, setDescription] = useState("");
 
@@ -301,6 +302,7 @@ export function ProductsTab({
           setCreateOpen(next);
           if (!next) {
             setTitle("");
+            setKind("");
             setPrice("");
             setDescription("");
           }
@@ -322,6 +324,15 @@ export function ProductsTab({
                 value={title}
                 onChange={(event) => setTitle(event.target.value)}
                 placeholder="Кухня «Модерн», шкаф-купе…"
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="product-kind">Вид изделия</Label>
+              <Input
+                id="product-kind"
+                value={kind}
+                onChange={(event) => setKind(event.target.value)}
+                placeholder="Кухня, шкаф, перегородка…"
               />
             </div>
             <div className="flex flex-col gap-1.5">
@@ -356,6 +367,7 @@ export function ProductsTab({
                   const result = await createProduct({
                     projectId,
                     title: title.trim(),
+                    kind: kind.trim() || undefined,
                     expectedPrice: parsedPrice,
                     description: description.trim() || undefined,
                   });
@@ -363,6 +375,7 @@ export function ProductsTab({
                     toast.success("Изделие создано");
                     setCreateOpen(false);
                     setTitle("");
+                    setKind("");
                     setPrice("");
                     setDescription("");
                     router.refresh();

@@ -1,6 +1,6 @@
 import type { NextAuthConfig } from "next-auth";
 
-// Edge-safe конфигурация Auth.js: без prisma/bcrypt (они подключаются в auth.ts).
+// Edge-safe конфигурация Auth.js: без prisma/argon2 (они подключаются в auth.ts).
 // Используется и middleware, и основным экземпляром NextAuth.
 export const authConfig = {
   pages: {

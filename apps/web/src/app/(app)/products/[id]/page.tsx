@@ -20,6 +20,8 @@ import { FilesTab } from "../../projects/[id]/files-tab";
 import { MaterialsTab } from "../../projects/[id]/materials-tab";
 import { TasksTab } from "../../projects/[id]/tasks-tab";
 import { ProductHeader } from "./product-header";
+import { ProductSketch } from "./product-sketch";
+import { SurveyorLink } from "./surveyor-link";
 
 export const dynamic = "force-dynamic";
 
@@ -89,6 +91,7 @@ export default async function ProductPage({
             id: product.id,
             number: product.number,
             title: product.title,
+            kind: product.kind,
             status: product.status,
             expectedPrice: product.expectedPrice?.toString() ?? null,
             description: product.description,
@@ -107,6 +110,71 @@ export default async function ProductPage({
         ) : null}
       </div>
 
+      {/* Основные поля изделия: вид, клиент/адрес/телефон (подтягиваются
+          из проекта), замерщик, статус — в шапке. */}
+      <Card>
+        <CardContent className="grid gap-x-6 gap-y-3 p-4 text-sm sm:grid-cols-2 lg:grid-cols-3">
+          <div>
+            <div className="text-muted-foreground">Вид изделия</div>
+            <div>{product.kind ?? product.title}</div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">Клиент</div>
+            {showAmount ? (
+              <Link
+                href={`/clients?focus=${product.project.client.id}`}
+                className="text-foreground underline-offset-2 hover:underline"
+              >
+                {displayClientName(product.project.client)}
+              </Link>
+            ) : (
+              <div>{displayClientName(product.project.client)}</div>
+            )}
+          </div>
+          <div>
+            <div className="text-muted-foreground">Адрес</div>
+            <div>{product.project.address ?? product.project.client.address ?? "—"}</div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">Телефон</div>
+            <div>{product.project.client.phone}</div>
+          </div>
+          <div>
+            <div className="text-muted-foreground">Замерщик</div>
+            {product.surveyor ? (
+              <SurveyorLink surveyor={product.surveyor} />
+            ) : (
+              <div>—</div>
+            )}
+          </div>
+          <div>
+            <div className="text-muted-foreground">Статус</div>
+            <div>{productStatusLabels[product.status]}</div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Тех. описание — большое, расширяется по контенту; эскиз — только
+          в детальном просмотре изделия (в списке не показывается). */}
+      {product.sketchFile ? (
+        <ProductSketch
+          sketch={{
+            id: product.sketchFile.id,
+            fileName: product.sketchFile.fileName,
+            mimeType: product.sketchFile.mimeType,
+            size: product.sketchFile.size,
+          }}
+        />
+      ) : null}
+      {product.description ? (
+        <Card>
+          <CardContent className="p-4 text-sm">
+            <div className="mb-1 text-muted-foreground">Техническое описание</div>
+            <div className="whitespace-pre-wrap">{product.description}</div>
+          </CardContent>
+        </Card>
+      ) : null}
+
       <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm text-muted-foreground">
         <span>
           Проект:{" "}
@@ -117,21 +185,12 @@ export default async function ProductPage({
             {product.project.number} · {product.project.title}
           </Link>
         </span>
-        <span>Клиент: {displayClientName(product.project.client)}</span>
         {showAmount ? (
           <span>
             Цена: {formatAmount(product.expectedPrice?.toString() ?? null, product.project.currency)}
           </span>
         ) : null}
       </div>
-      {product.description ? (
-        <Card>
-          <CardContent className="p-4 text-sm">
-            <span className="text-muted-foreground">Технический блок: </span>
-            {product.description}
-          </CardContent>
-        </Card>
-      ) : null}
 
       <Tabs defaultValue="tasks">
         <TabsList>

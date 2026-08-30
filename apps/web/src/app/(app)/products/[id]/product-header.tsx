@@ -53,6 +53,7 @@ export function ProductHeader({
     id: string;
     number: string;
     title: string;
+    kind: string | null;
     status: ProductStatus;
     expectedPrice: string | null;
     description: string | null;
@@ -68,6 +69,7 @@ export function ProductHeader({
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [title, setTitle] = useState(product.title);
+  const [kind, setKind] = useState(product.kind ?? "");
   const [price, setPrice] = useState(product.expectedPrice ?? "");
   const [description, setDescription] = useState(product.description ?? "");
 
@@ -147,6 +149,15 @@ export function ProductHeader({
                     onChange={(event) => setTitle(event.target.value)}
                   />
                 </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="ph-kind">Вид изделия</Label>
+                  <Input
+                    id="ph-kind"
+                    value={kind}
+                    onChange={(event) => setKind(event.target.value)}
+                    placeholder="Кухня, шкаф, перегородка…"
+                  />
+                </div>
                 {showAmount ? (
                   <div className="flex flex-col gap-1.5">
                     <Label htmlFor="ph-price">Цена, {currency}</Label>
@@ -163,12 +174,13 @@ export function ProductHeader({
               </>
             ) : null}
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="ph-description">Технический блок</Label>
+              <Label htmlFor="ph-description">Техническое описание</Label>
               <Textarea
                 id="ph-description"
                 value={description}
                 onChange={(event) => setDescription(event.target.value)}
                 placeholder="Материалы, размеры, особенности…"
+                className="min-h-24 field-sizing-content"
               />
             </div>
           </div>
@@ -186,6 +198,7 @@ export function ProductHeader({
                       ? { description: description.trim() || null }
                       : {
                           title: title.trim(),
+                          kind: kind.trim() || null,
                           expectedPrice: parsedPrice,
                           description: description.trim() || null,
                         },

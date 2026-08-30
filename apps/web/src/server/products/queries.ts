@@ -53,10 +53,22 @@ export async function getProductFor(
           id: true,
           number: true,
           title: true,
+          address: true,
           currency: true,
-          client: { select: { name: true, lastName: true, middleName: true } },
+          client: {
+            select: {
+              id: true,
+              name: true,
+              lastName: true,
+              middleName: true,
+              phone: true,
+              address: true,
+            },
+          },
         },
       },
+      surveyor: { select: { id: true, name: true, position: true, phone: true } },
+      sketchFile: { select: { id: true, fileName: true, mimeType: true, size: true } },
       tasks: {
         include: taskDetailsInclude,
         orderBy: { createdAt: "desc" },
