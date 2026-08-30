@@ -322,13 +322,24 @@ BEGIN
     'legacy_project_' || split_part(p.num, '.', 1),
     p.num,
     COALESCE(NULLIF(btrim(p.kind), ''), 'Изделие ' || p.num),
+    -- Статус изделия: факты производственного цикла v1 в порядке надёжности.
+    -- «9. Установлен» в v1 — выпадающий список (f56671 → t2801), но его
+    -- часто не переводят; реальность видна по фактам: дата статуса 9,
+    -- состояние установки, отгрузка, завершённый техпроцесс.
     (CASE
        WHEN fd.force_done OR pr.stage = 'DONE'::"ProjectStage" THEN 'DONE'
        WHEN p.recl_open THEN 'RECLAMATION'
        WHEN _legacy_ts(p.d9) IS NOT NULL THEN 'DONE'
        WHEN _legacy_ts(p.d8) IS NOT NULL THEN 'INSTALLATION'
-       WHEN _legacy_ts(p.d6) IS NOT NULL THEN 'DELIVERY'
+       WHEN p.install_state IN ('Установлен', 'Без нашего участия') THEN 'DONE'
+       WHEN _legacy_ts(p.d6) IS NOT NULL OR _legacy_ts(p.d7) IS NOT NULL
+            OR p.ship_state = 'Отгружен' THEN 'DELIVERY'
+       WHEN p.tp_done THEN 'DONE'
        WHEN _legacy_ts(p.d5) IS NOT NULL THEN 'PRODUCTION'
+       WHEN p.status_no IN ('9') THEN 'DONE'
+       WHEN p.status_no IN ('8') THEN 'INSTALLATION'
+       WHEN p.status_no IN ('6', '7', '33', '34') THEN 'DELIVERY'
+       WHEN p.status_no IN ('4', '5', '32') THEN 'PRODUCTION'
        ELSE 'DESIGN'
      END)::"ProductStatus",
     (CASE
@@ -339,9 +350,14 @@ BEGIN
        WHEN p.recl_open THEN _legacy_ts(p.recl_date)
        WHEN _legacy_ts(p.d9) IS NOT NULL THEN _legacy_ts(p.d9)
        WHEN _legacy_ts(p.d8) IS NOT NULL THEN _legacy_ts(p.d8)
-       WHEN _legacy_ts(p.d6) IS NOT NULL THEN _legacy_ts(p.d6)
+       WHEN p.install_state IN ('Установлен', 'Без нашего участия') THEN
+         COALESCE(_legacy_ts(p.d9), _legacy_ts(p.touched), now())
+       WHEN _legacy_ts(p.d6) IS NOT NULL OR _legacy_ts(p.d7) IS NOT NULL
+            OR p.ship_state = 'Отгружен' THEN
+         COALESCE(_legacy_ts(p.d7), _legacy_ts(p.d6), _legacy_ts(p.touched), now())
+       WHEN p.tp_done THEN COALESCE(_legacy_ts(p.tp_fact), _legacy_ts(p.touched), now())
        WHEN _legacy_ts(p.d5) IS NOT NULL THEN _legacy_ts(p.d5)
-       ELSE _legacy_ts(p.added)
+       ELSE COALESCE(_legacy_ts(p.added), now())
      END),
     COALESCE(_legacy_num(p.cost), _legacy_num(p.cost_furniture)),
     NULLIF(btrim(p.tech), ''),
@@ -352,15 +368,27 @@ BEGIN
     SELECT p.id::text, p.f2651, p.f2641, p.f2761::text, p.f4071::text, p.f56831,
            p.f2561::text, p.f2571::text, p.f26121::text,
            p.f9830::text, p.f56691::text, p.f9850::text, p.f9860::text,
+           p.f9840::text AS d7,
+           btrim(COALESCE(p.f2801, '')) AS install_state,
+           btrim(COALESCE(p.f2791, '')) AS ship_state,
            EXISTS(SELECT 1 FROM t211 rc WHERE COALESCE(rc.f3441, rc.f37741) = p.id
                   AND rc.f3581 IS NULL) AS recl_open,
            (SELECT min(rc.f3521)::text FROM t211 rc
-            WHERE COALESCE(rc.f3441, rc.f37741) = p.id AND rc.f3581 IS NULL) AS recl_date
+            WHERE COALESCE(rc.f3441, rc.f37741) = p.id AND rc.f3581 IS NULL) AS recl_date,
+           -- Завершённый техпроцесс (t631) и его факт-дата: в v1 статус
+           -- «9. Установлен» держится в выпадающем списке (f56671 → t2801),
+           -- но его часто не переводят — реальность видно по фактам
+           EXISTS(SELECT 1 FROM t631 tp
+                  WHERE tp.f18811 = p.id AND btrim(tp.f17411) = 'Завершен') AS tp_done,
+           (SELECT max(tp.f17391)::text FROM t631 tp WHERE tp.f18811 = p.id) AS tp_fact,
+           s.f56521::text AS status_no
     FROM t181 p
+    LEFT JOIN t2801 s ON s.id = p.f56671
     WHERE p.f2651 ~ '[0-9]'
   $q$) AS p(uid text, num text, kind text, cost text, cost_furniture text, tech text,
             added_by text, added text, touched text, d9 text, d8 text, d6 text, d5 text,
-            recl_open boolean, recl_date text)
+            d7 text, install_state text, ship_state text,
+            recl_open boolean, recl_date text, tp_done boolean, tp_fact text, status_no text)
   JOIN "Project" pr ON pr.id = 'legacy_project_' || split_part(p.num, '.', 1)
   CROSS JOIN LATERAL (
     SELECT _legacy_ts(p.added) < c_year_ago OR _legacy_ts(p.touched) < c_half_ago AS force_done
@@ -448,6 +476,25 @@ BEGIN
     SELECT _legacy_ts(z.added) < c_year_ago OR _legacy_ts(z.touched) < c_half_ago AS force_done
   ) fd
   WHERE z.lead_card_canon IS NOT NULL OR COALESCE(btrim(z.fio), '') <> '';
+
+  -- Стадия проекта = агрегат статусов изделий: все изделия DONE (и ни одной
+  -- открытой рекламации) → проект Завершён.
+  UPDATE "Project" p SET
+    stage = 'DONE'::"ProjectStage",
+    "stageChangedAt" = GREATEST(p."stageChangedAt", COALESCE(mx.last_done, p."stageChangedAt"))
+  FROM (
+    SELECT pr."projectId" AS pid, max(pr."statusChangedAt") AS last_done
+    FROM "Product" pr
+    WHERE pr.status = 'DONE'
+    GROUP BY 1
+  ) mx
+  WHERE p."legacyTable" = 't181'
+    AND p.id = mx.pid
+    AND p.stage NOT IN ('RECLAMATION', 'REFUSED')
+    AND NOT EXISTS (
+      SELECT 1 FROM "Product" pr2
+      WHERE pr2."projectId" = p.id AND pr2.status <> 'DONE'
+    );
 
   -- ── 2.8 История этапов/статусов: по одной записи на сущность ──────────────
   INSERT INTO "ProjectStageHistory" (id, "projectId", "fromStage", "toStage", "comment", "createdAt")
