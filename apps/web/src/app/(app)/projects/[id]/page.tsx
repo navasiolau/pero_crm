@@ -209,7 +209,27 @@ export default async function ProjectPage({
 
         <TabsContent value="overview" className="mt-4">
           <OverviewTab
-            project={project}
+            // Плоский объект по составу OverviewProject: сырой Prisma-проект
+            // содержит Decimal (works/tasks/payments) — через RSC-границу нельзя.
+            project={{
+              id: project.id,
+              number: project.number,
+              title: project.title,
+              stage: project.stage,
+              stageChangedAt: project.stageChangedAt,
+              currency: project.currency,
+              address: project.address,
+              clientId: project.clientId,
+              managerId: project.managerId,
+              engineerId: project.engineerId,
+              createdAt: project.createdAt,
+              refusalReason: project.refusalReason,
+              refusalComment: project.refusalComment,
+              reclamationReason: project.reclamationReason,
+              reclamationDescription: project.reclamationDescription,
+              reclamationFault: project.reclamationFault,
+              client: project.client,
+            }}
             totalPrice={totalPrice}
             createdByName={
               project.createdById

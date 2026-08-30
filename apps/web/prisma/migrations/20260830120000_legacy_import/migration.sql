@@ -808,7 +808,18 @@ BEGIN
        WHEN 9380 THEN 'DRAWING'
        ELSE 'DOCUMENT'
      END)::"FileCategory",
-    'PRODUCTION'::"FileStage",
+    -- Группа по назначению (плагин file-stages: Производство/Сборка/Монтаж):
+    -- монтажные по имени («монтаж…», «установ…»); чертежи (документы
+    -- инженера, деталировки, раскрои) — рабочая документация сборки →
+    -- ASSEMBLY; остальное (эскизы, замеры, документы продаж) — PRODUCTION.
+    (CASE
+       WHEN lower(f.fname) LIKE '%монтаж%' OR lower(f.fname) LIKE '%установ%' THEN 'INSTALLATION'
+       WHEN f.field_id = 9380 THEN 'ASSEMBLY'
+       WHEN lower(f.fname) LIKE '%сборк%' THEN 'ASSEMBLY'
+       WHEN lower(f.fname) LIKE '%чертеж%' OR lower(f.fname) LIKE '%чертёж%'
+         OR lower(f.fname) LIKE '%деталировк%' OR lower(f.fname) LIKE '%раскрой%' THEN 'ASSEMBLY'
+       ELSE 'PRODUCTION'
+     END)::"FileStage",
     f.fname,
     f.fid || CASE WHEN f.ext <> '' THEN '.' || f.ext ELSE '' END,
     (CASE f.ext
@@ -851,7 +862,15 @@ BEGIN
     COALESCE(lp.id, op.id),
     NULL, NULL,
     'DOCUMENT'::"FileCategory",
-    'PRODUCTION'::"FileStage",
+    -- Группа по назначению (плагин file-stages): монтажные/сборочные/чертежи
+    -- по имени, остальные документы воронки — производственная подготовка.
+    (CASE
+       WHEN lower(f.fname) LIKE '%монтаж%' OR lower(f.fname) LIKE '%установ%' THEN 'INSTALLATION'
+       WHEN lower(f.fname) LIKE '%сборк%' THEN 'ASSEMBLY'
+       WHEN lower(f.fname) LIKE '%чертеж%' OR lower(f.fname) LIKE '%чертёж%'
+         OR lower(f.fname) LIKE '%деталировк%' OR lower(f.fname) LIKE '%раскрой%' THEN 'ASSEMBLY'
+       ELSE 'PRODUCTION'
+     END)::"FileStage",
     f.fname,
     f.fid || CASE WHEN f.ext <> '' THEN '.' || f.ext ELSE '' END,
     (CASE f.ext
@@ -897,7 +916,14 @@ BEGIN
     tk."productId",
     tk.id,
     'DOCUMENT'::"FileCategory",
-    'PRODUCTION'::"FileStage",
+    -- Группа по назначению (плагин file-stages): по имени файла.
+    (CASE
+       WHEN lower(f.fname) LIKE '%монтаж%' OR lower(f.fname) LIKE '%установ%' THEN 'INSTALLATION'
+       WHEN lower(f.fname) LIKE '%сборк%' THEN 'ASSEMBLY'
+       WHEN lower(f.fname) LIKE '%чертеж%' OR lower(f.fname) LIKE '%чертёж%'
+         OR lower(f.fname) LIKE '%деталировк%' OR lower(f.fname) LIKE '%раскрой%' THEN 'ASSEMBLY'
+       ELSE 'PRODUCTION'
+     END)::"FileStage",
     f.fname,
     f.fid || CASE WHEN f.ext <> '' THEN '.' || f.ext ELSE '' END,
     (CASE f.ext
