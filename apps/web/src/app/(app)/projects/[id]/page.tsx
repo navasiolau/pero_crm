@@ -13,6 +13,7 @@ import { stageLabels, stageStyles } from "@/lib/stages";
 import { cn } from "@/lib/utils";
 import { prisma } from "@/lib/prisma";
 import { getPluginSettings } from "@/server/plugins/run-log";
+import { getFileStageConfig } from "@/server/files/stage-config";
 import { getSlotContributions } from "@/server/plugins/slots";
 import { getProjectEconomics } from "@/server/finance/queries";
 import { getProjectFor, listClients, listEngineers, listManagers, listWorkers } from "@/server/projects/queries";
@@ -53,6 +54,9 @@ export default async function ProjectPage({
   const showAmount = showFinance || canManage || role === "ENGINEER";
   // Склад (§12): вкладка «Материалы» — офисные роли (+ бухгалтер на просмотр)
   const showMaterials = ["ADMIN", "DIRECTOR", "MANAGER", "ENGINEER", "ACCOUNTANT"].includes(role);
+
+  // Группировка файлов по этапам (плагин file-stages), если включён.
+  const stageConfig = await getFileStageConfig();
 
   const productIds = project.products.map((product) => product.id);
 
@@ -282,6 +286,7 @@ export default async function ProjectPage({
               id: file.id,
               fileName: file.fileName,
               category: file.category,
+              stage: file.stage,
               caption: file.caption,
               mimeType: file.mimeType,
               size: file.size,
@@ -292,6 +297,8 @@ export default async function ProjectPage({
                 : "—",
             }))}
             canEdit={canEditTech}
+            stagesEnabled={stageConfig.enabled}
+            stageExtensions={stageConfig.extensions}
           />
         </TabsContent>
 

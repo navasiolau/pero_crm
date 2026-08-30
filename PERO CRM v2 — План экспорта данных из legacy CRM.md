@@ -33,7 +33,7 @@
 
 ## 3. Архитектура пайплайна
 
-Скрипты на Python 3.12 (httpx + parsel/BeautifulSoup + psycopg), в репозитории `legacy_export/`. Каждый шаг — отдельный скрипт с чекпоинтами (прогресс в SQLite/JSON), любой шаг перезапускаем без потери уже сделанного.
+Скрипты на Python 3.12 (httpx + parsel/BeautifulSoup + psycopg), каталог `D:\legacy_export` (вне репозитория CRM). Каждый шаг — отдельный скрипт с чекпоинтами (прогресс в SQLite/JSON), любой шаг перезапускаем без потери уже сделанного.
 
 ```
 01_discover_tables  → 02_dump_schemas  → 03_build_pg_schema

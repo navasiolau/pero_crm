@@ -80,6 +80,14 @@ enum FileCategory {
   OTHER // прочее
 }
 
+// Группа файла по этапу мебельного производства (§ плагин file-stages):
+// Производство / Сборка / Монтаж.
+enum FileStage {
+  PRODUCTION // Производство
+  ASSEMBLY // Сборка
+  INSTALLATION // Монтаж
+}
+
 enum CommunicationType {
   CALL // звонок
   EMAIL // письмо
@@ -543,6 +551,7 @@ model File {
   taskId       String?
   task         Task?        @relation(fields: [taskId], references: [id], onDelete: SetNull)
   category     FileCategory @default(OTHER)
+  stage        FileStage    @default(PRODUCTION) // группа этапа (file-stages)
   caption      String? // пояснение
   fileName     String // оригинальное имя
   storedName   String // имя на диске
@@ -555,6 +564,7 @@ model File {
   createdAt    DateTime     @default(now())
 
   @@index([projectId, category])
+  @@index([projectId, stage])
 }
 
 model Communication {

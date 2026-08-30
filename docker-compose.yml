@@ -8,7 +8,7 @@ services:
       POSTGRES_USER: pero
       POSTGRES_PASSWORD: pero_crm_dev
     ports:
-      # Порт 5433: 5432 может быть занят postgres проекта legacy_export
+      # Порт 5433: 5432 занят postgres проекта экспорта legacy CRM (D:\legacy_export)
       - "127.0.0.1:5433:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data

@@ -3,13 +3,19 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import sharp from "sharp";
-import type { FileCategory, Role } from "@prisma/client";
+import type { FileCategory, FileStage, Role } from "@prisma/client";
 
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { UPLOADS_ROOT } from "@/lib/uploads";
 import { writeChangeLog } from "@/server/plugins/changelog";
 import { notifyOrg } from "@/server/notifications/notify";
+import { getFileStageConfig } from "@/server/files/stage-config";
+import {
+  FILE_STAGES,
+  validateFileForCategory,
+  type FileStageKey,
+} from "@pero/plugin-file-stages";
 
 const MAX_SIZE = 25 * 1024 * 1024; // 25 МБ
 const CATEGORIES: FileCategory[] = [
@@ -80,6 +86,27 @@ export async function POST(request: Request) {
   const caption = typeof form.get("caption") === "string" ? (form.get("caption") as string) : null;
   const taskId = typeof form.get("taskId") === "string" && form.get("taskId") ? (form.get("taskId") as string) : null;
 
+  // Проверка расширения по настройкам плагина file-stages (если включён).
+  // Возвращаем 422 до записи на диск — плагин меняет базовое поведение загрузки.
+  const stageConfig = await getFileStageConfig();
+  if (stageConfig.enabled && stageConfig.extensions) {
+    const extError = validateFileForCategory(
+      category,
+      file.name,
+      stageConfig.extensions[category],
+    );
+    if (extError) {
+      return NextResponse.json({ error: extError }, { status: 422 });
+    }
+  }
+
+  // Группа этапа (file-stages). Если не передана — действует дефолт схемы.
+  const stageRaw = form.get("stage");
+  const stage: FileStage | undefined =
+    typeof stageRaw === "string" && FILE_STAGES.includes(stageRaw as FileStageKey)
+      ? (stageRaw as FileStage)
+      : undefined;
+
   const storedName = `${randomUUID()}-${sanitizeFileName(file.name)}`;
   const projectDir = path.join(UPLOADS_ROOT, projectId);
   await mkdir(projectDir, { recursive: true });
@@ -108,6 +135,7 @@ export async function POST(request: Request) {
       productId,
       taskId,
       category,
+      stage,
       caption,
       fileName: file.name,
       storedName,

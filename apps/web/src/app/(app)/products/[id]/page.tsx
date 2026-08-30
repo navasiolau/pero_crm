@@ -10,6 +10,7 @@ import { formatAmount } from "@/lib/format";
 import { displayClientName } from "@/lib/labels";
 import { productStatusLabels } from "@/lib/product-statuses";
 import { prisma } from "@/lib/prisma";
+import { getFileStageConfig } from "@/server/files/stage-config";
 import { getProductFor } from "@/server/products/queries";
 import { listWorkers } from "@/server/projects/queries";
 import { mapTaskDetails } from "@/server/tasks/queries";
@@ -42,6 +43,9 @@ export default async function ProductPage({
   const showAmount = ["ADMIN", "DIRECTOR", "MANAGER", "ENGINEER", "ACCOUNTANT"].includes(role);
   const showMaterials = ["ADMIN", "DIRECTOR", "MANAGER", "ENGINEER", "ACCOUNTANT"].includes(role);
   const showMoney = ["ADMIN", "DIRECTOR"].includes(role);
+
+  // Группировка файлов по этапам (плагин file-stages), если включён.
+  const stageConfig = await getFileStageConfig();
 
   const [workers, priceItems, materialsData, materialOptions] = await Promise.all([
     listWorkers(),
@@ -201,6 +205,7 @@ export default async function ProductPage({
               id: file.id,
               fileName: file.fileName,
               category: file.category,
+              stage: file.stage,
               caption: file.caption,
               mimeType: file.mimeType,
               size: file.size,
@@ -211,6 +216,8 @@ export default async function ProductPage({
                 : "—",
             }))}
             canEdit={canEditTech}
+            stagesEnabled={stageConfig.enabled}
+            stageExtensions={stageConfig.extensions}
           />
         </TabsContent>
 
