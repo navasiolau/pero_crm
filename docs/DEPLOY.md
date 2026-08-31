@@ -24,13 +24,12 @@ standalone-сборка, при старте сам применяет мигр�
 
 ## 1. Код
 
-```bash
-git clone <адрес-репозитория> pero_crm_v2
-cd pero_crm_v2
-```
-
-Важно: перед клонированием все изменения должны быть закоммичены и запушены
-(см. статус `git status` на машине разработки).
+Серверу репозиторий НЕ нужен: CI собирает образ и публикует в GHCR, сервер
+забирает его watcher'ом (см. `deploy/README.md`). Коммит/пуш в `main` →
+зелёные тесты → образ `ghcr.io/navasiolau/pero_crm:main` → на прод поднимется
+сам ≤5 минут. Стек на сервере: только `.env`, `docker-compose.yml`
+(из `deploy/docker-compose.server.yml`), `Caddyfile` (из `deploy/Caddyfile.lxc`)
+и скрипты watcher/refresh.
 
 ## 2. .env
 
@@ -125,12 +124,13 @@ docker compose logs -f app              # «All migrations have been successfull
 
 ## 7. Обновление версии
 
-```bash
-git pull
-docker compose --profile prod up -d --build   # пересоберёт и перезапустит app
-```
+Автоматически: push в `main` → CI (тесты → сборка → GHCR) → watcher на сервере
+забирает образ ≤5 минут и перезапускает контейнер (`migrate deploy` накатывает
+миграции при старте). Лог watcher'а: `/var/log/watch-deploy.log`.
 
-Накат миграций произойдёт при старте контейнера. БД и файлы не трогаются.
+Вручную (если нужно сразу): `cd /opt/crm && docker compose pull web && docker compose up -d web`.
+Откат: `CRM_IMAGE_TAG=sha-<коммит>` в `.env` → `docker compose up -d web`.
+БД и файлы не трогаются.
 
 ## 8. Бэкапы (настроить сразу)
 
