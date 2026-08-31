@@ -99,7 +99,7 @@ function DraggableProduct({
   currency: string;
   showAmount: boolean;
   canManage: boolean;
-  onOpen: (id: string) => void;
+  onOpen: (product: ProductCard) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } =
     useDraggable({ id: product.id, disabled: !canManage });
@@ -110,7 +110,7 @@ function DraggableProduct({
       style={{ transform: CSS.Translate.toString(transform) }}
       className={cn(isDragging && "opacity-40")}
       {...(canManage ? { ...listeners, ...attributes } : {})}
-      onClick={() => onOpen(product.id)}
+      onClick={() => onOpen(product)}
     >
       <ProductCardView
         product={product}
@@ -134,7 +134,7 @@ function StatusColumn({
   currency: string;
   showAmount: boolean;
   canManage: boolean;
-  onOpen: (id: string) => void;
+  onOpen: (product: ProductCard) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: status.id });
   const style = productStatusStyles[status.id];
@@ -285,7 +285,7 @@ export function ProductsTab({
               currency={currency}
               showAmount={showAmount}
               canManage={canManage}
-              onOpen={(id) => router.push(`/products/${id}`)}
+              onOpen={(product) => router.push(`/products/${product.number}`)}
             />
           ))}
         </div>

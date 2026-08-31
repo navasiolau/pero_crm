@@ -102,7 +102,7 @@ export function ProductsTable({
       columns={columns}
       rows={products}
       emptyText="Изделий не найдено — ослабьте фильтры"
-      onRowClick={(row) => router.push(`/products/${row.id}`)}
+      onRowClick={(row) => router.push(`/products/${row.number}`)}
       server={{
         total,
         page,

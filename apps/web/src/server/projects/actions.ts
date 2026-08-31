@@ -46,6 +46,8 @@ async function createProjectWithNumber(
     const number = String(numberInt);
     const project = await tx.project.create({
       data: {
+        // id = номер («205»): URL карточки — /projects/205
+        id: number,
         number,
         numberInt,
         title: data.title,

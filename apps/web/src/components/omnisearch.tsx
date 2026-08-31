@@ -104,7 +104,7 @@ export function Omnisearch() {
           icon: "product" as const,
           title: `${product.number} · ${product.title}`,
           hint: `${product.projectNumber} · ${product.client}`,
-          href: `/products/${product.id}`,
+          href: `/products/${product.number}`,
         })),
         ...results.tasks.map((task) => ({
           key: `t-${task.id}`,
@@ -112,8 +112,8 @@ export function Omnisearch() {
           icon: "task" as const,
           title: task.title,
           hint: `${task.projectNumber}${task.productNumber ? ` · ${task.productNumber}` : ""} · ${task.assignee ?? ""}`,
-          href: task.productId
-            ? `/products/${task.productId}`
+          href: task.productNumber
+            ? `/products/${task.productNumber}`
             : `/projects/${task.projectId}`,
         })),
         ...results.clients.map((client) => ({

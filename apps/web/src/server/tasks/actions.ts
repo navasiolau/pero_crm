@@ -1,4 +1,4 @@
-"use server";
+﻿"use server";
 
 import { revalidatePath } from "next/cache";
 import type { Role } from "@prisma/client";
@@ -12,6 +12,7 @@ import { emitDomainEvent } from "@/server/plugins/events";
 import { notifyOrg, notifyPerson } from "@/server/notifications/notify";
 
 import { MANAGER_ROLES } from "@/server/projects/queries";
+import { revalidateProductPaths } from "@/server/products/revalidate";
 import { getPayrollCurrency } from "@/server/payroll/queries";
 
 const createSchema = z.object({
@@ -167,7 +168,7 @@ export async function createTask(
     });
   }
   revalidatePath(`/projects/${data.projectId}`);
-  if (data.productId) revalidatePath(`/products/${data.productId}`);
+  await revalidateProductPaths(data.productId);
   revalidatePath("/my");
   return { ok: true };
 }
@@ -310,8 +311,8 @@ export async function updateTask(
   }
 
   revalidatePath(`/projects/${task.project.id}`);
-  if (task.productId) revalidatePath(`/products/${task.productId}`);
-  if (data.productId) revalidatePath(`/products/${data.productId}`);
+  await revalidateProductPaths(task.productId);
+  await revalidateProductPaths(data.productId);
   revalidatePath("/tasks");
   revalidatePath("/my");
   return { ok: true };
@@ -552,12 +553,12 @@ export async function changeTaskStatus(
     type: "task.statusChanged",
     title: `Задача «${task.title}»: ${toStatus === "DONE" ? "выполнена" : "в работе"}`,
     body: `${projectLabel(task.project.number)} · ${session.user.name ?? ""}`,
-    link: task.product ? `/products/${task.product.id}` : `/projects/${task.project.id}`,
+    link: task.product ? `/products/${task.product.number}` : `/projects/${task.project.id}`,
     exceptUserId: session.user.id,
   });
 
   revalidatePath(`/projects/${task.project.id}`);
-  if (task.product) revalidatePath(`/products/${task.product.id}`);
+  if (task.product) await revalidateProductPaths(task.product.id);
   revalidatePath("/my");
   return { ok: true };
 }
@@ -607,7 +608,7 @@ export async function deleteTask(
     oldValue: { title: task.title, project: task.project.number },
   });
   revalidatePath(`/projects/${task.project.id}`);
-  if (task.productId) revalidatePath(`/products/${task.productId}`);
+  await revalidateProductPaths(task.productId);
   revalidatePath("/tasks");
   revalidatePath("/my");
   return { ok: true };

@@ -6,6 +6,7 @@ import { z } from "zod";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { writeChangeLog } from "@/server/plugins/changelog";
+import { revalidateProductPaths } from "@/server/products/revalidate";
 
 import { MANAGER_ROLES } from "@/server/projects/queries";
 
@@ -78,7 +79,7 @@ export async function addWork(
     },
   });
   revalidatePath(`/projects/${data.projectId}`);
-  if (data.productId) revalidatePath(`/products/${data.productId}`);
+  await revalidateProductPaths(data.productId);
   return { ok: true };
 }
 
@@ -107,6 +108,6 @@ export async function removeWork(
     oldValue: { title: work.title, total: work.total.toString() },
   });
   revalidatePath(`/projects/${work.projectId}`);
-  if (work.productId) revalidatePath(`/products/${work.productId}`);
+  await revalidateProductPaths(work.productId);
   return { ok: true };
 }

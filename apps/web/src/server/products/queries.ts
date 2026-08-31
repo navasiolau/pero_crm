@@ -229,10 +229,14 @@ export async function listProductOptions(projectId: string) {
 export async function getProductFor(
   userId: string,
   role: Role,
-  productId: string,
+  key: string,
 ) {
+  // Адрес карточки — /products/<номер>; допускаем и внутренний id
   const product = await prisma.product.findFirst({
-    where: { id: productId, ...productVisibilityFilter(userId, role) },
+    where: {
+      ...productVisibilityFilter(userId, role),
+      OR: [{ number: key }, { id: key }],
+    },
     include: {
       project: {
         select: {

@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
@@ -140,7 +140,7 @@ export function MovementsView({
       cell: (row) =>
         row.productId && row.productNumber ? (
           <Link
-            href={`/products/${row.productId}`}
+            href={`/products/${row.productNumber}`}
             className="text-primary hover:underline"
           >
             {row.productNumber}

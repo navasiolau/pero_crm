@@ -77,19 +77,24 @@ deploy`, увидит их и пропустит.
 
 ## 4. Файлы (uploads)
 
-Хранилище — папка `uploads/<projectId>/…` (загруженные фото, чертежи, b3d…).
-В контейнере это named-volume `uploads` → `/app/uploads` (переживает
-пересборку образа). Скопировать содержимое `apps/web/uploads/` с текущей
-машины на сервер и залить в volume:
+Хранилище — папка `uploads/<projectId>/…` (загруженные фото, чертежи, b3d…),
+где `projectId` = номер проекта («205»). В контейнере это named-volume
+`uploads` → `/app/uploads` (переживает пересборку образа). Скопировать
+содержимое `apps/web/uploads/` с текущей машины на сервер и залить в volume:
 
 ```bash
 # на сервере, после первого старта контейнера app (п. 5):
 docker cp ./uploads/. pero_crm_app:/app/uploads/
-# права не критичны (читает node), но volumes принадлежат root — ок.
 ```
 
 Альтернатива — сразу наполнить volume: `docker volume inspect pero_crm_v2_uploads`,
 скопировать файлы в его реальный путь (нужен root).
+
+Важно: дамп БД и папку uploads снимать **после** миграций
+`20260901140000_normalize_project_numbers` и `20260901150000_clean_identifiers` —
+там id проектов уже равны номерам, и имена папок совпадают с id. Если вдруг
+переносится старый дамп/старые папки (с именами `legacy_project_*`), сначала
+запустите на машине-источнике `pnpm --filter @pero/web exec tsx scripts/rename-uploads-folders.ts`.
 
 ## 5. Запуск
 

@@ -1,4 +1,4 @@
-"use server";
+﻿"use server";
 
 import { unlink } from "node:fs/promises";
 import path from "node:path";
@@ -9,6 +9,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { UPLOADS_ROOT } from "@/lib/uploads";
 import { writeChangeLog } from "@/server/plugins/changelog";
+import { revalidateProductPaths } from "@/server/products/revalidate";
 
 const MANAGER: Role[] = ["ADMIN", "DIRECTOR", "MANAGER"];
 
@@ -45,6 +46,6 @@ export async function deleteFile(
     oldValue: { fileName: file.fileName },
   });
   revalidatePath(`/projects/${file.projectId}`);
-  if (file.productId) revalidatePath(`/products/${file.productId}`);
+  await revalidateProductPaths(file.productId);
   return { ok: true };
 }

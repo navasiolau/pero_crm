@@ -1,4 +1,4 @@
-"use server";
+﻿"use server";
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
@@ -8,6 +8,7 @@ import { formatAmount, formatQty } from "@/lib/format";
 import { writeChangeLog } from "@/server/plugins/changelog";
 import { emitDomainEvent } from "@/server/plugins/events";
 import { notifyOrg } from "@/server/notifications/notify";
+import { revalidateProductPaths } from "@/server/products/revalidate";
 import { requireRole } from "@/server/require-role";
 
 // Склад (§12, фаза 6). Правки — админ/директор/менеджер; просмотр — офисные
@@ -21,7 +22,7 @@ const WAREHOUSE_MANAGERS = ["ADMIN", "DIRECTOR", "MANAGER"] as const;
 // a transaction» при прогретом пуле соединений
 const TX_OPTIONS = { maxWait: 10_000, timeout: 15_000 } as const;
 
-function revalidateWarehouse(productId?: string | null, projectId?: string | null) {
+async function revalidateWarehouse(productId?: string | null, projectId?: string | null) {
   revalidatePath("/warehouse");
   revalidatePath("/warehouse/stock");
   revalidatePath("/warehouse/items");
@@ -29,7 +30,7 @@ function revalidateWarehouse(productId?: string | null, projectId?: string | nul
   revalidatePath("/projects"); // бейдж нехватки на канбане/в таблице
   revalidatePath("/products");
   if (projectId) revalidatePath(`/projects/${projectId}`);
-  if (productId) revalidatePath(`/products/${productId}`);
+  await revalidateProductPaths(productId);
 }
 
 function round2(value: number): number {
@@ -66,7 +67,7 @@ export async function addMaterialCategory(
     action: "create",
     newValue: { name: category.name },
   });
-  revalidateWarehouse();
+  await revalidateWarehouse();
   return { ok: true };
 }
 
@@ -91,7 +92,7 @@ export async function toggleMaterialCategory(
     oldValue: category.active,
     newValue: !category.active,
   });
-  revalidateWarehouse();
+  await revalidateWarehouse();
   return { ok: true };
 }
 
@@ -149,7 +150,7 @@ export async function addMaterial(
       purchasePrice: data.purchasePrice ?? null,
     },
   });
-  revalidateWarehouse();
+  await revalidateWarehouse();
   return { ok: true };
 }
 
@@ -197,7 +198,7 @@ export async function updateMaterial(
       purchasePrice: data.purchasePrice ?? null,
     },
   });
-  revalidateWarehouse();
+  await revalidateWarehouse();
   return { ok: true };
 }
 
@@ -222,7 +223,7 @@ export async function toggleMaterial(
     oldValue: material.active,
     newValue: !material.active,
   });
-  revalidateWarehouse();
+  await revalidateWarehouse();
   return { ok: true };
 }
 
@@ -286,7 +287,7 @@ export async function addStockIncome(
     },
     session.user.id,
   );
-  revalidateWarehouse();
+  await revalidateWarehouse();
   return { ok: true };
 }
 
@@ -347,7 +348,7 @@ export async function addProjectMaterial(
       quantity: data.quantity,
     },
   });
-  revalidateWarehouse(product.id, product.projectId);
+  await revalidateWarehouse(product.id, product.projectId);
   return { ok: true };
 }
 
@@ -395,7 +396,7 @@ export async function updateProjectMaterial(
     oldValue: Number(line.quantity),
     newValue: parsed.data.quantity,
   });
-  revalidateWarehouse(line.productId, line.product.projectId);
+  await revalidateWarehouse(line.productId, line.product.projectId);
   return { ok: true };
 }
 
@@ -430,7 +431,7 @@ export async function deleteProjectMaterial(
       quantity: Number(line.quantity),
     },
   });
-  revalidateWarehouse(line.productId, line.product.projectId);
+  await revalidateWarehouse(line.productId, line.product.projectId);
   return { ok: true };
 }
 
@@ -545,10 +546,10 @@ export async function requestMaterial(
         unitPrice === null
           ? undefined
           : `Сумма: ${formatAmount(round2(data.quantity * unitPrice), "BYN")}`,
-      link: `/products/${line.productId}`,
+      link: `/products/${line.product.number}`,
       exceptUserId: session.user.id,
     });
-    revalidateWarehouse(line.productId, line.product.projectId);
+    await revalidateWarehouse(line.productId, line.product.projectId);
     return { ok: true };
   } catch (error) {
     return {
@@ -643,7 +644,7 @@ export async function returnMaterial(
       },
       session.user.id,
     );
-    revalidateWarehouse(line.productId, line.product.projectId);
+    await revalidateWarehouse(line.productId, line.product.projectId);
     return { ok: true };
   } catch (error) {
     return {

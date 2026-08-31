@@ -12,6 +12,7 @@ import { emitDomainEvent } from "@/server/plugins/events";
 import { notifyOrg } from "@/server/notifications/notify";
 
 import { MANAGER_ROLES } from "@/server/projects/queries";
+import { revalidateProductPaths } from "@/server/products/revalidate";
 
 async function requireUser() {
   const session = await auth();
@@ -20,9 +21,8 @@ async function requireUser() {
 }
 
 function revalidateProduct(product: { id: string; projectId: string }) {
-  revalidatePath(`/products/${product.id}`);
-  revalidatePath("/products");
-  revalidatePath(`/projects/${product.projectId}`);
+  // Адрес карточки изделия — по номеру (/products/<номер>)
+  void revalidateProductPaths(product.id);
   revalidatePath("/projects");
 }
 
@@ -35,10 +35,9 @@ const createSchema = z.object({
   description: z.string().optional(),
 });
 
-// Номер изделия: <номер проекта>-<n>, n — следующий суффикс в проекте.
-// Считается по max(suffixInt) среди изделий проекта (в legacy-номерах
-// вида «205.21» суффикс числовой; изделия без суффикса не мешают),
-// чтобы удаление не давало коллизий.
+// Номер изделия: «<номер проекта>.<N>» (точка — единый стиль с legacy),
+// N — следующий суффикс в проекте по max(suffixInt). id изделия — отдельный
+// cuid (Prisma default), номер — отображаемое уникальное поле.
 async function nextProductSuffixInt(
   projectId: string,
 ): Promise<number> {
@@ -76,7 +75,7 @@ export async function createProduct(
   if (!project) return { ok: false, error: "Проект не найден" };
 
   const suffixInt = await nextProductSuffixInt(project.id);
-  const number = `${project.number}-${suffixInt}`;
+  const number = `${project.number}.${suffixInt}`;
   const product = await prisma.product.create({
     data: {
       projectId: project.id,
@@ -217,7 +216,7 @@ export async function changeProductStatus(
     type: "product.statusChanged",
     title: `${product.number}: ${productStatusLabels[product.status]} → ${productStatusLabels[toStatus]}`,
     body: product.title,
-    link: `/products/${productId}`,
+    link: `/products/${product.number}`,
     exceptUserId: session.user.id,
   });
 

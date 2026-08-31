@@ -272,6 +272,8 @@ async function main() {
     const numberInt = Number(project.number);
     const created = await prisma.project.create({
       data: {
+        // id = номер: URL карточки — /projects/<номер>
+        id: project.number,
         number: project.number,
         numberInt,
         title: project.title,
@@ -291,7 +293,8 @@ async function main() {
       await prisma.product.create({
         data: {
           projectId: created.id,
-          number: `${project.number}-${suffix}`,
+          // id изделия — cuid (Prisma default), номер — отображаемое поле
+          number: `${project.number}.${suffix}`,
           suffixInt: suffix,
           title: product.title,
           status: product.status,
@@ -530,7 +533,7 @@ async function main() {
   // «Обеспечено»; кромка: нужно 600 при остатке 500 → «Нет на складе»
   // (красная строка + бейдж нехватки на проекте).
   const shkafProduct = await prisma.product.findUnique({
-    where: { number: `${demoBase + 2}-1` },
+    where: { number: `${demoBase + 2}.1` },
   });
   if (shkafProduct && (await prisma.projectMaterial.count()) === 0) {
     const [ldspLine, petlyaLine] = await Promise.all([

@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState, useTransition } from "react";
 import Link from "next/link";
@@ -182,7 +182,7 @@ export function TaskDialog({
               <>
                 {" · изделие "}
                 <Link
-                  href={`/products/${task.productId}`}
+                  href={`/products/${task.productNumber}`}
                   className="underline-offset-2 hover:underline"
                 >
                   {task.productNumber}
@@ -416,7 +416,7 @@ export function TaskDialog({
                 <div>
                   {task.productId && task.productNumber ? (
                     <Link
-                      href={`/products/${task.productId}`}
+                      href={`/products/${task.productNumber}`}
                       className="underline-offset-2 hover:underline"
                     >
                       {task.productNumber}

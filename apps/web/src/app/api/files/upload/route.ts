@@ -66,10 +66,11 @@ export async function POST(request: Request) {
   const productId =
     typeof productIdRaw === "string" && productIdRaw ? productIdRaw : null;
   // Изделие должно принадлежать проекту
+  let productNumber: string | null = null;
   if (productId) {
     const product = await prisma.product.findFirst({
       where: { id: productId, projectId },
-      select: { id: true },
+      select: { id: true, number: true },
     });
     if (!product) {
       return NextResponse.json(
@@ -77,6 +78,7 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
+    productNumber = product.number;
   }
 
   const categoryRaw = form.get("category");
@@ -159,7 +161,7 @@ export async function POST(request: Request) {
     type: "file.added",
     title: `Файл к проекту ${project.number}`,
     body: file.name,
-    link: productId ? `/products/${productId}` : `/projects/${projectId}`,
+    link: productNumber ? `/products/${productNumber}` : `/projects/${projectId}`,
     exceptUserId: session.user.id,
   });
 

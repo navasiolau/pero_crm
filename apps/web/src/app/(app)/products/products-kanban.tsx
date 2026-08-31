@@ -84,7 +84,7 @@ function DraggableProduct({
   product: ProductRow;
   showAmount: boolean;
   canManage: boolean;
-  onOpen: (id: string) => void;
+  onOpen: (product: ProductRow) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } =
     useDraggable({ id: product.id, disabled: !canManage });
@@ -95,7 +95,7 @@ function DraggableProduct({
       style={{ transform: CSS.Translate.toString(transform) }}
       className={cn(isDragging && "opacity-40")}
       {...(canManage ? { ...listeners, ...attributes } : {})}
-      onClick={() => onOpen(product.id)}
+      onClick={() => onOpen(product)}
     >
       <ProductCardView product={product} showAmount={showAmount} />
     </div>
@@ -113,7 +113,7 @@ function StatusColumn({
   products: ProductRow[];
   showAmount: boolean;
   canManage: boolean;
-  onOpen: (id: string) => void;
+  onOpen: (product: ProductRow) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: status.id });
   const style = productStatusStyles[status.id];
@@ -229,7 +229,7 @@ export function ProductsKanban({
             products={products.filter((product) => product.status === status.id)}
             showAmount={showAmount}
             canManage={canManage}
-            onOpen={(id) => router.push(`/products/${id}`)}
+            onOpen={(product) => router.push(`/products/${product.number}`)}
           />
         ))}
       </div>

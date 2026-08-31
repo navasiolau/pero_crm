@@ -109,7 +109,7 @@ export function MaterialsSummaryTab({
           <div key={group.productId} className="flex flex-col gap-3">
             <h3 className="text-lg font-semibold">
               <Link
-                href={`/products/${group.productId}`}
+                href={`/products/${group.productNumber}`}
                 className="underline-offset-2 hover:underline"
               >
                 {group.productNumber}
