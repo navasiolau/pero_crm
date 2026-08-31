@@ -7,6 +7,9 @@ WORKDIR /app
 # --- Сборка ---
 FROM base AS build
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
+# Workspace-пакеты (@pero/plugin-sdk, плагины) — часть монорепо,
+# без них pnpm install --frozen-lockfile не разрешит workspace:*-зависимости
+COPY packages packages
 COPY apps/web/package.json apps/web/
 RUN pnpm install --frozen-lockfile
 COPY apps/web apps/web

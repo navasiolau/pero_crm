@@ -28,6 +28,12 @@ services:
       - .env
     environment:
       DATABASE_URL: postgresql://pero:pero_crm_dev@postgres:5432/pero_crm
+      # Начисления/таймеры/месяцы ЗП считаются по локальному времени
+      TZ: ${TZ:-Europe/Minsk}
+    volumes:
+      # Файловое хранилище (§13): uploads/<projectId>/… — переживает
+      # пересборку образа; в контейнере process.cwd() = /app
+      - uploads:/app/uploads
     depends_on:
       postgres:
         condition: service_healthy
@@ -52,5 +58,6 @@ services:
 
 volumes:
   pgdata:
+  uploads:
   caddy_data:
   caddy_config:

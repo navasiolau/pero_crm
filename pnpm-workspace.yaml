@@ -3,17 +3,12 @@ packages:
   - "packages/*"
   - "packages/plugins/*"
 
-onlyBuiltDependencies:
-  - sharp
-  - unrs-resolver
-  - "@prisma/client"
-  - prisma
-  - "@prisma/engines"
-  - esbuild
+# Postinstall-скрипты разрешены только этим пакетам (pnpm 11: ключ
+# allowBuilds со значениями boolean; pnpm approve-builds пишет сюда же)
 allowBuilds:
-  '@prisma/client': set this to true or false
-  '@prisma/engines': set this to true or false
-  esbuild: set this to true or false
-  prisma: set this to true or false
-  sharp: set this to true or false
-  unrs-resolver: set this to true or false
+  "@prisma/client": true
+  "@prisma/engines": true
+  esbuild: true
+  prisma: true
+  sharp: true
+  unrs-resolver: true
