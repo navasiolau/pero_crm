@@ -52,6 +52,7 @@ export interface OverviewProject {
 export function OverviewTab({
   project,
   totalPrice,
+  totalInitialPrice,
   createdByName,
   doneAt,
   canManage,
@@ -62,6 +63,7 @@ export function OverviewTab({
 }: {
   project: OverviewProject;
   totalPrice: number;
+  totalInitialPrice: number;
   createdByName: string | null;
   doneAt: string | null; // дата перехода в «Завершён» из истории этапов
   canManage: boolean;
@@ -242,6 +244,19 @@ export function OverviewTab({
             <div>
               <span className="text-muted-foreground">Сумма изделий:</span>{" "}
               {formatAmount(totalPrice > 0 ? String(totalPrice) : null, project.currency)}
+            </div>
+          ) : null}
+          {showAmount ? (
+            <div>
+              <span className="text-muted-foreground">Первоначальная цена:</span>{" "}
+              {formatAmount(
+                totalInitialPrice > 0 ? String(totalInitialPrice) : null,
+                project.currency,
+              )}
+              <span className="text-xs text-muted-foreground">
+                {" "}
+                · сумма по изделиям
+              </span>
             </div>
           ) : null}
           {project.stage === "REFUSED" ? (

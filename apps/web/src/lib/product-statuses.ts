@@ -20,35 +20,37 @@ export const productStatusLabels = Object.fromEntries(
 ) as Record<ProductStatus, string>;
 
 // Визуальная дифференциация — по образцу stageStyles: заголовки колонок
-// мини-канбана и «таблетки» статусов. «Рекламация» — служебное состояние
-// вне нормального воркфлоу, выделяется всегда.
+// мини-канбана и «таблетки» статусов. Колонки тонированы в цвет статуса;
+// «Рекламация» — служебное состояние вне нормального воркфлоу, выделяется
+// всегда (плюс border-2 на колонке).
 export const productStatusStyles: Record<
   ProductStatus,
   { column: string; header: string; badge: string }
 > = {
   DESIGN: {
-    column: "bg-muted/40",
+    column: "border-violet-500/50 bg-violet-500/10",
     header: "text-violet-700 dark:text-violet-400",
     badge: "bg-violet-500/10 text-violet-700 dark:text-violet-400",
   },
   PRODUCTION: {
-    column: "bg-muted/40",
+    column: "border-blue-500/50 bg-blue-500/10",
     header: "text-blue-700 dark:text-blue-400",
     badge: "bg-blue-500/10 text-blue-700 dark:text-blue-400",
   },
   DELIVERY: {
-    column: "bg-muted/40",
+    column: "border-cyan-500/50 bg-cyan-500/10",
     header: "text-cyan-700 dark:text-cyan-400",
     badge: "bg-cyan-500/10 text-cyan-700 dark:text-cyan-400",
   },
   INSTALLATION: {
-    column: "bg-muted/40",
+    column: "border-emerald-500/50 bg-emerald-500/10",
     header: "text-emerald-700 dark:text-emerald-400",
     badge: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
   },
   DONE: {
-    column: "bg-muted/40",
-    header: "text-muted-foreground",
+    // Спокойное завершение — едва заметный тинт без активной рамки.
+    column: "border-emerald-500/25 bg-emerald-500/5",
+    header: "text-emerald-800/70 dark:text-emerald-300/70",
     badge: "bg-muted text-muted-foreground",
   },
   RECLAMATION: {

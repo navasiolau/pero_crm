@@ -31,6 +31,7 @@ const createSchema = z.object({
   title: z.string().min(1, "Укажите название изделия"),
   kind: z.string().optional(),
   expectedPrice: z.number().nonnegative("Цена не может быть отрицательной").optional(),
+  initialPrice: z.number().nonnegative("Первоначальная цена не может быть отрицательной").optional(),
   description: z.string().optional(),
 });
 
@@ -81,6 +82,7 @@ export async function createProduct(
       title: data.title,
       kind: data.kind?.trim() || null,
       expectedPrice: data.expectedPrice,
+      initialPrice: data.initialPrice,
       description: data.description?.trim() || null,
       createdById: session.user.id,
       statusHistory: {
@@ -107,6 +109,11 @@ const updateSchema = z.object({
   title: z.string().min(1, "Укажите название изделия").optional(),
   kind: z.string().nullable().optional(),
   expectedPrice: z.number().nonnegative("Цена не может быть отрицательной").nullable().optional(),
+  initialPrice: z
+    .number()
+    .nonnegative("Первоначальная цена не может быть отрицательной")
+    .nullable()
+    .optional(),
   description: z.string().nullable().optional(),
 });
 

@@ -22,35 +22,37 @@ export const stageLabels = Object.fromEntries(
 ) as Record<ProjectStage, string>;
 
 // Визуальная дифференциация (§6): у каждого этапа свой цвет — заголовки
-// колонок канбана и «таблетки» этапов. Служебные состояния (Рекламация,
-// Пауза, Отказ) — вне нормального воркфлоу, сигнализируют сильнее.
+// колонок канбана и «таблетки» этапов. Колонки канбана тонированы в цвет
+// этапа; служебные состояния (Рекламация, Пауза, Отказ) — вне нормального
+// воркфлоу, сигнализируют сильнее (плюс border-2 на колонке).
 export const stageStyles: Record<
   ProjectStage,
   { column: string; header: string; badge: string }
 > = {
   LEAD: {
-    column: "bg-muted/40",
+    column: "border-blue-500/50 bg-blue-500/10",
     header: "text-blue-700 dark:text-blue-400",
     badge: "bg-blue-500/10 text-blue-700 dark:text-blue-400",
   },
   ESTIMATE: {
-    column: "bg-muted/40",
+    column: "border-violet-500/50 bg-violet-500/10",
     header: "text-violet-700 dark:text-violet-400",
     badge: "bg-violet-500/10 text-violet-700 dark:text-violet-400",
   },
   CONTRACT: {
-    column: "bg-muted/40",
+    column: "border-cyan-500/50 bg-cyan-500/10",
     header: "text-cyan-700 dark:text-cyan-400",
     badge: "bg-cyan-500/10 text-cyan-700 dark:text-cyan-400",
   },
   IN_WORK: {
-    column: "bg-muted/40",
+    column: "border-emerald-500/50 bg-emerald-500/10",
     header: "text-emerald-700 dark:text-emerald-400",
     badge: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
   },
   DONE: {
-    column: "bg-muted/40",
-    header: "text-muted-foreground",
+    // Спокойное завершение — едва заметный тинт без активной рамки.
+    column: "border-emerald-500/25 bg-emerald-500/5",
+    header: "text-emerald-800/70 dark:text-emerald-300/70",
     badge: "bg-muted text-muted-foreground",
   },
   RECLAMATION: {

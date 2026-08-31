@@ -180,6 +180,7 @@ model Product {
   status           ProductStatus @default(DESIGN)
   statusChangedAt  DateTime     @default(now())
   expectedPrice    Decimal?     @db.Decimal(12, 2)
+  initialPrice     Decimal?     @db.Decimal(12, 2) // первоначальная цена (сумма по проекту = Σ изделий)
   description      String? // тех. описание (большое текстовое поле, правит и инженер, §4)
   surveyorId       String? // замерщик — сотрудник, произведший замер (legacy f4061)
   surveyor         User?        @relation("ProductSurveyor", fields: [surveyorId], references: [id], onDelete: SetNull)

@@ -56,6 +56,7 @@ export function ProductHeader({
     kind: string | null;
     status: ProductStatus;
     expectedPrice: string | null;
+    initialPrice: string | null;
     description: string | null;
     projectId: string;
   };
@@ -71,13 +72,18 @@ export function ProductHeader({
   const [title, setTitle] = useState(product.title);
   const [kind, setKind] = useState(product.kind ?? "");
   const [price, setPrice] = useState(product.expectedPrice ?? "");
+  const [initialPrice, setInitialPrice] = useState(product.initialPrice ?? "");
   const [description, setDescription] = useState(product.description ?? "");
 
   const onlyTech = canEditTech && !canManage; // инженер — только тех. блок
   const parsedPrice = price.trim() === "" ? null : Number(price);
+  const parsedInitialPrice =
+    initialPrice.trim() === "" ? null : Number(initialPrice);
   const canSave =
     (onlyTech || title.trim().length > 0) &&
-    (parsedPrice === null || (!Number.isNaN(parsedPrice) && parsedPrice >= 0));
+    (parsedPrice === null || (!Number.isNaN(parsedPrice) && parsedPrice >= 0)) &&
+    (parsedInitialPrice === null ||
+      (!Number.isNaN(parsedInitialPrice) && parsedInitialPrice >= 0));
 
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -171,6 +177,21 @@ export function ProductHeader({
                     />
                   </div>
                 ) : null}
+                {showAmount ? (
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="ph-initial-price">
+                      Первоначальная цена, {currency}
+                    </Label>
+                    <Input
+                      id="ph-initial-price"
+                      type="number"
+                      min="0"
+                      value={initialPrice}
+                      onChange={(event) => setInitialPrice(event.target.value)}
+                      placeholder="не обязательна"
+                    />
+                  </div>
+                ) : null}
               </>
             ) : null}
             <div className="flex flex-col gap-1.5">
@@ -200,6 +221,7 @@ export function ProductHeader({
                           title: title.trim(),
                           kind: kind.trim() || null,
                           expectedPrice: parsedPrice,
+                          initialPrice: parsedInitialPrice,
                           description: description.trim() || null,
                         },
                   );

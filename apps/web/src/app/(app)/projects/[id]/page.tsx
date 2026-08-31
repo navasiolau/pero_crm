@@ -137,6 +137,11 @@ export default async function ProjectPage({
     (sum, product) => sum + Number(product.expectedPrice ?? 0),
     0,
   );
+  // Первоначальная цена проекта = Σ первоначальных цен изделий
+  const totalInitialPrice = project.products.reduce(
+    (sum, product) => sum + Number(product.initialPrice ?? 0),
+    0,
+  );
   // Дата завершения — последний переход в «Завершён» из истории этапов
   const doneEntry = project.stageHistory.find((entry) => entry.toStage === "DONE");
   // Нехватка материалов — хотя бы по одному изделию (§12)
@@ -231,6 +236,7 @@ export default async function ProjectPage({
               client: project.client,
             }}
             totalPrice={totalPrice}
+            totalInitialPrice={totalInitialPrice}
             createdByName={
               project.createdById
                 ? (uploaderNames.get(project.createdById) ?? null)

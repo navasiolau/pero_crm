@@ -94,6 +94,7 @@ export default async function ProductPage({
             kind: product.kind,
             status: product.status,
             expectedPrice: product.expectedPrice?.toString() ?? null,
+            initialPrice: product.initialPrice?.toString() ?? null,
             description: product.description,
             projectId: product.project.id,
           }}
@@ -151,6 +152,17 @@ export default async function ProductPage({
             <div className="text-muted-foreground">Статус</div>
             <div>{productStatusLabels[product.status]}</div>
           </div>
+          {showAmount ? (
+            <div>
+              <div className="text-muted-foreground">Первоначальная цена</div>
+              <div>
+                {formatAmount(
+                  product.initialPrice?.toString() ?? null,
+                  product.project.currency,
+                )}
+              </div>
+            </div>
+          ) : null}
         </CardContent>
       </Card>
 
