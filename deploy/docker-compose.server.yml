@@ -1,0 +1,70 @@
+# Стек продакшена PERO CRM на офисном сервере (LXC crm, /opt/crm).
+# Контракт из ARCHITECTURE.md: сервисы web/db/proxy, у db нет интернета
+# (backend internal), TLS терминирует Caddy на VPS — здесь только :80.
+# Кладётся в /opt/crm/docker-compose.yml, рядом .env и Caddyfile,
+# код — в /opt/crm/app (git clone, deploy-ключ).
+services:
+  web:
+    build:
+      context: ./app
+      dockerfile: apps/web/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://crm:${DB_PASSWORD}@db:5432/crm
+      TZ: ${TZ:-Europe/Minsk}
+    volumes:
+      # Файловое хранилище (§13). ВАЖНО: standalone server.js делает
+      # process.chdir(__dirname) → cwd = /app/apps/web, поэтому маунт
+      # строго /app/apps/web/uploads (иначе «Файл не найден на диске»)
+      - uploads:/app/apps/web/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - frontend
+      - backend
+
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: crm
+      POSTGRES_USER: crm
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U crm -d crm"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    # Только internal-сеть: у БД нет интернета и входа снаружи
+    networks:
+      - backend
+
+  proxy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - web
+    networks:
+      - frontend
+
+volumes:
+  pgdata:
+  uploads:
+  caddy_data:
+  caddy_config:
+
+networks:
+  frontend:
+  backend:
+    internal: true

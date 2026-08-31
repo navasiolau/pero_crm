@@ -1,0 +1,5 @@
+# Caddy внутри LXC crm: только HTTP, TLS терминирует Caddy на VPS
+# (Let's Encrypt + crm.peromebel.by там же).
+:80 {
+	reverse_proxy web:3000
+}

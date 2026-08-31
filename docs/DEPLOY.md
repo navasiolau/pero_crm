@@ -79,12 +79,16 @@ deploy`, увидит их и пропустит.
 
 Хранилище — папка `uploads/<projectId>/…` (загруженные фото, чертежи, b3d…),
 где `projectId` = номер проекта («205»). В контейнере это named-volume
-`uploads` → `/app/uploads` (переживает пересборку образа). Скопировать
-содержимое `apps/web/uploads/` с текущей машины на сервер и залить в volume:
+`uploads` → **`/app/apps/web/uploads`** (переживает пересборку образа).
+Внимание: standalone `server.js` делает `process.chdir(__dirname)`, поэтому
+внутри контейнера `process.cwd() = /app/apps/web` — маунт и `docker cp` должны
+целиться в `/app/apps/web/uploads`, иначе API отдаст «Файл не найден на диске».
+Скопировать содержимое `apps/web/uploads/` с текущей машины на сервер и залить
+в volume:
 
 ```bash
 # на сервере, после первого старта контейнера app (п. 5):
-docker cp ./uploads/. pero_crm_app:/app/uploads/
+docker cp ./uploads/. pero_crm_app:/app/apps/web/uploads/
 ```
 
 Альтернатива — сразу наполнить volume: `docker volume inspect pero_crm_v2_uploads`,

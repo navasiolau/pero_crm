@@ -32,8 +32,10 @@ services:
       TZ: ${TZ:-Europe/Minsk}
     volumes:
       # Файловое хранилище (§13): uploads/<projectId>/… — переживает
-      # пересборку образа; в контейнере process.cwd() = /app
-      - uploads:/app/uploads
+      # пересборку образа. ВАЖНО: standalone server.js делает
+      # process.chdir(__dirname), поэтому cwd = /app/apps/web и хранилище
+      # обязано быть смонтировано именно сюда (не /app/uploads!)
+      - uploads:/app/apps/web/uploads
     depends_on:
       postgres:
         condition: service_healthy
