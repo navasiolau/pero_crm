@@ -1,0 +1,37 @@
+{
+  "name": "@pero/plugin-bazis-import",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Плагин PERO CRM: импорт спецификаций из Базис-Мебельщик (XML)",
+  "main": "./src/plugin.ts",
+  "types": "./src/plugin.ts",
+  "exports": {
+    ".": "./src/plugin.ts",
+    "./parser": "./src/parser/index.ts",
+    "./apply": "./src/apply.ts",
+    "./settings": "./src/settings.ts",
+    "./classify": "./src/classify.ts",
+    "./templates": "./src/templates.ts",
+    "./materials": "./src/materials.ts",
+    "./tech-data-view": "./src/ui/TechDataView.tsx"
+  },
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@pero/plugin-sdk": "workspace:*",
+    "fast-xml-parser": "5.10.1",
+    "next": "15.5.20",
+    "sonner": "^2.0.7"
+  },
+  "peerDependencies": {
+    "react": "^19"
+  },
+  "devDependencies": {
+    "@prisma/client": "6.19.3",
+    "@types/node": "20.19.43",
+    "@types/react": "^19",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
+  }
+}

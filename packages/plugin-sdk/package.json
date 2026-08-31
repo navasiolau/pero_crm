@@ -1,0 +1,14 @@
+{
+  "name": "@pero/plugin-sdk",
+  "version": "0.1.0",
+  "private": true,
+  "description": "SDK плагинов PERO CRM: манифест, слоты, команды, контекст",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "peerDependencies": {
+    "react": "^19"
+  },
+  "devDependencies": {
+    "@types/react": "^19"
+  }
+}

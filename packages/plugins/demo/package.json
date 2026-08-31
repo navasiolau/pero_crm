@@ -1,0 +1,17 @@
+{
+  "name": "@pero/plugin-demo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Демо-плагин PERO CRM: проверка плагинного ядра",
+  "main": "./src/plugin.ts",
+  "types": "./src/plugin.ts",
+  "dependencies": {
+    "@pero/plugin-sdk": "workspace:*"
+  },
+  "peerDependencies": {
+    "react": "^19"
+  },
+  "devDependencies": {
+    "@types/react": "^19"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "name": "@pero/plugin-file-stages",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Файловая конфигурация для мебельного производства: группы Производство/Сборка/Монтаж и проверка расширений при загрузке.",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "dependencies": {
+    "@pero/plugin-sdk": "workspace:*"
+  },
+  "peerDependencies": {
+    "react": "^19"
+  },
+  "devDependencies": {
+    "@types/react": "^19"
+  }
+}
