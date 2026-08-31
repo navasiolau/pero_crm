@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   DndContext,
@@ -166,6 +166,8 @@ function StageColumn({
 
 // Канбан проектов (§7): колонки = этапы §6, свободные переходы,
 // оптимистичное обновление с откатом; мини-формы для Отказа/Рекламации (§6).
+// Порядок карточек и фильтрация — с сервера (listProjects, новые сверху);
+// после смены этапа revalidate приносит новый список — синхронизируемся.
 export function KanbanBoard({
   initialProjects,
   canManage,
@@ -179,6 +181,13 @@ export function KanbanBoard({
   const [projects, setProjects] = useState(initialProjects);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [formRequest, setFormRequest] = useState<StageFormRequest | null>(null);
+
+  // Синхронизация с сервером: фильтры/этапы меняются на сервере, а
+  // перетаскивание в «Завершён»/«Отказ» при активной галочке убирает
+  // карточку с доски (сервер её отфильтровал)
+  useEffect(() => {
+    setProjects(initialProjects);
+  }, [initialProjects]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),

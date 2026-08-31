@@ -25,14 +25,42 @@ function requireRoles(role: Role, roles: Role[]) {
   if (!roles.includes(role)) throw new Error("Недостаточно прав");
 }
 
-// Номер проекта: П-<год>-<порядковый в году>, генерация в транзакции.
-async function nextProjectNumber(): Promise<string> {
-  const year = new Date().getFullYear();
+// Номер проекта — сплошная нумерация: следующий = max(numberInt) + 1
+// (после миграции нормализации все номера каноничные числа, «205» —
+// последний). Создание — в той же транзакции, чтобы два параллельных
+// запроса не получили один номер.
+async function createProjectWithNumber(
+  data: {
+    title: string;
+    clientId: string;
+    currency: string;
+    address?: string;
+    managerId?: string;
+    engineerId?: string;
+  },
+  userId: string,
+) {
   return prisma.$transaction(async (tx) => {
-    const count = await tx.project.count({
-      where: { number: { startsWith: `П-${year}-` } },
+    const max = await tx.project.aggregate({ _max: { numberInt: true } });
+    const numberInt = (max._max.numberInt ?? 0) + 1;
+    const number = String(numberInt);
+    const project = await tx.project.create({
+      data: {
+        number,
+        numberInt,
+        title: data.title,
+        clientId: data.clientId,
+        currency: data.currency,
+        address: data.address,
+        managerId: data.managerId,
+        engineerId: data.engineerId,
+        createdById: userId,
+        stageHistory: {
+          create: { toStage: "LEAD", changedById: userId },
+        },
+      },
     });
-    return `П-${year}-${String(count + 1).padStart(3, "0")}`;
+    return project;
   });
 }
 
@@ -58,22 +86,18 @@ export async function createProject(
   }
   const data = parsed.data;
 
-  const number = await nextProjectNumber();
-  const project = await prisma.project.create({
-    data: {
-      number,
+  const project = await createProjectWithNumber(
+    {
       title: data.title,
       clientId: data.clientId,
       currency: data.currency,
       address: data.address,
       managerId: data.managerId,
       engineerId: data.engineerId,
-      createdById: session.user.id,
-      stageHistory: {
-        create: { toStage: "LEAD", changedById: session.user.id },
-      },
     },
-  });
+    session.user.id,
+  );
+  const number = project.number;
 
   await writeChangeLog({
     actorType: "user",

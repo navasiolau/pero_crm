@@ -5,42 +5,49 @@ import { TriangleAlert } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { DataTable, type DataColumn } from "@/components/ui/data-table";
+import { useListParams } from "@/lib/list-params";
 import { cn } from "@/lib/utils";
 import { daysOnStage, stageLabels, stageStyles } from "@/lib/stages";
 
 import { formatAmount } from "./kanban-board";
 import type { ProjectCard } from "./projects-view";
 
-// Табличный вид проектов (§7): поиск, сортировка, пагинация.
+// Табличный вид проектов (§7): сортировка/пагинация — серверные
+// (события → URL), поиск — в фильтр-баре над таблицей.
 export function ProjectsTable({
   projects,
+  total,
+  page,
+  pageSize,
   showAmount,
   onOpen,
 }: {
   projects: ProjectCard[];
+  total: number;
+  page: number;
+  pageSize: number;
   showAmount: boolean;
   onOpen: (id: string) => void;
 }) {
+  const { get, set } = useListParams();
+
   const columns: DataColumn<ProjectCard>[] = [
     {
       id: "number",
       header: "Номер",
       sortable: true,
-      sortValue: (row) => row.number,
       cell: (row) => <span className="font-medium">{row.number}</span>,
     },
     {
       id: "title",
       header: "Название",
       sortable: true,
-      sortValue: (row) => row.title,
       cell: (row) => row.title,
     },
     {
       id: "client",
       header: "Клиент",
       sortable: true,
-      sortValue: (row) => row.clientName,
       cell: (row) => (
         <Link
           href="/clients"
@@ -55,7 +62,6 @@ export function ProjectsTable({
       id: "stage",
       header: "Этап",
       sortable: true,
-      sortValue: (row) => stageLabels[row.stage],
       cell: (row) => (
         <span className="flex flex-col items-start gap-1">
           <Badge
@@ -77,7 +83,6 @@ export function ProjectsTable({
       id: "products",
       header: "Изделий",
       sortable: true,
-      sortValue: (row) => row.productsCount,
       className: "text-right",
       headerClassName: "text-right",
       cell: (row) => row.productsCount,
@@ -86,7 +91,6 @@ export function ProjectsTable({
       id: "manager",
       header: "Менеджер",
       sortable: true,
-      sortValue: (row) => row.managerName ?? "",
       cell: (row) => (
         <span className="text-muted-foreground">{row.managerName ?? "—"}</span>
       ),
@@ -96,8 +100,8 @@ export function ProjectsTable({
           {
             id: "amount",
             header: "Сумма изделий",
-            sortable: true,
-            sortValue: (row: ProjectCard) => Number(row.totalPrice ?? 0),
+            // Σ цен изделий считается по строкам — сервером не сортируется
+            sortable: false,
             headerClassName: "text-right",
             className: "text-right",
             cell: (row: ProjectCard) => formatAmount(row.totalPrice, row.currency),
@@ -110,9 +114,19 @@ export function ProjectsTable({
     <DataTable
       columns={columns}
       rows={projects}
-      searchPlaceholder="Поиск проекта…"
+      emptyText="Проектов не найдено — ослабьте фильтры"
       onRowClick={(row) => onOpen(row.id)}
-      emptyText="Проектов пока нет — создайте первый"
+      server={{
+        total,
+        page,
+        pageSize,
+        sort: get("sort") || "number",
+        dir: get("dir") === "asc" ? "asc" : "desc",
+        onPageChange: (next) => set({ page: String(next) }),
+        onSortChange: (columnId, dir) =>
+          set({ sort: columnId, dir, page: null }),
+        onPageSizeChange: (size) => set({ pageSize: String(size), page: null }),
+      }}
     />
   );
 }

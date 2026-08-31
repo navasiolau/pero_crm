@@ -193,6 +193,9 @@ async function main() {
   }
   // Демо-проекты вынесены в функцию, чтобы складской seed (ниже) работал
   // и на уже заполненной базе (ранний выход из main недопустим)
+  // Демо-номера каноничные числовые (как после миграции нормализации),
+  // в диапазоне 9000+ — чтобы не пересекаться с реальной нумерацией.
+  const demoBase = 9000;
   const seedDemoProjects = async () => {
     if (clientsCount > 0) return;
 
@@ -216,11 +219,10 @@ async function main() {
     },
   });
 
-  const year = new Date().getFullYear();
   // Проект = заказ клиента с изделиями (цены — на изделиях).
   const projects = [
     {
-      number: `П-${year}-001`,
+      number: `${demoBase + 1}`,
       title: "Кухня и шкаф для Ивановой",
       stage: "IN_WORK" as const,
       clientId: ivanova.id,
@@ -235,7 +237,7 @@ async function main() {
       ],
     },
     {
-      number: `П-${year}-002`,
+      number: `${demoBase + 2}`,
       title: "Шкаф-купе для Петрова",
       stage: "CONTRACT" as const,
       clientId: petrov.id,
@@ -245,7 +247,7 @@ async function main() {
       ],
     },
     {
-      number: `П-${year}-003`,
+      number: `${demoBase + 3}`,
       title: "Офисная мебель",
       stage: "LEAD" as const,
       clientId: alpha.id,
@@ -255,7 +257,7 @@ async function main() {
       ],
     },
     {
-      number: `П-${year}-004`,
+      number: `${demoBase + 4}`,
       title: "Прихожая «Лофт»",
       stage: "ESTIMATE" as const,
       clientId: ivanova.id,
@@ -267,9 +269,11 @@ async function main() {
   ];
 
   for (const project of projects) {
+    const numberInt = Number(project.number);
     const created = await prisma.project.create({
       data: {
         number: project.number,
+        numberInt,
         title: project.title,
         stage: project.stage,
         clientId: project.clientId,
@@ -288,6 +292,7 @@ async function main() {
         data: {
           projectId: created.id,
           number: `${project.number}-${suffix}`,
+          suffixInt: suffix,
           title: product.title,
           status: product.status,
           expectedPrice: product.expectedPrice,
@@ -303,7 +308,7 @@ async function main() {
 
   // Замер — типовая задача с обязательными фото (§6.2), на весь заказ
   const kitchen = await prisma.project.findUniqueOrThrow({
-    where: { number: `П-${year}-001` },
+    where: { number: `${demoBase + 1}` },
   });
   const zamExists = await prisma.task.count({
     where: { projectId: kitchen.id, type: "Замер" },
@@ -345,7 +350,7 @@ async function main() {
   // приходов. BYN, курс 1, основная касса; USD-приход 1000 по курсу
   // 2.8938 (эквивалент 2 893,8 BYN) — зафиксированная экономика П-001.
   const shkaf = await prisma.project.findUniqueOrThrow({
-    where: { number: `П-${year}-002` },
+    where: { number: `${demoBase + 2}` },
   });
   await prisma.payment.createMany({
     data: [
@@ -404,7 +409,6 @@ async function main() {
   // ─── Демо-данные склада (§12, фаза 6) — идемпотентно ──────────────────
   // Категории/номенклатура — upsert по фиксированным id; движения и
   // потребность — только если журналы пусты (иначе количества задвоятся).
-  const warehouseYear = new Date().getFullYear();
   for (const category of [
     { id: "seed-cat-ldsp", name: "ЛДСП и плиты" },
     { id: "seed-cat-kromka", name: "Кромка" },
@@ -526,7 +530,7 @@ async function main() {
   // «Обеспечено»; кромка: нужно 600 при остатке 500 → «Нет на складе»
   // (красная строка + бейдж нехватки на проекте).
   const shkafProduct = await prisma.product.findUnique({
-    where: { number: `П-${warehouseYear}-002-1` },
+    where: { number: `${demoBase + 2}-1` },
   });
   if (shkafProduct && (await prisma.projectMaterial.count()) === 0) {
     const [ldspLine, petlyaLine] = await Promise.all([

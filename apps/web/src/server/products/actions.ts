@@ -35,22 +35,23 @@ const createSchema = z.object({
   description: z.string().optional(),
 });
 
-// Номер изделия: <номер проекта>-<n>, n — следующий суффикс в проекте
-// (по максимуму существующих, чтобы удаление не давало коллизий).
-async function nextProductNumber(
+// Номер изделия: <номер проекта>-<n>, n — следующий суффикс в проекте.
+// Считается по max(suffixInt) среди изделий проекта (в legacy-номерах
+// вида «205.21» суффикс числовой; изделия без суффикса не мешают),
+// чтобы удаление не давало коллизий.
+async function nextProductSuffixInt(
   projectId: string,
-  projectNumber: string,
-): Promise<string> {
+): Promise<number> {
   const siblings = await prisma.product.findMany({
     where: { projectId },
-    select: { number: true },
+    select: { suffixInt: true },
   });
   let max = 0;
   for (const sibling of siblings) {
-    const suffix = Number(sibling.number.split("-").pop());
-    if (Number.isFinite(suffix) && suffix > max) max = suffix;
+    const suffix = sibling.suffixInt;
+    if (suffix !== null && suffix > max) max = suffix;
   }
-  return `${projectNumber}-${max + 1}`;
+  return max + 1;
 }
 
 // Создание изделия в проекте — админ/директор/менеджер (§4).
@@ -74,11 +75,13 @@ export async function createProduct(
   });
   if (!project) return { ok: false, error: "Проект не найден" };
 
-  const number = await nextProductNumber(project.id, project.number);
+  const suffixInt = await nextProductSuffixInt(project.id);
+  const number = `${project.number}-${suffixInt}`;
   const product = await prisma.product.create({
     data: {
       projectId: project.id,
       number,
+      suffixInt,
       title: data.title,
       kind: data.kind?.trim() || null,
       expectedPrice: data.expectedPrice,

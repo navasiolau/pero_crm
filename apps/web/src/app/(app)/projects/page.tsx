@@ -3,23 +3,51 @@ import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { displayClientName } from "@/lib/labels";
 import { getUserPreference } from "@/server/preferences";
-import { listClients, listEngineers, listManagers, listProjects } from "@/server/projects/queries";
+import {
+  listClientOptions,
+  listEngineers,
+  listManagers,
+  listProjects,
+  parseProjectListParams,
+} from "@/server/projects/queries";
 
 import { ProjectsView } from "./projects-view";
 
 export const dynamic = "force-dynamic";
 
-// Проекты: канбан по умолчанию, таблица — по переключателю (§7).
-// Выбор вида сохраняется в UserPreference per user.
-export default async function ProjectsPage() {
+// Проекты: серверные фильтры/сортировка/пагинация (состояние в URL),
+// вид канбан/таблица — параметр ?view с фолбэком на UserPreference (§7).
+// Канбан получает все отфильтрованные проекты, таблица — одну страницу.
+export default async function ProjectsPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const session = await auth();
   if (!session?.user) redirect("/login");
 
   const role = session.user.role;
-  const [projects, view, clients, managers, engineers] = await Promise.all([
-    listProjects(session.user.id, role),
-    getUserPreference(session.user.id, "projects.view"),
-    listClients(),
+  const params = await searchParams;
+  const { filters, page, pageSize } = parseProjectListParams(params);
+
+  const viewParam = (Array.isArray(params.view) ? params.view[0] : params.view) ?? "";
+  const savedView = await getUserPreference(session.user.id, "projects.view");
+  const view =
+    viewParam === "table" || viewParam === "kanban"
+      ? viewParam
+      : savedView === "table"
+        ? "table"
+        : "kanban";
+
+  const [result, clients, managers, engineers] = await Promise.all([
+    listProjects(
+      session.user.id,
+      role,
+      filters,
+      // Канбану нужна вся отфильтрованная доска, таблице — страница
+      view === "table" ? { page, pageSize } : undefined,
+    ),
+    listClientOptions(),
     listManagers(),
     listEngineers(),
   ]);
@@ -27,7 +55,8 @@ export default async function ProjectsPage() {
 
   return (
     <ProjectsView
-      projects={projects.map((project) => ({
+      view={view}
+      projects={result.rows.map((project) => ({
         id: project.id,
         number: project.number,
         title: project.title,
@@ -43,7 +72,9 @@ export default async function ProjectsPage() {
         filesCount: project._count.files,
         hasMaterialShortage: project.hasMaterialShortage,
       }))}
-      initialView={view === "table" ? "table" : "kanban"}
+      total={result.total}
+      page={page}
+      pageSize={pageSize}
       canManage={canManage}
       showAmount={["ADMIN", "DIRECTOR", "MANAGER", "ENGINEER", "ACCOUNTANT"].includes(role)}
       clients={clients.map((client) => ({ id: client.id, name: displayClientName(client) }))}

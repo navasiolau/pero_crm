@@ -34,6 +34,19 @@ export interface DataColumn<TRow> {
   headerClassName?: string;
 }
 
+/** Сервер-режим: поиск/сортировка/пагинация живут снаружи (в URL),
+ * таблица только отображает страницу и отдаёт события. */
+export interface DataTableServerState {
+  total: number;
+  page: number; // 1-based
+  pageSize: number;
+  sort: string | null;
+  dir: "asc" | "desc";
+  onPageChange: (page: number) => void;
+  onSortChange: (columnId: string, dir: "asc" | "desc") => void;
+  onPageSizeChange?: (size: number) => void;
+}
+
 // Универсальная таблица: поиск по строкам, сортировка по клику на заголовок,
 // пагинация с выбором размера страницы. Использовать для ВСЕХ табличных
 // списков сущностей (§ревью: таблица ≠ полная информация, но обязана
@@ -46,6 +59,7 @@ export function DataTable<TRow extends { id: string }>({
   onRowClick,
   rowClassName,
   defaultPageSize = 10,
+  server,
 }: {
   columns: DataColumn<TRow>[];
   rows: TRow[];
@@ -55,6 +69,8 @@ export function DataTable<TRow extends { id: string }>({
   /** Доп. класс строки по условию (напр. подсветка нехватки материалов) */
   rowClassName?: (row: TRow) => string | undefined;
   defaultPageSize?: number;
+  /** Сервер-режим: поиск/сортировка/пагинация — снаружи (в URL) */
+  server?: DataTableServerState;
 }) {
   const [query, setQuery] = useState("");
   const [sortId, setSortId] = useState<string | null>(null);
@@ -63,6 +79,8 @@ export function DataTable<TRow extends { id: string }>({
   const [pageSize, setPageSize] = useState(defaultPageSize);
 
   const filtered = useMemo(() => {
+    // Сервер-режим: данные уже отфильтрованы и отсортированы на сервере
+    if (server) return rows;
     const needle = query.trim().toLowerCase();
     let result = rows;
     if (needle) {
@@ -90,17 +108,30 @@ export function DataTable<TRow extends { id: string }>({
       }
     }
     return result;
-  }, [rows, columns, query, sortId, sortDir]);
+  }, [rows, columns, query, sortId, sortDir, server]);
 
-  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
-  const safePage = Math.min(page, pageCount - 1);
-  const pageRows = filtered.slice(
-    safePage * pageSize,
-    safePage * pageSize + pageSize,
-  );
+  const totalCount = server ? server.total : filtered.length;
+  const activePageSize = server ? server.pageSize : pageSize;
+  const pageCount = Math.max(1, Math.ceil(totalCount / activePageSize));
+  const localSafePage = Math.min(page, pageCount - 1);
+  const safePage = server ? server.page - 1 : localSafePage;
+  const pageRows = server
+    ? filtered
+    : filtered.slice(safePage * activePageSize, safePage * activePageSize + activePageSize);
 
+  // Клик по заголовку: клиентский режим крутит локальную сортировку,
+  // серверный — отдаёт событие наверх (в URL)
   function toggleSort(column: DataColumn<TRow>) {
-    if (!column.sortable || !column.sortValue) return;
+    if (!column.sortable) return;
+    if (server) {
+      if (server.sort === column.id) {
+        server.onSortChange(column.id, server.dir === "asc" ? "desc" : "asc");
+      } else {
+        server.onSortChange(column.id, "asc");
+      }
+      return;
+    }
+    if (!column.sortValue) return;
     setPage(0);
     if (sortId === column.id) {
       setSortDir((prev) => (prev === "asc" ? "desc" : "asc"));
@@ -110,20 +141,25 @@ export function DataTable<TRow extends { id: string }>({
     }
   }
 
+  const activeSortId = server ? server.sort : sortId;
+  const activeSortDir = server ? server.dir : sortDir;
+
   return (
     <div className="flex flex-col gap-3">
-      <div className="relative max-w-sm">
-        <Search className="absolute top-2.5 left-2 size-4 text-muted-foreground" />
-        <Input
-          value={query}
-          onChange={(event) => {
-            setQuery(event.target.value);
-            setPage(0);
-          }}
-          placeholder={searchPlaceholder}
-          className="pl-8"
-        />
-      </div>
+      {server ? null : (
+        <div className="relative max-w-sm">
+          <Search className="absolute top-2.5 left-2 size-4 text-muted-foreground" />
+          <Input
+            value={query}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setPage(0);
+            }}
+            placeholder={searchPlaceholder}
+            className="pl-8"
+          />
+        </div>
+      )}
 
       <div className="rounded-xl border">
         <Table>
@@ -131,7 +167,7 @@ export function DataTable<TRow extends { id: string }>({
             <TableRow>
               {columns.map((column) => (
                 <TableHead key={column.id} className={column.headerClassName}>
-                  {column.sortable && column.sortValue ? (
+                  {column.sortable && (column.sortValue || server) ? (
                     <button
                       type="button"
                       className={cn(
@@ -142,8 +178,8 @@ export function DataTable<TRow extends { id: string }>({
                       onClick={() => toggleSort(column)}
                     >
                       {column.header}
-                      {sortId === column.id ? (
-                        sortDir === "asc" ? (
+                      {activeSortId === column.id ? (
+                        activeSortDir === "asc" ? (
                           <ArrowUp className="size-3.5" />
                         ) : (
                           <ArrowDown className="size-3.5" />
@@ -191,14 +227,19 @@ export function DataTable<TRow extends { id: string }>({
         <div className="flex items-center gap-2">
           <span>На странице:</span>
           <Select
-            value={String(pageSize)}
+            value={String(activePageSize)}
             onValueChange={(value) => {
-              setPageSize(Number(value ?? 10));
+              const size = Number(value ?? 10);
+              if (server?.onPageSizeChange) {
+                server.onPageSizeChange(size);
+                return;
+              }
+              setPageSize(size);
               setPage(0);
             }}
           >
             <SelectTrigger className="h-8 w-20">
-              <SelectValue>{pageSize}</SelectValue>
+              <SelectValue>{activePageSize}</SelectValue>
             </SelectTrigger>
             <SelectContent>
               {[10, 20, 50, 100].map((size) => (
@@ -209,8 +250,7 @@ export function DataTable<TRow extends { id: string }>({
             </SelectContent>
           </Select>
           <span>
-            · {filtered.length}{" "}
-            {filtered.length === 1 ? "запись" : "записей"}
+            · {totalCount} {totalCount === 1 ? "запись" : "записей"}
           </span>
         </div>
         <div className="flex items-center gap-2">
@@ -218,7 +258,9 @@ export function DataTable<TRow extends { id: string }>({
             variant="outline"
             size="sm"
             disabled={safePage === 0}
-            onClick={() => setPage(safePage - 1)}
+            onClick={() =>
+              server ? server.onPageChange(safePage) : setPage(safePage - 1)
+            }
           >
             Назад
           </Button>
@@ -229,7 +271,9 @@ export function DataTable<TRow extends { id: string }>({
             variant="outline"
             size="sm"
             disabled={safePage >= pageCount - 1}
-            onClick={() => setPage(safePage + 1)}
+            onClick={() =>
+              server ? server.onPageChange(safePage + 2) : setPage(safePage + 1)
+            }
           >
             Вперёд
           </Button>

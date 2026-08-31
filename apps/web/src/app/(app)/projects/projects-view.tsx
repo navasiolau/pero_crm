@@ -1,16 +1,18 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { LayoutGrid, Plus, Table2 } from "lucide-react";
 import type { ProjectStage } from "@prisma/client";
 
 import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { useListParams } from "@/lib/list-params";
 import { saveViewPreference } from "@/server/preferences-actions";
 
 import { CreateProjectDialog } from "./create-project-dialog";
 import { KanbanBoard } from "./kanban-board";
+import { ProjectsFilterBar } from "./filter-bar";
 import { ProjectsTable } from "./projects-table";
 
 export interface ProjectCard {
@@ -36,18 +38,27 @@ export interface SelectOption {
   hint?: string; // должность/телефон — вторая строка в списках
 }
 
-// Раздел «Проекты»: канбан (по умолчанию) / таблица, выбор сохраняется (§7).
+// Раздел «Проекты»: фильтры в URL, канбан (по умолчанию) / таблица,
+// выбор вида — параметр ?view с фолбэком на UserPreference (§7).
+// Фильтрация/сортировка/пагинация — на сервере (listProjects).
 export function ProjectsView({
+  view,
   projects,
-  initialView,
+  total,
+  page,
+  pageSize,
   canManage,
   showAmount,
   clients,
   managers,
   engineers,
 }: {
+  view: "kanban" | "table";
+  // Канбан — все отфильтрованные проекты; таблица — одна страница
   projects: ProjectCard[];
-  initialView: "kanban" | "table";
+  total: number;
+  page: number;
+  pageSize: number;
   canManage: boolean;
   showAmount: boolean;
   clients: SelectOption[];
@@ -55,14 +66,17 @@ export function ProjectsView({
   engineers: SelectOption[];
 }) {
   const router = useRouter();
-  const [view, setView] = useState(initialView);
+  const { set } = useListParams();
   const [, startTransition] = useTransition();
   const [createOpen, setCreateOpen] = useState(false);
 
-  const sorted = useMemo(
-    () => [...projects].sort((a, b) => a.number.localeCompare(b.number)),
-    [projects],
-  );
+  function switchView(next: "kanban" | "table") {
+    set({ view: next });
+    // Предпочтение — фолбэк для следующего визита (URL главнее)
+    startTransition(async () => {
+      await saveViewPreference("projects.view", next);
+    });
+  }
 
   return (
     <div className="flex h-full flex-col gap-4">
@@ -74,10 +88,7 @@ export function ProjectsView({
             onValueChange={(value) => {
               const next = value[0] as "kanban" | "table" | undefined;
               if (!next) return;
-              setView(next);
-              startTransition(async () => {
-                await saveViewPreference("projects.view", next);
-              });
+              switchView(next);
             }}
           >
             <ToggleGroupItem value="kanban" aria-label="Канбан">
@@ -95,15 +106,24 @@ export function ProjectsView({
         </div>
       </div>
 
+      <ProjectsFilterBar
+        clients={clients}
+        managers={managers}
+        engineers={engineers}
+      />
+
       {view === "kanban" ? (
         <KanbanBoard
-          initialProjects={sorted}
+          initialProjects={projects}
           canManage={canManage}
           showAmount={showAmount}
         />
       ) : (
         <ProjectsTable
-          projects={sorted}
+          projects={projects}
+          total={total}
+          page={page}
+          pageSize={pageSize}
           showAmount={showAmount}
           onOpen={(id) => router.push(`/projects/${id}`)}
         />

@@ -119,7 +119,10 @@ model Client {
 // экономика — тоже на проекте (§11). Стоимость проекта = Σ цен изделий.
 model Project {
   id                     String       @id @default(cuid())
-  number                 String       @unique // П-2026-001
+  number                 String       @unique // «205» — канонический номер, только цифры без ведущих нулей
+  // Числовое представление номера для серверной сортировки «новые сверху»
+  // (numberInt DESC) — заполняется при создании и миграцией нормализации
+  numberInt              Int
   title                  String // название заказа
   stage                  ProjectStage @default(LEAD)
   stageChangedAt         DateTime     @default(now())
@@ -152,6 +155,7 @@ model Project {
   payments               Payment[]
 
   @@index([stage, stageChangedAt])
+  @@index([numberInt])
 }
 
 // Статусы изделия — проще этапов проекта: производственная цепочка
@@ -174,7 +178,10 @@ model Product {
   id               String       @id @default(cuid())
   projectId        String
   project          Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  number           String       @unique // П-2026-001-1
+  number           String       @unique // «205.21» / «205-1» — <номер проекта><разделитель><суффикс>
+  // Числовой суффикс после префикса проекта («205.21» → 21, «205-3» → 3,
+  // «108.» без суффикса → NULL) — для серверной сортировки внутри проекта
+  suffixInt        Int?
   title            String // название изделия
   kind             String? // вид изделия (текстовое поле, из legacy f2641)
   status           ProductStatus @default(DESIGN)
@@ -199,6 +206,7 @@ model Product {
   stockMovements   StockMovement[]
 
   @@index([projectId])
+  @@index([projectId, suffixInt])
   @@index([status, statusChangedAt])
 }
 

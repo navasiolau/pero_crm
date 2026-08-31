@@ -2,58 +2,58 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import type { ProductStatus } from "@prisma/client";
 
 import { Badge } from "@/components/ui/badge";
 import { DataTable, type DataColumn } from "@/components/ui/data-table";
+import { useListParams } from "@/lib/list-params";
 import { formatAmount } from "@/lib/format";
 import { productStatusLabels, productStatusStyles } from "@/lib/product-statuses";
 import { cn } from "@/lib/utils";
 
-export interface ProductRow {
-  id: string;
-  number: string;
-  title: string;
-  status: ProductStatus;
-  expectedPrice: string | null;
-  currency: string;
-  projectId: string;
-  projectNumber: string;
-  projectTitle: string;
-  clientName: string;
-}
+import type { ProductRow } from "./products-view";
 
-// Общая таблица изделий (§15): все изделия организации со ссылкой
-// на проект и карточку изделия.
+// Табличный вид изделий (§15): сортировка/пагинация — серверные
+// (события → URL), поиск — в фильтр-баре над таблицей.
 export function ProductsTable({
   products,
+  total,
+  page,
+  pageSize,
   showAmount,
 }: {
   products: ProductRow[];
+  total: number;
+  page: number;
+  pageSize: number;
   showAmount: boolean;
 }) {
   const router = useRouter();
+  const { get, set } = useListParams();
 
   const columns: DataColumn<ProductRow>[] = [
     {
       id: "number",
       header: "Номер",
       sortable: true,
-      sortValue: (row) => row.number,
       cell: (row) => <span className="font-medium">{row.number}</span>,
     },
     {
       id: "title",
       header: "Название",
       sortable: true,
-      sortValue: (row) => row.title,
-      cell: (row) => row.title,
+      cell: (row) => (
+        <span className="flex flex-col">
+          <span>{row.title}</span>
+          {row.kind ? (
+            <span className="text-xs text-muted-foreground">{row.kind}</span>
+          ) : null}
+        </span>
+      ),
     },
     {
       id: "project",
       header: "Проект",
       sortable: true,
-      sortValue: (row) => `${row.projectNumber} ${row.projectTitle}`,
       cell: (row) => (
         <Link
           href={`/projects/${row.projectId}`}
@@ -68,14 +68,12 @@ export function ProductsTable({
       id: "client",
       header: "Клиент",
       sortable: true,
-      sortValue: (row) => row.clientName,
       cell: (row) => <span className="text-muted-foreground">{row.clientName}</span>,
     },
     {
       id: "status",
       header: "Статус",
       sortable: true,
-      sortValue: (row) => productStatusLabels[row.status],
       cell: (row) => (
         <Badge
           variant="outline"
@@ -91,7 +89,6 @@ export function ProductsTable({
             id: "price",
             header: "Цена",
             sortable: true,
-            sortValue: (row: ProductRow) => Number(row.expectedPrice ?? 0),
             headerClassName: "text-right",
             className: "text-right",
             cell: (row: ProductRow) => formatAmount(row.expectedPrice, row.currency),
@@ -101,20 +98,22 @@ export function ProductsTable({
   ];
 
   return (
-    <div className="flex flex-col gap-4">
-      <div>
-        <h1 className="text-2xl font-semibold">Изделия</h1>
-        <p className="text-sm text-muted-foreground">
-          Все изделия организации — клик по строке открывает карточку изделия
-        </p>
-      </div>
-      <DataTable
-        columns={columns}
-        rows={products}
-        searchPlaceholder="Поиск изделия…"
-        onRowClick={(row) => router.push(`/products/${row.id}`)}
-        emptyText="Изделий пока нет — добавьте их в карточке проекта"
-      />
-    </div>
+    <DataTable
+      columns={columns}
+      rows={products}
+      emptyText="Изделий не найдено — ослабьте фильтры"
+      onRowClick={(row) => router.push(`/products/${row.id}`)}
+      server={{
+        total,
+        page,
+        pageSize,
+        sort: get("sort") || "number",
+        dir: get("dir") === "asc" ? "asc" : "desc",
+        onPageChange: (next) => set({ page: String(next) }),
+        onSortChange: (columnId, dir) =>
+          set({ sort: columnId, dir, page: null }),
+        onPageSizeChange: (size) => set({ pageSize: String(size), page: null }),
+      }}
+    />
   );
 }
