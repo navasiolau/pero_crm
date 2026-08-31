@@ -5,9 +5,12 @@
 # код — в /opt/crm/app (git clone, deploy-ключ).
 services:
   web:
-    build:
-      context: ./app
-      dockerfile: apps/web/Dockerfile
+    # Pull-модель (решение 09.2026): образ собирает GitHub CI и публикует в
+    # GHCR, серверы забирают его watcher-кроном (docker compose pull + up -d).
+    # Тег образа = имя ветки: CRM_IMAGE_TAG=main (прод) / staging (стейджинг)
+    # в .env рядом с compose. Откат: docker pull по sha-тегу
+    # (sha-<коммит>) и правка CRM_IMAGE_TAG.
+    image: ghcr.io/navasiolau/pero_crm:${CRM_IMAGE_TAG:-main}
     restart: unless-stopped
     env_file:
       - .env

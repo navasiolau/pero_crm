@@ -1,0 +1,79 @@
+name: CI/CD
+
+# Модель деплоя (решение 09.2026): сборка образа в облаке, публикация в GHCR,
+# серверы сами забирают образ watcher-кроном (исходящий трафик, NAT не мешает).
+# Тег образа = имя ветки (main, staging) + sha-тег для отката.
+# Деплой возможен ТОЛЬКО при зелёных тестах (needs: test).
+
+on:
+  push:
+    branches: [main, staging]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        # версия берётся из packageManager в package.json (pnpm@11)
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Зависимости
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck (backend + frontend)
+        run: pnpm --filter @pero/web exec tsc --noEmit
+
+      # vitest-сьюты плагинов; после удаления bazis-import их нет —
+      # шаг остаётся заделом: новые тесты подхватятся автоматически
+      - name: Тесты (vitest)
+        run: pnpm -r --if-present test
+
+      - name: Сборка (Next.js production)
+        run: pnpm build
+        env:
+          # Значения-заглушки — только для prerender, как в Dockerfile
+          DATABASE_URL: postgresql://dummy:dummy@localhost:5432/dummy
+          AUTH_SECRET: ci-dummy
+
+  build-push:
+    if: github.event_name == 'push'
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/web/Dockerfile
+          push: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          tags: |
+            ghcr.io/navasiolau/pero_crm:${{ github.ref_name }}
+            ghcr.io/navasiolau/pero_crm:sha-${{ github.sha }}
