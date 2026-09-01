@@ -1,0 +1,13 @@
+# WireGuard-сервер на VPS. Плейсхолдер <VPS_PRIVATE_KEY> заполняется
+# скриптом vps-restore.sh (ключ — в хранилище владельца; это /etc/wireguard/vps.key).
+# РАБОТА ПАРЫ: тот же приватный ключ на новом VPS = офисная сторона (pve)
+# НЕ ТРОГАЕТСЯ вовсе; меняется только Endpoint, если сменился IP (см. README).
+[Interface]
+Address = 10.200.200.1/24
+ListenPort = 51820
+PrivateKey = <VPS_PRIVATE_KEY>
+
+[Peer]
+# офисный pve-хост
+PublicKey = kTayHq924q3qIPDbutDTjUHGOVq5lRTTuX5JOCaY3UA=
+AllowedIPs = 10.200.200.2/32, 192.168.0.0/24

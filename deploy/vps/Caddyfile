@@ -1,0 +1,16 @@
+# Caddy на VPS — публичный край (точная рабочая копия 01.09.2026).
+# Хеш basic auth НЕ секрет (однонаправленный) — пароль в хранилище владельца.
+{
+	# auth.peromebel.by добавим в шаге Authentik
+}
+
+crm.peromebel.by {
+	reverse_proxy 192.168.0.20:80
+}
+
+staging-crm.peromebel.by {
+	basic_auth {
+		staging $2a$14$loxh/pLiXQCMERQWX8BVc.F9H3fXOkXfgGZ/3MerSdyn/sGspnqhW
+	}
+	reverse_proxy 192.168.0.30:80
+}
