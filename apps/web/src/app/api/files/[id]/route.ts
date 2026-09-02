@@ -5,7 +5,7 @@ import type { Role } from "@prisma/client";
 
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { UPLOADS_ROOT } from "@/lib/uploads";
+import { UPLOADS_ROOT, s3Enabled, s3Get, fileKey, thumbKey } from "@/lib/s3";
 
 const OFFICE: Role[] = ["ADMIN", "DIRECTOR", "MANAGER", "ENGINEER", "ACCOUNTANT"];
 
@@ -30,6 +30,25 @@ export async function GET(
   }
 
   const thumb = new URL(request.url).searchParams.get("thumb") === "1";
+  const headers = new Headers({
+    "Content-Type": thumb && file.hasThumb ? "image/jpeg" : file.mimeType,
+    "Content-Disposition": thumb
+      ? "inline"
+      : `attachment; filename*=UTF-8''${encodeURIComponent(file.fileName)}`,
+    "Cache-Control": "private, max-age=3600",
+  });
+
+  if (s3Enabled()) {
+    const key = thumb && file.hasThumb
+      ? thumbKey(file.projectId, file.storedName)
+      : fileKey(file.projectId, file.storedName);
+    const stream = await s3Get(key);
+    if (!stream) {
+      return NextResponse.json({ error: "Файл не найден в хранилище" }, { status: 404 });
+    }
+    return new NextResponse(stream, { headers });
+  }
+
   const relative = thumb && file.hasThumb
     ? path.join(file.projectId, "thumbs", `${file.storedName}.jpg`)
     : path.join(file.projectId, file.storedName);
@@ -39,12 +58,5 @@ export async function GET(
   }
 
   const stream = createReadStream(fullPath);
-  const headers = new Headers({
-    "Content-Type": thumb && file.hasThumb ? "image/jpeg" : file.mimeType,
-    "Content-Disposition": thumb
-      ? "inline"
-      : `attachment; filename*=UTF-8''${encodeURIComponent(file.fileName)}`,
-    "Cache-Control": "private, max-age=3600",
-  });
   return new NextResponse(stream as unknown as ReadableStream, { headers });
 }

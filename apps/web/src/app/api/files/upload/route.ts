@@ -7,7 +7,7 @@ import type { FileCategory, FileStage, Role } from "@prisma/client";
 
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { UPLOADS_ROOT } from "@/lib/uploads";
+import { UPLOADS_ROOT, s3Enabled, s3Put, fileKey, thumbKey } from "@/lib/s3";
 import { writeChangeLog } from "@/server/plugins/changelog";
 import { notifyOrg } from "@/server/notifications/notify";
 import { getFileStageConfig } from "@/server/files/stage-config";
@@ -110,24 +110,38 @@ export async function POST(request: Request) {
       : undefined;
 
   const storedName = `${randomUUID()}-${sanitizeFileName(file.name)}`;
-  const projectDir = path.join(UPLOADS_ROOT, projectId);
-  await mkdir(projectDir, { recursive: true });
   const buffer = Buffer.from(await file.arrayBuffer());
-  await writeFile(path.join(projectDir, storedName), buffer);
 
   // Превью для изображений
   let hasThumb = false;
+  let thumbBuffer: Buffer | null = null;
   if (file.type.startsWith("image/")) {
     try {
-      const thumbDir = path.join(projectDir, "thumbs");
-      await mkdir(thumbDir, { recursive: true });
-      await sharp(buffer)
+      thumbBuffer = await sharp(buffer)
         .resize(480, 480, { fit: "inside", withoutEnlargement: true })
         .jpeg({ quality: 80 })
-        .toFile(path.join(thumbDir, `${storedName}.jpg`));
+        .toBuffer();
       hasThumb = true;
     } catch {
       hasThumb = false; // битая картинка — отдадим оригинал
+    }
+  }
+
+  if (s3Enabled()) {
+    // S3 (MinIO) — основное хранилище (§13)
+    await s3Put(fileKey(projectId, storedName), buffer, file.type || "application/octet-stream");
+    if (thumbBuffer) {
+      await s3Put(thumbKey(projectId, storedName), thumbBuffer, "image/jpeg");
+    }
+  } else {
+    // Локальный фолбэк (dev без S3)
+    const projectDir = path.join(UPLOADS_ROOT, projectId);
+    await mkdir(projectDir, { recursive: true });
+    await writeFile(path.join(projectDir, storedName), buffer);
+    if (thumbBuffer) {
+      const thumbDir = path.join(projectDir, "thumbs");
+      await mkdir(thumbDir, { recursive: true });
+      await writeFile(path.join(thumbDir, `${storedName}.jpg`), thumbBuffer);
     }
   }
 
