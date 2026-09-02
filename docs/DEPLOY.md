@@ -49,6 +49,9 @@ openssl rand -base64 32   # вставить в AUTH_SECRET
 | `CADDY_DOMAIN` | caddy | домен сайта; `localhost` — самоподписанный сертификат |
 | `TZ` | app | по умолчанию Europe/Minsk |
 | `DATABASE_URL` | app | задавать не нужно — compose подставляет `postgres:5432` |
+| `S3_ENDPOINT` | app | MinIO/S3 (`http://192.168.0.33:9000` в текущей инфраструктуре); **без переменной файлы пишутся на локальный диск** (fallback) |
+| `S3_BUCKET` | app | `pero-crm` (прод) / `pero-crm-staging` (стейджинг) |
+| `S3_ACCESS_KEY` / `S3_SECRET_KEY` | app | креды MinIO (у владельца в хранилище) |
 
 ## 3. База данных (дамп)
 
