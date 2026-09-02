@@ -53,6 +53,25 @@ openssl rand -base64 32   # вставить в AUTH_SECRET
 | `S3_BUCKET` | app | `pero-crm` (прод) / `pero-crm-staging` (стейджинг) |
 | `S3_ACCESS_KEY` / `S3_SECRET_KEY` | app | креды MinIO (у владельца в хранилище) |
 
+### Стейджинг vs продакшен
+
+Стек стейджинга — отдельный CT 101 (`/opt/crm-staging`), свои `.env`,
+volumes и БД. Отличия окружений:
+
+| | Прод (CT 100) | Стейджинг (CT 101) |
+|---|---|---|
+| `CRM_IMAGE_TAG` | `main` | `staging` |
+| База | `crm`, живые данные | `crm`, копия прода (nightly refresh 03:30) |
+| `S3_BUCKET` | `pero-crm` | `pero-crm-staging` (зеркалится из прода тем же refresh) |
+| Домен | crm.peromebel.by (TLS на VPS) | staging-crm.peromebel.by (TLS + basic auth на VPS) |
+
+Выкатка: ветка `staging` → CI → стейджинг (проверка) → merge в `main` → CI →
+прод. Ночной refresh (`/opt/crm/refresh-staging.sh`, вне репо) переносит на
+стейджинг и БД, и файлы: дамп + `mc mirror --overwrite --remove`
+`peros3/pero-crm` → `peros3/pero-crm-staging` (тестовые объекты стейджинга
+сверх зеркала удаляются — потому тестировать загрузки нужно с расчётом на
+ночной сброс).
+
 ## 3. База данных (дамп)
 
 Данные переносятся дампом текущей базы (не «с нуля»: из пустой БД миграции
