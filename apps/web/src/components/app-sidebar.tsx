@@ -17,10 +17,10 @@ import {
 import { navItemsForRole } from "@/lib/nav"
 
 export function AppSidebar({
-  role,
+  roles,
   ...props
-}: { role: Role } & React.ComponentProps<typeof Sidebar>) {
-  const items = navItemsForRole(role)
+}: { roles: Role[] } & React.ComponentProps<typeof Sidebar>) {
+  const items = navItemsForRole(roles)
   const mainItems = items.filter((item) => item.group === "main")
   const manageItems = items.filter((item) => item.group === "manage")
 

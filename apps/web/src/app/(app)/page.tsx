@@ -7,6 +7,7 @@ import { RecentProjects } from "@/components/recent-projects"
 import { SectionCards } from "@/components/section-cards"
 import { formatAmount } from "@/lib/format"
 import { displayClientName } from "@/lib/labels"
+import { OFFICE_ROLES, hasAnyRole, primaryRole } from "@/lib/roles"
 import { stageLabels, stageStyles } from "@/lib/stages"
 import { prisma } from "@/lib/prisma"
 
@@ -15,8 +16,10 @@ export const dynamic = "force-dynamic"
 export default async function DashboardPage() {
   const session = await auth()
 
-  // Работник и монтажник после входа сразу попадают на «Мои задачи» (§4 плана)
-  if (session?.user.role === "WORKER" || session?.user.role === "MOUNTER") {
+  // Работник/монтажник (все роли производственные) сразу попадают
+  // на «Мои задачи» (§4); при комбинации с офисной ролью — дашборд
+  const roles = session?.user.roles ?? []
+  if (!hasAnyRole(roles, OFFICE_ROLES)) {
     redirect("/my")
   }
 
@@ -39,9 +42,7 @@ export default async function DashboardPage() {
     }),
   ]);
 
-  const showAmount = ["ADMIN", "DIRECTOR", "MANAGER", "ENGINEER", "ACCOUNTANT"].includes(
-    session?.user.role ?? "",
-  );
+  const showAmount = hasAnyRole(roles, OFFICE_ROLES);
 
   return (
     <div className="flex flex-col gap-4 md:gap-6">
@@ -76,7 +77,7 @@ export default async function DashboardPage() {
       {/* Слот виджетов плагинов (§14): пусто, пока ни один модуль не включён */}
       <PluginSlot
         slot="dashboard.widget"
-        props={{ role: session?.user.role ?? "" }}
+        props={{ role: primaryRole(roles) }}
       />
       <ChartAreaInteractive />
       <RecentProjects

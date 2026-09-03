@@ -1,17 +1,16 @@
-﻿"use server";
+"use server";
 
 import { unlink } from "node:fs/promises";
 import path from "node:path";
 import { revalidatePath } from "next/cache";
-import type { Role } from "@prisma/client";
 
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { UPLOADS_ROOT, s3Enabled, s3Delete, fileKey, thumbKey } from "@/lib/s3";
 import { writeChangeLog } from "@/server/plugins/changelog";
 import { revalidateProductPaths } from "@/server/products/revalidate";
+import { MANAGER_ROLES, hasAnyRole } from "@/lib/roles";
 
-const MANAGER: Role[] = ["ADMIN", "DIRECTOR", "MANAGER"];
 
 // Удаление файла: загрузивший (в т.ч. инженер, §4) или админ/директор/менеджер.
 export async function deleteFile(
@@ -24,7 +23,7 @@ export async function deleteFile(
 
   const canDelete =
     file.uploadedById === session.user.id ||
-    MANAGER.includes(session.user.role);
+    hasAnyRole(session.user.roles, MANAGER_ROLES);
   if (!canDelete) return { ok: false, error: "Недостаточно прав" };
 
   await prisma.file.delete({ where: { id: fileId } });

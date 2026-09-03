@@ -2,12 +2,13 @@ import { redirect } from "next/navigation";
 
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { OFFICE_ROLES, hasAnyRole } from "@/lib/roles";
 
 import { ClientsView } from "./clients-view";
 
 export const dynamic = "force-dynamic";
 
-// Клиенты (§4): админ/директор/менеджер/инженер/бухгалтер.
+// Клиенты (§4): офисные роли (достаточно любой из ролей пользователя).
 // ?focus=<id> — открыть карточку клиента (ссылки из изделий/проектов).
 export default async function ClientsPage({
   searchParams,
@@ -16,7 +17,7 @@ export default async function ClientsPage({
 }) {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  if (!["ADMIN", "DIRECTOR", "MANAGER", "ENGINEER", "ACCOUNTANT"].includes(session.user.role)) {
+  if (!hasAnyRole(session.user.roles, OFFICE_ROLES)) {
     redirect("/");
   }
 

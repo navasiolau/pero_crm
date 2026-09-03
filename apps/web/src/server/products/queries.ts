@@ -2,13 +2,13 @@ import type { Prisma, ProductStatus, Role } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
 import { PRODUCT_STATUSES } from "@/lib/product-statuses";
-import { OFFICE_ROLES } from "@/server/projects/queries";
+import { OFFICE_ROLES, hasAnyRole } from "@/lib/roles";
 import { taskDetailsInclude } from "@/server/tasks/queries";
 
 // Видимость изделий = видимость родительских проектов (§4):
 // офисные роли — все; работник/монтажник — изделия проектов со своими задачами.
-function productVisibilityFilter(userId: string, role: Role) {
-  if (OFFICE_ROLES.includes(role)) return {};
+function productVisibilityFilter(userId: string, roles: Role[]) {
+  if (hasAnyRole(roles, OFFICE_ROLES)) return {};
   return { project: { tasks: { some: { assigneeId: userId } } } };
 }
 
@@ -56,10 +56,10 @@ const PRODUCT_SORT_MAP: Record<
 
 function productWhere(
   userId: string,
-  role: Role,
+  roles: Role[],
   filters: ProductListFilters,
 ): Prisma.ProductWhereInput {
-  const visibility = productVisibilityFilter(userId, role);
+  const visibility = productVisibilityFilter(userId, roles);
   const where: Prisma.ProductWhereInput = { ...visibility };
   // Условие по проекту: фильтр видимости (у работника — по задачам)
   // и фильтр по клиенту объединяются в одном объекте project
@@ -102,11 +102,11 @@ function productWhere(
 
 export async function listProducts(
   userId: string,
-  role: Role,
+  roles: Role[],
   filters: ProductListFilters,
   paging?: { page: number; pageSize: number },
 ): Promise<{ rows: Awaited<ReturnType<typeof fetchProductRows>>; total: number }> {
-  const where = productWhere(userId, role, filters);
+  const where = productWhere(userId, roles, filters);
   const sortField = filters.sort && filters.sort in PRODUCT_SORT_MAP ? filters.sort : undefined;
   const orderBy =
     sortField !== undefined
@@ -155,9 +155,9 @@ async function fetchProductRows(
 
 // Опции фильтров «Проект» и «Клиент»: пары, встречающиеся среди видимых
 // изделий (чтобы не было пустых значений), slim — без лишних полей.
-export async function listProductFilterOptions(userId: string, role: Role) {
+export async function listProductFilterOptions(userId: string, roles: Role[]) {
   const products = await prisma.product.findMany({
-    where: productVisibilityFilter(userId, role),
+    where: productVisibilityFilter(userId, roles),
     select: {
       project: {
         select: {
@@ -228,13 +228,13 @@ export async function listProductOptions(projectId: string) {
 
 export async function getProductFor(
   userId: string,
-  role: Role,
+  roles: Role[],
   key: string,
 ) {
   // Адрес карточки — /products/<номер>; допускаем и внутренний id
   const product = await prisma.product.findFirst({
     where: {
-      ...productVisibilityFilter(userId, role),
+      ...productVisibilityFilter(userId, roles),
       OR: [{ number: key }, { id: key }],
     },
     include: {

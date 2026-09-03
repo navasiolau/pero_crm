@@ -40,7 +40,7 @@ export default async function MyTasksPage() {
       active={active}
       done={done}
       userName={session.user.name ?? ""}
-      role={session.user.role}
+      role={session.user.roles}
       initialView={view === "kanban" ? "kanban" : "list"}
       timer={
         activeTimer

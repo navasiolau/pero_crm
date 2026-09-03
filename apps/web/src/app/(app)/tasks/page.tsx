@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { MANAGER_ROLES, OFFICE_ROLES, hasAnyRole } from "@/lib/roles";
 import { getUserPreference } from "@/server/preferences";
 import { listWorkers } from "@/server/projects/queries";
 import { mapTaskDetails, taskDetailsInclude } from "@/server/tasks/queries";
@@ -14,8 +15,8 @@ export const dynamic = "force-dynamic";
 export default async function TasksPage() {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  const role = session.user.role;
-  if (!["ADMIN", "DIRECTOR", "MANAGER", "ENGINEER", "ACCOUNTANT"].includes(role)) {
+  const role = session.user.roles;
+  if (!hasAnyRole(role, OFFICE_ROLES)) {
     redirect("/my");
   }
 
@@ -34,7 +35,7 @@ export default async function TasksPage() {
   return (
     <TasksPageView
       tasks={mapped}
-      canEdit={["ADMIN", "DIRECTOR", "MANAGER"].includes(role)}
+      canEdit={hasAnyRole(role, MANAGER_ROLES)}
       initialView={view === "table" ? "table" : "kanban"}
       workers={workers.map((worker) => ({
         id: worker.id,

@@ -25,7 +25,7 @@ export default async function UsersPage() {
         position: user.position,
         phone: user.phone,
         telegram: user.telegram,
-        role: user.role,
+        roles: user.roles,
         payScheme: user.payScheme,
         payPercent: user.payPercent?.toString() ?? null,
         active: user.active,

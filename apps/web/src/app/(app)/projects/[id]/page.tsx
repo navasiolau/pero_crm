@@ -9,6 +9,13 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SlotErrorBoundary } from "@/components/plugins/slot-error-boundary";
 import { displayClientName } from "@/lib/labels";
+import {
+  FINANCE_ROLES,
+  MANAGER_ROLES,
+  OFFICE_ROLES,
+  hasAnyRole,
+  hasRole,
+} from "@/lib/roles";
 import { stageLabels, stageStyles } from "@/lib/stages";
 import { cn } from "@/lib/utils";
 import { prisma } from "@/lib/prisma";
@@ -43,17 +50,17 @@ export default async function ProjectPage({
   const session = await auth();
   if (!session?.user) redirect("/login");
   const { id } = await params;
-  const role = session.user.role;
+  const role = session.user.roles;
 
   const project = await getProjectFor(session.user.id, role, id);
   if (!project) notFound();
 
-  const canManage = ["ADMIN", "DIRECTOR", "MANAGER"].includes(role);
-  const canEditTech = canManage || role === "ENGINEER";
-  const showFinance = ["ADMIN", "DIRECTOR", "ACCOUNTANT"].includes(role);
-  const showAmount = showFinance || canManage || role === "ENGINEER";
+  const canManage = hasAnyRole(role, MANAGER_ROLES);
+  const canEditTech = canManage || hasRole(role, "ENGINEER");
+  const showFinance = hasAnyRole(role, FINANCE_ROLES);
+  const showAmount = showFinance || canManage || hasRole(role, "ENGINEER");
   // Склад (§12): вкладка «Материалы» — офисные роли (+ бухгалтер на просмотр)
-  const showMaterials = ["ADMIN", "DIRECTOR", "MANAGER", "ENGINEER", "ACCOUNTANT"].includes(role);
+  const showMaterials = hasAnyRole(role, OFFICE_ROLES);
 
   // Группировка файлов по этапам (плагин file-stages), если включён.
   const stageConfig = await getFileStageConfig();

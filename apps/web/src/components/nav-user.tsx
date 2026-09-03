@@ -1,6 +1,5 @@
 "use client"
 
-import type { Role } from "@prisma/client"
 import { ChevronsUpDownIcon, LogOutIcon } from "lucide-react"
 
 import { logout } from "@/app/(app)/actions"
@@ -16,12 +15,13 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { roleLabels } from "@/lib/nav"
+import type { Role } from "@prisma/client"
+import { roleComboLabel } from "@/lib/roles"
 
 export type ShellUser = {
   name: string
   email: string
-  role: Role
+  roles: Role[]
 }
 
 function initialsOf(name: string): string {
@@ -64,7 +64,7 @@ export function NavUser({ user }: { user: ShellUser }) {
               </span>
               <span className="text-xs">{user.email}</span>
               <span>
-                <Badge variant="secondary">{roleLabels[user.role]}</Badge>
+                <Badge variant="secondary">{roleComboLabel(user.roles)}</Badge>
               </span>
             </div>
           </DropdownMenuLabel>

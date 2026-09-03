@@ -1,14 +1,13 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import type { Role } from "@prisma/client";
 import { z } from "zod";
 
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { writeChangeLog } from "@/server/plugins/changelog";
 
-import { MANAGER_ROLES } from "@/server/projects/queries";
+import { MANAGER_ROLES, OFFICE_ROLES, hasAnyRole } from "@/lib/roles";
 
 const AUTOSTOP_MINUTES = 12 * 60; // §19: автостоп по таймауту 12 ч с пометкой
 
@@ -49,7 +48,7 @@ export async function startTimer(
   if (!task) return { ok: false, error: "Задача не найдена" };
   if (task.status === "DONE") return { ok: false, error: "Задача уже выполнена" };
   const isAssignee = task.assigneeId === session.user.id;
-  if (!isAssignee && !MANAGER_ROLES.includes(session.user.role)) {
+  if (!isAssignee && !hasAnyRole(session.user.roles, MANAGER_ROLES)) {
     return { ok: false, error: "Недостаточно прав" };
   }
 
@@ -105,14 +104,15 @@ const manualSchema = z.object({
 // Работнику и монтажнику ручной ввод закрыт (требование владельца):
 // их время считается только таймером — иначе можно обмануть руководство.
 // Забыли таймер — правку вносит менеджер (с записью в журнал, §19).
-const MANUAL_TIME_FORBIDDEN: Role[] = ["WORKER", "MOUNTER"];
+// Комбинированные роли: запрет действует только если НИ одна из ролей
+// пользователя не офисная (приоритет старшей роли, §4).
 
 export async function addManualTime(
   input: z.infer<typeof manualSchema>,
 ): Promise<{ ok: boolean; error?: string }> {
   const session = await auth();
   if (!session?.user) throw new Error("Не авторизован");
-  if (MANUAL_TIME_FORBIDDEN.includes(session.user.role)) {
+  if (!hasAnyRole(session.user.roles, OFFICE_ROLES)) {
     return {
       ok: false,
       error:
@@ -128,7 +128,7 @@ export async function addManualTime(
   });
   if (!task) return { ok: false, error: "Задача не найдена" };
   const isAssignee = task.assigneeId === session.user.id;
-  if (!isAssignee && !MANAGER_ROLES.includes(session.user.role)) {
+  if (!isAssignee && !hasAnyRole(session.user.roles, MANAGER_ROLES)) {
     return { ok: false, error: "Недостаточно прав" };
   }
 

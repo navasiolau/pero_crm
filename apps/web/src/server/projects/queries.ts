@@ -1,17 +1,21 @@
 import type { Prisma, ProjectStage, Role } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
+import {
+  ASSIGNEE_ROLES,
+  MANAGER_ROLES,
+  OFFICE_ROLES,
+  hasAnyRole,
+} from "@/lib/roles";
 import { STAGES } from "@/lib/stages";
 import { taskDetailsInclude } from "@/server/tasks/queries";
 import { listProjectShortages } from "@/server/warehouse/queries";
 
-// Правила видимости (§4): офисные роли — все проекты;
-// работник/монтажник — только проекты со своими задачами.
-export const OFFICE_ROLES: Role[] = ["ADMIN", "DIRECTOR", "MANAGER", "ENGINEER", "ACCOUNTANT"];
-export const MANAGER_ROLES: Role[] = ["ADMIN", "DIRECTOR", "MANAGER"];
-
-function projectVisibilityFilter(userId: string, role: Role) {
-  if (OFFICE_ROLES.includes(role)) return {};
+// Правила видимости (§4, комбинированные роли): офисные роли (любая из
+// ролей пользователя) — все проекты; остальные — только проекты со своими
+// задачами.
+function projectVisibilityFilter(userId: string, roles: Role[]) {
+  if (hasAnyRole(roles, OFFICE_ROLES)) return {};
   return { tasks: { some: { assigneeId: userId } } };
 }
 
@@ -62,11 +66,11 @@ const PROJECT_SORT_MAP: Record<
 
 function projectWhere(
   userId: string,
-  role: Role,
+  roles: Role[],
   filters: ProjectListFilters,
 ): Prisma.ProjectWhereInput {
   const where: Prisma.ProjectWhereInput = {
-    ...projectVisibilityFilter(userId, role),
+    ...projectVisibilityFilter(userId, roles),
   };
   // Этап: галочка «Только незавершённые» (скрывает DONE и REFUSED — решение
   // владельца, 08.2026) и явный фильтр по этапу сочетаются через AND
@@ -146,11 +150,11 @@ export function parseProjectListParams(sp: Record<string, string | string[] | un
 
 export async function listProjects(
   userId: string,
-  role: Role,
+  roles: Role[],
   filters: ProjectListFilters,
   paging?: ListPaging,
 ): Promise<{ rows: Awaited<ReturnType<typeof fetchProjectRows>>; total: number }> {
-  const where = projectWhere(userId, role, filters);
+  const where = projectWhere(userId, roles, filters);
   const orderBy = projectOrderBy(filters.sort, filters.dir ?? "desc");
   if (!paging) {
     const rows = await fetchProjectRows(where, orderBy, undefined, undefined);
@@ -202,11 +206,11 @@ async function fetchProjectRows(
 
 export async function getProjectFor(
   userId: string,
-  role: Role,
+  roles: Role[],
   projectId: string,
 ) {
   const project = await prisma.project.findFirst({
-    where: { id: projectId, ...projectVisibilityFilter(userId, role) },
+    where: { id: projectId, ...projectVisibilityFilter(userId, roles) },
     include: {
       client: true,
       manager: { select: { id: true, name: true } },
@@ -263,10 +267,13 @@ export async function listClientOptions() {
   });
 }
 
+// Фильтры списков (§4, комбинированные роли): человек с несколькими ролями
+// попадает в каждый список, где есть хоть одна его роль — менеджер+инженер
+// виден и в фильтре «Менеджер», и в фильтре «Инженер».
 export async function listManagers() {
   return prisma.user.findMany({
-    where: { active: true, role: { in: ["ADMIN", "DIRECTOR", "MANAGER"] } },
-    select: { id: true, name: true, role: true, position: true },
+    where: { active: true, roles: { hasSome: MANAGER_ROLES } },
+    select: { id: true, name: true, roles: true, position: true },
     orderBy: { name: "asc" },
   });
 }
@@ -275,19 +282,16 @@ export async function listManagers() {
 // % от стоимости (Σ цен изделий) при переходе «В работе» (§10).
 export async function listEngineers() {
   return prisma.user.findMany({
-    where: { active: true, role: "ENGINEER" },
-    select: { id: true, name: true, role: true, position: true },
+    where: { active: true, roles: { hasSome: ["ENGINEER"] } },
+    select: { id: true, name: true, roles: true, position: true },
     orderBy: { name: "asc" },
   });
 }
 
 export async function listWorkers() {
   return prisma.user.findMany({
-    where: {
-      active: true,
-      role: { in: ["WORKER", "MOUNTER", "ENGINEER", "MANAGER"] },
-    },
-    select: { id: true, name: true, role: true, position: true },
+    where: { active: true, roles: { hasSome: ASSIGNEE_ROLES } },
+    select: { id: true, name: true, roles: true, position: true },
     orderBy: { name: "asc" },
   });
 }

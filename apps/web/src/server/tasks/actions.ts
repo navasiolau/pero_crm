@@ -1,7 +1,6 @@
-﻿"use server";
+"use server";
 
 import { revalidatePath } from "next/cache";
-import type { Role } from "@prisma/client";
 import { z } from "zod";
 
 import { auth } from "@/auth";
@@ -11,7 +10,7 @@ import { writeChangeLog } from "@/server/plugins/changelog";
 import { emitDomainEvent } from "@/server/plugins/events";
 import { notifyOrg, notifyPerson } from "@/server/notifications/notify";
 
-import { MANAGER_ROLES } from "@/server/projects/queries";
+import { MANAGER_ROLES, OFFICE_ROLES, hasAnyRole } from "@/lib/roles";
 import { revalidateProductPaths } from "@/server/products/revalidate";
 import { getPayrollCurrency } from "@/server/payroll/queries";
 
@@ -84,7 +83,7 @@ export async function createTask(
   input: z.input<typeof createSchema>,
 ): Promise<{ ok: boolean; error?: string }> {
   const session = await requireUser();
-  if (!MANAGER_ROLES.includes(session.user.role)) {
+  if (!hasAnyRole(session.user.roles, MANAGER_ROLES)) {
     throw new Error("Недостаточно прав");
   }
   const parsed = createSchema.safeParse(input);
@@ -199,7 +198,7 @@ export async function updateTask(
   input: z.infer<typeof updateSchema>,
 ): Promise<{ ok: boolean; error?: string }> {
   const session = await requireUser();
-  if (!MANAGER_ROLES.includes(session.user.role)) {
+  if (!hasAnyRole(session.user.roles, MANAGER_ROLES)) {
     throw new Error("Недостаточно прав");
   }
   const parsed = updateSchema.safeParse(input);
@@ -387,7 +386,7 @@ export async function changeTaskStatus(
   actualMinutes?: number,
 ): Promise<{ ok: boolean; error?: string; timeRequired?: boolean }> {
   const session = await requireUser();
-  const role: Role = session.user.role;
+  const roles = session.user.roles;
   const task = await prisma.task.findUnique({
     where: { id: taskId },
     include: {
@@ -403,7 +402,7 @@ export async function changeTaskStatus(
   if (!task) return { ok: false, error: "Задача не найдена" };
 
   const isAssignee = task.assigneeId === session.user.id;
-  if (!isAssignee && !MANAGER_ROLES.includes(role)) {
+  if (!isAssignee && !hasAnyRole(roles, MANAGER_ROLES)) {
     return { ok: false, error: "Недостаточно прав" };
   }
   if (!(STAGE_FLOW[task.status] ?? []).includes(toStatus)) {
@@ -442,7 +441,7 @@ export async function changeTaskStatus(
     const recorded = spent._sum.minutes ?? 0;
     if (recorded === 0) {
       // Работнику/монтажнику ручной ввод закрыт — только таймер
-      if (role === "WORKER" || role === "MOUNTER") {
+      if (!hasAnyRole(roles, OFFICE_ROLES)) {
         return {
           ok: false,
           error:
@@ -574,7 +573,7 @@ export async function deleteTask(
   taskId: string,
 ): Promise<{ ok: boolean; error?: string }> {
   const session = await requireUser();
-  if (!MANAGER_ROLES.includes(session.user.role)) {
+  if (!hasAnyRole(session.user.roles, MANAGER_ROLES)) {
     throw new Error("Недостаточно прав");
   }
   const task = await prisma.task.findUnique({

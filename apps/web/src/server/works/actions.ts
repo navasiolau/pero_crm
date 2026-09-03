@@ -8,7 +8,7 @@ import { prisma } from "@/lib/prisma";
 import { writeChangeLog } from "@/server/plugins/changelog";
 import { revalidateProductPaths } from "@/server/products/revalidate";
 
-import { MANAGER_ROLES } from "@/server/projects/queries";
+import { MANAGER_ROLES, hasAnyRole } from "@/lib/roles";
 
 const addSchema = z.object({
   projectId: z.string(),
@@ -24,7 +24,7 @@ export async function addWork(
 ): Promise<{ ok: boolean; error?: string }> {
   const session = await auth();
   if (!session?.user) throw new Error("Не авторизован");
-  if (!MANAGER_ROLES.includes(session.user.role)) throw new Error("Недостаточно прав");
+  if (!hasAnyRole(session.user.roles, MANAGER_ROLES)) throw new Error("Недостаточно прав");
 
   const parsed = addSchema.safeParse(input);
   if (!parsed.success) {
@@ -88,7 +88,7 @@ export async function removeWork(
 ): Promise<{ ok: boolean; error?: string }> {
   const session = await auth();
   if (!session?.user) throw new Error("Не авторизован");
-  if (!MANAGER_ROLES.includes(session.user.role)) throw new Error("Недостаточно прав");
+  if (!hasAnyRole(session.user.roles, MANAGER_ROLES)) throw new Error("Недостаточно прав");
 
   const work = await prisma.work.findUnique({ where: { id: workId } });
   if (!work) return { ok: false, error: "Работа не найдена" };

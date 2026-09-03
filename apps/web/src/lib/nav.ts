@@ -1,4 +1,3 @@
-import type { Role } from "@prisma/client";
 import {
   Banknote,
   ClipboardCheck,
@@ -15,15 +14,16 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-export const roleLabels: Record<Role, string> = {
-  ADMIN: "Администратор",
-  DIRECTOR: "Директор",
-  MANAGER: "Менеджер",
-  ENGINEER: "Инженер",
-  WORKER: "Работник",
-  MOUNTER: "Монтажник",
-  ACCOUNTANT: "Бухгалтер",
-};
+import {
+  ADMIN_ROLES,
+  FIELD_ROLES,
+  FINANCE_ROLES,
+  OFFICE_ROLES,
+  type Role,
+} from "@/lib/roles";
+
+// re-export для совместимости: подписи ролей теперь живут в lib/roles
+export { roleLabels } from "@/lib/roles";
 
 // Группы навигации в сайдбаре: «Основное» и «Управление»
 export type NavGroup = "main" | "manage";
@@ -36,22 +36,9 @@ export type NavItem = {
   group: NavGroup;
 };
 
-// Бухгалтер — офисная роль на просмотр (проекты/клиенты нужны для приходов
-// и расходов); правок у него нет, кроме финансовых
-const OFFICE_ROLES: Role[] = ["ADMIN", "DIRECTOR", "MANAGER", "ENGINEER", "ACCOUNTANT"];
-const ADMIN_ROLES: Role[] = ["ADMIN", "DIRECTOR"];
-const FINANCE_ROLES: Role[] = ["ADMIN", "DIRECTOR", "ACCOUNTANT"];
-const ALL_ROLES: Role[] = [
-  "ADMIN",
-  "DIRECTOR",
-  "MANAGER",
-  "ENGINEER",
-  "WORKER",
-  "MOUNTER",
-  "ACCOUNTANT",
-];
-// Директору зарплата не считается (§4 плана)
-const PAYROLL_ROLES: Role[] = ["ADMIN", "MANAGER", "ENGINEER", "WORKER", "MOUNTER", "ACCOUNTANT"];
+const ALL_ROLES: Role[] = [...OFFICE_ROLES, ...FIELD_ROLES];
+// Директору зарплата не считается (§4)
+const PAYROLL_ROLES: Role[] = ALL_ROLES.filter((role) => role !== "DIRECTOR");
 
 export const navItems: NavItem[] = [
   // У работника и монтажника дашборда нет — их главный экран «Мои задачи»
@@ -69,8 +56,12 @@ export const navItems: NavItem[] = [
   { href: "/settings", label: "Настройки", icon: Settings, roles: ADMIN_ROLES, group: "manage" },
 ];
 
-export function navItemsForRole(role: Role): NavItem[] {
-  return navItems.filter((item) => item.roles.includes(role));
+// Видимые пункты = объединение по всем ролям пользователя
+// (комбинированные роли: менеджер+инженер видит оба набора разделов).
+export function navItemsForRole(roles: Role[]): NavItem[] {
+  return navItems.filter((item) =>
+    item.roles.some((role) => roles.includes(role)),
+  );
 }
 
 export function sectionTitle(pathname: string): string {

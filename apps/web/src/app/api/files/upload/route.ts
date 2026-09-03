@@ -8,6 +8,7 @@ import type { FileCategory, FileStage, Role } from "@prisma/client";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { UPLOADS_ROOT, s3Enabled, s3Put, fileKey, thumbKey } from "@/lib/s3";
+import { hasAnyRole } from "@/lib/roles";
 import { writeChangeLog } from "@/server/plugins/changelog";
 import { notifyOrg } from "@/server/notifications/notify";
 import { getFileStageConfig } from "@/server/files/stage-config";
@@ -26,6 +27,7 @@ const CATEGORIES: FileCategory[] = [
   "DOCUMENT",
   "OTHER",
 ];
+// Кто может загружать в любой проект (§4); остальным — только свои задачи
 const OFFICE: Role[] = ["ADMIN", "DIRECTOR", "MANAGER", "ENGINEER"];
 
 function sanitizeFileName(name: string): string {
@@ -39,7 +41,6 @@ export async function POST(request: Request) {
   if (!session?.user) {
     return NextResponse.json({ error: "Не авторизован" }, { status: 401 });
   }
-  const role = session.user.role;
 
   const form = await request.formData().catch(() => null);
   const file = form?.get("file");
@@ -53,7 +54,7 @@ export async function POST(request: Request) {
 
   // Проверка видимости проекта (§4)
   const project = await prisma.project.findFirst({
-    where: OFFICE.includes(role)
+    where: hasAnyRole(session.user.roles, OFFICE)
       ? { id: projectId }
       : { id: projectId, tasks: { some: { assigneeId: session.user.id } } },
     select: { id: true, number: true },

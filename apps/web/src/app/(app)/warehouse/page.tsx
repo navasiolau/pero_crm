@@ -9,6 +9,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { OFFICE_ROLES, hasAnyRole } from "@/lib/roles";
 
 export const dynamic = "force-dynamic";
 
@@ -17,9 +18,7 @@ export const dynamic = "force-dynamic";
 export default async function WarehousePage() {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  if (
-    !["ADMIN", "DIRECTOR", "MANAGER", "ENGINEER", "ACCOUNTANT"].includes(session.user.role)
-  ) {
+  if (!hasAnyRole(session.user.roles, OFFICE_ROLES)) {
     redirect("/");
   }
 

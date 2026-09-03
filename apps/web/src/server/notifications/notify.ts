@@ -52,11 +52,15 @@ export function orgRolesFor(type: string): Role[] {
   return ORG_TYPE_ROLES[type] ?? OFFICE_ORG;
 }
 
-// Типы, которые роль реально может получать (для страницы настройки):
-// personal — все, org — по ролевой карте.
-export function receivableTypesFor(role: Role) {
+// Типы, которые пользователь реально может получать (для страницы настройки):
+// personal — все, org — объединение ролевых карт по всем его ролям
+// (комбинированные роли, §4).
+export function receivableTypesFor(roles: Role[] | Role) {
+  const list = Array.isArray(roles) ? roles : [roles];
   return NOTIFICATION_TYPES.filter(
-    (t) => t.kind === "personal" || orgRolesFor(t.id).includes(role),
+    (t) =>
+      t.kind === "personal" ||
+      list.some((role) => orgRolesFor(t.id).includes(role)),
   );
 }
 
@@ -71,7 +75,6 @@ async function isEnabledFor(userId: string, type: string) {
 // Отправка уведомления пользователю с учётом его настроек типов.
 export async function notifyUser(input: {
   userId: string;
-  role: Role;
   type: string;
   title: string;
   body?: string;
@@ -89,7 +92,8 @@ export async function notifyUser(input: {
   });
 }
 
-// Орг-уведомление: получатели — роли из карты для данного типа,
+// Орг-уведомление: получатели — пользователи, у которых хотя бы одна роль
+// входит в карту для данного типа (комбинированные роли, §4),
 // кроме автора действия и отключивших тип в настройках.
 export async function notifyOrg(input: {
   type: string;
@@ -101,13 +105,13 @@ export async function notifyOrg(input: {
   const users = await prisma.user.findMany({
     where: {
       active: true,
-      role: { in: orgRolesFor(input.type) },
+      roles: { hasSome: orgRolesFor(input.type) },
       id: input.exceptUserId ? { not: input.exceptUserId } : undefined,
     },
-    select: { id: true, role: true },
+    select: { id: true },
   });
   for (const user of users) {
-    await notifyUser({ ...input, userId: user.id, role: user.role });
+    await notifyUser({ ...input, userId: user.id });
   }
 }
 
@@ -121,10 +125,10 @@ export async function notifyPerson(input: {
 }) {
   const user = await prisma.user.findUnique({
     where: { id: input.userId },
-    select: { id: true, role: true, active: true },
+    select: { id: true, active: true },
   });
   if (!user?.active) return;
-  await notifyUser({ ...input, userId: user.id, role: user.role });
+  await notifyUser({ ...input, userId: user.id });
 }
 
 export function isOrgType(type: string) {

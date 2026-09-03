@@ -6,9 +6,9 @@ import { z } from "zod";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { writeChangeLog } from "@/server/plugins/changelog";
+import { OFFICE_ROLES, hasAnyRole } from "@/lib/roles";
 
-// Клиенты и коммуникации — админ/директор/менеджер/инженер (§4).
-const ALLOWED = ["ADMIN", "DIRECTOR", "MANAGER", "ENGINEER", "ACCOUNTANT"];
+// Клиенты — офисные роли (§4, комбинированные роли: достаточно любой).
 
 const clientSchema = z.object({
   name: z.string().min(1, "Укажите имя"),
@@ -23,7 +23,7 @@ const clientSchema = z.object({
 async function requireAllowed() {
   const session = await auth();
   if (!session?.user) throw new Error("Не авторизован");
-  if (!ALLOWED.includes(session.user.role)) throw new Error("Недостаточно прав");
+  if (!hasAnyRole(session.user.roles, OFFICE_ROLES)) throw new Error("Недостаточно прав");
   return session;
 }
 

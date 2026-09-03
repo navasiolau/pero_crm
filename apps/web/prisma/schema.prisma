@@ -35,7 +35,7 @@ model User {
   phone           String?
   telegram        String? // @username
   passwordHash    String
-  role            Role
+  roles           Role[] // комбинированные роли (§4): права = объединение
   payScheme       PayScheme      @default(NONE)
   payPercent      Decimal?       @db.Decimal(5, 2)
   active          Boolean        @default(true)

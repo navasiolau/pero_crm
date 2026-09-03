@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { auth } from "@/auth";
+import { FINANCE_ROLES, hasAnyRole } from "@/lib/roles";
 import { listCashAccounts } from "@/server/finance/queries";
 
 import { AccountsView } from "./accounts-view";
@@ -12,7 +13,7 @@ export const dynamic = "force-dynamic";
 export default async function FinanceAccountsPage() {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  if (!["ADMIN", "DIRECTOR", "ACCOUNTANT"].includes(session.user.role)) redirect("/");
+  if (!hasAnyRole(session.user.roles, FINANCE_ROLES)) redirect("/");
 
   const accounts = await listCashAccounts();
   return <AccountsView accounts={accounts} />;

@@ -1,13 +1,11 @@
 import { createReadStream, existsSync } from "node:fs";
 import path from "node:path";
 import { NextResponse } from "next/server";
-import type { Role } from "@prisma/client";
 
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { UPLOADS_ROOT, s3Enabled, s3Get, fileKey, thumbKey } from "@/lib/s3";
-
-const OFFICE: Role[] = ["ADMIN", "DIRECTOR", "MANAGER", "ENGINEER", "ACCOUNTANT"];
+import { OFFICE_ROLES, hasAnyRole } from "@/lib/roles";
 
 // GET /api/files/:id — отдача файла с проверкой прав (§4, §13).
 // ?thumb=1 — превью (для изображений), иначе оригинал.
@@ -21,7 +19,7 @@ export async function GET(
   }
   const { id } = await params;
   const file = await prisma.file.findFirst({
-    where: OFFICE.includes(session.user.role)
+    where: hasAnyRole(session.user.roles, OFFICE_ROLES)
       ? { id }
       : { id, project: { tasks: { some: { assigneeId: session.user.id } } } },
   });

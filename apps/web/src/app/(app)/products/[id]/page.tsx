@@ -10,6 +10,7 @@ import { formatAmount } from "@/lib/format";
 import { displayClientName } from "@/lib/labels";
 import { productStatusLabels } from "@/lib/product-statuses";
 import { prisma } from "@/lib/prisma";
+import { MANAGER_ROLES, OFFICE_ROLES, hasAnyRole, hasRole } from "@/lib/roles";
 import { getFileStageConfig } from "@/server/files/stage-config";
 import { getProductFor } from "@/server/products/queries";
 import { listWorkers } from "@/server/projects/queries";
@@ -35,16 +36,16 @@ export default async function ProductPage({
   const session = await auth();
   if (!session?.user) redirect("/login");
   const { id } = await params;
-  const role = session.user.role;
+  const role = session.user.roles;
 
   const product = await getProductFor(session.user.id, role, id);
   if (!product) notFound();
 
-  const canManage = ["ADMIN", "DIRECTOR", "MANAGER"].includes(role);
-  const canEditTech = canManage || role === "ENGINEER";
-  const showAmount = ["ADMIN", "DIRECTOR", "MANAGER", "ENGINEER", "ACCOUNTANT"].includes(role);
-  const showMaterials = ["ADMIN", "DIRECTOR", "MANAGER", "ENGINEER", "ACCOUNTANT"].includes(role);
-  const showMoney = ["ADMIN", "DIRECTOR"].includes(role);
+  const canManage = hasAnyRole(role, MANAGER_ROLES);
+  const canEditTech = canManage || hasRole(role, "ENGINEER");
+  const showAmount = hasAnyRole(role, OFFICE_ROLES);
+  const showMaterials = hasAnyRole(role, OFFICE_ROLES);
+  const showMoney = hasAnyRole(role, ["ADMIN", "DIRECTOR"]);
 
   // Группировка файлов по этапам (плагин file-stages), если включён.
   const stageConfig = await getFileStageConfig();

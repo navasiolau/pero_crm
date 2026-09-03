@@ -3,25 +3,28 @@ import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import type { Role } from "@prisma/client";
 
-// Проверка роли для server actions и страниц.
-// Возвращает сессию или выбрасывает redirect/ошибку.
-export async function requireRole(roles: Role[]) {
+import { ADMIN_ROLES, FINANCE_ROLES, hasAnyRole } from "@/lib/roles";
+
+// Проверка ролей для server actions и страниц (§4, комбинированные роли:
+// достаточно любой из перечисленных). Возвращает сессию или выбрасывает
+// redirect/ошибку.
+export async function requireRole(allowed: Role[]) {
   const session = await auth();
   if (!session?.user) {
     redirect("/login");
   }
-  if (!roles.includes(session.user.role)) {
+  if (!hasAnyRole(session.user.roles, allowed)) {
     throw new Error("Недостаточно прав");
   }
   return session;
 }
 
 export async function requireAdmin() {
-  return requireRole(["ADMIN", "DIRECTOR"]);
+  return requireRole(ADMIN_ROLES);
 }
 
 // Финансовый доступ (§10–§11): выплаты/авансы, приходы/расходы, кассы, статьи.
 // Бухгалтер — полный доступ к финансам, но без настроек и журнала.
 export async function requireFinance() {
-  return requireRole(["ADMIN", "DIRECTOR", "ACCOUNTANT"]);
+  return requireRole(FINANCE_ROLES);
 }

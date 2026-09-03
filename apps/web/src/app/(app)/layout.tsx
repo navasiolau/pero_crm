@@ -19,7 +19,7 @@ export default async function AppLayout({
       user={{
         name: session.user.name ?? "",
         email: session.user.email ?? "",
-        role: session.user.role,
+        roles: session.user.roles,
       }}
       headerExtras={<NotificationsBell />}
     >

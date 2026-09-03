@@ -13,7 +13,7 @@ import { emitDomainEvent } from "@/server/plugins/events";
 import { notifyOrg, notifyPerson } from "@/server/notifications/notify";
 import { getPayrollCurrency } from "@/server/payroll/queries";
 
-import { MANAGER_ROLES } from "./queries";
+import { MANAGER_ROLES, hasAnyRole } from "@/lib/roles";
 
 async function requireUser() {
   const session = await auth();
@@ -21,8 +21,8 @@ async function requireUser() {
   return session;
 }
 
-function requireRoles(role: Role, roles: Role[]) {
-  if (!roles.includes(role)) throw new Error("Недостаточно прав");
+function requireRoles(userRoles: Role[], allowed: Role[]) {
+  if (!hasAnyRole(userRoles, allowed)) throw new Error("Недостаточно прав");
 }
 
 // Номер проекта — сплошная нумерация: следующий = max(numberInt) + 1
@@ -81,7 +81,7 @@ export async function createProject(
   input: z.input<typeof createSchema>,
 ): Promise<{ ok: boolean; id?: string; error?: string }> {
   const session = await requireUser();
-  requireRoles(session.user.role, MANAGER_ROLES);
+  requireRoles(session.user.roles, MANAGER_ROLES);
   const parsed = createSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Ошибка данных" };
@@ -139,7 +139,7 @@ export async function updateProject(
   input: z.infer<typeof updateSchema>,
 ): Promise<{ ok: boolean; error?: string }> {
   const session = await requireUser();
-  requireRoles(session.user.role, MANAGER_ROLES);
+  requireRoles(session.user.roles, MANAGER_ROLES);
   const parsed = updateSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "Ошибка данных" };
   const data = parsed.data;
@@ -180,7 +180,7 @@ export async function changeProjectStage(
   },
 ): Promise<{ ok: boolean; error?: string }> {
   const session = await requireUser();
-  requireRoles(session.user.role, MANAGER_ROLES);
+  requireRoles(session.user.roles, MANAGER_ROLES);
 
   const project = await prisma.project.findUnique({ where: { id: projectId } });
   if (!project) return { ok: false, error: "Проект не найден" };

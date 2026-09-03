@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 
 import { auth } from "@/auth";
 import { displayClientName } from "@/lib/labels";
+import { MANAGER_ROLES, OFFICE_ROLES, hasAnyRole } from "@/lib/roles";
 import { getUserPreference } from "@/server/preferences";
 import {
   listProductFilterOptions,
@@ -23,7 +24,7 @@ export default async function ProductsPage({
 }) {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  const role = session.user.role;
+  const role = session.user.roles;
 
   const params = await searchParams;
   const { filters, page, pageSize } = parseProductListParams(params);
@@ -68,8 +69,8 @@ export default async function ProductsPage({
       total={result.total}
       page={page}
       pageSize={pageSize}
-      canManage={["ADMIN", "DIRECTOR", "MANAGER"].includes(role)}
-      showAmount={["ADMIN", "DIRECTOR", "MANAGER", "ENGINEER", "ACCOUNTANT"].includes(role)}
+      canManage={hasAnyRole(role, MANAGER_ROLES)}
+      showAmount={hasAnyRole(role, OFFICE_ROLES)}
       projectOptions={options.projects.map((project) => ({
         value: project.id,
         label: project.number,
