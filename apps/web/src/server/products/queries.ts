@@ -20,6 +20,8 @@ export interface ProductListFilters {
   status?: ProductStatus;
   projectId?: string;
   clientId?: string;
+  // Инженер проекта изделия (по аналогии с фильтром «Проекты»)
+  engineerId?: string;
   // «Только незавершённые» — по умолчанию включена (скрывает DONE)
   activeOnly: boolean;
   sort?: ProductSortField;
@@ -68,6 +70,7 @@ function productWhere(
       ? { ...visibility.project }
       : {};
   if (filters.clientId) projectCondition.clientId = filters.clientId;
+  if (filters.engineerId) projectCondition.engineerId = filters.engineerId;
   if (Object.keys(projectCondition).length > 0) where.project = projectCondition;
   const statusConditions: Prisma.ProductWhereInput[] = [];
   if (filters.activeOnly) {
@@ -207,6 +210,7 @@ export function parseProductListParams(sp: Record<string, string | string[] | un
       status,
       projectId: get("project") || undefined,
       clientId: get("client") || undefined,
+      engineerId: get("engineer") || undefined,
       // «Только незавершённые» включена по умолчанию (active=0 — снята)
       activeOnly: get("active") !== "0",
       sort,

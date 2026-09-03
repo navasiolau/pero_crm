@@ -4,6 +4,7 @@ import { auth } from "@/auth";
 import { displayClientName } from "@/lib/labels";
 import { MANAGER_ROLES, OFFICE_ROLES, hasAnyRole } from "@/lib/roles";
 import { getUserPreference } from "@/server/preferences";
+import { listEngineers } from "@/server/projects/queries";
 import {
   listProductFilterOptions,
   listProducts,
@@ -38,7 +39,7 @@ export default async function ProductsPage({
         ? "table"
         : "kanban";
 
-  const [result, options] = await Promise.all([
+  const [result, options, engineers] = await Promise.all([
     listProducts(
       session.user.id,
       role,
@@ -46,6 +47,7 @@ export default async function ProductsPage({
       view === "table" ? { page, pageSize } : undefined,
     ),
     listProductFilterOptions(session.user.id, role),
+    listEngineers(),
   ]);
 
   return (
@@ -71,6 +73,10 @@ export default async function ProductsPage({
       pageSize={pageSize}
       canManage={hasAnyRole(role, MANAGER_ROLES)}
       showAmount={hasAnyRole(role, OFFICE_ROLES)}
+      engineerOptions={engineers.map((engineer) => ({
+        value: engineer.id,
+        label: engineer.name,
+      }))}
       projectOptions={options.projects.map((project) => ({
         value: project.id,
         label: project.number,
