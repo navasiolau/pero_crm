@@ -13,7 +13,7 @@ import { prisma } from "@/lib/prisma";
 import { MANAGER_ROLES, OFFICE_ROLES, hasAnyRole, hasRole } from "@/lib/roles";
 import { getFileStageConfig } from "@/server/files/stage-config";
 import { getProductFor } from "@/server/products/queries";
-import { listWorkers } from "@/server/projects/queries";
+import { listEngineers, listWorkers } from "@/server/projects/queries";
 import { mapTaskDetails } from "@/server/tasks/queries";
 import { getProjectMaterials, listMaterialOptions } from "@/server/warehouse/queries";
 
@@ -50,15 +50,17 @@ export default async function ProductPage({
   // Группировка файлов по этапам (плагин file-stages), если включён.
   const stageConfig = await getFileStageConfig();
 
-  const [workers, priceItems, materialsData, materialOptions] = await Promise.all([
-    listWorkers(),
-    prisma.priceItem.findMany({
-      where: { active: true },
-      orderBy: { name: "asc" },
-    }),
-    showMaterials ? getProjectMaterials(product.id) : Promise.resolve(null),
-    showMaterials && canManage ? listMaterialOptions() : Promise.resolve([]),
-  ]);
+  const [workers, engineers, priceItems, materialsData, materialOptions] =
+    await Promise.all([
+      listWorkers(),
+      listEngineers(),
+      prisma.priceItem.findMany({
+        where: { active: true },
+        orderBy: { name: "asc" },
+      }),
+      showMaterials ? getProjectMaterials(product.id) : Promise.resolve(null),
+      showMaterials && canManage ? listMaterialOptions() : Promise.resolve([]),
+    ]);
 
   const authorIds = [
     ...new Set(
@@ -98,7 +100,12 @@ export default async function ProductPage({
             initialPrice: product.initialPrice?.toString() ?? null,
             description: product.description,
             projectId: product.project.id,
+            engineerId: product.engineerId,
           }}
+          engineerOptions={engineers.map((engineer) => ({
+            value: engineer.id,
+            label: engineer.name,
+          }))}
           currency={product.project.currency}
           canManage={canManage}
           canEditTech={canEditTech}
@@ -148,6 +155,10 @@ export default async function ProductPage({
             ) : (
               <div>—</div>
             )}
+          </div>
+          <div>
+            <div className="text-muted-foreground">Инженер</div>
+            <div>{product.engineer?.name ?? "—"}</div>
           </div>
           <div>
             <div className="text-muted-foreground">Статус</div>

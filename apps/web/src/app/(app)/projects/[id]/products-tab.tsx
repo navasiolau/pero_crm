@@ -32,6 +32,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { formatAmount } from "@/lib/format";
 import {
   PRODUCT_STATUSES,
@@ -49,6 +50,7 @@ export interface ProductCard {
   status: ProductStatus;
   statusChangedAt: string;
   expectedPrice: string | null;
+  engineerName: string | null;
 }
 
 function ProductCardView({
@@ -78,6 +80,11 @@ function ProductCardView({
           </Badge>
         </div>
         <div className="text-sm">{product.title}</div>
+        {product.engineerName ? (
+          <div className="text-xs text-muted-foreground">
+            Инженер: {product.engineerName}
+          </div>
+        ) : null}
         {showAmount ? (
           <div className="text-xs text-muted-foreground">
             {formatAmount(product.expectedPrice, currency)}
@@ -179,12 +186,14 @@ export function ProductsTab({
   initialProducts,
   canManage,
   showAmount,
+  engineerOptions,
 }: {
   projectId: string;
   currency: string;
   initialProducts: ProductCard[];
   canManage: boolean;
   showAmount: boolean;
+  engineerOptions: { value: string; label: string; hint?: string }[];
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -202,6 +211,7 @@ export function ProductsTab({
   const [price, setPrice] = useState("");
   const [initialPrice, setInitialPrice] = useState("");
   const [description, setDescription] = useState("");
+  const [engineerId, setEngineerId] = useState("");
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -311,6 +321,7 @@ export function ProductsTab({
             setPrice("");
             setInitialPrice("");
             setDescription("");
+            setEngineerId("");
           }
         }}
       >
@@ -376,6 +387,17 @@ export function ProductsTab({
                 placeholder="Материалы, размеры, особенности…"
               />
             </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>Инженер</Label>
+              <SearchableSelect
+                options={engineerOptions}
+                value={engineerId}
+                onChange={(value) => setEngineerId(value ?? "")}
+                placeholder="не назначен"
+                searchPlaceholder="Поиск инженера…"
+                allowClear
+              />
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setCreateOpen(false)}>
@@ -392,6 +414,7 @@ export function ProductsTab({
                     expectedPrice: parsedPrice,
                     initialPrice: parsedInitialPrice,
                     description: description.trim() || undefined,
+                    engineerId: engineerId || undefined,
                   });
                   if (result.ok) {
                     toast.success("Изделие создано");

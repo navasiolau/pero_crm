@@ -67,6 +67,7 @@ export default async function ProductsPage({
         projectTitle: product.project.title,
         clientId: product.project.client.id,
         clientName: displayClientName(product.project.client),
+        engineerName: product.engineer?.name ?? null,
       }))}
       total={result.total}
       page={page}

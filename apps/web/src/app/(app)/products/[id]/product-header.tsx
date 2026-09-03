@@ -26,6 +26,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { ConfirmDeleteDialog } from "@/components/confirm-delete-dialog";
 import {
   PRODUCT_STATUSES,
@@ -44,6 +45,7 @@ import {
 // удаление через ConfirmDeleteDialog.
 export function ProductHeader({
   product,
+  engineerOptions,
   currency,
   canManage,
   canEditTech,
@@ -59,7 +61,9 @@ export function ProductHeader({
     initialPrice: string | null;
     description: string | null;
     projectId: string;
+    engineerId: string | null;
   };
+  engineerOptions: { value: string; label: string; hint?: string }[];
   currency: string;
   canManage: boolean;
   canEditTech: boolean;
@@ -74,6 +78,8 @@ export function ProductHeader({
   const [price, setPrice] = useState(product.expectedPrice ?? "");
   const [initialPrice, setInitialPrice] = useState(product.initialPrice ?? "");
   const [description, setDescription] = useState(product.description ?? "");
+  // Инженер изделия — ответственен за конкретное изделие (§10)
+  const [engineerId, setEngineerId] = useState(product.engineerId ?? "");
 
   const onlyTech = canEditTech && !canManage; // инженер — только тех. блок
   const parsedPrice = price.trim() === "" ? null : Number(price);
@@ -192,6 +198,17 @@ export function ProductHeader({
                     />
                   </div>
                 ) : null}
+                <div className="flex flex-col gap-1.5">
+                  <Label>Инженер</Label>
+                  <SearchableSelect
+                    options={engineerOptions}
+                    value={engineerId}
+                    onChange={(value) => setEngineerId(value ?? "")}
+                    placeholder="не назначен"
+                    searchPlaceholder="Поиск инженера…"
+                    allowClear
+                  />
+                </div>
               </>
             ) : null}
             <div className="flex flex-col gap-1.5">
@@ -223,6 +240,7 @@ export function ProductHeader({
                           expectedPrice: parsedPrice,
                           initialPrice: parsedInitialPrice,
                           description: description.trim() || null,
+                          engineerId: engineerId || null,
                         },
                   );
                   if (result.ok) {

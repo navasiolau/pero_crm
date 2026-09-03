@@ -233,7 +233,6 @@ export default async function ProjectPage({
               address: project.address,
               clientId: project.clientId,
               managerId: project.managerId,
-              engineerId: project.engineerId,
               createdAt: project.createdAt,
               refusalReason: project.refusalReason,
               refusalComment: project.refusalComment,
@@ -254,7 +253,14 @@ export default async function ProjectPage({
             showAmount={showAmount}
             clients={clients.map((client) => ({ id: client.id, name: displayClientName(client) }))}
             managers={managers.map((manager) => ({ id: manager.id, name: manager.name }))}
-            engineers={engineers.map((engineer) => ({ id: engineer.id, name: engineer.name }))}
+            productEngineers={project.products
+              .map((product) => product.engineer)
+              .filter(
+                (engineer, index, all) =>
+                  engineer &&
+                  all.findIndex((item) => item?.id === engineer.id) === index,
+              )
+              .map((engineer) => ({ id: engineer!.id, name: engineer!.name }))}
           />
         </TabsContent>
 
@@ -269,9 +275,14 @@ export default async function ProjectPage({
               status: product.status,
               statusChangedAt: product.statusChangedAt.toISOString(),
               expectedPrice: product.expectedPrice?.toString() ?? null,
+              engineerName: product.engineer?.name ?? null,
             }))}
             canManage={canManage}
             showAmount={showAmount}
+            engineerOptions={engineers.map((engineer) => ({
+              value: engineer.id,
+              label: engineer.name,
+            }))}
           />
         </TabsContent>
 

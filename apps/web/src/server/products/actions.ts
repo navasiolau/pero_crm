@@ -33,6 +33,8 @@ const createSchema = z.object({
   expectedPrice: z.number().nonnegative("Цена не может быть отрицательной").optional(),
   initialPrice: z.number().nonnegative("Первоначальная цена не может быть отрицательной").optional(),
   description: z.string().optional(),
+  // Инженер изделия — ответственен за конкретное изделие (§10)
+  engineerId: z.string().optional(),
 });
 
 // Номер изделия: «<номер проекта>.<N>» (точка — единый стиль с legacy),
@@ -86,6 +88,7 @@ export async function createProduct(
       expectedPrice: data.expectedPrice,
       initialPrice: data.initialPrice,
       description: data.description?.trim() || null,
+      engineerId: data.engineerId || null,
       createdById: session.user.id,
       statusHistory: {
         create: { toStatus: "DESIGN", changedById: session.user.id },
@@ -117,6 +120,7 @@ const updateSchema = z.object({
     .nullable()
     .optional(),
   description: z.string().nullable().optional(),
+  engineerId: z.string().nullable().optional(),
 });
 
 // Редактирование изделия (§4): полностью — админ/директор/менеджер;

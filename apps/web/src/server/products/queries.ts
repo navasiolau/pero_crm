@@ -70,8 +70,9 @@ function productWhere(
       ? { ...visibility.project }
       : {};
   if (filters.clientId) projectCondition.clientId = filters.clientId;
-  if (filters.engineerId) projectCondition.engineerId = filters.engineerId;
   if (Object.keys(projectCondition).length > 0) where.project = projectCondition;
+  // Инженер — на самом изделии (§10, решение владельца 09.2026)
+  if (filters.engineerId) where.engineerId = filters.engineerId;
   const statusConditions: Prisma.ProductWhereInput[] = [];
   if (filters.activeOnly) {
     statusConditions.push({ status: { not: "DONE" } });
@@ -140,6 +141,7 @@ async function fetchProductRows(
   return prisma.product.findMany({
     where,
     include: {
+      engineer: { select: { id: true, name: true } },
       project: {
         select: {
           id: true,
@@ -262,6 +264,7 @@ export async function getProductFor(
         },
       },
       surveyor: { select: { id: true, name: true, position: true, phone: true } },
+      engineer: { select: { id: true, name: true, position: true, phone: true } },
       sketchFile: { select: { id: true, fileName: true, mimeType: true, size: true } },
       tasks: {
         include: taskDetailsInclude,

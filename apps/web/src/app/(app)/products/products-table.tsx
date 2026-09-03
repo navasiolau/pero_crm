@@ -71,6 +71,15 @@ export function ProductsTable({
       cell: (row) => <span className="text-muted-foreground">{row.clientName}</span>,
     },
     {
+      id: "engineer",
+      header: "Инженер",
+      sortable: true,
+      sortValue: (row) => row.engineerName ?? "",
+      cell: (row) => (
+        <span className="text-muted-foreground">{row.engineerName ?? "—"}</span>
+      ),
+    },
+    {
       id: "status",
       header: "Статус",
       sortable: true,

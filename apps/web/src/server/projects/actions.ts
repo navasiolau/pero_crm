@@ -36,7 +36,6 @@ async function createProjectWithNumber(
     currency: string;
     address?: string;
     managerId?: string;
-    engineerId?: string;
   },
   userId: string,
 ) {
@@ -55,7 +54,6 @@ async function createProjectWithNumber(
         currency: data.currency,
         address: data.address,
         managerId: data.managerId,
-        engineerId: data.engineerId,
         createdById: userId,
         stageHistory: {
           create: { toStage: "LEAD", changedById: userId },
@@ -72,7 +70,6 @@ const createSchema = z.object({
   currency: z.string().default("BYN"),
   address: z.string().optional(),
   managerId: z.string().optional(),
-  engineerId: z.string().optional(),
 });
 
 // Проект = заказ клиента (§6): название, клиент, менеджер, инженер, адрес,
@@ -95,7 +92,6 @@ export async function createProject(
       currency: data.currency,
       address: data.address,
       managerId: data.managerId,
-      engineerId: data.engineerId,
     },
     session.user.id,
   );
@@ -128,7 +124,6 @@ const updateSchema = z.object({
   currency: z.string().optional(),
   address: z.string().nullable().optional(),
   managerId: z.string().nullable().optional(),
-  engineerId: z.string().nullable().optional(),
   clientId: z.string().optional(),
 });
 
@@ -244,70 +239,84 @@ export async function changeProjectStage(
     }),
   ]);
 
-  // Начисление «% от стоимости» инженеру (§10): этап начисления — передача
+  // Начисление «% от стоимости» инженерам (§10): этап начисления — передача
   // проекта в производство (первый переход «В работе»). Повторные переходы
-  // (пауза, рекламация) не начисляют — запись одна на проект.
-  // Стоимость проекта = Σ цен изделий на момент перехода.
-  if (toStage === "IN_WORK" && project.engineerId) {
-    const engineer = await prisma.user.findUnique({
-      where: { id: project.engineerId },
-      select: { name: true, payScheme: true, payPercent: true },
+  // (пауза, рекламация) не начисляют — СТРОГО один раз на проект: если
+  // начисление уже было, новые назначения инженеров не начисляются.
+  // Инженер назначается на ИЗДЕЛИЕ (правило владельца, 09.2026): на проекте
+  // может быть несколько инженеров — каждый получает % от Σ цен СВОИХ изделий.
+  if (toStage === "IN_WORK") {
+    const existing = await prisma.payrollEntry.findFirst({
+      where: { projectId, scheme: "PERCENT_PROJECT" },
+      select: { id: true },
     });
-    if (
-      engineer?.payScheme === "PERCENT_PROJECT" &&
-      engineer.payPercent &&
-      Number(engineer.payPercent) > 0
-    ) {
-      const existing = await prisma.payrollEntry.findFirst({
-        where: { projectId, scheme: "PERCENT_PROJECT" },
-        select: { id: true },
+    if (!existing) {
+      const products = await prisma.product.findMany({
+        where: { projectId, engineerId: { not: null } },
+        select: { engineerId: true, expectedPrice: true },
       });
-      if (!existing) {
-        const priceAgg = await prisma.product.aggregate({
-          where: { projectId },
-          _sum: { expectedPrice: true },
+      // Группировка цен по инженерам
+      const priceByEngineer = new Map<string, number>();
+      for (const product of products) {
+        if (!product.engineerId) continue;
+        const current = priceByEngineer.get(product.engineerId) ?? 0;
+        priceByEngineer.set(
+          product.engineerId,
+          current + Number(product.expectedPrice ?? 0),
+        );
+      }
+      const currency = await getPayrollCurrency();
+      for (const [engineerId, totalPrice] of priceByEngineer) {
+        const engineer = await prisma.user.findUnique({
+          where: { id: engineerId },
+          select: { name: true, payScheme: true, payPercent: true },
         });
-        const totalPrice = Number(priceAgg._sum.expectedPrice ?? 0);
-        const percent = Number(engineer.payPercent);
-        const amount = Math.round(((totalPrice * percent) / 100) * 100) / 100;
-        if (amount > 0) {
-          const currency = await getPayrollCurrency();
-          await prisma.payrollEntry.create({
-            data: {
-              userId: project.engineerId,
-              projectId,
-              amount,
-              currency,
-              scheme: "PERCENT_PROJECT",
-              month: new Date().toISOString().slice(0, 7),
-              comment: `${percent}% от стоимости · ${project.number}`,
-            },
-          });
-          await emitDomainEvent(
-            "payroll.accrued",
-            {
-              userId: project.engineerId,
-              scheme: "PERCENT_PROJECT",
-              amount,
-              projectId,
-            },
-            session.user.id,
-          );
-          await notifyPerson({
-            userId: project.engineerId,
-            type: "payroll.accrued",
-            title: `Начислена зарплата: ${formatAmount(amount, currency)}`,
-            body: `${percent}% от стоимости проекта ${project.number}`,
-            link: "/payroll",
-          });
-          await notifyOrg({
-            type: "payroll.orgAccrued",
-            title: `Начислено ${engineer.name}: ${formatAmount(amount, currency)}`,
-            body: `${percent}% от стоимости проекта ${project.number}`,
-            link: "/finance/payroll",
-            exceptUserId: session.user.id,
-          });
+        if (
+          engineer?.payScheme !== "PERCENT_PROJECT" ||
+          !engineer.payPercent ||
+          Number(engineer.payPercent) <= 0
+        ) {
+          continue;
         }
+        const percent = Number(engineer.payPercent);
+        const amount =
+          Math.round(((totalPrice * percent) / 100) * 100) / 100;
+        if (amount <= 0) continue;
+        await prisma.payrollEntry.create({
+          data: {
+            userId: engineerId,
+            projectId,
+            amount,
+            currency,
+            scheme: "PERCENT_PROJECT",
+            month: new Date().toISOString().slice(0, 7),
+            comment: `${percent}% от стоимости изделий · ${project.number}`,
+          },
+        });
+        await emitDomainEvent(
+          "payroll.accrued",
+          {
+            userId: engineerId,
+            scheme: "PERCENT_PROJECT",
+            amount,
+            projectId,
+          },
+          session.user.id,
+        );
+        await notifyPerson({
+          userId: engineerId,
+          type: "payroll.accrued",
+          title: `Начислена зарплата: ${formatAmount(amount, currency)}`,
+          body: `${percent}% от стоимости ваших изделий по проекту ${project.number}`,
+          link: "/payroll",
+        });
+        await notifyOrg({
+          type: "payroll.orgAccrued",
+          title: `Начислено ${engineer.name}: ${formatAmount(amount, currency)}`,
+          body: `${percent}% от стоимости изделий по проекту ${project.number}`,
+          link: "/finance/payroll",
+          exceptUserId: session.user.id,
+        });
       }
     }
   }

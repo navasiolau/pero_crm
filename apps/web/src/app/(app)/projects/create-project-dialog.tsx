@@ -30,27 +30,24 @@ import type { SelectOption } from "./projects-view";
 const CURRENCIES = ["BYN", "RUB", "USD", "EUR"];
 
 // Создание проекта (§6): проект = заказ клиента; изделия с ценами
-// добавляются позже в карточке проекта (вкладка «Изделия»).
+// и инженерами добавляются позже в карточке проекта (вкладка «Изделия»).
 export function CreateProjectDialog({
   open,
   onOpenChange,
   clients,
   managers,
-  engineers,
   onCreated,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   clients: SelectOption[];
   managers: SelectOption[];
-  engineers: SelectOption[];
   onCreated: (id: string) => void;
 }) {
   const [pending, startTransition] = useTransition();
   const [title, setTitle] = useState("");
   const [clientId, setClientId] = useState("");
   const [managerId, setManagerId] = useState("");
-  const [engineerId, setEngineerId] = useState("");
   const [address, setAddress] = useState("");
   const [currency, setCurrency] = useState("BYN");
   // Мини-форма нового клиента
@@ -63,7 +60,6 @@ export function CreateProjectDialog({
     setTitle("");
     setClientId("");
     setManagerId("");
-    setEngineerId("");
     setAddress("");
     setCurrency("BYN");
     setNewClientOpen(false);
@@ -191,20 +187,6 @@ export function CreateProjectDialog({
                 allowClear
               />
             </div>
-            <div className="flex flex-col gap-1.5">
-              <Label>Инженер</Label>
-              <SearchableSelect
-                options={engineers.map((engineer) => ({
-                  value: engineer.id,
-                  label: engineer.name,
-                }))}
-                value={engineerId}
-                onChange={setEngineerId}
-                placeholder="не назначен"
-                searchPlaceholder="Поиск инженера…"
-                allowClear
-              />
-            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -250,7 +232,6 @@ export function CreateProjectDialog({
                   title: title.trim(),
                   clientId,
                   managerId: managerId || undefined,
-                  engineerId: engineerId || undefined,
                   address: address.trim() || undefined,
                   currency,
                 });

@@ -134,7 +134,6 @@ export function ProjectsView({
         onOpenChange={setCreateOpen}
         clients={clients}
         managers={managers}
-        engineers={engineers}
         onCreated={(id) => router.push(`/projects/${id}`)}
       />
     </div>

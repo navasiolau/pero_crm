@@ -5,6 +5,7 @@ import Link from "next/link";
 import { toast } from "sonner";
 import type { ProjectStage } from "@prisma/client";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -36,7 +37,6 @@ export interface OverviewProject {
   address: string | null;
   clientId: string;
   managerId: string | null;
-  engineerId: string | null;
   createdAt: Date;
   refusalReason: string | null;
   refusalComment: string | null;
@@ -46,9 +46,10 @@ export interface OverviewProject {
   client: { id: string; name: string; lastName: string | null; middleName: string | null; phone: string };
 }
 
-// Вкладка «Общее» карточки проекта: заказ (клиент, менеджер, инженер,
-// адрес, валюта) + служебные данные. Цены — на изделиях (вкладка
-// «Изделия»), сумма изделий показана справочно.
+// Вкладка «Общее» карточки проекта: заказ (клиент, менеджер, адрес, валюта)
+// + инженеры (по изделиям — read-only, назначаются в изделиях) + служебные
+// данные. Цены — на изделиях (вкладка «Изделия»), сумма изделий показана
+// справочно.
 export function OverviewTab({
   project,
   totalPrice,
@@ -59,7 +60,7 @@ export function OverviewTab({
   showAmount,
   clients,
   managers,
-  engineers,
+  productEngineers,
 }: {
   project: OverviewProject;
   totalPrice: number;
@@ -70,7 +71,7 @@ export function OverviewTab({
   showAmount: boolean;
   clients: SelectOption[];
   managers: SelectOption[];
-  engineers: SelectOption[];
+  productEngineers: SelectOption[];
 }) {
   const [pending, startTransition] = useTransition();
   const [form, setForm] = useState({
@@ -79,7 +80,6 @@ export function OverviewTab({
     currency: project.currency,
     clientId: project.clientId,
     managerId: project.managerId ?? "",
-    engineerId: project.engineerId ?? "",
   });
 
   function set(key: keyof typeof form) {
@@ -141,23 +141,21 @@ export function OverviewTab({
               />
             </div>
             <div className="flex flex-col gap-1.5">
-              <Label>Инженер</Label>
-              <SearchableSelect
-                options={engineers.map((engineer) => ({
-                  value: engineer.id,
-                  label: engineer.name,
-                }))}
-                value={form.engineerId}
-                onChange={(value) =>
-                  setForm((prev) => ({ ...prev, engineerId: value }))
-                }
-                placeholder="не назначен"
-                searchPlaceholder="Поиск инженера…"
-                allowClear
-                disabled={ro}
-              />
+              <Label>Инженеры (по изделиям)</Label>
+              <div className="flex min-h-9 flex-wrap items-center gap-1.5 rounded-md border border-input px-3 py-2 text-sm">
+                {productEngineers.length > 0 ? (
+                  productEngineers.map((engineer) => (
+                    <Badge key={engineer.id} variant="secondary">
+                      {engineer.name}
+                    </Badge>
+                  ))
+                ) : (
+                  <span className="text-muted-foreground">—</span>
+                )}
+              </div>
               <p className="text-xs text-muted-foreground">
-                На инженера начисляется % от суммы изделий при переходе «В работе»
+                Инженер назначается на конкретное изделие (вкладка «Изделия»);
+                на него начисляется % от стоимости его изделий при переходе «В работе»
               </p>
             </div>
           </div>
@@ -200,7 +198,6 @@ export function OverviewTab({
                       currency: form.currency,
                       clientId: form.clientId,
                       managerId: form.managerId || null,
-                      engineerId: form.engineerId || null,
                     });
                     if (result.ok) {
                       toast.success("Сохранено");

@@ -26,6 +26,7 @@ export interface ProductRow {
   projectTitle: string;
   clientId: string;
   clientName: string;
+  engineerName: string | null;
 }
 
 // Раздел «Изделия»: канбан (по умолчанию) / таблица, фильтры в URL —

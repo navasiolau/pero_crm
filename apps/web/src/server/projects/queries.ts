@@ -84,7 +84,9 @@ function projectWhere(
   if (stageConditions.length > 0) where.AND = stageConditions;
   if (filters.clientId) where.clientId = filters.clientId;
   if (filters.managerId) where.managerId = filters.managerId;
-  if (filters.engineerId) where.engineerId = filters.engineerId;
+  // Инженер — на изделии (§10): проект «инженера X» = есть хоть одно его изделие
+  if (filters.engineerId)
+    where.products = { some: { engineerId: filters.engineerId } };
   const q = filters.q?.trim();
   if (q) {
     where.OR = [
@@ -214,9 +216,9 @@ export async function getProjectFor(
     include: {
       client: true,
       manager: { select: { id: true, name: true } },
-      engineer: { select: { id: true, name: true } },
       products: {
         include: {
+          engineer: { select: { id: true, name: true } },
           statusHistory: { orderBy: { createdAt: "desc" } },
         },
         // Новые изделия сверху: суффикс по числу («205.9» после «205.21»),
