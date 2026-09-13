@@ -71,7 +71,8 @@ export function projectCardText(
     `Этап: ${STAGE_LABELS[project.stage] ?? project.stage} (${daysOnStage(project.stageChangedAt)} дн.)`,
     `Менеджер: ${project.managerName ?? "—"}`,
     `Валюта: ${project.currency}`,
-    `Изделий: ${project.productsCount} · Σ цен: ${formatMoney(project.totalExpected, project.currency)}`,
+    `Изделий: ${project.productsCount}`,
+    `Сумма за все изделия: ${formatMoney(project.totalExpected, project.currency)}`,
     `Первоначальная цена (КП): ${project.initialPrice === null ? "—" : formatMoney(project.initialPrice, project.currency)}`,
   ];
   if (finance) {
