@@ -4,6 +4,7 @@ import { randomBytes } from "crypto";
 
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { writeChangeLog } from "@/server/plugins/changelog";
 import { requireAdmin } from "@/server/require-role";
 
 // Привязка Telegram-аккаунта (сервис telegram-bot): одноразовый код из
