@@ -139,16 +139,11 @@ export default async function ProjectPage({
   });
   const uploaderNames = new Map(authors.map((user) => [user.id, user.name]));
 
-  // Стоимость проекта = Σ цен изделий + доставка/выгрузка/монтаж (валюта проекта)
-  const productsTotal = project.products.reduce(
+  // Стоимость проекта = Σ цен изделий (в валюте проекта)
+  const totalPrice = project.products.reduce(
     (sum, product) => sum + Number(product.expectedPrice ?? 0),
     0,
   );
-  const totalPrice =
-    productsTotal +
-    Number(project.delivery ?? 0) +
-    Number(project.unloading ?? 0) +
-    Number(project.installation ?? 0);
   // Первоначальная цена — первая цена КП клиенту (хранится на проекте;
   // правят менеджмент в карточке и telegram-бот; бэкфилл — Σ по изделиям)
   const initialPrice =
@@ -237,14 +232,6 @@ export default async function ProjectPage({
               address: project.address,
               initialPrice:
                 project.initialPrice === null ? null : Number(project.initialPrice),
-              delivery:
-                project.delivery === null ? null : Number(project.delivery),
-              unloading:
-                project.unloading === null ? null : Number(project.unloading),
-              installation:
-                project.installation === null
-                  ? null
-                  : Number(project.installation),
               clientId: project.clientId,
               managerId: project.managerId,
               createdAt: project.createdAt,
@@ -256,7 +243,6 @@ export default async function ProjectPage({
               client: project.client,
             }}
             totalPrice={totalPrice}
-            productsTotal={productsTotal}
             initialPrice={initialPrice}
             createdByName={
               project.createdById
