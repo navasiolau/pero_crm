@@ -1,19 +1,22 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
-import type { ProjectStage, Role } from "@prisma/client";
-import { z } from "zod";
+import type { ProjectStage } from "@prisma/client";
+import type { z } from "zod";
 
 import { auth } from "@/auth";
-import { prisma } from "@/lib/prisma";
-import { formatAmount } from "@/lib/format";
-import { stageLabels as STAGE_LABELS } from "@/lib/stages";
-import { writeChangeLog } from "@/server/plugins/changelog";
-import { emitDomainEvent } from "@/server/plugins/events";
-import { notifyOrg, notifyPerson } from "@/server/notifications/notify";
-import { getPayrollCurrency } from "@/server/payroll/queries";
 
-import { MANAGER_ROLES, hasAnyRole } from "@/lib/roles";
+import {
+  changeProjectStageCore,
+  createProjectCore,
+  createProjectSchema,
+  updateProjectCore,
+  updateProjectSchema,
+  type StageExtras,
+} from "./core";
+
+// Server actions — тонкие обёртки над ядрами (./core): сессия → актёр
+// (source "web"), вся логика и проверки ролей — в ядре, чтобы её переиспользовал
+// telegram-бот (source "telegram").
 
 async function requireUser() {
   const session = await auth();
@@ -21,331 +24,35 @@ async function requireUser() {
   return session;
 }
 
-function requireRoles(userRoles: Role[], allowed: Role[]) {
-  if (!hasAnyRole(userRoles, allowed)) throw new Error("Недостаточно прав");
+function actorFromSession(session: Awaited<ReturnType<typeof requireUser>>) {
+  return {
+    id: session.user.id,
+    name: session.user.name ?? "",
+    roles: session.user.roles,
+    source: "web" as const,
+  };
 }
 
-// Номер проекта — сплошная нумерация: следующий = max(numberInt) + 1
-// (после миграции нормализации все номера каноничные числа, «205» —
-// последний). Создание — в той же транзакции, чтобы два параллельных
-// запроса не получили один номер.
-async function createProjectWithNumber(
-  data: {
-    title: string;
-    clientId: string;
-    currency: string;
-    address?: string;
-    managerId?: string;
-  },
-  userId: string,
-) {
-  return prisma.$transaction(async (tx) => {
-    const max = await tx.project.aggregate({ _max: { numberInt: true } });
-    const numberInt = (max._max.numberInt ?? 0) + 1;
-    const number = String(numberInt);
-    const project = await tx.project.create({
-      data: {
-        // id = номер («205»): URL карточки — /projects/205
-        id: number,
-        number,
-        numberInt,
-        title: data.title,
-        clientId: data.clientId,
-        currency: data.currency,
-        address: data.address,
-        managerId: data.managerId,
-        createdById: userId,
-        stageHistory: {
-          create: { toStage: "LEAD", changedById: userId },
-        },
-      },
-    });
-    return project;
-  });
-}
-
-const createSchema = z.object({
-  title: z.string().min(1, "Укажите название проекта"),
-  clientId: z.string().min(1, "Выберите клиента"),
-  currency: z.string().default("BYN"),
-  address: z.string().optional(),
-  managerId: z.string().optional(),
-});
-
-// Проект = заказ клиента (§6): название, клиент, менеджер, инженер, адрес,
-// валюта. Цены — на изделиях, создаются в карточке проекта.
 export async function createProject(
-  input: z.input<typeof createSchema>,
-): Promise<{ ok: boolean; id?: string; error?: string }> {
+  input: z.input<typeof createProjectSchema>,
+): Promise<{ ok: boolean; id?: string; number?: string; error?: string }> {
   const session = await requireUser();
-  requireRoles(session.user.roles, MANAGER_ROLES);
-  const parsed = createSchema.safeParse(input);
-  if (!parsed.success) {
-    return { ok: false, error: parsed.error.issues[0]?.message ?? "Ошибка данных" };
-  }
-  const data = parsed.data;
-
-  const project = await createProjectWithNumber(
-    {
-      title: data.title,
-      clientId: data.clientId,
-      currency: data.currency,
-      address: data.address,
-      managerId: data.managerId,
-    },
-    session.user.id,
-  );
-  const number = project.number;
-
-  await writeChangeLog({
-    actorType: "user",
-    actorId: session.user.id,
-    actorName: session.user.name ?? undefined,
-    entity: "project",
-    entityId: project.id,
-    action: "create",
-    newValue: { number, title: data.title },
-  });
-  await emitDomainEvent("project.created", { projectId: project.id, number }, session.user.id);
-  await notifyOrg({
-    type: "project.created",
-    title: `Новый проект ${number}`,
-    body: data.title,
-    link: `/projects/${project.id}`,
-    exceptUserId: session.user.id,
-  });
-
-  revalidatePath("/projects");
-  return { ok: true, id: project.id };
+  return createProjectCore(actorFromSession(session), input);
 }
 
-const updateSchema = z.object({
-  title: z.string().min(1).optional(),
-  currency: z.string().optional(),
-  address: z.string().nullable().optional(),
-  managerId: z.string().nullable().optional(),
-  clientId: z.string().optional(),
-});
-
-// Редактирование карточки проекта (§4) — админ/директор/менеджер.
-// (Тех. блок живёт на изделии — его правит и инженер, см. products/actions.)
 export async function updateProject(
   projectId: string,
-  input: z.infer<typeof updateSchema>,
+  input: z.input<typeof updateProjectSchema>,
 ): Promise<{ ok: boolean; error?: string }> {
   const session = await requireUser();
-  requireRoles(session.user.roles, MANAGER_ROLES);
-  const parsed = updateSchema.safeParse(input);
-  if (!parsed.success) return { ok: false, error: "Ошибка данных" };
-  const data = parsed.data;
-
-  const before = await prisma.project.findUnique({ where: { id: projectId } });
-  if (!before) return { ok: false, error: "Проект не найден" };
-
-  await prisma.project.update({ where: { id: projectId }, data });
-
-  await writeChangeLog({
-    actorType: "user",
-    actorId: session.user.id,
-    actorName: session.user.name ?? undefined,
-    entity: "project",
-    entityId: projectId,
-    action: "update",
-    oldValue: Object.fromEntries(
-      Object.keys(data).map((k) => [k, before[k as keyof typeof before]]),
-    ),
-    newValue: data,
-  });
-  revalidatePath(`/projects/${projectId}`);
-  revalidatePath("/projects");
-  return { ok: true };
+  return updateProjectCore(actorFromSession(session), projectId, input);
 }
 
-// Смена этапа (§6): переходы свободные; для Отказа нужны причина+комментарий,
-// для Рекламации — причина, описание, виновная сторона (§6.3, только из «Завершён»).
 export async function changeProjectStage(
   projectId: string,
   toStage: ProjectStage,
-  extras?: {
-    refusalReason?: string;
-    refusalComment?: string;
-    reclamationReason?: string;
-    reclamationDescription?: string;
-    reclamationFault?: string;
-  },
+  extras?: StageExtras,
 ): Promise<{ ok: boolean; error?: string }> {
   const session = await requireUser();
-  requireRoles(session.user.roles, MANAGER_ROLES);
-
-  const project = await prisma.project.findUnique({ where: { id: projectId } });
-  if (!project) return { ok: false, error: "Проект не найден" };
-  if (project.stage === toStage) return { ok: true };
-
-  if (toStage === "REFUSED") {
-    if (!extras?.refusalReason?.trim() || !extras?.refusalComment?.trim()) {
-      return { ok: false, error: "Для отказа нужны причина и комментарий" };
-    }
-  }
-  if (toStage === "RECLAMATION") {
-    if (project.stage !== "DONE") {
-      return { ok: false, error: "Рекламация открывается только из «Завершён»" };
-    }
-    if (
-      !extras?.reclamationReason?.trim() ||
-      !extras?.reclamationDescription?.trim() ||
-      !extras?.reclamationFault?.trim()
-    ) {
-      return {
-        ok: false,
-        error: "Для рекламации нужны причина, описание и виновная сторона",
-      };
-    }
-  }
-
-  await prisma.$transaction([
-    prisma.project.update({
-      where: { id: projectId },
-      data: {
-        stage: toStage,
-        stageChangedAt: new Date(),
-        ...(toStage === "REFUSED"
-          ? {
-              refusalReason: extras!.refusalReason,
-              refusalComment: extras!.refusalComment,
-            }
-          : {}),
-        ...(toStage === "RECLAMATION"
-          ? {
-              reclamationReason: extras!.reclamationReason,
-              reclamationDescription: extras!.reclamationDescription,
-              reclamationFault: extras!.reclamationFault,
-            }
-          : {}),
-      },
-    }),
-    prisma.projectStageHistory.create({
-      data: {
-        projectId,
-        fromStage: project.stage,
-        toStage,
-        comment:
-          toStage === "REFUSED"
-            ? extras!.refusalReason
-            : toStage === "RECLAMATION"
-              ? extras!.reclamationReason
-              : undefined,
-        changedById: session.user.id,
-      },
-    }),
-  ]);
-
-  // Начисление «% от стоимости» инженерам (§10): этап начисления — передача
-  // проекта в производство (первый переход «В работе»). Повторные переходы
-  // (пауза, рекламация) не начисляют — СТРОГО один раз на проект: если
-  // начисление уже было, новые назначения инженеров не начисляются.
-  // Инженер назначается на ИЗДЕЛИЕ (правило владельца, 09.2026): на проекте
-  // может быть несколько инженеров — каждый получает % от Σ цен СВОИХ изделий.
-  if (toStage === "IN_WORK") {
-    const existing = await prisma.payrollEntry.findFirst({
-      where: { projectId, scheme: "PERCENT_PROJECT" },
-      select: { id: true },
-    });
-    if (!existing) {
-      const products = await prisma.product.findMany({
-        where: { projectId, engineerId: { not: null } },
-        select: { engineerId: true, expectedPrice: true },
-      });
-      // Группировка цен по инженерам
-      const priceByEngineer = new Map<string, number>();
-      for (const product of products) {
-        if (!product.engineerId) continue;
-        const current = priceByEngineer.get(product.engineerId) ?? 0;
-        priceByEngineer.set(
-          product.engineerId,
-          current + Number(product.expectedPrice ?? 0),
-        );
-      }
-      const currency = await getPayrollCurrency();
-      for (const [engineerId, totalPrice] of priceByEngineer) {
-        const engineer = await prisma.user.findUnique({
-          where: { id: engineerId },
-          select: { name: true, payScheme: true, payPercent: true },
-        });
-        if (
-          engineer?.payScheme !== "PERCENT_PROJECT" ||
-          !engineer.payPercent ||
-          Number(engineer.payPercent) <= 0
-        ) {
-          continue;
-        }
-        const percent = Number(engineer.payPercent);
-        const amount =
-          Math.round(((totalPrice * percent) / 100) * 100) / 100;
-        if (amount <= 0) continue;
-        await prisma.payrollEntry.create({
-          data: {
-            userId: engineerId,
-            projectId,
-            amount,
-            currency,
-            scheme: "PERCENT_PROJECT",
-            month: new Date().toISOString().slice(0, 7),
-            comment: `${percent}% от стоимости изделий · ${project.number}`,
-          },
-        });
-        await emitDomainEvent(
-          "payroll.accrued",
-          {
-            userId: engineerId,
-            scheme: "PERCENT_PROJECT",
-            amount,
-            projectId,
-          },
-          session.user.id,
-        );
-        await notifyPerson({
-          userId: engineerId,
-          type: "payroll.accrued",
-          title: `Начислена зарплата: ${formatAmount(amount, currency)}`,
-          body: `${percent}% от стоимости ваших изделий по проекту ${project.number}`,
-          link: "/payroll",
-        });
-        await notifyOrg({
-          type: "payroll.orgAccrued",
-          title: `Начислено ${engineer.name}: ${formatAmount(amount, currency)}`,
-          body: `${percent}% от стоимости изделий по проекту ${project.number}`,
-          link: "/finance/payroll",
-          exceptUserId: session.user.id,
-        });
-      }
-    }
-  }
-
-  await writeChangeLog({
-    actorType: "user",
-    actorId: session.user.id,
-    actorName: session.user.name ?? undefined,
-    entity: "project",
-    entityId: projectId,
-    action: "stage",
-    field: "stage",
-    oldValue: project.stage,
-    newValue: toStage,
-  });
-  await emitDomainEvent(
-    "project.stageChanged",
-    { projectId, number: project.number, from: project.stage, to: toStage },
-    session.user.id,
-  );
-  await notifyOrg({
-    type: "project.stageChanged",
-    title: `${project.number}: ${STAGE_LABELS[project.stage]} → ${STAGE_LABELS[toStage]}`,
-    body: project.title,
-    link: `/projects/${projectId}`,
-    exceptUserId: session.user.id,
-  });
-
-  revalidatePath(`/projects/${projectId}`);
-  revalidatePath("/projects");
-  return { ok: true };
+  return changeProjectStageCore(actorFromSession(session), projectId, toStage, extras);
 }

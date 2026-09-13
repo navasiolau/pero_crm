@@ -35,6 +35,7 @@ export interface OverviewProject {
   stageChangedAt: Date;
   currency: string;
   address: string | null;
+  initialPrice: number | null;
   clientId: string;
   managerId: string | null;
   createdAt: Date;
@@ -53,7 +54,7 @@ export interface OverviewProject {
 export function OverviewTab({
   project,
   totalPrice,
-  totalInitialPrice,
+  initialPrice,
   createdByName,
   doneAt,
   canManage,
@@ -64,7 +65,7 @@ export function OverviewTab({
 }: {
   project: OverviewProject;
   totalPrice: number;
-  totalInitialPrice: number;
+  initialPrice: number | null;
   createdByName: string | null;
   doneAt: string | null; // дата перехода в «Завершён» из истории этапов
   canManage: boolean;
@@ -78,6 +79,7 @@ export function OverviewTab({
     title: project.title,
     address: project.address ?? "",
     currency: project.currency,
+    initialPrice: initialPrice === null ? "" : String(initialPrice),
     clientId: project.clientId,
     managerId: project.managerId ?? "",
   });
@@ -186,19 +188,44 @@ export function OverviewTab({
               </Select>
             </div>
           </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="initialPrice">Первоначальная цена (КП)</Label>
+            <Input
+              id="initialPrice"
+              inputMode="decimal"
+              value={form.initialPrice}
+              onChange={set("initialPrice")}
+              readOnly={ro}
+            />
+            <p className="text-xs text-muted-foreground">
+              Первая цена КП клиенту; правится также через Telegram-бот
+            </p>
+          </div>
           {canManage ? (
             <div>
               <Button
                 disabled={pending}
                 onClick={() =>
-                  startTransition(async () => {
-                    const result = await updateProject(project.id, {
-                      title: form.title.trim(),
-                      address: form.address.trim() || null,
-                      currency: form.currency,
-                      clientId: form.clientId,
-                      managerId: form.managerId || null,
-                    });
+              startTransition(async () => {
+                const parsedInitialPrice =
+                  form.initialPrice.trim() === ""
+                    ? null
+                    : Number(form.initialPrice);
+                if (
+                  parsedInitialPrice !== null &&
+                  (Number.isNaN(parsedInitialPrice) || parsedInitialPrice < 0)
+                ) {
+                  toast.error("Неверная первоначальная цена");
+                  return;
+                }
+                const result = await updateProject(project.id, {
+                  title: form.title.trim(),
+                  address: form.address.trim() || null,
+                  currency: form.currency,
+                  initialPrice: parsedInitialPrice,
+                  clientId: form.clientId,
+                  managerId: form.managerId || null,
+                });
                     if (result.ok) {
                       toast.success("Сохранено");
                     } else {
@@ -247,12 +274,12 @@ export function OverviewTab({
             <div>
               <span className="text-muted-foreground">Первоначальная цена:</span>{" "}
               {formatAmount(
-                totalInitialPrice > 0 ? String(totalInitialPrice) : null,
+                initialPrice !== null ? String(initialPrice) : null,
                 project.currency,
               )}
               <span className="text-xs text-muted-foreground">
                 {" "}
-                · сумма по изделиям
+                · цена КП клиенту
               </span>
             </div>
           ) : null}
