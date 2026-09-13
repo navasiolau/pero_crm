@@ -64,7 +64,14 @@ export async function GET(request: Request) {
         select: { id: true, name: true, currency: true },
         orderBy: { name: "asc" },
       });
-      return NextResponse.json({ ok: true, items: accounts });
+      return NextResponse.json({
+        ok: true,
+        items: accounts.map((account) => ({
+          id: account.id,
+          label: account.name,
+          currency: account.currency,
+        })),
+      });
     }
     case "articles": {
       const articles = await prisma.expenseArticle.findMany({
