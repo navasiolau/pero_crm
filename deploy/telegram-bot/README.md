@@ -5,6 +5,14 @@
 `apps/telegram-bot` в монорепо; данные — только в CRM (через REST
 `/api/v1/bot/*` с сервисным Bearer-токеном).
 
+**Факт развёртывания (13.09.2026): CT 110 `tgbot`, 192.168.0.34** (ID 105
+занят остановленным leftover `restore-test` и сам прописан на .34 — при его
+старт будет конфликт адресов; leftover подлежит удалению решением владельца).
+Сейчас бот работает в staging-режиме (CRM_BASE_URL=http://192.168.0.30,
+BOT_IMAGE_TAG=staging); переключение на прод — поменять в .env
+CRM_BASE_URL=http://192.168.0.20, продовый CRM_API_TOKEN и BOT_IMAGE_TAG=main,
+`docker compose up -d`.
+
 **Доступ к боту (решение владельца):** привязать Telegram можно с любой
 ролью, но команды работают только у ADMIN/DIRECTOR/MANAGER (комбинированные
 роли — достаточно одной из них).
@@ -19,17 +27,18 @@
 ## 2. Создать контейнер (на pve)
 
 По образцу crm-staging: unprivileged, nesting=1 (docker), onboot.
+Хранилище — `local-zfs` (не local-lvm).
 
 ```bash
 ssh root@192.168.0.10   # pve
-pct create 105 local:vztmpl-ubuntu-24.04 \
+pct create 110 local:vztmpl/ubuntu-24.04-standard_24.04-2_amd64.tar.zst \
   --hostname tgbot --net0 name=net0,bridge=vmbr0,ip=192.168.0.34/24,gw=192.168.0.1 \
   --unprivileged 1 --features nesting=1 --cores 1 --memory 1024 --swap 512 \
-  --rootfs local-lvm:8 --onboot 1 --start 1
+  --rootfs local-zfs:8 --onboot 1 --start 1
 ```
 
-Внутри (по образцу crm): docker + docker compose plugin, `docker login ghcr.io`
-(PAT владельца, read:packages).
+Внутри (по образцу crm): docker (`curl -fsSL https://get.docker.com | sh`),
+`docker login ghcr.io` (PAT владельца, read:packages).
 
 ## 3. Конфиг и запуск
 

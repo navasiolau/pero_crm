@@ -34,6 +34,21 @@ async function main(): Promise<void> {
   console.log(`[bot] запущен как @${me.username}`);
   await registerWithRetry(me.username);
 
+  // Перерегистрация каждые 6 ч: ночной refresh staging пересоздаёт БД
+  // (OrgSetting стирается) — botUsername должен восстанавливаться без
+  // рестарта контейнера.
+  void (async () => {
+    for (;;) {
+      await sleep(6 * 3600 * 1000);
+      try {
+        await crm.register(me.username!);
+        console.log("[bot] перерегистрирован в CRM");
+      } catch (e) {
+        console.error("[bot] перерегистрация:", (e as Error).message);
+      }
+    }
+  })();
+
   let offset = 0;
   let consecutiveErrors = 0;
   for (;;) {
