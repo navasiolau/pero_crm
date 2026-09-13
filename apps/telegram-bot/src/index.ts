@@ -61,6 +61,15 @@ async function main(): Promise<void> {
           await handleUpdate(update);
         } catch (e) {
           console.error("[bot] ошибка обработки обновления:", e);
+          const chatId =
+            update.message?.chat.id ?? update.callback_query?.message.chat.id;
+          if (chatId) {
+            try {
+              await tg.sendMessage(chatId, "❌ Ошибка, попробуйте ещё раз");
+            } catch {
+              // не смогли и ответить — пишем только в лог
+            }
+          }
         }
       }
     } catch (e) {

@@ -44,6 +44,9 @@ async function createProjectWithNumber(
     address?: string;
     managerId?: string;
     initialPrice?: number;
+    delivery?: number;
+    unloading?: number;
+    installation?: number;
   },
   userId: string,
 ) {
@@ -63,6 +66,9 @@ async function createProjectWithNumber(
         address: data.address,
         managerId: data.managerId,
         initialPrice: data.initialPrice ?? null,
+        delivery: data.delivery ?? null,
+        unloading: data.unloading ?? null,
+        installation: data.installation ?? null,
         createdById: userId,
         stageHistory: {
           create: { toStage: "LEAD", changedById: userId },
@@ -82,6 +88,18 @@ export const createProjectSchema = z.object({
   initialPrice: z
     .number()
     .min(0, "Первоначальная цена не может быть отрицательной")
+    .optional(),
+  delivery: z
+    .number()
+    .min(0, "Доставка не может быть отрицательной")
+    .optional(),
+  unloading: z
+    .number()
+    .min(0, "Выгрузка не может быть отрицательной")
+    .optional(),
+  installation: z
+    .number()
+    .min(0, "Монтаж не может быть отрицательным")
     .optional(),
 });
 
@@ -106,6 +124,9 @@ export async function createProjectCore(
       address: data.address,
       managerId: data.managerId,
       initialPrice: data.initialPrice,
+      delivery: data.delivery,
+      unloading: data.unloading,
+      installation: data.installation,
     },
     actor.id,
   );
@@ -143,6 +164,21 @@ export const updateProjectSchema = z.object({
   initialPrice: z
     .number()
     .min(0, "Первоначальная цена не может быть отрицательной")
+    .nullable()
+    .optional(),
+  delivery: z
+    .number()
+    .min(0, "Доставка не может быть отрицательной")
+    .nullable()
+    .optional(),
+  unloading: z
+    .number()
+    .min(0, "Выгрузка не может быть отрицательной")
+    .nullable()
+    .optional(),
+  installation: z
+    .number()
+    .min(0, "Монтаж не может быть отрицательным")
     .nullable()
     .optional(),
 });

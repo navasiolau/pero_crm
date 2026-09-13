@@ -195,13 +195,17 @@ async function fetchProjectRows(
   // Бейдж «Нехватка материалов» на канбане/в таблице (§12) — агрегат
   // по изделиям проекта, один запрос на весь список
   const shortages = await listProjectShortages(projects.map((project) => project.id));
+  // Стоимость проекта = Σ цен изделий + доставка/выгрузка/монтаж (в валюте проекта)
   return projects.map((project) => ({
     ...project,
-    // Стоимость проекта = Σ цен изделий (в валюте проекта)
-    totalPrice: project.products.reduce(
-      (sum, product) => sum + Number(product.expectedPrice ?? 0),
-      0,
-    ),
+    totalPrice:
+      project.products.reduce(
+        (sum, product) => sum + Number(product.expectedPrice ?? 0),
+        0,
+      ) +
+      Number(project.delivery ?? 0) +
+      Number(project.unloading ?? 0) +
+      Number(project.installation ?? 0),
     hasMaterialShortage: shortages.has(project.id),
   }));
 }

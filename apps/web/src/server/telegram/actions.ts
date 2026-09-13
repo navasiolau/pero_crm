@@ -4,11 +4,14 @@ import { randomBytes } from "crypto";
 
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { requireAdmin } from "@/server/require-role";
 
 // Привязка Telegram-аккаунта (сервис telegram-bot): одноразовый код из
 // профиля → пользователь открывает t.me/<bot>?start=<код> → бот подтверждает
 // через POST /api/v1/bot/link. Привязка доступна любой роли; использование
 // бота ограничено ADMIN/DIRECTOR/MANAGER (решение владельца).
+// Отвязка через бота НЕ предусмотрена (решение владельца): пользователь —
+// из профиля, администратор — отсюда (управление пользователями).
 
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // без похожих 0/O/1/I
 const CODE_LENGTH = 8;
@@ -91,5 +94,28 @@ export async function requestTelegramLink(): Promise<{
 export async function unlinkTelegram(): Promise<{ ok: boolean }> {
   const user = await getSessionUser();
   await prisma.telegramLink.deleteMany({ where: { userId: user.id } });
+  return { ok: true };
+}
+
+// ─── Отвязка администратором (управление пользователями) ────────────────────
+
+export async function getTelegramLinkStatusFor(
+  userId: string,
+): Promise<{ linked: boolean; username: string | null }> {
+  await requireAdmin();
+  const link = await prisma.telegramLink.findUnique({ where: { userId } });
+  return { linked: !!link?.chatId, username: link?.username ?? null };
+}
+
+export async function unlinkTelegramFor(userId: string): Promise<{ ok: boolean }> {
+  await requireAdmin();
+  await prisma.telegramLink.deleteMany({ where: { userId } });
+  await writeChangeLog({
+    actorType: "user",
+    actorId: (await getSessionUser()).id,
+    entity: "telegramLink",
+    entityId: userId,
+    action: "unlink",
+  });
   return { ok: true };
 }

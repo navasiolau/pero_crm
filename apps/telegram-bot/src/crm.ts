@@ -93,9 +93,6 @@ export const crm = {
       user?: { name: string; roles: string[]; botAllowed: boolean };
     }>("POST", "/link", { code, chatId, username });
   },
-  unlink(chatId: string) {
-    return request<{ ok: boolean }>("DELETE", "/unlink", { chatId });
-  },
   projects(actorId: string, q?: string) {
     return request<{ ok: boolean; error?: string; projects?: ProjectRef[] }>(
       "GET",

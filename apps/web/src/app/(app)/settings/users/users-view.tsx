@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { Pencil, Plus } from "lucide-react";
 import { toast } from "sonner";
 import type { PayScheme, Role } from "@prisma/client";
@@ -28,6 +28,10 @@ import {
 import { roleLabels, roleComboLabel, isValidRolesCombination, normalizeRoles } from "@/lib/roles";
 import { cn } from "@/lib/utils";
 import { createUser, updateUser } from "@/server/users/actions";
+import {
+  getTelegramLinkStatusFor,
+  unlinkTelegramFor,
+} from "@/server/telegram/actions";
 
 interface UserRow {
   id: string;
@@ -75,6 +79,16 @@ export function UsersView({
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<UserRow | null>(null);
   const [form, setForm] = useState(emptyForm);
+  // Привязка Telegram-бота (отвязка администратором — решение владельца)
+  const [tgLink, setTgLink] = useState<{ linked: boolean; username: string | null } | null>(null);
+
+  useEffect(() => {
+    if (!open || !editing) {
+      setTgLink(null);
+      return;
+    }
+    getTelegramLinkStatusFor(editing.id).then(setTgLink).catch(() => setTgLink(null));
+  }, [open, editing]);
 
   function openCreate() {
     setEditing(null);
@@ -395,6 +409,36 @@ export function UsersView({
               Учётная запись активна
             </label>
           </div>
+          {editing ? (
+            <div className="rounded-lg border p-3 text-sm">
+              <div className="font-medium">Telegram-бот</div>
+              {tgLink === null ? (
+                <p className="text-muted-foreground">Загрузка…</p>
+              ) : tgLink.linked ? (
+                <div className="flex items-center justify-between gap-2">
+                  <span>
+                    Привязан{tgLink.username ? `: @${tgLink.username}` : ""}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={pending}
+                    onClick={() =>
+                      startTransition(async () => {
+                        await unlinkTelegramFor(editing.id);
+                        setTgLink({ linked: false, username: null });
+                        toast.success("Telegram отвязан");
+                      })
+                    }
+                  >
+                    Отвязать
+                  </Button>
+                </div>
+              ) : (
+                <p className="text-muted-foreground">Не привязан</p>
+              )}
+            </div>
+          ) : null}
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)}>
               Отмена

@@ -1,5 +1,5 @@
 import { crm, CrmError, type ProjectRef } from "./crm";
-import { tg, type InlineButton, type TgCallbackQuery, type TgUpdate } from "./tg";
+import { tg, TgError, type InlineButton, type TgCallbackQuery, type TgUpdate } from "./tg";
 import {
   CURRENCIES,
   FINANCE_ROLES,
@@ -111,6 +111,17 @@ async function reply(
   try {
     await tg.sendMessage(chatId, text, buttons);
   } catch (e) {
+    // Клавиатура не прошла (например, битая кнопка) — повторяем без неё,
+    // чтобы пользователь не оставался без ответа
+    if (buttons && e instanceof TgError) {
+      try {
+        await tg.sendMessage(chatId, text);
+        return;
+      } catch (e2) {
+        console.error("[engine] sendMessage (без кнопок):", (e2 as Error).message);
+        return;
+      }
+    }
     console.error("[engine] sendMessage:", (e as Error).message);
   }
 }
@@ -135,13 +146,11 @@ export async function handleUpdate(update: TgUpdate): Promise<void> {
   const text = message.text.trim();
   const { cmd, args } = parseCommand(text);
 
-  // /start <код> и /стоп работают без сессии (привязка доступна любой роли)
+  // /start <код> работает без сессии (привязка доступна любой роли).
+  // Отвязка через бота НЕ предусмотрена (решение владельца): только из CRM
+  // (профиль) или администратором в управлении пользователями.
   if (cmd === "/start" && args[0]) {
     await handleLinkCode(chatId, args[0], message.from?.username);
-    return;
-  }
-  if (cmd === "/стоп" || cmd === "/stop") {
-    await handleUnlink(chatId);
     return;
   }
 
@@ -201,16 +210,6 @@ async function handleLinkCode(
     return;
   }
   await reply(chatId, `✅ Привязано: ${who}\n\nСписок команд — /help`);
-}
-
-async function handleUnlink(chatId: number): Promise<void> {
-  const result = await crm.unlink(String(chatId));
-  dropSession(String(chatId));
-  setDialog(chatId, null);
-  await reply(
-    chatId,
-    result.ok ? "Аккаунт отвязан. Чтобы привязать снова — запросите код в профиле CRM." : "Не удалось отвязать.",
-  );
 }
 
 // ─── Команды ─────────────────────────────────────────────────────────────────
@@ -304,7 +303,7 @@ function helpText(session: Session): string {
       "/расход [номер] [сумма] — расход по проекту",
     );
   }
-  lines.push("/стоп — отвязать аккаунт");
+  lines.push("Отвязать бота — в CRM: меню профиля → Telegram");
   return lines.join("\n");
 }
 

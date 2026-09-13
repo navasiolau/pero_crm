@@ -131,6 +131,12 @@ model Project {
   // Первоначальная цена — первая цена КП клиенту (§11). Правят менеджмент
   // и telegram-бот; бэкфилл при внедрении — из Σ initialPrice изделий.
   initialPrice           Decimal?     @db.Decimal(12, 2)
+  // Доставка / Выгрузка / Монтаж из КП — прибавляются к Σ цен изделий
+  // в «сумме проекта» (карточка, канбан, экономика, бот). Не входят в базу
+  // «% инженеру» при «В работе».
+  delivery               Decimal?     @db.Decimal(12, 2)
+  unloading              Decimal?     @db.Decimal(12, 2)
+  installation           Decimal?     @db.Decimal(12, 2)
   address                String?
   refusalReason          String?
   refusalComment         String?
