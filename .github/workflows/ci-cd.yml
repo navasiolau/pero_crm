@@ -42,8 +42,7 @@ jobs:
       - name: Typecheck (backend + frontend)
         run: pnpm --filter @pero/web exec tsc --noEmit
 
-      # vitest-сьюты плагинов; после удаления bazis-import их нет —
-      # шаг остаётся заделом: новые тесты подхватятся автоматически
+      # vitest-сьютов пока нет — шаг задел: новые тесты подхватятся автоматически
       - name: Тесты (vitest)
         run: pnpm -r --if-present test
 
