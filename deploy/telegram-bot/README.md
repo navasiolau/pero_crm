@@ -64,15 +64,13 @@ EOF
 cat > /opt/telegram-bot/watch-deploy.sh <<'EOF'
 #!/bin/sh
 cd /opt/telegram-bot
-CURRENT_ID=$(docker compose images bot -q 2>/dev/null)
-docker compose pull bot -q
-NEW_ID=$(docker compose images bot -q 2>/dev/null)
-if [ "$CURRENT_ID" != "$NEW_ID" ]; then
-  echo "$(date -Is) pull: новая версия ($CURRENT_ID -> $NEW_ID), up -d"
-  docker compose up -d bot
-fi
+docker compose pull bot
+docker compose up -d bot
 EOF
 chmod +x /opt/telegram-bot/watch-deploy.sh
+# ВАЖНО: сравнение ID через `docker compose images` НЕ работает — он показывает
+# образ контейнера, а не тега (рестарта не будет). `up -d` сам пересоздаёт
+# контейнер при смене образа и ничего не делает, если образ тот же.
 ```
 
 Откат: в `.env` добавить `BOT_IMAGE_TAG=sha-<коммит>` → `docker compose up -d`.
