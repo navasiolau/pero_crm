@@ -37,3 +37,8 @@ legacy_export
 research
 
 b_plus_creds.md
+
+# Handoff/owner-документы с живыми кредами — никогда не коммитить
+HANDOVER-NEXT-AGENT.md
+docs/INFRA_RECOVERY_HANDOFF.md
+docs/NETBIRD_SETUP_OWNER.md

@@ -88,6 +88,9 @@ export async function getProjectEconomics(
     select: {
       id: true,
       currency: true,
+      delivery: true,
+      unloading: true,
+      installation: true,
       products: { select: { expectedPrice: true } },
     },
   });
@@ -173,10 +176,15 @@ export async function getProjectEconomics(
   paidTotal = round(paidTotal);
   expensesTotal = round(expensesTotal);
   payrollTotal = round(payrollTotal);
-  const expectedRaw = project.products.reduce(
-    (sum, product) => sum + Number(product.expectedPrice ?? 0),
-    0,
-  );
+  // Ожидаемая цена = Σ цен изделий + доставка/выгрузка/монтаж проекта
+  const expectedRaw =
+    project.products.reduce(
+      (sum, product) => sum + Number(product.expectedPrice ?? 0),
+      0,
+    ) +
+    Number(project.delivery ?? 0) +
+    Number(project.unloading ?? 0) +
+    Number(project.installation ?? 0);
   const expectedPrice = expectedRaw > 0 ? round(expectedRaw) : null;
 
   const expenseBreakdown = [...byArticle.entries()]

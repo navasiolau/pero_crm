@@ -42,10 +42,15 @@ export async function GET(
     return NextResponse.json({ ok: false, error: "Проект не найден" }, { status: 404 });
   }
 
-  const totalExpected = project.products.reduce(
-    (sum, product) => sum + Number(product.expectedPrice ?? 0),
-    0,
-  );
+  // Сумма по проекту = Σ цен изделий + доставка/выгрузка/монтаж
+  const totalExpected =
+    project.products.reduce(
+      (sum, product) => sum + Number(product.expectedPrice ?? 0),
+      0,
+    ) +
+    Number(project.delivery ?? 0) +
+    Number(project.unloading ?? 0) +
+    Number(project.installation ?? 0);
 
   let finance: { incomeByn: number; expenseByn: number } | null = null;
   if (hasAnyRole(actor.roles, FINANCE_ROLES)) {

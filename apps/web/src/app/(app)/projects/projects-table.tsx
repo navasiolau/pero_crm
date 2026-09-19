@@ -99,8 +99,8 @@ export function ProjectsTable({
       ? [
           {
             id: "amount",
-            header: "Сумма изделий",
-            // Σ цен изделий считается по строкам — сервером не сортируется
+            header: "Сумма проекта",
+            // Σ цен изделий + доставка/выгрузка/монтаж считается по строкам — сервером не сортируется
             sortable: false,
             headerClassName: "text-right",
             className: "text-right",

@@ -82,10 +82,15 @@ export default async function DashboardPage() {
       <ChartAreaInteractive />
       <RecentProjects
         projects={recent.map((project) => {
-          const totalPrice = project.products.reduce(
-            (sum, product) => sum + Number(product.expectedPrice ?? 0),
-            0,
-          );
+          // Сумма проекта = Σ цен изделий + доставка/выгрузка/монтаж
+          const totalPrice =
+            project.products.reduce(
+              (sum, product) => sum + Number(product.expectedPrice ?? 0),
+              0,
+            ) +
+            Number(project.delivery ?? 0) +
+            Number(project.unloading ?? 0) +
+            Number(project.installation ?? 0);
           return {
             id: project.id,
             number: project.number,

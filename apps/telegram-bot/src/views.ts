@@ -72,7 +72,7 @@ export function projectCardText(
     `Менеджер: ${project.managerName ?? "—"}`,
     `Валюта: ${project.currency}`,
     `Изделий: ${project.productsCount}`,
-    `Сумма за все изделия: ${formatMoney(project.totalExpected, project.currency)}`,
+    `Сумма по проекту: ${formatMoney(project.totalExpected, project.currency)}`,
     `Первоначальная цена (КП): ${project.initialPrice === null ? "—" : formatMoney(project.initialPrice, project.currency)}`,
   ];
   if (finance) {

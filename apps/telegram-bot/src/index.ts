@@ -2,11 +2,14 @@ import { config } from "./config";
 import { crm } from "./crm";
 import { tg, TgError } from "./tg";
 import { handleUpdate } from "./engine";
+import { BotHealthReporter } from "./health";
 
 // Точка входа: long polling Telegram + обработка обновлений.
 // Только исходящие соединения (Telegram API + CRM) — входящих портов нет.
 
 const POLL_TIMEOUT_SEC = 25;
+const CRM_HEALTH_INTERVAL_MS = config.recoveryTest ? 100 : 30_000;
+const health = new BotHealthReporter(config.healthFile);
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -25,7 +28,20 @@ async function registerWithRetry(username: string): Promise<void> {
   }
 }
 
+async function monitorCrmHealth(): Promise<never> {
+  for (;;) {
+    try {
+      await crm.health();
+      health.crmSuccess();
+    } catch {
+      health.crmFailure();
+    }
+    await sleep(CRM_HEALTH_INTERVAL_MS);
+  }
+}
+
 async function main(): Promise<void> {
+  void monitorCrmHealth();
   const me = await tg.getMe();
   if (!me.username) {
     console.error("[bot] у бота нет username — проверьте токен");
@@ -54,6 +70,7 @@ async function main(): Promise<void> {
   for (;;) {
     try {
       const updates = await tg.getUpdates(offset, POLL_TIMEOUT_SEC);
+      health.pollingSuccess();
       consecutiveErrors = 0;
       for (const update of updates) {
         offset = update.update_id + 1;
@@ -74,11 +91,13 @@ async function main(): Promise<void> {
       }
     } catch (e) {
       if (e instanceof TgError && e.code === 409) {
+        health.pollingFailure("telegram-conflict");
         console.error("[bot] 409 Conflict — другой экземпляр уже опрашивает этот токен");
         await sleep(30000);
         continue;
       }
       consecutiveErrors++;
+      health.pollingFailure("telegram-poll-failed");
       const delay = Math.min(30000, 2000 * consecutiveErrors);
       console.error(
         `[bot] ошибка polling (${consecutiveErrors}): ${(e as Error).message} — пауза ${delay} мс`,

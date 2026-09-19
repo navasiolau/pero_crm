@@ -80,6 +80,28 @@ async function request<T>(
 }
 
 export const crm = {
+  async health(): Promise<void> {
+    let response: Response;
+    try {
+      response = await fetch(`${config.crmBaseUrl}/api/v1`, {
+        headers: { authorization: `Bearer ${config.crmApiToken}` },
+        signal: AbortSignal.timeout(30000),
+      });
+    } catch {
+      throw new CrmError("CRM health check failed");
+    }
+    const result = (await response.json().catch(() => null)) as {
+      service?: string;
+      api?: string;
+    } | null;
+    if (
+      !response.ok ||
+      result?.service !== "PERO CRM" ||
+      result.api !== "v1"
+    ) {
+      throw new CrmError("CRM health check failed");
+    }
+  },
   register(username: string) {
     return request<{ ok: boolean }>("POST", "/register", { username });
   },
