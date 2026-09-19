@@ -9,7 +9,7 @@ import { requireAdmin } from "@/server/require-role";
 import { writeChangeLog } from "@/server/plugins/changelog";
 import { notifyPerson } from "@/server/notifications/notify";
 import { paySchemeLabels } from "@/lib/labels";
-import { roleLabels } from "@/lib/nav";
+import { roleComboLabel, isValidRolesCombination, normalizeRoles } from "@/lib/roles";
 
 const ROLES = ["ADMIN", "DIRECTOR", "MANAGER", "ENGINEER", "WORKER", "MOUNTER", "ACCOUNTANT"] as const;
 const PAY_SCHEMES = ["PIECE", "PERCENT_PROJECT", "PERCENT_TURNOVER", "NONE"] as const;
@@ -20,7 +20,7 @@ const userSchema = z.object({
   position: z.string().optional(),
   phone: z.string().optional(),
   telegram: z.string().optional(),
-  role: z.enum(ROLES),
+  roles: z.array(z.enum(ROLES)).min(1, "Выберите хотя бы одну роль"),
   payScheme: z.enum(PAY_SCHEMES),
   payPercent: z.number().min(0).max(100).nullable().optional(),
   active: z.boolean().default(true),
@@ -40,6 +40,14 @@ export async function createUser(
   if (!data.password || data.password.length < 8) {
     return { ok: false, error: "Пароль — минимум 8 символов" };
   }
+  // Комбинированные роли (§4): нормализация + ADMIN/DIRECTOR не сочетаются
+  const roles = normalizeRoles(data.roles);
+  if (!isValidRolesCombination(roles)) {
+    return {
+      ok: false,
+      error: "Роли «Администратор» и «Директор» не сочетаются с другими ролями",
+    };
+  }
   const exists = await prisma.user.findUnique({ where: { email: data.email } });
   if (exists) return { ok: false, error: "Email уже занят" };
 
@@ -50,7 +58,7 @@ export async function createUser(
       position: data.position || null,
       phone: data.phone || null,
       telegram: data.telegram || null,
-      role: data.role,
+      roles,
       payScheme: data.payScheme,
       payPercent: data.payPercent ?? null,
       active: data.active,
@@ -64,14 +72,14 @@ export async function createUser(
     entity: "user",
     entityId: user.id,
     action: "create",
-    newValue: { email: user.email, name: user.name, role: user.role },
+    newValue: { email: user.email, name: user.name, roles: user.roles },
   });
   // Уведомление человеку о создании его учётной записи (§6.1)
   await notifyPerson({
     userId: user.id,
     type: "user.accountChanged",
     title: "Для вас создана учётная запись",
-    body: `Роль: ${roleLabels[user.role]} · схема оплаты: ${paySchemeLabels[user.payScheme] ?? user.payScheme}`,
+    body: `Роли: ${roleComboLabel(user.roles)} · схема оплаты: ${paySchemeLabels[user.payScheme] ?? user.payScheme}`,
   });
   revalidatePath("/settings/users");
   return { ok: true };
@@ -98,6 +106,15 @@ export async function updateUser(
   });
   if (emailTaken) return { ok: false, error: "Email уже занят" };
 
+  // Комбинированные роли (§4): нормализация + ADMIN/DIRECTOR не сочетаются
+  const roles = normalizeRoles(data.roles);
+  if (!isValidRolesCombination(roles)) {
+    return {
+      ok: false,
+      error: "Роли «Администратор» и «Директор» не сочетаются с другими ролями",
+    };
+  }
+
   await prisma.user.update({
     where: { id: userId },
     data: {
@@ -106,7 +123,7 @@ export async function updateUser(
       position: data.position || null,
       phone: data.phone || null,
       telegram: data.telegram || null,
-      role: data.role,
+      roles,
       payScheme: data.payScheme,
       payPercent: data.payPercent ?? null,
       active: data.active,
@@ -125,13 +142,13 @@ export async function updateUser(
     oldValue: {
       email: before.email,
       name: before.name,
-      role: before.role,
+      roles: before.roles,
       active: before.active,
     },
     newValue: {
       email: data.email,
       name: data.name,
-      role: data.role,
+      roles: data.roles,
       active: data.active,
       passwordChanged: !!data.password,
     },
@@ -142,8 +159,8 @@ export async function updateUser(
   const changes: string[] = [];
   if (before.name !== data.name) changes.push(`ФИО: ${before.name} → ${data.name}`);
   if (before.email !== data.email) changes.push(`Email: ${before.email} → ${data.email}`);
-  if (before.role !== data.role)
-    changes.push(`Роль: ${roleLabels[before.role]} → ${roleLabels[data.role]}`);
+  if (before.roles.join(",") !== data.roles.join(","))
+    changes.push(`Роли: ${roleComboLabel(before.roles)} → ${roleComboLabel(roles)}`);
   if (before.payScheme !== data.payScheme)
     changes.push(
       `Схема оплаты: ${paySchemeLabels[before.payScheme] ?? before.payScheme} → ${paySchemeLabels[data.payScheme] ?? data.payScheme}`,

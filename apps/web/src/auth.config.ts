@@ -1,5 +1,7 @@
 import type { NextAuthConfig } from "next-auth";
 
+import { ADMIN_ROLES, FINANCE_ROLES, hasAnyRole } from "@/lib/roles";
+
 // Edge-safe конфигурация Auth.js: без prisma/argon2 (они подключаются в auth.ts).
 // Используется и middleware, и основным экземпляром NextAuth.
 export const authConfig = {
@@ -17,21 +19,16 @@ export const authConfig = {
       }
 
       const { pathname } = request.nextUrl;
-      const { role } = auth.user;
+      const roles = auth.user.roles ?? [];
       // Финансы — админ/директор/бухгалтер; журнал и настройки — только админ/директор
-      if (
-        pathname.startsWith("/finance") &&
-        role !== "ADMIN" &&
-        role !== "DIRECTOR" &&
-        role !== "ACCOUNTANT"
-      ) {
+      if (pathname.startsWith("/finance") && !hasAnyRole(roles, FINANCE_ROLES)) {
         return Response.redirect(new URL("/", request.nextUrl));
       }
       const adminOnlyPrefixes = ["/changelog", "/settings"];
       const isAdminOnly = adminOnlyPrefixes.some((prefix) =>
         pathname.startsWith(prefix),
       );
-      if (isAdminOnly && role !== "ADMIN" && role !== "DIRECTOR") {
+      if (isAdminOnly && !hasAnyRole(roles, ADMIN_ROLES)) {
         return Response.redirect(new URL("/", request.nextUrl));
       }
 
@@ -40,14 +37,16 @@ export const authConfig = {
     jwt({ token, user }) {
       if (user) {
         token.id = user.id;
-        token.role = user.role;
+        token.roles = user.roles;
       }
       return token;
     },
     session({ session, token }) {
       if (session.user) {
         session.user.id = token.id;
-        session.user.role = token.role;
+        // Фолбэк для живых JWT, выданных до перехода на роли[] (после деплоя
+        // пользователи не разлогиниваются; при следующем входе — новый формат)
+        session.user.roles = token.roles ?? (token.role ? [token.role] : []);
       }
       return session;
     },

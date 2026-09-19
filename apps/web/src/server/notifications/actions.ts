@@ -101,7 +101,7 @@ export async function getMyPreferences() {
   });
   const map = new Map(rows.map((r) => [r.type, r.enabled]));
   return {
-    prefs: receivableTypesFor(session.user.role).map((t) => ({
+    prefs: receivableTypesFor(session.user.roles).map((t) => ({
       id: t.id,
       label: t.label,
       enabled: map.get(t.id) ?? true,

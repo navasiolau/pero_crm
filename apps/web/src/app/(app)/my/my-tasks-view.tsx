@@ -42,14 +42,14 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { PhotoUploadButton } from "@/components/photo-upload-button";
 import { ActualTimeDialog } from "@/components/actual-time-dialog";
 import { cn } from "@/lib/utils";
+import { OFFICE_ROLES, hasAnyRole } from "@/lib/roles";
 import { saveViewPreference } from "@/server/preferences-actions";
 import { changeTaskStatus } from "@/server/tasks/actions";
 import { addManualTime, startTimer, stopTimer } from "@/server/time/actions";
 import type { TaskDetails } from "@/components/task-dialog";
 
-// Работнику и монтажнику ручной ввод времени закрыт (требование владельца) —
-// их время считается только таймером, который сам стартует при «В работе».
-const SHOP_FLOOR: Role[] = ["WORKER", "MOUNTER"];
+// Ручной ввод времени — только если есть офисная роль (комбинированные
+// роли, §4): чистый работник/монтажник вводит время только таймером.
 
 const KANBAN_COLUMNS: { id: TaskStatus; label: string }[] = [
   { id: "NEW", label: "Новая" },
@@ -108,7 +108,7 @@ export function MyTasksView({
   done: TaskDetails[];
   userName: string;
   timer: ActiveTimer | null;
-  role: Role;
+  role: Role[];
   initialView: "list" | "kanban";
 }) {
   const router = useRouter();
@@ -120,7 +120,9 @@ export function MyTasksView({
   const [manualMinutes, setManualMinutes] = useState("60");
   const [actualFor, setActualFor] = useState<TaskDetails | null>(null);
   const elapsed = useElapsed(timer?.startedAt ?? null);
-  const canManualTime = !SHOP_FLOOR.includes(role);
+  // Наследие: проп называется role, внутри — роли пользователя (§4)
+  const roles = role;
+  const canManualTime = hasAnyRole(roles, OFFICE_ROLES);
 
   // После router.refresh() подтягиваем свежие данные в локальное состояние
   useEffect(() => {

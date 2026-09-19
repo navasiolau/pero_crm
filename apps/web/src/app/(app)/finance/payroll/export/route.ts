@@ -1,4 +1,5 @@
 import { auth } from "@/auth";
+import { FINANCE_ROLES, hasAnyRole } from "@/lib/roles";
 import { paySchemeLabels } from "@/lib/labels";
 import {
   currentMonth,
@@ -11,7 +12,7 @@ import {
 // Разделитель «;» и BOM — чтобы русский Excel открывал корректно.
 export async function GET(request: Request) {
   const session = await auth();
-  if (!session?.user || !["ADMIN", "DIRECTOR", "ACCOUNTANT"].includes(session.user.role)) {
+  if (!session?.user || !hasAnyRole(session.user.roles, FINANCE_ROLES)) {
     return new Response("Недостаточно прав", { status: 403 });
   }
 

@@ -9,6 +9,13 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SlotErrorBoundary } from "@/components/plugins/slot-error-boundary";
 import { displayClientName } from "@/lib/labels";
+import {
+  FINANCE_ROLES,
+  MANAGER_ROLES,
+  OFFICE_ROLES,
+  hasAnyRole,
+  hasRole,
+} from "@/lib/roles";
 import { stageLabels, stageStyles } from "@/lib/stages";
 import { cn } from "@/lib/utils";
 import { prisma } from "@/lib/prisma";
@@ -43,17 +50,17 @@ export default async function ProjectPage({
   const session = await auth();
   if (!session?.user) redirect("/login");
   const { id } = await params;
-  const role = session.user.role;
+  const role = session.user.roles;
 
   const project = await getProjectFor(session.user.id, role, id);
   if (!project) notFound();
 
-  const canManage = ["ADMIN", "DIRECTOR", "MANAGER"].includes(role);
-  const canEditTech = canManage || role === "ENGINEER";
-  const showFinance = ["ADMIN", "DIRECTOR", "ACCOUNTANT"].includes(role);
-  const showAmount = showFinance || canManage || role === "ENGINEER";
+  const canManage = hasAnyRole(role, MANAGER_ROLES);
+  const canEditTech = canManage || hasRole(role, "ENGINEER");
+  const showFinance = hasAnyRole(role, FINANCE_ROLES);
+  const showAmount = showFinance || canManage || hasRole(role, "ENGINEER");
   // Склад (§12): вкладка «Материалы» — офисные роли (+ бухгалтер на просмотр)
-  const showMaterials = ["ADMIN", "DIRECTOR", "MANAGER", "ENGINEER", "ACCOUNTANT"].includes(role);
+  const showMaterials = hasAnyRole(role, OFFICE_ROLES);
 
   // Группировка файлов по этапам (плагин file-stages), если включён.
   const stageConfig = await getFileStageConfig();
@@ -132,16 +139,20 @@ export default async function ProjectPage({
   });
   const uploaderNames = new Map(authors.map((user) => [user.id, user.name]));
 
-  // Стоимость проекта = Σ цен изделий (в валюте проекта)
-  const totalPrice = project.products.reduce(
+  // Стоимость проекта = Σ цен изделий + доставка/выгрузка/монтаж (валюта проекта)
+  const productsTotal = project.products.reduce(
     (sum, product) => sum + Number(product.expectedPrice ?? 0),
     0,
   );
-  // Первоначальная цена проекта = Σ первоначальных цен изделий
-  const totalInitialPrice = project.products.reduce(
-    (sum, product) => sum + Number(product.initialPrice ?? 0),
-    0,
-  );
+  const totalPrice =
+    productsTotal +
+    Number(project.delivery ?? 0) +
+    Number(project.unloading ?? 0) +
+    Number(project.installation ?? 0);
+  // Первоначальная цена — первая цена КП клиенту (хранится на проекте;
+  // правят менеджмент в карточке и telegram-бот; бэкфилл — Σ по изделиям)
+  const initialPrice =
+    project.initialPrice === null ? null : Number(project.initialPrice);
   // Дата завершения — последний переход в «Завершён» из истории этапов
   const doneEntry = project.stageHistory.find((entry) => entry.toStage === "DONE");
   // Нехватка материалов — хотя бы по одному изделию (§12)
@@ -224,9 +235,18 @@ export default async function ProjectPage({
               stageChangedAt: project.stageChangedAt,
               currency: project.currency,
               address: project.address,
+              initialPrice:
+                project.initialPrice === null ? null : Number(project.initialPrice),
+              delivery:
+                project.delivery === null ? null : Number(project.delivery),
+              unloading:
+                project.unloading === null ? null : Number(project.unloading),
+              installation:
+                project.installation === null
+                  ? null
+                  : Number(project.installation),
               clientId: project.clientId,
               managerId: project.managerId,
-              engineerId: project.engineerId,
               createdAt: project.createdAt,
               refusalReason: project.refusalReason,
               refusalComment: project.refusalComment,
@@ -236,7 +256,8 @@ export default async function ProjectPage({
               client: project.client,
             }}
             totalPrice={totalPrice}
-            totalInitialPrice={totalInitialPrice}
+            productsTotal={productsTotal}
+            initialPrice={initialPrice}
             createdByName={
               project.createdById
                 ? (uploaderNames.get(project.createdById) ?? null)
@@ -247,7 +268,14 @@ export default async function ProjectPage({
             showAmount={showAmount}
             clients={clients.map((client) => ({ id: client.id, name: displayClientName(client) }))}
             managers={managers.map((manager) => ({ id: manager.id, name: manager.name }))}
-            engineers={engineers.map((engineer) => ({ id: engineer.id, name: engineer.name }))}
+            productEngineers={project.products
+              .map((product) => product.engineer)
+              .filter(
+                (engineer, index, all) =>
+                  engineer &&
+                  all.findIndex((item) => item?.id === engineer.id) === index,
+              )
+              .map((engineer) => ({ id: engineer!.id, name: engineer!.name }))}
           />
         </TabsContent>
 
@@ -262,9 +290,14 @@ export default async function ProjectPage({
               status: product.status,
               statusChangedAt: product.statusChangedAt.toISOString(),
               expectedPrice: product.expectedPrice?.toString() ?? null,
+              engineerName: product.engineer?.name ?? null,
             }))}
             canManage={canManage}
             showAmount={showAmount}
+            engineerOptions={engineers.map((engineer) => ({
+              value: engineer.id,
+              label: engineer.name,
+            }))}
           />
         </TabsContent>
 

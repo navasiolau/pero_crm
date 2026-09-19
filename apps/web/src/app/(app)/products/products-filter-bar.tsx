@@ -27,9 +27,11 @@ import {
 export function ProductsFilterBar({
   projectOptions,
   clientOptions,
+  engineerOptions,
 }: {
   projectOptions: { value: string; label: string; hint?: string }[];
   clientOptions: { value: string; label: string; hint?: string }[];
+  engineerOptions: { value: string; label: string; hint?: string }[];
 }) {
   const { get, set, pending } = useListParams();
   const urlQ = get("q");
@@ -58,9 +60,10 @@ export function ProductsFilterBar({
     : "") as ProductStatus;
   const projectId = get("project");
   const clientId = get("client");
+  const engineerId = get("engineer");
   const activeOnly = get("active") !== "0";
   const hasFilters =
-    Boolean(urlQ || status || projectId || clientId) || !activeOnly;
+    Boolean(urlQ || status || projectId || clientId || engineerId) || !activeOnly;
 
   return (
     <div
@@ -118,6 +121,15 @@ export function ProductsFilterBar({
           allowClear
         />
       </div>
+      <div className="w-44">
+        <SearchableSelect
+          options={engineerOptions}
+          value={engineerId}
+          onChange={(value) => set({ engineer: value || null, page: null })}
+          placeholder="Все инженеры"
+          allowClear
+        />
+      </div>
 
       <div className="flex items-center gap-2 pb-1">
         <Checkbox
@@ -146,6 +158,7 @@ export function ProductsFilterBar({
               status: null,
               project: null,
               client: null,
+              engineer: null,
               active: null,
               sort: null,
               dir: null,

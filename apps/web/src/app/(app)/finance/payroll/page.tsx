@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { auth } from "@/auth";
+import { FINANCE_ROLES, hasAnyRole } from "@/lib/roles";
 import {
   currentMonth,
   getCurrentMonthEstimates,
@@ -27,7 +28,7 @@ export default async function FinancePayrollPage({
 }) {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  if (!["ADMIN", "DIRECTOR", "ACCOUNTANT"].includes(session.user.role)) redirect("/");
+  if (!hasAnyRole(session.user.roles, FINANCE_ROLES)) redirect("/");
 
   const { month: param } = await searchParams;
   const month = isValidMonth(param) ? param : currentMonth();

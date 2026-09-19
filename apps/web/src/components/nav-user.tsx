@@ -1,9 +1,10 @@
 "use client"
 
-import type { Role } from "@prisma/client"
-import { ChevronsUpDownIcon, LogOutIcon } from "lucide-react"
+import { useState } from "react"
+import { ChevronsUpDownIcon, LogOutIcon, SendIcon } from "lucide-react"
 
 import { logout } from "@/app/(app)/actions"
+import { TelegramLinkDialog } from "@/components/telegram-link-dialog"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -16,12 +17,13 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { roleLabels } from "@/lib/nav"
+import type { Role } from "@prisma/client"
+import { roleComboLabel } from "@/lib/roles"
 
 export type ShellUser = {
   name: string
   email: string
-  role: Role
+  roles: Role[]
 }
 
 function initialsOf(name: string): string {
@@ -36,7 +38,10 @@ function initialsOf(name: string): string {
 }
 
 export function NavUser({ user }: { user: ShellUser }) {
+  const [telegramOpen, setTelegramOpen] = useState(false);
+
   return (
+    <>
     <DropdownMenu>
       <DropdownMenuTrigger
         render={
@@ -64,17 +69,23 @@ export function NavUser({ user }: { user: ShellUser }) {
               </span>
               <span className="text-xs">{user.email}</span>
               <span>
-                <Badge variant="secondary">{roleLabels[user.role]}</Badge>
+                <Badge variant="secondary">{roleComboLabel(user.roles)}</Badge>
               </span>
             </div>
           </DropdownMenuLabel>
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={() => setTelegramOpen(true)}>
+          <SendIcon />
+          Telegram
+        </DropdownMenuItem>
         <DropdownMenuItem variant="destructive" onClick={() => logout()}>
           <LogOutIcon />
           Выйти
         </DropdownMenuItem>
       </DropdownMenuContent>
-    </DropdownMenu>
+      </DropdownMenu>
+      <TelegramLinkDialog open={telegramOpen} onOpenChange={setTelegramOpen} />
+    </>
   )
 }

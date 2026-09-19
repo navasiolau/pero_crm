@@ -1,0 +1,14 @@
+# Telegram-бот PERO CRM — изолированный контейнер (LXC tgbot).
+# Образ собирается CI (ghcr.io/navasiolau/pero_telegram_bot:<ветка>),
+# контейнер сам тянет watcher-кроном — та же pull-модель, что у CRM.
+services:
+  bot:
+    image: ghcr.io/navasiolau/pero_telegram_bot:${BOT_IMAGE_TAG:-main}
+    container_name: tgbot
+    env_file: .env
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

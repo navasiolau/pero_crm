@@ -26,6 +26,7 @@ export interface ProductRow {
   projectTitle: string;
   clientId: string;
   clientName: string;
+  engineerName: string | null;
 }
 
 // Раздел «Изделия»: канбан (по умолчанию) / таблица, фильтры в URL —
@@ -40,6 +41,7 @@ export function ProductsView({
   showAmount,
   projectOptions,
   clientOptions,
+  engineerOptions,
 }: {
   view: "kanban" | "table";
   // Канбан — все отфильтрованные изделия; таблица — одна страница
@@ -51,6 +53,7 @@ export function ProductsView({
   showAmount: boolean;
   projectOptions: { value: string; label: string; hint?: string }[];
   clientOptions: { value: string; label: string; hint?: string }[];
+  engineerOptions: { value: string; label: string; hint?: string }[];
 }) {
   const { set } = useListParams();
   const [, startTransition] = useTransition();
@@ -93,6 +96,7 @@ export function ProductsView({
       <ProductsFilterBar
         projectOptions={projectOptions}
         clientOptions={clientOptions}
+        engineerOptions={engineerOptions}
       />
 
       {view === "kanban" ? (

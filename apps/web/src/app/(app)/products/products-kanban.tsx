@@ -65,6 +65,11 @@ function ProductCardView({
         <div className="text-xs text-muted-foreground">
           Проект {product.projectNumber} · {product.clientName}
         </div>
+        {product.engineerName ? (
+          <div className="text-xs text-muted-foreground">
+            Инженер: {product.engineerName}
+          </div>
+        ) : null}
         {showAmount ? (
           <div className="text-xs text-muted-foreground">
             {formatAmount(product.expectedPrice, product.currency)}

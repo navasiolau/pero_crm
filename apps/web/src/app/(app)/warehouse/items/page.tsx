@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { auth } from "@/auth";
+import { MANAGER_ROLES, OFFICE_ROLES, hasAnyRole } from "@/lib/roles";
 import { listCategories, listMaterials } from "@/server/warehouse/queries";
 
 import { ItemsView } from "./items-view";
@@ -12,8 +13,8 @@ export const dynamic = "force-dynamic";
 export default async function WarehouseItemsPage() {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  const role = session.user.role;
-  if (!["ADMIN", "DIRECTOR", "MANAGER", "ENGINEER", "ACCOUNTANT"].includes(role)) {
+  const role = session.user.roles;
+  if (!hasAnyRole(role, OFFICE_ROLES)) {
     redirect("/");
   }
 
@@ -26,8 +27,8 @@ export default async function WarehouseItemsPage() {
     <ItemsView
       rows={rows}
       categories={categories}
-      canManage={["ADMIN", "DIRECTOR", "MANAGER"].includes(role)}
-      showMoney={["ADMIN", "DIRECTOR"].includes(role)}
+      canManage={hasAnyRole(role, MANAGER_ROLES)}
+      showMoney={hasAnyRole(role, ["ADMIN", "DIRECTOR"])}
     />
   );
 }

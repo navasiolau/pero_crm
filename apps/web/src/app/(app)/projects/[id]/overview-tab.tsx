@@ -5,6 +5,7 @@ import Link from "next/link";
 import { toast } from "sonner";
 import type { ProjectStage } from "@prisma/client";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -34,9 +35,12 @@ export interface OverviewProject {
   stageChangedAt: Date;
   currency: string;
   address: string | null;
+  initialPrice: number | null;
+  delivery: number | null;
+  unloading: number | null;
+  installation: number | null;
   clientId: string;
   managerId: string | null;
-  engineerId: string | null;
   createdAt: Date;
   refusalReason: string | null;
   refusalComment: string | null;
@@ -46,46 +50,59 @@ export interface OverviewProject {
   client: { id: string; name: string; lastName: string | null; middleName: string | null; phone: string };
 }
 
-// Вкладка «Общее» карточки проекта: заказ (клиент, менеджер, инженер,
-// адрес, валюта) + служебные данные. Цены — на изделиях (вкладка
-// «Изделия»), сумма изделий показана справочно.
+// Вкладка «Общее» карточки проекта: заказ (клиент, менеджер, адрес, валюта)
+// + инженеры (по изделиям — read-only, назначаются в изделиях) + служебные
+// данные. Цены — на изделиях (вкладка «Изделия»); сумма проекта = изделия +
+// доставка/выгрузка/монтаж.
 export function OverviewTab({
   project,
   totalPrice,
-  totalInitialPrice,
+  productsTotal,
+  initialPrice,
   createdByName,
   doneAt,
   canManage,
   showAmount,
   clients,
   managers,
-  engineers,
+  productEngineers,
 }: {
   project: OverviewProject;
   totalPrice: number;
-  totalInitialPrice: number;
+  productsTotal: number;
+  initialPrice: number | null;
   createdByName: string | null;
   doneAt: string | null; // дата перехода в «Завершён» из истории этапов
   canManage: boolean;
   showAmount: boolean;
   clients: SelectOption[];
   managers: SelectOption[];
-  engineers: SelectOption[];
+  productEngineers: SelectOption[];
 }) {
   const [pending, startTransition] = useTransition();
   const [form, setForm] = useState({
     title: project.title,
     address: project.address ?? "",
     currency: project.currency,
+    initialPrice: initialPrice === null ? "" : String(initialPrice),
+    delivery: project.delivery === null ? "" : String(project.delivery),
+    unloading: project.unloading === null ? "" : String(project.unloading),
+    installation:
+      project.installation === null ? "" : String(project.installation),
     clientId: project.clientId,
     managerId: project.managerId ?? "",
-    engineerId: project.engineerId ?? "",
   });
 
   function set(key: keyof typeof form) {
     return (event: { target: { value: string } }) =>
       setForm((prev) => ({ ...prev, [key]: event.target.value }));
   }
+
+  // Есть ли хотя бы одна надбавка (доставка/выгрузка/монтаж) — для разбивки суммы
+  const hasExtras =
+    project.delivery !== null ||
+    project.unloading !== null ||
+    project.installation !== null;
 
   const ro = !canManage; // read-only для не-менеджеров
 
@@ -141,23 +158,21 @@ export function OverviewTab({
               />
             </div>
             <div className="flex flex-col gap-1.5">
-              <Label>Инженер</Label>
-              <SearchableSelect
-                options={engineers.map((engineer) => ({
-                  value: engineer.id,
-                  label: engineer.name,
-                }))}
-                value={form.engineerId}
-                onChange={(value) =>
-                  setForm((prev) => ({ ...prev, engineerId: value }))
-                }
-                placeholder="не назначен"
-                searchPlaceholder="Поиск инженера…"
-                allowClear
-                disabled={ro}
-              />
+              <Label>Инженеры (по изделиям)</Label>
+              <div className="flex min-h-9 flex-wrap items-center gap-1.5 rounded-md border border-input px-3 py-2 text-sm">
+                {productEngineers.length > 0 ? (
+                  productEngineers.map((engineer) => (
+                    <Badge key={engineer.id} variant="secondary">
+                      {engineer.name}
+                    </Badge>
+                  ))
+                ) : (
+                  <span className="text-muted-foreground">—</span>
+                )}
+              </div>
               <p className="text-xs text-muted-foreground">
-                На инженера начисляется % от суммы изделий при переходе «В работе»
+                Инженер назначается на конкретное изделие (вкладка «Изделия»);
+                на него начисляется % от стоимости его изделий при переходе «В работе»
               </p>
             </div>
           </div>
@@ -188,20 +203,96 @@ export function OverviewTab({
               </Select>
             </div>
           </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="initialPrice">Первоначальная цена (КП)</Label>
+            <Input
+              id="initialPrice"
+              inputMode="decimal"
+              value={form.initialPrice}
+              onChange={set("initialPrice")}
+              readOnly={ro}
+            />
+            <p className="text-xs text-muted-foreground">
+              Цена КП клиенту до скидки; правится также через Telegram-бот
+            </p>
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="delivery">Доставка</Label>
+              <Input
+                id="delivery"
+                inputMode="decimal"
+                value={form.delivery}
+                onChange={set("delivery")}
+                readOnly={ro}
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="unloading">Выгрузка</Label>
+              <Input
+                id="unloading"
+                inputMode="decimal"
+                value={form.unloading}
+                onChange={set("unloading")}
+                readOnly={ro}
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="installation">Монтаж</Label>
+              <Input
+                id="installation"
+                inputMode="decimal"
+                value={form.installation}
+                onChange={set("installation")}
+                readOnly={ro}
+              />
+            </div>
+          </div>
+          <p className="-mt-1 text-xs text-muted-foreground">
+            Прибавляются к сумме изделий в стоимости проекта
+          </p>
           {canManage ? (
             <div>
               <Button
                 disabled={pending}
                 onClick={() =>
-                  startTransition(async () => {
-                    const result = await updateProject(project.id, {
-                      title: form.title.trim(),
-                      address: form.address.trim() || null,
-                      currency: form.currency,
-                      clientId: form.clientId,
-                      managerId: form.managerId || null,
-                      engineerId: form.engineerId || null,
-                    });
+              startTransition(async () => {
+                const parsedInitialPrice =
+                  form.initialPrice.trim() === ""
+                    ? null
+                    : Number(form.initialPrice);
+                if (
+                  parsedInitialPrice !== null &&
+                  (Number.isNaN(parsedInitialPrice) || parsedInitialPrice < 0)
+                ) {
+                  toast.error("Неверная первоначальная цена");
+                  return;
+                }
+                const extras: Array<[string, string, string]> = [
+                  ["delivery", form.delivery, "Доставка"],
+                  ["unloading", form.unloading, "Выгрузка"],
+                  ["installation", form.installation, "Монтаж"],
+                ];
+                const parsedExtras: Record<string, number | null> = {};
+                for (const [key, raw, label] of extras) {
+                  const value = raw.trim() === "" ? null : Number(raw);
+                  if (value !== null && (Number.isNaN(value) || value < 0)) {
+                    toast.error(`Неверное значение: ${label}`);
+                    return;
+                  }
+                  parsedExtras[key] = value;
+                }
+                const result = await updateProject(project.id, {
+                  title: form.title.trim(),
+                  address: form.address.trim() || null,
+                  currency: form.currency,
+                  initialPrice: parsedInitialPrice,
+                  delivery: parsedExtras.delivery,
+                  unloading: parsedExtras.unloading,
+                  installation: parsedExtras.installation,
+                  clientId: form.clientId,
+                  managerId: form.managerId || null,
+                });
                     if (result.ok) {
                       toast.success("Сохранено");
                     } else {
@@ -241,21 +332,52 @@ export function OverviewTab({
             </div>
           ) : null}
           {showAmount ? (
-            <div>
-              <span className="text-muted-foreground">Сумма изделий:</span>{" "}
-              {formatAmount(totalPrice > 0 ? String(totalPrice) : null, project.currency)}
-            </div>
+            hasExtras ? (
+              <div className="flex flex-col gap-1">
+                <div>
+                  <span className="text-muted-foreground">Изделия:</span>{" "}
+                  {formatAmount(productsTotal > 0 ? String(productsTotal) : null, project.currency)}
+                </div>
+                {project.delivery !== null ? (
+                  <div>
+                    <span className="text-muted-foreground">Доставка:</span>{" "}
+                    {formatAmount(String(project.delivery), project.currency)}
+                  </div>
+                ) : null}
+                {project.unloading !== null ? (
+                  <div>
+                    <span className="text-muted-foreground">Выгрузка:</span>{" "}
+                    {formatAmount(String(project.unloading), project.currency)}
+                  </div>
+                ) : null}
+                {project.installation !== null ? (
+                  <div>
+                    <span className="text-muted-foreground">Монтаж:</span>{" "}
+                    {formatAmount(String(project.installation), project.currency)}
+                  </div>
+                ) : null}
+                <div className="font-medium">
+                  <span className="text-muted-foreground">Итого:</span>{" "}
+                  {formatAmount(totalPrice > 0 ? String(totalPrice) : null, project.currency)}
+                </div>
+              </div>
+            ) : (
+              <div>
+                <span className="text-muted-foreground">Сумма проекта:</span>{" "}
+                {formatAmount(totalPrice > 0 ? String(totalPrice) : null, project.currency)}
+              </div>
+            )
           ) : null}
           {showAmount ? (
             <div>
               <span className="text-muted-foreground">Первоначальная цена:</span>{" "}
               {formatAmount(
-                totalInitialPrice > 0 ? String(totalInitialPrice) : null,
+                initialPrice !== null ? String(initialPrice) : null,
                 project.currency,
               )}
               <span className="text-xs text-muted-foreground">
                 {" "}
-                · сумма по изделиям
+                · цена КП клиенту
               </span>
             </div>
           ) : null}

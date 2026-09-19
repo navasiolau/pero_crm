@@ -10,9 +10,10 @@ import { formatAmount } from "@/lib/format";
 import { displayClientName } from "@/lib/labels";
 import { productStatusLabels } from "@/lib/product-statuses";
 import { prisma } from "@/lib/prisma";
+import { MANAGER_ROLES, OFFICE_ROLES, hasAnyRole, hasRole } from "@/lib/roles";
 import { getFileStageConfig } from "@/server/files/stage-config";
 import { getProductFor } from "@/server/products/queries";
-import { listWorkers } from "@/server/projects/queries";
+import { listEngineers, listWorkers } from "@/server/projects/queries";
 import { mapTaskDetails } from "@/server/tasks/queries";
 import { getProjectMaterials, listMaterialOptions } from "@/server/warehouse/queries";
 
@@ -35,29 +36,31 @@ export default async function ProductPage({
   const session = await auth();
   if (!session?.user) redirect("/login");
   const { id } = await params;
-  const role = session.user.role;
+  const role = session.user.roles;
 
   const product = await getProductFor(session.user.id, role, id);
   if (!product) notFound();
 
-  const canManage = ["ADMIN", "DIRECTOR", "MANAGER"].includes(role);
-  const canEditTech = canManage || role === "ENGINEER";
-  const showAmount = ["ADMIN", "DIRECTOR", "MANAGER", "ENGINEER", "ACCOUNTANT"].includes(role);
-  const showMaterials = ["ADMIN", "DIRECTOR", "MANAGER", "ENGINEER", "ACCOUNTANT"].includes(role);
-  const showMoney = ["ADMIN", "DIRECTOR"].includes(role);
+  const canManage = hasAnyRole(role, MANAGER_ROLES);
+  const canEditTech = canManage || hasRole(role, "ENGINEER");
+  const showAmount = hasAnyRole(role, OFFICE_ROLES);
+  const showMaterials = hasAnyRole(role, OFFICE_ROLES);
+  const showMoney = hasAnyRole(role, ["ADMIN", "DIRECTOR"]);
 
   // Группировка файлов по этапам (плагин file-stages), если включён.
   const stageConfig = await getFileStageConfig();
 
-  const [workers, priceItems, materialsData, materialOptions] = await Promise.all([
-    listWorkers(),
-    prisma.priceItem.findMany({
-      where: { active: true },
-      orderBy: { name: "asc" },
-    }),
-    showMaterials ? getProjectMaterials(product.id) : Promise.resolve(null),
-    showMaterials && canManage ? listMaterialOptions() : Promise.resolve([]),
-  ]);
+  const [workers, engineers, priceItems, materialsData, materialOptions] =
+    await Promise.all([
+      listWorkers(),
+      listEngineers(),
+      prisma.priceItem.findMany({
+        where: { active: true },
+        orderBy: { name: "asc" },
+      }),
+      showMaterials ? getProjectMaterials(product.id) : Promise.resolve(null),
+      showMaterials && canManage ? listMaterialOptions() : Promise.resolve([]),
+    ]);
 
   const authorIds = [
     ...new Set(
@@ -97,7 +100,12 @@ export default async function ProductPage({
             initialPrice: product.initialPrice?.toString() ?? null,
             description: product.description,
             projectId: product.project.id,
+            engineerId: product.engineerId,
           }}
+          engineerOptions={engineers.map((engineer) => ({
+            value: engineer.id,
+            label: engineer.name,
+          }))}
           currency={product.project.currency}
           canManage={canManage}
           canEditTech={canEditTech}
@@ -147,6 +155,10 @@ export default async function ProductPage({
             ) : (
               <div>—</div>
             )}
+          </div>
+          <div>
+            <div className="text-muted-foreground">Инженер</div>
+            <div>{product.engineer?.name ?? "—"}</div>
           </div>
           <div>
             <div className="text-muted-foreground">Статус</div>

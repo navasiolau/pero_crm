@@ -7,8 +7,8 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { writeChangeLog } from "@/server/plugins/changelog";
 import { notifyOrg } from "@/server/notifications/notify";
+import { OFFICE_ROLES, hasAnyRole } from "@/lib/roles";
 
-const ALLOWED = ["ADMIN", "DIRECTOR", "MANAGER", "ENGINEER", "ACCOUNTANT"];
 
 const schema = z.object({
   projectId: z.string(),
@@ -21,7 +21,7 @@ export async function addCommunication(
 ): Promise<{ ok: boolean; error?: string }> {
   const session = await auth();
   if (!session?.user) throw new Error("Не авторизован");
-  if (!ALLOWED.includes(session.user.role)) throw new Error("Недостаточно прав");
+  if (!hasAnyRole(session.user.roles, OFFICE_ROLES)) throw new Error("Недостаточно прав");
   const parsed = schema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Ошибка данных" };

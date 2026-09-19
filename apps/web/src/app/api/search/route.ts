@@ -3,8 +3,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { displayClientName } from "@/lib/labels";
-
-const OFFICE = ["ADMIN", "DIRECTOR", "MANAGER", "ENGINEER", "ACCOUNTANT"];
+import { OFFICE_ROLES, hasAnyRole } from "@/lib/roles";
 
 // GET /api/search?q=… — глобальный поиск (omnisearch): проекты, изделия,
 // задачи, клиенты. Видимость как в разделах (§4): работник/монтажник —
@@ -14,8 +13,7 @@ export async function GET(request: Request) {
   if (!session?.user) {
     return NextResponse.json({ error: "Не авторизован" }, { status: 401 });
   }
-  const role = session.user.role;
-  const office = OFFICE.includes(role);
+  const office = hasAnyRole(session.user.roles, OFFICE_ROLES);
 
   const q = new URL(request.url).searchParams.get("q")?.trim() ?? "";
   if (q.length < 2) {

@@ -2,13 +2,13 @@ import type { Prisma, ProductStatus, Role } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
 import { PRODUCT_STATUSES } from "@/lib/product-statuses";
-import { OFFICE_ROLES } from "@/server/projects/queries";
+import { OFFICE_ROLES, hasAnyRole } from "@/lib/roles";
 import { taskDetailsInclude } from "@/server/tasks/queries";
 
 // Видимость изделий = видимость родительских проектов (§4):
 // офисные роли — все; работник/монтажник — изделия проектов со своими задачами.
-function productVisibilityFilter(userId: string, role: Role) {
-  if (OFFICE_ROLES.includes(role)) return {};
+function productVisibilityFilter(userId: string, roles: Role[]) {
+  if (hasAnyRole(roles, OFFICE_ROLES)) return {};
   return { project: { tasks: { some: { assigneeId: userId } } } };
 }
 
@@ -20,6 +20,8 @@ export interface ProductListFilters {
   status?: ProductStatus;
   projectId?: string;
   clientId?: string;
+  // Инженер проекта изделия (по аналогии с фильтром «Проекты»)
+  engineerId?: string;
   // «Только незавершённые» — по умолчанию включена (скрывает DONE)
   activeOnly: boolean;
   sort?: ProductSortField;
@@ -56,10 +58,10 @@ const PRODUCT_SORT_MAP: Record<
 
 function productWhere(
   userId: string,
-  role: Role,
+  roles: Role[],
   filters: ProductListFilters,
 ): Prisma.ProductWhereInput {
-  const visibility = productVisibilityFilter(userId, role);
+  const visibility = productVisibilityFilter(userId, roles);
   const where: Prisma.ProductWhereInput = { ...visibility };
   // Условие по проекту: фильтр видимости (у работника — по задачам)
   // и фильтр по клиенту объединяются в одном объекте project
@@ -69,6 +71,8 @@ function productWhere(
       : {};
   if (filters.clientId) projectCondition.clientId = filters.clientId;
   if (Object.keys(projectCondition).length > 0) where.project = projectCondition;
+  // Инженер — на самом изделии (§10, решение владельца 09.2026)
+  if (filters.engineerId) where.engineerId = filters.engineerId;
   const statusConditions: Prisma.ProductWhereInput[] = [];
   if (filters.activeOnly) {
     statusConditions.push({ status: { not: "DONE" } });
@@ -102,11 +106,11 @@ function productWhere(
 
 export async function listProducts(
   userId: string,
-  role: Role,
+  roles: Role[],
   filters: ProductListFilters,
   paging?: { page: number; pageSize: number },
 ): Promise<{ rows: Awaited<ReturnType<typeof fetchProductRows>>; total: number }> {
-  const where = productWhere(userId, role, filters);
+  const where = productWhere(userId, roles, filters);
   const sortField = filters.sort && filters.sort in PRODUCT_SORT_MAP ? filters.sort : undefined;
   const orderBy =
     sortField !== undefined
@@ -137,6 +141,7 @@ async function fetchProductRows(
   return prisma.product.findMany({
     where,
     include: {
+      engineer: { select: { id: true, name: true } },
       project: {
         select: {
           id: true,
@@ -155,9 +160,9 @@ async function fetchProductRows(
 
 // Опции фильтров «Проект» и «Клиент»: пары, встречающиеся среди видимых
 // изделий (чтобы не было пустых значений), slim — без лишних полей.
-export async function listProductFilterOptions(userId: string, role: Role) {
+export async function listProductFilterOptions(userId: string, roles: Role[]) {
   const products = await prisma.product.findMany({
-    where: productVisibilityFilter(userId, role),
+    where: productVisibilityFilter(userId, roles),
     select: {
       project: {
         select: {
@@ -207,6 +212,7 @@ export function parseProductListParams(sp: Record<string, string | string[] | un
       status,
       projectId: get("project") || undefined,
       clientId: get("client") || undefined,
+      engineerId: get("engineer") || undefined,
       // «Только незавершённые» включена по умолчанию (active=0 — снята)
       activeOnly: get("active") !== "0",
       sort,
@@ -228,13 +234,13 @@ export async function listProductOptions(projectId: string) {
 
 export async function getProductFor(
   userId: string,
-  role: Role,
+  roles: Role[],
   key: string,
 ) {
   // Адрес карточки — /products/<номер>; допускаем и внутренний id
   const product = await prisma.product.findFirst({
     where: {
-      ...productVisibilityFilter(userId, role),
+      ...productVisibilityFilter(userId, roles),
       OR: [{ number: key }, { id: key }],
     },
     include: {
@@ -258,6 +264,7 @@ export async function getProductFor(
         },
       },
       surveyor: { select: { id: true, name: true, position: true, phone: true } },
+      engineer: { select: { id: true, name: true, position: true, phone: true } },
       sketchFile: { select: { id: true, fileName: true, mimeType: true, size: true } },
       tasks: {
         include: taskDetailsInclude,

@@ -2,7 +2,9 @@ import { redirect } from "next/navigation";
 
 import { auth } from "@/auth";
 import { displayClientName } from "@/lib/labels";
+import { MANAGER_ROLES, OFFICE_ROLES, hasAnyRole } from "@/lib/roles";
 import { getUserPreference } from "@/server/preferences";
+import { listEngineers } from "@/server/projects/queries";
 import {
   listProductFilterOptions,
   listProducts,
@@ -23,7 +25,7 @@ export default async function ProductsPage({
 }) {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  const role = session.user.role;
+  const role = session.user.roles;
 
   const params = await searchParams;
   const { filters, page, pageSize } = parseProductListParams(params);
@@ -37,7 +39,7 @@ export default async function ProductsPage({
         ? "table"
         : "kanban";
 
-  const [result, options] = await Promise.all([
+  const [result, options, engineers] = await Promise.all([
     listProducts(
       session.user.id,
       role,
@@ -45,6 +47,7 @@ export default async function ProductsPage({
       view === "table" ? { page, pageSize } : undefined,
     ),
     listProductFilterOptions(session.user.id, role),
+    listEngineers(),
   ]);
 
   return (
@@ -64,12 +67,17 @@ export default async function ProductsPage({
         projectTitle: product.project.title,
         clientId: product.project.client.id,
         clientName: displayClientName(product.project.client),
+        engineerName: product.engineer?.name ?? null,
       }))}
       total={result.total}
       page={page}
       pageSize={pageSize}
-      canManage={["ADMIN", "DIRECTOR", "MANAGER"].includes(role)}
-      showAmount={["ADMIN", "DIRECTOR", "MANAGER", "ENGINEER", "ACCOUNTANT"].includes(role)}
+      canManage={hasAnyRole(role, MANAGER_ROLES)}
+      showAmount={hasAnyRole(role, OFFICE_ROLES)}
+      engineerOptions={engineers.map((engineer) => ({
+        value: engineer.id,
+        label: engineer.name,
+      }))}
       projectOptions={options.projects.map((project) => ({
         value: project.id,
         label: project.number,

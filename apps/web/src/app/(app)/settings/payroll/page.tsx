@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { auth } from "@/auth";
+import { ADMIN_ROLES, hasAnyRole } from "@/lib/roles";
 import { getPayrollCurrency } from "@/server/payroll/queries";
 
 import { PayrollSettingsForm } from "./payroll-settings-form";
@@ -12,7 +13,7 @@ export const dynamic = "force-dynamic";
 export default async function PayrollSettingsPage() {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  if (!["ADMIN", "DIRECTOR"].includes(session.user.role)) redirect("/");
+  if (!hasAnyRole(session.user.roles, ADMIN_ROLES)) redirect("/");
 
   const currency = await getPayrollCurrency();
   return <PayrollSettingsForm currency={currency} />;

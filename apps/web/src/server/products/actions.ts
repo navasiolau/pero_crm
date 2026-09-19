@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import type { ProductStatus, Role } from "@prisma/client";
+import type { ProductStatus } from "@prisma/client";
 import { z } from "zod";
 
 import { auth } from "@/auth";
@@ -11,7 +11,7 @@ import { writeChangeLog } from "@/server/plugins/changelog";
 import { emitDomainEvent } from "@/server/plugins/events";
 import { notifyOrg } from "@/server/notifications/notify";
 
-import { MANAGER_ROLES } from "@/server/projects/queries";
+import { MANAGER_ROLES, hasAnyRole, hasRole } from "@/lib/roles";
 import { revalidateProductPaths } from "@/server/products/revalidate";
 
 async function requireUser() {
@@ -33,6 +33,8 @@ const createSchema = z.object({
   expectedPrice: z.number().nonnegative("Цена не может быть отрицательной").optional(),
   initialPrice: z.number().nonnegative("Первоначальная цена не может быть отрицательной").optional(),
   description: z.string().optional(),
+  // Инженер изделия — ответственен за конкретное изделие (§10)
+  engineerId: z.string().optional(),
 });
 
 // Номер изделия: «<номер проекта>.<N>» (точка — единый стиль с legacy),
@@ -59,7 +61,7 @@ export async function createProduct(
   input: z.input<typeof createSchema>,
 ): Promise<{ ok: boolean; id?: string; error?: string }> {
   const session = await requireUser();
-  if (!MANAGER_ROLES.includes(session.user.role)) {
+  if (!hasAnyRole(session.user.roles, MANAGER_ROLES)) {
     throw new Error("Недостаточно прав");
   }
   const parsed = createSchema.safeParse(input);
@@ -86,6 +88,7 @@ export async function createProduct(
       expectedPrice: data.expectedPrice,
       initialPrice: data.initialPrice,
       description: data.description?.trim() || null,
+      engineerId: data.engineerId || null,
       createdById: session.user.id,
       statusHistory: {
         create: { toStatus: "DESIGN", changedById: session.user.id },
@@ -117,6 +120,7 @@ const updateSchema = z.object({
     .nullable()
     .optional(),
   description: z.string().nullable().optional(),
+  engineerId: z.string().nullable().optional(),
 });
 
 // Редактирование изделия (§4): полностью — админ/директор/менеджер;
@@ -126,8 +130,9 @@ export async function updateProduct(
   input: z.infer<typeof updateSchema>,
 ): Promise<{ ok: boolean; error?: string }> {
   const session = await requireUser();
-  const role: Role = session.user.role;
-  if (![...MANAGER_ROLES, "ENGINEER" as Role].includes(role)) {
+  const roles = session.user.roles;
+  // Право на правку изделия: менеджмент или инженер (§4)
+  if (!hasAnyRole(roles, [...MANAGER_ROLES, "ENGINEER"])) {
     throw new Error("Недостаточно прав");
   }
   const parsed = updateSchema.safeParse(input);
@@ -136,7 +141,9 @@ export async function updateProduct(
   }
   const data = parsed.data;
 
-  if (role === "ENGINEER") {
+  // Приоритет ролей: при комбинации менеджерских ролей с инженером права
+  // старше — урезанное «только тех. блок» действует для чистого инженера
+  if (hasRole(roles, "ENGINEER") && !hasAnyRole(roles, MANAGER_ROLES)) {
     const keys = Object.keys(data);
     if (keys.some((key) => key !== "description")) {
       return { ok: false, error: "Инженер правит только технический блок" };
@@ -172,7 +179,7 @@ export async function changeProductStatus(
   comment?: string,
 ): Promise<{ ok: boolean; error?: string }> {
   const session = await requireUser();
-  if (!MANAGER_ROLES.includes(session.user.role)) {
+  if (!hasAnyRole(session.user.roles, MANAGER_ROLES)) {
     throw new Error("Недостаточно прав");
   }
 
@@ -231,7 +238,7 @@ export async function deleteProduct(
   productId: string,
 ): Promise<{ ok: boolean; error?: string }> {
   const session = await requireUser();
-  if (!MANAGER_ROLES.includes(session.user.role)) {
+  if (!hasAnyRole(session.user.roles, MANAGER_ROLES)) {
     throw new Error("Недостаточно прав");
   }
   const product = await prisma.product.findUnique({
