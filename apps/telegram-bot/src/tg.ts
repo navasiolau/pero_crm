@@ -57,7 +57,7 @@ async function call<T>(
 ): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(`https://api.telegram.org/bot${config.token}/${method}`, {
+    response = await fetch(`${config.telegramApiOrigin}/bot${config.token}/${method}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: payload ? JSON.stringify(payload) : undefined,

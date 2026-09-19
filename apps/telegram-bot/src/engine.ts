@@ -184,7 +184,10 @@ export async function handleUpdate(update: TgUpdate): Promise<void> {
 
 function parseCommand(text: string): { cmd: string; args: string[] } {
   const parts = text.split(/\s+/);
-  const cmd = parts[0]?.replace(/@[\w_]+$/, "").toLowerCase() ?? "";
+  const first = parts[0] ?? "";
+  const cmd = first.startsWith("/")
+    ? first.replace(/@[\w_]+$/, "").toLowerCase()
+    : "";
   return { cmd, args: parts.slice(1) };
 }
 
