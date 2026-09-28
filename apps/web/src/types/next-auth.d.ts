@@ -12,6 +12,7 @@ declare module "next-auth" {
   interface User {
     id: string;
     roles: Role[];
+    sessionVersion: number;
   }
 }
 
@@ -19,8 +20,7 @@ declare module "@auth/core/jwt" {
   interface JWT {
     id: string;
     roles: Role[];
-    // Наследие одноролевой модели: живые JWT после деплоя обновляются
-    // с фолбэком на это поле (см. session-callback в auth.config.ts)
-    role?: Role;
+    // Отсутствие версии в старом JWT означает обязательный новый вход.
+    sessionVersion?: number;
   }
 }

@@ -2,8 +2,8 @@ import type { NextAuthConfig } from "next-auth";
 
 import { ADMIN_ROLES, FINANCE_ROLES, hasAnyRole } from "@/lib/roles";
 
-// Edge-safe конфигурация Auth.js: без prisma/argon2 (они подключаются в auth.ts).
-// Используется и middleware, и основным экземпляром NextAuth.
+// Общие route/session callbacks. Единственный экземпляр Auth.js в auth.ts
+// добавляет обязательную проверку актуального пользователя из БД.
 export const authConfig = {
   pages: {
     signIn: "/login",
@@ -34,19 +34,10 @@ export const authConfig = {
 
       return true;
     },
-    jwt({ token, user }) {
-      if (user) {
-        token.id = user.id;
-        token.roles = user.roles;
-      }
-      return token;
-    },
     session({ session, token }) {
       if (session.user) {
         session.user.id = token.id;
-        // Фолбэк для живых JWT, выданных до перехода на роли[] (после деплоя
-        // пользователи не разлогиниваются; при следующем входе — новый формат)
-        session.user.roles = token.roles ?? (token.role ? [token.role] : []);
+        session.user.roles = token.roles;
       }
       return session;
     },

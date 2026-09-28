@@ -27,6 +27,29 @@ const userSchema = z.object({
   password: z.string().optional(),
 });
 
+// Точечный отзыв всех веб-сеансов сотрудника без смены пароля/общего AUTH_SECRET.
+// API-токены отзываются отдельно, отключение пользователя отзывает их в БД.
+export async function revokeUserSessions(
+  userId: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const session = await requireAdmin();
+  const changed = await prisma.user.updateMany({
+    where: { id: userId },
+    data: { sessionVersion: { increment: 1 } },
+  });
+  if (changed.count !== 1) return { ok: false, error: "Сотрудник не найден" };
+  await writeChangeLog({
+    actorType: "user",
+    actorId: session.user.id,
+    actorName: session.user.name ?? undefined,
+    entity: "user",
+    entityId: userId,
+    action: "revokeSessions",
+  });
+  revalidatePath("/settings/users");
+  return { ok: true };
+}
+
 // Создание сотрудника (админ/директор, §4).
 export async function createUser(
   input: z.input<typeof userSchema>,

@@ -78,6 +78,10 @@ export function LoginForm({
               </Field>
             </FieldGroup>
           </form>
+          <p className="mt-4 text-sm text-muted-foreground">
+            Забыли пароль? Обратитесь к администратору или директору PERO.
+            После проверки личности вам зададут новый пароль; прежние веб-сеансы будут завершены.
+          </p>
         </CardContent>
       </Card>
     </div>
