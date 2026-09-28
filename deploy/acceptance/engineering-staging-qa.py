@@ -70,7 +70,7 @@ def backup_proof(old, seal):
     raw = old.read_private(folder / "receipt.json")
     require(digest(raw) == seal["backupReceiptSha256"], "BACKUP_RECEIPT_MISMATCH")
     receipt = json.loads(raw)
-    verified = json.loads(old.read_private(folder / "verified.json"))
+    verified = json.loads(old.read_private(folder / ("verified-" + seal["expectedRevision"] + ".json")))
     summary = verified.get("summary", {})
     require(receipt.get("migration") == MIGRATION and receipt.get("sqlSha256") == SQL_SHA and
             summary.get("runId") == seal["backupRunId"] and summary.get("revision") == seal["expectedRevision"] and

@@ -46,6 +46,7 @@ import { ActualTimeDialog } from "@/components/actual-time-dialog";
 import { TaskSplitDialog } from "@/components/task-split-dialog";
 import { taskPaymentLabel } from "@/lib/task-payment-display";
 import { requiresManualCompletionTime } from "@/lib/task-completion-prompt";
+import { useElapsed } from "@/lib/use-elapsed";
 import { cn } from "@/lib/utils";
 import { sharePercent } from "@/lib/work-shares";
 import { OFFICE_ROLES, hasAnyRole } from "@/lib/roles";
@@ -74,23 +75,6 @@ interface ActiveTimer {
   taskTitle: string;
   projectNumber: string;
   startedAt: string;
-}
-
-function useElapsed(startedAt: string | null): string {
-  const [, tick] = useState(0);
-  useEffect(() => {
-    if (!startedAt) return;
-    const interval = setInterval(() => tick((n) => n + 1), 1000);
-    return () => clearInterval(interval);
-  }, [startedAt]);
-  if (!startedAt) return "";
-  const total = Math.max(0, Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000));
-  const hours = Math.floor(total / 3600);
-  const minutes = Math.floor((total % 3600) / 60);
-  const seconds = total % 60;
-  return hours > 0
-    ? `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
-    : `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
 function isOverdue(dueAt: string | null): boolean {

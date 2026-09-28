@@ -56,6 +56,9 @@ test("read-only POST allowance is bound to exact compiled export and source file
     ["fetchProductOptions", "products/actions.ts"],
   ].map(([name, source], i) => [String(i + 1).repeat(42), { exportedName: name, filename: `C:/workspace/src/server/${source}` }]));
   assert.deepEqual([...engineeringReadOnlyActionIds({ node }).values()].sort(), ["fetchProductOptions", "getBellData", "getTaskSplitOptions"]);
+  const standalone = structuredClone(node);
+  for (const row of Object.values(standalone)) row.filename = row.filename.split("/src/")[1];
+  assert.equal(engineeringReadOnlyActionIds({ node: standalone }).size, 3);
   const forged = structuredClone(node);
   Object.values(forged)[0].filename = "C:/workspace/src/server/tasks/actions.ts";
   assert.throws(() => engineeringReadOnlyActionIds({ node: forged }), /MANIFEST/);

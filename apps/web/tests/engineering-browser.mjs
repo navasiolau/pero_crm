@@ -101,8 +101,9 @@ export function engineeringReadOnlyActionIds(manifest) {
   for (const [id, entry] of Object.entries(manifest.node)) {
     const suffix = READ_ONLY_EXPORTS[entry?.exportedName];
     if (!suffix) continue;
-    guard(/^[0-9a-f]{42}$/i.test(id) && typeof entry.filename === "string" &&
-      entry.filename.replaceAll("\\", "/").endsWith(suffix) && !found.has(id) &&
+    const filename = typeof entry.filename === "string" ? entry.filename.replaceAll("\\", "/") : "";
+    guard(/^[0-9a-f]{42}$/i.test(id) &&
+      (filename.endsWith(suffix) || filename === suffix.slice("/src/".length)) && !found.has(id) &&
       ![...found.values()].includes(entry.exportedName), "READ_ONLY_MANIFEST_ENTRY_INVALID");
     found.set(id, entry.exportedName);
   }
@@ -314,6 +315,7 @@ export async function runEngineeringBrowser({ baseUrl, plan, sessions, outputDir
     await act(role, "status", () => card.getByRole("button", { name: "В работу" }).click(), { taskId, toStatus: "IN_PROGRESS" });
     card = await myCard(role, title);
     await expect(pages.get(role).getByText(`Идёт таймер: ${title}`)).toBeVisible();
+    await expect(card.getByRole("button", { name: /^Стоп \d+:\d{2}(?::\d{2})?$/ })).toBeVisible();
     await act(role, "status", () => card.getByRole("button", { name: "Выполнено" }).click(), { taskId, toStatus: "DONE" });
   }
 

@@ -120,7 +120,7 @@ def main():
                 check(len(applied) == 1 and applied[0]["checksum"] == SQL_SHA and applied[0]["finished_at"] and not applied[0]["rolled_back_at"], "MIGRATION_CHECKSUM_MISMATCH")
                 result_summary = {"status": "MIGRATION_AND_PRESERVATION_PASS", "runId": run_id, "revision": revision, "preservedTables": len(previous), "newTablesEmpty": 4,
                                   "routineMetadataTablesChanged": [t for t in ("ApiToken", "Plugin") if state["full"][t] != receipt["state"]["full"][t]]}
-                support.write_exclusive(directory / "verified.json", {"summary": result_summary, "state": state})
+                support.write_exclusive(directory / ("verified-" + revision + ".json"), {"summary": result_summary, "state": state})
         support.require_refresh_idle()
         check(support.identity(revision)[0] == identity, "DEPLOYMENT_DRIFT")
         print(json.dumps(result_summary))

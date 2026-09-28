@@ -1,8 +1,8 @@
 /** Root browser coordinator; holds the existing staging W07 lock for the UI window. */
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
+import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { engineeringStageSessions } from "./engineering-stage-runner.mjs";
@@ -11,6 +11,15 @@ import { parseStagingBasicAuth } from "./work-shares-stage-browser-runner.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 async function browserWindow(directory, revision, runId, operation) {
+  // A reviewed pre-browser retry may acquire a new window only after every
+  // prior window has an explicit successful release. Preserve all old proofs.
+  for (const name of readdirSync(directory).filter((n) => /^window(?:-[0-9a-f-]{36})?-acquired\.json$/.test(n))) {
+    const ended = join(directory, name.replace(/acquired\.json$/, "ended.json"));
+    assert.ok(existsSync(ended), "PREVIOUS_WINDOW_NOT_RELEASED");
+    const proof = JSON.parse(readFileSync(ended, "utf8"));
+    assert.ok(proof.runId === runId && proof.released && proof.code === 0 && !proof.failed, "PREVIOUS_WINDOW_NOT_RELEASED");
+  }
+  const attempt = randomUUID();
   const bytes = readFileSync(join(ROOT, "deploy/acceptance/engineering-staging-window.py"));
   const digest = createHash("sha256").update(bytes).digest("hex");
   const child = spawn("C:\\Windows\\System32\\OpenSSH\\ssh.exe", ["-T", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes",
@@ -46,13 +55,13 @@ async function browserWindow(directory, revision, runId, operation) {
   };
   try {
     await readyPromise; check();
-    writeFileSync(join(directory, "window-acquired.json"), JSON.stringify({ revision, runId, helperSha256: digest, at: new Date().toISOString() }), { flag: "wx", mode: 0o600 });
+    writeFileSync(join(directory, `window-${attempt}-acquired.json`), JSON.stringify({ revision, runId, helperSha256: digest, at: new Date().toISOString() }), { flag: "wx", mode: 0o600 });
     return await operation(check);
   } finally {
     if (alive && ready) child.stdin.end(JSON.stringify({ release: runId }) + "\n");
     else child.stdin.end();
     const code = await exited;
-    writeFileSync(join(directory, "window-ended.json"), JSON.stringify({ runId, released, code, failed, at: new Date().toISOString() }), { flag: "wx", mode: 0o600 });
+    writeFileSync(join(directory, `window-${attempt}-ended.json`), JSON.stringify({ runId, released, code, failed, at: new Date().toISOString() }), { flag: "wx", mode: 0o600 });
     assert.ok(released && code === 0 && !failed, "STAGING_WINDOW_END_FAILED");
   }
 }
