@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { scopeNotificationContent } from "@/server/access/notification-visibility";
 
 import { receivableTypesFor } from "./notify";
 
@@ -25,9 +26,10 @@ export async function getBellData() {
       where: { userId: session.user.id, readAt: null },
     }),
   ]);
+  const visibleItems = await scopeNotificationContent(session.user, items, prisma);
   return {
     unread,
-    items: items.map((item) => ({
+    items: visibleItems.map((item) => ({
       id: item.id,
       title: item.title,
       body: item.body,
@@ -52,11 +54,12 @@ export async function listMyNotifications(page: number) {
     }),
     prisma.notification.count({ where: { userId: session.user.id } }),
   ]);
+  const visibleItems = await scopeNotificationContent(session.user, items, prisma);
   return {
     total,
     page: safePage,
     pageSize: NOTIFICATIONS_PAGE_SIZE,
-    items: items.map((item) => ({
+    items: visibleItems.map((item) => ({
       id: item.id,
       type: item.type,
       title: item.title,

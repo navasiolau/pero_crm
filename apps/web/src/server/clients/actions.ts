@@ -7,6 +7,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { writeChangeLog } from "@/server/plugins/changelog";
 import { OFFICE_ROLES, hasAnyRole } from "@/lib/roles";
+import { clientVisibilityWhere } from "@/server/access/visibility";
 
 // Клиенты — офисные роли (§4, комбинированные роли: достаточно любой).
 
@@ -57,7 +58,7 @@ export async function updateClient(
   const session = await requireAllowed();
   const parsed = clientSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "Ошибка данных" };
-  const before = await prisma.client.findUnique({ where: { id: clientId } });
+  const before = await prisma.client.findFirst({ where: { AND: [{ id: clientId }, clientVisibilityWhere(session.user)] } });
   if (!before) return { ok: false, error: "Клиент не найден" };
   await prisma.client.update({ where: { id: clientId }, data: parsed.data });
   await writeChangeLog({

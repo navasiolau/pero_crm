@@ -19,8 +19,8 @@ export default async function WarehouseMovementsPage() {
   }
 
   const [rows, materials] = await Promise.all([
-    listMovements(),
-    listMaterialOptions(),
+    listMovements(session.user),
+    listMaterialOptions(session.user),
   ]);
 
   return (

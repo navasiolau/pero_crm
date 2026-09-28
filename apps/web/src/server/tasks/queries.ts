@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import type { TaskDetails } from "@/components/task-dialog";
+import { fileVisibilityWhere, taskVisibilityWhere, workVisibilityWhere, type VisibilityActor } from "@/server/access/visibility";
 
 // Общий select задачи для карточек/списков (§9: работа, зависимости, файлы).
 export const taskDetailsInclude = {
@@ -14,6 +15,19 @@ export const taskDetailsInclude = {
     },
   },
 } as const;
+
+// All nested contexts must obey the same actor policy as the outer task.
+export function taskDetailsIncludeFor(actor: VisibilityActor) {
+  return {
+    ...taskDetailsInclude,
+    work: { ...taskDetailsInclude.work, where: workVisibilityWhere(actor) },
+    files: { ...taskDetailsInclude.files, where: fileVisibilityWhere(actor) },
+    dependencies: {
+      ...taskDetailsInclude.dependencies,
+      where: { dependsOn: taskVisibilityWhere(actor) },
+    },
+  } as const;
+}
 
 type TaskWithIncludes = {
   id: string;
@@ -81,7 +95,7 @@ export async function mapTaskDetails(
     requiresPhoto: task.requiresPhoto,
     estimateMinutes: task.estimateMinutes,
     spentMinutes: spentMap.get(task.id) ?? 0,
-    workId: task.workId,
+    workId: task.work?.id ?? null,
     workTitle: task.work?.title ?? null,
     workTotal: task.work ? String(task.work.total) : null,
     workPriceSnapshot: task.work ? String(task.work.priceSnapshot) : null,

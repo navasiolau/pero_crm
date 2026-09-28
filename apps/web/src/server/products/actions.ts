@@ -13,6 +13,8 @@ import { notifyOrg } from "@/server/notifications/notify";
 
 import { MANAGER_ROLES, hasAnyRole, hasRole } from "@/lib/roles";
 import { revalidateProductPaths } from "@/server/products/revalidate";
+import { productEditWhere } from "@/server/access/visibility";
+import { listProductOptions } from "@/server/products/queries";
 
 async function requireUser() {
   const session = await auth();
@@ -150,7 +152,7 @@ export async function updateProduct(
     }
   }
 
-  const before = await prisma.product.findUnique({ where: { id: productId } });
+  const before = await prisma.product.findFirst({ where: { AND: [{ id: productId }, productEditWhere(session.user)] } });
   if (!before) return { ok: false, error: "Изделие не найдено" };
 
   await prisma.product.update({ where: { id: productId }, data });
@@ -279,10 +281,5 @@ export async function fetchProductOptions(
   projectId: string,
 ): Promise<{ id: string; number: string; title: string }[]> {
   const session = await requireUser();
-  void session;
-  return prisma.product.findMany({
-    where: { projectId },
-    select: { id: true, number: true, title: true },
-    orderBy: { number: "asc" },
-  });
+  return listProductOptions(projectId, session.user);
 }

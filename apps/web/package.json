@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "tsx --test tests/auth-security.test.ts",
+    "test": "tsx --test tests/*.test.ts",
     "test:auth-db": "tsx tests/auth-revocation-db.ts",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",

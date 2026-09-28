@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { hasFullProjectVisibility, productVisibilityWhere, type VisibilityActor } from "@/server/access/visibility";
 
 // ─── Склад (§12, фаза 6): номенклатура, остатки из движений, потребность ──
 // Остатки не хранятся: остаток = Σ INCOME + Σ RETURN − Σ EXPENSE.
@@ -46,8 +47,9 @@ async function stockByMaterial(
 }
 
 // Открытая потребность (долг) по материалам: Σ max(0, quantity − issuedQty)
-async function debtByMaterial(): Promise<Map<string, number>> {
+async function debtByMaterial(actor: VisibilityActor): Promise<Map<string, number>> {
   const lines = await prisma.projectMaterial.findMany({
+    where: { product: productVisibilityWhere(actor) },
     select: { materialId: true, quantity: true, issuedQty: true },
   });
   const debt = new Map<string, number>();
@@ -75,14 +77,14 @@ export type MaterialView = {
   shortByProjects: number; // сколько не хватает по всем открытым потребностям
 };
 
-export async function listMaterials(): Promise<MaterialView[]> {
+export async function listMaterials(actor: VisibilityActor): Promise<MaterialView[]> {
   const [materials, stock, debt] = await Promise.all([
     prisma.material.findMany({
       orderBy: { name: "asc" },
       include: { category: { select: { name: true } } },
     }),
     stockByMaterial(),
-    debtByMaterial(),
+    debtByMaterial(actor),
   ]);
   return materials.map((material) => {
     const onStock = stock.get(material.id) ?? 0;
@@ -124,13 +126,14 @@ export type StockMovementView = {
   createdAt: string; // ISO
 };
 
-export async function listMovements(filter?: {
+export async function listMovements(actor: VisibilityActor, filter?: {
   materialId?: string;
   productId?: string;
   type?: "INCOME" | "EXPENSE" | "RETURN";
 }): Promise<StockMovementView[]> {
   const movements = await prisma.stockMovement.findMany({
     where: {
+      ...(hasFullProjectVisibility(actor) ? {} : { OR: [{ productId: null }, { product: productVisibilityWhere(actor) }] }),
       materialId: filter?.materialId || undefined,
       productId: filter?.productId || undefined,
       type: filter?.type || undefined,
@@ -195,10 +198,11 @@ export type ProjectMaterialsData = {
 
 export async function getProjectMaterials(
   productId: string,
+  actor: VisibilityActor,
 ): Promise<ProjectMaterialsData> {
   const [rows, movements] = await Promise.all([
     prisma.projectMaterial.findMany({
-      where: { productId },
+      where: { productId, product: productVisibilityWhere(actor) },
       orderBy: { createdAt: "asc" },
       include: {
         material: {
@@ -206,7 +210,7 @@ export async function getProjectMaterials(
         },
       },
     }),
-    listMovements({ productId }),
+    listMovements(actor, { productId }),
   ]);
   const stock = await stockByMaterial(rows.map((row) => row.materialId));
 
@@ -257,10 +261,11 @@ export async function getProjectMaterials(
 // строка потребности, которую не покрывает остаток.
 export async function listProductShortages(
   productIds: string[],
+  actor: VisibilityActor,
 ): Promise<Set<string>> {
   if (productIds.length === 0) return new Set();
   const lines = await prisma.projectMaterial.findMany({
-    where: { productId: { in: productIds } },
+    where: { productId: { in: productIds }, product: productVisibilityWhere(actor) },
     select: {
       productId: true,
       materialId: true,
@@ -286,10 +291,11 @@ export async function listProductShortages(
 // агрегат по всем изделиям проекта.
 export async function listProjectShortages(
   projectIds: string[],
+  actor: VisibilityActor,
 ): Promise<Set<string>> {
   if (projectIds.length === 0) return new Set();
   const lines = await prisma.projectMaterial.findMany({
-    where: { product: { projectId: { in: projectIds } } },
+    where: { product: { AND: [{ projectId: { in: projectIds } }, productVisibilityWhere(actor)] } },
     select: {
       materialId: true,
       quantity: true,
@@ -321,8 +327,8 @@ export type MaterialOption = {
   stock: number;
 };
 
-export async function listMaterialOptions(): Promise<MaterialOption[]> {
-  const materials = await listMaterials();
+export async function listMaterialOptions(actor: VisibilityActor): Promise<MaterialOption[]> {
+  const materials = await listMaterials(actor);
   return materials
     .filter((material) => material.active)
     .map((material) => ({

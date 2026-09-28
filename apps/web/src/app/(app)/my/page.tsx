@@ -4,7 +4,8 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { getUserPreference } from "@/server/preferences";
 import { getActiveTimer } from "@/server/time/actions";
-import { mapTaskDetails, taskDetailsInclude } from "@/server/tasks/queries";
+import { mapTaskDetails, taskDetailsIncludeFor } from "@/server/tasks/queries";
+import { taskVisibilityWhere } from "@/server/access/visibility";
 
 import { MyTasksView } from "./my-tasks-view";
 
@@ -18,8 +19,8 @@ export default async function MyTasksPage() {
 
   const [tasks, activeTimer, view] = await Promise.all([
     prisma.task.findMany({
-      where: { assigneeId: session.user.id },
-      include: taskDetailsInclude,
+      where: { AND: [{ assigneeId: session.user.id }, taskVisibilityWhere(session.user)] },
+      include: taskDetailsIncludeFor(session.user),
       orderBy: [
         { status: "asc" },
         { dueAt: "asc" },
@@ -27,7 +28,7 @@ export default async function MyTasksPage() {
       ],
       take: 100,
     }),
-    getActiveTimer(session.user.id),
+    getActiveTimer(),
     getUserPreference(session.user.id, "my.view"),
   ]);
 

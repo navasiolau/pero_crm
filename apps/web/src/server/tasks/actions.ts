@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { fileVisibilityWhere, hasFullProjectVisibility, taskExecutionWhere } from "@/server/access/visibility";
 import { formatAmount } from "@/lib/format";
 import { writeChangeLog } from "@/server/plugins/changelog";
 import { emitDomainEvent } from "@/server/plugins/events";
@@ -387,12 +388,12 @@ export async function changeTaskStatus(
 ): Promise<{ ok: boolean; error?: string; timeRequired?: boolean }> {
   const session = await requireUser();
   const roles = session.user.roles;
-  const task = await prisma.task.findUnique({
-    where: { id: taskId },
+  const task = await prisma.task.findFirst({
+    where: { AND: [{ id: taskId }, taskExecutionWhere(session.user)] },
     include: {
       project: { select: { id: true, number: true } },
       product: { select: { id: true, number: true } },
-      files: { select: { id: true } },
+      files: { where: fileVisibilityWhere(session.user), select: { id: true } },
       work: { select: { id: true, total: true } },
       dependencies: {
         include: { dependsOn: { select: { id: true, title: true, status: true } } },
@@ -413,9 +414,9 @@ export async function changeTaskStatus(
   if (blockers.length > 0) {
     return {
       ok: false,
-      error: `Задача заблокирована — сначала выполните: ${blockers
+      error: hasFullProjectVisibility(session.user) ? `Задача заблокирована — сначала выполните: ${blockers
         .map((edge) => `«${edge.dependsOn.title}»`)
-        .join(", ")}`,
+        .join(", ")}` : "Задача заблокирована — сначала должны быть выполнены предыдущие задачи",
     };
   }
   if (toStatus === "DONE" && task.requiresPhoto && task.files.length === 0) {

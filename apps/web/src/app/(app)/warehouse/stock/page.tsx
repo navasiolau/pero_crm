@@ -20,8 +20,8 @@ export default async function WarehouseStockPage() {
   }
 
   const [rows, materials] = await Promise.all([
-    listStock(),
-    listMaterialOptions(),
+    listStock(session.user),
+    listMaterialOptions(session.user),
   ]);
 
   return (

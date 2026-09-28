@@ -4,6 +4,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { displayClientName } from "@/lib/labels";
 import { OFFICE_ROLES, hasAnyRole } from "@/lib/roles";
+import { clientVisibilityWhere, productVisibilityWhere, projectVisibilityWhere, taskVisibilityWhere } from "@/server/access/visibility";
 
 // GET /api/search?q=… — глобальный поиск (omnisearch): проекты, изделия,
 // задачи, клиенты. Видимость как в разделах (§4): работник/монтажник —
@@ -20,9 +21,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ projects: [], products: [], tasks: [], clients: [] });
   }
   const contains = { contains: q, mode: "insensitive" as const };
-  const visibility = office
-    ? {}
-    : { tasks: { some: { assigneeId: session.user.id } } };
+  const visibility = projectVisibilityWhere(session.user);
 
   const [projects, products, tasks, clients] = await Promise.all([
     prisma.project.findMany({
@@ -47,7 +46,7 @@ export async function GET(request: Request) {
     prisma.product.findMany({
       where: {
         AND: [
-          office ? {} : { project: visibility },
+          productVisibilityWhere(session.user),
           { OR: [{ number: contains }, { title: contains }] },
         ],
       },
@@ -65,6 +64,7 @@ export async function GET(request: Request) {
     prisma.task.findMany({
       where: {
         AND: [
+          taskVisibilityWhere(session.user),
           office ? {} : { assigneeId: session.user.id },
           { OR: [{ title: contains }, { project: { number: contains } }] },
         ],
@@ -80,6 +80,7 @@ export async function GET(request: Request) {
     office
       ? prisma.client.findMany({
           where: {
+            AND: [clientVisibilityWhere(session.user)],
             OR: [
               { name: contains },
               { lastName: contains },

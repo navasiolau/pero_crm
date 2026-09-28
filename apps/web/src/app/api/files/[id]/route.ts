@@ -5,7 +5,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { UPLOADS_ROOT, s3Enabled, s3Get, fileKey, thumbKey } from "@/lib/s3";
-import { OFFICE_ROLES, hasAnyRole } from "@/lib/roles";
+import { fileVisibilityWhere } from "@/server/access/visibility";
 
 // GET /api/files/:id — отдача файла с проверкой прав (§4, §13).
 // ?thumb=1 — превью (для изображений), иначе оригинал.
@@ -19,9 +19,7 @@ export async function GET(
   }
   const { id } = await params;
   const file = await prisma.file.findFirst({
-    where: hasAnyRole(session.user.roles, OFFICE_ROLES)
-      ? { id }
-      : { id, project: { tasks: { some: { assigneeId: session.user.id } } } },
+    where: { AND: [{ id }, fileVisibilityWhere(session.user)] },
   });
   if (!file) {
     return NextResponse.json({ error: "Файл не найден" }, { status: 404 });

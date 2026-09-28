@@ -2,7 +2,8 @@ import { redirect } from "next/navigation";
 
 import { auth } from "@/auth";
 import { displayClientName } from "@/lib/labels";
-import { MANAGER_ROLES, OFFICE_ROLES, hasAnyRole } from "@/lib/roles";
+import { MANAGER_ROLES, hasAnyRole } from "@/lib/roles";
+import { hasFullProjectVisibility } from "@/server/access/visibility";
 import { getUserPreference } from "@/server/preferences";
 import {
   listClientOptions,
@@ -48,7 +49,7 @@ export default async function ProjectsPage({
       // Канбану нужна вся отфильтрованная доска, таблице — страница
       view === "table" ? { page, pageSize } : undefined,
     ),
-    listClientOptions(),
+    listClientOptions(session.user),
     listManagers(),
     listEngineers(),
   ]);
@@ -63,7 +64,7 @@ export default async function ProjectsPage({
         title: project.title,
         stage: project.stage,
         stageChangedAt: project.stageChangedAt.toISOString(),
-        totalPrice: project.totalPrice > 0 ? String(project.totalPrice) : null,
+        totalPrice: hasFullProjectVisibility(session.user) && project.totalPrice > 0 ? String(project.totalPrice) : null,
         currency: project.currency,
         clientId: project.client.id,
         clientName: displayClientName(project.client),
@@ -77,7 +78,7 @@ export default async function ProjectsPage({
       page={page}
       pageSize={pageSize}
       canManage={canManage}
-      showAmount={hasAnyRole(role, OFFICE_ROLES)}
+      showAmount={hasFullProjectVisibility(session.user)}
       clients={clients.map((client) => ({ id: client.id, name: displayClientName(client) }))}
       managers={managers.map((manager) => ({ id: manager.id, name: manager.name }))}
       engineers={engineers.map((engineer) => ({ id: engineer.id, name: engineer.name }))}

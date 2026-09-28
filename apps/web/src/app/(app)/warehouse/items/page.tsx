@@ -19,7 +19,7 @@ export default async function WarehouseItemsPage() {
   }
 
   const [rows, categories] = await Promise.all([
-    listMaterials(),
+    listMaterials(session.user),
     listCategories(),
   ]);
 
