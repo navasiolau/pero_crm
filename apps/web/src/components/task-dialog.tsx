@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Pencil, Trash2 } from "lucide-react";
+import { Pencil, Split, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import type { TaskStatus } from "@prisma/client";
 
@@ -30,7 +30,11 @@ import {
 import { useFileViewer } from "@/components/file-viewer";
 import { ConfirmDeleteDialog } from "@/components/confirm-delete-dialog";
 import { QuantityStepper } from "@/components/quantity-stepper";
+import { TaskSplitDialog } from "@/components/task-split-dialog";
+import { formatAmount } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { sharePercent } from "@/lib/work-shares";
+import { isPositiveQuantity, quantityInputError, remainingWorkQuantity } from "@/lib/work-quantity";
 import { deleteTask, updateTask } from "@/server/tasks/actions";
 import { fetchProductOptions } from "@/server/products/actions";
 
@@ -49,7 +53,14 @@ export interface TaskDetails {
   workTitle: string | null;
   workTotal: string | null; // итого по всей работе
   workPriceSnapshot: string | null; // цена-снимок за единицу
-  quantity: string | null; // часть работы, которую берёт задача
+  quantity: string | null; // исходный объём; у разделённых задач общий для группы
+  allocationGroupId?: string | null;
+  shareUnits?: number;
+  shareAmount?: string | null;
+  shareCurrency?: string | null;
+  personalQuantity?: string | null;
+  splitRevision?: number;
+  canSplit?: boolean;
   dependencies: { id: string; title: string; status: TaskStatus }[];
   projectId: string;
   projectNumber: string;
@@ -113,6 +124,7 @@ export function TaskDialog({
   const [pending, startTransition] = useTransition();
   const [editing, setEditing] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [splitOpen, setSplitOpen] = useState(false);
   const [productOptions, setProductOptions] = useState(products ?? []);
   const fileViewer = useFileViewer();
   const [form, setForm] = useState({
@@ -129,6 +141,13 @@ export function TaskDialog({
 
   if (!task) return null;
   const readOnly = task.status === "DONE" || !canEdit;
+  const isAllocatedShare = !!task.allocationGroupId;
+  const ownQuantity = task.personalQuantity === undefined
+    ? (isAllocatedShare ? null : task.quantity)
+    : task.personalQuantity;
+  const ownAmount = task.shareCurrency
+    ? formatAmount(task.shareAmount, task.shareCurrency)
+    : task.workId ? "—" : "Без денежного начисления";
 
   function startEdit() {
     if (!task) return;
@@ -145,18 +164,22 @@ export function TaskDialog({
     });
     setEditing(true);
     // Изделия проекта — если родитель не передал список, подгружаем сами
-    if (!products) {
+    if (!products && !isAllocatedShare) {
       void fetchProductOptions(task.projectId).then(setProductOptions);
     }
   }
 
-  const valid = form.title.trim() && form.type && form.dueAt;
+  const valid = form.title.trim() && form.type && form.dueAt &&
+    (isAllocatedShare || !form.workId || !quantityInputError(form.quantity));
 
   return (
     <Dialog
       open={open}
       onOpenChange={(next) => {
-        if (!next) setEditing(false);
+        if (!next) {
+          setEditing(false);
+          setSplitOpen(false);
+        }
         onOpenChange(next);
       }}
     >
@@ -262,11 +285,16 @@ export function TaskDialog({
             <div className="flex flex-col gap-1.5">
               <Label>Изделие</Label>
               <SearchableSelect
-                options={productOptions.map((product) => ({
+                options={(isAllocatedShare && task.productId ? [{
+                  id: task.productId,
+                  number: task.productNumber ?? "",
+                  title: task.productTitle ?? "Изделие задачи",
+                }] : productOptions).map((product) => ({
                   value: product.id,
                   label: `${product.number} · ${product.title}`,
                 }))}
                 value={form.productId}
+                disabled={isAllocatedShare}
                 onChange={(value) =>
                   setForm((prev) => ({ ...prev, productId: value }))
                 }
@@ -279,24 +307,27 @@ export function TaskDialog({
               <div className="flex flex-col gap-1.5">
                 <Label>Работа (оплата)</Label>
                 <SearchableSelect
-                  options={works.map((work) => {
+                  options={isAllocatedShare && task.workId ? [{
+                    value: task.workId,
+                    label: task.workTitle ?? "Работа задачи",
+                  }] : works.map((work) => {
                     const own =
                       work.id === task.workId && task.quantity
-                        ? Number(task.quantity)
-                        : 0;
-                    const remaining =
-                      Number(work.quantity) - Number(work.allocated) + own;
+                        ? task.quantity
+                        : "0";
+                    const remaining = remainingWorkQuantity(work.quantity, work.allocated, own);
                     return {
                       value: work.id,
                       label: `${work.title} · ${work.total} BYN`,
                       hint:
-                        remaining > 0
+                        isPositiveQuantity(remaining)
                           ? `свободно ${remaining} из ${work.quantity}`
                           : "распределена полностью",
-                      disabled: remaining <= 0,
+                      disabled: !isPositiveQuantity(remaining),
                     };
                   })}
                   value={form.workId}
+                  disabled={isAllocatedShare}
                   onChange={(value) =>
                     setForm((prev) => ({ ...prev, workId: value }))
                   }
@@ -322,7 +353,17 @@ export function TaskDialog({
                 />
               </div>
             </div>
-            {form.workId ? (
+            {isAllocatedShare ? (
+              <div className="rounded-lg border p-3 text-sm">
+                <div className="font-medium">Доля задачи: {sharePercent(task.shareUnits).replace(".", ",")}%</div>
+                {ownQuantity !== null ? <div>Личный объём: {ownQuantity.replace(".", ",")} ед.</div> : null}
+                <div>Сумма доли: {ownAmount}</div>
+                <p className="mt-1 text-muted-foreground">
+                  Изделие, работа и общий объём закреплены за всеми частями задачи.
+                  Передать часть личного объёма можно через «Разделить».
+                </p>
+              </div>
+            ) : form.workId ? (
               <div className="flex flex-col gap-1.5">
                 <Label>Количество из работы</Label>
                 <QuantityStepper
@@ -332,14 +373,12 @@ export function TaskDialog({
                   }
                   remaining={(() => {
                     const work = works.find((item) => item.id === form.workId);
-                    if (!work) return 0;
+                    if (!work) return "0.00";
                     const own =
                       work.id === task.workId && task.quantity
-                        ? Number(task.quantity)
-                        : 0;
-                    return (
-                      Number(work.quantity) - Number(work.allocated) + own
-                    );
+                        ? task.quantity
+                        : "0";
+                    return remainingWorkQuantity(work.quantity, work.allocated, own);
                   })()}
                 />
               </div>
@@ -440,16 +479,23 @@ export function TaskDialog({
               {task.workTitle ? (
                 <div>
                   <div className="text-xs text-muted-foreground">Работа (оплата)</div>
-                  <div>
-                    {task.workTitle}
-                    {task.quantity && task.workPriceSnapshot
-                      ? ` · ${task.quantity} ед. × ${task.workPriceSnapshot} = ${(
-                          Number(task.quantity) * Number(task.workPriceSnapshot)
-                        ).toLocaleString("ru-RU")} BYN`
-                      : ""}
-                  </div>
+                  <div>{task.workTitle}</div>
                 </div>
               ) : null}
+              <div>
+                <div className="text-xs text-muted-foreground">Доля задачи</div>
+                <div>{sharePercent(task.shareUnits).replace(".", ",")}%</div>
+              </div>
+              {ownQuantity !== null ? (
+                <div>
+                  <div className="text-xs text-muted-foreground">Личный объём</div>
+                  <div>{ownQuantity.replace(".", ",")} ед.</div>
+                </div>
+              ) : null}
+              <div>
+                <div className="text-xs text-muted-foreground">Сумма доли</div>
+                <div>{ownAmount}</div>
+              </div>
             </div>
             {task.dependencies.length > 0 ? (
               <div>
@@ -540,12 +586,14 @@ export function TaskDialog({
                       title: form.title.trim(),
                       type: form.type,
                       assigneeId: form.assigneeId || null,
-                      productId: form.productId || null,
-                      workId: form.workId || null,
-                      quantity:
-                        form.workId && form.quantity.trim() !== ""
-                          ? Number(form.quantity)
-                          : null,
+                      ...(!isAllocatedShare ? {
+                        productId: form.productId || null,
+                        workId: form.workId || null,
+                        quantity:
+                          form.workId && form.quantity.trim() !== ""
+                            ? Number(form.quantity)
+                            : null,
+                      } : {}),
                       dueAt: form.dueAt,
                       estimateMinutes:
                         form.estimateMinutes.trim() === ""
@@ -568,22 +616,41 @@ export function TaskDialog({
               </Button>
             </>
           ) : (
-            !readOnly && (
-              <div className="flex w-full items-center justify-between">
-                <Button
-                  variant="destructive"
-                  onClick={() => setDeleteOpen(true)}
-                >
-                  <Trash2 className="size-4" /> Удалить
-                </Button>
-                <Button variant="outline" onClick={startEdit}>
-                  <Pencil className="size-4" /> Редактировать
-                </Button>
+            (!readOnly || task.canSplit) && (
+              <div className="flex w-full flex-wrap items-center justify-end gap-2">
+                {!readOnly && !isAllocatedShare ? (
+                  <Button
+                    variant="destructive"
+                    className="sm:mr-auto"
+                    onClick={() => setDeleteOpen(true)}
+                  >
+                    <Trash2 className="size-4" /> Удалить
+                  </Button>
+                ) : null}
+                {task.canSplit ? (
+                  <Button variant="outline" disabled={pending} onClick={() => setSplitOpen(true)}>
+                    <Split className="size-4" /> Разделить
+                  </Button>
+                ) : null}
+                {!readOnly ? (
+                  <Button variant="outline" onClick={startEdit}>
+                    <Pencil className="size-4" /> Редактировать
+                  </Button>
+                ) : null}
               </div>
             )
           )}
         </DialogFooter>
       </DialogContent>
+      <TaskSplitDialog
+        task={task}
+        open={open && splitOpen}
+        onOpenChange={setSplitOpen}
+        onDone={() => {
+          onOpenChange(false);
+          router.refresh();
+        }}
+      />
       {fileViewer.viewer}
       <ConfirmDeleteDialog
         entityLabel="задачу"

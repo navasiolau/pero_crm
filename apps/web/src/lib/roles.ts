@@ -48,7 +48,7 @@ export const ADMIN_ROLES: Role[] = ["ADMIN", "DIRECTOR"];
 // Производственный персонал: без дашборда, время — только таймером.
 export const FIELD_ROLES: Role[] = ["WORKER", "MOUNTER"];
 // Кому можно назначать задачи/работы (исполнители).
-export const ASSIGNEE_ROLES: Role[] = ["WORKER", "MOUNTER", "ENGINEER", "MANAGER"];
+export const ASSIGNEE_ROLES: Role[] = [...ROLE_PRIORITY];
 
 // Есть ли у пользователя конкретная роль.
 export function hasRole(userRoles: Role[] | null | undefined, role: Role): boolean {

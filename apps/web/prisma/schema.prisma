@@ -271,6 +271,11 @@ model Task {
   requiresPhoto  Boolean    @default(false) // при выполнении просим приложить файлы (§6.2)
   estimateMinutes Int? // оценка (среднее идентичных из истории / шаблон), правит менеджер
   executorShare  Decimal    @default(1) @db.Decimal(4, 3) // доля исполнителя в оплате работы
+  allocationGroupId String?
+  allocationGroup TaskAllocationGroup? @relation(fields: [allocationGroupId], references: [id], onDelete: Restrict)
+  shareUnits     Int? // 1 000 000 единиц = 100% исходной группы
+  shareAmount    Decimal? @db.Decimal(12, 2) // точный бюджет этой части, не умножать повторно на долю
+  splitRevision  Int @default(0) // оптимистическая ревизия формы деления
   doneAt         DateTime?
   doneById       String?
   createdById    String?
@@ -286,6 +291,23 @@ model Task {
 
   @@index([assigneeId, status])
   @@index([productId])
+  @@index([allocationGroupId])
+}
+
+// Группа возникает только при первом делении незавершённой задачи.
+// Исходное количество Work учитывается один раз; прежние задачи/начисления не backfill-ятся.
+model TaskAllocationGroup {
+  id          String @id @default(cuid())
+  workId      String?
+  work        Work? @relation(fields: [workId], references: [id], onDelete: SetNull)
+  quantity    Decimal? @db.Decimal(10, 2)
+  budget      Decimal @db.Decimal(12, 2)
+  currency    String?
+  createdById String
+  createdAt   DateTime @default(now())
+  tasks       Task[]
+
+  @@index([workId])
 }
 
 // Зависимость задач (DAG, §9): задача блокируется,
@@ -336,6 +358,7 @@ model Work {
   legacyTable   String?
   createdAt     DateTime  @default(now())
   tasks         Task[]
+  allocationGroups TaskAllocationGroup[]
 
   @@index([projectId])
   @@index([productId])

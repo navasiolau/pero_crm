@@ -1,0 +1,91 @@
+import type { Prisma } from "@prisma/client";
+import { fileVisibilityWhere, hasFullProjectVisibility, taskExecutionWhere } from "@/server/access/visibility";
+import { moneyAtoms, taskPieceAmount } from "@/lib/work-shares";
+import { OFFICE_ROLES, hasAnyRole } from "@/lib/roles";
+import type { DomainActor } from "@/server/projects/core";
+import type { TaskTransaction } from "./transaction";
+
+type TaskEffect = { id: string; title: string; assigneeId: string | null; projectId: string; projectNumber: string; productId: string | null; productNumber: string | null };
+export type CompletionResult = { ok: false; error: string; timeRequired?: boolean } | {
+  ok: true; repeated: boolean; task: TaskEffect; eventId: string | null;
+  payroll: { name: string; amount: string; currency: string } | null;
+};
+
+class CompletionError extends Error {
+  constructor(message: string, readonly timeRequired = false) { super(message); }
+}
+
+async function startTimer(tx: Prisma.TransactionClient, taskId: string, userId: string) {
+  if (await tx.timeEntry.findFirst({ where: { taskId, userId, stoppedAt: null }, select: { id: true } })) return;
+  await tx.timeEntry.updateMany({ where: { userId, stoppedAt: null }, data: { stoppedAt: new Date() } });
+  await tx.$executeRaw`
+    UPDATE "TimeEntry" SET "minutes" = GREATEST(1, FLOOR(EXTRACT(EPOCH FROM ("stoppedAt" - "startedAt")) / 60)::int)
+    WHERE "userId" = ${userId} AND "stoppedAt" IS NOT NULL AND "minutes" = 0
+  `;
+  await tx.timeEntry.create({ data: { taskId, userId, source: "timer" } });
+}
+
+async function stopTimer(tx: Prisma.TransactionClient, taskId: string) {
+  await tx.timeEntry.updateMany({ where: { taskId, stoppedAt: null }, data: { stoppedAt: new Date() } });
+  await tx.$executeRaw`
+    UPDATE "TimeEntry" SET "minutes" = GREATEST(1, FLOOR(EXTRACT(EPOCH FROM ("stoppedAt" - "startedAt")) / 60)::int)
+    WHERE "taskId" = ${taskId} AND "stoppedAt" IS NOT NULL AND "minutes" = 0
+  `;
+}
+
+export async function changeTaskStatusCore(actor: DomainActor, taskId: string, toStatus: "IN_PROGRESS" | "DONE", actualMinutes: number | undefined, transaction: TaskTransaction): Promise<CompletionResult> {
+  if (toStatus !== "IN_PROGRESS" && toStatus !== "DONE") return { ok: false, error: "Недопустимый переход статуса" };
+  try {
+    return await transaction(async (tx): Promise<CompletionResult> => {
+      const task = await tx.task.findFirst({
+        where: { AND: [{ id: taskId }, taskExecutionWhere(actor)] },
+        include: {
+          project: { select: { id: true, number: true } }, product: { select: { id: true, number: true } },
+          work: { select: { id: true, priceSnapshot: true } }, allocationGroup: { select: { currency: true } },
+          files: { where: fileVisibilityWhere(actor), select: { id: true } },
+          dependencies: { include: { dependsOn: { select: { id: true, title: true, status: true } } } },
+        },
+      });
+      if (!task) throw new CompletionError("Задача не найдена");
+      const effect: TaskEffect = { id: task.id, title: task.title, assigneeId: task.assigneeId, projectId: task.projectId, projectNumber: task.project.number, productId: task.productId, productNumber: task.product?.number ?? null };
+      if (task.status === toStatus) return { ok: true, repeated: true, task: effect, payroll: null, eventId: null };
+      if (task.status !== "NEW" && !(task.status === "IN_PROGRESS" && toStatus === "DONE")) throw new CompletionError("Недопустимый переход статуса");
+      const blockers = task.dependencies.filter((edge) => edge.dependsOn.status !== "DONE");
+      if (blockers.length) throw new CompletionError(hasFullProjectVisibility(actor)
+        ? `Задача заблокирована — сначала выполните: ${blockers.map((edge) => `«${edge.dependsOn.title}»`).join(", ")}`
+        : "Задача заблокирована — сначала должны быть выполнены предыдущие задачи");
+      if (toStatus === "DONE" && task.requiresPhoto && !task.files.length) throw new CompletionError("Приложите файлы (фото/замерный лист) перед выполнением");
+      if (toStatus === "IN_PROGRESS" && task.assigneeId) await startTimer(tx, task.id, task.assigneeId);
+      const doneAt = toStatus === "DONE" ? new Date() : null;
+      if (doneAt) {
+        await stopTimer(tx, task.id);
+        const spent = await tx.timeEntry.aggregate({ where: { taskId, stoppedAt: { not: null } }, _sum: { minutes: true } });
+        if ((spent._sum.minutes ?? 0) === 0) {
+          if (!hasAnyRole(actor.roles, OFFICE_ROLES)) throw new CompletionError("Нет записей времени. Возьмите задачу «В работу» — время посчитается таймером автоматически");
+          if (!Number.isInteger(actualMinutes) || !actualMinutes || actualMinutes < 1 || actualMinutes > 1440) throw new CompletionError("Укажите фактическое время от 1 до 1440 минут", true);
+          await tx.timeEntry.create({ data: { taskId, userId: task.assigneeId ?? actor.id, source: "manual", stoppedAt: doneAt, minutes: actualMinutes } });
+          await tx.changeLog.create({ data: { actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source, entity: "task", entityId: task.id, action: "time", newValue: { actual: actualMinutes } } });
+        }
+      }
+      await tx.task.update({ where: { id: task.id }, data: { status: toStatus, splitRevision: { increment: 1 }, ...(doneAt ? { doneAt, doneById: actor.id } : {}) } });
+      let payroll: { name: string; amount: string; currency: string } | null = null;
+      if (doneAt && task.assigneeId && task.work) {
+        const assignee = await tx.user.findUnique({ where: { id: task.assigneeId }, select: { name: true, payScheme: true } });
+        if (assignee?.payScheme === "PIECE" && !await tx.payrollEntry.findFirst({ where: { taskId: task.id, scheme: "PIECE" }, select: { id: true } })) {
+          const amount = taskPieceAmount(task, task.work.priceSnapshot);
+          if (moneyAtoms(amount) > BigInt(0)) {
+            const currency = task.allocationGroup?.currency ?? (await tx.orgSetting.findUnique({ where: { key: "payrollCurrency" } }))?.value ?? "BYN";
+            await tx.payrollEntry.create({ data: { userId: task.assigneeId, taskId: task.id, workId: task.work.id, projectId: task.projectId, amount, currency, scheme: "PIECE", month: doneAt.toISOString().slice(0, 7), comment: `${task.title} · ${task.project.number}` } });
+            payroll = { name: assignee.name, amount, currency };
+          }
+        }
+      }
+      await tx.changeLog.create({ data: { actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source, entity: "task", entityId: task.id, action: "status", field: "status", oldValue: task.status, newValue: toStatus } });
+      const event = await tx.domainEvent.create({ data: { type: "task.statusChanged", actor: actor.id, payload: { taskId, projectId: task.projectId, from: task.status, to: toStatus } } });
+      return { ok: true, repeated: false, task: effect, payroll, eventId: event.id };
+    });
+  } catch (error) {
+    if (error instanceof CompletionError) return { ok: false, error: error.message, ...(error.timeRequired ? { timeRequired: true } : {}) };
+    throw error;
+  }
+}

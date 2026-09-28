@@ -1,13 +1,19 @@
 import { prisma } from "@/lib/prisma";
 import type { TaskDetails } from "@/components/task-dialog";
+import type { ProductStatus } from "@prisma/client";
 import { fileVisibilityWhere, taskVisibilityWhere, workVisibilityWhere, type VisibilityActor } from "@/server/access/visibility";
+import { FULL_SHARE_UNITS, personalQuantity, taskPieceAmount } from "@/lib/work-shares";
+import { getPayrollCurrency } from "@/server/payroll/queries";
+import { canSplitTask } from "./share-policy";
 
 // Общий select задачи для карточек/списков (§9: работа, зависимости, файлы).
 export const taskDetailsInclude = {
   project: { select: { id: true, number: true, title: true } },
-  product: { select: { id: true, number: true, title: true } },
+  product: { select: { id: true, number: true, title: true, engineerId: true, status: true } },
   assignee: { select: { id: true, name: true } },
   work: { select: { id: true, title: true, total: true, priceSnapshot: true } },
+  allocationGroup: { select: { currency: true } },
+  _count: { select: { payrollEntries: true } },
   files: { select: { id: true, fileName: true, hasThumb: true, mimeType: true } },
   dependencies: {
     include: {
@@ -40,12 +46,19 @@ type TaskWithIncludes = {
   estimateMinutes: number | null;
   workId: string | null;
   quantity: unknown;
+  executorShare?: unknown;
+  allocationGroupId?: string | null;
+  shareUnits?: number | null;
+  shareAmount?: unknown;
+  splitRevision?: number;
+  allocationGroup?: { currency: string | null } | null;
+  _count?: { payrollEntries: number };
   createdAt: Date;
   doneAt: Date | null;
   doneById: string | null;
   createdById: string | null;
   project: { id: string; number: string; title: string };
-  product: { id: string; number: string; title: string } | null;
+  product: { id: string; number: string; title: string; engineerId: string | null; status: ProductStatus } | null;
   assignee: { id: string; name: string } | null;
   work: { id: string; title: string; total: unknown; priceSnapshot: unknown } | null;
   files: { id: string; fileName: string; hasThumb: boolean; mimeType: string }[];
@@ -58,6 +71,7 @@ type TaskWithIncludes = {
 // пачкой и имена автора/исполнителя закрытия.
 export async function mapTaskDetails(
   tasks: TaskWithIncludes[],
+  actor?: VisibilityActor,
 ): Promise<TaskDetails[]> {
   const taskIds = tasks.map((task) => task.id);
   const spent = taskIds.length
@@ -83,8 +97,15 @@ export async function mapTaskDetails(
       })
     : [];
   const userNames = new Map(users.map((user) => [user.id, user.name]));
+  const currency = tasks.some((task) => task.work && !task.allocationGroup) ? await getPayrollCurrency() : null;
 
-  return tasks.map((task) => ({
+  return tasks.map((task) => {
+    const allocation = {
+      quantity: task.work && task.quantity !== null && task.quantity !== undefined ? String(task.quantity) : null,
+      executorShare: String(task.executorShare ?? 1), allocationGroupId: task.allocationGroupId ?? null,
+      shareUnits: task.shareUnits ?? FULL_SHARE_UNITS, shareAmount: task.shareAmount === null || task.shareAmount === undefined ? null : String(task.shareAmount),
+    };
+    return ({
     id: task.id,
     title: task.title,
     type: task.type,
@@ -100,6 +121,13 @@ export async function mapTaskDetails(
     workTotal: task.work ? String(task.work.total) : null,
     workPriceSnapshot: task.work ? String(task.work.priceSnapshot) : null,
     quantity: task.quantity ? String(task.quantity) : null,
+    allocationGroupId: allocation.allocationGroupId,
+    shareUnits: allocation.shareUnits,
+    shareAmount: task.work ? taskPieceAmount(allocation, String(task.work.priceSnapshot)) : null,
+    shareCurrency: task.work ? task.allocationGroup?.currency ?? currency : null,
+    personalQuantity: personalQuantity(allocation),
+    splitRevision: task.splitRevision ?? 0,
+    canSplit: actor ? canSplitTask(actor, { ...task, paidCount: task._count?.payrollEntries ?? 0 }) : false,
     dependencies: task.dependencies.map((edge) => ({
       id: edge.dependsOn.id,
       title: edge.dependsOn.title,
@@ -118,5 +146,6 @@ export async function mapTaskDetails(
     createdByName: task.createdById
       ? (userNames.get(task.createdById) ?? null)
       : null,
-  }));
+  });
+  });
 }

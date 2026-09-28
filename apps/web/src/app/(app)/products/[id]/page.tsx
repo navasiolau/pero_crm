@@ -12,6 +12,7 @@ import { productStatusLabels } from "@/lib/product-statuses";
 import { prisma } from "@/lib/prisma";
 import { MANAGER_ROLES, OFFICE_ROLES, hasAnyRole } from "@/lib/roles";
 import { canEditProductTechnicalBlock } from "@/server/access/visibility";
+import { allocatedWorkQuantity } from "@/lib/work-shares";
 import { getFileStageConfig } from "@/server/files/stage-config";
 import { getProductFor } from "@/server/products/queries";
 import { listEngineers, listWorkers } from "@/server/projects/queries";
@@ -238,14 +239,12 @@ export default async function ProductPage({
             products={[
               { id: product.id, number: product.number, title: product.title },
             ]}
-            tasks={await mapTaskDetails(product.tasks)}
+            tasks={await mapTaskDetails(product.tasks, session.user)}
             works={product.works.map((work) => ({
               id: work.id,
               title: work.title,
               quantity: work.quantity.toString(),
-              allocated: work.tasks
-                .reduce((sum, task) => sum + Number(task.quantity ?? 0), 0)
-                .toString(),
+              allocated: allocatedWorkQuantity(work.tasks),
               priceSnapshot: work.priceSnapshot.toString(),
               total: work.total.toString(),
               linkedTask: work.tasks[0]

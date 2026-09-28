@@ -252,7 +252,7 @@ export async function getProjectFor(
       works: {
         where: workVisibilityWhere(actor),
         include: {
-          tasks: { where: taskVisibilityWhere(actor), select: { id: true, title: true, status: true, quantity: true } },
+          tasks: { where: taskVisibilityWhere(actor), select: { id: true, title: true, status: true, quantity: true, allocationGroupId: true } },
         },
         orderBy: { createdAt: "asc" },
       },

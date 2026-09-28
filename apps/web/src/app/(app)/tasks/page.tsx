@@ -32,7 +32,7 @@ export default async function TasksPage() {
     getUserPreference(session.user.id, "tasks.view"),
   ]);
 
-  const mapped = await mapTaskDetails(tasks);
+  const mapped = await mapTaskDetails(tasks, session.user);
 
   return (
     <TasksPageView

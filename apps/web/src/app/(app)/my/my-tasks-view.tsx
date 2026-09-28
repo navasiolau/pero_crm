@@ -20,6 +20,7 @@ import {
   List,
   Play,
   Plus,
+  Split,
   Square,
   Timer,
 } from "lucide-react";
@@ -42,7 +43,10 @@ import { Label } from "@/components/ui/label";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { PhotoUploadButton } from "@/components/photo-upload-button";
 import { ActualTimeDialog } from "@/components/actual-time-dialog";
+import { TaskSplitDialog } from "@/components/task-split-dialog";
+import { formatAmount } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { sharePercent } from "@/lib/work-shares";
 import { OFFICE_ROLES, hasAnyRole } from "@/lib/roles";
 import { saveViewPreference } from "@/server/preferences-actions";
 import { changeTaskStatus } from "@/server/tasks/actions";
@@ -120,6 +124,7 @@ export function MyTasksView({
   const [manualFor, setManualFor] = useState<string | null>(null);
   const [manualMinutes, setManualMinutes] = useState("60");
   const [actualFor, setActualFor] = useState<TaskDetails | null>(null);
+  const [splitFor, setSplitFor] = useState<TaskDetails | null>(null);
   const elapsed = useElapsed(timer?.startedAt ?? null);
   // Наследие: проп называется role, внутри — роли пользователя (§4)
   const roles = role;
@@ -164,6 +169,12 @@ export function MyTasksView({
   function renderTask(task: TaskDetails, faded = false) {
     const timerHere = timer?.taskId === task.id;
     const timerElsewhere = timer && !timerHere;
+    const ownQuantity = task.personalQuantity === undefined
+      ? (task.allocationGroupId ? null : task.quantity)
+      : task.personalQuantity;
+    const ownAmount = task.shareCurrency
+      ? formatAmount(task.shareAmount, task.shareCurrency)
+      : task.workId ? "—" : "Без денежного начисления";
     return (
       <Card className={faded ? "opacity-60" : ""}>
         <CardContent className="flex flex-wrap items-center gap-3 p-4">
@@ -192,6 +203,11 @@ export function MyTasksView({
             <div className="mt-0.5 text-xs text-muted-foreground">
               Время: {task.estimateMinutes ?? "—"} / {task.spentMinutes} мин
               (оценка / факт)
+            </div>
+            <div className="mt-2 flex flex-col gap-0.5 text-sm">
+              <div>Ваша доля: {sharePercent(task.shareUnits).replace(".", ",")}%</div>
+              {ownQuantity !== null ? <div>Личный объём: {ownQuantity.replace(".", ",")} ед.</div> : null}
+              <div>Сумма доли: {ownAmount}</div>
             </div>
           </div>
 
@@ -280,6 +296,11 @@ export function MyTasksView({
                   filesCount={task.files.length}
                   size="default"
                 />
+              ) : null}
+              {task.canSplit ? (
+                <Button variant="outline" disabled={pending} onClick={() => setSplitFor(task)}>
+                  <Split className="size-4" /> Разделить
+                </Button>
               ) : null}
               <Button
                 size="lg"
@@ -552,6 +573,12 @@ export function MyTasksView({
         task={actualFor}
         open={!!actualFor}
         onOpenChange={(open) => !open && setActualFor(null)}
+        onDone={() => router.refresh()}
+      />
+      <TaskSplitDialog
+        task={splitFor}
+        open={!!splitFor}
+        onOpenChange={(open) => !open && setSplitFor(null)}
         onDone={() => router.refresh()}
       />
     </div>

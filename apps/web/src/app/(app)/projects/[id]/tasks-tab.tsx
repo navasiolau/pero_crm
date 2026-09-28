@@ -38,6 +38,7 @@ import {
 } from "@/components/task-dialog";
 import { formatAmount } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { isPositiveQuantity, quantityInputError, remainingWorkQuantity } from "@/lib/work-quantity";
 import { changeTaskStatus, createTask } from "@/server/tasks/actions";
 import { addWork, removeWork } from "@/server/works/actions";
 
@@ -127,7 +128,7 @@ export function TasksTab({
           ) : null}
         </div>
         {works.map((work) => {
-          const remaining = Number(work.quantity) - Number(work.allocated);
+          const remaining = remainingWorkQuantity(work.quantity, work.allocated);
           return (
             <div
               key={work.id}
@@ -135,7 +136,7 @@ export function TasksTab({
             >
               <span className="flex-1">
                 {work.title}
-                {remaining > 0 ? (
+                {isPositiveQuantity(remaining) ? (
                   <Badge variant="secondary" className="ml-2">
                     свободно {remaining} из {work.quantity}
                   </Badge>
@@ -376,16 +377,15 @@ export function TasksTab({
               <Label>Работа (оплата)</Label>
               <SearchableSelect
                 options={works.map((work) => {
-                  const remaining =
-                    Number(work.quantity) - Number(work.allocated);
+                  const remaining = remainingWorkQuantity(work.quantity, work.allocated);
                   return {
                     value: work.id,
                     label: `${work.title} · ${formatAmount(work.priceSnapshot, "BYN")}/${"ед."}`,
                     hint:
-                      remaining > 0
+                      isPositiveQuantity(remaining)
                         ? `свободно ${remaining} из ${work.quantity}`
                         : "распределена полностью",
-                    disabled: remaining <= 0,
+                    disabled: !isPositiveQuantity(remaining),
                   };
                 })}
                 value={workId}
@@ -393,9 +393,9 @@ export function TasksTab({
                   setWorkId(value);
                   const work = works.find((item) => item.id === value);
                   const remaining = work
-                    ? Number(work.quantity) - Number(work.allocated)
-                    : 0;
-                  setQuantity(remaining > 0 ? String(remaining) : "");
+                    ? remainingWorkQuantity(work.quantity, work.allocated)
+                    : "0.00";
+                  setQuantity(isPositiveQuantity(remaining) ? remaining : "");
                 }}
                 placeholder="без работы"
                 searchPlaceholder="Поиск работы…"
@@ -411,8 +411,8 @@ export function TasksTab({
                   remaining={(() => {
                     const work = works.find((item) => item.id === workId);
                     return work
-                      ? Number(work.quantity) - Number(work.allocated)
-                      : 0;
+                      ? remainingWorkQuantity(work.quantity, work.allocated)
+                      : "0.00";
                   })()}
                 />
                 <p className="text-xs text-muted-foreground">
@@ -439,7 +439,7 @@ export function TasksTab({
               Отмена
             </Button>
             <Button
-              disabled={!title.trim() || !type || !dueAt || pending}
+              disabled={!title.trim() || !type || !dueAt || (!!workId && !!quantityInputError(quantity)) || pending}
               onClick={() =>
                 startTransition(async () => {
                   const result = await createTask({

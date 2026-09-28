@@ -7,6 +7,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { writeChangeLog } from "@/server/plugins/changelog";
 import { revalidateProductPaths } from "@/server/products/revalidate";
+import { withTaskTransaction } from "@/server/tasks/transaction";
 
 import { MANAGER_ROLES, hasAnyRole } from "@/lib/roles";
 
@@ -90,14 +91,19 @@ export async function removeWork(
   if (!session?.user) throw new Error("Не авторизован");
   if (!hasAnyRole(session.user.roles, MANAGER_ROLES)) throw new Error("Недостаточно прав");
 
-  const work = await prisma.work.findUnique({ where: { id: workId } });
-  if (!work) return { ok: false, error: "Работа не найдена" };
-  const linked = await prisma.task.count({ where: { workId } });
+  const mutation = await withTaskTransaction(async (tx) => {
+  const work = await tx.work.findUnique({ where: { id: workId } });
+  if (!work) return { ok: false as const, error: "Работа не найдена" };
+  const linked = await tx.task.count({ where: { workId } });
   if (linked > 0) {
-    return { ok: false, error: "К работе привязаны задачи — сначала удалите их" };
+    return { ok: false as const, error: "К работе привязаны задачи — сначала удалите их" };
   }
 
-  await prisma.work.delete({ where: { id: workId } });
+  await tx.work.delete({ where: { id: workId } });
+  return { ok: true as const, work };
+  });
+  if (!mutation.ok) return mutation;
+  const { work } = mutation;
   await writeChangeLog({
     actorType: "user",
     actorId: session.user.id,
