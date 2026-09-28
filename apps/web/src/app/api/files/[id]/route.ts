@@ -33,7 +33,7 @@ export async function GET(
     "Content-Disposition": thumb
       ? "inline"
       : `attachment; filename*=UTF-8''${encodeURIComponent(file.fileName)}`,
-    "Cache-Control": "private, max-age=3600",
+    "Cache-Control": "private, no-store",
   });
 
   if (s3Enabled()) {

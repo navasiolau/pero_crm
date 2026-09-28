@@ -27,7 +27,7 @@ import {
 } from "@/components/ui/select";
 import { roleLabels, roleComboLabel, isValidRolesCombination, normalizeRoles } from "@/lib/roles";
 import { cn } from "@/lib/utils";
-import { createUser, updateUser } from "@/server/users/actions";
+import { createUser, revokeUserSessions, updateUser } from "@/server/users/actions";
 import {
   getTelegramLinkStatusFor,
   unlinkTelegramFor,
@@ -409,6 +409,26 @@ export function UsersView({
               Учётная запись активна
             </label>
           </div>
+          {editing ? (
+            <div className="rounded-lg border p-3 text-sm">
+              <p className="mb-2 text-muted-foreground">
+                Смена пароля, email или ролей завершает все веб-сеансы.
+                Отключение сотрудника или смена ролей также отзывает его API-ключи.
+              </p>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={pending}
+                onClick={() => startTransition(async () => {
+                  const result = await revokeUserSessions(editing.id);
+                  if (result.ok) toast.success("Веб-сеансы завершены. Потребуется новый вход");
+                  else toast.error(result.error ?? "Ошибка");
+                })}
+              >
+                Завершить все веб-сеансы
+              </Button>
+            </div>
+          ) : null}
           {editing ? (
             <div className="rounded-lg border p-3 text-sm">
               <div className="font-medium">Telegram-бот</div>
