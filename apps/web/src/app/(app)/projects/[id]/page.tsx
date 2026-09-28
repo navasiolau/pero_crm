@@ -26,6 +26,7 @@ import { getProjectEconomics } from "@/server/finance/queries";
 import { getProjectFor, listClients, listEngineers, listManagers, listWorkers } from "@/server/projects/queries";
 import { mapTaskDetails } from "@/server/tasks/queries";
 import { getProjectMaterials } from "@/server/warehouse/queries";
+import { hasFullProjectVisibility } from "@/server/access/visibility";
 
 import { CommunicationsTab } from "./communications-tab";
 import { FilesTab } from "./files-tab";
@@ -69,22 +70,22 @@ export default async function ProjectPage({
 
   const [clients, managers, engineers, workers, changeLogs, contributions, priceItems, economics, cashAccounts, expenseArticles, materialsGroups] =
     await Promise.all([
-      listClients(),
+      listClients(session.user),
       listManagers(),
       listEngineers(),
       listWorkers(),
       prisma.changeLog.findMany({
         where: {
           OR: [
-            { entity: "project", entityId: id },
+            ...(hasFullProjectVisibility(session.user) ? [{ entity: "project", entityId: id }] : []),
             { entity: "product", entityId: { in: productIds } },
-            { entity: "task", newValue: { path: ["project"], equals: project.number } },
+            ...(hasFullProjectVisibility(session.user) ? [{ entity: "task", entityId: { in: project.tasks.map((task) => task.id) } }] : []),
           ],
         },
         orderBy: { createdAt: "desc" },
         take: 50,
       }),
-      getSlotContributions("project.tab"),
+      hasFullProjectVisibility(session.user) ? getSlotContributions("project.tab") : Promise.resolve([]),
       prisma.priceItem.findMany({
         where: { active: true },
         orderBy: { name: "asc" },
@@ -105,7 +106,7 @@ export default async function ProjectPage({
         : Promise.resolve([]),
       // Сводная потребность по изделиям (вкладка «Материалы», read-only)
       showMaterials
-        ? Promise.all(project.products.map((product) => getProjectMaterials(product.id)))
+        ? Promise.all(project.products.map((product) => getProjectMaterials(product.id, session.user)))
         : Promise.resolve([]),
     ]);
 
@@ -265,7 +266,7 @@ export default async function ProjectPage({
             }
             doneAt={doneEntry ? doneEntry.createdAt.toISOString() : null}
             canManage={canManage}
-            showAmount={showAmount}
+            showAmount={hasFullProjectVisibility(session.user)}
             clients={clients.map((client) => ({ id: client.id, name: displayClientName(client) }))}
             managers={managers.map((manager) => ({ id: manager.id, name: manager.name }))}
             productEngineers={project.products

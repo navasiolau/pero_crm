@@ -2,15 +2,8 @@ import type { Prisma, ProductStatus, Role } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
 import { PRODUCT_STATUSES } from "@/lib/product-statuses";
-import { OFFICE_ROLES, hasAnyRole } from "@/lib/roles";
-import { taskDetailsInclude } from "@/server/tasks/queries";
-
-// Видимость изделий = видимость родительских проектов (§4):
-// офисные роли — все; работник/монтажник — изделия проектов со своими задачами.
-function productVisibilityFilter(userId: string, roles: Role[]) {
-  if (hasAnyRole(roles, OFFICE_ROLES)) return {};
-  return { project: { tasks: { some: { assigneeId: userId } } } };
-}
+import { fileVisibilityWhere, productVisibilityWhere, taskVisibilityWhere, workVisibilityWhere, type VisibilityActor } from "@/server/access/visibility";
+import { taskDetailsIncludeFor } from "@/server/tasks/queries";
 
 // ── Список изделий (/products): серверные фильтры/сортировка/пагинация ──
 // Состояние — в URL (?q=&status=&project=&client=&active=0&sort=&dir=&page=).
@@ -61,16 +54,8 @@ function productWhere(
   roles: Role[],
   filters: ProductListFilters,
 ): Prisma.ProductWhereInput {
-  const visibility = productVisibilityFilter(userId, roles);
-  const where: Prisma.ProductWhereInput = { ...visibility };
-  // Условие по проекту: фильтр видимости (у работника — по задачам)
-  // и фильтр по клиенту объединяются в одном объекте project
-  const projectCondition: Prisma.ProjectWhereInput =
-    typeof visibility.project === "object" && visibility.project !== null
-      ? { ...visibility.project }
-      : {};
-  if (filters.clientId) projectCondition.clientId = filters.clientId;
-  if (Object.keys(projectCondition).length > 0) where.project = projectCondition;
+  const where: Prisma.ProductWhereInput = {};
+  if (filters.clientId) where.project = { clientId: filters.clientId };
   // Инженер — на самом изделии (§10, решение владельца 09.2026)
   if (filters.engineerId) where.engineerId = filters.engineerId;
   const statusConditions: Prisma.ProductWhereInput[] = [];
@@ -101,7 +86,7 @@ function productWhere(
       },
     ];
   }
-  return where;
+  return { AND: [productVisibilityWhere({ id: userId, roles }), where] };
 }
 
 export async function listProducts(
@@ -162,7 +147,7 @@ async function fetchProductRows(
 // изделий (чтобы не было пустых значений), slim — без лишних полей.
 export async function listProductFilterOptions(userId: string, roles: Role[]) {
   const products = await prisma.product.findMany({
-    where: productVisibilityFilter(userId, roles),
+    where: productVisibilityWhere({ id: userId, roles }),
     select: {
       project: {
         select: {
@@ -224,9 +209,9 @@ export function parseProductListParams(sp: Record<string, string | string[] | un
 }
 
 // Изделия проекта — опции для селектов (задача/работа/файл, вкладка «Задачи»)
-export async function listProductOptions(projectId: string) {
+export async function listProductOptions(projectId: string, actor: VisibilityActor) {
   return prisma.product.findMany({
-    where: { projectId },
+    where: { AND: [{ projectId }, productVisibilityWhere(actor)] },
     select: { id: true, number: true, title: true },
     orderBy: { number: "asc" },
   });
@@ -237,11 +222,11 @@ export async function getProductFor(
   roles: Role[],
   key: string,
 ) {
+  const actor = { id: userId, roles };
   // Адрес карточки — /products/<номер>; допускаем и внутренний id
   const product = await prisma.product.findFirst({
     where: {
-      ...productVisibilityFilter(userId, roles),
-      OR: [{ number: key }, { id: key }],
+      AND: [productVisibilityWhere(actor), { OR: [{ number: key }, { id: key }] }],
     },
     include: {
       project: {
@@ -265,18 +250,20 @@ export async function getProductFor(
       },
       surveyor: { select: { id: true, name: true, position: true, phone: true } },
       engineer: { select: { id: true, name: true, position: true, phone: true } },
-      sketchFile: { select: { id: true, fileName: true, mimeType: true, size: true } },
+      sketchFile: { where: fileVisibilityWhere(actor), select: { id: true, fileName: true, mimeType: true, size: true } },
       tasks: {
-        include: taskDetailsInclude,
+        where: taskVisibilityWhere(actor),
+        include: taskDetailsIncludeFor(actor),
         orderBy: { createdAt: "desc" },
       },
       works: {
+        where: workVisibilityWhere(actor),
         include: {
-          tasks: { select: { id: true, title: true, status: true, quantity: true } },
+          tasks: { where: taskVisibilityWhere(actor), select: { id: true, title: true, status: true, quantity: true } },
         },
         orderBy: { createdAt: "asc" },
       },
-      files: { orderBy: { createdAt: "desc" } },
+      files: { where: fileVisibilityWhere(actor), orderBy: { createdAt: "desc" } },
       statusHistory: { orderBy: { createdAt: "desc" } },
     },
   });

@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { OFFICE_ROLES, hasAnyRole } from "@/lib/roles";
+import { clientVisibilityWhere, projectVisibilityWhere } from "@/server/access/visibility";
 
 import { ClientsView } from "./clients-view";
 
@@ -23,12 +24,14 @@ export default async function ClientsPage({
 
   const { focus } = await searchParams;
   const clients = await prisma.client.findMany({
+    where: clientVisibilityWhere(session.user),
     include: {
       projects: {
+        where: projectVisibilityWhere(session.user),
         select: { id: true, number: true, title: true },
         orderBy: { createdAt: "desc" },
       },
-      _count: { select: { projects: true } },
+      _count: { select: { projects: { where: projectVisibilityWhere(session.user) } } },
     },
     orderBy: { name: "asc" },
   });

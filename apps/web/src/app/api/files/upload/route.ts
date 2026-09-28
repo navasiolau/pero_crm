@@ -3,12 +3,12 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import sharp from "sharp";
-import type { FileCategory, FileStage, Role } from "@prisma/client";
+import type { FileCategory, FileStage } from "@prisma/client";
 
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { UPLOADS_ROOT, s3Enabled, s3Put, fileKey, thumbKey } from "@/lib/s3";
-import { hasAnyRole } from "@/lib/roles";
+import { resolveUploadContext } from "@/server/files/upload-context";
 import { writeChangeLog } from "@/server/plugins/changelog";
 import { notifyOrg } from "@/server/notifications/notify";
 import { getFileStageConfig } from "@/server/files/stage-config";
@@ -27,8 +27,6 @@ const CATEGORIES: FileCategory[] = [
   "DOCUMENT",
   "OTHER",
 ];
-// Кто может загружать в любой проект (§4); остальным — только свои задачи
-const OFFICE: Role[] = ["ADMIN", "DIRECTOR", "MANAGER", "ENGINEER"];
 
 function sanitizeFileName(name: string): string {
   return name.replace(/[^\wа-яА-ЯёЁ.-]+/g, "_").slice(-80);
@@ -52,42 +50,19 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Файл больше 25 МБ" }, { status: 413 });
   }
 
-  // Проверка видимости проекта (§4)
-  const project = await prisma.project.findFirst({
-    where: hasAnyRole(session.user.roles, OFFICE)
-      ? { id: projectId }
-      : { id: projectId, tasks: { some: { assigneeId: session.user.id } } },
-    select: { id: true, number: true },
-  });
-  if (!project) {
-    return NextResponse.json({ error: "Проект не найден" }, { status: 404 });
-  }
-
   const productIdRaw = form.get("productId");
-  const productId =
+  const requestedProductId =
     typeof productIdRaw === "string" && productIdRaw ? productIdRaw : null;
-  // Изделие должно принадлежать проекту
-  let productNumber: string | null = null;
-  if (productId) {
-    const product = await prisma.product.findFirst({
-      where: { id: productId, projectId },
-      select: { id: true, number: true },
-    });
-    if (!product) {
-      return NextResponse.json(
-        { error: "Изделие не найдено в этом проекте" },
-        { status: 400 },
-      );
-    }
-    productNumber = product.number;
-  }
+  const taskId = typeof form.get("taskId") === "string" && form.get("taskId") ? (form.get("taskId") as string) : null;
+  const context = await resolveUploadContext(prisma, session.user, { projectId, productId: requestedProductId, taskId });
+  if (!context) return NextResponse.json({ error: "Проект, изделие или задача не найдены" }, { status: 404 });
+  const { project, productId, productNumber } = context;
 
   const categoryRaw = form.get("category");
   const category: FileCategory = CATEGORIES.includes(categoryRaw as FileCategory)
     ? (categoryRaw as FileCategory)
     : "OTHER";
   const caption = typeof form.get("caption") === "string" ? (form.get("caption") as string) : null;
-  const taskId = typeof form.get("taskId") === "string" && form.get("taskId") ? (form.get("taskId") as string) : null;
 
   // Проверка расширения по настройкам плагина file-stages (если включён).
   // Возвращаем 422 до записи на диск — плагин меняет базовое поведение загрузки.

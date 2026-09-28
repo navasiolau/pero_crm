@@ -8,6 +8,7 @@ import { prisma } from "@/lib/prisma";
 import { writeChangeLog } from "@/server/plugins/changelog";
 import { notifyOrg } from "@/server/notifications/notify";
 import { OFFICE_ROLES, hasAnyRole } from "@/lib/roles";
+import { projectVisibilityWhere } from "@/server/access/visibility";
 
 
 const schema = z.object({
@@ -28,8 +29,8 @@ export async function addCommunication(
   }
   const data = parsed.data;
 
-  const project = await prisma.project.findUnique({
-    where: { id: data.projectId },
+  const project = await prisma.project.findFirst({
+    where: { AND: [{ id: data.projectId }, projectVisibilityWhere(session.user)] },
     select: { id: true, number: true, clientId: true },
   });
   if (!project) return { ok: false, error: "Проект не найден" };

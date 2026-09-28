@@ -10,7 +10,8 @@ import { formatAmount } from "@/lib/format";
 import { displayClientName } from "@/lib/labels";
 import { productStatusLabels } from "@/lib/product-statuses";
 import { prisma } from "@/lib/prisma";
-import { MANAGER_ROLES, OFFICE_ROLES, hasAnyRole, hasRole } from "@/lib/roles";
+import { MANAGER_ROLES, OFFICE_ROLES, hasAnyRole } from "@/lib/roles";
+import { canEditProductTechnicalBlock } from "@/server/access/visibility";
 import { getFileStageConfig } from "@/server/files/stage-config";
 import { getProductFor } from "@/server/products/queries";
 import { listEngineers, listWorkers } from "@/server/projects/queries";
@@ -42,7 +43,7 @@ export default async function ProductPage({
   if (!product) notFound();
 
   const canManage = hasAnyRole(role, MANAGER_ROLES);
-  const canEditTech = canManage || hasRole(role, "ENGINEER");
+  const canEditTech = canEditProductTechnicalBlock(session.user, product);
   const showAmount = hasAnyRole(role, OFFICE_ROLES);
   const showMaterials = hasAnyRole(role, OFFICE_ROLES);
   const showMoney = hasAnyRole(role, ["ADMIN", "DIRECTOR"]);
@@ -58,8 +59,8 @@ export default async function ProductPage({
         where: { active: true },
         orderBy: { name: "asc" },
       }),
-      showMaterials ? getProjectMaterials(product.id) : Promise.resolve(null),
-      showMaterials && canManage ? listMaterialOptions() : Promise.resolve([]),
+      showMaterials ? getProjectMaterials(product.id, session.user) : Promise.resolve(null),
+      showMaterials && canManage ? listMaterialOptions(session.user) : Promise.resolve([]),
     ]);
 
   const authorIds = [

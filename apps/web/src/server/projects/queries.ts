@@ -4,19 +4,16 @@ import { prisma } from "@/lib/prisma";
 import {
   ASSIGNEE_ROLES,
   MANAGER_ROLES,
-  OFFICE_ROLES,
-  hasAnyRole,
 } from "@/lib/roles";
 import { STAGES } from "@/lib/stages";
-import { taskDetailsInclude } from "@/server/tasks/queries";
+import { taskDetailsIncludeFor } from "@/server/tasks/queries";
 import { listProjectShortages } from "@/server/warehouse/queries";
+import { clientVisibilityWhere, fileVisibilityWhere, hasFullProjectVisibility, productVisibilityWhere, projectVisibilityWhere, taskVisibilityWhere, workVisibilityWhere, type VisibilityActor } from "@/server/access/visibility";
 
-// Правила видимости (§4, комбинированные роли): офисные роли (любая из
-// ролей пользователя) — все проекты; остальные — только проекты со своими
-// задачами.
-function projectVisibilityFilter(userId: string, roles: Role[]) {
-  if (hasAnyRole(roles, OFFICE_ROLES)) return {};
-  return { tasks: { some: { assigneeId: userId } } };
+function scopedProjectAmounts<T extends { initialPrice: unknown; delivery: unknown; unloading: unknown; installation: unknown }>(project: T, actor: VisibilityActor) {
+  return hasFullProjectVisibility(actor) ? project : {
+    ...project, initialPrice: null, delivery: null, unloading: null, installation: null,
+  };
 }
 
 // ── Список проектов: серверные фильтры/сортировка/пагинация ─────────────
@@ -69,9 +66,8 @@ function projectWhere(
   roles: Role[],
   filters: ProjectListFilters,
 ): Prisma.ProjectWhereInput {
-  const where: Prisma.ProjectWhereInput = {
-    ...projectVisibilityFilter(userId, roles),
-  };
+  const actor = { id: userId, roles };
+  const where: Prisma.ProjectWhereInput = {};
   // Этап: галочка «Только незавершённые» (скрывает DONE и REFUSED — решение
   // владельца, 08.2026) и явный фильтр по этапу сочетаются через AND
   const stageConditions: Prisma.ProjectWhereInput[] = [];
@@ -86,7 +82,7 @@ function projectWhere(
   if (filters.managerId) where.managerId = filters.managerId;
   // Инженер — на изделии (§10): проект «инженера X» = есть хоть одно его изделие
   if (filters.engineerId)
-    where.products = { some: { engineerId: filters.engineerId } };
+    where.products = { some: { AND: [productVisibilityWhere(actor), { engineerId: filters.engineerId }] } };
   const q = filters.q?.trim();
   if (q) {
     where.OR = [
@@ -103,7 +99,7 @@ function projectWhere(
       },
     ];
   }
-  return where;
+  return { AND: [projectVisibilityWhere(actor), where] };
 }
 
 function projectOrderBy(
@@ -157,9 +153,17 @@ export async function listProjects(
   paging?: ListPaging,
 ): Promise<{ rows: Awaited<ReturnType<typeof fetchProjectRows>>; total: number }> {
   const where = projectWhere(userId, roles, filters);
+  const actor = { id: userId, roles };
   const orderBy = projectOrderBy(filters.sort, filters.dir ?? "desc");
+  // Prisma's relation-count ordering cannot filter the count. Sort the visible
+  // counts before pagination so hidden siblings cannot affect ordering.
+  if (filters.sort === "products" && !hasFullProjectVisibility(actor)) {
+    const rows = await fetchProjectRows(where, PROJECT_SORT_MAP.number("desc"), undefined, undefined, actor);
+    rows.sort((a, b) => (a._count.products - b._count.products) * (filters.dir === "asc" ? 1 : -1));
+    return { rows: paging ? rows.slice((paging.page - 1) * paging.pageSize, paging.page * paging.pageSize) : rows, total: rows.length };
+  }
   if (!paging) {
-    const rows = await fetchProjectRows(where, orderBy, undefined, undefined);
+    const rows = await fetchProjectRows(where, orderBy, undefined, undefined, actor);
     return { rows, total: rows.length };
   }
   const [rows, total] = await Promise.all([
@@ -168,6 +172,7 @@ export async function listProjects(
       orderBy,
       (paging.page - 1) * paging.pageSize,
       paging.pageSize,
+      actor,
     ),
     prisma.project.count({ where }),
   ]);
@@ -179,14 +184,19 @@ async function fetchProjectRows(
   orderBy: Prisma.ProjectOrderByWithRelationInput[],
   skip: number | undefined,
   take: number | undefined,
+  actor: VisibilityActor,
 ) {
   const projects = await prisma.project.findMany({
     where,
     include: {
       client: { select: { id: true, name: true, lastName: true, middleName: true } },
       manager: { select: { id: true, name: true } },
-      products: { select: { id: true, expectedPrice: true } },
-      _count: { select: { tasks: true, files: true, products: true } },
+      products: { where: productVisibilityWhere(actor), select: { id: true, expectedPrice: true } },
+      _count: { select: {
+        tasks: { where: taskVisibilityWhere(actor) },
+        files: { where: fileVisibilityWhere(actor) },
+        products: { where: productVisibilityWhere(actor) },
+      } },
     },
     orderBy,
     skip,
@@ -194,18 +204,18 @@ async function fetchProjectRows(
   });
   // Бейдж «Нехватка материалов» на канбане/в таблице (§12) — агрегат
   // по изделиям проекта, один запрос на весь список
-  const shortages = await listProjectShortages(projects.map((project) => project.id));
+  const shortages = await listProjectShortages(projects.map((project) => project.id), actor);
   // Стоимость проекта = Σ цен изделий + доставка/выгрузка/монтаж (в валюте проекта)
   return projects.map((project) => ({
-    ...project,
+    ...scopedProjectAmounts(project, actor),
     totalPrice:
       project.products.reduce(
         (sum, product) => sum + Number(product.expectedPrice ?? 0),
         0,
       ) +
-      Number(project.delivery ?? 0) +
+      (hasFullProjectVisibility(actor) ? Number(project.delivery ?? 0) +
       Number(project.unloading ?? 0) +
-      Number(project.installation ?? 0),
+      Number(project.installation ?? 0) : 0),
     hasMaterialShortage: shortages.has(project.id),
   }));
 }
@@ -215,12 +225,14 @@ export async function getProjectFor(
   roles: Role[],
   projectId: string,
 ) {
+  const actor = { id: userId, roles };
   const project = await prisma.project.findFirst({
-    where: { id: projectId, ...projectVisibilityFilter(userId, roles) },
+    where: { AND: [{ id: projectId }, projectVisibilityWhere(actor)] },
     include: {
       client: true,
       manager: { select: { id: true, name: true } },
       products: {
+        where: productVisibilityWhere(actor),
         include: {
           engineer: { select: { id: true, name: true } },
           statusHistory: { orderBy: { createdAt: "desc" } },
@@ -233,18 +245,21 @@ export async function getProjectFor(
         ],
       },
       tasks: {
-        include: taskDetailsInclude,
+        where: taskVisibilityWhere(actor),
+        include: taskDetailsIncludeFor(actor),
         orderBy: { createdAt: "desc" },
       },
       works: {
+        where: workVisibilityWhere(actor),
         include: {
-          tasks: { select: { id: true, title: true, status: true, quantity: true } },
+          tasks: { where: taskVisibilityWhere(actor), select: { id: true, title: true, status: true, quantity: true } },
         },
         orderBy: { createdAt: "asc" },
       },
-      files: { orderBy: { createdAt: "desc" } },
+      files: { where: fileVisibilityWhere(actor), orderBy: { createdAt: "desc" } },
       communications: { orderBy: { happenedAt: "desc" } },
       payments: {
+        where: hasFullProjectVisibility(actor) ? {} : { id: { in: [] } },
         include: {
           cashAccount: { select: { name: true } },
           expenseArticle: { select: { name: true } },
@@ -254,20 +269,22 @@ export async function getProjectFor(
       stageHistory: { orderBy: { createdAt: "desc" } },
     },
   });
-  return project;
+  return project ? scopedProjectAmounts(project, actor) : null;
 }
 
-export async function listClients() {
+export async function listClients(actor: VisibilityActor) {
   return prisma.client.findMany({
-    include: { _count: { select: { projects: true } } },
+    where: clientVisibilityWhere(actor),
+    include: { _count: { select: { projects: { where: projectVisibilityWhere(actor) } } } },
     orderBy: { name: "asc" },
   });
 }
 
 // Slim-вариант для фильтров/диалогов: без счётчиков, но с ФИО
 // (displayClientName собирает «Фамилия Имя Отчество»).
-export async function listClientOptions() {
+export async function listClientOptions(actor: VisibilityActor) {
   return prisma.client.findMany({
+    where: clientVisibilityWhere(actor),
     select: { id: true, name: true, lastName: true, middleName: true },
     orderBy: [{ lastName: "asc" }, { name: "asc" }],
   });
