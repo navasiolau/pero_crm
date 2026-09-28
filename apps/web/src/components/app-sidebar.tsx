@@ -15,6 +15,7 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar"
 import { navItemsForRole } from "@/lib/nav"
+import { homePathForRoles } from "@/lib/home-route"
 
 export function AppSidebar({
   roles,
@@ -29,7 +30,7 @@ export function AppSidebar({
       <SidebarHeader>
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton size="lg" render={<Link href="/" />}>
+            <SidebarMenuButton size="lg" render={<Link href={homePathForRoles(roles)} />}>
               <Logo className="size-8" />
               <span className="truncate text-base font-semibold">PERO CRM</span>
             </SidebarMenuButton>

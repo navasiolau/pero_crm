@@ -1,0 +1,129 @@
+{
+  "checkedAt": "2026-09-28T10:58:46.336Z",
+  "database": "localhost:5433/pero_crm",
+  "containerId": "bf45c761b5687e54bff1aafea82e8647925b5b425d6743ebdc7d33f4824b0ed5",
+  "signedTestSessions": true,
+  "passwordLoginTested": false,
+  "roleCombinations": [
+    "MOUNTER",
+    "WORKER",
+    "ACCOUNTANT",
+    "DIRECTOR",
+    "ENGINEER",
+    "ADMIN",
+    "MANAGER",
+    "ENGINEER+MANAGER"
+  ],
+  "fixturesCreated": false,
+  "schemaChanged": false,
+  "applicationStartupPluginMetadataSync": true,
+  "unchangedBusinessTables": 13,
+  "baseline": {
+    "User": {
+      "count": 18,
+      "hash": "76365a47b05102e28cff0590bc3d45e2"
+    },
+    "Client": {
+      "count": 175,
+      "hash": "2c5ef2342b70ef02a184f743a37083cf"
+    },
+    "Project": {
+      "count": 174,
+      "hash": "77ceb243049b552c381bf6c587dc49e2"
+    },
+    "Product": {
+      "count": 1305,
+      "hash": "49848f9aa0b1323d7d7e3f381bbbe3b9"
+    },
+    "Task": {
+      "count": 1131,
+      "hash": "ae78bed5dcc5903210c7ab93eacd33a8"
+    },
+    "Work": {
+      "count": 6449,
+      "hash": "2e342b2de1763f1fc2b0274ae681d743"
+    },
+    "File": {
+      "count": 4726,
+      "hash": "c4cf3d1dfaa87a5249135c5e2d26f398"
+    },
+    "Payment": {
+      "count": 0,
+      "hash": "d41d8cd98f00b204e9800998ecf8427e"
+    },
+    "Payout": {
+      "count": 0,
+      "hash": "d41d8cd98f00b204e9800998ecf8427e"
+    },
+    "PayrollEntry": {
+      "count": 0,
+      "hash": "d41d8cd98f00b204e9800998ecf8427e"
+    },
+    "Material": {
+      "count": 2119,
+      "hash": "74265fb7b2f351c0f4989cecbbeaf195"
+    },
+    "ProjectMaterial": {
+      "count": 1149,
+      "hash": "25d26f1ee4c6c3e6cb39042bfc6bff8b"
+    },
+    "StockMovement": {
+      "count": 1568,
+      "hash": "051e62d72671e89f67e86baf2b329dd8"
+    }
+  },
+  "after": {
+    "User": {
+      "count": 18,
+      "hash": "76365a47b05102e28cff0590bc3d45e2"
+    },
+    "Client": {
+      "count": 175,
+      "hash": "2c5ef2342b70ef02a184f743a37083cf"
+    },
+    "Project": {
+      "count": 174,
+      "hash": "77ceb243049b552c381bf6c587dc49e2"
+    },
+    "Product": {
+      "count": 1305,
+      "hash": "49848f9aa0b1323d7d7e3f381bbbe3b9"
+    },
+    "Task": {
+      "count": 1131,
+      "hash": "ae78bed5dcc5903210c7ab93eacd33a8"
+    },
+    "Work": {
+      "count": 6449,
+      "hash": "2e342b2de1763f1fc2b0274ae681d743"
+    },
+    "File": {
+      "count": 4726,
+      "hash": "c4cf3d1dfaa87a5249135c5e2d26f398"
+    },
+    "Payment": {
+      "count": 0,
+      "hash": "d41d8cd98f00b204e9800998ecf8427e"
+    },
+    "Payout": {
+      "count": 0,
+      "hash": "d41d8cd98f00b204e9800998ecf8427e"
+    },
+    "PayrollEntry": {
+      "count": 0,
+      "hash": "d41d8cd98f00b204e9800998ecf8427e"
+    },
+    "Material": {
+      "count": 2119,
+      "hash": "74265fb7b2f351c0f4989cecbbeaf195"
+    },
+    "ProjectMaterial": {
+      "count": 1149,
+      "hash": "25d26f1ee4c6c3e6cb39042bfc6bff8b"
+    },
+    "StockMovement": {
+      "count": 1568,
+      "hash": "051e62d72671e89f67e86baf2b329dd8"
+    }
+  }
+}
