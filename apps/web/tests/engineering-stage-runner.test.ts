@@ -21,6 +21,8 @@ test("reviewed staging bundle builds locally without connecting or running its e
   const bundle = await buildEngineeringStageBundle();
   assert.ok(bundle.length > 0 && bundle.length < 768 * 1024);
   assert.match(bundle.toString("utf8"), /CRM_ENGINEERING_QA_INPUT/);
+  assert.equal(/import\(["']@auth\/core\/jwt["']\)/.test(bundle.toString("utf8")), false,
+    "The standalone web image does not ship the JWT module as an external package");
 });
 
 test("staging entry rejects a local or extended target before a DB client exists", () => {

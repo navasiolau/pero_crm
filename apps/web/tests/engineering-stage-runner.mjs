@@ -75,7 +75,7 @@ export function validateEngineeringStageSeal(seal) {
 export async function buildEngineeringStageBundle() {
   const { build } = createRequire(require.resolve("tsx/package.json"))("esbuild");
   const built = await build({ entryPoints: [ENTRY], bundle: true, write: false, platform: "node", format: "esm", target: "node22",
-    external: ["@prisma/client", "@node-rs/argon2", "@auth/core/jwt"], logLevel: "silent" });
+    external: ["@prisma/client", "@node-rs/argon2"], logLevel: "silent" });
   stop(built.outputFiles.length === 1 && built.outputFiles[0].contents.length <= 768 * 1024, "BUNDLE_SIZE_INVALID");
   return Buffer.from(built.outputFiles[0].contents);
 }
