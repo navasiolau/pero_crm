@@ -3,6 +3,9 @@
  * Input is PRIVATE, in memory: {baseUrl,outputDir,plan,sessions,httpCredentials?}.
  * plan is the minimal owned-fixture plan WITHOUT passwordHash/baseline/secrets.
  * sessions comes from executeOwnedQa(... operation:'sessions').
+ * Only the exact HTTPS staging origin may additionally supply companionCookie
+ * (authjs.session-token) from the reviewed guest-side session bridge. Both
+ * token values remain private and are redacted from every diagnostic.
  *
  * Only http://localhost:3105, http://127.0.0.1:3105 and the exact HTTPS staging
  * origin are accepted. Root verifies native DB/container/image before invoking.
@@ -64,6 +67,21 @@ export function workSharesTimerSeconds(label) {
   return Number.isSafeInteger(seconds) ? seconds : null;
 }
 
+export function workSharesSessionCookies(profile) {
+  return [{ ...profile.cookie }, ...(profile.companionCookie === undefined ? [] : [{ ...profile.companionCookie }])];
+}
+
+export function createWorkSharesBrowserRedactor(sessions, httpCredentials) {
+  const secretValues = [...sessions.flatMap(workSharesSessionCookies).map((cookie) => cookie.value), httpCredentials?.username, httpCredentials?.password].filter(Boolean);
+  if (httpCredentials) secretValues.push(Buffer.from(`${httpCredentials.username}:${httpCredentials.password}`).toString("base64"));
+  return (value) => {
+    let text = String(value ?? "");
+    for (const secret of secretValues) text = text.split(secret).join("[REDACTED]");
+    return text.replace(/((?:authorization|proxy-authorization|cookie|set-cookie)["'\s]*[:=]\s*)[^\r\n]*/gi, "$1[REDACTED]")
+      .replace(/\b(?:[A-Za-z0-9_-]{8,}\.){4}[A-Za-z0-9_-]+\b/g, "[REDACTED_JWE]");
+  };
+}
+
 export function validateWorkSharesBrowserInput({ baseUrl, plan, sessions } = {}) {
   let url;
   try { url = new URL(baseUrl); } catch { throw new WorkSharesBrowserStop("BASE_URL_INVALID"); }
@@ -83,10 +101,20 @@ export function validateWorkSharesBrowserInput({ baseUrl, plan, sessions } = {})
   const profiles = Object.fromEntries(sessions.map((item) => [item.role, item]));
   guard(profiles.manager && profiles.worker && profiles.mounter && ID.test(profiles.manager.userId ?? ""), "SESSION_PROFILES_INVALID");
   guard(profiles.worker.userId === plan.users[0].id && profiles.mounter.userId === plan.users[1].id && new Set(sessions.map((item) => item.userId)).size === 3, "SESSION_IDENTITY_MISMATCH");
+  const primaryCookieValues = new Set(sessions.map((item) => item.cookie?.value));
+  const companionCookieValues = new Set();
   for (const item of sessions) {
     const cookie = item.cookie;
     guard(cookie?.name === (url.protocol === "https:" ? "__Secure-authjs.session-token" : "authjs.session-token") && typeof cookie.value === "string" && cookie.value.length > 0, "SIGNED_SESSION_COOKIE_REQUIRED");
     guard(cookie.domain === url.hostname && cookie.path === "/" && cookie.httpOnly === true && cookie.secure === (url.protocol === "https:") && cookie.sameSite === "Lax", "SESSION_COOKIE_SCOPE_MISMATCH");
+    const companion = item.companionCookie;
+    if (companion !== undefined) {
+      guard(url.origin === STAGING_ORIGIN, "COMPANION_COOKIE_STAGE_ONLY");
+      guard(record(companion) && companion.name === "authjs.session-token" && typeof companion.value === "string" && companion.value.length > 0, "COMPANION_COOKIE_NAMESPACE_OR_VALUE_INVALID");
+      guard(companion.domain === cookie.domain && companion.path === cookie.path && companion.httpOnly === true && companion.secure === true && companion.sameSite === "Lax", "COMPANION_COOKIE_SCOPE_MISMATCH");
+      guard(!primaryCookieValues.has(companion.value) && !companionCookieValues.has(companion.value), "COMPANION_COOKIE_DUPLICATE");
+      companionCookieValues.add(companion.value);
+    }
   }
   return { origin: url.origin, local: LOCAL_ORIGINS.has(url.origin), profiles };
 }
@@ -161,8 +189,7 @@ async function runWorkSharesBrowserScenario(input, completionOnly) {
   const screenshots = [];
   const failures = [];
   const actionIds = new Map();
-  const secretValues = [...sessions.map((item) => item.cookie.value), httpCredentials?.username, httpCredentials?.password].filter(Boolean);
-  if (httpCredentials) secretValues.push(Buffer.from(`${httpCredentials.username}:${httpCredentials.password}`).toString("base64"));
+  const redact = createWorkSharesBrowserRedactor(sessions, httpCredentials);
   let browser;
   let armed = null;
   let stopping = false;
@@ -172,12 +199,6 @@ async function runWorkSharesBrowserScenario(input, completionOnly) {
   let counter = 0;
   let actionsDrained = false;
 
-  function redact(value) {
-    let text = String(value ?? "");
-    for (const secret of secretValues) text = text.split(secret).join("[REDACTED]");
-    return text.replace(/((?:authorization|proxy-authorization|cookie|set-cookie)["'\s]*[:=]\s*)[^\r\n]*/gi, "$1[REDACTED]")
-      .replace(/\b(?:[A-Za-z0-9_-]{8,}\.){4}[A-Za-z0-9_-]+\b/g, "[REDACTED_JWE]");
-  }
   function durable(file, bytes, replace = false) {
     const target = join(directory, file);
     const temp = replace ? `${target}.next` : target;
@@ -360,7 +381,13 @@ async function runWorkSharesBrowserScenario(input, completionOnly) {
     });
     // Attach a rejection handler before click waits for actionability.
     void result.catch(() => {});
-    try { await click(); return await result; }
+    try {
+      journal({ event: "click-start", role, kind: spec.kind, taskId: spec.taskId ?? null,
+        documentReady: await page.evaluate(() => document.readyState) });
+      await click();
+      journal({ event: "click-returned", role, kind: spec.kind, upstreamIntentSeen: armed?.consumed === true });
+      return await result;
+    }
     finally { clearTimeout(timer); armed = null; }
   }
   async function step(name, run) {
@@ -372,6 +399,12 @@ async function runWorkSharesBrowserScenario(input, completionOnly) {
     guard(allowedPage(role, pathname), "SCRIPT_NAVIGATION_OUTSIDE_QA");
     const response = await page.goto(`${origin}${pathname}`, { waitUntil: "domcontentloaded", timeout: 30_000 });
     guard(response?.status() === 200 && new URL(page.url()).pathname === pathname && new URL(page.url()).origin === origin, "QA_PAGE_FAILED_OR_REDIRECTED");
+    // Interception disables browser cache. On remote staging, SSR buttons may be
+    // visible before their client bundles have loaded; never click that state.
+    // This waits for the page to settle, not for a fixed delay or a write retry.
+    await page.waitForLoadState("load", { timeout: 30_000 });
+    await page.waitForLoadState("networkidle", { timeout: 30_000 });
+    journal({ event: "page-ready", role, pathname, documentReady: await page.evaluate(() => document.readyState) });
     const sw = await page.evaluate(() => ({ apiAbsent: !("serviceWorker" in navigator), serwistAbsent: typeof window.serwist === "undefined" }));
     guard(sw.apiAbsent && sw.serwistAbsent && page.context().serviceWorkers().length === 0, "QA_SW_API_DISABLE_FAILED");
   }
@@ -441,7 +474,7 @@ async function runWorkSharesBrowserScenario(input, completionOnly) {
     for (const role of ["manager", "worker", "mounter"]) {
       const profile = binding.profiles[role];
       const context = await browser.newContext({ baseURL: origin, viewport: VIEWPORTS[0], deviceScaleFactor: 1, hasTouch: true, locale: "ru-RU", timezoneId: "Europe/Moscow", ignoreHTTPSErrors: false, serviceWorkers: "allow", ...(httpCredentials ? { httpCredentials } : {}) });
-      contexts.add(context); await context.addCookies([{ ...profile.cookie }]);
+      contexts.add(context); await context.addCookies(workSharesSessionCookies(profile));
       await context.addInitScript(() => {
         let owner = navigator;
         while (owner) {

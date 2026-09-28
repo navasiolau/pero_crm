@@ -105,4 +105,22 @@ QA и migration guards теперь защищают все поля ApiToken к
 
 ## Не выполнено
 
-Staging и production этой фичи, её commit/push. После первого реального split откат на прежний код начислений небезопасен: нужна совместимая версия (см. design.md).
+Production этой фичи: main остаётся на предыдущей версии до отдельного разрешения production-миграции. После первого реального split откат на прежний код начислений небезопасен: нужна совместимая версия (см. design.md).
+
+## Root: принятая staging-ревизия 614ec23
+
+Один feature-коммит `614ec23128de83f16833a56443354c2707e87c60` опубликован в отдельной ветке и затем в staging только после backup-check PASS (все защищённые данные совпали; единственное штатное изменение — lastUsedAt одного API-токена). [CI #50](https://github.com/navasiolau/pero_crm/actions/runs/36454463392) — SUCCESS: test2m46s, web build/push3m41s. Scheduled watcher развернул приложение 28.09 в17:05:19.846 UTC, web started17:05:12.645696023Z, image `sha256:12d4f2a68f35e478b8b0a1a4e1c20abaab453be82b013c55ac407279a82c0ec7`, web ID `adf54c85532acbabce512e509a8f7d63bbda3f791584f7b5d063f8c0578a7a7a`. Healthy и HTTP200 подтверждены; DB ID/start/volume не изменились.
+
+Native migration-check PASS: 33 прежние application tables, старые колонки Task, прежняя migration history сохранены; применена ровно reviewed650…f0a6, новая группа пуста, новые поля всех старых Task NULL/0. Разрешённые служебные изменения явно зафиксированы: lastUsedAt одного API-токена, updatedAt двух неизменённых по остальным полям Plugin. Данные не восстанавливались из архива и настройки refresh не менялись.
+
+Первый QA run `3205e5a8-6b3d-437c-8438-c80c99ada500` остановился на synthetic session check до UI writes. Существующий first-wave signer использовал оба cookie namespace; новый тест ошибочно передавал только __Secure-name. Runtime AUTH_URL/NEXTAUTH_URL отсутствуют; приложение/прокси не перенастраивались. Отдельный **sessions-only** bridge внутри гостя проверяет исходный JWT id/roles/sessionVersion/900s TTL и подписывает те же claims для второго namespace. Обе cookie привязаны к HTTPS staging, Secure/HttpOnly/Lax; secret не покидает гостя, session streams не сохраняются. Frozen mutation helper, wrapper и migration seals не изменялись. Проверены 23 synthetic crypto cases и19 pure browser guards.
+
+Этот первый набор точно очищен: 2 User, 1 Project, 1 Work, 2 Task, 1 dependency; native inspect ABSENT/0Task и protected hashes PASS. Новый QA control получил только прежнее доказательство принятой миграции с parent link и hashes принятой очистки; новые plan/IDs созданы заново, прежние intent/отчёты не переписаны.
+
+Run `9ce6722a-5c22-4da8-ad03-a7448c53c695` прошёл auth и8 checks, включая split/concurrent sameUUID, 700/300, зависимости до/после A, таймеры A/D и doubleDONE D. Дальше один click не породил ни одного status POST; таймаут остановил сценарий без автоматического повторения. Native capture PASS подтвердил состояние; точно удалены 2 User, 1 Project, 1 Work, 4 Task, 1 group, 2 dependencies, 2 TimeEntry, 2 PayrollEntry, 24 Notification, 6 DomainEvent, 6 ChangeLog, последующий inspect ABSENT. Причина отсутствия POST полностью не трассирована; тест стал ждать load/networkidle перед взаимодействием с удалённой страницей и писать click-start/click-returned с фактом upstream intent. Product-код не менялся.
+
+**Финальный полный run `88a00ed1-777a-4757-8cd1-8d25aff9585a` — PASS одним прогоном:** 12 checks, 14 action intents, 17 PNG; завершён17:47:07.362 UTC. TLS включён, три реальные signed sessions с проверенными User IDs/roles; запросы create/split/status реальные, два duplicate-case отправлены параллельно ровно по два раза, остальные mutations не повторялись. Подтверждены C=0,30, объём Work10,30, A700/D300/C30, зависимость B от обеих частей, четыре автоматических таймера/DONE, одна запись на оплачиваемую задачу, totals730/300.
+
+Root лично осмотрел все17 PNG на360/390: формы/preview/footer, карточки долей, таймеры, расчётники и DONE. Native capture: dataChecks PASS, settlementComplete true, четыре Task. Exact cleanup PASS: 2 User, 1 Project, 1 Work, 4 Task, 1 group, 2 dependencies, 4 TimeEntry, 3 PayrollEntry, 43 Notification, 10 DomainEvent, 10 ChangeLog; UserPreference0. Затем отдельный readonly inspect подтвердил ABSENT/0Task и сохранность защищённых чужих данных.
+
+Final control: `%LOCALAPPDATA%/Temp/pero-work-shares-stage-R6L8oL/`; screenshots: `pero-work-shares-qa-staging-3yacJn/`. Все промежуточные неуспешные отчёты сохранены. Offline/PWA и password login не тестировались. Непосредственно product/src и SQL после локальной приёмки не менялись; дополнительные коррекции относятся к QA-инструментам. Полный локальный code/guard набор после cookie-fix: **191/191 PASS**, TypeScript и scoped lint PASS.
