@@ -161,10 +161,11 @@ export function Omnisearch() {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="flex h-8 w-40 items-center gap-2 rounded-lg border bg-background px-2.5 text-sm text-muted-foreground transition-colors hover:bg-accent md:w-56"
+        aria-label="Глобальный поиск"
+        className="flex size-11 shrink-0 items-center justify-center gap-2 rounded-lg bg-background text-sm text-muted-foreground transition-colors hover:bg-accent md:h-8 md:w-56 md:border md:px-2.5"
       >
         <Search className="size-4" />
-        <span className="flex-1 truncate text-left">Поиск…</span>
+        <span className="hidden flex-1 truncate text-left md:block">Поиск…</span>
         <kbd className="hidden rounded border bg-muted px-1 text-[10px] md:inline">
           Ctrl K
         </kbd>
@@ -181,7 +182,7 @@ export function Omnisearch() {
         }}
       >
         <DialogContent
-          className="top-24 max-w-xl translate-y-0 gap-0 overflow-hidden p-0"
+          className="max-w-xl gap-0 p-0 md:top-24 md:translate-y-0 md:overflow-hidden"
           showCloseButton={false}
         >
           <DialogTitle className="sr-only">Глобальный поиск</DialogTitle>

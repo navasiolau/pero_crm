@@ -18,6 +18,7 @@ import { ClipboardList, Package, Paperclip, TriangleAlert } from "lucide-react";
 import { toast } from "sonner";
 import type { ProjectStage } from "@prisma/client";
 
+import { DragHandle } from "@/components/drag-handle";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { formatAmount } from "@/lib/format";
@@ -49,12 +50,12 @@ function ProjectCardView({
   return (
     <Card
       className={cn(
-        "cursor-grab touch-none select-none",
+        "cursor-pointer select-none",
         dragging && "rotate-2 shadow-lg",
       )}
     >
       <CardContent className="flex flex-col gap-1.5 p-3">
-        <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center justify-between gap-2 pr-10">
           <span className="text-sm font-medium">{project.number}</span>
           <Badge className={cn("text-xs", daysBadgeClass(days))}>
             {days} дн.
@@ -102,17 +103,17 @@ function DraggableCard({
   canManage: boolean;
   onOpen: (id: string) => void;
 }) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } =
+  const { attributes, listeners, setActivatorNodeRef, setNodeRef, transform, isDragging } =
     useDraggable({ id: project.id, disabled: !canManage });
 
   return (
     <div
       ref={setNodeRef}
       style={{ transform: CSS.Translate.toString(transform) }}
-      className={cn(isDragging && "opacity-40")}
-      {...(canManage ? { ...listeners, ...attributes } : {})}
+      className={cn("relative", isDragging && "opacity-40")}
       onClick={() => onOpen(project.id)}
     >
+      {canManage && <DragHandle ref={setActivatorNodeRef} {...attributes} {...listeners} label={project.title} />}
       <ProjectCardView project={project} showAmount={showAmount} />
     </div>
   );
@@ -136,6 +137,7 @@ function StageColumn({
   return (
     <div
       ref={setNodeRef}
+      data-slot="kanban-column"
       className={cn(
         "flex w-64 shrink-0 flex-col gap-2 rounded-xl border p-2 transition-colors",
         style.column,
@@ -258,7 +260,7 @@ export function KanbanBoard({
         onDragEnd={onDragEnd}
         onDragCancel={() => setActiveId(null)}
       >
-        <div className="flex gap-3 overflow-x-auto pb-4">
+        <div data-slot="kanban-scroll" className="flex min-w-0 gap-3 overflow-x-auto pb-4">
           {STAGES.map((stage) => (
             <StageColumn
               key={stage.id}

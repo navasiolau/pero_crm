@@ -17,6 +17,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { toast } from "sonner";
 import type { TaskStatus } from "@prisma/client";
 
+import { DragHandle } from "@/components/drag-handle";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { ActualTimeDialog } from "@/components/actual-time-dialog";
@@ -45,9 +46,9 @@ const DRAG_FLOW: Record<TaskStatus, TaskStatus[]> = {
 
 function TaskCardView({ task, dragging }: { task: TaskDetails; dragging?: boolean }) {
   return (
-    <Card className={cn("cursor-grab touch-none select-none", dragging && "rotate-2 shadow-lg")}>
+    <Card className={cn("cursor-pointer select-none", dragging && "rotate-2 shadow-lg")}>
       <CardContent className="flex flex-col gap-1.5 p-3">
-        <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center justify-between gap-2 pr-10">
           <span className="text-sm font-medium">{task.title}</span>
           {task.type ? (
             <Badge variant="outline" className="text-xs">
@@ -79,17 +80,17 @@ function DraggableTask({
   canDrag: boolean;
   onOpen: (task: TaskDetails) => void;
 }) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } =
+  const { attributes, listeners, setActivatorNodeRef, setNodeRef, transform, isDragging } =
     useDraggable({ id: task.id, disabled: !canDrag });
 
   return (
     <div
       ref={setNodeRef}
       style={{ transform: CSS.Translate.toString(transform) }}
-      className={cn(isDragging && "opacity-40")}
-      {...(canDrag ? { ...listeners, ...attributes } : {})}
+      className={cn("relative", isDragging && "opacity-40")}
       onClick={() => onOpen(task)}
     >
+      {canDrag && <DragHandle ref={setActivatorNodeRef} {...attributes} {...listeners} label={task.title} />}
       <TaskCardView task={task} />
     </div>
   );
@@ -174,7 +175,7 @@ export function TasksKanban({
       onDragEnd={onDragEnd}
       onDragCancel={() => setActiveId(null)}
     >
-      <div className="flex gap-3 overflow-x-auto pb-4">
+      <div data-slot="kanban-scroll" className="flex min-w-0 gap-3 overflow-x-auto pb-4">
         {COLUMNS.map((column) => (
           <TasksColumn
             key={column.id}
@@ -213,6 +214,7 @@ function TasksColumn({
   return (
     <div
       ref={setNodeRef}
+      data-slot="kanban-column"
       className={cn(
         "flex w-64 shrink-0 flex-col gap-2 rounded-xl border bg-muted/40 p-2 transition-colors",
         isOver && "border-primary/60 bg-accent/40",

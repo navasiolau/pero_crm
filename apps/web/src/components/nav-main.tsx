@@ -10,6 +10,7 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  useSidebar,
 } from "@/components/ui/sidebar"
 import type { NavItem } from "@/lib/nav"
 
@@ -21,6 +22,7 @@ export function NavMain({
   items: NavItem[]
 }) {
   const pathname = usePathname()
+  const { setOpenMobile } = useSidebar()
 
   // Пустые группы (например, «Управление» у работника) не рисуем
   if (items.length === 0) {
@@ -42,6 +44,7 @@ export function NavMain({
                 <SidebarMenuButton
                   isActive={isActive}
                   tooltip={item.label}
+                  onClick={() => setOpenMobile(false)}
                   render={<Link href={item.href} />}
                 >
                   <item.icon />

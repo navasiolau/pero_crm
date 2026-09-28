@@ -141,7 +141,7 @@ export function OverviewTab({
               {" · "}Телефон: {project.client.phone}
             </p>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             <div className="flex flex-col gap-1.5">
               <Label>Менеджер</Label>
               <SearchableSelect
@@ -176,7 +176,7 @@ export function OverviewTab({
               </p>
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="address">Адрес</Label>
               <Input id="address" value={form.address} onChange={set("address")} readOnly={ro} />

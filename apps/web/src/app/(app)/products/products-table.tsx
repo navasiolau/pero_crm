@@ -110,6 +110,22 @@ export function ProductsTable({
     <DataTable
       columns={columns}
       rows={products}
+      renderMobileCard={(row) => (
+        <div className="flex flex-col items-start gap-3 text-sm">
+          <Link href={`/products/${row.number}`} className="min-h-12 w-full min-w-0 font-medium underline-offset-2 [overflow-wrap:anywhere] hover:underline">
+            <span className="block text-xs text-muted-foreground">Изделие {row.number}</span>
+            {row.title}
+          </Link>
+          {row.kind && <span className="text-xs text-muted-foreground">{row.kind}</span>}
+          <Badge variant="outline" className={cn("border-transparent", productStatusStyles[row.status].badge)}>{productStatusLabels[row.status]}</Badge>
+          <dl className="flex w-full flex-col gap-2">
+            <div><dt className="text-xs text-muted-foreground">Проект</dt><dd><Link className="block min-h-11 underline-offset-2 hover:underline" href={`/projects/${row.projectId}`}>{row.projectNumber} · {row.projectTitle}</Link></dd></div>
+            <div><dt className="text-xs text-muted-foreground">Клиент</dt><dd>{row.clientName}</dd></div>
+            <div><dt className="text-xs text-muted-foreground">Инженер</dt><dd>{row.engineerName ?? "—"}</dd></div>
+            {showAmount && <div><dt className="text-xs text-muted-foreground">Цена</dt><dd>{formatAmount(row.expectedPrice, row.currency)}</dd></div>}
+          </dl>
+        </div>
+      )}
       emptyText="Изделий не найдено — ослабьте фильтры"
       onRowClick={(row) => router.push(`/products/${row.number}`)}
       server={{

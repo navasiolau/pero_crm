@@ -3,6 +3,7 @@
 import { RotateCcw, Search } from "lucide-react";
 import type { ProductStatus } from "@prisma/client";
 
+import { ResponsiveFilterPanel } from "@/components/responsive-filter-panel";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -46,12 +47,9 @@ export function ProductsFilterBar({
   const hasFilters = canReset || Boolean(q);
 
   return (
-    <div
-      data-pending={pending || undefined}
-      className="flex flex-wrap items-end gap-2"
-    >
+    <ResponsiveFilterPanel active={hasFilters} pending={pending}>
       <div className="relative w-56">
-        <Search className="absolute top-2.5 left-2 size-4 text-muted-foreground" />
+        <Search className="absolute top-1/2 -translate-y-1/2 left-2 size-4 text-muted-foreground" />
         <Input
           value={q}
           onChange={(event) => setQ(event.target.value)}
@@ -137,6 +135,6 @@ export function ProductsFilterBar({
           <RotateCcw className="size-3.5" /> Сбросить
         </Button>
       ) : null}
-    </div>
+    </ResponsiveFilterPanel>
   );
 }

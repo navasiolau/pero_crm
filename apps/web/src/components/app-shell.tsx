@@ -26,7 +26,7 @@ export function AppShell({
       <AppSidebar roles={user.roles} variant="inset" />
       <SidebarInset>
         <SiteHeader user={user} extras={headerExtras} />
-        <main className="@container/main flex flex-1 flex-col px-4 py-4 md:py-6 lg:px-6">
+        <main className="@container/main flex min-w-0 flex-1 flex-col px-4 py-4 md:py-6 lg:px-6">
           {children}
         </main>
       </SidebarInset>

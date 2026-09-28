@@ -159,3 +159,121 @@
     @apply font-sans;
   }
 }
+
+/* Реальные названия иногда содержат длинные URL; размер шрифта не меняем. */
+[data-slot="sidebar-inset"] h1 {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+/* Телефон: увеличиваем текст, не масштабируя rem и десктопную сетку. */
+@media (width < 768px) {
+  :root {
+    --text-xs: 1rem;
+    --text-xs--line-height: 1.375rem;
+    --text-sm: 1.125rem;
+    --text-sm--line-height: 1.625rem;
+    --text-base: 1.375rem;
+    --text-base--line-height: 1.875rem;
+  }
+
+  :is(button, [role="button"], [role="menuitem"], [role="option"], [data-slot="sidebar-menu-button"]) {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  :is([data-slot="button"], [data-slot="input"], [data-slot="select-trigger"], [data-slot="sidebar-menu-button"]) {
+    min-height: 48px;
+    font-size: var(--text-sm);
+  }
+  [data-slot="button"][data-size^="icon"] {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  :is([data-slot="toggle"], [data-slot="toggle-group-item"], [data-slot="tabs-trigger"]) {
+    font-size: var(--text-sm);
+  }
+  [data-slot="label"] {
+    min-width: 0;
+    line-height: 1.4;
+  }
+  label:has([data-slot="checkbox"]), [data-slot="checkbox"] + label {
+    min-height: 44px;
+  }
+  [data-slot="checkbox"] {
+    position: relative;
+    min-width: 20px;
+    min-height: 20px;
+  }
+  [data-slot="checkbox"]::after {
+    content: "";
+    position: absolute;
+    inset: -12px;
+  }
+  [data-slot="badge"] {
+    height: auto;
+    min-height: 24px;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  [data-slot="dialog-content"] {
+    top: var(--dialog-viewport-top, 50%);
+    max-height: calc(var(--dialog-viewport-height, 100dvh) - 1.5rem);
+    grid-template-columns: minmax(0, 1fr);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scroll-padding: 1rem;
+  }
+  [data-slot="dialog-content"] > * {
+    min-width: 0;
+  }
+  [data-slot="dialog-header"] {
+    padding-right: 2rem;
+  }
+  [data-slot="dialog-content"] :is(.grid-cols-2, [class~="sm:grid-cols-2"], [class~="sm:grid-cols-3"]) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  [data-slot="dialog-content"] .flex-1 {
+    min-width: 0;
+  }
+  [data-slot="dialog-content"] [data-slot="select-trigger"] {
+    max-width: 100%;
+  }
+  [data-slot="tabs"] {
+    min-width: 0;
+    max-width: 100%;
+  }
+  [data-slot="tabs-list"] {
+    max-width: 100%;
+    min-height: 50px;
+    height: auto;
+    justify-content: flex-start;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+  }
+  [data-slot="tabs-trigger"] {
+    flex: 0 0 auto;
+  }
+  [data-slot="kanban-scroll"] {
+    max-width: 100%;
+    overscroll-behavior-x: contain;
+    scroll-snap-type: x proximity;
+  }
+  [data-slot="kanban-column"] {
+    scroll-snap-align: start;
+  }
+  a[aria-label]:has(> svg:only-child) {
+    display: inline-flex;
+    min-width: 44px;
+    min-height: 44px;
+    align-items: center;
+    justify-content: center;
+  }
+  [data-slot="mobile-list-card"] {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  [data-slot="mobile-list-card"] [data-slot="badge"] {
+    max-width: 100%;
+  }
+}

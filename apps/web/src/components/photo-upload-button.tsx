@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Camera, UploadCloud } from "lucide-react";
 import { toast } from "sonner";
@@ -33,6 +33,8 @@ export function PhotoUploadButton({
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const cameraInput = useRef<HTMLInputElement>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
 
   async function upload(file: File) {
     setBusy(true);
@@ -54,6 +56,8 @@ export function PhotoUploadButton({
         const data = await response.json().catch(() => ({}));
         toast.error(data.error ?? "Ошибка загрузки");
       }
+    } catch {
+      toast.error("Не удалось загрузить фото. Проверьте соединение и повторите.");
     } finally {
       setBusy(false);
     }
@@ -81,6 +85,16 @@ export function PhotoUploadButton({
               Фото или замерный лист — попадёт в проект с категорией «Замер»
             </DialogDescription>
           </DialogHeader>
+
+          <div className="flex flex-col gap-2">
+            <Button variant="outline" disabled={busy} onClick={() => cameraInput.current?.click()}><Camera className="size-4" />Снять фото</Button>
+            <Button variant="outline" disabled={busy} onClick={() => fileInput.current?.click()}><UploadCloud className="size-4" />Выбрать файл</Button>
+            <input ref={cameraInput} type="file" accept="image/*" capture="environment" className="hidden" disabled={busy} onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file) void upload(file);
+              event.target.value = "";
+            }} />
+          </div>
 
           <label
             className={cn(
@@ -116,9 +130,11 @@ export function PhotoUploadButton({
                 ? "Отпускайте файл"
                 : "Перетащите файл, нажмите для выбора или вставьте из буфера (Ctrl+V)"}
             <input
+              ref={fileInput}
               type="file"
               accept="image/*"
               className="hidden"
+              disabled={busy}
               onChange={(event) => {
                 const file = event.target.files?.[0];
                 if (file) void upload(file);
