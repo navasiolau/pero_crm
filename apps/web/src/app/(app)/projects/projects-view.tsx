@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { LayoutGrid, Plus, Table2 } from "lucide-react";
 import type { ProjectStage } from "@prisma/client";
@@ -8,7 +8,6 @@ import type { ProjectStage } from "@prisma/client";
 import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useListParams } from "@/lib/list-params";
-import { saveViewPreference } from "@/server/preferences-actions";
 
 import { CreateProjectDialog } from "./create-project-dialog";
 import { KanbanBoard } from "./kanban-board";
@@ -39,7 +38,7 @@ export interface SelectOption {
 }
 
 // Раздел «Проекты»: фильтры в URL, канбан (по умолчанию) / таблица,
-// выбор вида — параметр ?view с фолбэком на UserPreference (§7).
+// полное состояние сохраняется общим ListParamsProvider (§7).
 // Фильтрация/сортировка/пагинация — на сервере (listProjects).
 export function ProjectsView({
   view,
@@ -67,15 +66,10 @@ export function ProjectsView({
 }) {
   const router = useRouter();
   const { set } = useListParams();
-  const [, startTransition] = useTransition();
   const [createOpen, setCreateOpen] = useState(false);
 
   function switchView(next: "kanban" | "table") {
     set({ view: next });
-    // Предпочтение — фолбэк для следующего визита (URL главнее)
-    startTransition(async () => {
-      await saveViewPreference("projects.view", next);
-    });
   }
 
   return (

@@ -3,7 +3,8 @@ import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { displayClientName } from "@/lib/labels";
 import { MANAGER_ROLES, OFFICE_ROLES, hasAnyRole } from "@/lib/roles";
-import { getUserPreference } from "@/server/preferences";
+import { ListParamsProvider } from "@/lib/list-params";
+import { listPreferences } from "@/server/list-preferences";
 import { listEngineers } from "@/server/projects/queries";
 import {
   listProductFilterOptions,
@@ -27,17 +28,12 @@ export default async function ProductsPage({
   if (!session?.user) redirect("/login");
   const role = session.user.roles;
 
-  const params = await searchParams;
+  const rawParams = await searchParams;
+  const state = await listPreferences.load("products", rawParams);
+  if (Object.keys(rawParams).length === 0) redirect(`/products?${state.query}`);
+  const params = Object.fromEntries(new URLSearchParams(state.query));
   const { filters, page, pageSize } = parseProductListParams(params);
-
-  const viewParam = (Array.isArray(params.view) ? params.view[0] : params.view) ?? "";
-  const savedView = await getUserPreference(session.user.id, "products.view");
-  const view =
-    viewParam === "table" || viewParam === "kanban"
-      ? viewParam
-      : savedView === "table"
-        ? "table"
-        : "kanban";
+  const view = params.view === "table" ? "table" : "kanban";
 
   const [result, options, engineers] = await Promise.all([
     listProducts(
@@ -51,6 +47,7 @@ export default async function ProductsPage({
   ]);
 
   return (
+    <ListParamsProvider key={session.user.id} section="products" initialQuery={state.query} preference={state.value}>
     <ProductsView
       view={view}
       products={result.rows.map((product) => ({
@@ -88,5 +85,6 @@ export default async function ProductsPage({
         label: displayClientName(client),
       }))}
     />
+    </ListParamsProvider>
   );
 }

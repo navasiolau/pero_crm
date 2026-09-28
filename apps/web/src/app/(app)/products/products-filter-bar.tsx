@@ -1,6 +1,5 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
 import { RotateCcw, Search } from "lucide-react";
 import type { ProductStatus } from "@prisma/client";
 
@@ -16,7 +15,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { SearchableSelect } from "@/components/ui/searchable-select";
-import { useListParams } from "@/lib/list-params";
+import { useListParams, useListSearch } from "@/lib/list-params";
 import {
   PRODUCT_STATUSES,
   productStatusLabels,
@@ -33,26 +32,8 @@ export function ProductsFilterBar({
   clientOptions: { value: string; label: string; hint?: string }[];
   engineerOptions: { value: string; label: string; hint?: string }[];
 }) {
-  const { get, set, pending } = useListParams();
-  const urlQ = get("q");
-  const [q, setQ] = useState(urlQ);
-  const debounceRef = useRef(urlQ);
-
-  // Синхронизация поля с URL (кнопка «Сбросить», навигация «назад»)
-  useEffect(() => {
-    setQ(urlQ);
-  }, [urlQ]);
-
-  // Отложенная запись поиска в URL — не дёргаем сервер на каждый символ
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      if (debounceRef.current !== q) {
-        debounceRef.current = q;
-        set({ q: q || null, page: null });
-      }
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [q, set]);
+  const { get, set, reset, pending, canReset } = useListParams();
+  const { q, setQ } = useListSearch();
 
   const statusRaw = get("status");
   const status = (PRODUCT_STATUSES.some((item) => item.id === statusRaw)
@@ -62,8 +43,7 @@ export function ProductsFilterBar({
   const clientId = get("client");
   const engineerId = get("engineer");
   const activeOnly = get("active") !== "0";
-  const hasFilters =
-    Boolean(urlQ || status || projectId || clientId || engineerId) || !activeOnly;
+  const hasFilters = canReset || Boolean(q);
 
   return (
     <div
@@ -152,19 +132,7 @@ export function ProductsFilterBar({
           variant="ghost"
           size="sm"
           className="text-muted-foreground"
-          onClick={() =>
-            set({
-              q: null,
-              status: null,
-              project: null,
-              client: null,
-              engineer: null,
-              active: null,
-              sort: null,
-              dir: null,
-              page: null,
-            })
-          }
+          onClick={reset}
         >
           <RotateCcw className="size-3.5" /> Сбросить
         </Button>
