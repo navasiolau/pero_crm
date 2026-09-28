@@ -26,6 +26,7 @@ import {
 import { toast } from "sonner";
 import type { Role, TaskStatus } from "@prisma/client";
 
+import { DragHandle } from "@/components/drag-handle";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -166,7 +167,7 @@ export function MyTasksView({
     return (
       <Card className={faded ? "opacity-60" : ""}>
         <CardContent className="flex flex-wrap items-center gap-3 p-4">
-          <div className="min-w-40 flex-1">
+          <div className={cn("min-w-40 flex-1", view === "kanban" && task.status !== "DONE" && "pr-9")}>
             <div className="flex flex-wrap items-center gap-2">
               <span className="font-medium">{task.title}</span>
               {task.type ? <Badge variant="outline">{task.type}</Badge> : null}
@@ -295,19 +296,19 @@ export function MyTasksView({
   }
 
   function DraggableTask({ task }: { task: TaskDetails }) {
-    const { attributes, listeners, setNodeRef, transform, isDragging } =
+    const { attributes, listeners, setActivatorNodeRef, setNodeRef, transform, isDragging } =
       useDraggable({ id: task.id, disabled: task.status === "DONE" });
     return (
       <div
         ref={setNodeRef}
         style={{ transform: CSS.Translate.toString(transform) }}
         className={cn(
-          "cursor-grab touch-none select-none",
+          "relative select-none",
           isDragging && "opacity-40",
           task.status === "DONE" && "cursor-default",
         )}
-        {...(task.status !== "DONE" ? { ...listeners, ...attributes } : {})}
       >
+        {task.status !== "DONE" && <DragHandle ref={setActivatorNodeRef} {...attributes} {...listeners} label={task.title} />}
         {renderTask(task, task.status === "DONE")}
       </div>
     );
@@ -324,8 +325,9 @@ export function MyTasksView({
     return (
       <div
         ref={setNodeRef}
+        data-slot="kanban-column"
         className={cn(
-          "flex w-80 shrink-0 flex-col gap-2 rounded-xl border p-2 transition-colors",
+          "flex w-[min(20rem,calc(100vw-2rem))] shrink-0 flex-col gap-2 rounded-xl border p-2 transition-colors",
           isOver && "border-primary/60 bg-accent/40",
         )}
       >
@@ -381,7 +383,7 @@ export function MyTasksView({
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h1 className="text-2xl font-semibold">Мои задачи</h1>
           <p className="text-sm text-muted-foreground">
@@ -477,7 +479,7 @@ export function MyTasksView({
           onDragEnd={onDragEnd}
           onDragCancel={() => setDragId(null)}
         >
-          <div className="flex gap-3 overflow-x-auto pb-4">
+          <div data-slot="kanban-scroll" className="flex min-w-0 gap-3 overflow-x-auto pb-4">
             {KANBAN_COLUMNS.map((column) => (
               <KanbanColumn
                 key={column.id}

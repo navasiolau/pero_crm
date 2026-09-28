@@ -13,6 +13,7 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  useSidebar,
 } from "@/components/ui/sidebar"
 import { navItemsForRole } from "@/lib/nav"
 
@@ -21,6 +22,7 @@ export function AppSidebar({
   ...props
 }: { roles: Role[] } & React.ComponentProps<typeof Sidebar>) {
   const items = navItemsForRole(roles)
+  const { setOpenMobile } = useSidebar()
   const mainItems = items.filter((item) => item.group === "main")
   const manageItems = items.filter((item) => item.group === "manage")
 
@@ -29,7 +31,7 @@ export function AppSidebar({
       <SidebarHeader>
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton size="lg" render={<Link href="/" />}>
+            <SidebarMenuButton size="lg" render={<Link href="/" />} onClick={() => setOpenMobile(false)}>
               <Logo className="size-8" />
               <span className="truncate text-base font-semibold">PERO CRM</span>
             </SidebarMenuButton>

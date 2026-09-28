@@ -114,6 +114,22 @@ export function ProjectsTable({
     <DataTable
       columns={columns}
       rows={projects}
+      renderMobileCard={(row) => (
+        <div className="flex flex-col items-start gap-3 text-sm">
+          <Link href={`/projects/${row.id}`} className="min-h-12 w-full min-w-0 font-medium underline-offset-2 [overflow-wrap:anywhere] hover:underline">
+            <span className="block text-xs text-muted-foreground">Проект {row.number}</span>
+            {row.title}
+          </Link>
+          <Badge variant="outline" className={cn("border-transparent", stageStyles[row.stage].badge)}>{stageLabels[row.stage]} · {daysOnStage(row.stageChangedAt)} дн.</Badge>
+          {row.hasMaterialShortage && <Badge variant="destructive"><TriangleAlert />Нехватка материалов</Badge>}
+          <dl className="flex w-full flex-col gap-2">
+            <div><dt className="text-xs text-muted-foreground">Клиент</dt><dd><Link href="/clients" className="block min-h-11 underline-offset-2 hover:underline">{row.clientName}</Link></dd></div>
+            <div><dt className="text-xs text-muted-foreground">Менеджер</dt><dd>{row.managerName ?? "—"}</dd></div>
+            <div><dt className="text-xs text-muted-foreground">Изделий</dt><dd>{row.productsCount}</dd></div>
+            {showAmount && <div><dt className="text-xs text-muted-foreground">Сумма проекта</dt><dd>{formatAmount(row.totalPrice, row.currency)}</dd></div>}
+          </dl>
+        </div>
+      )}
       emptyText="Проектов не найдено — ослабьте фильтры"
       onRowClick={(row) => onOpen(row.id)}
       server={{

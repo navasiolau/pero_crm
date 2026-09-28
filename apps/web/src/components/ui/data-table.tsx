@@ -60,6 +60,7 @@ export function DataTable<TRow extends { id: string }>({
   rowClassName,
   defaultPageSize = 10,
   server,
+  renderMobileCard,
 }: {
   columns: DataColumn<TRow>[];
   rows: TRow[];
@@ -71,6 +72,8 @@ export function DataTable<TRow extends { id: string }>({
   defaultPageSize?: number;
   /** Сервер-режим: поиск/сортировка/пагинация — снаружи (в URL) */
   server?: DataTableServerState;
+  /** Карточный вид до 768 px; данные, сортировка и пагинация общие. */
+  renderMobileCard?: (row: TRow) => ReactNode;
 }) {
   const [query, setQuery] = useState("");
   const [sortId, setSortId] = useState<string | null>(null);
@@ -145,7 +148,7 @@ export function DataTable<TRow extends { id: string }>({
   const activeSortDir = server ? server.dir : sortDir;
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex min-w-0 flex-col gap-3">
       {server ? null : (
         <div className="relative max-w-sm">
           <Search className="absolute top-2.5 left-2 size-4 text-muted-foreground" />
@@ -161,7 +164,34 @@ export function DataTable<TRow extends { id: string }>({
         </div>
       )}
 
-      <div className="rounded-xl border">
+      {renderMobileCard ? (
+        <div className="flex min-w-0 flex-col gap-3 md:hidden">
+          <label className="flex min-w-0 flex-col gap-1 text-sm">
+            Сортировка
+            <select
+              aria-label="Сортировка"
+              className="min-h-12 w-full min-w-0 rounded-lg border bg-background px-2 text-sm"
+              value={activeSortId ? `${activeSortId}:${activeSortDir}` : ""}
+              onChange={(event) => {
+                const [id, direction] = event.target.value.split(":");
+                const dir = direction === "desc" ? "desc" : "asc";
+                if (server) server.onSortChange(id, dir);
+                else { setSortId(id); setSortDir(dir); setPage(0); }
+              }}
+            >
+              {!activeSortId && <option value="">По умолчанию</option>}
+              {columns.filter((column) => column.sortable && (server || column.sortValue)).flatMap((column) => [
+                <option key={`${column.id}:asc`} value={`${column.id}:asc`}>{column.header} ↑</option>,
+                <option key={`${column.id}:desc`} value={`${column.id}:desc`}>{column.header} ↓</option>,
+              ])}
+            </select>
+          </label>
+          {pageRows.map((row) => <article key={row.id} data-slot="mobile-list-card" className={cn("rounded-xl border p-4", rowClassName?.(row))}>{renderMobileCard(row)}</article>)}
+          {pageRows.length === 0 && <p className="py-8 text-center text-sm text-muted-foreground">{emptyText}</p>}
+        </div>
+      ) : null}
+
+      <div className={cn("min-w-0 rounded-xl border", renderMobileCard && "hidden md:block")}>
         <Table>
           <TableHeader>
             <TableRow>
@@ -224,7 +254,7 @@ export function DataTable<TRow extends { id: string }>({
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-muted-foreground">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <span>На странице:</span>
           <Select
             value={String(activePageSize)}
