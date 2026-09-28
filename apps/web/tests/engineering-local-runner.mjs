@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import { closeSync, existsSync, fsyncSync, lstatSync, mkdtempSync, openSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
 import { assertContainerIdentity } from "./work-shares-local-migrate.mjs";
 import { assertEngineeringQaTarget, baselineEngineeringOwned, captureEngineeringOwned, cleanupEngineeringOwned,
@@ -25,8 +25,8 @@ function stop(condition, code) { if (!condition) throw new Error(code); }
 function equal(a, b, code) { stop(JSON.stringify(a) === JSON.stringify(b), code); }
 
 export function assertEngineeringLocalSource({ platform, root, cwd, env = {} }) {
-  stop(platform === "win32" && resolve(root).toLowerCase() === resolve(EXPECTED_ROOT).toLowerCase() &&
-    resolve(cwd).toLowerCase() === resolve(WEB).toLowerCase(), "SOURCE_NOT_APPROVED_WORKTREE");
+  stop(platform === "win32" && win32.resolve(root).toLowerCase() === win32.resolve(EXPECTED_ROOT).toLowerCase() &&
+    win32.resolve(cwd).toLowerCase() === win32.resolve(EXPECTED_ROOT, "apps", "web").toLowerCase(), "SOURCE_NOT_APPROVED_WORKTREE");
   for (const key of ["DATABASE_URL", "DIRECT_URL", "PGHOST", "PGPORT", "PGDATABASE", "PGUSER", "PGPASSWORD", "PGOPTIONS", "PGSERVICE",
     "DOCKER_HOST", "DOCKER_CONFIG", "NODE_OPTIONS", "NODE_PATH", "DOTENV_CONFIG_PATH"]) stop(!env[key], "AMBIENT_TARGET_OVERRIDE_FORBIDDEN");
   for (const directory of [ROOT, WEB]) for (const name of [".env", ".env.local", ".env.production", ".env.production.local",

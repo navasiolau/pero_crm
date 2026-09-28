@@ -16,6 +16,7 @@ test("runner import is inert; CLI accepts only named local QA operations", () =>
 
 test("source guard rejects another checkout and ambient database overrides", () => {
   assert.equal(assertEngineeringLocalSource({ platform: "win32", root, cwd, env: {} }), true);
+  assert.equal(assertEngineeringLocalSource({ platform: "win32", root: root.replaceAll("\\", "/"), cwd: cwd.toLowerCase(), env: {} }), true);
   assert.throws(() => assertEngineeringLocalSource({ platform: "win32", root: "D:\\Projects\\pero_crm_v2", cwd, env: {} }), /SOURCE_NOT_APPROVED_WORKTREE/);
   assert.throws(() => assertEngineeringLocalSource({ platform: "win32", root, cwd, env: { DATABASE_URL: "postgresql://prod" } }), /AMBIENT_TARGET_OVERRIDE_FORBIDDEN/);
   assert.throws(() => assertEngineeringLocalSource({ platform: "linux", root, cwd, env: {} }), /SOURCE_NOT_APPROVED_WORKTREE/);
