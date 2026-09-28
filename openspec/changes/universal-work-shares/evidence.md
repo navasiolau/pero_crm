@@ -1,5 +1,11 @@
 # universal-work-shares — evidence
 
+## Решение владельца после приёмки
+
+28.09.2026: «Пока оставить только на staging». Production backup, push в main и применение миграции не выполняются. Код принят локально и на staging; rollout остаётся незавершённым по явному решению владельца. Штатный автодеплой не приостанавливается.
+
+QA/docs companion `13732b696cd8928d25fb895e527c8162b679aae8`: [CI #51](https://github.com/navasiolau/pero_crm/actions/runs/36461777324) SUCCESS. Обычный staging watcher выполнил деплой 28.09.2026 в 18:05:19 UTC; работающий образ `sha256:166d50248ceb314523b148e17aa9bbf60aedbc1ed21f8e7b00acb73b815eb478` имеет эту revision. В 18:08:49 UTC HTTP health 200/healthy, исходные DB container ID/start time/volume сохранены. SQL-проверок и новых QA-записей при этой metadata-проверке не было.
+
 Рабочая ветка: `codex/universal-work-shares`, независимый worktree `D:\Projects\pero_crm_worktrees\universal-work-shares`, исходная ревизия `a1123c5`.
 
 ## Граница проверки
