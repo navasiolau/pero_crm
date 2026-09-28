@@ -20,6 +20,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Тесты безопасного автодеплоя (без Docker и БД)
+        run: python -m unittest discover -s deploy/tests -v
+
       - uses: pnpm/action-setup@v4
         # версия берётся из packageManager в package.json (pnpm@11)
 
@@ -45,8 +52,7 @@ jobs:
       - name: Typecheck (telegram-bot)
         run: pnpm --filter @pero/telegram-bot exec tsc --noEmit
 
-      # vitest-сьютов пока нет — шаг задел: новые тесты подхватятся автоматически
-      - name: Тесты (vitest)
+      - name: Тесты приложений
         run: pnpm -r --if-present test
 
       - name: Сборка (Next.js production)
@@ -84,6 +90,8 @@ jobs:
           tags: |
             ghcr.io/navasiolau/pero_crm:${{ github.ref_name }}
             ghcr.io/navasiolau/pero_crm:sha-${{ github.sha }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
 
   # Telegram-бот — изолированный сервис (LXC tgbot), свой образ,
   # та же pull-модель деплоя (watcher-крон на контейнере)
@@ -115,3 +123,5 @@ jobs:
           tags: |
             ghcr.io/navasiolau/pero_telegram_bot:${{ github.ref_name }}
             ghcr.io/navasiolau/pero_telegram_bot:sha-${{ github.sha }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}

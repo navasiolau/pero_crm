@@ -1,0 +1,288 @@
+{
+  "observedDate": "2026-09-28",
+  "ci": {
+    "staging": {
+      "commit": "809535e7af44be19d028dc0aec767b4346c9dd09",
+      "url": "https://github.com/navasiolau/pero_crm/actions/runs/36393059814",
+      "test": "success",
+      "publish": "success"
+    },
+    "main": {
+      "commit": "717b2c59ddb277dd041552dc43da52bd6eba90ee",
+      "url": "https://github.com/navasiolau/pero_crm/actions/runs/36394947094",
+      "test": "success",
+      "publish": "success"
+    },
+    "negativeGate": {
+      "url": "https://github.com/navasiolau/pero_crm/actions/runs/34789914319",
+      "test": "failure",
+      "publish": "skipped",
+      "botPublish": "skipped"
+    }
+  },
+  "live": [
+    {
+      "deploy": {
+        "hostname": "crm-staging",
+        "stack": "/opt/crm-staging",
+        "watcherCron": {
+          "exists": true,
+          "sha256": "f32050dc24e9ad0c21ac00de5e36179d173e2c0296e2f63ca961ba136ccb731a",
+          "activeWatcherLines": [],
+          "pausedMarker": true
+        },
+        "watcherFile": {
+          "exists": true,
+          "sha256": "27e3bcd727d9e83170c76a254806fde42590da76cea30c9e1441d873df680139",
+          "refreshGuard": true,
+          "usesPull": false,
+          "usesLock": false
+        },
+        "pinJournal": {
+          "owner": "pero-crm-auth-20260922",
+          "phase": "paused",
+          "stack": "/opt/crm-staging",
+          "expectedImage": "sha256:952240e4ad1e9e08883a39f20975cd6d4269b8e78c922ebc12e91ebd35603fa5",
+          "beforeSha256": "30c19a3c3ec6c3937f04dfea4d7e278fbd182dccdc446f812a4e87faf6c8843d",
+          "heldSha256": "c6d2fa97b031a4a50145c5e14a39e2ac9827047d8f08ff74afc022d01cebcf17"
+        },
+        "configuredTag": "staging",
+        "overrideImageLines": [
+          "image: sha256:952240e4ad1e9e08883a39f20975cd6d4269b8e78c922ebc12e91ebd35603fa5"
+        ],
+        "cronService": "active",
+        "containers": [
+          {
+            "name": "crm-staging-web-1",
+            "id": "eeac67d9c48a5ff6c61f732d958b19eb8784de509725c2a617c59c11720ac7a6",
+            "imageId": "sha256:b6ae57346cadba45bfa4f1d849d80e2fdbab13563641673eded7eb8c4475c66b",
+            "configuredImage": "ghcr.io/navasiolau/pero_crm:staging",
+            "running": true,
+            "startedAt": "2026-09-28T07:56:58.743769761Z",
+            "health": null,
+            "composeProject": "crm-staging",
+            "composeDir": "/opt/crm-staging",
+            "databaseEndpoint": {
+              "scheme": "postgresql",
+              "host": "db",
+              "port": 5432,
+              "path": "/crm"
+            },
+            "s3Endpoint": {
+              "scheme": "http",
+              "host": "192.168.0.33",
+              "port": 9000,
+              "path": ""
+            },
+            "s3Bucket": "pero-crm-staging",
+            "databaseName": null,
+            "mounts": [
+              {
+                "type": "volume",
+                "source": "/var/lib/docker/volumes/crm-staging_uploads/_data",
+                "destination": "/app/apps/web/uploads"
+              }
+            ]
+          },
+          {
+            "name": "crm-staging-db-1",
+            "id": "27b8f7342b9d722ab8788e137b37b03a3037442da038c5b8b98dbb30245b8b6a",
+            "imageId": "sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73",
+            "configuredImage": "postgres:17-alpine",
+            "running": true,
+            "startedAt": "2026-09-23T11:42:14.649193151Z",
+            "health": "healthy",
+            "composeProject": "crm-staging",
+            "composeDir": "/opt/crm-staging",
+            "databaseEndpoint": null,
+            "s3Endpoint": null,
+            "s3Bucket": null,
+            "databaseName": "crm",
+            "mounts": [
+              {
+                "type": "volume",
+                "source": "/var/lib/docker/volumes/crm-staging_pgdata/_data",
+                "destination": "/var/lib/postgresql/data"
+              }
+            ]
+          }
+        ]
+      },
+      "data": {
+        "host": "crm-staging",
+        "dbContainerId": "27b8f7342b9d722ab8788e137b37b03a3037442da038c5b8b98dbb30245b8b6a",
+        "dbMounts": [
+          {
+            "Type": "volume",
+            "Name": "crm-staging_pgdata",
+            "Source": "/var/lib/docker/volumes/crm-staging_pgdata/_data",
+            "Destination": "/var/lib/postgresql/data",
+            "Driver": "local",
+            "Mode": "rw",
+            "RW": true,
+            "Propagation": ""
+          }
+        ],
+        "state": {
+          "database": "crm",
+          "systemIdentifier": "7680344238676262945",
+          "users": 18,
+          "projects": 184,
+          "products": 1325,
+          "tasks": 1131,
+          "files": 4736,
+          "payments": 0,
+          "payroll": 0,
+          "payouts": 0,
+          "unfinishedMigrations": 0,
+          "latestMigration": "20260922160000_session_revocation"
+        },
+        "health": {
+          "status": 200,
+          "body": {
+            "status": "ok",
+            "service": "pero-crm",
+            "database": "ok",
+            "checkedAt": "2026-09-28T10:32:14.210Z"
+          }
+        },
+        "refreshMarkers": {}
+      }
+    },
+    {
+      "deploy": {
+        "hostname": "crm",
+        "stack": "/opt/crm",
+        "watcherCron": {
+          "exists": true,
+          "sha256": "5ce0ea133bba9a75380a92210a72d8a8dc1658b2b7ffec6a360ead326b3e6acb",
+          "activeWatcherLines": [],
+          "pausedMarker": true
+        },
+        "watcherFile": {
+          "exists": true,
+          "sha256": "52016627ac261fca97c01e290a003d83534aa36840af7fd5314e789cca351a37",
+          "refreshGuard": false,
+          "usesPull": true,
+          "usesLock": false
+        },
+        "pinJournal": {
+          "owner": "pero-crm-auth-20260922",
+          "phase": "paused",
+          "stack": "/opt/crm",
+          "expectedImage": "sha256:952240e4ad1e9e08883a39f20975cd6d4269b8e78c922ebc12e91ebd35603fa5",
+          "beforeSha256": "67cfba4437def0afcd3eda9146840050176bb7ffbada0d2afbc3862b16ca8fa5",
+          "heldSha256": "330359cb131620317b8470d55e08970a66b421bb40b14ae15ee174797d9eb6a6"
+        },
+        "configuredTag": "main",
+        "overrideImageLines": [
+          "image: sha256:952240e4ad1e9e08883a39f20975cd6d4269b8e78c922ebc12e91ebd35603fa5"
+        ],
+        "cronService": "active",
+        "containers": [
+          {
+            "name": "crm-web-1",
+            "id": "72351829faa5ec7c95595a6217c6874b15424af2489f41f532b7e92670ad329e",
+            "imageId": "sha256:5b1a88200872b80e9857f9658de6608d55995e4508bc5231f86f8f53f35d8926",
+            "configuredImage": "ghcr.io/navasiolau/pero_crm:main",
+            "running": true,
+            "startedAt": "2026-09-28T08:10:07.283722818Z",
+            "health": null,
+            "composeProject": "crm",
+            "composeDir": "/opt/crm",
+            "databaseEndpoint": {
+              "scheme": "postgresql",
+              "host": "db",
+              "port": 5432,
+              "path": "/crm"
+            },
+            "s3Endpoint": {
+              "scheme": "http",
+              "host": "192.168.0.33",
+              "port": 9000,
+              "path": ""
+            },
+            "s3Bucket": "pero-crm",
+            "databaseName": null,
+            "mounts": [
+              {
+                "type": "volume",
+                "source": "/var/lib/docker/volumes/crm_uploads/_data",
+                "destination": "/app/apps/web/uploads"
+              }
+            ]
+          },
+          {
+            "name": "crm-db-1",
+            "id": "15fee2f9002f17118ad148331a3b5ba61bd4d0969deb3913f6fa55f76ff9d624",
+            "imageId": "sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73",
+            "configuredImage": "postgres:17-alpine",
+            "running": true,
+            "startedAt": "2026-09-23T11:42:09.206207656Z",
+            "health": "healthy",
+            "composeProject": "crm",
+            "composeDir": "/opt/crm",
+            "databaseEndpoint": null,
+            "s3Endpoint": null,
+            "s3Bucket": null,
+            "databaseName": "crm",
+            "mounts": [
+              {
+                "type": "volume",
+                "source": "/var/lib/docker/volumes/crm_pgdata/_data",
+                "destination": "/var/lib/postgresql/data"
+              }
+            ]
+          }
+        ]
+      },
+      "data": {
+        "host": "crm",
+        "dbContainerId": "15fee2f9002f17118ad148331a3b5ba61bd4d0969deb3913f6fa55f76ff9d624",
+        "dbMounts": [
+          {
+            "Type": "volume",
+            "Name": "crm_pgdata",
+            "Source": "/var/lib/docker/volumes/crm_pgdata/_data",
+            "Destination": "/var/lib/postgresql/data",
+            "Driver": "local",
+            "Mode": "rw",
+            "RW": true,
+            "Propagation": ""
+          }
+        ],
+        "state": {
+          "database": "crm",
+          "systemIdentifier": "7680256893223825442",
+          "users": 18,
+          "projects": 184,
+          "products": 1325,
+          "tasks": 1131,
+          "files": 4736,
+          "payments": 0,
+          "payroll": 0,
+          "payouts": 0,
+          "unfinishedMigrations": 0,
+          "latestMigration": "20260922160000_session_revocation"
+        },
+        "health": {
+          "status": 200,
+          "body": {
+            "status": "ok",
+            "service": "pero-crm",
+            "database": "ok",
+            "checkedAt": "2026-09-28T10:32:15.365Z"
+          }
+        },
+        "refreshMarkers": {}
+      }
+    }
+  ],
+  "isolation": {
+    "distinctDatabaseSystems": true,
+    "distinctDatabaseVolumes": true,
+    "distinctAuthSecrets": true,
+    "distinctS3Credentials": true,
+    "distinctS3Buckets": true
+  }
+}

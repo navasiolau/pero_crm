@@ -8,6 +8,8 @@ dist/
 out/
 *.tsbuildinfo
 .turbo/
+__pycache__/
+*.py[cod]
 
 # Env
 .env
