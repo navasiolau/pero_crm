@@ -1,0 +1,49 @@
+{
+  "ciRun": "https://github.com/navasiolau/pero_crm/actions/runs/36422255188",
+  "hostname": "crm-staging",
+  "watcher": {
+    "at": "2026-09-28T12:40:31.756540+00:00",
+    "project": "crm-staging",
+    "image": "sha256:b73699f704dde54f10283f8ad3da3ef8a2856b709e33a9eede57d6e618d86f32",
+    "revision": "a1123c5f8a498dc916a67e609a4a550720367fc2",
+    "database": "27b8f7342b9d722ab8788e137b37b03a3037442da038c5b8b98dbb30245b8b6a",
+    "status": "deployed",
+    "web": "6271e0e50276114e998f685c7fd180e5b08f4a380a82b1128108983a8320e2b3",
+    "health": "healthy"
+  },
+  "activeCron": [
+    "*/5 * * * * root /opt/crm-staging/watch-staging.sh"
+  ],
+  "web": {
+    "id": "6271e0e50276114e998f685c7fd180e5b08f4a380a82b1128108983a8320e2b3",
+    "image": "sha256:b73699f704dde54f10283f8ad3da3ef8a2856b709e33a9eede57d6e618d86f32",
+    "revision": "a1123c5f8a498dc916a67e609a4a550720367fc2",
+    "startedAt": "2026-09-28T12:40:25.092887475Z",
+    "health": "healthy"
+  },
+  "database": {
+    "id": "27b8f7342b9d722ab8788e137b37b03a3037442da038c5b8b98dbb30245b8b6a",
+    "startedAt": "2026-09-23T11:42:14.649193151Z",
+    "mounts": [
+      {
+        "Type": "volume",
+        "Name": "crm-staging_pgdata",
+        "Source": "/var/lib/docker/volumes/crm-staging_pgdata/_data",
+        "Destination": "/var/lib/postgresql/data",
+        "Driver": "local",
+        "Mode": "rw",
+        "RW": true,
+        "Propagation": ""
+      }
+    ]
+  },
+  "health": {
+    "http": 200,
+    "body": {
+      "status": "ok",
+      "service": "pero-crm",
+      "database": "ok",
+      "checkedAt": "2026-09-28T12:41:37.376Z"
+    }
+  }
+}

@@ -1,0 +1,69 @@
+{
+  "ciRun": "https://github.com/navasiolau/pero_crm/actions/runs/36416583485",
+  "ciRunNumber": 45,
+  "ciConclusion": "success",
+  "branch": "main",
+  "commit": "f535d5f7f0c9cd4b855e37cd5a0c784f532d519a",
+  "trigger": "scheduled cron, not manual watcher invocation",
+  "scheduledDeployment": {
+    "at": "2026-09-28T11:45:15.451+00:00",
+    "status": "deployed",
+    "evidenceSource": "root-confirmed live watcher journal"
+  },
+  "databaseChecks": "Docker identity, mounts and start time preserved; no direct SQL to production after owner restriction",
+  "latestRootVerification": {
+    "date": "2026-09-28",
+    "timeUtc": "12:20",
+    "timePrecision": "minute",
+    "watcherStatus": "unchanged",
+    "webHealth": "healthy",
+    "httpHealthStatus": 200,
+    "evidenceSource": "root-confirmed repeated live readback"
+  },
+  "hostname": "crm",
+  "watcher": {
+    "at": "2026-09-28T11:55:06.015262+00:00",
+    "project": "crm",
+    "image": "sha256:a6adca052b10a4d333107dbbc5aea856dfbf5eb0108ce57c4400ef063d34063d",
+    "revision": "f535d5f7f0c9cd4b855e37cd5a0c784f532d519a",
+    "database": "15fee2f9002f17118ad148331a3b5ba61bd4d0969deb3913f6fa55f76ff9d624",
+    "status": "unchanged",
+    "web": "79a3c06bbbffdaa621f944cfb6d10a22a50875c98a72ba3eb460fb341132aaf4",
+    "health": "healthy"
+  },
+  "activeCron": [
+    "*/5 * * * * root /opt/crm/watch-prod.sh"
+  ],
+  "web": {
+    "id": "79a3c06bbbffdaa621f944cfb6d10a22a50875c98a72ba3eb460fb341132aaf4",
+    "image": "sha256:a6adca052b10a4d333107dbbc5aea856dfbf5eb0108ce57c4400ef063d34063d",
+    "revision": "f535d5f7f0c9cd4b855e37cd5a0c784f532d519a",
+    "startedAt": "2026-09-28T11:45:08.953114865Z",
+    "health": "healthy"
+  },
+  "database": {
+    "id": "15fee2f9002f17118ad148331a3b5ba61bd4d0969deb3913f6fa55f76ff9d624",
+    "startedAt": "2026-09-23T11:42:09.206207656Z",
+    "mounts": [
+      {
+        "Type": "volume",
+        "Name": "crm_pgdata",
+        "Source": "/var/lib/docker/volumes/crm_pgdata/_data",
+        "Destination": "/var/lib/postgresql/data",
+        "Driver": "local",
+        "Mode": "rw",
+        "RW": true,
+        "Propagation": ""
+      }
+    ]
+  },
+  "health": {
+    "http": 200,
+    "body": {
+      "status": "ok",
+      "service": "pero-crm",
+      "database": "ok",
+      "checkedAt": "2026-09-28T11:59:43.461Z"
+    }
+  }
+}

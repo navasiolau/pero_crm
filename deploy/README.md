@@ -141,7 +141,7 @@ durable receipt получает `activation-intent`. Ошибка после н
 
 ```text
 python -m unittest discover -s deploy/tests -v
-openspec validate restore-crm-autodeploy --strict
+openspec validate --specs --strict
 git diff --check
 ```
 

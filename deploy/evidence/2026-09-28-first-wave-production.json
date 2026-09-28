@@ -1,0 +1,51 @@
+{
+  "ciRun": "https://github.com/navasiolau/pero_crm/actions/runs/36428827890",
+  "revision": "a1123c5f8a498dc916a67e609a4a550720367fc2",
+  "validationScope": "Docker metadata and normal HTTP health only; no direct production SQL, fixtures or new migrations.",
+  "hostname": "crm",
+  "watcher": {
+    "at": "2026-09-28T13:40:05.434559+00:00",
+    "project": "crm",
+    "image": "sha256:a36d495309e3ceb1e88e654374ade34412d4a7365f369e5581c7901051546560",
+    "revision": "a1123c5f8a498dc916a67e609a4a550720367fc2",
+    "database": "15fee2f9002f17118ad148331a3b5ba61bd4d0969deb3913f6fa55f76ff9d624",
+    "status": "unchanged",
+    "web": "dd4eb4006d3d2f9f9e4242e8d51200298c1e1cc4131f5c80aee9b007a3c6a279",
+    "health": "healthy"
+  },
+  "activeCron": [
+    "*/5 * * * * root /opt/crm/watch-prod.sh"
+  ],
+  "web": {
+    "id": "dd4eb4006d3d2f9f9e4242e8d51200298c1e1cc4131f5c80aee9b007a3c6a279",
+    "image": "sha256:a36d495309e3ceb1e88e654374ade34412d4a7365f369e5581c7901051546560",
+    "revision": "a1123c5f8a498dc916a67e609a4a550720367fc2",
+    "startedAt": "2026-09-28T13:35:26.80154508Z",
+    "health": "healthy"
+  },
+  "database": {
+    "id": "15fee2f9002f17118ad148331a3b5ba61bd4d0969deb3913f6fa55f76ff9d624",
+    "startedAt": "2026-09-23T11:42:09.206207656Z",
+    "mounts": [
+      {
+        "Type": "volume",
+        "Name": "crm_pgdata",
+        "Source": "/var/lib/docker/volumes/crm_pgdata/_data",
+        "Destination": "/var/lib/postgresql/data",
+        "Driver": "local",
+        "Mode": "rw",
+        "RW": true,
+        "Propagation": ""
+      }
+    ]
+  },
+  "health": {
+    "http": 200,
+    "body": {
+      "status": "ok",
+      "service": "pero-crm",
+      "database": "ok",
+      "checkedAt": "2026-09-28T13:41:35.615Z"
+    }
+  }
+}

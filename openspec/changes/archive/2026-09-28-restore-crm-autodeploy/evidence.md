@@ -1,8 +1,9 @@
-# Локальная проверка 28.09.2026
+# Проверка автодеплоя CRM — 28.09.2026
 
 Ветка: `codex/restore-crm-autodeploy`. Среда: Windows, Python 3.12.10.
-Все Docker-операции watcher в тестах заменены fake adapter либо mock subprocess. Серверы,
-SQL, production/staging/local DB не использовались и не менялись.
+В описанных ниже локальных тестах Docker-операции watcher заменены fake adapter либо mock subprocess;
+серверы и SQL не использовались. Последующая фактическая приёмка основным агентом
+на staging/production зафиксирована отдельно в конце документа.
 
 ## RED
 
@@ -74,9 +75,9 @@ unittest step завершились успешно. Собственные `__p
 Этот локальный результат не является проверкой выполнения изменённого workflow
 на GitHub. Полный Node CI и server deployment выполняет основной агент.
 
-## Оставшиеся проверки
+## Приёмка основным агентом
 
-### Независимая проверка основным агентом
+### Независимая локальная проверка
 
 - Пройдены `pnpm lint` (0 ошибок, прежнее предупреждение cleanup-uploads),
   TypeScript web/bot, `pnpm -r --if-present test`, production `pnpm build`.
@@ -89,8 +90,38 @@ unittest step завершились успешно. Собственные `__p
   activation-unknown с readback; независимый повтор 7/7 installer tests PASS.
 - Общий Python suite после installer: 36 тестов, Windows 34 PASS и 2 POSIX skip.
   Root отдельно повторил Linux suite: 36/36 PASS, network none, без Docker socket
-  и подключения к БД. Это не приёмка серверной установки; live-файлы пока не менялись.
+  и подключения к БД. На этом локальном этапе live-файлы ещё не менялись;
+  последующая серверная приёмка приведена ниже.
 
-GitHub CI, реальный staging deployment с сохранением W07, повторный unchanged и production
-deployment остаются незавершёнными. Их результаты заполняются после фактического
-выполнения; наличие исходников не означает снятия server pause или установки cron.
+### Фактические CI и scheduled deployment
+
+Основной агент подтвердил следующие результаты live-приёмки; эта актуализация
+документации не сопровождалась новым запуском watcher, CI или проверками серверов/БД.
+Обе среды получили ревизию `f535d5f7f0c9cd4b855e37cd5a0c784f532d519a`.
+
+| Среда | Успешный CI | Штатный cron deployment (UTC) | Повторный результат |
+|---|---|---|---|
+| staging | [CI #44](https://github.com/navasiolau/pero_crm/actions/runs/36414902350) | 11:26:01.462050, `deployed` | 11:30:05.464290, `unchanged`, healthy, HTTP 200 |
+| production | [CI #45](https://github.com/navasiolau/pero_crm/actions/runs/36416583485) | 11:45:15.451, `deployed`; web started 11:45:08.953114865 | 11:55:06.015262, `unchanged`; root повторно подтвердил `unchanged`/healthy/HTTP 200 в 12:20 |
+
+Снимки: [staging](../../../../deploy/evidence/2026-09-28-autodeploy-staging.json),
+[production](../../../../deploy/evidence/2026-09-28-autodeploy-production.json).
+Image IDs: staging `sha256:d07edbbf17717614dd1f79d35a7f72a00226a8b03aa0d36969af5f47974fbb61`,
+production `sha256:a6adca052b10a4d333107dbbc5aea856dfbf5eb0108ce57c4400ef063d34063d`.
+
+- Обновление инициировал штатный cron каждые 5 минут, не ручной вызов watcher.
+  Ветки `staging` и `main` публикуют соответствующий образ только после job `test`;
+  `needs: test` сохранён у обоих publish jobs, упавшие тесты блокируют публикацию.
+- Внешний W07 wrapper сохранён с SHA256
+  `27e3bcd727d9e83170c76a254806fde42590da76cea30c9e1441d873df680139`;
+  его lock/active-run guard и механизм refresh этим выпуском не менялись.
+- DB container IDs, mounts и время старта сохранились. Проверка ограничена Docker
+  metadata и штатным HTTP health; прямой SQL к production после запрета владельца
+  не выполнялся. Это не заявляется как SQL-сверка строк или полное восстановление БД.
+- Старые паузы CRM watcher и image pins ниже в исторических инфраструктурных
+  документах больше не описывают текущее состояние CRM. CMS и прочие инфраструктурные
+  паузы этим изменением не затрагивались.
+
+Задачи 3.2 и 3.3 закрыты по этой приёмке. Основной агент 28.09.2026 перенёс
+требования в `openspec/specs/crm-autodeploy/spec.md`, проверил точное соответствие
+всех требований и сценариев и архивировал завершённый change.

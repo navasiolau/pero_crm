@@ -1,6 +1,6 @@
 # Проверки persistent-list-filters
 
-28.09.2026, worktree `persistent-list-filters`, ветка `codex/persistent-list-filters`. Локальная приёмка последних исправлений и независимый review приняты оркестратором; разрешён один feature-коммит. Push/deploy и приёмка staging ещё не выполнялись.
+28.09.2026. Feature-ветка `codex/persistent-list-filters` прошла локальную приёмку и независимый review. Интеграция первой волны, staging и production ревизии a1123c5 приняты root; актуальная сводка — в конце документа. Основные specs синхронизированы; change архивирован 28.09.2026. Ниже сохранена история ранних прогонов с их ограничениями.
 
 ## TDD
 
@@ -19,10 +19,10 @@
 
 После уточнения владельца о тестировании на существующей локальной БД все browser/DB действия остановлены. Playwright session 54048 и Next session 56916 завершены; проверка TCP3103 показала отсутствие слушателя. Рабочая локальная БД, staging и production этим агентом не изменялись.
 
-## Pending
+## Что оставалось после раннего локального прогона
 
-- Staging на точной ревизии с реальными скопированными данными.
-- Синхронизация/архивирование OpenSpec и выпуск — только после staging.
+- Staging на точной ревизии с реальными скопированными данными; последующая приёмка описана ниже.
+- Синхронизация/архивирование OpenSpec и завершение выпуска остаются отдельным этапом root.
 
 ## Прогон на существующей локальной БД
 
@@ -52,4 +52,44 @@ RED-прогон `.playwright-mcp/local-list-acceptance/c7451871-ad69-47c4-8e70-
 
 Лично просмотрены desktop-скриншоты `projects-restored.png` и `products-restored.png` из прогона `0ea5…`: выбранный табличный вид, сортировка и вторая страница отображаются после возврата. Это desktop-проверка данной фичи; мобильную приёмку ведёт отдельная ветка. Traces, пользовательские DTO, checkpoints и сессии остаются gitignored и не входят в feature-коммит. Отправка в staging/main не выполнялась.
 
-Независимый review последних исправлений принят root. Код, тесты, pinned Playwright и OpenSpec объединены в один локальный feature-коммит; change остаётся активным до приёмки staging и последующего архивирования.
+Независимый review последних исправлений принят root. Код, тесты, pinned Playwright и OpenSpec объединены в один локальный feature-коммит; следующие результаты относятся уже к общей интеграции первой волны.
+
+## Итоговая интеграция на существующей local DB
+
+Run `590386f3-1802-4f76-bb81-047d76f8de1e` подтвердил **единый 8/8 integration PASS**, browserExitCode=0, status=passed. Четыре предпочтения возвращены через CAS, restoreConflicts пуст, businessCountsUnchanged=true. Это новый итоговый прогон; он не меняет исторического факта, что предыдущие восемь сценариев были выполнены в двух разных run. Источник: `.playwright-mcp/local-list-acceptance/590386f3-1802-4f76-bb81-047d76f8de1e/result.json`.
+
+## Первая волна на staging — 28.09.2026
+
+Точная ревизия `a1123c5f8a498dc916a67e609a4a550720367fc2`; [staging CI #46](https://github.com/navasiolau/pero_crm/actions/runs/36422255188) — success, штатный scheduled deployment 12:40:31 UTC. Приложение healthy, DB identity не изменилась. Read-only run `82bb11a9-73d1-4e90-aecd-7ca1d8772dce` дал 13 PASS + 1 NOT_AVAILABLE на 1325 изделиях/184 проектах, включая четыре проверки возвратных редиректов списков. Counts/hashes 13 бизнес-таблиц + ChangeLog/TimeEntry совпали. Сам этот read-only run не проверял запись фильтров; её проверил браузерный этап.
+
+### Первый browser run и принятый baseline
+
+Исторический staging run `b761bc98-6e3b-4ce9-9e15-58e4703c5d31` потерял response bodies. CAS правильно отказался перезаписывать непроверенную текущую ревизию. `disposition.json` фиксирует четыре проверенных ключа: два остались исходными, две канонические manager-строки `projects.list`/`products.list` с `query=view=kanban` сохранены. До run соответствующие list и legacy-view строки отсутствовали и эффективным видом также был kanban; в итоговой паре одна текущая ревизия не доказана захваченным ответом.
+
+Обе default-строки оставлены без удаления/перезаписи и приняты root как новый baseline. **Побайтовое восстановление prefs этого первого staging run не утверждается**, первый browser acceptance имеет FAILED. Пятнадцать бизнес/audit/time таблиц при этом не изменились, production не затрагивался.
+
+После диагностики QA перехват выполняет ровно один `route.fetch`, записывает response durable до `route.fulfill` с неизменным ответом. Это исправление harness; код приложения не менялся ради перехвата/восстановления.
+
+### Успешное покрытие в двух последующих run
+
+| Run | Браузерный результат | Восстановление данных |
+|---|---|---|
+| `5e5af0c2-481e-4976-882a-8f4f7245288c` | Четыре сценария 360 px PASS: проекты/persistence, изделия/persistence, короткая форма, инженерский экран. Затем native session 390 FAIL, поэтому общий status run — FAIL. | Четыре ключа приведены точно к принятому baseline: 1 unchanged, 2 restored, 1 собственная вставка deleted; 15 hashes PASS. |
+| `b56c73bb-6648-4934-b4a7-0d07175ba1b2` | Восемь оставшихся сценариев на 390 и 1440 px PASS. | Те же четыре ключа восстановлены точно CAS: 1 unchanged, 2 restored, 1 deleted; 15 hashes PASS. |
+
+Итог — **12 сценариев на трёх viewport в двух run, не единый 12/12**. Public HTTPS + Basic Auth прошли. Использованы signed sessions существующих пользователей; парольный вход NOT_TESTED. Семь чистых ролей доступны на staging; M+E отсутствует (NOT_AVAILABLE), локальная матрица восьми существующих наборов ролей её покрывает. Аккаунты/роли ради QA не создавались и не менялись.
+
+Root просмотрел все 21 реальный PNG успешных сценариев: семь из 360 px в run `5e5af0c2-481e-4976-882a-8f4f7245288c` и четырнадцать из 390/1440 px в run `b56c73bb-6648-4934-b4a7-0d07175ba1b2`. Не заявляется, что все PNG происходят из единственного успешного прогона.
+
+Источники: `.playwright-mcp/staging-first-wave/<runId>/readonly-result.json`, `browser-result.json`, `restore-result.json`, а для b761 — `disposition.json`. В Git добавляется только эта санитизированная сводка и ссылки; PII, checkpoints, JWT, запросы с пользовательскими DTO и PNG остаются вне Git.
+
+## Операционное завершение
+
+После QA root отправил a1123c5 в main. [Main CI #47](https://github.com/navasiolau/pero_crm/actions/runs/36428827890) — SUCCESS, все три jobs зелёные. Root подтвердил production этой ревизии: web started `2026-09-28T13:35:26.80154508Z`, scheduled watcher `13:40:05.434559 UTC` — `unchanged`/healthy, штатный HTTP health 200. DB ID/startedAt/mount прежние; прямой production SQL не выполнялся. Снимки: [staging deployment](../../../../deploy/evidence/2026-09-28-first-wave-stage-deployment.json), [production](../../../../deploy/evidence/2026-09-28-first-wave-production.json).
+
+Основные specs синхронизированы, change архивирован 28.09.2026. Для обновления этой документации runtime/БД/remote операции не выполнялись.
+
+
+## Завершение OpenSpec
+
+28.09.2026 основной агент сверил все требования и сценарии с основными спецификациями, выполнил strict validation и архивировал change после принятой локальной, staging и production приёмки.
