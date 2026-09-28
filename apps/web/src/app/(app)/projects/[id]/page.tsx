@@ -27,6 +27,7 @@ import { getProjectFor, listClients, listEngineers, listManagers, listWorkers } 
 import { mapTaskDetails } from "@/server/tasks/queries";
 import { getProjectMaterials } from "@/server/warehouse/queries";
 import { hasFullProjectVisibility } from "@/server/access/visibility";
+import { allocatedWorkQuantity } from "@/lib/work-shares";
 
 import { CommunicationsTab } from "./communications-tab";
 import { FilesTab } from "./files-tab";
@@ -310,14 +311,12 @@ export default async function ProjectPage({
               number: product.number,
               title: product.title,
             }))}
-            tasks={await mapTaskDetails(project.tasks)}
+            tasks={await mapTaskDetails(project.tasks, session.user)}
             works={project.works.map((work) => ({
               id: work.id,
               title: work.title,
               quantity: work.quantity.toString(),
-              allocated: work.tasks
-                .reduce((sum, task) => sum + Number(task.quantity ?? 0), 0)
-                .toString(),
+              allocated: allocatedWorkQuantity(work.tasks),
               priceSnapshot: work.priceSnapshot.toString(),
               total: work.total.toString(),
               linkedTask: work.tasks[0]

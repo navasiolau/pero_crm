@@ -2,18 +2,20 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import type { Prisma } from "@prisma/client";
 
 import { auth } from "@/auth";
-import { prisma } from "@/lib/prisma";
-import { fileVisibilityWhere, hasFullProjectVisibility, taskExecutionWhere } from "@/server/access/visibility";
 import { formatAmount } from "@/lib/format";
+import { allocatedWorkQuantity, quantityAtoms, quantityFromAtoms } from "@/lib/work-shares";
 import { writeChangeLog } from "@/server/plugins/changelog";
-import { emitDomainEvent } from "@/server/plugins/events";
+import { dispatchEvent, emitDomainEvent } from "@/server/plugins/events";
 import { notifyOrg, notifyPerson } from "@/server/notifications/notify";
 
-import { MANAGER_ROLES, OFFICE_ROLES, hasAnyRole } from "@/lib/roles";
+import { MANAGER_ROLES, hasAnyRole } from "@/lib/roles";
 import { revalidateProductPaths } from "@/server/products/revalidate";
-import { getPayrollCurrency } from "@/server/payroll/queries";
+import { withTaskTransaction } from "./transaction";
+import { changeTaskStatusCore } from "./completion-core";
+import { taskRecipientError } from "./share-policy";
 
 const createSchema = z.object({
   projectId: z.string(),
@@ -41,33 +43,36 @@ async function requireUser() {
 // доля исполнителя). Проверка: сумма частей по задачам не превышает
 // количество работы. Возвращает остаток при успехе, иначе текст ошибки.
 async function checkWorkQuantity(
+  tx: Prisma.TransactionClient,
   workId: string,
   quantity: number | null,
   excludeTaskId?: string,
-): Promise<{ error?: string; remaining?: number }> {
-  const work = await prisma.work.findUnique({
+  context?: { projectId: string; productId: string | null },
+): Promise<{ error?: string; remaining?: string }> {
+  const work = await tx.work.findUnique({
     where: { id: workId },
-    include: { tasks: { select: { id: true, title: true, quantity: true } } },
+    include: { tasks: { select: { id: true, quantity: true, allocationGroupId: true } } },
   });
   if (!work) return { error: "Работа не найдена" };
-  const used = work.tasks
-    .filter((task) => task.id !== excludeTaskId)
-    .reduce((sum, task) => sum + Number(task.quantity ?? 0), 0);
-  const remaining = Number(work.quantity) - used;
-  const qty = quantity ?? remaining; // пусто → забрать весь остаток
-  if (qty <= 0) return { error: "Количество должно быть больше нуля" };
+  if (context && (work.projectId !== context.projectId || work.productId !== context.productId)) return { error: "Выберите работу этого проекта и изделия" };
+  const used = quantityAtoms(allocatedWorkQuantity(work.tasks.filter((task) => task.id !== excludeTaskId)));
+  const remaining = quantityAtoms(work.quantity) - used;
+  let qty: bigint;
+  try { qty = quantity === null ? remaining : quantityAtoms(quantity); }
+  catch { return { error: "Количество должно содержать не больше двух знаков после запятой" }; }
+  if (qty <= BigInt(0)) return { error: "Количество должно быть больше нуля" };
   if (qty > remaining) {
     return {
-      error: `В работе осталось ${remaining} из ${work.quantity} — больше распределить нельзя`,
+      error: `В работе осталось ${quantityFromAtoms(remaining)} из ${work.quantity} — больше распределить нельзя`,
     };
   }
-  return { remaining: qty };
+  return { remaining: quantityFromAtoms(qty) };
 }
 
 // Оценка времени (§9): среднее фактическое время идентичных задач
 // (тот же тип) из истории организации; пока истории нет — null.
-async function estimateFromHistory(type: string): Promise<number | null> {
-  const rows = await prisma.$queryRaw<{ avg: number | null }[]>`
+async function estimateFromHistory(tx: Prisma.TransactionClient, type: string): Promise<number | null> {
+  const rows = await tx.$queryRaw<{ avg: number | null }[]>`
     SELECT AVG(s.m)::float AS avg FROM (
       SELECT SUM(te."minutes") AS m
       FROM "TimeEntry" te
@@ -92,39 +97,45 @@ export async function createTask(
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Ошибка данных" };
   }
   const data = parsed.data;
-  const project = await prisma.project.findUnique({
+  const mutation = await withTaskTransaction(async (tx) => {
+  const project = await tx.project.findUnique({
     where: { id: data.projectId },
     select: { id: true, number: true },
   });
-  if (!project) return { ok: false, error: "Проект не найден" };
+  if (!project) return { ok: false as const, error: "Проект не найден" };
 
   // Изделие должно принадлежать проекту задачи
-  if (data.productId) {
-    const product = await prisma.product.findFirst({
+  const product = data.productId ? await tx.product.findFirst({
       where: { id: data.productId, projectId: data.projectId },
-      select: { id: true },
-    });
-    if (!product) return { ok: false, error: "Изделие не найдено в этом проекте" };
+      select: { id: true, engineerId: true, status: true },
+    }) : null;
+  if (data.productId && !product) return { ok: false as const, error: "Изделие не найдено в этом проекте" };
+  if (data.assigneeId) {
+    const assignee = await tx.user.findUnique({ where: { id: data.assigneeId }, select: { id: true, roles: true, active: true } });
+    const error = assignee ? taskRecipientError(assignee, product) : "Сотрудник не найден";
+    if (error) return { ok: false as const, error };
   }
 
   const estimateMinutes =
-    data.estimateMinutes ?? (await estimateFromHistory(data.type)) ?? null;
+    data.estimateMinutes ?? (await estimateFromHistory(tx, data.type)) ?? null;
   // Оценка времени обязательна для любой задачи (§9)
   if (!estimateMinutes) {
     return {
-      ok: false,
+      ok: false as const,
       error: "Укажите оценку времени (мин) — истории по таким задачам нет",
     };
   }
 
-  let workQuantity: number | null = null;
+  let workQuantity: string | null = null;
   if (data.workId) {
-    const check = await checkWorkQuantity(data.workId, data.quantity ?? null);
-    if (check.error) return { ok: false, error: check.error };
+    const check = await checkWorkQuantity(tx, data.workId, data.quantity ?? null, undefined, { projectId: data.projectId, productId: data.productId || null });
+    if (check.error) return { ok: false as const, error: check.error };
     workQuantity = check.remaining!;
   }
 
-  const task = await prisma.task.create({
+  const dependencies = await expandDependencies(tx, data.dependencyIds);
+  if (dependencies.error) return { ok: false as const, error: dependencies.error };
+  const task = await tx.task.create({
     data: {
       projectId: data.projectId,
       productId: data.productId || null,
@@ -139,10 +150,14 @@ export async function createTask(
       estimateMinutes,
       createdById: session.user.id,
       dependencies: {
-        create: data.dependencyIds.map((dependsOnId) => ({ dependsOnId })),
+        create: dependencies.ids.map((dependsOnId) => ({ dependsOnId })),
       },
     },
   });
+  return { ok: true as const, task, project };
+  });
+  if (!mutation.ok) return mutation;
+  const { task, project } = mutation;
 
   await writeChangeLog({
     actorType: "user",
@@ -172,11 +187,6 @@ export async function createTask(
   revalidatePath("/my");
   return { ok: true };
 }
-
-const STAGE_FLOW: Record<string, string[]> = {
-  NEW: ["IN_PROGRESS", "DONE"],
-  IN_PROGRESS: ["DONE"],
-};
 
 const updateSchema = z.object({
   title: z.string().min(1, "Укажите название задачи").optional(),
@@ -208,22 +218,37 @@ export async function updateTask(
   }
   const data = parsed.data;
 
-  const task = await prisma.task.findUnique({
+  const mutation = await withTaskTransaction(async (tx) => {
+  const task = await tx.task.findUnique({
     where: { id: taskId },
-    include: { project: { select: { id: true, number: true } } },
+    include: { project: { select: { id: true, number: true } }, product: { select: { engineerId: true, status: true } }, _count: { select: { payrollEntries: true } } },
   });
-  if (!task) return { ok: false, error: "Задача не найдена" };
-  if (task.status === "DONE") {
-    return { ok: false, error: "Выполненная задача — только просмотр" };
+  if (!task) return { ok: false as const, error: "Задача не найдена" };
+  if (task.status === "DONE" || task._count.payrollEntries > 0) {
+    return { ok: false as const, error: "Выполненная или начисленная задача — только просмотр" };
+  }
+  if (task.allocationGroupId && (
+    (data.workId !== undefined && data.workId !== task.workId) ||
+    (data.productId !== undefined && data.productId !== task.productId) ||
+    (data.quantity !== undefined && String(data.quantity) !== String(task.quantity))
+  )) {
+    return { ok: false as const, error: "Объём, работа и изделие общей доли зафиксированы; используйте разделение" };
   }
 
   // Изделие должно принадлежать проекту задачи
+  let product = data.productId === null ? null : task.product;
   if (data.productId) {
-    const product = await prisma.product.findFirst({
+    product = await tx.product.findFirst({
       where: { id: data.productId, projectId: task.project.id },
-      select: { id: true },
+      select: { engineerId: true, status: true },
     });
-    if (!product) return { ok: false, error: "Изделие не найдено в этом проекте" };
+    if (!product) return { ok: false as const, error: "Изделие не найдено в этом проекте" };
+  }
+  const nextAssigneeId = data.assigneeId === undefined ? task.assigneeId : data.assigneeId;
+  if (nextAssigneeId) {
+    const assignee = await tx.user.findUnique({ where: { id: nextAssigneeId }, select: { id: true, roles: true, active: true } });
+    const error = assignee ? taskRecipientError(assignee, product) : "Сотрудник не найден";
+    if (error) return { ok: false as const, error };
   }
 
   const becameAssigned =
@@ -233,22 +258,26 @@ export async function updateTask(
 
   const newWorkId =
     data.workId === undefined ? task.workId : data.workId;
-  let quantityValue: number | null | undefined = undefined;
-  if (data.workId !== undefined || data.quantity !== undefined) {
+  let quantityValue: string | null | undefined = undefined;
+  if (!task.allocationGroupId && (data.workId !== undefined || data.quantity !== undefined || data.productId !== undefined)) {
     if (newWorkId) {
       const check = await checkWorkQuantity(
+        tx,
         newWorkId,
         data.quantity ?? (task.quantity ? Number(task.quantity) : null),
         taskId,
+        { projectId: task.projectId, productId: data.productId === undefined ? task.productId : data.productId },
       );
-      if (check.error) return { ok: false, error: check.error };
+      if (check.error) return { ok: false as const, error: check.error };
       quantityValue = check.remaining!;
     } else {
       quantityValue = null;
     }
   }
 
-  await prisma.task.update({
+  const dependencies = data.dependencyIds === undefined ? null : await expandDependencies(tx, data.dependencyIds, taskId);
+  if (dependencies?.error) return { ok: false as const, error: dependencies.error };
+  await tx.task.update({
     where: { id: taskId },
     data: {
       title: data.title,
@@ -261,22 +290,19 @@ export async function updateTask(
       estimateMinutes:
         data.estimateMinutes === undefined ? undefined : data.estimateMinutes,
       status: newStatus,
+      splitRevision: { increment: 1 },
     },
   });
 
   // Зависимости (DAG, §9): заменяем список, без самоссылок и циклов
-  if (data.dependencyIds !== undefined) {
-    const next = data.dependencyIds.filter((id) => id !== taskId);
-    if (await hasCycle(taskId, next)) {
-      return { ok: false, error: "Зависимость образует цикл" };
-    }
-    await prisma.$transaction([
-      prisma.taskDependency.deleteMany({ where: { taskId } }),
-      prisma.taskDependency.createMany({
-        data: next.map((dependsOnId) => ({ taskId, dependsOnId })),
-      }),
-    ]);
+  if (dependencies) {
+    await tx.taskDependency.deleteMany({ where: { taskId } });
+    await tx.taskDependency.createMany({ data: dependencies.ids.map((dependsOnId) => ({ taskId, dependsOnId })) });
   }
+  return { ok: true as const, task, becameAssigned, newStatus };
+  });
+  if (!mutation.ok) return mutation;
+  const { task, becameAssigned, newStatus } = mutation;
 
   await writeChangeLog({
     actorType: "user",
@@ -320,7 +346,7 @@ export async function updateTask(
 
 // Проверка цикла: идём от новых предшественников по зависимостям —
 // если добрались до самой задачи, цикл есть.
-async function hasCycle(taskId: string, dependencyIds: string[]) {
+async function hasCycle(tx: Prisma.TransactionClient, taskId: string, dependencyIds: string[]) {
   const seen = new Set<string>();
   const queue = [...dependencyIds];
   while (queue.length > 0) {
@@ -328,13 +354,25 @@ async function hasCycle(taskId: string, dependencyIds: string[]) {
     if (current === taskId) return true;
     if (seen.has(current)) continue;
     seen.add(current);
-    const next = await prisma.taskDependency.findMany({
+    const next = await tx.taskDependency.findMany({
       where: { taskId: current },
       select: { dependsOnId: true },
     });
     queue.push(...next.map((edge) => edge.dependsOnId));
   }
   return false;
+}
+
+async function expandDependencies(tx: Prisma.TransactionClient, selectedIds: string[], taskId?: string): Promise<{ ids: string[]; error?: string }> {
+  const requested = [...new Set(selectedIds)];
+  if (!requested.length) return { ids: [] };
+  const selected = await tx.task.findMany({ where: { id: { in: requested } }, select: { id: true, allocationGroupId: true } });
+  if (selected.length !== requested.length) return { ids: [], error: "Одна из выбранных зависимостей не найдена" };
+  const groupIds = [...new Set(selected.map((task) => task.allocationGroupId).filter((id): id is string => !!id))];
+  const parts = groupIds.length ? await tx.task.findMany({ where: { allocationGroupId: { in: groupIds } }, select: { id: true } }) : [];
+  const ids = [...new Set([...selected, ...parts].map((task) => task.id))];
+  if (taskId && (ids.includes(taskId) || await hasCycle(tx, taskId, ids))) return { ids: [], error: "Зависимость образует цикл или включает собственную группу долей" };
+  return { ids };
 }
 
 // Смена статуса задачи (§4, §9): сам исполнитель — свои; любые — админ/директор/менеджер.
@@ -347,226 +385,41 @@ async function hasCycle(taskId: string, dependencyIds: string[]) {
 // ручной ввод — но работнику/монтажнику ручной ввод закрыт: нет записей →
 // ошибка с подсказкой взять задачу в работу; правку вносит менеджер (§19).
 
-// Автостарт таймера при «В работе»: прежний активный таймер исполнителя
-// останавливаем (один таймер на пользователя), по этой задаче — создаём,
-// если ещё не запущен вручную.
-async function autoStartTimer(taskId: string, assigneeId: string) {
-  const existing = await prisma.timeEntry.findFirst({
-    where: { taskId, userId: assigneeId, stoppedAt: null },
-    select: { id: true },
-  });
-  if (existing) return;
-  await prisma.timeEntry.updateMany({
-    where: { userId: assigneeId, stoppedAt: null },
-    data: { stoppedAt: new Date() },
-  });
-  await prisma.$executeRaw`
-    UPDATE "TimeEntry" SET "minutes" = GREATEST(1, FLOOR(EXTRACT(EPOCH FROM ("stoppedAt" - "startedAt")) / 60)::int)
-    WHERE "userId" = ${assigneeId} AND "stoppedAt" IS NOT NULL AND "minutes" = 0
-  `;
-  await prisma.timeEntry.create({
-    data: { taskId, userId: assigneeId, source: "timer" },
-  });
-}
-
-// Автостоп таймера задачи при «Выполнена» — пишет фактические минуты.
-async function autoStopTimer(taskId: string) {
-  await prisma.timeEntry.updateMany({
-    where: { taskId, stoppedAt: null },
-    data: { stoppedAt: new Date() },
-  });
-  await prisma.$executeRaw`
-    UPDATE "TimeEntry" SET "minutes" = GREATEST(1, FLOOR(EXTRACT(EPOCH FROM ("stoppedAt" - "startedAt")) / 60)::int)
-    WHERE "taskId" = ${taskId} AND "stoppedAt" IS NOT NULL AND "minutes" = 0
-  `;
-}
-
 export async function changeTaskStatus(
   taskId: string,
   toStatus: "IN_PROGRESS" | "DONE",
   actualMinutes?: number,
 ): Promise<{ ok: boolean; error?: string; timeRequired?: boolean }> {
   const session = await requireUser();
-  const roles = session.user.roles;
-  const task = await prisma.task.findFirst({
-    where: { AND: [{ id: taskId }, taskExecutionWhere(session.user)] },
-    include: {
-      project: { select: { id: true, number: true } },
-      product: { select: { id: true, number: true } },
-      files: { where: fileVisibilityWhere(session.user), select: { id: true } },
-      work: { select: { id: true, total: true } },
-      dependencies: {
-        include: { dependsOn: { select: { id: true, title: true, status: true } } },
-      },
-    },
-  });
-  if (!task) return { ok: false, error: "Задача не найдена" };
-
-  const isAssignee = task.assigneeId === session.user.id;
-  if (!isAssignee && !hasAnyRole(roles, MANAGER_ROLES)) {
-    return { ok: false, error: "Недостаточно прав" };
-  }
-  if (!(STAGE_FLOW[task.status] ?? []).includes(toStatus)) {
-    return { ok: false, error: "Недопустимый переход статуса" };
-  }
-  // Блокировка зависимостями (§9): предшественники должны быть выполнены
-  const blockers = task.dependencies.filter((edge) => edge.dependsOn.status !== "DONE");
-  if (blockers.length > 0) {
-    return {
-      ok: false,
-      error: hasFullProjectVisibility(session.user) ? `Задача заблокирована — сначала выполните: ${blockers
-        .map((edge) => `«${edge.dependsOn.title}»`)
-        .join(", ")}` : "Задача заблокирована — сначала должны быть выполнены предыдущие задачи",
-    };
-  }
-  if (toStatus === "DONE" && task.requiresPhoto && task.files.length === 0) {
-    return {
-      ok: false,
-      error: "Приложите файлы (фото/замерный лист) перед выполнением",
-    };
-  }
-
-  // Автостарт таймера при переходе «В работе» (исполнителя, не нажавшего)
-  if (toStatus === "IN_PROGRESS" && task.assigneeId) {
-    await autoStartTimer(task.id, task.assigneeId);
-  }
-
-  // Обязательное фактическое время при «Выполнена»
-  if (toStatus === "DONE") {
-    // Автостоп таймера задачи — его минуты и есть факт
-    await autoStopTimer(taskId);
-    const spent = await prisma.timeEntry.aggregate({
-      where: { taskId, stoppedAt: { not: null } },
-      _sum: { minutes: true },
+  const result = await changeTaskStatusCore({ id: session.user.id, name: session.user.name ?? "", roles: session.user.roles, source: "web" }, taskId, toStatus, actualMinutes, withTaskTransaction);
+  if (!result.ok) return result;
+  if (!result.repeated) {
+    if (result.eventId) await dispatchEvent(result.eventId);
+    if (result.payroll) await notifyOrg({
+      type: "payroll.orgAccrued",
+      title: `Начислено ${result.payroll.name}: ${formatAmount(result.payroll.amount, result.payroll.currency)}`,
+      body: `Сдельно · ${result.task.title} · ${result.task.projectNumber}`,
+      link: "/finance/payroll", exceptUserId: session.user.id,
     });
-    const recorded = spent._sum.minutes ?? 0;
-    if (recorded === 0) {
-      // Работнику/монтажнику ручной ввод закрыт — только таймер
-      if (!hasAnyRole(roles, OFFICE_ROLES)) {
-        return {
-          ok: false,
-          error:
-            "Нет записей времени. Возьмите задачу «В работу» — время посчитается таймером автоматически",
-        };
-      }
-      if (!actualMinutes || actualMinutes < 1) {
-        // UI по этому флагу показывает форму ввода фактического времени
-        return { ok: false, error: "Укажите фактическое время (мин)", timeRequired: true };
-      }
-      await prisma.timeEntry.create({
-        data: {
-          taskId,
-          userId: task.assigneeId ?? session.user.id,
-          source: "manual",
-          stoppedAt: new Date(),
-          minutes: actualMinutes,
-        },
-      });
-      await writeChangeLog({
-        actorType: "user",
-        actorId: session.user.id,
-        actorName: session.user.name ?? undefined,
-        entity: "task",
-        entityId: taskId,
-        action: "time",
-        newValue: { actual: actualMinutes },
-      });
-    }
-  }
-
-  const doneAt = toStatus === "DONE" ? new Date() : null;
-  await prisma.task.update({
-    where: { id: taskId },
-    data: {
-      status: toStatus,
-      ...(doneAt ? { doneAt, doneById: session.user.id } : {}),
-    },
-  });
-
-  // Начисление сдельной оплаты при «Выполнена» (§9):
-  // цена-снимок работы × количество задачи × доля исполнителя.
-  if (doneAt && task.assigneeId && task.work) {
-    const assignee = await prisma.user.findUnique({
-      where: { id: task.assigneeId },
-      select: { name: true, payScheme: true },
+    if (result.task.assigneeId && result.task.assigneeId !== session.user.id) await notifyPerson({
+      userId: result.task.assigneeId, type: "task.statusChanged",
+      title: `Задача «${result.task.title}»: ${toStatus === "DONE" ? "выполнена" : "в работе"}`,
+      body: `Проект ${result.task.projectNumber}`, link: "/my",
     });
-    if (assignee?.payScheme === "PIECE") {
-      const qty = task.quantity ? Number(task.quantity) : 1;
-      const workRow = await prisma.work.findUnique({
-        where: { id: task.work.id },
-        select: { priceSnapshot: true },
-      });
-      const amount = Number(workRow?.priceSnapshot ?? 0) * qty * Number(task.executorShare);
-      if (amount > 0) {
-        const currency = await getPayrollCurrency();
-        await prisma.payrollEntry.create({
-          data: {
-            userId: task.assigneeId,
-            taskId: task.id,
-            workId: task.work.id,
-            projectId: task.project.id,
-            amount,
-            currency,
-            scheme: "PIECE",
-            month: doneAt.toISOString().slice(0, 7),
-            comment: `${task.title} · ${task.project.number}`,
-          },
-        });
-        // ЗП-событие для финансовых ролей (админ/директор/бухгалтер)
-        await notifyOrg({
-          type: "payroll.orgAccrued",
-          title: `Начислено ${assignee.name}: ${formatAmount(amount, currency)}`,
-          body: `Сдельно · ${task.title} · ${task.project.number}`,
-          link: "/finance/payroll",
-          exceptUserId: session.user.id,
-        });
-      }
-    }
-  }
-
-  await writeChangeLog({
-    actorType: "user",
-    actorId: session.user.id,
-    actorName: session.user.name ?? undefined,
-    entity: "task",
-    entityId: taskId,
-    action: "status",
-    field: "status",
-    oldValue: task.status,
-    newValue: toStatus,
-  });
-  await emitDomainEvent(
-    "task.statusChanged",
-    { taskId, projectId: task.project.id, from: task.status, to: toStatus },
-    session.user.id,
-  );
-  if (task.assigneeId && !isAssignee) {
-    await notifyPerson({
-      userId: task.assigneeId,
+    await notifyOrg({
       type: "task.statusChanged",
-      title: `Задача «${task.title}»: ${toStatus === "DONE" ? "выполнена" : "в работе"}`,
-      body: `Проект ${task.project.number}`,
-      link: "/my",
+      title: `Задача «${result.task.title}»: ${toStatus === "DONE" ? "выполнена" : "в работе"}`,
+      body: `Проект ${result.task.projectNumber} · ${session.user.name ?? ""}`,
+      link: result.task.productNumber ? `/products/${result.task.productNumber}` : `/projects/${result.task.projectId}`,
+      exceptUserId: session.user.id,
     });
   }
-  await notifyOrg({
-    type: "task.statusChanged",
-    title: `Задача «${task.title}»: ${toStatus === "DONE" ? "выполнена" : "в работе"}`,
-    body: `${projectLabel(task.project.number)} · ${session.user.name ?? ""}`,
-    link: task.product ? `/products/${task.product.number}` : `/projects/${task.project.id}`,
-    exceptUserId: session.user.id,
-  });
-
-  revalidatePath(`/projects/${task.project.id}`);
-  if (task.product) await revalidateProductPaths(task.product.id);
+  revalidatePath(`/projects/${result.task.projectId}`);
+  await revalidateProductPaths(result.task.productId);
   revalidatePath("/my");
+  revalidatePath("/tasks");
   return { ok: true };
 }
-
-function projectLabel(number: string) {
-  return `Проект ${number}`;
-}
-
 // Удаление задачи — админ/директор/менеджер (§4).
 // Выполненную удалять нельзя: там начисления, время и история.
 // Файлы остаются в проекте (отвязываются), время и зависимости удаляются с ней.
@@ -577,26 +430,30 @@ export async function deleteTask(
   if (!hasAnyRole(session.user.roles, MANAGER_ROLES)) {
     throw new Error("Недостаточно прав");
   }
-  const task = await prisma.task.findUnique({
+  const mutation = await withTaskTransaction(async (tx) => {
+  const task = await tx.task.findUnique({
     where: { id: taskId },
-    include: { project: { select: { id: true, number: true } } },
+    include: { project: { select: { id: true, number: true } }, _count: { select: { payrollEntries: true } } },
   });
-  if (!task) return { ok: false, error: "Задача не найдена" };
-  if (task.status === "DONE") {
+  if (!task) return { ok: false as const, error: "Задача не найдена" };
+  if (task.allocationGroupId) return { ok: false as const, error: "Отдельную долю общей работы удалить нельзя — её объём и бюджет должны сохраниться" };
+  if (task.status === "DONE" || task._count.payrollEntries > 0) {
     return {
-      ok: false,
+      ok: false as const,
       error: "Выполненную задачу удалить нельзя — там начисления и история",
     };
   }
 
-  await prisma.$transaction([
-    prisma.taskDependency.deleteMany({
+  await tx.taskDependency.deleteMany({
       where: { OR: [{ taskId }, { dependsOnId: taskId }] },
-    }),
-    prisma.timeEntry.deleteMany({ where: { taskId } }),
-    prisma.file.updateMany({ where: { taskId }, data: { taskId: null } }),
-    prisma.task.delete({ where: { id: taskId } }),
-  ]);
+    });
+  await tx.timeEntry.deleteMany({ where: { taskId } });
+  await tx.file.updateMany({ where: { taskId }, data: { taskId: null } });
+  await tx.task.delete({ where: { id: taskId } });
+  return { ok: true as const, task };
+  });
+  if (!mutation.ok) return mutation;
+  const { task } = mutation;
 
   await writeChangeLog({
     actorType: "user",

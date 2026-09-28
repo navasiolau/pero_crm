@@ -33,7 +33,7 @@ function project(row: FixtureRow, query: Query): FixtureRow {
   for (const [key, option] of Object.entries(query.select ?? query.include ?? {})) {
     if (key === "_count") {
       result[key] = Object.fromEntries(Object.entries((option as Query).select ?? {}).map(([relation, count]) => [relation,
-        (row[relation] as FixtureRow[]).filter((item) => count === true || matches(item, (count as Query).where)).length,
+        ((row[relation] ?? []) as FixtureRow[]).filter((item) => count === true || matches(item, (count as Query).where)).length,
       ]));
     } else if (option === true) result[key] = row[key];
     else if (object(option)) {

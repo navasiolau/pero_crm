@@ -32,7 +32,7 @@ export default async function MyTasksPage() {
     getUserPreference(session.user.id, "my.view"),
   ]);
 
-  const mapped = await mapTaskDetails(tasks);
+  const mapped = await mapTaskDetails(tasks, session.user);
   const active = mapped.filter((task) => task.status !== "DONE");
   const done = mapped.filter((task) => task.status === "DONE").slice(0, 10);
 

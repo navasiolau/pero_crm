@@ -1,0 +1,189 @@
+{
+  "status": "LOCAL_ACCEPTED_WITH_READONLY_CONTINUATION",
+  "runId": "099ea392-0930-4307-9d0a-334cc22edf87",
+  "database": "EXISTING_LOCAL",
+  "sqlSha256": "65058910bdeec05482a9881c4f83a015cd1e86c32e0ffc352278ac3aa378f0a6",
+  "native": {
+    "browserAssertions": "NOT_RUN_BY_HELPER",
+    "currency": "BYN",
+    "dataChecks": "PASS",
+    "diagnostics": [],
+    "groupCount": 1,
+    "settlementComplete": true,
+    "taskCount": 4,
+    "tasks": {
+      "child": {
+        "id": "cmulfv4540009vxj40vbyw3nw",
+        "payroll": [
+          {
+            "amount": 300,
+            "currency": "BYN",
+            "id": "cmulfv8vn001kvxj41o7ssxiz"
+          }
+        ],
+        "quantity": 10,
+        "shareAmount": 300,
+        "shareUnits": 300000,
+        "status": "DONE"
+      },
+      "dependent": {
+        "id": "1ea3cd53-a745-42ff-accf-7877204b7bf7",
+        "payroll": [],
+        "quantity": null,
+        "shareAmount": null,
+        "shareUnits": null,
+        "status": "DONE"
+      },
+      "fractional": {
+        "id": "cmulfv2r70001vxj4ywkyp26s",
+        "payroll": [
+          {
+            "amount": 30,
+            "currency": "BYN",
+            "id": "cmulfvcso0030vxj4axtr0f8n"
+          }
+        ],
+        "quantity": 0.3,
+        "shareAmount": null,
+        "shareUnits": null,
+        "status": "DONE"
+      },
+      "source": {
+        "id": "736a72e8-6f9a-429f-be69-0d6bf8a9a8db",
+        "payroll": [
+          {
+            "amount": 700,
+            "currency": "BYN",
+            "id": "cmulfv6r4000qvxj4eflqb67m"
+          }
+        ],
+        "quantity": 10,
+        "shareAmount": 700,
+        "shareUnits": 700000,
+        "status": "DONE"
+      }
+    }
+  },
+  "originalBrowserStatus": "FAIL",
+  "originalBrowserChecks": [
+    {
+      "check": "sessions",
+      "status": "PASS",
+      "verifiedProfiles": 3,
+      "passwordLogin": "NOT_TESTED",
+      "tlsVerification": true
+    },
+    {
+      "check": "create-fractional-C-with-All",
+      "status": "PASS",
+      "exactQuantity": "0.30",
+      "genuineThirdDecimalRejected": true,
+      "tasksAfterCreate": 3
+    },
+    {
+      "check": "discover-C-from-real-readonly-options",
+      "status": "PASS",
+      "fractionalIdObserved": true,
+      "budget": "30.00"
+    },
+    {
+      "check": "split-A-30-percent-with-same-UUID-concurrency",
+      "status": "PASS",
+      "splitRequestIdObserved": true,
+      "upstreamCopies": 2,
+      "uniqueChildTaskIds": 1,
+      "sourceAmount": "700.00",
+      "childAmount": "300.00"
+    },
+    {
+      "check": "dependent-blocked-before-both-parts",
+      "status": "PASS",
+      "stage": "before A and D",
+      "taskStayedNew": true,
+      "rejectedByServer": true
+    },
+    {
+      "check": "source-A-auto-timer-and-DONE",
+      "status": "PASS",
+      "automaticTimerObserved": true,
+      "recordedMinutes": 1,
+      "doneUpstreamCopies": 1
+    },
+    {
+      "check": "dependent-still-blocked-after-A",
+      "status": "PASS",
+      "stage": "A done, D unfinished",
+      "taskStayedNew": true,
+      "rejectedByServer": true
+    },
+    {
+      "check": "child-D-auto-timer-and-double-DONE",
+      "status": "PASS",
+      "automaticTimerObserved": true,
+      "recordedMinutes": 1,
+      "doneUpstreamCopies": 2
+    },
+    {
+      "check": "dependent-B-unblocked-without-Work",
+      "status": "PASS",
+      "automaticTimerObserved": true,
+      "recordedMinutes": 1,
+      "doneUpstreamCopies": 1
+    },
+    {
+      "check": "fractional-C-auto-timer-and-DONE",
+      "status": "PASS",
+      "automaticTimerObserved": true,
+      "recordedMinutes": 1,
+      "doneUpstreamCopies": 1
+    }
+  ],
+  "readonlyCompletionStatus": "PASS",
+  "readonlyChecks": [
+    {
+      "check": "sessions",
+      "status": "PASS",
+      "verifiedProfiles": 3,
+      "passwordLogin": "NOT_TESTED",
+      "tlsVerification": true
+    },
+    {
+      "check": "actual-personal-payroll-no-duplicate",
+      "status": "PASS",
+      "workerRows": 2,
+      "mounterRows": 1,
+      "workerTotal": "730.00",
+      "mounterTotal": "300.00",
+      "nativeCaptureStillRequired": true
+    },
+    {
+      "check": "final-owned-project-four-completed-tasks",
+      "status": "PASS",
+      "taskCount": 4,
+      "workQuantityFullyAllocated": "10.30",
+      "allDone": true
+    }
+  ],
+  "passwordLogin": "NOT_TESTED",
+  "offlinePwa": "NOT_TESTED",
+  "visualPngsInspected": 17,
+  "cleanup": {
+    "deleted": {
+      "ChangeLog": 10,
+      "DomainEvent": 10,
+      "Notification": 43,
+      "PayrollEntry": 3,
+      "Project": 1,
+      "Task": 4,
+      "TaskAllocationGroup": 1,
+      "TaskDependency": 2,
+      "TimeEntry": 4,
+      "User": 2,
+      "UserPreference": 0,
+      "Work": 1
+    },
+    "phase": "CLEANED",
+    "scenarioDiagnostics": []
+  },
+  "retainedForeignTableFingerprints": 34
+}

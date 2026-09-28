@@ -39,6 +39,7 @@ before(() => {
       update: async () => { writes.push("time.update"); },
     },
   };
+  Object.assign(db, { $transaction: async (operation: (tx: typeof db) => Promise<unknown>) => operation(db), $queryRaw: async () => [{ locked: 1 }] });
   (globalThis as { prisma?: PrismaClient }).prisma = db as unknown as PrismaClient;
   inject("../src/auth", { auth: async () => ({ user: { id: "engineer", name: "Engineer", roles } }) });
   inject("next/cache", { revalidatePath: () => {} });
