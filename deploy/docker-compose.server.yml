@@ -12,6 +12,12 @@ services:
     # (sha-<коммит>) и правка CRM_IMAGE_TAG.
     image: ghcr.io/navasiolau/pero_crm:${CRM_IMAGE_TAG:-main}
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health',{signal:AbortSignal.timeout(4000)}).then(r=>{if(!r.ok)process.exit(1);return r.json()}).then(b=>{if(b.status!=='ok'||b.database!=='ok')process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 90s
     env_file:
       - .env
     environment:
@@ -50,6 +56,12 @@ services:
   proxy:
     image: caddy:2-alpine
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -T 4 -O - http://127.0.0.1/api/health | grep -q '\"status\":\"ok\"'"]
+      interval: 30s
+      timeout: 6s
+      retries: 3
+      start_period: 30s
     ports:
       - "80:80"
     volumes:
@@ -57,7 +69,8 @@ services:
       - caddy_data:/data
       - caddy_config:/config
     depends_on:
-      - web
+      web:
+        condition: service_healthy
     networks:
       - frontend
 
