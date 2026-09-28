@@ -123,7 +123,11 @@ test("split action and UI mapping show individual quantity, actual cents and all
   assert.equal(mapped.canSplit, true);
   const current = await shares.getTaskSplitOptions("source");
   assert.ok(current.ok);
-  assert.deepEqual(current.share, { units: 700_000, amount: "700.00", currency: "BYN", quantity: "10", revision: 1 });
+  assert.deepEqual(current.share, {
+    units: 700_000, amount: "700.00", currency: "BYN", quantity: "10", revision: 1,
+    source: "LEGACY", stageUnits: null, previewAmount: null, previewCurrency: null,
+    previewReason: null, settledSource: false, engineeringPreview: null,
+  });
 });
 
 test("UI fractional remainder reaches strict create and edit actions without binary tails", async () => {
@@ -141,4 +145,16 @@ test("UI fractional remainder reaches strict create and edit actions without bin
   assert.equal((await actions.updateTask("source", { quantity: Number(remainingWorkQuantity("10.30", "10.00", "0.20")) })).ok, true);
   assert.equal(fixture.state().tasks[0].quantity, "0.50");
   assert.equal((await actions.updateTask("source", { quantity: 0.501 })).ok, false);
+});
+
+test("engineering DTO never presents retained legacy money as the current work price", async () => {
+  fixture = taskShareFixture();
+  Object.assign(fixture.state().works[0], { paymentKind: "ENGINEERING", stagePayPoolId: "pool", poolWeightUnits: 1_000_000 });
+  fixture.state().tasks[0].stageShareUnits = 1_000_000;
+  const row = await fixture.database.task.findFirst({ where: { id: "source" } });
+  const { mapTaskDetails } = await import("../src/server/tasks/queries");
+  const [mapped] = await mapTaskDetails([row as never], { id: "manager", roles: ["MANAGER"] });
+  assert.equal(mapped.paymentKind, "ENGINEERING");
+  assert.equal(mapped.workPriceSnapshot, null); assert.equal(mapped.workTotal, null); assert.equal(mapped.shareAmount, null);
+  assert.equal(fixture.state().works[0].priceSnapshot, "100"); assert.equal(fixture.state().works[0].total, "1000");
 });

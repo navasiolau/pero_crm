@@ -49,8 +49,9 @@ export interface WorkRow {
   title: string;
   quantity: string;
   allocated: string;
-  priceSnapshot: string;
-  total: string;
+  priceSnapshot: string | null;
+  total: string | null;
+  paymentKind?: "LEGACY" | "ENGINEERING";
   linkedTask: { id: string; title: string; status: string } | null;
 }
 
@@ -111,7 +112,7 @@ export function TasksTab({
   const [priceItemId, setPriceItemId] = useState("");
   const [quantity, setQuantity] = useState("1");
 
-  const worksTotal = works.reduce((sum, work) => sum + Number(work.total), 0);
+  const worksTotal = works.filter((work) => work.paymentKind !== "ENGINEERING").reduce((sum, work) => sum + Number(work.total ?? 0), 0);
 
   return (
     <div className="flex flex-col gap-5">
@@ -119,7 +120,7 @@ export function TasksTab({
       <div className="flex flex-col gap-2">
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-medium">
-            Работы · итого {formatAmount(worksTotal, "BYN")}
+            {works.some((work) => work.paymentKind === "ENGINEERING") ? "Сдельные работы" : "Работы"} · итого {formatAmount(worksTotal, "BYN")}
           </h3>
           {canManage ? (
             <Button size="sm" variant="outline" onClick={() => setWorkOpen(true)}>
@@ -132,7 +133,7 @@ export function TasksTab({
           return (
             <div
               key={work.id}
-              className="flex items-center gap-3 rounded-xl border px-3 py-2 text-sm"
+              className="flex flex-wrap items-center gap-3 rounded-xl border px-3 py-2 text-sm"
             >
               <span className="flex-1">
                 {work.title}
@@ -147,12 +148,12 @@ export function TasksTab({
                 )}
               </span>
               <span className="text-muted-foreground">
-                {formatAmount(work.priceSnapshot, "BYN")} × {work.quantity}
+                {work.paymentKind === "ENGINEERING" ? "Инженерный фонд" : `${formatAmount(work.priceSnapshot, "BYN")} × ${work.quantity}`}
               </span>
               <span className="font-medium">
-                {formatAmount(work.total, "BYN")}
+                {work.paymentKind === "ENGINEERING" ? "Оплата по долям фонда" : formatAmount(work.total, "BYN")}
               </span>
-            {canManage ? (
+            {canManage && work.paymentKind !== "ENGINEERING" ? (
               <Button
                 size="icon-xs"
                 variant="ghost"
@@ -380,12 +381,12 @@ export function TasksTab({
                   const remaining = remainingWorkQuantity(work.quantity, work.allocated);
                   return {
                     value: work.id,
-                    label: `${work.title} · ${formatAmount(work.priceSnapshot, "BYN")}/${"ед."}`,
+                    label: `${work.title} · ${work.paymentKind === "ENGINEERING" ? "Инженерный фонд" : `${formatAmount(work.priceSnapshot, "BYN")}/ед.`}`,
                     hint:
                       isPositiveQuantity(remaining)
                         ? `свободно ${remaining} из ${work.quantity}`
                         : "распределена полностью",
-                    disabled: !isPositiveQuantity(remaining),
+                    disabled: work.paymentKind === "ENGINEERING" || !isPositiveQuantity(remaining),
                   };
                 })}
                 value={workId}
@@ -495,6 +496,7 @@ export function TasksTab({
           id: work.id,
           title: work.title,
           total: work.total,
+          paymentKind: work.paymentKind,
           quantity: work.quantity,
           allocated: work.allocated,
         }))}

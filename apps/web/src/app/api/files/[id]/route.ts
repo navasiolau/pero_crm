@@ -5,7 +5,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { UPLOADS_ROOT, s3Enabled, s3Get, fileKey, thumbKey } from "@/lib/s3";
-import { fileVisibilityWhere } from "@/server/access/visibility";
+import { fileVisibilityWhere, resolveVisibilityActor } from "@/server/access/visibility";
 
 // GET /api/files/:id — отдача файла с проверкой прав (§4, §13).
 // ?thumb=1 — превью (для изображений), иначе оригинал.
@@ -18,8 +18,9 @@ export async function GET(
     return NextResponse.json({ error: "Не авторизован" }, { status: 401 });
   }
   const { id } = await params;
+  const actor = await resolveVisibilityActor(prisma, session.user);
   const file = await prisma.file.findFirst({
-    where: { AND: [{ id }, fileVisibilityWhere(session.user)] },
+    where: { AND: [{ id }, fileVisibilityWhere(actor)] },
   });
   if (!file) {
     return NextResponse.json({ error: "Файл не найден" }, { status: 404 });

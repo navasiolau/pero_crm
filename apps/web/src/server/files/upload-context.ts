@@ -1,6 +1,6 @@
 import type { PrismaClient } from "@prisma/client";
 import { FIELD_ROLES, MANAGER_ROLES, hasAnyRole, hasRole } from "@/lib/roles";
-import { productVisibilityWhere, projectVisibilityWhere, taskVisibilityWhere, type VisibilityActor } from "@/server/access/visibility";
+import { engineeringProductWhere, productVisibilityWhere, projectVisibilityWhere, resolveVisibilityActor, taskVisibilityWhere, type VisibilityActor } from "@/server/access/visibility";
 
 /** Validate every foreign key before any storage write; task-only uploads inherit its product. */
 export async function resolveUploadContext(
@@ -8,6 +8,7 @@ export async function resolveUploadContext(
   actor: VisibilityActor,
   input: { projectId: string; productId: string | null; taskId: string | null },
 ) {
+  actor = await resolveVisibilityActor(db, actor);
   const project = await db.project.findFirst({
     where: { AND: [
       { id: input.projectId },
@@ -15,7 +16,7 @@ export async function resolveUploadContext(
     ] },
     select: {
       id: true, number: true,
-      products: { where: { engineerId: actor.id, status: "DESIGN" }, select: { id: true }, take: 1 },
+      products: { where: engineeringProductWhere(actor), select: { id: true }, take: 1 },
       tasks: { where: { assigneeId: actor.id }, select: { id: true }, take: 1 },
     },
   });
@@ -40,8 +41,8 @@ export async function resolveUploadContext(
   }) : null;
   if (productId && !product) return null;
   const managerGrant = hasAnyRole(actor.roles, MANAGER_ROLES);
-  const engineerGrant = hasRole(actor.roles, "ENGINEER") && (product
-    ? product.engineerId === actor.id && product.status === "DESIGN"
+  const engineerGrant = (product
+    ? product.status === "DESIGN" && ((hasRole(actor.roles, "ENGINEER") && product.engineerId === actor.id) || actor.engineeringParticipantProductIds?.includes(product.id))
     // Only an unbound project file inherits access through a DESIGN product.
     // A common task still needs its own execution/field or manager grant.
     : !input.taskId && project.products.length > 0);

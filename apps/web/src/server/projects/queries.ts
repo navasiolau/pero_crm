@@ -8,7 +8,7 @@ import {
 import { STAGES } from "@/lib/stages";
 import { taskDetailsIncludeFor } from "@/server/tasks/queries";
 import { listProjectShortages } from "@/server/warehouse/queries";
-import { clientVisibilityWhere, fileVisibilityWhere, hasFullProjectVisibility, productVisibilityWhere, projectVisibilityWhere, taskVisibilityWhere, workVisibilityWhere, type VisibilityActor } from "@/server/access/visibility";
+import { clientVisibilityWhere, engineeringParticipantProductIds, fileVisibilityWhere, hasFullProjectVisibility, productVisibilityWhere, projectVisibilityWhere, resolveVisibilityActor, taskVisibilityWhere, workVisibilityWhere, type VisibilityActor } from "@/server/access/visibility";
 
 function scopedProjectAmounts<T extends { initialPrice: unknown; delivery: unknown; unloading: unknown; installation: unknown }>(project: T, actor: VisibilityActor) {
   return hasFullProjectVisibility(actor) ? project : {
@@ -62,11 +62,10 @@ const PROJECT_SORT_MAP: Record<
 };
 
 function projectWhere(
-  userId: string,
-  roles: Role[],
+  actor: VisibilityActor,
   filters: ProjectListFilters,
+  filterParticipantIds: string[],
 ): Prisma.ProjectWhereInput {
-  const actor = { id: userId, roles };
   const where: Prisma.ProjectWhereInput = {};
   // Этап: галочка «Только незавершённые» (скрывает DONE и REFUSED — решение
   // владельца, 08.2026) и явный фильтр по этапу сочетаются через AND
@@ -82,7 +81,10 @@ function projectWhere(
   if (filters.managerId) where.managerId = filters.managerId;
   // Инженер — на изделии (§10): проект «инженера X» = есть хоть одно его изделие
   if (filters.engineerId)
-    where.products = { some: { AND: [productVisibilityWhere(actor), { engineerId: filters.engineerId }] } };
+    where.products = { some: { AND: [productVisibilityWhere(actor), { OR: [
+      { engineerId: filters.engineerId },
+      { id: { in: filterParticipantIds } },
+    ] }] } };
   const q = filters.q?.trim();
   if (q) {
     where.OR = [
@@ -152,8 +154,9 @@ export async function listProjects(
   filters: ProjectListFilters,
   paging?: ListPaging,
 ): Promise<{ rows: Awaited<ReturnType<typeof fetchProjectRows>>; total: number }> {
-  const where = projectWhere(userId, roles, filters);
-  const actor = { id: userId, roles };
+  const actor = await resolveVisibilityActor(prisma, { id: userId, roles });
+  const filterParticipantIds = filters.engineerId ? await engineeringParticipantProductIds(prisma, filters.engineerId, false) : [];
+  const where = projectWhere(actor, filters, filterParticipantIds);
   const orderBy = projectOrderBy(filters.sort, filters.dir ?? "desc");
   // Prisma's relation-count ordering cannot filter the count. Sort the visible
   // counts before pagination so hidden siblings cannot affect ordering.
@@ -225,7 +228,7 @@ export async function getProjectFor(
   roles: Role[],
   projectId: string,
 ) {
-  const actor = { id: userId, roles };
+  const actor = await resolveVisibilityActor(prisma, { id: userId, roles });
   const project = await prisma.project.findFirst({
     where: { AND: [{ id: projectId }, projectVisibilityWhere(actor)] },
     include: {
@@ -273,6 +276,7 @@ export async function getProjectFor(
 }
 
 export async function listClients(actor: VisibilityActor) {
+  actor = await resolveVisibilityActor(prisma, actor);
   return prisma.client.findMany({
     where: clientVisibilityWhere(actor),
     include: { _count: { select: { projects: { where: projectVisibilityWhere(actor) } } } },
@@ -283,6 +287,7 @@ export async function listClients(actor: VisibilityActor) {
 // Slim-вариант для фильтров/диалогов: без счётчиков, но с ФИО
 // (displayClientName собирает «Фамилия Имя Отчество»).
 export async function listClientOptions(actor: VisibilityActor) {
+  actor = await resolveVisibilityActor(prisma, actor);
   return prisma.client.findMany({
     where: clientVisibilityWhere(actor),
     select: { id: true, name: true, lastName: true, middleName: true },

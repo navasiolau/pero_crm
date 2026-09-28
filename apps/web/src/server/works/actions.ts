@@ -94,6 +94,7 @@ export async function removeWork(
   const mutation = await withTaskTransaction(async (tx) => {
   const work = await tx.work.findUnique({ where: { id: workId } });
   if (!work) return { ok: false as const, error: "Работа не найдена" };
+  if (work.paymentKind === "ENGINEERING") return { ok: false as const, error: "Работа включена в инженерный фонд — используйте настройку его распределения" };
   const linked = await tx.task.count({ where: { workId } });
   if (linked > 0) {
     return { ok: false as const, error: "К работе привязаны задачи — сначала удалите их" };
@@ -111,7 +112,7 @@ export async function removeWork(
     entity: "work",
     entityId: workId,
     action: "delete",
-    oldValue: { title: work.title, total: work.total.toString() },
+    oldValue: { title: work.title, total: work.total?.toString() ?? null },
   });
   revalidatePath(`/projects/${work.projectId}`);
   await revalidateProductPaths(work.productId);

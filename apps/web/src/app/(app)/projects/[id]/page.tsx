@@ -317,8 +317,9 @@ export default async function ProjectPage({
               title: work.title,
               quantity: work.quantity.toString(),
               allocated: allocatedWorkQuantity(work.tasks),
-              priceSnapshot: work.priceSnapshot.toString(),
-              total: work.total.toString(),
+              priceSnapshot: work.priceSnapshot?.toString() ?? null,
+              total: work.total?.toString() ?? null,
+              paymentKind: work.paymentKind,
               linkedTask: work.tasks[0]
                 ? { id: work.tasks[0].id, title: work.tasks[0].title, status: work.tasks[0].status }
                 : null,

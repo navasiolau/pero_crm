@@ -14,8 +14,9 @@ import { notifyOrg, notifyPerson } from "@/server/notifications/notify";
 import { MANAGER_ROLES, hasAnyRole } from "@/lib/roles";
 import { revalidateProductPaths } from "@/server/products/revalidate";
 import { withTaskTransaction } from "./transaction";
-import { changeTaskStatusCore } from "./completion-core";
-import { taskRecipientError } from "./share-policy";
+import { changeTaskStatusCore, stopTaskTimers } from "./completion-core";
+import { engineeringRecipientError, taskRecipientError } from "./share-policy";
+import { bumpEngineeringPoolRevision } from "@/server/product-stage-pay/core";
 
 const createSchema = z.object({
   projectId: z.string(),
@@ -128,6 +129,8 @@ export async function createTask(
 
   let workQuantity: string | null = null;
   if (data.workId) {
+    const work = await tx.work.findUnique({ where: { id: data.workId }, select: { paymentKind: true } });
+    if (work?.paymentKind === "ENGINEERING") return { ok: false as const, error: "Задачи инженерного фонда создаются через настройку фонда" };
     const check = await checkWorkQuantity(tx, data.workId, data.quantity ?? null, undefined, { projectId: data.projectId, productId: data.productId || null });
     if (check.error) return { ok: false as const, error: check.error };
     workQuantity = check.remaining!;
@@ -221,9 +224,28 @@ export async function updateTask(
   const mutation = await withTaskTransaction(async (tx) => {
   const task = await tx.task.findUnique({
     where: { id: taskId },
-    include: { project: { select: { id: true, number: true } }, product: { select: { engineerId: true, status: true } }, _count: { select: { payrollEntries: true } } },
+    include: { project: { select: { id: true, number: true } }, product: { select: { engineerId: true, status: true, projectId: true } },
+      work: { select: { paymentKind: true, projectId: true, productId: true, stagePayPoolId: true, stagePayPool: { select: { id: true, kind: true, state: true, productId: true } } } },
+      _count: { select: { payrollEntries: true } } },
   });
   if (!task) return { ok: false as const, error: "Задача не найдена" };
+  const engineering = task.work?.paymentKind === "ENGINEERING";
+  let engineeringPoolId: string | null = null;
+  if (engineering) {
+    const pool = task.work?.stagePayPool;
+    if (!task.productId || task.product?.status !== "DESIGN" || task.product.projectId !== task.projectId ||
+      task.work?.projectId !== task.projectId || task.work.productId !== task.productId ||
+      !pool || pool.kind !== "ENGINEERING" || pool.state !== "DRAFT" || pool.productId !== task.productId)
+      return { ok: false as const, error: "Инженерную задачу можно менять только на проектировании до начисления" };
+    if ((data.workId !== undefined && data.workId !== task.workId) || (data.productId !== undefined && data.productId !== task.productId))
+      return { ok: false as const, error: "Нельзя переносить задачу между инженерными фондами" };
+    if (await tx.payrollEntry.count({ where: { workId: task.workId } })) return { ok: false as const, error: "По инженерной работе уже есть начисление" };
+    engineeringPoolId = pool.id;
+  }
+  if (data.workId && data.workId !== task.workId) {
+    const targetWork = await tx.work.findUnique({ where: { id: data.workId }, select: { paymentKind: true } });
+    if (targetWork?.paymentKind === "ENGINEERING") return { ok: false as const, error: "Инженерная работа требует настройки полного распределения долей" };
+  }
   if (task.status === "DONE" || task._count.payrollEntries > 0) {
     return { ok: false as const, error: "Выполненная или начисленная задача — только просмотр" };
   }
@@ -240,21 +262,22 @@ export async function updateTask(
   if (data.productId) {
     product = await tx.product.findFirst({
       where: { id: data.productId, projectId: task.project.id },
-      select: { engineerId: true, status: true },
+      select: { engineerId: true, status: true, projectId: true },
     });
     if (!product) return { ok: false as const, error: "Изделие не найдено в этом проекте" };
   }
   const nextAssigneeId = data.assigneeId === undefined ? task.assigneeId : data.assigneeId;
   if (nextAssigneeId) {
     const assignee = await tx.user.findUnique({ where: { id: nextAssigneeId }, select: { id: true, roles: true, active: true } });
-    const error = assignee ? taskRecipientError(assignee, product) : "Сотрудник не найден";
+    const error = assignee ? (engineering ? engineeringRecipientError(assignee, product) : taskRecipientError(assignee, product)) : "Сотрудник не найден";
     if (error) return { ok: false as const, error };
   }
 
   const becameAssigned =
     data.assigneeId && data.assigneeId !== task.assigneeId;
-  const newStatus =
-    task.status === "DRAFT" && data.assigneeId ? "NEW" : task.status;
+  const reassignedEngineering = engineering && data.assigneeId !== undefined && data.assigneeId !== task.assigneeId;
+  const newStatus = reassignedEngineering ? (data.assigneeId ? "NEW" : "DRAFT")
+    : task.status === "DRAFT" && data.assigneeId ? "NEW" : task.status;
 
   const newWorkId =
     data.workId === undefined ? task.workId : data.workId;
@@ -277,6 +300,7 @@ export async function updateTask(
 
   const dependencies = data.dependencyIds === undefined ? null : await expandDependencies(tx, data.dependencyIds, taskId);
   if (dependencies?.error) return { ok: false as const, error: dependencies.error };
+  if (reassignedEngineering) await stopTaskTimers(tx, taskId);
   await tx.task.update({
     where: { id: taskId },
     data: {
@@ -299,6 +323,7 @@ export async function updateTask(
     await tx.taskDependency.deleteMany({ where: { taskId } });
     await tx.taskDependency.createMany({ data: dependencies.ids.map((dependsOnId) => ({ taskId, dependsOnId })) });
   }
+  if (engineeringPoolId) await bumpEngineeringPoolRevision(tx, engineeringPoolId);
   return { ok: true as const, task, becameAssigned, newStatus };
   });
   if (!mutation.ok) return mutation;
@@ -433,9 +458,10 @@ export async function deleteTask(
   const mutation = await withTaskTransaction(async (tx) => {
   const task = await tx.task.findUnique({
     where: { id: taskId },
-    include: { project: { select: { id: true, number: true } }, _count: { select: { payrollEntries: true } } },
+    include: { project: { select: { id: true, number: true } }, work: { select: { paymentKind: true } }, _count: { select: { payrollEntries: true } } },
   });
   if (!task) return { ok: false as const, error: "Задача не найдена" };
+  if (task.work?.paymentKind === "ENGINEERING") return { ok: false as const, error: "Задача входит в распределение инженерного фонда — её долю можно передать или перераспределить" };
   if (task.allocationGroupId) return { ok: false as const, error: "Отдельную долю общей работы удалить нельзя — её объём и бюджет должны сохраниться" };
   if (task.status === "DONE" || task._count.payrollEntries > 0) {
     return {

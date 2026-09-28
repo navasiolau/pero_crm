@@ -27,6 +27,28 @@ enum PayScheme {
   NONE
 }
 
+enum ProductPayStage {
+  ENGINEERING
+  ASSEMBLY
+  INSTALLATION
+}
+
+enum ProductStagePayState {
+  DRAFT
+  SETTLED
+  LEGACY_PROTECTED
+}
+
+enum WorkPaymentKind {
+  LEGACY
+  ENGINEERING
+}
+
+enum TaskAllocationBudgetSource {
+  TASK_FIXED
+  STAGE_PREVIEW
+}
+
 model User {
   id              String         @id @default(cuid())
   email           String         @unique
@@ -52,6 +74,11 @@ model User {
   payrollEntries  PayrollEntry[]
   payouts         Payout[]
   telegramLink    TelegramLink?
+  createdStagePayPools ProductStagePayPool[] @relation("StagePayPoolCreator")
+  convertedWorkPayments WorkPaymentConversion[] @relation("WorkPaymentConverter")
+  closedStageSettlements ProductStageSettlement[] @relation("StageSettlementCloser")
+  primaryStageSettlements ProductStageSettlement[] @relation("StageSettlementPrimaryEngineer")
+  stageSettlementShares ProductStageSettlementShare[] @relation("StageSettlementShareUser")
 }
 
 // ─── Проекты и клиенты (фаза 2, §6) ──────────────────────────────────────────
@@ -160,6 +187,8 @@ model Project {
   files                  File[]
   communications         Communication[]
   payments               Payment[]
+  stageSettlements       ProductStageSettlement[]
+  legacyProtectedStagePools ProductStagePayPool[] @relation("StagePayPoolLegacyProject")
 
   @@index([stage, stageChangedAt])
   @@index([numberInt])
@@ -217,6 +246,9 @@ model Product {
   files            File[]
   projectMaterials ProjectMaterial[]
   stockMovements   StockMovement[]
+  stagePayPools    ProductStagePayPool[]
+  stageSettlements ProductStageSettlement[] @relation("ProductStageSettlementProduct")
+  payrollEntries   PayrollEntry[]
 
   @@index([projectId])
   @@index([projectId, suffixInt])
@@ -275,6 +307,7 @@ model Task {
   allocationGroup TaskAllocationGroup? @relation(fields: [allocationGroupId], references: [id], onDelete: Restrict)
   shareUnits     Int? // 1 000 000 единиц = 100% исходной группы
   shareAmount    Decimal? @db.Decimal(12, 2) // точный бюджет этой части, не умножать повторно на долю
+  stageShareUnits Int? // доля процентного пула изделия; отдельна от физического объёма и shareAmount
   splitRevision  Int @default(0) // оптимистическая ревизия формы деления
   doneAt         DateTime?
   doneById       String?
@@ -288,10 +321,12 @@ model Task {
   dependencies   TaskDependency[]  @relation("TaskDependencies")
   dependents     TaskDependency[]  @relation("TaskDependents")
   payrollEntries PayrollEntry[]
+  stageSettlementShares ProductStageSettlementShare[]
 
   @@index([assigneeId, status])
   @@index([productId])
   @@index([allocationGroupId])
+  @@index([workId])
 }
 
 // Группа возникает только при первом делении незавершённой задачи.
@@ -301,7 +336,8 @@ model TaskAllocationGroup {
   workId      String?
   work        Work? @relation(fields: [workId], references: [id], onDelete: SetNull)
   quantity    Decimal? @db.Decimal(10, 2)
-  budget      Decimal @db.Decimal(12, 2)
+  budget      Decimal? @db.Decimal(12, 2)
+  budgetSource TaskAllocationBudgetSource @default(TASK_FIXED)
   currency    String?
   createdById String
   createdAt   DateTime @default(now())
@@ -351,17 +387,24 @@ model Work {
   priceItem     PriceItem? @relation(fields: [priceItemId], references: [id], onDelete: SetNull)
   title         String
   quantity      Decimal   @db.Decimal(10, 2)
-  priceSnapshot Decimal   @db.Decimal(12, 2) // цена на момент назначения
-  total         Decimal   @db.Decimal(12, 2) // priceSnapshot × quantity
+  priceSnapshot Decimal?  @db.Decimal(12, 2) // цена на момент назначения
+  total         Decimal?  @db.Decimal(12, 2) // priceSnapshot × quantity
+  paymentKind   WorkPaymentKind @default(LEGACY)
+  stagePayPoolId String?
+  stagePayPool ProductStagePayPool? @relation(fields: [stagePayPoolId], references: [id], onDelete: Restrict)
+  poolWeightUnits Int?
   createdById   String?
   legacyId      String?
   legacyTable   String?
   createdAt     DateTime  @default(now())
   tasks         Task[]
   allocationGroups TaskAllocationGroup[]
+  paymentConversions WorkPaymentConversion[]
+  settlementShares ProductStageSettlementShare[]
 
   @@index([projectId])
   @@index([productId])
+  @@index([stagePayPoolId])
 }
 
 // ─── Время по задачам (§9) ───────────────────────────────────────────────────
@@ -396,6 +439,13 @@ model PayrollEntry {
   taskId     String?
   task       Task?    @relation(fields: [taskId], references: [id], onDelete: SetNull)
   workId     String?
+  productId String?
+  product Product? @relation(fields: [productId], references: [id], onDelete: Restrict)
+  settlementShareId String? @unique
+  settlementShare ProductStageSettlementShare? @relation(fields: [settlementShareId], references: [id], onDelete: Restrict)
+  bynAmount Decimal? @db.Decimal(18, 2)
+  projectAmount Decimal? @db.Decimal(12, 2)
+  projectCurrency String?
   // Проект необязателен: начисление «% от оборота» — на организацию целиком
   projectId  String?
   amount     Decimal  @db.Decimal(12, 2)
@@ -407,6 +457,109 @@ model PayrollEntry {
 
   @@index([userId, month])
   @@index([projectId])
+  @@index([productId])
+}
+
+// Неизменяемый снимок пула оплаты изделия для производственного этапа.
+model ProductStagePayPool {
+  id                    String              @id @default(cuid())
+  productId             String
+  product               Product             @relation(fields: [productId], references: [id], onDelete: Restrict)
+  kind                  ProductPayStage
+  state                 ProductStagePayState @default(DRAFT)
+  ratePercent           Decimal?            @db.Decimal(5, 2)
+  revision              Int                 @default(0)
+  legacyProjectId       String?
+  legacyProject         Project?            @relation("StagePayPoolLegacyProject", fields: [legacyProjectId], references: [id], onDelete: Restrict)
+  legacyPayrollEntryIds String[]             @default([])
+  legacyProtectedAt     DateTime?            @db.Timestamp(3)
+  createdById           String?
+  createdBy             User?               @relation("StagePayPoolCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+  works                 Work[]
+  conversions           WorkPaymentConversion[]
+  settlement            ProductStageSettlement?
+
+  @@unique([productId, kind])
+  @@index([state, kind])
+}
+
+model WorkPaymentConversion {
+  id                 String   @id @default(cuid())
+  workId             String   @unique
+  work               Work     @relation(fields: [workId], references: [id], onDelete: Restrict)
+  poolId             String
+  pool               ProductStagePayPool @relation(fields: [poolId], references: [id], onDelete: Restrict)
+  requestId          String   @unique
+  requestFingerprint String
+  convertedById      String
+  convertedBy        User     @relation("WorkPaymentConverter", fields: [convertedById], references: [id], onDelete: Restrict)
+  convertedAt        DateTime @db.Timestamp(3)
+  sourceSnapshot     Json
+  targetShares       Json
+
+}
+
+model ProductStageSettlement {
+  id                         String   @id @default(cuid())
+  poolId                     String   @unique
+  pool                       ProductStagePayPool @relation(fields: [poolId], references: [id], onDelete: Restrict)
+  productId                  String
+  product                    Product  @relation("ProductStageSettlementProduct", fields: [productId], references: [id], onDelete: Restrict)
+  projectId                  String
+  project                    Project  @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  closedById                 String
+  closedBy                   User     @relation("StageSettlementCloser", fields: [closedById], references: [id], onDelete: Restrict)
+  closedAt                   DateTime @db.Timestamp(3)
+  poolRevision               Int
+  primaryEngineerIdSnapshot  String
+  primaryEngineer            User     @relation("StageSettlementPrimaryEngineer", fields: [primaryEngineerIdSnapshot], references: [id], onDelete: Restrict)
+  primaryEngineerNameSnapshot String
+  priceSnapshot              Decimal  @db.Decimal(12, 2)
+  ratePercentSnapshot        Decimal  @db.Decimal(5, 2)
+  productCurrency            String
+  payrollCurrency            String
+  productRateByn             Decimal  @db.Decimal(18, 6)
+  payrollRateByn             Decimal  @db.Decimal(18, 6)
+  productRateDate            DateTime @db.Date
+  payrollRateDate            DateTime @db.Date
+  sourceFundExact            Decimal  @db.Decimal(18, 6)
+  amount                     Decimal  @db.Decimal(12, 2)
+  bynAmount                  Decimal  @db.Decimal(18, 2)
+  projectAmount              Decimal  @db.Decimal(12, 2)
+  shares                     ProductStageSettlementShare[]
+
+  @@index([projectId])
+  @@index([productId])
+}
+
+model ProductStageSettlementShare {
+  id                          String   @id @default(cuid())
+  settlementId                String
+  settlement                  ProductStageSettlement @relation(fields: [settlementId], references: [id], onDelete: Restrict)
+  taskId                      String
+  task                        Task     @relation(fields: [taskId], references: [id], onDelete: Restrict)
+  workId                      String
+  work                        Work     @relation(fields: [workId], references: [id], onDelete: Restrict)
+  userId                      String
+  user                        User     @relation("StageSettlementShareUser", fields: [userId], references: [id], onDelete: Restrict)
+  taskTitleSnapshot           String
+  workTitleSnapshot           String
+  userNameSnapshot            String
+  workWeightUnits             Int
+  stageShareUnits             Int
+  quantitySnapshot            Decimal? @db.Decimal(10, 2)
+  quantityShareUnitsSnapshot  Int
+  allocationGroupIdSnapshot   String?
+  amount                      Decimal  @db.Decimal(12, 2)
+  bynAmount                   Decimal  @db.Decimal(18, 2)
+  projectAmount               Decimal  @db.Decimal(12, 2)
+  payrollEntry                PayrollEntry?
+
+  @@unique([settlementId, taskId])
+  @@index([workId])
+  @@index([userId])
 }
 
 // Выплата зарплаты (§10): вносит администратор, история по месяцам.

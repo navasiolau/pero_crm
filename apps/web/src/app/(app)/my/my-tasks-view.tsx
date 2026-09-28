@@ -44,7 +44,8 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { PhotoUploadButton } from "@/components/photo-upload-button";
 import { ActualTimeDialog } from "@/components/actual-time-dialog";
 import { TaskSplitDialog } from "@/components/task-split-dialog";
-import { formatAmount } from "@/lib/format";
+import { taskPaymentLabel } from "@/lib/task-payment-display";
+import { requiresManualCompletionTime } from "@/lib/task-completion-prompt";
 import { cn } from "@/lib/utils";
 import { sharePercent } from "@/lib/work-shares";
 import { OFFICE_ROLES, hasAnyRole } from "@/lib/roles";
@@ -151,7 +152,7 @@ export function MyTasksView({
   // «Выполнено»: у работника без записей времени сервер сам откажет с
   // подсказкой; офисным ролям показываем форму фактического времени (§9).
   function completeTask(task: TaskDetails) {
-    if (task.spentMinutes === 0 && canManualTime) {
+    if (requiresManualCompletionTime(task, canManualTime, timer?.taskId)) {
       setActualFor(task);
       return;
     }
@@ -172,9 +173,7 @@ export function MyTasksView({
     const ownQuantity = task.personalQuantity === undefined
       ? (task.allocationGroupId ? null : task.quantity)
       : task.personalQuantity;
-    const ownAmount = task.shareCurrency
-      ? formatAmount(task.shareAmount, task.shareCurrency)
-      : task.workId ? "—" : "Без денежного начисления";
+    const ownAmount = taskPaymentLabel(task);
     return (
       <Card className={faded ? "opacity-60" : ""}>
         <CardContent className="flex flex-wrap items-center gap-3 p-4">
@@ -205,7 +204,8 @@ export function MyTasksView({
               (оценка / факт)
             </div>
             <div className="mt-2 flex flex-col gap-0.5 text-sm">
-              <div>Ваша доля: {sharePercent(task.shareUnits).replace(".", ",")}%</div>
+              <div>{task.paymentKind === "ENGINEERING" ? "Доля объёма" : "Ваша доля"}: {sharePercent(task.shareUnits).replace(".", ",")}%</div>
+              {task.paymentKind === "ENGINEERING" && task.stageShareUnits !== null && task.stageShareUnits !== undefined ? <div>Доля оплаты работы: {sharePercent(task.stageShareUnits).replace(".", ",")}%</div> : null}
               {ownQuantity !== null ? <div>Личный объём: {ownQuantity.replace(".", ",")} ед.</div> : null}
               <div>Сумма доли: {ownAmount}</div>
             </div>
@@ -384,7 +384,7 @@ export function MyTasksView({
     moveLocal(task.id, to);
     startTransition(async () => {
       // Форма фактического времени — только офисным ролям
-      if (to === "DONE" && task.spentMinutes === 0 && canManualTime) {
+      if (to === "DONE" && requiresManualCompletionTime(task, canManualTime, timer?.taskId)) {
         moveLocal(task.id, from);
         setActualFor(task);
         return;

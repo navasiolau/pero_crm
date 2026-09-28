@@ -46,6 +46,7 @@ export const paySchemeLabels: Record<string, string> = {
 // Подписи схем в начислениях (короткие, для таблиц расчётника)
 export const entrySchemeLabels: Record<string, string> = {
   PIECE: "Сдельно",
+  PRODUCT_ENGINEERING: "Инженерный фонд изделия",
   PERCENT_PROJECT: "% от стоимости",
   PERCENT_TURNOVER: "% от оборота",
 };

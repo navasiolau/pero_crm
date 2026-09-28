@@ -1,6 +1,6 @@
 import type { PrismaClient } from "@prisma/client";
 import { hasRole } from "@/lib/roles";
-import { hasFullProjectVisibility, productVisibilityWhere, projectVisibilityWhere, taskVisibilityWhere, type VisibilityActor } from "./visibility";
+import { hasFullProjectVisibility, productVisibilityWhere, projectVisibilityWhere, resolveVisibilityActor, taskVisibilityWhere, type VisibilityActor } from "./visibility";
 
 type NotificationContent = { type: string; title: string; body: string | null; link: string | null };
 type Lookup = Pick<PrismaClient, "product" | "project" | "task">;
@@ -12,7 +12,8 @@ export async function scopeNotificationContent<T extends NotificationContent>(
   items: T[],
   db: Lookup,
 ): Promise<T[]> {
-  if (!hasRole(actor.roles, "ENGINEER") || hasFullProjectVisibility(actor)) return items;
+  actor = await resolveVisibilityActor(db, actor);
+  if ((!hasRole(actor.roles, "ENGINEER") && actor.engineeringParticipantProductIds?.length === 0) || hasFullProjectVisibility(actor)) return items;
   const checked = new Map<string, Promise<boolean>>();
   const canReadLink = (link: string | null): Promise<boolean> => {
     if (!link) return Promise.resolve(false);

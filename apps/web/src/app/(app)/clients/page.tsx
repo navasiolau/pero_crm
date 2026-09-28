@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { OFFICE_ROLES, hasAnyRole } from "@/lib/roles";
-import { clientVisibilityWhere, projectVisibilityWhere } from "@/server/access/visibility";
+import { clientVisibilityWhere, projectVisibilityWhere, resolveVisibilityActor } from "@/server/access/visibility";
 
 import { ClientsView } from "./clients-view";
 
@@ -18,20 +18,21 @@ export default async function ClientsPage({
 }) {
   const session = await auth();
   if (!session?.user) redirect("/login");
+  const actor = await resolveVisibilityActor(prisma, session.user);
   if (!hasAnyRole(session.user.roles, OFFICE_ROLES)) {
     redirect("/");
   }
 
   const { focus } = await searchParams;
   const clients = await prisma.client.findMany({
-    where: clientVisibilityWhere(session.user),
+    where: clientVisibilityWhere(actor),
     include: {
       projects: {
-        where: projectVisibilityWhere(session.user),
+        where: projectVisibilityWhere(actor),
         select: { id: true, number: true, title: true },
         orderBy: { createdAt: "desc" },
       },
-      _count: { select: { projects: { where: projectVisibilityWhere(session.user) } } },
+      _count: { select: { projects: { where: projectVisibilityWhere(actor) } } },
     },
     orderBy: { name: "asc" },
   });

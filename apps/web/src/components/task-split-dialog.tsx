@@ -16,10 +16,17 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { personalQuantity, sharePercent, splitAllocation } from "@/lib/work-shares";
+import { previewStageSplit } from "@/lib/product-stage-split-preview";
+import { createRequestId } from "@/lib/request-id";
 import { getTaskSplitOptions, splitTask } from "@/server/tasks/share-actions";
 
 type SplitOptions = Extract<Awaited<ReturnType<typeof getTaskSplitOptions>>, { ok: true }>;
 type SplitTask = { id: string; title: string };
+type SplitPreview = {
+  percent: string; remainingUnits: number; transferredUnits: number;
+  remainingAmount: string | null; transferredAmount: string | null;
+  remainingStageUnits?: number; transferredStageUnits?: number;
+};
 type LoadState =
   | { status: "loading" }
   | { status: "error"; error: string }
@@ -30,16 +37,6 @@ function displayDecimal(value: string): string {
   return `${integer.replace(/\B(?=(\d{3})+(?!\d))/g, "\u00a0")}${fraction ? `,${fraction}` : ""}`;
 }
 
-function createRequestId(): string {
-  if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
-  // Локальный CRM может открываться по HTTP, где randomUUID недоступен.
-  const bytes = crypto.getRandomValues(new Uint8Array(16));
-  bytes[6] = (bytes[6] & 0x0f) | 0x40;
-  bytes[8] = (bytes[8] & 0x3f) | 0x80;
-  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
-}
-
 function SharePreview({
   title,
   name,
@@ -47,13 +44,17 @@ function SharePreview({
   amount,
   currency,
   quantity,
+  stageUnits,
+  engineering,
 }: {
   title: string;
   name: string;
   units: number;
-  amount: string;
+  amount: string | null;
   currency: string | null;
   quantity: string | null;
+  stageUnits?: number;
+  engineering: boolean;
 }) {
   const ownQuantity = personalQuantity({
     quantity,
@@ -69,9 +70,12 @@ function SharePreview({
       <div className="break-words text-sm text-muted-foreground">{name}</div>
       <dl className="mt-2 flex flex-col gap-1 text-sm">
         <div className="flex flex-wrap justify-between gap-x-3">
-          <dt>Доля задачи</dt>
+          <dt>{engineering ? "Доля объёма" : "Доля задачи"}</dt>
           <dd className="font-medium tabular-nums">{displayDecimal(sharePercent(units))}%</dd>
         </div>
+        {stageUnits !== undefined ? <div className="flex flex-wrap justify-between gap-x-3">
+          <dt>Доля оплаты работы</dt><dd className="font-medium tabular-nums">{displayDecimal(sharePercent(stageUnits))}%</dd>
+        </div> : null}
         {ownQuantity !== null ? (
           <div className="flex flex-wrap justify-between gap-x-3">
             <dt>Личный объём</dt>
@@ -79,9 +83,9 @@ function SharePreview({
           </div>
         ) : null}
         <div className="flex flex-wrap justify-between gap-x-3">
-          <dt>Сумма доли</dt>
+          <dt>{engineering ? "Предварительная сумма" : "Сумма доли"}</dt>
           <dd className="font-medium tabular-nums">
-            {currency ? `${displayDecimal(amount)} ${currency}` : "Без денежного начисления"}
+            {amount === null ? "Пока не рассчитана" : currency ? `${engineering ? "≈ " : ""}${displayDecimal(amount)} ${currency}` : "Без денежного начисления"}
           </dd>
         </div>
       </dl>
@@ -129,7 +133,7 @@ function TaskSplitForm({
 
   const data = load.status === "ready" ? load.data : null;
   const recipient = data?.options.find((option) => option.id === recipientId);
-  let preview: ReturnType<typeof splitAllocation> | null = null;
+  let preview: SplitPreview | null = null;
   let percentError: string | null = null;
   if (data) {
     try {
@@ -137,7 +141,13 @@ function TaskSplitForm({
       if (!/^\d+(?:\.\d{1,2})?$/.test(normalizedPercent)) {
         throw new Error("Укажите процент от 0,01 до 99,99, не более двух знаков после запятой");
       }
-      preview = splitAllocation(data.share.units, data.share.amount, normalizedPercent);
+      if (data.share.source === "ENGINEERING") {
+        if (data.share.stageUnits === null) throw new Error("Финансовая доля ещё не задана");
+        preview = previewStageSplit(task.id, data.share.units, data.share.stageUnits, normalizedPercent, data.share.engineeringPreview);
+      } else {
+        if (data.share.amount === null) throw new Error("Не задан бюджет обычной задачи");
+        preview = splitAllocation(data.share.units, data.share.amount, normalizedPercent);
+      }
     } catch (cause) {
       percentError = cause instanceof Error ? cause.message : "Проверьте передаваемый процент";
     }
@@ -192,9 +202,14 @@ function TaskSplitForm({
       ) : data ? (
         <div className="flex min-w-0 flex-col gap-4">
           <p className="text-sm text-muted-foreground">
-            Текущая доля {data.assigneeName}: {displayDecimal(sharePercent(data.share.units))}%.
+            Текущая доля{data.share.source === "ENGINEERING" ? " объёма" : ""} {data.assigneeName}: {displayDecimal(sharePercent(data.share.units))}%.
             Передаваемый процент считается от этой доли.
           </p>
+          {data.share.source === "ENGINEERING" ? <p className="text-sm text-muted-foreground">
+            Сейчас доля оплаты работы — {data.share.stageUnits === null ? "не задана" : `${displayDecimal(sharePercent(data.share.stageUnits))}%`}.
+            Предварительные суммы пересчитываются по всему фонду и фиксируются при передаче изделия в производство.
+            {data.share.previewReason ? ` ${data.share.previewReason}.` : ""}
+          </p> : null}
           <div className="flex flex-col gap-1.5">
             <Label>Кому передать часть задачи</Label>
             <SearchableSelect
@@ -247,16 +262,20 @@ function TaskSplitForm({
                 name={data.assigneeName}
                 units={preview.remainingUnits}
                 amount={preview.remainingAmount}
-                currency={data.share.currency}
+                currency={data.share.previewCurrency ?? data.share.currency}
                 quantity={data.share.quantity}
+                engineering={data.share.source === "ENGINEERING"}
+                stageUnits={preview.remainingStageUnits}
               />
               <SharePreview
                 title="Будет передано"
                 name={recipient?.name ?? "Выберите сотрудника"}
                 units={preview.transferredUnits}
                 amount={preview.transferredAmount}
-                currency={data.share.currency}
+                currency={data.share.previewCurrency ?? data.share.currency}
                 quantity={data.share.quantity}
+                engineering={data.share.source === "ENGINEERING"}
+                stageUnits={preview.transferredStageUnits}
               />
             </div>
           ) : null}

@@ -9,6 +9,8 @@ import { writeChangeLog } from "@/server/plugins/changelog";
 import { emitDomainEvent } from "@/server/plugins/events";
 import { notifyOrg, notifyPerson } from "@/server/notifications/notify";
 import { requireAdmin, requireFinance } from "@/server/require-role";
+import { withTaskTransaction } from "@/server/tasks/transaction";
+import { assertPayrollCurrencyChange } from "@/server/product-stage-pay/core";
 
 import {
   currentMonth,
@@ -366,14 +368,19 @@ export async function setPayrollCurrency(
   if (!(CURRENCIES as readonly string[]).includes(currency)) {
     return { ok: false, error: "Неизвестная валюта" };
   }
-  const before = await getPayrollCurrency();
+  let before: string;
+  try {
+    before = await withTaskTransaction(async (tx) => {
+      const current = (await tx.orgSetting.findUnique({ where: { key: "payrollCurrency" } }))?.value ?? "BYN";
+      if (current === currency) return current;
+      await assertPayrollCurrencyChange(tx, currency);
+      await tx.orgSetting.upsert({ where: { key: "payrollCurrency" }, update: { value: currency }, create: { key: "payrollCurrency", value: currency } });
+      return current;
+    });
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "Не удалось изменить валюту зарплаты" };
+  }
   if (before === currency) return { ok: true };
-
-  await prisma.orgSetting.upsert({
-    where: { key: "payrollCurrency" },
-    update: { value: currency },
-    create: { key: "payrollCurrency", value: currency },
-  });
   await writeChangeLog({
     actorType: "user",
     actorId: session.user.id,

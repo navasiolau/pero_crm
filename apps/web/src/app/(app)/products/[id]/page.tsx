@@ -11,7 +11,7 @@ import { displayClientName } from "@/lib/labels";
 import { productStatusLabels } from "@/lib/product-statuses";
 import { prisma } from "@/lib/prisma";
 import { MANAGER_ROLES, OFFICE_ROLES, hasAnyRole } from "@/lib/roles";
-import { canEditProductTechnicalBlock } from "@/server/access/visibility";
+import { canEditProductTechnicalBlock, resolveVisibilityActor } from "@/server/access/visibility";
 import { allocatedWorkQuantity } from "@/lib/work-shares";
 import { getFileStageConfig } from "@/server/files/stage-config";
 import { getProductFor } from "@/server/products/queries";
@@ -24,6 +24,8 @@ import { MaterialsTab } from "../../projects/[id]/materials-tab";
 import { TasksTab } from "../../projects/[id]/tasks-tab";
 import { ProductHeader } from "./product-header";
 import { ProductSketch } from "./product-sketch";
+import { EngineeringFund } from "@/components/engineering-fund";
+import { getEngineeringFundView } from "@/server/products/engineering-view";
 import { SurveyorLink } from "./surveyor-link";
 
 export const dynamic = "force-dynamic";
@@ -37,6 +39,7 @@ export default async function ProductPage({
 }) {
   const session = await auth();
   if (!session?.user) redirect("/login");
+  const actor = await resolveVisibilityActor(prisma, session.user);
   const { id } = await params;
   const role = session.user.roles;
 
@@ -44,7 +47,7 @@ export default async function ProductPage({
   if (!product) notFound();
 
   const canManage = hasAnyRole(role, MANAGER_ROLES);
-  const canEditTech = canEditProductTechnicalBlock(session.user, product);
+  const canEditTech = canEditProductTechnicalBlock(actor, product);
   const showAmount = hasAnyRole(role, OFFICE_ROLES);
   const showMaterials = hasAnyRole(role, OFFICE_ROLES);
   const showMoney = hasAnyRole(role, ["ADMIN", "DIRECTOR"]);
@@ -77,6 +80,7 @@ export default async function ProductPage({
     select: { id: true, name: true },
   });
   const authorNames = new Map(authors.map((user) => [user.id, user.name]));
+  const engineeringView = showAmount ? await getEngineeringFundView(prisma, product.id, canManage) : null;
 
   return (
     <div className="flex flex-col gap-4">
@@ -220,6 +224,7 @@ export default async function ProductPage({
 
       <Tabs defaultValue="tasks">
         <TabsList>
+          {engineeringView ? <TabsTrigger value="engineering">Инженерный фонд</TabsTrigger> : null}
           <TabsTrigger value="tasks">
             Работы и задачи ({product.tasks.length})
           </TabsTrigger>
@@ -232,6 +237,9 @@ export default async function ProductPage({
           <TabsTrigger value="history">История</TabsTrigger>
         </TabsList>
 
+        {engineeringView ? <TabsContent value="engineering" className="mt-4">
+          <EngineeringFund view={engineeringView} canManage={canManage} workers={workers.map((worker) => ({ id: worker.id, name: worker.name }))} />
+        </TabsContent> : null}
         <TabsContent value="tasks" className="mt-4">
           <TasksTab
             projectId={product.project.id}
@@ -239,14 +247,15 @@ export default async function ProductPage({
             products={[
               { id: product.id, number: product.number, title: product.title },
             ]}
-            tasks={await mapTaskDetails(product.tasks, session.user)}
+            tasks={await mapTaskDetails(product.tasks, actor)}
             works={product.works.map((work) => ({
               id: work.id,
               title: work.title,
               quantity: work.quantity.toString(),
               allocated: allocatedWorkQuantity(work.tasks),
-              priceSnapshot: work.priceSnapshot.toString(),
-              total: work.total.toString(),
+              priceSnapshot: work.priceSnapshot?.toString() ?? null,
+              total: work.total?.toString() ?? null,
+              paymentKind: work.paymentKind,
               linkedTask: work.tasks[0]
                 ? { id: work.tasks[0].id, title: work.tasks[0].title, status: work.tasks[0].status }
                 : null,
