@@ -5,6 +5,7 @@ import { z } from "zod";
 import { authConfig } from "@/auth.config";
 import { prisma } from "@/lib/prisma";
 import { verifyPassword } from "@/lib/password";
+import { createSessionCallbacks } from "@/server/auth/session-callbacks";
 
 const credentialsSchema = z.object({
   email: z.email(),
@@ -14,6 +15,22 @@ const credentialsSchema = z.object({
 export const { handlers, auth, signIn, signOut } = NextAuth({
   ...authConfig,
   session: { strategy: "jwt" },
+  callbacks: {
+    ...authConfig.callbacks,
+    ...createSessionCallbacks((id) =>
+      prisma.user.findUnique({
+        where: { id },
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          roles: true,
+          active: true,
+          sessionVersion: true,
+        },
+      }),
+    ),
+  },
   providers: [
     Credentials({
       credentials: {
@@ -39,6 +56,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           email: user.email,
           name: user.name,
           roles: user.roles,
+          sessionVersion: user.sessionVersion,
         };
       },
     }),
