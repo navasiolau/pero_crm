@@ -4,11 +4,12 @@ import { redirect } from "next/navigation"
 import { auth } from "@/auth"
 import { LoginForm } from "@/components/login-form"
 import { Logo } from "@/components/logo"
+import { homePathForRoles } from "@/lib/home-route"
 
 export default async function LoginPage() {
   const session = await auth()
   if (session?.user) {
-    redirect("/")
+    redirect(homePathForRoles(session.user.roles))
   }
 
   return (

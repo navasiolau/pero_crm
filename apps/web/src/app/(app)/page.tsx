@@ -7,6 +7,7 @@ import { RecentProjects } from "@/components/recent-projects"
 import { SectionCards } from "@/components/section-cards"
 import { formatAmount } from "@/lib/format"
 import { displayClientName } from "@/lib/labels"
+import { homePathForRoles } from "@/lib/home-route"
 import { OFFICE_ROLES, hasAnyRole, primaryRole } from "@/lib/roles"
 import { stageLabels, stageStyles } from "@/lib/stages"
 import { prisma } from "@/lib/prisma"
@@ -15,12 +16,13 @@ export const dynamic = "force-dynamic"
 
 export default async function DashboardPage() {
   const session = await auth()
+  if (!session?.user) redirect("/login")
 
-  // Работник/монтажник (все роли производственные) сразу попадают
-  // на «Мои задачи» (§4); при комбинации с офисной ролью — дашборд
-  const roles = session?.user.roles ?? []
-  if (!hasAnyRole(roles, OFFICE_ROLES)) {
-    redirect("/my")
+  // Проверяем доступ до запросов статистики, в том числе без middleware.
+  const roles = session.user.roles
+  const homePath = homePathForRoles(roles)
+  if (homePath !== "/") {
+    redirect(homePath)
   }
 
   const todayEnd = new Date();

@@ -18,6 +18,7 @@ import {
   ADMIN_ROLES,
   FIELD_ROLES,
   FINANCE_ROLES,
+  MANAGER_ROLES,
   OFFICE_ROLES,
   type Role,
 } from "@/lib/roles";
@@ -41,8 +42,7 @@ const ALL_ROLES: Role[] = [...OFFICE_ROLES, ...FIELD_ROLES];
 const PAYROLL_ROLES: Role[] = ALL_ROLES.filter((role) => role !== "DIRECTOR");
 
 export const navItems: NavItem[] = [
-  // У работника и монтажника дашборда нет — их главный экран «Мои задачи»
-  { href: "/", label: "Дашборд", icon: LayoutDashboard, roles: OFFICE_ROLES, group: "main" },
+  { href: "/", label: "Дашборд", icon: LayoutDashboard, roles: MANAGER_ROLES, group: "main" },
   { href: "/my", label: "Мои задачи", icon: ClipboardCheck, roles: ALL_ROLES, group: "main" },
   { href: "/payroll", label: "Моя зарплата", icon: Wallet, roles: PAYROLL_ROLES, group: "main" },
   { href: "/projects", label: "Проекты", icon: FolderKanban, roles: OFFICE_ROLES, group: "manage" },
