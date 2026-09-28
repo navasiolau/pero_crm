@@ -4,7 +4,8 @@ import { auth } from "@/auth";
 import { displayClientName } from "@/lib/labels";
 import { MANAGER_ROLES, hasAnyRole } from "@/lib/roles";
 import { hasFullProjectVisibility } from "@/server/access/visibility";
-import { getUserPreference } from "@/server/preferences";
+import { ListParamsProvider } from "@/lib/list-params";
+import { listPreferences } from "@/server/list-preferences";
 import {
   listClientOptions,
   listEngineers,
@@ -17,8 +18,7 @@ import { ProjectsView } from "./projects-view";
 
 export const dynamic = "force-dynamic";
 
-// Проекты: серверные фильтры/сортировка/пагинация (состояние в URL),
-// вид канбан/таблица — параметр ?view с фолбэком на UserPreference (§7).
+// Параметры URL полностью определяют список; голый маршрут восстанавливает UserPreference.
 // Канбан получает все отфильтрованные проекты, таблица — одну страницу.
 export default async function ProjectsPage({
   searchParams,
@@ -29,17 +29,12 @@ export default async function ProjectsPage({
   if (!session?.user) redirect("/login");
 
   const role = session.user.roles;
-  const params = await searchParams;
+  const rawParams = await searchParams;
+  const state = await listPreferences.load("projects", rawParams);
+  if (Object.keys(rawParams).length === 0) redirect(`/projects?${state.query}`);
+  const params = Object.fromEntries(new URLSearchParams(state.query));
   const { filters, page, pageSize } = parseProjectListParams(params);
-
-  const viewParam = (Array.isArray(params.view) ? params.view[0] : params.view) ?? "";
-  const savedView = await getUserPreference(session.user.id, "projects.view");
-  const view =
-    viewParam === "table" || viewParam === "kanban"
-      ? viewParam
-      : savedView === "table"
-        ? "table"
-        : "kanban";
+  const view = params.view === "table" ? "table" : "kanban";
 
   const [result, clients, managers, engineers] = await Promise.all([
     listProjects(
@@ -56,6 +51,7 @@ export default async function ProjectsPage({
   const canManage = hasAnyRole(role, MANAGER_ROLES);
 
   return (
+    <ListParamsProvider key={session.user.id} section="projects" initialQuery={state.query} preference={state.value}>
     <ProjectsView
       view={view}
       projects={result.rows.map((project) => ({
@@ -83,5 +79,6 @@ export default async function ProjectsPage({
       managers={managers.map((manager) => ({ id: manager.id, name: manager.name }))}
       engineers={engineers.map((engineer) => ({ id: engineer.id, name: engineer.name }))}
     />
+    </ListParamsProvider>
   );
 }

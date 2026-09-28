@@ -1,12 +1,10 @@
 "use client";
 
-import { useTransition } from "react";
 import { LayoutGrid, Table2 } from "lucide-react";
 import type { ProductStatus } from "@prisma/client";
 
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useListParams } from "@/lib/list-params";
-import { saveViewPreference } from "@/server/preferences-actions";
 
 import { ProductsFilterBar } from "./products-filter-bar";
 import { ProductsKanban } from "./products-kanban";
@@ -56,14 +54,9 @@ export function ProductsView({
   engineerOptions: { value: string; label: string; hint?: string }[];
 }) {
   const { set } = useListParams();
-  const [, startTransition] = useTransition();
 
   function switchView(next: "kanban" | "table") {
     set({ view: next });
-    // Предпочтение — фолбэк для следующего визита (URL главнее)
-    startTransition(async () => {
-      await saveViewPreference("products.view", next);
-    });
   }
 
   return (

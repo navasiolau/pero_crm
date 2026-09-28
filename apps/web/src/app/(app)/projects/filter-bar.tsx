@@ -1,6 +1,5 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
 import { RotateCcw, Search } from "lucide-react";
 import type { ProjectStage } from "@prisma/client";
 
@@ -16,7 +15,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { SearchableSelect } from "@/components/ui/searchable-select";
-import { useListParams } from "@/lib/list-params";
+import { useListParams, useListSearch } from "@/lib/list-params";
 import { STAGES, stageLabels } from "@/lib/stages";
 
 import type { SelectOption } from "./projects-view";
@@ -33,26 +32,8 @@ export function ProjectsFilterBar({
   managers: SelectOption[];
   engineers: SelectOption[];
 }) {
-  const { get, set, pending } = useListParams();
-  const urlQ = get("q");
-  const [q, setQ] = useState(urlQ);
-  const debounceRef = useRef(urlQ);
-
-  // Синхронизация поля с URL (кнопка «Сбросить», навигация «назад»)
-  useEffect(() => {
-    setQ(urlQ);
-  }, [urlQ]);
-
-  // Отложенная запись поиска в URL — не дёргаем сервер на каждый символ
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      if (debounceRef.current !== q) {
-        debounceRef.current = q;
-        set({ q: q || null, page: null });
-      }
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [q, set]);
+  const { get, set, reset, pending, canReset } = useListParams();
+  const { q, setQ } = useListSearch();
 
   const stageRaw = get("stage");
   const stage = (STAGES.some((item) => item.id === stageRaw)
@@ -62,8 +43,7 @@ export function ProjectsFilterBar({
   const managerId = get("manager");
   const engineerId = get("engineer");
   const activeOnly = get("active") !== "0";
-  const hasFilters =
-    Boolean(urlQ || stage || clientId || managerId || engineerId) || !activeOnly;
+  const hasFilters = canReset || Boolean(q);
 
   // SelectOption (id/name) → SearchableOption (value/label)
   const toOptions = (items: SelectOption[]) =>
@@ -153,19 +133,7 @@ export function ProjectsFilterBar({
           variant="ghost"
           size="sm"
           className="text-muted-foreground"
-          onClick={() =>
-            set({
-              q: null,
-              stage: null,
-              client: null,
-              manager: null,
-              engineer: null,
-              active: null,
-              sort: null,
-              dir: null,
-              page: null,
-            })
-          }
+          onClick={reset}
         >
           <RotateCcw className="size-3.5" /> Сбросить
         </Button>

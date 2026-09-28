@@ -29,6 +29,8 @@ apps/web/uploads/
 
 # Playwright MCP артефакты сессии
 .playwright-mcp/
+apps/web/test-results/
+apps/web/playwright-report/
 
 # Прочее
 *.log
