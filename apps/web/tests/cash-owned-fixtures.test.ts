@@ -71,6 +71,29 @@ test("raw business fingerprints preserve numeric text exactly and stop foreign d
   assert.throws(() => inspectCashCapture(first, plan, { outcomes: [], effectIds: {} }, "INITIAL"), /FOREIGN_FINGERPRINT_DRIFT/);
 });
 
+test("only attested staging fingerprint projection omits ApiToken.lastUsedAt, never business fields", () => {
+  const tables = cashQaSchemaTables();
+  const rows = Object.fromEntries(tables.map((table) => [table, [] as string[]]));
+  rows.ApiToken = [JSON.stringify({ id: "token-owned-by-real-user", tokenHash: "hash-a", scopes: ["read"],
+    ownerId: "real-user", lastUsedAt: "2026-09-29T00:00:00.000Z" })];
+  const stageSnapshot = { schemaTables: tables, rows, fingerprintTargetKind: "EXISTING_STAGING" };
+  const first = cashRawFingerprints(stageSnapshot, tables);
+  const later = structuredClone(stageSnapshot);
+  later.rows.ApiToken[0] = JSON.stringify({ ...JSON.parse(later.rows.ApiToken[0]), lastUsedAt: "2026-09-29T01:00:00.000Z" });
+  assert.equal(cashRawFingerprints(later, tables).ApiToken, first.ApiToken);
+  assert.notEqual(cashRawFingerprints({ ...stageSnapshot, fingerprintTargetKind: "EXISTING_LOCAL" }, tables).ApiToken,
+    cashRawFingerprints({ ...later, fingerprintTargetKind: "EXISTING_LOCAL" }, tables).ApiToken);
+  for (const changed of [{ scopes: ["write"] }, { tokenHash: "hash-b" }, { ownerId: "other-user" },
+    { id: "different-token-id" }]) {
+    later.rows.ApiToken[0] = JSON.stringify({ ...JSON.parse(rows.ApiToken[0]), lastUsedAt: "2026-09-29T01:00:00.000Z",
+      ...changed });
+    assert.notEqual(cashRawFingerprints(later, tables).ApiToken, first.ApiToken);
+  }
+  later.rows.ApiToken = rows.ApiToken;
+  later.rows.Plugin = [JSON.stringify({ id: "demo", updatedAt: "later" })];
+  assert.notEqual(cashRawFingerprints(later, tables).Plugin, first.Plugin);
+});
+
 test("plan binds exact QA identities, fallback funding and prior-month accrual", () => {
   const { plan } = fixture();
   assert.match(cashPlanSha256(plan), /^[0-9a-f]{64}$/);

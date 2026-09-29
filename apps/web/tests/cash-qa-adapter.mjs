@@ -53,6 +53,42 @@ const DDL_SQL = Object.freeze({
   enums: "SELECT typ.typname AS type,e.enumlabel AS label,e.enumsortorder AS ordinal FROM pg_catalog.pg_enum e JOIN pg_catalog.pg_type typ ON typ.oid=e.enumtypid JOIN pg_catalog.pg_namespace ns ON ns.oid=typ.typnamespace WHERE ns.nspname='public' ORDER BY typ.typname,e.enumsortorder",
 });
 
+async function readCatalog(tx) {
+  const foundTables = (await tx.$queryRawUnsafe(TABLES_SQL)).map((row) => row.name);
+  const ddl = { tables: foundTables };
+  for (const [key, sql] of Object.entries(DDL_SQL)) ddl[key] = await tx.$queryRawUnsafe(sql);
+  const migrations = await tx.$queryRawUnsafe(MIGRATIONS_SQL);
+  return { foundTables, schemaHash: cashSchemaDigest(ddl), migrations };
+}
+
+function assertMigration(migrations, sqlHash) {
+  const required = migrations.filter((row) => row.migration_name === "20260929120000_manager_cash_advances");
+  check(required.length === 1 && required[0].finished_at !== null && required[0].rolled_back_at === null &&
+    required[0].checksum?.toLowerCase() === sqlHash.toLowerCase() &&
+    migrations.every((row) => row.finished_at !== null || row.rolled_back_at !== null), "MIGRATION_LEDGER_MISMATCH");
+}
+
+/** Runner preflight before attestation creation; never chooses a DB or opens a connection itself. */
+export async function probeCashQaDatabase(prisma, target, sqlHash) {
+  assertCashQaTarget(target);
+  check(prisma && typeof prisma.$transaction === "function" && HASH.test(sqlHash ?? ""), "PROBE_INPUT_INVALID");
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe("SET TRANSACTION READ ONLY");
+    const found = await tx.$queryRawUnsafe(IDENTITY_SQL);
+    check(found.length === 1 && found[0].database === target.database && found[0].schema === "public" &&
+      typeof found[0].username === "string" && found[0].username.length > 0 &&
+      typeof found[0].address === "string" && found[0].address.length > 0 && Number(found[0].port) === 5432,
+    "DATABASE_IDENTITY_MISMATCH");
+    const catalog = await readCatalog(tx);
+    const optional = catalog.foundTables.filter((name) => !cashQaSchemaTables().includes(name));
+    check(same(sorted(catalog.foundTables), cashQaSchemaTables(optional)), "UNKNOWN_SCHEMA_TABLES");
+    assertMigration(catalog.migrations, sqlHash);
+    return { database: found[0].database, dbUser: found[0].username, serverAddress: found[0].address,
+      serverPort: Number(found[0].port), schemaTables: sorted(catalog.foundTables),
+      optionalCompositionTables: optional, schemaHash: catalog.schemaHash, sqlSha256: sqlHash.toLowerCase() };
+  }, { isolationLevel: "RepeatableRead", maxWait: 5000, timeout: 120000 });
+}
+
 function planIds(plan) {
   return [plan.project.id, ...plan.users.map((u) => u.id), ...plan.accounts.map((a) => a.id),
     ...plan.payments.map((p) => p.id), plan.accrual.id];
@@ -87,18 +123,11 @@ export function createCashQaSqlAdapter({ prisma, target, attestation, plan = nul
 
   async function guard(tx) {
     await identity(tx);
-    const catalog = await tx.$queryRawUnsafe(TABLES_SQL);
-    const foundTables = catalog.map((row) => row.name);
-    check(same(foundTables, tables), "UNKNOWN_SCHEMA_TABLES");
-    const ddl = { tables: foundTables };
-    for (const [key, sql] of Object.entries(DDL_SQL)) ddl[key] = await tx.$queryRawUnsafe(sql);
-    check(cashSchemaDigest(ddl) === attestation.schemaHash, "DDL_DIGEST_CHANGED");
-    const migrations = await tx.$queryRawUnsafe(MIGRATIONS_SQL);
-    const required = migrations.filter((row) => row.migration_name === "20260929120000_manager_cash_advances");
-    check(required.length === 1 && required[0].finished_at !== null && required[0].rolled_back_at === null &&
-      required[0].checksum?.toLowerCase() === sqlHash.toLowerCase() &&
-      migrations.every((row) => row.finished_at !== null || row.rolled_back_at !== null), "MIGRATION_LEDGER_MISMATCH");
-    return ddl;
+    const catalog = await readCatalog(tx);
+    check(same(catalog.foundTables, tables), "UNKNOWN_SCHEMA_TABLES");
+    check(catalog.schemaHash === attestation.schemaHash, "DDL_DIGEST_CHANGED");
+    assertMigration(catalog.migrations, sqlHash);
+    return catalog;
   }
 
   async function snapshot(tx) {
@@ -108,7 +137,8 @@ export function createCashQaSqlAdapter({ prisma, target, attestation, plan = nul
       check(Array.isArray(result) && result.every((row) => typeof row.raw === "string"), "RAW_SNAPSHOT_INVALID");
       rows[table] = result.map((row) => row.raw);
     }
-    return { schemaTables: tables, schemaHash: attestation.schemaHash, rows };
+    return { schemaTables: tables, schemaHash: attestation.schemaHash,
+      fingerprintTargetKind: target.kind, rows };
   }
 
   async function assertFixtureReferences(tx) {

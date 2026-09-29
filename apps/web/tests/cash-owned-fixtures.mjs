@@ -85,6 +85,12 @@ export function cashRawFingerprints(snapshot, tables, excluded = {}) {
       const row = JSON.parse(raw);
       check(row && typeof row === "object" && !Array.isArray(row), "RAW_JSON_REQUIRED");
       return !blocked.has(rowId(table, row));
+    }).map((raw) => {
+      if (snapshot.fingerprintTargetKind !== "EXISTING_STAGING" || table !== "ApiToken") return raw;
+      const token = JSON.parse(raw);
+      check(Object.hasOwn(token, "lastUsedAt"), "API_TOKEN_LAST_USED_FIELD_MISSING");
+      delete token.lastUsedAt;
+      return canonical(token); // stage-only service-use timestamp; every other token field stays exact
     }).sort();
     return [table, sha(raws.join("\n") + "\n")];
   }));

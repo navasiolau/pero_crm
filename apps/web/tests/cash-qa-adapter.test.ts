@@ -6,6 +6,8 @@ import { assertCashRuntimeAttestation, cashSchemaDigest, createCashQaSqlAdapter 
 
 const target = { kind: "EXISTING_LOCAL", containerId: "bf45c761b5687e54bff1aafea82e8647925b5b425d6743ebdc7d33f4824b0ed5",
   host: "127.0.0.1", port: 5433, database: "pero_crm" };
+const stageTarget = { kind: "EXISTING_STAGING", containerId: "27b8f7342b9d722ab8788e137b37b03a3037442da038c5b8b98dbb30245b8b6a",
+  guest: "crm-staging", host: "db", port: 5432, database: "crm" };
 const tables = cashQaSchemaTables();
 const ddl = { tables, relations: [], columns: [], constraints: [], indexes: [], triggers: [], triggerFunctions: [], policies: [], enums: [] };
 const sqlSha256 = "bfa8d8a59b67ec027e67602a824a71eb98e473b57aad35e181eeaa1f852870dd";
@@ -16,14 +18,20 @@ function attestation() {
     backup: { verified: true, archiveSha256: "b".repeat(64), tocSha256: "c".repeat(64), fullReadSha256: "d".repeat(64),
       targetKind: target.kind, database: target.database } };
 }
+function stageAttestation() {
+  const local = attestation();
+  return { ...local, target: stageTarget, dbUser: "crm", database: "crm",
+    backup: { ...local.backup, targetKind: stageTarget.kind, database: "crm" } };
+}
 
 function fakeDb(options: { unknownTable?: boolean; badDdl?: boolean; deleteRows?: Array<{ id: string }>;
-  rows?: Record<string, string[]>; insertZeroOn?: string; waitingLock?: boolean } = {}) {
+  rows?: Record<string, string[]>; insertZeroOn?: string; waitingLock?: boolean; stage?: boolean } = {}) {
   const calls: string[] = [];
   const tx = {
     $queryRawUnsafe: async (sql: string) => {
       calls.push(sql);
-      if (sql.includes("current_database()")) return [{ database: "pero_crm", username: "pero", address: "172.18.0.2", port: 5432, schema: "public" }];
+      if (sql.includes("current_database()")) return [{ database: options.stage ? "crm" : "pero_crm",
+        username: options.stage ? "crm" : "pero", address: "172.18.0.2", port: 5432, schema: "public" }];
       if (sql.includes("pg_catalog.pg_tables")) return [...tables.map((name) => ({ name })), ...(options.unknownTable ? [{ name: "Unknown" }] : [])];
       if (sql.includes('FROM public."_prisma_migrations"')) return [{ migration_name: "20260929120000_manager_cash_advances", checksum: sqlSha256,
         finished_at: new Date(), rolled_back_at: null }];
@@ -95,6 +103,16 @@ test("read-only snapshot rechecks current database, catalog, DDL and migration c
   assert.ok(fake.calls.some((sql) => sql.includes("to_jsonb(t)::text")));
   await assert.rejects(createCashQaSqlAdapter({ prisma: fakeDb({ unknownTable: true }).client, target, attestation: attestation() }).readOnly(async () => true), /UNKNOWN_SCHEMA_TABLES/);
   await assert.rejects(createCashQaSqlAdapter({ prisma: fakeDb({ badDdl: true }).client, target, attestation: attestation() }).readOnly(async () => true), /DDL_DIGEST_CHANGED/);
+});
+
+test("only verified staging adapter stamps snapshots for ApiToken lastUsedAt projection", async () => {
+  const stage = createCashQaSqlAdapter({ prisma: fakeDb({ stage: true }).client,
+    target: stageTarget, attestation: stageAttestation() });
+  const local = createCashQaSqlAdapter({ prisma: fakeDb().client, target, attestation: attestation() });
+  const stageSnapshot = await stage.readOnly((tx: { snapshot(): Promise<unknown> }) => tx.snapshot());
+  const localSnapshot = await local.readOnly((tx: { snapshot(): Promise<unknown> }) => tx.snapshot());
+  assert.equal((stageSnapshot as { fingerprintTargetKind?: string }).fingerprintTargetKind, "EXISTING_STAGING");
+  assert.equal((localSnapshot as { fingerprintTargetKind?: string }).fingerprintTargetKind, "EXISTING_LOCAL");
 });
 
 test("write transaction performs identity probe, advisory lock, all-table lock, then guarded business read", async () => {
