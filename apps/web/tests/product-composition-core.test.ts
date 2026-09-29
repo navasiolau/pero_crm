@@ -9,7 +9,7 @@ type Row = Record<string, unknown> & { id: string };
 const manager = { id: "manager", name: "Manager", roles: ["MANAGER" as const], source: "web" as const };
 function fixture() {
   let state = { product: { id: "product", engineerId: "engineer", status: "DESIGN" }, revisions: [] as Row[],
-    items: [] as Row[], logs: [] as Row[] };
+    items: [] as Row[], finishes: [] as Row[], logs: [] as Row[] };
   const writes: string[] = [];
   let failAt: string | null = null;
   const write = (name: string) => { writes.push(name); if (failAt === name) throw new Error("Injected transactional failure"); };
@@ -40,6 +40,15 @@ function fixture() {
         state.items = state.items.filter((r) => r !== row); return row; },
       deleteMany: async ({ where }: { where: { id: { in: string[] } } }) => { write("item.deleteMany"); const before = state.items.length;
         state.items = state.items.filter((row) => !where.id.in.includes(row.id)); return { count: before - state.items.length }; },
+    },
+    productCompositionFinish: {
+      findMany: async ({ where }: { where: Row }) => state.finishes.filter((row) => row.revisionId === where.revisionId),
+      createMany: async ({ data }: { data: Row[] }) => { write("finish.createMany");
+        state.finishes.push(...data.map((row) => ({ ...row }))); return { count: data.length }; },
+      deleteMany: async ({ where }: { where: { itemId: { in: string[] } } }) => { write("finish.deleteMany");
+        const before = state.finishes.length;
+        state.finishes = state.finishes.filter((row) => !where.itemId.in.includes(String(row.itemId)));
+        return { count: before - state.finishes.length }; },
     },
     changeLog: { create: async ({ data }: { data: Row }) => { write("log.create"); const row = { ...data, id: data.id ?? randomUUID() };
       state.logs.push(row); return row; } },

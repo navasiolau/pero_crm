@@ -27,6 +27,7 @@ import { ProductSketch } from "./product-sketch";
 import { EngineeringFund } from "@/components/engineering-fund";
 import { getEngineeringFundView } from "@/server/products/engineering-view";
 import { getProductComposition } from "@/server/composition/queries";
+import { listFinishSampleFiles } from "@/server/finishes/queries";
 import { CompositionTab } from "@/components/composition-tab";
 import { SurveyorLink } from "./surveyor-link";
 
@@ -56,6 +57,7 @@ export default async function ProductPage({
 
   const canManage = hasAnyRole(role, MANAGER_ROLES);
   const canEditTech = canEditProductTechnicalBlock(actor, product);
+  const finishSampleFiles = canEditTech ? await listFinishSampleFiles(actor, product.id) : [];
   const showAmount = hasAnyRole(role, OFFICE_ROLES);
   const showMaterials = hasAnyRole(role, OFFICE_ROLES);
   const showMoney = hasAnyRole(role, ["ADMIN", "DIRECTOR"]);
@@ -289,7 +291,7 @@ export default async function ProductPage({
         </TabsContent>
 
         <TabsContent value="composition" className="mt-4">
-          <CompositionTab data={composition} canEdit={canEditTech} authorNames={Object.fromEntries(authorNames)} />
+          <CompositionTab data={composition} canEdit={canEditTech} authorNames={Object.fromEntries(authorNames)} sampleFiles={finishSampleFiles} />
         </TabsContent>
 
         {showMaterials && materialsData ? (

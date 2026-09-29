@@ -7,6 +7,7 @@ import { withTaskTransaction } from "@/server/tasks/transaction";
 import { createCompositionDraftCore, saveCompositionItemCore, deleteCompositionItemCore,
   discardCompositionDraftCore, confirmCompositionDraftCore, type CompositionActor } from "./core";
 import { compositionErrorMessage } from "./errors";
+import { saveCompositionFinishCore, deleteCompositionFinishCore } from "@/server/finishes/core";
 
 async function actor(): Promise<CompositionActor> {
   const session = await auth();
@@ -44,4 +45,11 @@ export async function discardCompositionDraft(input: Parameters<typeof discardCo
 }
 export async function confirmCompositionDraft(input: Parameters<typeof confirmCompositionDraftCore>[2]) {
   return mutation(input.productId, (user) => withTaskTransaction((tx) => confirmCompositionDraftCore(tx, user, input)));
+}
+
+export async function saveCompositionFinish(input: Parameters<typeof saveCompositionFinishCore>[2]) {
+  return mutation(input.productId, (user) => withTaskTransaction((tx) => saveCompositionFinishCore(tx, user, input)));
+}
+export async function deleteCompositionFinish(input: Parameters<typeof deleteCompositionFinishCore>[2]) {
+  return mutation(input.productId, (user) => withTaskTransaction((tx) => deleteCompositionFinishCore(tx, user, input)));
 }

@@ -19,7 +19,7 @@ async function main() {
       kind: index === 15 ? "PART" : "MODULE", designation: `М-${index + 1}-ОЧЕНЬДЛИННОЕОБОЗНАЧЕНИЕБЕЗПРОБЕЛОВ`,
       normalizedDesignation: `М-${index + 1}`, title: `Уровень ${index + 1} — модуль шкафа`,
       quantityPerParent: 1, effectiveQuantity: 1, depth: index + 1, travelsToInstallation: true, sortOrder: 0,
-      createdAt: revision.createdAt, updatedAt: revision.createdAt,
+      createdAt: revision.createdAt, updatedAt: revision.createdAt, finishes: [],
     })) };
   const cssDir = join(process.cwd(), ".next", "static", "css");
   let css = (await Promise.all((await readdir(cssDir)).filter((name) => name.endsWith(".css"))

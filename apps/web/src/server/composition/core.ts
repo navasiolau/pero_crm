@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Prisma, Role } from "@prisma/client";
 import { canEditProductTechnicalBlock, resolveVisibilityActor } from "@/server/access/visibility";
 import { normalizeCompositionDesignation, validateCompositionTree, type CompositionKind, type CompositionTreeRow } from "@/lib/composition-tree";
+import { cloneRevisionFinishes, deleteFinishesForItems, validateRevisionFinishes } from "@/server/finishes/core";
 
 type Tx = Prisma.TransactionClient;
 export type CompositionActor = { id: string; name: string; roles: Role[]; source: string };
@@ -16,7 +17,7 @@ function version(actual: number, expected: number) {
 }
 async function lockProductAndCheck(tx: Tx, actor: CompositionActor, productId: string) {
   await tx.$queryRaw`SELECT "id" FROM "Product" WHERE "id" = ${productId} FOR UPDATE`;
-  const product = await tx.product.findUnique({ where: { id: productId }, select: { id: true, engineerId: true, status: true } });
+  const product = await tx.product.findUnique({ where: { id: productId }, select: { id: true, projectId: true, engineerId: true, status: true } });
   if (!product) fail("PRODUCT_NOT_FOUND");
   const visibility = await resolveVisibilityActor(tx, actor);
   if (!canEditProductTechnicalBlock(visibility, product)) fail("ACCESS_DENIED");
@@ -63,6 +64,7 @@ export async function createCompositionDraftCore(tx: Tx, actor: CompositionActor
       }));
       if (data.length) await tx.productCompositionItem.createMany({ data });
     }
+    await cloneRevisionFinishes(tx, latest.id, draft.id, newIds);
   }
   await audit(tx, actor, draft.id, "draft.create", undefined, { productId, baseRevisionId: latest?.id ?? null });
   return draft;
@@ -112,6 +114,7 @@ export async function deleteCompositionItemCore(tx: Tx, actor: CompositionActor,
   for (let level = 16; level >= 1; level--) {
     const atLevel = rows.filter((row) => ids.has(row.id) && context.depth.get(row.id) === level).map((row) => row.id);
     if (atLevel.length) {
+      await deleteFinishesForItems(tx, draft.id, atLevel);
       const removed = await tx.productCompositionItem.deleteMany({ where: { id: { in: atLevel } } });
       if (removed.count !== atLevel.length) fail("ITEM_DELETE_CHANGED");
     }
@@ -129,6 +132,7 @@ export async function discardCompositionDraftCore(tx: Tx, actor: CompositionActo
   for (let level = 16; level >= 1; level--) {
     const atLevel = rows.filter((row) => context.depth.get(row.id) === level).map((row) => row.id);
     if (atLevel.length) {
+      await deleteFinishesForItems(tx, draft.id, atLevel);
       const removed = await tx.productCompositionItem.deleteMany({ where: { id: { in: atLevel } } });
       if (removed.count !== atLevel.length) fail("ITEM_DELETE_CHANGED");
     }
@@ -140,7 +144,7 @@ export async function discardCompositionDraftCore(tx: Tx, actor: CompositionActo
 
 export async function confirmCompositionDraftCore(tx: Tx, actor: CompositionActor,
   input: DraftInput & { requestId: string }) {
-  await lockProductAndCheck(tx, actor, input.productId);
+  const product = await lockProductAndCheck(tx, actor, input.productId);
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(input.requestId))
     fail("REQUEST_ID_INVALID");
   const repeated = await tx.productCompositionRevision.findUnique({ where: { requestId: input.requestId } });
@@ -154,6 +158,7 @@ export async function confirmCompositionDraftCore(tx: Tx, actor: CompositionActo
   const rows = await tx.productCompositionItem.findMany({ where: { revisionId: draft.id } });
   if (!rows.length) fail("EMPTY_COMPOSITION");
   validateCompositionTree(treeRows(rows));
+  await validateRevisionFinishes(tx, actor, product, draft.id, new Set(rows.map((row) => row.id)));
   const latest = await tx.productCompositionRevision.findFirst({ where: { productId: input.productId, status: "CONFIRMED" },
     orderBy: { revisionNo: "desc" } });
   const revisionNo = (latest?.revisionNo ?? 0) + 1;

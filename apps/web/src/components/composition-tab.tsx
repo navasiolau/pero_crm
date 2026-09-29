@@ -4,6 +4,8 @@ import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { createRequestId } from "@/lib/request-id";
+import type { CompositionFinish } from "./composition-finish-display";
+import { CompositionFinishForm, type CompositionFinishFormValues, type CompositionFinishSaveValues, type FinishSampleFile } from "./composition-finish-form";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -13,22 +15,31 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { createCompositionDraft, saveCompositionItem, deleteCompositionItem, discardCompositionDraft,
   confirmCompositionDraft } from "@/server/composition/actions";
-import { CompositionView, type CompositionData, type CompositionItem } from "./composition-view";
+import { CompositionView, type CompositionViewData, type CompositionItem } from "./composition-view";
 import { compositionParentOptions, nextCompositionConfirmRequestId, parseCompositionQuantity } from "./composition-form";
+import { deleteCompositionFinish, saveCompositionFinish } from "@/server/finishes/actions";
+import { bindFinishDraftMutation, captureFinishDraftBinding, finishMutationDisposition, type FinishDraftBinding } from "./composition-finish-binding";
 
 type FormKind = "MODULE" | "PART" | "HARDWARE";
 type FormState = { itemId: string | null; kind: FormKind; designation: string; title: string; quantity: string;
   parentId: string; travelsToInstallation: boolean; sortOrder: number };
+type FinishEditor = { itemId: string; initial: CompositionFinishFormValues; binding: FinishDraftBinding };
+type FinishDeleteRequest = { finish: CompositionFinish; binding: FinishDraftBinding };
 const freshForm = (order: number): FormState => ({ itemId: null, kind: "PART", designation: "", title: "", quantity: "1",
   parentId: "", travelsToInstallation: false, sortOrder: order });
 
-export function CompositionTab({ data, canEdit, authorNames = {} }: { data: CompositionData; canEdit: boolean; authorNames?: Record<string, string> }) {
+export function CompositionTab({ data, canEdit, authorNames = {}, sampleFiles = [] }: {
+  data: CompositionViewData; canEdit: boolean; authorNames?: Record<string, string>; sampleFiles?: FinishSampleFile[];
+}) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState<FormState | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<CompositionItem | null>(null);
+  const [finishEditor, setFinishEditor] = useState<FinishEditor | null>(null);
+  const [finishError, setFinishError] = useState<string | null>(null);
+  const [deletingFinish, setDeletingFinish] = useState<FinishDeleteRequest | null>(null);
   const [discardOpen, setDiscardOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const confirmRequestId = useRef<string | null>(null);
@@ -52,6 +63,63 @@ export function CompositionTab({ data, canEdit, authorNames = {} }: { data: Comp
     setForm(item ? { itemId: item.id, kind: item.kind, designation: item.designation, title: item.title,
       quantity: String(item.quantityPerParent), parentId: item.parentId ?? "", travelsToInstallation: item.travelsToInstallation,
       sortOrder: item.sortOrder } : freshForm(data.items.length));
+  }
+  function beginFinishForm(item: CompositionItem, finish?: CompositionFinish) {
+    if (!editingDraft) return;
+    const binding = captureFinishDraftBinding(data.productId, selected);
+    if (!binding) return;
+    setFinishError(null);
+    setFinishEditor({ itemId: item.id, binding, initial: finish ? {
+      itemId: item.id, finishId: finish.id, surfaceKind: finish.surfaceKind, surfaceLabel: finish.surfaceLabel,
+      layerOrder: String(finish.layerOrder), finishKind: finish.finishKind, name: finish.name, code: finish.code,
+      colorHex: finish.colorHex ?? "", sampleFileId: finish.sampleFileId ?? "",
+    } : {
+      itemId: item.id, surfaceKind: "FACE", surfaceLabel: "", layerOrder: "1", finishKind: "ENAMEL",
+      name: "", code: "", colorHex: "", sampleFileId: "",
+    } });
+  }
+  function saveFinish(values: CompositionFinishSaveValues) {
+    if (!finishEditor) return;
+    startTransition(async () => {
+      try {
+        const result = await saveCompositionFinish(bindFinishDraftMutation(finishEditor.binding, values));
+        if (!result.ok) {
+          if (result.error === "DRAFT_VERSION_CHANGED" || result.error === "DRAFT_NOT_FOUND") {
+            const disposition = finishMutationDisposition("stale");
+            if (disposition.closeEditor) setFinishEditor(null);
+            setFinishError(null); setError(result.message);
+            if (disposition.refresh) router.refresh();
+          } else {
+            setFinishError(result.message);
+          }
+          return;
+        }
+        setFinishEditor(null); setFinishError(null); setError(null); router.refresh();
+      } catch {
+        const disposition = finishMutationDisposition("unknown");
+        if (disposition.closeEditor) setFinishEditor(null);
+        setFinishError(null); setError(disposition.message);
+        if (disposition.refresh) router.refresh();
+      }
+    });
+  }
+  async function removeFinish() {
+    if (!deletingFinish) return false;
+    try {
+      const result = await deleteCompositionFinish(bindFinishDraftMutation(deletingFinish.binding, { finishId: deletingFinish.finish.id }));
+      if (!result.ok) {
+        toast.error(result.message);
+        if (result.error === "DRAFT_VERSION_CHANGED" || result.error === "DRAFT_NOT_FOUND") {
+          setDeletingFinish(null); setError(result.message); router.refresh(); return true;
+        }
+        return false;
+      }
+      setDeletingFinish(null); setError(null); router.refresh(); return true;
+    } catch {
+      const disposition = finishMutationDisposition("unknown", "delete");
+      setDeletingFinish(null); setError(disposition.message);
+      if (disposition.refresh) router.refresh(); return true;
+    }
   }
   function createDraft() {
     startTransition(async () => {
@@ -145,7 +213,28 @@ export function CompositionTab({ data, canEdit, authorNames = {} }: { data: Comp
     {data.draft && selected?.status === "CONFIRMED" ? <p className="text-sm text-muted-foreground">
       Подтверждённая ревизия остаётся текущей. Черновик доступен отдельно и ещё не подтверждён.
     </p> : null}
-    <CompositionView data={data} canEdit={editingDraft} authorNames={authorNames} onEdit={beginForm} onDelete={setDeleting} />
+    <CompositionView data={data} canEdit={editingDraft} authorNames={authorNames} onEdit={beginForm} onDelete={setDeleting}
+      onAddFinish={(item) => beginFinishForm(item)}
+      onEditFinish={(finish) => { const item = data.items.find((row) => row.id === finish.itemId); if (item) beginFinishForm(item, finish); }}
+      onDeleteFinish={(finish) => {
+        if (!editingDraft) return;
+        const binding = captureFinishDraftBinding(data.productId, selected);
+        if (binding) setDeletingFinish({ finish, binding });
+      }} />
+
+    <Dialog open={finishEditor !== null} onOpenChange={(open) => { if (!open && !pending) { setFinishEditor(null); setFinishError(null); } }}>
+      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-xl">
+        <DialogHeader>
+          <DialogTitle>{finishEditor?.initial.finishId ? "Изменить покрытие" : "Новое покрытие"}</DialogTitle>
+          <DialogDescription>Укажите поверхность и слой. Название и код сохраняются отдельно; образец можно не задавать.</DialogDescription>
+        </DialogHeader>
+        {finishEditor ? <CompositionFinishForm key={`${finishEditor.itemId}:${finishEditor.initial.finishId ?? "new"}`}
+          initial={finishEditor.initial}
+          existing={data.items.find((item) => item.id === finishEditor.itemId)?.finishes ?? []}
+          sampleFiles={sampleFiles} pending={pending} error={finishError} onSubmit={saveFinish}
+          onCancel={() => { setFinishEditor(null); setFinishError(null); }} /> : null}
+      </DialogContent>
+    </Dialog>
 
     <Dialog open={form !== null} onOpenChange={(open) => { if (!open) { setForm(null); setFormError(null); } }}>
       <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-xl">
@@ -186,6 +275,10 @@ export function CompositionTab({ data, canEdit, authorNames = {} }: { data: Comp
       onOpenChange={(open) => { if (!open) setDeleting(null); }} onConfirm={removeItem}
       warning={deleting?.kind === "MODULE" && data.items.some((item) => item.parentId === deleting.id)
         ? "Вложенные позиции этого модуля тоже будут удалены из черновика." : undefined} />
+    <ConfirmDeleteDialog entityLabel="покрытие" open={deletingFinish !== null}
+      onOpenChange={(open) => { if (!open) setDeletingFinish(null); }}
+      onConfirm={removeFinish}
+      warning={deletingFinish ? `Будет удалён слой «${deletingFinish.finish.name}» с кодом ${deletingFinish.finish.code} и его образец.` : undefined} />
     <ConfirmDeleteDialog entityLabel="черновик состава" open={discardOpen} onOpenChange={setDiscardOpen} onConfirm={discard}
       warning="Подтверждённые ревизии сохранятся без изменений." />
     <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>

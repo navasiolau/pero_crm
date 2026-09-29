@@ -27,6 +27,20 @@ export const compositionErrorMessages: Record<string, string> = {
   PARENT_REVISION_MISMATCH: "Родитель должен принадлежать той же ревизии.",
   REVISION_MISMATCH: "Позиции относятся к разным ревизиям.",
   SORT_ORDER_INVALID: "Некорректный порядок позиции.",
+  FINISH_INVALID: "Проверьте данные покрытия и повторите сохранение.",
+  FINISH_SURFACE_INVALID: "Укажите тип и подпись поверхности до 80 символов.",
+  FINISH_NAME_INVALID: "Укажите название покрытия до 160 символов.",
+  FINISH_CODE_INVALID: "Укажите код покрытия до 160 символов.",
+  FINISH_HEX_INVALID: "Цвет должен быть в формате #RRGGBB.",
+  FINISH_SAMPLE_ID_INVALID: "Некорректный идентификатор файла-образца.",
+  FINISH_SAMPLE_INVALID: "Выберите доступное изображение JPEG, PNG или WebP этого изделия.",
+  FINISH_ORDER_INVALID: "Порядок слоя должен быть целым числом от 1 до 20.",
+  FINISH_DUPLICATE_LAYER: "Этот номер слоя уже занят на данной поверхности.",
+  FINISH_LIMIT_EXCEEDED: "Превышен лимит покрытий для позиции или ревизии.",
+  FINISH_NOT_FOUND: "Покрытие не найдено в этом черновике.",
+  FINISH_ITEM_MISMATCH: "Покрытие относится к другой позиции или ревизии.",
+  FINISH_CLONE_CHANGED: "Не удалось полностью скопировать покрытия. Повторите действие.",
+  FINISH_DELETE_CHANGED: "Покрытия изменились во время удаления. Обновите карточку.",
 };
 
 export function compositionErrorMessage(code: string): string {

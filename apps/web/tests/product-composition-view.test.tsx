@@ -15,10 +15,10 @@ const base = { productId: "product", productNumber: "P-1", draft, current: revis
   items: [
     { id: "module", revisionId: revision.id, lineageId: "m", parentId: null, kind: "MODULE" as const, designation: "М-1",
       normalizedDesignation: "М-1", title: "Длинный модуль шкафа", quantityPerParent: 2, effectiveQuantity: 2,
-      depth: 1, travelsToInstallation: true, sortOrder: 0, createdAt: revision.createdAt, updatedAt: revision.createdAt },
+      depth: 1, travelsToInstallation: true, sortOrder: 0, createdAt: revision.createdAt, updatedAt: revision.createdAt, finishes: [] },
     { id: "part", revisionId: revision.id, lineageId: "p", parentId: "module", kind: "PART" as const, designation: "Д-1",
       normalizedDesignation: "Д-1", title: "Полка", quantityPerParent: 3, effectiveQuantity: 6,
-      depth: 2, travelsToInstallation: true, sortOrder: 0, createdAt: revision.createdAt, updatedAt: revision.createdAt },
+      depth: 2, travelsToInstallation: true, sortOrder: 0, createdAt: revision.createdAt, updatedAt: revision.createdAt, finishes: [] },
   ] };
 
 test("confirmed composition displays relative and effective quantities without duplicate shipping actions", () => {

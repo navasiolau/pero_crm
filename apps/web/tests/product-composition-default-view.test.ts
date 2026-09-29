@@ -21,6 +21,7 @@ test("current confirmed revision is default even when a newer draft exists", asy
       { id: "confirmed-item", revisionId: "confirmed", lineageId: "same", parentId: null, kind: "PART", designation: "D-1",
         title: "Confirmed", quantityPerParent: 2, travelsToInstallation: false, createdAt: now, updatedAt: now },
     ]),
+    productCompositionFinish: fixtureModel([]),
   } as unknown as Prisma.TransactionClient;
   const actor = { id: "manager", roles: ["MANAGER" as const] };
   const defaultView = await getProductCompositionFor(db, actor, "product");

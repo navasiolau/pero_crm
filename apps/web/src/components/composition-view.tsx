@@ -4,15 +4,21 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { getProductComposition } from "@/server/composition/queries";
+import { CompositionFinishDisplay, type CompositionFinish } from "./composition-finish-display";
 
 export type CompositionData = NonNullable<Awaited<ReturnType<typeof getProductComposition>>>;
-export type CompositionItem = CompositionData["items"][number];
+export type CompositionItem = CompositionData["items"][number] & { finishes: CompositionFinish[] };
+export type CompositionViewData = Omit<CompositionData, "items"> & { items: CompositionItem[] };
 
 const kindLabels = { MODULE: "Модуль", PART: "Деталь", HARDWARE: "Фурнитура" } as const;
 
-export function CompositionView({ data, canEdit = false, authorNames = {}, onEdit, onDelete }: {
-  data: CompositionData; canEdit?: boolean; authorNames?: Record<string, string>;
+export function CompositionView({ data, canEdit = false, authorNames = {}, onEdit, onDelete,
+  onAddFinish, onEditFinish, onDeleteFinish }: {
+  data: CompositionViewData; canEdit?: boolean; authorNames?: Record<string, string>;
   onEdit?: (item: CompositionItem) => void; onDelete?: (item: CompositionItem) => void;
+  onAddFinish?: (item: CompositionItem) => void;
+  onEditFinish?: (finish: CompositionFinish) => void;
+  onDeleteFinish?: (finish: CompositionFinish) => void;
 }) {
   const selected = data.selected;
   const children = new Map<string | null, CompositionItem[]>();
@@ -40,6 +46,13 @@ export function CompositionView({ data, canEdit = false, authorNames = {}, onEdi
           </Button>
         </div> : null}
       </div>
+      <CompositionFinishDisplay
+        finishes={item.finishes}
+        canEdit={canEdit && selected?.status === "DRAFT"}
+        onAdd={onAddFinish ? () => onAddFinish(item) : undefined}
+        onEdit={onEditFinish}
+        onDelete={onDeleteFinish}
+      />
       {children.has(item.id) ? <details open className={item.depth < 3 ? "ml-2 min-w-0 border-l-2 pl-3 sm:ml-4" : "min-w-0"}>
         <summary className="min-h-11 cursor-pointer break-words py-2 text-sm text-muted-foreground">
           Состав модуля {item.designation}

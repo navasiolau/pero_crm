@@ -22,6 +22,7 @@ function db() {
         designation: "Секрет", title: "Секрет", quantityPerParent: 3, travelsToInstallation: false,
         sortOrder: 0, createdAt: now, updatedAt: now },
     ]),
+    productCompositionFinish: fixtureModel([]),
   });
   return fixture;
 }

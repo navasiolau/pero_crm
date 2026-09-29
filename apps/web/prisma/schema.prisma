@@ -298,6 +298,7 @@ model ProductCompositionRevision {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   items           ProductCompositionItem[]
+  finishes        ProductCompositionFinish[]
 
   @@unique([productId, revisionNo])
   @@unique([productId, id])
@@ -321,11 +322,48 @@ model ProductCompositionItem {
   sortOrder             Int @default(0)
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
+  finishes              ProductCompositionFinish[]
 
   @@unique([revisionId, id])
   @@unique([revisionId, lineageId])
   @@unique([revisionId, normalizedDesignation])
   @@index([revisionId, parentId, sortOrder])
+}
+
+enum CompositionSurfaceKind {
+  FACE
+  EDGE
+  WHOLE
+}
+
+enum CompositionFinishKind {
+  ENAMEL
+  VENEER
+  COATING
+}
+
+model ProductCompositionFinish {
+  id                     String @id @default(cuid())
+  revisionId             String
+  revision               ProductCompositionRevision @relation(fields: [revisionId], references: [id], onDelete: Restrict)
+  itemId                 String
+  item                   ProductCompositionItem @relation(fields: [revisionId, itemId], references: [revisionId, id], onDelete: Restrict)
+  surfaceKind            CompositionSurfaceKind
+  surfaceLabel           String
+  normalizedSurfaceLabel String
+  layerOrder             Int
+  finishKind             CompositionFinishKind
+  name                   String
+  code                   String
+  colorHex               String?
+  sampleFileId           String?
+  sampleFile             File? @relation(fields: [sampleFileId], references: [id], onDelete: Restrict)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  @@unique([itemId, surfaceKind, normalizedSurfaceLabel, layerOrder], map: "CompositionFinish_surface_layer_key")
+  @@index([revisionId, itemId])
+  @@index([sampleFileId])
 }
 
 model ProjectStageHistory {
@@ -829,6 +867,7 @@ model File {
   legacyTable  String?
   createdAt    DateTime     @default(now())
   sketchForProduct Product?  @relation("ProductSketch")
+  compositionFinishSamples ProductCompositionFinish[]
 
   @@index([projectId, category])
   @@index([projectId, stage])
