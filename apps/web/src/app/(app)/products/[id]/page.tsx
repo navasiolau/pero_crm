@@ -26,6 +26,8 @@ import { ProductHeader } from "./product-header";
 import { ProductSketch } from "./product-sketch";
 import { EngineeringFund } from "@/components/engineering-fund";
 import { getEngineeringFundView } from "@/server/products/engineering-view";
+import { getProductComposition } from "@/server/composition/queries";
+import { CompositionTab } from "@/components/composition-tab";
 import { SurveyorLink } from "./surveyor-link";
 
 export const dynamic = "force-dynamic";
@@ -34,8 +36,10 @@ export const dynamic = "force-dynamic";
 // тех. блок) + вкладки «Работы и задачи», «Материалы», «Файлы», «История».
 export default async function ProductPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ compositionRevision?: string | string[] }>;
 }) {
   const session = await auth();
   if (!session?.user) redirect("/login");
@@ -45,6 +49,10 @@ export default async function ProductPage({
 
   const product = await getProductFor(session.user.id, role, id);
   if (!product) notFound();
+  const search = await searchParams;
+  const selectedCompositionRevision = typeof search.compositionRevision === "string" ? search.compositionRevision : undefined;
+  const composition = await getProductComposition(actor, product.id, selectedCompositionRevision);
+  if (!composition) notFound();
 
   const canManage = hasAnyRole(role, MANAGER_ROLES);
   const canEditTech = canEditProductTechnicalBlock(actor, product);
@@ -72,6 +80,8 @@ export default async function ProductPage({
       [
         ...product.files.map((file) => file.uploadedById),
         ...product.statusHistory.map((entry) => entry.changedById),
+        ...composition.history.flatMap((entry) => [entry.createdById, entry.confirmedById]),
+        composition.draft?.createdById,
       ].filter((value): value is string => !!value),
     ),
   ];
@@ -222,12 +232,14 @@ export default async function ProductPage({
         ) : null}
       </div>
 
-      <Tabs defaultValue="tasks">
-        <TabsList>
+      <Tabs defaultValue={selectedCompositionRevision ? "composition" : "tasks"}>
+        <div className="max-w-full overflow-x-auto pb-1">
+        <TabsList className="min-h-11">
           {engineeringView ? <TabsTrigger value="engineering">Инженерный фонд</TabsTrigger> : null}
           <TabsTrigger value="tasks">
             Работы и задачи ({product.tasks.length})
           </TabsTrigger>
+          <TabsTrigger value="composition" className="min-h-11">Состав</TabsTrigger>
           {showMaterials ? (
             <TabsTrigger value="materials">
               Материалы{materialsData && materialsData.lines.length > 0 ? ` (${materialsData.lines.length})` : ""}
@@ -236,6 +248,7 @@ export default async function ProductPage({
           <TabsTrigger value="files">Файлы ({product.files.length})</TabsTrigger>
           <TabsTrigger value="history">История</TabsTrigger>
         </TabsList>
+        </div>
 
         {engineeringView ? <TabsContent value="engineering" className="mt-4">
           <EngineeringFund view={engineeringView} canManage={canManage} workers={workers.map((worker) => ({ id: worker.id, name: worker.name }))} />
@@ -273,6 +286,10 @@ export default async function ProductPage({
               hint: worker.position ?? undefined,
             }))}
           />
+        </TabsContent>
+
+        <TabsContent value="composition" className="mt-4">
+          <CompositionTab data={composition} canEdit={canEditTech} authorNames={Object.fromEntries(authorNames)} />
         </TabsContent>
 
         {showMaterials && materialsData ? (

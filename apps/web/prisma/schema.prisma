@@ -49,6 +49,17 @@ enum TaskAllocationBudgetSource {
   STAGE_PREVIEW
 }
 
+enum CompositionRevisionStatus {
+  DRAFT
+  CONFIRMED
+}
+
+enum CompositionItemKind {
+  MODULE
+  PART
+  HARDWARE
+}
+
 model User {
   id              String         @id @default(cuid())
   email           String         @unique
@@ -249,6 +260,7 @@ model Product {
   stagePayPools    ProductStagePayPool[]
   stageSettlements ProductStageSettlement[] @relation("ProductStageSettlementProduct")
   payrollEntries   PayrollEntry[]
+  compositionRevisions ProductCompositionRevision[]
 
   @@index([projectId])
   @@index([projectId, suffixInt])
@@ -267,6 +279,53 @@ model ProductStatusHistory {
   createdAt   DateTime      @default(now())
 
   @@index([productId, createdAt])
+}
+
+model ProductCompositionRevision {
+  id              String @id @default(cuid())
+  productId       String
+  product         Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+  status          CompositionRevisionStatus @default(DRAFT)
+  revisionNo      Int?
+  baseRevisionId  String?
+  baseRevision    ProductCompositionRevision? @relation("CompositionBase", fields: [productId, baseRevisionId], references: [productId, id], onDelete: Restrict)
+  derivedDrafts   ProductCompositionRevision[] @relation("CompositionBase")
+  draftVersion    Int @default(0)
+  createdById     String
+  confirmedById   String?
+  confirmedAt     DateTime?
+  requestId       String? @unique
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  items           ProductCompositionItem[]
+
+  @@unique([productId, revisionNo])
+  @@unique([productId, id])
+  @@index([productId, status])
+}
+
+model ProductCompositionItem {
+  id                    String @id @default(cuid())
+  revisionId            String
+  revision              ProductCompositionRevision @relation(fields: [revisionId], references: [id], onDelete: Restrict)
+  lineageId             String
+  parentId              String?
+  parent                ProductCompositionItem? @relation("CompositionTree", fields: [revisionId, parentId], references: [revisionId, id], onDelete: Restrict)
+  children              ProductCompositionItem[] @relation("CompositionTree")
+  kind                  CompositionItemKind
+  designation           String
+  normalizedDesignation String
+  title                 String
+  quantityPerParent     Int
+  travelsToInstallation Boolean @default(false)
+  sortOrder             Int @default(0)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@unique([revisionId, id])
+  @@unique([revisionId, lineageId])
+  @@unique([revisionId, normalizedDesignation])
+  @@index([revisionId, parentId, sortOrder])
 }
 
 model ProjectStageHistory {
