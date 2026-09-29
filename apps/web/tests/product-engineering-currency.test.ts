@@ -9,10 +9,11 @@ const require = createRequire(import.meta.url);
 const actor: DomainActor = { id: "admin", name: "Admin", roles: ["ADMIN"], source: "web" };
 let projectCurrency = "BYN", payrollCurrency: string | null = null, inside = false;
 let settlements: { id: string; projectId: string; currency: string }[] = [];
+let cashPayouts = 0;
 let tail = Promise.resolve();
 let project: typeof import("../src/server/projects/core"), payroll: typeof import("../src/server/payroll/actions");
 let transaction: TaskTransaction;
-function reset() { projectCurrency = "BYN"; payrollCurrency = null; settlements = []; tail = Promise.resolve(); }
+function reset() { projectCurrency = "BYN"; payrollCurrency = null; settlements = []; cashPayouts = 0; tail = Promise.resolve(); }
 const db = {
   $queryRaw: async () => [{ locked: 1 }],
   project: {
@@ -30,6 +31,7 @@ const db = {
     },
     create: async () => { const row = { id: "earned", projectId: "project", currency: payrollCurrency ?? "BYN" }; settlements.push(row); return row; },
   },
+  payout: { count: async () => cashPayouts },
   changeLog: { create: async () => ({ id: "log" }) },
   $transaction: async (operation: (tx: unknown) => Promise<unknown>) => {
     const previous = tail; let release!: () => void; tail = new Promise<void>((resolve) => { release = resolve; });
@@ -79,6 +81,12 @@ test("payroll currency is frozen organization-wide, including its implicit BYN d
 
 test("payroll currency can change before the first settlement", async () => {
   reset(); assert.ok((await payroll.setPayrollCurrency("USD")).ok); assert.equal(payrollCurrency, "USD");
+});
+
+test("a cash-linked payout freezes payroll currency without rewriting its saved amount", async () => {
+  reset(); cashPayouts = 1;
+  assert.equal((await payroll.setPayrollCurrency("USD")).ok, false);
+  assert.equal(payrollCurrency, null);
 });
 
 test("a settlement committing first blocks the competing currency change under the same lock", async () => {

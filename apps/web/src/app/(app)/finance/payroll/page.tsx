@@ -14,6 +14,7 @@ import {
   isValidMonth,
   listPayrollUsers,
 } from "@/server/payroll/queries";
+import { listAdvanceOptions } from "@/server/payroll/cash-actions";
 
 import { FinancePayrollView } from "./finance-payroll-view";
 
@@ -33,7 +34,7 @@ export default async function FinancePayrollPage({
   const { month: param } = await searchParams;
   const month = isValidMonth(param) ? param : currentMonth();
 
-  const [summary, currency, turnover, turnoverAccruals, users, orgBalance, dues, estimates] =
+  const [summary, currency, turnover, turnoverAccruals, users, orgBalance, dues, estimates, cashOptions] =
     await Promise.all([
       getPayrollSummary(month),
       getPayrollCurrency(),
@@ -43,6 +44,7 @@ export default async function FinancePayrollPage({
       getOrgBalance(),
       getEmployeeDues(),
       getCurrentMonthEstimates(),
+      listAdvanceOptions(),
     ]);
 
   return (
@@ -58,6 +60,8 @@ export default async function FinancePayrollPage({
       orgBalance={orgBalance}
       dues={dues}
       estimates={estimates}
+      cashAccounts={cashOptions.accounts}
+      advanceUsers={cashOptions.users}
     />
   );
 }

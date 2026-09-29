@@ -19,15 +19,17 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { SearchableSelect } from "@/components/ui/searchable-select";
+import { Label } from "@/components/ui/label";
 import { ConfirmDeleteDialog } from "@/components/confirm-delete-dialog";
 import { MonthSwitcher, monthLabel } from "@/components/month-switcher";
 import { formatAmount } from "@/lib/format";
 import { paySchemeLabels, payoutKindLabels } from "@/lib/labels";
+import type { CashAccountView } from "@/server/finance/queries";
+import { AdvancePayoutDialog } from "@/app/(app)/advances/advance-payout-dialog";
+import { CashPayoutForm } from "@/app/(app)/advances/cash-payout-form";
+import { didSettleAnything, settlementConfirmationDisabled, settlementPreviewDisclosure } from "./settlement-preview";
 import {
-  addPayout,
   accrueTurnover,
   deletePayout,
   settleAll,
@@ -68,6 +70,8 @@ export function FinancePayrollView({
   orgBalance,
   dues,
   estimates,
+  cashAccounts,
+  advanceUsers,
 }: {
   month: string;
   currency: string;
@@ -80,26 +84,17 @@ export function FinancePayrollView({
   orgBalance: number;
   dues: EmployeeDue[];
   estimates: Record<string, number>;
+  cashAccounts: CashAccountView[];
+  advanceUsers: { id: string; name: string; position: string | null }[];
 }) {
   const [pending, startTransition] = useTransition();
   const [payoutOpen, setPayoutOpen] = useState(false);
-  const [payoutUserId, setPayoutUserId] = useState("");
-  const [payoutAmount, setPayoutAmount] = useState("");
-  const [payoutComment, setPayoutComment] = useState("");
   const [advanceOpen, setAdvanceOpen] = useState(false);
-  const [advanceUserId, setAdvanceUserId] = useState("");
-  const [advanceAmount, setAdvanceAmount] = useState("");
-  const [advanceComment, setAdvanceComment] = useState("");
+  const [salaryPayoutUncertain, setSalaryPayoutUncertain] = useState(false);
   const [deleting, setDeleting] = useState<PayoutView | null>(null);
   const [settleOpen, setSettleOpen] = useState(false);
-
-  // Потолки для диалога выплаты: долг сотруднику и баланс организации
-  // (нулевого долга в dues нет — трактуем как 0, чтобы показать подсказку)
-  const selectedDue = payoutUserId
-    ? (dues.find((row) => row.userId === payoutUserId)?.due ?? 0)
-    : null;
-  const payoutMax =
-    selectedDue === null ? null : round2(Math.min(selectedDue, orgBalance));
+  const [settleCashAccountId, setSettleCashAccountId] = useState("");
+  const activeCashAccounts = cashAccounts.filter((account) => account.active);
 
   // Превью «Рассчитать всех»: долги, покрываемые балансом по порядку
   const settlePreview = (() => {
@@ -113,6 +108,8 @@ export function FinancePayrollView({
       });
   })();
   const settleTotal = round2(settlePreview.reduce((sum, row) => sum + row.pay, 0));
+  const settleCashAccount = activeCashAccounts.find((account) => account.id === settleCashAccountId);
+  const hasFundedActiveCash = activeCashAccounts.some((account) => account.balance > 0);
 
   const summaryColumns: DataColumn<PayrollSummaryRow>[] = [
     {
@@ -221,13 +218,22 @@ export function FinancePayrollView({
       ),
     },
     {
+      id: "physical",
+      header: "Выдано из кассы",
+      sortable: true,
+      sortValue: (row) => row.cashAmount ?? "",
+      cell: (row) => row.cashAmount !== null && row.cashAmount !== undefined && row.cashCurrency
+        ? <span className="flex flex-col"><span>{formatAmount(row.cashAmount, row.cashCurrency)}</span><span className="text-xs text-muted-foreground">{row.cashAccountName ?? "Касса"}</span></span>
+        : <Badge variant="outline">Историческая (legacy)</Badge>,
+    },
+    {
       id: "amount",
       header: "Сумма",
       sortable: true,
       sortValue: (row) => row.amount,
       className: "text-right font-medium",
       headerClassName: "text-right",
-      cell: (row) => formatAmount(row.amount, currency),
+      cell: (row) => formatAmount(row.amount, row.payrollCurrency ?? currency),
     },
     {
       id: "actions",
@@ -257,14 +263,6 @@ export function FinancePayrollView({
     const expected = round2((turnover.total * accrual.percent) / 100);
     return expected > round2(accrual.accruedAmount ?? 0);
   });
-  const payoutSum = payoutAmount.trim() === "" ? NaN : Number(payoutAmount);
-
-  // Аванс: потолок — только баланс организации; приблизительная зарплата
-  // текущего месяца — мягкая подсказка (предупреждение, не запрет)
-  const currentMonthValue = new Date().toISOString().slice(0, 7);
-  const advanceEstimate = advanceUserId ? (estimates[advanceUserId] ?? 0) : null;
-  const advanceSum = advanceAmount.trim() === "" ? NaN : Number(advanceAmount);
-
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -475,20 +473,22 @@ export function FinancePayrollView({
       <div className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-lg font-semibold">Выплаты</h2>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Button
               variant="outline"
-              disabled={settlePreview.every((row) => row.pay <= 0)}
+              className="min-h-12 h-auto whitespace-normal"
+              disabled={settlePreview.every((row) => row.pay <= 0) || !hasFundedActiveCash}
               onClick={() => setSettleOpen(true)}
             >
               <Calculator className="size-4" />
               Рассчитать всех
             </Button>
-            <Button onClick={() => setPayoutOpen(true)}>
+            {!hasFundedActiveCash ? <span className="text-xs text-destructive">Нет активной кассы с доступным остатком для расчёта.</span> : null}
+            <Button className="min-h-12 h-auto whitespace-normal" onClick={() => setPayoutOpen(true)}>
               <Plus className="size-4" />
               Добавить выплату
             </Button>
-            <Button variant="outline" onClick={() => setAdvanceOpen(true)}>
+            <Button className="min-h-12 h-auto whitespace-normal" variant="outline" onClick={() => setAdvanceOpen(true)}>
               <HandCoins className="size-4" />
               Выдать аванс
             </Button>
@@ -507,10 +507,26 @@ export function FinancePayrollView({
           <DialogHeader>
             <DialogTitle>Рассчитать всех</DialogTitle>
             <DialogDescription>
-              Будут созданы выплаты по задолженности перед сотрудниками
-              с комментарием «Выплата зарплаты от {new Date().toLocaleDateString("ru-RU")}».
+              Выберите кассу. Сервер рассчитает и спишет выплаты с комментарием «Выплата зарплаты от {new Date().toLocaleDateString("ru-RU")}».
             </DialogDescription>
           </DialogHeader>
+          <div className="flex flex-col gap-1.5">
+            <Label>Касса для выплаты *</Label>
+            <SearchableSelect
+              options={activeCashAccounts.map((account) => ({
+                value: account.id,
+                label: `${account.name} · ${account.currency}`,
+                hint: `Доступно ${formatAmount(account.balance, account.currency)}`,
+              }))}
+              value={settleCashAccountId}
+              onChange={setSettleCashAccountId}
+              placeholder="Выберите кассу…"
+              searchPlaceholder="Поиск кассы…"
+              className="min-h-12 h-auto whitespace-normal text-left"
+            />
+          </div>
+          {settleCashAccount ? <p className="text-sm text-muted-foreground">Остаток выбранной кассы: {formatAmount(settleCashAccount.balance, settleCashAccount.currency)}. {settlementPreviewDisclosure(currency, settleCashAccount.currency)}</p> : <p className="text-sm text-muted-foreground">В таблице показана только верхняя граница по долгам и балансу организации; выберите кассу, чтобы увидеть её остаток.</p>}
+          {settleCashAccount && settleCashAccount.balance <= 0 ? <p className="text-sm text-destructive" role="alert">В выбранной кассе нет средств. Выберите кассу с положительным остатком.</p> : null}
           <ul className="flex flex-col gap-1 text-sm">
             {settlePreview.map((row) => (
               <li key={row.userId} className="flex flex-wrap justify-between gap-2">
@@ -521,7 +537,7 @@ export function FinancePayrollView({
                     {row.pay < row.due ? (
                       <span className="text-amber-600 dark:text-amber-400">
                         {" "}
-                        из {formatAmount(row.due, currency)} — не хватит баланса
+                        из {formatAmount(row.due, currency)} — ограничено балансом организации
                       </span>
                     ) : null}
                   </span>
@@ -532,31 +548,34 @@ export function FinancePayrollView({
             ))}
           </ul>
           <p className="text-sm">
-            Итого:{" "}
+            Верхняя граница по долгу и балансу организации:{" "}
             <span className="font-semibold">
               {formatAmount(settleTotal, currency)}
             </span>{" "}
             · баланс организации {formatAmount(orgBalance, currency)}
           </p>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setSettleOpen(false)}>
+            <Button className="min-h-12 h-auto whitespace-normal" variant="outline" onClick={() => setSettleOpen(false)}>
               Отмена
             </Button>
             <Button
-              disabled={pending || settleTotal <= 0}
+              className="min-h-12 h-auto whitespace-normal"
+              disabled={settlementConfirmationDisabled(settleCashAccount?.balance ?? 0, settleTotal, pending) || !settleCashAccountId}
               onClick={() =>
                 startTransition(async () => {
-                  const result = await settleAll(month);
+                  const result = await settleAll(month, settleCashAccountId);
                   if (result.ok) {
-                    toast.success(
-                      `Выплачено ${formatAmount(result.totalPaid ?? 0, currency)} (${result.paidCount} сотр.)`,
-                    );
+                    if (didSettleAnything(result)) {
+                      toast.success(`Выплачено ${formatAmount(result.totalPaid ?? 0, currency)} (${result.paidCount} сотр.)`);
+                      setSettleOpen(false);
+                    } else {
+                      toast.warning("Выплаты не проведены: проверьте остаток выбранной кассы и доступный долг.");
+                    }
                     if (result.shortPaid && result.shortPaid.length > 0) {
                       toast.warning(
                         `Баланса не хватило: ${result.shortPaid.join(", ")}`,
                       );
                     }
-                    setSettleOpen(false);
                   } else {
                     toast.error(result.error ?? "Ошибка расчёта");
                   }
@@ -569,263 +588,22 @@ export function FinancePayrollView({
         </DialogContent>
       </Dialog>
 
-      <Dialog
-        open={payoutOpen}
-        onOpenChange={(next) => {
-          if (!next) {
-            setPayoutUserId("");
-            setPayoutAmount("");
-            setPayoutComment("");
-          }
-          setPayoutOpen(next);
-        }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Выплата зарплаты</DialogTitle>
-            <DialogDescription>
-              Расчётный месяц: {monthLabel(month).toLowerCase()}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex flex-col gap-3">
-            <div className="flex flex-col gap-1.5">
-              <Label>Сотрудник *</Label>
-              <SearchableSelect
-                options={users.map((user) => ({
-                  value: user.id,
-                  label: user.name,
-                  hint: user.position ?? undefined,
-                }))}
-                value={payoutUserId}
-                onChange={(value) => {
-                  setPayoutUserId(value);
-                  setPayoutAmount("");
-                }}
-                placeholder="Выберите сотрудника…"
-                searchPlaceholder="Поиск сотрудника…"
-              />
-              {payoutUserId ? (
-                <p className="text-xs text-muted-foreground">
-                  К выплате сотруднику:{" "}
-                  {formatAmount(selectedDue ?? 0, currency)} · баланс организации:{" "}
-                  {formatAmount(orgBalance, currency)}
-                </p>
-              ) : null}
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="payout-amount">Сумма, {currency} *</Label>
-              <div className="flex gap-2">
-                <Input
-                  id="payout-amount"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={payoutAmount}
-                  onChange={(event) => setPayoutAmount(event.target.value)}
-                  placeholder="0.00"
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={!payoutMax || payoutMax <= 0}
-                  onClick={() => setPayoutAmount(String(payoutMax))}
-                >
-                  Вся сумма
-                </Button>
-              </div>
-              {payoutUserId && payoutMax !== null && payoutMax <= 0 ? (
-                <p className="text-xs text-destructive">
-                  Выплачивать нечего: нет долга за прошлые месяцы или пуст баланс
-                </p>
-              ) : null}
-              {Number.isFinite(payoutSum) &&
-              payoutMax !== null &&
-              payoutSum > payoutMax ? (
-                <p className="text-xs text-destructive">
-                  Сумма превышает доступную ({formatAmount(payoutMax, currency)})
-                </p>
-              ) : null}
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="payout-comment">Комментарий</Label>
-              <Input
-                id="payout-comment"
-                value={payoutComment}
-                onChange={(event) => setPayoutComment(event.target.value)}
-                placeholder="Аванс, окончательный расчёт…"
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setPayoutOpen(false)}>
-              Отмена
-            </Button>
-            <Button
-              disabled={
-                pending ||
-                !payoutUserId ||
-                !Number.isFinite(payoutSum) ||
-                payoutSum <= 0 ||
-                payoutMax === null ||
-                payoutSum > payoutMax
-              }
-              onClick={() =>
-                startTransition(async () => {
-                  const result = await addPayout({
-                    userId: payoutUserId,
-                    amount: payoutSum,
-                    month,
-                    comment: payoutComment.trim() || undefined,
-                  });
-                  if (result.ok) {
-                    toast.success("Выплата внесена");
-                    setPayoutOpen(false);
-                    setPayoutUserId("");
-                    setPayoutAmount("");
-                    setPayoutComment("");
-                  } else {
-                    toast.error(result.error ?? "Ошибка");
-                  }
-                })
-              }
-            >
-              {pending ? "Сохранение…" : "Внести выплату"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
+      <Dialog open={payoutOpen} onOpenChange={(next) => {
+        if (!next && salaryPayoutUncertain) return;
+        setPayoutOpen(next);
+      }}>
+        {payoutOpen ? (
+          <DialogContent className="sm:max-w-lg">
+            <DialogHeader>
+              <DialogTitle>Выплата зарплаты</DialogTitle>
+              <DialogDescription>Расчётный месяц: {monthLabel(month).toLowerCase()}. Сумма указывается в валюте кассы.</DialogDescription>
+            </DialogHeader>
+            <CashPayoutForm mode="SALARY" users={users} accounts={activeCashAccounts} month={month} dues={dues} orgBalance={orgBalance} salaryCurrency={currency} onUncertainChange={setSalaryPayoutUncertain} onClose={() => setPayoutOpen(false)} />
+          </DialogContent>
+        ) : null}
       </Dialog>
 
-      <Dialog
-        open={advanceOpen}
-        onOpenChange={(next) => {
-          if (!next) {
-            setAdvanceUserId("");
-            setAdvanceAmount("");
-            setAdvanceComment("");
-          }
-          setAdvanceOpen(next);
-        }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Аванс</DialogTitle>
-            <DialogDescription>
-              Выплата под текущий месяц ({monthLabel(currentMonthValue).toLowerCase()})
-              — вычтется из зарплаты при закрытии месяца. Потолок — баланс
-              организации.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex flex-col gap-3">
-            <div className="flex flex-col gap-1.5">
-              <Label>Сотрудник *</Label>
-              <SearchableSelect
-                options={users.map((user) => ({
-                  value: user.id,
-                  label: user.name,
-                  hint: user.position ?? undefined,
-                }))}
-                value={advanceUserId}
-                onChange={(value) => {
-                  setAdvanceUserId(value);
-                  setAdvanceAmount("");
-                }}
-                placeholder="Выберите сотрудника…"
-                searchPlaceholder="Поиск сотрудника…"
-              />
-              {advanceUserId ? (
-                <p className="text-xs text-muted-foreground">
-                  Приблизительная зарплата за {monthLabel(currentMonthValue).toLowerCase()}:{" "}
-                  ≈{formatAmount(advanceEstimate ?? 0, currency)} · баланс
-                  организации: {formatAmount(orgBalance, currency)}
-                </p>
-              ) : null}
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="advance-amount">Сумма, {currency} *</Label>
-              <div className="flex gap-2">
-                <Input
-                  id="advance-amount"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={advanceAmount}
-                  onChange={(event) => setAdvanceAmount(event.target.value)}
-                  placeholder="0.00"
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={orgBalance <= 0}
-                  onClick={() => setAdvanceAmount(String(round2(orgBalance)))}
-                >
-                  Вся сумма
-                </Button>
-              </div>
-              {Number.isFinite(advanceSum) && advanceSum > orgBalance ? (
-                <p className="text-xs text-destructive">
-                  Сумма превышает баланс организации ({formatAmount(orgBalance, currency)})
-                </p>
-              ) : null}
-              {Number.isFinite(advanceSum) &&
-              advanceSum > 0 &&
-              advanceSum <= orgBalance &&
-              advanceSum > (advanceEstimate ?? 0) ? (
-                <p className="text-xs text-amber-600 dark:text-amber-400">
-                  Больше приблизительной зарплаты за текущий месяц
-                  (≈{formatAmount(advanceEstimate ?? 0, currency)}) — месяц ещё не
-                  закрыт, оценка может вырасти
-                </p>
-              ) : null}
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="advance-comment">Комментарий</Label>
-              <Input
-                id="advance-comment"
-                value={advanceComment}
-                onChange={(event) => setAdvanceComment(event.target.value)}
-                placeholder="Аванс"
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setAdvanceOpen(false)}>
-              Отмена
-            </Button>
-            <Button
-              disabled={
-                pending ||
-                !advanceUserId ||
-                !Number.isFinite(advanceSum) ||
-                advanceSum <= 0 ||
-                advanceSum > orgBalance
-              }
-              onClick={() =>
-                startTransition(async () => {
-                  const result = await addPayout({
-                    userId: advanceUserId,
-                    amount: advanceSum,
-                    month: currentMonthValue,
-                    kind: "ADVANCE",
-                    comment: advanceComment.trim() || undefined,
-                  });
-                  if (result.ok) {
-                    toast.success("Аванс выдан");
-                    setAdvanceOpen(false);
-                    setAdvanceUserId("");
-                    setAdvanceAmount("");
-                    setAdvanceComment("");
-                  } else {
-                    toast.error(result.error ?? "Ошибка");
-                  }
-                })
-              }
-            >
-              {pending ? "Сохранение…" : "Выдать аванс"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
+      <AdvancePayoutDialog open={advanceOpen} onOpenChange={setAdvanceOpen} users={advanceUsers} accounts={activeCashAccounts} estimates={estimates} />
       <ConfirmDeleteDialog
         entityLabel="выплату"
         open={deleting !== null}
@@ -834,7 +612,7 @@ export function FinancePayrollView({
         }}
         warning={
           deleting
-            ? `${deleting.userName ?? ""}, ${formatAmount(deleting.amount, currency)} — ${
+            ? `${deleting.userName ?? ""}, ${formatAmount(deleting.amount, deleting.payrollCurrency ?? currency)} — ${
                 deleting.kind === "ADVANCE"
                   ? "аванс отменится, сумма вернётся в баланс."
                   : "сумма вернётся в «к выплате»."

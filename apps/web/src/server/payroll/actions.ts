@@ -1,6 +1,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { randomUUID } from "node:crypto";
+import { Prisma } from "@prisma/client";
 import { z } from "zod";
 
 import { prisma } from "@/lib/prisma";
@@ -11,6 +13,10 @@ import { notifyOrg, notifyPerson } from "@/server/notifications/notify";
 import { requireAdmin, requireFinance } from "@/server/require-role";
 import { withTaskTransaction } from "@/server/tasks/transaction";
 import { assertPayrollCurrencyChange } from "@/server/product-stage-pay/core";
+import { executeCashPayout } from "./cash-service";
+import { calculateCashPayout, isCashCurrency, parseCashRate } from "@/lib/cash-ledger";
+import { listCashAccounts } from "@/server/finance/queries";
+import { getNbrbRate } from "@/server/finance/nbrb";
 
 import {
   currentMonth,
@@ -33,7 +39,11 @@ function revalidatePayroll() {
 
 const payoutSchema = z.object({
   userId: z.string().min(1, "Выберите сотрудника"),
-  amount: z.number().positive("Сумма должна быть больше нуля"),
+  amount: z.number().positive("Сумма должна быть больше нуля").optional(),
+  cashAmount: z.string().optional(),
+  cashAccountId: z.string().optional(),
+  expectedCashCurrency: z.string().optional(),
+  requestId: z.string().optional(),
   month: z.string().regex(MONTH_RE, "Месяц в формате ГГГГ-ММ"),
   kind: z.enum(["SALARY", "ADVANCE"]).default("SALARY"),
   comment: z.string().optional(),
@@ -41,125 +51,42 @@ const payoutSchema = z.object({
 
 export async function addPayout(
   input: z.input<typeof payoutSchema>,
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<Awaited<ReturnType<typeof executeCashPayout>>> {
   const session = await requireFinance();
   const parsed = payoutSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Ошибка данных" };
   }
   const data = parsed.data;
-  const isAdvance = data.kind === "ADVANCE";
-  // Аванс — всегда текущим расчётным месяцем (начислений под него ещё нет)
-  const month = isAdvance ? currentMonth() : data.month;
-  const user = await prisma.user.findUnique({
-    where: { id: data.userId },
-    select: { id: true, name: true },
+  if (!data.cashAccountId) return { ok: false, error: "Выберите кассу" };
+  if (!data.expectedCashCurrency || !isCashCurrency(data.expectedCashCurrency)) return { ok: false, error: "Обновите выбранную кассу и валюту" };
+  if (!data.requestId) return { ok: false, error: "Обновите форму выплаты перед подтверждением" };
+  const cashAmount = data.cashAmount ?? (data.amount === undefined ? "" : data.amount.toFixed(2));
+  return executeCashPayout({ id: session.user.id, name: session.user.name ?? "", roles: session.user.roles, source: "web" }, {
+    kind: data.kind, userId: data.userId, cashAccountId: data.cashAccountId, cashAmount,
+    expectedCashCurrency: data.expectedCashCurrency,
+    requestId: data.requestId, month: data.month, description: data.comment, comment: data.comment,
   });
-  if (!user) return { ok: false, error: "Сотрудник не найден" };
-
-  // Копейки: храним ровно два знака
-  const amount = Math.round(data.amount * 100) / 100;
-  const currency = await getPayrollCurrency();
-
-  // Потолки выплаты: задолженность перед сотрудником (за всё время)
-  // и баланс организации — больше физически выплатить нельзя.
-  // Аванс долга не требует: единственный потолок — баланс организации.
-  const balance = await getOrgBalance();
-  if (!isAdvance) {
-    const dues = await getEmployeeDues();
-    const due = dues.find((row) => row.userId === data.userId)?.due ?? 0;
-    if (due <= 0) {
-      return {
-        ok: false,
-        error: "Долга за прошлые месяцы перед сотрудником нет — текущий месяц ещё не закрыт",
-      };
-    }
-    if (amount > due) {
-      return {
-        ok: false,
-        error: `Больше долга за прошлые месяцы — к выплате сейчас ${formatAmount(due, currency)}`,
-      };
-    }
-  }
-  if (amount > balance) {
-    return {
-      ok: false,
-      error: `Недостаточно средств на балансе организации — доступно ${formatAmount(balance, currency)}`,
-    };
-  }
-  const payout = await prisma.payout.create({
-    data: {
-      userId: data.userId,
-      amount,
-      month,
-      kind: data.kind,
-      comment: data.comment?.trim() || (isAdvance ? "Аванс" : null),
-      createdById: session.user.id,
-    },
-  });
-
-  await writeChangeLog({
-    actorType: "user",
-    actorId: session.user.id,
-    actorName: session.user.name ?? undefined,
-    entity: "payout",
-    entityId: payout.id,
-    action: "create",
-    newValue: { user: user.name, amount, month, kind: data.kind },
-  });
-  await emitDomainEvent(
-    "payroll.payout",
-    { payoutId: payout.id, userId: data.userId, amount, month, kind: data.kind },
-    session.user.id,
-  );
-  await notifyPerson({
-    userId: data.userId,
-    type: "payroll.payout",
-    title: isAdvance
-      ? `Аванс: ${formatAmount(amount, currency)}`
-      : `Выплата зарплаты: ${formatAmount(amount, currency)}`,
-    body: data.comment?.trim() || `Расчётный месяц ${month}`,
-    link: "/payroll",
-  });
-  // ЗП-событие для финансовых ролей (админ/директор/бухгалтер), кроме автора
-  await notifyOrg({
-    type: "payroll.orgPayout",
-    title: `${isAdvance ? "Аванс" : "Выплата"}: ${user.name}, ${formatAmount(amount, currency)}`,
-    body: data.comment?.trim() || `Расчётный месяц ${month}`,
-    link: "/finance/payroll",
-    exceptUserId: session.user.id,
-  });
-
-  revalidatePayroll();
-  return { ok: true };
 }
 
 export async function deletePayout(
   payoutId: string,
 ): Promise<{ ok: boolean; error?: string }> {
   const session = await requireFinance();
-  const payout = await prisma.payout.findUnique({
-    where: { id: payoutId },
-    include: { user: { select: { name: true } } },
+  const result = await withTaskTransaction(async (tx) => {
+    const payout = await tx.payout.findUnique({ where: { id: payoutId }, include: { user: { select: { name: true } } } });
+    if (!payout) return { ok: false, error: "Выплата не найдена" };
+    await tx.payout.delete({ where: { id: payoutId } });
+    await tx.changeLog.create({ data: { actorType: "user", actorId: session.user.id, actorName: session.user.name ?? undefined,
+      entity: "payout", entityId: payoutId, action: "delete", oldValue: { user: payout.user.name,
+        amount: payout.amount.toFixed(2), cashAmount: payout.cashAmount?.toFixed(2) ?? null,
+        cashCurrency: payout.cashCurrency, month: payout.month } } });
+    return { ok: true };
   });
-  if (!payout) return { ok: false, error: "Выплата не найдена" };
-
-  await prisma.payout.delete({ where: { id: payoutId } });
-  await writeChangeLog({
-    actorType: "user",
-    actorId: session.user.id,
-    actorName: session.user.name ?? undefined,
-    entity: "payout",
-    entityId: payoutId,
-    action: "delete",
-    oldValue: {
-      user: payout.user.name,
-      amount: Number(payout.amount),
-      month: payout.month,
-    },
-  });
-
+  if (!result.ok) return result;
   revalidatePayroll();
+  revalidatePath("/finance/accounts");
+  revalidatePath("/advances");
   return { ok: true };
 }
 
@@ -266,6 +193,7 @@ export async function accrueTurnover(
 
 export async function settleAll(
   month: string,
+  cashAccountId?: string,
 ): Promise<{
   ok: boolean;
   error?: string;
@@ -275,84 +203,56 @@ export async function settleAll(
 }> {
   const session = await requireFinance();
   if (!isValidMonth(month)) return { ok: false, error: "Некорректный месяц" };
-
-  const balance = await getOrgBalance();
-  if (balance <= 0) {
-    return { ok: false, error: "Баланс организации пуст — сначала внесите приходы" };
-  }
+  if (!cashAccountId) return { ok: false, error: "Выберите кассу для расчёта" };
+  const account = (await listCashAccounts()).find((row) => row.id === cashAccountId && row.active);
+  if (!account || !isCashCurrency(account.currency)) return { ok: false, error: "Активная касса не найдена" };
   const debtors = (await getEmployeeDues()).filter((row) => row.due > 0);
   if (debtors.length === 0) {
     return { ok: false, error: "Задолженности перед сотрудниками нет" };
   }
-
   const currency = await getPayrollCurrency();
+  if (!isCashCurrency(currency)) return { ok: false, error: "Неизвестная валюта зарплаты" };
+  const asOf = new Date().toISOString().slice(0, 10);
+  const rateDate = new Date(`${asOf}T12:00:00.000Z`);
+  const cashRateInfo = await getNbrbRate(account.currency, rateDate).catch(() => null);
+  const payrollRateInfo = currency === account.currency ? cashRateInfo : await getNbrbRate(currency, rateDate).catch(() => null);
+  if (!cashRateInfo || !payrollRateInfo) return { ok: false, error: "Не удалось получить курс НБ РБ" };
+  const rates = { asOf, cash: { currency: account.currency, rate: parseCashRate(cashRateInfo.rate.toFixed(6), account.currency), date: cashRateInfo.date },
+    payroll: { currency, rate: parseCashRate(payrollRateInfo.rate.toFixed(6), currency), date: payrollRateInfo.date } };
   const today = new Date();
   const dateStr = `${String(today.getDate()).padStart(2, "0")}.${String(
     today.getMonth() + 1,
   ).padStart(2, "0")}.${today.getFullYear()}`;
-
-  let remaining = balance;
   let paidCount = 0;
   let totalPaid = 0;
   const shortPaid: string[] = [];
-
   for (const debtor of debtors) {
-    if (remaining <= 0) {
-      shortPaid.push(debtor.name);
-      continue;
+    const [cashRows, orgAvailable, currentDues] = await Promise.all([listCashAccounts(), getOrgBalance(), getEmployeeDues()]);
+    const cashAvailable = cashRows.find((row) => row.id === cashAccountId)?.balance ?? 0;
+    const due = currentDues.find((row) => row.userId === debtor.userId)?.due ?? 0;
+    const payrollCap = new Prisma.Decimal(Math.min(due, orgAvailable));
+    if (cashAvailable <= 0 || payrollCap.lte(0)) { shortPaid.push(debtor.name); continue; }
+    const physicalCap = payrollCap.mul(rates.payroll.rate).div(rates.cash.rate)
+      .toDecimalPlaces(2, Prisma.Decimal.ROUND_DOWN);
+    const amount = Prisma.Decimal.min(new Prisma.Decimal(cashAvailable), physicalCap);
+    if (amount.lte(0)) { shortPaid.push(debtor.name); continue; }
+    let cashAmount = amount.toFixed(2);
+    while (new Prisma.Decimal(calculateCashPayout(cashAmount, rates).amount).gt(payrollCap)) {
+      const reduced = new Prisma.Decimal(cashAmount).sub("0.01");
+      if (reduced.lte(0)) break;
+      cashAmount = reduced.toFixed(2);
     }
-    const amount = round2(Math.min(debtor.due, remaining));
-    if (amount <= 0) {
-      shortPaid.push(debtor.name);
-      continue;
-    }
-    const payout = await prisma.payout.create({
-      data: {
-        userId: debtor.userId,
-        amount,
-        month,
-        comment: `Выплата зарплаты от ${dateStr}`,
-        createdById: session.user.id,
-      },
-    });
-    remaining = round2(remaining - amount);
+    const result = await executeCashPayout({ id: session.user.id, name: session.user.name ?? "", roles: session.user.roles, source: "web" },
+      { kind: "SALARY", userId: debtor.userId, cashAccountId, cashAmount, expectedCashCurrency: account.currency,
+        requestId: randomUUID(), month,
+        comment: `Выплата зарплаты от ${dateStr}` });
+    if (!result.ok || !result.payoutId) { shortPaid.push(debtor.name); continue; }
+    const saved = await prisma.payout.findUnique({ where: { id: result.payoutId }, select: { amount: true } });
+    if (!saved) { shortPaid.push(debtor.name); continue; }
     paidCount += 1;
-    totalPaid = round2(totalPaid + amount);
-    if (amount < debtor.due) shortPaid.push(debtor.name);
-
-    await writeChangeLog({
-      actorType: "user",
-      actorId: session.user.id,
-      actorName: session.user.name ?? undefined,
-      entity: "payout",
-      entityId: payout.id,
-      action: "create",
-      newValue: { user: debtor.name, amount, month, batch: true },
-    });
-    await emitDomainEvent(
-      "payroll.payout",
-      { payoutId: payout.id, userId: debtor.userId, amount, month },
-      session.user.id,
-    );
-    await notifyPerson({
-      userId: debtor.userId,
-      type: "payroll.payout",
-      title: `Выплата зарплаты: ${formatAmount(amount, currency)}`,
-      body: `Выплата зарплаты от ${dateStr}`,
-      link: "/payroll",
-    });
+    totalPaid = round2(totalPaid + Number(saved.amount));
+    if (Number(saved.amount) < due) shortPaid.push(debtor.name);
   }
-
-  if (paidCount > 0) {
-    await notifyOrg({
-      type: "payroll.orgPayout",
-      title: `Рассчитать всех: выплачено ${formatAmount(totalPaid, currency)} (${paidCount} сотр.)`,
-      body: `Выплата зарплаты от ${dateStr}`,
-      link: "/finance/payroll",
-      exceptUserId: session.user.id,
-    });
-  }
-
   revalidatePayroll();
   return { ok: true, paidCount, totalPaid, shortPaid };
 }
@@ -374,6 +274,9 @@ export async function setPayrollCurrency(
       const current = (await tx.orgSetting.findUnique({ where: { key: "payrollCurrency" } }))?.value ?? "BYN";
       if (current === currency) return current;
       await assertPayrollCurrencyChange(tx, currency);
+      if (await tx.payout.count({ where: { cashAccountId: { not: null } } })) {
+        throw new Error("Валюта зарплаты зафиксирована выплатами из кассы");
+      }
       await tx.orgSetting.upsert({ where: { key: "payrollCurrency" }, update: { value: currency }, create: { key: "payrollCurrency", value: currency } });
       return current;
     });

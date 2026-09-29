@@ -10,6 +10,9 @@ import { notifyOrg } from "@/server/notifications/notify";
 import { equivalents, getNbrbRate, isCurrency } from "@/server/finance/nbrb";
 import { requireActorRoles, type DomainActor } from "@/server/projects/core";
 import { FINANCE_ROLES } from "@/lib/roles";
+import { withTaskTransaction } from "@/server/tasks/transaction";
+import { readCashBalance, readOrgBalance } from "@/server/payroll/cash-core";
+import { getPayrollCurrency } from "@/server/payroll/queries";
 
 // Ядро создания платежа (§11): приход от клиента или расход на проект.
 // Используется и вебом (finance-tab), и telegram-ботом — актёр передаётся
@@ -126,8 +129,33 @@ export async function createPaymentCore(
       ? { bynAmount: round2(amount * rate), projectAmount: amount }
       : equivalents(amount, rate, projectRate);
 
-  const payment = await prisma.payment.create({
-    data: {
+  let payrollRate = "1.000000";
+  let payrollCurrency = "BYN";
+  if (data.direction === "EXPENSE") {
+    payrollCurrency = await getPayrollCurrency();
+    if (!isCurrency(payrollCurrency)) return { ok: false, error: "Неизвестная валюта зарплаты" };
+    try { payrollRate = (await getNbrbRate(payrollCurrency)).rate.toFixed(6); }
+    catch { return { ok: false, error: "Не удалось получить курс для проверки баланса организации" }; }
+  }
+  let payment;
+  try {
+    payment = await withTaskTransaction(async (tx) => {
+      const [currentProject, currentAccount, currentArticle, payrollSetting] = await Promise.all([
+        tx.project.findUnique({ where: { id: project.id }, select: { currency: true } }),
+        tx.cashAccount.findUnique({ where: { id: account.id }, select: { active: true, currency: true } }),
+        articleId ? tx.expenseArticle.findUnique({ where: { id: articleId }, select: { active: true } }) : Promise.resolve(null),
+        tx.orgSetting.findUnique({ where: { key: "payrollCurrency" } }),
+      ]);
+      if (currentProject?.currency !== project.currency || !currentAccount?.active || currentAccount.currency !== data.currency
+        || (articleId && !currentArticle?.active)) throw new Error("Реквизиты платежа изменились — обновите форму");
+      if (data.direction === "EXPENSE") {
+        const currentPayroll = payrollSetting?.value ?? "BYN";
+        if (currentPayroll !== payrollCurrency) throw new Error("Валюта зарплаты изменилась — повторите операцию");
+        const [cashBalance, orgBalanceAfter] = await Promise.all([readCashBalance(tx, account.id), readOrgBalance(tx, payrollRate, `-${equiv.bynAmount}`)]);
+        if (cashBalance.lt(amount)) throw new Error("Недостаточно средств в выбранной кассе");
+        if (orgBalanceAfter.lt(0)) throw new Error("Недостаточно средств на балансе организации");
+      }
+      return tx.payment.create({ data: {
       projectId: project.id,
       direction: data.direction,
       amount,
@@ -141,8 +169,11 @@ export async function createPaymentCore(
       paidAt,
       comment: data.comment?.trim() || null,
       createdById: actor.id,
-    },
-  });
+      } });
+    });
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "Не удалось внести платёж" };
+  }
 
   const isIncome = data.direction === "INCOME";
   const kind = isIncome ? "Приход" : "Расход";

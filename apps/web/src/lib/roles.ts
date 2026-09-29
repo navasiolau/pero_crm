@@ -43,6 +43,8 @@ export const OFFICE_ROLES: Role[] = [
 export const MANAGER_ROLES: Role[] = ["ADMIN", "DIRECTOR", "MANAGER"];
 // Финансы: выплаты, приходы/расходы, кассы, статьи (§10–§11).
 export const FINANCE_ROLES: Role[] = ["ADMIN", "DIRECTOR", "ACCOUNTANT"];
+// Выдача аванса — узкое право менеджера, без доступа ко всему разделу финансов.
+export const ADVANCE_ROLES: Role[] = ["ADMIN", "DIRECTOR", "MANAGER", "ACCOUNTANT"];
 // Настройки и журнал изменений.
 export const ADMIN_ROLES: Role[] = ["ADMIN", "DIRECTOR"];
 // Производственный персонал: без дашборда, время — только таймером.

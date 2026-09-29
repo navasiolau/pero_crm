@@ -1,3 +1,4 @@
 # Keep the reviewed migration bytes and Prisma checksum identical across platforms.
 apps/web/prisma/migrations/20260928140000_universal_work_shares/migration.sql text eol=lf
 apps/web/prisma/migrations/20260928220000_product_engineering_pay/migration.sql text eol=lf
+apps/web/prisma/migrations/20260929120000_manager_cash_advances/migration.sql text eol=lf

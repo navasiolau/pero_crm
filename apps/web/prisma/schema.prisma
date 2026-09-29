@@ -577,9 +577,20 @@ model Payout {
   comment     String?
   createdById String?
   createdAt   DateTime @default(now())
+  cashAccountId String?
+  cashAccount   CashAccount? @relation(fields: [cashAccountId], references: [id], onDelete: Restrict)
+  cashAmount    Decimal? @db.Decimal(12, 2)
+  cashCurrency  String?
+  bynAmount     Decimal? @db.Decimal(18, 2)
+  cashRate      Decimal? @db.Decimal(14, 6)
+  payrollRate   Decimal? @db.Decimal(14, 6)
+  cashRateDate    DateTime? @db.Date
+  payrollRateDate DateTime? @db.Date
+  payrollCurrency String?
 
   @@index([userId, month])
   @@index([month])
+  @@index([cashAccountId])
 }
 
 // Направление платежа (§11): приход от клиента / расход на проект
@@ -601,6 +612,7 @@ model CashAccount {
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   payments  Payment[]
+  payouts   Payout[]
 }
 
 // Статья расходов (§8): справочник для расходов по проектам
