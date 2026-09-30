@@ -37,6 +37,7 @@ import {
   type TaskDetails,
 } from "@/components/task-dialog";
 import { formatAmount } from "@/lib/format";
+import { workPaymentAmountLabel, workPaymentSourceLabel } from "@/lib/task-payment-display";
 import { cn } from "@/lib/utils";
 import { isPositiveQuantity, quantityInputError, remainingWorkQuantity } from "@/lib/work-quantity";
 import { changeTaskStatus, createTask } from "@/server/tasks/actions";
@@ -51,7 +52,7 @@ export interface WorkRow {
   allocated: string;
   priceSnapshot: string | null;
   total: string | null;
-  paymentKind?: "LEGACY" | "ENGINEERING";
+  paymentKind?: "LEGACY" | "ENGINEERING" | "INSTALLATION";
   linkedTask: { id: string; title: string; status: string } | null;
 }
 
@@ -112,7 +113,9 @@ export function TasksTab({
   const [priceItemId, setPriceItemId] = useState("");
   const [quantity, setQuantity] = useState("1");
 
-  const worksTotal = works.filter((work) => work.paymentKind !== "ENGINEERING").reduce((sum, work) => sum + Number(work.total ?? 0), 0);
+  const pieceWorks = works.filter((work) => work.paymentKind !== "ENGINEERING" && work.paymentKind !== "INSTALLATION");
+  const worksTotal = pieceWorks.reduce((sum, work) => sum + Number(work.total ?? 0), 0);
+  const hasPercentageSource = works.some((work) => work.paymentKind === "ENGINEERING" || work.paymentKind === "INSTALLATION");
 
   return (
     <div className="flex flex-col gap-5">
@@ -120,7 +123,7 @@ export function TasksTab({
       <div className="flex flex-col gap-2">
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-medium">
-            {works.some((work) => work.paymentKind === "ENGINEERING") ? "Сдельные работы" : "Работы"} · итого {formatAmount(worksTotal, "BYN")}
+            {hasPercentageSource ? "Сдельные работы" : "Работы"}{pieceWorks.length ? ` · итого ${formatAmount(worksTotal, "BYN")}` : ""}
           </h3>
           {canManage ? (
             <Button size="sm" variant="outline" onClick={() => setWorkOpen(true)}>
@@ -148,12 +151,12 @@ export function TasksTab({
                 )}
               </span>
               <span className="text-muted-foreground">
-                {work.paymentKind === "ENGINEERING" ? "Инженерный фонд" : `${formatAmount(work.priceSnapshot, "BYN")} × ${work.quantity}`}
+                {workPaymentSourceLabel(work)}
               </span>
               <span className="font-medium">
-                {work.paymentKind === "ENGINEERING" ? "Оплата по долям фонда" : formatAmount(work.total, "BYN")}
+                {workPaymentAmountLabel(work)}
               </span>
-            {canManage && work.paymentKind !== "ENGINEERING" ? (
+            {canManage && work.paymentKind !== "ENGINEERING" && work.paymentKind !== "INSTALLATION" ? (
               <Button
                 size="icon-xs"
                 variant="ghost"
@@ -381,12 +384,12 @@ export function TasksTab({
                   const remaining = remainingWorkQuantity(work.quantity, work.allocated);
                   return {
                     value: work.id,
-                    label: `${work.title} · ${work.paymentKind === "ENGINEERING" ? "Инженерный фонд" : `${formatAmount(work.priceSnapshot, "BYN")}/ед.`}`,
+                    label: `${work.title} · ${work.paymentKind === "ENGINEERING" ? "Инженерный фонд (история)" : work.paymentKind === "INSTALLATION" ? "Монтаж — процент от изделия" : `${formatAmount(work.priceSnapshot, "BYN")}/ед.`}`,
                     hint:
                       isPositiveQuantity(remaining)
                         ? `свободно ${remaining} из ${work.quantity}`
                         : "распределена полностью",
-                    disabled: work.paymentKind === "ENGINEERING" || !isPositiveQuantity(remaining),
+                    disabled: work.paymentKind === "ENGINEERING" || work.paymentKind === "INSTALLATION" || !isPositiveQuantity(remaining),
                   };
                 })}
                 value={workId}

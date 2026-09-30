@@ -3,7 +3,7 @@ import { test } from "node:test";
 import type { PrismaClient, Role } from "@prisma/client";
 import {
   canEditProductTechnicalBlock, engineeringParticipantProductIds, productEditWhere,
-  productVisibilityWhere, resolveVisibilityActor, taskExecutionWhere,
+  productVisibilityWhere, projectVisibilityWhere, resolveVisibilityActor, taskExecutionWhere,
 } from "../src/server/access/visibility";
 import { canSplitTask, engineeringRecipientError } from "../src/server/tasks/share-policy";
 
@@ -21,7 +21,7 @@ test("participant resolver accepts zero-share assignment and rejects every misma
     { ...valid, work: { productId: "p", projectId: "other" } },
     { ...valid, work: null },
   ]);
-  const actor = await resolveVisibilityActor(db, { id: "u", roles: [] });
+  const actor = await resolveVisibilityActor(db, { id: "u", roles: ["ENGINEER"] });
   assert.deepEqual(actor.engineeringParticipantProductIds, ["p"]);
   assert.deepEqual(actor.engineeringParticipantTaskIds, ["valid"]);
   assert.deepEqual(await engineeringParticipantProductIds(db, "u", false), ["p"]);
@@ -31,8 +31,8 @@ test("participant resolver accepts zero-share assignment and rejects every misma
 });
 
 test("participant predicates remain DESIGN scoped; independent manager and field grants survive", () => {
-  const participant = { id: "u", roles: [] as Role[], engineeringParticipantProductIds: ["p"], engineeringParticipantTaskIds: ["task"] };
-  assert.deepEqual(productEditWhere(participant), { status: "DESIGN", OR: [{ id: { in: ["p"] } }] });
+  const participant = { id: "u", roles: ["ENGINEER"] as Role[], engineeringParticipantProductIds: ["p"], engineeringParticipantTaskIds: ["task"] };
+  assert.deepEqual(productEditWhere(participant), { status: "DESIGN", OR: [{ engineerId: "u" }, { id: { in: ["p"] } }] });
   const read = JSON.stringify(productVisibilityWhere(participant));
   assert.match(read, /DESIGN/);
   assert.match(read, /"p"/);
@@ -40,15 +40,36 @@ test("participant predicates remain DESIGN scoped; independent manager and field
   assert.match(execution, /"task"/);
   assert.match(execution, /DESIGN/);
   assert.deepEqual(productEditWhere({ id: "u", roles: ["MANAGER"] }), {});
-  assert.match(JSON.stringify(productVisibilityWhere({ id: "u", roles: ["WORKER"] })), /assigneeId/);
+  const field = JSON.stringify(productVisibilityWhere({ id: "u", roles: ["WORKER"] }));
+  assert.match(field, /assigneeId/);
+  assert.match(field, /not":"DESIGN/);
+  assert.deepEqual(productVisibilityWhere({ id: "u", roles: [] }), { OR: [{ id: { in: [] } }] });
 });
 
-test("active recipient of any role, including zero roles, may receive ENGINEERING split", () => {
+test("legacy ENGINEERING recipient facts remain readable but no new split is offered", () => {
   const product = { engineerId: "primary", status: "DESIGN" as const };
   assert.equal(engineeringRecipientError({ id: "u", roles: [], active: true }, product), null);
   assert.equal(engineeringRecipientError({ id: "u", roles: ["ACCOUNTANT"], active: true }, product), null);
   assert.match(engineeringRecipientError({ id: "u", roles: [], active: false }, product) ?? "", /неактивен/);
-  assert.equal(canSplitTask({ id: "u", roles: [] }, { assigneeId: "u", status: "NEW", product, paidCount: 0, work: { paymentKind: "ENGINEERING" } }), true);
+  assert.equal(canSplitTask({ id: "u", roles: [] }, { assigneeId: "u", status: "NEW", product, paidCount: 0, work: { paymentKind: "ENGINEERING" } }), false);
   assert.equal(canSplitTask({ id: "u", roles: [] }, { assigneeId: "u", status: "DONE", product, paidCount: 0, work: { paymentKind: "ENGINEERING" } }), false);
   assert.equal(canSplitTask({ id: "u", roles: [] }, { assigneeId: "u", status: "NEW", product, paidCount: 1, work: { paymentKind: "ENGINEERING" } }), false);
+});
+
+test("direct participant grants are stage-scoped; pure field cannot see DESIGN sibling", async () => {
+  const db = { task: { findMany: async () => [] }, productPercentageParticipant: {
+    findMany: async ({ where }: { where: { config: { kind: string } } }) =>
+      [{ config: { productId: where.config.kind === "ENGINEERING" ? "design-own" : "install-own" } }],
+  } } as unknown as Pick<PrismaClient, "task" | "productPercentageParticipant">;
+  const engineer = await resolveVisibilityActor(db, { id: "e", roles: ["ENGINEER"] });
+  assert.deepEqual(engineer.engineeringParticipantProductIds, ["design-own"]);
+  assert.match(JSON.stringify(productVisibilityWhere(engineer)), /design-own/);
+  const mounter = await resolveVisibilityActor(db, { id: "m", roles: ["MOUNTER"] });
+  assert.deepEqual(mounter.fieldParticipantProductIds, ["install-own"]);
+  const product = JSON.stringify(productVisibilityWhere(mounter));
+  assert.match(product, /install-own/);
+  assert.match(product, /"not":"DESIGN"/);
+  const project = JSON.stringify(projectVisibilityWhere(mounter));
+  assert.match(project, /"products"/);
+  assert.match(project, /"none":\{\}/);
 });

@@ -33,6 +33,18 @@ enum ProductPayStage {
   INSTALLATION
 }
 
+enum ProductPercentageKind {
+  ENGINEERING
+  INSTALLATION
+}
+
+enum ProductPercentageCompletionState {
+  SKIPPED_ONCE
+  PENDING_FX
+  SETTLED
+  LEGACY_PROTECTED
+}
+
 enum ProductStagePayState {
   DRAFT
   SETTLED
@@ -42,11 +54,13 @@ enum ProductStagePayState {
 enum WorkPaymentKind {
   LEGACY
   ENGINEERING
+  INSTALLATION
 }
 
 enum TaskAllocationBudgetSource {
   TASK_FIXED
   STAGE_PREVIEW
+  PHYSICAL_ONLY
 }
 
 model User {
@@ -79,6 +93,8 @@ model User {
   closedStageSettlements ProductStageSettlement[] @relation("StageSettlementCloser")
   primaryStageSettlements ProductStageSettlement[] @relation("StageSettlementPrimaryEngineer")
   stageSettlementShares ProductStageSettlementShare[] @relation("StageSettlementShareUser")
+  percentageParticipants ProductPercentageParticipant[]
+  percentageCompletionShares ProductPercentageCompletionShare[]
 }
 
 // ─── Проекты и клиенты (фаза 2, §6) ──────────────────────────────────────────
@@ -231,6 +247,7 @@ model Product {
   // «В работе» (§10)
   engineerId       String?
   engineer         User?        @relation("ProductEngineer", fields: [engineerId], references: [id], onDelete: SetNull)
+  noModel          Boolean      @default(false)
   surveyorId       String? // замерщик — сотрудник, произведший замер (legacy f4061)
   surveyor         User?        @relation("ProductSurveyor", fields: [surveyorId], references: [id], onDelete: SetNull)
   sketchFileId     String? @unique // эскиз изделия — изображение (показ в детальном просмотре)
@@ -249,6 +266,8 @@ model Product {
   stagePayPools    ProductStagePayPool[]
   stageSettlements ProductStageSettlement[] @relation("ProductStageSettlementProduct")
   payrollEntries   PayrollEntry[]
+  percentageConfigs ProductPercentageConfig[]
+  percentageCompletions ProductPercentageCompletion[]
 
   @@index([projectId])
   @@index([projectId, suffixInt])
@@ -307,6 +326,7 @@ model Task {
   allocationGroup TaskAllocationGroup? @relation(fields: [allocationGroupId], references: [id], onDelete: Restrict)
   shareUnits     Int? // 1 000 000 единиц = 100% исходной группы
   shareAmount    Decimal? @db.Decimal(12, 2) // точный бюджет этой части, не умножать повторно на долю
+  physicalOnlyShare Boolean @default(false) // физическое деление монтажной работы без денежной доли задачи
   stageShareUnits Int? // доля процентного пула изделия; отдельна от физического объёма и shareAmount
   splitRevision  Int @default(0) // оптимистическая ревизия формы деления
   doneAt         DateTime?
@@ -443,6 +463,8 @@ model PayrollEntry {
   product Product? @relation(fields: [productId], references: [id], onDelete: Restrict)
   settlementShareId String? @unique
   settlementShare ProductStageSettlementShare? @relation(fields: [settlementShareId], references: [id], onDelete: Restrict)
+  percentageCompletionShareId String? @unique
+  percentageCompletionShare ProductPercentageCompletionShare? @relation(fields: [percentageCompletionShareId], references: [id], onDelete: Restrict)
   bynAmount Decimal? @db.Decimal(18, 2)
   projectAmount Decimal? @db.Decimal(12, 2)
   projectCurrency String?
@@ -458,6 +480,81 @@ model PayrollEntry {
   @@index([userId, month])
   @@index([projectId])
   @@index([productId])
+}
+
+// Новые прямые проценты. Старые Work/Task/settlement записи остаются нетронутыми.
+model ProductPercentageConfig {
+  id          String                @id @default(cuid())
+  productId   String
+  product     Product               @relation(fields: [productId], references: [id], onDelete: Restrict)
+  kind        ProductPercentageKind
+  ratePercent Decimal?              @db.Decimal(5, 2)
+  revision    Int                   @default(0)
+  reviewedLegacyWorkIds String[]    @default([])
+  participants ProductPercentageParticipant[]
+  createdAt   DateTime              @default(now())
+  updatedAt   DateTime              @updatedAt
+
+  @@unique([productId, kind])
+}
+
+model ProductPercentageParticipant {
+  id         String                  @id @default(cuid())
+  configId   String
+  config     ProductPercentageConfig @relation(fields: [configId], references: [id], onDelete: Restrict)
+  userId     String
+  user       User                    @relation(fields: [userId], references: [id], onDelete: Restrict)
+  shareUnits Int
+
+  @@unique([configId, userId])
+  @@index([userId])
+}
+
+// Один снимок первого завершения этапа; замороженные входы остаются при FX retry.
+model ProductPercentageCompletion {
+  id             String                           @id @default(cuid())
+  productId      String
+  product        Product                          @relation(fields: [productId], references: [id], onDelete: Restrict)
+  kind           ProductPercentageKind
+  state          ProductPercentageCompletionState
+  completedAt    DateTime                         @default(now())
+  completedById  String?
+  statusAtCompletion ProductStatus
+  reason         String?
+  priceSnapshot  Decimal?                         @db.Decimal(12, 2)
+  ratePercentSnapshot Decimal?                    @db.Decimal(5, 2)
+  productCurrency String
+  payrollCurrency String?
+  configRevision Int?
+  productRateByn Decimal?                        @db.Decimal(18, 6)
+  payrollRateByn Decimal?                        @db.Decimal(18, 6)
+  productRateDate DateTime?                      @db.Date
+  payrollRateDate DateTime?                      @db.Date
+  sourceFundExact Decimal?                      @db.Decimal(18, 6)
+  amount         Decimal?                        @db.Decimal(12, 2)
+  bynAmount      Decimal?                        @db.Decimal(18, 2)
+  projectAmount  Decimal?                        @db.Decimal(12, 2)
+  settledAt      DateTime?
+  shares         ProductPercentageCompletionShare[]
+
+  @@unique([productId, kind])
+  @@index([state])
+}
+
+model ProductPercentageCompletionShare {
+  id            String                       @id @default(cuid())
+  completionId  String
+  completion    ProductPercentageCompletion  @relation(fields: [completionId], references: [id], onDelete: Restrict)
+  userId        String
+  user          User                         @relation(fields: [userId], references: [id], onDelete: Restrict)
+  userNameSnapshot String
+  shareUnits    Int
+  amount        Decimal?                     @db.Decimal(12, 2)
+  bynAmount     Decimal?                     @db.Decimal(18, 2)
+  projectAmount Decimal?                     @db.Decimal(12, 2)
+  payrollEntry  PayrollEntry?
+
+  @@unique([completionId, userId])
 }
 
 // Неизменяемый снимок пула оплаты изделия для производственного этапа.

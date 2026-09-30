@@ -5,13 +5,13 @@ import type { PrismaClient } from "@prisma/client";
 import { taskShareFixture } from "./helpers/task-share-fixture";
 
 const require = createRequire(import.meta.url);
-let fixture = taskShareFixture();
+let fixture = taskShareFixture("DESIGN");
 let actions: typeof import("../src/server/tasks/actions");
 function inject(path: string, exports: Record<string, unknown>) {
   const filename = require.resolve(path), stub = new Module(filename); stub.exports = exports; stub.filename = filename; stub.loaded = true; require.cache[filename] = stub;
 }
 function engineering() {
-  fixture = taskShareFixture();
+  fixture = taskShareFixture("DESIGN");
   Object.assign(fixture.state().works[0], { paymentKind: "ENGINEERING", stagePayPoolId: "pool", poolWeightUnits: 1_000_000 });
   Object.assign(fixture.state().tasks[0], { stageShareUnits: 1_000_000, status: "NEW" });
 }

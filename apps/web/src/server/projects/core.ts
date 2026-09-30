@@ -11,6 +11,7 @@ import { notifyOrg, notifyPerson } from "@/server/notifications/notify";
 import { withTaskTransaction } from "@/server/tasks/transaction";
 import { changeProjectStageTransaction } from "./stage-core";
 import { assertProjectCurrencyChange } from "@/server/product-stage-pay/core";
+import { assertPercentageProjectCurrencyChange } from "@/server/product-percentage-pay/core";
 
 import { hasAnyRole, MANAGER_ROLES, type Role } from "@/lib/roles";
 
@@ -202,7 +203,10 @@ export async function updateProjectCore(
     before = await withTaskTransaction(async (tx) => {
       const current = await tx.project.findUnique({ where: { id: projectId } });
       if (!current) return null;
-      if (data.currency !== undefined) await assertProjectCurrencyChange(tx, projectId, data.currency);
+      if (data.currency !== undefined) {
+        await assertProjectCurrencyChange(tx, projectId, data.currency);
+        await assertPercentageProjectCurrencyChange(tx, projectId, data.currency);
+      }
       await tx.project.update({ where: { id: projectId }, data });
       return current;
     });

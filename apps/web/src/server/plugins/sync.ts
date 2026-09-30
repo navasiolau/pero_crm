@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 
 import { isApiCompatible, listManifests } from "./registry";
+import { syncPluginMetadata } from "./sync-core";
 
 // Синхронизация реестра с БД: upsert строк Plugin по манифестам.
 // enabled и настройки не трогаем — выключение/данные сохраняются (§14).
@@ -13,23 +14,6 @@ export async function syncPlugins(): Promise<void> {
       );
       continue;
     }
-    await prisma.plugin.upsert({
-      where: { id: manifest.id },
-      create: {
-        id: manifest.id,
-        name: manifest.name,
-        version: manifest.version,
-        apiVersion: manifest.apiVersion,
-        description: manifest.description,
-        permissions: manifest.permissions,
-      },
-      update: {
-        name: manifest.name,
-        version: manifest.version,
-        apiVersion: manifest.apiVersion,
-        description: manifest.description,
-        permissions: manifest.permissions,
-      },
-    });
+    await syncPluginMetadata(prisma.plugin, manifest);
   }
 }

@@ -107,7 +107,7 @@ export async function listProducts(
       ? PRODUCT_SORT_MAP[sortField](filters.dir ?? "desc")
       : PRODUCT_SORT_MAP.number("desc");
   if (!paging) {
-    const rows = await fetchProductRows(where, orderBy, undefined, undefined);
+    const rows = await fetchProductRows(where, orderBy, undefined, undefined, actor);
     return { rows, total: rows.length };
   }
   const [rows, total] = await Promise.all([
@@ -116,6 +116,7 @@ export async function listProducts(
       orderBy,
       (paging.page - 1) * paging.pageSize,
       paging.pageSize,
+      actor,
     ),
     prisma.product.count({ where }),
   ]);
@@ -127,11 +128,14 @@ async function fetchProductRows(
   orderBy: Prisma.ProductOrderByWithRelationInput[],
   skip: number | undefined,
   take: number | undefined,
+  actor: VisibilityActor,
 ) {
-  return prisma.product.findMany({
+  const rows = await prisma.product.findMany({
     where,
     include: {
       engineer: { select: { id: true, name: true } },
+      files: { where: { fileName: { endsWith: ".b3d", mode: "insensitive" } }, select: { id: true }, take: 1 },
+      percentageConfigs: { where: { kind: "ENGINEERING" }, select: { participants: { where: { userId: actor.id }, select: { id: true } } } },
       project: {
         select: {
           id: true,
@@ -146,6 +150,9 @@ async function fetchProductRows(
     skip,
     take,
   });
+  return rows.map((row) => ({ ...row, hasB3d: row.files.length > 0,
+    isEngineeringParticipant: row.percentageConfigs.some((config) => config.participants.length > 0) ||
+      actor.engineeringParticipantProductIds?.includes(row.id) === true }));
 }
 
 // Опции фильтров «Проект» и «Клиент»: пары, встречающиеся среди видимых

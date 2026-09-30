@@ -6,24 +6,26 @@ import { matches, type FixtureRow as Row } from "./helpers/visibility-fixture";
 
 const require = createRequire(import.meta.url);
 let actions: typeof import("../src/server/products/actions");
-let state: { products: Row[]; pools: Row[]; history: Row[]; logs: Row[]; events: Row[] };
+let state: { products: Row[]; pools: Row[]; completions: Row[]; history: Row[]; logs: Row[]; events: Row[] };
 let failPool = false;
 const users = [{ id: "engineer", roles: ["ENGINEER"], active: true }, { id: "worker", roles: ["WORKER"], active: true }, { id: "inactive", roles: ["ENGINEER"], active: false }];
-function reset() { state = { products: [], pools: [], history: [], logs: [], events: [] }; failPool = false; }
+function reset() { state = { products: [], pools: [], completions: [], history: [], logs: [], events: [] }; failPool = false; }
 function seed(status = "DESIGN", poolState = "DRAFT") {
-  state.products.push({ id: "product", projectId: "project", number: "1.1", suffixInt: 1, title: "Product", engineerId: "engineer", expectedPrice: "100", status });
+  state.products.push({ id: "product", projectId: "project", number: "1.1", suffixInt: 1, title: "Product", engineerId: "engineer", expectedPrice: "100", status, noModel: false });
   state.pools.push({ id: "pool", productId: "product", kind: "ENGINEERING", state: poolState, revision: 0 });
 }
 function product(where: Row) {
   const row = state.products.find((item) => matches(item, where));
-  return row ? { ...row, stagePayPools: state.pools.filter((pool) => pool.productId === row.id), _count: { tasks: 0, works: 0, projectMaterials: 0, stockMovements: 0 } } : null;
+  return row ? { ...row, stagePayPools: state.pools.filter((pool) => pool.productId === row.id),
+    project: { currency: "BYN" }, percentageConfigs: [], files: [], works: [],
+    _count: { tasks: 0, works: 0, projectMaterials: 0, stockMovements: 0 } } : null;
 }
 function apply(row: Row, data: Row) {
   for (const [key, value] of Object.entries(data)) row[key] = value && typeof value === "object" && "increment" in value ? Number(row[key]) + Number(value.increment) : value;
 }
 const db = {
   $queryRaw: async () => [{ locked: 1 }],
-  task: { findMany: async () => [] },
+  task: { findMany: async () => [], findFirst: async () => null },
   user: { findFirst: async ({ where }: { where: Row }) => users.find((row) => matches(row, where)) ?? null },
   project: { findUnique: async () => ({ id: "project", number: "1" }) },
   product: {
@@ -40,6 +42,15 @@ const db = {
     updateMany: async ({ where, data }: { where: Row; data: Row }) => { const rows = state.pools.filter((item) => matches(item, where)); rows.forEach((item) => apply(item, data)); return { count: rows.length }; },
     deleteMany: async ({ where }: { where: Row }) => { state.pools = state.pools.filter((item) => !matches(item, where)); },
   },
+  productPercentageCompletion: {
+    findUnique: async ({ where }: { where: Row }) => state.completions.find((row) => matches(row,
+      (where.productId_kind ?? where) as Row)) ?? null,
+    create: async ({ data }: { data: Row }) => { const row = { id: `completion-${state.completions.length}`, ...data }; state.completions.push(row); return row; },
+    count: async ({ where }: { where: Row }) => state.completions.filter((row) => matches(row, where)).length,
+  },
+  productPercentageConfig: { findMany: async () => [], deleteMany: async () => ({ count: 0 }) },
+  productPercentageParticipant: { findMany: async () => [], deleteMany: async () => ({ count: 0 }) },
+  orgSetting: { findUnique: async () => ({ value: "BYN" }) },
   productStatusHistory: { create: async ({ data }: { data: Row }) => { state.history.push(data); return data; } },
   changeLog: { create: async ({ data }: { data: Row }) => { state.logs.push(data); return data; } },
   domainEvent: { create: async ({ data }: { data: Row }) => { const row = { id: "event", ...data }; state.events.push(row); return row; } },
@@ -64,13 +75,10 @@ before(() => {
   actions = require("../src/server/products/actions");
 });
 
-test("creating a product creates its unconfigured engineering pool atomically", async () => {
+test("новое изделие создаётся без фиктивного старого инженерного фонда", async () => {
   reset(); assert.ok((await actions.createProduct({ projectId: "project", title: "New", engineerId: "engineer" })).ok);
-  assert.equal(state.pools.length, 1); assert.equal(state.pools[0].state, "DRAFT");
-  assert.equal(state.pools[0].productId, state.products[0].id);
-  reset(); failPool = true;
-  await assert.rejects(actions.createProduct({ projectId: "project", title: "New", engineerId: "engineer" }), /Injected/);
-  assert.equal(state.products.length, 0);
+  assert.equal(state.pools.length, 0);
+  assert.equal(state.products[0].status, "DESIGN");
 });
 
 test("primary engineer assignment requires an active ENGINEER role", async () => {
@@ -80,11 +88,14 @@ test("primary engineer assignment requires an active ENGINEER role", async () =>
   }
 });
 
-test("generic status calls cannot skip a draft fund via direct production or reclamation", async () => {
+test("менеджер меняет статус независимо от старого DRAFT фонда и фиксирует первый пропуск", async () => {
   for (const from of ["DESIGN", "RECLAMATION"]) for (const to of ["PRODUCTION", "DELIVERY", "INSTALLATION", "DONE"] as const) {
-    reset(); seed(from); const before = structuredClone(state);
-    assert.equal((await actions.changeProductStatus("product", to)).ok, false);
-    assert.deepEqual(state, before);
+    reset(); seed(from);
+    assert.equal((await actions.changeProductStatus("product", to)).ok, true);
+    assert.equal(state.products[0].status, to);
+    assert.equal(state.completions.filter((row) => row.kind === "ENGINEERING").length, 1);
+    assert.equal(state.completions.filter((row) => row.kind === "INSTALLATION").length, to === "DONE" ? 1 : 0);
+    assert.ok(state.completions.every((row) => row.state === "SKIPPED_ONCE"));
   }
 });
 

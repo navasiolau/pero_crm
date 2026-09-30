@@ -84,7 +84,7 @@ export async function changeTaskStatusCore(actor: DomainActor, taskId: string, t
       let payroll: { name: string; amount: string; currency: string } | null = null;
       // Инженерный фонд начисляется целиком при передаче изделия в производство.
       // Старые monetary snapshots конвертированной работы не являются её оплатой.
-      if (doneAt && task.assigneeId && task.work && task.work.paymentKind !== "ENGINEERING") {
+      if (doneAt && task.assigneeId && task.work && task.work.paymentKind === "LEGACY") {
         const assignee = await tx.user.findUnique({ where: { id: task.assigneeId }, select: { name: true, payScheme: true } });
         if (assignee?.payScheme === "PIECE" && !await tx.payrollEntry.findFirst({ where: { taskId: task.id, scheme: "PIECE" }, select: { id: true } })) {
           if (task.work.priceSnapshot === null) throw new CompletionError("Не задана расценка обычной работы");

@@ -13,6 +13,7 @@ import { notifyOrg, notifyPerson } from "@/server/notifications/notify";
 import { requireAdmin, requireFinance } from "@/server/require-role";
 import { withTaskTransaction } from "@/server/tasks/transaction";
 import { assertPayrollCurrencyChange } from "@/server/product-stage-pay/core";
+import { assertPercentagePayrollCurrencyChange } from "@/server/product-percentage-pay/core";
 import { executeCashPayout } from "./cash-service";
 import { calculateCashPayout, isCashCurrency, parseCashRate } from "@/lib/cash-ledger";
 import { listCashAccounts } from "@/server/finance/queries";
@@ -274,6 +275,7 @@ export async function setPayrollCurrency(
       const current = (await tx.orgSetting.findUnique({ where: { key: "payrollCurrency" } }))?.value ?? "BYN";
       if (current === currency) return current;
       await assertPayrollCurrencyChange(tx, currency);
+      await assertPercentagePayrollCurrencyChange(tx, currency);
       if (await tx.payout.count({ where: { cashAccountId: { not: null } } })) {
         throw new Error("Валюта зарплаты зафиксирована выплатами из кассы");
       }

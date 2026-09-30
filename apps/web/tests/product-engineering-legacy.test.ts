@@ -75,28 +75,27 @@ before(() => {
   core = require("../src/server/projects/core");
 });
 
-test("old IN_WORK writer excludes products with engineering pools", async () => {
+test("IN_WORK не создаёт новых процентов или protective pool, включая старую конфигурацию", async () => {
   reset(); assert.ok((await core.changeProjectStageCore(actor, "project", "IN_WORK")).ok);
-  assert.equal(state.entries.length, 1);
-  assert.equal(String(state.entries[0].amount), "5");
-  const coverage = state.pools.find((pool) => pool.productId === "old");
-  assert.equal(coverage?.state, "LEGACY_PROTECTED");
-  assert.deepEqual(coverage?.legacyPayrollEntryIds, [state.entries[0].id]);
+  assert.equal(state.entries.length, 0);
+  assert.equal(state.pools.length, 1);
   assert.equal(state.pools.find((pool) => pool.productId === "new")?.state, "DRAFT");
 });
 
-test("a payroll write failure rolls back project stage and its history", async () => {
-  reset(); failPayroll = true; const before = structuredClone(state);
-  await assert.rejects(core.changeProjectStageCore(actor, "project", "IN_WORK"), /Injected/);
-  assert.deepEqual(state, before);
+test("движение проекта не вызывает старый payroll writer", async () => {
+  reset(); failPayroll = true;
+  assert.ok((await core.changeProjectStageCore(actor, "project", "IN_WORK")).ok);
+  assert.equal(state.project.stage, "IN_WORK");
+  assert.equal(state.histories.length, 1);
+  assert.equal(state.entries.length, 0);
 });
 
-test("concurrent project transitions make a single legacy charge and coverage set", async () => {
+test("параллельные переходы дают одну историю без legacy начисления", async () => {
   reset();
   const result = await Promise.all([core.changeProjectStageCore(actor, "project", "IN_WORK"), core.changeProjectStageCore(actor, "project", "IN_WORK")]);
   assert.ok(result.every((item) => item.ok));
-  assert.equal(state.entries.length, 1); assert.equal(state.histories.length, 1);
-  assert.equal(state.pools.filter((pool) => pool.productId === "old").length, 1);
+  assert.equal(state.entries.length, 0); assert.equal(state.histories.length, 1);
+  assert.equal(state.pools.filter((pool) => pool.productId === "old").length, 0);
 });
 
 test("previous legacy history is not edited or charged again on return to IN_WORK", async () => {

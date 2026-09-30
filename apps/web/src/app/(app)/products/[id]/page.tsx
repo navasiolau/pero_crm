@@ -10,7 +10,7 @@ import { formatAmount } from "@/lib/format";
 import { displayClientName } from "@/lib/labels";
 import { productStatusLabels } from "@/lib/product-statuses";
 import { prisma } from "@/lib/prisma";
-import { MANAGER_ROLES, OFFICE_ROLES, hasAnyRole } from "@/lib/roles";
+import { FINANCE_ROLES, MANAGER_ROLES, OFFICE_ROLES, hasAnyRole } from "@/lib/roles";
 import { canEditProductTechnicalBlock, resolveVisibilityActor } from "@/server/access/visibility";
 import { allocatedWorkQuantity } from "@/lib/work-shares";
 import { getFileStageConfig } from "@/server/files/stage-config";
@@ -24,8 +24,10 @@ import { MaterialsTab } from "../../projects/[id]/materials-tab";
 import { TasksTab } from "../../projects/[id]/tasks-tab";
 import { ProductHeader } from "./product-header";
 import { ProductSketch } from "./product-sketch";
+import { ProductPercentagePanel } from "./product-percentage-panel";
 import { EngineeringFund } from "@/components/engineering-fund";
 import { getEngineeringFundView } from "@/server/products/engineering-view";
+import { getProductPercentageView } from "@/server/product-percentage-pay/queries";
 import { SurveyorLink } from "./surveyor-link";
 
 export const dynamic = "force-dynamic";
@@ -47,6 +49,7 @@ export default async function ProductPage({
   if (!product) notFound();
 
   const canManage = hasAnyRole(role, MANAGER_ROLES);
+  const canViewAllPercentage = canManage || hasAnyRole(role, FINANCE_ROLES);
   const canEditTech = canEditProductTechnicalBlock(actor, product);
   const showAmount = hasAnyRole(role, OFFICE_ROLES);
   const showMaterials = hasAnyRole(role, OFFICE_ROLES);
@@ -55,7 +58,7 @@ export default async function ProductPage({
   // Группировка файлов по этапам (плагин file-stages), если включён.
   const stageConfig = await getFileStageConfig();
 
-  const [workers, engineers, priceItems, materialsData, materialOptions] =
+  const [workers, engineers, priceItems, materialsData, materialOptions, percentageView] =
     await Promise.all([
       listWorkers(),
       listEngineers(),
@@ -65,6 +68,7 @@ export default async function ProductPage({
       }),
       showMaterials ? getProjectMaterials(product.id, session.user) : Promise.resolve(null),
       showMaterials && canManage ? listMaterialOptions(session.user) : Promise.resolve([]),
+      getProductPercentageView({ id: session.user.id, roles: role }, product.id),
     ]);
 
   const authorIds = [
@@ -80,7 +84,7 @@ export default async function ProductPage({
     select: { id: true, name: true },
   });
   const authorNames = new Map(authors.map((user) => [user.id, user.name]));
-  const engineeringView = showAmount ? await getEngineeringFundView(prisma, product.id, canManage) : null;
+  const engineeringView = canViewAllPercentage ? await getEngineeringFundView(prisma, product.id, false) : null;
 
   return (
     <div className="flex flex-col gap-4">
@@ -116,6 +120,10 @@ export default async function ProductPage({
           canManage={canManage}
           canEditTech={canEditTech}
           showAmount={showAmount}
+          actorRoles={role}
+          hasB3d={percentageView.hasB3d}
+          noModel={percentageView.noModel}
+          isEngineeringParticipant={percentageView.sections.ENGINEERING.ownMember !== null}
         />
         {showMaterials && materialsData?.hasShortage ? (
           <Badge variant="destructive">
@@ -223,22 +231,35 @@ export default async function ProductPage({
       </div>
 
       <Tabs defaultValue="tasks">
-        <TabsList>
-          {engineeringView ? <TabsTrigger value="engineering">Инженерный фонд</TabsTrigger> : null}
-          <TabsTrigger value="tasks">
+        <TabsList className="w-full max-w-full justify-start overflow-x-auto">
+          <TabsTrigger className="shrink-0" value="percentage">Процентные этапы</TabsTrigger>
+          {engineeringView ? <TabsTrigger className="shrink-0" value="engineering">История прежнего фонда</TabsTrigger> : null}
+          <TabsTrigger className="shrink-0" value="tasks">
             Работы и задачи ({product.tasks.length})
           </TabsTrigger>
           {showMaterials ? (
-            <TabsTrigger value="materials">
+            <TabsTrigger className="shrink-0" value="materials">
               Материалы{materialsData && materialsData.lines.length > 0 ? ` (${materialsData.lines.length})` : ""}
             </TabsTrigger>
           ) : null}
-          <TabsTrigger value="files">Файлы ({product.files.length})</TabsTrigger>
-          <TabsTrigger value="history">История</TabsTrigger>
+          <TabsTrigger className="shrink-0" value="files">Файлы ({product.files.length})</TabsTrigger>
+          <TabsTrigger className="shrink-0" value="history">История</TabsTrigger>
         </TabsList>
 
+        <TabsContent value="percentage" className="mt-4">
+          <ProductPercentagePanel
+            view={percentageView}
+            assignedEngineerId={product.engineerId}
+            canManage={canManage}
+            canViewAll={canViewAllPercentage}
+            engineers={engineers.map((user) => ({ id: user.id, name: user.name, active: true, roles: user.roles }))}
+            mounters={workers.filter((user) => user.roles.includes("MOUNTER")).map((user) => ({
+              id: user.id, name: user.name, active: true, roles: user.roles,
+            }))}
+          />
+        </TabsContent>
         {engineeringView ? <TabsContent value="engineering" className="mt-4">
-          <EngineeringFund view={engineeringView} canManage={canManage} workers={workers.map((worker) => ({ id: worker.id, name: worker.name }))} />
+          <EngineeringFund view={engineeringView} canManage={false} workers={workers.map((worker) => ({ id: worker.id, name: worker.name }))} />
         </TabsContent> : null}
         <TabsContent value="tasks" className="mt-4">
           <TasksTab

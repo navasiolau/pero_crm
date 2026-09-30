@@ -293,8 +293,13 @@ export default async function ProjectPage({
               statusChangedAt: product.statusChangedAt.toISOString(),
               expectedPrice: product.expectedPrice?.toString() ?? null,
               engineerName: product.engineer?.name ?? null,
+              engineerId: product.engineerId,
+              isEngineeringParticipant: product.isEngineeringParticipant,
+              hasB3d: product.hasB3d,
+              noModel: product.noModel,
             }))}
             canManage={canManage}
+            actorRoles={role}
             showAmount={showAmount}
             engineerOptions={engineers.map((engineer) => ({
               value: engineer.id,

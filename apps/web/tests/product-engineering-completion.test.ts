@@ -8,7 +8,7 @@ const manager: DomainActor = { id: "manager", name: "Manager", roles: ["MANAGER"
 
 test("ENGINEERING completion never pays PIECE, regardless of recipient role or old price", async () => {
   for (const role of ["ENGINEER", "WORKER", "MOUNTER", "ACCOUNTANT", "MANAGER", "ADMIN", "DIRECTOR"]) {
-    const fixture = taskShareFixture();
+    const fixture = taskShareFixture("DESIGN");
     Object.assign(fixture.state().works[0], { paymentKind: "ENGINEERING", stagePayPoolId: "pool", poolWeightUnits: 1_000_000 });
     fixture.state().tasks[0].stageShareUnits = 1_000_000;
     fixture.state().users.find((user) => user.id === "worker")!.roles = [role];
@@ -22,7 +22,7 @@ test("ENGINEERING completion never pays PIECE, regardless of recipient role or o
 });
 
 test("a new ENGINEERING Work with no legacy monetary snapshot can finish", async () => {
-  const fixture = taskShareFixture();
+  const fixture = taskShareFixture("DESIGN");
   Object.assign(fixture.state().works[0], { paymentKind: "ENGINEERING", stagePayPoolId: "pool", priceSnapshot: null, total: null });
   fixture.state().tasks[0].stageShareUnits = 1_000_000;
   const result = await changeTaskStatusCore(manager, "source", "DONE", 20, fixture.transaction);
@@ -32,7 +32,7 @@ test("a new ENGINEERING Work with no legacy monetary snapshot can finish", async
 });
 
 test("zero-funded engineering work retains photo and time requirements", async () => {
-  const fixture = taskShareFixture();
+  const fixture = taskShareFixture("DESIGN");
   Object.assign(fixture.state().works[0], { paymentKind: "ENGINEERING", stagePayPoolId: "pool", poolWeightUnits: 0 });
   fixture.state().tasks[0].stageShareUnits = 0;
   fixture.state().files.length = 0;
@@ -43,7 +43,7 @@ test("zero-funded engineering work retains photo and time requirements", async (
 });
 
 test("a LEGACY Work named engineering keeps its ordinary piece payment", async () => {
-  const fixture = taskShareFixture();
+  const fixture = taskShareFixture("DESIGN");
   Object.assign(fixture.state().works[0], { paymentKind: "LEGACY", title: "Проектирование" });
   const result = await changeTaskStatusCore(manager, "source", "DONE", 20, fixture.transaction);
   assert.ok(result.ok);
@@ -52,7 +52,7 @@ test("a LEGACY Work named engineering keeps its ordinary piece payment", async (
 });
 
 test("duplicate engineering completion leaves one status event and no PIECE", async () => {
-  const fixture = taskShareFixture();
+  const fixture = taskShareFixture("DESIGN");
   Object.assign(fixture.state().works[0], { paymentKind: "ENGINEERING", stagePayPoolId: "pool" });
   const complete = () => changeTaskStatusCore(manager, "source", "DONE", 20, fixture.transaction);
   const results = await Promise.all([complete(), complete()]);
@@ -64,7 +64,7 @@ test("duplicate engineering completion leaves one status event and no PIECE", as
 
 test("ENGINEERING completion rejects settled pool and inconsistent task/work context atomically", async () => {
   for (const mismatch of ["settled", "work-project", "pool-product"]) {
-    const fixture = taskShareFixture();
+    const fixture = taskShareFixture("DESIGN");
     Object.assign(fixture.state().works[0], { paymentKind: "ENGINEERING", stagePayPoolId: "pool" });
     fixture.state().tasks[0].stageShareUnits = 1_000_000;
     if (mismatch === "settled") fixture.state().pools[0].state = "SETTLED";

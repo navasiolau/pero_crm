@@ -238,6 +238,8 @@ export async function getProjectFor(
         where: productVisibilityWhere(actor),
         include: {
           engineer: { select: { id: true, name: true } },
+          files: { where: { fileName: { endsWith: ".b3d", mode: "insensitive" } }, select: { id: true }, take: 1 },
+          percentageConfigs: { where: { kind: "ENGINEERING" }, select: { participants: { where: { userId: actor.id }, select: { id: true } } } },
           statusHistory: { orderBy: { createdAt: "desc" } },
         },
         // Новые изделия сверху: суффикс по числу («205.9» после «205.21»),
@@ -272,7 +274,12 @@ export async function getProjectFor(
       stageHistory: { orderBy: { createdAt: "desc" } },
     },
   });
-  return project ? scopedProjectAmounts(project, actor) : null;
+  if (!project) return null;
+  return scopedProjectAmounts({ ...project, products: project.products.map((product) => ({
+    ...product, hasB3d: product.files.length > 0,
+    isEngineeringParticipant: product.percentageConfigs.some((config) => config.participants.length > 0) ||
+      actor.engineeringParticipantProductIds?.includes(product.id) === true,
+  })) }, actor);
 }
 
 export async function listClients(actor: VisibilityActor) {

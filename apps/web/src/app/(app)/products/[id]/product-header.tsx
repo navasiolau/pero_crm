@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import type { ProductStatus } from "@prisma/client";
+import type { ProductStatus, Role } from "@prisma/client";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -34,14 +34,16 @@ import {
   productStatusStyles,
 } from "@/lib/product-statuses";
 import { cn } from "@/lib/utils";
+import { productStatusTargets, shouldRollbackProductStatus } from "@/lib/product-percentage-ui";
 import {
   changeProductStatus,
   deleteProduct,
   updateProduct,
 } from "@/server/products/actions";
 
-// Шапка карточки изделия: статус с быстрой сменой (админ/директор/менеджер),
-// редактирование (полностью — они же; инженер — только тех. блок),
+// Шапка карточки изделия: менеджмент управляет статусами свободно, инженер
+// переводит своё DESIGN-изделие только в производство; цена остаётся менеджерской,
+// инженер редактирует только тех. блок,
 // удаление через ConfirmDeleteDialog.
 export function ProductHeader({
   product,
@@ -50,6 +52,10 @@ export function ProductHeader({
   canManage,
   canEditTech,
   showAmount,
+  actorRoles,
+  hasB3d,
+  noModel,
+  isEngineeringParticipant,
 }: {
   product: {
     id: string;
@@ -68,6 +74,10 @@ export function ProductHeader({
   canManage: boolean;
   canEditTech: boolean;
   showAmount: boolean;
+  actorRoles: readonly Role[];
+  hasB3d: boolean;
+  noModel: boolean;
+  isEngineeringParticipant: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -90,6 +100,30 @@ export function ProductHeader({
     (parsedPrice === null || (!Number.isNaN(parsedPrice) && parsedPrice >= 0)) &&
     (parsedInitialPrice === null ||
       (!Number.isNaN(parsedInitialPrice) && parsedInitialPrice >= 0));
+  const allowedStatusTargets = productStatusTargets(actorRoles, {
+    from: product.status,
+    assignedEngineer: isEngineeringParticipant,
+    participant: isEngineeringParticipant,
+    hasB3d,
+    noModel,
+  });
+  const canEngineerStart = !canManage && actorRoles.includes("ENGINEER") &&
+    isEngineeringParticipant && product.status === "DESIGN";
+
+  async function moveStatus(toStatus: ProductStatus) {
+    const result = await changeProductStatus(product.id, toStatus);
+    if (shouldRollbackProductStatus(result)) {
+      toast.error(result.error ?? "Не удалось сменить статус");
+      return;
+    }
+    toast.success(result.financeState === "PENDING_FX"
+      ? `Статус сохранён: ${productStatusLabels[toStatus]}. Расчёт ожидает курса.`
+      : `Статус: ${productStatusLabels[toStatus]}`);
+    if (actorRoles.length === 1 && actorRoles[0] === "ENGINEER" && toStatus === "PRODUCTION")
+      router.replace("/products");
+    else
+      router.refresh();
+  }
 
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -106,13 +140,7 @@ export function ProductHeader({
             const toStatus = value as ProductStatus | undefined;
             if (!toStatus || toStatus === product.status) return;
             startTransition(async () => {
-              const result = await changeProductStatus(product.id, toStatus);
-              if (result.ok) {
-                toast.success(`Статус: ${productStatusLabels[toStatus]}`);
-                router.refresh();
-              } else {
-                toast.error(result.error ?? "Не удалось сменить статус");
-              }
+              await moveStatus(toStatus);
             });
           }}
           disabled={pending}
@@ -128,6 +156,24 @@ export function ProductHeader({
             ))}
           </SelectContent>
         </Select>
+      ) : null}
+      {canEngineerStart ? (
+        <div className="flex min-w-0 flex-col gap-1">
+          <Button
+            type="button"
+            variant="outline"
+            className="min-h-12"
+            disabled={pending || !allowedStatusTargets.includes("PRODUCTION")}
+            onClick={() => startTransition(() => { void moveStatus("PRODUCTION"); })}
+          >
+            Передать в производство
+          </Button>
+          {!allowedStatusTargets.includes("PRODUCTION") ? (
+            <span role="note" className="max-w-64 text-xs text-muted-foreground">
+              Для передачи нужна B3D-модель этого изделия или отметка менеджера «Модели нет».
+            </span>
+          ) : null}
+        </div>
       ) : null}
       {canEditTech ? (
         <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}>

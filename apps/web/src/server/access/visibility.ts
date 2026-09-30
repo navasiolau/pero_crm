@@ -1,14 +1,16 @@
 import type { Prisma, ProductStatus, Role } from "@prisma/client";
 import { FIELD_ROLES, MANAGER_ROLES, hasAnyRole, hasRole } from "@/lib/roles";
 
-export type VisibilityActor = { id: string; roles: Role[]; engineeringParticipantProductIds?: string[]; engineeringParticipantTaskIds?: string[] };
+export type VisibilityActor = { id: string; roles: Role[]; engineeringParticipantProductIds?: string[];
+  engineeringParticipantTaskIds?: string[]; fieldParticipantProductIds?: string[] };
 
 /** Participant membership comes from assignments, including zero-share tasks. */
 export function engineeringProductWhere(actor: VisibilityActor): Prisma.ProductWhereInput {
+  if (!hasRole(actor.roles, "ENGINEER")) return { id: { in: [] } };
   return {
     status: "DESIGN",
     OR: [
-      ...(hasRole(actor.roles, "ENGINEER") ? [{ engineerId: actor.id }] : []),
+      { engineerId: actor.id },
       { id: { in: actor.engineeringParticipantProductIds ?? [] } },
     ],
   };
@@ -16,19 +18,35 @@ export function engineeringProductWhere(actor: VisibilityActor): Prisma.ProductW
 
 /** Use inside a mutation transaction for synchronous technical permission checks. */
 export async function resolveVisibilityActor(
-  db: Pick<Prisma.TransactionClient, "task">,
+  db: Pick<Prisma.TransactionClient, "task"> & Partial<Pick<Prisma.TransactionClient, "productPercentageParticipant">>,
   actor: VisibilityActor,
 ): Promise<VisibilityActor> {
   const assignments = await engineeringAssignments(db, actor.id, true);
-  return { ...actor, engineeringParticipantProductIds: [...new Set(assignments.map((task) => task.productId))], engineeringParticipantTaskIds: assignments.map((task) => task.id) };
+  const direct = hasRole(actor.roles, "ENGINEER") && db.productPercentageParticipant ? await db.productPercentageParticipant.findMany({
+    where: { userId: actor.id, config: { kind: "ENGINEERING", product: { status: "DESIGN" } } },
+    select: { config: { select: { productId: true } } },
+  }) : [];
+  const field = hasAnyRole(actor.roles, FIELD_ROLES) && db.productPercentageParticipant ? await db.productPercentageParticipant.findMany({
+    where: { userId: actor.id, config: { kind: "INSTALLATION", product: { status: { not: "DESIGN" } } } },
+    select: { config: { select: { productId: true } } },
+  }) : [];
+  return { ...actor, engineeringParticipantProductIds: [...new Set([
+    ...assignments.map((task) => task.productId), ...direct.map((row) => row.config.productId),
+  ])], engineeringParticipantTaskIds: assignments.map((task) => task.id),
+    fieldParticipantProductIds: field.map((row) => row.config.productId) };
 }
 
 export async function engineeringParticipantProductIds(
-  db: Pick<Prisma.TransactionClient, "task">,
+  db: Pick<Prisma.TransactionClient, "task"> & Partial<Pick<Prisma.TransactionClient, "productPercentageParticipant">>,
   userId: string,
   designOnly: boolean,
 ): Promise<string[]> {
-  return [...new Set((await engineeringAssignments(db, userId, designOnly)).map((task) => task.productId))];
+  const [legacy, direct] = await Promise.all([
+    engineeringAssignments(db, userId, designOnly),
+    db.productPercentageParticipant?.findMany({ where: { userId, config: { kind: "ENGINEERING",
+      ...(designOnly ? { product: { status: "DESIGN" } } : {}) } }, select: { config: { select: { productId: true } } } }),
+  ]);
+  return [...new Set([...legacy.map((task) => task.productId), ...(direct ?? []).map((row) => row.config.productId)])];
 }
 
 async function engineeringAssignments(
@@ -60,7 +78,7 @@ export function canEditProductTechnicalBlock(actor: VisibilityActor, product: { 
   return hasAnyRole(actor.roles, MANAGER_ROLES) || (
     product.status === "DESIGN" && (
       (hasRole(actor.roles, "ENGINEER") && product.engineerId === actor.id) ||
-      (!!product.id && !!actor.engineeringParticipantProductIds?.includes(product.id))
+      (hasRole(actor.roles, "ENGINEER") && !!product.id && !!actor.engineeringParticipantProductIds?.includes(product.id))
     )
   );
 }
@@ -69,15 +87,24 @@ export function productVisibilityWhere(actor: VisibilityActor): Prisma.ProductWh
   if (hasFullProjectVisibility(actor)) return {};
   const grants: Prisma.ProductWhereInput[] = [];
   grants.push(engineeringProductWhere(actor));
-  if (hasAnyRole(actor.roles, FIELD_ROLES)) grants.push({ project: { tasks: { some: { assigneeId: actor.id } } } });
+  if (hasAnyRole(actor.roles, FIELD_ROLES)) grants.push({
+    status: { not: "DESIGN" },
+    OR: [
+      { tasks: { some: { assigneeId: actor.id } } },
+      { id: { in: actor.fieldParticipantProductIds ?? [] } },
+      { project: { tasks: { some: { assigneeId: actor.id, productId: null } } } },
+    ],
+  });
   return grants.length ? { OR: grants } : { id: { in: [] } };
 }
 
 export function projectVisibilityWhere(actor: VisibilityActor): Prisma.ProjectWhereInput {
   if (hasFullProjectVisibility(actor)) return {};
   const grants: Prisma.ProjectWhereInput[] = [];
-  grants.push({ products: { some: engineeringProductWhere(actor) } });
-  if (hasAnyRole(actor.roles, FIELD_ROLES)) grants.push({ tasks: { some: { assigneeId: actor.id } } });
+  grants.push({ products: { some: productVisibilityWhere(actor) } });
+  if (hasAnyRole(actor.roles, FIELD_ROLES)) grants.push({
+    products: { none: {} }, tasks: { some: { assigneeId: actor.id, productId: null } },
+  });
   return grants.length ? { OR: grants } : { id: { in: [] } };
 }
 
@@ -85,7 +112,12 @@ export function taskVisibilityWhere(actor: VisibilityActor): Prisma.TaskWhereInp
   if (hasFullProjectVisibility(actor)) return {};
   const grants: Prisma.TaskWhereInput[] = [];
   grants.push({ product: engineeringProductWhere(actor) });
-  if (hasAnyRole(actor.roles, FIELD_ROLES)) grants.push({ project: { tasks: { some: { assigneeId: actor.id } } } });
+  if (hasAnyRole(actor.roles, FIELD_ROLES)) grants.push({
+    assigneeId: actor.id, OR: [
+      { product: { status: { not: "DESIGN" } } },
+      { productId: null, project: projectVisibilityWhere(actor) },
+    ],
+  });
   return grants.length ? { OR: grants } : { id: { in: [] } };
 }
 
@@ -97,7 +129,11 @@ export function taskExecutionWhere(actor: VisibilityActor): Prisma.TaskWhereInpu
   ];
   // Сохраняем принятый порядок исполнения: чистый бухгалтер выполняет свои
   // задачи, а ENGINEER+ACCOUNTANT исполняет их через инженерный DESIGN-grant.
-  if (hasAnyRole(actor.roles, FIELD_ROLES) || (hasRole(actor.roles, "ACCOUNTANT") && !hasRole(actor.roles, "ENGINEER"))) grants.push({ assigneeId: actor.id });
+  if (hasAnyRole(actor.roles, FIELD_ROLES)) grants.push({ assigneeId: actor.id, OR: [
+    { product: { status: { not: "DESIGN" } } },
+    { productId: null, project: projectVisibilityWhere(actor) },
+  ] });
+  if (hasRole(actor.roles, "ACCOUNTANT") && !hasRole(actor.roles, "ENGINEER")) grants.push({ assigneeId: actor.id });
   if (hasRole(actor.roles, "ENGINEER")) grants.push({ assigneeId: actor.id, product: { engineerId: actor.id, status: "DESIGN" } });
   return { OR: grants };
 }
@@ -106,7 +142,12 @@ export function workVisibilityWhere(actor: VisibilityActor): Prisma.WorkWhereInp
   if (hasFullProjectVisibility(actor)) return {};
   const grants: Prisma.WorkWhereInput[] = [];
   grants.push({ product: engineeringProductWhere(actor) });
-  if (hasAnyRole(actor.roles, FIELD_ROLES)) grants.push({ project: { tasks: { some: { assigneeId: actor.id } } } });
+  if (hasAnyRole(actor.roles, FIELD_ROLES)) grants.push({
+    tasks: { some: { assigneeId: actor.id } }, OR: [
+      { product: { status: { not: "DESIGN" } } },
+      { productId: null, project: projectVisibilityWhere(actor) },
+    ],
+  });
   return grants.length ? { OR: grants } : { id: { in: [] } };
 }
 

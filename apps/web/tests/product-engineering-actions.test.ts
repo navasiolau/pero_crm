@@ -21,5 +21,5 @@ test("a non-manager cannot trigger product reads or FX preparation through close
     const result = await actions.closeEngineeringStageAction({ productId: "foreign", expectedPoolRevision: 0, requestId: "00000000-0000-4000-8000-000000000000" });
     if (!result.ok) message = result.error;
   } catch (error) { message = error instanceof Error ? error.message : undefined; }
-  assert.equal(message, "Недостаточно прав"); assert.equal(reads, 0);
+  assert.match(message ?? "", /закрыта/); assert.equal(reads, 0);
 });

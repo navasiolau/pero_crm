@@ -18,6 +18,10 @@ const schema = z.object({
   expectedRevision: z.number().int().nonnegative(), requestId: z.uuid(),
 });
 
+function isRetiredEngineeringWork(work: { paymentKind?: string } | null | undefined): boolean {
+  return work?.paymentKind === "ENGINEERING";
+}
+
 export async function splitTaskCore(actor: DomainActor, input: SplitTaskInput, transaction: TaskTransaction): Promise<SplitTaskResult> {
   const parsed = schema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "Проверьте сотрудника, процент и ревизию задачи" };
@@ -53,6 +57,10 @@ export async function splitTaskCore(actor: DomainActor, input: SplitTaskInput, t
       }
       return { ok: true, childTaskId: saved.childTaskId, groupId: saved.groupId, repeated: true, eventId: null, ...context };
     }
+    // Старые инженерные денежные векторы сохранены только для просмотра.
+    // UUID уже завершённого деления выше допускает только replay без записи.
+    if (isRetiredEngineeringWork(task.work))
+      return { ok: false, error: "Инженерный фонд закрыт для новых делений; используйте прямые доли изделия" };
     if (!task.assigneeId || task.status === "DRAFT") return { ok: false, error: "Сначала назначьте исполнителя задачи" };
     if (task.status === "DONE") return { ok: false, error: "Выполненную задачу разделить нельзя" };
     if (task._count.payrollEntries > 0) return { ok: false, error: "По задаче уже есть начисление — деление запрещено" };
@@ -60,6 +68,7 @@ export async function splitTaskCore(actor: DomainActor, input: SplitTaskInput, t
     if (task.assigneeId === data.recipientId) return { ok: false, error: "Выберите другого сотрудника" };
     const engineeringWork = task.work?.paymentKind === "ENGINEERING" ? task.work : null;
     const engineering = engineeringWork !== null;
+    const installation = task.work?.paymentKind === "INSTALLATION";
     if (engineeringWork) {
       const pool = engineeringWork.stagePayPool;
       if (!task.productId || !task.product || task.product.status !== "DESIGN" || task.product.projectId !== task.projectId ||
@@ -88,34 +97,37 @@ export async function splitTaskCore(actor: DomainActor, input: SplitTaskInput, t
     if (task.work && (!task.quantity || quantityAtoms(task.quantity) <= BigInt(0))) return { ok: false, error: "Менеджер должен сначала указать количество задачи" };
 
     const group = task.allocationGroup;
+    if (installation && (group ? group.budgetSource !== "PHYSICAL_ONLY" : task.shareAmount != null))
+      return { ok: false, error: "Старое денежное распределение сохранено; новое физическое деление здесь недоступно. Доли этапа настраиваются в карточке изделия" };
     if (group) {
       const parts = await tx.task.findMany({ where: { allocationGroupId: group.id }, select: { shareUnits: true, shareAmount: true, quantity: true, workId: true } });
       const validPhysical = group.workId === task.workId &&
         parts.every((part) => part.shareUnits !== null && part.workId === group.workId && quantityAtoms(part.quantity ?? 0) === quantityAtoms(group.quantity ?? 0)) &&
         parts.reduce((sum, part) => sum + (part.shareUnits ?? 0), 0) === FULL_SHARE_UNITS;
-      const validMoney = !engineering && group.budget !== null && parts.every((part) => part.shareAmount !== null) &&
+      const validMoney = !engineering && !installation && group.budget !== null && parts.every((part) => part.shareAmount !== null) &&
         parts.reduce((sum, part) => sum + moneyAtoms(part.shareAmount ?? 0), BigInt(0)) === moneyAtoms(group.budget);
-      const valid = validPhysical && (engineering || validMoney);
+      const valid = validPhysical && (engineering || installation && group.budget === null && parts.every((part) => part.shareAmount === null) || validMoney);
       if (!valid) return { ok: false, error: "Распределение общей работы не согласовано — обратитесь к администратору" };
     }
     const legacySnapshot = task.work?.priceSnapshot;
-    if (!engineering && !group && task.work && legacySnapshot === null) return { ok: false, error: "У работы отсутствует снимок цены" };
-    const budget = engineering ? null : group ? String(task.shareAmount) : task.work ? taskPieceAmount(task, legacySnapshot!) : "0.00";
-    if (!engineering && budget !== null && moneyAtoms(budget) > BigInt("999999999999")) return { ok: false, error: "Бюджет превышает допустимую сумму" };
+    if (!engineering && !installation && !group && task.work && legacySnapshot === null) return { ok: false, error: "У работы отсутствует снимок цены" };
+    const budget = engineering || installation ? null : group ? String(task.shareAmount) : task.work ? taskPieceAmount(task, legacySnapshot!) : "0.00";
+    if (!engineering && !installation && budget !== null && moneyAtoms(budget) > BigInt("999999999999")) return { ok: false, error: "Бюджет превышает допустимую сумму" };
     let allocation: ReturnType<typeof splitAllocation>;
     let stageAllocation: ReturnType<typeof splitStageShareVectors> | null = null;
     try {
-      allocation = splitAllocation(group ? task.shareUnits! : FULL_SHARE_UNITS, engineering ? "0.00" : budget!, percent);
+      allocation = splitAllocation(group ? task.shareUnits! : FULL_SHARE_UNITS, engineering || installation ? "0.00" : budget!, percent);
       if (engineering) stageAllocation = splitStageShareVectors({
         quantityShareUnits: BigInt(group ? task.shareUnits! : FULL_SHARE_UNITS),
         stageShareUnits: BigInt(task.stageShareUnits!), percent,
       });
     }
     catch (error) { return { ok: false, error: error instanceof Error ? error.message : "Некорректная доля" }; }
-    const currency = engineering ? null : group ? group.currency : task.work ? (await tx.orgSetting.findUnique({ where: { key: "payrollCurrency" } }))?.value ?? "BYN" : null;
+    const currency = engineering || installation ? null : group ? group.currency : task.work ? (await tx.orgSetting.findUnique({ where: { key: "payrollCurrency" } }))?.value ?? "BYN" : null;
     const allocationGroup = group ?? await tx.taskAllocationGroup.create({ data: {
       workId: task.workId, quantity: task.work ? task.quantity : null,
-      ...(engineering ? { budget: null, budgetSource: "STAGE_PREVIEW" } : { budget, budgetSource: "TASK_FIXED" }),
+      ...(engineering ? { budget: null, budgetSource: "STAGE_PREVIEW" }
+        : installation ? { budget: null, budgetSource: "PHYSICAL_ONLY" } : { budget, budgetSource: "TASK_FIXED" }),
       currency, createdById: actor.id,
     } });
     const transferredEstimate = task.estimateMinutes === null ? null : Math.max(1, Math.floor(task.estimateMinutes * Number(percent) / 100));
@@ -126,7 +138,8 @@ export async function splitTaskCore(actor: DomainActor, input: SplitTaskInput, t
     ]);
     await tx.task.update({ where: { id: task.id }, data: {
       allocationGroupId: allocationGroup.id, shareUnits: allocation.remainingUnits,
-      ...(engineering ? { stageShareUnits: Number(stageAllocation!.remainingStageShareUnits) } : { shareAmount: allocation.remainingAmount }),
+      ...(engineering ? { stageShareUnits: Number(stageAllocation!.remainingStageShareUnits) }
+        : installation ? { shareAmount: null, physicalOnlyShare: true } : { shareAmount: allocation.remainingAmount }),
       quantity: task.work ? task.quantity : null, estimateMinutes: remainingEstimate, splitRevision: { increment: 1 },
     } });
     const child = await tx.task.create({ data: {
@@ -135,7 +148,8 @@ export async function splitTaskCore(actor: DomainActor, input: SplitTaskInput, t
       executorShare: task.executorShare, dueAt: task.dueAt, requiresPhoto: task.requiresPhoto,
       estimateMinutes: transferredEstimate, status: "NEW", createdById: actor.id,
       allocationGroupId: allocationGroup.id, shareUnits: allocation.transferredUnits,
-      ...(engineering ? { stageShareUnits: Number(stageAllocation!.transferredStageShareUnits), shareAmount: null } : { shareAmount: allocation.transferredAmount }),
+      ...(engineering ? { stageShareUnits: Number(stageAllocation!.transferredStageShareUnits), shareAmount: null }
+        : installation ? { shareAmount: null, physicalOnlyShare: true } : { shareAmount: allocation.transferredAmount }),
     } });
     await tx.taskDependency.createMany({ data: [
       ...predecessors.map((edge) => ({ taskId: child.id, dependsOnId: edge.dependsOnId })),
@@ -147,11 +161,15 @@ export async function splitTaskCore(actor: DomainActor, input: SplitTaskInput, t
       entity: "task", entityId: task.id, action: "split",
       oldValue: engineering
         ? { quantityShareUnits: group ? task.shareUnits : FULL_SHARE_UNITS, stageShareUnits: task.stageShareUnits, splitRevision: task.splitRevision }
+        : installation ? { quantityShareUnits: group ? task.shareUnits : FULL_SHARE_UNITS, splitRevision: task.splitRevision }
         : { shareUnits: group ? task.shareUnits : FULL_SHARE_UNITS, amount: budget, splitRevision: task.splitRevision },
       newValue: engineering
         ? { childTaskId: child.id, groupId: allocationGroup.id, recipientId: recipient.id, percent, expectedRevision: data.expectedRevision,
           remainingQuantityShareUnits: allocation.remainingUnits, transferredQuantityShareUnits: allocation.transferredUnits,
           remainingStageShareUnits: Number(stageAllocation!.remainingStageShareUnits), transferredStageShareUnits: Number(stageAllocation!.transferredStageShareUnits) }
+        : installation ? { childTaskId: child.id, groupId: allocationGroup.id, recipientId: recipient.id, percent,
+          expectedRevision: data.expectedRevision, remainingQuantityShareUnits: allocation.remainingUnits,
+          transferredQuantityShareUnits: allocation.transferredUnits, paymentKind: "INSTALLATION" }
         : { childTaskId: child.id, groupId: allocationGroup.id, recipientId: recipient.id, percent,
           expectedRevision: data.expectedRevision, remainingUnits: allocation.remainingUnits, transferredUnits: allocation.transferredUnits,
           remainingAmount: allocation.remainingAmount, transferredAmount: allocation.transferredAmount },

@@ -9,11 +9,12 @@ const require = createRequire(import.meta.url);
 const actor: DomainActor = { id: "admin", name: "Admin", roles: ["ADMIN"], source: "web" };
 let projectCurrency = "BYN", payrollCurrency: string | null = null, inside = false;
 let settlements: { id: string; projectId: string; currency: string }[] = [];
+let percentageCompletions: { projectId: string; state: "PENDING_FX" | "SETTLED" | "SKIPPED_ONCE"; payrollCurrency: string; productCurrency: string }[] = [];
 let cashPayouts = 0;
 let tail = Promise.resolve();
 let project: typeof import("../src/server/projects/core"), payroll: typeof import("../src/server/payroll/actions");
 let transaction: TaskTransaction;
-function reset() { projectCurrency = "BYN"; payrollCurrency = null; settlements = []; cashPayouts = 0; tail = Promise.resolve(); }
+function reset() { projectCurrency = "BYN"; payrollCurrency = null; settlements = []; percentageCompletions = []; cashPayouts = 0; tail = Promise.resolve(); }
 const db = {
   $queryRaw: async () => [{ locked: 1 }],
   project: {
@@ -31,14 +32,22 @@ const db = {
     },
     create: async () => { const row = { id: "earned", projectId: "project", currency: payrollCurrency ?? "BYN" }; settlements.push(row); return row; },
   },
+  productPercentageCompletion: { count: async (query: { where: { product?: { projectId?: string }; state: { in: string[] };
+    payrollCurrency?: { not: string }; productCurrency?: { not: string } } }) => {
+    assert.ok(inside, "Direct-percentage currency guard must run inside the shared transaction");
+    return percentageCompletions.filter((item) => query.where.state.in.includes(item.state) &&
+      (!query.where.product?.projectId || item.projectId === query.where.product.projectId) &&
+      (!query.where.payrollCurrency || item.payrollCurrency !== query.where.payrollCurrency.not) &&
+      (!query.where.productCurrency || item.productCurrency !== query.where.productCurrency.not)).length;
+  } },
   payout: { count: async () => cashPayouts },
   changeLog: { create: async () => ({ id: "log" }) },
   $transaction: async (operation: (tx: unknown) => Promise<unknown>) => {
     const previous = tail; let release!: () => void; tail = new Promise<void>((resolve) => { release = resolve; });
     await previous; inside = true;
-    const old = { projectCurrency, payrollCurrency, settlements: structuredClone(settlements) };
+    const old = { projectCurrency, payrollCurrency, settlements: structuredClone(settlements), percentageCompletions: structuredClone(percentageCompletions) };
     try { return await operation(db); }
-    catch (error) { projectCurrency = old.projectCurrency; payrollCurrency = old.payrollCurrency; settlements = old.settlements; throw error; }
+    catch (error) { projectCurrency = old.projectCurrency; payrollCurrency = old.payrollCurrency; settlements = old.settlements; percentageCompletions = old.percentageCompletions; throw error; }
     finally { inside = false; release(); }
   },
 };
@@ -97,4 +106,16 @@ test("a settlement committing first blocks the competing currency change under t
   assert.equal((await change).ok, false);
   assert.equal(payrollCurrency, null);
   assert.equal(settlements[0].currency, "BYN");
+});
+
+test("direct percentage pending/settled freezes payroll and project currency; skipped does not", async () => {
+  for (const state of ["PENDING_FX", "SETTLED"] as const) {
+    reset(); percentageCompletions.push({ projectId: "project", state, payrollCurrency: "BYN", productCurrency: "BYN" });
+    assert.equal((await payroll.setPayrollCurrency("USD")).ok, false);
+    assert.equal((await project.updateProjectCore(actor, "project", { currency: "USD" })).ok, false);
+    assert.equal(payrollCurrency, null); assert.equal(projectCurrency, "BYN");
+  }
+  reset(); percentageCompletions.push({ projectId: "project", state: "SKIPPED_ONCE", payrollCurrency: "BYN", productCurrency: "BYN" });
+  assert.equal((await payroll.setPayrollCurrency("USD")).ok, true);
+  assert.equal((await project.updateProjectCore(actor, "project", { currency: "USD" })).ok, true);
 });

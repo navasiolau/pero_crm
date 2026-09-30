@@ -13,7 +13,7 @@ export const taskDetailsInclude = {
   product: { select: { id: true, number: true, title: true, engineerId: true, status: true } },
   assignee: { select: { id: true, name: true } },
   work: { select: { id: true, title: true, total: true, priceSnapshot: true, paymentKind: true } },
-  allocationGroup: { select: { currency: true } },
+  allocationGroup: { select: { currency: true, budgetSource: true } },
   _count: { select: { payrollEntries: true } },
   files: { select: { id: true, fileName: true, hasThumb: true, mimeType: true } },
   dependencies: {
@@ -53,7 +53,7 @@ type TaskWithIncludes = {
   shareAmount?: unknown;
   stageShareUnits?: number | null;
   splitRevision?: number;
-  allocationGroup?: { currency: string | null } | null;
+  allocationGroup?: { currency: string | null; budgetSource: string } | null;
   _count?: { payrollEntries: number };
   createdAt: Date;
   doneAt: Date | null;
@@ -62,7 +62,7 @@ type TaskWithIncludes = {
   project: { id: string; number: string; title: string };
   product: { id: string; number: string; title: string; engineerId: string | null; status: ProductStatus } | null;
   assignee: { id: string; name: string } | null;
-  work: { id: string; title: string; total: unknown; priceSnapshot: unknown; paymentKind?: "LEGACY" | "ENGINEERING" } | null;
+  work: { id: string; title: string; total: unknown; priceSnapshot: unknown; paymentKind?: "LEGACY" | "ENGINEERING" | "INSTALLATION" } | null;
   files: { id: string; fileName: string; hasThumb: boolean; mimeType: string }[];
   dependencies: {
     dependsOn: { id: string; title: string; status: "DRAFT" | "NEW" | "IN_PROGRESS" | "DONE" };
@@ -99,7 +99,7 @@ export async function mapTaskDetails(
       })
     : [];
   const userNames = new Map(users.map((user) => [user.id, user.name]));
-  const currency = tasks.some((task) => task.work && task.work.paymentKind !== "ENGINEERING" && !task.allocationGroup) ? await getPayrollCurrency() : null;
+  const currency = tasks.some((task) => task.work?.paymentKind === "LEGACY" && !task.allocationGroup) ? await getPayrollCurrency() : null;
   const engineeringProductIds = [...new Set(tasks.filter((task) => task.work?.paymentKind === "ENGINEERING").flatMap((task) => task.product ? [task.product.id] : []))];
   const previews = new Map<string, Awaited<ReturnType<typeof getEngineeringTaskPreview>>>();
   const previewErrors = new Map<string, string>();
@@ -110,6 +110,7 @@ export async function mapTaskDetails(
 
   return tasks.map((task) => {
     const engineering = task.work?.paymentKind === "ENGINEERING";
+    const percentageWork = engineering || task.work?.paymentKind === "INSTALLATION";
     const preview = engineering && task.product ? previews.get(task.product.id)?.get(task.id) : undefined;
     const allocation = {
       quantity: task.work && task.quantity !== null && task.quantity !== undefined ? String(task.quantity) : null,
@@ -129,14 +130,14 @@ export async function mapTaskDetails(
     spentMinutes: spentMap.get(task.id) ?? 0,
     workId: task.work?.id ?? null,
     workTitle: task.work?.title ?? null,
-    workTotal: engineering || task.work?.total === null || task.work?.total === undefined ? null : String(task.work.total),
-    workPriceSnapshot: engineering || task.work?.priceSnapshot === null || task.work?.priceSnapshot === undefined ? null : String(task.work.priceSnapshot),
+    workTotal: percentageWork || task.work?.total === null || task.work?.total === undefined ? null : String(task.work.total),
+    workPriceSnapshot: percentageWork || task.work?.priceSnapshot === null || task.work?.priceSnapshot === undefined ? null : String(task.work.priceSnapshot),
     quantity: task.quantity ? String(task.quantity) : null,
     allocationGroupId: allocation.allocationGroupId,
     shareUnits: allocation.shareUnits,
-    shareAmount: engineering ? null : task.work && task.work.priceSnapshot !== null && task.work.priceSnapshot !== undefined ? taskPieceAmount(allocation, String(task.work.priceSnapshot)) : null,
-    shareCurrency: engineering ? null : task.work ? task.allocationGroup?.currency ?? currency : null,
-    paymentKind: engineering ? "ENGINEERING" : "LEGACY",
+    shareAmount: percentageWork ? null : task.work && task.work.priceSnapshot !== null && task.work.priceSnapshot !== undefined ? taskPieceAmount(allocation, String(task.work.priceSnapshot)) : null,
+    shareCurrency: percentageWork ? null : task.work ? task.allocationGroup?.currency ?? currency : null,
+    paymentKind: task.work?.paymentKind ?? "LEGACY",
     physicalShareUnits: allocation.shareUnits,
     stageShareUnits: engineering ? task.stageShareUnits ?? null : null,
     previewAmount: preview?.amount ?? null,

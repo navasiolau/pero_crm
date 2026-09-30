@@ -16,7 +16,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { Plus } from "lucide-react";
 import { toast } from "sonner";
-import type { ProductStatus } from "@prisma/client";
+import type { ProductStatus, Role } from "@prisma/client";
 
 import { DragHandle } from "@/components/drag-handle";
 import { Badge } from "@/components/ui/badge";
@@ -42,6 +42,7 @@ import {
   productStatusStyles,
 } from "@/lib/product-statuses";
 import { cn } from "@/lib/utils";
+import { productStatusTargets, shouldRollbackProductStatus } from "@/lib/product-percentage-ui";
 import { changeProductStatus, createProduct } from "@/server/products/actions";
 
 export interface ProductCard {
@@ -52,6 +53,10 @@ export interface ProductCard {
   statusChangedAt: string;
   expectedPrice: string | null;
   engineerName: string | null;
+  engineerId: string | null;
+  isEngineeringParticipant: boolean;
+  hasB3d: boolean;
+  noModel: boolean;
 }
 
 function ProductCardView({
@@ -100,17 +105,17 @@ function DraggableProduct({
   product,
   currency,
   showAmount,
-  canManage,
+  canDrag,
   onOpen,
 }: {
   product: ProductCard;
   currency: string;
   showAmount: boolean;
-  canManage: boolean;
+  canDrag: boolean;
   onOpen: (product: ProductCard) => void;
 }) {
   const { attributes, listeners, setActivatorNodeRef, setNodeRef, transform, isDragging } =
-    useDraggable({ id: product.id, disabled: !canManage });
+    useDraggable({ id: product.id, disabled: !canDrag });
 
   return (
     <div
@@ -119,7 +124,7 @@ function DraggableProduct({
       className={cn("relative", isDragging && "opacity-40")}
       onClick={() => onOpen(product)}
     >
-      {canManage && <DragHandle ref={setActivatorNodeRef} {...attributes} {...listeners} label={product.title} />}
+      {canDrag && <DragHandle ref={setActivatorNodeRef} {...attributes} {...listeners} label={product.title} />}
       <ProductCardView
         product={product}
         currency={currency}
@@ -134,17 +139,19 @@ function StatusColumn({
   products,
   currency,
   showAmount,
-  canManage,
+  canDrop,
+  canDrag,
   onOpen,
 }: {
   status: (typeof PRODUCT_STATUSES)[number];
   products: ProductCard[];
   currency: string;
   showAmount: boolean;
-  canManage: boolean;
+  canDrop: boolean;
+  canDrag: (product: ProductCard) => boolean;
   onOpen: (product: ProductCard) => void;
 }) {
-  const { setNodeRef, isOver } = useDroppable({ id: status.id });
+  const { setNodeRef, isOver } = useDroppable({ id: status.id, disabled: !canDrop });
   const style = productStatusStyles[status.id];
   return (
     <div
@@ -170,7 +177,7 @@ function StatusColumn({
             product={product}
             currency={currency}
             showAmount={showAmount}
-            canManage={canManage}
+            canDrag={canDrag(product)}
             onOpen={onOpen}
           />
         ))}
@@ -187,6 +194,7 @@ export function ProductsTab({
   currency,
   initialProducts,
   canManage,
+  actorRoles,
   showAmount,
   engineerOptions,
 }: {
@@ -194,6 +202,7 @@ export function ProductsTab({
   currency: string;
   initialProducts: ProductCard[];
   canManage: boolean;
+  actorRoles: readonly Role[];
   showAmount: boolean;
   engineerOptions: { value: string; label: string; hint?: string }[];
 }) {
@@ -245,15 +254,33 @@ export function ProductsTab({
     const toStatus = over.id as ProductStatus;
     if (!product || product.status === toStatus) return;
 
+    const allowedTargets = productStatusTargets(actorRoles, {
+      from: product.status,
+      assignedEngineer: product.isEngineeringParticipant,
+      participant: product.isEngineeringParticipant,
+      hasB3d: product.hasB3d,
+      noModel: product.noModel,
+    });
+    if (!allowedTargets.includes(toStatus)) {
+      toast.error("Нет права на такой переход статуса");
+      return;
+    }
+
     const fromStatus = product.status;
     applyStatus(product.id, toStatus);
     startTransition(async () => {
       const result = await changeProductStatus(product.id, toStatus);
-      if (!result.ok) {
+      if (shouldRollbackProductStatus(result)) {
         applyStatus(product.id, fromStatus); // откат оптимистичного обновления
         toast.error(result.error ?? "Не удалось сменить статус");
       } else {
-        toast.success(`Статус: ${productStatusLabels[toStatus]}`);
+        toast.success(result.financeState === "PENDING_FX"
+          ? `Статус сохранён: ${productStatusLabels[toStatus]}. Расчёт ожидает курса.`
+          : `Статус: ${productStatusLabels[toStatus]}`);
+        if (actorRoles.length === 1 && actorRoles[0] === "ENGINEER" && toStatus === "PRODUCTION")
+          router.push("/products");
+        else
+          router.refresh();
       }
     });
   }
@@ -273,7 +300,7 @@ export function ProductsTab({
       <div className="flex items-center justify-between gap-2">
         <p className="text-sm text-muted-foreground">
           Клик по изделию — карточка с задачами, материалами и файлами;
-          статус меняется перетаскиванием.
+          доступный переход статуса меняется перетаскиванием.
         </p>
         {canManage ? (
           <Button size="sm" onClick={() => setCreateOpen(true)}>
@@ -296,7 +323,20 @@ export function ProductsTab({
               products={products.filter((product) => product.status === status.id)}
               currency={currency}
               showAmount={showAmount}
-              canManage={canManage}
+              canDrag={(product) => canManage || productStatusTargets(actorRoles, {
+                from: product.status,
+                assignedEngineer: product.isEngineeringParticipant,
+                participant: product.isEngineeringParticipant,
+                hasB3d: product.hasB3d,
+                noModel: product.noModel,
+              }).length > 0}
+              canDrop={canManage || (!!activeProduct && productStatusTargets(actorRoles, {
+                from: activeProduct.status,
+                assignedEngineer: activeProduct.isEngineeringParticipant,
+                participant: activeProduct.isEngineeringParticipant,
+                hasB3d: activeProduct.hasB3d,
+                noModel: activeProduct.noModel,
+              }).includes(status.id))}
               onOpen={(product) => router.push(`/products/${product.number}`)}
             />
           ))}

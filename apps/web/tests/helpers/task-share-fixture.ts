@@ -3,7 +3,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import type { TaskTransaction } from "../../src/server/tasks/transaction";
 import { matches, type FixtureRow as Row } from "./visibility-fixture";
 
-export function taskShareFixture() {
+export function taskShareFixture(productStatus: "DESIGN" | "PRODUCTION" = "PRODUCTION") {
   const now = new Date("2026-09-28T00:00:00.000Z");
   let state = {
     tasks: ["source", "predecessor", "dependent"].map((id): Row => ({
@@ -15,9 +15,9 @@ export function taskShareFixture() {
       createdAt: now, updatedAt: now, doneAt: null, doneById: null,
     })),
     users: [["worker", "WORKER"], ["recipient", "WORKER"], ["manager", "MANAGER"], ["engineer", "ENGINEER"], ["accountant", "ACCOUNTANT"], ["admin", "ADMIN"], ["director", "DIRECTOR"], ["mounter", "MOUNTER"]].map(([id, role]): Row => ({ id, name: id, roles: [role], active: true, payScheme: "PIECE" })),
-    products: [{ id: "product", projectId: "project", number: "1.1", engineerId: "engineer", status: "DESIGN" }] as Row[],
+    products: [{ id: "product", projectId: "project", number: "1.1", engineerId: "engineer", status: productStatus }] as Row[],
     pools: [{ id: "pool", productId: "product", kind: "ENGINEERING", state: "DRAFT", revision: 0 }] as Row[],
-    works: [{ id: "work", projectId: "project", productId: "product", title: "work", quantity: "10", priceSnapshot: "100", total: "1000" }] as Row[],
+    works: [{ id: "work", projectId: "project", productId: "product", title: "work", quantity: "10", priceSnapshot: "100", total: "1000", paymentKind: "LEGACY" }] as Row[],
     groups: [] as Row[], entries: [] as Row[], logs: [] as Row[], events: [] as Row[],
     dependencies: [{ taskId: "source", dependsOnId: "predecessor" }, { taskId: "dependent", dependsOnId: "source" }] as Row[],
     times: [{ id: "timer", taskId: "source", userId: "worker", minutes: 20, stoppedAt: null, startedAt: now }] as Row[],

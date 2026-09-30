@@ -16,7 +16,7 @@ import { withTaskTransaction } from "./transaction";
 
 export async function getTaskSplitOptions(taskId: string): Promise<{ ok: false; error: string } | {
   ok: true; options: { id: string; name: string; hint: string; disabledReason: string | null }[];
-  share: { units: number; amount: string | null; currency: string | null; quantity: string | null; revision: number; source: "LEGACY" | "ENGINEERING"; stageUnits: number | null; previewAmount: string | null; previewCurrency: string | null; previewReason: string | null; settledSource: boolean; engineeringPreview: { workAmount: string; currency: string; tasks: { id: string; stageShareUnits: number; createdAt: string }[] } | null };
+  share: { units: number; amount: string | null; currency: string | null; quantity: string | null; revision: number; source: "LEGACY" | "ENGINEERING" | "INSTALLATION"; stageUnits: number | null; previewAmount: string | null; previewCurrency: string | null; previewReason: string | null; settledSource: boolean; engineeringPreview: { workAmount: string; currency: string; tasks: { id: string; stageShareUnits: number; createdAt: string }[] } | null };
   assigneeName: string;
 }> {
   const session = await auth();
@@ -28,10 +28,11 @@ export async function getTaskSplitOptions(taskId: string): Promise<{ ok: false; 
   });
   if (!task || !canSplitTask(actor, { ...task, paidCount: task._count.payrollEntries })) return { ok: false, error: "Задача недоступна для разделения: проверьте исполнителя, статус и начисления" };
   const engineering = task.work?.paymentKind === "ENGINEERING";
+  const installation = task.work?.paymentKind === "INSTALLATION";
   if (engineering && task.work?.stagePayPool?.state !== "DRAFT") return { ok: false, error: "Инженерный фонд уже закрыт" };
   if (task.work && task.quantity === null) return { ok: false, error: "Менеджер должен сначала указать количество задачи" };
   const users = await prisma.user.findMany({ where: engineering ? { active: true } : { active: true, roles: { hasSome: ROLE_PRIORITY } }, select: { id: true, name: true, roles: true, active: true, position: true }, orderBy: { name: "asc" } });
-  const currency = engineering ? null : task.allocationGroup ? task.allocationGroup.currency : task.work ? (await prisma.orgSetting.findUnique({ where: { key: "payrollCurrency" } }))?.value ?? "BYN" : null;
+  const currency = engineering || installation ? null : task.allocationGroup ? task.allocationGroup.currency : task.work ? (await prisma.orgSetting.findUnique({ where: { key: "payrollCurrency" } }))?.value ?? "BYN" : null;
   let preview: { amount: string; currency: string; settled: boolean } | undefined;
   let previewReason: string | null = null;
   let engineeringPreview: { workAmount: string; currency: string; tasks: { id: string; stageShareUnits: number; createdAt: string }[] } | null = null;
@@ -51,8 +52,8 @@ export async function getTaskSplitOptions(taskId: string): Promise<{ ok: false; 
   return {
     ok: true,
     options: users.map((user) => ({ id: user.id, name: user.name, hint: [roleComboLabel(user.roles), user.position].filter(Boolean).join(" · "), disabledReason: user.id === task.assigneeId ? "Уже исполнитель этой задачи" : engineering ? engineeringRecipientError(user, task.product) : taskRecipientError(user, task.product) })),
-    share: { units: task.shareUnits ?? FULL_SHARE_UNITS, amount: engineering ? null : task.work?.priceSnapshot !== null && task.work?.priceSnapshot !== undefined ? taskPieceAmount(task, task.work.priceSnapshot) : "0.00", currency, quantity: task.work ? task.quantity?.toString() ?? null : null, revision: task.splitRevision,
-      source: engineering ? "ENGINEERING" : "LEGACY", stageUnits: engineering ? task.stageShareUnits : null, previewAmount: preview?.amount ?? null, previewCurrency: preview?.currency ?? null, previewReason, settledSource: preview?.settled ?? false, engineeringPreview },
+    share: { units: task.shareUnits ?? FULL_SHARE_UNITS, amount: engineering || installation ? null : task.work?.priceSnapshot !== null && task.work?.priceSnapshot !== undefined ? taskPieceAmount(task, task.work.priceSnapshot) : "0.00", currency, quantity: task.work ? task.quantity?.toString() ?? null : null, revision: task.splitRevision,
+      source: engineering ? "ENGINEERING" : installation ? "INSTALLATION" : "LEGACY", stageUnits: engineering ? task.stageShareUnits : null, previewAmount: preview?.amount ?? null, previewCurrency: preview?.currency ?? null, previewReason, settledSource: preview?.settled ?? false, engineeringPreview },
     assigneeName: task.assignee?.name ?? "Исполнитель",
   };
 }

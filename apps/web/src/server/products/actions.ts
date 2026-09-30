@@ -15,7 +15,10 @@ import { revalidateProductPaths } from "@/server/products/revalidate";
 import { productEditWhere, resolveVisibilityActor } from "@/server/access/visibility";
 import { listProductOptions } from "@/server/products/queries";
 import { withTaskTransaction } from "@/server/tasks/transaction";
-import { assertEngineeringTransition, ensureNewEngineeringPool } from "@/server/product-stage-pay/core";
+import { settlePendingProductPercentage } from "@/server/product-percentage-pay/core";
+import { changeProductStatusTransaction } from "@/server/products/status-core";
+
+type FinanceState = "PENDING_FX" | "SETTLED" | "SKIPPED_ONCE" | "LEGACY_PROTECTED" | null;
 
 async function requireUser() {
   const session = await auth();
@@ -103,7 +106,6 @@ export async function createProduct(
     },
   });
 
-  await ensureNewEngineeringPool(tx, product.id, session.user.id);
   await tx.changeLog.create({ data: {
     actorType: "user",
     actorId: session.user.id,
@@ -193,39 +195,30 @@ export async function updateProduct(
 // событием product.statusChanged и org-уведомлением A/D/M.
 export async function changeProductStatus(
   productId: string, toStatus: ProductStatus, comment?: string,
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: boolean; error?: string; financeState?: FinanceState }> {
   const session = await requireUser();
-  if (!hasAnyRole(session.user.roles, MANAGER_ROLES)) throw new Error("Недостаточно прав");
   if (!Object.hasOwn(productStatusLabels, toStatus)) return { ok: false, error: "Неизвестный статус изделия" };
   try {
-    const result = await withTaskTransaction(async (tx) => {
-      const product = await tx.product.findUnique({ where: { id: productId } });
-      if (!product) return { ok: false as const, error: "Изделие не найдено" };
-      if (product.status === toStatus) return { ok: true as const, product, eventId: null };
-      await assertEngineeringTransition(tx, productId, toStatus);
-      await tx.product.update({ where: { id: productId }, data: { status: toStatus, statusChangedAt: new Date() } });
-      await tx.productStatusHistory.create({ data: {
-        productId, fromStatus: product.status, toStatus, comment: comment?.trim() || null, changedById: session.user.id,
-      } });
-      await tx.changeLog.create({ data: {
-        actorType: "user", actorId: session.user.id, actorName: session.user.name,
-        entity: "product", entityId: productId, action: "status", field: "status", oldValue: product.status, newValue: toStatus,
-      } });
-      const event = await tx.domainEvent.create({ data: { type: "product.statusChanged", actor: session.user.id,
-        payload: { productId, number: product.number, from: product.status, to: toStatus },
-      } });
-      return { ok: true as const, product, eventId: event.id };
-    });
+    const result = await withTaskTransaction((tx) => changeProductStatusTransaction(tx,
+      { id: session.user.id, name: session.user.name ?? "", roles: session.user.roles, source: "web" },
+      productId, toStatus, comment));
     if (!result.ok) return result;
+    let financeState: FinanceState = null;
+    for (const kind of result.captured) {
+      let current: FinanceState;
+      try { current = await settlePendingProductPercentage(productId, kind); }
+      catch { current = "PENDING_FX"; }
+      financeState = current === "PENDING_FX" || financeState === "PENDING_FX" ? "PENDING_FX" : current;
+    }
     if (result.eventId) {
       await dispatchEvent(result.eventId).catch(() => {});
       await notifyOrg({ type: "product.statusChanged",
         title: `${result.product.number}: ${productStatusLabels[result.product.status]} → ${productStatusLabels[toStatus]}`,
-        body: result.product.title, link: `/products/${result.product.number}`, exceptUserId: session.user.id,
+        body: result.product.title, link: `/products/${productId}`, exceptUserId: session.user.id,
       }).catch(() => {});
     }
     revalidateProduct(result.product);
-    return { ok: true };
+    return { ok: true, financeState };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "Не удалось изменить статус изделия" };
   }
@@ -244,6 +237,13 @@ export async function deleteProduct(productId: string): Promise<{ ok: boolean; e
     if (tasks + works + projectMaterials + stockMovements > 0) return { ok: false as const, error: "К изделию привязаны задачи, работы или материалы — сначала удалите или отвяжите их" };
     if (await tx.productStagePayPool.count({ where: { productId, state: { in: ["SETTLED", "LEGACY_PROTECTED"] } } }))
       return { ok: false as const, error: "Нельзя удалить изделие с историей инженерных начислений" };
+    if (await tx.productPercentageCompletion.count({ where: { productId } }))
+      return { ok: false as const, error: "Нельзя удалить изделие с историей процентного этапа" };
+    const configs = await tx.productPercentageConfig.findMany({ where: { productId }, select: { id: true } });
+    if (configs.length) {
+      await tx.productPercentageParticipant.deleteMany({ where: { configId: { in: configs.map((config) => config.id) } } });
+      await tx.productPercentageConfig.deleteMany({ where: { productId } });
+    }
     await tx.productStagePayPool.deleteMany({ where: { productId, state: "DRAFT" } });
     await tx.product.delete({ where: { id: productId } });
     await tx.changeLog.create({ data: {

@@ -46,6 +46,7 @@ function SharePreview({
   quantity,
   stageUnits,
   engineering,
+  installation,
 }: {
   title: string;
   name: string;
@@ -55,6 +56,7 @@ function SharePreview({
   quantity: string | null;
   stageUnits?: number;
   engineering: boolean;
+  installation: boolean;
 }) {
   const ownQuantity = personalQuantity({
     quantity,
@@ -70,7 +72,7 @@ function SharePreview({
       <div className="break-words text-sm text-muted-foreground">{name}</div>
       <dl className="mt-2 flex flex-col gap-1 text-sm">
         <div className="flex flex-wrap justify-between gap-x-3">
-          <dt>{engineering ? "Доля объёма" : "Доля задачи"}</dt>
+          <dt>{installation ? "Физическая доля задачи" : engineering ? "Доля физического объёма" : "Доля задачи"}</dt>
           <dd className="font-medium tabular-nums">{displayDecimal(sharePercent(units))}%</dd>
         </div>
         {stageUnits !== undefined ? <div className="flex flex-wrap justify-between gap-x-3">
@@ -82,12 +84,12 @@ function SharePreview({
             <dd className="font-medium tabular-nums">{displayDecimal(ownQuantity)} ед.</dd>
           </div>
         ) : null}
-        <div className="flex flex-wrap justify-between gap-x-3">
+        {!installation ? <div className="flex flex-wrap justify-between gap-x-3">
           <dt>{engineering ? "Предварительная сумма" : "Сумма доли"}</dt>
           <dd className="font-medium tabular-nums">
             {amount === null ? "Пока не рассчитана" : currency ? `${engineering ? "≈ " : ""}${displayDecimal(amount)} ${currency}` : "Без денежного начисления"}
           </dd>
-        </div>
+        </div> : null}
       </dl>
     </div>
   );
@@ -144,6 +146,8 @@ function TaskSplitForm({
       if (data.share.source === "ENGINEERING") {
         if (data.share.stageUnits === null) throw new Error("Финансовая доля ещё не задана");
         preview = previewStageSplit(task.id, data.share.units, data.share.stageUnits, normalizedPercent, data.share.engineeringPreview);
+      } else if (data.share.source === "INSTALLATION") {
+        preview = splitAllocation(data.share.units, "0.00", normalizedPercent);
       } else {
         if (data.share.amount === null) throw new Error("Не задан бюджет обычной задачи");
         preview = splitAllocation(data.share.units, data.share.amount, normalizedPercent);
@@ -202,9 +206,12 @@ function TaskSplitForm({
       ) : data ? (
         <div className="flex min-w-0 flex-col gap-4">
           <p className="text-sm text-muted-foreground">
-            Текущая доля{data.share.source === "ENGINEERING" ? " объёма" : ""} {data.assigneeName}: {displayDecimal(sharePercent(data.share.units))}%.
+            Текущая {data.share.source === "INSTALLATION" ? "физическая доля задачи" : data.share.source === "ENGINEERING" ? "доля физического объёма" : "доля задачи"} {data.assigneeName}: {displayDecimal(sharePercent(data.share.units))}%.
             Передаваемый процент считается от этой доли.
           </p>
+          {data.share.source === "INSTALLATION" ? <p className="text-sm text-muted-foreground">
+            Передаётся только физическая доля задачи. Денежное участие в монтаже меняется отдельно в карточке процентных этапов изделия.
+          </p> : null}
           {data.share.source === "ENGINEERING" ? <p className="text-sm text-muted-foreground">
             Сейчас доля оплаты работы — {data.share.stageUnits === null ? "не задана" : `${displayDecimal(sharePercent(data.share.stageUnits))}%`}.
             Предварительные суммы пересчитываются по всему фонду и фиксируются при передаче изделия в производство.
@@ -235,7 +242,7 @@ function TaskSplitForm({
             ) : null}
           </div>
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor={percentId}>Передать от текущей доли, %</Label>
+            <Label htmlFor={percentId}>{data.share.source === "INSTALLATION" ? "Передать от текущей физической доли, %" : "Передать от текущей доли, %"}</Label>
             <Input
               id={percentId}
               type="text"
@@ -251,7 +258,7 @@ function TaskSplitForm({
               }}
             />
             <p id={`${percentId}-hint`} className={percentError ? "text-sm text-destructive" : "text-sm text-muted-foreground"}>
-              {percentError ?? "От 0,01 до 99,99%, не более двух знаков после запятой"}
+              {percentError ?? (data.share.source === "INSTALLATION" ? "Физическое распределение задачи; это не денежная доля этапа изделия." : "От 0,01 до 99,99%, не более двух знаков после запятой")}
             </p>
           </div>
 
@@ -265,6 +272,7 @@ function TaskSplitForm({
                 currency={data.share.previewCurrency ?? data.share.currency}
                 quantity={data.share.quantity}
                 engineering={data.share.source === "ENGINEERING"}
+                installation={data.share.source === "INSTALLATION"}
                 stageUnits={preview.remainingStageUnits}
               />
               <SharePreview
@@ -275,6 +283,7 @@ function TaskSplitForm({
                 currency={data.share.previewCurrency ?? data.share.currency}
                 quantity={data.share.quantity}
                 engineering={data.share.source === "ENGINEERING"}
+                installation={data.share.source === "INSTALLATION"}
                 stageUnits={preview.transferredStageUnits}
               />
             </div>
