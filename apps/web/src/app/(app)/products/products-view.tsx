@@ -5,6 +5,7 @@ import type { ProductStatus, Role } from "@prisma/client";
 
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useListParams } from "@/lib/list-params";
+import type { SketchFilePreview } from "@/lib/product-hero";
 
 import { ProductsFilterBar } from "./products-filter-bar";
 import { ProductsKanban } from "./products-kanban";
@@ -29,6 +30,7 @@ export interface ProductRow {
   isEngineeringParticipant: boolean;
   hasB3d: boolean;
   noModel: boolean;
+  sketchFile: SketchFilePreview | null;
 }
 
 // Раздел «Изделия»: канбан (по умолчанию) / таблица, фильтры в URL —

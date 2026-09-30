@@ -27,6 +27,6 @@
 
 - [x] 4.1 Запустить целевые RED→GREEN тесты схемы, домена, доступа, файлов и UI; сохранить команды и результаты в `qa-plan.md`.
 - [x] 4.2 Выполнить локальный native QA только чтением существующих rows/images на PostgreSQL:5433; никаких новых QA users/projects/products/works/tasks/files/configs/earned rows и никаких live status/rate/share mutations.
-- [ ] 4.3 Выполнить read-only staging browser acceptance после публикации проверенной версии; никаких новых fixtures или live status/rate/share mutations. Предмиграционный backup/TOC и preservation baseline выполнены, но staging deploy/acceptance пока NOT RUN.
+- [x] 4.3 Выполнить read-only staging UI acceptance на ревизии `080d9d9` только по существующим данным; новые fixtures и QA status/rate/share writes не создавались. Приёмка ограничена UI/role behavior: full old-row preservation comparison не прошёл из-за отдельно подтверждённой activity другой существующей учётной записи, которая не откатывалась и не исключалась. Live earning/split не проверены; это отмечено в `qa-plan.md`.
 - [x] 4.4 Выполнить SQL review, backup/TOC и before/after fingerprints существующих business rows; применить reviewed additive forward migrations к существующей локальной цели. Зафиксировать отсутствие новых fixtures, live positive earning acceptance NOT VERIFIED и production/main HOLD. Restore-test, disposable/copy DB, DDL rollback и destructive cleanup не выполнялись.
 

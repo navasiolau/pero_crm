@@ -69,6 +69,7 @@ export default async function ProductsPage({
         isEngineeringParticipant: product.isEngineeringParticipant,
         hasB3d: product.hasB3d,
         noModel: product.noModel,
+        sketchFile: product.sketchFile,
       }))}
       total={result.total}
       page={page}

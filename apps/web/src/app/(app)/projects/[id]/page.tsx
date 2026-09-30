@@ -297,6 +297,7 @@ export default async function ProjectPage({
               isEngineeringParticipant: product.isEngineeringParticipant,
               hasB3d: product.hasB3d,
               noModel: product.noModel,
+              sketchFile: product.sketchFile,
             }))}
             canManage={canManage}
             actorRoles={role}

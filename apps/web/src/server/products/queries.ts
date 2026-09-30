@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { PRODUCT_STATUSES } from "@/lib/product-statuses";
 import { engineeringParticipantProductIds, fileVisibilityWhere, productVisibilityWhere, resolveVisibilityActor, taskVisibilityWhere, workVisibilityWhere, type VisibilityActor } from "@/server/access/visibility";
 import { taskDetailsIncludeFor } from "@/server/tasks/queries";
+import { productSketchProjection } from "./sketch-projection";
 
 // ── Список изделий (/products): серверные фильтры/сортировка/пагинация ──
 // Состояние — в URL (?q=&status=&project=&client=&active=0&sort=&dir=&page=).
@@ -135,6 +136,7 @@ async function fetchProductRows(
     include: {
       engineer: { select: { id: true, name: true } },
       files: { where: { fileName: { endsWith: ".b3d", mode: "insensitive" } }, select: { id: true }, take: 1 },
+      sketchFile: productSketchProjection(actor),
       percentageConfigs: { where: { kind: "ENGINEERING" }, select: { participants: { where: { userId: actor.id }, select: { id: true } } } },
       project: {
         select: {
@@ -264,7 +266,7 @@ export async function getProductFor(
       },
       surveyor: { select: { id: true, name: true, position: true, phone: true } },
       engineer: { select: { id: true, name: true, position: true, phone: true } },
-      sketchFile: { where: fileVisibilityWhere(actor), select: { id: true, fileName: true, mimeType: true, size: true } },
+      sketchFile: productSketchProjection(actor),
       tasks: {
         where: taskVisibilityWhere(actor),
         include: taskDetailsIncludeFor(actor),

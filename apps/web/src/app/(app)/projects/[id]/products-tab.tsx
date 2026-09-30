@@ -19,9 +19,9 @@ import { toast } from "sonner";
 import type { ProductStatus, Role } from "@prisma/client";
 
 import { DragHandle } from "@/components/drag-handle";
+import { ProductKanbanCard } from "@/components/product-kanban-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -34,14 +34,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { SearchableSelect } from "@/components/ui/searchable-select";
-import { formatAmount } from "@/lib/format";
 import {
   PRODUCT_STATUSES,
-  daysOnStatus,
   productStatusLabels,
   productStatusStyles,
 } from "@/lib/product-statuses";
 import { cn } from "@/lib/utils";
+import type { SketchFilePreview } from "@/lib/product-hero";
 import { productStatusTargets, shouldRollbackProductStatus } from "@/lib/product-percentage-ui";
 import { changeProductStatus, createProduct } from "@/server/products/actions";
 
@@ -57,48 +56,7 @@ export interface ProductCard {
   isEngineeringParticipant: boolean;
   hasB3d: boolean;
   noModel: boolean;
-}
-
-function ProductCardView({
-  product,
-  currency,
-  showAmount,
-  dragging,
-}: {
-  product: ProductCard;
-  currency: string;
-  showAmount: boolean;
-  dragging?: boolean;
-}) {
-  const days = daysOnStatus(product.statusChangedAt);
-  return (
-    <Card
-      className={cn(
-        "cursor-pointer select-none",
-        dragging && "rotate-2 shadow-lg",
-      )}
-    >
-      <CardContent className="flex flex-col gap-1.5 p-3">
-        <div className="flex items-center justify-between gap-2 pr-10">
-          <span className="text-sm font-medium">{product.number}</span>
-          <Badge variant="secondary" className="text-xs">
-            {days} дн.
-          </Badge>
-        </div>
-        <div className="text-sm">{product.title}</div>
-        {product.engineerName ? (
-          <div className="text-xs text-muted-foreground">
-            Инженер: {product.engineerName}
-          </div>
-        ) : null}
-        {showAmount ? (
-          <div className="text-xs text-muted-foreground">
-            {formatAmount(product.expectedPrice, currency)}
-          </div>
-        ) : null}
-      </CardContent>
-    </Card>
-  );
+  sketchFile: SketchFilePreview | null;
 }
 
 function DraggableProduct({
@@ -125,7 +83,7 @@ function DraggableProduct({
       onClick={() => onOpen(product)}
     >
       {canDrag && <DragHandle ref={setActivatorNodeRef} {...attributes} {...listeners} label={product.title} />}
-      <ProductCardView
+      <ProductKanbanCard
         product={product}
         currency={currency}
         showAmount={showAmount}
@@ -343,7 +301,7 @@ export function ProductsTab({
         </div>
         <DragOverlay>
           {activeProduct ? (
-            <ProductCardView
+            <ProductKanbanCard
               product={activeProduct}
               currency={currency}
               showAmount={showAmount}

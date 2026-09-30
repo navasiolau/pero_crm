@@ -8,6 +8,7 @@ import {
 import { STAGES } from "@/lib/stages";
 import { taskDetailsIncludeFor } from "@/server/tasks/queries";
 import { listProjectShortages } from "@/server/warehouse/queries";
+import { productSketchProjection } from "@/server/products/sketch-projection";
 import { clientVisibilityWhere, engineeringParticipantProductIds, fileVisibilityWhere, hasFullProjectVisibility, productVisibilityWhere, projectVisibilityWhere, resolveVisibilityActor, taskVisibilityWhere, workVisibilityWhere, type VisibilityActor } from "@/server/access/visibility";
 
 function scopedProjectAmounts<T extends { initialPrice: unknown; delivery: unknown; unloading: unknown; installation: unknown }>(project: T, actor: VisibilityActor) {
@@ -239,6 +240,7 @@ export async function getProjectFor(
         include: {
           engineer: { select: { id: true, name: true } },
           files: { where: { fileName: { endsWith: ".b3d", mode: "insensitive" } }, select: { id: true }, take: 1 },
+          sketchFile: productSketchProjection(actor),
           percentageConfigs: { where: { kind: "ENGINEERING" }, select: { participants: { where: { userId: actor.id }, select: { id: true } } } },
           statusHistory: { orderBy: { createdAt: "desc" } },
         },
