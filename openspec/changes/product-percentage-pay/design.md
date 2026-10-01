@@ -33,4 +33,3 @@
 ## Open Questions
 
 Нет: границы статусов, ролей, долей, `skipped_once`, frozen FX retry и сохранения истории определены.
-

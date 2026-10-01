@@ -155,6 +155,17 @@ def main():
         bundle = base64.b64decode(packet["bundle"], validate=True)
         require(0 < len(bundle) <= 768 * 1024 and digest(bundle) == packet["bundleSha256"], "BUNDLE_SOURCE_MISMATCH")
         state_path = "/tmp/product-quantity-qa-" + packet["runId"] + ".json"
+        checkpoint = BASE / packet["baselineRunId"] / ("qa-state-" + packet["runId"] + ".json")
+        if resume and checkpoint.is_file():
+            require(not checkpoint.is_symlink() and checkpoint.stat().st_uid == 0 and
+                checkpoint.stat().st_mode & 0o777 == 0o600, "QA_CHECKPOINT_UNSAFE")
+            raw = checkpoint.read_bytes()
+            stored = json.loads(raw)
+            require(stored.get("format") == "product-quantity-qa/v1" and stored.get("target") == "staging", "QA_CHECKPOINT_INVALID")
+            restore = 'import{existsSync,writeFileSync}from"node:fs";const p=' + json.dumps(state_path) + ';if(!existsSync(p)){let s="";for await(const c of process.stdin)s+=c;writeFileSync(p,s,{mode:0o600,flag:"wx"})}'
+            result = subprocess.run(old.DOCKER + ["exec", "-i", before["web"], "node", "--input-type=module", "-e", restore],
+                input=raw, capture_output=True, env=old.SAFE_ENV, timeout=15)
+            require(result.returncode == 0, "QA_CHECKPOINT_RESTORE_FAILED")
         print(json.dumps({"status": "STAGING_WINDOW_READY", "identity": before, "tablesPreserved": len(current),
             "backfill": backfill, "apiTokenUsageProof": usage_proof}), flush=True)
         deadline = time.monotonic() + 900
@@ -189,6 +200,13 @@ def main():
                 error_path.chmod(0o600)
             require(child.returncode == 0, "STAGING_QA_OPERATION_STOP")
             result = json.loads(child.stdout)
+            saved = subprocess.run(old.DOCKER + ["exec", before["web"], "cat", state_path],
+                capture_output=True, env=old.SAFE_ENV, timeout=15)
+            require(saved.returncode == 0, "QA_CHECKPOINT_CAPTURE_FAILED")
+            with os.fdopen(os.open(checkpoint, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "wb") as handle:
+                handle.write(saved.stdout)
+                handle.flush()
+                os.fsync(handle.fileno())
             old.require_refresh_idle()
             require(old.identity(packet["revision"])[0] == before, "QA_RUNTIME_IDENTITY_DRIFT")
             print(json.dumps(result), flush=True)
