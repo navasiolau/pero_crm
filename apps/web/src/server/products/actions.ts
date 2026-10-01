@@ -1,20 +1,24 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import type { ProductStatus } from "@prisma/client";
+import type { Prisma, ProductStatus } from "@prisma/client";
 import { z } from "zod";
 
 import { auth } from "@/auth";
-import { prisma } from "@/lib/prisma";
 import { productStatusLabels } from "@/lib/product-statuses";
 import { writeChangeLog } from "@/server/plugins/changelog";
-import { emitDomainEvent } from "@/server/plugins/events";
+import { dispatchEvent } from "@/server/plugins/events";
 import { notifyOrg } from "@/server/notifications/notify";
 
-import { MANAGER_ROLES, hasAnyRole, hasRole } from "@/lib/roles";
+import { MANAGER_ROLES, hasAnyRole } from "@/lib/roles";
 import { revalidateProductPaths } from "@/server/products/revalidate";
-import { productEditWhere } from "@/server/access/visibility";
+import { productEditWhere, resolveVisibilityActor } from "@/server/access/visibility";
 import { listProductOptions } from "@/server/products/queries";
+import { withTaskTransaction } from "@/server/tasks/transaction";
+import { settlePendingProductPercentage } from "@/server/product-percentage-pay/core";
+import { changeProductStatusTransaction } from "@/server/products/status-core";
+
+type FinanceState = "PENDING_FX" | "SETTLED" | "SKIPPED_ONCE" | "LEGACY_PROTECTED" | null;
 
 async function requireUser() {
   const session = await auth();
@@ -44,8 +48,9 @@ const createSchema = z.object({
 // cuid (Prisma default), номер — отображаемое уникальное поле.
 async function nextProductSuffixInt(
   projectId: string,
+  tx: Prisma.TransactionClient,
 ): Promise<number> {
-  const siblings = await prisma.product.findMany({
+  const siblings = await tx.product.findMany({
     where: { projectId },
     select: { suffixInt: true },
   });
@@ -72,15 +77,18 @@ export async function createProduct(
   }
   const data = parsed.data;
 
-  const project = await prisma.project.findUnique({
+  const mutation = await withTaskTransaction(async (tx) => {
+  const project = await tx.project.findUnique({
     where: { id: data.projectId },
     select: { id: true, number: true },
   });
-  if (!project) return { ok: false, error: "Проект не найден" };
+  if (!project) return { ok: false as const, error: "Проект не найден" };
+  if (data.engineerId && !await tx.user.findFirst({ where: { id: data.engineerId, active: true, roles: { hasSome: ["ENGINEER"] } }, select: { id: true } }))
+    return { ok: false as const, error: "Выберите активного сотрудника с ролью инженера" };
 
-  const suffixInt = await nextProductSuffixInt(project.id);
+  const suffixInt = await nextProductSuffixInt(project.id, tx);
   const number = `${project.number}.${suffixInt}`;
-  const product = await prisma.product.create({
+  const product = await tx.product.create({
     data: {
       projectId: project.id,
       number,
@@ -98,7 +106,7 @@ export async function createProduct(
     },
   });
 
-  await writeChangeLog({
+  await tx.changeLog.create({ data: {
     actorType: "user",
     actorId: session.user.id,
     actorName: session.user.name ?? undefined,
@@ -106,7 +114,11 @@ export async function createProduct(
     entityId: product.id,
     action: "create",
     newValue: { number, title: data.title, project: project.number },
+  } });
+  return { ok: true as const, product };
   });
+  if (!mutation.ok) return mutation;
+  const { product } = mutation;
 
   revalidateProduct(product);
   return { ok: true, id: product.id };
@@ -133,10 +145,6 @@ export async function updateProduct(
 ): Promise<{ ok: boolean; error?: string }> {
   const session = await requireUser();
   const roles = session.user.roles;
-  // Право на правку изделия: менеджмент или инженер (§4)
-  if (!hasAnyRole(roles, [...MANAGER_ROLES, "ENGINEER"])) {
-    throw new Error("Недостаточно прав");
-  }
   const parsed = updateSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Ошибка данных" };
@@ -145,17 +153,27 @@ export async function updateProduct(
 
   // Приоритет ролей: при комбинации менеджерских ролей с инженером права
   // старше — урезанное «только тех. блок» действует для чистого инженера
-  if (hasRole(roles, "ENGINEER") && !hasAnyRole(roles, MANAGER_ROLES)) {
+  if (!hasAnyRole(roles, MANAGER_ROLES)) {
     const keys = Object.keys(data);
     if (keys.some((key) => key !== "description")) {
       return { ok: false, error: "Инженер правит только технический блок" };
     }
   }
 
-  const before = await prisma.product.findFirst({ where: { AND: [{ id: productId }, productEditWhere(session.user)] } });
-  if (!before) return { ok: false, error: "Изделие не найдено" };
-
-  await prisma.product.update({ where: { id: productId }, data });
+  const mutation = await withTaskTransaction(async (tx) => {
+    const actor = await resolveVisibilityActor(tx, session.user);
+    const before = await tx.product.findFirst({ where: { AND: [{ id: productId }, productEditWhere(actor)] } });
+    if (!before) return { ok: false as const, error: "Изделие не найдено" };
+    if (data.engineerId && data.engineerId !== before.engineerId && !await tx.user.findFirst({ where: { id: data.engineerId, active: true, roles: { hasSome: ["ENGINEER"] } }, select: { id: true } }))
+      return { ok: false as const, error: "Выберите активного сотрудника с ролью инженера" };
+    await tx.product.update({ where: { id: productId }, data });
+    if (data.expectedPrice !== undefined || data.engineerId !== undefined) await tx.productStagePayPool.updateMany({
+      where: { productId, kind: "ENGINEERING", state: "DRAFT" }, data: { revision: { increment: 1 } },
+    });
+    return { ok: true as const, before };
+  });
+  if (!mutation.ok) return mutation;
+  const { before } = mutation;
 
   await writeChangeLog({
     actorType: "user",
@@ -176,105 +194,68 @@ export async function updateProduct(
 // Смена статуса изделия: переходы свободные, каждый — в историю (§6),
 // событием product.statusChanged и org-уведомлением A/D/M.
 export async function changeProductStatus(
-  productId: string,
-  toStatus: ProductStatus,
-  comment?: string,
-): Promise<{ ok: boolean; error?: string }> {
+  productId: string, toStatus: ProductStatus, comment?: string,
+): Promise<{ ok: boolean; error?: string; financeState?: FinanceState }> {
   const session = await requireUser();
-  if (!hasAnyRole(session.user.roles, MANAGER_ROLES)) {
-    throw new Error("Недостаточно прав");
+  if (!Object.hasOwn(productStatusLabels, toStatus)) return { ok: false, error: "Неизвестный статус изделия" };
+  try {
+    const result = await withTaskTransaction((tx) => changeProductStatusTransaction(tx,
+      { id: session.user.id, name: session.user.name ?? "", roles: session.user.roles, source: "web" },
+      productId, toStatus, comment));
+    if (!result.ok) return result;
+    let financeState: FinanceState = null;
+    for (const kind of result.captured) {
+      let current: FinanceState;
+      try { current = await settlePendingProductPercentage(productId, kind); }
+      catch { current = "PENDING_FX"; }
+      financeState = current === "PENDING_FX" || financeState === "PENDING_FX" ? "PENDING_FX" : current;
+    }
+    if (result.eventId) {
+      await dispatchEvent(result.eventId).catch(() => {});
+      await notifyOrg({ type: "product.statusChanged",
+        title: `${result.product.number}: ${productStatusLabels[result.product.status]} → ${productStatusLabels[toStatus]}`,
+        body: result.product.title, link: `/products/${productId}`, exceptUserId: session.user.id,
+      }).catch(() => {});
+    }
+    revalidateProduct(result.product);
+    return { ok: true, financeState };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "Не удалось изменить статус изделия" };
   }
-
-  const product = await prisma.product.findUnique({ where: { id: productId } });
-  if (!product) return { ok: false, error: "Изделие не найдено" };
-  if (product.status === toStatus) return { ok: true };
-
-  await prisma.$transaction([
-    prisma.product.update({
-      where: { id: productId },
-      data: { status: toStatus, statusChangedAt: new Date() },
-    }),
-    prisma.productStatusHistory.create({
-      data: {
-        productId,
-        fromStatus: product.status,
-        toStatus,
-        comment: comment?.trim() || null,
-        changedById: session.user.id,
-      },
-    }),
-  ]);
-
-  await writeChangeLog({
-    actorType: "user",
-    actorId: session.user.id,
-    actorName: session.user.name ?? undefined,
-    entity: "product",
-    entityId: productId,
-    action: "status",
-    field: "status",
-    oldValue: product.status,
-    newValue: toStatus,
-  });
-  await emitDomainEvent(
-    "product.statusChanged",
-    { productId, number: product.number, from: product.status, to: toStatus },
-    session.user.id,
-  );
-  await notifyOrg({
-    type: "product.statusChanged",
-    title: `${product.number}: ${productStatusLabels[product.status]} → ${productStatusLabels[toStatus]}`,
-    body: product.title,
-    link: `/products/${product.number}`,
-    exceptUserId: session.user.id,
-  });
-
-  revalidateProduct(product);
-  return { ok: true };
 }
 
-// Удаление изделия — админ/директор/менеджер. Нельзя, если есть задачи,
-// работы, потребность или движения склада (там деньги и история);
-// файлы при этом отвязываются и остаются в проекте (FK SetNull).
-export async function deleteProduct(
-  productId: string,
-): Promise<{ ok: boolean; error?: string }> {
+// Финансовая история и работы не удаляются вместе с изделием.
+export async function deleteProduct(productId: string): Promise<{ ok: boolean; error?: string }> {
   const session = await requireUser();
-  if (!hasAnyRole(session.user.roles, MANAGER_ROLES)) {
-    throw new Error("Недостаточно прав");
-  }
-  const product = await prisma.product.findUnique({
-    where: { id: productId },
-    include: {
-      _count: {
-        select: { tasks: true, works: true, projectMaterials: true, stockMovements: true },
-      },
-    },
+  if (!hasAnyRole(session.user.roles, MANAGER_ROLES)) throw new Error("Недостаточно прав");
+  const result = await withTaskTransaction(async (tx) => {
+    const product = await tx.product.findUnique({ where: { id: productId }, include: {
+      _count: { select: { tasks: true, works: true, projectMaterials: true, stockMovements: true } },
+    } });
+    if (!product) return { ok: false as const, error: "Изделие не найдено" };
+    const { tasks, works, projectMaterials, stockMovements } = product._count;
+    if (tasks + works + projectMaterials + stockMovements > 0) return { ok: false as const, error: "К изделию привязаны задачи, работы или материалы — сначала удалите или отвяжите их" };
+    if (await tx.productStagePayPool.count({ where: { productId, state: { in: ["SETTLED", "LEGACY_PROTECTED"] } } }))
+      return { ok: false as const, error: "Нельзя удалить изделие с историей инженерных начислений" };
+    if (await tx.productPercentageCompletion.count({ where: { productId } }))
+      return { ok: false as const, error: "Нельзя удалить изделие с историей процентного этапа" };
+    const configs = await tx.productPercentageConfig.findMany({ where: { productId }, select: { id: true } });
+    if (configs.length) {
+      await tx.productPercentageParticipant.deleteMany({ where: { configId: { in: configs.map((config) => config.id) } } });
+      await tx.productPercentageConfig.deleteMany({ where: { productId } });
+    }
+    await tx.productStagePayPool.deleteMany({ where: { productId, state: "DRAFT" } });
+    await tx.product.delete({ where: { id: productId } });
+    await tx.changeLog.create({ data: {
+      actorType: "user", actorId: session.user.id, actorName: session.user.name,
+      entity: "product", entityId: productId, action: "delete", oldValue: { number: product.number, title: product.title },
+    } });
+    return { ok: true as const, product };
   });
-  if (!product) return { ok: false, error: "Изделие не найдено" };
-  const { tasks, works, projectMaterials, stockMovements } = product._count;
-  if (tasks + works + projectMaterials + stockMovements > 0) {
-    return {
-      ok: false,
-      error:
-        "К изделию привязаны задачи, работы или материалы — сначала удалите или отвяжите их",
-    };
-  }
-
-  await prisma.product.delete({ where: { id: productId } });
-  await writeChangeLog({
-    actorType: "user",
-    actorId: session.user.id,
-    actorName: session.user.name ?? undefined,
-    entity: "product",
-    entityId: productId,
-    action: "delete",
-    oldValue: { number: product.number, title: product.title },
-  });
-  revalidateProduct(product);
+  if (!result.ok) return result;
+  revalidateProduct(result.product);
   return { ok: true };
 }
-
 // Опции изделий проекта для диалога задачи (клиентский компонент
 // не может дёрнуть queries.ts напрямую — только server action).
 export async function fetchProductOptions(

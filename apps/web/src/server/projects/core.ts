@@ -6,9 +6,12 @@ import { prisma } from "@/lib/prisma";
 import { formatAmount } from "@/lib/format";
 import { stageLabels as STAGE_LABELS } from "@/lib/stages";
 import { writeChangeLog } from "@/server/plugins/changelog";
-import { emitDomainEvent } from "@/server/plugins/events";
+import { emitDomainEvent, dispatchEvent } from "@/server/plugins/events";
 import { notifyOrg, notifyPerson } from "@/server/notifications/notify";
-import { getPayrollCurrency } from "@/server/payroll/queries";
+import { withTaskTransaction } from "@/server/tasks/transaction";
+import { changeProjectStageTransaction } from "./stage-core";
+import { assertProjectCurrencyChange } from "@/server/product-stage-pay/core";
+import { assertPercentageProjectCurrencyChange } from "@/server/product-percentage-pay/core";
 
 import { hasAnyRole, MANAGER_ROLES, type Role } from "@/lib/roles";
 
@@ -195,10 +198,22 @@ export async function updateProjectCore(
   if (!parsed.success) return { ok: false, error: "Ошибка данных" };
   const data = parsed.data;
 
-  const before = await prisma.project.findUnique({ where: { id: projectId } });
+  let before;
+  try {
+    before = await withTaskTransaction(async (tx) => {
+      const current = await tx.project.findUnique({ where: { id: projectId } });
+      if (!current) return null;
+      if (data.currency !== undefined) {
+        await assertProjectCurrencyChange(tx, projectId, data.currency);
+        await assertPercentageProjectCurrencyChange(tx, projectId, data.currency);
+      }
+      await tx.project.update({ where: { id: projectId }, data });
+      return current;
+    });
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "Не удалось изменить проект" };
+  }
   if (!before) return { ok: false, error: "Проект не найден" };
-
-  await prisma.project.update({ where: { id: projectId }, data });
 
   await writeChangeLog({
     actorType: "user",
@@ -229,183 +244,26 @@ export interface StageExtras {
 // Смена этапа (§6): переходы свободные; для Отказа нужны причина+комментарий,
 // для Рекламации — причина, описание, виновная сторона (§6.3, только из «Завершён»).
 export async function changeProjectStageCore(
-  actor: DomainActor,
-  projectId: string,
-  toStage: ProjectStage,
-  extras?: StageExtras,
+  actor: DomainActor, projectId: string, toStage: ProjectStage, extras?: StageExtras,
 ): Promise<{ ok: boolean; error?: string }> {
   requireActorRoles(actor, MANAGER_ROLES);
-
-  const project = await prisma.project.findUnique({ where: { id: projectId } });
-  if (!project) return { ok: false, error: "Проект не найден" };
-  if (project.stage === toStage) return { ok: true };
-
-  if (toStage === "REFUSED") {
-    if (!extras?.refusalReason?.trim() || !extras?.refusalComment?.trim()) {
-      return { ok: false, error: "Для отказа нужны причина и комментарий" };
-    }
+  const result = await withTaskTransaction((tx) => changeProjectStageTransaction(actor, projectId, toStage, extras, tx));
+  if (!result.ok) return result;
+  if (result.repeated) return { ok: true };
+  for (const eventId of result.eventIds) await dispatchEvent(eventId).catch(() => {});
+  for (const earning of result.earnings) {
+    await notifyPerson({ userId: earning.userId, type: "payroll.accrued",
+      title: `Начислена зарплата: ${formatAmount(earning.amount, earning.currency)}`,
+      body: `${earning.percent}% от стоимости ваших изделий по проекту ${result.project.number}`, link: "/payroll",
+    }).catch(() => {});
+    await notifyOrg({ type: "payroll.orgAccrued", title: `Начислено ${earning.name}: ${formatAmount(earning.amount, earning.currency)}`,
+      body: `${earning.percent}% от стоимости изделий по проекту ${result.project.number}`, link: "/finance/payroll", exceptUserId: actor.id,
+    }).catch(() => {});
   }
-  if (toStage === "RECLAMATION") {
-    if (project.stage !== "DONE") {
-      return { ok: false, error: "Рекламация открывается только из «Завершён»" };
-    }
-    if (
-      !extras?.reclamationReason?.trim() ||
-      !extras?.reclamationDescription?.trim() ||
-      !extras?.reclamationFault?.trim()
-    ) {
-      return {
-        ok: false,
-        error: "Для рекламации нужны причина, описание и виновная сторона",
-      };
-    }
-  }
-
-  await prisma.$transaction([
-    prisma.project.update({
-      where: { id: projectId },
-      data: {
-        stage: toStage,
-        stageChangedAt: new Date(),
-        ...(toStage === "REFUSED"
-          ? {
-              refusalReason: extras!.refusalReason,
-              refusalComment: extras!.refusalComment,
-            }
-          : {}),
-        ...(toStage === "RECLAMATION"
-          ? {
-              reclamationReason: extras!.reclamationReason,
-              reclamationDescription: extras!.reclamationDescription,
-              reclamationFault: extras!.reclamationFault,
-            }
-          : {}),
-      },
-    }),
-    prisma.projectStageHistory.create({
-      data: {
-        projectId,
-        fromStage: project.stage,
-        toStage,
-        comment:
-          toStage === "REFUSED"
-            ? extras!.refusalReason
-            : toStage === "RECLAMATION"
-              ? extras!.reclamationReason
-              : undefined,
-        changedById: actor.id,
-      },
-    }),
-  ]);
-
-  // Начисление «% от стоимости» инженерам (§10): этап начисления — передача
-  // проекта в производство (первый переход «В работе»). Повторные переходы
-  // (пауза, рекламация) не начисляют — СТРОГО один раз на проект: если
-  // начисление уже было, новые назначения инженеров не начисляются.
-  // Инженер назначается на ИЗДЕЛИЕ (правило владельца, 09.2026): на проекте
-  // может быть несколько инженеров — каждый получает % от Σ цен СВОИХ изделий.
-  if (toStage === "IN_WORK") {
-    const existing = await prisma.payrollEntry.findFirst({
-      where: { projectId, scheme: "PERCENT_PROJECT" },
-      select: { id: true },
-    });
-    if (!existing) {
-      const products = await prisma.product.findMany({
-        where: { projectId, engineerId: { not: null } },
-        select: { engineerId: true, expectedPrice: true },
-      });
-      // Группировка цен по инженерам
-      const priceByEngineer = new Map<string, number>();
-      for (const product of products) {
-        if (!product.engineerId) continue;
-        const current = priceByEngineer.get(product.engineerId) ?? 0;
-        priceByEngineer.set(
-          product.engineerId,
-          current + Number(product.expectedPrice ?? 0),
-        );
-      }
-      const currency = await getPayrollCurrency();
-      for (const [engineerId, totalPrice] of priceByEngineer) {
-        const engineer = await prisma.user.findUnique({
-          where: { id: engineerId },
-          select: { name: true, payScheme: true, payPercent: true },
-        });
-        if (
-          engineer?.payScheme !== "PERCENT_PROJECT" ||
-          !engineer.payPercent ||
-          Number(engineer.payPercent) <= 0
-        ) {
-          continue;
-        }
-        const percent = Number(engineer.payPercent);
-        const amount =
-          Math.round(((totalPrice * percent) / 100) * 100) / 100;
-        if (amount <= 0) continue;
-        await prisma.payrollEntry.create({
-          data: {
-            userId: engineerId,
-            projectId,
-            amount,
-            currency,
-            scheme: "PERCENT_PROJECT",
-            month: new Date().toISOString().slice(0, 7),
-            comment: `${percent}% от стоимости изделий · ${project.number}`,
-          },
-        });
-        await emitDomainEvent(
-          "payroll.accrued",
-          {
-            userId: engineerId,
-            scheme: "PERCENT_PROJECT",
-            amount,
-            projectId,
-          },
-          actor.id,
-        );
-        await notifyPerson({
-          userId: engineerId,
-          type: "payroll.accrued",
-          title: `Начислена зарплата: ${formatAmount(amount, currency)}`,
-          body: `${percent}% от стоимости ваших изделий по проекту ${project.number}`,
-          link: "/payroll",
-        });
-        await notifyOrg({
-          type: "payroll.orgAccrued",
-          title: `Начислено ${engineer.name}: ${formatAmount(amount, currency)}`,
-          body: `${percent}% от стоимости изделий по проекту ${project.number}`,
-          link: "/finance/payroll",
-          exceptUserId: actor.id,
-        });
-      }
-    }
-  }
-
-  await writeChangeLog({
-    actorType: "user",
-    actorId: actor.id,
-    actorName: actor.name || undefined,
-    entity: "project",
-    entityId: projectId,
-    action: "stage",
-    field: "stage",
-    oldValue: project.stage,
-    newValue: toStage,
-    source: actor.source,
-  });
-  await emitDomainEvent(
-    "project.stageChanged",
-    { projectId, number: project.number, from: project.stage, to: toStage },
-    actor.id,
-  );
-  await notifyOrg({
-    type: "project.stageChanged",
-    title: `${project.number}: ${STAGE_LABELS[project.stage]} → ${STAGE_LABELS[toStage]}`,
-    body: project.title,
-    link: `/projects/${projectId}`,
-    exceptUserId: actor.id,
-  });
-
-  revalidatePath(`/projects/${projectId}`);
-  revalidatePath("/projects");
+  await notifyOrg({ type: "project.stageChanged",
+    title: `${result.project.number}: ${STAGE_LABELS[result.project.stage]} → ${STAGE_LABELS[toStage]}`,
+    body: result.project.title, link: `/projects/${projectId}`, exceptUserId: actor.id,
+  }).catch(() => {});
+  revalidatePath(`/projects/${projectId}`); revalidatePath("/projects");
   return { ok: true };
 }

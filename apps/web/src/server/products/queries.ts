@@ -2,7 +2,7 @@ import type { Prisma, ProductStatus, Role } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
 import { PRODUCT_STATUSES } from "@/lib/product-statuses";
-import { fileVisibilityWhere, productVisibilityWhere, taskVisibilityWhere, workVisibilityWhere, type VisibilityActor } from "@/server/access/visibility";
+import { engineeringParticipantProductIds, fileVisibilityWhere, productVisibilityWhere, resolveVisibilityActor, taskVisibilityWhere, workVisibilityWhere, type VisibilityActor } from "@/server/access/visibility";
 import { taskDetailsIncludeFor } from "@/server/tasks/queries";
 import { productSketchProjection } from "./sketch-projection";
 
@@ -51,14 +51,17 @@ const PRODUCT_SORT_MAP: Record<
 };
 
 function productWhere(
-  userId: string,
-  roles: Role[],
+  actor: VisibilityActor,
   filters: ProductListFilters,
+  filterParticipantIds: string[],
 ): Prisma.ProductWhereInput {
   const where: Prisma.ProductWhereInput = {};
   if (filters.clientId) where.project = { clientId: filters.clientId };
   // Инженер — на самом изделии (§10, решение владельца 09.2026)
-  if (filters.engineerId) where.engineerId = filters.engineerId;
+  if (filters.engineerId) where.OR = [
+    { engineerId: filters.engineerId },
+    { id: { in: filterParticipantIds } },
+  ];
   const statusConditions: Prisma.ProductWhereInput[] = [];
   if (filters.activeOnly) {
     statusConditions.push({ status: { not: "DONE" } });
@@ -70,7 +73,7 @@ function productWhere(
   if (filters.projectId) where.projectId = filters.projectId;
   const q = filters.q?.trim();
   if (q) {
-    where.OR = [
+    where.AND = [...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []), { OR: [
       { number: { contains: q } },
       { title: { contains: q, mode: "insensitive" } },
       { project: { number: { contains: q } } },
@@ -85,9 +88,9 @@ function productWhere(
           },
         },
       },
-    ];
+    ] }];
   }
-  return { AND: [productVisibilityWhere({ id: userId, roles }), where] };
+  return { AND: [productVisibilityWhere(actor), where] };
 }
 
 export async function listProducts(
@@ -96,24 +99,25 @@ export async function listProducts(
   filters: ProductListFilters,
   paging?: { page: number; pageSize: number },
 ): Promise<{ rows: Awaited<ReturnType<typeof fetchProductRows>>; total: number }> {
-  const actor = { id: userId, roles };
-  const where = productWhere(userId, roles, filters);
+  const actor = await resolveVisibilityActor(prisma, { id: userId, roles });
+  const filterParticipantIds = filters.engineerId ? await engineeringParticipantProductIds(prisma, filters.engineerId, false) : [];
+  const where = productWhere(actor, filters, filterParticipantIds);
   const sortField = filters.sort && filters.sort in PRODUCT_SORT_MAP ? filters.sort : undefined;
   const orderBy =
     sortField !== undefined
       ? PRODUCT_SORT_MAP[sortField](filters.dir ?? "desc")
       : PRODUCT_SORT_MAP.number("desc");
   if (!paging) {
-    const rows = await fetchProductRows(actor, where, orderBy, undefined, undefined);
+    const rows = await fetchProductRows(where, orderBy, undefined, undefined, actor);
     return { rows, total: rows.length };
   }
   const [rows, total] = await Promise.all([
     fetchProductRows(
-      actor,
       where,
       orderBy,
       (paging.page - 1) * paging.pageSize,
       paging.pageSize,
+      actor,
     ),
     prisma.product.count({ where }),
   ]);
@@ -121,17 +125,19 @@ export async function listProducts(
 }
 
 async function fetchProductRows(
-  actor: VisibilityActor,
   where: Prisma.ProductWhereInput,
   orderBy: Prisma.ProductOrderByWithRelationInput[],
   skip: number | undefined,
   take: number | undefined,
+  actor: VisibilityActor,
 ) {
-  return prisma.product.findMany({
+  const rows = await prisma.product.findMany({
     where,
     include: {
       engineer: { select: { id: true, name: true } },
+      files: { where: { fileName: { endsWith: ".b3d", mode: "insensitive" } }, select: { id: true }, take: 1 },
       sketchFile: productSketchProjection(actor),
+      percentageConfigs: { where: { kind: "ENGINEERING" }, select: { participants: { where: { userId: actor.id }, select: { id: true } } } },
       project: {
         select: {
           id: true,
@@ -146,13 +152,17 @@ async function fetchProductRows(
     skip,
     take,
   });
+  return rows.map((row) => ({ ...row, hasB3d: row.files.length > 0,
+    isEngineeringParticipant: row.percentageConfigs.some((config) => config.participants.length > 0) ||
+      actor.engineeringParticipantProductIds?.includes(row.id) === true }));
 }
 
 // Опции фильтров «Проект» и «Клиент»: пары, встречающиеся среди видимых
 // изделий (чтобы не было пустых значений), slim — без лишних полей.
 export async function listProductFilterOptions(userId: string, roles: Role[]) {
+  const actor = await resolveVisibilityActor(prisma, { id: userId, roles });
   const products = await prisma.product.findMany({
-    where: productVisibilityWhere({ id: userId, roles }),
+    where: productVisibilityWhere(actor),
     select: {
       project: {
         select: {
@@ -215,6 +225,7 @@ export function parseProductListParams(sp: Record<string, string | string[] | un
 
 // Изделия проекта — опции для селектов (задача/работа/файл, вкладка «Задачи»)
 export async function listProductOptions(projectId: string, actor: VisibilityActor) {
+  actor = await resolveVisibilityActor(prisma, actor);
   return prisma.product.findMany({
     where: { AND: [{ projectId }, productVisibilityWhere(actor)] },
     select: { id: true, number: true, title: true },
@@ -227,7 +238,7 @@ export async function getProductFor(
   roles: Role[],
   key: string,
 ) {
-  const actor = { id: userId, roles };
+  const actor = await resolveVisibilityActor(prisma, { id: userId, roles });
   // Адрес карточки — /products/<номер>; допускаем и внутренний id
   const product = await prisma.product.findFirst({
     where: {

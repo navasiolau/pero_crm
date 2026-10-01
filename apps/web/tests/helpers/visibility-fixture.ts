@@ -106,7 +106,8 @@ export function engineerFixture() {
   ].map(([id, projectId, engineerId, status, price]) => ({
     id, number: id, title: id, projectId, project: projects.find((p) => p.id === projectId),
     engineerId, engineer: engineerId === "engineer" ? engineer : other, status, expectedPrice: price,
-    tasks: [], works: [], files: [], statusHistory: [], surveyor: null, sketchFile: null,
+    tasks: [], works: [], files: [], percentageConfigs: [], noModel: false,
+    statusHistory: [], surveyor: null, sketchFile: null,
   }));
   const tasks = products.filter((p) => p.id !== "hidden-product").map((product): FixtureRow => ({
     id: `task-${product.id}`, title: product.id, product, productId: product.id, project: product.project,
@@ -134,6 +135,7 @@ export function engineerFixture() {
     products, projects, tasks, files,
     db: {
       product: fixtureModel(products), project: fixtureModel(projects), task: fixtureModel(tasks),
+      productPercentageParticipant: fixtureModel([]),
       file: fixtureModel(files), client: fixtureModel([client]), user: fixtureModel([engineer, other]),
       projectMaterial: fixtureModel([]), stockMovement: fixtureModel([]), timeEntry: fixtureModel([]),
       payrollEntry: fixtureModel([

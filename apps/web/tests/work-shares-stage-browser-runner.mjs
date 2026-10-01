@@ -16,7 +16,8 @@ import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { canonicalEnvelope, envelopeSha256 } from "./work-shares-owned-fixtures.mjs";
-import { recordActionsDrained, stageOperation, StageStop, validateSeal } from "./work-shares-stage-runner.mjs";
+import { recordActionsDrained, StageStop, validateSeal } from "./work-shares-stage-runner.mjs";
+import { createStageBrowserSessionSeal, getStageBrowserSessions, StageSessionsStop } from "./work-shares-stage-sessions.mjs";
 import { runWorkSharesBrowser, validateWorkSharesBrowserInput, WorkSharesBrowserStop } from "./work-shares-browser.mjs";
 
 const SELF = fileURLToPath(import.meta.url);
@@ -33,7 +34,7 @@ export class StageBrowserStop extends Error {
 }
 function guard(value, code) { if (!value) throw new StageBrowserStop(code); }
 function safeCode(error) {
-  return (error instanceof StageBrowserStop || error instanceof StageStop || error instanceof WorkSharesBrowserStop) &&
+  return (error instanceof StageBrowserStop || error instanceof StageStop || error instanceof StageSessionsStop || error instanceof WorkSharesBrowserStop) &&
     /^[A-Z][A-Z0-9_]{2,100}$/.test(error.code ?? "") ? error.code : "STAGE_BROWSER_FAILED_INSPECT_STATE";
 }
 function read(path) {
@@ -136,7 +137,9 @@ export async function runStageBrowser({ controlDir, featureSeal }) {
   let drain = "MISSING";
   let browserStarted = false;
   try {
-    sessionResult = await stageOperation({ operation: "sessions", directory, sealFile: featureSeal });
+    const sessionSeal = join(directory, "browser-session-bridge-seal.json");
+    await createStageBrowserSessionSeal({ directory, sealFile: featureSeal, outputFile: sessionSeal });
+    sessionResult = await getStageBrowserSessions({ directory, sealFile: sessionSeal });
     guard(sessionResult.publicSummary?.status === "PASS" && sessionResult.publicSummary.runId === plan.runId &&
       hash(read(preparedFile)) === hash(preparedBytes), "SESSION_PREPARED_BINDING_CHANGED");
     const sessions = sessionResult.privatePayload?.sessions;

@@ -65,12 +65,17 @@ export default async function ProductsPage({
         clientId: product.project.client.id,
         clientName: displayClientName(product.project.client),
         engineerName: product.engineer?.name ?? null,
+        engineerId: product.engineerId,
+        isEngineeringParticipant: product.isEngineeringParticipant,
+        hasB3d: product.hasB3d,
+        noModel: product.noModel,
         sketchFile: product.sketchFile,
       }))}
       total={result.total}
       page={page}
       pageSize={pageSize}
       canManage={hasAnyRole(role, MANAGER_ROLES)}
+      actorRoles={role}
       showAmount={hasAnyRole(role, OFFICE_ROLES)}
       engineerOptions={engineers.map((engineer) => ({
         value: engineer.id,

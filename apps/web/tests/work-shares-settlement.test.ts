@@ -41,6 +41,40 @@ test("completion pays only the fixed remaining split budget", async () => {
   assert.equal(Number(fixture.state().entries[0].amount), 700);
 });
 
+test("classified installation splits only physical quantity and never pays task PIECE", async () => {
+  fixture = taskShareFixture();
+  fixture.state().works[0].paymentKind = "INSTALLATION";
+  const split = await splitTaskCore({ id: "manager", name: "Manager", roles: ["MANAGER"], source: "web" },
+    { taskId: "source", recipientId: "recipient", percent: "30", expectedRevision: 0, requestId: randomUUID() }, fixture.transaction);
+  assert.equal(split.ok, true);
+  assert.equal(fixture.state().groups[0].budgetSource, "PHYSICAL_ONLY");
+  assert.equal(fixture.state().groups[0].budget, null);
+  assert.equal(fixture.state().groups[0].currency, null);
+  const parts = fixture.state().tasks.filter((task) => task.allocationGroupId);
+  assert.deepEqual(parts.map((task) => task.shareUnits).sort(), [300000, 700000]);
+  assert.ok(parts.every((task) => task.physicalOnlyShare === true && task.shareAmount === null && task.stageShareUnits == null));
+  assert.equal((await actions.changeTaskStatus("source", "DONE", 20)).ok, true);
+  assert.equal(fixture.state().entries.length, 0);
+});
+
+test("old TASK_FIXED installation allocation stays readable but split form and action refuse it", async () => {
+  fixture = taskShareFixture();
+  fixture.state().works[0].paymentKind = "INSTALLATION";
+  const source = fixture.state().tasks[0];
+  source.allocationGroupId = "old-group"; source.shareUnits = 1000000; source.shareAmount = "1000.00";
+  fixture.state().groups.push({ id: "old-group", workId: "work", quantity: "10", budget: "1000.00",
+    currency: "BYN", budgetSource: "TASK_FIXED" });
+  const before = structuredClone(fixture.state());
+  const options = await shares.getTaskSplitOptions("source");
+  assert.equal(options.ok, false);
+  const result = await splitTaskCore({ id: "manager", name: "Manager", roles: ["MANAGER"], source: "web" },
+    { taskId: "source", recipientId: "recipient", percent: "50", expectedRevision: 0, requestId: randomUUID() }, fixture.transaction);
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.match(result.error, /Старое денежное распределение сохранено/);
+  assert.deepEqual(fixture.state(), before);
+  assert.deepEqual(fixture.writes, []);
+});
+
 test("simultaneous completion requests cannot create duplicate earnings", async () => {
   fixture = taskShareFixture();
   await Promise.all([actions.changeTaskStatus("source", "DONE", 20), actions.changeTaskStatus("source", "DONE", 20)]);
@@ -123,7 +157,11 @@ test("split action and UI mapping show individual quantity, actual cents and all
   assert.equal(mapped.canSplit, true);
   const current = await shares.getTaskSplitOptions("source");
   assert.ok(current.ok);
-  assert.deepEqual(current.share, { units: 700_000, amount: "700.00", currency: "BYN", quantity: "10", revision: 1 });
+  assert.deepEqual(current.share, {
+    units: 700_000, amount: "700.00", currency: "BYN", quantity: "10", revision: 1,
+    source: "LEGACY", stageUnits: null, previewAmount: null, previewCurrency: null,
+    previewReason: null, settledSource: false, engineeringPreview: null,
+  });
 });
 
 test("UI fractional remainder reaches strict create and edit actions without binary tails", async () => {
@@ -141,4 +179,16 @@ test("UI fractional remainder reaches strict create and edit actions without bin
   assert.equal((await actions.updateTask("source", { quantity: Number(remainingWorkQuantity("10.30", "10.00", "0.20")) })).ok, true);
   assert.equal(fixture.state().tasks[0].quantity, "0.50");
   assert.equal((await actions.updateTask("source", { quantity: 0.501 })).ok, false);
+});
+
+test("engineering DTO never presents retained legacy money as the current work price", async () => {
+  fixture = taskShareFixture();
+  Object.assign(fixture.state().works[0], { paymentKind: "ENGINEERING", stagePayPoolId: "pool", poolWeightUnits: 1_000_000 });
+  fixture.state().tasks[0].stageShareUnits = 1_000_000;
+  const row = await fixture.database.task.findFirst({ where: { id: "source" } });
+  const { mapTaskDetails } = await import("../src/server/tasks/queries");
+  const [mapped] = await mapTaskDetails([row as never], { id: "manager", roles: ["MANAGER"] });
+  assert.equal(mapped.paymentKind, "ENGINEERING");
+  assert.equal(mapped.workPriceSnapshot, null); assert.equal(mapped.workTotal, null); assert.equal(mapped.shareAmount, null);
+  assert.equal(fixture.state().works[0].priceSnapshot, "100"); assert.equal(fixture.state().works[0].total, "1000");
 });

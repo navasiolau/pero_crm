@@ -15,7 +15,7 @@ import {
 } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
 import { toast } from "sonner";
-import type { ProductStatus } from "@prisma/client";
+import type { ProductStatus, Role } from "@prisma/client";
 
 import { DragHandle } from "@/components/drag-handle";
 import { ProductKanbanCard } from "@/components/product-kanban-card";
@@ -26,6 +26,7 @@ import {
   productStatusStyles,
 } from "@/lib/product-statuses";
 import { cn } from "@/lib/utils";
+import { productStatusTargets, shouldRollbackProductStatus } from "@/lib/product-percentage-ui";
 import { changeProductStatus } from "@/server/products/actions";
 
 import type { ProductRow } from "./products-view";
@@ -33,16 +34,16 @@ import type { ProductRow } from "./products-view";
 function DraggableProduct({
   product,
   showAmount,
-  canManage,
+  canDrag,
   onOpen,
 }: {
   product: ProductRow;
   showAmount: boolean;
-  canManage: boolean;
+  canDrag: boolean;
   onOpen: (product: ProductRow) => void;
 }) {
   const { attributes, listeners, setActivatorNodeRef, setNodeRef, transform, isDragging } =
-    useDraggable({ id: product.id, disabled: !canManage });
+    useDraggable({ id: product.id, disabled: !canDrag });
 
   return (
     <div
@@ -51,7 +52,7 @@ function DraggableProduct({
       className={cn("relative", isDragging && "opacity-40")}
       onClick={() => onOpen(product)}
     >
-      {canManage && <DragHandle ref={setActivatorNodeRef} {...attributes} {...listeners} label={product.title} />}
+      {canDrag && <DragHandle ref={setActivatorNodeRef} {...attributes} {...listeners} label={product.title} />}
       <ProductKanbanCard
         product={product}
         currency={product.currency}
@@ -66,16 +67,18 @@ function StatusColumn({
   status,
   products,
   showAmount,
-  canManage,
+  canDrop,
+  canDrag,
   onOpen,
 }: {
   status: (typeof PRODUCT_STATUSES)[number];
   products: ProductRow[];
   showAmount: boolean;
-  canManage: boolean;
+  canDrop: boolean;
+  canDrag: (product: ProductRow) => boolean;
   onOpen: (product: ProductRow) => void;
 }) {
-  const { setNodeRef, isOver } = useDroppable({ id: status.id });
+  const { setNodeRef, isOver } = useDroppable({ id: status.id, disabled: !canDrop });
   const style = productStatusStyles[status.id];
   return (
     <div
@@ -100,7 +103,7 @@ function StatusColumn({
             key={product.id}
             product={product}
             showAmount={showAmount}
-            canManage={canManage}
+            canDrag={canDrag(product)}
             onOpen={onOpen}
           />
         ))}
@@ -109,17 +112,19 @@ function StatusColumn({
   );
 }
 
-// Канбан изделий: колонки = статусы §6, свободные переходы, оптимичное
-// обновление с откатом (dnd — админ/директор/менеджер). Порядок и фильтры —
+// Канбан изделий: колонки = статусы §6, доступность перехода определяется
+// ролью и данными изделия. Порядок и фильтры —
 // с сервера (новые сверху); после смены статуса revalidate синхронизирует
 // доску — перетащенное в «Готово» при активной галочке уходит с доски.
 export function ProductsKanban({
   initialProducts,
   canManage,
+  actorRoles,
   showAmount,
 }: {
   initialProducts: ProductRow[];
   canManage: boolean;
+  actorRoles: readonly Role[];
   showAmount: boolean;
 }) {
   const router = useRouter();
@@ -159,16 +164,33 @@ export function ProductsKanban({
     const product = products.find((item) => item.id === String(active.id));
     const toStatus = over.id as ProductStatus;
     if (!product || product.status === toStatus) return;
+    const allowedTargets = productStatusTargets(actorRoles, {
+      from: product.status,
+      assignedEngineer: product.isEngineeringParticipant,
+      participant: product.isEngineeringParticipant,
+      hasB3d: product.hasB3d,
+      noModel: product.noModel,
+    });
+    if (!allowedTargets.includes(toStatus)) {
+      toast.error("Нет права на такой переход статуса");
+      return;
+    }
 
     const fromStatus = product.status;
     applyStatus(product.id, toStatus);
     const result = await changeProductStatus(product.id, toStatus);
-    if (!result.ok) {
+    if (shouldRollbackProductStatus(result)) {
       applyStatus(product.id, fromStatus); // откат оптимистичного обновления
       toast.error(result.error ?? "Не удалось сменить статус");
       return;
     }
-    toast.success(`Статус: ${productStatusLabels[toStatus]}`);
+    toast.success(result.financeState === "PENDING_FX"
+      ? `Статус сохранён: ${productStatusLabels[toStatus]}. Расчёт ожидает курса.`
+      : `Статус: ${productStatusLabels[toStatus]}`);
+    if (actorRoles.length === 1 && actorRoles[0] === "ENGINEER" && toStatus === "PRODUCTION")
+      router.push("/products");
+    else
+      router.refresh();
   }
 
   const activeProduct = products.find((product) => product.id === activeId);
@@ -189,7 +211,20 @@ export function ProductsKanban({
             status={status}
             products={products.filter((product) => product.status === status.id)}
             showAmount={showAmount}
-            canManage={canManage}
+            canDrag={(product) => canManage || productStatusTargets(actorRoles, {
+              from: product.status,
+              assignedEngineer: product.isEngineeringParticipant,
+              participant: product.isEngineeringParticipant,
+              hasB3d: product.hasB3d,
+              noModel: product.noModel,
+            }).length > 0}
+            canDrop={canManage || (!!activeProduct && productStatusTargets(actorRoles, {
+              from: activeProduct.status,
+              assignedEngineer: activeProduct.isEngineeringParticipant,
+              participant: activeProduct.isEngineeringParticipant,
+              hasB3d: activeProduct.hasB3d,
+              noModel: activeProduct.noModel,
+            }).includes(status.id))}
             onOpen={(product) => router.push(`/products/${product.number}`)}
           />
         ))}

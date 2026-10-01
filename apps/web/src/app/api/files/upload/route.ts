@@ -6,12 +6,16 @@ import sharp from "sharp";
 import type { FileCategory, FileStage } from "@prisma/client";
 
 import { auth } from "@/auth";
+import { isCoverImageMime } from "@/lib/product-cover";
 import { prisma } from "@/lib/prisma";
 import { UPLOADS_ROOT, s3Enabled, s3Put, fileKey, thumbKey } from "@/lib/s3";
+import { authorizeProductCoverUpload, persistUploadedProductCover } from "@/server/products/cover-core";
+import { revalidateProductPaths } from "@/server/products/revalidate";
 import { resolveUploadContext } from "@/server/files/upload-context";
 import { writeChangeLog } from "@/server/plugins/changelog";
 import { notifyOrg } from "@/server/notifications/notify";
 import { getFileStageConfig } from "@/server/files/stage-config";
+import { withTaskTransaction } from "@/server/tasks/transaction";
 import {
   FILE_STAGES,
   validateFileForCategory,
@@ -54,6 +58,24 @@ export async function POST(request: Request) {
   const requestedProductId =
     typeof productIdRaw === "string" && productIdRaw ? productIdRaw : null;
   const taskId = typeof form.get("taskId") === "string" && form.get("taskId") ? (form.get("taskId") as string) : null;
+  const coverRaw = form.get("assignCover");
+  const assignCover = coverRaw === "1";
+  if (coverRaw !== null && !assignCover) {
+    return NextResponse.json({ error: "Неверный режим загрузки обложки" }, { status: 400 });
+  }
+  if (assignCover) {
+    if (!requestedProductId || taskId || form.get("category") !== "PHOTO") {
+      return NextResponse.json({ error: "Для обложки нужны изделие и категория Фото без задачи" }, { status: 400 });
+    }
+    if (!isCoverImageMime(file.type)) {
+      return NextResponse.json({ error: "Нужно изображение поддерживаемого формата" }, { status: 415 });
+    }
+    // The generic task/project upload grant is broader than cover-edit rights.
+    // Resolve exact product and role before file.arrayBuffer or storage writes.
+    const permission = await authorizeProductCoverUpload(prisma, session.user,
+      { projectId, productId: requestedProductId });
+    if (!permission.ok) return NextResponse.json({ error: permission.error }, { status: 404 });
+  }
   const context = await resolveUploadContext(prisma, session.user, { projectId, productId: requestedProductId, taskId });
   if (!context) return NextResponse.json({ error: "Проект, изделие или задача не найдены" }, { status: 404 });
   const { project, productId, productNumber } = context;
@@ -87,18 +109,23 @@ export async function POST(request: Request) {
 
   const storedName = `${randomUUID()}-${sanitizeFileName(file.name)}`;
   const buffer = Buffer.from(await file.arrayBuffer());
+  if (buffer.length > MAX_SIZE) return NextResponse.json({ error: "Файл больше 25 МБ" }, { status: 413 });
 
   // Превью для изображений
   let hasThumb = false;
   let thumbBuffer: Buffer | null = null;
   if (file.type.startsWith("image/")) {
     try {
-      thumbBuffer = await sharp(buffer)
+      const image = sharp(buffer);
+      thumbBuffer = await (assignCover ? image.rotate() : image)
         .resize(480, 480, { fit: "inside", withoutEnlargement: true })
         .jpeg({ quality: 80 })
         .toBuffer();
       hasThumb = true;
     } catch {
+      if (assignCover) {
+        return NextResponse.json({ error: "Не удалось прочитать изображение обложки" }, { status: 422 });
+      }
       hasThumb = false; // битая картинка — отдадим оригинал
     }
   }
@@ -119,6 +146,29 @@ export async function POST(request: Request) {
       await mkdir(thumbDir, { recursive: true });
       await writeFile(path.join(thumbDir, `${storedName}.jpg`), thumbBuffer);
     }
+  }
+
+  if (assignCover && requestedProductId) {
+    let result: Awaited<ReturnType<typeof persistUploadedProductCover>>;
+    try {
+      result = await withTaskTransaction((tx) => persistUploadedProductCover(tx, session.user,
+        { projectId, productId: requestedProductId }, {
+          fileName: file.name, storedName, mimeType: file.type, size: file.size,
+          hasThumb, uploadedById: session.user.id, caption, stage,
+        }));
+    } catch {
+      // The old cover remains untouched. A failed DB transaction may leave a
+      // new, unreferenced storage object; never remove existing media here.
+      return NextResponse.json({ error: "Не удалось сохранить обложку" }, { status: 500 });
+    }
+    if (!result.ok) return NextResponse.json({ error: result.error }, { status: 404 });
+    await revalidateProductPaths(requestedProductId).catch(() => {});
+    await notifyOrg({
+      type: "file.added", title: `Файл к проекту ${project.number}`,
+      body: file.name, link: productNumber ? `/products/${productNumber}` : `/projects/${projectId}`,
+      exceptUserId: session.user.id,
+    }).catch(() => {});
+    return NextResponse.json({ ok: true, id: result.id });
   }
 
   const row = await prisma.file.create({

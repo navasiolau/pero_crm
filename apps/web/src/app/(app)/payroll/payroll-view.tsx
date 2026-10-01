@@ -70,7 +70,7 @@ export function PayrollView({
       sortValue: (row) => row.amount,
       className: "text-right font-medium",
       headerClassName: "text-right",
-      cell: (row) => formatAmount(row.amount, currency),
+      cell: (row) => formatAmount(row.amount, row.currency),
     },
   ];
 

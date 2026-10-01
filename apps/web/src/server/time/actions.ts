@@ -8,7 +8,7 @@ import { prisma } from "@/lib/prisma";
 import { writeChangeLog } from "@/server/plugins/changelog";
 
 import { MANAGER_ROLES, OFFICE_ROLES, hasAnyRole } from "@/lib/roles";
-import { taskExecutionWhere, taskVisibilityWhere } from "@/server/access/visibility";
+import { resolveVisibilityActor, taskExecutionWhere, taskVisibilityWhere } from "@/server/access/visibility";
 
 const AUTOSTOP_MINUTES = 12 * 60; // §19: автостоп по таймауту 12 ч с пометкой
 
@@ -25,8 +25,9 @@ export async function getActiveTimer() {
   const session = await auth();
   if (!session?.user) throw new Error("Не авторизован");
   await autostopExpired(session.user.id);
+  const actor = await resolveVisibilityActor(prisma, session.user);
   return prisma.timeEntry.findFirst({
-    where: { userId: session.user.id, stoppedAt: null, task: taskExecutionWhere(session.user) },
+    where: { userId: session.user.id, stoppedAt: null, task: taskExecutionWhere(actor) },
     include: {
       task: {
         select: {
@@ -46,8 +47,9 @@ export async function startTimer(
 ): Promise<{ ok: boolean; error?: string }> {
   const session = await auth();
   if (!session?.user) throw new Error("Не авторизован");
+  const actor = await resolveVisibilityActor(prisma, session.user);
 
-  const task = await prisma.task.findFirst({ where: { AND: [{ id: taskId }, taskExecutionWhere(session.user)] } });
+  const task = await prisma.task.findFirst({ where: { AND: [{ id: taskId }, taskExecutionWhere(actor)] } });
   if (!task) return { ok: false, error: "Задача не найдена" };
   if (task.status === "DONE") return { ok: false, error: "Задача уже выполнена" };
   const isAssignee = task.assigneeId === session.user.id;
@@ -80,9 +82,10 @@ export async function stopTimer(): Promise<{
 }> {
   const session = await auth();
   if (!session?.user) throw new Error("Не авторизован");
+  const actor = await resolveVisibilityActor(prisma, session.user);
 
   const active = await prisma.timeEntry.findFirst({
-    where: { userId: session.user.id, stoppedAt: null, task: taskExecutionWhere(session.user) },
+    where: { userId: session.user.id, stoppedAt: null, task: taskExecutionWhere(actor) },
   });
   if (!active) return { ok: false, error: "Активного таймера нет" };
 
@@ -126,8 +129,9 @@ export async function addManualTime(
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Ошибка данных" };
   }
+  const actor = await resolveVisibilityActor(prisma, session.user);
   const task = await prisma.task.findFirst({
-    where: { AND: [{ id: parsed.data.taskId }, taskExecutionWhere(session.user)] },
+    where: { AND: [{ id: parsed.data.taskId }, taskExecutionWhere(actor)] },
   });
   if (!task) return { ok: false, error: "Задача не найдена" };
   const isAssignee = task.assigneeId === session.user.id;
@@ -162,8 +166,9 @@ export async function addManualTime(
 export async function spentMinutes(taskId: string): Promise<number> {
   const session = await auth();
   if (!session?.user) throw new Error("Не авторизован");
+  const actor = await resolveVisibilityActor(prisma, session.user);
   const result = await prisma.timeEntry.aggregate({
-    where: { taskId, stoppedAt: { not: null }, task: taskVisibilityWhere(session.user) },
+    where: { taskId, stoppedAt: { not: null }, task: taskVisibilityWhere(actor) },
     _sum: { minutes: true },
   });
   return result._sum.minutes ?? 0;

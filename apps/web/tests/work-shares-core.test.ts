@@ -32,11 +32,13 @@ test("repeat split affects only the remaining portion and conserves original bud
   assert.equal(f.state().groups.length, 1);
 });
 
-test("all active roles are valid recipients when context access permits", async () => {
-  for (const recipientId of ["recipient", "accountant", "admin", "director", "manager", "mounter", "engineer"]) {
+test("ordinary production task accepts recipients with production access", async () => {
+  for (const recipientId of ["recipient", "accountant", "admin", "director", "manager", "mounter"]) {
     const f = taskShareFixture();
     assert.equal((await splitTaskCore(worker, input({ recipientId }), f.transaction)).ok, true, recipientId);
   }
+  const engineer = taskShareFixture();
+  assert.equal((await splitTaskCore(worker, input({ recipientId: "engineer" }), engineer.transaction)).ok, false);
 });
 
 test("only assignee or management can divide a task", async () => {

@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { Prisma } from "@prisma/client";
 
 import { getNbrbRate } from "./nbrb";
 
@@ -102,7 +103,7 @@ export async function getProjectEconomics(
   if (!project) return null;
   const currency = project.currency;
 
-  const [payments, payrollEntries, stockMovements] = await Promise.all([
+  const [payments, payrollEntries, stockMovements, settlements] = await Promise.all([
     prisma.payment.findMany({
       where: { projectId },
       select: {
@@ -112,7 +113,7 @@ export async function getProjectEconomics(
       },
     }),
     prisma.payrollEntry.findMany({
-      where: { projectId },
+      where: { projectId, settlementShareId: null },
       select: { amount: true, currency: true },
     }),
     // Списания материалов со склада (§12): цены хранятся в BYN (totalByn),
@@ -120,6 +121,10 @@ export async function getProjectEconomics(
     prisma.stockMovement.findMany({
       where: { product: { projectId }, type: { in: ["EXPENSE", "RETURN"] } },
       select: { type: true, totalByn: true },
+    }),
+    prisma.productStageSettlement.findMany({
+      where: { projectId },
+      select: { productCurrency: true, projectAmount: true },
     }),
   ]);
 
@@ -145,7 +150,14 @@ export async function getProjectEconomics(
       (payrollByCurrency.get(entry.currency) ?? 0) + Number(entry.amount),
     );
   }
-  let payrollTotal = 0;
+  // Полный снимок включает эквиваленты долей, округлённых до нуля в валюте
+  // выплаты. Сумма только положительных PayrollEntry потеряла бы эти копейки.
+  let fixedPayroll = new Prisma.Decimal(0);
+  for (const settlement of settlements) {
+    if (settlement.productCurrency !== currency) throw new Error("Валюта проекта не соответствует зафиксированному начислению");
+    fixedPayroll = fixedPayroll.plus(settlement.projectAmount);
+  }
+  let payrollTotal = fixedPayroll.toNumber();
   for (const [entryCurrency, amount] of payrollByCurrency) {
     if (entryCurrency === currency) {
       payrollTotal += amount;

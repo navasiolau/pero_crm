@@ -1,5 +1,7 @@
 # Pre-push frozen release manifest — CRM, 01.10.2026
 
+> Исторический manifest первоначального релиза shares/cash/hero. Состав superseded утверждённой корректировкой в [CRM_APPROVED_RELEASE_CORRECTION_20261001.md](CRM_APPROVED_RELEASE_CORRECTION_20261001.md); изложенные здесь факты и снимок pre-push сохранены как история и не описывают текущий correction-кандидат.
+
 > Снимок состояния до main push. На момент подготовки локальные проверки selective release-кандидата завершены, main push/CI/deploy ожидаются. Фактическую доставку подтверждать по Git `main` ref и итоговому receipt. Production результат не проверен; его принимает владелец.
 
 ## Основание и состав

@@ -21,16 +21,16 @@ test("product detail keeps both fields and expands an image or description by it
   assert.equal(getProductHeroLayout(false, false), "empty");
 });
 
-test("preview chooses only the protected file route and uses a thumb when present", () => {
+test("preview chooses optimized protected routes independently of legacy thumb metadata", () => {
   assert.equal(getProductSketchPreviewSource({
     id: "file-1", fileName: "sketch.png", mimeType: "image/png", hasThumb: true,
-  }), "/api/files/file-1?thumb=1");
+  }), "/api/files/file-1?preview=card");
   assert.equal(getProductSketchPreviewSource({
     id: "file-2", fileName: "sketch.png", mimeType: "image/png", hasThumb: false,
-  }), "/api/files/file-2");
+  }), "/api/files/file-2?preview=card");
   assert.equal(getProductSketchPreviewSource({
     id: "file-1", fileName: "sketch.png", mimeType: "image/png", hasThumb: true,
-  }, false), "/api/files/file-1");
+  }, "original"), "/api/files/file-1");
   assert.equal(getProductSketchPreviewSource({
     id: "file-3", fileName: "drawing.pdf", mimeType: "application/pdf", hasThumb: true,
   }), null);
@@ -43,7 +43,7 @@ test("kanban image stage remains twice the measured information height", () => {
 });
 
 test("image failure replaces a broken source, while a different source can load", () => {
-  const failed = "/api/files/file-1?thumb=1";
+  const failed = "/api/files/file-1?preview=card";
   assert.equal(getProductHeroImageState(failed, null), "image");
   assert.equal(getProductHeroImageState(failed, failed), "error");
   assert.equal(getProductHeroImageState("/api/files/file-2", failed), "image");
@@ -96,7 +96,7 @@ test("shared kanban card renders contained protected thumbnail for both board re
   }));
 
   assert.match(html, /data-slot="product-kanban-image"/);
-  assert.match(html, /src="\/api\/files\/file-10\?thumb=1"/);
+  assert.match(html, /src="\/api\/files\/file-10\?preview=card"/);
   assert.match(html, /object-contain/);
   assert.match(html, /alt="sketch\.png"/);
   assert.doesNotMatch(html, /1200|formatAmount/);

@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useState, useTransition } from "react";
 import Link from "next/link";
@@ -32,6 +32,7 @@ import { ConfirmDeleteDialog } from "@/components/confirm-delete-dialog";
 import { QuantityStepper } from "@/components/quantity-stepper";
 import { TaskSplitDialog } from "@/components/task-split-dialog";
 import { formatAmount } from "@/lib/format";
+import { taskPaymentLabel, workPaymentSourceLabel } from "@/lib/task-payment-display";
 import { cn } from "@/lib/utils";
 import { sharePercent } from "@/lib/work-shares";
 import { isPositiveQuantity, quantityInputError, remainingWorkQuantity } from "@/lib/work-quantity";
@@ -58,6 +59,13 @@ export interface TaskDetails {
   shareUnits?: number;
   shareAmount?: string | null;
   shareCurrency?: string | null;
+  paymentKind?: "LEGACY" | "ENGINEERING" | "INSTALLATION";
+  physicalShareUnits?: number;
+  stageShareUnits?: number | null;
+  previewAmount?: string | null;
+  previewCurrency?: string | null;
+  previewReason?: string | null;
+  settledSource?: boolean;
   personalQuantity?: string | null;
   splitRevision?: number;
   canSplit?: boolean;
@@ -75,7 +83,7 @@ export interface TaskDetails {
   createdByName: string | null;
 }
 
-export const TASK_TYPES = ["Замер", "Производство", "Доставка", "Монтаж", "Прочее"];
+export const TASK_TYPES = ["Замер", "Проектирование", "Производство", "Доставка", "Монтаж", "Прочее"];
 
 export const taskStatusLabels: Record<TaskStatus, string> = {
   DRAFT: "Черновик",
@@ -112,7 +120,8 @@ export function TaskDialog({
   works?: {
     id: string;
     title: string;
-    total: string;
+    total: string | null;
+    paymentKind?: "LEGACY" | "ENGINEERING" | "INSTALLATION";
     quantity: string;
     allocated: string;
   }[];
@@ -142,12 +151,13 @@ export function TaskDialog({
   if (!task) return null;
   const readOnly = task.status === "DONE" || !canEdit;
   const isAllocatedShare = !!task.allocationGroupId;
+  const isInstallationPercentage = task.paymentKind === "INSTALLATION";
+  const quantityShareLabel = task.paymentKind === "ENGINEERING" || isInstallationPercentage
+    ? "Доля физического объёма" : "Доля задачи";
   const ownQuantity = task.personalQuantity === undefined
     ? (isAllocatedShare ? null : task.quantity)
     : task.personalQuantity;
-  const ownAmount = task.shareCurrency
-    ? formatAmount(task.shareAmount, task.shareCurrency)
-    : task.workId ? "—" : "Без денежного начисления";
+  const ownAmount = taskPaymentLabel(task);
 
   function startEdit() {
     if (!task) return;
@@ -318,16 +328,19 @@ export function TaskDialog({
                     const remaining = remainingWorkQuantity(work.quantity, work.allocated, own);
                     return {
                       value: work.id,
-                      label: `${work.title} · ${work.total} BYN`,
+                      label: `${work.title} · ${work.paymentKind === "INSTALLATION"
+                        ? workPaymentSourceLabel({ paymentKind: work.paymentKind, priceSnapshot: null, total: null, quantity: work.quantity })
+                        : work.paymentKind === "ENGINEERING" ? "Инженерный фонд (история)" : formatAmount(work.total, "BYN")}`,
                       hint:
                         isPositiveQuantity(remaining)
                           ? `свободно ${remaining} из ${work.quantity}`
                           : "распределена полностью",
-                      disabled: !isPositiveQuantity(remaining),
+                      disabled: !isPositiveQuantity(remaining) ||
+                        (work.paymentKind !== "LEGACY" && work.id !== task.workId),
                     };
                   })}
                   value={form.workId}
-                  disabled={isAllocatedShare}
+                  disabled={isAllocatedShare || isInstallationPercentage}
                   onChange={(value) =>
                     setForm((prev) => ({ ...prev, workId: value }))
                   }
@@ -355,9 +368,10 @@ export function TaskDialog({
             </div>
             {isAllocatedShare ? (
               <div className="rounded-lg border p-3 text-sm">
-                <div className="font-medium">Доля задачи: {sharePercent(task.shareUnits).replace(".", ",")}%</div>
+                <div className="font-medium">{quantityShareLabel}: {sharePercent(task.shareUnits).replace(".", ",")}%</div>
+                {task.paymentKind === "ENGINEERING" && task.stageShareUnits !== null && task.stageShareUnits !== undefined ? <div>Доля прежнего фонда (история): {sharePercent(task.stageShareUnits).replace(".", ",")}%</div> : null}
                 {ownQuantity !== null ? <div>Личный объём: {ownQuantity.replace(".", ",")} ед.</div> : null}
-                <div>Сумма доли: {ownAmount}</div>
+                <div>{isInstallationPercentage ? "Источник оплаты" : "Сумма доли"}: {ownAmount}</div>
                 <p className="mt-1 text-muted-foreground">
                   Изделие, работа и общий объём закреплены за всеми частями задачи.
                   Передать часть личного объёма можно через «Разделить».
@@ -483,9 +497,12 @@ export function TaskDialog({
                 </div>
               ) : null}
               <div>
-                <div className="text-xs text-muted-foreground">Доля задачи</div>
+                <div className="text-xs text-muted-foreground">{quantityShareLabel}</div>
                 <div>{sharePercent(task.shareUnits).replace(".", ",")}%</div>
               </div>
+              {task.paymentKind === "ENGINEERING" && task.stageShareUnits !== null && task.stageShareUnits !== undefined ? (
+                <div><div className="text-xs text-muted-foreground">Доля прежнего фонда (история)</div><div>{sharePercent(task.stageShareUnits).replace(".", ",")}%</div></div>
+              ) : null}
               {ownQuantity !== null ? (
                 <div>
                   <div className="text-xs text-muted-foreground">Личный объём</div>
@@ -493,7 +510,7 @@ export function TaskDialog({
                 </div>
               ) : null}
               <div>
-                <div className="text-xs text-muted-foreground">Сумма доли</div>
+                <div className="text-xs text-muted-foreground">{isInstallationPercentage ? "Источник оплаты" : "Сумма доли"}</div>
                 <div>{ownAmount}</div>
               </div>
             </div>
@@ -627,7 +644,7 @@ export function TaskDialog({
                     <Trash2 className="size-4" /> Удалить
                   </Button>
                 ) : null}
-                {task.canSplit ? (
+                {task.canSplit && task.paymentKind !== "ENGINEERING" ? (
                   <Button variant="outline" disabled={pending} onClick={() => setSplitOpen(true)}>
                     <Split className="size-4" /> Разделить
                   </Button>

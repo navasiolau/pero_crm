@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { hasFullProjectVisibility, productVisibilityWhere, type VisibilityActor } from "@/server/access/visibility";
+import { hasFullProjectVisibility, productVisibilityWhere, resolveVisibilityActor, type VisibilityActor } from "@/server/access/visibility";
 
 // ─── Склад (§12, фаза 6): номенклатура, остатки из движений, потребность ──
 // Остатки не хранятся: остаток = Σ INCOME + Σ RETURN − Σ EXPENSE.
@@ -48,6 +48,7 @@ async function stockByMaterial(
 
 // Открытая потребность (долг) по материалам: Σ max(0, quantity − issuedQty)
 async function debtByMaterial(actor: VisibilityActor): Promise<Map<string, number>> {
+  actor = await resolveVisibilityActor(prisma, actor);
   const lines = await prisma.projectMaterial.findMany({
     where: { product: productVisibilityWhere(actor) },
     select: { materialId: true, quantity: true, issuedQty: true },
@@ -131,6 +132,7 @@ export async function listMovements(actor: VisibilityActor, filter?: {
   productId?: string;
   type?: "INCOME" | "EXPENSE" | "RETURN";
 }): Promise<StockMovementView[]> {
+  actor = await resolveVisibilityActor(prisma, actor);
   const movements = await prisma.stockMovement.findMany({
     where: {
       ...(hasFullProjectVisibility(actor) ? {} : { OR: [{ productId: null }, { product: productVisibilityWhere(actor) }] }),
@@ -200,6 +202,7 @@ export async function getProjectMaterials(
   productId: string,
   actor: VisibilityActor,
 ): Promise<ProjectMaterialsData> {
+  actor = await resolveVisibilityActor(prisma, actor);
   const [rows, movements] = await Promise.all([
     prisma.projectMaterial.findMany({
       where: { productId, product: productVisibilityWhere(actor) },
@@ -264,6 +267,7 @@ export async function listProductShortages(
   actor: VisibilityActor,
 ): Promise<Set<string>> {
   if (productIds.length === 0) return new Set();
+  actor = await resolveVisibilityActor(prisma, actor);
   const lines = await prisma.projectMaterial.findMany({
     where: { productId: { in: productIds }, product: productVisibilityWhere(actor) },
     select: {
@@ -294,6 +298,7 @@ export async function listProjectShortages(
   actor: VisibilityActor,
 ): Promise<Set<string>> {
   if (projectIds.length === 0) return new Set();
+  actor = await resolveVisibilityActor(prisma, actor);
   const lines = await prisma.projectMaterial.findMany({
     where: { product: { AND: [{ projectId: { in: projectIds } }, productVisibilityWhere(actor)] } },
     select: {

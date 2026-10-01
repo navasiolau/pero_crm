@@ -8,7 +8,7 @@ import { prisma } from "@/lib/prisma";
 import { writeChangeLog } from "@/server/plugins/changelog";
 import { notifyOrg } from "@/server/notifications/notify";
 import { OFFICE_ROLES, hasAnyRole } from "@/lib/roles";
-import { projectVisibilityWhere } from "@/server/access/visibility";
+import { projectVisibilityWhere, resolveVisibilityActor } from "@/server/access/visibility";
 
 
 const schema = z.object({
@@ -28,9 +28,10 @@ export async function addCommunication(
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Ошибка данных" };
   }
   const data = parsed.data;
+  const actor = await resolveVisibilityActor(prisma, session.user);
 
   const project = await prisma.project.findFirst({
-    where: { AND: [{ id: data.projectId }, projectVisibilityWhere(session.user)] },
+    where: { AND: [{ id: data.projectId }, projectVisibilityWhere(actor)] },
     select: { id: true, number: true, clientId: true },
   });
   if (!project) return { ok: false, error: "Проект не найден" };

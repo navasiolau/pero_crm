@@ -5,14 +5,15 @@ import { fileVisibilityWhere, taskVisibilityWhere, workVisibilityWhere, type Vis
 import { FULL_SHARE_UNITS, personalQuantity, taskPieceAmount } from "@/lib/work-shares";
 import { getPayrollCurrency } from "@/server/payroll/queries";
 import { canSplitTask } from "./share-policy";
+import { getEngineeringTaskPreview } from "@/server/product-stage-pay/preview";
 
 // Общий select задачи для карточек/списков (§9: работа, зависимости, файлы).
 export const taskDetailsInclude = {
   project: { select: { id: true, number: true, title: true } },
   product: { select: { id: true, number: true, title: true, engineerId: true, status: true } },
   assignee: { select: { id: true, name: true } },
-  work: { select: { id: true, title: true, total: true, priceSnapshot: true } },
-  allocationGroup: { select: { currency: true } },
+  work: { select: { id: true, title: true, total: true, priceSnapshot: true, paymentKind: true } },
+  allocationGroup: { select: { currency: true, budgetSource: true } },
   _count: { select: { payrollEntries: true } },
   files: { select: { id: true, fileName: true, hasThumb: true, mimeType: true } },
   dependencies: {
@@ -50,8 +51,9 @@ type TaskWithIncludes = {
   allocationGroupId?: string | null;
   shareUnits?: number | null;
   shareAmount?: unknown;
+  stageShareUnits?: number | null;
   splitRevision?: number;
-  allocationGroup?: { currency: string | null } | null;
+  allocationGroup?: { currency: string | null; budgetSource: string } | null;
   _count?: { payrollEntries: number };
   createdAt: Date;
   doneAt: Date | null;
@@ -60,7 +62,7 @@ type TaskWithIncludes = {
   project: { id: string; number: string; title: string };
   product: { id: string; number: string; title: string; engineerId: string | null; status: ProductStatus } | null;
   assignee: { id: string; name: string } | null;
-  work: { id: string; title: string; total: unknown; priceSnapshot: unknown } | null;
+  work: { id: string; title: string; total: unknown; priceSnapshot: unknown; paymentKind?: "LEGACY" | "ENGINEERING" | "INSTALLATION" } | null;
   files: { id: string; fileName: string; hasThumb: boolean; mimeType: string }[];
   dependencies: {
     dependsOn: { id: string; title: string; status: "DRAFT" | "NEW" | "IN_PROGRESS" | "DONE" };
@@ -97,9 +99,19 @@ export async function mapTaskDetails(
       })
     : [];
   const userNames = new Map(users.map((user) => [user.id, user.name]));
-  const currency = tasks.some((task) => task.work && !task.allocationGroup) ? await getPayrollCurrency() : null;
+  const currency = tasks.some((task) => task.work?.paymentKind === "LEGACY" && !task.allocationGroup) ? await getPayrollCurrency() : null;
+  const engineeringProductIds = [...new Set(tasks.filter((task) => task.work?.paymentKind === "ENGINEERING").flatMap((task) => task.product ? [task.product.id] : []))];
+  const previews = new Map<string, Awaited<ReturnType<typeof getEngineeringTaskPreview>>>();
+  const previewErrors = new Map<string, string>();
+  await Promise.all(engineeringProductIds.map(async (productId) => {
+    try { previews.set(productId, await getEngineeringTaskPreview(prisma, productId)); }
+    catch { previewErrors.set(productId, "Предварительная сумма недоступна: проверьте курс или распределение фонда"); }
+  }));
 
   return tasks.map((task) => {
+    const engineering = task.work?.paymentKind === "ENGINEERING";
+    const percentageWork = engineering || task.work?.paymentKind === "INSTALLATION";
+    const preview = engineering && task.product ? previews.get(task.product.id)?.get(task.id) : undefined;
     const allocation = {
       quantity: task.work && task.quantity !== null && task.quantity !== undefined ? String(task.quantity) : null,
       executorShare: String(task.executorShare ?? 1), allocationGroupId: task.allocationGroupId ?? null,
@@ -118,13 +130,20 @@ export async function mapTaskDetails(
     spentMinutes: spentMap.get(task.id) ?? 0,
     workId: task.work?.id ?? null,
     workTitle: task.work?.title ?? null,
-    workTotal: task.work ? String(task.work.total) : null,
-    workPriceSnapshot: task.work ? String(task.work.priceSnapshot) : null,
+    workTotal: percentageWork || task.work?.total === null || task.work?.total === undefined ? null : String(task.work.total),
+    workPriceSnapshot: percentageWork || task.work?.priceSnapshot === null || task.work?.priceSnapshot === undefined ? null : String(task.work.priceSnapshot),
     quantity: task.quantity ? String(task.quantity) : null,
     allocationGroupId: allocation.allocationGroupId,
     shareUnits: allocation.shareUnits,
-    shareAmount: task.work ? taskPieceAmount(allocation, String(task.work.priceSnapshot)) : null,
-    shareCurrency: task.work ? task.allocationGroup?.currency ?? currency : null,
+    shareAmount: percentageWork ? null : task.work && task.work.priceSnapshot !== null && task.work.priceSnapshot !== undefined ? taskPieceAmount(allocation, String(task.work.priceSnapshot)) : null,
+    shareCurrency: percentageWork ? null : task.work ? task.allocationGroup?.currency ?? currency : null,
+    paymentKind: task.work?.paymentKind ?? "LEGACY",
+    physicalShareUnits: allocation.shareUnits,
+    stageShareUnits: engineering ? task.stageShareUnits ?? null : null,
+    previewAmount: preview?.amount ?? null,
+    previewCurrency: preview?.currency ?? null,
+    previewReason: engineering && !preview ? previewErrors.get(task.product?.id ?? "") ?? "Задайте цену, ставку и полное распределение фонда" : null,
+    settledSource: preview?.settled ?? false,
     personalQuantity: personalQuantity(allocation),
     splitRevision: task.splitRevision ?? 0,
     canSplit: actor ? canSplitTask(actor, { ...task, paidCount: task._count?.payrollEntries ?? 0 }) : false,

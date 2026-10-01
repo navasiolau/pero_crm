@@ -3,7 +3,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import type { TaskTransaction } from "../../src/server/tasks/transaction";
 import { matches, type FixtureRow as Row } from "./visibility-fixture";
 
-export function taskShareFixture() {
+export function taskShareFixture(productStatus: "DESIGN" | "PRODUCTION" = "PRODUCTION") {
   const now = new Date("2026-09-28T00:00:00.000Z");
   let state = {
     tasks: ["source", "predecessor", "dependent"].map((id): Row => ({
@@ -15,8 +15,9 @@ export function taskShareFixture() {
       createdAt: now, updatedAt: now, doneAt: null, doneById: null,
     })),
     users: [["worker", "WORKER"], ["recipient", "WORKER"], ["manager", "MANAGER"], ["engineer", "ENGINEER"], ["accountant", "ACCOUNTANT"], ["admin", "ADMIN"], ["director", "DIRECTOR"], ["mounter", "MOUNTER"]].map(([id, role]): Row => ({ id, name: id, roles: [role], active: true, payScheme: "PIECE" })),
-    products: [{ id: "product", projectId: "project", number: "1.1", engineerId: "engineer", status: "DESIGN" }] as Row[],
-    works: [{ id: "work", projectId: "project", productId: "product", title: "work", quantity: "10", priceSnapshot: "100", total: "1000" }] as Row[],
+    products: [{ id: "product", projectId: "project", number: "1.1", engineerId: "engineer", status: productStatus }] as Row[],
+    pools: [{ id: "pool", productId: "product", kind: "ENGINEERING", state: "DRAFT", revision: 0 }] as Row[],
+    works: [{ id: "work", projectId: "project", productId: "product", title: "work", quantity: "10", priceSnapshot: "100", total: "1000", paymentKind: "LEGACY" }] as Row[],
     groups: [] as Row[], entries: [] as Row[], logs: [] as Row[], events: [] as Row[],
     dependencies: [{ taskId: "source", dependsOnId: "predecessor" }, { taskId: "dependent", dependsOnId: "source" }] as Row[],
     times: [{ id: "timer", taskId: "source", userId: "worker", minutes: 20, stoppedAt: null, startedAt: now }] as Row[],
@@ -34,7 +35,7 @@ export function taskShareFixture() {
       project: { id: "project", number: "1" },
       product: state.products.find((product) => product.id === row.productId) ?? null,
       assignee: state.users.find((user) => user.id === row.assigneeId) ?? null,
-      work: state.works.find((work) => work.id === row.workId) ?? null,
+      work: (() => { const work = state.works.find((item) => item.id === row.workId); const pool = state.pools.find((item) => item.id === work?.stagePayPoolId); return work ? { ...work, stagePayPool: work.stagePayPool ?? (pool ? { ...pool, product: state.products.find((item) => item.id === pool.productId) } : null) } : null; })(),
       allocationGroup: state.groups.find((group) => group.id === row.allocationGroupId) ?? null,
       _count: { payrollEntries: state.entries.filter((entry) => entry.taskId === row.id).length },
       dependencies: state.dependencies.filter((edge) => edge.taskId === row.id).map((edge) => ({ ...edge, dependsOn: state.tasks.find((task) => task.id === edge.dependsOnId) })),
@@ -83,7 +84,14 @@ export function taskShareFixture() {
       delete: async ({ where }: { where: Row }) => { write("work.delete"); const row = filtered(state.works, where)[0]; state.works = state.works.filter((work) => work !== row); return row; },
     },
     project: { findUnique: async () => ({ id: "project", number: "1" }) },
-    product: { findFirst: async ({ where }: { where: Row }) => filtered(state.products, where)[0] ?? null },
+    product: { findFirst: async ({ where }: { where: Row }) => filtered(state.products, where)[0] ?? null,
+      findUnique: async ({ where }: { where: Row }) => filtered(state.products, where)[0] ?? null },
+    productStagePayPool: {
+      findUnique: async ({ where }: { where: Row }) => filtered(state.pools, where)[0] ?? null,
+      update: async ({ where, data }: { where: Row; data: Row }) => {
+        write("pool.update"); const row = filtered(state.pools, where)[0]; if (!row) throw new Error("Pool not found"); return updateRow(row, data);
+      },
+    },
     orgSetting: { findUnique: async () => ({ value: state.currency }) },
     file: { updateMany: async ({ where, data }: { where: Row; data: Row }) => { write("file.updateMany"); const rows = filtered(state.files, where); for (const row of rows) Object.assign(row, data); return { count: rows.length }; } },
     timeEntry: {

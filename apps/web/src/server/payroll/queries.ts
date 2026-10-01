@@ -36,6 +36,7 @@ export async function getPayrollCurrency(): Promise<string> {
 export type PayrollEntryView = {
   id: string;
   amount: number;
+  currency: string;
   scheme: string;
   comment: string | null;
   createdAt: string;
@@ -109,6 +110,7 @@ export async function getMyPayroll(userId: string, month: string) {
       (entry): PayrollEntryView => ({
         id: entry.id,
         amount: Number(entry.amount),
+        currency: entry.currency,
         scheme: entry.scheme,
         comment: entry.comment,
         createdAt: entry.createdAt.toISOString(),
@@ -197,10 +199,19 @@ export async function getPayrollSummary(month: string) {
       prisma.payout.groupBy({ by: ["userId"], _sum: { amount: true } }),
     ]);
 
+  const pastAccruedMap = new Map(
+    pastAccrued.map((row) => [row.userId, Number(row._sum.amount ?? 0)]),
+  );
+  const totalPaidMap = new Map(
+    totalPaidByUser.map((row) => [row.userId, Number(row._sum.amount ?? 0)]),
+  );
+  const debtIds = [...new Set([...pastAccruedMap.keys(), ...totalPaidMap.keys()])]
+    .filter((id) => round2((pastAccruedMap.get(id) ?? 0) - (totalPaidMap.get(id) ?? 0)) !== 0);
   const ids = new Set<string>([
     ...schemeUsers.map((u) => u.id),
     ...entryUsers.map((u) => u.userId),
     ...payoutUsers.map((u) => u.userId),
+    ...debtIds,
   ]);
   const users = await prisma.user.findMany({
     where: { id: { in: [...ids] } },
@@ -217,13 +228,6 @@ export async function getPayrollSummary(month: string) {
   const advanceMap = new Map(
     advanceByUser.map((row) => [row.userId, Number(row._sum.amount ?? 0)]),
   );
-  const pastAccruedMap = new Map(
-    pastAccrued.map((row) => [row.userId, Number(row._sum.amount ?? 0)]),
-  );
-  const totalPaidMap = new Map(
-    totalPaidByUser.map((row) => [row.userId, Number(row._sum.amount ?? 0)]),
-  );
-
   const rows: PayrollSummaryRow[] = users.map((user) => {
     const accrued = accruedMap.get(user.id) ?? 0;
     const paid = paidMap.get(user.id) ?? 0;
@@ -302,11 +306,16 @@ export async function getMonthTurnover(
   };
 }
 
-// Сотрудники, которым считается зарплата (для диалога выплаты):
-// активные, схема не «без расчёта».
+// Схема NONE и деактивация не отменяют уже заработанную оплату.
+// Проверки месяца, долга и прав выплаты остаются в существующем action.
 export async function listPayrollUsers() {
+  const owed = (await getEmployeeDues()).filter((row) => row.due > 0).map((row) => row.userId);
   const users = await prisma.user.findMany({
-    where: { active: true, payScheme: { not: "NONE" } },
+    where: { OR: [
+      { active: true, payScheme: { not: "NONE" } },
+      { active: true, payrollEntries: { some: { settlementShareId: { not: null } } } },
+      { id: { in: owed } },
+    ] },
     select: { id: true, name: true, position: true },
     orderBy: { name: "asc" },
   });

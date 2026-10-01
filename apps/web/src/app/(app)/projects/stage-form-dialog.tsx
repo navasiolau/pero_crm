@@ -30,8 +30,8 @@ export interface StageFormValues {
   reclamationFault?: string;
 }
 
-// Мини-форма добора данных при перетаскивании (§6):
-// Отказ — причина + комментарий; Рекламация — причина, описание, виновная сторона (§6.3).
+// Необязательные дополнительные сведения при переходе в отказ/рекламацию.
+// Сами сведения не ограничивают право менеджмента сменить этап.
 export function StageFormDialog({
   request,
   onClose,
@@ -59,12 +59,6 @@ export function StageFormDialog({
       setValues((prev) => ({ ...prev, [key]: event.target.value }));
   }
 
-  const valid = isRefusal
-    ? values.refusalReason?.trim() && values.refusalComment?.trim()
-    : values.reclamationReason?.trim() &&
-      values.reclamationDescription?.trim() &&
-      values.reclamationFault?.trim();
-
   return (
     <Dialog open={!!request} onOpenChange={(open) => !open && onClose()}>
       <DialogContent>
@@ -74,8 +68,8 @@ export function StageFormDialog({
           </DialogTitle>
           <DialogDescription>
             {isRefusal
-              ? "Укажите причину отказа и комментарий — обязательные поля."
-              : "Рекламация переоткрывает завершённый проект. Заполните обязательные поля."}
+              ? "Причину и комментарий можно добавить по желанию."
+              : "Рекламация переоткрывает завершённый проект. Дополнительные сведения необязательны."}
           </DialogDescription>
         </DialogHeader>
 
@@ -83,7 +77,7 @@ export function StageFormDialog({
           {isRefusal ? (
             <>
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="refusalReason">Причина отказа *</Label>
+                <Label htmlFor="refusalReason">Причина отказа</Label>
                 <Input
                   id="refusalReason"
                   value={values.refusalReason ?? ""}
@@ -92,7 +86,7 @@ export function StageFormDialog({
                 />
               </div>
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="refusalComment">Комментарий *</Label>
+                <Label htmlFor="refusalComment">Комментарий</Label>
                 <Textarea
                   id="refusalComment"
                   value={values.refusalComment ?? ""}
@@ -104,7 +98,7 @@ export function StageFormDialog({
           ) : (
             <>
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="reclamationReason">Причина *</Label>
+                <Label htmlFor="reclamationReason">Причина</Label>
                 <Input
                   id="reclamationReason"
                   value={values.reclamationReason ?? ""}
@@ -113,7 +107,7 @@ export function StageFormDialog({
                 />
               </div>
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="reclamationDescription">Описание *</Label>
+                <Label htmlFor="reclamationDescription">Описание</Label>
                 <Textarea
                   id="reclamationDescription"
                   value={values.reclamationDescription ?? ""}
@@ -122,7 +116,7 @@ export function StageFormDialog({
                 />
               </div>
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="reclamationFault">Виновная сторона *</Label>
+                <Label htmlFor="reclamationFault">Виновная сторона</Label>
                 <Input
                   id="reclamationFault"
                   value={values.reclamationFault ?? ""}
@@ -139,7 +133,7 @@ export function StageFormDialog({
             Отмена
           </Button>
           <Button
-            disabled={!valid || pending}
+            disabled={pending}
             onClick={async () => {
               setPending(true);
               await onSubmit(request, values);

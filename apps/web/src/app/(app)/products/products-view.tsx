@@ -1,7 +1,7 @@
 "use client";
 
 import { LayoutGrid, Table2 } from "lucide-react";
-import type { ProductStatus } from "@prisma/client";
+import type { ProductStatus, Role } from "@prisma/client";
 
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useListParams } from "@/lib/list-params";
@@ -26,6 +26,10 @@ export interface ProductRow {
   clientId: string;
   clientName: string;
   engineerName: string | null;
+  engineerId: string | null;
+  isEngineeringParticipant: boolean;
+  hasB3d: boolean;
+  noModel: boolean;
   sketchFile: SketchFilePreview | null;
 }
 
@@ -38,6 +42,7 @@ export function ProductsView({
   page,
   pageSize,
   canManage,
+  actorRoles,
   showAmount,
   projectOptions,
   clientOptions,
@@ -50,6 +55,7 @@ export function ProductsView({
   page: number;
   pageSize: number;
   canManage: boolean;
+  actorRoles: readonly Role[];
   showAmount: boolean;
   projectOptions: { value: string; label: string; hint?: string }[];
   clientOptions: { value: string; label: string; hint?: string }[];
@@ -67,8 +73,8 @@ export function ProductsView({
         <div>
           <h1 className="text-2xl font-semibold">Изделия</h1>
           <p className="text-sm text-muted-foreground">
-            Все изделия организации — клик по карточке/строке открывает карточку
-            изделия; статус меняется перетаскиванием
+            Доступные вам изделия — карточка открывается по клику; разрешённый
+            переход статуса доступен перетаскиванием
           </p>
         </div>
         <ToggleGroup
@@ -98,6 +104,7 @@ export function ProductsView({
         <ProductsKanban
           initialProducts={products}
           canManage={canManage}
+          actorRoles={actorRoles}
           showAmount={showAmount}
         />
       ) : (

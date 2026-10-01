@@ -37,6 +37,7 @@ import {
   type TaskDetails,
 } from "@/components/task-dialog";
 import { formatAmount } from "@/lib/format";
+import { workPaymentAmountLabel, workPaymentSourceLabel } from "@/lib/task-payment-display";
 import { cn } from "@/lib/utils";
 import { isPositiveQuantity, quantityInputError, remainingWorkQuantity } from "@/lib/work-quantity";
 import { changeTaskStatus, createTask } from "@/server/tasks/actions";
@@ -49,8 +50,9 @@ export interface WorkRow {
   title: string;
   quantity: string;
   allocated: string;
-  priceSnapshot: string;
-  total: string;
+  priceSnapshot: string | null;
+  total: string | null;
+  paymentKind?: "LEGACY" | "ENGINEERING" | "INSTALLATION";
   linkedTask: { id: string; title: string; status: string } | null;
 }
 
@@ -111,7 +113,9 @@ export function TasksTab({
   const [priceItemId, setPriceItemId] = useState("");
   const [quantity, setQuantity] = useState("1");
 
-  const worksTotal = works.reduce((sum, work) => sum + Number(work.total), 0);
+  const pieceWorks = works.filter((work) => work.paymentKind !== "ENGINEERING" && work.paymentKind !== "INSTALLATION");
+  const worksTotal = pieceWorks.reduce((sum, work) => sum + Number(work.total ?? 0), 0);
+  const hasPercentageSource = works.some((work) => work.paymentKind === "ENGINEERING" || work.paymentKind === "INSTALLATION");
 
   return (
     <div className="flex flex-col gap-5">
@@ -119,7 +123,7 @@ export function TasksTab({
       <div className="flex flex-col gap-2">
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-medium">
-            Работы · итого {formatAmount(worksTotal, "BYN")}
+            {hasPercentageSource ? "Сдельные работы" : "Работы"}{pieceWorks.length ? ` · итого ${formatAmount(worksTotal, "BYN")}` : ""}
           </h3>
           {canManage ? (
             <Button size="sm" variant="outline" onClick={() => setWorkOpen(true)}>
@@ -132,7 +136,7 @@ export function TasksTab({
           return (
             <div
               key={work.id}
-              className="flex items-center gap-3 rounded-xl border px-3 py-2 text-sm"
+              className="flex flex-wrap items-center gap-3 rounded-xl border px-3 py-2 text-sm"
             >
               <span className="flex-1">
                 {work.title}
@@ -147,12 +151,12 @@ export function TasksTab({
                 )}
               </span>
               <span className="text-muted-foreground">
-                {formatAmount(work.priceSnapshot, "BYN")} × {work.quantity}
+                {workPaymentSourceLabel(work)}
               </span>
               <span className="font-medium">
-                {formatAmount(work.total, "BYN")}
+                {workPaymentAmountLabel(work)}
               </span>
-            {canManage ? (
+            {canManage && work.paymentKind !== "ENGINEERING" && work.paymentKind !== "INSTALLATION" ? (
               <Button
                 size="icon-xs"
                 variant="ghost"
@@ -380,12 +384,12 @@ export function TasksTab({
                   const remaining = remainingWorkQuantity(work.quantity, work.allocated);
                   return {
                     value: work.id,
-                    label: `${work.title} · ${formatAmount(work.priceSnapshot, "BYN")}/${"ед."}`,
+                    label: `${work.title} · ${work.paymentKind === "ENGINEERING" ? "Инженерный фонд (история)" : work.paymentKind === "INSTALLATION" ? "Монтаж — процент от изделия" : `${formatAmount(work.priceSnapshot, "BYN")}/ед.`}`,
                     hint:
                       isPositiveQuantity(remaining)
                         ? `свободно ${remaining} из ${work.quantity}`
                         : "распределена полностью",
-                    disabled: !isPositiveQuantity(remaining),
+                    disabled: work.paymentKind === "ENGINEERING" || work.paymentKind === "INSTALLATION" || !isPositiveQuantity(remaining),
                   };
                 })}
                 value={workId}
@@ -495,6 +499,7 @@ export function TasksTab({
           id: work.id,
           title: work.title,
           total: work.total,
+          paymentKind: work.paymentKind,
           quantity: work.quantity,
           allocated: work.allocated,
         }))}

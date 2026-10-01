@@ -6,7 +6,7 @@ import { MANAGER_ROLES, OFFICE_ROLES, hasAnyRole } from "@/lib/roles";
 import { getUserPreference } from "@/server/preferences";
 import { listWorkers } from "@/server/projects/queries";
 import { mapTaskDetails, taskDetailsIncludeFor } from "@/server/tasks/queries";
-import { taskVisibilityWhere } from "@/server/access/visibility";
+import { taskVisibilityWhere, resolveVisibilityActor } from "@/server/access/visibility";
 
 import { TasksPageView } from "./tasks-page-view";
 
@@ -16,6 +16,7 @@ export const dynamic = "force-dynamic";
 export default async function TasksPage() {
   const session = await auth();
   if (!session?.user) redirect("/login");
+  const actor = await resolveVisibilityActor(prisma, session.user);
   const role = session.user.roles;
   if (!hasAnyRole(role, OFFICE_ROLES)) {
     redirect("/my");
@@ -23,8 +24,8 @@ export default async function TasksPage() {
 
   const [tasks, workers, view] = await Promise.all([
     prisma.task.findMany({
-      where: taskVisibilityWhere(session.user),
-      include: taskDetailsIncludeFor(session.user),
+      where: taskVisibilityWhere(actor),
+      include: taskDetailsIncludeFor(actor),
       orderBy: [{ status: "asc" }, { dueAt: "asc" }, { createdAt: "desc" }],
       take: 300,
     }),
@@ -32,7 +33,7 @@ export default async function TasksPage() {
     getUserPreference(session.user.id, "tasks.view"),
   ]);
 
-  const mapped = await mapTaskDetails(tasks, session.user);
+  const mapped = await mapTaskDetails(tasks, actor);
 
   return (
     <TasksPageView

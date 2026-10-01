@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
-import { fileVisibilityWhere, hasFullProjectVisibility, taskExecutionWhere } from "@/server/access/visibility";
+import { fileVisibilityWhere, hasFullProjectVisibility, resolveVisibilityActor, taskExecutionWhere } from "@/server/access/visibility";
+import { bumpEngineeringPoolRevision } from "@/server/product-stage-pay/core";
 import { moneyAtoms, taskPieceAmount } from "@/lib/work-shares";
 import { OFFICE_ROLES, hasAnyRole } from "@/lib/roles";
 import type { DomainActor } from "@/server/projects/core";
@@ -25,7 +26,7 @@ async function startTimer(tx: Prisma.TransactionClient, taskId: string, userId: 
   await tx.timeEntry.create({ data: { taskId, userId, source: "timer" } });
 }
 
-async function stopTimer(tx: Prisma.TransactionClient, taskId: string) {
+export async function stopTaskTimers(tx: Prisma.TransactionClient, taskId: string) {
   await tx.timeEntry.updateMany({ where: { taskId, stoppedAt: null }, data: { stoppedAt: new Date() } });
   await tx.$executeRaw`
     UPDATE "TimeEntry" SET "minutes" = GREATEST(1, FLOOR(EXTRACT(EPOCH FROM ("stoppedAt" - "startedAt")) / 60)::int)
@@ -37,18 +38,30 @@ export async function changeTaskStatusCore(actor: DomainActor, taskId: string, t
   if (toStatus !== "IN_PROGRESS" && toStatus !== "DONE") return { ok: false, error: "Недопустимый переход статуса" };
   try {
     return await transaction(async (tx): Promise<CompletionResult> => {
+      const visibilityActor = await resolveVisibilityActor(tx, actor);
       const task = await tx.task.findFirst({
-        where: { AND: [{ id: taskId }, taskExecutionWhere(actor)] },
+        where: { AND: [{ id: taskId }, taskExecutionWhere(visibilityActor)] },
         include: {
-          project: { select: { id: true, number: true } }, product: { select: { id: true, number: true } },
-          work: { select: { id: true, priceSnapshot: true } }, allocationGroup: { select: { currency: true } },
-          files: { where: fileVisibilityWhere(actor), select: { id: true } },
+          project: { select: { id: true, number: true } }, product: { select: { id: true, number: true, projectId: true, status: true } },
+          work: { select: { id: true, projectId: true, productId: true, priceSnapshot: true, paymentKind: true, stagePayPoolId: true, stagePayPool: { select: { productId: true } } } }, allocationGroup: { select: { currency: true } },
+          files: { where: fileVisibilityWhere(visibilityActor), select: { id: true } },
           dependencies: { include: { dependsOn: { select: { id: true, title: true, status: true } } } },
         },
       });
       if (!task) throw new CompletionError("Задача не найдена");
       const effect: TaskEffect = { id: task.id, title: task.title, assigneeId: task.assigneeId, projectId: task.projectId, projectNumber: task.project.number, productId: task.productId, productNumber: task.product?.number ?? null };
       if (task.status === toStatus) return { ok: true, repeated: true, task: effect, payroll: null, eventId: null };
+      if (task.work?.paymentKind === "ENGINEERING") {
+        if (!task.productId || !task.product || task.product.projectId !== task.projectId ||
+          task.work.projectId !== task.projectId || task.work.productId !== task.productId ||
+          !task.work.stagePayPoolId || task.work.stagePayPool?.productId !== task.productId)
+          throw new CompletionError("Инженерная задача, работа и фонд относятся к разным изделиям или проектам");
+        try { await bumpEngineeringPoolRevision(tx, task.work.stagePayPoolId); }
+        catch (error) {
+          if (error instanceof Error && /Инженерный фонд|Изделие уже вышло/.test(error.message)) throw new CompletionError(error.message);
+          throw error;
+        }
+      }
       if (task.status !== "NEW" && !(task.status === "IN_PROGRESS" && toStatus === "DONE")) throw new CompletionError("Недопустимый переход статуса");
       const blockers = task.dependencies.filter((edge) => edge.dependsOn.status !== "DONE");
       if (blockers.length) throw new CompletionError(hasFullProjectVisibility(actor)
@@ -58,7 +71,7 @@ export async function changeTaskStatusCore(actor: DomainActor, taskId: string, t
       if (toStatus === "IN_PROGRESS" && task.assigneeId) await startTimer(tx, task.id, task.assigneeId);
       const doneAt = toStatus === "DONE" ? new Date() : null;
       if (doneAt) {
-        await stopTimer(tx, task.id);
+        await stopTaskTimers(tx, task.id);
         const spent = await tx.timeEntry.aggregate({ where: { taskId, stoppedAt: { not: null } }, _sum: { minutes: true } });
         if ((spent._sum.minutes ?? 0) === 0) {
           if (!hasAnyRole(actor.roles, OFFICE_ROLES)) throw new CompletionError("Нет записей времени. Возьмите задачу «В работу» — время посчитается таймером автоматически");
@@ -69,9 +82,12 @@ export async function changeTaskStatusCore(actor: DomainActor, taskId: string, t
       }
       await tx.task.update({ where: { id: task.id }, data: { status: toStatus, splitRevision: { increment: 1 }, ...(doneAt ? { doneAt, doneById: actor.id } : {}) } });
       let payroll: { name: string; amount: string; currency: string } | null = null;
-      if (doneAt && task.assigneeId && task.work) {
+      // Инженерный фонд начисляется целиком при передаче изделия в производство.
+      // Старые monetary snapshots конвертированной работы не являются её оплатой.
+      if (doneAt && task.assigneeId && task.work && task.work.paymentKind === "LEGACY") {
         const assignee = await tx.user.findUnique({ where: { id: task.assigneeId }, select: { name: true, payScheme: true } });
         if (assignee?.payScheme === "PIECE" && !await tx.payrollEntry.findFirst({ where: { taskId: task.id, scheme: "PIECE" }, select: { id: true } })) {
+          if (task.work.priceSnapshot === null) throw new CompletionError("Не задана расценка обычной работы");
           const amount = taskPieceAmount(task, task.work.priceSnapshot);
           if (moneyAtoms(amount) > BigInt(0)) {
             const currency = task.allocationGroup?.currency ?? (await tx.orgSetting.findUnique({ where: { key: "payrollCurrency" } }))?.value ?? "BYN";
