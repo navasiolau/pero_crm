@@ -29,6 +29,10 @@ apps/web/uploads/
 
 # Playwright MCP артефакты сессии
 .playwright-mcp/
+.pytest_cache/
+
+# Локальные CAD-образцы удалённого плагина; файлы сохраняются на диске
+/test_bazis_models/
 apps/web/test-results/
 apps/web/playwright-report/
 
