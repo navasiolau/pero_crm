@@ -28,4 +28,3 @@ test("settled preview retains frozen EUR currency and original amounts", async (
 test("foreign unprepared project has no new BYN preview", async () => {
   await assert.rejects(getEngineeringPreview(reader(null, "USD"), "p"), /BYN/);
 });
-

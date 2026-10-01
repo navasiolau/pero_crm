@@ -12,7 +12,7 @@
 
 | Проверка | Фактический результат |
 |---|---|
-| Web tests | 574/574 PASS |
+| Web tests | 576/576 PASS |
 | Telegram bot tests и typecheck | 11/11 PASS; typecheck PASS |
 | Web TypeScript | PASS |
 | Lint | 0 errors; только прежнее предупреждение cleanup-uploads |
@@ -42,3 +42,5 @@ QA-артефакты и приватные runtime файлы ignored; секр
 ## Pending Acceptance
 
 5.2 commit/обычный merge/CI и 5.3 фактические staging SHA/образ/health/денежные/ролевые/browser сценарии остаются pending до выполнения оркестратором. Не объявлять tested staging по локальному build или source equality. Refresh/W07 сохраняются. Production manual gate и отдельное разрешение выпуска остаются будущими; production DB, deployment и миграции этой задачей не проверялись/не изменялись.
+
+Последняя денежная поправка: Decimal ROUND_HALF_UP проверен для 0,05 USD × 0,7 = 0,04 BYN. Реальный local native runner повторён: 7 проверок, полный rollback и неизменные отпечатки таблиц; сборка повторена успешно. Серверные лимиты складывают Decimal без промежуточного number.

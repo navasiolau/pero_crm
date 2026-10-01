@@ -44,4 +44,3 @@ test("unknown foreign ordinary work cannot accrue payroll under BYN", async () =
   assert.equal(f.state().entries.length, 0);
   assert.deepEqual(f.state().tasks, before);
 });
-

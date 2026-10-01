@@ -95,6 +95,13 @@ async function main() {
    const history=payroll.payouts.find(row=>row.id===marker); assert.equal(history.amount,10); assert.equal(history.payrollCurrency,null); assert.equal(history.bynAmount,null);
    assert.equal(payroll.entries.find(row=>row.id===marker).currency,"USD");
    checks.push("legacy_payout_unknown_preserves_original_history");
+   phase = "physical_half_cent";
+   const precision=await createPaymentCore(actor,{projectId:created.id,direction:"INCOME",amount:0.05,currency:"USD",cashAccountId:cash.id,rate:0.7,rateDate:"2026-10-01",comment:`${marker}-precision`});
+   assert.equal(precision.ok,true,precision.error);
+   const precisionRow=await tx.payment.findFirstOrThrow({where:{projectId:created.id,comment:`${marker}-precision`}});
+   assert.equal(precisionRow.amount.toString(),"0.05");
+   assert.equal(precisionRow.bynAmount.toString(),"0.04");
+   checks.push("physical_half_cent_rounds_UP_to_fixed_BYN004");
    phase = "expected_rollback";
    throw rollback;
   }, { timeout:60000,maxWait:10000}), error=>error===rollback);

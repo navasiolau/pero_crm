@@ -20,7 +20,11 @@ export function sumByn(values: readonly (number | null)[]): number | null {
  return values.reduce<Prisma.Decimal>((sum, value) => sum.plus(value!), new Prisma.Decimal(0)).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP).toNumber();
 }
 export function requireHistoricalByn(rows: readonly Money[]): Prisma.Decimal {
- const value = sumHistoricalByn(rows);
- if (value === null) throw new Error(BYN_UNAVAILABLE_REASON);
- return new Prisma.Decimal(value);
+ let sum = new Prisma.Decimal(0);
+ for (const row of rows) {
+  const value = historicalByn(row);
+  if (value === null) throw new Error(BYN_UNAVAILABLE_REASON);
+  sum = sum.plus(value);
+ }
+ return sum.toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
 }
