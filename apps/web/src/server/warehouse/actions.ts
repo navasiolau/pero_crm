@@ -9,6 +9,9 @@ import { writeChangeLog } from "@/server/plugins/changelog";
 import { emitDomainEvent } from "@/server/plugins/events";
 import { notifyOrg } from "@/server/notifications/notify";
 import { revalidateProductPaths } from "@/server/products/revalidate";
+import { withTaskTransaction } from "@/server/tasks/transaction";
+import { addMaterialNorm, updateMaterialNorm, lockMaterialProduct } from "./norm-core";
+import { decimalAtoms, decimalText, materialDebt } from "@/lib/product-quantity";
 import { requireRole } from "@/server/require-role";
 
 // Склад (§12, фаза 6). Правки — админ/директор/менеджер; просмотр — офисные
@@ -296,7 +299,8 @@ export async function addStockIncome(
 const projectMaterialSchema = z.object({
   productId: z.string().min(1),
   materialId: z.string().min(1, "Выберите материал"),
-  quantity: z.number().positive("Количество должно быть больше нуля"),
+  quantity: z.number().positive("Количество должно быть больше нуля").optional(),
+  quantityPerUnit: z.number().positive("Количество должно быть больше нуля").optional(),
   comment: z.string().optional(),
 });
 
@@ -309,32 +313,10 @@ export async function addProjectMaterial(
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Ошибка данных" };
   }
   const data = parsed.data;
-  const [product, material] = await Promise.all([
-    prisma.product.findUnique({
-      where: { id: data.productId },
-      select: { id: true, number: true, projectId: true },
-    }),
-    prisma.material.findUnique({ where: { id: data.materialId } }),
-  ]);
-  if (!product) return { ok: false, error: "Изделие не найдено" };
-  if (!material || !material.active) {
-    return { ok: false, error: "Материал не найден" };
-  }
-  // Строка на этот материал уже есть — наращиваем количество (§12: строки
-  // может создавать скрипт плагина; дубли недопустимы)
-  const line = await prisma.projectMaterial.upsert({
-    where: {
-      productId_materialId: { productId: product.id, materialId: material.id },
-    },
-    create: {
-      productId: product.id,
-      materialId: material.id,
-      quantity: data.quantity,
-      comment: data.comment?.trim() || null,
-      createdById: session.user.id,
-    },
-    update: { quantity: { increment: data.quantity } },
-  });
+  let mutation;
+  try { mutation = await withTaskTransaction((tx) => addMaterialNorm(tx, data, session.user.id)); }
+  catch (error) { return { ok: false, error: error instanceof Error ? error.message : "Не удалось добавить материал" }; }
+  const { line, product, material } = mutation;
   await writeChangeLog({
     actorType: "user",
     actorId: session.user.id,
@@ -345,7 +327,8 @@ export async function addProjectMaterial(
     newValue: {
       product: product.number,
       material: material.name,
-      quantity: data.quantity,
+      quantity: line.quantity.toString(),
+      quantityPerUnit: line.quantityPerUnit?.toString() ?? null,
     },
   });
   await revalidateWarehouse(product.id, product.projectId);
@@ -354,7 +337,8 @@ export async function addProjectMaterial(
 
 const updateProjectMaterialSchema = z.object({
   id: z.string().min(1),
-  quantity: z.number().positive("Количество должно быть больше нуля"),
+  quantity: z.number().positive("Количество должно быть больше нуля").optional(),
+  quantityPerUnit: z.number().positive("Количество должно быть больше нуля").optional(),
   comment: z.string().optional(),
 });
 
@@ -366,25 +350,10 @@ export async function updateProjectMaterial(
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Ошибка данных" };
   }
-  const line = await prisma.projectMaterial.findUnique({
-    where: { id: parsed.data.id },
-    include: { product: { select: { projectId: true } } },
-  });
-  if (!line) return { ok: false, error: "Строка не найдена" };
-  const issuedQty = Number(line.issuedQty);
-  if (parsed.data.quantity < issuedQty) {
-    return {
-      ok: false,
-      error: `Нельзя поставить меньше уже выданного (${formatQty(issuedQty)})`,
-    };
-  }
-  await prisma.projectMaterial.update({
-    where: { id: line.id },
-    data: {
-      quantity: parsed.data.quantity,
-      comment: parsed.data.comment?.trim() || null,
-    },
-  });
+  let mutation;
+  try { mutation = await withTaskTransaction((tx) => updateMaterialNorm(tx, parsed.data)); }
+  catch (error) { return { ok: false, error: error instanceof Error ? error.message : "Не удалось изменить материал" }; }
+  const { line, quantity, quantityPerUnit } = mutation;
   await writeChangeLog({
     actorType: "user",
     actorId: session.user.id,
@@ -394,7 +363,7 @@ export async function updateProjectMaterial(
     action: "update",
     field: "quantity",
     oldValue: Number(line.quantity),
-    newValue: parsed.data.quantity,
+    newValue: { quantity, quantityPerUnit },
   });
   await revalidateWarehouse(line.productId, line.product.projectId);
   return { ok: true };
@@ -404,21 +373,19 @@ export async function deleteProjectMaterial(
   id: string,
 ): Promise<{ ok: boolean; error?: string }> {
   const session = await requireRole([...WAREHOUSE_MANAGERS]);
-  const line = await prisma.projectMaterial.findUnique({
-    where: { id },
-    include: {
-      material: { select: { name: true } },
-      product: { select: { projectId: true } },
-    },
-  });
-  if (!line) return { ok: false, error: "Строка не найдена" };
-  if (Number(line.issuedQty) > 0) {
-    return {
-      ok: false,
-      error: "По строке уже есть выдача со склада — сначала верните материал",
-    };
-  }
-  await prisma.projectMaterial.delete({ where: { id } });
+  let line;
+  try {
+    line = await withTaskTransaction(async (tx) => {
+      await lockMaterialProduct(tx, id);
+      const line = await tx.projectMaterial.findUnique({ where: { id }, include: {
+        material: { select: { name: true } }, product: { select: { projectId: true } },
+      } });
+      if (!line) throw new Error("Строка не найдена");
+      if (Number(line.issuedQty) > 0) throw new Error("По строке уже есть выдача со склада — сначала верните материал");
+      await tx.projectMaterial.delete({ where: { id } });
+      return line;
+    });
+  } catch (error) { return { ok: false, error: error instanceof Error ? error.message : "Не удалось удалить потребность" }; }
   await writeChangeLog({
     actorType: "user",
     actorId: session.user.id,
@@ -456,6 +423,7 @@ export async function requestMaterial(
 
   try {
     const result = await prisma.$transaction(async (tx) => {
+      await lockMaterialProduct(tx, data.projectMaterialId);
       const line = await tx.projectMaterial.findUnique({
         where: { id: data.projectMaterialId },
         include: {
@@ -465,7 +433,8 @@ export async function requestMaterial(
       });
       if (!line) throw new Error("Строка потребности не найдена");
 
-      const debt = Number(line.quantity) - Number(line.issuedQty);
+      const debt = materialDebt(line.quantity, line.issuedQty);
+      decimalAtoms(data.quantity, 3, 12);
       if (data.quantity > debt) {
         throw new Error(`Осталось выдать по строке ${formatQty(debt)} ${line.material.unit}`);
       }
@@ -476,11 +445,12 @@ export async function requestMaterial(
         where: { materialId: line.materialId },
         _sum: { quantity: true },
       });
-      let stock = 0;
+      let stockAtoms = BigInt(0);
       for (const row of grouped) {
-        stock += (row.type === "EXPENSE" ? -1 : 1) * Number(row._sum.quantity ?? 0);
+        stockAtoms += BigInt(row.type === "EXPENSE" ? -1 : 1) * decimalAtoms(row._sum.quantity ?? 0, 3, 18);
       }
-      if (data.quantity > stock) {
+      if (decimalAtoms(data.quantity, 3, 12) > stockAtoms) {
+        const stock = decimalText(stockAtoms, 3);
         throw new Error(
           `Недостаточно на складе: доступно ${formatQty(stock)} ${line.material.unit}`,
         );
@@ -580,6 +550,7 @@ export async function returnMaterial(
 
   try {
     const { movement, line } = await prisma.$transaction(async (tx) => {
+      await lockMaterialProduct(tx, data.projectMaterialId);
       const line = await tx.projectMaterial.findUnique({
         where: { id: data.projectMaterialId },
         include: {

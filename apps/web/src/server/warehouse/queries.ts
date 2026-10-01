@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { decimalAtoms, decimalText, materialDebt } from "@/lib/product-quantity";
 import { hasFullProjectVisibility, productVisibilityWhere, resolveVisibilityActor, type VisibilityActor } from "@/server/access/visibility";
 
 // ─── Склад (§12, фаза 6): номенклатура, остатки из движений, потребность ──
@@ -35,15 +36,15 @@ async function stockByMaterial(
     where: materialIds ? { materialId: { in: materialIds } } : undefined,
     _sum: { quantity: true },
   });
-  const stock = new Map<string, number>();
+  const stock = new Map<string, bigint>();
   for (const row of grouped) {
     const sign = row.type === "EXPENSE" ? -1 : 1;
     stock.set(
       row.materialId,
-      (stock.get(row.materialId) ?? 0) + sign * Number(row._sum.quantity ?? 0),
+      (stock.get(row.materialId) ?? BigInt(0)) + BigInt(sign) * decimalAtoms(row._sum.quantity ?? 0, 3, 18),
     );
   }
-  return stock;
+  return new Map([...stock].map(([id, atoms]) => [id, Number(decimalText(atoms, 3))]));
 }
 
 // Открытая потребность (долг) по материалам: Σ max(0, quantity − issuedQty)
@@ -55,7 +56,7 @@ async function debtByMaterial(actor: VisibilityActor): Promise<Map<string, numbe
   });
   const debt = new Map<string, number>();
   for (const line of lines) {
-    const value = Number(line.quantity) - Number(line.issuedQty);
+    const value = materialDebt(line.quantity, line.issuedQty);
     if (value > 0) {
       debt.set(line.materialId, (debt.get(line.materialId) ?? 0) + value);
     }
@@ -183,6 +184,7 @@ export type ProjectMaterialLine = {
   materialSku: string | null;
   unit: string;
   purchasePrice: number | null;
+  quantityPerUnit: number;
   quantity: number; // сколько нужно
   issuedQty: number; // сколько уже выдано
   debt: number; // quantity − issuedQty
@@ -221,7 +223,7 @@ export async function getProjectMaterials(
   const lines: ProjectMaterialLine[] = rows.map((row) => {
     const quantity = Number(row.quantity);
     const issuedQty = Number(row.issuedQty);
-    const debt = Math.max(0, quantity - issuedQty);
+    const debt = materialDebt(row.quantity, row.issuedQty);
     const available = stock.get(row.materialId) ?? 0;
     const status: ProjectMaterialLineStatus =
       debt <= 0 ? "FULFILLED" : available >= debt ? "AVAILABLE" : "SHORTAGE";
@@ -237,6 +239,7 @@ export async function getProjectMaterials(
           ? null
           : Number(row.material.purchasePrice),
       quantity,
+      quantityPerUnit: Number(row.quantityPerUnit ?? row.quantity),
       issuedQty,
       debt,
       available,

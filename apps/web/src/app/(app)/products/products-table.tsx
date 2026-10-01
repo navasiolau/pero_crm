@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { DataTable, type DataColumn } from "@/components/ui/data-table";
 import { useListParams } from "@/lib/list-params";
+import { productLineTotal } from "@/lib/product-quantity";
 import { formatAmount } from "@/lib/format";
 import { productStatusLabels, productStatusStyles } from "@/lib/product-statuses";
 import { cn } from "@/lib/utils";
@@ -92,16 +93,19 @@ export function ProductsTable({
         </Badge>
       ),
     },
+    { id: "quantity", header: "Количество", sortable: true, cell: (row) => `${row.quantity} шт.` },
     ...(showAmount
       ? [
           {
             id: "price",
-            header: "Цена",
+            header: "Цена за 1 шт.",
             sortable: true,
             headerClassName: "text-right",
             className: "text-right",
             cell: (row: ProductRow) => formatAmount(row.expectedPrice, row.currency),
           } satisfies DataColumn<ProductRow>,
+          { id: "sum", header: "Сумма", headerClassName: "text-right", className: "text-right",
+            cell: (row: ProductRow) => formatAmount(productLineTotal(row.expectedPrice, row.quantity), row.currency) } satisfies DataColumn<ProductRow>,
         ]
       : []),
   ];
@@ -122,7 +126,9 @@ export function ProductsTable({
             <div><dt className="text-xs text-muted-foreground">Проект</dt><dd><Link className="block min-h-11 underline-offset-2 hover:underline" href={`/projects/${row.projectId}`}>{row.projectNumber} · {row.projectTitle}</Link></dd></div>
             <div><dt className="text-xs text-muted-foreground">Клиент</dt><dd>{row.clientName}</dd></div>
             <div><dt className="text-xs text-muted-foreground">Инженер</dt><dd>{row.engineerName ?? "—"}</dd></div>
-            {showAmount && <div><dt className="text-xs text-muted-foreground">Цена</dt><dd>{formatAmount(row.expectedPrice, row.currency)}</dd></div>}
+            <div><dt className="text-xs text-muted-foreground">Количество</dt><dd>{row.quantity} шт.</dd></div>
+            {showAmount && <div><dt className="text-xs text-muted-foreground">Цена за 1 шт.</dt><dd>{formatAmount(row.expectedPrice, row.currency)}</dd></div>}
+            {showAmount && <div><dt className="text-xs text-muted-foreground">Сумма</dt><dd>{formatAmount(productLineTotal(row.expectedPrice, row.quantity), row.currency)}</dd></div>}
           </dl>
         </div>
       )}

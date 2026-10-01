@@ -17,6 +17,8 @@ import { listProductOptions } from "@/server/products/queries";
 import { withTaskTransaction } from "@/server/tasks/transaction";
 import { settlePendingProductPercentage } from "@/server/product-percentage-pay/core";
 import { changeProductStatusTransaction } from "@/server/products/status-core";
+import { productLineTotal } from "@/lib/product-quantity";
+import { lockProductRow, recalculateQuantity } from "@/server/products/quantity-core";
 
 type FinanceState = "PENDING_FX" | "SETTLED" | "SKIPPED_ONCE" | "LEGACY_PROTECTED" | null;
 
@@ -35,6 +37,7 @@ function revalidateProduct(product: { id: string; projectId: string }) {
 const createSchema = z.object({
   projectId: z.string().min(1),
   title: z.string().min(1, "Укажите название изделия"),
+  quantity: z.number().int("Количество должно быть целым").min(1, "Количество должно быть не меньше 1").max(2_147_483_647, "Слишком большое количество изделий").default(1),
   kind: z.string().optional(),
   expectedPrice: z.number().nonnegative("Цена не может быть отрицательной").optional(),
   initialPrice: z.number().nonnegative("Первоначальная цена не может быть отрицательной").optional(),
@@ -77,6 +80,12 @@ export async function createProduct(
   }
   const data = parsed.data;
 
+  try {
+    productLineTotal(data.expectedPrice ?? null, data.quantity);
+    productLineTotal(data.initialPrice ?? null, data.quantity);
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "Некорректная сумма партии" };
+  }
   const mutation = await withTaskTransaction(async (tx) => {
   const project = await tx.project.findUnique({
     where: { id: data.projectId },
@@ -94,6 +103,7 @@ export async function createProduct(
       number,
       suffixInt,
       title: data.title,
+      quantity: data.quantity,
       kind: data.kind?.trim() || null,
       expectedPrice: data.expectedPrice,
       initialPrice: data.initialPrice,
@@ -113,7 +123,7 @@ export async function createProduct(
     entity: "product",
     entityId: product.id,
     action: "create",
-    newValue: { number, title: data.title, project: project.number },
+    newValue: { number, title: data.title, quantity: data.quantity, project: project.number },
   } });
   return { ok: true as const, product };
   });
@@ -126,6 +136,7 @@ export async function createProduct(
 
 const updateSchema = z.object({
   title: z.string().min(1, "Укажите название изделия").optional(),
+  quantity: z.number().int("Количество должно быть целым").min(1, "Количество должно быть не меньше 1").max(2_147_483_647, "Слишком большое количество изделий").optional(),
   kind: z.string().nullable().optional(),
   expectedPrice: z.number().nonnegative("Цена не может быть отрицательной").nullable().optional(),
   initialPrice: z
@@ -160,14 +171,22 @@ export async function updateProduct(
     }
   }
 
+  try {
   const mutation = await withTaskTransaction(async (tx) => {
+    await lockProductRow(tx, productId);
     const actor = await resolveVisibilityActor(tx, session.user);
     const before = await tx.product.findFirst({ where: { AND: [{ id: productId }, productEditWhere(actor)] } });
     if (!before) return { ok: false as const, error: "Изделие не найдено" };
+    const oldCount = before.quantity ?? 1;
+    const count = data.quantity ?? oldCount;
+    productLineTotal(data.expectedPrice === undefined ? before.expectedPrice ?? null : data.expectedPrice, count);
+    productLineTotal(data.initialPrice === undefined ? before.initialPrice ?? null : data.initialPrice, count);
     if (data.engineerId && data.engineerId !== before.engineerId && !await tx.user.findFirst({ where: { id: data.engineerId, active: true, roles: { hasSome: ["ENGINEER"] } }, select: { id: true } }))
       return { ok: false as const, error: "Выберите активного сотрудника с ролью инженера" };
+    if (count !== oldCount) await recalculateQuantity(tx, { ...before, quantity: oldCount }, count);
     await tx.product.update({ where: { id: productId }, data });
-    if (data.expectedPrice !== undefined || data.engineerId !== undefined) await tx.productStagePayPool.updateMany({
+    if ((data.expectedPrice !== undefined && String(data.expectedPrice) !== String(before.expectedPrice)) ||
+        (data.engineerId !== undefined && data.engineerId !== before.engineerId)) await tx.productStagePayPool.updateMany({
       where: { productId, kind: "ENGINEERING", state: "DRAFT" }, data: { revision: { increment: 1 } },
     });
     return { ok: true as const, before };
@@ -188,7 +207,13 @@ export async function updateProduct(
     newValue: data,
   });
   revalidateProduct(before);
+  if (data.quantity !== undefined) {
+    for (const path of ["/", "/warehouse", "/warehouse/stock", "/warehouse/items", "/finance"]) revalidatePath(path);
+  }
   return { ok: true };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "Не удалось изменить изделие" };
+  }
 }
 
 // Смена статуса изделия: переходы свободные, каждый — в историю (§6),

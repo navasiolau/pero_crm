@@ -30,6 +30,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { ProductQuantityInput } from "@/components/product-quantity-input";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -51,6 +52,7 @@ export interface ProductCard {
   status: ProductStatus;
   statusChangedAt: string;
   expectedPrice: string | null;
+    quantity: number;
   engineerName: string | null;
   engineerId: string | null;
   isEngineeringParticipant: boolean;
@@ -177,6 +179,7 @@ export function ProductsTab({
   const [createOpen, setCreateOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [kind, setKind] = useState("");
+  const [quantity, setQuantity] = useState("1");
   const [price, setPrice] = useState("");
   const [initialPrice, setInitialPrice] = useState("");
   const [description, setDescription] = useState("");
@@ -247,7 +250,9 @@ export function ProductsTab({
   const parsedPrice = price.trim() === "" ? undefined : Number(price);
   const parsedInitialPrice =
     initialPrice.trim() === "" ? undefined : Number(initialPrice);
+  const parsedQuantity = Number(quantity);
   const canCreate =
+    Number.isInteger(parsedQuantity) && parsedQuantity >= 1 && parsedQuantity <= 2_147_483_647 &&
     title.trim().length > 0 &&
     (parsedPrice === undefined || (!Number.isNaN(parsedPrice) && parsedPrice >= 0)) &&
     (parsedInitialPrice === undefined ||
@@ -266,6 +271,8 @@ export function ProductsTab({
           </Button>
         ) : null}
       </div>
+
+      <p className="text-sm text-muted-foreground">{products.length} {products.length % 100 >= 11 && products.length % 100 <= 14 ? "позиций" : products.length % 10 === 1 ? "позиция" : [2, 3, 4].includes(products.length % 10) ? "позиции" : "позиций"} · {products.reduce((sum, product) => sum + product.quantity, 0)} шт.</p>
 
       <DndContext
         sensors={sensors}
@@ -319,6 +326,7 @@ export function ProductsTab({
             setTitle("");
             setKind("");
             setPrice("");
+                    setQuantity("1");
             setInitialPrice("");
             setDescription("");
             setEngineerId("");
@@ -352,8 +360,9 @@ export function ProductsTab({
                 placeholder="Кухня, шкаф, перегородка…"
               />
             </div>
+            <ProductQuantityInput value={quantity} onChange={setQuantity} price={price.trim() || null} currency={currency} showAmount={showAmount} />
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="product-price">Цена, {currency}</Label>
+              <Label htmlFor="product-price">Цена за 1 шт., {currency}</Label>
               <Input
                 id="product-price"
                 type="number"
@@ -366,7 +375,7 @@ export function ProductsTab({
             {showAmount ? (
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor="product-initial-price">
-                  Первоначальная цена, {currency}
+                  Первоначальная цена за 1 шт. (КП), {currency}
                 </Label>
                 <Input
                   id="product-initial-price"
@@ -412,6 +421,7 @@ export function ProductsTab({
                     title: title.trim(),
                     kind: kind.trim() || undefined,
                     expectedPrice: parsedPrice,
+                    quantity: parsedQuantity,
                     initialPrice: parsedInitialPrice,
                     description: description.trim() || undefined,
                     engineerId: engineerId || undefined,
@@ -422,6 +432,7 @@ export function ProductsTab({
                     setTitle("");
                     setKind("");
                     setPrice("");
+                    setQuantity("1");
                     setDescription("");
                     router.refresh();
                   } else {

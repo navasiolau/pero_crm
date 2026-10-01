@@ -16,6 +16,7 @@ export interface ProductKanbanCardData {
   title: string;
   statusChangedAt: string;
   expectedPrice: string | null;
+  quantity?: number;
   engineerName: string | null;
   sketchFile: SketchFilePreview | null;
 }
@@ -87,9 +88,12 @@ export function ProductKanbanCard({
       <div ref={infoRef} data-slot="product-kanban-info" className="flex flex-col gap-1.5 p-3">
         <div className="flex items-center justify-between gap-2 pr-10">
           <span className="break-all text-sm font-medium">{product.number}</span>
+          <div className="flex shrink-0 flex-wrap justify-end gap-1">
+          {(product.quantity ?? 1) > 1 && <Badge variant="secondary" aria-label={`Количество: ${product.quantity} шт.`}>×{product.quantity}</Badge>}
           <Badge variant="secondary" className={cn("shrink-0 text-xs", daysBadgeClass(days))}>
             {days} дн.
           </Badge>
+          </div>
         </div>
         <div className="break-words text-sm">{product.title}</div>
         {projectContext ? (
@@ -102,7 +106,7 @@ export function ProductKanbanCard({
         ) : null}
         {showAmount ? (
           <div className="text-xs text-muted-foreground">
-            {formatAmount(product.expectedPrice, currency)}
+            {formatAmount(product.expectedPrice, currency)} / шт.
           </div>
         ) : null}
       </div>

@@ -16,6 +16,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { ProductQuantityInput } from "@/components/product-quantity-input";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -64,6 +65,7 @@ export function ProductHeader({
     kind: string | null;
     status: ProductStatus;
     expectedPrice: string | null;
+    quantity: number;
     initialPrice: string | null;
     description: string | null;
     projectId: string;
@@ -85,6 +87,7 @@ export function ProductHeader({
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [title, setTitle] = useState(product.title);
   const [kind, setKind] = useState(product.kind ?? "");
+  const [quantity, setQuantity] = useState(String(product.quantity));
   const [price, setPrice] = useState(product.expectedPrice ?? "");
   const [initialPrice, setInitialPrice] = useState(product.initialPrice ?? "");
   const [description, setDescription] = useState(product.description ?? "");
@@ -95,7 +98,9 @@ export function ProductHeader({
   const parsedPrice = price.trim() === "" ? null : Number(price);
   const parsedInitialPrice =
     initialPrice.trim() === "" ? null : Number(initialPrice);
+  const parsedQuantity = Number(quantity);
   const canSave =
+    Number.isInteger(parsedQuantity) && parsedQuantity >= 1 && parsedQuantity <= 2_147_483_647 &&
     (onlyTech || title.trim().length > 0) &&
     (parsedPrice === null || (!Number.isNaN(parsedPrice) && parsedPrice >= 0)) &&
     (parsedInitialPrice === null ||
@@ -216,9 +221,10 @@ export function ProductHeader({
                     placeholder="Кухня, шкаф, перегородка…"
                   />
                 </div>
+                <ProductQuantityInput value={quantity} onChange={setQuantity} price={price.trim() || null} currency={currency} showAmount={showAmount} />
                 {showAmount ? (
                   <div className="flex flex-col gap-1.5">
-                    <Label htmlFor="ph-price">Цена, {currency}</Label>
+                    <Label htmlFor="ph-price">Цена за 1 шт., {currency}</Label>
                     <Input
                       id="ph-price"
                       type="number"
@@ -232,7 +238,7 @@ export function ProductHeader({
                 {showAmount ? (
                   <div className="flex flex-col gap-1.5">
                     <Label htmlFor="ph-initial-price">
-                      Первоначальная цена, {currency}
+                      Первоначальная цена за 1 шт. (КП), {currency}
                     </Label>
                     <Input
                       id="ph-initial-price"
@@ -284,6 +290,7 @@ export function ProductHeader({
                           title: title.trim(),
                           kind: kind.trim() || null,
                           expectedPrice: parsedPrice,
+                    quantity: parsedQuantity,
                           initialPrice: parsedInitialPrice,
                           description: description.trim() || null,
                           engineerId: engineerId || null,

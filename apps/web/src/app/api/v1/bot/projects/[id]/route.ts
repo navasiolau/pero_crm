@@ -1,3 +1,4 @@
+import { projectTotal as calculateProjectTotal } from "@/lib/product-quantity";
 import { NextResponse } from "next/server";
 
 import { prisma } from "@/lib/prisma";
@@ -35,7 +36,7 @@ export async function GET(
         select: { name: true, lastName: true, middleName: true, phone: true },
       },
       manager: { select: { name: true } },
-      products: { select: { expectedPrice: true } },
+      products: { select: { expectedPrice: true, quantity: true } },
     },
   });
   if (!project) {
@@ -44,13 +45,7 @@ export async function GET(
 
   // Сумма по проекту = Σ цен изделий + доставка/выгрузка/монтаж
   const totalExpected =
-    project.products.reduce(
-      (sum, product) => sum + Number(product.expectedPrice ?? 0),
-      0,
-    ) +
-    Number(project.delivery ?? 0) +
-    Number(project.unloading ?? 0) +
-    Number(project.installation ?? 0);
+    calculateProjectTotal(project.products, project);
 
   let finance: { incomeByn: number; expenseByn: number } | null = null;
   if (hasAnyRole(actor.roles, FINANCE_ROLES)) {

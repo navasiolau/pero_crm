@@ -1,3 +1,4 @@
+import { projectTotal as calculateProjectTotal } from "@/lib/product-quantity";
 import { redirect } from "next/navigation"
 
 import { auth } from "@/auth"
@@ -37,7 +38,7 @@ export default async function DashboardPage() {
     prisma.project.findMany({
       include: {
         client: { select: { name: true, lastName: true, middleName: true } },
-        products: { select: { expectedPrice: true } },
+        products: { select: { expectedPrice: true, quantity: true } },
       },
       orderBy: { createdAt: "desc" },
       take: 5,
@@ -86,13 +87,7 @@ export default async function DashboardPage() {
         projects={recent.map((project) => {
           // Сумма проекта = Σ цен изделий + доставка/выгрузка/монтаж
           const totalPrice =
-            project.products.reduce(
-              (sum, product) => sum + Number(product.expectedPrice ?? 0),
-              0,
-            ) +
-            Number(project.delivery ?? 0) +
-            Number(project.unloading ?? 0) +
-            Number(project.installation ?? 0);
+            calculateProjectTotal(project.products, project);
           return {
             id: project.id,
             number: project.number,

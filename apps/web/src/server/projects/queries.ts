@@ -1,3 +1,4 @@
+import { projectTotal as calculateProjectTotal } from "@/lib/product-quantity";
 import type { Prisma, ProjectStage, Role } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
@@ -195,7 +196,7 @@ async function fetchProjectRows(
     include: {
       client: { select: { id: true, name: true, lastName: true, middleName: true } },
       manager: { select: { id: true, name: true } },
-      products: { where: productVisibilityWhere(actor), select: { id: true, expectedPrice: true } },
+      products: { where: productVisibilityWhere(actor), select: { id: true, expectedPrice: true, quantity: true } },
       _count: { select: {
         tasks: { where: taskVisibilityWhere(actor) },
         files: { where: fileVisibilityWhere(actor) },
@@ -213,13 +214,7 @@ async function fetchProjectRows(
   return projects.map((project) => ({
     ...scopedProjectAmounts(project, actor),
     totalPrice:
-      project.products.reduce(
-        (sum, product) => sum + Number(product.expectedPrice ?? 0),
-        0,
-      ) +
-      (hasFullProjectVisibility(actor) ? Number(project.delivery ?? 0) +
-      Number(project.unloading ?? 0) +
-      Number(project.installation ?? 0) : 0),
+      calculateProjectTotal(project.products, hasFullProjectVisibility(actor) ? project : {}),
     hasMaterialShortage: shortages.has(project.id),
   }));
 }

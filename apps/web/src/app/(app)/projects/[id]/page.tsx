@@ -1,3 +1,4 @@
+import { projectTotal as calculateProjectTotal } from "@/lib/product-quantity";
 import nextDynamic from "next/dynamic";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
@@ -142,15 +143,9 @@ export default async function ProjectPage({
   const uploaderNames = new Map(authors.map((user) => [user.id, user.name]));
 
   // Стоимость проекта = Σ цен изделий + доставка/выгрузка/монтаж (валюта проекта)
-  const productsTotal = project.products.reduce(
-    (sum, product) => sum + Number(product.expectedPrice ?? 0),
-    0,
-  );
+  const productsTotal = calculateProjectTotal(project.products);
   const totalPrice =
-    productsTotal +
-    Number(project.delivery ?? 0) +
-    Number(project.unloading ?? 0) +
-    Number(project.installation ?? 0);
+    calculateProjectTotal(project.products, project);
   // Первоначальная цена — первая цена КП клиенту (хранится на проекте;
   // правят менеджмент в карточке и telegram-бот; бэкфилл — Σ по изделиям)
   const initialPrice =
@@ -203,21 +198,21 @@ export default async function ProjectPage({
       </div>
 
       <Tabs defaultValue="overview">
-        <TabsList>
-          <TabsTrigger value="overview">Общее</TabsTrigger>
-          <TabsTrigger value="products">
+        <TabsList className="w-full max-w-full justify-start overflow-x-auto">
+          <TabsTrigger className="shrink-0" value="overview">Общее</TabsTrigger>
+          <TabsTrigger className="shrink-0" value="products">
             Изделия ({project.products.length})
           </TabsTrigger>
-          <TabsTrigger value="tasks">
+          <TabsTrigger className="shrink-0" value="tasks">
             Задачи ({project.tasks.length})
           </TabsTrigger>
-          <TabsTrigger value="files">Файлы ({project.files.length})</TabsTrigger>
-          <TabsTrigger value="communications">
+          <TabsTrigger className="shrink-0" value="files">Файлы ({project.files.length})</TabsTrigger>
+          <TabsTrigger className="shrink-0" value="communications">
             Коммуникации ({project.communications.length})
           </TabsTrigger>
-          {showFinance ? <TabsTrigger value="finance">Финансы</TabsTrigger> : null}
-          {showMaterials ? <TabsTrigger value="materials">Материалы</TabsTrigger> : null}
-          <TabsTrigger value="history">История</TabsTrigger>
+          {showFinance ? <TabsTrigger className="shrink-0" value="finance">Финансы</TabsTrigger> : null}
+          {showMaterials ? <TabsTrigger className="shrink-0" value="materials">Материалы</TabsTrigger> : null}
+          <TabsTrigger className="shrink-0" value="history">История</TabsTrigger>
           {pluginTabs.map((tab) => (
             <TabsTrigger key={tab.pluginId} value={tab.pluginId}>
               {tab.pluginName}
@@ -292,6 +287,7 @@ export default async function ProjectPage({
               status: product.status,
               statusChangedAt: product.statusChangedAt.toISOString(),
               expectedPrice: product.expectedPrice?.toString() ?? null,
+              quantity: product.quantity,
               engineerName: product.engineer?.name ?? null,
               engineerId: product.engineerId,
               isEngineeringParticipant: product.isEngineeringParticipant,
@@ -322,6 +318,7 @@ export default async function ProjectPage({
               id: work.id,
               title: work.title,
               quantity: work.quantity.toString(),
+              quantityPerUnit: work.quantityPerUnit?.toString() ?? null,
               allocated: allocatedWorkQuantity(work.tasks),
               priceSnapshot: work.priceSnapshot?.toString() ?? null,
               total: work.total?.toString() ?? null,

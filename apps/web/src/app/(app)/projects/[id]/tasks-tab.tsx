@@ -49,6 +49,7 @@ export interface WorkRow {
   id: string;
   title: string;
   quantity: string;
+  quantityPerUnit?: string | null;
   allocated: string;
   priceSnapshot: string | null;
   total: string | null;
@@ -80,6 +81,7 @@ function tomorrow(): string {
 export function TasksTab({
   projectId,
   productId,
+  productQuantity = 1,
   products = [],
   tasks,
   works,
@@ -88,6 +90,7 @@ export function TasksTab({
   workers,
 }: {
   projectId: string;
+  productQuantity?: number;
   productId?: string; // зафиксированное изделие (карточка изделия)
   products?: ProductOption[]; // изделия проекта — выбор в диалоге задачи
   tasks: TaskDetails[];
@@ -153,6 +156,7 @@ export function TasksTab({
               <span className="text-muted-foreground">
                 {workPaymentSourceLabel(work)}
               </span>
+              {work.quantityPerUnit != null && <span className="text-muted-foreground">На 1 изделие: {work.quantityPerUnit}; всего: {work.quantity}</span>}
               <span className="font-medium">
                 {workPaymentAmountLabel(work)}
               </span>
@@ -529,7 +533,7 @@ export function TasksTab({
               />
             </div>
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="work-qty">Количество *</Label>
+              <Label htmlFor="work-qty">{productId ? "Количество на 1 изделие *" : "Количество *"}</Label>
               <Input
                 id="work-qty"
                 type="number"
@@ -541,11 +545,11 @@ export function TasksTab({
             </div>
             {priceItemId && Number(quantity) > 0 ? (
               <p className="text-sm text-muted-foreground">
-                Итого:{" "}
+                {productId ? `${quantity} × ${productQuantity} = ${Number(quantity) * productQuantity}; ` : ""}Итого:{" "}
                 {formatAmount(
                   Number(
                     priceItems.find((item) => item.id === priceItemId)?.price,
-                  ) * Number(quantity),
+                  ) * Number(quantity) * (productId ? productQuantity : 1),
                   "BYN",
                 )}{" "}
                 — цена зафиксируется снимком (смена прайса её не изменит).
@@ -564,7 +568,7 @@ export function TasksTab({
                     projectId,
                     productId: productId || undefined,
                     priceItemId,
-                    quantity: Number(quantity),
+                    ...(productId ? { quantityPerUnit: Number(quantity) } : { quantity: Number(quantity) }),
                   });
                   if (result.ok) {
                     toast.success("Работа добавлена");

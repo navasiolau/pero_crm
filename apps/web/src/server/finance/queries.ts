@@ -1,3 +1,4 @@
+import { projectTotal as calculateProjectTotal } from "@/lib/product-quantity";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
 
@@ -97,7 +98,7 @@ export async function getProjectEconomics(
       delivery: true,
       unloading: true,
       installation: true,
-      products: { select: { expectedPrice: true } },
+      products: { select: { expectedPrice: true, quantity: true } },
     },
   });
   if (!project) return null;
@@ -195,13 +196,7 @@ export async function getProjectEconomics(
   payrollTotal = round(payrollTotal);
   // Ожидаемая цена = Σ цен изделий + доставка/выгрузка/монтаж проекта
   const expectedRaw =
-    project.products.reduce(
-      (sum, product) => sum + Number(product.expectedPrice ?? 0),
-      0,
-    ) +
-    Number(project.delivery ?? 0) +
-    Number(project.unloading ?? 0) +
-    Number(project.installation ?? 0);
+    calculateProjectTotal(project.products, project);
   const expectedPrice = expectedRaw > 0 ? round(expectedRaw) : null;
 
   const expenseBreakdown = [...byArticle.entries()]

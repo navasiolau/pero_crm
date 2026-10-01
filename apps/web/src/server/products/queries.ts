@@ -28,7 +28,8 @@ export type ProductSortField =
   | "project"
   | "client"
   | "status"
-  | "price";
+  | "price"
+  | "quantity";
 
 const PRODUCT_SORT_MAP: Record<
   ProductSortField,
@@ -47,6 +48,7 @@ const PRODUCT_SORT_MAP: Record<
     { project: { numberInt: "desc" } },
   ],
   status: (dir) => [{ status: dir }, { project: { numberInt: "desc" } }],
+  quantity: (dir) => [{ quantity: dir }, { project: { numberInt: "desc" } }],
   price: (dir) => [{ expectedPrice: dir }, { project: { numberInt: "desc" } }],
 };
 

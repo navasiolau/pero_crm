@@ -1,3 +1,4 @@
+import { productLineTotal } from "@/lib/product-quantity";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { ArrowLeft, TriangleAlert } from "lucide-react";
@@ -129,6 +130,7 @@ export default async function ProductPage({
                 kind: product.kind,
                 status: product.status,
                 expectedPrice: product.expectedPrice?.toString() ?? null,
+            quantity: product.quantity,
                 initialPrice: product.initialPrice?.toString() ?? null,
                 description: product.description,
                 projectId: product.project.id,
@@ -198,7 +200,7 @@ export default async function ProductPage({
                 </div>
                 {showAmount ? (
                   <div className="min-w-0">
-                    <div className="text-muted-foreground">Первоначальная цена</div>
+                    <div className="text-muted-foreground">Первоначальная цена за 1 шт. (КП)</div>
                     <div className="break-words">{formatAmount(product.initialPrice?.toString() ?? null, product.project.currency)}</div>
                   </div>
                 ) : null}
@@ -222,11 +224,13 @@ export default async function ProductPage({
                   {product.project.number} · {product.project.title}
                 </Link>
               </span>
+              <span>Количество: {product.quantity} шт.</span>
               {showAmount ? (
                 <span>
-                  Цена: {formatAmount(product.expectedPrice?.toString() ?? null, product.project.currency)}
+                  Цена за 1 шт.: {formatAmount(product.expectedPrice?.toString() ?? null, product.project.currency)}
                 </span>
               ) : null}
+              {showAmount && <span>Сумма партии: {formatAmount(productLineTotal(product.expectedPrice, product.quantity), product.project.currency)}</span>}
             </div>
           </div>
         )}
@@ -267,6 +271,7 @@ export default async function ProductPage({
           <TasksTab
             projectId={product.project.id}
             productId={product.id}
+            productQuantity={product.quantity}
             products={[
               { id: product.id, number: product.number, title: product.title },
             ]}
@@ -275,6 +280,7 @@ export default async function ProductPage({
               id: work.id,
               title: work.title,
               quantity: work.quantity.toString(),
+              quantityPerUnit: work.quantityPerUnit?.toString() ?? null,
               allocated: allocatedWorkQuantity(work.tasks),
               priceSnapshot: work.priceSnapshot?.toString() ?? null,
               total: work.total?.toString() ?? null,
@@ -302,6 +308,7 @@ export default async function ProductPage({
           <TabsContent value="materials" className="mt-4">
             <MaterialsTab
               productId={product.id}
+            productQuantity={product.quantity}
               lines={materialsData.lines}
               movements={materialsData.movements}
               materialsTotalByn={materialsData.materialsTotalByn}

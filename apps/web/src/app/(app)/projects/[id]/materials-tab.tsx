@@ -19,6 +19,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { ConfirmDeleteDialog } from "@/components/confirm-delete-dialog";
+import { scaleNorm } from "@/lib/product-quantity";
 import { formatAmount, formatQty } from "@/lib/format";
 import { projectMaterialStatusLabels, stockMovementTypeLabels } from "@/lib/labels";
 import {
@@ -40,6 +41,7 @@ export type ProjectMaterialLineView = {
   materialSku: string | null;
   unit: string;
   purchasePrice: number | null; // учётная цена, BYN
+  quantityPerUnit: number;
   quantity: number; // сколько нужно
   issuedQty: number; // сколько уже выдано
   debt: number; // quantity − issuedQty
@@ -82,6 +84,7 @@ type DialogState =
 // (нехватка подсвечена красным), запрос/возврат со склада и журнал движений.
 export function MaterialsTab({
   productId,
+  productQuantity = 1,
   lines,
   movements,
   materialsTotalByn,
@@ -90,6 +93,7 @@ export function MaterialsTab({
   showMoney,
 }: {
   productId: string;
+  productQuantity?: number;
   lines: ProjectMaterialLineView[];
   movements: StockMovementRow[];
   materialsTotalByn: number;
@@ -123,8 +127,13 @@ export function MaterialsTab({
       cell: (row) => <span className="text-muted-foreground">{row.unit}</span>,
     },
     {
+      id: "quantityPerUnit",
+      header: "На 1 изделие",
+      cell: (row) => formatQty(row.quantityPerUnit),
+    },
+    {
       id: "quantity",
-      header: "Нужно",
+      header: "Нужно всего",
       sortable: true,
       sortValue: (row) => row.quantity,
       headerClassName: "text-right",
@@ -397,6 +406,7 @@ export function MaterialsTab({
           if (!open) setDialog(null);
         }}
         productId={productId}
+        productQuantity={productQuantity}
         options={options}
       />
 
@@ -405,6 +415,7 @@ export function MaterialsTab({
           kind={dialog.kind}
           line={dialog.line}
           showMoney={showMoney}
+          productQuantity={productQuantity}
           open
           onOpenChange={(open) => {
             if (!open) setDialog(null);
@@ -444,11 +455,13 @@ function AddMaterialDialog({
   open,
   onOpenChange,
   productId,
+  productQuantity = 1,
   options,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   productId: string;
+  productQuantity?: number;
   options: MaterialOptionView[];
 }) {
   const [pending, startTransition] = useTransition();
@@ -501,7 +514,7 @@ function AddMaterialDialog({
             />
           </div>
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="mat-add-qty">Количество *</Label>
+            <Label htmlFor="mat-add-qty">Количество на 1 изделие *</Label>
             <Input
               id="mat-add-qty"
               type="number"
@@ -512,6 +525,7 @@ function AddMaterialDialog({
               placeholder="0"
             />
           </div>
+          <p className="text-sm text-muted-foreground">На партию: {Number.isFinite(parsedQuantity) ? `${formatQty(parsedQuantity)} × ${productQuantity} = ${formatQty(parsedQuantity * productQuantity)}` : "—"}</p>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="mat-add-comment">Комментарий</Label>
             <Input
@@ -533,7 +547,7 @@ function AddMaterialDialog({
                 const result = await addProjectMaterial({
                   productId,
                   materialId,
-                  quantity: parsedQuantity,
+                  quantityPerUnit: parsedQuantity,
                   comment: comment.trim() || undefined,
                 });
                 if (result.ok) {
@@ -557,12 +571,14 @@ function AddMaterialDialog({
 // возврат на склад или изменение количества/комментария.
 function LineActionDialog({
   kind,
+  productQuantity,
   line,
   showMoney,
   open,
   onOpenChange,
 }: {
   kind: "request" | "return" | "edit";
+  productQuantity: number;
   line: ProjectMaterialLineView;
   showMoney: boolean;
   open: boolean;
@@ -585,7 +601,7 @@ function LineActionDialog({
     if (open) {
       setQuantity(
         kind === "edit"
-          ? String(line.quantity)
+          ? String(line.quantityPerUnit)
           : String(maxQuantity ?? line.debt),
       );
       setUnitPrice(line.purchasePrice === null ? "" : String(line.purchasePrice));
@@ -596,11 +612,13 @@ function LineActionDialog({
   const parsedQuantity = quantity.trim() === "" ? NaN : Number(quantity);
   const parsedPrice = unitPrice.trim() === "" ? NaN : Number(unitPrice);
 
+  let plannedQuantity = NaN;
+  try { plannedQuantity = Number(scaleNorm(parsedQuantity, productQuantity, 3, 12)); } catch { /* Ошибка ввода блокирует сохранение. */ }
   const quantityValid =
     Number.isFinite(parsedQuantity) &&
     parsedQuantity > 0 &&
     (maxQuantity === null || parsedQuantity <= maxQuantity) &&
-    (kind !== "edit" || parsedQuantity >= line.issuedQty);
+    (kind !== "edit" || plannedQuantity >= line.issuedQty);
   const priceValid =
     unitPrice.trim() === "" || (Number.isFinite(parsedPrice) && parsedPrice >= 0);
   const canSubmit = !pending && quantityValid && priceValid;
@@ -633,7 +651,7 @@ function LineActionDialog({
         </DialogHeader>
         <div className="flex flex-col gap-3">
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="mat-line-qty">Количество, {line.unit} *</Label>
+            <Label htmlFor="mat-line-qty">{kind === "edit" ? "На 1 изделие" : "Количество на всю партию"}, {line.unit} *</Label>
             <Input
               id="mat-line-qty"
               type="number"
@@ -642,6 +660,7 @@ function LineActionDialog({
               value={quantity}
               onChange={(event) => setQuantity(event.target.value)}
             />
+            {kind === "edit" && Number.isFinite(parsedQuantity) && <p className="text-sm text-muted-foreground">Всего: {formatQty(parsedQuantity)} × {productQuantity} = {formatQty(plannedQuantity)} {line.unit}</p>}
             {maxQuantity !== null ? (
               <p className="text-xs text-muted-foreground">
                 Не больше {formatQty(maxQuantity)} {line.unit}
@@ -701,7 +720,7 @@ function LineActionDialog({
                         })
                       : await updateProjectMaterial({
                           id: line.id,
-                          quantity: parsedQuantity,
+                          quantityPerUnit: parsedQuantity,
                           comment: comment.trim() || undefined,
                         });
                 if (result.ok) {

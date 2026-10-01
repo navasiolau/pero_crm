@@ -58,6 +58,7 @@ export default async function ProductsPage({
         status: product.status,
         statusChangedAt: product.statusChangedAt.toISOString(),
         expectedPrice: product.expectedPrice?.toString() ?? null,
+        quantity: product.quantity,
         currency: product.project.currency,
         projectId: product.project.id,
         projectNumber: product.project.number,

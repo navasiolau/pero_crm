@@ -8,6 +8,8 @@ import { prisma } from "@/lib/prisma";
 import { writeChangeLog } from "@/server/plugins/changelog";
 import { revalidateProductPaths } from "@/server/products/revalidate";
 import { withTaskTransaction } from "@/server/tasks/transaction";
+import { inputNorm, scaleNorm, workBudget } from "@/lib/product-quantity";
+import { lockProductRow } from "@/server/products/quantity-core";
 
 import { MANAGER_ROLES, hasAnyRole } from "@/lib/roles";
 
@@ -15,7 +17,8 @@ const addSchema = z.object({
   projectId: z.string(),
   productId: z.string().optional(), // изделие проекта (необязательно)
   priceItemId: z.string().min(1, "Выберите расценку"),
-  quantity: z.number().positive("Количество должно быть больше нуля"),
+  quantity: z.number().positive("Количество должно быть больше нуля").optional(),
+  quantityPerUnit: z.number().positive("Количество должно быть больше нуля").optional(),
 });
 
 // Добавление работы в проект (§9): цена фиксируется снимком
@@ -41,28 +44,26 @@ export async function addWork(
   if (!priceItem) return { ok: false, error: "Расценка не найдена" };
   if (!priceItem.active) return { ok: false, error: "Расценка неактивна" };
 
-  // Изделие должно принадлежать проекту работы
-  if (data.productId) {
-    const product = await prisma.product.findFirst({
-      where: { id: data.productId, projectId: data.projectId },
-      select: { id: true },
+  let work;
+  try {
+    work = await withTaskTransaction(async (tx) => {
+      if (data.productId) await lockProductRow(tx, data.productId);
+      const product = data.productId ? await tx.product.findFirst({
+        where: { id: data.productId, projectId: data.projectId }, select: { id: true, quantity: true },
+      }) : null;
+      if (data.productId && !product) throw new Error("Изделие не найдено в этом проекте");
+      if (!product && data.quantityPerUnit !== undefined) throw new Error("Для нормы на штуку выберите изделие");
+      const norm = inputNorm(data, product?.quantity ?? 1, 2, 10);
+      const quantity = scaleNorm(norm, product?.quantity ?? 1, 2, 10);
+      return tx.work.create({ data: {
+        projectId: data.projectId, productId: product?.id ?? null, priceItemId: priceItem.id,
+        title: priceItem.name, quantity, quantityPerUnit: product ? norm : null,
+        priceSnapshot: priceItem.price, total: workBudget(priceItem.price, quantity), createdById: session.user.id,
+      } });
     });
-    if (!product) return { ok: false, error: "Изделие не найдено в этом проекте" };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "Не удалось добавить работу" };
   }
-
-  const total = Number(priceItem.price) * data.quantity;
-  const work = await prisma.work.create({
-    data: {
-      projectId: data.projectId,
-      productId: data.productId || null,
-      priceItemId: priceItem.id,
-      title: priceItem.name,
-      quantity: data.quantity,
-      priceSnapshot: priceItem.price,
-      total,
-      createdById: session.user.id,
-    },
-  });
 
   await writeChangeLog({
     actorType: "user",
@@ -74,9 +75,10 @@ export async function addWork(
     newValue: {
       project: project.number,
       title: work.title,
-      quantity: data.quantity,
+      quantity: work.quantity.toString(),
+      quantityPerUnit: work.quantityPerUnit?.toString() ?? null,
       price: priceItem.price.toString(),
-      total,
+      total: work.total?.toString() ?? null,
     },
   });
   revalidatePath(`/projects/${data.projectId}`);

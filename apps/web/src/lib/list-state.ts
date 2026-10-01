@@ -7,7 +7,7 @@ export const DEFAULT_LIST_QUERY = "view=kanban";
 
 const sortFields: Record<ListSection, readonly string[]> = {
   projects: ["number", "title", "client", "stage", "manager", "products"],
-  products: ["number", "title", "project", "client", "status", "price"],
+  products: ["number", "title", "project", "client", "status", "price", "quantity"],
 };
 
 export function isListSection(section: unknown): section is ListSection {

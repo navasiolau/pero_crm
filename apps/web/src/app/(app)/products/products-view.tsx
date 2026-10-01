@@ -19,6 +19,7 @@ export interface ProductRow {
   status: ProductStatus;
   statusChangedAt: string;
   expectedPrice: string | null;
+  quantity: number;
   currency: string;
   projectId: string;
   projectNumber: string;

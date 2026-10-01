@@ -235,6 +235,7 @@ model Product {
   // «108.» без суффикса → NULL) — для серверной сортировки внутри проекта
   suffixInt        Int?
   title            String // название изделия
+  quantity         Int          @default(1) // одинаковых экземпляров в карточке
   kind             String? // вид изделия (текстовое поле, из legacy f2641)
   status           ProductStatus @default(DESIGN)
   statusChangedAt  DateTime     @default(now())
@@ -407,6 +408,7 @@ model Work {
   priceItem     PriceItem? @relation(fields: [priceItemId], references: [id], onDelete: SetNull)
   title         String
   quantity      Decimal   @db.Decimal(10, 2)
+  quantityPerUnit Decimal? @db.Decimal(10, 2) // норма на одно изделие; quantity — на партию
   priceSnapshot Decimal?  @db.Decimal(12, 2) // цена на момент назначения
   total         Decimal?  @db.Decimal(12, 2) // priceSnapshot × quantity
   paymentKind   WorkPaymentKind @default(LEGACY)
@@ -821,7 +823,8 @@ model ProjectMaterial {
   product     Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
   materialId  String
   material    Material        @relation(fields: [materialId], references: [id], onDelete: Restrict)
-  quantity    Decimal         @db.Decimal(12, 3) // сколько нужно
+  quantity    Decimal         @db.Decimal(12, 3) // сколько нужно на партию
+  quantityPerUnit Decimal?    @db.Decimal(12, 3) // норма на одно изделие
   issuedQty   Decimal         @default(0) @db.Decimal(12, 3) // сколько уже выдано со склада
   comment     String?
   createdById String?
