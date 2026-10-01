@@ -5,6 +5,11 @@ const CURRENCY_SYMBOLS: Record<string, string> = {
   EUR: "€",
 };
 
+// Одинаковое представление даты в SSR (Linux UTC) и браузере компании.
+export function formatDateTime(value: string | Date): string {
+  return new Date(value).toLocaleString("ru-RU", { timeZone: "Europe/Moscow" });
+}
+
 // Форматирование суммы с символом валюты (BYN по умолчанию)
 export function formatAmount(
   amount: string | number | null | undefined,

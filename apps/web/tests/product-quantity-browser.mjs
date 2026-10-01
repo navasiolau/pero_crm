@@ -14,7 +14,7 @@ const browser = await chromium.launch({ channel: "chrome", headless: true });
 const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, ...(httpCredentials ? { httpCredentials } : {}) });
 const page = await context.newPage();
 const errors = [];
-page.on("pageerror", (error) => errors.push(String(error)));
+page.on("pageerror", (error) => errors.push({ message: String(error), url: page.url(), stack: error.stack }));
 async function pick(scope, label, option) {
   const field = scope.locator("label").filter({ hasText: new RegExp("^" + escape(label)) }).first().locator("..");
   const combobox = field.getByRole("combobox");

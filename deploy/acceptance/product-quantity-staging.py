@@ -62,6 +62,40 @@ def fingerprint(old, before, password):
     return result
 
 
+def prove_api_usage(old, before, password, folder):
+    baseline = json.loads((folder / "baseline.json").read_text())
+    dump = (folder / "before.dump").read_bytes()
+    require(digest(dump) == baseline["backupSha256"], "API_PROOF_BACKUP_MISMATCH")
+    result = subprocess.run(old.DOCKER + ["exec", "-i", before["database"], "pg_restore",
+        "--data-only", "--table=ApiToken", "--file=-"], input=dump, capture_output=True, timeout=30)
+    require(result.returncode == 0, "API_PROOF_ARCHIVE_READ_FAILED")
+    match = re.search(r'COPY public\."ApiToken" \((.*?)\) FROM stdin;\n(.*?)\n\\\.', result.stdout.decode(), re.S)
+    require(match is not None, "API_PROOF_COPY_REQUIRED")
+    columns = [value.strip().strip('"') for value in match.group(1).split(",")]
+    require(all(re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", value) for value in columns), "API_PROOF_COLUMNS_INVALID")
+    def decode(value):
+        if value == r"\N":
+            return None
+        return re.sub(r"\\([\\ntr])", lambda item: {"n": "\n", "t": "\t", "r": "\r", "\\": "\\"}[item.group(1)], value)
+    prior = [dict(zip(columns, map(decode, line.split("\t")))) for line in match.group(2).splitlines()]
+    expression = ",".join("'" + column + "',t.\"" + column + "\"::text" for column in columns)
+    current = json.loads(pg(old, before, password, "BEGIN READ ONLY; SELECT json_agg(json_build_object(" +
+        expression + ')) FROM "ApiToken" t; ROLLBACK;'))
+    by_id = {row["id"]: row for row in current}
+    require(len(by_id) == len(prior), "API_PROOF_IDENTITIES_CHANGED")
+    changes = []
+    for original in prior:
+        require(original["id"] in by_id, "API_PROOF_ID_MISSING")
+        latest = by_id[original["id"]]
+        fields = [key for key in columns if original[key] != latest[key]]
+        require(set(fields) <= {"lastUsedAt"}, "API_PROOF_PROTECTED_FIELD_CHANGED")
+        if fields:
+            changes.append({"idSha256": digest(original["id"].encode()), "fields": fields,
+                "beforeLastUsedAt": original["lastUsedAt"], "afterLastUsedAt": latest["lastUsedAt"]})
+    return {"status": "API_TOKEN_USAGE_ONLY_PROVEN", "identitiesExact": True, "protectedFieldsExact": True,
+        "rows": len(prior), "changed": changes}
+
+
 def main():
     old = load_support()
     packet = json.loads(sys.stdin.readline(2 * 1024 * 1024))
@@ -93,23 +127,36 @@ def main():
             print(json.dumps({"status": "STAGING_BASELINE_READY", "runId": packet["runId"], "identity": before,
                 "tables": len(snapshot), "backupBytes": len(dump.stdout)}), flush=True)
             return
-        require(set(packet) == {"operation", "revision", "runId", "baselineRunId", "bundle", "bundleSha256"}, "WINDOW_FIELDS_INVALID")
+        require(set(packet) in ({"operation", "revision", "runId", "baselineRunId", "bundle", "bundleSha256"},
+            {"operation", "revision", "runId", "baselineRunId", "bundle", "bundleSha256", "resume"}), "WINDOW_FIELDS_INVALID")
+        resume = packet.get("resume") is True
         require(re.fullmatch(r"[a-f0-9-]{36}", packet["baselineRunId"]), "BASELINE_RUN_ID_INVALID")
         baseline = json.loads((BASE / packet["baselineRunId"] / "baseline.json").read_text())
         require(baseline["identity"]["database"] == before["database"] and baseline["identity"]["databaseVolume"] == before["databaseVolume"], "STAGING_DATABASE_DRIFT")
         current = fingerprint(old, before, password)
         changed = [table for table in current if current[table] != baseline["before"].get(table)]
-        require(not changed, "STAGING_MIGRATION_PRESERVATION_FAILED")
+        usage_proof = None
+        if changed == ["ApiToken"]:
+            proof_path = BASE / packet["baselineRunId"] / "api-token-usage-proof.json"
+            require(proof_path.is_file() and not proof_path.is_symlink(), "API_TOKEN_PROOF_REQUIRED")
+            usage_proof = json.loads(proof_path.read_text())
+            require(usage_proof.get("status") == "API_TOKEN_USAGE_ONLY_PROVEN" and
+                usage_proof.get("identitiesExact") is True and usage_proof.get("protectedFieldsExact") is True and
+                usage_proof.get("afterApiTokenFingerprint") == current["ApiToken"], "API_TOKEN_PROOF_BINDING_MISMATCH")
+            require(all(row["fields"] == ["lastUsedAt"] for row in usage_proof["changed"]), "API_TOKEN_FIELD_DRIFT")
+            changed = []
+        require(not changed or resume, "STAGING_MIGRATION_PRESERVATION_FAILED")
         backfill = json.loads(pg(old, before, password, """BEGIN READ ONLY;
           SELECT json_build_object('products',(SELECT count(*) FROM "Product" WHERE quantity <> 1),
           'works',(SELECT count(*) FROM "Work" WHERE "productId" IS NOT NULL AND "paymentKind"='LEGACY' AND "quantityPerUnit" IS DISTINCT FROM quantity),
           'materials',(SELECT count(*) FROM "ProjectMaterial" WHERE "quantityPerUnit" IS DISTINCT FROM quantity));
           ROLLBACK;"""))
-        require(backfill == {"products": 0, "works": 0, "materials": 0}, "STAGING_BACKFILL_INCONSISTENT")
+        require(backfill == {"products": 0, "works": 0, "materials": 0} or resume, "STAGING_BACKFILL_INCONSISTENT")
         bundle = base64.b64decode(packet["bundle"], validate=True)
         require(0 < len(bundle) <= 768 * 1024 and digest(bundle) == packet["bundleSha256"], "BUNDLE_SOURCE_MISMATCH")
         state_path = "/tmp/product-quantity-qa-" + packet["runId"] + ".json"
-        print(json.dumps({"status": "STAGING_WINDOW_READY", "identity": before, "tablesPreserved": len(current), "backfill": backfill}), flush=True)
+        print(json.dumps({"status": "STAGING_WINDOW_READY", "identity": before, "tablesPreserved": len(current),
+            "backfill": backfill, "apiTokenUsageProof": usage_proof}), flush=True)
         deadline = time.monotonic() + 900
         attempted = set()
         while True:
@@ -122,11 +169,16 @@ def main():
                 require(old.identity(packet["revision"])[0] == before, "WINDOW_IDENTITY_DRIFT")
                 print(json.dumps({"status": "STAGING_WINDOW_RELEASED"}), flush=True)
                 return
-            require(operation in ("prepare", "capture", "cleanup"), "QA_OPERATION_INVALID")
+            require(operation in ("prepare", "capture", "cleanup", "bind-api-usage", "resume"), "QA_OPERATION_INVALID")
+            require(not resume or operation != "prepare", "EXISTING_QA_ONLY")
+            if operation == "bind-api-usage":
+                require(resume, "RESUME_PROOF_REQUIRED")
+                usage_proof = prove_api_usage(old, before, password, BASE / packet["baselineRunId"])
             if operation in ("prepare", "cleanup"):
                 require(operation not in attempted, "MUTATION_RETRY_FORBIDDEN")
                 attempted.add(operation)
-            data = json.dumps({"operation": operation, "target": "staging", "statePath": state_path})
+            data = json.dumps({"operation": operation, "target": "staging", "statePath": state_path,
+                **({"apiTokenProof": usage_proof} if operation == "bind-api-usage" else {})})
             child = subprocess.run(old.DOCKER + ["exec", "-i", "-w", "/app/apps/web", "--env", "CRM_PRODUCT_QUANTITY_QA",
                 before["web"], "node", "--input-type=module"], input=bundle, capture_output=True,
                 env={**old.SAFE_ENV, "CRM_PRODUCT_QUANTITY_QA": data}, timeout=90)

@@ -5,6 +5,11 @@ import { hash } from "@node-rs/argon2";
 
 const sha = (value) => createHash("sha256").update(value).digest("hex");
 const keyText = (key) => JSON.stringify(key);
+export function apiTokenProtectedHash(row) {
+  const protectedRow = { ...row };
+  delete protectedRow.lastUsedAt;
+  return sha(JSON.stringify(protectedRow));
+}
 const identityTables = new Set(["User", "Client", "Project", "PriceItem", "Material"]);
 const cleanupOrder = ["Notification", "NotificationPreference", "UserPreference", "DomainEvent", "ChangeLog",
   "PayrollEntry", "TimeEntry", "TaskDependency", "Task", "TaskAllocationGroup",
@@ -88,6 +93,7 @@ export async function prepareQuantityOwned(db, target) {
     await tx.stockMovement.create({ data: { id: ids.income, materialId: ids.material, type: "INCOME", quantity: "50",
       unitPrice: "2", totalByn: "100", comment: marker, createdById: ids.manager } });
     return { format: "product-quantity-qa/v1", target, runId, marker, ids, number, before,
+      apiTokenProtectedBefore: (rows.ApiToken ?? []).map(({ key, row }) => ({ key, hash: apiTokenProtectedHash(row) })),
       credentials: { managerEmail, workerEmail, password }, owned: {} };
   }, { isolationLevel: "Serializable", timeout: 60000 });
   return captureQuantityOwned(db, state);
@@ -141,7 +147,12 @@ export async function captureQuantityOwned(db, state) {
     const baseline = new Map((state.before[table] ?? []).map((row) => [keyText(row.key), row.hash]));
     owned[table] = [];
     for (const entry of rows) {
-      if (baseline.has(keyText(entry.key))) assert.equal(entry.hash, baseline.get(keyText(entry.key)), `PREEXISTING_ROW_CHANGED_${table}`);
+      if (baseline.has(keyText(entry.key))) {
+        if (table === "ApiToken" && entry.hash !== baseline.get(keyText(entry.key))) {
+          const protectedBaseline = state.apiTokenProtectedBefore?.find((row) => keyText(row.key) === keyText(entry.key));
+          assert.ok(protectedBaseline && apiTokenProtectedHash(entry.row) === protectedBaseline.hash, "API_TOKEN_PROTECTED_FIELD_CHANGED");
+        } else assert.equal(entry.hash, baseline.get(keyText(entry.key)), `PREEXISTING_ROW_CHANGED_${table}`);
+      }
       else {
         assert.ok(isOwned(table, entry.row, state, known), `UNOWNED_NEW_ROW_${table}`);
         owned[table].push({ key: entry.key, hash: entry.hash });
@@ -184,7 +195,8 @@ export async function cleanupQuantityOwned(db, state) {
     for (const [table, name] of historyTriggers)
       await tx.$executeRawUnsafe(`ALTER TABLE "${table}" ENABLE TRIGGER "${name}"`);
     assert.equal(await triggerSignature(tx), triggerBefore, "QA_TRIGGERS_NOT_RESTORED");
-    assert.deepEqual(fingerprints(await quantityRows(tx)), state.before, "QA_PRESERVATION_FAILED");
+    const final = await captureQuantityOwned(tx, state);
+    assert.equal(Object.values(final.owned).reduce((sum, rows) => sum + rows.length, 0), 0, "QA_PRESERVATION_FAILED");
   }, { isolationLevel: "Serializable", timeout: 60000 });
   return { status: "QA_CLEANED_PRESERVED", target: state.target, runId: state.runId, exactTables: Object.keys(state.before).length,
     triggersRestoredExactly: true, deleted: total };

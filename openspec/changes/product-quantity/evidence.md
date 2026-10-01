@@ -40,3 +40,11 @@
 - 543/543 web tests and 9/9 bot tests; TypeScript web/bot pass, ESLint no errors, Next production build pass. Deploy safeguards:66 tests pass, 2 existing skips.
 - Second native run after responsive tab fix: all create/boards/details/work/material/recalc/percentage/group/accrual/return/table/project scenarios PASS; zero page errors. Mobile labels no longer overlap. Visual screenshots inspected; 5 chairs200, batch1000, delivery100, project1100.
 - Second rolled-back lock race PASS; no partial writes. Second exact QA cleanup deleted81 own rows; all42 previous tables and three trigger definitions/enabled states match. First run's97 rows were also cleaned with the same guarantees.
+
+## First staging run / necessary corrections
+
+- ebdb055 deployed and healthy: image sha256:01e5fc169083b9a4142cfd5ea0a74576f5b6d20b4adcef850b5e39e2dec430c2, started2026-10-01 10:40:12 UTC.
+- Preflight stopped before QA on an ApiToken fingerprint difference. Read-only extraction of ApiToken COPY from the original dump proved all3 IDs/scopes/hashes/creation/revocation fields exact; only lastUsedAt of one existing identity changes under background API use. Full original baseline retained. Protected-field projection added to QA; no ApiToken data is edited/restored by tests.
+- Native staging functionality PASS: real password login via HTTPS Basic Auth, create5 ×200, mobile boards/detail, normal work5/budget150, material20/issue8/return2, atomic q6 and lower-bound rejection, actual percent10 and piece PayrollEntry84 preserved, shared physical allocation4 counted once, table sorting and project1100.
+- Three React418 hydration errors surfaced on timestamp-bearing UI. Linux SSR UTC and desktop browser Europe/Moscow formatted the same dates differently; a shared explicit Europe/Moscow datetime formatter now keeps the existing user-visible time consistent. New UTC/Moscow regression PASS; web tests544/544, TypeScript/lint pass; rebuilt image awaiting staging retest.
+- Existing one QA set on staging is retained for bounded resume, not duplicated. W07 window released after stop; no cleanup or history edits claimed yet.

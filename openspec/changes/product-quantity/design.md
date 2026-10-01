@@ -77,3 +77,9 @@
 3. Native read-only приёмка на существующих записях с количеством 1; для полноценного live сценария партии предварительно согласовать отдельный точный QA-контур этого change. Прежние разрешения на fixtures других фич автоматически сюда не переносить. До разрешения выполнять сценарии 5 экземпляров в DI и browser harness с синтетическими ответами, честно разделяя их с DB/native проверкой.
 4. Staging — отдельный согласованный выпуск с защитой от refresh/deploy race и подтверждением ревизии. Production-миграция и публикация требуют отдельного решения по существующим правилам проекта; не включать автоматический перенос в main в выполнение текущего плана.
 5. Откат до первого использования партии возможен только после проверки, что quantity везде 1 и отсутствуют новые зависимые планы; колонки не удалять. После использования партий исправлять вперёд совместимым образом, не возвращать приложение, которое игнорирует количество. В evidence записывать только реально выполненные проверки.
+
+## Acceptance corrections
+
+- Existing background ApiToken.lastUsedAt is measured separately after original-dump proof of unchanged protected fields and identities. QA does not mutate or restore token metadata; financial/warehouse rows remain strict. Resume uses the same approved QA graph and verifies every original row.
+- Relevant timestamp displays use an explicit Europe/Moscow formatter so Linux SSR and the business browser hydrate identically; this preserves the established user-visible time.
+- Cleanup follows the existing engineering QA pattern: exact manifest plus table locks, only3 named immutable-history triggers suspended within the same transaction, restored and compared before commit. No definitions change and no unowned row is deleted.

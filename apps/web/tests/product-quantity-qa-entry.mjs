@@ -4,10 +4,10 @@ import { readFileSync, writeFileSync, existsSync, lstatSync } from "node:fs";
 import { resolve } from "node:path";
 import { execFileSync } from "node:child_process";
 import { PrismaClient } from "@prisma/client";
-import { prepareQuantityOwned, captureQuantityOwned, cleanupQuantityOwned } from "./product-quantity-owned.mjs";
+import { prepareQuantityOwned, captureQuantityOwned, cleanupQuantityOwned, apiTokenProtectedHash, quantityRows } from "./product-quantity-owned.mjs";
 
 const packet = JSON.parse(process.env.CRM_PRODUCT_QUANTITY_QA ?? "{}");
-assert.ok(["prepare", "capture", "cleanup"].includes(packet.operation), "EXPLICIT_QA_OPERATION_REQUIRED");
+assert.ok(["prepare", "capture", "cleanup", "bind-api-usage", "resume"].includes(packet.operation), "EXPLICIT_QA_OPERATION_REQUIRED");
 assert.match(packet.statePath ?? "", /^.+product-quantity.+\.json$/);
 const target = packet.target;
 assert.ok(["local", "staging"].includes(target), "QA_TARGET_REQUIRED");
@@ -42,7 +42,19 @@ try {
     assert.ok(lstatSync(packet.statePath).isFile() && !lstatSync(packet.statePath).isSymbolicLink(), "QA_STATE_FILE_REQUIRED");
     const state = JSON.parse(readFileSync(packet.statePath, "utf8"));
     assert.equal(state.target, target);
-    if (packet.operation === "cleanup") console.log(JSON.stringify(await cleanupQuantityOwned(db, state)));
+    if (packet.operation === "bind-api-usage") {
+      assert.equal(target, "staging");
+      assert.equal(packet.apiTokenProof?.protectedFieldsExact, true, "API_TOKEN_EXTERNAL_PROOF_REQUIRED");
+      const rows = (await quantityRows(db)).ApiToken;
+      assert.deepEqual(rows.map((row) => row.key), state.before.ApiToken.map((row) => row.key), "API_TOKEN_IDENTITY_DRIFT");
+      state.apiTokenProtectedBefore = rows.map(({ key, row }) => ({ key, hash: apiTokenProtectedHash(row) }));
+      state.apiTokenProof = packet.apiTokenProof;
+      writeFileSync(packet.statePath, JSON.stringify(state), { mode: 0o600 });
+      console.log(JSON.stringify({ status: "API_TOKEN_USAGE_BOUND" }));
+    } else if (packet.operation === "resume") {
+      console.log(JSON.stringify({ status: "QA_PREPARED", runId: state.runId, marker: state.marker, ids: state.ids,
+        number: state.number, credentials: state.credentials, manifestSha256: state.manifestSha256 }));
+    } else if (packet.operation === "cleanup") console.log(JSON.stringify(await cleanupQuantityOwned(db, state)));
     else {
       const captured = await captureQuantityOwned(db, state);
       writeFileSync(packet.statePath, JSON.stringify(captured), { mode: 0o600 });

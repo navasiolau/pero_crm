@@ -18,7 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { formatAmount } from "@/lib/format";
+import { formatAmount, formatDateTime } from "@/lib/format";
 import { displayClientName } from "@/lib/labels";
 import { stageLabels } from "@/lib/stages";
 import { updateProject } from "@/server/projects/actions";
@@ -319,17 +319,17 @@ export function OverviewTab({
           </div>
           <div>
             <span className="text-muted-foreground">На этапе с:</span>{" "}
-            {new Date(project.stageChangedAt).toLocaleString("ru-RU")}
+            {formatDateTime(project.stageChangedAt)}
           </div>
           <div>
             <span className="text-muted-foreground">Создан:</span>{" "}
-            {new Date(project.createdAt).toLocaleString("ru-RU")}
+            {formatDateTime(project.createdAt)}
             {createdByName ? ` · ${createdByName}` : ""}
           </div>
           {doneAt ? (
             <div>
               <span className="text-muted-foreground">Завершён:</span>{" "}
-              {new Date(doneAt).toLocaleString("ru-RU")}
+              {formatDateTime(doneAt)}
             </div>
           ) : null}
           {showAmount ? (

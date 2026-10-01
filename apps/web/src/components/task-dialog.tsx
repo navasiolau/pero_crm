@@ -31,7 +31,7 @@ import { useFileViewer } from "@/components/file-viewer";
 import { ConfirmDeleteDialog } from "@/components/confirm-delete-dialog";
 import { QuantityStepper } from "@/components/quantity-stepper";
 import { TaskSplitDialog } from "@/components/task-split-dialog";
-import { formatAmount } from "@/lib/format";
+import { formatAmount, formatDateTime } from "@/lib/format";
 import { taskPaymentLabel, workPaymentSourceLabel } from "@/lib/task-payment-display";
 import { cn } from "@/lib/utils";
 import { sharePercent } from "@/lib/work-shares";
@@ -541,7 +541,7 @@ export function TaskDialog({
             {task.status === "DONE" ? (
               <div className="rounded-lg bg-emerald-500/10 p-2.5 text-emerald-700 dark:text-emerald-400">
                 Выполнена {task.doneAt
-                  ? new Date(task.doneAt).toLocaleString("ru-RU")
+                  ? formatDateTime(task.doneAt)
                   : ""}
                 {task.doneByName ? ` · ${task.doneByName}` : ""}
               </div>

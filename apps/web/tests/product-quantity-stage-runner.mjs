@@ -54,16 +54,19 @@ async function request(operation) {
   return response();
 }
 mkdirSync(directory, { recursive: true });
-const runId = randomUUID();
+const resume = process.argv[3] === "resume";
+const runId = resume ? JSON.parse(readFileSync(resolve(directory, "staging-resume.json"), "utf8")).runId : randomUUID();
 child.stdin.write(JSON.stringify({ operation: "window", revision, runId, baselineRunId: baseline.runId,
-  bundle: bundle.toString("base64"), bundleSha256: createHash("sha256").update(bundle).digest("hex") }) + "\n");
+  bundle: bundle.toString("base64"), bundleSha256: createHash("sha256").update(bundle).digest("hex"),
+  ...(resume ? { resume: true } : {}) }) + "\n");
 let ready; let prepared; let cleaned = false;
 try {
   ready = await response();
   assert.equal(ready.status, "STAGING_WINDOW_READY");
   writeFileSync(resolve(directory, "staging-window.json"), JSON.stringify(ready, null, 2));
   console.log(JSON.stringify({ status: ready.status, revision, tablesPreserved: ready.tablesPreserved }));
-  prepared = await request("prepare");
+  if (resume) await request("bind-api-usage");
+  prepared = await request(resume ? "resume" : "prepare");
   writeFileSync(resolve(directory, "prepare-staging.json"), JSON.stringify(prepared), { mode: 0o600 });
   const httpCredentials = parseStagingBasicAuth(readFileSync("D:/Projects/pero_crm_v2/HANDOVER-NEXT-AGENT.md", "utf8"));
   await runQuantityBrowser({ prepared, directory, target: "staging", origin: "https://staging-crm.peromebel.by", httpCredentials,
