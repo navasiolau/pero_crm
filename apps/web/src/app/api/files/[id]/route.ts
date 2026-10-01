@@ -1,11 +1,66 @@
 import { createReadStream, existsSync } from "node:fs";
+import { readFile, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import { NextResponse } from "next/server";
 
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { UPLOADS_ROOT, s3Enabled, s3Get, fileKey, thumbKey } from "@/lib/s3";
-import { fileVisibilityWhere, resolveVisibilityActor } from "@/server/access/visibility";
+import { fileVisibilityWhere, resolveVisibilityActor, type VisibilityActor } from "@/server/access/visibility";
+import { createImagePreviewService, type PreviewFile, type ImagePreviewVariant } from "@/server/files/image-preview";
+
+function safeImageKey(file: PreviewFile): boolean {
+  return !!file.projectId && !!file.storedName &&
+    !/[/\\]/.test(file.projectId) && !/[/\\]/.test(file.storedName) &&
+    file.projectId !== "." && file.projectId !== ".." &&
+    file.storedName !== "." && file.storedName !== "..";
+}
+
+async function boundedBytes(stream: ReadableStream, maxBytes: number): Promise<Buffer> {
+  const parts: Buffer[] = [];
+  let length = 0;
+  // The S3 SDK uses an async iterable Node stream; Web streams also implement
+  // async iteration in the deployed Node runtime.
+  for await (const chunk of stream as unknown as AsyncIterable<Uint8Array>) {
+    const bytes = Buffer.from(chunk);
+    length += bytes.length;
+    if (length > maxBytes) {
+      await (stream as unknown as { cancel?: () => Promise<void>; destroy?: () => void }).cancel?.().catch(() => {});
+      (stream as unknown as { destroy?: () => void }).destroy?.();
+      throw new Error("PREVIEW_INPUT_TOO_LARGE");
+    }
+    parts.push(bytes);
+  }
+  return Buffer.concat(parts, length);
+}
+
+const previews = createImagePreviewService<VisibilityActor>({
+  lookup: (actor, id) => prisma.file.findFirst({
+    where: { AND: [{ id }, fileVisibilityWhere(actor)] },
+    select: { id: true, projectId: true, productId: true, storedName: true,
+      mimeType: true, size: true, createdAt: true },
+  }),
+  loadOriginal: async (file, maxBytes) => {
+    if (!safeImageKey(file)) return null;
+    if (s3Enabled()) {
+      const stream = await s3Get(fileKey(file.projectId, file.storedName));
+      return stream ? boundedBytes(stream, maxBytes) : null;
+    }
+    const root = path.resolve(UPLOADS_ROOT);
+    const fullPath = path.resolve(root, file.projectId, file.storedName);
+    const relative = path.relative(root, fullPath);
+    if (!relative || relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return null;
+    const [rootReal, fileReal] = await Promise.all([realpath(root), realpath(fullPath)]).catch(() => []);
+    if (!rootReal || !fileReal) return null;
+    const actualRelative = path.relative(rootReal, fileReal);
+    if (!actualRelative || actualRelative === ".." || actualRelative.startsWith(`..${path.sep}`) ||
+        path.isAbsolute(actualRelative)) return null;
+    const info = await stat(fullPath).catch(() => null);
+    if (!info?.isFile() || info.size > maxBytes) return null;
+    const bytes = await readFile(fullPath).catch(() => null);
+    return bytes && bytes.length <= maxBytes ? bytes : null;
+  },
+});
 
 // GET /api/files/:id — отдача файла с проверкой прав (§4, §13).
 // ?thumb=1 — превью (для изображений), иначе оригинал.
@@ -19,6 +74,17 @@ export async function GET(
   }
   const { id } = await params;
   const actor = await resolveVisibilityActor(prisma, session.user);
+  const query = new URL(request.url).searchParams;
+  const variant = query.get("preview");
+  if (variant !== null) {
+    if (variant !== "card" && variant !== "cover") {
+      return NextResponse.json({ error: "Неизвестный размер превью" }, { status: 400,
+        headers: { "Cache-Control": "private, no-store", "Vary": "Cookie",
+          "X-Content-Type-Options": "nosniff" } });
+    }
+    return previews.respond({ actor, fileId: id, variant: variant as ImagePreviewVariant,
+      ifNoneMatch: request.headers.get("If-None-Match") });
+  }
   const file = await prisma.file.findFirst({
     where: { AND: [{ id }, fileVisibilityWhere(actor)] },
   });
