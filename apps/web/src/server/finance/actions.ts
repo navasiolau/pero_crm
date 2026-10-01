@@ -6,6 +6,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { writeChangeLog } from "@/server/plugins/changelog";
 import { requireFinance } from "@/server/require-role";
+import { withTaskTransaction } from "@/server/tasks/transaction";
 
 import { getNbrbRate, isCurrency } from "./nbrb";
 
@@ -50,13 +51,13 @@ export async function addCashAccount(
   if (!isCurrency(parsed.data.currency)) {
     return { ok: false, error: "Неизвестная валюта" };
   }
-  const account = await prisma.cashAccount.create({
+  const account = await withTaskTransaction((tx) => tx.cashAccount.create({
     data: {
       name: parsed.data.name,
       currency: parsed.data.currency,
       comment: parsed.data.comment?.trim() || null,
     },
-  });
+  }));
   await writeChangeLog({
     actorType: "user",
     actorId: session.user.id,
@@ -76,14 +77,13 @@ export async function toggleCashAccount(
   accountId: string,
 ): Promise<{ ok: boolean; error?: string }> {
   const session = await requireFinance();
-  const account = await prisma.cashAccount.findUnique({
-    where: { id: accountId },
+  const account = await withTaskTransaction(async (tx) => {
+    const current = await tx.cashAccount.findUnique({ where: { id: accountId } });
+    if (!current) return null;
+    await tx.cashAccount.update({ where: { id: accountId }, data: { active: !current.active } });
+    return current;
   });
   if (!account) return { ok: false, error: "Касса не найдена" };
-  await prisma.cashAccount.update({
-    where: { id: accountId },
-    data: { active: !account.active },
-  });
   await writeChangeLog({
     actorType: "user",
     actorId: session.user.id,

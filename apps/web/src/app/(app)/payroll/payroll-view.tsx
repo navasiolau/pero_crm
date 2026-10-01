@@ -111,13 +111,22 @@ export function PayrollView({
       ),
     },
     {
+      id: "physical",
+      header: "Выдано из кассы",
+      sortable: true,
+      sortValue: (row) => row.cashAmount ?? "",
+      cell: (row) => row.cashAmount !== null && row.cashAmount !== undefined && row.cashCurrency
+        ? <span className="flex flex-col"><span>{formatAmount(row.cashAmount, row.cashCurrency)}</span><span className="text-xs text-muted-foreground">{row.cashAccountName ?? "Касса"}</span></span>
+        : <Badge variant="outline">Историческая (legacy)</Badge>,
+    },
+    {
       id: "amount",
       header: "Сумма",
       sortable: true,
       sortValue: (row) => row.amount,
       className: "text-right font-medium",
       headerClassName: "text-right",
-      cell: (row) => formatAmount(row.amount, currency),
+      cell: (row) => formatAmount(row.amount, row.payrollCurrency ?? currency),
     },
   ];
 

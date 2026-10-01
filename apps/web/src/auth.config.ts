@@ -1,6 +1,6 @@
 import type { NextAuthConfig } from "next-auth";
 
-import { ADMIN_ROLES, FINANCE_ROLES, hasAnyRole } from "@/lib/roles";
+import { ADMIN_ROLES, ADVANCE_ROLES, FINANCE_ROLES, hasAnyRole } from "@/lib/roles";
 import { homePathForRoles } from "@/lib/home-route";
 
 // Общие route/session callbacks. Единственный экземпляр Auth.js в auth.ts
@@ -27,6 +27,9 @@ export const authConfig = {
       }
       // Финансы — админ/директор/бухгалтер; журнал и настройки — только админ/директор
       if (pathname.startsWith("/finance") && !hasAnyRole(roles, FINANCE_ROLES)) {
+        return Response.redirect(new URL("/", request.nextUrl));
+      }
+      if (pathname.startsWith("/advances") && !hasAnyRole(roles, ADVANCE_ROLES)) {
         return Response.redirect(new URL("/", request.nextUrl));
       }
       const adminOnlyPrefixes = ["/changelog", "/settings"];

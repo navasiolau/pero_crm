@@ -1,7 +1,9 @@
 import type { PayScheme } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
-import { convertFromByn } from "@/server/finance/nbrb";
+import { convertFromByn, getNbrbRate } from "@/server/finance/nbrb";
+import { calculateOrgBalance } from "@/lib/cash-ledger";
 
 // ─── Зарплата (§10): запросы для страниц «Моя зарплата» и «Финансы → Зарплата»
 
@@ -44,6 +46,10 @@ export type PayoutView = {
   userId?: string;
   userName?: string;
   amount: number;
+  cashAmount?: string | null;
+  cashCurrency?: string | null;
+  cashAccountName?: string | null;
+  payrollCurrency?: string | null;
   kind: string; // SALARY | ADVANCE
   comment: string | null;
   createdByName: string | null;
@@ -63,6 +69,7 @@ export async function getMyPayroll(userId: string, month: string) {
       }),
       prisma.payout.findMany({
         where: { userId, month },
+        include: { cashAccount: { select: { name: true } } },
         orderBy: { createdAt: "desc" },
       }),
       prisma.payrollEntry.aggregate({
@@ -111,6 +118,10 @@ export async function getMyPayroll(userId: string, month: string) {
       (payout): PayoutView => ({
         id: payout.id,
         amount: Number(payout.amount),
+        cashAmount: payout.cashAmount?.toFixed(2) ?? null,
+        cashCurrency: payout.cashCurrency,
+        cashAccountName: payout.cashAccount?.name ?? null,
+        payrollCurrency: payout.payrollCurrency,
         kind: payout.kind,
         comment: payout.comment,
         createdByName: payout.createdById
@@ -174,7 +185,7 @@ export async function getPayrollSummary(month: string) {
       }),
       prisma.payout.findMany({
         where: { month },
-        include: { user: { select: { id: true, name: true } } },
+        include: { user: { select: { id: true, name: true } }, cashAccount: { select: { name: true } } },
         orderBy: { createdAt: "desc" },
       }),
       // для текущего долга: начислено за месяцы до текущего, выплаты — все
@@ -254,6 +265,10 @@ export async function getPayrollSummary(month: string) {
         userId: payout.userId,
         userName: payout.user.name,
         amount: Number(payout.amount),
+        cashAmount: payout.cashAmount?.toFixed(2) ?? null,
+        cashCurrency: payout.cashCurrency,
+        cashAccountName: payout.cashAccount?.name ?? null,
+        payrollCurrency: payout.payrollCurrency,
         kind: payout.kind,
         comment: payout.comment,
         createdByName: payout.createdById
@@ -325,7 +340,7 @@ export function round2(value: number): number {
 // по текущему курсу. Кассовые остатки — см. listCashAccounts (§11).
 export async function getOrgBalance(): Promise<number> {
   const currency = await getPayrollCurrency();
-  const [income, expense, paid] = await Promise.all([
+  const [income, expense, newPayouts, legacy] = await Promise.all([
     prisma.payment.aggregate({
       where: { direction: "INCOME" },
       _sum: { bynAmount: true },
@@ -334,12 +349,13 @@ export async function getOrgBalance(): Promise<number> {
       where: { direction: "EXPENSE" },
       _sum: { bynAmount: true },
     }),
-    prisma.payout.aggregate({ _sum: { amount: true } }),
+    prisma.payout.aggregate({ where: { cashAccountId: { not: null } }, _sum: { bynAmount: true } }),
+    prisma.payout.aggregate({ where: { cashAccountId: null }, _sum: { amount: true } }),
   ]);
-  const cashByn =
-    Number(income._sum.bynAmount ?? 0) - Number(expense._sum.bynAmount ?? 0);
-  const cash = await convertFromByn(cashByn, currency);
-  return round2(cash - Number(paid._sum.amount ?? 0));
+  const paymentByn = new Prisma.Decimal(income._sum.bynAmount ?? 0).sub(expense._sum.bynAmount ?? 0);
+  const rate = currency === "BYN" ? "1.000000" : (await getNbrbRate(currency)).rate.toFixed(6);
+  return Number(calculateOrgBalance(paymentByn.toFixed(2), new Prisma.Decimal(newPayouts._sum.bynAmount ?? 0).toFixed(2),
+    new Prisma.Decimal(legacy._sum.amount ?? 0).toFixed(2), rate));
 }
 
 export type EmployeeDue = { userId: string; name: string; due: number };

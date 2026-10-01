@@ -17,12 +17,13 @@ export type CashAccountView = {
 // Кассы с балансами. Операция по кассе всегда в валюте кассы (правило
 // внесения), поэтому баланс — просто сумма приходов минус расходы.
 export async function listCashAccounts(): Promise<CashAccountView[]> {
-  const [accounts, grouped] = await Promise.all([
+  const [accounts, grouped, payouts] = await Promise.all([
     prisma.cashAccount.findMany({ orderBy: { createdAt: "asc" } }),
     prisma.payment.groupBy({
       by: ["cashAccountId", "direction"],
       _sum: { amount: true },
     }),
+    prisma.payout.groupBy({ by: ["cashAccountId"], where: { cashAccountId: { not: null } }, _sum: { cashAmount: true } }),
   ]);
   const sums = new Map<string, number>();
   for (const row of grouped) {
@@ -32,6 +33,10 @@ export async function listCashAccounts(): Promise<CashAccountView[]> {
       row.cashAccountId,
       (sums.get(row.cashAccountId) ?? 0) + sign * Number(row._sum.amount ?? 0),
     );
+  }
+  for (const row of payouts) {
+    if (!row.cashAccountId) continue;
+    sums.set(row.cashAccountId, (sums.get(row.cashAccountId) ?? 0) - Number(row._sum.cashAmount ?? 0));
   }
   return accounts.map((account) => ({
     id: account.id,
