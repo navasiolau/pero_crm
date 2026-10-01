@@ -1,0 +1,85 @@
+{
+  "status": "STAGING_READONLY_SMOKE_PASS",
+  "revision": "530df25c6971107a6ffb283da62fb95db40f0359",
+  "identity": {
+    "hostname": "crm-staging",
+    "web": "e2dc3bee974ae8aea66b6b62e7a8b4abfcf469164e930eec2140026ccd4b4cc4",
+    "image": "sha256:24c555c888dd3dfe95edd4b35dd3e5aba427c2ad4b36fb88970564d68f35f583",
+    "revision": "530df25c6971107a6ffb283da62fb95db40f0359",
+    "webStartedAt": "2026-10-01T13:20:07.115095611Z",
+    "database": "27b8f7342b9d722ab8788e137b37b03a3037442da038c5b8b98dbb30245b8b6a",
+    "databaseStartedAt": "2026-09-23T11:42:14.649193151Z",
+    "databaseVolume": "crm-staging_pgdata",
+    "pgdata": "/var/lib/postgresql/data",
+    "outerW07Sha256": "27e3bcd727d9e83170c76a254806fde42590da76cea30c9e1441d873df680139"
+  },
+  "checks": [
+    {
+      "screen": "product",
+      "width": 360,
+      "status": 200
+    },
+    {
+      "screen": "project",
+      "width": 360,
+      "status": 200
+    },
+    {
+      "screen": "tasks",
+      "width": 360,
+      "status": 200
+    },
+    {
+      "screen": "product",
+      "width": 390,
+      "status": 200
+    },
+    {
+      "screen": "project",
+      "width": 390,
+      "status": 200
+    },
+    {
+      "screen": "tasks",
+      "width": 390,
+      "status": 200
+    },
+    {
+      "screen": "product",
+      "width": 1440,
+      "status": 200
+    },
+    {
+      "screen": "project",
+      "width": 1440,
+      "status": 200
+    },
+    {
+      "screen": "tasks",
+      "width": 1440,
+      "status": 200
+    }
+  ],
+  "pageErrors": [],
+  "blockedWriteRequests": 0,
+  "preservation": {
+    "status": "READONLY_SMOKE_PRESERVED",
+    "identity": {
+      "hostname": "crm-staging",
+      "web": "e2dc3bee974ae8aea66b6b62e7a8b4abfcf469164e930eec2140026ccd4b4cc4",
+      "image": "sha256:24c555c888dd3dfe95edd4b35dd3e5aba427c2ad4b36fb88970564d68f35f583",
+      "revision": "530df25c6971107a6ffb283da62fb95db40f0359",
+      "webStartedAt": "2026-10-01T13:20:07.115095611Z",
+      "database": "27b8f7342b9d722ab8788e137b37b03a3037442da038c5b8b98dbb30245b8b6a",
+      "databaseStartedAt": "2026-09-23T11:42:14.649193151Z",
+      "databaseVolume": "crm-staging_pgdata",
+      "pgdata": "/var/lib/postgresql/data",
+      "outerW07Sha256": "27e3bcd727d9e83170c76a254806fde42590da76cea30c9e1441d873df680139"
+    },
+    "businessTables": 13,
+    "auditAndTimeTables": 2,
+    "preferencesUnchanged": 4
+  },
+  "wrapperHash": "0d66c7cfeb8d41044f1e9ddc841d2cf80ca6c3ef98ffefbfc6d9e2192139884d",
+  "sourceApplicationRevision": "987787fbcba9dc17bd72113e882d4732cc4d17d0"
+}
