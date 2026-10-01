@@ -35,7 +35,8 @@ before(() => {
       findUnique: async () => ({ ...state.product }),
       update: async ({ data }: { data: Record<string, unknown> }) => Object.assign(state.product, data),
     },
-    project: { findUnique: async () => ({ id: "j", number: "900001" }) },
+    project: { findUnique: async () => ({ id: "j", number: "900001", currency: "BYN" }) },
+    orgSetting: { findUnique: async () => ({ value: "BYN" }) },
     task: { findMany: async () => [] },
     priceItem: { findUnique: async () => ({ id: "price", name: "Сборка", price: "30", active: true }) },
     work: {

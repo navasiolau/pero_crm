@@ -28,3 +28,8 @@ export function formatQty(quantity: string | number | null | undefined): string 
   if (Number.isNaN(value)) return "—";
   return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 3 }).format(value);
 }
+
+// Только денежные итоги: null означает отсутствие подтверждённого BYN-эквивалента.
+export function formatMoneyTotal(amount: number | null, currency = "BYN"): string {
+  return amount === null ? "Недоступно: нет подтверждённого BYN-эквивалента" : formatAmount(amount, currency);
+}

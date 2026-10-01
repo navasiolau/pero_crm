@@ -5,6 +5,8 @@ import { randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
 
+import { INTERNAL_CURRENCY, INTERNAL_CURRENCY_ERROR } from "@/lib/internal-currency";
+import { historicalByn, BYN_UNAVAILABLE_REASON } from "@/lib/history-byn";
 import { prisma } from "@/lib/prisma";
 import { formatAmount } from "@/lib/format";
 import { writeChangeLog } from "@/server/plugins/changelog";
@@ -110,7 +112,8 @@ export async function accrueTurnover(
     };
   }
 
-  const { total, currency } = await getMonthTurnover(month);
+  const { total } = await getMonthTurnover(month);
+  const currency = INTERNAL_CURRENCY;
   const users = await prisma.user.findMany({
     where: { active: true, payScheme: "PERCENT_TURNOVER", payPercent: { gt: 0 } },
     select: { id: true, name: true, payPercent: true },
@@ -119,28 +122,30 @@ export async function accrueTurnover(
     return { ok: false, error: "Нет сотрудников со схемой «% от оборота»" };
   }
 
-  const existing = await prisma.payrollEntry.groupBy({
-    by: ["userId"],
-    where: { month, scheme: "PERCENT_TURNOVER" },
-    _sum: { amount: true },
+  const existing = await prisma.payrollEntry.findMany({
+    where: { month, scheme: "PERCENT_TURNOVER", userId: { in: users.map((user) => user.id) } },
+    select: { userId: true, amount: true, currency: true, bynAmount: true },
   });
-  const accruedMap = new Map(
-    existing.map((row) => [row.userId, Number(row._sum.amount ?? 0)]),
-  );
-
+  const accruedMap = new Map<string, Prisma.Decimal>();
+  for (const row of existing) {
+    const amount = historicalByn(row);
+    if (amount === null) return { ok: false, error: BYN_UNAVAILABLE_REASON };
+    accruedMap.set(row.userId, (accruedMap.get(row.userId) ?? new Prisma.Decimal(0)).plus(amount));
+  }
   let accruedCount = 0;
   for (const user of users) {
     const percent = Number(user.payPercent);
-    const expected = round2((total * percent) / 100);
-    const already = round2(accruedMap.get(user.id) ?? 0);
-    const diff = round2(expected - already);
+    const expected = new Prisma.Decimal(total).mul(percent).div(100).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+    const already = accruedMap.get(user.id) ?? new Prisma.Decimal(0);
+    const diff = expected.minus(already).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP).toNumber();
     if (diff <= 0) continue; // начислено актуально или больше расчётного
-    const isTopUp = already > 0;
+    const isTopUp = already.gt(0);
     await prisma.payrollEntry.create({
       data: {
         userId: user.id,
         projectId: null, // начисление на организацию целиком, не на проект
         amount: diff,
+        bynAmount: diff,
         currency,
         scheme: "PERCENT_TURNOVER",
         month,
@@ -207,7 +212,9 @@ export async function settleAll(
   if (!cashAccountId) return { ok: false, error: "Выберите кассу для расчёта" };
   const account = (await listCashAccounts()).find((row) => row.id === cashAccountId && row.active);
   if (!account || !isCashCurrency(account.currency)) return { ok: false, error: "Активная касса не найдена" };
-  const debtors = (await getEmployeeDues()).filter((row) => row.due > 0);
+  const dues = await getEmployeeDues();
+  if (dues.some((row) => row.due === null) || await getOrgBalance() === null) return { ok: false, error: BYN_UNAVAILABLE_REASON };
+  const debtors = dues.filter((row): row is typeof row & { due: number } => row.due !== null && row.due > 0);
   if (debtors.length === 0) {
     return { ok: false, error: "Задолженности перед сотрудниками нет" };
   }
@@ -230,7 +237,9 @@ export async function settleAll(
   for (const debtor of debtors) {
     const [cashRows, orgAvailable, currentDues] = await Promise.all([listCashAccounts(), getOrgBalance(), getEmployeeDues()]);
     const cashAvailable = cashRows.find((row) => row.id === cashAccountId)?.balance ?? 0;
-    const due = currentDues.find((row) => row.userId === debtor.userId)?.due ?? 0;
+    const currentDue = currentDues.find((row) => row.userId === debtor.userId);
+    if (orgAvailable === null || currentDue?.due === null) return { ok: false, error: BYN_UNAVAILABLE_REASON, paidCount, totalPaid, shortPaid };
+    const due = currentDue?.due ?? 0;
     const payrollCap = new Prisma.Decimal(Math.min(due, orgAvailable));
     if (cashAvailable <= 0 || payrollCap.lte(0)) { shortPaid.push(debtor.name); continue; }
     const physicalCap = payrollCap.mul(rates.payroll.rate).div(rates.cash.rate)
@@ -260,14 +269,14 @@ export async function settleAll(
 
 // ─── Валюта зарплаты (§10): единая, задаётся администратором ────────────────
 
-const CURRENCIES = ["BYN", "RUB", "USD", "EUR"] as const;
+
 
 export async function setPayrollCurrency(
   currency: string,
 ): Promise<{ ok: boolean; error?: string }> {
   const session = await requireAdmin();
-  if (!(CURRENCIES as readonly string[]).includes(currency)) {
-    return { ok: false, error: "Неизвестная валюта" };
+  if (currency !== INTERNAL_CURRENCY) {
+    return { ok: false, error: INTERNAL_CURRENCY_ERROR };
   }
   let before: string;
   try {

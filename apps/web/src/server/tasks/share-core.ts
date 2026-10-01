@@ -1,3 +1,4 @@
+import { assertInternalCurrency, assertProjectMoneyCurrency } from "@/lib/internal-currency";
 import type { DomainActor } from "@/server/projects/core";
 import { z } from "zod";
 import { FULL_SHARE_UNITS, moneyAtoms, quantityAtoms, splitAllocation, taskPieceAmount } from "@/lib/work-shares";
@@ -35,7 +36,7 @@ export async function splitTaskCore(actor: DomainActor, input: SplitTaskInput, t
     const task = await tx.task.findFirst({
       where: { AND: [{ id: data.taskId }, taskExecutionWhere(visibilityActor)] },
       include: {
-        project: { select: { number: true } },
+        project: { select: { number: true, currency: true } },
         product: { select: { engineerId: true, status: true, projectId: true } },
         work: { select: {
           id: true, projectId: true, productId: true, priceSnapshot: true, paymentKind: true, stagePayPoolId: true,
@@ -124,6 +125,10 @@ export async function splitTaskCore(actor: DomainActor, input: SplitTaskInput, t
     }
     catch (error) { return { ok: false, error: error instanceof Error ? error.message : "Некорректная доля" }; }
     const currency = engineering || installation ? null : group ? group.currency : task.work ? (await tx.orgSetting.findUnique({ where: { key: "payrollCurrency" } }))?.value ?? "BYN" : null;
+    if (task.work && !engineering && !installation) {
+      try { assertProjectMoneyCurrency(task.project.currency); assertInternalCurrency(currency); }
+      catch (error) { return { ok: false, error: error instanceof Error ? error.message : "Не определена валюта работы" }; }
+    }
     const allocationGroup = group ?? await tx.taskAllocationGroup.create({ data: {
       workId: task.workId, quantity: task.work ? task.quantity : null,
       ...(engineering ? { budget: null, budgetSource: "STAGE_PREVIEW" }

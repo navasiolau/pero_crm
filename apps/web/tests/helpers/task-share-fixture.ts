@@ -22,7 +22,7 @@ export function taskShareFixture(productStatus: "DESIGN" | "PRODUCTION" = "PRODU
     dependencies: [{ taskId: "source", dependsOnId: "predecessor" }, { taskId: "dependent", dependsOnId: "source" }] as Row[],
     times: [{ id: "timer", taskId: "source", userId: "worker", minutes: 20, stoppedAt: null, startedAt: now }] as Row[],
     files: [{ id: "photo", taskId: "source", projectId: "project", productId: "product" }] as Row[],
-    sequence: 0, currency: "BYN",
+    sequence: 0, currency: "BYN", projectCurrency: "BYN",
   };
   let failAt: string | null = null;
   const transactionContext = new AsyncLocalStorage<boolean>();
@@ -32,7 +32,7 @@ export function taskShareFixture(productStatus: "DESIGN" | "PRODUCTION" = "PRODU
   function hydrate(row: Row): Row {
     return {
       ...row,
-      project: { id: "project", number: "1" },
+      project: { id: "project", number: "1", currency: state.projectCurrency },
       product: state.products.find((product) => product.id === row.productId) ?? null,
       assignee: state.users.find((user) => user.id === row.assigneeId) ?? null,
       work: (() => { const work = state.works.find((item) => item.id === row.workId); const pool = state.pools.find((item) => item.id === work?.stagePayPoolId); return work ? { ...work, stagePayPool: work.stagePayPool ?? (pool ? { ...pool, product: state.products.find((item) => item.id === pool.productId) } : null) } : null; })(),
@@ -83,7 +83,7 @@ export function taskShareFixture(productStatus: "DESIGN" | "PRODUCTION" = "PRODU
       findUnique: async ({ where }: { where: Row }) => { const row = filtered(state.works, where)[0]; return row ? { ...row, tasks: state.tasks.filter((task) => task.workId === row.id) } : null; },
       delete: async ({ where }: { where: Row }) => { write("work.delete"); const row = filtered(state.works, where)[0]; state.works = state.works.filter((work) => work !== row); return row; },
     },
-    project: { findUnique: async () => ({ id: "project", number: "1" }) },
+    project: { findUnique: async () => ({ id: "project", number: "1", currency: state.projectCurrency }) },
     product: { findFirst: async ({ where }: { where: Row }) => filtered(state.products, where)[0] ?? null,
       findUnique: async ({ where }: { where: Row }) => filtered(state.products, where)[0] ?? null },
     productStagePayPool: {

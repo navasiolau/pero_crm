@@ -2,6 +2,7 @@ import { revalidatePath } from "next/cache";
 import type { ProjectStage } from "@prisma/client";
 import { z } from "zod";
 
+import { INTERNAL_CURRENCY, INTERNAL_CURRENCY_ERROR, assertProjectMoneyCurrency } from "@/lib/internal-currency";
 import { prisma } from "@/lib/prisma";
 import { formatAmount } from "@/lib/format";
 import { stageLabels as STAGE_LABELS } from "@/lib/stages";
@@ -85,7 +86,7 @@ async function createProjectWithNumber(
 export const createProjectSchema = z.object({
   title: z.string().min(1, "Укажите название проекта"),
   clientId: z.string().min(1, "Выберите клиента"),
-  currency: z.string().default("BYN"),
+  currency: z.string().refine((value) => value === INTERNAL_CURRENCY, INTERNAL_CURRENCY_ERROR).default(INTERNAL_CURRENCY),
   address: z.string().optional(),
   managerId: z.string().optional(),
   initialPrice: z
@@ -160,7 +161,7 @@ export async function createProjectCore(
 
 export const updateProjectSchema = z.object({
   title: z.string().min(1).optional(),
-  currency: z.string().optional(),
+  currency: z.string().refine((value) => value === INTERNAL_CURRENCY, INTERNAL_CURRENCY_ERROR).optional(),
   address: z.string().nullable().optional(),
   managerId: z.string().nullable().optional(),
   clientId: z.string().optional(),
@@ -203,6 +204,7 @@ export async function updateProjectCore(
     before = await withTaskTransaction(async (tx) => {
       const current = await tx.project.findUnique({ where: { id: projectId } });
       if (!current) return null;
+      if ([data.initialPrice, data.delivery, data.unloading, data.installation].some((value) => value !== undefined)) assertProjectMoneyCurrency(data.currency ?? current.currency);
       if (data.currency !== undefined) {
         await assertProjectCurrencyChange(tx, projectId, data.currency);
         await assertPercentageProjectCurrencyChange(tx, projectId, data.currency);

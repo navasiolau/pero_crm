@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
+import { assertInternalCurrency, assertProjectMoneyCurrency } from "@/lib/internal-currency";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { writeChangeLog } from "@/server/plugins/changelog";
@@ -47,6 +48,10 @@ export async function addWork(
   let work;
   try {
     work = await withTaskTransaction(async (tx) => {
+      const currentProject = await tx.project.findUnique({ where: { id: data.projectId }, select: { currency: true } });
+      if (!currentProject) throw new Error("Проект не найден");
+      assertProjectMoneyCurrency(currentProject.currency);
+      assertInternalCurrency((await tx.orgSetting.findUnique({ where: { key: "payrollCurrency" } }))?.value ?? "BYN");
       if (data.productId) await lockProductRow(tx, data.productId);
       const product = data.productId ? await tx.product.findFirst({
         where: { id: data.productId, projectId: data.projectId }, select: { id: true, quantity: true },

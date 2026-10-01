@@ -15,19 +15,10 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SearchableSelect } from "@/components/ui/searchable-select";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { createClient } from "@/server/clients/actions";
 import { createProject } from "@/server/projects/actions";
 
 import type { SelectOption } from "./projects-view";
-
-const CURRENCIES = ["BYN", "RUB", "USD", "EUR"];
 
 // Создание проекта (§6): проект = заказ клиента; изделия с ценами
 // и инженерами добавляются позже в карточке проекта (вкладка «Изделия»).
@@ -49,7 +40,6 @@ export function CreateProjectDialog({
   const [clientId, setClientId] = useState("");
   const [managerId, setManagerId] = useState("");
   const [address, setAddress] = useState("");
-  const [currency, setCurrency] = useState("BYN");
   // Мини-форма нового клиента
   const [newClientOpen, setNewClientOpen] = useState(false);
   const [newClientName, setNewClientName] = useState("");
@@ -61,7 +51,6 @@ export function CreateProjectDialog({
     setClientId("");
     setManagerId("");
     setAddress("");
-    setCurrency("BYN");
     setNewClientOpen(false);
     setNewClientName("");
     setNewClientPhone("");
@@ -199,24 +188,7 @@ export function CreateProjectDialog({
                 placeholder="Адрес объекта"
               />
             </div>
-            <div className="flex flex-col gap-1.5">
-              <Label>Валюта</Label>
-              <Select
-                value={currency}
-                onValueChange={(value) => setCurrency(value ?? "BYN")}
-              >
-                <SelectTrigger>
-                  <SelectValue>{currency}</SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  {CURRENCIES.map((item) => (
-                    <SelectItem key={item} value={item}>
-                      {item}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+
           </div>
         </div>
 
@@ -233,7 +205,6 @@ export function CreateProjectDialog({
                   clientId,
                   managerId: managerId || undefined,
                   address: address.trim() || undefined,
-                  currency,
                 });
                 if (result.ok && result.id) {
                   toast.success("Проект создан");

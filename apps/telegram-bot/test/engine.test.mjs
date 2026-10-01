@@ -38,7 +38,7 @@ globalThis.fetch = async (input, options = {}) => {
     const type = url.searchParams.get("type");
     value = type === "clients" ? { ok: true, items: [{ id: "client-1", label: "Client" }] }
       : type === "managers" ? { ok: true, items: [{ id: "manager-1", label: "Manager" }] }
-      : type === "cash" ? { ok: true, items: [{ id: "cash-1", label: "Main", currency: "BYN" }] }
+      : type === "cash" ? { ok: true, items: [{ id: "cash-1", label: "Main", currency: "BYN" }, { id: "cash-usd", label: "USD cash", currency: "USD" }] }
       : { ok: true, items: [] };
   } else if (url.pathname === "/api/v1/bot/projects" && options.method === "GET") {
     value = { ok: true, projects: [{ id: "project-205", number: "205", title: "Existing", stage: "NEW", currency: "BYN" }] };
@@ -73,7 +73,6 @@ test("engine executes restored link, role, project and payment behavior", async 
     message(4, 501, "Восстановленный заказ"),
     message(5, 501, "Клиент"),
     callback(6, 501, "cli:client-1"),
-    callback(7, 501, "npc:BYN"),
     callback(8, 501, "mgr:manager-1"),
     message(9, 501, "1500"),
     message(10, 501, "/приход 205 100"),
@@ -89,7 +88,7 @@ test("engine executes restored link, role, project and payment behavior", async 
   const project = calls.find((item) => item.path === "/api/v1/bot/projects" && item.method === "POST");
   assert.ok(project, `project call missing: ${JSON.stringify({ calls, sent })}`);
   assert.deepEqual(project.body, {
-    title: "Восстановленный заказ", clientId: "client-1", currency: "BYN",
+    title: "Восстановленный заказ", clientId: "client-1",
     managerId: "manager-1", initialPrice: 1500,
   });
   const payment = calls.find((item) => item.path === "/api/v1/bot/payments");
@@ -103,4 +102,37 @@ test("engine executes restored link, role, project and payment behavior", async 
   ));
   assert.equal(project.actor, "admin-1");
   assert.equal(payment.actor, "admin-1");
+});
+
+
+test("project wizard skips currency and rejects stale foreign currency callback", async () => {
+  const startCalls = calls.length;
+  const startSent = sent.length;
+  await handleUpdate(message(101, 601, "/новый"));
+  await handleUpdate(message(102, 601, "Заказ BYN"));
+  await handleUpdate(message(103, 601, "Клиент"));
+  await handleUpdate(callback(104, 601, "cli:client-1"));
+  const managerPrompt = sent.at(-1);
+  assert.ok(managerPrompt.text.includes("Менеджер проекта"));
+  assert.ok(!JSON.stringify(sent.slice(startSent)).includes("npc:"));
+  await handleUpdate(callback(105, 601, "npc:RUB"));
+  assert.ok(sent.at(-1).text.includes("BYN"));
+  await handleUpdate(callback(106, 601, "mgr:none"));
+  await handleUpdate(message(107, 601, "—"));
+  assert.equal(calls.slice(startCalls).filter(item => item.path === "/api/v1/bot/projects" && item.method === "POST").length, 0);
+});
+
+
+test("physical payment currency remains selectable independently of project BYN", async () => {
+  const startCalls = calls.length;
+  await handleUpdate(message(201, 701, "/приход 205 100"));
+  assert.ok(JSON.stringify(sent.at(-1)).includes("cur:USD"));
+  await handleUpdate(callback(202, 701, "cur:USD"));
+  await handleUpdate(callback(203, 701, "cash:cash-usd"));
+  await handleUpdate(message(204, 701, "—"));
+  await handleUpdate(callback(205, 701, "payok"));
+  const payment = calls.slice(startCalls).find(item => item.path === "/api/v1/bot/payments");
+  assert.equal(payment.body.currency, "USD");
+  assert.equal(payment.body.amount, 100);
+  assert.equal(payment.body.cashAccountId, "cash-usd");
 });

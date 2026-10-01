@@ -47,18 +47,18 @@ export function NavUser({ user }: { user: ShellUser }) {
         render={
           <Button
             variant="ghost"
-            className="h-9 gap-2 px-2"
+            className="h-9 min-w-0 shrink gap-2 px-2"
             aria-label="Меню пользователя"
           />
         }
       >
-        <Avatar className="size-7">
+        <Avatar className="size-7 shrink-0">
           <AvatarFallback>{initialsOf(user.name)}</AvatarFallback>
         </Avatar>
-        <span className="hidden max-w-40 truncate text-sm font-medium md:inline">
+        <span className="hidden min-w-0 max-w-40 truncate text-sm font-medium lg:inline">
           {user.name}
         </span>
-        <ChevronsUpDownIcon className="hidden size-4 text-muted-foreground md:inline" />
+        <ChevronsUpDownIcon className="hidden size-4 shrink-0 text-muted-foreground lg:inline" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-64">
         <DropdownMenuGroup>

@@ -11,21 +11,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SearchableSelect } from "@/components/ui/searchable-select";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { formatAmount, formatDateTime } from "@/lib/format";
 import { displayClientName } from "@/lib/labels";
 import { stageLabels } from "@/lib/stages";
 import { updateProject } from "@/server/projects/actions";
 
 import type { SelectOption } from "../projects-view";
-
-const CURRENCIES = ["BYN", "RUB", "USD", "EUR"];
 
 export interface OverviewProject {
   id: string;
@@ -182,27 +173,7 @@ export function OverviewTab({
               <Label htmlFor="address">Адрес</Label>
               <Input id="address" value={form.address} onChange={set("address")} readOnly={ro} />
             </div>
-            <div className="flex flex-col gap-1.5">
-              <Label>Валюта</Label>
-              <Select
-                value={form.currency}
-                onValueChange={(value) =>
-                  setForm((prev) => ({ ...prev, currency: value ?? "BYN" }))
-                }
-                disabled={ro}
-              >
-                <SelectTrigger>
-                  <SelectValue>{form.currency}</SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  {CURRENCIES.map((item) => (
-                    <SelectItem key={item} value={item}>
-                      {item}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="initialPrice">Первоначальная цена (КП)</Label>

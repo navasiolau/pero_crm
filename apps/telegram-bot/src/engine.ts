@@ -27,10 +27,9 @@ interface Session {
 type Dialog =
   | {
       kind: "newProject";
-      step: "title" | "client" | "currency" | "manager" | "initialPrice";
+      step: "title" | "client" | "manager" | "initialPrice";
       title: string;
       clientId?: string;
-      currency: string;
       managerId?: string | null;
     }
   | {
@@ -235,11 +234,10 @@ async function handleCommand(
         kind: "newProject",
         step: "title",
         title: "",
-        currency: "BYN",
       });
       await reply(
         chatId,
-        "Создание проекта.\n1/5 Название заказа:",
+        "Создание проекта.\n1/4 Название заказа:",
         [[CANCEL_BUTTON]],
       );
       return;
@@ -384,7 +382,7 @@ async function newProjectText(
       dialog.title = text;
       dialog.step = "client";
       setDialog(chatId, dialog);
-      await reply(chatId, "2/5 Клиент — введите имя/фамилию или телефон для поиска:", [
+      await reply(chatId, "2/4 Клиент — введите имя/фамилию или телефон для поиска:", [
         [CANCEL_BUTTON],
       ]);
       return;
@@ -420,7 +418,6 @@ async function newProjectText(
       const input: Record<string, unknown> = {
         title: dialog.title,
         clientId: dialog.clientId,
-        currency: dialog.currency,
       };
       if (dialog.managerId) input.managerId = dialog.managerId;
       if (value !== null) input.initialPrice = value;
@@ -431,7 +428,7 @@ async function newProjectText(
       }
       await reply(
         chatId,
-        `✅ Проект П-${result.number} «${dialog.title}» создан.\nВалюта: ${dialog.currency}\nПервоначальная цена: ${value === null ? "—" : formatMoney(value, dialog.currency)}`,
+        `✅ Проект П-${result.number} «${dialog.title}» создан.\nВалюта: BYN\nПервоначальная цена: ${value === null ? "—" : formatMoney(value, "BYN")}`,
       );
       return;
     }
@@ -859,7 +856,7 @@ async function dispatchCallback(
       dialog.managerId = value === "none" ? null : value;
       dialog.step = "initialPrice";
       setDialog(chatId, dialog);
-      await reply(chatId, "5/5 Первоначальная цена — цена КП клиенту (или «—»):");
+      await reply(chatId, "4/4 Первоначальная цена — цена КП клиенту (или «—»):");
     }
     return;
   }
@@ -872,33 +869,12 @@ async function dispatchCallback(
       return;
     }
     dialog.clientId = rest[0];
-    // Подпись клиента подтянем из справочника по id
-    dialog.step = "currency";
-    setDialog(chatId, dialog);
-    await reply(chatId, "3/5 Валюта проекта:", [
-      [
-        { text: "✅ BYN", callback_data: `npc:BYN` },
-        ...CURRENCIES.filter((c) => c !== "BYN").map(
-          (c) => ({ text: c, callback_data: `npc:${c}` }) as InlineButton,
-        ),
-      ],
-      [CANCEL_BUTTON],
-    ]);
-    return;
-  }
-  if (action === "npc") {
-    const dialog = getDialog(chatId);
-    if (dialog?.kind !== "newProject") {
-      await reply(chatId, "Сессия устарела — начните заново: /новый");
-      return;
-    }
-    dialog.currency = rest[0];
     dialog.step = "manager";
     setDialog(chatId, dialog);
     const managers = await crm.directory(session.userId, "managers");
     await reply(
       chatId,
-      "4/5 Менеджер проекта:",
+      "3/4 Менеджер проекта:",
       buttonsRow(
         [
           { text: "— без менеджера", callback_data: `mgr:none` },
@@ -910,6 +886,13 @@ async function dispatchCallback(
         2,
       ),
     );
+    return;
+  }
+
+  // Callback из старого мастера не может задать валюту нового проекта.
+  if (action === "npc") {
+    setDialog(chatId, null);
+    await reply(chatId, "Новые проекты создаются только в BYN. Сессия устарела — начните заново: /новый");
     return;
   }
 

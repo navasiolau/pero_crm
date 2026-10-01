@@ -1,3 +1,4 @@
+import { INTERNAL_CURRENCY, assertProjectMoneyCurrency } from "@/lib/internal-currency";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { calculateStageFund, distributeStageFund, type StageCurrency } from "@/lib/product-stage-pay";
 import { resolveStageRates } from "./quote";
@@ -36,8 +37,8 @@ export async function getEngineeringPreview(db: Reader, productId: string) {
       work.tasks.reduce((sum, task) => sum + (task.stageShareUnits ?? 0), 0) !== 1_000_000) ||
     allWorks.reduce((sum, work) => sum + (work.poolWeightUnits ?? 0), 0) !== 1_000_000)
     return { state: "DRAFT" as const, ratePercent: pool.ratePercent?.toString() ?? null, amount: null, currency: null, tasks: new Map<string, EngineeringTaskPreview>() };
-  const setting = await db.orgSetting.findUnique({ where: { key: "payrollCurrency" } });
-  const payrollCurrency = setting?.value ?? "BYN";
+  assertProjectMoneyCurrency(product.project.currency);
+  const payrollCurrency = INTERNAL_CURRENCY;
   const quote = await resolveStageRates(product.project.currency, payrollCurrency, new Date());
   const fund = calculateStageFund({ price: product.expectedPrice.toString(), ratePercent: pool.ratePercent.toString(),
     productCurrency: product.project.currency as StageCurrency, payrollCurrency: payrollCurrency as StageCurrency,

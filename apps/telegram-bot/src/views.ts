@@ -50,10 +50,10 @@ export function rolesLabel(roles: string[]): string {
     .join(" · ");
 }
 
-export function formatMoney(amount: number, currency: string): string {
+export function formatMoney(amount: number | string, currency: string): string {
   const formatted = new Intl.NumberFormat("ru-RU", {
     maximumFractionDigits: 2,
-  }).format(amount);
+  }).format(Number(amount));
   return `${formatted} ${currency}`;
 }
 

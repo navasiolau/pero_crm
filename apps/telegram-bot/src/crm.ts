@@ -33,8 +33,8 @@ export interface ProjectCard {
 }
 
 export interface FinanceInfo {
-  incomeByn: number;
-  expenseByn: number;
+  incomeByn: string;
+  expenseByn: string;
 }
 
 export interface DirectoryItem {

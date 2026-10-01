@@ -1,5 +1,6 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
 import { formatAmount } from "@/lib/format";
@@ -7,12 +8,12 @@ import { writeChangeLog } from "@/server/plugins/changelog";
 import { emitDomainEvent } from "@/server/plugins/events";
 import { notifyOrg } from "@/server/notifications/notify";
 
-import { equivalents, getNbrbRate, isCurrency } from "@/server/finance/nbrb";
+import { getNbrbRate, isCurrency } from "@/server/finance/nbrb";
 import { requireActorRoles, type DomainActor } from "@/server/projects/core";
 import { FINANCE_ROLES } from "@/lib/roles";
 import { withTaskTransaction } from "@/server/tasks/transaction";
 import { readCashBalance, readOrgBalance } from "@/server/payroll/cash-core";
-import { getPayrollCurrency } from "@/server/payroll/queries";
+import { assertProjectMoneyCurrency } from "@/lib/internal-currency";
 
 // Ядро создания платежа (§11): приход от клиента или расход на проект.
 // Используется и вебом (finance-tab), и telegram-ботом — актёр передаётся
@@ -34,10 +35,6 @@ export const paymentSchema = z.object({
   comment: z.string().optional(),
 });
 
-function round2(value: number): number {
-  return Math.round(value * 100) / 100;
-}
-
 export async function createPaymentCore(
   actor: DomainActor,
   input: z.input<typeof paymentSchema>,
@@ -55,9 +52,8 @@ export async function createPaymentCore(
     select: { id: true, number: true, currency: true },
   });
   if (!project) return { ok: false, error: "Проект не найден" };
-  if (!isCurrency(project.currency)) {
-    return { ok: false, error: `Неизвестная валюта проекта: ${project.currency}` };
-  }
+  try { assertProjectMoneyCurrency(project.currency); }
+  catch (error) { return { ok: false, error: error instanceof Error ? error.message : "Сначала подготовьте проект в BYN" }; }
 
   // Касса: операция проводится только в валюте кассы (деньги физически
   // лежат в кассе в её валюте; эквиваленты — в полях курса операции)
@@ -87,7 +83,8 @@ export async function createPaymentCore(
   }
 
   const paidAt = data.paidAt ? new Date(`${data.paidAt}T12:00:00`) : new Date();
-  const amount = round2(data.amount);
+  const amountDecimal = new Prisma.Decimal(data.amount).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+  const amount = amountDecimal.toNumber();
 
   // Курс: ручной ввод имеет приоритет (§11), иначе — НБ РБ на дату операции.
   // Если НБ РБ недоступен — просим ввести курс вручную (§19).
@@ -111,48 +108,26 @@ export async function createPaymentCore(
     }
   }
 
-  // Эквивалент в валюте проекта: при совпадении валют — сумма как есть,
-  // иначе кросс-курс через BYN (курс валюты проекта — тоже с НБ РБ).
-  let projectRate = 1;
-  if (project.currency !== data.currency && project.currency !== "BYN") {
-    try {
-      projectRate = (await getNbrbRate(project.currency, paidAt)).rate;
-    } catch {
-      return {
-        ok: false,
-        error: `Не удалось получить курс ${project.currency} (валюта проекта) с НБ РБ`,
-      };
-    }
-  }
-  const equiv =
-    project.currency === data.currency
-      ? { bynAmount: round2(amount * rate), projectAmount: amount }
-      : equivalents(amount, rate, projectRate);
+  // Проект уже проверен как BYN. Считаем фиксированный эквивалент Decimal:
+  // полкопейки округляется вверх без ошибки двоичного умножения.
+  const rateDecimal = new Prisma.Decimal(rate);
+  const bynDecimal = amountDecimal.times(rateDecimal).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+  const equiv = { bynAmount: bynDecimal.toNumber(), projectAmount: bynDecimal.toNumber() };
 
-  let payrollRate = "1.000000";
-  let payrollCurrency = "BYN";
-  if (data.direction === "EXPENSE") {
-    payrollCurrency = await getPayrollCurrency();
-    if (!isCurrency(payrollCurrency)) return { ok: false, error: "Неизвестная валюта зарплаты" };
-    try { payrollRate = (await getNbrbRate(payrollCurrency)).rate.toFixed(6); }
-    catch { return { ok: false, error: "Не удалось получить курс для проверки баланса организации" }; }
-  }
+  const payrollRate = "1.000000";
   let payment;
   try {
     payment = await withTaskTransaction(async (tx) => {
-      const [currentProject, currentAccount, currentArticle, payrollSetting] = await Promise.all([
+      const [currentProject, currentAccount, currentArticle] = await Promise.all([
         tx.project.findUnique({ where: { id: project.id }, select: { currency: true } }),
         tx.cashAccount.findUnique({ where: { id: account.id }, select: { active: true, currency: true } }),
         articleId ? tx.expenseArticle.findUnique({ where: { id: articleId }, select: { active: true } }) : Promise.resolve(null),
-        tx.orgSetting.findUnique({ where: { key: "payrollCurrency" } }),
       ]);
       if (currentProject?.currency !== project.currency || !currentAccount?.active || currentAccount.currency !== data.currency
         || (articleId && !currentArticle?.active)) throw new Error("Реквизиты платежа изменились — обновите форму");
       if (data.direction === "EXPENSE") {
-        const currentPayroll = payrollSetting?.value ?? "BYN";
-        if (currentPayroll !== payrollCurrency) throw new Error("Валюта зарплаты изменилась — повторите операцию");
-        const [cashBalance, orgBalanceAfter] = await Promise.all([readCashBalance(tx, account.id), readOrgBalance(tx, payrollRate, `-${equiv.bynAmount}`)]);
-        if (cashBalance.lt(amount)) throw new Error("Недостаточно средств в выбранной кассе");
+        const [cashBalance, orgBalanceAfter] = await Promise.all([readCashBalance(tx, account.id), readOrgBalance(tx, payrollRate, bynDecimal.negated().toFixed(2))]);
+        if (cashBalance.lt(amountDecimal)) throw new Error("Недостаточно средств в выбранной кассе");
         if (orgBalanceAfter.lt(0)) throw new Error("Недостаточно средств на балансе организации");
       }
       return tx.payment.create({ data: {

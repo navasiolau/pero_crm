@@ -3,7 +3,7 @@ import type { TaskDetails } from "@/components/task-dialog";
 import type { ProductStatus } from "@prisma/client";
 import { fileVisibilityWhere, taskVisibilityWhere, workVisibilityWhere, type VisibilityActor } from "@/server/access/visibility";
 import { FULL_SHARE_UNITS, personalQuantity, taskPieceAmount } from "@/lib/work-shares";
-import { getPayrollCurrency } from "@/server/payroll/queries";
+import { INTERNAL_CURRENCY } from "@/lib/internal-currency";
 import { canSplitTask } from "./share-policy";
 import { getEngineeringTaskPreview } from "@/server/product-stage-pay/preview";
 
@@ -99,7 +99,9 @@ export async function mapTaskDetails(
       })
     : [];
   const userNames = new Map(users.map((user) => [user.id, user.name]));
-  const currency = tasks.some((task) => task.work?.paymentKind === "LEGACY" && !task.allocationGroup) ? await getPayrollCurrency() : null;
+  const ungroupedSetting = tasks.some((task) => task.work?.paymentKind === "LEGACY" && !task.allocationGroup)
+    ? (await prisma.orgSetting.findUnique({ where: { key: "payrollCurrency" } }))?.value ?? INTERNAL_CURRENCY : null;
+  const currency = ungroupedSetting === INTERNAL_CURRENCY ? INTERNAL_CURRENCY : null;
   const engineeringProductIds = [...new Set(tasks.filter((task) => task.work?.paymentKind === "ENGINEERING").flatMap((task) => task.product ? [task.product.id] : []))];
   const previews = new Map<string, Awaited<ReturnType<typeof getEngineeringTaskPreview>>>();
   const previewErrors = new Map<string, string>();
@@ -136,7 +138,7 @@ export async function mapTaskDetails(
     allocationGroupId: allocation.allocationGroupId,
     shareUnits: allocation.shareUnits,
     shareAmount: percentageWork ? null : task.work && task.work.priceSnapshot !== null && task.work.priceSnapshot !== undefined ? taskPieceAmount(allocation, String(task.work.priceSnapshot)) : null,
-    shareCurrency: percentageWork ? null : task.work ? task.allocationGroup?.currency ?? currency : null,
+    shareCurrency: percentageWork ? null : task.work ? task.allocationGroup ? task.allocationGroup.currency : currency : null,
     paymentKind: task.work?.paymentKind ?? "LEGACY",
     physicalShareUnits: allocation.shareUnits,
     stageShareUnits: engineering ? task.stageShareUnits ?? null : null,

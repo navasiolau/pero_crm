@@ -24,7 +24,7 @@ export async function GET(request: Request) {
     getPayrollCurrency(),
   ]);
 
-  const fmt = (value: number) => value.toFixed(2).replace(".", ",");
+  const fmt = (value: number | null) => value === null ? "Недоступно: нет подтверждённого BYN-эквивалента" : value.toFixed(2).replace(".", ",");
   const escape = (cell: string) => `"${cell.replaceAll('"', '""')}"`;
   const lines = [
     ["ФИО", "Схема оплаты", `Начислено (${currency})`, `Выплачено (${currency})`, `Аванс (${currency})`, `Долг к выплате (${currency})`],

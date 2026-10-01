@@ -24,7 +24,7 @@ export function AdvancePayoutDialog({
   onOpenChange: (open: boolean) => void;
   users: EmployeeOption[];
   accounts: CashAccountOption[];
-  estimates?: Record<string, number>;
+  estimates?: Record<string, number | null>;
 }) {
   const [uncertain, setUncertain] = useState(false);
   function changeOpen(next: boolean) {

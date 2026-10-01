@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import type { Prisma, ProductStatus } from "@prisma/client";
 import { z } from "zod";
 
+import { assertProjectMoneyCurrency } from "@/lib/internal-currency";
 import { auth } from "@/auth";
 import { productStatusLabels } from "@/lib/product-statuses";
 import { writeChangeLog } from "@/server/plugins/changelog";
@@ -89,9 +90,13 @@ export async function createProduct(
   const mutation = await withTaskTransaction(async (tx) => {
   const project = await tx.project.findUnique({
     where: { id: data.projectId },
-    select: { id: true, number: true },
+    select: { id: true, number: true, currency: true },
   });
   if (!project) return { ok: false as const, error: "Проект не найден" };
+  if (data.expectedPrice !== undefined || data.initialPrice !== undefined) {
+    try { assertProjectMoneyCurrency(project.currency); }
+    catch (error) { return { ok: false as const, error: error instanceof Error ? error.message : "Валюта проекта не подготовлена" }; }
+  }
   if (data.engineerId && !await tx.user.findFirst({ where: { id: data.engineerId, active: true, roles: { hasSome: ["ENGINEER"] } }, select: { id: true } }))
     return { ok: false as const, error: "Выберите активного сотрудника с ролью инженера" };
 
@@ -177,6 +182,11 @@ export async function updateProduct(
     const actor = await resolveVisibilityActor(tx, session.user);
     const before = await tx.product.findFirst({ where: { AND: [{ id: productId }, productEditWhere(actor)] } });
     if (!before) return { ok: false as const, error: "Изделие не найдено" };
+    if (data.expectedPrice !== undefined || data.initialPrice !== undefined || data.quantity !== undefined) {
+      const project = await tx.project.findUnique({ where: { id: before.projectId }, select: { currency: true } });
+      if (!project) return { ok: false as const, error: "Проект не найден" };
+      assertProjectMoneyCurrency(project.currency);
+    }
     const oldCount = before.quantity ?? 1;
     const count = data.quantity ?? oldCount;
     productLineTotal(data.expectedPrice === undefined ? before.expectedPrice ?? null : data.expectedPrice, count);

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
-import { calculateCashPayout, calculateExactOrgBalance, isCashCurrency, parseCashAmount, type CashCurrency, type CashRates } from "@/lib/cash-ledger";
+import { calculateCashPayout, isCashCurrency, parseCashAmount, type CashCurrency, type CashRates } from "@/lib/cash-ledger";
+import { requireHistoricalByn } from "@/lib/history-byn";
 import { ADVANCE_ROLES, FINANCE_ROLES, hasAnyRole, type Role } from "@/lib/roles";
 
 export type PayoutActor = { id: string; name: string; roles: Role[]; source: "web" | "telegram" | "api" };
@@ -49,17 +50,14 @@ export async function readCashBalance(tx: Prisma.TransactionClient, cashAccountI
   return paymentBalance.sub(payouts._sum.cashAmount ?? 0);
 }
 
-export async function readOrgBalance(tx: Prisma.TransactionClient, payrollRate: string, paymentBynDelta = "0.00", newPayoutBynDelta = "0.00"): Promise<Prisma.Decimal> {
-  const [income, expense, newPayouts, legacy] = await Promise.all([
+export async function readOrgBalance(tx: Prisma.TransactionClient, _payrollRate: string, paymentBynDelta = "0.00", newPayoutBynDelta = "0.00"): Promise<Prisma.Decimal> {
+  const [income, expense, payouts] = await Promise.all([
     tx.payment.aggregate({ where: { direction: "INCOME" }, _sum: { bynAmount: true } }),
     tx.payment.aggregate({ where: { direction: "EXPENSE" }, _sum: { bynAmount: true } }),
-    tx.payout.aggregate({ where: { cashAccountId: { not: null } }, _sum: { bynAmount: true } }),
-    tx.payout.aggregate({ where: { cashAccountId: null }, _sum: { amount: true } }),
+    tx.payout.findMany({ select: { amount: true, payrollCurrency: true, bynAmount: true } }),
   ]);
-  const paymentByn = new Prisma.Decimal(income._sum.bynAmount ?? 0).sub(expense._sum.bynAmount ?? 0).add(paymentBynDelta);
-  // Writers must preserve a negative sub-cent balance; rounding is for display only.
-  return calculateExactOrgBalance(paymentByn.toFixed(2), new Prisma.Decimal(newPayouts._sum.bynAmount ?? 0).add(newPayoutBynDelta).toFixed(2),
-    new Prisma.Decimal(legacy._sum.amount ?? 0).toFixed(2), payrollRate);
+  return new Prisma.Decimal(income._sum.bynAmount ?? 0).minus(expense._sum.bynAmount ?? 0)
+    .plus(paymentBynDelta).minus(requireHistoricalByn(payouts)).minus(newPayoutBynDelta);
 }
 
 export async function issuePayoutCore(actor: PayoutActor, input: CashPayoutInput, rates: CashRates, tx: Prisma.TransactionClient) {
@@ -81,25 +79,24 @@ export async function issuePayoutCore(actor: PayoutActor, input: CashPayoutInput
 
   if (rates.asOf !== new Date().toISOString().slice(0, 10)) fail("Дата расчёта изменилась; обновите форму");
 
-  const [user, account, payrollSetting] = await Promise.all([
+  const [user, account] = await Promise.all([
     tx.user.findUnique({ where: { id: input.userId }, select: { id: true, name: true, active: true } }),
     tx.cashAccount.findUnique({ where: { id: input.cashAccountId }, select: { id: true, name: true, active: true, currency: true } }),
-    tx.orgSetting.findUnique({ where: { key: "payrollCurrency" } }),
   ]);
   if (!user || (input.kind === "ADVANCE" && !user.active)) fail("Активный сотрудник не найден");
   if (!account?.active) fail("Активная касса не найдена");
   if (account.currency !== input.expectedCashCurrency || account.currency !== rates.cash.currency ||
-    (payrollSetting?.value ?? "BYN") !== rates.payroll.currency) fail("Валюта или состояние кассы изменились; обновите форму");
+    rates.payroll.currency !== "BYN") fail("Валюта или состояние кассы изменились; обновите форму");
   const quote = calculateCashPayout(normalized.cashAmount, rates);
   const [cashBalance, orgBalanceAfter] = await Promise.all([readCashBalance(tx, account.id), readOrgBalance(tx, quote.payrollRate, "0.00", quote.bynAmount)]);
   if (cashBalance.lt(quote.cashAmount)) fail("Недостаточно средств в выбранной кассе");
   if (orgBalanceAfter.lt(0)) fail("Недостаточно средств на балансе организации");
   if (input.kind === "SALARY") {
     const [accrued, paid] = await Promise.all([
-      tx.payrollEntry.aggregate({ where: { userId: user.id, month: { lt: new Date().toISOString().slice(0, 7) } }, _sum: { amount: true } }),
-      tx.payout.aggregate({ where: { userId: user.id }, _sum: { amount: true } }),
+      tx.payrollEntry.findMany({ where: { userId: user.id, month: { lt: new Date().toISOString().slice(0, 7) } }, select: { amount: true, currency: true, bynAmount: true } }),
+      tx.payout.findMany({ where: { userId: user.id }, select: { amount: true, payrollCurrency: true, bynAmount: true } }),
     ]);
-    const due = new Prisma.Decimal(accrued._sum.amount ?? 0).sub(paid._sum.amount ?? 0);
+    const due = requireHistoricalByn(accrued).sub(requireHistoricalByn(paid));
     if (due.lte(0) || due.lt(quote.amount)) fail("Выплата превышает долг за прошлые месяцы");
   }
   const payout = await tx.payout.create({ data: {

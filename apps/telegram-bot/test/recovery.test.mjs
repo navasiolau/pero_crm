@@ -53,7 +53,6 @@ test("long polling drives link, role gate, project and payment through fake HTTP
     update(4, 101, "Восстановленный заказ"),
     update(5, 101, "Тестовый клиент"),
     callback(6, 101, "cli:client-1"),
-    callback(7, 101, "npc:BYN"),
     callback(8, 101, "mgr:manager-1"),
     update(9, 101, "1500"),
     update(10, 101, "/приход 205 100"),
@@ -165,7 +164,7 @@ test("long polling drives link, role gate, project and payment through fake HTTP
   assert.ok(sent.some((message) => message.chat_id === 202 && message.text.includes("доступен только")));
 
   const project = calls.find((call) => call.path === "/api/v1/bot/projects" && call.method === "POST");
-  assert.deepEqual(project.body, { title: "Восстановленный заказ", clientId: "client-1", currency: "BYN", managerId: "manager-1", initialPrice: 1500 });
+  assert.deepEqual(project.body, { title: "Восстановленный заказ", clientId: "client-1", managerId: "manager-1", initialPrice: 1500 });
   assert.equal(project.actor, "manager-1");
   const payment = calls.find((call) => call.path === "/api/v1/bot/payments");
   assert.deepEqual(payment.body, { projectId: "project-205", direction: "INCOME", amount: 100, currency: "BYN", cashAccountId: "cash-1" });

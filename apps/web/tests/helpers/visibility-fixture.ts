@@ -139,10 +139,10 @@ export function engineerFixture() {
       file: fixtureModel(files), client: fixtureModel([client]), user: fixtureModel([engineer, other]),
       projectMaterial: fixtureModel([]), stockMovement: fixtureModel([]), timeEntry: fixtureModel([]),
       payrollEntry: fixtureModel([
-        { id: "historical-earned", userId: "engineer", projectId: "hidden", month: "2000-01", amount: 500, scheme: "PERCENT_PROJECT", comment: "Historical earnings", createdAt: new Date(0) },
+        { id: "historical-earned", userId: "engineer", projectId: "hidden", month: "2000-01", amount: 500, currency: "BYN", bynAmount: null, scheme: "PERCENT_PROJECT", comment: "Historical earnings", createdAt: new Date(0) },
         { id: "someone-elses-earned", userId: "other", month: "2000-01", amount: 999, createdAt: new Date(0) },
       ]),
-      payout: fixtureModel([{ id: "historical-paid", userId: "engineer", month: "2000-01", amount: 100, kind: "SALARY", comment: null, createdAt: new Date(0), createdById: null }]),
+      payout: fixtureModel([{ id: "historical-paid", userId: "engineer", month: "2000-01", amount: 100, payrollCurrency: "BYN", bynAmount: null, kind: "SALARY", comment: null, createdAt: new Date(0), createdById: null }]),
     },
   };
 }

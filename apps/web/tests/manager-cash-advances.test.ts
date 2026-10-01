@@ -108,6 +108,7 @@ function cashFixture(options: { employeeActive?: boolean; accountActive?: boolea
       aggregate: async ({ where }: { where: { direction: string } }) => ({ _sum: { bynAmount: where.direction === "INCOME" ? orgFunds : "0.00" } }),
     },
     payout: {
+      findMany: async () => [...payouts.values(), ...(options.legacyPaid ? [{amount: options.legacyPaid, payrollCurrency: "BYN", bynAmount: null}] : [])],
       findUnique: async ({ where }: { where: { id: string } }) => payouts.get(where.id) ?? null,
       aggregate: async ({ where }: { where: { cashAccountId?: unknown; userId?: string } }) => {
         const rows = [...payouts.values()];
@@ -123,7 +124,7 @@ function cashFixture(options: { employeeActive?: boolean; accountActive?: boolea
         payouts.set(row.id, row); return row;
       },
     },
-    payrollEntry: { aggregate: async () => ({ _sum: { amount: options.pastAccrued ?? "500.00" } }) },
+    payrollEntry: { findMany: async () => [{amount: options.pastAccrued ?? "500.00", currency: "BYN", bynAmount: null}], aggregate: async () => ({ _sum: { amount: options.pastAccrued ?? "500.00" } }) },
     domainEvent: { create: async ({ data }: { data: Record<string, unknown> }) => { events.push(data); return { id: `event-${events.length}` }; } },
   } as unknown as Prisma.TransactionClient;
   return { tx, payouts, receipts, events };
@@ -167,7 +168,7 @@ test("server rejects missing work, inactive parties, account overdraft and organ
 
 test("a negative organization balance cannot disappear when converted and rounded for display", async () => {
   const f = cashFixture({ payrollCurrency: "USD", orgFunds: "119.99" });
-  const quoteRates = { ...rates, payroll: { currency: "USD" as const, rate: "4.000000", date: today } };
+  const quoteRates = rates;
   await assert.rejects(issuePayoutCore(actor(["MANAGER"]), {
     ...input, requestId: randomUUID(), kind: "ADVANCE", cashAmount: "120.00",
   }, quoteRates, f.tx), /организации/);

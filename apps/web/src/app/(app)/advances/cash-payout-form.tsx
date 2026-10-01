@@ -60,10 +60,10 @@ export function CashPayoutForm({
   users: EmployeeOption[];
   accounts: CashAccountOption[];
   month?: string;
-  dues?: { userId: string; due: number }[];
-  orgBalance?: number;
+  dues?: { userId: string; due: number | null }[];
+  orgBalance?: number | null;
   salaryCurrency?: string;
-  estimates?: Record<string, number>;
+  estimates?: Record<string, number | null>;
   onClose?: () => void;
   onUncertainChange?: (uncertain: boolean) => void;
 }) {
@@ -80,9 +80,9 @@ export function CashPayoutForm({
   const [receipt, setReceipt] = useState<SuccessReceipt | null>(null);
 
   const account = accounts.find((item) => item.id === cashAccountId);
-  const employeeDue = dues?.find((row) => row.userId === userId)?.due ?? 0;
-  const salaryLimit = dues
-    ? Math.round(Math.min(employeeDue, orgBalance ?? 0) * 100) / 100
+  const employeeDue = dues?.find((row) => row.userId === userId)?.due ?? null;
+  const salaryLimit = dues && employeeDue !== null && orgBalance !== null && orgBalance !== undefined
+    ? Math.round(Math.min(employeeDue, orgBalance) * 100) / 100
     : null;
   const validCurrency = account && isCashCurrency(account.currency)
     ? account.currency
@@ -92,7 +92,7 @@ export function CashPayoutForm({
   const amountValid = /^\d+(?:\.\d{1,2})?$/.test(cashAmount) && Number(cashAmount) > 0;
   const descriptionValid = mode !== "ADVANCE" || description.trim().length > 0;
   const canPreview = Boolean(userId && account?.active && validCurrency && amountValid && descriptionValid) &&
-    Number(cashAmount) <= (account?.balance ?? 0);
+    Number(cashAmount) <= (account?.balance ?? 0) && !(mode === "SALARY" && dues && salaryLimit === null);
   const salaryLimitExceeded = mode === "SALARY" && currentPreview && salaryLimit !== null && salaryLimit !== undefined &&
     Number(currentPreview.amount) > salaryLimit;
   const advanceEstimate = estimates?.[userId] ?? null;
@@ -135,6 +135,7 @@ export function CashPayoutForm({
         ? { userId, cashAccountId, cashAmount, expectedCashCurrency: validCurrency, description: description.trim() }
         : null
     );
+    if (!frozen && mode === "SALARY" && dues && salaryLimit === null) return;
     if (!payload || salaryRetryBlockedByLimit(Boolean(frozen), Boolean(salaryLimitExceeded))) return;
     const operation: FrozenCashPayoutRequest = frozen ?? {
       mode,
@@ -289,6 +290,7 @@ export function CashPayoutForm({
         />
       </div>
 
+      {mode === "SALARY" && dues && salaryLimit === null ? <p className="text-xs text-destructive">Выплата недоступна: нет подтверждённого BYN-эквивалента долга или баланса.</p> : null}
       {mode === "SALARY" && userId && salaryLimit !== null ? (
         <p className="text-xs text-muted-foreground">Доступно по долгу и балансу организации: {formatAmount(salaryLimit, currentPreview?.payrollCurrency ?? salaryCurrency)}</p>
       ) : null}
@@ -317,7 +319,7 @@ export function CashPayoutForm({
             {submitting ? "Проверяем операцию…" : "Повторить тот же запрос"}
           </Button>
         ) : currentPreview ? (
-          <Button className="min-h-12 h-auto whitespace-normal" disabled={submitting || checking || Boolean(salaryLimitExceeded)} onClick={() => void submit(null)}>
+          <Button className="min-h-12 h-auto whitespace-normal" disabled={submitting || checking || Boolean(salaryLimitExceeded) || Boolean(mode === "SALARY" && dues && salaryLimit === null)} onClick={() => void submit(null)}>
             {submitting ? "Сохранение…" : mode === "ADVANCE" ? "Подтвердить и выдать аванс" : "Подтвердить выплату"}
           </Button>
         ) : (
