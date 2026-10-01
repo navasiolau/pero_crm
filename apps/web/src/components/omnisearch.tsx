@@ -162,7 +162,7 @@ export function Omnisearch() {
         type="button"
         onClick={() => setOpen(true)}
         aria-label="Глобальный поиск"
-        className="flex size-11 shrink-0 items-center justify-center gap-2 rounded-lg bg-background text-sm text-muted-foreground transition-colors hover:bg-accent md:h-8 md:w-56 md:border md:px-2.5"
+        className="flex size-11 min-w-11 shrink items-center justify-center gap-2 rounded-lg bg-background text-sm text-muted-foreground transition-colors hover:bg-accent md:h-8 md:w-40 lg:w-56 md:border md:px-2.5"
       >
         <Search className="size-4" />
         <span className="hidden flex-1 truncate text-left md:block">Поиск…</span>

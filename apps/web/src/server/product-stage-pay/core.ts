@@ -1,3 +1,4 @@
+import { INTERNAL_CURRENCY, assertProjectMoneyCurrency } from "@/lib/internal-currency";
 import { createHash } from "node:crypto";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { calculateStageFund, distributeStageFund, type StageCurrency } from "@/lib/product-stage-pay";
@@ -51,8 +52,7 @@ const includeEngineering = {
 async function readContext(db: Reader | Tx, productId: string) {
   const product = await db.product.findUnique({ where: { id: productId }, include: includeEngineering });
   if (!product) err("Изделие не найдено");
-  const currency = await db.orgSetting.findUnique({ where: { key: "payrollCurrency" } });
-  const payrollCurrency = currency?.value ?? "BYN";
+  const payrollCurrency = INTERNAL_CURRENCY;
   if (!isCurrency(product.project.currency) || !isCurrency(payrollCurrency)) err("Валюта расчёта не поддерживается");
   return { product, pool: product.stagePayPools.at(0) ?? null, payrollCurrency: payrollCurrency as StageCurrency };
 }
@@ -80,6 +80,7 @@ export interface PreparedEngineeringQuote { rates: StageRateQuote; fingerprint: 
 /** Call before entering withTaskTransaction. The caller must not accept rates from the browser. */
 export async function prepareEngineeringQuote(productId: string, db: Reader, now = new Date()): Promise<PreparedEngineeringQuote> {
   const context = await readContext(db, productId);
+  assertProjectMoneyCurrency(context.product.project.currency);
   return { rates: await resolveStageRates(context.product.project.currency, context.payrollCurrency, now), fingerprint: fingerprint(context) };
 }
 
@@ -291,6 +292,7 @@ export async function closeEngineeringStageCore(actor: DomainActor, input: {
   const { product, pool, payrollCurrency } = context;
   if (!pool || pool.kind !== "ENGINEERING" || pool.state !== "DRAFT" || product.status !== "DESIGN") err("Изделие должно быть в проектировании с незакрытым инженерным фондом");
   assertRevision(pool.revision, input.expectedPoolRevision);
+  assertProjectMoneyCurrency(product.project.currency);
   if (!prepared || prepared.fingerprint !== fingerprint(context)) err("Данные инженерного фонда изменились. Обновите расчёт");
   assertStageQuoteCurrent(prepared.rates, product.project.currency, payrollCurrency, new Date());
   if (!product.engineerId || !product.engineer) err("Назначьте основного инженера изделия");

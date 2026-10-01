@@ -48,6 +48,7 @@ before(() => {
       create: async ({ data }: { data: Money }) => { const row = { ...data, id: `payment-${payments.length}` }; payments.push(row); return row; },
     },
     payout: {
+      findMany: async ({ where }: { where?: { userId?: string } }) => where?.userId ? payouts.filter(row => row.userId === where.userId) : payouts,
       aggregate: async ({ where }: { where: { cashAccountId?: string | { not: null } | null; userId?: string } }) => {
         const found = where.userId ? payouts.filter((row) => row.userId === where.userId) :
           where.cashAccountId === "cash" ? payouts.filter((row) => row.cashAccountId === "cash") :
@@ -60,7 +61,7 @@ before(() => {
     changeLog: { findUnique: async ({ where }: { where: { id: string } }) => receipts.get(where.id) ?? null,
       create: async ({ data }: { data: { id: string } }) => { receipts.set(data.id, data); return data; } },
     domainEvent: { create: async () => ({ id: randomUUID() }) },
-    payrollEntry: { aggregate: async () => ({ _sum: { amount: 600 } }) },
+    payrollEntry: { findMany: async () => [{ amount: "600", currency: "BYN", bynAmount: "600" }], aggregate: async () => ({ _sum: { amount: 600 } }) },
   };
   let tail = Promise.resolve();
   const database = { ...tx, $transaction: async (operation: (transaction: typeof tx) => Promise<unknown>, options: {

@@ -47,7 +47,7 @@ export async function GET(
   const totalExpected =
     calculateProjectTotal(project.products, project);
 
-  let finance: { incomeByn: number; expenseByn: number } | null = null;
+  let finance: { incomeByn: string; expenseByn: string } | null = null;
   if (hasAnyRole(actor.roles, FINANCE_ROLES)) {
     const groups = await prisma.payment.groupBy({
       by: ["direction"],
@@ -55,12 +55,8 @@ export async function GET(
       _sum: { bynAmount: true },
     });
     finance = {
-      incomeByn: Number(
-        groups.find((g) => g.direction === "INCOME")?._sum.bynAmount ?? 0,
-      ),
-      expenseByn: Number(
-        groups.find((g) => g.direction === "EXPENSE")?._sum.bynAmount ?? 0,
-      ),
+      incomeByn: (groups.find((g) => g.direction === "INCOME")?._sum.bynAmount ?? "0").toString(),
+      expenseByn: (groups.find((g) => g.direction === "EXPENSE")?._sum.bynAmount ?? "0").toString(),
     };
   }
 

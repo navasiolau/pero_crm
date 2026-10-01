@@ -14,6 +14,8 @@ apps/web/.env.local
 apps/web/.env.production
 .playwright-mcp
 .pytest_cache
+apps/web/test-results
+apps/web/playwright-report
 test_bazis_models
 uploads
 

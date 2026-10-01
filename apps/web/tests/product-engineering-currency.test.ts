@@ -74,10 +74,10 @@ test("project currency is frozen by its own settlement while same-value save rem
   assert.equal(settlements[0].currency, "BYN");
 });
 
-test("a different project's settlement does not freeze this project's currency", async () => {
+test("a different project settlement does not bypass the internal BYN policy", async () => {
   reset(); settlements.push({ id: "other", projectId: "other-project", currency: "BYN" });
-  assert.ok((await project.updateProjectCore(actor, "project", { currency: "USD" })).ok);
-  assert.equal(projectCurrency, "USD");
+  assert.equal((await project.updateProjectCore(actor, "project", { currency: "USD" })).ok, false);
+  assert.equal(projectCurrency, "BYN");
 });
 
 test("payroll currency is frozen organization-wide, including its implicit BYN default", async () => {
@@ -88,8 +88,8 @@ test("payroll currency is frozen organization-wide, including its implicit BYN d
   assert.equal(payrollCurrency, null);
 });
 
-test("payroll currency can change before the first settlement", async () => {
-  reset(); assert.ok((await payroll.setPayrollCurrency("USD")).ok); assert.equal(payrollCurrency, "USD");
+test("payroll currency is BYN even before the first settlement", async () => {
+  reset(); assert.equal((await payroll.setPayrollCurrency("USD")).ok, false); assert.equal(payrollCurrency, null);
 });
 
 test("a cash-linked payout freezes payroll currency without rewriting its saved amount", async () => {
@@ -116,6 +116,21 @@ test("direct percentage pending/settled freezes payroll and project currency; sk
     assert.equal(payrollCurrency, null); assert.equal(projectCurrency, "BYN");
   }
   reset(); percentageCompletions.push({ projectId: "project", state: "SKIPPED_ONCE", payrollCurrency: "BYN", productCurrency: "BYN" });
-  assert.equal((await payroll.setPayrollCurrency("USD")).ok, true);
-  assert.equal((await project.updateProjectCore(actor, "project", { currency: "USD" })).ok, true);
+  assert.equal((await payroll.setPayrollCurrency("USD")).ok, false);
+  assert.equal((await project.updateProjectCore(actor, "project", { currency: "USD" })).ok, false);
+});
+
+
+test("project create schema rejects explicit foreign currency and defaults missing currency to BYN", () => {
+  const data = { title: "Заказ", clientId: "client" };
+  assert.equal(project.createProjectSchema.parse(data).currency, "BYN");
+  for (const currency of ["USD", "EUR", "RUB", "", "byn"]) assert.equal(project.createProjectSchema.safeParse({ ...data, currency }).success, false);
+});
+
+test("combined management role still rejects foreign input and worker has no new currency rights", async () => {
+  reset();
+  const combined = { ...actor, roles: ["MANAGER", "ENGINEER"] as DomainActor["roles"] };
+  assert.equal((await project.updateProjectCore(combined, "project", { currency: "USD" })).ok, false);
+  await assert.rejects(project.updateProjectCore({ ...actor, roles: ["WORKER"] }, "project", { currency: "BYN" }), /Недостаточно прав/);
+  assert.equal(projectCurrency, "BYN");
 });

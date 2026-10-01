@@ -25,7 +25,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ConfirmDeleteDialog } from "@/components/confirm-delete-dialog";
-import { formatAmount } from "@/lib/format";
+import { formatAmount, formatMoneyTotal } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { addPayment, deletePayment } from "@/server/payments/actions";
 import { fetchNbrbRate } from "@/server/finance/actions";
@@ -36,6 +36,7 @@ export type PaymentRow = {
   amount: number; // в валюте операции
   currency: string;
   rate: number; // BYN за единицу валюты (курс НБ РБ / ручной)
+  bynAmount: number;
   projectAmount: number; // эквивалент в валюте проекта
   paidAt: string;
   comment: string | null;
@@ -46,12 +47,12 @@ export type PaymentRow = {
 
 export type ProjectEconomicsView = {
   expectedPrice: number | null;
-  paidTotal: number;
-  expensesTotal: number;
-  payrollTotal: number;
-  margin: number;
+  paidTotal: number | null;
+  expensesTotal: number | null;
+  payrollTotal: number | null;
+  margin: number | null;
   marginAtFullPrice: number | null;
-  expenseBreakdown: { label: string; amount: number }[];
+  expenseBreakdown: { label: string; amount: number | null }[];
 };
 
 export type CashAccountOption = { id: string; name: string; currency: string };
@@ -93,9 +94,9 @@ export function FinanceTab({
     return (
       <div className="flex flex-col items-end">
         <span>{formatAmount(row.amount, row.currency)}</span>
-        {row.currency !== currency ? (
+        {row.currency !== "BYN" ? (
           <span className="text-xs text-muted-foreground">
-            ≈ {formatAmount(row.projectAmount, currency)} по курсу {row.rate}
+            {formatAmount(row.bynAmount, "BYN")} по курсу {row.rate}
           </span>
         ) : null}
       </div>
@@ -155,7 +156,7 @@ export function FinanceTab({
         id: "amount",
         header: "Сумма",
         sortable: true,
-        sortValue: (row) => row.projectAmount,
+        sortValue: (row) => row.bynAmount,
         className: "text-right font-medium",
         headerClassName: "text-right",
         cell: amountCell,
@@ -195,8 +196,8 @@ export function FinanceTab({
           <CardContent>
             <div className="text-2xl font-semibold">
               {economics.expectedPrice !== null
-                ? formatAmount(economics.expectedPrice, currency)
-                : "—"}
+                ? formatMoneyTotal(economics.expectedPrice, "BYN")
+                : formatMoneyTotal(null)}
             </div>
           </CardContent>
         </Card>
@@ -208,14 +209,14 @@ export function FinanceTab({
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-semibold">
-              {formatAmount(economics.paidTotal, currency)}
+              {formatMoneyTotal(economics.paidTotal, "BYN")}
             </div>
-            {economics.expectedPrice !== null ? (
+            {economics.expectedPrice !== null && economics.paidTotal !== null ? (
               <p className="text-xs text-muted-foreground">
                 осталось{" "}
                 {formatAmount(
                   Math.max(0, economics.expectedPrice - economics.paidTotal),
-                  currency,
+                  "BYN",
                 )}
               </p>
             ) : null}
@@ -229,15 +230,15 @@ export function FinanceTab({
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-semibold">
-              {formatAmount(
-                economics.expensesTotal + economics.payrollTotal,
-                currency,
+              {formatMoneyTotal(
+                economics.expensesTotal === null || economics.payrollTotal === null ? null : economics.expensesTotal + economics.payrollTotal,
+                "BYN",
               )}
             </div>
             {economics.expenseBreakdown.length > 0 ? (
               <p className="text-xs text-muted-foreground">
                 {economics.expenseBreakdown
-                  .map((item) => `${item.label}: ${formatAmount(item.amount, currency)}`)
+                  .map((item) => `${item.label}: ${formatMoneyTotal(item.amount, "BYN")}`)
                   .join(" · ")}
               </p>
             ) : null}
@@ -253,10 +254,10 @@ export function FinanceTab({
             <div
               className={cn(
                 "text-2xl font-semibold",
-                economics.margin >= 0 ? "text-green-600" : "text-red-600",
+                economics.margin === null ? "" : economics.margin >= 0 ? "text-green-600" : "text-red-600",
               )}
             >
-              {formatAmount(economics.margin, currency)}
+              {formatMoneyTotal(economics.margin, "BYN")}
             </div>
             {economics.marginAtFullPrice !== null ? (
               <p className="text-xs text-muted-foreground">
@@ -268,7 +269,7 @@ export function FinanceTab({
                       : "text-red-600",
                   )}
                 >
-                  {formatAmount(economics.marginAtFullPrice, currency)}
+                  {formatMoneyTotal(economics.marginAtFullPrice, "BYN")}
                 </span>
               </p>
             ) : null}

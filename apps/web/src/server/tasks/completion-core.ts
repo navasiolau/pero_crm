@@ -1,3 +1,4 @@
+import { assertInternalCurrency, assertProjectMoneyCurrency } from "@/lib/internal-currency";
 import type { Prisma } from "@prisma/client";
 import { fileVisibilityWhere, hasFullProjectVisibility, resolveVisibilityActor, taskExecutionWhere } from "@/server/access/visibility";
 import { bumpEngineeringPoolRevision } from "@/server/product-stage-pay/core";
@@ -42,7 +43,7 @@ export async function changeTaskStatusCore(actor: DomainActor, taskId: string, t
       const task = await tx.task.findFirst({
         where: { AND: [{ id: taskId }, taskExecutionWhere(visibilityActor)] },
         include: {
-          project: { select: { id: true, number: true } }, product: { select: { id: true, number: true, projectId: true, status: true } },
+          project: { select: { id: true, number: true, currency: true } }, product: { select: { id: true, number: true, projectId: true, status: true } },
           work: { select: { id: true, projectId: true, productId: true, priceSnapshot: true, paymentKind: true, stagePayPoolId: true, stagePayPool: { select: { productId: true } } } }, allocationGroup: { select: { currency: true } },
           files: { where: fileVisibilityWhere(visibilityActor), select: { id: true } },
           dependencies: { include: { dependsOn: { select: { id: true, title: true, status: true } } } },
@@ -91,7 +92,9 @@ export async function changeTaskStatusCore(actor: DomainActor, taskId: string, t
           const amount = taskPieceAmount(task, task.work.priceSnapshot);
           if (moneyAtoms(amount) > BigInt(0)) {
             const currency = task.allocationGroup?.currency ?? (await tx.orgSetting.findUnique({ where: { key: "payrollCurrency" } }))?.value ?? "BYN";
-            await tx.payrollEntry.create({ data: { userId: task.assigneeId, taskId: task.id, workId: task.work.id, projectId: task.projectId, amount, currency, scheme: "PIECE", month: doneAt.toISOString().slice(0, 7), comment: `${task.title} · ${task.project.number}` } });
+            try { assertProjectMoneyCurrency(task.project.currency); assertInternalCurrency(currency); }
+            catch (error) { throw new CompletionError(error instanceof Error ? error.message : "Не определена валюта работы"); }
+            await tx.payrollEntry.create({ data: { userId: task.assigneeId, taskId: task.id, workId: task.work.id, projectId: task.projectId, amount, bynAmount: amount, currency, scheme: "PIECE", month: doneAt.toISOString().slice(0, 7), comment: `${task.title} · ${task.project.number}` } });
             payroll = { name: assignee.name, amount, currency };
           }
         }

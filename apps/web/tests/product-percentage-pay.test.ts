@@ -390,3 +390,23 @@ test("старый ENGINEERING Work не даёт новый split/доли, п�
   if (repeated.ok) assert.equal(repeated.repeated, true);
   assert.deepEqual(f.writes, []);
 });
+
+test("foreign frozen PENDING_FX retry preserves currency and fixed BYN amounts without duplicate payroll", async () => {
+  const h = settlementHarness("1000", "5");
+  h.completion.productCurrency = "USD";
+  h.completion.payrollCurrency = "EUR";
+  const deps = { ...h.deps, resolveRates: async (productCurrency: string, payrollCurrency: string, date: Date) => {
+    assert.equal(productCurrency, "USD"); assert.equal(payrollCurrency, "EUR");
+    assert.equal(date.toISOString(), h.completedAt.toISOString());
+    return { asOf: "2026-09-30", product: { currency: "USD" as const, rate: "3.000000", date: "2026-09-30" },
+      payroll: { currency: "EUR" as const, rate: "4.000000", date: "2026-09-30" } };
+  } };
+  assert.equal(await settlePendingProductPercentage("p", "ENGINEERING", deps), "SETTLED");
+  assert.equal(h.completion.productCurrency, "USD"); assert.equal(h.completion.payrollCurrency, "EUR");
+  const entries = h.entries as { amount: string; bynAmount: string; currency: string; projectCurrency: string }[];
+  assert.equal(entries.length, 2);
+  assert.equal(entries.reduce((sum, row) => sum + Number(row.bynAmount), 0), 150);
+  assert.ok(entries.every(row => row.currency === "EUR" && row.projectCurrency === "USD"));
+  assert.equal(await settlePendingProductPercentage("p", "ENGINEERING", deps), "SETTLED");
+  assert.equal(entries.length, 2);
+});

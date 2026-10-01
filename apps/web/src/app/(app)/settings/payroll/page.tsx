@@ -2,7 +2,6 @@ import { redirect } from "next/navigation";
 
 import { auth } from "@/auth";
 import { ADMIN_ROLES, hasAnyRole } from "@/lib/roles";
-import { getPayrollCurrency } from "@/server/payroll/queries";
 
 import { PayrollSettingsForm } from "./payroll-settings-form";
 
@@ -15,6 +14,5 @@ export default async function PayrollSettingsPage() {
   if (!session?.user) redirect("/login");
   if (!hasAnyRole(session.user.roles, ADMIN_ROLES)) redirect("/");
 
-  const currency = await getPayrollCurrency();
-  return <PayrollSettingsForm currency={currency} />;
+  return <PayrollSettingsForm />;
 }

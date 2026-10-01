@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { INTERNAL_CURRENCY } from "@/lib/internal-currency";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { ROLE_PRIORITY, roleComboLabel } from "@/lib/roles";
@@ -33,6 +34,8 @@ export async function getTaskSplitOptions(taskId: string): Promise<{ ok: false; 
   if (task.work && task.quantity === null) return { ok: false, error: "Менеджер должен сначала указать количество задачи" };
   const users = await prisma.user.findMany({ where: engineering ? { active: true } : { active: true, roles: { hasSome: ROLE_PRIORITY } }, select: { id: true, name: true, roles: true, active: true, position: true }, orderBy: { name: "asc" } });
   const currency = engineering || installation ? null : task.allocationGroup ? task.allocationGroup.currency : task.work ? (await prisma.orgSetting.findUnique({ where: { key: "payrollCurrency" } }))?.value ?? "BYN" : null;
+  if (task.work && !engineering && !installation && currency !== INTERNAL_CURRENCY)
+    return { ok: false, error: "Денежное деление доступно только для подтверждённой BYN-базы" };
   let preview: { amount: string; currency: string; settled: boolean } | undefined;
   let previewReason: string | null = null;
   let engineeringPreview: { workAmount: string; currency: string; tasks: { id: string; stageShareUnits: number; createdAt: string }[] } | null = null;

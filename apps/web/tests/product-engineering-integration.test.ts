@@ -153,18 +153,18 @@ test("failure after shares, payroll, or history rolls back settlement and every 
   }
 });
 
-test("changes to price, rate, payroll currency, task revision, or status invalidate prepared quote", async () => {
+test("changes to price, rate, project currency, task revision, or status invalidate prepared quote", async () => {
   for (const mutation of ["price", "rate", "currency", "revision", "status"] as const) {
     const f = await readyToClose();
     const quote = await prepareEngineeringQuote("product", f.db);
     if (mutation === "price") f.state().product.expectedPrice = "600.00";
     if (mutation === "rate") f.state().pools[0].ratePercent = "6.00";
-    if (mutation === "currency") f.state().payrollCurrency = "USD";
+    if (mutation === "currency") f.state().project.currency = "USD";
     if (mutation === "revision") f.state().tasks[0].splitRevision = 5;
     if (mutation === "status") f.state().tasks[1].status = "IN_PROGRESS";
     const before = structuredClone(f.state());
     await assert.rejects(f.transaction((tx) => closeEngineeringStageCore(manager,
-      { productId: "product", expectedPoolRevision: 1, requestId: randomUUID() }, quote, tx)), /изменились|расчёт|курс/);
+      { productId: "product", expectedPoolRevision: 1, requestId: randomUUID() }, quote, tx)), /изменились|расчёт|курс|BYN/);
     assert.deepEqual(f.state(), before, mutation);
     assert.deepEqual(f.writes, [], mutation);
   }

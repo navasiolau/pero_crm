@@ -23,7 +23,7 @@ import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Label } from "@/components/ui/label";
 import { ConfirmDeleteDialog } from "@/components/confirm-delete-dialog";
 import { MonthSwitcher, monthLabel } from "@/components/month-switcher";
-import { formatAmount } from "@/lib/format";
+import { formatAmount, formatMoneyTotal } from "@/lib/format";
 import { paySchemeLabels, payoutKindLabels } from "@/lib/labels";
 import type { CashAccountView } from "@/server/finance/queries";
 import { AdvancePayoutDialog } from "@/app/(app)/advances/advance-payout-dialog";
@@ -76,14 +76,14 @@ export function FinancePayrollView({
   month: string;
   currency: string;
   rows: PayrollSummaryRow[];
-  totals: { accrued: number; paid: number; advance: number; due: number };
+  totals: { accrued: number | null; paid: number | null; advance: number | null; due: number | null };
   payouts: PayoutView[];
   turnover: { total: number; paymentsCount: number; currency: string };
   turnoverAccruals: TurnoverAccrual[];
   users: { id: string; name: string; position: string | null }[];
-  orgBalance: number;
+  orgBalance: number | null;
   dues: EmployeeDue[];
-  estimates: Record<string, number>;
+  estimates: Record<string, number | null>;
   cashAccounts: CashAccountView[];
   advanceUsers: { id: string; name: string; position: string | null }[];
 }) {
@@ -98,15 +98,17 @@ export function FinancePayrollView({
 
   // Превью «Рассчитать всех»: долги, покрываемые балансом по порядку
   const settlePreview = (() => {
+    if (orgBalance === null || dues.some((row) => row.due === null)) return [];
     let remaining = orgBalance;
     return dues
-      .filter((row) => row.due > 0)
+      .filter((row): row is EmployeeDue & { due: number } => row.due !== null && row.due > 0)
       .map((row) => {
         const pay = round2(Math.max(0, Math.min(row.due, remaining)));
         remaining = round2(remaining - pay);
         return { ...row, pay };
       });
   })();
+  const settlementUnavailable = orgBalance === null || dues.some((row) => row.due === null);
   const settleTotal = round2(settlePreview.reduce((sum, row) => sum + row.pay, 0));
   const settleCashAccount = activeCashAccounts.find((account) => account.id === settleCashAccountId);
   const hasFundedActiveCash = activeCashAccounts.some((account) => account.balance > 0);
@@ -135,30 +137,30 @@ export function FinancePayrollView({
       id: "accrued",
       header: "Начислено",
       sortable: true,
-      sortValue: (row) => row.accrued,
+      sortValue: (row) => row.accrued ?? "",
       className: "text-right",
       headerClassName: "text-right",
-      cell: (row) => formatAmount(row.accrued, currency),
+      cell: (row) => formatMoneyTotal(row.accrued, currency),
     },
     {
       id: "paid",
       header: "Выплачено",
       sortable: true,
-      sortValue: (row) => row.paid,
+      sortValue: (row) => row.paid ?? "",
       className: "text-right",
       headerClassName: "text-right",
-      cell: (row) => formatAmount(row.paid, currency),
+      cell: (row) => formatMoneyTotal(row.paid, currency),
     },
     {
       id: "advance",
       header: "Аванс",
       sortable: true,
-      sortValue: (row) => row.advance,
+      sortValue: (row) => row.advance ?? "",
       className: "text-right",
       headerClassName: "text-right",
       cell: (row) =>
-        row.advance > 0 ? (
-          formatAmount(row.advance, currency)
+        row.advance === null ? formatMoneyTotal(null) : row.advance > 0 ? (
+          formatMoneyTotal(row.advance, currency)
         ) : (
           <span className="text-muted-foreground">—</span>
         ),
@@ -167,10 +169,10 @@ export function FinancePayrollView({
       id: "due",
       header: "Долг к выплате",
       sortable: true,
-      sortValue: (row) => row.due,
+      sortValue: (row) => row.due ?? "",
       className: "text-right font-medium",
       headerClassName: "text-right",
-      cell: (row) => formatAmount(row.due, currency),
+      cell: (row) => formatMoneyTotal(row.due, currency),
     },
   ];
 
@@ -233,7 +235,7 @@ export function FinancePayrollView({
       sortValue: (row) => row.amount,
       className: "text-right font-medium",
       headerClassName: "text-right",
-      cell: (row) => formatAmount(row.amount, row.payrollCurrency ?? currency),
+      cell: (row) => row.payrollCurrency ? formatAmount(row.amount, row.payrollCurrency) : `${formatAmount(row.amount, "")} · валюта неизвестна`,
     },
     {
       id: "actions",
@@ -285,6 +287,7 @@ export function FinancePayrollView({
         </div>
       </div>
 
+      {settlementUnavailable ? <p className="text-sm text-destructive">Расчёт всех недоступен: исторические суммы не имеют подтверждённого BYN-эквивалента.</p> : null}
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Card>
           <CardHeader className="pb-2">
@@ -294,7 +297,7 @@ export function FinancePayrollView({
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-semibold">
-              {formatAmount(totals.accrued, currency)}
+              {formatMoneyTotal(totals.accrued, currency)}
             </div>
           </CardContent>
         </Card>
@@ -306,7 +309,7 @@ export function FinancePayrollView({
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-semibold">
-              {formatAmount(totals.paid, currency)}
+              {formatMoneyTotal(totals.paid, currency)}
             </div>
           </CardContent>
         </Card>
@@ -318,7 +321,7 @@ export function FinancePayrollView({
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-semibold">
-              {formatAmount(totals.due, currency)}
+              {formatMoneyTotal(totals.due, currency)}
             </div>
             <p className="text-xs text-muted-foreground">
               долг за прошлые месяцы
@@ -333,7 +336,7 @@ export function FinancePayrollView({
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-semibold">
-              {formatAmount(orgBalance, currency)}
+              {formatMoneyTotal(orgBalance, currency)}
             </div>
             <p className="text-xs text-muted-foreground">
               приходы − выплаты, за всё время
@@ -477,7 +480,7 @@ export function FinancePayrollView({
             <Button
               variant="outline"
               className="min-h-12 h-auto whitespace-normal"
-              disabled={settlePreview.every((row) => row.pay <= 0) || !hasFundedActiveCash}
+              disabled={settlementUnavailable || settlePreview.every((row) => row.pay <= 0) || !hasFundedActiveCash}
               onClick={() => setSettleOpen(true)}
             >
               <Calculator className="size-4" />
@@ -537,7 +540,7 @@ export function FinancePayrollView({
                     {row.pay < row.due ? (
                       <span className="text-amber-600 dark:text-amber-400">
                         {" "}
-                        из {formatAmount(row.due, currency)} — ограничено балансом организации
+                        из {formatMoneyTotal(row.due, currency)} — ограничено балансом организации
                       </span>
                     ) : null}
                   </span>
@@ -552,7 +555,7 @@ export function FinancePayrollView({
             <span className="font-semibold">
               {formatAmount(settleTotal, currency)}
             </span>{" "}
-            · баланс организации {formatAmount(orgBalance, currency)}
+            · баланс организации {formatMoneyTotal(orgBalance, currency)}
           </p>
           <DialogFooter>
             <Button className="min-h-12 h-auto whitespace-normal" variant="outline" onClick={() => setSettleOpen(false)}>
@@ -560,7 +563,7 @@ export function FinancePayrollView({
             </Button>
             <Button
               className="min-h-12 h-auto whitespace-normal"
-              disabled={settlementConfirmationDisabled(settleCashAccount?.balance ?? 0, settleTotal, pending) || !settleCashAccountId}
+              disabled={settlementUnavailable || settlementConfirmationDisabled(settleCashAccount?.balance ?? 0, settleTotal, pending) || !settleCashAccountId}
               onClick={() =>
                 startTransition(async () => {
                   const result = await settleAll(month, settleCashAccountId);
@@ -612,7 +615,7 @@ export function FinancePayrollView({
         }}
         warning={
           deleting
-            ? `${deleting.userName ?? ""}, ${formatAmount(deleting.amount, deleting.payrollCurrency ?? currency)} — ${
+            ? `${deleting.userName ?? ""}, ${deleting.payrollCurrency ? formatAmount(deleting.amount, deleting.payrollCurrency) : `${formatAmount(deleting.amount, "")} · валюта неизвестна`} — ${
                 deleting.kind === "ADVANCE"
                   ? "аванс отменится, сумма вернётся в баланс."
                   : "сумма вернётся в «к выплате»."

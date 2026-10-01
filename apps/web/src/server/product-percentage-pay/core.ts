@@ -1,3 +1,4 @@
+import { INTERNAL_CURRENCY, assertProjectMoneyCurrency } from "@/lib/internal-currency";
 import { Prisma, type PrismaClient, type ProductPercentageKind, type ProductStatus } from "@prisma/client";
 import { allocatePercentageShares, assertPercentageShares, parsePercentageRate, transferOwnPercentageShare, type PercentageShare } from "@/lib/product-percentage-pay";
 import { calculateStageFund, type StageCurrency } from "@/lib/product-stage-pay";
@@ -159,9 +160,10 @@ export async function captureProductPercentageCompletion(tx: Tx, actor: DomainAc
   const shares = members.map((member) => ({ userId: member.userId, shareUnits: member.shareUnits }));
   let completeShares = false;
   if (validMembers) { try { assertPercentageShares(shares); completeShares = true; } catch { /* сохранённая конфигурация требует решения менеджмента */ } }
-  const payrollCurrency = (await tx.orgSetting.findUnique({ where: { key: "payrollCurrency" }, select: { value: true } }))?.value ?? "BYN";
+  const payrollCurrency = INTERNAL_CURRENCY;
   const configured = !legacyPaid && product.expectedPrice !== null && config?.ratePercent !== null && config?.ratePercent !== undefined &&
     completeShares && isCurrency(product.project.currency) && isCurrency(payrollCurrency);
+  if (configured) assertProjectMoneyCurrency(product.project.currency);
   const state = legacyPaid ? "LEGACY_PROTECTED" : configured ? "PENDING_FX" : "SKIPPED_ONCE";
   const reason = legacyPaid ? "Уже оплачен прежним способом" : configured ? null : "На момент завершения отсутствовала полная прямая настройка";
   const completion = await tx.productPercentageCompletion.create({ data: { productId, kind, state, statusAtCompletion,

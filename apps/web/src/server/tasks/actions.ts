@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 
+import { assertProjectMoneyCurrency } from "@/lib/internal-currency";
 import { auth } from "@/auth";
 import { formatAmount } from "@/lib/format";
 import { allocatedWorkQuantity, quantityAtoms, quantityFromAtoms } from "@/lib/work-shares";
@@ -101,7 +102,7 @@ export async function createTask(
   const mutation = await withTaskTransaction(async (tx) => {
   const project = await tx.project.findUnique({
     where: { id: data.projectId },
-    select: { id: true, number: true },
+    select: { id: true, number: true, currency: true },
   });
   if (!project) return { ok: false as const, error: "Проект не найден" };
 
@@ -129,6 +130,8 @@ export async function createTask(
 
   let workQuantity: string | null = null;
   if (data.workId) {
+    try { assertProjectMoneyCurrency(project.currency); }
+    catch (error) { return { ok: false as const, error: error instanceof Error ? error.message : "Валюта проекта не подготовлена" }; }
     const work = await tx.work.findUnique({ where: { id: data.workId }, select: { paymentKind: true } });
     if (work?.paymentKind === "ENGINEERING") return { ok: false as const, error: "Задачи инженерного фонда создаются через настройку фонда" };
     const check = await checkWorkQuantity(tx, data.workId, data.quantity ?? null, undefined, { projectId: data.projectId, productId: data.productId || null });
@@ -224,11 +227,15 @@ export async function updateTask(
   const mutation = await withTaskTransaction(async (tx) => {
   const task = await tx.task.findUnique({
     where: { id: taskId },
-    include: { project: { select: { id: true, number: true } }, product: { select: { engineerId: true, status: true, projectId: true } },
+    include: { project: { select: { id: true, number: true, currency: true } }, product: { select: { engineerId: true, status: true, projectId: true } },
       work: { select: { paymentKind: true, projectId: true, productId: true, stagePayPoolId: true, stagePayPool: { select: { id: true, kind: true, state: true, productId: true } } } },
       _count: { select: { payrollEntries: true } } },
   });
   if (!task) return { ok: false as const, error: "Задача не найдена" };
+  if (data.workId !== undefined || data.quantity !== undefined) {
+    try { assertProjectMoneyCurrency(task.project.currency); }
+    catch (error) { return { ok: false as const, error: error instanceof Error ? error.message : "Валюта проекта не подготовлена" }; }
+  }
   const engineering = task.work?.paymentKind === "ENGINEERING";
   let engineeringPoolId: string | null = null;
   if (engineering) {
@@ -458,7 +465,7 @@ export async function deleteTask(
   const mutation = await withTaskTransaction(async (tx) => {
   const task = await tx.task.findUnique({
     where: { id: taskId },
-    include: { project: { select: { id: true, number: true } }, work: { select: { paymentKind: true } }, _count: { select: { payrollEntries: true } } },
+    include: { project: { select: { id: true, number: true, currency: true } }, work: { select: { paymentKind: true } }, _count: { select: { payrollEntries: true } } },
   });
   if (!task) return { ok: false as const, error: "Задача не найдена" };
   if (task.work?.paymentKind === "ENGINEERING") return { ok: false as const, error: "Задача входит в распределение инженерного фонда — её долю можно передать или перераспределить" };

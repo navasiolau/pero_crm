@@ -414,6 +414,7 @@ export default async function ProjectPage({
                 amount: Number(payment.amount),
                 currency: payment.currency,
                 rate: Number(payment.rate),
+                bynAmount: Number(payment.bynAmount),
                 projectAmount: Number(payment.projectAmount),
                 paidAt: payment.paidAt.toISOString(),
                 comment: payment.comment,

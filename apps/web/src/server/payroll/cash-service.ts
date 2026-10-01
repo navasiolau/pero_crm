@@ -10,14 +10,14 @@ import { deliverCashPayout } from "./cash-post-commit";
 
 export async function preparedRates(cashAccountId: string): Promise<CashRates> {
   const asOf = new Date().toISOString().slice(0, 10);
-  const [account, setting] = await Promise.all([
+  const [account] = await Promise.all([
     prisma.cashAccount.findUnique({ where: { id: cashAccountId }, select: { currency: true, active: true } }),
-    prisma.orgSetting.findUnique({ where: { key: "payrollCurrency" } }),
   ]);
   if (!account?.active || !isCashCurrency(account.currency)) throw new Error("Активная касса не найдена");
-  const payrollCurrency = setting?.value ?? "BYN";
+  const payrollCurrency = "BYN";
   if (!isCashCurrency(payrollCurrency)) throw new Error("Неизвестная валюта зарплаты");
   const rateFor = async (currency: CashCurrency) => {
+    if (currency === "BYN") return { currency, rate: "1.000000", date: asOf };
     const value = await getNbrbRate(currency, new Date(`${asOf}T12:00:00.000Z`));
     if (!Number.isFinite(value.rate) || !/^\d+(?:\.\d{1,6})?$/.test(String(value.rate))) throw new Error("Некорректный курс НБ РБ");
     return { currency, rate: parseCashRate(value.rate.toFixed(6), currency), date: value.date };

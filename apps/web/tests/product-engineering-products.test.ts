@@ -27,7 +27,7 @@ const db = {
   $queryRaw: async () => [{ locked: 1 }],
   task: { findMany: async () => [], findFirst: async () => null },
   user: { findFirst: async ({ where }: { where: Row }) => users.find((row) => matches(row, where)) ?? null },
-  project: { findUnique: async () => ({ id: "project", number: "1" }) },
+  project: { findUnique: async () => ({ id: "project", number: "1", currency: "BYN" }) },
   product: {
     findMany: async () => state.products,
     findUnique: async ({ where }: { where: Row }) => product(where), findFirst: async ({ where }: { where: Row }) => product(where),

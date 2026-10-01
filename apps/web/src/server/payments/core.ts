@@ -12,7 +12,7 @@ import { requireActorRoles, type DomainActor } from "@/server/projects/core";
 import { FINANCE_ROLES } from "@/lib/roles";
 import { withTaskTransaction } from "@/server/tasks/transaction";
 import { readCashBalance, readOrgBalance } from "@/server/payroll/cash-core";
-import { getPayrollCurrency } from "@/server/payroll/queries";
+import { assertProjectMoneyCurrency } from "@/lib/internal-currency";
 
 // Ядро создания платежа (§11): приход от клиента или расход на проект.
 // Используется и вебом (finance-tab), и telegram-ботом — актёр передаётся
@@ -55,9 +55,8 @@ export async function createPaymentCore(
     select: { id: true, number: true, currency: true },
   });
   if (!project) return { ok: false, error: "Проект не найден" };
-  if (!isCurrency(project.currency)) {
-    return { ok: false, error: `Неизвестная валюта проекта: ${project.currency}` };
-  }
+  try { assertProjectMoneyCurrency(project.currency); }
+  catch (error) { return { ok: false, error: error instanceof Error ? error.message : "Сначала подготовьте проект в BYN" }; }
 
   // Касса: операция проводится только в валюте кассы (деньги физически
   // лежат в кассе в её валюте; эквиваленты — в полях курса операции)
@@ -129,28 +128,18 @@ export async function createPaymentCore(
       ? { bynAmount: round2(amount * rate), projectAmount: amount }
       : equivalents(amount, rate, projectRate);
 
-  let payrollRate = "1.000000";
-  let payrollCurrency = "BYN";
-  if (data.direction === "EXPENSE") {
-    payrollCurrency = await getPayrollCurrency();
-    if (!isCurrency(payrollCurrency)) return { ok: false, error: "Неизвестная валюта зарплаты" };
-    try { payrollRate = (await getNbrbRate(payrollCurrency)).rate.toFixed(6); }
-    catch { return { ok: false, error: "Не удалось получить курс для проверки баланса организации" }; }
-  }
+  const payrollRate = "1.000000";
   let payment;
   try {
     payment = await withTaskTransaction(async (tx) => {
-      const [currentProject, currentAccount, currentArticle, payrollSetting] = await Promise.all([
+      const [currentProject, currentAccount, currentArticle] = await Promise.all([
         tx.project.findUnique({ where: { id: project.id }, select: { currency: true } }),
         tx.cashAccount.findUnique({ where: { id: account.id }, select: { active: true, currency: true } }),
         articleId ? tx.expenseArticle.findUnique({ where: { id: articleId }, select: { active: true } }) : Promise.resolve(null),
-        tx.orgSetting.findUnique({ where: { key: "payrollCurrency" } }),
       ]);
       if (currentProject?.currency !== project.currency || !currentAccount?.active || currentAccount.currency !== data.currency
         || (articleId && !currentArticle?.active)) throw new Error("Реквизиты платежа изменились — обновите форму");
       if (data.direction === "EXPENSE") {
-        const currentPayroll = payrollSetting?.value ?? "BYN";
-        if (currentPayroll !== payrollCurrency) throw new Error("Валюта зарплаты изменилась — повторите операцию");
         const [cashBalance, orgBalanceAfter] = await Promise.all([readCashBalance(tx, account.id), readOrgBalance(tx, payrollRate, `-${equiv.bynAmount}`)]);
         if (cashBalance.lt(amount)) throw new Error("Недостаточно средств в выбранной кассе");
         if (orgBalanceAfter.lt(0)) throw new Error("Недостаточно средств на балансе организации");

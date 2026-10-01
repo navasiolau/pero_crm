@@ -2,7 +2,7 @@ import { projectTotal as calculateProjectTotal } from "@/lib/product-quantity";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
 
-import { getNbrbRate } from "./nbrb";
+import { sumHistoricalByn, sumByn, subtractByn, BYN_UNAVAILABLE_REASON } from "@/lib/history-byn";
 
 // ─── Финансы (§11): кассы, статьи расходов, экономика проекта ───────────────
 // Раздел доступен администратору, директору и бухгалтеру (middleware + requireFinance).
@@ -71,22 +71,19 @@ export async function listExpenseArticles(): Promise<ExpenseArticleView[]> {
 
 export type ProjectEconomics = {
   currency: string;
+  unavailableReason: string | null;
   expectedPrice: number | null;
-  paidTotal: number; // приходы, в валюте проекта
-  expensesTotal: number; // расходы (статьи + материалы склада), в валюте проекта
-  payrollTotal: number; // ЗП по проекту (начисления), в валюте проекта
-  margin: number; // paidTotal − expensesTotal − payrollTotal
+  paidTotal: number | null; // приходы, в валюте проекта
+  expensesTotal: number | null; // расходы (статьи + материалы склада), в валюте проекта
+  payrollTotal: number | null; // ЗП по проекту (начисления), в валюте проекта
+  margin: number | null; // paidTotal − expensesTotal − payrollTotal
   marginAtFullPrice: number | null; // expectedPrice − расходы − ЗП
-  expenseBreakdown: { label: string; amount: number }[]; // по статьям + ЗП + материалы
+  expenseBreakdown: { label: string; amount: number | null }[]; // по статьям + ЗП + материалы
 };
 
-// Экономика проекта (§11): ожидаемая цена (Σ цен изделий), оплаты, расходы
-// (ЗП + материалы + прочее), маржа. Все суммы — в валюте проекта (платежи
-// хранят projectAmount; начисления ЗП — в валюте ЗП, материалы склада — в BYN;
-// при отличии конвертируем по текущему курсу НБ РБ — редкий случай, в типовой
-// установке валюты совпадают). Материалы склада (§12) — безденежный расход:
-// Σ StockMovement.totalByn (EXPENSE − RETURN) по изделиям проекта,
-// без кассы и платежа.
+// Внутренняя экономика использует только сохранённые BYN-эквиваленты.
+// Полные процентные снимки заменяют связанные начисления, а не дополняют их.
+// Историческая неизвестность не пересчитывается сегодняшним курсом.
 export async function getProjectEconomics(
   projectId: string,
 ): Promise<ProjectEconomics | null> {
@@ -102,20 +99,20 @@ export async function getProjectEconomics(
     },
   });
   if (!project) return null;
-  const currency = project.currency;
+  const currency = "BYN";
 
-  const [payments, payrollEntries, stockMovements, settlements] = await Promise.all([
+  const [payments, payrollEntries, stockMovements, settlements, completions] = await Promise.all([
     prisma.payment.findMany({
       where: { projectId },
       select: {
         direction: true,
-        projectAmount: true,
+        bynAmount: true,
         expenseArticle: { select: { name: true } },
       },
     }),
     prisma.payrollEntry.findMany({
-      where: { projectId, settlementShareId: null },
-      select: { amount: true, currency: true },
+      where: { projectId, settlementShareId: null, percentageCompletionShareId: null },
+      select: { amount: true, currency: true, bynAmount: true },
     }),
     // Списания материалов со склада (§12): цены хранятся в BYN (totalByn),
     // привязка — к изделиям этого проекта
@@ -125,104 +122,72 @@ export async function getProjectEconomics(
     }),
     prisma.productStageSettlement.findMany({
       where: { projectId },
-      select: { productCurrency: true, projectAmount: true },
+      select: { bynAmount: true },
+    }),
+    prisma.productPercentageCompletion.findMany({
+      where: { product: { projectId }, state: "SETTLED" },
+      select: { amount: true, payrollCurrency: true, bynAmount: true },
     }),
   ]);
 
-  let paidTotal = 0;
-  let expensesTotal = 0;
-  const byArticle = new Map<string, number>();
+  let paidByn = new Prisma.Decimal(0);
+  let expenseByn = new Prisma.Decimal(0);
+  const byArticle = new Map<string, Prisma.Decimal>();
   for (const payment of payments) {
-    const amount = Number(payment.projectAmount);
-    if (payment.direction === "INCOME") {
-      paidTotal += amount;
-    } else {
-      expensesTotal += amount;
+    const amount = new Prisma.Decimal(payment.bynAmount);
+    if (payment.direction === "INCOME") paidByn = paidByn.plus(amount);
+    else {
+      expenseByn = expenseByn.plus(amount);
       const label = payment.expenseArticle?.name ?? "Прочее";
-      byArticle.set(label, (byArticle.get(label) ?? 0) + amount);
+      byArticle.set(label, (byArticle.get(label) ?? new Prisma.Decimal(0)).plus(amount));
     }
   }
+  let paidTotal = paidByn.toNumber();
+  let expensesTotal: number | null = expenseByn.toNumber();
 
-  // ЗП проекта: суммируем начисления по валютам и приводим к валюте проекта
-  const payrollByCurrency = new Map<string, number>();
-  for (const entry of payrollEntries) {
-    payrollByCurrency.set(
-      entry.currency,
-      (payrollByCurrency.get(entry.currency) ?? 0) + Number(entry.amount),
-    );
-  }
-  // Полный снимок включает эквиваленты долей, округлённых до нуля в валюте
-  // выплаты. Сумма только положительных PayrollEntry потеряла бы эти копейки.
-  let fixedPayroll = new Prisma.Decimal(0);
-  for (const settlement of settlements) {
-    if (settlement.productCurrency !== currency) throw new Error("Валюта проекта не соответствует зафиксированному начислению");
-    fixedPayroll = fixedPayroll.plus(settlement.projectAmount);
-  }
-  let payrollTotal = fixedPayroll.toNumber();
-  for (const [entryCurrency, amount] of payrollByCurrency) {
-    if (entryCurrency === currency) {
-      payrollTotal += amount;
-    } else {
-      const [from, to] = await Promise.all([
-        getNbrbRate(entryCurrency).catch(() => null),
-        getNbrbRate(currency).catch(() => null),
-      ]);
-      // НБ РБ недоступен — не искажаем маржу: показываем как есть
-      payrollTotal += from && to ? (amount * from.rate) / to.rate : amount;
-    }
-  }
-
-  // Материалы склада: BYN → валюта проекта тем же курсом, что и ЗП
-  let materialsByn = 0;
-  for (const movement of stockMovements) {
-    materialsByn +=
-      (movement.type === "RETURN" ? -1 : 1) * Number(movement.totalByn ?? 0);
-  }
-  let materialsTotal = 0;
-  if (materialsByn !== 0) {
-    if (currency === "BYN") {
-      materialsTotal = materialsByn;
-    } else {
-      const rate = await getNbrbRate(currency).catch(() => null);
-      // НБ РБ недоступен — не искажаем маржу: показываем как есть
-      materialsTotal = rate ? materialsByn / rate.rate : materialsByn;
-    }
-    expensesTotal += materialsTotal;
-  }
-
-  const round = (value: number) => Math.round(value * 100) / 100;
+  // Полные снимки учитывают даже доли, округлённые до нуля; связанные
+  // PayrollEntry исключены выше, чтобы не начислять одну сумму дважды.
+  const payrollTotal = sumByn([
+    sumHistoricalByn(payrollEntries),
+    sumHistoricalByn(settlements.map(row => ({ amount: row.bynAmount, bynAmount: row.bynAmount }))),
+    sumByn(completions.map(row => row.bynAmount?.toNumber() ?? null)),
+  ]);
+  const materialsTotal = stockMovements.some(movement => movement.totalByn === null) ? null : stockMovements.reduce((sum, movement) => sum.plus(
+    new Prisma.Decimal(movement.totalByn!).times(movement.type === "RETURN" ? -1 : 1)), new Prisma.Decimal(0)).toNumber();
+  expensesTotal = sumByn([expensesTotal, materialsTotal]);
+  const round = (value: number) => new Prisma.Decimal(value).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP).toNumber();
   paidTotal = round(paidTotal);
-  expensesTotal = round(expensesTotal);
-  payrollTotal = round(payrollTotal);
+  expensesTotal = expensesTotal === null ? null : round(expensesTotal);
   // Ожидаемая цена = Σ цен изделий + доставка/выгрузка/монтаж проекта
   const expectedRaw =
     calculateProjectTotal(project.products, project);
-  const expectedPrice = expectedRaw > 0 ? round(expectedRaw) : null;
+  const expectedPrice = project.currency === "BYN" && project.products.every(product => product.expectedPrice !== null) ? round(expectedRaw) : null;
 
-  const expenseBreakdown = [...byArticle.entries()]
-    .map(([label, amount]) => ({ label, amount: round(amount) }))
+  const expenseBreakdown: { label: string; amount: number | null }[] = [...byArticle.entries()]
+    .map(([label, amount]) => ({ label, amount: round(amount.toNumber()) }))
     .sort((a, b) => b.amount - a.amount);
-  if (materialsTotal > 0) {
+  if (materialsTotal === null || materialsTotal > 0) {
     expenseBreakdown.unshift({
       label: "Материалы (склад)",
-      amount: round(materialsTotal),
+      amount: materialsTotal === null ? null : round(materialsTotal),
     });
   }
-  if (payrollTotal > 0) {
+  if (payrollTotal === null || payrollTotal > 0) {
     expenseBreakdown.unshift({ label: "Зарплата", amount: payrollTotal });
   }
 
   return {
     currency,
+    unavailableReason: payrollTotal === null || expensesTotal === null || project.currency !== "BYN" ? BYN_UNAVAILABLE_REASON : null,
     expectedPrice,
     paidTotal,
     expensesTotal,
     payrollTotal,
-    margin: round(paidTotal - expensesTotal - payrollTotal),
+    margin: subtractByn(subtractByn(paidTotal, expensesTotal), payrollTotal),
     marginAtFullPrice:
       expectedPrice === null
         ? null
-        : round(expectedPrice - expensesTotal - payrollTotal),
+        : subtractByn(subtractByn(expectedPrice, expensesTotal), payrollTotal),
     expenseBreakdown,
   };
 }

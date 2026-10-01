@@ -7,7 +7,7 @@ import {
   type DataColumn,
 } from "@/components/ui/data-table";
 import { MonthSwitcher, monthLabel } from "@/components/month-switcher";
-import { formatAmount } from "@/lib/format";
+import { formatAmount, formatMoneyTotal } from "@/lib/format";
 import { entrySchemeLabels, payoutKindLabels } from "@/lib/labels";
 import type { PayrollEntryView, PayoutView } from "@/server/payroll/queries";
 
@@ -30,10 +30,10 @@ export function PayrollView({
 }: {
   month: string;
   currency: string;
-  accrued: number;
-  paid: number;
-  debt: number;
-  estimate: number;
+  accrued: number | null;
+  paid: number | null;
+  debt: number | null;
+  estimate: number | null;
   entries: PayrollEntryView[];
   payouts: PayoutView[];
 }) {
@@ -126,7 +126,7 @@ export function PayrollView({
       sortValue: (row) => row.amount,
       className: "text-right font-medium",
       headerClassName: "text-right",
-      cell: (row) => formatAmount(row.amount, row.payrollCurrency ?? currency),
+      cell: (row) => row.payrollCurrency ? formatAmount(row.amount, row.payrollCurrency) : `${formatAmount(row.amount, "")} · валюта неизвестна`,
     },
   ];
 
@@ -177,7 +177,7 @@ export function PayrollView({
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-semibold">
-                {formatAmount(stat.value, currency)}
+                {formatMoneyTotal(stat.value, currency)}
               </div>
               <p className="text-xs text-muted-foreground">{stat.note}</p>
             </CardContent>
