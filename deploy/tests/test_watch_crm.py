@@ -367,8 +367,38 @@ class WatcherTests(unittest.TestCase):
         self.assertEqual(runtime.records[-1]["image"], NEW_IMAGE)
 
 
+def process_is_stopped(state_path):
+    """Return whether a Linux /proc stat entry is absent or a zombie."""
+    try:
+        state = state_path.read_text()
+    except (FileNotFoundError, ProcessLookupError):
+        return True
+    return state.rsplit(")", 1)[1].split()[0] == "Z"
+
+
 @unittest.skipIf(LEGACY_BASELINE, "Runtime adapter is new")
 class DockerAdapterTests(unittest.TestCase):
+
+    def test_process_state_probe_treats_vanishing_proc_entries_as_stopped(self):
+        state = Path("/proc/1234/stat")
+        for error in (FileNotFoundError(), ProcessLookupError()):
+            with self.subTest(error=type(error).__name__), patch.object(
+                    Path, "read_text", side_effect=error):
+                self.assertTrue(process_is_stopped(state))
+
+    def test_process_state_probe_distinguishes_alive_and_zombie(self):
+        state = Path("/proc/1234/stat")
+        with patch.object(Path, "read_text", return_value="1234 (child) S 1"):
+            self.assertFalse(process_is_stopped(state))
+        with patch.object(Path, "read_text", return_value="1234 (child) Z 1"):
+            self.assertTrue(process_is_stopped(state))
+
+    def test_process_state_probe_propagates_unexpected_read_errors(self):
+        state = Path("/proc/1234/stat")
+        with patch.object(Path, "read_text", side_effect=PermissionError("denied")):
+            with self.assertRaises(PermissionError):
+                process_is_stopped(state)
+
     def test_subprocess_errors_and_timeouts_do_not_leak_output(self):
         runtime = watcher.DockerRuntime()
         with self.assertRaises(watcher.WatchError) as caught:
@@ -406,9 +436,9 @@ class DockerAdapterTests(unittest.TestCase):
             child_pid = int(pid_path.read_text())
             state = Path(f"/proc/{child_pid}/stat")
             deadline = time.monotonic() + 1
-            while state.exists() and state.read_text().split()[2] != "Z" and time.monotonic() < deadline:
+            while not process_is_stopped(state) and time.monotonic() < deadline:
                 time.sleep(0.01)
-            self.assertTrue(not state.exists() or state.read_text().split()[2] == "Z",
+            self.assertTrue(process_is_stopped(state),
                             "Child must be dead before W07 can release its lock")
 
     def test_up_never_pulls_builds_or_touches_dependencies(self):
