@@ -1,94 +1,108 @@
 # PERO CRM v2
 
-CRM для производства корпусной мебели на заказ. Современная замена «Бизнес в плюсе».
+CRM для производства корпусной мебели на заказ: клиенты и заказы, изделия,
+работы и задачи, файлы, коммуникации, финансы, зарплата и склад.
 
-Стек: **Next.js 15 (App Router) · TypeScript strict · PostgreSQL 16 · Prisma · Auth.js v5 · shadcn/ui · Tailwind v4 · PWA (Serwist)**.
+Стек: Next.js 15 (App Router), React 19, TypeScript strict, PostgreSQL,
+Prisma 6, Auth.js v5, shadcn/ui / Base UI, Tailwind v4, Serwist.
+Требования: Node.js 22+, pnpm 11; единый lockfile в корне.
 
-Полный план: [PERO CRM v2 — План реализации базовой CRM.md](./PERO%20CRM%20v2%20—%20План%20реализации%20базовой%20CRM.md)
+## Документация
 
-## Быстрый старт (dev)
+- [AGENTS.md](AGENTS.md) — правила разработки, GitFlow, БД и безопасности.
+- [План улучшений](CRM_IMPROVEMENTS_PLAN.md) — действующий план работ.
+- [Основные specs](openspec/specs) и [changes](openspec/changes) — требования,
+  решения и результаты проверок отдельных задач.
+- [Архитектура](ARCHITECTURE.md) — технические и инфраструктурные решения.
+- [Развёртывание](docs/DEPLOY.md), [production](PROD_DEPLOYMENT.md) и
+  [pull-модель деплоя](deploy/README.md) — операторские инструкции.
+- [Telegram-бот](deploy/telegram-bot/README.md), [S3](docs/S3.md) и
+  [NAS](docs/NAS.md) — отдельные сервисы.
+- [Отчёт импорта legacy](apps/web/scripts/import-legacy/REPORT.md) — результаты
+  завершённого переноса; исходный экспорт хранится вне репозитория.
 
-Требования: Node 22, pnpm 11, Docker.
+Правила владельца в AGENTS.md имеют приоритет над историческими указаниями
+в документах и QA-скриптах. Оригинальные планы ранних этапов удалены; требования
+текущих задач находятся в действующем плане и OpenSpec.
 
-```bash
-pnpm install                    # установка зависимостей (единый lockfile в корне)
-docker compose up -d postgres   # PostgreSQL 16 на порту 5433
-cp apps/web/.env.example apps/web/.env   # и заполнить AUTH_SECRET (openssl rand -base64 32)
-pnpm db:migrate                 # миграции Prisma
-pnpm db:seed                    # демо-пользователи (6 ролей)
-pnpm dev                        # http://localhost:3000
-```
+## Модель и доступ
 
-> Порт **5433**, а не 5432: на 5432 работает postgres проекта экспорта legacy CRM (каталог `D:\legacy_export`, вне этого репозитория).
+- `Project` — заказ клиента; `Product` — позиция заказа с количеством одинаковых
+  экземпляров. Цена изделия задаётся за единицу, сумма партии учитывает количество.
+- Инженер, изображения, файлы, работы и материалы относятся к конкретному изделию;
+  на проекте доступны общие данные и итоговые показатели.
+- Роли сотрудника — массив `User.roles`. Права объединяются; ADMIN и DIRECTOR
+  используются отдельно. Ролевые наборы определены в
+  [roles.ts](apps/web/src/lib/roles.ts), ограничения данных — в
+  [серверной политике](apps/web/src/server/access/visibility.ts).
+- Финансовые суммы хранятся как Decimal; выплаты, начисления и складские движения
+  сохраняют необходимые снимки и аудит. Процентная оплата изделия реализована в
+  [product-percentage-pay](apps/web/src/server/product-percentage-pay).
+- Вход — credentials / JWT с серверной проверкой сессии. REST `/api/v1`
+  использует Bearer-токены и проверку scopes в каждом route.
+- Загрузки обслуживаются защищёнными routes. При настроенном S3 используется MinIO;
+  для локального хранения предусмотрен файловый fallback.
 
-## Демо-пользователи
+## Структура
 
-Пароль у всех: **`pero-demo-2026`**
-
-| Email | Имя | Роль | Схема оплаты | После входа |
-|---|---|---|---|---|
-| `admin@pero.local` | Администратор | ADMIN | 3% с оборота | Дашборд |
-| `director@pero.local` | Директор | DIRECTOR | без расчёта | Дашборд |
-| `manager@pero.local` | Менеджер | MANAGER | — | Дашборд |
-| `engineer@pero.local` | Инженер | ENGINEER | 5% от стоимости | Дашборд |
-| `worker@pero.local` | Работник | WORKER | сдельная | «Мои задачи» |
-| `mounter@pero.local` | Монтажник | MOUNTER | сдельная | «Мои задачи» |
-
-## Команды
-
-| Команда | Что делает |
+| Каталог | Назначение |
 |---|---|
-| `pnpm dev` | dev-сервер Next.js (Turbopack) |
-| `pnpm build` | prod-сборка (webpack — нужен для Serwist) |
-| `pnpm start` | prod-сервер |
+| `apps/web/src/app` | Страницы App Router и API |
+| `apps/web/src/components` | Интерфейс и переиспользуемые компоненты |
+| `apps/web/src/server` | Доменные запросы, действия и права |
+| `apps/web/src/lib` | Общие политики, форматирование и утилиты |
+| `apps/web/prisma` | Схема и история миграций |
+| `apps/web/tests` | Unit/DI, DB/runtime и browser-проверки |
+| `apps/telegram-bot` | Изолированный сервис бота, long polling + CRM REST API |
+| `packages/plugin-sdk` | Контракт плагинов |
+| `packages/plugins` | Установленные плагины demo и file-stages |
+| `deploy` | Compose, CI-приёмка и операторские инструкции |
+
+## Локальная работа
+
+Используется существующий разрешённый PostgreSQL на порту **5433**.
+Порт 5432 принадлежит legacy-проекту `D:\legacy_export`.
+Базовые переменные описаны в [.env.example](.env.example). Для локального web
+задаются `DATABASE_URL` и `AUTH_SECRET`; секреты хранятся в ignored env.
+
+После подготовки окружения:
+
+```sh
+pnpm install --frozen-lockfile
+pnpm db:generate
+pnpm dev
+```
+
+Приложение открывается на http://localhost:3000. Миграции выполняются в рамках
+согласованной задачи. Seed, reset, legacy-import и создание нового стенда
+требуют отдельного поручения; seed существующих рабочих данных не запускать.
+
+## Команды и проверки
+
+| Команда из корня | Назначение |
+|---|---|
+| `pnpm dev` | Dev-сервер Next.js |
+| `pnpm build` / `pnpm start` | Production-сборка / запуск |
 | `pnpm lint` | ESLint |
-| `pnpm db:migrate` | `prisma migrate dev` |
-| `pnpm db:deploy` | `prisma migrate deploy` (prod) |
-| `pnpm db:generate` | `prisma generate` |
-| `pnpm db:seed` | seed демо-пользователей (идемпотентный) |
+| `pnpm --filter @pero/web test` | Unit/DI-тесты web |
+| `pnpm --filter @pero/web exec tsc --noEmit --incremental false` | Типизация web |
+| `pnpm --filter @pero/telegram-bot test` | Сборка и тесты бота |
+| `pnpm --filter @pero/telegram-bot typecheck` | Типизация бота |
+| `pnpm db:generate` | Генерация Prisma Client |
+| `pnpm db:migrate` / `pnpm db:deploy` | Миграции local / deploy |
+| `openspec validate <change> --strict` | Проверка OpenSpec change |
 
-## Структура монорепо
+Prisma Client генерируется перед типизацией и сборкой. DB/runtime/browser-проверки
+имеют собственные guards и инструкции в tests и OpenSpec; unit-тесты и build
+не заменяют фактическую приёмку сценария.
 
-```
-pero_crm_v2/
-├── apps/
-│   └── web/                  # @pero/web — приложение Next.js
-│       ├── prisma/           # схема, миграции, seed
-│       ├── public/icons/     # иконки PWA (генерируются scripts/generate-icons.mjs)
-│       ├── scripts/          # служебные скрипты
-│       └── src/
-│           ├── app/
-│           │   ├── (app)/    # защищённая группа роутов (app shell)
-│           │   │   ├── settings/    # Настройки: modules/ (плагины), api/ (токены)
-│           │   │   └── changelog/   # журнал изменений (§5)
-│           │   ├── api/v1/   # публичный REST API (Bearer-токены) + openapi.json
-│           │   └── login/    # страница входа
-│           ├── components/   # app shell + shadcn/ui + plugins/ (рендер слотов)
-│           ├── server/       # plugins/ (плагинное ядро §14), api/, require-role
-│           ├── lib/          # prisma-синглтон, навигация, утилиты
-│           ├── instrumentation.ts # синхронизация реестра плагинов при старте
-│           ├── auth.ts       # Auth.js (credentials)
-│           ├── auth.config.ts# edge-safe конфиг Auth.js
-│           └── middleware.ts # защита роутов + ролевые ограничения
-├── packages/
-│   ├── plugin-sdk/           # @pero/plugin-sdk — SDK: манифест, слоты, контекст
-│   └── plugins/              # плагины (§14); demo — эталонный
-├── docker-compose.yml        # postgres (5433) + app + caddy (профиль prod)
-└── Caddyfile
-```
+## Выпуск и локальные материалы
 
-## Модули (плагины, §14)
+Работа начинается от свежего staging в ветке одной задачи. Далее идут local,
+обычный merge в staging, CI и приёмка фактически развёрнутой ревизии.
+Main получает весь принятый staging по прямому указанию владельца.
+CI собирает образы web и бота в GHCR; серверные watchers применяют их по pull-модели.
+Полные правила разрешений и проверки выпуска находятся в AGENTS.md.
 
-- Управление: **Настройки → Модули** (админ/директор) — вкл/выкл одной кнопкой, автоформа настроек, команды, журнал запусков.
-- Точки расширения: UI-слоты (`dashboard.widget`, `project.tab`, `project.action`, `task.action`, `settings.page`), шина доменных событий (outbox), команды (UI/cron/REST).
-- REST API `/api/v1` с Bearer-токенами: **Настройки → API и токены**; OpenAPI — `/api/v1/openapi.json`.
-- Установка ручная: пакет в `packages/plugins/<id>/` + запись в `apps/web/src/server/plugins/registry.ts`. Эталон — `packages/plugins/demo`.
-
-## Prod (docker)
-
-```bash
-cp .env.example .env   # AUTH_SECRET, CADDY_DOMAIN
-docker compose --profile prod up -d --build
-```
-
-Caddy поднимает HTTPS (обязателен для PWA) и проксирует на `app:3000`; при старте контейнера применяются миграции (`prisma migrate deploy`).
+Локальные env, загрузки, браузерные артефакты и тестовые `test_bazis_models`
+не включаются в Git. B3D-модели сохранены на диске и исключены из Docker-контекста.

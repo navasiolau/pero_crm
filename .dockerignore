@@ -13,6 +13,8 @@ apps/web/.env
 apps/web/.env.local
 apps/web/.env.production
 .playwright-mcp
+.pytest_cache
+test_bazis_models
 uploads
 
 # Соседние проекты/артефакты, не нужные для сборки
