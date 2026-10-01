@@ -180,26 +180,16 @@ export default async function ProductPage({
         </CardContent>
       </Card>
 
-      {/* Тех. описание — большое, расширяется по контенту; эскиз — только
-          в детальном просмотре изделия (в списке не показывается). */}
-      {product.sketchFile ? (
-        <ProductSketch
-          sketch={{
-            id: product.sketchFile.id,
-            fileName: product.sketchFile.fileName,
-            mimeType: product.sketchFile.mimeType,
-            size: product.sketchFile.size,
-          }}
-        />
-      ) : null}
-      {product.description ? (
-        <Card>
-          <CardContent className="p-4 text-sm">
-            <div className="mb-1 text-muted-foreground">Техническое описание</div>
-            <div className="whitespace-pre-wrap">{product.description}</div>
-          </CardContent>
-        </Card>
-      ) : null}
+      {/* Эскиз и техническое описание адаптируются к ширине карточки. */}
+      <ProductSketch
+        sketch={product.sketchFile ? {
+          id: product.sketchFile.id,
+          fileName: product.sketchFile.fileName,
+          mimeType: product.sketchFile.mimeType,
+          hasThumb: product.sketchFile.hasThumb,
+        } : null}
+        description={product.description}
+      />
 
       <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm text-muted-foreground">
         <span>

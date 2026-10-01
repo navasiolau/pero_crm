@@ -5,6 +5,7 @@ import type { ProductStatus } from "@prisma/client";
 
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useListParams } from "@/lib/list-params";
+import type { SketchFilePreview } from "@/lib/product-hero";
 
 import { ProductsFilterBar } from "./products-filter-bar";
 import { ProductsKanban } from "./products-kanban";
@@ -25,6 +26,7 @@ export interface ProductRow {
   clientId: string;
   clientName: string;
   engineerName: string | null;
+  sketchFile: SketchFilePreview | null;
 }
 
 // Раздел «Изделия»: канбан (по умолчанию) / таблица, фильтры в URL —

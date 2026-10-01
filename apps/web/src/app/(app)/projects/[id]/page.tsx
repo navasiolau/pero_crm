@@ -293,6 +293,7 @@ export default async function ProjectPage({
               statusChangedAt: product.statusChangedAt.toISOString(),
               expectedPrice: product.expectedPrice?.toString() ?? null,
               engineerName: product.engineer?.name ?? null,
+              sketchFile: product.sketchFile,
             }))}
             canManage={canManage}
             showAmount={showAmount}

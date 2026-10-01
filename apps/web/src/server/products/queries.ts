@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { PRODUCT_STATUSES } from "@/lib/product-statuses";
 import { fileVisibilityWhere, productVisibilityWhere, taskVisibilityWhere, workVisibilityWhere, type VisibilityActor } from "@/server/access/visibility";
 import { taskDetailsIncludeFor } from "@/server/tasks/queries";
+import { productSketchProjection } from "./sketch-projection";
 
 // ── Список изделий (/products): серверные фильтры/сортировка/пагинация ──
 // Состояние — в URL (?q=&status=&project=&client=&active=0&sort=&dir=&page=).
@@ -95,6 +96,7 @@ export async function listProducts(
   filters: ProductListFilters,
   paging?: { page: number; pageSize: number },
 ): Promise<{ rows: Awaited<ReturnType<typeof fetchProductRows>>; total: number }> {
+  const actor = { id: userId, roles };
   const where = productWhere(userId, roles, filters);
   const sortField = filters.sort && filters.sort in PRODUCT_SORT_MAP ? filters.sort : undefined;
   const orderBy =
@@ -102,11 +104,12 @@ export async function listProducts(
       ? PRODUCT_SORT_MAP[sortField](filters.dir ?? "desc")
       : PRODUCT_SORT_MAP.number("desc");
   if (!paging) {
-    const rows = await fetchProductRows(where, orderBy, undefined, undefined);
+    const rows = await fetchProductRows(actor, where, orderBy, undefined, undefined);
     return { rows, total: rows.length };
   }
   const [rows, total] = await Promise.all([
     fetchProductRows(
+      actor,
       where,
       orderBy,
       (paging.page - 1) * paging.pageSize,
@@ -118,6 +121,7 @@ export async function listProducts(
 }
 
 async function fetchProductRows(
+  actor: VisibilityActor,
   where: Prisma.ProductWhereInput,
   orderBy: Prisma.ProductOrderByWithRelationInput[],
   skip: number | undefined,
@@ -127,6 +131,7 @@ async function fetchProductRows(
     where,
     include: {
       engineer: { select: { id: true, name: true } },
+      sketchFile: productSketchProjection(actor),
       project: {
         select: {
           id: true,
@@ -250,7 +255,7 @@ export async function getProductFor(
       },
       surveyor: { select: { id: true, name: true, position: true, phone: true } },
       engineer: { select: { id: true, name: true, position: true, phone: true } },
-      sketchFile: { where: fileVisibilityWhere(actor), select: { id: true, fileName: true, mimeType: true, size: true } },
+      sketchFile: productSketchProjection(actor),
       tasks: {
         where: taskVisibilityWhere(actor),
         include: taskDetailsIncludeFor(actor),

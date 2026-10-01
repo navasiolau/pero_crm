@@ -9,6 +9,7 @@ import { STAGES } from "@/lib/stages";
 import { taskDetailsIncludeFor } from "@/server/tasks/queries";
 import { listProjectShortages } from "@/server/warehouse/queries";
 import { clientVisibilityWhere, fileVisibilityWhere, hasFullProjectVisibility, productVisibilityWhere, projectVisibilityWhere, taskVisibilityWhere, workVisibilityWhere, type VisibilityActor } from "@/server/access/visibility";
+import { productSketchProjection } from "@/server/products/sketch-projection";
 
 function scopedProjectAmounts<T extends { initialPrice: unknown; delivery: unknown; unloading: unknown; installation: unknown }>(project: T, actor: VisibilityActor) {
   return hasFullProjectVisibility(actor) ? project : {
@@ -235,6 +236,7 @@ export async function getProjectFor(
         where: productVisibilityWhere(actor),
         include: {
           engineer: { select: { id: true, name: true } },
+          sketchFile: productSketchProjection(actor),
           statusHistory: { orderBy: { createdAt: "desc" } },
         },
         // Новые изделия сверху: суффикс по числу («205.9» после «205.21»),

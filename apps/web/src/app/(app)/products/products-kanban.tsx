@@ -18,12 +18,10 @@ import { toast } from "sonner";
 import type { ProductStatus } from "@prisma/client";
 
 import { DragHandle } from "@/components/drag-handle";
+import { ProductKanbanCard } from "@/components/product-kanban-card";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent } from "@/components/ui/card";
-import { formatAmount } from "@/lib/format";
 import {
   PRODUCT_STATUSES,
-  daysOnStatus,
   productStatusLabels,
   productStatusStyles,
 } from "@/lib/product-statuses";
@@ -31,55 +29,6 @@ import { cn } from "@/lib/utils";
 import { changeProductStatus } from "@/server/products/actions";
 
 import type { ProductRow } from "./products-view";
-
-function daysBadgeClass(days: number): string {
-  if (days >= 14) return "bg-destructive/15 text-destructive";
-  if (days >= 7) return "bg-amber-500/15 text-amber-700 dark:text-amber-400";
-  return "bg-muted text-muted-foreground";
-}
-
-function ProductCardView({
-  product,
-  showAmount,
-  dragging,
-}: {
-  product: ProductRow;
-  showAmount: boolean;
-  dragging?: boolean;
-}) {
-  const days = daysOnStatus(product.statusChangedAt);
-  return (
-    <Card
-      className={cn(
-        "cursor-pointer select-none",
-        dragging && "rotate-2 shadow-lg",
-      )}
-    >
-      <CardContent className="flex flex-col gap-1.5 p-3">
-        <div className="flex items-center justify-between gap-2 pr-10">
-          <span className="text-sm font-medium">{product.number}</span>
-          <Badge className={cn("text-xs", daysBadgeClass(days))}>
-            {days} дн.
-          </Badge>
-        </div>
-        <div className="text-sm">{product.title}</div>
-        <div className="text-xs text-muted-foreground">
-          Проект {product.projectNumber} · {product.clientName}
-        </div>
-        {product.engineerName ? (
-          <div className="text-xs text-muted-foreground">
-            Инженер: {product.engineerName}
-          </div>
-        ) : null}
-        {showAmount ? (
-          <div className="text-xs text-muted-foreground">
-            {formatAmount(product.expectedPrice, product.currency)}
-          </div>
-        ) : null}
-      </CardContent>
-    </Card>
-  );
-}
 
 function DraggableProduct({
   product,
@@ -103,7 +52,12 @@ function DraggableProduct({
       onClick={() => onOpen(product)}
     >
       {canManage && <DragHandle ref={setActivatorNodeRef} {...attributes} {...listeners} label={product.title} />}
-      <ProductCardView product={product} showAmount={showAmount} />
+      <ProductKanbanCard
+        product={product}
+        currency={product.currency}
+        showAmount={showAmount}
+        projectContext={`Проект ${product.projectNumber} · ${product.clientName}`}
+      />
     </div>
   );
 }
@@ -242,7 +196,13 @@ export function ProductsKanban({
       </div>
       <DragOverlay>
         {activeProduct ? (
-          <ProductCardView product={activeProduct} showAmount={showAmount} dragging />
+          <ProductKanbanCard
+            product={activeProduct}
+            currency={activeProduct.currency}
+            showAmount={showAmount}
+            projectContext={`Проект ${activeProduct.projectNumber} · ${activeProduct.clientName}`}
+            dragging
+          />
         ) : null}
       </DragOverlay>
     </DndContext>
