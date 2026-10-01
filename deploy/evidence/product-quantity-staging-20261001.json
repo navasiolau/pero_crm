@@ -1,0 +1,35 @@
+{
+  "status": "STAGING_NATIVE_AND_PRESERVATION_PASS",
+  "revision": "987787fbcba9dc17bd72113e882d4732cc4d17d0",
+  "identity": {
+    "hostname": "crm-staging",
+    "web": "eeaeb25c6f6b8c40260d8bbbd50c18b312783a0fef2cfde2ecd55943d4923cf8",
+    "image": "sha256:a17a82ce4f658fc3a90de98acd56cd3ce3976ace9a33b5694a1ec397d298db5e",
+    "revision": "987787fbcba9dc17bd72113e882d4732cc4d17d0",
+    "webStartedAt": "2026-10-01T11:45:12.360107526Z",
+    "database": "27b8f7342b9d722ab8788e137b37b03a3037442da038c5b8b98dbb30245b8b6a",
+    "databaseStartedAt": "2026-09-23T11:42:14.649193151Z",
+    "databaseVolume": "crm-staging_pgdata",
+    "pgdata": "/var/lib/postgresql/data",
+    "outerW07Sha256": "27e3bcd727d9e83170c76a254806fde42590da76cea30c9e1441d873df680139"
+  },
+  "cleanup": {
+    "status": "QA_CLEANED_PRESERVED",
+    "target": "staging",
+    "runId": "937e637f-85f5-4203-b78b-c3466e59d275",
+    "exactTables": 42,
+    "triggersRestoredExactly": true,
+    "deleted": 89
+  },
+  "widths": [
+    360,
+    390,
+    1440
+  ],
+  "pageErrors": [],
+  "apiTokenUsageException": {
+    "field": "lastUsedAt",
+    "identitiesAndProtectedFieldsExact": true,
+    "originalBackupProof": true
+  }
+}

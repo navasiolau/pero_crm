@@ -21,6 +21,10 @@
 - Next production build — PASS с фиктивным DATABASE_URL на loopback-порту 9; к реальной БД сборка не подключалась. Post-build web TypeScript и Prisma validate — PASS.
 - OpenSpec --all --strict — 13/13 PASS; git diff --cached --check — PASS.
 
-## Следующие проверки
+## Итоговые QA/evidence количества
 
-Merge итоговых четырёх QA/evidence файлов product-quantity, интеграция в staging и приёмка новой фактической staging revision выполняются далее. Эти результаты пока не заявлены; прежний полный live QA остаётся evidence исходной идентичной app-ревизии 987787f.
+Обычным merge включён product-quantity 62415eb: четыре ранее подготовленных QA/evidence файла; приложение осталось побайтно равным принятому staging 987787f. Новых тестовых данных или бизнес-операций нет.
+
+## Следующая проверка
+
+Интеграция в staging и приёмка новой фактической staging revision выполняются далее. Эти результаты пока не заявлены; прежний полный live QA остаётся evidence исходной идентичной app-ревизии 987787f.

@@ -9,9 +9,9 @@
 ## 2. Согласование истории в отдельной рабочей ветке
 
 - [x] 2.1 Создать bugfix/<согласованный номер> от свежего origin/staging в чистом worktree; проверить базовый SHA, имя ветки и отсутствие чужих изменений.
-- [ ] 2.2 Влить main и рабочую ветку product-quantity обычными merge, разрешить файлы по design/preview: приложение из принятого staging, 22 документа из main, новая политика AGENTS.md и итоговые QA/evidence; проверить отсутствие unmerged entries и идентичность полного app tree принятой ревизии.
+- [x] 2.2 Влить main и рабочую ветку product-quantity обычными merge, разрешить файлы по design/preview: приложение из принятого staging, 22 документа из main, новая политика AGENTS.md и итоговые QA/evidence; проверить отсутствие unmerged entries и идентичность полного app tree принятой ревизии.
 - [x] 2.3 Заменить старое правило codex/… в импортированной версии CRM_IMPROVEMENTS_PLAN.md ссылкой на AGENTS.md; проверить diff и сохранность исходной незакоммиченной версии в D:/Projects/pero_crm_v2.
-- [ ] 2.4 Пройти git diff --check, OpenSpec strict, существующие web/bot/deploy тесты, typecheck/lint/build и review итогового состава; проверить отсутствие новых runtime-правок и миграций сверх принятой product_quantity.
+- [x] 2.4 Пройти git diff --check, OpenSpec strict, существующие web/bot/deploy тесты, typecheck/lint/build и review итогового состава; проверить отсутствие новых runtime-правок и миграций сверх принятой product_quantity.
 
 ## 3. Staging-приёмка согласованной ревизии
 

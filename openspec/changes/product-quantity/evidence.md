@@ -48,3 +48,15 @@
 - Native staging functionality PASS: real password login via HTTPS Basic Auth, create5 ×200, mobile boards/detail, normal work5/budget150, material20/issue8/return2, atomic q6 and lower-bound rejection, actual percent10 and piece PayrollEntry84 preserved, shared physical allocation4 counted once, table sorting and project1100.
 - Three React418 hydration errors surfaced on timestamp-bearing UI. Linux SSR UTC and desktop browser Europe/Moscow formatted the same dates differently; a shared explicit Europe/Moscow datetime formatter now keeps the existing user-visible time consistent. New UTC/Moscow regression PASS; web tests544/544, TypeScript/lint pass; rebuilt image awaiting staging retest.
 - Existing one QA set on staging is retained for bounded resume, not duplicated. W07 window released after stop; no cleanup or history edits claimed yet.
+
+## Final staging acceptance / review-ready
+
+- Tested app revision987787fbcba9dc17bd72113e882d4732cc4d17d0; actual healthy image sha256:a17a82ce4f658fc3a90de98acd56cd3ce3976ace9a33b5694a1ec397d298db5e. Existing database27b8f734... / crm-staging_pgdata / original start23.09 preserved; stage S3 bucket and outer W07 guard verified.
+- Public HTTPS Basic Auth and real QA-password login PASS. Native scenarios at360/390/1440 PASS, pageErrors empty after stable datetime formatting. Root inspected stage board/detail/table screenshots.
+- All functionality PASS including actual Engineer10 and Worker84 entries, quantity mutations preserving snapshots, shared physical group4, issue8/return2, table sort and total1100.
+- The same one QA graph resumed after guards stopped the prior attempts; it was not duplicated. Root checkpoint retained exact state across web image replacement.
+- Exact cleanup89 own rows completed; all42 existing business tables/row identities/protected values retained,3 immutable trigger definitions/enabled states restored exactly. ApiToken.lastUsedAt background use measured separately with original-dump proof; no token is changed/restored by QA.
+- W07 window released; existing refresh/deploy coordination left intact. No production SQL, migration, fixtures or deployment.
+- Remote main remains7c51972d4264bd10fb779638cc94c13d6533d6b7; stage remains987787f. Main push requires owner's new explicit order.
+- Local gate:544 web tests,9 bot tests, web/bot TypeScript, ESLint(no new errors), production build,64 deployment tests with2 existing skips. GitHub private status API unavailable to existing read-packages identity; deployment image publication is gated by the checked workflow needs:test, but a full Actions-run conclusion is not separately claimed.
+- All24 implementation/acceptance tasks complete; OpenSpec remains open for owner review and later separately authorized main release.
