@@ -1,0 +1,170 @@
+{
+  "mode": "preview-only-no-commit-no-ref-change",
+  "baseline": {
+    "main": "7c51972d4264bd10fb779638cc94c13d6533d6b7",
+    "staging": "987787fbcba9dc17bd72113e882d4732cc4d17d0",
+    "quantityFeature": "62415eb904b2572bae7d299ebd44dcaa8bddef4a",
+    "quantityBase": "a899e8e679a6a7d97674ee6250fa84e6cafb0424"
+  },
+  "conflicts": {
+    "application": [
+      "apps/web/prisma/schema.prisma",
+      "apps/web/src/app/(app)/products/[id]/page.tsx",
+      "apps/web/src/app/(app)/projects/[id]/page.tsx",
+      "apps/web/src/components/product-kanban-card.tsx",
+      "apps/web/src/components/task-dialog.tsx",
+      "apps/web/src/server/products/actions.ts",
+      "apps/web/src/server/warehouse/queries.ts",
+      "apps/web/src/server/works/actions.ts"
+    ],
+    "documentation": [
+      "openspec/changes/manager-cash-advances/design.md",
+      "openspec/changes/manager-cash-advances/qa-plan.md",
+      "openspec/changes/manager-cash-advances/review-evidence.md",
+      "openspec/changes/manager-cash-advances/tasks.md",
+      "openspec/changes/product-cover-layout/tasks.md",
+      "openspec/changes/product-hero-images/tasks.md",
+      "openspec/changes/product-hero-images/verification.md",
+      "openspec/changes/product-percentage-pay/design.md",
+      "openspec/changes/product-percentage-pay/proposal.md",
+      "openspec/changes/product-percentage-pay/specs/product-percentage-pay/spec.md",
+      "openspec/changes/product-percentage-pay/tasks.md",
+      "openspec/changes/universal-work-shares/evidence.md",
+      "openspec/changes/universal-work-shares/production-rollout.md",
+      "openspec/changes/universal-work-shares/tasks.md"
+    ]
+  },
+  "mainDocumentsPreserved": [
+    {
+      "path": "CRM_IMPROVEMENTS_PLAN.md",
+      "source": "main",
+      "blob": "e883c79feb5ea0ae3e8669a3280bfbd1f2a5b31b"
+    },
+    {
+      "path": "deploy/evidence/product-cover-layout-staging-20261001.json",
+      "source": "main",
+      "blob": "9df7af272dada91c256c29059775b37059cfdce0"
+    },
+    {
+      "path": "docs/CRM_APPROVED_RELEASE_CORRECTION_20261001.md",
+      "source": "main",
+      "blob": "a96f6406747949ab4d88045bfe8837bf430b9714"
+    },
+    {
+      "path": "docs/CRM_THREE_FEATURES_RELEASE_20261001.md",
+      "source": "main",
+      "blob": "2d25c4dd709bccb513431ddbc6b931cf07715848"
+    },
+    {
+      "path": "openspec/changes/manager-cash-advances/design.md",
+      "source": "main",
+      "blob": "640082323631d4043646e2fe672499212522be41"
+    },
+    {
+      "path": "openspec/changes/manager-cash-advances/qa-plan.md",
+      "source": "main",
+      "blob": "3d53cad7eee5a97220a03db1036fd86eb6c4257f"
+    },
+    {
+      "path": "openspec/changes/manager-cash-advances/review-evidence.md",
+      "source": "main",
+      "blob": "c3f9dadf85f18e10c95d5560899a1b5189b2038a"
+    },
+    {
+      "path": "openspec/changes/manager-cash-advances/tasks.md",
+      "source": "main",
+      "blob": "20da88ee5dc16d8f06ae708d797f5d095db4426e"
+    },
+    {
+      "path": "openspec/changes/product-cover-layout/acceptance.md",
+      "source": "main",
+      "blob": "d5fb92ca83db494d48418aed1d83ae1025c61812"
+    },
+    {
+      "path": "openspec/changes/product-cover-layout/release-correction-20261001.md",
+      "source": "main",
+      "blob": "a7ea34442c224a8a90d3d6b17d3d35fa6149c7d8"
+    },
+    {
+      "path": "openspec/changes/product-cover-layout/tasks.md",
+      "source": "main",
+      "blob": "95f2dc0fbb6908a7ce8abe46f96d9b18be7c6a55"
+    },
+    {
+      "path": "openspec/changes/product-engineering-pay/release-correction-20261001.md",
+      "source": "main",
+      "blob": "d73d86d9338e51e053a8e7ca8d6f5a19326f4934"
+    },
+    {
+      "path": "openspec/changes/product-hero-images/tasks.md",
+      "source": "main",
+      "blob": "720e3fac0c531ec1c0ee50c0b05ffd930eb61285"
+    },
+    {
+      "path": "openspec/changes/product-hero-images/verification.md",
+      "source": "main",
+      "blob": "5fbaea52a57335cbd9e94b05629f0cf928b1cc75"
+    },
+    {
+      "path": "openspec/changes/product-percentage-pay/design.md",
+      "source": "main",
+      "blob": "babc153ff65796dd4d186c367d70fb4c6382fca6"
+    },
+    {
+      "path": "openspec/changes/product-percentage-pay/proposal.md",
+      "source": "main",
+      "blob": "6f24f9d55b428d75b36f335321585634f2ce5201"
+    },
+    {
+      "path": "openspec/changes/product-percentage-pay/release-correction-20261001.md",
+      "source": "main",
+      "blob": "e3e2c5882b0e450391ffa2c77ce54b6a4570f4df"
+    },
+    {
+      "path": "openspec/changes/product-percentage-pay/specs/product-percentage-pay/spec.md",
+      "source": "main",
+      "blob": "2b53464d6910e4fb1ba9e390ef3962ae1224022b"
+    },
+    {
+      "path": "openspec/changes/product-percentage-pay/tasks.md",
+      "source": "main",
+      "blob": "aa44d86718a1d0244bc9ca903414d25494d585f1"
+    },
+    {
+      "path": "openspec/changes/universal-work-shares/evidence.md",
+      "source": "main",
+      "blob": "3baeb823b9b9b32c2788e44b576bce7881e7b335"
+    },
+    {
+      "path": "openspec/changes/universal-work-shares/production-rollout.md",
+      "source": "main",
+      "blob": "dd3a0a394ad052ab7815ac9829efbe1e8d3d65e7"
+    },
+    {
+      "path": "openspec/changes/universal-work-shares/tasks.md",
+      "source": "main",
+      "blob": "d9c924c1b42e8d6b193514fffe721d517dc21811"
+    }
+  ],
+  "quantityEvidencePreserved": [
+    "deploy/acceptance/product-quantity-staging.py",
+    "deploy/evidence/product-quantity-staging-20261001.json",
+    "openspec/changes/product-quantity/evidence.md",
+    "openspec/changes/product-quantity/tasks.md"
+  ],
+  "draftChanges": [
+    "AGENTS.md",
+    "openspec/changes/gitflow-branch-reconciliation/.openspec.yaml",
+    "openspec/changes/gitflow-branch-reconciliation/design.md",
+    "openspec/changes/gitflow-branch-reconciliation/proposal.md",
+    "openspec/changes/gitflow-branch-reconciliation/tasks.md",
+    "CRM_IMPROVEMENTS_PLAN.md (branch-policy sentence only)"
+  ],
+  "expectedTreeWithoutPreviewReport": "baf4f15fd6f64548ff292bb4f541f1867556eb94",
+  "applicationTree": "fc7da0985e6bd90972fcadefed154bb30adb4162",
+  "testedStagingApplicationTree": "fc7da0985e6bd90972fcadefed154bb30adb4162",
+  "applicationExactMatch": true,
+  "deploymentAndDependencyExactMatch": true,
+  "noMainPushOrProductionActions": true,
+  "realIndexAndRefsPreserved": true
+}

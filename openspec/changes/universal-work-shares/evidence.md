@@ -1,8 +1,14 @@
 # universal-work-shares — evidence
 
-## Решение владельца после приёмки
+## Историческое решение владельца от 28.09.2026 (заменено решением 01.10.2026)
 
 28.09.2026: «Пока оставить только на staging». Production backup, push в main и применение миграции не выполняются. Код принят локально и на staging; rollout остаётся незавершённым по явному решению владельца. Штатный автодеплой не приостанавливается.
+
+## Актуализация релизного решения — 01.10.2026
+
+Владелец явно одобрил выпуск ровно трёх функций: `universal-work-shares` (`614ec23`), `manager-cash-advances` (`3f6da0d`), `product-hero-images` (`c3c58a0`). Это заменяет HOLD от 28.09 только для данного набора. Local/staging receipts ниже относятся к исходной реализации `614ec23128de83f16833a56443354c2707e87c60`; они не являются отдельной staging-приёмкой selective backport-кандидата. Локальные проверки release-кандидата завершены root (полный перечень ниже); main push ожидается. Feature-branch push сам по себе CI не запускает: GitHub CI test gate выполняется на main, и только успех gate публикует образ для обычного watcher deploy. Production acceptance явно делегирован владельцу; агентом production SQL/SSH/result check не выполнялись.
+
+Root сообщил о созданном и опубликованном annotated Git source tag `codex/pre-crm-three-features-20261001`, закреплённом на `2cac6f3c3fa83ef9eac8a43dde6d9a7524951480`. Это только исходный кодовый checkpoint: не backup базы/хранилища и не проверка текущего production image. Root также подтвердил, что source `apps/web/src` и Prisma schema в old main совпадают с прежним принятым production-функциональным baseline `a1123c5` (отличия — только docs/QA tools); текущий сервер не читали и не проверяли.
 
 QA/docs companion `13732b696cd8928d25fb895e527c8162b679aae8`: [CI #51](https://github.com/navasiolau/pero_crm/actions/runs/36461777324) SUCCESS. Обычный staging watcher выполнил деплой 28.09.2026 в 18:05:19 UTC; работающий образ `sha256:166d50248ceb314523b148e17aa9bbf60aedbc1ed21f8e7b00acb73b815eb478` имеет эту revision. В 18:08:49 UTC HTTP health 200/healthy, исходные DB container ID/start time/volume сохранены. SQL-проверок и новых QA-записей при этой metadata-проверке не было.
 
@@ -111,7 +117,11 @@ QA и migration guards теперь защищают все поля ApiToken к
 
 ## Не выполнено
 
-Production этой фичи: main остаётся на предыдущей версии до отдельного разрешения production-миграции. После первого реального split откат на прежний код начислений небезопасен: нужна совместимая версия (см. design.md).
+Production result check этой фичи не выполнен и делегирован владельцу после main CI/watch deployment. Локальные проверки release-кандидата завершены; main push ожидается. После первого реального split откат на прежний код начислений небезопасен: нужна совместимая версия (см. design.md).
+
+## Локальная приёмка selective release-кандидата
+
+Root завершил local checks релизного кандидата: web `pnpm-rtests` **219/219 PASS**, bot **9/9 PASS**, Python deploy unittest **39 всего** (37 PASS, 2 Windows POSIX-only skip), lint 0 ошибок/1 прежнее предупреждение `existsSync`, Next production build PASS на фиктивном DSN (без live DB), post-build web/bot TypeScript PASS, Prisma validate PASS, `openspec validate --all --strict` **8/8 PASS**, `git diff --check` PASS. В кандидате ровно две новые additive migrations: universal-work-shares SHA-256 `65058910bdeec05482a9881c4f83a015cd1e86c32e0ffc352278ac3aa378f0a6`; manager-cash-advances SHA-256 `bfa8d8a59b67ec027e67602a824a71eb98e473b57aad35e181eeaa1f852870dd`. В `src`/schema не обнаружены ссылки на исключённые fund/percentage/cover изменения; `projects/core.ts`, workflow и file API не менялись. Нового staging или production acceptance не выполняли. Main push ожидается от root; после CI/watch production результат проверяет владелец по явной делегации.
 
 ## Root: принятая staging-ревизия 614ec23
 
