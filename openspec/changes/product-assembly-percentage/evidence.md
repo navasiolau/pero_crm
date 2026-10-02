@@ -7,3 +7,7 @@ Local24 migration3 applied (enum125900/fields130000/forwardCHECK140000), all7fin
 Root BUILD24PASS, full821PASS до добавления staticCHECK preservation test; отдельный static1PASS. Current822 ожидается, но full822 не заявлен. Targeted backend22/UI14/access27PASS, ESLint targeted clean. Implementation/essential tasks checked; task3.3actual24merge/deploy/stage acceptance и4.1FINALvisual после26 остаются unchecked.
 
 Verifier обновил только OpenSpec24, не DB/Git/runtime/source и не duplicate25/26dirs. Root owns migration/tests/build/commit/ordinarymerge/deploy. Restic/dumps/production/infra untouched.
+
+## Completed Basic Integration
+
+Actual82a19imageaa629healthy/native24-stage.private.json exitCode0,targetstaging/native10/all43rollback. ForwardCHECK applied; basicpay integration complete, finalvisualunchecked. Earlierpendingtext — historicalstate; thisupdatesonlybasicgate. Current159health supports source/deployment, not newappsmoke proof.

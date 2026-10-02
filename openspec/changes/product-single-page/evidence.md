@@ -5,3 +5,7 @@ Feature25 root ordinary refreshed fresh24 at HEAD82a19f1 with code preserved/no 
 Actualstage24 image/native acceptance ещё ожидается по root; local24 native10PASS с forwardCHECK корректен, но не заменяет hosted acceptance. Root можетcommit/push25 branch, ordinary integration25 только послеactual24 accepted. Actualstage25image/health/smoke pending; finalvisual/pixel6sizes после26unchecked. Нет заявления о фактическом браузерном smoke25 из unit/layout tests.
 
 В этой актуализации изменены только actual25OpenSpec docs; source/DB/Git/runtime не запускались. Restic/dumps/production/infra untouched.
+
+## Basic Source / Health Integration
+
+Rootordinary25integration110dda81 послеactual24basicaccepted82a; current159healthyimagea415 includes25source. Это source/deployhealth proof, не functionalbrowserlayoutsmoke. Basic3.3 completed with narrowed scope;3.4appsmoke и3.2finalvisualpending. No globalbrowserPASS.

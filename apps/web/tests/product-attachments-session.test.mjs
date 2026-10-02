@@ -6,7 +6,7 @@ const source=readFileSync(new URL('./product-attachments-session.mjs',import.met
 function load(env={},platform='win32') {
  const process={env:{CRM_MODERNIZATION_TARGET:'local',DATABASE_URL:'postgresql://u:p@localhost:5433/pero_crm',AUTH_SECRET:'test-only-secret',...env},platform};
  const tokenCalls=[];
- const api=Function('createHash','createHmac','randomUUID','timingSafeEqual','process','encode',`${source};return {environmentGuard,prepare,restore,validateCheckpoint,validateOwnWrites,buildRestorePlan,checkpointSignature};`)(createHash,createHmac,randomUUID,timingSafeEqual,process,async options=>{tokenCalls.push(options);return 'private-test-token'});
+ const api=Function('createHash','createHmac','randomUUID','timingSafeEqual','process','encode',`${source};return {environmentGuard,prepare,resume,restore,validateCheckpoint,validateOwnWrites,buildRestorePlan,checkpointSignature};`)(createHash,createHmac,randomUUID,timingSafeEqual,process,async options=>{tokenCalls.push(options);return 'private-test-token'});
  return {api,process,tokenCalls};
 }
 function fixture(combined=true){
@@ -72,3 +72,18 @@ test('project prefs preserve unchanged business fingerprint protection',async()=
 });
 
 test('20 product tab preferences are exact raw successful values and cannot cross scope',()=>{const {api}=load();const originals=[{userId:'u',key:'product.tab',value:null}];for(const value of ['percentage','engineering','tasks','materials','files','history'])assert.equal(api.validateOwnWrites(originals,[{userId:'u',key:'product.tab',value}]).size,1);assert.throws(()=>api.validateOwnWrites(originals,[{userId:'u',key:'product.tab',value:'finance'}]));});
+
+test('local resume uses current exact actors/session versions and retains immutable CP despite pending own business changes',async()=>{
+ const {api,tokenCalls}=load(),f=fixture(),prepared=await api.prepare(f.db,'test-only-secret'),before=JSON.stringify(prepared.checkpoint);
+ tokenCalls.length=0;f.users[0].sessionVersion=99;f.changeProtectedData();
+ const result=await api.resume(f.db,'test-only-secret',prepared.checkpoint);
+ assert.equal(result.status,'RESUMED');assert.equal(result.checkpointSignature,prepared.checkpoint.signature);assert.equal(JSON.stringify(prepared.checkpoint),before);assert.equal(f.mutations,0);
+ assert.equal(tokenCalls.length,8);assert.ok(tokenCalls.every(call=>call.maxAge===900));assert.equal(tokenCalls.find(call=>call.token.id==='a').token.sessionVersion,99);assert.ok(Object.values(result.profiles).every(profile=>profile.canVisitMy===false));assert.ok(!('dataIntegrity' in result)&&!('checkpoint' in result));
+});
+test('resume rejects forged CP, inactive/changed roles/invalid version before token generation and refuses staging without DB use',async()=>{
+ const {api,process,tokenCalls}=load(),f=fixture(),prepared=await api.prepare(f.db,'test-only-secret');tokenCalls.length=0;
+ const forged=structuredClone(prepared.checkpoint);forged.profiles.admin.id='other';await assert.rejects(api.resume(f.db,'test-only-secret',forged),/SIGNATURE_MISMATCH/);
+ f.users[0].active=false;await assert.rejects(api.resume(f.db,'test-only-secret',prepared.checkpoint),/USER_IDENTITY_CHANGED/);f.users[0].active=true;
+ f.users[0].roles=['DIRECTOR'];await assert.rejects(api.resume(f.db,'test-only-secret',prepared.checkpoint),/USER_IDENTITY_CHANGED/);f.users[0].roles=['ADMIN'];f.users[0].sessionVersion=-1;await assert.rejects(api.resume(f.db,'test-only-secret',prepared.checkpoint),/SESSION_VERSION_INVALID/);
+ assert.equal(tokenCalls.length,0);process.env.CRM_MODERNIZATION_TARGET='staging';await assert.rejects(api.resume({$transaction(){throw Error('DB must not be used')}},'test-only-secret',prepared.checkpoint),/LOCAL_SESSION_RESUME_ONLY/);
+});

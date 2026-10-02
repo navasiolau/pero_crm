@@ -17,5 +17,9 @@
 
 ## 4. Приёмка и интеграция
 - [x] 4.1 Выполнить существенные pure/DI suites изменения, type/build и проверку diff; результат записать без заявлений о непроведённой визуальной приёмке.
-- [ ] 4.2 Root выполняет обычный merge в staging и короткий smoke фактически развёрнутого SHA: новые долевые команды закрыты, обычные задачи/количества и историческое чтение работают.
+- [x] 4.2 Root выполняет обычный merge в staging и короткий smoke фактически развёрнутого SHA: новые долевые команды закрыты, обычные задачи/количества и историческое чтение работают.
 - [ ] 4.3 Финальная визуальная/пиксельная проверка выполняется после №26; не создавать для №22 огромный QA runner, шесть размеров экранов или новые фикстуры без необходимости/разрешения. Restic/дампы/DB reset/seed/production вне этой задачи.
+
+## Basic Integration Evidence Reconciliation
+
+Actual46d7image1bedahealthy/native22-stage.private.json exitCode0,targetstaging/rollbackVerifiedtrue: 2refusal groups/all43tables. Basicnative логическая приёмка, не finalvisual. Evidence linked in evidence.md; comprehensivevisual/lifecycle/wire pendingcheckpoints не отмечены.

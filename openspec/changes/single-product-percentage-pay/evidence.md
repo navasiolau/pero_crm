@@ -10,3 +10,7 @@ Implementation/essential local tasks marked, stage23 actualimage/health/smoke ta
 Root modernization23 ordinaryfastforward origin/staging542 с sourceвсех11задач. Actual finalbrowser helper получил FAIL fullRSC boundary после подтверждённого percentagecommit: предыдущий domain native15PASS не доказывал wire-contract. Узкое исправление удаляет revalidateProductPaths только из compact percentage fieldpatchAction; legacy frozen retry invalidation сохранена (counter1). Domain/migration/money не менялись.
 
 Real thinAction regression REDcounter1 expected0 → GREEN2/2 плюсcontroller7=9; typecheck/lint/rootproductionBUILD23fixPASS. Эти результаты подтверждают локальную compactAction границу, но не глобальную browser приёмку. Actualstaging542native15/bothealthy/CI86success относятся к прежней deployedrevision; новый compactfix ждёт freshactualstageimage/browser. Root ownscommit/ordinarymerge; no app/test/core edits in this docs update.
+
+## Completed Basic Integration
+
+Actual451image d629healthy/native23-stage.private.json exitCode0,targetstaging/native7/all43rollback. Basicdomainpay integration complete; latercompactwirefollowup5.2 remainsunchecked. Earlierpendingtext — historicalstate; thisupdatesonlybasicgate. Current159health supports source/deployment, not newappsmoke proof.
