@@ -286,7 +286,6 @@ export async function getProductFor(
         orderBy: { createdAt: "asc" },
       },
       files: { where: fileVisibilityWhere(actor), orderBy: { createdAt: "desc" } },
-      statusHistory: { orderBy: { createdAt: "desc" } },
     },
   });
   return product;

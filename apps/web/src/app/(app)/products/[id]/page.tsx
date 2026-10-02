@@ -4,8 +4,6 @@ import { ArrowLeft, TriangleAlert } from "lucide-react";
 
 import { auth } from "@/auth";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { displayClientName } from "@/lib/labels";
 import { prisma } from "@/lib/prisma";
 import { FINANCE_ROLES, MANAGER_ROLES, OFFICE_ROLES, hasAnyRole } from "@/lib/roles";
@@ -20,24 +18,18 @@ import { getProjectMaterials, listMaterialOptions } from "@/server/warehouse/que
 
 import { ProductMeasurement, ProductDocuments } from "@/components/product-attachments";
 import { productAttachmentGroups } from "@/lib/product-attachment-groups";
-import { FilesTab } from "../../projects/[id]/files-tab";
 import { MaterialsTab } from "../../projects/[id]/materials-tab";
 import { TasksTab } from "../../projects/[id]/tasks-tab";
-import { productStatusLabels } from "@/lib/product-statuses";
 import { ProductHeader } from "./product-header";
 import { ProductInlineProvider } from "@/components/product-inline-provider";
-import { ProductInlineTitle, ProductInlineDetails } from "@/components/product-inline-fields";
+import { ProductInlineTitle, ProductInlineContacts, ProductInlineDetails } from "@/components/product-inline-fields";
 import { ProductCoverClient } from "./product-sketch";
-import { ProductPercentagePanel } from "./product-percentage-panel";
-import { EngineeringFund } from "@/components/engineering-fund";
-import { getEngineeringFundView } from "@/server/products/engineering-view";
+import { SinglePercentageRow } from "./product-percentage-panel";
 import { getProductPercentageView } from "@/server/product-percentage-pay/queries";
-import { SurveyorLink } from "./surveyor-link";
+import { ProductSinglePage } from "./product-overview";
 
 export const dynamic = "force-dynamic";
 
-// Карточка изделия (§15): шапка (номер, название, проект, статус, цена,
-// тех. блок) + вкладки «Работы и задачи», «Материалы», «Файлы», «История».
 export default async function ProductPage({
   params,
 }: {
@@ -80,7 +72,6 @@ export default async function ProductPage({
     ...new Set(
       [
         ...product.files.map((file) => file.uploadedById),
-        ...product.statusHistory.map((entry) => entry.changedById),
       ].filter((value): value is string => !!value),
     ),
   ];
@@ -104,118 +95,43 @@ export default async function ProductPage({
                 : "—",
             }));
   const attachments = productAttachmentGroups(fileRows, product.sketchFile?.id);
-  const engineeringView = canViewAllPercentage ? await getEngineeringFundView(prisma, product.id, false) : null;
 
+  const percentagePeople = workers.map(user => ({ id: user.id, name: user.name, active: true, roles: user.roles }));
+  const percentageProps = { productId: product.id, canManage, canViewAll: canViewAllPercentage };
   return (
     <ProductInlineProvider key={product.id} productId={product.id} initial={{
       title: product.title, kind: product.kind, quantity: product.quantity, expectedPrice: showAmount ? product.expectedPrice?.toString() ?? null : null, engineerId: product.engineerId, description: product.description, "project.clientId": product.project.client.id, "project.address": product.project.address, "client.phone": product.project.client.phone,
     }}>
-    <div className="flex flex-col gap-4">
-      <ProductCoverClient
-        productId={product.id}
-        projectId={product.project.id}
-        cover={product.sketchFile ? {
-          id: product.sketchFile.id,
-          fileName: product.sketchFile.fileName,
-          mimeType: product.sketchFile.mimeType,
-          hasThumb: product.sketchFile.hasThumb,
-        } : null}
-        actorRoles={role}
-        canEditTechnicalBlock={canEditTech}
-        canDeleteCover={canEditTech && (canManage || product.files.some(file => file.id === product.sketchFile?.id && file.uploadedById === session.user.id))}
-        deleteCoverAction={deleteProductSketchAction}
-        header={(
-          <div className="flex min-w-0 flex-col gap-3" data-product-header="stacked">
-            <div className="flex w-full min-w-0 items-start gap-3" data-product-title-row>
-            <Link
-              href={`/projects/${product.project.id}`}
-              className="mt-6 shrink-0 text-muted-foreground hover:text-foreground"
-              aria-label="К проекту"
-            >
-              <ArrowLeft className="size-5" />
-            </Link>
-            <ProductInlineTitle number={product.number} canManage={canManage} />
+      <ProductSinglePage
+        overview={<ProductCoverClient
+          productId={product.id} projectId={product.project.id}
+          cover={product.sketchFile ? { id: product.sketchFile.id, fileName: product.sketchFile.fileName, mimeType: product.sketchFile.mimeType, hasThumb: product.sketchFile.hasThumb } : null}
+          actorRoles={role} canEditTechnicalBlock={canEditTech}
+          canDeleteCover={canEditTech && (canManage || product.files.some(file => file.id === product.sketchFile?.id && file.uploadedById === session.user.id))}
+          deleteCoverAction={deleteProductSketchAction}
+          header={<div className="flex min-w-0 flex-col gap-4" data-product-header="stacked">
+            <div className="flex min-w-0 items-start gap-3" data-product-title-row>
+              <Link href={`/projects/${product.project.id}`} className="mt-6 shrink-0 text-muted-foreground hover:text-foreground" aria-label="К проекту"><ArrowLeft className="size-5" /></Link>
+              <ProductInlineTitle number={product.number} canManage={canManage} />
             </div>
-            <div className="flex w-full min-w-0 flex-wrap items-center gap-3" data-product-actions-row>
-            <ProductHeader
-              product={{
-                id: product.id,
-                number: product.number,
-                title: product.title,
-                kind: product.kind,
-                status: product.status,
-                expectedPrice: showAmount ? product.expectedPrice?.toString() ?? null : null,
-            quantity: product.quantity,
-                initialPrice: showAmount ? product.initialPrice?.toString() ?? null : null,
-                description: product.description,
-                projectId: product.project.id,
-                engineerId: product.engineerId,
-              }}
-              currency={product.project.currency}
-              canManage={canManage}
-              showAmount={showAmount}
-              actorRoles={role}
-              hasB3d={percentageView.hasB3d}
-              noModel={percentageView.noModel}
-              isEngineeringParticipant={percentageView.sections.ENGINEERING.ownMember !== null}
-            />
-            {showMaterials && materialsData?.hasShortage ? (
-              <Badge variant="destructive">
-                <TriangleAlert />
-                Нехватка материалов
-              </Badge>
-            ) : null}
-            </div>
-          </div>
-        )}
-        details={<ProductInlineDetails
-          canManage={canManage} canEditTech={canEditTech} showAmount={showAmount} currency={product.project.currency}
-          clients={(canManage ? clients : [{ id: product.project.client.id, name: displayClientName(product.project.client), phone: product.project.client.phone }]).map(client => ({value: client.id, label: "lastName" in client ? displayClientName(client) : client.name, hint: client.phone}))}
-          engineers={[...engineers.map(engineer => ({value: engineer.id, label: engineer.name})), ...(product.engineer && !engineers.some(engineer => engineer.id === product.engineerId) ? [{ value: product.engineer.id, label: product.engineer.name, disabled: true }] : [])]}
-          inheritedAddress={product.project.client.address}
-          surveyor={product.surveyor ? <SurveyorLink surveyor={product.surveyor} /> : <div>—</div>}
-          project={{id: product.project.id,number: product.project.number,title: product.project.title}}
-          measurement={<ProductMeasurement projectId={product.project.id} productId={product.id} files={attachments.measurement} canEdit={canEditTech} extensions={stageConfig.enabled ? stageConfig.extensions ?? undefined : undefined} />}
-          initialPrice={showAmount ? product.initialPrice?.toString() ?? null : null}
+            <ProductInlineContacts canManage={canManage}
+              clients={(canManage ? clients : [{ id: product.project.client.id, name: displayClientName(product.project.client), phone: product.project.client.phone }]).map(client => ({value: client.id, label: "lastName" in client ? displayClientName(client) : client.name, hint: client.phone}))}
+              inheritedAddress={product.project.client.address} />
+          </div>}
+          details={<ProductInlineDetails canManage={canManage} canEditTech={canEditTech} showAmount={showAmount} currency={product.project.currency}
+            status={<div className="min-w-0 space-y-2">
+              <ProductHeader product={{ id: product.id, number: product.number, title: product.title, kind: product.kind, status: product.status, expectedPrice: showAmount ? product.expectedPrice?.toString() ?? null : null, quantity: product.quantity, initialPrice: null, description: product.description, projectId: product.project.id, engineerId: product.engineerId }}
+                currency={product.project.currency} canManage={canManage} showAmount={showAmount} actorRoles={role} hasB3d={percentageView.hasB3d} noModel={percentageView.noModel} isEngineeringParticipant={percentageView.sections.ENGINEERING.ownMember !== null} />
+              {showMaterials && materialsData?.hasShortage ? <Badge variant="destructive"><TriangleAlert />Нехватка материалов</Badge> : null}
+            </div>}
+            measurement={<ProductMeasurement projectId={product.project.id} productId={product.id} files={attachments.measurement} canEdit={canEditTech} extensions={stageConfig.enabled ? stageConfig.extensions ?? undefined : undefined} />}
+            engineer={<SinglePercentageRow {...percentageProps} kind="ENGINEERING" section={percentageView.sections.ENGINEERING} assignedEngineerId={product.engineerId} editEngineer candidates={engineers.map(user => ({ id: user.id, name: user.name, active: true, roles: user.roles }))} />}
+          />}
         />}
-
-      />
-
-      <ProductDocuments projectId={product.project.id} productId={product.id} production={attachments.production} installation={attachments.installation} canEdit={canEditTech} canManage={canManage} noModel={percentageView.noModel} extensions={stageConfig.enabled ? stageConfig.extensions ?? undefined : undefined} />
-
-      <Tabs defaultValue="tasks">
-        <TabsList className="w-full max-w-full justify-start overflow-x-auto">
-          <TabsTrigger className="shrink-0" value="percentage">Процентные этапы</TabsTrigger>
-          {engineeringView ? <TabsTrigger className="shrink-0" value="engineering">История прежнего фонда</TabsTrigger> : null}
-          <TabsTrigger className="shrink-0" value="tasks">
-            Работы и задачи ({product.tasks.length})
-          </TabsTrigger>
-          {showMaterials ? (
-            <TabsTrigger className="shrink-0" value="materials">
-              Материалы{materialsData && materialsData.lines.length > 0 ? ` (${materialsData.lines.length})` : ""}
-            </TabsTrigger>
-          ) : null}
-          <TabsTrigger className="shrink-0" value="files">Файлы ({product.files.length})</TabsTrigger>
-          <TabsTrigger className="shrink-0" value="history">История</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="percentage" className="mt-4">
-          <ProductPercentagePanel
-            view={percentageView}
-            assignedEngineerId={product.engineerId}
-            canManage={canManage}
-            canViewAll={canViewAllPercentage}
-            engineers={engineers.map((user) => ({ id: user.id, name: user.name, active: true, roles: user.roles }))}
-            mounters={workers.filter((user) => user.roles.includes("MOUNTER")).map((user) => ({
-              id: user.id, name: user.name, active: true, roles: user.roles,
-            }))}
-          />
-        </TabsContent>
-        {engineeringView ? <TabsContent value="engineering" className="mt-4">
-          <EngineeringFund view={engineeringView} canManage={false} workers={workers.map((worker) => ({ id: worker.id, name: worker.name }))} />
-        </TabsContent> : null}
-        <TabsContent value="tasks" className="mt-4">
-          <TasksTab
+        documents={<ProductDocuments projectId={product.project.id} productId={product.id} production={attachments.production} installation={attachments.installation} canEdit={canEditTech} canManage={canManage} noModel={percentageView.noModel} extensions={stageConfig.enabled ? stageConfig.extensions ?? undefined : undefined} />}
+        assembly={<SinglePercentageRow {...percentageProps} kind="ASSEMBLY" section={percentageView.sections.ASSEMBLY} candidates={percentagePeople.filter(user => user.roles.includes("WORKER"))} />}
+        installation={<SinglePercentageRow {...percentageProps} kind="INSTALLATION" section={percentageView.sections.INSTALLATION} candidates={percentagePeople.filter(user => user.roles.includes("MOUNTER"))} />}
+        works={<TasksTab
             projectId={product.project.id}
             productId={product.id}
             productQuantity={product.quantity}
@@ -248,12 +164,8 @@ export default async function ProductPage({
               name: worker.name,
               hint: worker.position ?? undefined,
             }))}
-          />
-        </TabsContent>
-
-        {showMaterials && materialsData ? (
-          <TabsContent value="materials" className="mt-4">
-            <MaterialsTab
+          />}
+        materials={showMaterials && materialsData ? (<MaterialsTab
               productId={product.id}
             productQuantity={product.quantity}
               lines={materialsData.lines}
@@ -262,62 +174,8 @@ export default async function ProductPage({
               options={materialOptions}
               canManage={canManage}
               showMoney={showMoney}
-            />
-          </TabsContent>
-        ) : null}
-
-        <TabsContent value="files" className="mt-4">
-          <FilesTab
-            projectId={product.project.id}
-            productId={product.id}
-            files={fileRows}
-            canEdit={canEditTech}
-            stagesEnabled={stageConfig.enabled}
-            stageExtensions={stageConfig.extensions}
-          />
-        </TabsContent>
-
-        <TabsContent value="history" className="mt-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">История статусов</CardTitle>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-3">
-              {product.statusHistory.map((entry) => (
-                <div key={entry.id} className="flex flex-col gap-0.5 border-l-2 pl-3">
-                  <div className="text-sm">
-                    {entry.fromStatus ? (
-                      <>
-                        {productStatusLabels[entry.fromStatus]} →{" "}
-                        <Badge variant="secondary">
-                          {productStatusLabels[entry.toStatus]}
-                        </Badge>
-                      </>
-                    ) : (
-                      <>
-                        Создано:{" "}
-                        <Badge variant="secondary">
-                          {productStatusLabels[entry.toStatus]}
-                        </Badge>
-                      </>
-                    )}
-                  </div>
-                  {entry.comment ? (
-                    <div className="text-sm text-muted-foreground">{entry.comment}</div>
-                  ) : null}
-                  <div className="text-xs text-muted-foreground">
-                    {entry.changedById
-                      ? (authorNames.get(entry.changedById) ?? "—")
-                      : "—"}{" "}
-                    · {new Date(entry.createdAt).toLocaleString("ru-RU")}
-                  </div>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
-    </div>
+            />) : null}
+      />
     </ProductInlineProvider>
   );
 }
