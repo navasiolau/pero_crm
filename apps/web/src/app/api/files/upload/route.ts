@@ -102,6 +102,10 @@ export async function POST(request: Request) {
 
   // Группа этапа (file-stages). Если не передана — действует дефолт схемы.
   const stageRaw = form.get("stage");
+  if (stageRaw !== null && (typeof stageRaw !== "string" || !FILE_STAGES.includes(stageRaw as FileStageKey))) {
+    return NextResponse.json({ error: "Неизвестный этап файла" }, { status: 422 });
+  }
+
   const stage: FileStage | undefined =
     typeof stageRaw === "string" && FILE_STAGES.includes(stageRaw as FileStageKey)
       ? (stageRaw as FileStage)

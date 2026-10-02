@@ -49,22 +49,31 @@ function formatSize(size: number): string {
 
 // Блок загрузки файла. Для режима этапов (stagesEnabled) принимает stage и
 // карту допустимых расширений и проверяет тип файла до отправки.
-function Uploader({
+export function Uploader({
   projectId,
   productId,
   canEdit,
   stage,
   extensions,
+  fixedCategory,
+  excludeMeasurement = false,
+  compact = false,
+  onBusyChange,
 }: {
   projectId: string;
   productId?: string;
   canEdit: boolean;
   stage?: FileStageKey;
   extensions?: Record<FileCategory, string[]>;
+  fixedCategory?: FileCategory;
+  excludeMeasurement?: boolean;
+  compact?: boolean;
+  onBusyChange?: (busy: boolean) => void;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const [category, setCategory] = useState<FileCategory>("PHOTO");
+  const [category, setCategory] = useState<FileCategory>(fixedCategory ?? "PHOTO");
+  const [error, setError] = useState<string | null>(null);
   const [caption, setCaption] = useState("");
   const inputRef = useRef<HTMLInputElement | null>(null);
 
@@ -76,6 +85,7 @@ function Uploader({
         extensions[category],
       );
       if (error) {
+        setError(error);
         toast.error(error);
         return;
       }
@@ -88,18 +98,25 @@ function Uploader({
     if (stage) form.append("stage", stage);
     if (caption.trim()) form.append("caption", caption.trim());
     startTransition(async () => {
+      onBusyChange?.(true);
+      setError(null);
+      try {
       const response = await fetch("/api/files/upload", {
         method: "POST",
         body: form,
       });
-      if (response.ok) {
+      const data = await response.json().catch(() => ({}));
+      if (response.ok && data.ok === true && typeof data.id === "string") {
         toast.success("Файл загружен");
         setCaption("");
         router.refresh();
       } else {
-        const data = await response.json().catch(() => ({}));
+        setError(data.error ?? "Ошибка загрузки");
         toast.error(data.error ?? "Ошибка загрузки");
       }
+      } catch {
+        setError("Не удалось загрузить файл. Повторите выбор файла.");
+      } finally { onBusyChange?.(false); }
     });
   }
 
@@ -107,8 +124,8 @@ function Uploader({
 
   return (
     <Card>
-      <CardContent className="flex flex-wrap items-end gap-3 p-4">
-        <div className="flex flex-col gap-1.5">
+      <CardContent className="flex min-w-0 flex-wrap items-end gap-3 p-4">
+        {!fixedCategory ? <div className="flex min-w-0 flex-col gap-1.5">
           <span className="text-sm font-medium">Категория</span>
           <Select
             value={category}
@@ -118,15 +135,15 @@ function Uploader({
               <SelectValue>{FILE_CATEGORY_LABELS[category as FileCategoryKey]}</SelectValue>
             </SelectTrigger>
             <SelectContent>
-              {Object.entries(FILE_CATEGORY_LABELS).map(([id, label]) => (
+              {Object.entries(FILE_CATEGORY_LABELS).filter(([id]) => !excludeMeasurement || id !== "MEASUREMENT").map(([id, label]) => (
                 <SelectItem key={id} value={id}>
                   {label}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
-        </div>
-        <div className="flex min-w-48 flex-1 flex-col gap-1.5">
+        </div> : null}
+        <div className={`flex flex-1 flex-col gap-1.5 ${compact ? "min-w-0 basis-40" : "min-w-48"}`}>
           <span className="text-sm font-medium">Пояснение</span>
           <Input
             value={caption}
@@ -148,20 +165,25 @@ function Uploader({
           <Upload className="size-4" />
           {pending ? "Загрузка…" : "Загрузить файл"}
         </Button>
+        {error ? <p role="alert" className="w-full min-w-0 break-words text-sm text-destructive">{error}</p> : null}
       </CardContent>
     </Card>
   );
 }
 
 // Сетка фото + список документов с просмотром и удалением.
-function FileGridView({
+export function FileGridView({
   files,
   canEdit,
   flat = false,
+  compact = false,
+  onBusyChange,
 }: {
   flat?: boolean;
   files: FileRow[];
   canEdit: boolean;
+  compact?: boolean;
+  onBusyChange?: (busy: boolean) => void;
 }) {
   const router = useRouter();
   const [pending] = useTransition();
@@ -174,9 +196,9 @@ function FileGridView({
   return (
     <>
       {photos.length > 0 ? (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+        <div className={compact ? "grid min-w-0 grid-cols-2 gap-3" : "grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4"}>
           {photos.map((file) => (
-            <div key={file.id} className="group relative">
+            <div key={file.id} data-file-id={file.id} className="group relative min-w-0">
               <button
                 type="button"
                 className="block w-full"
@@ -191,10 +213,10 @@ function FileGridView({
                   loading="lazy"
                 />
               </button>
-              <div className="mt-1 flex items-center justify-between gap-2">
+              <div className="mt-1 flex min-w-0 flex-wrap items-center justify-between gap-2">
                 <div className="min-w-0">
-                  <div className="truncate text-xs">{file.caption ?? file.fileName}</div>
-                  <div className="text-xs text-muted-foreground">
+                  <div className={compact ? "break-all text-xs" : "truncate text-xs"}>{file.caption ?? file.fileName}</div>
+                  <div className="break-words text-xs text-muted-foreground">
                     {FILE_CATEGORY_LABELS[file.category as FileCategoryKey]} · {file.uploaderName}
                   </div>
                 </div>
@@ -225,15 +247,16 @@ function FileGridView({
       {documents.map((file) => (
         <Card
           key={file.id}
-          className="cursor-pointer transition-colors hover:bg-accent/50"
+          className="min-w-0 cursor-pointer transition-colors hover:bg-accent/50"
+          data-file-id={file.id}
           onClick={() => fileViewer.open(file)}
         >
-          <CardContent className="flex items-center gap-3 p-3">
+          <CardContent className="flex min-w-0 flex-wrap items-center gap-3 p-3">
             {flat && file.hasThumb ? <button type="button" className="size-10 shrink-0" aria-label={`Просмотреть ${file.fileName}`} onClick={event => { event.stopPropagation(); fileViewer.open(file); }}>{ /* eslint-disable-next-line @next/next/no-img-element */ }
                 <img src={`/api/files/${file.id}?thumb=1`} alt="" className="size-10 rounded-md object-cover" /></button> : <FileText className="size-5 shrink-0 text-muted-foreground" />}
             <div className="min-w-0 flex-1">
-              <div className="truncate text-sm">{file.caption ?? file.fileName}</div>
-              <div className="text-xs text-muted-foreground">
+              <div className={compact ? "break-all text-sm" : "truncate text-sm"}>{file.caption ?? file.fileName}</div>
+              <div className="break-words text-xs text-muted-foreground">
                 <Badge variant="outline" className="mr-2">
                   {FILE_CATEGORY_LABELS[file.category as FileCategoryKey]}
                 </Badge>
@@ -275,6 +298,8 @@ function FileGridView({
         open={!!deleteFor}
         onOpenChange={(open) => !open && setDeleteFor(null)}
         onConfirm={async () => {
+          onBusyChange?.(true);
+          try {
           const result = await deleteFile(deleteFor!.id);
           if (result.ok) {
             toast.success("Файл удалён");
@@ -283,6 +308,8 @@ function FileGridView({
           }
           toast.error(result.error ?? "Ошибка");
           return false;
+          } catch { toast.error("Не удалось удалить файл. Повторите попытку."); return false; }
+          finally { onBusyChange?.(false); }
         }}
       />
     </>
