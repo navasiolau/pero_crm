@@ -15,7 +15,7 @@
 
 - [x] 3.1 Inline assembler/rate CAS+managementrights/union roles, currentedit aftercompletion сохраняет frozenrecipient; tests staleforms и nullablezero rendering.
 - [x] 3.2 Адаптировать payroll/settings/SDK/bot/exhaustive enum consumers; targetedregression/typecheck/build и smallfunctional smoke показывают oldENGINEERING/INSTALLATION compatibility, newASSEMBLY correctlabels.
-- [ ] 3.3 Root guardedexistinglocal additive migration/atomicity и exactcleanup без dumps/newDB/seed/reset; ordinarymerge24 после23basicaccepted, actualdeployedSHA/image/health/pay smoke recorded.
+- [x] 3.3 Root guardedexistinglocal additive migration/atomicity и exactcleanup без dumps/newDB/seed/reset; ordinarymerge24 после23basicaccepted, actualdeployedSHA/image/health/pay smoke recorded.
 
 ## 4. Deferred FINAL QA
 
@@ -34,3 +34,7 @@ Root ordinaryfastforward23 intofeature24 HEAD451ea6c, schemaconflicts preservedm
 №24 содержит3SQLsteps: enum-only125900, fields/protective markers130000, forwardPayrollCheck140000. Первые2 уже примененыrootlocal и immutablechecksum; третья сохраняет точный PayrollEntry_percentage_fields CHECK (requiredshare/product/project/currency/numeric conditions) с добавлением PRODUCT_PERCENT_ASSEMBLY. Frozen triggers/history unchanged. Actualnative первый assembly_delivery failed на прежнемCHECK; root outerSQLrollback сохранил окружение, исправление ещё требует actual rerun, не объявляется nativePASS.
 
 COVERED work exclusive одному этапу: exactworkId не может одновременно покрывать ASSEMBLY и INSTALLATION. Cross-stage validation проверяет нынешние и frozen reviewed relations; INDEPENDENT сохраняет самостоятельнуюPIECE, COVEREDPAID защищаетвесьstage, COVEREDUNPAID подавляет будущуюPIECE через validatedshared23review. Нет nameheuristic/globalWorkflag/oldPayrollrewrite.
+
+## Basic Integration Evidence Reconciliation
+
+Actual82a19imageaa629healthy/native24-stage.private.json exitCode0,targetstaging/native10/all43rollback. ForwardCHECK applied; basicpay integration complete, finalvisualunchecked. Evidence linked in evidence.md; comprehensivevisual/lifecycle/wire pendingcheckpoints не отмечены.

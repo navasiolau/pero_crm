@@ -17,7 +17,7 @@
 
 - [x] 3.1 Inline oneengineer/onemounter/rate nullableCAS, postcompletion currentedit без frozenedit; tests manager/pureEngineer/unionrights/conflicts и product previewsqty/BYN без oldprojectamount label.
 - [x] 3.2 Targeted domain/regression/typecheck/build и small realfunctional smoke; root guardedexistinglocal migration/atomicity/hash проверки без dumps/newDB/reset/seed, exact cleanup; результаты записаны без fakevisual.
-- [ ] 3.3 Root ordinarymerge23 после22basicaccepted, фактические deployedSHA/image/health/pay smoke; main/prod excluded.
+- [x] 3.3 Root ordinarymerge23 после22basicaccepted, фактические deployedSHA/image/health/pay smoke; main/prod excluded.
 
 ## 4. Deferred FINAL QA
 
@@ -33,3 +33,7 @@ Root уже создал реальную feature/23 от freshstagef33f574; п�
 
 - [x] 5.1 ActualfullRSCboundaryFAIL послеPctcommit воспроизведён; compactfieldAction removesonlyrevalidateProductPaths, REDcounter1→GREEN2/2+controller7,TC/lint/rootBUILDfixPASS; legacyfrozenretry cachecounter1 сохранён, domain/money/migration unchanged.
 - [ ] 5.2 Новая deployedfixrevision/image/health и actualbrowser compactpercentageboundary приёмка; прежний542native/CI не подменяет этот wireproof, globalvisual не помечатьdone.
+
+## Basic Integration Evidence Reconciliation
+
+Actual451image d629healthy/native23-stage.private.json exitCode0,targetstaging/native7/all43rollback. Basicdomainpay integration complete; latercompactwirefollowup5.2 remainsunchecked. Evidence linked in evidence.md; comprehensivevisual/lifecycle/wire pendingcheckpoints не отмечены.

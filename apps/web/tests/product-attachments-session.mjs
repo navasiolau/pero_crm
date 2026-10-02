@@ -48,8 +48,8 @@ function readEnvelope() {
   requireThat(bytes.toString("base64") === encoded, "PRIVATE_INPUT_BASE64_NONCANONICAL");
   let input;
   try { input = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)); } catch { throw new SafeFailure("PRIVATE_INPUT_JSON_INVALID"); }
-  requireThat(["prepare", "restore", "inspect"].includes(input?.operation), "OPERATION_REQUIRED");
-  requireThat(exactKeys(input, input.operation === "prepare" ? ["operation"] : ["operation", "checkpoint", "ownWrites"]), "INPUT_FIELDS_INVALID");
+  requireThat(["prepare", "restore", "inspect", "resume"].includes(input?.operation), "OPERATION_REQUIRED");
+  requireThat(exactKeys(input, input.operation === "prepare" ? ["operation"] : input.operation === "resume" ? ["operation", "checkpoint"] : ["operation", "checkpoint", "ownWrites"]), "INPUT_FIELDS_INVALID");
   return input;
 }
 
@@ -314,16 +314,7 @@ async function prepare(db, secret) {
       baseline: await snapshots(tx),
     };
   }, { isolationLevel: "RepeatableRead", maxWait: 10_000, timeout: 120_000 });
-  const profiles = {};
-  const identities = {};
-  for (const key of PROFILE_KEYS.filter((key) => key in source.actors)) {
-    const actor = source.actors[key];
-    const cookies = await Promise.all(["authjs.session-token", "__Secure-authjs.session-token"].map(async (name) => ({
-      name, value: await encode({ secret, salt: name, token: { id: actor.id, roles: actor.roles, sessionVersion: actor.sessionVersion }, maxAge: 15 * 60 }),
-    })));
-    profiles[key] = { id: actor.id, roles: actor.roles, cookies, canVisitMy: !source.activeTimerUsers.has(actor.id) };
-    identities[key] = { id: actor.id, roles: actor.roles };
-  }
+  const {profiles,identities}=await encodeProfiles(source.actors,secret,source.activeTimerUsers,true);
   const checkpoint = {
     version: 1, namespace: NAMESPACE, runId: randomUUID(), issuedAt: new Date().toISOString(),
     profiles: identities, availability: source.availability, originalPreferences: source.originals, baseline: source.baseline,
@@ -341,6 +332,33 @@ async function prepare(db, secret) {
     originalPreferences: source.originals, availability: source.availability,
     sessionExpiresAt: new Date(Date.now() + 15 * 60_000).toISOString(),
   };
+}
+
+async function encodeProfiles(actors,secret,activeTimerUsers=new Set(),allowMy=false){
+  const profiles={},identities={};
+  for(const key of PROFILE_KEYS.filter(key=>key in actors)){
+    const actor=actors[key];
+    const cookies=await Promise.all(["authjs.session-token","__Secure-authjs.session-token"].map(async name=>({name,value:await encode({secret,salt:name,token:{id:actor.id,roles:actor.roles,sessionVersion:actor.sessionVersion},maxAge:15*60})})));
+    profiles[key]={id:actor.id,roles:actor.roles,cookies,canVisitMy:allowMy&&!activeTimerUsers.has(actor.id)};
+    identities[key]={id:actor.id,roles:actor.roles};
+  }
+  return{profiles,identities};
+}
+
+// Возобновляется только локальная сессия прежних акторов; checkpoint и данные не меняются.
+async function resume(db,secret,checkpoint){
+  requireThat(process.env.CRM_MODERNIZATION_TARGET==="local","LOCAL_SESSION_RESUME_ONLY");
+  environmentGuard();validateCheckpoint(checkpoint,secret);
+  const actors=await db.$transaction(async tx=>{
+    await tx.$executeRawUnsafe("SET TRANSACTION READ ONLY");await databaseGuard(tx,true);
+    const keys=Object.keys(checkpoint.profiles),ids=keys.map(key=>checkpoint.profiles[key].id);
+    const users=await tx.user.findMany({where:{id:{in:ids}},select:{id:true,roles:true,active:true,sessionVersion:true}});
+    requireThat(users.length===ids.length,"ORIGINAL_USERS_MISSING");
+    const actors={};for(const key of keys){const original=checkpoint.profiles[key],current=users.find(user=>user.id===original.id);requireThat(current?.active&&sameRoles(current.roles,original.roles),"USER_IDENTITY_CHANGED");requireThat(Number.isSafeInteger(current.sessionVersion)&&current.sessionVersion>=0,"CURRENT_SESSION_VERSION_INVALID");actors[key]=current;}
+    return actors;
+  },{isolationLevel:"RepeatableRead",maxWait:10000,timeout:120000});
+  const {profiles}=await encodeProfiles(actors,secret);
+  return{status:"RESUMED",checkpointSignature:checkpoint.signature,profiles,sessionExpiresAt:new Date(Date.now()+15*60000).toISOString(),scope:"sessions-only; business integrity and preference restoration require separate guarded cleanup"};
 }
 
 async function restore(db, secret, checkpoint, ownWrites) {
@@ -394,9 +412,11 @@ async function main() {
     operation = input.operation;
     const secret = environmentGuard();
     // Validate authenticated diagnostic/cleanup scope BEFORE a database client.
-    if (operation !== "prepare") validateOwnWrites(validateCheckpoint(input.checkpoint, secret), input.ownWrites);
+    if(operation==="resume"){requireThat(process.env.CRM_MODERNIZATION_TARGET==="local","LOCAL_SESSION_RESUME_ONLY");validateCheckpoint(input.checkpoint,secret);}
+    else if (operation !== "prepare") validateOwnWrites(validateCheckpoint(input.checkpoint, secret), input.ownWrites);
     db = new PrismaClient({ log: [], errorFormat: "minimal" });
     const result = operation === "prepare" ? await prepare(db, secret)
+      : operation === "resume" ? await resume(db,secret,input.checkpoint)
       : operation === "inspect" ? await inspect(db, secret, input.checkpoint, input.ownWrites)
         : await restore(db, secret, input.checkpoint, input.ownWrites);
     await db.$disconnect();

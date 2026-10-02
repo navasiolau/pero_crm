@@ -12,7 +12,7 @@
 
 ## 3. Acceptance
 
-- [ ] 3.3 Root ordinary integration25 только после actual24 basic acceptance; actual25deployedSHA/image/health/functionalsmoke pending, не заменять localbuild/units приёмкой.
+- [x] 3.3 Root ordinaryintegration25 после actual24native10/basicacceptance; committed110dda81 deployed последовательно до159healthy/a415 подтверждает source+health. Functional layout/browser smoke не включён в этот basicintegrationcheckbox и остаётся3.4pending.
 
 - [x] 3.1 Essential локальные unit828/828 (821previous+layout7), fulltypecheck/lint/rootBUILD25PASS подтвержденыroot; no schema/money/dependencies. Hosted/smallfunctional browser smoke не заявлен этим checkbox.
 - [ ] 3.2 После26 выполнить comprehensivevisual/pixel6sizes/resize/zoom всех20–26, доэтогоunchecked и неessential25gate.
@@ -20,3 +20,5 @@
 ## Actual Branch Context
 
 Root после fresh fetch создал feature/25 от originf33f574 в modernization-25. Прежняя planning в24 была provisional; теперь это фактическая локальная ветка. Независимая параллельная localimplementation разрешена владельцем. Перед интеграцией root ordinarymerge свежего предшествующего staging (для25 после24, для26 после25), сверяет source/contracts и проходит basicactualstage gate. Fullvisual после26 остаётся unchecked; sourceworkers changes не затронуты.
+
+- [ ] 3.4 Actual finalbrowser25singlepage/layout/roles functional smoke; source+health/basicintegration не подменяет appsmoke, finalvisual3.2 такжеunchecked.

@@ -37,3 +37,7 @@ Root final local smoke: `.playwright-mcp/modernization/local-attachments-smoke-2
 Root20-release buildPASS включая optional paste guard; full757PASS до добавления helper recovery tests. Existing native5groups/actualstatus5/43table rollbackPASS при неизменном domain source; более поздний fullsuite результат не выдумывается.
 
 Старый recovery STOP2ce5 сохранён. По точному checkpoint/sourceSS после узкого MEASUREMENT guard fix завершена recovery только5ownfiles: CLEANED и prefsRESTORED; исходный STOP не стирается, это не dump/restore БД. Source verifier не выполнял runtime/storage/DB. Staging20 commit/merge/image/health/smoke пока pending, finalvisual4.3 unchecked.
+
+## Completed Basic Integration
+
+Actualeaa6 staging native5/all43rollback и functional12checks: modernization-20/.playwright-mcp/modernization/staging-attachments-native-80a1cef7-9034-4e28-bec6-6642a88b7dbb и staging-attachments-smoke-b2f5d4b3-1ffc-4521-8ca2-973dd76ce040. ReceiptrenderReact418FAIL сохранён; render/finalvisualDEFERRED, basicintegration не означаетbrowserPASS. Earlierpendingtext — historicalstate; thisupdatesonlybasicgate. Current159health supports source/deployment, not newappsmoke proof.
