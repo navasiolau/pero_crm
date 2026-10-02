@@ -24,10 +24,10 @@
 - [x] 4.2 Root native QA на existing guarded local DB проверяет exact strings/null/CAS/roles/audit и exact rollback/hashes, без новых DB/dump/reset/seed; authoritative target proof и результаты сохранены.
 - [x] 4.3 Compiled browser save→reload показывает исходные leading/trailing/tabs/blanklines/newlines; delayed/failing POST, raw no-op, conflicts/roles и snapshot-safe restoration проверены; root QA edits толькоточно разрешённые и restored по receipt.
 - [x] 4.4 Лично проверить 320×800,360×800,390×844,768×1024,1024×768,1440×900, sidebar/actual200% zoom, вертикальный resize и достижимость errors/actions; screenshots не заменять build.
-- [ ] 4.5 Один атомарный19commit+обычныйmerge staging только после accepted18 по выданному разрешению, CI и actualSHA/image/health/text/roles/browser acceptance; nightrefresh/W07 сохранить, root владеет выпуском. Main/prod исключены.
+- [x] 4.5 Один атомарный19commit+обычныйmerge staging только после accepted18 по выданному разрешению, CI и actualSHA/image/health/text/roles/browser acceptance; nightrefresh/W07 сохранить, root владеет выпуском. Main/prod исключены.
 
 
 
 ## Evidence
 
-Фактический local evidence: [evidence.md](evidence.md). Root native6groups/43tablesrollbackPASS; final compiled browser60checks/skips0/failures0 и actualChrome200%zoom5 PASS, root лично просмотрел6sizes/native-resize/errorzoom; cleanup CLEANED/prefs RESTORED. Три прежние QA попытки FAIL0/5/6checks и успешные cleanups сохранены отдельно. Полный web722PASS, последующие14 QA guard/codec/matcher tests PASS; root выполнит finalfullrerun перед commit. Только4.5 commit/merge/CI/hosted staging19 pending.
+Фактический local evidence: [evidence.md](evidence.md). Root native6groups/43tablesrollbackPASS; final compiled browser60checks/skips0/failures0 и actualChrome200%zoom5 PASS, root лично просмотрел6sizes/native-resize/errorzoom; cleanup CLEANED/prefs RESTORED. Три прежние QA попытки FAIL0/5/6checks и успешные cleanups сохранены отдельно. Полный web722PASS, последующие14 QA guard/codec/matcher tests PASS; root выполнит finalfullrerun перед commit. 4.5 actualstaging19 принят на7e0df2afd544e9e36cc029b4af760262b7db7b56: native6/43rollback, два nativeChromium59checks/zeroerrors иtruezoom5/cleanup/prefs. CIlogsнепрочитаны, workflowtestdependencyфиксируется безвыдуманногогreenCI. Main/prodнеизменялись.

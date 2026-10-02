@@ -1,6 +1,6 @@
 # Evidence — product-description-textarea (local / prestage)
 
-Дата: 02.10.2026. Реализация19 в feature/19 начата отfresh24bdc21494a57877b23f64c803152b619146b360 и после fresh fetch обновлена root ff-only до f2f529137ce8a799a7c554941591b0ed6851a1d6, все19правки сохранены. №18 фактически принят на24bd; web/prisma/bot source diff24bd→f2 пуст, только QA/документы. Этот документ отделяет code/unit/native и завершённую local compiled browser/zoom приёмку от ещё незавершённой hosted staging-приёмки. Оркестратор владеет DB/runtime/Git; автор этой проверки их не запускал.
+Дата: 02.10.2026. Реализация19 в feature/19 начата отfresh24bdc21494a57877b23f64c803152b619146b360 и после fresh fetch обновлена root ff-only до f2f529137ce8a799a7c554941591b0ed6851a1d6, все19правки сохранены. №18 фактически принят на24bd; web/prisma/bot source diff24bd→f2 пуст, только QA/документы. Этот документ отделяет code/unit/native и завершённую local compiled browser/zoom приёмку от отдельно завершённой hosted staging-приёмки ниже. Оркестратор владеет DB/runtime/Git; автор этой проверки их не запускал.
 
 ## Completed Local Evidence
 
@@ -42,6 +42,16 @@ Native6groups43tablesrollbackPASS остаётся независимым real-D
 
 Последний полный web722PASS; после него14 QA codec/guard/matcher testsPASS, включая добавленный synchronizing matcher. Root выполняет ещё finalfullrerun перед коммитом; его итог пока не выдаётся за выполненный. App buildproperNODE_PATH/typecheck/lint0errors(1oldwarning)PASS на frozen19source; QA-only repairs не были app fix.
 
-Только4.5: commit/ordinarymerge/CI и фактические image/SHA/health/text/roles/browser hosted staging19 acceptance pending. Gateaccepted18DONE24bd; это не acceptance19. Main/production вне scope. Три FAIL QA receipts остаются частью истории проверок и не заменяются одной финальной PASS записью.
+На момент local receipt4.5 hosted staging19 ещё ожидалась; итоговая acceptance приведена ниже. Gateaccepted18DONE24bd; это не acceptance19. Main/production вне scope. Три FAIL QA receipts остаются частью истории проверок и не заменяются одной финальной PASS записью.
 
 Финальный root full-suite после всех QA исправлений: 723/723 PASS, failures0/skips0; tests19-final.log. App source оставался заморожен, production build/typecheck и lint0errors подтверждены ранее.
+
+## Final Actual Staging19 Acceptance
+
+Оркестратор принял именно appSHA7e0df2afd544e9e36cc029b4af760262b7db7b56, ordinary merge результата feature19f04e3c1. Actual native staging6groups/43table exactrollbackPASS. Два независимых UNMODIFIEDAPP nativeChromium compiled-run receipts: `staging-description-browser-783453bb-9d0a-4b18-88d2-4aa3428a599f/description-receipt.json` и `staging-description-browser-e35e8a4c-170d-40f7-98b1-bfffc00e8d7e/description-receipt.json`: каждыйPASS/59checks/failures0/pageErrors0, actualChrome200zoom5PASS, dataCleanupCLEANED/prefCleanupRESTORED. Root лично просмотрел6sizes/nativeverticalresize/200error изображения первого native прохода.
+
+Actual web image digest dda8c3d8b68338540346cbc0074fe5d59ddeb22b867637d2a4fb0b72b26dedc7 и boted8a608b2077021bfc0eeebad5bf4714fa0ee1f44f4f4560cebc389f595091f1 соответствуютSHA7e и healthy по проверке оркестратора. Botenv сохранён, W07/DB не изменялись. Это фактический deployment/runtime proof, а не совпадение Git refs/localbuild.
+
+Предыдущие headless-shell staging FAILs `aeb383e1-2be4-476d-97d4-083447928b5d` и `ddb7c631-fa44-4767-90fc-d53fec183906` сохранили59functionalchecks, но имелиReact418/pageErrors1, поэтому не были приняты. CleanupsCLEANED/prefsRESTORED не оправдывали ошибки. Точная причинаReact418 НЕ доказана; успешные instrumented/modifiedJS/DEV diagnostics также не считаются acceptance. Принятие основано только надвух последующих nativeChromium UNMODIFIEDAPP PASS receipts.
+
+CIlogs не были доступны/прочитаны verifier: `.github/workflows/ci-cd.yml` содержит testjob и buildjobs needs:test, но sourcedependency не доказывает статус конкретногоCIrun. Local723/723 и реальнаяstage image/native/browser proof записаны отдельно, greenCI не выдуман. Root следующая diagnostics/helper-channel+docs интеграция QA-only; она не подменяет принятую appревизию, app source invariance проверяется отдельно перед релизом. Все14tasks выполнены; main/production/другие приложения не выпускаются этой задачей.
