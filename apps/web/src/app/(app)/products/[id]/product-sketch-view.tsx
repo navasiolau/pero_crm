@@ -56,7 +56,7 @@ export function ProductCoverLayout({productId,projectId,cover:initialCover,actor
   return <>
     <section data-layout="cover" className="grid min-w-0 grid-cols-1 gap-4 lg:min-h-[calc(100dvh-8rem)] lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] lg:grid-rows-[auto_1fr]">
       <div data-slot="product-cover-header" className="order-1 min-w-0 lg:col-start-1 lg:row-start-1">{header}</div>
-      <div data-slot="product-cover-image" data-sketch-state={cover?"filled":"empty"} className="relative order-3 aspect-[4/5] min-w-0 overflow-hidden rounded-lg border bg-muted/20 lg:order-2 lg:col-start-2 lg:row-start-1 lg:row-span-2 lg:aspect-auto lg:h-full lg:min-h-[calc(100dvh-8rem)]">
+      <div data-slot="product-cover-image" data-sketch-state={cover?"filled":"empty"} className="relative order-2 aspect-[4/5] min-w-0 overflow-hidden rounded-lg border bg-muted/20 lg:col-start-2 lg:row-start-1 lg:row-span-2 lg:aspect-auto lg:h-full lg:min-h-[calc(100dvh-8rem)]">
         {cover?<>
           <button type="button" aria-label="Открыть эскиз на весь экран" className="absolute inset-0 h-full w-full" onClick={()=>viewer.open(cover)}><ProductHeroImage sketch={cover} preview="cover" priority alt="Эскиз изделия" className="absolute inset-0 h-full w-full" /></button>
           {canDelete?<button type="button" aria-label="Удалить эскиз" disabled={busy} className="absolute top-2 right-2 z-10 inline-flex size-10 items-center justify-center rounded-md bg-background/85 shadow-sm disabled:opacity-50" onClick={()=>{setError(null);if(!uncertainDelete.current)deleteAttempt.current=null;setDeleteFor(cover);}}><X className="size-4" /></button>:null}
@@ -64,7 +64,7 @@ export function ProductCoverLayout({productId,projectId,cover:initialCover,actor
         {busy?<p aria-live="polite" className="absolute bottom-2 left-2 rounded bg-background/90 p-2 text-xs">Сохраняется…</p>:null}
         {error?<p role="alert" className="absolute right-2 bottom-2 left-2 min-w-0 break-words rounded bg-background/95 p-2 text-sm text-destructive">{error}</p>:null}
       </div>
-      <div data-slot="product-cover-details" className="order-2 min-w-0 lg:col-start-1 lg:row-start-2">{details}</div>
+      <div data-slot="product-cover-details" className="order-3 min-w-0 lg:col-start-1 lg:row-start-2">{details}</div>
     </section>
     {viewer.viewer}
     <ConfirmDeleteDialog entityLabel={`эскиз «${deleteFor?.fileName??""}»`} open={!!deleteFor} onOpenChange={open=>{if(!open&&!pending.current){setDeleteFor(null);if(!uncertainDelete.current)deleteAttempt.current=null;}}} onConfirm={remove} />
