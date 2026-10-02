@@ -1,5 +1,6 @@
 import {createInlineSaveController,type InlineSaveController,type InlineValue} from "./inline-save-controller";
 import {parsePercentageInput} from "./percentage-rate-input";
+import {flushSketchCriticalFields} from "./product-sketch-ui";
 import {productPercentagePatchSchema,readWorkReview,type ProductPercentagePatch,type ProductPercentagePatchResult,type WorkReviewItem} from "@/server/product-percentage-pay/contracts";
 type Field=ProductPercentagePatch["field"];
 type Initial={ratePercent:string|null;assigneeId:string|null;workReview:WorkReviewItem[]};
@@ -64,7 +65,7 @@ export function createSinglePercentageControllers(options:{productId:string;kind
    if(nextRevision<revision)return;
    revision=nextRevision;if(nextWorkIds)workIds=[...nextWorkIds];controllers.ratePercent.receive(next.ratePercent);controllers.assigneeId.receive(next.assigneeId);controllers.workReview.receive(JSON.stringify(next.workReview));
   },
-  async flush(){return(await Promise.all(Object.values(controllers).map(controller=>controller.flush()))).every(Boolean)},
+  async flush(){return flushSketchCriticalFields(Object.values(controllers))},
   async cancel(field:Field){const controller=controllers[field],state=controller.getSnapshot();if(blocked?.kind==="uncertain"||state.status==="saving"||state.status==="conflict")return false;controller.setDraft(format(state.baseline));return controller.retry();},
  };
 }
