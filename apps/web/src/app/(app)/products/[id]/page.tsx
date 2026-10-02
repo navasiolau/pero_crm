@@ -1,4 +1,3 @@
-import { productLineTotal } from "@/lib/product-quantity";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { ArrowLeft, TriangleAlert } from "lucide-react";
@@ -7,9 +6,7 @@ import { auth } from "@/auth";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { formatAmount } from "@/lib/format";
 import { displayClientName } from "@/lib/labels";
-import { productStatusLabels } from "@/lib/product-statuses";
 import { prisma } from "@/lib/prisma";
 import { FINANCE_ROLES, MANAGER_ROLES, OFFICE_ROLES, hasAnyRole } from "@/lib/roles";
 import { canEditProductTechnicalBlock, resolveVisibilityActor } from "@/server/access/visibility";
@@ -17,14 +14,17 @@ import { allocatedWorkQuantity } from "@/lib/work-shares";
 import { getFileStageConfig } from "@/server/files/stage-config";
 import { getProductFor } from "@/server/products/queries";
 import { setProductCover } from "@/server/products/cover-actions";
-import { listEngineers, listWorkers } from "@/server/projects/queries";
+import { listClients, listEngineers, listWorkers } from "@/server/projects/queries";
 import { mapTaskDetails } from "@/server/tasks/queries";
 import { getProjectMaterials, listMaterialOptions } from "@/server/warehouse/queries";
 
 import { FilesTab } from "../../projects/[id]/files-tab";
 import { MaterialsTab } from "../../projects/[id]/materials-tab";
 import { TasksTab } from "../../projects/[id]/tasks-tab";
+import { productStatusLabels } from "@/lib/product-statuses";
 import { ProductHeader } from "./product-header";
+import { ProductInlineProvider } from "@/components/product-inline-provider";
+import { ProductInlineTitle, ProductInlineDetails } from "@/components/product-inline-fields";
 import { ProductCoverClient } from "./product-sketch";
 import { ProductPercentagePanel } from "./product-percentage-panel";
 import { EngineeringFund } from "@/components/engineering-fund";
@@ -60,8 +60,9 @@ export default async function ProductPage({
   // Группировка файлов по этапам (плагин file-stages), если включён.
   const stageConfig = await getFileStageConfig();
 
-  const [workers, engineers, priceItems, materialsData, materialOptions, percentageView] =
+  const [clients, workers, engineers, priceItems, materialsData, materialOptions, percentageView] =
     await Promise.all([
+      canManage ? listClients(actor) : Promise.resolve([]),
       listWorkers(),
       listEngineers(),
       prisma.priceItem.findMany({
@@ -89,6 +90,9 @@ export default async function ProductPage({
   const engineeringView = canViewAllPercentage ? await getEngineeringFundView(prisma, product.id, false) : null;
 
   return (
+    <ProductInlineProvider key={product.id} productId={product.id} initial={{
+      title: product.title, kind: product.kind, quantity: product.quantity, expectedPrice: showAmount ? product.expectedPrice?.toString() ?? null : null, engineerId: product.engineerId, description: product.description, "project.clientId": product.project.client.id, "project.address": product.project.address, "client.phone": product.project.client.phone,
+    }}>
     <div className="flex flex-col gap-4">
       <ProductCoverClient
         productId={product.id}
@@ -119,9 +123,7 @@ export default async function ProductPage({
             >
               <ArrowLeft className="size-5" />
             </Link>
-            <h1 className="min-w-0 break-words text-2xl font-semibold">
-              {product.number} · {product.title}
-            </h1>
+            <ProductInlineTitle number={product.number} canManage={canManage} />
             <ProductHeader
               product={{
                 id: product.id,
@@ -129,20 +131,15 @@ export default async function ProductPage({
                 title: product.title,
                 kind: product.kind,
                 status: product.status,
-                expectedPrice: product.expectedPrice?.toString() ?? null,
+                expectedPrice: showAmount ? product.expectedPrice?.toString() ?? null : null,
             quantity: product.quantity,
-                initialPrice: product.initialPrice?.toString() ?? null,
+                initialPrice: showAmount ? product.initialPrice?.toString() ?? null : null,
                 description: product.description,
                 projectId: product.project.id,
                 engineerId: product.engineerId,
               }}
-              engineerOptions={engineers.map((engineer) => ({
-                value: engineer.id,
-                label: engineer.name,
-              }))}
               currency={product.project.currency}
               canManage={canManage}
-              canEditTech={canEditTech}
               showAmount={showAmount}
               actorRoles={role}
               hasB3d={percentageView.hasB3d}
@@ -157,83 +154,16 @@ export default async function ProductPage({
             ) : null}
           </div>
         )}
-        details={(
-          <div className="flex min-w-0 flex-col gap-4">
-            <Card>
-              <CardContent className="grid min-w-0 gap-x-6 gap-y-3 p-4 text-sm sm:grid-cols-2">
-                <div className="min-w-0">
-                  <div className="text-muted-foreground">Вид изделия</div>
-                  <div className="break-words">{product.kind ?? product.title}</div>
-                </div>
-                <div className="min-w-0">
-                  <div className="text-muted-foreground">Клиент</div>
-                  {showAmount ? (
-                    <Link
-                      href={`/clients?focus=${product.project.client.id}`}
-                      className="break-words text-foreground underline-offset-2 hover:underline"
-                    >
-                      {displayClientName(product.project.client)}
-                    </Link>
-                  ) : (
-                    <div className="break-words">{displayClientName(product.project.client)}</div>
-                  )}
-                </div>
-                <div className="min-w-0">
-                  <div className="text-muted-foreground">Адрес</div>
-                  <div className="break-words">{product.project.address ?? product.project.client.address ?? "—"}</div>
-                </div>
-                <div className="min-w-0">
-                  <div className="text-muted-foreground">Телефон</div>
-                  <div className="break-words">{product.project.client.phone}</div>
-                </div>
-                <div className="min-w-0 break-words">
-                  <div className="text-muted-foreground">Замерщик</div>
-                  {product.surveyor ? <SurveyorLink surveyor={product.surveyor} /> : <div>—</div>}
-                </div>
-                <div className="min-w-0 break-words">
-                  <div className="text-muted-foreground">Инженер</div>
-                  <div>{product.engineer?.name ?? "—"}</div>
-                </div>
-                <div className="min-w-0">
-                  <div className="text-muted-foreground">Статус</div>
-                  <div className="break-words">{productStatusLabels[product.status]}</div>
-                </div>
-                {showAmount ? (
-                  <div className="min-w-0">
-                    <div className="text-muted-foreground">Первоначальная цена за 1 шт. (КП)</div>
-                    <div className="break-words">{formatAmount(product.initialPrice?.toString() ?? null, product.project.currency)}</div>
-                  </div>
-                ) : null}
-              </CardContent>
-            </Card>
-            {product.description ? (
-              <Card>
-                <CardContent className="p-4 text-sm">
-                  <div className="mb-1 text-muted-foreground">Техническое описание</div>
-                  <div className="whitespace-pre-wrap break-words">{product.description}</div>
-                </CardContent>
-              </Card>
-            ) : null}
-            <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm text-muted-foreground">
-              <span>
-                Проект:{" "}
-                <Link
-                  href={`/projects/${product.project.id}`}
-                  className="text-foreground underline-offset-2 hover:underline"
-                >
-                  {product.project.number} · {product.project.title}
-                </Link>
-              </span>
-              <span>Количество: {product.quantity} шт.</span>
-              {showAmount ? (
-                <span>
-                  Цена за 1 шт.: {formatAmount(product.expectedPrice?.toString() ?? null, product.project.currency)}
-                </span>
-              ) : null}
-              {showAmount && <span>Сумма партии: {formatAmount(productLineTotal(product.expectedPrice, product.quantity), product.project.currency)}</span>}
-            </div>
-          </div>
-        )}
+        details={<ProductInlineDetails
+          canManage={canManage} canEditTech={canEditTech} showAmount={showAmount} currency={product.project.currency}
+          clients={(canManage ? clients : [{ id: product.project.client.id, name: displayClientName(product.project.client), phone: product.project.client.phone }]).map(client => ({value: client.id, label: "lastName" in client ? displayClientName(client) : client.name, hint: client.phone}))}
+          engineers={[...engineers.map(engineer => ({value: engineer.id, label: engineer.name})), ...(product.engineer && !engineers.some(engineer => engineer.id === product.engineerId) ? [{ value: product.engineer.id, label: product.engineer.name, disabled: true }] : [])]}
+          inheritedAddress={product.project.client.address}
+          surveyor={product.surveyor ? <SurveyorLink surveyor={product.surveyor} /> : <div>—</div>}
+          project={{id: product.project.id,number: product.project.number,title: product.project.title}}
+          initialPrice={showAmount ? product.initialPrice?.toString() ?? null : null}
+        />}
+
       />
 
       <Tabs defaultValue="tasks">
@@ -384,5 +314,6 @@ export default async function ProductPage({
         </TabsContent>
       </Tabs>
     </div>
+    </ProductInlineProvider>
   );
 }

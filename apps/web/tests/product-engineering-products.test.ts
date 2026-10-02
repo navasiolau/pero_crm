@@ -100,10 +100,10 @@ test("менеджер меняет статус независимо от ст�
 });
 
 test("price changes invalidate draft pool forms but never rewrite a settled pool", async () => {
-  reset(); seed(); assert.ok((await actions.updateProduct("product", { expectedPrice: 120 })).ok);
+  reset(); seed(); assert.ok((await actions.updateProduct("product", { expectedPrice: 120 }, { expectedPrice: "100" })).ok);
   assert.equal(state.pools[0].revision, 1);
   reset(); seed("PRODUCTION", "SETTLED"); const pool = structuredClone(state.pools[0]);
-  assert.ok((await actions.updateProduct("product", { expectedPrice: 120 })).ok);
+  assert.ok((await actions.updateProduct("product", { expectedPrice: 120 }, { expectedPrice: "100" })).ok);
   assert.deepEqual(state.pools[0], pool);
 });
 

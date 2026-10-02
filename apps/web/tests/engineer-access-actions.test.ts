@@ -30,6 +30,7 @@ let uploadRoute: typeof import("../src/app/api/files/upload/route");
 before(() => {
   const db = {
     ...fixture.db,
+    changeLog: { create: async () => ({}) },
     product: { ...fixture.db.product, update: async ({ where }: { where: { id: string } }) => { writes.push(`product.update:${where.id}`); } },
     file: { ...fixture.db.file, delete: async () => { writes.push("file.delete"); } },
     task: { ...fixture.db.task, update: async () => { writes.push("task.update"); } },
@@ -69,12 +70,12 @@ test("real technical-block action denies foreign and former products before any 
   for (const combination of [["ENGINEER"], ["ENGINEER", "ACCOUNTANT"], ["ENGINEER", "WORKER"]] as Role[][]) {
     roles = combination;
     for (const product of ["foreign", "production", "hidden-product"]) {
-      assert.equal((await productActions.updateProduct(product, { description: "forbidden" })).ok, false);
+      assert.equal((await productActions.updateProduct(product, { description: "forbidden" }, { description: null })).ok, false);
     }
   }
   assert.deepEqual(writes, []);
   roles = ["ENGINEER"];
-  assert.deepEqual(await productActions.updateProduct("own", { description: "allowed" }), { ok: true });
+  assert.deepEqual(await productActions.updateProduct("own", { description: "allowed" }, { description: null }), { ok: true });
   assert.deepEqual(writes.splice(0), ["product.update:own"]);
 });
 

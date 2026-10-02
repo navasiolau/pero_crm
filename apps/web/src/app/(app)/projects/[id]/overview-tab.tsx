@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, useRef } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import type { ProjectStage } from "@prisma/client";
@@ -95,6 +95,7 @@ export function OverviewTab({
     project.unloading !== null ||
     project.installation !== null;
 
+  const contactBaseline = useRef({ address: project.address, clientId: project.clientId });
   const ro = !canManage; // read-only для не-менеджеров
 
   return (
@@ -256,16 +257,18 @@ export function OverviewTab({
                 }
                 const result = await updateProject(project.id, {
                   title: form.title.trim(),
-                  address: form.address.trim() || null,
+                  ...(form.address.trim() !== (contactBaseline.current.address ?? "") ? { address: form.address.trim() || null } : {}),
+                  contactBaseline: { ...contactBaseline.current },
                   currency: form.currency,
                   initialPrice: parsedInitialPrice,
                   delivery: parsedExtras.delivery,
                   unloading: parsedExtras.unloading,
                   installation: parsedExtras.installation,
-                  clientId: form.clientId,
+                  ...(form.clientId !== contactBaseline.current.clientId ? { clientId: form.clientId } : {}),
                   managerId: form.managerId || null,
                 });
                     if (result.ok) {
+                      contactBaseline.current = { address: form.address.trim() || null, clientId: form.clientId };
                       toast.success("Сохранено");
                     } else {
                       toast.error(result.error ?? "Ошибка сохранения");
