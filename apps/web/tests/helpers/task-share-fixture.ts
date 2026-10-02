@@ -137,3 +137,13 @@ export function taskShareFixture(productStatus: "DESIGN" | "PRODUCTION" = "PRODU
   };
   return { state: () => state, writes, transaction, inTransaction: () => transactionContext.getStore() ?? false, database: { ...tx, $transaction: transaction }, failOn: (operation: string) => { failAt = operation; } };
 }
+/** Recorded legacy split fixture, never invokes the retired writer. */
+export function historicalTaskAllocation(f: ReturnType<typeof taskShareFixture>, physicalOnly = false) {
+  const state = f.state();
+  const source = state.tasks.find(row => row.id === 'source')!;
+  Object.assign(source, { allocationGroupId: 'historic-group', shareUnits: 700000, shareAmount: physicalOnly ? null : '700.00', physicalOnlyShare: physicalOnly, splitRevision: 1, estimateMinutes: 70 });
+  state.groups.push({ id: 'historic-group', workId: 'work', quantity: '10', budget: physicalOnly ? null : '1000.00', currency: physicalOnly ? null : 'BYN', budgetSource: physicalOnly ? 'PHYSICAL_ONLY' : 'TASK_FIXED' });
+  state.tasks.push({ ...source, id: 'historic-child', status: 'NEW', assigneeId: 'recipient', shareUnits: 300000, shareAmount: physicalOnly ? null : '300.00', estimateMinutes: 30 });
+  state.dependencies.push({ taskId: 'historic-child', dependsOnId: 'predecessor' }, { taskId: 'dependent', dependsOnId: 'historic-child' });
+  return { ok: true as const, childTaskId: 'historic-child' };
+}

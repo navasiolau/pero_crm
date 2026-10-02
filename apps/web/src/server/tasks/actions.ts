@@ -33,7 +33,7 @@ const createSchema = z.object({
   estimateMinutes: z.number().int().min(0).optional(),
   requiresPhoto: z.boolean().default(false),
   dependencyIds: z.array(z.string()).default([]),
-});
+}).strict();
 
 async function requireUser() {
   const session = await auth();
@@ -150,6 +150,7 @@ export async function createTask(
       assigneeId: data.assigneeId || null,
       workId: data.workId || null,
       quantity: workQuantity,
+      executorShare: 1,
       status: data.assigneeId ? "NEW" : "DRAFT",
       dueAt: data.dueAt ? new Date(data.dueAt) : null,
       requiresPhoto: data.requiresPhoto,
@@ -204,7 +205,7 @@ const updateSchema = z.object({
   dueAt: z.string().min(1, "Укажите срок").optional(),
   estimateMinutes: z.number().int().min(0).nullable().optional(),
   dependencyIds: z.array(z.string()).optional(),
-});
+}).strict();
 
 // Редактирование задачи — админ/директор/менеджер (§4).
 // Закрытая (выполненная) задача — только просмотр, правок не принимаем.
@@ -257,11 +258,12 @@ export async function updateTask(
     return { ok: false as const, error: "Выполненная или начисленная задача — только просмотр" };
   }
   if (task.allocationGroupId && (
+    (data.assigneeId !== undefined && data.assigneeId !== task.assigneeId) ||
     (data.workId !== undefined && data.workId !== task.workId) ||
     (data.productId !== undefined && data.productId !== task.productId) ||
     (data.quantity !== undefined && String(data.quantity) !== String(task.quantity))
   )) {
-    return { ok: false as const, error: "Объём, работа и изделие общей доли зафиксированы; используйте разделение" };
+    return { ok: false as const, error: "Исполнитель, объём, работа и изделие общей доли зафиксированы" };
   }
 
   // Изделие должно принадлежать проекту задачи

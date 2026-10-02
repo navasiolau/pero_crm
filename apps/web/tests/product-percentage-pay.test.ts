@@ -237,38 +237,21 @@ test("менеджер явно отмечает только неоплачен
   } as unknown as Prisma.TransactionClient;
   const actor = { id: "manager", name: "Менеджер", roles: ["MANAGER" as const], source: "web" as const };
   const input = { productId: "product", kind: "INSTALLATION" as const, ratePercent: "5", expectedRevision: 0,
-    participants: [{ userId: "mounter", shareUnits: 1000000 }], installationWorkIds: ["work"], reviewedLegacyWorks: true };
+    installationWorkIds: ["work"], reviewedLegacyWorks: true };
   await assert.rejects(configureProductPercentageCore(actor, { ...input, reviewedLegacyWorks: false }, tx), /Подтвердите просмотр/);
   assert.deepEqual(writes, []);
   await assert.rejects(configureProductPercentageCore(actor, input, tx), /уже есть начисление/);
   assert.deepEqual(writes, []);
   paid = false;
   assert.deepEqual(await configureProductPercentageCore(actor, input, tx), { revision: 1 });
-  assert.deepEqual(writes, ["classification", "config", "participant", "audit"]);
+  assert.deepEqual(writes, ["classification", "config", "audit"]);
 });
 
-test("участник передаёт долю существующему коллеге без изменения общей ставки", async () => {
-  let saved: { userId: string; shareUnits: number }[] = [];
-  const config = { id: "cfg", revision: 2, ratePercent: "5.00", participants: [
-    { userId: "a", shareUnits: 700000 }, { userId: "b", shareUnits: 300000 },
-  ] };
-  const tx = {
-    product: { findUnique: async () => ({ engineerId: "a" }) },
-    productPercentageCompletion: { findUnique: async () => null },
-    productPercentageConfig: { findUnique: async () => config,
-      update: async ({ data }: { data: Record<string, unknown> }) => {
-        assert.deepEqual(Object.keys(data), ["revision"]); return { revision: 3 }; } },
-    productPercentageParticipant: { deleteMany: async () => ({}),
-      createMany: async ({ data }: { data: { userId: string; shareUnits: number }[] }) => { saved = data; } },
-    user: { findFirst: async () => ({ id: "b" }) },
-    changeLog: { create: async () => ({}) },
-  } as unknown as Prisma.TransactionClient;
+test("старый transfer entrypoint не перераспределяет participants", async () => {
   const actor = { id: "a", name: "А", roles: ["ENGINEER" as const], source: "web" as const };
-  assert.deepEqual(await transferProductPercentageCore(actor, { productId: "p", kind: "ENGINEERING",
-    toUserId: "b", percentOfOwnShare: "10", expectedRevision: 2 }, tx), { revision: 3 });
-  assert.deepEqual(saved.map((row) => [row.userId, row.shareUnits]), [["a", 630000], ["b", 370000]]);
-  await assert.rejects(transferProductPercentageCore({ ...actor, roles: ["WORKER"] }, { productId: "p", kind: "ENGINEERING",
-    toUserId: "b", percentOfOwnShare: "10", expectedRevision: 2 }, tx), /своего этапа/);
+  const tx = new Proxy({}, { get: () => { throw new Error("Retired transfer must not access database"); } }) as Prisma.TransactionClient;
+  await assert.rejects(transferProductPercentageCore(actor, { productId: "p", kind: "ENGINEERING",
+    toUserId: "b", percentOfOwnShare: "10", expectedRevision: 2 }, tx), /больше недоступна/);
 });
 
 test("единый статусный handler сохраняет manager DONE с двумя terminal snapshots и проверяет B3D инженеру", async () => {

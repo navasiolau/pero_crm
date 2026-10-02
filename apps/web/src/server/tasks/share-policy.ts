@@ -22,13 +22,6 @@ export function engineeringRecipientError(user: ShareActor & { active: boolean }
 
 export function canSplitTask(actor: ShareActor, task: { assigneeId: string | null; status: string; product: TaskProductContext; paidCount: number;
   work?: { paymentKind?: string } | null; allocationGroup?: { budgetSource?: string } | null; shareAmount?: unknown }): boolean {
-  if (!task.assigneeId || !["NEW", "IN_PROGRESS"].includes(task.status) || task.paidCount > 0) return false;
-  if (task.work?.paymentKind === "ENGINEERING") return false;
-  if (task.work?.paymentKind === "INSTALLATION" &&
-    (task.allocationGroup ? task.allocationGroup.budgetSource !== "PHYSICAL_ONLY" : task.shareAmount != null)) return false;
-  return hasAnyRole(actor.roles, MANAGER_ROLES) || (
-    task.assigneeId === actor.id && (task.work?.paymentKind === "ENGINEERING"
-      ? !engineeringRecipientError({ ...actor, active: true }, task.product)
-      : !taskRecipientError({ ...actor, active: true }, task.product))
-  );
+  void actor; void task;
+  return false;
 }

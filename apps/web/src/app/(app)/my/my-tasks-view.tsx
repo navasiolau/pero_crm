@@ -20,7 +20,6 @@ import {
   List,
   Play,
   Plus,
-  Split,
   Square,
   Timer,
 } from "lucide-react";
@@ -43,7 +42,6 @@ import { Label } from "@/components/ui/label";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { PhotoUploadButton } from "@/components/photo-upload-button";
 import { ActualTimeDialog } from "@/components/actual-time-dialog";
-import { TaskSplitDialog } from "@/components/task-split-dialog";
 import { taskPaymentLabel } from "@/lib/task-payment-display";
 import { requiresManualCompletionTime } from "@/lib/task-completion-prompt";
 import { useElapsed } from "@/lib/use-elapsed";
@@ -109,7 +107,6 @@ export function MyTasksView({
   const [manualFor, setManualFor] = useState<string | null>(null);
   const [manualMinutes, setManualMinutes] = useState("60");
   const [actualFor, setActualFor] = useState<TaskDetails | null>(null);
-  const [splitFor, setSplitFor] = useState<TaskDetails | null>(null);
   const elapsed = useElapsed(timer?.startedAt ?? null);
   // Наследие: проп называется role, внутри — роли пользователя (§4)
   const roles = role;
@@ -280,11 +277,6 @@ export function MyTasksView({
                   filesCount={task.files.length}
                   size="default"
                 />
-              ) : null}
-              {task.canSplit ? (
-                <Button variant="outline" disabled={pending} onClick={() => setSplitFor(task)}>
-                  <Split className="size-4" /> Разделить
-                </Button>
               ) : null}
               <Button
                 size="lg"
@@ -557,12 +549,6 @@ export function MyTasksView({
         task={actualFor}
         open={!!actualFor}
         onOpenChange={(open) => !open && setActualFor(null)}
-        onDone={() => router.refresh()}
-      />
-      <TaskSplitDialog
-        task={splitFor}
-        open={!!splitFor}
-        onOpenChange={(open) => !open && setSplitFor(null)}
         onDone={() => router.refresh()}
       />
     </div>
