@@ -35,3 +35,25 @@ test('capture matcher never borrows a preceding other-product response when the 
  const cleared=make('own-b',null);assert.equal(descriptionCapturedWrite([previous,cleared],{from:1,actorId:'a',productId:'own-b',value:null}),cleared);assert.equal(descriptionCapturedWrite([cleared],{actorId:'other',productId:'own-b',value:null}),undefined);
  assert.equal(descriptionCapturedWrite([{...cleared,result:{...cleared.result,clientMutationId:'foreign'}}],{actorId:'a',productId:'own-b',value:null}),undefined);
 });
+
+test('blocked diagnostic records only argument shape and action hash, never unknown body values', async()=>{
+ const {descriptionBlockedRequestDiagnostic}=await import('./product-description-browser.mjs');
+ const action='raw-next-action-secret';
+ const detail=descriptionBlockedRequestDiagnostic({method:'POST',path:'/__nextjs_error_feedback',action,args:[{password:'secret-value',cookie:'secret-cookie',nested:{token:'secret-token'}},'unowned-body']});
+ assert.equal(detail.method,'POST');assert.equal(detail.path,'/__nextjs_error_feedback');assert.equal(detail.actionHash.length,64);assert.equal(detail.argsShape.length,2);
+ const serialized=JSON.stringify(detail);for(const secret of [action,'secret-value','secret-cookie','secret-token','unowned-body'])assert.ok(!serialized.includes(secret));
+ assert.deepEqual(detail.argsShape.items[0].keys,['cookie','nested','password']);
+});
+
+test('DEV private hydration diagnostic preserves full React diff while redacting credentials',()=>{
+ const full='Hydration failed '+ 'x'.repeat(7000)+' https://name:secret@local.test';
+ const detail=descriptionPrivateDiagnostic({message:full},{fullMessage:true});
+ assert.ok(detail.message.length>7000);assert.doesNotMatch(detail.message,/name:secret/);
+});
+
+test('description acceptance pins real Chromium new headless and does not expose caller launch overrides',async()=>{
+ const {DESCRIPTION_BROWSER_LAUNCH}=await import('./product-description-browser.mjs');
+ assert.deepEqual(DESCRIPTION_BROWSER_LAUNCH,{headless:true,channel:'chromium'});
+ assert.ok(Object.isFrozen(DESCRIPTION_BROWSER_LAUNCH));
+ assert.throws(()=>{DESCRIPTION_BROWSER_LAUNCH.channel='chrome'});
+});

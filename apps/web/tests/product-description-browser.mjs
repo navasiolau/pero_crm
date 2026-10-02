@@ -3,12 +3,18 @@ import assert from 'node:assert/strict';
 import {chromium,expect} from '@playwright/test';
 import {mkdir,writeFile,rename} from 'node:fs/promises';
 import {resolve} from 'node:path';
+import {createHash} from 'node:crypto';
 import {decodeProductDescriptionAction} from './product-description-flight.mjs';
 export const DESCRIPTION_LF='  Начало\n\tПункт\n\nКонец  \n\n';
+export const DESCRIPTION_BROWSER_LAUNCH=Object.freeze({headless:true,channel:'chromium'});
 export const descriptionBrowserValue=value=>value.replace(/\r\n/g,'\n');
-export function descriptionPrivateDiagnostic(error){
+export function descriptionPrivateDiagnostic(error,{fullMessage=false}={}){
  const redact=value=>String(value??'').replace(/Bearer\s+[^\s]+/gi,'Bearer [REDACTED_SECRET]').replace(/[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}/g,'[REDACTED_SECRET]').replace(/\b(?:pero_|sk-)[A-Za-z0-9_-]{20,}\b/gi,'[REDACTED_SECRET]').replace(/(https?:\/\/)[^/\s:@]+:[^/@\s]+@/g,'$1[REDACTED_SECRET]@');
- return{message:redact(error?.message).slice(0,6000),stack:redact(error?.stack).slice(0,10000)};
+ return{message:redact(error?.message).slice(0,fullMessage?Infinity:6000),stack:redact(error?.stack).slice(0,10000)};
+}
+export function descriptionBlockedRequestDiagnostic({method,path,args,action}){
+ const shape=value=>Array.isArray(value)?{type:'array',length:value.length,items:value.map(item=>item!==null&&typeof item==='object'?{type:Array.isArray(item)?'array':'object',keys:Object.keys(item).sort()}:{type:item===null?'null':typeof item})}:value!==null&&typeof value==='object'?{type:'object',keys:Object.keys(value).sort()}:{type:value===null?'null':typeof value};
+ return{method,path,argsShape:shape(args),actionHash:action?createHash('sha256').update(action).digest('hex'):null};
 }
 const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
 const VIEWPORTS=[[320,800],[360,800],[390,844],[768,1024],[1024,768],[1440,900]];
@@ -16,14 +22,17 @@ export function descriptionCapturedWrite(rows,{from=0,actorId,productId,value}){
  return rows.slice(from).find(row=>row.type==='description'&&row.actorId===actorId&&row.request?.productId===productId&&row.request.field==='description'&&row.request.value===value&&UUID.test(row.request.clientMutationId??'')&&row.result?.field==='description'&&row.result.clientMutationId===row.request.clientMutationId&&['response-captured','response-lost-after-upstream-commit'].includes(row.phase));
 }
 export function descriptionPatchOwned(patch,fixture){return Boolean(patch&&typeof patch==='object'&&!Array.isArray(patch)&&[fixture.ids.productA,fixture.ids.productB].includes(patch.productId)&&patch.field==='description'&&UUID.test(patch.clientMutationId??'')&&Object.keys(patch).sort().join('|')==='clientMutationId|expectedValue|field|productId|value'&&(patch.value===null||typeof patch.value==='string')&&(patch.expectedValue===null||typeof patch.expectedValue==='string'))}
-export async function runProductDescriptionBrowser({origin,profiles,fixture,outputDir,basicAuth,onOwnWrites}){
+export async function runProductDescriptionBrowser({origin,profiles,fixture,outputDir,basicAuth,onOwnWrites,diagnosticDev=false}){
  assert.ok(['http://127.0.0.1:3019','https://staging-crm.peromebel.by'].includes(origin),'DESCRIPTION_ORIGIN_REQUIRED');
+ assert.ok(!diagnosticDev||origin==='http://127.0.0.1:3019','DESCRIPTION_DEV_DIAGNOSTIC_LOCAL_ONLY');
  assert.ok(fixture?.ids?.productA&&fixture.ids.productB&&profiles.admin?.cookies?.length&&profiles.manager?.cookies?.length,'OWNED_DESCRIPTION_FIXTURE_AND_SESSIONS_REQUIRED');
  assert.equal(profiles.engineer?.id,fixture.actors.engineer.id,'DESCRIPTION_ENGINEER_SESSION_FIXTURE_MISMATCH');
  const paths=[fixture.paths.productA,fixture.paths.productB];assert.ok(paths.every(path=>/^\/products\/[^/]+$/.test(path)),'OWNED_PRODUCT_PATHS_REQUIRED');
- await mkdir(outputDir,{recursive:true});const receipt={kind:'product-description-compiled-browser',origin,status:'FAIL',checks:[],failures:[],skips:[],screenshots:[],requests:[],ownWrites:[],preferenceOwnWrites:[],pageErrors:[],lineEndings:'Browser LF input; raw CRLF/legacy unchanged checks belong to native/domain suites'};
- const browser=await chromium.launch({headless:true}),contexts=[];const pending=new Set(),own=new Map(),prefs=new Map(),releases=[];let phase='session',lastPage;let hold=null,loseNext=false;let persistence=Promise.resolve();
+ await mkdir(outputDir,{recursive:true});const receipt={kind:'product-description-compiled-browser',origin,status:'FAIL',checks:[],failures:[],skips:[],screenshots:[],requests:[],ownWrites:[],preferenceOwnWrites:[],pageErrors:[],consoleDiagnostics:[],blockedRequests:[],diagnosticDev,browserMode:'Chromium new headless via channel chromium; not headless-shell',lineEndings:'Browser LF input; raw CRLF/legacy unchanged checks belong to native/domain suites'};
+ const browser=await chromium.launch(DESCRIPTION_BROWSER_LAUNCH),contexts=[];const pending=new Set(),own=new Map(),prefs=new Map(),releases=[];let phase='session',lastPage;let hold=null,loseNext=false;let persistence=Promise.resolve();
  function persist(){const job=persistence.then(async()=>{receipt.ownWrites=[...own.values()];receipt.preferenceOwnWrites=[...prefs.values()];const journal={ownWrites:receipt.ownWrites,preferenceOwnWrites:receipt.preferenceOwnWrites};for(const[name,value]of [['product-description-owned-writes.json',journal],['product-description-request-journal.json',receipt.requests]]){const file=resolve(outputDir,name);await writeFile(`${file}.tmp`,JSON.stringify(value,null,2),{mode:0o600});await rename(`${file}.tmp`,file)}if(onOwnWrites)await onOwnWrites(journal)});persistence=job.catch(()=>{});return job}
+ let diagnosticPersistence=Promise.resolve();
+ function persistDiagnostics(){diagnosticPersistence=diagnosticPersistence.then(()=>writeFile(resolve(outputDir,'product-description-diagnostics.private.json'),JSON.stringify({consoleDiagnostics:receipt.consoleDiagnostics,blockedRequests:receipt.blockedRequests},null,2),{mode:0o600}));return diagnosticPersistence;}
  const check=(label,detail={})=>receipt.checks.push({label,passed:true,...detail});
  const field=page=>page.locator('#product-inline-description'),state=page=>page.locator('#product-inline-description-state');
  const patches=()=>receipt.requests.filter(row=>row.type==='description');
@@ -37,7 +46,7 @@ export async function runProductDescriptionBrowser({origin,profiles,fixture,outp
    const patch=Array.isArray(args)&&args.length===1?args[0]:null,closed=owned&&descriptionPatchOwned(patch,fixture);
    const empty=Array.isArray(args)&&args.length===0;if(owned&&empty)bellId??=action;
    if(owned&&empty&&action===bellId){await route.continue();return;}
-   if(closing||!closed){if(!closing)receipt.failures.push(`UNAUTHORIZED_MUTATION_BLOCKED:${name}`);await route.abort('blockedbyclient');return;}
+   if(closing||!closed){if(!closing){receipt.failures.push(`UNAUTHORIZED_MUTATION_BLOCKED:${name}`);receipt.blockedRequests.push({profile:name,phase,at:new Date().toISOString(),...descriptionBlockedRequestDiagnostic({method:request.method(),path:url.pathname,args,action})});await persistDiagnostics().catch(()=>{receipt.failures.push('PRIVATE_DIAGNOSTIC_WRITE_FAILED')});}await route.abort('blockedbyclient');return;}
    const record={type:'description',profile:name,actorId:profile.id,path:url.pathname,request:{...patch},phase:'requested'};receipt.requests.push(record);await persist();
    const delayed=closed?hold:null;if(delayed)hold=null;const lost=closed&&loseNext;if(lost)loseNext=false;
    const task=(async()=>{
@@ -48,6 +57,12 @@ export async function runProductDescriptionBrowser({origin,profiles,fixture,outp
    })();pending.add(task);try{await task}catch(error){record.privateFailure=descriptionPrivateDiagnostic(error);receipt.failures.push(`ACTION_CAPTURE_FAILED:${name}`);await persist();await route.abort('blockedbyclient').catch(()=>{})}finally{pending.delete(task)}
   });
   const page=await context.newPage(),network=[];page.on('request',request=>{const url=new URL(request.url());if(request.method()==='GET'&&paths.includes(url.pathname)&&!request.headers()['next-router-prefetch']&&(request.isNavigationRequest()||request.headers().rsc||url.searchParams.has('_rsc')))network.push({path:url.pathname,kind:request.isNavigationRequest()?'document':'RSC'})});
+  page.on('console',message=>{
+   if(!diagnosticDev||!['error','warning'].includes(message.type())||!/hydrat|nesting|In HTML|server rendered/i.test(message.text()))return;
+   receipt.consoleDiagnostics.push({profile:name,phase,path:new URL(page.url()).pathname,at:new Date().toISOString(),type:message.type(),...descriptionPrivateDiagnostic({message:message.text()},{fullMessage:true})});
+   receipt.failures.push(`DEV_HYDRATION_OR_NESTING_CONSOLE:${name}`);
+   void persistDiagnostics().catch(()=>{receipt.failures.push('PRIVATE_DIAGNOSTIC_WRITE_FAILED')});
+  });
   page.on('pageerror',error=>{receipt.pageErrors.push({name:error.name,profile:name,phase,...descriptionPrivateDiagnostic(error)});receipt.failures.push(`PAGE_ERROR:${name}`)});
   const item={context,page,profile,network,close:async()=>{closing=true;await context.close()}};contexts.push(item);return item;
  }
@@ -87,6 +102,6 @@ export async function runProductDescriptionBrowser({origin,profiles,fixture,outp
   for(let width=320;width<=1440;width+=40){await page.setViewportSize({width,height:900});await page.evaluate(()=>new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done))));await geometry(page,`smooth-${width}`)}
   await Promise.all([...pending]);await persist();receipt.status=receipt.failures.length?'FAIL':'PASS';
  }catch(error){const detail={code:'PRODUCT_DESCRIPTION_BROWSER_STOP',phase,errorType:error?.name??'Error',...descriptionPrivateDiagnostic(error)};receipt.failures.push(detail);await writeFile(resolve(outputDir,'product-description-failure.private.json'),JSON.stringify(detail,null,2),{mode:0o600}).catch(()=>{});if(lastPage&&!lastPage.isClosed()){await screenshot(lastPage,'description-failure').catch(()=>{});const dom=descriptionPrivateDiagnostic({message:await lastPage.locator('body').innerText().catch(()=> 'DOM_UNAVAILABLE')}).message;await writeFile(resolve(outputDir,'product-description-failure-dom.private.txt'),dom,{mode:0o600}).catch(()=>{})}}
- finally{for(const release of releases)release();await Promise.allSettled([...pending]);for(const item of contexts)await item.close().catch(()=>{});await browser.close();await persist();await writeFile(resolve(outputDir,'product-description-browser-receipt.json'),JSON.stringify(receipt,null,2),{mode:0o600})}
+ finally{for(const release of releases)release();await Promise.allSettled([...pending]);for(const item of contexts)await item.close().catch(()=>{});await browser.close();await persist();await diagnosticPersistence.catch(()=>{});await writeFile(resolve(outputDir,'product-description-browser-receipt.json'),JSON.stringify(receipt,null,2),{mode:0o600})}
  return receipt;
 }
