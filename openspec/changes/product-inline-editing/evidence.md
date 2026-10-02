@@ -27,6 +27,14 @@ Malformed DTO/unauth payload возвращает typed validation до domain t
 
 ## Staging acceptance
 
+### Accepted revision — 02.10.2026
+
+**6edd76ef2cee0b7ce40c5df4399ea9b7570b0728 принят.** Web containera3607d2bc409d383dda08cb143f93e3137c717e8191283bc7e665c6cfae4fe7d, image sha256:91e8ca76459f444e9800ae9d577d34e165e82e0e2f52d97a97d53b606ff063cf, healthy. Ботc97d3543bf2c103d0a5e3dd72974b474b1c4193dc1a2876f1aaca4fd7232dcc0, image sha256:8c62e533a545cd724f6029801c5e3348094b382b04afe5aa7322473a255c3a1c, тот же revision и healthy. Источник CI publication gated needs:test подтверждён workflow; приватные CI logs не читались, это не объявляется.
+
+Hosted native9groups и2SQLprofiles (title/phone) PASS с точным rollback, receipt .playwright-mcp/modernization/staging-inline-native-37bf6fb0-f428-4851-bba6-5931169b498a/native-receipt.json. Compiled browser70checks/failures0 и truebrowserzoom5checks PASS: .playwright-mcp/modernization/staging-inline-browser-43365a35-f3bc-4844-a6ef-6f55a370e9ed/browser-receipt.json. ADMIN/MANAGER/ENGINEER — реальные существующие cohorts; combined на staging отсутствует, не заявляется browser-проверка четвёртой роли (она проверена локально/native). Два actors, delay/failure/replay/CAS/contact/status-barrier/defaultEngineer, шесть размеров, sidebar/smoothwidth и nativeCDPzoom screenshots лично просмотрены.
+
+Signed V2 fixture cleanup CLEANED, preference restore RESTORED. Все original business/security поля/count совпали; только штатный ApiToken.lastUsedAt является operational fingerprint-полем. Полностью сохранены database container27b8f7342b9d722ab8788e137b37b03a3037442da038c5b8b98dbb30245b8b6a/start/mount, W07 SHA27e3bcd727d9e83170c76a254806fde42590da76cea30c9e1441d873df680139 и refresh. Mainf0368235 не изменялся. Неудачные предыдущие прогоны ниже остаются отдельными FAIL/STOP.
+
 Первый merge7eb10ae19c4c69f6d93d725dc5b15668d52b89fb фактически развёрнут: web16fdba69014ca3072635a8d4453effe32ec5acd6f81e7eebe44a4bca47b0c735, image sha256:0bd5dd0399205cc99ba3e2ff97a66867ef6da58a562e9e4cfc93f91f886e75c7, healthy. Hosted native9groups PASS, rollback verified, receipt .playwright-mcp/modernization/staging-inline-native-4a762b12-632b-4244-9dbd-37c230d7e210/native-receipt.json. DB/container/start/mount и W07 исходный SHA сохранены. После следующего scoped fix default-engineer projection требуется приёмка новой фактической staging-ревизии; полного принятия №17 пока нет.
 
 fcc48dadfc63c4621c0050c0ffdad04574ba94dc развёрнут healthy: webff2dea461201e5ef5fac0136fc1f039014e1e27efd87248f8007e3d04bfcdab6, image sha256:faa905f899f5dae72f983745bae6d9a79220aa739d6f09c7f973554151b0ef4d; native9PASS, receipt staging-inline-native-f949e179-b036-4743-ac8c-d858775204ae. Browser70сценариев завершены, но прогон FAIL из-за React418 и затем STOP по raw ApiToken fingerprint. Старый результат остаётся FAIL, не выдаётся за приёмку.

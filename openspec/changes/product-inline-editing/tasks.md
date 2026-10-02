@@ -28,7 +28,7 @@
 - [x] 4.2 Запустить targeted tests, полный test/lint/typecheck/build по actual scripts и проверить diff; evidence содержит RED→GREEN и отсутствие новых dependencies/price migration/исправлений других задач.
 - [x] 4.3 Лично пройти local браузер: keyboard, blur/select, slow/fail network, two-user same/different field, zero/null, changed client before phone, quantity/status flush; сохранить network evidence без full history/economics/FX чтения для title/phone.
 - [x] 4.4 Проверить размеры 320×800,360×800,390×844,768×1024,1024×768,1440×900, sidebar/200%: новые controls/errors внутри области и нет page overflow; не объявлять эту visual приёмку по одному build.
-- [ ] 4.5 Атомарно коммитить только №17 по выданному разрешению, обычным merge в staging; после CI принять фактические SHA/образ/health и повторить targeted/browser/role сценарии. Night refresh/W07 сохранить; новые QA-данные только по отдельному точному разрешению, без reset/seed/дампов/restic.
+- [x] 4.5 Атомарно коммитить только №17 по выданному разрешению, обычным merge в staging; после CI принять фактические SHA/образ/health и повторить targeted/browser/role сценарии. Принята ревизия6edd76ef2cee0b7ce40c5df4399ea9b7570b0728: native9/browser70/truezoom5 PASS, Web/бот healthy на том же SHA, исходные business/security поля сохранены, QA точно очищены. Night refresh/W07 сохранены; без reset/seed/дампов/restic.
 
 ## Future Scope
 
