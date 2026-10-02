@@ -38,3 +38,8 @@ Root уже создал реальную feature/23 от freshstagef33f574; п�
 ## Actual Integration Base
 
 Root feature23 ordinarily refreshed22 to46d7392 with preserved work and resolved23UI/core conflicts. Actual22image/native basicacceptance complete; essential23full801/build/native7groups completed, staging23 pending. No hostedconcurrency claim; finalvisual after26unchecked.
+## Compact Percentage Action Follow-up
+
+Root modernization23 ordinaryfastforward origin/staging542 с sourceвсех11задач. Actual finalbrowser helper получил FAIL fullRSC boundary после подтверждённого percentagecommit: предыдущий domain native15PASS не доказывал wire-contract. Узкое исправление удаляет revalidateProductPaths только из compact percentage fieldpatchAction; legacy frozen retry invalidation сохранена (counter1). Domain/migration/money не менялись.
+
+Real thinAction regression REDcounter1 expected0 → GREEN2/2 плюсcontroller7=9; typecheck/lint/rootproductionBUILD23fixPASS. Эти результаты подтверждают локальную compactAction границу, но не глобальную browser приёмку. Actualstaging542native15/bothealthy/CI86success относятся к прежней deployedrevision; новый compactfix ждёт freshactualstageimage/browser. Root ownscommit/ordinarymerge; no app/test/core edits in this docs update.
