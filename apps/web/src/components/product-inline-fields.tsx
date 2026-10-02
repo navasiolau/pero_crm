@@ -6,6 +6,8 @@ import { useProductInline } from "@/components/product-inline-provider";
 import {ClientDialog} from "@/components/client-dialog";
 import {Button} from "@/components/ui/button";
 import {confirmedProductClientContacts,type ProductClientContact} from "@/lib/product-client-contacts";
+import {InlineQuantityField} from "@/components/product-quantity-input";
+import {productDraftTotal} from "@/lib/product-quantity-input";
 import { formatAmount } from "@/lib/format";
 export function ProductInlineTitle({ number, canManage }: { number: string; canManage: boolean }) {
   const { controller } = useProductInline();
@@ -34,23 +36,16 @@ export function ProductInlineDetails({ canManage, canEditTech, showAmount, curre
   const price = controller("expectedPrice"); const quantity = controller("quantity");
   const p = useSyncExternalStore(price.subscribe, price.getSnapshot, price.getServerSnapshot);
   const q = useSyncExternalStore(quantity.subscribe, quantity.getSnapshot, quantity.getServerSnapshot);
-  let total: string | null = null;
-  if (/^\d{1,10}(?:[.,]\d{1,2})?$/.test(p.draft.trim()) && /^\d{1,10}$/.test(q.draft) && Number(q.draft) >= 1 && Number(q.draft) <= 2_147_483_647) {
-    const [units, fraction = ""] = p.draft.replace(",", ".").split(".");
-    const cents = (BigInt(units) * BigInt(100) + BigInt(fraction.padEnd(2, "0"))) * BigInt(q.draft);
-    total = `${cents / BigInt(100)}.${String(cents % BigInt(100)).padStart(2, "0")}`;
-  }
+  const total=productDraftTotal(p.draft,q.draft);
   return <div className="flex min-w-0 flex-col gap-4" data-product-details>
-    <Card className="min-w-0"><CardContent className="flex min-w-0 flex-col gap-3 p-4 text-sm">
-      {notice}
-      <InlineTextField id="product-inline-quantity" label="Количество, шт." controller={quantity} inputMode="numeric" readOnly={!canManage} />
+    {notice?<Card className="min-w-0"><CardContent className="p-4 text-sm">{notice}</CardContent></Card>:null}
+    <Card className="min-w-0"><CardContent className={showAmount?"grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,6.5rem)_minmax(0,1fr)] items-start gap-3 p-4 text-sm":"min-w-0 p-4 text-sm"} data-product-price-quantity>
+      {showAmount?<InlineTextField id="product-inline-price" label="Цена, BYN" controller={price} inputMode="decimal" readOnly={!canManage}/>:null}
+      <InlineQuantityField controller={quantity} readOnly={!canManage}/>
+      {showAmount?<div className="min-w-0 break-words pt-6" aria-live="polite">Сумма: {formatAmount(total,currency)}</div>:null}
     </CardContent></Card>
     <Card className="min-w-0"><CardContent className="min-w-0 p-4"><InlineTextField id="product-inline-description" label="Техническое описание" controller={controller("description")} readOnly={!canEditTech} multiline largeDescription /></CardContent></Card>
     {measurement}
-    {showAmount ? <Card className="min-w-0"><CardContent className="grid min-w-0 grid-cols-2 gap-3 p-4 text-sm">
-      <InlineTextField id="product-inline-price" label={`Цена за 1 шт., ${currency}`} controller={price} inputMode="decimal" readOnly={!canManage} />
-      <div className="min-w-0 break-words"><div className="text-muted-foreground">Сумма партии</div>{formatAmount(total, currency)}{[p.status, q.status].some(value => ["dirty", "saving", "error", "conflict"].includes(value)) ? <span className="block text-xs text-muted-foreground">По текущему вводу; сохранение подтверждается рядом с полем.</span> : null}</div>
-    </CardContent></Card> : null}
     {engineer}
   </div>;
 }

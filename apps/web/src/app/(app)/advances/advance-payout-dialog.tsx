@@ -35,7 +35,7 @@ export function AdvancePayoutDialog({
   return (
     <Dialog open={open} onOpenChange={changeOpen}>
       {open ? (
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="sm:max-w-xl">
           <DialogHeader>
             <DialogTitle>Выдать аванс</DialogTitle>
             <DialogDescription>Сумма указывается в валюте кассы. Перед подтверждением будут показаны валютные эквиваленты и курсы.</DialogDescription>

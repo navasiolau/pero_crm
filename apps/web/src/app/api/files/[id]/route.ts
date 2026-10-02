@@ -77,7 +77,7 @@ export async function GET(
   const query = new URL(request.url).searchParams;
   const variant = query.get("preview");
   if (variant !== null) {
-    if (variant !== "card" && variant !== "cover") {
+    if (variant !== "card" && variant !== "cover" && variant !== "thumbnail") {
       return NextResponse.json({ error: "Неизвестный размер превью" }, { status: 400,
         headers: { "Cache-Control": "private, no-store", "Vary": "Cookie",
           "X-Content-Type-Options": "nosniff" } });

@@ -18,7 +18,7 @@ export type ProjectPatchField = ProjectPatch["field"];
 export type ProjectPatchValue = string | null;
 const projectedMoney=z.string().regex(/^\d+\.\d{2}$/).nullable();
 export const projectPricingProjectionSchema=z.object({expectedTotalBYN:projectedMoney,productsSubtotalBYN:projectedMoney,pricingVersion:z.string().regex(/^\d+$/),delivery:projectMoneySchema,unloading:projectMoneySchema,installation:projectMoneySchema}).strict();
-export type ProjectPatchDerived = { expectedTotalBYN?: string | null; productsSubtotalBYN?:string|null; pricingVersion?:string; delivery?: string | null; unloading?: string | null; installation?: string | null; clientId?: string; clientLabel?: string | null; phone?: string; managerLabel?: string | null };
+export type ProjectPatchDerived = { expectedTotalBYN?: string | null; productsSubtotalBYN?:string|null; pricingVersion?:string; delivery?: string | null; unloading?: string | null; installation?: string | null; clientId?: string; clientLabel?: string | null; phone?: string; clientAddress?: string | null; managerLabel?: string | null };
 export type MalformedProjectPatchValidation = {kind:"validation";malformed:true;error:string;field?:ProjectPatchField;clientMutationId?:string};
 export type ProjectPatchResult = MalformedProjectPatchValidation | {
   kind:"saved";field:ProjectPatchField;value:ProjectPatchValue;clientMutationId:string;derived?:ProjectPatchDerived;repeated?:boolean;noOp?:boolean;

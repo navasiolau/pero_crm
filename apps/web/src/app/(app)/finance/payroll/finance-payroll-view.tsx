@@ -596,7 +596,7 @@ export function FinancePayrollView({
         setPayoutOpen(next);
       }}>
         {payoutOpen ? (
-          <DialogContent className="sm:max-w-lg">
+          <DialogContent className="sm:max-w-xl">
             <DialogHeader>
               <DialogTitle>Выплата зарплаты</DialogTitle>
               <DialogDescription>Расчётный месяц: {monthLabel(month).toLowerCase()}. Сумма указывается в валюте кассы.</DialogDescription>

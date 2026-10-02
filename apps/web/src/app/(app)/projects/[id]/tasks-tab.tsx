@@ -174,19 +174,12 @@ export function TasksTab({
             </div>
           );
         })}
-        {works.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            Работ не назначено — добавляются из прайса со снимком цены.
-          </p>
-        ) : null}
+
       </div>
 
       <div className="flex flex-col gap-3">
         <div className="flex justify-between">
-          <p className="text-sm text-muted-foreground">
-            Клик по задаче — просмотр{canManage ? " и редактирование" : ""}.
-            Замер требует фото при выполнении.
-          </p>
+
           {canManage ? (
             <Button size="sm" onClick={() => setOpen(true)}>
               <Plus className="size-4" /> Задача

@@ -39,7 +39,7 @@ export function correctionJournalScope(fixture,journal,signedPreferenceScope=nul
  requireThat(Array.isArray(journal.statusWrites)&&journal.statusWrites.length<=1&&journal.statusWrites.every(row=>row.ok===true&&row.actorId===fixture.actors.engineer.id&&row.productId===fixture.ids.productB&&row.fromStatus==='PRODUCTION'&&row.toStatus==='DESIGN'),'CORRECTIONS_STATUS_BACK_JOURNAL_STOP');
  return{mutationIds,percentageMutationIds,percentageWrites,sketchWrites,noModelWrites,coverWrites,extraClientWrites:journal.extraClientWrites,statusWrites:journal.statusWrites};
 }
-export async function runUiCorrectionsStage({target,revision,authorized=false}){
+export async function runUiCorrectionsStage({target,revision,authorized=false,round2Factory=null}){
  requireThat(authorized===true&&['local','staging'].includes(target)&&/^[a-f0-9]{40}$/.test(revision??''),'FINAL_AUTHORIZED_TARGET_REVISION_REQUIRED');
  const outputDir=path.join(acceptanceRoot,'.playwright-mcp','corrections',`${target}-corrections-${randomUUID()}`);await mkdir(outputDir,{recursive:true});
  async function save(name,value){const file=path.join(outputDir,name);await writeFile(`${file}.tmp`,JSON.stringify(value,null,2),{mode:0o600});await rename(`${file}.tmp`,file)}
@@ -55,7 +55,7 @@ export async function runUiCorrectionsStage({target,revision,authorized=false}){
   const basicAuth=target==='staging'?await qaBasicAuth():undefined;
   let journal={ownWrites:[],preferenceOwnWrites:[],extraClientWrites:[],statusWrites:[]},fileObservation=null;
   const scope=()=>correctionJournalScope(fixture,journal,session.checkpoint);
-  const browser=await runUiCorrectionsBrowser({origin,expectedRevision:revision,authorized:true,profiles,fixture,outputDir,basicAuth,runZoom:true,
+  const browser=await runUiCorrectionsBrowser({origin,expectedRevision:revision,authorized:true,profiles,fixture,outputDir,basicAuth,runZoom:true,round2Factory,
    signedPreferenceScope:session.checkpoint,
    onOwnWrites:async value=>{journal=structuredClone(value);scope();await save('owned-write-journal.json',journal)},
    onOwnFiles:async({uploadedFileIds})=>{

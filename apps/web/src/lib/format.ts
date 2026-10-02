@@ -10,6 +10,11 @@ export function formatDateTime(value: string | Date): string {
   return new Date(value).toLocaleString("ru-RU", { timeZone: "Europe/Moscow" });
 }
 
+// Даты строк файлов и задач используют тот же пояс, что служебные даты CRM.
+export function formatDate(value: string | Date): string {
+  return new Date(value).toLocaleDateString("ru-RU", { timeZone: "Europe/Moscow" });
+}
+
 // Форматирование суммы с символом валюты (BYN по умолчанию)
 export function formatAmount(
   amount: string | number | null | undefined,

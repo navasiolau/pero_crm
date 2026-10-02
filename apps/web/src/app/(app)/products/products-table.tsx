@@ -1,4 +1,5 @@
 "use client";
+import { CardNumber } from "@/components/card-number";
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -117,7 +118,7 @@ export function ProductsTable({
       renderMobileCard={(row) => (
         <div className="flex flex-col items-start gap-3 text-sm">
           <Link href={`/products/${row.number}`} className="min-h-12 w-full min-w-0 font-medium underline-offset-2 [overflow-wrap:anywhere] hover:underline">
-            <span className="block text-xs text-muted-foreground">Изделие {row.number}</span>
+            <span className="block text-xs text-muted-foreground">Изделие <CardNumber>{row.number}</CardNumber></span>
             {row.title}
           </Link>
           {row.kind && <span className="text-xs text-muted-foreground">{row.kind}</span>}

@@ -9,7 +9,7 @@ import { useInlineSave } from "@/hooks/use-inline-save";
 import type { InlineSaveController, InlineValue } from "@/lib/inline-save-controller";
 
 type Props = { id: string; label: string; controller: InlineSaveController<InlineValue>; readOnly?: boolean; hint?: ReactNode };
-function SaveState({ field, readOnly }: { field: ReturnType<typeof useInlineSave<InlineValue>>; readOnly?: boolean }) {
+export function SaveState({ field, readOnly }: { field: ReturnType<typeof useInlineSave<InlineValue>>; readOnly?: boolean }) {
   return <div className="min-w-0 break-words text-xs" aria-live="polite">
     {field.error ? <div role="alert" className="break-words text-destructive">{field.error}</div> : <span className="text-muted-foreground">{field.status === "saving" ? "Сохраняется…" : field.status === "dirty" ? "Есть изменения" : field.status === "saved" ? "Сохранено" : ""}</span>}
     {!readOnly && field.status === "error" ? <Button type="button" variant="link" className="h-auto max-w-full px-0 text-xs" onClick={() => void field.retry()}>Повторить сохранение</Button> : null}
