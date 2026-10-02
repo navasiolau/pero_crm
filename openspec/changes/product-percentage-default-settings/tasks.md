@@ -13,4 +13,4 @@
 ## 3. Acceptance
 
 - [x] 3.1 Focusedtests/directTC/scopedlintPASS no schema/dependencies/price/payhistory changes.
-- [ ] 3.2 Rootactualruntime/stagingSHA/image/health/defaults create smoke, no widevisualQA.
+- [x] 3.2 Rootactualruntime/stagingSHA/image/health/defaults create smoke, no widevisualQA.

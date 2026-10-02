@@ -7,6 +7,6 @@
 - [x] 2.2 Исключить делегированные controllers карточки, сохранить исторические данные и остальные partial fields; typecheck.
 ## 3. Приёмка
 - [x] 3.1 Targeted tests/lint/tsc, точный handoff root.
-- [ ] 3.2 Root actual staging после ordinary merge; визуальная QA отдельно.
+- [x] 3.2 Root actual staging после ordinary merge; визуальная QA отдельно.
 
 Локальные доказательства: actual SSR RED2/2 → GREEN2/2, затем 34 targeted tests PASS (включая реальный core CAS/Client.address ACK и неизменность historical Project.address/delivery). Typecheck и scoped lint PASS. Браузер/staging не запускались агентом.

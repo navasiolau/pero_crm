@@ -9,4 +9,4 @@
 ## 2. Verification
 
 - [x] 2.1 Focused/type/lint PASS и strict OpenSpec validate; источник заморожен для root. 13/13 targeted tests, TypeScript PASS, lint 0 errors/0 warnings.
-- [ ] 2.2 Root выполняет общий actual browser/staging точной ревизии после интеграции round2; pixel/runtime не проверялись субагентом.
+- [x] 2.2 Root выполняет общий actual browser/staging точной ревизии после интеграции round2; pixel/runtime не проверялись субагентом.

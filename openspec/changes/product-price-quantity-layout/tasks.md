@@ -6,7 +6,7 @@
 
 ## 2. Validation
 - [x] 2.1 Выполнить focused tests и strict OpenSpec validate.
-- [ ] 2.2 Root проводит интеграцию, runtime/визуальную/staging приёмку.
+- [x] 2.2 Root проводит интеграцию, runtime/визуальную/staging приёмку.
 
 ## Evidence
 
