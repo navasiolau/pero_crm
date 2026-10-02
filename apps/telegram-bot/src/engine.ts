@@ -1,4 +1,5 @@
-import { crm, CrmError, type ProjectRef } from "./crm";
+import {randomUUID} from "node:crypto";
+import { crm, CrmError, type ProjectRef,type ProjectBaseline } from "./crm";
 import { tg, TgError, type InlineButton, type TgCallbackQuery, type TgUpdate } from "./tg";
 import {
   CURRENCIES,
@@ -51,6 +52,7 @@ type Dialog =
       kind: "stage";
       projectId: string;
       projectNumber: string;
+      expectedStage: string; clientMutationId: string;
       step:
         | "refusalReason"
         | "refusalComment"
@@ -67,8 +69,11 @@ type Dialog =
       projectNumber: string;
       field: "title" | "address" | "initialPrice" | "manager";
       expectedAddress?: string | null;
+      expectedBaseline?: ProjectBaseline;
+      clientMutationId?: string; submittedValue?: string;
     };
 
+const stageMenus=new Map<string,{projectId:string;projectNumber:string;expectedStage:string;token:string;mutations:Record<string,string>}>();
 const dialogs = new Map<string, Dialog>();
 const sessionCache = new Map<string, Session & { at: number }>();
 const noticeAt = new Map<string, number>();
@@ -176,7 +181,8 @@ export async function handleUpdate(update: TgUpdate): Promise<void> {
 
   const dialog = getDialog(chatId);
   if (dialog) {
-    await handleDialogText(chatId, session, dialog, text);
+    try { await handleDialogText(chatId, session, dialog, text); }
+    catch(error){if(error instanceof CrmError)await reply(chatId,`❌ ${error.message}. Повторите ввод: исходные данные сохранены.`);else throw error;}
     return;
   }
   await reply(chatId, "Команды бота — /help");
@@ -333,7 +339,7 @@ async function showProjectCard(
   }
   const buttons: InlineButton[][] = [
     [
-      { text: "🔀 Сменить этап", callback_data: `stage:${projectId}` },
+      { text: "🔀 Сменить статус", callback_data: `stage:${projectId}` },
       { text: "✏️ Реквизиты", callback_data: `edit:${projectId}` },
     ],
   ];
@@ -602,38 +608,42 @@ async function stageText(
 ): Promise<void> {
   switch (dialog.step) {
     case "refusalReason":
+      if(!text.trim()){await reply(chatId,"Укажите причину отказа:");return;}
       dialog.refusalReason = text;
       dialog.step = "refusalComment";
       setDialog(chatId, dialog);
-      await reply(chatId, "Комментарий к отказу:");
+      await reply(chatId, "Комментарий к отказу («—» — пропустить):");
       return;
     case "refusalComment": {
       const result = await crm.changeStage(session.userId, dialog.projectId, "REFUSED", {
         refusalReason: dialog.refusalReason ?? "",
-        refusalComment: text,
-      });
-      setDialog(chatId, null);
+        refusalComment: text === "—" || text === "-" ? "" : text,
+      },dialog.expectedStage,dialog.clientMutationId);
+      if(result.ok)setDialog(chatId, null);
       await reply(
         chatId,
         result.ok
-          ? `✅ Этап: ${STAGE_LABELS.REFUSED} · П-${dialog.projectNumber}`
+          ? `✅ Статус: ${STAGE_LABELS.REFUSED} · П-${dialog.projectNumber}`
           : `❌ ${result.error}`,
       );
       return;
     }
     case "reclamationReason":
+      if(!text.trim()){await reply(chatId,"Укажите причину рекламации:");return;}
       dialog.reclamationReason = text;
       dialog.step = "reclamationDescription";
       setDialog(chatId, dialog);
       await reply(chatId, "Описание рекламации:");
       return;
     case "reclamationDescription":
+      if(!text.trim()){await reply(chatId,"Опишите рекламацию:");return;}
       dialog.reclamationDescription = text;
       dialog.step = "reclamationFault";
       setDialog(chatId, dialog);
       await reply(chatId, "Виновная сторона:");
       return;
     case "reclamationFault": {
+      if(!text.trim()){await reply(chatId,"Укажите виновную сторону:");return;}
       const result = await crm.changeStage(
         session.userId,
         dialog.projectId,
@@ -642,13 +652,13 @@ async function stageText(
           reclamationReason: dialog.reclamationReason ?? "",
           reclamationDescription: dialog.reclamationDescription ?? "",
           reclamationFault: text,
-        },
+        },dialog.expectedStage,dialog.clientMutationId,
       );
-      setDialog(chatId, null);
+      if(result.ok)setDialog(chatId, null);
       await reply(
         chatId,
         result.ok
-          ? `✅ Этап: ${STAGE_LABELS.RECLAMATION} · П-${dialog.projectNumber}`
+          ? `✅ Статус: ${STAGE_LABELS.RECLAMATION} · П-${dialog.projectNumber}`
           : `❌ ${result.error}`,
       );
       return;
@@ -664,6 +674,7 @@ async function editText(
   dialog: Extract<Dialog, { kind: "edit" }>,
   text: string,
 ): Promise<void> {
+  if(!dialog.expectedBaseline){await reply(chatId,"Откройте редактирование заново: исходные значения отсутствуют");return;}
   let input: Record<string, unknown>;
   switch (dialog.field) {
     case "title":
@@ -673,7 +684,7 @@ async function editText(
       if (!Object.prototype.hasOwnProperty.call(dialog, "expectedAddress")) {
         setDialog(chatId, null); await reply(chatId, "Откройте адрес проекта заново: исходное значение отсутствует."); return;
       }
-      input = { address: text === "-" || text === "—" ? null : text, contactBaseline: { address: dialog.expectedAddress } };
+      input = { address: text === "-" || text === "—" ? null : text, baseline: dialog.expectedBaseline };
       break;
     case "initialPrice": {
       const value = text === "-" || text === "—" ? null : parseAmount(text);
@@ -688,8 +699,10 @@ async function editText(
       setDialog(chatId, null);
       return;
   }
-  const result = await crm.updateProject(session.userId, dialog.projectId, input);
-  setDialog(chatId, null);
+  const result = dialog.field === "initialPrice"
+    ? await crm.updateProject(session.userId,dialog.projectId,{...input,baseline:dialog.expectedBaseline})
+    : await saveProjectEdit(session,dialog,dialog.field,input[dialog.field] as string|null);
+  if(result.ok)setDialog(chatId, null);
   await reply(
     chatId,
     result.ok
@@ -698,6 +711,16 @@ async function editText(
   );
 }
 
+/** ID принадлежит конкретному введённому значению, а не каждой попытке доставки. */
+async function saveProjectEdit(session:Session,dialog:Extract<Dialog,{kind:"edit"}>,field:"title"|"address"|"managerId",value:string|null){
+ if(!dialog.expectedBaseline||!dialog.clientMutationId)return{ok:false,error:"Откройте редактирование заново: исходные значения отсутствуют"};
+ const serialized=JSON.stringify({field,value});
+ if(dialog.submittedValue!==undefined&&dialog.submittedValue!==serialized)dialog.clientMutationId=randomUUID();
+ dialog.submittedValue=serialized;
+ const result=await crm.patchProject(session.userId,dialog.projectId,{projectId:dialog.projectId,field,value,expectedValue:dialog.expectedBaseline[field],clientMutationId:dialog.clientMutationId});
+ if(result.kind==='conflict')return{...result,error:`${result.error??'Данные изменены другим пользователем'}. Откройте редактирование заново для подтверждения актуальных данных.`};
+ return result;
+}
 // ─── Кнопки (callback queries) ───────────────────────────────────────────────
 
 async function handleCallback(query: TgCallbackQuery): Promise<void> {
@@ -747,14 +770,18 @@ async function dispatchCallback(
   // Смена этапа: запрос списка этапов
   if (action === "stage") {
     const projectId = rest[0];
+    const card=await crm.project(session.userId,projectId);
+    if(!card.project){await reply(chatId,"Проект не найден");return;}
+    const token=randomUUID().slice(0,8);
+    stageMenus.set(String(chatId),{projectId,projectNumber:card.project.number,expectedStage:card.project.stage,token,mutations:{}});
     setDialog(chatId, null); // сброс возможного незавершённого диалога
     await reply(
       chatId,
-      "Выберите новый этап:",
+      "Выберите новый статус:",
       buttonsRow(
         STAGE_ORDER.map((stage) => ({
           text: STAGE_LABELS[stage],
-          callback_data: `st:${projectId}:${stage}`,
+          callback_data: `st:${projectId}:${stage}:${token}`,
         })),
         2,
       ),
@@ -762,34 +789,35 @@ async function dispatchCallback(
     return;
   }
   if (action === "st") {
-    const [projectId, toStage] = rest;
+    const [projectId, toStage,token] = rest;
+    const menu=stageMenus.get(String(chatId));
+    if(!menu||menu.projectId!==projectId||menu.token!==token){await reply(chatId,"Откройте выбор статуса заново: исходный статус отсутствует");return;}
+    const clientMutationId=menu.mutations[toStage]??(menu.mutations[toStage]=randomUUID());
     if (toStage === "REFUSED") {
-      const card = await crm.project(session.userId, projectId);
       setDialog(chatId, {
         kind: "stage",
         projectId,
-        projectNumber: card.project?.number ?? "",
+        projectNumber: menu.projectNumber, expectedStage:menu.expectedStage,clientMutationId,
         step: "refusalReason",
       });
       await reply(chatId, "Причина отказа:");
       return;
     }
     if (toStage === "RECLAMATION") {
-      const card = await crm.project(session.userId, projectId);
       setDialog(chatId, {
         kind: "stage",
         projectId,
-        projectNumber: card.project?.number ?? "",
+        projectNumber: menu.projectNumber, expectedStage:menu.expectedStage,clientMutationId,
         step: "reclamationReason",
       });
       await reply(chatId, "Причина рекламации:");
       return;
     }
-    const result = await crm.changeStage(session.userId, projectId, toStage);
+    const result = await crm.changeStage(session.userId, projectId, toStage,undefined,menu.expectedStage,clientMutationId);
     await reply(
       chatId,
       result.ok
-        ? `✅ Этап: ${STAGE_LABELS[toStage] ?? toStage}`
+        ? `✅ Статус: ${STAGE_LABELS[toStage] ?? toStage}`
         : `❌ ${result.error}`,
     );
     return;
@@ -816,10 +844,12 @@ async function dispatchCallback(
   if (action === "ed") {
     const [projectId, field] = rest as [string, "title" | "address" | "initialPrice" | "manager"];
     const card = await crm.project(session.userId, projectId);
-    const projectNumber = card.project?.number ?? "";
+    if(!card.project?.fullBaseline){await reply(chatId,"Откройте карточку заново: исходные значения отсутствуют");return;}
+    const expectedBaseline=card.project.fullBaseline;
+    const projectNumber = card.project.number;
     if (field === "manager") {
       const managers = await crm.directory(session.userId, "managers");
-      setDialog(chatId, { kind: "edit", projectId, projectNumber, field });
+      setDialog(chatId, { kind: "edit", projectId, projectNumber, field,expectedBaseline,clientMutationId:randomUUID() });
       await reply(
         chatId,
         "Выберите менеджера:",
@@ -842,7 +872,7 @@ async function dispatchCallback(
       initialPrice: "Новая первоначальная цена («—» — очистить):",
     };
     if (field === "address" && !card.project) { await reply(chatId, "Проект не найден."); return; }
-    setDialog(chatId, { kind: "edit", projectId, projectNumber, field, ...(field === "address" ? { expectedAddress: card.project!.address } : {}) });
+    setDialog(chatId, { kind: "edit", projectId, projectNumber, field,expectedBaseline,clientMutationId:randomUUID(), ...(field === "address" ? { expectedAddress: card.project!.address } : {}) });
     await reply(chatId, `П-${projectNumber}. ${prompts[field]}`, [[CANCEL_BUTTON]]);
     return;
   }
@@ -850,10 +880,9 @@ async function dispatchCallback(
     const dialog = getDialog(chatId);
     const value = rest[0];
     if (dialog?.kind === "edit") {
-      const result = await crm.updateProject(session.userId, dialog.projectId, {
-        managerId: value === "none" ? null : value,
-      });
-      setDialog(chatId, null);
+      if(!dialog.expectedBaseline){await reply(chatId,"Откройте редактирование заново: исходные значения отсутствуют");return;}
+      const result = await saveProjectEdit(session,dialog,"managerId",value === "none" ? null : value);
+      if(result.ok)setDialog(chatId, null);
       await reply(chatId, result.ok ? `✅ Менеджер сохранён` : `❌ ${result.error}`);
       return;
     }

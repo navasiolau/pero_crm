@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ProjectStage } from "@prisma/client";
 
 import { Button } from "@/components/ui/button";
@@ -30,14 +30,14 @@ export interface StageFormValues {
   reclamationFault?: string;
 }
 
-// Необязательные дополнительные сведения при переходе в отказ/рекламацию.
-// Сами сведения не ограничивают право менеджмента сменить этап.
+// Обязательные сведения нового перехода; введённые данные сохраняются при отмене.
+
 export function StageFormDialog({
   request,
   onClose,
-  onSubmit,
+  onSubmit, errors = {},
 }: {
-  request: StageFormRequest | null;
+  request: StageFormRequest | null; errors?: Record<string,string>;
   onClose: () => void;
   onSubmit: (
     request: StageFormRequest,
@@ -47,20 +47,20 @@ export function StageFormDialog({
   const [values, setValues] = useState<StageFormValues>({});
   const [pending, setPending] = useState(false);
 
-  useEffect(() => {
-    setValues({});
-  }, [request]);
+  const drafts = useRef<Record<string,StageFormValues>>({});
+  const key=request ? `${request.projectId}:${request.toStage}` : null;
+  useEffect(()=>{if(key)setValues(drafts.current[key]??{})},[key]);
 
   if (!request) return null;
   const isRefusal = request.toStage === "REFUSED";
 
   function field(key: keyof StageFormValues) {
     return (event: { target: { value: string } }) =>
-      setValues((prev) => ({ ...prev, [key]: event.target.value }));
+      setValues((prev) => {const next={ ...prev, [key]: event.target.value }; drafts.current[`${request!.projectId}:${request!.toStage}`]=next; return next;});
   }
 
   return (
-    <Dialog open={!!request} onOpenChange={(open) => !open && onClose()}>
+    <Dialog open={!!request} onOpenChange={(open) => !open && !pending && onClose()}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>
@@ -68,8 +68,8 @@ export function StageFormDialog({
           </DialogTitle>
           <DialogDescription>
             {isRefusal
-              ? "Причину и комментарий можно добавить по желанию."
-              : "Рекламация переоткрывает завершённый проект. Дополнительные сведения необязательны."}
+              ? "Укажите причину отказа. Комментарий необязателен."
+              : "Укажите причину, описание и виновную сторону."}
           </DialogDescription>
         </DialogHeader>
 
@@ -128,6 +128,7 @@ export function StageFormDialog({
           )}
         </div>
 
+        {Object.entries(errors).map(([key,message])=><p key={key} role="alert" className="text-sm text-destructive">{message}</p>)}
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={pending}>
             Отмена
@@ -136,8 +137,7 @@ export function StageFormDialog({
             disabled={pending}
             onClick={async () => {
               setPending(true);
-              await onSubmit(request, values);
-              setPending(false);
+              try { if(await onSubmit(request, values)) delete drafts.current[`${request.projectId}:${request.toStage}`]; } finally { setPending(false); }
             }}
           >
             {pending

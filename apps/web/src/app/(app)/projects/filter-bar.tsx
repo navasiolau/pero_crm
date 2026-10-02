@@ -69,10 +69,10 @@ export function ProjectsFilterBar({
         }
       >
         <SelectTrigger className="w-40">
-          <SelectValue>{stage ? stageLabels[stage] : "Все этапы"}</SelectValue>
+          <SelectValue>{stage ? stageLabels[stage] : "Все статусы"}</SelectValue>
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="all">Все этапы</SelectItem>
+          <SelectItem value="all">Все статусы</SelectItem>
           {STAGES.map((item) => (
             <SelectItem key={item.id} value={item.id}>
               {item.label}

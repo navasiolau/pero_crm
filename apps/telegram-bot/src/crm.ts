@@ -8,6 +8,8 @@ export interface SessionInfo {
   user?: { id: string; name: string; roles: string[]; botAllowed: boolean };
 }
 
+export interface OrdinaryProjectPatch {projectId:string;field:"title"|"address"|"managerId";value:string|null;expectedValue:string|null;clientMutationId:string;}
+export interface ProjectPatchAck {ok:boolean;kind:"saved"|"validation"|"conflict"|"forbidden"|"not-found"|"failure";error?:string;clientMutationId?:string;currentValue?:string|null;replayed?:boolean;}
 export interface ProjectRef {
   id: string;
   number: string;
@@ -16,7 +18,12 @@ export interface ProjectRef {
   currency: string;
 }
 
+export interface ProjectBaseline {
+  title: string; clientId: string; managerId: string | null; address: string | null;
+  delivery: string | null; unloading: string | null; installation: string | null; initialPrice: string | null; currency: string;
+}
 export interface ProjectCard {
+  fullBaseline: ProjectBaseline;
   id: string;
   number: string;
   title: string;
@@ -147,16 +154,20 @@ export const crm = {
       actorId,
     );
   },
+  patchProject(actorId:string,id:string,input:OrdinaryProjectPatch){
+    return request<ProjectPatchAck>("PATCH",`/projects/${id}`,input,actorId);
+  },
   changeStage(
     actorId: string,
     id: string,
     toStage: string,
-    extras?: Record<string, string>,
+    extras: Record<string, string> | undefined,
+    expectedStage: string, clientMutationId: string,
   ) {
     return request<{ ok: boolean; error?: string }>(
       "POST",
       `/projects/${id}/stage`,
-      { toStage, extras },
+      { toStage, extras,expectedStage,clientMutationId },
       actorId,
     );
   },

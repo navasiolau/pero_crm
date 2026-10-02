@@ -64,3 +64,17 @@ test('forbidden role cannot disclose the newly bound client phone or label',asyn
  assert.equal(result.ok,false);if(!result.ok){assert.equal(result.kind,'forbidden');assert.equal(result.currentValue,undefined);assert.equal(result.currentClientLabel,undefined);assert.equal(result.currentClientId,undefined)}
  assert.equal(f.state.locks.length,0);assert.deepEqual(f.state.clients.map(row=>row.phone),['100','999']);assert.equal(f.state.audit.length,0);assert.equal(f.state.events.length,0);
 });
+import {patchProjectContactInTransaction} from '../src/server/projects/contact-core';
+test('project target without products reuses shared contact CAS without manufacturing a product',async()=>{
+ const f=fixture();f.tx.product.findUnique=(async()=>{throw new Error('PRODUCT_READ_FORBIDDEN_ON_PROJECT_PATH')}) as unknown as typeof f.tx.product.findUnique;
+ const result=await patchProjectContactInTransaction(manager,{projectId:'project',field:'address',value:'Project address',expectedValue:null},f.tx);
+ assert.equal(result.ok,true);assert.equal(f.state.projects[0].address,'Project address');assert.match(f.state.locks[0],/Project/);assert.equal(f.state.audit.length,1);assert.equal(f.state.events.length,1);
+});
+test('project phone keeps binding conflict context and readonly role guards',async()=>{
+ const f=fixture();f.state.projects[0].clientId='other';
+ const result=await patchProjectContactInTransaction(manager,{projectId:'project',field:'phone',value:'200',expectedValue:'100',expectedClientId:'client'},f.tx);
+ assert.equal(result.ok,false);if(!result.ok){assert.equal(result.kind,'conflict');assert.equal(result.currentValue,'999');assert.equal(result.currentClientId,'other');assert.equal(result.currentClientLabel,'Client')}
+ assert.deepEqual(f.state.clients.map(row=>row.phone),['100','999']);assert.equal(f.state.audit.length,0);assert.equal(f.state.events.length,0);
+ const forbidden=await patchProjectContactInTransaction({...manager,roles:['ACCOUNTANT','ENGINEER']},{projectId:'project',field:'phone',value:'200',expectedValue:'100',expectedClientId:'client'},f.tx);
+ assert.equal(forbidden.ok,false);if(!forbidden.ok){assert.equal(forbidden.kind,'forbidden');assert.equal(forbidden.currentValue,undefined);assert.equal(forbidden.currentClientId,undefined)}
+});

@@ -144,7 +144,7 @@ export function useFileViewer(variant: FileViewerVariant = "standard") {
     if (isImage(file) || isVideo(file)) {
       setFile(file);
     } else if (isPdf(file)) {
-      window.open(`/api/files/${file.id}`, "_blank", "noopener");
+      window.open(`/api/files/${file.id}?view=1`, "_blank", "noopener");
     } else {
       const anchor = document.createElement("a");
       anchor.href = `/api/files/${file.id}`;

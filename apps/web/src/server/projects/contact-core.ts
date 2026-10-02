@@ -2,13 +2,20 @@ import type {Prisma} from '@prisma/client';
 import type {DomainActor} from './core';
 import {mayManageContacts,patchClientPhoneInTransaction,type ContactResult} from '@/server/clients/core';
 export type ProductContactResult = ContactResult & {currentClientLabel?:string};
+export type ProjectContactPatch = {projectId:string;field:'clientId'|'address'|'phone';value:string|null;expectedValue:string|null;expectedClientId?:string};
 export type ProductContactPatch = {productId:string;field:'clientId'|'address'|'phone';value:string|null;expectedValue:string|null;expectedClientId?:string};
 /** Порядок блокировок: Project → Client. Изделие используется только как точка доступа. */
 export async function patchProductContactInTransaction(actor:DomainActor,patch:ProductContactPatch,tx:Prisma.TransactionClient):Promise<ProductContactResult> {
  if(!mayManageContacts(actor))return{ok:false,kind:'forbidden',error:'Недостаточно прав'};
  const product=await tx.product.findUnique({where:{id:patch.productId},select:{projectId:true}});
  if(!product)return{ok:false,kind:'not-found',error:'Изделие не найдено'};
- const projectId=product.projectId;
+ return patchProjectContactInTransaction(actor,{projectId:product.projectId,field:patch.field,value:patch.value,expectedValue:patch.expectedValue,expectedClientId:patch.expectedClientId},tx);
+}
+
+/** Общая операция настоящего Project: никаких фиктивных изделий или повторных writers. */
+export async function patchProjectContactInTransaction(actor:DomainActor,patch:ProjectContactPatch,tx:Prisma.TransactionClient):Promise<ProductContactResult> {
+ if(!mayManageContacts(actor))return{ok:false,kind:'forbidden',error:'Недостаточно прав'};
+ const projectId=patch.projectId;
  await tx.$queryRaw`SELECT id FROM "Project" WHERE id = ${projectId} FOR UPDATE`;
  const project=await tx.project.findUnique({where:{id:projectId},select:{id:true,clientId:true,address:true}});
  if(!project)return{ok:false,kind:'not-found',error:'Проект не найден'};

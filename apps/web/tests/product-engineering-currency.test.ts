@@ -70,7 +70,7 @@ test("project currency is frozen by its own settlement while same-value save rem
   reset(); settlements.push({ id: "old", projectId: "project", currency: "BYN" });
   assert.equal((await project.updateProjectCore(actor, "project", { currency: "USD" })).ok, false);
   assert.equal(projectCurrency, "BYN");
-  assert.ok((await project.updateProjectCore(actor, "project", { currency: "BYN" })).ok);
+  assert.ok((await project.updateProjectCore(actor, "project", { currency: "BYN", baseline: { currency: "BYN" } })).ok);
   assert.equal(settlements[0].currency, "BYN");
 });
 

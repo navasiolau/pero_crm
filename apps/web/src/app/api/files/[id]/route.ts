@@ -92,14 +92,19 @@ export async function GET(
     return NextResponse.json({ error: "Файл не найден" }, { status: 404 });
   }
 
-  const thumb = new URL(request.url).searchParams.get("thumb") === "1";
+  const thumb = query.get("thumb") === "1";
+  // Просмотр PDF явно запрашивается после проверки доступа; прочие MIME
+  // и исходный URI сохраняют режим скачивания и прежние storage keys.
+  const pdfView = !thumb && query.get("view") === "1" && file.mimeType === "application/pdf";
   const headers = new Headers({
     "Content-Type": thumb && file.hasThumb ? "image/jpeg" : file.mimeType,
     "Content-Disposition": thumb
       ? "inline"
-      : `attachment; filename*=UTF-8''${encodeURIComponent(file.fileName)}`,
+      : `${pdfView ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(file.fileName)}`,
     "Cache-Control": "private, no-store",
   });
+
+  if (pdfView) headers.set("X-Content-Type-Options", "nosniff");
 
   if (s3Enabled()) {
     const key = thumb && file.hasThumb

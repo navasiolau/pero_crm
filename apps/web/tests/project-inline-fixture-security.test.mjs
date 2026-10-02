@@ -1,0 +1,15 @@
+// CPU adapter for the emitted SQL projections; no database or token secret execution.
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {createHash,createHmac,randomUUID,randomBytes,timingSafeEqual} from 'node:crypto';
+import {test} from 'node:test';
+const source=readFileSync(new URL('./project-inline-browser-fixtures.mjs',import.meta.url),'utf8').replace(/^import .*;\r?\n/gm,'').replace(/await main\(\);\s*$/,'');
+const api=Function('Prisma','createHash','createHmac','randomUUID','randomBytes','timingSafeEqual',`${source};return{snapshot,tokenFingerprint,canonical};`)({ModelName:{ApiToken:'ApiToken',User:'User'}},createHash,createHmac,randomUUID,randomBytes,timingSafeEqual);
+function adapter(){const rows={ApiToken:[{id:'original',tokenHash:'existing credential digest',scopes:['read'],revokedAt:null,createdById:'owner',lastUsedAt:'old'}],User:[{id:'owner',roles:['ADMIN']}],_prisma_migrations:[]};return{rows,tx:{$queryRawUnsafe:async(sql,...ids)=>{const table=/FROM "([^"]+)" t/.exec(sql)[1],excluded=/NOT IN/.test(sql),one=/WHERE id=\$1/.test(sql);const selected=rows[table].filter(row=>excluded?!ids.includes(row.id):one?row.id===ids[0]:true);const drop=/to_jsonb\(t\)\s*-\s*'([^']+)'/.exec(sql)?.[1];const values=selected.map(row=>Object.fromEntries(Object.entries(row).filter(([key])=>key!==drop)));return[{count:String(values.length),hash:createHash('md5').update(values.map(api.canonical).sort().join('')).digest('hex')}];}}};}
+test('owned token alone is excluded from original snapshot; other token security changes remain visible',async()=>{
+ const f=adapter(),baseline=await api.snapshot(f.tx);f.rows.ApiToken.push({id:'owned',tokenHash:'owned digest',scopes:['read','write'],revokedAt:null,createdById:'owner',lastUsedAt:null});assert.deepEqual(await api.snapshot(f.tx,{ApiToken:['owned']}),baseline);f.rows.ApiToken[0].lastUsedAt='health';assert.deepEqual(await api.snapshot(f.tx,{ApiToken:['owned']}),baseline);
+ for(const[field,value]of Object.entries({tokenHash:'changed',scopes:['write'],revokedAt:'now',createdById:'other'})){const previous=f.rows.ApiToken[0][field];f.rows.ApiToken[0][field]=value;assert.notDeepEqual((await api.snapshot(f.tx,{ApiToken:['owned']})).ApiToken,baseline.ApiToken,field);f.rows.ApiToken[0][field]=previous;}
+});
+test('own token credential/scope/revocation/owner fingerprint cannot be replaced; last use is operational only',async()=>{
+ const f=adapter();f.rows.ApiToken.push({id:'owned',tokenHash:'owned digest',scopes:['read','write'],revokedAt:null,createdById:'owner',lastUsedAt:null});const before=await api.tokenFingerprint(f.tx,'owned');f.rows.ApiToken[1].lastUsedAt='used';assert.deepEqual(await api.tokenFingerprint(f.tx,'owned'),before);for(const[field,value]of Object.entries({tokenHash:'changed',scopes:['admin'],revokedAt:'now',createdById:'other'})){const previous=f.rows.ApiToken[1][field];f.rows.ApiToken[1][field]=value;assert.notDeepEqual(await api.tokenFingerprint(f.tx,'owned'),before,field);f.rows.ApiToken[1][field]=previous;}
+});

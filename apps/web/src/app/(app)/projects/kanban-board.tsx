@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   DndContext,
@@ -24,7 +24,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { formatAmount } from "@/lib/format";
 import { STAGES, daysOnStage, stageLabels, stageStyles } from "@/lib/stages";
 import { cn } from "@/lib/utils";
-import { changeProjectStage } from "@/server/projects/actions";
+import { patchProjectStage } from "@/server/projects/stage-actions";
+import type {ProjectStagePatch,StageExtras} from "@/server/projects/stage-contract";
 
 import type { ProjectCard } from "./projects-view";
 import { StageFormDialog, type StageFormRequest } from "./stage-form-dialog";
@@ -183,6 +184,9 @@ export function KanbanBoard({
   const [projects, setProjects] = useState(initialProjects);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [formRequest, setFormRequest] = useState<StageFormRequest | null>(null);
+  const [errors,setErrors]=useState<Record<string,string>>({});
+  const inflight=useRef(new Set<string>());
+  const retries=useRef<Record<string,ProjectStagePatch>>({});
 
   // Синхронизация с сервером: фильтры/этапы меняются на сервере, а
   // перетаскивание в «Завершён»/«Отказ» при активной галочке убирает
@@ -213,17 +217,19 @@ export function KanbanBoard({
     projectId: string,
     fromStage: ProjectStage,
     toStage: ProjectStage,
-    extras?: Parameters<typeof changeProjectStage>[2],
+    extras?: StageExtras,
   ) {
-    applyStage(projectId, toStage);
-    const result = await changeProjectStage(projectId, toStage, extras);
-    if (!result.ok) {
-      applyStage(projectId, fromStage); // откат оптимистичного обновления
-      toast.error(result.error ?? "Не удалось сменить этап");
-      return false;
-    }
-    toast.success(`Этап: ${stageLabels[toStage]}`);
-    return true;
+    if(inflight.current.has(projectId))return false;
+    inflight.current.add(projectId);setErrors({});
+    const candidate={projectId,toStage,expectedStage:fromStage,extras};
+    if(!retries.current[projectId]||JSON.stringify({...retries.current[projectId],clientMutationId:undefined})!==JSON.stringify(candidate))retries.current[projectId]={...candidate,clientMutationId:crypto.randomUUID()};
+    try {
+      const result=await patchProjectStage(retries.current[projectId]);
+      if(!result.ok){delete retries.current[projectId];setErrors(result.errors??{});toast.error(result.error??"Не удалось сменить статус");return false;}
+      delete retries.current[projectId];applyStage(projectId,result.stage??toStage);
+      toast.success(`Статус: ${stageLabels[toStage]}`);return true;
+    } catch {toast.error("Ответ не получен. Повторите сохранение");return false;}
+    finally {inflight.current.delete(projectId);}
   }
 
   function onDragStart(event: DragStartEvent) {
@@ -280,7 +286,7 @@ export function KanbanBoard({
       </DndContext>
 
       <StageFormDialog
-        request={formRequest}
+        request={formRequest} errors={errors}
         onClose={() => setFormRequest(null)}
         onSubmit={async (request, values) => {
           const success = await moveTo(
