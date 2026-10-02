@@ -261,6 +261,7 @@ test("v2 покрытая уже оплаченная монтажная раб�
     work: {findMany: async () => [{id:"w",title:"Оплаченная работа",tasks:[{id:"task",projectId:"project",productId:"p"}]}]},
     payrollEntry: {findMany: async () => [{workId:null,taskId:"task"}],create: async () => {throw Error("Paid covered work must not accrue twice");}},
     productPercentageCompletionShare: {create: async () => ({id:"share"})},
+    productPercentageConfig: {findMany: async () => []},
     domainEvent: {create: async () => {throw Error("Protected history must not emit new earning");}},
     changeLog: {create: async () => ({})},
   } as unknown as Prisma.TransactionClient;
@@ -277,7 +278,7 @@ test("retired transfer отказывает до любых операций д�
   await assert.rejects(transferProductPercentageCore({...actor,roles:["WORKER"]},input,tx),/больше недоступна/);
 });
 
-test("единый статусный handler сохраняет manager DONE с двумя terminal snapshots и проверяет B3D инженеру", async () => {
+test("единый статусный handler сохраняет manager DONE с тремя terminal snapshots и проверяет B3D инженеру", async () => {
   const product = { id: "p", projectId: "project", number: "1.1", title: "Изделие", status: "DESIGN",
     quantity: 3, engineerId: "engineer", noModel: false, expectedPrice: null, files: [] as { id: string }[],
     percentageConfigs: [], stagePayPools: [], project: { currency: "BYN" } };
@@ -302,10 +303,10 @@ test("единый статусный handler сохраняет manager DONE с
   const moved = await changeProductStatusTransaction(tx, manager, "p", "DONE");
   assert.equal(moved.ok, true); assert.equal(product.status, "DONE");
   assert.deepEqual(completions.map((row) => [row.kind, row.state]),
-    [["ENGINEERING", "SKIPPED_ONCE"], ["INSTALLATION", "SKIPPED_ONCE"]]);
-  assert.deepEqual(writes, ["status", "audit", "audit", "history", "audit", "event"]);
+    [["ENGINEERING", "SKIPPED_ONCE"], ["ASSEMBLY", "SKIPPED_ONCE"], ["INSTALLATION", "SKIPPED_ONCE"]]);
+  assert.deepEqual(writes, ["status", "audit", "audit", "audit", "history", "audit", "event"]);
   assert.equal((await changeProductStatusTransaction(tx, manager, "p", "DONE")).ok, true);
-  assert.equal(completions.length, 2);
+  assert.equal(completions.length, 3);
 });
 
 test("после SKIPPED_ONCE менеджер настраивает ставку, но цикл статусов не начисляет задним числом", async () => {

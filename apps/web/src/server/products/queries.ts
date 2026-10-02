@@ -138,6 +138,7 @@ async function fetchProductRows(
     include: {
       engineer: { select: { id: true, name: true } },
       mounter: { select: { id: true, name: true } },
+      assembler: { select: { id: true, name: true } },
       files: { where: { fileName: { endsWith: ".b3d", mode: "insensitive" } }, select: { id: true }, take: 1 },
       sketchFile: productSketchProjection(actor),
       percentageConfigs: { where: { kind: "ENGINEERING" }, select: { participants: { where: { userId: actor.id }, select: { id: true } } } },
@@ -270,6 +271,7 @@ export async function getProductFor(
       surveyor: { select: { id: true, name: true, position: true, phone: true } },
       engineer: { select: { id: true, name: true, position: true, phone: true } },
       mounter: { select: { id: true, name: true, position: true, phone: true } },
+      assembler: { select: { id: true, name: true, position: true, phone: true } },
       sketchFile: productSketchProjection(actor),
       tasks: {
         where: taskVisibilityWhere(actor),

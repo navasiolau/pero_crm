@@ -22,11 +22,11 @@ export async function changeProductStatusTransaction(tx: Prisma.TransactionClien
     hasB3d: product.files.length > 0, noModel: product.noModel });
   if (!decision.allowed) return { ok: false as const, error: decision.error ?? "Недостаточно прав" };
   if (product.status === toStatus) return { ok: true as const, product, eventId: null,
-    captured: [] as ("ENGINEERING" | "INSTALLATION")[], percentageEffects: {eventIds:[],earnings:[]} as PercentageAccrualEffects };
+    captured: [] as ("ENGINEERING" | "ASSEMBLY" | "INSTALLATION")[], percentageEffects: {eventIds:[],earnings:[]} as PercentageAccrualEffects };
   const fromStatus = product.status;
   await tx.product.update({ where: { id: productId }, data: { status: toStatus, statusChangedAt: new Date() } });
   const kinds = percentageCompletionKinds(fromStatus, toStatus, hasAnyRole(actor.roles, MANAGER_ROLES));
-  const captured: ("ENGINEERING" | "INSTALLATION")[] = [];
+  const captured: ("ENGINEERING" | "ASSEMBLY" | "INSTALLATION")[] = [];
   const percentageEffects: PercentageAccrualEffects = {eventIds:[],earnings:[]};
   for (const kind of kinds) {
     const state=await captureProductPercentageCompletion(tx, actor, productId, kind, toStatus, percentageEffects);

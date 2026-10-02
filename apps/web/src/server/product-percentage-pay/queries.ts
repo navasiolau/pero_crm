@@ -1,5 +1,6 @@
 import { Prisma, type PrismaClient, type Role } from "@prisma/client";
 import type { ProductPercentageView, ProductPercentageSectionView } from "@/lib/product-percentage-view";
+import { PERCENTAGE_STAGE_POLICY } from "./stage-policy";
 import { readWorkReview } from "./contracts";
 import { hasAnyRole, MANAGER_ROLES } from "@/lib/roles";
 import { prisma } from "@/lib/prisma";
@@ -10,7 +11,7 @@ export async function getProductPercentageView(actor: { id: string; roles: Role[
   database: Reader = prisma): Promise<ProductPercentageView> {
   const visibilityActor = await resolveVisibilityActor(database, actor);
   const product = await database.product.findFirst({ where: { AND: [{ id: productId }, productVisibilityWhere(visibilityActor)] },
-    include: { project: { select: { currency: true } }, engineer: { select: { id:true, name: true, active:true, roles:true } }, mounter: { select: { id:true,name:true,active:true,roles:true } },
+    include: { project: { select: { currency: true } }, engineer: { select: { id:true, name: true, active:true, roles:true } }, mounter: { select: { id:true,name:true,active:true,roles:true } },assembler: { select: {id:true,name:true,active:true,roles:true} },
       percentageConfigs: { include: { participants: { include: { user: { select: { name: true } } } } } },
       percentageCompletions: { include: { shares: true } },
       stagePayPools: { where: { kind: "ENGINEERING" }, include: { settlement: true } },
@@ -22,8 +23,9 @@ export async function getProductPercentageView(actor: { id: string; roles: Role[
   if (!product) throw new Error("Изделие не найдено");
   const manager = hasAnyRole(actor.roles, MANAGER_ROLES);
   const financeView = hasFullProjectVisibility(visibilityActor);
-  const [engineers, mounters] = await Promise.all([
+  const [engineers,assemblers,mounters] = await Promise.all([
     database.user.findMany({ where: { active: true, roles: { hasSome: ["ENGINEER"] } }, select: { id: true, name: true } }),
+    database.user.findMany({ where: { active: true, roles: { hasSome: ["WORKER"] } }, select: {id:true,name:true} }),
     database.user.findMany({ where: { active: true, roles: { hasSome: ["MOUNTER"] } }, select: { id: true, name: true } }),
   ]);
   const workIds = manager ? product.works.map((work) => work.id) : [];
@@ -31,14 +33,15 @@ export async function getProductPercentageView(actor: { id: string; roles: Role[
   const paid = manager && workIds.length ? await database.payrollEntry.findMany({ where: {
     OR: [{ workId: { in: workIds } }, { taskId: { in: taskIds } }],
   }, select: { workId: true, taskId: true } }) : [];
-  const sections = Object.fromEntries((["ENGINEERING", "INSTALLATION"] as const).map((kind) => {
+  const sections = Object.fromEntries((["ENGINEERING","ASSEMBLY", "INSTALLATION"] as const).map((kind) => {
+    const policy=PERCENTAGE_STAGE_POLICY[kind];
     const config = product.percentageConfigs.find((row) => row.kind === kind);
     const completion = product.percentageCompletions.find((row) => row.kind === kind);
     const editableAfterSkip = completion?.state === "SKIPPED_ONCE";
     const displayCompletion = editableAfterSkip ? null : completion;
     const pool = kind === "ENGINEERING" ? product.stagePayPools.at(0) : null;
-    const assigneeUser = kind === "ENGINEERING" ? product.engineer : product.mounter;
-    const assignee = assigneeUser ? {userId:kind === "ENGINEERING" ? product.engineerId! : product.mounterId!,name:assigneeUser.name,active:assigneeUser.active,eligible:assigneeUser.roles?.includes(kind === "ENGINEERING" ? "ENGINEER" : "MOUNTER") ?? false} : null;
+    const assigneeUser = product[policy.recipient];
+    const assignee = assigneeUser ? {userId:product[policy.assignment]!,name:assigneeUser.name,active:assigneeUser.active,eligible:assigneeUser.roles?.includes(policy.role) ?? false} : null;
     const quantity=Number.isSafeInteger(product.quantity)&&product.quantity>0?product.quantity:null;
     const productTotal=product.expectedPrice!==null&&quantity!==null?new Prisma.Decimal(product.expectedPrice.toString()).mul(quantity).toFixed(2):null;
     let draftTotal:string|null=null;
@@ -61,9 +64,9 @@ export async function getProductPercentageView(actor: { id: string; roles: Role[
       quantity: completion ? completion.quantitySnapshot??null : quantity,
       productTotal: financeView ? completion ? completion.totalSnapshot?.toString()??null : productTotal : null,
       calculationVersion: completion?.calculationVersion===2 ? 2 : completion ? 1 : 2,
-      workReview: manager ? review : [], canReview: manager&&!completion&&kind==="INSTALLATION",
-      legacyWorkCandidates: manager&&kind==="INSTALLATION" ? product.works.filter(work=>work.paymentKind==="LEGACY").map(work=>({id:work.id,title:work.title,paid:paid.some(entry=>entry.workId===work.id||work.tasks.some(task=>task.id===entry.taskId)),classification:review.find(row=>row.workId===work.id)?.classification??null})) : [],
-      recipientCandidates: manager ? (kind==="ENGINEERING"?engineers:mounters).map(user=>({userId:user.id,name:user.name})) : [],
+      workReview: manager ? review : [], canReview: manager&&!completion&&policy.requiresWorkReview,
+      legacyWorkCandidates: manager&&policy.requiresWorkReview ? product.works.filter(work=>work.paymentKind==="LEGACY").map(work=>({id:work.id,title:work.title,paid:paid.some(entry=>entry.workId===work.id||work.tasks.some(task=>task.id===entry.taskId)),classification:review.find(row=>row.workId===work.id)?.classification??null})) : [],
+      recipientCandidates: manager ? (kind==="ENGINEERING"?engineers:kind==="ASSEMBLY"?assemblers:mounters).map(user=>({userId:user.id,name:user.name})) : [],
       kind, state: completion?.state ?? (pool?.state === "SETTLED" || pool?.state === "LEGACY_PROTECTED" ? "LEGACY_PROTECTED" : "DRAFT"),
       ratePercent: financeView ? displayCompletion ? displayCompletion.ratePercentSnapshot?.toString()??null : config?.ratePercent?.toString()??null : null,
       price: financeView ? displayCompletion ? displayCompletion.priceSnapshot?.toString()??null : product.expectedPrice?.toString()??null : null,

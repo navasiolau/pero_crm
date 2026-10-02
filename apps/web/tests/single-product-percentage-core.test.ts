@@ -9,8 +9,8 @@ function fixture(rate:string|null='5',price:string|null='1000',recipient=true){
  const completions:Record<string,unknown>[]=[];const payroll:Record<string,unknown>[]=[];const logs:Record<string,unknown>[]=[];
  const product={status:'DESIGN' as import('@prisma/client').ProductStatus,noModel:true,files:[],title:'P',id:'p',number:'1.1',projectId:'project',quantity:3,expectedPrice:price,engineerId:recipient?'engineer':null,mounterId:recipient?'mounter':null,
  engineer:recipient?{id:'engineer',name:'Engineer',active:true,roles:['ENGINEER']}:null,mounter:recipient?{id:'mounter',name:'Mounter',active:true,roles:['MOUNTER']}:null,
- project:{currency:'BYN'},percentageConfigs:[{id:'cfg',kind:'ENGINEERING',ratePercent:rate,revision:2,workReview:null as unknown,participants:[]}],stagePayPools:[]};
- const tx={product:{findUnique:async()=>product,update:async({data}:{data:{status:import('@prisma/client').ProductStatus}})=>{product.status=data.status;return product}},productPercentageCompletion:{findUnique:async({where}:{where:{productId_kind:{kind:string}}})=>completions.find(row=>row.kind===where.productId_kind.kind)??null,create:async({data}:{data:Record<string,unknown>})=>{const row={id:'completion',...data};completions.push(row);return row}},
+ project:{currency:'BYN'},percentageConfigs:[{id:'cfg',kind:'ENGINEERING',ratePercent:rate,revision:2,workReview:null as unknown,participants:[]},{id:'installcfg',kind:'INSTALLATION',ratePercent:rate,revision:2,workReview:null as unknown,participants:[]}],stagePayPools:[]};
+ const tx={productPercentageConfig:{findMany:async()=>[]},product:{findUnique:async({include}:{include?:{percentageConfigs?:{where?:{kind?:string}}}}={})=>({...product,percentageConfigs:include?.percentageConfigs?.where?.kind?product.percentageConfigs.filter(row=>row.kind===include.percentageConfigs!.where!.kind):product.percentageConfigs}),update:async({data}:{data:{status:import('@prisma/client').ProductStatus}})=>{product.status=data.status;return product}},productPercentageCompletion:{findUnique:async({where}:{where:{productId_kind:{kind:string}}})=>completions.find(row=>row.kind===where.productId_kind.kind)??null,create:async({data}:{data:Record<string,unknown>})=>{const row={id:'completion',...data};completions.push(row);return row}},
  productPercentageCompletionShare:{create:async({data}:{data:Record<string,unknown>})=>({id:'share',...data})},user:{findUnique:async({where}:{where:{id:string}})=>where.id==='engineer'?product.engineer:product.mounter},
  payrollEntry:{create:async({data}:{data:Record<string,unknown>})=>{payroll.push(data);return{id:'payroll'}}},domainEvent:{create:async()=>({id:'event'})},changeLog:{create:async({data}:{data:Record<string,unknown>})=>{if(failAudit)throw new Error('audit unavailable');logs.push(data);return{id:'log'}}},work:{findMany:async()=>[]},task:{findFirst:async()=>null},productStatusHistory:{create:async({data}:{data:unknown})=>{history.push(data);return{id:'history'}}}} as unknown as Prisma.TransactionClient;
  return{tx,product,completions,payroll,logs,history,failAudit:()=>{failAudit=true}};
@@ -32,9 +32,9 @@ test('zero rate or price produces settled zero withoutPayroll, missingpositiveba
 });
 
 test('directmanagerDONE closesboth thresholds once, return/reclamation neverpayagain',async()=>{
- const f=fixture();const result=await changeProductStatusTransaction(f.tx,actor,'p','DONE');assert.ok(result.ok);assert.equal(f.completions.length,2);assert.equal(f.payroll.length,2);
+ const f=fixture();const result=await changeProductStatusTransaction(f.tx,actor,'p','DONE');assert.ok(result.ok);assert.equal(f.completions.length,3);assert.equal(f.payroll.length,2);
  for(const status of ['RECLAMATION','DESIGN','PRODUCTION','DONE'] as const)assert.equal((await changeProductStatusTransaction(f.tx,actor,'p',status)).ok,true);
- assert.equal(f.completions.length,2);assert.equal(f.payroll.length,2);
+ assert.equal(f.completions.length,3);assert.equal(f.payroll.length,2);
 });
 test('status/completion/payroll are inside suppliedtransaction and rollback together on auditfailure',async()=>{
  const f=fixture();f.failAudit();
@@ -58,7 +58,7 @@ test('actualLEGACY Work paidviaTask requires exactreview, coveredprotects andind
  }
 });
 test('managementlaterthreshold closesmissing previous stage whileexistingoldmarker remainsimmutable',async()=>{
- const f=fixture();f.product.status='PRODUCTION';const first=await changeProductStatusTransaction(f.tx,actor,'p','DELIVERY');assert.ok(first.ok);assert.equal(f.completions.length,1);assert.equal(f.payroll.length,1);
+ const f=fixture();f.product.status='PRODUCTION';const first=await changeProductStatusTransaction(f.tx,actor,'p','DELIVERY');assert.ok(first.ok);assert.equal(f.completions.length,2);assert.equal(f.payroll.length,1);
  const g=fixture();g.completions.push({id:'legacy',kind:'ENGINEERING',state:'LEGACY_PROTECTED',calculationVersion:1,priceSnapshot:null});const original=structuredClone(g.completions[0]);
  assert.equal((await changeProductStatusTransaction(g.tx,actor,'p','PRODUCTION')).ok,true);assert.deepEqual(g.completions[0],original);assert.equal(g.payroll.length,0);
 });
