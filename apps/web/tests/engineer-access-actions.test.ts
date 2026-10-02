@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createRequire, Module } from "node:module";
-import { before, test } from "node:test";
+import { before, beforeEach, test } from "node:test";
 import type { PrismaClient, Role } from "@prisma/client";
 import { engineerFixture, fixtureModel } from "./helpers/visibility-fixture";
 
@@ -26,6 +26,8 @@ let timeActions: typeof import("../src/server/time/actions");
 let fileActions: typeof import("../src/server/files/actions");
 let fileRoute: typeof import("../src/app/api/files/[id]/route");
 let uploadRoute: typeof import("../src/app/api/files/upload/route");
+
+beforeEach(() => { writes.length = 0; storage.length = 0; roles = ["ENGINEER"]; });
 
 before(() => {
   const db = {
@@ -104,7 +106,7 @@ test("hidden dependency blocks real status action without disclosing its title",
 
 test("real file download, thumbnail and delete deny hidden IDs before storage access", async () => {
   roles = ["ENGINEER"];
-  for (const name of ["foreign", "production", "cross-task"]) {
+  for (const name of ["foreign", "cross-task"]) {
     const id = `file-${name}`;
     for (const suffix of ["", "?thumb=1"]) {
       const response = await fileRoute.GET(new Request(`http://example.invalid/api/files/${id}${suffix}`), { params: Promise.resolve({ id }) });
@@ -112,6 +114,20 @@ test("real file download, thumbnail and delete deny hidden IDs before storage ac
     }
     assert.equal((await fileActions.deleteFile(id)).ok, false);
   }
+  assert.deepEqual(writes, []);
+  assert.deepEqual(storage, []);
+});
+
+test("current assigned engineer reads production originals and thumbnails but cannot delete them", async () => {
+  const id = "file-production";
+  for (const suffix of ["", "?thumb=1"]) {
+    const response = await fileRoute.GET(new Request(`http://example.invalid/api/files/${id}${suffix}`), { params: Promise.resolve({ id }) });
+    assert.equal(response.status, 200);
+  }
+  assert.equal(storage.filter(call => call.startsWith("get:")).length, 2);
+  assert.deepEqual(writes, []);
+  storage.length = 0;
+  assert.equal((await fileActions.deleteFile(id)).ok, false);
   assert.deepEqual(writes, []);
   assert.deepEqual(storage, []);
 });
