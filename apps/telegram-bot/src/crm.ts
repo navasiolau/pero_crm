@@ -20,7 +20,7 @@ export interface ProjectRef {
 
 export interface ProjectBaseline {
   title: string; clientId: string; managerId: string | null; address: string | null;
-  delivery: string | null; unloading: string | null; installation: string | null; initialPrice: string | null; currency: string;
+  delivery: string | null; unloading: string | null; installation: string | null; currency: string;
 }
 export interface ProjectCard {
   fullBaseline: ProjectBaseline;
@@ -31,7 +31,6 @@ export interface ProjectCard {
   stageChangedAt: string;
   currency: string;
   address: string | null;
-  initialPrice: number | null;
   client: string;
   clientPhone: string;
   managerName: string | null;

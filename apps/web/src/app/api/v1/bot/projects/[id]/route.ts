@@ -73,7 +73,6 @@ export async function GET(
       stageChangedAt: project.stageChangedAt,
       currency: project.currency,
       address: project.address,
-      initialPrice: project.initialPrice === null ? null : Number(project.initialPrice),
       client: displayClientName(project.client),
       clientPhone: project.client.phone,
       managerName: project.manager?.name ?? null,

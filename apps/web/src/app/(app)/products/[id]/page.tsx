@@ -120,7 +120,7 @@ export default async function ProductPage({
           </div>}
           details={<ProductInlineDetails canManage={canManage} canEditTech={canEditTech} showAmount={showAmount} currency={product.project.currency}
             status={<div className="min-w-0 space-y-2">
-              <ProductHeader product={{ id: product.id, number: product.number, title: product.title, kind: product.kind, status: product.status, expectedPrice: showAmount ? product.expectedPrice?.toString() ?? null : null, quantity: product.quantity, initialPrice: null, description: product.description, projectId: product.project.id, engineerId: product.engineerId }}
+              <ProductHeader product={{ id: product.id, number: product.number, title: product.title, kind: product.kind, status: product.status, expectedPrice: showAmount ? product.expectedPrice?.toString() ?? null : null, quantity: product.quantity, description: product.description, projectId: product.project.id, engineerId: product.engineerId }}
                 currency={product.project.currency} canManage={canManage} showAmount={showAmount} actorRoles={role} hasB3d={percentageView.hasB3d} noModel={percentageView.noModel} isEngineeringParticipant={percentageView.sections.ENGINEERING.ownMember !== null} />
               {showMaterials && materialsData?.hasShortage ? <Badge variant="destructive"><TriangleAlert />Нехватка материалов</Badge> : null}
             </div>}

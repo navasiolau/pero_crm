@@ -9,6 +9,7 @@ import { productLineTotal } from "@/lib/product-quantity";
 import { productEditWhere, resolveVisibilityActor } from "@/server/access/visibility";
 import { withTaskTransaction, type TaskTransaction } from "@/server/tasks/transaction";
 import { lockProductRow, recalculateQuantity } from "./quantity-core";
+import { initialPriceCapture, newProductInitialPrice } from "./initial-price";
 import type { DomainActor } from "../projects/core";
 import { malformedProductPatch, productPatchSchema, type ProductPatch, type ProductPatchResult, type ProductPatchValue, type ProductPatchDerived } from "./patch-contract";
 export const createSchema = z.object({
@@ -17,11 +18,10 @@ export const createSchema = z.object({
   quantity: z.number().int("Количество должно быть целым").min(1, "Количество должно быть не меньше 1").max(2_147_483_647, "Слишком большое количество изделий").default(1),
   kind: z.string().optional(),
   expectedPrice: z.number().nonnegative("Цена не может быть отрицательной").optional(),
-  initialPrice: z.number().nonnegative("Первоначальная цена не может быть отрицательной").optional(),
   description: z.string().optional(),
   // Инженер изделия — ответственен за конкретное изделие (§10)
   engineerId: z.string().optional(),
-});
+}).strict();
 
 async function nextProductSuffixInt(
   projectId: string,
@@ -44,22 +44,17 @@ export const updateSchema = z.object({
   quantity: z.number().int("Количество должно быть целым").min(1, "Количество должно быть не меньше 1").max(2_147_483_647, "Слишком большое количество изделий").optional(),
   kind: z.string().nullable().optional(),
   expectedPrice: z.number().nonnegative("Цена не может быть отрицательной").nullable().optional(),
-  initialPrice: z
-    .number()
-    .nonnegative("Первоначальная цена не может быть отрицательной")
-    .nullable()
-    .optional(),
   description: z.string().nullable().optional(),
   engineerId: z.string().nullable().optional(),
-});
+}).strict();
 
 export type CreateProductInput = z.input<typeof createSchema>;
 export type UpdateProductInput = z.infer<typeof updateSchema>;
-type ProductValues = Omit<UpdateProductInput, "expectedPrice" | "initialPrice"> & {expectedPrice?: string | number | null; initialPrice?: string | number | null};
+type ProductValues = Omit<UpdateProductInput, "expectedPrice"> & {expectedPrice?: string | number | null};
 export type ProductUpdateBaseline = Partial<Record<keyof UpdateProductInput, ProductPatchValue>>;
 const canonical = (field: string, value: unknown): ProductPatchValue => {
   if (value === null || value === undefined) return null;
-  if (field === "expectedPrice" || field === "initialPrice") return new Prisma.Decimal(String(value)).toFixed(2);
+  if (field === "expectedPrice") return new Prisma.Decimal(String(value)).toFixed(2);
   if (field === "quantity") return Number(value);
   return String(value);
 };
@@ -70,14 +65,14 @@ export async function createProductCore(actor: DomainActor, input: CreateProduct
   const parsed = createSchema.safeParse(input);
   if (!parsed.success) return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Ошибка данных" };
   const data = parsed.data;
-  try { productLineTotal(data.expectedPrice ?? null, data.quantity); productLineTotal(data.initialPrice ?? null, data.quantity); }
+  try { productLineTotal(data.expectedPrice ?? null, data.quantity); }
   catch (error) { return { ok: false as const, error: error instanceof Error ? error.message : "Некорректная сумма партии" }; }  const mutation = await transaction(async (tx) => {
   const project = await tx.project.findUnique({
     where: { id: data.projectId },
     select: { id: true, number: true, currency: true },
   });
   if (!project) return { ok: false as const, error: "Проект не найден" };
-  if (data.expectedPrice !== undefined || data.initialPrice !== undefined) {
+  if (data.expectedPrice !== undefined) {
     try { assertProjectMoneyCurrency(project.currency); }
     catch (error) { return { ok: false as const, error: error instanceof Error ? error.message : "Валюта проекта не подготовлена" }; }
   }
@@ -95,7 +90,7 @@ export async function createProductCore(actor: DomainActor, input: CreateProduct
       quantity: data.quantity,
       kind: data.kind?.trim() || null,
       expectedPrice: data.expectedPrice,
-      initialPrice: data.initialPrice,
+      ...newProductInitialPrice(data.expectedPrice),
       description: normalizeProductDescription(data.description),
       engineerId: data.engineerId || null,
       createdById: actor.id,
@@ -112,7 +107,8 @@ export async function createProductCore(actor: DomainActor, input: CreateProduct
     entity: "product",
     entityId: product.id,
     action: "create",
-    newValue: { number, title: data.title, quantity: data.quantity, project: project.number },
+    newValue: { number, title: data.title, quantity: data.quantity, project: project.number,
+      initialPrice: product.initialPrice?.toString() ?? null, initialPriceCaptureEligible: data.expectedPrice === undefined },
   } });
   return { ok: true as const, product };
   });
@@ -123,7 +119,7 @@ async function updateProductValues(actor: DomainActor, productId: string, data: 
     const visibilityActor = hasAnyRole(actor.roles, MANAGER_ROLES) ? actor : await resolveVisibilityActor(tx, actor);
     const before = await tx.product.findFirst({ where: { AND: [{ id: productId }, productEditWhere(visibilityActor)] } });
     if (!before) return { ok: false as const, error: "Изделие не найдено" };
-    if (data.expectedPrice !== undefined || data.initialPrice !== undefined || data.quantity !== undefined) {
+    if (data.expectedPrice !== undefined || data.quantity !== undefined) {
       const project = await tx.project.findUnique({ where: { id: before.projectId }, select: { currency: true } });
       if (!project) return { ok: false as const, error: "Проект не найден" };
       assertProjectMoneyCurrency(project.currency);
@@ -140,11 +136,17 @@ async function updateProductValues(actor: DomainActor, productId: string, data: 
     const oldCount = before.quantity ?? 1;
     const count = data.quantity ?? oldCount;
     productLineTotal(data.expectedPrice === undefined ? before.expectedPrice ?? null : data.expectedPrice, count);
-    productLineTotal(data.initialPrice === undefined ? before.initialPrice ?? null : data.initialPrice, count);
     if (data.engineerId && data.engineerId !== before.engineerId && !await tx.user.findFirst({ where: { id: data.engineerId, active: true, roles: { hasSome: ["ENGINEER"] } }, select: { id: true } }))
       return { ok: false as const, error: "Выберите активного сотрудника с ролью инженера" };
     if (count !== oldCount) await recalculateQuantity(tx, { ...before, quantity: oldCount }, count);
-    await tx.product.update({ where: { id: productId }, data });
+    const capture = initialPriceCapture(before, data.expectedPrice);
+    await tx.product.update({ where: { id: productId }, data: { ...data, ...capture } });
+    if ("initialPrice" in capture) await tx.changeLog.create({ data: {
+      actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
+      entity: "product", entityId: productId, action: "initialPrice.capture",
+      oldValue: { initialPrice: null, initialPriceCaptureEligible: true },
+      newValue: { initialPrice: capture.initialPrice.toString(), initialPriceCaptureEligible: false },
+    } });
     if ((data.expectedPrice !== undefined && String(data.expectedPrice) !== String(before.expectedPrice)) ||
         (data.engineerId !== undefined && data.engineerId !== before.engineerId)) await tx.productStagePayPool.updateMany({
       where: { productId, kind: "ENGINEERING", state: "DRAFT" }, data: { revision: { increment: 1 } },
@@ -153,6 +155,7 @@ async function updateProductValues(actor: DomainActor, productId: string, data: 
   }
 
 export async function updateProductCore(actor: DomainActor, productId: string, input: UpdateProductInput, baseline?: ProductUpdateBaseline, transaction: TaskTransaction = withTaskTransaction) {
+  if (baseline && Object.prototype.hasOwnProperty.call(baseline, "initialPrice")) return { ok: false as const, error: "Первоначальная цена недоступна для изменения" };
   if (!baseline) return { ok: false as const, error: "Обновите форму: требуется исходное значение изменённых полей" };
   const parsed = updateSchema.safeParse(input);
   if (!parsed.success) return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Ошибка данных" };

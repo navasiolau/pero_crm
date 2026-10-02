@@ -28,7 +28,7 @@ interface Session {
 type Dialog =
   | {
       kind: "newProject";
-      step: "title" | "client" | "manager" | "initialPrice";
+      step: "title" | "client" | "manager";
       title: string;
       clientId?: string;
       managerId?: string | null;
@@ -67,7 +67,7 @@ type Dialog =
       kind: "edit";
       projectId: string;
       projectNumber: string;
-      field: "title" | "address" | "initialPrice" | "manager";
+      field: "title" | "address" | "manager";
       expectedAddress?: string | null;
       expectedBaseline?: ProjectBaseline;
       clientMutationId?: string; submittedValue?: string;
@@ -244,7 +244,7 @@ async function handleCommand(
       });
       await reply(
         chatId,
-        "Создание проекта.\n1/4 Название заказа:",
+        "Создание проекта.\n1/3 Название заказа:",
         [[CANCEL_BUTTON]],
       );
       return;
@@ -389,7 +389,7 @@ async function newProjectText(
       dialog.title = text;
       dialog.step = "client";
       setDialog(chatId, dialog);
-      await reply(chatId, "2/4 Клиент — введите имя/фамилию или телефон для поиска:", [
+      await reply(chatId, "2/3 Клиент — введите имя/фамилию или телефон для поиска:", [
         [CANCEL_BUTTON],
       ]);
       return;
@@ -412,30 +412,6 @@ async function newProjectText(
           })),
           1,
         ),
-      );
-      return;
-    }
-    case "initialPrice": {
-      const value = text === "-" || text === "—" ? null : parseAmount(text);
-      if (text !== "-" && text !== "—" && value === null) {
-        await reply(chatId, "Сумма не распознана (пример: 12500 или 12500,50), либо «—»:");
-        return;
-      }
-      setDialog(chatId, null);
-      const input: Record<string, unknown> = {
-        title: dialog.title,
-        clientId: dialog.clientId,
-      };
-      if (dialog.managerId) input.managerId = dialog.managerId;
-      if (value !== null) input.initialPrice = value;
-      const result = await crm.createProject(session.userId, input);
-      if (!result.ok) {
-        await reply(chatId, `❌ ${result.error ?? "Не удалось создать проект"}`);
-        return;
-      }
-      await reply(
-        chatId,
-        `✅ Проект П-${result.number} «${dialog.title}» создан.\nВалюта: BYN\nПервоначальная цена: ${value === null ? "—" : formatMoney(value, "BYN")}`,
       );
       return;
     }
@@ -686,22 +662,11 @@ async function editText(
       }
       input = { address: text === "-" || text === "—" ? null : text, baseline: dialog.expectedBaseline };
       break;
-    case "initialPrice": {
-      const value = text === "-" || text === "—" ? null : parseAmount(text);
-      if (text !== "-" && text !== "—" && value === null) {
-        await reply(chatId, "Сумма не распознана (пример: 12500 или 12500,50), либо «—»:");
-        return;
-      }
-      input = { initialPrice: value };
-      break;
-    }
     default:
       setDialog(chatId, null);
       return;
   }
-  const result = dialog.field === "initialPrice"
-    ? await crm.updateProject(session.userId,dialog.projectId,{...input,baseline:dialog.expectedBaseline})
-    : await saveProjectEdit(session,dialog,dialog.field,input[dialog.field] as string|null);
+  const result = await saveProjectEdit(session,dialog,dialog.field,input[dialog.field] as string|null);
   if(result.ok)setDialog(chatId, null);
   await reply(
     chatId,
@@ -833,7 +798,6 @@ async function dispatchCallback(
         [
           { text: "Название", callback_data: `ed:${projectId}:title` },
           { text: "Адрес", callback_data: `ed:${projectId}:address` },
-          { text: "Первоначальная цена", callback_data: `ed:${projectId}:initialPrice` },
           { text: "Менеджер", callback_data: `ed:${projectId}:manager` },
         ],
         2,
@@ -842,7 +806,8 @@ async function dispatchCallback(
     return;
   }
   if (action === "ed") {
-    const [projectId, field] = rest as [string, "title" | "address" | "initialPrice" | "manager"];
+    const [projectId, field] = rest as [string, "title" | "address" | "manager"];
+    if (!["title", "address", "manager"].includes(field)) { await reply(chatId, "Это поле недоступно для редактирования."); return; }
     const card = await crm.project(session.userId, projectId);
     if(!card.project?.fullBaseline){await reply(chatId,"Откройте карточку заново: исходные значения отсутствуют");return;}
     const expectedBaseline=card.project.fullBaseline;
@@ -869,7 +834,6 @@ async function dispatchCallback(
     const prompts: Record<string, string> = {
       title: "Новое название:",
       address: "Новый адрес («—» — очистить):",
-      initialPrice: "Новая первоначальная цена («—» — очистить):",
     };
     if (field === "address" && !card.project) { await reply(chatId, "Проект не найден."); return; }
     setDialog(chatId, { kind: "edit", projectId, projectNumber, field,expectedBaseline,clientMutationId:randomUUID(), ...(field === "address" ? { expectedAddress: card.project!.address } : {}) });
@@ -888,9 +852,13 @@ async function dispatchCallback(
     }
     if (dialog?.kind === "newProject") {
       dialog.managerId = value === "none" ? null : value;
-      dialog.step = "initialPrice";
-      setDialog(chatId, dialog);
-      await reply(chatId, "4/4 Первоначальная цена — цена КП клиенту (или «—»):");
+      setDialog(chatId, null);
+      const input: Record<string, unknown> = { title: dialog.title, clientId: dialog.clientId };
+      if (dialog.managerId) input.managerId = dialog.managerId;
+      const result = await crm.createProject(session.userId, input);
+      await reply(chatId, result.ok
+        ? `✅ Проект П-${result.number} «${dialog.title}» создан.\nВалюта: BYN`
+        : `❌ ${result.error ?? "Не удалось создать проект"}`);
     }
     return;
   }
@@ -908,7 +876,7 @@ async function dispatchCallback(
     const managers = await crm.directory(session.userId, "managers");
     await reply(
       chatId,
-      "3/4 Менеджер проекта:",
+      "3/3 Менеджер проекта:",
       buttonsRow(
         [
           { text: "— без менеджера", callback_data: `mgr:none` },

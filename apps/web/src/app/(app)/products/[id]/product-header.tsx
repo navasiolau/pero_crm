@@ -30,7 +30,6 @@ export function ProductHeader({
     status: ProductStatus;
     expectedPrice: string | null;
     quantity: number;
-    initialPrice: string | null;
     description: string | null;
     projectId: string;
     engineerId: string | null;
