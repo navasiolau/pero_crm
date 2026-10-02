@@ -63,13 +63,13 @@ export function ProductHeader({
     toast.success(result.financeState === "PENDING_FX" ? `Статус сохранён: ${productStatusLabels[toStatus]}. Расчёт ожидает курса.` : `Статус: ${productStatusLabels[toStatus]}`);
     router.refresh();
   }
-  return <div className="flex min-w-0 flex-col gap-2">
+  return <div className="flex min-w-0 flex-wrap items-start gap-2">
     <div className="flex min-w-0 flex-wrap items-center gap-2">
     <Link href={backHref ?? `/projects/${product.projectId}`} aria-label="Назад к проекту" className="inline-flex size-10 shrink-0 items-center justify-center rounded-md hover:bg-muted"><ArrowLeft className="size-4" /></Link>
     <span className="shrink-0 text-sm text-muted-foreground">{product.number}</span>
     <Badge variant="outline" className={cn("border-transparent", productStatusStyles[localStatus].badge)}>{productStatusLabels[localStatus]}</Badge>
     </div>
-    <div className="flex min-w-0 flex-wrap items-center gap-2">
+    <div className="ml-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2">
     {statusError ? <p role="alert" className="max-w-full break-words text-sm text-destructive">{statusError}</p> : null}
     {canManage ? <Select value={localStatus} onValueChange={value => { const next = value as ProductStatus | undefined; if (next && next !== localStatus) startTransition(async () => { await moveStatus(next); }); }} disabled={pending}>
       <SelectTrigger className="w-48 max-w-full" aria-label="Сменить статус"><SelectValue>{productStatusLabels[localStatus]}</SelectValue></SelectTrigger>
