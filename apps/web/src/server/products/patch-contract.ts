@@ -11,15 +11,17 @@ export const productPatchSchema = z.discriminatedUnion("field", [
   variant("title", required), variant("kind", text), variant("description", text),
   variant("engineerId", text), variant("expectedPrice", money),
   variant("quantity", z.number().int().min(1).max(2_147_483_647)),
-  variant("project.clientId", required), variant("project.address", text),
-  z.object({ ...base, field: z.literal("client.phone"), value: required, expectedValue: z.string(), expectedClientId: z.string().min(1) }).strict(),
+  variant("project.clientId", required),
+  // Формат прежних callers распознаётся, но не даёт право менять Client/Project из изделия.
+  variant("project.address", text).superRefine((_value,ctx)=>ctx.addIssue({code:"custom",message:"Адрес и телефон изменяются в карточке клиента"})),
+  z.object({ ...base, field: z.literal("client.phone"), value: required, expectedValue: z.string(), expectedClientId: z.string().min(1) }).strict().superRefine((_value,ctx)=>ctx.addIssue({code:"custom",message:"Адрес и телефон изменяются в карточке клиента"})),
 ]);
 export type ProductPatch = z.infer<typeof productPatchSchema>;
 export type ProductPatchField = ProductPatch["field"];
 export type ProductPatchValue = string | number | null;
 export type ProductPatchDerived = {
   lineTotalBYN?: string | null; quantity?: number; currentUnitPrice?: string | null;
-  engineerLabel?: string | null; clientLabel?: string | null; clientId?: string; phone?: string;
+  engineerLabel?: string | null; clientLabel?: string | null; clientId?: string; phone?: string;clientAddress?:string|null;
 };
 export type MalformedProductPatchValidation = {
   kind: "validation"; malformed: true; error: string;

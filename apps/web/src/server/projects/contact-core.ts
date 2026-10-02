@@ -1,12 +1,13 @@
 import type {Prisma} from '@prisma/client';
 import type {DomainActor} from './core';
 import {mayManageContacts,patchClientPhoneInTransaction,type ContactResult} from '@/server/clients/core';
-export type ProductContactResult = ContactResult & {currentClientLabel?:string};
+export type ProductContactResult = ContactResult & {currentClientLabel?:string;clientAddress?:string|null};
 export type ProjectContactPatch = {projectId:string;field:'clientId'|'address'|'phone';value:string|null;expectedValue:string|null;expectedClientId?:string};
 export type ProductContactPatch = {productId:string;field:'clientId'|'address'|'phone';value:string|null;expectedValue:string|null;expectedClientId?:string};
 /** Порядок блокировок: Project → Client. Изделие используется только как точка доступа. */
 export async function patchProductContactInTransaction(actor:DomainActor,patch:ProductContactPatch,tx:Prisma.TransactionClient):Promise<ProductContactResult> {
  if(!mayManageContacts(actor))return{ok:false,kind:'forbidden',error:'Недостаточно прав'};
+ if(patch.field!=="clientId")return{ok:false,kind:"validation",error:"Адрес и телефон изменяются в карточке клиента"};
  const product=await tx.product.findUnique({where:{id:patch.productId},select:{projectId:true}});
  if(!product)return{ok:false,kind:'not-found',error:'Изделие не найдено'};
  return patchProjectContactInTransaction(actor,{projectId:product.projectId,field:patch.field,value:patch.value,expectedValue:patch.expectedValue,expectedClientId:patch.expectedClientId},tx);
@@ -38,10 +39,10 @@ export async function patchProjectContactInTransaction(actor:DomainActor,patch:P
  if(field==='clientId'&&(!value||typeof value!=='string'))return{ok:false,kind:'validation',error:'Выберите клиента'};
  if(project[field]!==patch.expectedValue)return{ok:false,kind:'conflict',error:'Реквизит проекта изменён другим пользователем',currentValue:project[field],currentClientId:project.clientId};
  if(project[field]===value)return{ok:true,value,changed:false,projectId,clientId:project.clientId};
- let selectedClient: {id:string;name:string;lastName:string|null;middleName:string|null;phone:string}|null=null;
+ let selectedClient: {id:string;name:string;lastName:string|null;middleName:string|null;phone:string;address:string|null}|null=null;
  if(field==='clientId'){
   await tx.$queryRaw`SELECT id FROM "Client" WHERE id = ${value} FOR UPDATE`;
-  const client=await tx.client.findUnique({where:{id:value!},select:{id:true,name:true,lastName:true,middleName:true,phone:true}});
+  const client=await tx.client.findUnique({where:{id:value!},select:{id:true,name:true,lastName:true,middleName:true,phone:true,address:true}});
   selectedClient=client;
   if(!client)return{ok:false,kind:'not-found',error:'Клиент не найден'};
  }
@@ -49,5 +50,5 @@ export async function patchProjectContactInTransaction(actor:DomainActor,patch:P
  if(update.count!==1)throw new Error('PROJECT_CONTACT_CAS_RACE');
  await tx.changeLog.create({data:{actorType:'user',actorId:actor.id,actorName:actor.name,source:actor.source,entity:'project',entityId:projectId,action:'update',field,oldValue:{[field]:project[field]},newValue:{[field]:value}}});
  await tx.domainEvent.create({data:{type:'project.updated',actor:actor.id,payload:{projectId,field}}});
- return{ok:true,value,changed:true,projectId,clientId:field==='clientId'?value!:project.clientId,...(selectedClient?{clientLabel:[selectedClient.lastName,selectedClient.name,selectedClient.middleName].filter(Boolean).join(' '),phone:selectedClient.phone}:{})};
+ return{ok:true,value,changed:true,projectId,clientId:field==='clientId'?value!:project.clientId,...(selectedClient?{clientLabel:[selectedClient.lastName,selectedClient.name,selectedClient.middleName].filter(Boolean).join(' '),phone:selectedClient.phone,clientAddress:selectedClient.address}:{})};
 }

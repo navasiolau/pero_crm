@@ -19,27 +19,27 @@ function fixture(){
  const run=async<T>(callback:()=>Promise<T>)=>{const before=structuredClone(state);try{return await callback()}catch(error){Object.assign(state,before);throw error}};
  return{state,tx,run};
 }
-test('two products share project address and client phone with no duplicated product values',async()=>{
- const f=fixture();const address=await patchProductContactInTransaction(manager,{productId:'p1',field:'address',value:'  shared address  ',expectedValue:null},f.tx);
+test('project contact CRUD retains address and phone CAS independently of product retirement',async()=>{
+ const f=fixture();const address=await patchProjectContactInTransaction(manager,{projectId:'project',field:'address',value:'  shared address  ',expectedValue:null},f.tx);
  assert.equal(address.ok,true);assert.equal(f.state.projects[0].address,'shared address');
- const conflict=await patchProductContactInTransaction(manager,{productId:'p2',field:'address',value:'Other',expectedValue:null},f.tx);assert.equal(conflict.ok,false);if(!conflict.ok)assert.equal(conflict.currentValue,'shared address');
- const phone=await patchProductContactInTransaction(manager,{productId:'p2',field:'phone',value:'200',expectedValue:'100',expectedClientId:'client'},f.tx);
+ const conflict=await patchProjectContactInTransaction(manager,{projectId:'project',field:'address',value:'Other',expectedValue:null},f.tx);assert.equal(conflict.ok,false);if(!conflict.ok)assert.equal(conflict.currentValue,'shared address');
+ const phone=await patchProjectContactInTransaction(manager,{projectId:'project',field:'phone',value:'200',expectedValue:'100',expectedClientId:'client'},f.tx);
  assert.equal(phone.ok,true);assert.equal(f.state.clients[0].phone,'200');assert.equal(f.state.audit.length,2);assert.equal(f.state.events.length,2);
  assert.match(f.state.locks[0],/Project/);assert.match(f.state.locks.at(-1)??'',/Client/);
 });
 test('client switch races against old phone without modifying either client phone',async()=>{
  const f=fixture();const switched=await patchProductContactInTransaction(manager,{productId:'p1',field:'clientId',value:'other',expectedValue:'client'},f.tx);assert.equal(switched.ok,true);
- const phone=await patchProductContactInTransaction(manager,{productId:'p2',field:'phone',value:'200',expectedValue:'100',expectedClientId:'client'},f.tx);
+ const phone=await patchProjectContactInTransaction(manager,{projectId:'project',field:'phone',value:'200',expectedValue:'100',expectedClientId:'client'},f.tx);
  assert.equal(phone.ok,false);if(!phone.ok){assert.equal(phone.kind,'conflict');assert.equal(phone.currentClientId,'other');assert.equal(phone.currentValue,'999');assert.equal(phone.currentClientLabel,'Client')}
  assert.deepEqual(f.state.clients.map(row=>row.phone),['100','999']);assert.equal(f.state.audit.length,1);
 });
 test('phone no-op and same-field conflict, legacy empty repair and blank rejection',async()=>{
- const f=fixture();const base={productId:'p1',field:'phone' as const,expectedValue:'100',expectedClientId:'client'};
- const noop=await patchProductContactInTransaction(manager,{...base,value:'100'},f.tx);assert.equal(noop.ok&&noop.changed,false);assert.equal(f.state.audit.length,0);
- await patchProductContactInTransaction(manager,{...base,value:'200'},f.tx);
- const conflict=await patchProductContactInTransaction(manager,{...base,value:'300'},f.tx);assert.equal(conflict.ok,false);assert.equal(f.state.clients[0].phone,'200');
- const blank=await patchProductContactInTransaction(manager,{...base,expectedValue:'200',value:'   '},f.tx);assert.equal(blank.ok,false);
- f.state.clients[0].phone='';assert.equal((await patchProductContactInTransaction(manager,{...base,expectedValue:'',value:'400'},f.tx)).ok,true);
+ const f=fixture();const base={projectId:'project',field:'phone' as const,expectedValue:'100',expectedClientId:'client'};
+ const noop=await patchProjectContactInTransaction(manager,{...base,value:'100'},f.tx);assert.equal(noop.ok&&noop.changed,false);assert.equal(f.state.audit.length,0);
+ await patchProjectContactInTransaction(manager,{...base,value:'200'},f.tx);
+ const conflict=await patchProjectContactInTransaction(manager,{...base,value:'300'},f.tx);assert.equal(conflict.ok,false);assert.equal(f.state.clients[0].phone,'200');
+ const blank=await patchProjectContactInTransaction(manager,{...base,expectedValue:'200',value:'   '},f.tx);assert.equal(blank.ok,false);
+ f.state.clients[0].phone='';assert.equal((await patchProjectContactInTransaction(manager,{...base,expectedValue:'',value:'400'},f.tx)).ok,true);
 });
 test('standalone client CAS changes only submitted field and rejects stale same-field writes',async()=>{
  const f=fixture();const first=await updateClientInTransaction(f.tx,manager,'client',{name:initial.name,phone:initial.phone,address:initial.address??undefined,lastName:undefined,middleName:undefined,email:'one@example.test',comment:undefined},initial);assert.equal(first.ok,true);
@@ -48,14 +48,14 @@ test('standalone client CAS changes only submitted field and rejects stale same-
 });
 test('outbox failure rolls back contacts and audit as one transaction',async()=>{
  const f=fixture();f.state.fail=true;
- await assert.rejects(f.run(()=>patchProductContactInTransaction(manager,{productId:'p1',field:'phone',value:'200',expectedValue:'100',expectedClientId:'client'},f.tx)),/outbox failure/);
+ await assert.rejects(f.run(()=>patchProjectContactInTransaction(manager,{projectId:'project',field:'phone',value:'200',expectedValue:'100',expectedClientId:'client'},f.tx)),/outbox failure/);
  assert.equal(f.state.clients[0].phone,'100');assert.equal(f.state.audit.length,0);assert.equal(f.state.events.length,0);
 });
 test('read-only office/field roles cannot see contact conflict values; union manager retains writes',async()=>{
  const f=fixture();for(const roles of [['ENGINEER'],['ACCOUNTANT'],['WORKER'],['MOUNTER'],['ENGINEER','ACCOUNTANT']] as const){
  const result=await patchProductContactInTransaction({...manager,roles:[...roles]},{productId:'p1',field:'address',value:'x',expectedValue:'hidden'},f.tx);assert.equal(result.ok,false);if(!result.ok){assert.equal(result.kind,'forbidden');assert.equal(result.currentValue,undefined)}
  }
- const result=await patchProductContactInTransaction({...manager,roles:['MANAGER','ENGINEER']},{productId:'p1',field:'address',value:'x',expectedValue:null},f.tx);assert.equal(result.ok,true);
+ const result=await patchProductContactInTransaction({...manager,roles:['MANAGER','ENGINEER']},{productId:'p1',field:'clientId',value:'other',expectedValue:'client'},f.tx);assert.equal(result.ok,true);
 });
 
 test('forbidden role cannot disclose the newly bound client phone or label',async()=>{
@@ -66,7 +66,7 @@ test('forbidden role cannot disclose the newly bound client phone or label',asyn
 });
 import {patchProjectContactInTransaction} from '../src/server/projects/contact-core';
 test('project target without products reuses shared contact CAS without manufacturing a product',async()=>{
- const f=fixture();f.tx.product.findUnique=(async()=>{throw new Error('PRODUCT_READ_FORBIDDEN_ON_PROJECT_PATH')}) as unknown as typeof f.tx.product.findUnique;
+ const f=fixture();f.tx.product.findUnique=(async()=>{throw new Error('PRODUCT_READ_FORBIDDEN_ON_PROJECT_PATH')}) as unknown as unknown as typeof f.tx.product.findUnique;
  const result=await patchProjectContactInTransaction(manager,{projectId:'project',field:'address',value:'Project address',expectedValue:null},f.tx);
  assert.equal(result.ok,true);assert.equal(f.state.projects[0].address,'Project address');assert.match(f.state.locks[0],/Project/);assert.equal(f.state.audit.length,1);assert.equal(f.state.events.length,1);
 });
@@ -78,3 +78,9 @@ test('project phone keeps binding conflict context and readonly role guards',asy
  const forbidden=await patchProjectContactInTransaction({...manager,roles:['ACCOUNTANT','ENGINEER']},{projectId:'project',field:'phone',value:'200',expectedValue:'100',expectedClientId:'client'},f.tx);
  assert.equal(forbidden.ok,false);if(!forbidden.ok){assert.equal(forbidden.kind,'forbidden');assert.equal(forbidden.currentValue,undefined);assert.equal(forbidden.currentClientId,undefined)}
 });
+
+ test('retired product address and phone are denied before any reads or locks',async()=>{
+ const f=fixture();f.tx.product.findUnique=(async()=>{throw new Error('unexpected product read')}) as unknown as typeof f.tx.product.findUnique;
+ for(const field of ['address','phone'] as const){const result=await patchProductContactInTransaction(manager,{productId:'p1',field,value:'new',expectedValue:'old',expectedClientId:'client'},f.tx);assert.equal(result.ok,false);if(!result.ok)assert.equal(result.kind,'validation');}
+ assert.equal(f.state.locks.length,0);assert.equal(f.state.audit.length,0);assert.equal(f.state.events.length,0);
+ });

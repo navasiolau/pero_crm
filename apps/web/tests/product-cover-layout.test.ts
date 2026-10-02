@@ -135,8 +135,6 @@ test("cover presentation shows clickable sketch and exact delete only, never fil
   }));
 
   assert.match(html, /lg:grid-cols-\[minmax\(0,3fr\)_minmax\(0,2fr\)\]/);
-  assert.match(html, /lg:grid-rows-\[auto_1fr\]/);
-  assert.match(html, /lg:min-h-\[calc\(100dvh-8rem\)\]/);
   assert.match(html, /aria-label="Открыть эскиз на весь экран"/);
   assert.match(html, /aria-label="Удалить эскиз"/);
   assert.match(html, /preview=cover/);
@@ -182,7 +180,6 @@ test("cover remains large when description is absent", () => {
 
   assert.match(html, /data-layout="cover"/);
   assert.match(html, /data-slot="product-cover-image"/);
-  assert.match(html, /lg:min-h-\[calc\(100dvh-8rem\)\]/);
 });
 
 test("21 empty sketch keeps permanent slot and exact upload prompt; readonly has no mutation control", () => {

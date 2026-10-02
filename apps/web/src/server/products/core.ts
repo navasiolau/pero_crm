@@ -227,7 +227,7 @@ export async function patchProductCore(actor: DomainActor, input: ProductPatch, 
         field:patch.field==="client.phone"?"phone":patch.field==="project.address"?"address":"clientId",
         value:patch.value,expectedValue:patch.expectedValue,...(patch.field==="client.phone"?{expectedClientId:patch.expectedClientId}:{})},tx);
       if(!shared.ok)return {...identity,...shared};
-      result={...identity,kind:"saved",value:shared.value,noOp:!shared.changed,derived:{clientId:shared.clientId,clientLabel:shared.clientLabel,phone:shared.phone,...(patch.field==="client.phone"?{phone:String(shared.value)}:{})}};
+      result={...identity,kind:"saved",value:shared.value,noOp:!shared.changed,derived:{clientId:shared.clientId,clientLabel:shared.clientLabel,phone:shared.phone,clientAddress:shared.clientAddress}};
     } else {
       await lockProductRow(tx,patch.productId);
       const current=await tx.product.findFirst({where:{AND:[{id:patch.productId},productEditWhere(visibilityActor)]},select:{id:true,projectId:true,title:true,kind:true,description:patch.field==="description",quantity:true,expectedPrice:true,initialPrice:true,engineerId:true,status:true}});

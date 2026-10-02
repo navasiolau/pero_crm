@@ -1,6 +1,5 @@
-import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { ArrowLeft, TriangleAlert } from "lucide-react";
+import { TriangleAlert } from "lucide-react";
 
 import { auth } from "@/auth";
 import { Badge } from "@/components/ui/badge";
@@ -99,7 +98,7 @@ export default async function ProductPage({
   const percentageProps = { productId: product.id, canManage, canViewAll: canViewAllPercentage };
   return (
     <ProductInlineProvider key={product.id} productId={product.id} initial={{
-      title: product.title, kind: product.kind, quantity: product.quantity, expectedPrice: showAmount ? product.expectedPrice?.toString() ?? null : null, engineerId: product.engineerId, description: product.description, "project.clientId": product.project.client.id, "project.address": product.project.address, "client.phone": product.project.client.phone,
+      title: product.title, kind: product.kind, quantity: product.quantity, expectedPrice: showAmount ? product.expectedPrice?.toString() ?? null : null, engineerId: product.engineerId, description: product.description, "project.clientId": product.project.client.id,
     }}>
       <ProductSinglePage
         overview={<ProductCoverClient
@@ -109,20 +108,13 @@ export default async function ProductPage({
           canDeleteCover={canEditTech && (canManage || product.files.some(file => file.id === product.sketchFile?.id && file.uploadedById === session.user.id))}
           deleteCoverAction={deleteProductSketchAction}
           header={<div className="flex min-w-0 flex-col gap-4" data-product-header="stacked">
-            <div className="flex min-w-0 items-start gap-3" data-product-title-row>
-              <Link href={`/projects/${product.project.id}`} className="mt-6 shrink-0 text-muted-foreground hover:text-foreground" aria-label="К проекту"><ArrowLeft className="size-5" /></Link>
-              <ProductInlineTitle number={product.number} canManage={canManage} />
-            </div>
-            <ProductInlineContacts canManage={canManage}
-              clients={(canManage ? clients : [{ id: product.project.client.id, name: displayClientName(product.project.client), phone: product.project.client.phone }]).map(client => ({value: client.id, label: "lastName" in client ? displayClientName(client) : client.name, hint: client.phone}))}
-              inheritedAddress={product.project.client.address} />
+            <ProductHeader product={{id:product.id,number:product.number,title:product.title,kind:product.kind,status:product.status,expectedPrice:showAmount?product.expectedPrice?.toString()??null:null,quantity:product.quantity,description:product.description,projectId:product.project.id,engineerId:product.engineerId}}
+              currency={product.project.currency} canManage={canManage} showAmount={showAmount} actorRoles={role} actorUserId={session.user.id} backHref={`/projects/${product.project.id}`} hasB3d={percentageView.hasB3d} noModel={percentageView.noModel} isEngineeringParticipant={percentageView.sections.ENGINEERING.ownMember!==null}/>
+            <ProductInlineTitle number={product.number} canManage={canManage}/>
+            <ProductInlineContacts canManage={canManage} clients={(canManage?clients:[product.project.client]).map(client=>({id:client.id,label:displayClientName(client),phone:client.phone,address:client.address}))}/>
           </div>}
           details={<ProductInlineDetails canManage={canManage} canEditTech={canEditTech} showAmount={showAmount} currency={product.project.currency}
-            status={<div className="min-w-0 space-y-2">
-              <ProductHeader product={{ id: product.id, number: product.number, title: product.title, kind: product.kind, status: product.status, expectedPrice: showAmount ? product.expectedPrice?.toString() ?? null : null, quantity: product.quantity, description: product.description, projectId: product.project.id, engineerId: product.engineerId }}
-                currency={product.project.currency} canManage={canManage} showAmount={showAmount} actorRoles={role} hasB3d={percentageView.hasB3d} noModel={percentageView.noModel} isEngineeringParticipant={percentageView.sections.ENGINEERING.ownMember !== null} />
-              {showMaterials && materialsData?.hasShortage ? <Badge variant="destructive"><TriangleAlert />Нехватка материалов</Badge> : null}
-            </div>}
+            notice={showMaterials&&materialsData?.hasShortage?<Badge variant="destructive"><TriangleAlert/>Нехватка материалов</Badge>:null}
             measurement={<ProductMeasurement projectId={product.project.id} productId={product.id} files={attachments.measurement} canEdit={canEditTech} extensions={stageConfig.enabled ? stageConfig.extensions ?? undefined : undefined} />}
             engineer={<SinglePercentageRow {...percentageProps} kind="ENGINEERING" section={percentageView.sections.ENGINEERING} assignedEngineerId={product.engineerId} editEngineer candidates={engineers.map(user => ({ id: user.id, name: user.name, active: true, roles: user.roles }))} />}
           />}
