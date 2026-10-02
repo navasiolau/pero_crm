@@ -10,6 +10,8 @@ import { productEditWhere, resolveVisibilityActor } from "@/server/access/visibi
 import { withTaskTransaction, type TaskTransaction } from "@/server/tasks/transaction";
 import { lockProductRow, recalculateQuantity } from "./quantity-core";
 import { initialPriceCapture, newProductInitialPrice } from "./initial-price";
+import { readProductPercentageDefaults } from "@/server/product-percentage-defaults/core";
+import { DEFAULT_PERCENTAGE_KINDS } from "@/server/product-percentage-defaults/contracts";
 import type { DomainActor } from "../projects/core";
 import { malformedProductPatch, productPatchSchema, type ProductPatch, type ProductPatchResult, type ProductPatchValue, type ProductPatchDerived } from "./patch-contract";
 export const createSchema = z.object({
@@ -81,6 +83,11 @@ export async function createProductCore(actor: DomainActor, input: CreateProduct
 
   const suffixInt = await nextProductSuffixInt(project.id, tx);
   const number = `${project.number}.${suffixInt}`;
+  const defaults = await readProductPercentageDefaults(tx);
+  if (Object.values(defaults.rates).some(rate => rate !== null)) {
+    try { assertProjectMoneyCurrency(project.currency); }
+    catch (error) { return { ok: false as const, error: error instanceof Error ? error.message : "Валюта проекта не подготовлена" }; }
+  }
   const product = await tx.product.create({
     data: {
       projectId: project.id,
@@ -93,6 +100,7 @@ export async function createProductCore(actor: DomainActor, input: CreateProduct
       ...newProductInitialPrice(data.expectedPrice),
       description: normalizeProductDescription(data.description),
       engineerId: data.engineerId || null,
+      percentageConfigs: { create: DEFAULT_PERCENTAGE_KINDS.map(kind => ({ kind, ratePercent: defaults.rates[kind], revision: 1 })) },
       createdById: actor.id,
       statusHistory: {
         create: { toStatus: "DESIGN", changedById: actor.id },
@@ -108,6 +116,7 @@ export async function createProductCore(actor: DomainActor, input: CreateProduct
     entityId: product.id,
     action: "create",
     newValue: { number, title: data.title, quantity: data.quantity, project: project.number,
+      percentageDefaultsRevision: defaults.revision, percentageRates: defaults.rates,
       initialPrice: product.initialPrice?.toString() ?? null, initialPriceCaptureEligible: data.expectedPrice === undefined },
   } });
   return { ok: true as const, product };
