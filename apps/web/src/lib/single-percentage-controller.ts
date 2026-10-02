@@ -1,5 +1,5 @@
 import {createInlineSaveController,type InlineSaveController,type InlineValue} from "./inline-save-controller";
-import {parsePercentageRate} from "./product-percentage-pay";
+import {parsePercentageInput} from "./percentage-rate-input";
 import {productPercentagePatchSchema,readWorkReview,type ProductPercentagePatch,type ProductPercentagePatchResult,type WorkReviewItem} from "@/server/product-percentage-pay/contracts";
 type Field=ProductPercentagePatch["field"];
 type Initial={ratePercent:string|null;assigneeId:string|null;workReview:WorkReviewItem[]};
@@ -29,7 +29,7 @@ export function createSinglePercentageControllers(options:{productId:string;kind
   controllers[field]=createInlineSaveController<InlineValue>({initialValue:initial[field],format,id:options.id,
    isUnchangedDraft:(draft,baseline)=>draft===format(baseline),
    parse:raw=>{
-    if(field==="ratePercent"){const rate=parsePercentageRate(raw.trim()?raw.trim().replace(",","."):null);return rate===null?null:rate.replace(/(\.\d*?)0+$/,"$1").replace(/\.$/,"");}
+    if(field==="ratePercent"){const rate=parsePercentageInput(raw);return rate===null?null:rate.replace(/(\.\d*?)0+$/,"$1").replace(/\.$/,"");}
     if(field==="assigneeId")return raw||null;
     const rows=readWorkReview(JSON.parse(raw));
     if(rows.length!==workIds.length||workIds.some(id=>!rows.some(row=>row.workId===id)))throw Error("Выберите решение для каждой прежней работы");
