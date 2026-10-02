@@ -5,22 +5,21 @@ import { Label } from "@/components/ui/label";
 import { InlineSelectField, InlineTextField } from "@/components/inline-fields";
 import { ProjectStageControl } from "@/components/project-stage-control";
 import { useProjectInline } from "@/components/project-inline-provider";
-import { ProjectConfirmedTotal } from "@/components/project-inline-fields";
+import type { ProductClientContact } from "@/lib/product-client-contacts";
+import { ProjectInlineContacts, ProjectConfirmedTotal } from "@/components/project-inline-fields";
 import { formatDateTime } from "@/lib/format";
 import type { SelectOption } from "../projects-view";
 export interface OverviewProject {
  id:string;number:string;stage:ProjectStage;stageChangedAt:Date;currency:string;createdAt:Date;
  refusalReason:string|null;refusalComment:string|null;reclamationReason:string|null;reclamationDescription:string|null;reclamationFault:string|null;
 }
-export function OverviewTab({project,createdByName,canManage,showAmount,clients,managers,productEngineers,doneAt}:{project:OverviewProject;createdByName:string|null;canManage:boolean;showAmount:boolean;clients:SelectOption[];managers:SelectOption[];productEngineers:SelectOption[];doneAt:string|null}) {
+export function OverviewTab({project,createdByName,canManage,showAmount,clients,managers,productEngineers,doneAt}:{project:OverviewProject;createdByName:string|null;canManage:boolean;showAmount:boolean;clients:ProductClientContact[];managers:SelectOption[];productEngineers:SelectOption[];doneAt:string|null}) {
  const inline=useProjectInline();const {controller}=inline;
  return <div className="grid min-w-0 gap-4 lg:grid-cols-2"><Card className="min-w-0"><CardHeader><CardTitle className="text-lg">Данные проекта</CardTitle></CardHeader><CardContent className="flex min-w-0 flex-col gap-3">
  <InlineTextField id="project-inline-title" label="Название заказа" controller={controller("title")} readOnly={!canManage}/>
  <div className="flex min-w-0 flex-col gap-1.5"><Label>Статус</Label><ProjectStageControl projectId={project.id} stage={inline.stage} canManage={canManage} onBeforeChange={inline.flush} onConfirmed={inline.confirmStage}/></div>
- <InlineSelectField id="project-inline-client" label="Клиент" controller={controller("clientId")} readOnly={!canManage} options={clients.map(client=>({value:client.id,label:client.name}))}/>
+<ProjectInlineContacts canManage={canManage} clients={clients}/>
  <InlineSelectField id="project-inline-manager" label="Менеджер" controller={controller("managerId")} readOnly={!canManage} options={managers.map(manager=>({value:manager.id,label:manager.name}))} allowClear/>
- <InlineTextField id="project-inline-address" label="Адрес проекта" controller={controller("address")} readOnly={!canManage}/>
- <InlineTextField id="project-inline-phone" label="Телефон клиента *" inputMode="tel" controller={controller("client.phone")} readOnly={!canManage} hint="Общее поле карточки клиента. При смене клиента черновик телефона требует подтверждения."/>
  <div className="flex min-w-0 flex-col gap-1.5"><Label>Инженеры назначенные в Изделиях</Label><div aria-readonly="true" className="min-h-9 min-w-0 break-words rounded-md border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">{productEngineers.length?productEngineers.map(engineer=>engineer.name).join(" · "):"—"}</div></div>
  {showAmount?<div className="grid min-w-0 gap-3 sm:grid-cols-3">{(["delivery","unloading","installation"] as const).map((field,index)=><InlineTextField key={field} id={`project-inline-${field}`} label={`${["Доставка","Выгрузка","Монтаж"][index]}, ${project.currency}`} inputMode="decimal" controller={controller(field)} readOnly={!canManage||project.currency!=="BYN"}/>)}</div>:null}
  </CardContent></Card><Card className="min-w-0"><CardHeader><CardTitle className="text-lg">Сведения</CardTitle></CardHeader><CardContent className="min-w-0 space-y-3 text-sm">

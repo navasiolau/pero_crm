@@ -130,7 +130,7 @@ export default async function ProjectPage({
 
   return (
     <ProjectInlineProvider key={project.id} projectId={project.id} stage={project.stage} pricingProjection={pricingProjection} initial={{
-      title: project.title, clientId: project.clientId, managerId: project.managerId, address: project.address, "client.phone": project.client.phone,
+      title: project.title, clientId: project.clientId, managerId: project.managerId,
       delivery: showOverviewAmount ? pricingProjection ? pricingProjection.delivery : project.delivery?.toString() ?? null : null, unloading: showOverviewAmount ? pricingProjection ? pricingProjection.unloading : project.unloading?.toString() ?? null : null, installation: showOverviewAmount ? pricingProjection ? pricingProjection.installation : project.installation?.toString() ?? null : null,
     }}>
     <div className="flex min-w-0 flex-col gap-4">
@@ -193,7 +193,7 @@ export default async function ProjectPage({
             }
             canManage={canManage}
             showAmount={showOverviewAmount}
-            clients={clients.map((client) => ({ id: client.id, name: displayClientName(client) }))}
+            clients={[...clients, ...(clients.some(client=>client.id===project.client.id)?[]:[project.client])].map((client) => ({ id: client.id, label: displayClientName(client), phone:client.phone, address:client.address }))}
             managers={managers.map((manager) => ({ id: manager.id, name: manager.name }))}
             productEngineers={project.products
               .map((product) => product.engineer)

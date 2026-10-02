@@ -74,7 +74,7 @@ export async function patchProjectCore(actor:DomainActor,input:ProjectPatch,tran
   if(patch.field==="clientId"||patch.field==="address"||patch.field==="client.phone"){
    const shared=await patchProjectContactInTransaction(actor,{projectId:patch.projectId,field:patch.field==="client.phone"?"phone":patch.field,value:patch.value,expectedValue:patch.expectedValue,...(patch.field==="client.phone"?{expectedClientId:patch.expectedClientId}:{})},tx);
    if(!shared.ok)return{...identity,...shared};
-   result={...identity,kind:"saved",value:shared.value,noOp:!shared.changed,derived:{clientId:shared.clientId,clientLabel:shared.clientLabel,phone:shared.phone,...(patch.field==="client.phone"?{phone:String(shared.value)}:{})}};
+   result={...identity,kind:"saved",value:shared.value,noOp:!shared.changed,derived:{clientId:shared.clientId,clientLabel:shared.clientLabel,phone:shared.phone,clientAddress:shared.clientAddress,...(patch.field==="client.phone"?{phone:String(shared.value)}:{})}};
   }else{
    const current=canonical(patch.field,project[patch.field]);if(current!==canonical(patch.field,patch.expectedValue))return{...identity,kind:"conflict",error:"Поле изменено другим пользователем",currentValue:current};
    const value=normalize(patch.field,patch.value);if(current===value)return{...identity,kind:"saved",value,noOp:true};

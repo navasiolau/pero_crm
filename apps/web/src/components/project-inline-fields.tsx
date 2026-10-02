@@ -1,5 +1,9 @@
 "use client";
-import { useSyncExternalStore } from "react";
+import { useState, useSyncExternalStore } from "react";
+import { InlineSelectField } from "@/components/inline-fields";
+import { ClientDialog } from "@/components/client-dialog";
+import { Button } from "@/components/ui/button";
+import { confirmedProductClientContacts, type ProductClientContact } from "@/lib/product-client-contacts";
 import { Badge } from "@/components/ui/badge";
 import { stageLabels, stageStyles } from "@/lib/stages";
 import { cn } from "@/lib/utils";
@@ -20,4 +24,18 @@ export function ProjectConfirmedTotal() {
  const total=confirmedProjectTotal(productsSubtotalBYN,[d.baseline===null?null:String(d.baseline),u.baseline===null?null:String(u.baseline),i.baseline===null?null:String(i.baseline)]);
  const pending=[d,u,i].some(state=>!["idle","saved"].includes(state.status));
  return <div className="min-w-0 space-y-2 text-sm">{pricingError?<p role="alert" className="break-words text-destructive">{pricingError}</p>:null}<p className="break-words">Изделия: {formatMoneyTotal(productsSubtotalBYN===null?null:Number(productsSubtotalBYN),"BYN")}</p><p className="break-words font-medium">Подтверждённая сумма проекта: {total===null?formatMoneyTotal(null):formatAmount(total,"BYN")}</p>{pending?<p className="break-words text-xs text-muted-foreground">Новый итог появится после подтверждения сохранения услуг.</p>:null}</div>;
+}
+
+export function ProjectInlineContacts({canManage,clients}:{canManage:boolean;clients:ProductClientContact[]}){
+ const{controller,derived}=useProjectInline();const client=controller("clientId");
+ const selected=useSyncExternalStore(client.subscribe,client.getSnapshot,client.getServerSnapshot);
+ const[createOpen,setCreateOpen]=useState(false);const contact=confirmedProductClientContacts(String(selected.baseline),clients,derived);
+ const options=clients.map(row=>({value:row.id,label:row.label,hint:row.phone}));
+ if(derived.clientId&&derived.clientLabel&&!options.some(row=>row.value===derived.clientId))options.push({value:derived.clientId,label:derived.clientLabel,hint:derived.phone??""});
+ return <div className="flex min-w-0 flex-col gap-3 text-sm" data-project-contacts>
+ <div className="flex min-w-0 items-start gap-3"><div className="min-w-0 flex-1"><InlineSelectField id="project-inline-client" label="Клиент" controller={client} readOnly={!canManage} options={options}/></div>{canManage?<Button type="button" variant="outline" className="mt-6 shrink-0" onClick={()=>setCreateOpen(true)}>Новый клиент</Button>:null}</div>
+ <p id="project-client-phone" className="break-words"><span className="text-muted-foreground">Телефон: </span>{contact.known?contact.phone:"Не определён"}</p>
+ <p id="project-client-address" className="break-words"><span className="text-muted-foreground">Адрес: </span>{contact.known?contact.address??"Не указан":"Не определён"}</p>
+ <ClientDialog open={createOpen} onOpenChange={setCreateOpen} onCreated={async id=>{client.setDraft(id);await client.commit();}}/>
+ </div>;
 }
