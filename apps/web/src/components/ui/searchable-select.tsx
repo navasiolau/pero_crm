@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Check, ChevronDown, Search } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -46,6 +46,7 @@ export function SearchableSelect({
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const searchInput = useRef<HTMLInputElement>(null);
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -82,11 +83,11 @@ export function SearchableSelect({
         </span>
         <ChevronDown className="size-4 shrink-0 opacity-50" />
       </PopoverTrigger>
-      <PopoverContent className="w-72 p-2" align="start">
+      <PopoverContent className="w-72 p-2" align="start" initialFocus={searchInput}>
         <div className="relative mb-2">
           <Search className="absolute top-2.5 left-2 size-4 text-muted-foreground" />
           <Input
-            autoFocus
+            ref={searchInput}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder={searchPlaceholder}
