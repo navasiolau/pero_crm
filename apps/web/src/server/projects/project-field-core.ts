@@ -12,25 +12,25 @@ import {patchProjectContactInTransaction} from "./contact-core";
 import {projectPricingProjectionSchema,projectPatchSchema,malformedProjectPatch,projectMoneySchema,type ProjectPatch,type ProjectPatchResult,type ProjectPatchValue,type ProjectPatchDerived,type ProjectFullBaseline} from "./patch-contract";
 
 const services=["delivery","unloading","installation"] as const;
-const legacyFields=["title","clientId","managerId","address","delivery","unloading","installation","initialPrice","currency"] as const;
+const legacyFields=["title","clientId","managerId","address","delivery","unloading","installation","currency"] as const;
 type LegacyField=typeof legacyFields[number];
 const moneyInput=z.union([projectMoneySchema,z.number().nonnegative()]);
-const baselineSchema=z.object({title:z.string().optional(),clientId:z.string().optional(),managerId:z.string().nullable().optional(),address:z.string().nullable().optional(),delivery:projectMoneySchema.optional(),unloading:projectMoneySchema.optional(),installation:projectMoneySchema.optional(),initialPrice:projectMoneySchema.optional(),currency:z.string().optional()}).strict();
-export const legacyProjectUpdateSchema=z.object({title:z.string().refine(value=>value.trim().length>0,"Укажите название проекта").optional(),clientId:z.string().min(1).optional(),managerId:z.string().nullable().optional(),address:z.string().nullable().optional(),delivery:moneyInput.optional(),unloading:moneyInput.optional(),installation:moneyInput.optional(),initialPrice:moneyInput.optional(),currency:z.string().refine(value=>value===INTERNAL_CURRENCY,"Внутренние суммы CRM используют только BYN").optional(),baseline:baselineSchema.optional()}).strict();
+const baselineSchema=z.object({title:z.string().optional(),clientId:z.string().optional(),managerId:z.string().nullable().optional(),address:z.string().nullable().optional(),delivery:projectMoneySchema.optional(),unloading:projectMoneySchema.optional(),installation:projectMoneySchema.optional(),currency:z.string().optional()}).strict();
+export const legacyProjectUpdateSchema=z.object({title:z.string().refine(value=>value.trim().length>0,"Укажите название проекта").optional(),clientId:z.string().min(1).optional(),managerId:z.string().nullable().optional(),address:z.string().nullable().optional(),delivery:moneyInput.optional(),unloading:moneyInput.optional(),installation:moneyInput.optional(),currency:z.string().refine(value=>value===INTERNAL_CURRENCY,"Внутренние суммы CRM используют только BYN").optional(),baseline:baselineSchema.optional()}).strict();
 export type LegacyProjectUpdateInput=z.input<typeof legacyProjectUpdateSchema>;
 const json=(value:unknown):Prisma.InputJsonValue=>JSON.parse(JSON.stringify(value));
 function canonical(field:string,value:unknown):ProjectPatchValue {
  if(value===undefined||value===null)return null;
- return [...services,"initialPrice"].includes(field as typeof services[number])?new Prisma.Decimal(String(value)).toFixed(2):String(value);
+ return [...services].includes(field as typeof services[number])?new Prisma.Decimal(String(value)).toFixed(2):String(value);
 }
 function normalize(field:string,value:unknown):ProjectPatchValue {
  const money=canonical(field,value);
- if([...services,"initialPrice"].includes(field as typeof services[number]))return money;
+ if([...services].includes(field as typeof services[number]))return money;
  return typeof money==="string"?money.trim()||null:money;
 }
 export function projectFullBaseline(project:Pick<Project,LegacyField>):ProjectFullBaseline {
  return {title:project.title,clientId:project.clientId,managerId:project.managerId,address:project.address,
- delivery:canonical("delivery",project.delivery),unloading:canonical("unloading",project.unloading),installation:canonical("installation",project.installation),initialPrice:canonical("initialPrice",project.initialPrice),currency:project.currency};
+ delivery:canonical("delivery",project.delivery),unloading:canonical("unloading",project.unloading),installation:canonical("installation",project.installation),currency:project.currency};
 }
 async function validateManager(tx:Prisma.TransactionClient,value:ProjectPatchValue) {
  if(value!==null&&!await tx.user.findFirst({where:{id:value,active:true,roles:{hasSome:MANAGER_ROLES}},select:{id:true}}))throw Error("Выберите активного менеджера");
@@ -111,7 +111,7 @@ export async function updateProjectFieldsCore(actor:DomainActor,projectId:string
   }
   if(!Object.keys(data).length)return{ok:true,noOp:true};
   if("currency"in data){await assertProjectCurrencyChange(tx,projectId,data.currency!);await assertPercentageProjectCurrencyChange(tx,projectId,data.currency!);}
-  if([...services,"initialPrice"].some(field=>field in data))assertProjectMoneyCurrency(data.currency??current.currency);
+  if([...services].some(field=>field in data))assertProjectMoneyCurrency(data.currency??current.currency);
   if("managerId"in data)await validateManager(tx,data.managerId);
   // Все CAS проверены до первого shared write; ошибки далее бросаются для rollback.
   for(const field of ["address","clientId"] as const){if(!(field in data))continue;

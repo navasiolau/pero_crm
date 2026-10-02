@@ -32,4 +32,4 @@ export function malformedProjectPatch(input:unknown,error="Некорректн�
   if("clientMutationId" in input&&z.uuid().safeParse(input.clientMutationId).success)result.clientMutationId=input.clientMutationId as string;
   return result;
 }
-export type ProjectFullBaseline = {title:string;clientId:string;managerId:string|null;address:string|null;delivery:string|null;unloading:string|null;installation:string|null;initialPrice:string|null;currency:string};
+export type ProjectFullBaseline = {title:string;clientId:string;managerId:string|null;address:string|null;delivery:string|null;unloading:string|null;installation:string|null;currency:string};

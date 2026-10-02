@@ -181,7 +181,6 @@ export function ProductsTab({
   const [kind, setKind] = useState("");
   const [quantity, setQuantity] = useState("1");
   const [price, setPrice] = useState("");
-  const [initialPrice, setInitialPrice] = useState("");
   const [description, setDescription] = useState("");
   const [engineerId, setEngineerId] = useState("");
 
@@ -248,15 +247,11 @@ export function ProductsTab({
 
   const activeProduct = products.find((product) => product.id === activeId);
   const parsedPrice = price.trim() === "" ? undefined : Number(price);
-  const parsedInitialPrice =
-    initialPrice.trim() === "" ? undefined : Number(initialPrice);
   const parsedQuantity = Number(quantity);
   const canCreate =
     Number.isInteger(parsedQuantity) && parsedQuantity >= 1 && parsedQuantity <= 2_147_483_647 &&
     title.trim().length > 0 &&
-    (parsedPrice === undefined || (!Number.isNaN(parsedPrice) && parsedPrice >= 0)) &&
-    (parsedInitialPrice === undefined ||
-      (!Number.isNaN(parsedInitialPrice) && parsedInitialPrice >= 0));
+    (parsedPrice === undefined || (!Number.isNaN(parsedPrice) && parsedPrice >= 0));
 
   return (
     <div className="flex flex-col gap-3">
@@ -327,7 +322,6 @@ export function ProductsTab({
             setKind("");
             setPrice("");
                     setQuantity("1");
-            setInitialPrice("");
             setDescription("");
             setEngineerId("");
           }
@@ -372,21 +366,6 @@ export function ProductsTab({
                 placeholder="не обязательно"
               />
             </div>
-            {showAmount ? (
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="product-initial-price">
-                  Первоначальная цена за 1 шт. (КП), {currency}
-                </Label>
-                <Input
-                  id="product-initial-price"
-                  type="number"
-                  min="0"
-                  value={initialPrice}
-                  onChange={(event) => setInitialPrice(event.target.value)}
-                  placeholder="не обязательна"
-                />
-              </div>
-            ) : null}
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="product-description">Технический блок</Label>
               <Textarea
@@ -422,7 +401,6 @@ export function ProductsTab({
                     kind: kind.trim() || undefined,
                     expectedPrice: parsedPrice,
                     quantity: parsedQuantity,
-                    initialPrice: parsedInitialPrice,
                     description,
                     engineerId: engineerId || undefined,
                   });

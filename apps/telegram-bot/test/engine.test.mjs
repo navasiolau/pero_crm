@@ -12,7 +12,7 @@ const sent = [];
 let nextMessageId = 1000;
 let stageFailure=false;let loseStageAck=false;
 let editFixture=false,loseEditAck=false,editConflict=false,editWrites=0;const editReceipts=new Map();
-const baseline={title:"Captured title",clientId:"client-1",managerId:null,address:"Captured address",currency:"BYN",initialPrice:null,delivery:null,unloading:null,installation:null};
+const baseline={title:"Captured title",clientId:"client-1",managerId:null,address:"Captured address",currency:"BYN",delivery:null,unloading:null,installation:null};
 
 globalThis.fetch = async (input, options = {}) => {
   const url = new URL(String(input));
@@ -86,7 +86,6 @@ test("engine executes restored link, role, project and payment behavior", async 
     message(5, 501, "Клиент"),
     callback(6, 501, "cli:client-1"),
     callback(8, 501, "mgr:manager-1"),
-    message(9, 501, "1500"),
     message(10, 501, "/приход 205 100"),
     callback(11, 501, "cur:BYN"),
     callback(12, 501, "cash:cash-1"),
@@ -101,8 +100,9 @@ test("engine executes restored link, role, project and payment behavior", async 
   assert.ok(project, `project call missing: ${JSON.stringify({ calls, sent })}`);
   assert.deepEqual(project.body, {
     title: "Восстановленный заказ", clientId: "client-1",
-    managerId: "manager-1", initialPrice: 1500,
+    managerId: "manager-1",
   });
+  assert.ok(!sent.some((item) => item.text.includes("Первоначальная цена")));
   const payment = calls.find((item) => item.path === "/api/v1/bot/payments");
   assert.ok(payment, `payment call missing: ${JSON.stringify({ calls, sent })}`);
   assert.deepEqual(payment.body, {
@@ -114,6 +114,13 @@ test("engine executes restored link, role, project and payment behavior", async 
   ));
   assert.equal(project.actor, "admin-1");
   assert.equal(payment.actor, "admin-1");
+});
+
+test("stale initial-price callback is rejected without a project write", async () => {
+  const before = calls.filter(item => item.path.startsWith("/api/v1/bot/projects") && (item.method === "PATCH" || item.method === "POST")).length;
+  await handleUpdate(callback(3900, 501, "ed:project-205:initialPrice"));
+  assert.equal(calls.filter(item => item.path.startsWith("/api/v1/bot/projects") && (item.method === "PATCH" || item.method === "POST")).length, before);
+  assert.ok(sent.some(item => item.text.includes("Это поле недоступно")));
 });
 
 

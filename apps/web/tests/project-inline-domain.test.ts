@@ -56,7 +56,7 @@ test("legacy stale service and initialPrice cannot bypass CAS or write unrelated
  f.project().delivery="20.00";
  const service=await updateProjectFieldsCore(actor,"j",{title:"Lost",delivery:"30.00",baseline:{title:"Old",delivery:null}},f.transaction);
  assert.equal(service.ok,false);assert.equal(f.project().title,"Old");
- const snapshot=await updateProjectFieldsCore(actor,"j",{initialPrice:300,baseline:{initialPrice:"100.00"}},f.transaction);
+ const snapshot=await updateProjectFieldsCore(actor,"j",{initialPrice:300,baseline:{initialPrice:"100.00"}} as never,f.transaction);
  assert.equal(snapshot.ok,false);assert.equal(f.project().initialPrice,"200.00");
 });
 test("malformed envelope/readonly request performs no data or receipt lookup",async()=>{

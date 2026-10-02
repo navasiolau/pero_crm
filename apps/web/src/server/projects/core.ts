@@ -44,7 +44,6 @@ async function createProjectWithNumber(
     currency: string;
     address?: string;
     managerId?: string;
-    initialPrice?: number;
     delivery?: number;
     unloading?: number;
     installation?: number;
@@ -66,7 +65,7 @@ async function createProjectWithNumber(
         currency: data.currency,
         address: data.address,
         managerId: data.managerId,
-        initialPrice: data.initialPrice ?? null,
+        initialPrice: null,
         delivery: data.delivery ?? null,
         unloading: data.unloading ?? null,
         installation: data.installation ?? null,
@@ -86,10 +85,6 @@ export const createProjectSchema = z.object({
   currency: z.string().refine((value) => value === INTERNAL_CURRENCY, INTERNAL_CURRENCY_ERROR).default(INTERNAL_CURRENCY),
   address: z.string().optional(),
   managerId: z.string().optional(),
-  initialPrice: z
-    .number()
-    .min(0, "Первоначальная цена не может быть отрицательной")
-    .optional(),
   delivery: z
     .number()
     .min(0, "Доставка не может быть отрицательной")
@@ -102,7 +97,7 @@ export const createProjectSchema = z.object({
     .number()
     .min(0, "Монтаж не может быть отрицательным")
     .optional(),
-});
+}).strict();
 
 // Проект = заказ клиента (§6): название, клиент, менеджер, адрес, валюта
 // и первоначальная цена (первая цена КП клиенту, правится и через бота).
@@ -124,7 +119,6 @@ export async function createProjectCore(
       currency: data.currency,
       address: data.address,
       managerId: data.managerId,
-      initialPrice: data.initialPrice,
       delivery: data.delivery,
       unloading: data.unloading,
       installation: data.installation,
