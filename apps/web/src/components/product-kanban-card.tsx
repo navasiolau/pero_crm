@@ -10,6 +10,7 @@ import { getKanbanHeroHeights, getProductSketchPreviewSource, type SketchFilePre
 import { daysOnStatus } from "@/lib/product-statuses";
 import { cn } from "@/lib/utils";
 import { ProductHeroImage } from "./product-hero-image";
+import { useFileViewer } from "./file-viewer";
 
 export interface ProductKanbanCardData {
   number: string;
@@ -41,6 +42,7 @@ export function ProductKanbanCard({
   dragging?: boolean;
 }) {
   const infoRef = useRef<HTMLDivElement>(null);
+  const fileViewer = useFileViewer();
   const [infoHeight, setInfoHeight] = useState(0);
   const sketch = product.sketchFile;
   const imageSource = getProductSketchPreviewSource(sketch);
@@ -66,7 +68,7 @@ export function ProductKanbanCard({
     : undefined;
 
   return (
-    <Card
+    <><Card
       data-slot="product-kanban-card"
       data-has-image={imageSource ? "true" : "false"}
       className={cn("cursor-pointer select-none gap-0 overflow-hidden py-0", dragging && "rotate-2 shadow-lg")}
@@ -78,10 +80,13 @@ export function ProductKanbanCard({
           className="relative w-full shrink-0 overflow-hidden bg-muted/30"
           style={{ height: heights.infoHeight > 0 ? `${heights.imageHeight}px` : "8rem" }}
         >
+          <button type="button" className="absolute inset-0 h-full w-full" aria-label={`Открыть изображение ${product.title} на весь экран`} disabled={dragging}
+            onClick={event => { event.preventDefault(); event.stopPropagation(); fileViewer.open(sketch); }}>
           <ProductHeroImage
             sketch={sketch}
             className="absolute inset-0 h-full w-full p-2"
           />
+          </button>
         </div>
       ) : null}
 
@@ -110,6 +115,6 @@ export function ProductKanbanCard({
           </div>
         ) : null}
       </div>
-    </Card>
+    </Card>{fileViewer.viewer}</>
   );
 }
