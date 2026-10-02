@@ -1,6 +1,6 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, writeFile, unlink } from "node:fs/promises";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 import sharp from "sharp";
 import type { FileCategory, FileStage } from "@prisma/client";
@@ -8,7 +8,8 @@ import type { FileCategory, FileStage } from "@prisma/client";
 import { auth } from "@/auth";
 import { isCoverImageMime } from "@/lib/product-cover";
 import { prisma } from "@/lib/prisma";
-import { UPLOADS_ROOT, s3Enabled, s3Put, fileKey, thumbKey } from "@/lib/s3";
+import { UPLOADS_ROOT, s3Enabled, s3Put, s3Delete, fileKey, thumbKey } from "@/lib/s3";
+import { sketchUploadTargetSchema, type SketchUploadTarget } from "@/server/products/sketch-contract";
 import { authorizeProductCoverUpload, persistUploadedProductCover } from "@/server/products/cover-core";
 import { revalidateProductPaths } from "@/server/products/revalidate";
 import { resolveUploadContext } from "@/server/files/upload-context";
@@ -63,6 +64,8 @@ export async function POST(request: Request) {
   if (coverRaw !== null && !assignCover) {
     return NextResponse.json({ error: "Неверный режим загрузки обложки" }, { status: 400 });
   }
+  let coverTarget: SketchUploadTarget | undefined;
+  let replayCover = false;
   if (assignCover) {
     if (!requestedProductId || taskId || form.get("category") !== "PHOTO") {
       return NextResponse.json({ error: "Для обложки нужны изделие и категория Фото без задачи" }, { status: 400 });
@@ -70,11 +73,17 @@ export async function POST(request: Request) {
     if (!isCoverImageMime(file.type)) {
       return NextResponse.json({ error: "Нужно изображение поддерживаемого формата" }, { status: 415 });
     }
+    const parsedCover = sketchUploadTargetSchema.safeParse({projectId,productId:requestedProductId,
+      expectedSketchFileId:form.get("expectedSketchFileId") === "null" ? null : undefined,
+      clientMutationId:form.get("clientMutationId")});
+    if (!parsedCover.success) return NextResponse.json({ok:false,kind:"validation",error:"Обновите форму эскиза"},{status:422});
+    coverTarget = parsedCover.data;
     // The generic task/project upload grant is broader than cover-edit rights.
     // Resolve exact product and role before file.arrayBuffer or storage writes.
     const permission = await authorizeProductCoverUpload(prisma, session.user,
-      { projectId, productId: requestedProductId });
-    if (!permission.ok) return NextResponse.json({ error: permission.error }, { status: 404 });
+      coverTarget);
+    if (!permission.ok) return NextResponse.json(permission, { status: permission.kind === "conflict" ? 409 : 404 });
+    replayCover = permission.replayHint;
   }
   const context = await resolveUploadContext(prisma, session.user, { projectId, productId: requestedProductId, taskId });
   if (!context) return NextResponse.json({ error: "Проект, изделие или задача не найдены" }, { status: 404 });
@@ -115,6 +124,15 @@ export async function POST(request: Request) {
   const buffer = Buffer.from(await file.arrayBuffer());
   if (buffer.length > MAX_SIZE) return NextResponse.json({ error: "Файл больше 25 МБ" }, { status: 413 });
 
+  const contentHash = assignCover ? createHash("sha256").update(buffer).digest("hex") : undefined;
+  if (assignCover && replayCover && coverTarget) {
+    const result = await withTaskTransaction(tx => persistUploadedProductCover(tx,session.user,coverTarget!,{
+      fileName:file.name,storedName,mimeType:file.type,size:file.size,hasThumb:false,uploadedById:session.user.id,caption,stage,contentHash}));
+    if (!result.ok) return NextResponse.json(result,{status:result.kind==="conflict"?409:422});
+    const sketch=await prisma.file.findUnique({where:{id:result.id},select:{id:true,fileName:true,mimeType:true,size:true,hasThumb:true,category:true,stage:true,uploadedById:true}});
+    if (!sketch) return NextResponse.json({ok:false,kind:"conflict",error:"Эскиз уже удалён"},{status:409});
+    return NextResponse.json({...result,sketch});
+  }
   // Превью для изображений
   let hasThumb = false;
   let thumbBuffer: Buffer | null = null;
@@ -134,6 +152,12 @@ export async function POST(request: Request) {
     }
   }
 
+  const compensateOwnCover = async () => {
+    if (!assignCover) return;
+    if (s3Enabled()) { await s3Delete(fileKey(projectId,storedName)).catch(()=>{}); if(thumbBuffer)await s3Delete(thumbKey(projectId,storedName)).catch(()=>{}); }
+    else { await unlink(path.join(UPLOADS_ROOT,projectId,storedName)).catch(()=>{}); if(thumbBuffer)await unlink(path.join(UPLOADS_ROOT,projectId,"thumbs",storedName+".jpg")).catch(()=>{}); }
+  };
+  try {
   if (s3Enabled()) {
     // S3 (MinIO) — основное хранилище (§13)
     await s3Put(fileKey(projectId, storedName), buffer, file.type || "application/octet-stream");
@@ -152,27 +176,33 @@ export async function POST(request: Request) {
     }
   }
 
+  } catch (error) {
+    if (!assignCover) throw error;
+    await compensateOwnCover();
+    return NextResponse.json({ok:false,kind:"failure",error:"Не удалось загрузить эскиз"},{status:500});
+  }
+
   if (assignCover && requestedProductId) {
     let result: Awaited<ReturnType<typeof persistUploadedProductCover>>;
     try {
       result = await withTaskTransaction((tx) => persistUploadedProductCover(tx, session.user,
-        { projectId, productId: requestedProductId }, {
+        coverTarget!, {
           fileName: file.name, storedName, mimeType: file.type, size: file.size,
-          hasThumb, uploadedById: session.user.id, caption, stage,
+          hasThumb, uploadedById: session.user.id, caption, stage, contentHash,
         }));
     } catch {
-      // The old cover remains untouched. A failed DB transaction may leave a
-      // new, unreferenced storage object; never remove existing media here.
+      await compensateOwnCover();
       return NextResponse.json({ error: "Не удалось сохранить обложку" }, { status: 500 });
     }
-    if (!result.ok) return NextResponse.json({ error: result.error }, { status: 404 });
+    if (!result.ok) { await compensateOwnCover(); return NextResponse.json(result, {status:result.kind==="conflict"?409:404}); }
     await revalidateProductPaths(requestedProductId).catch(() => {});
     await notifyOrg({
       type: "file.added", title: `Файл к проекту ${project.number}`,
       body: file.name, link: productNumber ? `/products/${productNumber}` : `/projects/${projectId}`,
       exceptUserId: session.user.id,
     }).catch(() => {});
-    return NextResponse.json({ ok: true, id: result.id });
+    const sketch = await prisma.file.findUnique({where:{id:result.id},select:{id:true,fileName:true,mimeType:true,size:true,hasThumb:true,category:true,stage:true,uploadedById:true}});
+    return NextResponse.json({...result,sketch});
   }
 
   const row = await prisma.file.create({

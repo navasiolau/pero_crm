@@ -13,7 +13,7 @@ import { canEditProductTechnicalBlock, resolveVisibilityActor } from "@/server/a
 import { allocatedWorkQuantity } from "@/lib/work-shares";
 import { getFileStageConfig } from "@/server/files/stage-config";
 import { getProductFor } from "@/server/products/queries";
-import { setProductCover } from "@/server/products/cover-actions";
+import { deleteProductSketchAction } from "@/server/products/cover-actions";
 import { listClients, listEngineers, listWorkers } from "@/server/projects/queries";
 import { mapTaskDetails } from "@/server/tasks/queries";
 import { getProjectMaterials, listMaterialOptions } from "@/server/warehouse/queries";
@@ -120,17 +120,10 @@ export default async function ProductPage({
           mimeType: product.sketchFile.mimeType,
           hasThumb: product.sketchFile.hasThumb,
         } : null}
-        attachedImages={product.files.map((file) => ({
-          id: file.id,
-          fileName: file.fileName,
-          mimeType: file.mimeType,
-          hasThumb: file.hasThumb,
-          productId: file.productId ?? "",
-          projectId: file.projectId,
-        }))}
         actorRoles={role}
         canEditTechnicalBlock={canEditTech}
-        setCoverAction={setProductCover}
+        canDeleteCover={canEditTech && (canManage || product.files.some(file => file.id === product.sketchFile?.id && file.uploadedById === session.user.id))}
+        deleteCoverAction={deleteProductSketchAction}
         header={(
           <div className="flex min-w-0 flex-col gap-3" data-product-header="stacked">
             <div className="flex w-full min-w-0 items-start gap-3" data-product-title-row>
