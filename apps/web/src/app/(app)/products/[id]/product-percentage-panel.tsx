@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useEffect, useRef, useLayoutEffect, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowRightLeft, RotateCcw, Trash2 } from "lucide-react";
+import { RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 
 import { useOptionalProductInline } from "@/components/product-inline-provider";
@@ -11,10 +11,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { SearchableSelect } from "@/components/ui/searchable-select";
 import { projectedPercentagePrice, projectedPercentageTotal, canRebaseSuggestedParticipants } from "@/lib/inline-percentage-projection";
 import { formatAmount } from "@/lib/format";
-import { assertPercentageShares, parsePercentageRate } from "@/lib/product-percentage-pay";
+import { parsePercentageRate } from "@/lib/product-percentage-pay";
 import type { ProductPercentageKind } from "@/lib/product-percentage-pay";
 import type {
   ProductPercentageSectionView,
@@ -22,7 +21,6 @@ import type {
 } from "@/lib/product-percentage-view";
 import {
   initialProductPercentageParticipants,
-  addProductPercentageParticipant,
   canEditProductPercentageConfig,
   percentageTextToShareUnits,
   previewProductPercentageShare,
@@ -31,13 +29,11 @@ import {
   displayProductPercentageMemberAmount,
   shareUnitsToPercentageText,
   toggleInstallationWorkSelection,
-  transferOptionsForKind,
   type ProductPercentageCandidate,
 } from "@/lib/product-percentage-ui";
 import {
   configureProductPercentageAction,
   retryProductPercentageAction,
-  transferProductPercentageShareAction,
 } from "@/server/product-percentage-pay/actions";
 
 const noSubscribe = () => () => {};
@@ -131,11 +127,8 @@ function PercentageStageSection({
   const [shares, setShares] = useState<Record<string, string>>(
     () => Object.fromEntries(initial.map((row) => [row.userId, shareUnitsToPercentageText(row.shareUnits)])),
   );
-  const [addUserId, setAddUserId] = useState("");
   const [installationWorkIds, setInstallationWorkIds] = useState<string[]>([]);
   const [reviewedLegacyWorks, setReviewedLegacyWorks] = useState(false);
-  const [transferUserId, setTransferUserId] = useState("");
-  const [transferPercent, setTransferPercent] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inline = useOptionalProductInline();
@@ -144,12 +137,12 @@ function PercentageStageSection({
   const displayPrice = projectedPercentagePrice(section.state, section.price, priceController && canViewAll ? acknowledgedPrice === null ? null : String(acknowledgedPrice) : undefined);
   useLayoutEffect(() => {
     if (canRebaseSuggestedParticipants({ state: section.state, hasConfiguration: section.hasConfiguration, previous: previousInitial.current, next: initial, participants, shares,
-      otherDirty: rate !== (section.ratePercent ?? "") || Boolean(installationWorkIds.length || reviewedLegacyWorks || addUserId || transferUserId || transferPercent) })) {
+      otherDirty: rate !== (section.ratePercent ?? "") || Boolean(installationWorkIds.length || reviewedLegacyWorks) })) {
       setParticipants(initial);
       setShares(Object.fromEntries(initial.map(row => [row.userId, shareUnitsToPercentageText(row.shareUnits)])));
     }
     previousInitial.current = initial;
-  }, [initial, section.state, section.hasConfiguration, section.ratePercent, participants, shares, rate, installationWorkIds.length, reviewedLegacyWorks, addUserId, transferUserId, transferPercent]);
+  }, [initial, section.state, section.hasConfiguration, section.ratePercent, participants, shares, rate, installationWorkIds.length, reviewedLegacyWorks]);
 
 
   const shareRows = useMemo(() => participants.map((row) => {
@@ -159,14 +152,6 @@ function PercentageStageSection({
       return row;
     }
   }), [participants, shares]);
-  const sharesValid = (() => {
-    try {
-      assertPercentageShares(participants.map((row) => ({ userId: row.userId, shareUnits: percentageTextToShareUnits(shares[row.userId] ?? "") })));
-      return true;
-    } catch {
-      return false;
-    }
-  })();
   const normalizedRate = (() => {
     try {
       return parsePercentageRate(rate.trim() ? rate.trim().replace(",", ".") : null);
@@ -183,7 +168,7 @@ function PercentageStageSection({
     rate !== (section.ratePercent ?? "") ||
     JSON.stringify(participants) !== JSON.stringify(initial) ||
     JSON.stringify(shares) !== JSON.stringify(Object.fromEntries(initial.map(row => [row.userId, shareUnitsToPercentageText(row.shareUnits)]))) ||
-    installationWorkIds.length > 0 || reviewedLegacyWorks || Boolean(addUserId || transferUserId || transferPercent)
+    installationWorkIds.length > 0 || reviewedLegacyWorks
   );
   useEffect(() => {
     if (inline) inline.registerGuard(`percentage-${kind}`, async () => !busy && !error && !configDirty);
@@ -195,9 +180,6 @@ function PercentageStageSection({
   const activeRows = section.state === "SETTLED" || section.state === "PENDING_FX" ? section.members : shareRows;
   const people = new Map(candidates.map((person) => [person.id, person.name]));
   const participantNames = new Map(section.members.map((person) => [person.userId, person.name]));
-  const transferChoices = section.transferCandidates.map((candidate) => ({ value: candidate.userId, label: candidate.name }));
-  const addChoices = transferOptionsForKind(kind, candidates, "")
-    .filter((option) => !participants.some((member) => member.userId === option.value));
   const previewRate = normalizedRate === undefined ? null : normalizedRate;
   const displayTotal = projectedPercentageTotal(section.state, section.total, displayPrice, previewRate);
 
@@ -217,65 +199,21 @@ function PercentageStageSection({
     }
   }
 
-  function addParticipant(userId: string) {
-    if (!userId || participants.some((row) => row.userId === userId)) return;
-    const next = addProductPercentageParticipant(participants, userId);
-    const added = next.find((row) => row.userId === userId)!;
-    setParticipants(next);
-    setShares((rows) => ({ ...rows, [userId]: shareUnitsToPercentageText(added.shareUnits) }));
-    setAddUserId("");
-  }
-
-  function removeParticipant(userId: string) {
-    setParticipants((rows) => rows.filter((row) => row.userId !== userId));
-    setShares((rows) => {
-      const next = { ...rows };
-      delete next[userId];
-      return next;
-    });
-  }
-
   function saveConfiguration() {
     try {
       if (!reviewAcknowledged) throw new Error("Подтвердите проверку источников оплаты существующих работ");
       const cleanRate = parsePercentageRate(rate.trim() ? rate.trim().replace(",", ".") : null);
-      const configuredShares = participants.map((row) => ({
-        userId: row.userId,
-        shareUnits: percentageTextToShareUnits(shares[row.userId] ?? ""),
-      }));
-      assertPercentageShares(configuredShares);
       void perform(() => configureProductPercentageAction({
         productId,
         kind,
         ratePercent: cleanRate,
-        participants: configuredShares,
         expectedRevision: section.revision,
         ...(kind === "INSTALLATION" && installationWorkIds.length ? { installationWorkIds } : {}),
         ...(installationReviewRequired ? { reviewedLegacyWorks: reviewedLegacyWorks } : {}),
       }), "Настройки этапа сохранены");
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Проверьте ставку и доли");
+      setError(cause instanceof Error ? cause.message : "Проверьте ставку");
     }
-  }
-
-  function transferShare() {
-    if (!transferUserId || !transferPercent.trim()) {
-      setError("Выберите коллегу и укажите часть своей доли");
-      return;
-    }
-    try {
-      parsePercentageRate(transferPercent.trim().replace(",", "."));
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Проверьте долю");
-      return;
-    }
-    void perform(() => transferProductPercentageShareAction({
-      productId,
-      kind,
-      toUserId: transferUserId,
-      percentOfOwnShare: transferPercent.trim().replace(",", "."),
-      expectedRevision: section.revision,
-    }), "Ваша доля передана коллеге");
   }
 
   async function retryFx() {
@@ -325,24 +263,6 @@ function PercentageStageSection({
                 {amount !== null ? (
                   <p className="shrink-0 font-medium">{section.state === "DRAFT" ? "≈ " : ""}{formatAmount(amount, currency)}</p>
                 ) : null}
-                {managerCanEdit ? (
-                  <div className="flex min-w-0 items-end gap-2 sm:w-40">
-                    <div className="min-w-0 flex-1">
-                      <Label htmlFor={`${kind}-${row.userId}-share`}>Доля, %</Label>
-                      <Input
-                        id={`${kind}-${row.userId}-share`}
-                        className="h-12"
-                        inputMode="decimal"
-                        value={shares[row.userId] ?? ""}
-                        onChange={(event) => setShares((rows) => ({ ...rows, [row.userId]: event.target.value }))}
-                        disabled={busy}
-                      />
-                    </div>
-                    <Button type="button" variant="outline" className="size-12 shrink-0" aria-label={`Убрать ${name}`} disabled={busy} onClick={() => removeParticipant(row.userId)}>
-                      <Trash2 />
-                    </Button>
-                  </div>
-                ) : null}
               </div>
             );
           }) : (
@@ -364,18 +284,6 @@ function PercentageStageSection({
                 disabled={busy}
               />
               <p className="text-xs text-muted-foreground">Цена изделия × ставка роли × доля участника. Оставьте пустым, чтобы не задавать ставку.</p>
-            </div>
-            <div className="space-y-1.5">
-              <Label>Добавить участника</Label>
-              <SearchableSelect
-                options={addChoices}
-                value={addUserId}
-                onChange={addParticipant}
-                placeholder="Выберите активного коллегу"
-                searchPlaceholder="Поиск сотрудника…"
-                className="min-h-12"
-                disabled={busy || addChoices.length === 0}
-              />
             </div>
             <div className="grid gap-2 sm:grid-cols-2">
               {shareRows.map((row) => (
@@ -431,45 +339,12 @@ function PercentageStageSection({
               </div>
             ) : null}
             {normalizedRate === undefined ? <p role="alert" className="text-sm text-destructive">Ставка должна быть от 0 до 100 процентов</p> : null}
-            {!sharesValid ? <p className="text-sm text-muted-foreground">Доли всех участников должны составлять ровно 100%.</p> : null}
-            <Button type="button" className="min-h-12 w-full sm:w-auto" disabled={busy || !sharesValid || normalizedRate === undefined || !participants.length || !reviewAcknowledged} onClick={saveConfiguration}>
+            <Button type="button" className="min-h-12 w-full sm:w-auto" disabled={busy || normalizedRate === undefined || !reviewAcknowledged} onClick={saveConfiguration}>
               Сохранить настройки этапа
             </Button>
           </div>
         ) : null}
 
-        {section.canTransfer && section.ownMember && section.state === "DRAFT" ? (
-          <div className="space-y-3 rounded-lg border p-3 sm:p-4">
-            <div>
-              <h4 className="font-medium">Передать часть своей доли</h4>
-              <p className="text-sm text-muted-foreground">Можно добавить активного коллегу той же роли до завершения этапа.</p>
-            </div>
-            <SearchableSelect
-              options={transferChoices}
-              value={transferUserId}
-              onChange={setTransferUserId}
-              placeholder="Выберите активного коллегу"
-              searchPlaceholder="Поиск сотрудника…"
-              className="min-h-12"
-              disabled={busy || transferChoices.length === 0}
-            />
-            <div className="space-y-1.5">
-              <Label htmlFor={`${kind}-transfer-percent`}>Часть вашей доли для передачи, %</Label>
-              <Input
-                id={`${kind}-transfer-percent`}
-                className="h-12"
-                inputMode="decimal"
-                value={transferPercent}
-                onChange={(event) => setTransferPercent(event.target.value)}
-                placeholder="например, 30"
-                disabled={busy}
-              />
-            </div>
-            <Button type="button" variant="outline" className="min-h-12 w-full sm:w-auto" disabled={busy || !transferUserId || !transferPercent.trim()} onClick={transferShare}>
-              <ArrowRightLeft /> Передать долю
-            </Button>
-          </div>
-        ) : null}
 
         {section.state === "DRAFT" && displayPrice === null && canViewAll ? (
           <p className="text-sm text-muted-foreground">Задайте цену изделия, чтобы увидеть предварительную сумму.</p>

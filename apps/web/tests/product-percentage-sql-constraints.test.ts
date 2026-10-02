@@ -49,8 +49,14 @@ test("INSTALLATION and PHYSICAL_ONLY SQL admit exactly the new service shape", (
   assert.match(next, /source_group_work_id IS DISTINCT FROM NEW\."workId"/);
   assert.match(next, /source_project_id IS DISTINCT FROM NEW\."projectId"/);
   assert.match(next, /source_product_id IS DISTINCT FROM NEW\."productId"/);
-  assert.match(shareCore, /budgetSource: "PHYSICAL_ONLY"/);
-  assert.match(shareCore, /physicalOnlyShare: true/g);
+});
+
+test("retired split retains historical receipt reads without allocation writers", () => {
+  // Runtime denial and exact historical receipt replay are covered by
+  // task-share-retirement.test.ts and product-engineering-split.test.ts.
+  assert.match(shareCore, /Деление задач и передача долей больше недоступны/);
+  assert.match(shareCore, /tx\.changeLog\.findUnique\(/);
+  assert.doesNotMatch(shareCore, /tx\.(?:task|taskAllocationGroup|work|changeLog)\.(?:create|createMany|update|updateMany|upsert|delete|deleteMany)\(/);
 });
 
 test("forward migration does not remove old tables, columns, or rows", () => {

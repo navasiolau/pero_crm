@@ -1,6 +1,6 @@
 import { INTERNAL_CURRENCY, assertProjectMoneyCurrency } from "@/lib/internal-currency";
 import { Prisma, type PrismaClient, type ProductPercentageKind, type ProductStatus } from "@prisma/client";
-import { allocatePercentageShares, assertPercentageShares, parsePercentageRate, transferOwnPercentageShare, type PercentageShare } from "@/lib/product-percentage-pay";
+import { allocatePercentageShares, assertPercentageShares, parsePercentageRate, type PercentageShare } from "@/lib/product-percentage-pay";
 import { calculateStageFund, type StageCurrency } from "@/lib/product-stage-pay";
 import { hasAnyRole, MANAGER_ROLES } from "@/lib/roles";
 import { isCurrency } from "@/server/finance/nbrb";
@@ -15,7 +15,7 @@ import { formatAmount } from "@/lib/format";
 
 type Tx = Prisma.TransactionClient;
 type ConfigureInput = { productId: string; kind: ProductPercentageKind; ratePercent: string | null;
-  participants: PercentageShare[]; expectedRevision: number; installationWorkIds?: string[]; reviewedLegacyWorks?: boolean };
+  participants?: PercentageShare[]; expectedRevision: number; installationWorkIds?: string[]; reviewedLegacyWorks?: boolean };
 type TransferInput = { productId: string; kind: ProductPercentageKind; toUserId: string;
   percentOfOwnShare: string; expectedRevision: number };
 const requiredRole: Record<ProductPercentageKind, "ENGINEER" | "MOUNTER"> = { ENGINEERING: "ENGINEER", INSTALLATION: "MOUNTER" };
@@ -54,16 +54,22 @@ async function assertParticipants(tx: Tx, kind: ProductPercentageKind, rows: rea
 export async function configureProductPercentageCore(actor: DomainActor, input: ConfigureInput, tx: Tx) {
   assertManager(actor); assertKind(input.kind);
   const rate = parsePercentageRate(input.ratePercent);
-  await assertParticipants(tx, input.kind, input.participants);
-  const product = await tx.product.findUnique({ where: { id: input.productId }, select: { id: true, projectId: true } });
+  const product = await tx.product.findUnique({ where: { id: input.productId }, select: { id: true, projectId: true, engineerId: true } });
   if (!product) throw new Error("Изделие не найдено");
   const completion = await tx.productPercentageCompletion.findUnique({ where: { productId_kind: { productId: input.productId, kind: input.kind } }, select: { state: true } });
   if (completion && completion.state !== "SKIPPED_ONCE")
     throw new Error("Этап уже завершён; его снимок нельзя изменить");
   if (completion?.state === "SKIPPED_ONCE" && input.installationWorkIds?.length)
     throw new Error("После пропуска этапа нельзя переводить работы в монтажный процент без начисления");
-  const old = await tx.productPercentageConfig.findUnique({ where: { productId_kind: { productId: input.productId, kind: input.kind } } });
+  const old = await tx.productPercentageConfig.findUnique({ where: { productId_kind: { productId: input.productId, kind: input.kind } }, include: { participants: true } });
   assertRevision(old?.revision ?? 0, input.expectedRevision);
+  const participants = old ? old.participants.map(({ userId, shareUnits }) => ({ userId, shareUnits }))
+    : input.kind === "ENGINEERING" && product.engineerId ? [{ userId: product.engineerId, shareUnits: 1000000 }] : [];
+  if (input.participants !== undefined) {
+    const canonical = (rows: readonly PercentageShare[]) => JSON.stringify([...rows].map(({ userId, shareUnits }) => ({ userId, shareUnits })).sort((a,b) => a.userId.localeCompare(b.userId)));
+    if (canonical(input.participants) !== canonical(participants)) throw new Error("Изменение распределения процентных долей больше недоступно");
+  }
+  if (!old && participants.length) await assertParticipants(tx, input.kind, participants);
   const legacyWorks = input.kind === "INSTALLATION" ? await tx.work.findMany({
     where: { productId: product.id, projectId: product.projectId, paymentKind: "LEGACY" }, select: { id: true },
   }) : [];
@@ -91,43 +97,18 @@ export async function configureProductPercentageCore(actor: DomainActor, input: 
     } })
     : await tx.productPercentageConfig.create({ data: { productId: input.productId, kind: input.kind,
       ratePercent: rate, revision: 1, reviewedLegacyWorkIds } });
-  if (old) await tx.productPercentageParticipant.deleteMany({ where: { configId: config.id } });
-  await tx.productPercentageParticipant.createMany({ data: input.participants.map((row) => ({ configId: config.id, userId: row.userId, shareUnits: row.shareUnits })) });
+  if (!old && participants.length) await tx.productPercentageParticipant.createMany({ data: participants.map((row) => ({ configId: config.id, ...row })) });
   await tx.changeLog.create({ data: { actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
     entity: "product", entityId: input.productId, action: "percentage.configure",
     oldValue: old ? { kind: old.kind, ratePercent: old.ratePercent?.toString() ?? null, revision: old.revision } : Prisma.JsonNull,
-    newValue: { kind: input.kind, ratePercent: rate, revision: config.revision, participants: input.participants,
+    newValue: { kind: input.kind, ratePercent: rate, revision: config.revision, participants,
       installationWorkIds: workIds, reviewedLegacyWorkIds, reviewedLegacyWorks: input.reviewedLegacyWorks === true } } });
   return { revision: config.revision };
 }
 
 export async function transferProductPercentageCore(actor: DomainActor, input: TransferInput, tx: Tx) {
-  assertKind(input.kind);
-  if (!actor.roles.includes(requiredRole[input.kind])) throw new Error("Можно передать долю только своего этапа");
-  const product = await tx.product.findUnique({ where: { id: input.productId }, select: { engineerId: true } });
-  if (!product) throw new Error("Изделие не найдено");
-  if (await tx.productPercentageCompletion.findUnique({ where: { productId_kind: { productId: input.productId, kind: input.kind } }, select: { id: true } }))
-    throw new Error("Этап уже завершён; доли зафиксированы");
-  let config = await tx.productPercentageConfig.findUnique({ where: { productId_kind: { productId: input.productId, kind: input.kind } }, include: { participants: true } });
-  assertRevision(config?.revision ?? 0, input.expectedRevision);
-  if (!config) {
-    if (input.kind !== "ENGINEERING" || product.engineerId !== actor.id) throw new Error("В этом этапе у вас нет доли");
-    config = await tx.productPercentageConfig.create({ data: { productId: input.productId, kind: input.kind,
-      participants: { create: { userId: actor.id, shareUnits: 1000000 } } }, include: { participants: true } });
-  }
-  if (!config.participants.some((row) => row.userId === actor.id)) throw new Error("Можно передавать только свою долю");
-  const colleague = await tx.user.findFirst({ where: { id: input.toUserId, active: true,
-    roles: { hasSome: [requiredRole[input.kind]] } }, select: { id: true } });
-  if (!colleague) throw new Error("Выберите активного коллегу нужной роли");
-  const next = transferOwnPercentageShare(config.participants.map((row) => ({ userId: row.userId, shareUnits: row.shareUnits })),
-    actor.id, colleague.id, input.percentOfOwnShare);
-  await tx.productPercentageParticipant.deleteMany({ where: { configId: config.id } });
-  await tx.productPercentageParticipant.createMany({ data: next.map((row) => ({ configId: config.id, ...row })) });
-  const updated = await tx.productPercentageConfig.update({ where: { id: config.id }, data: { revision: { increment: 1 } } });
-  await tx.changeLog.create({ data: { actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
-    entity: "product", entityId: input.productId, action: "percentage.transfer",
-    newValue: { kind: input.kind, fromUserId: actor.id, toUserId: colleague.id, percentOfOwnShare: input.percentOfOwnShare } } });
-  return { revision: updated.revision };
+  void actor; void input; void tx;
+  throw new Error("Передача процентных долей больше недоступна");
 }
 
 export async function setProductNoModelCore(actor: DomainActor, productId: string, noModel: boolean, tx: Tx) {

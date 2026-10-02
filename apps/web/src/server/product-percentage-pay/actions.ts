@@ -22,7 +22,7 @@ async function answer<T>(productId: string, operation: () => Promise<T>): Promis
 }
 
 export async function configureProductPercentageAction(input: { productId: string; kind: ProductPercentageKind;
-  ratePercent: string | null; participants: { userId: string; shareUnits: number }[]; expectedRevision: number;
+  ratePercent: string | null; participants?: { userId: string; shareUnits: number }[]; expectedRevision: number;
   installationWorkIds?: string[]; reviewedLegacyWorks?: boolean }) {
   const user = await actor();
   return answer(input.productId, () => withTaskTransaction((tx) => configureProductPercentageCore(user, input, tx)));

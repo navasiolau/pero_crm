@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Pencil, Split, Trash2 } from "lucide-react";
+import { Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import type { TaskStatus } from "@prisma/client";
 
@@ -30,7 +30,6 @@ import {
 import { useFileViewer } from "@/components/file-viewer";
 import { ConfirmDeleteDialog } from "@/components/confirm-delete-dialog";
 import { QuantityStepper } from "@/components/quantity-stepper";
-import { TaskSplitDialog } from "@/components/task-split-dialog";
 import { formatAmount, formatDateTime } from "@/lib/format";
 import { taskPaymentLabel, workPaymentSourceLabel } from "@/lib/task-payment-display";
 import { cn } from "@/lib/utils";
@@ -133,7 +132,6 @@ export function TaskDialog({
   const [pending, startTransition] = useTransition();
   const [editing, setEditing] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const [splitOpen, setSplitOpen] = useState(false);
   const [productOptions, setProductOptions] = useState(products ?? []);
   const fileViewer = useFileViewer();
   const [form, setForm] = useState({
@@ -188,7 +186,6 @@ export function TaskDialog({
       onOpenChange={(next) => {
         if (!next) {
           setEditing(false);
-          setSplitOpen(false);
         }
         onOpenChange(next);
       }}
@@ -374,7 +371,7 @@ export function TaskDialog({
                 <div>{isInstallationPercentage ? "Источник оплаты" : "Сумма доли"}: {ownAmount}</div>
                 <p className="mt-1 text-muted-foreground">
                   Изделие, работа и общий объём закреплены за всеми частями задачи.
-                  Передать часть личного объёма можно через «Разделить».
+                  Прежнее распределение сохранено и доступно только для просмотра.
                 </p>
               </div>
             ) : form.workId ? (
@@ -633,7 +630,7 @@ export function TaskDialog({
               </Button>
             </>
           ) : (
-            (!readOnly || task.canSplit) && (
+            !readOnly && (
               <div className="flex w-full flex-wrap items-center justify-end gap-2">
                 {!readOnly && !isAllocatedShare ? (
                   <Button
@@ -642,11 +639,6 @@ export function TaskDialog({
                     onClick={() => setDeleteOpen(true)}
                   >
                     <Trash2 className="size-4" /> Удалить
-                  </Button>
-                ) : null}
-                {task.canSplit && task.paymentKind !== "ENGINEERING" ? (
-                  <Button variant="outline" disabled={pending} onClick={() => setSplitOpen(true)}>
-                    <Split className="size-4" /> Разделить
                   </Button>
                 ) : null}
                 {!readOnly ? (
@@ -659,15 +651,6 @@ export function TaskDialog({
           )}
         </DialogFooter>
       </DialogContent>
-      <TaskSplitDialog
-        task={task}
-        open={open && splitOpen}
-        onOpenChange={setSplitOpen}
-        onDone={() => {
-          onOpenChange(false);
-          router.refresh();
-        }}
-      />
       {fileViewer.viewer}
       <ConfirmDeleteDialog
         entityLabel="задачу"
