@@ -3,6 +3,7 @@
 import Link from "next/link"
 
 import { Badge } from "@/components/ui/badge"
+import { CardNumber } from "@/components/card-number"
 import {
   Card,
   CardContent,
@@ -57,7 +58,7 @@ export function RecentProjects({ projects }: { projects: RecentProjectRow[] }) {
                     href={`/projects/${project.id}`}
                     className="underline-offset-2 hover:underline"
                   >
-                    {project.number}
+                    <CardNumber>{project.number}</CardNumber>
                   </Link>
                 </TableCell>
                 <TableCell>{project.client}</TableCell>

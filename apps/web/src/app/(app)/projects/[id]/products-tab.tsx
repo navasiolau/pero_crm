@@ -89,6 +89,7 @@ function DraggableProduct({
         product={product}
         currency={currency}
         showAmount={showAmount}
+        coverAction={{type:"navigate",onOpen:()=>onOpen(product)}}
       />
     </div>
   );
