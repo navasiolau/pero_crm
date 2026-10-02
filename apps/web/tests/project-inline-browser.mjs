@@ -18,7 +18,7 @@ export async function runProjectInlineBrowser({origin,profiles,fixture,outputDir
   await mkdir(outputDir,{recursive:true});
   const receipt={kind:"project-inline-compiled-browser",origin,status:"FAIL",passed:false,checks:[],screenshots:[],skips:[],failures:[],requests:[],ownWrites:[],preferenceOwnWrites:[],authentication:"caller supplied short-lived sessions; password login not tested",pageErrors:[],serviceWorkerMode:"native allow",browserMode:"Chromium new headless (PDF-capable); not headless-shell",networkScope:"actual Next Action Flight response; compact DTO required, not zero Flight encoding"};
   const browser=await chromium.launch({headless:true,channel:"chromium"});
-  const contexts=new Map();const pending=new Set();const own=new Map();const preferences=new Map();
+  const contexts=new Map();const pending=new Set();const own=new Map();const preferences=new Map();const deliveryRequests=new WeakMap();
   let page;let activeProfile="admin";let phase="session_setup";let substep="start";let bellActionId;let delayPlan=null;let abortField=null;let statusPermit=false;let deletePermit=null;const releases=[];const uploadedFileIds=new Set();
   let persistence = Promise.resolve();
   function persist() {
@@ -70,6 +70,7 @@ export async function runProjectInlineBrowser({origin,profiles,fixture,outputDir
         if(read){await route.continue();return;}
         const record={profile:name,actorId:profile.id,type:closed?"patch":status?"status":deletion?"file-delete":"preference",path:url.pathname,request:closed||status?{...patch}:deletion?{fileId:args[0]}:{args},phase:"requested"};
         receipt.requests.push(record);
+        if(closed)deliveryRequests.set(request,record);
         const loseResponse=closed&&abortField===patch.field;
         if(loseResponse)abortField=null;
         const delayed=closed&&delayPlan?.field===patch.field?delayPlan:null;
@@ -77,6 +78,10 @@ export async function runProjectInlineBrowser({origin,profiles,fixture,outputDir
         const task=(async()=>{
           const response=await route.fetch({maxRetries:0,maxRedirects:0,timeout:30000});const body=await response.body();
           record.httpStatus=response.status();record.bytes=body.length;record.contentType=response.headers()["content-type"];record.phase="response-captured";
+          if(closed){
+            const headers=response.headers();
+            record.responseFraming={decodedBodyBytes:body.length,headers:Object.fromEntries(["content-type","content-encoding","content-length","transfer-encoding"].filter(key=>headers[key]!==undefined).map(key=>[key,headers[key]]))};
+          }
           const rows=outcomeRows(body);const matches=closed?rows.filter(value=>value?.clientMutationId===patch.clientMutationId&&typeof value.kind==="string"):rows.filter(value=>typeof value?.ok==="boolean");
           assert.equal(response.status(),200,"ACTION_HTTP_FAILED");assert.equal(matches.length,1,"ACTION_RESULT_NOT_CAPTURED");
           const outcome=matches[0];record.result=outcome;
@@ -84,6 +89,11 @@ export async function runProjectInlineBrowser({origin,profiles,fixture,outputDir
             record.compact=body.length<20000&&!body.toString("utf8").includes('"children"')&&!/statusHistory|expenseBreakdown|materialsData|ProductCoverClient/.test(body.toString("utf8"));
             if(outcome.kind==="saved")own.set(patch.clientMutationId,{actorId:profile.id,projectId:patch.projectId,field:patch.field,value:outcome.value,clientMutationId:patch.clientMutationId,noOp:Boolean(outcome.noOp),auditLookupKey:outcome.noOp?null:`project-inline:${patch.clientMutationId}`});
             assert.ok(record.compact,"FULL_CARD_FLIGHT_RETURNED_FOR_FIELD");
+            const rawFlight=body.toString("utf8");
+            if(!/Bearer\s+[A-Za-z0-9._-]+|[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}/i.test(rawFlight)){
+              const filename=`project-inline-flight-${patch.clientMutationId}-${receipt.requests.indexOf(record)}.txt`;
+              await writeFile(resolve(outputDir,filename),body,{mode:0o600});record.privateFlightArtifact=filename;
+            }else record.privateFlightArtifactSkipped="SECRET_PATTERN";
           }else if(status&&outcome.ok)own.set(`status:${patch.clientMutationId}`,{actorId:profile.id,projectId:ownedProject,toStage:patch.toStage,clientMutationId:patch.clientMutationId,type:"status",saved:true,noOp:Boolean(outcome.noOp),replayed:Boolean(outcome.replayed)});
           else if(deletion&&outcome.ok)own.set(`file-delete:${args[0]}`,{actorId:profile.id,type:"file-delete",fileId:args[0],saved:true});
           else if((list||tab)&&outcome.ok){
@@ -92,15 +102,25 @@ export async function runProjectInlineBrowser({origin,profiles,fixture,outputDir
             preferences.set(`${profile.id}/${key}`,{userId:profile.id,key,value});
           }
           await persist();
-          if(loseResponse){record.phase="response-lost-after-upstream-commit";await persist();await route.abort("failed");return;}
+          if(loseResponse){record.phase="response-lost-after-upstream-commit";record.delivery={...record.delivery,abortStartedAt:new Date().toISOString()};await persist();await route.abort("failed");record.delivery={...record.delivery,abortedAt:new Date().toISOString()};await persist();return;}
           if(delayed){delayed.captured=true;await delayed.gate;}
+          if(closed){record.delivery={...record.delivery,fulfillStartedAt:new Date().toISOString()};await persist();}
           await route.fulfill({response,body});
+          if(closed){record.delivery={...record.delivery,fulfilledAt:new Date().toISOString()};await persist();}
         })();pending.add(task);try{await task;}catch{receipt.failures.push(`ACTION_CAPTURE_FAILED:${name}`);await route.abort("blockedbyclient").catch(()=>{});}finally{pending.delete(task);}return;
       }
       if(!closing)receipt.failures.push(`UNAUTHORIZED_MUTATION_BLOCKED:${name}:${url.pathname}`);
       await route.abort("blockedbyclient");
     });
     const current=await context.newPage();
+    for(const event of ["requestfinished","requestfailed"]){
+      current.on(event,request=>{
+        const record=deliveryRequests.get(request);if(!record)return;
+        // Диагностика только известного UUID: без URL, headers и текста сетевой ошибки.
+        record.delivery={...record.delivery,[event]:{at:new Date().toISOString(),clientMutationId:record.request.clientMutationId}};
+        void persist().catch(()=>{});
+      });
+    }
     const network=[];current.on("request",request=>{
       const url=new URL(request.url());const prefetch=request.headers()["next-router-prefetch"]||request.headers()["purpose"]==="prefetch";
       if(!prefetch&&request.method()==="GET"&&url.pathname===path&&(request.isNavigationRequest()||request.headers()["rsc"]||url.searchParams.has("_rsc")))network.push({path:url.pathname,kind:request.isNavigationRequest()?"document":"RSC"});
