@@ -85,7 +85,6 @@ export default async function ProductPage({
               fileName: file.fileName,
               category: file.category,
               stage: file.stage,
-              caption: file.caption,
               mimeType: file.mimeType,
               size: file.size,
               hasThumb: file.hasThumb,

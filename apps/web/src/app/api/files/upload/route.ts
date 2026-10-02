@@ -38,7 +38,7 @@ function sanitizeFileName(name: string): string {
 }
 
 // POST /api/files/upload — multipart/form-data:
-// file, projectId, productId?, category?, caption?, taskId?
+// file, projectId, productId?, category?, taskId?
 export async function POST(request: Request) {
   const session = await auth();
   if (!session?.user) {
@@ -54,6 +54,8 @@ export async function POST(request: Request) {
   if (file.size > MAX_SIZE) {
     return NextResponse.json({ error: "Файл больше 25 МБ" }, { status: 413 });
   }
+
+  if (form.get("caption") !== null) return NextResponse.json({ok:false,kind:"validation",error:"Подписи файлов больше не используются"},{status:422});
 
   const productIdRaw = form.get("productId");
   const requestedProductId =
@@ -93,7 +95,6 @@ export async function POST(request: Request) {
   const category: FileCategory = CATEGORIES.includes(categoryRaw as FileCategory)
     ? (categoryRaw as FileCategory)
     : "OTHER";
-  const caption = typeof form.get("caption") === "string" ? (form.get("caption") as string) : null;
 
   // Проверка расширения по настройкам плагина file-stages (если включён).
   // Возвращаем 422 до записи на диск — плагин меняет базовое поведение загрузки.
@@ -127,7 +128,7 @@ export async function POST(request: Request) {
   const contentHash = assignCover ? createHash("sha256").update(buffer).digest("hex") : undefined;
   if (assignCover && replayCover && coverTarget) {
     const result = await withTaskTransaction(tx => persistUploadedProductCover(tx,session.user,coverTarget!,{
-      fileName:file.name,storedName,mimeType:file.type,size:file.size,hasThumb:false,uploadedById:session.user.id,caption,stage,contentHash}));
+      fileName:file.name,storedName,mimeType:file.type,size:file.size,hasThumb:false,uploadedById:session.user.id,stage,contentHash}));
     if (!result.ok) return NextResponse.json(result,{status:result.kind==="conflict"?409:422});
     const sketch=await prisma.file.findUnique({where:{id:result.id},select:{id:true,fileName:true,mimeType:true,size:true,hasThumb:true,category:true,stage:true,uploadedById:true}});
     if (!sketch) return NextResponse.json({ok:false,kind:"conflict",error:"Эскиз уже удалён"},{status:409});
@@ -188,7 +189,7 @@ export async function POST(request: Request) {
       result = await withTaskTransaction((tx) => persistUploadedProductCover(tx, session.user,
         coverTarget!, {
           fileName: file.name, storedName, mimeType: file.type, size: file.size,
-          hasThumb, uploadedById: session.user.id, caption, stage, contentHash,
+          hasThumb, uploadedById: session.user.id, stage, contentHash,
         }));
     } catch {
       await compensateOwnCover();
@@ -212,7 +213,6 @@ export async function POST(request: Request) {
       taskId,
       category,
       stage,
-      caption,
       fileName: file.name,
       storedName,
       mimeType: file.type,

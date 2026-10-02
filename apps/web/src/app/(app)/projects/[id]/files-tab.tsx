@@ -9,7 +9,6 @@ import type { FileCategory } from "@prisma/client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -34,7 +33,6 @@ export interface FileRow {
   fileName: string;
   category: FileCategory;
   stage: FileStageKey;
-  caption: string | null;
   mimeType: string;
   size: number;
   hasThumb: boolean;
@@ -57,7 +55,6 @@ export function Uploader({
   extensions,
   fixedCategory,
   excludeMeasurement = false,
-  compact = false,
   onBusyChange,
 }: {
   projectId: string;
@@ -74,7 +71,6 @@ export function Uploader({
   const [pending, startTransition] = useTransition();
   const [category, setCategory] = useState<FileCategory>(fixedCategory ?? "PHOTO");
   const [error, setError] = useState<string | null>(null);
-  const [caption, setCaption] = useState("");
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   function upload(file: File) {
@@ -96,7 +92,6 @@ export function Uploader({
     if (productId) form.append("productId", productId);
     form.append("category", category);
     if (stage) form.append("stage", stage);
-    if (caption.trim()) form.append("caption", caption.trim());
     startTransition(async () => {
       onBusyChange?.(true);
       setError(null);
@@ -108,7 +103,6 @@ export function Uploader({
       const data = await response.json().catch(() => ({}));
       if (response.ok && data.ok === true && typeof data.id === "string") {
         toast.success("Файл загружен");
-        setCaption("");
         router.refresh();
       } else {
         setError(data.error ?? "Ошибка загрузки");
@@ -143,14 +137,6 @@ export function Uploader({
             </SelectContent>
           </Select>
         </div> : null}
-        <div className={`flex flex-1 flex-col gap-1.5 ${compact ? "min-w-0 basis-40" : "min-w-48"}`}>
-          <span className="text-sm font-medium">Пояснение</span>
-          <Input
-            value={caption}
-            onChange={(event) => setCaption(event.target.value)}
-            placeholder="не обязательно"
-          />
-        </div>
         <input
           ref={inputRef}
           type="file"
@@ -208,14 +194,14 @@ export function FileGridView({
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={`/api/files/${file.id}?thumb=1`}
-                  alt={file.caption ?? file.fileName}
+                  alt={file.fileName}
                   className="aspect-square w-full rounded-xl border object-cover transition-opacity hover:opacity-90"
                   loading="lazy"
                 />
               </button>
               <div className="mt-1 flex min-w-0 flex-wrap items-center justify-between gap-2">
                 <div className="min-w-0">
-                  <div className={compact ? "break-all text-xs" : "truncate text-xs"}>{file.caption ?? file.fileName}</div>
+                  <div className={compact ? "break-all text-xs" : "truncate text-xs"}>{file.fileName}</div>
                   <div className="break-words text-xs text-muted-foreground">
                     {FILE_CATEGORY_LABELS[file.category as FileCategoryKey]} · {file.uploaderName}
                   </div>
@@ -255,7 +241,7 @@ export function FileGridView({
             {flat && file.hasThumb ? <button type="button" className="size-10 shrink-0" aria-label={`Просмотреть ${file.fileName}`} onClick={event => { event.stopPropagation(); fileViewer.open(file); }}>{ /* eslint-disable-next-line @next/next/no-img-element */ }
                 <img src={`/api/files/${file.id}?thumb=1`} alt="" className="size-10 rounded-md object-cover" /></button> : <FileText className="size-5 shrink-0 text-muted-foreground" />}
             <div className="min-w-0 flex-1">
-              <div className={compact ? "break-all text-sm" : "truncate text-sm"}>{file.caption ?? file.fileName}</div>
+              <div className={compact ? "break-all text-sm" : "truncate text-sm"}>{file.fileName}</div>
               <div className="break-words text-xs text-muted-foreground">
                 <Badge variant="outline" className="mr-2">
                   {FILE_CATEGORY_LABELS[file.category as FileCategoryKey]}
