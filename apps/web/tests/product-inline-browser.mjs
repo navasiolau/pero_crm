@@ -161,6 +161,28 @@ export async function runProductInlineBrowser({origin,profiles,fixture,outputDir
     await state(page,"phone").getByRole("button",{name:"Принять сохранённое",exact:true}).click();await expect(field(page,"phone")).toHaveValue(fixture.initial.phoneB);
     await enter(page,"phone","888");assert.equal(patches().at(-1).request.expectedClientId,fixture.ids.clientB);
     await selectClient(page,fixture.initial.clientLabelA);await expect(field(page,"phone")).toHaveValue(fixture.initial.phoneA);check("changed-client conflict keeps old draft, explicit accept binds actual phone; original client phone unchanged");
+    phase="pristine_engineer_fallback_projection";
+    await page.getByRole("tab",{name:"Процентные этапы",exact:true}).click();
+    const engineerSelect=field(page,"engineer");
+    const originalEngineerName=(await engineerSelect.innerText()).trim();
+    await engineerSelect.click();
+    const engineerOptions=page.locator('[data-slot="popover-content"]').getByRole("button");
+    let alternateEngineerName=null;
+    for(let index=0;index<await engineerOptions.count();index++){
+      const candidate=engineerOptions.nth(index);const label=(await candidate.innerText()).trim();
+      if(label&&label!==originalEngineerName&&!label.startsWith("—")&&await candidate.isEnabled()) {alternateEngineerName=label;await candidate.click();break;}
+    }
+    if(alternateEngineerName){
+      await saved(page,"engineer");
+      const engineeringCard=page.locator('[data-slot="card"]').filter({has:page.getByText("Инженерный этап",{exact:true})});
+      await expect(engineeringCard.getByText(alternateEngineerName,{exact:true})).toBeVisible();
+      const engineerRequest=patches().at(-1);assert.equal(engineerRequest.request.field,"engineerId");assert.notEqual(engineerRequest.request.value,fixture.initial.engineerId);
+      await engineerSelect.click();await page.locator('[data-slot="popover-content"]').getByRole("button").filter({has:page.getByText(originalEngineerName,{exact:true})}).click();
+      await saved(page,"engineer");await expect(engineeringCard.getByText(originalEngineerName,{exact:true})).toBeVisible();
+      assert.equal(patches().at(-1).request.value,fixture.initial.engineerId);
+      check("pristine DRAFT server-fallback recipient follows confirmed alternative engineer and revert; no percentage config written");
+    }else{await page.keyboard.press("Escape");receipt.skips.push("alternative active engineer unavailable: default projection runtime scenario not executed");}
+    await page.getByRole("tab",{name:/Работы и задачи/}).click();
     phase="dependent_flush_before_status";
     let releaseQuantity;const quantityPlan={field:"quantity",captured:false,gate:new Promise(done=>{releaseQuantity=done;})};releases.push(()=>releaseQuantity());delayPlan=quantityPlan;
     await field(page,"quantity").fill("2");await field(page,"quantity").press("Enter");await expect.poll(()=>quantityPlan.captured).toBe(true);

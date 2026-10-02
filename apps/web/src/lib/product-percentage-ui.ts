@@ -58,11 +58,12 @@ export function initialProductPercentageParticipants(
   section: ProductPercentageSectionView,
   assignedEngineerId: string | null,
 ): { userId: string; shareUnits: number }[] {
-  if (section.members.length)
+  // members без config могут быть лишь серверной подсказкой прежнего инженера.
+  // Подтверждённая конфигурация и frozen-история всегда сохраняют своих участников.
+  if (section.hasConfiguration || section.state !== "DRAFT")
     return section.members.map(({ userId, shareUnits }) => ({ userId, shareUnits }));
-  if (kind === "ENGINEERING" && assignedEngineerId)
-    return [{ userId: assignedEngineerId, shareUnits: PERCENTAGE_SHARE_UNITS }];
-  return [];
+  if (kind === "ENGINEERING") return assignedEngineerId ? [{ userId: assignedEngineerId, shareUnits: PERCENTAGE_SHARE_UNITS }] : [];
+  return section.members.map(({ userId, shareUnits }) => ({ userId, shareUnits }));
 }
 
 export function addProductPercentageParticipant(
