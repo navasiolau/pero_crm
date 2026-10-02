@@ -169,3 +169,13 @@ test("bounded LRU evicts the oldest transformed preview", async () => {
   }
   assert.equal(reads, 3, "Rendering the second asset must evict the oldest asset");
 });
+
+ test("thumbnail is bounded160 and remains protected on warm conditional cache; source immutable",async()=>{
+ const original=await sourceImage(),before=Buffer.from(original);let allowed=true,loads=0;
+ const preview=createImagePreviewService({lookup:async()=>allowed?file:null,loadOriginal:async()=>{loads++;return original;}});
+ const variant="thumbnail" as import('../src/server/files/image-preview').ImagePreviewVariant;
+ const result=await preview.respond({actor,fileId:file.id,variant});assert.equal(result.status,200);
+ const bytes=Buffer.from(await result.arrayBuffer()),meta=await sharp(bytes).metadata();assert.ok(meta.width!<=160&&meta.height!<=160);assert.deepEqual(original,before);
+ const etag=result.headers.get('etag');assert.equal((await preview.respond({actor,fileId:file.id,variant,ifNoneMatch:etag})).status,304);assert.equal(loads,1);
+ allowed=false;const denied=await preview.respond({actor,fileId:file.id,variant,ifNoneMatch:etag});assert.equal(denied.status,404);assert.equal(denied.headers.get('etag'),null);assert.equal(loads,1);
+ });

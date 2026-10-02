@@ -4,7 +4,7 @@ import sharp from "sharp";
 
 import { isCoverImageMime } from "@/lib/product-cover";
 
-export type ImagePreviewVariant = "card" | "cover";
+export type ImagePreviewVariant = "card" | "cover" | "thumbnail";
 export type PreviewFile = {
   id: string;
   projectId: string;
@@ -19,6 +19,7 @@ const SOURCE_MAX_BYTES = 25 * 1024 * 1024;
 const DEFAULT_CACHE_BYTES = 25 * 1024 * 1024;
 const MAX_PENDING_JOBS = 24;
 const SIZE: Record<ImagePreviewVariant, { width: number; height: number }> = {
+  thumbnail: { width: 160, height: 160 },
   card: { width: 480, height: 480 },
   cover: { width: 1280, height: 1600 },
 };
@@ -106,7 +107,7 @@ export function createImagePreviewService<Actor>(
           .rotate()
           .resize(SIZE[variant].width, SIZE[variant].height,
             { fit: "inside", withoutEnlargement: true })
-          .webp({ quality: 78, effort: 4 })
+          .webp({ quality: variant === "cover" ? 90 : variant === "thumbnail" ? 85 : 78, effort: 4 })
           .toBuffer();
         const etag = `"preview-${createHash("sha256").update(bytes).digest("hex")}"`;
         const asset = { bytes, etag };

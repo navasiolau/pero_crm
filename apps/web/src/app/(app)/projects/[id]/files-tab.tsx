@@ -16,6 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { FileImageThumbnail } from "@/components/file-image-thumbnail";
 import { useFileViewer } from "@/components/file-viewer";
 import { ConfirmDeleteDialog } from "@/components/confirm-delete-dialog";
 import { deleteFile } from "@/server/files/actions";
@@ -176,61 +177,9 @@ export function FileGridView({
   const [deleteFor, setDeleteFor] = useState<FileRow | null>(null);
   const fileViewer = useFileViewer();
 
-  const photos = flat ? [] : files.filter((file) => file.hasThumb);
-  const documents = flat ? files : files.filter((file) => !file.hasThumb);
-
   return (
     <>
-      {photos.length > 0 ? (
-        <div className={compact ? "grid min-w-0 grid-cols-2 gap-3" : "grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4"}>
-          {photos.map((file) => (
-            <div key={file.id} data-file-id={file.id} className="group relative min-w-0">
-              <button
-                type="button"
-                className="block w-full"
-                onClick={() => fileViewer.open(file)}
-                title="Открыть на просмотр"
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={`/api/files/${file.id}?thumb=1`}
-                  alt={file.fileName}
-                  className="aspect-square w-full rounded-xl border object-cover transition-opacity hover:opacity-90"
-                  loading="lazy"
-                />
-              </button>
-              <div className="mt-1 flex min-w-0 flex-wrap items-center justify-between gap-2">
-                <div className="min-w-0">
-                  <div className={compact ? "break-all text-xs" : "truncate text-xs"}>{file.fileName}</div>
-                  <div className="break-words text-xs text-muted-foreground">
-                    {FILE_CATEGORY_LABELS[file.category as FileCategoryKey]} · {file.uploaderName}
-                  </div>
-                </div>
-                <div className="flex shrink-0 gap-1">
-                  <a href={`/api/files/${file.id}`} download onClick={event => event.stopPropagation()}>
-                    <Button size="icon-xs" variant="ghost" aria-label="Скачать оригинал">
-                      <Download className="size-3.5" />
-                    </Button>
-                  </a>
-                  {canEdit ? (
-                    <Button
-                      size="icon-xs"
-                      variant="ghost"
-                      aria-label="Удалить"
-                      disabled={pending}
-                      onClick={() => setDeleteFor(file)}
-                    >
-                      <Trash2 className="size-3.5" />
-                    </Button>
-                  ) : null}
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : null}
-
-      {documents.map((file) => (
+      {files.map((file) => (
         <Card
           key={file.id}
           className="min-w-0 cursor-pointer transition-colors hover:bg-accent/50"
@@ -238,8 +187,7 @@ export function FileGridView({
           onClick={() => fileViewer.open(file)}
         >
           <CardContent className="flex min-w-0 flex-wrap items-center gap-3 p-3">
-            {flat && file.hasThumb ? <button type="button" className="size-10 shrink-0" aria-label={`Просмотреть ${file.fileName}`} onClick={event => { event.stopPropagation(); fileViewer.open(file); }}>{ /* eslint-disable-next-line @next/next/no-img-element */ }
-                <img src={`/api/files/${file.id}?thumb=1`} alt="" className="size-10 rounded-md object-cover" /></button> : <FileText className="size-5 shrink-0 text-muted-foreground" />}
+            <FileText className="size-5 shrink-0 text-muted-foreground" />
             <div className="min-w-0 flex-1">
               <div className={compact ? "break-all text-sm" : "truncate text-sm"}>{file.fileName}</div>
               <div className="break-words text-xs text-muted-foreground">
@@ -250,6 +198,7 @@ export function FileGridView({
                 {new Date(file.createdAt).toLocaleDateString("ru-RU", flat ? { timeZone: "Europe/Moscow" } : undefined)}
               </div>
             </div>
+            <FileImageThumbnail file={file} onOpen={()=>fileViewer.open(file)}/>
             <a href={`/api/files/${file.id}`} download onClick={event => event.stopPropagation()}>
               <Button size="icon" variant="ghost" aria-label="Скачать">
                 <Download className="size-4" />
