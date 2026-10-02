@@ -1,0 +1,40 @@
+# №19: код контура compiled browser и границы проверок
+
+Подготовлены `product-description-browser.mjs`, `product-description-stage-runner.mjs` и scoped build-only `product-description-qa-bundle.mjs`. Исполнитель не запускал DB/SSH/браузер/storage/сам stage-runner. Root запускает фактическую приёмку после фиксации compiled ревизии.
+
+Кодовые проверки: `node --check` всех новых helpers/runner и `crm-browser-zoom.mjs`; targeted ESLint — PASS. `node --test tests/product-description-browser.test.mjs tests/product-description-qa-bundle.test.mjs` — 10/10 PASS; включают реальные generated HMAC checks на подделку/изменение профиля, missing/duplicate source seam STOP, closed owned description request/receipt scope, no-op исключение, ранние zoom guards до запуска Chromium и build-only размеры bundles.
+
+## Подписанные варианты и неизменность исходников
+
+Session19 использует source-reviewed вариант существующего `project-inline-session.mjs` №18 с namespace `PERO_PRODUCT_DESCRIPTION_SESSION_V1`. Захватывает `product.tab` вместе с прежними preference keys. Роли берутся из существующих active ADMIN/MANAGER/ENGINEER и опциональных MANAGER+ENGINEER/ACCOUNTANT/WORKER/MOUNTER, без создания людей/поддельных cookies. Отсутствующие optional cohorts явно отмечаются как skips.
+
+Fixture19 повторно использует реализацию `product-inline-browser-fixtures.mjs` №17, сохраняя исходный signed V2 файл/namespace без изменений. Новый namespace — `PERO_PRODUCT_DESCRIPTION_BROWSER_FIXTURES_V1`. До prepare transaction проверяется HMAC Session19; actor IDs/roles и инженер изделий точно соответствуют captured session profiles. Checkpoint связан с hash исходного session checkpoint. Новые own fixture строки находятся в existing guarded DB; никакой новый стенд/схема/seed не используется.
+
+Source variants строятся через отдельный esbuild onLoad с точным путём и exactly-one seams. При missing/duplicate источнике builder STOP, а не подстановка в неизвестную функцию. Tests подтвердили неизменность hashes исходников №17/18 после build-only. Изменяемый business scope дополнительно сужен: только Product.description/updatedAt; Client/Project и прочие product fields immutable, status только DESIGN, audit только inline.update/description, events только product.updated; history/notifications остаются пустыми. Все прежние HMAC/target/actor/dependency/audit/whole-data CAS guards сохранены.
+
+Own Product B создаётся с legacy whitespace/CRLF. Browser harness проверяет focus/CtrlEnter/blur без POST и без backfill до явной очистки пустым вводом. Browser LF имеет собственную проверку exact ведущих/завершающих whitespace/tab/blank lines; это не подменяет raw CRLF native доказательства.
+
+## Реальные сценарии, которые root должен выполнить
+
+Небольшой description-only browser сценарий: bare Enter без промежуточного POST, CtrlEnter+blur dedupe, exact LF save/reload/no-op, delayed committed ACK/new draft, потерянный ACK/same UUID replay, whitespace-only CAS между admin/manager и explicit rebase, literal HTML/Markdown/длинная строка, null/пустое большое поле, настоящий native vertical resize, assigned DESIGN engineer/manager union/readonly office и отказ field roles, шесть размеров/sidebar/smooth widths. Единственный field mutation route — closed ProductPatch(description) двух signed own IDs; никакие цены/status/files/соседние поля не разрешены. Описание находится над существующими вкладками изделия: QA не переключает вымышленную «Общее» и не разрешает preference writes. Session всё ещё подписывает исходный product.tab как baseline; bell — source-verified read.
+
+Потерянный результат не считается saved receipt. Durable journals фиксируются до возврата route ACK. Root coordinator допускает restore только exact known IDs/actors/description, no-op не требует receipt. После закрытия всех holds/contexts выполняются signed fixture inspect/restore, затем signed session preference CAS restore. Unknown mutation/uncaptured upstream result — STOP с сохранением checkpoints/journals.
+
+True Chrome200 использует прежние tabs.setZoom/getZoom + native compositor screenshots, без CSS zoom/emulation. Scoped descriptionMode допускается только exact owned product/selector и обязательный journal callback (пустой при отсутствии preference writes). Для видимого настоящего transport error один closed own description POST abort-ится до route.fetch/upstream — DB write отсутствует; literal long text/errors должны оставаться в ширине. Старые quantity/project/payroll zoom modes и guards сохраняются.
+
+## Запуск координатора
+
+Из root workspace: `node apps/web/tests/product-description-stage-runner.mjs local <полный-SHA> native|browser|zoom`. Local origin фиксирован `http://127.0.0.1:3019`; staging — `https://staging-crm.peromebel.by`, проверенная transport ревизия + existing Basic Auth. Environment/secrets передаёт только root; stdout содержит status/counts/revision/cleanup/outputDir, а raw session cookies остаются в памяти. Stage-runner/native/browser здесь не исполнялись и PASS фактической приёмки не заявляется.
+
+
+Root actual первый запуск browser19 завершился FAIL с 0 checks: QA ошибочно ждал отсутствующую вкладку изделия «Общее». Root подтвердил поле description над действующими вкладками; fixture/pref cleanup прошли. Исправлен только QA: goto/readonly/zoom непосредственно ждут description; tab preference writer удалён. Browser expected LF теперь нормализует реальные CRLF (`/\r\n/`) и не трогает буквальные backslash-последовательности. Добавлены redacted private failure message/stack/DOM для следующей фактической диагностики. Pure tests воспроизводят различие CRLF и literal escapes, а также redaction tokens/URL credentials; нового фактического browser PASS исполнитель не заявляет.
+
+Root второй actual запуск browser19 завершился FAIL после 5 checks на `literal_and_long_text`, cleanup прошёл. Поле приложения дошло до «Сохранено», но прежний QA JSON-line parser принял Flight reference `$2` за сохранённое значение. Это ошибка decoder QA, не доказанный дефект сохранения приложения.
+
+Добавлен `product-description-flight.mjs`: pinned installed Next15.5.20 `react-server-dom-webpack/client.edge.createFromFetch` с настоящим ActionResult promise. Empty consumer manifests запрещают client/server module references; проверяются status/content-type/redirect/revalidation, пустой `f`, allowed envelope metadata, точные field/UUID и компактный description result contract. Длинный текст разрешается через настоящий Flight text chunk; ручного разрешения references/JSON-line результата нет.
+
+Pure test encoder использует установленный `server.edge.renderToReadableStream` в отдельном Node react-server condition (не приложение/БД/браузер). Genuine long T chunk, `$2`, `$undefined`, Unicode/non-BMP/leading/trailing/tab/newlines roundtrip PASS; genuine module/full RSC/unknown metadata, wrong UUID/redirect/revalidation/content-type отвергаются. Literal browser test остаётся длинным (2400 символов), а `saveText` и reload проверяют точное исходное значение. Все QA guard/bundle/codec tests сейчас 13/13 PASS, targeted ESLint PASS. Фактический повторный browser запускает root; новый actual PASS здесь не заявляется.
+
+Root третий actual browser19 завершился FAIL после 6 checks в `null_visible_and_native_resize`, cleanup прошёл. QA повторно заполнил B тем же whitespace/LF, который DOM уже показывал из raw CRLF. Правильный raw no-op не отправил POST; прежний helper ошибочно сравнил последний глобальный ответ изделия A с null. Исправлен только QA: explicit clear `''`, matcher по текущему actor/product/description/new request offset + совпадающему UUID result/request; global at(-1) больше не используется ни для save, ни для конфликтов/replay. Pure regression доказывает, что отсутствие новой записи не подменяется старым ответом другого изделия.
+
+Native resize использует реальный Chromium handle drag после scrollIntoView(center); before/after bbox, viewport/start/end записаны в receipt, оба конца drag проверяются внутри viewport. CSS высота не подменяется. Syntax/targeted ESLint PASS; codec/guard/bundle/matcher tests 14/14 PASS. Фактический повтор запускает root, а не исполнитель QA.

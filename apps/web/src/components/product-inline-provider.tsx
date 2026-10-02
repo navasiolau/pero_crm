@@ -3,12 +3,15 @@ import { createContext, useContext, useMemo, useRef, useState, type ReactNode } 
 import { createInlineSaveController, type InlineSaveController, type InlineValue } from "@/lib/inline-save-controller";
 import { productPatchSchema, type ProductPatchField, type ProductPatchDerived } from "@/server/products/patch-contract";
 import { invokeProductPatch } from "@/lib/independent-product-action";
+import { normalizeProductDescription } from "@/lib/product-description";
+import { isUnchangedProductDescriptionDraft } from "@/lib/product-description-draft";
 import { resolvePhoneDependency } from "@/lib/inline-phone-dependency";
 
 export type ProductInlineInitial = Record<ProductPatchField, InlineValue>;
 type Context = { controller: (field: ProductPatchField) => InlineSaveController; flush: () => Promise<boolean>; registerGuard: (key: string, guard: () => Promise<boolean>) => () => void; derived: ProductPatchDerived; clientId: string; sourceClientId: string };
 const InlineContext = createContext<Context | null>(null);
 function parse(field: ProductPatchField, raw: string): InlineValue {
+  if (field === "description") return normalizeProductDescription(raw);
   const value = raw.trim();
   if (field === "quantity") { const quantity = Number(value); if (!value || !Number.isInteger(quantity) || quantity < 1 || quantity > 2_147_483_647) throw Error("Количество — целое число от 1 до 2147483647"); return quantity; }
   if (field === "expectedPrice") { if (!value) return null; const decimal = value.replace(",", "."); if (!/^\d{1,10}(?:\.\d{1,2})?$/.test(decimal)) throw Error("Введите неотрицательную цену с точностью до копеек"); const [units, fraction = ""] = decimal.split("."); return `${BigInt(units)}.${fraction.padEnd(2, "0")}`; }
@@ -25,7 +28,7 @@ export function ProductInlineProvider({ productId, initial, children }: { produc
     for (const field of Object.keys(initial) as ProductPatchField[]) {
       let rebaseClientId: string | undefined;
       let rebaseClientLabel: string | undefined;
-      const controller = createInlineSaveController<InlineValue>({ initialValue: field === "expectedPrice" && initial[field] !== null ? parse(field, String(initial[field])) : initial[field], format: value => value === null ? "" : String(value), parse: raw => parse(field, raw), onSaved: () => {
+      const controller = createInlineSaveController<InlineValue>({ initialValue: field === "expectedPrice" && initial[field] !== null ? parse(field, String(initial[field])) : initial[field], format: value => value === null ? "" : String(value), parse: raw => parse(field, raw), isUnchangedDraft: field === "description" ? (draft, baseline) => isUnchangedProductDescriptionDraft(draft, baseline === null ? null : String(baseline)) : undefined, onSaved: () => {
         if (field !== "project.clientId" && field !== "client.phone") return;
         setTimeout(() => {
           const phone = result.get("client.phone");
