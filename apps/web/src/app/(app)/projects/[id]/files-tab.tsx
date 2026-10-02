@@ -157,7 +157,9 @@ function Uploader({
 function FileGridView({
   files,
   canEdit,
+  flat = false,
 }: {
+  flat?: boolean;
   files: FileRow[];
   canEdit: boolean;
 }) {
@@ -166,8 +168,8 @@ function FileGridView({
   const [deleteFor, setDeleteFor] = useState<FileRow | null>(null);
   const fileViewer = useFileViewer();
 
-  const photos = files.filter((file) => file.hasThumb);
-  const documents = files.filter((file) => !file.hasThumb);
+  const photos = flat ? [] : files.filter((file) => file.hasThumb);
+  const documents = flat ? files : files.filter((file) => !file.hasThumb);
 
   return (
     <>
@@ -197,7 +199,7 @@ function FileGridView({
                   </div>
                 </div>
                 <div className="flex shrink-0 gap-1">
-                  <a href={`/api/files/${file.id}`} download>
+                  <a href={`/api/files/${file.id}`} download onClick={event => event.stopPropagation()}>
                     <Button size="icon-xs" variant="ghost" aria-label="Скачать оригинал">
                       <Download className="size-3.5" />
                     </Button>
@@ -227,7 +229,8 @@ function FileGridView({
           onClick={() => fileViewer.open(file)}
         >
           <CardContent className="flex items-center gap-3 p-3">
-            <FileText className="size-5 shrink-0 text-muted-foreground" />
+            {flat && file.hasThumb ? <button type="button" className="size-10 shrink-0" aria-label={`Просмотреть ${file.fileName}`} onClick={event => { event.stopPropagation(); fileViewer.open(file); }}>{ /* eslint-disable-next-line @next/next/no-img-element */ }
+                <img src={`/api/files/${file.id}?thumb=1`} alt="" className="size-10 rounded-md object-cover" /></button> : <FileText className="size-5 shrink-0 text-muted-foreground" />}
             <div className="min-w-0 flex-1">
               <div className="truncate text-sm">{file.caption ?? file.fileName}</div>
               <div className="text-xs text-muted-foreground">
@@ -235,10 +238,10 @@ function FileGridView({
                   {FILE_CATEGORY_LABELS[file.category as FileCategoryKey]}
                 </Badge>
                 {formatSize(file.size)} · {file.uploaderName} ·{" "}
-                {new Date(file.createdAt).toLocaleDateString("ru-RU")}
+                {new Date(file.createdAt).toLocaleDateString("ru-RU", flat ? { timeZone: "Europe/Moscow" } : undefined)}
               </div>
             </div>
-            <a href={`/api/files/${file.id}`} download>
+            <a href={`/api/files/${file.id}`} download onClick={event => event.stopPropagation()}>
               <Button size="icon" variant="ghost" aria-label="Скачать">
                 <Download className="size-4" />
               </Button>
@@ -296,6 +299,7 @@ export function FilesTab({
   canEdit,
   stagesEnabled = false,
   stageExtensions = null,
+  flatProject = false,
 }: {
   projectId: string;
   productId?: string;
@@ -303,7 +307,10 @@ export function FilesTab({
   canEdit: boolean;
   stagesEnabled?: boolean;
   stageExtensions?: Record<FileCategory, string[]> | null;
+  flatProject?: boolean;
 }) {
+  if (flatProject && !productId) return <div className="flex min-w-0 flex-col gap-4" data-project-files="flat"><Uploader projectId={projectId} canEdit={canEdit} extensions={stageExtensions ?? undefined} /><div className="flex min-w-0 flex-col gap-2"><FileGridView files={files} canEdit={canEdit} flat /></div></div>;
+
   if (!stagesEnabled) {
     return (
       <div className="flex flex-col gap-4">

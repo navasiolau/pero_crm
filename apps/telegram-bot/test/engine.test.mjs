@@ -10,6 +10,9 @@ process.env.CRM_API_TOKEN = "fixture-crm-token";
 const calls = [];
 const sent = [];
 let nextMessageId = 1000;
+let stageFailure=false;let loseStageAck=false;
+let editFixture=false,loseEditAck=false,editConflict=false,editWrites=0;const editReceipts=new Map();
+const baseline={title:"Captured title",clientId:"client-1",managerId:null,address:"Captured address",currency:"BYN",initialPrice:null,delivery:null,unloading:null,installation:null};
 
 globalThis.fetch = async (input, options = {}) => {
   const url = new URL(String(input));
@@ -45,9 +48,14 @@ globalThis.fetch = async (input, options = {}) => {
   } else if (url.pathname === "/api/v1/bot/projects" && options.method === "POST") {
     value = { ok: true, number: "999" };
   } else if (url.pathname === "/api/v1/bot/projects/205" && options.method === "GET") {
-    value = { project: { id: "205", number: "205", address: "Captured address" } };
+    value = { project: { id: "205", number: "205", stage:"LEAD",address: "Captured address",fullBaseline:baseline } };
+  } else if (url.pathname === "/api/v1/bot/projects/205/stage") {
+    if(loseStageAck){loseStageAck=false;throw Error("lost ACK")}
+    value={ok:!stageFailure,error:stageFailure?"conflict":undefined};
   } else if (url.pathname === "/api/v1/bot/projects/205" && options.method === "PATCH") {
-    value = { ok: true };
+    if(editFixture){if(editConflict)value={ok:false,kind:"conflict",error:"Conflict"};else {if(!body.clientMutationId||!editReceipts.has(body.clientMutationId)){editWrites++;if(body.clientMutationId)editReceipts.set(body.clientMutationId,body)}value={ok:true,kind:"saved",replayed:editReceipts.has(body.clientMutationId)};}
+      if(loseEditAck){loseEditAck=false;throw Error("lost ACK after commit");}}
+    else value = { ok: true };
   } else if (url.pathname === "/api/v1/bot/payments") {
     value = { ok: true };
   } else {
@@ -146,5 +154,55 @@ test("address edit PATCH carries the genuine address captured when dialog opened
   await handleUpdate(callback(5101, 501, "ed:205:address"));
   await handleUpdate(message(5102, 501, "Changed address"));
   const patch = calls.slice(before).find(call => call.method === "PATCH" && call.path === "/api/v1/bot/projects/205");
-  assert.ok(patch); assert.deepEqual(patch.body, { address: "Changed address", contactBaseline: { address: "Captured address" } });
+  assert.ok(patch); assert.equal(patch.body.field,"address");assert.equal(patch.body.value,"Changed address");assert.equal(patch.body.expectedValue,baseline.address);assert.match(patch.body.clientMutationId,/^[a-f0-9-]{36}$/);
+});
+
+
+test("title and manager edits retain full genuine baseline",async()=>{
+ const before=calls.length;await handleUpdate(callback(5201,801,"ed:205:title"));await handleUpdate(message(5202,801,"Edited"));
+ await handleUpdate(callback(5203,801,"ed:205:manager"));await handleUpdate(callback(5204,801,"mgr:manager-1"));
+ const writes=calls.slice(before).filter(call=>call.method==='PATCH');assert.equal(writes.length,2);assert.equal(writes[0].body.field,'title');assert.equal(writes[0].body.value,'Edited');assert.equal(writes[0].body.expectedValue,baseline.title);assert.equal(writes[1].body.field,'managerId');assert.equal(writes[1].body.value,'manager-1');assert.equal(writes[1].body.expectedValue,baseline.managerId);
+});
+function stageButton(stage){return sent.at(-1).reply_markup.inline_keyboard.flat().find(item=>item.callback_data.includes(`:${stage}:`)).callback_data;}
+test("stage menu captures baseline once, stale callback rejected, refusal optional comment and lost ACK retry same UUID",async()=>{
+ const before=calls.length;
+ await handleUpdate(callback(5300,901,'st:205:IN_WORK'));assert.equal(calls.slice(before).filter(c=>c.path.endsWith('/stage')).length,0);
+ await handleUpdate(callback(5301,901,'stage:205'));const chosen=stageButton('REFUSED');
+ await handleUpdate(callback(5302,901,chosen));await handleUpdate(message(5303,901,'дорого'));loseStageAck=true;
+ await handleUpdate(message(5304,901,'—'));await handleUpdate(message(5305,901,'—'));
+ const stageWrites=calls.slice(before).filter(c=>c.path.endsWith('/stage'));assert.equal(stageWrites.length,2);assert.deepEqual(stageWrites[0].body,stageWrites[1].body);assert.equal(stageWrites[0].body.expectedStage,'LEAD');assert.equal(stageWrites[0].body.extras.refusalComment,'');assert.match(stageWrites[0].body.clientMutationId,/^[a-f0-9-]{36}$/);
+ assert.equal(calls.slice(before).filter(c=>c.path==='/api/v1/bot/projects/205'&&c.method==='GET').length,1);
+ await handleUpdate(callback(5306,901,'stage:205'));await handleUpdate(callback(5307,901,chosen));assert.equal(calls.slice(before).filter(c=>c.path.endsWith('/stage')).length,2);
+});
+test("reclamation dialog retains extras after conflict and requires all details",async()=>{
+ const before=calls.length;await handleUpdate(callback(5401,902,'stage:205'));await handleUpdate(callback(5402,902,stageButton('RECLAMATION')));
+ await handleUpdate(message(5403,902,'скол'));await handleUpdate(message(5404,902,'фасад'));stageFailure=true;
+ await handleUpdate(message(5405,902,'цех'));stageFailure=false;await handleUpdate(message(5406,902,'цех'));
+ const writes=calls.slice(before).filter(c=>c.path.endsWith('/stage'));assert.equal(writes.length,2);assert.deepEqual(writes[0].body,writes[1].body);assert.deepEqual(writes[0].body.extras,{reclamationReason:'скол',reclamationDescription:'фасад',reclamationFault:'цех'});
+});
+
+
+test("ordinary project edits retry same field receipt after commit then lost ACK",async()=>{
+ editFixture=true;
+ for(const [field,value,chat] of [['title','Lost title',951],['address','Lost address',952],['manager','manager-1',953]]){
+  const before=calls.length;const initialWrites=editWrites;
+  await handleUpdate(callback(5500,chat,`ed:205:${field}`));loseEditAck=true;
+  const send=async(id)=>field==='manager'?handleUpdate(callback(id,chat,`mgr:${value}`)):handleUpdate(message(id,chat,value));
+  await send(5501);await send(5502);
+  const writes=calls.slice(before).filter(c=>c.method==='PATCH');assert.equal(writes.length,2);assert.match(writes[0].body.clientMutationId,/^[a-f0-9-]{36}$/);assert.deepEqual(writes[0].body,writes[1].body);assert.equal(editWrites-initialWrites,1);assert.equal(writes[0].body.expectedValue,baseline[field==='manager'?'managerId':field]);
+  assert.equal(calls.slice(before).filter(c=>c.method==='GET'&&c.path==='/api/v1/bot/projects/205').length,1);
+ }
+ editFixture=false;
+});
+
+
+test("intentional new edit value gets a new UUID without silently replacing baseline",async()=>{
+ editFixture=true;const before=calls.length;
+ await handleUpdate(callback(5600,954,'ed:205:title'));loseEditAck=true;await handleUpdate(message(5601,954,'First intended'));await handleUpdate(message(5602,954,'Second intended'));
+ const writes=calls.slice(before).filter(c=>c.method==='PATCH');assert.equal(writes.length,2);assert.notEqual(writes[0].body.clientMutationId,writes[1].body.clientMutationId);assert.equal(writes[1].body.expectedValue,baseline.title);assert.equal(writes[1].body.value,'Second intended');assert.equal(calls.slice(before).filter(c=>c.method==='GET'&&c.path==='/api/v1/bot/projects/205').length,1);editFixture=false;
+});
+test("edit conflict retains the dialog and asks to reopen instead of inventing a fresh baseline",async()=>{
+ editFixture=true;editConflict=true;const before=calls.length;
+ await handleUpdate(callback(5700,955,'ed:205:address'));await handleUpdate(message(5701,955,'Draft address'));assert.match(sent.at(-1).text,/Откройте редактирование заново/);
+ await handleUpdate(message(5702,955,'Revised draft'));const writes=calls.slice(before).filter(c=>c.method==='PATCH');assert.equal(writes.length,2);assert.equal(writes[1].body.expectedValue,baseline.address);assert.equal(calls.slice(before).filter(c=>c.method==='GET'&&c.path==='/api/v1/bot/projects/205').length,1);editFixture=false;editConflict=false;
 });

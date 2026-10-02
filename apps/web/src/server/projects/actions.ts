@@ -3,6 +3,8 @@
 import type { ProjectStage } from "@prisma/client";
 import type { z } from "zod";
 
+import { patchProjectCore } from "./project-field-core";
+import { projectPatchSchema, malformedProjectPatch, type ProjectPatch, type ProjectPatchResult } from "./patch-contract";
 import { auth } from "@/auth";
 
 import {
@@ -52,7 +54,16 @@ export async function changeProjectStage(
   projectId: string,
   toStage: ProjectStage,
   extras?: StageExtras,
+  expectedStage?: ProjectStage,
+  clientMutationId?: string,
 ): Promise<{ ok: boolean; error?: string }> {
   const session = await requireUser();
-  return changeProjectStageCore(actorFromSession(session), projectId, toStage, extras);
+  return changeProjectStageCore(actorFromSession(session), projectId, toStage, extras, expectedStage, clientMutationId);
+}
+
+/** Независимый field Server Action не вызывает cache/router invalidation. */
+export async function patchProject(input:ProjectPatch):Promise<ProjectPatchResult> {
+ const session=await auth();
+ if(!session?.user){const parsed=projectPatchSchema.safeParse(input);if(!parsed.success)return malformedProjectPatch(input);return{kind:"forbidden",field:parsed.data.field,clientMutationId:parsed.data.clientMutationId,error:"Не авторизован"};}
+ return patchProjectCore(actorFromSession(session),input);
 }

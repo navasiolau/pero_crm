@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
-import { z } from "zod";
+import {projectStagePatchSchema} from "@/server/projects/stage-contract";
 
 import { authenticate, isErrorResponse } from "@/server/api/auth";
-import { changeProjectStageCore } from "@/server/projects/core";
+import {patchProjectStageCore} from "@/server/projects/stage-service";
 import {
   domainError,
   isActorError,
@@ -12,27 +12,7 @@ import {
 
 // POST /api/v1/bot/projects/:id/stage — смена этапа проекта (§6, свободные
 // переходы; Отказ/Рекламация — с extras). Логика — в ядре. Scope: write.
-const schema = z.object({
-  toStage: z.enum([
-    "LEAD",
-    "ESTIMATE",
-    "CONTRACT",
-    "IN_WORK",
-    "DONE",
-    "REFUSED",
-    "PAUSED",
-    "RECLAMATION",
-  ]),
-  extras: z
-    .object({
-      refusalReason: z.string().optional(),
-      refusalComment: z.string().optional(),
-      reclamationReason: z.string().optional(),
-      reclamationDescription: z.string().optional(),
-      reclamationFault: z.string().optional(),
-    })
-    .optional(),
-});
+const schema = projectStagePatchSchema.omit({projectId:true});
 
 export async function POST(
   request: Request,
@@ -48,15 +28,10 @@ export async function POST(
   const { id } = await params;
   const parsed = schema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
-    return NextResponse.json({ ok: false, error: "Неверный этап" }, { status: 400 });
+    return NextResponse.json({ ok: false, error: "Неверный статус" }, { status: 400 });
   }
   try {
-    const result = await changeProjectStageCore(
-      actor,
-      id,
-      parsed.data.toStage,
-      parsed.data.extras,
-    );
+    const result = await patchProjectStageCore(actor,{projectId:id,...parsed.data});
     return NextResponse.json(result);
   } catch (e) {
     return domainError(e);

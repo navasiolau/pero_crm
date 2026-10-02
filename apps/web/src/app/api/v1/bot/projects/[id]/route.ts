@@ -5,6 +5,8 @@ import { prisma } from "@/lib/prisma";
 import { displayClientName } from "@/lib/labels";
 
 import { authenticate, isErrorResponse } from "@/server/api/auth";
+import { projectPatchSchema } from "@/server/projects/patch-contract";
+import { projectFullBaseline, patchProjectCore } from "@/server/projects/project-field-core";
 import { updateProjectCore } from "@/server/projects/core";
 import { FINANCE_ROLES, hasAnyRole } from "@/lib/roles";
 import {
@@ -63,6 +65,7 @@ export async function GET(
   return NextResponse.json({
     ok: true,
     project: {
+      fullBaseline: projectFullBaseline(project),
       id: project.id,
       number: project.number,
       title: project.title,
@@ -96,10 +99,17 @@ export async function PATCH(
 
   const { id } = await params;
   const body = await request.json().catch(() => null);
-  if (!body || typeof body !== "object") {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
     return NextResponse.json({ ok: false, error: "Пустой запрос" }, { status: 400 });
   }
   try {
+    if ("field" in body || "clientMutationId" in body) {
+      const parsed = projectPatchSchema.safeParse(body);
+      if (!parsed.success) return NextResponse.json({ok:false,kind:"validation",error:"Некорректный запрос поля"},{status:400});
+      if (parsed.data.projectId !== id) return NextResponse.json({ok:false,kind:"validation",error:"Проект запроса не совпадает с адресом"},{status:400});
+      const result = await patchProjectCore(actor,parsed.data);
+      return NextResponse.json({ok:result.kind === "saved",...result});
+    }
     const result = await updateProjectCore(actor, id, body);
     return NextResponse.json(result);
   } catch (e) {

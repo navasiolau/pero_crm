@@ -1,4 +1,3 @@
-import { projectTotal as calculateProjectTotal } from "@/lib/product-quantity";
 import nextDynamic from "next/dynamic";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
@@ -17,12 +16,11 @@ import {
   hasAnyRole,
   hasRole,
 } from "@/lib/roles";
-import { stageLabels, stageStyles } from "@/lib/stages";
-import { cn } from "@/lib/utils";
 import { prisma } from "@/lib/prisma";
 import { getPluginSettings } from "@/server/plugins/run-log";
 import { getFileStageConfig } from "@/server/files/stage-config";
 import { getSlotContributions } from "@/server/plugins/slots";
+import { getProjectPricingProjection } from "@/server/projects/project-field-core";
 import { getProjectEconomics } from "@/server/finance/queries";
 import { getProjectFor, listClients, listEngineers, listManagers, listWorkers } from "@/server/projects/queries";
 import { mapTaskDetails } from "@/server/tasks/queries";
@@ -30,11 +28,11 @@ import { getProjectMaterials } from "@/server/warehouse/queries";
 import { hasFullProjectVisibility } from "@/server/access/visibility";
 import { allocatedWorkQuantity } from "@/lib/work-shares";
 
-import { CommunicationsTab } from "./communications-tab";
 import { FilesTab } from "./files-tab";
 import { FinanceTab } from "./finance-tab";
-import { HistoryTab } from "./history-tab";
 import { MaterialsSummaryTab } from "./materials-summary-tab";
+import { ProjectInlineProvider } from "@/components/project-inline-provider";
+import { ProjectInlineHeading } from "@/components/project-inline-fields";
 import { OverviewTab } from "./overview-tab";
 import { ProductsTab } from "./products-tab";
 import { TasksTab } from "./tasks-tab";
@@ -55,7 +53,7 @@ export default async function ProjectPage({
   const { id } = await params;
   const role = session.user.roles;
 
-  const project = await getProjectFor(session.user.id, role, id);
+  const project = await getProjectFor(session.user.id, role, id, { includeHistory: false });
   if (!project) notFound();
 
   const canManage = hasAnyRole(role, MANAGER_ROLES);
@@ -68,25 +66,12 @@ export default async function ProjectPage({
   // Группировка файлов по этапам (плагин file-stages), если включён.
   const stageConfig = await getFileStageConfig();
 
-  const productIds = project.products.map((product) => product.id);
-
-  const [clients, managers, engineers, workers, changeLogs, contributions, priceItems, economics, cashAccounts, expenseArticles, materialsGroups] =
+  const [clients, managers, engineers, workers, contributions, priceItems, economics, cashAccounts, expenseArticles, materialsGroups] =
     await Promise.all([
       listClients(session.user),
       listManagers(),
       listEngineers(),
       listWorkers(),
-      prisma.changeLog.findMany({
-        where: {
-          OR: [
-            ...(hasFullProjectVisibility(session.user) ? [{ entity: "project", entityId: id }] : []),
-            { entity: "product", entityId: { in: productIds } },
-            ...(hasFullProjectVisibility(session.user) ? [{ entity: "task", entityId: { in: project.tasks.map((task) => task.id) } }] : []),
-          ],
-        },
-        orderBy: { createdAt: "desc" },
-        take: 50,
-      }),
       hasFullProjectVisibility(session.user) ? getSlotContributions("project.tab") : Promise.resolve([]),
       prisma.priceItem.findMany({
         where: { active: true },
@@ -128,10 +113,7 @@ export default async function ProjectPage({
       [
         project.createdById,
         ...project.files.map((f) => f.uploadedById),
-        ...project.communications.map((c) => c.createdById),
         ...project.payments.map((p) => p.createdById),
-        ...project.stageHistory.map((h) => h.changedById),
-        ...project.products.flatMap((p) => p.statusHistory.map((h) => h.changedById)),
         ...project.tasks.flatMap((t) => [t.createdById, t.doneById]),
       ].filter((v): v is string => !!v),
     ),
@@ -142,36 +124,16 @@ export default async function ProjectPage({
   });
   const uploaderNames = new Map(authors.map((user) => [user.id, user.name]));
 
-  // Стоимость проекта = Σ цен изделий + доставка/выгрузка/монтаж (валюта проекта)
-  const productsTotal = calculateProjectTotal(project.products);
-  const totalPrice =
-    calculateProjectTotal(project.products, project);
-  // Первоначальная цена — первая цена КП клиенту (хранится на проекте;
-  // правят менеджмент в карточке и telegram-бот; бэкфилл — Σ по изделиям)
-  const initialPrice =
-    project.initialPrice === null ? null : Number(project.initialPrice);
-  // Дата завершения — последний переход в «Завершён» из истории этапов
-  const doneEntry = project.stageHistory.find((entry) => entry.toStage === "DONE");
-  // Нехватка материалов — хотя бы по одному изделию (§12)
-  const hasShortage = materialsGroups.some((group) => group.hasShortage);
-  // Сводная история статусов изделий (свежие сверху)
-  const productHistory = project.products
-    .flatMap((product) =>
-      product.statusHistory.map((entry) => ({
-        id: entry.id,
-        productNumber: product.number,
-        productTitle: product.title,
-        fromStatus: entry.fromStatus,
-        toStatus: entry.toStatus,
-        comment: entry.comment,
-        createdAt: entry.createdAt,
-        changedById: entry.changedById,
-      })),
-    )
-    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+  const showOverviewAmount = hasFullProjectVisibility(session.user);
+  const pricingProjection = showOverviewAmount ? await getProjectPricingProjection({id:session.user.id,name:session.user.name??"",roles:role,source:"web"},project.id) : null;
+  const hasShortage = materialsGroups.some(group => group.hasShortage);
 
   return (
-    <div className="flex flex-col gap-4">
+    <ProjectInlineProvider key={project.id} projectId={project.id} stage={project.stage} pricingProjection={pricingProjection} initial={{
+      title: project.title, clientId: project.clientId, managerId: project.managerId, address: project.address, "client.phone": project.client.phone,
+      delivery: showOverviewAmount ? pricingProjection ? pricingProjection.delivery : project.delivery?.toString() ?? null : null, unloading: showOverviewAmount ? pricingProjection ? pricingProjection.unloading : project.unloading?.toString() ?? null : null, installation: showOverviewAmount ? pricingProjection ? pricingProjection.installation : project.installation?.toString() ?? null : null,
+    }}>
+    <div className="flex min-w-0 flex-col gap-4">
       <div className="flex flex-wrap items-center gap-3">
         <Link
           href="/projects"
@@ -180,15 +142,7 @@ export default async function ProjectPage({
         >
           <ArrowLeft className="size-5" />
         </Link>
-        <h1 className="text-2xl font-semibold">
-          {project.number} · {project.title}
-        </h1>
-        <Badge
-          variant="outline"
-          className={cn("border-transparent", stageStyles[project.stage].badge)}
-        >
-          {stageLabels[project.stage]}
-        </Badge>
+        <ProjectInlineHeading number={project.number} />
         {showMaterials && hasShortage ? (
           <Badge variant="destructive">
             <TriangleAlert />
@@ -203,16 +157,10 @@ export default async function ProjectPage({
           <TabsTrigger className="shrink-0" value="products">
             Изделия ({project.products.length})
           </TabsTrigger>
-          <TabsTrigger className="shrink-0" value="tasks">
-            Задачи ({project.tasks.length})
-          </TabsTrigger>
           <TabsTrigger className="shrink-0" value="files">Файлы ({project.files.length})</TabsTrigger>
-          <TabsTrigger className="shrink-0" value="communications">
-            Коммуникации ({project.communications.length})
-          </TabsTrigger>
-          {showFinance ? <TabsTrigger className="shrink-0" value="finance">Финансы</TabsTrigger> : null}
+          <TabsTrigger className="shrink-0" value="tasks">Задачи ({project.tasks.length})</TabsTrigger>
           {showMaterials ? <TabsTrigger className="shrink-0" value="materials">Материалы</TabsTrigger> : null}
-          <TabsTrigger className="shrink-0" value="history">История</TabsTrigger>
+          {showFinance ? <TabsTrigger className="shrink-0" value="finance">Финансы</TabsTrigger> : null}
           {pluginTabs.map((tab) => (
             <TabsTrigger key={tab.pluginId} value={tab.pluginId}>
               {tab.pluginName}
@@ -227,42 +175,24 @@ export default async function ProjectPage({
             project={{
               id: project.id,
               number: project.number,
-              title: project.title,
               stage: project.stage,
               stageChangedAt: project.stageChangedAt,
               currency: project.currency,
-              address: project.address,
-              initialPrice:
-                project.initialPrice === null ? null : Number(project.initialPrice),
-              delivery:
-                project.delivery === null ? null : Number(project.delivery),
-              unloading:
-                project.unloading === null ? null : Number(project.unloading),
-              installation:
-                project.installation === null
-                  ? null
-                  : Number(project.installation),
-              clientId: project.clientId,
-              managerId: project.managerId,
               createdAt: project.createdAt,
               refusalReason: project.refusalReason,
               refusalComment: project.refusalComment,
               reclamationReason: project.reclamationReason,
               reclamationDescription: project.reclamationDescription,
               reclamationFault: project.reclamationFault,
-              client: project.client,
             }}
-            totalPrice={totalPrice}
-            productsTotal={productsTotal}
-            initialPrice={initialPrice}
+            doneAt={project.stageHistory[0]?.createdAt.toISOString() ?? null}
             createdByName={
               project.createdById
                 ? (uploaderNames.get(project.createdById) ?? null)
                 : null
             }
-            doneAt={doneEntry ? doneEntry.createdAt.toISOString() : null}
             canManage={canManage}
-            showAmount={hasFullProjectVisibility(session.user)}
+            showAmount={showOverviewAmount}
             clients={clients.map((client) => ({ id: client.id, name: displayClientName(client) }))}
             managers={managers.map((manager) => ({ id: manager.id, name: manager.name }))}
             productEngineers={project.products
@@ -360,24 +290,9 @@ export default async function ProjectPage({
                 : "—",
             }))}
             canEdit={canEditTech}
+            flatProject
             stagesEnabled={stageConfig.enabled}
             stageExtensions={stageConfig.extensions}
-          />
-        </TabsContent>
-
-        <TabsContent value="communications" className="mt-4">
-          <CommunicationsTab
-            projectId={project.id}
-            entries={project.communications.map((entry) => ({
-              id: entry.id,
-              type: entry.type,
-              text: entry.text,
-              happenedAt: entry.happenedAt.toISOString(),
-              authorName: entry.createdById
-                ? (uploaderNames.get(entry.createdById) ?? "—")
-                : "—",
-            }))}
-            canEdit={canEditTech}
           />
         </TabsContent>
 
@@ -437,43 +352,6 @@ export default async function ProjectPage({
           </TabsContent>
         ) : null}
 
-        <TabsContent value="history" className="mt-4">
-          <HistoryTab
-            stageHistory={project.stageHistory.map((entry) => ({
-              id: entry.id,
-              fromStage: entry.fromStage,
-              toStage: entry.toStage,
-              comment: entry.comment,
-              createdAt: entry.createdAt.toISOString(),
-              changedByName: entry.changedById
-                ? (uploaderNames.get(entry.changedById) ?? "—")
-                : "—",
-            }))}
-            productHistory={productHistory.map((entry) => ({
-              id: entry.id,
-              productNumber: entry.productNumber,
-              productTitle: entry.productTitle,
-              fromStatus: entry.fromStatus,
-              toStatus: entry.toStatus,
-              comment: entry.comment,
-              createdAt: entry.createdAt.toISOString(),
-              changedByName: entry.changedById
-                ? (uploaderNames.get(entry.changedById) ?? "—")
-                : "—",
-            }))}
-            changeLogs={changeLogs.map((entry) => ({
-              id: entry.id,
-              actorName: entry.actorName ?? entry.actorId,
-              actorType: entry.actorType,
-              action: entry.action,
-              field: entry.field,
-              oldValue: entry.oldValue,
-              newValue: entry.newValue,
-              createdAt: entry.createdAt.toISOString(),
-            }))}
-          />
-        </TabsContent>
-
         {pluginTabs.map((tab) => (
           <TabsContent key={tab.pluginId} value={tab.pluginId} className="mt-4">
             <SlotErrorBoundary pluginName={tab.pluginName}>
@@ -483,5 +361,6 @@ export default async function ProjectPage({
         ))}
       </Tabs>
     </div>
+    </ProjectInlineProvider>
   );
 }

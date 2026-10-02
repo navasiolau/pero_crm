@@ -1,18 +1,15 @@
+import { updateProjectFieldsCore, type LegacyProjectUpdateInput } from "./project-field-core";
+import { patchProjectStageCore } from "./stage-service";
+import type { StageExtras } from "./stage-contract";
 import { revalidatePath } from "next/cache";
 import type { ProjectStage } from "@prisma/client";
 import { z } from "zod";
 
-import { INTERNAL_CURRENCY, INTERNAL_CURRENCY_ERROR, assertProjectMoneyCurrency } from "@/lib/internal-currency";
+import { INTERNAL_CURRENCY, INTERNAL_CURRENCY_ERROR } from "@/lib/internal-currency";
 import { prisma } from "@/lib/prisma";
-import { formatAmount } from "@/lib/format";
-import { stageLabels as STAGE_LABELS } from "@/lib/stages";
 import { writeChangeLog } from "@/server/plugins/changelog";
-import { emitDomainEvent, dispatchEvent } from "@/server/plugins/events";
-import { notifyOrg, notifyPerson } from "@/server/notifications/notify";
-import { withTaskTransaction } from "@/server/tasks/transaction";
-import { changeProjectStageTransaction } from "./stage-core";
-import { assertProjectCurrencyChange } from "@/server/product-stage-pay/core";
-import { assertPercentageProjectCurrencyChange } from "@/server/product-percentage-pay/core";
+import { emitDomainEvent } from "@/server/plugins/events";
+import { notifyOrg } from "@/server/notifications/notify";
 
 import { hasAnyRole, MANAGER_ROLES, type Role } from "@/lib/roles";
 
@@ -159,122 +156,18 @@ export async function createProjectCore(
   return { ok: true, id: project.id, number };
 }
 
-export const updateProjectSchema = z.object({
-  contactBaseline: z.object({ address: z.string().nullable().optional(), clientId: z.string().min(1).optional() }).strict().optional(),
-  title: z.string().min(1).optional(),
-  currency: z.string().refine((value) => value === INTERNAL_CURRENCY, INTERNAL_CURRENCY_ERROR).optional(),
-  address: z.string().nullable().optional(),
-  managerId: z.string().nullable().optional(),
-  clientId: z.string().optional(),
-  initialPrice: z
-    .number()
-    .min(0, "Первоначальная цена не может быть отрицательной")
-    .nullable()
-    .optional(),
-  delivery: z
-    .number()
-    .min(0, "Доставка не может быть отрицательной")
-    .nullable()
-    .optional(),
-  unloading: z
-    .number()
-    .min(0, "Выгрузка не может быть отрицательной")
-    .nullable()
-    .optional(),
-  installation: z
-    .number()
-    .min(0, "Монтаж не может быть отрицательным")
-    .nullable()
-    .optional(),
-});
+export { legacyProjectUpdateSchema as updateProjectSchema } from "./project-field-core";
+export type { StageExtras } from "./stage-contract";
 
-// Редактирование карточки проекта (§4) — админ/директор/менеджер.
-// (Тех. блок живёт на изделии — его правит и инженер, см. products/actions.)
-export async function updateProjectCore(
-  actor: DomainActor,
-  projectId: string,
-  input: z.input<typeof updateProjectSchema>,
-): Promise<{ ok: boolean; error?: string }> {
-  requireActorRoles(actor, MANAGER_ROLES);
-  const parsed = updateProjectSchema.safeParse(input);
-  if (!parsed.success) return { ok: false, error: "Ошибка данных" };
-  const { contactBaseline, ...data } = parsed.data;
-  let mutation;
-  try {
-    mutation = await withTaskTransaction(async (tx) => {
-      await tx.$queryRaw`SELECT id FROM "Project" WHERE id = ${projectId} FOR UPDATE`;
-      const current = await tx.project.findUnique({ where: { id: projectId } });
-      if (!current) return null;
-      // Поля, неизменённые относительно подлинного baseline формы, не пишутся:
-      // они могли уже измениться через карточку другого изделия этого проекта.
-      for (const field of ["address", "clientId"] as const) {
-        const value = data[field];
-        if (value === undefined) continue;
-        if (Object.prototype.hasOwnProperty.call(contactBaseline ?? {}, field)) {
-          const expected = contactBaseline![field];
-          if (value === expected) { delete data[field]; continue; }
-          if (current[field] !== expected) throw new Error("Реквизиты проекта изменены другим пользователем — обновите форму");
-        } else {
-          if (value === current[field]) { delete data[field]; continue; }
-          throw new Error("Обновите форму: для изменения адреса или клиента требуется исходное значение");
-        }
-      }
-      if (data.clientId !== undefined) {
-        await tx.$queryRaw`SELECT id FROM "Client" WHERE id = ${data.clientId} FOR UPDATE`;
-        if (!await tx.client.findUnique({where:{id:data.clientId},select:{id:true}})) throw new Error("Клиент не найден");
-      }
-      if ([data.initialPrice, data.delivery, data.unloading, data.installation].some((value) => value !== undefined)) assertProjectMoneyCurrency(data.currency ?? current.currency);
-      if (data.currency !== undefined) {
-        await assertProjectCurrencyChange(tx, projectId, data.currency);
-        await assertPercentageProjectCurrencyChange(tx, projectId, data.currency);
-      }
-      if (!Object.keys(data).length) return {current,noOp:true};
-      await tx.project.update({ where: { id: projectId }, data });
-      await tx.changeLog.create({data:{actorType:"user",actorId:actor.id,actorName:actor.name||undefined,source:actor.source,
-        entity:"project",entityId:projectId,action:"update",
-        oldValue:JSON.parse(JSON.stringify(Object.fromEntries(Object.keys(data).map(key=>[key,current[key as keyof typeof current]])))),
-        newValue:JSON.parse(JSON.stringify(data))}});
-      if (data.address !== undefined || data.clientId !== undefined) await tx.domainEvent.create({data:{type:"project.updated",actor:actor.id,payload:{projectId,fields:Object.keys(data).filter(field=>field==="address"||field==="clientId")}}});
-      return {current,noOp:false};
-    });
-  } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : "Не удалось изменить проект" };
-  }
-  if (!mutation) return {ok:false,error:"Проект не найден"};
-  if (!mutation.noOp) {revalidatePath(`/projects/${projectId}`);revalidatePath("/projects");}
-  return {ok:true};
-}
-export interface StageExtras {
-  refusalReason?: string;
-  refusalComment?: string;
-  reclamationReason?: string;
-  reclamationDescription?: string;
-  reclamationFault?: string;
+/** Прежний transport сохраняет только поля с подлинным baseline клиента. */
+export async function updateProjectCore(actor: DomainActor, projectId:string, input:LegacyProjectUpdateInput):Promise<{ok:boolean;error?:string}> {
+  requireActorRoles(actor,MANAGER_ROLES);
+  const result=await updateProjectFieldsCore(actor,projectId,input);
+  if(result.ok && !result.noOp){ revalidatePath(`/projects/${projectId}`);revalidatePath("/projects"); }
+  return result;
 }
 
-// Смена этапа (§6): переходы свободные; для Отказа нужны причина+комментарий,
-// для Рекламации — причина, описание, виновная сторона (§6.3, только из «Завершён»).
-export async function changeProjectStageCore(
-  actor: DomainActor, projectId: string, toStage: ProjectStage, extras?: StageExtras,
-): Promise<{ ok: boolean; error?: string }> {
-  requireActorRoles(actor, MANAGER_ROLES);
-  const result = await withTaskTransaction((tx) => changeProjectStageTransaction(actor, projectId, toStage, extras, tx));
-  if (!result.ok) return result;
-  if (result.repeated) return { ok: true };
-  for (const eventId of result.eventIds) await dispatchEvent(eventId).catch(() => {});
-  for (const earning of result.earnings) {
-    await notifyPerson({ userId: earning.userId, type: "payroll.accrued",
-      title: `Начислена зарплата: ${formatAmount(earning.amount, earning.currency)}`,
-      body: `${earning.percent}% от стоимости ваших изделий по проекту ${result.project.number}`, link: "/payroll",
-    }).catch(() => {});
-    await notifyOrg({ type: "payroll.orgAccrued", title: `Начислено ${earning.name}: ${formatAmount(earning.amount, earning.currency)}`,
-      body: `${earning.percent}% от стоимости изделий по проекту ${result.project.number}`, link: "/finance/payroll", exceptUserId: actor.id,
-    }).catch(() => {});
-  }
-  await notifyOrg({ type: "project.stageChanged",
-    title: `${result.project.number}: ${STAGE_LABELS[result.project.stage]} → ${STAGE_LABELS[toStage]}`,
-    body: result.project.title, link: `/projects/${projectId}`, exceptUserId: actor.id,
-  }).catch(() => {});
-  revalidatePath(`/projects/${projectId}`); revalidatePath("/projects");
-  return { ok: true };
+/** Совместимый мост: старые диалоги без expectedStage/UUID не подставляют состояние сервера. */
+export async function changeProjectStageCore(actor:DomainActor,projectId:string,toStage:ProjectStage,extras?:StageExtras,expectedStage?:ProjectStage,clientMutationId?:string):Promise<{ok:boolean;error?:string}> {
+  return patchProjectStageCore(actor,{projectId,toStage,extras,expectedStage,clientMutationId});
 }

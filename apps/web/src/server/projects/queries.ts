@@ -223,6 +223,7 @@ export async function getProjectFor(
   userId: string,
   roles: Role[],
   projectId: string,
+  options: { includeHistory?: boolean } = {},
 ) {
   const actor = await resolveVisibilityActor(prisma, { id: userId, roles });
   const project = await prisma.project.findFirst({
@@ -237,7 +238,7 @@ export async function getProjectFor(
           files: { where: { fileName: { endsWith: ".b3d", mode: "insensitive" } }, select: { id: true }, take: 1 },
           sketchFile: productSketchProjection(actor),
           percentageConfigs: { where: { kind: "ENGINEERING" }, select: { participants: { where: { userId: actor.id }, select: { id: true } } } },
-          statusHistory: { orderBy: { createdAt: "desc" } },
+          statusHistory: options.includeHistory === false ? false : { orderBy: { createdAt: "desc" } },
         },
         // Новые изделия сверху: суффикс по числу («205.9» после «205.21»),
         // изделия без суффикса («108.») — в конце
@@ -259,7 +260,7 @@ export async function getProjectFor(
         orderBy: { createdAt: "asc" },
       },
       files: { where: fileVisibilityWhere(actor), orderBy: { createdAt: "desc" } },
-      communications: { orderBy: { happenedAt: "desc" } },
+      communications: options.includeHistory === false ? false : { orderBy: { happenedAt: "desc" } },
       payments: {
         where: hasFullProjectVisibility(actor) ? {} : { id: { in: [] } },
         include: {
@@ -268,12 +269,12 @@ export async function getProjectFor(
         },
         orderBy: { paidAt: "desc" },
       },
-      stageHistory: { orderBy: { createdAt: "desc" } },
+      stageHistory: options.includeHistory === false ? { where: { toStage: "DONE" }, orderBy: { createdAt: "desc" }, take: 1 } : { orderBy: { createdAt: "desc" } },
     },
   });
   if (!project) return null;
-  return scopedProjectAmounts({ ...project, products: project.products.map((product) => ({
-    ...product, hasB3d: product.files.length > 0,
+  return scopedProjectAmounts({ ...project, communications: project.communications ?? [], products: project.products.map((product) => ({
+    ...product, statusHistory: product.statusHistory ?? [], hasB3d: product.files.length > 0,
     isEngineeringParticipant: product.percentageConfigs.some((config) => config.participants.length > 0) ||
       actor.engineeringParticipantProductIds?.includes(product.id) === true,
   })) }, actor);

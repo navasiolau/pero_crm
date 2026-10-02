@@ -6,10 +6,10 @@ import { basename, dirname, resolve, relative, isAbsolute } from "node:path";
 import { chromium } from "@playwright/test";
 
 const PREFIX="pero-crm-browser-zoom-";
-export async function runCrmBrowserZoom({origin,profile,basicAuth,outputDir,pagePath="/settings/payroll",ownedProductPaths=[],readySelector}) {
-  assert.ok(["http://127.0.0.1:3016","http://127.0.0.1:3017","https://staging-crm.peromebel.by"].includes(origin),"ZOOM_ORIGIN_MISMATCH_STOP");
-  assert.ok(pagePath==="/settings/payroll" || (/^\/products\/[^/]+$/.test(pagePath)&&ownedProductPaths.includes(pagePath)),"ZOOM_PATH_NOT_OWNED_STOP");
-  if(pagePath!=="/settings/payroll")assert.equal(readySelector,"#product-inline-title","OWNED_INLINE_READY_SELECTOR_REQUIRED");
+export async function runCrmBrowserZoom({origin,profile,basicAuth,outputDir,pagePath="/settings/payroll",ownedProductPaths=[],readySelector,ownedProjectPaths=[]}) {
+  assert.ok(["http://127.0.0.1:3016","http://127.0.0.1:3017","http://127.0.0.1:3018","https://staging-crm.peromebel.by"].includes(origin),"ZOOM_ORIGIN_MISMATCH_STOP");
+  assert.ok(pagePath==="/settings/payroll" || (/^\/products\/[^/]+$/.test(pagePath)&&ownedProductPaths.includes(pagePath)) || (/^\/projects\/[^/]+$/.test(pagePath)&&ownedProjectPaths.includes(pagePath)),"ZOOM_PATH_NOT_OWNED_STOP");
+  if(pagePath!=="/settings/payroll")assert.equal(readySelector,pagePath.startsWith("/projects/")?"#project-inline-title":"#product-inline-title","OWNED_INLINE_READY_SELECTOR_REQUIRED");
   assert.ok(Array.isArray(profile?.cookies)&&profile.cookies.length,"SHORT_LIVED_ADMIN_SESSION_REQUIRED");
   assert.ok(profile.roles?.includes("ADMIN"),"ADMIN_PROFILE_REQUIRED");
   assert.ok(outputDir,"OUTPUT_DIRECTORY_REQUIRED");
@@ -70,13 +70,17 @@ export async function runCrmBrowserZoom({origin,profile,basicAuth,outputDir,page
     assert.equal(zoom,2,"ACTUAL_TAB_ZOOM_NOT_200");
     await page.waitForFunction(previous=>innerWidth<previous.innerWidth&&devicePixelRatio>previous.dpr,before,{timeout:10000});
     let quantityDraft;
+    let invalidSelector;
+    let invalidMessage;
     if(pagePath!=="/settings/payroll") {
-      const quantity=page.locator("#product-inline-quantity");
+      invalidSelector=pagePath.startsWith("/projects/")?"#project-inline-delivery":"#product-inline-quantity";
+      invalidMessage=pagePath.startsWith("/projects/")?/^Введите неотрицательную/:/^Количество/;
+      const quantity=page.locator(invalidSelector);
       quantityDraft=await quantity.inputValue();
-      await quantity.fill("0");await quantity.press("Enter");
-      const error=page.locator('#product-inline-quantity-state [role="alert"]');await error.waitFor();
-      assert.match(await error.innerText(),/^Количество/,"LOCAL_QUANTITY_VALIDATION_NOT_SHOWN");
-      receipt.checks.push({label:"local quantity error displayed at actual browser200 without field POST",passed:true});
+      await quantity.fill(pagePath.startsWith("/projects/")?"1.001":"0");await quantity.press("Enter");
+      const error=page.locator(`${invalidSelector}-state [role="alert"]`);await error.waitFor();
+      assert.match(await error.innerText(),invalidMessage,"LOCAL_QUANTITY_VALIDATION_NOT_SHOWN");
+      receipt.checks.push({label:"local scalar validation error displayed at actual browser200 without field POST",passed:true});
     }
     const after=await geometry();
     assert.ok(Math.abs(after.innerWidth-before.innerWidth/2)<=2,"ACTUAL_ZOOM_CSS_WIDTH_NOT_HALVED");
@@ -110,11 +114,11 @@ export async function runCrmBrowserZoom({origin,profile,basicAuth,outputDir,page
       await page.evaluate(()=>window.scrollTo({top:0,left:0,behavior:"instant"}));
       await captureViewport("crm-byn-actual-browser-zoom200.png","zoom200-top");
       if(quantityDraft!==undefined){
-        await page.locator('#product-inline-quantity-state [role="alert"]').scrollIntoViewIfNeeded();
+        await page.locator(`${invalidSelector}-state [role="alert"]`).scrollIntoViewIfNeeded();
         await captureViewport("crm-byn-actual-browser-zoom200-quantity-error.png","zoom200-quantity-error");
       }
     }finally{await screenshotSession.detach();}
-    if(quantityDraft!==undefined)await page.locator("#product-inline-quantity").fill(quantityDraft);
+    if(quantityDraft!==undefined)await page.locator(invalidSelector).fill(quantityDraft);
     phase="reset_zoom";
     const reset=await worker.evaluate(async id=>{await chrome.tabs.setZoom(id,1);return chrome.tabs.getZoom(id);},tabId);
     assert.equal(reset,1,"ZOOM_RESET_FAILED");

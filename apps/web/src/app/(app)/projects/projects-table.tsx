@@ -60,7 +60,7 @@ export function ProjectsTable({
     },
     {
       id: "stage",
-      header: "Этап",
+      header: "Статус",
       sortable: true,
       cell: (row) => (
         <span className="flex flex-col items-start gap-1">

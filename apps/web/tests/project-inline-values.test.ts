@@ -1,0 +1,5 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { parseProjectInlineValue, confirmedProjectTotal, projectSubtotalFromProjection } from "../src/lib/project-inline-values";
+test("project services are decimal strings; null and zero are distinct, invalid fraction never accepted",()=>{assert.equal(parseProjectInlineValue("delivery","0"),"0.00");assert.equal(parseProjectInlineValue("delivery",""),null);assert.equal(parseProjectInlineValue("unloading","0,10"),"0.10");assert.throws(()=>parseProjectInlineValue("installation","1.001"));assert.throws(()=>parseProjectInlineValue("client.phone","  "));});
+test("late service ACK cannot overwrite newer peer service in displayed confirmed total",()=>{const lateSubtotal=projectSubtotalFromProjection("10.11",["0.10",null,null]);assert.equal(lateSubtotal,"10.01");assert.equal(confirmedProjectTotal(lateSubtotal,["0.10","0.20",null]),"10.31");assert.equal(confirmedProjectTotal(null,["0.00",null,null]),null);assert.equal(confirmedProjectTotal("0.00",["0.00",null,null]),"0.00");});

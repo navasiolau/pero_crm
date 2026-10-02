@@ -1,0 +1,28 @@
+# Evidence
+
+## Scope and baseline
+
+feature/18 создана от fresh origin/staging6edd76ef2cee0b7ce40c5df4399ea9b7570b0728 после локального завершения №17; интеграция ожидала его фактической staging-приёмки. №17 принят, затем feature/18 fast-forward обновлена до5f542b1d9b0b23eac617531a1e48cd10fb7d0c19: отличаются только документы приёмки, web/prisma/bot код идентичен принятому6edd. Чужие изменения первоначального checkout сохранены. Main/production вне объёма, новых схем/миграций/dependencies нет.
+
+## Local verification — 02.10.2026
+
+- Web698/698 PASS, bot18/18 PASS, TypeScript/production build PASS. Lint0errors/один прежний cleanup-uploads.ts warning. Старые tests фонды/проценты сохранены и вызывают новую статусную операцию с подлинным baseline/UUID.
+- Project domain RED5/4fails→GREEN26, исправление неизвестной цены (старый total10.00 вместоnull) RED→GREEN17, typedAPI/receipt replay2PASS. Статусная baseline-регрессия на точном исходном6edd core: missing extras2FAIL→текущее2PASS; это честная демонстрация после реализации. Bot lostACK — фактический RED→GREEN, все18tests PASS. PDF?view1 headerattachment RED→GREEN9/9 доступа/режимов.
+- Реальный PostgreSQL на существующей127.0.0.1:5433/pero_crm:7групп CAS/replay/null/zero/Decimal/phone-binding/ролей/статуса/atomic outbox failure PASS. Три actualSQLprofiles title/service/phone не читают history/files/finance и не вызываютfetch. Реальные Prisma/Zod/savepoints; только внешняя delivery/cache явно stubbed. Безусловный outerrollback сохранил42таблицы, включая migrations. Receipt .playwright-mcp/modernization/native18-final.json, minified native bundle105081B.
+- Compiled local browser81checks PASS, failures0, skips0; readonly/доступ проверены для ADMIN/MANAGER/MANAGER+ENGINEER/ENGINEER/ACCOUNTANT и directURL-denial FIELD actors. Клавиатура/no-op/Enter+blur, задержанный ответ/new draft, two-user conflict+explicit rebase,0/null/decimal,total20.32, lostACK actualcommit+sameUUID replay, client/phone binding, mandatoryextras/cancel/optionalrefusalcomment, safeProjectstage transitions, вкладки/readonlyengineers/hiddeninitialPrice.
+- Два PDF OTHER загружены через приложение; предыдущий сохранён, raworiginalbytes+inlinepreviewURL/header проверены. Не объявляется визуальная проверка встроенного PDF plugin по одним bytes/URL. Dirty title сохранён при files RSC. ExactfileID удалён через ConfirmDelete, оставшийся — через guardedcompiled UI. Signedfilemetadata/keys получены до удаления, затем localENOENT подтверждён для каждого точного key. Никакого SDKDelete/List/prefixcleanup/DBFiledelete.
+- Compiled SAME bot API PATCH реально вызван private ephemeral token+x-acting-user с URI-bound ProjectPatch: тот же receipt/CAS, токен передавался только в памяти. Один временный ApiToken удалён по exactID; существующие токены/roles/users не менялись. Все оригинальные бизнес/security поля/count совпали, исключён только operationalApiToken.lastUsedAt; preferences exactHMAC/CAS restored.
+- Browser receipt .playwright-mcp/modernization/local-project-inline-browser-a1dc3661-166c-439b-bdf0-9ddf1f3d488e/browser-receipt.json. Размеры320×800/360×800/390×844/768×1024/1024×768/1440×900, sidebar open/closed,29промежуточных ширин. Root лично просмотрел изображения. Настоящий Chrome tabsZoom200%, nativeCDPviewport physicalwidth/DPR/geometry проверки PASS; временный профиль удалён точно. Все2filekeys/QAfixtures/token/effects очищены, preferencesRESTORED.
+- Финальный отдельный прогон82checks PASS/failures0/skips0 дополнил дваPDF однимPHOTO PNG: originalbytes/mime8×8 и реальный FileViewer dialog с complete/natural dimensions проверены, fullscreen screenshot лично просмотрен. Все3fileIDs и точные original/thumbkeys подписаны до удаления и затем проверены отсутствующими после appdelete; originalданные/security и preferences сохранены. Final receipt .playwright-mcp/modernization/local-project-inline-browser-6c0dedca-14c7-4ffd-93e2-ae5ddd784e3d/browser-receipt.json, truezoomPASS.
+
+## Architecture mapping
+
+project-field-core/patch-contract → sharedcontact-core/clientscore + existingTaskTransaction. Обычный field path закрыт/типизирован, audit/outbox+receipt атомарны, не вызываетrevalidation/refresh/FX. Nullable subtotal при неизвестной цене сохраняется; delivery/unloading/installation иsubtotal/total возвращаются Decimalстроками. PostgreSQLtxid_current версия того же короткого lockedснимка предотвращает поздний rollback отображения; RSC считывает свежую ограниченную projection с этой версией. Все original financial snapshots/initialPrice сохранены.
+
+Legacyfullupdate проверяет genuinebaseline каждого changedscalar и пропускает unchanged. Bot typedPATCH действует через тот же patchcore; oldfullbaseline route остаётся защищён. Новый stagecontract/service/core используется селектом, доской и ботом: expectedStage/UUID, requiredextras, history/audit/outbox в одной транзакции, безproductpay. Совмещённые роли сохраняют union.
+
+Overview: название/Статус/directfields/серые агрегированные инженеры; основные вкладки ровно в порядке плана, communications/history UI удалены, данные/adminjournal сохранены. ПоследнийDONEdate отображён readonly из уже ограниченного query. Flatfilemode относится только проекту. PDFview=1 разрешён только application/pdf после прежней ACL; обычныйdownloadattachment/HTMLattachment/no-sniff и storagekeys сохранены, extraction/денежных эффектов нет.
+
+## Staging acceptance
+
+Pending после ordinarymerge/CI/фактического deployment. Push/build/source SHA сами по себе не являются приёмкой. Root проверяетimage/revision/health обоих stagedсервисов, W07/DB identity и выполняет native/browser/API/files/roles/truezoom на точной ревизии. Main/production/restic/дампы/reset/seed не используются.
