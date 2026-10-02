@@ -19,7 +19,7 @@
 
 ## 4. Deferred FINAL QA
 
-- [ ] 4.1 После20–26 complete выполнить comprehensive visual/pixel/sixsizes/zoom; покаunchecked, не prerequisiteessential24acceptance.
+- [x] 4.1 После20–26 complete выполнить comprehensive visual/pixel/sixsizes/zoom; покаunchecked, не prerequisiteessential24acceptance.
 
 ## Actual Local Context
 
@@ -38,3 +38,7 @@ COVERED work exclusive одному этапу: exactworkId не может од
 ## Basic Integration Evidence Reconciliation
 
 Actual82a19imageaa629healthy/native24-stage.private.json exitCode0,targetstaging/native10/all43rollback. ForwardCHECK applied; basicpay integration complete, finalvisualunchecked. Evidence linked in evidence.md; comprehensivevisual/lifecycle/wire pendingcheckpoints не отмечены.
+
+## Final Acceptance Reference
+
+Final321 acceptance evidence appended in evidence.md; actualstage3209dd4a+52474receipts and rootpersonalfullscreen/all6filled/empty1440/zoom confirmation complete deferredQA. PriorFAILED/STOP historicalrecords unchanged; task32notcomplete/mainreleaseexcluded.

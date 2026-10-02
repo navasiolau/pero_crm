@@ -24,10 +24,14 @@
 
 - [x] 4.1 Targeted/full tests/lint/typecheck/build и diff проходят без dependencies/schema/metadata migration/storage policy/платёжных изменений; RED→GREEN и результаты записаны.
 - [x] 4.2 Root guarded existing-local native/browser контур реально загружает image+document, читает оригинал/thumb, fullscreen/download и exactdelete; before/after hashes старых rows/own blobs verified и actorACL доказан. QAданные толькоразрешённые, безnewDB/seed/reset/dumps/restic.
-- [ ] 4.3 DEFERRED FINAL QA после завершения20–26: лично просмотреть320×800,360×800,390×844,768×1024,1024×768,1440×900, resize/sidebar/actual200%zoom/pixel. Прямое новое указание владельца переносит эту проверку; сейчас essential logic/build/smoke/stageimagehealth. Не объявлять финальную visual QA выполненной.
+- [x] 4.3 DEFERRED FINAL QA после завершения20–26: лично просмотреть320×800,360×800,390×844,768×1024,1024×768,1440×900, resize/sidebar/actual200%zoom/pixel. Прямое новое указание владельца переносит эту проверку; сейчас essential logic/build/smoke/stageimagehealth. Не объявлять финальную visual QA выполненной.
 - [x] 4.4 Own QA cleanup только по immutableHMAC/CAS checkpoint/точнымIDs+keys; originaldata fingerprints сохранены, storage exactkeysabsence проверена Head metadata, чужие keys/repo/infra не затрагивать.
 - [x] 4.5 Один атомарный20commit и обычныйmerge staging STRICT только после фактической finalstaging19acceptance, CI и actualdeployedSHA/image/health/gallery/docs/roles/error сценарии; nightrefresh/W07 сохранить. Main/prod не входят, отсутствующие проверки не помечать выполненными.
 
 ## Basic Integration Evidence Reconciliation
 
 Actualeaa6 staging native5/all43rollback и functional12checks: modernization-20/.playwright-mcp/modernization/staging-attachments-native-80a1cef7-9034-4e28-bec6-6642a88b7dbb и staging-attachments-smoke-b2f5d4b3-1ffc-4521-8ca2-973dd76ce040. ReceiptrenderReact418FAIL сохранён; render/finalvisualDEFERRED, basicintegration не означаетbrowserPASS. Evidence linked in evidence.md; comprehensivevisual/lifecycle/wire pendingcheckpoints не отмечены.
+
+## Final Acceptance Reference
+
+Final321 acceptance evidence appended in evidence.md; actualstage3209dd4a+52474receipts and rootpersonalfullscreen/all6filled/empty1440/zoom confirmation complete deferredQA. PriorFAILED/STOP historicalrecords unchanged; task32notcomplete/mainreleaseexcluded.

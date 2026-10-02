@@ -13,10 +13,10 @@
 
 ## 3. Acceptance / Final QA
 
-- [ ] 3.3 Actualstage26 SHA/image/health/smoke послеbasic25acceptance иordinarymerge, pending. Main release не разрешён.
+- [x] 3.3 Actualstage26 SHA/image/health/smoke послеbasic25acceptance иordinarymerge, pending. Main release не разрешён.
 
 - [x] 3.1 EssentialrootBUILD26PASS/fullweb835/bot19/type/lintPASS; additivecapturemigration1 сохраняетOLDProduct/Project+7financialfacts; initialnative5PASS/all43rollback. Compiledbrowser/finalvisual не заявляются по native proof.
-- [ ] 3.2 После20–26 implemented выполнить финальнуюvisual/pixel всех6sizes/sidebar/resize/actual200zoom/roles/errors/cover/textarea/docs, exactowncleanup/prefs; покаunchecked, неfakeproof.
+- [x] 3.2 После20–26 implemented выполнить финальнуюvisual/pixel всех6sizes/sidebar/resize/actual200zoom/roles/errors/cover/textarea/docs, exactowncleanup/prefs; покаunchecked, неfakeproof.
 
 ## Actual Branch Context
 
@@ -25,3 +25,7 @@ Root после fresh fetch создал feature/26 от originf33f574 в modern
 ## Local Source Evidence
 
 02.10.2026: additive marker and ordinary DTO/UI/bot changes implemented. Against original f33 Product core the new focused suite failed 5/7 (missing captures and accepted initialPrice); after restoring implemented core it passes 7/7. Focused suite plus Product description/inline and Project inline regressions passes 37/37. Web TypeScript and scoped ESLint pass; compiled bot build and engine suite pass 11/11, including stale initial-price callback rejection and no initial-price wizard text. No database or deployment was executed by the source worker. Native migration/transaction checks, integrated build and actual staging acceptance remain root tasks; comprehensive visual acceptance remains unchecked.
+
+## Final Acceptance Reference
+
+Final321 acceptance evidence appended in evidence.md; actualstage3209dd4a+52474receipts and rootpersonalfullscreen/all6filled/empty1440/zoom confirmation complete deferredQA. PriorFAILED/STOP historicalrecords unchanged; task32notcomplete/mainreleaseexcluded.
