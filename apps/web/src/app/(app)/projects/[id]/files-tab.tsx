@@ -16,6 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { formatDate } from "@/lib/format";
 import { FileImageThumbnail } from "@/components/file-image-thumbnail";
 import { useFileViewer } from "@/components/file-viewer";
 import { ConfirmDeleteDialog } from "@/components/confirm-delete-dialog";
@@ -162,7 +163,6 @@ export function Uploader({
 export function FileGridView({
   files,
   canEdit,
-  flat = false,
   compact = false,
   onBusyChange,
 }: {
@@ -195,7 +195,7 @@ export function FileGridView({
                   {FILE_CATEGORY_LABELS[file.category as FileCategoryKey]}
                 </Badge>
                 {formatSize(file.size)} · {file.uploaderName} ·{" "}
-                {new Date(file.createdAt).toLocaleDateString("ru-RU", flat ? { timeZone: "Europe/Moscow" } : undefined)}
+                {formatDate(file.createdAt)}
               </div>
             </div>
             <FileImageThumbnail file={file} onOpen={()=>fileViewer.open(file)}/>
