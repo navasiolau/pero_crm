@@ -27,6 +27,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { formatDate } from "@/lib/format";
 import { FileImageThumbnail } from "@/components/file-image-thumbnail";
 import { useFileViewer } from "@/components/file-viewer";
 import { ConfirmDeleteDialog } from "@/components/confirm-delete-dialog";
@@ -440,7 +441,7 @@ export function TaskDialog({
                 <div className="text-xs text-muted-foreground">Срок</div>
                 <div>
                   {task.dueAt
-                    ? new Date(task.dueAt).toLocaleDateString("ru-RU")
+                    ? formatDate(task.dueAt)
                     : "—"}
                 </div>
               </div>
@@ -480,7 +481,7 @@ export function TaskDialog({
               </div>
               <div>
                 <div className="text-xs text-muted-foreground">Создана</div>
-                <div>{new Date(task.createdAt).toLocaleDateString("ru-RU")}</div>
+                <div>{formatDate(task.createdAt)}</div>
               </div>
               <div>
                 <div className="text-xs text-muted-foreground">Время (оценка / факт)</div>

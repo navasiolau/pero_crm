@@ -9,3 +9,6 @@
 Ошибка preview → явная иконка без скачивания original. WebP остаётся сжатым preview, субъективное качество подтверждается Root визуально; не выдавать unit tests за отсутствие визуальных потерь. Bounds/ACL/cache остаются прежними для всех вариантов.
 ## Migration Plan
 Без миграций, Root local build и actual staging; оригинальные storage keys не изменяются.
+
+## Hydration date correction
+Actual staging после московской полуночи: семь owned file createdAt имеют разные UTC/EuropeMoscow календарные даты. FileGrid nonflat раньше форматировал без timeZone, flat уже использовал Moscow. Единый formatDate с Europe/Moscow применяется ко всем строкам FileGrid и служебным датам TaskDialog, без изменения timestamp/order. Actual SSR childTZ UTC/Moscow RED1→GREEN1, без подавления hydration/SSR. Generic React418 не идентифицирует fiber; подтверждение устранения в hosted runtime остаётся за Root.
