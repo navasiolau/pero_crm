@@ -47,6 +47,7 @@ export const paySchemeLabels: Record<string, string> = {
 export const entrySchemeLabels: Record<string, string> = {
   PIECE: "Сдельно",
   PRODUCT_ENGINEERING: "Инженерный фонд изделия",
+  PRODUCT_PERCENT_ASSEMBLY: "Процент за сборку",
   PERCENT_PROJECT: "% от стоимости",
   PERCENT_TURNOVER: "% от оборота",
 };

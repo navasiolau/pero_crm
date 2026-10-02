@@ -1,4 +1,4 @@
-export type ProductPercentageKind = "ENGINEERING" | "INSTALLATION";
+export type ProductPercentageKind = "ENGINEERING" | "ASSEMBLY" | "INSTALLATION";
 export const PERCENTAGE_SHARE_UNITS = 1_000_000;
 export type PercentageShare = { userId: string; shareUnits: number };
 

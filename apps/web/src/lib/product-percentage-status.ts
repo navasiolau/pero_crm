@@ -21,10 +21,11 @@ export function decideProductPercentageStatus(roles: Role[], input: ProductPerce
   return { allowed: true };
 }
 
-export function percentageCompletionKinds(from: ProductStatus, to: ProductStatus, manager: boolean): ("ENGINEERING" | "INSTALLATION")[] {
-  const kinds: ("ENGINEERING" | "INSTALLATION")[] = [];
+export function percentageCompletionKinds(from: ProductStatus, to: ProductStatus, manager: boolean): ("ENGINEERING" | "ASSEMBLY" | "INSTALLATION")[] {
+  const kinds: ("ENGINEERING" | "ASSEMBLY" | "INSTALLATION")[] = [];
   if ((manager || from === "DESIGN" || from === "RECLAMATION") &&
     (["PRODUCTION", "DELIVERY", "INSTALLATION", "DONE"] as ProductStatus[]).includes(to)) kinds.push("ENGINEERING");
+  if (manager && (["DELIVERY", "INSTALLATION", "DONE"] as ProductStatus[]).includes(to)) kinds.push("ASSEMBLY");
   if (to === "DONE" && manager) kinds.push("INSTALLATION");
   return kinds;
 }

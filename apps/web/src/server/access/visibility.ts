@@ -92,6 +92,7 @@ export function productVisibilityWhere(actor: VisibilityActor): Prisma.ProductWh
     OR: [
       { tasks: { some: { assigneeId: actor.id } } },
       ...(hasRole(actor.roles, "MOUNTER") ? [{ mounterId: actor.id }] : []),
+      ...(hasRole(actor.roles, "WORKER") ? [{ assemblerId: actor.id, assembler: { active: true, roles: { hasSome: ["WORKER" as const] } } }] : []),
       { id: { in: actor.fieldParticipantProductIds ?? [] } },
       { project: { tasks: { some: { assigneeId: actor.id, productId: null } } } },
     ],

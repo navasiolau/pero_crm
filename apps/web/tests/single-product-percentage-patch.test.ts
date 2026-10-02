@@ -7,7 +7,7 @@ import type { ProductPercentagePatch } from '../src/server/product-percentage-pa
 const manager={id:'manager',name:'Manager',roles:['MANAGER' as const],source:'web' as const};
 function fixture(){const product={id:'p',projectId:'project',engineerId:'e',mounterId:'m'};const cfg={id:'cfg',revision:2,ratePercent:{toString:()=> '5'},workReview:null as unknown};const logs:Record<string,unknown>[]=[];const writes:string[]=[];let completed=false;
  const tx={product:{findUnique:async()=>product,update:async({data}:{data:Record<string,unknown>})=>{writes.push('product');Object.assign(product,data)}},
- productPercentageConfig:{findUnique:async()=>cfg,update:async({data}:{data:Record<string,unknown>})=>{writes.push('config');Object.assign(cfg,{...data,revision:cfg.revision+1});return cfg}},
+ productPercentageConfig:{findMany:async()=>[],findUnique:async()=>cfg,update:async({data}:{data:Record<string,unknown>})=>{writes.push('config');Object.assign(cfg,{...data,revision:cfg.revision+1});return cfg}},
  changeLog:{findUnique:async({where}:{where:{id:string}})=>logs.find(log=>log.id===where.id)??null,create:async({data}:{data:Record<string,unknown>})=>{writes.push('audit');logs.push(data)}},
  user:{findUnique:async({where}:{where:{id:string}})=>({active:where.id!=='inactive',roles:['MOUNTER']})},
  productPercentageCompletion:{findUnique:async()=>completed?{id:'completion'}:null},work:{findMany:async()=>[{id:'w',title:'real ordinary work',tasks:[{id:'t',productId:'p',projectId:'project'}]}]},payrollEntry:{findMany:async()=>[{workId:null,taskId:'t'}]},task:{findFirst:async()=>({id:'unfinished-old-allocation'})}} as unknown as Prisma.TransactionClient;

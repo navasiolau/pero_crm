@@ -11,6 +11,7 @@ import { prisma } from "@/lib/prisma";
 import { dispatchEvent } from "@/server/plugins/events";
 import { notifyOrg, notifyPerson } from "@/server/notifications/notify";
 import { formatAmount } from "@/lib/format";
+import { PERCENTAGE_STAGE_POLICY } from "./stage-policy";
 import { captureDirectPercentage, type PercentageAccrualEffects } from "./direct-completion";
 
 type Tx = Prisma.TransactionClient;
@@ -33,7 +34,7 @@ export async function assertPercentageProjectCurrencyChange(tx: Pick<Tx, "produc
 }
 
 function assertKind(kind: ProductPercentageKind): void {
-  if (kind !== "ENGINEERING" && kind !== "INSTALLATION") throw new Error("Неизвестный процентный этап");
+  if (!Object.hasOwn(PERCENTAGE_STAGE_POLICY,kind)) throw new Error("Неизвестный процентный этап");
 }
 function assertManager(actor: DomainActor): void {
   if (!hasAnyRole(actor.roles, MANAGER_ROLES)) throw new Error("Недостаточно прав");
@@ -126,8 +127,8 @@ export async function settlePendingProductPercentage(productId: string, kind: Pr
         await tx.payrollEntry.create({ data: { userId: row.userId, productId, projectId: pending.product.projectId,
           percentageCompletionShareId: row.id, amount, bynAmount, projectAmount,
           projectCurrency: current.productCurrency, currency: current.payrollCurrency!,
-          scheme: kind === "ENGINEERING" ? "PRODUCT_PERCENT_ENGINEERING" : "PRODUCT_PERCENT_INSTALLATION",
-          month: current.completedAt.toISOString().slice(0, 7), comment: `${kind === "ENGINEERING" ? "Проектирование" : "Монтаж"} изделия ${pending.product.number}` } });
+          scheme: PERCENTAGE_STAGE_POLICY[kind].scheme,
+          month: current.completedAt.toISOString().slice(0, 7), comment: `${PERCENTAGE_STAGE_POLICY[kind].label} изделия ${pending.product.number}` } });
         const event = await tx.domainEvent.create({ data: { type: "payroll.accrued", actor: current.completedById ?? undefined,
           payload: { userId: row.userId, productId, projectId: pending.product.projectId, kind, amount: Number(amount) } } });
         eventIds.push(event.id);
