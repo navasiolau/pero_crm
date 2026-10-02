@@ -1,4 +1,13 @@
 import type { SketchFilePreview } from "@/lib/product-hero";
+import type { InlineSaveController } from "./inline-save-controller";
+export async function flushSketchCriticalFields(controllers:readonly InlineSaveController[]):Promise<boolean>{
+  // Файловая операция не добавляет сообщения «Сохранено» к нетронутым полям.
+  // Любой изменённый draft, pending или ошибка проходят прежний flush/replay.
+  return(await Promise.all(controllers.map(controller=>{
+    const state=controller.getSnapshot(),baseline=state.baseline===null?"":String(state.baseline);
+    return["idle","saved"].includes(state.status)&&state.draft===baseline?true:controller.flush();
+  }))).every(Boolean);
+}
 
 // Отображение меняется только после согласованного ACK указателя и файла.
 export function readSketchUploadConfirmation(value: unknown, mutationId: string): SketchFilePreview {

@@ -23,6 +23,8 @@
 
 ## Risks / Trade-offs
 
+Финальная проверка после №26 выявила +60px на desktop1024×768: grid/header ширины совпали, details вырос на60px, cover растянулся вместе с левым содержимым. Загрузка вызывала flush трёх нетронутых price/quantity/engineer controllers и меняла idle→saved, добавляя три сообщения «Сохранено». Scoped cover flush теперь пропускает только чистые idle/saved с точным draft=formattedbaseline; dirty/mismatch/pending/error/conflict сохраняют прежний flush/replay. Высота контента не фиксируется и не обрезается. Actual14checks/7files до failure сохранены; итоговый повтор проверяет ту же area assertion после сборки.
+
 - [Storage и DB не единая транзакция] → retain existing scoped upload compensation / best-effort deletion, точные own keys, не обещать distributed atomicity.
 - [Lost ACK / parallel uploads] → re-read authoritative pointer/conflict; не автоматическая замена или повторное удаление нового файла.
 - [Visual QA deferred] → basic functional smoke сейчас; отдельный unchecked FINAL QA после26, никакого pixel-ready заявления.
