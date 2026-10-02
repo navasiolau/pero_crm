@@ -14,6 +14,7 @@ transportStub.filename = transportFile; transportStub.loaded = true;
 transportStub.exports = { invokeProductPatch() { throw Error("SSR must never write"); } };
 require.cache[transportFile] = transportStub;
 (globalThis as unknown as { React: typeof React }).React = React;
+const clientActionsFile=require.resolve("../src/server/clients/actions"),clientActionsStub=new Module(clientActionsFile);clientActionsStub.filename=clientActionsFile;clientActionsStub.loaded=true;clientActionsStub.exports={createClient(){throw Error("SSR must never write")},updateClient(){throw Error("SSR must never write")}};require.cache[clientActionsFile]=clientActionsStub;
 const { ProductInlineProvider } = require("../src/components/product-inline-provider") as typeof import("../src/components/product-inline-provider");
 const { ProductInlineContacts, ProductInlineDetails } = require("../src/components/product-inline-fields") as typeof import("../src/components/product-inline-fields");
 
@@ -21,13 +22,13 @@ const initial = { title: "Шкаф", kind: null, quantity: 3, expectedPrice: "12
 function details(canManage: boolean, canEditTech: boolean, showAmount: boolean, expectedPrice: string | null = initial.expectedPrice) {
   // eslint-disable-next-line react/no-children-prop -- provider requires children in its typed props
   return renderToStaticMarkup(createElement(ProductInlineProvider, { productId: "product", initial: { ...initial, expectedPrice }, children: createElement(ProductInlineDetails, {
-    canManage, canEditTech, showAmount, currency: "BYN", status: createElement("p", null, "Статус"),
+    canManage, canEditTech, showAmount, currency: "BYN", notice: createElement("p", null, "Нехватка материалов"),
     measurement: createElement("p", null, "Замер"), engineer: createElement("p", null, "Инженер и процент"),
   }) }));
 }
-test("основные поля следуют статус → количество → описание → замер → цена → инженер", () => {
+test("основные поля сохраняют количество → описание → замер → цена → инженер после Header", () => {
   const html = details(true, true, true);
-  const markers = ["Статус", "product-inline-quantity", "product-inline-description", "Замер", "product-inline-price", "Инженер и процент"];
+  const markers = ["product-inline-quantity", "product-inline-description", "Замер", "product-inline-price", "Инженер и процент"];
   const positions = markers.map(marker => html.indexOf(marker));
   assert.ok(positions.every(position => position >= 0));
   assert.deepEqual([...positions].sort((a, b) => a - b), positions);
@@ -49,12 +50,12 @@ test("пустая цена остаётся пустой, сумма парти
   assert.match(html, /Сумма партии<\/div>—/);
   assert.doesNotMatch(html, /Сумма партии<\/div>0/);
 });
-test("клиентские контакты отдельным блоком сохраняют порядок и controller поля", () => {
+test("контакты клиента readonly и используют данные Client, не Project.address", () => {
   // eslint-disable-next-line react/no-children-prop -- provider requires children in its typed props
   const html = renderToStaticMarkup(createElement(ProductInlineProvider, { productId: "product", initial,
-    children: createElement(ProductInlineContacts, { canManage: false, clients: [{value: "client", label: "Клиент"}], inheritedAddress: null }) }));
-  assert.ok(html.indexOf("product-inline-client") < html.indexOf("product-inline-address"));
-  assert.ok(html.indexOf("product-inline-address") < html.indexOf("product-inline-phone"));
+    children: createElement(ProductInlineContacts, { canManage: false, clients: [{id: "client", label: "Клиент", phone: "+375290000000", address: "Адрес клиента"}] }) }));
+  assert.ok(html.indexOf("product-inline-client") < html.indexOf("product-client-phone"));
+  assert.ok(html.indexOf("product-client-phone") < html.indexOf("product-client-address"));
   assert.doesNotMatch(html, /Количество|Техническое описание|Замерщик/);
 });
 test("нижние секции постоянны, документы precede сборку/монтаж и локальная прокрутка", () => {
@@ -63,7 +64,7 @@ test("нижние секции постоянны, документы precede �
   }));
   const markers = ["Реквизиты", "Документы", "Сборщик", "Монтажник", "Работы и задачи"];
   assert.ok(markers.every((marker, index) => !index || html.indexOf(markers[index - 1]) < html.indexOf(marker)));
-  assert.doesNotMatch(html, /role="tab|Материалы|История|Файлы|Процентные этапы/);
+  assert.doesNotMatch(html, /role="tab|Материалы|История|Процентные этапы/);
   assert.match(html, /data-product-section="works"/);
   assert.match(html, /overflow-x-auto/);
 });
@@ -82,5 +83,5 @@ test("страница подключает один keyed provider и преж�
   const documents = readFileSync(new URL("../src/components/product-attachments.tsx", import.meta.url), "utf8");
   assert.match(documents, /@min-\[640px\]:grid-cols-2/);
   assert.ok(documents.indexOf('data-product-documents-column="production"') < documents.indexOf('data-product-documents-column="installation"'));
-  assert.match(documents, /<ProductNoModel productId=\{props.productId\} noModel=\{noModel\} canManage=\{canManage\}/);
+  assert.doesNotMatch(documents, /<ProductNoModel/);
 });

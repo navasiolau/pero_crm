@@ -7,7 +7,7 @@ export function ProductSinglePage({ overview, documents, assembly, installation,
 }) {
   return <div className="flex min-w-0 max-w-full flex-col gap-4" data-product-single-page>
     {overview}
-    <div className="min-w-0 w-full max-w-full" data-product-section="documents">{documents}</div>
+    <section className="min-w-0 w-full max-w-full space-y-3 rounded-lg border p-4" aria-labelledby="product-engineer-files-heading" data-product-section="documents"><h2 id="product-engineer-files-heading" className="text-lg font-semibold">Файлы от инженера</h2>{documents}</section>
     <div className="min-w-0" data-product-section="assembly">{assembly}</div>
     <div className="min-w-0" data-product-section="installation">{installation}</div>
     <section className="min-w-0 space-y-3" aria-labelledby="product-works-heading" data-product-section="works">

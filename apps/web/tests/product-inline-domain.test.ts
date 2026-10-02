@@ -31,12 +31,12 @@ function fixture() {
 }
 const patch = (extra: Partial<ProductPatch> = {}): ProductPatch => ({ productId: "p", field: "title", value: "New", expectedValue: "Old", clientMutationId: randomUUID(), ...extra } as ProductPatch);
 
-test("closed schemas reject wrong field/money/quantity and blank phone while permitting legacy expected empty phone", () => {
+test("closed schemas reject wrong field/money/quantity and retired delegated phone/address", () => {
   assert.equal(productPatchSchema.safeParse({ ...patch(), field: "currency" }).success, false);
   assert.equal(productPatchSchema.safeParse(patch({ field: "expectedPrice", value: "-1", expectedValue: "10" })).success, false);
   assert.equal(productPatchSchema.safeParse(patch({ field: "quantity", value: 1.2, expectedValue: 1 })).success, false);
   assert.equal(productPatchSchema.safeParse({ ...patch(), field: "client.phone", value: "", expectedValue: "", expectedClientId: "c" }).success, false);
-  assert.equal(productPatchSchema.safeParse({ ...patch(), field: "client.phone", value: "+375", expectedValue: "", expectedClientId: "c" }).success, true);
+  assert.equal(productPatchSchema.safeParse({ ...patch(), field: "client.phone", value: "+375", expectedValue: "", expectedClientId: "c" }).success, false);
 });
 test("same-field competitors yield one saved and one conflict without silent overwrite", async () => {
   const f=fixture(); const results=await Promise.all([patchProductCore(actor,patch(),f.transaction), patchProductCore(actor,patch({value:"Other"}),f.transaction)]);
@@ -80,13 +80,16 @@ test("legacy no-op with genuine baseline does not write success audit", async ()
   assert.equal(f.logs.length,0);
 });
 
-test("authorized phone-binding conflict carries actual client context without writes; forbidden carries none", async () => {
-  const f=fixture(); const input:ProductPatch={productId:"p",field:"client.phone",value:"draft",expectedValue:"old-phone",expectedClientId:"old",clientMutationId:randomUUID()};
-  const result=await patchProductCore(actor,input,f.transaction);
-  assert.equal(result.kind,"conflict"); assert.equal(result.currentClientId,"new");assert.equal(result.currentValue,"999");assert.equal(result.currentClientLabel,"New Client");
-  assert.equal(f.logs.length,0);assert.equal(f.events.length,0);
-  const denied=await patchProductCore({...actor,roles:["ACCOUNTANT"] as never},input,f.transaction);
-  assert.equal(denied.kind,"forbidden");assert.equal('currentClientId' in denied,false);assert.equal('currentValue' in denied,false);assert.equal('currentClientLabel' in denied,false);
+test("retired product contacts reject before transaction and disclose no client metadata", async () => {
+  let calls=0;
+  const transaction:TaskTransaction=async()=>{calls++;throw new Error("unexpected data access");};
+  for(const roles of [["MANAGER"],["ACCOUNTANT"]] as const) {
+    const input:ProductPatch={productId:"p",field:"client.phone",value:"draft",expectedValue:"old-phone",expectedClientId:"old",clientMutationId:randomUUID()};
+    const result=await patchProductCore({...actor,roles:[...roles]},input,transaction);
+    assert.equal(result.kind,"validation");
+    assert.equal('currentClientId' in result,false);assert.equal('currentValue' in result,false);
+  }
+  assert.equal(calls,0);
 });
 
 
