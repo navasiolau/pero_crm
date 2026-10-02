@@ -4,6 +4,7 @@ import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { MANAGER_ROLES, hasAnyRole, hasRole } from "@/lib/roles";
 import { assertProjectMoneyCurrency } from "@/lib/internal-currency";
+import { normalizeProductDescription, isProductDescriptionUnchanged } from "@/lib/product-description";
 import { productLineTotal } from "@/lib/product-quantity";
 import { productEditWhere, resolveVisibilityActor } from "@/server/access/visibility";
 import { withTaskTransaction, type TaskTransaction } from "@/server/tasks/transaction";
@@ -95,7 +96,7 @@ export async function createProductCore(actor: DomainActor, input: CreateProduct
       kind: data.kind?.trim() || null,
       expectedPrice: data.expectedPrice,
       initialPrice: data.initialPrice,
-      description: data.description?.trim() || null,
+      description: normalizeProductDescription(data.description),
       engineerId: data.engineerId || null,
       createdById: actor.id,
       statusHistory: {
@@ -131,6 +132,9 @@ async function updateProductValues(actor: DomainActor, productId: string, data: 
       if (!(key in baseline)) return { ok: false as const, error: "Обновите форму: отсутствует исходное значение поля" };
       if (canonical(key, before[key]) !== canonical(key, baseline[key])) return { ok: false as const, error: "Поле изменено другим пользователем" };
     }
+    // Неизменённый legacy raw текст не очищаем даже при правке соседнего поля.
+    if (data.description !== undefined && !isProductDescriptionUnchanged(data.description, before.description))
+      data.description = normalizeProductDescription(data.description);
     const changed = Object.keys(data).some((key) => canonical(key, before[key as keyof typeof before]) !== canonical(key, data[key as keyof UpdateProductInput]));
     if (!changed) return { ok: true as const, before, noOp: true };
     const oldCount = before.quantity ?? 1;
@@ -228,8 +232,11 @@ export async function patchProductCore(actor: DomainActor, input: ProductPatch, 
       if(!manager && (current.engineerId!==actor.id||current.status!=="DESIGN")) return {...identity,kind:"forbidden",error:"Доступ к техническому блоку изменён"};
       const previous=canonical(patch.field,current[patch.field]);
       if(previous!==canonical(patch.field,patch.expectedValue)) return {...identity,kind:"conflict",error:"Поле изменено другим пользователем",currentValue:previous};
+      if (patch.field === "description" && isProductDescriptionUnchanged(patch.value, previous as string | null))
+        return {...identity,kind:"saved",value:previous,noOp:true};
       let value:ProductPatchValue=patch.value;
-      if(patch.field==="expectedPrice")value=canonical(patch.field,value);
+      if(patch.field==="description")value=normalizeProductDescription(patch.value);
+      else if(patch.field==="expectedPrice")value=canonical(patch.field,value);
       else if(typeof value==="string") value=value.trim()||(patch.field==="title"?value:null);
       if(previous===value)return {...identity,kind:"saved",value,noOp:true};
       const data = {[patch.field]:value} as ProductValues;

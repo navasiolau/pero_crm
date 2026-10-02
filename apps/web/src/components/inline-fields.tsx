@@ -19,13 +19,13 @@ function SaveState({ field, readOnly }: { field: ReturnType<typeof useInlineSave
     {!readOnly && field.status === "conflict" && field.currentValue !== undefined ? <div className="flex min-w-0 flex-wrap gap-2"><Button type="button" variant="link" className="h-auto px-0 text-xs" onClick={field.acceptCurrent}>Принять сохранённое</Button><Button type="button" variant="link" className="h-auto px-0 text-xs" onClick={() => void field.rebaseAndRetry()}>Сохранить мой ввод</Button></div> : null}
   </div>;
 }
-export function InlineTextField({ id, label, controller, readOnly, hint, multiline, inputMode, inputClassName }: Props & { inputClassName?: string; multiline?: boolean; inputMode?: "text" | "decimal" | "numeric" | "tel" }) {
+export function InlineTextField({ id, label, controller, readOnly, hint, multiline, inputMode, inputClassName, largeDescription }: Props & { inputClassName?: string; multiline?: boolean; largeDescription?: boolean; inputMode?: "text" | "decimal" | "numeric" | "tel" }) {
   const field = useInlineSave(controller);
   const shared = { id, value: field.draft, readOnly, "aria-invalid": Boolean(field.error), "aria-describedby": `${id}-state`, onChange: (event: { target: { value: string } }) => field.setDraft(event.target.value), onBlur: () => { if (!readOnly) void field.commit(); }, onKeyDown: (event: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     if (event.nativeEvent.isComposing) return;
     if (event.key === "Enter" && (!multiline || event.ctrlKey || event.metaKey)) { event.preventDefault(); if (!readOnly) void field.commit(); }
   } };
-  return <div className="flex min-w-0 flex-col gap-1.5"><Label htmlFor={id}>{label}</Label>{multiline ? <Textarea {...shared} className="min-h-24 min-w-0 field-sizing-content" /> : <Input {...shared} inputMode={inputMode} className={`min-w-0 ${inputClassName ?? ""}`} />}{hint ? <p className="break-words text-xs text-muted-foreground">{hint}</p> : null}{!readOnly || field.error || field.status === "dirty" ? <div id={`${id}-state`}><SaveState field={field} readOnly={readOnly} /></div> : null}</div>;
+  return <div className="flex min-w-0 flex-col gap-1.5"><Label htmlFor={id}>{label}</Label>{multiline ? <Textarea {...shared} rows={largeDescription ? 12 : undefined} className={largeDescription ? "h-80 min-h-80 w-full max-w-full min-w-0 resize-y field-sizing-fixed" : "min-h-24 min-w-0 field-sizing-content"} /> : <Input {...shared} inputMode={inputMode} className={`min-w-0 ${inputClassName ?? ""}`} />}{hint ? <p className="break-words text-xs text-muted-foreground">{hint}</p> : null}{!readOnly || field.error || field.status === "dirty" ? <div id={`${id}-state`}><SaveState field={field} readOnly={readOnly} /></div> : null}</div>;
 }
 export function InlineSelectField({ id, label, controller, readOnly, hint, options, allowClear }: Props & { options: SearchableOption[]; allowClear?: boolean }) {
   const field = useInlineSave(controller);

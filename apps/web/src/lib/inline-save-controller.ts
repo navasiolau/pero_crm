@@ -2,7 +2,7 @@ export type InlineValue = string | number | null;
 export type InlineReply<V extends InlineValue> = {kind:"saved";value:V} | {kind:"validation"|"conflict"|"forbidden"|"not-found"|"failure";error:string;currentValue?:V;currentClientId?:string;currentClientLabel?:string};
 export type InlineRequest<V extends InlineValue> = {value:V;expectedValue:V;clientMutationId:string};
 export type InlineState<V extends InlineValue> = {draft:string;baseline:V;status:"idle"|"dirty"|"saving"|"saved"|"error"|"conflict";error:string|null;currentValue?:V;currentClientId?:string;currentClientLabel?:string};
-export type InlineOptions<V extends InlineValue> = {initialValue:V;format:(value:V)=>string;parse:(draft:string)=>V;save:(request:InlineRequest<V>)=>Promise<InlineReply<V>>;id?:()=>string;onRebase?:(state:InlineState<V>)=>void;onSaved?:(reply:InlineReply<V>)=>void};
+export type InlineOptions<V extends InlineValue> = {initialValue:V;format:(value:V)=>string;parse:(draft:string)=>V;isUnchangedDraft?:(draft:string,baseline:V)=>boolean;save:(request:InlineRequest<V>)=>Promise<InlineReply<V>>;id?:()=>string;onRebase?:(state:InlineState<V>)=>void;onSaved?:(reply:InlineReply<V>)=>void};
 // Очередь принадлежит одному полю; соседние поля сохраняются независимо.
 export function createInlineSaveController<V extends InlineValue>(options: InlineOptions<V>) {
   let state: InlineState<V> = { draft: options.format(options.initialValue), baseline: options.initialValue, status: "idle", error: null };
@@ -32,7 +32,8 @@ export function createInlineSaveController<V extends InlineValue>(options: Inlin
         const requested = queued ?? { draft: state.draft, generation };
         queued = null;
         let value: V;
-        try { value = options.parse(requested.draft); }
+        // Описание может иметь старый raw baseline, который нельзя очищать при blur.
+        try { value = options.isUnchangedDraft?.(requested.draft, state.baseline) ? state.baseline : options.parse(requested.draft); }
         catch (error) { publish({ ...state, status: "error", error: error instanceof Error ? error.message : "Проверьте значение" }); return false; }
         if (Object.is(value, state.baseline)) {
           const newer = requested.generation !== generation;

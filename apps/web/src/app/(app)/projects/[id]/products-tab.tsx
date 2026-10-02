@@ -423,7 +423,7 @@ export function ProductsTab({
                     expectedPrice: parsedPrice,
                     quantity: parsedQuantity,
                     initialPrice: parsedInitialPrice,
-                    description: description.trim() || undefined,
+                    description,
                     engineerId: engineerId || undefined,
                   });
                   if (result.ok) {

@@ -6,10 +6,12 @@ import { basename, dirname, resolve, relative, isAbsolute } from "node:path";
 import { chromium } from "@playwright/test";
 
 const PREFIX="pero-crm-browser-zoom-";
-export async function runCrmBrowserZoom({origin,profile,basicAuth,outputDir,pagePath="/settings/payroll",ownedProductPaths=[],readySelector,ownedProjectPaths=[]}) {
-  assert.ok(["http://127.0.0.1:3016","http://127.0.0.1:3017","http://127.0.0.1:3018","https://staging-crm.peromebel.by"].includes(origin),"ZOOM_ORIGIN_MISMATCH_STOP");
+export async function runCrmBrowserZoom({origin,profile,basicAuth,outputDir,pagePath="/settings/payroll",ownedProductPaths=[],readySelector,ownedProjectPaths=[],descriptionMode=null,onOwnWrites}) {
+  assert.ok(["http://127.0.0.1:3016","http://127.0.0.1:3017","http://127.0.0.1:3018","http://127.0.0.1:3019","https://staging-crm.peromebel.by"].includes(origin),"ZOOM_ORIGIN_MISMATCH_STOP");
+  if(origin==="http://127.0.0.1:3019")assert.ok(descriptionMode,"DESCRIPTION19_ZOOM_MODE_REQUIRED");
   assert.ok(pagePath==="/settings/payroll" || (/^\/products\/[^/]+$/.test(pagePath)&&ownedProductPaths.includes(pagePath)) || (/^\/projects\/[^/]+$/.test(pagePath)&&ownedProjectPaths.includes(pagePath)),"ZOOM_PATH_NOT_OWNED_STOP");
-  if(pagePath!=="/settings/payroll")assert.equal(readySelector,pagePath.startsWith("/projects/")?"#project-inline-title":"#product-inline-title","OWNED_INLINE_READY_SELECTOR_REQUIRED");
+  if(descriptionMode){assert.ok(pagePath.startsWith("/products/")&&ownedProductPaths.includes(pagePath)&&/^[0-9a-f-]{36}$/i.test(descriptionMode.productId??""),"DESCRIPTION_ZOOM_OWNED_PRODUCT_REQUIRED");assert.equal(readySelector,"#product-inline-description","DESCRIPTION_ZOOM_SELECTOR_REQUIRED");assert.equal(typeof onOwnWrites,"function","DESCRIPTION_ZOOM_PREFERENCE_JOURNAL_REQUIRED");}
+  else if(pagePath!=="/settings/payroll")assert.equal(readySelector,pagePath.startsWith("/projects/")?"#project-inline-title":"#product-inline-title","OWNED_INLINE_READY_SELECTOR_REQUIRED");
   assert.ok(Array.isArray(profile?.cookies)&&profile.cookies.length,"SHORT_LIVED_ADMIN_SESSION_REQUIRED");
   assert.ok(profile.roles?.includes("ADMIN"),"ADMIN_PROFILE_REQUIRED");
   assert.ok(outputDir,"OUTPUT_DIRECTORY_REQUIRED");
@@ -25,6 +27,8 @@ export async function runCrmBrowserZoom({origin,profile,basicAuth,outputDir,page
   let worker;
   let tabId;
   let bellActionId;
+  let descriptionBlocked=0;
+  let zoomClosing=false;
   let phase="isolated_extension_setup";
   try {
     const extension=resolve(ownedCanonical,"extension");
@@ -38,9 +42,16 @@ export async function runCrmBrowserZoom({origin,profile,basicAuth,outputDir,page
     await context.route("**/*",async route=>{
       const request=route.request();
       if(!["GET","HEAD","OPTIONS"].includes(request.method())) {
+        if(zoomClosing){await route.abort("blockedbyclient");return;}
         // По исходникам единственный вызов без аргументов здесь — чтение NotificationsBell.
         let args;try{args=JSON.parse(request.postData()??"");}catch{}
         const url=new URL(request.url());
+        if(descriptionMode&&request.method()==="POST"&&url.origin===origin&&url.pathname===pagePath&&request.headers()["next-action"]&&Array.isArray(args)){
+          const patch=args.length===1?args[0]:null;
+          const closed=patch&&typeof patch==="object"&&patch.productId===descriptionMode.productId&&patch.field==="description"&&typeof patch.value==="string"&&patch.value.length<=5000&&(patch.expectedValue===null||typeof patch.expectedValue==="string")&&/^[0-9a-f-]{36}$/i.test(patch.clientMutationId??"")&&Object.keys(patch).sort().join("|")==="clientMutationId|expectedValue|field|productId|value";
+          if(closed){descriptionBlocked++;await route.abort("failed");return;}
+
+        }
         if(request.method()==="POST"&&url.origin===origin&&url.pathname===pagePath&&request.headers()["next-action"]&&Array.isArray(args)&&args.length===0){
           bellActionId??=request.headers()["next-action"];
           if(request.headers()["next-action"]===bellActionId){await route.continue();return;}
@@ -51,10 +62,12 @@ export async function runCrmBrowserZoom({origin,profile,basicAuth,outputDir,page
     });
     worker=context.serviceWorkers()[0]??await context.waitForEvent("serviceworker",{timeout:15000});
     page=context.pages()[0]??await context.newPage();
+    if(descriptionMode){const auth=await context.request.get(`${origin}/api/auth/session`);assert.equal(auth.status(),200,"DESCRIPTION_ZOOM_SESSION_HTTP_FAILED");assert.equal((await auth.json()).user?.id,profile.id,"DESCRIPTION_ZOOM_ACTOR_MISMATCH");}
     phase=pagePath==="/settings/payroll"?"payroll_settings_navigation":"owned_inline_navigation";
     const response=await page.goto(`${origin}${pagePath}`,{waitUntil:"networkidle"});
     assert.ok(response&&response.status()===200,"SETTINGS_REQUEST_FAILED");
     assert.equal(new URL(page.url()).pathname,pagePath,"SESSION_NOT_ACCEPTED");
+    if(descriptionMode)await onOwnWrites({ownWrites:[],preferenceOwnWrites:[]});
     if(pagePath==="/settings/payroll")await page.getByText("BYN — белорусский рубль",{exact:true}).waitFor();
     else await page.locator(readySelector).waitFor();
     tabId=await worker.evaluate(async url=>{
@@ -72,7 +85,15 @@ export async function runCrmBrowserZoom({origin,profile,basicAuth,outputDir,page
     let quantityDraft;
     let invalidSelector;
     let invalidMessage;
-    if(pagePath!=="/settings/payroll") {
+    if(descriptionMode){
+      invalidSelector="#product-inline-description";invalidMessage=/^Ответ не получен/;
+      const description=page.locator(invalidSelector);quantityDraft=await description.inputValue();
+      const literal="  <b>literal zoom200</b>\n\t"+"L".repeat(2000)+"\n\n";
+      await description.fill(literal);await description.press("Enter");assert.equal(descriptionBlocked,0,"DESCRIPTION_ZOOM_BARE_ENTER_POST");
+      await description.press("Control+Enter");const error=page.locator(`${invalidSelector}-state [role="alert"]`);await error.waitFor();assert.match(await error.innerText(),invalidMessage,"DESCRIPTION_ZOOM_TRANSPORT_ERROR_NOT_SHOWN");assert.equal(descriptionBlocked,1,"DESCRIPTION_ZOOM_EXACT_PREUPSTREAM_ABORT_REQUIRED");
+      const box=await description.boundingBox();assert.ok(box.width<=await page.evaluate(()=>innerWidth),"DESCRIPTION_ZOOM_FIELD_OVERFLOW");
+      receipt.checks.push({label:"description literal long line/error at actual200; one owned POST aborted before upstream, no data write",passed:true});
+    }else if(pagePath!=="/settings/payroll") {
       invalidSelector=pagePath.startsWith("/projects/")?"#project-inline-delivery":"#product-inline-quantity";
       invalidMessage=pagePath.startsWith("/projects/")?/^Введите неотрицательную/:/^Количество/;
       const quantity=page.locator(invalidSelector);
@@ -118,13 +139,14 @@ export async function runCrmBrowserZoom({origin,profile,basicAuth,outputDir,page
         await captureViewport("crm-byn-actual-browser-zoom200-quantity-error.png","zoom200-quantity-error");
       }
     }finally{await screenshotSession.detach();}
-    if(quantityDraft!==undefined)await page.locator(invalidSelector).fill(quantityDraft);
+    if(quantityDraft!==undefined&&!descriptionMode)await page.locator(invalidSelector).fill(quantityDraft);
     phase="reset_zoom";
     const reset=await worker.evaluate(async id=>{await chrome.tabs.setZoom(id,1);return chrome.tabs.getZoom(id);},tabId);
     assert.equal(reset,1,"ZOOM_RESET_FAILED");
     receipt.status=receipt.checks.every(check=>check.passed)?"PASS":"FAIL";receipt.passed=receipt.status==="PASS";
   }catch(error){receipt.failure={code:"ACTUAL_BROWSER_ZOOM_PROBE_STOP",phase,errorType:error?.name??"Error"};}
   finally {
+    zoomClosing=true;
     if(context){if(worker&&tabId)await worker.evaluate(async id=>{await chrome.tabs.setZoom(id,1);},tabId).catch(()=>{});await context.close();}
     // Удаляем только собственный mkdtemp после проверок пути и reparse guard.
     const current=await realpath(owned);

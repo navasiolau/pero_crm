@@ -38,7 +38,7 @@ export function ProductInlineDetails({ canManage, canEditTech, showAmount, curre
       <InlineTextField id="product-inline-quantity" label="Количество, шт." controller={quantity} inputMode="numeric" readOnly={!canManage} />
       {showAmount ? <><InlineTextField id="product-inline-price" label={`Цена за 1 шт., ${currency}`} controller={price} inputMode="decimal" readOnly={!canManage} /><div className="min-w-0 break-words"><div className="text-muted-foreground">Сумма партии</div>{formatAmount(total, currency)}{[p.status, q.status].some(status => ["dirty", "saving", "error", "conflict"].includes(status)) ? <span className="block text-xs text-muted-foreground">По текущему вводу; сохранение подтверждается рядом с полем.</span> : null}</div><div className="min-w-0 break-words"><div className="text-muted-foreground">Первоначальная цена за 1 шт. (КП)</div>{formatAmount(initialPrice, currency)}</div></> : null}
     </CardContent></Card>
-    <Card><CardContent className="min-w-0 p-4"><InlineTextField id="product-inline-description" label="Техническое описание" controller={controller("description")} readOnly={!canEditTech} multiline /></CardContent></Card>
+    <Card><CardContent className="min-w-0 p-4"><InlineTextField id="product-inline-description" label="Техническое описание" controller={controller("description")} readOnly={!canEditTech} multiline largeDescription /></CardContent></Card>
     <div className="min-w-0 break-words text-sm text-muted-foreground">Проект: <Link href={`/projects/${project.id}`} className="text-foreground underline-offset-2 hover:underline">{project.number} · {project.title}</Link></div>
   </div>;
 }
