@@ -18,6 +18,8 @@ import { listClients, listEngineers, listWorkers } from "@/server/projects/queri
 import { mapTaskDetails } from "@/server/tasks/queries";
 import { getProjectMaterials, listMaterialOptions } from "@/server/warehouse/queries";
 
+import { ProductMeasurement, ProductDocuments } from "@/components/product-attachments";
+import { productAttachmentGroups } from "@/lib/product-attachment-groups";
 import { FilesTab } from "../../projects/[id]/files-tab";
 import { MaterialsTab } from "../../projects/[id]/materials-tab";
 import { TasksTab } from "../../projects/[id]/tasks-tab";
@@ -87,6 +89,21 @@ export default async function ProductPage({
     select: { id: true, name: true },
   });
   const authorNames = new Map(authors.map((user) => [user.id, user.name]));
+  const fileRows = product.files.map((file) => ({
+              id: file.id,
+              fileName: file.fileName,
+              category: file.category,
+              stage: file.stage,
+              caption: file.caption,
+              mimeType: file.mimeType,
+              size: file.size,
+              hasThumb: file.hasThumb,
+              createdAt: file.createdAt.toISOString(),
+              uploaderName: file.uploadedById
+                ? (authorNames.get(file.uploadedById) ?? "—")
+                : "—",
+            }));
+  const attachments = productAttachmentGroups(fileRows, product.sketchFile?.id);
   const engineeringView = canViewAllPercentage ? await getEngineeringFundView(prisma, product.id, false) : null;
 
   return (
@@ -115,15 +132,18 @@ export default async function ProductPage({
         canEditTechnicalBlock={canEditTech}
         setCoverAction={setProductCover}
         header={(
-          <div className="flex min-w-0 flex-wrap items-center gap-3">
+          <div className="flex min-w-0 flex-col gap-3" data-product-header="stacked">
+            <div className="flex w-full min-w-0 items-start gap-3" data-product-title-row>
             <Link
               href={`/projects/${product.project.id}`}
-              className="text-muted-foreground hover:text-foreground"
+              className="mt-6 shrink-0 text-muted-foreground hover:text-foreground"
               aria-label="К проекту"
             >
               <ArrowLeft className="size-5" />
             </Link>
             <ProductInlineTitle number={product.number} canManage={canManage} />
+            </div>
+            <div className="flex w-full min-w-0 flex-wrap items-center gap-3" data-product-actions-row>
             <ProductHeader
               product={{
                 id: product.id,
@@ -152,6 +172,7 @@ export default async function ProductPage({
                 Нехватка материалов
               </Badge>
             ) : null}
+            </div>
           </div>
         )}
         details={<ProductInlineDetails
@@ -161,10 +182,13 @@ export default async function ProductPage({
           inheritedAddress={product.project.client.address}
           surveyor={product.surveyor ? <SurveyorLink surveyor={product.surveyor} /> : <div>—</div>}
           project={{id: product.project.id,number: product.project.number,title: product.project.title}}
+          measurement={<ProductMeasurement projectId={product.project.id} productId={product.id} files={attachments.measurement} canEdit={canEditTech} extensions={stageConfig.enabled ? stageConfig.extensions ?? undefined : undefined} />}
           initialPrice={showAmount ? product.initialPrice?.toString() ?? null : null}
         />}
 
       />
+
+      <ProductDocuments projectId={product.project.id} productId={product.id} production={attachments.production} installation={attachments.installation} canEdit={canEditTech} canManage={canManage} noModel={percentageView.noModel} extensions={stageConfig.enabled ? stageConfig.extensions ?? undefined : undefined} />
 
       <Tabs defaultValue="tasks">
         <TabsList className="w-full max-w-full justify-start overflow-x-auto">
@@ -253,20 +277,7 @@ export default async function ProductPage({
           <FilesTab
             projectId={product.project.id}
             productId={product.id}
-            files={product.files.map((file) => ({
-              id: file.id,
-              fileName: file.fileName,
-              category: file.category,
-              stage: file.stage,
-              caption: file.caption,
-              mimeType: file.mimeType,
-              size: file.size,
-              hasThumb: file.hasThumb,
-              createdAt: file.createdAt.toISOString(),
-              uploaderName: file.uploadedById
-                ? (authorNames.get(file.uploadedById) ?? "—")
-                : "—",
-            }))}
+            files={fileRows}
             canEdit={canEditTech}
             stagesEnabled={stageConfig.enabled}
             stageExtensions={stageConfig.extensions}

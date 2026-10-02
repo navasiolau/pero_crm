@@ -37,7 +37,6 @@ import {
 import {
   configureProductPercentageAction,
   retryProductPercentageAction,
-  setProductNoModelAction,
   transferProductPercentageShareAction,
 } from "@/server/product-percentage-pay/actions";
 
@@ -70,60 +69,18 @@ export function ProductPercentagePanel({
   engineers: ProductPercentageCandidate[];
   mounters: ProductPercentageCandidate[];
 }) {
-  const router = useRouter();
-  const [noModelBusy, setNoModelBusy] = useState(false);
   const inline = useOptionalProductInline();
   const engineerController = inline?.controller("engineerId");
   const acknowledgedEngineer = useSyncExternalStore(engineerController?.subscribe ?? noSubscribe, () => engineerController ? engineerController.getSnapshot().baseline : assignedEngineerId, () => engineerController ? engineerController.getServerSnapshot().baseline : assignedEngineerId);
   const currentEngineerId = acknowledgedEngineer === null ? null : String(acknowledgedEngineer);
-  useEffect(() => {
-    if (inline) inline.registerGuard("percentage-no-model", async () => !noModelBusy);
-    // Сохраняем последний dirty/pending guard скрытой вкладки; открытие заменяет его.
-  }, [inline, noModelBusy]);
   const candidates: Record<ProductPercentageKind, ProductPercentageCandidate[]> = {
     ENGINEERING: engineers,
     INSTALLATION: mounters,
   };
 
-  async function setNoModel(noModel: boolean) {
-    if (noModelBusy) return;
-    setNoModelBusy(true);
-    try {
-      const result = await setProductNoModelAction({ productId: view.productId, noModel });
-      if (!result.ok) throw new Error(result.error);
-      toast.success(noModel ? "Отметка сохранена" : "Отметка снята");
-      router.refresh();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Не удалось сохранить отметку");
-    } finally {
-      setNoModelBusy(false);
-    }
-  }
 
   return (
     <section className="min-w-0 space-y-4" aria-label="Процентные этапы изделия">
-      {canManage ? (
-        <Card className="min-w-0">
-          <CardContent className="flex min-h-12 items-start gap-3 p-4">
-            <Checkbox
-              id="product-no-model"
-              checked={view.noModel}
-              disabled={noModelBusy}
-              onCheckedChange={(checked) => {
-                if (typeof checked === "boolean") void setNoModel(checked);
-              }}
-            />
-            <div className="min-w-0 space-y-1">
-              <Label htmlFor="product-no-model" className="min-h-6 cursor-pointer text-sm">
-                Модели нет
-              </Label>
-              <p className="text-xs text-muted-foreground">
-                Инженер сможет вручную перевести изделие из проектирования в производство.
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-      ) : null}
 
       <div className="grid min-w-0 gap-4 lg:grid-cols-2">
         {(["ENGINEERING", "INSTALLATION"] as const).map((kind) => (
