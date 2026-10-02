@@ -16,7 +16,7 @@ export function QuantitySpinner({id,value,onChange,onCommit,readOnly=false,error
 }
 export function InlineQuantityField({controller,readOnly}:{controller:InlineSaveController<InlineValue>;readOnly:boolean}){
  const field=useInlineSave(controller),id='product-inline-quantity';
- return <div className="flex min-w-0 flex-col gap-1.5"><Label htmlFor={id}>Количество, шт.</Label><QuantitySpinner id={id} value={field.draft} onChange={field.setDraft} onCommit={field.commit} readOnly={readOnly} error={Boolean(field.error)}/>{!readOnly||field.error||field.status==='dirty'?<div id={`${id}-state`}><SaveState field={field} readOnly={readOnly}/></div>:null}</div>;
+ return <div className="flex min-w-0 flex-col gap-1.5"><Label htmlFor={id}>Количество</Label><QuantitySpinner id={id} value={field.draft} onChange={field.setDraft} onCommit={field.commit} readOnly={readOnly} error={Boolean(field.error)}/>{!readOnly||field.error||field.status==='dirty'?<div id={`${id}-state`}><SaveState field={field} readOnly={readOnly}/></div>:null}</div>;
 }
 
 export function ProductQuantityInput({ value, onChange, price, currency, showAmount }: {

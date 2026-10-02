@@ -39,7 +39,7 @@ export function ProductInlineDetails({ canManage, canEditTech, showAmount, curre
   const total=productDraftTotal(p.draft,q.draft);
   return <div className="flex min-w-0 flex-col gap-4" data-product-details>
     {notice?<Card className="min-w-0"><CardContent className="p-4 text-sm">{notice}</CardContent></Card>:null}
-    <Card className="min-w-0"><CardContent className={showAmount?"grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,5.5rem)_minmax(0,1fr)] items-start gap-3 p-4 text-sm":"min-w-0 p-4 text-sm"} data-product-price-quantity>
+    <Card className="min-w-0"><CardContent className={showAmount?"grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,6.5rem)_minmax(0,1fr)] items-start gap-3 p-4 text-sm":"min-w-0 p-4 text-sm"} data-product-price-quantity>
       {showAmount?<InlineTextField id="product-inline-price" label="Цена, BYN" controller={price} inputMode="decimal" readOnly={!canManage}/>:null}
       <InlineQuantityField controller={quantity} readOnly={!canManage}/>
       {showAmount?<div className="min-w-0 break-words pt-6" aria-live="polite">Сумма: {formatAmount(total,currency)}</div>:null}
