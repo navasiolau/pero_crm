@@ -27,6 +27,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { FileImageThumbnail } from "@/components/file-image-thumbnail";
 import { useFileViewer } from "@/components/file-viewer";
 import { ConfirmDeleteDialog } from "@/components/confirm-delete-dialog";
 import { QuantityStepper } from "@/components/quantity-stepper";
@@ -554,32 +555,10 @@ export function TaskDialog({
                   Файлы ({task.files.length}) — клик открывает просмотр:
                 </span>
                 <div className="flex flex-wrap gap-2">
-                  {task.files.map((file) =>
-                    file.hasThumb ? (
-                      <button
-                        key={file.id}
-                        type="button"
-                        onClick={() => fileViewer.open(file)}
-                        title="Открыть на просмотр"
-                      >
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={`/api/files/${file.id}?thumb=1`}
-                          alt={file.fileName}
-                          className="size-20 rounded-lg border object-cover transition-transform hover:scale-105"
-                        />
-                      </button>
-                    ) : (
-                      <button
-                        key={file.id}
-                        type="button"
-                        onClick={() => fileViewer.open(file)}
-                        className="rounded-lg border px-2 py-1 text-xs underline-offset-2 hover:underline"
-                      >
-                        {file.fileName}
-                      </button>
-                    ),
-                  )}
+                  {task.files.map(file=><div key={file.id} className="flex w-full min-w-0 items-center gap-3 rounded-lg border p-2">
+                    <button type="button" onClick={()=>fileViewer.open(file)} className="min-w-0 flex-1 break-all text-left text-xs underline-offset-2 hover:underline">{file.fileName}</button>
+                    <FileImageThumbnail file={file} onOpen={()=>fileViewer.open(file)}/>
+                  </div>)}
                 </div>
               </div>
             ) : null}

@@ -18,7 +18,7 @@ export function ProductHeroImage({
   sketch: SketchFilePreview;
   alt?: string;
   className?: string;
-  preview?: ProductCoverPreviewKind;
+  preview?: Exclude<ProductCoverPreviewKind, "original">;
   priority?: boolean;
   errorDisplay?: "message" | "icon";
 }) {
