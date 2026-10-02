@@ -39,10 +39,10 @@ const blankSection = (kind: ProductPercentageKind): ProductPercentageSectionView
   transferCandidates: [],
 });
 
-test("product status UI gives managers all statuses and engineers only model-ready DESIGN to PRODUCTION", () => {
+test("product status UI gives managers all statuses and engineers assigned DESIGN to PRODUCTION without model", () => {
   const context = { from: "DESIGN" as const, assignedEngineer: true, participant: false, hasB3d: false, noModel: false };
   assert.deepEqual(productStatusTargets(["MANAGER", "ENGINEER"] as const, context), ["DESIGN", "PRODUCTION", "DELIVERY", "INSTALLATION", "DONE", "RECLAMATION"]);
-  assert.deepEqual(productStatusTargets(["ENGINEER"] as const, context), []);
+  assert.deepEqual(productStatusTargets(["ENGINEER"] as const, context), ["PRODUCTION"]);
   assert.deepEqual(productStatusTargets(["ENGINEER"] as const, { ...context, hasB3d: true }), ["PRODUCTION"]);
   assert.deepEqual(productStatusTargets(["WORKER"] as const, { ...context, hasB3d: true }), []);
 });

@@ -19,29 +19,29 @@ before(async () => {
   projects = await import("../src/server/projects/queries");
 });
 
-test("queries return only own DESIGN and filters cannot overwrite access", async () => {
+test("queries return current own DESIGN and PRODUCTION and filters cannot overwrite access", async () => {
   const result = await products.listProducts(engineer.id, engineer.roles, { activeOnly: false }, { page: 1, pageSize: 10 });
-  assert.deepEqual(result.rows.map((p) => p.id), ["own"]);
-  assert.equal(result.total, 1);
-  for (const filter of [{ engineerId: "other" }, { status: "PRODUCTION" as const }, { projectId: "hidden" }]) {
+  assert.deepEqual(result.rows.map((p) => p.id), ["own", "production"]);
+  assert.equal(result.total, 2);
+  for (const filter of [{ engineerId: "other" }, { projectId: "hidden" }]) {
     assert.equal((await products.listProducts(engineer.id, engineer.roles, { activeOnly: false, ...filter })).total, 0);
   }
-  for (const key of ["foreign", "production", "hidden-product"]) assert.equal(await products.getProductFor(engineer.id, engineer.roles, key), null);
+  for (const key of ["foreign", "hidden-product"]) assert.equal(await products.getProductFor(engineer.id, engineer.roles, key), null);
 });
 
 test("project query scopes children, files, dependencies and financial aggregates", async () => {
   const project = await projects.getProjectFor(engineer.id, engineer.roles, "mixed");
   assert.ok(project);
-  assert.deepEqual(project.products.map((p) => p.id), ["own"]);
+  assert.deepEqual(project.products.map((p) => p.id), ["own", "production"]);
   assert.deepEqual(project.tasks.map((t) => t.id), ["task-own"]);
-  assert.deepEqual(new Set(project.files.map((f) => f.id)), new Set(["file-own", "file-general"]));
+  assert.deepEqual(new Set(project.files.map((f) => f.id)), new Set(["file-own", "file-general", "file-production"]));
   assert.equal(project.tasks[0].dependencies.length, 0);
   for (const field of ["initialPrice", "delivery", "unloading", "installation"] as const) assert.equal(project[field], null);
   assert.equal(await projects.getProjectFor(engineer.id, engineer.roles, "hidden"), null);
   const result = await projects.listProjects(engineer.id, engineer.roles, { activeOnly: false });
   assert.equal(result.total, 1);
-  assert.equal(result.rows[0].totalPrice, 100);
-  assert.deepEqual(result.rows[0]._count, { tasks: 1, products: 1, files: 2 });
+  assert.equal(result.rows[0].totalPrice, 400);
+  assert.deepEqual(result.rows[0]._count, { tasks: 1, products: 2, files: 3 });
   assert.equal((await projects.listProjects(engineer.id, engineer.roles, { activeOnly: false, engineerId: "other" })).total, 0);
 });
 
@@ -50,7 +50,7 @@ test("filter options and client counts use the same visible project set", async 
   assert.deepEqual(options.projects.map((p) => p.id), ["mixed"]);
   const clients = await projects.listClients(engineer);
   assert.equal(clients[0]._count.projects, 1);
-  assert.deepEqual((await products.listProductOptions("mixed", engineer)).map((p) => p.id), ["own"]);
+  assert.deepEqual((await products.listProductOptions("mixed", engineer)).map((p) => p.id), ["own", "production"]);
   assert.deepEqual(await products.listProductOptions("hidden", engineer), []);
 });
 
@@ -79,7 +79,7 @@ test("accounting and field read grants do not widen engineering technical edits"
 
 test("file policy checks both direct product and indirect task", () => {
   const result = fixture.files.filter((file) => matches(file, fileVisibilityWhere(engineer)));
-  assert.deepEqual(result.map((file) => file.id), ["file-own", "file-general"]);
+  assert.deepEqual(result.map((file) => file.id), ["file-own", "file-production", "file-general"]);
 });
 
 test("upload rejects hidden task and mismatched product before any write", async () => {
@@ -124,7 +124,7 @@ test("change of status is effective for the next access check without cached gra
   const row = { ...fixture.products[0] };
   assert.equal(matches(row, productVisibilityWhere(engineer)), true);
   row.status = "PRODUCTION";
-  assert.equal(matches(row, productVisibilityWhere(engineer)), false);
+  assert.equal(matches(row, productVisibilityWhere(engineer)), true);
   assert.equal(matches(row, productEditWhere(engineer)), false);
 });
 
@@ -173,8 +173,8 @@ test("sorting and pagination by product count use only accessible products", asy
     hidden.engineerId = engineer.id;
     const result = await projects.listProjects(engineer.id, engineer.roles, { activeOnly: false, sort: "products", dir: "desc" }, { page: 1, pageSize: 1 });
     assert.equal(result.total, 2);
-    assert.deepEqual(result.rows.map((p) => p.id), ["hidden"]);
-    assert.equal(result.rows[0]._count.products, 1);
+    assert.deepEqual(result.rows.map((p) => p.id), ["mixed"]);
+    assert.equal(result.rows[0]._count.products, 2);
   } finally {
     hidden.engineerId = oldEngineer;
   }
@@ -192,7 +192,8 @@ test("notification redaction respects current entity access and legacy /my fallb
   const original = structuredClone(items);
   const result = await scopeNotificationContent(engineer, items, db);
   assert.deepEqual(result[0], items[0]);
-  for (const index of [1, 2, 3]) {
+  assert.deepEqual(result[1], items[1]);
+  for (const index of [2, 3]) {
     assert.equal(result[index].title, "Список доступных задач обновлён");
     assert.equal(result[index].body, null);
     assert.equal(result[index].link, "/my");

@@ -12,12 +12,10 @@ export interface ProductPercentageStatusContext {
 
 export function decideProductPercentageStatus(roles: Role[], input: ProductPercentageStatusContext): { allowed: boolean; error?: string } {
   if (hasAnyRole(roles, MANAGER_ROLES)) return { allowed: true };
-  if (!hasRole(roles, "ENGINEER") || !input.assignedEngineer && !input.participant)
+  if (!hasRole(roles, "ENGINEER") || !input.assignedEngineer)
     return { allowed: false, error: "Недостаточно прав для изменения статуса изделия" };
-  if (input.from !== "DESIGN" || input.to !== "PRODUCTION")
-    return { allowed: false, error: "Инженер может передать изделие только из проектирования в производство" };
-  if (!input.hasB3d && !input.noModel)
-    return { allowed: false, error: "Для передачи изделия нужна модель B3D или отметка «Модели нет»" };
+  if (!["DESIGN", "PRODUCTION"].includes(input.from) || !["DESIGN", "PRODUCTION"].includes(input.to))
+    return { allowed: false, error: "Назначенный инженер может менять только проектирование и производство" };
   return { allowed: true };
 }
 

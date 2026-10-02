@@ -6,6 +6,7 @@ import { invokeProductPatch } from "@/lib/independent-product-action";
 import { normalizeProductDescription } from "@/lib/product-description";
 import { isUnchangedProductDescriptionDraft } from "@/lib/product-description-draft";
 import { resolvePhoneDependency } from "@/lib/inline-phone-dependency";
+import { flushProductStatusBarrier } from "@/lib/product-status-barrier";
 
 export type ProductInlineInitial = Record<ProductPatchField, InlineValue>;
 type Context = { controller: (field: ProductPatchField) => InlineSaveController; flush: () => Promise<boolean>; registerGuard: (key: string, guard: () => Promise<boolean>) => () => void; derived: ProductPatchDerived; clientId: string; sourceClientId: string };
@@ -74,12 +75,7 @@ export function ProductInlineProvider({ productId, initial, children }: { produc
   }, [productId]);
   const value = useMemo<Context>(() => ({
     controller: field => { const controller = controllers.get(field); if (!controller) throw Error("Неизвестное поле изделия"); return controller; },
-    flush: async () => {
-      const saved = await Promise.all(["expectedPrice", "quantity", "engineerId"].map(field => controllers.get(field as ProductPatchField)!.flush()));
-      if (!saved.every(Boolean)) return false;
-      for (const guard of guards.current.values()) if (!await guard()) return false;
-      return true;
-    },
+    flush: () => flushProductStatusBarrier([...controllers.values()], [...guards.current.values()]),
     registerGuard: (key, guard) => { guards.current.set(key, guard); return () => { if (guards.current.get(key) === guard) guards.current.delete(key); }; },
     derived,
     clientId: derived.clientId ?? String(initial["project.clientId"]),
