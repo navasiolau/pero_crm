@@ -1,6 +1,8 @@
 "use server";
 
 import type { ProductPercentageKind } from "@prisma/client";
+import { patchProductPercentageCore } from "./patch-core";
+import type { ProductPercentagePatch,ProductPercentagePatchResult } from "./contracts";
 import { auth } from "@/auth";
 import { MANAGER_ROLES, hasAnyRole } from "@/lib/roles";
 import type { DomainActor } from "@/server/projects/core";
@@ -43,4 +45,13 @@ export async function retryProductPercentageAction(input: { productId: string; k
   const user = await actor();
   if (!hasAnyRole(user.roles, MANAGER_ROLES)) return { ok: false as const, error: "Недостаточно прав" };
   return answer(input.productId, () => settlePendingProductPercentage(input.productId, input.kind));
+}
+
+export async function patchProductPercentageAction(input:ProductPercentagePatch):Promise<ProductPercentagePatchResult>{
+  try {
+    const user=await actor();
+    const result=await withTaskTransaction(tx=>patchProductPercentageCore(user,input,tx));
+    if(result.ok&&!result.noOp&&!result.repeated)await revalidateProductPaths(input.productId).catch(()=>{});
+    return result;
+  }catch(error){return{ok:false,kind:"failure",error:error instanceof Error?error.message:"Не удалось сохранить оплату изделия"};}
 }

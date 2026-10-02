@@ -8,6 +8,16 @@ export interface ProductPercentageMemberView {
   amount: string | null;
 }
 export interface ProductPercentageSectionView {
+  currentRatePercent?: string | null;
+  assignee?: {userId:string;name:string;active:boolean;eligible:boolean} | null;
+  unitPrice?: string | null;
+  quantity?: number | null;
+  productTotal?: string | null;
+  calculationVersion?: 1 | 2;
+  workReview?: {workId:string;classification:"COVERED"|"INDEPENDENT"}[];
+  legacyWorkCandidates?: {id:string;title:string;paid:boolean;classification:"COVERED"|"INDEPENDENT"|null}[];
+  recipientCandidates?: {userId:string;name:string}[];
+  canReview?: boolean;
   kind: ProductPercentageKind;
   state: ProductPercentageState;
   hasConfiguration: boolean;

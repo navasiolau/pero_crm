@@ -11,6 +11,8 @@ import { changeProductStatusTransaction } from "../src/server/products/status-co
 import { getProductPercentageView } from "../src/server/product-percentage-pay/queries";
 import { splitTaskCore } from "../src/server/tasks/share-core";
 import { canSplitTask } from "../src/server/tasks/share-policy";
+import { patchProductPercentageCore } from "../src/server/product-percentage-pay/patch-core";
+import { randomUUID } from "node:crypto";
 import { taskShareFixture } from "./helpers/task-share-fixture";
 
 test("нулевая ставка допустима, null не является нулём", () => {
@@ -68,28 +70,33 @@ test("менеджер свободен; инженер имеет только 
   assert.equal(decideProductPercentageStatus(["WORKER", "MOUNTER"], { ...context, hasB3d: true }).allowed, false);
 });
 
-test("первый переход сохраняет нулевую цену и ставку как pending, а повтор не дублирует снимок", async () => {
+test("v2 первый переход фиксирует нулевой BYN расчёт без начисления, повтор не дублирует снимок", async () => {
   const saved: unknown[] = [];
+  const shares: unknown[] = [];
   const tx = {
     productPercentageCompletion: {
-      findUnique: async () => saved.length ? { state: "PENDING_FX" } : null,
+      findUnique: async () => saved.length ? { state: "SETTLED" } : null,
       create: async ({ data }: { data: unknown }) => { saved.push(data); return { id: "completion" }; },
     },
-    product: { findUnique: async () => ({ expectedPrice: { toString: () => "0.00" },
+    product: { findUnique: async () => ({ quantity: 3, engineer: { id: "engineer", name: "Инженер", active: true, roles: ["ENGINEER"] }, expectedPrice: { toString: () => "0.00" },
       project: { currency: "BYN" }, percentageConfigs: [{ ratePercent: { toString: () => "0.00" }, revision: 3,
         participants: [{ userId: "engineer", shareUnits: 1000000,
           user: { id: "engineer", name: "Инженер", active: true, roles: ["ENGINEER"] } }] }], stagePayPools: [] }) },
     orgSetting: { findUnique: async () => ({ value: "BYN" }) },
+    productPercentageCompletionShare: { create: async ({data}: {data: unknown}) => {shares.push(data); return {id: "share"};} },
+    payrollEntry: { create: async () => { throw Error("Zero amount must not create payroll"); } },
+    domainEvent: { create: async () => { throw Error("Zero amount must not create event"); } },
     changeLog: { create: async () => ({}) },
   } as unknown as Prisma.TransactionClient;
   const actor = { id: "manager", name: "Менеджер", roles: ["MANAGER" as const], source: "web" as const };
-  assert.equal(await captureProductPercentageCompletion(tx, actor, "p", "ENGINEERING", "PRODUCTION"), "PENDING_FX");
-  assert.equal(await captureProductPercentageCompletion(tx, actor, "p", "ENGINEERING", "DONE"), "PENDING_FX");
+  assert.equal(await captureProductPercentageCompletion(tx, actor, "p", "ENGINEERING", "PRODUCTION"), "SETTLED");
+  assert.equal(await captureProductPercentageCompletion(tx, actor, "p", "ENGINEERING", "DONE"), "SETTLED");
   assert.equal(saved.length, 1);
-  const snapshot = saved[0] as { priceSnapshot: unknown; ratePercentSnapshot: unknown; shares: { create: unknown[] } };
+  const snapshot = saved[0] as { priceSnapshot: unknown; ratePercentSnapshot: unknown; calculationVersion: number; quantitySnapshot: number; amount: string };
   assert.ok(snapshot.priceSnapshot);
   assert.ok(snapshot.ratePercentSnapshot);
-  assert.equal(snapshot.shares.create.length, 1);
+  assert.equal(snapshot.calculationVersion, 2); assert.equal(snapshot.quantitySnapshot, 3);
+  assert.equal(snapshot.amount, "0.00"); assert.equal(shares.length, 1);
 });
 
 test("null конфигурация фиксирует однократный пропуск без начисления", async () => {
@@ -97,7 +104,7 @@ test("null конфигурация фиксирует однократный п
   const tx = {
     productPercentageCompletion: { findUnique: async () => null,
       create: async ({ data }: { data: { state: string } }) => { state = data.state; return { id: "completion" }; } },
-    product: { findUnique: async () => ({ expectedPrice: null, project: { currency: "BYN" },
+    product: { findUnique: async () => ({ quantity: 3, expectedPrice: null, project: { currency: "BYN" },
       percentageConfigs: [], stagePayPools: [] }) },
     orgSetting: { findUnique: async () => ({ value: "BYN" }) },
     changeLog: { create: async () => ({}) },
@@ -107,22 +114,27 @@ test("null конфигурация фиксирует однократный п
   assert.equal(state, "SKIPPED_ONCE");
 });
 
-test("новая обычная сдельная работа после настройки не отменяет монтажный процент", async () => {
+test("v2 самостоятельная обычная работа сохраняет монтажный процент от цены всей партии", async () => {
   let savedState = "";
+  const payroll: {amount: string}[] = [];
   const tx = {
     productPercentageCompletion: { findUnique: async () => null,
       create: async ({ data }: { data: { state: string } }) => { savedState = data.state; return { id: "completion" }; } },
-    product: { findUnique: async () => ({ expectedPrice: { toString: () => "500" }, project: { currency: "BYN" },
+    product: { findUnique: async () => ({ id: "p", projectId: "project", quantity: 3, mounter: {id: "mounter", name: "Монтажник", active: true, roles: ["MOUNTER"]}, expectedPrice: { toString: () => "500" }, project: { currency: "BYN" },
       works: [{ id: "new-ordinary", paymentKind: "LEGACY" }],
-      percentageConfigs: [{ ratePercent: { toString: () => "10" }, revision: 2, reviewedLegacyWorkIds: [],
+      percentageConfigs: [{ ratePercent: { toString: () => "10" }, revision: 2, workReview: [{workId: "new-ordinary", classification: "INDEPENDENT"}],
         participants: [{ userId: "mounter", shareUnits: 1000000,
           user: { id: "mounter", name: "Монтажник", active: true, roles: ["MOUNTER"] } }] }], stagePayPools: [] }) },
     orgSetting: { findUnique: async () => ({ value: "BYN" }) },
+    work: {findMany: async () => [{id: "new-ordinary", title: "Обычная работа", tasks: []}]},
+    productPercentageCompletionShare: {create: async () => ({id: "share"})},
+    payrollEntry: {findMany: async () => [], create: async ({data}: {data: {amount: string}}) => {payroll.push(data); return {};}},
+    domainEvent: {create: async () => ({id: "event"})},
     changeLog: { create: async () => ({}) },
   } as unknown as Prisma.TransactionClient;
   const actor = { id: "manager", name: "Менеджер", roles: ["MANAGER" as const], source: "web" as const };
-  assert.equal(await captureProductPercentageCompletion(tx, actor, "p", "INSTALLATION", "DONE"), "PENDING_FX");
-  assert.equal(savedState, "PENDING_FX");
+  assert.equal(await captureProductPercentageCompletion(tx, actor, "p", "INSTALLATION", "DONE"), "SETTLED");
+  assert.equal(savedState, "SETTLED"); assert.equal(payroll.length, 1); assert.equal(payroll[0].amount, "150.00");
 });
 
 test("миграция сохраняет прежние финансовые таблицы и защищает пройденные этапы", () => {
@@ -147,7 +159,7 @@ test("старые инженерные endpoints отказывают до за
 
 function settlementHarness(price: string, rate: string) {
   const completedAt = new Date("2026-09-30T10:00:00.000Z");
-  const completion = { id: "completion", productId: "p", kind: "ENGINEERING", state: "PENDING_FX",
+  const completion = { id: "completion", calculationVersion: 1, productId: "p", kind: "ENGINEERING", state: "PENDING_FX",
     completedAt, completedById: "manager", priceSnapshot: { toString: () => price },
     ratePercentSnapshot: { toString: () => rate }, productCurrency: "BYN", payrollCurrency: "BYN",
     shares: [{ id: "share-a", userId: "a", userNameSnapshot: "А", shareUnits: 500000 },
@@ -219,44 +231,55 @@ test("смена валюты зарплаты блокируется pending/se
   await assert.doesNotReject(assertPercentagePayrollCurrencyChange(skipped, "USD"));
 });
 
-test("менеджер явно отмечает только неоплаченную монтажную работу вместе с прямыми долями", async () => {
+test("retired configure не классифицирует и не создаёт доли; новый patch назначает одного монтажника", async () => {
   const writes: string[] = [];
-  let paid = true;
+  const product = {id: "product", projectId: "project", engineerId: null, mounterId: null as string|null};
   const tx = {
-    user: { findMany: async () => [{ id: "mounter" }] },
-    product: { findUnique: async () => ({ id: "product", projectId: "project" }) },
-    productPercentageCompletion: { findUnique: async () => null },
-    productPercentageConfig: { findUnique: async () => null,
-      create: async () => { writes.push("config"); return { id: "config", revision: 1 }; } },
-    productPercentageParticipant: { createMany: async () => { writes.push("participant"); } },
-    work: { findMany: async () => [{ id: "work", productId: "product", projectId: "project", paymentKind: "LEGACY",
-      stagePayPoolId: null, poolWeightUnits: null, tasks: [{ id: "task", projectId: "project", productId: "product" }] }],
-      updateMany: async () => { writes.push("classification"); } },
-    payrollEntry: { findFirst: async () => paid ? { id: "paid" } : null },
-    changeLog: { create: async () => { writes.push("audit"); } },
+    product: {findUnique: async () => product, update: async ({data}: {data: {mounterId: string|null}}) => {writes.push("assignee"); Object.assign(product,data); return product;}},
+    user: {findUnique: async () => ({active: true, roles: ["MOUNTER"]})},
+    productPercentageConfig: {findUnique: async () => null, create: async () => {writes.push("config"); return {id: "cfg",revision:1};}},
+    changeLog: {findUnique: async () => null, create: async () => {writes.push("audit"); return {}; }},
+    work: {updateMany: async () => {throw Error("No classification writer");}},
+    productPercentageParticipant: {createMany: async () => {throw Error("No participant writer");}},
   } as unknown as Prisma.TransactionClient;
   const actor = { id: "manager", name: "Менеджер", roles: ["MANAGER" as const], source: "web" as const };
-  const input = { productId: "product", kind: "INSTALLATION" as const, ratePercent: "5", expectedRevision: 0,
-    installationWorkIds: ["work"], reviewedLegacyWorks: true };
-  await assert.rejects(configureProductPercentageCore(actor, { ...input, reviewedLegacyWorks: false }, tx), /Подтвердите просмотр/);
-  assert.deepEqual(writes, []);
-  await assert.rejects(configureProductPercentageCore(actor, input, tx), /уже есть начисление/);
-  assert.deepEqual(writes, []);
-  paid = false;
-  assert.deepEqual(await configureProductPercentageCore(actor, input, tx), { revision: 1 });
-  assert.deepEqual(writes, ["classification", "config", "audit"]);
+  const old = {productId:"product",kind:"INSTALLATION" as const,ratePercent:"5",expectedRevision:0,participants:[{userId:"mounter",shareUnits:1000000}],installationWorkIds:["work"]};
+  for(const reviewedLegacyWorks of [false,true]) {
+    await assert.rejects(configureProductPercentageCore(actor,{...old,reviewedLegacyWorks},tx),/одиночное поле/);
+    assert.deepEqual(writes,[]);
+  }
+  const result=await patchProductPercentageCore(actor,{productId:"product",kind:"INSTALLATION",field:"assigneeId",value:"mounter",expectedValue:null,expectedRevision:0,clientMutationId:randomUUID()},tx);
+  assert.equal(result.ok,true); if(result.ok) assert.equal(result.revision,1);
+  assert.equal(product.mounterId,"mounter"); assert.deepEqual(writes,["assignee","config","audit"]);
 });
 
-test("старый transfer entrypoint не перераспределяет participants", async () => {
-  const actor = { id: "a", name: "А", roles: ["ENGINEER" as const], source: "web" as const };
-  const tx = new Proxy({}, { get: () => { throw new Error("Retired transfer must not access database"); } }) as Prisma.TransactionClient;
-  await assert.rejects(transferProductPercentageCore(actor, { productId: "p", kind: "ENGINEERING",
-    toUserId: "b", percentOfOwnShare: "10", expectedRevision: 2 }, tx), /больше недоступна/);
+test("v2 покрытая уже оплаченная монтажная работа защищает прежнее начисление без нового payroll", async () => {
+  const completionRows: {state: string; amount?: unknown}[] = [];
+  const tx = {
+    productPercentageCompletion: {findUnique: async () => null, create: async ({data}: {data: {state: string; amount?: unknown}}) => {completionRows.push(data); return {id:"completion"};}},
+    product: {findUnique: async () => ({id:"p",projectId:"project",quantity:3,expectedPrice:"500",project:{currency:"BYN"},mounter:{id:"m",name:"Монтажник",active:true,roles:["MOUNTER"]},stagePayPools:[],percentageConfigs:[{ratePercent:"10",workReview:[{workId:"w",classification:"COVERED"}]}]})},
+    work: {findMany: async () => [{id:"w",title:"Оплаченная работа",tasks:[{id:"task",projectId:"project",productId:"p"}]}]},
+    payrollEntry: {findMany: async () => [{workId:null,taskId:"task"}],create: async () => {throw Error("Paid covered work must not accrue twice");}},
+    productPercentageCompletionShare: {create: async () => ({id:"share"})},
+    domainEvent: {create: async () => {throw Error("Protected history must not emit new earning");}},
+    changeLog: {create: async () => ({})},
+  } as unknown as Prisma.TransactionClient;
+  const actor = {id:"manager",name:"Менеджер",roles:["MANAGER" as const],source:"web" as const};
+  assert.equal(await captureProductPercentageCompletion(tx,actor,"p","INSTALLATION","DONE"),"LEGACY_PROTECTED");
+  assert.equal(completionRows.length,1); assert.equal(completionRows[0].amount,undefined);
+});
+
+test("retired transfer отказывает до любых операций для владельца доли и посторонней роли", async () => {
+  const tx = new Proxy({}, {get() {throw Error("Retired transfer must not read or write");}}) as Prisma.TransactionClient;
+  const actor = {id:"a",name:"А",roles:["ENGINEER" as const],source:"web" as const};
+  const input={productId:"p",kind:"ENGINEERING" as const,toUserId:"b",percentOfOwnShare:"10",expectedRevision:2};
+  await assert.rejects(transferProductPercentageCore(actor,input,tx),/больше недоступна/);
+  await assert.rejects(transferProductPercentageCore({...actor,roles:["WORKER"]},input,tx),/больше недоступна/);
 });
 
 test("единый статусный handler сохраняет manager DONE с двумя terminal snapshots и проверяет B3D инженеру", async () => {
   const product = { id: "p", projectId: "project", number: "1.1", title: "Изделие", status: "DESIGN",
-    engineerId: "engineer", noModel: false, expectedPrice: null, files: [] as { id: string }[],
+    quantity: 3, engineerId: "engineer", noModel: false, expectedPrice: null, files: [] as { id: string }[],
     percentageConfigs: [], stagePayPools: [], project: { currency: "BYN" } };
   const completions: { kind: string; state: string }[] = [];
   const writes: string[] = [];
@@ -290,27 +313,29 @@ test("после SKIPPED_ONCE менеджер настраивает ставк
     priceSnapshot: null, ratePercentSnapshot: null };
   const original = structuredClone(completion);
   const product = { id: "p", projectId: "project", number: "1.1", title: "Изделие", status: "DESIGN",
-    engineerId: "engineer", noModel: false, expectedPrice: "500", files: [], percentageConfigs: [],
+    quantity: 3, engineerId: "engineer", noModel: false, expectedPrice: "500", files: [], percentageConfigs: [],
     stagePayPools: [], project: { currency: "BYN" } };
   let configCreated = 0, snapshotsCreated = 0, payrollCreated = 0;
+  let config: {id: string; revision: number; ratePercent: string} | null = null;
   const tx = {
     user: { findMany: async () => [{ id: "engineer" }] },
     product: { findUnique: async () => product, update: async ({ data }: { data: { status: string } }) => {
       product.status = data.status; return product; } },
     productPercentageCompletion: { findUnique: async () => completion,
       create: async () => { snapshotsCreated++; return completion; } },
-    productPercentageConfig: { findUnique: async () => null,
-      create: async () => { configCreated++; return { id: "cfg", revision: 1 }; } },
+    productPercentageConfig: { findUnique: async () => config,
+      create: async ({data}: {data: {ratePercent: string}}) => { configCreated++; config = { id: "cfg", revision: 1, ratePercent: data.ratePercent }; return config; },
+      update: async ({data}: {data: {ratePercent: string}}) => { config = {...config!,ratePercent:data.ratePercent,revision:config!.revision+1}; return config; } },
     productPercentageParticipant: { createMany: async () => ({}) },
     task: { findFirst: async () => null },
     productStatusHistory: { create: async () => ({}) },
     payrollEntry: { create: async () => { payrollCreated++; return {}; } },
-    changeLog: { create: async () => ({}) },
+    changeLog: { findUnique: async () => null, create: async () => ({}) },
     domainEvent: { create: async () => ({ id: "event" }) },
   } as unknown as Prisma.TransactionClient;
   const actor = { id: "manager", name: "Менеджер", roles: ["MANAGER" as const], source: "web" as const };
-  assert.deepEqual(await configureProductPercentageCore(actor, { productId: "p", kind: "ENGINEERING",
-    ratePercent: "10", participants: [{ userId: "engineer", shareUnits: 1000000 }], expectedRevision: 0 }, tx), { revision: 1 });
+  const patched = await patchProductPercentageCore(actor, {productId:"p",kind:"ENGINEERING",field:"ratePercent",value:"10",expectedValue:null,expectedRevision:0,clientMutationId:randomUUID()},tx);
+  assert.equal(patched.ok,true); if(patched.ok) assert.equal(patched.revision,1);
   for (const status of ["PRODUCTION", "DESIGN", "PRODUCTION"] as const) {
     const result = await changeProductStatusTransaction(tx, actor, "p", status);
     assert.equal(result.ok, true);
@@ -321,7 +346,12 @@ test("после SKIPPED_ONCE менеджер настраивает ставк
   for (const state of ["PENDING_FX", "SETTLED", "LEGACY_PROTECTED"] as const) {
     completion.state = state;
     await assert.rejects(configureProductPercentageCore(actor, { productId: "p", kind: "ENGINEERING",
-      ratePercent: "10", participants: [{ userId: "engineer", shareUnits: 1000000 }], expectedRevision: 0 }, tx), /снимок нельзя изменить/);
+      ratePercent: "10", participants: [{ userId: "engineer", shareUnits: 1000000 }], expectedRevision: 0 }, tx), /одиночное поле/);
+    const before = structuredClone(completion);
+    const revision = config!.revision;
+    const result = await patchProductPercentageCore(actor,{productId:"p",kind:"ENGINEERING",field:"ratePercent",value:String(10+revision),expectedValue:config!.ratePercent,expectedRevision:revision,clientMutationId:randomUUID()},tx);
+    assert.equal(result.ok,true); assert.deepEqual(completion,before);
+    assert.equal(snapshotsCreated,0); assert.equal(payrollCreated,0);
   }
 });
 
@@ -329,7 +359,7 @@ test("SKIPPED editor показывает позднюю конфигураци�
   const database = {
     task: { findMany: async () => [] },
     productPercentageParticipant: { findMany: async () => [] },
-    product: { findFirst: async () => ({ id: "p", noModel: false, engineerId: "old", engineer: { name: "Старый" },
+    product: { findFirst: async () => ({ id: "p", quantity: 3, noModel: false, engineerId: "new", engineer: { name: "Новый",active: true,roles:["ENGINEER"] },
       expectedPrice: { toString: () => "500" }, project: { currency: "USD" }, files: [], works: [], stagePayPools: [],
       percentageConfigs: [{ kind: "ENGINEERING", revision: 1, ratePercent: { toString: () => "10" },
         participants: [{ userId: "new", shareUnits: 1000000, user: { name: "Новый" } }] }],
@@ -344,8 +374,9 @@ test("SKIPPED editor показывает позднюю конфигураци�
   const section = view.sections.ENGINEERING;
   assert.equal(section.state, "SKIPPED_ONCE"); assert.equal(section.canManage, true); assert.equal(section.canTransfer, false);
   assert.equal(section.ratePercent, "10"); assert.equal(section.price, "500");
-  assert.equal(section.productCurrency, "USD"); assert.equal(section.payrollCurrency, null); assert.equal(section.total, "50.00");
-  assert.deepEqual(section.members.map((member) => [member.userId, member.shareUnits, member.amount]), [["new", 1000000, "50.00"]]);
+  assert.equal(section.productCurrency, "USD"); assert.equal(section.payrollCurrency, null); assert.equal(section.total, null);
+  assert.equal(section.currentRatePercent,"10"); assert.equal(section.assignee?.userId,"new");
+  assert.deepEqual(section.members.map((member) => [member.userId, member.shareUnits, member.amount]), [["old", 1000000, null]]);
   assert.equal(section.skippedSnapshot?.price, "100"); assert.equal(section.skippedSnapshot?.ratePercent, "5");
   assert.equal(section.skippedSnapshot?.productCurrency, "BYN");
   assert.deepEqual(section.skippedSnapshot?.members.map((member) => member.userId), ["old"]);

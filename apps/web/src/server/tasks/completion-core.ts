@@ -1,3 +1,4 @@
+import { isEffectivelyCoveredWork } from "@/server/product-percentage-pay/work-coverage";
 import { assertInternalCurrency, assertProjectMoneyCurrency } from "@/lib/internal-currency";
 import type { Prisma } from "@prisma/client";
 import { fileVisibilityWhere, hasFullProjectVisibility, resolveVisibilityActor, taskExecutionWhere } from "@/server/access/visibility";
@@ -86,8 +87,11 @@ export async function changeTaskStatusCore(actor: DomainActor, taskId: string, t
       // Инженерный фонд начисляется целиком при передаче изделия в производство.
       // Старые monetary snapshots конвертированной работы не являются её оплатой.
       if (doneAt && task.assigneeId && task.work && task.work.paymentKind === "LEGACY") {
+        if(task.work.projectId!==task.projectId||task.work.productId!==task.productId)throw new CompletionError("Работа и задача относятся к разным изделиям или проектам");
+        const historicalMoney=!!task.allocationGroupId||task.shareAmount!=null||String(task.executorShare)!=="1";
+        const covered=!historicalMoney&&task.productId!==null&&await isEffectivelyCoveredWork(tx,task.work.id,task.productId,task.projectId);
         const assignee = await tx.user.findUnique({ where: { id: task.assigneeId }, select: { name: true, payScheme: true } });
-        if (assignee?.payScheme === "PIECE" && !await tx.payrollEntry.findFirst({ where: { taskId: task.id, scheme: "PIECE" }, select: { id: true } })) {
+        if (!covered && assignee?.payScheme === "PIECE" && !await tx.payrollEntry.findFirst({ where: { taskId: task.id, scheme: "PIECE" }, select: { id: true } })) {
           if (task.work.priceSnapshot === null) throw new CompletionError("Не задана расценка обычной работы");
           const amount = taskPieceAmount(task, task.work.priceSnapshot);
           if (moneyAtoms(amount) > BigInt(0)) {

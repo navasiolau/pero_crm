@@ -9,7 +9,7 @@ import { notifyOrg } from "@/server/notifications/notify";
 import { revalidateProductPaths } from "./revalidate";
 import { listProductOptions } from "./queries";
 import { withTaskTransaction } from "@/server/tasks/transaction";
-import { settlePendingProductPercentage } from "@/server/product-percentage-pay/core";
+import { settlePendingProductPercentage, deliverProductPercentageEffects } from "@/server/product-percentage-pay/core";
 import { changeProductStatusTransaction } from "./status-core";
 import { createProductCore, updateProductCore, deleteProductCore, patchProductCore, type CreateProductInput, type UpdateProductInput, type ProductUpdateBaseline } from "./core";
 import { malformedProductPatch, productPatchSchema, type ProductPatch, type ProductPatchResult } from "./patch-contract";
@@ -71,12 +71,13 @@ export async function changeProductStatus(
       { id: session.user.id, name: session.user.name ?? "", roles: session.user.roles, source: "web" },
       productId, toStatus, comment));
     if (!result.ok) return result;
-    let financeState: FinanceState = null;
+    await deliverProductPercentageEffects(result.percentageEffects, productId, session.user.id).catch(()=>{});
+    let financeState: FinanceState = result.percentageEffects.earnings.length ? "SETTLED" : null;
     for (const kind of result.captured) {
       let current: FinanceState;
       try { current = await settlePendingProductPercentage(productId, kind); }
       catch { current = "PENDING_FX"; }
-      financeState = current === "PENDING_FX" || financeState === "PENDING_FX" ? "PENDING_FX" : current;
+      financeState = current === "PENDING_FX" || (financeState as FinanceState) === "PENDING_FX" ? "PENDING_FX" : current;
     }
     if (result.eventId) {
       await dispatchEvent(result.eventId).catch(() => {});

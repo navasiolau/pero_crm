@@ -11,7 +11,7 @@ let failPool = false;
 const users = [{ id: "engineer", roles: ["ENGINEER"], active: true }, { id: "worker", roles: ["WORKER"], active: true }, { id: "inactive", roles: ["ENGINEER"], active: false }];
 function reset() { state = { products: [], pools: [], completions: [], history: [], logs: [], events: [] }; failPool = false; }
 function seed(status = "DESIGN", poolState = "DRAFT") {
-  state.products.push({ id: "product", projectId: "project", number: "1.1", suffixInt: 1, title: "Product", engineerId: "engineer", expectedPrice: "100", status, noModel: false });
+  state.products.push({ id: "product", projectId: "project", number: "1.1", suffixInt: 1, title: "Product", quantity: 1, engineerId: "engineer", expectedPrice: "100", status, noModel: false });
   state.pools.push({ id: "pool", productId: "product", kind: "ENGINEERING", state: poolState, revision: 0 });
 }
 function product(where: Row) {
