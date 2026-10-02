@@ -11,3 +11,6 @@ DirectESLint stopped missingeslint-plugin-react-hooks insharedpinneddependencies
 Root-authorized existing pinned lint helper resolves sharedplugin withoutinstall/config/purge: ownedtargets PASS0errors/3warnings; newbarrier/helper/provider/test subset PASS0/0. DirectTypeScriptPASS. Initialmissingplugin result remains historical, notcurrentblocker.
 
 Statusbarrier review found unconditional cleancontrollerflush. Provider now reuses clean-aware helper for allcontrollers then runs allregisteredguards; no readonly role bypass. RED1fail→GREEN2 behaviourtests showcleanreadonly fields neverPOST, dirtytechnicaldraft awaited, error/conflict/saving prevents transition, percentageguard false blocks. StatusACL4+barrier2 PASS6, earlierrelated55PASS. Root runtime/stage task3.2 remainsunchecked; no widepixelQA/source37financialchanges.
+# Clean Percentage Guard Follow-up
+
+После объединения с №36 группа процентных полей также пропускает чистые контроллеры. Два новых теста подтверждают сохранение idle без POST, ожидание dirty технического поля и отказ при ошибке dirty процента. Совместно с барьером и прежними controller tests выполнено 11/11; typecheck и scoped lint PASS. Исходный RED выявлял лишний clean flush/state, а не выдуманный сетевой отказ.
