@@ -21,18 +21,18 @@ const hash=data=>createHash('sha256').update(data).digest('hex');
 
 async function child(command,args,{input,env=process.env,cwd=web}={}){
  const proc=spawn(command,args,{windowsHide:true,cwd,env,stdio:['pipe','pipe','pipe']});
- const buffers=[];let bytes=0;
+ const buffers=[],errors=[];let bytes=0,errorBytes=0;
  proc.stdout.on('data',chunk=>{bytes+=chunk.length;if(bytes<1024*1024)buffers.push(chunk);});
- proc.stderr.resume(); // Ошибки зависимостей могут включать секретное окружение.
+ proc.stderr.on('data',chunk=>{errorBytes+=chunk.length;if(errorBytes<1024*1024)errors.push(chunk);});
  proc.stdin.on('error',()=>{});
  const done=new Promise((resolve,reject)=>{proc.on('error',()=>reject(new Error('ACCEPTANCE_PROCESS_START_FAILED')));proc.on('close',code=>resolve(code));});
  proc.stdin.end(input);
  const code=await done;
  if(bytes>=1024*1024)throw new Error('ACCEPTANCE_OUTPUT_LIMIT');
- return {code,stdout:Buffer.concat(buffers).toString('utf8')};
+ return {code,stdout:Buffer.concat(buffers).toString('utf8'),privateStderr:Buffer.concat(errors)};
 }
 async function bundle(entry){
- const result=await build({entryPoints:[path.join(here,entry)],bundle:true,write:false,platform:'node',format:'esm',target:'node22',packages:'external',logLevel:'silent',tsconfig:path.join(web,'tsconfig.json')});
+ const result=await build({entryPoints:[path.join(here,entry)],bundle:true,write:false,platform:'node',format:'esm',target:'node22',external:['@prisma/client'],minify:true,logLevel:'silent',tsconfig:path.join(web,'tsconfig.json')});
  return Buffer.from(result.outputFiles[0].contents);
 }
 let remoteWrapper;
@@ -62,7 +62,12 @@ async function execute(code,op,input){
    ...(input?{CRM_STAGING_BROWSER_INPUT:Buffer.from(JSON.stringify(input)).toString('base64')}:{})};
   execution=await child(process.execPath,[file],{env});
  }
- let decoded;try{decoded=JSON.parse(execution.stdout);}catch{throw new Error('ACCEPTANCE_JSON_REQUIRED');}
+ let decoded;try{decoded=JSON.parse(execution.stdout);}catch{
+  await writeFile(path.join(outputDir,'transport.stderr.private.log'),execution.privateStderr,{mode:0o600});
+  await writeFile(path.join(outputDir,'transport.stdout.private.log'),execution.stdout,{mode:0o600});
+  await writeFile(path.join(outputDir,'transport-diagnostic.json'),JSON.stringify({exitCode:execution.code,stdoutBytes:Buffer.byteLength(execution.stdout),stderrBytes:execution.privateStderr.length}));
+  throw new Error('ACCEPTANCE_JSON_REQUIRED');
+ }
  const body=target==='staging'?decoded.result:decoded;
  if(execution.code!==0){
   const code=decoded.code??body?.code??'ACCEPTANCE_FAILED';

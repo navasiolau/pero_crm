@@ -159,6 +159,10 @@ def main():
         try:
             body = json.loads(result.stdout)
         except (ValueError, UnicodeError):
+            if b"ERR_MODULE_NOT_FOUND" in result.stderr or b"Cannot find module" in result.stderr:
+                raise Refused("ACCEPTANCE_MODULE_DEPENDENCY_MISSING") from None
+            if b"NATIVE_PROBE_STOP" in result.stderr:
+                raise Refused("NATIVE_PROBE_STOP_ROLLED_BACK") from None
             raise Refused("ACCEPTANCE_JSON_REQUIRED") from None
         print(json.dumps({"identity": before, "bundleSha256": packet["bundleSha256"],
                           "operation": operation, "exitCode": result.returncode, "result": body}))
