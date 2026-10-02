@@ -2,6 +2,7 @@ import type { NextAuthConfig } from "next-auth";
 
 import { ADMIN_ROLES, ADVANCE_ROLES, FINANCE_ROLES, hasAnyRole } from "@/lib/roles";
 import { homePathForRoles } from "@/lib/home-route";
+import { canAccessSettingsPath } from "@/lib/settings-access";
 
 // Общие route/session callbacks. Единственный экземпляр Auth.js в auth.ts
 // добавляет обязательную проверку актуального пользователя из БД.
@@ -32,7 +33,10 @@ export const authConfig = {
       if (pathname.startsWith("/advances") && !hasAnyRole(roles, ADVANCE_ROLES)) {
         return Response.redirect(new URL("/", request.nextUrl));
       }
-      const adminOnlyPrefixes = ["/changelog", "/settings"];
+      if (pathname.startsWith("/settings") && !canAccessSettingsPath(roles, pathname)) {
+        return Response.redirect(new URL("/", request.nextUrl));
+      }
+      const adminOnlyPrefixes = ["/changelog"];
       const isAdminOnly = adminOnlyPrefixes.some((prefix) =>
         pathname.startsWith(prefix),
       );

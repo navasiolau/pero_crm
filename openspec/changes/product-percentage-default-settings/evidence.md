@@ -1,0 +1,7 @@
+# Evidence — Local Source42 / Runtime Pending
+
+Feature42 fresh02d7db1, user direct approval. GenericOrgSetting productPercentageDefaults strictJSON/revision uses no schema/migration/dependency. Observed creation semantics absentconfigs => effectiveALLNULL. Newcreate readsone snapshot inexistingTX andnestedcreatesALL3configsrevision1, evennoassignee; createaudit recordsdefaultsrevision/rates. CurrentexistingProduct/configs/immutablepay are notupdated. Configurednonnull rates retain BYNguard forlegacyforeign project; missingNULL defaults preserve oldnonmoneycreation semantics.
+
+MeaningfulRED: actualnewProductcore had missingpercentageConfigs; actualmanagernav lackedscopedroute. GREEN focusednewsettings/create/auth and priorcreation regressions28/28PASS, directTypeScriptPASS, pinnedscopedESLint0errors/0warnings. Tests cover0/NULL/bounds/0.1, managerunion/nonmanager/foreignreceipt/noop/CAS/replay/auditerror escapesrollbackcallback, corruptstoredsettingsfailclosed, changedfuturedefaults/nooldmutation, actualauthcallback exactmanagerroute withotheradmin/finance denied. Initialmissingnewmodule testfailure alsorecorded as scaffolding, notclaimed3behaviourRED.
+
+Three olderDIcreatefixtures adapted missingdefaultOrgSetting/exactpayrollkey; no production fallback guesses. Logs `.playwright-mcp/round2/defaults-tests.private.log` and `lint-details.private.log`. Runtime/browser/build/deployedstage remainroot, task3.2unchecked. No41widget edits/Git/DB/runtime/SSH/prod/restic/dumps/newDB/seed/reset byworker.

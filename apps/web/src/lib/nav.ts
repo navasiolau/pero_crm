@@ -56,6 +56,7 @@ export const navItems: NavItem[] = [
   { href: "/warehouse", label: "Склад", icon: Warehouse, roles: OFFICE_ROLES, group: "manage" },
   { href: "/finance", label: "Финансы", icon: Banknote, roles: FINANCE_ROLES, group: "manage" },
   { href: "/changelog", label: "Журнал", icon: History, roles: ADMIN_ROLES, group: "manage" },
+  { href: "/settings/product-percentages", label: "Проценты изделий", icon: Settings, roles: MANAGER_ROLES, group: "manage" },
   { href: "/settings", label: "Настройки", icon: Settings, roles: ADMIN_ROLES, group: "manage" },
 ];
 

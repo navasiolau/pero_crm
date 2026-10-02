@@ -18,6 +18,7 @@ function fixture(eligible = true, initialPrice: string | null = null) {
   const tx = { $queryRaw: async () => [],
     product: { findMany: async()=>[], create:async({data}:{data:Record<string,unknown>})=>({id:'created',...data}), findFirst: async () => product, findUnique: async () => product,
       update: async ({ data }: { data: object }) => Object.assign(product, Object.fromEntries(Object.entries(data).map(([key,value])=>[key,typeof value === "object" && value !== null && "toFixed" in value ? String(value) : value]))) },
+    orgSetting: { findUnique: async () => null },
     project: { findUnique: async () => ({ id: "j", number: "1", currency: "BYN", clientId: "new" }) },
     client: { findUnique: async () => ({ id: "new", name: "New Client", phone: "999", lastName: null, middleName: null }) },
     user: { findFirst: async () => ({ id: "e", name: "Engineer" }), findUnique: async () => ({ id: "e", name: "Engineer", roles: ["ENGINEER"], active: true }) },

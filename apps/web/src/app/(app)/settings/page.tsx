@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/card";
 
 const sections = [
+  { href: "/settings/product-percentages", icon: Wallet, title: "Проценты изделий", description: "Стандартные ставки новых изделий: инженер, сборщик и монтажник" },
   {
     href: "/settings/users",
     icon: Users,
