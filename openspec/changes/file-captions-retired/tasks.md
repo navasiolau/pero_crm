@@ -13,4 +13,4 @@
 ## 3. Verification
 
 - [x] 3.1 Выполнить targeted regression/typecheck/scoped lint; записать фактические результаты без runtime claims.
-- [ ] 3.2 Root выполнить обычный merge34 и совокупную runtime/visual33–38 на фактически развёрнутой ревизии; production исключён.
+- [x] 3.2 Root выполнить обычный merge34 и совокупную runtime/visual33–38 на фактически развёрнутой ревизии; production исключён.

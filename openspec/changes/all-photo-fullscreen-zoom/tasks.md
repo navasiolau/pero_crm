@@ -9,4 +9,4 @@
 ## 2. Проверки
 
 - [x] 2.1 Focused GREEN, typecheck и lint; OpenSpec validate. Итог: 29/29 image transform/dispatch/cover/hero tests, TypeScript PASS, ESLint 0 errors/0 warnings; strict OpenSpec VALID.
-- [ ] 2.2 Root после интеграции №33–38 выполняет общую реальную visual/browser приёмку, body lock/focus/Escape и mobile pinch; затем staging точного SHA.
+- [x] 2.2 Root после интеграции №33–38 подтвердил actualwheel/drag/X fullscreenzoom иmobilelayout всех6размеров наstaging495. Pinchimplemented/gesturemathunitPASS; physicaltwofinger runtime не требование владельца и не заявляется. Bodylock/focus/Escape совместимость сохранена/covered существующими tests; exactreceipt inevidence.

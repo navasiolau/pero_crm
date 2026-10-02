@@ -55,7 +55,7 @@ export function finalUploadOwned(fields,file,fixture,cases){
  const allowed=item.cover?['projectId','productId','category','assignCover','expectedSketchFileId','clientMutationId']:['projectId','productId','category','stage','caption'];
  return Object.keys(fields).every(key=>allowed.includes(key))&&(item.cover?fields.assignCover==='1'&&fields.expectedSketchFileId==='null'&&UUID.test(fields.clientMutationId??''):!fields.assignCover);
 }
-async function decodeFinalAction({body,status,headers,compact}){
+export async function decodeFinalAction({body,status,headers,compact}){
  assert.equal(require('next/package.json').version,'15.5.20','FINAL_FLIGHT_VERSION_STOP');
  const bytes=Buffer.from(body),metadata=new Headers(headers);assert.ok(status===200&&bytes.length<(compact?24000:2*1024*1024)&&metadata.get('content-type')?.startsWith('text/x-component')&&!metadata.has('x-action-redirect')&&metadata.get('x-nextjs-action-not-found')!=='1','FINAL_FLIGHT_BOUNDARY_STOP');
  const inert=()=>{throw Error('FINAL_OBSERVER_EXECUTION_STOP')},exports=new Proxy(Object.create(null),{get(_target,key){if(key==='then')return undefined;if(key==='__esModule')return true;return inert}}),info={id:'final-inert',chunks:[],name:'*',async:false};
