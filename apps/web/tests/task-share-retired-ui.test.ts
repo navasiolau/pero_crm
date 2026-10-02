@@ -16,8 +16,8 @@ test("percentage settings cannot launch transfer or change participant allocatio
  const source=readFileSync("src/app/(app)/products/[id]/product-percentage-panel.tsx","utf8");
  assert.equal(/transferProductPercentageShareAction|transferShare|addParticipant|removeParticipant|Добавить участника|Передать долю/.test(source),false);
  assert.equal(/participants:\s*configuredShares/.test(source),false);
- assert.match(source,/Прежнее начисление, только история/);
- assert.match(source,/shareUnitsToPercentageText\(row.shareUnits\)/);
+ assert.doesNotMatch(source,/Сохранённый результат этапа|Прежнее начисление, только история/);
+ assert.doesNotMatch(source,/shareUnitsToPercentageText\(row.shareUnits\)/);
 });
 
 test("stale split dialog is inert for every role/combined role even when old projection says canSplit",()=>{
