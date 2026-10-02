@@ -13,7 +13,7 @@ test("new percentage snapshot rejects foreign project before snapshot/audit writ
   let writes = 0;
   const tx = {
     productPercentageCompletion: { findUnique: async () => null, create: async () => { writes++; return { id: "new" }; } },
-    product: { findUnique: async () => ({ expectedPrice: "1000", project: { currency: "USD" }, percentageConfigs: [{ ratePercent: "5", participants: [{ userId: "m", shareUnits: 1000000, user: { id: "m", name: "M", active: true, roles: ["MOUNTER"] } }] }], stagePayPools: [] }) },
+    product: { findUnique: async () => ({ quantity: 3, expectedPrice: "1000", mounterId: "m", mounter: { id: "m", name: "M", active: true, roles: ["MOUNTER"] }, project: { currency: "USD" }, percentageConfigs: [{ ratePercent: "5" }], stagePayPools: [] }) },
     orgSetting: { findUnique: async () => ({ value: "BYN" }) },
     changeLog: { create: async () => { writes++; } },
   } as unknown as Prisma.TransactionClient;

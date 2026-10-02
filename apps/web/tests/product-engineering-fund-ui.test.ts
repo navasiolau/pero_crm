@@ -58,7 +58,7 @@ test("request id falls back to cryptographic random bytes when randomUUID is una
   assert.match(createRequestId(random), /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
 });
 
-test("full component is read-only for non-manager, paid and non-design products", () => {
+test("fund component remains readonly even for management and old editable draft flags", () => {
   // tsx's test transform uses classic JSX for existing UI primitives that rely on Next's injected React runtime.
   const runtime = globalThis as typeof globalThis & { React?: typeof React };
   const previous = runtime.React;
@@ -70,10 +70,8 @@ test("full component is read-only for non-manager, paid and non-design products"
     assert.doesNotMatch(render(view({ state: "SETTLED", amount: "1.00" }), true), /Сохранить ставку|Добавить инженерную работу/);
     assert.doesNotMatch(render(view({ productStatus: "PRODUCTION" }), true), /Сохранить ставку|Добавить инженерную работу/);
     const editable = render(view(), true);
-    assert.match(editable, /Сохранить ставку|Включить фонд/);
-    assert.match(editable, /min-h-12/);
+    assert.doesNotMatch(editable, /Сохранить ставку|Включить фонд|Добавить инженерную работу|Подтвердить и начислить|Сохранить доли задач/);
     assert.match(editable, /min-w-0/);
-    assert.match(editable, /Тип задачи:.*Проектирование/);
   } finally { runtime.React = previous; }
 });
 

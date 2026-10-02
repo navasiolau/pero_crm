@@ -82,6 +82,7 @@ model User {
   updatedAt       DateTime       @updatedAt
   managedProjects Project[]      @relation("ProjectManager")
   engineeredProducts Product[]   @relation("ProductEngineer")
+  mountedProducts Product[]      @relation("ProductMounter")
   surveyedProducts Product[]    @relation("ProductSurveyor")
   assignedTasks   Task[]         @relation("TaskAssignee")
   notifications   Notification[]
@@ -95,6 +96,7 @@ model User {
   stageSettlementShares ProductStageSettlementShare[] @relation("StageSettlementShareUser")
   percentageParticipants ProductPercentageParticipant[]
   percentageCompletionShares ProductPercentageCompletionShare[]
+  percentageCompletions ProductPercentageCompletion[] @relation("PercentageCompletionRecipient")
 }
 
 // ─── Проекты и клиенты (фаза 2, §6) ──────────────────────────────────────────
@@ -248,6 +250,8 @@ model Product {
   // «В работе» (§10)
   engineerId       String?
   engineer         User?        @relation("ProductEngineer", fields: [engineerId], references: [id], onDelete: SetNull)
+  mounterId        String?
+  mounter          User?        @relation("ProductMounter", fields: [mounterId], references: [id], onDelete: SetNull)
   noModel          Boolean      @default(false)
   surveyorId       String? // замерщик — сотрудник, произведший замер (legacy f4061)
   surveyor         User?        @relation("ProductSurveyor", fields: [surveyorId], references: [id], onDelete: SetNull)
@@ -274,6 +278,7 @@ model Product {
   @@index([projectId, suffixInt])
   @@index([status, statusChangedAt])
   @@index([engineerId])
+  @@index([mounterId])
 }
 
 model ProductStatusHistory {
@@ -493,6 +498,7 @@ model ProductPercentageConfig {
   ratePercent Decimal?              @db.Decimal(5, 2)
   revision    Int                   @default(0)
   reviewedLegacyWorkIds String[]    @default([])
+  workReview Json?
   participants ProductPercentageParticipant[]
   createdAt   DateTime              @default(now())
   updatedAt   DateTime              @updatedAt
@@ -523,6 +529,11 @@ model ProductPercentageCompletion {
   completedById  String?
   statusAtCompletion ProductStatus
   reason         String?
+  calculationVersion Int                         @default(1)
+  quantitySnapshot Int?
+  totalSnapshot Decimal?                         @db.Decimal(18, 2)
+  recipientId String?
+  recipient User? @relation("PercentageCompletionRecipient", fields: [recipientId], references: [id], onDelete: Restrict)
   priceSnapshot  Decimal?                         @db.Decimal(12, 2)
   ratePercentSnapshot Decimal?                    @db.Decimal(5, 2)
   productCurrency String

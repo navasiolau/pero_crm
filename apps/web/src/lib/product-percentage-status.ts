@@ -23,7 +23,7 @@ export function decideProductPercentageStatus(roles: Role[], input: ProductPerce
 
 export function percentageCompletionKinds(from: ProductStatus, to: ProductStatus, manager: boolean): ("ENGINEERING" | "INSTALLATION")[] {
   const kinds: ("ENGINEERING" | "INSTALLATION")[] = [];
-  if ((from === "DESIGN" || from === "RECLAMATION") &&
+  if ((manager || from === "DESIGN" || from === "RECLAMATION") &&
     (["PRODUCTION", "DELIVERY", "INSTALLATION", "DONE"] as ProductStatus[]).includes(to)) kinds.push("ENGINEERING");
   if (to === "DONE" && manager) kinds.push("INSTALLATION");
   return kinds;

@@ -1,6 +1,6 @@
-import type { PrismaClient, Role } from "@prisma/client";
+import { Prisma, type PrismaClient, type Role } from "@prisma/client";
 import type { ProductPercentageView, ProductPercentageSectionView } from "@/lib/product-percentage-view";
-import { allocatePercentageShares, calculateProductCurrencyPercentage } from "@/lib/product-percentage-pay";
+import { readWorkReview } from "./contracts";
 import { hasAnyRole, MANAGER_ROLES } from "@/lib/roles";
 import { prisma } from "@/lib/prisma";
 import { hasFullProjectVisibility, productVisibilityWhere, resolveVisibilityActor } from "@/server/access/visibility";
@@ -10,7 +10,7 @@ export async function getProductPercentageView(actor: { id: string; roles: Role[
   database: Reader = prisma): Promise<ProductPercentageView> {
   const visibilityActor = await resolveVisibilityActor(database, actor);
   const product = await database.product.findFirst({ where: { AND: [{ id: productId }, productVisibilityWhere(visibilityActor)] },
-    include: { project: { select: { currency: true } }, engineer: { select: { name: true } },
+    include: { project: { select: { currency: true } }, engineer: { select: { id:true, name: true, active:true, roles:true } }, mounter: { select: { id:true,name:true,active:true,roles:true } },
       percentageConfigs: { include: { participants: { include: { user: { select: { name: true } } } } } },
       percentageCompletions: { include: { shares: true } },
       stagePayPools: { where: { kind: "ENGINEERING" }, include: { settlement: true } },
@@ -37,38 +37,42 @@ export async function getProductPercentageView(actor: { id: string; roles: Role[
     const editableAfterSkip = completion?.state === "SKIPPED_ONCE";
     const displayCompletion = editableAfterSkip ? null : completion;
     const pool = kind === "ENGINEERING" ? product.stagePayPools.at(0) : null;
-    let draftAmounts = new Map<string, string>();
-    let draftTotal: string | null = null;
-    if ((!completion || editableAfterSkip) && config?.ratePercent !== null && config?.ratePercent !== undefined && product.expectedPrice !== null) {
-      try {
-        const total = calculateProductCurrencyPercentage(product.expectedPrice.toString(), config.ratePercent.toString());
-        draftAmounts = new Map(allocatePercentageShares(total,
-          config.participants.map((row) => ({ userId: row.userId, shareUnits: row.shareUnits })))
-          .map((row) => [row.userId, row.amount]));
-        draftTotal = total;
-      } catch { /* неполная конфигурация не становится расчётом */ }
+    const assigneeUser = kind === "ENGINEERING" ? product.engineer : product.mounter;
+    const assignee = assigneeUser ? {userId:kind === "ENGINEERING" ? product.engineerId! : product.mounterId!,name:assigneeUser.name,active:assigneeUser.active,eligible:assigneeUser.roles?.includes(kind === "ENGINEERING" ? "ENGINEER" : "MOUNTER") ?? false} : null;
+    const quantity=Number.isSafeInteger(product.quantity)&&product.quantity>0?product.quantity:null;
+    const productTotal=product.expectedPrice!==null&&quantity!==null?new Prisma.Decimal(product.expectedPrice.toString()).mul(quantity).toFixed(2):null;
+    let draftTotal:string|null=null;
+    if(!completion&&product.project.currency==="BYN"&&pool?.state!=="SETTLED"&&pool?.state!=="LEGACY_PROTECTED"&&config?.ratePercent!==null&&config?.ratePercent!==undefined){
+      const rate=new Prisma.Decimal(config.ratePercent.toString());
+      if(rate.isZero())draftTotal="0.00";
+      else if(productTotal!==null&&assignee?.active&&assignee.eligible)draftTotal=new Prisma.Decimal(productTotal).mul(rate).div(100).toFixed(2,Prisma.Decimal.ROUND_HALF_UP);
     }
+    const review=readWorkReview(config?.workReview);
     const legacyPaidSummary = financeView && pool?.settlement
       ? { amount: pool.settlement.amount.toString(), currency: pool.settlement.payrollCurrency, count: 1 } : null;
-    const members = displayCompletion?.shares.length
-      ? displayCompletion.shares.map((row) => ({ userId: row.userId, name: row.userNameSnapshot, shareUnits: row.shareUnits,
-          amount: row.amount?.toString() ?? null }))
-      : config?.participants.map((row) => ({ userId: row.userId, name: row.user.name, shareUnits: row.shareUnits,
-          amount: draftAmounts.get(row.userId) ?? null }))
-        ?? (kind === "ENGINEERING" && product.engineerId && product.engineer
-          ? [{ userId: product.engineerId, name: product.engineer.name, shareUnits: 1000000, amount: null }] : []);
+    const members = completion ? completion.shares.map(row=>({userId:row.userId,name:row.userNameSnapshot,shareUnits:row.shareUnits,amount:row.amount?.toString()??null}))
+      : assignee ? [{userId:assignee.userId,name:assignee.name,shareUnits:1000000,amount:draftTotal}] : [];
     const ownMember = members.find((row) => row.userId === actor.id) ?? null;
     const view: ProductPercentageSectionView = {
       hasConfiguration: Boolean(config),
+      currentRatePercent: financeView ? config?.ratePercent?.toString()??null : null,
+      assignee,
+      unitPrice: financeView ? completion ? completion.priceSnapshot?.toString()??null : product.expectedPrice?.toString()??null : null,
+      quantity: completion ? completion.quantitySnapshot??null : quantity,
+      productTotal: financeView ? completion ? completion.totalSnapshot?.toString()??null : productTotal : null,
+      calculationVersion: completion?.calculationVersion===2 ? 2 : completion ? 1 : 2,
+      workReview: manager ? review : [], canReview: manager&&!completion&&kind==="INSTALLATION",
+      legacyWorkCandidates: manager&&kind==="INSTALLATION" ? product.works.filter(work=>work.paymentKind==="LEGACY").map(work=>({id:work.id,title:work.title,paid:paid.some(entry=>entry.workId===work.id||work.tasks.some(task=>task.id===entry.taskId)),classification:review.find(row=>row.workId===work.id)?.classification??null})) : [],
+      recipientCandidates: manager ? (kind==="ENGINEERING"?engineers:mounters).map(user=>({userId:user.id,name:user.name})) : [],
       kind, state: completion?.state ?? (pool?.state === "SETTLED" || pool?.state === "LEGACY_PROTECTED" ? "LEGACY_PROTECTED" : "DRAFT"),
-      ratePercent: financeView ? (displayCompletion?.ratePercentSnapshot ?? config?.ratePercent)?.toString() ?? null : null,
-      price: financeView ? (displayCompletion?.priceSnapshot ?? product.expectedPrice)?.toString() ?? null : null,
+      ratePercent: financeView ? displayCompletion ? displayCompletion.ratePercentSnapshot?.toString()??null : config?.ratePercent?.toString()??null : null,
+      price: financeView ? displayCompletion ? displayCompletion.priceSnapshot?.toString()??null : product.expectedPrice?.toString()??null : null,
       productCurrency: displayCompletion?.productCurrency ?? product.project.currency,
       payrollCurrency: displayCompletion?.payrollCurrency ?? null,
       total: financeView ? displayCompletion?.amount?.toString() ?? draftTotal : null,
       members: financeView ? members : ownMember ? [ownMember] : [], revision: config?.revision ?? 0,
-      canManage: manager && (!completion || completion.state === "SKIPPED_ONCE"),
-      canTransfer: !completion && !!ownMember,
+      canManage: manager,
+      canTransfer: false,
       ownMember, legacyPaidSummary,
       skippedSnapshot: editableAfterSkip && financeView ? { completedAt: completion.completedAt.toISOString(), reason: completion.reason,
         price: completion.priceSnapshot?.toString() ?? null, ratePercent: completion.ratePercentSnapshot?.toString() ?? null,
@@ -86,9 +90,7 @@ export async function getProductPercentageView(actor: { id: string; roles: Role[
               : work.stagePayPoolId !== null || work.poolWeightUnits !== null ? "Связана со старым фондом" : null }; }) : [],
       classifiedInstallationWorkIds: kind === "INSTALLATION" && manager ? product.works
         .filter((work) => work.paymentKind === "INSTALLATION").map((work) => work.id) : [],
-      transferCandidates: !completion && (manager || !!ownMember) ? (kind === "ENGINEERING" ? engineers : mounters)
-        .filter((user) => user.id !== actor.id)
-        .map((user) => ({ userId: user.id, name: user.name })) : [],
+      transferCandidates: [],
     };
     return [kind, view];
   })) as ProductPercentageView["sections"];

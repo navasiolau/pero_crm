@@ -79,6 +79,7 @@ export function taskShareFixture(productStatus: "DESIGN" | "PRODUCTION" = "PRODU
       findFirst: async ({ where }: { where: Row }) => filtered(state.users, where)[0] ?? null,
       findMany: async ({ where }: { where?: Row } = {}) => filtered(state.users, where),
     },
+    productPercentageConfig: { findMany: async () => [] },
     work: {
       findUnique: async ({ where }: { where: Row }) => { const row = filtered(state.works, where)[0]; return row ? { ...row, tasks: state.tasks.filter((task) => task.workId === row.id) } : null; },
       delete: async ({ where }: { where: Row }) => { write("work.delete"); const row = filtered(state.works, where)[0]; state.works = state.works.filter((work) => work !== row); return row; },
