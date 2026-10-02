@@ -26,13 +26,16 @@ function details(canManage: boolean, canEditTech: boolean, showAmount: boolean, 
     measurement: createElement("p", null, "Замер"), engineer: createElement("p", null, "Инженер и процент"),
   }) }));
 }
-test("основные поля сохраняют количество → описание → замер → цена → инженер после Header", () => {
+test("цена, количество и сумма в общей группе перед описанием → замером → инженером", () => {
   const html = details(true, true, true);
-  const markers = ["product-inline-quantity", "product-inline-description", "Замер", "product-inline-price", "Инженер и процент"];
+  const markers = ["product-inline-price", "product-inline-quantity", "Сумма:", "product-inline-description", "Замер", "Инженер и процент"];
   const positions = markers.map(marker => html.indexOf(marker));
   assert.ok(positions.every(position => position >= 0));
   assert.deepEqual([...positions].sort((a, b) => a - b), positions);
-  assert.match(html, /37[,.]5 BYN/);
+  const groupStart=html.indexOf("data-product-price-quantity");
+  assert.ok(groupStart>=0&&positions.slice(0,3).every(position=>position>groupStart&&position<positions[3]));
+  assert.match(html, /Цена, BYN/);
+  assert.match(html, /Сумма:\s*37[,.]5 BYN/);
   assert.doesNotMatch(html, /Замерщик|Вид изделия|Первоначальная цена/);
 });
 test("перенос полей сохраняет readonly и самостоятельное право технического блока", () => {
@@ -44,11 +47,11 @@ test("перенос полей сохраняет readonly и самостоя�
   assert.match(engineer, /id="product-inline-quantity"[^>]*readOnly=""/);
   assert.doesNotMatch(engineer, /id="product-inline-description"[^>]*readOnly=""/);
 });
-test("пустая цена остаётся пустой, сумма партии не превращается в нулевую стоимость", () => {
+test("пустая цена остаётся пустой, Сумма: — не превращается в нулевую стоимость", () => {
   const html = details(true, true, true, null);
   assert.match(html, /id="product-inline-price"[^>]*value=""/);
-  assert.match(html, /Сумма партии<\/div>—/);
-  assert.doesNotMatch(html, /Сумма партии<\/div>0/);
+  assert.match(html, /Сумма:\s*—/);
+  assert.doesNotMatch(html, /Сумма:\s*0/);
 });
 test("контакты клиента readonly и используют данные Client, не Project.address", () => {
   // eslint-disable-next-line react/no-children-prop -- provider requires children in its typed props
