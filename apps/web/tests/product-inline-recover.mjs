@@ -1,4 +1,4 @@
-// Explicit root recovery only. No browser requests, guessed writes, or guard bypass.
+// Explicit root V2 recovery only. Failed V1 runs require the dedicated reconciliation driver. No browser requests, guessed writes, or guard bypass.
 import {readFile,writeFile,realpath,lstat} from 'node:fs/promises';
 import path from 'node:path';
 import {qaTransport,qaBundle,acceptanceRoot} from './crm-acceptance-transport.mjs';
@@ -15,10 +15,10 @@ async function main(){
  for(const item of [acceptanceRoot,path.join(acceptanceRoot,'.playwright-mcp'),base,outputDir]){const info=await lstat(item);requireThat(info.isDirectory()&&!info.isSymbolicLink(),'RECOVERY_REPARSE_PATH_STOP');requireThat(normalize(await realpath(item))===normalize(path.resolve(item)),'RECOVERY_CANONICAL_PATH_STOP');}
  async function json(name){const file=path.join(outputDir,name);const info=await lstat(file);requireThat(info.isFile()&&!info.isSymbolicLink(),'RECOVERY_FILE_SCOPE_STOP');requireThat(normalize(await realpath(file))===normalize(file),'RECOVERY_FILE_CANONICAL_STOP');return JSON.parse(await readFile(file,'utf8'));}
  const fixture=await json('fixture-checkpoint.json');const session=await json('session-checkpoint.json');const journal=await json('product-inline-owned-writes.json');const requests=await json('product-inline-request-journal.json');
- requireThat(fixture.target===target&&uuid(fixture.runId)&&fixture.namespace==='PERO_PRODUCT_INLINE_BROWSER_FIXTURES_V1','RECORDED_FIXTURE_SCOPE_MISMATCH');
+ requireThat(fixture.target===target&&uuid(fixture.runId)&&fixture.namespace==='PERO_PRODUCT_INLINE_BROWSER_FIXTURES_V2','RECORDED_FIXTURE_SCOPE_MISMATCH');
  requireThat(Array.isArray(journal.ownWrites)&&Array.isArray(journal.preferenceOwnWrites)&&Array.isArray(requests),'CAPTURED_JOURNALS_REQUIRED');
  const actorIds=Object.values(fixture.actors).map(actor=>actor.id);const products=[fixture.ids.productA,fixture.ids.productB];const mutations=new Set();
- for(const write of journal.ownWrites){requireThat(actorIds.includes(write.actorId)&&products.includes(write.productId)&&uuid(write.clientMutationId),'CAPTURED_WRITE_SCOPE_MISMATCH');if(!write.noOp)mutations.add(write.clientMutationId);}
+ for(const write of journal.ownWrites){requireThat(actorIds.includes(write.actorId)&&products.includes(write.productId),'CAPTURED_WRITE_SCOPE_MISMATCH');if(write.type==='status'){requireThat(write.saved===true&&write.toStatus==='RECLAMATION'&&write.clientMutationId===undefined,'CAPTURED_STATUS_SCOPE_MISMATCH');continue;}requireThat(uuid(write.clientMutationId),'CAPTURED_WRITE_SCOPE_MISMATCH');if(!write.noOp)mutations.add(write.clientMutationId);}
  // A response durably captured before the ownWrites callback is still direct
  // success evidence. Never authorize pending/intended/failed request snapshots.
  for(const request of requests){if(request.type!=='patch'||request.phase!=='response-captured'||request.httpStatus!==200||request.result?.kind!=='saved')continue;

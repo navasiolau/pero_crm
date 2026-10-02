@@ -8,7 +8,7 @@ import { formatAmount } from "@/lib/format";
 export function ProductInlineTitle({ number, canManage }: { number: string; canManage: boolean }) {
   const { controller } = useProductInline();
   const title = controller("title");
-  const state = useSyncExternalStore(title.subscribe, title.getSnapshot, title.getSnapshot);
+  const state = useSyncExternalStore(title.subscribe, title.getSnapshot, title.getServerSnapshot);
   return <div className="min-w-0 flex-1"><h1 className="sr-only">{number} · {state.draft}</h1><span className="text-sm text-muted-foreground">{number}</span><InlineTextField id="product-inline-title" label="Название изделия" inputClassName="h-auto text-lg font-semibold" controller={title} readOnly={!canManage} /></div>;
 }
 export function ProductInlineDetails({ canManage, canEditTech, showAmount, currency, clients, engineers, inheritedAddress, surveyor, project, initialPrice }: {
@@ -16,11 +16,11 @@ export function ProductInlineDetails({ canManage, canEditTech, showAmount, curre
 }) {
   const { controller, sourceClientId } = useProductInline();
   const client = controller("project.clientId");
-  const selectedClient = useSyncExternalStore(client.subscribe, client.getSnapshot, client.getSnapshot);
+  const selectedClient = useSyncExternalStore(client.subscribe, client.getSnapshot, client.getServerSnapshot);
   const addressHint = inheritedAddress && selectedClient.baseline === sourceClientId && selectedClient.draft === sourceClientId ? `Адрес клиента: ${inheritedAddress}` : "Общий адрес для всех изделий проекта.";
   const price = controller("expectedPrice"); const quantity = controller("quantity");
-  const p = useSyncExternalStore(price.subscribe, price.getSnapshot, price.getSnapshot);
-  const q = useSyncExternalStore(quantity.subscribe, quantity.getSnapshot, quantity.getSnapshot);
+  const p = useSyncExternalStore(price.subscribe, price.getSnapshot, price.getServerSnapshot);
+  const q = useSyncExternalStore(quantity.subscribe, quantity.getSnapshot, quantity.getServerSnapshot);
   let total: string | null = null;
   if (/^\d{1,10}(?:[.,]\d{1,2})?$/.test(p.draft.trim()) && /^\d{1,10}$/.test(q.draft) && Number(q.draft) >= 1 && Number(q.draft) <= 2_147_483_647) {
     const [units, fraction = ""] = p.draft.replace(",", ".").split(".");

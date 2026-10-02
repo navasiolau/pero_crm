@@ -74,7 +74,7 @@ export function ProductPercentagePanel({
   const [noModelBusy, setNoModelBusy] = useState(false);
   const inline = useOptionalProductInline();
   const engineerController = inline?.controller("engineerId");
-  const acknowledgedEngineer = useSyncExternalStore(engineerController?.subscribe ?? noSubscribe, () => engineerController ? engineerController.getSnapshot().baseline : assignedEngineerId, () => assignedEngineerId);
+  const acknowledgedEngineer = useSyncExternalStore(engineerController?.subscribe ?? noSubscribe, () => engineerController ? engineerController.getSnapshot().baseline : assignedEngineerId, () => engineerController ? engineerController.getServerSnapshot().baseline : assignedEngineerId);
   const currentEngineerId = acknowledgedEngineer === null ? null : String(acknowledgedEngineer);
   useEffect(() => {
     if (inline) inline.registerGuard("percentage-no-model", async () => !noModelBusy);
@@ -183,7 +183,7 @@ function PercentageStageSection({
   const [error, setError] = useState<string | null>(null);
   const inline = useOptionalProductInline();
   const priceController = inline?.controller("expectedPrice");
-  const acknowledgedPrice = useSyncExternalStore(priceController?.subscribe ?? noSubscribe, () => priceController ? priceController.getSnapshot().baseline : section.price, () => section.price);
+  const acknowledgedPrice = useSyncExternalStore(priceController?.subscribe ?? noSubscribe, () => priceController ? priceController.getSnapshot().baseline : section.price, () => priceController ? priceController.getServerSnapshot().baseline : section.price);
   const displayPrice = projectedPercentagePrice(section.state, section.price, priceController && canViewAll ? acknowledgedPrice === null ? null : String(acknowledgedPrice) : undefined);
   useLayoutEffect(() => {
     if (canRebaseSuggestedParticipants({ state: section.state, hasConfiguration: section.hasConfiguration, previous: previousInitial.current, next: initial, participants, shares,
