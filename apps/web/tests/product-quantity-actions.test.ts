@@ -38,6 +38,7 @@ before(() => {
     project: { findUnique: async () => ({ id: "j", number: "900001", currency: "BYN" }) },
     orgSetting: { findUnique: async () => ({ value: "BYN" }) },
     task: { findMany: async () => [] },
+    changeLog: { create: async () => ({}) },
     priceItem: { findUnique: async () => ({ id: "price", name: "Сборка", price: "30", active: true }) },
     work: {
       findMany: async () => [structuredClone(state.work)],
@@ -73,7 +74,7 @@ beforeEach(() => { state = initial(); roles = ["MANAGER"]; locks.length = 0; });
 
 test("real product action changes both plans, never touches facts and takes allocation lock first", async () => {
   const facts = JSON.stringify(state.facts); const tasks = JSON.stringify(state.work.tasks);
-  assert.deepEqual(await products.updateProduct("p", { quantity: 6 }), { ok: true });
+  assert.deepEqual(await products.updateProduct("p", { quantity: 6 }, { quantity: 5 }), { ok: true });
   assert.equal(state.product.quantity, 6);
   assert.equal(state.work.quantity, "6.00"); assert.equal(state.work.total, "180.00");
   assert.equal(state.material.quantity, "24.000");
@@ -83,25 +84,25 @@ test("real product action changes both plans, never touches facts and takes allo
 });
 test("real action rejects partial reduction and keeps all rows byte-identical", async () => {
   const baseline = JSON.stringify(state);
-  const workFailure = await products.updateProduct("p", { quantity: 3 });
+  const workFailure = await products.updateProduct("p", { quantity: 3 }, { quantity: 5 });
   assert.equal(workFailure.ok, false); assert.match(workFailure.error!, /Сборка/);
   assert.equal(JSON.stringify(state), baseline);
   state.work.tasks = [];
   const second = JSON.stringify(state);
-  const materialFailure = await products.updateProduct("p", { quantity: 1 });
+  const materialFailure = await products.updateProduct("p", { quantity: 1 }, { quantity: 5 });
   assert.equal(materialFailure.ok, false); assert.match(materialFailure.error!, /Петли/);
   assert.equal(JSON.stringify(state), second);
 });
 test("real action permits reducing group of two participants to shared volume four", async () => {
-  assert.equal((await products.updateProduct("p", { quantity: 4 })).ok, true);
+  assert.equal((await products.updateProduct("p", { quantity: 4 }, { quantity: 5 })).ok, true);
   assert.equal(state.work.quantity, "4.00"); assert.equal(state.material.quantity, "16.000");
 });
 test("quantity action rejects forbidden role and malformed counts without writes", async () => {
   const baseline = JSON.stringify(state);
   roles = ["ENGINEER"];
-  assert.equal((await products.updateProduct("p", { quantity: 6 })).ok, false);
+  assert.equal((await products.updateProduct("p", { quantity: 6 }, { quantity: 5 })).ok, false);
   roles = ["MANAGER"];
-  for (const quantity of [0, -1, 1.5]) assert.equal((await products.updateProduct("p", { quantity })).ok, false);
+  for (const quantity of [0, -1, 1.5]) assert.equal((await products.updateProduct("p", { quantity }, { quantity: 5 })).ok, false);
   assert.equal(JSON.stringify(state), baseline);
 });
 test("real addWork action scales explicit unit norm and rejects stale total input", async () => {

@@ -2,7 +2,7 @@
  * root captures it privately; never echo or log. No business CRUD or new users.
  * CRM_STAGING_BROWSER_INPUT carries prepare/restore/inspect envelopes.
  * Checkpoint is immutable HMAC; ownWrites are actual successful response bytes.
- * Only projects.list and project.tab for existing admin/manager/combined/engineer.
+ * Only projects.list, project.tab and product.tab for existing admin/manager/combined/engineer.
  * Local and staging environment guards run before any Prisma connection.
  */
 import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
@@ -11,7 +11,7 @@ import { encode } from "@auth/core/jwt";
 
 const NAMESPACE = "PERO_CRM_MODERNIZATION_SESSION_V1";
 const MAX_INPUT = 96 * 1024;
-const PREF_KEYS = ["projects.list", "project.tab"];
+const PREF_KEYS = ["projects.list", "project.tab", "product.tab"];
 const PROFILE_KEYS = ["admin", "manager", "combined", "engineer"];
 const BUSINESS_TABLES = ["User", "Client", "Project", "Product", "Task", "Work", "File", "Payment", "Payout", "PayrollEntry", "Material", "ProjectMaterial", "StockMovement"];
 const AUDIT_TIME_TABLES = ["ChangeLog", "TimeEntry"];
@@ -115,11 +115,11 @@ function validateCheckpoint(checkpoint, secret) {
   }
   requireThat(new Set(ids).size === profileKeys.length, "DISTINCT_PROFILE_USERS_REQUIRED");
   const originals = checkpoint.originalPreferences;
-  requireThat(Array.isArray(originals) && originals.length === profileKeys.length * 2, "EXACT_ORIGINAL_PREFERENCE_SET_REQUIRED");
+  requireThat(Array.isArray(originals) && originals.length === profileKeys.length * PREF_KEYS.length, "EXACT_ORIGINAL_PREFERENCE_SET_REQUIRED");
   const seen = new Set();
   for (const row of originals) {
     requireThat(exactKeys(row, ["userId", "key", "value"]) && ids.includes(row.userId) && PREF_KEYS.includes(row.key), "ORIGINAL_PREFERENCE_NOT_ALLOWLISTED");
-    requireThat(row.value === null || (typeof row.value === "string" && row.value.length <= (row.key === "project.tab" ? 64 : 8192)), "ORIGINAL_PREFERENCE_VALUE_INVALID");
+    requireThat(row.value === null || (typeof row.value === "string" && row.value.length <= (row.key.endsWith(".tab") ? 64 : 8192)), "ORIGINAL_PREFERENCE_VALUE_INVALID");
     requireThat(!seen.has(preferenceId(row)), "DUPLICATE_ORIGINAL_PREFERENCE");
     seen.add(preferenceId(row));
   }
@@ -140,9 +140,10 @@ function validateOwnWrites(originals, ownWrites) {
   const writes = new Map();
   for (const row of ownWrites) {
     requireThat(exactKeys(row, ["userId", "key", "value"]) && allowed.has(preferenceId(row)), "OWN_WRITE_NOT_ALLOWLISTED");
-    requireThat(typeof row.value === "string" && row.value.length > 0 && row.value.length <= (row.key === "project.tab" ? 64 : 8192), "OWN_WRITE_VALUE_INVALID");
-    if (row.key === "project.tab") {
-      requireThat(["overview", "finance"].includes(row.value), "OWN_TAB_RESPONSE_VALUE_REQUIRED");
+    requireThat(typeof row.value === "string" && row.value.length > 0 && row.value.length <= (row.key.endsWith(".tab") ? 64 : 8192), "OWN_WRITE_VALUE_INVALID");
+    if (row.key.endsWith(".tab")) {
+      const allowed = row.key === "project.tab" ? ["overview", "finance"] : ["percentage", "engineering", "tasks", "materials", "files", "history"];
+      requireThat(allowed.includes(row.value), "OWN_TAB_RESPONSE_VALUE_REQUIRED");
     } else {
       let parsed;
       try { parsed = JSON.parse(row.value); } catch { throw new SafeFailure("OWN_WRITE_RESPONSE_VALUE_REQUIRED"); }
@@ -168,9 +169,10 @@ function buildRestorePlan(originals, writes, rows) {
   });
 }
 
-function describePreference(value) {
+function describePreference(value, key) {
   if (value === null) return { status: "MISSING", bytes: 0, sha256: null, revision: null, query: null, decodedQuery: null };
   const summary = { status: "INVALID_JSON", bytes: Buffer.byteLength(value, "utf8"), sha256: createHash("sha256").update(value).digest("hex"), revision: null, query: null, decodedQuery: null };
+  if (key?.endsWith(".tab")) return { ...summary, status: "RAW_TAB", value };
   if (value.length > 8192) return { ...summary, status: "OVERSIZED_NOT_DECODED" };
   let parsed;
   try { parsed = JSON.parse(value); } catch { return summary; }
@@ -186,6 +188,7 @@ function describePreference(value) {
 }
 
 function querySelectionInput(summary, legacyValue) {
+  if (summary.status === "RAW_TAB") return { source: "RAW_TAB", tabValue: summary.value, queryInput: null };
   if (summary.status === "VALID_V1") return { source: "LIST_V1_BEFORE_APP_NORMALIZATION", queryInput: summary.query };
   if (summary.status === "OVERSIZED_NOT_DECODED") return { source: "NOT_DECODED", queryInput: null };
   if (summary.status === "MISSING") return { source: legacyValue === "table" ? "CURRENT_LEGACY_TABLE" : "DEFAULT_OR_CURRENT_LEGACY_KANBAN", queryInput: legacyValue === "table" ? "view=table" : "view=kanban" };
@@ -203,9 +206,9 @@ function preferenceDiagnostics(checkpoint, writes, rows, legacyRows) {
     const last = hasRecorded ? writes.get(key) : null;
     const legacyKey = original.key.replace(/\.list$/, ".view");
     const legacyValue = legacy.get(preferenceId({ userId: original.userId, key: legacyKey })) ?? null;
-    const currentSummary = describePreference(value);
-    const originalSummary = describePreference(original.value);
-    const recordedSummary = hasRecorded ? describePreference(last) : null;
+    const currentSummary = describePreference(value, original.key);
+    const originalSummary = describePreference(original.value, original.key);
+    const recordedSummary = hasRecorded ? describePreference(last, original.key) : null;
     const equalOriginal = value === original.value;
     const equalRecorded = hasRecorded ? value === last : null;
     return {
@@ -327,7 +330,7 @@ async function prepare(db, secret) {
   // Conservative budget for every allowed key at the maximum response length.
   // URLSearchParams response queries are ASCII and never contain JSON quotes or
   // backslashes; the fixed JSON wrapper below overestimates their escaping cost.
-  const maximumWrites = source.originals.map(({ userId, key }) => ({ userId, key, value: key === "project.tab" ? "finance" : "x".repeat(8192) }));
+  const maximumWrites = source.originals.map(({ userId, key }) => ({ userId, key, value: key.endsWith(".tab") ? "x".repeat(64) : "x".repeat(8192) }));
   const restoreSkeleton = { operation: "restore", checkpoint, ownWrites: maximumWrites };
   requireThat(Buffer.byteLength(Buffer.from(JSON.stringify(restoreSkeleton)).toString("base64"), "ascii") <= MAX_INPUT, "CHECKPOINT_TOO_LARGE_FOR_PRIVATE_TRANSPORT");
   return {
@@ -353,7 +356,7 @@ async function restore(db, secret, checkpoint, ownWrites) {
     }
     const before = await snapshots(tx);
     requireThat(canonical(before) === canonical(checkpoint.baseline), "BUSINESS_AUDIT_OR_TIME_CHANGED_BEFORE_RESTORE");
-    // Lock only the six/eight exact preference keys. Missing rows are covered by the
+    // Lock only the nine/twelve exact preference keys. Missing rows are covered by the
     // serializable predicate; no unrelated rows or whole tables are locked.
     const sorted = [...originals].sort((a, b) => preferenceId(a).localeCompare(preferenceId(b)));
     const placeholders = sorted.map((_, i) => `($${i * 2 + 1},$${i * 2 + 2})`).join(",");

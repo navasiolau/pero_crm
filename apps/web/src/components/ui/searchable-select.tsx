@@ -22,6 +22,7 @@ export interface SearchableOption {
 // Выпадающий список с поиском: поле ввода над списком фильтрует значения.
 // Для длинных списков (клиенты, сотрудники), где скролл не масштабируется.
 export function SearchableSelect({
+  id,
   options,
   value,
   onChange,
@@ -32,6 +33,7 @@ export function SearchableSelect({
   allowClear,
   className,
 }: {
+  id?: string;
   options: SearchableOption[];
   value: string;
   onChange: (value: string) => void;
@@ -68,6 +70,7 @@ export function SearchableSelect({
       <PopoverTrigger
         render={
           <Button
+            id={id}
             variant="outline"
             disabled={disabled}
             className={cn("w-full justify-between font-normal", className)}

@@ -44,6 +44,10 @@ globalThis.fetch = async (input, options = {}) => {
     value = { ok: true, projects: [{ id: "project-205", number: "205", title: "Existing", stage: "NEW", currency: "BYN" }] };
   } else if (url.pathname === "/api/v1/bot/projects" && options.method === "POST") {
     value = { ok: true, number: "999" };
+  } else if (url.pathname === "/api/v1/bot/projects/205" && options.method === "GET") {
+    value = { project: { id: "205", number: "205", address: "Captured address" } };
+  } else if (url.pathname === "/api/v1/bot/projects/205" && options.method === "PATCH") {
+    value = { ok: true };
   } else if (url.pathname === "/api/v1/bot/payments") {
     value = { ok: true };
   } else {
@@ -135,4 +139,12 @@ test("physical payment currency remains selectable independently of project BYN"
   assert.equal(payment.body.currency, "USD");
   assert.equal(payment.body.amount, 100);
   assert.equal(payment.body.cashAccountId, "cash-usd");
+});
+
+test("address edit PATCH carries the genuine address captured when dialog opened", async () => {
+  const before = calls.length;
+  await handleUpdate(callback(5101, 501, "ed:205:address"));
+  await handleUpdate(message(5102, 501, "Changed address"));
+  const patch = calls.slice(before).find(call => call.method === "PATCH" && call.path === "/api/v1/bot/projects/205");
+  assert.ok(patch); assert.deepEqual(patch.body, { address: "Changed address", contactBaseline: { address: "Captured address" } });
 });

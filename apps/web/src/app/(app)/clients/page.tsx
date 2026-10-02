@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { OFFICE_ROLES, hasAnyRole } from "@/lib/roles";
+import { MANAGER_ROLES, OFFICE_ROLES, hasAnyRole } from "@/lib/roles";
 import { clientVisibilityWhere, projectVisibilityWhere, resolveVisibilityActor } from "@/server/access/visibility";
 
 import { ClientsView } from "./clients-view";
@@ -39,6 +39,7 @@ export default async function ClientsPage({
 
   return (
     <ClientsView
+      canManage={hasAnyRole(session.user.roles, MANAGER_ROLES)}
       focusClientId={focus}
       clients={clients.map((client) => ({
         id: client.id,

@@ -66,6 +66,7 @@ type Dialog =
       projectId: string;
       projectNumber: string;
       field: "title" | "address" | "initialPrice" | "manager";
+      expectedAddress?: string | null;
     };
 
 const dialogs = new Map<string, Dialog>();
@@ -669,7 +670,10 @@ async function editText(
       input = { title: text };
       break;
     case "address":
-      input = { address: text === "-" || text === "—" ? null : text };
+      if (!Object.prototype.hasOwnProperty.call(dialog, "expectedAddress")) {
+        setDialog(chatId, null); await reply(chatId, "Откройте адрес проекта заново: исходное значение отсутствует."); return;
+      }
+      input = { address: text === "-" || text === "—" ? null : text, contactBaseline: { address: dialog.expectedAddress } };
       break;
     case "initialPrice": {
       const value = text === "-" || text === "—" ? null : parseAmount(text);
@@ -837,7 +841,8 @@ async function dispatchCallback(
       address: "Новый адрес («—» — очистить):",
       initialPrice: "Новая первоначальная цена («—» — очистить):",
     };
-    setDialog(chatId, { kind: "edit", projectId, projectNumber, field });
+    if (field === "address" && !card.project) { await reply(chatId, "Проект не найден."); return; }
+    setDialog(chatId, { kind: "edit", projectId, projectNumber, field, ...(field === "address" ? { expectedAddress: card.project!.address } : {}) });
     await reply(chatId, `П-${projectNumber}. ${prompts[field]}`, [[CANCEL_BUTTON]]);
     return;
   }

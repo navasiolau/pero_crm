@@ -160,6 +160,7 @@ export async function createProjectCore(
 }
 
 export const updateProjectSchema = z.object({
+  contactBaseline: z.object({ address: z.string().nullable().optional(), clientId: z.string().min(1).optional() }).strict().optional(),
   title: z.string().min(1).optional(),
   currency: z.string().refine((value) => value === INTERNAL_CURRENCY, INTERNAL_CURRENCY_ERROR).optional(),
   address: z.string().nullable().optional(),
@@ -197,44 +198,52 @@ export async function updateProjectCore(
   requireActorRoles(actor, MANAGER_ROLES);
   const parsed = updateProjectSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "Ошибка данных" };
-  const data = parsed.data;
-
-  let before;
+  const { contactBaseline, ...data } = parsed.data;
+  let mutation;
   try {
-    before = await withTaskTransaction(async (tx) => {
+    mutation = await withTaskTransaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "Project" WHERE id = ${projectId} FOR UPDATE`;
       const current = await tx.project.findUnique({ where: { id: projectId } });
       if (!current) return null;
+      // Поля, неизменённые относительно подлинного baseline формы, не пишутся:
+      // они могли уже измениться через карточку другого изделия этого проекта.
+      for (const field of ["address", "clientId"] as const) {
+        const value = data[field];
+        if (value === undefined) continue;
+        if (Object.prototype.hasOwnProperty.call(contactBaseline ?? {}, field)) {
+          const expected = contactBaseline![field];
+          if (value === expected) { delete data[field]; continue; }
+          if (current[field] !== expected) throw new Error("Реквизиты проекта изменены другим пользователем — обновите форму");
+        } else {
+          if (value === current[field]) { delete data[field]; continue; }
+          throw new Error("Обновите форму: для изменения адреса или клиента требуется исходное значение");
+        }
+      }
+      if (data.clientId !== undefined) {
+        await tx.$queryRaw`SELECT id FROM "Client" WHERE id = ${data.clientId} FOR UPDATE`;
+        if (!await tx.client.findUnique({where:{id:data.clientId},select:{id:true}})) throw new Error("Клиент не найден");
+      }
       if ([data.initialPrice, data.delivery, data.unloading, data.installation].some((value) => value !== undefined)) assertProjectMoneyCurrency(data.currency ?? current.currency);
       if (data.currency !== undefined) {
         await assertProjectCurrencyChange(tx, projectId, data.currency);
         await assertPercentageProjectCurrencyChange(tx, projectId, data.currency);
       }
+      if (!Object.keys(data).length) return {current,noOp:true};
       await tx.project.update({ where: { id: projectId }, data });
-      return current;
+      await tx.changeLog.create({data:{actorType:"user",actorId:actor.id,actorName:actor.name||undefined,source:actor.source,
+        entity:"project",entityId:projectId,action:"update",
+        oldValue:JSON.parse(JSON.stringify(Object.fromEntries(Object.keys(data).map(key=>[key,current[key as keyof typeof current]])))),
+        newValue:JSON.parse(JSON.stringify(data))}});
+      if (data.address !== undefined || data.clientId !== undefined) await tx.domainEvent.create({data:{type:"project.updated",actor:actor.id,payload:{projectId,fields:Object.keys(data).filter(field=>field==="address"||field==="clientId")}}});
+      return {current,noOp:false};
     });
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "Не удалось изменить проект" };
   }
-  if (!before) return { ok: false, error: "Проект не найден" };
-
-  await writeChangeLog({
-    actorType: "user",
-    actorId: actor.id,
-    actorName: actor.name || undefined,
-    entity: "project",
-    entityId: projectId,
-    action: "update",
-    oldValue: Object.fromEntries(
-      Object.keys(data).map((k) => [k, before[k as keyof typeof before]]),
-    ),
-    newValue: data,
-    source: actor.source,
-  });
-  revalidatePath(`/projects/${projectId}`);
-  revalidatePath("/projects");
-  return { ok: true };
+  if (!mutation) return {ok:false,error:"Проект не найден"};
+  if (!mutation.noOp) {revalidatePath(`/projects/${projectId}`);revalidatePath("/projects");}
+  return {ok:true};
 }
-
 export interface StageExtras {
   refusalReason?: string;
   refusalComment?: string;

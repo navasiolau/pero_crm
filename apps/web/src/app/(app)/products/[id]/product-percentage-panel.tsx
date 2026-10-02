@@ -1,16 +1,18 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect, useRef, useLayoutEffect, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowRightLeft, RotateCcw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
+import { useOptionalProductInline } from "@/components/product-inline-provider";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SearchableSelect } from "@/components/ui/searchable-select";
+import { projectedPercentagePrice, projectedPercentageTotal, canRebaseSuggestedParticipants } from "@/lib/inline-percentage-projection";
 import { formatAmount } from "@/lib/format";
 import { assertPercentageShares, parsePercentageRate } from "@/lib/product-percentage-pay";
 import type { ProductPercentageKind } from "@/lib/product-percentage-pay";
@@ -38,6 +40,8 @@ import {
   setProductNoModelAction,
   transferProductPercentageShareAction,
 } from "@/server/product-percentage-pay/actions";
+
+const noSubscribe = () => () => {};
 
 const stageTitle: Record<ProductPercentageKind, string> = {
   ENGINEERING: "Инженерный этап",
@@ -68,6 +72,14 @@ export function ProductPercentagePanel({
 }) {
   const router = useRouter();
   const [noModelBusy, setNoModelBusy] = useState(false);
+  const inline = useOptionalProductInline();
+  const engineerController = inline?.controller("engineerId");
+  const acknowledgedEngineer = useSyncExternalStore(engineerController?.subscribe ?? noSubscribe, () => engineerController ? engineerController.getSnapshot().baseline : assignedEngineerId, () => assignedEngineerId);
+  const currentEngineerId = acknowledgedEngineer === null ? null : String(acknowledgedEngineer);
+  useEffect(() => {
+    if (inline) inline.registerGuard("percentage-no-model", async () => !noModelBusy);
+    // Сохраняем последний dirty/pending guard скрытой вкладки; открытие заменяет его.
+  }, [inline, noModelBusy]);
   const candidates: Record<ProductPercentageKind, ProductPercentageCandidate[]> = {
     ENGINEERING: engineers,
     INSTALLATION: mounters,
@@ -120,7 +132,7 @@ export function ProductPercentagePanel({
             productId={view.productId}
             kind={kind}
             section={view.sections[kind]}
-            assignedEngineerId={assignedEngineerId}
+            assignedEngineerId={currentEngineerId}
             canManage={canManage}
             canViewAll={canViewAll}
             candidates={candidates[kind]}
@@ -156,6 +168,7 @@ function PercentageStageSection({
     () => initialProductPercentageParticipants(kind, section, assignedEngineerId),
     [assignedEngineerId, kind, section],
   );
+  const previousInitial = useRef(initial);
   const [rate, setRate] = useState(section.ratePercent ?? "");
   const [participants, setParticipants] = useState(initial);
   const [shares, setShares] = useState<Record<string, string>>(
@@ -168,6 +181,19 @@ function PercentageStageSection({
   const [transferPercent, setTransferPercent] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const inline = useOptionalProductInline();
+  const priceController = inline?.controller("expectedPrice");
+  const acknowledgedPrice = useSyncExternalStore(priceController?.subscribe ?? noSubscribe, () => priceController ? priceController.getSnapshot().baseline : section.price, () => section.price);
+  const displayPrice = projectedPercentagePrice(section.state, section.price, priceController && canViewAll ? acknowledgedPrice === null ? null : String(acknowledgedPrice) : undefined);
+  useLayoutEffect(() => {
+    if (canRebaseSuggestedParticipants({ state: section.state, existingMemberCount: section.members.length, previous: previousInitial.current, next: initial, participants, shares,
+      otherDirty: rate !== (section.ratePercent ?? "") || Boolean(installationWorkIds.length || reviewedLegacyWorks || addUserId || transferUserId || transferPercent) })) {
+      setParticipants(initial);
+      setShares(Object.fromEntries(initial.map(row => [row.userId, shareUnitsToPercentageText(row.shareUnits)])));
+    }
+    previousInitial.current = initial;
+  }, [initial, section.state, section.members.length, section.ratePercent, participants, shares, rate, installationWorkIds.length, reviewedLegacyWorks, addUserId, transferUserId, transferPercent]);
+
 
   const shareRows = useMemo(() => participants.map((row) => {
     try {
@@ -196,6 +222,17 @@ function PercentageStageSection({
     sectionCanManage: section.canManage,
     state: section.state,
   });
+  const configDirty = managerCanEdit && (
+    rate !== (section.ratePercent ?? "") ||
+    JSON.stringify(participants) !== JSON.stringify(initial) ||
+    JSON.stringify(shares) !== JSON.stringify(Object.fromEntries(initial.map(row => [row.userId, shareUnitsToPercentageText(row.shareUnits)]))) ||
+    installationWorkIds.length > 0 || reviewedLegacyWorks || Boolean(addUserId || transferUserId || transferPercent)
+  );
+  useEffect(() => {
+    if (inline) inline.registerGuard(`percentage-${kind}`, async () => !busy && !error && !configDirty);
+    // Guard остаётся при смене вкладки: скрытый черновик не должен
+    // разрешать финансовый переход статуса.
+  }, [inline, kind, busy, error, configDirty]);
   const installationReviewRequired = needsInstallationLegacyReview(kind, section.requiresManagerReview);
   const reviewAcknowledged = installationLegacyReviewSatisfied(installationReviewRequired, reviewedLegacyWorks);
   const activeRows = section.state === "SETTLED" || section.state === "PENDING_FX" ? section.members : shareRows;
@@ -205,6 +242,7 @@ function PercentageStageSection({
   const addChoices = transferOptionsForKind(kind, candidates, "")
     .filter((option) => !participants.some((member) => member.userId === option.value));
   const previewRate = normalizedRate === undefined ? null : normalizedRate;
+  const displayTotal = projectedPercentageTotal(section.state, section.total, displayPrice, previewRate);
 
   async function perform(operation: () => Promise<{ ok: boolean; error?: string }>, success: string) {
     if (busy) return;
@@ -308,7 +346,7 @@ function PercentageStageSection({
         {error ? <p role="alert" className="break-words rounded-md border border-destructive/50 p-3 text-sm text-destructive">{error}</p> : null}
         {canViewAll ? (
           <div className="grid min-w-0 gap-2 text-sm sm:grid-cols-2">
-            <p>Цена изделия: {section.price === null ? "не задана" : formatAmount(section.price, section.productCurrency)}</p>
+            <p>Цена изделия: {displayPrice === null ? "не задана" : formatAmount(displayPrice, section.productCurrency)}</p>
             <p>Валюта зарплаты: {section.payrollCurrency ?? "будет зафиксирована при начислении"}</p>
           </div>
         ) : null}
@@ -316,7 +354,7 @@ function PercentageStageSection({
           {displayedRows.length ? displayedRows.map((row) => {
             const rowName = (row as { name?: unknown }).name;
             const name = participantNames.get(row.userId) ?? people.get(row.userId) ?? (typeof rowName === "string" ? rowName : null) ?? "Участник";
-            const preview = previewProductPercentageShare(section.price, previewRate, row.shareUnits);
+            const preview = previewProductPercentageShare(displayPrice, previewRate, row.shareUnits);
             const rowAmount = (row as { amount?: unknown }).amount;
             const savedAmount = typeof rowAmount === "string" ? rowAmount : null;
             const amount = displayProductPercentageMemberAmount(section.state, savedAmount, preview);
@@ -386,8 +424,8 @@ function PercentageStageSection({
               {shareRows.map((row) => (
                 <p key={row.userId} className="text-sm text-muted-foreground">
                   {people.get(row.userId) ?? participantNames.get(row.userId) ?? "Участник"}: {shareUnitsToPercentageText(row.shareUnits)}%
-                  {section.state === "DRAFT" && previewProductPercentageShare(section.price, previewRate, row.shareUnits) !== null
-                    ? ` · ≈ ${formatAmount(previewProductPercentageShare(section.price, previewRate, row.shareUnits), section.productCurrency)}`
+                  {section.state === "DRAFT" && previewProductPercentageShare(displayPrice, previewRate, row.shareUnits) !== null
+                    ? ` · ≈ ${formatAmount(previewProductPercentageShare(displayPrice, previewRate, row.shareUnits), section.productCurrency)}`
                     : ""}
                 </p>
               ))}
@@ -476,7 +514,7 @@ function PercentageStageSection({
           </div>
         ) : null}
 
-        {section.state === "DRAFT" && section.price === null && canViewAll ? (
+        {section.state === "DRAFT" && displayPrice === null && canViewAll ? (
           <p className="text-sm text-muted-foreground">Задайте цену изделия, чтобы увидеть предварительную сумму.</p>
         ) : null}
         {section.state === "SKIPPED_ONCE" ? (
@@ -511,8 +549,8 @@ function PercentageStageSection({
         {section.state === "SETTLED" && section.total !== null && canManage ? (
           <p className="rounded-md border bg-muted/30 p-3 text-sm font-medium">Начислено всего: {formatAmount(section.total, section.payrollCurrency ?? section.productCurrency)}</p>
         ) : null}
-        {section.state === "DRAFT" && section.total !== null && canViewAll ? (
-          <p className="rounded-md border bg-muted/30 p-3 text-sm font-medium">Предварительно по этапу: ≈ {formatAmount(section.total, section.productCurrency)}</p>
+        {section.state === "DRAFT" && displayTotal !== null && canViewAll ? (
+          <p className="rounded-md border bg-muted/30 p-3 text-sm font-medium">Предварительно по этапу: ≈ {formatAmount(displayTotal, section.productCurrency)}</p>
         ) : null}
       </CardContent>
     </Card>

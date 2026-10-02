@@ -50,9 +50,11 @@ const emptyForm = {
 export function ClientsView({
   clients,
   focusClientId,
+  canManage,
 }: {
   clients: ClientRow[];
   focusClientId?: string;
+  canManage: boolean;
 }) {
   const [pending, startTransition] = useTransition();
   const [editOpen, setEditOpen] = useState(false);
@@ -63,12 +65,14 @@ export function ClientsView({
   const [form, setForm] = useState(emptyForm);
 
   function openCreate() {
+    if (!canManage) return;
     setEditing(null);
     setForm(emptyForm);
     setEditOpen(true);
   }
 
   function openEdit(client: ClientRow) {
+    if (!canManage) return;
     setEditing(client);
     setForm({
       name: client.name,
@@ -130,7 +134,7 @@ export function ClientsView({
       id: "actions",
       header: "",
       sortValue: () => "",
-      cell: (row) => (
+      cell: (row) => canManage ? (
         <div className="text-right" onClick={(event) => event.stopPropagation()}>
           <Button
             size="icon"
@@ -141,7 +145,7 @@ export function ClientsView({
             <Pencil className="size-4" />
           </Button>
         </div>
-      ),
+      ) : null,
     },
   ];
 
@@ -154,9 +158,9 @@ export function ClientsView({
             Клик по строке — просмотр карточки клиента
           </p>
         </div>
-        <Button onClick={openCreate}>
+        {canManage ? <Button onClick={openCreate}>
           <Plus className="size-4" /> Клиент
-        </Button>
+        </Button> : null}
       </div>
 
       <DataTable
@@ -218,7 +222,7 @@ export function ClientsView({
             </div>
           ) : null}
           <DialogFooter>
-            <Button
+            {canManage ? <Button
               variant="outline"
               onClick={() => {
                 if (viewing) {
@@ -228,7 +232,7 @@ export function ClientsView({
               }}
             >
               <Pencil className="size-4" /> Редактировать
-            </Button>
+            </Button> : null}
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -304,7 +308,7 @@ export function ClientsView({
                     comment: form.comment.trim() || undefined,
                   };
                   const result = editing
-                    ? await updateClient(editing.id, payload)
+                    ? await updateClient(editing.id, payload, { name: editing.name, lastName: editing.lastName, middleName: editing.middleName, phone: editing.phone, email: editing.email, address: editing.address, comment: editing.comment })
                     : await createClient(payload);
                   if (result.ok) {
                     toast.success(editing ? "Сохранено" : "Клиент создан");
