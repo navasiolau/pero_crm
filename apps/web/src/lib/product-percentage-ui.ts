@@ -45,7 +45,7 @@ export function productStatusTargets(roles: readonly Role[], context: {
   if (MANAGER_ROLES.some((role) => roles.includes(role)))
     return PRODUCT_STATUSES.map((status) => status.id);
   return PRODUCT_STATUSES.map((status) => status.id).filter((to) =>
-    decideProductPercentageStatus([...roles], { ...context, to }).allowed,
+    to !== context.from && decideProductPercentageStatus([...roles], { ...context, to }).allowed,
   );
 }
 

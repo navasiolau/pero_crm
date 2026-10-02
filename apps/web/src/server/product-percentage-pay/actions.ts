@@ -8,7 +8,7 @@ import { MANAGER_ROLES, hasAnyRole } from "@/lib/roles";
 import type { DomainActor } from "@/server/projects/core";
 import { revalidateProductPaths } from "@/server/products/revalidate";
 import { withTaskTransaction } from "@/server/tasks/transaction";
-import { configureProductPercentageCore, setProductNoModelCore, settlePendingProductPercentage, transferProductPercentageCore } from "./core";
+import { configureProductPercentageCore, settlePendingProductPercentage, transferProductPercentageCore } from "./core";
 
 async function actor(): Promise<DomainActor> {
   const session = await auth();
@@ -37,10 +37,10 @@ export async function transferProductPercentageShareAction(input: { productId: s
 }
 
 export async function setProductNoModelAction(input: { productId: string; noModel: boolean }) {
-  const user = await actor();
-  return answer(input.productId, () => withTaskTransaction((tx) => setProductNoModelCore(user, input.productId, input.noModel, tx)));
+  void input;
+  await actor();
+  return { ok: false as const, error: "Отметка модели больше не используется для изменения статуса" };
 }
-
 export async function retryProductPercentageAction(input: { productId: string; kind: ProductPercentageKind }) {
   const user = await actor();
   if (!hasAnyRole(user.roles, MANAGER_ROLES)) return { ok: false as const, error: "Недостаточно прав" };

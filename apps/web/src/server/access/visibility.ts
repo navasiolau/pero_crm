@@ -16,6 +16,12 @@ export function engineeringProductWhere(actor: VisibilityActor): Prisma.ProductW
   };
 }
 
+/** Current assignment grants status-return reading, never production technical edits. */
+export function currentEngineeringReadWhere(actor: VisibilityActor): Prisma.ProductWhereInput {
+  if (!hasRole(actor.roles, "ENGINEER")) return { id: { in: [] } };
+  return { engineerId: actor.id, status: { in: ["DESIGN", "PRODUCTION"] } };
+}
+
 /** Use inside a mutation transaction for synchronous technical permission checks. */
 export async function resolveVisibilityActor(
   db: Pick<Prisma.TransactionClient, "task"> & Partial<Pick<Prisma.TransactionClient, "productPercentageParticipant">>,
@@ -86,7 +92,7 @@ export function canEditProductTechnicalBlock(actor: VisibilityActor, product: { 
 export function productVisibilityWhere(actor: VisibilityActor): Prisma.ProductWhereInput {
   if (hasFullProjectVisibility(actor)) return {};
   const grants: Prisma.ProductWhereInput[] = [];
-  grants.push(engineeringProductWhere(actor));
+  grants.push(currentEngineeringReadWhere(actor));
   if (hasAnyRole(actor.roles, FIELD_ROLES)) grants.push({
     status: { not: "DESIGN" },
     OR: [

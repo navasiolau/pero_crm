@@ -49,17 +49,9 @@ export async function transferProductPercentageCore(actor: DomainActor, input: T
 }
 
 export async function setProductNoModelCore(actor: DomainActor, productId: string, noModel: boolean, tx: Tx) {
-  assertManager(actor);
-  if (typeof noModel !== "boolean") throw new Error("Некорректная отметка модели");
-  const product = await tx.product.findUnique({ where: { id: productId }, select: { noModel: true } });
-  if (!product) throw new Error("Изделие не найдено");
-  if (product.noModel === noModel) return;
-  await tx.product.update({ where: { id: productId }, data: { noModel } });
-  await tx.changeLog.create({ data: { actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
-    entity: "product", entityId: productId, action: "noModel", oldValue: { noModel: product.noModel }, newValue: { noModel } } });
+  void actor; void productId; void noModel; void tx;
+  throw new Error("Отметка модели больше не используется для изменения статуса");
 }
-
-/** Вызывается только после status update в той же сериализованной транзакции. */
 export async function captureProductPercentageCompletion(tx: Tx, actor: DomainActor, productId: string,
   kind: ProductPercentageKind, statusAtCompletion: ProductStatus, effects?: PercentageAccrualEffects) {
   assertKind(kind);

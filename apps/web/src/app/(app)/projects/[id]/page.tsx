@@ -227,6 +227,7 @@ export default async function ProjectPage({
             }))}
             canManage={canManage}
             actorRoles={role}
+            actorUserId={session.user.id}
             showAmount={showAmount}
             engineerOptions={engineers.map((engineer) => ({
               value: engineer.id,

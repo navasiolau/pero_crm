@@ -60,10 +60,10 @@ test("предпросмотр в валюте изделия не требуе�
   assert.equal(calculateProductCurrencyPercentage("1.01", "50"), "0.51");
 });
 
-test("менеджер свободен; инженер имеет только ручной DESIGN→PRODUCTION с моделью", () => {
+test("менеджер свободен; текущий инженер DESIGN↔PRODUCTION без модели", () => {
   const context = { from: "DESIGN" as const, to: "PRODUCTION" as const, assignedEngineer: true, participant: false, hasB3d: false, noModel: false };
   assert.equal(decideProductPercentageStatus(["MANAGER", "ENGINEER"], context).allowed, true);
-  assert.equal(decideProductPercentageStatus(["ENGINEER"], context).allowed, false);
+  assert.equal(decideProductPercentageStatus(["ENGINEER"], context).allowed, true);
   assert.equal(decideProductPercentageStatus(["ENGINEER"], { ...context, hasB3d: true }).allowed, true);
   assert.equal(decideProductPercentageStatus(["ENGINEER"], { ...context, noModel: true }).allowed, true);
   assert.equal(decideProductPercentageStatus(["ENGINEER"], { ...context, to: "DONE" }).allowed, false);
@@ -278,7 +278,7 @@ test("retired transfer отказывает до любых операций д�
   await assert.rejects(transferProductPercentageCore({...actor,roles:["WORKER"]},input,tx),/больше недоступна/);
 });
 
-test("единый статусный handler сохраняет manager DONE с тремя terminal snapshots и проверяет B3D инженеру", async () => {
+test("единый статусный handler сохраняет manager DONE и не требует B3D назначенному инженеру", async () => {
   const product = { id: "p", projectId: "project", number: "1.1", title: "Изделие", status: "DESIGN",
     quantity: 3, engineerId: "engineer", noModel: false, expectedPrice: null, files: [] as { id: string }[],
     percentageConfigs: [], stagePayPools: [], project: { currency: "BYN" } };
@@ -297,7 +297,7 @@ test("единый статусный handler сохраняет manager DONE с
     domainEvent: { create: async () => { writes.push("event"); return { id: "event" }; } },
   } as unknown as Prisma.TransactionClient;
   const engineer = { id: "engineer", name: "Инженер", roles: ["ENGINEER" as const], source: "web" as const };
-  const denied = await changeProductStatusTransaction(tx, engineer, "p", "PRODUCTION");
+  const denied = await changeProductStatusTransaction(tx, {...engineer,id:"foreign"}, "p", "PRODUCTION");
   assert.equal(denied.ok, false); assert.deepEqual(writes, []);
   const manager = { id: "manager", name: "Менеджер", roles: ["MANAGER" as const], source: "web" as const };
   const moved = await changeProductStatusTransaction(tx, manager, "p", "DONE");

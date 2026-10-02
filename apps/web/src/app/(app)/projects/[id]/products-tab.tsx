@@ -155,6 +155,7 @@ export function ProductsTab({
   initialProducts,
   canManage,
   actorRoles,
+  actorUserId,
   showAmount,
   engineerOptions,
 }: {
@@ -163,6 +164,7 @@ export function ProductsTab({
   initialProducts: ProductCard[];
   canManage: boolean;
   actorRoles: readonly Role[];
+  actorUserId: string;
   showAmount: boolean;
   engineerOptions: { value: string; label: string; hint?: string }[];
 }) {
@@ -216,7 +218,7 @@ export function ProductsTab({
 
     const allowedTargets = productStatusTargets(actorRoles, {
       from: product.status,
-      assignedEngineer: product.isEngineeringParticipant,
+      assignedEngineer: product.engineerId === actorUserId,
       participant: product.isEngineeringParticipant,
       hasB3d: product.hasB3d,
       noModel: product.noModel,
@@ -237,10 +239,7 @@ export function ProductsTab({
         toast.success(result.financeState === "PENDING_FX"
           ? `Статус сохранён: ${productStatusLabels[toStatus]}. Расчёт ожидает курса.`
           : `Статус: ${productStatusLabels[toStatus]}`);
-        if (actorRoles.length === 1 && actorRoles[0] === "ENGINEER" && toStatus === "PRODUCTION")
-          router.push("/products");
-        else
-          router.refresh();
+        router.refresh();
       }
     });
   }
@@ -285,14 +284,14 @@ export function ProductsTab({
               showAmount={showAmount}
               canDrag={(product) => canManage || productStatusTargets(actorRoles, {
                 from: product.status,
-                assignedEngineer: product.isEngineeringParticipant,
+                assignedEngineer: product.engineerId === actorUserId,
                 participant: product.isEngineeringParticipant,
                 hasB3d: product.hasB3d,
                 noModel: product.noModel,
               }).length > 0}
               canDrop={canManage || (!!activeProduct && productStatusTargets(actorRoles, {
                 from: activeProduct.status,
-                assignedEngineer: activeProduct.isEngineeringParticipant,
+                assignedEngineer: activeProduct.engineerId === actorUserId,
                 participant: activeProduct.isEngineeringParticipant,
                 hasB3d: activeProduct.hasB3d,
                 noModel: activeProduct.noModel,

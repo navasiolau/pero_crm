@@ -1,7 +1,8 @@
 "use client";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Trash2 } from "lucide-react";
+import Link from "next/link";
+import { ArrowLeft, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import type { ProductStatus, Role } from "@prisma/client";
 import { Badge } from "@/components/ui/badge";
@@ -18,9 +19,8 @@ export function ProductHeader({
   product,
   canManage,
   actorRoles,
-  hasB3d,
-  noModel,
-  isEngineeringParticipant,
+  actorUserId,
+  backHref,
 }: {
   product: {
     id: string;
@@ -38,9 +38,11 @@ export function ProductHeader({
   canManage: boolean;
   showAmount: boolean;
   actorRoles: readonly Role[];
-  hasB3d: boolean;
-  noModel: boolean;
-  isEngineeringParticipant: boolean;
+  actorUserId?: string;
+  backHref?: string;
+  hasB3d?: boolean;
+  noModel?: boolean;
+  isEngineeringParticipant?: boolean;
 }) {
   const router = useRouter();
   const inline = useProductInline();
@@ -48,8 +50,10 @@ export function ProductHeader({
   const [localStatus, setLocalStatus] = useState(product.status);
   const [statusError, setStatusError] = useState<string | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const allowedStatusTargets = productStatusTargets(actorRoles, { from: localStatus, assignedEngineer: isEngineeringParticipant, participant: isEngineeringParticipant, hasB3d, noModel });
-  const canEngineerStart = !canManage && actorRoles.includes("ENGINEER") && isEngineeringParticipant && localStatus === "DESIGN";
+  const assignedEngineer = !!actorUserId && product.engineerId === actorUserId;
+  const allowedStatusTargets = productStatusTargets(actorRoles, { from: localStatus, assignedEngineer, participant: false, hasB3d: false, noModel: false });
+  const engineerTarget = allowedStatusTargets[0];
+  const canEngineerMove = !canManage && actorRoles.includes("ENGINEER") && assignedEngineer && !!engineerTarget;
   async function moveStatus(toStatus: ProductStatus) {
     setStatusError(null);
     if (!await inline.flush()) { setStatusError("Сначала сохраните цену, количество, инженера и настройки процентных этапов. Ошибки показаны рядом с полями."); return; }
@@ -57,17 +61,23 @@ export function ProductHeader({
     if (shouldRollbackProductStatus(result)) { setStatusError(result.error ?? "Не удалось сменить статус"); return; }
     setLocalStatus(toStatus);
     toast.success(result.financeState === "PENDING_FX" ? `Статус сохранён: ${productStatusLabels[toStatus]}. Расчёт ожидает курса.` : `Статус: ${productStatusLabels[toStatus]}`);
-    if (actorRoles.length === 1 && actorRoles[0] === "ENGINEER" && toStatus === "PRODUCTION") router.replace("/products");
+    router.refresh();
   }
-  return <div className="flex min-w-0 flex-wrap items-center gap-2">
+  return <div className="flex min-w-0 flex-col gap-2">
+    <div className="flex min-w-0 flex-wrap items-center gap-2">
+    <Link href={backHref ?? `/projects/${product.projectId}`} aria-label="Назад к проекту" className="inline-flex size-10 shrink-0 items-center justify-center rounded-md hover:bg-muted"><ArrowLeft className="size-4" /></Link>
+    <span className="shrink-0 text-sm text-muted-foreground">{product.number}</span>
     <Badge variant="outline" className={cn("border-transparent", productStatusStyles[localStatus].badge)}>{productStatusLabels[localStatus]}</Badge>
+    </div>
+    <div className="flex min-w-0 flex-wrap items-center gap-2">
     {statusError ? <p role="alert" className="max-w-full break-words text-sm text-destructive">{statusError}</p> : null}
     {canManage ? <Select value={localStatus} onValueChange={value => { const next = value as ProductStatus | undefined; if (next && next !== localStatus) startTransition(async () => { await moveStatus(next); }); }} disabled={pending}>
       <SelectTrigger className="w-48 max-w-full" aria-label="Сменить статус"><SelectValue>{productStatusLabels[localStatus]}</SelectValue></SelectTrigger>
       <SelectContent>{PRODUCT_STATUSES.map(status => <SelectItem key={status.id} value={status.id}>{status.label}</SelectItem>)}</SelectContent>
     </Select> : null}
-    {canEngineerStart ? <div className="flex min-w-0 flex-col gap-1"><Button type="button" variant="outline" className="min-h-12" disabled={pending || !allowedStatusTargets.includes("PRODUCTION")} onClick={() => startTransition(async () => { await moveStatus("PRODUCTION"); })}>Передать в производство</Button>{!allowedStatusTargets.includes("PRODUCTION") ? <span role="note" className="max-w-64 text-xs text-muted-foreground">Для передачи нужна B3D-модель этого изделия или отметка менеджера «Модели нет».</span> : null}</div> : null}
+    {canEngineerMove ? <Button type="button" variant="outline" className="min-h-12" disabled={pending} onClick={() => startTransition(async () => { await moveStatus(engineerTarget); })}>{engineerTarget === "DESIGN" ? "Вернуть в проектирование" : "Передать в производство"}</Button> : null}
     {canManage ? <Button variant="outline" size="sm" onClick={() => setDeleteOpen(true)}><Trash2 className="size-4" /> Удалить</Button> : null}
+    </div>
     <ConfirmDeleteDialog entityLabel={`изделие «${product.number} · ${product.title}»`} open={deleteOpen} onOpenChange={setDeleteOpen} warning="Нельзя удалить, пока к изделию привязаны задачи, работы или материалы. Файлы останутся в проекте." onConfirm={async () => {
       const result = await deleteProduct(product.id); if (result.ok) { toast.success("Изделие удалено"); router.push(`/projects/${product.projectId}`); return true; } toast.error(result.error ?? "Ошибка удаления"); return false;
     }} />
