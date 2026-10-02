@@ -1,25 +1,41 @@
-# Evidence — №42, стандартные проценты новых изделий
+# Evidence — Round2, №42
 
-## Scope
+## Проверяемый результат
 
-Ветка feature/42 создана от свежего staging02d7db1. Прямое разрешение владельца получено. Настройка хранится в одном OrgSetting `productPercentageDefaults` с JSON/revision; схема БД, миграции и зависимости не добавлены.
+№42: менеджмент задаёт три defaults; только новое изделие получает один snapshot всех трёх configs. Реализация завершена. Runtime checkbox завершён после actual staging browser подтверждения APP 065.
 
-До настройки ставки ENGINEERING/ASSEMBLY/INSTALLATION равны NULL: это сохраняет наблюдавшуюся семантику создания. Явный 0 отличается от NULL, допустимы значения 0–100 с точностью 0.1. Новый Product читает один snapshot внутри существующей транзакции и создаёт все три configs revision1, даже без назначенных сотрудников. Audit создания содержит revision/rates. Изменение defaults не обновляет существующие изделия, configs или финансовую историю. Настройки доступны менеджменту только по точному `/settings/product-percentages`; остальные settings/finance права сохранены.
+## Локальная проверка текущей ревизии
 
-## Local Verification
+Root подтвердил полный suite953/953 PASS и NextBuild PASS. Local 065 browser: 62 checks PASS, ошибок нет, 7 owned файлов; cleanup CLEANED, original MATCH, prefs RESTORED 26. Receipt: correction-41/.playwright-mcp/corrections/local-corrections-b7a9dd62-252e-4162-b4bf-9fe414b05dc5/final-receipt.json. Предыдущий local8bdf также прошёл62 checks с таким же cleanup. Root лично просмотрел предыдущие local1440/390 и XLSX preview; просмотр новой staging ревизии ещё ожидается.
 
-Meaningful RED: прежний create core не создавал три configs; manager navigation не содержал нового scoped route. После реализации focused/settings/create/auth и старые create regressions прошли 28/28. Проверены NULL/0/границы/точность, role union, запрет nonmanager, CAS/no-op/replay/foreign actor, отказ повреждённых settings и выход audit-error из callback для rollback. Прежние DI fixtures исправлены по точному OrgSetting key, без production fallback. TypeScript и scoped ESLint прошли с 0 errors/0 warnings.
+Доказанный shared date fix: server UTC показывал02.10, client Europe/Moscow —03.10. Формат FileGrid отличался по timezone. Теперь formatDate использует Europe/Moscow в lib/format, FileGrid и TaskDialog; реальный SSR child-TZ regression прошёл RED→GREEN, 23. Два quantity поля получили подпись «Количество» и ширину 104 px; controllers не менялись, targeted 10 PASS.
 
-Root затем подтвердил полный интегрированный web suite 952/952, fail0/skip0, после исправления только устаревшего SSR-layout теста. Полный TypeScript PASS. Compiled local app6b22 соответствует app source pushed `a160b5bdf9ebbbec1fd06248bc0026e073cf12c5`; различия относятся к scripts/tests/docs.
+## Сохранённые failures
 
-Actual local native №42: 5 групп PASS, все 43 таблицы совпали после outer ROLLBACK, externalFetch0. Receipt: `correction-41/.playwright-mcp/round2/local-defaults-native.private.json`. Это реальный settings/create SQL/ACL proof, включая копирование ставок только новым изделиям и сохранение старых данных, а не hosted-concurrency или browser proof.
+Stage a160 run eb5 выполнил60 assertions, но имел React 418 / pageErrors=1 и потому остался FAIL; original MATCH и prefs RESTORED подтверждены. Local 1aee FAIL после 48 checks и30ac FAIL после 52 checks также сохранены с cleanup: исправлялись helper Node и выбор вкладки, не ослаблялись assertions. Старый62 STOP/recovery и original receipts не переписаны.
 
-## Browser и staging: текущий статус
+## История предыдущей ревизии a160
 
-Actual local browser `8bdf3fd1-3505-4021-86f7-6c46fad068ab`: PASS62checks/7files, protocolStopped=false, CLEANED, original MATCH. Настройки восстановлены: prefs RESTORED26, из них25 unchanged и1 restored. Receipt: `correction-41/.playwright-mcp/corrections/local-corrections-8bdf3fd1-3505-4021-86f7-6c46fad068ab/final-receipt.json`.
+Actual a160 был healthy, image e01c37d1b51604257d5baec6022cd8d6ce2742223a325ae41a0361dfedef1dc7; CI 93 SUCCESS. Native №42 на staging: 5 групп PASS, all 43 rollback verified, externalFetch=0. Эти результаты не заменяют UI browser проверку исправленного APP 065.
 
-Предыдущие helper FAIL сохранены с таким же успешным cleanup: 1aee0f14 остановился на48 checks из-за Node, не переданного в browser callback; 30acb2dd — на52 checks из-за чтения контактов в неправильной вкладке. Исправлен только helper: overview → readonly contacts → products/card navigation. Assertions не ослаблялись, app source не менялся. Личный просмотр новых local screenshots root ещё выполняет; stage browser PASS пока не заявляется.
+CI94 run37065325423 теперь SUCCESS. Прежний промежуточный pending статус закрыт actual hosted065 PASS 60, указанным ниже. Локальные62 и hosted60 не смешиваются; завершение runtime основано на actual hosted receipt.
 
-CI93 SUCCESS: run37063222232, test4m6/build3m29/bot1m12. Actual staging `a160b5bdf9ebbbec1fd06248bc0026e073cf12c5` healthy, image `e01c37d1b51604257d5baec6022cd8d6ce2742223a325ae41a0361dfedef1dc7`. Staging native42: 5 групп PASS, all43-table rollback verified, externalFetch0; root evidence44-delivered-metadata и staging-defaults-native. Это фактический SQL/ACL/deployment proof, отдельно от будущей hosted browser приёмки.
+## Данные и отчёт
 
-Task3.2 остаётся unchecked до root final staging browser confirmation. Mainf036 не изменён, production release не разрешён. Runtime, данные и deployment проверяет root. Эта актуализация меняет только документы; restic/дампы/seed/reset/production DB не использовались.
+Data №46 V3: actual stage 02d7 / image 14f, 10 проектов/20 изделий, all-other DATA MATCH; post-readonly staging: 184 BYN, foreign=0, local: 174 BYN, foreign=0. Повтор: ALREADY_APPLIED, committed=false, MATCH 10/20. Signed V2 исключает только operational ApiToken.lastUsedAt и отвергает старые manifests; финансовые и другие поля остаются строгими. Triggers, backup/reset, миграции и production DB не обходились.
+
+№32 завершён после получения actual production app source: 191 проектов/10 валютных, detailsUnavailable0. Один NON_BYN_PROJECT_PRICES.xlsx содержит 80 строк: 59 numeric и21 known NULL; canonical Decimal/formulas/readback согласованы, root подтвердил preview. Actual source SHA256: 859b11ee27f82fcc5cd0d42763e125e07de547a004970a91d4455e53bb45449e, canonical SHA256: 33af45f406d52b543062248bd24e2a6b271fcc5ff9a427a9cfeb096646e82a4b. Прежний №32 LOGIN-blocked статус исторический и superseded этим фактом; старые документы/FAIL receipts сохранены.
+
+Main f036 не изменён, production release не разрешён. Эта актуализация касается только документов; source/Git/runtime/DB/SSH/restic/дампы не выполнялись.
+
+## Итоговая hosted приёмка
+
+Root подтвердил actual staging `065ab453d4ddea025f15cf4b72b0617c0c1bfd86`: healthy image `253b3a39b209be61a5b0fa267f458086b62d7beabce203904cb90fbeb98c1101`. CI94 SUCCESS: test4m19/build3m45/bot1m8.
+
+Receipt: `correction-41/.playwright-mcp/corrections/staging-corrections-877d3374-4562-489f-b6a7-84e3f9f5e0b3/final-receipt.json`. PASS 60 checks / 7 files, pageErrors=0, protocolStopped=false, skips[], zoom PASS; CLEANED, original MATCH, prefs RESTORED 22 (21 unchanged, 1 restored). На staging нет пользователя с combined role, поэтому60 против local 62; пользователи не создавались для искусственного выравнивания count. Local 065 b7a также PASS 62 / 7 с полным cleanup.
+
+Native №42 actual local/staging: 5 групп, all 43 outer rollback verified. Staging native выполнен на a160; backend source в 065 не менялся, поэтому SQL/ACL proof применим к065. Browser 065 отдельно доказывает исправленный UI/SSR. Data №46: staging: 184 BYN / local: 174 BYN, foreign=0, повтор ALREADY_APPLIED/committed=false. №32 actual production app source 191 / 10 и один 80-row XLSX завершены, без production DB изменений.
+
+Все runtime пункты39–46 отмечены по этим фактам. Root выполняет завершающий личный просмотр новых stage1440/390/cover; предыдущие local1440/390 и XLSX preview уже просмотрены. Старый a160 React418 FAIL и helper failures сохраняют прежние статусы и cleanup. Date fix подтверждён реальным SSR timezone regression, не скрытием ошибки.
+
+Main f036 не изменён; production release не разрешён. Документы заморожены после этой актуализации, no source/Git/runtime/DB/SSH/restic/дампы.

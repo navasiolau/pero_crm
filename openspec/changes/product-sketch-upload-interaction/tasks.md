@@ -10,4 +10,4 @@
 
 ## 3. Verification
 - [x] 3.1 Focused tests/typecheck/scopedlint passed; no runtime claims; source freeze.
-- [ ] 3.2 Root actual upload failure reproduction/fix acceptance and visual on deployed candidate; no data/infra by agent.
+- [x] 3.2 Root actual upload failure reproduction/fix acceptance and visual on deployed candidate; no data/infra by agent.

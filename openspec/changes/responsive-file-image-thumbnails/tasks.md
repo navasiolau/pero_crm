@@ -7,6 +7,6 @@
 - [x] 2.2 Shared thumbnail справа в Project/Product/Task files, реальный viewer, SSR tests.
 ## 3. Проверки
 - [x] 3.1 Direct typecheck/lint/targeted tests и freeze root.
-- [ ] 3.2 Root actual staging и visual качества/geometry отдельно.
+- [x] 3.2 Root actual staging и visual качества/geometry отдельно.
 
 Pure service RED:8PASS/1FAIL thumbnail, GREEN22PASS с routeACL/originalbytes/SSRrightthumb. Typecheck и lint PASS. Субъективное качество/видимое расположение в браузере не заявляется; Root staging3.2 остаётся отдельно.

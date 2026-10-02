@@ -9,5 +9,5 @@
 
 ## 2. Actual Data Acceptance
 
-- [ ] 2.1 Root inventory/apply существующих local/staging, real FX proof, all-other-model fingerprints и actual exact-state receipt; субагент БД/runtime не запускал.
-- [ ] 2.2 №32: владелец получает actual production app source и один ручной отчёт; без production DB runner и без выдуманных данных.
+- [x] 2.1 Root inventory/apply существующих local/staging, real FX proof, all-other-model fingerprints и actual exact-state receipt; субагент БД/runtime не запускал.
+- [x] 2.2 №32: владелец получает actual production app source и один ручной отчёт; без production DB runner и без выдуманных данных.
