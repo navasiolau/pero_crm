@@ -9,9 +9,9 @@ import { prisma } from "@/lib/prisma";
 import { UPLOADS_ROOT, s3Enabled, s3Delete, fileKey, thumbKey } from "@/lib/s3";
 import { writeChangeLog } from "@/server/plugins/changelog";
 import { revalidateProductPaths } from "@/server/products/revalidate";
-import { MANAGER_ROLES, hasAnyRole, hasRole } from "@/lib/roles";
+import { mayDeleteStoredFile } from "@/server/files/delete-permission";
 import { fileVisibilityWhere, resolveVisibilityActor } from "@/server/access/visibility";
-import { resolveUploadContext } from "@/server/files/upload-context";
+
 
 
 // Удаление файла: загрузивший (в т.ч. инженер, §4) или админ/директор/менеджер.
@@ -24,13 +24,7 @@ export async function deleteFile(
   const file = await prisma.file.findFirst({ where: { AND: [{ id: fileId }, fileVisibilityWhere(actor)] } });
   if (!file) return { ok: false, error: "Файл не найден" };
 
-  const canDelete =
-    file.uploadedById === session.user.id ||
-    hasAnyRole(session.user.roles, MANAGER_ROLES);
-  if (!canDelete) return { ok: false, error: "Недостаточно прав" };
-  if ((hasRole(session.user.roles, "ENGINEER") || actor.engineeringParticipantProductIds?.includes(file.productId ?? "")) && !hasAnyRole(session.user.roles, MANAGER_ROLES) && !await resolveUploadContext(prisma, actor, file)) {
-    return { ok: false, error: "Недостаточно прав" };
-  }
+  if (!await mayDeleteStoredFile(prisma, actor, file)) return { ok: false, error: "Недостаточно прав" };
 
   await prisma.file.delete({ where: { id: fileId } });
   // Файлы в хранилище удаляем best-effort — метаданные уже убраны

@@ -1,0 +1,10 @@
+import {z} from 'zod';
+const id=z.string().min(1).max(128);
+export const sketchUploadTargetSchema=z.object({projectId:id,productId:id,expectedSketchFileId:z.null(),clientMutationId:z.uuid()}).strict();
+export const sketchBindSchema=z.object({productId:id,fileId:id,expectedSketchFileId:z.null(),clientMutationId:z.uuid()}).strict();
+export const sketchDeleteSchema=z.object({productId:id,expectedSketchFileId:id,clientMutationId:z.uuid()}).strict();
+export type SketchUploadTarget=z.infer<typeof sketchUploadTargetSchema>;
+export type SketchBindInput=z.infer<typeof sketchBindSchema>;
+export type SketchDeleteInput=z.infer<typeof sketchDeleteSchema>;
+export type SketchStorageIntent={projectId:string;productId:string;fileId:string;storedName:string;hasThumb:boolean};
+export type SketchResult={ok:true;sketchFileId:string|null;clientMutationId:string;id?:string;repeated?:boolean;storageIntent?:SketchStorageIntent}|{ok:false;kind:'validation'|'conflict'|'forbidden'|'not-found'|'failure';error:string;currentSketchFileId?:string|null};

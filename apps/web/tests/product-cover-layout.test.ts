@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
-import { createElement } from "react";
+import * as React from "react";
+import { createElement, type ComponentProps } from "react";
+import { AppRouterContext, type AppRouterInstance } from "next/dist/shared/lib/app-router-context.shared-runtime";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import {
@@ -16,8 +18,14 @@ import {
   type ProductCoverChoice,
 } from "../src/lib/product-hero";
 import { getFileViewerPresentation } from "../src/components/file-viewer";
-import { ProductCoverLayout } from "../src/app/(app)/products/[id]/product-sketch";
+import { ProductCoverLayout as ActualProductCoverLayout } from "../src/app/(app)/products/[id]/product-sketch-view";
 
+function ProductCoverLayout(props: ComponentProps<typeof ActualProductCoverLayout>) {
+  return createElement(AppRouterContext.Provider, {value: {refresh() {}} as AppRouterInstance}, createElement(ActualProductCoverLayout, props));
+}
+
+Object.assign(globalThis, {React});
+const deleteSketchAction = async (input: {productId:string;expectedSketchFileId:string;clientMutationId:string}) => ({ok:true as const,sketchFileId:null,clientMutationId:input.clientMutationId});
 const image = (id: string, productId: string, projectId: string, mimeType = "image/jpeg") => ({
   id, productId, projectId, fileName: `${id}.jpg`, mimeType, hasThumb: true,
 });
@@ -38,7 +46,7 @@ test("cover replacement follows edit permission and role union", () => {
   assert.equal(canReplaceProductCover(["MOUNTER"], true), false);
 });
 
-test("cover toolbar contains only fullscreen and the permitted replace icon", () => {
+test("legacy cover toolbar helper remains available for older SDK compatibility", () => {
   assert.deepEqual(getProductCoverActions(true, true), ["fullscreen", "replace"]);
   assert.deepEqual(getProductCoverActions(true, false), ["fullscreen"]);
   assert.deepEqual(getProductCoverActions(false, true), ["replace"]);
@@ -111,7 +119,7 @@ test("cover change refreshes page data only after the server confirms success", 
   assert.equal(refreshes, 1);
 });
 
-test("cover presentation shows only fullscreen and authorized replace icons, never captions", () => {
+test("cover presentation shows clickable sketch and exact delete only, never filename captions", () => {
   const cover: ProductCoverChoice = {
     ...image("cover-1", "p1", "order1"),
   };
@@ -119,10 +127,9 @@ test("cover presentation shows only fullscreen and authorized replace icons, nev
     productId: "p1",
     projectId: "order1",
     cover,
-    attachedImages: [cover],
     actorRoles: ["ENGINEER"],
     canEditTechnicalBlock: true,
-    setCoverAction: async () => ({ ok: true }),
+    deleteCoverAction: deleteSketchAction,
     header: createElement("h1", null, "Тестовый шкаф"),
     details: createElement("p", null, "Основные сведения"),
   }));
@@ -130,20 +137,19 @@ test("cover presentation shows only fullscreen and authorized replace icons, nev
   assert.match(html, /lg:grid-cols-\[minmax\(0,3fr\)_minmax\(0,2fr\)\]/);
   assert.match(html, /lg:grid-rows-\[auto_1fr\]/);
   assert.match(html, /lg:min-h-\[calc\(100dvh-8rem\)\]/);
-  assert.match(html, /aria-label="Открыть обложку на весь экран"/);
-  assert.match(html, /aria-label="Заменить обложку"/);
+  assert.match(html, /aria-label="Открыть эскиз на весь экран"/);
+  assert.match(html, /aria-label="Удалить эскиз"/);
   assert.match(html, /preview=cover/);
   assert.match(html, /object-contain/);
-  assert.doesNotMatch(html, /Эскиз изделия|Открыть оригинал|cover-1\.jpg/);
+  assert.doesNotMatch(html, /Открыть оригинал|cover-1\.jpg/);
 });
 
-test("no-cover layout collapses to full width and offers only authorized replace icon", () => {
+test("empty cover keeps the same slot and offers only authorized upload", () => {
   const base = {
     productId: "p1",
     projectId: "order1",
     cover: null,
-    attachedImages: [],
-    setCoverAction: async () => ({ ok: true }),
+    deleteCoverAction: deleteSketchAction,
     header: createElement("h1", null, "Тестовый шкаф"),
     details: createElement("p", null, "Основные сведения"),
   };
@@ -154,11 +160,11 @@ test("no-cover layout collapses to full width and offers only authorized replace
     ...base, actorRoles: ["ACCOUNTANT"], canEditTechnicalBlock: false,
   }));
 
-  assert.match(authorized, /data-layout="full-width"/);
-  assert.match(authorized, /aria-label="Добавить обложку"/);
+  assert.match(authorized, /data-layout="cover"/);
+  assert.match(authorized, /Добавить изображение/);
   assert.doesNotMatch(authorized, /Открыть обложку на весь экран/);
-  assert.doesNotMatch(authorized, /lg:grid-cols-\[minmax\(0,3fr\)_minmax\(0,2fr\)\]/);
-  assert.doesNotMatch(denied, /Добавить обложку|Заменить обложку/);
+  assert.match(authorized, /lg:grid-cols-\[minmax\(0,3fr\)_minmax\(0,2fr\)\]/);
+  assert.doesNotMatch(denied, /Добавить изображение|Удалить эскиз/);
 });
 
 test("cover remains large when description is absent", () => {
@@ -167,10 +173,9 @@ test("cover remains large when description is absent", () => {
     productId: "p1",
     projectId: "order1",
     cover,
-    attachedImages: [cover],
     actorRoles: ["WORKER"],
     canEditTechnicalBlock: false,
-    setCoverAction: async () => ({ ok: true }),
+    deleteCoverAction: deleteSketchAction,
     header: createElement("h1", null, "Тестовый шкаф"),
     details: null,
   }));
@@ -178,4 +183,27 @@ test("cover remains large when description is absent", () => {
   assert.match(html, /data-layout="cover"/);
   assert.match(html, /data-slot="product-cover-image"/);
   assert.match(html, /lg:min-h-\[calc\(100dvh-8rem\)\]/);
+});
+
+test("21 empty sketch keeps permanent slot and exact upload prompt; readonly has no mutation control", () => {
+ const base={productId:"p1",projectId:"order1",cover:null,deleteCoverAction:deleteSketchAction,header:createElement("h1",null,"Изделие"),details:null};
+ const writable=renderToStaticMarkup(createElement(ProductCoverLayout,{...base,actorRoles:["MANAGER"],canEditTechnicalBlock:true}));
+ const readonly=renderToStaticMarkup(createElement(ProductCoverLayout,{...base,actorRoles:["ACCOUNTANT"],canEditTechnicalBlock:false}));
+ assert.match(writable,/data-slot="product-cover-image"/);assert.match(writable,/Добавьте эскиз/);assert.match(writable,/Добавить изображение/);
+ assert.match(readonly,/data-slot="product-cover-image"/);assert.match(readonly,/Добавьте эскиз/);assert.doesNotMatch(readonly,/Добавить изображение/);
+});
+
+test("21 filled sketch is itself fullscreen trigger with exact delete, no gallery pencil or expand", () => {
+ const cover=image("exact-file","p1","order1");
+ const markup=renderToStaticMarkup(createElement(ProductCoverLayout,{productId:"p1",projectId:"order1",cover,actorRoles:["MANAGER"],canEditTechnicalBlock:true,deleteCoverAction:deleteSketchAction,header:null,details:null}));
+ assert.match(markup,/aria-label="Открыть эскиз на весь экран"/);assert.match(markup,/aria-label="Удалить эскиз"/);
+ assert.doesNotMatch(markup,/Заменить обложку|Добавить обложку|Назначить изображение|Выберите обложку/);
+});
+
+test("readonly and engineer without existing file-delete right still view sketch but cannot delete",()=>{
+ const cover=image("legacy-cover","p1","order1");
+ for(const actorRoles of [["ACCOUNTANT"],["ENGINEER"]] as const){
+  const markup=renderToStaticMarkup(createElement(ProductCoverLayout,{productId:"p1",projectId:"order1",cover,actorRoles,canEditTechnicalBlock:actorRoles[0]==="ENGINEER",canDeleteCover:false,deleteCoverAction:deleteSketchAction,header:null,details:null}));
+  assert.match(markup,/Открыть эскиз на весь экран/);assert.doesNotMatch(markup,/Удалить эскиз|Добавить изображение/);
+ }
 });
