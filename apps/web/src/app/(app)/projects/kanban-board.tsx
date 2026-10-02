@@ -21,6 +21,7 @@ import type { ProjectStage } from "@prisma/client";
 import { DragHandle } from "@/components/drag-handle";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+import { CardNumber } from "@/components/card-number";
 import { formatAmount } from "@/lib/format";
 import { STAGES, daysOnStage, stageLabels, stageStyles } from "@/lib/stages";
 import { cn } from "@/lib/utils";
@@ -57,7 +58,7 @@ function ProjectCardView({
     >
       <CardContent className="flex flex-col gap-1.5 p-3">
         <div className="flex items-center justify-between gap-2 pr-10">
-          <span className="text-sm font-medium">{project.number}</span>
+          <span className="text-sm"><CardNumber>{project.number}</CardNumber></span>
           <Badge className={cn("text-xs", daysBadgeClass(days))}>
             {days} дн.
           </Badge>
