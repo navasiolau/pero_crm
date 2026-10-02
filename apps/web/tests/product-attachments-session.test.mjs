@@ -6,7 +6,7 @@ const source=readFileSync(new URL('./product-attachments-session.mjs',import.met
 function load(env={},platform='win32') {
  const process={env:{CRM_MODERNIZATION_TARGET:'local',DATABASE_URL:'postgresql://u:p@localhost:5433/pero_crm',AUTH_SECRET:'test-only-secret',...env},platform};
  const tokenCalls=[];
- const api=Function('createHash','createHmac','randomUUID','timingSafeEqual','process','encode',`${source};return {environmentGuard,prepare,resume,restore,validateCheckpoint,validateOwnWrites,buildRestorePlan,checkpointSignature};`)(createHash,createHmac,randomUUID,timingSafeEqual,process,async options=>{tokenCalls.push(options);return 'private-test-token'});
+ const api=Function('createHash','createHmac','randomUUID','timingSafeEqual','process','encode',`${source};return {readEnvelope,environmentGuard,prepare,resume,restore,validateCheckpoint,validateOwnWrites,buildRestorePlan,checkpointSignature};`)(createHash,createHmac,randomUUID,timingSafeEqual,process,async options=>{tokenCalls.push(options);return 'private-test-token'});
  return {api,process,tokenCalls};
 }
 function fixture(combined=true){
@@ -86,4 +86,38 @@ test('resume rejects forged CP, inactive/changed roles/invalid version before to
  f.users[0].active=false;await assert.rejects(api.resume(f.db,'test-only-secret',prepared.checkpoint),/USER_IDENTITY_CHANGED/);f.users[0].active=true;
  f.users[0].roles=['DIRECTOR'];await assert.rejects(api.resume(f.db,'test-only-secret',prepared.checkpoint),/USER_IDENTITY_CHANGED/);f.users[0].roles=['ADMIN'];f.users[0].sessionVersion=-1;await assert.rejects(api.resume(f.db,'test-only-secret',prepared.checkpoint),/SESSION_VERSION_INVALID/);
  assert.equal(tokenCalls.length,0);process.env.CRM_MODERNIZATION_TARGET='staging';await assert.rejects(api.resume({$transaction(){throw Error('DB must not be used')}},'test-only-secret',prepared.checkpoint),/LOCAL_SESSION_RESUME_ONLY/);
+});
+
+test('explicit correction prepare captures products.list only for eligible captured actors without changing default scope',async()=>{
+ const {api}=load(),f=fixture(false);f.users.push({id:'accountant',roles:['ACCOUNTANT'],active:true,sessionVersion:1},{id:'worker',roles:['WORKER'],active:true,sessionVersion:1},{id:'mounter',roles:['MOUNTER'],active:true,sessionVersion:1});
+ const prior=JSON.stringify({version:1,revision:randomUUID(),query:'view=table'});f.prefs.push({userId:'a',key:'products.list',value:prior});
+ const old=await api.prepare(f.db,'test-only-secret');assert.equal(Object.hasOwn(old.checkpoint,'correctionMode'),false);assert.equal(old.originalPreferences.length,18);assert.equal(old.originalPreferences.some(row=>row.key==='products.list'),false);
+ const current=await api.prepare(f.db,'test-only-secret',true);assert.equal(current.checkpoint.correctionMode,true);assert.equal(current.checkpoint.namespace,old.checkpoint.namespace);assert.equal(current.originalPreferences.length,22);
+ assert.deepEqual(current.originalPreferences.filter(row=>row.key==='products.list').map(row=>row.userId),['a','m','e','accountant']);assert.equal(current.originalPreferences.find(row=>row.userId==='a'&&row.key==='products.list').value,prior);assert.equal(f.mutations,0);
+ assert.equal(api.validateCheckpoint(old.checkpoint,'test-only-secret').length,18);assert.equal(api.validateCheckpoint(current.checkpoint,'test-only-secret').length,22);
+});
+
+test('old signed checkpoint cannot authorize products.list, missing signed flag/key sets are rejected',async()=>{
+ const {api}=load(),f=fixture(),old=await api.prepare(f.db,'test-only-secret');const value=JSON.stringify({version:1,revision:randomUUID(),query:'view=kanban&q=205.1'});
+ assert.throws(()=>api.validateOwnWrites(api.validateCheckpoint(old.checkpoint,'test-only-secret'),[{userId:'a',key:'products.list',value}]),/OWN_WRITE_NOT_ALLOWLISTED/);
+ const unsigned=structuredClone(old.checkpoint);unsigned.correctionMode=true;assert.throws(()=>api.validateCheckpoint(unsigned,'test-only-secret'),/SIGNATURE_MISMATCH/);
+ unsigned.signature=api.checkpointSignature(unsigned,'test-only-secret');assert.throws(()=>api.validateCheckpoint(unsigned,'test-only-secret'),/EXACT_ORIGINAL_PREFERENCE_SET_REQUIRED/);
+ const injected=structuredClone(old.checkpoint);injected.originalPreferences.push({userId:'a',key:'products.list',value:null});injected.signature=api.checkpointSignature(injected,'test-only-secret');assert.throws(()=>api.validateCheckpoint(injected,'test-only-secret'),/EXACT_ORIGINAL_PREFERENCE_SET_REQUIRED/);
+});
+
+test('correction products.list restore uses exact captured ACK CAS and retains old namespace/checkpoint',async()=>{
+ const {api}=load(),f=fixture(false),previous=JSON.stringify({version:1,revision:randomUUID(),query:'view=table'});f.prefs.push({userId:'a',key:'products.list',value:previous});const prepared=await api.prepare(f.db,'test-only-secret',true),immutable=JSON.stringify(prepared.checkpoint);
+ const owned=JSON.stringify({version:1,revision:randomUUID(),query:'view=kanban&q=205.1'});f.prefs[0].value=owned;
+ const result=await api.restore(f.db,'test-only-secret',prepared.checkpoint,[{userId:'a',key:'products.list',value:owned}]);assert.equal(result.status,'RESTORED');assert.equal(f.prefs[0].value,previous);assert.equal(result.counts.restored,1);assert.equal(JSON.stringify(prepared.checkpoint),immutable);
+ f.prefs[0].value=owned;f.prefs.push({userId:'m',key:'products.list',value:owned});const before=structuredClone(f.prefs),mutations=f.mutations;
+ await assert.rejects(api.restore(f.db,'test-only-secret',prepared.checkpoint,[{userId:'a',key:'products.list',value:owned}]),/PREFERENCE_CONFLICT/);assert.deepEqual(f.prefs,before);assert.equal(f.mutations,mutations);
+});
+
+test('correction envelope and new ACK query remain narrow and bounded without increasing old input limits',async()=>{
+ const {api,process}=load();for(const input of [{operation:'prepare'},{operation:'prepare',correctionMode:true}]){process.env.CRM_STAGING_BROWSER_INPUT=Buffer.from(JSON.stringify(input)).toString('base64');assert.deepEqual(api.readEnvelope(),input);}
+ for(const input of [{operation:'prepare',correctionMode:false},{operation:'resume',checkpoint:{},correctionMode:true},{operation:'prepare',productsList:true}]){process.env.CRM_STAGING_BROWSER_INPUT=Buffer.from(JSON.stringify(input)).toString('base64');assert.throws(()=>api.readEnvelope(),/INPUT_FIELDS_INVALID/);}
+ const prepared=await api.prepare(fixture(false).db,'test-only-secret',true),originals=api.validateCheckpoint(prepared.checkpoint,'test-only-secret');
+ const encode=query=>JSON.stringify({version:1,revision:randomUUID(),query});assert.equal(api.validateOwnWrites(originals,[{userId:'a',key:'products.list',value:encode('view=kanban&q=205.1')}]).size,1);
+ for(const query of ['view=table&q=205.1','view=kanban&q=foreign','view=kanban&q=205.1&engineer=foreign','view=kanban&q='+('1'.repeat(1100))])assert.throws(()=>api.validateOwnWrites(originals,[{userId:'a',key:'products.list',value:encode(query)}]));
+ process.env.CRM_STAGING_BROWSER_INPUT='A'.repeat(96*1024+4);assert.throws(()=>api.readEnvelope(),/PRIVATE_INPUT_REQUIRED_OR_TOO_LARGE/);
 });

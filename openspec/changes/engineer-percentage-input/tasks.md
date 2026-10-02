@@ -6,7 +6,7 @@
 
 ## 2. Validation
 - [x] 2.1 Выполнить focused tests, TypeScript и scoped lint.
-- [ ] 2.2 Root выполняет интеграцию, общую визуальную и staging-приёмку после №33–38.
+- [x] 2.2 Root выполняет интеграцию, общую визуальную и staging-приёмку после №33–38.
 
 ## Evidence
 

@@ -13,4 +13,4 @@
 ## 3. Verification
 
 - [x] 3.1 Targetedregressions/typecheck/lintPASS; oldmodelgate tests updatedmeaningfully.
-- [ ] 3.2 Rootactualruntime/stagingrevision/image/health/statusreturnaccepted; nowidepixelQA/newDB/seed/production.
+- [x] 3.2 Rootactualruntime/stagingrevision/image/health/statusreturnaccepted; nowidepixelQA/newDB/seed/production.

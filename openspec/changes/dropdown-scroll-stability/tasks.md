@@ -8,4 +8,4 @@
 
 ## 2. Интеграция
 
-- [ ] 2.1 Root после всех №33–38 выполняет actual CRM browser acceptance и staging точного SHA; sandbox не заменяет приёмку приложения.
+- [x] 2.1 Root после всех №33–38 выполняет actual CRM browser acceptance и staging точного SHA; sandbox не заменяет приёмку приложения.
