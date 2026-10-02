@@ -51,7 +51,7 @@ export async function patchProductPercentageAction(input:ProductPercentagePatch)
   try {
     const user=await actor();
     const result=await withTaskTransaction(tx=>patchProductPercentageCore(user,input,tx));
-    if(result.ok&&!result.noOp&&!result.repeated)await revalidateProductPaths(input.productId).catch(()=>{});
+    // Partial fields return a compact receipt; page/status operations revalidate separately.
     return result;
   }catch(error){return{ok:false,kind:"failure",error:error instanceof Error?error.message:"Не удалось сохранить оплату изделия"};}
 }

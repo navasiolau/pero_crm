@@ -28,3 +28,8 @@
 Config.workReview — nullable Json array с exactworkId и classification COVERED|INDEPENDENT. Только реальные Payroll.workId либо Payroll.taskId→Task.workId подтверждают оплату; relevant works требуют явного review. COVERED+ужеPAID защищает ВЕСЬ этап как LEGACY_PROTECTED: никакого нового процента или выдуманной paidamount. INDEPENDENT сохраняет самостоятельный PIECE и допускает новый процент. COVERED+UNPAID подавляет будущий PIECE только через validated review read в completion writer, без нового глобального поляWork и без переписывания старогоPayroll. Review immutable послеcompletion; actor/date/revision фиксируются ChangeLog атомарно.
 
 Root уже создал реальную feature/23 от freshstagef33f574; перед интеграцией required ordinarymerge22 refresh. Это локальная authorization, не утверждение staging23 acceptance.
+
+## 5. Compact Transport Follow-up
+
+- [x] 5.1 ActualfullRSCboundaryFAIL послеPctcommit воспроизведён; compactfieldAction removesonlyrevalidateProductPaths, REDcounter1→GREEN2/2+controller7,TC/lint/rootBUILDfixPASS; legacyfrozenretry cachecounter1 сохранён, domain/money/migration unchanged.
+- [ ] 5.2 Новая deployedfixrevision/image/health и actualbrowser compactpercentageboundary приёмка; прежний542native/CI не подменяет этот wireproof, globalvisual не помечатьdone.
