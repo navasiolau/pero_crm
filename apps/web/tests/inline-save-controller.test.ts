@@ -20,3 +20,17 @@ test("typing is local until explicit commit; neighboring fields stay independent
 test("changed client conflict shows target and only explicit rebase retargets phone",async()=>{let target="client-old";const snapshots:{target:string;request:InlineRequest<string>}[]=[];let attempt=0;const c=createInlineSaveController<string>({initialValue:"111",format:v=>v,parse:v=>v,onRebase:s=>{target=s.currentClientId!;},save:async request=>{snapshots.push({target,request});return ++attempt===1?{kind:"conflict",error:"Client changed",currentValue:"222",currentClientId:"client-new",currentClientLabel:"New client"}:{kind:"saved",value:request.value};}});c.setDraft("333");assert.equal(await c.commit(),false);assert.equal(target,"client-old");assert.equal(c.getSnapshot().draft,"333");assert.equal(c.getSnapshot().currentClientLabel,"New client");assert.equal(await c.flush(),false);assert.equal(await c.rebaseAndRetry(),true);assert.equal(snapshots[1].target,"client-new");assert.equal(snapshots[1].request.expectedValue,"222");assert.equal(snapshots[1].request.value,"333");});
 
 test("typing a newer draft during slow save does not surprise-write until another trigger",async()=>{const s=setup();s.controller.setDraft("one");const first=s.controller.commit();s.controller.setDraft("partially typed next value");s.replies[0].resolve({kind:"saved",value:"one"});await first;assert.equal(s.calls.length,1);assert.equal(s.controller.getSnapshot().draft,"partially typed next value");assert.equal(s.controller.getSnapshot().status,"dirty");const blur=s.controller.commit();assert.equal(s.calls[1].expectedValue,"one");s.replies[1].resolve({kind:"saved",value:"partially typed next value"});await blur;});
+
+test("late hydrating consumer receives immutable initial server snapshot after another client consumer edits and saves",async()=>{
+ const s=setup();
+ const compatible=s.controller as typeof s.controller & {getServerSnapshot?:typeof s.controller.getSnapshot};
+ const readServer=compatible.getServerSnapshot??s.controller.getSnapshot;
+ const initialSSR=readServer();
+ s.controller.setDraft("already edited in hydrated consumer");const saving=s.controller.commit();
+ assert.equal(s.controller.getSnapshot().status,"saving");
+ assert.strictEqual(readServer(),initialSSR,"late hydration must reproduce the original SSR, not live client draft");
+ s.replies[0].resolve({kind:"saved",value:"already edited in hydrated consumer"});await saving;
+ assert.equal(s.controller.getSnapshot().baseline,"already edited in hydrated consumer");
+ assert.strictEqual(readServer(),initialSSR);assert.equal(readServer().draft,"old");assert.equal(readServer().status,"idle");assert.ok(Object.isFrozen(readServer()));
+ s.controller.receive("fresh ordinary client snapshot");assert.equal(s.controller.getSnapshot().draft,"fresh ordinary client snapshot");assert.strictEqual(readServer(),initialSSR);
+});

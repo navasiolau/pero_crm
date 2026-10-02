@@ -6,6 +6,9 @@ export type InlineOptions<V extends InlineValue> = {initialValue:V;format:(value
 // Очередь принадлежит одному полю; соседние поля сохраняются независимо.
 export function createInlineSaveController<V extends InlineValue>(options: InlineOptions<V>) {
   let state: InlineState<V> = { draft: options.format(options.initialValue), baseline: options.initialValue, status: "idle", error: null };
+  // Поздняя hydration должна читать тот же снимок, который дал исходный SSR.
+  // Клиентские edits/ACK/receive обновляют только live state, не этот объект.
+  const serverSnapshot = Object.freeze({ ...state });
   const listeners = new Set<() => void>();
   let generation = 0;
   let inflight: Promise<boolean> | null = null;
@@ -66,6 +69,7 @@ export function createInlineSaveController<V extends InlineValue>(options: Inlin
   }
   return {
     getSnapshot: () => state,
+    getServerSnapshot: () => serverSnapshot,
     subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
     setDraft,
     commit: () => start(),
