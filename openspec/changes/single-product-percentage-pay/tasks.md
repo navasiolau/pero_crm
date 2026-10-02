@@ -21,7 +21,7 @@
 
 ## 4. Deferred FINAL QA
 
-- [ ] 4.1 После20–26 complete выполнить comprehensive visual/pixel/sixsizes/zoom; до этого unchecked и не prerequisite essential23 release.
+- [x] 4.1 После20–26 complete выполнить comprehensive visual/pixel/sixsizes/zoom; до этого unchecked и не prerequisite essential23 release.
 
 ## Conservative Legacy Work Review
 
@@ -32,8 +32,12 @@ Root уже создал реальную feature/23 от freshstagef33f574; п�
 ## 5. Compact Transport Follow-up
 
 - [x] 5.1 ActualfullRSCboundaryFAIL послеPctcommit воспроизведён; compactfieldAction removesonlyrevalidateProductPaths, REDcounter1→GREEN2/2+controller7,TC/lint/rootBUILDfixPASS; legacyfrozenretry cachecounter1 сохранён, domain/money/migration unchanged.
-- [ ] 5.2 Новая deployedfixrevision/image/health и actualbrowser compactpercentageboundary приёмка; прежний542native/CI не подменяет этот wireproof, globalvisual не помечатьdone.
+- [x] 5.2 Новая deployedfixrevision/image/health и actualbrowser compactpercentageboundary приёмка; прежний542native/CI не подменяет этот wireproof, globalvisual не помечатьdone.
 
 ## Basic Integration Evidence Reconciliation
 
 Actual451image d629healthy/native23-stage.private.json exitCode0,targetstaging/native7/all43rollback. Basicdomainpay integration complete; latercompactwirefollowup5.2 remainsunchecked. Evidence linked in evidence.md; comprehensivevisual/lifecycle/wire pendingcheckpoints не отмечены.
+
+## Final Acceptance Reference
+
+Final321 acceptance evidence appended in evidence.md; actualstage3209dd4a+52474receipts and rootpersonalfullscreen/all6filled/empty1440/zoom confirmation complete deferredQA. PriorFAILED/STOP historicalrecords unchanged; task32notcomplete/mainreleaseexcluded.

@@ -19,8 +19,12 @@
 ## 4. Essential Acceptance
 
 - [x] 4.1 Root подтверждает essential build и targeted19+7server tests PASS, native3groups PASS. Это существенная локальная проверка; full-suite/lint результаты не выдумываются. No schema/dependencies/money/metadata migration; comprehensive visual deferred.
-- [ ] 4.2 Essential functional smoke реальной upload→fullscreen→cancel→confirmdelete→empty и denied/stale/error, exactown cleanup/prefs; actual21 staging SHA/image/health после ordinarymerge/CI и basic accepted20. Не запускать all6sizes/pixel QA на этом шаге.
+- [x] 4.2 Essential functional smoke реальной upload→fullscreen→cancel→confirmdelete→empty и denied/stale/error, exactown cleanup/prefs; actual21 staging SHA/image/health после ordinarymerge/CI и basic accepted20. Не запускать all6sizes/pixel QA на этом шаге.
 
 ## 5. Deferred FINAL QA after26
 
-- [ ] 5.1 После завершения20–26 выполнить итоговую личную visual/pixel приёмку пустого/заполненного эскиза:320×800,360×800,390×844,768×1024,1024×768,1440×900, resize/sidebar/actual200%zoom, финальная25позиция/overflow/error/role screenshots. До этого checkbox остаётся пустым, perfeature essential completion не выдаётся за finalvisual QA.
+- [x] 5.1 После завершения20–26 выполнить итоговую личную visual/pixel приёмку пустого/заполненного эскиза:320×800,360×800,390×844,768×1024,1024×768,1440×900, resize/sidebar/actual200%zoom, финальная25позиция/overflow/error/role screenshots. До этого checkbox остаётся пустым, perfeature essential completion не выдаётся за finalvisual QA.
+
+## Final Acceptance Reference
+
+Final321 acceptance evidence appended in evidence.md; actualstage3209dd4a+52474receipts and rootpersonalfullscreen/all6filled/empty1440/zoom confirmation complete deferredQA. PriorFAILED/STOP historicalrecords unchanged; task32notcomplete/mainreleaseexcluded.

@@ -28,3 +28,9 @@ test('installed BaseUI checkbox exposes visible role separately from its native 
  const previous=globalThis.React;globalThis.React=React;
  try{const html=renderToStaticMarkup(React.createElement(Checkbox,{id:'product-no-model'}));assert.match(html,/<span[^>]*role="checkbox"[^>]*>/);const native=html.match(/<input[^>]*id="product-no-model"[^>]*>/)?.[0];assert.ok(native);assert.match(native,/aria-hidden="true"/);assert.match(html,/data-slot="checkbox"/);}finally{globalThis.React=previous;}
 });
+test('fullscreen capture requires loaded opaque modal covering viewport and actual hit-test ownership',async()=>{
+ const {finalFullscreenVisible}=await import('./product-modernization-final-browser.mjs');
+ const ready={popup:{x:0,y:0,width:1440,height:900},viewport:{x:0,y:0,width:1440,height:900},imageLoaded:true,centerInside:true,opacity:1};
+ assert.equal(finalFullscreenVisible(ready),true);
+ for(const change of [{imageLoaded:false},{centerInside:false},{opacity:0},{popup:{...ready.popup,y:900}},{popup:{...ready.popup,width:400}}])assert.equal(finalFullscreenVisible({...ready,...change}),false);
+});
