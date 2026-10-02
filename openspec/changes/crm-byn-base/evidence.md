@@ -44,3 +44,11 @@ QA-артефакты и приватные runtime файлы ignored; секр
 5.2 commit/обычный merge/CI и 5.3 фактические staging SHA/образ/health/денежные/ролевые/browser сценарии остаются pending до выполнения оркестратором. Не объявлять tested staging по локальному build или source equality. Refresh/W07 сохраняются. Production manual gate и отдельное разрешение выпуска остаются будущими; production DB, deployment и миграции этой задачей не проверялись/не изменялись.
 
 Последняя денежная поправка: Decimal ROUND_HALF_UP проверен для 0,05 USD × 0,7 = 0,04 BYN. Реальный local native runner повторён: 7 проверок, полный rollback и неизменные отпечатки таблиц; сборка повторена успешно. Серверные лимиты складывают Decimal без промежуточного number.
+
+## Staging acceptance 02.10.2026
+
+Принята фактически развёрнутая ревизия 9fb844fc4b427cfa6df5c7d7741d79496260e328, образ sha256:dbcf9022d5fd03601c66d85eb79f9355300cdb1aff5ee3111eee07624d2ebf72; web/db healthy, прежние DB ID/StartedAt/том и W07 SHA сохранены. Native PostgreSQL: 7 проверок, полный rollback и совпавшие отпечатки. Compiled browser: 46 проверок ADMIN/MANAGER/ENGINEER в шести размерах, captured prefs CAS RESTORED, business/audit/time отпечатки совпали. Совмещённого MANAGER+ENGINEER в staging нет; этот сценарий проверен на local и unit, отсутствующую hosted-проверку не выдаём за выполненную. Настоящий browser tab zoom 200% проверен отдельно: PASS, профиль удалён точно по своему пути.
+
+Receipts: .playwright-mcp/modernization/staging-native-fb26926a-66e1-45da-9895-693b0de752a9/native-receipt.json; staging-browser-59de57ea-d545-4966-b2d5-63b1766db6fa/browser-receipt.json; staging-zoom-baf21a99-427a-42c0-9161-07eacba06182/browser-receipt.json. CI logs недоступны с текущими read:packages credentials; публикация образа gated needs:test в проверенном workflow. Git merge обычный, main остаётся f036823. Проверки не используют дамп, restic, новые БД или изменения production.
+
+QA упаковка исправлена после фактической проверки standalone image: реальные Zod factories bundled вместо отсутствующей внешней зависимости; namespace неиспользуемых locales исключён, размер 97 305 байт в пределах неизменённого 256 KiB guard. Серверное ядро и валидаторы не подменяются. Приватный stderr сохраняется только локально, наружу выдаётся безопасный код ошибки. Исправленные инструменты реально выполнены на принятой staging-ревизии.
