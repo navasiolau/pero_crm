@@ -20,6 +20,7 @@ import {
 const blankSection = (kind: ProductPercentageKind): ProductPercentageSectionView => ({
   kind,
   state: "DRAFT",
+  hasConfiguration: false,
   ratePercent: null,
   price: "10000.00",
   productCurrency: "BYN",

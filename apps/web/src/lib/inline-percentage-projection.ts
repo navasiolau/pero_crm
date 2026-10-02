@@ -7,8 +7,8 @@ type Participant = { userId: string; shareUnits: number };
 export function projectedPercentagePrice(state: ProductPercentageState, snapshot: string | null, confirmed: string | null | undefined) {
   return state === "DRAFT" && confirmed !== undefined ? confirmed : snapshot;
 }
-export function canRebaseSuggestedParticipants(input: { state: ProductPercentageState; existingMemberCount: number; previous: readonly Participant[]; next: readonly Participant[]; participants: readonly Participant[]; shares: Readonly<Record<string, string>>; otherDirty: boolean }) {
-  if (input.state !== "DRAFT" || input.existingMemberCount || input.otherDirty || JSON.stringify(input.previous) === JSON.stringify(input.next)) return false;
+export function canRebaseSuggestedParticipants(input: { state: ProductPercentageState; hasConfiguration: boolean; previous: readonly Participant[]; next: readonly Participant[]; participants: readonly Participant[]; shares: Readonly<Record<string, string>>; otherDirty: boolean }) {
+  if (input.state !== "DRAFT" || input.hasConfiguration || input.otherDirty || JSON.stringify(input.previous) === JSON.stringify(input.next)) return false;
   const originalShares = Object.fromEntries(input.previous.map(row => [row.userId, shareUnitsToPercentageText(row.shareUnits)]));
   return JSON.stringify(input.participants) === JSON.stringify(input.previous) && JSON.stringify(input.shares) === JSON.stringify(originalShares);
 }

@@ -186,13 +186,13 @@ function PercentageStageSection({
   const acknowledgedPrice = useSyncExternalStore(priceController?.subscribe ?? noSubscribe, () => priceController ? priceController.getSnapshot().baseline : section.price, () => section.price);
   const displayPrice = projectedPercentagePrice(section.state, section.price, priceController && canViewAll ? acknowledgedPrice === null ? null : String(acknowledgedPrice) : undefined);
   useLayoutEffect(() => {
-    if (canRebaseSuggestedParticipants({ state: section.state, existingMemberCount: section.members.length, previous: previousInitial.current, next: initial, participants, shares,
+    if (canRebaseSuggestedParticipants({ state: section.state, hasConfiguration: section.hasConfiguration, previous: previousInitial.current, next: initial, participants, shares,
       otherDirty: rate !== (section.ratePercent ?? "") || Boolean(installationWorkIds.length || reviewedLegacyWorks || addUserId || transferUserId || transferPercent) })) {
       setParticipants(initial);
       setShares(Object.fromEntries(initial.map(row => [row.userId, shareUnitsToPercentageText(row.shareUnits)])));
     }
     previousInitial.current = initial;
-  }, [initial, section.state, section.members.length, section.ratePercent, participants, shares, rate, installationWorkIds.length, reviewedLegacyWorks, addUserId, transferUserId, transferPercent]);
+  }, [initial, section.state, section.hasConfiguration, section.ratePercent, participants, shares, rate, installationWorkIds.length, reviewedLegacyWorks, addUserId, transferUserId, transferPercent]);
 
 
   const shareRows = useMemo(() => participants.map((row) => {

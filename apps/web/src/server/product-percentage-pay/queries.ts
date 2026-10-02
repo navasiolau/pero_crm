@@ -59,6 +59,7 @@ export async function getProductPercentageView(actor: { id: string; roles: Role[
           ? [{ userId: product.engineerId, name: product.engineer.name, shareUnits: 1000000, amount: null }] : []);
     const ownMember = members.find((row) => row.userId === actor.id) ?? null;
     const view: ProductPercentageSectionView = {
+      hasConfiguration: Boolean(config),
       kind, state: completion?.state ?? (pool?.state === "SETTLED" || pool?.state === "LEGACY_PROTECTED" ? "LEGACY_PROTECTED" : "DRAFT"),
       ratePercent: financeView ? (displayCompletion?.ratePercentSnapshot ?? config?.ratePercent)?.toString() ?? null : null,
       price: financeView ? (displayCompletion?.priceSnapshot ?? product.expectedPrice)?.toString() ?? null : null,

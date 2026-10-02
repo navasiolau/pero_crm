@@ -7,8 +7,8 @@ test("DRAFT uses newly acknowledged unit price, including zero/null; frozen snap
 });
 test("only pristine suggested receiver follows acknowledged engineer; explicit recipients and drafts stay",()=>{
  const previous=[{userId:"old-engineer",shareUnits:1000000}],next=[{userId:"new-engineer",shareUnits:1000000}];
- const input={state:"DRAFT" as const,existingMemberCount:0,previous,next,participants:previous,shares:{"old-engineer":"100"},otherDirty:false};
- assert.equal(canRebaseSuggestedParticipants(input),true);assert.equal(canRebaseSuggestedParticipants({...input,existingMemberCount:1}),false);assert.equal(canRebaseSuggestedParticipants({...input,otherDirty:true}),false);assert.equal(canRebaseSuggestedParticipants({...input,shares:{"old-engineer":"50"}}),false);assert.equal(canRebaseSuggestedParticipants({...input,state:"SETTLED"}),false);
+ const input={state:"DRAFT" as const,hasConfiguration:false,previous,next,participants:previous,shares:{"old-engineer":"100"},otherDirty:false};
+ assert.equal(canRebaseSuggestedParticipants(input),true);assert.equal(canRebaseSuggestedParticipants({...input,hasConfiguration:true}),false);assert.equal(canRebaseSuggestedParticipants({...input,otherDirty:true}),false);assert.equal(canRebaseSuggestedParticipants({...input,shares:{"old-engineer":"50"}}),false);assert.equal(canRebaseSuggestedParticipants({...input,state:"SETTLED"}),false);
 });
 
 test("DRAFT total follows acknowledged unit price and existing rate; no quantity multiplier or frozen rewrite",()=>{

@@ -10,6 +10,7 @@ export interface ProductPercentageMemberView {
 export interface ProductPercentageSectionView {
   kind: ProductPercentageKind;
   state: ProductPercentageState;
+  hasConfiguration: boolean;
   ratePercent: string | null;
   price: string | null;
   productCurrency: string;
