@@ -7,7 +7,7 @@ import type {ProductPercentagePatch} from "../src/server/product-percentage-pay/
 const require=createRequire(import.meta.url);
 type FixturePlugin={onResolve:(options:{filter:RegExp},callback:(args:{path:string})=>{path:string;namespace:string}|null)=>void;onLoad:(options:{filter:RegExp;namespace:string},callback:(args:{path:string})=>{contents:string;loader:"js"})=>void};
 type BuildOptions={entryPoints:string[];absWorkingDir:string;bundle:boolean;write:boolean;format:"cjs";platform:"node";target:string;logLevel:"silent";plugins:{name:string;setup:(plugin:FixturePlugin)=>void}[]};
-const {build}=require("esbuild") as {build:(options:BuildOptions)=>Promise<{outputFiles:{text:string}[]}>};
+const {build}=createRequire(require.resolve("tsx/package.json"))("esbuild") as {build:(options:BuildOptions)=>Promise<{outputFiles:{text:string}[]}>};
 async function actualActions(){
  const probe={cacheCalls:0,domainCalls:0,inputs:[] as ProductPercentagePatch[],patch:async(input:ProductPercentagePatch)=>{probe.domainCalls++;probe.inputs.push(input);return{ok:true,kind:"saved",field:input.field,value:input.value,revision:1,clientMutationId:input.clientMutationId,noOp:false,repeated:false}}};
  const stubs:Record<string,string>={
