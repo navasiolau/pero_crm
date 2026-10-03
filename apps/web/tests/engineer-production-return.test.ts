@@ -17,7 +17,7 @@ test("current engineer card/kanban allows both directions without a model; snaps
 });
 test("assigned production read does not expand technical edit or legacy participant visibility",()=>{
  const actor={id:"e",roles:["ENGINEER" as Role],engineeringParticipantProductIds:["old"]};
- const row={id:"p",engineerId:"e",status:"PRODUCTION"};
+ const row={id:"p",deletedAt:null,project:{deletedAt:null},engineerId:"e",status:"PRODUCTION"};
  assert.equal(matches(row,productVisibilityWhere(actor) as FixtureRow),true);
  assert.equal(matches(row,productEditWhere(actor) as FixtureRow),false);
  assert.equal(matches({id:"old",engineerId:"foreign",status:"DESIGN"},productVisibilityWhere(actor) as FixtureRow),false);

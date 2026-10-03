@@ -1,3 +1,4 @@
+import {liveProjectWhere,liveProductWhere,liveChildWhere} from "@/server/access/live-entities";
 import { projectTotal as calculateProjectTotal } from "@/lib/product-quantity";
 import { redirect } from "next/navigation"
 
@@ -30,15 +31,16 @@ export default async function DashboardPage() {
   todayEnd.setHours(23, 59, 59, 999);
 
   const [inWork, tasksToday, activeUsers, recent] = await Promise.all([
-    prisma.project.count({ where: { stage: "IN_WORK" } }),
+    prisma.project.count({ where: { ...liveProjectWhere,stage: "IN_WORK" } }),
     prisma.task.count({
-      where: { status: { not: "DONE" }, dueAt: { lte: todayEnd } },
+      where: { ...liveChildWhere,status: { not: "DONE" }, dueAt: { lte: todayEnd } },
     }),
     prisma.user.count({ where: { active: true } }),
     prisma.project.findMany({
+      where:liveProjectWhere,
       include: {
         client: { select: { name: true, lastName: true, middleName: true } },
-        products: { select: { expectedPrice: true, quantity: true } },
+        products: { where:liveProductWhere,select: { expectedPrice: true, quantity: true } },
       },
       orderBy: { createdAt: "desc" },
       take: 5,

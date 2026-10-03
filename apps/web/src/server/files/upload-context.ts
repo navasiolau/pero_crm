@@ -17,7 +17,7 @@ export async function resolveUploadContext(
     select: {
       id: true, number: true,
       products: { where: engineeringProductWhere(actor), select: { id: true }, take: 1 },
-      tasks: { where: { assigneeId: actor.id }, select: { id: true }, take: 1 },
+      tasks: { where: { AND:[{ assigneeId: actor.id },taskVisibilityWhere(actor)] }, select: { id: true }, take: 1 },
     },
   });
   if (!project) return null;

@@ -10,7 +10,7 @@ export function matches(row: FixtureRow | null, where: FixtureRow = {}): boolean
     if (key === "AND") return (Array.isArray(condition) ? condition : [condition]).every((part) => matches(row, part as FixtureRow));
     if (key === "OR") return (condition as FixtureRow[]).some((part) => matches(row, part));
     if (key === "NOT") return !matches(row, condition as FixtureRow);
-    const value = row[key];
+    const value = key === "deletedAt" && row[key] === undefined ? null : row[key];
     if (!object(condition)) return value === condition;
     if ("in" in condition) return (condition.in as unknown[]).includes(value);
     if ("notIn" in condition) return !(condition.notIn as unknown[]).includes(value);
@@ -37,7 +37,7 @@ function project(row: FixtureRow, query: Query): FixtureRow {
       ]));
     } else if (option === true) result[key] = row[key];
     else if (object(option)) {
-      const value = row[key];
+      const value = key === "deletedAt" && row[key] === undefined ? null : row[key];
       result[key] = Array.isArray(value)
         ? queryRows(value as FixtureRow[], option)
         : value && matches(value as FixtureRow, option.where as FixtureRow) ? project(value as FixtureRow, option) : null;

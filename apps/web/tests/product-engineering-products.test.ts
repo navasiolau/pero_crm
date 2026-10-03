@@ -15,7 +15,7 @@ function seed(status = "DESIGN", poolState = "DRAFT") {
   state.pools.push({ id: "pool", productId: "product", kind: "ENGINEERING", state: poolState, revision: 0 });
 }
 function product(where: Row) {
-  const row = state.products.find((item) => matches(item, where));
+  const row = state.products.find((item) => matches({...item,project:{deletedAt:null}}, where));
   return row ? { ...row, stagePayPools: state.pools.filter((pool) => pool.productId === row.id),
     project: { currency: "BYN" }, percentageConfigs: [], files: [], works: [],
     _count: { tasks: 0, works: 0, projectMaterials: 0, stockMovements: 0 } } : null;
@@ -32,15 +32,15 @@ const db = {
     findMany: async () => state.products,
     findUnique: async ({ where }: { where: Row }) => product(where), findFirst: async ({ where }: { where: Row }) => product(where),
     create: async ({ data }: { data: Row }) => { const row = { id: "created", status: "DESIGN", ...data }; state.products.push(row); return row; },
-    update: async ({ where, data }: { where: Row; data: Row }) => { const row = state.products.find((item) => matches(item, where))!; apply(row, data); return row; },
-    delete: async ({ where }: { where: Row }) => { state.products = state.products.filter((item) => !matches(item, where)); },
+    update: async ({ where, data }: { where: Row; data: Row }) => { const row = state.products.find((item) => matches({...item,project:{deletedAt:null}}, where))!; apply(row, data); return row; },
+    delete: async ({ where }: { where: Row }) => { state.products = state.products.filter((item) => !matches({...item,project:{deletedAt:null}}, where)); },
   },
   productStagePayPool: {
     findUnique: async ({ where }: { where: Row }) => state.pools.find((item) => matches(item, (where.productId_kind ?? where) as Row)) ?? null,
     create: async ({ data }: { data: Row }) => { if (failPool) throw new Error("Injected pool failure"); const row = { id: "pool-created", revision: 0, ...data }; state.pools.push(row); return row; },
-    count: async ({ where }: { where: Row }) => state.pools.filter((item) => matches(item, where)).length,
-    updateMany: async ({ where, data }: { where: Row; data: Row }) => { const rows = state.pools.filter((item) => matches(item, where)); rows.forEach((item) => apply(item, data)); return { count: rows.length }; },
-    deleteMany: async ({ where }: { where: Row }) => { state.pools = state.pools.filter((item) => !matches(item, where)); },
+    count: async ({ where }: { where: Row }) => state.pools.filter((item) => matches({...item,project:{deletedAt:null}}, where)).length,
+    updateMany: async ({ where, data }: { where: Row; data: Row }) => { const rows = state.pools.filter((item) => matches({...item,project:{deletedAt:null}}, where)); rows.forEach((item) => apply(item, data)); return { count: rows.length }; },
+    deleteMany: async ({ where }: { where: Row }) => { state.pools = state.pools.filter((item) => !matches({...item,project:{deletedAt:null}}, where)); },
   },
   productPercentageCompletion: {
     findUnique: async ({ where }: { where: Row }) => state.completions.find((row) => matches(row,

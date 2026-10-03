@@ -1,3 +1,4 @@
+import {liveProjectWhere,liveProductWhere} from "@/server/access/live-entities";
 import { projectTotal as calculateProjectTotal } from "@/lib/product-quantity";
 import { NextResponse } from "next/server";
 
@@ -32,13 +33,13 @@ export async function GET(
 
   const { id } = await params;
   const project = await prisma.project.findUnique({
-    where: { id },
+    where: {...liveProjectWhere, id },
     include: {
       client: {
         select: { name: true, lastName: true, middleName: true, phone: true },
       },
       manager: { select: { name: true } },
-      products: { select: { expectedPrice: true, quantity: true } },
+      products: { where:liveProductWhere, select: { expectedPrice: true, quantity: true } },
     },
   });
   if (!project) {

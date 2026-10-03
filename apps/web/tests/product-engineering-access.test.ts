@@ -1,3 +1,4 @@
+import {liveProductWhere} from "../src/server/access/live-entities";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { PrismaClient, Role } from "@prisma/client";
@@ -32,7 +33,7 @@ test("participant resolver accepts zero-share assignment and rejects every misma
 
 test("participant predicates remain DESIGN scoped; independent manager and field grants survive", () => {
   const participant = { id: "u", roles: ["ENGINEER"] as Role[], engineeringParticipantProductIds: ["p"], engineeringParticipantTaskIds: ["task"] };
-  assert.deepEqual(productEditWhere(participant), { status: "DESIGN", OR: [{ engineerId: "u" }, { id: { in: ["p"] } }] });
+  assert.deepEqual(productEditWhere(participant), {AND:[liveProductWhere,{AND:[liveProductWhere,{ status: "DESIGN", OR: [{ engineerId: "u" }, { id: { in: ["p"] } }] }]}]});
   const read = JSON.stringify(productVisibilityWhere(participant));
   assert.match(read, /DESIGN/);
   assert.match(read, /engineerId/);
@@ -40,11 +41,11 @@ test("participant predicates remain DESIGN scoped; independent manager and field
   const execution = JSON.stringify(taskExecutionWhere(participant));
   assert.match(execution, /"task"/);
   assert.match(execution, /DESIGN/);
-  assert.deepEqual(productEditWhere({ id: "u", roles: ["MANAGER"] }), {});
+  assert.deepEqual(productEditWhere({ id: "u", roles: ["MANAGER"] }), {AND:[liveProductWhere,{}]});
   const field = JSON.stringify(productVisibilityWhere({ id: "u", roles: ["WORKER"] }));
   assert.match(field, /assigneeId/);
   assert.match(field, /not":"DESIGN/);
-  assert.deepEqual(productVisibilityWhere({ id: "u", roles: [] }), { OR: [{ id: { in: [] } }] });
+  assert.deepEqual(productVisibilityWhere({ id: "u", roles: [] }), {AND:[liveProductWhere,{ OR: [{AND:[liveProductWhere,{ id: { in: [] } }]}] }]});
 });
 
 test("legacy ENGINEERING recipient facts remain readable but no new split is offered", () => {
