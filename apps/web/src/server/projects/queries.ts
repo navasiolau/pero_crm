@@ -12,6 +12,7 @@ import { STAGES } from "@/lib/stages";
 import { taskDetailsIncludeFor } from "@/server/tasks/queries";
 import { listProjectShortages } from "@/server/warehouse/queries";
 import { productSketchProjection } from "@/server/products/sketch-projection";
+import { projectCoverProjection } from "./cover-projection";
 import { clientVisibilityWhere, engineeringParticipantProductIds, fileVisibilityWhere, hasFullProjectVisibility, productVisibilityWhere, projectVisibilityWhere, resolveVisibilityActor, taskVisibilityWhere, workVisibilityWhere, type VisibilityActor } from "@/server/access/visibility";
 
 function scopedProjectAmounts<T extends { initialPrice: unknown; delivery: unknown; unloading: unknown; installation: unknown }>(project: T, actor: VisibilityActor) {
@@ -198,6 +199,8 @@ async function fetchProjectRows(
     include: {
       client: { select: { id: true, name: true, lastName: true, middleName: true } },
       manager: { select: { id: true, name: true } },
+      coverFile: projectCoverProjection(actor),
+      stageHistory: { orderBy: { createdAt: "desc" }, take: 1, select: { toStage: true, createdAt: true } },
       products: { where: productVisibilityWhere(actor), select: { id: true, expectedPrice: true, quantity: true } },
       _count: { select: {
         tasks: { where: taskVisibilityWhere(actor) },
@@ -231,6 +234,7 @@ export async function getProjectFor(
   const project = await prisma.project.findFirst({
     where: { AND: [{ id: projectId }, projectVisibilityWhere(actor)] },
     include: {
+      coverFile: projectCoverProjection(actor),
       client: true,
       manager: { select: { id: true, name: true } },
       products: {

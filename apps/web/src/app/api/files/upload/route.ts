@@ -18,6 +18,9 @@ import { afterUploadCommit, uploadFailure, UploadError, type UploadPhase, type C
 import { notifyOrg } from "@/server/notifications/notify";
 import { getFileStageConfig } from "@/server/files/stage-config";
 import { withTaskTransaction } from "@/server/tasks/transaction";
+import {projectCoverUploadSchema,type ProjectCoverUpload} from "@/server/projects/cover-contract";
+import {authorizeProjectCoverUpload,persistProjectCoverUpload} from "@/server/projects/cover-core";
+import {revalidatePath} from "next/cache";
 import {
   FILE_STAGES,
   validateFileForCategory,
@@ -91,6 +94,19 @@ async function upload(request:Request,state:{phase:UploadPhase;commitState:Commi
   }
   let coverTarget: SketchUploadTarget | undefined;
   let replayCover = false;
+  const projectCoverRaw=form.get("assignProjectCover"),assignProjectCover=projectCoverRaw==="1";
+  let projectCoverTarget:ProjectCoverUpload|undefined,replayProjectCover=false;
+  if(projectCoverRaw!==null){
+    if(!assignProjectCover||coverRaw!==null||form.get("productId")!==null||form.get("taskId")!==null||form.get("stage")!==null||form.get("category")!=="PHOTO")
+      return NextResponse.json({error:"Неверный контекст обложки проекта"},{status:422});
+    if(!isCoverImageMime(file.type))return NextResponse.json({error:"Нужно изображение поддерживаемого формата"},{status:415});
+    const parsed=projectCoverUploadSchema.safeParse({projectId,expectedCoverFileId:form.get("expectedCoverFileId")==="null"?null:undefined,clientMutationId:form.get("clientMutationId")});
+    if(!parsed.success)return NextResponse.json({error:"Обновите форму обложки проекта"},{status:422});
+    projectCoverTarget=parsed.data;
+    const permission=await authorizeProjectCoverUpload(prisma,session.user,parsed.data);
+    if(!permission.ok)return NextResponse.json(permission,{status:permission.kind==="conflict"?409:404});
+    replayProjectCover=permission.replayHint;
+  }
   if (assignCover) {
     if (!requestedProductId || taskId || form.get("category") !== "PHOTO") {
       return NextResponse.json({ error: "Для обложки нужны изделие и категория Фото без задачи" }, { status: 400 });
@@ -159,9 +175,17 @@ async function upload(request:Request,state:{phase:UploadPhase;commitState:Commi
   const contentHash = createHash("sha256").update(buffer).digest("hex");
   const fingerprint=uploadFingerprint({actorId:session.user.id,projectId,productId,taskId,category,stage:stage??"PRODUCTION",
     fileName:file.name,mimeType:file.type,size:buffer.length,contentHash});
-  if(!assignCover){
+  if(!assignCover&&!assignProjectCover){
     const prior=await readUploadReceipt(prisma,session.user.id,clientMutationId,fingerprint);
     if(prior)return NextResponse.json({ok:true,...prior});
+  }
+  if(assignProjectCover&&replayProjectCover&&projectCoverTarget){
+    const result=await withTaskTransaction(tx=>persistProjectCoverUpload(tx,session.user,projectCoverTarget!,{fileName:file.name,storedName,mimeType:file.type,size:file.size,hasThumb:false,contentHash}));
+    if(!result.ok)return NextResponse.json(result,{status:result.kind==="conflict"?409:422});
+    state.commitState="committed";
+    const cover=await prisma.file.findUnique({where:{id:result.id},select:{id:true,fileName:true,mimeType:true,hasThumb:true}});
+    if(!cover)return NextResponse.json({error:"Обложка этого запроса уже удалена",kind:"conflict"},{status:409});
+    return NextResponse.json({...result,cover});
   }
   if (assignCover && replayCover && coverTarget) {
     const result = await withTaskTransaction(tx => persistUploadedProductCover(tx,session.user,coverTarget!,{
@@ -179,13 +203,13 @@ async function upload(request:Request,state:{phase:UploadPhase;commitState:Commi
     state.phase="image";
     try {
       const image = sharp(buffer);
-      thumbBuffer = await (assignCover ? image.rotate() : image)
+      thumbBuffer = await (assignCover||assignProjectCover ? image.rotate() : image)
         .resize(480, 480, { fit: "inside", withoutEnlargement: true })
         .jpeg({ quality: 80 })
         .toBuffer();
       hasThumb = true;
     } catch {
-      if (assignCover) {
+      if (assignCover||assignProjectCover) {
         return NextResponse.json({ error: "Не удалось прочитать изображение обложки" }, { status: 422 });
       }
       hasThumb = false; // битая картинка — отдадим оригинал
@@ -227,6 +251,19 @@ async function upload(request:Request,state:{phase:UploadPhase;commitState:Commi
 
   state.phase="persist";
   state.commitState="unknown";
+  if(assignProjectCover&&projectCoverTarget){
+    let callbackCompleted=false;
+    let result:Awaited<ReturnType<typeof persistProjectCoverUpload>>;
+    try{result=await withTaskTransaction(async tx=>{const saved=await persistProjectCoverUpload(tx,session.user,projectCoverTarget!,{fileName:file.name,storedName,mimeType:file.type,size:file.size,hasThumb,contentHash});callbackCompleted=true;return saved;});}
+    catch(error){if(!callbackCompleted){state.commitState="notCommitted";await compensateOwnCover();}throw error;}
+    if(!result.ok){state.commitState="notCommitted";await compensateOwnCover();return NextResponse.json(result,{status:result.kind==="conflict"?409:404});}
+    if(result.repeated)await compensateOwnCover();
+    state.commitState="committed";state.phase="confirmation";
+    await afterUploadCommit(async()=>{revalidatePath(`/projects/${projectId}`);},requestId);
+    if(!result.repeated)await afterUploadCommit(()=>notifyOrg({type:"file.added",title:`Обложка проекта ${project.number}`,body:file.name,link:`/projects/${projectId}`,exceptUserId:session.user.id}),requestId);
+    const cover=await prisma.file.findUnique({where:{id:result.id},select:{id:true,fileName:true,mimeType:true,hasThumb:true}});
+    return NextResponse.json({...result,cover});
+  }
   if (assignCover && requestedProductId) {
     let result: Awaited<ReturnType<typeof persistUploadedProductCover>>;
     let callbackCompleted=false;

@@ -8,8 +8,10 @@ import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
 export function AppShell({
   user,
   headerExtras,
+  calendarEnabled = false,
   children,
 }: {
+  calendarEnabled?: boolean
   user: ShellUser
   headerExtras?: React.ReactNode
   children: React.ReactNode
@@ -23,7 +25,7 @@ export function AppShell({
         } as React.CSSProperties
       }
     >
-      <AppSidebar roles={user.roles} variant="inset" />
+      <AppSidebar calendarEnabled={calendarEnabled} roles={user.roles} variant="inset" />
       <SidebarInset>
         <SiteHeader user={user} extras={headerExtras} />
         <main className="@container/main flex min-w-0 flex-1 flex-col px-4 py-4 md:py-6 lg:px-6">

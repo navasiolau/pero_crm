@@ -5,6 +5,7 @@ import {renderToStaticMarkup} from 'react-dom/server';
 import test from 'node:test';
 const require=createRequire(import.meta.url);
 function inject(path:string,exports:Record<string,unknown>){const file=require.resolve(path);const stub=new Module(file);stub.filename=file;stub.loaded=true;stub.exports=exports;require.cache[file]=stub;}
+inject('next/navigation',{useRouter:()=>({refresh(){throw Error('SSR_WRITE_FORBIDDEN')}})});
 inject('../src/lib/independent-project-action',{invokeProjectPatch(){throw Error('SSR_WRITE_FORBIDDEN')}});
 inject('../src/server/clients/actions',{createClient(){throw Error('SSR_WRITE_FORBIDDEN')},updateClient(){throw Error('SSR_WRITE_FORBIDDEN')}});
 inject('../src/components/project-stage-control',{ProjectStageControl(){return React.createElement('div',null,'Статус')}});

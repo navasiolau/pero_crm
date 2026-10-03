@@ -1,3 +1,4 @@
+import {liveProjectWhere,liveProductWhere} from "@/server/access/live-entities";
 import {assertProjectCurrencyChange} from "@/server/product-stage-pay/core";
 import {assertPercentageProjectCurrencyChange} from "@/server/product-percentage-pay/core";
 import {createHash} from "node:crypto";
@@ -36,7 +37,7 @@ async function validateManager(tx:Prisma.TransactionClient,value:ProjectPatchVal
  if(value!==null&&!await tx.user.findFirst({where:{id:value,active:true,roles:{hasSome:MANAGER_ROLES}},select:{id:true}}))throw Error("Выберите активного менеджера");
 }
 async function lightweightTotal(tx:Prisma.TransactionClient,projectId:string,project:Pick<Project,"delivery"|"unloading"|"installation">) {
- const products=await tx.product.findMany({where:{projectId},select:{expectedPrice:true,quantity:true}});
+ const products=await tx.product.findMany({where:{...liveProductWhere,projectId},select:{expectedPrice:true,quantity:true}});
  // Неполная оценка не превращается в известный ноль. Запись услуги при этом валидна.
  const productsSubtotalBYN=products.some(product=>product.expectedPrice===null)?null:productsTotal(products);
  const expectedTotalBYN=productsSubtotalBYN===null?null:decimalText(decimalAtoms(productsSubtotalBYN,2,18)+services.reduce((sum,field)=>sum+decimalAtoms(project[field]??"0",2,12),BigInt(0)),2);
@@ -50,7 +51,7 @@ export async function getProjectPricingProjection(actor:DomainActor,projectId:st
  if(!hasAnyRole(actor.roles,MANAGER_ROLES)&&!hasAnyRole(actor.roles,FINANCE_ROLES))return null;
  return transaction(async tx=>{
   await tx.$queryRaw`SELECT id FROM "Project" WHERE id = ${projectId} FOR UPDATE`;
-  const project=await tx.project.findUnique({where:{id:projectId},select:{currency:true,delivery:true,unloading:true,installation:true}});
+  const project=await tx.project.findUnique({where:{...liveProjectWhere,id:projectId},select:{currency:true,delivery:true,unloading:true,installation:true}});
   if(!project||project.currency!==INTERNAL_CURRENCY)return null;
   return lightweightTotal(tx,projectId,project);
  });
@@ -62,7 +63,7 @@ export async function patchProjectCore(actor:DomainActor,input:ProjectPatch,tran
  const receiptId=`project-inline:${patch.clientMutationId}`,fingerprint=createHash("sha256").update(JSON.stringify(patch)).digest("hex");
  try{return await transaction(async tx=>{
   await tx.$queryRaw`SELECT id FROM "Project" WHERE id = ${patch.projectId} FOR UPDATE`;
-  const project=await tx.project.findUnique({where:{id:patch.projectId},select:{id:true,title:true,clientId:true,managerId:true,address:true,currency:true,delivery:true,unloading:true,installation:true}});
+  const project=await tx.project.findUnique({where:{...liveProjectWhere,id:patch.projectId},select:{id:true,title:true,clientId:true,managerId:true,address:true,currency:true,delivery:true,unloading:true,installation:true}});
   if(!project)return{...identity,kind:"not-found",error:"Проект не найден"};
   const receipt=await tx.changeLog.findUnique({where:{id:receiptId}});
   if(receipt){const saved=receipt.newValue;
@@ -100,7 +101,7 @@ export async function updateProjectFieldsCore(actor:DomainActor,projectId:string
  const {baseline,...values}=parsed.data;
  try{return await transaction(async tx=>{
   await tx.$queryRaw`SELECT id FROM "Project" WHERE id = ${projectId} FOR UPDATE`;
-  const current=await tx.project.findUnique({where:{id:projectId}});if(!current)return{ok:false,error:"Проект не найден"};
+  const current=await tx.project.findUnique({where:{...liveProjectWhere,id:projectId}});if(!current)return{ok:false,error:"Проект не найден"};
   const data:Record<string,ProjectPatchValue>={};
   for(const field of legacyFields){if(values[field]===undefined)continue;
    if(!baseline||!Object.prototype.hasOwnProperty.call(baseline,field))throw Error("Обновите форму: требуется исходное значение изменённых полей");

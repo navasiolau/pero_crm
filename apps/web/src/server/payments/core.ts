@@ -1,3 +1,4 @@
+import {liveProjectWhere} from "@/server/access/live-entities";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { Prisma } from "@prisma/client";
@@ -48,7 +49,7 @@ export async function createPaymentCore(
   if (!isCurrency(data.currency)) return { ok: false, error: "Неизвестная валюта" };
 
   const project = await prisma.project.findUnique({
-    where: { id: data.projectId },
+    where: {...liveProjectWhere, id: data.projectId },
     select: { id: true, number: true, currency: true },
   });
   if (!project) return { ok: false, error: "Проект не найден" };
@@ -119,7 +120,7 @@ export async function createPaymentCore(
   try {
     payment = await withTaskTransaction(async (tx) => {
       const [currentProject, currentAccount, currentArticle] = await Promise.all([
-        tx.project.findUnique({ where: { id: project.id }, select: { currency: true } }),
+        tx.project.findUnique({ where: {...liveProjectWhere, id: project.id }, select: { currency: true } }),
         tx.cashAccount.findUnique({ where: { id: account.id }, select: { active: true, currency: true } }),
         articleId ? tx.expenseArticle.findUnique({ where: { id: articleId }, select: { active: true } }) : Promise.resolve(null),
       ]);

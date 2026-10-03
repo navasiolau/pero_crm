@@ -179,6 +179,7 @@ export default async function ProjectPage({
             // содержит Decimal (works/tasks/payments) — через RSC-границу нельзя.
             project={{
               id: project.id,
+              coverFile: project.coverFile,
               number: project.number,
               stage: project.stage,
               stageChangedAt: project.stageChangedAt,

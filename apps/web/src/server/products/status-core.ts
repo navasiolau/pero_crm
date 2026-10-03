@@ -1,3 +1,4 @@
+import {liveProductWhere} from "@/server/access/live-entities";
 import type { Prisma, ProductStatus } from "@prisma/client";
 import { hasAnyRole, MANAGER_ROLES } from "@/lib/roles";
 import { productStatusLabels } from "@/lib/product-statuses";
@@ -10,7 +11,7 @@ import type { DomainActor } from "@/server/projects/core";
 export async function changeProductStatusTransaction(tx: Prisma.TransactionClient, actor: DomainActor,
   productId: string, toStatus: ProductStatus, comment?: string) {
   if (!Object.hasOwn(productStatusLabels, toStatus)) return { ok: false as const, error: "Неизвестный статус изделия" };
-  const product = await tx.product.findUnique({ where: { id: productId } });
+  const product = await tx.product.findUnique({ where: {...liveProductWhere, id: productId } });
   if (!product) return { ok: false as const, error: "Изделие не найдено" };
   const decision = decideProductPercentageStatus(actor.roles, { from: product.status, to: toStatus,
     assignedEngineer: product.engineerId === actor.id,

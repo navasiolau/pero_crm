@@ -1,3 +1,4 @@
+import {liveProjectWhere} from "@/server/access/live-entities";
 import {createHash} from 'node:crypto';
 import {Prisma} from '@prisma/client';
 import {MANAGER_ROLES,hasAnyRole} from '@/lib/roles';
@@ -12,7 +13,7 @@ export async function patchProjectStageTransaction(actor:DomainActor,input:unkno
  const fail=(kind:ProjectStageResult['kind'],error:string,extra:Partial<ProjectStageResult>={})=>({result:{ok:false,kind,error,clientMutationId:patch.clientMutationId,...extra},eventIds:[]});
  if(!hasAnyRole(actor.roles,MANAGER_ROLES))return fail('forbidden','Недостаточно прав');
  await tx.$queryRaw`SELECT id FROM "Project" WHERE id = ${patch.projectId} FOR UPDATE`;
- const project=await tx.project.findUnique({where:{id:patch.projectId},select:{id:true,stage:true,number:true,title:true}});
+ const project=await tx.project.findUnique({where:{...liveProjectWhere,id:patch.projectId},select:{id:true,stage:true,number:true,title:true}});
  if(!project)return fail('not-found','Проект не найден');
  const receiptId=`project-stage:${patch.clientMutationId}`;
  const fingerprint=createHash('sha256').update(JSON.stringify(patch)).digest('hex');

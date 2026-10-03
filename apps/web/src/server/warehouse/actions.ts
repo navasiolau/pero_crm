@@ -1,4 +1,5 @@
-﻿"use server";
+"use server";
+import {liveProductWhere} from "@/server/access/live-entities";
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
@@ -378,7 +379,7 @@ export async function deleteProjectMaterial(
   try {
     line = await withTaskTransaction(async (tx) => {
       await lockMaterialProduct(tx, id);
-      const line = await tx.projectMaterial.findUnique({ where: { id }, include: {
+      const line = await tx.projectMaterial.findUnique({ where: {product:liveProductWhere, id }, include: {
         material: { select: { name: true } }, product: { select: { projectId: true } },
       } });
       if (!line) throw new Error("Строка не найдена");
@@ -426,7 +427,7 @@ export async function requestMaterial(
     const result = await prisma.$transaction(async (tx) => {
       await lockMaterialProduct(tx, data.projectMaterialId);
       const line = await tx.projectMaterial.findUnique({
-        where: { id: data.projectMaterialId },
+        where: {product:liveProductWhere, id: data.projectMaterialId },
         include: {
           material: { select: { id: true, name: true, unit: true, purchasePrice: true } },
           product: { select: { id: true, number: true, projectId: true } },
@@ -550,7 +551,7 @@ export async function returnMaterial(
     const { movement, line } = await prisma.$transaction(async (tx) => {
       await lockMaterialProduct(tx, data.projectMaterialId);
       const line = await tx.projectMaterial.findUnique({
-        where: { id: data.projectMaterialId },
+        where: {product:liveProductWhere, id: data.projectMaterialId },
         include: {
           material: { select: { id: true, name: true, unit: true, purchasePrice: true } },
           product: { select: { id: true, number: true, projectId: true } },

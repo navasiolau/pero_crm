@@ -1,3 +1,4 @@
+import {liveProductWhere} from "@/server/access/live-entities";
 import { Prisma } from '@prisma/client';
 import { createHash } from 'node:crypto';
 import { MANAGER_ROLES,hasAnyRole } from '@/lib/roles';
@@ -12,7 +13,7 @@ export async function patchProductPercentageCore(actor:DomainActor,input:Product
  const parsed=productPercentagePatchSchema.safeParse(input);if(!parsed.success)return{ok:false,kind:'validation',error:'Проверьте поле оплаты, значение и ревизию'};
  const data=parsed.data;const policy=PERCENTAGE_STAGE_POLICY[data.kind];const receiptId=`product-percentage:${data.clientMutationId}`;
  const fingerprint=createHash('sha256').update(JSON.stringify(data)).digest('hex');
- const product=await tx.product.findUnique({where:{id:data.productId},select:{id:true,projectId:true,engineerId:true,mounterId:true,assemblerId:true}});
+ const product=await tx.product.findUnique({where:{...liveProductWhere,id:data.productId},select:{id:true,projectId:true,engineerId:true,mounterId:true,assemblerId:true}});
  if(!product)return{ok:false,kind:'not-found',error:'Изделие не найдено'};
  const receipt=await tx.changeLog.findUnique({where:{id:receiptId}});
  if(receipt){const saved=receipt.newValue;
