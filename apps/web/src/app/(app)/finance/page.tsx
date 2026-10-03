@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { FolderKanban, Landmark, ReceiptText, Wallet } from "lucide-react";
+import { FolderKanban, HandCoins, Landmark, ReceiptText, Wallet } from "lucide-react";
 
 import {
   Card,
@@ -27,6 +27,17 @@ export default function FinancePage() {
               <CardTitle>Зарплата</CardTitle>
               <CardDescription>
                 Начисления по сотрудникам, выплаты, закрытие месяца и экспорт CSV
+              </CardDescription>
+            </CardHeader>
+          </Card>
+        </Link>
+        <Link href="/finance/advances">
+          <Card className="h-full transition-colors hover:bg-accent/50">
+            <CardHeader>
+              <HandCoins className="mb-2 size-6 text-muted-foreground" />
+              <CardTitle>Авансы</CardTitle>
+              <CardDescription>
+                Выдача аванса сотруднику из кассы организации
               </CardDescription>
             </CardHeader>
           </Card>

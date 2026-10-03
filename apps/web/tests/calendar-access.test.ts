@@ -15,7 +15,7 @@ test('plan placement preserves existing union and pure accountant finance bounda
  assert.deepEqual(enabled.filter(x=>x.href!=='/plan'),baseline);
  const dashboard=enabled.findIndex(x=>x.href==='/');assert.equal(enabled.findIndex(x=>x.href==='/plan'),dashboard<0?0:dashboard+1);
  }
- assert.deepEqual(navItemsForRole(['ACCOUNTANT'],true).map(x=>x.href),['/plan','/advances','/finance']);
+ assert.deepEqual(navItemsForRole(['ACCOUNTANT'],true).map(x=>x.href),['/plan','/finance']);
 });
 test('live actor guard does not trust stale grants or accept arbitrary subject',async()=>{
  const calls:string[]=[];let enabled:boolean|null=true;

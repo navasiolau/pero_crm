@@ -31,7 +31,14 @@ test("field roles cannot see or directly open advances", () => {
   assert.notEqual(authorize(["WORKER"], "/advances"), true);
 });
 
-test("finance roles can use advances", () => {
-  assert.ok(navItemsForRole(["ACCOUNTANT"]).some((item) => item.href === "/advances"));
-  assert.equal(authorize(["ACCOUNTANT"], "/advances"), true);
+test("advances live within finance for financial and combined roles", () => {
+  for (const roles of [["ADMIN"], ["DIRECTOR"], ["ACCOUNTANT"], ["PROCUREMENT"], ["MANAGER", "ACCOUNTANT"]] as Role[][]) {
+    assert.equal(navItemsForRole(roles).some((item) => item.href === "/advances"), false);
+    assert.ok(navItemsForRole(roles).some((item) => item.href === "/finance"));
+    assert.equal(authorize(roles, "/finance/advances"), true);
+    assert.equal(authorize(roles, "/advances"), true);
+  }
+  for (const role of ["MANAGER", "ENGINEER", "WORKER", "MOUNTER"] as Role[]) {
+    assert.notEqual(authorize([role], "/finance/advances"), true);
+  }
 });
