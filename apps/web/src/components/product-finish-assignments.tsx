@@ -13,6 +13,7 @@ import {getProductFinishController} from "@/lib/product-finish-controller";
 import {invokeProductFinishPatch} from "@/lib/independent-product-finish-action";
 import {FINISH_KIND_LABELS,type FinishView} from "@/server/finishes/contracts";
 import type {ProductFinishInitial,ProductFinishRow} from "@/server/product-finishes/contracts";
+import {CatalogueSampleThumbnail} from "@/components/catalogue-sample-control";
 const label=(row:Pick<FinishView,"name"|"code"|"color">)=>`${row.name} · ${row.code} · ${row.color}`;
 const snapshotLabel=(row:ProductFinishRow)=>label({name:row.finishName,code:row.finishCode,color:row.finishColor});
 export function ProductFinishAssignments({productId,initial,choices,canEdit}:{productId:string;initial:ProductFinishInitial;choices:FinishView[];canEdit:boolean}){
@@ -26,6 +27,7 @@ export function ProductFinishAssignments({productId,initial,choices,canEdit}:{pr
   {state.rows.map(row=>{const options:SearchableOption[]=active.map(choice=>({value:choice.id,label:choice.id===row.finishId?snapshotLabel(row):label(choice)}));if(!options.some(choice=>choice.value===row.finishId))options.push({value:row.finishId,label:snapshotLabel(row),disabled:true});
    return <div key={row.id} data-finish-assignment={row.id} className="min-w-0 space-y-2 rounded-lg border p-3"><div className="grid min-w-0 gap-3 sm:grid-cols-2"><InlineTextField id={`finish-element-${row.id}`} label="Элемент" controller={group.controller(row.id,"element")} readOnly={!canEdit}/><InlineSelectField id={`finish-choice-${row.id}`} label="Покрытие" controller={group.controller(row.id,"finishId")} options={options} readOnly={!canEdit}/></div>
     <p className="break-words text-sm text-muted-foreground">{FINISH_KIND_LABELS[row.finishKind]} · {row.finishName} · {row.finishCode} · {row.finishColor}</p>
+    <CatalogueSampleThumbnail asset={row.sampleAsset}/>
     {state.removeErrors[row.id]?<p role="alert" className="break-words text-sm text-destructive">{state.removeErrors[row.id]}</p>:null}
     {canEdit?<Button type="button" variant="ghost" size="sm" onClick={()=>setDeleteId(row.id)}><Trash2 className="size-4"/>Удалить элемент</Button>:null}
    </div>;

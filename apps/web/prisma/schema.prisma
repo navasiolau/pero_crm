@@ -1130,6 +1130,12 @@ model Finish {
   @@index([active, kind])
   productAssignments ProductFinishAssignment[]
 
+  sampleAssetId String? @db.Uuid
+  sampleAsset CatalogueMediaAsset? @relation("CurrentFinishSample", fields: [sampleAssetId, id], references: [id, finishId], onDelete: Restrict, onUpdate: NoAction)
+  catalogueAssets CatalogueMediaAsset[] @relation("FinishAssetOwner")
+
+  @@index([sampleAssetId])
+
 }
 
 model ProductFinishAssignment {
@@ -1149,6 +1155,11 @@ model ProductFinishAssignment {
   updatedAt       DateTime @updatedAt
   @@unique([productId, elementKey])
   @@index([finishId])
+  sampleAssetId String? @db.Uuid
+  sampleAsset CatalogueMediaAsset? @relation("AssignmentSample", fields: [sampleAssetId, finishId], references: [id, finishId], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([sampleAssetId])
+
 }
 enum CalendarReminderWebState {
  DELIVERED
@@ -1210,4 +1221,24 @@ model TelegramReminderOutbox {
  updatedAt DateTime @updatedAt
  @@unique([namespace,factId])
  @@index([namespace,state,retryAt])
+}
+
+// Отдельный catalogue-media asset: ни Project, ни File не создаются.
+model CatalogueMediaAsset {
+  id           String @id @db.Uuid
+  finishId     String @db.Uuid
+  finish       Finish @relation("FinishAssetOwner", fields: [finishId], references: [id], onDelete: Restrict)
+  fileName     String
+  mimeType     String
+  size         Int
+  originalHash String
+  storageKey   String @unique
+  uploadedById String
+  createdAt    DateTime @default(now())
+  retiredAt    DateTime?
+  deletedAt    DateTime?
+  currentFinishes Finish[] @relation("CurrentFinishSample")
+  assignmentSnapshots ProductFinishAssignment[] @relation("AssignmentSample")
+  @@unique([id, finishId])
+  @@index([finishId, retiredAt])
 }
