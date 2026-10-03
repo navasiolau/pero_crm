@@ -34,6 +34,6 @@ test("project tab passes shared onOpen policy while global board now explicitly 
  const tab=readFileSync(new URL("../src/app/(app)/projects/[id]/products-tab.tsx",import.meta.url),"utf8");
  assert.match(tab,/coverAction=\{\{type:"navigate",onOpen:\(\)=>onOpen\(product\)\}\}/);assert.match(tab,/onClick=\{\(\) => onOpen\(product\)\}/);assert.match(tab,/setActivatorNodeRef/);
  const general=readFileSync(new URL("../src/app/(app)/products/products-kanban.tsx",import.meta.url),"utf8");assert.match(general,/coverAction=\{\{type:"navigate",onOpen:\(\)=>onOpen\(product\)\}\}/);assert.match(general,/setActivatorNodeRef/);
- for(const file of ["../src/app/(app)/projects/kanban-board.tsx","../src/app/(app)/projects/projects-table.tsx","../src/app/(app)/products/products-table.tsx"])
+ for(const file of ["../src/components/project-kanban-card.tsx","../src/app/(app)/projects/projects-table.tsx","../src/app/(app)/products/products-table.tsx"])
   assert.match(readFileSync(new URL(file,import.meta.url),"utf8"),/<CardNumber>\{(?:project|row)\.number\}<\/CardNumber>/);
 });
