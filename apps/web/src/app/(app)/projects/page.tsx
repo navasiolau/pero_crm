@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { auth } from "@/auth";
+import { projectStageAgeStart } from "@/lib/project-kanban-values";
 import { displayClientName } from "@/lib/labels";
 import { MANAGER_ROLES, hasAnyRole } from "@/lib/roles";
 import { hasFullProjectVisibility } from "@/server/access/visibility";
@@ -59,8 +60,9 @@ export default async function ProjectsPage({
         number: project.number,
         title: project.title,
         stage: project.stage,
-        stageChangedAt: project.stageChangedAt.toISOString(),
-        totalPrice: hasFullProjectVisibility(session.user) && project.totalPrice > 0 ? String(project.totalPrice) : null,
+        stageChangedAt: new Date(projectStageAgeStart({stage:project.stage,createdAt:project.createdAt,stageChangedAt:project.stageChangedAt,latestTransition:project.stageHistory[0]})).toISOString(),
+        coverFile: project.coverFile,
+        totalPrice: hasFullProjectVisibility(session.user) && project.currency === "BYN" && !project.products.some(product => product.expectedPrice === null) ? String(project.totalPrice) : null,
         currency: project.currency,
         clientId: project.client.id,
         clientName: displayClientName(project.client),

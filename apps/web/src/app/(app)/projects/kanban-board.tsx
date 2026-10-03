@@ -14,16 +14,14 @@ import {
   type DragStartEvent,
 } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
-import { ClipboardList, Package, Paperclip, TriangleAlert } from "lucide-react";
 import { toast } from "sonner";
 import type { ProjectStage } from "@prisma/client";
 
 import { DragHandle } from "@/components/drag-handle";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent } from "@/components/ui/card";
-import { CardNumber } from "@/components/card-number";
+import { ProjectKanbanCard as ProjectCardView } from "@/components/project-kanban-card";
 import { formatAmount } from "@/lib/format";
-import { STAGES, daysOnStage, stageLabels, stageStyles } from "@/lib/stages";
+import { STAGES, stageLabels, stageStyles } from "@/lib/stages";
 import { cn } from "@/lib/utils";
 import { patchProjectStage } from "@/server/projects/stage-actions";
 import type {ProjectStagePatch,StageExtras} from "@/server/projects/stage-contract";
@@ -32,67 +30,6 @@ import type { ProjectCard } from "./projects-view";
 import { StageFormDialog, type StageFormRequest } from "./stage-form-dialog";
 
 export { formatAmount };
-
-function daysBadgeClass(days: number): string {
-  if (days >= 14) return "bg-destructive/15 text-destructive";
-  if (days >= 7) return "bg-amber-500/15 text-amber-700 dark:text-amber-400";
-  return "bg-muted text-muted-foreground";
-}
-
-function ProjectCardView({
-  project,
-  showAmount,
-  dragging,
-}: {
-  project: ProjectCard;
-  showAmount: boolean;
-  dragging?: boolean;
-}) {
-  const days = daysOnStage(project.stageChangedAt);
-  return (
-    <Card
-      className={cn(
-        "cursor-pointer select-none",
-        dragging && "rotate-2 shadow-lg",
-      )}
-    >
-      <CardContent className="flex flex-col gap-1.5 p-3">
-        <div className="flex items-center justify-between gap-2 pr-10">
-          <span className="text-sm"><CardNumber>{project.number}</CardNumber></span>
-          <Badge className={cn("text-xs", daysBadgeClass(days))}>
-            {days} дн.
-          </Badge>
-        </div>
-        <div className="text-sm">{project.title}</div>
-        <div className="text-xs text-muted-foreground">{project.clientName}</div>
-        {project.hasMaterialShortage ? (
-          <Badge variant="destructive" className="text-xs">
-            <TriangleAlert />
-            Нехватка материалов
-          </Badge>
-        ) : null}
-        <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-          {showAmount ? (
-            <span>{formatAmount(project.totalPrice, project.currency)}</span>
-          ) : (
-            <span />
-          )}
-          <span className="flex items-center gap-2">
-            <span className="flex items-center gap-0.5">
-              <Package className="size-3.5" /> {project.productsCount}
-            </span>
-            <span className="flex items-center gap-0.5">
-              <ClipboardList className="size-3.5" /> {project.tasksCount}
-            </span>
-            <span className="flex items-center gap-0.5">
-              <Paperclip className="size-3.5" /> {project.filesCount}
-            </span>
-          </span>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
 
 function DraggableCard({
   project,
@@ -116,7 +53,7 @@ function DraggableCard({
       onClick={() => onOpen(project.id)}
     >
       {canManage && <DragHandle ref={setActivatorNodeRef} {...attributes} {...listeners} label={project.title} />}
-      <ProjectCardView project={project} showAmount={showAmount} />
+      <ProjectCardView project={project} showAmount={showAmount} dragging={isDragging} onOpen={onOpen} />
     </div>
   );
 }
