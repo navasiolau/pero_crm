@@ -21,7 +21,7 @@ import type { SketchFilePreview } from "@/lib/product-hero";
 import { sketchUploadForm } from "@/lib/product-sketch-upload";
 import { readSketchUploadConfirmation } from "@/lib/product-sketch-ui";
 import {UploadErrorDetails} from "@/components/upload-error-details";
-import {createUploadAttempt,sendFileUpload,localUploadFailure,uploadAttemptMatchesContext,type UploadAttempt,type UploadFailure} from "@/lib/file-upload-client";
+import {createUploadAttempt,sendFileUpload,localUploadFailure,type UploadFailure} from "@/lib/file-upload-client";
 
 type PhotoTarget = (MeasurementUploadContext & { assignCover?: never; coverSurface?:never; expectedSketchFileId?:never }) | { projectId: string; productId: string; taskId?: never; stage?: never; assignCover: true; coverSurface?:boolean; expectedSketchFileId?:string|null };
 
@@ -63,65 +63,26 @@ export function PhotoUploadButton({
   const coverInput = useRef<HTMLInputElement>(null);
   const active = useRef(false);
   const [error, setError] = useState<UploadFailure | null>(null);
-  const uncertain = useRef<{file:File;id:string;attempt:UploadAttempt}|null>(null);
-  const [retryAvailable,setRetryAvailable] = useState(false);
+  const currentTarget=useRef('');currentTarget.current=JSON.stringify({projectId,productId,taskId,stage,assignCover});
 
-  async function upload(file: File, retry = false) {
-    if (active.current) return;
-    active.current = true;
-    setBusy(true);
-    onBusyChange?.(true);
-    setError(null);
-    let mutationId: string | undefined;
+  async function upload(file:File){
+    if(active.current)return;active.current=true;setBusy(true);onBusyChange?.(true);setError(null);
+    const selectedTarget=currentTarget.current;let mutationId:string|undefined,started=false,acknowledged=false;
     let confirmation:{httpStatus:number;requestId:string}|undefined;
-    try {
-      if (uncertain.current && !retry) throw Error("Повторите прежнюю загрузку, чтобы проверить её результат.");
-      if(retry&&uncertain.current){const currentContext=assignCover?{projectId,productId,category:"PHOTO",assignCover:"1",expectedSketchFileId:expectedSketchFileId??"null"}:measurementUploadFields(taskId?{projectId,taskId}:{projectId,productId:productId!,stage:stage!});if(!uploadAttemptMatchesContext(uncertain.current.attempt,currentContext))throw Error("Контекст изменился. Откройте прежнюю карточку для проверки загрузки.");}
-      if (beforeUpload && !await beforeUpload()) throw Error("Сначала сохраните цену, количество и инженера изделия.");
-      if (productId && !file.type.startsWith("image/")) throw Error(assignCover ? "Эскиз должен быть изображением." : "Выберите фотографию; документ можно приложить отдельно в блоке замера.");
-      if (extensions) {
-        const validation = validateFileForCategory(assignCover ? "PHOTO" : "MEASUREMENT", file.name, extensions);
-        if (validation) throw Error(validation);
-      }
-      let form:FormData;
-      mutationId = retry && uncertain.current ? uncertain.current.id : createRequestId();
-      if (retry && uncertain.current) form=uncertain.current.attempt.form;
-      else if (assignCover) {
-        form=sketchUploadForm(file,projectId,productId!,mutationId,expectedSketchFileId);
-      } else {
-        form=new FormData();form.append("file",file);
-        const context = taskId ? { projectId, taskId } as const : { projectId, productId: productId!, stage: stage! } as const;
-        for (const [key, value] of Object.entries(measurementUploadFields(context))) form.append(key, value);
-      }
-      const attempt=retry&&uncertain.current?uncertain.current.attempt:createUploadAttempt(form,mutationId);
-      uncertain.current={file,id:mutationId,attempt};
-      const result=await sendFileUpload(attempt);
-      if (result.ok) {
-        const data=result.data;confirmation={httpStatus:result.httpStatus,requestId:result.requestId};
-        const sketch = assignCover ? readSketchUploadConfirmation(data, mutationId!) : undefined;
-        uncertain.current=null;setRetryAvailable(false);
-        onUncertainChange?.(false);
-        toast.success("Фото приложено");
-        onUploaded?.(data.id,sketch);
-        setOpen(false);
-        router.refresh();
-      } else {
-        if(result.failure.commitState==="notCommitted")uncertain.current=null;
-        setRetryAvailable(Boolean(uncertain.current));onUncertainChange?.(Boolean(uncertain.current));
-        setError(result.failure);toast.error(result.failure.error);
-      }
-    } catch (failure) {
-      if (uncertain.current) { setRetryAvailable(true); onUncertainChange?.(true); }
-      const message = failure instanceof Error ? failure.message : "Не удалось загрузить фото. Проверьте соединение и повторите.";
-      const diagnostic=localUploadFailure(confirmation&&!uncertain.current?"Фото загружено, но интерфейс не обновился. Обновите страницу.":message,uncertain.current||confirmation?"confirmation":"validation",uncertain.current?.id??mutationId,uncertain.current?"unknown":confirmation?"committed":"notCommitted",confirmation?.httpStatus,confirmation?.requestId);
-      setError(diagnostic); toast.error(diagnostic.error);
-    } finally {
-      active.current = false;
-      setBusy(false);
-      onBusyChange?.(false);
-    }
+    try{
+      if(beforeUpload&&!await beforeUpload())throw Error('\u0421\u043d\u0430\u0447\u0430\u043b\u0430 \u0441\u043e\u0445\u0440\u0430\u043d\u0438\u0442\u0435 \u0438\u0437\u043c\u0435\u043d\u0435\u043d\u0438\u044f \u0438\u0437\u0434\u0435\u043b\u0438\u044f.');
+      if(productId&&!file.type.startsWith('image/'))throw Error(assignCover?'\u042d\u0441\u043a\u0438\u0437 \u0434\u043e\u043b\u0436\u0435\u043d \u0431\u044b\u0442\u044c \u0438\u0437\u043e\u0431\u0440\u0430\u0436\u0435\u043d\u0438\u0435\u043c.':'\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u0444\u043e\u0442\u043e\u0433\u0440\u0430\u0444\u0438\u044e.');
+      if(extensions){const validation=validateFileForCategory(assignCover?'PHOTO':'MEASUREMENT',file.name,extensions);if(validation)throw Error(validation);}
+      mutationId=createRequestId();let form:FormData;
+      if(assignCover)form=sketchUploadForm(file,projectId,productId!,mutationId,expectedSketchFileId);
+      else{form=new FormData();form.append('file',file);const context=taskId?{projectId,taskId}as const:{projectId,productId:productId!,stage:stage!}as const;for(const[key,value]of Object.entries(measurementUploadFields(context)))form.append(key,value);}
+      started=true;const result=await sendFileUpload(createUploadAttempt(form,mutationId));if(currentTarget.current!==selectedTarget)return;
+      if(!result.ok){setError(result.failure);toast.error(result.failure.error);return;}
+      confirmation={httpStatus:result.httpStatus,requestId:result.requestId};const sketch=assignCover?readSketchUploadConfirmation(result.data,mutationId):undefined;acknowledged=true;
+      toast.success('\u0424\u043e\u0442\u043e \u043f\u0440\u0438\u043b\u043e\u0436\u0435\u043d\u043e');onUploaded?.(result.data.id,sketch);setOpen(false);router.refresh();
+    }catch(failure){if(currentTarget.current!==selectedTarget)return;const message=failure instanceof Error?failure.message:'\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u0437\u0430\u0433\u0440\u0443\u0437\u0438\u0442\u044c \u0444\u043e\u0442\u043e.';const diagnostic=localUploadFailure(message,started?'confirmation':'validation',mutationId,acknowledged?'committed':started?'unknown':'notCommitted',confirmation?.httpStatus,confirmation?.requestId);setError(diagnostic);toast.error(diagnostic.error);}
+    finally{active.current=false;setBusy(false);onBusyChange?.(false);onUncertainChange?.(false);}
   }
-
   return (
     <>
       {assignCover&&coverSurface?<div data-sketch-dropzone role="button" tabIndex={busy?-1:0} aria-label="Выбрать изображение эскиза" aria-disabled={busy} className="absolute inset-0 flex min-h-48 flex-col items-center justify-center gap-3 p-4 text-center outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={event=>{if(!busy&&!(event.target instanceof Element&&event.target.closest("button,input")))coverInput.current?.click();}} onKeyDown={event=>{if(event.target===event.currentTarget&&!busy&&(event.key==="Enter"||event.key===" ")){event.preventDefault();coverInput.current?.click();}}} onDragOver={event=>{event.preventDefault();if(!busy)setDragOver(true);}} onDragLeave={()=>setDragOver(false)} onDrop={event=>{event.preventDefault();setDragOver(false);const file=event.dataTransfer.files[0];if(file&&!busy)void upload(file);}}>
@@ -139,8 +100,7 @@ export function PhotoUploadButton({
         {buttonLabel ?? (filesCount > 0 ? `Фото (${filesCount})` : "Фото")}
       </Button>
         <UploadErrorDetails failure={error} />
-        {retryAvailable&&uncertain.current?<Button type="button" variant="outline" disabled={busy} onClick={()=>void upload(uncertain.current!.file,true)}>Проверить прежнюю загрузку</Button>:null}
-      </div>:      <Button
+              </div>:      <Button
         variant={assignCover?"default":"outline"}
         size={assignCover?"default":size}
         className={assignCover?"h-12 bg-black px-6 text-base font-semibold text-white hover:bg-black/90":undefined}
@@ -161,7 +121,6 @@ export function PhotoUploadButton({
             {!assignCover?<DialogDescription>Фото или замерный лист — попадёт в проект с категорией «Замер»</DialogDescription>:null}
           </DialogHeader>
           <UploadErrorDetails failure={error} />
-          {retryAvailable ? <Button disabled={busy} onClick={() => {if(uncertain.current)void upload(uncertain.current.file,true);}}>Повторить загрузку</Button> : null}
 
           <div className="flex flex-col gap-2">
             {!assignCover?<Button variant="outline" disabled={busy} onClick={() => cameraInput.current?.click()}><Camera className="size-4" />Снять фото</Button>:null}
