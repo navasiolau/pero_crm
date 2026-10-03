@@ -5,7 +5,7 @@ Project kanban не показывает cover53 и требует утверж�
 - Cover сверху, крупный boldномер и дни справа, далее title/client/число BYN без подписи и валютного суффикса.
 - Cover открывает Project, readonlyfinancevisibility сохраняется.
 - Stageage от latest actual transition; createdAt fallback только initial безhistory.
-- Существующие counters/shortage после суммы остаются; Product карточки не меняются.
+- Счётчики изделий/задач/файлов убраны; компактная отметка shortage остаётся после суммы. Product карточки не меняются.
 ## Capabilities
 ### New Capabilities
 - `project-kanban-card-layout`: Project card cover/layout/currentstageage.

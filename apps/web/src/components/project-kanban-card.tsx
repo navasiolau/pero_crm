@@ -1,6 +1,6 @@
 "use client";
 import * as React from "react";
-import { ClipboardList, Package, Paperclip, TriangleAlert } from "lucide-react";
+import { TriangleAlert } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { CardNumber } from "@/components/card-number";
 import { Badge } from "@/components/ui/badge";
@@ -19,7 +19,6 @@ export function ProjectKanbanCard({ project, showAmount, dragging=false, onOpen 
       <div className="break-words text-xs text-muted-foreground">{project.clientName}</div>
       {showAmount?<div data-project-amount className="break-words text-sm">{projectKanbanAmount(project.totalPrice,project.currency)}</div>:null}
       {project.hasMaterialShortage?<Badge variant="destructive" className="text-xs"><TriangleAlert/>Нехватка материалов</Badge>:null}
-      <div className="flex items-center justify-end gap-2 text-xs text-muted-foreground"><span className="flex items-center gap-0.5"><Package className="size-3.5"/>{project.productsCount}</span><span className="flex items-center gap-0.5"><ClipboardList className="size-3.5"/>{project.tasksCount}</span><span className="flex items-center gap-0.5"><Paperclip className="size-3.5"/>{project.filesCount}</span></div>
     </CardContent>
   </Card>;
 }
