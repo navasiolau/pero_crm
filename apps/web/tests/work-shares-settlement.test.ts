@@ -120,7 +120,7 @@ test("work allocation counts split group once and existing parts cannot be moved
   for (const update of [{ quantity: 1 }, { workId: null }, { productId: null }]) assert.equal((await actions.updateTask("source", update)).ok, false);
   assert.equal((await actions.deleteTask("source")).ok, false);
   fixture.state().works[0].quantity = "15";
-  const create = await actions.createTask({ projectId: "project", productId: "product", workId: "work", title: "remaining", type: "Прочее", dueAt: "2026-10-01", assigneeId: "accountant", quantity: 5, estimateMinutes: 30 });
+  const create = await actions.createTask({ projectId: "project", productId: "product", workId: "work", title: "remaining", type: "Прочее", dueAt: "2026-10-01", assigneeId: "recipient", quantity: 5, estimateMinutes: 30 });
   assert.equal(create.ok, true);
   assert.equal((await actions.createTask({ projectId: "project", productId: "product", workId: "work", title: "overflow", type: "Прочее", dueAt: "2026-10-01", assigneeId: "director", quantity: 1, estimateMinutes: 10 })).ok, false);
 });
@@ -151,7 +151,7 @@ test("UI fractional remainder reaches strict create and edit actions without bin
   fixture = taskShareFixture();
   fixture.state().works[0].quantity = "10.30";
   const remaining = remainingWorkQuantity("10.30", "10.00");
-  const created = await actions.createTask({ projectId: "project", productId: "product", workId: "work", title: "fractional remainder", type: "Прочее", dueAt: "2026-10-01", assigneeId: "accountant", quantity: Number(remaining), estimateMinutes: 10 });
+  const created = await actions.createTask({ projectId: "project", productId: "product", workId: "work", title: "fractional remainder", type: "Прочее", dueAt: "2026-10-01", assigneeId: "recipient", quantity: Number(remaining), estimateMinutes: 10 });
   assert.equal(created.ok, true);
   assert.equal(fixture.state().tasks.find((task) => task.title === "fractional remainder")?.quantity, "0.30");
   fixture = taskShareFixture();
@@ -177,7 +177,7 @@ test("engineering DTO never presents retained legacy money as the current work p
 });
 test('ordinary quantity4+6 consumes10 once, full executor pay, and rejects excess',async()=>{
  fixture=taskShareFixture(); fixture.state().tasks[0].workId=null; fixture.state().tasks[0].quantity=null;
- const ordinary={projectId:'project',productId:'product',workId:'work',title:'portion',type:'Прочее',dueAt:'2026-10-01',assigneeId:'accountant',estimateMinutes:10};
+ const ordinary={projectId:'project',productId:'product',workId:'work',title:'portion',type:'Прочее',dueAt:'2026-10-01',assigneeId:'recipient',estimateMinutes:10};
  assert.equal((await actions.createTask({...ordinary,quantity:4})).ok,true);
  assert.equal((await actions.createTask({...ordinary,title:'second',quantity:6})).ok,true);
  assert.equal((await actions.createTask({...ordinary,quantity:1})).ok,false);

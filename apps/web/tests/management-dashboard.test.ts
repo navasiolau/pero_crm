@@ -42,7 +42,6 @@ const roleCases: { roles: Role[]; home: string }[] = [
   { roles: ["WORKER"], home: "/my" },
   { roles: ["MOUNTER"], home: "/my" },
   { roles: ["WORKER", "MOUNTER"], home: "/my" },
-  { roles: [], home: "/my" },
 ];
 
 for (const { roles, home } of roleCases) {
@@ -83,6 +82,13 @@ test("director keeps the dashboard and does not gain personal payroll navigation
 
 test("unauthenticated root requests require login", () => {
   assert.equal(authorize(null), false);
+});
+
+test("authenticated account without roles fails closed without redirecting to a forbidden home", () => {
+  for (const path of ["/", "/my", "/finance", "/products"]) {
+    assert.equal(authorize(session([]), path), false);
+  }
+  assert.deepEqual(navItemsForRole([]), []);
 });
 
 test("an old manager claim cannot grant dashboard access after current roles change", async () => {

@@ -18,11 +18,11 @@ function authorize(roles: Role[], pathname: string) {
   });
 }
 
-test("manager gets the advances entry without finance navigation or route access", () => {
+test("pure manager has neither advance nor finance navigation or route access", () => {
   const items = navItemsForRole(["MANAGER"]);
-  assert.ok(items.some((item) => item.href === "/advances"));
+  assert.equal(items.some((item) => item.href === "/advances"), false);
   assert.equal(items.some((item) => item.href === "/finance"), false);
-  assert.equal(authorize(["MANAGER"], "/advances"), true);
+  assert.notEqual(authorize(["MANAGER"], "/advances"), true);
   assert.notEqual(authorize(["MANAGER"], "/finance/payroll"), true);
 });
 

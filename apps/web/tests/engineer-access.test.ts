@@ -55,7 +55,9 @@ test("filter options and client counts use the same visible project set", async 
 });
 
 test("role grants are united, while empty roles fail closed even inside AND", async () => {
-  for (const roles of [["ADMIN"], ["DIRECTOR"], ["MANAGER", "ENGINEER"], ["ACCOUNTANT", "ENGINEER"]] as Role[][]) {
+  assert.equal((await products.listProducts(engineer.id, ["ACCOUNTANT", "ENGINEER"], { activeOnly: false })).total, 2);
+  assert.equal((await products.listProducts(engineer.id, ["ACCOUNTANT"], { activeOnly: false })).total, 0);
+  for (const roles of [["ADMIN"], ["DIRECTOR"], ["MANAGER", "ENGINEER"], ["PROCUREMENT", "ENGINEER"]] as Role[][]) {
     assert.equal((await products.listProducts(engineer.id, roles, { activeOnly: false })).total, 5);
   }
   for (const role of ["WORKER", "MOUNTER"] as Role[]) {
@@ -201,7 +203,7 @@ test("notification redaction respects current entity access and legacy /my fallb
   assert.deepEqual(result.slice(4), items.slice(4));
   assert.deepEqual(items, original, "stored notification history is not mutated");
   assert.deepEqual(await scopeNotificationContent({ ...engineer, roles: ["MANAGER", "ENGINEER"] }, items, db), items);
-  assert.deepEqual(await scopeNotificationContent({ ...engineer, roles: ["ACCOUNTANT", "ENGINEER"] }, items, db), items);
+  assert.deepEqual(await scopeNotificationContent({ ...engineer, roles: ["ACCOUNTANT", "ENGINEER"] }, items, db), result, "Financial role does not widen engineering notification access");
 });
 
 test("own historical payslip is preserved although its project is inaccessible", async () => {

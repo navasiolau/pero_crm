@@ -23,6 +23,7 @@ export const authConfig = {
 
       const { pathname } = request.nextUrl;
       const roles = auth.user.roles ?? [];
+      if (roles.length === 0) return false;
       const homePath = homePathForRoles(roles);
       if(!canAccessOperationalPath(roles,pathname))return Response.redirect(new URL(homePath,request.nextUrl));
       if (pathname === "/" && homePath !== "/") {
