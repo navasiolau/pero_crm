@@ -14,3 +14,6 @@
 Нет.
 ## Impact
 CalendarEntry namespace, CalendarReminderFact, Notification relation и migration100000; calendar actions/worker/env guard, instrumentation, dispatch API и точечный notification read scope. Будущий66 использует confirmed fact; нет TG вызовов/изменений реального env.
+
+## Startup origin correction
+Actual1955 startup/QA shared resolver fails ERR_INVALID_URL when AUTH_URL and NEXTAUTH_URL are both absent; all46 startup data MATCH before first write, OFF flags restored, no reminder delivery claimed. Добавляется CALENDAR_REMINDERS_PUBLIC_ORIGIN: первый непустой origin перед AUTH_URL/NEXTAUTH_URL, без hardcoded fallback и без изменения auth/Host/CSRF.

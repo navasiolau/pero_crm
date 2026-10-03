@@ -14,3 +14,19 @@ test('staging is isolated by pinned origin bucket db and explicit owner namespac
  assert.equal(resolveReminderContext(staged,{platform:'linux',container:true})?.environment,'staging');assert.throws(()=>resolveReminderContext({...staged,S3_BUCKET:'pero-crm'},{platform:'linux',container:true}));
  const disabled=resolveReminderContext({...base,CALENDAR_REMINDERS_ENABLED:'false'},{platform:'win32',container:false});assert.ok(disabled&&!disabled.enabled);
 });
+
+test('dedicated staging origin works when both auth aliases are absent; empty aliases choose next nonempty',()=>{
+ const stage={...base,CALENDAR_REMINDER_ENVIRONMENT:'staging',CALENDAR_REMINDER_NAMESPACE:`staging:${randomUUID()}`,AUTH_URL:undefined,DATABASE_URL:'postgresql://test:test@db:5432/crm',S3_BUCKET:'pero-crm-staging'};
+ const runtime={platform:'linux',container:true};
+ assert.equal(resolveReminderContext({...stage,CALENDAR_REMINDERS_PUBLIC_ORIGIN:'https://staging-crm.peromebel.by'},runtime)?.enabled,true);
+ assert.equal(resolveReminderContext({...stage,CALENDAR_REMINDERS_PUBLIC_ORIGIN:' ',AUTH_URL:'',NEXTAUTH_URL:'https://staging-crm.peromebel.by'},runtime)?.environment,'staging');
+});
+
+test('explicit reminder origin remains guarded without auth-origin changes or unsafe fallback',()=>{
+ const runtime={platform:'win32',container:false};
+ for(const origin of ['https://crm.peromebel.by','http://user:pass@localhost:3019','http://localhost:3019/path','http://localhost:3019?x=1','http://localhost:3019#x']) assert.throws(()=>resolveReminderContext({...base,CALENDAR_REMINDERS_PUBLIC_ORIGIN:origin},runtime));
+ assert.throws(()=>resolveReminderContext({...base,AUTH_URL:undefined,NEXTAUTH_URL:' ',CALENDAR_REMINDERS_PUBLIC_ORIGIN:''},runtime));
+ const prod={CALENDAR_REMINDER_ENVIRONMENT:'production',CALENDAR_REMINDER_NAMESPACE:'production',CALENDAR_REMINDERS_ENABLED:'true',CALENDAR_REMINDERS_PUBLIC_ORIGIN:'https://crm.peromebel.by',DATABASE_URL:'postgresql://test:test@db:5432/crm',S3_BUCKET:'pero-crm'};
+ assert.equal(resolveReminderContext(prod,{platform:'linux',container:true})?.environment,'production');
+ assert.throws(()=>resolveReminderContext({...prod,S3_BUCKET:'pero-crm-staging'},{platform:'linux',container:true}));
+});
