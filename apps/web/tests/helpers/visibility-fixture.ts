@@ -15,6 +15,7 @@ export function matches(row: FixtureRow | null, where: FixtureRow = {}): boolean
     if ("in" in condition) return (condition.in as unknown[]).includes(value);
     if ("notIn" in condition) return !(condition.notIn as unknown[]).includes(value);
     if ("not" in condition) return value !== condition.not;
+    if ("is" in condition) return condition.is === null ? value === null : matches(value as FixtureRow | null, condition.is as FixtureRow);
     if ("lt" in condition) return (value as string | number) < (condition.lt as string | number);
     if ("contains" in condition) {
       const text = String(value ?? "");
@@ -134,6 +135,11 @@ export function engineerFixture() {
   return {
     products, projects, tasks, files,
     db: {
+      // Read-only eligibility join adapter; role grants remain in the real query.
+      $queryRaw:async()=>tasks.filter(task=>{
+        const work=task.work as FixtureRow|null,product=task.product as FixtureRow|null,project=task.project as FixtureRow|null;
+        return work&&product&&project&&task.assigneeId!=null&&work.projectId===task.projectId&&work.productId===task.productId&&product.projectId===task.projectId&&product.deletedAt==null&&project.deletedAt==null&&(work.priceSnapshot!=null||task.allocationGroupId!=null&&task.shareAmount!=null);
+      }).map(task=>({id:task.id})),
       product: fixtureModel(products), project: fixtureModel(projects), task: fixtureModel(tasks),
       productPercentageParticipant: fixtureModel([]),
       file: fixtureModel(files), client: fixtureModel([client]), user: fixtureModel([engineer, other]),

@@ -8,6 +8,14 @@ import { scopeNotificationContent } from "../src/server/access/notification-visi
 import { engineerFixture, fixtureModel, matches } from "./helpers/visibility-fixture";
 
 const fixture = engineerFixture();
+// The workspace now contains real priced Work tasks; generic orphan fixtures
+// remain present so the read query must omit them without changing old payroll.
+const ownTask = fixture.tasks.find(task => task.id === "task-own")!;
+ownTask.workId = "work-own";
+ownTask.quantity = "2";
+ownTask.work = { id: "work-own", title: "Work", productId: ownTask.productId,
+  projectId: ownTask.projectId, product: ownTask.product, project: ownTask.project,
+  priceSnapshot: "10", total: "20", paymentKind: "LEGACY" };
 const db = fixture.db as unknown as PrismaClient;
 const engineer = { id: "engineer", roles: ["ENGINEER" as Role] };
 let products: typeof import("../src/server/products/queries");
@@ -44,6 +52,23 @@ test("project query scopes children, files, dependencies and financial aggregate
   assert.equal(result.rows[0].totalPrice, 400);
   assert.deepEqual(result.rows[0]._count, { tasks: 1, products: 2, files: 3 });
   assert.equal((await projects.listProjects(engineer.id, engineer.roles, { activeOnly: false, engineerId: "other" })).total, 0);
+});
+
+test("workspace omits a visible orphan without deleting its original row or financial facts",async()=>{
+  const orphan={...ownTask,id:"task-orphan-visible",workId:null,work:null};
+  fixture.tasks.push(orphan);(fixture.projects[0].tasks as typeof fixture.tasks).push(orphan);
+  const project=await projects.getProjectFor(engineer.id,engineer.roles,"mixed");
+  assert.ok(project);assert.deepEqual(project.tasks.map(task=>task.id),["task-own"]);
+  assert(fixture.tasks.includes(orphan));
+});
+test("frozen reward cannot expose a Task whose Work is unbound or belongs to another Product/Project",async()=>{
+  const work=ownTask.work as Record<string,unknown>;
+  const variants=[{productId:null},{productId:"foreign"},{projectId:"hidden"}];
+  const originals=variants.map((patch,index)=>({...ownTask,id:`task-frozen-invalid-${index}`,allocationGroupId:"old-fixed",shareAmount:"17.89",allocationGroup:{currency:"USD",budgetSource:"TASK_FIXED"},work:{...work,priceSnapshot:null,...patch}}));
+  fixture.tasks.push(...originals);(fixture.projects[0].tasks as typeof fixture.tasks).push(...originals);
+  const project=await projects.getProjectFor(engineer.id,engineer.roles,"mixed");assert.ok(project);
+  assert.deepEqual(project.tasks.map(task=>task.id),["task-own"]);
+  assert(originals.every(task=>fixture.tasks.includes(task)&&task.shareAmount==="17.89"));
 });
 
 test("filter options and client counts use the same visible project set", async () => {
@@ -137,18 +162,16 @@ test("nested work, sketch and task file cannot smuggle a hidden product into a v
   const original = { sketchFile: own.sketchFile, work: task.work, workId: task.workId, files: task.files };
   try {
     own.sketchFile = fixture.files[1];
-    task.work = { id: "secret-work", title: "Secret work", product: fixture.products[1], project: fixture.projects[0] };
+    task.work = { id: "secret-work", title: "Secret work", productId:"foreign",projectId:"mixed",priceSnapshot:"10",product: fixture.products[1], project: fixture.projects[0] };
     task.workId = "secret-work";
     task.files = [fixture.files[1]];
     const result = await products.getProductFor(engineer.id, engineer.roles, "own");
     assert.ok(result);
     assert.equal(result.sketchFile, null);
-    assert.equal(result.tasks[0].work, null);
-    assert.deepEqual(result.tasks[0].files, []);
+    assert.deepEqual(result.tasks, []);
     const { mapTaskDetails } = await import("../src/server/tasks/queries");
     const mapped = await mapTaskDetails(result.tasks);
-    assert.equal(mapped[0].workId, null);
-    assert.equal(mapped[0].workTitle, null);
+    assert.deepEqual(mapped, []);
   } finally {
     own.sketchFile = original.sketchFile;
     task.work = original.work;
