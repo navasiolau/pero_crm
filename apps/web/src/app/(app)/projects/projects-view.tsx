@@ -1,4 +1,5 @@
 "use client";
+import type { SketchFilePreview } from "@/lib/product-hero";
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
@@ -20,6 +21,7 @@ export interface ProjectCard {
   title: string;
   stage: ProjectStage;
   stageChangedAt: string;
+  coverFile?: SketchFilePreview | null;
   totalPrice: string | null; // Σ цен изделий, в валюте проекта
   currency: string;
   clientId: string;

@@ -200,6 +200,8 @@ async function fetchProjectRows(
     include: {
       client: { select: { id: true, name: true, lastName: true, middleName: true } },
       manager: { select: { id: true, name: true } },
+      coverFile: projectCoverProjection(actor),
+      stageHistory: { orderBy: { createdAt: "desc" }, take: 1, select: { toStage: true, createdAt: true } },
       products: { where: productVisibilityWhere(actor), select: { id: true, expectedPrice: true, quantity: true } },
       _count: { select: {
         tasks: { where: taskVisibilityWhere(actor) },

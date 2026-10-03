@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Plus, Trash2 } from "lucide-react";
 
@@ -25,7 +26,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ConfirmDeleteDialog } from "@/components/confirm-delete-dialog";
-import { formatAmount, formatMoneyTotal } from "@/lib/format";
+import { formatAmount, formatMoneyTotal, formatDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { addPayment, deletePayment } from "@/server/payments/actions";
 import { fetchNbrbRate } from "@/server/finance/actions";
@@ -60,10 +61,6 @@ export type ExpenseArticleOption = { id: string; name: string };
 
 const CURRENCIES = ["BYN", "RUB", "USD", "EUR"];
 
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString("ru-RU");
-}
-
 // Вкладка «Финансы» проекта (§11, только админ/директор): экономика
 // (ожидаемая цена, оплаты, расходы = ЗП + статьи, маржа с индикатором),
 // приходы и расходы в любой из 4 валют с курсом НБ РБ в записи.
@@ -74,7 +71,9 @@ export function FinanceTab({
   payments,
   cashAccounts,
   expenseArticles,
+  canEdit = true,
 }: {
+  canEdit?: boolean;
   projectId: string;
   currency: string;
   economics: ProjectEconomicsView;
@@ -86,6 +85,7 @@ export function FinanceTab({
     "INCOME" | "EXPENSE" | null
   >(null);
   const [deleting, setDeleting] = useState<PaymentRow | null>(null);
+  const router = useRouter();
 
   const incomes = payments.filter((payment) => payment.direction === "INCOME");
   const expenses = payments.filter((payment) => payment.direction === "EXPENSE");
@@ -165,7 +165,7 @@ export function FinanceTab({
         id: "actions",
         header: "",
         className: "w-10",
-        cell: (row) => (
+        cell: (row) => canEdit ? (
           <Button
             variant="ghost"
             size="icon"
@@ -177,7 +177,7 @@ export function FinanceTab({
           >
             <Trash2 className="size-4 text-muted-foreground" />
           </Button>
-        ),
+        ) : null,
       },
     );
     return columns;
@@ -281,7 +281,7 @@ export function FinanceTab({
       <div className="flex flex-col gap-3">
         <div className="flex items-center justify-between gap-3">
           <h3 className="text-lg font-semibold">Приходы</h3>
-          <Button onClick={() => setDialogDirection("INCOME")}>
+          <Button disabled={!canEdit} onClick={() => setDialogDirection("INCOME")}>
             <Plus className="size-4" />
             Добавить приход
           </Button>
@@ -300,6 +300,7 @@ export function FinanceTab({
           <h3 className="text-lg font-semibold">Расходы</h3>
           <Button
             variant="outline"
+            disabled={!canEdit}
             onClick={() => setDialogDirection("EXPENSE")}
           >
             <Plus className="size-4" />
@@ -320,7 +321,7 @@ export function FinanceTab({
 
       <PaymentDialog
         direction={dialogDirection ?? "INCOME"}
-        open={dialogDirection !== null}
+        open={canEdit && dialogDirection !== null}
         onOpenChange={(open) => {
           if (!open) setDialogDirection(null);
         }}
@@ -332,7 +333,7 @@ export function FinanceTab({
 
       <ConfirmDeleteDialog
         entityLabel={deleting?.direction === "EXPENSE" ? "расход" : "приход"}
-        open={deleting !== null}
+        open={canEdit && deleting !== null}
         onOpenChange={(open) => {
           if (!open) setDeleting(null);
         }}
@@ -354,6 +355,7 @@ export function FinanceTab({
                 ? "Приход удалён"
                 : "Расход удалён",
             );
+            router.refresh();
             return true;
           }
           toast.error(result.error ?? "Ошибка удаления");
@@ -385,6 +387,7 @@ function PaymentDialog({
   expenseArticles: ExpenseArticleOption[];
 }) {
   const isIncome = direction === "INCOME";
+  const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [currency, setCurrency] = useState(projectCurrency);
   const [cashAccountId, setCashAccountId] = useState("");
@@ -635,6 +638,7 @@ function PaymentDialog({
                 if (result.ok) {
                   toast.success(isIncome ? "Приход внесён" : "Расход внесён");
                   onOpenChange(false);
+                  router.refresh();
                 } else {
                   toast.error(result.error ?? "Ошибка");
                 }

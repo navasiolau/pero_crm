@@ -74,6 +74,7 @@ model User {
   telegram        String? // @username
   passwordHash    String
   sessionVersion  Int            @default(0)
+  calendarEnabled Boolean?
   roles           Role[] // комбинированные роли (§4): права = объединение
   payScheme       PayScheme      @default(NONE)
   payPercent      Decimal?       @db.Decimal(5, 2)
@@ -168,6 +169,8 @@ model Client {
 // целого дома). Этапы воронки — на проекте (§6); платежи, маржа и
 // экономика — тоже на проекте (§11). Стоимость проекта = Σ цен изделий.
 model Project {
+  deletedAt DateTime?
+  deletedById String? // actor snapshot; no cascade or reassignment
   id                     String       @id @default(cuid())
   number                 String       @unique // «205» — канонический номер, только цифры без ведущих нулей
   // Числовое представление номера для серверной сортировки «новые сверху»
@@ -234,6 +237,8 @@ enum ProductStatus {
 // Данные клиента (ФИО, адрес, телефон) подтягиваются из проекта —
 // на уровне проекта они и вносятся.
 model Product {
+  deletedAt DateTime?
+  deletedById String? // actor snapshot; no cascade or reassignment
   id               String       @id @default(cuid())
   projectId        String
   project          Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)

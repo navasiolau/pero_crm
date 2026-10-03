@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Landmark, ReceiptText, Wallet } from "lucide-react";
+import { FolderKanban, Landmark, ReceiptText, Wallet } from "lucide-react";
 
 import {
   Card,
@@ -19,6 +19,7 @@ export default function FinancePage() {
         </p>
       </div>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <Link href="/finance/projects"><Card className="h-full transition-colors hover:bg-accent/50"><CardHeader><FolderKanban className="mb-2 size-6 text-muted-foreground"/><CardTitle>Финансы проектов</CardTitle><CardDescription>Выбор проекта, приходы, расходы и экономика без общих и технических правок</CardDescription></CardHeader></Card></Link>
         <Link href="/finance/payroll">
           <Card className="h-full transition-colors hover:bg-accent/50">
             <CardHeader>

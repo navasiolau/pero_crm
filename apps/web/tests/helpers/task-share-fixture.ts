@@ -28,12 +28,17 @@ export function taskShareFixture(productStatus: "DESIGN" | "PRODUCTION" = "PRODU
   const transactionContext = new AsyncLocalStorage<boolean>();
   const writes: string[] = [];
   const write = (name: string) => { writes.push(name); if (failAt === name) throw new Error("Injected transactional failure"); };
-  const filtered = (rows: Row[], where?: Row) => rows.filter((row) => matches(row, where));
+  const projectRow = () => ({id:"project",number:"1",currency:state.projectCurrency,deletedAt:null});
+  const productRow = (id:unknown) => {const row=state.products.find(product=>product.id===id);return row?{...row,project:projectRow()}:null;};
+  const filtered = (rows: Row[], where?: Row) => rows.filter((row) => matches({ ...row,
+    ...(row.projectId ? {project:projectRow()} : {}),
+    ...(row.productId !== undefined ? {product:productRow(row.productId)} : {}),
+  }, where));
   function hydrate(row: Row): Row {
     return {
       ...row,
       project: { id: "project", number: "1", currency: state.projectCurrency },
-      product: state.products.find((product) => product.id === row.productId) ?? null,
+      product: productRow(row.productId),
       assignee: state.users.find((user) => user.id === row.assigneeId) ?? null,
       work: (() => { const work = state.works.find((item) => item.id === row.workId); const pool = state.pools.find((item) => item.id === work?.stagePayPoolId); return work ? { ...work, stagePayPool: work.stagePayPool ?? (pool ? { ...pool, product: state.products.find((item) => item.id === pool.productId) } : null) } : null; })(),
       allocationGroup: state.groups.find((group) => group.id === row.allocationGroupId) ?? null,

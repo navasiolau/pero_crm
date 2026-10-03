@@ -1,3 +1,4 @@
+import {liveProjectWhere,liveProductWhere,liveChildWhere} from "./live-entities";
 import type { Prisma, ProductStatus, Role } from "@prisma/client";
 import { ASSIGNEE_ROLES,FIELD_ROLES, MANAGER_ROLES, hasAnyRole, hasRole } from "@/lib/roles";
 
@@ -5,7 +6,7 @@ export type VisibilityActor = { id: string; roles: Role[]; engineeringParticipan
   engineeringParticipantTaskIds?: string[]; fieldParticipantProductIds?: string[] };
 
 /** Participant membership comes from assignments, including zero-share tasks. */
-export function engineeringProductWhere(actor: VisibilityActor): Prisma.ProductWhereInput {
+function engineeringProductWhereGrants(actor: VisibilityActor): Prisma.ProductWhereInput {
   if (!hasRole(actor.roles, "ENGINEER")) return { id: { in: [] } };
   return {
     status: "DESIGN",
@@ -17,7 +18,7 @@ export function engineeringProductWhere(actor: VisibilityActor): Prisma.ProductW
 }
 
 /** Current assignment grants status-return reading, never production technical edits. */
-export function currentEngineeringReadWhere(actor: VisibilityActor): Prisma.ProductWhereInput {
+function currentEngineeringReadWhereGrants(actor: VisibilityActor): Prisma.ProductWhereInput {
   if (!hasRole(actor.roles, "ENGINEER")) return { id: { in: [] } };
   return { engineerId: actor.id, status: { in: ["DESIGN", "PRODUCTION"] } };
 }
@@ -75,7 +76,7 @@ export function hasFullProjectVisibility(actor: VisibilityActor): boolean {
 }
 
 // Read grants from ACCOUNTANT/FIELD must never widen engineering edit rights.
-export function productEditWhere(actor: VisibilityActor): Prisma.ProductWhereInput {
+function productEditWhereGrants(actor: VisibilityActor): Prisma.ProductWhereInput {
   if (hasAnyRole(actor.roles, MANAGER_ROLES)) return {};
   return engineeringProductWhere(actor);
 }
@@ -89,7 +90,7 @@ export function canEditProductTechnicalBlock(actor: VisibilityActor, product: { 
   );
 }
 
-export function assignedProductVisibilityWhere(actor: VisibilityActor): Prisma.ProductWhereInput {
+function assignedProductVisibilityWhereGrants(actor: VisibilityActor): Prisma.ProductWhereInput {
   if (hasFullProjectVisibility(actor)) return {};
   const grants: Prisma.ProductWhereInput[] = [];
   grants.push(currentEngineeringReadWhere(actor));
@@ -106,7 +107,7 @@ export function assignedProductVisibilityWhere(actor: VisibilityActor): Prisma.P
   return grants.length ? { OR: grants } : { id: { in: [] } };
 }
 
-export function assignedProjectVisibilityWhere(actor: VisibilityActor): Prisma.ProjectWhereInput {
+function assignedProjectVisibilityWhereGrants(actor: VisibilityActor): Prisma.ProjectWhereInput {
   if (hasFullProjectVisibility(actor)) return {};
   const grants: Prisma.ProjectWhereInput[] = [];
   grants.push({ products: { some: assignedProductVisibilityWhere(actor) } });
@@ -116,7 +117,7 @@ export function assignedProjectVisibilityWhere(actor: VisibilityActor): Prisma.P
   return grants.length ? { OR: grants } : { id: { in: [] } };
 }
 
-export function taskVisibilityWhere(actor: VisibilityActor): Prisma.TaskWhereInput {
+function taskVisibilityWhereGrants(actor: VisibilityActor): Prisma.TaskWhereInput {
   if (hasFullProjectVisibility(actor)) return {};
   const grants: Prisma.TaskWhereInput[] = [];
   grants.push({ product: engineeringProductWhere(actor) });
@@ -130,7 +131,7 @@ export function taskVisibilityWhere(actor: VisibilityActor): Prisma.TaskWhereInp
 }
 
 /** Execution is an assignee/manager grant, not a consequence of read access. */
-export function taskExecutionWhere(actor: VisibilityActor): Prisma.TaskWhereInput {
+function taskExecutionWhereGrants(actor: VisibilityActor): Prisma.TaskWhereInput {
   if (hasAnyRole(actor.roles, MANAGER_ROLES)) return {};
   const grants: Prisma.TaskWhereInput[] = hasAnyRole(actor.roles,ASSIGNEE_ROLES) ? [
     { id: { in: actor.engineeringParticipantTaskIds ?? [] }, assigneeId: actor.id, product: { status: "DESIGN" } },
@@ -145,7 +146,7 @@ export function taskExecutionWhere(actor: VisibilityActor): Prisma.TaskWhereInpu
   return { OR: grants };
 }
 
-export function workVisibilityWhere(actor: VisibilityActor): Prisma.WorkWhereInput {
+function workVisibilityWhereGrants(actor: VisibilityActor): Prisma.WorkWhereInput {
   if (hasFullProjectVisibility(actor)) return {};
   const grants: Prisma.WorkWhereInput[] = [];
   grants.push({ product: engineeringProductWhere(actor) });
@@ -158,7 +159,7 @@ export function workVisibilityWhere(actor: VisibilityActor): Prisma.WorkWhereInp
   return grants.length ? { OR: grants } : { id: { in: [] } };
 }
 
-export function fileVisibilityWhere(actor: VisibilityActor): Prisma.FileWhereInput {
+function fileVisibilityWhereGrants(actor: VisibilityActor): Prisma.FileWhereInput {
   if (hasFullProjectVisibility(actor)) return {};
   return {
     AND: [
@@ -173,12 +174,27 @@ export function clientVisibilityWhere(actor: VisibilityActor): Prisma.ClientWher
   return hasFullProjectVisibility(actor) ? {} : { projects: { some: projectVisibilityWhere(actor) } };
 }
 
-/** Production-wide read is separate from assignment/file/execution grants. */
-export function productVisibilityWhere(actor:VisibilityActor):Prisma.ProductWhereInput {
- return hasRole(actor.roles,"WORKER") && !hasFullProjectVisibility(actor)
-  ? {OR:[assignedProductVisibilityWhere(actor),{status:"PRODUCTION"}]} : assignedProductVisibilityWhere(actor);
-}
-export function projectVisibilityWhere(actor:VisibilityActor):Prisma.ProjectWhereInput {
- return hasRole(actor.roles,"WORKER") && !hasFullProjectVisibility(actor)
-  ? {OR:[assignedProjectVisibilityWhere(actor),{products:{some:productVisibilityWhere(actor)}}]} : assignedProjectVisibilityWhere(actor);
-}
+export function productEditWhere(actor:VisibilityActor):Prisma.ProductWhereInput {return {AND:[liveProductWhere,productEditWhereGrants(actor)]};}
+
+export function productVisibilityWhere(actor:VisibilityActor):Prisma.ProductWhereInput {return {AND:[liveProductWhere,hasRole(actor.roles,"WORKER") && !hasFullProjectVisibility(actor)
+ ? {OR:[assignedProductVisibilityWhere(actor),{status:"PRODUCTION"}]} : assignedProductVisibilityWhereGrants(actor)]};}
+
+export function projectVisibilityWhere(actor:VisibilityActor):Prisma.ProjectWhereInput {return {AND:[liveProjectWhere,hasRole(actor.roles,"WORKER") && !hasFullProjectVisibility(actor)
+ ? {OR:[assignedProjectVisibilityWhere(actor),{products:{some:productVisibilityWhere(actor)}}]} : assignedProjectVisibilityWhereGrants(actor)]};}
+
+export function taskVisibilityWhere(actor:VisibilityActor):Prisma.TaskWhereInput {return {AND:[liveChildWhere,taskVisibilityWhereGrants(actor)]};}
+
+export function taskExecutionWhere(actor:VisibilityActor):Prisma.TaskWhereInput {return {AND:[liveChildWhere,taskExecutionWhereGrants(actor)]};}
+
+export function workVisibilityWhere(actor:VisibilityActor):Prisma.WorkWhereInput {return {AND:[liveChildWhere,workVisibilityWhereGrants(actor)]};}
+
+export function fileVisibilityWhere(actor:VisibilityActor):Prisma.FileWhereInput {return {AND:[liveChildWhere,fileVisibilityWhereGrants(actor)]};}
+
+export function engineeringProductWhere(actor:VisibilityActor):Prisma.ProductWhereInput {return {AND:[liveProductWhere,engineeringProductWhereGrants(actor)]};}
+
+export function currentEngineeringReadWhere(actor:VisibilityActor):Prisma.ProductWhereInput {return {AND:[liveProductWhere,currentEngineeringReadWhereGrants(actor)]};}
+
+
+/** File and technical assignment access never inherit the global production read. */
+export function assignedProductVisibilityWhere(actor:VisibilityActor):Prisma.ProductWhereInput {return {AND:[liveProductWhere,assignedProductVisibilityWhereGrants(actor)]};}
+export function assignedProjectVisibilityWhere(actor:VisibilityActor):Prisma.ProjectWhereInput {return {AND:[liveProjectWhere,assignedProjectVisibilityWhereGrants(actor)]};}

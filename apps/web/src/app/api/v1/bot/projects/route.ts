@@ -1,3 +1,4 @@
+import {liveProjectWhere} from "@/server/access/live-entities";
 import { NextResponse } from "next/server";
 
 import { hasAnyRole, MANAGER_ROLES } from "@/lib/roles";
@@ -28,14 +29,14 @@ export async function GET(request: Request) {
     return NextResponse.json({ ok: true, projects: await listFinanceProjectRefs(actor, q) });
   }
   const projects = await prisma.project.findMany({
-    where: q
+    where: { ...liveProjectWhere, ...(q
       ? {
           OR: [
             { number: { contains: q } },
             { title: { contains: q, mode: "insensitive" } },
           ],
         }
-      : undefined,
+      : {} )},
     orderBy: { numberInt: "desc" },
     take: 8,
     select: { id: true, number: true, title: true, stage: true, currency: true },

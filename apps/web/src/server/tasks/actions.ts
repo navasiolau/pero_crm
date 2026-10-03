@@ -1,4 +1,6 @@
 "use server";
+import {liveChildWhere} from "@/server/access/live-entities";
+import {liveProductWhere,liveProjectWhere} from "@/server/access/live-entities";
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
@@ -52,7 +54,7 @@ async function checkWorkQuantity(
   context?: { projectId: string; productId: string | null },
 ): Promise<{ error?: string; remaining?: string }> {
   const work = await tx.work.findUnique({
-    where: { id: workId },
+    where: {...liveChildWhere, id: workId },
     include: { tasks: { select: { id: true, quantity: true, allocationGroupId: true } } },
   });
   if (!work) return { error: "Работа не найдена" };
@@ -101,14 +103,14 @@ export async function createTask(
   const data = parsed.data;
   const mutation = await withTaskTransaction(async (tx) => {
   const project = await tx.project.findUnique({
-    where: { id: data.projectId },
+    where: {...liveProjectWhere, id: data.projectId },
     select: { id: true, number: true, currency: true },
   });
   if (!project) return { ok: false as const, error: "Проект не найден" };
 
   // Изделие должно принадлежать проекту задачи
   const product = data.productId ? await tx.product.findFirst({
-      where: { id: data.productId, projectId: data.projectId },
+      where: {...liveProductWhere, id: data.productId, projectId: data.projectId },
       select: { id: true, engineerId: true, status: true },
     }) : null;
   if (data.productId && !product) return { ok: false as const, error: "Изделие не найдено в этом проекте" };
@@ -132,7 +134,7 @@ export async function createTask(
   if (data.workId) {
     try { assertProjectMoneyCurrency(project.currency); }
     catch (error) { return { ok: false as const, error: error instanceof Error ? error.message : "Валюта проекта не подготовлена" }; }
-    const work = await tx.work.findUnique({ where: { id: data.workId }, select: { paymentKind: true } });
+    const work = await tx.work.findUnique({ where: {...liveChildWhere, id: data.workId }, select: { paymentKind: true } });
     if (work?.paymentKind === "ENGINEERING") return { ok: false as const, error: "Задачи инженерного фонда создаются через настройку фонда" };
     const check = await checkWorkQuantity(tx, data.workId, data.quantity ?? null, undefined, { projectId: data.projectId, productId: data.productId || null });
     if (check.error) return { ok: false as const, error: check.error };
@@ -227,7 +229,7 @@ export async function updateTask(
 
   const mutation = await withTaskTransaction(async (tx) => {
   const task = await tx.task.findUnique({
-    where: { id: taskId },
+    where: {...liveChildWhere, id: taskId },
     include: { project: { select: { id: true, number: true, currency: true } }, product: { select: { engineerId: true, status: true, projectId: true } },
       work: { select: { paymentKind: true, projectId: true, productId: true, stagePayPoolId: true, stagePayPool: { select: { id: true, kind: true, state: true, productId: true } } } },
       _count: { select: { payrollEntries: true } } },
@@ -251,7 +253,7 @@ export async function updateTask(
     engineeringPoolId = pool.id;
   }
   if (data.workId && data.workId !== task.workId) {
-    const targetWork = await tx.work.findUnique({ where: { id: data.workId }, select: { paymentKind: true } });
+    const targetWork = await tx.work.findUnique({ where: {...liveChildWhere, id: data.workId }, select: { paymentKind: true } });
     if (targetWork?.paymentKind === "ENGINEERING") return { ok: false as const, error: "Инженерная работа требует настройки полного распределения долей" };
   }
   if (task.status === "DONE" || task._count.payrollEntries > 0) {
@@ -270,7 +272,7 @@ export async function updateTask(
   let product = data.productId === null ? null : task.product;
   if (data.productId) {
     product = await tx.product.findFirst({
-      where: { id: data.productId, projectId: task.project.id },
+      where: {...liveProductWhere, id: data.productId, projectId: task.project.id },
       select: { engineerId: true, status: true, projectId: true },
     });
     if (!product) return { ok: false as const, error: "Изделие не найдено в этом проекте" };
@@ -466,7 +468,7 @@ export async function deleteTask(
   }
   const mutation = await withTaskTransaction(async (tx) => {
   const task = await tx.task.findUnique({
-    where: { id: taskId },
+    where: {...liveChildWhere, id: taskId },
     include: { project: { select: { id: true, number: true, currency: true } }, work: { select: { paymentKind: true } }, _count: { select: { payrollEntries: true } } },
   });
   if (!task) return { ok: false as const, error: "Задача не найдена" };

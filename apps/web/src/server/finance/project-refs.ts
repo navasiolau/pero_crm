@@ -1,12 +1,23 @@
-import type {Prisma} from '@prisma/client';
+import type {PrismaClient,Prisma,Role,ProjectStage} from '@prisma/client';
+import {FINANCE_ROLES,hasAnyRole} from '@/lib/roles';
+import {displayClientName} from '@/lib/labels';
+import {liveProjectWhere} from '@/server/access/live-entities';
 import {prisma} from '@/lib/prisma';
-import {FINANCE_ROLES,hasAnyRole,type Role} from '@/lib/roles';
-
+export type FinanceWorkspaceActor={id:string;roles:Role[]};
+export type FinanceProjectRef={id:string;number:string;title:string;currency:string;stage:ProjectStage;clientLabel:string;projectArchived:boolean};
+export const financeProjectSelect={id:true,number:true,title:true,currency:true,stage:true,deletedAt:true,client:{select:{name:true,lastName:true,middleName:true}}} satisfies Prisma.ProjectSelect;
+export function requireFinanceWorkspaceActor(actor:{roles:Role[]}){if(!hasAnyRole(actor.roles,FINANCE_ROLES))throw Error('Недостаточно прав для финансового проекта');}
+const ref=(project:Prisma.ProjectGetPayload<{select:typeof financeProjectSelect}>):FinanceProjectRef=>({id:project.id,number:project.number,title:project.title,currency:project.currency,stage:project.stage,projectArchived:project.deletedAt!==null,clientLabel:displayClientName(project.client)});
+export function selectableFinanceProjectsWhere():Prisma.ProjectWhereInput{return liveProjectWhere;}
 export const financeProjectRefSelect={id:true,number:true,title:true,currency:true} satisfies Prisma.ProjectSelect;
-/** Financial selection does not grant operational Project/Product payloads. */
+/** Preserve the narrower reference API/bot contract introduced by task58. */
 export async function listFinanceProjectRefs(actor:{roles:Role[]},query='',db:Pick<Prisma.TransactionClient,'project'>=prisma){
- if(!hasAnyRole(actor.roles,FINANCE_ROLES))throw new Error('Недостаточно прав');
- const q=query.trim().slice(0,100);
- const rows=await db.project.findMany({where:q?{OR:[{number:{contains:q}},{title:{contains:q,mode:'insensitive'}}]}:{},select:financeProjectRefSelect,orderBy:{numberInt:'desc'},take:100});
+ requireFinanceWorkspaceActor(actor);const q=query.trim().slice(0,100);
+ const rows=await db.project.findMany({where:{AND:[selectableFinanceProjectsWhere(),q?{OR:[{number:{contains:q}},{title:{contains:q,mode:'insensitive'}}]}:{}]},select:financeProjectRefSelect,orderBy:{numberInt:'desc'},take:100});
  return rows.map(row=>({id:row.id,number:row.number,title:row.title,currency:row.currency}));
+}
+export async function listFinanceWorkspaceProjects(actor:FinanceWorkspaceActor,db:Pick<PrismaClient,'project'>):Promise<FinanceProjectRef[]>{requireFinanceWorkspaceActor(actor);return(await db.project.findMany({where:selectableFinanceProjectsWhere(),select:financeProjectSelect,orderBy:{numberInt:'desc'}})).map(ref);}
+export async function getFinanceProjectRef(actor:FinanceWorkspaceActor,identifier:string,db:Pick<PrismaClient,'project'>):Promise<FinanceProjectRef|null>{
+ requireFinanceWorkspaceActor(actor);if(!/^[A-Za-z0-9_-]{1,128}$/.test(identifier))return null;
+ const project=await db.project.findFirst({where:/^[1-9][0-9]*$/.test(identifier)?{number:identifier}:{id:identifier},select:financeProjectSelect});return project?ref(project):null;
 }

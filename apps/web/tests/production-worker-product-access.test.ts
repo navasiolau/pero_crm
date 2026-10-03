@@ -33,3 +33,15 @@ test('actual original and preview HTTP route return 404 before storage; parent D
  assert.equal(storageReads,0);
  const projects=await import('../src/server/projects/queries');const parent=await projects.getProjectFor(worker.id,worker.roles,'mixed');assert.ok(parent);assert.deepEqual(parent.products.map(row=>row.id),['production']);assert.equal(parent.products[0].description,null);assert.equal(parent.products[0].expectedPrice,null);assert.deepEqual(parent.files,[]);assert.deepEqual(parent.payments,[]);
 });
+import {assignedProductVisibilityWhere,assignedProjectVisibilityWhere} from '../src/server/access/visibility';
+test('merged live wrappers enclose new global production and old assignment grants for every role',async()=>{
+ const row=fixture.products.find(row=>row.id==='production')!,parent=fixture.projects.find(row=>row.id==='mixed')!;
+ for(const deleted of ['product','parent']){
+  const entity=deleted==='product'?row:parent;entity.deletedAt=new Date();
+  try{
+   for(const roles of [['WORKER'],['WORKER','ENGINEER'],['WORKER','MANAGER'],['MANAGER'],['MOUNTER'],['PROCUREMENT']] as Role[][]){const actor={id:'engineer',roles};for(const predicate of [productVisibilityWhere(actor),assignedProductVisibilityWhere(actor),productEditWhere(actor)])assert.equal(matches(row,predicate),false);if(deleted==='parent')for(const predicate of [projectVisibilityWhere(actor),assignedProjectVisibilityWhere(actor)])assert.equal(matches(parent,predicate),false);}
+   assert.equal(await query.getProductFor(worker.id,worker.roles,'production'),null);assert.equal((await query.listProducts(worker.id,worker.roles,{activeOnly:false})).rows.some(item=>item.id==='production'),false);
+  }finally{entity.deletedAt=null;}
+ }
+ assert.ok(await query.getProductFor(worker.id,worker.roles,'production'));
+});
