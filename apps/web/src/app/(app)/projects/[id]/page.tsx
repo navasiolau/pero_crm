@@ -34,6 +34,7 @@ import { FilesTab } from "./files-tab";
 import { FinanceTab } from "./finance-tab";
 import { MaterialsSummaryTab } from "./materials-summary-tab";
 import { ProjectInlineProvider } from "@/components/project-inline-provider";
+import {ProjectDeleteButton} from '@/components/project-delete-button';
 import { ProjectInlineHeading } from "@/components/project-inline-fields";
 import { OverviewTab } from "./overview-tab";
 import { ProductsTab } from "./products-tab";
@@ -148,6 +149,7 @@ export default async function ProjectPage({
           <ArrowLeft className="size-5" />
         </Link>
         <ProjectInlineHeading number={project.number} />
+        <div className="ml-auto"><ProjectDeleteButton projectId={project.id} canManage={canManage}/></div>
         {showMaterials && hasShortage ? (
           <Badge variant="destructive">
             <TriangleAlert />
