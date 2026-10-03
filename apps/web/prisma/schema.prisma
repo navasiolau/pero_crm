@@ -762,15 +762,15 @@ model ExpenseArticle {
 //   projectAmount — эквивалент в валюте проекта (экономика проекта, маржа).
 model Payment {
   id               String           @id @default(cuid())
-  projectId        String
-  project          Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId        String?
+  project          Project?         @relation(fields: [projectId], references: [id], onDelete: Cascade)
   direction        PaymentDirection @default(INCOME)
   amount           Decimal          @db.Decimal(12, 2) // в валюте операции
   currency         String           @default("BYN")
   rate             Decimal          @default(1) @db.Decimal(14, 6) // BYN за ед. валюты (НБ РБ)
   rateDate         DateTime? // дата курса НБ РБ
   bynAmount        Decimal          @db.Decimal(12, 2) // эквивалент в BYN
-  projectAmount    Decimal          @db.Decimal(12, 2) // эквивалент в валюте проекта
+  projectAmount    Decimal?         @db.Decimal(12, 2) // эквивалент в валюте проекта
   cashAccountId    String?
   cashAccount      CashAccount?     @relation(fields: [cashAccountId], references: [id], onDelete: SetNull)
   expenseArticleId String?
