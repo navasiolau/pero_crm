@@ -7,14 +7,14 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { prisma } from "@/lib/prisma";
+import { listGlobalChangeLog } from "@/server/changelog/queries";
 
 import { ChangelogTable } from "./changelog-table";
 
 export const dynamic = "force-dynamic";
 
 // Журнал изменений (§5): фильтры по сотруднику, сущности, периоду.
-// Доступ ограничен middleware (ADMIN/DIRECTOR).
+// ADMIN-only guard выполняется и в middleware, и перед серверным чтением.
 export default async function ChangelogPage({
   searchParams,
 }: {
@@ -22,31 +22,7 @@ export default async function ChangelogPage({
 }) {
   const { actor, entity, from, to } = await searchParams;
 
-  const where = {
-    ...(actor
-      ? {
-          OR: [
-            { actorName: { contains: actor, mode: "insensitive" as const } },
-            { actorId: { contains: actor, mode: "insensitive" as const } },
-          ],
-        }
-      : {}),
-    ...(entity ? { entity: { contains: entity, mode: "insensitive" as const } } : {}),
-    ...(from || to
-      ? {
-          createdAt: {
-            ...(from ? { gte: new Date(from) } : {}),
-            ...(to ? { lte: new Date(`${to}T23:59:59`) } : {}),
-          },
-        }
-      : {}),
-  };
-
-  const entries = await prisma.changeLog.findMany({
-    where,
-    orderBy: { createdAt: "desc" },
-    take: 200,
-  });
+  const entries = await listGlobalChangeLog({ actor, entity, from, to });
 
   return (
     <div className="flex flex-col gap-6">
