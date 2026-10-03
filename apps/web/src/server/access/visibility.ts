@@ -146,7 +146,7 @@ function taskExecutionWhereGrants(actor: VisibilityActor): Prisma.TaskWhereInput
   return { OR: grants };
 }
 
-function workVisibilityWhereGrants(actor: VisibilityActor): Prisma.WorkWhereInput {
+function assignedWorkVisibilityWhereGrants(actor: VisibilityActor): Prisma.WorkWhereInput {
   if (hasFullProjectVisibility(actor)) return {};
   const grants: Prisma.WorkWhereInput[] = [];
   grants.push({ product: engineeringProductWhere(actor) });
@@ -186,7 +186,8 @@ export function taskVisibilityWhere(actor:VisibilityActor):Prisma.TaskWhereInput
 
 export function taskExecutionWhere(actor:VisibilityActor):Prisma.TaskWhereInput {return {AND:[liveChildWhere,taskExecutionWhereGrants(actor)]};}
 
-export function workVisibilityWhere(actor:VisibilityActor):Prisma.WorkWhereInput {return {AND:[liveChildWhere,workVisibilityWhereGrants(actor)]};}
+export function workVisibilityWhere(actor:VisibilityActor):Prisma.WorkWhereInput {return {AND:[liveChildWhere,hasRole(actor.roles,"WORKER")&&!hasFullProjectVisibility(actor)
+ ? {OR:[assignedWorkVisibilityWhere(actor),{paymentKind:"LEGACY",stagePayPoolId:null,poolWeightUnits:null,product:{status:"PRODUCTION"}}]} : assignedWorkVisibilityWhereGrants(actor)]};}
 
 export function fileVisibilityWhere(actor:VisibilityActor):Prisma.FileWhereInput {return {AND:[liveChildWhere,fileVisibilityWhereGrants(actor)]};}
 
@@ -198,3 +199,5 @@ export function currentEngineeringReadWhere(actor:VisibilityActor):Prisma.Produc
 /** File and technical assignment access never inherit the global production read. */
 export function assignedProductVisibilityWhere(actor:VisibilityActor):Prisma.ProductWhereInput {return {AND:[liveProductWhere,assignedProductVisibilityWhereGrants(actor)]};}
 export function assignedProjectVisibilityWhere(actor:VisibilityActor):Prisma.ProjectWhereInput {return {AND:[liveProjectWhere,assignedProjectVisibilityWhereGrants(actor)]};}
+
+export function assignedWorkVisibilityWhere(actor:VisibilityActor):Prisma.WorkWhereInput {return {AND:[liveChildWhere,assignedWorkVisibilityWhereGrants(actor)]};}
