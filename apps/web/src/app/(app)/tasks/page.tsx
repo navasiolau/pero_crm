@@ -5,8 +5,8 @@ import { prisma } from "@/lib/prisma";
 import { MANAGER_ROLES, OFFICE_ROLES, hasAnyRole } from "@/lib/roles";
 import { getUserPreference } from "@/server/preferences";
 import { listWorkers } from "@/server/projects/queries";
-import { mapTaskDetails, taskDetailsIncludeFor } from "@/server/tasks/queries";
-import { taskVisibilityWhere, resolveVisibilityActor } from "@/server/access/visibility";
+import { mapTaskDetails, taskDetailsIncludeFor, taskWorkspaceWhere } from "@/server/tasks/queries";
+import { resolveVisibilityActor } from "@/server/access/visibility";
 
 import { TasksPageView } from "./tasks-page-view";
 
@@ -24,7 +24,7 @@ export default async function TasksPage() {
 
   const [tasks, workers, view] = await Promise.all([
     prisma.task.findMany({
-      where: taskVisibilityWhere(actor),
+      where: await taskWorkspaceWhere(actor),
       include: taskDetailsIncludeFor(actor),
       orderBy: [{ status: "asc" }, { dueAt: "asc" }, { createdAt: "desc" }],
       take: 300,

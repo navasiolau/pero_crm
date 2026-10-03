@@ -35,7 +35,9 @@ const createSchema = z.object({
   estimateMinutes: z.number().int().min(0).optional(),
   requiresPhoto: z.boolean().default(false),
   dependencyIds: z.array(z.string()).default([]),
-}).strict();
+}).strict().superRefine((data,ctx)=>{
+  for(const key of ['productId','workId','assigneeId'] as const)if(!data[key]?.trim())ctx.addIssue({code:'custom',path:[key],message:'Выберите изделие, работу и одного исполнителя'});
+});
 
 async function requireUser() {
   const session = await auth();
@@ -58,6 +60,8 @@ async function checkWorkQuantity(
     include: { tasks: { select: { id: true, quantity: true, allocationGroupId: true } } },
   });
   if (!work) return { error: "Работа не найдена" };
+  if(!work.productId||!context?.productId)return {error:'Задача должна относиться к работе конкретного изделия'};
+  if(work.priceSnapshot===null)return {error:'У выбранной работы отсутствует снимок расценки'};
   if (context && (work.projectId !== context.projectId || work.productId !== context.productId)) return { error: "Выберите работу этого проекта и изделия" };
   const used = quantityAtoms(allocatedWorkQuantity(work.tasks.filter((task) => task.id !== excludeTaskId)));
   const remaining = quantityAtoms(work.quantity) - used;
@@ -135,7 +139,7 @@ export async function createTask(
     try { assertProjectMoneyCurrency(project.currency); }
     catch (error) { return { ok: false as const, error: error instanceof Error ? error.message : "Валюта проекта не подготовлена" }; }
     const work = await tx.work.findUnique({ where: {...liveChildWhere, id: data.workId }, select: { paymentKind: true } });
-    if (work?.paymentKind === "ENGINEERING") return { ok: false as const, error: "Задачи инженерного фонда создаются через настройку фонда" };
+    if (work?.paymentKind !== "LEGACY") return { ok: false as const, error: "Новая задача создаётся только для обычной работы со снимком расценки" };
     const check = await checkWorkQuantity(tx, data.workId, data.quantity ?? null, undefined, { projectId: data.projectId, productId: data.productId || null });
     if (check.error) return { ok: false as const, error: check.error };
     workQuantity = check.remaining!;
@@ -153,7 +157,7 @@ export async function createTask(
       workId: data.workId || null,
       quantity: workQuantity,
       executorShare: 1,
-      status: data.assigneeId ? "NEW" : "DRAFT",
+      status: "NEW",
       dueAt: data.dueAt ? new Date(data.dueAt) : null,
       requiresPhoto: data.requiresPhoto,
       estimateMinutes,
@@ -207,7 +211,9 @@ const updateSchema = z.object({
   dueAt: z.string().min(1, "Укажите срок").optional(),
   estimateMinutes: z.number().int().min(0).nullable().optional(),
   dependencyIds: z.array(z.string()).optional(),
-}).strict();
+}).strict().superRefine((data,ctx)=>{
+  for(const key of ['productId','workId','assigneeId'] as const)if(data[key]!==undefined&&!data[key]?.trim())ctx.addIssue({code:'custom',path:[key],message:'Нельзя очистить изделие, работу или исполнителя задачи'});
+});
 
 // Редактирование задачи — админ/директор/менеджер (§4).
 // Закрытая (выполненная) задача — только просмотр, правок не принимаем.
@@ -242,6 +248,7 @@ export async function updateTask(
   const engineering = task.work?.paymentKind === "ENGINEERING";
   let engineeringPoolId: string | null = null;
   if (engineering) {
+    if((data.assigneeId!==undefined&&data.assigneeId!==task.assigneeId)||(data.quantity!==undefined&&String(data.quantity)!==String(task.quantity)))return {ok:false as const,error:'Перераспределение исторической инженерной оплаты недоступно'};
     const pool = task.work?.stagePayPool;
     if (!task.productId || task.product?.status !== "DESIGN" || task.product.projectId !== task.projectId ||
       task.work?.projectId !== task.projectId || task.work.productId !== task.productId ||
@@ -282,6 +289,17 @@ export async function updateTask(
     const assignee = await tx.user.findUnique({ where: { id: nextAssigneeId }, select: { id: true, roles: true, active: true } });
     const error = assignee ? (engineering ? engineeringRecipientError(assignee, product) : taskRecipientError(assignee, product)) : "Сотрудник не найден";
     if (error) return { ok: false as const, error };
+  }
+
+  const nextProductId=data.productId===undefined?task.productId:data.productId;
+  const effectiveWorkId=data.workId===undefined?task.workId:data.workId;
+  if(!nextProductId||!effectiveWorkId||!nextAssigneeId)return {ok:false as const,error:'Выберите изделие, работу и одного исполнителя'};
+  if(!engineering){
+    const currentProduct=await tx.product.findFirst({where:{...liveProductWhere,id:nextProductId,projectId:task.projectId},select:{id:true}});
+    const currentWork=await tx.work.findUnique({where:{...liveChildWhere,id:effectiveWorkId},select:{projectId:true,productId:true,priceSnapshot:true,paymentKind:true}});
+    if(!currentProduct||!currentWork||currentWork.projectId!==task.projectId||currentWork.productId!==nextProductId)return {ok:false as const,error:'Выберите работу этого живого изделия'};
+    const frozenSnapshot=task.allocationGroupId&&effectiveWorkId===task.workId&&nextProductId===task.productId&&nextAssigneeId===task.assigneeId;
+    if(currentWork.priceSnapshot===null&&!frozenSnapshot)return {ok:false as const,error:'У выбранной работы отсутствует снимок расценки'};
   }
 
   const becameAssigned =

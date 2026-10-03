@@ -1,3 +1,4 @@
+import {taskWorkspaceEligibility} from '@/server/tasks/workspace-contract';
 import {liveProjectWhere,liveProductWhere,liveChildWhere} from "@/server/access/live-entities";
 import { projectTotal as calculateProjectTotal } from "@/lib/product-quantity";
 import { redirect } from "next/navigation"
@@ -33,7 +34,7 @@ export default async function DashboardPage() {
   const [inWork, tasksToday, activeUsers, recent] = await Promise.all([
     prisma.project.count({ where: { ...liveProjectWhere,stage: "IN_WORK" } }),
     prisma.task.count({
-      where: { ...liveChildWhere,status: { not: "DONE" }, dueAt: { lte: todayEnd } },
+      where: { AND:[liveChildWhere,await taskWorkspaceEligibility(prisma)],status: { not: "DONE" }, dueAt: { lte: todayEnd } },
     }),
     prisma.user.count({ where: { active: true } }),
     prisma.project.findMany({

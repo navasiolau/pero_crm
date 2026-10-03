@@ -10,6 +10,7 @@
 - Отделить складские mutations от редактирования потребностей менеджментом.
 - Убрать ACCOUNTANT operational read/execute и MANAGER из advance grants.
 - Согласовать роли, навигацию, API/DTO, уведомления и денежные складские projections.
+- По прямому уточнению владельца 03.10 глобальный «Журнал» /changelog доступен только ADMIN: sidebar, direct route, серверная страница и query. DIRECTOR и все другие роли не получают grant; общий ADMIN_ROLES и история отдельных задач/финансов сохраняются.
 
 ## Capabilities
 

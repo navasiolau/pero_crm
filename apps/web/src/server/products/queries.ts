@@ -4,7 +4,7 @@ import type { Prisma, ProductStatus, Role } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { PRODUCT_STATUSES } from "@/lib/product-statuses";
 import { engineeringParticipantProductIds, fileVisibilityWhere, productVisibilityWhere, resolveVisibilityActor, taskVisibilityWhere, workVisibilityWhere, type VisibilityActor } from "@/server/access/visibility";
-import { taskDetailsIncludeFor } from "@/server/tasks/queries";
+import { taskDetailsIncludeFor,taskWorkspaceWhere } from "@/server/tasks/queries";
 import { productSketchProjection } from "./sketch-projection";
 
 // ── Список изделий (/products): серверные фильтры/сортировка/пагинация ──
@@ -275,7 +275,7 @@ export async function getProductFor(
       assembler: { select: { id: true, name: true, position: true, phone: true } },
       sketchFile: productSketchProjection(actor),
       tasks: {
-        where: taskVisibilityWhere(actor),
+        where: await taskWorkspaceWhere(actor),
         include: taskDetailsIncludeFor(actor),
         orderBy: { createdAt: "desc" },
       },
