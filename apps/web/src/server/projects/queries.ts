@@ -10,7 +10,7 @@ import {
   hasAnyRole,
 } from "@/lib/roles";
 import { STAGES } from "@/lib/stages";
-import { taskDetailsIncludeFor } from "@/server/tasks/queries";
+import { taskDetailsIncludeFor,taskWorkspaceWhere } from "@/server/tasks/queries";
 import { listProjectShortages } from "@/server/warehouse/queries";
 import { productSketchProjection } from "@/server/products/sketch-projection";
 import { projectCoverProjection } from "./cover-projection";
@@ -204,7 +204,7 @@ async function fetchProjectRows(
       stageHistory: { orderBy: { createdAt: "desc" }, take: 1, select: { toStage: true, createdAt: true } },
       products: { where: productVisibilityWhere(actor), select: { id: true, expectedPrice: true, quantity: true } },
       _count: { select: {
-        tasks: { where: taskVisibilityWhere(actor) },
+        tasks: { where: await taskWorkspaceWhere(actor) },
         files: { where: fileVisibilityWhere(actor) },
         products: { where: productVisibilityWhere(actor) },
       } },
@@ -255,7 +255,7 @@ export async function getProjectFor(
         ],
       },
       tasks: {
-        where: taskVisibilityWhere(actor),
+        where: await taskWorkspaceWhere(actor),
         include: taskDetailsIncludeFor(actor),
         orderBy: { createdAt: "desc" },
       },

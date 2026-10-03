@@ -8,3 +8,11 @@
 ## 3. Проверка
 - [x] 3.1 Private client/deps, full regressions, TSC/scoped lint и strict validate.
 - [ ] 3.2 Root native/local/staging acceptance без DB execution агентом.
+
+## 4. Уточнение владельца: конкретная оплачиваемая работа
+- [x] 4.1 RED→GREEN manager create/update обязательных Work/Product/executor и известной цены; zero и quantity allocation сохранить.
+- [x] 4.2 Additive server reward DTO без historical repricing или FX fallback.
+- [x] 4.3 Structural Work/Product/executor workspace quarantine по прямому уточнению владельца и readonly происхождению t47; без DELETE/изменения финансовых фактов.
+- [ ] 4.4 Root local/staging acceptance actual обновлённого writer/read контракта.
+
+- [x] 4.5 Исправить reviewer gap обеих reward-веток: actual Work/Product/Project join и NULL/foreign/deleted negative tests; исходные monetary snapshots неизменны.

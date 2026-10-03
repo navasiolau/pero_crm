@@ -1,3 +1,4 @@
+import {taskWorkspaceWhere} from '@/server/tasks/queries';
 import { NextResponse } from "next/server";
 
 import {canAccessOperationalPath} from "@/lib/operational-access";
@@ -5,7 +6,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { displayClientName } from "@/lib/labels";
 import { OFFICE_ROLES, hasAnyRole } from "@/lib/roles";
-import { clientVisibilityWhere, productVisibilityWhere, projectVisibilityWhere, taskVisibilityWhere, resolveVisibilityActor } from "@/server/access/visibility";
+import { clientVisibilityWhere, productVisibilityWhere, projectVisibilityWhere, resolveVisibilityActor } from "@/server/access/visibility";
 
 // GET /api/search?q=… — глобальный поиск (omnisearch): проекты, изделия,
 // задачи, клиенты. Видимость как в разделах (§4): работник/монтажник —
@@ -67,7 +68,7 @@ export async function GET(request: Request) {
     prisma.task.findMany({
       where: {
         AND: [
-          taskVisibilityWhere(actor),
+          await taskWorkspaceWhere(actor),
           office ? {} : { assigneeId: session.user.id },
           { OR: [{ title: contains }, { project: { number: contains } }] },
         ],

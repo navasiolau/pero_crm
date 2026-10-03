@@ -1,3 +1,6 @@
+import {taskWorkspaceEligibility,taskReward} from './workspace-contract';
+import type {Prisma} from '@prisma/client';
+export async function taskWorkspaceWhere(actor:VisibilityActor):Promise<Prisma.TaskWhereInput>{return {AND:[taskVisibilityWhere(actor),await taskWorkspaceEligibility(prisma)]};}
 import { prisma } from "@/lib/prisma";
 import type { TaskDetails } from "@/components/task-dialog";
 import type { ProductStatus } from "@prisma/client";
@@ -12,7 +15,7 @@ export const taskDetailsInclude = {
   project: { select: { id: true, number: true, title: true } },
   product: { select: { id: true, number: true, title: true, engineerId: true, status: true } },
   assignee: { select: { id: true, name: true } },
-  work: { select: { id: true, title: true, total: true, priceSnapshot: true, paymentKind: true } },
+  work: { select: { id: true, projectId:true,productId:true,title: true, total: true, priceSnapshot: true, paymentKind: true } },
   allocationGroup: { select: { currency: true, budgetSource: true } },
   _count: { select: { payrollEntries: true } },
   files: { select: { id: true, fileName: true, hasThumb: true, mimeType: true } },
@@ -62,7 +65,7 @@ type TaskWithIncludes = {
   project: { id: string; number: string; title: string };
   product: { id: string; number: string; title: string; engineerId: string | null; status: ProductStatus } | null;
   assignee: { id: string; name: string } | null;
-  work: { id: string; title: string; total: unknown; priceSnapshot: unknown; paymentKind?: "LEGACY" | "ENGINEERING" | "INSTALLATION" } | null;
+  work: { id: string; projectId?:string;productId?:string|null;title: string; total: unknown; priceSnapshot: unknown; paymentKind?: "LEGACY" | "ENGINEERING" | "INSTALLATION" } | null;
   files: { id: string; fileName: string; hasThumb: boolean; mimeType: string }[];
   dependencies: {
     dependsOn: { id: string; title: string; status: "DRAFT" | "NEW" | "IN_PROGRESS" | "DONE" };
@@ -75,6 +78,7 @@ export async function mapTaskDetails(
   tasks: TaskWithIncludes[],
   actor?: VisibilityActor,
 ): Promise<TaskDetails[]> {
+  tasks=tasks.filter(task=>!!task.work&&!!task.product&&task.work.projectId===task.project.id&&task.work.productId===task.product.id);
   const taskIds = tasks.map((task) => task.id);
   const spent = taskIds.length
     ? await prisma.timeEntry.groupBy({
@@ -138,6 +142,7 @@ export async function mapTaskDetails(
     allocationGroupId: allocation.allocationGroupId,
     shareUnits: allocation.shareUnits,
     shareAmount: percentageWork ? null : task.work && task.work.priceSnapshot !== null && task.work.priceSnapshot !== undefined ? taskPieceAmount(allocation, String(task.work.priceSnapshot)) : null,
+    ...(percentageWork?{rewardAmount:preview?.settled?preview.amount:null,rewardCurrency:preview?.settled?preview.currency:null,rewardSource:preview?.settled&&preview.amount!==null?'FROZEN_TASK_SNAPSHOT' as const:'UNAVAILABLE' as const}:taskReward(allocation,task.work?.priceSnapshot==null?null:String(task.work.priceSnapshot),task.work?task.allocationGroup?task.allocationGroup.currency:currency:null)),
     shareCurrency: percentageWork ? null : task.work ? task.allocationGroup ? task.allocationGroup.currency : currency : null,
     paymentKind: task.work?.paymentKind ?? "LEGACY",
     physicalShareUnits: allocation.shareUnits,
