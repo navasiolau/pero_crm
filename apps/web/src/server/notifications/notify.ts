@@ -7,6 +7,7 @@ import { prisma } from "@/lib/prisma";
 // personal — адресные конкретному человеку. Настраивать типы могут все роли,
 // по умолчанию всё включено.
 export const NOTIFICATION_TYPES = [
+  {id:"plan.reminder",label:"Напоминания личного плана",kind:"personal"},
   { id: "project.created", label: "Новый проект", kind: "org" },
   { id: "project.stageChanged", label: "Смена этапа проекта", kind: "org" },
   { id: "product.statusChanged", label: "Смена статуса изделия", kind: "org" },

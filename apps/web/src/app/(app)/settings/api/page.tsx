@@ -21,6 +21,7 @@ import { TokenManager } from "./token-manager";
 export const dynamic = "force-dynamic";
 
 const endpoints = [
+  {method:"POST",path:"/api/v1/calendar/reminders/dispatch",scope:"calendar.reminders",description:"Подтвердить личные web-напоминания в принятом namespace"},
   { method: "GET", path: "/api/v1", scope: "—", description: "Информация о сервисе и включённых модулях" },
   { method: "GET", path: "/api/v1/plugins", scope: "read", description: "Список модулей и их статус" },
   { method: "POST", path: "/api/v1/plugins/:id/commands/:command", scope: "write", description: "Запуск команды модуля" },

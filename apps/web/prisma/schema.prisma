@@ -90,6 +90,7 @@ model User {
   surveyedProducts Product[]    @relation("ProductSurveyor")
   assignedTasks   Task[]         @relation("TaskAssignee")
   calendarEntries CalendarEntry[]
+  calendarReminderFacts CalendarReminderFact[]
   notifications   Notification[]
   payrollEntries  PayrollEntry[]
   payouts         Payout[]
@@ -933,6 +934,7 @@ model Communication {
 // ─── Уведомления (§6.1) ──────────────────────────────────────────────────────
 
 model Notification {
+  calendarReminderFact CalendarReminderFact?
   id        String    @id @default(cuid())
   userId    String
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -1092,8 +1094,33 @@ model CalendarEntry {
   startsAt DateTime @db.Timestamptz(3)
   state CalendarEntryState @default(PLANNED)
   reminderOffsetMinutes Int? @default(15)
+  reminderNamespace String?
+  reminderFacts CalendarReminderFact[]
   revision Int @default(0)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   @@index([ownerId,startsAt])
+  @@index([reminderNamespace,startsAt])
+}
+enum CalendarReminderWebState {
+ DELIVERED
+ SKIPPED
+}
+model CalendarReminderFact {
+ id String @id @default(cuid())
+ entryId String
+ entry CalendarEntry @relation(fields:[entryId],references:[id],onDelete:Restrict)
+ ownerId String
+ owner User @relation(fields:[ownerId],references:[id],onDelete:Restrict)
+ namespace String
+ entryRevision Int
+ scheduledFor DateTime @db.Timestamptz(3)
+ confirmedAt DateTime @default(now()) @db.Timestamptz(3)
+ titleSnapshot String @db.VarChar(250)
+ startsAtSnapshot DateTime @db.Timestamptz(3)
+ webState CalendarReminderWebState
+ webNotificationId String? @unique
+ webNotification Notification? @relation(fields:[webNotificationId],references:[id],onDelete:Restrict)
+ @@unique([namespace,entryId,entryRevision])
+ @@index([namespace,confirmedAt])
 }
