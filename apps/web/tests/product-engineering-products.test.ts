@@ -107,10 +107,18 @@ test("price changes invalidate draft pool forms but never rewrite a settled pool
   assert.deepEqual(state.pools[0], pool);
 });
 
-test("deleting an empty draft product removes only its draft pool, settled history is retained", async () => {
-  reset(); seed(); assert.ok((await actions.deleteProduct("product")).ok);
-  assert.equal(state.pools.length, 0);
-  reset(); seed("PRODUCTION", "SETTLED");
-  assert.equal((await actions.deleteProduct("product")).ok, false);
-  assert.equal(state.products.length, 1);
+test("legacy string-only deletion refuses without CAS and preserves both draft and settled history", async () => {
+  const originalDelete=db.product.delete,originalPoolDelete=db.productStagePayPool.deleteMany,
+    originalConfigDelete=db.productPercentageConfig.deleteMany,originalParticipantDelete=db.productPercentageParticipant.deleteMany;
+  let physicalCalls=0;
+  db.product.delete=async()=>{physicalCalls++;};db.productStagePayPool.deleteMany=async()=>{physicalCalls++;};
+  db.productPercentageConfig.deleteMany=async()=>{physicalCalls++;return{count:0};};db.productPercentageParticipant.deleteMany=async()=>{physicalCalls++;return{count:0};};
+  try{
+    for(const poolState of ["DRAFT","SETTLED"]){
+      reset();seed(poolState==="DRAFT"?"DESIGN":"PRODUCTION",poolState);const before=structuredClone(state);
+      const result=await actions.deleteProduct("product");assert.equal(result.ok,false);
+      if(!result.ok)assert.equal(result.kind,"validation");
+      assert.deepEqual(state,before);assert.equal(state.products.length,1);assert.equal(state.pools.length,1);assert.equal(physicalCalls,0);
+    }
+  }finally{db.product.delete=originalDelete;db.productStagePayPool.deleteMany=originalPoolDelete;db.productPercentageConfig.deleteMany=originalConfigDelete;db.productPercentageParticipant.deleteMany=originalParticipantDelete;}
 });
