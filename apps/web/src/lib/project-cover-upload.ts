@@ -7,6 +7,6 @@ export function projectCoverAttempt(file:File,projectId:string){
 }
 export function confirmedProjectCover(data:Record<string,unknown>,mutationId:string):ProjectCoverPreview{
  const cover=data.cover as Partial<ProjectCoverPreview>|null;
- if(data.ok!==true||data.clientMutationId!==mutationId||typeof data.id!=='string'||data.coverFileId!==data.id||!cover||cover.id!==data.id||typeof cover.fileName!=='string'||typeof cover.mimeType!=='string'||!isCoverImageMime(cover.mimeType)||typeof cover.hasThumb!=='boolean')throw Error('Не получено подтверждение обложки. Повторите прежний запрос.');
+ if(data.ok!==true||data.clientMutationId!==mutationId||typeof data.id!=='string'||data.coverFileId!==data.id||!cover||cover.id!==data.id||typeof cover.fileName!=='string'||typeof cover.mimeType!=='string'||!isCoverImageMime(cover.mimeType)||typeof cover.hasThumb!=='boolean')throw Error('Не получено подтверждение обложки.');
  return cover as ProjectCoverPreview;
 }

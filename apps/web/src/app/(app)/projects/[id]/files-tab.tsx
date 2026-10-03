@@ -22,7 +22,7 @@ import { useFileViewer } from "@/components/file-viewer";
 import { ConfirmDeleteDialog } from "@/components/confirm-delete-dialog";
 import { deleteFile } from "@/server/files/actions";
 import {UploadErrorDetails} from "@/components/upload-error-details";
-import {createUploadAttempt,sendFileUpload,localUploadFailure,uploadAttemptMatchesContext,type UploadAttempt,type UploadFailure} from "@/lib/file-upload-client";
+import {createUploadAttempt,sendFileUpload,localUploadFailure,type UploadFailure} from "@/lib/file-upload-client";
 import {
   FILE_CATEGORY_LABELS,
   FILE_STAGES,
@@ -78,46 +78,32 @@ export function Uploader({
   const [category, setCategory] = useState<FileCategory>(fixedCategory ?? "PHOTO");
   const [error, setError] = useState<UploadFailure | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
-  const uncertain = useRef<UploadAttempt | null>(null);
+  const currentTarget=useRef('');currentTarget.current=JSON.stringify({projectId,productId,category,stage});
   const active = useRef(false);
 
-  function upload(file?: File,retry=false) {
+  function upload(file:File){
     if(active.current)return;
-    if(uncertain.current&&!retry){const failure=localUploadFailure("Повторите прежнюю загрузку, чтобы проверить её результат.","confirmation",uncertain.current.clientMutationId,"unknown");setError(failure);toast.error(failure.error);return;}
-    if(retry&&uncertain.current&&!uploadAttemptMatchesContext(uncertain.current,{projectId,productId,category,stage})){setError(localUploadFailure("Контекст изменился. Откройте прежнюю карточку для проверки загрузки.","confirmation",uncertain.current.clientMutationId,"unknown"));return;}
-    if (!retry && file && extensions) {
-      const error = validateFileForCategory(
-        category,
-        file.name,
-        extensions[category],
-      );
-      if (error) {
-        setError(localUploadFailure(error));
-        toast.error(error);
-        return;
-      }
-    }
-    let attempt=retry?uncertain.current:null;
-    if(!attempt){if(!file)return;const form=new FormData();form.append("file",file);form.append("projectId",projectId);if(productId)form.append("productId",productId);form.append("category",category);if(stage)form.append("stage",stage);attempt=createUploadAttempt(form);}
-    const request=attempt;active.current=true;
+    if(extensions){const validation=validateFileForCategory(category,file.name,extensions[category]);if(validation){setError(localUploadFailure(validation));toast.error(validation);return;}}
+    const form=new FormData();form.append('file',file);form.append('projectId',projectId);if(productId)form.append('productId',productId);form.append('category',category);if(stage)form.append('stage',stage);
+    const request=createUploadAttempt(form),selectedTarget=currentTarget.current;active.current=true;
     startTransition(async () => {
       let confirmation:{httpStatus:number;requestId:string}|undefined;
       onBusyChange?.(true);
       setError(null);
       try {
-      uncertain.current=request;
-      const result=await sendFileUpload(request);
+
+      const result=await sendFileUpload(request);if(currentTarget.current!==selectedTarget)return;
       if (result.ok) {
         confirmation={httpStatus:result.httpStatus,requestId:result.requestId};
-        uncertain.current=null;
+
         toast.success("Файл загружен");
         router.refresh();
       } else {
-        if(result.failure.commitState==="notCommitted")uncertain.current=null;
+
         setError(result.failure);toast.error(result.failure.error);
       }
       } catch {
-        setError(localUploadFailure(confirmation?"Файл загружен, но интерфейс не обновился. Обновите страницу.":"Не получено подтверждение загрузки. Повторите прежний запрос.","confirmation",request.clientMutationId,confirmation?"committed":"unknown",confirmation?.httpStatus,confirmation?.requestId));
+        setError(localUploadFailure(confirmation?"Файл загружен, но интерфейс не обновился. Обновите страницу.":"Не получено подтверждение загрузки.","confirmation",request.clientMutationId,confirmation?"committed":"unknown",confirmation?.httpStatus,confirmation?.requestId));
       } finally { active.current=false;onBusyChange?.(false); }
     });
   }
@@ -135,7 +121,7 @@ export function Uploader({
             event.target.value = "";
           }}
         />
-        <Button disabled={pending||Boolean(uncertain.current)} onClick={() => inputRef.current?.click()}>
+        <Button disabled={pending} onClick={() => inputRef.current?.click()}>
           <Upload className="size-4" />
           {pending ? "Загрузка…" : "Загрузить файл"}
         </Button>
@@ -148,7 +134,7 @@ export function Uploader({
           <span className="text-sm font-medium">Категория</span>
           <Select
             value={category}
-            disabled={pending||Boolean(uncertain.current)}
+            disabled={pending}
             onValueChange={(value) => setCategory((value ?? "OTHER") as FileCategory)}
           >
             <SelectTrigger className="w-40">
@@ -164,8 +150,7 @@ export function Uploader({
           </Select>
         </div> : null}
         {header ? <header className="flex w-full min-w-0 items-center justify-between gap-3">{header}{uploadControl}</header> : uploadControl}
-        {uncertain.current?<Button type="button" variant="outline" disabled={pending} onClick={()=>upload(undefined,true)}>Повторить прежнюю загрузку</Button>:null}
-        <UploadErrorDetails failure={error} />
+                <UploadErrorDetails failure={error} />
       </CardContent>
     </Card>
   );
