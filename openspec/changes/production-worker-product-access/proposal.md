@@ -9,5 +9,6 @@
 ## New Capabilities
 - `production-worker-product-access`: безопасный производственный просмотр без назначения задачи.
 ## Modified Capabilities
+- `engineer-product-access`: полное требование «Объединение прав ролей» добавляет общий readonly WORKER доступ к живым PRODUCTION и сохраняет отдельные file/technical/money/execution grants.
 # Impact
 Central visibility, Products sidebar row и focused query/direct-file/upload tests. Active actor проверяется existing auth/API resolve; soft-delete54 wrappers сохраняются при обычном merge.
