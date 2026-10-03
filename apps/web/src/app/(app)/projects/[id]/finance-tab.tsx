@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Plus, Trash2 } from "lucide-react";
 
@@ -25,7 +26,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ConfirmDeleteDialog } from "@/components/confirm-delete-dialog";
-import { formatAmount, formatMoneyTotal } from "@/lib/format";
+import { formatAmount, formatMoneyTotal, formatDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { addPayment, deletePayment } from "@/server/payments/actions";
 import { fetchNbrbRate } from "@/server/finance/actions";
@@ -60,10 +61,6 @@ export type ExpenseArticleOption = { id: string; name: string };
 
 const CURRENCIES = ["BYN", "RUB", "USD", "EUR"];
 
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString("ru-RU");
-}
-
 // Вкладка «Финансы» проекта (§11, только админ/директор): экономика
 // (ожидаемая цена, оплаты, расходы = ЗП + статьи, маржа с индикатором),
 // приходы и расходы в любой из 4 валют с курсом НБ РБ в записи.
@@ -86,6 +83,7 @@ export function FinanceTab({
     "INCOME" | "EXPENSE" | null
   >(null);
   const [deleting, setDeleting] = useState<PaymentRow | null>(null);
+  const router = useRouter();
 
   const incomes = payments.filter((payment) => payment.direction === "INCOME");
   const expenses = payments.filter((payment) => payment.direction === "EXPENSE");
@@ -354,6 +352,7 @@ export function FinanceTab({
                 ? "Приход удалён"
                 : "Расход удалён",
             );
+            router.refresh();
             return true;
           }
           toast.error(result.error ?? "Ошибка удаления");
@@ -385,6 +384,7 @@ function PaymentDialog({
   expenseArticles: ExpenseArticleOption[];
 }) {
   const isIncome = direction === "INCOME";
+  const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [currency, setCurrency] = useState(projectCurrency);
   const [cashAccountId, setCashAccountId] = useState("");
@@ -635,6 +635,7 @@ function PaymentDialog({
                 if (result.ok) {
                   toast.success(isIncome ? "Приход внесён" : "Расход внесён");
                   onOpenChange(false);
+                  router.refresh();
                 } else {
                   toast.error(result.error ?? "Ошибка");
                 }
