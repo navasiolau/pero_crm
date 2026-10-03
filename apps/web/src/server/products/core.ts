@@ -1,4 +1,6 @@
 import {liveProductWhere,liveProjectWhere} from "@/server/access/live-entities";
+import {softDeleteProductCore} from './delete-core';
+import type {ProductDeleteInput,ProductDeleteResult} from './delete-contract';
 import { patchProductContactInTransaction } from "../projects/contact-core";
 import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
@@ -179,32 +181,10 @@ export async function updateProductCore(actor: DomainActor, productId: string, i
   }); } catch(error) { return {ok:false as const,error:error instanceof Error?error.message:"Не удалось изменить изделие"}; }
 }
 
-export async function deleteProductCore(actor: DomainActor, productId:string, transaction: TaskTransaction = withTaskTransaction) {
-  if (!hasAnyRole(actor.roles,MANAGER_ROLES)) throw new Error("Недостаточно прав");  const result = await transaction(async (tx) => {
-    const product = await tx.product.findUnique({ where: {...liveProductWhere, id: productId }, include: {
-      _count: { select: { tasks: true, works: true, projectMaterials: true, stockMovements: true } },
-    } });
-    if (!product) return { ok: false as const, error: "Изделие не найдено" };
-    const { tasks, works, projectMaterials, stockMovements } = product._count;
-    if (tasks + works + projectMaterials + stockMovements > 0) return { ok: false as const, error: "К изделию привязаны задачи, работы или материалы — сначала удалите или отвяжите их" };
-    if (await tx.productStagePayPool.count({ where: { productId, state: { in: ["SETTLED", "LEGACY_PROTECTED"] } } }))
-      return { ok: false as const, error: "Нельзя удалить изделие с историей инженерных начислений" };
-    if (await tx.productPercentageCompletion.count({ where: { productId } }))
-      return { ok: false as const, error: "Нельзя удалить изделие с историей процентного этапа" };
-    const configs = await tx.productPercentageConfig.findMany({ where: { productId }, select: { id: true } });
-    if (configs.length) {
-      await tx.productPercentageParticipant.deleteMany({ where: { configId: { in: configs.map((config) => config.id) } } });
-      await tx.productPercentageConfig.deleteMany({ where: { productId } });
-    }
-    await tx.productStagePayPool.deleteMany({ where: { productId, state: "DRAFT" } });
-    await tx.product.delete({ where: { id: productId } });
-    await tx.changeLog.create({ data: {
-      actorType: "user", actorId: actor.id, actorName: actor.name,
-      entity: "product", entityId: productId, action: "delete", oldValue: { number: product.number, title: product.title },
-    } });
-    return { ok: true as const, product };
-  });
-  return result;
+export async function deleteProductCore(actor: DomainActor, productId:string, transaction: TaskTransaction = withTaskTransaction,baseline?:Omit<ProductDeleteInput,'productId'>):Promise<ProductDeleteResult> {
+  if(!baseline)return{ok:false,kind:'validation',error:'Обновите подтверждение удаления изделия'};
+  try{return await transaction(tx=>softDeleteProductCore(tx,actor,{productId,expectedUpdatedAt:baseline.expectedUpdatedAt,clientMutationId:baseline.clientMutationId}));}
+  catch{return{ok:false,kind:'failure',error:'Не получено подтверждение удаления. Повторите тот же запрос'};}
 }
 
 
