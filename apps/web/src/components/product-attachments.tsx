@@ -4,24 +4,22 @@ import { useCallback, useEffect, useRef } from "react";
 import type { FileCategory } from "@prisma/client";
 import { Uploader, FileGridView, type FileRow } from "@/app/(app)/projects/[id]/files-tab";
 import { useProductInline } from "@/components/product-inline-provider";
-import { PhotoUploadButton } from "@/components/photo-upload-button";
 
 export type ProductAttachmentProps = { projectId: string; productId: string; files: FileRow[]; canEdit: boolean; extensions?: Record<FileCategory, string[]> };
 function useAttachmentBarrier(key: string) {
   const { registerGuard } = useProductInline();
-  const busy = useRef({ upload: false, photo: false, deletion: false });
-  useEffect(() => registerGuard(key, async () => !busy.current.upload && !busy.current.photo && !busy.current.deletion), [registerGuard, key]);
+  const busy = useRef({ upload: false, deletion: false });
+  useEffect(() => registerGuard(key, async () => !busy.current.upload && !busy.current.deletion), [registerGuard, key]);
   const upload = useCallback((value: boolean) => { busy.current.upload = value; }, []);
   const deletion = useCallback((value: boolean) => { busy.current.deletion = value; }, []);
-  const photo = useCallback((value: boolean) => { busy.current.photo = value; }, []);
-  return { upload, deletion, photo };
+  return { upload, deletion };
 }
 function AttachmentBlock({ title, stage, measurement, ...props }: ProductAttachmentProps & { title: string; stage: "PRODUCTION" | "INSTALLATION"; measurement?: boolean }) {
   const busy = useAttachmentBarrier(`attachments-${measurement ? "measurement" : stage}`);
   return <section className="flex min-w-0 flex-col gap-3" aria-label={title}>
-    <h2 className="text-sm font-semibold">{title} <span className="text-muted-foreground">({props.files.length})</span></h2>
-    {measurement && props.canEdit ? <div className="min-w-0"><PhotoUploadButton projectId={props.projectId} productId={props.productId} stage="PRODUCTION" filesCount={props.files.filter(file => file.mimeType.startsWith("image/")).length} extensions={props.extensions?.MEASUREMENT} onBusyChange={busy.photo} /></div> : null}
-    <Uploader projectId={props.projectId} productId={props.productId} canEdit={props.canEdit} stage={stage} extensions={props.extensions} fixedCategory={measurement ? "MEASUREMENT" : undefined} excludeMeasurement={!measurement} compact onBusyChange={busy.upload} />
+    {!measurement || !props.canEdit ? <h2 className="text-sm font-semibold">{title} <span className="text-muted-foreground">({props.files.length})</span></h2> : null}
+    <Uploader projectId={props.projectId} productId={props.productId} canEdit={props.canEdit} stage={stage} extensions={props.extensions} fixedCategory={measurement ? "MEASUREMENT" : undefined} excludeMeasurement={!measurement} compact onBusyChange={busy.upload}
+      header={measurement ? <h2 className="min-w-0 flex-1 break-words text-sm font-semibold">{title} <span className="text-muted-foreground">({props.files.length})</span></h2> : undefined} />
     <FileGridView files={props.files} canEdit={props.canEdit} compact onBusyChange={busy.deletion} />
   </section>;
 }
