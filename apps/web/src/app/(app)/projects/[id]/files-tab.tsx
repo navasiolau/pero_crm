@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import { useRef, useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { Download, FileText, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
@@ -59,6 +59,7 @@ export function Uploader({
   extensions,
   fixedCategory,
   excludeMeasurement = false,
+  header,
   onBusyChange,
 }: {
   projectId: string;
@@ -69,6 +70,7 @@ export function Uploader({
   fixedCategory?: FileCategory;
   excludeMeasurement?: boolean;
   compact?: boolean;
+  header?: ReactNode;
   onBusyChange?: (busy: boolean) => void;
 }) {
   const router = useRouter();
@@ -122,6 +124,23 @@ export function Uploader({
 
   if (!canEdit) return null;
 
+  const uploadControl = <>
+        <input
+          ref={inputRef}
+          type="file"
+          className="hidden"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (file) upload(file);
+            event.target.value = "";
+          }}
+        />
+        <Button disabled={pending||Boolean(uncertain.current)} onClick={() => inputRef.current?.click()}>
+          <Upload className="size-4" />
+          {pending ? "Загрузка…" : "Загрузить файл"}
+        </Button>
+  </>;
+
   return (
     <Card>
       <CardContent className="flex min-w-0 flex-wrap items-end gap-3 p-4">
@@ -144,20 +163,7 @@ export function Uploader({
             </SelectContent>
           </Select>
         </div> : null}
-        <input
-          ref={inputRef}
-          type="file"
-          className="hidden"
-          onChange={(event) => {
-            const file = event.target.files?.[0];
-            if (file) upload(file);
-            event.target.value = "";
-          }}
-        />
-        <Button disabled={pending||Boolean(uncertain.current)} onClick={() => inputRef.current?.click()}>
-          <Upload className="size-4" />
-          {pending ? "Загрузка…" : "Загрузить файл"}
-        </Button>
+        {header ? <header className="flex w-full min-w-0 items-center justify-between gap-3">{header}{uploadControl}</header> : uploadControl}
         {uncertain.current?<Button type="button" variant="outline" disabled={pending} onClick={()=>upload(undefined,true)}>Повторить прежнюю загрузку</Button>:null}
         <UploadErrorDetails failure={error} />
       </CardContent>
