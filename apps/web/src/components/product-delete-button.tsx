@@ -27,6 +27,6 @@ export function ProductDeleteButton({productId,canManage,returnHref}:{productId:
   attempt.current=null;router.push(returnHref);router.refresh();return true;
  }catch(e){setError(e instanceof Error?e.message:'Не получено подтверждение удаления');return false;}finally{active.current=false;setBusy(false);}}
  if(!canManage)return null;
- return <div className="min-w-0"><Button variant="destructive" disabled={busy} className="min-h-11 gap-2" onClick={()=>void open()}><Trash2 className="size-4"/>Удалить</Button>{error?<p role="alert" className="mt-2 break-words text-sm text-destructive">{error}</p>:null}
+ return <div className="min-w-0"><Button variant="destructive" disabled={busy} className="min-h-11 gap-2 bg-destructive text-white hover:bg-destructive/90 dark:bg-destructive dark:text-white dark:hover:bg-destructive/90" onClick={()=>void open()}><Trash2 className="size-4"/>Удалить</Button>{error?<p role="alert" className="mt-2 break-words text-sm text-destructive">{error}</p>:null}
  <ConfirmDeleteDialog open={!!baseline} entityLabel={`изделие ${baseline?.number??''} «${baseline?.title??''}»`} warning="Изделие исчезнет из рабочих списков. Записи, файлы и финансовая история сохранятся." onOpenChange={value=>{if(!value&&!active.current&&!attempt.current)setBaseline(null);}} onConfirm={confirm}/></div>;
 }
