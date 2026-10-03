@@ -13,7 +13,7 @@ inject('next/navigation',{useRouter:()=>({refresh(){throw Error('SSR_REFRESH_FOR
 inject('../src/server/finishes/actions',{createFinishAction(){throw Error('SSR_WRITE_FORBIDDEN')},updateFinishAction(){throw Error('SSR_WRITE_FORBIDDEN')},setFinishActiveAction(){throw Error('SSR_WRITE_FORBIDDEN')}});
 Object.assign(globalThis,{React});
 const{FinishesView}=require('../src/app/(app)/finishes/finishes-view') as typeof import('../src/app/(app)/finishes/finishes-view');
-const row={id:'11111111-1111-4111-8111-111111111111',kind:'ENAMEL' as const,name:'Белая эмаль',code:'RAL9016',color:'Белый',active:true,revision:0,updatedAt:new Date(0).toISOString()};
+const row={id:'11111111-1111-4111-8111-111111111111',kind:'ENAMEL' as const,name:'Белая эмаль',code:'RAL9016',color:'Белый',active:true,sampleAssetId:null,sampleAsset:null,revision:0,updatedAt:new Date(0).toISOString()};
 test('exact management and operational readonly role unions retain their independent permissions',()=>{
  for(const roles of [['ADMIN'],['DIRECTOR'],['MANAGER'],['PROCUREMENT'],['ENGINEER','PROCUREMENT']] as Role[][]){assert.equal(canManageFinishCatalog(roles),true);assert.equal(canReadFinishCatalog(roles),true);assert.ok(navItemsForRole(roles).some(item=>item.href==='/finishes'));}
  for(const roles of [['ENGINEER'],['WORKER'],['MOUNTER']] as Role[][]){assert.equal(canReadFinishCatalog(roles),true);assert.equal(canManageFinishCatalog(roles),false);}

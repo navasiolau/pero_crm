@@ -31,13 +31,15 @@ export function localUploadFailure(message:string,phase:UploadPhase="validation"
 function failure(attempt:UploadAttempt,options:{error:string;code:string;message:string;phase:UploadPhase;response?:Response;requestId?:unknown;kind?:unknown;commitState:UploadCommitState}):UploadResult {
  return {ok:false,failure:{error:safeText(options.error,"Не удалось загрузить файл.",300),code:safeId(options.code,"UPLOAD_FAILED"),requestId:safeId(options.requestId,safeId(options.response?.headers.get("x-request-id"),attempt.clientMutationId)),clientMutationId:attempt.clientMutationId,httpStatus:options.response?.status,kind:typeof options.kind==="string"?safeText(options.kind,"",40):undefined,commitState:options.commitState,details:{phase:options.phase,message:safeText(options.message,"Причина не указана")}}};
 }
-export async function sendFileUpload(attempt:UploadAttempt,{fetcher=fetch,timeoutMs=60000}:{fetcher?:typeof fetch;timeoutMs?:number}={}):Promise<UploadResult> {
+export type UploadEndpoint="/api/files/upload"|"/api/catalogue-media/upload";
+export async function sendFileUpload(attempt:UploadAttempt,{fetcher=fetch,timeoutMs=60000,endpoint="/api/files/upload"}:{fetcher?:typeof fetch;timeoutMs?:number;endpoint?:UploadEndpoint}={}):Promise<UploadResult> {
+ if(endpoint!=="/api/files/upload"&&endpoint!=="/api/catalogue-media/upload")return {ok:false,failure:localUploadFailure("Неверный адрес загрузки","request",attempt.clientMutationId)};
  const controller=new AbortController();let response:Response|undefined,timedOut=false,timer:ReturnType<typeof setTimeout>|undefined;
  const unknown=(code:string,error:string,message:string)=>failure(attempt,{code,error,message,phase:response?"confirmation":"request",response,commitState:"unknown"});
  const timeout=new Promise<UploadResult>(resolve=>{timer=setTimeout(()=>{timedOut=true;controller.abort();resolve(unknown("UPLOAD_TIMEOUT","Загрузка не завершилась вовремя. Повторите прежний запрос.","Время ожидания ответа истекло; результат записи не подтверждён."));},timeoutMs);});
  const work=(async():Promise<UploadResult>=>{
   try{
-   response=await fetcher("/api/files/upload",{method:"POST",body:attempt.form,headers:{"x-request-id":attempt.clientMutationId},signal:controller.signal});
+   response=await fetcher(endpoint,{method:"POST",body:attempt.form,headers:{"x-request-id":attempt.clientMutationId},signal:controller.signal});
    let data:unknown;try{data=await response.json();}catch{return unknown("UPLOAD_NON_JSON_RESPONSE","Сервер вернул неожиданный ответ. Повторите прежнюю загрузку.","Ответ сервера не удалось прочитать как JSON.");}
    if(plain(data)&&response.ok&&data.ok===true&&typeof data.id==="string"&&data.id&&data.clientMutationId===attempt.clientMutationId)return {ok:true,data:data as UploadSuccessData,httpStatus:response.status,requestId:safeId(data.requestId,safeId(response.headers.get("x-request-id"),attempt.clientMutationId))};
    if(plain(data)&&data.ok===false){const details=plain(data.details)?data.details:{};const phase=PHASES.includes(details.phase as UploadPhase)?details.phase as UploadPhase:"confirmation";const commitState=["notCommitted","committed","unknown"].includes(String(data.commitState))?data.commitState as UploadCommitState:response.status>=400&&response.status<500?"notCommitted":"unknown";

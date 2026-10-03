@@ -1,0 +1,14 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import {createRequire,Module} from 'node:module';
+import sharp from 'sharp';
+import {sendFileUpload,createUploadAttempt} from '../src/lib/file-upload-client';
+import {sampleFixture} from './helpers/catalogue-sample-fixture';
+const require=createRequire(import.meta.url);
+function inject(name:string,exports:Record<string,unknown>){const file=require.resolve(name),stub=new Module(file);stub.filename=file;stub.loaded=true;stub.exports=exports;require.cache[file]=stub;}
+const f=sampleFixture();let manager=true;let bytesSeen:Buffer|undefined;
+inject('../src/auth',{auth:async()=>({user:{id:'manager',name:'Manager',roles:manager?['MANAGER']:['ENGINEER']}})});
+inject('../src/server/catalogue-media/service',{uploadCatalogueSample:async(_actor:unknown,target:ReturnType<typeof f.target>,asset:{fileName:string;mimeType:string;size:number},bytes:Buffer)=>{bytesSeen=bytes;return{ok:true,id:target.clientMutationId,finishId:target.finishId,sampleAssetId:target.clientMutationId,finishRevision:1,asset:{id:target.clientMutationId,...asset},clientMutationId:target.clientMutationId}}});
+const{POST}=require('../src/app/api/catalogue-media/upload/route') as typeof import('../src/app/api/catalogue-media/upload/route');
+test('actual multipart route and shared client use real Response, exact CID ACK and unchanged encoded image',async()=>{const bytes=await sharp({create:{width:12,height:8,channels:3,background:'#88aacc'}}).png().toBuffer(),target=f.target(),form=new FormData();form.set('file',new File([new Uint8Array(bytes)],'sample.png',{type:'image/png'}));form.set('finishId',target.finishId);form.set('expectedSampleAssetId','null');form.set('expectedRevision','0');const attempt=createUploadAttempt(form,target.clientMutationId);const result=await sendFileUpload(attempt,{endpoint:'/api/catalogue-media/upload',fetcher:async(url,options)=>{assert.equal(url,'/api/catalogue-media/upload');return POST(new Request('http://example.invalid/api/catalogue-media/upload',options));}});assert.equal(result.ok,true);assert.deepEqual(bytesSeen,bytes);if(result.ok)assert.equal(result.data.id,target.clientMutationId);});
+test('readonly and missing exact CAS fields rejected before catalogue upload service',async()=>{bytesSeen=undefined;manager=false;const denied=await POST(new Request('http://example.invalid/api/catalogue-media/upload',{method:'POST',body:new FormData()}));assert.equal(denied.status,403);assert.equal(bytesSeen,undefined);manager=true;const form=new FormData();form.set('finishId',f.finishId);form.set('expectedSampleAssetId','null');form.set('clientMutationId',f.target().clientMutationId);const missing=await POST(new Request('http://example.invalid/api/catalogue-media/upload',{method:'POST',body:form}));assert.equal(missing.status,422);assert.equal(bytesSeen,undefined);});

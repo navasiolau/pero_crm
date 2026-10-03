@@ -59,14 +59,15 @@ export function createPreviewLimiter(maxConcurrent = 2, maxPending = MAX_PENDING
   return { acquire, run };
 }
 
-export type ImagePreviewDependencies<Actor> = {
-  lookup: (actor: Actor, fileId: string) => Promise<PreviewFile | null>;
-  loadOriginal: (file: PreviewFile, maxBytes: number) => Promise<Buffer | null>;
+export type ImagePreviewBase = Pick<PreviewFile, "id" | "mimeType" | "size" | "createdAt">;
+export type ImagePreviewDependencies<Actor, File extends ImagePreviewBase = PreviewFile> = {
+  lookup: (actor: Actor, fileId: string) => Promise<File | null>;
+  loadOriginal: (file: File, maxBytes: number) => Promise<Buffer | null>;
 };
 
-export function createImagePreviewService<Actor>(
-  deps: ImagePreviewDependencies<Actor>,
-  options: { maxCacheBytes?: number; maxConcurrent?: number } = {},
+export function createImagePreviewService<Actor, File extends ImagePreviewBase = PreviewFile>(
+  deps: ImagePreviewDependencies<Actor, File>,
+  options: { maxCacheBytes?: number; maxConcurrent?: number; identity?: (file: File) => string } = {},
 ) {
   const maxCacheBytes = options.maxCacheBytes ?? DEFAULT_CACHE_BYTES;
   const maxConcurrent = options.maxConcurrent ?? 2;
@@ -87,8 +88,8 @@ export function createImagePreviewService<Actor>(
     cachedBytes += asset.bytes.length;
   }
 
-  async function render(file: PreviewFile, variant: ImagePreviewVariant): Promise<Rendered> {
-    const key = [file.id, file.projectId, file.productId, file.storedName, file.mimeType,
+  async function render(file: File, variant: ImagePreviewVariant): Promise<Rendered> {
+    const key = [file.id, options.identity?.(file) ?? JSON.stringify(file), file.mimeType,
       file.size, file.createdAt.getTime(), variant].join(":");
     const cached = cache.get(key);
     if (cached) {
