@@ -9,15 +9,15 @@ import {withTaskTransaction} from '../tasks/transaction';
 import { writeChangeLog } from "@/server/plugins/changelog";
 
 import { MANAGER_ROLES, OFFICE_WRITE_ROLES, hasAnyRole } from "@/lib/roles";
-import { resolveVisibilityActor, taskExecutionWhere, taskVisibilityWhere } from "@/server/access/visibility";
+import { resolveVisibilityActor, taskExecutionWhere, taskVisibilityWhere, type VisibilityActor } from "@/server/access/visibility";
 
 const AUTOSTOP_MINUTES = 12 * 60; // §19: автостоп по таймауту 12 ч с пометкой
 
 // Автостоп «забытых» таймеров (вызывается при чтении/старте/стопе).
-async function autostopExpired(userId: string): Promise<void> {
+async function autostopExpired(actor: VisibilityActor): Promise<void> {
   const edge = new Date(Date.now() - AUTOSTOP_MINUTES * 60 * 1000);
   await prisma.timeEntry.updateMany({
-    where: { userId, stoppedAt: null, startedAt: { lt: edge } },
+    where: { userId: actor.id, stoppedAt: null, startedAt: { lt: edge }, task: taskExecutionWhere(actor) },
     data: { stoppedAt: new Date(), autoStopped: true, minutes: AUTOSTOP_MINUTES },
   });
 }
@@ -25,8 +25,8 @@ async function autostopExpired(userId: string): Promise<void> {
 export async function getActiveTimer() {
   const session = await auth();
   if (!session?.user) throw new Error("Не авторизован");
-  await autostopExpired(session.user.id);
   const actor = await resolveVisibilityActor(prisma, session.user);
+  await autostopExpired(actor);
   return prisma.timeEntry.findFirst({
     where: { userId: session.user.id, stoppedAt: null, task: taskExecutionWhere(actor) },
     include: {
