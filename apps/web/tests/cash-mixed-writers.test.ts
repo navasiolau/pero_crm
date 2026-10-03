@@ -78,7 +78,7 @@ before(() => {
   inject("../src/server/finance/nbrb", { isCurrency: (value: string) => ["BYN", "USD", "RUB", "EUR"].includes(value),
     getNbrbRate: async () => ({ rate: 1, date }), equivalents: (amount: number) => ({ bynAmount: amount, projectAmount: amount }) });
   inject("../src/server/plugins/changelog", { writeChangeLog: async () => {} });
-  inject("../src/server/plugins/events", { emitDomainEvent: async () => {} });
+  inject("../src/server/plugins/events", { emitDomainEvent: async () => {}, dispatchEvent: async () => {} });
   inject("../src/server/notifications/notify", { notifyOrg: async () => {} });
   inject("../src/server/payroll/queries", { getPayrollCurrency: async () => "BYN" });
   const realTransaction = require("../src/server/tasks/transaction");

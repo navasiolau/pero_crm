@@ -5,8 +5,7 @@ import { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
 import { formatAmount } from "@/lib/format";
-import { writeChangeLog } from "@/server/plugins/changelog";
-import { emitDomainEvent } from "@/server/plugins/events";
+import { dispatchEvent } from "@/server/plugins/events";
 import { notifyOrg } from "@/server/notifications/notify";
 
 import { getNbrbRate, isCurrency } from "@/server/finance/nbrb";
@@ -22,7 +21,7 @@ import { assertProjectMoneyCurrency } from "@/lib/internal-currency";
 // кассы/статьи/курса НБ РБ — здесь, единообразно для обоих каналов.
 
 export const paymentSchema = z.object({
-  projectId: z.string().min(1),
+  projectId: z.string().min(1).nullable().optional(),
   direction: z.enum(["INCOME", "EXPENSE"]),
   amount: z.number().positive("Сумма должна быть больше нуля"),
   currency: z.string(),
@@ -34,7 +33,7 @@ export const paymentSchema = z.object({
   rateDate: z.string().optional(), // YYYY-MM-DD
   paidAt: z.string().optional(), // YYYY-MM-DD; пусто — сейчас
   comment: z.string().optional(),
-});
+}).refine(data => data.direction !== "EXPENSE" || !!data.projectId, { message: "Для расхода выберите действующий проект", path: ["projectId"] });
 
 export async function createPaymentCore(
   actor: DomainActor,
@@ -48,12 +47,12 @@ export async function createPaymentCore(
   const data = parsed.data;
   if (!isCurrency(data.currency)) return { ok: false, error: "Неизвестная валюта" };
 
-  const project = await prisma.project.findUnique({
+  const project = data.projectId ? await prisma.project.findUnique({
     where: {...liveProjectWhere, id: data.projectId },
     select: { id: true, number: true, currency: true },
-  });
-  if (!project) return { ok: false, error: "Проект не найден" };
-  try { assertProjectMoneyCurrency(project.currency); }
+  }) : null;
+  if (data.projectId && !project) return { ok: false, error: "Проект не найден" };
+  try { if (project) assertProjectMoneyCurrency(project.currency); }
   catch (error) { return { ok: false, error: error instanceof Error ? error.message : "Сначала подготовьте проект в BYN" }; }
 
   // Касса: операция проводится только в валюте кассы (деньги физически
@@ -113,87 +112,43 @@ export async function createPaymentCore(
   // полкопейки округляется вверх без ошибки двоичного умножения.
   const rateDecimal = new Prisma.Decimal(rate);
   const bynDecimal = amountDecimal.times(rateDecimal).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
-  const equiv = { bynAmount: bynDecimal.toNumber(), projectAmount: bynDecimal.toNumber() };
+  const equiv = { bynAmount: bynDecimal.toNumber(), projectAmount: project ? bynDecimal.toNumber() : null };
 
-  const payrollRate = "1.000000";
-  let payment;
+  let result;
   try {
-    payment = await withTaskTransaction(async (tx) => {
-      const [currentProject, currentAccount, currentArticle] = await Promise.all([
-        tx.project.findUnique({ where: {...liveProjectWhere, id: project.id }, select: { currency: true } }),
-        tx.cashAccount.findUnique({ where: { id: account.id }, select: { active: true, currency: true } }),
-        articleId ? tx.expenseArticle.findUnique({ where: { id: articleId }, select: { active: true } }) : Promise.resolve(null),
-      ]);
-      if (currentProject?.currency !== project.currency || !currentAccount?.active || currentAccount.currency !== data.currency
-        || (articleId && !currentArticle?.active)) throw new Error("Реквизиты платежа изменились — обновите форму");
-      if (data.direction === "EXPENSE") {
-        const [cashBalance, orgBalanceAfter] = await Promise.all([readCashBalance(tx, account.id), readOrgBalance(tx, payrollRate, bynDecimal.negated().toFixed(2))]);
-        if (cashBalance.lt(amountDecimal)) throw new Error("Недостаточно средств в выбранной кассе");
-        if (orgBalanceAfter.lt(0)) throw new Error("Недостаточно средств на балансе организации");
-      }
-      return tx.payment.create({ data: {
-      projectId: project.id,
-      direction: data.direction,
-      amount,
-      currency: data.currency,
-      rate,
-      rateDate,
-      bynAmount: equiv.bynAmount,
-      projectAmount: equiv.projectAmount,
-      cashAccountId: account.id,
-      expenseArticleId: articleId,
-      paidAt,
-      comment: data.comment?.trim() || null,
-      createdById: actor.id,
-      } });
-    });
-  } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : "Не удалось внести платёж" };
-  }
-
+    result = await withTaskTransaction(tx => createPaymentInTransaction(actor, data, {project,account,articleId,paidAt,rate,rateDate,amount,bynAmount:equiv.bynAmount},tx));
+  } catch(error) { return {ok:false,error:error instanceof Error?error.message:"Не удалось внести платёж"}; }
   const isIncome = data.direction === "INCOME";
   const kind = isIncome ? "Приход" : "Расход";
-  await writeChangeLog({
-    actorType: "user",
-    actorId: actor.id,
-    actorName: actor.name || undefined,
-    entity: "payment",
-    entityId: payment.id,
-    action: "create",
-    newValue: {
-      project: project.number,
-      direction: data.direction,
-      amount,
-      currency: data.currency,
-      rate,
-      bynAmount: equiv.bynAmount,
-      projectAmount: equiv.projectAmount,
-      cashAccount: account.name,
-    },
-    source: actor.source,
-  });
-  await emitDomainEvent(
-    isIncome ? "payment.created" : "expense.created",
-    {
-      paymentId: payment.id,
-      projectId: project.id,
-      direction: data.direction,
-      amount,
-      currency: data.currency,
-      bynAmount: equiv.bynAmount,
-    },
-    actor.id,
-  );
+  await dispatchEvent(result.eventId).catch(() => {});
   await notifyOrg({
     type: isIncome ? "payment.added" : "expense.added",
-    title: `${kind} ${formatAmount(amount, data.currency)} · ${project.number}`,
+    title: `${kind} ${formatAmount(amount, data.currency)} · ${project?.number ?? "Организация"}`,
     body: data.comment?.trim() || undefined,
-    link: `/projects/${project.id}`,
+    link: project ? `/finance/projects/${project.id}` : "/finance/income",
     exceptUserId: actor.id,
-  });
+  }).catch(() => {});
 
-  revalidatePath(`/projects/${project.id}`);
+  if (project) revalidatePath(`/projects/${project.id}`);
+  revalidatePath("/finance/income");
   revalidatePath("/finance/payroll");
   revalidatePath("/finance/accounts");
   return { ok: true };
+}
+
+export type PreparedPayment = {project:{id:string;number:string;currency:string}|null;account:{id:string;name:string};articleId:string|null;paidAt:Date;rate:number;rateDate:Date|null;amount:number;bynAmount:number};
+export async function createPaymentInTransaction(actor:DomainActor,input:z.input<typeof paymentSchema>,prepared:PreparedPayment,tx:Prisma.TransactionClient){
+ requireActorRoles(actor,FINANCE_ROLES);const data=paymentSchema.parse(input);
+ if(!isCurrency(data.currency)||data.cashAccountId!==prepared.account.id)throw Error("Реквизиты кассы изменились");
+ const amount=new Prisma.Decimal(data.amount).toDecimalPlaces(2,Prisma.Decimal.ROUND_HALF_UP);
+ if(!Number.isFinite(prepared.rate)||prepared.rate<=0||(data.currency==='BYN'&&prepared.rate!==1)||!amount.eq(prepared.amount)||!amount.times(prepared.rate).toDecimalPlaces(2,Prisma.Decimal.ROUND_HALF_UP).eq(prepared.bynAmount))throw Error("Денежный снимок изменился");
+ if((data.projectId??null)!==(prepared.project?.id??null))throw Error("Реквизиты проекта изменились");
+ const [project,account,article]=await Promise.all([prepared.project?tx.project.findUnique({where:{...liveProjectWhere,id:prepared.project.id},select:{currency:true}}):Promise.resolve(null),tx.cashAccount.findUnique({where:{id:prepared.account.id},select:{active:true,currency:true}}),prepared.articleId?tx.expenseArticle.findUnique({where:{id:prepared.articleId},select:{active:true}}):Promise.resolve(null)]);
+ if((prepared.project&&project?.currency!==prepared.project.currency)||!account?.active||account.currency!==data.currency||(prepared.articleId&&!article?.active))throw Error("Реквизиты платежа изменились — обновите форму");
+ if(project)assertProjectMoneyCurrency(project.currency);
+ if(data.direction==='EXPENSE'){if(!prepared.articleId)throw Error("Выберите статью расхода");const [cash,org]=await Promise.all([readCashBalance(tx,prepared.account.id),readOrgBalance(tx,'1.000000',new Prisma.Decimal(prepared.bynAmount).negated().toFixed(2))]);if(cash.lt(prepared.amount))throw Error("Недостаточно средств в выбранной кассе");if(org.lt(0))throw Error("Недостаточно средств на балансе организации");}
+ const payment=await tx.payment.create({data:{projectId:prepared.project?.id??null,direction:data.direction,amount:prepared.amount,currency:data.currency,rate:prepared.rate,rateDate:prepared.rateDate,bynAmount:prepared.bynAmount,projectAmount:prepared.project?prepared.bynAmount:null,cashAccountId:prepared.account.id,expenseArticleId:prepared.articleId,paidAt:prepared.paidAt,comment:data.comment?.trim()||null,createdById:actor.id}});
+ await tx.changeLog.create({data:{actorType:'user',actorId:actor.id,actorName:actor.name||undefined,entity:'payment',entityId:payment.id,action:'create',source:actor.source,newValue:{project:prepared.project?.number??null,direction:data.direction,amount:prepared.amount,currency:data.currency,rate:prepared.rate,bynAmount:prepared.bynAmount,projectAmount:prepared.project?prepared.bynAmount:null,cashAccount:prepared.account.name}}});
+ const event=await tx.domainEvent.create({data:{type:data.direction==='INCOME'?'payment.created':'expense.created',actor:actor.id,payload:{paymentId:payment.id,projectId:prepared.project?.id??null,direction:data.direction,amount:prepared.amount,currency:data.currency,bynAmount:prepared.bynAmount}}});
+ return{payment,eventId:event.id};
 }

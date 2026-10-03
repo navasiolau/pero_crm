@@ -38,7 +38,7 @@ export type PaymentRow = {
   currency: string;
   rate: number; // BYN за единицу валюты (курс НБ РБ / ручной)
   bynAmount: number;
-  projectAmount: number; // эквивалент в валюте проекта
+  projectAmount: number | null; // эквивалент в валюте проекта
   paidAt: string;
   comment: string | null;
   cashAccountName: string | null;
@@ -369,24 +369,27 @@ export function FinanceTab({
 // Диалог внесения прихода/расхода (§11): валюта, касса в валюте операции,
 // курс НБ РБ (подтягивается автоматически, можно поправить вручную),
 // эквивалент BYN. Эквивалент в валюте проекта считает сервер.
-function PaymentDialog({
+export function PaymentDialog({
   direction,
   open,
   onOpenChange,
   projectId,
   projectCurrency,
+  projectOptions,
   cashAccounts,
   expenseArticles,
 }: {
   direction: "INCOME" | "EXPENSE";
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  projectId: string;
+  projectId?: string | null;
   projectCurrency: string;
+  projectOptions?: {id:string;number:string;title:string}[];
   cashAccounts: CashAccountOption[];
   expenseArticles: ExpenseArticleOption[];
 }) {
   const isIncome = direction === "INCOME";
+  const [selectedProjectId,setSelectedProjectId]=useState(projectId??"");
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [currency, setCurrency] = useState(projectCurrency);
@@ -402,6 +405,7 @@ function PaymentDialog({
   // Сброс формы при каждом открытии
   useEffect(() => {
     if (open) {
+      setSelectedProjectId(projectId??"");
       setCurrency(projectCurrency);
       setCashAccountId("");
       setArticleId("");
@@ -411,7 +415,7 @@ function PaymentDialog({
       setPaidAt("");
       setComment("");
     }
-  }, [open, projectCurrency]);
+  }, [open, projectCurrency, projectId]);
 
   // Курс НБ РБ — автоматически при смене валюты/даты (§11)
   useEffect(() => {
@@ -474,7 +478,7 @@ function PaymentDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>
-            {isIncome ? "Приход по проекту" : "Расход по проекту"}
+            {isIncome ? (projectOptions ? "Приход организации" : "Приход по проекту") : "Расход по проекту"}
           </DialogTitle>
           <DialogDescription>
             {isIncome
@@ -483,6 +487,7 @@ function PaymentDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="flex flex-col gap-3">
+          {projectOptions?<div className="flex flex-col gap-1.5"><Label htmlFor="income-project">Проект (необязательно)</Label><select id="income-project" className="h-10 rounded-md border bg-background px-3" value={selectedProjectId} onChange={event=>setSelectedProjectId(event.target.value)}><option value="">Общий приход организации</option>{projectOptions.map(project=><option key={project.id} value={project.id}>{project.number} · {project.title}</option>)}</select></div>:null}
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1.5">
               <Label>Валюта *</Label>
@@ -624,7 +629,7 @@ function PaymentDialog({
             onClick={() =>
               startTransition(async () => {
                 const result = await addPayment({
-                  projectId,
+                  projectId: projectOptions ? selectedProjectId || null : projectId ?? null,
                   direction,
                   amount: parsedAmount,
                   currency,
