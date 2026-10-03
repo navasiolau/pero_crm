@@ -30,6 +30,7 @@ interface TokenRow {
 }
 
 const AVAILABLE_SCOPES = [
+  {id:"calendar.reminders",label:"calendar.reminders — доставка личных напоминаний"},
   { id: "read", label: "read — чтение" },
   { id: "write", label: "write — команды и операции" },
   { id: "admin", label: "admin — полный доступ" },

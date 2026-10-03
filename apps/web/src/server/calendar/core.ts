@@ -1,3 +1,4 @@
+import {reminderOwnerAllowed,type ReminderContext} from "@/lib/calendar-reminder-context";
 import type {CalendarEntry,Prisma} from '@prisma/client';
 import {resolveCalendarActor} from '@/lib/calendar-access';
 import {parseCalendarDateTime,calendarMonthRange} from '@/lib/calendar-dates';
@@ -12,7 +13,7 @@ export async function listCalendarMonthCore(actorId:string|null,month:string,tra
  return transaction(async tx=>{const actor=await actorInTransaction(actorId,tx);return (await tx.calendarEntry.findMany({where:{ownerId:actor.id,startsAt:{gte:range.start,lt:range.end}},orderBy:[{startsAt:'asc'},{id:'asc'}]})).map(calendarEntryView);});
 }
 const failure=(code:string,error:string,kind:'conflict'|'failure'='failure'):CalendarMutationResult=>({ok:false,kind,code,error});
-export async function mutateCalendarCore(actorId:string|null,input:unknown,transaction:CalendarTransaction):Promise<CalendarMutationResult>{
+export async function mutateCalendarCore(actorId:string|null,input:unknown,transaction:CalendarTransaction,reminderContext:ReminderContext|null=null):Promise<CalendarMutationResult>{
  const parsed=calendarMutationSchema.safeParse(input);if(!parsed.success)return failure('CALENDAR_INPUT_INVALID',parsed.error.issues[0]?.message??'Некорректные данные');
  const data=parsed.data;
  let startsAt:Date|undefined;
@@ -22,7 +23,7 @@ export async function mutateCalendarCore(actorId:string|null,input:unknown,trans
  const current=await tx.calendarEntry.findFirst({where:{id:data.entryId,ownerId:actor.id}});
  if(data.operation==='create'){
  const values={title:data.title,description:data.description,startsAt:startsAt!,reminderOffsetMinutes:data.reminderOffsetMinutes};
- const row=current??await tx.calendarEntry.upsert({where:{id:data.entryId},create:{id:data.entryId,ownerId:actor.id,...values},update:{}});
+ const row=current??await tx.calendarEntry.upsert({where:{id:data.entryId},create:{id:data.entryId,ownerId:actor.id,...values,reminderNamespace:reminderContext&&reminderOwnerAllowed(reminderContext,actor.id)?reminderContext.namespace:null},update:{}});
  if(row.ownerId!==actor.id)return failure('CALENDAR_ENTRY_NOT_FOUND','Запись не найдена');
  if(row.title!==values.title||row.description!==values.description||row.startsAt.getTime()!==values.startsAt.getTime()||row.reminderOffsetMinutes!==values.reminderOffsetMinutes)return failure('CALENDAR_CREATE_CONFLICT','Повтор создания содержит другие данные','conflict');
  return {ok:true,entry:calendarEntryView(row),repeated:current!==null};
@@ -30,7 +31,7 @@ export async function mutateCalendarCore(actorId:string|null,input:unknown,trans
  if(!current)return failure('CALENDAR_ENTRY_NOT_FOUND','Запись не найдена');
  if(current.revision!==data.expectedRevision)return failure('CALENDAR_REVISION_CONFLICT','Запись уже изменена. Откройте актуальную запись','conflict');
  const values=data.operation==='state'?{state:data.state}:{title:data.title,description:data.description,startsAt:startsAt!,reminderOffsetMinutes:data.reminderOffsetMinutes};
- const changed=await tx.calendarEntry.updateMany({where:{id:data.entryId,ownerId:actor.id,revision:data.expectedRevision},data:{...values,revision:{increment:1}}});
+ const changed=await tx.calendarEntry.updateMany({where:{id:data.entryId,ownerId:actor.id,revision:data.expectedRevision},data:{...values,...(data.operation==='update'?{reminderNamespace:reminderContext&&reminderOwnerAllowed(reminderContext,actor.id)?reminderContext.namespace:null}:{}),revision:{increment:1}}});
  if(changed.count!==1)return failure('CALENDAR_REVISION_CONFLICT','Запись уже изменена. Откройте актуальную запись','conflict');
  const row=await tx.calendarEntry.findFirst({where:{id:data.entryId,ownerId:actor.id}});
  if(!row)throw new Error('CALENDAR_CONFIRMED_ROW_MISSING');

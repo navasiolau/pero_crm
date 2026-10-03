@@ -1,0 +1,15 @@
+# Design
+## Context
+64 даёт личный CalendarEntry и live enabled guard. Bell читает Notification,58 ограничивает content по текущим ролям. Web instrumentation уже запускается в существующем node process; bot не требуется.
+## Goals / Non-Goals
+Goals: once-only Notification+confirmed ReminderFact, stale/cancel/off защита и test isolation.
+Non-Goals: Telegram66, новые сервисы, org сообщения, чужие settings/API read и реальное окружение/БД автором.
+## Decisions
+Server context namespace определяется только explicit env с origin/DB/bucket/environment guard. Local/stage дополнительно точный owner allowlist. Mutation ставит trusted namespace только разрешённому actor; NULL старых записей не backfill. Worker query использует namespace+allowlist до выборки; повторно блокирует запись и User, проверяет live flag/state/revision/dueAt. Fact unique(namespace,entryId,entryRevision), Notification и факт создаются атомарно. Crash откатывает обе записи, restart/конкуренция не дублируют. Preference=false сохраняет confirmed fact webState SKIPPED без Notification; future66 повторно проверяет свои delivery grants. Изменение/cancel/newrevision не даёт старому pending candidate доставить. Fact сохраняется как история, private content не попадает в global ChangeLog. Worker в instrumentation60s имеет singleton/reentrancy guards+unref, error retry следующего tick без raw logging. Dispatch capability calendar.reminders принимает только empty request и отдаёт counts. Personal type чтения требует собственного confirmed fact/current enabled account/matching trusted namespace, а не офисной роли.
+## Risks / Trade-offs
+Не настроенный или неоднозначный env → failclosed без query/delivery; календарный CRUD остаётся доступным без arming. Legacy/imported entries NULL/foreign namespace не доставляются; явная собственная правка в trusted context может arm запись. Web process restart → периодический tick и unique fact сохраняют once-only. Namespace/testallowlist на staging настраивает Root отдельно после review.
+## Migration Plan
+Добавить nullable stamp и новую таблицу/FK/unique/check без обновления старых бизнес-данных. Root native outer rollback проверяет Notification/Fact атомарность/дедуп/изолированный namespace; author BUILDONLY. Production activation только отдельно принятой runtime конфигурацией; disabled default.
+
+## Runtime activation (Root)
+Доставка выключена по умолчанию. Root отдельно задаёт CALENDAR_REMINDERS_ENABLED=true, CALENDAR_REMINDER_ENVIRONMENT и CALENDAR_REMINDER_NAMESPACE. Production namespace ровно production; local/staging — local:<UUID>/staging:<UUID> и CALENDAR_REMINDER_TEST_OWNER_IDS JSON с точными собственными test actor IDs. Origin/DB/bucket должны соответствовать каноническому окружению; неизвестное сочетание не запускает worker. В этой задаче реальные env не изменялись. Старые CalendarEntry.reminderNamespace=NULL не backfill: в test окружениях only explicit own create/update в принятом context arms запись. Shared fact confirmedAt — подтверждение события;66 проверяет current entry/flag/namespace перед своей отдельной delivery claim. Fact SKIPPED значит web preference выключена, Notification не создана.
