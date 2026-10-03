@@ -23,6 +23,8 @@ services:
     environment:
       DATABASE_URL: postgresql://crm:${DB_PASSWORD}@db:5432/crm
       TZ: ${TZ:-Europe/Minsk}
+      # Server deployments explicitly use S3; incomplete config never falls back to disk.
+      CRM_FILE_STORAGE: s3
     volumes:
       # Файловое хранилище (§13). ВАЖНО: standalone server.js делает
       # process.chdir(__dirname) → cwd = /app/apps/web, поэтому маунт
