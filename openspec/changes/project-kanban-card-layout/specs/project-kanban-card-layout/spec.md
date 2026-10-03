@@ -12,7 +12,7 @@ Project kanban SHALL показывать cover сверху, крупный bol
 - **WHEN** Project вернулся в LEAD после переходов
 - **THEN** возраст начинается с последнего перехода, не создания проекта.
 ### Requirement: Preserve visibility and information
-Card MUST сохранять monetaryroleACL, distinctnull/zero и существующие counters/shortage послеamount; Productcardlayout остаётся прежним.
+Card MUST сохранять monetaryroleACL, distinctnull/zero и compactshortage послеamount; counters изделий/задач/файлов не показываются. Productcardlayout остаётся прежним.
 #### Scenario: Restricted or unknown price
 - **WHEN** actor не видит деньги либо цена неизвестна
 - **THEN** hiddenamount не появляется и неизвестное значение не становится0.
