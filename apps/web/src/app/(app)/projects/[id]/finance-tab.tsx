@@ -71,7 +71,9 @@ export function FinanceTab({
   payments,
   cashAccounts,
   expenseArticles,
+  canEdit = true,
 }: {
+  canEdit?: boolean;
   projectId: string;
   currency: string;
   economics: ProjectEconomicsView;
@@ -163,7 +165,7 @@ export function FinanceTab({
         id: "actions",
         header: "",
         className: "w-10",
-        cell: (row) => (
+        cell: (row) => canEdit ? (
           <Button
             variant="ghost"
             size="icon"
@@ -175,7 +177,7 @@ export function FinanceTab({
           >
             <Trash2 className="size-4 text-muted-foreground" />
           </Button>
-        ),
+        ) : null,
       },
     );
     return columns;
@@ -279,7 +281,7 @@ export function FinanceTab({
       <div className="flex flex-col gap-3">
         <div className="flex items-center justify-between gap-3">
           <h3 className="text-lg font-semibold">Приходы</h3>
-          <Button onClick={() => setDialogDirection("INCOME")}>
+          <Button disabled={!canEdit} onClick={() => setDialogDirection("INCOME")}>
             <Plus className="size-4" />
             Добавить приход
           </Button>
@@ -298,6 +300,7 @@ export function FinanceTab({
           <h3 className="text-lg font-semibold">Расходы</h3>
           <Button
             variant="outline"
+            disabled={!canEdit}
             onClick={() => setDialogDirection("EXPENSE")}
           >
             <Plus className="size-4" />
@@ -318,7 +321,7 @@ export function FinanceTab({
 
       <PaymentDialog
         direction={dialogDirection ?? "INCOME"}
-        open={dialogDirection !== null}
+        open={canEdit && dialogDirection !== null}
         onOpenChange={(open) => {
           if (!open) setDialogDirection(null);
         }}
@@ -330,7 +333,7 @@ export function FinanceTab({
 
       <ConfirmDeleteDialog
         entityLabel={deleting?.direction === "EXPENSE" ? "расход" : "приход"}
-        open={deleting !== null}
+        open={canEdit && deleting !== null}
         onOpenChange={(open) => {
           if (!open) setDeleting(null);
         }}

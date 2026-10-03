@@ -29,3 +29,11 @@ INCOME/EXPENSE SHALL использовать existingpayments cores/rolechecks/
 #### Scenario: Подмена роли
 - **WHEN** MANAGER или ENGINEER безfinance роли вызываетworkspacequery
 - **THEN** отказдо dataread, прежнийgeneralprojectдоступнеизменён
+
+### Requirement: Удалённые проекты и финансовая история
+
+Selectable list SHALL исключать soft-deleted проекты через central liveProjectWhere. Прямой финансовый lookup SHALL сохранять исторические строки, выдавая только projectArchived boolean. Архивный workspace SHALL оставаться доступным для просмотра и отключать денежные controls; серверные ограничения №54 SHALL сохраняться.
+
+#### Scenario: Историческая ссылка
+- **WHEN** финансовый actor открывает ранее удалённый проект по ID
+- **THEN** история и экономика сохранены, новые операции недоступны, а picker этот проект не предлагает

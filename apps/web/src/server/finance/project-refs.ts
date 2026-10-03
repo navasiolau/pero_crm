@@ -1,15 +1,14 @@
 import type {PrismaClient,Prisma,Role,ProjectStage} from '@prisma/client';
 import {FINANCE_ROLES,hasAnyRole} from '@/lib/roles';
 import {displayClientName} from '@/lib/labels';
+import {liveProjectWhere} from '@/server/access/live-entities';
 import {prisma} from '@/lib/prisma';
 export type FinanceWorkspaceActor={id:string;roles:Role[]};
-export type FinanceProjectRef={id:string;number:string;title:string;currency:string;stage:ProjectStage;clientLabel:string};
-export const financeProjectSelect={id:true,number:true,title:true,currency:true,stage:true,client:{select:{name:true,lastName:true,middleName:true}}} satisfies Prisma.ProjectSelect;
+export type FinanceProjectRef={id:string;number:string;title:string;currency:string;stage:ProjectStage;clientLabel:string;projectArchived:boolean};
+export const financeProjectSelect={id:true,number:true,title:true,currency:true,stage:true,deletedAt:true,client:{select:{name:true,lastName:true,middleName:true}}} satisfies Prisma.ProjectSelect;
 export function requireFinanceWorkspaceActor(actor:{roles:Role[]}){if(!hasAnyRole(actor.roles,FINANCE_ROLES))throw Error('Недостаточно прав для финансового проекта');}
-const ref=(project:Prisma.ProjectGetPayload<{select:typeof financeProjectSelect}>):FinanceProjectRef=>({id:project.id,number:project.number,title:project.title,currency:project.currency,stage:project.stage,clientLabel:displayClientName(project.client)});
-// Foundation54 supplies the live selectable predicate on normal integration.
-// This branch currently has no deleted fields; historical financial lookup stays separate.
-export function selectableFinanceProjectsWhere():Prisma.ProjectWhereInput{return{};}
+const ref=(project:Prisma.ProjectGetPayload<{select:typeof financeProjectSelect}>):FinanceProjectRef=>({id:project.id,number:project.number,title:project.title,currency:project.currency,stage:project.stage,projectArchived:project.deletedAt!==null,clientLabel:displayClientName(project.client)});
+export function selectableFinanceProjectsWhere():Prisma.ProjectWhereInput{return liveProjectWhere;}
 export const financeProjectRefSelect={id:true,number:true,title:true,currency:true} satisfies Prisma.ProjectSelect;
 /** Preserve the narrower reference API/bot contract introduced by task58. */
 export async function listFinanceProjectRefs(actor:{roles:Role[]},query='',db:Pick<Prisma.TransactionClient,'project'>=prisma){
