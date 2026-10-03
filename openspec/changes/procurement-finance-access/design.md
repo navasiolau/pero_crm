@@ -16,6 +16,8 @@ Goals: PROCUREMENT full supply/finance, Accountant finance-only, union roles. No
 
 ## Risks / Trade-offs
 
+Глобальный «Журнал» по уточнению 03.10 — отдельный ADMIN-only reader. Nav journal roles и auth route callback требуют ADMIN; серверный listGlobalChangeLog вызывает requireRole(["ADMIN"]) до Prisma query, страница использует этот reader. Middleware не является единственной защитой. Общий ADMIN_ROLES (ADMIN/DIRECTOR), audit writeChangeLog и task/finance history не меняются; схемы/миграции для этого уточнения нет. Role-union не добавляет Journal без ADMIN.
+
 [Скрытое обходное разрешение] → серверные role/visibility/DTO tests. [Смешанные роли] → positive union matrix. [Разделение material controls] → отдельные flags/actions.
 
 ## Migration Plan
