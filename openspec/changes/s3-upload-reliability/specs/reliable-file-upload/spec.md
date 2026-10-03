@@ -57,3 +57,12 @@
 #### Scenario: Actual first cover upload
 - **WHEN** развёрнута проверяемая ревизия и первый файл выбран в реальном UI
 - **THEN** browser request сохраняет разрешённую обложку в реальном S3, UI показывает подтверждённый результат; receipts различают endpoint-only и rendered-browser доказательства
+
+### Requirement: Upload body reaches protected handler
+Система SHALL исключить только точный /api/files/upload из Node middleware body clone. Handler MUST проверить текущую authenticated session и operational/upload grants до чтения multipart или storage; остальные path middleware policies SHALL сохраняться.
+#### Scenario: Delayed small multipart after middleware
+- **WHEN** framework body-finalize ещё не завершён для small multipart
+- **THEN** regression воспроизводит прежний disturbed-stream error, а точный upload path передаёт непрочитанный stream protected handler без middleware clone
+#### Scenario: Financial-only or read-only actor
+- **WHEN** unauthenticated, pure ACCOUNTANT/PROCUREMENT или empty-role actor вызывает upload
+- **THEN** handler возвращает JSON401/403 до formData и storage; независимый manager union grant сохраняется

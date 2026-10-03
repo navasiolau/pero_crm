@@ -4,8 +4,10 @@ export { auth as default } from "@/auth";
 
 export const config = {
   runtime: "nodejs",
-  // Защищаем всё, кроме страницы входа, Auth.js API, PWA-служебных файлов и статики
+  // Upload проверяет текущую auth/session и upload grants в route до чтения тела.
+  // Next 15.5 Node middleware асинхронно восстанавливает клонированное POST body;
+  // исключение точного endpoint предотвращает pre-handler disturbed-stream race.
   matcher: [
-    "/((?!login|api/auth|api/health$|api/v1|manifest\\.webmanifest|sw\\.js|swe-worker|icon\\.svg|apple-icon\\.png|icons|_next/static|_next/image|favicon\\.ico).*)",
+    "/((?!login|api/auth|api/health$|api/files/upload$|api/v1|manifest\\.webmanifest|sw\\.js|swe-worker|icon\\.svg|apple-icon\\.png|icons|_next/static|_next/image|favicon\\.ico).*)",
   ],
 };
