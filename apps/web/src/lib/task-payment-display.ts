@@ -2,6 +2,9 @@ import { formatAmount } from "./format";
 
 export type TaskPaymentDisplayInput = {
   workId: string | null;
+  rewardAmount?: string | null;
+  rewardCurrency?: string | null;
+  rewardSource?: "WORK_SNAPSHOT" | "FROZEN_TASK_SNAPSHOT" | "UNAVAILABLE";
   paymentKind?: "LEGACY" | "ENGINEERING" | "INSTALLATION";
   shareAmount?: string | null;
   shareCurrency?: string | null;
@@ -31,13 +34,7 @@ export function workPaymentAmountLabel(work: WorkPaymentDisplayInput): string {
 }
 
 export function taskPaymentLabel(task: TaskPaymentDisplayInput): string {
-  if (task.paymentKind === "INSTALLATION") return "Монтаж — процент от изделия";
-  if (task.paymentKind === "ENGINEERING") {
-    const label = task.settledSource ? "Начислено ранее" : "Прежнее распределение (история)";
-    if (task.previewAmount === null || task.previewAmount === undefined || !task.previewCurrency)
-      return `${label}: ${task.previewReason ?? "сумма в исторической записи отсутствует"}`;
-    return `${label}: ${task.settledSource ? "" : "≈ "}${formatAmount(task.previewAmount, task.previewCurrency)}`;
-  }
-  return task.shareCurrency ? formatAmount(task.shareAmount, task.shareCurrency)
-    : task.workId ? "—" : "Без денежного начисления";
+  if (task.rewardAmount !== null && task.rewardAmount !== undefined && task.rewardCurrency)
+    return formatAmount(task.rewardAmount, task.rewardCurrency);
+  return "—";
 }

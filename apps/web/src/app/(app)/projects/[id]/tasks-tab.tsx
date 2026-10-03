@@ -38,7 +38,7 @@ import {
 } from "@/components/task-dialog";
 import {WorkerTaskAllocationDialog,type WorkerAllocationData} from "@/components/worker-task-allocation-dialog";
 import { formatDate,formatAmount } from "@/lib/format";
-import { workPaymentAmountLabel, workPaymentSourceLabel } from "@/lib/task-payment-display";
+import { workPaymentAmountLabel, workPaymentSourceLabel, taskPaymentLabel } from "@/lib/task-payment-display";
 import { cn } from "@/lib/utils";
 import { isPositiveQuantity, quantityInputError, remainingWorkQuantity } from "@/lib/work-quantity";
 import { changeTaskStatus, createTask } from "@/server/tasks/actions";
@@ -174,6 +174,7 @@ export function TasksTab({
                 {workPaymentAmountLabel(work)}
               </span>
             {canAllocateWork&&!canManage&&productId&&allocationData&&work.canAllocateWorker&&isPositiveQuantity(remaining)?<Button size="sm" variant="outline" onClick={()=>setAllocationWork(work)}>Назначить задачу</Button>:null}
+            {canManage && productId && work.paymentKind !== "ENGINEERING" && work.paymentKind !== "INSTALLATION" && work.priceSnapshot !== null && isPositiveQuantity(remaining) ? <Button size="sm" variant="outline" onClick={() => {setWorkId(work.id);setTitle(work.title);setTaskProductId(productId);setQuantity(remaining);setAssigneeId("");setOpen(true);}}>Назначить задачу</Button> : null}
             {canManage && work.paymentKind !== "ENGINEERING" && work.paymentKind !== "INSTALLATION" ? (
               <Button
                 size="icon-xs"
@@ -191,17 +192,9 @@ export function TasksTab({
 
       </div>
 
-      {canAllocateWork&&!canManage&&allocationData?.createdAssignments.length?<section className="flex flex-col gap-2" aria-label="Созданные назначения"><h3 className="text-sm font-medium">Мои назначения работникам</h3>{allocationData.createdAssignments.map(task=><div key={task.id} className="rounded-xl border p-3 text-sm"><span>{task.title} · {task.assigneeName} · количество {task.quantity}</span><Badge variant="outline" className="ml-2">{taskStatusLabels[task.status as keyof typeof taskStatusLabels]??task.status}</Badge>{task.dueAt?<p className="text-xs text-muted-foreground">Срок: {formatDate(task.dueAt)}</p>:null}</div>)}</section>:null}
+      {canAllocateWork&&!canManage&&allocationData?.createdAssignments.length?<section className="flex flex-col gap-2" aria-label="Созданные назначения"><h3 className="text-sm font-medium">Мои назначения работникам</h3>{allocationData.createdAssignments.map(task=><div key={task.id} className="rounded-xl border p-3 text-sm"><span>{task.title} · {task.assigneeName} · количество {task.quantity} · Вознаграждение: {taskPaymentLabel(task)}</span><Badge variant="outline" className="ml-2">{taskStatusLabels[task.status as keyof typeof taskStatusLabels]??task.status}</Badge>{task.dueAt?<p className="text-xs text-muted-foreground">Срок: {formatDate(task.dueAt)}</p>:null}</div>)}</section>:null}
       {allocationWork&&productId&&allocationData?<WorkerTaskAllocationDialog key={allocationWork.id} projectId={projectId} productId={productId} actorUserId={actorUserId} work={{id:allocationWork.id,title:allocationWork.title,unit:allocationWork.unitSnapshot,remaining:remainingWorkQuantity(allocationWork.quantity,allocationWork.allocated)}} data={allocationData} onClose={()=>setAllocationWork(null)}/>:null}
       <div className="flex flex-col gap-3">
-        <div className="flex justify-between">
-
-          {canManage ? (
-            <Button size="sm" onClick={() => setOpen(true)}>
-              <Plus className="size-4" /> Задача
-            </Button>
-          ) : null}
-        </div>
 
       {tasks.map((task) => (
         <Card
@@ -229,7 +222,8 @@ export function TasksTab({
                 ) : null}
               </div>
               <div className="text-xs text-muted-foreground">
-                {task.assigneeName ?? "без исполнителя"}
+                {task.assigneeName ?? "—"}
+                {` · Вознаграждение: ${taskPaymentLabel(task)}`}
                 {task.dueAt
                   ? ` · до ${new Date(task.dueAt).toLocaleDateString("ru-RU")}`
                   : ""}
@@ -315,7 +309,7 @@ export function TasksTab({
               <Input
                 id="task-title"
                 value={title}
-                onChange={(event) => setTitle(event.target.value)}
+                readOnly
                 placeholder="Например: Замер на объекте"
               />
             </div>
@@ -348,9 +342,9 @@ export function TasksTab({
                   }))}
                   value={assigneeId}
                   onChange={setAssigneeId}
-                  placeholder="не назначен — черновик"
+                  placeholder="Выберите исполнителя"
                   searchPlaceholder="Поиск сотрудника…"
-                  allowClear
+
                 />
               </div>
             </div>
@@ -384,28 +378,18 @@ export function TasksTab({
                 }))}
                 value={taskProductId}
                 onChange={setTaskProductId}
-                placeholder="весь проект"
+                placeholder="Изделие работы"
                 searchPlaceholder="Поиск изделия…"
-                allowClear
-                disabled={!!productId}
+
+                disabled
               />
             </div>
             <div className="flex flex-col gap-1.5">
               <Label>Работа (оплата)</Label>
               <SearchableSelect
-                options={works.map((work) => {
-                  const remaining = remainingWorkQuantity(work.quantity, work.allocated);
-                  return {
-                    value: work.id,
-                    label: `${work.title} · ${work.paymentKind === "ENGINEERING" ? "Инженерный фонд (история)" : work.paymentKind === "INSTALLATION" ? "Монтаж — процент от изделия" : `${formatAmount(work.priceSnapshot, "BYN")}/ед.`}`,
-                    hint:
-                      isPositiveQuantity(remaining)
-                        ? `свободно ${remaining} из ${work.quantity}`
-                        : "распределена полностью",
-                    disabled: work.paymentKind === "ENGINEERING" || work.paymentKind === "INSTALLATION" || !isPositiveQuantity(remaining),
-                  };
-                })}
+                options={works.filter(work => work.id === workId).map(work => ({value: work.id, label: work.title}))}
                 value={workId}
+                disabled
                 onChange={(value) => {
                   setWorkId(value);
                   const work = works.find((item) => item.id === value);
@@ -414,9 +398,9 @@ export function TasksTab({
                     : "0.00";
                   setQuantity(isPositiveQuantity(remaining) ? remaining : "");
                 }}
-                placeholder="без работы"
+                placeholder="Работа изделия"
                 searchPlaceholder="Поиск работы…"
-                allowClear
+
               />
             </div>
             {workId ? (
@@ -437,12 +421,6 @@ export function TasksTab({
                 </p>
               </div>
             ) : null}
-            {!assigneeId ? (
-              <p className="text-xs text-muted-foreground">
-                Без исполнителя задача создаётся черновиком — будет подписана
-                значком «Черновик», пока исполнителя не выберут.
-              </p>
-            ) : null}
             {type === "Замер" ? (
               <p className="text-xs text-muted-foreground">
                 Замер: при выполнении система потребует приложить
@@ -456,16 +434,16 @@ export function TasksTab({
               Отмена
             </Button>
             <Button
-              disabled={!title.trim() || !type || !dueAt || (!!workId && !!quantityInputError(quantity)) || pending}
+              disabled={!title.trim() || !type || !dueAt || !productId || taskProductId !== productId || !workId || !assigneeId || !isPositiveQuantity(quantity) || !!quantityInputError(quantity) || pending}
               onClick={() =>
                 startTransition(async () => {
                   const result = await createTask({
                     projectId,
-                    productId: taskProductId || undefined,
+                    productId,
                     title: title.trim(),
                     type,
-                    assigneeId: assigneeId || undefined,
-                    workId: workId || undefined,
+                    assigneeId,
+                    workId,
                     quantity:
                       workId && quantity.trim() !== ""
                         ? Number(quantity)
