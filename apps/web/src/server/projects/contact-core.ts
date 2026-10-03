@@ -1,3 +1,4 @@
+import {liveProductWhere,liveProjectWhere} from "@/server/access/live-entities";
 import type {Prisma} from '@prisma/client';
 import type {DomainActor} from './core';
 import {mayManageContacts,patchClientPhoneInTransaction,type ContactResult} from '@/server/clients/core';
@@ -8,7 +9,7 @@ export type ProductContactPatch = {productId:string;field:'clientId'|'address'|'
 export async function patchProductContactInTransaction(actor:DomainActor,patch:ProductContactPatch,tx:Prisma.TransactionClient):Promise<ProductContactResult> {
  if(!mayManageContacts(actor))return{ok:false,kind:'forbidden',error:'Недостаточно прав'};
  if(patch.field!=="clientId")return{ok:false,kind:"validation",error:"Адрес и телефон изменяются в карточке клиента"};
- const product=await tx.product.findUnique({where:{id:patch.productId},select:{projectId:true}});
+ const product=await tx.product.findUnique({where:{...liveProductWhere,id:patch.productId},select:{projectId:true}});
  if(!product)return{ok:false,kind:'not-found',error:'Изделие не найдено'};
  return patchProjectContactInTransaction(actor,{projectId:product.projectId,field:patch.field,value:patch.value,expectedValue:patch.expectedValue,expectedClientId:patch.expectedClientId},tx);
 }
@@ -18,7 +19,7 @@ export async function patchProjectContactInTransaction(actor:DomainActor,patch:P
  if(!mayManageContacts(actor))return{ok:false,kind:'forbidden',error:'Недостаточно прав'};
  const projectId=patch.projectId;
  await tx.$queryRaw`SELECT id FROM "Project" WHERE id = ${projectId} FOR UPDATE`;
- const project=await tx.project.findUnique({where:{id:projectId},select:{id:true,clientId:true,address:true}});
+ const project=await tx.project.findUnique({where:{...liveProjectWhere,id:projectId},select:{id:true,clientId:true,address:true}});
  if(!project)return{ok:false,kind:'not-found',error:'Проект не найден'};
  if(patch.field==='phone'){
   if(typeof patch.value!=='string'||typeof patch.expectedValue!=='string'||!patch.expectedClientId)return{ok:false,kind:'validation',error:'Укажите телефон и исходного клиента'};

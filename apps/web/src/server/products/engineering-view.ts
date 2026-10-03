@@ -1,3 +1,4 @@
+import {liveProductWhere} from "@/server/access/live-entities";
 import type { PrismaClient } from "@prisma/client";
 import { moneyAtoms, personalQuantity, quantityFromAtoms } from "@/lib/work-shares";
 import type { EngineeringFundView, EngineeringTaskView } from "@/lib/engineering-fund-view";
@@ -8,7 +9,7 @@ type Reader = Pick<PrismaClient, "product" | "orgSetting" | "payrollEntry">;
 /** Карточка вызывается после getProductFor, для офисных ролей; mutation API
  * повторно проверяет роль, ревизии и весь состав под блокировкой. */
 export async function getEngineeringFundView(db: Reader, productId: string, canManage: boolean): Promise<EngineeringFundView> {
-  const product = await db.product.findUnique({ where: { id: productId }, include: {
+  const product = await db.product.findUnique({ where: {...liveProductWhere, id: productId }, include: {
     project: { select: { currency: true } },
     stagePayPools: { where: { kind: "ENGINEERING" }, include: { settlement: { include: { shares: true } } } },
     works: { orderBy: [{ createdAt: "asc" }, { id: "asc" }], include: {

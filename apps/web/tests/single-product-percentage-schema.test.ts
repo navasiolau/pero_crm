@@ -1,3 +1,4 @@
+import {liveProductWhere} from "../src/server/access/live-entities";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
@@ -11,9 +12,9 @@ test("assigned mounter reads non-DESIGN product/project without a synthetic task
   assert.match(JSON.stringify(productVisibilityWhere(input)), /"mounterId":"m"/);
   assert.match(JSON.stringify(projectVisibilityWhere(input)), /"mounterId":"m"/);
   assert.match(JSON.stringify(productVisibilityWhere(input)), /"not":"DESIGN"/);
-  assert.deepEqual(productEditWhere(input), { id: { in: [] } });
+  assert.deepEqual(productEditWhere(input), {AND:[liveProductWhere,{AND:[liveProductWhere,{ id: { in: [] } }]}]});
   assert.doesNotMatch(JSON.stringify(productVisibilityWhere({ id: "m", roles: ["WORKER"] })), /mounterId/);
-  assert.deepEqual(productVisibilityWhere({ id: "m", roles: ["MOUNTER", "MANAGER"] }), {});
+  assert.deepEqual(productVisibilityWhere({ id: "m", roles: ["MOUNTER", "MANAGER"] }), {AND:[liveProductWhere,{}]});
 });
 
 test("forward migration preserves financial history and never backfills old quantities", () => {

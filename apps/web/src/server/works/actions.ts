@@ -1,4 +1,6 @@
 "use server";
+import {liveChildWhere} from "@/server/access/live-entities";
+import {liveProductWhere,liveProjectWhere} from "@/server/access/live-entities";
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
@@ -38,7 +40,7 @@ export async function addWork(
   const data = parsed.data;
 
   const [project, priceItem] = await Promise.all([
-    prisma.project.findUnique({ where: { id: data.projectId }, select: { id: true, number: true } }),
+    prisma.project.findUnique({ where: {...liveProjectWhere, id: data.projectId }, select: { id: true, number: true } }),
     prisma.priceItem.findUnique({ where: { id: data.priceItemId } }),
   ]);
   if (!project) return { ok: false, error: "Проект не найден" };
@@ -48,13 +50,13 @@ export async function addWork(
   let work;
   try {
     work = await withTaskTransaction(async (tx) => {
-      const currentProject = await tx.project.findUnique({ where: { id: data.projectId }, select: { currency: true } });
+      const currentProject = await tx.project.findUnique({ where: {...liveProjectWhere, id: data.projectId }, select: { currency: true } });
       if (!currentProject) throw new Error("Проект не найден");
       assertProjectMoneyCurrency(currentProject.currency);
       assertInternalCurrency((await tx.orgSetting.findUnique({ where: { key: "payrollCurrency" } }))?.value ?? "BYN");
       if (data.productId) await lockProductRow(tx, data.productId);
       const product = data.productId ? await tx.product.findFirst({
-        where: { id: data.productId, projectId: data.projectId }, select: { id: true, quantity: true },
+        where: {...liveProductWhere, id: data.productId, projectId: data.projectId }, select: { id: true, quantity: true },
       }) : null;
       if (data.productId && !product) throw new Error("Изделие не найдено в этом проекте");
       if (!product && data.quantityPerUnit !== undefined) throw new Error("Для нормы на штуку выберите изделие");
@@ -99,7 +101,7 @@ export async function removeWork(
   if (!hasAnyRole(session.user.roles, MANAGER_ROLES)) throw new Error("Недостаточно прав");
 
   const mutation = await withTaskTransaction(async (tx) => {
-  const work = await tx.work.findUnique({ where: { id: workId } });
+  const work = await tx.work.findUnique({ where: {...liveChildWhere, id: workId } });
   if (!work) return { ok: false as const, error: "Работа не найдена" };
   if (work.paymentKind === "ENGINEERING") return { ok: false as const, error: "Работа включена в инженерный фонд — используйте настройку его распределения" };
   if (work.paymentKind === "INSTALLATION") return { ok: false as const, error: "Работа отмечена как монтажная; её история сохраняется вместе с настройкой процента изделия" };

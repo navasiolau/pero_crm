@@ -1,3 +1,4 @@
+import {liveProductWhere} from "../src/server/access/live-entities";
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import * as role from '../src/lib/roles';
@@ -20,7 +21,7 @@ test('financial and warehouse/office grants remain independent of manager privil
 test('pure accountant has no operational read/task execution; role union preserves independent engineering/field grants',()=>{
  const acc={id:'a',roles:['ACCOUNTANT'] as Role[]};assert.equal(hasFullProjectVisibility(acc),false);assert.match(JSON.stringify(productVisibilityWhere(acc)),/"in":\[\]/);assert.match(JSON.stringify(fileVisibilityWhere(acc)),/"in":\[\]/);assert.doesNotMatch(JSON.stringify(taskExecutionWhere(acc)),/"assigneeId":"a"/);assert.notEqual(taskRecipientError({...acc,active:true},null),null);
  assert.equal(hasFullProjectVisibility({id:'a',roles:['ACCOUNTANT','ENGINEER']}),false);assert.match(JSON.stringify(taskExecutionWhere({id:'a',roles:['ACCOUNTANT','WORKER']})),/"assigneeId":"a"/);
- assert.equal(hasFullProjectVisibility({id:'p',roles:[procurement]}),true);assert.deepEqual(productEditWhere({id:'p',roles:[procurement]}),{id:{in:[]}});
+ assert.equal(hasFullProjectVisibility({id:'p',roles:[procurement]}),true);assert.deepEqual(productEditWhere({id:'p',roles:[procurement]}),{AND:[liveProductWhere,{AND:[liveProductWhere,{id:{in:[]}}]}]});
 });
 test('home and navigation isolate finance-only accountant and pure manager advance denial',()=>{
  const accountant=navItemsForRole(['ACCOUNTANT']).map(item=>item.href);for(const path of ['/projects','/products','/clients','/tasks','/warehouse','/prices','/my'])assert.ok(!accountant.includes(path));assert.ok(accountant.includes('/finance'));

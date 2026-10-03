@@ -1,3 +1,4 @@
+import {liveProductWhere,liveProjectWhere} from "@/server/access/live-entities";
 import { patchProductContactInTransaction } from "../projects/contact-core";
 import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
@@ -70,7 +71,7 @@ export async function createProductCore(actor: DomainActor, input: CreateProduct
   try { productLineTotal(data.expectedPrice ?? null, data.quantity); }
   catch (error) { return { ok: false as const, error: error instanceof Error ? error.message : "Некорректная сумма партии" }; }  const mutation = await transaction(async (tx) => {
   const project = await tx.project.findUnique({
-    where: { id: data.projectId },
+    where: {...liveProjectWhere, id: data.projectId },
     select: { id: true, number: true, currency: true },
   });
   if (!project) return { ok: false as const, error: "Проект не найден" };
@@ -126,10 +127,10 @@ export async function createProductCore(actor: DomainActor, input: CreateProduct
 
 async function updateProductValues(actor: DomainActor, productId: string, data: ProductValues, baseline: ProductUpdateBaseline, tx: Prisma.TransactionClient) {    await lockProductRow(tx, productId);
     const visibilityActor = hasAnyRole(actor.roles, MANAGER_ROLES) ? actor : await resolveVisibilityActor(tx, actor);
-    const before = await tx.product.findFirst({ where: { AND: [{ id: productId }, productEditWhere(visibilityActor)] } });
+    const before = await tx.product.findFirst({ where: {...liveProductWhere, AND: [{ id: productId }, productEditWhere(visibilityActor)] } });
     if (!before) return { ok: false as const, error: "Изделие не найдено" };
     if (data.expectedPrice !== undefined || data.quantity !== undefined) {
-      const project = await tx.project.findUnique({ where: { id: before.projectId }, select: { currency: true } });
+      const project = await tx.project.findUnique({ where: {...liveProjectWhere, id: before.projectId }, select: { currency: true } });
       if (!project) return { ok: false as const, error: "Проект не найден" };
       assertProjectMoneyCurrency(project.currency);
     }
@@ -180,7 +181,7 @@ export async function updateProductCore(actor: DomainActor, productId: string, i
 
 export async function deleteProductCore(actor: DomainActor, productId:string, transaction: TaskTransaction = withTaskTransaction) {
   if (!hasAnyRole(actor.roles,MANAGER_ROLES)) throw new Error("Недостаточно прав");  const result = await transaction(async (tx) => {
-    const product = await tx.product.findUnique({ where: { id: productId }, include: {
+    const product = await tx.product.findUnique({ where: {...liveProductWhere, id: productId }, include: {
       _count: { select: { tasks: true, works: true, projectMaterials: true, stockMovements: true } },
     } });
     if (!product) return { ok: false as const, error: "Изделие не найдено" };
@@ -219,7 +220,7 @@ export async function patchProductCore(actor: DomainActor, input: ProductPatch, 
   try { return await transaction(async(tx):Promise<ProductPatchResult>=> {
     // Права проверяются до replay/conflict; после выхода из DESIGN старый ответ не раскрывается.
     const visibilityActor=manager?actor:await resolveVisibilityActor(tx,actor);
-    const permitted=await tx.product.findFirst({where:{AND:[{id:patch.productId},productEditWhere(visibilityActor)]},select:{id:true,projectId:true,engineerId:true,status:true}});
+    const permitted=await tx.product.findFirst({where:{...liveProductWhere,AND:[{id:patch.productId},productEditWhere(visibilityActor)]},select:{id:true,projectId:true,engineerId:true,status:true}});
     if (!permitted) return {...identity,kind:"not-found",error:"Изделие не найдено или недоступно"};
     if (!manager && (permitted.status!=="DESIGN" || permitted.engineerId!==actor.id)) return {...identity,kind:"forbidden",error:"Доступ к техническому блоку изменён"};
     const receipt=await tx.changeLog.findUnique({where:{id:receiptId}});
@@ -239,7 +240,7 @@ export async function patchProductCore(actor: DomainActor, input: ProductPatch, 
       result={...identity,kind:"saved",value:shared.value,noOp:!shared.changed,derived:{clientId:shared.clientId,clientLabel:shared.clientLabel,phone:shared.phone,clientAddress:shared.clientAddress}};
     } else {
       await lockProductRow(tx,patch.productId);
-      const current=await tx.product.findFirst({where:{AND:[{id:patch.productId},productEditWhere(visibilityActor)]},select:{id:true,projectId:true,title:true,kind:true,description:patch.field==="description",quantity:true,expectedPrice:true,initialPrice:true,engineerId:true,status:true}});
+      const current=await tx.product.findFirst({where:{...liveProductWhere,AND:[{id:patch.productId},productEditWhere(visibilityActor)]},select:{id:true,projectId:true,title:true,kind:true,description:patch.field==="description",quantity:true,expectedPrice:true,initialPrice:true,engineerId:true,status:true}});
       if(!current) return {...identity,kind:"not-found",error:"Изделие не найдено или недоступно"};
       if(!manager && (current.engineerId!==actor.id||current.status!=="DESIGN")) return {...identity,kind:"forbidden",error:"Доступ к техническому блоку изменён"};
       const previous=canonical(patch.field,current[patch.field]);
