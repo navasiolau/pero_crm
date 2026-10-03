@@ -31,9 +31,9 @@ export function localUploadFailure(message:string,phase:UploadPhase="validation"
 function failure(attempt:UploadAttempt,options:{error:string;code:string;message:string;phase:UploadPhase;response?:Response;requestId?:unknown;kind?:unknown;commitState:UploadCommitState}):UploadResult {
  return {ok:false,failure:{error:safeText(options.error,"Не удалось загрузить файл.",300),code:safeId(options.code,"UPLOAD_FAILED"),requestId:safeId(options.requestId,safeId(options.response?.headers.get("x-request-id"),attempt.clientMutationId)),clientMutationId:attempt.clientMutationId,httpStatus:options.response?.status,kind:typeof options.kind==="string"?safeText(options.kind,"",40):undefined,commitState:options.commitState,details:{phase:options.phase,message:safeText(options.message,"Причина не указана")}}};
 }
-export type UploadEndpoint="/api/files/upload"|"/api/catalogue-media/upload";
+export type UploadEndpoint="/api/files/upload";
 export async function sendFileUpload(attempt:UploadAttempt,{fetcher=fetch,timeoutMs=60000,endpoint="/api/files/upload"}:{fetcher?:typeof fetch;timeoutMs?:number;endpoint?:UploadEndpoint}={}):Promise<UploadResult> {
- if(endpoint!=="/api/files/upload"&&endpoint!=="/api/catalogue-media/upload")return {ok:false,failure:localUploadFailure("Неверный адрес загрузки","request",attempt.clientMutationId)};
+ if(endpoint!=="/api/files/upload")return {ok:false,failure:localUploadFailure("Неверный адрес загрузки","request",attempt.clientMutationId)};
  const controller=new AbortController();let response:Response|undefined,timedOut=false,timer:ReturnType<typeof setTimeout>|undefined;
  const unknown=(code:string,error:string,message:string)=>failure(attempt,{code,error:response&&response.status>=500?`\u041d\u0435\u0442 \u043f\u043e\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0435\u043d\u0438\u044f \u0437\u0430\u0433\u0440\u0443\u0437\u043a\u0438. \u041e\u0448\u0438\u0431\u043a\u0430 \u0441\u0435\u0440\u0432\u0435\u0440\u0430 (${response.status}).`:error,message,phase:response?"confirmation":"request",response,commitState:"unknown"});
  const timeout=new Promise<UploadResult>(resolve=>{timer=setTimeout(()=>{timedOut=true;controller.abort();resolve(unknown("UPLOAD_TIMEOUT","Загрузка не завершилась вовремя.","Время ожидания ответа истекло; результат записи не подтверждён."));},timeoutMs);});

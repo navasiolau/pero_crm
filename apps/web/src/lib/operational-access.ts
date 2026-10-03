@@ -1,6 +1,6 @@
 import {ASSIGNEE_ROLES,FIELD_ROLES,OFFICE_ROLES,hasAnyRole,type Role} from './roles';
 
-const prefixes=['/projects','/products','/clients','/tasks','/warehouse','/prices','/finishes','/api/files','/api/catalogue-media','/api/search'];
+const prefixes=['/projects','/products','/clients','/tasks','/warehouse','/prices','/api/files','/api/search'];
 const within=(path:string,prefix:string)=>path===prefix||path.startsWith(`${prefix}/`);
 /** Finance membership never implies access to operational pages or technical bytes. */
 export function canAccessOperationalPath(roles:Role[],pathname:string):boolean{

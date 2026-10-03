@@ -1,17 +1,23 @@
-# Design
-## Context
-58 уже содержит PROCUREMENT и warehouse manage set ровно ADMIN/DIRECTOR/MANAGER/PROCUREMENT. OFFICE/FIELD operationalread grants исключают чистый ACCOUNTANT. 72 создаёт foundation,73 назначения snapshots и74 media отдельно.
-## Goals / Non-Goals
-Независимые сохранённые варианты с edit/deactivate. Не привязывать к Project/Product, не писать платежи/зарплату/цены, не реализовывать storage74.
-## Decisions
-FinishKind ENAMEL/VENEER/COATING и Finish UUID(name/code/color/active/revision/createdAt/updatedAt). Code trim+uppercase, unique(kind,code) allowsодноимённыекоды разных материалов. Name/color plain text, requiredmaxlength; нет требованияhex для дерева.
-Authrolechecks в page/query/action/core; толькоactive доступныreadonly, manager видитinactive и можетвключить. Обычнаяформа сохраняет captured integer revisionCAS, stale update/active refusalnoaudit; запись+ChangeLog atomicwithTaskTransaction. P2002 duplicate mapsfriendlyerror, все прочиеошибкиgeneric безdetails/secrets.
-UI /finishes с DataTable и реальным sharedDialog Editor; navEntry operationalrole set. Middleware prefix добавленonlycatalog, readonlyfinance-role нерасширяется. Media74 модель неизвестна, pointer сейчаснеимитируется и никакогоuploadcontrol нет.
-## Risks / Trade-offs
-Неактивныйcode остаётсязанят, UUID neverreused; snapshots73 будуткопироватьвыбранныйвариант. Sourcechecks/buildnative не DB/runtimeproof; Root выполнит migrationtargetguards/rollbacknative.
-## Migration Plan
-Добавочная enum/table/uniqueindex миграция20261003060000. No seed/reset/newDB/restic/dumps. Rootexistinglocal/stagingguards и nativeouterrollback; prod толькоотдельноowner.
+# Context
 
-CAS использует monotonic integer revision, а не равенство wall-clock timestamps: одинаковая миллисекунда двух правок не разрешает lost update. UpdatedAt остаётся служебной датой. Sample-media pointer сейчас отсутствует: он должен ссылаться на реальный защищённый asset74, не на fakeProject/File.
+Source175 содержит Finish, ProductFinishAssignment, CatalogueMediaAsset, Product.finishRevision и отдельную catalogue-media область. Владелец прямо отменил72–74 после завершения их испытаний; данные original сохраняются до проверенного выбора schema boundary.
 
-До первого применения Root перенёс reserved migration на20261003090000_finish_catalog. Native защищает динамически все actual public tables (включая CalendarEntry64 вне source72 Prisma.ModelName) и schema fingerprints columns/constraints/indexes/enums. Прежний canonical guard не изменён, единственное operational исключениеApiToken.lastUsedAt сохранено. SQL не выполнялся агентом.
+# Goals / Non-Goals
+
+Goals: убрать всю active feature и imports, обычные Files/Viewer/storage/ACL сохранить; direct removed routes404; clean generated ORM; local/CI/stage подтверждать честно.
+Non-Goals: business S3 cleanup/archives, финансовые удаления/пересчёт, rollback applied migrations, production release, правки Task68/69/journal58.
+
+# Decisions
+
+- Remove active modules, not feature flag. Shared viewer возвращается к scope обычных File, upload endpoint только /api/files/upload; S3 functions добавленные исключительно catalogue scope убрать, стандартный transport не менять.
+- Prisma models/relations/enum/technical column убрать. Historical SQL090/130/140 НЕ удаляется. Coordinator сначала проверяет actual counts/FK/asset refs. Для empty tables новый ordered guarded DROP без CASCADE; при любых original records STOP/PRESERVE, отдельная retention boundary вне active feature без выдуманного переписывания данных.
+- Все feature-specific tests и native helpers удаляются из active suite. Сохранить общие image transform/image-preview/ordinary upload/roles tests и добавить meaningful nav absence/read permission regression.
+- Normal merges сохраняют №47 и disjoint Task changes. Исторические73/74 planning artifacts не переименовывать в PASS/removal.
+
+# Risks / Trade-offs
+
+Drop не выполнять работником и не считать source schema diff actual DB proof. Nonempty referenced assets нельзя физически удалять. No completed47/financial proof повторяется ради removal.
+
+# Migration Plan
+
+Coordinator readonly counts→автор guarded migration source→coordinator exact existing local/stage application→native metadata/wholeTSC/CI/direct404/nav absence. Без dumps/restic/newDB; main/prod только отдельно по владельцу.
