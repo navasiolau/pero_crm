@@ -89,6 +89,7 @@ model User {
   assembledProducts Product[] @relation("ProductAssembler")
   surveyedProducts Product[]    @relation("ProductSurveyor")
   assignedTasks   Task[]         @relation("TaskAssignee")
+  calendarEntries CalendarEntry[]
   notifications   Notification[]
   payrollEntries  PayrollEntry[]
   payouts         Payout[]
@@ -1074,4 +1075,25 @@ model TelegramLink {
   linkedAt          DateTime?
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
+}
+
+// Личный план: owner всегда текущий session actor.
+enum CalendarEntryState {
+  PLANNED
+  COMPLETED
+  CANCELLED
+}
+model CalendarEntry {
+  id String @id
+  ownerId String
+  owner User @relation(fields:[ownerId],references:[id],onDelete:Restrict)
+  title String @db.VarChar(250)
+  description String @default("")
+  startsAt DateTime @db.Timestamptz(3)
+  state CalendarEntryState @default(PLANNED)
+  reminderOffsetMinutes Int? @default(15)
+  revision Int @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([ownerId,startsAt])
 }

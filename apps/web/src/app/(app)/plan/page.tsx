@@ -1,6 +1,10 @@
 import {requireCalendarActor} from '@/server/calendar/access';
+import {loadCalendarMonth} from '@/server/calendar/actions';
+import {calendarLocalValue} from '@/lib/calendar-dates';
+import {PersonalCalendar} from './personal-calendar';
 export const dynamic='force-dynamic';
 export default async function PlanPage(){
  await requireCalendarActor();
- return <section aria-labelledby="plan-title"><h1 id="plan-title" className="text-xl font-semibold">План</h1><p className="mt-2 text-sm text-muted-foreground">Личный план включён. Календарь появится в следующем обновлении.</p></section>;
+ const date=calendarLocalValue(new Date()).slice(0,10),month=date.slice(0,7);
+ return <PersonalCalendar initialMonth={month} initialDate={date} initialEntries={await loadCalendarMonth(month)}/>;
 }
