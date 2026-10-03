@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
+import * as React from "react";
 import { fitImage, clampImageTransform, zoomImageAt, imageGesture, beginImageGesture, initialImageTransform } from "../src/lib/image-view-transform";
-import { getFileViewerPresentation, getFileViewerDispatch } from "../src/components/file-viewer";
+import { FileViewer, getFileViewerPresentation, getFileViewerDispatch, type ViewableFile } from "../src/components/file-viewer";
+import { FullscreenImageViewport } from "../src/components/fullscreen-image-viewport";
 
 const bounds = { viewport: {width: 1000, height: 800}, image: {width: 1000, height: 800} };
 test("fit показывает весь оригинал без обрезки для портретной и широкой фотографии", () => {
@@ -44,13 +46,33 @@ test("central dispatch всегда полноэкранный для image/*, P
   assert.equal(getFileViewerPresentation("standard",{mimeType:"video/mp4"}).fullscreen,false);
   assert.equal(getFileViewerPresentation("cover-fullscreen",{mimeType:"video/mp4"}).fullscreen,false);
 });
-test("закрытие и смена file/context размонтируют масштаб; все входы используют центральный viewer", () => {
-  const viewer = readFileSync(new URL("../src/components/file-viewer.tsx",import.meta.url),"utf8");
-  assert.match(viewer,/if \(!file \|\| !open\) return null/);
-  assert.match(viewer,/FullscreenImageViewport key=\{`\$\{variant\}:\$\{file.id\}`\}/);
-  assert.match(viewer,/getFileViewerPresentation\(variant,file\)/);
-  assert.match(viewer,/Dialog open=\{open\} onOpenChange=\{onOpenChange\} modal/);
-  assert.match(viewer,/\/api\/files\/\$\{file.id\}\?view=1/);
+test("закрытие размонтирует изображение; file, scope и variant разделяют состояние масштаба", () => {
+  const file: ViewableFile = {id:"sample/id",fileName:"sample.png",mimeType:"image/png"};
+  const onOpenChange = () => {};
+  assert.equal(FileViewer({file,open:false,onOpenChange}),null);
+  assert.equal(FileViewer({file:null,open:true,onOpenChange}),null);
+  function viewport(input: ViewableFile, variant: "standard" | "cover-fullscreen" = "standard") {
+    const dialog = FileViewer({file:input,open:true,onOpenChange,variant})!;
+    assert.equal(dialog.props.open,true);
+    assert.equal(dialog.props.modal,true);
+    assert.equal(dialog.props.onOpenChange,onOpenChange);
+    const content = dialog.props.children as React.ReactElement<{children: React.ReactNode}>;
+    const image = (content.props.children as React.ReactNode[]).find(node =>
+      React.isValidElement(node) && node.type === FullscreenImageViewport);
+    assert.ok(React.isValidElement<{src:string;alt:string}>(image));
+    assert.equal(image.props.alt,input.fileName);
+    return image;
+  }
+  const regular = viewport(file);
+  const catalogue = viewport({...file,scope:"catalogue-media"});
+  assert.equal(regular.props.src,"/api/files/sample/id");
+  assert.equal(catalogue.props.src,"/api/catalogue-media/sample%2Fid");
+  assert.notEqual(regular.key,catalogue.key);
+  assert.notEqual(regular.key,viewport({...file,id:"another-image"}).key);
+  assert.notEqual(regular.key,viewport(file,"cover-fullscreen").key);
+  assert.equal(regular.key,viewport({...file}).key);
+});
+test("все входы используют центральный viewer; жесты удаляют обработчики при закрытии", () => {
   for (const file of ["../src/app/(app)/projects/[id]/files-tab.tsx","../src/components/task-dialog.tsx","../src/app/(app)/products/[id]/product-sketch-view.tsx","../src/components/product-kanban-card.tsx"])
     assert.match(readFileSync(new URL(file,import.meta.url),"utf8"),/useFileViewer/);
   const image = readFileSync(new URL("../src/components/fullscreen-image-viewport.tsx",import.meta.url),"utf8");
