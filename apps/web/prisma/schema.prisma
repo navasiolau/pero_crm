@@ -294,6 +294,9 @@ model Product {
   @@index([engineerId])
   @@index([mounterId])
   @@index([assemblerId])
+  finishRevision Int @default(0)
+  finishAssignments ProductFinishAssignment[]
+
 }
 
 model ProductStatusHistory {
@@ -1118,4 +1121,25 @@ model Finish {
 
   @@unique([kind, code])
   @@index([active, kind])
+  productAssignments ProductFinishAssignment[]
+
+}
+
+model ProductFinishAssignment {
+  id              String @id @default(uuid()) @db.Uuid
+  productId       String
+  product         Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+  element         String
+  elementKey      String
+  finishId        String @db.Uuid
+  finish          Finish @relation(fields: [finishId], references: [id], onDelete: Restrict)
+  finishKind      FinishKind
+  finishName      String
+  finishCode      String
+  finishColor     String
+  catalogRevision Int
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  @@unique([productId, elementKey])
+  @@index([finishId])
 }
