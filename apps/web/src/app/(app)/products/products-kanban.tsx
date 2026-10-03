@@ -60,6 +60,8 @@ function DraggableProduct({
         currency={product.currency}
         showAmount={showAmount}
         projectContext={`Проект ${product.projectNumber} · ${product.clientName}`}
+        dragging={isDragging}
+        coverAction={{type:"navigate",onOpen:()=>onOpen(product)}}
       />
     </div>
   );
