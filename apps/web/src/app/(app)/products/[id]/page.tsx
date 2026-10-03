@@ -7,13 +7,14 @@ import { auth } from "@/auth";
 import { Badge } from "@/components/ui/badge";
 import { displayClientName } from "@/lib/labels";
 import { prisma } from "@/lib/prisma";
-import { FINANCE_ROLES, MANAGER_ROLES, OFFICE_ROLES, WAREHOUSE_MANAGE_ROLES, WAREHOUSE_MONEY_ROLES, hasAnyRole } from "@/lib/roles";
+import { FINANCE_ROLES, MANAGER_ROLES, OFFICE_ROLES, WAREHOUSE_MANAGE_ROLES, WAREHOUSE_MONEY_ROLES, hasRole, hasAnyRole } from "@/lib/roles";
 import { canEditProductTechnicalBlock, resolveVisibilityActor } from "@/server/access/visibility";
 import { allocatedWorkQuantity } from "@/lib/work-shares";
 import { getFileStageConfig } from "@/server/files/stage-config";
 import { getProductFor } from "@/server/products/queries";
 import { deleteProductSketchAction } from "@/server/products/cover-actions";
 import { listClients, listEngineers, listWorkers } from "@/server/projects/queries";
+import {listWorkerAllocationData} from "@/server/tasks/worker-allocation-queries";
 import { mapTaskDetails } from "@/server/tasks/queries";
 import { getProjectMaterials, listMaterialOptions } from "@/server/warehouse/queries";
 
@@ -53,6 +54,8 @@ export default async function ProductPage({
   const canManage = hasAnyRole(role, MANAGER_ROLES);
   const canViewAllPercentage = canManage || hasAnyRole(role, FINANCE_ROLES);
   const canEditTech = canEditProductTechnicalBlock(actor, product);
+  const canAllocateWork=hasRole(role,"WORKER")&&product.status==="PRODUCTION"&&!canManage;
+  const allocationData=canAllocateWork?await listWorkerAllocationData(session.user.id,product.id):undefined;
   const canAddWork=canAddProductWork(role,product.status);
   const showAmount = hasAnyRole(role, OFFICE_ROLES);
   const showMaterials = hasAnyRole(role, OFFICE_ROLES);
@@ -147,11 +150,16 @@ export default async function ProductPage({
               priceSnapshot: work.priceSnapshot?.toString() ?? null,
               total: work.total?.toString() ?? null,
               paymentKind: work.paymentKind,
+              stagePayPoolId:work.stagePayPoolId,
+              canAllocateWorker:allocationData?.eligibleWorkIds.includes(work.id)??false,
               linkedTask: work.tasks[0]
                 ? { id: work.tasks[0].id, title: work.tasks[0].title, status: work.tasks[0].status }
                 : null,
             }))}
             canAddWork={canAddWork}
+            canAllocateWork={canAllocateWork}
+            actorUserId={session.user.id}
+            allocationData={allocationData}
             priceItems={priceItems.map((item) => ({
               id: item.id,
               name: item.name,
