@@ -36,7 +36,8 @@ import {
   taskStatusLabels,
   type TaskDetails,
 } from "@/components/task-dialog";
-import { formatAmount } from "@/lib/format";
+import {WorkerTaskAllocationDialog,type WorkerAllocationData} from "@/components/worker-task-allocation-dialog";
+import { formatDate,formatAmount } from "@/lib/format";
 import { workPaymentAmountLabel, workPaymentSourceLabel } from "@/lib/task-payment-display";
 import { cn } from "@/lib/utils";
 import { isPositiveQuantity, quantityInputError, remainingWorkQuantity } from "@/lib/work-quantity";
@@ -52,6 +53,8 @@ export interface WorkRow {
   quantityPerUnit?: string | null;
   unitSnapshot?: string|null;
   allocated: string;
+  stagePayPoolId?:string|null;
+  canAllocateWorker?:boolean;
   priceSnapshot: string | null;
   total: string | null;
   paymentKind?: "LEGACY" | "ENGINEERING" | "INSTALLATION";
@@ -89,6 +92,9 @@ export function TasksTab({
   priceItems,
   canManage,
   canAddWork=canManage,
+  canAllocateWork=false,
+  actorUserId="",
+  allocationData,
   workers,
 }: {
   projectId: string;
@@ -100,6 +106,9 @@ export function TasksTab({
   priceItems: PriceOption[];
   canManage: boolean;
   canAddWork?:boolean;
+  canAllocateWork?:boolean;
+  actorUserId?:string;
+  allocationData?:WorkerAllocationData;
   workers: SelectOption[];
 }) {
   const router = useRouter();
@@ -114,6 +123,7 @@ export function TasksTab({
   const [estimate, setEstimate] = useState("");
   const [dueAt, setDueAt] = useState(tomorrow);
   const [workOpen, setWorkOpen] = useState(false);
+  const [allocationWork,setAllocationWork]=useState<WorkRow|null>(null);
   const [deleteWorkFor, setDeleteWorkFor] = useState<WorkRow | null>(null);
   const [actualFor, setActualFor] = useState<TaskDetails | null>(null);
   const [priceItemId, setPriceItemId] = useState("");
@@ -163,6 +173,7 @@ export function TasksTab({
               <span className="font-medium">
                 {workPaymentAmountLabel(work)}
               </span>
+            {canAllocateWork&&!canManage&&productId&&allocationData&&work.canAllocateWorker&&isPositiveQuantity(remaining)?<Button size="sm" variant="outline" onClick={()=>setAllocationWork(work)}>Назначить задачу</Button>:null}
             {canManage && work.paymentKind !== "ENGINEERING" && work.paymentKind !== "INSTALLATION" ? (
               <Button
                 size="icon-xs"
@@ -180,6 +191,8 @@ export function TasksTab({
 
       </div>
 
+      {canAllocateWork&&!canManage&&allocationData?.createdAssignments.length?<section className="flex flex-col gap-2" aria-label="Созданные назначения"><h3 className="text-sm font-medium">Мои назначения работникам</h3>{allocationData.createdAssignments.map(task=><div key={task.id} className="rounded-xl border p-3 text-sm"><span>{task.title} · {task.assigneeName} · количество {task.quantity}</span><Badge variant="outline" className="ml-2">{taskStatusLabels[task.status as keyof typeof taskStatusLabels]??task.status}</Badge>{task.dueAt?<p className="text-xs text-muted-foreground">Срок: {formatDate(task.dueAt)}</p>:null}</div>)}</section>:null}
+      {allocationWork&&productId&&allocationData?<WorkerTaskAllocationDialog key={allocationWork.id} projectId={projectId} productId={productId} actorUserId={actorUserId} work={{id:allocationWork.id,title:allocationWork.title,unit:allocationWork.unitSnapshot,remaining:remainingWorkQuantity(allocationWork.quantity,allocationWork.allocated)}} data={allocationData} onClose={()=>setAllocationWork(null)}/>:null}
       <div className="flex flex-col gap-3">
         <div className="flex justify-between">
 
