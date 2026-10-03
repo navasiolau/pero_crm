@@ -7,27 +7,44 @@ import {
   DeleteObjectCommand,
 } from "@aws-sdk/client-s3";
 
-// Файловое хранилище CRM (§13): S3 (MinIO) по умолчанию.
-// Если S3_ENDPOINT/S3_BUCKET не заданы (локальная разработка) —
-// используется локальный диск uploads/ (как раньше).
+// Target is explicit; incomplete server configuration never selects disk.
 // ВАЖНО: standalone server.js делает chdir(__dirname), поэтому локальный
 // фолбэк-путь в контейнере — /app/apps/web/uploads (см. docker-compose).
 export const UPLOADS_ROOT = path.join(process.cwd(), "uploads");
 
 export function s3Enabled(): boolean {
-  return Boolean(process.env.S3_ENDPOINT && process.env.S3_BUCKET);
+  return storageConfiguration().mode === "s3";
+}
+
+export function storageConfiguration() {
+  const mode = process.env.CRM_FILE_STORAGE;
+  const required = [process.env.S3_ENDPOINT, process.env.S3_BUCKET, process.env.S3_ACCESS_KEY, process.env.S3_SECRET_KEY];
+  const invalid = () => { throw new Error("STORAGE_CONFIG_INVALID"); };
+  if (mode === "local") {
+    if (required.some(value => Boolean(value?.trim()))) invalid();
+    return { mode: "local" as const };
+  }
+  if (mode !== "s3" || required.some(value => !value?.trim())) invalid();
+  let endpoint: URL;
+  try { endpoint = new URL(process.env.S3_ENDPOINT!); } catch { return invalid(); }
+  if (!['http:', 'https:'].includes(endpoint.protocol) || endpoint.username || endpoint.password || endpoint.search || endpoint.hash ||
+      !/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(process.env.S3_BUCKET!)) invalid();
+  return { mode: "s3" as const, endpoint: endpoint.toString(), bucket: process.env.S3_BUCKET!,
+    region: process.env.S3_REGION ?? "us-east-1", accessKeyId: process.env.S3_ACCESS_KEY!, secretAccessKey: process.env.S3_SECRET_KEY! };
 }
 
 let client: S3Client | null = null;
 
 function s3(): S3Client {
+  const config = storageConfiguration();
+  if (config.mode !== "s3") throw new Error("STORAGE_CONFIG_INVALID");
   client ??= new S3Client({
-    endpoint: process.env.S3_ENDPOINT,
-    region: process.env.S3_REGION ?? "us-east-1",
+    endpoint: config.endpoint,
+    region: config.region,
     forcePathStyle: true,
     credentials: {
-      accessKeyId: process.env.S3_ACCESS_KEY ?? "",
-      secretAccessKey: process.env.S3_SECRET_KEY ?? "",
+      accessKeyId: config.accessKeyId,
+      secretAccessKey: config.secretAccessKey,
     },
   });
   return client;
