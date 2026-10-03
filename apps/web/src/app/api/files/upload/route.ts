@@ -115,7 +115,7 @@ async function upload(request:Request,state:{phase:UploadPhase;commitState:Commi
       return NextResponse.json({ error: "Нужно изображение поддерживаемого формата" }, { status: 415 });
     }
     const parsedCover = sketchUploadTargetSchema.safeParse({projectId,productId:requestedProductId,
-      expectedSketchFileId:form.get("expectedSketchFileId") === "null" ? null : undefined,
+      expectedSketchFileId:form.get("expectedSketchFileId") === "null" ? null : form.get("expectedSketchFileId") ?? undefined,
       clientMutationId:form.get("clientMutationId")});
     if (!parsedCover.success) return NextResponse.json({ok:false,kind:"validation",error:"Обновите форму эскиза"},{status:422});
     coverTarget = parsedCover.data;
