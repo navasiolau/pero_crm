@@ -74,7 +74,6 @@ function WorkDetails({ view }: { view: EngineeringFundView }) {
           {work.tasks.map((task) => <div key={task.id} className="min-w-0 rounded-lg border p-3">
             <p className="font-medium break-words">{task.title} · {task.assigneeName ?? "Исполнитель не назначен"}</p>
             <p>Физический объём задачи: {task.quantity ?? "не задан"}</p>
-            <p>Финансовая доля задачи в работе: {task.units === null ? "не задана" : `${percentOf(task.units)}%`}</p>
             <p>{view.state === "SETTLED" ? "Начислено задаче" : "Предварительно задаче"}: {task.amount === null ? "пока не рассчитано" : `${view.state === "DRAFT" ? "≈ " : ""}${amountLabel(task.amount, view.currency)}`}</p>
             <p className="text-xs text-muted-foreground">Статус: {task.status === "DONE" ? "Выполнена" : task.status === "IN_PROGRESS" ? "В работе" : task.status === "DRAFT" ? "Черновик" : "Новая"}</p>
           </div>)}

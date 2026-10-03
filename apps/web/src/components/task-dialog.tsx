@@ -32,13 +32,13 @@ import { FileImageThumbnail } from "@/components/file-image-thumbnail";
 import { useFileViewer } from "@/components/file-viewer";
 import { ConfirmDeleteDialog } from "@/components/confirm-delete-dialog";
 import { QuantityStepper } from "@/components/quantity-stepper";
-import { formatAmount, formatDateTime } from "@/lib/format";
-import { taskPaymentLabel, workPaymentSourceLabel } from "@/lib/task-payment-display";
+import { formatDateTime } from "@/lib/format";
+import { taskPaymentLabel } from "@/lib/task-payment-display";
 import { cn } from "@/lib/utils";
-import { sharePercent } from "@/lib/work-shares";
+
 import { isPositiveQuantity, quantityInputError, remainingWorkQuantity } from "@/lib/work-quantity";
 import { deleteTask, updateTask } from "@/server/tasks/actions";
-import { fetchProductOptions } from "@/server/products/actions";
+
 
 export interface TaskDetails {
   id: string;
@@ -51,6 +51,9 @@ export interface TaskDetails {
   requiresPhoto: boolean;
   estimateMinutes: number | null;
   spentMinutes: number;
+  rewardAmount?: string | null;
+  rewardCurrency?: string | null;
+  rewardSource?: "WORK_SNAPSHOT" | "FROZEN_TASK_SNAPSHOT" | "UNAVAILABLE";
   workId: string | null;
   workTitle: string | null;
   workTotal: string | null; // итого по всей работе
@@ -110,7 +113,6 @@ export function TaskDialog({
   onOpenChange,
   projectTasks = [],
   works = [],
-  products,
 }: {
   task: TaskDetails | null;
   workers: { id: string; name: string; hint?: string }[];
@@ -134,7 +136,7 @@ export function TaskDialog({
   const [pending, startTransition] = useTransition();
   const [editing, setEditing] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const [productOptions, setProductOptions] = useState(products ?? []);
+
   const fileViewer = useFileViewer();
   const [form, setForm] = useState({
     title: "",
@@ -151,9 +153,7 @@ export function TaskDialog({
   if (!task) return null;
   const readOnly = task.status === "DONE" || !canEdit;
   const isAllocatedShare = !!task.allocationGroupId;
-  const isInstallationPercentage = task.paymentKind === "INSTALLATION";
-  const quantityShareLabel = task.paymentKind === "ENGINEERING" || isInstallationPercentage
-    ? "Доля физического объёма" : "Доля задачи";
+
   const ownQuantity = task.personalQuantity === undefined
     ? (isAllocatedShare ? null : task.quantity)
     : task.personalQuantity;
@@ -173,14 +173,12 @@ export function TaskDialog({
       dependencyIds: task.dependencies.map((dep) => dep.id),
     });
     setEditing(true);
-    // Изделия проекта — если родитель не передал список, подгружаем сами
-    if (!products && !isAllocatedShare) {
-      void fetchProductOptions(task.projectId).then(setProductOptions);
-    }
+
   }
 
   const valid = form.title.trim() && form.type && form.dueAt &&
-    (isAllocatedShare || !form.workId || !quantityInputError(form.quantity));
+    form.assigneeId && task.productId && task.workId &&
+    (isAllocatedShare || (isPositiveQuantity(form.quantity) && !quantityInputError(form.quantity)));
 
   return (
     <Dialog
@@ -232,6 +230,7 @@ export function TaskDialog({
               <Input
                 id="td-title"
                 value={form.title}
+                readOnly
                 onChange={(event) =>
                   setForm((prev) => ({ ...prev, title: event.target.value }))
                 }
@@ -273,9 +272,9 @@ export function TaskDialog({
                   onChange={(value) =>
                     setForm((prev) => ({ ...prev, assigneeId: value }))
                   }
-                  placeholder="не назначен — черновик"
+                  placeholder="Выберите исполнителя"
                   searchPlaceholder="Поиск сотрудника…"
-                  allowClear
+
                 />
               </div>
             </div>
@@ -294,58 +293,30 @@ export function TaskDialog({
             <div className="flex flex-col gap-1.5">
               <Label>Изделие</Label>
               <SearchableSelect
-                options={(isAllocatedShare && task.productId ? [{
-                  id: task.productId,
-                  number: task.productNumber ?? "",
-                  title: task.productTitle ?? "Изделие задачи",
-                }] : productOptions).map((product) => ({
-                  value: product.id,
-                  label: `${product.number} · ${product.title}`,
-                }))}
+                options={task.productId ? [{value: task.productId, label: `${task.productNumber ?? ""} · ${task.productTitle ?? "Изделие работы"}`}] : []}
                 value={form.productId}
-                disabled={isAllocatedShare}
+                disabled
                 onChange={(value) =>
                   setForm((prev) => ({ ...prev, productId: value }))
                 }
-                placeholder="весь проект"
+                placeholder="Изделие работы"
                 searchPlaceholder="Поиск изделия…"
-                allowClear
+
               />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="flex flex-col gap-1.5">
                 <Label>Работа (оплата)</Label>
                 <SearchableSelect
-                  options={isAllocatedShare && task.workId ? [{
-                    value: task.workId,
-                    label: task.workTitle ?? "Работа задачи",
-                  }] : works.map((work) => {
-                    const own =
-                      work.id === task.workId && task.quantity
-                        ? task.quantity
-                        : "0";
-                    const remaining = remainingWorkQuantity(work.quantity, work.allocated, own);
-                    return {
-                      value: work.id,
-                      label: `${work.title} · ${work.paymentKind === "INSTALLATION"
-                        ? workPaymentSourceLabel({ paymentKind: work.paymentKind, priceSnapshot: null, total: null, quantity: work.quantity })
-                        : work.paymentKind === "ENGINEERING" ? "Инженерный фонд (история)" : formatAmount(work.total, "BYN")}`,
-                      hint:
-                        isPositiveQuantity(remaining)
-                          ? `свободно ${remaining} из ${work.quantity}`
-                          : "распределена полностью",
-                      disabled: !isPositiveQuantity(remaining) ||
-                        (work.paymentKind !== "LEGACY" && work.id !== task.workId),
-                    };
-                  })}
+                  options={task.workId ? [{value: task.workId, label: task.workTitle ?? "Работа изделия"}] : []}
                   value={form.workId}
-                  disabled={isAllocatedShare || isInstallationPercentage}
+                  disabled
                   onChange={(value) =>
                     setForm((prev) => ({ ...prev, workId: value }))
                   }
-                  placeholder="без работы"
+                  placeholder="Работа изделия"
                   searchPlaceholder="Поиск работы…"
-                  allowClear
+
                 />
               </div>
               <div className="flex flex-col gap-1.5">
@@ -367,13 +338,11 @@ export function TaskDialog({
             </div>
             {isAllocatedShare ? (
               <div className="rounded-lg border p-3 text-sm">
-                <div className="font-medium">{quantityShareLabel}: {sharePercent(task.shareUnits).replace(".", ",")}%</div>
-                {task.paymentKind === "ENGINEERING" && task.stageShareUnits !== null && task.stageShareUnits !== undefined ? <div>Доля прежнего фонда (история): {sharePercent(task.stageShareUnits).replace(".", ",")}%</div> : null}
                 {ownQuantity !== null ? <div>Личный объём: {ownQuantity.replace(".", ",")} ед.</div> : null}
-                <div>{isInstallationPercentage ? "Источник оплаты" : "Сумма доли"}: {ownAmount}</div>
+                <div>Вознаграждение: {ownAmount}</div>
                 <p className="mt-1 text-muted-foreground">
-                  Изделие, работа и общий объём закреплены за всеми частями задачи.
-                  Прежнее распределение сохранено и доступно только для просмотра.
+                  Изделие и работа закреплены за задачей.
+                  Исторический объём сохранён без пересчёта.
                 </p>
               </div>
             ) : form.workId ? (
@@ -495,13 +464,6 @@ export function TaskDialog({
                   <div>{task.workTitle}</div>
                 </div>
               ) : null}
-              <div>
-                <div className="text-xs text-muted-foreground">{quantityShareLabel}</div>
-                <div>{sharePercent(task.shareUnits).replace(".", ",")}%</div>
-              </div>
-              {task.paymentKind === "ENGINEERING" && task.stageShareUnits !== null && task.stageShareUnits !== undefined ? (
-                <div><div className="text-xs text-muted-foreground">Доля прежнего фонда (история)</div><div>{sharePercent(task.stageShareUnits).replace(".", ",")}%</div></div>
-              ) : null}
               {ownQuantity !== null ? (
                 <div>
                   <div className="text-xs text-muted-foreground">Личный объём</div>
@@ -509,7 +471,7 @@ export function TaskDialog({
                 </div>
               ) : null}
               <div>
-                <div className="text-xs text-muted-foreground">{isInstallationPercentage ? "Источник оплаты" : "Сумма доли"}</div>
+                <div className="text-xs text-muted-foreground">Вознаграждение</div>
                 <div>{ownAmount}</div>
               </div>
             </div>
@@ -579,10 +541,10 @@ export function TaskDialog({
                     const result = await updateTask(task.id, {
                       title: form.title.trim(),
                       type: form.type,
-                      assigneeId: form.assigneeId || null,
+                      assigneeId: form.assigneeId,
                       ...(!isAllocatedShare ? {
-                        productId: form.productId || null,
-                        workId: form.workId || null,
+                        productId: task.productId,
+                        workId: task.workId,
                         quantity:
                           form.workId && form.quantity.trim() !== ""
                             ? Number(form.quantity)

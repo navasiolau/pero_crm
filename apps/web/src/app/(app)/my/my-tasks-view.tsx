@@ -46,7 +46,6 @@ import { taskPaymentLabel } from "@/lib/task-payment-display";
 import { requiresManualCompletionTime } from "@/lib/task-completion-prompt";
 import { useElapsed } from "@/lib/use-elapsed";
 import { cn } from "@/lib/utils";
-import { sharePercent } from "@/lib/work-shares";
 import { OFFICE_WRITE_ROLES, hasAnyRole } from "@/lib/roles";
 import { saveViewPreference } from "@/server/preferences-actions";
 import { changeTaskStatus } from "@/server/tasks/actions";
@@ -185,10 +184,8 @@ export function MyTasksView({
               (оценка / факт)
             </div>
             <div className="mt-2 flex flex-col gap-0.5 text-sm">
-              <div>{task.paymentKind === "ENGINEERING" ? "Доля объёма" : "Ваша доля"}: {sharePercent(task.shareUnits).replace(".", ",")}%</div>
-              {task.paymentKind === "ENGINEERING" && task.stageShareUnits !== null && task.stageShareUnits !== undefined ? <div>Доля оплаты работы: {sharePercent(task.stageShareUnits).replace(".", ",")}%</div> : null}
               {ownQuantity !== null ? <div>Личный объём: {ownQuantity.replace(".", ",")} ед.</div> : null}
-              <div>Сумма доли: {ownAmount}</div>
+              <div>Вознаграждение: {ownAmount}</div>
             </div>
           </div>
 
