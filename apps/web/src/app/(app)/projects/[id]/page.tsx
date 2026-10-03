@@ -6,7 +6,9 @@ import { ArrowLeft, TriangleAlert } from "lucide-react";
 
 import { auth } from "@/auth";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { resolveProjectTab } from "@/lib/product-return-navigation";
+import { ProjectTabs } from "@/components/project-tabs";
+import { TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SlotErrorBoundary } from "@/components/plugins/slot-error-boundary";
 import { displayClientName } from "@/lib/labels";
 import {
@@ -44,9 +46,10 @@ export const dynamic = "force-dynamic";
 // «Материалы» (сводно по изделиям, только просмотр), «История»
 // + вкладки плагинов (слот project.tab).
 export default async function ProjectPage({
-  params,
+  params, searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const session = await auth();
   if (!session?.user) redirect("/login");
@@ -128,6 +131,8 @@ export default async function ProjectPage({
   const pricingProjection = showOverviewAmount ? await getProjectPricingProjection({id:session.user.id,name:session.user.name??"",roles:role,source:"web"},project.id) : null;
   const hasShortage = materialsGroups.some(group => group.hasShortage);
 
+  const initialTab = resolveProjectTab((await searchParams).tab, ["overview", "products", "files", "tasks", ...(showMaterials ? ["materials"] : []), ...(showFinance ? ["finance"] : []), ...pluginTabs.map(tab => tab.pluginId)]);
+
   return (
     <ProjectInlineProvider key={project.id} projectId={project.id} stage={project.stage} pricingProjection={pricingProjection} initial={{
       title: project.title, clientId: project.clientId, managerId: project.managerId,
@@ -151,7 +156,7 @@ export default async function ProjectPage({
         ) : null}
       </div>
 
-      <Tabs defaultValue="overview">
+      <ProjectTabs initialTab={initialTab}>
         <TabsList className="w-full max-w-full justify-start overflow-x-auto">
           <TabsTrigger className="shrink-0" value="overview">Общее</TabsTrigger>
           <TabsTrigger className="shrink-0" value="products">
@@ -359,7 +364,7 @@ export default async function ProjectPage({
             </SlotErrorBoundary>
           </TabsContent>
         ))}
-      </Tabs>
+      </ProjectTabs>
     </div>
     </ProjectInlineProvider>
   );

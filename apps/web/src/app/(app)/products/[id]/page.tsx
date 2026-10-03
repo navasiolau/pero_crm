@@ -27,12 +27,15 @@ import { SinglePercentageRow } from "./product-percentage-panel";
 import { getProductPercentageView } from "@/server/product-percentage-pay/queries";
 import { ProductSinglePage } from "./product-overview";
 
+import { resolveProductReturn } from "@/lib/product-return-navigation";
+
 export const dynamic = "force-dynamic";
 
 export default async function ProductPage({
-  params,
+  params, searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const session = await auth();
   if (!session?.user) redirect("/login");
@@ -42,6 +45,7 @@ export default async function ProductPage({
 
   const product = await getProductFor(session.user.id, role, id);
   if (!product) notFound();
+  const returnDestination = resolveProductReturn((await searchParams).returnTo, product.project.id);
 
   const canManage = hasAnyRole(role, MANAGER_ROLES);
   const canViewAllPercentage = canManage || hasAnyRole(role, FINANCE_ROLES);
@@ -109,7 +113,7 @@ export default async function ProductPage({
           deleteCoverAction={deleteProductSketchAction}
           header={<div className="flex min-w-0 flex-col gap-4" data-product-header="stacked">
             <ProductHeader product={{id:product.id,number:product.number,title:product.title,kind:product.kind,status:product.status,expectedPrice:showAmount?product.expectedPrice?.toString()??null:null,quantity:product.quantity,description:product.description,projectId:product.project.id,engineerId:product.engineerId}}
-              currency={product.project.currency} canManage={canManage} showAmount={showAmount} actorRoles={role} actorUserId={session.user.id} backHref={`/projects/${product.project.id}`} hasB3d={percentageView.hasB3d} noModel={percentageView.noModel} isEngineeringParticipant={percentageView.sections.ENGINEERING.ownMember!==null}/>
+              currency={product.project.currency} canManage={canManage} showAmount={showAmount} actorRoles={role} actorUserId={session.user.id} backHref={returnDestination.href} hasB3d={percentageView.hasB3d} noModel={percentageView.noModel} isEngineeringParticipant={percentageView.sections.ENGINEERING.ownMember!==null}/>
             <ProductInlineTitle number={product.number} canManage={canManage}/>
             <ProductInlineContacts canManage={canManage} clients={(canManage?clients:[product.project.client]).map(client=>({id:client.id,label:displayClientName(client),phone:client.phone,address:client.address}))}/>
           </div>}

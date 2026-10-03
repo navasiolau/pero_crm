@@ -17,6 +17,8 @@ import { CSS } from "@dnd-kit/utilities";
 import { toast } from "sonner";
 import type { ProductStatus, Role } from "@prisma/client";
 
+import { useListParams } from "@/lib/list-params";
+import { globalProductsHref, productDetailHref } from "@/lib/product-return-navigation";
 import { DragHandle } from "@/components/drag-handle";
 import { ProductKanbanCard } from "@/components/product-kanban-card";
 import { Badge } from "@/components/ui/badge";
@@ -128,6 +130,7 @@ export function ProductsKanban({
   showAmount: boolean;
 }) {
   const router = useRouter();
+  const { query } = useListParams();
   const [products, setProducts] = useState(initialProducts);
   const [activeId, setActiveId] = useState<string | null>(null);
 
@@ -225,7 +228,7 @@ export function ProductsKanban({
               hasB3d: activeProduct.hasB3d,
               noModel: activeProduct.noModel,
             }).includes(status.id))}
-            onOpen={(product) => router.push(`/products/${product.number}`)}
+            onOpen={(product) => router.push(productDetailHref(product.number, globalProductsHref(query)))}
           />
         ))}
       </div>

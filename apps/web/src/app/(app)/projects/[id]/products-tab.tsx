@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
+import { productDetailHref, projectProductsHref } from "@/lib/product-return-navigation";
 import { useRouter } from "next/navigation";
 import {
   DndContext,
@@ -297,7 +298,7 @@ export function ProductsTab({
                 hasB3d: activeProduct.hasB3d,
                 noModel: activeProduct.noModel,
               }).includes(status.id))}
-              onOpen={(product) => router.push(`/products/${product.number}`)}
+              onOpen={(product) => router.push(productDetailHref(product.number, projectProductsHref(projectId)))}
             />
           ))}
         </div>

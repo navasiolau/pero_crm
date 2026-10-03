@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 
 import { Badge } from "@/components/ui/badge";
 import { DataTable, type DataColumn } from "@/components/ui/data-table";
+import { globalProductsHref, productDetailHref } from "@/lib/product-return-navigation";
 import { useListParams } from "@/lib/list-params";
 import { productLineTotal } from "@/lib/product-quantity";
 import { formatAmount } from "@/lib/format";
@@ -30,7 +31,8 @@ export function ProductsTable({
   showAmount: boolean;
 }) {
   const router = useRouter();
-  const { get, set } = useListParams();
+  const { get, set, query } = useListParams();
+  const productHref = (number: string) => productDetailHref(number, globalProductsHref(query));
 
   const columns: DataColumn<ProductRow>[] = [
     {
@@ -117,7 +119,7 @@ export function ProductsTable({
       rows={products}
       renderMobileCard={(row) => (
         <div className="flex flex-col items-start gap-3 text-sm">
-          <Link href={`/products/${row.number}`} className="min-h-12 w-full min-w-0 font-medium underline-offset-2 [overflow-wrap:anywhere] hover:underline">
+          <Link href={productHref(row.number)} className="min-h-12 w-full min-w-0 font-medium underline-offset-2 [overflow-wrap:anywhere] hover:underline">
             <span className="block text-xs text-muted-foreground">Изделие <CardNumber>{row.number}</CardNumber></span>
             {row.title}
           </Link>
@@ -134,7 +136,7 @@ export function ProductsTable({
         </div>
       )}
       emptyText="Изделий не найдено — ослабьте фильтры"
-      onRowClick={(row) => router.push(`/products/${row.number}`)}
+      onRowClick={(row) => router.push(productHref(row.number))}
       server={{
         total,
         page,
