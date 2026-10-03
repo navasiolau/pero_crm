@@ -3,6 +3,7 @@ import type { NextAuthConfig } from "next-auth";
 import { ADMIN_ROLES, ADVANCE_ROLES, FINANCE_ROLES, hasAnyRole } from "@/lib/roles";
 import { homePathForRoles } from "@/lib/home-route";
 import { canAccessSettingsPath } from "@/lib/settings-access";
+import {canAccessOperationalPath} from '@/lib/operational-access';
 
 // Общие route/session callbacks. Единственный экземпляр Auth.js в auth.ts
 // добавляет обязательную проверку актуального пользователя из БД.
@@ -23,6 +24,7 @@ export const authConfig = {
       const { pathname } = request.nextUrl;
       const roles = auth.user.roles ?? [];
       const homePath = homePathForRoles(roles);
+      if(!canAccessOperationalPath(roles,pathname))return Response.redirect(new URL(homePath,request.nextUrl));
       if (pathname === "/" && homePath !== "/") {
         return Response.redirect(new URL(homePath, request.nextUrl));
       }

@@ -11,6 +11,7 @@ export const ROLE_LABELS: Record<string, string> = {
   WORKER: "Работник",
   MOUNTER: "Монтажник",
   ACCOUNTANT: "Бухгалтер",
+  PROCUREMENT: "Снабженец",
 };
 
 export const STAGE_LABELS: Record<string, string> = {
@@ -38,7 +39,7 @@ export const STAGE_ORDER = [
 
 export const CURRENCIES = ["BYN", "RUB", "USD", "EUR"];
 
-export const FINANCE_ROLES = ["ADMIN", "DIRECTOR", "ACCOUNTANT"];
+export const FINANCE_ROLES = ["ADMIN", "DIRECTOR", "ACCOUNTANT", "PROCUREMENT"];
 
 export function hasAny(roles: string[], needed: string[]): boolean {
   return needed.some((role) => roles.includes(role));

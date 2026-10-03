@@ -5,7 +5,7 @@ import { createPaymentCore } from "@/server/payments/core";
 import {
   domainError,
   isActorError,
-  requireBotManager,
+  requireBotFinance,
   resolveBotActor,
 } from "@/server/telegram/bot-api";
 
@@ -16,7 +16,7 @@ export async function POST(request: Request) {
   if (isErrorResponse(auth)) return auth;
   const actor = await resolveBotActor(request);
   if (isActorError(actor)) return actor;
-  const gate = requireBotManager(actor);
+  const gate = requireBotFinance(actor);
   if (gate) return gate;
 
   const body = await request.json().catch(() => null);

@@ -1,3 +1,4 @@
+import {FIELD_ROLES,OFFICE_ROLES,WAREHOUSE_MONEY_ROLES,hasAnyRole} from "@/lib/roles";
 import { prisma } from "@/lib/prisma";
 import { decimalAtoms, decimalText, materialDebt } from "@/lib/product-quantity";
 import { hasFullProjectVisibility, productVisibilityWhere, resolveVisibilityActor, type VisibilityActor } from "@/server/access/visibility";
@@ -80,6 +81,7 @@ export type MaterialView = {
 };
 
 export async function listMaterials(actor: VisibilityActor): Promise<MaterialView[]> {
+  if(!hasAnyRole(actor.roles,OFFICE_ROLES))throw new Error("Недостаточно прав");
   const [materials, stock, debt] = await Promise.all([
     prisma.material.findMany({
       orderBy: { name: "asc" },
@@ -99,7 +101,7 @@ export async function listMaterials(actor: VisibilityActor): Promise<MaterialVie
       categoryId: material.categoryId,
       categoryName: material.category?.name ?? null,
       purchasePrice:
-        material.purchasePrice === null ? null : Number(material.purchasePrice),
+        !hasAnyRole(actor.roles,WAREHOUSE_MONEY_ROLES)||material.purchasePrice === null ? null : Number(material.purchasePrice),
       minStock: material.minStock === null ? null : Number(material.minStock),
       active: material.active,
       comment: material.comment,
@@ -133,6 +135,7 @@ export async function listMovements(actor: VisibilityActor, filter?: {
   productId?: string;
   type?: "INCOME" | "EXPENSE" | "RETURN";
 }): Promise<StockMovementView[]> {
+  if(!hasAnyRole(actor.roles,OFFICE_ROLES))throw new Error("Недостаточно прав");
   actor = await resolveVisibilityActor(prisma, actor);
   const movements = await prisma.stockMovement.findMany({
     where: {
@@ -163,8 +166,8 @@ export async function listMovements(actor: VisibilityActor, filter?: {
     materialName: movement.material.name,
     materialUnit: movement.material.unit,
     quantity: Number(movement.quantity),
-    unitPrice: movement.unitPrice === null ? null : Number(movement.unitPrice),
-    totalByn: movement.totalByn === null ? null : Number(movement.totalByn),
+    unitPrice: !hasAnyRole(actor.roles,WAREHOUSE_MONEY_ROLES)||movement.unitPrice === null ? null : Number(movement.unitPrice),
+    totalByn: !hasAnyRole(actor.roles,WAREHOUSE_MONEY_ROLES)||movement.totalByn === null ? null : Number(movement.totalByn),
     productId: movement.productId,
     productNumber: movement.product?.number ?? null,
     comment: movement.comment,
@@ -204,6 +207,7 @@ export async function getProjectMaterials(
   productId: string,
   actor: VisibilityActor,
 ): Promise<ProjectMaterialsData> {
+  if(!hasAnyRole(actor.roles,OFFICE_ROLES))throw new Error("Недостаточно прав");
   actor = await resolveVisibilityActor(prisma, actor);
   const [rows, movements] = await Promise.all([
     prisma.projectMaterial.findMany({
@@ -235,7 +239,7 @@ export async function getProjectMaterials(
       materialSku: row.material.sku,
       unit: row.material.unit,
       purchasePrice:
-        row.material.purchasePrice === null
+        !hasAnyRole(actor.roles,WAREHOUSE_MONEY_ROLES)||row.material.purchasePrice === null
           ? null
           : Number(row.material.purchasePrice),
       quantity,
@@ -270,6 +274,7 @@ export async function listProductShortages(
   actor: VisibilityActor,
 ): Promise<Set<string>> {
   if (productIds.length === 0) return new Set();
+  if(!hasAnyRole(actor.roles,[...OFFICE_ROLES,...FIELD_ROLES]))throw new Error("Недостаточно прав");
   actor = await resolveVisibilityActor(prisma, actor);
   const lines = await prisma.projectMaterial.findMany({
     where: { productId: { in: productIds }, product: productVisibilityWhere(actor) },
@@ -301,6 +306,7 @@ export async function listProjectShortages(
   actor: VisibilityActor,
 ): Promise<Set<string>> {
   if (projectIds.length === 0) return new Set();
+  if(!hasAnyRole(actor.roles,[...OFFICE_ROLES,...FIELD_ROLES]))throw new Error("Недостаточно прав");
   actor = await resolveVisibilityActor(prisma, actor);
   const lines = await prisma.projectMaterial.findMany({
     where: { product: { AND: [{ projectId: { in: projectIds } }, productVisibilityWhere(actor)] } },
@@ -336,6 +342,7 @@ export type MaterialOption = {
 };
 
 export async function listMaterialOptions(actor: VisibilityActor): Promise<MaterialOption[]> {
+  if(!hasAnyRole(actor.roles,OFFICE_ROLES))throw new Error("Недостаточно прав");
   const materials = await listMaterials(actor);
   return materials
     .filter((material) => material.active)

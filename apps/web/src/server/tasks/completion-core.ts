@@ -4,7 +4,7 @@ import type { Prisma } from "@prisma/client";
 import { fileVisibilityWhere, hasFullProjectVisibility, resolveVisibilityActor, taskExecutionWhere } from "@/server/access/visibility";
 import { bumpEngineeringPoolRevision } from "@/server/product-stage-pay/core";
 import { moneyAtoms, taskPieceAmount } from "@/lib/work-shares";
-import { OFFICE_ROLES, hasAnyRole } from "@/lib/roles";
+import { OFFICE_WRITE_ROLES, hasAnyRole } from "@/lib/roles";
 import type { DomainActor } from "@/server/projects/core";
 import type { TaskTransaction } from "./transaction";
 
@@ -76,7 +76,7 @@ export async function changeTaskStatusCore(actor: DomainActor, taskId: string, t
         await stopTaskTimers(tx, task.id);
         const spent = await tx.timeEntry.aggregate({ where: { taskId, stoppedAt: { not: null } }, _sum: { minutes: true } });
         if ((spent._sum.minutes ?? 0) === 0) {
-          if (!hasAnyRole(actor.roles, OFFICE_ROLES)) throw new CompletionError("Нет записей времени. Возьмите задачу «В работу» — время посчитается таймером автоматически");
+          if (!hasAnyRole(actor.roles, OFFICE_WRITE_ROLES)) throw new CompletionError("Нет записей времени. Возьмите задачу «В работу» — время посчитается таймером автоматически");
           if (!Number.isInteger(actualMinutes) || !actualMinutes || actualMinutes < 1 || actualMinutes > 1440) throw new CompletionError("Укажите фактическое время от 1 до 1440 минут", true);
           await tx.timeEntry.create({ data: { taskId, userId: task.assigneeId ?? actor.id, source: "manual", stoppedAt: doneAt, minutes: actualMinutes } });
           await tx.changeLog.create({ data: { actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source, entity: "task", entityId: task.id, action: "time", newValue: { actual: actualMinutes } } });

@@ -5,7 +5,7 @@ import { auth } from "@/auth";
 import { Badge } from "@/components/ui/badge";
 import { displayClientName } from "@/lib/labels";
 import { prisma } from "@/lib/prisma";
-import { FINANCE_ROLES, MANAGER_ROLES, OFFICE_ROLES, hasAnyRole } from "@/lib/roles";
+import { FINANCE_ROLES, MANAGER_ROLES, OFFICE_ROLES, WAREHOUSE_MANAGE_ROLES, WAREHOUSE_MONEY_ROLES, hasAnyRole } from "@/lib/roles";
 import { canEditProductTechnicalBlock, resolveVisibilityActor } from "@/server/access/visibility";
 import { allocatedWorkQuantity } from "@/lib/work-shares";
 import { getFileStageConfig } from "@/server/files/stage-config";
@@ -52,7 +52,8 @@ export default async function ProductPage({
   const canEditTech = canEditProductTechnicalBlock(actor, product);
   const showAmount = hasAnyRole(role, OFFICE_ROLES);
   const showMaterials = hasAnyRole(role, OFFICE_ROLES);
-  const showMoney = hasAnyRole(role, ["ADMIN", "DIRECTOR"]);
+  const showMoney = hasAnyRole(role, WAREHOUSE_MONEY_ROLES);
+  const canIssueReturn=hasAnyRole(role,WAREHOUSE_MANAGE_ROLES);
 
   // Группировка файлов по этапам (плагин file-stages), если включён.
   const stageConfig = await getFileStageConfig();
@@ -168,6 +169,7 @@ export default async function ProductPage({
               materialsTotalByn={materialsData.materialsTotalByn}
               options={materialOptions}
               canManage={canManage}
+              canIssueReturn={canIssueReturn}
               showMoney={showMoney}
             />) : null}
       />

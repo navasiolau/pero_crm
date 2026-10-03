@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import type { Role } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
-import { hasAnyRole, MANAGER_ROLES } from "@/lib/roles";
+import { hasAnyRole, MANAGER_ROLES, FINANCE_ROLES } from "@/lib/roles";
 
 // Слой REST /api/v1/bot/* — канал telegram-бота (LXC tgbot).
 // Авторизация: Bearer-сервисный токен CRM (authenticate, scope) + заголовок
@@ -72,5 +72,9 @@ export function requireBotManager(actor: BotActor): NextResponse | null {
 }
 
 export function botAllowed(roles: Role[]): boolean {
-  return hasAnyRole(roles, MANAGER_ROLES);
+  return hasAnyRole(roles, [...MANAGER_ROLES, ...FINANCE_ROLES]);
+}
+
+export function requireBotFinance(actor: BotActor): NextResponse | null {
+  return hasAnyRole(actor.roles, FINANCE_ROLES) ? null : NextResponse.json({ ok: false, error: "Недостаточно прав" }, { status: 403 });
 }

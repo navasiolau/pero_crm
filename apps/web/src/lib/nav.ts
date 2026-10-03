@@ -17,6 +17,7 @@ import {
 
 import {
   ADMIN_ROLES,
+  ASSIGNEE_ROLES,
   ADVANCE_ROLES,
   FIELD_ROLES,
   FINANCE_ROLES,
@@ -45,7 +46,7 @@ const PAYROLL_ROLES: Role[] = ALL_ROLES.filter((role) => role !== "DIRECTOR");
 
 export const navItems: NavItem[] = [
   { href: "/", label: "Дашборд", icon: LayoutDashboard, roles: MANAGER_ROLES, group: "main" },
-  { href: "/my", label: "Мои задачи", icon: ClipboardCheck, roles: ALL_ROLES, group: "main" },
+  { href: "/my", label: "Мои задачи", icon: ClipboardCheck, roles: ASSIGNEE_ROLES, group: "main" },
   { href: "/payroll", label: "Моя зарплата", icon: Wallet, roles: PAYROLL_ROLES, group: "main" },
   { href: "/advances", label: "Авансы", icon: HandCoins, roles: ADVANCE_ROLES, group: "main" },
   { href: "/projects", label: "Проекты", icon: FolderKanban, roles: OFFICE_ROLES, group: "manage" },

@@ -90,6 +90,7 @@ export function MaterialsTab({
   materialsTotalByn,
   options,
   canManage,
+  canIssueReturn = canManage,
   showMoney,
 }: {
   productId: string;
@@ -99,6 +100,7 @@ export function MaterialsTab({
   materialsTotalByn: number;
   options: MaterialOptionView[];
   canManage: boolean;
+  canIssueReturn?: boolean;
   showMoney: boolean;
 }) {
   const [dialog, setDialog] = useState<DialogState>(null);
@@ -208,7 +210,7 @@ export function MaterialsTab({
         </Badge>
       ),
     },
-    ...(canManage
+    ...(canManage || canIssueReturn
       ? [
           {
             id: "actions",
@@ -216,6 +218,7 @@ export function MaterialsTab({
             className: "w-32",
             cell: (row: ProjectMaterialLineView) => (
               <div className="flex items-center justify-end gap-1">
+                {canIssueReturn?<>
                 <Button
                   variant="ghost"
                   size="icon"
@@ -242,6 +245,8 @@ export function MaterialsTab({
                 >
                   <Undo2 className="size-4 text-muted-foreground" />
                 </Button>
+                </>:null}
+                {canManage?<>
                 <Button
                   variant="ghost"
                   size="icon"
@@ -268,6 +273,7 @@ export function MaterialsTab({
                     <Trash2 className="size-4 text-muted-foreground" />
                   </Button>
                 ) : null}
+                </>:null}
               </div>
             ),
           } satisfies DataColumn<ProjectMaterialLineView>,

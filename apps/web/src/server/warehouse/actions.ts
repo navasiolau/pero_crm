@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { prisma } from "@/lib/prisma";
-import { formatAmount, formatQty } from "@/lib/format";
+import { formatQty } from "@/lib/format";
 import { writeChangeLog } from "@/server/plugins/changelog";
 import { emitDomainEvent } from "@/server/plugins/events";
 import { notifyOrg } from "@/server/notifications/notify";
@@ -12,13 +12,14 @@ import { revalidateProductPaths } from "@/server/products/revalidate";
 import { withTaskTransaction } from "@/server/tasks/transaction";
 import { addMaterialNorm, updateMaterialNorm, lockMaterialProduct } from "./norm-core";
 import { decimalAtoms, decimalText, materialDebt } from "@/lib/product-quantity";
+import {MANAGER_ROLES,WAREHOUSE_MANAGE_ROLES,WAREHOUSE_MONEY_ROLES,hasAnyRole} from "@/lib/roles";
 import { requireRole } from "@/server/require-role";
 
 // Склад (§12, фаза 6). Правки — админ/директор/менеджер; просмотр — офисные
 // роли (разграничение на страницах). Цены — BYN; EXPENSE/RETURN несут
 // снимок цены (unitPrice/totalByn) и идут в экономику проекта (§11).
 
-const WAREHOUSE_MANAGERS = ["ADMIN", "DIRECTOR", "MANAGER"] as const;
+
 
 // Опции интерактивных транзакций списания/возврата: дефолты Prisma
 // (maxWait 2 с / timeout 5 с) на e2e ловили P2028 «Unable to start
@@ -50,7 +51,7 @@ const categorySchema = z.object({
 export async function addMaterialCategory(
   input: z.input<typeof categorySchema>,
 ): Promise<{ ok: boolean; error?: string }> {
-  const session = await requireRole([...WAREHOUSE_MANAGERS]);
+  const session = await requireRole(WAREHOUSE_MANAGE_ROLES);
   const parsed = categorySchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Ошибка данных" };
@@ -77,7 +78,7 @@ export async function addMaterialCategory(
 export async function toggleMaterialCategory(
   id: string,
 ): Promise<{ ok: boolean; error?: string }> {
-  const session = await requireRole([...WAREHOUSE_MANAGERS]);
+  const session = await requireRole(WAREHOUSE_MANAGE_ROLES);
   const category = await prisma.materialCategory.findUnique({ where: { id } });
   if (!category) return { ok: false, error: "Категория не найдена" };
   await prisma.materialCategory.update({
@@ -114,7 +115,7 @@ const materialSchema = z.object({
 export async function addMaterial(
   input: z.input<typeof materialSchema>,
 ): Promise<{ ok: boolean; error?: string }> {
-  const session = await requireRole([...WAREHOUSE_MANAGERS]);
+  const session = await requireRole(WAREHOUSE_MANAGE_ROLES);
   const parsed = materialSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Ошибка данных" };
@@ -161,7 +162,7 @@ export async function updateMaterial(
   id: string,
   input: z.input<typeof materialSchema>,
 ): Promise<{ ok: boolean; error?: string }> {
-  const session = await requireRole([...WAREHOUSE_MANAGERS]);
+  const session = await requireRole(WAREHOUSE_MANAGE_ROLES);
   const parsed = materialSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Ошибка данных" };
@@ -176,7 +177,7 @@ export async function updateMaterial(
       sku: data.sku?.trim() || null,
       unit: data.unit,
       categoryId: data.categoryId || null,
-      purchasePrice: data.purchasePrice ?? null,
+      purchasePrice: hasAnyRole(session.user.roles,WAREHOUSE_MONEY_ROLES)?data.purchasePrice ?? null:material.purchasePrice,
       minStock: data.minStock ?? null,
       comment: data.comment?.trim() || null,
     },
@@ -208,7 +209,7 @@ export async function updateMaterial(
 export async function toggleMaterial(
   id: string,
 ): Promise<{ ok: boolean; error?: string }> {
-  const session = await requireRole([...WAREHOUSE_MANAGERS]);
+  const session = await requireRole(WAREHOUSE_MANAGE_ROLES);
   const material = await prisma.material.findUnique({ where: { id } });
   if (!material) return { ok: false, error: "Материал не найден" };
   await prisma.material.update({
@@ -242,7 +243,7 @@ const incomeSchema = z.object({
 export async function addStockIncome(
   input: z.input<typeof incomeSchema>,
 ): Promise<{ ok: boolean; error?: string }> {
-  const session = await requireRole([...WAREHOUSE_MANAGERS]);
+  const session = await requireRole(WAREHOUSE_MANAGE_ROLES);
   const parsed = incomeSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Ошибка данных" };
@@ -307,7 +308,7 @@ const projectMaterialSchema = z.object({
 export async function addProjectMaterial(
   input: z.input<typeof projectMaterialSchema>,
 ): Promise<{ ok: boolean; error?: string }> {
-  const session = await requireRole([...WAREHOUSE_MANAGERS]);
+  const session = await requireRole(MANAGER_ROLES);
   const parsed = projectMaterialSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Ошибка данных" };
@@ -345,7 +346,7 @@ const updateProjectMaterialSchema = z.object({
 export async function updateProjectMaterial(
   input: z.input<typeof updateProjectMaterialSchema>,
 ): Promise<{ ok: boolean; error?: string }> {
-  const session = await requireRole([...WAREHOUSE_MANAGERS]);
+  const session = await requireRole(MANAGER_ROLES);
   const parsed = updateProjectMaterialSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Ошибка данных" };
@@ -372,7 +373,7 @@ export async function updateProjectMaterial(
 export async function deleteProjectMaterial(
   id: string,
 ): Promise<{ ok: boolean; error?: string }> {
-  const session = await requireRole([...WAREHOUSE_MANAGERS]);
+  const session = await requireRole(MANAGER_ROLES);
   let line;
   try {
     line = await withTaskTransaction(async (tx) => {
@@ -414,7 +415,7 @@ const requestSchema = z.object({
 export async function requestMaterial(
   input: z.input<typeof requestSchema>,
 ): Promise<{ ok: boolean; error?: string }> {
-  const session = await requireRole([...WAREHOUSE_MANAGERS]);
+  const session = await requireRole(WAREHOUSE_MANAGE_ROLES);
   const parsed = requestSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Ошибка данных" };
@@ -512,10 +513,7 @@ export async function requestMaterial(
     await notifyOrg({
       type: "stock.expense",
       title: `Списание: ${line.material.name} × ${formatQty(data.quantity)} · ${line.product.number}`,
-      body:
-        unitPrice === null
-          ? undefined
-          : `Сумма: ${formatAmount(round2(data.quantity * unitPrice), "BYN")}`,
+
       link: `/products/${line.product.number}`,
       exceptUserId: session.user.id,
     });
@@ -541,7 +539,7 @@ const returnSchema = z.object({
 export async function returnMaterial(
   input: z.input<typeof returnSchema>,
 ): Promise<{ ok: boolean; error?: string }> {
-  const session = await requireRole([...WAREHOUSE_MANAGERS]);
+  const session = await requireRole(WAREHOUSE_MANAGE_ROLES);
   const parsed = returnSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Ошибка данных" };

@@ -1,5 +1,5 @@
 import type { ProductStatus, Role } from "@prisma/client";
-import { FIELD_ROLES, MANAGER_ROLES, hasAnyRole, hasRole } from "@/lib/roles";
+import { ASSIGNEE_ROLES, FIELD_ROLES, MANAGER_ROLES, hasAnyRole, hasRole } from "@/lib/roles";
 
 export type ShareActor = { id: string; roles: Role[] };
 export type TaskProductContext = { engineerId: string | null; status: ProductStatus } | null;
@@ -11,12 +11,13 @@ export function taskRecipientError(user: ShareActor & { active: boolean }, produ
     return product?.engineerId === user.id && product.status === "DESIGN" ? null
       : "Инженер может получить задачу только своего изделия на проектировании";
   }
-  return hasRole(user.roles, "ACCOUNTANT") ? null : "У сотрудника нет роли для выполнения задач";
+  return "У сотрудника нет роли для выполнения задач";
 }
 
 /** ENGINEERING task assignment is product membership, not a role/pay-scheme grant. */
 export function engineeringRecipientError(user: ShareActor & { active: boolean }, product: TaskProductContext): string | null {
   if (!user.active) return "Сотрудник неактивен";
+  if(!hasAnyRole(user.roles,ASSIGNEE_ROLES))return 'У сотрудника нет роли для выполнения задач';
   return product?.status === "DESIGN" ? null : "Инженерные задачи можно передавать только пока изделие на проектировании";
 }
 

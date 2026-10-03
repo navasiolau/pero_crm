@@ -1,5 +1,5 @@
 import type { PrismaClient } from "@prisma/client";
-import { hasRole } from "@/lib/roles";
+import {FINANCIAL_ORG_NOTIFICATION_TYPES,canReceiveNotificationContent} from '@/lib/notification-access';
 import { hasFullProjectVisibility, productVisibilityWhere, projectVisibilityWhere, resolveVisibilityActor, taskVisibilityWhere, type VisibilityActor } from "./visibility";
 
 type NotificationContent = { type: string; title: string; body: string | null; link: string | null };
@@ -12,8 +12,9 @@ export async function scopeNotificationContent<T extends NotificationContent>(
   items: T[],
   db: Lookup,
 ): Promise<T[]> {
+  items=items.filter(item=>canReceiveNotificationContent(actor.roles,item.type));
   actor = await resolveVisibilityActor(db, actor);
-  if ((!hasRole(actor.roles, "ENGINEER") && actor.engineeringParticipantProductIds?.length === 0) || hasFullProjectVisibility(actor)) return items;
+  if (hasFullProjectVisibility(actor)) return items;
   const checked = new Map<string, Promise<boolean>>();
   const canReadLink = (link: string | null): Promise<boolean> => {
     if (!link) return Promise.resolve(false);
@@ -39,6 +40,7 @@ export async function scopeNotificationContent<T extends NotificationContent>(
     return allowed;
   };
   return Promise.all(items.map(async (item) => {
+    if(FINANCIAL_ORG_NOTIFICATION_TYPES.includes(item.type))return{...item,link:await canReadLink(item.link)?item.link:'/finance'};
     if (item.type.startsWith("payroll.") || item.type === "user.accountChanged" || await canReadLink(item.link)) return item;
     return { ...item, title: "Список доступных задач обновлён", body: null, link: "/my" };
   }));

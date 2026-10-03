@@ -1,5 +1,6 @@
 import type { Role } from "@prisma/client";
 
+import { canReceiveNotificationContent } from "@/lib/notification-access";
 import { prisma } from "@/lib/prisma";
 
 // Типы уведомлений (§6.1). Org — ролевые рассылки (кому — см. ORG_TYPE_ROLES),
@@ -28,9 +29,9 @@ export type NotificationKind = "org" | "personal";
 // Кому рассылаются org-уведомления — по типу (§6.1, уточнение владельца):
 // финансовые операции (приходы/расходы) — + бухгалтер; ЗП-события — админ/
 // директор/бухгалтер (менеджеру зарплата не рассылается); остальное — A/D/M.
-const OFFICE_ORG: Role[] = ["ADMIN", "DIRECTOR", "MANAGER"];
-const FINANCE_ORG: Role[] = ["ADMIN", "DIRECTOR", "MANAGER", "ACCOUNTANT"];
-const PAYROLL_ORG: Role[] = ["ADMIN", "DIRECTOR", "ACCOUNTANT"];
+const OFFICE_ORG: Role[] = ["ADMIN", "DIRECTOR", "MANAGER", "PROCUREMENT"];
+const FINANCE_ORG: Role[] = ["ADMIN", "DIRECTOR", "ACCOUNTANT", "PROCUREMENT"];
+const PAYROLL_ORG: Role[] = ["ADMIN", "DIRECTOR", "ACCOUNTANT", "PROCUREMENT"];
 
 const ORG_TYPE_ROLES: Record<string, Role[]> = {
   "payment.added": FINANCE_ORG,
@@ -59,7 +60,7 @@ export function receivableTypesFor(roles: Role[] | Role) {
   const list = Array.isArray(roles) ? roles : [roles];
   return NOTIFICATION_TYPES.filter(
     (t) =>
-      t.kind === "personal" ||
+      (t.kind === "personal" && canReceiveNotificationContent(list, t.id)) ||
       list.some((role) => orgRolesFor(t.id).includes(role)),
   );
 }

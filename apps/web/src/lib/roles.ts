@@ -15,6 +15,7 @@ export const ROLE_PRIORITY: Role[] = [
   "DIRECTOR",
   "MANAGER",
   "ENGINEER",
+  "PROCUREMENT",
   "ACCOUNTANT",
   "WORKER",
   "MOUNTER",
@@ -28,6 +29,7 @@ export const roleLabels: Record<Role, string> = {
   WORKER: "Работник",
   MOUNTER: "Монтажник",
   ACCOUNTANT: "Бухгалтер",
+  PROCUREMENT: "Снабженец",
 };
 
 // Ролевые наборы — единый источник истины (вместо инлайн-массивов по коду).
@@ -37,20 +39,24 @@ export const OFFICE_ROLES: Role[] = [
   "DIRECTOR",
   "MANAGER",
   "ENGINEER",
-  "ACCOUNTANT",
+  "PROCUREMENT",
 ];
 // Менеджмент: создание/правка проектов, задач, изделий, работ.
 export const MANAGER_ROLES: Role[] = ["ADMIN", "DIRECTOR", "MANAGER"];
 // Финансы: выплаты, приходы/расходы, кассы, статьи (§10–§11).
-export const FINANCE_ROLES: Role[] = ["ADMIN", "DIRECTOR", "ACCOUNTANT"];
-// Выдача аванса — узкое право менеджера, без доступа ко всему разделу финансов.
-export const ADVANCE_ROLES: Role[] = ["ADMIN", "DIRECTOR", "MANAGER", "ACCOUNTANT"];
+export const FINANCE_ROLES: Role[] = ["ADMIN", "DIRECTOR", "ACCOUNTANT", "PROCUREMENT"];
+// Авансы — финансовая операция, отдельного права менеджера больше нет.
+export const ADVANCE_ROLES: Role[] = [...FINANCE_ROLES];
+export const WAREHOUSE_MANAGE_ROLES: Role[] = ["ADMIN", "DIRECTOR", "MANAGER", "PROCUREMENT"];
+export const WAREHOUSE_MONEY_ROLES: Role[] = [...FINANCE_ROLES];
+// Эти прежние офисные writes не следуют из readonly supply/finance grants.
+export const OFFICE_WRITE_ROLES: Role[] = [...MANAGER_ROLES,"ENGINEER"];
 // Настройки и журнал изменений.
 export const ADMIN_ROLES: Role[] = ["ADMIN", "DIRECTOR"];
 // Производственный персонал: без дашборда, время — только таймером.
 export const FIELD_ROLES: Role[] = ["WORKER", "MOUNTER"];
 // Кому можно назначать задачи/работы (исполнители).
-export const ASSIGNEE_ROLES: Role[] = [...ROLE_PRIORITY];
+export const ASSIGNEE_ROLES: Role[] = [...MANAGER_ROLES, "ENGINEER", ...FIELD_ROLES];
 
 // Есть ли у пользователя конкретная роль.
 export function hasRole(userRoles: Role[] | null | undefined, role: Role): boolean {
