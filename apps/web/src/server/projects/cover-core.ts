@@ -14,11 +14,14 @@ async function permission(tx:Tx,actor:Actor,projectId:string){
  if(!hasAnyRole(actor.roles,MANAGER_ROLES))return null;
  return tx.project.findFirst({where:{AND:[{id:projectId},projectVisibilityWhere(actor)]},select:{id:true,number:true,coverFileId:true}});
 }
-async function replay(tx:Tx,actor:Actor,projectId:string,mutationId:string,fingerprint:string){
+async function replay(tx:Tx,actor:Actor,projectId:string,mutationId:string,fingerprint:string,currentCoverFileId:string|null){
  const row=await tx.changeLog.findUnique({where:{id:`project-cover:${mutationId}`}});if(!row)return null;
  const saved=row.newValue;
- if(row.actorId!==actor.id||row.entity!=='project'||row.entityId!==projectId||!saved||typeof saved!=='object'||Array.isArray(saved)||saved.fingerprint!==fingerprint||!saved.result||typeof saved.result!=='object')return fail('conflict','Идентификатор операции уже использован');
- return{...saved.result as unknown as Extract<ProjectCoverResult,{ok:true}>,repeated:true};
+ if(row.actorId!==actor.id||row.entity!=='project'||row.entityId!==projectId||row.action!=='cover.receipt'||!saved||typeof saved!=='object'||Array.isArray(saved)||saved.fingerprint!==fingerprint||!saved.result||typeof saved.result!=='object')return fail('conflict','Идентификатор операции уже использован');
+ const result=saved.result as unknown as Extract<ProjectCoverResult,{ok:true}>;
+ if(result.ok!==true||result.clientMutationId!==mutationId||(result.coverFileId!==null&&(typeof result.coverFileId!=='string'||result.id!==result.coverFileId)))return fail('conflict','Идентификатор операции уже использован');
+ if(result.coverFileId!==currentCoverFileId)return fail('conflict','Обложка проекта уже изменена',currentCoverFileId);
+ return{...result,repeated:true};
 }
 async function receipt(tx:Tx,actor:Actor,projectId:string,mutationId:string,fingerprint:string,result:ProjectCoverResult){
  await tx.changeLog.create({data:{id:`project-cover:${mutationId}`,actorType:'user',actorId:actor.id,actorName:actor.name??undefined,entity:'project',entityId:projectId,action:'cover.receipt',field:'coverFileId',newValue:json({fingerprint,result})}});
@@ -27,7 +30,12 @@ export async function authorizeProjectCoverUpload(tx:Tx,actor:Actor,input:Projec
  if(!projectCoverUploadSchema.safeParse(input).success)return{ok:false as const,kind:'validation' as const,error:'Обновите форму обложки проекта'};
  const project=await permission(tx,actor,input.projectId);if(!project)return{ok:false as const,kind:'forbidden' as const,error:'Недостаточно прав'};
  const existing=await tx.changeLog.findUnique({where:{id:`project-cover:${input.clientMutationId}`}});
- if(existing&&existing.actorId===actor.id&&existing.entityId===input.projectId&&existing.action==='cover.receipt')return{ok:true as const,project,replayHint:true};
+ if(existing){
+  const saved=existing.newValue,result=saved&&typeof saved==='object'&&!Array.isArray(saved)?saved.result:null;
+  if(existing.actorId!==actor.id||existing.entity!=='project'||existing.entityId!==input.projectId||existing.action!=='cover.receipt'||!result||typeof result!=='object'||Array.isArray(result)||result.ok!==true||result.clientMutationId!==input.clientMutationId||typeof result.coverFileId!=='string'||!result.coverFileId||result.id!==result.coverFileId||result.storageIntent!==undefined)return{ok:false as const,kind:'conflict' as const,error:'Идентификатор операции уже использован'};
+  if(result.coverFileId!==project.coverFileId)return{ok:false as const,kind:'conflict' as const,error:'Обложка проекта уже изменена',currentCoverFileId:project.coverFileId};
+  return{ok:true as const,project,replayHint:true};
+ }
  if(project.coverFileId!==null)return{ok:false as const,kind:'conflict' as const,error:'Обложка проекта уже изменена',currentCoverFileId:project.coverFileId};
  return{ok:true as const,project,replayHint:false};
 }
@@ -36,7 +44,7 @@ export async function persistProjectCoverUpload(tx:Tx,actor:Actor,input:ProjectC
  await tx.$queryRaw`SELECT id FROM "Project" WHERE id=${input.projectId} FOR UPDATE`;
  const project=await permission(tx,actor,input.projectId);if(!project)return fail('forbidden','Недостаточно прав');
  const fingerprint=digest({operation:'upload',...input,fileName:file.fileName,mimeType:file.mimeType,size:file.size,contentHash:file.contentHash});
- const previous=await replay(tx,actor,input.projectId,input.clientMutationId,fingerprint);if(previous)return previous;
+ const previous=await replay(tx,actor,input.projectId,input.clientMutationId,fingerprint,project.coverFileId);if(previous)return previous;
  if(project.coverFileId!==null)return fail('conflict','Обложка проекта уже изменена',project.coverFileId);
  const row=await tx.file.create({data:{projectId:input.projectId,productId:null,taskId:null,category:'PHOTO',fileName:file.fileName,storedName:file.storedName,mimeType:file.mimeType,size:file.size,hasThumb:file.hasThumb,uploadedById:actor.id}});
  if((await tx.project.updateMany({where:{id:input.projectId,coverFileId:null},data:{coverFileId:row.id}})).count!==1)throw Error('PROJECT_COVER_CAS_RACE');
@@ -49,7 +57,7 @@ export async function deleteProjectCoverCore(tx:Tx,actor:Actor,input:ProjectCove
  if(!projectCoverDeleteSchema.safeParse(input).success)return fail('validation','Подтвердите точный файл обложки');
  await tx.$queryRaw`SELECT id FROM "Project" WHERE id=${input.projectId} FOR UPDATE`;
  const project=await permission(tx,actor,input.projectId);if(!project)return fail('forbidden','Недостаточно прав');
- const fingerprint=digest({operation:'delete',...input}),previous=await replay(tx,actor,project.id,input.clientMutationId,fingerprint);if(previous)return previous;
+ const fingerprint=digest({operation:'delete',...input}),previous=await replay(tx,actor,project.id,input.clientMutationId,fingerprint,project.coverFileId);if(previous)return previous;
  if(project.coverFileId!==input.expectedCoverFileId)return fail('conflict','Обложка проекта уже изменена',project.coverFileId);
  await tx.$queryRaw`SELECT id FROM "File" WHERE id=${input.expectedCoverFileId} FOR UPDATE`;
  const file=await tx.file.findUnique({where:{id:input.expectedCoverFileId}});

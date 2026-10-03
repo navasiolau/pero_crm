@@ -12,10 +12,10 @@ test('only manager union may upload own project cover; engineer is readonly',asy
 const actor={id:'m',roles:['MANAGER'] as ['MANAGER']};
 const upload={fileName:'original.png',storedName:'owned.png',mimeType:'image/png',size:5,hasThumb:true,contentHash:'exact-original-hash'};
 function fixture(){
- const project={id:'j',number:'1',coverFileId:null as string|null},files=new Map<string,Record<string,unknown>>(),logs=new Map<string,Record<string,unknown>>();let failAudit=false;
+ const project={id:'j',number:'1',coverFileId:null as string|null},files=new Map<string,Record<string,unknown>>(),logs=new Map<string,Record<string,unknown>>();let failAudit=false,fileSequence=0;
  const tx={
   $queryRaw:async()=>[],project:{findFirst:async()=>project,updateMany:async({where,data}:{where:{coverFileId:string|null};data:{coverFileId:string|null}})=>{if(project.coverFileId!==where.coverFileId)return{count:0};project.coverFileId=data.coverFileId;return{count:1}}},
-  file:{create:async({data}:{data:Record<string,unknown>})=>{const row={...data,id:'file-'+files.size};files.set(row.id,row);return row},findUnique:async({where}:{where:{id:string}})=>files.get(where.id)??null,delete:async({where}:{where:{id:string}})=>files.delete(where.id)},
+  file:{create:async({data}:{data:Record<string,unknown>})=>{const row={...data,id:'file-'+fileSequence++};files.set(row.id,row);return row},findUnique:async({where}:{where:{id:string}})=>files.get(where.id)??null,delete:async({where}:{where:{id:string}})=>files.delete(where.id)},
   changeLog:{findUnique:async({where}:{where:{id:string}})=>logs.get(where.id)??null,create:async({data}:{data:Record<string,unknown>})=>{if(failAudit)throw Error('AUDIT_FAILURE');logs.set((data.id as string)??'audit-'+logs.size,data);return data}},
  } as unknown as Prisma.TransactionClient;
  async function transaction<T>(fn:()=>Promise<T>){const before=project.coverFileId,f=new Map(files),l=new Map(logs);try{return await fn()}catch(e){project.coverFileId=before;files.clear();f.forEach((v,k)=>files.set(k,v));logs.clear();l.forEach((v,k)=>logs.set(k,v));throw e;}}
@@ -39,3 +39,33 @@ test('confirmed delete emits exact storage intents, replay does not delete anoth
  const repeated=await deleteProjectCoverCore(f.tx,actor,request);assert.equal(repeated.ok,true);if(repeated.ok)assert.equal(repeated.repeated,true);
 });
 test('audit error rolls back new file and pointer in transaction',async()=>{const f=fixture();f.failAudit();await assert.rejects(f.transaction(()=>persistProjectCoverUpload(f.tx,actor,input,upload)),/AUDIT_FAILURE/);assert.equal(f.project.coverFileId,null);assert.equal(f.files.size,0);assert.equal(f.logs.size,0);});
+
+const deleteCid='22222222-2222-4222-8222-222222222222',newUploadCid='32222222-2222-4222-8222-222222222222';
+const stateOf=(f:ReturnType<typeof fixture>)=>JSON.stringify({project:f.project,files:[...f.files],logs:[...f.logs]});
+test('historical upload CID after delete and after a new cover is refused in preflight and persist without writes',async()=>{
+ const f=fixture();const initial=await persistProjectCoverUpload(f.tx,actor,input,upload);assert.ok(initial.ok&&initial.id);
+ assert.ok((await deleteProjectCoverCore(f.tx,actor,{projectId:'j',expectedCoverFileId:initial.id,clientMutationId:deleteCid})).ok);
+ for(const current of [null,'new']){
+ if(current==='new'){const created=await persistProjectCoverUpload(f.tx,actor,{...input,clientMutationId:newUploadCid},{...upload,storedName:'new-cover.png'});assert.ok(created.ok&&created.id);assert.notEqual(created.id,initial.id);}
+ const before=stateOf(f),pointer=f.project.coverFileId;
+ const authorized=await authorizeProjectCoverUpload(f.tx,actor,input);assert.equal(authorized.ok,false);if(!authorized.ok){assert.equal(authorized.kind,'conflict');assert.equal(authorized.currentCoverFileId,pointer);}
+ const replayed=await persistProjectCoverUpload(f.tx,actor,input,upload);assert.equal(replayed.ok,false);if(!replayed.ok){assert.equal(replayed.kind,'conflict');assert.equal(replayed.currentCoverFileId,pointer);}
+ assert.equal(stateOf(f),before);
+ }
+});
+test('old delete CID is idempotent only while pointer stays null; never returns storage intent or clears newer cover',async()=>{
+ const f=fixture();const created=await persistProjectCoverUpload(f.tx,actor,input,upload);assert.ok(created.ok&&created.id);
+ const deleted={projectId:'j',expectedCoverFileId:created.id,clientMutationId:deleteCid};assert.ok((await deleteProjectCoverCore(f.tx,actor,deleted)).ok);
+ const beforeReplay=stateOf(f),valid=await deleteProjectCoverCore(f.tx,actor,deleted);assert.ok(valid.ok&&valid.repeated);assert.equal(stateOf(f),beforeReplay);
+ const newer=await persistProjectCoverUpload(f.tx,actor,{...input,clientMutationId:newUploadCid},{...upload,storedName:'new-cover.png'});assert.ok(newer.ok&&newer.id);
+ const before=stateOf(f),stale=await deleteProjectCoverCore(f.tx,actor,deleted);assert.equal(stale.ok,false);if(!stale.ok){assert.equal(stale.kind,'conflict');assert.equal(stale.currentCoverFileId,newer.id);}
+ assert.equal('storageIntent' in stale,false);assert.equal(stateOf(f),before);assert.ok(f.files.has(newer.id));
+});
+test('upload preflight accepts current upload replay but refuses delete CID or unrelated/malformed receipt even at empty pointer',async()=>{
+ const f=fixture();const first=await persistProjectCoverUpload(f.tx,actor,input,upload);assert.ok(first.ok&&first.id);
+ const before=stateOf(f),same=await authorizeProjectCoverUpload(f.tx,actor,input);assert.ok(same.ok&&same.replayHint);assert.equal(stateOf(f),before);
+ assert.ok((await deleteProjectCoverCore(f.tx,actor,{projectId:'j',expectedCoverFileId:first.id,clientMutationId:deleteCid})).ok);
+ assert.equal((await authorizeProjectCoverUpload(f.tx,actor,{...input,clientMutationId:deleteCid})).ok,false);
+ const receipt=f.logs.get(`project-cover:${input.clientMutationId}`)!;
+ for(const corrupt of [{actorId:'foreign'},{entity:'product'},{entityId:'other-project'},{newValue:{fingerprint:'unknown',result:{ok:false}}}]){const snapshot={...receipt};Object.assign(receipt,corrupt);const current=stateOf(f);assert.equal((await authorizeProjectCoverUpload(f.tx,actor,input)).ok,false);assert.equal(stateOf(f),current);Object.assign(receipt,snapshot);}
+});
