@@ -3,18 +3,18 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { resolveProductReturn } from "@/lib/product-return-navigation";
-import { ArrowLeft, Trash2 } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { toast } from "sonner";
 import type { ProductStatus, Role } from "@prisma/client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ConfirmDeleteDialog } from "@/components/confirm-delete-dialog";
+import { ProductDeleteButton } from "@/components/product-delete-button";
 import { useProductInline } from "@/components/product-inline-provider";
 import { PRODUCT_STATUSES, productStatusLabels, productStatusStyles } from "@/lib/product-statuses";
 import { cn } from "@/lib/utils";
 import { productStatusTargets, shouldRollbackProductStatus } from "@/lib/product-percentage-ui";
-import { changeProductStatus, deleteProduct } from "@/server/products/actions";
+import { changeProductStatus } from "@/server/products/actions";
 
 export function ProductHeader({
   product,
@@ -50,7 +50,6 @@ export function ProductHeader({
   const [pending, startTransition] = useTransition();
   const [localStatus, setLocalStatus] = useState(product.status);
   const [statusError, setStatusError] = useState<string | null>(null);
-  const [deleteOpen, setDeleteOpen] = useState(false);
   const assignedEngineer = !!actorUserId && product.engineerId === actorUserId;
   const allowedStatusTargets = productStatusTargets(actorRoles, { from: localStatus, assignedEngineer, participant: false, hasB3d: false, noModel: false });
   const engineerTarget = allowedStatusTargets[0];
@@ -78,10 +77,7 @@ export function ProductHeader({
       <SelectContent>{PRODUCT_STATUSES.map(status => <SelectItem key={status.id} value={status.id}>{status.label}</SelectItem>)}</SelectContent>
     </Select> : null}
     {canEngineerMove ? <Button type="button" variant="outline" className="min-h-12" disabled={pending} onClick={() => startTransition(async () => { await moveStatus(engineerTarget); })}>{engineerTarget === "DESIGN" ? "Вернуть в проектирование" : "Передать в производство"}</Button> : null}
-    {canManage ? <Button variant="outline" size="sm" onClick={() => setDeleteOpen(true)}><Trash2 className="size-4" /> Удалить</Button> : null}
+    <ProductDeleteButton productId={product.id} canManage={canManage} returnHref={returnDestination.href} />
     </div>
-    <ConfirmDeleteDialog entityLabel={`изделие «${product.number} · ${product.title}»`} open={deleteOpen} onOpenChange={setDeleteOpen} warning="Нельзя удалить, пока к изделию привязаны задачи, работы или материалы. Файлы останутся в проекте." onConfirm={async () => {
-      const result = await deleteProduct(product.id); if (result.ok) { toast.success("Изделие удалено"); router.push(returnDestination.href); return true; } toast.error(result.error ?? "Ошибка удаления"); return false;
-    }} />
   </div>;
 }
