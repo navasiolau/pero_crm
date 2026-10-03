@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
 import test from "node:test";
 import {allocatedWorkQuantity,taskPieceAmount} from "../src/lib/work-shares";
+import {taskPaymentLabel} from "../src/lib/task-payment-display";
 import {TaskSplitDialog} from "../src/components/task-split-dialog";
 import {remainingWorkQuantity} from "../src/lib/work-quantity";
 
@@ -9,7 +10,8 @@ test("task and personal views expose no stale split launcher regardless of canSp
  for(const path of ["src/components/task-dialog.tsx","src/app/(app)/my/my-tasks-view.tsx"]){
   const source=readFileSync(path,"utf8");
   assert.equal(/TaskSplitDialog|setSplitOpen|setSplitFor|Разделить/.test(source),false);
-  assert.match(source,/sharePercent\(task.shareUnits\)/,"historical readonly share stays available");
+  assert.doesNotMatch(source,/sharePercent\(task.shareUnits\)|Сумма доли|Доля прежнего фонда|Ваша доля|Доля объёма/);
+  assert.match(source,/taskPaymentLabel\(task\)/);assert.match(source,/Вознаграждение/);
  }
 });
 test("percentage settings cannot launch transfer or change participant allocation",()=>{
@@ -41,4 +43,10 @@ test("ordinary quantity distribution 4+6 of10 keeps full per-task pay and no rem
  const tasks=[{quantity:"4.00",executorShare:"1.000"},{quantity:"6.00",executorShare:"1.000"}];
  assert.equal(allocatedWorkQuantity(tasks),"10.00");assert.equal(remainingWorkQuantity("10.00",allocatedWorkQuantity(tasks)),"0.00");
  assert.deepEqual(tasks.map(task=>taskPieceAmount(task,"10.00")),["40.00","60.00"]);
+});
+
+test("task rewards use canonical zero and frozen DTO amounts without old-share or engineering-preview fallback",()=>{
+ assert.match(taskPaymentLabel({workId:"work",rewardAmount:"0.00",rewardCurrency:"BYN",rewardSource:"WORK_SNAPSHOT",shareAmount:"999",shareCurrency:"USD"}),/0.*BYN/);
+ assert.match(taskPaymentLabel({workId:"work",rewardAmount:"17.89",rewardCurrency:"BYN",rewardSource:"FROZEN_TASK_SNAPSHOT",previewAmount:"999",previewCurrency:"USD"}),/17,89.*BYN/);
+ assert.equal(taskPaymentLabel({workId:"work",rewardAmount:null,rewardCurrency:null,rewardSource:"UNAVAILABLE",paymentKind:"ENGINEERING",previewAmount:"999",previewCurrency:"BYN",shareAmount:"888",shareCurrency:"BYN"}),"—");
 });

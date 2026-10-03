@@ -75,7 +75,7 @@ test("fund component remains readonly even for management and old editable draft
   } finally { runtime.React = previous; }
 });
 
-test("read-only work summary labels physical quantity separately from payment share", () => {
+test("readonly historical fund keeps physical quantity and exact amounts without task share percentages", () => {
   const data = view({ works: [{ id: "w", title: "Чертежи", quantity: "5.00", weightUnits: 1_000_000, amount: "50.00",
     tasks: [{ id: "t", title: "Эскиз", status: "DONE", assigneeId: "u", assigneeName: "Инженер", quantity: "2.00", units: 800_000,
       revision: 0, amount: "40.00" }] }] });
@@ -86,7 +86,17 @@ test("read-only work summary labels physical quantity separately from payment sh
     const html = renderToStaticMarkup(React.createElement(AppRouterContext.Provider, { value: { refresh() {} } as never },
       React.createElement(EngineeringFund, { view: data, canManage: false, workers: [] })));
     assert.match(html, /Физический объём задачи:.*2.00/);
-    assert.match(html, /Финансовая доля задачи в работе:.*80%/);
+    assert.doesNotMatch(html, /Финансовая доля задачи|80%|Сохранить доли задач|Разделить/);
+    assert.match(html, /Физический объём работы:.*5.00/);
+    assert.match(html, /≈ 50.00 BYN/);
     assert.match(html, /≈ 40.00 BYN/);
+    for (const amount of ["40.00", "0.00"]) {
+      const settled = { ...data, state: "SETTLED" as const, works: data.works.map(work => ({ ...work, tasks: work.tasks.map(task => ({ ...task, amount })) })) };
+      const historical = renderToStaticMarkup(React.createElement(AppRouterContext.Provider, { value: { refresh() {} } as never }, React.createElement(EngineeringFund, { view: settled, canManage: false, workers: [] })));
+      assert.ok(historical.includes(`Начислено задаче: ${amount} BYN`));
+      assert.doesNotMatch(historical, /Финансовая доля задачи|80%|Разделить/);
+      assert.equal(data.works[0].tasks[0].amount,"40.00");
+      assert.equal(data.works[0].tasks[0].units,800_000);
+    }
   } finally { runtime.React = previous; }
 });

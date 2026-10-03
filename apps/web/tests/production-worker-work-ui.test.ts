@@ -11,6 +11,16 @@ test('actual worker work-create control is independent of task/delete controls a
  const html=renderToStaticMarkup(React.createElement(TasksTab,{...base,canManage:false,canAddWork:true}));assert.match(html,/>\s*Работа<\/button>/);assert.doesNotMatch(html,/>\s*Задача<\/button>|Удалить работу/);assert.match(html,/м\.п\./);assert.doesNotMatch(html,/итого 0/);
  const closed=renderToStaticMarkup(React.createElement(TasksTab,{...base,canManage:false,canAddWork:false}));assert.doesNotMatch(closed,/>\s*Работа<\/button>/);
 });
-test('manager default work/task/delete flow remains independent and retains known snapshot total',()=>{
- const html=renderToStaticMarkup(React.createElement(TasksTab,{...base,canManage:true,works:[{...base.works[0],priceSnapshot:'12.34',total:'37.02'}]}));assert.match(html,/>\s*Работа<\/button>/);assert.match(html,/>\s*Задача<\/button>/);assert.match(html,/Удалить работу/);assert.match(html,/37,02/);
+test('manager work-bound task allocation retains work creation, deletion and exact snapshot total',()=>{
+ const html=renderToStaticMarkup(React.createElement(TasksTab,{...base,canManage:true,works:[{...base.works[0],priceSnapshot:'12.34',total:'37.02'}]}));assert.match(html,/>\s*Работа<\/button>/);assert.match(html,/Назначить задачу/);assert.doesNotMatch(html,/>\s*Задача<\/button>/);assert.match(html,/Удалить работу/);assert.match(html,/37,02/);
+});
+
+test('zero snapshot work remains assignable while generic project task creation is absent',()=>{
+ const props={...base,canManage:true,works:[{...base.works[0],priceSnapshot:'0.00',total:'0.00'}]};
+ const html=renderToStaticMarkup(React.createElement(TasksTab,props));
+ assert.match(html,/Назначить задачу/);assert.match(html,/итого 0 BYN/);assert.match(html,/Удалить работу/);
+ const project=renderToStaticMarkup(React.createElement(TasksTab,{...props,productId:undefined}));
+ assert.doesNotMatch(project,/Назначить задачу|>\s*Задача<\/button>/);assert.match(project,/Удалить работу/);
+ const exhausted=renderToStaticMarkup(React.createElement(TasksTab,{...props,works:[{...props.works[0],allocated:'3'}]}));
+ assert.doesNotMatch(exhausted,/Назначить задачу/);
 });
