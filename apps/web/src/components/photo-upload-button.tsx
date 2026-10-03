@@ -20,6 +20,8 @@ import { validateFileForCategory } from "@pero/plugin-file-stages";
 import type { SketchFilePreview } from "@/lib/product-hero";
 import { sketchUploadForm } from "@/lib/product-sketch-upload";
 import { readSketchUploadConfirmation } from "@/lib/product-sketch-ui";
+import {UploadErrorDetails} from "@/components/upload-error-details";
+import {createUploadAttempt,sendFileUpload,localUploadFailure,uploadAttemptMatchesContext,type UploadAttempt,type UploadFailure} from "@/lib/file-upload-client";
 
 type PhotoTarget = (MeasurementUploadContext & { assignCover?: never; coverSurface?:never }) | { projectId: string; productId: string; taskId?: never; stage?: never; assignCover: true; coverSurface?:boolean };
 
@@ -59,8 +61,8 @@ export function PhotoUploadButton({
   const fileInput = useRef<HTMLInputElement>(null);
   const coverInput = useRef<HTMLInputElement>(null);
   const active = useRef(false);
-  const [error, setError] = useState<string | null>(null);
-  const uncertain = useRef<{file:File;id:string}|null>(null);
+  const [error, setError] = useState<UploadFailure | null>(null);
+  const uncertain = useRef<{file:File;id:string;attempt:UploadAttempt}|null>(null);
   const [retryAvailable,setRetryAvailable] = useState(false);
 
   async function upload(file: File, retry = false) {
@@ -70,8 +72,10 @@ export function PhotoUploadButton({
     onBusyChange?.(true);
     setError(null);
     let mutationId: string | undefined;
+    let confirmation:{httpStatus:number;requestId:string}|undefined;
     try {
-      if (assignCover && uncertain.current && !retry) throw Error("Повторите прежнюю загрузку, чтобы проверить её результат.");
+      if (uncertain.current && !retry) throw Error("Повторите прежнюю загрузку, чтобы проверить её результат.");
+      if(retry&&uncertain.current){const currentContext=assignCover?{projectId,productId,category:"PHOTO",assignCover:"1",expectedSketchFileId:"null"}:measurementUploadFields(taskId?{projectId,taskId}:{projectId,productId:productId!,stage:stage!});if(!uploadAttemptMatchesContext(uncertain.current.attempt,currentContext))throw Error("Контекст изменился. Откройте прежнюю карточку для проверки загрузки.");}
       if (beforeUpload && !await beforeUpload()) throw Error("Сначала сохраните цену, количество и инженера изделия.");
       if (productId && !file.type.startsWith("image/")) throw Error(assignCover ? "Эскиз должен быть изображением." : "Выберите фотографию; документ можно приложить отдельно в блоке замера.");
       if (extensions) {
@@ -79,22 +83,20 @@ export function PhotoUploadButton({
         if (validation) throw Error(validation);
       }
       let form:FormData;
-      if (assignCover) {
-        mutationId = retry && uncertain.current ? uncertain.current.id : createRequestId();
+      mutationId = retry && uncertain.current ? uncertain.current.id : createRequestId();
+      if (retry && uncertain.current) form=uncertain.current.attempt.form;
+      else if (assignCover) {
         form=sketchUploadForm(file,projectId,productId!,mutationId);
       } else {
         form=new FormData();form.append("file",file);
         const context = taskId ? { projectId, taskId } as const : { projectId, productId: productId!, stage: stage! } as const;
         for (const [key, value] of Object.entries(measurementUploadFields(context))) form.append(key, value);
       }
-      if (assignCover) { uncertain.current={file,id:mutationId!}; }
-      const response = await fetch("/api/files/upload", {
-        method: "POST",
-        body: form,
-      });
-      const data = await response.json().catch(() => ({}));
-      if (assignCover && response.ok && data.ok !== false && (data.ok !== true || typeof data.id !== "string")) throw Error("Не получено подтверждение эскиза. Повторите запрос.");
-      if (response.ok && data.ok === true && typeof data.id === "string") {
+      const attempt=retry&&uncertain.current?uncertain.current.attempt:createUploadAttempt(form,mutationId);
+      uncertain.current={file,id:mutationId,attempt};
+      const result=await sendFileUpload(attempt);
+      if (result.ok) {
+        const data=result.data;confirmation={httpStatus:result.httpStatus,requestId:result.requestId};
         const sketch = assignCover ? readSketchUploadConfirmation(data, mutationId!) : undefined;
         uncertain.current=null;setRetryAvailable(false);
         onUncertainChange?.(false);
@@ -103,15 +105,15 @@ export function PhotoUploadButton({
         setOpen(false);
         router.refresh();
       } else {
-        uncertain.current=null;setRetryAvailable(false);
-        onUncertainChange?.(false);
-        setError(data.error ?? "Ошибка загрузки");
-        toast.error(data.error ?? "Ошибка загрузки");
+        if(result.failure.commitState==="notCommitted")uncertain.current=null;
+        setRetryAvailable(Boolean(uncertain.current));onUncertainChange?.(Boolean(uncertain.current));
+        setError(result.failure);toast.error(result.failure.error);
       }
     } catch (failure) {
-      if (assignCover && uncertain.current) { setRetryAvailable(true); onUncertainChange?.(true); }
+      if (uncertain.current) { setRetryAvailable(true); onUncertainChange?.(true); }
       const message = failure instanceof Error ? failure.message : "Не удалось загрузить фото. Проверьте соединение и повторите.";
-      setError(message); toast.error(message);
+      const diagnostic=localUploadFailure(confirmation&&!uncertain.current?"Фото загружено, но интерфейс не обновился. Обновите страницу.":message,uncertain.current||confirmation?"confirmation":"validation",uncertain.current?.id??mutationId,uncertain.current?"unknown":confirmation?"committed":"notCommitted",confirmation?.httpStatus,confirmation?.requestId);
+      setError(diagnostic); toast.error(diagnostic.error);
     } finally {
       active.current = false;
       setBusy(false);
@@ -135,7 +137,8 @@ export function PhotoUploadButton({
         {assignCover?<UploadCloud className="size-5" />:<Camera className="size-4" />}
         {buttonLabel ?? (filesCount > 0 ? `Фото (${filesCount})` : "Фото")}
       </Button>
-        {error?<p role="alert" className="min-w-0 break-words text-sm text-destructive">{error}</p>:null}
+        <UploadErrorDetails failure={error} />
+        {retryAvailable&&uncertain.current?<Button type="button" variant="outline" disabled={busy} onClick={()=>void upload(uncertain.current!.file,true)}>Проверить прежнюю загрузку</Button>:null}
       </div>:      <Button
         variant={assignCover?"default":"outline"}
         size={assignCover?"default":size}
@@ -156,7 +159,7 @@ export function PhotoUploadButton({
             <DialogTitle>{assignCover ? "Добавить изображение эскиза" : productId ? "Фото замера изделия" : "Фото к задаче"}</DialogTitle>
             {!assignCover?<DialogDescription>Фото или замерный лист — попадёт в проект с категорией «Замер»</DialogDescription>:null}
           </DialogHeader>
-          {error ? <p role="alert" className="min-w-0 break-words text-sm text-destructive">{error}</p> : null}
+          <UploadErrorDetails failure={error} />
           {retryAvailable ? <Button disabled={busy} onClick={() => {if(uncertain.current)void upload(uncertain.current.file,true);}}>Повторить загрузку</Button> : null}
 
           <div className="flex flex-col gap-2">
