@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import {withTaskTransaction} from '../tasks/transaction';
 import { writeChangeLog } from "@/server/plugins/changelog";
 
 import { MANAGER_ROLES, OFFICE_WRITE_ROLES, hasAnyRole } from "@/lib/roles";
@@ -47,9 +48,10 @@ export async function startTimer(
 ): Promise<{ ok: boolean; error?: string }> {
   const session = await auth();
   if (!session?.user) throw new Error("Не авторизован");
-  const actor = await resolveVisibilityActor(prisma, session.user);
+  const result=await withTaskTransaction(async tx=>{
+  const actor = await resolveVisibilityActor(tx, session.user);
 
-  const task = await prisma.task.findFirst({ where: { AND: [{ id: taskId }, taskExecutionWhere(actor)] } });
+  const task = await tx.task.findFirst({ where: { AND: [{ id: taskId }, taskExecutionWhere(actor)] } });
   if (!task) return { ok: false, error: "Задача не найдена" };
   if (task.status === "DONE") return { ok: false, error: "Задача уже выполнена" };
   const isAssignee = task.assigneeId === session.user.id;
@@ -58,20 +60,22 @@ export async function startTimer(
   }
 
   // Один активный таймер: прежний останавливаем
-  await prisma.timeEntry.updateMany({
+  await tx.timeEntry.updateMany({
     where: { userId: session.user.id, stoppedAt: null },
     data: { stoppedAt: new Date() },
   });
-  await prisma.$executeRaw`
+  await tx.$executeRaw`
     UPDATE "TimeEntry" SET "minutes" = GREATEST(1, FLOOR(EXTRACT(EPOCH FROM ("stoppedAt" - "startedAt")) / 60)::int)
     WHERE "userId" = ${session.user.id} AND "stoppedAt" IS NOT NULL AND "minutes" = 0
   `;
 
-  await prisma.timeEntry.create({
+  await tx.timeEntry.create({
     data: { taskId, userId: session.user.id, source: "timer" },
   });
-  revalidatePath("/my");
   return { ok: true };
+  });
+  if(result.ok)revalidatePath("/my");
+  return result;
 }
 
 // Стоп активного таймера — пишет факт (§9).

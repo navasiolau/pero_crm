@@ -3,6 +3,10 @@
 import { revalidatePath } from "next/cache";
 import type { ProductStatus } from "@prisma/client";
 import { auth } from "@/auth";
+import {prisma} from '@/lib/prisma';
+import {MANAGER_ROLES,hasAnyRole} from '@/lib/roles';
+import {liveProductWhere} from '../access/live-entities';
+import {productDeleteSchema,type ProductDeleteInput,type ProductDeleteResult,type ProductDeleteBaseline} from './delete-contract';
 import { productStatusLabels } from "@/lib/product-statuses";
 import { dispatchEvent } from "@/server/plugins/events";
 import { notifyOrg } from "@/server/notifications/notify";
@@ -54,13 +58,20 @@ export async function patchProduct(input:ProductPatch):Promise<ProductPatchResul
   }
   return patchProductCore(domainActor(session),input);
 }
-export async function deleteProduct(productId:string):Promise<{ok:boolean;error?:string}> {
-  const session=await requireUser();
-  const result=await deleteProductCore(domainActor(session),productId);
-  if(!result.ok)return result;
-  await revalidateProduct(result.product);
-  return{ok:true};
+export async function readProductDeleteBaseline(productId:string):Promise<{ok:true;baseline:ProductDeleteBaseline}|{ok:false;error:string}>{
+  const session=await auth();if(!session?.user||!hasAnyRole(session.user.roles,MANAGER_ROLES))return{ok:false,error:'Недостаточно прав'};
+  const product=await prisma.product.findFirst({where:{...liveProductWhere,id:productId},select:{id:true,number:true,title:true,updatedAt:true}});
+  if(!product)return{ok:false,error:'Изделие не найдено'};
+  return{ok:true,baseline:{productId:product.id,number:product.number,title:product.title,expectedUpdatedAt:product.updatedAt.toISOString()}};
 }
+export async function deleteProduct(input:string|ProductDeleteInput):Promise<ProductDeleteResult> {
+  const session=await auth();if(!session?.user)return{ok:false,kind:'forbidden',error:'Не авторизован'};
+  const parsed=productDeleteSchema.safeParse(input);if(!parsed.success)return{ok:false,kind:'validation',error:'Обновите подтверждение удаления изделия'};
+  const data=parsed.data,result=await deleteProductCore(domainActor(session),data.productId,withTaskTransaction,data);
+  if(result.ok)await revalidateProductPaths(result.productId).catch(()=>{});
+  return result;
+}
+export async function deleteProductAction(input:ProductDeleteInput):Promise<ProductDeleteResult>{return deleteProduct(input);}
 export async function changeProductStatus(
   productId: string, toStatus: ProductStatus, comment?: string,
 ): Promise<{ ok: boolean; error?: string; financeState?: FinanceState }> {
