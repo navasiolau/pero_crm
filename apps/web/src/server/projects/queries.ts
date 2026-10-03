@@ -1,3 +1,4 @@
+import {maskProductionRead} from "@/server/access/production-read-projection";
 import { projectTotal as calculateProjectTotal } from "@/lib/product-quantity";
 import type { Prisma, ProjectStage, Role } from "@prisma/client";
 
@@ -241,7 +242,7 @@ export async function getProjectFor(
         where: productVisibilityWhere(actor),
         include: {
           engineer: { select: { id: true, name: true } },
-          files: { where: { fileName: { endsWith: ".b3d", mode: "insensitive" } }, select: { id: true }, take: 1 },
+          files: { where: { AND:[fileVisibilityWhere(actor),{ fileName: { endsWith: ".b3d", mode: "insensitive" } }] }, select: { id: true }, take: 1 },
           sketchFile: productSketchProjection(actor),
           percentageConfigs: { where: { kind: "ENGINEERING" }, select: { participants: { where: { userId: actor.id }, select: { id: true } } } },
           statusHistory: options.includeHistory === false ? false : { orderBy: { createdAt: "desc" } },
@@ -279,7 +280,7 @@ export async function getProjectFor(
     },
   });
   if (!project) return null;
-  return scopedProjectAmounts({ ...project, communications: project.communications ?? [], products: project.products.map((product) => ({
+  return scopedProjectAmounts({ ...project, communications: project.communications ?? [], products: (await maskProductionRead(prisma,actor,project.products)).map((product) => ({
     ...product, statusHistory: product.statusHistory ?? [], hasB3d: product.files.length > 0,
     isEngineeringParticipant: product.percentageConfigs.some((config) => config.participants.length > 0) ||
       actor.engineeringParticipantProductIds?.includes(product.id) === true,

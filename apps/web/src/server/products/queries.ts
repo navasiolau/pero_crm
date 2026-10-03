@@ -1,3 +1,4 @@
+import {maskProductionRead} from "@/server/access/production-read-projection";
 import type { Prisma, ProductStatus, Role } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
@@ -139,7 +140,7 @@ async function fetchProductRows(
       engineer: { select: { id: true, name: true } },
       mounter: { select: { id: true, name: true } },
       assembler: { select: { id: true, name: true } },
-      files: { where: { fileName: { endsWith: ".b3d", mode: "insensitive" } }, select: { id: true }, take: 1 },
+      files: { where: { AND:[fileVisibilityWhere(actor),{ fileName: { endsWith: ".b3d", mode: "insensitive" } }] }, select: { id: true }, take: 1 },
       sketchFile: productSketchProjection(actor),
       percentageConfigs: { where: { kind: "ENGINEERING" }, select: { participants: { where: { userId: actor.id }, select: { id: true } } } },
       project: {
@@ -156,7 +157,7 @@ async function fetchProductRows(
     skip,
     take,
   });
-  return rows.map((row) => ({ ...row, hasB3d: row.files.length > 0,
+  return (await maskProductionRead(prisma,actor,rows)).map((row) => ({ ...row, hasB3d: row.files.length > 0,
     isEngineeringParticipant: row.percentageConfigs.some((config) => config.participants.length > 0) ||
       actor.engineeringParticipantProductIds?.includes(row.id) === true }));
 }
@@ -288,5 +289,5 @@ export async function getProductFor(
       files: { where: fileVisibilityWhere(actor), orderBy: { createdAt: "desc" } },
     },
   });
-  return product;
+  return product ? (await maskProductionRead(prisma,actor,[product]))[0] : null;
 }
