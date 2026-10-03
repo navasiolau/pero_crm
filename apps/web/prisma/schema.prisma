@@ -428,6 +428,7 @@ model Work {
   title         String
   quantity      Decimal   @db.Decimal(10, 2)
   quantityPerUnit Decimal? @db.Decimal(10, 2) // норма на одно изделие; quantity — на партию
+  unitSnapshot String? // server tariff unit; legacy NULL is preserved
   priceSnapshot Decimal?  @db.Decimal(12, 2) // цена на момент назначения
   total         Decimal?  @db.Decimal(12, 2) // priceSnapshot × quantity
   paymentKind   WorkPaymentKind @default(LEGACY)

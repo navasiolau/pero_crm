@@ -1,4 +1,4 @@
-import {maskProductionRead} from "@/server/access/production-read-projection";
+import {maskProductionRead,maskProductionWorkRead} from "@/server/access/production-read-projection";
 import { projectTotal as calculateProjectTotal } from "@/lib/product-quantity";
 import type { Prisma, ProjectStage, Role } from "@prisma/client";
 
@@ -280,7 +280,7 @@ export async function getProjectFor(
     },
   });
   if (!project) return null;
-  return scopedProjectAmounts({ ...project, communications: project.communications ?? [], products: (await maskProductionRead(prisma,actor,project.products)).map((product) => ({
+  return scopedProjectAmounts({ ...project, works:await maskProductionWorkRead(prisma,actor,project.works),communications: project.communications ?? [], products: (await maskProductionRead(prisma,actor,project.products)).map((product) => ({
     ...product, statusHistory: product.statusHistory ?? [], hasB3d: product.files.length > 0,
     isEngineeringParticipant: product.percentageConfigs.some((config) => config.participants.length > 0) ||
       actor.engineeringParticipantProductIds?.includes(product.id) === true,

@@ -50,6 +50,7 @@ export interface WorkRow {
   title: string;
   quantity: string;
   quantityPerUnit?: string | null;
+  unitSnapshot?: string|null;
   allocated: string;
   priceSnapshot: string | null;
   total: string | null;
@@ -87,6 +88,7 @@ export function TasksTab({
   works,
   priceItems,
   canManage,
+  canAddWork=canManage,
   workers,
 }: {
   projectId: string;
@@ -97,6 +99,7 @@ export function TasksTab({
   works: WorkRow[];
   priceItems: PriceOption[];
   canManage: boolean;
+  canAddWork?:boolean;
   workers: SelectOption[];
 }) {
   const router = useRouter();
@@ -126,9 +129,9 @@ export function TasksTab({
       <div className="flex flex-col gap-2">
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-medium">
-            {hasPercentageSource ? "Сдельные работы" : "Работы"}{pieceWorks.length ? ` · итого ${formatAmount(worksTotal, "BYN")}` : ""}
+            {hasPercentageSource ? "Сдельные работы" : "Работы"}{pieceWorks.length && pieceWorks.every(work=>work.total!==null) ? ` · итого ${formatAmount(worksTotal, "BYN")}` : ""}
           </h3>
-          {canManage ? (
+          {canAddWork ? (
             <Button size="sm" variant="outline" onClick={() => setWorkOpen(true)}>
               <Plus className="size-4" /> Работа
             </Button>
@@ -142,7 +145,7 @@ export function TasksTab({
               className="flex flex-wrap items-center gap-3 rounded-xl border px-3 py-2 text-sm"
             >
               <span className="flex-1">
-                {work.title}
+                {work.title}{work.unitSnapshot ? ` · ${work.unitSnapshot}` : ""}
                 {isPositiveQuantity(remaining) ? (
                   <Badge variant="secondary" className="ml-2">
                     свободно {remaining} из {work.quantity}

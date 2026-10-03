@@ -1,4 +1,4 @@
-import {maskProductionRead} from "@/server/access/production-read-projection";
+import {maskProductionRead,maskProductionWorkRead} from "@/server/access/production-read-projection";
 import type { Prisma, ProductStatus, Role } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
@@ -289,5 +289,6 @@ export async function getProductFor(
       files: { where: fileVisibilityWhere(actor), orderBy: { createdAt: "desc" } },
     },
   });
-  return product ? (await maskProductionRead(prisma,actor,[product]))[0] : null;
+  if(!product)return null;
+  return (await maskProductionRead(prisma,actor,[{...product,works:await maskProductionWorkRead(prisma,actor,product.works)}]))[0];
 }

@@ -1,3 +1,5 @@
+import {canAddProductWork} from "@/server/works/access";
+import {listWorkPriceOptions} from "@/server/works/queries";
 import { notFound, redirect } from "next/navigation";
 import { TriangleAlert } from "lucide-react";
 
@@ -50,6 +52,7 @@ export default async function ProductPage({
   const canManage = hasAnyRole(role, MANAGER_ROLES);
   const canViewAllPercentage = canManage || hasAnyRole(role, FINANCE_ROLES);
   const canEditTech = canEditProductTechnicalBlock(actor, product);
+  const canAddWork=canAddProductWork(role,product.status);
   const showAmount = hasAnyRole(role, OFFICE_ROLES);
   const showMaterials = hasAnyRole(role, OFFICE_ROLES);
   const showMoney = hasAnyRole(role, WAREHOUSE_MONEY_ROLES);
@@ -63,10 +66,7 @@ export default async function ProductPage({
       canManage ? listClients(actor) : Promise.resolve([]),
       listWorkers(),
       listEngineers(),
-      prisma.priceItem.findMany({
-        where: { active: true },
-        orderBy: { name: "asc" },
-      }),
+      listWorkPriceOptions(actor,product.id),
       showMaterials ? getProjectMaterials(product.id, session.user) : Promise.resolve(null),
       showMaterials && canManage ? listMaterialOptions(session.user) : Promise.resolve([]),
       getProductPercentageView({ id: session.user.id, roles: role }, product.id),
@@ -140,6 +140,7 @@ export default async function ProductPage({
               title: work.title,
               quantity: work.quantity.toString(),
               quantityPerUnit: work.quantityPerUnit?.toString() ?? null,
+              unitSnapshot:work.unitSnapshot,
               allocated: allocatedWorkQuantity(work.tasks),
               priceSnapshot: work.priceSnapshot?.toString() ?? null,
               total: work.total?.toString() ?? null,
@@ -148,6 +149,7 @@ export default async function ProductPage({
                 ? { id: work.tasks[0].id, title: work.tasks[0].title, status: work.tasks[0].status }
                 : null,
             }))}
+            canAddWork={canAddWork}
             priceItems={priceItems.map((item) => ({
               id: item.id,
               name: item.name,

@@ -38,8 +38,9 @@ before(() => {
     project: { findUnique: async () => ({ id: "j", number: "900001", currency: "BYN" }) },
     orgSetting: { findUnique: async () => ({ value: "BYN" }) },
     task: { findMany: async () => [] },
+    user:{findUnique:async()=>({id:"manager",name:"QA",active:true,roles})},
     changeLog: { create: async () => ({}) },
-    priceItem: { findUnique: async () => ({ id: "price", name: "Сборка", price: "30", active: true }) },
+    priceItem: { findUnique: async () => ({ id: "price", name: "Сборка", unit:"шт.",price: "30", active: true }) },
     work: {
       findMany: async () => [structuredClone(state.work)],
       update: async ({ data }: { data: Record<string, unknown> }) => Object.assign(state.work, data),
