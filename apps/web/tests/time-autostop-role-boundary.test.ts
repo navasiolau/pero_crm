@@ -9,6 +9,7 @@ let actor:{id:string;roles:Role[]}|null={id:'actor',roles:['ACCOUNTANT']};let ro
 const db={task:{findMany:async()=>{order.push('resolve');return [];}},productPercentageParticipant:{findMany:async()=>[]},timeEntry:{updateMany:async({where,data}:{where:FixtureRow;data:FixtureRow})=>{order.push('update');updates.push(where);const eligible=rows.filter(row=>matches(row,where));for(const row of eligible)Object.assign(row,data);written+=eligible.length;return {count:eligible.length};},findFirst:async({where}:{where:FixtureRow})=>rows.find(row=>matches(row,where))??null}};
 inject('../src/auth',{auth:async()=>actor?{user:actor}:null});inject('../src/lib/prisma',{prisma:db});inject('next/cache',{revalidatePath:()=>{}});inject('../src/server/plugins/changelog',{writeChangeLog:async()=>{}});
 const {getActiveTimer}=require('../src/server/time/actions') as typeof import('../src/server/time/actions');
+const {taskExecutionWhere}=require('../src/server/access/visibility') as typeof import('../src/server/access/visibility');
 function fixture(roles:Role[],status='PRODUCTION'){
  actor={id:'actor',roles};written=0;updates.length=0;order.length=0;
  const task=(id:string,assigneeId='actor',deleted=false)=>({id,assigneeId,productId:'product',project:{id:'project',deletedAt:deleted?new Date():null},product:{id:'product',projectId:'project',engineerId:'actor',status,deletedAt:null,project:{deletedAt:null}}});
@@ -17,6 +18,17 @@ function fixture(roles:Role[],status='PRODUCTION'){
 }
 test('finance-only ACCOUNTANT and readonly PROCUREMENT inherited expired timers cannot mutate or reveal ordinary task',async()=>{
  for(const role of ['ACCOUNTANT','PROCUREMENT'] as Role[]){fixture([role]);const before=structuredClone(rows);assert.equal(await getActiveTimer(),null,role);assert.equal(written,0,role);assert.deepEqual(rows,before,role);assert.ok(updates.every(where=>'task' in where),'autostop must carry current task scope');}
+});
+test('denied execution uses an explicit impossible ID predicate inside real timer relation filters',async()=>{
+ for(const role of ['ACCOUNTANT','PROCUREMENT'] as Role[]){
+  fixture([role]);
+  const scope=taskExecutionWhere({id:'actor',roles:[role]});
+  assert.deepEqual((scope.AND as FixtureRow[])[1],{id:{in:[]}},role);
+  await getActiveTimer();
+  assert.ok(updates.length>0);
+  for(const where of updates)assert.deepEqual(((where.task as FixtureRow).AND as FixtureRow[])[1],{id:{in:[]}},role);
+  assert.equal(rows.find(row=>row.id==='fresh-own')?.stoppedAt,null);
+ }
 });
 test('allowed worker timeout is limited to own live executable task; resolved scope precedes update',async()=>{
  fixture(['WORKER']);const result=await getActiveTimer();assert.equal(result?.id,'fresh-own');assert.equal(written,1);assert.equal(rows[0].minutes,720);assert.equal(rows[0].autoStopped,true);assert.ok(rows[0].stoppedAt instanceof Date);assert.equal(rows[2].stoppedAt,null);assert.equal(rows[3].stoppedAt,null);assert.ok(order.indexOf('resolve')<order.indexOf('update'),'visibility must resolve before autostop');

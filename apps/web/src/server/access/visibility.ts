@@ -143,7 +143,7 @@ function taskExecutionWhereGrants(actor: VisibilityActor): Prisma.TaskWhereInput
     { productId: null, project: projectVisibilityWhere(actor) },
   ] });
   if (hasRole(actor.roles, "ENGINEER")) grants.push({ assigneeId: actor.id, product: { engineerId: actor.id, status: "DESIGN" } });
-  return { OR: grants };
+  return grants.length ? { OR: grants } : { id: { in: [] } };
 }
 
 function assignedWorkVisibilityWhereGrants(actor: VisibilityActor): Prisma.WorkWhereInput {

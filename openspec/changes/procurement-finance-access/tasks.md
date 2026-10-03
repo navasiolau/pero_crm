@@ -10,6 +10,7 @@
 - [x] 2.3 Уведомления/privacy и legacy advance grants согласовать, проверить role combinations.
 
 - [x] 2.4 Проверить текущий execution scope до автостопа getActiveTimer и ограничить TimeEntry live task predicate. RED4→GREEN4: finance/readonly без записи, worker/combo сохраняют timeout, stale assignment/deleted parent исключены.
+- [x] 2.5 Для отсутствующих execution grants использовать явный невозможный id in [], включая nested relation автостопа; focused RED4/5→GREEN5/5. Actual Prisma staging regression повторяет координатор, без изменения запрещённого finance grant.
 
 ## 3. Validation
 - [x] 3.1 Focused/regression tests, TSC/scoped lint и strict OpenSpec validate.
