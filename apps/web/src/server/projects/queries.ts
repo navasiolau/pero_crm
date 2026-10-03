@@ -12,6 +12,7 @@ import { STAGES } from "@/lib/stages";
 import { taskDetailsIncludeFor } from "@/server/tasks/queries";
 import { listProjectShortages } from "@/server/warehouse/queries";
 import { productSketchProjection } from "@/server/products/sketch-projection";
+import { projectCoverProjection } from "./cover-projection";
 import { clientVisibilityWhere, engineeringParticipantProductIds, fileVisibilityWhere, hasFullProjectVisibility, productVisibilityWhere, projectVisibilityWhere, resolveVisibilityActor, taskVisibilityWhere, workVisibilityWhere, type VisibilityActor } from "@/server/access/visibility";
 
 function scopedProjectAmounts<T extends { initialPrice: unknown; delivery: unknown; unloading: unknown; installation: unknown }>(project: T, actor: VisibilityActor) {
@@ -231,6 +232,7 @@ export async function getProjectFor(
   const project = await prisma.project.findFirst({
     where: { AND: [{ id: projectId }, projectVisibilityWhere(actor)] },
     include: {
+      coverFile: projectCoverProjection(actor),
       client: true,
       manager: { select: { id: true, name: true } },
       products: {

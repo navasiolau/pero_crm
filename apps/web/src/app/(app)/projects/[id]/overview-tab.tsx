@@ -9,9 +9,12 @@ import type { ProductClientContact } from "@/lib/product-client-contacts";
 import { ProjectInlineContacts, ProjectConfirmedTotal } from "@/components/project-inline-fields";
 import { formatDateTime } from "@/lib/format";
 import type { SelectOption } from "../projects-view";
+import {ProjectCover} from "@/components/project-cover";
+import type {ProjectCoverPreview} from "@/server/projects/cover-contract";
 export interface OverviewProject {
  id:string;number:string;stage:ProjectStage;stageChangedAt:Date;currency:string;createdAt:Date;
  refusalReason:string|null;refusalComment:string|null;reclamationReason:string|null;reclamationDescription:string|null;reclamationFault:string|null;
+ coverFile?:ProjectCoverPreview|null;
 }
 export function OverviewTab({project,createdByName,canManage,showAmount,clients,managers,productEngineers,doneAt}:{project:OverviewProject;createdByName:string|null;canManage:boolean;showAmount:boolean;clients:ProductClientContact[];managers:SelectOption[];productEngineers:SelectOption[];doneAt:string|null}) {
  const inline=useProjectInline();const {controller}=inline;
@@ -22,7 +25,7 @@ export function OverviewTab({project,createdByName,canManage,showAmount,clients,
  <InlineSelectField id="project-inline-manager" label="Менеджер" controller={controller("managerId")} readOnly={!canManage} options={managers.map(manager=>({value:manager.id,label:manager.name}))} allowClear/>
  <div className="flex min-w-0 flex-col gap-1.5"><Label>Инженеры назначенные в Изделиях</Label><div aria-readonly="true" className="min-h-9 min-w-0 break-words rounded-md border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">{productEngineers.length?productEngineers.map(engineer=>engineer.name).join(" · "):"—"}</div></div>
  {showAmount?<div className="grid min-w-0 gap-3 sm:grid-cols-3">{(["delivery","unloading","installation"] as const).map((field,index)=><InlineTextField key={field} id={`project-inline-${field}`} label={`${["Доставка","Выгрузка","Монтаж"][index]}, ${project.currency}`} inputMode="decimal" controller={controller(field)} readOnly={!canManage||project.currency!=="BYN"}/>)}</div>:null}
- </CardContent></Card><Card className="min-w-0"><CardHeader><CardTitle className="text-lg">Сведения</CardTitle></CardHeader><CardContent className="min-w-0 space-y-3 text-sm">
+ </CardContent></Card><ProjectCover projectId={project.id} cover={project.coverFile??null} canManage={canManage} beforeMutation={inline.flush} registerGuard={inline.registerGuard}/><Card className="min-w-0"><CardHeader><CardTitle className="text-lg">Сведения</CardTitle></CardHeader><CardContent className="min-w-0 space-y-3 text-sm">
  {showAmount?<ProjectConfirmedTotal/>:null}
  <p className="break-words text-muted-foreground">Создан: {formatDateTime(project.createdAt)}{createdByName?` · ${createdByName}`:""}</p>
  {doneAt?<p className="break-words text-muted-foreground">Завершён: {formatDateTime(doneAt)}</p>:null}

@@ -206,6 +206,8 @@ model Project {
   tasks                  Task[]
   works                  Work[]
   files                  File[]
+  coverFileId            String? @unique
+  coverFile              File? @relation("ProjectCover", fields: [coverFileId], references: [id], onDelete: SetNull)
   communications         Communication[]
   payments               Payment[]
   stageSettlements       ProductStageSettlement[]
@@ -901,6 +903,7 @@ model File {
   legacyTable  String?
   createdAt    DateTime     @default(now())
   sketchForProduct Product?  @relation("ProductSketch")
+  coverForProject Project? @relation("ProjectCover")
 
   @@index([projectId, category])
   @@index([projectId, stage])
