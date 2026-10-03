@@ -65,7 +65,7 @@ export function useListParams() {
   const get = useCallback((key: string) => new URLSearchParams(snapshot.query).get(key) ?? "", [snapshot.query]);
   const set = useCallback((updates: Record<string, string | null>) => controller.set(updates), [controller]);
   const reset = useCallback(() => controller.reset(), [controller]);
-  return { get, set, reset, pending: snapshot.pending || navigating, revision: snapshot.revision, searchRevision: snapshot.searchRevision, canReset: snapshot.query !== DEFAULT_LIST_QUERY };
+  return { get, set, reset, query: snapshot.query, pending: snapshot.pending || navigating, revision: snapshot.revision, searchRevision: snapshot.searchRevision, canReset: snapshot.query !== DEFAULT_LIST_QUERY };
 }
 
 // Таймер появляется только вследствие ввода, эффекты синхронизации не пишут URL.

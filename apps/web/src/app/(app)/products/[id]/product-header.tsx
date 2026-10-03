@@ -2,6 +2,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { resolveProductReturn } from "@/lib/product-return-navigation";
 import { ArrowLeft, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import type { ProductStatus, Role } from "@prisma/client";
@@ -63,9 +64,10 @@ export function ProductHeader({
     toast.success(result.financeState === "PENDING_FX" ? `Статус сохранён: ${productStatusLabels[toStatus]}. Расчёт ожидает курса.` : `Статус: ${productStatusLabels[toStatus]}`);
     router.refresh();
   }
+  const returnDestination = resolveProductReturn(backHref, product.projectId);
   return <div className="flex min-w-0 flex-wrap items-start gap-2">
     <div className="flex min-w-0 flex-wrap items-center gap-2">
-    <Link href={backHref ?? `/projects/${product.projectId}`} aria-label="Назад к проекту" className="inline-flex size-10 shrink-0 items-center justify-center rounded-md hover:bg-muted"><ArrowLeft className="size-4" /></Link>
+    <Link href={returnDestination.href} aria-label={returnDestination.label} className="inline-flex size-10 shrink-0 items-center justify-center rounded-md hover:bg-muted"><ArrowLeft className="size-4" /></Link>
     <span className="shrink-0 text-sm text-muted-foreground">{product.number}</span>
     <Badge variant="outline" className={cn("border-transparent", productStatusStyles[localStatus].badge)}>{productStatusLabels[localStatus]}</Badge>
     </div>
@@ -79,7 +81,7 @@ export function ProductHeader({
     {canManage ? <Button variant="outline" size="sm" onClick={() => setDeleteOpen(true)}><Trash2 className="size-4" /> Удалить</Button> : null}
     </div>
     <ConfirmDeleteDialog entityLabel={`изделие «${product.number} · ${product.title}»`} open={deleteOpen} onOpenChange={setDeleteOpen} warning="Нельзя удалить, пока к изделию привязаны задачи, работы или материалы. Файлы останутся в проекте." onConfirm={async () => {
-      const result = await deleteProduct(product.id); if (result.ok) { toast.success("Изделие удалено"); router.push(`/projects/${product.projectId}`); return true; } toast.error(result.error ?? "Ошибка удаления"); return false;
+      const result = await deleteProduct(product.id); if (result.ok) { toast.success("Изделие удалено"); router.push(returnDestination.href); return true; } toast.error(result.error ?? "Ошибка удаления"); return false;
     }} />
   </div>;
 }
