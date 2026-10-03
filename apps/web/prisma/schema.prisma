@@ -296,8 +296,6 @@ model Product {
   @@index([engineerId])
   @@index([mounterId])
   @@index([assemblerId])
-  finishRevision Int @default(0)
-  finishAssignments ProductFinishAssignment[]
 
 }
 
@@ -1109,58 +1107,10 @@ model CalendarEntry {
   @@index([ownerId,startsAt])
   @@index([reminderNamespace,startsAt])
 }
-// Независимый справочник отделок; Product snapshots и catalogue-media добавляются отдельно.
-enum FinishKind {
-  ENAMEL
-  VENEER
-  COATING
-}
-model Finish {
-  id        String     @id @default(uuid()) @db.Uuid
-  kind      FinishKind
-  name      String
-  code      String
-  color     String
-  active    Boolean    @default(true)
-  revision  Int        @default(0)
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
 
-  @@unique([kind, code])
-  @@index([active, kind])
-  productAssignments ProductFinishAssignment[]
 
-  sampleAssetId String? @db.Uuid
-  sampleAsset CatalogueMediaAsset? @relation("CurrentFinishSample", fields: [sampleAssetId, id], references: [id, finishId], onDelete: Restrict, onUpdate: NoAction)
-  catalogueAssets CatalogueMediaAsset[] @relation("FinishAssetOwner")
 
-  @@index([sampleAssetId])
 
-}
-
-model ProductFinishAssignment {
-  id              String @id @default(uuid()) @db.Uuid
-  productId       String
-  product         Product @relation(fields: [productId], references: [id], onDelete: Restrict)
-  element         String
-  elementKey      String
-  finishId        String @db.Uuid
-  finish          Finish @relation(fields: [finishId], references: [id], onDelete: Restrict)
-  finishKind      FinishKind
-  finishName      String
-  finishCode      String
-  finishColor     String
-  catalogRevision Int
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  @@unique([productId, elementKey])
-  @@index([finishId])
-  sampleAssetId String? @db.Uuid
-  sampleAsset CatalogueMediaAsset? @relation("AssignmentSample", fields: [sampleAssetId, finishId], references: [id, finishId], onDelete: Restrict, onUpdate: NoAction)
-
-  @@index([sampleAssetId])
-
-}
 enum CalendarReminderWebState {
  DELIVERED
  SKIPPED
@@ -1221,24 +1171,4 @@ model TelegramReminderOutbox {
  updatedAt DateTime @updatedAt
  @@unique([namespace,factId])
  @@index([namespace,state,retryAt])
-}
-
-// Отдельный catalogue-media asset: ни Project, ни File не создаются.
-model CatalogueMediaAsset {
-  id           String @id @db.Uuid
-  finishId     String @db.Uuid
-  finish       Finish @relation("FinishAssetOwner", fields: [finishId], references: [id], onDelete: Restrict)
-  fileName     String
-  mimeType     String
-  size         Int
-  originalHash String
-  storageKey   String @unique
-  uploadedById String
-  createdAt    DateTime @default(now())
-  retiredAt    DateTime?
-  deletedAt    DateTime?
-  currentFinishes Finish[] @relation("CurrentFinishSample")
-  assignmentSnapshots ProductFinishAssignment[] @relation("AssignmentSample")
-  @@unique([id, finishId])
-  @@index([finishId, retiredAt])
 }

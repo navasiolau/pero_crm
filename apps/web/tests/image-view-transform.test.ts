@@ -64,10 +64,7 @@ test("закрытие размонтирует изображение; file, sc
     return image;
   }
   const regular = viewport(file);
-  const catalogue = viewport({...file,scope:"catalogue-media"});
   assert.equal(regular.props.src,"/api/files/sample/id");
-  assert.equal(catalogue.props.src,"/api/catalogue-media/sample%2Fid");
-  assert.notEqual(regular.key,catalogue.key);
   assert.notEqual(regular.key,viewport({...file,id:"another-image"}).key);
   assert.notEqual(regular.key,viewport(file,"cover-fullscreen").key);
   assert.equal(regular.key,viewport({...file}).key);

@@ -92,9 +92,3 @@ export async function s3Delete(key: string): Promise<void> {
     new DeleteObjectCommand({ Bucket: process.env.S3_BUCKET, Key: key }),
   );
 }
-
-// Каталожный original никогда не перезаписывается повторным запросом.
-export async function s3PutIfAbsent(key:string,body:Buffer,contentType:string){
-  await s3().send(new PutObjectCommand({Bucket:process.env.S3_BUCKET,Key:key,Body:body,ContentType:contentType,IfNoneMatch:"*"}));
-}
-export async function s3DeleteScoped(key:string,signal:AbortSignal){await s3().send(new DeleteObjectCommand({Bucket:process.env.S3_BUCKET,Key:key}),{abortSignal:signal});}

@@ -1,14 +1,17 @@
 # Tasks
-## 1. Контракт
-- [x] 1.1 FF/apply strict beforecode, reservedmigration/ACLscope.
-- [x] 1.2 RED→GREEN create/duplicate/read/writeACL/CAS/deactivation tests.
-## 2. Реализация
-- [x] 2.1 Finish schema+core atomic audit/CAS/queries/action, withoutProduct/storage.
-- [x] 2.2 Actual DataTable/dialog /finishes rolegatednav/page, SSR tests.
-- [x] 2.3 Buildonly native outerrollback source+fingerprints; typecheck/lint/tests.
-## 3. Приёмка
-- [ ] 3.1 Root existingDB migration+nativefunctional/staging beforeclaimruntime.
 
-Local proof: initialRED missingcoremodule (не заявляется runtime RED); GREEN7 cases actualcore create/duplicate/CAS/activity/atomicrollback/readonly +SSR roles/nav. PrivateownschemaPrismagenerate и nativebundle BUILDONLY(noDBExecuted); native existingtargetguard/dynamic public-table/schema fingerprints/SAVEPOINT/outerROLLBACK реализованы, но не запускались. Root3.1 остаётся pending, безstorage/Productassignment claims.
+## 1. Owner cancellation boundary
+- [x] 1.1 Пересогласовать existing finish-catalog на полное active removal72–74; historical artifacts/migrations сохранить.
+- [x] 1.2 Coordinator actual readonly counts/references; автор только guarded DDL source после подтверждения boundary.
 
-090 rename: ownreserved migration20261003090000_finish_catalog. Native rebuildonly22739B sha5247da72e875f91fabf0b197847d72d520f1ca23f8a3d943100fcae4ccbea3ab;7catalogtests+2dynamicfingerprintguardsPASS. Canonicaltargetguard unchanged; noSQLexecuted.
+## 2. Source removal
+- [x] 2.1 Удалить catalogue/assignment/sample UI/routes/domain/types/controllers/queries/nav и active feature-specific QA/tests.
+- [x] 2.2 Prisma models/relations/enum/technical column удалить; новая guarded migration без CASCADE, не менять applied historical SQL.
+- [x] 2.3 Meaningful nav/ordinaryFile/permission regressions, own generatedclient/TSC/scopedlint/whole source checks, freeze.
+
+## 3. Coordinator acceptance
+- [ ] 3.1 Ordinary merge preserving47/Task69/journal58; CI + actual deployed revision/nav absence/direct404/schema proof. Source worker не выполняет DB/runtime/Git.
+
+Historical original implementation/native evidence остаётся в прошлых receipts/tasks73–74; это отмена, не переименование прежних PASS/STOP.
+
+Source evidence: actual coordinator readonly0211 confirms three tables empty, no external inbound FK, Product.finishRevision all0. New150 migration repeats empty guards under table locks and uses no CASCADE. Nav RED1→GREEN1; retained ordinary viewer/single-page focused14/14 PASS; scoped lint0/0. Coordinator generated own current Prisma client; full TSC exit0 PASS (.playwright-mcp/finish-removal-final-tsc.private.log). Two obsolete schema comments removed; no further behavior changes. No author DB/storage/runtime actions.
