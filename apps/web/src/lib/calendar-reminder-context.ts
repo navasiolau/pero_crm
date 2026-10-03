@@ -5,7 +5,10 @@ export function resolveReminderContext(env:Record<string,string|undefined>,runti
  if(!environment&&!namespace&&env.CALENDAR_REMINDERS_ENABLED!=='true'&&!env.CALENDAR_REMINDER_TEST_OWNER_IDS)return null;
  const stop=(condition:unknown)=>{if(!condition)throw new Error('CALENDAR_REMINDER_CONTEXT_INVALID');};
  stop(['local','staging','production'].includes(environment??''));stop(env.CALENDAR_REMINDERS_ENABLED===undefined||['true','false'].includes(env.CALENDAR_REMINDERS_ENABLED));
- const origin=new URL(env.AUTH_URL??env.NEXTAUTH_URL??'');stop(!origin.username&&!origin.password&&!origin.search&&!origin.hash&&(origin.pathname==='/'||origin.pathname===''));
+ // Отдельный origin напоминаний не меняет настройки авторизации приложения.
+ const originValue=[env.CALENDAR_REMINDERS_PUBLIC_ORIGIN,env.AUTH_URL,env.NEXTAUTH_URL].map(value=>value?.trim()).find(value=>value);
+ let origin:URL;try{origin=new URL(originValue??'');}catch{throw new Error('CALENDAR_REMINDER_CONTEXT_INVALID');}
+ stop(!origin.username&&!origin.password&&!origin.search&&!origin.hash&&(origin.pathname==='/'||origin.pathname===''));
  const db=new URL(env.DATABASE_URL??'');stop(db.protocol==='postgresql:'&&!db.hash&&(!db.searchParams.has('schema')||db.searchParams.get('schema')==='public'));
  let testOwnerIds:string[]=[];
  if(environment==='production'){

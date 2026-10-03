@@ -27,3 +27,12 @@ The system SHALL выполнять bounded60s reminder job в существу�
 #### Scenario: Invalid environment
 - **WHEN** worker запускается без принятого environment context
 - **THEN** query/delivery не выполняется и внешние уведомления не отправляются
+
+### Requirement: Dedicated validated reminder origin
+The system MUST выбирать первый непустой CALENDAR_REMINDERS_PUBLIC_ORIGIN, AUTH_URL, NEXTAUTH_URL для проверки reminder environment, без автоматического адреса и без изменения auth/CSRF.
+#### Scenario: Both auth aliases absent
+- **WHEN** оба auth alias отсутствуют и dedicated reminder origin явно совпадает с staging environment
+- **THEN** reminder context проходит остальные обязательные DB/S3/runtime/owner guards
+#### Scenario: Empty aliases and invalid explicit origin
+- **WHEN** более приоритетный alias пуст, resolver использует следующий непустой; если выбранный origin unsafe или не совпадает environment
+- **THEN** unsafe context отклоняется без менее приоритетного обхода
