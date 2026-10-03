@@ -17,7 +17,7 @@
 - `procurement-finance-access`: отдельная supply/finance роль и изоляция operational/financial прав.
 
 ### Modified Capabilities
-Нет.
+- `engineer-product-access`: полное требование «Объединение прав ролей» согласуется с Finance-only ACCOUNTANT и независимыми PROCUREMENT/office/warehouse grants; прежний WORKER/MOUNTER доступ по назначениям сохраняется.
 
 ## Impact
 
