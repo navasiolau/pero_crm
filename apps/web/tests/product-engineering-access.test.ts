@@ -49,8 +49,9 @@ test("participant predicates remain DESIGN scoped; independent manager and field
 
 test("legacy ENGINEERING recipient facts remain readable but no new split is offered", () => {
   const product = { engineerId: "primary", status: "DESIGN" as const };
-  assert.equal(engineeringRecipientError({ id: "u", roles: [], active: true }, product), null);
-  assert.equal(engineeringRecipientError({ id: "u", roles: ["ACCOUNTANT"], active: true }, product), null);
+  assert.notEqual(engineeringRecipientError({ id: "u", roles: [], active: true }, product), null);
+  assert.notEqual(engineeringRecipientError({ id: "u", roles: ["ACCOUNTANT"], active: true }, product), null);
+  assert.equal(engineeringRecipientError({ id: "u", roles: ["WORKER"], active: true }, product), null);
   assert.match(engineeringRecipientError({ id: "u", roles: [], active: false }, product) ?? "", /неактивен/);
   assert.equal(canSplitTask({ id: "u", roles: [] }, { assigneeId: "u", status: "NEW", product, paidCount: 0, work: { paymentKind: "ENGINEERING" } }), false);
   assert.equal(canSplitTask({ id: "u", roles: [] }, { assigneeId: "u", status: "DONE", product, paidCount: 0, work: { paymentKind: "ENGINEERING" } }), false);

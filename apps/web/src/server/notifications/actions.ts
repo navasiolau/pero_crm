@@ -6,6 +6,8 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { scopeNotificationContent } from "@/server/access/notification-visibility";
 
+import {NOTIFICATION_TYPES} from "./notify";
+import {canReceiveNotificationContent} from "@/lib/notification-access";
 import { receivableTypesFor } from "./notify";
 
 const NOTIFICATIONS_PAGE_SIZE = 20;
@@ -18,12 +20,12 @@ export async function getBellData() {
   if (!session?.user) throw new Error("Не авторизован");
   const [items, unread] = await Promise.all([
     prisma.notification.findMany({
-      where: { userId: session.user.id },
+      where: { userId: session.user.id,type:{in:NOTIFICATION_TYPES.filter(type=>canReceiveNotificationContent(session.user.roles,type.id)).map(type=>type.id)} },
       orderBy: { createdAt: "desc" },
       take: 10,
     }),
     prisma.notification.count({
-      where: { userId: session.user.id, readAt: null },
+      where: { userId: session.user.id, readAt: null,type:{in:NOTIFICATION_TYPES.filter(type=>canReceiveNotificationContent(session.user.roles,type.id)).map(type=>type.id)} },
     }),
   ]);
   const visibleItems = await scopeNotificationContent(session.user, items, prisma);
@@ -47,7 +49,7 @@ export async function listMyNotifications(page: number) {
   const safePage = Number.isFinite(page) && page >= 1 ? Math.floor(page) : 1;
   const [items, total] = await Promise.all([
     prisma.notification.findMany({
-      where: { userId: session.user.id },
+      where: { userId: session.user.id,type:{in:NOTIFICATION_TYPES.filter(type=>canReceiveNotificationContent(session.user.roles,type.id)).map(type=>type.id)} },
       orderBy: { createdAt: "desc" },
       take: NOTIFICATIONS_PAGE_SIZE,
       skip: (safePage - 1) * NOTIFICATIONS_PAGE_SIZE,
@@ -75,7 +77,7 @@ export async function markAllRead(): Promise<{ ok: boolean }> {
   const session = await auth();
   if (!session?.user) throw new Error("Не авторизован");
   await prisma.notification.updateMany({
-    where: { userId: session.user.id, readAt: null },
+    where: { userId: session.user.id, readAt: null,type:{in:NOTIFICATION_TYPES.filter(type=>canReceiveNotificationContent(session.user.roles,type.id)).map(type=>type.id)} },
     data: { readAt: new Date() },
   });
   revalidatePath("/notifications");
@@ -100,7 +102,7 @@ export async function getMyPreferences() {
   if (!session?.user) throw new Error("Не авторизован");
 
   const rows = await prisma.notificationPreference.findMany({
-    where: { userId: session.user.id },
+    where: { userId: session.user.id,type:{in:NOTIFICATION_TYPES.filter(type=>canReceiveNotificationContent(session.user.roles,type.id)).map(type=>type.id)} },
   });
   const map = new Map(rows.map((r) => [r.type, r.enabled]));
   return {

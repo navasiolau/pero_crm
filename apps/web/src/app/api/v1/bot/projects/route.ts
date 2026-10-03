@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 
+import { hasAnyRole, MANAGER_ROLES } from "@/lib/roles";
+import { listFinanceProjectRefs } from "@/server/finance/project-refs";
 import { prisma } from "@/lib/prisma";
 
 import { authenticate, isErrorResponse } from "@/server/api/auth";
@@ -18,10 +20,13 @@ export async function GET(request: Request) {
   if (isErrorResponse(auth)) return auth;
   const actor = await resolveBotActor(request);
   if (isActorError(actor)) return actor;
-  const gate = requireBotManager(actor);
-  if (gate) return gate;
-
   const q = new URL(request.url).searchParams.get("q")?.trim() ?? "";
+  if (!hasAnyRole(actor.roles, MANAGER_ROLES)) {
+    const { requireBotFinance } = await import("@/server/telegram/bot-api");
+    const gate = requireBotFinance(actor);
+    if (gate) return gate;
+    return NextResponse.json({ ok: true, projects: await listFinanceProjectRefs(actor, q) });
+  }
   const projects = await prisma.project.findMany({
     where: q
       ? {

@@ -5,6 +5,7 @@ import { hasAnyRole, hasRole, MANAGER_ROLES, type Role } from "@/lib/roles";
 export function homePathForRoles(roles: Role[] | null | undefined) {
   if (hasAnyRole(roles, MANAGER_ROLES)) return "/";
   if (hasRole(roles, "ENGINEER")) return "/products";
+  if (hasRole(roles, "PROCUREMENT")) return "/warehouse";
   if (hasRole(roles, "ACCOUNTANT")) return "/finance";
   return "/my";
 }

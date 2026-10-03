@@ -7,6 +7,7 @@ import { Omnisearch } from "@/components/omnisearch"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { Separator } from "@/components/ui/separator"
 import { SidebarTrigger } from "@/components/ui/sidebar"
+import {canAccessOperationalPath} from "@/lib/operational-access"
 import { sectionTitle } from "@/lib/nav"
 
 export function SiteHeader({
@@ -30,7 +31,7 @@ export function SiteHeader({
           {sectionTitle(pathname)}
         </h1>
         <div className="ml-auto flex min-w-0 items-center gap-0 md:gap-1">
-          <Omnisearch />
+          {canAccessOperationalPath(user.roles,"/api/search")?<Omnisearch />:null}
           {extras}
           <ThemeToggle />
           <NavUser user={user} />

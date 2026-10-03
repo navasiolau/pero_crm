@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import {canAccessOperationalPath} from "@/lib/operational-access";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { displayClientName } from "@/lib/labels";
@@ -14,6 +15,7 @@ export async function GET(request: Request) {
   if (!session?.user) {
     return NextResponse.json({ error: "Не авторизован" }, { status: 401 });
   }
+  if(!canAccessOperationalPath(session.user.roles,"/api/search"))return NextResponse.json({error:"Недостаточно прав"},{status:403});
   const actor = await resolveVisibilityActor(prisma, session.user);
   const office = hasAnyRole(session.user.roles, OFFICE_ROLES);
 

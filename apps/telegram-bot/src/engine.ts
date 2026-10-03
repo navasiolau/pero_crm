@@ -237,6 +237,7 @@ async function handleCommand(
     }
     case "/новый":
     case "/new": {
+      if (!hasAny(session.roles, ["ADMIN", "DIRECTOR", "MANAGER"])) { await reply(chatId, "Недостаточно прав"); return; }
       setDialog(chatId, {
         kind: "newProject",
         step: "title",
@@ -263,7 +264,7 @@ async function handleCommand(
         buttonsRow(
           projects.map((project) => ({
             text: `П-${project.number} ${project.title}`.slice(0, 64),
-            callback_data: `proj:${project.id}`,
+            callback_data: hasAny(session.roles, ["ADMIN", "DIRECTOR", "MANAGER"]) ? `proj:${project.id}` : `payin:${project.id}`,
           })),
         ),
       );
@@ -271,6 +272,7 @@ async function handleCommand(
     }
     case "/проект":
     case "/project": {
+      if (!hasAny(session.roles, ["ADMIN", "DIRECTOR", "MANAGER"])) { await reply(chatId, "Карточка проекта недоступна. Для платежа: /приход или /расход"); return; }
       if (!args[0]) {
         await reply(chatId, "Укажите номер: /проект 205");
         return;
@@ -299,12 +301,12 @@ async function handleCommand(
 }
 
 function helpText(session: Session): string {
-  const lines = [
-    "Команды бота:",
+  const lines = ["Команды бота:"];
+  if (hasAny(session.roles, ["ADMIN", "DIRECTOR", "MANAGER"])) lines.push(
     "/новый — создать проект",
     "/проект <номер> — карточка проекта (этап, реквизиты, платежи)",
     "/проекты — последние проекты",
-  ];
+  );
   if (hasAny(session.roles, FINANCE_ROLES)) {
     lines.push(
       "/приход [номер] [сумма] — приход по проекту",
@@ -720,6 +722,9 @@ async function dispatchCallback(
   action: string,
   rest: string[],
 ): Promise<void> {
+  if (["proj", "stage", "st", "edit"].includes(action) && !hasAny(session.roles, ["ADMIN", "DIRECTOR", "MANAGER"])) {
+    await reply(chatId, "Недостаточно прав"); return;
+  }
   if (action === "cancel") {
     setDialog(chatId, null);
     await reply(chatId, "Отменено.");

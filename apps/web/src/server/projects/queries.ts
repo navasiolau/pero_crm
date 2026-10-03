@@ -5,6 +5,8 @@ import { prisma } from "@/lib/prisma";
 import {
   ASSIGNEE_ROLES,
   MANAGER_ROLES,
+  FINANCE_ROLES,
+  hasAnyRole,
 } from "@/lib/roles";
 import { STAGES } from "@/lib/stages";
 import { taskDetailsIncludeFor } from "@/server/tasks/queries";
@@ -262,7 +264,7 @@ export async function getProjectFor(
       files: { where: fileVisibilityWhere(actor), orderBy: { createdAt: "desc" } },
       communications: options.includeHistory === false ? false : { orderBy: { happenedAt: "desc" } },
       payments: {
-        where: hasFullProjectVisibility(actor) ? {} : { id: { in: [] } },
+        where: hasAnyRole(actor.roles,FINANCE_ROLES) ? {} : { id: { in: [] } },
         include: {
           cashAccount: { select: { name: true } },
           expenseArticle: { select: { name: true } },

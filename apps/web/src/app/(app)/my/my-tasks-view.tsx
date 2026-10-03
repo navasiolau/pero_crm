@@ -47,7 +47,7 @@ import { requiresManualCompletionTime } from "@/lib/task-completion-prompt";
 import { useElapsed } from "@/lib/use-elapsed";
 import { cn } from "@/lib/utils";
 import { sharePercent } from "@/lib/work-shares";
-import { OFFICE_ROLES, hasAnyRole } from "@/lib/roles";
+import { OFFICE_WRITE_ROLES, hasAnyRole } from "@/lib/roles";
 import { saveViewPreference } from "@/server/preferences-actions";
 import { changeTaskStatus } from "@/server/tasks/actions";
 import { addManualTime, startTimer, stopTimer } from "@/server/time/actions";
@@ -110,7 +110,7 @@ export function MyTasksView({
   const elapsed = useElapsed(timer?.startedAt ?? null);
   // Наследие: проп называется role, внутри — роли пользователя (§4)
   const roles = role;
-  const canManualTime = hasAnyRole(roles, OFFICE_ROLES);
+  const canManualTime = hasAnyRole(roles, OFFICE_WRITE_ROLES);
 
   // После router.refresh() подтягиваем свежие данные в локальное состояние
   useEffect(() => {

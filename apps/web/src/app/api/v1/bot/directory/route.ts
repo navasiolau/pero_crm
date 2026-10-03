@@ -9,6 +9,7 @@ import { listManagers } from "@/server/projects/queries";
 import {
   isActorError,
   requireBotManager,
+  requireBotFinance,
   resolveBotActor,
 } from "@/server/telegram/bot-api";
 
@@ -19,12 +20,12 @@ export async function GET(request: Request) {
   if (isErrorResponse(auth)) return auth;
   const actor = await resolveBotActor(request);
   if (isActorError(actor)) return actor;
-  const gate = requireBotManager(actor);
-  if (gate) return gate;
 
   const url = new URL(request.url);
   const type = url.searchParams.get("type") ?? "";
   const q = url.searchParams.get("q")?.trim() ?? "";
+  const gate = type === "cash" || type === "articles" ? requireBotFinance(actor) : requireBotManager(actor);
+  if (gate) return gate;
 
   switch (type) {
     case "clients": {

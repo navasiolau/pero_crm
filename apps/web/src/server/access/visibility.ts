@@ -1,5 +1,5 @@
 import type { Prisma, ProductStatus, Role } from "@prisma/client";
-import { FIELD_ROLES, MANAGER_ROLES, hasAnyRole, hasRole } from "@/lib/roles";
+import { ASSIGNEE_ROLES,FIELD_ROLES, MANAGER_ROLES, hasAnyRole, hasRole } from "@/lib/roles";
 
 export type VisibilityActor = { id: string; roles: Role[]; engineeringParticipantProductIds?: string[];
   engineeringParticipantTaskIds?: string[]; fieldParticipantProductIds?: string[] };
@@ -27,7 +27,7 @@ export async function resolveVisibilityActor(
   db: Pick<Prisma.TransactionClient, "task"> & Partial<Pick<Prisma.TransactionClient, "productPercentageParticipant">>,
   actor: VisibilityActor,
 ): Promise<VisibilityActor> {
-  const assignments = await engineeringAssignments(db, actor.id, true);
+  const assignments = hasAnyRole(actor.roles,ASSIGNEE_ROLES) ? await engineeringAssignments(db, actor.id, true) : [];
   const direct = hasRole(actor.roles, "ENGINEER") && db.productPercentageParticipant ? await db.productPercentageParticipant.findMany({
     where: { userId: actor.id, config: { kind: "ENGINEERING", product: { status: "DESIGN" } } },
     select: { config: { select: { productId: true } } },
@@ -71,7 +71,7 @@ async function engineeringAssignments(
 
 /** Full read rights come from these roles, even when ENGINEER is also present. */
 export function hasFullProjectVisibility(actor: VisibilityActor): boolean {
-  return hasAnyRole(actor.roles, MANAGER_ROLES) || hasRole(actor.roles, "ACCOUNTANT");
+  return hasAnyRole(actor.roles, MANAGER_ROLES) || hasRole(actor.roles, "PROCUREMENT");
 }
 
 // Read grants from ACCOUNTANT/FIELD must never widen engineering edit rights.
@@ -132,16 +132,15 @@ export function taskVisibilityWhere(actor: VisibilityActor): Prisma.TaskWhereInp
 /** Execution is an assignee/manager grant, not a consequence of read access. */
 export function taskExecutionWhere(actor: VisibilityActor): Prisma.TaskWhereInput {
   if (hasAnyRole(actor.roles, MANAGER_ROLES)) return {};
-  const grants: Prisma.TaskWhereInput[] = [
+  const grants: Prisma.TaskWhereInput[] = hasAnyRole(actor.roles,ASSIGNEE_ROLES) ? [
     { id: { in: actor.engineeringParticipantTaskIds ?? [] }, assigneeId: actor.id, product: { status: "DESIGN" } },
-  ];
-  // Сохраняем принятый порядок исполнения: чистый бухгалтер выполняет свои
-  // задачи, а ENGINEER+ACCOUNTANT исполняет их через инженерный DESIGN-grant.
+  ] : [];
+  // Исполнение даёт производственная или инженерная роль; финансовая роль
+  // сама по себе не добавляет задач, а сочетание сохраняет независимые права.
   if (hasAnyRole(actor.roles, FIELD_ROLES)) grants.push({ assigneeId: actor.id, OR: [
     { product: { status: { not: "DESIGN" } } },
     { productId: null, project: projectVisibilityWhere(actor) },
   ] });
-  if (hasRole(actor.roles, "ACCOUNTANT") && !hasRole(actor.roles, "ENGINEER")) grants.push({ assigneeId: actor.id });
   if (hasRole(actor.roles, "ENGINEER")) grants.push({ assigneeId: actor.id, product: { engineerId: actor.id, status: "DESIGN" } });
   return { OR: grants };
 }

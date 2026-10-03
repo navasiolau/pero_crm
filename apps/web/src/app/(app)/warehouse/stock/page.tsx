@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { auth } from "@/auth";
-import { MANAGER_ROLES, OFFICE_ROLES, hasAnyRole } from "@/lib/roles";
+import { WAREHOUSE_MANAGE_ROLES, WAREHOUSE_MONEY_ROLES, OFFICE_ROLES, hasAnyRole } from "@/lib/roles";
 import { listMaterialOptions, listStock } from "@/server/warehouse/queries";
 
 import { StockView } from "./stock-view";
@@ -28,8 +28,8 @@ export default async function WarehouseStockPage() {
     <StockView
       rows={rows}
       materials={materials}
-      canManage={hasAnyRole(role, MANAGER_ROLES)}
-      showMoney={hasAnyRole(role, ["ADMIN", "DIRECTOR"])}
+      canManage={hasAnyRole(role, WAREHOUSE_MANAGE_ROLES)}
+      showMoney={hasAnyRole(role, WAREHOUSE_MONEY_ROLES)}
     />
   );
 }

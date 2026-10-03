@@ -69,7 +69,7 @@ test("writer refuses a quote prepared on an earlier UTC day", async () => {
   const stale = { asOf: yesterday, cash: { currency: "BYN" as const, rate: "1.000000", date: yesterday },
     payroll: { currency: "BYN" as const, rate: "1.000000", date: yesterday } };
   const f = cashFixture();
-  await assert.rejects(issuePayoutCore(actor(["MANAGER"]), { ...input, requestId: randomUUID(), kind: "ADVANCE" }, stale, f.tx), /Дата расчёта/);
+  await assert.rejects(issuePayoutCore(actor(["PROCUREMENT"]), { ...input, requestId: randomUUID(), kind: "ADVANCE" }, stale, f.tx), /Дата расчёта/);
   assert.equal(f.payouts.size, 0);
 });
 
@@ -78,14 +78,14 @@ test("advance writer enforces narrow role before DB access", async () => {
   await assert.rejects(issuePayoutCore(actor(["MANAGER"]), { ...input, kind: "SALARY", month: "2026-08" }, rates, noDb), /прав/i);
 });
 
-test("all authorized roles and combined manager roles can issue, other roles cannot read the ledger", async () => {
-  for (const roles of [["ADMIN"], ["DIRECTOR"], ["MANAGER"], ["ACCOUNTANT"], ["MANAGER", "ENGINEER"]] as Role[][]) {
+test("all financial roles and financial combinations can issue, other roles cannot read the ledger", async () => {
+  for (const roles of [["ADMIN"], ["DIRECTOR"], ["PROCUREMENT"], ["ACCOUNTANT"], ["MANAGER", "ACCOUNTANT"]] as Role[][]) {
     const f = cashFixture();
     const result = await issuePayoutCore(actor(roles), { ...input, requestId: randomUUID(), kind: "ADVANCE" }, rates, f.tx);
     assert.equal(result.cashAmount, "120.00");
     assert.equal(f.payouts.size, 1);
   }
-  for (const roles of [["ENGINEER"], ["WORKER"], ["MOUNTER"], ["ENGINEER", "WORKER"]] as Role[][]) {
+  for (const roles of [["MANAGER"], ["MANAGER", "ENGINEER"], ["ENGINEER"], ["WORKER"], ["MOUNTER"], ["ENGINEER", "WORKER"]] as Role[][]) {
     await assert.rejects(issuePayoutCore(actor(roles), { ...input, requestId: randomUUID(), kind: "ADVANCE" }, rates, noDb), /прав/);
   }
 });
@@ -130,10 +130,10 @@ function cashFixture(options: { employeeActive?: boolean; accountActive?: boolea
   return { tx, payouts, receipts, events };
 }
 
-test("manager issues to active NONE payee once, with work description and no Payment or PayrollEntry write", async () => {
+test("procurement issues to active NONE payee once, with work description and no Payment or PayrollEntry write", async () => {
   const f = cashFixture();
   const request = { ...input, requestId: randomUUID(), kind: "ADVANCE" as const };
-  const first = await issuePayoutCore(actor(["MANAGER"]), request, rates, f.tx);
+  const first = await issuePayoutCore(actor(["PROCUREMENT"]), request, rates, f.tx);
   assert.equal(first.repeated, false);
   assert.equal(first.amount, "120.00");
   assert.equal(f.payouts.size, 1);
@@ -144,24 +144,24 @@ test("manager issues to active NONE payee once, with work description and no Pay
   assert.equal(row.comment, "Работа над шкафом");
   assert.equal(row.bynAmount, "120.00");
   assert.equal(row.cashCurrency, "BYN");
-  const replay = await issuePayoutCore(actor(["MANAGER"]), request, rates, f.tx);
+  const replay = await issuePayoutCore(actor(["PROCUREMENT"]), request, rates, f.tx);
   assert.equal(replay.repeated, true);
   assert.equal(f.payouts.size, 1);
   assert.equal(f.events.length, 1);
-  await assert.rejects(issuePayoutCore(actor(["MANAGER"]), { ...request, cashAmount: "130.00" }, rates, f.tx), /использован/);
+  await assert.rejects(issuePayoutCore(actor(["PROCUREMENT"]), { ...request, cashAmount: "130.00" }, rates, f.tx), /использован/);
   f.payouts.clear();
-  await assert.rejects(issuePayoutCore(actor(["MANAGER"]), request, rates, f.tx), /отменена/);
+  await assert.rejects(issuePayoutCore(actor(["PROCUREMENT"]), request, rates, f.tx), /отменена/);
 });
 
 test("server rejects missing work, inactive parties, account overdraft and organization overdraft", async () => {
   const request = { ...input, requestId: randomUUID(), kind: "ADVANCE" as const };
-  await assert.rejects(issuePayoutCore(actor(["MANAGER"]), { ...request, description: " " }, rates, noDb), /описание/);
+  await assert.rejects(issuePayoutCore(actor(["PROCUREMENT"]), { ...request, description: " " }, rates, noDb), /описание/);
   for (const [fixtureOptions, message] of [
     [{ employeeActive: false }, /сотрудник/], [{ accountActive: false }, /касса/],
     [{ accountFunds: "119.99" }, /кассе/], [{ orgFunds: "119.99" }, /организации/],
   ] as const) {
     const f = cashFixture(fixtureOptions);
-    await assert.rejects(issuePayoutCore(actor(["MANAGER"]), request, rates, f.tx), message);
+    await assert.rejects(issuePayoutCore(actor(["PROCUREMENT"]), request, rates, f.tx), message);
     assert.equal(f.payouts.size, 0);
   }
 });
@@ -169,7 +169,7 @@ test("server rejects missing work, inactive parties, account overdraft and organ
 test("a negative organization balance cannot disappear when converted and rounded for display", async () => {
   const f = cashFixture({ payrollCurrency: "USD", orgFunds: "119.99" });
   const quoteRates = rates;
-  await assert.rejects(issuePayoutCore(actor(["MANAGER"]), {
+  await assert.rejects(issuePayoutCore(actor(["PROCUREMENT"]), {
     ...input, requestId: randomUUID(), kind: "ADVANCE", cashAmount: "120.00",
   }, quoteRates, f.tx), /организации/);
   assert.equal(f.payouts.size, 0);
@@ -180,7 +180,7 @@ test("a negative organization balance cannot disappear when converted and rounde
 test("sequential payouts cannot consume the same cash twice; salary checks existing past debt", async () => {
   const f = cashFixture();
   const first = { ...input, cashAmount: "600.00", requestId: randomUUID(), kind: "ADVANCE" as const };
-  await issuePayoutCore(actor(["MANAGER"]), first, rates, f.tx);
+  await issuePayoutCore(actor(["PROCUREMENT"]), first, rates, f.tx);
   await assert.rejects(issuePayoutCore(actor(["ACCOUNTANT"]), { ...first, requestId: randomUUID(), cashAmount: "600.00" }, rates, f.tx), /кассе|организации/);
   const salaryFixture = cashFixture();
   await issuePayoutCore(actor(["ACCOUNTANT"]), { ...input, requestId: randomUUID(), kind: "SALARY", month: "2026-08" }, rates, salaryFixture.tx);
@@ -194,21 +194,21 @@ test("server derives cash and payroll currencies from current records, not clien
   const f = cashFixture({ accountCurrency: "USD", payrollCurrency: "BYN", accountFunds: "100.00", orgFunds: "300.00" });
   const usdRates = { asOf: today, cash: { currency: "USD", rate: "3.000000", date: today },
     payroll: { currency: "BYN", rate: "1.000000", date: today } } as const;
-  const result = await issuePayoutCore(actor(["MANAGER"]), { ...input, requestId: randomUUID(), kind: "ADVANCE", cashAmount: "50.00",
+  const result = await issuePayoutCore(actor(["PROCUREMENT"]), { ...input, requestId: randomUUID(), kind: "ADVANCE", cashAmount: "50.00",
     expectedCashCurrency: "USD" }, usdRates, f.tx);
   assert.equal(result.amount, "150.00");
   assert.equal([...f.payouts.values()][0].bynAmount, "150.00");
   assert.equal([...f.payouts.values()][0].cashCurrency, "USD");
   assert.equal(calculateCashPayout("50.00", { ...usdRates, cash: { ...usdRates.cash, rate: "4.000000" } }).bynAmount, "200.00");
   assert.equal([...f.payouts.values()][0].bynAmount, "150.00");
-  await assert.rejects(issuePayoutCore(actor(["MANAGER"]), { ...input, requestId: randomUUID(), kind: "ADVANCE" }, rates, f.tx), /валюта/i);
-  await assert.rejects(issuePayoutCore(actor(["MANAGER"]), { ...input, requestId: randomUUID(), kind: "ADVANCE",
+  await assert.rejects(issuePayoutCore(actor(["PROCUREMENT"]), { ...input, requestId: randomUUID(), kind: "ADVANCE" }, rates, f.tx), /валюта/i);
+  await assert.rejects(issuePayoutCore(actor(["PROCUREMENT"]), { ...input, requestId: randomUUID(), kind: "ADVANCE",
     cashAmount: "50.00", expectedCashCurrency: "BYN" } as Parameters<typeof issuePayoutCore>[1], usdRates, f.tx), /валют/i);
 });
 
 test("legacy payouts remain in org cap, and two serialized advances cannot overspend", async () => {
   const legacy = cashFixture({ legacyPaid: "200.00" });
-  await assert.rejects(issuePayoutCore(actor(["MANAGER"]), { ...input, requestId: randomUUID(), kind: "ADVANCE", cashAmount: "850.00" }, rates, legacy.tx), /организации/);
+  await assert.rejects(issuePayoutCore(actor(["PROCUREMENT"]), { ...input, requestId: randomUUID(), kind: "ADVANCE", cashAmount: "850.00" }, rates, legacy.tx), /организации/);
   const f = cashFixture();
   Object.assign(f.tx, { $queryRaw: async (sql: TemplateStringsArray) => {
     assert.match(sql.join(""), /pg_advisory_xact_lock\(18435, 55001\)/);
@@ -223,7 +223,7 @@ test("legacy payouts remain in org cap, and two serialized advances cannot overs
     try { return await operation(f.tx); } finally { release(); }
   } } as unknown as Pick<PrismaClient, "$transaction">;
   const transaction = createTaskTransaction(database);
-  const requests = [randomUUID(), randomUUID()].map((requestId) => transaction((tx) => issuePayoutCore(actor(["MANAGER"]),
+  const requests = [randomUUID(), randomUUID()].map((requestId) => transaction((tx) => issuePayoutCore(actor(["PROCUREMENT"]),
     { ...input, requestId, kind: "ADVANCE", cashAmount: "600.00" }, rates, tx)));
   const results = await Promise.allSettled(requests);
   assert.deepEqual(results.map((row) => row.status).sort(), ["fulfilled", "rejected"]);

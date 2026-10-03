@@ -11,7 +11,7 @@ import { notifyPerson } from "@/server/notifications/notify";
 import { paySchemeLabels } from "@/lib/labels";
 import { roleComboLabel, isValidRolesCombination, normalizeRoles } from "@/lib/roles";
 
-const ROLES = ["ADMIN", "DIRECTOR", "MANAGER", "ENGINEER", "WORKER", "MOUNTER", "ACCOUNTANT"] as const;
+const ROLES = ["ADMIN", "DIRECTOR", "MANAGER", "ENGINEER", "WORKER", "MOUNTER", "ACCOUNTANT", "PROCUREMENT"] as const;
 const PAY_SCHEMES = ["PIECE", "PERCENT_PROJECT", "PERCENT_TURNOVER", "NONE"] as const;
 
 const userSchema = z.object({

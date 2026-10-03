@@ -7,7 +7,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { writeChangeLog } from "@/server/plugins/changelog";
 import { notifyOrg } from "@/server/notifications/notify";
-import { OFFICE_ROLES, hasAnyRole } from "@/lib/roles";
+import { OFFICE_WRITE_ROLES, hasAnyRole } from "@/lib/roles";
 import { projectVisibilityWhere, resolveVisibilityActor } from "@/server/access/visibility";
 
 
@@ -22,7 +22,7 @@ export async function addCommunication(
 ): Promise<{ ok: boolean; error?: string }> {
   const session = await auth();
   if (!session?.user) throw new Error("Не авторизован");
-  if (!hasAnyRole(session.user.roles, OFFICE_ROLES)) throw new Error("Недостаточно прав");
+  if (!hasAnyRole(session.user.roles, OFFICE_WRITE_ROLES)) throw new Error("Недостаточно прав");
   const parsed = schema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Ошибка данных" };

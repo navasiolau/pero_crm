@@ -7,7 +7,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { writeChangeLog } from "@/server/plugins/changelog";
 
-import { MANAGER_ROLES, OFFICE_ROLES, hasAnyRole } from "@/lib/roles";
+import { MANAGER_ROLES, OFFICE_WRITE_ROLES, hasAnyRole } from "@/lib/roles";
 import { resolveVisibilityActor, taskExecutionWhere, taskVisibilityWhere } from "@/server/access/visibility";
 
 const AUTOSTOP_MINUTES = 12 * 60; // §19: автостоп по таймауту 12 ч с пометкой
@@ -118,7 +118,7 @@ export async function addManualTime(
 ): Promise<{ ok: boolean; error?: string }> {
   const session = await auth();
   if (!session?.user) throw new Error("Не авторизован");
-  if (!hasAnyRole(session.user.roles, OFFICE_ROLES)) {
+  if (!hasAnyRole(session.user.roles, OFFICE_WRITE_ROLES)) {
     return {
       ok: false,
       error:
