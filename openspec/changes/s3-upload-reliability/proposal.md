@@ -27,3 +27,6 @@
 ## Impact
 
 lib/s3.ts, сервер загрузки, POST /api/files/upload и upload UI. Диагностика задачи48 и server/CAS обложки задачи53 сохраняются; их прежние требования видимого explicit retry заменены прямым решением 03.10 только для клиентского upload recovery. Нет схемы/миграции или инфраструктурных изменений. Production не затрагивается. Deployment должен явно задать storage mode.
+
+## Actual small PNG failure
+Установлена race клонирования body в Node middleware Next15.5.20 до upload-handler. Точный endpoint переносит existing auth/operational guards внутрь route до body-read, чтобы вернуть надёжный JSON и сохранить права. Это не ошибка S3 и не подтверждение10MiB/root host hypothesis.

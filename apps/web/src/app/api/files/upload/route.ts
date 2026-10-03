@@ -6,6 +6,8 @@ import sharp from "sharp";
 import type { FileCategory, FileStage } from "@prisma/client";
 
 import { auth } from "@/auth";
+import {canAccessOperationalPath} from "@/lib/operational-access";
+import {ASSIGNEE_ROLES,hasAnyRole} from "@/lib/roles";
 import { isCoverImageMime } from "@/lib/product-cover";
 import { prisma } from "@/lib/prisma";
 import { UPLOADS_ROOT, s3Enabled, s3Put, s3Delete, fileKey, thumbKey } from "@/lib/s3";
@@ -69,6 +71,11 @@ async function upload(request:Request,state:{phase:UploadPhase;commitState:Commi
   if (!session?.user) {
     return NextResponse.json({ error: "Не авторизован" }, { status: 401 });
   }
+  // This endpoint avoids the framework's Node middleware body-cloning race.
+  // auth() still refreshes active/sessionVersion/roles; both broad operational
+  // isolation and narrower context permissions remain server-side.
+  if(!canAccessOperationalPath(session.user.roles,"/api/files/upload")||!hasAnyRole(session.user.roles,ASSIGNEE_ROLES))
+    throw new UploadError("UPLOAD_FORBIDDEN",403,"auth","Недостаточно прав для загрузки файлов","forbidden");
 
   state.phase="request";
   const form = await request.formData().catch(() => null);
