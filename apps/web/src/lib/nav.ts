@@ -1,5 +1,6 @@
 import {
   Banknote,
+  CalendarDays,
   ClipboardCheck,
   FolderKanban,
   History,
@@ -62,14 +63,17 @@ export const navItems: NavItem[] = [
 
 // Видимые пункты = объединение по всем ролям пользователя
 // (комбинированные роли: менеджер+инженер видит оба набора разделов).
-export function navItemsForRole(roles: Role[]): NavItem[] {
-  return navItems.filter((item) =>
+const planItem: NavItem = {href: "/plan", label: "План", icon: CalendarDays, roles: ALL_ROLES, group: "main"};
+export function navItemsForRole(roles: Role[], calendarEnabled = false): NavItem[] {
+  const visible = navItems.filter((item) =>
     item.roles.some((role) => roles.includes(role)),
   );
+  if (calendarEnabled) visible.splice(visible.findIndex(item => item.href === "/") + 1, 0, planItem);
+  return visible;
 }
 
 export function sectionTitle(pathname: string): string {
-  const match = navItems.find((item) =>
+  const match = [...navItems, planItem].find((item) =>
     item.href === "/" ? pathname === "/" : pathname.startsWith(item.href),
   );
   return match?.label ?? "PERO CRM";

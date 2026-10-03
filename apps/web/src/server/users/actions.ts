@@ -25,6 +25,7 @@ const userSchema = z.object({
   payPercent: z.number().min(0).max(100).nullable().optional(),
   active: z.boolean().default(true),
   password: z.string().optional(),
+  calendarEnabled: z.boolean().nullable().optional(),
 });
 
 // Точечный отзыв всех веб-сеансов сотрудника без смены пароля/общего AUTH_SECRET.
@@ -46,6 +47,7 @@ export async function revokeUserSessions(
     entityId: userId,
     action: "revokeSessions",
   });
+  revalidatePath("/", "layout");
   revalidatePath("/settings/users");
   return { ok: true };
 }
@@ -85,6 +87,7 @@ export async function createUser(
       payScheme: data.payScheme,
       payPercent: data.payPercent ?? null,
       active: data.active,
+      ...(data.calendarEnabled !== undefined ? {calendarEnabled: data.calendarEnabled} : {}),
       passwordHash: await hashPassword(data.password),
     },
   });
@@ -104,6 +107,7 @@ export async function createUser(
     title: "Для вас создана учётная запись",
     body: `Роли: ${roleComboLabel(user.roles)} · схема оплаты: ${paySchemeLabels[user.payScheme] ?? user.payScheme}`,
   });
+  revalidatePath("/", "layout");
   revalidatePath("/settings/users");
   return { ok: true };
 }
@@ -150,6 +154,7 @@ export async function updateUser(
       payScheme: data.payScheme,
       payPercent: data.payPercent ?? null,
       active: data.active,
+      ...(data.calendarEnabled !== undefined ? {calendarEnabled: data.calendarEnabled} : {}),
       ...(data.password
         ? { passwordHash: await hashPassword(data.password) }
         : {}),
@@ -167,12 +172,14 @@ export async function updateUser(
       name: before.name,
       roles: before.roles,
       active: before.active,
+      calendarEnabled: before.calendarEnabled,
     },
     newValue: {
       email: data.email,
       name: data.name,
       roles: data.roles,
       active: data.active,
+      calendarEnabled: data.calendarEnabled === undefined ? before.calendarEnabled : data.calendarEnabled,
       passwordChanged: !!data.password,
     },
   });
@@ -205,6 +212,7 @@ export async function updateUser(
     });
   }
 
+  revalidatePath("/", "layout");
   revalidatePath("/settings/users");
   return { ok: true };
 }

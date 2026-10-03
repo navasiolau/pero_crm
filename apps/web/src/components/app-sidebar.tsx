@@ -20,9 +20,10 @@ import { homePathForRoles } from "@/lib/home-route"
 
 export function AppSidebar({
   roles,
+  calendarEnabled = false,
   ...props
-}: { roles: Role[] } & React.ComponentProps<typeof Sidebar>) {
-  const items = navItemsForRole(roles)
+}: { roles: Role[]; calendarEnabled?: boolean } & React.ComponentProps<typeof Sidebar>) {
+  const items = navItemsForRole(roles, calendarEnabled)
   const { setOpenMobile } = useSidebar()
   const mainItems = items.filter((item) => item.group === "main")
   const manageItems = items.filter((item) => item.group === "manage")

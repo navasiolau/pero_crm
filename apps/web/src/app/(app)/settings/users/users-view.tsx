@@ -44,6 +44,7 @@ interface UserRow {
   payScheme: PayScheme;
   payPercent: string | null;
   active: boolean;
+  calendarEnabled: boolean | null;
 }
 
 const paySchemeLabels: Record<PayScheme, string> = {
@@ -63,6 +64,7 @@ const emptyForm = {
   payScheme: "PIECE" as PayScheme,
   payPercent: "",
   active: true,
+  calendarEnabled: null as boolean | null,
   password: "",
 };
 
@@ -108,6 +110,7 @@ export function UsersView({
       payScheme: user.payScheme,
       payPercent: user.payPercent ?? "",
       active: user.active,
+      calendarEnabled: user.calendarEnabled,
       password: "",
     });
     setOpen(true);
@@ -401,6 +404,14 @@ export function UsersView({
                 autoComplete="new-password"
               />
             </div>
+            <div className="grid gap-2">
+              <Label htmlFor="u-calendar">Личный план</Label>
+              <Select value={form.calendarEnabled === null ? "inherit" : String(form.calendarEnabled)} onValueChange={value => set("calendarEnabled", value === "true" ? true : value === "false" ? false : null)}>
+                <SelectTrigger id="u-calendar"><SelectValue>{form.calendarEnabled === null ? "По роли (снабженец — включён)" : form.calendarEnabled ? "Включён" : "Выключен"}</SelectValue></SelectTrigger>
+                <SelectContent><SelectItem value="inherit">По роли (снабженец — включён)</SelectItem><SelectItem value="true">Включён</SelectItem><SelectItem value="false">Выключен</SelectItem></SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">Выключение сохраняет записи и прекращает напоминания.</p>
+            </div>
             <label className="flex items-center gap-2 text-sm">
               <Checkbox
                 checked={form.active}
@@ -480,6 +491,7 @@ export function UsersView({
                         ? null
                         : Number(form.payPercent),
                     active: form.active,
+                    calendarEnabled: form.calendarEnabled,
                     password: form.password || undefined,
                   };
                   const result = editing
