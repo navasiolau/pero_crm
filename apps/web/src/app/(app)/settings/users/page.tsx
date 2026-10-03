@@ -29,6 +29,7 @@ export default async function UsersPage() {
         payScheme: user.payScheme,
         payPercent: user.payPercent?.toString() ?? null,
         active: user.active,
+        calendarEnabled: user.calendarEnabled,
       }))}
       currentUserId={session.user.id}
     />
