@@ -1,3 +1,4 @@
+import {canAccrueOrdinarySalary,hasFrozenTaskPieceObligation} from "@/lib/compensation-policy";
 import { isEffectivelyCoveredWork } from "@/server/product-percentage-pay/work-coverage";
 import { assertInternalCurrency, assertProjectMoneyCurrency } from "@/lib/internal-currency";
 import type { Prisma } from "@prisma/client";
@@ -45,7 +46,7 @@ export async function changeTaskStatusCore(actor: DomainActor, taskId: string, t
         where: { AND: [{ id: taskId }, taskExecutionWhere(visibilityActor)] },
         include: {
           project: { select: { id: true, number: true, currency: true } }, product: { select: { id: true, number: true, projectId: true, status: true } },
-          work: { select: { id: true, projectId: true, productId: true, priceSnapshot: true, paymentKind: true, stagePayPoolId: true, stagePayPool: { select: { productId: true } } } }, allocationGroup: { select: { currency: true } },
+          work: { select: { id: true, projectId: true, productId: true, priceSnapshot: true, paymentKind: true, stagePayPoolId: true, stagePayPool: { select: { productId: true } } } }, allocationGroup: { select: { id:true,workId:true,budgetSource:true,budget:true,currency: true } },
           files: { where: fileVisibilityWhere(visibilityActor), select: { id: true } },
           dependencies: { include: { dependsOn: { select: { id: true, title: true, status: true } } } },
         },
@@ -90,10 +91,11 @@ export async function changeTaskStatusCore(actor: DomainActor, taskId: string, t
         if(task.work.projectId!==task.projectId||task.work.productId!==task.productId)throw new CompletionError("Работа и задача относятся к разным изделиям или проектам");
         const historicalMoney=!!task.allocationGroupId||task.shareAmount!=null||String(task.executorShare)!=="1";
         const covered=!historicalMoney&&task.productId!==null&&await isEffectivelyCoveredWork(tx,task.work.id,task.productId,task.projectId);
-        const assignee = await tx.user.findUnique({ where: { id: task.assigneeId }, select: { name: true, payScheme: true } });
-        if (!covered && assignee?.payScheme === "PIECE" && !await tx.payrollEntry.findFirst({ where: { taskId: task.id, scheme: "PIECE" }, select: { id: true } })) {
-          if (task.work.priceSnapshot === null) throw new CompletionError("Не задана расценка обычной работы");
-          const amount = taskPieceAmount(task, task.work.priceSnapshot);
+        const frozenObligation = hasFrozenTaskPieceObligation(task);
+        const assignee = await tx.user.findUnique({ where: { id: task.assigneeId }, select: { name: true, payScheme: true, roles: true } });
+        if (!covered && assignee?.payScheme === "PIECE" && (canAccrueOrdinarySalary(assignee.roles) || frozenObligation) && !await tx.payrollEntry.findFirst({ where: { taskId: task.id, scheme: "PIECE" }, select: { id: true } })) {
+          if (task.work.priceSnapshot === null && !frozenObligation) throw new CompletionError("Не задана расценка обычной работы");
+          const amount = taskPieceAmount(task, task.work.priceSnapshot ?? 0);
           if (moneyAtoms(amount) > BigInt(0)) {
             const currency = task.allocationGroup?.currency ?? (await tx.orgSetting.findUnique({ where: { key: "payrollCurrency" } }))?.value ?? "BYN";
             try { assertProjectMoneyCurrency(task.project.currency); assertInternalCurrency(currency); }

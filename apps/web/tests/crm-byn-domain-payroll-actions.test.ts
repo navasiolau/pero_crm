@@ -16,7 +16,7 @@ function inject(path: string, exports: Record<string, unknown>) {
 }
 before(() => {
   (globalThis as { prisma?: PrismaClient }).prisma = {
-    user: { findMany: async () => [{ id: "u", name: "U", payPercent: "5" }] },
+    user: { findMany: async () => [{ id: "u", name: "U", roles: ["MANAGER"], payPercent: "5" }] },
     payrollEntry: { findMany: async () => history, create: async ({ data }: { data: typeof writes[number] }) => { writes.push(data); return {}; } },
   } as unknown as PrismaClient;
   inject("next/cache", { revalidatePath: () => {} });

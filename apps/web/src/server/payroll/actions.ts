@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
 
+import {canAccrueOrdinarySalary} from "@/lib/compensation-policy";
 import { INTERNAL_CURRENCY, INTERNAL_CURRENCY_ERROR } from "@/lib/internal-currency";
 import { historicalByn, BYN_UNAVAILABLE_REASON } from "@/lib/history-byn";
 import { prisma } from "@/lib/prisma";
@@ -114,10 +115,11 @@ export async function accrueTurnover(
 
   const { total } = await getMonthTurnover(month);
   const currency = INTERNAL_CURRENCY;
-  const users = await prisma.user.findMany({
+  const candidates = await prisma.user.findMany({
     where: { active: true, payScheme: "PERCENT_TURNOVER", payPercent: { gt: 0 } },
-    select: { id: true, name: true, payPercent: true },
+    select: { id: true, name: true, payPercent: true, roles: true },
   });
+  const users = candidates.filter(user => canAccrueOrdinarySalary(user.roles));
   if (users.length === 0) {
     return { ok: false, error: "Нет сотрудников со схемой «% от оборота»" };
   }

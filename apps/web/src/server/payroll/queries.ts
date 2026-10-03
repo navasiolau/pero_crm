@@ -1,3 +1,4 @@
+import {canAccrueOrdinarySalary} from "@/lib/compensation-policy";
 import type { PayScheme } from "@prisma/client";
 import { Prisma } from "@prisma/client";
 
@@ -421,7 +422,7 @@ export async function getEmployeeDues(): Promise<EmployeeDue[]> {
 export async function getTurnoverAccruals(month: string) {
   const users = await prisma.user.findMany({
     where: { active: true, payScheme: "PERCENT_TURNOVER", payPercent: { gt: 0 } },
-    select: { id: true, name: true, payPercent: true },
+    select: { id: true, name: true, payPercent: true, roles: true },
     orderBy: { name: "asc" },
   });
   const existing = await groupPayroll({
@@ -432,7 +433,7 @@ export async function getTurnoverAccruals(month: string) {
   const accruedMap = new Map(
     existing.map((row) => [row.userId, row._sum.amount]),
   );
-  return users.map((user) => ({
+  return users.filter(user => canAccrueOrdinarySalary(user.roles)).map((user) => ({
     userId: user.id,
     name: user.name,
     percent: Number(user.payPercent),
