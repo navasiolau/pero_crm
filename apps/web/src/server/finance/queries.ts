@@ -52,6 +52,7 @@ export async function listCashAccounts(): Promise<CashAccountView[]> {
 
 export type ExpenseArticleView = {
   id: string;
+  code: number;
   name: string;
   comment: string | null;
   active: boolean;
@@ -59,10 +60,11 @@ export type ExpenseArticleView = {
 
 export async function listExpenseArticles(): Promise<ExpenseArticleView[]> {
   const articles = await prisma.expenseArticle.findMany({
-    orderBy: { createdAt: "asc" },
+    orderBy: { code: "asc" },
   });
   return articles.map((article) => ({
     id: article.id,
+    code: article.code,
     name: article.name,
     comment: article.comment,
     active: article.active,

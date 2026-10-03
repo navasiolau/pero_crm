@@ -3,12 +3,12 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
-import { prisma } from "@/lib/prisma";
 import { writeChangeLog } from "@/server/plugins/changelog";
 import { requireFinance } from "@/server/require-role";
 import { withTaskTransaction } from "@/server/tasks/transaction";
 
 import { getNbrbRate, isCurrency } from "./nbrb";
+import { createExpenseArticleCore, toggleExpenseArticleCore, expenseArticleCreateError, type ExpenseArticleInput } from "./article-core";
 
 // ─── Финансы (§11): кассы, статьи расходов, курсы НБ РБ ─────────────────────
 
@@ -101,61 +101,16 @@ export async function toggleCashAccount(
 
 // ─── Статьи расходов ────────────────────────────────────────────────────────
 
-const articleSchema = z.object({
-  name: z.string().trim().min(1, "Укажите название статьи"),
-  comment: z.string().optional(),
-});
-
-export async function addExpenseArticle(
-  input: z.input<typeof articleSchema>,
-): Promise<{ ok: boolean; error?: string }> {
-  const session = await requireFinance();
-  const parsed = articleSchema.safeParse(input);
-  if (!parsed.success) {
-    return { ok: false, error: parsed.error.issues[0]?.message ?? "Ошибка данных" };
-  }
-  const article = await prisma.expenseArticle.create({
-    data: {
-      name: parsed.data.name,
-      comment: parsed.data.comment?.trim() || null,
-    },
-  });
-  await writeChangeLog({
-    actorType: "user",
-    actorId: session.user.id,
-    actorName: session.user.name ?? undefined,
-    entity: "expenseArticle",
-    entityId: article.id,
-    action: "create",
-    newValue: { name: article.name },
-  });
-  revalidatePath("/finance/articles");
-  return { ok: true };
+export async function addExpenseArticle(input: ExpenseArticleInput): Promise<{ok:boolean;error?:string}> {
+  const session=await requireFinance();
+  try{
+    const result=await withTaskTransaction(tx=>createExpenseArticleCore(session.user,input,tx));
+    if(result.ok)revalidatePath('/finance/articles');
+    return result.ok?{ok:true}:result;
+  }catch(error){return{ok:false,error:expenseArticleCreateError(error)};}
 }
-
-export async function toggleExpenseArticle(
-  articleId: string,
-): Promise<{ ok: boolean; error?: string }> {
-  const session = await requireFinance();
-  const article = await prisma.expenseArticle.findUnique({
-    where: { id: articleId },
-  });
-  if (!article) return { ok: false, error: "Статья не найдена" };
-  await prisma.expenseArticle.update({
-    where: { id: articleId },
-    data: { active: !article.active },
-  });
-  await writeChangeLog({
-    actorType: "user",
-    actorId: session.user.id,
-    actorName: session.user.name ?? undefined,
-    entity: "expenseArticle",
-    entityId: articleId,
-    action: "update",
-    field: "active",
-    oldValue: article.active,
-    newValue: !article.active,
-  });
-  revalidatePath("/finance/articles");
-  return { ok: true };
+export async function toggleExpenseArticle(articleId:string):Promise<{ok:boolean;error?:string}>{
+  const session=await requireFinance();
+  try{const result=await withTaskTransaction(tx=>toggleExpenseArticleCore(session.user,articleId,tx));if(result.ok)revalidatePath('/finance/articles');return result;}
+  catch{return{ok:false,error:'Не удалось изменить активность статьи'};}
 }

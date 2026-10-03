@@ -20,6 +20,7 @@ import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { addExpenseArticle, toggleExpenseArticle } from "@/server/finance/actions";
 import type { ExpenseArticleView } from "@/server/finance/queries";
+import { nextExpenseArticleCode, parseExpenseArticleCode } from "@/lib/expense-article-code";
 
 // Статьи расходов (§8/§11): справочник для расходов по проектам.
 // Статья с историей операций не удаляется — деактивируется.
@@ -28,8 +29,19 @@ export function ArticlesView({ articles }: { articles: ExpenseArticleView[] }) {
   const [addOpen, setAddOpen] = useState(false);
   const [name, setName] = useState("");
   const [comment, setComment] = useState("");
+  const [code, setCode] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  function openAdd() {
+    setError(null);
+    try { setCode(String(nextExpenseArticleCode(articles.length ? Math.max(...articles.map(article => article.code)) : null))); }
+    catch { setCode(""); setError("Автоматические коды закончились. Укажите свободный положительный код"); }
+    setAddOpen(true);
+  }
 
   const columns: DataColumn<ExpenseArticleView>[] = [
+    { id: "code", header: "Код", sortable: true, sortValue: row => row.code,
+      cell: row => <span className={cn("tabular-nums", !row.active && "text-muted-foreground")}>{row.code}</span> },
     {
       id: "name",
       header: "Название",
@@ -101,7 +113,7 @@ export function ArticlesView({ articles }: { articles: ExpenseArticleView[] }) {
             Зарплата статьёй не нужна — она учитывается из начислений по задачам
           </p>
         </div>
-        <Button onClick={() => setAddOpen(true)}>
+        <Button onClick={openAdd}>
           <Plus className="size-4" />
           Добавить статью
         </Button>
@@ -120,6 +132,8 @@ export function ArticlesView({ articles }: { articles: ExpenseArticleView[] }) {
           if (!next) {
             setName("");
             setComment("");
+            setCode("");
+            setError(null);
           }
           setAddOpen(next);
         }}
@@ -132,6 +146,14 @@ export function ArticlesView({ articles }: { articles: ExpenseArticleView[] }) {
             </DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="article-code">Код *</Label>
+              <Input id="article-code" inputMode="numeric" pattern="[0-9]*" maxLength={10}
+                value={code} aria-invalid={Boolean(error)} onChange={event => {
+                  if (/^[0-9]*$/.test(event.target.value)) { setCode(event.target.value); setError(null); }
+                }} />
+              {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
+            </div>
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="article-name">Название *</Label>
               <Input
@@ -159,7 +181,10 @@ export function ArticlesView({ articles }: { articles: ExpenseArticleView[] }) {
               disabled={pending || name.trim() === ""}
               onClick={() =>
                 startTransition(async () => {
+                  try { parseExpenseArticleCode(code); }
+                  catch (failure) { setError(failure instanceof Error ? failure.message : "Проверьте код"); return; }
                   const result = await addExpenseArticle({
+                    code,
                     name: name.trim(),
                     comment: comment.trim() || undefined,
                   });
@@ -168,7 +193,10 @@ export function ArticlesView({ articles }: { articles: ExpenseArticleView[] }) {
                     setAddOpen(false);
                     setName("");
                     setComment("");
+                    setCode("");
+                    setError(null);
                   } else {
+                    setError(result.error ?? "Ошибка");
                     toast.error(result.error ?? "Ошибка");
                   }
                 })
