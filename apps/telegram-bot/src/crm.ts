@@ -86,6 +86,9 @@ async function request<T>(
 }
 
 export const crm = {
+  calendarClaim(input:{namespace:string;botId:string;requestId:string}) {return request<{ok:boolean;claim?:import('./calendar-reminders').CalendarTelegramClaim|null}>('POST','/calendar-reminders/claim',input);},
+  calendarAuthorize(input:{namespace:string;botId:string;id:string;claimId:string}) {return request<{ok:boolean;claim?:import('./calendar-reminders').CalendarTelegramClaim}>('POST','/calendar-reminders/authorize',input);},
+  calendarAck(input:{namespace:string;botId:string;id:string;claimId:string}&import('./calendar-reminders').CalendarTelegramOutcome) {return request<{ok:boolean}>('POST','/calendar-reminders/ack',input);},
   async health(): Promise<void> {
     let response: Response;
     try {
