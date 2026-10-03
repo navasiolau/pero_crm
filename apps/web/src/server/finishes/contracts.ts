@@ -1,0 +1,11 @@
+import { z } from "zod";
+import type { Finish } from "@prisma/client";
+export const FINISH_KIND_LABELS = { ENAMEL: "Эмаль", VENEER: "Шпон", COATING: "Покрытие" } as const;
+const text = (max: number) => z.string().trim().min(1, "Заполните обязательное поле").max(max, `Не больше ${max} символов`);
+export const finishFieldsSchema = z.object({ kind: z.enum(["ENAMEL", "VENEER", "COATING"]), name: text(160), code: text(80).transform(value => value.normalize("NFKC").toUpperCase()).pipe(z.string().max(80, "Не больше 80 символов")), color: text(120) }).strict();
+export const finishUpdateSchema = finishFieldsSchema.extend({ id: z.uuid(), expectedRevision: z.number().int().min(0).max(2147483647) }).strict();
+export const finishActiveSchema = z.object({ id: z.uuid(), active: z.boolean(), expectedRevision: z.number().int().min(0).max(2147483647) }).strict();
+export type FinishFields = z.input<typeof finishFieldsSchema>;
+export type FinishView = Pick<Finish, "id" | "kind" | "name" | "code" | "color" | "active" | "revision"> & { updatedAt: string };
+export function finishView(row: Finish): FinishView { return { id: row.id, kind: row.kind, name: row.name, code: row.code, color: row.color, active: row.active, revision: row.revision, updatedAt: row.updatedAt.toISOString() }; }
+export type FinishMutationResult = { ok: true; row: FinishView; noOp?: boolean } | { ok: false; kind: "validation" | "conflict" | "forbidden" | "not-found" | "failure"; error: string };

@@ -813,6 +813,7 @@ model MaterialCategory {
   name      String
   comment   String?
   active    Boolean    @default(true)
+  revision  Int        @default(0)
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
   materials Material[]
@@ -1097,4 +1098,24 @@ model CalendarEntry {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   @@index([ownerId,startsAt])
+}
+// Независимый справочник отделок; Product snapshots и catalogue-media добавляются отдельно.
+enum FinishKind {
+  ENAMEL
+  VENEER
+  COATING
+}
+model Finish {
+  id        String     @id @default(uuid()) @db.Uuid
+  kind      FinishKind
+  name      String
+  code      String
+  color     String
+  active    Boolean    @default(true)
+  revision  Int        @default(0)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  @@unique([kind, code])
+  @@index([active, kind])
 }

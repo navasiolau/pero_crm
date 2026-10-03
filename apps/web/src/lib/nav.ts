@@ -1,3 +1,4 @@
+import { FINISH_CATALOG_READ_ROLES } from "./finish-catalog-access";
 import {
   Banknote,
   CalendarDays,
@@ -51,6 +52,7 @@ export const navItems: NavItem[] = [
   { href: "/products", label: "Изделия", icon: Package, roles: [...OFFICE_ROLES,"WORKER"], group: "manage" },
   { href: "/clients", label: "Клиенты", icon: Users, roles: OFFICE_ROLES, group: "manage" },
   { href: "/tasks", label: "Задачи", icon: ListChecks, roles: OFFICE_ROLES, group: "manage" },
+  { href: "/finishes", label: "Покрытия", icon: Package, roles: FINISH_CATALOG_READ_ROLES, group: "manage" },
   { href: "/prices", label: "Прайсы", icon: Receipt, roles: OFFICE_ROLES, group: "manage" },
   { href: "/warehouse", label: "Склад", icon: Warehouse, roles: OFFICE_ROLES, group: "manage" },
   { href: "/finance", label: "Финансы", icon: Banknote, roles: FINANCE_ROLES, group: "manage" },
