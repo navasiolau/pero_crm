@@ -23,7 +23,7 @@ import { readSketchUploadConfirmation } from "@/lib/product-sketch-ui";
 import {UploadErrorDetails} from "@/components/upload-error-details";
 import {createUploadAttempt,sendFileUpload,localUploadFailure,uploadAttemptMatchesContext,type UploadAttempt,type UploadFailure} from "@/lib/file-upload-client";
 
-type PhotoTarget = (MeasurementUploadContext & { assignCover?: never; coverSurface?:never }) | { projectId: string; productId: string; taskId?: never; stage?: never; assignCover: true; coverSurface?:boolean };
+type PhotoTarget = (MeasurementUploadContext & { assignCover?: never; coverSurface?:never; expectedSketchFileId?:never }) | { projectId: string; productId: string; taskId?: never; stage?: never; assignCover: true; coverSurface?:boolean; expectedSketchFileId?:string|null };
 
 // Кнопка «Фото» для замера (§6.2): открывает ВИДИМЫЙ диалог с дроп-зоной —
 // файл можно перетащить или выбрать кликом. Не зависит от того, как браузер
@@ -35,6 +35,7 @@ export function PhotoUploadButton({
   stage,
   assignCover,
   coverSurface,
+  expectedSketchFileId = null,
   filesCount,
   size = "sm",
   extensions,
@@ -75,7 +76,7 @@ export function PhotoUploadButton({
     let confirmation:{httpStatus:number;requestId:string}|undefined;
     try {
       if (uncertain.current && !retry) throw Error("Повторите прежнюю загрузку, чтобы проверить её результат.");
-      if(retry&&uncertain.current){const currentContext=assignCover?{projectId,productId,category:"PHOTO",assignCover:"1",expectedSketchFileId:"null"}:measurementUploadFields(taskId?{projectId,taskId}:{projectId,productId:productId!,stage:stage!});if(!uploadAttemptMatchesContext(uncertain.current.attempt,currentContext))throw Error("Контекст изменился. Откройте прежнюю карточку для проверки загрузки.");}
+      if(retry&&uncertain.current){const currentContext=assignCover?{projectId,productId,category:"PHOTO",assignCover:"1",expectedSketchFileId:expectedSketchFileId??"null"}:measurementUploadFields(taskId?{projectId,taskId}:{projectId,productId:productId!,stage:stage!});if(!uploadAttemptMatchesContext(uncertain.current.attempt,currentContext))throw Error("Контекст изменился. Откройте прежнюю карточку для проверки загрузки.");}
       if (beforeUpload && !await beforeUpload()) throw Error("Сначала сохраните цену, количество и инженера изделия.");
       if (productId && !file.type.startsWith("image/")) throw Error(assignCover ? "Эскиз должен быть изображением." : "Выберите фотографию; документ можно приложить отдельно в блоке замера.");
       if (extensions) {
@@ -86,7 +87,7 @@ export function PhotoUploadButton({
       mutationId = retry && uncertain.current ? uncertain.current.id : createRequestId();
       if (retry && uncertain.current) form=uncertain.current.attempt.form;
       else if (assignCover) {
-        form=sketchUploadForm(file,projectId,productId!,mutationId);
+        form=sketchUploadForm(file,projectId,productId!,mutationId,expectedSketchFileId);
       } else {
         form=new FormData();form.append("file",file);
         const context = taskId ? { projectId, taskId } as const : { projectId, productId: productId!, stage: stage! } as const;
@@ -156,7 +157,7 @@ export function PhotoUploadButton({
       <Dialog open={open} onOpenChange={next => { if (!busy) setOpen(next); }}>
         <DialogContent onPaste={event => { const file = event.clipboardData?.files?.[0]; if (file) { event.preventDefault(); void upload(file); } }}>
           <DialogHeader>
-            <DialogTitle>{assignCover ? "Добавить изображение эскиза" : productId ? "Фото замера изделия" : "Фото к задаче"}</DialogTitle>
+            <DialogTitle>{assignCover ? expectedSketchFileId ? "Заменить изображение эскиза" : "Добавить изображение эскиза" : productId ? "Фото замера изделия" : "Фото к задаче"}</DialogTitle>
             {!assignCover?<DialogDescription>Фото или замерный лист — попадёт в проект с категорией «Замер»</DialogDescription>:null}
           </DialogHeader>
           <UploadErrorDetails failure={error} />
