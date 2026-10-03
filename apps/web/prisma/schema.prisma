@@ -91,6 +91,7 @@ model User {
   assignedTasks   Task[]         @relation("TaskAssignee")
   calendarEntries CalendarEntry[]
   calendarReminderFacts CalendarReminderFact[]
+  telegramReminderOutboxes TelegramReminderOutbox[]
   notifications   Notification[]
   payrollEntries  PayrollEntry[]
   payouts         Payout[]
@@ -1098,6 +1099,7 @@ model CalendarEntry {
   reminderOffsetMinutes Int? @default(15)
   reminderNamespace String?
   reminderFacts CalendarReminderFact[]
+  telegramReminderOutboxes TelegramReminderOutbox[]
   revision Int @default(0)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1129,6 +1131,7 @@ enum CalendarReminderWebState {
  SKIPPED
 }
 model CalendarReminderFact {
+ telegramOutboxes TelegramReminderOutbox[]
  id String @id @default(cuid())
  entryId String
  entry CalendarEntry @relation(fields:[entryId],references:[id],onDelete:Restrict)
@@ -1145,4 +1148,42 @@ model CalendarReminderFact {
  webNotification Notification? @relation(fields:[webNotificationId],references:[id],onDelete:Restrict)
  @@unique([namespace,entryId,entryRevision])
  @@index([namespace,confirmedAt])
+}
+
+enum TelegramReminderState {
+ READY
+ CLAIMED
+ SENDING
+ SENT
+ RETRY
+ FAILED
+ UNKNOWN
+ CANCELLED
+}
+model TelegramReminderOutbox {
+ id String @id @default(cuid())
+ namespace String
+ factId String
+ fact CalendarReminderFact @relation(fields:[factId],references:[id],onDelete:Restrict)
+ ownerId String
+ owner User @relation(fields:[ownerId],references:[id],onDelete:Restrict)
+ entryId String
+ entry CalendarEntry @relation(fields:[entryId],references:[id],onDelete:Restrict)
+ entryRevision Int
+ chatIdSnapshot String
+ linkIdSnapshot String
+ linkedAtSnapshot DateTime @db.Timestamptz(3)
+ state TelegramReminderState @default(READY)
+ attempts Int @default(0)
+ claimId String? @unique
+ leaseExpiresAt DateTime? @db.Timestamptz(3)
+ retryAt DateTime? @db.Timestamptz(3)
+ retryAfterSeconds Int?
+ sentAt DateTime? @db.Timestamptz(3)
+ messageId String?
+ resultCode String?
+ createdAt DateTime @default(now())
+ updatedAt DateTime @updatedAt
+ @@unique([namespace,factId])
+ @@index([namespace,state,retryAt])
 }

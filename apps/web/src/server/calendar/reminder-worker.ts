@@ -1,3 +1,4 @@
+import {queuePendingTelegramReminders} from './telegram-worker';
 import {prisma} from '@/lib/prisma';
 import {getReminderContext} from './reminder-context';
 import {dispatchCalendarRemindersCore} from './reminders';
@@ -11,6 +12,6 @@ export function startCalendarReminderWorker(){
  if(workerState.calendarReminderWorker)return;
  const context=getReminderContext();if(!context?.enabled)return;
  const state={timer:undefined as unknown as ReturnType<typeof setInterval>,running:false};
- const tick=async()=>{if(state.running)return;state.running=true;try{await dispatchCalendarReminders();}catch{console.error('[calendar-reminders] delivery failed; next tick will retry');}finally{state.running=false;}};
+ const tick=async()=>{if(state.running)return;state.running=true;try{try{await dispatchCalendarReminders();}catch{console.error('[calendar-reminders] delivery failed; next tick will retry');}try{await queuePendingTelegramReminders();}catch{console.error('[calendar-reminders] telegram queue unavailable');}}finally{state.running=false;}};
  state.timer=setInterval(()=>{void tick();},60000);state.timer.unref?.();workerState.calendarReminderWorker=state;void tick();
 }

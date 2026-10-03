@@ -1,3 +1,5 @@
+import {resolveBotCalendarContext,sendCalendarTelegramMessage} from "./calendar-reminders";
+import {createCalendarReminderJob} from "./calendar-job";
 import { config } from "./config";
 import { crm } from "./crm";
 import { tg, TgError } from "./tg";
@@ -10,6 +12,7 @@ import { BotHealthReporter } from "./health";
 const POLL_TIMEOUT_SEC = 25;
 const CRM_HEALTH_INTERVAL_MS = config.recoveryTest ? 100 : 30_000;
 const health = new BotHealthReporter(config.healthFile);
+let calendarJob:ReturnType<typeof createCalendarReminderJob>|null=null;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -33,6 +36,7 @@ async function monitorCrmHealth(): Promise<never> {
     try {
       await crm.health();
       health.crmSuccess();
+      void calendarJob?.tick();
     } catch {
       health.crmFailure();
     }
@@ -47,6 +51,10 @@ async function main(): Promise<void> {
     console.error("[bot] у бота нет username — проверьте токен");
     process.exit(1);
   }
+  try {
+    const context=resolveBotCalendarContext(process.env,String(me.id),config.crmBaseUrl);
+    calendarJob=createCalendarReminderJob(context,{claim:crm.calendarClaim,authorize:crm.calendarAuthorize,ack:crm.calendarAck,send:claim=>sendCalendarTelegramMessage({apiOrigin:config.telegramApiOrigin,token:config.token,claim})});
+  } catch {console.error('[bot] calendar reminders disabled: invalid context');}
   console.log(`[bot] запущен как @${me.username}`);
   await registerWithRetry(me.username);
 
