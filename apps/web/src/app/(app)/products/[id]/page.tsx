@@ -23,6 +23,9 @@ import { productAttachmentGroups } from "@/lib/product-attachment-groups";
 import { MaterialsTab } from "../../projects/[id]/materials-tab";
 import { TasksTab } from "../../projects/[id]/tasks-tab";
 import { ProductHeader } from "./product-header";
+import { ProductFinishAssignments } from "@/components/product-finish-assignments";
+import { getProductFinishStateFor } from "@/server/product-finishes/queries";
+import { listFinishesFor } from "@/server/finishes/queries";
 import { ProductInlineProvider } from "@/components/product-inline-provider";
 import { ProductInlineTitle, ProductInlineContacts, ProductInlineDetails } from "@/components/product-inline-fields";
 import { ProductCoverClient } from "./product-sketch";
@@ -51,6 +54,9 @@ export default async function ProductPage({
   if (!product) notFound();
   const returnDestination = resolveProductReturn((await searchParams).returnTo, product.project.id);
 
+  const finishState = await getProductFinishStateFor({id:session.user.id,name:session.user.name??"",roles:role,source:"web"},product.id);
+  if (!finishState) notFound();
+  const finishChoices = (await listFinishesFor(session.user)).filter(row=>row.active);
   const canManage = hasAnyRole(role, MANAGER_ROLES);
   const canViewAllPercentage = canManage || hasAnyRole(role, FINANCE_ROLES);
   const canEditTech = canEditProductTechnicalBlock(actor, product);
@@ -130,6 +136,7 @@ export default async function ProductPage({
           />}
         />}
         documents={<ProductDocuments projectId={product.project.id} productId={product.id} production={attachments.production} installation={attachments.installation} canEdit={canEditTech} canManage={canManage} noModel={percentageView.noModel} extensions={stageConfig.enabled ? stageConfig.extensions ?? undefined : undefined} />}
+        finishes={<ProductFinishAssignments productId={product.id} initial={finishState} choices={finishChoices} canEdit={canEditTech}/>}
         assembly={<SinglePercentageRow {...percentageProps} kind="ASSEMBLY" section={percentageView.sections.ASSEMBLY} candidates={percentagePeople.filter(user => user.roles.includes("WORKER"))} />}
         installation={<SinglePercentageRow {...percentageProps} kind="INSTALLATION" section={percentageView.sections.INSTALLATION} candidates={percentagePeople.filter(user => user.roles.includes("MOUNTER"))} />}
         works={<TasksTab
