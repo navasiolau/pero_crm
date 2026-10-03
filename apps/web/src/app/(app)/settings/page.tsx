@@ -1,3 +1,7 @@
+import { auth } from "@/auth";
+import { redirect } from "next/navigation";
+import { canAccessSettingsPath } from "@/lib/settings-access";
+import { ADMIN_ROLES, hasAnyRole } from "@/lib/roles";
 import Link from "next/link";
 import { Blocks, KeyRound, Users, Wallet } from "lucide-react";
 
@@ -36,17 +40,20 @@ const sections = [
   },
 ];
 
-export default function SettingsPage() {
+export default async function SettingsPage() {
+  const session = await auth();
+  if (!session?.user || !canAccessSettingsPath(session.user.roles, "/settings")) redirect("/");
+  const admin = hasAnyRole(session.user.roles, ADMIN_ROLES);
   return (
     <div className="flex flex-col gap-6">
       <div>
         <h1 className="text-2xl font-semibold">Настройки</h1>
         <p className="text-sm text-muted-foreground">
-          Управление системой — доступно администратору и директору
+          {admin ? "Управление системой — доступно администратору и директору" : "Проценты новых изделий"}
         </p>
       </div>
       <div className="grid gap-4 sm:grid-cols-2">
-        {sections.map((section) => (
+        {sections.filter(section => canAccessSettingsPath(session.user.roles, section.href)).map((section) => (
           <Link key={section.href} href={section.href}>
             <Card className="h-full transition-colors hover:bg-accent/50">
               <CardHeader>
