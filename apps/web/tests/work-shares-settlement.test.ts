@@ -127,6 +127,10 @@ test("work allocation counts split group once and existing parts cannot be moved
 
 test("selecting one part as dependency expands to the whole group; cycles roll back edits", async () => {
   fixture = taskShareFixture();
+  // The dependent is a real task of an independent priced Work. It must not
+  // consume quantity from the source Work whose old group is tested below.
+  fixture.state().works.push({...fixture.state().works[0],id:"dependent-work",quantity:"1",total:"100"});
+  Object.assign(fixture.state().tasks.find(task=>task.id==="dependent")!,{workId:"dependent-work",quantity:"1"});
   const result = historicalTaskAllocation(fixture);
   assert.ok(result.ok);
   assert.equal((await actions.updateTask("dependent", { dependencyIds: ["source"] })).ok, true);
