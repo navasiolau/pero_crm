@@ -4,7 +4,7 @@ import { PERCENTAGE_STAGE_POLICY } from "./stage-policy";
 import { readWorkReview } from "./contracts";
 import { hasAnyRole, MANAGER_ROLES } from "@/lib/roles";
 import { prisma } from "@/lib/prisma";
-import { hasFullProjectVisibility, productVisibilityWhere, resolveVisibilityActor } from "@/server/access/visibility";
+import { fileVisibilityWhere,hasFullProjectVisibility, productVisibilityWhere, resolveVisibilityActor } from "@/server/access/visibility";
 
 type Reader = Pick<PrismaClient, "product" | "task" | "productPercentageParticipant" | "user" | "payrollEntry">;
 export async function getProductPercentageView(actor: { id: string; roles: Role[] }, productId: string,
@@ -18,7 +18,7 @@ export async function getProductPercentageView(actor: { id: string; roles: Role[
       works: { where: { paymentKind: { in: ["LEGACY", "INSTALLATION"] } },
         select: { id: true, title: true, paymentKind: true, projectId: true, stagePayPoolId: true, poolWeightUnits: true,
           tasks: { select: { id: true, projectId: true, productId: true } } } },
-      files: { where: { fileName: { endsWith: ".b3d", mode: "insensitive" } }, select: { id: true }, take: 1 },
+      files: { where: { AND:[fileVisibilityWhere(visibilityActor),{ fileName: { endsWith: ".b3d", mode: "insensitive" } }] }, select: { id: true }, take: 1 },
     } });
   if (!product) throw new Error("Изделие не найдено");
   const manager = hasAnyRole(actor.roles, MANAGER_ROLES);

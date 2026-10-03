@@ -89,7 +89,7 @@ export function canEditProductTechnicalBlock(actor: VisibilityActor, product: { 
   );
 }
 
-export function productVisibilityWhere(actor: VisibilityActor): Prisma.ProductWhereInput {
+export function assignedProductVisibilityWhere(actor: VisibilityActor): Prisma.ProductWhereInput {
   if (hasFullProjectVisibility(actor)) return {};
   const grants: Prisma.ProductWhereInput[] = [];
   grants.push(currentEngineeringReadWhere(actor));
@@ -106,10 +106,10 @@ export function productVisibilityWhere(actor: VisibilityActor): Prisma.ProductWh
   return grants.length ? { OR: grants } : { id: { in: [] } };
 }
 
-export function projectVisibilityWhere(actor: VisibilityActor): Prisma.ProjectWhereInput {
+export function assignedProjectVisibilityWhere(actor: VisibilityActor): Prisma.ProjectWhereInput {
   if (hasFullProjectVisibility(actor)) return {};
   const grants: Prisma.ProjectWhereInput[] = [];
-  grants.push({ products: { some: productVisibilityWhere(actor) } });
+  grants.push({ products: { some: assignedProductVisibilityWhere(actor) } });
   if (hasAnyRole(actor.roles, FIELD_ROLES)) grants.push({
     products: { none: {} }, tasks: { some: { assigneeId: actor.id, productId: null } },
   });
@@ -162,8 +162,8 @@ export function fileVisibilityWhere(actor: VisibilityActor): Prisma.FileWhereInp
   if (hasFullProjectVisibility(actor)) return {};
   return {
     AND: [
-      { project: projectVisibilityWhere(actor) },
-      { OR: [{ productId: null }, { product: productVisibilityWhere(actor) }] },
+      { project: assignedProjectVisibilityWhere(actor) },
+      { OR: [{ productId: null }, { product: assignedProductVisibilityWhere(actor) }] },
       { OR: [{ taskId: null }, { task: taskVisibilityWhere(actor) }] },
     ],
   };
@@ -171,4 +171,14 @@ export function fileVisibilityWhere(actor: VisibilityActor): Prisma.FileWhereInp
 
 export function clientVisibilityWhere(actor: VisibilityActor): Prisma.ClientWhereInput {
   return hasFullProjectVisibility(actor) ? {} : { projects: { some: projectVisibilityWhere(actor) } };
+}
+
+/** Production-wide read is separate from assignment/file/execution grants. */
+export function productVisibilityWhere(actor:VisibilityActor):Prisma.ProductWhereInput {
+ return hasRole(actor.roles,"WORKER") && !hasFullProjectVisibility(actor)
+  ? {OR:[assignedProductVisibilityWhere(actor),{status:"PRODUCTION"}]} : assignedProductVisibilityWhere(actor);
+}
+export function projectVisibilityWhere(actor:VisibilityActor):Prisma.ProjectWhereInput {
+ return hasRole(actor.roles,"WORKER") && !hasFullProjectVisibility(actor)
+  ? {OR:[assignedProjectVisibilityWhere(actor),{products:{some:productVisibilityWhere(actor)}}]} : assignedProjectVisibilityWhere(actor);
 }

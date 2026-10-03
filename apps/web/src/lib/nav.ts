@@ -50,7 +50,7 @@ export const navItems: NavItem[] = [
   { href: "/payroll", label: "Моя зарплата", icon: Wallet, roles: PAYROLL_ROLES, group: "main" },
   { href: "/advances", label: "Авансы", icon: HandCoins, roles: ADVANCE_ROLES, group: "main" },
   { href: "/projects", label: "Проекты", icon: FolderKanban, roles: OFFICE_ROLES, group: "manage" },
-  { href: "/products", label: "Изделия", icon: Package, roles: OFFICE_ROLES, group: "manage" },
+  { href: "/products", label: "Изделия", icon: Package, roles: [...OFFICE_ROLES,"WORKER"], group: "manage" },
   { href: "/clients", label: "Клиенты", icon: Users, roles: OFFICE_ROLES, group: "manage" },
   { href: "/tasks", label: "Задачи", icon: ListChecks, roles: OFFICE_ROLES, group: "manage" },
   { href: "/prices", label: "Прайсы", icon: Receipt, roles: OFFICE_ROLES, group: "manage" },
