@@ -26,21 +26,32 @@ before(() => {
   actions = require("../src/server/tasks/actions");
 });
 
-test("manager can edit ordinary fields and reassign an unpaid engineering task without changing its pay vector", async () => {
-  engineering(); fixture.state().users.find((user) => user.id === "recipient")!.roles = ["ENGINEER"];
-  const result = await actions.updateTask("source", { title: "Уточнённое название", assigneeId: "recipient", estimateMinutes: 45 });
+test("manager can edit legacy engineering title/deadline without moving pay vector or frozen payroll", async () => {
+  engineering();fixture.state().works[0].priceSnapshot=null;
+  fixture.state().works.push({...fixture.state().works[0],id:"another-work",paymentKind:"LEGACY",priceSnapshot:"700",quantity:"1",total:"700",stagePayPoolId:null});
+  fixture.state().entries.push({id:"original-700",userId:"worker",projectId:"project",workId:"another-work",scheme:"PIECE",month:"2026-09",amount:"700",bynAmount:"700",currency:"BYN"});
+  const originalEntries=structuredClone(fixture.state().entries);
+  const result = await actions.updateTask("source", { title: "Уточнённое название", dueAt:"2026-10-10", estimateMinutes: 45 });
   assert.ok(result.ok);
-  assert.equal(fixture.state().tasks[0].assigneeId, "recipient");
+  assert.equal(fixture.state().tasks[0].assigneeId, "worker");
   assert.equal(fixture.state().tasks[0].stageShareUnits, 1_000_000);
   assert.equal(fixture.state().tasks[0].quantity, "10");
   assert.equal(fixture.state().pools[0].revision, 1);
+  assert.deepEqual(fixture.state().entries,originalEntries);
+  assert.equal(fixture.state().works[0].priceSnapshot,null);
 });
 
-test("manager can explicitly repair missing quantity on an ungrouped converted NEW task", async () => {
-  engineering(); fixture.state().tasks[0].quantity = null;
+test("manager can explicitly repair missing quantity on an ordinary priced NEW task", async () => {
+  fixture=taskShareFixture("DESIGN");fixture.state().tasks[0].status="NEW";fixture.state().tasks[0].quantity = null;
   const result = await actions.updateTask("source", { quantity: 2 });
   assert.ok(result.ok); assert.equal(fixture.state().tasks[0].quantity, "2.00");
-  assert.equal(fixture.state().tasks[0].stageShareUnits, 1_000_000);
+  assert.equal(fixture.state().works[0].priceSnapshot,"100");
+  assert.equal(fixture.state().entries.length,0);
+});
+
+test("legacy engineering quantity cannot be redistributed by generic repair",async()=>{
+  engineering();fixture.state().tasks[0].quantity=null;const before=structuredClone(fixture.state());
+  assert.equal((await actions.updateTask("source",{quantity:2})).ok,false);assert.deepEqual(fixture.state(),before);
 });
 
 test("engineering task cannot change its fund context, paid facts or settled state through generic edit", async () => {
@@ -58,10 +69,12 @@ test("engineering task cannot change its fund context, paid facts or settled sta
   }
 });
 
-test("reassignment of an active engineering task stops the old timer and lets the new assignee start their own", async () => {
+test("legacy active engineering reassignment is refused without stopping timer or moving pay", async () => {
   engineering(); fixture.state().tasks[0].status = "IN_PROGRESS";
-  assert.ok((await actions.updateTask("source", { assigneeId: "recipient" })).ok);
-  assert.equal(fixture.state().tasks[0].status, "NEW");
-  assert.ok(fixture.state().times.every((entry) => entry.stoppedAt !== null));
+  const before=structuredClone(fixture.state());
+  assert.equal((await actions.updateTask("source", { assigneeId: "recipient" })).ok,false);
+  assert.deepEqual(fixture.state(),before);
+  assert.equal(fixture.state().tasks[0].status, "IN_PROGRESS");
+  assert.ok(fixture.state().times.every((entry) => entry.stoppedAt === null));
   assert.equal(fixture.state().times[0].minutes, 20);
 });
