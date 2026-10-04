@@ -22,19 +22,30 @@ test('expense missing target rejects before DB/FX',async()=>{projectReads=fxCall
 test('audit failure rolls the general income back with no outbox',async()=>{writes=audits=events=0;auditFails=true;try{assert.equal((await createPaymentCore(actor,{...input,projectId:null,rate:3})).ok,false);assert.equal(writes+audits+events,0);}finally{auditFails=false;}});
 
 
-test('selected income article persists for general and project-linked FX income without expense caps',async()=>{
- for(const projectId of [null,'p']){articleActive=true;articleReads=0;writes=0;
- assert.equal((await createPaymentCore(actor,{...input,projectId,expenseArticleId:'article',rate:3})).ok,true);
- assert.equal(saved.expenseArticleId,'article');assert.equal(saved.direction,'INCOME');assert.equal(saved.amount,100);assert.equal(saved.bynAmount,300);assert.equal(saved.projectAmount,projectId?300:null);assert.equal(writes,1);assert.equal(articleReads,2);}
+test('income rejects supplied expense article before reads, FX or any financial records',async()=>{
+ for(const projectId of [null,'p']){projectReads=articleReads=fxCalls=writes=audits=events=0;
+ const result=await createPaymentCore(actor,{...input,projectId,expenseArticleId:'article'});
+ assert.equal(result.ok,false);assert.equal(projectReads+articleReads+fxCalls+writes+audits+events,0);}
 });
-test('unknown or inactive selected income article rejects before FX and write',async()=>{
+test('plain income stores NULL article for general and project-linked cash snapshots',async()=>{
+ for(const projectId of [null,'p']){articleReads=0;
+ assert.equal((await createPaymentCore(actor,{...input,projectId,rate:3})).ok,true);
+ assert.equal(saved.expenseArticleId,null);assert.equal(saved.direction,'INCOME');assert.equal(saved.amount,100);assert.equal(saved.bynAmount,300);assert.equal(saved.projectAmount,projectId?300:null);assert.equal(articleReads,0);}
+});
+test('direct transaction refuses income article even when input and preparation agree',async()=>{
+ writes=audits=events=0;
+ const prepared={project:null,account:{id:'cash',name:'USD cash'},articleId:'article',paidAt:new Date(),rate:3,rateDate:null,amount:100,bynAmount:300};
+ await assert.rejects(createPaymentInTransaction(actor,{...input,projectId:null,expenseArticleId:'article'},prepared,tx as unknown as Prisma.TransactionClient));
+ assert.equal(writes+audits+events,0);
+});
+test('expense retains active article FK and rejects unknown, inactive or timing deactivation',async()=>{
+ articleActive=true;articleReads=0;
+ assert.equal((await createPaymentCore(actor,{...input,direction:'EXPENSE',expenseArticleId:'article',rate:3})).ok,true);
+ assert.equal(saved.expenseArticleId,'article');assert.equal(saved.direction,'EXPENSE');assert.equal(articleReads,2);
  for(const id of ['unknown','article']){articleActive=id!=='article';writes=fxCalls=0;
- const result=await createPaymentCore(actor,{...input,expenseArticleId:id});assert.equal(result.ok,false);assert.equal(writes+fxCalls,0);}
- articleActive=true;
-});
-test('article deactivation between preparation and transaction rejects income atomically',async()=>{
+ assert.equal((await createPaymentCore(actor,{...input,direction:'EXPENSE',expenseArticleId:id})).ok,false);assert.equal(writes+fxCalls,0);}
  articleActive=true;deactivateBeforeTransaction=true;writes=audits=events=0;
- try{const result=await createPaymentCore(actor,{...input,expenseArticleId:'article',rate:3});assert.equal(result.ok,false);assert.equal(writes+audits+events,0);}finally{deactivateBeforeTransaction=false;articleActive=true;}
+ try{assert.equal((await createPaymentCore(actor,{...input,direction:'EXPENSE',expenseArticleId:'article',rate:3})).ok,false);assert.equal(writes+audits+events,0);}finally{deactivateBeforeTransaction=false;articleActive=true;}
 });
 test('transaction refuses changed or omitted article in either input or prepared snapshot',async()=>{
  const prepared={project:null,account:{id:'cash',name:'USD cash'},articleId:'article',paidAt:new Date(),rate:3,rateDate:null,amount:100,bynAmount:300};

@@ -33,7 +33,7 @@ export const paymentSchema = z.object({
   rateDate: z.string().optional(), // YYYY-MM-DD
   paidAt: z.string().optional(), // YYYY-MM-DD; пусто — сейчас
   comment: z.string().optional(),
-}).refine(data => data.direction !== "EXPENSE" || !!data.projectId, { message: "Для расхода выберите действующий проект", path: ["projectId"] });
+}).refine(data => data.direction !== "EXPENSE" || !!data.projectId, { message: "Для расхода выберите действующий проект", path: ["projectId"] }).refine(data => data.direction !== "INCOME" || !data.expenseArticleId, { message: "У прихода не может быть статьи расхода", path: ["expenseArticleId"] });
 
 export async function createPaymentCore(
   actor: DomainActor,
