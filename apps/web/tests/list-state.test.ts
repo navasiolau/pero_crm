@@ -1,14 +1,53 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { encodeListPreference, normalizeListQuery, resolveListState, updateListQuery } from "../src/lib/list-state";
+import { decodeListPreference, encodeListPreference, normalizeListQuery, resolveListState, updateListQuery } from "../src/lib/list-state";
+import { encodeProjectFilterValue, parseProjectFilterValue } from "../src/lib/project-filter-values";
 
 const fields = (query: string) => Object.fromEntries(new URLSearchParams(query));
+
+test("project codec distinguishes all/none and retains a selected ID absent from options", () => {
+  assert.equal(parseProjectFilterValue(undefined), undefined);
+  assert.equal(parseProjectFilterValue(" "), undefined);
+  assert.equal(encodeProjectFilterValue(undefined), null);
+  assert.equal(encodeProjectFilterValue([]), "[]");
+  assert.deepEqual(parseProjectFilterValue("[]"), []);
+  assert.deepEqual(parseProjectFilterValue(" old-selected-id "), ["old-selected-id"]);
+  assert.equal(encodeProjectFilterValue(["z", "a", "z"]), '["a","z"]');
+});
+
+test("project multi-value normalization preserves five clients, two engineers and explicit none", () => {
+  const source = new URLSearchParams({ client: JSON.stringify(["c5", "c2", "c1", "c4", "c3", "c1"]), engineer: '["e2","e1"]', stage: '[]', manager: '[]', active: '1' });
+  assert.deepEqual(fields(normalizeListQuery("projects", source.toString())), {
+    view: "kanban", client: '["c1","c2","c3","c4","c5"]', engineer: '["e1","e2"]', stage: '[]', manager: '[]', active: '1',
+  });
+  assert.deepEqual(fields(normalizeListQuery("projects", "client=c1&stage=IN_WORK")), { view: "kanban", client: '["c1"]', stage: '["IN_WORK"]' });
+  assert.equal(normalizeListQuery("projects", ""), "view=kanban");
+});
+
+test("project preferences upgrade V1 effective activity, create V2 and keep products V1", () => {
+  const old = JSON.stringify({ version: 1, revision: "old", query: "view=table&engineer=e1" });
+  assert.deepEqual(fields(decodeListPreference("projects", old)!), { view: "table", engineer: '["e1"]', active: "1" });
+  assert.equal(new URLSearchParams(decodeListPreference("projects", JSON.stringify({ version: 1, query: "active=0" }))!).get("active"), "0");
+  assert.equal(JSON.parse(encodeListPreference("projects", "", "new")).version, 2);
+  assert.equal(JSON.parse(encodeListPreference("products", "engineer=e1", "new")).version, 1);
+  assert.equal(decodeListPreference("products", old), "view=table&engineer=e1");
+  assert.equal(decodeListPreference("products", JSON.stringify({ version: 2, query: "engineer=e1" })), null);
+});
+
+test("project normalization never drops a long valid ID set or widens an invalid one", () => {
+  const ids = Array.from({ length: 100 }, (_, index) => `client-${String(index).padStart(3, "0")}`);
+  const source = new URLSearchParams({ client: JSON.stringify(ids) });
+  assert.deepEqual(JSON.parse(new URLSearchParams(normalizeListQuery("projects", source.toString())).get("client")!), ids);
+  for (const client of ['["c1",7]', '["c1"', JSON.stringify(["x".repeat(129)]), '{"id":"c1"}']) {
+    assert.equal(new URLSearchParams(normalizeListQuery("projects", new URLSearchParams({ client }).toString())).get("client"), "[]");
+  }
+});
 
 test("bare project route restores all saved filters, search, sorting, view and paging", () => {
   const query = "view=table&q=Кухня&stage=IN_WORK&client=c1&manager=m1&engineer=e1&active=0&sort=title&dir=asc&page=3&pageSize=50";
   const saved = encodeListPreference("projects", query, "one");
-  assert.deepEqual(fields(resolveListState("projects", {}, saved)), fields(query));
+  assert.deepEqual(fields(resolveListState("projects", {}, saved)), { ...fields(query), stage: '["IN_WORK"]', client: '["c1"]', manager: '["m1"]', engineer: '["e1"]' });
 });
 
 test("bare product route restores its own full state, including project and engineer", () => {
@@ -18,7 +57,7 @@ test("bare product route restores its own full state, including project and engi
 
 test("explicit partial URL overrides the entire saved state, including saved table view", () => {
   const saved = encodeListPreference("projects", "view=table&q=old&client=c1&page=3", "one");
-  assert.deepEqual(fields(resolveListState("projects", { engineer: "e2" }, saved, "table")), { view: "kanban", engineer: "e2" });
+  assert.deepEqual(fields(resolveListState("projects", { engineer: "e2" }, saved, "table")), { view: "kanban", engineer: '["e2"]' });
 });
 
 test("even an unknown explicit query does not restore hidden saved filters", () => {

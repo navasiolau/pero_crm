@@ -21,6 +21,45 @@ function fixture() {
   return { service, rows, login: (id: string | null) => { user = id; } };
 }
 
+test("V1 load preserves its raw CAS token and upgrade saves V2 without expiry", async () => {
+  const f = fixture();
+  const raw = '{ "version": 1, "revision": "2000-old", "query": "view=table&client=c1" }';
+  f.rows.set("alice/projects.list", raw);
+  const loaded = await f.service.load("projects", {});
+  assert.equal(loaded.value, raw);
+  assert.equal(new URLSearchParams(loaded.query).get("active"), "1");
+  const choice = new URLSearchParams({ view: "table", client: '["c1","c2","c3","c4","c5"]', engineer: '["e1","e2"]' }).toString();
+  const saved = await f.service.save("projects", choice, loaded.value);
+  assert.equal(saved.ok, true);
+  assert.equal(JSON.parse(saved.value!).version, 2);
+  const late = await f.service.save("projects", "client=c3", raw);
+  assert.equal(late.ok, false);
+  assert.equal(late.value, saved.value);
+  f.login(null); f.login("alice");
+  assert.equal((await f.service.load("projects", {})).value, saved.value);
+  assert.equal(new URLSearchParams((await f.service.load("projects", {})).query).get("engineer"), '["e1","e2"]');
+});
+
+test("large project selections fit bounded save and subsequent raw CAS while products retain bounds", async () => {
+  const f = fixture();
+  const clients = Array.from({ length: 150 }, (_, index) => `client-${index}-${"x".repeat(20)}`);
+  const query = new URLSearchParams({ client: JSON.stringify(clients) }).toString();
+  assert.ok(query.length > 4096);
+  const saved = await f.service.save("projects", query, null);
+  assert.equal(saved.ok, true);
+  assert.equal(JSON.parse(new URLSearchParams(decodeListPreference("projects", saved.value)!).get("client")!).length, clients.length);
+  assert.equal((await f.service.save("projects", "client=[]", saved.value)).ok, true);
+  await assert.rejects(f.service.save("products", query, null), /параметры/);
+  await assert.rejects(f.service.save("projects", "x".repeat(16_385), null), /параметры/);
+  const oversized = new URLSearchParams({ client: JSON.stringify(Array.from({ length: 150 }, (_, index) => `${index}${"я".repeat(40)}`)) }).toString();
+  const before = [...f.rows];
+  await assert.rejects(f.service.save("projects", oversized, saved.value), /параметры/);
+  const expands = `client=${JSON.stringify(Array.from({ length: 150 }, (_, index) => `${index}${"я".repeat(40)}`))}`;
+  assert.ok(expands.length < 16_384);
+  await assert.rejects(f.service.save("projects", expands, saved.value), /параметры/);
+  assert.deepEqual([...f.rows], before);
+});
+
 test("authenticated preference survives returning and remains separate per section and user", async () => {
   const f = fixture();
   assert.equal((await f.service.save("projects", "view=table&q=Alice", null)).ok, true);
@@ -57,7 +96,7 @@ test("load never writes, including explicit URLs and framework prefetches", asyn
   const f = fixture();
   await f.service.save("projects", "view=table&q=old", null);
   const before = [...f.rows];
-  assert.equal((await f.service.load("projects", { engineer: "new" })).query, "view=kanban&engineer=new");
+  assert.equal(new URLSearchParams((await f.service.load("projects", { engineer: "new" })).query).get("engineer"), '["new"]');
   assert.deepEqual([...f.rows], before);
 });
 

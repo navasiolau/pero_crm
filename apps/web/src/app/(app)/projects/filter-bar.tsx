@@ -1,29 +1,21 @@
 "use client";
 
 import { RotateCcw, Search } from "lucide-react";
-import type { ProjectStage } from "@prisma/client";
 
 import { ResponsiveFilterPanel } from "@/components/responsive-filter-panel";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { SearchableSelect } from "@/components/ui/searchable-select";
+import { MultiSelectFilter } from "@/components/ui/multi-select-filter";
 import { useListParams, useListSearch } from "@/lib/list-params";
-import { STAGES, stageLabels } from "@/lib/stages";
+import { encodeProjectFilterValue, parseProjectFilterValue } from "@/lib/project-filter-values";
+import { STAGES } from "@/lib/stages";
 
 import type { SelectOption } from "./projects-view";
 
 // Фильтр-бар раздела «Проекты»: состояние — в URL (?q=&stage=&client=&…).
-// «Только незавершённые» включена по умолчанию (параметра active нет);
-// снятая галочка пишется как active=0.
+// Отсутствующий фильтр означает все; [] — явный пустой выбор.
 export function ProjectsFilterBar({
   clients,
   managers,
@@ -36,17 +28,14 @@ export function ProjectsFilterBar({
   const { get, set, reset, pending, canReset } = useListParams();
   const { q, setQ } = useListSearch();
 
-  const stageRaw = get("stage");
-  const stage = (STAGES.some((item) => item.id === stageRaw)
-    ? stageRaw
-    : "") as ProjectStage;
-  const clientId = get("client");
-  const managerId = get("manager");
-  const engineerId = get("engineer");
-  const activeOnly = get("active") !== "0";
+  const stages = parseProjectFilterValue(get("stage"));
+  const clientIds = parseProjectFilterValue(get("client"));
+  const managerIds = parseProjectFilterValue(get("manager"));
+  const engineerIds = parseProjectFilterValue(get("engineer"));
+  const activeOnly = get("active") === "1";
   const hasFilters = canReset || Boolean(q);
 
-  // SelectOption (id/name) → SearchableOption (value/label)
+  // SelectOption (id/name) → пункты чекбоксного фильтра.
   const toOptions = (items: SelectOption[]) =>
     items.map((item) => ({ value: item.id, label: item.name }));
 
@@ -62,51 +51,45 @@ export function ProjectsFilterBar({
         />
       </div>
 
-      <Select
-        value={stage || "all"}
-        onValueChange={(value: string | null) =>
-          set({ stage: !value || value === "all" ? null : value, page: null })
-        }
-      >
-        <SelectTrigger className="w-40">
-          <SelectValue>{stage ? stageLabels[stage] : "Все статусы"}</SelectValue>
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">Все статусы</SelectItem>
-          {STAGES.map((item) => (
-            <SelectItem key={item.id} value={item.id}>
-              {item.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      <div className="w-40">
+        <MultiSelectFilter
+          label="Статус"
+          options={STAGES.map((item) => ({ value: item.id, label: item.label }))}
+          value={stages}
+          onChange={(value) => set({ stage: encodeProjectFilterValue(value), page: null })}
+          allLabel="Все статусы"
+          searchPlaceholder="Поиск статуса…"
+        />
+      </div>
 
       <div className="w-48">
-        <SearchableSelect
+        <MultiSelectFilter
+          label="Клиент"
           options={toOptions(clients)}
-          value={clientId}
-          onChange={(value) => set({ client: value || null, page: null })}
-          placeholder="Все клиенты"
+          value={clientIds}
+          onChange={(value) => set({ client: encodeProjectFilterValue(value), page: null })}
+          allLabel="Все клиенты"
           searchPlaceholder="Поиск клиента…"
-          allowClear
         />
       </div>
       <div className="w-44">
-        <SearchableSelect
+        <MultiSelectFilter
+          label="Менеджер"
           options={toOptions(managers)}
-          value={managerId}
-          onChange={(value) => set({ manager: value || null, page: null })}
-          placeholder="Все менеджеры"
-          allowClear
+          value={managerIds}
+          onChange={(value) => set({ manager: encodeProjectFilterValue(value), page: null })}
+          allLabel="Все менеджеры"
+          searchPlaceholder="Поиск менеджера…"
         />
       </div>
       <div className="w-44">
-        <SearchableSelect
+        <MultiSelectFilter
+          label="Инженер"
           options={toOptions(engineers)}
-          value={engineerId}
-          onChange={(value) => set({ engineer: value || null, page: null })}
-          placeholder="Все инженеры"
-          allowClear
+          value={engineerIds}
+          onChange={(value) => set({ engineer: encodeProjectFilterValue(value), page: null })}
+          allLabel="Все инженеры"
+          searchPlaceholder="Поиск инженера…"
         />
       </div>
 
@@ -115,14 +98,14 @@ export function ProjectsFilterBar({
           id="projects-active-only"
           checked={activeOnly}
           onCheckedChange={(checked) =>
-            set({ active: checked ? null : "0", page: null })
+            set({ active: checked ? "1" : "0", page: null })
           }
         />
         <Label
           htmlFor="projects-active-only"
           className="text-sm font-normal whitespace-nowrap"
         >
-          Только незавершённые
+          Незавершённые
         </Label>
       </div>
 

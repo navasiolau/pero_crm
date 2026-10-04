@@ -10,6 +10,7 @@ import {
   hasAnyRole,
 } from "@/lib/roles";
 import { STAGES } from "@/lib/stages";
+import { parseProjectFilterValue } from "@/lib/project-filter-values";
 import { taskDetailsIncludeFor,taskWorkspaceWhere } from "@/server/tasks/queries";
 import { listProjectShortages } from "@/server/warehouse/queries";
 import { productSketchProjection } from "@/server/products/sketch-projection";
@@ -32,7 +33,11 @@ export interface ProjectListFilters {
   clientId?: string;
   managerId?: string;
   engineerId?: string;
-  // «Только незавершённые» — по умолчанию включена (скрывает DONE и REFUSED)
+  stages?: ProjectStage[];
+  clientIds?: string[];
+  managerIds?: string[];
+  engineerIds?: string[];
+  // «Незавершённые» скрывает DONE и REFUSED; новые настройки выключены.
   activeOnly: boolean;
   sort?: ProjectSortField;
   dir?: "asc" | "desc";
@@ -73,22 +78,26 @@ function projectWhere(
   filterParticipantIds: string[],
 ): Prisma.ProjectWhereInput {
   const where: Prisma.ProjectWhereInput = {};
-  // Этап: галочка «Только незавершённые» (скрывает DONE и REFUSED — решение
-  // владельца, 08.2026) и явный фильтр по этапу сочетаются через AND
+  // Пустой plural-набор сохраняется как IN []; scalar-поля поддерживают старые callers.
+  const stages = filters.stages ?? (filters.stage ? [filters.stage] : undefined);
+  const clientIds = filters.clientIds ?? (filters.clientId ? [filters.clientId] : undefined);
+  const managerIds = filters.managerIds ?? (filters.managerId ? [filters.managerId] : undefined);
+  const engineerIds = filters.engineerIds ?? (filters.engineerId ? [filters.engineerId] : undefined);
+  // Незавершённые и явно выбранные этапы сочетаются через AND.
   const stageConditions: Prisma.ProjectWhereInput[] = [];
   if (filters.activeOnly) {
     stageConditions.push({ stage: { notIn: ["DONE", "REFUSED"] } });
   }
-  if (filters.stage) {
-    stageConditions.push({ stage: filters.stage });
+  if (stages !== undefined) {
+    stageConditions.push({ stage: { in: stages } });
   }
   if (stageConditions.length > 0) where.AND = stageConditions;
-  if (filters.clientId) where.clientId = filters.clientId;
-  if (filters.managerId) where.managerId = filters.managerId;
+  if (clientIds !== undefined) where.clientId = { in: clientIds };
+  if (managerIds !== undefined) where.managerId = { in: managerIds };
   // Инженер — на изделии (§10): проект «инженера X» = есть хоть одно его изделие
-  if (filters.engineerId)
+  if (engineerIds !== undefined)
     where.products = { some: { AND: [productVisibilityWhere(actor), { OR: [
-      { engineerId: filters.engineerId },
+      { engineerId: { in: engineerIds } },
       { id: { in: filterParticipantIds } },
     ] }] } };
   const q = filters.q?.trim();
@@ -127,10 +136,10 @@ export function parseProjectListParams(sp: Record<string, string | string[] | un
     const value = sp[key];
     return (Array.isArray(value) ? value[0] : value)?.trim() ?? "";
   };
-  const stageRaw = get("stage");
-  const stage = (STAGES.some((item) => item.id === stageRaw)
-    ? stageRaw
-    : undefined) as ProjectStage | undefined;
+  const stageValues = parseProjectFilterValue(get("stage"));
+  // Невалидные enum-значения не доходят до Prisma и не расширяют выборку.
+  const stages = stageValues === undefined ? undefined : stageValues.every((value) => STAGES.some((item) => item.id === value))
+    ? stageValues as ProjectStage[] : [];
   const sortRaw = get("sort");
   const sort = (Object.keys(PROJECT_SORT_MAP) as string[]).includes(sortRaw)
     ? (sortRaw as ProjectSortField)
@@ -140,12 +149,11 @@ export function parseProjectListParams(sp: Record<string, string | string[] | un
   return {
     filters: {
       q: get("q").slice(0, 100) || undefined,
-      stage,
-      clientId: get("client") || undefined,
-      managerId: get("manager") || undefined,
-      engineerId: get("engineer") || undefined,
-      // Галочка «Только незавершённые» включена по умолчанию (active=0 — снята)
-      activeOnly: get("active") !== "0",
+      stages,
+      clientIds: parseProjectFilterValue(get("client")),
+      managerIds: parseProjectFilterValue(get("manager")),
+      engineerIds: parseProjectFilterValue(get("engineer")),
+      activeOnly: get("active") === "1",
       sort,
       dir: dirRaw === "asc" || dirRaw === "desc" ? dirRaw : undefined,
     } satisfies ProjectListFilters,
@@ -161,7 +169,9 @@ export async function listProjects(
   paging?: ListPaging,
 ): Promise<{ rows: Awaited<ReturnType<typeof fetchProjectRows>>; total: number }> {
   const actor = await resolveVisibilityActor(prisma, { id: userId, roles });
-  const filterParticipantIds = filters.engineerId ? await engineeringParticipantProductIds(prisma, filters.engineerId, false) : [];
+  const engineerIds = filters.engineerIds ?? (filters.engineerId ? [filters.engineerId] : []);
+  const filterParticipantIds = [...new Set((await Promise.all([...new Set(engineerIds)].map((id) =>
+    engineeringParticipantProductIds(prisma, id, false)))).flat())];
   const where = projectWhere(actor, filters, filterParticipantIds);
   const orderBy = projectOrderBy(filters.sort, filters.dir ?? "desc");
   // Prisma's relation-count ordering cannot filter the count. Sort the visible
