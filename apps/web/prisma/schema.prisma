@@ -816,7 +816,6 @@ model MaterialCategory {
   name      String
   comment   String?
   active    Boolean    @default(true)
-  revision  Int        @default(0)
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
   materials Material[]
