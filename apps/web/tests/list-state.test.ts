@@ -2,18 +2,33 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { decodeListPreference, encodeListPreference, normalizeListQuery, resolveListState, updateListQuery } from "../src/lib/list-state";
-import { encodeProjectFilterValue, parseProjectFilterValue } from "../src/lib/project-filter-values";
+import { encodeListFilterValue, parseListFilterValue } from "../src/lib/list-filter-values";
 
 const fields = (query: string) => Object.fromEntries(new URLSearchParams(query));
 
-test("project codec treats empty as unrestricted and retains a selected ID absent from options", () => {
-  assert.equal(parseProjectFilterValue(undefined), undefined);
-  assert.equal(parseProjectFilterValue(" "), undefined);
-  assert.equal(encodeProjectFilterValue(undefined), null);
-  assert.equal(encodeProjectFilterValue([]), null);
-  assert.equal(parseProjectFilterValue("[]"), undefined);
-  assert.deepEqual(parseProjectFilterValue(" old-selected-id "), ["old-selected-id"]);
-  assert.equal(encodeProjectFilterValue(["z", "a", "z"]), '["a","z"]');
+test("products use the same arrays, activity and V2/V1 upgrade semantics as projects", () => {
+  const query = new URLSearchParams({ status: '["PRODUCTION","DESIGN"]', project: '["p2","p1"]', client: '["c1","c2"]', engineer: '["e2","e1"]', active: "1" }).toString();
+  assert.deepEqual(fields(normalizeListQuery("products", query)), { view: "kanban", status: '["DESIGN","PRODUCTION"]', project: '["p1","p2"]', client: '["c1","c2"]', engineer: '["e1","e2"]', active: "1" });
+  const saved = encodeListPreference("products", query, "now");
+  assert.equal(JSON.parse(saved).version, 2);
+  assert.equal(resolveListState("products", {}, saved), normalizeListQuery("products", query));
+  const old = JSON.stringify({ version: 1, query: "status=DESIGN&project=p1&engineer=e1" });
+  assert.deepEqual(fields(decodeListPreference("products", old)!), { view: "kanban", status: '["DESIGN"]', project: '["p1"]', engineer: '["e1"]', active: "1" });
+  assert.equal(new URLSearchParams(decodeListPreference("products", JSON.stringify({ version: 1, query: "active=0" }))!).get("active"), "0");
+  const resetAxis = updateListQuery("products", query, { engineer: "[]" });
+  assert.equal(new URLSearchParams(resetAxis).get("engineer"), null);
+  assert.equal(new URLSearchParams(resetAxis).get("status"), '["DESIGN","PRODUCTION"]');
+  assert.equal(new URLSearchParams(resetAxis).get("active"), "1");
+});
+
+test("shared codec treats empty as unrestricted and retains a selected ID absent from options", () => {
+  assert.equal(parseListFilterValue(undefined), undefined);
+  assert.equal(parseListFilterValue(" "), undefined);
+  assert.equal(encodeListFilterValue(undefined), null);
+  assert.equal(encodeListFilterValue([]), null);
+  assert.equal(parseListFilterValue("[]"), undefined);
+  assert.deepEqual(parseListFilterValue(" old-selected-id "), ["old-selected-id"]);
+  assert.equal(encodeListFilterValue(["z", "a", "z"]), '["a","z"]');
 });
 
 test("project multi-value normalization preserves five clients and two engineers while empty axes disappear", () => {
@@ -25,14 +40,14 @@ test("project multi-value normalization preserves five clients and two engineers
   assert.equal(normalizeListQuery("projects", ""), "view=kanban");
 });
 
-test("project preferences upgrade V1 effective activity, create V2 and keep products V1", () => {
+test("both sections upgrade V1 effective activity and write V2", () => {
   const old = JSON.stringify({ version: 1, revision: "old", query: "view=table&engineer=e1" });
   assert.deepEqual(fields(decodeListPreference("projects", old)!), { view: "table", engineer: '["e1"]', active: "1" });
   assert.equal(new URLSearchParams(decodeListPreference("projects", JSON.stringify({ version: 1, query: "active=0" }))!).get("active"), "0");
   assert.equal(JSON.parse(encodeListPreference("projects", "", "new")).version, 2);
-  assert.equal(JSON.parse(encodeListPreference("products", "engineer=e1", "new")).version, 1);
-  assert.equal(decodeListPreference("products", old), "view=table&engineer=e1");
-  assert.equal(decodeListPreference("products", JSON.stringify({ version: 2, query: "engineer=e1" })), null);
+  assert.equal(JSON.parse(encodeListPreference("products", "engineer=e1", "new")).version, 2);
+  assert.deepEqual(fields(decodeListPreference("products", old)!), { view: "table", engineer: '["e1"]', active: "1" });
+  assert.deepEqual(fields(decodeListPreference("products", JSON.stringify({ version: 2, query: "engineer=e1" }))!), { view: "kanban", engineer: '["e1"]' });
 });
 
 test("project normalization retains a long valid set and ignores malformed axes only", () => {
@@ -58,7 +73,7 @@ test("bare project route restores all saved filters, search, sorting, view and p
 
 test("bare product route restores its own full state, including project and engineer", () => {
   const query = "view=table&q=Шкаф&status=DESIGN&project=p1&client=c1&engineer=e1&active=0&sort=price&dir=desc&page=2&pageSize=20";
-  assert.deepEqual(fields(resolveListState("products", {}, encodeListPreference("products", query, "one"))), fields(query));
+  assert.deepEqual(fields(resolveListState("products", {}, encodeListPreference("products", query, "one"))), { ...fields(query), status: '["DESIGN"]', project: '["p1"]', client: '["c1"]', engineer: '["e1"]' });
 });
 
 test("explicit partial URL overrides the entire saved state, including saved table view", () => {
@@ -84,7 +99,7 @@ test("malformed saved values fail closed to defaults", () => {
 });
 
 test("normalization accepts only parameters for this list and bounded valid values", () => {
-  assert.deepEqual(fields(normalizeListQuery("products", "view=bad&status=DESIGN&stage=LEAD&manager=m1&active=bad&sort=garbage&dir=up&page=-9&pageSize=99&owner=other&q=%20desk%20")), { view: "kanban", status: "DESIGN", q: "desk" });
+  assert.deepEqual(fields(normalizeListQuery("products", "view=bad&status=DESIGN&stage=LEAD&manager=m1&active=bad&sort=garbage&dir=up&page=-9&pageSize=99&owner=other&q=%20desk%20")), { view: "kanban", status: '["DESIGN"]', q: "desk" });
   assert.equal(new URLSearchParams(normalizeListQuery("projects", `q=${"x".repeat(120)}`)).get("q")?.length, 100);
   assert.equal(new URLSearchParams(normalizeListQuery("projects", "q=first&q=second")).get("q"), "first");
 });

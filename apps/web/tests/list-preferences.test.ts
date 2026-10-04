@@ -21,20 +21,43 @@ function fixture() {
   return { service, rows, login: (id: string | null) => { user = id; } };
 }
 
+test("product V1 upgrade keeps raw CAS and a large V2 selection independently of projects", async () => {
+  const f = fixture();
+  const raw = '{ "version": 1, "revision": "2000-old", "query": "project=p1&status=DESIGN" }';
+  f.rows.set("alice/products.list", raw);
+  const loaded = await f.service.load("products", {});
+  assert.equal(loaded.value, raw);
+  assert.equal(new URLSearchParams(loaded.query).get("active"), "1");
+  const ids = Array.from({ length: 150 }, (_, index) => `client-${index}-${"x".repeat(20)}`);
+  const query = new URLSearchParams({ client: JSON.stringify(ids), status: '["DESIGN","PRODUCTION"]' }).toString();
+  assert.ok(query.length > 4096);
+  const saved = await f.service.save("products", query, raw);
+  assert.equal(saved.ok, true);
+  assert.equal(JSON.parse(saved.value!).version, 2);
+  assert.equal(JSON.parse(new URLSearchParams(decodeListPreference("products", saved.value)!).get("client")!).length, ids.length);
+  assert.equal((await f.service.save("products", "status=DONE", raw)).ok, false);
+  await f.service.save("projects", "stage=IN_WORK&client=c1", null);
+  f.login(null); f.login("alice");
+  assert.equal((await f.service.load("products", {})).value, saved.value);
+  assert.equal(new URLSearchParams((await f.service.load("projects", {})).query).get("client"), '["c1"]');
+});
+
 test("old stored empty arrays remove only their axes and retain raw CAS across V1 and V2", async () => {
-  for (const version of [1, 2]) {
+  for (const section of ["projects", "products"] as const) for (const version of [1, 2]) {
     const f = fixture();
-    const raw = JSON.stringify({ version, revision: "old", query: new URLSearchParams({ client: "[]", engineer: '["e1"]', stage: '["IN_WORK"]', manager: "[]" }).toString() });
-    f.rows.set("alice/projects.list", raw);
-    const loaded = await f.service.load("projects", {});
+    const statusKey = section === "projects" ? "stage" : "status";
+    const status = section === "projects" ? '["IN_WORK"]' : '["DESIGN"]';
+    const raw = JSON.stringify({ version, revision: "old", query: new URLSearchParams({ client: "[]", engineer: '["e1"]', [statusKey]: status, manager: "[]", project: "[]" }).toString() });
+    f.rows.set(`alice/${section}.list`, raw);
+    const loaded = await f.service.load(section, {});
     assert.equal(loaded.value, raw);
     const params = new URLSearchParams(loaded.query);
     assert.equal(params.get("client"), null);
     assert.equal(params.get("manager"), null);
     assert.equal(params.get("engineer"), '["e1"]');
-    assert.equal(params.get("stage"), '["IN_WORK"]');
+    assert.equal(params.get(statusKey), status);
     assert.equal(params.get("active"), version === 1 ? "1" : null);
-    const saved = await f.service.save("projects", loaded.query, loaded.value);
+    const saved = await f.service.save(section, loaded.query, loaded.value);
     assert.equal(saved.ok, true);
     assert.equal(JSON.parse(saved.value!).version, 2);
   }
@@ -59,23 +82,23 @@ test("V1 load preserves its raw CAS token and upgrade saves V2 without expiry", 
   assert.equal(new URLSearchParams((await f.service.load("projects", {})).query).get("engineer"), '["e1","e2"]');
 });
 
-test("large project selections fit bounded save and subsequent raw CAS while products retain bounds", async () => {
+for (const section of ["projects", "products"] as const) test(`${section} large selections fit common save/CAS bounds without truncation`, async () => {
   const f = fixture();
   const clients = Array.from({ length: 150 }, (_, index) => `client-${index}-${"x".repeat(20)}`);
   const query = new URLSearchParams({ client: JSON.stringify(clients) }).toString();
   assert.ok(query.length > 4096);
-  const saved = await f.service.save("projects", query, null);
+  const saved = await f.service.save(section, query, null);
   assert.equal(saved.ok, true);
-  assert.equal(JSON.parse(new URLSearchParams(decodeListPreference("projects", saved.value)!).get("client")!).length, clients.length);
-  assert.equal((await f.service.save("projects", "client=[]", saved.value)).ok, true);
-  await assert.rejects(f.service.save("products", query, null), /параметры/);
-  await assert.rejects(f.service.save("projects", "x".repeat(16_385), null), /параметры/);
+  assert.equal(JSON.parse(new URLSearchParams(decodeListPreference(section, saved.value)!).get("client")!).length, clients.length);
+  assert.equal((await f.service.save(section, "client=[]", saved.value)).ok, true);
+  await assert.rejects(f.service.save(section, "x".repeat(16_385), null), /параметры/);
+  await assert.rejects(f.service.save(section, "view=table", "x".repeat(32_769)), /параметры/);
   const oversized = new URLSearchParams({ client: JSON.stringify(Array.from({ length: 150 }, (_, index) => `${index}${"я".repeat(40)}`)) }).toString();
   const before = [...f.rows];
-  await assert.rejects(f.service.save("projects", oversized, saved.value), /параметры/);
+  await assert.rejects(f.service.save(section, oversized, saved.value), /параметры/);
   const expands = `client=${JSON.stringify(Array.from({ length: 150 }, (_, index) => `${index}${"я".repeat(40)}`))}`;
   assert.ok(expands.length < 16_384);
-  await assert.rejects(f.service.save("projects", expands, saved.value), /параметры/);
+  await assert.rejects(f.service.save(section, expands, saved.value), /параметры/);
   assert.deepEqual([...f.rows], before);
 });
 
@@ -84,7 +107,7 @@ test("authenticated preference survives returning and remains separate per secti
   assert.equal((await f.service.save("projects", "view=table&q=Alice", null)).ok, true);
   assert.equal((await f.service.save("products", "view=table&engineer=e1", null)).ok, true);
   assert.equal(new URLSearchParams((await f.service.load("projects", {})).query).get("q"), "Alice");
-  assert.equal(new URLSearchParams((await f.service.load("products", {})).query).get("engineer"), "e1");
+  assert.equal(new URLSearchParams((await f.service.load("products", {})).query).get("engineer"), '["e1"]');
   f.login("bob");
   assert.equal((await f.service.load("projects", {})).query, "view=kanban");
   await f.service.save("projects", "q=Bob", null);
@@ -135,5 +158,5 @@ test("server restricts writable sections and ignores attempts to name a differen
   await f.service.save("products", "userId=bob&engineer=e1", null);
   assert.equal(f.rows.size, 1);
   const saved = f.rows.get("alice/products.list") ?? null;
-  assert.equal(decodeListPreference("products", saved), "view=kanban&engineer=e1");
+  assert.equal(new URLSearchParams(decodeListPreference("products", saved)!).get("engineer"), '["e1"]');
 });

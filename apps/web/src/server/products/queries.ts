@@ -3,6 +3,7 @@ import type { Prisma, ProductStatus, Role } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
 import { PRODUCT_STATUSES } from "@/lib/product-statuses";
+import { parseListFilterValue } from "@/lib/list-filter-values";
 import { engineeringParticipantProductIds, fileVisibilityWhere, productVisibilityWhere, resolveVisibilityActor, taskVisibilityWhere, workVisibilityWhere, type VisibilityActor } from "@/server/access/visibility";
 import { taskDetailsIncludeFor,taskWorkspaceWhere } from "@/server/tasks/queries";
 import { productSketchProjection } from "./sketch-projection";
@@ -17,7 +18,11 @@ export interface ProductListFilters {
   clientId?: string;
   // Инженер проекта изделия (по аналогии с фильтром «Проекты»)
   engineerId?: string;
-  // «Только незавершённые» — по умолчанию включена (скрывает DONE)
+  statuses?: ProductStatus[];
+  projectIds?: string[];
+  clientIds?: string[];
+  engineerIds?: string[];
+  // «Незавершённые» скрывает DONE; новые настройки выключены.
   activeOnly: boolean;
   sort?: ProductSortField;
   dir?: "asc" | "desc";
@@ -59,21 +64,25 @@ function productWhere(
   filterParticipantIds: string[],
 ): Prisma.ProductWhereInput {
   const where: Prisma.ProductWhereInput = {};
-  if (filters.clientId) where.project = { clientId: filters.clientId };
+  const statuses = filters.statuses ?? (filters.status ? [filters.status] : undefined);
+  const projectIds = filters.projectIds ?? (filters.projectId ? [filters.projectId] : undefined);
+  const clientIds = filters.clientIds ?? (filters.clientId ? [filters.clientId] : undefined);
+  const engineerIds = filters.engineerIds ?? (filters.engineerId ? [filters.engineerId] : undefined);
+  if (clientIds?.length) where.project = { clientId: { in: clientIds } };
   // Инженер — на самом изделии (§10, решение владельца 09.2026)
-  if (filters.engineerId) where.OR = [
-    { engineerId: filters.engineerId },
+  if (engineerIds?.length) where.OR = [
+    { engineerId: { in: engineerIds } },
     { id: { in: filterParticipantIds } },
   ];
   const statusConditions: Prisma.ProductWhereInput[] = [];
   if (filters.activeOnly) {
     statusConditions.push({ status: { not: "DONE" } });
   }
-  if (filters.status) {
-    statusConditions.push({ status: filters.status });
+  if (statuses?.length) {
+    statusConditions.push({ status: { in: statuses } });
   }
   if (statusConditions.length > 0) where.AND = statusConditions;
-  if (filters.projectId) where.projectId = filters.projectId;
+  if (projectIds?.length) where.projectId = { in: projectIds };
   const q = filters.q?.trim();
   if (q) {
     where.AND = [...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []), { OR: [
@@ -103,7 +112,9 @@ export async function listProducts(
   paging?: { page: number; pageSize: number },
 ): Promise<{ rows: Awaited<ReturnType<typeof fetchProductRows>>; total: number }> {
   const actor = await resolveVisibilityActor(prisma, { id: userId, roles });
-  const filterParticipantIds = filters.engineerId ? await engineeringParticipantProductIds(prisma, filters.engineerId, false) : [];
+  const engineerIds = filters.engineerIds ?? (filters.engineerId ? [filters.engineerId] : []);
+  const filterParticipantIds = [...new Set((await Promise.all([...new Set(engineerIds)].map((id) =>
+    engineeringParticipantProductIds(prisma, id, false)))).flat())];
   const where = productWhere(actor, filters, filterParticipantIds);
   const sortField = filters.sort && filters.sort in PRODUCT_SORT_MAP ? filters.sort : undefined;
   const orderBy =
@@ -201,10 +212,9 @@ export function parseProductListParams(sp: Record<string, string | string[] | un
     const value = sp[key];
     return (Array.isArray(value) ? value[0] : value)?.trim() ?? "";
   };
-  const statusRaw = get("status");
-  const status = (PRODUCT_STATUSES.some((item) => item.id === statusRaw)
-    ? statusRaw
-    : undefined) as ProductStatus | undefined;
+  const statusValues = parseListFilterValue(get("status"));
+  const statuses = statusValues === undefined ? undefined : statusValues.every((value) => PRODUCT_STATUSES.some((item) => item.id === value))
+    ? statusValues as ProductStatus[] : undefined;
   const sortRaw = get("sort");
   const sort = (Object.keys(PRODUCT_SORT_MAP) as string[]).includes(sortRaw)
     ? (sortRaw as ProductSortField)
@@ -214,12 +224,11 @@ export function parseProductListParams(sp: Record<string, string | string[] | un
   return {
     filters: {
       q: get("q").slice(0, 100) || undefined,
-      status,
-      projectId: get("project") || undefined,
-      clientId: get("client") || undefined,
-      engineerId: get("engineer") || undefined,
-      // «Только незавершённые» включена по умолчанию (active=0 — снята)
-      activeOnly: get("active") !== "0",
+      statuses,
+      projectIds: parseListFilterValue(get("project")),
+      clientIds: parseListFilterValue(get("client")),
+      engineerIds: parseListFilterValue(get("engineer")),
+      activeOnly: get("active") === "1",
       sort,
       dir: dirRaw === "asc" || dirRaw === "desc" ? dirRaw : undefined,
     } satisfies ProductListFilters,

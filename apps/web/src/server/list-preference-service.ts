@@ -1,4 +1,4 @@
-import { encodeListPreference, isListSection, normalizeListQuery, resolveListState, type ListSearchParams, type ListSection } from "../lib/list-state";
+import { encodeListPreference, isListSection, MAX_LIST_QUERY_LENGTH, normalizeListQuery, resolveListState, type ListSearchParams, type ListSection } from "../lib/list-state";
 
 export interface ListPreferenceStore {
   get(userId: string, key: string): Promise<string | null>;
@@ -28,16 +28,16 @@ export function createListPreferenceService(deps: {
     },
     async save(section: ListSection, query: string, expected: string | null): Promise<SaveListPreferenceResult> {
       const userId = await owner(section);
-      // JSON-наборы проектов длиннее scalar-параметров; превышение отклоняется целиком.
-      const queryLimit = section === "projects" ? 16_384 : 4096;
-      const expectedLimit = section === "projects" ? 32_768 : 8192;
+      // Общие bounds JSON-наборов; превышение отклоняется целиком.
+      const queryLimit = MAX_LIST_QUERY_LENGTH;
+      const expectedLimit = 32_768;
       if (typeof query !== "string" || query.length > queryLimit ||
         (expected !== null && (typeof expected !== "string" || expected.length > expectedLimit))) {
         throw new Error("Некорректные параметры списка");
       }
       const key = `${section}.list`;
       const normalized = normalizeListQuery(section, query);
-      if (section === "projects" && normalized.length > queryLimit) throw new Error("Некорректные параметры списка");
+      if (normalized.length > queryLimit) throw new Error("Некорректные параметры списка");
       const value = encodeListPreference(section, normalized, deps.revision());
       if (await deps.store.compareAndSwap(userId, key, expected, value)) return { ok: true, value };
       return { ok: false, value: await deps.store.get(userId, key) };

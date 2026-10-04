@@ -1,5 +1,5 @@
 /** Отсутствующий параметр и пустой набор не ограничивают эту ось. */
-export function parseProjectFilterValue(value: string | undefined): string[] | undefined {
+export function parseListFilterValue(value: string | undefined): string[] | undefined {
   const raw = value?.trim();
   if (!raw) return undefined;
   let values: unknown = [raw];
@@ -11,6 +11,6 @@ export function parseProjectFilterValue(value: string | undefined): string[] | u
   return [...new Set((values as string[]).map((item) => item.trim()))].sort();
 }
 
-export function encodeProjectFilterValue(value: readonly string[] | undefined): string | null {
+export function encodeListFilterValue(value: readonly string[] | undefined): string | null {
   return !value?.length ? null : JSON.stringify([...new Set(value.map((item) => item.trim()))].sort());
 }

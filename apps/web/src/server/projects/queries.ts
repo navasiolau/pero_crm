@@ -10,7 +10,7 @@ import {
   hasAnyRole,
 } from "@/lib/roles";
 import { STAGES } from "@/lib/stages";
-import { parseProjectFilterValue } from "@/lib/project-filter-values";
+import { parseListFilterValue } from "@/lib/list-filter-values";
 import { taskDetailsIncludeFor,taskWorkspaceWhere } from "@/server/tasks/queries";
 import { listProjectShortages } from "@/server/warehouse/queries";
 import { productSketchProjection } from "@/server/products/sketch-projection";
@@ -136,7 +136,7 @@ export function parseProjectListParams(sp: Record<string, string | string[] | un
     const value = sp[key];
     return (Array.isArray(value) ? value[0] : value)?.trim() ?? "";
   };
-  const stageValues = parseProjectFilterValue(get("stage"));
+  const stageValues = parseListFilterValue(get("stage"));
   // Невалидный этап игнорируется; область доступа ниже остаётся обязательной.
   const stages = stageValues === undefined ? undefined : stageValues.every((value) => STAGES.some((item) => item.id === value))
     ? stageValues as ProjectStage[] : undefined;
@@ -150,9 +150,9 @@ export function parseProjectListParams(sp: Record<string, string | string[] | un
     filters: {
       q: get("q").slice(0, 100) || undefined,
       stages,
-      clientIds: parseProjectFilterValue(get("client")),
-      managerIds: parseProjectFilterValue(get("manager")),
-      engineerIds: parseProjectFilterValue(get("engineer")),
+      clientIds: parseListFilterValue(get("client")),
+      managerIds: parseListFilterValue(get("manager")),
+      engineerIds: parseListFilterValue(get("engineer")),
       activeOnly: get("active") === "1",
       sort,
       dir: dirRaw === "asc" || dirRaw === "desc" ? dirRaw : undefined,
