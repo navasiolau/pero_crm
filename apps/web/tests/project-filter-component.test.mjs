@@ -1,0 +1,182 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { createRequire } from "node:module";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const require = createRequire(import.meta.url);
+const { build } = createRequire(require.resolve("tsx/package.json"))("esbuild");
+const { chromium } = require("@playwright/test");
+const web = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+// Монтируется настоящий фильтр-бар, React и Base UI. Подменяется только
+// граница состояния списка: она записывает payload и обновляет входной query.
+const bundlePromise = build({
+  stdin: {
+    contents: `
+      import React, {useState} from 'react';
+      import {createRoot} from 'react-dom/client';
+      import {ProjectsFilterBar} from '@/app/(app)/projects/filter-bar';
+      function Harness() {
+        const [clients, setClients] = useState(Array.from({length: 12}, (_, i) => ({id: 'c'+(i+1), name: 'Клиент '+(i+1)})));
+        window.__replaceClients = setClients;
+        return <ProjectsFilterBar clients={clients} managers={[{id:'m1',name:'Менеджер 1'},{id:'m2',name:'Менеджер 2'}]} engineers={[{id:'e1',name:'Инженер 1'},{id:'e2',name:'Инженер 2'},{id:'e3',name:'Инженер 3'}]}/>;
+      }
+      createRoot(document.getElementById('root')).render(<Harness/>);
+    `,
+    resolveDir: web,
+    loader: "tsx",
+  },
+  bundle: true,
+  write: false,
+  platform: "browser",
+  format: "iife",
+  jsx: "automatic",
+  tsconfig: path.join(web, "tsconfig.json"),
+  define: { "process.env.NODE_ENV": '"production"' },
+  plugins: [{
+    name: "list-state-boundary",
+    setup(builder) {
+      builder.onResolve({ filter: /^@\/lib\/list-params$/ }, (args) => ({ path: args.path, namespace: "boundary" }));
+      builder.onLoad({ filter: /.*/, namespace: "boundary" }, () => ({
+        contents: `
+          import {useState, useEffect} from 'react';
+          let query = window.__initialQuery || '';
+          const listeners = new Set();
+          window.__payloads = [];
+          window.__query = query;
+          function publish() { window.__query = query; listeners.forEach(listener => listener(query)); }
+          export function useListParams() {
+            const [snapshot, update] = useState(query);
+            useEffect(() => { listeners.add(update); return () => listeners.delete(update); }, []);
+            return {
+              get: key => new URLSearchParams(snapshot).get(key) || '',
+              set: values => {
+                window.__payloads.push(values);
+                const params = new URLSearchParams(query);
+                Object.entries(values).forEach(([key,value]) => value === null ? params.delete(key) : params.set(key,value));
+                query = params.toString(); publish();
+              },
+              reset: () => { query = ''; publish(); },
+              pending: false, canReset: Boolean(snapshot),
+            };
+          }
+          export function useListSearch() {
+            const state = useListParams();
+            return { q: state.get('q'), setQ: value => state.set({q:value, page:null}) };
+          }
+        `,
+        loader: "js",
+        resolveDir: web,
+      }));
+    },
+  }],
+  logLevel: "silent",
+});
+
+async function withPage(initialQuery, run) {
+  const bundle = await bundlePromise;
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+    page.setDefaultTimeout(5000);
+    await page.setContent(`<style>
+      .z-50{z-index:50}.isolate{isolation:isolate}
+      [data-slot=popover-content]{background:white;width:288px;padding:10px}
+      [data-slot=popover-content] label{display:flex;align-items:center;gap:8px;padding:8px}
+      [data-slot=checkbox]{display:inline-flex;width:16px;height:16px;flex-shrink:0}
+      [data-filter-options]{max-height:224px;overflow-y:auto}
+      button,[role=checkbox]{cursor:pointer}
+    </style><div style="height:900px"></div><div id="root"></div><div style="height:1200px"></div>`);
+    await page.evaluate((query) => { window.__initialQuery = query; }, initialQuery);
+    await page.addScriptTag({ content: bundle.outputFiles[0].text });
+    await page.locator("#projects-active-only").waitFor();
+    await run(page);
+  } finally {
+    await browser.close();
+  }
+}
+
+const queryValue = (page, key) => page.evaluate((name) => new URLSearchParams(window.__query).get(name), key);
+
+test("project filters default to all and Незавершённые writes explicit 1/0 preserving other state", async () => {
+  await withPage("q=кухня&sort=title&dir=asc&view=table&size=50&page=4", async (page) => {
+    assert.equal(await page.locator("#projects-active-only").isChecked(), false);
+    assert.equal(await page.getByText("Незавершённые", { exact: true }).count(), 1);
+    for (const name of ["Статус", "Клиент", "Менеджер", "Инженер"]) {
+      assert.equal(await page.getByRole("button", { name, exact: true }).count(), 1);
+    }
+    await page.getByText("Незавершённые", { exact: true }).click();
+    assert.equal(await queryValue(page, "active"), "1");
+    await page.getByText("Незавершённые", { exact: true }).click();
+    assert.equal(await queryValue(page, "active"), "0");
+    assert.equal(await queryValue(page, "page"), null);
+    for (const [key, value] of Object.entries({ q: "кухня", sort: "title", dir: "asc", view: "table", size: "50" })) {
+      assert.equal(await queryValue(page, key), value);
+    }
+  });
+});
+
+test("all except Lead, clear and all keep popup open and page viewport stable", async () => {
+  await withPage("", async (page) => {
+    const trigger = page.getByRole("button", { name: "Статус", exact: true });
+    await trigger.scrollIntoViewIfNeeded();
+    await trigger.click();
+    const popup = page.locator('[data-slot="popover-content"]');
+    assert.equal(await popup.getByRole("checkbox").count(), 8);
+    assert.equal(await popup.getByRole("checkbox", { checked: true }).count(), 8);
+    const scroll = await page.evaluate(() => window.scrollY);
+    await popup.getByRole("checkbox", { name: "Лид", exact: true }).click();
+    assert.equal(await popup.isVisible(), true);
+    assert.equal(await page.evaluate(() => window.scrollY), scroll);
+    assert.deepEqual(JSON.parse(await queryValue(page, "stage")).sort(), ["ESTIMATE", "CONTRACT", "IN_WORK", "DONE", "RECLAMATION", "PAUSED", "REFUSED"].sort());
+    await popup.getByRole("button", { name: "Снять выбор", exact: true }).click();
+    assert.equal(await queryValue(page, "stage"), "[]");
+    assert.equal(await popup.getByRole("checkbox", { checked: true }).count(), 0);
+    await popup.getByRole("button", { name: "Выбрать все", exact: true }).click();
+    assert.equal(await queryValue(page, "stage"), null);
+    assert.equal(await popup.getByRole("checkbox", { checked: true }).count(), 8);
+    assert.equal(await popup.isVisible(), true);
+  });
+});
+
+test("two engineers and five searched clients save immediately, preserving absent selected IDs", async () => {
+  const initial = new URLSearchParams({ manager: "m2", client: JSON.stringify(["missing-client", "c1"]) }).toString();
+  await withPage(initial, async (page) => {
+    await page.getByRole("button", { name: "Менеджер", exact: true }).click();
+    let popup = page.locator('[data-slot="popover-content"]');
+    assert.equal(await popup.getByRole("checkbox", { name: "Менеджер 2", exact: true }).getAttribute("aria-checked"), "true");
+    assert.equal(await popup.getByRole("checkbox", { name: "Менеджер 1", exact: true }).getAttribute("aria-checked"), "false");
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "Клиент", exact: true }).click();
+    popup = page.locator('[data-slot="popover-content"]');
+    const sixth = popup.getByRole("checkbox", { name: "Клиент 6", exact: true });
+    await sixth.scrollIntoViewIfNeeded();
+    const optionsScroll = await popup.locator("[data-filter-options]").evaluate((node) => node.scrollTop);
+    assert.ok(optionsScroll > 0);
+    await sixth.click();
+    assert.equal(await popup.locator("[data-filter-options]").evaluate((node) => node.scrollTop), optionsScroll);
+    await page.evaluate(() => window.__replaceClients([{ id: "c2", name: "Клиент 2" }]));
+    await page.waitForFunction(() => document.querySelectorAll('[data-slot="popover-content"] [role="checkbox"]').length === 1);
+    assert.deepEqual(JSON.parse(await queryValue(page, "client")).sort(), ["missing-client", "c1", "c6"].sort());
+    await popup.getByRole("checkbox", { name: "Клиент 2", exact: true }).click();
+    assert.deepEqual(JSON.parse(await queryValue(page, "client")).sort(), ["missing-client", "c1", "c2", "c6"].sort());
+    await page.evaluate(() => window.__replaceClients(Array.from({ length: 12 }, (_, i) => ({ id: "c" + (i + 1), name: "Клиент " + (i + 1) }))));
+    await popup.getByRole("button", { name: "Снять выбор", exact: true }).click();
+    for (let i = 1; i <= 5; i++) {
+      await popup.getByPlaceholder("Поиск клиента…").fill("Клиент " + i);
+      await popup.getByRole("checkbox", { name: "Клиент " + i, exact: true }).click();
+      assert.equal(await popup.isVisible(), true);
+    }
+    assert.deepEqual(JSON.parse(await queryValue(page, "client")).sort(), ["c1", "c2", "c3", "c4", "c5"]);
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "Инженер", exact: true }).click();
+    popup = page.locator('[data-slot="popover-content"]');
+    await popup.getByRole("button", { name: "Снять выбор", exact: true }).click();
+    await popup.getByRole("checkbox", { name: "Инженер 1", exact: true }).click();
+    await popup.getByRole("checkbox", { name: "Инженер 2", exact: true }).click();
+    assert.deepEqual(JSON.parse(await queryValue(page, "engineer")), ["e1", "e2"]);
+    assert.equal(await popup.isVisible(), true);
+    assert.equal(await queryValue(page, "manager"), "m2");
+  });
+});

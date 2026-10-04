@@ -7,6 +7,29 @@ import type { SaveListPreferenceResult } from "../src/server/list-preference-ser
 
 const tick = () => new Promise<void>((resolve) => setImmediate(resolve));
 
+test("rapid project checkbox changes keep latest arrays and preserve raw V1 CAS through a late conflict", async () => {
+  const calls: { query: string; expected: string | null; resolve: (result: SaveListPreferenceResult) => void }[] = [];
+  const navigations: string[] = [];
+  const rawV1 = '{ "version":1, "query":"view=table&engineer=e1", "revision":"old" }';
+  const controller = new ListStateController({ section: "projects", query: "view=table&engineer=%5B%22e1%22%5D&active=1", preference: rawV1,
+    save: (query, expected) => new Promise((resolve) => calls.push({ query, expected, resolve })),
+    navigate: (query) => navigations.push(query), isCurrent: () => true });
+  controller.start();
+  controller.set({ engineer: '["e1","e2"]' });
+  controller.set({ client: '["c1","c2","c3","c4","c5"]' });
+  controller.set({ stage: '[]' });
+  assert.equal(calls[0].expected, rawV1);
+  calls[0].resolve({ ok: false, value: "external-update" });
+  await tick();
+  assert.equal(calls[1].expected, "external-update");
+  assert.deepEqual(Object.fromEntries(new URLSearchParams(calls[1].query)), { view: "table", client: '["c1","c2","c3","c4","c5"]', engineer: '["e1","e2"]', stage: '[]', active: '1' });
+  assert.deepEqual(navigations, []);
+  calls[1].resolve({ ok: true, value: encodeListPreference("projects", calls[1].query, "latest") });
+  await tick();
+  assert.deepEqual(navigations, [calls[1].query]);
+  controller.stop();
+});
+
 function fixture() {
   const calls: { query: string; expected: string | null; resolve: (value: SaveListPreferenceResult) => void }[] = [];
   const navigations: string[] = [];
