@@ -7,24 +7,24 @@ import type { SaveListPreferenceResult } from "../src/server/list-preference-ser
 
 const tick = () => new Promise<void>((resolve) => setImmediate(resolve));
 
-test("rapid project checkbox changes keep latest arrays and preserve raw V1 CAS through a late conflict", async () => {
+for (const section of ["projects", "products"] as const) test(`${section} rapid checkbox changes keep latest arrays and raw V1 CAS through a late conflict`, async () => {
   const calls: { query: string; expected: string | null; resolve: (result: SaveListPreferenceResult) => void }[] = [];
   const navigations: string[] = [];
   const rawV1 = '{ "version":1, "query":"view=table&engineer=e1", "revision":"old" }';
-  const controller = new ListStateController({ section: "projects", query: "view=table&engineer=%5B%22e1%22%5D&active=1", preference: rawV1,
+  const controller = new ListStateController({ section, query: "view=table&engineer=%5B%22e1%22%5D&active=1", preference: rawV1,
     save: (query, expected) => new Promise((resolve) => calls.push({ query, expected, resolve })),
     navigate: (query) => navigations.push(query), isCurrent: () => true });
   controller.start();
   controller.set({ engineer: '["e1","e2"]' });
   controller.set({ client: '["c1","c2","c3","c4","c5"]' });
-  controller.set({ stage: '[]' });
+  controller.set({ [section === "projects" ? "stage" : "status"]: '[]' });
   assert.equal(calls[0].expected, rawV1);
   calls[0].resolve({ ok: false, value: "external-update" });
   await tick();
   assert.equal(calls[1].expected, "external-update");
   assert.deepEqual(Object.fromEntries(new URLSearchParams(calls[1].query)), { view: "table", client: '["c1","c2","c3","c4","c5"]', engineer: '["e1","e2"]', active: '1' });
   assert.deepEqual(navigations, []);
-  calls[1].resolve({ ok: true, value: encodeListPreference("projects", calls[1].query, "latest") });
+  calls[1].resolve({ ok: true, value: encodeListPreference(section, calls[1].query, "latest") });
   await tick();
   assert.deepEqual(navigations, [calls[1].query]);
   controller.stop();
@@ -54,7 +54,7 @@ test("rapid changes serialize saves, merge parameters and navigate only to the l
   await tick();
   assert.equal(f.calls.length, 2);
   assert.equal(f.calls[1].expected, firstValue);
-  assert.deepEqual(Object.fromEntries(new URLSearchParams(f.calls[1].query)), { view: "table", q: "desk", engineer: "e1", status: "DESIGN" });
+  assert.deepEqual(Object.fromEntries(new URLSearchParams(f.calls[1].query)), { view: "table", q: "desk", engineer: '["e1"]', status: '["DESIGN"]' });
   assert.deepEqual(f.navigations, []);
   f.calls[1].resolve({ ok: true, value: encodeListPreference("products", f.calls[1].query, "third") });
   await tick();
@@ -103,7 +103,7 @@ test("external URL navigation supersedes pending state and is persisted as the f
   f.controller.observe("view=kanban&engineer=e2", null);
   f.calls[0].resolve({ ok: true, value: encodeListPreference("products", f.calls[0].query, "second") });
   await tick();
-  assert.equal(f.calls[1].query, "view=kanban&engineer=e2");
+  assert.deepEqual(Object.fromEntries(new URLSearchParams(f.calls[1].query)), { view: "kanban", engineer: '["e2"]' });
   assert.deepEqual(f.navigations, []);
   f.calls[1].resolve({ ok: true, value: encodeListPreference("products", f.calls[1].query, "third") });
   await tick();
@@ -171,13 +171,13 @@ test("a pending search is merged with a status chosen before the debounce expire
   f.controller.set({ status: "DESIGN" });
   t.mock.timers.tick(201);
   assert.deepEqual(Object.fromEntries(new URLSearchParams(f.controller.getSnapshot().query)), {
-    view: "table", q: "desk", engineer: "e1", status: "DESIGN",
+    view: "table", q: "desk", engineer: '["e1"]', status: '["DESIGN"]',
   });
   f.calls[0].resolve({ ok: true, value: encodeListPreference("products", f.calls[0].query, "status") });
   await tick();
   assert.equal(f.calls.length, 2);
   assert.deepEqual(Object.fromEntries(new URLSearchParams(f.calls[1].query)), {
-    view: "table", q: "desk", engineer: "e1", status: "DESIGN",
+    view: "table", q: "desk", engineer: '["e1"]', status: '["DESIGN"]',
   });
   f.controller.stop();
   f.calls[1].resolve({ ok: true, value: "saved" });
@@ -218,7 +218,7 @@ test("search draft survives a filter save and its confirmed navigation before 30
   t.mock.timers.tick(301);
   assert.equal(f.calls.length, 2);
   assert.equal(new URLSearchParams(f.calls[1].query).get("q"), "desk");
-  assert.equal(new URLSearchParams(f.calls[1].query).get("status"), "DESIGN");
+  assert.equal(new URLSearchParams(f.calls[1].query).get("status"), '["DESIGN"]');
   f.controller.stop();
   f.calls[1].resolve({ ok: true, value: "saved" });
   draft.cancel();

@@ -1,14 +1,14 @@
 # Tasks
 
+По указанию05.10.2026 scope расширен на Изделия и общий компонент. Прежние Projects proofs сохраняются в evidence.md как история; текущая корректировка ниже.
+
 ## 1. Реализация
 
-- [x] 1.1 Уточнение RED→GREEN: []/отсутствие/полный UI-выбор означают отсутствие фильтра; partial arrays/legacy/V1/V2/raw CAS/no expiry и Products сохранены.
-- [x] 1.2 Уточнение query RED→GREEN: пустая ось не создаёт IN[], другие оси остаются активны, OR/AND/engineerparticipant visibility сохранены.
-- [x] 1.3 Настоящий UI RED→GREEN: только «Сброс», исходно ни одной галочки, partial выбор, снятие последней/полный выбор возвращают отсутствие ограничения; комбинированные фильтры/menu/scroll/persistence сохранены.
-- [x] 1.4 Обновлённые local tests/TSC/build/lint/strict/review и native outerROLLBACK подтверждают новые semantics, original data/schema MATCH.
+- [x] 1.1 Общая панель и thin wrappers заменяют дублирующий JSX; actual React tests обоих разделов подтверждают rename, multi/Сброс/empty/full и сохранение других осей.
+- [x] 1.2 Один codec/normalizer/preferencesV2 обслуживает оба раздела; RED→GREEN подтверждает scalar/V1rawCAS/noTTL/isolation/bounds/races без сброса прежних значений.
+- [x] 1.3 Product parser/query RED→GREEN поддерживает OR/AND/status/project/client/engineer arrays, empty nofilter, participant union и прежние role/softdelete ограничения.
+- [x] 1.4 Нужные localchecks/TSC/build/lint/strict/review и actual native обоих разделов outerROLLBACK проходят, originaldata/schema MATCH.
 
 ## 2. Staging
 
-- [x] 2.1 Ordinary commit/merge/CI и actual deployed SHA/image/health подтверждены; целевой browser выбор/возврат/reload и native persistence проходят, исходные настройки восстановлены CAS и receipts сохранены. Income61 сохранён, main/production не меняются.
-
-Предыдущие source/local/native35E proofs сохранены в evidence.md как исторические; UI35E не запускался, PrefLIVE0. Владелец отменил NONE/две кнопки до завершения приёмки.
+- [ ] 2.1 Ordinary merge/CI и actualdeployedsource/image/health; новый Products browser partial/reset/reload/newcontext и короткий Project shared smoke приняты, originals restored exactCAS/MATCH, receipts сохранены. Production/main и W07/refresh не меняются.
