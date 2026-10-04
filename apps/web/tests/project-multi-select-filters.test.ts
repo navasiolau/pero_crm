@@ -28,7 +28,7 @@ before(async () => {
   queries = await import("../src/server/projects/queries");
 });
 
-test("project parser accepts arrays and legacy scalars with all/none and new activity default", () => {
+test("project parser accepts arrays and legacy scalars while empty and invalid axes are ignored", () => {
   const result = queries.parseProjectListParams({ client: '["c5","c1","c3","c2","c4"]', engineer: '["e2","e1"]', manager: "m1", stage: '["DONE","IN_WORK"]', active: "1" });
   assert.deepEqual(result.filters.clientIds, ["c1", "c2", "c3", "c4", "c5"]);
   assert.deepEqual(result.filters.engineerIds, ["e1", "e2"]);
@@ -38,8 +38,11 @@ test("project parser accepts arrays and legacy scalars with all/none and new act
   assert.equal(queries.parseProjectListParams({}).filters.activeOnly, false);
   assert.equal(queries.parseProjectListParams({ active: "0" }).filters.activeOnly, false);
   assert.equal(queries.parseProjectListParams({}).filters.clientIds, undefined);
-  assert.deepEqual(queries.parseProjectListParams({ client: "[]", stage: '["bad"]', engineer: '[1]' }).filters.clientIds, []);
-  assert.deepEqual(queries.parseProjectListParams({ stage: '["bad"]' }).filters.stages, []);
+  const ignored = queries.parseProjectListParams({ client: "[]", stage: '["bad"]', engineer: '[1]', manager: "m1" });
+  assert.equal(ignored.filters.clientIds, undefined);
+  assert.equal(ignored.filters.stages, undefined);
+  assert.equal(ignored.filters.engineerIds, undefined);
+  assert.deepEqual(ignored.filters.managerIds, ["m1"]);
 });
 
 test("two engineers and five clients union within each axis and intersect manager/stage axes", async () => {
@@ -50,15 +53,19 @@ test("two engineers and five clients union within each axis and intersect manage
   assert.equal((await queries.listProjects("manager", ["MANAGER"], { ...filters, stages: [...filters.stages], activeOnly: true })).total, 2);
 });
 
-test("explicit none for any axis returns no rows; absent axes include unassigned projects", async () => {
+test("empty arrays do not restrict any axis or discard other filters and include unassigned projects", async () => {
   for (const key of ["stages", "clientIds", "managerIds", "engineerIds"] as const) {
     const result = await queries.listProjects("manager", ["MANAGER"], { activeOnly: false, [key]: [] });
-    assert.equal(result.total, 0, key);
+    assert.equal(result.total, 7, key);
+    const constrained = await queries.listProjects("manager", ["MANAGER"], { activeOnly: false, ...(key === "clientIds" ? { stage: "DONE" as const } : { clientIds: ["c1"] }), [key]: [] });
+    assert.equal(constrained.total, 1, key);
   }
   const unassigned = { ...rows[0], id: "unassigned", numberInt: 99, clientId: null, managerId: null, products: [] };
   rows.push(unassigned);
   try {
-    assert.ok((await queries.listProjects("manager", ["MANAGER"], { activeOnly: false })).rows.some((row) => row.id === "unassigned"));
+    for (const key of ["stages", "clientIds", "managerIds", "engineerIds"] as const) {
+      assert.ok((await queries.listProjects("manager", ["MANAGER"], { activeOnly: false, [key]: [] })).rows.some((row) => row.id === "unassigned"), key);
+    }
   } finally { rows.pop(); }
 });
 
@@ -68,6 +75,7 @@ test("multi-engineer participants cannot bypass project/product visibility or li
   assert.deepEqual(new Set(engineer.rows.map((row) => row.id)), new Set(["p0", "p2", "p4"]));
   assert.ok(engineer.rows.every((row) => row.products.every((product) => ["product-0", "product-2", "product-4"].includes(product.id))));
   assert.equal((await queries.listProjects("e1", ["ENGINEER"], { activeOnly: false, engineerIds: ["e2"] })).total, 0);
+  assert.equal((await queries.listProjects("e1", ["ENGINEER"], { activeOnly: false, engineerIds: [], clientIds: [], stages: [], managerIds: [] })).total, 3);
   const manager = await queries.listProjects("manager", ["MANAGER"], filters);
   assert.deepEqual(new Set(manager.rows.map((row) => row.id)), new Set(["p0", "p1", "p2", "p3", "p4", "p5"]));
 });
@@ -87,5 +95,5 @@ test("engineer filter unions participant products of every selected engineer", a
 
 test("legacy scalar callers still filter and explicit plural selection takes precedence", async () => {
   assert.equal((await queries.listProjects("manager", ["MANAGER"], { activeOnly: false, clientId: "c1", engineerId: "e2", stage: "DONE" })).total, 1);
-  assert.equal((await queries.listProjects("manager", ["MANAGER"], { activeOnly: false, clientId: "c1", clientIds: [] })).total, 0);
+  assert.equal((await queries.listProjects("manager", ["MANAGER"], { activeOnly: false, clientId: "c1", clientIds: [] })).total, 7);
 });

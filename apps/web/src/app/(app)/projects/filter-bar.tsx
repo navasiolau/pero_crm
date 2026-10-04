@@ -15,7 +15,7 @@ import { STAGES } from "@/lib/stages";
 import type { SelectOption } from "./projects-view";
 
 // Фильтр-бар раздела «Проекты»: состояние — в URL (?q=&stage=&client=&…).
-// Отсутствующий фильтр означает все; [] — явный пустой выбор.
+// Пустой выбор означает отсутствие ограничения по этой оси.
 export function ProjectsFilterBar({
   clients,
   managers,
@@ -116,7 +116,7 @@ export function ProjectsFilterBar({
           className="text-muted-foreground"
           onClick={reset}
         >
-          <RotateCcw className="size-3.5" /> Сбросить
+          <RotateCcw className="size-3.5" /> Сброс
         </Button>
       ) : null}
     </ResponsiveFilterPanel>

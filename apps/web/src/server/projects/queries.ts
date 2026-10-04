@@ -78,7 +78,7 @@ function projectWhere(
   filterParticipantIds: string[],
 ): Prisma.ProjectWhereInput {
   const where: Prisma.ProjectWhereInput = {};
-  // Пустой plural-набор сохраняется как IN []; scalar-поля поддерживают старые callers.
+  // Пустой plural-набор снимает фильтр; scalar-поля поддерживают старые callers.
   const stages = filters.stages ?? (filters.stage ? [filters.stage] : undefined);
   const clientIds = filters.clientIds ?? (filters.clientId ? [filters.clientId] : undefined);
   const managerIds = filters.managerIds ?? (filters.managerId ? [filters.managerId] : undefined);
@@ -88,14 +88,14 @@ function projectWhere(
   if (filters.activeOnly) {
     stageConditions.push({ stage: { notIn: ["DONE", "REFUSED"] } });
   }
-  if (stages !== undefined) {
+  if (stages?.length) {
     stageConditions.push({ stage: { in: stages } });
   }
   if (stageConditions.length > 0) where.AND = stageConditions;
-  if (clientIds !== undefined) where.clientId = { in: clientIds };
-  if (managerIds !== undefined) where.managerId = { in: managerIds };
+  if (clientIds?.length) where.clientId = { in: clientIds };
+  if (managerIds?.length) where.managerId = { in: managerIds };
   // Инженер — на изделии (§10): проект «инженера X» = есть хоть одно его изделие
-  if (engineerIds !== undefined)
+  if (engineerIds?.length)
     where.products = { some: { AND: [productVisibilityWhere(actor), { OR: [
       { engineerId: { in: engineerIds } },
       { id: { in: filterParticipantIds } },
@@ -137,9 +137,9 @@ export function parseProjectListParams(sp: Record<string, string | string[] | un
     return (Array.isArray(value) ? value[0] : value)?.trim() ?? "";
   };
   const stageValues = parseProjectFilterValue(get("stage"));
-  // Невалидные enum-значения не доходят до Prisma и не расширяют выборку.
+  // Невалидный этап игнорируется; область доступа ниже остаётся обязательной.
   const stages = stageValues === undefined ? undefined : stageValues.every((value) => STAGES.some((item) => item.id === value))
-    ? stageValues as ProjectStage[] : [];
+    ? stageValues as ProjectStage[] : undefined;
   const sortRaw = get("sort");
   const sort = (Object.keys(PROJECT_SORT_MAP) as string[]).includes(sortRaw)
     ? (sortRaw as ProjectSortField)

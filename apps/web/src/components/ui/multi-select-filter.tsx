@@ -15,7 +15,7 @@ export interface MultiSelectFilterOption {
   label: string;
 }
 
-// undefined — все, [] — ничего; неизвестные выбранные ID сохраняются
+// Пустой или полный набор не ограничивает результаты; неизвестные ID сохраняются
 // при изменении справочника и снимаются только явным действием пользователя.
 export function MultiSelectFilter({
   label,
@@ -38,16 +38,14 @@ export function MultiSelectFilter({
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const searchInput = useRef<HTMLInputElement>(null);
-  const selected = new Set(value ?? options.map((option) => option.value));
+  const selected = new Set(value ?? []);
   const filtered = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase("ru");
     return options.filter((option) => option.label.toLocaleLowerCase("ru").includes(needle));
   }, [options, query]);
-  const selectedLabel = value === undefined
+  const selectedLabel = !value?.length
     ? allLabel
-    : value.length === 0
-      ? `${label}: ничего`
-      : value.length === 1
+    : value.length === 1
         ? options.find((option) => option.value === value[0])?.label ?? `${label}: 1`
         : `${label}: ${value.length}`;
 
@@ -60,7 +58,7 @@ export function MultiSelectFilter({
     // Отсутствующие в справочнике ID нельзя потерять при таком переходе.
     const allKnown = options.length > 0 && options.every((option) => next.has(option.value));
     const hasUnknown = [...next].some((item) => !known.has(item));
-    onChange(checked && allKnown && !hasUnknown ? undefined : [...next]);
+    onChange(next.size === 0 || (checked && allKnown && !hasUnknown) ? undefined : [...next]);
   }
 
   return (
@@ -90,8 +88,7 @@ export function MultiSelectFilter({
           />
         </div>
         <div className="flex gap-1 border-b pb-2">
-          <Button type="button" variant="ghost" size="sm" onClick={() => onChange(undefined)}>Выбрать все</Button>
-          <Button type="button" variant="ghost" size="sm" onClick={() => onChange([])}>Снять выбор</Button>
+          <Button type="button" variant="ghost" size="sm" onClick={() => onChange(undefined)}>Сброс</Button>
         </div>
         <div data-filter-options className="max-h-56 overflow-y-auto overscroll-contain" role="group" aria-label={label}>
           {filtered.map((option) => {

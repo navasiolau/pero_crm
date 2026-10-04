@@ -114,34 +114,46 @@ test("project filters default to all and Незавершённые writes expli
     for (const [key, value] of Object.entries({ q: "кухня", sort: "title", dir: "asc", view: "table", size: "50" })) {
       assert.equal(await queryValue(page, key), value);
     }
+    await page.getByRole("button", { name: "Статус", exact: true }).click();
+    const popup = page.locator('[data-slot="popover-content"]');
+    assert.deepEqual(await popup.getByRole("button").allTextContents(), ["Сброс"]);
+    assert.equal(await popup.getByRole("checkbox", { checked: true }).count(), 0);
   });
 });
 
-test("all except Lead, clear and all keep popup open and page viewport stable", async () => {
+test("partial stages, last unchecked, full selection and dimension reset retain popup and viewport", async () => {
   await withPage("", async (page) => {
     const trigger = page.getByRole("button", { name: "Статус", exact: true });
     await trigger.scrollIntoViewIfNeeded();
     await trigger.click();
     const popup = page.locator('[data-slot="popover-content"]');
     assert.equal(await popup.getByRole("checkbox").count(), 8);
-    assert.equal(await popup.getByRole("checkbox", { checked: true }).count(), 8);
+    assert.equal(await popup.getByRole("checkbox", { checked: true }).count(), 0);
     const scroll = await page.evaluate(() => window.scrollY);
-    await popup.getByRole("checkbox", { name: "Лид", exact: true }).click();
+    for (const name of ["Просчёт", "Договор", "В работе", "Завершён", "Рекламация", "Пауза", "Отказ"]) {
+      await popup.getByRole("checkbox", { name, exact: true }).click();
+    }
     assert.equal(await popup.isVisible(), true);
     assert.equal(await page.evaluate(() => window.scrollY), scroll);
     assert.deepEqual(JSON.parse(await queryValue(page, "stage")).sort(), ["ESTIMATE", "CONTRACT", "IN_WORK", "DONE", "RECLAMATION", "PAUSED", "REFUSED"].sort());
-    await popup.getByRole("button", { name: "Снять выбор", exact: true }).click();
-    assert.equal(await queryValue(page, "stage"), "[]");
-    assert.equal(await popup.getByRole("checkbox", { checked: true }).count(), 0);
-    await popup.getByRole("button", { name: "Выбрать все", exact: true }).click();
+    await popup.getByRole("button", { name: "Сброс", exact: true }).click();
     assert.equal(await queryValue(page, "stage"), null);
-    assert.equal(await popup.getByRole("checkbox", { checked: true }).count(), 8);
+    assert.equal(await popup.getByRole("checkbox", { checked: true }).count(), 0);
+    await popup.getByRole("checkbox", { name: "Лид", exact: true }).click();
+    assert.deepEqual(JSON.parse(await queryValue(page, "stage")), ["LEAD"]);
+    await popup.getByRole("checkbox", { name: "Лид", exact: true }).click();
+    assert.equal(await queryValue(page, "stage"), null);
+    for (const name of ["Лид", "Просчёт", "Договор", "В работе", "Завершён", "Рекламация", "Пауза", "Отказ"]) {
+      await popup.getByRole("checkbox", { name, exact: true }).click();
+    }
+    assert.equal(await queryValue(page, "stage"), null);
+    assert.equal(await popup.getByRole("checkbox", { checked: true }).count(), 0);
     assert.equal(await popup.isVisible(), true);
   });
 });
 
 test("two engineers and five searched clients save immediately, preserving absent selected IDs", async () => {
-  const initial = new URLSearchParams({ manager: "m2", client: JSON.stringify(["missing-client", "c1"]) }).toString();
+  const initial = new URLSearchParams({ manager: "m2", stage: "IN_WORK", client: JSON.stringify(["missing-client", "c1"]) }).toString();
   await withPage(initial, async (page) => {
     await page.getByRole("button", { name: "Менеджер", exact: true }).click();
     let popup = page.locator('[data-slot="popover-content"]');
@@ -162,7 +174,7 @@ test("two engineers and five searched clients save immediately, preserving absen
     await popup.getByRole("checkbox", { name: "Клиент 2", exact: true }).click();
     assert.deepEqual(JSON.parse(await queryValue(page, "client")).sort(), ["missing-client", "c1", "c2", "c6"].sort());
     await page.evaluate(() => window.__replaceClients(Array.from({ length: 12 }, (_, i) => ({ id: "c" + (i + 1), name: "Клиент " + (i + 1) }))));
-    await popup.getByRole("button", { name: "Снять выбор", exact: true }).click();
+    await popup.getByRole("button", { name: "Сброс", exact: true }).click();
     for (let i = 1; i <= 5; i++) {
       await popup.getByPlaceholder("Поиск клиента…").fill("Клиент " + i);
       await popup.getByRole("checkbox", { name: "Клиент " + i, exact: true }).click();
@@ -172,11 +184,21 @@ test("two engineers and five searched clients save immediately, preserving absen
     await page.keyboard.press("Escape");
     await page.getByRole("button", { name: "Инженер", exact: true }).click();
     popup = page.locator('[data-slot="popover-content"]');
-    await popup.getByRole("button", { name: "Снять выбор", exact: true }).click();
+    await popup.getByRole("button", { name: "Сброс", exact: true }).click();
     await popup.getByRole("checkbox", { name: "Инженер 1", exact: true }).click();
     await popup.getByRole("checkbox", { name: "Инженер 2", exact: true }).click();
     assert.deepEqual(JSON.parse(await queryValue(page, "engineer")), ["e1", "e2"]);
     assert.equal(await popup.isVisible(), true);
     assert.equal(await queryValue(page, "manager"), "m2");
+    assert.equal(await queryValue(page, "stage"), "IN_WORK");
+    await popup.getByRole("checkbox", { name: "Инженер 1", exact: true }).click();
+    await popup.getByRole("checkbox", { name: "Инженер 2", exact: true }).click();
+    assert.equal(await queryValue(page, "engineer"), null);
+    assert.equal(await queryValue(page, "stage"), "IN_WORK");
+    assert.deepEqual(JSON.parse(await queryValue(page, "client")).sort(), ["c1", "c2", "c3", "c4", "c5"]);
+    await popup.getByRole("checkbox", { name: "Инженер 1", exact: true }).click();
+    await popup.getByRole("button", { name: "Сброс", exact: true }).click();
+    assert.equal(await queryValue(page, "engineer"), null);
+    assert.equal(await queryValue(page, "stage"), "IN_WORK");
   });
 });
