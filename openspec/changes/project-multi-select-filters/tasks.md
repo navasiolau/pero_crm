@@ -9,6 +9,6 @@
 
 ## 2. Staging
 
-- [ ] 2.1 Ordinary commit/merge/CI и actual deployed SHA/image/health подтверждены; целевой browser выбор/возврат/reload и native persistence проходят, исходные настройки восстановлены CAS и receipts сохранены. Income61 сохранён, main/production не меняются.
+- [x] 2.1 Ordinary commit/merge/CI и actual deployed SHA/image/health подтверждены; целевой browser выбор/возврат/reload и native persistence проходят, исходные настройки восстановлены CAS и receipts сохранены. Income61 сохранён, main/production не меняются.
 
 Предыдущие source/local/native35E proofs сохранены в evidence.md как исторические; UI35E не запускался, PrefLIVE0. Владелец отменил NONE/две кнопки до завершения приёмки.
