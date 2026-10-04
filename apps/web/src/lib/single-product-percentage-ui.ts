@@ -24,10 +24,10 @@ export function productPercentageBase(unitPrice:string|null,quantity:number|null
   const cents=(BigInt(whole)*BigInt(100)+BigInt(fraction.padEnd(2,"0")))*BigInt(quantity);
   return `${cents/BigInt(100)}.${String(cents%BigInt(100)).padStart(2,"0")}`;
 }
-export function singleProductPercentagePreview(input:{state:ProductPercentageState;version:1|2;unitPrice:string|null;quantity:number|null;rate:string|null;frozenTotal:string|null;recipientEligible?:boolean}):string|null{
+export function singleProductPercentagePreview(input:{state:ProductPercentageState;kind:ProductPercentageKind;version:1|2|3;unitPrice:string|null;quantity:number|null;rate:string|null;frozenTotal:string|null;recipientEligible?:boolean}):string|null{
   if(input.state!=="DRAFT")return input.frozenTotal;
   if(input.recipientEligible===false&&input.rate!==null){try{if(Number(parsePercentageRate(input.rate))>0)return null;}catch{return null;}}
-  if(input.version===1)return previewProductPercentageShare(input.unitPrice,input.rate,PERCENTAGE_SHARE_UNITS);
+  if(input.version===1||(input.version===3&&input.kind==="ENGINEERING"))return previewProductPercentageShare(input.unitPrice,input.rate,PERCENTAGE_SHARE_UNITS);
   const base=productPercentageBase(input.unitPrice,input.quantity);
   if(base===null||input.rate===null)return null;
   let rate:string|null;try{rate=parsePercentageRate(input.rate)}catch{return null}

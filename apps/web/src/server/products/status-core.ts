@@ -25,7 +25,7 @@ export async function changeProductStatusTransaction(tx: Prisma.TransactionClien
   const captured: ("ENGINEERING" | "ASSEMBLY" | "INSTALLATION")[] = [];
   const percentageEffects: PercentageAccrualEffects = {eventIds:[],earnings:[]};
   for (const kind of kinds) {
-    const state=await captureProductPercentageCompletion(tx, actor, productId, kind, toStatus, percentageEffects);
+    const state=await captureProductPercentageCompletion(tx, actor, productId, kind, toStatus, percentageEffects, fromStatus);
     if(state === "PENDING_FX" || state === "SETTLED") captured.push(kind);
   }
   await tx.productStatusHistory.create({ data: { productId, fromStatus, toStatus,

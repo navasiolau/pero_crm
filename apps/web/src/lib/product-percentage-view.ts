@@ -13,11 +13,8 @@ export interface ProductPercentageSectionView {
   unitPrice?: string | null;
   quantity?: number | null;
   productTotal?: string | null;
-  calculationVersion?: 1 | 2;
-  workReview?: {workId:string;classification:"COVERED"|"INDEPENDENT"}[];
-  legacyWorkCandidates?: {id:string;title:string;paid:boolean;classification:"COVERED"|"INDEPENDENT"|null}[];
+  calculationVersion?: 1 | 2 | 3;
   recipientCandidates?: {userId:string;name:string}[];
-  canReview?: boolean;
   kind: ProductPercentageKind;
   state: ProductPercentageState;
   hasConfiguration: boolean;
@@ -35,9 +32,6 @@ export interface ProductPercentageSectionView {
   skippedSnapshot: { completedAt: string; reason: string | null; price: string | null;
     ratePercent: string | null; productCurrency: string;
     members: { userId: string; name: string; shareUnits: number }[] } | null;
-  requiresManagerReview: boolean;
-  installationWorkCandidates: { id: string; title: string; canConvert: boolean; reason: string | null }[];
-  classifiedInstallationWorkIds: string[];
   transferCandidates: { userId: string; name: string }[];
 }
 export interface ProductPercentageView {

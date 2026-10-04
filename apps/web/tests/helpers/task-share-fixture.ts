@@ -18,7 +18,7 @@ export function taskShareFixture(productStatus: "DESIGN" | "PRODUCTION" = "PRODU
     products: [{ id: "product", projectId: "project", number: "1.1", engineerId: "engineer", status: productStatus }] as Row[],
     pools: [{ id: "pool", productId: "product", kind: "ENGINEERING", state: "DRAFT", revision: 0 }] as Row[],
     works: [{ id: "work", projectId: "project", productId: "product", title: "work", quantity: "10", priceSnapshot: "100", total: "1000", paymentKind: "LEGACY" }] as Row[],
-    groups: [] as Row[], entries: [] as Row[], logs: [] as Row[], events: [] as Row[],
+    groups: [] as Row[], entries: [] as Row[], logs: [] as Row[], events: [] as Row[], history: [] as Row[],
     dependencies: [{ taskId: "source", dependsOnId: "predecessor" }, { taskId: "dependent", dependsOnId: "source" }] as Row[],
     times: [{ id: "timer", taskId: "source", userId: "worker", minutes: 20, stoppedAt: null, startedAt: now }] as Row[],
     files: [{ id: "photo", taskId: "source", projectId: "project", productId: "product" }] as Row[],
@@ -85,6 +85,10 @@ export function taskShareFixture(productStatus: "DESIGN" | "PRODUCTION" = "PRODU
       findMany: async ({ where }: { where?: Row } = {}) => filtered(state.users, where),
     },
     productPercentageConfig: { findMany: async () => [] },
+    productStatusHistory: {
+      findFirst: async ({ where }: { where: Row }) => filtered(state.history, where)[0] ?? null,
+      create: async ({ data }: { data: Row }) => { write("history.create"); const row = { id: `history-${++state.sequence}`, ...data }; state.history.push(row); return row; },
+    },
     work: {
       findUnique: async ({ where }: { where: Row }) => { const row = filtered(state.works, where)[0]; return row ? { ...row, tasks: state.tasks.filter((task) => task.workId === row.id) } : null; },
       delete: async ({ where }: { where: Row }) => { write("work.delete"); const row = filtered(state.works, where)[0]; state.works = state.works.filter((work) => work !== row); return row; },

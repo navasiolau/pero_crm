@@ -11,8 +11,8 @@ function coveredFixture(state:string|null,rate='5',kind:'ASSEMBLY'|'INSTALLATION
  Object.assign(f.database.payrollEntry,{findMany:async()=>f.state().entries});
  return f;
 }
-test('validated planned/settled directpositive coverage suppresses ordinaryPIECE only',async()=>{
- for(const kind of ['ASSEMBLY','INSTALLATION'] as const)for(const state of [null,'SETTLED']){const f=coveredFixture(state,'5',kind);assert.equal((await changeTaskStatusCore(actor,'source','DONE',20,f.transaction)).ok,true);assert.equal(f.state().entries.length,0);assert.equal(f.state().tasks[0].status,'DONE');}
+test('retired direct coverage leaves ordinary PIECE accrual independent',async()=>{
+ for(const kind of ['ASSEMBLY','INSTALLATION'] as const)for(const state of [null,'SETTLED']){const f=coveredFixture(state,'5',kind);assert.equal((await changeTaskStatusCore(actor,'source','DONE',20,f.transaction)).ok,true);assert.equal(f.state().entries.length,1);assert.equal(f.state().tasks[0].status,'DONE');}
 });
 test('SKIPPED/protected/zero configurations preserve legacyPIECE, including historicalgroups',async()=>{
  for(const [state,rate] of [['SKIPPED_ONCE','5'],['LEGACY_PROTECTED','5'],[null,'0']] as const){const f=coveredFixture(state,rate);assert.equal((await changeTaskStatusCore(actor,'source','DONE',20,f.transaction)).ok,true);assert.equal(Number(f.state().entries[0].amount),1000);}

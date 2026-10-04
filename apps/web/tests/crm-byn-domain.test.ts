@@ -12,8 +12,9 @@ const actor = { id: "manager", name: "Manager", roles: ["MANAGER" as const], sou
 test("new percentage snapshot rejects foreign project before snapshot/audit writes", async () => {
   let writes = 0;
   const tx = {
+    productStatusHistory: { findFirst: async () => null },
     productPercentageCompletion: { findUnique: async () => null, create: async () => { writes++; return { id: "new" }; } },
-    product: { findUnique: async () => ({ quantity: 3, expectedPrice: "1000", mounterId: "m", mounter: { id: "m", name: "M", active: true, roles: ["MOUNTER"] }, project: { currency: "USD" }, percentageConfigs: [{ ratePercent: "5" }], stagePayPools: [] }) },
+    product: { findUnique: async () => ({ status: "INSTALLATION", quantity: 3, expectedPrice: "1000", mounterId: "m", mounter: { id: "m", name: "M", active: true, roles: ["MOUNTER"] }, project: { currency: "USD" }, percentageConfigs: [{ ratePercent: "5" }], stagePayPools: [] }) },
     orgSetting: { findUnique: async () => ({ value: "BYN" }) },
     changeLog: { create: async () => { writes++; } },
   } as unknown as Prisma.TransactionClient;

@@ -1,5 +1,4 @@
 import {canAccrueOrdinarySalary,hasFrozenTaskPieceObligation} from "@/lib/compensation-policy";
-import { isEffectivelyCoveredWork } from "@/server/product-percentage-pay/work-coverage";
 import { assertInternalCurrency, assertProjectMoneyCurrency } from "@/lib/internal-currency";
 import type { Prisma } from "@prisma/client";
 import { fileVisibilityWhere, hasFullProjectVisibility, resolveVisibilityActor, taskExecutionWhere } from "@/server/access/visibility";
@@ -89,11 +88,9 @@ export async function changeTaskStatusCore(actor: DomainActor, taskId: string, t
       // Старые monetary snapshots конвертированной работы не являются её оплатой.
       if (doneAt && task.assigneeId && task.work && task.work.paymentKind === "LEGACY") {
         if(task.work.projectId!==task.projectId||task.work.productId!==task.productId)throw new CompletionError("Работа и задача относятся к разным изделиям или проектам");
-        const historicalMoney=!!task.allocationGroupId||task.shareAmount!=null||String(task.executorShare)!=="1";
-        const covered=!historicalMoney&&task.productId!==null&&await isEffectivelyCoveredWork(tx,task.work.id,task.productId,task.projectId);
         const frozenObligation = hasFrozenTaskPieceObligation(task);
         const assignee = await tx.user.findUnique({ where: { id: task.assigneeId }, select: { name: true, payScheme: true, roles: true } });
-        if (!covered && assignee?.payScheme === "PIECE" && (canAccrueOrdinarySalary(assignee.roles) || frozenObligation) && !await tx.payrollEntry.findFirst({ where: { taskId: task.id, scheme: "PIECE" }, select: { id: true } })) {
+        if (assignee?.payScheme === "PIECE" && (canAccrueOrdinarySalary(assignee.roles) || frozenObligation) && !await tx.payrollEntry.findFirst({ where: { taskId: task.id, scheme: "PIECE" }, select: { id: true } })) {
           if (task.work.priceSnapshot === null && !frozenObligation) throw new CompletionError("Не задана расценка обычной работы");
           const amount = taskPieceAmount(task, task.work.priceSnapshot ?? 0);
           if (moneyAtoms(amount) > BigInt(0)) {

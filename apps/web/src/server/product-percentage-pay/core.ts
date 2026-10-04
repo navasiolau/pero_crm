@@ -53,10 +53,19 @@ export async function setProductNoModelCore(actor: DomainActor, productId: strin
   throw new Error("Отметка модели больше не используется для изменения статуса");
 }
 export async function captureProductPercentageCompletion(tx: Tx, actor: DomainActor, productId: string,
-  kind: ProductPercentageKind, statusAtCompletion: ProductStatus, effects?: PercentageAccrualEffects) {
+  kind: ProductPercentageKind, statusAtCompletion: ProductStatus, effects?: PercentageAccrualEffects,
+  originalStatus?: ProductStatus) {
   assertKind(kind);
   const existing = await tx.productPercentageCompletion.findUnique({ where: { productId_kind: { productId, kind } }, select: { state: true } });
   if (existing) return existing.state;
+  // Read the original status before the new transition, never its already-written target.
+  const reached: ProductStatus[] = kind === "ENGINEERING" ? ["PRODUCTION", "DELIVERY", "INSTALLATION", "DONE"]
+    : kind === "ASSEMBLY" ? ["DELIVERY", "INSTALLATION", "DONE"] : ["DONE"];
+  const status = originalStatus ?? (await tx.product.findUnique({ where: { id: productId }, select: { status: true } }))?.status;
+  if (status && reached.includes(status)) return "LEGACY_PROTECTED";
+  if (await tx.productStatusHistory.findFirst({ where: { productId, OR: [
+    { fromStatus: { in: reached } }, { toStatus: { in: reached } },
+  ] }, select: { id: true } })) return "LEGACY_PROTECTED";
   return captureDirectPercentage(tx, actor, productId, kind, statusAtCompletion, effects);
 }
 

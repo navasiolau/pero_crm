@@ -41,3 +41,14 @@ test("v2 constraints validate unit/quantity/BYN snapshots and freeze all new inp
   assert.match(sql, /NEW\."calculationVersion",NEW\."quantitySnapshot",NEW\."totalSnapshot",NEW\."recipientId"/);
   assert.match(sql, /OLD\."calculationVersion",OLD\."quantitySnapshot",OLD\."totalSnapshot",OLD\."recipientId"/);
 });
+
+test("v3 CHECK retains v1/v2 exactly and introduces only unit engineering formula without data writes", () => {
+  const next = readFileSync(new URL("../prisma/migrations/20261004120000_simplify_product_percentage_accrual/migration.sql", import.meta.url), "utf8");
+  const marker = 'ALTER TABLE "ProductPercentageCompletion" ADD CONSTRAINT "ProductPercentageCompletion_version_shape" CHECK (';
+  const start = sql.indexOf(marker);
+  const oldBranches = sql.slice(start, sql.indexOf("\n);", start));
+  assert.ok(next.includes(oldBranches), "every historical branch must remain exactly intact");
+  assert.match(next, /"calculationVersion" = 3/);
+  assert.match(next, /CASE WHEN "kind" = 'ENGINEERING' THEN "priceSnapshot" ELSE "totalSnapshot" END \* "ratePercentSnapshot" \/ 100/);
+  assert.doesNotMatch(next, /\b(?:INSERT|UPDATE|DELETE|TRUNCATE|DROP TABLE|DROP COLUMN|CREATE OR REPLACE FUNCTION)\b/);
+});

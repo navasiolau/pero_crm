@@ -51,7 +51,10 @@ const db = {
   productPercentageConfig: { findMany: async () => [], deleteMany: async () => ({ count: 0 }) },
   productPercentageParticipant: { findMany: async () => [], deleteMany: async () => ({ count: 0 }) },
   orgSetting: { findUnique: async ({where}: {where: {key:string}}) => where.key === "payrollCurrency" ? ({value:"BYN"}) : null },
-  productStatusHistory: { create: async ({ data }: { data: Row }) => { state.history.push(data); return data; } },
+  productStatusHistory: {
+    findFirst: async ({ where }: { where: Row }) => state.history.find((row) => matches(row, where)) ?? null,
+    create: async ({ data }: { data: Row }) => { state.history.push(data); return data; },
+  },
   changeLog: { create: async ({ data }: { data: Row }) => { state.logs.push(data); return data; } },
   domainEvent: { create: async ({ data }: { data: Row }) => { const row = { id: "event", ...data }; state.events.push(row); return row; } },
   $transaction: async (operation: ((tx: unknown) => Promise<unknown>) | Promise<unknown>[]) => {

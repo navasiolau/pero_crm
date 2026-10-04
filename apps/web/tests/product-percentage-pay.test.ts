@@ -70,10 +70,11 @@ test("менеджер свободен; текущий инженер DESIGN↔
   assert.equal(decideProductPercentageStatus(["WORKER", "MOUNTER"], { ...context, hasB3d: true }).allowed, false);
 });
 
-test("v2 первый переход фиксирует нулевой BYN расчёт без начисления, повтор не дублирует снимок", async () => {
+test("v3 первый переход фиксирует нулевой BYN расчёт без начисления, повтор не дублирует снимок", async () => {
   const saved: unknown[] = [];
   const shares: unknown[] = [];
   const tx = {
+    productStatusHistory: { findFirst: async () => null },
     productPercentageCompletion: {
       findUnique: async () => saved.length ? { state: "SETTLED" } : null,
       create: async ({ data }: { data: unknown }) => { saved.push(data); return { id: "completion" }; },
@@ -95,13 +96,14 @@ test("v2 первый переход фиксирует нулевой BYN ра�
   const snapshot = saved[0] as { priceSnapshot: unknown; ratePercentSnapshot: unknown; calculationVersion: number; quantitySnapshot: number; amount: string };
   assert.ok(snapshot.priceSnapshot);
   assert.ok(snapshot.ratePercentSnapshot);
-  assert.equal(snapshot.calculationVersion, 2); assert.equal(snapshot.quantitySnapshot, 3);
+  assert.equal(snapshot.calculationVersion, 3); assert.equal(snapshot.quantitySnapshot, 3);
   assert.equal(snapshot.amount, "0.00"); assert.equal(shares.length, 1);
 });
 
 test("null конфигурация фиксирует однократный пропуск без начисления", async () => {
   let state = "";
   const tx = {
+    productStatusHistory: { findFirst: async () => null },
     productPercentageCompletion: { findUnique: async () => null,
       create: async ({ data }: { data: { state: string } }) => { state = data.state; return { id: "completion" }; } },
     product: { findUnique: async () => ({ quantity: 3, expectedPrice: null, project: { currency: "BYN" },
@@ -114,10 +116,11 @@ test("null конфигурация фиксирует однократный п
   assert.equal(state, "SKIPPED_ONCE");
 });
 
-test("v2 самостоятельная обычная работа сохраняет монтажный процент от цены всей партии", async () => {
+test("v3 самостоятельная обычная работа сохраняет монтажный процент от цены всей партии", async () => {
   let savedState = "";
   const payroll: {amount: string}[] = [];
   const tx = {
+    productStatusHistory: { findFirst: async () => null },
     productPercentageCompletion: { findUnique: async () => null,
       create: async ({ data }: { data: { state: string } }) => { savedState = data.state; return { id: "completion" }; } },
     product: { findUnique: async () => ({ id: "p", projectId: "project", quantity: 3, mounter: {id: "mounter", name: "Монтажник", active: true, roles: ["MOUNTER"]}, expectedPrice: { toString: () => "500" }, project: { currency: "BYN" },
@@ -253,21 +256,14 @@ test("retired configure не классифицирует и не создаёт
   assert.equal(product.mounterId,"mounter"); assert.deepEqual(writes,["assignee","config","audit"]);
 });
 
-test("v2 покрытая уже оплаченная монтажная работа защищает прежнее начисление без нового payroll", async () => {
-  const completionRows: {state: string; amount?: unknown}[] = [];
+test("historical DONE skips absent completion without reading work payments or creating marker", async () => {
   const tx = {
-    productPercentageCompletion: {findUnique: async () => null, create: async ({data}: {data: {state: string; amount?: unknown}}) => {completionRows.push(data); return {id:"completion"};}},
-    product: {findUnique: async () => ({id:"p",projectId:"project",quantity:3,expectedPrice:"500",project:{currency:"BYN"},mounter:{id:"m",name:"Монтажник",active:true,roles:["MOUNTER"]},stagePayPools:[],percentageConfigs:[{ratePercent:"10",workReview:[{workId:"w",classification:"COVERED"}]}]})},
-    work: {findMany: async () => [{id:"w",title:"Оплаченная работа",tasks:[{id:"task",projectId:"project",productId:"p"}]}]},
-    payrollEntry: {findMany: async () => [{workId:null,taskId:"task"}],create: async () => {throw Error("Paid covered work must not accrue twice");}},
-    productPercentageCompletionShare: {create: async () => ({id:"share"})},
-    productPercentageConfig: {findMany: async () => []},
-    domainEvent: {create: async () => {throw Error("Protected history must not emit new earning");}},
-    changeLog: {create: async () => ({})},
+    productPercentageCompletion: {findUnique: async () => null, create: async () => {throw Error("no historical marker")}},
+    product: {findUnique: async () => ({status:"DONE"})},
+    payrollEntry: {findMany: async () => {throw Error("no work pay read")},create: async () => {throw Error("no historic accrual")}},
   } as unknown as Prisma.TransactionClient;
-  const actor = {id:"manager",name:"Менеджер",roles:["MANAGER" as const],source:"web" as const};
+  const actor = {id:"manager",name:"Manager",roles:["MANAGER" as const],source:"web" as const};
   assert.equal(await captureProductPercentageCompletion(tx,actor,"p","INSTALLATION","DONE"),"LEGACY_PROTECTED");
-  assert.equal(completionRows.length,1); assert.equal(completionRows[0].amount,undefined);
 });
 
 test("retired transfer отказывает до любых операций для владельца доли и посторонней роли", async () => {
@@ -292,7 +288,7 @@ test("единый статусный handler сохраняет manager DONE и
       completions.find((row) => row.kind === where.productId_kind.kind) ?? null,
       create: async ({ data }: { data: { kind: string; state: string } }) => { completions.push(data); return { id: data.kind }; } },
     orgSetting: { findUnique: async () => ({ value: "BYN" }) },
-    productStatusHistory: { create: async () => { writes.push("history"); return {}; } },
+    productStatusHistory: { findFirst: async () => null, create: async () => { writes.push("history"); return {}; } },
     changeLog: { create: async () => { writes.push("audit"); return {}; } },
     domainEvent: { create: async () => { writes.push("event"); return { id: "event" }; } },
   } as unknown as Prisma.TransactionClient;
@@ -329,7 +325,7 @@ test("после SKIPPED_ONCE менеджер настраивает ставк
       update: async ({data}: {data: {ratePercent: string}}) => { config = {...config!,ratePercent:data.ratePercent,revision:config!.revision+1}; return config; } },
     productPercentageParticipant: { createMany: async () => ({}) },
     task: { findFirst: async () => null },
-    productStatusHistory: { create: async () => ({}) },
+    productStatusHistory: { findFirst: async () => null, create: async () => ({}) },
     payrollEntry: { create: async () => { payrollCreated++; return {}; } },
     changeLog: { findUnique: async () => null, create: async () => ({}) },
     domainEvent: { create: async () => ({ id: "event" }) },
@@ -424,4 +420,17 @@ test("foreign frozen PENDING_FX retry preserves currency and fixed BYN amounts w
   assert.ok(entries.every(row => row.currency === "EUR" && row.projectCurrency === "USD"));
   assert.equal(await settlePendingProductPercentage("p", "ENGINEERING", deps), "SETTLED");
   assert.equal(entries.length, 2);
+});
+
+test("server DTO draft preview uses engineer unit price and batch price for assembler/mounter without legacy reads", async () => {
+  const product = {id:"p",quantity:3,expectedPrice:"1000",project:{currency:"BYN"},noModel:false,files:[],stagePayPools:[],percentageCompletions:[],
+    engineerId:"e",engineer:{name:"E",active:true,roles:["ENGINEER"]},assemblerId:"a",assembler:{name:"A",active:true,roles:["WORKER"]},mounterId:"m",mounter:{name:"M",active:true,roles:["MOUNTER"]},
+    percentageConfigs:[{kind:"ENGINEERING",ratePercent:"5",revision:1},{kind:"ASSEMBLY",ratePercent:"4",revision:1},{kind:"INSTALLATION",ratePercent:"7",revision:1}]};
+  const database = {task:{findMany:async()=>[]},productPercentageParticipant:{findMany:async()=>[]},product:{findFirst:async()=>product},user:{findMany:async()=>[]},payrollEntry:{findMany:async()=>{throw Error("no legacy pay read")}}} as unknown as Parameters<typeof getProductPercentageView>[2];
+  const view=await getProductPercentageView({id:"manager",roles:["MANAGER"]},"p",database);
+  assert.deepEqual(Object.values(view.sections).map(section=>section.total),["50.00","120.00","210.00"]);
+  assert.ok(Object.values(view.sections).every(section=>section.calculationVersion===3&&!('workReview' in section)&&!('legacyWorkCandidates' in section)));
+  product.quantity=6;
+  const changed=await getProductPercentageView({id:"manager",roles:["MANAGER"]},"p",database);
+  assert.deepEqual(Object.values(changed.sections).map(section=>section.total),["50.00","240.00","420.00"]);
 });

@@ -33,9 +33,6 @@ const blankSection = (kind: ProductPercentageKind): ProductPercentageSectionView
   ownMember: null,
   legacyPaidSummary: null,
   skippedSnapshot: null,
-  requiresManagerReview: false,
-  installationWorkCandidates: [],
-  classifiedInstallationWorkIds: [],
   transferCandidates: [],
 });
 
