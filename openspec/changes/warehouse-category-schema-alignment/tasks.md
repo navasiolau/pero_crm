@@ -7,5 +7,5 @@
 
 ## 2. Staging
 
-- [ ] 2.1 Ordinary commit/merge/CI и actual deployed revision/client/health подтверждены; Income61 сохраняется, schemaDDL/main/prod нет.
-- [ ] 2.2 Actual warehouse/items readonly page/screenshot и native category defaults проходят безP2022, own effects очищены; настоящий receipt/итоговая ревизия сохранены.
+- [x] 2.1 Ветка bugfix/58 интегрирована обычным merge, CI118 SUCCESS. Фактически развёрнутый staging120eb56c, исправленный Prisma Client и health200 подтверждены; код Income61 сохранён, SQL-миграций и выпуска main/production нет.
+- [x] 2.2 Страница warehouse/items отвечает200 и показывает Номенклатуру безP2022; обычные операции категорий прошли с outerROLLBACK. Все исходные таблицы и схема MATCH, сохранённых тестовых строк0. Receipts и скриншот сохранены; общий browser wrapper отдельно имеет STOP из-за заблокированного автоматического POST после успешных целевых наблюдений.
