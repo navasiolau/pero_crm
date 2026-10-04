@@ -24,16 +24,8 @@ test('current fields can change after completion while stale peers conflict and 
  assert.equal((await patchProductPercentageCore(manager,input({field:'assigneeId',value:'inactive',expectedValue:'m',expectedRevision:3}),f.tx)).ok,false);
  const before=f.writes.length;assert.equal((await patchProductPercentageCore({...manager,roles:['ENGINEER']},input(),f.tx)).kind,'forbidden');assert.equal(f.writes.length,before);
 });
-test('structured real workreview exactscope, immutable aftercompletion; samevalue is no-op',async()=>{
- const f=fixture();const patch:ProductPercentagePatch={...input(),field:'workReview',value:[{workId:'w',classification:'INDEPENDENT'}],expectedValue:[]};
- assert.equal((await patchProductPercentageCore(manager,{...patch,value:[{workId:'foreign',classification:'COVERED'}]},f.tx)).ok,false);assert.deepEqual(f.writes,[]);
- assert.equal((await patchProductPercentageCore(manager,patch,f.tx)).ok,true);assert.deepEqual(f.cfg.workReview,[{workId:'w',classification:'INDEPENDENT'}]);
- f.complete();assert.equal((await patchProductPercentageCore(manager,{...patch,expectedRevision:3,expectedValue:patch.value,value:[{workId:'w',classification:'COVERED'}],clientMutationId:randomUUID()},f.tx)).ok,false);
- const g=fixture();const result=await patchProductPercentageCore(manager,input({value:'5'}),g.tx);assert.ok(result.ok);assert.equal(result.noOp,true);assert.deepEqual(g.writes,[]);
-});
-
-
-test('coveredreview refuses unfinished fixedlegacy obligations instead of suppressing their pay',async()=>{
- const f=fixture();const patch:ProductPercentagePatch={...input(),field:'workReview',value:[{workId:'w',classification:'COVERED'}],expectedValue:[]};
- const result=await patchProductPercentageCore(manager,patch,f.tx);assert.equal(result.ok,false);if(!result.ok)assert.match(result.error,/Старые обязательства/);assert.deepEqual(f.writes,[]);
+test('retired workReview rejects without any writes and ordinary same value remains no-op',async()=>{
+ const f=fixture();const patch={...input(),field:'workReview',value:[{workId:'w',classification:'INDEPENDENT'}],expectedValue:[]} as unknown as ProductPercentagePatch;
+ const result=await patchProductPercentageCore(manager,patch,f.tx);assert.equal(result.kind,'validation');assert.deepEqual(f.writes,[]);
+ const g=fixture();const same=await patchProductPercentageCore(manager,input({value:'5'}),g.tx);assert.ok(same.ok);assert.equal(same.noOp,true);assert.deepEqual(g.writes,[]);
 });

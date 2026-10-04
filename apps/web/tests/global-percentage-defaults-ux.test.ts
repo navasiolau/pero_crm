@@ -17,7 +17,7 @@ inject('../src/server/product-percentage-pay/actions',{retryProductPercentageAct
 (globalThis as unknown as {React:typeof React}).React=React;
 const{default:SettingsPage}=require('../src/app/(app)/settings/page') as typeof import('../src/app/(app)/settings/page');
 const{SinglePercentageRow}=require('../src/app/(app)/products/[id]/product-percentage-panel') as typeof import('../src/app/(app)/products/[id]/product-percentage-panel');
-const section:ProductPercentageSectionView={kind:'ENGINEERING',state:'DRAFT',hasConfiguration:true,ratePercent:'5',currentRatePercent:'5',price:'1000.00',unitPrice:'1000.00',quantity:3,calculationVersion:2,productCurrency:'BYN',payrollCurrency:'BYN',total:null,members:[],revision:1,canManage:false,canTransfer:false,ownMember:null,legacyPaidSummary:null,skippedSnapshot:null,requiresManagerReview:false,installationWorkCandidates:[],classifiedInstallationWorkIds:[],transferCandidates:[],assignee:{userId:'engineer',name:'Engineer',active:true,eligible:true}};
+const section:ProductPercentageSectionView={kind:'ENGINEERING',state:'DRAFT',hasConfiguration:true,ratePercent:'5',currentRatePercent:'5',price:'1000.00',unitPrice:'1000.00',quantity:3,calculationVersion:3,productCurrency:'BYN',payrollCurrency:'BYN',total:null,members:[],revision:1,canManage:false,canTransfer:false,ownMember:null,legacyPaidSummary:null,skippedSnapshot:null,transferCandidates:[],assignee:{userId:'engineer',name:'Engineer',active:true,eligible:true}};
 function panel(overrides:Partial<ProductPercentageSectionView>={}){return renderToStaticMarkup(React.createElement(SinglePercentageRow,{productId:'product',kind:'ENGINEERING',section:{...section,...overrides},canManage:false,canViewAll:true,candidates:[]}));}
 test('actual Settings root shows manager union only percentage card and retains admin cards',async()=>{
  for(const value of [['MANAGER'],['MANAGER','ENGINEER']] as Role[][]){roles=value;const html=renderToStaticMarkup(await SettingsPage());assert.match(html,/href="\/settings\/product-percentages"/);for(const path of ['users','payroll','modules','api'])assert.doesNotMatch(html,new RegExp('href="/settings/'+path+'"'));}
@@ -26,7 +26,9 @@ test('actual Settings root shows manager union only percentage card and retains 
 test('actual Settings page denies readonly office and field roles without any default writes',async()=>{
  for(const value of [['ENGINEER'],['ACCOUNTANT'],['WORKER'],['MOUNTER']] as Role[][]){roles=value;await assert.rejects(async()=>SettingsPage(),/SETTINGS_ACCESS_DENIED/);}
 });
-test('actual engineering draft shows only Preliminary150BYN, with no base or saved-price hints',()=>{const html=panel();assert.match(html,/Предварительно:/);assert.match(html,/150 BYN/);assert.doesNotMatch(html,/База:|По сохранённым/);});
+test('actual engineering draft shows only Preliminary50BYN, with no base or saved-price hints',()=>{const html=panel();assert.match(html,/Предварительно:/);assert.match(html,/50 BYN/);assert.doesNotMatch(html,/База:|По сохранённым/);});
 test('draft null differs from explicit zero and frozen totals remain unchanged',()=>{
- assert.match(panel({unitPrice:null,price:null}),/не определено/);assert.match(panel({currentRatePercent:'0',ratePercent:'0'}),/0 BYN/);const frozen=panel({state:'SETTLED',total:'150.00',unitPrice:'9999.00',quantity:99});assert.doesNotMatch(frozen,/Предварительно:/);assert.equal(singleProductPercentagePreview({state:'SETTLED',version:2,unitPrice:'9999.00',quantity:99,rate:'5',frozenTotal:'150.00'}),'150.00');
+ assert.match(panel({unitPrice:null,price:null}),/не определено/);assert.match(panel({currentRatePercent:'0',ratePercent:'0'}),/0 BYN/);const frozen=panel({state:'SETTLED',total:'150.00',unitPrice:'9999.00',quantity:99});assert.doesNotMatch(frozen,/Предварительно:/);assert.equal(singleProductPercentagePreview({state:'SETTLED',kind:'ENGINEERING',version:2,unitPrice:'9999.00',quantity:99,rate:'5',frozenTotal:'150.00'}),'150.00');
 });
+
+test('actual percentage row contains no former-work classification controls',()=>{assert.doesNotMatch(panel(),/Проверка прежних работ|Выберите решение|Включено в процентный этап|Самостоятельная сдельная работа/);});

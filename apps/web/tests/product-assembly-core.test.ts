@@ -14,11 +14,11 @@ function fixture(rate:string|null='5',price:string|null='1000'){
  productPercentageConfig:{findMany:async()=>[],findUnique:async()=>product.percentageConfigs[0],update:async({data}:{data:Record<string,unknown>})=>{Object.assign(product.percentageConfigs[0],data,{revision:3});return{id:'cfg',revision:3}}},
  productPercentageCompletion:{findUnique:async({where}:{where:{productId_kind:{kind:string}}})=>completions.find(row=>row.kind===where.productId_kind.kind)??null,create:async({data}:{data:Record<string,unknown>})=>{const row={id:'completion'+completions.length,...data};completions.push(row);return row}},
  productPercentageCompletionShare:{create:async({data}:{data:Record<string,unknown>})=>({id:'share',...data})},payrollEntry:{findMany:async()=>oldPaid,create:async({data}:{data:Record<string,unknown>})=>{payroll.push(data);return{id:'payroll'}}},
- changeLog:{findUnique:async({where}:{where:{id:string}})=>logs.find(row=>row.id===where.id)??null,create:async({data}:{data:Record<string,unknown>})=>{logs.push(data);return{id:'log'}}},domainEvent:{create:async()=>({id:'event'})},user:{findUnique:async()=>assembler},work:{findMany:async()=>works},task:{findFirst:async()=>null},productStatusHistory:{create:async()=>({id:'history'})}} as unknown as Prisma.TransactionClient;
+ changeLog:{findUnique:async({where}:{where:{id:string}})=>logs.find(row=>row.id===where.id)??null,create:async({data}:{data:Record<string,unknown>})=>{logs.push(data);return{id:'log'}}},domainEvent:{create:async()=>({id:'event'})},user:{findUnique:async()=>assembler},work:{findMany:async()=>works},task:{findFirst:async()=>null},productStatusHistory:{findFirst:async()=>null,create:async()=>({id:'history'})}} as unknown as Prisma.TransactionClient;
  return{tx,product,assembler,completions,payroll,logs,oldPaid,works};
 }
-test('ASSEMBLY existingV2core captures1000×3×5%=150 tosingleWORKER atDELIVERY',async()=>{
- const f=fixture();const result=await changeProductStatusTransaction(f.tx,manager,'p','DELIVERY');assert.ok(result.ok);const snapshot=f.completions.find(row=>row.kind==='ASSEMBLY')!;assert.equal(snapshot.calculationVersion,2);assert.equal(snapshot.recipientId,'worker');assert.equal(snapshot.quantitySnapshot,3);assert.equal(String(snapshot.amount),'150.00');assert.equal(f.payroll.length,1);assert.equal(f.payroll[0].scheme,'PRODUCT_PERCENT_ASSEMBLY');
+test('ASSEMBLY v3core captures1000×3×5%=150 tosingleWORKER atDELIVERY',async()=>{
+ const f=fixture();const result=await changeProductStatusTransaction(f.tx,manager,'p','DELIVERY');assert.ok(result.ok);const snapshot=f.completions.find(row=>row.kind==='ASSEMBLY')!;assert.equal(snapshot.calculationVersion,3);assert.equal(snapshot.recipientId,'worker');assert.equal(snapshot.quantitySnapshot,3);assert.equal(String(snapshot.amount),'150.00');assert.equal(f.payroll.length,1);assert.equal(f.payroll[0].scheme,'PRODUCT_PERCENT_ASSEMBLY');
  assert.equal((await changeProductStatusTransaction(f.tx,manager,'p','DONE')).ok,true);assert.equal(f.payroll.length,1);f.product.quantity=99;assert.equal(await captureProductPercentageCompletion(f.tx,manager,'p','ASSEMBLY','DONE'),'SETTLED');assert.equal(snapshot.quantitySnapshot,3);
 });
 test('assemblynullskip forever/zero noPayroll/missingpositivebasis andwrongrecipient reject',async()=>{
@@ -31,31 +31,26 @@ test('worker status denied; manager assemblyassignment CAS requiresactiveWORKER 
  const request={productId:'p',kind:'ASSEMBLY' as const,field:'assigneeId' as const,value:'nextworker',expectedValue:'worker',expectedRevision:2,clientMutationId:randomUUID()};
  f.assembler.roles=['MOUNTER'];assert.equal((await patchProductPercentageCore(manager,request,f.tx)).ok,false);f.assembler.roles=['WORKER'];assert.equal(await captureProductPercentageCompletion(f.tx,manager,'p','ASSEMBLY','DELIVERY'),'SETTLED');assert.equal((await patchProductPercentageCore(manager,request,f.tx)).ok,true);assert.equal(f.product.assemblerId,'nextworker');assert.equal(f.completions[0].recipientId,'worker');assert.equal(f.payroll[0].userId,'worker');
 });
-test('assemblyworkreview paidrealTaskrelation coveredprotects independentallows andmissingreviewdenies',async()=>{
+test('assembly ignores paid legacy work and retired classification',async()=>{
  for(const classification of [null,'COVERED','INDEPENDENT'] as const){const f=fixture();f.works.push({id:'w',title:'arbitrarylabel',tasks:[{id:'t',projectId:'project',productId:'p'}]});f.oldPaid.push({workId:null,taskId:'t'});f.product.percentageConfigs[0].workReview=classification?[{workId:'w',classification}]:null;
- if(!classification)await assert.rejects(captureProductPercentageCompletion(f.tx,manager,'p','ASSEMBLY','DELIVERY'),/Классифицируйте/);else{assert.equal(await captureProductPercentageCompletion(f.tx,manager,'p','ASSEMBLY','DELIVERY'),classification==='COVERED'?'LEGACY_PROTECTED':'SETTLED');assert.equal(f.payroll.length,classification==='COVERED'?0:1);}}
+ assert.equal(await captureProductPercentageCompletion(f.tx,manager,'p','ASSEMBLY','DELIVERY'),'SETTLED');assert.equal(f.payroll.length,1);}
 });
 
 test('managerjumpDONE closes3stages once insharedcore; laterreturns andreclamationdo notpayagain',async()=>{
- const f=fixture();Object.assign(f.product,{engineerId:'engineer',engineer:{id:'engineer',name:'Engineer',active:true,roles:['ENGINEER']},mounterId:'mounter',mounter:{id:'mounter',name:'Mounter',active:true,roles:['MOUNTER']}});
+ const f=fixture();f.product.status='DESIGN';Object.assign(f.product,{engineerId:'engineer',engineer:{id:'engineer',name:'Engineer',active:true,roles:['ENGINEER']},mounterId:'mounter',mounter:{id:'mounter',name:'Mounter',active:true,roles:['MOUNTER']}});
  f.product.percentageConfigs.push({id:'eng',kind:'ENGINEERING',ratePercent:'2',revision:1,workReview:null,participants:[]},{id:'mount',kind:'INSTALLATION',ratePercent:'4',revision:1,workReview:null,participants:[]});
  assert.equal((await changeProductStatusTransaction(f.tx,manager,'p','DONE')).ok,true);
- assert.equal(f.completions.length,3);assert.equal(f.payroll.length,3);assert.deepEqual(f.payroll.map(row=>Number(row.amount)).sort((a,b)=>a-b),[60,120,150]);
+ assert.equal(f.completions.length,3);assert.equal(f.payroll.length,3);assert.deepEqual(f.payroll.map(row=>Number(row.amount)).sort((a,b)=>a-b),[20,120,150]);
  for(const status of ['RECLAMATION','PRODUCTION','DELIVERY','DONE'] as const)assert.equal((await changeProductStatusTransaction(f.tx,manager,'p',status)).ok,true);
  assert.equal(f.completions.length,3);assert.equal(f.payroll.length,3);
 });
 test('invalidASSEMBLY recipient rolls back wholemanagerjump includingearlierENGINEERINGpay',async()=>{
- const f=fixture();Object.assign(f.product,{engineerId:'engineer',engineer:{id:'engineer',name:'Engineer',active:true,roles:['ENGINEER']}});f.product.percentageConfigs.push({id:'eng',kind:'ENGINEERING',ratePercent:'2',revision:1,workReview:null,participants:[]});f.assembler.active=false;
+ const f=fixture();f.product.status='DESIGN';Object.assign(f.product,{engineerId:'engineer',engineer:{id:'engineer',name:'Engineer',active:true,roles:['ENGINEER']}});f.product.percentageConfigs.push({id:'eng',kind:'ENGINEERING',ratePercent:'2',revision:1,workReview:null,participants:[]});f.assembler.active=false;
  let earlierWrites=0;const transaction=async()=>{const before=f.product.status;try{return await changeProductStatusTransaction(f.tx,manager,'p','DONE');}catch(error){earlierWrites=f.payroll.length;f.product.status=before;f.payroll.length=0;f.completions.length=0;f.logs.length=0;throw error;}};
- await assert.rejects(transaction(),/активного сборщика/);assert.equal(earlierWrites,1);assert.equal(f.product.status,'PRODUCTION');assert.deepEqual(f.payroll,[]);assert.deepEqual(f.completions,[]);
+ await assert.rejects(transaction(),/активного сборщика/);assert.equal(earlierWrites,1);assert.equal(f.product.status,'DESIGN');assert.deepEqual(f.payroll,[]);assert.deepEqual(f.completions,[]);
 });
-test('typedreview rejects coveredintersection withotherstage evenitsrateNULL; independentremainsvalid',async()=>{
- const f=fixture();f.works.push({id:'w',title:'labelignored',tasks:[]});f.tx.productPercentageConfig.findMany=(async()=>[{kind:'INSTALLATION',ratePercent:null,workReview:[{workId:'w',classification:'COVERED'}]}]) as never;
- const request={productId:'p',kind:'ASSEMBLY' as const,field:'workReview' as const,value:[{workId:'w',classification:'COVERED' as const}],expectedValue:[],expectedRevision:2,clientMutationId:randomUUID()};
- const denied=await patchProductPercentageCore(manager,request,f.tx);assert.equal(denied.ok,false);if(!denied.ok)assert.match(denied.error,/только одним/);assert.deepEqual(f.logs,[]);assert.equal(f.product.percentageConfigs[0].workReview,null);
- assert.equal((await patchProductPercentageCore(manager,{...request,value:[{workId:'w',classification:'INDEPENDENT'}],clientMutationId:randomUUID()},f.tx)).ok,true);
-});
-test('capturedefensively refuses corruptcrossstagecoveredreviews with no marker/payroll/writes',async()=>{
- const f=fixture();f.works.push({id:'w',title:'sameidnotname',tasks:[]});f.product.percentageConfigs[0].workReview=[{workId:'w',classification:'COVERED'}];f.tx.productPercentageConfig.findMany=(async()=>[{kind:'INSTALLATION',workReview:[{workId:'w',classification:'COVERED'}]}]) as never;
- await assert.rejects(captureProductPercentageCompletion(f.tx,manager,'p','ASSEMBLY','DELIVERY'),/только одним/);assert.deepEqual(f.completions,[]);assert.deepEqual(f.payroll,[]);assert.deepEqual(f.logs,[]);
+test('corrupt retired cross-stage reviews have no effect on independent direct accrual',async()=>{
+ const f=fixture();f.works.push({id:'w',title:'sameidnotname',tasks:[]});f.product.percentageConfigs[0].workReview=[{workId:'w',classification:'COVERED'}];
+ f.tx.productPercentageConfig.findMany=(async()=>{throw new Error('must not inspect retired coverage')}) as never;
+ assert.equal(await captureProductPercentageCompletion(f.tx,manager,'p','ASSEMBLY','DELIVERY'),'SETTLED');assert.equal(f.payroll.length,1);
 });

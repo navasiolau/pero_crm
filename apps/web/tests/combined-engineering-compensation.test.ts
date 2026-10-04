@@ -15,7 +15,7 @@ function combinedFixture(roles:Role[],payScheme:string){
  let price='1000.01',rate='5';
  const capture=()=>fixture.transaction(async tx=>{
  const percentageTx={...tx,
- product:{findUnique:async()=>({id:'product',projectId:'project',number:'1.1',quantity:3,expectedPrice:new Prisma.Decimal(price),project:{currency:fixture.state().projectCurrency},engineer:recipient,percentageConfigs:[{revision:1,ratePercent:new Prisma.Decimal(rate)}],stagePayPools:[]})},
+ product:{findUnique:async()=>({id:'product',projectId:'project',number:'1.1',status:fixture.state().products[0].status,quantity:3,expectedPrice:new Prisma.Decimal(price),project:{currency:fixture.state().projectCurrency},engineer:recipient,percentageConfigs:[{revision:1,ratePercent:new Prisma.Decimal(rate)}],stagePayPools:[]})},
  productPercentageCompletion:{findUnique:async()=>snapshots[0]??null,create:async({data}:{data:Row})=>{const row={id:'completion',...data};snapshots.push(row);return row;}},
  productPercentageCompletionShare:{create:async({data}:{data:Row})=>{const row={id:'percentage-share',...data};shares.push(row);return row;}},
  } as unknown as Prisma.TransactionClient;
@@ -30,8 +30,8 @@ test('ENGINEER+MANAGER chosen PIECE plus independent engineering percentage in e
  assert.ok(result.ok);assert.equal(result.payroll?.amount,'1000.00');
  assert.equal(await f.capture(),'SETTLED');
  const entries=f.fixture.state().entries;
- assert.deepEqual(entries.map(row=>[row.scheme,row.amount,row.currency]),[['PIECE','1000.00','BYN'],['PRODUCT_PERCENT_ENGINEERING','150.00','BYN']]);
- assert.ok(entries.every(row=>row.userId==='worker'));assert.equal(f.snapshots[0].calculationVersion,2);assert.equal(f.snapshots[0].quantitySnapshot,3);
+ assert.deepEqual(entries.map(row=>[row.scheme,row.amount,row.currency]),[['PIECE','1000.00','BYN'],['PRODUCT_PERCENT_ENGINEERING','50.00','BYN']]);
+ assert.ok(entries.every(row=>row.userId==='worker'));assert.equal(f.snapshots[0].calculationVersion,3);assert.equal(f.snapshots[0].quantitySnapshot,3);
  assert.equal(String(f.snapshots[0].totalSnapshot),'3000.03');assert.equal(String(f.snapshots[0].ratePercentSnapshot),'5');
  const immutable=JSON.stringify({entries,snapshots:f.snapshots,shares:f.shares});
  f.changePriceAndRate();assert.equal(await f.capture(),'SETTLED');
@@ -46,7 +46,7 @@ test('engineering percentage remains independent of chosen NONE or TURNOVER sche
  const f=combinedFixture(['ENGINEER','MANAGER'],payScheme);
  const result=await changeTaskStatusCore(manager,'source','DONE',20,f.fixture.transaction);assert.ok(result.ok);assert.equal(result.payroll,null);
  assert.equal(await f.capture(),'SETTLED');assert.deepEqual(f.fixture.state().entries.map(row=>row.scheme),['PRODUCT_PERCENT_ENGINEERING']);
- assert.equal(f.fixture.state().entries[0].amount,'150.00');assert.equal(f.fixture.state().users.find(row=>row.id==='worker')!.payScheme,payScheme);
+ assert.equal(f.fixture.state().entries[0].amount,'50.00');assert.equal(f.fixture.state().users.find(row=>row.id==='worker')!.payScheme,payScheme);
  }
 });
 test('combined role does not weaken photo/dependency/currency or produce engineering payment on malformed source',async()=>{
@@ -62,7 +62,7 @@ test('pure ENGINEER does not accrue a new ordinary PIECE but keeps product engin
  const result=await changeTaskStatusCore(manager,'source','DONE',20,f.fixture.transaction);assert.ok(result.ok);assert.equal(result.payroll,null);
  assert.equal(JSON.stringify(f.fixture.state().entries),history);
  assert.equal(await f.capture(),'SETTLED');assert.equal(f.fixture.state().entries.at(-1)?.scheme,'PRODUCT_PERCENT_ENGINEERING');
- assert.equal(f.fixture.state().entries.at(-1)?.amount,'150.00');
+ assert.equal(f.fixture.state().entries.at(-1)?.amount,'50.00');
 });
 
 test('pure ENGINEER keeps valid old TASK_FIXED monetary obligation unchanged despite changed/null current unit price',async()=>{
