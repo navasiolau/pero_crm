@@ -10,4 +10,4 @@
 
 ## 2. Staging
 
-- [ ] 2.1 Обычный commit/merge/CI, actual deployed revision/image/health, native INCOME NULL/server reject и readonly формы без статьи подтверждены; исходные данные сохранены, receipts записаны, main/production не меняются.
+- [x] 2.1 Обычный commit/merge/CI, actual deployed revision/image/health, native INCOME NULL/server reject и readonly формы без статьи подтверждены; исходные данные сохранены, receipts записаны, main/production не меняются.
