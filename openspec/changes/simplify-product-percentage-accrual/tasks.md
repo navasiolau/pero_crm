@@ -16,5 +16,5 @@
 
 - [x] 3.1 Existing local DB: применить только новую миграцию и выполнить native OUTERROLLBACK полный цикл без работ, незакрытые задачи, v3 суммы50/120/210, frozen v1/v2, no-retro и replay; original-data fingerprints/rollback PASS, без дампа/seed/newDB.
 - [x] 3.2 TypeScript, необходимые целевые/общие regression tests, lint и strict OpenSpec PASS; независимое ревью исправляет конкретные замечания перед commit.
-- [ ] 3.3 Обычный commit/merge/push staging; CI PASS и actual deployed SHA/image/health/new migration подтверждены. Main/production не меняются.
-- [ ] 3.4 Actual staging: native сценарии и focused browser карточка/формулы/отсутствие классификации приняты, собственные QA effects очищены; сохранить краткий receipt и итоговый SHA.
+- [x] 3.3 Обычный commit/merge/push staging; CI PASS и actual deployed SHA/image/health/new migration подтверждены. Main/production не меняются.
+- [x] 3.4 Actual staging: native сценарии и focused browser карточка/формулы/отсутствие классификации приняты, собственные QA effects очищены; сохранить краткий receipt и итоговый SHA.
