@@ -69,10 +69,10 @@ export async function createPaymentCore(
   }
 
   let articleId: string | null = null;
-  if (data.direction === "EXPENSE") {
-    if (!data.expenseArticleId) {
-      return { ok: false, error: "Выберите статью расхода" };
-    }
+  if (data.direction === "EXPENSE" && !data.expenseArticleId) {
+    return { ok: false, error: "Выберите статью расхода" };
+  }
+  if (data.expenseArticleId) {
     const article = await prisma.expenseArticle.findUnique({
       where: { id: data.expenseArticleId },
     });
@@ -143,6 +143,7 @@ export async function createPaymentInTransaction(actor:DomainActor,input:z.input
  const amount=new Prisma.Decimal(data.amount).toDecimalPlaces(2,Prisma.Decimal.ROUND_HALF_UP);
  if(!Number.isFinite(prepared.rate)||prepared.rate<=0||(data.currency==='BYN'&&prepared.rate!==1)||!amount.eq(prepared.amount)||!amount.times(prepared.rate).toDecimalPlaces(2,Prisma.Decimal.ROUND_HALF_UP).eq(prepared.bynAmount))throw Error("Денежный снимок изменился");
  if((data.projectId??null)!==(prepared.project?.id??null))throw Error("Реквизиты проекта изменились");
+ if((data.expenseArticleId||null)!==prepared.articleId)throw Error("Реквизиты статьи изменились");
  const [project,account,article]=await Promise.all([prepared.project?tx.project.findUnique({where:{...liveProjectWhere,id:prepared.project.id},select:{currency:true}}):Promise.resolve(null),tx.cashAccount.findUnique({where:{id:prepared.account.id},select:{active:true,currency:true}}),prepared.articleId?tx.expenseArticle.findUnique({where:{id:prepared.articleId},select:{active:true}}):Promise.resolve(null)]);
  if((prepared.project&&project?.currency!==prepared.project.currency)||!account?.active||account.currency!==data.currency||(prepared.articleId&&!article?.active))throw Error("Реквизиты платежа изменились — обновите форму");
  if(project)assertProjectMoneyCurrency(project.currency);

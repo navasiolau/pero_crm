@@ -52,6 +52,9 @@ jobs:
       - name: Typecheck (telegram-bot)
         run: pnpm --filter @pero/telegram-bot exec tsc --noEmit
 
+      - name: Chromium для компонентных тестов формы
+        run: pnpm --filter @pero/web exec playwright install --with-deps chromium
+
       - name: Тесты приложений
         run: pnpm -r --if-present test
 
