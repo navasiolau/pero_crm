@@ -384,7 +384,7 @@ export function PaymentDialog({
   onOpenChange: (open: boolean) => void;
   projectId?: string | null;
   projectCurrency: string;
-  projectOptions?: {id:string;number:string;title:string}[];
+  projectOptions?: { id: string; number: string; title?: string }[];
   cashAccounts: CashAccountOption[];
   expenseArticles: ExpenseArticleOption[];
 }) {
@@ -455,7 +455,7 @@ export function PaymentDialog({
     (article) => article.id === articleId,
   )
     ? articleId
-    : (expenseArticles[0]?.id ?? "");
+    : (isIncome ? "" : expenseArticles[0]?.id ?? "");
 
   const parsedAmount = amount.trim() === "" ? NaN : Number(amount);
   const parsedRate = rate.trim() === "" ? NaN : Number(rate);
@@ -473,6 +473,37 @@ export function PaymentDialog({
     (isIncome || effectiveArticleId !== "") &&
     (!needsRate || (Number.isFinite(parsedRate) && parsedRate > 0));
 
+  const articleField = (
+    <div className="flex min-w-0 max-w-full flex-col gap-1.5">
+      <Label htmlFor="pay-article">{isIncome ? "Статья расходов" : "Статья расхода *"}</Label>
+      <Select
+        value={effectiveArticleId}
+        onValueChange={(next) => setArticleId(next ?? "")}
+      >
+        <SelectTrigger id="pay-article" className="w-full min-w-0 max-w-full">
+          <SelectValue className="min-w-0 flex-1 truncate">
+            {expenseArticles.find(
+              (article) => article.id === effectiveArticleId,
+            )?.name ?? (isIncome ? "Выберите статью" : "—")}
+          </SelectValue>
+        </SelectTrigger>
+        <SelectContent>
+          {expenseArticles.map((article) => (
+            <SelectItem key={article.id} value={article.id}>
+              {article.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {expenseArticles.length === 0 ? (
+        <p className="text-xs text-destructive">
+          Нет статей — создайте их в Финансы → Статьи расходов
+        </p>
+      ) : null}
+    </div>
+
+  );
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
@@ -486,14 +517,30 @@ export function PaymentDialog({
               : "Расход уменьшит маржу проекта"}
           </DialogDescription>
         </DialogHeader>
-        <div className="flex flex-col gap-3">
-          {projectOptions?<div className="flex flex-col gap-1.5"><Label htmlFor="income-project">Проект (необязательно)</Label><select id="income-project" className="h-10 rounded-md border bg-background px-3" value={selectedProjectId} onChange={event=>setSelectedProjectId(event.target.value)}><option value="">Общий приход организации</option>{projectOptions.map(project=><option key={project.id} value={project.id}>{project.number} · {project.title}</option>)}</select></div>:null}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="flex flex-col gap-1.5">
+        <div className="flex min-w-0 max-w-full flex-col gap-3">
+          {isIncome ? articleField : null}
+          {projectOptions ? (
+            <div className="flex min-w-0 max-w-full flex-col gap-1.5">
+              <Label htmlFor="income-project">Проект (необязательно)</Label>
+              <select
+                id="income-project"
+                className="h-10 w-full min-w-0 max-w-full rounded-md border bg-background px-3"
+                value={selectedProjectId}
+                onChange={(event) => setSelectedProjectId(event.target.value)}
+              >
+                <option value="">Общий приход организации</option>
+                {projectOptions.map((project) => (
+                  <option key={project.id} value={project.id}>{project.number}</option>
+                ))}
+              </select>
+            </div>
+          ) : null}
+          <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="flex min-w-0 max-w-full flex-col gap-1.5">
               <Label>Валюта *</Label>
               <Select value={currency} onValueChange={(next) => setCurrency(next ?? currency)}>
-                <SelectTrigger>
-                  <SelectValue>{currency}</SelectValue>
+                <SelectTrigger className="w-full min-w-0 max-w-full">
+                  <SelectValue className="min-w-0 flex-1 truncate">{currency}</SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {CURRENCIES.map((code) => (
@@ -504,14 +551,14 @@ export function PaymentDialog({
                 </SelectContent>
               </Select>
             </div>
-            <div className="flex flex-col gap-1.5">
+            <div className="flex min-w-0 max-w-full flex-col gap-1.5">
               <Label>Касса *</Label>
               <Select
                 value={effectiveAccountId}
                 onValueChange={(next) => setCashAccountId(next ?? "")}
               >
-                <SelectTrigger>
-                  <SelectValue>
+                <SelectTrigger className="w-full min-w-0 max-w-full">
+                  <SelectValue className="min-w-0 flex-1 truncate">
                     {accountOptions.find(
                       (account) => account.id === effectiveAccountId,
                     )?.name ?? "—"}
@@ -533,39 +580,12 @@ export function PaymentDialog({
             </div>
           </div>
 
-          {!isIncome ? (
-            <div className="flex flex-col gap-1.5">
-              <Label>Статья расхода *</Label>
-              <Select
-                value={effectiveArticleId}
-                onValueChange={(next) => setArticleId(next ?? "")}
-              >
-                <SelectTrigger>
-                  <SelectValue>
-                    {expenseArticles.find(
-                      (article) => article.id === effectiveArticleId,
-                    )?.name ?? "—"}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  {expenseArticles.map((article) => (
-                    <SelectItem key={article.id} value={article.id}>
-                      {article.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {expenseArticles.length === 0 ? (
-                <p className="text-xs text-destructive">
-                  Нет статей — создайте их в Финансы → Статьи расходов
-                </p>
-              ) : null}
-            </div>
-          ) : null}
+          {!isIncome ? articleField : null}
 
-          <div className="flex flex-col gap-1.5">
+          <div className="flex min-w-0 max-w-full flex-col gap-1.5">
             <Label htmlFor="pay-amount">Сумма, {currency} *</Label>
             <Input
+              className="w-full min-w-0 max-w-full"
               id="pay-amount"
               type="number"
               min="0"
@@ -577,10 +597,11 @@ export function PaymentDialog({
           </div>
 
           {needsRate ? (
-            <div className="flex flex-col gap-1.5">
+            <div className="flex min-w-0 max-w-full flex-col gap-1.5">
               <Label htmlFor="pay-rate">Курс НБ РБ (BYN за 1 {currency}) *</Label>
               <Input
-                id="pay-rate"
+                className="w-full min-w-0 max-w-full"
+              id="pay-rate"
                 type="number"
                 min="0"
                 step="0.000001"
@@ -600,9 +621,10 @@ export function PaymentDialog({
             </div>
           ) : null}
 
-          <div className="flex flex-col gap-1.5">
+          <div className="flex min-w-0 max-w-full flex-col gap-1.5">
             <Label htmlFor="pay-date">Дата</Label>
             <Input
+              className="w-full min-w-0 max-w-full"
               id="pay-date"
               type="date"
               value={paidAt}
@@ -610,13 +632,14 @@ export function PaymentDialog({
             />
             <p className="text-xs text-muted-foreground">Пусто — сегодня</p>
           </div>
-          <div className="flex flex-col gap-1.5">
+          <div className="flex min-w-0 max-w-full flex-col gap-1.5">
             <Label htmlFor="pay-comment">Комментарий</Label>
             <Input
+              className="w-full min-w-0 max-w-full"
               id="pay-comment"
               value={comment}
               onChange={(event) => setComment(event.target.value)}
-              placeholder={isIncome ? "Аванс, окончательный расчёт…" : "Закупка материалов…"}
+              placeholder={isIncome ? "Комментарий к приходу" : "Закупка материалов…"}
             />
           </div>
         </div>
@@ -634,7 +657,7 @@ export function PaymentDialog({
                   amount: parsedAmount,
                   currency,
                   cashAccountId: effectiveAccountId,
-                  expenseArticleId: isIncome ? undefined : effectiveArticleId,
+                  expenseArticleId: effectiveArticleId || undefined,
                   rate: needsRate ? parsedRate : undefined,
                   rateDate: rateDate || undefined,
                   paidAt: paidAt || undefined,
