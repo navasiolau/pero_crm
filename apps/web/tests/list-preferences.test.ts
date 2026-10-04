@@ -21,6 +21,25 @@ function fixture() {
   return { service, rows, login: (id: string | null) => { user = id; } };
 }
 
+test("old stored empty arrays remove only their axes and retain raw CAS across V1 and V2", async () => {
+  for (const version of [1, 2]) {
+    const f = fixture();
+    const raw = JSON.stringify({ version, revision: "old", query: new URLSearchParams({ client: "[]", engineer: '["e1"]', stage: '["IN_WORK"]', manager: "[]" }).toString() });
+    f.rows.set("alice/projects.list", raw);
+    const loaded = await f.service.load("projects", {});
+    assert.equal(loaded.value, raw);
+    const params = new URLSearchParams(loaded.query);
+    assert.equal(params.get("client"), null);
+    assert.equal(params.get("manager"), null);
+    assert.equal(params.get("engineer"), '["e1"]');
+    assert.equal(params.get("stage"), '["IN_WORK"]');
+    assert.equal(params.get("active"), version === 1 ? "1" : null);
+    const saved = await f.service.save("projects", loaded.query, loaded.value);
+    assert.equal(saved.ok, true);
+    assert.equal(JSON.parse(saved.value!).version, 2);
+  }
+});
+
 test("V1 load preserves its raw CAS token and upgrade saves V2 without expiry", async () => {
   const f = fixture();
   const raw = '{ "version": 1, "revision": "2000-old", "query": "view=table&client=c1" }';

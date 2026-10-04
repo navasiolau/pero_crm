@@ -47,7 +47,7 @@ export function normalizeListQuery(section: ListSection, query: string) {
   if (section === "projects") {
     for (const key of ["client", "manager", "engineer", "stage"]) {
       let values = parseProjectFilterValue(source.get(key) ?? undefined);
-      if (key === "stage" && values?.some((value) => !STAGES.some((item) => item.id === value))) values = [];
+      if (key === "stage" && values?.some((value) => !STAGES.some((item) => item.id === value))) values = undefined;
       const encoded = encodeProjectFilterValue(values);
       if (encoded !== null) result.set(key, encoded);
     }

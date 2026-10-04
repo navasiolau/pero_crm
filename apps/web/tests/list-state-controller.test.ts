@@ -22,7 +22,7 @@ test("rapid project checkbox changes keep latest arrays and preserve raw V1 CAS 
   calls[0].resolve({ ok: false, value: "external-update" });
   await tick();
   assert.equal(calls[1].expected, "external-update");
-  assert.deepEqual(Object.fromEntries(new URLSearchParams(calls[1].query)), { view: "table", client: '["c1","c2","c3","c4","c5"]', engineer: '["e1","e2"]', stage: '[]', active: '1' });
+  assert.deepEqual(Object.fromEntries(new URLSearchParams(calls[1].query)), { view: "table", client: '["c1","c2","c3","c4","c5"]', engineer: '["e1","e2"]', active: '1' });
   assert.deepEqual(navigations, []);
   calls[1].resolve({ ok: true, value: encodeListPreference("projects", calls[1].query, "latest") });
   await tick();

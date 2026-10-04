@@ -6,20 +6,20 @@ import { encodeProjectFilterValue, parseProjectFilterValue } from "../src/lib/pr
 
 const fields = (query: string) => Object.fromEntries(new URLSearchParams(query));
 
-test("project codec distinguishes all/none and retains a selected ID absent from options", () => {
+test("project codec treats empty as unrestricted and retains a selected ID absent from options", () => {
   assert.equal(parseProjectFilterValue(undefined), undefined);
   assert.equal(parseProjectFilterValue(" "), undefined);
   assert.equal(encodeProjectFilterValue(undefined), null);
-  assert.equal(encodeProjectFilterValue([]), "[]");
-  assert.deepEqual(parseProjectFilterValue("[]"), []);
+  assert.equal(encodeProjectFilterValue([]), null);
+  assert.equal(parseProjectFilterValue("[]"), undefined);
   assert.deepEqual(parseProjectFilterValue(" old-selected-id "), ["old-selected-id"]);
   assert.equal(encodeProjectFilterValue(["z", "a", "z"]), '["a","z"]');
 });
 
-test("project multi-value normalization preserves five clients, two engineers and explicit none", () => {
+test("project multi-value normalization preserves five clients and two engineers while empty axes disappear", () => {
   const source = new URLSearchParams({ client: JSON.stringify(["c5", "c2", "c1", "c4", "c3", "c1"]), engineer: '["e2","e1"]', stage: '[]', manager: '[]', active: '1' });
   assert.deepEqual(fields(normalizeListQuery("projects", source.toString())), {
-    view: "kanban", client: '["c1","c2","c3","c4","c5"]', engineer: '["e1","e2"]', stage: '[]', manager: '[]', active: '1',
+    view: "kanban", client: '["c1","c2","c3","c4","c5"]', engineer: '["e1","e2"]', active: '1',
   });
   assert.deepEqual(fields(normalizeListQuery("projects", "client=c1&stage=IN_WORK")), { view: "kanban", client: '["c1"]', stage: '["IN_WORK"]' });
   assert.equal(normalizeListQuery("projects", ""), "view=kanban");
@@ -35,13 +35,19 @@ test("project preferences upgrade V1 effective activity, create V2 and keep prod
   assert.equal(decodeListPreference("products", JSON.stringify({ version: 2, query: "engineer=e1" })), null);
 });
 
-test("project normalization never drops a long valid ID set or widens an invalid one", () => {
+test("project normalization retains a long valid set and ignores malformed axes only", () => {
   const ids = Array.from({ length: 100 }, (_, index) => `client-${String(index).padStart(3, "0")}`);
   const source = new URLSearchParams({ client: JSON.stringify(ids) });
   assert.deepEqual(JSON.parse(new URLSearchParams(normalizeListQuery("projects", source.toString())).get("client")!), ids);
   for (const client of ['["c1",7]', '["c1"', JSON.stringify(["x".repeat(129)]), '{"id":"c1"}']) {
-    assert.equal(new URLSearchParams(normalizeListQuery("projects", new URLSearchParams({ client }).toString())).get("client"), "[]");
+    assert.deepEqual(fields(normalizeListQuery("projects", new URLSearchParams({ client, engineer: '["e1"]' }).toString())), { view: "kanban", engineer: '["e1"]' });
   }
+});
+
+test("clearing the last choice drops only that project axis and resets page", () => {
+  const initial = new URLSearchParams({ view: "table", stage: '["IN_WORK"]', engineer: '["e1"]', manager: '["m1"]', page: "3" }).toString();
+  const updated = updateListQuery("projects", initial, { engineer: "[]" });
+  assert.deepEqual(fields(updated), { view: "table", stage: '["IN_WORK"]', manager: '["m1"]' });
 });
 
 test("bare project route restores all saved filters, search, sorting, view and paging", () => {
