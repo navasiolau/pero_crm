@@ -18,7 +18,7 @@ const actor={id:'a',name:'A',roles:['ACCOUNTANT' as const],source:'web' as const
 const input={projectId:'p',direction:'INCOME' as const,amount:100,currency:'USD',cashAccountId:'cash'};
 test('unprepared foreign project rejects income and expense before FX, cash read or write',async()=>{
  for(const direction of ['INCOME','EXPENSE'] as const){projectCurrency='USD';fxCalls=0;writes=0;accountReads=0;
- const result=await createPaymentCore(actor,{...input,direction,expenseArticleId:'article'});
+ const result=await createPaymentCore(actor,{...input,direction,...(direction==='EXPENSE'?{expenseArticleId:'article'}:{})});
  assert.equal(result.ok,false);assert.match(result.error??'',/BYN/);assert.equal(fxCalls,0);assert.equal(accountReads,0);assert.equal(writes,0);}
 });
 test('BYN project preserves USD cash100 and fixes BYN300 despite old payroll setting',async()=>{

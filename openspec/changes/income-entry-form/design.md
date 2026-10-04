@@ -2,27 +2,27 @@
 
 ## Context
 
-См.proposal.md. Shared PaymentDialog показывает статьи только для EXPENSE, organization view передаёт пустой список. paymentSchema и Payment FK уже допускают expenseArticleId, но addPaymentCore молча игнорирует его для INCOME. Native select с длинными project title растягивает intrinsic grid track DialogContent; overflow-y-auto даёт горизонтальную прокрутку при overflow-x:visible.
+См. proposal.md. Ошибочная реализация отображает ExpenseArticle в INCOME, загружает справочник в income loader и сохраняет связь. Пользователь явно требует удалить эту возможность.
 
 ## Goals / Non-Goals
 
-**Goals:** правильные первые поля, сохранение явного выбора, bounded popup/form widths и реальные viewport measurements.
+**Goals:** INCOME без расходных статей во всех общих и проектных формах и серверных входах; EXPENSE сохраняет прежнюю классификацию.
 
-**Non-Goals:** новый каталог доходных статей, обязательная новая классификация старых/новых income API, изменение финансовых формул/права, новые ledger columns, миграция/production.
+**Non-Goals:** новый справочник доходов, изменение финансовых формул, миграции, переписывание истории, production.
 
 ## Decisions
 
-- Использовать существующий ExpenseArticle FK и active lookup. EXPENSE требует статью, INCOME сохраняет и проверяет её если передана. Transaction helper сверяет input/prepared article и повторно проверяет active; отсутствие Income статьи сохраняет текущий nullable API.
-- Loader передаёт active articles по существующему code/name. Income выбор ручной с placeholder, без auto-first. Project option text только number, empty option означает общий приход. Shared project-income использует тот же исправленный комментарий/статью; expense layout/requirement сохраняются.
-- Устранить min-content ширину: shared DialogContent получает bounded minmax grid track/min-w-0, PaymentDialog containers/controls w-full/min-w-0/max-w-full. Mobile money row одна колонка, desktop две. Не лечить только сокрытием overflowing полей; измерить элементы и доступность footer. Общий запрет горизонтального overflow можно добавить после реального ограничения ширины.
-- Browser проверяет только открытие/выбор полей/геометрию, без submit финансовой операции. Сохранение проверяется actual native OUTERROLLBACK на existing local/staging, без уведомлений и реальных денежных движений. Реальные DOM observations записать ДО вторичных protocol asserts; не повторять проблему прежней недоказанной UI-приёмки.
+- Article control существует только для EXPENSE. INCOME не отправляет expenseArticleId независимо от оставшегося состояния shared dialog. Income loader не читает ExpenseArticle, view не получает этот справочник.
+- Сервер отклоняет INCOME с непустой статьёй до финансовой записи; transaction helper также защищает этот контракт от прямого вызова. Новая строка INCOME имеет expenseArticleId=NULL. EXPENSE по-прежнему проверяет обязательность, существование/active и повторно проверяет статью внутри транзакции.
+- Сохранить optional number-only project, комментарий и bounded dialog layout. Предыдущие layout proofs остаются применимыми к неизменённым ограничениям ширины; новое состояние проверить кратким hosted smoke без pixel-perfect цикла.
+- Проверить настоящий PaymentDialog и финансовый core meaningful RED→GREEN. Existing local/staging native выполняется в outerROLLBACK; browser открывает форму без финансового submit и новых постоянных fixtures.
 
 ## Risks / Trade-offs
 
-- [Новый income article ошибочно учитывается как расход] → direction/баланс/FX regression +actual savedFK/INCOME assertions.
-- [Общий dialog fix обрежет поле вместо исправления ширины] → actual scrollWidth/clientWidth и bounding boxes/видимость footer на3viewports.
-- [Чужие старые операции изменятся] → нет migration/backfill; native rollback/сохранность исходных данных.
+- [Скрыто только поле, но stale/API payload продолжает связывать статью] → server и transaction regression.
+- [Исчезли статьи у расходов] → настоящий EXPENSE dialog и required/active regressions.
+- [Изменены суммы или история] → native rollback и сравнение исходных таблиц/схемы; без data backfill.
 
 ## Migration Plan
 
-bugfix/61 от fresh staging6f98 → meaningful tests → local checks/native и layout → ordinary merge/CI → exact deployed revision/health → focused hosted form +native +cleanup. No dumps/restic/seed/reset/newDB/prod/main; W07/refresh неизменны.
+Обновлённая bugfix/61 → local checks/native → обычный merge staging → CI → actual deployed source/image/health → focused native/UI smoke. Нет SQL-миграции, дампов/restic/seed/reset/newDB/main/production; W07/refresh сохраняются.
