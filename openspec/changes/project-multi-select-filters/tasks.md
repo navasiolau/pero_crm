@@ -11,4 +11,4 @@
 
 ## 2. Staging
 
-- [ ] 2.1 Ordinary merge/CI и actualdeployedsource/image/health; новый Products browser partial/reset/reload/newcontext и короткий Project shared smoke приняты, originals restored exactCAS/MATCH, receipts сохранены. Production/main и W07/refresh не меняются.
+- [x] 2.1 Ordinary merge/CI и actualdeployedsource/image/health; новый Products browser partial/reset/reload/newcontext и короткий Project shared smoke приняты, originals restored exactCAS/MATCH, receipts сохранены. Production/main и W07/refresh не меняются.
