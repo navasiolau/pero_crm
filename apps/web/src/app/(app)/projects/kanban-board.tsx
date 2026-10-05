@@ -1,5 +1,7 @@
 "use client";
 
+import { KanbanScrollArea } from "@/components/kanban-scroll-area";
+
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -204,7 +206,7 @@ export function KanbanBoard({
         onDragEnd={onDragEnd}
         onDragCancel={() => setActiveId(null)}
       >
-        <div data-slot="kanban-scroll" className="flex min-w-0 gap-3 overflow-x-auto pb-4">
+        <KanbanScrollArea label="Канбан проектов">
           {STAGES.map((stage) => (
             <StageColumn
               key={stage.id}
@@ -215,7 +217,7 @@ export function KanbanBoard({
               onOpen={(id) => router.push(`/projects/${id}`)}
             />
           ))}
-        </div>
+        </KanbanScrollArea>
         <DragOverlay>
           {activeProject ? (
             <ProjectCardView project={activeProject} showAmount={showAmount} dragging />
