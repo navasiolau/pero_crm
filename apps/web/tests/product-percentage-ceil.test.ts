@@ -2,11 +2,11 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { singleProductPercentagePreview } from "../src/lib/single-product-percentage-ui";
 
-const draft = { state: "DRAFT", version: 4, unitPrice: "999.30", quantity: 1, rate: "100", frozenTotal: null, recipientEligible: true } as const;
+const draft = { state: "DRAFT", version: 4, unitPrice: "19986.00", quantity: 1, rate: "5", frozenTotal: null, recipientEligible: true } as const;
 for (const kind of ["ENGINEERING", "ASSEMBLY", "INSTALLATION"] as const) {
   test(`${kind}: v4 ceiling uses the exact result, including sub-cent values`, () => {
     const preview = (unitPrice: string, rate: string) => singleProductPercentagePreview({ ...draft, kind, unitPrice, rate });
-    assert.equal(preview("999.30", "100"), "1000.00");
+    assert.equal(preview("19986.00", "5"), "1000.00");
     assert.equal(preview("1000", "5"), "50.00");
     assert.equal(preview("0.01", "1"), "1.00");
     assert.equal(preview("0", "5"), "0.00");
@@ -23,8 +23,8 @@ test("v4: NULL, invalid input and rounded overflow stay unavailable; zero is exp
   assert.equal(singleProductPercentagePreview({ ...row, rate: null }), null);
   assert.equal(singleProductPercentagePreview({ ...row, quantity: null }), null);
   assert.equal(singleProductPercentagePreview({ ...row, rate: "101" }), null);
-  assert.equal(singleProductPercentagePreview({ ...row, unitPrice: "9999999999.01" }), null);
-  assert.equal(singleProductPercentagePreview({ ...row, unitPrice: "9999999999.00" }), "9999999999.00");
+  assert.equal(singleProductPercentagePreview({ ...row, kind: "ASSEMBLY", quantity: 8, rate: "15", unitPrice: "8333333332.51" }), null);
+  assert.equal(singleProductPercentagePreview({ ...row, rate: "15", unitPrice: "9999999999.00" }), "1500000000.00");
   assert.equal(singleProductPercentagePreview({ ...row, unitPrice: null, rate: "0" }), "0.00");
 });
 test("existing versions and frozen v4 totals are never repriced", () => {

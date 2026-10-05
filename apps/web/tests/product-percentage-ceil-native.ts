@@ -61,7 +61,7 @@ try {
     };
     const kinds: ProductPercentageKind[] = ["ENGINEERING", "ASSEMBLY", "INSTALLATION"];
     for (const scenario of [
-      { price: "999.30", quantity: 1, rates: ["100", "100", "100"], amounts: ["1000.00", "1000.00", "1000.00"] },
+      { price: "19986.00", quantity: 1, rates: ["5", "5", "5"], amounts: ["1000.00", "1000.00", "1000.00"] },
       { price: "0.01", quantity: 1, rates: ["1", "1", "1"], amounts: ["1.00", "1.00", "1.00"] },
       { price: "1000", quantity: 3, rates: ["5", "4", "7"], amounts: ["50.00", "120.00", "210.00"] },
       { price: null, quantity: 3, rates: ["0", "0", "0"], amounts: ["0.00", "0.00", "0.00"] },
@@ -119,9 +119,10 @@ try {
     }
     checks.push("historical_v1_v2_v3_constraints_and_snapshots_preserved");
 
-    const overflow = await createProduct("9999999999.01");
-    await tx.productPercentageConfig.create({ data: { productId: overflow.id, kind: "ENGINEERING", ratePercent: "100" } });
-    await assert.rejects(changeProductStatusTransaction(tx, actor, overflow.id, "PRODUCTION"), /превышает допустимую/);
+    const overflow = await createProduct("8333333332.51",8);
+    await tx.product.update({where:{id:overflow.id},data:{status:"PRODUCTION"}});
+    await tx.productPercentageConfig.create({ data: { productId: overflow.id, kind: "ASSEMBLY", ratePercent: "15" } });
+    await assert.rejects(changeProductStatusTransaction(tx, actor, overflow.id, "DELIVERY"), /превышает допустимую/);
     assert.equal(await tx.productPercentageCompletion.count({ where: { productId: overflow.id } }), 0);
     checks.push("rounded_overflow_rejected_before_database_writes");
     throw abort;

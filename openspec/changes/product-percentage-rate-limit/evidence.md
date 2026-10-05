@@ -12,3 +12,5 @@ UI review: D:/Projects/pero_crm_task_runtime/20261005-75-80-01a10c1f/review/brow
 Build/generated-client artifacts перенесены наD после ENOSPC; owner source/refs/файлы сохранены. Commit/merge/push/CI/staging/production не выполнялись. Restic и dumps не использовались.
 
 Последний browser review:27/27,errors0/outside0/serverClosed true. Финальные mobile/light и desktop/dark PNG полей выплат просмотрены; суммы на телефоне одной строкой, caret в пределах input, dark значения читаемы. Remote main/staging8c37e5c подтверждены; release без разрешения не выполнялся.
+
+Владелец разрешил commits/staging. Выполнена интеграция75–80 обычными merges; сохранены0.5/max15/v4ceil. Интеграционный RED24/32,8 FAIL показал устаревшие новые QA-ставки100%; примеры заменены19986×5%=999.3 и batch8333333332.51×8×15% для overflow. Исторические100% snapshots/SQL-проверки не переписывались.

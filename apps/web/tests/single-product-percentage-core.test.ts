@@ -83,7 +83,7 @@ test('full cycle without Work or Task produces 50/120/210 once with v4 actual qu
  assert.equal(f.payroll.length,3);
 });
 
-for (const [price, rate, amount, exact] of [["999.30","100","1000.00","999.3"],["0.01","1","1.00","0.0001"],["0","5","0.00","0"],["9999999999.00","100","9999999999.00","9999999999"]] as const) {
+for (const [price, rate, amount, exact] of [["19986.00","5","1000.00","999.3"],["0.01","1","1.00","0.0001"],["0","5","0.00","0"],["9999999999.00","15","1500000000.00","1499999999.85"]] as const) {
  test(`new v4 completion ${price} at ${rate}% accrues ${amount} once`,async()=>{
   const f=fixture(rate,price);await captureProductPercentageCompletion(f.tx,actor,'p','ENGINEERING','PRODUCTION');
   assert.equal(f.completions[0].calculationVersion,4);assert.equal(String(f.completions[0].amount),amount);
@@ -93,7 +93,7 @@ for (const [price, rate, amount, exact] of [["999.30","100","1000.00","999.3"],[
  });
 }
 test('v4 rejects overflow caused only by ceiling before any writes',async()=>{
- const f=fixture('100','9999999999.01');await assert.rejects(captureProductPercentageCompletion(f.tx,actor,'p','ENGINEERING','PRODUCTION'),/превышает допустимую/);
+ const f=fixture('15','8333333332.51');Object.assign(f.product,{quantity:8,assemblerId:'worker',assembler:{id:'worker',name:'Worker',active:true,roles:['WORKER']}});f.product.percentageConfigs.push({id:'assembly',kind:'ASSEMBLY',ratePercent:'15',revision:2,workReview:null,participants:[]});await assert.rejects(captureProductPercentageCompletion(f.tx,actor,'p','ASSEMBLY','DELIVERY'),/превышает допустимую/);
  assert.equal(f.completions.length,0);assert.equal(f.payroll.length,0);
 });
 test('new completion with a saved rate above15 fails before monetary writes',async()=>{
