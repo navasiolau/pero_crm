@@ -1,5 +1,7 @@
 "use client";
 
+import { KanbanScrollArea } from "@/components/kanban-scroll-area";
+
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -209,7 +211,7 @@ export function ProductsKanban({
       }}
       onDragCancel={() => setActiveId(null)}
     >
-      <div data-slot="kanban-scroll" className="flex min-w-0 gap-3 overflow-x-auto pb-4">
+      <KanbanScrollArea label="Канбан изделий">
         {PRODUCT_STATUSES.map((status) => (
           <StatusColumn
             key={status.id}
@@ -233,7 +235,7 @@ export function ProductsKanban({
             onOpen={(product) => router.push(productDetailHref(product.number, globalProductsHref(query)))}
           />
         ))}
-      </div>
+      </KanbanScrollArea>
       <DragOverlay>
         {activeProduct ? (
           <ProductKanbanCard
