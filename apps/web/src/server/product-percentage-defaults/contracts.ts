@@ -1,10 +1,13 @@
+import {MAX_PRODUCT_PERCENTAGE_RATE} from "@/lib/product-percentage-rate-limit";
 import {z} from 'zod';
 export const DEFAULT_PERCENTAGE_KEY='productPercentageDefaults';
 export const DEFAULT_PERCENTAGE_KINDS=['ENGINEERING','ASSEMBLY','INSTALLATION'] as const;
-const rate=z.string().regex(/^(?:0|[1-9]\d?|100)(?:\.\d)?$/, 'Введите процент от 0 до 100 с точностью 0.1').refine(value=>Number(value)<=100,'Процент не должен превышать 100').nullable().transform(value=>value===null?null:Number(value).toFixed(1));
+const historicalRate=z.string().regex(/^(?:0|[1-9]\d?|100)(?:\.\d)?$/, 'Введите процент от 0 до 100 с точностью 0.1').refine(value=>Number(value)<=100,'Процент не должен превышать 100').nullable().transform(value=>value===null?null:Number(value).toFixed(1));
+const rate=historicalRate.refine(value=>value===null||Number(value)<=MAX_PRODUCT_PERCENTAGE_RATE,"Процент оплаты не должен превышать 15%");
+const historicalRatesSchema=z.object({ENGINEERING:historicalRate,ASSEMBLY:historicalRate,INSTALLATION:historicalRate}).strict();
 export const defaultRatesSchema=z.object({ENGINEERING:rate,ASSEMBLY:rate,INSTALLATION:rate}).strict();
-export const defaultsSnapshotSchema=z.object({revision:z.number().int().nonnegative(),rates:defaultRatesSchema}).strict();
-export const defaultsPatchSchema=z.object({rates:defaultRatesSchema,expectedRates:defaultRatesSchema,expectedRevision:z.number().int().nonnegative(),clientMutationId:z.uuid()}).strict();
+export const defaultsSnapshotSchema=z.object({revision:z.number().int().nonnegative(),rates:historicalRatesSchema}).strict();
+export const defaultsPatchSchema=z.object({rates:defaultRatesSchema,expectedRates:historicalRatesSchema,expectedRevision:z.number().int().nonnegative(),clientMutationId:z.uuid()}).strict();
 export type DefaultRates=z.output<typeof defaultRatesSchema>;
 export type DefaultsSnapshot=z.output<typeof defaultsSnapshotSchema>;
 export type DefaultsPatch=z.input<typeof defaultsPatchSchema>;

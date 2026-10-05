@@ -9,8 +9,8 @@ test('ASCII input rejects exponent/sign/comma/whitespace/third decimal and prese
  assert.equal(parsePercentageInput(''),null);assert.equal(parsePercentageInput('0'),'0.00');assert.equal(parsePercentageInput('5.05'),'5.05');assert.throws(()=>parsePercentageInput('100.01'));
 });
 test('integer hundredths give exact 0.1 steps, retain hundredth precision and clamp endpoints',()=>{
- assert.equal(stepPercentageDraft('5.05',1),'5.15');assert.equal(stepPercentageDraft('5.05',-1),'4.95');assert.equal(stepPercentageDraft('99.95',1),'100');assert.equal(stepPercentageDraft('0.05',-1),'0');assert.equal(stepPercentageDraft('',1),'0.1');assert.equal(stepPercentageDraft('',-1),'0');assert.equal(stepPercentageDraft('5.',1),'5.1');assert.equal(stepPercentageDraft('.',1),null);
- let value='0';for(let i=0;i<1000;i++)value=stepPercentageDraft(value,1)!;assert.equal(value,'100');for(let i=0;i<1000;i++)value=stepPercentageDraft(value,-1)!;assert.equal(value,'0');
+ assert.equal(stepPercentageDraft('5.05',1),'5.15');assert.equal(stepPercentageDraft('5.05',-1),'4.95');assert.equal(stepPercentageDraft('99.95',1),'15');assert.equal(stepPercentageDraft('0.05',-1),'0');assert.equal(stepPercentageDraft('',1),'0.1');assert.equal(stepPercentageDraft('',-1),'0');assert.equal(stepPercentageDraft('5.',1),'5.1');assert.equal(stepPercentageDraft('.',1),null);
+ let value='0';for(let i=0;i<1000;i++)value=stepPercentageDraft(value,1)!;assert.equal(value,'15');for(let i=0;i<1000;i++)value=stepPercentageDraft(value,-1)!;assert.equal(value,'0');
 });
 const saved=(input:ProductPercentagePatch):ProductPercentagePatchResult=>({ok:true,kind:'saved',field:input.field,value:input.value,revision:input.expectedRevision+1,clientMutationId:input.clientMutationId,noOp:false,repeated:false});
 test('stepped dirty draft retains CAS/UUID after lost ACK and does not save invalid comma',async()=>{

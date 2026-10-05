@@ -2,6 +2,7 @@ import { Prisma, type ProductPercentageKind, type ProductStatus } from '@prisma/
 import { assertProjectMoneyCurrency } from '@/lib/internal-currency';
 import type { DomainActor } from '@/server/projects/core';
 import { PERCENTAGE_STAGE_POLICY } from './stage-policy';
+import { parseProductPercentageRate } from '@/lib/product-percentage-rate-limit';
 export type PercentageAccrualEffects={eventIds:string[];earnings:{userId:string;userName:string;amount:string;currency:string}[]};
 export async function captureDirectPercentage(tx:Prisma.TransactionClient,actor:DomainActor,productId:string,kind:ProductPercentageKind,statusAtCompletion:ProductStatus,effects?:PercentageAccrualEffects){
  const product=await tx.product.findUnique({where:{id:productId},include:{project:{select:{currency:true}},engineer:{select:{id:true,name:true,active:true,roles:true}},mounter:{select:{id:true,name:true,active:true,roles:true}},assembler:{select:{id:true,name:true,active:true,roles:true}},percentageConfigs:{where:{kind}},stagePayPools:{where:{kind:'ENGINEERING'},select:{state:true}}}});
@@ -17,6 +18,7 @@ export async function captureDirectPercentage(tx:Prisma.TransactionClient,actor:
  const eligible=!!recipient?.active&&recipient.roles.includes(policy.role);
  const positive=rate!==null&&rate.gt(0);
  const protectedReason:string|null=kind==='ENGINEERING'&&product.stagePayPools.some(pool=>pool.state==='SETTLED'||pool.state==='LEGACY_PROTECTED')?'Уже защищено прежним способом оплаты':null;
+ if(positive&&!protectedReason)parseProductPercentageRate(rate!.toString());
  if(positive&&!protectedReason&&price===null)throw new Error('Для положительной ставки укажите цену изделия');
  if(positive&&!protectedReason&&!eligible)throw new Error(policy.recipientError);
  const total=price?.mul(product.quantity)??null;const exact=rate===null?null:rate.isZero()?new Prisma.Decimal(0):(kind==='ENGINEERING'?price:total)?.mul(rate).div(100)??null;

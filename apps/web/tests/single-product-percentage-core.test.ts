@@ -82,3 +82,7 @@ test('full cycle without Work or Task produces 50/120/210 once with v3 actual qu
  for(const status of ['DESIGN','DONE'] as const)assert.equal((await changeProductStatusTransaction(f.tx,actor,'p',status)).ok,true);
  assert.equal(f.payroll.length,3);
 });
+
+test('new completion with a saved rate above15 fails before monetary writes',async()=>{
+ const f=fixture('15.01','1000');await assert.rejects(captureProductPercentageCompletion(f.tx,actor,'p','ENGINEERING','PRODUCTION'),/15/);assert.equal(f.completions.length,0);assert.equal(f.payroll.length,0);
+});

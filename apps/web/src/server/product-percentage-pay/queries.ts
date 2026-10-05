@@ -1,4 +1,5 @@
 import { Prisma, type PrismaClient, type Role } from "@prisma/client";
+import { MAX_PRODUCT_PERCENTAGE_RATE } from "@/lib/product-percentage-rate-limit";
 import type { ProductPercentageView, ProductPercentageSectionView } from "@/lib/product-percentage-view";
 import { PERCENTAGE_STAGE_POLICY } from "./stage-policy";
 import { hasAnyRole, MANAGER_ROLES } from "@/lib/roles";
@@ -39,7 +40,7 @@ export async function getProductPercentageView(actor: { id: string; roles: Role[
     if(!completion&&product.project.currency==="BYN"&&pool?.state!=="SETTLED"&&pool?.state!=="LEGACY_PROTECTED"&&config?.ratePercent!==null&&config?.ratePercent!==undefined){
       const rate=new Prisma.Decimal(config.ratePercent.toString());
       if(rate.isZero())draftTotal="0.00";
-      else if(productTotal!==null&&assignee?.active&&assignee.eligible)draftTotal=new Prisma.Decimal(kind === "ENGINEERING" ? product.expectedPrice!.toString() : productTotal).mul(rate).div(100).toFixed(2,Prisma.Decimal.ROUND_HALF_UP);
+      else if(rate.lte(MAX_PRODUCT_PERCENTAGE_RATE)&&productTotal!==null&&assignee?.active&&assignee.eligible)draftTotal=new Prisma.Decimal(kind === "ENGINEERING" ? product.expectedPrice!.toString() : productTotal).mul(rate).div(100).toFixed(2,Prisma.Decimal.ROUND_HALF_UP);
     }
     const legacyPaidSummary = financeView && pool?.settlement
       ? { amount: pool.settlement.amount.toString(), currency: pool.settlement.payrollCurrency, count: 1 } : null;

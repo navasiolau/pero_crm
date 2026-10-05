@@ -6,6 +6,7 @@ import type { ProductPercentageSectionView } from "./product-percentage-view";
 import type { ProductPercentageCandidate } from "./product-percentage-ui";
 import type { Role } from "@prisma/client";
 import {hasRole} from "./roles";
+import {parseProductPercentageRate} from "./product-percentage-rate-limit";
 const recipientRole:Record<ProductPercentageKind,Role>={ENGINEERING:"ENGINEER",ASSEMBLY:"WORKER",INSTALLATION:"MOUNTER"};
 export const percentageRecipientLabel=(kind:ProductPercentageKind)=>({ENGINEERING:"Инженер",ASSEMBLY:"Сборщик",INSTALLATION:"Монтажник"})[kind];
 export const percentageStageTitle=(kind:ProductPercentageKind)=>({ENGINEERING:"Инженерный этап",ASSEMBLY:"Сборочный этап",INSTALLATION:"Монтажный этап"})[kind];
@@ -26,6 +27,7 @@ export function productPercentageBase(unitPrice:string|null,quantity:number|null
 }
 export function singleProductPercentagePreview(input:{state:ProductPercentageState;kind:ProductPercentageKind;version:1|2|3;unitPrice:string|null;quantity:number|null;rate:string|null;frozenTotal:string|null;recipientEligible?:boolean}):string|null{
   if(input.state!=="DRAFT")return input.frozenTotal;
+  try{parseProductPercentageRate(input.rate);}catch{return null;}
   if(input.recipientEligible===false&&input.rate!==null){try{if(Number(parsePercentageRate(input.rate))>0)return null;}catch{return null;}}
   if(input.version===1||(input.version===3&&input.kind==="ENGINEERING"))return previewProductPercentageShare(input.unitPrice,input.rate,PERCENTAGE_SHARE_UNITS);
   const base=productPercentageBase(input.unitPrice,input.quantity);
