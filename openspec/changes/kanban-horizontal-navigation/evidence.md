@@ -1,5 +1,13 @@
 # Evidence
 
+## Исправление по замечанию владельца — 05.10.2026
+
+По новому прямому указанию владельца верхние range/стрелки удалены. Внизу — обычный overflow-x-auto контейнер, браузерная полоса15px, sticky bottom-0. Локальная реальная UI-проверка в CUA:9 сочетаний3 доски×3 viewport(1440×900/390×844/360×800), одна нижняя полоса без верхней панели, no horizontal page overflow, Home/End и ползунок синхронны, доступность в начале/середине/конце, resize3200 скрывает полосу. Реальный mouse drag native бегунка203/203, Shift+wheel150/150, карточка перетянута из DESIGN в PRODUCTION в fixture (7/9). Touch overflow/обработчики остаются native и не менялись; имитация touch-жеста не поддержана CUA/IAB и не выдаётся за выполненный touch runtime тест.
+
+База текущего исправления: fresh origin/staging d146aad1a1e03e9bd4b3b6252084decf739a9b05, рабочая ветка bugfix/75. Уточнение согласовано прямым запросом владельца; прежнее разрешение на коммиты/staging сохраняется. Локально1245/1245 тестов, typecheck/lint/build PASS (существующие5 lint warnings). Протокол и PNG: D:/Projects/pero_crm_task_runtime/20261005-75-80-01a10c1f/correction-75-79/local-browser-receipt.json. Компоненты реальные, данные synthetic/actions mocked; фактическая staging-приёмка нового SHA выполняется отдельно.
+
+Следующие разделы сохраняют историю прежней приёмки, superseded текущим уточнением.
+
 ## Завершённая приёмка staging — 05.10.2026
 
 Владелец разрешил commits/staging. Ветка bugfix/75 интегрирована обычным merge; функциональная приёмка выполнена на образе ревизии fd1a371610d8aa49f370f428911254040974d71e (healthy). CI/CD #127: https://github.com/navasiolau/pero_crm/actions/runs/37334434678 — Success.
