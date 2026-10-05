@@ -96,7 +96,7 @@ test("v3 первый переход фиксирует нулевой BYN ра�
   const snapshot = saved[0] as { priceSnapshot: unknown; ratePercentSnapshot: unknown; calculationVersion: number; quantitySnapshot: number; amount: string };
   assert.ok(snapshot.priceSnapshot);
   assert.ok(snapshot.ratePercentSnapshot);
-  assert.equal(snapshot.calculationVersion, 3); assert.equal(snapshot.quantitySnapshot, 3);
+  assert.equal(snapshot.calculationVersion, 4); assert.equal(snapshot.quantitySnapshot, 3);
   assert.equal(snapshot.amount, "0.00"); assert.equal(shares.length, 1);
 });
 
@@ -429,7 +429,7 @@ test("server DTO draft preview uses engineer unit price and batch price for asse
   const database = {task:{findMany:async()=>[]},productPercentageParticipant:{findMany:async()=>[]},product:{findFirst:async()=>product},user:{findMany:async()=>[]},payrollEntry:{findMany:async()=>{throw Error("no legacy pay read")}}} as unknown as Parameters<typeof getProductPercentageView>[2];
   const view=await getProductPercentageView({id:"manager",roles:["MANAGER"]},"p",database);
   assert.deepEqual(Object.values(view.sections).map(section=>section.total),["50.00","120.00","210.00"]);
-  assert.ok(Object.values(view.sections).every(section=>section.calculationVersion===3&&!('workReview' in section)&&!('legacyWorkCandidates' in section)));
+  assert.ok(Object.values(view.sections).every(section=>section.calculationVersion===4&&!('workReview' in section)&&!('legacyWorkCandidates' in section)));
   product.quantity=6;
   const changed=await getProductPercentageView({id:"manager",roles:["MANAGER"]},"p",database);
   assert.deepEqual(Object.values(changed.sections).map(section=>section.total),["50.00","240.00","420.00"]);
