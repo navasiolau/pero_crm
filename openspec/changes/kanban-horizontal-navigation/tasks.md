@@ -6,5 +6,4 @@
 - [x] 1.2 Реализовать общий KanbanScrollArea и подключить три доски.
 - [x] 1.3 Проверить настоящий React UI: синхронизацию, resize, sticky, клавиатуру и прежний drag/drop.
 - [x] 1.4 Пройти typecheck/lint/tests/build/OpenSpec strict; сохранить evidence.
-- [ ] 1.5 По разрешению выполнить commit/merge/CI и приёмку фактического staging SHA.
-
+- [x] 1.5 По разрешению выполнить commit/merge/CI и приёмку фактического staging SHA.
