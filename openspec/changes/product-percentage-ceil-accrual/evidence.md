@@ -1,5 +1,17 @@
 # Evidence
 
+## Завершённая приёмка staging — 05.10.2026
+
+Владелец разрешил commits/staging. Ветка bugfix/77 интегрирована обычным merge; функциональная приёмка выполнена на образе ревизии fd1a371610d8aa49f370f428911254040974d71e (healthy). CI/CD #127: https://github.com/navasiolau/pero_crm/actions/runs/37334434678 — Success.
+
+На фактически развёрнутой БД применена миграция 20261005120000_product_percentage_ceil_accrual. Нативная проверка actual core/query/preview/payroll для всех трёх ролей PASS: ceil без промежуточного округления, количество, tiny/zero, overflow, replay, исторические версии1–3 и immutable/SQL CHECK. Тест прошёл внутри outerROLLBACK: persistedRows0, outbound0, allOriginalRowsMatch=true, schemaRestored=true. Отдельный ранее выполненный тест существующей local БД также PASS; local/staging dumps отсутствуют.
+
+Объединённая локальная проверка:1245/1245 тестов, typecheck/lint/build и OpenSpec strict PASS; component browser review27/27. После миграции и UI-приёмки хеши всех45 бизнес-таблиц staging совпали с исходными, колонок не меняли; изменился только предусмотренный CHECK и запись миграции. W07 и существующий volume БД сохранены. Дампы не создавались, restic не использовался. Main/production не выпускались.
+
+Протоколы находятся в D:/Projects/pero_crm_task_runtime/20261005-75-80-01a10c1f: stage-native.json, stage-before.json, stage-after.json, stage-final.json, stage-ui-receipt.json; browser review и PNG — в review/. Завершающий коммит этого change содержит только tasks/evidence; исполняемые файлы остаются принятыми на fd1a371.
+
+## Предшествующая локальная проверка
+
 База:8c37e5c637b6a44a14e7b529702303b8486b94bb,fresh origin/staging05.10.2026.
 Ветка:bugfix/77. Scope/OpenSpec согласованы владельцем до реализации.
 
