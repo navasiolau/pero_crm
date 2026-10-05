@@ -53,7 +53,7 @@ export function SinglePercentageRow({productId,kind,section,canManage,canViewAll
  const options:SearchableOption[]=kind==="ENGINEERING"?candidates.filter(row=>{const recipient=confirmedPercentageRecipient(kind,row.id,[row],[],null);return recipient.active&&recipient.eligible;}).map(row=>({value:row.id,label:row.name})):section.recipientCandidates?.map(row=>({value:row.userId,label:row.name}))??candidates.filter(row=>{const recipient=confirmedPercentageRecipient(kind,row.id,[row],[],null);return recipient.active&&recipient.eligible;}).map(row=>({value:row.id,label:row.name}));
  if(section.assignee&&!options.some(option=>option.value===section.assignee?.userId))options.push({value:section.assignee.userId,label:section.assignee.name,disabled:!section.assignee.active||!section.assignee.eligible});
  const engineerName=confirmedRecipient.name;
- const version=section.calculationVersion??3;
+ const version=section.calculationVersion??4;
  const unitPrice=price===null?null:String(price),confirmedQuantity=quantity===null?null:Number(quantity);
  const total=version>=2&&section.productCurrency!=="BYN"?null:singleProductPercentagePreview({state:section.state,kind,version,unitPrice,quantity:confirmedQuantity,rate:rate.baseline===null?null:String(rate.baseline),frozenTotal:section.total,recipientEligible:confirmedRecipient.active&&confirmedRecipient.eligible});
  async function retryFrozen(){

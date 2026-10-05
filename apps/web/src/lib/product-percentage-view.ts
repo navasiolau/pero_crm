@@ -13,7 +13,7 @@ export interface ProductPercentageSectionView {
   unitPrice?: string | null;
   quantity?: number | null;
   productTotal?: string | null;
-  calculationVersion?: 1 | 2 | 3;
+  calculationVersion?: 1 | 2 | 3 | 4;
   recipientCandidates?: {userId:string;name:string}[];
   kind: ProductPercentageKind;
   state: ProductPercentageState;

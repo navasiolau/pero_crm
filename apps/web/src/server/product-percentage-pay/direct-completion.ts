@@ -2,6 +2,7 @@ import { Prisma, type ProductPercentageKind, type ProductStatus } from '@prisma/
 import { assertProjectMoneyCurrency } from '@/lib/internal-currency';
 import type { DomainActor } from '@/server/projects/core';
 import { PERCENTAGE_STAGE_POLICY } from './stage-policy';
+import { calculateWholeProductPercentage } from '@/lib/product-percentage-ceil';
 export type PercentageAccrualEffects={eventIds:string[];earnings:{userId:string;userName:string;amount:string;currency:string}[]};
 export async function captureDirectPercentage(tx:Prisma.TransactionClient,actor:DomainActor,productId:string,kind:ProductPercentageKind,statusAtCompletion:ProductStatus,effects?:PercentageAccrualEffects){
  const product=await tx.product.findUnique({where:{id:productId},include:{project:{select:{currency:true}},engineer:{select:{id:true,name:true,active:true,roles:true}},mounter:{select:{id:true,name:true,active:true,roles:true}},assembler:{select:{id:true,name:true,active:true,roles:true}},percentageConfigs:{where:{kind}},stagePayPools:{where:{kind:'ENGINEERING'},select:{state:true}}}});
@@ -19,12 +20,14 @@ export async function captureDirectPercentage(tx:Prisma.TransactionClient,actor:
  const protectedReason:string|null=kind==='ENGINEERING'&&product.stagePayPools.some(pool=>pool.state==='SETTLED'||pool.state==='LEGACY_PROTECTED')?'Уже защищено прежним способом оплаты':null;
  if(positive&&!protectedReason&&price===null)throw new Error('Для положительной ставки укажите цену изделия');
  if(positive&&!protectedReason&&!eligible)throw new Error(policy.recipientError);
- const total=price?.mul(product.quantity)??null;const exact=rate===null?null:rate.isZero()?new Prisma.Decimal(0):(kind==='ENGINEERING'?price:total)?.mul(rate).div(100)??null;
- if(total?.gt('9999999999999999.99')||exact?.toDecimalPlaces(2,Prisma.Decimal.ROUND_HALF_UP).gt('9999999999.99'))throw new Error('Сумма процентного этапа превышает допустимую');
+ const total=price?.mul(product.quantity)??null;
+ if(total?.gt('9999999999999999.99'))throw new Error('Сумма процентного этапа превышает допустимую');
+ const calculated=calculateWholeProductPercentage({kind,unitPrice:price?.toString()??null,quantity:product.quantity,rate:rate?.toString()??null});
+ const exact=calculated?new Prisma.Decimal(calculated.sourceFundExact):null;
  const state=protectedReason?'LEGACY_PROTECTED':rate===null?'SKIPPED_ONCE':'SETTLED';
- const amount=state==='SETTLED'?exact!.toFixed(2,Prisma.Decimal.ROUND_HALF_UP):null;
+ const amount=state==='SETTLED'?calculated!.amount:null;
  const now=new Date();const recipientSnapshot=eligible?recipient!:null;
- const completion=await tx.productPercentageCompletion.create({data:{productId,kind,state,statusAtCompletion,calculationVersion:3,quantitySnapshot:product.quantity,totalSnapshot:total,recipientId:recipientSnapshot?.id??null,completedAt:now,completedById:actor.id,reason:protectedReason??(rate===null?'Ставка не задана при первом завершении':null),priceSnapshot:price,ratePercentSnapshot:rate,productCurrency:'BYN',payrollCurrency:'BYN',configRevision:config?.revision??null,
+ const completion=await tx.productPercentageCompletion.create({data:{productId,kind,state,statusAtCompletion,calculationVersion:4,quantitySnapshot:product.quantity,totalSnapshot:total,recipientId:recipientSnapshot?.id??null,completedAt:now,completedById:actor.id,reason:protectedReason??(rate===null?'Ставка не задана при первом завершении':null),priceSnapshot:price,ratePercentSnapshot:rate,productCurrency:'BYN',payrollCurrency:'BYN',configRevision:config?.revision??null,
  ...(state==='SETTLED'?{productRateByn:1,payrollRateByn:1,productRateDate:now,payrollRateDate:now,sourceFundExact:exact,amount,bynAmount:amount,projectAmount:amount,settledAt:now}:{})}});
  if(recipientSnapshot){
  const share=await tx.productPercentageCompletionShare.create({data:{completionId:completion.id,userId:recipientSnapshot.id,userNameSnapshot:recipientSnapshot.name,shareUnits:1000000,...(amount!==null?{amount,bynAmount:amount,projectAmount:amount}:{})}});
@@ -34,6 +37,6 @@ export async function captureDirectPercentage(tx:Prisma.TransactionClient,actor:
  effects?.eventIds.push(event.id);effects?.earnings.push({userId:recipientSnapshot.id,userName:recipientSnapshot.name,amount,currency:'BYN'});
  }
  }
- await tx.changeLog.create({data:{actorType:'user',actorId:actor.id,actorName:actor.name,source:actor.source,entity:'product',entityId:productId,action:'percentage.firstCompletion',newValue:{kind,state,completionId:completion.id,statusAtCompletion,calculationVersion:3}}});
+ await tx.changeLog.create({data:{actorType:'user',actorId:actor.id,actorName:actor.name,source:actor.source,entity:'product',entityId:productId,action:'percentage.firstCompletion',newValue:{kind,state,completionId:completion.id,statusAtCompletion,calculationVersion:4}}});
  return state;
 }

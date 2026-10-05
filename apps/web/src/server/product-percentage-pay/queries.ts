@@ -1,3 +1,4 @@
+import { calculateWholeProductPercentage } from "@/lib/product-percentage-ceil";
 import { Prisma, type PrismaClient, type Role } from "@prisma/client";
 import type { ProductPercentageView, ProductPercentageSectionView } from "@/lib/product-percentage-view";
 import { PERCENTAGE_STAGE_POLICY } from "./stage-policy";
@@ -39,7 +40,7 @@ export async function getProductPercentageView(actor: { id: string; roles: Role[
     if(!completion&&product.project.currency==="BYN"&&pool?.state!=="SETTLED"&&pool?.state!=="LEGACY_PROTECTED"&&config?.ratePercent!==null&&config?.ratePercent!==undefined){
       const rate=new Prisma.Decimal(config.ratePercent.toString());
       if(rate.isZero())draftTotal="0.00";
-      else if(productTotal!==null&&assignee?.active&&assignee.eligible)draftTotal=new Prisma.Decimal(kind === "ENGINEERING" ? product.expectedPrice!.toString() : productTotal).mul(rate).div(100).toFixed(2,Prisma.Decimal.ROUND_HALF_UP);
+      else if(productTotal!==null&&assignee?.active&&assignee.eligible){try{draftTotal=calculateWholeProductPercentage({kind,unitPrice:product.expectedPrice!.toString(),quantity,rate:rate.toString()})?.amount??null;}catch{draftTotal=null;}}
     }
     const legacyPaidSummary = financeView && pool?.settlement
       ? { amount: pool.settlement.amount.toString(), currency: pool.settlement.payrollCurrency, count: 1 } : null;
@@ -53,7 +54,7 @@ export async function getProductPercentageView(actor: { id: string; roles: Role[
       unitPrice: financeView ? completion ? completion.priceSnapshot?.toString()??null : product.expectedPrice?.toString()??null : null,
       quantity: completion ? completion.quantitySnapshot??null : quantity,
       productTotal: financeView ? completion ? completion.totalSnapshot?.toString()??null : productTotal : null,
-      calculationVersion: completion?.calculationVersion===3 ? 3 : completion?.calculationVersion===2 ? 2 : completion ? 1 : 3,
+      calculationVersion: completion?.calculationVersion===4 ? 4 : completion?.calculationVersion===3 ? 3 : completion?.calculationVersion===2 ? 2 : completion ? 1 : 4,
       recipientCandidates: manager ? (kind==="ENGINEERING"?engineers:kind==="ASSEMBLY"?assemblers:mounters).map(user=>({userId:user.id,name:user.name})) : [],
       kind, state: completion?.state ?? (pool?.state === "SETTLED" || pool?.state === "LEGACY_PROTECTED" ? "LEGACY_PROTECTED" : "DRAFT"),
       ratePercent: financeView ? displayCompletion ? displayCompletion.ratePercentSnapshot?.toString()??null : config?.ratePercent?.toString()??null : null,

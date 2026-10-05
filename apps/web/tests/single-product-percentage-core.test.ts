@@ -15,9 +15,9 @@ function fixture(rate:string|null='5',price:string|null='1000',recipient=true){
  payrollEntry:{create:async({data}:{data:Record<string,unknown>})=>{payroll.push(data);return{id:'payroll'}}},domainEvent:{create:async()=>({id:'event'})},changeLog:{create:async({data}:{data:Record<string,unknown>})=>{if(failAudit)throw new Error('audit unavailable');logs.push(data);return{id:'log'}}},work:{findMany:async()=>[]},task:{findFirst:async()=>null},productStatusHistory:{findFirst:async()=>history.length?history[0]:null,create:async({data}:{data:unknown})=>{history.push(data);return{id:'history'}}}} as unknown as Prisma.TransactionClient;
  return{tx,product,completions,payroll,logs,history,failAudit:()=>{failAudit=true}};
 }
-test('v3 engineer completion uses unit1000×rate5=50BYN and preserves batch snapshots',async()=>{
+test('v4 engineer completion uses unit1000×rate5=50BYN and preserves batch snapshots',async()=>{
  const f=fixture();assert.equal(await captureProductPercentageCompletion(f.tx,actor,'p','ENGINEERING','PRODUCTION'),'SETTLED');
- assert.equal(f.completions[0].calculationVersion,3);assert.equal(String(f.completions[0].priceSnapshot),'1000');assert.equal(f.completions[0].quantitySnapshot,3);
+ assert.equal(f.completions[0].calculationVersion,4);assert.equal(String(f.completions[0].priceSnapshot),'1000');assert.equal(f.completions[0].quantitySnapshot,3);
  assert.equal(String(f.completions[0].totalSnapshot),'3000');assert.equal(String(f.completions[0].amount),'50.00');assert.equal(f.completions[0].recipientId,'engineer');
  assert.equal(f.payroll.length,1);assert.equal(String(f.payroll[0].bynAmount),'50.00');
  f.product.quantity=9;assert.equal(await captureProductPercentageCompletion(f.tx,actor,'p','ENGINEERING','PRODUCTION'),'SETTLED');assert.equal(f.payroll.length,1);assert.equal(f.completions[0].quantitySnapshot,3);
@@ -68,7 +68,7 @@ test('prior history protects returned historical stages without recording money 
  assert.equal(f.completions.length,0);assert.equal(f.payroll.length,0);
 });
 
-test('full cycle without Work or Task produces 50/120/210 once with v3 actual quantity snapshots',async()=>{
+test('full cycle without Work or Task produces 50/120/210 once with v4 actual quantity snapshots',async()=>{
  const f=fixture();Object.assign(f.product,{assemblerId:'assembler',assembler:{id:'assembler',name:'Assembler',active:true,roles:['WORKER']}});
  f.product.percentageConfigs[1].ratePercent='7';f.product.percentageConfigs.push({id:'assembly',kind:'ASSEMBLY',ratePercent:'4',revision:1,workReview:null,participants:[]});
  f.tx.work.findMany=(async()=>{throw new Error('no work read')}) as never;f.tx.task.findFirst=(async()=>{throw new Error('no task read')}) as never;
@@ -78,7 +78,21 @@ test('full cycle without Work or Task produces 50/120/210 once with v3 actual qu
  })??null) as never;
  for(const status of ['PRODUCTION','DELIVERY','INSTALLATION','DONE'] as const)assert.equal((await changeProductStatusTransaction(f.tx,actor,'p',status)).ok,true);
  assert.deepEqual(f.payroll.map(row=>Number(row.amount)),[50,120,210]);
- assert.ok(f.completions.every(row=>row.calculationVersion===3&&row.quantitySnapshot===3&&String(row.totalSnapshot)==='3000'));
+ assert.ok(f.completions.every(row=>row.calculationVersion===4&&row.quantitySnapshot===3&&String(row.totalSnapshot)==='3000'));
  for(const status of ['DESIGN','DONE'] as const)assert.equal((await changeProductStatusTransaction(f.tx,actor,'p',status)).ok,true);
  assert.equal(f.payroll.length,3);
+});
+
+for (const [price, rate, amount, exact] of [["999.30","100","1000.00","999.3"],["0.01","1","1.00","0.0001"],["0","5","0.00","0"],["9999999999.00","100","9999999999.00","9999999999"]] as const) {
+ test(`new v4 completion ${price} at ${rate}% accrues ${amount} once`,async()=>{
+  const f=fixture(rate,price);await captureProductPercentageCompletion(f.tx,actor,'p','ENGINEERING','PRODUCTION');
+  assert.equal(f.completions[0].calculationVersion,4);assert.equal(String(f.completions[0].amount),amount);
+  assert.equal(String(f.completions[0].sourceFundExact),exact);
+  if(amount!=='0.00')assert.equal(String(f.payroll[0].amount),amount);
+  await captureProductPercentageCompletion(f.tx,actor,'p','ENGINEERING','PRODUCTION');assert.equal(f.payroll.length,amount==='0.00'?0:1);
+ });
+}
+test('v4 rejects overflow caused only by ceiling before any writes',async()=>{
+ const f=fixture('100','9999999999.01');await assert.rejects(captureProductPercentageCompletion(f.tx,actor,'p','ENGINEERING','PRODUCTION'),/превышает допустимую/);
+ assert.equal(f.completions.length,0);assert.equal(f.payroll.length,0);
 });

@@ -18,7 +18,7 @@ function fixture(rate:string|null='5',price:string|null='1000'){
  return{tx,product,assembler,completions,payroll,logs,oldPaid,works};
 }
 test('ASSEMBLY v3core captures1000×3×5%=150 tosingleWORKER atDELIVERY',async()=>{
- const f=fixture();const result=await changeProductStatusTransaction(f.tx,manager,'p','DELIVERY');assert.ok(result.ok);const snapshot=f.completions.find(row=>row.kind==='ASSEMBLY')!;assert.equal(snapshot.calculationVersion,3);assert.equal(snapshot.recipientId,'worker');assert.equal(snapshot.quantitySnapshot,3);assert.equal(String(snapshot.amount),'150.00');assert.equal(f.payroll.length,1);assert.equal(f.payroll[0].scheme,'PRODUCT_PERCENT_ASSEMBLY');
+ const f=fixture();const result=await changeProductStatusTransaction(f.tx,manager,'p','DELIVERY');assert.ok(result.ok);const snapshot=f.completions.find(row=>row.kind==='ASSEMBLY')!;assert.equal(snapshot.calculationVersion,4);assert.equal(snapshot.recipientId,'worker');assert.equal(snapshot.quantitySnapshot,3);assert.equal(String(snapshot.amount),'150.00');assert.equal(f.payroll.length,1);assert.equal(f.payroll[0].scheme,'PRODUCT_PERCENT_ASSEMBLY');
  assert.equal((await changeProductStatusTransaction(f.tx,manager,'p','DONE')).ok,true);assert.equal(f.payroll.length,1);f.product.quantity=99;assert.equal(await captureProductPercentageCompletion(f.tx,manager,'p','ASSEMBLY','DONE'),'SETTLED');assert.equal(snapshot.quantitySnapshot,3);
 });
 test('assemblynullskip forever/zero noPayroll/missingpositivebasis andwrongrecipient reject',async()=>{
