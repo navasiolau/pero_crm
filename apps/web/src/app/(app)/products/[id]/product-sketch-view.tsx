@@ -5,7 +5,6 @@ import * as React from "react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Role } from "@prisma/client";
 import { Trash2 } from "lucide-react";
-import { ContainImageFrame } from "@/components/contain-image-frame";
 import { ProductHeroImage } from "@/components/product-hero-image";
 import { PhotoUploadButton } from "@/components/photo-upload-button";
 import { ConfirmDeleteDialog } from "@/components/confirm-delete-dialog";
@@ -58,7 +57,7 @@ export function ProductCoverLayout({productId,projectId,cover:initialCover,actor
   return <>
     <section data-layout="cover" className="grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] lg:grid-rows-[auto_auto]">
       <div data-slot="product-cover-header" className="order-1 min-w-0 lg:col-start-1 lg:row-start-1">{header}</div>
-      <ContainImageFrame imageKey={cover?.id??null} data-slot="product-cover-image" data-sketch-state={cover?"filled":"empty"} className="relative order-2 aspect-[4/5] min-w-0 overflow-hidden rounded-lg border bg-muted/20 lg:col-start-2 lg:row-start-1 lg:row-span-2 lg:aspect-auto lg:self-start lg:h-[max(8rem,calc(100svh-8.75rem))]">
+      <div data-slot="product-cover-image" data-sketch-state={cover?"filled":"empty"} className="relative order-2 aspect-[4/5] min-w-0 overflow-hidden rounded-lg border border-transparent bg-transparent lg:col-start-2 lg:row-start-1 lg:row-span-2 lg:aspect-auto lg:self-start lg:h-[max(8rem,calc(100svh-8.75rem))]">
         {cover?<>
           <button type="button" aria-label="Открыть эскиз на весь экран" className="absolute inset-0 h-full w-full" onClick={()=>viewer.open(cover)}><ProductHeroImage sketch={cover} preview="cover" priority alt="Эскиз изделия" className="absolute inset-0 h-full w-full" /></button>
           {canUpload?<div className="absolute bottom-2 left-2 z-10"><PhotoUploadButton projectId={projectId} productId={productId} assignCover expectedSketchFileId={cover.id} filesCount={1} buttonLabel="Заменить изображение" onBusyChange={changeBusy} onUncertainChange={value=>{uncertainUpload.current=value;}} beforeUpload={flushCritical} onUploaded={(_id,sketch)=>{if(sketch){awaiting.current={id:sketch.id};setCover(sketch);setError(null);}}} /></div>:null}
@@ -66,7 +65,7 @@ export function ProductCoverLayout({productId,projectId,cover:initialCover,actor
         </>:canUpload?<PhotoUploadButton projectId={projectId} productId={productId} assignCover coverSurface filesCount={0} buttonLabel="Добавить изображение" onBusyChange={changeBusy} onUncertainChange={value=>{uncertainUpload.current=value;}} beforeUpload={flushCritical} onUploaded={(_id,sketch)=>{if(sketch){awaiting.current={id:sketch.id};setCover(sketch);setError(null);}}} />:<div className="flex h-full min-h-48 items-center justify-center p-4 text-center"><p className="text-sm text-muted-foreground">Добавьте эскиз</p></div>}
         {busy?<p aria-live="polite" className="absolute bottom-2 left-2 rounded bg-background/90 p-2 text-xs">Сохраняется…</p>:null}
         {error?<p role="alert" className="absolute right-2 bottom-2 left-2 min-w-0 break-words rounded bg-background/95 p-2 text-sm text-destructive">{error}</p>:null}
-      </ContainImageFrame>
+      </div>
       <div data-slot="product-cover-details" className="order-3 min-w-0 lg:col-start-1 lg:row-start-2">{details}</div>
     </section>
     {viewer.viewer}
