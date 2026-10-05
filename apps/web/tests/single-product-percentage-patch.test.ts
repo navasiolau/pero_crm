@@ -29,3 +29,7 @@ test('retired workReview rejects without any writes and ordinary same value rema
  const result=await patchProductPercentageCore(manager,patch,f.tx);assert.equal(result.kind,'validation');assert.deepEqual(f.writes,[]);
  const g=fixture();const same=await patchProductPercentageCore(manager,input({value:'5'}),g.tx);assert.ok(same.ok);assert.equal(same.noOp,true);assert.deepEqual(g.writes,[]);
 });
+
+test('all three kinds refuse a forged rate above15 before config or audit writes',async()=>{
+ for(const kind of ['ENGINEERING','ASSEMBLY','INSTALLATION'] as const){const f=fixture();const result=await patchProductPercentageCore(manager,input({kind,value:'15.01'}),f.tx);assert.equal(result.kind,'validation');if(!result.ok)assert.match(result.error,/15/);assert.deepEqual(f.writes,[]);}
+});

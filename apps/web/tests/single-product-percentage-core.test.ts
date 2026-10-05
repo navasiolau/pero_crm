@@ -96,3 +96,7 @@ test('v4 rejects overflow caused only by ceiling before any writes',async()=>{
  const f=fixture('100','9999999999.01');await assert.rejects(captureProductPercentageCompletion(f.tx,actor,'p','ENGINEERING','PRODUCTION'),/превышает допустимую/);
  assert.equal(f.completions.length,0);assert.equal(f.payroll.length,0);
 });
+test('new completion with a saved rate above15 fails before monetary writes',async()=>{
+ const f=fixture('15.01','1000');await assert.rejects(captureProductPercentageCompletion(f.tx,actor,'p','ENGINEERING','PRODUCTION'),/15/);assert.equal(f.completions.length,0);assert.equal(f.payroll.length,0);
+
+});

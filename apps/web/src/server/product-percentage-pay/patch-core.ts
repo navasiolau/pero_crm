@@ -2,7 +2,7 @@ import {liveProductWhere} from "@/server/access/live-entities";
 import { Prisma } from '@prisma/client';
 import { createHash } from 'node:crypto';
 import { MANAGER_ROLES,hasAnyRole } from '@/lib/roles';
-import { parsePercentageRate } from '@/lib/product-percentage-pay';
+import { parseProductPercentageRate } from '@/lib/product-percentage-rate-limit';
 import type { DomainActor } from '@/server/projects/core';
 import { productPercentagePatchSchema,type ProductPercentagePatch,type ProductPercentagePatchResult } from './contracts';
 import { PERCENTAGE_STAGE_POLICY } from './stage-policy';
@@ -26,7 +26,7 @@ export async function patchProductPercentageCore(actor:DomainActor,input:Product
  if(revision!==data.expectedRevision||!equal(current,expected))return{ok:false,kind:'conflict',error:'Настройки изменились. Проверьте актуальное значение',currentValue:current,currentRevision:revision};
  let value:string|null;
  try{
- value=data.field==='ratePercent'?parsePercentageRate(data.value):data.value;
+ value=data.field==='ratePercent'?parseProductPercentageRate(data.value):data.value;
  if(data.field==='ratePercent'&&value!==null)value=new Prisma.Decimal(value as string).toString();
  if(data.field==='assigneeId'&&value!==null){const recipient=await tx.user.findUnique({where:{id:value as string},select:{active:true,roles:true}});if(!recipient?.active||!recipient.roles.includes(policy.role))throw new Error('Выберите активного сотрудника нужной роли');}
  }catch(error){return{ok:false,kind:'validation',error:error instanceof Error?error.message:'Проверьте данные оплаты'};}

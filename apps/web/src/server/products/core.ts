@@ -1,3 +1,4 @@
+import {parseProductPercentageRate} from "@/lib/product-percentage-rate-limit";
 import {liveProductWhere,liveProjectWhere} from "@/server/access/live-entities";
 import {softDeleteProductCore} from './delete-core';
 import type {ProductDeleteInput,ProductDeleteResult} from './delete-contract';
@@ -87,6 +88,8 @@ export async function createProductCore(actor: DomainActor, input: CreateProduct
   const suffixInt = await nextProductSuffixInt(project.id, tx);
   const number = `${project.number}.${suffixInt}`;
   const defaults = await readProductPercentageDefaults(tx);
+  try { for (const kind of DEFAULT_PERCENTAGE_KINDS) parseProductPercentageRate(defaults.rates[kind]); }
+  catch (error) { return { ok: false as const, error: error instanceof Error ? error.message : "Проверьте стандартные проценты" }; }
   if (Object.values(defaults.rates).some(rate => rate !== null)) {
     try { assertProjectMoneyCurrency(project.currency); }
     catch (error) { return { ok: false as const, error: error instanceof Error ? error.message : "Валюта проекта не подготовлена" }; }
