@@ -60,13 +60,16 @@ export function SinglePercentageRow({productId,kind,section,canManage,canViewAll
   if(retryPending.current)return;retryPending.current=true;setRetryBusy(true);setRetryError(null);
   try{if(!await group.flush())throw Error("Сначала сохраните текущие поля этапа");const result=await retryProductPercentageAction({productId,kind});if(!result.ok)throw Error(result.error??"Не удалось повторить расчёт");router.refresh();}catch(error){setRetryError(error instanceof Error?error.message:"Не удалось повторить расчёт");}finally{retryPending.current=false;setRetryBusy(false);}
  }
- return <section data-single-percentage-kind={kind} className="min-w-0 space-y-3">
+ return <section aria-label={`${label}: процентная оплата`} data-single-percentage-kind={kind} className="min-w-0 space-y-3">
   <div className="flex min-w-0 flex-nowrap items-start gap-3">
-   <div className="min-w-0 flex-1">{kind==="ENGINEERING"&&!editEngineer?<div className="space-y-1.5 text-sm"><span className="font-medium">Инженер</span><p className="break-words">{engineerName??"Не назначен"}</p></div>:recipientController?<InlineSelectField id={`${kind.toLowerCase()}-assignee`} label={label} controller={recipientController} readOnly={!editable} options={options} allowClear />:<p>{section.assignee?.name??"Не назначен"}</p>}</div>
-   <div className="w-48 max-w-full min-w-0 shrink" onKeyDownCapture={event=>{if(event.key==="Escape"){event.preventDefault();void group.cancel("ratePercent");}}}><PercentageRateInput id={`${kind.toLowerCase()}-rate`} label={kind==="ENGINEERING"?"Процент инженера, %":"Процент, %"} draft={rate.draft} setDraft={rate.setDraft} commit={rate.commit} error={Boolean(rate.error)} readOnly={!editable} /><div id={`${kind.toLowerCase()}-rate-state`}><PercentageState field={rate}/></div></div>
+   <div data-percentage-payment className="w-36 max-w-36 min-w-0 shrink-0" onKeyDownCapture={event=>{if(event.key==="Escape"){event.preventDefault();void group.cancel("ratePercent");}}}>
+    <PercentageRateInput id={`${kind.toLowerCase()}-rate`} label="Процент, %" draft={rate.draft} setDraft={rate.setDraft} commit={rate.commit} error={Boolean(rate.error)} readOnly={!editable} />
+    <div id={`${kind.toLowerCase()}-rate-state`}><PercentageState field={rate}/></div>
+    {canViewAll&&section.state==="DRAFT"?<p data-percentage-amount className="mt-2 min-w-0 break-words text-[18px] leading-6 font-semibold text-primary tabular-nums">Сумма: {total===null?"—":formatAmount(total,version>=2?"BYN":section.productCurrency)}</p>:null}
+   </div>
+   <div data-percentage-recipient className="w-60 max-w-60 min-w-0 shrink">{kind==="ENGINEERING"&&!editEngineer?<div className="space-y-1.5 text-sm"><span className="font-medium">Инженер</span><p className="break-words">{engineerName??"Не назначен"}</p></div>:recipientController?<InlineSelectField id={`${kind.toLowerCase()}-assignee`} label={label} controller={recipientController} readOnly={!editable} options={options} allowClear />:<p>{section.assignee?.name??"Не назначен"}</p>}</div>
   </div>
   {confirmedRecipient.userId!==null&&(!confirmedRecipient.active||!confirmedRecipient.eligible)?<p className="break-words text-xs text-muted-foreground">Текущий получатель не подходит для нового начисления. Назначьте активного сотрудника соответствующей роли.</p>:null}
-  {canViewAll&&section.state==="DRAFT"?<div className="break-words text-sm text-muted-foreground"><p>Предварительно: {total===null?"не определено":`≈ ${formatAmount(total,version>=2?"BYN":section.productCurrency)}`}</p></div>:null}
   {section.state==="PENDING_FX"&&canManage?<Button variant="outline" disabled={retryBusy} onClick={()=>void retryFrozen()}>Повторить расчёт снимка</Button>:null}
   {retryError?<p role="alert" className="break-words text-sm text-destructive">{retryError}</p>:null}
  </section>;
