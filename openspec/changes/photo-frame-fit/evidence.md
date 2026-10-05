@@ -1,5 +1,13 @@
 # Evidence
 
+## Исправление по замечанию владельца — 05.10.2026
+
+По новому прямому указанию владельца рамка удалена полностью: hostdiv имеет статический прозрачный border/bg с первого render, измерений/overlay/load/error/ResizeObserver рамки больше нет. Невидимая1px граница сохраняет прежние размеры. CUA-проверка: задержка image response10s — обе фото ещё loading, но border/bg уже прозрачны, overlay0; после load неизменны.9 сочетанийportrait/square/landscape×1440/390/360: img/host bounds совпадают с исходной реализацией, object-contain сохранён. Empty/broken6 сценариев без декоративной рамки; fullscreen обоих компонентов открывается/закрывается. Upload/replace/delete/ACK/права не изменялись.
+
+База текущего исправления: fresh origin/staging d146aad1a1e03e9bd4b3b6252084decf739a9b05, рабочая ветка bugfix/79. Уточнение согласовано прямым запросом владельца; прежнее разрешение на коммиты/staging сохраняется. Локально1245/1245 тестов, typecheck/lint/build PASS (существующие5 lint warnings). Протокол и PNG: D:/Projects/pero_crm_task_runtime/20261005-75-80-01a10c1f/correction-75-79/local-browser-receipt.json. Компоненты реальные, данные synthetic/actions mocked; фактическая staging-приёмка нового SHA выполняется отдельно.
+
+Следующие разделы сохраняют историю прежней приёмки, superseded текущим уточнением.
+
 ## Завершённая приёмка staging — 05.10.2026
 
 Владелец разрешил commits/staging. Ветка bugfix/79 интегрирована обычным merge; функциональная приёмка выполнена на образе ревизии fd1a371610d8aa49f370f428911254040974d71e (healthy). CI/CD #127: https://github.com/navasiolau/pero_crm/actions/runs/37334434678 — Success.

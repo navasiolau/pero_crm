@@ -2,7 +2,6 @@
 import {useEffect,useRef,useState} from 'react';
 import {useRouter} from 'next/navigation';
 import {Trash2,UploadCloud} from 'lucide-react';
-import {ContainImageFrame} from "./contain-image-frame";
 import {ProductHeroImage} from './product-hero-image';
 import {useFileViewer} from './file-viewer';
 import {ConfirmDeleteDialog} from './confirm-delete-dialog';
@@ -47,9 +46,9 @@ export function ProjectCover({projectId,cover:initial,canManage,beforeMutation,r
   }catch(e){setError(e instanceof Error?e.message:'Не удалось удалить обложку');return false;}
   finally{active.current=false;setBusy(false);}
  }
- return <div className="min-w-0 space-y-2"><ContainImageFrame imageKey={cover?.id??null} data-project-cover data-cover-state={cover?'filled':'empty'} className="relative aspect-[4/3] min-w-0 overflow-hidden rounded-lg border bg-muted/20">
+ return <div className="min-w-0 space-y-2"><div data-project-cover data-cover-state={cover?'filled':'empty'} className="relative aspect-[4/3] min-w-0 overflow-hidden rounded-lg border border-transparent bg-transparent">
   {cover?<><button type="button" aria-label="Открыть обложку проекта на весь экран" className="absolute inset-0" onClick={()=>viewer.open(cover)}><ProductHeroImage sketch={cover} preview="cover" alt="Обложка проекта" className="absolute inset-0 h-full w-full"/></button>{canManage?<button type="button" aria-label="Удалить обложку проекта" disabled={busy} className="absolute top-2 right-2 z-10 flex size-10 items-center justify-center rounded bg-background/90" onClick={()=>setConfirm(cover)}><Trash2 className="size-5 text-destructive"/></button>:null}</>:canManage?<div role="button" tabIndex={busy?-1:0} aria-label="Выбрать обложку проекта" aria-disabled={busy} className="absolute inset-0 flex cursor-pointer items-center justify-center p-4" onClick={()=>{if(!busy)input.current?.click();}} onKeyDown={e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();if(!busy)input.current?.click();}}} onDragOver={e=>e.preventDefault()} onDrop={e=>{e.preventDefault();const file=e.dataTransfer.files[0];if(file&&!busy)void upload(file);}}><span className="inline-flex min-h-12 items-center gap-2 rounded-md bg-black px-5 py-3 text-center text-base font-semibold text-white"><UploadCloud className="size-5 shrink-0"/>Добавить обложку проекта</span></div>:<div className="absolute inset-0 flex items-center justify-center text-sm text-muted-foreground">Обложка проекта не добавлена</div>}
   {busy?<p role="status" className="absolute bottom-2 left-2 rounded bg-background/90 p-2 text-sm">Сохраняется…</p>:null}
- </ContainImageFrame><input ref={input} data-project-cover-input type="file" accept="image/*" className="hidden" disabled={busy||!canManage} onChange={e=>{const file=e.target.files?.[0];e.target.value='';if(file)void upload(file);}}/>
+ </div><input ref={input} data-project-cover-input type="file" accept="image/*" className="hidden" disabled={busy||!canManage} onChange={e=>{const file=e.target.files?.[0];e.target.value='';if(file)void upload(file);}}/>
  {failure?<UploadErrorDetails failure={failure}/>:null}{error?<p role="alert" className="break-words text-sm text-destructive">{error}</p>:null} {viewer.viewer}<ConfirmDeleteDialog open={!!confirm} entityLabel={`обложку проекта «${confirm?.fileName??''}»`} onOpenChange={open=>{if(!open&&!active.current)setConfirm(null);}} onConfirm={remove}/></div>;
 }

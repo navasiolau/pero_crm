@@ -6,14 +6,13 @@ ProductCoverLayout сохраняет aspect4/5 либо desktop viewport-height
 
 ## Goals / Non-Goals
 
-**Goals:** только видимая рамка/фон под размер изображения.
+**Goals:** отсутствие видимой рамки и фона вокруг фото с первого paint, без перехода при загрузке.
 **Non-Goals:** размеры зарезервированного layoutslot, положение/масштаб img, кнопки/права/файлы/fullscreen/канбан-фото.
 
 ## Decisions
 
-Общий ContainImageFrame сохраняет hostclass/dimensions, прозрачную1px границу и прозрачный фон при filled. Внутри pointer-events-none border накладывается на actualpainted rect изображения, вычисленный по naturalWidth/Height и bounds текущего img. Img/положение/transform не менять; capture load/error и ResizeObserver обновляют рамку, cachedcomplete учитывается. Empty/failure сохраняют прежнюю рамку и фон. Кнопки/области клика прежние. Component keyed source сбрасывает отложенную рамку при замене.
+Обычный div сохраняет hostclass/dimensions и прозрачную1px границу для прежней геометрии, но всегда получает border-transparent/bg-transparent, в том числе до image load. Видимой рамки, overlay, вычислений naturalWidth/Height, load/error handlers рамки и ResizeObserver нет. Img/положение/transform не менять. Empty/failure сообщения, кнопки/области клика и upload/ACK логика прежние; внешний декоративный border/bg отсутствует и в этих состояниях.
 
 ## Risks / Trade-offs
 
-Сохранение положения оставляет прозрачное свободное пространство layoutslot → это намеренное следствие ограничения владельца; тёмных полей рамки нет. Broken/cached image/resize → отдельные проверки и вычисление только при успешной загрузке. Roundoff pixels → browserassert tolerance1px.
-
+Сохранение положения оставляет прозрачное свободное пространство layoutslot. Проверить loading/cached/broken/resize и первый paint: оформление контейнера не должно зависеть от момента загрузки фотографии. Геометрия изображения должна совпадать с исходной.
