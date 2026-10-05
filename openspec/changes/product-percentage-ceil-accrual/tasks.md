@@ -7,5 +7,4 @@
 - [x] 1.3 Реализовать общий точный helper, version4 и reader/query/preview/capture; получить GREEN.
 - [x] 1.4 Добавить forward SQL CHECK версии4, сохранив1–3/immutable; проверить existing local DB и rollback сохранность.
 - [x] 1.5 Пройти typecheck/lint/full tests/build/OpenSpec strict и сохранить evidence.
-- [ ] 1.6 По разрешению выполнить commit/merge/CI, миграцию и приёмку фактического staging SHA.
-
+- [x] 1.6 По разрешению выполнить commit/merge/CI, миграцию и приёмку фактического staging SHA.
