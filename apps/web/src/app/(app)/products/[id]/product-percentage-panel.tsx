@@ -61,7 +61,8 @@ export function SinglePercentageRow({productId,kind,section,canManage,canViewAll
   const ownAmount=section.ownMember?.amount??section.members[0]?.amount??null;
   const displaySum=canViewAll?(previewTotal??section.total):(ownAmount??(section.assignee?null:section.total));
   const rateMissing=currentRate(section)===null&&(section.state==="DRAFT"||section.state==="SKIPPED_ONCE");
-  const showSum=displaySum!==null||rateMissing;
+  // Сумма видна всегда в DRAFT (включая «—» при пустой базе) и при любом статусе, если есть что показать.
+  const showSum=section.state==="DRAFT"||displaySum!==null||rateMissing;
   // Поле без финансового обзора видит этап одной текстовой строкой: имя назначенного
   // и только своя оплата; ни полей %, ни селектов.
   if(!canViewAll){
