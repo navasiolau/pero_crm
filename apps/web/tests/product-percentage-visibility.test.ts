@@ -30,12 +30,15 @@ test("поле не видит %, но видит свою сумму и име�
   assert.deepEqual(assembly.members.map((m) => [m.userId, m.amount]), [["worker1", "120.00"]]);
   assert.equal(assembly.total, "120.00");
   assert.equal(assembly.assignee?.name, "Сборщик");
-  // Чужая секция без своей строки пуста, но прогноз виден через total, ставка скрыта.
+  // Чужая назначенная секция скрыта (total null), прогноз неназначенной виден, ставка скрыта везде.
   const eng = field.sections.ENGINEERING;
   assert.equal(eng.ratePercent, null);
   assert.deepEqual(eng.members, []);
-  assert.equal(eng.total, "50.00");
+  assert.equal(eng.total, null);
   assert.equal(eng.assignee?.name, "Инженер");
+  const forecast = field.sections.INSTALLATION;
+  assert.equal(forecast.assignee, null);
+  assert.equal(forecast.total, "210.00");
   const manager = await getProductPercentageView({ id: "manager", roles: ["MANAGER"] }, "p", db as unknown as Pick<PrismaClient, "product" | "task" | "productPercentageParticipant" | "user" | "payrollEntry">);
   assert.equal(manager.sections.ASSEMBLY.ratePercent, "4");
   assert.equal(manager.sections.ASSEMBLY.total, "120.00");
@@ -72,4 +75,9 @@ test("поле видит сумму без %, менеджер видит % и 
   const nullRateHtml = renderToStaticMarkup(React.createElement(SinglePercentageRow, { productId: "p", kind: "ASSEMBLY", section: sectionFixture({ ratePercent: null, currentRatePercent: null, total: null, members: [], ownMember: null }), canManage: true, canViewAll: true, candidates: [] }));
   assert.match(nullRateHtml, /Ставка не задана/);
   assert.match(nullRateHtml, /Сумма: —/);
+  // Поле не видит чужую назначенную сумму даже при просочившемся total: только «—», без цифр.
+  const strangerHtml = renderToStaticMarkup(React.createElement(SinglePercentageRow, { productId: "p", kind: "INSTALLATION", section: sectionFixture({ kind: "INSTALLATION", ratePercent: null, currentRatePercent: null, price: null, unitPrice: null, productTotal: null, total: "98.00", members: [], ownMember: null, assignee: { userId: "other", name: "Чужой", active: true, eligible: true } }), canManage: false, canViewAll: false, candidates: [] }));
+  assert.match(strangerHtml, /Сумма: —/);
+  assert.doesNotMatch(strangerHtml, /98/);
+  assert.doesNotMatch(strangerHtml, /Процент/);
 });
