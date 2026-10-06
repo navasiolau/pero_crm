@@ -68,6 +68,18 @@ test("закрытый этап показывает свою долю назн�
   const stranger = await getProductPercentageView({ id: "other", roles: ["WORKER"] }, "p", db);
   assert.equal(stranger.sections.ASSEMBLY.total, null);
 });
+
+// Пропущенное начисление с пустой долей: назначенный видит прогноз, чужой — ничего.
+test("пустая доля пропущенного показывает прогноз только своему назначенному", async () => {
+  const skipped = { kind: "ENGINEERING", state: "SKIPPED_ONCE", completedAt: new Date(0), reason: "no-rate", priceSnapshot: null, ratePercentSnapshot: null, productCurrency: "BYN", payrollCurrency: null, calculationVersion: 4, shares: [{ userId: "eng", userNameSnapshot: "Инженер", shareUnits: 1000000, amount: null }] };
+  const product = { id: "p", quantity: 2, expectedPrice: "500", project: { currency: "BYN" }, noModel: false, files: [], stagePayPools: [], percentageCompletions: [skipped], engineerId: "eng", engineer: { name: "Инженер", active: true, roles: ["ENGINEER"] }, assemblerId: null, assembler: null, mounterId: null, mounter: null, percentageConfigs: [{ kind: "ENGINEERING", ratePercent: "2", revision: 2 }] };
+  const db = { task: { findMany: async () => [] }, productPercentageParticipant: { findMany: async () => [] }, product: { findFirst: async () => product }, user: { findMany: async () => [] }, payrollEntry: { findMany: async () => [] } } as unknown as ViewReader;
+  const field = await getProductPercentageView({ id: "eng", roles: ["ENGINEER"] }, "p", db);
+  // 500×1×2% = 10.00 (инженерный этап считается от штуки).
+  assert.equal(field.sections.ENGINEERING.total, "10.00");
+  const stranger = await getProductPercentageView({ id: "other", roles: ["ENGINEER"] }, "p", db);
+  assert.equal(stranger.sections.ENGINEERING.total, null);
+});
 const customRequire = createRequire(import.meta.url);
 function inject(name: string, exp: Record<string, unknown>) {
   const file = customRequire.resolve(name);

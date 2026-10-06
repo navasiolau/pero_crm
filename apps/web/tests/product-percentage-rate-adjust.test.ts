@@ -97,7 +97,7 @@ test("правка при DONE отклоняется", async () => {
 
 test("пропущенное начисление добирается поздним переходом", async () => {
   const s = state();
-  s.completion = { id: "c", state: "SKIPPED_ONCE", amount: null, ratePercentSnapshot: null, shares: [] } as unknown as typeof s.completion;
+  s.completion = { id: "c", state: "SKIPPED_ONCE", amount: null, ratePercentSnapshot: null, shares: [{ id: "s0", userId: "w", userNameSnapshot: "Сборщик", shareUnits: 1000000, amount: null }] } as unknown as typeof s.completion;
   s.config.ratePercent = "4";
   const tx = {
     ...txOf(s),
@@ -110,6 +110,8 @@ test("пропущенное начисление добирается позд�
   const result = await captureProductPercentageCompletion(tx, actor, "p", "ASSEMBLY", "STORAGE", effects, "PRODUCTION");
   assert.equal(result, "SETTLED");
   assert.equal(s.completion.state, "SETTLED");
+  assert.equal(s.completion.shares.length, 1);
+  assert.equal(s.completion.shares[0].amount, "120.00");
   assert.equal(s.entries.length, 1);
   assert.equal(s.entries[0].amount, "120.00");
   assert.equal(effects.earnings.length, 1);
