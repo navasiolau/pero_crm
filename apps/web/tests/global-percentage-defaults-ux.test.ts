@@ -27,8 +27,8 @@ test('actual Settings page denies readonly office and field roles without any de
  for(const value of [['ENGINEER'],['ACCOUNTANT'],['WORKER'],['MOUNTER']] as Role[][]){roles=value;await assert.rejects(async()=>SettingsPage(),/SETTINGS_ACCESS_DENIED/);}
 });
 test('actual engineering draft shows only Sum50BYN, with no base or saved-price hints',()=>{const html=panel();assert.match(html,/Сумма:/);assert.match(html,/50 BYN/);assert.doesNotMatch(html,/База:|По сохранённым/);});
-test('draft null differs from explicit zero and frozen totals remain unchanged',()=>{
- assert.match(panel({unitPrice:null,price:null}),/Сумма: —/);assert.match(panel({currentRatePercent:'0',ratePercent:'0'}),/0 BYN/);const frozen=panel({state:'SETTLED',total:'150.00',unitPrice:'9999.00',quantity:99});assert.doesNotMatch(frozen,/Сумма:/);assert.equal(singleProductPercentagePreview({state:'SETTLED',kind:'ENGINEERING',version:2,unitPrice:'9999.00',quantity:99,rate:'5',frozenTotal:'150.00'}),'150.00');
+test('draft null differs from explicit zero and frozen totals are shown',()=>{
+ assert.match(panel({unitPrice:null,price:null}),/Сумма: —/);assert.match(panel({currentRatePercent:'0',ratePercent:'0'}),/0 BYN/);const frozen=panel({state:'SETTLED',total:'150.00',unitPrice:'9999.00',quantity:99});assert.match(frozen,/Сумма:/);assert.match(frozen,/150/);assert.equal(singleProductPercentagePreview({state:'SETTLED',kind:'ENGINEERING',version:2,unitPrice:'9999.00',quantity:99,rate:'5',frozenTotal:'150.00'}),'150.00');
 });
 
 test('actual percentage row contains no former-work classification controls',()=>{assert.doesNotMatch(panel(),/Проверка прежних работ|Выберите решение|Включено в процентный этап|Самостоятельная сдельная работа/);});
