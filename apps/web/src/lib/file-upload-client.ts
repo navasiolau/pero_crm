@@ -1,4 +1,5 @@
 import {createRequestId} from "./request-id";
+import {DOCUMENT_UPLOAD_MAX_BYTES,IMAGE_UPLOAD_MAX_BYTES} from "@/server/files/upload-limits";
 export type UploadCommitState="notCommitted"|"committed"|"unknown";
 const PHASES=["auth","request","context","validation","image","storage-original","storage-thumb","persist","confirmation"] as const;
 export type UploadPhase=typeof PHASES[number];
@@ -32,11 +33,30 @@ function failure(attempt:UploadAttempt,options:{error:string;code:string;message
  return {ok:false,failure:{error:safeText(options.error,"Не удалось загрузить файл.",300),code:safeId(options.code,"UPLOAD_FAILED"),requestId:safeId(options.requestId,safeId(options.response?.headers.get("x-request-id"),attempt.clientMutationId)),clientMutationId:attempt.clientMutationId,httpStatus:options.response?.status,kind:typeof options.kind==="string"?safeText(options.kind,"",40):undefined,commitState:options.commitState,details:{phase:options.phase,message:safeText(options.message,"Причина не указана")}}};
 }
 export type UploadEndpoint="/api/files/upload";
-export async function sendFileUpload(attempt:UploadAttempt,{fetcher=fetch,timeoutMs=60000,endpoint="/api/files/upload"}:{fetcher?:typeof fetch;timeoutMs?:number;endpoint?:UploadEndpoint}={}):Promise<UploadResult> {
+// Пакетная загрузка: до 100 файлов за раз; мелкие (до 25 МБ) — пулом,
+// крупные документы — строго последовательно, чтобы не держать гигабайты в памяти параллельно.
+export const MULTI_UPLOAD_MAX_FILES=100;
+export const MULTI_UPLOAD_CONCURRENCY=4;
+export const MULTI_UPLOAD_LARGE_THRESHOLD_BYTES=IMAGE_UPLOAD_MAX_BYTES;
+const UPLOAD_TIMEOUT_MIN_MS=60_000;
+const UPLOAD_TIMEOUT_MAX_MS=10*60_000;
+/** Таймаут по размеру файла: 60 с до 25 МБ, далее линейно до 10 мин к 1 ГБ. */
+export function uploadTimeoutMsForSize(sizeBytes:number):number {
+ if(!Number.isFinite(sizeBytes)||sizeBytes<=IMAGE_UPLOAD_MAX_BYTES)return UPLOAD_TIMEOUT_MIN_MS;
+ const ratio=Math.min(1,(sizeBytes-IMAGE_UPLOAD_MAX_BYTES)/(DOCUMENT_UPLOAD_MAX_BYTES-IMAGE_UPLOAD_MAX_BYTES));
+ return Math.round(UPLOAD_TIMEOUT_MIN_MS+ratio*(UPLOAD_TIMEOUT_MAX_MS-UPLOAD_TIMEOUT_MIN_MS));
+}
+function uploadTimeoutMsForAttempt(attempt:UploadAttempt):number {
+ const file=attempt.form.get("file");
+ return file instanceof File?uploadTimeoutMsForSize(file.size):UPLOAD_TIMEOUT_MIN_MS;
+}
+export async function sendFileUpload(attempt:UploadAttempt,{fetcher=fetch,timeoutMs,endpoint="/api/files/upload"}:{fetcher?:typeof fetch;timeoutMs?:number;endpoint?:UploadEndpoint}={}):Promise<UploadResult> {
+ if(endpoint!=="/api/files/upload")return {ok:false,failure:localUploadFailure("Неверный адрес загрузки","request",attempt.clientMutationId)};
+ const effectiveTimeout=timeoutMs??uploadTimeoutMsForAttempt(attempt);
  if(endpoint!=="/api/files/upload")return {ok:false,failure:localUploadFailure("Неверный адрес загрузки","request",attempt.clientMutationId)};
  const controller=new AbortController();let response:Response|undefined,timedOut=false,timer:ReturnType<typeof setTimeout>|undefined;
  const unknown=(code:string,error:string,message:string)=>failure(attempt,{code,error:response&&response.status>=500?`\u041d\u0435\u0442 \u043f\u043e\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0435\u043d\u0438\u044f \u0437\u0430\u0433\u0440\u0443\u0437\u043a\u0438. \u041e\u0448\u0438\u0431\u043a\u0430 \u0441\u0435\u0440\u0432\u0435\u0440\u0430 (${response.status}).`:error,message,phase:response?"confirmation":"request",response,commitState:"unknown"});
- const timeout=new Promise<UploadResult>(resolve=>{timer=setTimeout(()=>{timedOut=true;controller.abort();resolve(unknown("UPLOAD_TIMEOUT","Загрузка не завершилась вовремя.","Время ожидания ответа истекло; результат записи не подтверждён."));},timeoutMs);});
+ const timeout=new Promise<UploadResult>(resolve=>{timer=setTimeout(()=>{timedOut=true;controller.abort();resolve(unknown("UPLOAD_TIMEOUT","Загрузка не завершилась вовремя.","Время ожидания ответа истекло; результат записи не подтверждён."));},effectiveTimeout);});
  const work=(async():Promise<UploadResult>=>{
   try{
    response=await fetcher(endpoint,{method:"POST",body:attempt.form,headers:{"x-request-id":attempt.clientMutationId},signal:controller.signal});
@@ -48,6 +68,33 @@ export async function sendFileUpload(attempt:UploadAttempt,{fetcher=fetch,timeou
   }catch(error){return timedOut?unknown("UPLOAD_TIMEOUT","Загрузка не завершилась вовремя.","Время ожидания ответа истекло; результат записи не подтверждён."):unknown("UPLOAD_NETWORK","Не удалось связаться с сервером.",`Сетевая ошибка (${error instanceof Error?safeText(error.name,"Error",40):"Error"}); результат записи не подтверждён.`);}
  })();
  try{return await Promise.race([work,timeout]);}finally{if(timer)clearTimeout(timer);}
+}
+export type BatchUploadItem={fileName:string;size:number;attempt:UploadAttempt};
+export type BatchUploadResult={fileName:string;size:number;result:UploadResult};
+export type BatchUploadSummary={results:BatchUploadResult[];truncated:number};
+export type BatchFileFailure={fileName:string;failure:UploadFailure};
+/** Отправляет пачку файлов: первые 100, мелкие — пулом, крупные — последовательно.
+ *  Порядок результатов совпадает с порядком выбора; ошибка одного файла не валит пачку. */
+export async function sendUploadBatch(items:BatchUploadItem[],options:{concurrency?:number;fetcher?:typeof fetch;timeoutForSize?:(size:number)=>number}={}):Promise<BatchUploadSummary> {
+ const concurrency=Math.max(1,Math.floor(options.concurrency??MULTI_UPLOAD_CONCURRENCY));
+ const fetcher=options.fetcher??fetch,timeoutForSize=options.timeoutForSize??uploadTimeoutMsForSize;
+ const accepted=items.slice(0,MULTI_UPLOAD_MAX_FILES),truncated=items.length-accepted.length;
+ const indexed=accepted.map((item,index)=>({item,index}));
+ const results=new Array<BatchUploadResult>(accepted.length);
+ const small=indexed.filter(({item})=>item.size<=MULTI_UPLOAD_LARGE_THRESHOLD_BYTES);
+ const large=indexed.filter(({item})=>item.size>MULTI_UPLOAD_LARGE_THRESHOLD_BYTES);
+ const runOne=async({item,index}:{item:BatchUploadItem;index:number})=>{
+  const result=await sendFileUpload(item.attempt,{fetcher,timeoutMs:timeoutForSize(item.size)});
+  results[index]={fileName:item.fileName,size:item.size,result};
+ };
+ // Мелкие файлы — ограниченным пулом; крупные — строго по одному после них.
+ let cursor=0;
+ const poolSize=small.length?Math.min(concurrency,small.length):0;
+ await Promise.all(Array.from({length:poolSize},async()=>{
+  while(cursor<small.length){const next=small[cursor++];await runOne(next);}
+ }));
+ for(const next of large)await runOne(next);
+ return {results,truncated};
 }
 export function formatUploadDiagnostics(value:UploadFailure) {
  return [`HTTP: ${value.httpStatus??"нет ответа"}`,`Code: ${value.code}`,`Request ID: ${value.requestId}`,`Client mutation ID: ${value.clientMutationId}`,`Phase: ${value.details.phase}`,`Commit state: ${value.commitState}`,`Cause: ${value.details.message}`].join("\n");

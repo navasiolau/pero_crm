@@ -22,7 +22,7 @@ import { useFileViewer } from "@/components/file-viewer";
 import { ConfirmDeleteDialog } from "@/components/confirm-delete-dialog";
 import { deleteFile } from "@/server/files/actions";
 import {UploadErrorDetails} from "@/components/upload-error-details";
-import {createUploadAttempt,sendFileUpload,localUploadFailure,type UploadFailure} from "@/lib/file-upload-client";
+import {MULTI_UPLOAD_MAX_FILES,createUploadAttempt,sendUploadBatch,localUploadFailure,type BatchFileFailure,type BatchUploadItem,type UploadFailure} from "@/lib/file-upload-client";
 import {
   FILE_CATEGORY_LABELS,
   FILE_STAGES,
@@ -76,34 +76,51 @@ export function Uploader({
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [category, setCategory] = useState<FileCategory>(fixedCategory ?? "PHOTO");
-  const [error, setError] = useState<UploadFailure | null>(null);
+  const [batchFailures, setBatchFailures] = useState<BatchFileFailure[]>([]);
+  const [batchSummary, setBatchSummary] = useState<{succeeded:number;total:number}|null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const currentTarget=useRef('');currentTarget.current=JSON.stringify({projectId,productId,category,stage});
   const active = useRef(false);
 
-  function upload(file:File){
-    if(active.current)return;
-    if(extensions){const validation=validateFileForCategory(category,file.name,extensions[category]);if(validation){setError(localUploadFailure(validation));toast.error(validation);return;}}
-    const form=new FormData();form.append('file',file);form.append('projectId',projectId);if(productId)form.append('productId',productId);form.append('category',category);if(stage)form.append('stage',stage);
-    const request=createUploadAttempt(form),selectedTarget=currentTarget.current;active.current=true;
+  function buildForm(file:File){
+    const form=new FormData();form.append('file',file);form.append('projectId',projectId);if(productId)form.append('productId',productId);form.append('category',category);if(stage)form.append('stage',stage);return form;
+  }
+
+  // Пакетная загрузка: каждый файл — отдельный запрос со своим clientMutationId,
+  // ошибка одного файла не валит пачку; в конце — один итог и список ошибок.
+  function uploadFiles(selected:File[]){
+    if(active.current||selected.length===0)return;
+    const selectedTarget=currentTarget.current;active.current=true;
+    onBusyChange?.(true);
+    setBatchFailures([]);setBatchSummary(null);
     startTransition(async () => {
-      let confirmation:{httpStatus:number;requestId:string}|undefined;
-      onBusyChange?.(true);
-      setError(null);
       try {
-
-      const result=await sendFileUpload(request);if(currentTarget.current!==selectedTarget)return;
-      if (result.ok) {
-        confirmation={httpStatus:result.httpStatus,requestId:result.requestId};
-
-        toast.success("Файл загружен");
-        router.refresh();
-      } else {
-
-        setError(result.failure);toast.error(result.failure.error);
-      }
+        const capped=selected.slice(0,MULTI_UPLOAD_MAX_FILES);
+        const truncated=selected.length-capped.length;
+        const items:BatchUploadItem[]=[];const failures:BatchFileFailure[]=[];
+        for(const file of capped){
+          if(extensions){const validation=validateFileForCategory(category,file.name,extensions[category]);if(validation){failures.push({fileName:file.name,failure:localUploadFailure(validation)});continue;}}
+          items.push({fileName:file.name,size:file.size,attempt:createUploadAttempt(buildForm(file))});
+        }
+        const summary=await sendUploadBatch(items);if(currentTarget.current!==selectedTarget)return;
+        for(const entry of summary.results){
+          if(!entry.result.ok)failures.push({fileName:entry.fileName,failure:entry.result.failure});
+        }
+        const succeeded=summary.results.filter((entry)=>entry.result.ok).length,total=capped.length;
+        setBatchFailures(failures);setBatchSummary({succeeded,total});
+        if(truncated>0)toast.error(`Выбрано больше ${MULTI_UPLOAD_MAX_FILES} файлов — загружены первые ${MULTI_UPLOAD_MAX_FILES}.`);
+        if(failures.length===0){
+          toast.success(total===1?"Файл загружен":`Загружено ${succeeded} из ${total}`);
+        }else if(succeeded>0){
+          toast.error(`Загружено ${succeeded} из ${total}. Ошибок: ${failures.length}`);
+        }else{
+          toast.error(total===1&&failures[0]?failures[0].failure.error:`Не загружено ни одного файла из ${total}. Ошибок: ${failures.length}`);
+        }
+        if(succeeded>0)router.refresh();
       } catch {
-        setError(localUploadFailure(confirmation?"Файл загружен, но интерфейс не обновился. Обновите страницу.":"Не получено подтверждение загрузки.","confirmation",request.clientMutationId,confirmation?"committed":"unknown",confirmation?.httpStatus,confirmation?.requestId));
+        if(currentTarget.current!==selectedTarget)return;
+        setBatchFailures([{fileName:"",failure:localUploadFailure("Не получено подтверждение загрузки.")}]);
+        toast.error("Не получено подтверждение загрузки.");
       } finally { active.current=false;onBusyChange?.(false); }
     });
   }
@@ -114,11 +131,12 @@ export function Uploader({
         <input
           ref={inputRef}
           type="file"
+          multiple
           className="hidden"
           onChange={(event) => {
-            const file = event.target.files?.[0];
-            if (file) upload(file);
+            const files = event.target.files ? Array.from(event.target.files) : [];
             event.target.value = "";
+            if (files.length > 0) uploadFiles(files);
           }}
         />
         <Button disabled={pending} onClick={() => inputRef.current?.click()}>
@@ -150,7 +168,13 @@ export function Uploader({
           </Select>
         </div> : null}
         {header ? <header className="flex w-full min-w-0 items-center justify-between gap-3">{header}{uploadControl}</header> : uploadControl}
-                <UploadErrorDetails failure={error} />
+        {batchSummary && batchFailures.length > 0 ? <div className="w-full min-w-0" role="alert">
+          <p className="break-words text-sm text-destructive">Загружено {batchSummary.succeeded} из {batchSummary.total}. Ошибок: {batchFailures.length}</p>
+          <ul className="mt-1 min-w-0 list-disc space-y-1 pl-5 text-sm text-destructive">
+            {batchFailures.map((entry,index) => <li key={`${entry.fileName}-${index}`} className="break-words">{entry.fileName ? `«${entry.fileName}»: ` : ""}{entry.failure.error}</li>)}
+          </ul>
+        </div> : null}
+        <UploadErrorDetails failure={batchFailures[0]?.failure ?? null} />
       </CardContent>
     </Card>
   );
