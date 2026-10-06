@@ -18,7 +18,7 @@ test('stepped dirty draft retains CAS/UUID after lost ACK and does not save inva
  const calls:ProductPercentagePatch[]=[];let lost=true;
  const group=createSinglePercentageControllers({productId:'p',kind:'ENGINEERING',initial:{ratePercent:'5',assigneeId:'e'},revision:4,save:async input=>{calls.push(input);if(lost)throw Error('lost ACK');return saved(input);}});
  const rate=group.controllers.ratePercent;rate.setDraft('5.05');rate.setDraft(stepPercentageDraft(rate.getSnapshot().draft,1)!);assert.equal(await rate.commit(),false);assert.equal(calls[0].expectedValue,'5');assert.equal(calls[0].value,'5.55');assert.equal(calls[0].expectedRevision,4);lost=false;assert.equal(await rate.retry(),true);assert.deepEqual(calls[0],calls[1]);
- rate.setDraft('5,25');assert.equal(await rate.commit(),false);assert.equal(calls.length,2);rate.setDraft('');assert.equal(await rate.commit(),true);assert.equal(calls[2].value,null);rate.setDraft('0');assert.equal(await rate.commit(),true);assert.equal(calls[3].value,'0');
+  rate.setDraft('5,25');assert.equal(await rate.commit(),false);assert.equal(calls.length,2);rate.setDraft('');assert.equal(await rate.commit(),false);assert.equal(calls.length,2);rate.setDraft('0');assert.equal(await rate.commit(),true);assert.equal(calls[2].value,'0');
 });
 test('an older ACK cannot overwrite a newer stepped draft',async()=>{
  let resolve!:(result:ProductPercentagePatchResult)=>void;let input!:ProductPercentagePatch;

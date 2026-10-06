@@ -5,7 +5,8 @@ export const DEFAULT_PERCENTAGE_KINDS=['ENGINEERING','ASSEMBLY','INSTALLATION'] 
 // Точность — до 2 знаков после точки (например 1.25); старые снапшоты с 1 знаком валидны.
 // Нормализация — toFixed(2) с обрезкой хвоста до сотых.
 const historicalRate=z.string().regex(/^(?:0|[1-9]\d?|100)(?:\.\d{1,2})?$/, 'Введите процент от 0 до 100 с точностью 0.01').refine(value=>Number(value)<=100,'Процент не должен превышать 100').nullable().transform(value=>value===null?null:Number(value).toFixed(2));
-const rate=historicalRate.refine(value=>value===null||Number(value)<=MAX_PRODUCT_PERCENTAGE_RATE,"Процент оплаты не должен превышать 15%");
+// Новые значения пустыми не бывают (решение 06.10.2026: пустое = 0): только строка 0..15.
+const rate=z.string().regex(/^(?:0|[1-9]\d?|15)(?:\.\d{1,2})?$/, 'Укажите процент от 0 до 15 (0 — без оплаты)').refine(value=>Number(value)<=MAX_PRODUCT_PERCENTAGE_RATE,"Процент оплаты не должен превышать 15%").transform(value=>Number(value).toFixed(2));
 const historicalRatesSchema=z.object({ENGINEERING:historicalRate,ASSEMBLY:historicalRate,INSTALLATION:historicalRate}).strict();
 export const defaultRatesSchema=z.object({ENGINEERING:rate,ASSEMBLY:rate,INSTALLATION:rate}).strict();
 export const defaultsSnapshotSchema=z.object({revision:z.number().int().nonnegative(),rates:historicalRatesSchema}).strict();

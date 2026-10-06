@@ -12,7 +12,7 @@ import { dispatchEvent } from "@/server/plugins/events";
 import { notifyOrg, notifyPerson } from "@/server/notifications/notify";
 import { formatAmount } from "@/lib/format";
 import { PERCENTAGE_STAGE_POLICY } from "./stage-policy";
-import { captureDirectPercentage, type PercentageAccrualEffects } from "./direct-completion";
+import { captureDirectPercentage, settleSkippedPercentage, type PercentageAccrualEffects } from "./direct-completion";
 
 type Tx = Prisma.TransactionClient;
 type ConfigureInput = { productId: string; kind: ProductPercentageKind; ratePercent: string | null;
@@ -57,7 +57,9 @@ export async function captureProductPercentageCompletion(tx: Tx, actor: DomainAc
   originalStatus?: ProductStatus) {
   assertKind(kind);
   const existing = await tx.productPercentageCompletion.findUnique({ where: { productId_kind: { productId, kind } }, select: { state: true } });
-  if (existing) return existing.state;
+  // Состоявшееся/защищённое не трогаем; пропущенное со ставкой добирается поздним переходом.
+  if (existing && existing.state !== "SKIPPED_ONCE") return existing.state;
+  if (existing) return settleSkippedPercentage(tx, actor, productId, kind, statusAtCompletion, effects);
   // Read the original status before the new transition, never its already-written target.
   const reached: ProductStatus[] = kind === "ENGINEERING" ? ["PRODUCTION", "STORAGE", "INSTALLATION", "DONE"]
     : kind === "ASSEMBLY" ? ["STORAGE", "INSTALLATION", "DONE"] : ["DONE"];

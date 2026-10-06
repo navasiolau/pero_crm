@@ -305,51 +305,66 @@ test("единый статусный handler сохраняет manager DONE и
   assert.equal(completions.length, 3);
 });
 
-test("после SKIPPED_ONCE менеджер настраивает ставку, но цикл статусов не начисляет задним числом", async () => {
-  const completion = { id: "skipped", productId: "p", kind: "ENGINEERING", state: "SKIPPED_ONCE",
+test("после SKIPPED_ONCE поздняя ставка добирается следующим переходом, правка после начисления корректирует дельтой, DONE закрывает правки", async () => {
+  const completion = { id: "skipped", productId: "p", kind: "ENGINEERING", state: "SKIPPED_ONCE", shares: [] as Record<string, unknown>[],
     priceSnapshot: null, ratePercentSnapshot: null };
-  const original = structuredClone(completion);
   const product = { id: "p", projectId: "project", number: "1.1", title: "Изделие", status: "DESIGN",
-    quantity: 3, engineerId: "engineer", noModel: false, expectedPrice: "500", files: [], percentageConfigs: [],
+    quantity: 3, engineerId: "engineer", engineer: { id: "engineer", name: "Инженер", active: true, roles: ["ENGINEER"] },
+    noModel: false, expectedPrice: "500", files: [], percentageConfigs: [] as Record<string, unknown>[],
     stagePayPools: [], project: { currency: "BYN" } };
-  let configCreated = 0, snapshotsCreated = 0, payrollCreated = 0;
+  let snapshotsCreated = 0, payrollCreated = 0;
   let config: {id: string; revision: number; ratePercent: string} | null = null;
+  const syncConfig = () => { const row = { kind: "ENGINEERING", ratePercent: config?.ratePercent ?? null }; const i = product.percentageConfigs.findIndex((r) => (r as {kind:string}).kind === "ENGINEERING"); if (i < 0) product.percentageConfigs.push(row); else product.percentageConfigs[i] = row; };
   const tx = {
     user: { findMany: async () => [{ id: "engineer" }] },
     product: { findUnique: async () => product, update: async ({ data }: { data: { status: string } }) => {
       product.status = data.status; return product; } },
     productPercentageCompletion: { findUnique: async () => completion,
-      create: async () => { snapshotsCreated++; return completion; } },
+      create: async () => { snapshotsCreated++; return completion; },
+      update: async ({ data }: { data: Record<string, unknown> }) => { Object.assign(completion, data); return completion; } },
     productPercentageConfig: { findUnique: async () => config,
-      create: async ({data}: {data: {ratePercent: string}}) => { configCreated++; config = { id: "cfg", revision: 1, ratePercent: data.ratePercent }; return config; },
-      update: async ({data}: {data: {ratePercent: string}}) => { config = {...config!,ratePercent:data.ratePercent,revision:config!.revision+1}; return config; } },
+      create: async ({data}: {data: {ratePercent: string}}) => { configCreated(config = { id: "cfg", revision: 1, ratePercent: data.ratePercent }); return config; },
+      update: async ({data}: {data: {ratePercent: string}}) => { config = {...config!,ratePercent:data.ratePercent,revision:config!.revision+1}; syncConfig(); return config; } },
     productPercentageParticipant: { createMany: async () => ({}) },
+    productPercentageCompletionShare: {
+      create: async ({ data }: { data: Record<string, unknown> }) => { const row = { id: "share", ...data }; completion.shares.push(row); return row; },
+      update: async ({ data }: { data: Record<string, unknown> }) => { Object.assign(completion.shares[0], data); return completion.shares[0]; },
+    },
     task: { findFirst: async () => null },
     productStatusHistory: { findFirst: async () => null, create: async () => ({}) },
     payrollEntry: { create: async () => { payrollCreated++; return {}; } },
     changeLog: { findUnique: async () => null, create: async () => ({}) },
     domainEvent: { create: async () => ({ id: "event" }) },
   } as unknown as Prisma.TransactionClient;
+  function configCreated(next: {id: string; revision: number; ratePercent: string}) { config = next; syncConfig(); }
   const actor = { id: "manager", name: "Менеджер", roles: ["MANAGER" as const], source: "web" as const };
+  // Переход без ставки: пропуск без начислений.
+  const first = await changeProductStatusTransaction(tx, actor, "p", "PRODUCTION");
+  assert.equal(first.ok, true);
+  if (first.ok) assert.deepEqual(first.captured, []);
+  assert.equal(completion.state, "SKIPPED_ONCE");
+  assert.equal(payrollCreated, 0);
+  // Менеджер задаёт ставку постфактум.
   const patched = await patchProductPercentageCore(actor, {productId:"p",kind:"ENGINEERING",field:"ratePercent",value:"10",expectedValue:null,expectedRevision:0,clientMutationId:randomUUID()},tx);
-  assert.equal(patched.ok,true); if(patched.ok) assert.equal(patched.revision,1);
-  for (const status of ["PRODUCTION", "DESIGN", "PRODUCTION"] as const) {
-    const result = await changeProductStatusTransaction(tx, actor, "p", status);
-    assert.equal(result.ok, true);
-    if (result.ok) assert.deepEqual(result.captured, []);
-  }
-  assert.equal(configCreated, 1); assert.equal(snapshotsCreated, 0); assert.equal(payrollCreated, 0);
-  assert.deepEqual(completion, original);
-  for (const state of ["PENDING_FX", "SETTLED", "LEGACY_PROTECTED"] as const) {
-    completion.state = state;
-    await assert.rejects(configureProductPercentageCore(actor, { productId: "p", kind: "ENGINEERING",
-      ratePercent: "10", participants: [{ userId: "engineer", shareUnits: 1000000 }], expectedRevision: 0 }, tx), /одиночное поле/);
-    const before = structuredClone(completion);
-    const revision = config!.revision;
-    const result = await patchProductPercentageCore(actor,{productId:"p",kind:"ENGINEERING",field:"ratePercent",value:String(10+revision),expectedValue:config!.ratePercent,expectedRevision:revision,clientMutationId:randomUUID()},tx);
-    assert.equal(result.ok,true); assert.deepEqual(completion,before);
-    assert.equal(snapshotsCreated,0); assert.equal(payrollCreated,0);
-  }
+  assert.equal(patched.ok,true);
+  // Следующий затрагивающий переход добирает начисление (500×3×10% = 150).
+  const back = await changeProductStatusTransaction(tx, actor, "p", "DESIGN");
+  assert.equal(back.ok, true);
+  const late = await changeProductStatusTransaction(tx, actor, "p", "PRODUCTION");
+  assert.equal(late.ok, true);
+  if (late.ok) assert.deepEqual(late.captured, ["ENGINEERING"]);
+  assert.equal(completion.state, "SETTLED");
+  assert.equal(payrollCreated, 1);
+  assert.equal(snapshotsCreated, 0);
+  // Правка после начисления (не DONE): снимок и дельта.
+  const adjust = await patchProductPercentageCore(actor,{productId:"p",kind:"ENGINEERING",field:"ratePercent",value:"11",expectedValue:"10",expectedRevision:1,clientMutationId:randomUUID()},tx);
+  assert.equal(adjust.ok,true);
+  assert.equal(payrollCreated, 2);
+  // DONE закрывает любые правки процента.
+  product.status = "DONE";
+  const locked = await patchProductPercentageCore(actor,{productId:"p",kind:"ENGINEERING",field:"ratePercent",value:"12",expectedValue:"11",expectedRevision:2,clientMutationId:randomUUID()},tx);
+  assert.equal(locked.ok,false);
+  assert.equal(payrollCreated, 2);
 });
 
 test("SKIPPED editor показывает позднюю конфигурацию отдельно от frozen history", async () => {

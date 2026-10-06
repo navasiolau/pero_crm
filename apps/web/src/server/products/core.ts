@@ -106,9 +106,9 @@ export async function createProductCore(actor: DomainActor, input: CreateProduct
       ...newProductInitialPrice(data.expectedPrice),
       description: normalizeProductDescription(data.description),
       engineerId: data.engineerId || null,
-      // Ставка обязательна из настроек: новые изделия получают снимок дефолтов.
-      // Пустое (null) — без оплаты, 0 — явный ноль; при rate==null менеджер видит подсветку в карточке.
-      percentageConfigs: { create: DEFAULT_PERCENTAGE_KINDS.map(kind => ({ kind, ratePercent: defaults.rates[kind], revision: 1 })) },
+  // Ставка обязательна из настроек: новые изделия получают снимок дефолтов.
+  // Пустых ставок не бывает (решение 06.10.2026: пустое = 0); отсутствующий дефолт тоже 0.
+  percentageConfigs: { create: DEFAULT_PERCENTAGE_KINDS.map(kind => ({ kind, ratePercent: defaults.rates[kind] ?? '0.00', revision: 1 })) },
       createdById: actor.id,
       statusHistory: {
         create: { toStatus: "DESIGN", changedById: actor.id },
