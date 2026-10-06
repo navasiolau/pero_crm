@@ -57,9 +57,9 @@ export function SinglePercentageRow({productId,kind,section,canManage,canViewAll
   const unitPrice=price===null?null:String(price),confirmedQuantity=quantity===null?null:Number(quantity);
   const previewTotal=version>=2&&section.productCurrency!=="BYN"?null:singleProductPercentagePreview({state:section.state,kind,version,unitPrice,quantity:confirmedQuantity,rate:rate.baseline===null?null:String(rate.baseline),frozenTotal:section.total,recipientEligible:confirmedRecipient.active&&confirmedRecipient.eligible});
   // Строка своей суммы видна всегда в DRAFT, включая отсутствие назначенного (прогноз сервера).
-  // Процент виден только при canViewAll; поле видит лишь свою сумму в BYN и имена.
+  // Процент виден только при canViewAll; поле видит лишь свою сумму и прогноз неназначенного, чужие суммы — никогда.
   const ownAmount=section.ownMember?.amount??section.members[0]?.amount??null;
-  const displaySum=canViewAll?(previewTotal??section.total):(ownAmount??section.total);
+  const displaySum=canViewAll?(previewTotal??section.total):(ownAmount??(section.assignee?null:section.total));
   const showSum=section.state==="DRAFT";
   const rateMissing=currentRate(section)===null&&section.state==="DRAFT";
  async function retryFrozen(){

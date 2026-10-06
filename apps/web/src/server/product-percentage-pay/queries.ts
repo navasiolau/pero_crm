@@ -7,9 +7,6 @@ import { hasAnyRole, MANAGER_ROLES } from "@/lib/roles";
 import { prisma } from "@/lib/prisma";
 import { fileVisibilityWhere,hasFullProjectVisibility, productVisibilityWhere, resolveVisibilityActor } from "@/server/access/visibility";
 
-// Зависимость от feature/81: enum DELIVERY переименован в STORAGE, мерж идёт после feature/81.
-// Новый код видимости не вводит DELIVERY; где потребуется статус доставки, использовать строковый литерал "STORAGE".
-
 type Reader = Pick<PrismaClient, "product" | "task" | "productPercentageParticipant" | "user" | "payrollEntry">;
 export async function getProductPercentageView(actor: { id: string; roles: Role[] }, productId: string,
   database: Reader = prisma): Promise<ProductPercentageView> {
@@ -53,6 +50,8 @@ export async function getProductPercentageView(actor: { id: string; roles: Role[
     const members = completion ? completion.shares.map(row=>({userId:row.userId,name:row.userNameSnapshot,shareUnits:row.shareUnits,amount:row.amount?.toString()??null}))
       : assignee ? [{userId:assignee.userId,name:assignee.name,shareUnits:1000000,amount:draftTotal}] : [];
     const ownMember = members.find((row) => row.userId === actor.id) ?? null;
+    // Поле видит только свою сумму и прогноз неназначенного; чужие назначенные суммы не покидают сервер.
+    const fieldTotal = ownMember ? ownMember.amount : (assignee ? null : draftTotal);
     const view: ProductPercentageSectionView = {
       hasConfiguration: Boolean(config),
       currentRatePercent: financeView ? config?.ratePercent?.toString()??null : null,
@@ -67,9 +66,9 @@ export async function getProductPercentageView(actor: { id: string; roles: Role[
       price: financeView ? displayCompletion ? displayCompletion.priceSnapshot?.toString()??null : product.expectedPrice?.toString()??null : null,
       productCurrency: displayCompletion?.productCurrency ?? product.project.currency,
       payrollCurrency: displayCompletion?.payrollCurrency ?? null,
-      // Сумма (прогноз DRAFT) видна всем, включая поле без назначения; ставки/база скрыты ниже.
+      // Сумма: менеджерам — итог/прогноз как раньше; полю — только своя строка или прогноз неназначенного.
       // Не-финансы (не MANAGER/PROCUREMENT): members только своя строка, имена исполнителей оставлены через assignee.
-      total: displayCompletion?.amount?.toString() ?? draftTotal,
+      total: financeView ? (displayCompletion?.amount?.toString() ?? draftTotal) : fieldTotal,
       members: financeView ? members : ownMember ? [ownMember] : [], revision: config?.revision ?? 0,
       canManage: manager,
       canTransfer: false,
