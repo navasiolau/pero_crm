@@ -92,7 +92,7 @@ test("primary engineer assignment requires an active ENGINEER role", async () =>
 });
 
 test("менеджер меняет статус независимо от старого DRAFT фонда и фиксирует первый пропуск", async () => {
-  for (const from of ["DESIGN", "RECLAMATION"]) for (const to of ["PRODUCTION", "DELIVERY", "INSTALLATION", "DONE"] as const) {
+  for (const from of ["DESIGN", "RECLAMATION"]) for (const to of ["PRODUCTION", "STORAGE", "INSTALLATION", "DONE"] as const) {
     reset(); seed(from);
     assert.equal((await actions.changeProductStatus("product", to)).ok, true);
     assert.equal(state.products[0].status, to);

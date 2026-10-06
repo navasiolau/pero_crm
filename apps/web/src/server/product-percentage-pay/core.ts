@@ -59,8 +59,8 @@ export async function captureProductPercentageCompletion(tx: Tx, actor: DomainAc
   const existing = await tx.productPercentageCompletion.findUnique({ where: { productId_kind: { productId, kind } }, select: { state: true } });
   if (existing) return existing.state;
   // Read the original status before the new transition, never its already-written target.
-  const reached: ProductStatus[] = kind === "ENGINEERING" ? ["PRODUCTION", "DELIVERY", "INSTALLATION", "DONE"]
-    : kind === "ASSEMBLY" ? ["DELIVERY", "INSTALLATION", "DONE"] : ["DONE"];
+  const reached: ProductStatus[] = kind === "ENGINEERING" ? ["PRODUCTION", "STORAGE", "INSTALLATION", "DONE"]
+    : kind === "ASSEMBLY" ? ["STORAGE", "INSTALLATION", "DONE"] : ["DONE"];
   const status = originalStatus ?? (await tx.product.findUnique({ where: { id: productId }, select: { status: true } }))?.status;
   if (status && reached.includes(status)) return "LEGACY_PROTECTED";
   if (await tx.productStatusHistory.findFirst({ where: { productId, OR: [

@@ -122,7 +122,7 @@ try {
     const overflow = await createProduct("8333333332.51",8);
     await tx.product.update({where:{id:overflow.id},data:{status:"PRODUCTION"}});
     await tx.productPercentageConfig.create({ data: { productId: overflow.id, kind: "ASSEMBLY", ratePercent: "15" } });
-    await assert.rejects(changeProductStatusTransaction(tx, actor, overflow.id, "DELIVERY"), /превышает допустимую/);
+    await assert.rejects(changeProductStatusTransaction(tx, actor, overflow.id, "STORAGE"), /превышает допустимую/);
     assert.equal(await tx.productPercentageCompletion.count({ where: { productId: overflow.id } }), 0);
     checks.push("rounded_overflow_rejected_before_database_writes");
     throw abort;

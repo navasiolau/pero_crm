@@ -15,7 +15,7 @@ test('real list/direct URL allow production without Task and filters never add o
  const list=await query.listProducts(worker.id,worker.roles,{activeOnly:false});assert.deepEqual(list.rows.map(row=>row.id).sort(),['field-product','production']);
  for(const key of ['production','field-product'])assert.ok(await query.getProductFor(worker.id,worker.roles,key));
  assert.equal(await query.getProductFor(worker.id,worker.roles,'foreign'),null);assert.equal((await query.listProducts(worker.id,worker.roles,{activeOnly:false,status:'DESIGN'})).total,0);
- const row=fixture.products.find(row=>row.id==='field-product')!;row.status='DELIVERY';try{assert.equal(await query.getProductFor(worker.id,worker.roles,'field-product'),null);}finally{row.status='PRODUCTION';}
+ const row=fixture.products.find(row=>row.id==='field-product')!;row.status='STORAGE';try{assert.equal(await query.getProductFor(worker.id,worker.roles,'field-product'),null);}finally{row.status='PRODUCTION';}
 });
 test('pure mounter has no global production grant; engineer-worker union adds no edit/task/file/upload',async()=>{
  assert.equal(fixture.products.filter(row=>matches(row,productVisibilityWhere({id:'unassigned',roles:['MOUNTER']}))).length,0);

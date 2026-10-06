@@ -310,7 +310,7 @@ export function assertFinalEngineeringScenario(snapshot, manifest) {
     same(Object.values(capture.totals), [37200, 18000, 4800]) && Math.round(Number(picks.ProductStageSettlement[0].amount) * 100) === 60000,
   "SETTLEMENT_TOTAL_MISMATCH");
   const settlement = picks.ProductStageSettlement[0];
-  check(["PRODUCTION", "DELIVERY", "INSTALLATION", "DONE", "RECLAMATION"].includes(picks.Product[0].status) &&
+  check(["PRODUCTION", "STORAGE", "INSTALLATION", "DONE", "RECLAMATION"].includes(picks.Product[0].status) &&
     picks.ProductStagePayPool[0].state === "SETTLED" &&
     Number(settlement.priceSnapshot) === 12000 && Number(settlement.ratePercentSnapshot) === 5 &&
     settlement.productCurrency === "BYN" && settlement.payrollCurrency === "BYN" &&

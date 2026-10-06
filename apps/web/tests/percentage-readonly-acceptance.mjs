@@ -98,7 +98,7 @@ export function assertCompatibilityMarkers(before, after) {
   const projects = new Map(before.rows.Project.map((raw) => { const row = JSON.parse(raw); return [row.id, row]; }));
   const expected = [];
   for (const product of products) {
-    const normal = ["PRODUCTION", "DELIVERY", "INSTALLATION", "DONE"];
+    const normal = ["PRODUCTION", "STORAGE", "INSTALLATION", "DONE"];
     if (normal.includes(product.status) || histories.some((row) => row.productId === product.id && normal.includes(row.toStatus)) ||
       pools.some((row) => row.productId === product.id && row.kind === "ENGINEERING" && ["SETTLED", "LEGACY_PROTECTED"].includes(row.state)) ||
       payroll.some((row) => row.projectId === product.projectId && row.scheme === "PERCENT_PROJECT"))

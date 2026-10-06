@@ -72,10 +72,10 @@ async function main() {
       checks.push("native_single_fund_500_no_piece");
       await constraint("settlement_append_only", "P0001", () => tx.$executeRawUnsafe('DELETE FROM "ProductStageSettlement" WHERE id=$1', settlement.id));
       await constraint("payroll_append_only", "P0001", () => tx.$executeRawUnsafe('UPDATE "PayrollEntry" SET amount=amount WHERE "productId"=$1', manifest.ids.product));
-      await tx.product.update({ where: { id: manifest.ids.product }, data: { status: "DELIVERY" } });
+      await tx.product.update({ where: { id: manifest.ids.product }, data: { status: "STORAGE" } });
       const replay = await closeEngineeringStageCore(actor, input, null, tx);
       assert.equal(replay.settlementId, result.settlementId); assert.equal(replay.repeated, true);
-      assert.equal((await tx.product.findUniqueOrThrow({ where: { id: manifest.ids.product } })).status, "DELIVERY");
+      assert.equal((await tx.product.findUniqueOrThrow({ where: { id: manifest.ids.product } })).status, "STORAGE");
       checks.push("uuid_replay_after_delivery_no_rewind");
       const triggers = await tx.$queryRawUnsafe(`SELECT c.relname AS table_name,t.tgname,t.tgenabled,t.tgisinternal,t.tgtype,t.tgnargs,t.tgqual::text AS tgqual,nf.nspname AS fnnamespace,p.proname,p.prosrc,p.prosecdef,pg_get_triggerdef(t.oid) AS definition,pg_get_functiondef(t.tgfoid) AS function_definition FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace JOIN pg_proc p ON p.oid=t.tgfoid JOIN pg_namespace nf ON nf.oid=p.pronamespace WHERE n.nspname='public' AND c.relname IN ('WorkPaymentConversion','ProductStageSettlement','ProductStageSettlementShare','PayrollEntry') AND NOT t.tgisinternal`);
       assertEngineeringTriggerSet(triggers); checks.push("exact_native_trigger_definitions");
