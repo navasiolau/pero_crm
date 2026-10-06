@@ -9,6 +9,12 @@ import type { ProductPercentageSectionView } from "../src/lib/product-percentage
 
 type ViewReader = Parameters<typeof getProductPercentageView>[2];
 
+test("DONE закрывает поля процента и получателя уже в серверной проекции",async()=>{
+ const product={id:"p",status:"DONE",quantity:3,expectedPrice:"1000",project:{currency:"BYN"},noModel:false,files:[],stagePayPools:[],percentageCompletions:[],engineerId:null,engineer:null,assemblerId:null,assembler:null,mounterId:null,mounter:null,percentageConfigs:[]};
+ const db={task:{findMany:async()=>[]},productPercentageParticipant:{findMany:async()=>[]},product:{findFirst:async()=>product},user:{findMany:async()=>[]},payrollEntry:{findMany:async()=>[]}} as unknown as ViewReader;
+ assert.ok(Object.values((await getProductPercentageView({id:"m",roles:["MANAGER"]},"p",db)).sections).every(section=>section.canManage===false));
+});
+
 // Прогноз DRAFT считается без назначенного: нужны только ставка и цена.
 test("прогноз DRAFT виден до назначения по ставке и цене", async () => {
   const product = { id: "p", quantity: 3, expectedPrice: "1000", project: { currency: "BYN" }, noModel: false, files: [], stagePayPools: [], percentageCompletions: [], engineerId: null, engineer: null, assemblerId: null, assembler: null, mounterId: null, mounter: null, percentageConfigs: [{ kind: "ENGINEERING", ratePercent: "5", revision: 1 }, { kind: "ASSEMBLY", ratePercent: "4", revision: 1 }, { kind: "INSTALLATION", ratePercent: "1.25", revision: 1 }] };
