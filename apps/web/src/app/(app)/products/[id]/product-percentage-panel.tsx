@@ -66,7 +66,7 @@ export function SinglePercentageRow({productId,kind,section,canManage,canViewAll
   // и только своя оплата; ни полей %, ни селектов.
   if(!canViewAll){
    const name=section.assignee?.name??"Не назначен";
-   return <section aria-label={`${label}: процентная оплата`} data-single-percentage-kind={kind} className="min-w-0"><p className="min-w-0 break-words text-sm"><span className="font-medium">{label}:</span> <span>{name}</span>{ownAmount!==null?<span> <span className="text-muted-foreground">Оплата:</span> <span className="font-semibold text-primary tabular-nums">{formatAmount(ownAmount,version>=2?"BYN":section.productCurrency)}</span></span>:null}</p></section>;
+   return <section aria-label={`${label}: процентная оплата`} data-single-percentage-kind={kind} className="min-w-0"><p className="min-w-0 break-words text-sm"><span className="font-medium">{label}:</span> <span>{ownAmount!==null?`${name};`:name}</span>{ownAmount!==null?<span className="ml-2"><span className="text-muted-foreground">Оплата:</span> <span className="font-semibold text-primary tabular-nums">{formatAmount(ownAmount,version>=2?"BYN":section.productCurrency)}</span></span>:null}</p></section>;
   }
  async function retryFrozen(){
   if(retryPending.current)return;retryPending.current=true;setRetryBusy(true);setRetryError(null);

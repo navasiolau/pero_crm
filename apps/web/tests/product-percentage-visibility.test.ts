@@ -68,7 +68,7 @@ function sectionFixture(overrides: Partial<ProductPercentageSectionView> = {}): 
 test("поле видит строки без %, менеджер видит карточки и подсветку null", () => {
   const fieldHtml = renderToStaticMarkup(React.createElement(SinglePercentageRow, { productId: "p", kind: "ASSEMBLY", section: { ...sectionFixture(), ratePercent: null, currentRatePercent: null, price: null, unitPrice: null, productTotal: null }, canManage: false, canViewAll: false, candidates: [] }));
   assert.match(fieldHtml, /Сборщик:/);
-  assert.match(fieldHtml, /Сборщик/);
+  assert.match(fieldHtml, /Сборщик;/);
   assert.match(fieldHtml, /Оплата:/);
   assert.match(fieldHtml, /120/);
   assert.doesNotMatch(fieldHtml, /Процент/);
