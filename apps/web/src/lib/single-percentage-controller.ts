@@ -23,10 +23,10 @@ export function createSinglePercentageControllers(options:{productId:string;kind
  for(const field of ["ratePercent","assigneeId"] as const){
   controllers[field]=createInlineSaveController<InlineValue>({initialValue:initial[field],format,id:options.id,
    isUnchangedDraft:(draft,baseline)=>draft===format(baseline),
-   parse:raw=>{
-    if(field==="ratePercent"){const rate=parsePercentageInput(raw);return rate===null?null:rate.replace(/(\.\d*?)0+$/,"$1").replace(/\.$/,"");}
-    return raw||null;
-   },
+    parse:raw=>{
+     if(field==="ratePercent"){if(raw==="")throw Error("Укажите процент (0 — без оплаты)");const rate=parsePercentageInput(raw);return rate===null?null:rate.replace(/(\.\d*?)0+$/,"$1").replace(/\.$/,"");}
+     return raw||null;
+    },
    onRebase:()=>{const actual=conflicts.get(field);if(actual!==undefined){revision=actual;blocked=null;conflicts.delete(field);}},
    save:request=>{
     const operation=tail.then(async()=>{
