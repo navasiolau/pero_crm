@@ -9,3 +9,7 @@
 
 - [x] 2.1 Прогнать pnpm lint и pnpm --filter @pero/web test, сохранить результаты в evidence.md; verify: обе команды завершены без новых ошибок
 - [x] 2.2 Описать в evidence.md ручные кейсы: цех видит замер+эскиз+документы чужого назначенного изделия в PRODUCTION, DESIGN не видит, скачивание /api/files/:id отдаёт 200 вместо 404; verify: evidence.md содержит все три кейса
+
+## 3. Выравнивание тестов после красного CI staging
+
+- [x] 3.1 Обновить tests/production-worker-product-access.test.ts под новую семантику (поле видит file-production; plain GET идёт в storage; превью 422 без stored-файла; DTO показывает файлы, деньги скрыты); verify: `tsx --test tests/production-worker-product-access.test.ts` 5/5 и смежные visibility-сьюиты 36/36
