@@ -7,6 +7,9 @@ import { hasAnyRole, MANAGER_ROLES } from "@/lib/roles";
 import { prisma } from "@/lib/prisma";
 import { fileVisibilityWhere,hasFullProjectVisibility, productVisibilityWhere, resolveVisibilityActor } from "@/server/access/visibility";
 
+// Зависимость от feature/81: enum DELIVERY переименован в STORAGE, мерж идёт после feature/81.
+// Новый код видимости не вводит DELIVERY; где потребуется статус доставки, использовать строковый литерал "STORAGE".
+
 type Reader = Pick<PrismaClient, "product" | "task" | "productPercentageParticipant" | "user" | "payrollEntry">;
 export async function getProductPercentageView(actor: { id: string; roles: Role[] }, productId: string,
   database: Reader = prisma): Promise<ProductPercentageView> {
@@ -38,10 +41,11 @@ export async function getProductPercentageView(actor: { id: string; roles: Role[
     const quantity=Number.isSafeInteger(product.quantity)&&product.quantity>0?product.quantity:null;
     const productTotal=product.expectedPrice!==null&&quantity!==null?new Prisma.Decimal(product.expectedPrice.toString()).mul(quantity).toFixed(2):null;
     let draftTotal:string|null=null;
+    // Прогноз суммы виден ДО назначения исполнителя: нужны только ставка и цена.
     if(!completion&&product.project.currency==="BYN"&&pool?.state!=="SETTLED"&&pool?.state!=="LEGACY_PROTECTED"&&config?.ratePercent!==null&&config?.ratePercent!==undefined){
       const rate=new Prisma.Decimal(config.ratePercent.toString());
       if(rate.isZero())draftTotal="0.00";
-      else if(rate.lte(MAX_PRODUCT_PERCENTAGE_RATE)&&productTotal!==null&&assignee?.active&&assignee.eligible){try{draftTotal=calculateWholeProductPercentage({kind,unitPrice:product.expectedPrice!.toString(),quantity,rate:rate.toString()})?.amount??null;}catch{draftTotal=null;}}
+      else if(rate.lte(MAX_PRODUCT_PERCENTAGE_RATE)&&productTotal!==null&&product.expectedPrice!==null){try{draftTotal=calculateWholeProductPercentage({kind,unitPrice:product.expectedPrice!.toString(),quantity,rate:rate.toString()})?.amount??null;}catch{draftTotal=null;}}
 
     }
     const legacyPaidSummary = financeView && pool?.settlement
@@ -63,7 +67,9 @@ export async function getProductPercentageView(actor: { id: string; roles: Role[
       price: financeView ? displayCompletion ? displayCompletion.priceSnapshot?.toString()??null : product.expectedPrice?.toString()??null : null,
       productCurrency: displayCompletion?.productCurrency ?? product.project.currency,
       payrollCurrency: displayCompletion?.payrollCurrency ?? null,
-      total: financeView ? displayCompletion?.amount?.toString() ?? draftTotal : null,
+      // Сумма (прогноз DRAFT) видна всем, включая поле без назначения; ставки/база скрыты ниже.
+      // Не-финансы (не MANAGER/PROCUREMENT): members только своя строка, имена исполнителей оставлены через assignee.
+      total: displayCompletion?.amount?.toString() ?? draftTotal,
       members: financeView ? members : ownMember ? [ownMember] : [], revision: config?.revision ?? 0,
       canManage: manager,
       canTransfer: false,
