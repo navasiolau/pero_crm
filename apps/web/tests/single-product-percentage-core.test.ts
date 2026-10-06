@@ -58,7 +58,7 @@ test('ordinary works, unfinished tasks and former covered paid history never gat
  }
 });
 test('historical original status prevents engineering backpay but allows future assembly completion',async()=>{
- const f=fixture();f.product.status='PRODUCTION';const first=await changeProductStatusTransaction(f.tx,actor,'p','DELIVERY');assert.ok(first.ok);assert.equal(f.completions.length,1);assert.equal(f.completions[0].kind,'ASSEMBLY');assert.equal(f.payroll.length,0);
+ const f=fixture();f.product.status='PRODUCTION';const first=await changeProductStatusTransaction(f.tx,actor,'p','STORAGE');assert.ok(first.ok);assert.equal(f.completions.length,1);assert.equal(f.completions[0].kind,'ASSEMBLY');assert.equal(f.payroll.length,0);
  const g=fixture();g.completions.push({id:'legacy',kind:'ENGINEERING',state:'LEGACY_PROTECTED',calculationVersion:1,priceSnapshot:null});const original=structuredClone(g.completions[0]);
  assert.equal((await changeProductStatusTransaction(g.tx,actor,'p','PRODUCTION')).ok,true);assert.deepEqual(g.completions[0],original);assert.equal(g.payroll.length,0);
 });
@@ -76,7 +76,7 @@ test('full cycle without Work or Task produces 50/120/210 once with v4 actual qu
  f.tx.productStatusHistory.findFirst=(async({where}:{where:{OR:{fromStatus?:{in:string[]};toStatus?:{in:string[]}}[]}})=>f.history.find((row)=>{
    const h=row as {fromStatus:string;toStatus:string};return where.OR.some(filter=>filter.fromStatus?.in.includes(h.fromStatus)||filter.toStatus?.in.includes(h.toStatus));
  })??null) as never;
- for(const status of ['PRODUCTION','DELIVERY','INSTALLATION','DONE'] as const)assert.equal((await changeProductStatusTransaction(f.tx,actor,'p',status)).ok,true);
+ for(const status of ['PRODUCTION','STORAGE','INSTALLATION','DONE'] as const)assert.equal((await changeProductStatusTransaction(f.tx,actor,'p',status)).ok,true);
  assert.deepEqual(f.payroll.map(row=>Number(row.amount)),[50,120,210]);
  assert.ok(f.completions.every(row=>row.calculationVersion===4&&row.quantitySnapshot===3&&String(row.totalSnapshot)==='3000'));
  for(const status of ['DESIGN','DONE'] as const)assert.equal((await changeProductStatusTransaction(f.tx,actor,'p',status)).ok,true);
@@ -93,7 +93,7 @@ for (const [price, rate, amount, exact] of [["19986.00","5","1000.00","999.3"],[
  });
 }
 test('v4 rejects overflow caused only by ceiling before any writes',async()=>{
- const f=fixture('15','8333333332.51');Object.assign(f.product,{quantity:8,assemblerId:'worker',assembler:{id:'worker',name:'Worker',active:true,roles:['WORKER']}});f.product.percentageConfigs.push({id:'assembly',kind:'ASSEMBLY',ratePercent:'15',revision:2,workReview:null,participants:[]});await assert.rejects(captureProductPercentageCompletion(f.tx,actor,'p','ASSEMBLY','DELIVERY'),/превышает допустимую/);
+ const f=fixture('15','8333333332.51');Object.assign(f.product,{quantity:8,assemblerId:'worker',assembler:{id:'worker',name:'Worker',active:true,roles:['WORKER']}});f.product.percentageConfigs.push({id:'assembly',kind:'ASSEMBLY',ratePercent:'15',revision:2,workReview:null,participants:[]});await assert.rejects(captureProductPercentageCompletion(f.tx,actor,'p','ASSEMBLY','STORAGE'),/превышает допустимую/);
  assert.equal(f.completions.length,0);assert.equal(f.payroll.length,0);
 });
 test('new completion with a saved rate above15 fails before monetary writes',async()=>{

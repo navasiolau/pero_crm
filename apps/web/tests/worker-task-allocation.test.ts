@@ -28,7 +28,7 @@ test('worker assigns another active WORKER; task/audit/event/receipt once, immut
 });
 test('live role, active WORKER recipient, PRODUCTION and exact work context are required',async()=>{
  for(const change of ['creator-role','recipient-role','inactive','stage','context','pool','missing-price'] as const){
-  const f=fixture();if(change==='creator-role')f.users.get('creator')!.roles=['MANAGER'];if(change==='recipient-role')f.users.get('recipient')!.roles=['MOUNTER'];if(change==='inactive')f.users.get('recipient')!.active=false;if(change==='stage')f.product.status='DELIVERY';if(change==='context')f.work.productId='other';if(change==='pool')Object.assign(f.work,{stagePayPoolId:'pool'});if(change==='missing-price')Object.assign(f.work,{priceSnapshot:null});
+  const f=fixture();if(change==='creator-role')f.users.get('creator')!.roles=['MANAGER'];if(change==='recipient-role')f.users.get('recipient')!.roles=['MOUNTER'];if(change==='inactive')f.users.get('recipient')!.active=false;if(change==='stage')f.product.status='STORAGE';if(change==='context')f.work.productId='other';if(change==='pool')Object.assign(f.work,{stagePayPoolId:'pool'});if(change==='missing-price')Object.assign(f.work,{priceSnapshot:null});
   assert.equal((await createWorkerTaskAllocationCore(actor,input(),f.transaction)).ok,false,change);assert.equal(f.tasks.length,0);assert.equal(f.logs.length,0);assert.equal(f.events.length,0);
  }
 });

@@ -183,7 +183,7 @@ export async function runEngineeringBrowser({ baseUrl, plan, sessions, outputDir
       [["e1", captured.newTaskId], ["e2", captured.splitTaskId], ["worker", ids.legacyTasks[1]]].some(([r, id]) => r === role && id === intent.taskId), "TASK_STATUS_ACTION_MISMATCH");
     else if (intent.kind === "close") guard(args.length === 1 && data?.productId === ids.product &&
       Number.isSafeInteger(data.expectedPoolRevision) && data.expectedPoolRevision > 0 && UUID.test(data.requestId ?? ""), "CLOSE_ACTION_MISMATCH");
-    else if (intent.kind === "delivery") guard(args.length === 2 && args[0] === ids.product && args[1] === "DELIVERY", "DELIVERY_ACTION_MISMATCH");
+    else if (intent.kind === "delivery") guard(args.length === 2 && args[0] === ids.product && args[1] === "STORAGE", "STORAGE_ACTION_MISMATCH");
     else throw new EngineeringBrowserStop("UNKNOWN_ACTION_INTENT");
     intent.consumed = true;
   }
@@ -454,7 +454,7 @@ export async function runEngineeringBrowser({ baseUrl, plan, sessions, outputDir
 
     await act("manager", "delivery", async () => {
       await manager.getByRole("combobox", { name: "Сменить статус" }).click();
-      await manager.getByRole("option", { name: "Доставка" }).click();
+      await manager.getByRole("option", { name: "На складе ГП" }).click();
     });
     guard(closeRequest && captured.closeRequestId && captured.settlementId, "CLOSE_REPLAY_REQUEST_MISSING");
     checkLive();
@@ -467,7 +467,7 @@ export async function runEngineeringBrowser({ baseUrl, plan, sessions, outputDir
       "CLOSE_REPLAY_NOT_IDEMPOTENT");
     captured.closeReplay = "PASS";
     await visit("manager", productPath);
-    await expect(pages.get("manager").getByText("Доставка", { exact: true }).first()).toBeVisible();
+    await expect(pages.get("manager").getByText("На складе ГП", { exact: true }).first()).toBeVisible();
     checks.push("status-not-rewound-after-replay");
     for (const role of ["e1", "e2"]) {
       const page = pages.get(role);

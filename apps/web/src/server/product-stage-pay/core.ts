@@ -84,7 +84,7 @@ export async function bumpEngineeringPoolRevision(tx: Tx, poolId: string): Promi
 }
 
 export async function assertEngineeringTransition(tx: Tx, productId: string, toStatus: string): Promise<void> {
-  if (!["PRODUCTION", "DELIVERY", "INSTALLATION", "DONE"].includes(toStatus)) return;
+  if (!["PRODUCTION", "STORAGE", "INSTALLATION", "DONE"].includes(toStatus)) return;
   const product = await tx.product.findUnique({ where: { id: productId }, select: { status: true, stagePayPools: { where: { kind: "ENGINEERING" }, select: { state: true } } } });
   if (!product) err("Изделие не найдено");
   if (product.stagePayPools[0]?.state === "DRAFT") err("Сначала подтвердите передачу инженерного фонда в производство");

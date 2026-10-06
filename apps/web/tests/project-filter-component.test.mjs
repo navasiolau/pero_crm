@@ -250,7 +250,7 @@ test("products multi status/project/engineer and dimension reset preserve other 
     assert.deepEqual(JSON.parse(await queryValue(page, "status")), ["DESIGN", "PRODUCTION"]);
     assert.equal(await page.evaluate(() => window.scrollY), scroll);
     await popup.getByRole("button", { name: "Сброс", exact: true }).click();
-    for (const name of ["Проектирование", "В производстве", "Доставка", "Установка", "Готово", "Рекламация"]) await popup.getByRole("checkbox", { name, exact: true }).click();
+    for (const name of ["Проектирование", "В производстве", "На складе ГП", "Установка", "Готово", "Рекламация"]) await popup.getByRole("checkbox", { name, exact: true }).click();
     assert.equal(await queryValue(page, "status"), null);
     assert.equal(await popup.getByRole("checkbox", { checked: true }).count(), 0);
     await popup.getByRole("checkbox", { name: "Проектирование", exact: true }).click();

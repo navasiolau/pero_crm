@@ -192,7 +192,7 @@ test("final scenario guard checks one BYN settlement and exact 372/180/48 alloca
     body: `Инженерный фонд изделия ${manifest.product.number}`, link: "/finance/payroll" });
   assert.throws(() => assertFinalEngineeringScenario(snapshot, manifest), /BUSINESS_FINGERPRINT_DRIFT/);
   snapshot.Notification.pop();
-  snapshot.Product![0].status = "DELIVERY";
+  snapshot.Product![0].status = "STORAGE";
   assert.equal(assertFinalEngineeringScenario(snapshot, manifest).phase, "SETTLED");
   snapshot.PayrollEntry![0].amount = "191.00";
   assert.throws(() => assertFinalEngineeringScenario(snapshot, manifest), /UNKNOWN_REFERENCES|SETTLEMENT_TOTAL_MISMATCH/);

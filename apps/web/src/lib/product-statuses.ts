@@ -9,7 +9,7 @@ export const PRODUCT_STATUSES: {
 }[] = [
   { id: "DESIGN", label: "Проектирование" },
   { id: "PRODUCTION", label: "В производстве" },
-  { id: "DELIVERY", label: "Доставка" },
+  { id: "STORAGE", label: "На складе ГП" },
   { id: "INSTALLATION", label: "Установка" },
   { id: "DONE", label: "Готово" },
   { id: "RECLAMATION", label: "Рекламация", service: true },
@@ -37,7 +37,7 @@ export const productStatusStyles: Record<
     header: "text-blue-700 dark:text-blue-400",
     badge: "bg-blue-500/10 text-blue-700 dark:text-blue-400",
   },
-  DELIVERY: {
+  STORAGE: {
     column: "border-cyan-500/50 bg-cyan-500/10",
     header: "text-cyan-700 dark:text-cyan-400",
     badge: "bg-cyan-500/10 text-cyan-700 dark:text-cyan-400",

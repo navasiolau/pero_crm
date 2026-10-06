@@ -228,7 +228,7 @@ model Project {
 enum ProductStatus {
   DESIGN // Проектирование
   PRODUCTION // В производстве
-  DELIVERY // Доставка
+  STORAGE // На складе ГП
   INSTALLATION // Установка
   DONE // Готово
   RECLAMATION // Рекламация
