@@ -50,8 +50,11 @@ export async function getProductPercentageView(actor: { id: string; roles: Role[
       ? { amount: pool.settlement.amount.toString(), currency: pool.settlement.payrollCurrency, count: 1 } : null;
     // Назначенный специалист виден своей строкой всегда — даже при пустых долях (пропущенное
     // начисление): сумма ему показывается, в зарплату запишется только сменой статуса.
-    const members = completion && completion.shares.length ? completion.shares.map(row=>({userId:row.userId,name:row.userNameSnapshot,shareUnits:row.shareUnits,amount:row.amount?.toString()??null}))
+    // Доля без суммы добирает прогноз, если строка принадлежит текущему назначенному.
+    const members = completion && completion.shares.length ? completion.shares.map(row=>({userId:row.userId,name:row.userNameSnapshot,shareUnits:row.shareUnits,amount:row.amount?.toString()??(row.userId===assignee?.userId?draftTotal:null)}))
       : assignee ? [{userId:assignee.userId,name:assignee.name,shareUnits:1000000,amount:draftTotal}] : [];
+    // Текущий назначенный без доли виден своей строкой прогноза (но не пустой строкой).
+    if (assignee && draftTotal !== null && !members.some((row) => row.userId === assignee.userId)) members.push({userId:assignee.userId,name:assignee.name,shareUnits:1000000,amount:draftTotal});
     const ownMember = members.find((row) => row.userId === actor.id) ?? null;
     // Поле видит только свою сумму; неназначенному sums нет вообще (прогноз только менеджерам).
     const fieldTotal = ownMember ? ownMember.amount : null;
