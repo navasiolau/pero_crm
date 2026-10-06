@@ -1,7 +1,7 @@
 import {createHash,randomUUID} from 'node:crypto';
 import {Prisma} from '@prisma/client';
 import {z} from 'zod';
-import {hasRole} from '@/lib/roles';
+import {hasAnyRole,FIELD_ROLES} from '@/lib/roles';
 import {assertProjectMoneyCurrency} from '@/lib/internal-currency';
 import {allocatedWorkQuantity,quantityAtoms,quantityFromAtoms} from '@/lib/work-shares';
 import {liveProductWhere,liveProjectWhere,liveChildWhere} from '@/server/access/live-entities';
@@ -27,7 +27,7 @@ export async function createWorkerTaskAllocationCore(actor:DomainActor,input:unk
  try{return await transaction(async tx=>{
   await tx.$queryRaw`SELECT id FROM "User" WHERE id=${actor.id} FOR UPDATE`;
   const current=await tx.user.findUnique({where:{id:actor.id},select:{id:true,name:true,active:true,roles:true}});
-  if(!current?.active||!hasRole(current.roles,'WORKER'))deny('Недостаточно прав','forbidden');
+   if(!current?.active||!hasAnyRole(current.roles,FIELD_ROLES))deny('Недостаточно прав','forbidden');
   await tx.$queryRaw`SELECT id FROM "Product" WHERE id=${data.productId} FOR UPDATE`;
   const product=await tx.product.findFirst({where:{...liveProductWhere,id:data.productId,projectId:data.projectId},select:{id:true,projectId:true,status:true}});
   if(!product||product.projectId!==data.projectId||product.status!=='PRODUCTION')deny('Выберите живое изделие в производстве','forbidden');
@@ -47,7 +47,7 @@ export async function createWorkerTaskAllocationCore(actor:DomainActor,input:unk
   }
   await tx.$queryRaw`SELECT id FROM "User" WHERE id=${data.assigneeId} FOR UPDATE`;
   const recipient=await tx.user.findUnique({where:{id:data.assigneeId},select:{id:true,active:true,roles:true}});
-  if(!recipient?.active||!hasRole(recipient.roles,'WORKER'))deny('Выберите активного сборщика');
+   if(!recipient?.active||!hasAnyRole(recipient.roles,FIELD_ROLES))deny('Выберите активного работника или монтажника');
   if(work.tasks.some(task=>task.quantity===null))deny('В старой задаче не определён объём; распределение недоступно');
   let remaining:bigint;try{remaining=quantityAtoms(work.quantity)-quantityAtoms(allocatedWorkQuantity(work.tasks));}catch{deny('Объём ранее распределённой работы не согласован');}
   if(amount>remaining)deny(`В работе осталось ${quantityFromAtoms(remaining>BigInt(0)?remaining:BigInt(0))}; больше распределить нельзя`,'conflict');
