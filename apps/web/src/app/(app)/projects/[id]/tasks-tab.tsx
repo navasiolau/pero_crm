@@ -518,6 +518,11 @@ export function TasksTab({
                 placeholder="Выберите расценку…"
                 searchPlaceholder="Поиск расценки…"
               />
+              {priceItems.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  Прайс пуст — обратитесь к менеджеру.
+                </p>
+              ) : null}
             </div>
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="work-qty">{productId ? "Количество на 1 изделие *" : "Количество *"}</Label>

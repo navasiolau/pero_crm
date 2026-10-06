@@ -1,5 +1,5 @@
 import {z} from 'zod';
-import {hasAnyRole,hasRole,MANAGER_ROLES} from '@/lib/roles';
+import {hasAnyRole,FIELD_ROLES,MANAGER_ROLES} from '@/lib/roles';
 import {assertInternalCurrency,assertProjectMoneyCurrency} from '@/lib/internal-currency';
 import {inputNorm,scaleNorm,workBudget} from '@/lib/product-quantity';
 import {liveProductWhere,liveProjectWhere} from '@/server/access/live-entities';
@@ -13,7 +13,7 @@ export async function addWorkCore(actor:DomainActor,input:unknown,transaction:Ta
  try{return await transaction(async tx=>{
   await tx.$queryRaw`SELECT id FROM "User" WHERE id=${actor.id} FOR UPDATE`;
   const current=await tx.user.findUnique({where:{id:actor.id},select:{id:true,name:true,active:true,roles:true}});
-  if(!current?.active||!hasAnyRole(current.roles,[...MANAGER_ROLES,'WORKER']))throw Error('Недостаточно прав');
+   if(!current?.active||!hasAnyRole(current.roles,[...MANAGER_ROLES,...FIELD_ROLES]))throw Error('Недостаточно прав');
   const manager=hasAnyRole(current.roles,MANAGER_ROLES);
   if(!manager&&!data.productId)throw Error('Выберите изделие в производстве');
   if(data.productId)await lockProductRow(tx,data.productId);
@@ -21,7 +21,7 @@ export async function addWorkCore(actor:DomainActor,input:unknown,transaction:Ta
   if(!project)throw Error('Проект не найден');
   const product=data.productId?await tx.product.findFirst({where:{...liveProductWhere,id:data.productId,projectId:data.projectId},select:{id:true,status:true,quantity:true}}):null;
   if(data.productId&&!product)throw Error('Изделие не найдено в этом проекте');
-  if(!manager&&(!hasRole(current.roles,'WORKER')||product?.status!=='PRODUCTION'))throw Error('Работу можно добавить только в изделие в производстве');
+   if(!manager&&(!hasAnyRole(current.roles,FIELD_ROLES)||product?.status!=='PRODUCTION'))throw Error('Работу можно добавить только в изделие в производстве');
   assertProjectMoneyCurrency(project.currency);assertInternalCurrency((await tx.orgSetting.findUnique({where:{key:'payrollCurrency'}}))?.value??'BYN');
   await tx.$queryRaw`SELECT id FROM "PriceItem" WHERE id=${data.priceItemId} FOR UPDATE`;
   const price=await tx.priceItem.findUnique({where:{id:data.priceItemId},select:{id:true,name:true,unit:true,price:true,active:true}});
