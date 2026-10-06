@@ -50,8 +50,8 @@ export async function getProductPercentageView(actor: { id: string; roles: Role[
     const members = completion ? completion.shares.map(row=>({userId:row.userId,name:row.userNameSnapshot,shareUnits:row.shareUnits,amount:row.amount?.toString()??null}))
       : assignee ? [{userId:assignee.userId,name:assignee.name,shareUnits:1000000,amount:draftTotal}] : [];
     const ownMember = members.find((row) => row.userId === actor.id) ?? null;
-    // Поле видит только свою сумму и прогноз неназначенного; чужие назначенные суммы не покидают сервер.
-    const fieldTotal = ownMember ? ownMember.amount : (assignee ? null : draftTotal);
+    // Поле видит только свою сумму; неназначенному sums нет вообще (прогноз только менеджерам).
+    const fieldTotal = ownMember ? ownMember.amount : null;
     const view: ProductPercentageSectionView = {
       hasConfiguration: Boolean(config),
       currentRatePercent: financeView ? config?.ratePercent?.toString()??null : null,

@@ -36,9 +36,10 @@ test("поле не видит %, но видит свою сумму и име�
   assert.deepEqual(eng.members, []);
   assert.equal(eng.total, null);
   assert.equal(eng.assignee?.name, "Инженер");
+  // Неназначенный этап поле не видит в суммах вообще (прогноз только менеджерам).
   const forecast = field.sections.INSTALLATION;
   assert.equal(forecast.assignee, null);
-  assert.equal(forecast.total, "210.00");
+  assert.equal(forecast.total, null);
   const manager = await getProductPercentageView({ id: "manager", roles: ["MANAGER"] }, "p", db as unknown as Pick<PrismaClient, "product" | "task" | "productPercentageParticipant" | "user" | "payrollEntry">);
   assert.equal(manager.sections.ASSEMBLY.ratePercent, "4");
   assert.equal(manager.sections.ASSEMBLY.total, "120.00");
@@ -64,20 +65,24 @@ const { SinglePercentageRow } = customRequire("../src/app/(app)/products/[id]/pr
 function sectionFixture(overrides: Partial<ProductPercentageSectionView> = {}): ProductPercentageSectionView {
   return { kind: "ASSEMBLY", state: "DRAFT", hasConfiguration: true, ratePercent: "4", currentRatePercent: "4", price: "1000.00", unitPrice: "1000.00", quantity: 3, calculationVersion: 4, productCurrency: "BYN", payrollCurrency: null, total: "120.00", members: [{ userId: "worker1", name: "Сборщик", shareUnits: 1000000, amount: "120.00" }], revision: 1, canManage: false, canTransfer: false, ownMember: { userId: "worker1", name: "Сборщик", shareUnits: 1000000, amount: "120.00" }, legacyPaidSummary: null, skippedSnapshot: null, transferCandidates: [], assignee: { userId: "worker1", name: "Сборщик", active: true, eligible: true }, ...overrides };
 }
-test("поле видит сумму без %, менеджер видит % и подсветку null", () => {
+test("поле видит строки без %, менеджер видит карточки и подсветку null", () => {
   const fieldHtml = renderToStaticMarkup(React.createElement(SinglePercentageRow, { productId: "p", kind: "ASSEMBLY", section: { ...sectionFixture(), ratePercent: null, currentRatePercent: null, price: null, unitPrice: null, productTotal: null }, canManage: false, canViewAll: false, candidates: [] }));
-  assert.match(fieldHtml, /Сумма:/);
+  assert.match(fieldHtml, /Сборщик:/);
+  assert.match(fieldHtml, /Сборщик/);
+  assert.match(fieldHtml, /Оплата:/);
   assert.match(fieldHtml, /120/);
   assert.doesNotMatch(fieldHtml, /Процент/);
+  assert.doesNotMatch(fieldHtml, /увеличить на/);
+  assert.doesNotMatch(fieldHtml, /<select/);
+  // Чужая строка: только имя, без оплаты и без %.
+  const strangerHtml = renderToStaticMarkup(React.createElement(SinglePercentageRow, { productId: "p", kind: "INSTALLATION", section: sectionFixture({ kind: "INSTALLATION", ratePercent: null, currentRatePercent: null, price: null, unitPrice: null, productTotal: null, total: null, members: [], ownMember: null, assignee: { userId: "other", name: "Чужой", active: true, eligible: true } }), canManage: false, canViewAll: false, candidates: [] }));
+  assert.match(strangerHtml, /Чужой/);
+  assert.doesNotMatch(strangerHtml, /Оплата/);
+  assert.doesNotMatch(strangerHtml, /Процент/);
   const managerHtml = renderToStaticMarkup(React.createElement(SinglePercentageRow, { productId: "p", kind: "ASSEMBLY", section: sectionFixture(), canManage: true, canViewAll: true, candidates: [] }));
   assert.match(managerHtml, /Процент/);
   assert.match(managerHtml, /Сумма:/);
   const nullRateHtml = renderToStaticMarkup(React.createElement(SinglePercentageRow, { productId: "p", kind: "ASSEMBLY", section: sectionFixture({ ratePercent: null, currentRatePercent: null, total: null, members: [], ownMember: null }), canManage: true, canViewAll: true, candidates: [] }));
   assert.match(nullRateHtml, /Ставка не задана/);
   assert.match(nullRateHtml, /Сумма: —/);
-  // Поле не видит чужую назначенную сумму даже при просочившемся total: только «—», без цифр.
-  const strangerHtml = renderToStaticMarkup(React.createElement(SinglePercentageRow, { productId: "p", kind: "INSTALLATION", section: sectionFixture({ kind: "INSTALLATION", ratePercent: null, currentRatePercent: null, price: null, unitPrice: null, productTotal: null, total: "98.00", members: [], ownMember: null, assignee: { userId: "other", name: "Чужой", active: true, eligible: true } }), canManage: false, canViewAll: false, candidates: [] }));
-  assert.match(strangerHtml, /Сумма: —/);
-  assert.doesNotMatch(strangerHtml, /98/);
-  assert.doesNotMatch(strangerHtml, /Процент/);
 });

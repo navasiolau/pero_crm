@@ -62,6 +62,12 @@ export function SinglePercentageRow({productId,kind,section,canManage,canViewAll
   const displaySum=canViewAll?(previewTotal??section.total):(ownAmount??(section.assignee?null:section.total));
   const showSum=section.state==="DRAFT";
   const rateMissing=currentRate(section)===null&&section.state==="DRAFT";
+  // Поле без финансового обзора видит этап одной текстовой строкой: имя назначенного
+  // и только своя оплата; ни полей %, ни селектов.
+  if(!canViewAll){
+   const name=section.assignee?.name??"Не назначен";
+   return <section aria-label={`${label}: процентная оплата`} data-single-percentage-kind={kind} className="min-w-0"><p className="min-w-0 break-words text-sm"><span className="font-medium">{label}:</span> <span>{name}</span>{ownAmount!==null?<span> <span className="text-muted-foreground">Оплата:</span> <span className="font-semibold text-primary tabular-nums">{formatAmount(ownAmount,version>=2?"BYN":section.productCurrency)}</span></span>:null}</p></section>;
+  }
  async function retryFrozen(){
   if(retryPending.current)return;retryPending.current=true;setRetryBusy(true);setRetryError(null);
   try{if(!await group.flush())throw Error("Сначала сохраните текущие поля этапа");const result=await retryProductPercentageAction({productId,kind});if(!result.ok)throw Error(result.error??"Не удалось повторить расчёт");router.refresh();}catch(error){setRetryError(error instanceof Error?error.message:"Не удалось повторить расчёт");}finally{retryPending.current=false;setRetryBusy(false);}
