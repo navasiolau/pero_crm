@@ -77,7 +77,7 @@ export async function getProductPercentageView(actor: { id: string; roles: Role[
       // Не-финансы (не MANAGER/PROCUREMENT): members только своя строка, имена исполнителей оставлены через assignee.
       total: financeView ? (latestAdjustment?.amount.toString()??displayCompletion?.amount?.toString() ?? draftTotal) : fieldTotal,
       members: financeView ? members : ownMember ? [ownMember] : [], revision: config?.revision ?? 0,
-      canManage: manager,
+      canManage: manager&&product.status!=="DONE",
       canTransfer: false,
       ownMember, legacyPaidSummary,
       skippedSnapshot: editableAfterSkip && financeView ? { completedAt: completion.completedAt.toISOString(), reason: completion.reason,
