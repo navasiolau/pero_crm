@@ -77,6 +77,7 @@ export default async function ProjectsPage({
       pageSize={pageSize}
       canManage={canManage}
       showAmount={hasFullProjectVisibility(session.user)}
+      hideEngineerFilter={role.includes("ENGINEER") && !hasAnyRole(role, MANAGER_ROLES)}
       clients={clients.map((client) => ({ id: client.id, name: displayClientName(client) }))}
       managers={managers.map((manager) => ({ id: manager.id, name: manager.name }))}
       engineers={engineers.map((engineer) => ({ id: engineer.id, name: engineer.name }))}

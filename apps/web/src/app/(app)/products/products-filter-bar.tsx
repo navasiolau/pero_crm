@@ -4,10 +4,11 @@ import { EntityListFilterBar } from "@/components/entity-list-filter-bar";
 import type { MultiSelectFilterOption } from "@/components/ui/multi-select-filter";
 import { PRODUCT_STATUSES } from "@/lib/product-statuses";
 
-export function ProductsFilterBar({ projectOptions, clientOptions, engineerOptions }: {
+export function ProductsFilterBar({ projectOptions, clientOptions, engineerOptions, hideEngineer }: {
   projectOptions: MultiSelectFilterOption[];
   clientOptions: MultiSelectFilterOption[];
   engineerOptions: MultiSelectFilterOption[];
+  hideEngineer?: boolean;
 }) {
   return (
     <EntityListFilterBar
@@ -27,10 +28,10 @@ export function ProductsFilterBar({ projectOptions, clientOptions, engineerOptio
           queryKey: "client", label: "Клиент", allLabel: "Все клиенты",
           searchPlaceholder: "Поиск клиента…", width: "w-48", options: clientOptions,
         },
-        {
+        ...(hideEngineer ? [] : [{
           queryKey: "engineer", label: "Инженер", allLabel: "Все инженеры",
           searchPlaceholder: "Поиск инженера…", width: "w-44", options: engineerOptions,
-        },
+        }]),
       ]}
     />
   );

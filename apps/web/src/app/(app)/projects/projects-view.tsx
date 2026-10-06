@@ -53,6 +53,7 @@ export function ProjectsView({
   clients,
   managers,
   engineers,
+  hideEngineerFilter,
 }: {
   view: "kanban" | "table";
   // Канбан — все отфильтрованные проекты; таблица — одна страница
@@ -65,6 +66,7 @@ export function ProjectsView({
   clients: SelectOption[];
   managers: SelectOption[];
   engineers: SelectOption[];
+  hideEngineerFilter?: boolean;
 }) {
   const router = useRouter();
   const { set } = useListParams();
@@ -106,6 +108,7 @@ export function ProjectsView({
         clients={clients}
         managers={managers}
         engineers={engineers}
+        hideEngineer={hideEngineerFilter}
       />
 
       {view === "kanban" ? (

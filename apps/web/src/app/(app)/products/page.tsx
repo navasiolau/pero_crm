@@ -78,6 +78,7 @@ export default async function ProductsPage({
       canManage={hasAnyRole(role, MANAGER_ROLES)}
       actorRoles={role}
       showAmount={hasAnyRole(role, OFFICE_ROLES)}
+      hideEngineerFilter={role.includes("ENGINEER") && !hasAnyRole(role, MANAGER_ROLES)}
       engineerOptions={engineers.map((engineer) => ({
         value: engineer.id,
         label: engineer.name,
