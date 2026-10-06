@@ -52,21 +52,28 @@ export function SinglePercentageRow({productId,kind,section,canManage,canViewAll
  const confirmedRecipient=confirmedPercentageRecipient(kind,recipientId===null?null:String(recipientId),candidates,section.recipientCandidates??[],section.assignee);
  const options:SearchableOption[]=kind==="ENGINEERING"?candidates.filter(row=>{const recipient=confirmedPercentageRecipient(kind,row.id,[row],[],null);return recipient.active&&recipient.eligible;}).map(row=>({value:row.id,label:row.name})):section.recipientCandidates?.map(row=>({value:row.userId,label:row.name}))??candidates.filter(row=>{const recipient=confirmedPercentageRecipient(kind,row.id,[row],[],null);return recipient.active&&recipient.eligible;}).map(row=>({value:row.id,label:row.name}));
  if(section.assignee&&!options.some(option=>option.value===section.assignee?.userId))options.push({value:section.assignee.userId,label:section.assignee.name,disabled:!section.assignee.active||!section.assignee.eligible});
- const engineerName=confirmedRecipient.name;
- const version=section.calculationVersion??4;
- const unitPrice=price===null?null:String(price),confirmedQuantity=quantity===null?null:Number(quantity);
- const total=version>=2&&section.productCurrency!=="BYN"?null:singleProductPercentagePreview({state:section.state,kind,version,unitPrice,quantity:confirmedQuantity,rate:rate.baseline===null?null:String(rate.baseline),frozenTotal:section.total,recipientEligible:confirmedRecipient.active&&confirmedRecipient.eligible});
+  const engineerName=confirmedRecipient.name;
+  const version=section.calculationVersion??4;
+  const unitPrice=price===null?null:String(price),confirmedQuantity=quantity===null?null:Number(quantity);
+  const previewTotal=version>=2&&section.productCurrency!=="BYN"?null:singleProductPercentagePreview({state:section.state,kind,version,unitPrice,quantity:confirmedQuantity,rate:rate.baseline===null?null:String(rate.baseline),frozenTotal:section.total,recipientEligible:confirmedRecipient.active&&confirmedRecipient.eligible});
+  // Строка своей суммы видна всегда в DRAFT, включая отсутствие назначенного (прогноз сервера).
+  // Процент виден только при canViewAll; поле видит лишь свою сумму в BYN и имена.
+  const ownAmount=section.ownMember?.amount??section.members[0]?.amount??null;
+  const displaySum=canViewAll?(previewTotal??section.total):(ownAmount??section.total);
+  const showSum=section.state==="DRAFT";
+  const rateMissing=currentRate(section)===null&&section.state==="DRAFT";
  async function retryFrozen(){
   if(retryPending.current)return;retryPending.current=true;setRetryBusy(true);setRetryError(null);
   try{if(!await group.flush())throw Error("Сначала сохраните текущие поля этапа");const result=await retryProductPercentageAction({productId,kind});if(!result.ok)throw Error(result.error??"Не удалось повторить расчёт");router.refresh();}catch(error){setRetryError(error instanceof Error?error.message:"Не удалось повторить расчёт");}finally{retryPending.current=false;setRetryBusy(false);}
  }
- return <section aria-label={`${label}: процентная оплата`} data-single-percentage-kind={kind} className="min-w-0 space-y-3">
-  <div className="flex min-w-0 flex-nowrap items-start gap-3">
-   <div data-percentage-payment className="w-36 max-w-36 min-w-0 shrink-0" onKeyDownCapture={event=>{if(event.key==="Escape"){event.preventDefault();void group.cancel("ratePercent");}}}>
-    <PercentageRateInput id={`${kind.toLowerCase()}-rate`} label="Процент, %" draft={rate.draft} setDraft={rate.setDraft} commit={rate.commit} error={Boolean(rate.error)} readOnly={!editable} />
-    <div id={`${kind.toLowerCase()}-rate-state`}><PercentageState field={rate}/></div>
-    {canViewAll&&section.state==="DRAFT"?<p data-percentage-amount className="mt-2 min-w-0 break-words text-[18px] leading-6 font-semibold text-primary tabular-nums">Сумма: {total===null?"—":formatAmount(total,version>=2?"BYN":section.productCurrency)}</p>:null}
-   </div>
+  return <section aria-label={`${label}: процентная оплата`} data-single-percentage-kind={kind} className="min-w-0 space-y-3">
+   <div className="flex min-w-0 flex-nowrap items-start gap-3">
+    <div data-percentage-payment className="w-36 max-w-36 min-w-0 shrink-0" onKeyDownCapture={event=>{if(event.key==="Escape"){event.preventDefault();void group.cancel("ratePercent");}}}>
+     {canViewAll?<><PercentageRateInput id={`${kind.toLowerCase()}-rate`} label="Процент, %" draft={rate.draft} setDraft={rate.setDraft} commit={rate.commit} error={Boolean(rate.error)} readOnly={!editable} />
+     <div id={`${kind.toLowerCase()}-rate-state`}><PercentageState field={rate}/></div>
+     {rateMissing?<p className="mt-1 min-w-0 break-words text-xs text-amber-700">Ставка не задана — проверьте стандартные проценты</p>:null}</>:null}
+     {showSum?<p data-percentage-amount className="mt-2 min-w-0 break-words text-[18px] leading-6 font-semibold text-primary tabular-nums">Сумма: {displaySum===null?"—":formatAmount(displaySum,version>=2?"BYN":section.productCurrency)}</p>:null}
+    </div>
    <div data-percentage-recipient className="w-60 max-w-60 min-w-0 shrink">{kind==="ENGINEERING"&&!editEngineer?<div className="space-y-1.5 text-sm"><span className="font-medium">Инженер</span><p className="break-words">{engineerName??"Не назначен"}</p></div>:recipientController?<InlineSelectField id={`${kind.toLowerCase()}-assignee`} label={label} controller={recipientController} readOnly={!editable} options={options} allowClear />:<p>{section.assignee?.name??"Не назначен"}</p>}</div>
   </div>
   {confirmedRecipient.userId!==null&&(!confirmedRecipient.active||!confirmedRecipient.eligible)?<p className="break-words text-xs text-muted-foreground">Текущий получатель не подходит для нового начисления. Назначьте активного сотрудника соответствующей роли.</p>:null}
