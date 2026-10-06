@@ -56,12 +56,12 @@ export function SinglePercentageRow({productId,kind,section,canManage,canViewAll
   const version=section.calculationVersion??4;
   const unitPrice=price===null?null:String(price),confirmedQuantity=quantity===null?null:Number(quantity);
   const previewTotal=version>=2&&section.productCurrency!=="BYN"?null:singleProductPercentagePreview({state:section.state,kind,version,unitPrice,quantity:confirmedQuantity,rate:rate.baseline===null?null:String(rate.baseline),frozenTotal:section.total,recipientEligible:confirmedRecipient.active&&confirmedRecipient.eligible});
-  // Строка своей суммы видна всегда в DRAFT, включая отсутствие назначенного (прогноз сервера).
-  // Процент виден только при canViewAll; поле видит лишь свою сумму и прогноз неназначенного, чужие суммы — никогда.
+  // Сумма закреплённого специалиста видна при любом статусе изделия; в зарплату
+  // записывается только сменой статуса. Процент виден только при canViewAll.
   const ownAmount=section.ownMember?.amount??section.members[0]?.amount??null;
   const displaySum=canViewAll?(previewTotal??section.total):(ownAmount??(section.assignee?null:section.total));
-  const showSum=section.state==="DRAFT";
-  const rateMissing=currentRate(section)===null&&section.state==="DRAFT";
+  const rateMissing=currentRate(section)===null&&(section.state==="DRAFT"||section.state==="SKIPPED_ONCE");
+  const showSum=displaySum!==null||rateMissing;
   // Поле без финансового обзора видит этап одной текстовой строкой: имя назначенного
   // и только своя оплата; ни полей %, ни селектов.
   if(!canViewAll){

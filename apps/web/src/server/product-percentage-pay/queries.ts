@@ -38,8 +38,9 @@ export async function getProductPercentageView(actor: { id: string; roles: Role[
     const quantity=Number.isSafeInteger(product.quantity)&&product.quantity>0?product.quantity:null;
     const productTotal=product.expectedPrice!==null&&quantity!==null?new Prisma.Decimal(product.expectedPrice.toString()).mul(quantity).toFixed(2):null;
     let draftTotal:string|null=null;
-    // Прогноз суммы виден ДО назначения исполнителя: нужны только ставка и цена.
-    if(!completion&&product.project.currency==="BYN"&&pool?.state!=="SETTLED"&&pool?.state!=="LEGACY_PROTECTED"&&config?.ratePercent!==null&&config?.ratePercent!==undefined){
+    // Прогноз суммы виден ДО назначения и при пропущенном начислении (ставка задана позже): нужны только ставка и цена.
+    // Начисление при этом НЕ выполняется — оно происходит только сменой статуса.
+    if((!completion||editableAfterSkip)&&product.project.currency==="BYN"&&pool?.state!=="SETTLED"&&pool?.state!=="LEGACY_PROTECTED"&&config?.ratePercent!==null&&config?.ratePercent!==undefined){
       const rate=new Prisma.Decimal(config.ratePercent.toString());
       if(rate.isZero())draftTotal="0.00";
       else if(rate.lte(MAX_PRODUCT_PERCENTAGE_RATE)&&productTotal!==null&&product.expectedPrice!==null){try{draftTotal=calculateWholeProductPercentage({kind,unitPrice:product.expectedPrice!.toString(),quantity,rate:rate.toString()})?.amount??null;}catch{draftTotal=null;}}
@@ -47,7 +48,9 @@ export async function getProductPercentageView(actor: { id: string; roles: Role[
     }
     const legacyPaidSummary = financeView && pool?.settlement
       ? { amount: pool.settlement.amount.toString(), currency: pool.settlement.payrollCurrency, count: 1 } : null;
-    const members = completion ? completion.shares.map(row=>({userId:row.userId,name:row.userNameSnapshot,shareUnits:row.shareUnits,amount:row.amount?.toString()??null}))
+    // Назначенный специалист виден своей строкой всегда — даже при пустых долях (пропущенное
+    // начисление): сумма ему показывается, в зарплату запишется только сменой статуса.
+    const members = completion && completion.shares.length ? completion.shares.map(row=>({userId:row.userId,name:row.userNameSnapshot,shareUnits:row.shareUnits,amount:row.amount?.toString()??null}))
       : assignee ? [{userId:assignee.userId,name:assignee.name,shareUnits:1000000,amount:draftTotal}] : [];
     const ownMember = members.find((row) => row.userId === actor.id) ?? null;
     // Поле видит только свою сумму; неназначенному sums нет вообще (прогноз только менеджерам).
@@ -66,7 +69,7 @@ export async function getProductPercentageView(actor: { id: string; roles: Role[
       price: financeView ? displayCompletion ? displayCompletion.priceSnapshot?.toString()??null : product.expectedPrice?.toString()??null : null,
       productCurrency: displayCompletion?.productCurrency ?? product.project.currency,
       payrollCurrency: displayCompletion?.payrollCurrency ?? null,
-      // Сумма: менеджерам — итог/прогноз как раньше; полю — только своя строка или прогноз неназначенного.
+      // Сумма: менеджерам — итог/прогноз как раньше; полю — только своя строка назначенного.
       // Не-финансы (не MANAGER/PROCUREMENT): members только своя строка, имена исполнителей оставлены через assignee.
       total: financeView ? (displayCompletion?.amount?.toString() ?? draftTotal) : fieldTotal,
       members: financeView ? members : ownMember ? [ownMember] : [], revision: config?.revision ?? 0,

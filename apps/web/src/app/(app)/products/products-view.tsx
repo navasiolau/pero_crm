@@ -48,6 +48,7 @@ export function ProductsView({
   projectOptions,
   clientOptions,
   engineerOptions,
+  hideEngineerFilter,
 }: {
   view: "kanban" | "table";
   // Канбан — все отфильтрованные изделия; таблица — одна страница
@@ -61,6 +62,7 @@ export function ProductsView({
   projectOptions: { value: string; label: string; hint?: string }[];
   clientOptions: { value: string; label: string; hint?: string }[];
   engineerOptions: { value: string; label: string; hint?: string }[];
+  hideEngineerFilter?: boolean;
 }) {
   const { set } = useListParams();
 
@@ -99,6 +101,7 @@ export function ProductsView({
         projectOptions={projectOptions}
         clientOptions={clientOptions}
         engineerOptions={engineerOptions}
+        hideEngineer={hideEngineerFilter}
       />
 
       {view === "kanban" ? (
