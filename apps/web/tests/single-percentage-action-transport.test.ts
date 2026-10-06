@@ -13,6 +13,7 @@ async function actualActions(){
  const stubs:Record<string,string>={
   "@/auth":'export async function auth(){return {user:{id:"manager",name:"Manager",roles:["MANAGER"]}}}',
   "@/server/products/revalidate":'export async function revalidateProductPaths(){globalThis.__pctActionProbe.cacheCalls++}',
+  "@/server/notifications/notify":'export async function notifyPerson(){}',
   "@/server/tasks/transaction":'export async function withTaskTransaction(fn){return fn({fixture:"transaction"})}',
   "./patch-core":'export async function patchProductPercentageCore(_actor,input){return globalThis.__pctActionProbe.patch(input)}',
   "./core":'export async function configureProductPercentageCore(){return {ok:true}};export async function setProductNoModelCore(){return {ok:true}};export async function settlePendingProductPercentage(){return {state:"SETTLED"}};export async function transferProductPercentageCore(){return {ok:false}}',

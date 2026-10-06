@@ -491,6 +491,8 @@ model PayrollEntry {
   settlementShare ProductStageSettlementShare? @relation(fields: [settlementShareId], references: [id], onDelete: Restrict)
   percentageCompletionShareId String? @unique
   percentageCompletionShare ProductPercentageCompletionShare? @relation(fields: [percentageCompletionShareId], references: [id], onDelete: Restrict)
+  percentageAdjustmentId String? @unique
+  percentageAdjustment ProductPercentageAdjustment? @relation(fields: [percentageAdjustmentId], references: [id], onDelete: Restrict)
   bynAmount Decimal? @db.Decimal(18, 2)
   projectAmount Decimal? @db.Decimal(12, 2)
   projectCurrency String?
@@ -585,8 +587,32 @@ model ProductPercentageCompletionShare {
   bynAmount     Decimal?                     @db.Decimal(18, 2)
   projectAmount Decimal?                     @db.Decimal(12, 2)
   payrollEntry  PayrollEntry?
+  adjustments ProductPercentageAdjustment[]
 
   @@unique([completionId, userId])
+}
+
+// Исходное начисление неизменно; новая ставка создаёт отдельную корректировку.
+model ProductPercentageAdjustment {
+  id String @id @default(cuid())
+  completionShareId String
+  completionShare ProductPercentageCompletionShare @relation(fields: [completionShareId], references: [id], onDelete: Restrict)
+  recipientId String
+  actorId String
+  clientMutationId String @unique
+  configRevision Int
+  kind ProductPercentageKind
+  unitPrice Decimal @db.Decimal(12, 2)
+  quantity Int
+  ratePercent Decimal @db.Decimal(5, 2)
+  previousAmount Decimal @db.Decimal(12, 2)
+  amount Decimal @db.Decimal(12, 2)
+  delta Decimal @db.Decimal(12, 2)
+  calculationVersion Int @default(4)
+  createdAt DateTime @default(now())
+  payrollEntry PayrollEntry?
+
+  @@unique([completionShareId, configRevision])
 }
 
 // Неизменяемый снимок пула оплаты изделия для производственного этапа.

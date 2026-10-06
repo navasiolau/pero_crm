@@ -63,11 +63,13 @@ export function SinglePercentageRow({productId,kind,section,canManage,canViewAll
   const unitPrice=price===null?null:String(price),confirmedQuantity=quantity===null?null:Number(quantity);
   // Живой перерасчёт: превью считается от вводимого черновика, при невалидном — от сохранённого.
   // Для завершённых этапов живой расчёт тоже считается (совпадает с замороженным при тех же входах).
-  const previewRate=previewRateFromDraft(rate.draft,rate.baseline===null?null:String(rate.baseline));
-  const computedLive=version>=2&&section.productCurrency!=="BYN"?null:singleProductPercentagePreview({state:"DRAFT",kind,version,unitPrice,quantity:confirmedQuantity,rate:previewRate,frozenTotal:null,recipientEligible:confirmedRecipient.active&&confirmedRecipient.eligible});
+  const lastValidRate=useRef<string|null>(rate.baseline===null?null:String(rate.baseline));
+  const previewRate=previewRateFromDraft(rate.draft,lastValidRate.current);
+  lastValidRate.current=previewRate;
+  const computedLive=section.productCurrency!=="BYN"?null:singleProductPercentagePreview({state:"DRAFT",kind,version:4,unitPrice,quantity:confirmedQuantity,rate:previewRate,frozenTotal:null});
   // Замороженная истина — когда текущие входы совпадают со снимком начисления; иначе живой перерасчёт.
   const normRate=(value:string|null)=>{try{return value===null?null:parseProductPercentageRate(value);}catch{return null;}};
-  const sameAsFrozen=section.state!=="DRAFT"&&previewRate!==null&&normRate(section.ratePercent)!==null&&previewRate===normRate(section.ratePercent)&&String(price??"")===String(section.price??"")&&Number(quantity??NaN)===Number(section.quantity??NaN);
+  const sameAsFrozen=section.state!=="DRAFT"&&previewRate!==null&&normRate(previewRate)===normRate(currentRate(section))&&section.total!==null;
   const previewTotal=section.state==="DRAFT"?computedLive:(sameAsFrozen?section.total:(computedLive??section.total));
   // Сумма закреплённого специалиста видна при любом статусе изделия; в зарплату
   // записывается только сменой статуса. Процент виден только при canViewAll.

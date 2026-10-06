@@ -8,6 +8,8 @@ import { MANAGER_ROLES, hasAnyRole } from "@/lib/roles";
 import type { DomainActor } from "@/server/projects/core";
 import { revalidateProductPaths } from "@/server/products/revalidate";
 import { withTaskTransaction } from "@/server/tasks/transaction";
+import {notifyPerson} from "@/server/notifications/notify";
+import type {PercentageAdjustmentNotice} from "./direct-completion";
 import { configureProductPercentageCore, settlePendingProductPercentage, transferProductPercentageCore } from "./core";
 
 async function actor(): Promise<DomainActor> {
@@ -50,7 +52,11 @@ export async function retryProductPercentageAction(input: { productId: string; k
 export async function patchProductPercentageAction(input:ProductPercentagePatch):Promise<ProductPercentagePatchResult>{
   try {
     const user=await actor();
-    const result=await withTaskTransaction(tx=>patchProductPercentageCore(user,input,tx));
+    const effects:PercentageAdjustmentNotice[]=[];
+    const result=await withTaskTransaction(tx=>patchProductPercentageCore(user,input,tx,effects));
+    if(result.ok){
+      for(const effect of effects)await notifyPerson({userId:effect.userId,type:"payroll.accrued",title:`Процентная оплата пересчитана: ${effect.delta} BYN`,body:`${effect.label} изделия ${effect.number}: было ${effect.oldAmount}, стало ${effect.newAmount}`,link:"/payroll"}).catch(()=>{});
+    }
     // Partial fields return a compact receipt; page/status operations revalidate separately.
     return result;
   }catch(error){return{ok:false,kind:"failure",error:error instanceof Error?error.message:"Не удалось сохранить оплату изделия"};}

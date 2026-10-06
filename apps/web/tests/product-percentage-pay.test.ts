@@ -313,6 +313,7 @@ test("после SKIPPED_ONCE поздняя ставка добирается �
     noModel: false, expectedPrice: "500", files: [], percentageConfigs: [] as Record<string, unknown>[],
     stagePayPools: [], project: { currency: "BYN" } };
   let snapshotsCreated = 0, payrollCreated = 0;
+  const adjustments:Record<string,unknown>[]=[];
   let config: {id: string; revision: number; ratePercent: string} | null = null;
   const syncConfig = () => { const row = { kind: "ENGINEERING", ratePercent: config?.ratePercent ?? null }; const i = product.percentageConfigs.findIndex((r) => (r as {kind:string}).kind === "ENGINEERING"); if (i < 0) product.percentageConfigs.push(row); else product.percentageConfigs[i] = row; };
   const tx = {
@@ -332,6 +333,7 @@ test("после SKIPPED_ONCE поздняя ставка добирается �
     },
     task: { findFirst: async () => null },
     productStatusHistory: { findFirst: async () => null, create: async () => ({}) },
+    productPercentageAdjustment:{findFirst:async()=>adjustments.at(-1)??null,create:async({data}:{data:Record<string,unknown>})=>{const row={id:"adjustment",...data};adjustments.push(row);return row;}},
     payrollEntry: { create: async () => { payrollCreated++; return {}; } },
     changeLog: { findUnique: async () => null, create: async () => ({}) },
     domainEvent: { create: async () => ({ id: "event" }) },

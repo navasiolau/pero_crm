@@ -14,7 +14,7 @@ export async function getProductPercentageView(actor: { id: string; roles: Role[
   const product = await database.product.findFirst({ where: { AND: [{ id: productId }, productVisibilityWhere(visibilityActor)] },
     include: { project: { select: { currency: true } }, engineer: { select: { id:true, name: true, active:true, roles:true } }, mounter: { select: { id:true,name:true,active:true,roles:true } },assembler: { select: {id:true,name:true,active:true,roles:true} },
       percentageConfigs: { include: { participants: { include: { user: { select: { name: true } } } } } },
-      percentageCompletions: { include: { shares: true } },
+      percentageCompletions: { include: { shares: { include: { adjustments: { orderBy: { configRevision: "desc" } } } } } },
       stagePayPools: { where: { kind: "ENGINEERING" }, include: { settlement: true } },
       files: { where: { AND:[fileVisibilityWhere(visibilityActor),{ fileName: { endsWith: ".b3d", mode: "insensitive" } }] }, select: { id: true }, take: 1 },
     } });
@@ -32,6 +32,7 @@ export async function getProductPercentageView(actor: { id: string; roles: Role[
     const completion = product.percentageCompletions.find((row) => row.kind === kind);
     const editableAfterSkip = completion?.state === "SKIPPED_ONCE";
     const displayCompletion = editableAfterSkip ? null : completion;
+    const latestAdjustment=completion?.shares.flatMap(row=>row.adjustments??[]).sort((a,b)=>b.configRevision-a.configRevision).at(0);
     const pool = kind === "ENGINEERING" ? product.stagePayPools.at(0) : null;
     const assigneeUser = product[policy.recipient];
     const assignee = assigneeUser ? {userId:product[policy.assignment]!,name:assigneeUser.name,active:assigneeUser.active,eligible:assigneeUser.roles?.includes(policy.role) ?? false} : null;
@@ -51,7 +52,7 @@ export async function getProductPercentageView(actor: { id: string; roles: Role[
     // Назначенный специалист виден своей строкой всегда — даже при пустых долях (пропущенное
     // начисление): сумма ему показывается, в зарплату запишется только сменой статуса.
     // Доля без суммы добирает прогноз, если строка принадлежит текущему назначенному.
-    const members = completion && completion.shares.length ? completion.shares.map(row=>({userId:row.userId,name:row.userNameSnapshot,shareUnits:row.shareUnits,amount:row.amount?.toString()??(row.userId===assignee?.userId?draftTotal:null)}))
+    const members = completion && completion.shares.length ? completion.shares.map(row=>({userId:row.userId,name:row.userNameSnapshot,shareUnits:row.shareUnits,amount:row.adjustments?.at(0)?.amount.toString()??row.amount?.toString()??(row.userId===assignee?.userId?draftTotal:null)}))
       : assignee ? [{userId:assignee.userId,name:assignee.name,shareUnits:1000000,amount:draftTotal}] : [];
     // Текущий назначенный без доли виден своей строкой прогноза (но не пустой строкой).
     if (assignee && draftTotal !== null && !members.some((row) => row.userId === assignee.userId)) members.push({userId:assignee.userId,name:assignee.name,shareUnits:1000000,amount:draftTotal});
@@ -62,19 +63,19 @@ export async function getProductPercentageView(actor: { id: string; roles: Role[
       hasConfiguration: Boolean(config),
       currentRatePercent: financeView ? config?.ratePercent?.toString()??null : null,
       assignee,
-      unitPrice: financeView ? completion ? completion.priceSnapshot?.toString()??null : product.expectedPrice?.toString()??null : null,
-      quantity: completion ? completion.quantitySnapshot??null : quantity,
-      productTotal: financeView ? completion ? completion.totalSnapshot?.toString()??null : productTotal : null,
-      calculationVersion: completion?.calculationVersion===4 ? 4 : completion?.calculationVersion===3 ? 3 : completion?.calculationVersion===2 ? 2 : completion ? 1 : 4,
+      unitPrice: financeView ? latestAdjustment?.unitPrice.toString()??(completion ? completion.priceSnapshot?.toString()??null : product.expectedPrice?.toString()??null) : null,
+      quantity: latestAdjustment?.quantity??(completion ? completion.quantitySnapshot??null : quantity),
+      productTotal: financeView ? latestAdjustment?latestAdjustment.unitPrice.mul(latestAdjustment.quantity).toFixed(2):completion ? completion.totalSnapshot?.toString()??null : productTotal : null,
+      calculationVersion: latestAdjustment?4:completion?.calculationVersion===4 ? 4 : completion?.calculationVersion===3 ? 3 : completion?.calculationVersion===2 ? 2 : completion ? 1 : 4,
       recipientCandidates: manager ? (kind==="ENGINEERING"?engineers:kind==="ASSEMBLY"?assemblers:mounters).map(user=>({userId:user.id,name:user.name})) : [],
       kind, state: completion?.state ?? (pool?.state === "SETTLED" || pool?.state === "LEGACY_PROTECTED" ? "LEGACY_PROTECTED" : "DRAFT"),
-      ratePercent: financeView ? displayCompletion ? displayCompletion.ratePercentSnapshot?.toString()??null : config?.ratePercent?.toString()??null : null,
-      price: financeView ? displayCompletion ? displayCompletion.priceSnapshot?.toString()??null : product.expectedPrice?.toString()??null : null,
+      ratePercent: financeView ? latestAdjustment?.ratePercent.toString()??(displayCompletion ? displayCompletion.ratePercentSnapshot?.toString()??null : config?.ratePercent?.toString()??null) : null,
+      price: financeView ? latestAdjustment?.unitPrice.toString()??(displayCompletion ? displayCompletion.priceSnapshot?.toString()??null : product.expectedPrice?.toString()??null) : null,
       productCurrency: displayCompletion?.productCurrency ?? product.project.currency,
       payrollCurrency: displayCompletion?.payrollCurrency ?? null,
       // Сумма: менеджерам — итог/прогноз как раньше; полю — только своя строка назначенного.
       // Не-финансы (не MANAGER/PROCUREMENT): members только своя строка, имена исполнителей оставлены через assignee.
-      total: financeView ? (displayCompletion?.amount?.toString() ?? draftTotal) : fieldTotal,
+      total: financeView ? (latestAdjustment?.amount.toString()??displayCompletion?.amount?.toString() ?? draftTotal) : fieldTotal,
       members: financeView ? members : ownMember ? [ownMember] : [], revision: config?.revision ?? 0,
       canManage: manager,
       canTransfer: false,

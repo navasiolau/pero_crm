@@ -1,6 +1,6 @@
 import { projectTotal as calculateProjectTotal } from "@/lib/product-quantity";
 import { prisma } from "@/lib/prisma";
-import { Prisma } from "@prisma/client";
+import { Prisma,type PrismaClient } from "@prisma/client";
 
 import { sumHistoricalByn, sumByn, subtractByn, BYN_UNAVAILABLE_REASON } from "@/lib/history-byn";
 
@@ -88,8 +88,9 @@ export type ProjectEconomics = {
 // Историческая неизвестность не пересчитывается сегодняшним курсом.
 export async function getProjectEconomics(
   projectId: string,
+  database:Pick<PrismaClient,"project"|"payment"|"payrollEntry"|"stockMovement"|"productStageSettlement"|"productPercentageCompletion">=prisma,
 ): Promise<ProjectEconomics | null> {
-  const project = await prisma.project.findUnique({
+  const project = await database.project.findUnique({
     where: { id: projectId },
     select: {
       id: true,
@@ -104,7 +105,7 @@ export async function getProjectEconomics(
   const currency = "BYN";
 
   const [payments, payrollEntries, stockMovements, settlements, completions] = await Promise.all([
-    prisma.payment.findMany({
+    database.payment.findMany({
       where: { projectId },
       select: {
         direction: true,
@@ -112,23 +113,23 @@ export async function getProjectEconomics(
         expenseArticle: { select: { name: true } },
       },
     }),
-    prisma.payrollEntry.findMany({
-      where: { projectId, settlementShareId: null, percentageCompletionShareId: null },
+    database.payrollEntry.findMany({
+      where: { projectId, settlementShareId: null, percentageCompletionShareId: null,percentageAdjustmentId:null },
       select: { amount: true, currency: true, bynAmount: true },
     }),
     // Списания материалов со склада (§12): цены хранятся в BYN (totalByn),
     // привязка — к изделиям этого проекта
-    prisma.stockMovement.findMany({
+    database.stockMovement.findMany({
       where: { product: { projectId }, type: { in: ["EXPENSE", "RETURN"] } },
       select: { type: true, totalByn: true },
     }),
-    prisma.productStageSettlement.findMany({
+    database.productStageSettlement.findMany({
       where: { projectId },
       select: { bynAmount: true },
     }),
-    prisma.productPercentageCompletion.findMany({
+    database.productPercentageCompletion.findMany({
       where: { product: { projectId }, state: "SETTLED" },
-      select: { amount: true, payrollCurrency: true, bynAmount: true },
+      select: { amount: true, payrollCurrency: true, bynAmount: true,shares:{select:{adjustments:{select:{delta:true}}}} },
     }),
   ]);
 
@@ -153,6 +154,7 @@ export async function getProjectEconomics(
     sumHistoricalByn(payrollEntries),
     sumHistoricalByn(settlements.map(row => ({ amount: row.bynAmount, bynAmount: row.bynAmount }))),
     sumByn(completions.map(row => row.bynAmount?.toNumber() ?? null)),
+    sumByn(completions.flatMap(row=>(row.shares??[]).flatMap(share=>(share.adjustments??[]).map(adjustment=>adjustment.delta.toNumber())))),
   ]);
   const materialsTotal = stockMovements.some(movement => movement.totalByn === null) ? null : stockMovements.reduce((sum, movement) => sum.plus(
     new Prisma.Decimal(movement.totalByn!).times(movement.type === "RETURN" ? -1 : 1)), new Prisma.Decimal(0)).toNumber();
