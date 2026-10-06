@@ -15,6 +15,7 @@ import { sketchUploadTargetSchema, type SketchUploadTarget } from "@/server/prod
 import { authorizeProductCoverUpload, persistUploadedProductCover } from "@/server/products/cover-core";
 import { revalidateProductPaths } from "@/server/products/revalidate";
 import { resolveUploadContext } from "@/server/files/upload-context";
+import { uploadSizeLimitError, uploadSizeLimitFor } from "@/server/files/upload-limits";
 import { persistOrdinaryUpload, readUploadReceipt, uploadFingerprint, uploadMutationPattern } from "@/server/files/upload-core";
 import { afterUploadCommit, uploadFailure, UploadError, type UploadPhase, type CommitState } from "@/server/files/upload-result";
 import { notifyOrg } from "@/server/notifications/notify";
@@ -29,7 +30,6 @@ import {
   type FileStageKey,
 } from "@pero/plugin-file-stages";
 
-const MAX_SIZE = 25 * 1024 * 1024; // 25 МБ
 const CATEGORIES: FileCategory[] = [
   "PHOTO",
   "DRAWING",
@@ -84,8 +84,11 @@ async function upload(request:Request,state:{phase:UploadPhase;commitState:Commi
   if (!form || !(file instanceof File) || typeof projectId !== "string") {
     return NextResponse.json({ error: "Нужны file и projectId" }, { status: 400 });
   }
-  if (file.size > MAX_SIZE) {
-    return NextResponse.json({ error: "Файл больше 25 МБ" }, { status: 413 });
+  // Дифференцированный лимит: изображения и обложки — 25 МБ, не-изображения — 1 ГБ.
+  // Обложки — всегда image/*, поэтому ранняя проверка по типу содержимого их покрывает.
+  const sizeLimit = uploadSizeLimitFor({ mimeType: file.type });
+  if (file.size > sizeLimit.maxBytes) {
+    return NextResponse.json({ error: uploadSizeLimitError(sizeLimit.kind) }, { status: 413 });
   }
 
   if (form.get("caption") !== null) return NextResponse.json({ok:false,kind:"validation",error:"Подписи файлов больше не используются"},{status:422});
@@ -177,7 +180,7 @@ async function upload(request:Request,state:{phase:UploadPhase;commitState:Commi
 
   const storedName = `${randomUUID()}-${sanitizeFileName(file.name)}`;
   const buffer = Buffer.from(await file.arrayBuffer());
-  if (buffer.length > MAX_SIZE) return NextResponse.json({ error: "Файл больше 25 МБ" }, { status: 413 });
+  if (buffer.length > sizeLimit.maxBytes) return NextResponse.json({ error: uploadSizeLimitError(sizeLimit.kind) }, { status: 413 });
 
   const contentHash = createHash("sha256").update(buffer).digest("hex");
   const fingerprint=uploadFingerprint({actorId:session.user.id,projectId,productId,taskId,category,stage:stage??"PRODUCTION",
