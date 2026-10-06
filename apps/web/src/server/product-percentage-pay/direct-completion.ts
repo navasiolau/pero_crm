@@ -4,7 +4,6 @@ import type { DomainActor } from '@/server/projects/core';
 import { PERCENTAGE_STAGE_POLICY } from './stage-policy';
 import { calculateWholeProductPercentage } from '@/lib/product-percentage-ceil';
 import { parseProductPercentageRate } from '@/lib/product-percentage-rate-limit';
-import { notifyPerson } from '@/server/notifications/notify';
 
 export type PercentageAccrualEffects={eventIds:string[];earnings:{userId:string;userName:string;amount:string;currency:string}[]};
 export async function captureDirectPercentage(tx:Prisma.TransactionClient,actor:DomainActor,productId:string,kind:ProductPercentageKind,statusAtCompletion:ProductStatus,effects?:PercentageAccrualEffects){
@@ -86,10 +85,9 @@ export async function settleSkippedPercentage(tx:Prisma.TransactionClient,actor:
   await tx.changeLog.create({data:{actorType:'user',actorId:actor.id,actorName:actor.name,source:actor.source,entity:'product',entityId:productId,action:'percentage.lateSettlement',newValue:{kind,completionId:completion.id,statusAtCompletion,calculationVersion:4}}});
   return'SETTLED';
 }
-/** Пересчёт состоявшегося начисления после смены ставки (статус изделия не DONE).
- * Снимок и доля обновляются, разница проводится дельта-записью текущим месяцем;
- * история прошлых месяцев не переписывается. Возвращает дельту строкой. */
-export async function adjustSettledPercentage(tx:Prisma.TransactionClient,actor:DomainActor,productId:string,kind:ProductPercentageKind,newRate:string):Promise<{adjusted:boolean;delta:string}>{
+/** Новая ставка добавляет корректировку текущим месяцем; исходный снимок неизменен. */
+export type PercentageAdjustmentNotice={userId:string;label:string;number:string;oldAmount:string;newAmount:string;delta:string};
+export async function adjustSettledPercentage(tx:Prisma.TransactionClient,actor:DomainActor,productId:string,kind:ProductPercentageKind,newRate:string,clientMutationId:string):Promise<{adjusted:boolean;delta:string;notice?:PercentageAdjustmentNotice}>{
   const product=await tx.product.findUnique({where:{id:productId},include:{project:{select:{id:true,number:true,currency:true}}}});
   if(!product)throw new Error('Изделие не найдено');
   if(product.status==='DONE')throw new Error('Изделие завершено: изменение процентов закрыто');
@@ -102,19 +100,26 @@ export async function adjustSettledPercentage(tx:Prisma.TransactionClient,actor:
   const calculated=calculateWholeProductPercentage({kind,unitPrice:product.expectedPrice.toString(),quantity:product.quantity,rate});
   const newAmount=calculated?.amount??null;
   if(newAmount===null)throw new Error('Не удалось пересчитать сумму этапа');
-  const share=completion.shares.at(0);
+  const policy=PERCENTAGE_STAGE_POLICY[kind];
+  let share=completion.shares.at(0);
+  if(!share&&completion.amount?.isZero()){
+    const recipientId=product[policy.assignment];
+    const recipient=recipientId?await tx.user.findUnique({where:{id:recipientId},select:{id:true,name:true,active:true,roles:true}}):null;
+    if(!recipient?.active||!recipient.roles.includes(policy.role))throw new Error(policy.recipientError);
+    // Нулевое исходное начисление без получателя допускает добавление его первой нулевой доли.
+    share=await tx.productPercentageCompletionShare.create({data:{completionId:completion.id,userId:recipient.id,userNameSnapshot:recipient.name,shareUnits:1000000,amount:"0.00",bynAmount:"0.00",projectAmount:"0.00"}});
+  }
   if(!share)throw new Error('Доля завершённого этапа не найдена');
-  const oldAmount=completion.amount?.toString()??'0.00';
+  if(completion.shares.length>1)throw new Error('Историческое начисление с несколькими долями защищено');
+  const latest=await tx.productPercentageAdjustment.findFirst({where:{completionShareId:share.id},orderBy:{configRevision:'desc'}});
+  const oldAmount=latest?.amount.toString()??share.amount?.toString()??completion.amount?.toString()??'0.00';
   const config=await tx.productPercentageConfig.findUnique({where:{productId_kind:{productId,kind}},select:{revision:true}});
   const now=new Date();
-  await tx.productPercentageCompletion.update({where:{id:completion.id},data:{ratePercentSnapshot:rate,amount:newAmount,bynAmount:newAmount,projectAmount:newAmount,sourceFundExact:calculated?.sourceFundExact??null,configRevision:config?.revision??null}});
-  await tx.productPercentageCompletionShare.update({where:{id:share.id},data:{amount:newAmount,bynAmount:newAmount,projectAmount:newAmount}});
   const delta=new Prisma.Decimal(newAmount).minus(oldAmount).toFixed(2);
-  const policy=PERCENTAGE_STAGE_POLICY[kind];
+  const adjustment=await tx.productPercentageAdjustment.create({data:{completionShareId:share.id,recipientId:share.userId,actorId:actor.id,clientMutationId,configRevision:config!.revision,kind,unitPrice:product.expectedPrice,quantity:product.quantity,ratePercent:rate,previousAmount:oldAmount,amount:newAmount,delta,calculationVersion:4}});
   if(delta!=='0.00'){
-    await tx.payrollEntry.create({data:{userId:share.userId,productId,projectId:product.project.id,percentageCompletionShareId:share.id,amount:delta,bynAmount:delta,projectAmount:delta,projectCurrency:'BYN',currency:'BYN',scheme:policy.scheme,month:now.toISOString().slice(0,7),comment:`Корректировка ${policy.label} изделия ${product.number} (было ${oldAmount} → стало ${newAmount})`}});
-    await notifyPerson({userId:share.userId,type:'payroll.accrued',title:`Процентная оплата пересчитана: ${delta} BYN`,body:`${policy.label} изделия ${product.number}: было ${oldAmount}, стало ${newAmount}`,link:'/payroll'}).catch(()=>{});
+    await tx.payrollEntry.create({data:{userId:share.userId,productId,projectId:product.project.id,percentageAdjustmentId:adjustment.id,amount:delta,bynAmount:delta,projectAmount:delta,projectCurrency:'BYN',currency:'BYN',scheme:policy.scheme,month:now.toISOString().slice(0,7),comment:`Корректировка ${policy.label} изделия ${product.number} (было ${oldAmount} → стало ${newAmount})`}});
   }
   await tx.changeLog.create({data:{actorType:'user',actorId:actor.id,actorName:actor.name,source:actor.source,entity:'product',entityId:productId,action:'percentage.rateAdjust',newValue:{kind,oldRate:completion.ratePercentSnapshot?.toString()??null,newRate:rate,oldAmount,newAmount,delta}}});
-  return{adjusted:true,delta};
+  return{adjusted:true,delta,...(delta!=='0.00'?{notice:{userId:share.userId,label:policy.label,number:product.number,oldAmount,newAmount,delta}}:{})};
 }

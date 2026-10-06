@@ -98,7 +98,7 @@ test("full settlement includes equivalent cents belonging to zero-payout shares"
 
 test("legacy explicit BYN payroll combines with fixed BYN settlement without conversion", async () => {
   reset(); currency = "USD";
-  entries.push({ id: "old", projectId: "project", userId: "old", amount: "30", currency: "BYN", settlementShareId: null, percentageCompletionShareId: null });
+  entries.push({ id: "old", projectId: "project", userId: "old", amount: "30", currency: "BYN", settlementShareId: null, percentageCompletionShareId: null,percentageAdjustmentId:null });
   settlements.push({ projectId: "project", productCurrency: "USD", projectAmount: "50", bynAmount: "150" });
   assert.equal((await finance.getProjectEconomics("project"))?.payrollTotal, 180);
 });

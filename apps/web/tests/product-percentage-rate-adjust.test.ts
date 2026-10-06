@@ -34,6 +34,7 @@ function state() {
     completion: { id: "c", state: "SETTLED", amount: "180.00", ratePercentSnapshot: "6", shares: [{ id: "s", userId: "w", userNameSnapshot: "Сборщик", shareUnits: 1000000, amount: "180.00" }] } as unknown as Record<string, unknown> & { shares: Record<string, unknown>[] },
     entry: { id: "e", amount: "180.00" } as Record<string, unknown> | null,
     entries: [] as Record<string, unknown>[],
+    adjustments: [] as Record<string, unknown>[],
     logs: [] as Record<string, unknown>[],
     notified: [] as { userId: string; title: string }[],
   };
@@ -53,6 +54,13 @@ function txOf(s: ReturnType<typeof state>) {
       update: async ({ data }: { data: Record<string, unknown> }) => { Object.assign(s.completion.shares[0], data); return s.completion.shares[0]; },
       create: async ({ data }: { data: Record<string, unknown> }) => { const row = { id: `sh${s.completion.shares.length}`, ...data }; s.completion.shares.push(row); return row; },
     },
+    productPercentageAdjustment: {
+      findFirst: async () => s.adjustments.at(-1) ?? null,
+      create: async ({ data }: { data: Record<string, unknown> }) => {
+        const row = { id: `adjust${s.adjustments.length}`, ...data };
+        s.adjustments.push(row); return row;
+      },
+    },
     domainEvent: { create: async ({ data }: { data: Record<string, unknown> }) => ({ id: `ev${s.logs.length}`, ...data }) },
     payrollEntry: {
       findUnique: async () => s.entry,
@@ -70,20 +78,35 @@ function patchInput(value: string, expected: string | null, rev = 4) {
   return { productId: "p", kind: "ASSEMBLY", field: "ratePercent", value, expectedValue: expected, expectedRevision: rev, clientMutationId: randomUUID() } as never;
 }
 
-test("правка ставки после начисления пересчитывает снимок и пишет дельту с уведомлением", async () => {
+test("правка ставки сохраняет исходный снимок и создаёт добавочную дельту", async () => {
   const s = state();
   notified.length = 0;
   const result = await patchProductPercentageCore(actor, patchInput("5", "6"), txOf(s));
   assert.equal(result.ok, true);
-  assert.equal(s.completion.amount, "150.00");
-  assert.equal(s.completion.shares[0].amount, "150.00");
+  assert.equal(s.completion.amount, "180.00");
+  assert.equal(s.completion.shares[0].amount, "180.00");
+  assert.equal(s.adjustments[0].amount, "150.00");
   assert.equal(s.entries.length, 1);
   assert.equal(s.entries[0].amount, "-30.00");
   assert.equal((s.entries[0].month as string).length, 7);
   assert.ok(String(s.entries[0].comment).includes("было 180.00"));
-  assert.equal(notified.length, 1);
-  assert.equal(notified[0].userId, "w");
+  assert.equal(notified.length, 0, "уведомление нельзя отправлять внутри транзакции");
   assert.ok(s.logs.some((row) => (row as { action: string }).action === "percentage.rateAdjust"));
+});
+
+test("реальные запреты UPDATE снимка/доли и уникальная FK не обходятся при корректировке", async () => {
+  const s = state(), tx = txOf(s);
+  Object.assign(tx.productPercentageCompletion,{update:async () => { throw Error("completion inputs are immutable"); }});
+  Object.assign(tx.productPercentageCompletionShare,{update:async () => { throw Error("share inputs are immutable"); }});
+  const create = tx.payrollEntry.create;
+  Object.assign(tx.payrollEntry,{create:async (args:Prisma.PayrollEntryCreateArgs) => {
+    assert.equal(args.data.percentageCompletionShareId, undefined);
+    assert.ok(args.data.percentageAdjustmentId);
+    return create(args);
+  }});
+  assert.equal((await patchProductPercentageCore(actor, patchInput("5", "6"), tx)).ok, true);
+  assert.equal(s.adjustments.length, 1);
+  assert.equal(s.entries[0].amount, "-30.00");
 });
 
 test("правка при DONE отклоняется", async () => {
