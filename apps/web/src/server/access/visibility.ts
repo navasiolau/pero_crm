@@ -159,15 +159,29 @@ function assignedWorkVisibilityWhereGrants(actor: VisibilityActor): Prisma.WorkW
   return grants.length ? { OR: grants } : { id: { in: [] } };
 }
 
+/** Цех и монтажники читают все файлы изделия со статусом не DESIGN (только чтение). */
+function fieldNonDesignFileWhere(): Prisma.FileWhereInput {
+  return {
+    OR: [
+      { product: { status: { not: "DESIGN" } } },
+      { task: { product: { status: { not: "DESIGN" }, deletedAt: null } } },
+    ],
+  };
+}
+
 function fileVisibilityWhereGrants(actor: VisibilityActor): Prisma.FileWhereInput {
   if (hasFullProjectVisibility(actor)) return {};
-  return {
+  const base: Prisma.FileWhereInput = {
     AND: [
       { project: assignedProjectVisibilityWhere(actor) },
       { OR: [{ productId: null }, { product: assignedProductVisibilityWhere(actor) }] },
       { OR: [{ taskId: null }, { task: taskVisibilityWhere(actor) }] },
     ],
   };
+  // Полевая ветка рядом с productVisibilityWhere: Файлы не наследуют глобальное чтение,
+  // но WORKER/MOUNTER видят файлы любого не-DESIGN изделия (замеры, документы, эскиз, .b3d, файлы задач).
+  if (!hasAnyRole(actor.roles, FIELD_ROLES)) return base;
+  return { OR: [base, fieldNonDesignFileWhere()] };
 }
 
 export function clientVisibilityWhere(actor: VisibilityActor): Prisma.ClientWhereInput {
