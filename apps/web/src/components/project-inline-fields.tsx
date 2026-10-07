@@ -1,9 +1,9 @@
 "use client";
 import { useState, useSyncExternalStore } from "react";
-import { InlineSelectField } from "@/components/inline-fields";
+import { InlineSelectField, InlineTextField } from "@/components/inline-fields";
 import { ClientDialog } from "@/components/client-dialog";
 import { Button } from "@/components/ui/button";
-import { confirmedProductClientContacts, type ProductClientContact } from "@/lib/product-client-contacts";
+import type { ProductClientContact } from "@/lib/product-client-contacts";
 import { Badge } from "@/components/ui/badge";
 import { stageLabels, stageStyles } from "@/lib/stages";
 import { cn } from "@/lib/utils";
@@ -27,15 +27,14 @@ export function ProjectConfirmedTotal() {
 }
 
 export function ProjectInlineContacts({canManage,clients}:{canManage:boolean;clients:ProductClientContact[]}){
- const{controller,derived}=useProjectInline();const client=controller("clientId");
- const selected=useSyncExternalStore(client.subscribe,client.getSnapshot,client.getServerSnapshot);
- const[createOpen,setCreateOpen]=useState(false);const contact=confirmedProductClientContacts(String(selected.baseline),clients,derived);
+ const{controller,derived,switchingClient}=useProjectInline();const client=controller("clientId");
+ const[createOpen,setCreateOpen]=useState(false);
  const options=clients.map(row=>({value:row.id,label:row.label,hint:row.phone}));
  if(derived.clientId&&derived.clientLabel&&!options.some(row=>row.value===derived.clientId))options.push({value:derived.clientId,label:derived.clientLabel,hint:derived.phone??""});
  return <div className="flex min-w-0 flex-col gap-3 text-sm" data-project-contacts>
  <div className="flex min-w-0 items-start gap-3"><div className="min-w-0 flex-1"><InlineSelectField id="project-inline-client" label="Клиент" controller={client} readOnly={!canManage} options={options}/></div>{canManage?<Button type="button" variant="outline" className="mt-6 shrink-0" onClick={()=>setCreateOpen(true)}>Новый клиент</Button>:null}</div>
- <p id="project-client-phone" className="break-words"><span className="text-muted-foreground">Телефон: </span>{contact.known?contact.phone:"Не определён"}</p>
- <p id="project-client-address" className="break-words"><span className="text-muted-foreground">Адрес: </span>{contact.known?contact.address??"Не указан":"Не определён"}</p>
+ <InlineTextField id="project-client-phone" label="Телефон клиента" inputMode="tel" controller={controller('client.phone')} readOnly={!canManage||switchingClient}/>
+ <InlineTextField id="project-client-address" label="Адрес клиента" controller={controller('client.address')} readOnly={!canManage||switchingClient}/>
  <ClientDialog open={createOpen} onOpenChange={setCreateOpen} onCreated={async id=>{client.setDraft(id);await client.commit();}}/>
  </div>;
 }

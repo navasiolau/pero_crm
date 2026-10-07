@@ -12,11 +12,11 @@ inject('../src/components/project-stage-control',{ProjectStageControl(){return R
 (globalThis as unknown as {React:typeof React}).React=React;
 const {ProjectInlineProvider}=require('../src/components/project-inline-provider') as typeof import('../src/components/project-inline-provider');
 const {OverviewTab}=require('../src/app/(app)/projects/[id]/overview-tab') as typeof import('../src/app/(app)/projects/[id]/overview-tab');
-const initial={title:'Order',clientId:'b',managerId:null,address:'HISTORIC PROJECT ADDRESS','client.phone':'old phone',delivery:null,unloading:null,installation:null};
+const initial={title:'Order',clientId:'b',managerId:null,address:'HISTORIC PROJECT ADDRESS','client.phone':'200','client.address':'Client B',delivery:null,unloading:null,installation:null};
 // eslint-disable-next-line react/no-children-prop -- provider требует children в typed props
 function render(canManage:boolean){return renderToStaticMarkup(React.createElement(ProjectInlineProvider,{projectId:'project',initial,stage:'LEAD',pricingProjection:null,children:React.createElement(OverviewTab,{project:{id:'project',number:'1',stage:'LEAD',stageChangedAt:new Date(0),createdAt:new Date(0),currency:'BYN',refusalReason:null,refusalComment:null,reclamationReason:null,reclamationDescription:null,reclamationFault:null},createdByName:null,canManage,showAmount:false,clients:[{id:'a',label:'A',phone:'100',address:'Client A'},{id:'b',label:'B',phone:'200',address:'Client B'}],managers:[],productEngineers:[],doneAt:null})}));}
-test('project contacts are readonly selected Client data, never historical Project.address',()=>{
- const html=render(true);assert.match(html,/Client B/);assert.match(html,/>200</);assert.doesNotMatch(html,/HISTORIC PROJECT ADDRESS/);assert.doesNotMatch(html,/<input[^>]+id="project-inline-(?:phone|address)"/);assert.match(html,/project-client-phone/);assert.match(html,/project-client-address/);
+test('project contacts edit canonical Client data, never historical Project.address',()=>{
+ const html=render(true);assert.match(html,/Client B/);assert.match(html,/id="project-client-phone"[^>]*value="200"/);assert.doesNotMatch(html,/HISTORIC PROJECT ADDRESS/);assert.match(html,/Телефон клиента/);assert.match(html,/Адрес клиента/);
 });
 test('readonly role cannot create client while manager reuses create experience',()=>{assert.doesNotMatch(render(false),/Новый клиент/);assert.match(render(true),/Новый клиент/);});
 

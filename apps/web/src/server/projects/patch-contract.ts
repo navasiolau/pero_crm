@@ -12,6 +12,7 @@ export const projectPatchSchema = z.discriminatedUnion("field", [
   field("managerId", nullableText), field("address", nullableText),
   field("delivery", projectMoneySchema), field("unloading", projectMoneySchema), field("installation", projectMoneySchema),
   z.object({ ...base, field: z.literal("client.phone"), value: required, expectedValue: z.string(), expectedClientId: z.string().min(1) }).strict(),
+  z.object({ ...base, field: z.literal("client.address"), value: nullableText, expectedValue: nullableText, expectedClientId: z.string().min(1) }).strict(),
 ]);
 export type ProjectPatch = z.infer<typeof projectPatchSchema>;
 export type ProjectPatchField = ProjectPatch["field"];

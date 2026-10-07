@@ -72,8 +72,8 @@ export async function patchProjectCore(actor:DomainActor,input:ProjectPatch,tran
    return{...saved.result as unknown as Extract<ProjectPatchResult,{kind:"saved"}>,repeated:true};
   }
   let result:Extract<ProjectPatchResult,{kind:"saved"}>;
-  if(patch.field==="clientId"||patch.field==="address"||patch.field==="client.phone"){
-   const shared=await patchProjectContactInTransaction(actor,{projectId:patch.projectId,field:patch.field==="client.phone"?"phone":patch.field,value:patch.value,expectedValue:patch.expectedValue,...(patch.field==="client.phone"?{expectedClientId:patch.expectedClientId}:{})},tx);
+  if(patch.field==="clientId"||patch.field==="address"||patch.field==="client.phone"||patch.field==="client.address"){
+   const shared=await patchProjectContactInTransaction(actor,{projectId:patch.projectId,field:patch.field==="client.phone"?"phone":patch.field==="client.address"?"clientAddress":patch.field,value:patch.value,expectedValue:patch.expectedValue,...(patch.field==="client.phone"||patch.field==="client.address"?{expectedClientId:patch.expectedClientId}:{})},tx);
    if(!shared.ok)return{...identity,...shared};
    result={...identity,kind:"saved",value:shared.value,noOp:!shared.changed,derived:{clientId:shared.clientId,clientLabel:shared.clientLabel,phone:shared.phone,clientAddress:shared.clientAddress,...(patch.field==="client.phone"?{phone:String(shared.value)}:{})}};
   }else{

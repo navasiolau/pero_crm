@@ -19,6 +19,40 @@ function fixture(){
  const run=async<T>(callback:()=>Promise<T>)=>{const before=structuredClone(state);try{return await callback()}catch(error){Object.assign(state,before);throw error}};
  return{state,tx,run};
 }
+
+test('project edits the Client address shared by orders without changing Project.address',async()=>{
+ const f=fixture();f.state.projects[0].address='Delivery only';
+ const result=await patchProjectContactInTransaction(manager,{projectId:'project',field:'clientAddress',value:'  New client street  ',expectedValue:initial.address,expectedClientId:'client'},f.tx);
+ assert.equal(result.ok,true);assert.equal(f.state.clients[0].address,'New client street');assert.equal(f.state.projects[0].address,'Delivery only');
+ assert.equal(f.state.clients[0].phone,'100');assert.equal(f.state.audit.length,1);assert.equal(f.state.events.length,1);
+ const conflict=await patchProjectContactInTransaction(manager,{projectId:'project',field:'clientAddress',value:'stale',expectedValue:initial.address,expectedClientId:'client'},f.tx);
+ assert.equal(conflict.ok,false);if(!conflict.ok)assert.equal(conflict.currentValue,'New client street');
+ const cleared=await patchProjectContactInTransaction(manager,{projectId:'project',field:'clientAddress',value:'   ',expectedValue:'New client street',expectedClientId:'client'},f.tx);
+ assert.equal(cleared.ok,true);assert.equal(f.state.clients[0].address,null);
+});
+
+test('address rejects a changed client link and shares CAS with standalone Client CRUD',async()=>{
+ const f=fixture();f.state.projects[0].clientId='other';
+ const result=await patchProjectContactInTransaction(manager,{projectId:'project',field:'clientAddress',value:'Wrong client',expectedValue:initial.address,expectedClientId:'client'},f.tx);
+ assert.equal(result.ok,false);if(!result.ok)assert.equal(result.kind,'conflict');
+ assert.equal(f.state.audit.length,0);assert.equal(f.state.clients[1].address,initial.address);
+ f.state.projects[0].clientId='client';
+ await updateClientInTransaction(f.tx,manager,'client',{name:initial.name,phone:initial.phone,address:'From Client card'},initial);
+ const stale=await patchProjectContactInTransaction(manager,{projectId:'project',field:'clientAddress',value:'Old project form',expectedValue:initial.address,expectedClientId:'client'},f.tx);
+ assert.equal(stale.ok,false);assert.equal(f.state.clients[0].address,'From Client card');
+});
+
+test('address outbox failure rolls back and forbidden roles do not inspect clients',async()=>{
+ const f=fixture();f.state.fail=true;
+ await assert.rejects(f.run(()=>patchProjectContactInTransaction(manager,{projectId:'project',field:'clientAddress',value:'New',expectedValue:initial.address,expectedClientId:'client'},f.tx)),/outbox failure/);
+ assert.equal(f.state.clients[0].address,initial.address);assert.equal(f.state.audit.length,0);
+ const before=f.state.locks.length;
+ for(const roles of [['ENGINEER'],['WORKER'],['MOUNTER'],['ACCOUNTANT']] as const){
+ const result=await patchProjectContactInTransaction({...manager,roles:[...roles]},{projectId:'project',field:'clientAddress',value:'Secret',expectedValue:null,expectedClientId:'client'},f.tx);
+ assert.equal(result.ok,false);if(!result.ok)assert.equal(result.kind,'forbidden');
+ }
+ assert.equal(f.state.locks.length,before);
+});
 test('project contact CRUD retains address and phone CAS independently of product retirement',async()=>{
  const f=fixture();const address=await patchProjectContactInTransaction(manager,{projectId:'project',field:'address',value:'  shared address  ',expectedValue:null},f.tx);
  assert.equal(address.ok,true);assert.equal(f.state.projects[0].address,'shared address');
