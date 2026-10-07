@@ -106,6 +106,24 @@ def state(q):
 def original_stock(q):
     return json.loads(q("SELECT json_build_object('rows',count(*),'hash',md5(COALESCE(string_agg(h,'' ORDER BY h),''))) FROM (SELECT md5(jsonb_build_object('id',m.id,'price',m.\"purchasePrice\",'quantity',COALESCE(s.quantity,0))::text) h FROM \"Material\" m LEFT JOIN (SELECT \"materialId\",sum(CASE WHEN type='EXPENSE' THEN -quantity ELSE quantity END) quantity FROM \"StockMovement\" GROUP BY \"materialId\") s ON s.\"materialId\"=m.id) x"))
 
+def restored_state_matches(actual, expected, parse_check):
+    if {k:v for k,v in actual.items() if k!='constraints'}!={k:v for k,v in expected.items() if k!='constraints'}:return False
+    constraints={(row['table_name'],row['name']):row for row in actual['constraints']}
+    if len(constraints)!=len(actual['constraints']) or len(actual['constraints'])!=len(expected['constraints']):return False
+    for original in expected['constraints']:
+        restored=constraints.get((original['table_name'],original['name']))
+        if original==restored:continue
+        if restored is None or original['type']!='c' or {k:v for k,v in original.items() if k!='definition'}!={k:v for k,v in restored.items() if k!='definition'}:return False
+        reference=original['table_name'];table=reference[1:-1].replace('""','"') if reference.startswith('"') and reference.endswith('"') else reference
+        check(table in actual['tables'],'RESTORED_PUBLIC_TABLE_REQUIRED')
+        # PostgreSQL may flatten associative AND groups when reparsing a dump.
+        # Reparse the ORIGINAL full CHECK on an empty TEMP clone, preserving all
+        # casts/operators/precedence; do not strip parentheses or skip a check.
+        identifier='"'+table.replace('"','""')+'"'
+        sql='CREATE TEMP TABLE warehouse94_expected_table (LIKE public.'+identifier+'); ALTER TABLE warehouse94_expected_table ADD CONSTRAINT warehouse94_expected_check '+original['definition']+"; SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid='pg_temp.warehouse94_expected_table'::regclass AND conname='warehouse94_expected_check'"
+        if parse_check(sql)!=restored['definition']:return False
+    return True
+
 def frozen_archive_guard(receipt, allow_repeated=False):
     # Проверка архивного склада и исходных снимков в той же транзакции, что и zero.
     clauses=[]
@@ -195,14 +213,19 @@ def verify_local(options):
     try:
         item=inspect(name);check(item['Config']['Labels'].get('pero.warehouse94.run')==options.run and item['HostConfig']['NetworkMode']=='none' and not item['HostConfig'].get('PortBindings') and not [m for m in item['Mounts'] if m['Type'] in ('bind','volume')],'RESTORE_ISOLATION_REQUIRED')
         deadline=time.monotonic()+60
-        while subprocess.run(['docker','exec',name,'pg_isready','-U','crm','-d','crm'],capture_output=True).returncode:
+        while True:
+            # pg_isready also sees the temporary init server that is stopped
+            # before the final server starts. Wait for completed init first.
+            initialized='PostgreSQL init process complete; ready for start up.' in call(['docker','logs',name])
+            ready=subprocess.run(['docker','exec',name,'pg_isready','-U','crm','-d','crm'],capture_output=True).returncode==0
+            if initialized and ready:break
             check(time.monotonic()<deadline,'RESTORE_DATABASE_NOT_READY');time.sleep(1)
         with archive.open('rb') as stream:
             result=subprocess.run(['docker','exec','-i',name,'pg_restore','--exit-on-error','--no-owner','-U','crm','-d','crm'],stdin=stream,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=300)
         check(result.returncode==0,'ISOLATED_RESTORE_FAILED')
         q=lambda sql:query(name,sql)
-        restored=state(q);check(restored==receipt['state'],'RESTORED_ROWS_SCHEMA_MISMATCH')
-        report={'runId':options.run,'revision':receipt['revision'],'operatorSha256':sha(Path(__file__)),'archiveSha256':receipt['archiveSha256'],'restoredRowsMatched':True,'schemaAndForeignKeysMatched':True,'zeroRehearsal':False,'targetedRestore':False}
+        restored=state(q);check(restored_state_matches(restored,receipt['state'],lambda sql:query(name,sql,True)),'RESTORED_ROWS_SCHEMA_MISMATCH')
+        report={'runId':options.run,'revision':receipt['revision'],'operatorSha256':sha(Path(__file__)),'archiveSha256':receipt['archiveSha256'],'restoredRowsMatched':True,'schemaAndForeignKeysMatched':True,'constraintDefinitionsParsedByPostgres':True,'zeroRehearsal':False,'targetedRestore':False}
         if kind=='pre-zero':
             check(original_stock(q)==receipt['originalStock'],'RESTORED_ORIGINAL_STOCK_MISMATCH')
             provisional='a'*64;backup=receipt['archiveSha256'];prefix="SELECT warehouse_attach_recovery_proof('%s','%s','%s')"%(options.run,backup,provisional)

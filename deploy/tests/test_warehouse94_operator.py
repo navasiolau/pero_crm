@@ -51,4 +51,17 @@ class OperatorTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError,'ARTIFACT_TYPE_MISMATCH'):module.read_json(fake)
         fake.read_text.assert_not_called()
 
+    def test_check_reparse_preserves_logic_and_rejects_weakened_constraints(self):
+        table='"Material"';meta={'table_name':table,'name':'bounds','type':'c','validated':True}
+        expected={'tables':{'Material':{'rows':2,'hash':'a'*32}},'constraints':[{**meta,'definition':'CHECK (((quantity > 0) AND (value > 0)))'}]}
+        actual={**expected,'constraints':[{**meta,'definition':'CHECK ((quantity > 0) AND (value > 0))'}]}
+        parse=unittest.mock.MagicMock(return_value=actual['constraints'][0]['definition'])
+        with patch.object(module,'check',wraps=module.check):
+            self.assertTrue(module.restored_state_matches(actual,expected,parse))
+            sql=parse.call_args.args[0];self.assertIn('CREATE TEMP TABLE',sql);self.assertIn(expected['constraints'][0]['definition'],sql)
+            weakened={**actual,'constraints':[{**meta,'definition':'CHECK (quantity > 0)'}]}
+            self.assertFalse(module.restored_state_matches(weakened,expected,parse))
+        different_rows={**actual,'tables':{'Material':{'rows':1,'hash':'b'*32}}}
+        self.assertFalse(module.restored_state_matches(different_rows,expected,lambda sql:actual['constraints'][0]['definition']))
+
 if __name__=='__main__':unittest.main()
