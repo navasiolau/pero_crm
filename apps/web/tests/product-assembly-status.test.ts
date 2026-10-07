@@ -19,7 +19,7 @@ test("assigned worker read rights do not confer product status write rights", ()
   assert.deepEqual(percentageCompletionKinds("PRODUCTION", "STORAGE", false), []);
 });
 test("assembly payroll has its own readable label", () => {
-  assert.equal(entrySchemeLabels.PRODUCT_PERCENT_ASSEMBLY, "Процент за сборку");
+  assert.equal(entrySchemeLabels.PRODUCT_PERCENT_ASSEMBLY, "Процентные отчисления сборщика");
 });
 test("manager late transition closes every reached missing threshold", () => {
   assert.deepEqual(percentageCompletionKinds("INSTALLATION", "DONE", true), ["ENGINEERING", "ASSEMBLY", "INSTALLATION"]);

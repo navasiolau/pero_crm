@@ -8,7 +8,7 @@ import {
 } from "@/components/ui/data-table";
 import { MonthSwitcher, monthLabel } from "@/components/month-switcher";
 import { formatAmount, formatMoneyTotal } from "@/lib/format";
-import { entrySchemeLabels, payoutKindLabels } from "@/lib/labels";
+import { payrollEntryTypeLabel, payoutKindLabels } from "@/lib/labels";
 import type { PayrollEntryView, PayoutView } from "@/server/payroll/queries";
 
 function formatDate(iso: string): string {
@@ -47,12 +47,12 @@ export function PayrollView({
     },
     {
       id: "scheme",
-      header: "Схема",
+      header: "Тип",
       sortable: true,
-      sortValue: (row) => entrySchemeLabels[row.scheme] ?? row.scheme,
+      sortValue: (row) => payrollEntryTypeLabel(row.scheme),
       cell: (row) => (
         <span className="text-muted-foreground">
-          {entrySchemeLabels[row.scheme] ?? row.scheme}
+          {payrollEntryTypeLabel(row.scheme)}
         </span>
       ),
     },

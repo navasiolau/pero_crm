@@ -43,14 +43,21 @@ export const paySchemeLabels: Record<string, string> = {
   NONE: "Без расчёта",
 };
 
-// Подписи схем в начислениях (короткие, для таблиц расчётника)
+// Типы начислений в расчётнике сотрудника
 export const entrySchemeLabels: Record<string, string> = {
   PIECE: "Сдельно",
-  PRODUCT_ENGINEERING: "Инженерный фонд изделия",
-  PRODUCT_PERCENT_ASSEMBLY: "Процент за сборку",
+  PRODUCT_PERCENT_ENGINEERING: "Процентные отчисления инженера",
+  PRODUCT_PERCENT_ASSEMBLY: "Процентные отчисления сборщика",
+  PRODUCT_PERCENT_INSTALLATION: "Процентные отчисления монтажника",
   PERCENT_PROJECT: "% от стоимости",
   PERCENT_TURNOVER: "% от оборота",
 };
+
+export function payrollEntryTypeLabel(scheme: string): string {
+  return Object.hasOwn(entrySchemeLabels, scheme)
+    ? entrySchemeLabels[scheme]
+    : "";
+}
 
 // Типы выплат (§10): обычная выплата по долгу / аванс текущим месяцем
 export const payoutKindLabels: Record<string, string> = {
