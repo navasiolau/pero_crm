@@ -90,6 +90,7 @@ model User {
   surveyedProducts Product[]    @relation("ProductSurveyor")
   assignedTasks   Task[]         @relation("TaskAssignee")
   calendarEntries CalendarEntry[]
+  financeDocuments FinanceDocument[]
   calendarReminderFacts CalendarReminderFact[]
   telegramReminderOutboxes TelegramReminderOutbox[]
   notifications   Notification[]
@@ -807,6 +808,8 @@ model Payment {
   cashAccount      CashAccount?     @relation(fields: [cashAccountId], references: [id], onDelete: SetNull)
   expenseArticleId String?
   expenseArticle   ExpenseArticle?  @relation(fields: [expenseArticleId], references: [id], onDelete: SetNull)
+  reportDocumentId String?          @unique
+  reportDocument   FinanceDocument? @relation(fields: [reportDocumentId], references: [id], onDelete: Restrict)
   paidAt           DateTime         @default(now())
   comment          String?
   createdById      String?
@@ -815,6 +818,32 @@ model Payment {
   @@index([projectId])
   @@index([paidAt])
   @@index([cashAccountId])
+}
+
+enum FinanceDocumentState {
+  PENDING
+  READY
+}
+
+model FinanceDocument {
+  id                 String               @id @default(uuid())
+  clientMutationId   String               @unique
+  requestFingerprint String
+  uploadedById       String
+  uploadedBy         User                 @relation(fields: [uploadedById], references: [id], onDelete: Restrict)
+  fileName           String
+  mimeType           String
+  size               Int
+  contentHash        String
+  storageKey         String               @unique
+  storageMode        String
+  state              FinanceDocumentState @default(PENDING)
+  createdAt          DateTime             @default(now())
+  readyAt            DateTime?
+  payment            Payment?
+
+  @@index([uploadedById, state, createdAt])
+  @@index([state, createdAt])
 }
 
 // Настройки организации (§10): key-value, сейчас — payrollCurrency

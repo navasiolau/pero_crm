@@ -1,0 +1,30 @@
+# Design
+
+## Context
+
+См. proposal.md. Payment уже допускает отсутствие проекта, File — нет. Файловые routes используют технические grants; FINANCE_ROLES разрешены отдельно. В проекте есть explicit storageConfiguration, upload limits/results и FileViewer.
+
+## Goals / Non-Goals
+
+**Goals:** единый сервис подтверждённых финансовых файлов для web и будущего Telegram adapter, отдельные финансовые права, безопасный повтор после неоднозначного ответа.
+
+**Non-Goals:** обязательность документа (#99), Telegram adapter (#98), смена backend хранения, удаление старых файлов или пересчёт денег.
+
+## Decisions
+
+1. FinanceDocument хранит owner, имя/MIME/размер/hash, server-generated storageKey/backend, clientMutationId/fingerprint, PENDING/READY и даты. Payment получает необязательную уникальную связь reportDocumentId с Restrict. Финансовые файлы не получают фиктивных проектов.
+2. Перед storage write сервис резервирует документ в транзакции, проверяя актуального actor и fingerprint. Точный retry использует прежний ключ; изменение содержимого не перезаписывает оригинал. После storage write отдельная транзакция подтверждает READY и один audit. PENDING нельзя прочитать/привязать как готовый.
+3. Ключ finance-documents/<UUID>/<hash> задаёт сервер. Используются действующие S3 функции/explicit configuration и безопасный local adapter под uploads. Смена режима не переключает чтение старого документа молча.
+4. Web upload/read — тонкие адаптеры над сервисом. Upload проверяет actor до multipart, исключается точным путём из middleware cloning по существующему upload pattern. Bot получит такой же адаптер в #98. DTO не раскрывает storageKey и backend.
+5. ViewableFile получает ограниченный source project|finance, default project. Произвольные URL не принимаются. FinanceDocumentUpload переиспользуется страницей документов и последующей формой расходов.
+6. Неподвязанные документы видит только их владелец; привязанные платежи читают FINANCE_ROLES. Обычный список показывает READY, ограничен сервером, имеет поиск/сортировку/пагинацию через DataTable. Изображения/PDF открываются общим FileViewer; остальные файлы скачиваются.
+
+## Risks / Trade-offs
+
+- Storage и PostgreSQL не образуют общей транзакции → резервирование/подтверждение и стабильный ключ; при ошибке файл остаётся PENDING, деньги не создаются, широкая очистка не запускается.
+- Повтор/конкуренция → уникальный clientMutationId, fingerprint и транзакционная блокировка, аудит ровно один раз.
+- Отзыв роли во время загрузки → повторная проверка actor при подтверждении; неподтверждённые bytes не доступны читателям.
+
+## Migration Plan
+
+Аддитивная таблица, nullable FK Payment и relation User; прежние данные не меняются. Local/staging migrate deploy на разрешённой существующей БД без дампа/reset/seed. Production только по отдельному разрешению с временным проверенным дампом. Старый образ совместим с добавленными таблицей и nullable колонкой; документы сохраняются при rollback приложения.

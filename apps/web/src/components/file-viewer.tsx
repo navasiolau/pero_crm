@@ -6,9 +6,9 @@ import { Download, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { FullscreenImageViewport } from "@/components/fullscreen-image-viewport";
+import { getViewableFileSource, type ViewableFile } from "@/lib/viewable-file";
 
-export interface ViewableFile { id: string; fileName: string; mimeType: string }
-export function getViewableFileSource(file:ViewableFile){return `/api/files/${file.id}`;}
+export { getViewableFileSource, type ViewableFile } from "@/lib/viewable-file";
 export type FileViewerVariant = "standard" | "cover-fullscreen";
 export function getFileViewerPresentation(variant: FileViewerVariant = "standard", file?: Pick<ViewableFile,"mimeType">) {
   return (file ? file.mimeType.startsWith("image/") : variant === "cover-fullscreen")
@@ -34,7 +34,7 @@ export function FileViewer({file,open,onOpenChange,variant="standard"}: {
     <DialogContent data-file-viewer-variant={variant==="cover-fullscreen"?"cover-fullscreen":"image-fullscreen"} className={presentation.popupClassName} showCloseButton={false} onClick={event=>event.stopPropagation()}>
       <DialogTitle className="sr-only">Полноэкранный просмотр изображения</DialogTitle>
       <button type="button" className="absolute top-3 right-3 z-20 inline-flex size-11 items-center justify-center rounded-md text-white hover:bg-white/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white" aria-label="Закрыть полноэкранный просмотр" onClick={()=>onOpenChange(false)}><X className="size-5" /></button>
-      <FullscreenImageViewport key={`${variant}:file:${file.id}`} src={src} alt={file.fileName} />
+      <FullscreenImageViewport key={`${variant}:${file.source === "finance" ? "finance" : "file"}:${file.id}`} src={src} alt={file.fileName} />
     </DialogContent>
   </Dialog>;
   return <Dialog open={open} onOpenChange={onOpenChange}>
