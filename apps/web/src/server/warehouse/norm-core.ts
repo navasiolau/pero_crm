@@ -2,8 +2,10 @@ import {liveProductWhere} from "@/server/access/live-entities";
 import type { Prisma } from "@prisma/client";
 import { decimalAtoms, decimalText, existingNorm, inputNorm, scaleNorm } from "@/lib/product-quantity";
 import { lockProductRow } from "@/server/products/quantity-core";
+import {warehouseMetadataGate} from './gate';
 
 export async function lockMaterialProduct(tx: Prisma.TransactionClient, id: string) {
+  await warehouseMetadataGate(tx);
   const line = await tx.projectMaterial.findUnique({ where: {product:liveProductWhere, id }, select: { productId: true } });
   if (!line) throw new Error("Строка потребности не найдена");
   await lockProductRow(tx, line.productId);
@@ -11,6 +13,7 @@ export async function lockMaterialProduct(tx: Prisma.TransactionClient, id: stri
 
 export async function addMaterialNorm(tx: Prisma.TransactionClient,
   data: { productId: string; materialId: string; quantity?: number; quantityPerUnit?: number; comment?: string }, userId: string) {
+  await warehouseMetadataGate(tx);
   await lockProductRow(tx, data.productId);
   const product = await tx.product.findUnique({ where: {...liveProductWhere, id: data.productId }, select: { id: true, number: true, projectId: true, quantity: true } });
   if (!product) throw new Error("Изделие не найдено");

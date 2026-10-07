@@ -20,6 +20,7 @@ import { SearchableSelect } from "@/components/ui/searchable-select";
 import { formatAmount, formatQty } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { addStockIncome } from "@/server/warehouse/actions";
+import {priceInput,quantityInput} from '@/lib/warehouse-cost';
 import type { MaterialOption, MaterialView } from "@/server/warehouse/queries";
 
 // Остатки склада: остаток = приходы + возвраты − списания (считает сервер).
@@ -41,6 +42,7 @@ export function StockView({
   const [quantity, setQuantity] = useState("");
   const [unitPrice, setUnitPrice] = useState("");
   const [comment, setComment] = useState("");
+  const [clientMutationId,setClientMutationId]=useState(()=>crypto.randomUUID());
 
   const materialOptions = useMemo(
     () =>
@@ -137,20 +139,15 @@ export function StockView({
     });
   }
 
-  const qty = Number(quantity);
-  const price = Number(unitPrice);
-  const incomeValid =
-    materialId !== "" &&
-    quantity.trim() !== "" &&
-    Number.isFinite(qty) &&
-    qty > 0 &&
-    (unitPrice.trim() === "" || (Number.isFinite(price) && price >= 0));
+  let incomeValid=false;
+  try{quantityInput(quantity);priceInput(unitPrice);incomeValid=materialId!=='';}catch{}
 
   function resetIncomeForm() {
     setMaterialId("");
     setQuantity("");
     setUnitPrice("");
     setComment("");
+    setClientMutationId(crypto.randomUUID());
   }
 
   return (
@@ -163,7 +160,7 @@ export function StockView({
           </p>
         </div>
         {canManage ? (
-          <Button onClick={() => setIncomeOpen(true)}>
+          <Button disabled={rows.some(row=>!row.warehouseReady)} onClick={() => setIncomeOpen(true)}>
             <Plus className="size-4" />
             Приход
           </Button>
@@ -215,13 +212,14 @@ export function StockView({
                 />
               </div>
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="income-price">Цена, BYN</Label>
+                <Label htmlFor="income-price">Цена, BYN *</Label>
                 <Input
                   id="income-price"
                   inputMode="decimal"
                   value={unitPrice}
                   onChange={(event) => setUnitPrice(event.target.value)}
-                  placeholder="Необязательно"
+                  placeholder="Больше нуля"
+                  required
                 />
               </div>
             </div>
@@ -245,9 +243,9 @@ export function StockView({
                 startTransition(async () => {
                   const result = await addStockIncome({
                     materialId,
-                    quantity: qty,
-                    unitPrice:
-                      unitPrice.trim() === "" ? undefined : price,
+                    quantity,
+                    unitPrice,
+                    clientMutationId,
                     comment: comment.trim() || undefined,
                   });
                   if (result.ok) {

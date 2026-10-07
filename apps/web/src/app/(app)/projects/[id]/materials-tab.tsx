@@ -20,6 +20,7 @@ import { Label } from "@/components/ui/label";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { ConfirmDeleteDialog } from "@/components/confirm-delete-dialog";
 import { scaleNorm } from "@/lib/product-quantity";
+import {priceInput,quantityInput} from '@/lib/warehouse-cost';
 import { formatAmount, formatQty } from "@/lib/format";
 import { projectMaterialStatusLabels, stockMovementTypeLabels } from "@/lib/labels";
 import {
@@ -48,6 +49,9 @@ export type ProjectMaterialLineView = {
   available: number; // остаток на складе
   status: ProjectMaterialLineStatus;
   comment: string | null;
+  warehouseReady?:boolean;
+  returnSources?:{id:string;createdAt:string;quantity:number;unitPrice:number|null}[];
+  legacyReturnQuantity?:number;
 };
 
 export type StockMovementRow = {
@@ -594,12 +598,15 @@ function LineActionDialog({
   const [quantity, setQuantity] = useState("");
   const [unitPrice, setUnitPrice] = useState("");
   const [comment, setComment] = useState("");
+  const [clientMutationId,setClientMutationId]=useState(()=>crypto.randomUUID());
+  const [sourceId,setSourceId]=useState('legacy');
+  const source=line.returnSources?.find(item=>item.id===sourceId);
 
   const maxQuantity =
     kind === "request"
       ? Math.min(line.debt, line.available)
       : kind === "return"
-        ? line.issuedQty
+        ? source?.quantity??line.legacyReturnQuantity??line.issuedQty
         : null; // у правки потолка нет, только пол ≥ выданного
 
   // Дефолты при каждом открытии
@@ -610,13 +617,14 @@ function LineActionDialog({
           ? String(line.quantityPerUnit)
           : String(maxQuantity ?? line.debt),
       );
-      setUnitPrice(line.purchasePrice === null ? "" : String(line.purchasePrice));
+      if(kind!=='return')setUnitPrice(line.purchasePrice === null ? "" : String(line.purchasePrice));
       setComment(kind === "edit" ? (line.comment ?? "") : "");
     }
   }, [open, kind, line, maxQuantity]);
+  useEffect(()=>{if(open){setClientMutationId(crypto.randomUUID());setSourceId(line.returnSources?.[0]?.id??'legacy');if(kind==='return')setUnitPrice('');}},[open,kind,line]);
 
-  const parsedQuantity = quantity.trim() === "" ? NaN : Number(quantity);
-  const parsedPrice = unitPrice.trim() === "" ? NaN : Number(unitPrice);
+  let parsedQuantity=NaN;
+  try{parsedQuantity=Number(quantityInput(quantity));}catch{}
 
   let plannedQuantity = NaN;
   try { plannedQuantity = Number(scaleNorm(parsedQuantity, productQuantity, 3, 12)); } catch { /* Ошибка ввода блокирует сохранение. */ }
@@ -625,9 +633,9 @@ function LineActionDialog({
     parsedQuantity > 0 &&
     (maxQuantity === null || parsedQuantity <= maxQuantity) &&
     (kind !== "edit" || plannedQuantity >= line.issuedQty);
-  const priceValid =
-    unitPrice.trim() === "" || (Number.isFinite(parsedPrice) && parsedPrice >= 0);
-  const canSubmit = !pending && quantityValid && priceValid;
+  let priceValid=kind!=='return'||sourceId!=='legacy';
+  if(kind==='return'&&sourceId==='legacy')try{priceInput(unitPrice);priceValid=true;}catch{}
+  const canSubmit = !pending && quantityValid && priceValid && (kind==='edit'||line.warehouseReady===true);
 
   const titles = {
     request: "Запросить со склада",
@@ -673,7 +681,13 @@ function LineActionDialog({
               </p>
             ) : null}
           </div>
-          {kind !== "edit" && showMoney ? (
+          {kind==='return'&&<div className="flex flex-col gap-1.5">
+            <Label>Исходная выдача *</Label>
+            <SearchableSelect value={sourceId} onChange={value=>{setSourceId(value);setUnitPrice('');}}
+              options={[...(line.returnSources??[]).map(item=>({value:item.id,label:`${new Date(item.createdAt).toLocaleDateString('ru-RU')} · ${formatQty(item.quantity)} ${line.unit}`})),...((line.legacyReturnQuantity??line.issuedQty)>0?[{value:'legacy',label:'Выдано до нового учёта'}]:[])]}
+              placeholder="Выберите выдачу" searchPlaceholder="Поиск выдачи…"/>
+          </div>}
+          {(kind==='return'&&sourceId==='legacy')||(kind==='request'&&showMoney) ? (
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="mat-line-price">Цена, BYN за {line.unit}</Label>
               <Input
@@ -681,12 +695,13 @@ function LineActionDialog({
                 type="number"
                 min="0"
                 step="0.01"
-                value={unitPrice}
+                value={kind==='request'?(line.purchasePrice??''):unitPrice}
+                readOnly={kind==='request'}
                 onChange={(event) => setUnitPrice(event.target.value)}
-                placeholder="Учётная цена"
+                placeholder="Положительная фактическая цена"
               />
               <p className="text-xs text-muted-foreground">
-                Пусто — учётная цена материала
+                {kind==='request'?'Цена рассчитывается автоматически по средней стоимости склада':'Укажите фактическую оценку возвращаемого материала больше нуля'}
               </p>
             </div>
           ) : null}
@@ -707,21 +722,20 @@ function LineActionDialog({
             disabled={!canSubmit}
             onClick={() =>
               startTransition(async () => {
-                const price =
-                  unitPrice.trim() === "" ? undefined : parsedPrice;
                 const result =
                   kind === "request"
                     ? await requestMaterial({
                         projectMaterialId: line.id,
                         quantity: parsedQuantity,
-                        unitPrice: price,
+                        clientMutationId,
                         comment: comment.trim() || undefined,
                       })
                     : kind === "return"
                       ? await returnMaterial({
                           projectMaterialId: line.id,
                           quantity: parsedQuantity,
-                          unitPrice: price,
+                          clientMutationId,
+                          ...(sourceId==='legacy'?{unitPrice}:{sourceMovementId:sourceId}),
                           comment: comment.trim() || undefined,
                         })
                       : await updateProjectMaterial({
