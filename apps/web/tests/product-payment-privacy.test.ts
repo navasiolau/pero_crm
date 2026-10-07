@@ -18,11 +18,12 @@ test("стоимость назначенного изделия скрывае�
  }
 });
 
-test("обе полевые роли видят все не-DESIGN стадии, без права записи или чужой задачи",()=>{
+test("обе полевые роли видят последующие стадии, без подготовки, права записи или чужой задачи",()=>{
  const fixture=engineerFixture(),row=fixture.products[2];
  for(const role of ["WORKER","MOUNTER"] as const){
   const actor={id:"unassigned",roles:[role]};
-  for(const status of ["PRODUCTION","STORAGE","DELIVERY","INSTALLATION","DONE","RECLAMATION"]){row.status=status;assert.ok(matches(row,productVisibilityWhere(actor)),role+":"+status);assert.equal(matches(row,productEditWhere(actor)),false);}
+  for(const status of ["PRODUCTION","STORAGE","INSTALLATION","DONE","RECLAMATION"]){row.status=status;assert.ok(matches(row,productVisibilityWhere(actor)),role+":"+status);assert.equal(matches(row,productEditWhere(actor)),false);}
+  row.status="PREPARATION";assert.equal(matches(row,productVisibilityWhere(actor)),false);
   row.status="DESIGN";assert.equal(matches(row,productVisibilityWhere(actor)),false);
   assert.equal(fixture.tasks.some(task=>matches(task,taskExecutionWhere(actor))),false);
   assert.ok(navItemsForRole([role]).some(item=>item.href==="/products"));

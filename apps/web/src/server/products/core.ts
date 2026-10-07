@@ -101,6 +101,7 @@ export async function createProductCore(actor: DomainActor, input: CreateProduct
       number,
       suffixInt,
       title: data.title,
+      status: "PREPARATION",
       quantity: data.quantity,
       kind: data.kind?.trim() || null,
       expectedPrice: data.expectedPrice,
@@ -112,7 +113,7 @@ export async function createProductCore(actor: DomainActor, input: CreateProduct
   percentageConfigs: { create: DEFAULT_PERCENTAGE_KINDS.map(kind => ({ kind, ratePercent: defaults.rates[kind] ?? '0.00', revision: 1 })) },
       createdById: actor.id,
       statusHistory: {
-        create: { toStatus: "DESIGN", changedById: actor.id },
+        create: { toStatus: "PREPARATION", changedById: actor.id },
       },
     },
   });
