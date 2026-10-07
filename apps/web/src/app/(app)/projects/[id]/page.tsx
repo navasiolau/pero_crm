@@ -138,6 +138,7 @@ export default async function ProjectPage({
   return (
     <ProjectInlineProvider key={project.id} projectId={project.id} stage={project.stage} pricingProjection={pricingProjection} initial={{
       title: project.title, clientId: project.clientId, managerId: project.managerId,
+      'client.phone':project.client.phone,'client.address':project.client.address,
       delivery: showOverviewAmount ? pricingProjection ? pricingProjection.delivery : project.delivery?.toString() ?? null : null, unloading: showOverviewAmount ? pricingProjection ? pricingProjection.unloading : project.unloading?.toString() ?? null : null, installation: showOverviewAmount ? pricingProjection ? pricingProjection.installation : project.installation?.toString() ?? null : null,
     }}>
     <div className="flex min-w-0 flex-col gap-4">

@@ -1,9 +1,9 @@
 import {liveProductWhere,liveProjectWhere} from "@/server/access/live-entities";
 import type {Prisma} from '@prisma/client';
 import type {DomainActor} from './core';
-import {mayManageContacts,patchClientPhoneInTransaction,type ContactResult} from '@/server/clients/core';
+import {mayManageContacts,patchClientPhoneInTransaction,patchClientAddressInTransaction,type ContactResult} from '@/server/clients/core';
 export type ProductContactResult = ContactResult & {currentClientLabel?:string;clientAddress?:string|null};
-export type ProjectContactPatch = {projectId:string;field:'clientId'|'address'|'phone';value:string|null;expectedValue:string|null;expectedClientId?:string};
+export type ProjectContactPatch = {projectId:string;field:'clientId'|'address'|'phone'|'clientAddress';value:string|null;expectedValue:string|null;expectedClientId?:string};
 export type ProductContactPatch = {productId:string;field:'clientId'|'address'|'phone';value:string|null;expectedValue:string|null;expectedClientId?:string};
 /** Порядок блокировок: Project → Client. Изделие используется только как точка доступа. */
 export async function patchProductContactInTransaction(actor:DomainActor,patch:ProductContactPatch,tx:Prisma.TransactionClient):Promise<ProductContactResult> {
@@ -21,18 +21,20 @@ export async function patchProjectContactInTransaction(actor:DomainActor,patch:P
  await tx.$queryRaw`SELECT id FROM "Project" WHERE id = ${projectId} FOR UPDATE`;
  const project=await tx.project.findUnique({where:{...liveProjectWhere,id:projectId},select:{id:true,clientId:true,address:true}});
  if(!project)return{ok:false,kind:'not-found',error:'Проект не найден'};
- if(patch.field==='phone'){
-  if(typeof patch.value!=='string'||typeof patch.expectedValue!=='string'||!patch.expectedClientId)return{ok:false,kind:'validation',error:'Укажите телефон и исходного клиента'};
+ if(patch.field==='phone'||patch.field==='clientAddress'){
+  if(!patch.expectedClientId||(patch.field==='phone'&&(typeof patch.value!=='string'||typeof patch.expectedValue!=='string'))||(patch.value!==null&&typeof patch.value!=='string')||(patch.expectedValue!==null&&typeof patch.expectedValue!=='string'))return{ok:false,kind:'validation',error:'Укажите контакт и исходного клиента'};
   if(project.clientId!==patch.expectedClientId){
    // Менеджмент уже проверен до любых чтений; блокировка связи предшествует
    // Client, чтобы явное принятие конфликта использовало точный текущий телефон.
    await tx.$queryRaw`SELECT id FROM "Client" WHERE id = ${project.clientId} FOR UPDATE`;
-   const currentClient=await tx.client.findUnique({where:{id:project.clientId},select:{phone:true,name:true,lastName:true,middleName:true}});
+   const currentClient=await tx.client.findUnique({where:{id:project.clientId},select:{phone:true,address:true,name:true,lastName:true,middleName:true}});
    if(!currentClient)return{ok:false,kind:'not-found',error:'Клиент не найден'};
    return{ok:false,kind:'conflict',error:'Клиент проекта изменён',currentClientId:project.clientId,
-    currentValue:currentClient.phone,currentClientLabel:[currentClient.lastName,currentClient.name,currentClient.middleName].filter(Boolean).join(' ')};
+    currentValue:patch.field==='phone'?currentClient.phone:currentClient.address,currentClientLabel:[currentClient.lastName,currentClient.name,currentClient.middleName].filter(Boolean).join(' ')};
   }
-  const result=await patchClientPhoneInTransaction(tx,actor,project.clientId,patch.value,patch.expectedValue);
+  const result=patch.field==='phone'
+   ?await patchClientPhoneInTransaction(tx,actor,project.clientId,patch.value!,patch.expectedValue!)
+   :await patchClientAddressInTransaction(tx,actor,project.clientId,patch.value,patch.expectedValue);
   return result.ok?{...result,projectId}:result;
  }
  const field=patch.field;
