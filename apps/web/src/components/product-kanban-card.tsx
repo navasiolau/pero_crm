@@ -1,12 +1,11 @@
 "use client";
 
 import * as React from "react";
-import { useLayoutEffect, useRef, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { formatAmount } from "@/lib/format";
-import { getKanbanHeroHeights, getProductSketchPreviewSource, type SketchFilePreview } from "@/lib/product-hero";
+import { getProductSketchPreviewSource, type SketchFilePreview } from "@/lib/product-hero";
 import { daysOnStatus } from "@/lib/product-statuses";
 import { cn } from "@/lib/utils";
 import { ProductHeroImage } from "./product-hero-image";
@@ -45,56 +44,33 @@ export function ProductKanbanCard({
   dragging?: boolean;
   coverAction?: ProductCardCoverAction;
 }) {
-  const infoRef = useRef<HTMLDivElement>(null);
   const fileViewer = useFileViewer();
-  const [infoHeight, setInfoHeight] = useState(0);
   const sketch = product.sketchFile;
   const imageSource = getProductSketchPreviewSource(sketch);
-  const heights = getKanbanHeroHeights(infoHeight);
   const days = daysOnStatus(product.statusChangedAt);
-
-  useLayoutEffect(() => {
-    const node = infoRef.current;
-    if (!node || !imageSource || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver((entries) => {
-      const entry = entries[0];
-      const size = entry?.borderBoxSize;
-      const measured = size?.[0]?.blockSize;
-      const nextHeight = getKanbanHeroHeights(measured ?? node.getBoundingClientRect().height).infoHeight;
-      setInfoHeight((current) => current === nextHeight ? current : nextHeight);
-    });
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, [imageSource]);
-
-  const style = imageSource && heights.infoHeight > 0
-    ? { height: `${heights.cardHeight + 2}px` }
-    : undefined;
 
   return (
     <><Card
       data-slot="product-kanban-card"
       data-has-image={imageSource ? "true" : "false"}
       className={cn("cursor-pointer select-none gap-0 overflow-hidden py-0", dragging && "rotate-2 shadow-lg")}
-      style={style}
     >
       {imageSource && sketch ? (
         <div
           data-slot="product-kanban-image"
           className="relative w-full shrink-0 overflow-hidden bg-muted/30"
-          style={{ height: heights.infoHeight > 0 ? `${heights.imageHeight}px` : "8rem" }}
         >
-          <button type="button" className="absolute inset-0 h-full w-full" aria-label={coverAction?.type==="navigate"?`Открыть изделие ${product.title}`:`Открыть изображение ${product.title} на весь экран`} disabled={dragging}
+          <button type="button" className="block w-full" aria-label={coverAction?.type==="navigate"?`Открыть изделие ${product.title}`:`Открыть изображение ${product.title} на весь экран`} disabled={dragging}
             onClick={event => { event.preventDefault(); event.stopPropagation(); openProductCardCover(coverAction,()=>fileViewer.open(sketch),dragging); }}>
           <ProductHeroImage
             sketch={sketch}
-            className="absolute inset-0 h-full w-full p-2"
+            className="block h-auto w-full"
           />
           </button>
         </div>
       ) : null}
 
-      <div ref={infoRef} data-slot="product-kanban-info" className="flex flex-col gap-1.5 p-3">
+      <div data-slot="product-kanban-info" className="flex flex-col gap-1.5 p-3">
         <div className="flex items-center justify-between gap-2 pr-10">
           <span className="break-all text-sm"><CardNumber>{product.number}</CardNumber></span>
           <div className="flex shrink-0 flex-wrap justify-end gap-1">
