@@ -2,6 +2,7 @@ import {taskWorkspaceEligibility,taskReward} from './workspace-contract';
 import {prisma} from '@/lib/prisma';
 import type {TaskStatus} from '@prisma/client';
 import {hasAnyRole,FIELD_ROLES} from '@/lib/roles';
+import {canViewProductMoney} from '@/lib/product-financial-access';
 import {allocatedWorkQuantity,quantityAtoms} from '@/lib/work-shares';
 import {liveProductWhere,liveChildWhere} from '@/server/access/live-entities';
 export type WorkerAllocationData={workerOptions:{id:string;name:string}[];eligibleWorkIds:string[];createdAssignments:{id:string;title:string;assigneeName:string;quantity:string;status:TaskStatus;workId:string;dueAt:string|null;rewardAmount:string|null;rewardCurrency:string|null;rewardSource:'WORK_SNAPSHOT'|'FROZEN_TASK_SNAPSHOT'|'UNAVAILABLE'}[];dependencyOptions:{id:string;title:string;status:TaskStatus}[]};
@@ -18,5 +19,5 @@ export async function listWorkerAllocationData(actorId:string,productId:string):
  ]);
  const payrollCurrency=(await prisma.orgSetting.findUnique({where:{key:'payrollCurrency'},select:{value:true}}))?.value??'BYN';
  const eligibleWorkIds=works.filter(work=>{if(work.tasks.some(task=>task.quantity===null))return false;try{return quantityAtoms(work.quantity)>quantityAtoms(allocatedWorkQuantity(work.tasks));}catch{return false;}}).map(work=>work.id);
- return{workerOptions:workers,eligibleWorkIds,createdAssignments:created.filter(task=>task.workId!==null).map(task=>({id:task.id,title:task.title,assigneeName:task.assignee?.name??'—',quantity:task.quantity?.toString()??'—',status:task.status,workId:task.workId!,dueAt:task.dueAt?.toISOString()??null,...taskReward(task,task.work?.priceSnapshot?.toString()??null,task.allocationGroup?task.allocationGroup.currency:payrollCurrency==='BYN'?'BYN':null)})),dependencyOptions:dependencies};
+ return{workerOptions:workers,eligibleWorkIds,createdAssignments:created.filter(task=>task.workId!==null).map(task=>({id:task.id,title:task.title,assigneeName:task.assignee?.name??'—',quantity:task.quantity?.toString()??'—',status:task.status,workId:task.workId!,dueAt:task.dueAt?.toISOString()??null,...(canViewProductMoney(actor.roles)?taskReward(task,task.work?.priceSnapshot?.toString()??null,task.allocationGroup?task.allocationGroup.currency:payrollCurrency==='BYN'?'BYN':null):{rewardAmount:null,rewardCurrency:null,rewardSource:'UNAVAILABLE' as const})})),dependencyOptions:dependencies};
 }

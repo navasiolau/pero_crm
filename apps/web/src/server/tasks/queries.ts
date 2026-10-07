@@ -1,4 +1,6 @@
 import {taskWorkspaceEligibility,taskReward} from './workspace-contract';
+import {maskTaskPaymentRead} from "@/server/access/production-read-projection";
+import {canViewProductMoney} from "@/lib/product-financial-access";
 import type {Prisma} from '@prisma/client';
 export async function taskWorkspaceWhere(actor:VisibilityActor):Promise<Prisma.TaskWhereInput>{return {AND:[taskVisibilityWhere(actor),await taskWorkspaceEligibility(prisma)]};}
 import { prisma } from "@/lib/prisma";
@@ -78,6 +80,7 @@ export async function mapTaskDetails(
   tasks: TaskWithIncludes[],
   actor?: VisibilityActor,
 ): Promise<TaskDetails[]> {
+  if(actor)tasks=maskTaskPaymentRead(actor,tasks);
   tasks=tasks.filter(task=>!!task.work&&!!task.product&&task.work.projectId===task.project.id&&task.work.productId===task.product.id);
   const taskIds = tasks.map((task) => task.id);
   const spent = taskIds.length
@@ -117,7 +120,8 @@ export async function mapTaskDetails(
   return tasks.map((task) => {
     const engineering = task.work?.paymentKind === "ENGINEERING";
     const percentageWork = engineering || task.work?.paymentKind === "INSTALLATION";
-    const preview = engineering && task.product ? previews.get(task.product.id)?.get(task.id) : undefined;
+    const canSeePayment=!actor||canViewProductMoney(actor.roles)||task.assigneeId===actor.id;
+    const preview = canSeePayment&&engineering && task.product ? previews.get(task.product.id)?.get(task.id) : undefined;
     const allocation = {
       quantity: task.work && task.quantity !== null && task.quantity !== undefined ? String(task.quantity) : null,
       executorShare: String(task.executorShare ?? 1), allocationGroupId: task.allocationGroupId ?? null,

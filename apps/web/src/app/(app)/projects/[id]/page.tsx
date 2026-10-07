@@ -28,6 +28,7 @@ import { getProjectFor, listClients, listEngineers, listManagers, listWorkers } 
 import { mapTaskDetails } from "@/server/tasks/queries";
 import { getProjectMaterials } from "@/server/warehouse/queries";
 import { hasFullProjectVisibility } from "@/server/access/visibility";
+import {canViewProductMoney} from "@/lib/product-financial-access";
 import { allocatedWorkQuantity } from "@/lib/work-shares";
 
 import { FilesTab } from "./files-tab";
@@ -63,7 +64,7 @@ export default async function ProjectPage({
   const canManage = hasAnyRole(role, MANAGER_ROLES);
   const canEditTech = canManage || hasRole(role, "ENGINEER");
   const showFinance = hasAnyRole(role, FINANCE_ROLES);
-  const showAmount = showFinance || canManage || hasRole(role, "ENGINEER");
+  const showAmount = canViewProductMoney(role);
   // Склад (§12): вкладка «Материалы» — офисные роли (+ бухгалтер на просмотр)
   const showMaterials = hasAnyRole(role, OFFICE_ROLES);
 
@@ -128,7 +129,7 @@ export default async function ProjectPage({
   });
   const uploaderNames = new Map(authors.map((user) => [user.id, user.name]));
 
-  const showOverviewAmount = hasFullProjectVisibility(session.user);
+  const showOverviewAmount = canViewProductMoney(role);
   const pricingProjection = showOverviewAmount ? await getProjectPricingProjection({id:session.user.id,name:session.user.name??"",roles:role,source:"web"},project.id) : null;
   const hasShortage = materialsGroups.some(group => group.hasShortage);
 

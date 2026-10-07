@@ -4,7 +4,7 @@ import { auth } from "@/auth";
 import { projectStageAgeStart } from "@/lib/project-kanban-values";
 import { displayClientName } from "@/lib/labels";
 import { MANAGER_ROLES, hasAnyRole } from "@/lib/roles";
-import { hasFullProjectVisibility } from "@/server/access/visibility";
+import {canViewProductMoney} from "@/lib/product-financial-access";
 import { ListParamsProvider } from "@/lib/list-params";
 import { listPreferences } from "@/server/list-preferences";
 import {
@@ -62,7 +62,7 @@ export default async function ProjectsPage({
         stage: project.stage,
         stageChangedAt: new Date(projectStageAgeStart({stage:project.stage,createdAt:project.createdAt,stageChangedAt:project.stageChangedAt,latestTransition:project.stageHistory[0]})).toISOString(),
         coverFile: project.coverFile,
-        totalPrice: hasFullProjectVisibility(session.user) && project.currency === "BYN" && !project.products.some(product => product.expectedPrice === null) ? String(project.totalPrice) : null,
+        totalPrice: canViewProductMoney(session.user.roles) && project.currency === "BYN" && !project.products.some(product => product.expectedPrice === null) ? String(project.totalPrice) : null,
         currency: project.currency,
         clientId: project.client.id,
         clientName: displayClientName(project.client),
@@ -76,7 +76,7 @@ export default async function ProjectsPage({
       page={page}
       pageSize={pageSize}
       canManage={canManage}
-      showAmount={hasFullProjectVisibility(session.user)}
+      showAmount={canViewProductMoney(session.user.roles)}
       hideEngineerFilter={role.includes("ENGINEER") && !hasAnyRole(role, MANAGER_ROLES)}
       clients={clients.map((client) => ({ id: client.id, name: displayClientName(client) }))}
       managers={managers.map((manager) => ({ id: manager.id, name: manager.name }))}

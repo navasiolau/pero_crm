@@ -11,14 +11,14 @@ for(const row of fixture.products)row.description='PRIVATE_TECH';
 const require=createRequire(import.meta.url);let route:typeof import('../src/app/api/files/[id]/route');let storageReads=0;
 function inject(name:string,exports:Record<string,unknown>){const file=require.resolve(name),stub=new Module(file);stub.filename=file;stub.loaded=true;stub.exports=exports;require.cache[file]=stub;}
 before(async()=>{(globalThis as {prisma?:PrismaClient}).prisma=fixture.db as unknown as PrismaClient;query=await import('../src/server/products/queries');inject('../src/auth',{auth:async()=>({user:worker})});inject('../src/lib/s3',{UPLOADS_ROOT:'never-used',s3Enabled:()=>true,fileKey:()=>'',thumbKey:()=>'',s3Get:async()=>{storageReads++;throw Error('STORAGE_READ_FORBIDDEN');}});route=require('../src/app/api/files/[id]/route');});
-test('real list/direct URL allow production without Task and filters never add other stages',async()=>{
+test('real list/direct URL allow non-DESIGN without Task and filters never add DESIGN',async()=>{
  const list=await query.listProducts(worker.id,worker.roles,{activeOnly:false});assert.deepEqual(list.rows.map(row=>row.id).sort(),['field-product','production']);
  for(const key of ['production','field-product'])assert.ok(await query.getProductFor(worker.id,worker.roles,key));
  assert.equal(await query.getProductFor(worker.id,worker.roles,'foreign'),null);assert.equal((await query.listProducts(worker.id,worker.roles,{activeOnly:false,status:'DESIGN'})).total,0);
- const row=fixture.products.find(row=>row.id==='field-product')!;row.status='STORAGE';try{assert.equal(await query.getProductFor(worker.id,worker.roles,'field-product'),null);}finally{row.status='PRODUCTION';}
+ const row=fixture.products.find(row=>row.id==='field-product')!;row.status='STORAGE';try{assert.ok(await query.getProductFor(worker.id,worker.roles,'field-product'));}finally{row.status='PRODUCTION';}
 });
-test('pure mounter has no global production grant; field reads non-DESIGN files without edit/task/upload',async()=>{
- assert.equal(fixture.products.filter(row=>matches(row,productVisibilityWhere({id:'unassigned',roles:['MOUNTER']}))).length,0);
+test('pure mounter has global non-DESIGN read but keeps assigned edit/task/upload grants',async()=>{
+ assert.equal(fixture.products.filter(row=>matches(row,productVisibilityWhere({id:'unassigned',roles:['MOUNTER']}))).length,2);
  assert.equal(fixture.products.filter(row=>matches(row,productEditWhere(worker))).length,0);assert.equal(fixture.tasks.filter(row=>matches(row,taskExecutionWhere(worker))).length,0);
  assert.deepEqual(fixture.files.filter(row=>matches(row,fileVisibilityWhere(worker))).map(row=>row.id),['file-production']);
  assert.deepEqual(fixture.files.filter(row=>matches(row,fileVisibilityWhere({id:'unassigned',roles:['MOUNTER']}))).map(row=>row.id),['file-production']);
@@ -27,7 +27,7 @@ test('pure mounter has no global production grant; field reads non-DESIGN files 
 });
 test('genuine new readonly DTO masks unassigned technical description and money but shows non-DESIGN files, sidebar grants only Products',async()=>{
  const product=await query.getProductFor(worker.id,worker.roles,'production');assert.ok(product);assert.equal(product.description,null);assert.deepEqual((product.files as {id:string}[]).map(row=>row.id),['file-production']);assert.deepEqual(product.tasks,[]);assert.equal(product.expectedPrice,null);assert.equal((await query.listProducts(worker.id,worker.roles,{activeOnly:false})).rows.every(row=>row.description===null),true);
- assert.ok(navItemsForRole(['WORKER']).some(row=>row.href==='/products'));assert.equal(navItemsForRole(['MOUNTER']).some(row=>row.href==='/products'),false);assert.equal(navItemsForRole(['WORKER']).some(row=>row.href==='/finance'),false);
+ assert.ok(navItemsForRole(['WORKER']).some(row=>row.href==='/products'));assert.equal(navItemsForRole(['MOUNTER']).some(row=>row.href==='/products'),true);assert.equal(navItemsForRole(['WORKER']).some(row=>row.href==='/finance'),false);
 });
 
 test('field original passes visibility into storage; previews attempt storage; parent DTO shows files but masks money',async()=>{

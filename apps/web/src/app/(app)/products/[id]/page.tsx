@@ -7,7 +7,8 @@ import { auth } from "@/auth";
 import { Badge } from "@/components/ui/badge";
 import { displayClientName } from "@/lib/labels";
 import { prisma } from "@/lib/prisma";
-import { FIELD_ROLES, FINANCE_ROLES, MANAGER_ROLES, OFFICE_ROLES, WAREHOUSE_MANAGE_ROLES, WAREHOUSE_MONEY_ROLES, hasAnyRole } from "@/lib/roles";
+import { FIELD_ROLES, MANAGER_ROLES, OFFICE_ROLES, WAREHOUSE_MANAGE_ROLES, WAREHOUSE_MONEY_ROLES, hasAnyRole } from "@/lib/roles";
+import {canViewProductMoney} from "@/lib/product-financial-access";
 import { canEditProductTechnicalBlock, resolveVisibilityActor } from "@/server/access/visibility";
 import { allocatedWorkQuantity } from "@/lib/work-shares";
 import { getFileStageConfig } from "@/server/files/stage-config";
@@ -51,12 +52,12 @@ export default async function ProductPage({
   const returnDestination = resolveProductReturn((await searchParams).returnTo, product.project.id);
 
   const canManage = hasAnyRole(role, MANAGER_ROLES);
-  const canViewAllPercentage = canManage || hasAnyRole(role, FINANCE_ROLES);
+  const canViewAllPercentage = canViewProductMoney(role);
   const canEditTech = canEditProductTechnicalBlock(actor, product);
   const canAllocateWork=hasAnyRole(role,FIELD_ROLES)&&product.status==="PRODUCTION"&&!canManage;
   const allocationData=canAllocateWork?await listWorkerAllocationData(session.user.id,product.id):undefined;
   const canAddWork=canAddProductWork(role,product.status);
-  const showAmount = hasAnyRole(role, OFFICE_ROLES);
+  const showAmount = canViewProductMoney(role);
   const showMaterials = hasAnyRole(role, OFFICE_ROLES);
   const showMoney = hasAnyRole(role, WAREHOUSE_MONEY_ROLES);
   const canIssueReturn=hasAnyRole(role,WAREHOUSE_MANAGE_ROLES);
