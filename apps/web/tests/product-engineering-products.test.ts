@@ -81,7 +81,7 @@ before(() => {
 test("новое изделие создаётся без фиктивного старого инженерного фонда", async () => {
   reset(); assert.ok((await actions.createProduct({ projectId: "project", title: "New", engineerId: "engineer" })).ok);
   assert.equal(state.pools.length, 0);
-  assert.equal(state.products[0].status, "DESIGN");
+  assert.equal(state.products[0].status, "PREPARATION");
 });
 
 test("primary engineer assignment requires an active ENGINEER role", async () => {

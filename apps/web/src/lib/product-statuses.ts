@@ -1,18 +1,24 @@
 import type { ProductStatus } from "@prisma/client";
 
-// Статусы изделия (§6): производственная цепочка от проектирования
+// Статусы изделия (§6): производственная цепочка от подготовки
 // до готовности + служебная «Рекламация». Общий модуль для сервера и клиента.
 export const PRODUCT_STATUSES: {
   id: ProductStatus;
   label: string;
   service?: boolean;
 }[] = [
+  { id: "PREPARATION", label: "Подготовка" },
   { id: "DESIGN", label: "Проектирование" },
   { id: "PRODUCTION", label: "В производстве" },
   { id: "STORAGE", label: "На складе ГП" },
   { id: "INSTALLATION", label: "Установка" },
   { id: "DONE", label: "Готово" },
   { id: "RECLAMATION", label: "Рекламация", service: true },
+];
+
+// Производственные grants используют явные этапы: подготовка не открывает доступ цеху.
+export const POST_DESIGN_PRODUCT_STATUSES: ProductStatus[] = [
+  "PRODUCTION", "STORAGE", "INSTALLATION", "DONE", "RECLAMATION",
 ];
 
 export const productStatusLabels = Object.fromEntries(
@@ -27,6 +33,11 @@ export const productStatusStyles: Record<
   ProductStatus,
   { column: string; header: string; badge: string }
 > = {
+  PREPARATION: {
+    column: "border-slate-500/25 bg-slate-500/5",
+    header: "text-slate-700 dark:text-slate-400",
+    badge: "bg-muted text-muted-foreground",
+  },
   DESIGN: {
     column: "border-violet-500/50 bg-violet-500/10",
     header: "text-violet-700 dark:text-violet-400",

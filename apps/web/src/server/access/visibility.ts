@@ -1,6 +1,7 @@
 import {liveProjectWhere,liveProductWhere,liveChildWhere} from "./live-entities";
 import type { Prisma, ProductStatus, Role } from "@prisma/client";
 import { ASSIGNEE_ROLES,FIELD_ROLES, MANAGER_ROLES, hasAnyRole, hasRole } from "@/lib/roles";
+import { POST_DESIGN_PRODUCT_STATUSES } from "@/lib/product-statuses";
 
 export type VisibilityActor = { id: string; roles: Role[]; engineeringParticipantProductIds?: string[];
   engineeringParticipantTaskIds?: string[]; fieldParticipantProductIds?: string[] };
@@ -34,7 +35,7 @@ export async function resolveVisibilityActor(
     select: { config: { select: { productId: true } } },
   }) : [];
   const field = hasAnyRole(actor.roles, FIELD_ROLES) && db.productPercentageParticipant ? await db.productPercentageParticipant.findMany({
-    where: { userId: actor.id, config: { kind: "INSTALLATION", product: { status: { not: "DESIGN" } } } },
+    where: { userId: actor.id, config: { kind: "INSTALLATION", product: { status: { in: POST_DESIGN_PRODUCT_STATUSES } } } },
     select: { config: { select: { productId: true } } },
   }) : [];
   return { ...actor, engineeringParticipantProductIds: [...new Set([
@@ -95,7 +96,7 @@ function assignedProductVisibilityWhereGrants(actor: VisibilityActor): Prisma.Pr
   const grants: Prisma.ProductWhereInput[] = [];
   grants.push(currentEngineeringReadWhere(actor));
   if (hasAnyRole(actor.roles, FIELD_ROLES)) grants.push({
-    status: { not: "DESIGN" },
+    status: { in: POST_DESIGN_PRODUCT_STATUSES },
     OR: [
       { tasks: { some: { assigneeId: actor.id } } },
       ...(hasRole(actor.roles, "MOUNTER") ? [{ mounterId: actor.id }] : []),
@@ -123,7 +124,7 @@ function taskVisibilityWhereGrants(actor: VisibilityActor): Prisma.TaskWhereInpu
   grants.push({ product: engineeringProductWhere(actor) });
   if (hasAnyRole(actor.roles, FIELD_ROLES)) grants.push({
     assigneeId: actor.id, OR: [
-      { product: { status: { not: "DESIGN" } } },
+      { product: { status: { in: POST_DESIGN_PRODUCT_STATUSES } } },
       { productId: null, project: projectVisibilityWhere(actor) },
     ],
   });
@@ -139,7 +140,7 @@ function taskExecutionWhereGrants(actor: VisibilityActor): Prisma.TaskWhereInput
   // Исполнение даёт производственная или инженерная роль; финансовая роль
   // сама по себе не добавляет задач, а сочетание сохраняет независимые права.
   if (hasAnyRole(actor.roles, FIELD_ROLES)) grants.push({ assigneeId: actor.id, OR: [
-    { product: { status: { not: "DESIGN" } } },
+    { product: { status: { in: POST_DESIGN_PRODUCT_STATUSES } } },
     { productId: null, project: projectVisibilityWhere(actor) },
   ] });
   if (hasRole(actor.roles, "ENGINEER")) grants.push({ assigneeId: actor.id, product: { engineerId: actor.id, status: "DESIGN" } });
@@ -152,19 +153,19 @@ function assignedWorkVisibilityWhereGrants(actor: VisibilityActor): Prisma.WorkW
   grants.push({ product: engineeringProductWhere(actor) });
   if (hasAnyRole(actor.roles, FIELD_ROLES)) grants.push({
     tasks: { some: { assigneeId: actor.id } }, OR: [
-      { product: { status: { not: "DESIGN" } } },
+      { product: { status: { in: POST_DESIGN_PRODUCT_STATUSES } } },
       { productId: null, project: projectVisibilityWhere(actor) },
     ],
   });
   return grants.length ? { OR: grants } : { id: { in: [] } };
 }
 
-/** Цех и монтажники читают все файлы изделия со статусом не DESIGN (только чтение). */
-function fieldNonDesignFileWhere(): Prisma.FileWhereInput {
+/** Цех и монтажники читают файлы только последующих этапов изделия. */
+function fieldPostDesignFileWhere(): Prisma.FileWhereInput {
   return {
     OR: [
-      { product: { status: { not: "DESIGN" } } },
-      { task: { product: { status: { not: "DESIGN" }, deletedAt: null } } },
+      { product: { status: { in: POST_DESIGN_PRODUCT_STATUSES } } },
+      { task: { product: { status: { in: POST_DESIGN_PRODUCT_STATUSES }, deletedAt: null } } },
     ],
   };
 }
@@ -179,9 +180,9 @@ function fileVisibilityWhereGrants(actor: VisibilityActor): Prisma.FileWhereInpu
     ],
   };
   // Полевая ветка рядом с productVisibilityWhere: Файлы не наследуют глобальное чтение,
-  // но WORKER/MOUNTER видят файлы любого не-DESIGN изделия (замеры, документы, эскиз, .b3d, файлы задач).
+  // но WORKER/MOUNTER видят файлы изделия только после проектирования.
   if (!hasAnyRole(actor.roles, FIELD_ROLES)) return base;
-  return { OR: [base, fieldNonDesignFileWhere()] };
+  return { OR: [base, fieldPostDesignFileWhere()] };
 }
 
 export function clientVisibilityWhere(actor: VisibilityActor): Prisma.ClientWhereInput {
@@ -191,7 +192,7 @@ export function clientVisibilityWhere(actor: VisibilityActor): Prisma.ClientWher
 export function productEditWhere(actor:VisibilityActor):Prisma.ProductWhereInput {return {AND:[liveProductWhere,productEditWhereGrants(actor)]};}
 
 export function productVisibilityWhere(actor:VisibilityActor):Prisma.ProductWhereInput {return {AND:[liveProductWhere,hasAnyRole(actor.roles,FIELD_ROLES) && !hasFullProjectVisibility(actor)
- ? {OR:[assignedProductVisibilityWhere(actor),{status:{not:"DESIGN"}}]} : assignedProductVisibilityWhereGrants(actor)]};}
+ ? {OR:[assignedProductVisibilityWhere(actor),{status:{in:POST_DESIGN_PRODUCT_STATUSES}}]} : assignedProductVisibilityWhereGrants(actor)]};}
 
 export function projectVisibilityWhere(actor:VisibilityActor):Prisma.ProjectWhereInput {return {AND:[liveProjectWhere,hasAnyRole(actor.roles,FIELD_ROLES) && !hasFullProjectVisibility(actor)
  ? {OR:[assignedProjectVisibilityWhere(actor),{products:{some:productVisibilityWhere(actor)}}]} : assignedProjectVisibilityWhereGrants(actor)]};}
