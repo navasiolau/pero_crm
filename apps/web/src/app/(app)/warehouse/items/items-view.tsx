@@ -105,12 +105,9 @@ export function ItemsView({
     setEditOpen(true);
   }
 
-  const price = Number(form.purchasePrice);
   const minStock = Number(form.minStock);
   const formValid =
     form.name.trim() !== "" &&
-    (form.purchasePrice.trim() === "" ||
-      (Number.isFinite(price) && price >= 0)) &&
     (form.minStock.trim() === "" ||
       (Number.isFinite(minStock) && minStock >= 0));
 
@@ -378,7 +375,7 @@ export function ItemsView({
               {editing ? "Редактировать материал" : "Новый материал"}
             </DialogTitle>
             <DialogDescription>
-              Учётная цена и минимальный остаток — необязательны
+              Учётная цена рассчитывается по остатку; минимальный остаток — необязателен
             </DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-3">
@@ -437,8 +434,8 @@ export function ItemsView({
                 <Input
                   id="m-price"
                   inputMode="decimal"
-                  value={form.purchasePrice}
-                  onChange={set("purchasePrice")}
+                  value={form.purchasePrice||'0'}
+                  readOnly
                   placeholder="0"
                 />
               </div>
@@ -476,8 +473,6 @@ export function ItemsView({
                     sku: form.sku.trim() || undefined,
                     unit: form.unit,
                     categoryId: form.categoryId || undefined,
-                    purchasePrice:
-                      form.purchasePrice.trim() === "" ? undefined : price,
                     minStock:
                       form.minStock.trim() === "" ? undefined : minStock,
                     comment: form.comment.trim() || undefined,

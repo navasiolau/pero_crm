@@ -867,6 +867,7 @@ model Material {
   updatedAt        DateTime          @updatedAt
   movements        StockMovement[]
   projectMaterials ProjectMaterial[]
+  warehouseBalance WarehouseBalance?
 }
 
 // Потребность изделия в материале (аналог legacy 1531 «Номенклатура в заказах»).
@@ -912,10 +913,56 @@ model StockMovement {
   comment           String?
   createdById       String?
   createdAt         DateTime          @default(now())
+  warehouseValuation WarehouseMovementValuation? @relation("WarehouseValuation")
+  warehouseReturns WarehouseMovementValuation[] @relation("WarehouseReturnSource")
 
   @@index([materialId])
   @@index([productId])
   @@index([createdAt])
+}
+
+// Текущий склад не переписывает исторический журнал и цены движений.
+model WarehouseAccountingState {
+  id String @id
+  phase String
+  runId String @unique
+  backupSha256 String?
+  proofSha256 String?
+  beforePrices Json
+  beforeBalances Json
+  protectedSnapshot Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model WarehouseBalance {
+  materialId String @id
+  material Material @relation(fields:[materialId],references:[id],onDelete:Restrict)
+  runId String
+  quantity Decimal @default(0) @db.Decimal(12,3)
+  valueByn Decimal @default(0) @db.Decimal(30,9)
+  revision Int @default(0)
+}
+
+model WarehouseMovementValuation {
+  id String @id
+  movementId String @unique
+  movement StockMovement @relation("WarehouseValuation",fields:[movementId],references:[id],onDelete:Restrict)
+  sourceMovementId String?
+  sourceMovement StockMovement? @relation("WarehouseReturnSource",fields:[sourceMovementId],references:[id],onDelete:Restrict)
+  runId String
+  clientMutationId String @unique
+  requestFingerprint String
+  actorId String
+  quantity Decimal @db.Decimal(12,3)
+  unitCost Decimal @db.Decimal(24,9)
+  valueByn Decimal @db.Decimal(30,9)
+  moneyByn Decimal @db.Decimal(12,2)
+  returnedQuantity Decimal @default(0) @db.Decimal(12,3)
+  returnedValueByn Decimal @default(0) @db.Decimal(30,9)
+  returnedMoneyByn Decimal @default(0) @db.Decimal(12,2)
+  createdAt DateTime @default(now())
+  @@index([sourceMovementId])
 }
 
 model File {

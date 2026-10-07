@@ -11,6 +11,7 @@ function inject(specifier: string, exports: Record<string, unknown>) {
 }
 let roles: Role[] = ["MANAGER"];
 let state = initial();
+let warehousePhase:string|undefined;
 const locks: string[] = [];
 function initial() {
   return {
@@ -54,7 +55,7 @@ before(() => {
     },
     material: { findUnique: async () => ({ id: "hinge", name: "Петли", active: true }) },
     productStagePayPool: { updateMany: async () => { throw new Error("Percentage preview must not change on quantity"); } },
-    $queryRaw: async (strings: TemplateStringsArray) => { locks.push(strings.join("?")); return [{ id: "p" }]; },
+    $queryRaw: async (strings: TemplateStringsArray) => { const sql=strings.join("?");locks.push(sql);return sql.includes('"WarehouseAccountingState"')?(warehousePhase?[{phase:warehousePhase}]:[]):[{id:"p"}]; },
     $transaction: async <T>(operation: (tx: unknown) => Promise<T>) => {
       const before = structuredClone(state);
       try { return await operation(db); } catch (error) { state = before; throw error; }
@@ -71,7 +72,7 @@ before(() => {
   works = require("../src/server/works/actions");
   materials = require("../src/server/warehouse/actions");
 });
-beforeEach(() => { state = initial(); roles = ["MANAGER"]; locks.length = 0; });
+beforeEach(() => { state = initial(); roles = ["MANAGER"]; warehousePhase=undefined;locks.length = 0; });
 
 test("real product action changes both plans, never touches facts and takes allocation lock first", async () => {
   const facts = JSON.stringify(state.facts); const tasks = JSON.stringify(state.work.tasks);
@@ -81,7 +82,20 @@ test("real product action changes both plans, never touches facts and takes allo
   assert.equal(state.material.quantity, "24.000");
   assert.equal(JSON.stringify(state.facts), facts); assert.equal(JSON.stringify(state.work.tasks), tasks);
   assert.match(locks[0], /pg_advisory_xact_lock/);
-  assert.match(locks[1], /Product.*FOR UPDATE/);
+  assert.match(locks[1], /pg_advisory_xact_lock_shared/);
+  assert.match(locks[3], /Product.*FOR UPDATE/);
+});
+
+test('warehouse freeze blocks norms and quantity rescaling while other product edits continue',async()=>{
+ for(const phase of ['FROZEN','VERIFYING']){
+  warehousePhase=phase;
+  const before=JSON.stringify(state);
+  for(const change of [()=>products.updateProduct('p',{quantity:6},{quantity:5}),()=>materials.updateProjectMaterial({id:'m',quantityPerUnit:5}),()=>materials.deleteProjectMaterial('m')]){
+   const result=await change();assert.equal(result.ok,false);assert.match(result.error!,/Склад временно закрыт/);
+  }
+  assert.equal(JSON.stringify(state),before);
+ }
+ assert.deepEqual(await products.updateProduct('p',{title:'Новый стул'},{title:state.product.title}),{ok:true});
 });
 test("real action rejects partial reduction and keeps all rows byte-identical", async () => {
   const baseline = JSON.stringify(state);

@@ -5,11 +5,13 @@ import type {PrismaClient,Role} from '@prisma/client';
 const require=createRequire(import.meta.url);let roles:Role[]=['PROCUREMENT'],calls=0;
 const db={
  task:{findMany:async()=>[]},
+ warehouseAccountingState:{findUnique:async()=>({phase:'ACTIVE',runId:'qa'})},
+ warehouseBalance:{findMany:async()=>[{materialId:'material',quantity:'3',valueByn:'37.02'}]},
  $queryRaw:async()=>{calls++;return[];}, $transaction:async(fn:(tx:unknown)=>Promise<unknown>)=>fn(db),
  materialCategory:{create:async({data}:{data:object})=>{calls++;return{id:'category',...data};}},
  material:{findMany:async()=>{calls++;return[{id:'material',name:'M',sku:null,unit:'шт.',categoryId:null,category:null,purchasePrice:12.34,minStock:null,active:true,comment:null}];}},
  stockMovement:{groupBy:async()=>[],findMany:async()=>{calls++;return[];}},
- projectMaterial:{findMany:async()=>[],findUnique:async()=>{calls++;return null;}},
+ projectMaterial:{findMany:async()=>[],findUnique:async()=>{calls++;return null;},findFirst:async()=>{calls++;return null;}},
  project:{findMany:async()=>{calls++;return[{id:'project',number:'1',title:'Finance project',currency:'USD',stage:'PRODUCTION',description:'SECRET_TECH',client:{phone:'SECRET_CONTACT'}}];}},
  };
 function inject(name:string,exports:Record<string,unknown>){const file=require.resolve(name),stub=new Module(file);stub.filename=file;stub.loaded=true;stub.exports=exports;require.cache[file]=stub;}
@@ -22,9 +24,9 @@ before(()=>{
 });
 beforeEach(()=>{calls=0;roles=['PROCUREMENT'];});
 test('actual warehouse actions let procurement manage catalog and reach issue/return but never change requirements',async()=>{
- assert.equal((await actions.addMaterialCategory({name:'Category'})).ok,true);assert.equal(calls,1);
+ assert.equal((await actions.addMaterialCategory({name:'Category'})).ok,true);assert.equal(calls,3);
  for(const fn of [()=>actions.addProjectMaterial({productId:'p',materialId:'m',quantity:1}),()=>actions.updateProjectMaterial({id:'line',quantity:1}),()=>actions.deleteProjectMaterial('line')]){const before:number=calls;await assert.rejects(fn,/Недостаточно прав/);assert.equal(calls,before);}
- for(const fn of [()=>actions.requestMaterial({projectMaterialId:'line',quantity:1}),()=>actions.returnMaterial({projectMaterialId:'line',quantity:1})]){const before:number=calls;const result=await fn();assert.equal(result.ok,false);assert.notEqual(result.error,'Недостаточно прав');assert.ok(calls>before,'authorized operation must reach scoped line lookup');}
+ for(const fn of [()=>actions.requestMaterial({projectMaterialId:'line',quantity:1,clientMutationId:'00000000-0000-4000-8000-000000000094'}),()=>actions.returnMaterial({projectMaterialId:'line',quantity:1,unitPrice:1,clientMutationId:'00000000-0000-4000-8000-000000000094'})]){const before:number=calls;const result=await fn();assert.equal(result.ok,false);assert.notEqual(result.error,'Недостаточно прав');assert.ok(calls>before,'authorized operation must reach scoped line lookup');}
  roles=['ACCOUNTANT'];await assert.rejects(()=>actions.addMaterialCategory({name:'No'}),/Недостаточно прав/);
 });
 test('actual warehouse queries deny accountant before lookup and project cost fields by independent money grant',async()=>{

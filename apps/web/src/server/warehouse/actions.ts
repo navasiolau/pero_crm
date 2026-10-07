@@ -7,13 +7,14 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { formatQty } from "@/lib/format";
 import { writeChangeLog } from "@/server/plugins/changelog";
-import { emitDomainEvent } from "@/server/plugins/events";
+import { dispatchEvent } from "@/server/plugins/events";
 import { notifyOrg } from "@/server/notifications/notify";
 import { revalidateProductPaths } from "@/server/products/revalidate";
 import { withTaskTransaction } from "@/server/tasks/transaction";
 import { addMaterialNorm, updateMaterialNorm, lockMaterialProduct } from "./norm-core";
-import { decimalAtoms, decimalText, materialDebt } from "@/lib/product-quantity";
-import {MANAGER_ROLES,WAREHOUSE_MANAGE_ROLES,WAREHOUSE_MONEY_ROLES,hasAnyRole} from "@/lib/roles";
+import { stockIncomeSchema, stockIssueSchema, stockReturnSchema } from "@/lib/warehouse-input";
+import { warehouseMove, withWarehouseWrite } from "./accounting";
+import {MANAGER_ROLES,WAREHOUSE_MANAGE_ROLES} from "@/lib/roles";
 import { requireRole } from "@/server/require-role";
 
 // Склад (§12, фаза 6). Правки — админ/директор/менеджер; просмотр — офисные
@@ -38,10 +39,6 @@ async function revalidateWarehouse(productId?: string | null, projectId?: string
   await revalidateProductPaths(productId);
 }
 
-function round2(value: number): number {
-  return Math.round(value * 100) / 100;
-}
-
 // ─── Категории ────────────────────────────────────────────────────────────
 
 const categorySchema = z.object({
@@ -57,12 +54,12 @@ export async function addMaterialCategory(
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Ошибка данных" };
   }
-  const category = await prisma.materialCategory.create({
+  const category = await withWarehouseWrite((tx)=>tx.materialCategory.create({
     data: {
       name: parsed.data.name,
       comment: parsed.data.comment?.trim() || null,
     },
-  });
+  }));
   await writeChangeLog({
     actorType: "user",
     actorId: session.user.id,
@@ -82,10 +79,10 @@ export async function toggleMaterialCategory(
   const session = await requireRole(WAREHOUSE_MANAGE_ROLES);
   const category = await prisma.materialCategory.findUnique({ where: { id } });
   if (!category) return { ok: false, error: "Категория не найдена" };
-  await prisma.materialCategory.update({
+  await withWarehouseWrite((tx)=>tx.materialCategory.update({
     where: { id },
     data: { active: !category.active },
-  });
+  }));
   await writeChangeLog({
     actorType: "user",
     actorId: session.user.id,
@@ -108,10 +105,9 @@ const materialSchema = z.object({
   sku: z.string().optional(),
   unit: z.string().trim().min(1, "Укажите единицу"),
   categoryId: z.string().optional(),
-  purchasePrice: z.number().nonnegative("Цена не может быть отрицательной").optional(),
   minStock: z.number().nonnegative("Мин. остаток не может быть отрицательным").optional(),
   comment: z.string().optional(),
-});
+}).strict();
 
 export async function addMaterial(
   input: z.input<typeof materialSchema>,
@@ -130,17 +126,17 @@ export async function addMaterial(
       return { ok: false, error: "Категория не найдена" };
     }
   }
-  const material = await prisma.material.create({
+  const material = await withWarehouseWrite((tx) => tx.material.create({
     data: {
       name: data.name,
       sku: data.sku?.trim() || null,
       unit: data.unit,
       categoryId: data.categoryId || null,
-      purchasePrice: data.purchasePrice ?? null,
+      purchasePrice: 0,
       minStock: data.minStock ?? null,
       comment: data.comment?.trim() || null,
     },
-  });
+  }));
   await writeChangeLog({
     actorType: "user",
     actorId: session.user.id,
@@ -152,7 +148,7 @@ export async function addMaterial(
       name: material.name,
       sku: material.sku,
       unit: material.unit,
-      purchasePrice: data.purchasePrice ?? null,
+      purchasePrice: 0,
     },
   });
   await revalidateWarehouse();
@@ -171,18 +167,17 @@ export async function updateMaterial(
   const material = await prisma.material.findUnique({ where: { id } });
   if (!material) return { ok: false, error: "Материал не найден" };
   const data = parsed.data;
-  await prisma.material.update({
+  await withWarehouseWrite((tx) => tx.material.update({
     where: { id },
     data: {
       name: data.name,
       sku: data.sku?.trim() || null,
       unit: data.unit,
       categoryId: data.categoryId || null,
-      purchasePrice: hasAnyRole(session.user.roles,WAREHOUSE_MONEY_ROLES)?data.purchasePrice ?? null:material.purchasePrice,
       minStock: data.minStock ?? null,
       comment: data.comment?.trim() || null,
     },
-  });
+  }));
   await writeChangeLog({
     actorType: "user",
     actorId: session.user.id,
@@ -194,13 +189,11 @@ export async function updateMaterial(
       name: material.name,
       sku: material.sku,
       unit: material.unit,
-      purchasePrice: material.purchasePrice === null ? null : Number(material.purchasePrice),
     },
     newValue: {
       name: data.name,
       sku: data.sku?.trim() || null,
       unit: data.unit,
-      purchasePrice: data.purchasePrice ?? null,
     },
   });
   await revalidateWarehouse();
@@ -213,10 +206,10 @@ export async function toggleMaterial(
   const session = await requireRole(WAREHOUSE_MANAGE_ROLES);
   const material = await prisma.material.findUnique({ where: { id } });
   if (!material) return { ok: false, error: "Материал не найден" };
-  await prisma.material.update({
+  await withWarehouseWrite((tx) => tx.material.update({
     where: { id },
     data: { active: !material.active },
-  });
+  }));
   await writeChangeLog({
     actorType: "user",
     actorId: session.user.id,
@@ -234,66 +227,11 @@ export async function toggleMaterial(
 
 // ─── Приход на склад ──────────────────────────────────────────────────────
 
-const incomeSchema = z.object({
-  materialId: z.string().min(1, "Выберите материал"),
-  quantity: z.number().positive("Количество должно быть больше нуля"),
-  unitPrice: z.number().nonnegative("Цена не может быть отрицательной").optional(),
-  comment: z.string().optional(),
-});
-
-export async function addStockIncome(
-  input: z.input<typeof incomeSchema>,
-): Promise<{ ok: boolean; error?: string }> {
-  const session = await requireRole(WAREHOUSE_MANAGE_ROLES);
-  const parsed = incomeSchema.safeParse(input);
-  if (!parsed.success) {
-    return { ok: false, error: parsed.error.issues[0]?.message ?? "Ошибка данных" };
-  }
-  const data = parsed.data;
-  const material = await prisma.material.findUnique({
-    where: { id: data.materialId },
-  });
-  if (!material || !material.active) {
-    return { ok: false, error: "Материал не найден" };
-  }
-  const unitPrice = data.unitPrice ?? null;
-  const movement = await prisma.stockMovement.create({
-    data: {
-      materialId: material.id,
-      type: "INCOME",
-      quantity: data.quantity,
-      unitPrice,
-      totalByn: unitPrice === null ? null : round2(data.quantity * unitPrice),
-      comment: data.comment?.trim() || null,
-      createdById: session.user.id,
-    },
-  });
-  await writeChangeLog({
-    actorType: "user",
-    actorId: session.user.id,
-    actorName: session.user.name ?? undefined,
-    entity: "stockMovement",
-    entityId: movement.id,
-    action: "create",
-    newValue: {
-      type: "INCOME",
-      material: material.name,
-      quantity: data.quantity,
-      unitPrice,
-    },
-  });
-  await emitDomainEvent(
-    "stock.movement.created",
-    {
-      movementId: movement.id,
-      type: "INCOME",
-      materialId: material.id,
-      quantity: data.quantity,
-    },
-    session.user.id,
-  );
-  await revalidateWarehouse();
-  return { ok: true };
+export async function addStockIncome(input: z.input<typeof stockIncomeSchema>): Promise<{ok:boolean;error?:string}> {
+  const session=await requireRole(WAREHOUSE_MANAGE_ROLES);
+  const parsed=stockIncomeSchema.safeParse(input);
+  if(!parsed.success)return {ok:false,error:parsed.error.issues[0]?.message??"Укажите положительную цену"};
+  return saveWarehouseMovement(session.user,{...parsed.data,kind:"INCOME"});
 }
 
 // ─── Потребность изделия (простой резерв, без проверки остатка) ──────────
@@ -406,220 +344,29 @@ export async function deleteProjectMaterial(
 
 // ─── Запрос со склада на проект (списание) ───────────────────────────────
 
-const requestSchema = z.object({
-  projectMaterialId: z.string().min(1),
-  quantity: z.number().positive("Количество должно быть больше нуля"),
-  unitPrice: z.number().nonnegative("Цена не может быть отрицательной").optional(),
-  comment: z.string().optional(),
-});
-
-export async function requestMaterial(
-  input: z.input<typeof requestSchema>,
-): Promise<{ ok: boolean; error?: string }> {
-  const session = await requireRole(WAREHOUSE_MANAGE_ROLES);
-  const parsed = requestSchema.safeParse(input);
-  if (!parsed.success) {
-    return { ok: false, error: parsed.error.issues[0]?.message ?? "Ошибка данных" };
-  }
-  const data = parsed.data;
-
-  try {
-    const result = await prisma.$transaction(async (tx) => {
-      await lockMaterialProduct(tx, data.projectMaterialId);
-      const line = await tx.projectMaterial.findUnique({
-        where: {product:liveProductWhere, id: data.projectMaterialId },
-        include: {
-          material: { select: { id: true, name: true, unit: true, purchasePrice: true } },
-          product: { select: { id: true, number: true, projectId: true } },
-        },
-      });
-      if (!line) throw new Error("Строка потребности не найдена");
-
-      const debt = materialDebt(line.quantity, line.issuedQty);
-      decimalAtoms(data.quantity, 3, 12);
-      if (data.quantity > debt) {
-        throw new Error(`Осталось выдать по строке ${formatQty(debt)} ${line.material.unit}`);
-      }
-
-      // Остаток внутри транзакции: Σ INCOME + Σ RETURN − Σ EXPENSE
-      const grouped = await tx.stockMovement.groupBy({
-        by: ["type"],
-        where: { materialId: line.materialId },
-        _sum: { quantity: true },
-      });
-      let stockAtoms = BigInt(0);
-      for (const row of grouped) {
-        stockAtoms += BigInt(row.type === "EXPENSE" ? -1 : 1) * decimalAtoms(row._sum.quantity ?? 0, 3, 18);
-      }
-      if (decimalAtoms(data.quantity, 3, 12) > stockAtoms) {
-        const stock = decimalText(stockAtoms, 3);
-        throw new Error(
-          `Недостаточно на складе: доступно ${formatQty(stock)} ${line.material.unit}`,
-        );
-      }
-
-      const unitPrice =
-        data.unitPrice ??
-        (line.material.purchasePrice === null
-          ? null
-          : Number(line.material.purchasePrice));
-      const movement = await tx.stockMovement.create({
-        data: {
-          materialId: line.materialId,
-          type: "EXPENSE",
-          quantity: data.quantity,
-          unitPrice,
-          totalByn: unitPrice === null ? null : round2(data.quantity * unitPrice),
-          productId: line.productId,
-          projectMaterialId: line.id,
-          comment: data.comment?.trim() || null,
-          createdById: session.user.id,
-        },
-      });
-      await tx.projectMaterial.update({
-        where: { id: line.id },
-        data: { issuedQty: { increment: data.quantity } },
-      });
-      return { movement, line, unitPrice };
-    }, TX_OPTIONS);
-
-    const { movement, line, unitPrice } = result;
-    await writeChangeLog({
-      actorType: "user",
-      actorId: session.user.id,
-      actorName: session.user.name ?? undefined,
-      entity: "stockMovement",
-      entityId: movement.id,
-      action: "create",
-      newValue: {
-        type: "EXPENSE",
-        product: line.product.number,
-        material: line.material.name,
-        quantity: data.quantity,
-        unitPrice,
-      },
-    });
-    await emitDomainEvent(
-      "stock.movement.created",
-      {
-        movementId: movement.id,
-        type: "EXPENSE",
-        materialId: line.materialId,
-        productId: line.productId,
-        quantity: data.quantity,
-        totalByn: movement.totalByn === null ? null : Number(movement.totalByn),
-      },
-      session.user.id,
-    );
-    await notifyOrg({
-      type: "stock.expense",
-      title: `Списание: ${line.material.name} × ${formatQty(data.quantity)} · ${line.product.number}`,
-
-      link: `/products/${line.product.number}`,
-      exceptUserId: session.user.id,
-    });
-    await revalidateWarehouse(line.productId, line.product.projectId);
-    return { ok: true };
-  } catch (error) {
-    return {
-      ok: false,
-      error: error instanceof Error ? error.message : "Ошибка списания",
-    };
-  }
+export async function requestMaterial(input: z.input<typeof stockIssueSchema>): Promise<{ok:boolean;error?:string}> {
+  const session=await requireRole(WAREHOUSE_MANAGE_ROLES);
+  const parsed=stockIssueSchema.safeParse(input);
+  if(!parsed.success)return {ok:false,error:"Укажите количество; цена выдачи рассчитывается автоматически"};
+  return saveWarehouseMovement(session.user,{...parsed.data,kind:"EXPENSE"});
 }
 
-// ─── Возврат с проекта на склад ──────────────────────────────────────────
+export async function returnMaterial(input: z.input<typeof stockReturnSchema>): Promise<{ok:boolean;error?:string}> {
+  const session=await requireRole(WAREHOUSE_MANAGE_ROLES);
+  const parsed=stockReturnSchema.safeParse(input);
+  if(!parsed.success)return {ok:false,error:parsed.error.issues[0]?.message??"Укажите источник возврата"};
+  return saveWarehouseMovement(session.user,{...parsed.data,kind:"RETURN"});
+}
 
-const returnSchema = z.object({
-  projectMaterialId: z.string().min(1),
-  quantity: z.number().positive("Количество должно быть больше нуля"),
-  unitPrice: z.number().nonnegative("Цена не может быть отрицательной").optional(),
-  comment: z.string().optional(),
-});
-
-export async function returnMaterial(
-  input: z.input<typeof returnSchema>,
-): Promise<{ ok: boolean; error?: string }> {
-  const session = await requireRole(WAREHOUSE_MANAGE_ROLES);
-  const parsed = returnSchema.safeParse(input);
-  if (!parsed.success) {
-    return { ok: false, error: parsed.error.issues[0]?.message ?? "Ошибка данных" };
-  }
-  const data = parsed.data;
-
+async function saveWarehouseMovement(actor: {id:string;name?:string|null;roles:import("@prisma/client").Role[]}, input: import("./accounting").WarehouseMovementInput): Promise<{ok:boolean;error?:string}> {
+  let result;
   try {
-    const { movement, line } = await prisma.$transaction(async (tx) => {
-      await lockMaterialProduct(tx, data.projectMaterialId);
-      const line = await tx.projectMaterial.findUnique({
-        where: {product:liveProductWhere, id: data.projectMaterialId },
-        include: {
-          material: { select: { id: true, name: true, unit: true, purchasePrice: true } },
-          product: { select: { id: true, number: true, projectId: true } },
-        },
-      });
-      if (!line) throw new Error("Строка потребности не найдена");
-      const issuedQty = Number(line.issuedQty);
-      if (data.quantity > issuedQty) {
-        throw new Error(
-          `Нельзя вернуть больше выданного (${formatQty(issuedQty)} ${line.material.unit})`,
-        );
-      }
-      const unitPrice =
-        data.unitPrice ??
-        (line.material.purchasePrice === null
-          ? null
-          : Number(line.material.purchasePrice));
-      const movement = await tx.stockMovement.create({
-        data: {
-          materialId: line.materialId,
-          type: "RETURN",
-          quantity: data.quantity,
-          unitPrice,
-          totalByn: unitPrice === null ? null : round2(data.quantity * unitPrice),
-          productId: line.productId,
-          projectMaterialId: line.id,
-          comment: data.comment?.trim() || null,
-          createdById: session.user.id,
-        },
-      });
-      await tx.projectMaterial.update({
-        where: { id: line.id },
-        data: { issuedQty: { decrement: data.quantity } },
-      });
-      return { movement, line };
-    }, TX_OPTIONS);
-
-    await writeChangeLog({
-      actorType: "user",
-      actorId: session.user.id,
-      actorName: session.user.name ?? undefined,
-      entity: "stockMovement",
-      entityId: movement.id,
-      action: "create",
-      newValue: {
-        type: "RETURN",
-        product: line.product.number,
-        material: line.material.name,
-        quantity: data.quantity,
-      },
-    });
-    await emitDomainEvent(
-      "stock.movement.created",
-      {
-        movementId: movement.id,
-        type: "RETURN",
-        materialId: line.materialId,
-        productId: line.productId,
-        quantity: data.quantity,
-      },
-      session.user.id,
-    );
-    await revalidateWarehouse(line.productId, line.product.projectId);
-    return { ok: true };
-  } catch (error) {
-    return {
-      ok: false,
-      error: error instanceof Error ? error.message : "Ошибка возврата",
-    };
+    result=await prisma.$transaction(tx=>warehouseMove(tx,actor,input),TX_OPTIONS);
+  } catch(error){return {ok:false,error:error instanceof Error?error.message:"Не удалось сохранить складское движение"};}
+  if(!result.repeated){
+    await dispatchEvent(result.eventId!).catch(()=>console.error('[warehouse] Складское событие осталось в очереди доставки'));
+    if(input.kind==="EXPENSE")await notifyOrg({type:"stock.expense",title:`Списание: ${result.material!.name} × ${formatQty(input.quantity)} · ${result.line!.product.number}`,link:`/products/${result.line!.productId}`,exceptUserId:actor.id}).catch(()=>console.error('[warehouse] Не удалось отправить уведомление о выдаче'));
   }
+  await revalidateWarehouse(result.movement.productId,result.line?.product.projectId);
+  return {ok:true};
 }

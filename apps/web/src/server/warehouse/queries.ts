@@ -1,10 +1,11 @@
 import {FIELD_ROLES,OFFICE_ROLES,WAREHOUSE_MONEY_ROLES,hasAnyRole} from "@/lib/roles";
 import { prisma } from "@/lib/prisma";
-import { decimalAtoms, decimalText, materialDebt } from "@/lib/product-quantity";
+import { warehouseReadPositions, averagePrice } from './accounting';
+import { materialDebt,decimalAtoms,decimalText } from "@/lib/product-quantity";
 import { hasFullProjectVisibility, productVisibilityWhere, resolveVisibilityActor, type VisibilityActor } from "@/server/access/visibility";
 
-// ─── Склад (§12, фаза 6): номенклатура, остатки из движений, потребность ──
-// Остатки не хранятся: остаток = Σ INCOME + Σ RETURN − Σ EXPENSE.
+// ─── Склад: текущий баланс, неизменённая история и потребность ──
+// После операторского запуска количество и стоимость берутся из WarehouseBalance.
 // Потребность изделия (ProjectMaterial) создаётся без проверки остатка;
 // нехватка вычисляется: debt = quantity − issuedQty, строка «в нехватке»,
 // если debt > 0 и остаток < debt. Бейдж проекта — агрегат по его изделиям.
@@ -28,24 +29,12 @@ export async function listCategories(): Promise<MaterialCategoryView[]> {
   }));
 }
 
-// Остатки по всем материалам одним groupBy: materialId → количество
+// Единый текущий остаток: materialId → количество.
 async function stockByMaterial(
   materialIds?: string[],
 ): Promise<Map<string, number>> {
-  const grouped = await prisma.stockMovement.groupBy({
-    by: ["materialId", "type"],
-    where: materialIds ? { materialId: { in: materialIds } } : undefined,
-    _sum: { quantity: true },
-  });
-  const stock = new Map<string, bigint>();
-  for (const row of grouped) {
-    const sign = row.type === "EXPENSE" ? -1 : 1;
-    stock.set(
-      row.materialId,
-      (stock.get(row.materialId) ?? BigInt(0)) + BigInt(sign) * decimalAtoms(row._sum.quantity ?? 0, 3, 18),
-    );
-  }
-  return new Map([...stock].map(([id, atoms]) => [id, Number(decimalText(atoms, 3))]));
+  const data=await warehouseReadPositions(prisma,materialIds);
+  return new Map([...data.positions].map(([id,position])=>[id,Number(position.quantity)]));
 }
 
 // Открытая потребность (долг) по материалам: Σ max(0, quantity − issuedQty)
@@ -77,6 +66,7 @@ export type MaterialView = {
   active: boolean;
   comment: string | null;
   stock: number; // остаток из движений
+  warehouseReady: boolean;
   shortByProjects: number; // сколько не хватает по всем открытым потребностям
 };
 
@@ -87,11 +77,12 @@ export async function listMaterials(actor: VisibilityActor): Promise<MaterialVie
       orderBy: { name: "asc" },
       include: { category: { select: { name: true } } },
     }),
-    stockByMaterial(),
+    warehouseReadPositions(prisma),
     debtByMaterial(actor),
   ]);
   return materials.map((material) => {
-    const onStock = stock.get(material.id) ?? 0;
+    const position=stock.positions.get(material.id)??{quantity:'0',value:'0'};
+    const onStock = Number(position.quantity);
     const need = debt.get(material.id) ?? 0;
     return {
       id: material.id,
@@ -101,11 +92,12 @@ export async function listMaterials(actor: VisibilityActor): Promise<MaterialVie
       categoryId: material.categoryId,
       categoryName: material.category?.name ?? null,
       purchasePrice:
-        !hasAnyRole(actor.roles,WAREHOUSE_MONEY_ROLES)||material.purchasePrice === null ? null : Number(material.purchasePrice),
+        !hasAnyRole(actor.roles,WAREHOUSE_MONEY_ROLES)?null:stock.current?Number(averagePrice(position)):material.purchasePrice===null?null:Number(material.purchasePrice),
       minStock: material.minStock === null ? null : Number(material.minStock),
       active: material.active,
       comment: material.comment,
       stock: onStock,
+      warehouseReady: stock.ready,
       shortByProjects: Math.max(0, need - onStock),
     };
   });
@@ -194,6 +186,9 @@ export type ProjectMaterialLine = {
   available: number; // остаток на складе
   status: ProjectMaterialLineStatus;
   comment: string | null;
+  warehouseReady: boolean;
+  returnSources: {id:string;createdAt:string;quantity:number;unitPrice:number|null}[];
+  legacyReturnQuantity: number;
 };
 
 export type ProjectMaterialsData = {
@@ -221,14 +216,18 @@ export async function getProjectMaterials(
     }),
     listMovements(actor, { productId }),
   ]);
-  const stock = await stockByMaterial(rows.map((row) => row.materialId));
+  const stock = await warehouseReadPositions(prisma,rows.map((row) => row.materialId));
+  const issued=stock.current?await prisma.warehouseMovementValuation.findMany({where:{movement:{projectMaterialId:{in:rows.map(row=>row.id)},type:'EXPENSE'}},include:{movement:{select:{projectMaterialId:true,createdAt:true}}}}):[];
 
   let hasShortage = false;
   const lines: ProjectMaterialLine[] = rows.map((row) => {
     const quantity = Number(row.quantity);
     const issuedQty = Number(row.issuedQty);
     const debt = materialDebt(row.quantity, row.issuedQty);
-    const available = stock.get(row.materialId) ?? 0;
+    const position=stock.positions.get(row.materialId)??{quantity:'0',value:'0'};
+    const available = Number(position.quantity);
+    const sources=issued.filter(item=>item.movement.projectMaterialId===row.id).map(item=>({id:item.movementId,createdAt:item.movement.createdAt.toISOString(),quantity:Number(item.quantity.minus(item.returnedQuantity)),unitPrice:hasAnyRole(actor.roles,WAREHOUSE_MONEY_ROLES)?Number(item.unitCost.toFixed(2)):null})).filter(item=>item.quantity>0);
+    const legacyQuantity=decimalAtoms(row.issuedQty,3,12)-sources.reduce((sum,item)=>sum+decimalAtoms(item.quantity,3,12),BigInt(0));
     const status: ProjectMaterialLineStatus =
       debt <= 0 ? "FULFILLED" : available >= debt ? "AVAILABLE" : "SHORTAGE";
     if (status === "SHORTAGE") hasShortage = true;
@@ -239,9 +238,7 @@ export async function getProjectMaterials(
       materialSku: row.material.sku,
       unit: row.material.unit,
       purchasePrice:
-        !hasAnyRole(actor.roles,WAREHOUSE_MONEY_ROLES)||row.material.purchasePrice === null
-          ? null
-          : Number(row.material.purchasePrice),
+        !hasAnyRole(actor.roles,WAREHOUSE_MONEY_ROLES)?null:stock.current?Number(averagePrice(position)):row.material.purchasePrice===null?null:Number(row.material.purchasePrice),
       quantity,
       quantityPerUnit: Number(row.quantityPerUnit ?? row.quantity),
       issuedQty,
@@ -249,6 +246,9 @@ export async function getProjectMaterials(
       available,
       status,
       comment: row.comment,
+      warehouseReady: stock.ready,
+      returnSources:sources,
+      legacyReturnQuantity:Number(decimalText(legacyQuantity>BigInt(0)?legacyQuantity:BigInt(0),3)),
     };
   });
 

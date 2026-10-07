@@ -143,7 +143,7 @@ export function engineerFixture() {
       product: fixtureModel(products), project: fixtureModel(projects), task: fixtureModel(tasks),
       productPercentageParticipant: fixtureModel([]),
       file: fixtureModel(files), client: fixtureModel([client]), user: fixtureModel([engineer, other]),
-      projectMaterial: fixtureModel([]), stockMovement: fixtureModel([]), timeEntry: fixtureModel([]),
+      projectMaterial: fixtureModel([]), stockMovement: fixtureModel([]), warehouseAccountingState: {findUnique:async()=>null}, warehouseBalance: fixtureModel([]), timeEntry: fixtureModel([]),
       payrollEntry: fixtureModel([
         { id: "historical-earned", userId: "engineer", projectId: "hidden", month: "2000-01", amount: 500, currency: "BYN", bynAmount: null, scheme: "PERCENT_PROJECT", comment: "Historical earnings", createdAt: new Date(0) },
         { id: "someone-elses-earned", userId: "other", month: "2000-01", amount: 999, createdAt: new Date(0) },

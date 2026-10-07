@@ -13,6 +13,7 @@ import { productLineTotal } from "@/lib/product-quantity";
 import { productEditWhere, resolveVisibilityActor } from "@/server/access/visibility";
 import { withTaskTransaction, type TaskTransaction } from "@/server/tasks/transaction";
 import { lockProductRow, recalculateQuantity } from "./quantity-core";
+import {warehouseMetadataGate} from '@/server/warehouse/gate';
 import { initialPriceCapture, newProductInitialPrice } from "./initial-price";
 import { readProductPercentageDefaults } from "@/server/product-percentage-defaults/core";
 import { DEFAULT_PERCENTAGE_KINDS } from "@/server/product-percentage-defaults/contracts";
@@ -132,7 +133,9 @@ export async function createProductCore(actor: DomainActor, input: CreateProduct
   return mutation;
 }
 
-async function updateProductValues(actor: DomainActor, productId: string, data: ProductValues, baseline: ProductUpdateBaseline, tx: Prisma.TransactionClient) {    await lockProductRow(tx, productId);
+async function updateProductValues(actor: DomainActor, productId: string, data: ProductValues, baseline: ProductUpdateBaseline, tx: Prisma.TransactionClient) {
+    if(data.quantity!==undefined)await warehouseMetadataGate(tx);
+    await lockProductRow(tx, productId);
     const visibilityActor = hasAnyRole(actor.roles, MANAGER_ROLES) ? actor : await resolveVisibilityActor(tx, actor);
     const before = await tx.product.findFirst({ where: {...liveProductWhere, AND: [{ id: productId }, productEditWhere(visibilityActor)] } });
     if (!before) return { ok: false as const, error: "Изделие не найдено" };
