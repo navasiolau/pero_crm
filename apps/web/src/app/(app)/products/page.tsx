@@ -2,7 +2,8 @@ import { redirect } from "next/navigation";
 
 import { auth } from "@/auth";
 import { displayClientName } from "@/lib/labels";
-import { MANAGER_ROLES, OFFICE_ROLES, hasAnyRole } from "@/lib/roles";
+import { MANAGER_ROLES, hasAnyRole } from "@/lib/roles";
+import {canViewProductMoney} from "@/lib/product-financial-access";
 import { ListParamsProvider } from "@/lib/list-params";
 import { listPreferences } from "@/server/list-preferences";
 import { listEngineers } from "@/server/projects/queries";
@@ -77,7 +78,7 @@ export default async function ProductsPage({
       pageSize={pageSize}
       canManage={hasAnyRole(role, MANAGER_ROLES)}
       actorRoles={role}
-      showAmount={hasAnyRole(role, OFFICE_ROLES)}
+      showAmount={canViewProductMoney(role)}
       hideEngineerFilter={role.includes("ENGINEER") && !hasAnyRole(role, MANAGER_ROLES)}
       engineerOptions={engineers.map((engineer) => ({
         value: engineer.id,

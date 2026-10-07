@@ -190,10 +190,10 @@ export function clientVisibilityWhere(actor: VisibilityActor): Prisma.ClientWher
 
 export function productEditWhere(actor:VisibilityActor):Prisma.ProductWhereInput {return {AND:[liveProductWhere,productEditWhereGrants(actor)]};}
 
-export function productVisibilityWhere(actor:VisibilityActor):Prisma.ProductWhereInput {return {AND:[liveProductWhere,hasRole(actor.roles,"WORKER") && !hasFullProjectVisibility(actor)
- ? {OR:[assignedProductVisibilityWhere(actor),{status:"PRODUCTION"}]} : assignedProductVisibilityWhereGrants(actor)]};}
+export function productVisibilityWhere(actor:VisibilityActor):Prisma.ProductWhereInput {return {AND:[liveProductWhere,hasAnyRole(actor.roles,FIELD_ROLES) && !hasFullProjectVisibility(actor)
+ ? {OR:[assignedProductVisibilityWhere(actor),{status:{not:"DESIGN"}}]} : assignedProductVisibilityWhereGrants(actor)]};}
 
-export function projectVisibilityWhere(actor:VisibilityActor):Prisma.ProjectWhereInput {return {AND:[liveProjectWhere,hasRole(actor.roles,"WORKER") && !hasFullProjectVisibility(actor)
+export function projectVisibilityWhere(actor:VisibilityActor):Prisma.ProjectWhereInput {return {AND:[liveProjectWhere,hasAnyRole(actor.roles,FIELD_ROLES) && !hasFullProjectVisibility(actor)
  ? {OR:[assignedProjectVisibilityWhere(actor),{products:{some:productVisibilityWhere(actor)}}]} : assignedProjectVisibilityWhereGrants(actor)]};}
 
 export function taskVisibilityWhere(actor:VisibilityActor):Prisma.TaskWhereInput {return {AND:[liveChildWhere,taskVisibilityWhereGrants(actor)]};}

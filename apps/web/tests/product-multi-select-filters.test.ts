@@ -71,9 +71,9 @@ test("selected engineer participants union across users but cannot bypass roles 
     assert.deepEqual(new Set(engineer.rows.map((row) => row.id)), new Set(["product-0", "product-2", "product-4"]));
     assert.equal((await queries.listProducts("e1", ["ENGINEER"], { activeOnly: false, engineerIds: ["e2"] })).total, 0);
     const worker = await queries.listProducts("field", ["WORKER"], filters);
-    assert.deepEqual(worker.rows.map((row) => row.id), ["product-2"]);
-    assert.equal(worker.rows[0].expectedPrice, null);
-    assert.equal((await queries.listProducts("field", ["MOUNTER"], filters)).total, 0);
+    assert.deepEqual(worker.rows.map((row) => row.id), ["product-2","product-1"]);
+    assert.ok(worker.rows.every(row=>row.expectedPrice===null));
+    assert.equal((await queries.listProducts("field", ["MOUNTER"], filters)).total, 2);
   } finally { rows[5].engineerId = original; participants.pop(); }
 });
 

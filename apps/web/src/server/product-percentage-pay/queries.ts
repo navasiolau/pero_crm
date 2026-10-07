@@ -1,11 +1,12 @@
 import { calculateWholeProductPercentage } from "@/lib/product-percentage-ceil";
+import {canViewProductMoney} from "@/lib/product-financial-access";
 import { Prisma, type PrismaClient, type Role } from "@prisma/client";
 import { MAX_PRODUCT_PERCENTAGE_RATE } from "@/lib/product-percentage-rate-limit";
 import type { ProductPercentageView, ProductPercentageSectionView } from "@/lib/product-percentage-view";
 import { PERCENTAGE_STAGE_POLICY } from "./stage-policy";
 import { hasAnyRole, MANAGER_ROLES } from "@/lib/roles";
 import { prisma } from "@/lib/prisma";
-import { fileVisibilityWhere,hasFullProjectVisibility, productVisibilityWhere, resolveVisibilityActor } from "@/server/access/visibility";
+import { fileVisibilityWhere, productVisibilityWhere, resolveVisibilityActor } from "@/server/access/visibility";
 
 type Reader = Pick<PrismaClient, "product" | "task" | "productPercentageParticipant" | "user" | "payrollEntry">;
 export async function getProductPercentageView(actor: { id: string; roles: Role[] }, productId: string,
@@ -20,7 +21,7 @@ export async function getProductPercentageView(actor: { id: string; roles: Role[
     } });
   if (!product) throw new Error("Изделие не найдено");
   const manager = hasAnyRole(actor.roles, MANAGER_ROLES);
-  const financeView = hasFullProjectVisibility(visibilityActor);
+  const financeView = canViewProductMoney(actor.roles);
   const [engineers,assemblers,mounters] = await Promise.all([
     database.user.findMany({ where: { active: true, roles: { hasSome: ["ENGINEER"] } }, select: { id: true, name: true } }),
     database.user.findMany({ where: { active: true, roles: { hasSome: ["WORKER"] } }, select: {id:true,name:true} }),
@@ -38,6 +39,7 @@ export async function getProductPercentageView(actor: { id: string; roles: Role[
     const assignee = assigneeUser ? {userId:product[policy.assignment]!,name:assigneeUser.name,active:assigneeUser.active,eligible:assigneeUser.roles?.includes(policy.role) ?? false} : null;
     const quantity=Number.isSafeInteger(product.quantity)&&product.quantity>0?product.quantity:null;
     const productTotal=product.expectedPrice!==null&&quantity!==null?new Prisma.Decimal(product.expectedPrice.toString()).mul(quantity).toFixed(2):null;
+    const currentAssigneeForecast=!!assignee&&(!!displayCompletion||pool?.state==="SETTLED"||pool?.state==="LEGACY_PROTECTED")&&!completion?.shares.some(row=>row.userId===assignee.userId);
     let draftTotal:string|null=null;
     // Прогноз суммы виден ДО назначения и при пропущенном начислении (ставка задана позже): нужны только ставка и цена.
     // Начисление при этом НЕ выполняется — оно происходит только сменой статуса.
@@ -56,26 +58,35 @@ export async function getProductPercentageView(actor: { id: string; roles: Role[
       : assignee ? [{userId:assignee.userId,name:assignee.name,shareUnits:1000000,amount:draftTotal}] : [];
     // Текущий назначенный без доли виден своей строкой прогноза (но не пустой строкой).
     if (assignee && draftTotal !== null && !members.some((row) => row.userId === assignee.userId)) members.push({userId:assignee.userId,name:assignee.name,shareUnits:1000000,amount:draftTotal});
-    const ownMember = members.find((row) => row.userId === actor.id) ?? null;
+    // Текущий выбранный сотрудник может отличаться от исторического получателя.
+    if(assignee&&!members.some(row=>row.userId===assignee.userId)&&product.project.currency==="BYN"){
+      const forecast=calculateWholeProductPercentage({kind,unitPrice:product.expectedPrice?.toString()??null,quantity,rate:config?.ratePercent?.toString()??null})?.amount??null;
+      members.push({userId:assignee.userId,name:assignee.name,shareUnits:1000000,amount:forecast});
+    }
+    if(currentAssigneeForecast&&product.project.currency==="BYN"){
+      const member=members.find(row=>row.userId===assignee!.userId);
+      if(member)member.amount=calculateWholeProductPercentage({kind,unitPrice:product.expectedPrice?.toString()??null,quantity,rate:config?.ratePercent?.toString()??null})?.amount??null;
+    }
+    const ownMember = assignee?.userId===actor.id?members.find((row) => row.userId === actor.id) ?? null:null;
     // Поле видит только свою сумму; неназначенному sums нет вообще (прогноз только менеджерам).
     const fieldTotal = ownMember ? ownMember.amount : null;
     const view: ProductPercentageSectionView = {
       hasConfiguration: Boolean(config),
       currentRatePercent: financeView ? config?.ratePercent?.toString()??null : null,
       assignee,
-      unitPrice: financeView ? latestAdjustment?.unitPrice.toString()??(completion ? completion.priceSnapshot?.toString()??null : product.expectedPrice?.toString()??null) : null,
-      quantity: latestAdjustment?.quantity??(completion ? completion.quantitySnapshot??null : quantity),
-      productTotal: financeView ? latestAdjustment?latestAdjustment.unitPrice.mul(latestAdjustment.quantity).toFixed(2):completion ? completion.totalSnapshot?.toString()??null : productTotal : null,
-      calculationVersion: latestAdjustment?4:completion?.calculationVersion===4 ? 4 : completion?.calculationVersion===3 ? 3 : completion?.calculationVersion===2 ? 2 : completion ? 1 : 4,
+      unitPrice: financeView ? currentAssigneeForecast?product.expectedPrice?.toString()??null:latestAdjustment?.unitPrice.toString()??(completion ? completion.priceSnapshot?.toString()??null : product.expectedPrice?.toString()??null) : null,
+      quantity: currentAssigneeForecast?quantity:latestAdjustment?.quantity??(completion ? completion.quantitySnapshot??null : quantity),
+      productTotal: financeView ? currentAssigneeForecast?productTotal:latestAdjustment?latestAdjustment.unitPrice.mul(latestAdjustment.quantity).toFixed(2):completion ? completion.totalSnapshot?.toString()??null : productTotal : null,
+      calculationVersion: currentAssigneeForecast||latestAdjustment?4:completion?.calculationVersion===4 ? 4 : completion?.calculationVersion===3 ? 3 : completion?.calculationVersion===2 ? 2 : completion ? 1 : 4,
       recipientCandidates: manager ? (kind==="ENGINEERING"?engineers:kind==="ASSEMBLY"?assemblers:mounters).map(user=>({userId:user.id,name:user.name})) : [],
       kind, state: completion?.state ?? (pool?.state === "SETTLED" || pool?.state === "LEGACY_PROTECTED" ? "LEGACY_PROTECTED" : "DRAFT"),
-      ratePercent: financeView ? latestAdjustment?.ratePercent.toString()??(displayCompletion ? displayCompletion.ratePercentSnapshot?.toString()??null : config?.ratePercent?.toString()??null) : null,
-      price: financeView ? latestAdjustment?.unitPrice.toString()??(displayCompletion ? displayCompletion.priceSnapshot?.toString()??null : product.expectedPrice?.toString()??null) : null,
+      ratePercent: financeView ? currentAssigneeForecast?config?.ratePercent?.toString()??null:latestAdjustment?.ratePercent.toString()??(displayCompletion ? displayCompletion.ratePercentSnapshot?.toString()??null : config?.ratePercent?.toString()??null) : null,
+      price: financeView ? currentAssigneeForecast?product.expectedPrice?.toString()??null:latestAdjustment?.unitPrice.toString()??(displayCompletion ? displayCompletion.priceSnapshot?.toString()??null : product.expectedPrice?.toString()??null) : null,
       productCurrency: displayCompletion?.productCurrency ?? product.project.currency,
       payrollCurrency: displayCompletion?.payrollCurrency ?? null,
       // Сумма: менеджерам — итог/прогноз как раньше; полю — только своя строка назначенного.
       // Не-финансы (не MANAGER/PROCUREMENT): members только своя строка, имена исполнителей оставлены через assignee.
-      total: financeView ? (latestAdjustment?.amount.toString()??displayCompletion?.amount?.toString() ?? draftTotal) : fieldTotal,
+      total: financeView ? (currentAssigneeForecast?members.find(row=>row.userId===assignee!.userId)?.amount??null:latestAdjustment?.amount.toString()??displayCompletion?.amount?.toString() ?? draftTotal) : fieldTotal,
       members: financeView ? members : ownMember ? [ownMember] : [], revision: config?.revision ?? 0,
       canManage: manager&&product.status!=="DONE",
       canTransfer: false,

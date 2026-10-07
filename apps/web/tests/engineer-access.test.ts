@@ -49,7 +49,8 @@ test("project query scopes children, files, dependencies and financial aggregate
   assert.equal(await projects.getProjectFor(engineer.id, engineer.roles, "hidden"), null);
   const result = await projects.listProjects(engineer.id, engineer.roles, { activeOnly: false });
   assert.equal(result.total, 1);
-  assert.equal(result.rows[0].totalPrice, 400);
+  assert.equal(result.rows[0].totalPrice, null);
+  assert.ok(result.rows[0].products.every(product=>product.expectedPrice===null));
   assert.deepEqual(result.rows[0]._count, { tasks: 1, products: 2, files: 3 });
   assert.equal((await projects.listProjects(engineer.id, engineer.roles, { activeOnly: false, engineerId: "other" })).total, 0);
 });

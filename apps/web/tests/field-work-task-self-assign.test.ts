@@ -89,8 +89,8 @@ test('DESIGN hides field controls; empty price list shows manager hint',()=>{
  const filled=renderToStaticMarkup(React.createElement(TasksTab,tabProps()));
  assert.doesNotMatch(filled,/обратитесь к менеджеру/);
 });
-test('sidebar stays closed for mounters and tasks page keeps office redirect',()=>{
+test('mounters get Products while tasks page keeps office redirect',()=>{
  assert.equal(navItems.some(item=>item.href==='/tasks'&&item.roles.includes('MOUNTER' as Role)),false);
- assert.equal(navItems.some(item=>item.href==='/products'&&item.roles.includes('MOUNTER' as Role)),false);
+ assert.equal(navItems.some(item=>item.href==='/products'&&item.roles.includes('MOUNTER' as Role)),true);
  assert.equal(hasAnyRole(['MOUNTER' as Role],OFFICE_ROLES),false);
 });
