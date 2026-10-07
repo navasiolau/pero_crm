@@ -9,4 +9,12 @@
 - Первый browser STOP был ошибкой тестового селектора option вместо button. Только собственные bounded fixtures очищены подписанным checkpoint; preferences не менялись. Исправленный повтор PASS, данные CLEANED, preferences RESTORED; приватный receipt local-90a3c868-c632-4c8b-ab1b-121a8ef6bfe8.
 - Подготовка QA и очистка используют существующий строгий transport и подписанные before/after observations; поддержка нового client.address добавлена в whitelist сопоставляемого аудита, не в общий обход guards.
 
-Staging-приёмка ещё выполняется. Здесь не заявляются production, Telegram delivery или завершённый выпуск.
+## Staging — 08.10.2026
+
+- Функциональный commit af61c74004727cc6b7827f61478a190768755481 слит обычным merge в 8dd3039f828b1a88272f7349acf6ea39831d35af.
+- CI [37682909416](https://github.com/navasiolau/pero_crm/actions/runs/37682909416): test, build-push и build-push-bot SUCCESS.
+- Actual web revision 8dd3039f828b1a88272f7349acf6ea39831d35af, OCI sha256:3292ed27a0e2dbdbb37f84a5ac3c7ee2104266f8138697ce830e25c553e3717e; container healthy, HTTP health 200 JSON status/database ok.
+- Исходный DB ID 27b8f7342b9d722ab8788e137b37b03a3037442da038c5b8b98dbb30245b8b6a, StartedAt, crm-staging_pgdata и W07 SHA совпали. В первом отдельном metadata helper был неполный литерал ID; read-only сверка выявила ошибку helper, действующий guard не менялся. Временный REFRESH_OR_DEPLOY_BUSY дождались без обхода блокировки.
+- Native PostgreSQL 8 групп PASS с подтверждённым rollback и исходными хэшами; bundle eb8fdc3272c37fd08f83f4597b3727850cdef59e017779832aac6b15ba67be56.
+- Actual HTTPS/browser 5 групп PASS на manager и engineer; desktop 1440, mobile 390/360 просмотрены лично. Receipt staging-1ce4418a-0b03-4e3a-9c01-dbccfda4781a: DATA CLEANED, preferences RESTORED.
+- Main остался 8f257cba42f20df8f57d4d6cdcdc7df75f892ee5. Production и его БД не менялись.
