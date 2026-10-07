@@ -12,6 +12,8 @@
 6. `zero` выполняется одной транзакцией REPEATABLE READ: нули в текущем складе и Material.purchasePrice; защита всех старых строк кроме целевого поля. Фаза VERIFYING ещё не разрешает записи.
 7. Проверить через приложение нули, доступность, защищённые поля и старые расходы. Только затем `activate`. Повтор zero/activate не стирает инвентаризацию.
 
+Изолированная проверка ждёт завершения init PostgreSQL и готовности основного сервера. Если PostgreSQL иначе группирует скобки CHECK при разборе архива, полное исходное выражение заново разбирается на пустом TEMP-клоне в изолированной БД; условия, типы, операторы и признак validation не игнорируются. Отличающаяся логика, строки, связи или другие объекты приводят к отказу.
+
 Синтаксис: `python3 <reviewed-file> --target production --revision <40-hex> --run <UUID> --action <action>`. Windows recovery: `python deploy/warehouse94-operator.py --revision <40-hex> --run <UUID> --action verify-archive --archive <private-path/pre-zero.dump>`.
 
 ## Восстановление

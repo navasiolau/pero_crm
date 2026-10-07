@@ -56,7 +56,7 @@ Ignored локальные артефакты: `.playwright-mcp/warehouse94/brow
 
 ## Готовность восстановления и оставшиеся обязательные этапы
 
-Оператор: `deploy/warehouse94-operator.py`, SHA256 `41bb430d9149d1993ae19fab104be6640be639180f6adc94842313ea2389e802`. Процедура — `deploy/warehouse94-operator.README.md`.
+Оператор первоначальной локальной проверки: `deploy/warehouse94-operator.py`, SHA256 `41bb430d9149d1993ae19fab104be6640be639180f6adc94842313ea2389e802`. После настоящего production-archive rehearsal его проверка CHECK-выражений усилена; текущий SHA256 `78d296cc2a319b481ce05c751516a324247e55c3fde32597cae83afa0482a740`. Процедура — `deploy/warehouse94-operator.README.md`, результаты реального архива — production-evidence.md.
 
 Проверены отказы на чужом host, staging dump, SQL с неверным снимком, чтение symlink receipt; команды используют REPEATABLE READ и guards фактической ревизии/контейнеров/volume/bucket. Backup держит экспортированный согласованный снимок. Инструмент проверяет восстановленные строки, колонки, определения ограничений/FK, функций, триггеров и индексов, затем настоящее zero/targeted restore и совпадение исходных остатков/цен. Архивы остаются до приёмки владельцем.
 
