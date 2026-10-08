@@ -7,7 +7,13 @@ import {prepareStockPurchase,createStockPurchaseInTransaction} from '../../src/s
 export async function deletionBaseline(db:PrismaClient){
  const tables=await db.$queryRaw<{tablename:string}[]>`SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename<>'_prisma_migrations' ORDER BY tablename`;
  const result:Record<string,unknown>={};
- for(const {tablename} of tables){assert.match(tablename,/^[A-Za-z]+$/);result[tablename]=await db.$queryRawUnsafe(`SELECT count(*)::text n,md5(COALESCE(string_agg(h,'' ORDER BY h),'')) digest FROM (SELECT md5(to_jsonb(t)::text) h FROM "${tablename}" t) x`);}
+ for(const {tablename} of tables){
+  assert.match(tablename,/^[A-Za-z]+$/);
+  // Работающий бот обновляет только отметку использования токена при штатном ping.
+  // Сам токен, scopes, отзыв и все бизнес-таблицы по-прежнему сверяются полностью.
+  const row=tablename==='ApiToken'?"(to_jsonb(t)-'lastUsedAt')":'to_jsonb(t)';
+  result[tablename]=await db.$queryRawUnsafe(`SELECT count(*)::text n,md5(COALESCE(string_agg(h,'' ORDER BY h),'')) digest FROM (SELECT md5(${row}::text) h FROM "${tablename}" t) x`);
+ }
  return result;
 }
 export async function createDeletionFixture(tx:Prisma.TransactionClient,marker:string,currency='BYN'){
