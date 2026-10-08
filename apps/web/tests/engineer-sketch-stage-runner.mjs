@@ -6,23 +6,33 @@ import {mkdir,readFile,writeFile} from 'node:fs/promises';
 import {qaTransport,bundleHash} from './crm-acceptance-transport.mjs';
 const here=path.dirname(fileURLToPath(import.meta.url));
 const require=createRequire(import.meta.url),{build}=createRequire(require.resolve('tsx/package.json'))('esbuild');
-export async function sketchQaBundle(){const result=await build({entryPoints:[path.join(here,'engineer-sketch-qa-entry.mjs')],bundle:true,write:false,platform:'node',format:'esm',target:'node22',external:['@prisma/client','@aws-sdk/client-s3','@auth/core/jwt','sharp'],minify:true,logLevel:'silent'});const bytes=Buffer.from(result.outputFiles[0].contents);if(bytes.length>256*1024)throw Error('REVIEWED_BUNDLE_SIZE_LIMIT');return bytes;}
+export async function sketchQaBundle(){const result=await build({entryPoints:[path.join(here,'engineer-sketch-qa-entry.mjs')],bundle:true,write:false,platform:'node',format:'esm',target:'node22',external:['@prisma/client','@aws-sdk/client-s3','sharp'],banner:{js:'import { createRequire as task112CreateRequire } from "node:module"; const require = task112CreateRequire(import.meta.url);'},minify:true,logLevel:'silent'});const bytes=Buffer.from(result.outputFiles[0].contents);if(bytes.length>256*1024)throw Error('REVIEWED_BUNDLE_SIZE_LIMIT');return bytes;}
+/** Root-only private IPC: cookies stay in the returned process object, never argv/receipts/log files/stdout. */
+export async function requestSketchBrowserHandoff({revision,checkpoint,outputDir,authorized=false}){
+ if(!authorized||!/^[a-f0-9]{40}$/.test(revision??'')||checkpoint?.revision!==revision||!path.isAbsolute(outputDir))throw Error('HANDOFF_AUTHORIZED_BINDING_REQUIRED');
+ const bytes=await sketchQaBundle(),transport=qaTransport({target:'staging',revision,outputDir});
+ const result=await transport.execute(bytes,'inspect',{operation:'inspect',mode:'handoff',revision,runId:checkpoint.runId,authorized:true,checkpoint});
+ const handoff=result.body;
+ if(handoff.status!=='PRIVATE_BROWSER_HANDOFF'||handoff.runId!==checkpoint.runId||handoff.revision!==revision||handoff.profile?.id!==checkpoint.actors?.manager?.id)throw Error('HANDOFF_RESPONSE_BINDING_MISMATCH');
+ return {authorized:true,expectedRevision:revision,identity:result.receipt.identity,checkpoint,...handoff};
+}
 export async function runSketchQa({operation,revision,runId,outputDir,authorized=false}){
- if(!authorized||!['prepare','runtime','capture','cleanup'].includes(operation)||!/^[a-f0-9]{40}$/.test(revision??'')||!/^[a-f0-9-]{36}$/.test(runId??'')||!path.isAbsolute(outputDir))throw Error('AUTHORIZED_EXPLICIT_SCOPE_REQUIRED');
+ if(!authorized||!['prepare','runtime','capture','cleanup','partial-capture','partial-cleanup'].includes(operation)||!/^[a-f0-9]{40}$/.test(revision??'')||!/^[a-f0-9-]{36}$/.test(runId??'')||!path.isAbsolute(outputDir))throw Error('AUTHORIZED_EXPLICIT_SCOPE_REQUIRED');
  await mkdir(outputDir,{recursive:true});
  // Exclusive intent prevents silent duplicate mutation after a lost response.
  await writeFile(path.join(outputDir,`intent-${operation}.json`),JSON.stringify({operation,revision,runId}),{flag:'wx',mode:0o600});
- const wire=operation==='prepare'?'prepare':operation==='cleanup'?'restore':'inspect';
+ const wire=operation==='prepare'?'prepare':['cleanup','partial-cleanup'].includes(operation)?'restore':'inspect';
  const input={operation:wire,revision,runId,authorized:true};
  if(operation!=='prepare')input.checkpoint=JSON.parse(await readFile(path.join(outputDir,'checkpoint.json'),'utf8'));
- if(operation==='runtime'||operation==='capture')input.mode=operation;
- if(operation==='cleanup')input.observation=JSON.parse(await readFile(path.join(outputDir,'observation.json'),'utf8'));
+ if(['runtime','capture','partial-capture','partial-cleanup'].includes(operation))input.mode=operation;
+ if(operation==='partial-capture')input.partialPolicy=JSON.parse(await readFile(path.join(outputDir,'partial-policy.json'),'utf8'));
+ if(['cleanup','partial-cleanup'].includes(operation))input.observation=JSON.parse(await readFile(path.join(outputDir,'observation.json'),'utf8'));
  const bytes=await sketchQaBundle(),transport=qaTransport({target:'staging',revision,outputDir});
  const result=await transport.execute(bytes,wire,input);
  await writeFile(path.join(outputDir,`receipt-${operation}.json`),JSON.stringify(result.receipt,null,2),{flag:'wx',mode:0o600});
  if(operation==='prepare')await writeFile(path.join(outputDir,'checkpoint.json'),JSON.stringify(result.body.checkpoint),{flag:'wx',mode:0o600});
- if(operation==='runtime'||operation==='capture')await writeFile(path.join(outputDir,'observation.json'),JSON.stringify(result.body.observation),{flag:'wx',mode:0o600});
- return {status:result.body.status,operation,revision,runId,checks:result.body.checks?.length??0,counts:result.body.counts,outputDir};
+ if(['runtime','capture','partial-capture'].includes(operation))await writeFile(path.join(outputDir,'observation.json'),JSON.stringify(result.body.observation),{flag:'wx',mode:0o600});
+ return {status:result.body.status,operation,revision,runId,checks:result.body.checks?.length??0,counts:result.body.counts,runtimePass:result.body.runtimePass,fullOriginalMatch:result.body.fullOriginalMatch,currentOrgSettingPreservedAtCommit:result.body.currentOrgSettingPreservedAtCommit,laterOrgSettingChange:result.body.laterOrgSettingChange,outputDir};
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
  const[operation,...args]=process.argv.slice(2);

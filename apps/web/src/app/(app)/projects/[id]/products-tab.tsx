@@ -19,7 +19,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { Plus } from "lucide-react";
 import { toast } from "sonner";
-import type { ProductStatus, Role } from "@prisma/client";
+import type { ProductStatus, ProjectStage, Role } from "@prisma/client";
 
 import { DragHandle } from "@/components/drag-handle";
 import { ProductKanbanCard } from "@/components/product-kanban-card";
@@ -130,7 +130,7 @@ function StatusColumn({
     >
       <div className="flex items-center justify-between px-1 pt-1">
         <span className={cn("text-sm font-medium", style.header)}>
-          {status.label}
+          {status.columnLabel ?? status.label}
         </span>
         <Badge variant="secondary">{products.length}</Badge>
       </div>
@@ -155,6 +155,7 @@ function StatusColumn({
 // Клик по карточке — карточка изделия (/products/<id>).
 export function ProductsTab({
   projectId,
+  projectStage,
   currency,
   initialProducts,
   canManage,
@@ -164,6 +165,7 @@ export function ProductsTab({
   engineerOptions,
 }: {
   projectId: string;
+  projectStage?: ProjectStage;
   currency: string;
   initialProducts: ProductCard[];
   canManage: boolean;
@@ -222,6 +224,7 @@ export function ProductsTab({
 
     const allowedTargets = productStatusTargets(actorRoles, {
       from: product.status,
+      projectStage,
       assignedEngineer: product.engineerId === actorUserId,
       participant: product.isEngineeringParticipant,
       hasB3d: product.hasB3d,
@@ -286,20 +289,22 @@ export function ProductsTab({
               products={products.filter((product) => product.status === status.id)}
               currency={currency}
               showAmount={showAmount}
-              canDrag={(product) => canManage || productStatusTargets(actorRoles, {
+              canDrag={(product) => productStatusTargets(actorRoles, {
                 from: product.status,
+                projectStage,
                 assignedEngineer: product.engineerId === actorUserId,
                 participant: product.isEngineeringParticipant,
                 hasB3d: product.hasB3d,
                 noModel: product.noModel,
-              }).length > 0}
-              canDrop={canManage || (!!activeProduct && productStatusTargets(actorRoles, {
+              }).some(target => target !== product.status)}
+              canDrop={!!activeProduct && productStatusTargets(actorRoles, {
                 from: activeProduct.status,
+                projectStage,
                 assignedEngineer: activeProduct.engineerId === actorUserId,
                 participant: activeProduct.isEngineeringParticipant,
                 hasB3d: activeProduct.hasB3d,
                 noModel: activeProduct.noModel,
-              }).includes(status.id))}
+              }).includes(status.id)}
               onOpen={(product) => router.push(productDetailHref(product.number, projectProductsHref(projectId)))}
             />
           ))}

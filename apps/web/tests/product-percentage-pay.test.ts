@@ -281,6 +281,7 @@ test("единый статусный handler сохраняет manager DONE и
   const completions: { kind: string; state: string }[] = [];
   const writes: string[] = [];
   const tx = {
+    $queryRaw: async () => [],
     product: { findUnique: async () => product, update: async ({ data }: { data: { status: string } }) => {
       writes.push("status"); product.status = data.status; return product; } },
     task: { findFirst: async () => null },
@@ -317,6 +318,7 @@ test("после SKIPPED_ONCE поздняя ставка добирается �
   let config: {id: string; revision: number; ratePercent: string} | null = null;
   const syncConfig = () => { const row = { kind: "ENGINEERING", ratePercent: config?.ratePercent ?? null }; const i = product.percentageConfigs.findIndex((r) => (r as {kind:string}).kind === "ENGINEERING"); if (i < 0) product.percentageConfigs.push(row); else product.percentageConfigs[i] = row; };
   const tx = {
+    $queryRaw: async () => [],
     user: { findMany: async () => [{ id: "engineer" }] },
     product: { findUnique: async () => product, update: async ({ data }: { data: { status: string } }) => {
       product.status = data.status; return product; } },

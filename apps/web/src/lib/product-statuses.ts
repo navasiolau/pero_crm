@@ -5,8 +5,10 @@ import type { ProductStatus } from "@prisma/client";
 export const PRODUCT_STATUSES: {
   id: ProductStatus;
   label: string;
+  columnLabel?: string;
   service?: boolean;
 }[] = [
+  { id: "DRAFT", label: "Черновик", columnLabel: "Черновики" },
   { id: "PREPARATION", label: "Подготовка" },
   { id: "DESIGN", label: "Проектирование" },
   { id: "PRODUCTION", label: "В производстве" },
@@ -33,6 +35,11 @@ export const productStatusStyles: Record<
   ProductStatus,
   { column: string; header: string; badge: string }
 > = {
+  DRAFT: {
+    column: "border-zinc-500/25 bg-zinc-500/5",
+    header: "text-zinc-700 dark:text-zinc-400",
+    badge: "bg-muted text-muted-foreground",
+  },
   PREPARATION: {
     column: "border-slate-500/25 bg-slate-500/5",
     header: "text-slate-700 dark:text-slate-400",

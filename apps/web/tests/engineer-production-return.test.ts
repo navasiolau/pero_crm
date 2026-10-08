@@ -24,7 +24,7 @@ test("assigned production read does not expand technical edit or legacy particip
 });
 test("server return/production repeat preserves paid completion without files or tasks",async()=>{
  const product={id:"p",projectId:"project",title:"Изделие",engineerId:"e",status:"PRODUCTION" as ProductStatus,files:[],percentageConfigs:[]};let payroll=0,history=0;
- const tx={product:{findUnique:async()=>({...product}),update:async({data}:{data:{status:ProductStatus}})=>{product.status=data.status;return {...product};}},task:{findFirst:async()=>null},productPercentageCompletion:{findUnique:async()=>({state:"SETTLED"})},productStatusHistory:{create:async()=>{history++;return{};}},changeLog:{create:async()=>({})},domainEvent:{create:async()=>({id:"event"})},payrollEntry:{create:async()=>{payroll++;throw Error("must not pay twice")}}} as unknown as Prisma.TransactionClient;
+ const tx={$queryRaw:async()=>[],product:{findUnique:async()=>({...product}),update:async({data}:{data:{status:ProductStatus}})=>{product.status=data.status;return {...product};}},task:{findFirst:async()=>null},productPercentageCompletion:{findUnique:async()=>({state:"SETTLED"})},productStatusHistory:{create:async()=>{history++;return{};}},changeLog:{create:async()=>({})},domainEvent:{create:async()=>({id:"event"})},payrollEntry:{create:async()=>{payroll++;throw Error("must not pay twice")}}} as unknown as Prisma.TransactionClient;
  const actor={id:"e",roles:["ENGINEER" as Role],source:"web" as const,name:"Инженер"};
  assert.equal((await changeProductStatusTransaction(tx,actor,"p","DESIGN")).ok,true);
  assert.equal((await changeProductStatusTransaction(tx,actor,"p","PRODUCTION")).ok,true);

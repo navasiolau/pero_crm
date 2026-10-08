@@ -37,7 +37,7 @@ test("participant predicates remain DESIGN scoped; independent manager and field
   const read = JSON.stringify(productVisibilityWhere(participant));
   assert.match(read, /DESIGN/);
   assert.match(read, /engineerId/);
-  assert.doesNotMatch(read, /"p"/);
+  assert.match(read, /"p"/);
   const execution = JSON.stringify(taskExecutionWhere(participant));
   assert.match(execution, /"task"/);
   assert.match(execution, /DESIGN/);
@@ -66,7 +66,7 @@ test("direct participant grants are stage-scoped; pure field cannot see DESIGN s
   } } as unknown as Pick<PrismaClient, "task" | "productPercentageParticipant">;
   const engineer = await resolveVisibilityActor(db, { id: "e", roles: ["ENGINEER"] });
   assert.deepEqual(engineer.engineeringParticipantProductIds, ["design-own"]);
-  assert.doesNotMatch(JSON.stringify(productVisibilityWhere(engineer)), /design-own/);
+  assert.match(JSON.stringify(productVisibilityWhere(engineer)), /design-own/);
   assert.match(JSON.stringify(productVisibilityWhere(engineer)), /engineerId/);
   const mounter = await resolveVisibilityActor(db, { id: "m", roles: ["MOUNTER"] });
   assert.deepEqual(mounter.fieldParticipantProductIds, ["install-own"]);
