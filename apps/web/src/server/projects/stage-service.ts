@@ -3,6 +3,7 @@ import {withTaskTransaction} from '@/server/tasks/transaction';
 import {dispatchEvent} from '@/server/plugins/events';
 import {notifyOrg} from '@/server/notifications/notify';
 import {stageLabels} from '@/lib/stages';
+import {revalidateProductPaths} from '@/server/products/revalidate';
 import type {ProjectStage} from '@prisma/client';
 import type {DomainActor} from './core';
 import {patchProjectStageTransaction} from './stage-core';
@@ -18,5 +19,6 @@ export async function patchProjectStageCore(actor:DomainActor,input:unknown):Pro
  await notifyOrg({type:'project.stageChanged',title:`${committed.project!.number}: ${stageLabels[committed.fromStage as ProjectStage]} → ${stageLabels[parsed.data.toStage]}`,body:committed.project!.title,link:`/projects/${parsed.data.projectId}`,exceptUserId:actor.id}).catch(()=>{});
  // Инвалидация выполняется до ACK, как у прежней статусной операции.
  revalidatePath(`/projects/${parsed.data.projectId}`);revalidatePath('/projects');
+ if(committed.productIds?.length){revalidatePath('/products');for(const productId of committed.productIds)await revalidateProductPaths(productId);}
  return committed.result;
 }

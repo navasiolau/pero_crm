@@ -113,7 +113,7 @@ export default async function ProductPage({
           canDeleteCover={canEditTech && (canManage || product.files.some(file => file.id === product.sketchFile?.id && file.uploadedById === session.user.id))}
           deleteCoverAction={deleteProductSketchAction}
           header={<div className="flex min-w-0 flex-col gap-4" data-product-header="stacked">
-            <ProductHeader product={{id:product.id,number:product.number,title:product.title,kind:product.kind,status:product.status,expectedPrice:showAmount?product.expectedPrice?.toString()??null:null,quantity:product.quantity,description:product.description,projectId:product.project.id,engineerId:product.engineerId}}
+            <ProductHeader product={{id:product.id,number:product.number,title:product.title,kind:product.kind,status:product.status,expectedPrice:showAmount?product.expectedPrice?.toString()??null:null,quantity:product.quantity,description:product.description,projectId:product.project.id,projectStage:product.project.stage,engineerId:product.engineerId}}
               currency={product.project.currency} canManage={canManage} showAmount={showAmount} actorRoles={role} actorUserId={session.user.id} backHref={returnDestination.href} hasB3d={percentageView.hasB3d} noModel={percentageView.noModel} isEngineeringParticipant={percentageView.sections.ENGINEERING.ownMember!==null}/>
             <ProductInlineTitle number={product.number} canManage={canManage}/>
             <ProductInlineContacts canManage={canManage} clients={(canManage?clients:[product.project.client]).map(client=>({id:client.id,label:displayClientName(client),phone:client.phone,address:client.address}))}/>

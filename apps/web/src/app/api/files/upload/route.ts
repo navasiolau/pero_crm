@@ -251,10 +251,11 @@ async function upload(request:Request,state:{phase:UploadPhase;commitState:Commi
       return NextResponse.json({ error: "Не удалось сохранить обложку" }, { status: 500 });
     }
     if (!result.ok) { state.commitState="notCommitted";await compensateOwnCover(); return NextResponse.json(result, {status:result.kind==="conflict"?409:404}); }
+    if(result.repeated)await compensateOwnCover();
     state.commitState="committed";
     state.phase="confirmation";
     await afterUploadCommit(()=>revalidateProductPaths(requestedProductId),requestId);
-    await afterUploadCommit(()=>notifyOrg({
+    if(!result.repeated)await afterUploadCommit(()=>notifyOrg({
       type: "file.added", title: `Файл к проекту ${project.number}`,
       body: file.name, link: productNumber ? `/products/${productNumber}` : `/projects/${projectId}`,
       exceptUserId: session.user.id,

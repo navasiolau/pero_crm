@@ -159,6 +159,7 @@ async function fetchProductRows(
           id: true,
           number: true,
           title: true,
+          stage: true,
           currency: true,
           client: { select: { id: true, name: true, lastName: true, middleName: true } },
         },
@@ -265,6 +266,7 @@ export async function getProductFor(
           number: true,
           title: true,
           address: true,
+          stage: true,
           currency: true,
           client: {
             select: {

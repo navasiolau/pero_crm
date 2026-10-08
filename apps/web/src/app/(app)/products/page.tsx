@@ -62,6 +62,7 @@ export default async function ProductsPage({
         quantity: product.quantity,
         currency: product.project.currency,
         projectId: product.project.id,
+        projectStage: product.project.stage,
         projectNumber: product.project.number,
         projectTitle: product.project.title,
         clientId: product.project.client.id,

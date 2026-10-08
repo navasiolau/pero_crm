@@ -58,13 +58,13 @@ export function ProductKanbanCard({
       {imageSource && sketch ? (
         <div
           data-slot="product-kanban-image"
-          className="relative w-full shrink-0 overflow-hidden bg-muted/30"
+          className="relative aspect-[3/4] w-full shrink-0 overflow-hidden bg-muted/30"
         >
-          <button type="button" className="block w-full" aria-label={coverAction?.type==="navigate"?`Открыть изделие ${product.title}`:`Открыть изображение ${product.title} на весь экран`} disabled={dragging}
+          <button type="button" className="block h-full w-full" aria-label={coverAction?.type==="navigate"?`Открыть изделие ${product.title}`:`Открыть изображение ${product.title} на весь экран`} disabled={dragging}
             onClick={event => { event.preventDefault(); event.stopPropagation(); openProductCardCover(coverAction,()=>fileViewer.open(sketch),dragging); }}>
           <ProductHeroImage
             sketch={sketch}
-            className="block h-auto w-full"
+            className="h-full w-full object-cover object-center"
           />
           </button>
         </div>

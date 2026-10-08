@@ -1,7 +1,7 @@
 "use client";
 
 import { LayoutGrid, Table2 } from "lucide-react";
-import type { ProductStatus, Role } from "@prisma/client";
+import type { ProductStatus, ProjectStage, Role } from "@prisma/client";
 
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useListParams } from "@/lib/list-params";
@@ -22,6 +22,7 @@ export interface ProductRow {
   quantity: number;
   currency: string;
   projectId: string;
+  projectStage?: ProjectStage;
   projectNumber: string;
   projectTitle: string;
   clientId: string;

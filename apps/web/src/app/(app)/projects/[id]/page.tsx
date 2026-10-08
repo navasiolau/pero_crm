@@ -220,6 +220,7 @@ export default async function ProjectPage({
         <TabsContent value="products" className="mt-4">
           <ProductsTab
             projectId={project.id}
+            projectStage={project.stage}
             currency={project.currency}
             initialProducts={project.products.map((product) => ({
               id: product.id,
