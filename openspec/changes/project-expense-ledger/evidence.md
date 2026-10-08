@@ -15,4 +15,9 @@
 
 ## Staging
 
-Ожидаются CI, фактическая ревизия и runtime-приёмка.
+- CI/CD166 SUCCESS: https://github.com/navasiolau/pero_crm/actions/runs/37723186792.
+- Реально развёрнут6db0bc055df89071cf6a2b02874558f8da7e9f46, образ sha256:c976554534253ad982577c187ddbeaa24e82d395b9ef5b37b8dc3b597857f77b, health healthy.
+- Native в этом контейнере PASS: выдача60, возвраты−20/−40, количество денежных Payment неизменно, повторное ценообразование не влияет, неизвестная историяNULL.
+- Реальные SSR financial/general маршруты PASS: бухгалтер, отказ чистому менеджеру, объединённые роли. Техническое описание не попало в финансовый ответ. Исходные digest MATCH, QA rows0, providerMessages0.
+- Bundle SHA256a2493cf0514357354e6f8da94e469ba8c679f22a28fcc5eba8c74f504ee5bd0e, exitCode0; receipt .playwright-mcp/finance101/staging-receipt.json.
+- W07/DB guards сохранены: DB27b8f7342b9d722ab8788e137b37b03a3037442da038c5b8b98dbb30245b8b6a, started2026-09-23T11:42:14.649193151Z, volumecrm-staging_pgdata, watcher SHA27e3bcd727d9e83170c76a254806fde42590da76cea30c9e1441d873df680139. Миграций нет. Main не изменён.
