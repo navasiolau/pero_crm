@@ -12,4 +12,6 @@
 
 ## Staging
 
-Ожидается CI и проверка фактически развёрнутых web/bot. Main не меняется.
+CI177 SUCCESS; принят фактически развёрнутый staging3704214e590f7b1dd2478c25e2d9e3fa4d831e7d, web healthy, image sha256:9d7ea87bbce04250157c8f504443660ac72ee5c1e66d38295ca320d77436b0a8. Native, concurrency и HTTP PASS на REAL_ACTIVE: документы/без документа, FX, receipt/retry, rollback, права и неверный документ. Собственные QA-строки очищены, исходные digest MATCH, уведомлений0; DB и W07 совпали с baseline.
+
+Обновлён только tgbot-staging на тот же SHA; image sha256:843ef88bf3079fbd220c00547b495bf5c1c699e331813bb804f1d75c191f3264, healthy. На фактическом /app/dist прошли16 transport/engine/document тестов с fake providers, внешних сообщений0. Остальные контейнеры и config/env не изменены. Receipts: ignored .playwright-mcp/finance103-review/staging-receipt.json, bot-deploy.json, bot-verified.json. Main не меняется.
