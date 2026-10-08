@@ -1,4 +1,5 @@
 import { paymentView } from "@/server/finance/payment-view";
+import { loadProjectStockExpenses, projectExpenseRows } from "@/server/finance/project-expenses";
 import nextDynamic from "next/dynamic";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
@@ -71,6 +72,7 @@ export default async function ProjectPage({
 
   // Группировка файлов по этапам (плагин file-stages), если включён.
   const stageConfig = await getFileStageConfig();
+  const stockExpenses = showFinance ? await loadProjectStockExpenses(session.user, project.id, prisma) : [];
 
   const [clients, managers, engineers, workers, contributions, priceItems, economics, cashAccounts, expenseArticles, materialsGroups] =
     await Promise.all([
@@ -84,7 +86,7 @@ export default async function ProjectPage({
         orderBy: { name: "asc" },
       }),
       // Данные вкладки «Финансы» (§11) — админу/директору/бухгалтеру
-      showFinance ? getProjectEconomics(project.id) : Promise.resolve(null),
+      showFinance ? getProjectEconomics(project.id, prisma, { payments: project.payments, stockMovements: stockExpenses }) : Promise.resolve(null),
       showFinance
         ? prisma.cashAccount.findMany({
             where: { active: true },
@@ -120,6 +122,7 @@ export default async function ProjectPage({
         project.createdById,
         ...project.files.map((f) => f.uploadedById),
         ...project.payments.map((p) => p.createdById),
+        ...stockExpenses.map(row => row.createdById),
         ...project.tasks.flatMap((t) => [t.createdById, t.doneById]),
       ].filter((v): v is string => !!v),
     ),
@@ -335,6 +338,7 @@ export default async function ProjectPage({
                 expenseBreakdown: economics.expenseBreakdown,
               }}
               payments={project.payments.map(payment => paymentView(payment, uploaderNames))}
+              expenseRows={projectExpenseRows(project.payments, stockExpenses, uploaderNames)}
               cashAccounts={cashAccounts.map((account) => ({
                 id: account.id,
                 name: account.name,

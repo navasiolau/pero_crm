@@ -10,7 +10,7 @@ export async function loadOrganizationPayments(actor: FinanceWorkspaceActor, dir
     db.payment.findMany({ where: { direction }, select: { id: true, direction: true, amount: true, currency: true,
       rate: true, rateDate: true, bynAmount: true, projectAmount: true, paidAt: true, comment: true, createdById: true,
       project: { select: { id: true, number: true, title: true, deletedAt: true } }, cashAccount: { select: { name: true } },
-      expenseArticle: { select: { name: true } }, reportDocument: { select: reportDocumentSelect } }, orderBy: { paidAt: "desc" } }),
+      expenseArticle: { select: { id: true, name: true } }, reportDocument: { select: reportDocumentSelect } }, orderBy: { paidAt: "desc" } }),
     db.cashAccount.findMany({ where: { active: true }, select: { id: true, name: true, currency: true }, orderBy: { createdAt: "asc" } }),
     listFinanceWorkspaceProjects(actor, db),
   ]);

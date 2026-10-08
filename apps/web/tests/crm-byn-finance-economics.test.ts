@@ -30,3 +30,13 @@ test('confirmed zero expected price differs from missing price',async()=>{
  price=null;assert.equal((await getProjectEconomics('p'))?.expectedPrice,null);
  price=d('1000');
 });
+
+test('preloaded ledger facts are the economics source without a second payment or stock query',async()=>{
+ foreign=false;
+ const database={...stub.exports.prisma,payment:{findMany:()=>assert.fail('duplicate payment read')},stockMovement:{findMany:()=>assert.fail('duplicate stock read')}} as Parameters<typeof getProjectEconomics>[1];
+ const facts={payments:[{direction:'INCOME',bynAmount:d('300'),expenseArticle:null},{direction:'EXPENSE',bynAmount:d('10'),expenseArticle:{id:'a',name:'Delivery'}}],stockMovements:[{type:'EXPENSE',totalByn:d('60')},{type:'RETURN',totalByn:d('20')}]};
+ const result=await getProjectEconomics('p',database,facts);
+ assert.equal(result?.expensesTotal,50);assert.equal(result?.paidTotal,300);
+ assert.equal(result?.expenseBreakdown.find(row=>row.key==='warehouse')?.amount,40);
+ assert.equal(result?.expenseBreakdown.find(row=>row.key==='article:a')?.amount,10);
+});

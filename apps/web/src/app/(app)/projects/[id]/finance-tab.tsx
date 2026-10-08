@@ -14,10 +14,10 @@ import { ConfirmDeleteDialog } from "@/components/confirm-delete-dialog";
 import { formatAmount, formatMoneyTotal, formatDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { deletePayment } from "@/server/payments/actions";
-import { useFileViewer } from "@/components/file-viewer";
+import { ProjectExpenseLedger } from "@/components/project-expense-ledger";
 
 
-import type { PaymentRow, ProjectEconomicsView, CashAccountOption, ExpenseArticleOption } from "@/server/finance/contracts";
+import type { PaymentRow, ProjectExpenseRow, ProjectEconomicsView, CashAccountOption, ExpenseArticleOption } from "@/server/finance/contracts";
 export type { PaymentRow, ProjectEconomicsView, CashAccountOption, ExpenseArticleOption } from "@/server/finance/contracts";
 import { PaymentDialog } from "@/components/payment-dialog";
 export { PaymentDialog } from "@/components/payment-dialog";
@@ -30,6 +30,7 @@ export function FinanceTab({
   currency,
   economics,
   payments,
+  expenseRows,
   cashAccounts,
   expenseArticles,
   canEdit = true,
@@ -39,6 +40,7 @@ export function FinanceTab({
   currency: string;
   economics: ProjectEconomicsView;
   payments: PaymentRow[];
+  expenseRows: ProjectExpenseRow[];
   cashAccounts: CashAccountOption[];
   expenseArticles: ExpenseArticleOption[];
 }) {
@@ -46,11 +48,11 @@ export function FinanceTab({
     "INCOME" | "EXPENSE" | null
   >(null);
   const [deleting, setDeleting] = useState<PaymentRow | null>(null);
-  const fileViewer = useFileViewer();
+
   const router = useRouter();
 
   const incomes = payments.filter((payment) => payment.direction === "INCOME");
-  const expenses = payments.filter((payment) => payment.direction === "EXPENSE");
+
 
   function amountCell(row: PaymentRow) {
     return (
@@ -65,7 +67,7 @@ export function FinanceTab({
     );
   }
 
-  function buildColumns(withArticle: boolean): DataColumn<PaymentRow>[] {
+  function buildColumns(): DataColumn<PaymentRow>[] {
     const columns: DataColumn<PaymentRow>[] = [
       {
         id: "date",
@@ -75,19 +77,6 @@ export function FinanceTab({
         cell: (row) => formatDate(row.paidAt),
       },
     ];
-    if (withArticle) {
-      columns.push({ id: "reportDocument", header: "Отчетный документ", searchValue: row => row.reportDocument?.fileName ?? "", cell: row => row.reportDocument
-        ? <Button type="button" variant="link" className="h-auto max-w-56 whitespace-normal break-all p-0 text-left"
-            onClick={event => { event.stopPropagation(); if (row.reportDocument) fileViewer.open(row.reportDocument); }}>{row.reportDocument.fileName}</Button>
-        : <span className="text-muted-foreground">—</span> });
-      columns.push({
-        id: "article",
-        header: "Статья",
-        sortable: true,
-        sortValue: (row) => row.expenseArticleName ?? "",
-        cell: (row) => row.expenseArticleName ?? "—",
-      });
-    }
     columns.push(
       {
         id: "account",
@@ -253,7 +242,7 @@ export function FinanceTab({
           </Button>
         </div>
         <DataTable
-          columns={buildColumns(false)}
+          columns={buildColumns()}
           rows={incomes}
           searchPlaceholder="Поиск по приходам…"
           emptyText="Приходов по проекту пока нет"
@@ -273,19 +262,14 @@ export function FinanceTab({
             Добавить расход
           </Button>
         </div>
-        <DataTable
-          columns={buildColumns(true)}
-          rows={expenses}
-          searchPlaceholder="Поиск по расходам…"
-          emptyText="Расходов по проекту пока нет"
-        />
+        <ProjectExpenseLedger rows={expenseRows} breakdown={economics.expenseBreakdown} onDelete={canEdit ? setDeleting : undefined} />
         <p className="text-xs text-muted-foreground">
           Зарплата учитывается в марже автоматически из начислений по задачам
           проекта — вносить её расходом не нужно.
         </p>
       </div>
 
-      {fileViewer.viewer}
+
       <PaymentDialog
         direction={dialogDirection ?? "INCOME"}
         open={canEdit && dialogDirection !== null}
