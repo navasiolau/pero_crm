@@ -58,6 +58,42 @@ Existingengineerfilter remains responsible OR participant strictly AND rolevisib
 
 Private read-only browser IPC bridge проходит15 targeted QA/guard/pure tests и ESLint0/0. Независимое review3 exactQA source SHA — findings NONE. Bundle74790B SHA `185e2b73c523d65c1c92487c608473d9046ce3af6c0335d4137f362bb272d574`; никакого actualhandshake/114browser вызова субагент не делал. Bridge использует existing qaTransport, verifiedphysicalrevision +signedcheckpointHMAC, текущее id/roles/active/sessionVersion собственного QAmanager, serverderivedownnumber/paths/currentownedsketch и nullablecurrentownprojectcover. Cookies возвращаются только через private IPC в process object; не передаются в argv и не пишутся в receipt/profile files, log/trace/HAR или пользовательский stdout. Token/secret значения не выводятся.
 
-Порядок: root проверяет точную фактически развёрнутую итоговую SHA; свежие own prepare и полноценный112 runtime должны завершиться с acknowledged currentownsketch; затем root отдельно вызывает privatehandoff и reviewed GET/HEAD-only114 browser helper; после него — signedcapture и exactcleanup112. Handoff сразу послеPREPARED намеренно отказывает при пустомэскизе. Browser блокирует все nonread/preferences requests, screenshots ограничены собственными synthetic image regions; projectboard измеряет только numeric geometry, безpixel proof/чужихданных. Не создавать дополнительные114 fixtures и не назначать projectcover без отдельногоreviewedscope.
+Порядок: root проверяет точную фактически развёрнутую итоговую SHA; свежие own prepare и полноценный112 runtime должны завершиться с acknowledged currentownsketch и signed observation; затем root отдельно вызывает privatehandoff и reviewed GET/HEAD-only114 browser helper; после него — exactcleanup112 по сохранённому runtime observation и свежему strict CAS. Отдельный capture нужен только после failed runtime, когда подписанное observation не было сохранено и подтверждено завершение upstream requests. Handoff сразу послеPREPARED намеренно отказывает при пустомэскизе. Browser блокирует все nonread/preferences requests, screenshots ограничены собственными synthetic image regions; projectboard измеряет только numeric geometry, безpixel proof/чужихданных. Не создавать дополнительные114 fixtures и не назначать projectcover без отдельногоreviewedscope.
 
-Новый фактический stage PASS не зафиксирован. Первый deployment probe для промежуточного7aba дал WEB_REV_MISMATCH; это не доказательство применения новой ревизии. Старые AE partial и8c strict lifecycle root очистил, их actors/UUID/intents не переиспользуются. Новая finalcandidate приёмка остаётся pending exactdeployment/rootcommands; нельзя объявлять CI green или runtime/browser PASS по локальным тестам/публикации/подготовленным helper.
+На этапе готовности bridge новый фактический stage PASS ещё не был получен. Первый deployment probe для промежуточного7aba дал WEB_REV_MISMATCH; это не доказывало применение новой ревизии. Старые AE partial и8c strict lifecycle root очистил, их actors/UUID/intents не переиспользуются. Итоговая приёмка следующего кандидата приведена ниже; локальные тесты/публикация/подготовленный helper сами по себе не подтверждают CI green или runtime/browser PASS.
+
+## Фактическая staging-приёмка 09.10.2026
+
+Координатор принял задачу112 на фактически развёрнутой полной ревизии `322bd3d542e9d503e955127dc4c1f32644646bc4`, runId `fa98ed24-49a0-419e-b03d-09422a7625df`. Это новый UUID; предыдущие845/AE/8c не повторялись. Root-reviewed bundle74790B SHA256 `185e2b73c523d65c1c92487c608473d9046ce3af6c0335d4137f362bb272d574` исполнялся через существующий guarded transport. Доказательства находятся приватно в `.playwright-mcp/task112-stage-322/qa-fa98ed24-49a0-419e-b03d-09422a7625df`; ниже только обезличенные поля.
+
+Runtime и cleanup receipts подтверждают одну физическую identity:
+
+| Поле | Проверенное значение |
+|---|---|
+| Hostname / OCI revision | `crm-staging` / `322bd3d542e9d503e955127dc4c1f32644646bc4` |
+| Web container | `b5c5106176d3e97843e2dbd5ba7addd1944b7bcc7354b2844998b76f3db700d8` |
+| Image ID | `sha256:2dc4043eb6c5ce0840ff841a1617160659a21e0278a69e49ba0b022caa60debd` |
+| DB container / StartedAt | `27b8f7342b9d722ab8788e137b37b03a3037442da038c5b8b98dbb30245b8b6a` / `2026-09-23T11:42:14.649193151Z` |
+| DB volume | `crm-staging_pgdata` |
+| W07 SHA256 | `27e3bcd727d9e83170c76a254806fde42590da76cea30c9e1441d873df680139` |
+
+Guarded исполнение проверило running/healthy web и DB, общую backend network, `db:5432/crm`, endpoint `http://192.168.0.33:9000` и bucket `pero-crm-staging`; workflow lock и nightly refresh/W07 сохранились. Ни dump, ни restic, ни инфраструктурные изменения не выполнялись. Direct GitHub CI green здесь не заявляется: публикация/исходники не заменяют приведённую фактическую проверку deployed application.
+
+`receipt-runtime.json`: status `PASS`, exitCode0, все10 actual compiled/PostgreSQL/S3 сценариев завершены:
+
+1. MANAGER загрузил исходный original и thumbnail.
+2. Серверная страница доступного ENGINEER показала замену независимо от права удаления старого файла.
+3. Назначенный ENGINEER заменил manager sketch; exact replay сохранил один результат.
+4. Stale expected sketch и foreign/fake context получили отказ; недоступный инженер также не допущен.
+5. ENGINEERING-участник заменил эскиз на DESIGN независимо от primary engineer.
+6. ENGINEER заменил legacy sketch с `uploadedById=NULL`.
+7. Право DESIGN повторно проверено на текущем состоянии изделия.
+8. Две разные одновременные замены дали ровно одного победителя, второй получил конфликт.
+9. Одновременная доставка одной mutation дала один file/receipt без повторных notification/storage effects.
+10. Реальный S3 подтвердил сохранение bytes всех прежних own originals и отсутствие активных storage orphans.
+
+После runtime root выполнил read-only privatehandoff и reviewed browser114. Первую попытку с проблемой инициализации service worker не приняли; повтор только браузерного чтения прошёл9 geometry checks,0 page errors и0 upstream writes. Upload/runtime не повторялись, UserPreference не менялась. Projectboard проверен по numeric geometry, снимки ограничены собственными synthetic image regions; это не pixel proof всех существующих клиентских карточек.
+
+Дополнительный normal capture вернул удалённо `CAPTURED`, exitCode0, но локальный runner завершился `TASK112_STOP_PRESERVE_STATE`: после сохранения `receipt-capture.json` запись с `flag:wx` встретила уже существующий `observation.json` успешного runtime (`EEXIST`). Read-only локальная диагностика установила полное каноническое равенство fresh capture и runtime observation, одинаковую подпись/checkpoint hash и original DB/S3 MATCH. Observation не перезаписывали, intents/receipts не удаляли и capture/upload не повторяли. Cleanup использовал исходное подписанное runtime observation и свежий HMAC/current-state CAS. Без AUTH_SECRET локальная диагностика сравнила подписи, а их криптографическую проверку выполнил server cleanup.
+
+`receipt-cleanup.json`: `CLEANED`, exitCode0, `cleanupCommitted=true`; originalDatabase и originalDatabaseAtCommit — `MATCH`, `fullOriginalMatch=true`, originalStorage — `MATCH`. Точно удалены только own Notification29, ChangeLog18, File6, Participant1, Config1, Product1, Project1, Client1, User3 и captured own storage versions по точным keys/VersionId. Сохранённый observation содержал20 own storage versions; файл31436B, SHA256 `8fe6347bd75e1c18101cb59c131e1125b0a54d5e747db123487dd9d43088985b` остался неизменным. Жизненный цикл fa98 закрыт; новых app/test/DB правок для документирования приёмки не делали. Main/production не выпускались.

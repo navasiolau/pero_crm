@@ -8,7 +8,7 @@
 
 ## 2. Фактическая приёмка
 
-- [ ] 2.1 Подготовить root-reviewed task112 staging harness без backup gate; syntax/build/ownership guard проверки не подключаются к БД.
-- [ ] 2.2 Координатор проверяет exact deployed revision, DB/volume/S3/W07 и исполняет actual инженерную replacement/replay/stale/concurrent/participant проверку; старый файл и оригинальные bytes сохраняются.
-- [ ] 2.3 Выполнить точную очистку своих QA ID/S3 keys и сверить первоначальные fingerprints; сохранить приватные журналы и публичный обезличенный evidence.
+- [x] 2.1 Подготовить root-reviewed task112 staging harness без backup gate; syntax/build/ownership guard проверки не подключаются к БД.
+- [x] 2.2 Координатор проверяет exact deployed revision, DB/volume/S3/W07 и исполняет actual инженерную replacement/replay/stale/concurrent/participant проверку; старый файл и оригинальные bytes сохраняются.
+- [x] 2.3 Выполнить точную очистку своих QA ID/S3 keys и сверить первоначальные fingerprints; сохранить приватные журналы и публичный обезличенный evidence.
 - [x] 2.4 Пройти OpenSpec strict и локальные соответствующие проверки, зафиксировать вывод; Git-интеграция и разрешение на коммит принадлежат координатору.
