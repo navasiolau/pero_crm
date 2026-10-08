@@ -6,4 +6,4 @@
 
 ## 2. Приёмка
 - [x] 2.1 Пройти full tests/types/lint/build/strict, native/HTTP с личными границами, сохранить evidence.
-- [ ] 2.2 Принять обычный merge/CI/фактический staging; main не менять.
+- [x] 2.2 Принять обычный merge/CI/фактический staging; main не менять.

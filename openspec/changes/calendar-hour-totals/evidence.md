@@ -13,4 +13,6 @@
 
 ## Staging
 
-Ожидаются обычный merge, CI и приёмка фактической ревизии. Main/production не менялись.
+- Обычный merge `fb6227bc6d5aa2ef7a4ca0270b40819070cb4983`, CI173 SUCCESS: https://github.com/navasiolau/pero_crm/actions/runs/37751506472. Фактическая revision совпала; healthy образ `sha256:bd97a2d8a7c68387a540a05b11ff5b4516b2cded026576cb01cc5f3785b908b7`.
+- Native месяц180/день150/выполненных60, пропуск1, отмена/восстановление/правка/перенос, MSK и owner-only PASS. Реальный SSR с итогами и пустым месяцем PASS; чужих/соседних месячных записей нет. Исходные digest MATCH, QA0, providerMessages0.
+- Bundle `792158937a6c29614a187201e412a6685d185e30b11fa1807bbd6d7b17c922fb` (122626bytes). DB container/volume/start и W07 сохранены. Main/production не менялись; дампов нет, Restic не затронут.
