@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
@@ -14,7 +14,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { formatAmount, formatQty } from "@/lib/format";
-import { stockMovementTypeLabels } from "@/lib/labels";
+import { warehouseMovementKindLabels, warehouseMovementLabel, matchesWarehouseMovementKind } from "@/lib/warehouse-movement-labels";
 import type {
   MaterialOption,
   StockMovementView,
@@ -49,7 +49,7 @@ export function MovementsView({
       rows.filter(
         (row) =>
           (materialId === "" || row.materialId === materialId) &&
-          (typeFilter === "ALL" || row.type === typeFilter),
+          matchesWarehouseMovementKind(row, typeFilter),
       ),
     [rows, materialId, typeFilter],
   );
@@ -66,7 +66,7 @@ export function MovementsView({
       id: "type",
       header: "Тип",
       sortable: true,
-      sortValue: (row) => stockMovementTypeLabels[row.type] ?? row.type,
+      sortValue: (row) => warehouseMovementLabel(row),
       cell: (row) => (
         <Badge
           variant={
@@ -77,7 +77,7 @@ export function MovementsView({
                 : "outline"
           }
         >
-          {stockMovementTypeLabels[row.type] ?? row.type}
+          {warehouseMovementLabel(row)}
         </Badge>
       ),
     },
@@ -194,16 +194,16 @@ export function MovementsView({
           value={typeFilter}
           onValueChange={(next) => setTypeFilter(next ?? "ALL")}
         >
-          <SelectTrigger className="w-44">
+          <SelectTrigger className="w-64">
             <SelectValue>
               {typeFilter === "ALL"
                 ? "Все типы"
-                : stockMovementTypeLabels[typeFilter]}
+                : warehouseMovementKindLabels[typeFilter]}
             </SelectValue>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="ALL">Все типы</SelectItem>
-            {Object.entries(stockMovementTypeLabels).map(([value, label]) => (
+            {Object.entries(warehouseMovementKindLabels).map(([value, label]) => (
               <SelectItem key={value} value={value}>
                 {label}
               </SelectItem>
