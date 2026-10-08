@@ -38,7 +38,8 @@ before(() => {
     cashAccount: { findUnique: async () => ({ id: "cash", name: "QA cash", currency: "BYN", active: true }) },
     expenseArticle: { findUnique: async () => ({ id: "article", active: true }) },
     orgSetting: { findUnique: async () => ({ value: "BYN" }) },
-    user: { findUnique: async () => ({ id: "worker", name: "QA worker", active: true }) },
+    user: { findUnique: async ({where}:{where:{id:string}}) => ({ id: where.id, name: "QA user", active: true, roles: where.id === "worker" ? ["WORKER"] : ["ACCOUNTANT"] }) },
+    financeDocument: { findUnique: async ({where}:{where:{id:string}}) => ({ id:where.id,state:"READY",uploadedById:where.id === "99999999-9999-4999-8999-999999999998" ? "manager" : "accountant",payment:null }) },
     payment: {
       groupBy: async ({ where }: { where: { cashAccountId: string } }) => ["INCOME", "EXPENSE"].map((direction) =>
         ({ direction, _sum: { amount: sum(payments.filter((row) => row.cashAccountId === where.cashAccountId &&
@@ -97,7 +98,7 @@ test("actual expense writer and actual advance core share ReadCommitted lock; on
         expectedCashCurrency: "BYN", description: "QA work", requestId: randomUUID() },
       { asOf: date, cash: { currency: "BYN", rate: "1.000000", date },
         payroll: { currency: "BYN", rate: "1.000000", date } } as const, tx));
-    const expense = () => createPaymentCore(actor as never, { projectId: "project", direction: "EXPENSE",
+    const expense = () => createPaymentCore(actor as never, { projectId: "project", direction: "EXPENSE", reportDocumentId: "99999999-9999-4999-8999-999999999998",
       amount: 500, currency: "BYN", cashAccountId: "cash", expenseArticleId: "article" });
     const first = expenseFirst ? expense() : advance();
     const second = expenseFirst ? advance() : expense();
@@ -141,7 +142,7 @@ test("actual settleAll delegates each payout to the same guarded core while an e
   assert.equal(Number(payouts[0].cashAmount), 600);
   assert.equal(advisoryCalls, 1);
   reset();
-  const expense = createPaymentCore(actor as never, { projectId: "project", direction: "EXPENSE",
+  const expense = createPaymentCore(actor as never, { projectId: "project", direction: "EXPENSE", reportDocumentId: "99999999-9999-4999-8999-999999999999",
     amount: 500, currency: "BYN", cashAccountId: "cash", expenseArticleId: "article" });
   const bulk = settleAll(currentMonth, "cash");
   const results = await Promise.all([expense, bulk]);

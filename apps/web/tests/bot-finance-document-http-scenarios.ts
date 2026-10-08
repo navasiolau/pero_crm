@@ -4,11 +4,11 @@ import type { FinanceDocument, PrismaClient } from "@prisma/client";
 
 /** Только upload adapter: денежные HTTP actions/рассылки не запускаются. */
 export async function runBotFinanceDocumentHttp(db: PrismaClient, baseUrl: string,
-  verifyAndRemoveOwnObject: (document: FinanceDocument, expected: Buffer) => Promise<void>) {
+  verifyAndRemoveOwnObject: (document: FinanceDocument, expected: Buffer) => Promise<void>, requireExpenseDocument = false) {
   const marker = `qa-bot-doc98-${randomUUID()}`, userIds = [marker, `${marker}-manager`], tokenIds = [randomUUID(), randomUUID()];
   async function baseline() {
     const result: Record<string, unknown> = {};
-    for (const table of ["User", "ApiToken", "FinanceDocument", "ChangeLog"])
+    for (const table of ["User", "ApiToken", "FinanceDocument", "ChangeLog", "Payment"])
       result[table] = await db.$queryRawUnsafe(`SELECT count(*)::text AS count,md5(COALESCE(string_agg(md5(row_to_json(t)::text),'' ORDER BY id),'')) AS digest FROM "${table}" t`);
     return result;
   }
@@ -35,6 +35,14 @@ export async function runBotFinanceDocumentHttp(db: PrismaClient, baseUrl: strin
     assert.equal(await db.financeDocument.count({ where: { uploadedById: userIds[0] } }), 1);
     const audit = await db.changeLog.findUniqueOrThrow({ where: { id: `finance-document:${firstBody.document.id}` } });
     assert.equal(audit.source, "telegram");
+    if (requireExpenseDocument) {
+      const project = await db.project.findFirstOrThrow({ where: { currency: "BYN", deletedAt: null }, select: { id: true } });
+      const rejected = await fetch(`${baseUrl}/api/v1/bot/payments`, { method: "POST", headers: {
+        authorization: `Bearer ${tokens[0]}`, "x-acting-user": userIds[0], "content-type": "application/json",
+      }, body: JSON.stringify({ projectId: project.id, direction: "EXPENSE", amount: 10, currency: "BYN",
+        cashAccountId: "not-read", expenseArticleId: "not-read", source: "warehouse", skipReportDocument: true }) });
+      const result = await rejected.json(); assert.equal(result.ok, false); assert.match(result.error, /документ/i);
+    }
   } finally {
     for (const document of await db.financeDocument.findMany({ where: { uploadedById: { in: userIds } } }))
       await verifyAndRemoveOwnObject(document, bytes);
@@ -46,5 +54,5 @@ export async function runBotFinanceDocumentHttp(db: PrismaClient, baseUrl: strin
     });
     assert.deepEqual(await baseline(), before, "ORIGINAL_DATA_CHANGED");
   }
-  return { status: "PASS", cases: ["bearer-required", "write-scope", "finance-role", "multipart", "exact-retry", "telegram-audit"], originalData: "MATCH", qaRows: 0 };
+  return { status: "PASS", cases: ["bearer-required", "write-scope", "finance-role", "multipart", "exact-retry", "telegram-audit", ...(requireExpenseDocument ? ["expense-document-required"] : [])], originalData: "MATCH", qaRows: 0 };
 }

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import {randomUUID} from 'node:crypto';
 import {createRequire} from 'node:module';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -17,12 +18,13 @@ const bundlePromise=build({stdin:{contents:`
  function Harness(){
   const [direction,setDirection]=React.useState(window.__testDirection||'INCOME');
   window.__setDirection=setDirection;
-  return <PaymentDialog direction={direction} open={true} onOpenChange={()=>{}} projectId={window.__testProjectId} projectCurrency="BYN" projectOptions={window.__testProjectId?undefined:[{id:'project-1',number:'П-2026-042',title:'Название не должно быть в форме'}]} cashAccounts={[{id:'cash-1',name:'Основная касса',currency:'BYN'}]} expenseArticles={window.__testExpenseArticles??[{id:'article-1',name:'Материалы'},{id:'article-2',name:'Логистика'}]}/>;
+  const [open,setOpen]=React.useState(true);window.__setOpen=setOpen;
+  return <PaymentDialog direction={direction} open={open} onOpenChange={()=>{}} projectId={window.__testProjectId} projectCurrency="BYN" projectOptions={window.__testProjectId?undefined:[{id:'project-1',number:'П-2026-042',title:'Название не должно быть в форме'}]} cashAccounts={[{id:'cash-1',name:'Основная касса',currency:'BYN'}]} expenseArticles={window.__testExpenseArticles??[{id:'article-1',name:'Материалы'},{id:'article-2',name:'Логистика'}]}/>;
  }
  createRoot(document.getElementById('root')).render(<Harness/>);
  `,resolveDir:web,loader:'tsx'},bundle:true,write:false,platform:'browser',format:'iife',jsx:'automatic',tsconfig:path.join(web,'tsconfig.json'),define:{'process.env.NODE_ENV':'"production"'},plugins:[{name:'test-boundaries',setup(b){
  b.onResolve({filter:/^(next\/navigation|sonner|@\/server\/payments\/actions|@\/server\/finance\/actions)$/},args=>({path:args.path,namespace:'boundary'}));
- b.onLoad({filter:/.*/,namespace:'boundary'},args=>({contents:args.path==='next/navigation'?'export const useRouter=()=>({refresh(){}});':args.path==='sonner'?'export const toast={error(){},success(){}};':args.path.includes('payments')?'export const addPayment=async input=>{window.__paymentInput=input;return {ok:true}};export const deletePayment=async()=>({ok:true});':'export const fetchNbrbRate=async()=>({ok:true,rate:3,date:"2026-10-04"});',loader:'js'}));
+ b.onLoad({filter:/.*/,namespace:'boundary'},args=>({contents:args.path==='next/navigation'?'export const useRouter=()=>({refresh(){}});':args.path==='sonner'?'export const toast={error(){},success(){}};':args.path.includes('payments')?'export const addPayment=async input=>{window.__paymentInput=input;return window.__paymentResult??{ok:true}};export const deletePayment=async()=>({ok:true});':'export const fetchNbrbRate=async()=>({ok:true,rate:3,date:"2026-10-04"});',loader:'js'}));
  }}],logLevel:'silent'});
 
 async function withDialog(config,run){
@@ -30,7 +32,9 @@ async function withDialog(config,run){
  const browser=await chromium.launch({headless:true});
  try{
   const page=await browser.newPage();page.setDefaultTimeout(5000);
-  await page.setContent('<style>.z-50{z-index:50}.isolate{isolation:isolate}[data-slot=dialog-content]{position:relative;z-index:50}</style><div id="root"></div>');
+  await page.route('http://finance.fixture/',route=>route.fulfill({contentType:'text/html',body:'<style>.z-50{z-index:50}.isolate{isolation:isolate}[data-slot=dialog-content]{position:relative;z-index:50}</style><div id="root"></div>'}));
+  await page.route('**/api/finance/documents/upload',route=>route.fulfill({status:201,contentType:'application/json',body:JSON.stringify({ok:true,document:{id:randomUUID(),source:'finance',fileName:'Чек.pdf',mimeType:'application/pdf',size:4,createdAt:new Date().toISOString(),paymentId:null}})}));
+  await page.goto('http://finance.fixture/');
   await page.evaluate(values=>Object.assign(window,values),config);
   await page.addScriptTag({content:bundle.outputFiles[0].text});
   await page.locator('[data-slot="dialog-content"] label').first().waitFor();
@@ -91,9 +95,12 @@ test('expense keeps its required article and submits the selected article',async
  await withDialog({__testDirection:'EXPENSE',__testProjectId:'project-1'},async page=>{
   assert.equal(await page.locator('label[for="pay-article"]').textContent(),'Статья расхода *');
   await page.locator('#pay-amount').fill('10');
+  assert.equal(await page.getByRole('button',{name:'Внести расход',exact:true}).isDisabled(),true);
+  await uploadDocument(page);
   await page.getByRole('button',{name:'Внести расход',exact:true}).click();
   await page.waitForFunction(()=>window.__paymentInput);
-  assert.equal((await page.evaluate(()=>window.__paymentInput)).expenseArticleId,'article-1');
+  const submitted=await page.evaluate(()=>window.__paymentInput);
+  assert.equal(submitted.expenseArticleId,'article-1');assert.ok(submitted.reportDocumentId);assert.match(submitted.clientMutationId,/^[a-f0-9-]{36}$/);
   await page.evaluate(()=>{window.__paymentInput=null});
   await page.locator('#pay-article').click();
   await page.getByRole('option',{name:'Логистика',exact:true}).click();
@@ -109,5 +116,37 @@ test('expense cannot submit when no article is available',async()=>{
   await page.locator('#pay-amount').fill('10');
   assert.equal(await page.getByRole('button',{name:'Внести расход',exact:true}).isDisabled(),true);
   assert.equal(await page.evaluate(()=>window.__paymentInput),undefined);
+ });
+});
+
+async function uploadDocument(page){
+ await page.locator('#pay-document').setInputFiles({name:'Чек.pdf',mimeType:'application/pdf',buffer:Buffer.from('%PDF')});
+ await page.getByRole('button',{name:'Чек.pdf',exact:true}).waitFor();
+}
+
+test('failed monetary acknowledgement preserves document and UUID for exact retry',async()=>{
+ await withDialog({__testDirection:'EXPENSE',__testProjectId:'project-1',__paymentResult:{ok:false,error:'try again'}},async page=>{
+  await page.locator('#pay-amount').fill('15');await uploadDocument(page);
+  await page.getByRole('button',{name:'Внести расход',exact:true}).click();await page.waitForFunction(()=>window.__paymentInput);
+  const first=await page.evaluate(()=>window.__paymentInput);await page.evaluate(()=>{window.__paymentInput=null});
+  await page.getByRole('button',{name:'Внести расход',exact:true}).click();await page.waitForFunction(()=>window.__paymentInput);
+  assert.deepEqual(await page.evaluate(()=>window.__paymentInput),first);
+ });
+});
+
+test('late upload acknowledgement cannot attach a document to a newly opened form',async()=>{
+ await withDialog({__testDirection:'EXPENSE',__testProjectId:'project-1'},async page=>{
+  let release;let arrived;const wait=new Promise(resolve=>{arrived=resolve});
+  await page.route('**/api/finance/documents/upload',async route=>{arrived();await new Promise(resolve=>{release=resolve});
+   await route.fulfill({status:201,contentType:'application/json',body:JSON.stringify({ok:true,document:{id:randomUUID(),source:'finance',fileName:'Late.pdf',mimeType:'application/pdf',size:4,createdAt:new Date().toISOString(),paymentId:null}})});
+  });
+  try{
+   await page.locator('#pay-document').setInputFiles({name:'Late.pdf',mimeType:'application/pdf',buffer:Buffer.from('%PDF')});await wait;
+   await page.evaluate(()=>window.__setOpen(false));await page.locator('[data-slot="dialog-content"]').waitFor({state:'hidden'});
+   await page.evaluate(()=>window.__setOpen(true));await page.locator('#pay-amount').fill('15');
+   const finished=page.waitForResponse(response=>response.url().endsWith('/api/finance/documents/upload'));release();await finished;
+   assert.equal(await page.getByRole('button',{name:'Внести расход',exact:true}).isDisabled(),true);
+   assert.equal(await page.getByRole('button',{name:'Late.pdf',exact:true}).count(),0);
+  }finally{release?.()}
  });
 });

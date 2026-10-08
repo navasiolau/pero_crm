@@ -5,6 +5,7 @@ import { createPaymentInTransaction } from "../src/server/payments/transaction";
 import { createTaskTransaction } from "../src/server/tasks/transaction";
 import { readCashBalance, readOrgBalance } from "../src/server/payroll/cash-core";
 import { createFinanceDocumentService } from "../src/server/finance-documents/core";
+import { recordPaymentReceipt } from "../src/server/payments/receipts";
 
 export async function financePaymentBaseline(db: PrismaClient) {
   const result: Record<string, unknown> = {};
@@ -40,6 +41,8 @@ export async function runFinancePaymentNative(db: PrismaClient) {
       const input = { projectId: project.id, direction: "EXPENSE" as const, amount: 100, currency: "BYN", cashAccountId: account.id,
         expenseArticleId: article.id, reportDocumentId: uploaded.document.id, clientMutationId: randomUUID(), comment: marker };
       const prepared = { project, account, articleId: article.id, paidAt: new Date(), rate: 1, rateDate: null, amount: 100, bynAmount: 100 };
+      await assert.rejects(createPaymentInTransaction(actor, { ...input, reportDocumentId: undefined }, prepared, tx), /документ/i);
+      assert.equal(await tx.payment.count({ where: { cashAccountId: account.id, direction: "EXPENSE" } }), 0);
       await assert.rejects(createPaymentInTransaction({ ...actor, id: other.id, roles: other.roles }, { ...input, clientMutationId: randomUUID() }, prepared, tx), /документ/i);
       await tx.financeDocument.update({ where: { id: uploaded.document.id }, data: { state: "PENDING", readyAt: null } });
       await assert.rejects(createPaymentInTransaction(actor, input, prepared, tx), /документ/i);
@@ -55,6 +58,13 @@ export async function runFinancePaymentNative(db: PrismaClient) {
       await assert.rejects(createPaymentInTransaction(actor, { ...input, clientMutationId: randomUUID() }, prepared, tx), /документ/i);
       await tx.payment.delete({ where: { id: first.payment.id } });
       await assert.rejects(createPaymentInTransaction(actor, input, prepared, tx), /удалена/);
+      const legacyInput = { ...input, clientMutationId: randomUUID(), reportDocumentId: undefined };
+      const historical = await tx.payment.create({ data: { projectId: project.id, direction: "EXPENSE", amount: 100,
+        bynAmount: 100, projectAmount: 100, currency: "BYN", rate: 1, cashAccountId: account.id,
+        expenseArticleId: article.id, createdById: actor.id, comment: marker } });
+      await recordPaymentReceipt(actor, legacyInput, historical.id, tx);
+      const historyReplay = await createPaymentInTransaction(actor, legacyInput, prepared, tx);
+      assert.equal(historyReplay.repeated, true); assert.equal(historyReplay.payment.id, historical.id);
       checked = true;
       const faultTx = new Proxy(tx, { get(target, property, receiver) {
         if (property === "changeLog") return { ...target.changeLog, create: (args: Prisma.ChangeLogCreateArgs) => {

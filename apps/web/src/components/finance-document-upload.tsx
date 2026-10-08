@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { FileUp, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useFileViewer } from "@/components/file-viewer";
@@ -9,11 +9,15 @@ import { uploadSizeLimitError, uploadSizeLimitFor } from "@/server/files/upload-
 import type { FinanceDocumentView } from "@/server/finance-documents/contracts";
 
 /** Один uploader для списка документов и форм денежных расходов. */
-export function FinanceDocumentUpload({ onUploaded, disabled = false }: {
+export function FinanceDocumentUpload({ onUploaded, onBusyChange, id, disabled = false }: {
   onUploaded: (document: FinanceDocumentView) => void;
+  onBusyChange?: (busy: boolean) => void;
+  id?: string;
   disabled?: boolean;
 }) {
-  const inputId = useId(), inputRef = useRef<HTMLInputElement>(null);
+  const generatedId = useId(), inputId = id ?? generatedId, inputRef = useRef<HTMLInputElement>(null);
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const current = useRef<{ file: File; clientMutationId: string } | null>(null);
   const busy = useRef(false);
   const [pending, setPending] = useState(false), [error, setError] = useState("");
@@ -31,18 +35,20 @@ export function FinanceDocumentUpload({ onUploaded, disabled = false }: {
     }
     const request = current.current;
     if (!request) return;
-    busy.current = true; setPending(true); setError("");
+    busy.current = true; setPending(true); setError(""); onBusyChange?.(true);
     try {
       const form = new FormData(); form.set("file", request.file); form.set("clientMutationId", request.clientMutationId);
       const response = await fetch("/api/finance/documents/upload", { method: "POST", body: form });
       const body = await response.json() as { ok?: boolean; document?: FinanceDocumentView; error?: string };
       if (!response.ok || !body.ok || !body.document) throw new Error(body.error ?? "Не удалось подтвердить загрузку");
+      if (!mounted.current) return;
       setUploaded(body.document); current.current = null;
       onUploaded(body.document);
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : "Не удалось загрузить документ. Повторите запрос.");
+      if (mounted.current) setError(failure instanceof Error ? failure.message : "Не удалось загрузить документ. Повторите запрос.");
     } finally {
-      busy.current = false; setPending(false);
+      busy.current = false;
+      if (mounted.current) { setPending(false); onBusyChange?.(false); }
       if (inputRef.current) inputRef.current.value = "";
     }
   }
