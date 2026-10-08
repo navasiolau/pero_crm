@@ -90,6 +90,13 @@ export type QuantityMaterial = {
   material: { name: string };
 };
 
+// Over-issue is a physical fact, not an instruction to enlarge the plan.
+// Ordinary rows retain the previous floor at the issued quantity.
+export function materialPlanFloor(quantity: DecimalInput, issuedQty: DecimalInput): string {
+  const planned = decimalAtoms(quantity, 3, 12), issued = decimalAtoms(issuedQty, 3, 12);
+  return decimalText(planned < issued ? planned : issued, 3);
+}
+
 // Сначала проверяем весь план. Ни один факт и ни одна задача не меняются.
 export function planQuantityChange(oldCount: number, count: number, works: QuantityWork[], materials: QuantityMaterial[]) {
   assertProductQuantity(count);
@@ -105,7 +112,7 @@ export function planQuantityChange(oldCount: number, count: number, works: Quant
   const materialUpdates = materials.map((line) => {
     const norm = existingNorm(line.quantityPerUnit, line.quantity, oldCount);
     const quantity = scaleNorm(norm, count, 3, 12);
-    if (decimalAtoms(quantity, 3, 12) < decimalAtoms(line.issuedQty, 3, 12))
+    if (decimalAtoms(quantity, 3, 12) < decimalAtoms(materialPlanFloor(line.quantity, line.issuedQty), 3, 12))
       throw new Error(`Материал «${line.material.name}»: уже выдано ${line.issuedQty}; сначала верните излишек`);
     return { id: line.id, quantityPerUnit: decimalText(decimalAtoms(norm, 3, 12), 3), quantity };
   });

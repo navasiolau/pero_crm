@@ -1,3 +1,7 @@
+import type { Prisma } from "@prisma/client";
+import { summarizeProjectExpenses } from "@/server/finance/project-expense-facts";
+import type { StockMovementView, ProjectMaterialLineStatus, ProjectMaterialLine, ProjectMaterialsData, MaterialOption, WarehouseReturnSource } from "./contracts";
+export type { StockMovementView, ProjectMaterialLineStatus, ProjectMaterialLine, ProjectMaterialsData, MaterialOption } from "./contracts";
 import {FIELD_ROLES,OFFICE_ROLES,WAREHOUSE_MONEY_ROLES,hasAnyRole} from "@/lib/roles";
 import { prisma } from "@/lib/prisma";
 import { warehouseReadPositions, averagePrice } from './accounting';
@@ -106,38 +110,24 @@ export async function listMaterials(actor: VisibilityActor): Promise<MaterialVie
 // Остатки — та же выборка, что listMaterials (страница «Остатки»)
 export const listStock = listMaterials;
 
-export type StockMovementView = {
-  id: string;
-  type: "INCOME" | "EXPENSE" | "RETURN";
-  receiptKind: "INVENTORY" | "PAID" | null;
-  materialId: string;
-  materialName: string;
-  materialUnit: string;
-  quantity: number;
-  unitPrice: number | null;
-  totalByn: number | null;
-  productId: string | null;
-  productNumber: string | null;
-  comment: string | null;
-  createdByName: string | null;
-  createdAt: string; // ISO
-};
-
 export async function listMovements(actor: VisibilityActor, filter?: {
   materialId?: string;
   productId?: string;
   type?: "INCOME" | "EXPENSE" | "RETURN";
-}): Promise<StockMovementView[]> {
+}, database: Prisma.TransactionClient = prisma): Promise<StockMovementView[]> {
   if(!hasAnyRole(actor.roles,OFFICE_ROLES))throw new Error("Недостаточно прав");
-  actor = await resolveVisibilityActor(prisma, actor);
-  const movements = await prisma.stockMovement.findMany({
+  actor = await resolveVisibilityActor(database, actor);
+  return loadMovements(actor,filter,database);
+}
+async function loadMovements(actor: VisibilityActor, filter: {materialId?:string;productId?:string;type?:"INCOME"|"EXPENSE"|"RETURN"}|undefined, database: Prisma.TransactionClient): Promise<StockMovementView[]> {
+  const movements = await database.stockMovement.findMany({
     where: {
       ...(hasFullProjectVisibility(actor) ? {} : { OR: [{ productId: null }, { product: productVisibilityWhere(actor) }] }),
       materialId: filter?.materialId || undefined,
       productId: filter?.productId || undefined,
       type: filter?.type || undefined,
     },
-    orderBy: { createdAt: "desc" },
+    orderBy: [{ createdAt: "desc" },{id:"desc"}],
     take: 500,
     include: {
       material: { select: { name: true, unit: true } },
@@ -147,7 +137,7 @@ export async function listMovements(actor: VisibilityActor, filter?: {
   const userIds = [
     ...new Set(movements.map((m) => m.createdById).filter(Boolean)),
   ] as string[];
-  const users = await prisma.user.findMany({
+  const users = await database.user.findMany({
     where: { id: { in: userIds } },
     select: { id: true, name: true },
   });
@@ -172,42 +162,15 @@ export async function listMovements(actor: VisibilityActor, filter?: {
   }));
 }
 
-export type ProjectMaterialLineStatus = "FULFILLED" | "AVAILABLE" | "SHORTAGE";
-
-export type ProjectMaterialLine = {
-  id: string;
-  materialId: string;
-  materialName: string;
-  materialSku: string | null;
-  unit: string;
-  purchasePrice: number | null;
-  quantityPerUnit: number;
-  quantity: number; // сколько нужно
-  issuedQty: number; // сколько уже выдано
-  debt: number; // quantity − issuedQty
-  available: number; // остаток на складе
-  status: ProjectMaterialLineStatus;
-  comment: string | null;
-  warehouseReady: boolean;
-  returnSources: {id:string;createdAt:string;quantity:number;unitPrice:number|null}[];
-  legacyReturnQuantity: number;
-};
-
-export type ProjectMaterialsData = {
-  lines: ProjectMaterialLine[];
-  movements: StockMovementView[];
-  materialsTotalByn: number; // Σ EXPENSE − Σ RETURN (для A/D)
-  hasShortage: boolean;
-};
-
 export async function getProjectMaterials(
   productId: string,
   actor: VisibilityActor,
+  database: Prisma.TransactionClient = prisma,
 ): Promise<ProjectMaterialsData> {
   if(!hasAnyRole(actor.roles,OFFICE_ROLES))throw new Error("Недостаточно прав");
-  actor = await resolveVisibilityActor(prisma, actor);
+  actor = await resolveVisibilityActor(database, actor);
   const [rows, movements] = await Promise.all([
-    prisma.projectMaterial.findMany({
+    database.projectMaterial.findMany({
       where: { productId, product: productVisibilityWhere(actor) },
       orderBy: { createdAt: "asc" },
       include: {
@@ -216,11 +179,21 @@ export async function getProjectMaterials(
         },
       },
     }),
-    listMovements(actor, { productId }),
+    loadMovements(actor, { productId }, database),
   ]);
-  const stock = await warehouseReadPositions(prisma,rows.map((row) => row.materialId));
-  const issued=stock.current?await prisma.warehouseMovementValuation.findMany({where:{movement:{projectMaterialId:{in:rows.map(row=>row.id)},type:'EXPENSE'}},include:{movement:{select:{projectMaterialId:true,createdAt:true}}}}):[];
-
+  const stock = await warehouseReadPositions(database,rows.map((row) => row.materialId));
+  const showMoney=hasAnyRole(actor.roles,WAREHOUSE_MONEY_ROLES);
+  const [issued,allCosts]=await Promise.all([
+    stock.current&&stock.runId ? database.warehouseMovementValuation.findMany({
+      where:{runId:stock.runId,movement:{productId,product:productVisibilityWhere(actor),type:"EXPENSE"}},
+      include:{movement:{select:{materialId:true,createdAt:true,material:{select:{name:true,unit:true}}}}}
+    }) : Promise.resolve([]),
+    showMoney ? database.stockMovement.findMany({where:{productId,product:productVisibilityWhere(actor),type:{in:["EXPENSE","RETURN"]}},select:{type:true,totalByn:true}}) : Promise.resolve([]),
+  ]);
+  const returnSources:WarehouseReturnSource[]=issued.map(item=>({id:item.movementId,materialId:item.movement.materialId,
+    materialName:item.movement.material.name,unit:item.movement.material.unit,createdAt:item.movement.createdAt.toISOString(),
+    quantity:item.quantity.minus(item.returnedQuantity).toNumber(),unitPrice:showMoney?item.unitCost.toString():null})).filter(item=>item.quantity>0);
+  const sourcesById=new Map(returnSources.map(item=>[item.id,item]));
   let hasShortage = false;
   const lines: ProjectMaterialLine[] = rows.map((row) => {
     const quantity = Number(row.quantity);
@@ -228,7 +201,7 @@ export async function getProjectMaterials(
     const debt = materialDebt(row.quantity, row.issuedQty);
     const position=stock.positions.get(row.materialId)??{quantity:'0',value:'0'};
     const available = Number(position.quantity);
-    const sources=issued.filter(item=>item.movement.projectMaterialId===row.id).map(item=>({id:item.movementId,createdAt:item.movement.createdAt.toISOString(),quantity:Number(item.quantity.minus(item.returnedQuantity)),unitPrice:hasAnyRole(actor.roles,WAREHOUSE_MONEY_ROLES)?Number(item.unitCost.toFixed(2)):null})).filter(item=>item.quantity>0);
+    const sources=returnSources.filter(item=>item.materialId===row.materialId);
     const legacyQuantity=decimalAtoms(row.issuedQty,3,12)-sources.reduce((sum,item)=>sum+decimalAtoms(item.quantity,3,12),BigInt(0));
     const status: ProjectMaterialLineStatus =
       debt <= 0 ? "FULFILLED" : available >= debt ? "AVAILABLE" : "SHORTAGE";
@@ -254,17 +227,13 @@ export async function getProjectMaterials(
     };
   });
 
-  const materialsTotalByn = movements.reduce(
-    (sum, movement) =>
-      sum +
-      (movement.type === "RETURN" ? -1 : 1) * (movement.totalByn ?? 0),
-    0,
-  );
+  const materialsTotalByn = showMoney ? summarizeProjectExpenses({payments:[],stockMovements:allCosts}).expensesTotal : null;
 
   return {
     lines,
-    movements: movements.filter((movement) => movement.type !== "INCOME"),
-    materialsTotalByn: Math.round(materialsTotalByn * 100) / 100,
+    movements: movements.filter((movement) => movement.type !== "INCOME").map(movement=>({...movement,returnableQuantity:sourcesById.get(movement.id)?.quantity??null})),
+    materialsTotalByn,
+    returnSources, warehouseReady:stock.ready,
     hasShortage,
   };
 }
@@ -334,15 +303,6 @@ export async function listProjectShortages(
 }
 
 // Материалы для диалогов (SearchableSelect): активные, с остатком в hint
-export type MaterialOption = {
-  id: string;
-  name: string;
-  sku: string | null;
-  unit: string;
-  purchasePrice: number | null;
-  stock: number;
-};
-
 export async function listMaterialOptions(actor: VisibilityActor): Promise<MaterialOption[]> {
   if(!hasAnyRole(actor.roles,OFFICE_ROLES))throw new Error("Недостаточно прав");
   const materials = await listMaterials(actor);
@@ -356,4 +316,12 @@ export async function listMaterialOptions(actor: VisibilityActor): Promise<Mater
       purchasePrice: material.purchasePrice,
       stock: material.stock,
     }));
+}
+
+// One catalog read supplies both the planned need and direct issue pickers.
+export async function listProductMaterialOptions(actor:VisibilityActor) {
+  const materials=await listMaterials(actor);
+  const option=(material:MaterialView):MaterialOption=>({id:material.id,name:material.name,sku:material.sku,unit:material.unit,purchasePrice:material.purchasePrice,stock:material.stock});
+  return {plan:materials.filter(material=>material.active).map(option),
+    issue:materials.filter(material=>material.stock>0).map(material=>({...option(material),name:material.active?material.name:material.name+" (архив)"}))};
 }

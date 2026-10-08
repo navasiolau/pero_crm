@@ -17,7 +17,7 @@ import { deleteProductSketchAction } from "@/server/products/cover-actions";
 import { listClients, listEngineers, listWorkers } from "@/server/projects/queries";
 import {listWorkerAllocationData} from "@/server/tasks/worker-allocation-queries";
 import { mapTaskDetails } from "@/server/tasks/queries";
-import { getProjectMaterials, listMaterialOptions } from "@/server/warehouse/queries";
+import { getProjectMaterials, listProductMaterialOptions } from "@/server/warehouse/queries";
 
 import { ProductMeasurement, ProductDocuments } from "@/components/product-attachments";
 import { productAttachmentGroups } from "@/lib/product-attachment-groups";
@@ -72,7 +72,7 @@ export default async function ProductPage({
       listEngineers(),
       listWorkPriceOptions(actor,product.id),
       showMaterials ? getProjectMaterials(product.id, session.user) : Promise.resolve(null),
-      showMaterials && canManage ? listMaterialOptions(session.user) : Promise.resolve([]),
+      showMaterials && (canManage||canIssueReturn) ? listProductMaterialOptions(session.user) : Promise.resolve({plan:[],issue:[]}),
       getProductPercentageView({ id: session.user.id, roles: role }, product.id),
     ]);
 
@@ -178,7 +178,10 @@ export default async function ProductPage({
               lines={materialsData.lines}
               movements={materialsData.movements}
               materialsTotalByn={materialsData.materialsTotalByn}
-              options={materialOptions}
+              options={materialOptions.plan}
+              issueOptions={materialOptions.issue}
+              returnSources={materialsData.returnSources}
+              warehouseReady={materialsData.warehouseReady}
               canManage={canManage}
               canIssueReturn={canIssueReturn}
               showMoney={showMoney}
