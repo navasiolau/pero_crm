@@ -1221,6 +1221,7 @@ model CalendarEntry {
   title String @db.VarChar(250)
   description String @default("")
   startsAt DateTime @db.Timestamptz(3)
+  plannedMinutes Int?
   state CalendarEntryState @default(PLANNED)
   reminderOffsetMinutes Int? @default(15)
   reminderNamespace String?

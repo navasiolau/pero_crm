@@ -43,3 +43,15 @@ test('closed mutation contract rejects foreign subject, malformed date, unsuppor
  const results=await Promise.all(['COMPLETED','CANCELLED'].map(state=>mutateCalendarCore('a',{operation:'state',entryId:value.entryId,expectedRevision:0,state},f.transaction)));
  assert.equal(results.filter(r=>r.ok).length,1);assert.equal(results.filter(r=>!r.ok&&r.kind==='conflict').length,1);assert.equal(f.rows[0].revision,1);
 });
+
+test('duration survives old clients and state changes; exact create and CAS include minutes',async()=>{
+ const f=fixture();const input={...value,entryId:randomUUID(),plannedMinutes:90};
+ const created=await mutateCalendarCore('a',input,f.transaction);assert.ok(created.ok);assert.equal(created.entry.plannedMinutes,90);
+ assert.ok((await mutateCalendarCore('a',input,f.transaction)).ok);
+ const conflict=await mutateCalendarCore('a',{...input,plannedMinutes:60},f.transaction);assert.ok(!conflict.ok&&conflict.kind==='conflict');
+ const old=await mutateCalendarCore('a',{...value,entryId:input.entryId,operation:'update',expectedRevision:0},f.transaction);assert.ok(old.ok);assert.equal(old.entry.plannedMinutes,90);
+ const done=await mutateCalendarCore('a',{operation:'state',entryId:input.entryId,expectedRevision:1,state:'COMPLETED'},f.transaction);assert.ok(done.ok);assert.equal(done.entry.plannedMinutes,90);
+ const cleared=await mutateCalendarCore('a',{...input,operation:'update',expectedRevision:2,plannedMinutes:null},f.transaction);assert.ok(cleared.ok);assert.equal(cleared.entry.plannedMinutes,null);
+ const zero=await mutateCalendarCore('a',{...input,operation:'update',expectedRevision:3,plannedMinutes:0},f.transaction);assert.ok(zero.ok);assert.equal(zero.entry.plannedMinutes,0);
+ const before=JSON.stringify(f.rows);const stale=await mutateCalendarCore('a',{...input,operation:'update',expectedRevision:3},f.transaction);assert.ok(!stale.ok&&stale.kind==='conflict');assert.equal(JSON.stringify(f.rows),before);
+});
