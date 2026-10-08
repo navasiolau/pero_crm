@@ -57,3 +57,58 @@ test('handler itself denies missing session and financial-only/read-only roles b
  for(const roles of [null,['ACCOUNTANT'],['PROCUREMENT'],[]]){reset();sessionMissing=roles===null;actorRoles=roles??[];let reads=0;const req={formData:async()=>{reads++;throw Error('BODY_MUST_NOT_BE_READ')}} as unknown as Request;const response=await POST(req);assert.equal(response.status,roles===null?401:403);const body=await response.json();assert.equal(body.ok,false);assert.equal(body.commitState,'notCommitted');assert.equal(reads,0);assert.equal(puts,0);assert.equal(files.size,0);}
 });
 test('legitimate combined manager grant still uploads after early operational guard',async()=>{reset();actorRoles=['ACCOUNTANT','MANAGER'];const response=await POST(request());assert.equal(response.status,200);assert.equal((await response.json()).ok,true);assert.equal(files.size,1);});
+// Concurrent duplicate cover delivery must model the real Product row lock.
+let serializeSketchTransactions = false;
+let sketchQueue: Promise<void> = Promise.resolve();
+let originalBarrier: (() => Promise<void>) | null = null;
+const priorTransaction = require.cache[require.resolve('../src/server/tasks/transaction')]!.exports.withTaskTransaction;
+require.cache[require.resolve('../src/server/tasks/transaction')]!.exports.withTaskTransaction = async (fn: (t: typeof tx) => Promise<unknown>) => {
+ if (!serializeSketchTransactions) return priorTransaction(fn);
+ const previous = sketchQueue;
+ let release!: () => void;
+ sketchQueue = new Promise<void>(resolve => { release = resolve; });
+ await previous;
+ try { return await priorTransaction(fn); } finally { release(); }
+};
+const priorS3Put = require.cache[require.resolve('../src/lib/s3')]!.exports.s3Put;
+require.cache[require.resolve('../src/lib/s3')]!.exports.s3Put = async (key: string, bytes: Buffer) => {
+ await priorS3Put(key, bytes);
+ if (!key.includes('/thumbs/') && originalBarrier) await originalBarrier();
+};
+
+test('112 concurrent identical engineer replacement keeps one receipt and compensates only duplicate upload keys', async () => {
+ reset(); const old = oldSketch();
+ const bytes = await sharp({create:{width:2,height:2,channels:3,background:'#112233'}}).png().toBuffer();
+ const image = () => new File([new Uint8Array(bytes)],'replacement.png',{type:'image/png'});
+ let arrivals = 0; let release!: () => void;
+ const bothStored = new Promise<void>(resolve => { release = resolve; });
+ serializeSketchTransactions = true;
+ originalBarrier = async () => { if (++arrivals === 2) release(); await bothStored; };
+ try {
+  const responses = await Promise.all([POST(sketchRequest(image())), POST(sketchRequest(image()))]);
+  assert.deepEqual(responses.map(response => response.status), [200,200]);
+  const results = await Promise.all(responses.map(response => response.json()));
+  assert.equal(results[0].id, results[1].id);
+  assert.equal(results.filter(result => result.repeated === true).length, 1);
+  assert.equal(productRow.sketchFileId, results[0].id);
+  assert.equal(files.get('old'), old);
+  assert.equal(files.size, 2);
+  assert.equal(puts, 4);
+  assert.equal(deletes, 2, 'discard duplicate original and thumbnail after receipt replay');
+  assert.equal(notifies, 1, 'the already committed replacement must not notify twice');
+  const accepted = files.get(results[0].id)!;
+  assert.ok(deletedKeys.every(key => key !== `j/${accepted.storedName}` && key !== `j/thumbs/${accepted.storedName}.jpg` && !key.endsWith('/old.png')));
+ } finally { serializeSketchTransactions = false; originalBarrier = null; }
+});
+
+test('112 engineer replacement also preserves a legacy sketch with no upload author', async () => {
+ reset(); const old = oldSketch(); Object.assign(old,{uploadedById:null});
+ const bytes = await sharp({create:{width:2,height:2,channels:3,background:'#223344'}}).png().toBuffer();
+ const response = await POST(sketchRequest(new File([new Uint8Array(bytes)],'replacement.png',{type:'image/png'})));
+ assert.equal(response.status, 200);
+ assert.equal((await response.json()).ok, true);
+ assert.equal(files.get('old'), old);
+ assert.equal(old.uploadedById, null);
+ assert.equal(files.size, 2);
+ assert.equal(deletes, 0);
+});
