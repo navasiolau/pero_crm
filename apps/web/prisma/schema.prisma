@@ -913,6 +913,8 @@ model Material {
   movements        StockMovement[]
   projectMaterials ProjectMaterial[]
   warehouseBalance WarehouseBalance?
+
+  @@index([unitId])
 }
 
 // Потребность изделия в материале (аналог legacy 1531 «Номенклатура в заказах»).
