@@ -1,5 +1,4 @@
 import { demoPlugin } from "@pero/plugin-demo";
-import { fileStagesPlugin } from "@pero/plugin-file-stages";
 import {
   CURRENT_API_VERSION,
   type PluginManifest,
@@ -8,7 +7,7 @@ import {
 // Реестр установленных плагинов. Установка ручная (§14): добавить пакет в
 // packages/plugins/<id>, подключить workspace-зависимостью в apps/web и
 // вписать манифест сюда.
-const registry: PluginManifest[] = [demoPlugin, fileStagesPlugin];
+const registry: PluginManifest[] = [demoPlugin];
 
 export function listManifests(): PluginManifest[] {
   return registry;

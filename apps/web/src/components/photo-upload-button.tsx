@@ -16,14 +16,13 @@ import {
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { measurementUploadFields, type MeasurementUploadContext } from "@/lib/measurement-upload-context";
-import { validateFileForCategory } from "@pero/plugin-file-stages";
 import type { SketchFilePreview } from "@/lib/product-hero";
 import { sketchUploadForm } from "@/lib/product-sketch-upload";
 import { readSketchUploadConfirmation } from "@/lib/product-sketch-ui";
 import {UploadErrorDetails} from "@/components/upload-error-details";
 import {createUploadAttempt,sendFileUpload,sendUploadBatch,localUploadFailure,MULTI_UPLOAD_MAX_FILES,type BatchFileFailure,type BatchUploadItem,type UploadFailure} from "@/lib/file-upload-client";
 
-type PhotoTarget = (MeasurementUploadContext & { assignCover?: never; coverSurface?:never; expectedSketchFileId?:never }) | { projectId: string; productId: string; taskId?: never; stage?: never; assignCover: true; coverSurface?:boolean; expectedSketchFileId?:string|null };
+type PhotoTarget = (MeasurementUploadContext & { assignCover?: never; coverSurface?:never; expectedSketchFileId?:never }) | { projectId: string; productId: string; taskId?: never; assignCover: true; coverSurface?:boolean; expectedSketchFileId?:string|null };
 
 // Кнопка «Фото» для замера (§6.2): открывает ВИДИМЫЙ диалог с дроп-зоной —
 // файл можно перетащить или выбрать кликом. Не зависит от того, как браузер
@@ -32,13 +31,11 @@ export function PhotoUploadButton({
   taskId,
   projectId,
   productId,
-  stage,
   assignCover,
   coverSurface,
   expectedSketchFileId = null,
   filesCount,
   size = "sm",
-  extensions,
   onBusyChange,
   onUploaded,
   beforeUpload,
@@ -47,7 +44,6 @@ export function PhotoUploadButton({
 }: PhotoTarget & {
   filesCount: number;
   size?: "sm" | "default";
-  extensions?: string[];
   onBusyChange?: (busy: boolean) => void;
   onUploaded?: (id: string, sketch?: SketchFilePreview) => void;
   beforeUpload?: () => Promise<boolean>;
@@ -64,7 +60,7 @@ export function PhotoUploadButton({
   const active = useRef(false);
   const [error, setError] = useState<UploadFailure | null>(null);
   const [batchFailures, setBatchFailures] = useState<BatchFileFailure[]>([]);
-  const currentTarget=useRef('');currentTarget.current=JSON.stringify({projectId,productId,taskId,stage,assignCover});
+  const currentTarget=useRef('');currentTarget.current=JSON.stringify({projectId,productId,taskId,assignCover});
 
   async function upload(file:File){
     if(active.current)return;active.current=true;setBusy(true);onBusyChange?.(true);setError(null);
@@ -73,10 +69,9 @@ export function PhotoUploadButton({
     try{
       if(beforeUpload&&!await beforeUpload())throw Error('\u0421\u043d\u0430\u0447\u0430\u043b\u0430 \u0441\u043e\u0445\u0440\u0430\u043d\u0438\u0442\u0435 \u0438\u0437\u043c\u0435\u043d\u0435\u043d\u0438\u044f \u0438\u0437\u0434\u0435\u043b\u0438\u044f.');
       if(productId&&!file.type.startsWith('image/'))throw Error(assignCover?'\u042d\u0441\u043a\u0438\u0437 \u0434\u043e\u043b\u0436\u0435\u043d \u0431\u044b\u0442\u044c \u0438\u0437\u043e\u0431\u0440\u0430\u0436\u0435\u043d\u0438\u0435\u043c.':'\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u0444\u043e\u0442\u043e\u0433\u0440\u0430\u0444\u0438\u044e.');
-      if(extensions){const validation=validateFileForCategory(assignCover?'PHOTO':'MEASUREMENT',file.name,extensions);if(validation)throw Error(validation);}
       mutationId=createRequestId();let form:FormData;
       if(assignCover)form=sketchUploadForm(file,projectId,productId!,mutationId,expectedSketchFileId);
-      else{form=new FormData();form.append('file',file);const context=taskId?{projectId,taskId}as const:{projectId,productId:productId!,stage:stage!}as const;for(const[key,value]of Object.entries(measurementUploadFields(context)))form.append(key,value);}
+      else{form=new FormData();form.append('file',file);const context=taskId?{projectId,taskId}as const:{projectId,productId:productId!}as const;for(const[key,value]of Object.entries(measurementUploadFields(context)))form.append(key,value);}
       started=true;const result=await sendFileUpload(createUploadAttempt(form,mutationId));if(currentTarget.current!==selectedTarget)return;
       if(!result.ok){setError(result.failure);toast.error(result.failure.error);return;}
       confirmation={httpStatus:result.httpStatus,requestId:result.requestId};const sketch=assignCover?readSketchUploadConfirmation(result.data,mutationId):undefined;acknowledged=true;
@@ -97,9 +92,8 @@ export function PhotoUploadButton({
       for(const file of capped){
         try{
           if(productId&&!file.type.startsWith('image/'))throw Error('Выберите фотографию.');
-          if(extensions){const validation=validateFileForCategory('MEASUREMENT',file.name,extensions);if(validation)throw Error(validation);}
           const mutationId=createRequestId();const form=new FormData();form.append('file',file);
-          const context=taskId?{projectId,taskId}as const:{projectId,productId:productId!,stage:stage!}as const;
+          const context=taskId?{projectId,taskId}as const:{projectId,productId:productId!}as const;
           for(const[key,value]of Object.entries(measurementUploadFields(context)))form.append(key,value);
           items.push({fileName:file.name,size:file.size,attempt:createUploadAttempt(form,mutationId)});
         }catch(failure){failures.push({fileName:file.name,failure:localUploadFailure(failure instanceof Error?failure.message:'Не удалось загрузить фото.')});}
@@ -161,7 +155,7 @@ export function PhotoUploadButton({
         <DialogContent onPaste={event => { const files = event.clipboardData?.files ? Array.from(event.clipboardData.files) : []; if (files.length > 0) { event.preventDefault(); submitFiles(files); } }}>
           <DialogHeader>
             <DialogTitle>{assignCover ? expectedSketchFileId ? "Заменить изображение эскиза" : "Добавить изображение эскиза" : productId ? "Фото замера изделия" : "Фото к задаче"}</DialogTitle>
-            {!assignCover?<DialogDescription>Фото или замерный лист — попадёт в проект с категорией «Замер»</DialogDescription>:null}
+            {!assignCover?<DialogDescription>Фото или замерный лист — попадёт в раздел «Замер»</DialogDescription>:null}
           </DialogHeader>
           <UploadErrorDetails failure={error} />
           {batchFailures.length > 0 ? <div className="min-w-0" role="alert">

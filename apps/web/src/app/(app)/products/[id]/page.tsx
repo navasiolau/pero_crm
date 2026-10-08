@@ -11,7 +11,6 @@ import { FIELD_ROLES, MANAGER_ROLES, OFFICE_ROLES, WAREHOUSE_MANAGE_ROLES, WAREH
 import {canViewProductMoney} from "@/lib/product-financial-access";
 import { canEditProductTechnicalBlock, resolveVisibilityActor } from "@/server/access/visibility";
 import { allocatedWorkQuantity } from "@/lib/work-shares";
-import { getFileStageConfig } from "@/server/files/stage-config";
 import { getProductFor } from "@/server/products/queries";
 import { deleteProductSketchAction } from "@/server/products/cover-actions";
 import { listClients, listEngineers, listWorkers } from "@/server/projects/queries";
@@ -62,8 +61,6 @@ export default async function ProductPage({
   const showMoney = hasAnyRole(role, WAREHOUSE_MONEY_ROLES);
   const canIssueReturn=hasAnyRole(role,WAREHOUSE_MANAGE_ROLES);
 
-  // Группировка файлов по этапам (плагин file-stages), если включён.
-  const stageConfig = await getFileStageConfig();
 
   const [clients, workers, engineers, priceItems, materialsData, materialOptions, percentageView] =
     await Promise.all([
@@ -91,8 +88,7 @@ export default async function ProductPage({
   const fileRows = product.files.map((file) => ({
               id: file.id,
               fileName: file.fileName,
-              category: file.category,
-              stage: file.stage,
+              section: file.section,
               mimeType: file.mimeType,
               size: file.size,
               hasThumb: file.hasThumb,
@@ -124,11 +120,11 @@ export default async function ProductPage({
           </div>}
           details={<ProductInlineDetails canManage={canManage} canEditTech={canEditTech} showAmount={showAmount} currency={product.project.currency}
             notice={showMaterials&&materialsData?.hasShortage?<Badge variant="destructive"><TriangleAlert/>Нехватка материалов</Badge>:null}
-            measurement={<ProductMeasurement projectId={product.project.id} productId={product.id} files={attachments.measurement} canEdit={canEditTech} extensions={stageConfig.enabled ? stageConfig.extensions ?? undefined : undefined} />}
+            measurement={<ProductMeasurement projectId={product.project.id} productId={product.id} files={attachments.measurement} canEdit={canEditTech} />}
             engineer={<SinglePercentageRow {...percentageProps} kind="ENGINEERING" section={percentageView.sections.ENGINEERING} assignedEngineerId={product.engineerId} editEngineer candidates={engineers.map(user => ({ id: user.id, name: user.name, active: true, roles: user.roles }))} />}
           />}
         />}
-        documents={<ProductDocuments projectId={product.project.id} productId={product.id} production={attachments.production} installation={attachments.installation} canEdit={canEditTech} canManage={canManage} noModel={percentageView.noModel} extensions={stageConfig.enabled ? stageConfig.extensions ?? undefined : undefined} />}
+        documents={<ProductDocuments projectId={product.project.id} productId={product.id} production={attachments.production} installation={attachments.installation} canEdit={canEditTech} canManage={canManage} noModel={percentageView.noModel} />}
         assembly={<SinglePercentageRow {...percentageProps} kind="ASSEMBLY" section={percentageView.sections.ASSEMBLY} candidates={percentagePeople.filter(user => user.roles.includes("WORKER"))} />}
         installation={<SinglePercentageRow {...percentageProps} kind="INSTALLATION" section={percentageView.sections.INSTALLATION} candidates={percentagePeople.filter(user => user.roles.includes("MOUNTER"))} />}
         works={<TasksTab
