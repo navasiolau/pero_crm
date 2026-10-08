@@ -14,4 +14,7 @@
 
 ## Staging
 
-Ожидаются обычный merge, CI и фактическая runtime-приёмка. Main/production не менялись, Restic не затронут.
+- Обычный merge `a3a52b08ba68ff2096a7041a0cc2025aacfe9684`, CI172 SUCCESS: https://github.com/navasiolau/pero_crm/actions/runs/37749731126. Фактическая revision совпала; healthy образ `sha256:23865b37e1ae8b932deb8936b3968daa54f09a0c6995a80f0a25638e7714c488`.
+- Перед развёртыванием сохранён только count/digest прежних полей CalendarEntry (не дамп). После фактической миграции count1/digest `fbc971e8f05474bbdbc7b12bda217b53` совпал, историческая длительность NULL.
+- Native90/NULL/0, повтор, старая форма, CAS, SQL CHECK и owner/disabled access PASS. Реальные SSR-страницы показали длительность, администратор не получил чужой план. Исходные digest MATCH, QA0, providerMessages0.
+- Bundle с дополнительной проверкой миграции `f59569a85c6d60743b0055389cc5f48d37eb084c161a4d5a8b331eaa533be18a` (121449bytes). DB container/volume/start и W07 сохранены. Main/production не менялись, дампов нет, Restic не затронут.
