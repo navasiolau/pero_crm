@@ -35,3 +35,12 @@ export function calendarMonthDays(month:string):{date:string;inMonth:boolean}[]{
 export function calendarDisplay(value:Date|string):string{
  return new Intl.DateTimeFormat('ru-RU',{timeZone:CALENDAR_TIMEZONE,dateStyle:'long',timeStyle:'short'}).format(typeof value==='string'?new Date(value):value);
 }
+
+/** Inclusive local dates, represented as a half-open instant range. */
+export function calendarDateRange(from:string,to:string):{start:Date;end:Date}{
+ const start=parseCalendarDateTime(from+"T00:00"),last=parseCalendarDateTime(to+"T00:00");
+ if(start.getTime()>last.getTime())throw Error("Начало периода позже окончания");
+ const [year,month,day]=to.split("-").map(Number);
+ const next=new Date(Date.UTC(year,month-1,day+1)).toISOString().slice(0,10);
+ return {start,end:parseCalendarDateTime(next+"T00:00")};
+}

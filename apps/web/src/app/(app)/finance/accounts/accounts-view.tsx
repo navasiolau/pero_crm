@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import Link from "next/link";
 import { toast } from "sonner";
 import { Plus, Power } from "lucide-react";
 
@@ -138,6 +139,7 @@ export function AccountsView({ accounts }: { accounts: CashAccountView[] }) {
         </Button>
       </div>
 
+      <Link href="/finance/accounts/report" className="text-sm font-medium text-primary hover:underline">Отчёт по кассам за период →</Link>
       <DataTable
         columns={columns}
         rows={accounts}

@@ -38,3 +38,12 @@ export function formatQty(quantity: string | number | null | undefined): string 
 export function formatMoneyTotal(amount: number | null, currency = "BYN"): string {
   return amount === null ? "Недоступно: нет подтверждённого BYN-эквивалента" : formatAmount(amount, currency);
 }
+
+/** Exact report totals can exceed Number's cent precision. */
+export function formatExactMoney(amount:string|null,currency:string):string{
+ if(amount===null)return "Нет данных";
+ if(!/^-?\d+\.\d{2}$/.test(amount))throw Error("Некорректный денежный итог");
+ const negative=amount.startsWith("-"),[whole,cents]=(negative?amount.slice(1):amount).split(".");
+ const integer=new Intl.NumberFormat("ru-RU",{maximumFractionDigits:0}).format(BigInt(whole));
+ return `${negative?"−":""}${integer},${cents} ${CURRENCY_SYMBOLS[currency]??currency}`;
+}
