@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { auth } from "@/auth";
-import { OFFICE_ROLES, WAREHOUSE_MONEY_ROLES, hasAnyRole } from "@/lib/roles";
+import { OFFICE_ROLES, WAREHOUSE_MONEY_ROLES, WAREHOUSE_DELETE_ROLES, hasAnyRole } from "@/lib/roles";
 import { listMaterialOptions, listMovements } from "@/server/warehouse/queries";
 
 import { MovementsView } from "./movements-view";
@@ -28,6 +28,7 @@ export default async function WarehouseMovementsPage() {
       rows={rows}
       materials={materials}
       showMoney={hasAnyRole(role, WAREHOUSE_MONEY_ROLES)}
+      canDelete={hasAnyRole(role, WAREHOUSE_DELETE_ROLES)}
     />
   );
 }

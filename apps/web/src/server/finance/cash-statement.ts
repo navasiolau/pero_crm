@@ -1,4 +1,5 @@
 import {Prisma,type PrismaClient} from "@prisma/client";
+import {activePaymentWhere} from '@/server/payments/active-records';
 import {prisma} from "@/lib/prisma";
 import {calendarDateRange} from "@/lib/calendar-dates";
 import {cashMovementDelta} from "@/lib/cash-ledger";
@@ -75,7 +76,7 @@ export async function loadCashStatement(actor:FinanceWorkspaceActor,query:CashSt
  requireFinanceWorkspaceActor(actor);const range=rangeFor(query);
  const [accounts,payments,payouts]=await Promise.all([
   db.cashAccount.findMany({select:{id:true,name:true,currency:true,active:true},orderBy:{createdAt:"asc"}}),
-  db.payment.findMany({where:{paidAt:{lt:range.end}},select:{id:true,cashAccountId:true,paidAt:true,direction:true,amount:true,currency:true,bynAmount:true,comment:true,
+  db.payment.findMany({where:{...activePaymentWhere,paidAt:{lt:range.end}},select:{id:true,cashAccountId:true,paidAt:true,direction:true,amount:true,currency:true,bynAmount:true,comment:true,
    project:{select:{id:true,number:true}},expenseArticle:{select:{name:true}},reportDocument:{select:reportDocumentSelect},
    stockPurchase:{select:{movement:{select:{material:{select:{name:true}}}}}}
   }}),

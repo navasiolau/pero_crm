@@ -2,6 +2,8 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import {Button} from '@/components/ui/button';
+import {WarehouseMovementDeleteDialog} from '@/components/warehouse-movement-delete-dialog';
 
 import { Badge } from "@/components/ui/badge";
 import { DataTable, type DataColumn } from "@/components/ui/data-table";
@@ -28,14 +30,18 @@ export function MovementsView({
   rows,
   materials,
   showMoney,
+  canDelete = false,
 }: {
   rows: StockMovementView[];
   materials: MaterialOption[];
   showMoney: boolean;
+  canDelete?: boolean;
 }) {
   const [materialId, setMaterialId] = useState("");
   const [typeFilter, setTypeFilter] = useState("ALL");
   const viewer=useFileViewer('fullscreen');
+  const [deleting,setDeleting]=useState<string|null>(null);
+  const deleteButton=(row:StockMovementView)=>canDelete?<Button variant="ghost" size="sm" className="text-destructive" onClick={event=>{event.stopPropagation();setDeleting(row.id);}}>Удалить</Button>:null;
 
   const materialOptions = useMemo(
     () =>
@@ -174,6 +180,7 @@ export function MovementsView({
     },
   );
 
+  if(canDelete)columns.push({id:'actions',header:'',cell:deleteButton});
   return (
     <div className="flex flex-col gap-4">
       <div>
@@ -222,9 +229,10 @@ export function MovementsView({
         searchPlaceholder="Поиск по движениям…"
         emptyText="Движений пока нет"
         defaultPageSize={20}
-        renderMobileCard={row=><div className="space-y-2"><div className="flex flex-wrap items-start justify-between gap-2"><b className="break-words">{row.materialName}</b><Badge variant="outline">{warehouseMovementLabel(row)}</Badge></div><p className="text-xs text-muted-foreground">{formatDateTime(row.createdAt)}</p><p>{row.type==='EXPENSE'?'−':row.type==='RETURN'?'+':''}{formatQty(row.quantity)} {row.materialUnit}{showMoney?` · ${formatAmount(row.totalByn,'BYN')}`:''}</p>{row.productId&&row.productNumber?<Link href={`/products/${row.productNumber}`} className="text-primary hover:underline">Изделие {row.productNumber}</Link>:null}{row.comment?<p className="break-words text-sm">{row.comment}</p>:null}{row.createdByName?<p className="text-xs text-muted-foreground">{row.createdByName}</p>:null}<ReportDocumentButton document={row.reportDocument} onOpen={viewer.open}/></div>}
+        renderMobileCard={row=><div className="space-y-2"><div className="flex flex-wrap items-start justify-between gap-2"><b className="break-words">{row.materialName}</b><Badge variant="outline">{warehouseMovementLabel(row)}</Badge></div><p className="text-xs text-muted-foreground">{formatDateTime(row.createdAt)}</p><p>{row.type==='EXPENSE'?'−':row.type==='RETURN'?'+':''}{formatQty(row.quantity)} {row.materialUnit}{showMoney?` · ${formatAmount(row.totalByn,'BYN')}`:''}</p>{row.productId&&row.productNumber?<Link href={`/products/${row.productNumber}`} className="text-primary hover:underline">Изделие {row.productNumber}</Link>:null}{row.comment?<p className="break-words text-sm">{row.comment}</p>:null}{row.createdByName?<p className="text-xs text-muted-foreground">{row.createdByName}</p>:null}<ReportDocumentButton document={row.reportDocument} onOpen={viewer.open}/>{deleteButton(row)}</div>}
       />
       {viewer.viewer}
+      {deleting?<WarehouseMovementDeleteDialog key={deleting} movementId={deleting} onClose={()=>setDeleting(null)}/>:null}
     </div>
   );
 }

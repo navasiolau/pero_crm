@@ -1,4 +1,5 @@
 import {maskProductionRead,maskProductionWorkRead,maskTaskPaymentRead} from "@/server/access/production-read-projection";
+import {activePaymentWhere} from '@/server/payments/active-records';
 import {canViewProductMoney} from "@/lib/product-financial-access";
 import { projectTotal as calculateProjectTotal } from "@/lib/product-quantity";
 import type { Prisma, ProjectStage, Role } from "@prisma/client";
@@ -282,7 +283,7 @@ export async function getProjectFor(
       files: { where: fileVisibilityWhere(actor), orderBy: { createdAt: "desc" } },
       communications: options.includeHistory === false ? false : { orderBy: { happenedAt: "desc" } },
       payments: {
-        where: hasAnyRole(actor.roles,FINANCE_ROLES) ? {} : { id: { in: [] } },
+        where: hasAnyRole(actor.roles,FINANCE_ROLES) ? activePaymentWhere : { id: { in: [] } },
         include: {
           cashAccount: { select: { name: true } },
           expenseArticle: { select: { id: true, name: true } },

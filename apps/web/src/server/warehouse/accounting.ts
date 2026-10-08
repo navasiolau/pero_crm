@@ -7,6 +7,7 @@ import { lockProductRow } from '@/server/products/quantity-core';
 import { decimalAtoms, decimalText } from '@/lib/product-quantity';
 import { addPosition, addPaidPosition, addValue, issuePosition, returnShare, averagePrice, unitCost, quantityInput, priceInput } from '@/lib/warehouse-cost';
 import {warehouseMetadataGate} from './gate';
+import {activeStockMovementWhere} from './active-records';
 
 type Tx=Prisma.TransactionClient;
 type Reader=Pick<PrismaClient,'warehouseAccountingState'|'warehouseBalance'|'stockMovement'>;
@@ -19,7 +20,7 @@ export async function warehouseReadPositions(db:Reader=prisma,ids?:string[]){
   const rows=await db.warehouseBalance.findMany({where:ids?{materialId:{in:ids}}:undefined});
   return {current,ready:phase==='ACTIVE',runId:state?.runId??null,positions:new Map(rows.map(row=>[row.materialId,{quantity:row.quantity.toString(),value:row.valueByn.toString()}]))};
  }
- const grouped=await db.stockMovement.groupBy({by:['materialId','type'],where:ids?{materialId:{in:ids}}:undefined,_sum:{quantity:true}});
+ const grouped=await db.stockMovement.groupBy({by:['materialId','type'],where:{...activeStockMovementWhere,...(ids?{materialId:{in:ids}}:{})},_sum:{quantity:true}});
  const values=new Map<string,bigint>();
  for(const row of grouped)values.set(row.materialId,(values.get(row.materialId)??BigInt(0))+BigInt(row.type==='EXPENSE'?-1:1)*decimalAtoms(row._sum.quantity??0,3,18));
  return {current,ready:false,runId:state?.runId??null,positions:new Map([...values].map(([id,q])=>[id,{quantity:decimalText(q,3),value:'0'}]))};
@@ -52,6 +53,7 @@ export async function warehouseMove(tx:Tx,actor:WarehouseActor,input:WarehouseMo
  const previous=await tx.warehouseMovementValuation.findUnique({where:{clientMutationId},include:{movement:true}});
  if(previous){
   if(previous.actorId!==actor.id||previous.requestFingerprint!==fingerprint)throw Error('Идентификатор запроса уже использован с другими данными');
+  if(previous.movement.deletionId)throw Error('Движение удалено — повторное проведение запрещено');
   const product=previous.movement.productId?await tx.product.findUnique({where:{id:previous.movement.productId},select:{id:true,number:true,projectId:true}}):null;
   return {movement:previous.movement,repeated:true,line:null,material:null,product};
  }
@@ -79,7 +81,7 @@ export async function warehouseMove(tx:Tx,actor:WarehouseActor,input:WarehouseMo
  else if(input.sourceMovementId){
   // Re-read while the material/product locks protect all returns of this issue.
   const source=await tx.warehouseMovementValuation.findUnique({where:{movementId:input.sourceMovementId},include:{movement:true}});
-  if(!source||source.runId!==state.runId||source.movement.type!=='EXPENSE'||source.movement.productId!==product!.id||source.movement.materialId!==materialId)throw Error('Исходная выдача не найдена');
+  if(!source||source.movement.deletionId||source.runId!==state.runId||source.movement.type!=='EXPENSE'||source.movement.productId!==product!.id||source.movement.materialId!==materialId)throw Error('Исходная выдача не найдена');
   if(line&&decimalAtoms(quantity,3,12)>decimalAtoms(line.issuedQty,3,12))throw Error('Факт выдачи в потребности не согласован с исходной выдачей');
   const share=returnShare({quantity:source.quantity.toString(),value:source.valueByn.toString(),money:source.moneyByn.toString(),returnedQuantity:source.returnedQuantity.toString(),returnedValue:source.returnedValueByn.toString(),returnedMoney:source.returnedMoneyByn.toString()},quantity);
   result={...share,position:addValue(position,quantity,share.value)};
@@ -87,13 +89,13 @@ export async function warehouseMove(tx:Tx,actor:WarehouseActor,input:WarehouseMo
  }else{
   if(!line||!input.projectMaterialId)throw Error('Для исторического возврата нужна строка потребности');
   if(decimalAtoms(quantity,3,12)>decimalAtoms(line.issuedQty,3,12))throw Error('Нельзя вернуть больше выданного');
-  const outstanding=await tx.warehouseMovementValuation.findMany({where:{runId:state.runId,movement:{type:'EXPENSE',productId:product!.id,materialId}}});
+  const outstanding=await tx.warehouseMovementValuation.findMany({where:{runId:state.runId,movement:{...activeStockMovementWhere,type:'EXPENSE',productId:product!.id,materialId}}});
   const newIssued=outstanding.reduce((q,item)=>q+decimalAtoms(item.quantity,3,12)-decimalAtoms(item.returnedQuantity,3,12),BigInt(0));
   if(decimalAtoms(quantity,3,12)>decimalAtoms(line.issuedQty,3,12)-newIssued)throw Error('Выберите исходную выдачу нового учёта');
   result=addPosition(position,quantity,price!);
  }
  const movement=await tx.stockMovement.create({data:{id:randomUUID(),materialId,type:input.kind,receiptKind:input.kind==='INCOME'?(paidReceipt?'PAID':'INVENTORY'):null,quantity,unitPrice:averagePrice({quantity:'1',value:result.cost}),totalByn:result.money,productId:product?.id,projectMaterialId:line?.id,comment:input.comment?.trim()||null,createdById:actor.id}});
- await tx.warehouseMovementValuation.create({data:{id:randomUUID(),movementId:movement.id,sourceMovementId:input.sourceMovementId??null,runId:state.runId,clientMutationId,requestFingerprint:fingerprint,actorId:actor.id,quantity,unitCost:result.cost,valueByn:result.value,moneyByn:result.money}});
+ await tx.warehouseMovementValuation.create({data:{id:randomUUID(),movementId:movement.id,sourceMovementId:input.sourceMovementId??null,runId:state.runId,clientMutationId,requestFingerprint:fingerprint,actorId:actor.id,quantity,unitCost:result.cost,valueByn:result.value,moneyByn:result.money,accountingRevision:(balance?.revision??0)+1}});
  await tx.warehouseBalance.upsert({where:{materialId},create:{materialId,runId:state.runId,quantity:result.position.quantity,valueByn:result.position.value,revision:1},update:{quantity:result.position.quantity,valueByn:result.position.value,revision:{increment:1}}});
  await tx.$executeRaw`UPDATE "Material" SET "purchasePrice"=CAST(${averagePrice(result.position)} AS numeric) WHERE id=${materialId}`;
  if(line)await tx.projectMaterial.update({where:{id:line.id},data:{issuedQty:input.kind==='EXPENSE'?{increment:quantity}:{decrement:quantity}}});

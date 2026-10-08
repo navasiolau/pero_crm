@@ -1,4 +1,6 @@
 import { cashMovementDelta } from "@/lib/cash-ledger";
+import {activePaymentWhere} from '@/server/payments/active-records';
+import {activeStockMovementWhere} from '@/server/warehouse/active-records';
 import { projectTotal as calculateProjectTotal } from "@/lib/product-quantity";
 import { prisma } from "@/lib/prisma";
 import { Prisma,type PrismaClient } from "@prisma/client";
@@ -24,6 +26,7 @@ export async function listCashAccounts(): Promise<CashAccountView[]> {
   const [accounts, grouped, payouts] = await Promise.all([
     prisma.cashAccount.findMany({ orderBy: { createdAt: "asc" } }),
     prisma.payment.groupBy({
+      where: activePaymentWhere,
       by: ["cashAccountId", "direction"],
       _sum: { amount: true },
     }),
@@ -109,7 +112,7 @@ export async function getProjectEconomics(
 
   const [payments, payrollEntries, stockMovements, settlements, completions] = await Promise.all([
     facts ? Promise.resolve(facts.payments) : database.payment.findMany({
-      where: { projectId },
+      where: { ...activePaymentWhere, projectId },
       select: {
         direction: true,
         bynAmount: true,
@@ -123,7 +126,7 @@ export async function getProjectEconomics(
     // Списания материалов со склада (§12): цены хранятся в BYN (totalByn),
     // привязка — к изделиям этого проекта
     facts ? Promise.resolve(facts.stockMovements) : database.stockMovement.findMany({
-      where: { product: { projectId }, type: { in: ["EXPENSE", "RETURN"] } },
+      where: { ...activeStockMovementWhere, product: { projectId }, type: { in: ["EXPENSE", "RETURN"] } },
       select: { type: true, totalByn: true },
     }),
     database.productStageSettlement.findMany({

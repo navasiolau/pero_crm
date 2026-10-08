@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import {activePaymentWhere} from '@/server/payments/active-records';
 import { Prisma } from "@prisma/client";
 import { calculateCashPayout, cashMovementDelta, isCashCurrency, parseCashAmount, type CashCurrency, type CashRates } from "@/lib/cash-ledger";
 import { requireHistoricalByn } from "@/lib/history-byn";
@@ -43,7 +44,7 @@ function normalizedInput(actor: PayoutActor, input: CashPayoutInput) {
 
 export async function readCashBalance(tx: Prisma.TransactionClient, cashAccountId: string): Promise<Prisma.Decimal> {
   const [payments, payouts] = await Promise.all([
-    tx.payment.groupBy({ by: ["direction"], where: { cashAccountId }, _sum: { amount: true } }),
+    tx.payment.groupBy({ by: ["direction"], where: { ...activePaymentWhere, cashAccountId }, _sum: { amount: true } }),
     tx.payout.aggregate({ where: { cashAccountId }, _sum: { cashAmount: true } }),
   ]);
   const paymentBalance = payments.reduce((sum, row) => sum.add(cashMovementDelta(row.direction,row._sum.amount ?? 0)), new Prisma.Decimal(0));
@@ -52,8 +53,8 @@ export async function readCashBalance(tx: Prisma.TransactionClient, cashAccountI
 
 export async function readOrgBalance(tx: Prisma.TransactionClient, _payrollRate: string, paymentBynDelta = "0.00", newPayoutBynDelta = "0.00"): Promise<Prisma.Decimal> {
   const [income, expense, payouts] = await Promise.all([
-    tx.payment.aggregate({ where: { direction: "INCOME" }, _sum: { bynAmount: true } }),
-    tx.payment.aggregate({ where: { direction: "EXPENSE" }, _sum: { bynAmount: true } }),
+    tx.payment.aggregate({ where: { ...activePaymentWhere, direction: "INCOME" }, _sum: { bynAmount: true } }),
+    tx.payment.aggregate({ where: { ...activePaymentWhere, direction: "EXPENSE" }, _sum: { bynAmount: true } }),
     tx.payout.findMany({ select: { amount: true, payrollCurrency: true, bynAmount: true } }),
   ]);
   return new Prisma.Decimal(income._sum.bynAmount ?? 0).minus(expense._sum.bynAmount ?? 0)
