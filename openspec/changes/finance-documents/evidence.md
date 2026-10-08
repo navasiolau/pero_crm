@@ -25,4 +25,10 @@
 
 ## Staging
 
-Ожидаются CI, фактический образ и runtime-проверки. Push не является приёмкой.
+- Принят SHA a24b879065c7f743bffefe07949efc5e5809b45d, обычный merge feature/97 (3ec382b).
+- [CI/CD #162](https://github.com/navasiolau/pero_crm/actions/runs/37704781362) — Success, test/build-push/build-push-bot завершены успешно. Статус подтверждён в авторизованном GitHub UI; API token реестра не давал доступа к private Actions, результат 404 не считался состоянием CI.
+- Фактический web healthy, OCI revision совпадает; image sha256:07063703789439f5933c06d84786308cb6e1d240d2e490a8c0a0e74e87073102. FinanceDocument/миграция работают в настоящем PostgreSQL.
+- Под существующим W07 workflow.lock и проверками hostname/compose/DB id/startedAt/volume/network/staging bucket выполнены настоящие HTTP multipart upload, MinIO original read, private draft/manager deny, точный повтор (один документ/audit), финансовая страница и отзыв роли.
+- До/после web image/DB/W07 идентичны. Полные digest User/Payment/File/FinanceDocument/ChangeLog MATCH; собственных QA rows и S3 objects осталось 0. Чужие данные не менялись, фоновые provider-вызовы не запускались.
+- Receipt: ignored .playwright-mcp/finance97/staging-receipt.json; проверенный bundle SHA256 c462d86b60055f4b75fbb6953dac03ff030c8b572332f823dc8191dfabad2a26.
+- Main остаётся ac394f1fc27856a5b183526152e7a6bec0dec2c6; production не изменялся. Следующие действия — #98, затем общая обязательность документа #99.
