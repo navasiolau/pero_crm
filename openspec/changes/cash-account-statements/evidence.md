@@ -14,4 +14,6 @@
 
 ## Staging
 
-Ожидается обычный merge, CI и приёмка фактического образа. Main не менялся.
+- Обычный merge `a63c08fd753120dd9ab4eef71872ecce022cc57f`, CI171 SUCCESS: https://github.com/navasiolau/pero_crm/actions/runs/37747933122. Фактическая revision совпала; образ `sha256:1d7fa1840835c30061fc7690dd41bdadd400bb08dffcd6c56613539c775a5897` healthy.
+- Native на развёрнутом окружении: closing115BYN,85USD/252 сохранённых BYN, зарплата/аванс ONCE, денежное ядро MATCH, unknown/unassigned явно обозначены. Реальные страницы BYN/NATIVE/некорректного диапазона и supplier/manager-denied/combined PASS. Исходные digest MATCH, QA0, providerMessages0.
+- Bundle `a5ff6c150e8d718da18a9b0148887a02c7ad71783c9f4cc267b16dc0614e1ce0` (50826bytes). DB container/volume/start и W07 SHA сохранены. Миграций и дампов нет, Restic не затронут. Main/production не менялись.
