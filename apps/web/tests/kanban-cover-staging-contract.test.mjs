@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {KANBAN_STAGING_ORIGIN,validateKanbanStagingHandoff,kanbanReadonlyRequest,kanbanCoverGeometryValid} from './kanban-cover-staging-browser.mjs';
+import {runInNewContext} from 'node:vm';
+import {KANBAN_STAGING_ORIGIN,validateKanbanStagingHandoff,kanbanReadonlyRequest,kanbanCoverGeometryValid,disableKanbanQaServiceWorkerApi} from './kanban-cover-staging-browser.mjs';
 
 function input(){
  const revision='a'.repeat(40),manager={id:'qa-manager',roles:['MANAGER'],sessionVersion:1};
@@ -73,4 +74,36 @@ test('cover geometry requires loaded 3:4 centered proportional filling with no g
  const metrics={width:240,height:320,loaded:true,fit:'cover',position:'50% 50%',gaps:{left:0,right:0,top:0,bottom:0}};
  assert.equal(kanbanCoverGeometryValid(metrics),true);
  for(const patch of [{height:60},{height:2400},{fit:'fill'},{fit:'contain'},{position:'0% 0%'},{loaded:false},{gaps:{...metrics.gaps,bottom:2}}])assert.equal(kanbanCoverGeometryValid({...metrics,...patch}),false);
+});
+function bootstrap(fakeNavigator){return runInNewContext('('+disableKanbanQaServiceWorkerApi.toString()+')();',{navigator:fakeNavigator});}
+
+test('unsupported SW bootstrap skips registration when the API is already absent',()=>{
+ const navigator={language:'ru-RU',userAgent:'synthetic'};bootstrap(navigator);
+ assert.equal('serviceWorker' in navigator,false);assert.equal(navigator.language,'ru-RU');
+});
+
+test('unsupported SW bootstrap removes a configurable prototype API without invoking its getter or registration',()=>{
+ let accessed=0;const prototype={};Object.defineProperty(prototype,'serviceWorker',{configurable:true,get(){accessed++;return{register(){throw Error('REGISTRATION_MUST_NOT_RUN')}};}});
+ Object.defineProperty(prototype,'language',{value:'ru-RU',configurable:false});const navigator=Object.create(prototype),before=Object.getOwnPropertyDescriptor(prototype,'language');
+ bootstrap(navigator);assert.equal('serviceWorker' in navigator,false);assert.equal(accessed,0);assert.deepEqual(Object.getOwnPropertyDescriptor(prototype,'language'),before);
+ // This is Serwist's exact unsupported-API gate, not a fake registration result.
+ let serwistBooted=false;if('serviceWorker' in navigator)serwistBooted=true;assert.equal(serwistBooted,false);
+});
+
+test('unsupported SW bootstrap removes a configurable own API and preserves unrelated descriptors',()=>{
+ const navigator={language:'ru-RU'};Object.defineProperty(navigator,'serviceWorker',{value:{register(){}},configurable:true});const before=Object.getOwnPropertyDescriptor(navigator,'language');
+ bootstrap(navigator);assert.equal('serviceWorker' in navigator,false);assert.deepEqual(Object.getOwnPropertyDescriptor(navigator,'language'),before);
+});
+
+test('unsupported SW bootstrap stops on a non-configurable prototype or own API instead of mocking it',()=>{
+ for(const onPrototype of [true,false]){
+  let accessed=0;const prototype={},navigator=Object.create(prototype),owner=onPrototype?prototype:navigator;
+  Object.defineProperty(owner,'serviceWorker',{configurable:false,get(){accessed++;return{};}});
+  assert.throws(()=>bootstrap(navigator),/K114_SW_API_DISABLE_FAILED/);assert.equal('serviceWorker' in navigator,true);assert.equal(accessed,0);
+ }
+});
+
+test('unsupported SW bootstrap fails closed if deleting a shadow leaves an inherited API visible',()=>{
+ const prototype={};Object.defineProperty(prototype,'serviceWorker',{value:{},configurable:true});const navigator=Object.create(prototype);Object.defineProperty(navigator,'serviceWorker',{value:{},configurable:true});
+ assert.throws(()=>bootstrap(navigator),/K114_SW_API_DISABLE_FAILED/);assert.equal('serviceWorker' in navigator,true);
 });
