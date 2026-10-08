@@ -22,7 +22,6 @@ import {
 } from "@/lib/roles";
 import { prisma } from "@/lib/prisma";
 import { getPluginSettings } from "@/server/plugins/run-log";
-import { getFileStageConfig } from "@/server/files/stage-config";
 import { getSlotContributions } from "@/server/plugins/slots";
 import { getProjectPricingProjection } from "@/server/projects/project-field-core";
 import { getProjectEconomics } from "@/server/finance/queries";
@@ -70,8 +69,6 @@ export default async function ProjectPage({
   // Склад (§12): вкладка «Материалы» — офисные роли (+ бухгалтер на просмотр)
   const showMaterials = hasAnyRole(role, OFFICE_ROLES);
 
-  // Группировка файлов по этапам (плагин file-stages), если включён.
-  const stageConfig = await getFileStageConfig();
   const stockExpenses = showFinance ? await loadProjectStockExpenses(session.user, project.id, prisma) : [];
 
   const [clients, managers, engineers, workers, contributions, priceItems, economics, cashAccounts, expenseArticles, materialsGroups] =
@@ -290,11 +287,10 @@ export default async function ProjectPage({
         <TabsContent value="files" className="mt-4">
           <FilesTab
             projectId={project.id}
-            files={project.files.map((file) => ({
+            files={project.files.filter(file => file.id !== project.coverFileId).map((file) => ({
               id: file.id,
               fileName: file.fileName,
-              category: file.category,
-              stage: file.stage,
+              section: file.section,
               mimeType: file.mimeType,
               size: file.size,
               hasThumb: file.hasThumb,
@@ -305,8 +301,6 @@ export default async function ProjectPage({
             }))}
             canEdit={canEditTech}
             flatProject
-            stagesEnabled={stageConfig.enabled}
-            stageExtensions={stageConfig.extensions}
           />
         </TabsContent>
 

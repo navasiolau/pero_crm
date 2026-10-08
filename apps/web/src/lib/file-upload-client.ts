@@ -23,7 +23,7 @@ export function createUploadAttempt(form:FormData,clientMutationId?:string):Uplo
  const existing=form.get("clientMutationId");const id=clientMutationId??(typeof existing==="string"?existing:createRequestId());if(!UUID.test(id))throw Error("Некорректный идентификатор загрузки");form.set("clientMutationId",id);return {form,clientMutationId:id};
 }
 export function uploadAttemptMatchesContext(attempt:UploadAttempt,fields:Record<string,string|undefined>) {
- const keys=["projectId","productId","taskId","category","stage","assignCover","expectedSketchFileId"];
+ const keys=["projectId","productId","taskId","section","assignCover","expectedSketchFileId"];
  return keys.every(key=>(attempt.form.get(key)??undefined)===fields[key]);
 }
 export function localUploadFailure(message:string,phase:UploadPhase="validation",clientMutationId=createRequestId(),commitState:UploadCommitState="notCommitted",httpStatus?:number,requestId=clientMutationId):UploadFailure {

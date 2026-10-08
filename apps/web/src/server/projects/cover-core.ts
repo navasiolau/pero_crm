@@ -40,15 +40,16 @@ export async function authorizeProjectCoverUpload(tx:Tx,actor:Actor,input:Projec
  return{ok:true as const,project,replayHint:false};
 }
 export async function persistProjectCoverUpload(tx:Tx,actor:Actor,input:ProjectCoverUpload,file:UploadFile):Promise<ProjectCoverResult>{
+ if(['category','stage','caption'].some(key=>Object.hasOwn(file,key)))return fail('validation','Обновите форму: метаданные файлов больше не используются');
  if(!projectCoverUploadSchema.safeParse(input).success||!isCoverImageMime(file.mimeType)||!file.contentHash)return fail('validation','Нужно изображение поддерживаемого формата');
  await tx.$queryRaw`SELECT id FROM "Project" WHERE id=${input.projectId} FOR UPDATE`;
  const project=await permission(tx,actor,input.projectId);if(!project)return fail('forbidden','Недостаточно прав');
  const fingerprint=digest({operation:'upload',...input,fileName:file.fileName,mimeType:file.mimeType,size:file.size,contentHash:file.contentHash});
  const previous=await replay(tx,actor,input.projectId,input.clientMutationId,fingerprint,project.coverFileId);if(previous)return previous;
  if(project.coverFileId!==null)return fail('conflict','Обложка проекта уже изменена',project.coverFileId);
- const row=await tx.file.create({data:{projectId:input.projectId,productId:null,taskId:null,category:'PHOTO',fileName:file.fileName,storedName:file.storedName,mimeType:file.mimeType,size:file.size,hasThumb:file.hasThumb,uploadedById:actor.id}});
+ const row=await tx.file.create({data:{projectId:input.projectId,productId:null,taskId:null,section:'GENERAL',fileName:file.fileName,storedName:file.storedName,mimeType:file.mimeType,size:file.size,hasThumb:file.hasThumb,uploadedById:actor.id}});
  if((await tx.project.updateMany({where:{id:input.projectId,coverFileId:null},data:{coverFileId:row.id}})).count!==1)throw Error('PROJECT_COVER_CAS_RACE');
- await tx.changeLog.create({data:{actorType:'user',actorId:actor.id,actorName:actor.name??undefined,entity:'file',entityId:row.id,action:'create',newValue:{project:project.number,fileName:file.fileName,category:'PHOTO'}}});
+ await tx.changeLog.create({data:{actorType:'user',actorId:actor.id,actorName:actor.name??undefined,entity:'file',entityId:row.id,action:'create',newValue:{project:project.number,fileName:file.fileName,section:'GENERAL'}}});
  await tx.changeLog.create({data:{actorType:'user',actorId:actor.id,actorName:actor.name??undefined,entity:'project',entityId:project.id,action:'cover.upload',field:'coverFileId',oldValue:{coverFileId:null},newValue:{coverFileId:row.id}}});
  const result:ProjectCoverResult={ok:true,id:row.id,coverFileId:row.id,clientMutationId:input.clientMutationId};
  await receipt(tx,actor,project.id,input.clientMutationId,fingerprint,result);return result;

@@ -24,7 +24,6 @@ const nextConfig: NextConfig = {
   transpilePackages: [
     "@pero/plugin-sdk",
     "@pero/plugin-demo",
-    "@pero/plugin-file-stages",
   ],
   ...(isWindows
     ? {}

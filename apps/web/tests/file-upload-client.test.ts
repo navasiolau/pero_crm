@@ -7,7 +7,7 @@ import {createUploadAttempt,sendFileUpload,formatUploadDiagnostics,copyUploadDia
 import {UploadErrorDetails} from "../src/components/upload-error-details";
 Object.assign(globalThis,{React});
 const cid="11111111-1111-4111-8111-111111111111";
-function attempt(){const form=new FormData();form.append("file",new File([new Uint8Array([1,2,3])],"photo.png",{type:"image/png"}));form.append("projectId","project");form.append("category","MEASUREMENT");return createUploadAttempt(form,cid);}
+function attempt(){const form=new FormData();form.append("file",new File([new Uint8Array([1,2,3])],"photo.png",{type:"image/png"}));form.append("projectId","project");form.append("section","MEASUREMENT");return createUploadAttempt(form,cid);}
 test("JSON failure preserves actual HTTP/code/requestId/phase and safe cause",async()=>{
  const result=await sendFileUpload(attempt(),{fetcher:async()=>new Response(JSON.stringify({ok:false,error:"Не удалось сохранить файл",code:"STORAGE_FAILED",requestId:"request-47",details:{phase:"storage-original",message:"Хранилище недоступно"},commitState:"notCommitted"}),{status:503})});
  assert.equal(result.ok,false);if(result.ok)return;const details=formatUploadDiagnostics(result.failure);assert.match(details,/HTTP: 503/);assert.match(details,/STORAGE_FAILED/);assert.match(details,/request-47/);assert.match(details,/storage-original/);assert.match(details,/Хранилище недоступно/);assert.equal(result.failure.commitState,"notCommitted");
@@ -21,7 +21,7 @@ test("same attempt retries original bytes/context/CID only on explicit second ca
  const fetcher:typeof fetch=async(_url,init)=>{calls++;bodies.push(init!.body as FormData);if(calls===1)throw Error("network lost Authorization: Bearer live-secret");return new Response(JSON.stringify({ok:true,id:"file",clientMutationId:cid,repeated:true}),{status:200});};
  const lost=await sendFileUpload(original,{fetcher});assert.equal(calls,1);assert.equal(lost.ok,false);if(!lost.ok){assert.equal(lost.failure.commitState,"unknown");assert.doesNotMatch(formatUploadDiagnostics(lost.failure),/live-secret/);}
  const repeated=await sendFileUpload(original,{fetcher});assert.equal(repeated.ok,true);assert.equal(calls,2);assert.equal(bodies[0],bodies[1]);assert.equal(bodies[1].get("clientMutationId"),cid);assert.equal(bodies[1].get("projectId"),"project");assert.deepEqual(new Uint8Array(await (bodies[1].get("file") as File).arrayBuffer()),new Uint8Array([1,2,3]));
- assert.equal(uploadAttemptMatchesContext(original,{projectId:"project",category:"MEASUREMENT"}),true);assert.equal(uploadAttemptMatchesContext(original,{projectId:"other",category:"MEASUREMENT"}),false);assert.equal(uploadAttemptMatchesContext(original,{projectId:"project",category:"DOCUMENT"}),false);
+ assert.equal(uploadAttemptMatchesContext(original,{projectId:"project",section:"MEASUREMENT"}),true);assert.equal(uploadAttemptMatchesContext(original,{projectId:"other",section:"MEASUREMENT"}),false);assert.equal(uploadAttemptMatchesContext(original,{projectId:"project",section:"INSTALLATION"}),false);
 });
 test("timeout abort is explicit unknown and JSON validation/conflict preserve definite semantics",async()=>{
  const result=await sendFileUpload(attempt(),{timeoutMs:5,fetcher:async(_url,init)=>new Promise((_resolve,reject)=>init!.signal!.addEventListener("abort",()=>reject(Object.assign(Error("aborted"),{name:"AbortError"}))))});assert.equal(result.ok,false);if(!result.ok){assert.equal(result.failure.code,"UPLOAD_TIMEOUT");assert.equal(result.failure.commitState,"unknown");}

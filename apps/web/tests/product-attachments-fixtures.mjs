@@ -43,8 +43,8 @@ const scalarEqual=(field,a,b)=>canonical(field==='expectedPrice'?moneyText(a):a)
 const databaseScalarEqual=(field,actual,expected)=>scalarEqual(field,field==='expectedPrice'&&Prisma.Decimal.isDecimal(actual)?actual.toString():actual,expected);
 function approvedCoverMetadata(cp,file,cover){
  const exact=file.id===cover.fileId&&file.projectId===cp.ids.project&&file.productId===cover.productId&&file.taskId===null&&file.uploadedById===cover.actorId;
- const photo=file.category==='PHOTO'&&file.mimeType.startsWith('image/');
- const measured=file.category==='MEASUREMENT'&&cover.productId===cp.ids.productB&&file.mimeType==='image/png'&&file.stage==='INSTALLATION';
+ const photo=file.section==='PRODUCTION'&&file.mimeType.startsWith('image/');
+ const measured=file.section==='MEASUREMENT'&&cover.productId===cp.ids.productB&&file.mimeType==='image/png';
  return exact&&(photo||measured);
 }
 const entityId=value=>uuid(value)||(typeof value==='string'&&/^c[a-z0-9]{24}$/.test(value));
