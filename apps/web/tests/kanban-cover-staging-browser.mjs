@@ -13,6 +13,20 @@ const number=value=>typeof value==='string'&&/^[A-Za-z0-9_.-]{1,128}$/.test(valu
 const sameRoles=(a,b)=>Array.isArray(a)&&Array.isArray(b)&&a.length>0&&[...a].sort().join('|')===[...b].sort().join('|');
 function requireThat(ok,code){if(!ok)throw Error(code);}
 
+/** Run before app boot: an unsupported API lets Serwist skip registration instead of consuming Playwright's void stub. */
+export function disableKanbanQaServiceWorkerApi(){
+ let owner=navigator;
+ while(owner){
+  const descriptor=Object.getOwnPropertyDescriptor(owner,'serviceWorker');
+  if(descriptor){
+   if(!descriptor.configurable||!Reflect.deleteProperty(owner,'serviceWorker'))throw Error('K114_SW_API_DISABLE_FAILED');
+   break;
+  }
+  owner=Object.getPrototypeOf(owner);
+ }
+ if('serviceWorker' in navigator)throw Error('K114_SW_API_DISABLE_FAILED');
+}
+
 /** The existing 112 stage bridge verifies the checkpoint HMAC and physical target before returning this private handoff. */
 export function validateKanbanStagingHandoff(input={}){
  const {authorized,origin,expectedRevision,identity,checkpoint,profile,ownedPaths,currentSketchFileId}=input;
@@ -84,13 +98,14 @@ export async function runKanbanCoverStagingBrowser(input={}){
  await mkdir(directory,{recursive:false,mode:0o700});
  const actual=await realpath(directory),relative=path.relative(base,actual);
  requireThat(relative&&!relative.startsWith('..')&&!path.isAbsolute(relative),'K114_EVIDENCE_PATH_MISMATCH');
- const receipt={status:'STARTED',revision:binding.expectedRevision,revisionProof:'caller reviewed physical qaTransport identity; health checked separately',origin:binding.origin,runId:binding.runId,mode:'GET/HEAD only; existing project numeric geometry is not pixel proof',checks:[],projectGeometry:[],blockedNonReads:0,blockedPrefetches:0,deniedReads:0,upstreamNonReadResponses:0,screenshots:[],pageErrorCount:0};
+ const receipt={status:'STARTED',revision:binding.expectedRevision,revisionProof:'caller reviewed physical qaTransport identity; health checked separately',origin:binding.origin,runId:binding.runId,mode:'GET/HEAD only; unsupported SW API in isolated QA; existing project numeric geometry is not pixel proof',checks:[],projectGeometry:[],blockedNonReads:0,blockedPrefetches:0,deniedReads:0,upstreamNonReadResponses:0,screenshots:[],pageErrorCount:0};
  let browser,phase='browser-setup',context;
  async function persist(){await writeFile(path.join(directory,'receipt.json'),JSON.stringify(receipt,null,2),{mode:0o600});}
  try{
   browser=await chromium.launch({headless:true,channel:'chromium'});
   for(const viewport of VIEWPORTS){
    context=await browser.newContext({viewport,locale:'ru-RU',timezoneId:'Europe/Moscow',serviceWorkers:'block',ignoreHTTPSErrors:false,...(input.basicAuth?{httpCredentials:input.basicAuth}:{})});
+   await context.addInitScript(disableKanbanQaServiceWorkerApi);
    await context.route('**/*',async route=>{
     const request=route.request(),decision=kanbanReadonlyRequest({url:request.url(),method:request.method(),prefetch:Boolean(request.headers()['next-router-prefetch']||request.headers().purpose==='prefetch')},binding);
     if(decision.kind==='continue'){await route.continue();return;}
@@ -105,7 +120,11 @@ export async function runKanbanCoverStagingBrowser(input={}){
    const sessionResponse=await context.request.get(`${binding.origin}/api/auth/session`,{maxRedirects:0});requireThat(sessionResponse.status()===200,'K114_SESSION_HTTP_FAILED');
    const session=await sessionResponse.json();requireThat(session.user?.id===binding.managerId&&sameRoles(session.user.roles,binding.roles),'K114_CURRENT_SESSION_MISMATCH');
    const page=await context.newPage();page.on('pageerror',()=>receipt.pageErrorCount++);
-   async function goto(route){const response=await page.goto(`${binding.origin}${route}`,{waitUntil:'domcontentloaded'});requireThat(response?.status()===200&&new URL(page.url()).origin===binding.origin,'K114_NAVIGATION_FAILED');}
+   async function goto(route){
+    const response=await page.goto(`${binding.origin}${route}`,{waitUntil:'domcontentloaded'});requireThat(response?.status()===200&&new URL(page.url()).origin===binding.origin,'K114_NAVIGATION_FAILED');
+    const sw=await page.evaluate(()=>({apiAbsent:!('serviceWorker' in navigator),serwistAbsent:typeof window.serwist==='undefined'}));
+    requireThat(sw.apiAbsent&&sw.serwistAbsent&&context.serviceWorkers().length===0,'K114_SW_API_DISABLE_FAILED');
+   }
    async function ownCardProof(label){
     const card=page.locator('[data-slot="product-kanban-card"]').filter({has:page.getByText(binding.productNumber,{exact:true})});await expect(card).toHaveCount(1);
     const frame=card.locator('[data-slot="product-kanban-image"]'),img=frame.locator('img');await img.scrollIntoViewIfNeeded();await expect.poll(()=>img.evaluate(node=>node.complete&&node.naturalWidth>0)).toBe(true);
