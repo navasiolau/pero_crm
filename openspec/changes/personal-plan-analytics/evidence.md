@@ -14,4 +14,10 @@
 
 ## Staging
 
-Ожидаются обычный merge, CI, фактический web/bot runtime и регрессия пакета. Main/production не менялись.
+- Принят обычный merge `ead7ac36acc8f64db79a74e5b198a859a31d5cb6`, CI174 SUCCESS: https://github.com/navasiolau/pero_crm/actions/runs/37753426784. Фактическая revision совпала; web `sha256:2d0ce6fe812fe01d0cb0da1a3325f10161d240c55f6dccfb2baa35327d3dcf18` healthy.
+- Native108 и реальные SSR analytics/invalid/empty/calendar-link/privacy PASS:210/105 минут,3 выполненные, дни165/45, MSK и позднее завершение; исходные digest MATCH, QA0.
+- Финальная регрессия пересобрана из принятого кода108: project/general Payment с обязательным документом/receipt, единый project ledger60−20−40 и неизменная цена, inventory без кассы, paid BYN60/USD21.99/BYN65.99, shortage/last-write rollback, настоящий ACTIVE/конкурентные закупки/выдачи/возвраты, план после прямой выдачи и cash report115/85/252 PASS. Исходные digest MATCH, QA0, providerMessages0.
+- Настоящие web multipart/S3 bytes/private draft/роль/повтор/просмотр/отзыв роли и bot multipart/bearer/scope/role/audit/mandatory document PASS. Точные собственные объекты удалены; QA objects0/rows0, исходные digest MATCH.
+- Bundles: analytics `95019a2fedc1d1570ab427bfadf881be05d2cb85ec3ccf7f369e6dced3d38bd4`; native regression `24900e3bc3f939ba4e35a3a9d92159f8f167f65ebc815c07f4e5be59ff55ea8d`; web documents `90502486d4bdd50cbba682b404c58ec0c8b93fc3291df4c49d9102a7ab28a2d5`; bot documents `72928d525afdfbabb5cab63274e3bb882cea9d14780a3a3b703b3f2e40b60a39`.
+- Обновлён только существующий `telegram-bot-staging/bot-staging` до immutable image `sha256:12ac4b693e0d9a26d151f5d601b646b61353bf4b224522de1b55359a043f2685`, OCI revision совпала с web. Healthy. Compose/env hashes MATCH, другие контейнеры ID unchanged; конфиги/watcher/cron не менялись. На фактическом dist контейнера выполнены14 проверок finance/paid-stock/direct-stock/documents PASS, отдельные процессы с синтетическим env и подменённым транспортом, providerMessages0. Это не заявляется ручной Telegram-приёмкой владельца.
+- Инструкция владельцу: `docs/FINANCE_WAREHOUSE_PLAN_97_108_STAGING.md`. Архитектурная сверка: verification.md. DB container/volume/start, W07 и штатный refresh сохранены. Main остаётся `ac394f1fc27856a5b183526152e7a6bec0dec2c6`; production не выпускался, дампов нет, Restic не затронут.
