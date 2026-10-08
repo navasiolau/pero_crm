@@ -20,4 +20,8 @@
 
 ## Staging
 
-Ожидаются merge, CI, фактическая ревизия и runtime-приёмка. Main не выпускался.
+- Обычный merge: `b637c40dcc1e13409ac544f88c84eb076782b406`. CI169 SUCCESS: https://github.com/navasiolau/pero_crm/actions/runs/37729181655. Фактически работающий здоровый образ `sha256:f6bb3119b7112668a9ccfb1222e1758092fdb0d5d63fd6e0c642202049ea8880`, revision совпала.
+- Первая попытка выявила отсутствующее постоянное warehouse state (процедура №94 оставила staging неактивным). Она остановилась до committed QA. Ранее в №102 ACTIVE создавался только в rollback-фикстуре; это не означало постоянную активацию склада.
+- После отдельного прямого разрешения владельца выполнен нулевой запуск ТОЛЬКО staging: run `fa9eb8a3-9e8d-4e3f-9f4a-bc6586c829eb`, 2119 позиций с нулевыми остатками, 2085 ненулевых учётных цен обнулены. Старые движения, проекты и деньги MATCH. Официальные freeze/activate и эксклюзивные денежный/складской locks; backup/proof NULL, production recovery proof не заявляется. Локальная репетиция полностью откатилась. Receipt bundle `936c55c921281bcb5e9dac4cd0b4f43a4f1c6e923a8ef9c6614e699bda982278`.
+- Повторная приёмка на настоящем ACTIVE: native BYN60/USD21.99/BYN65.99, недостаток денег, сбой последней записи, повтор, document exemption и server/FK delete guard PASS. Две настоящие конкурентные транзакции: один дубль и один победитель при конкуренции за деньги. Настоящий HTTP проверил quote, bearer/scope/role и отклонённые записи. Исходные данные MATCH, QA0, providerMessages0.
+- Runtime bundle `bb2fc91c46498a336cf98ea9ca8a1b62a654772455246da6ae04f46b7f264c47` (129635bytes). DB container `27b8f7342b9d722ab8788e137b37b03a3037442da038c5b8b98dbb30245b8b6a`, volume `crm-staging_pgdata`, W07 SHA `27e3bcd727d9e83170c76a254806fde42590da76cea30c9e1441d873df680139` сохранены. Ночной refresh не менялся. Дампов нет, Restic не затронут. Main/production не выпускались.
