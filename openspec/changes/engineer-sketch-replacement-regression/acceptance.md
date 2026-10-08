@@ -43,3 +43,38 @@ node apps/web/tests/engineer-sketch-stage-runner.mjs capture <same-full-sha> <sa
 Capture разрешён после failed runtime только после подтверждения, что upstream requests завершены. Непредвиденный own key, чужая связь, changed original hash или неизвестный исход запрещают cleanup. Нельзя ослаблять guard ради завершения.
 
 113 позже удаляет category API/схему; если root меняет порядок интеграции, он обязан обновить поле multipart harness под принятый113 контракт и повторить проверки. Functional repeated-compensation/notify guards112 сохраняются при обычном merge.
+
+## Module preflight before a new run
+
+Standalone runtime не обязан экспортировать все packages, доступные Next-сборке. JWT/Auth.js теперь включён только в QA-bundle; Prisma/S3/sharp остаются existing deployed modules. Родительский transport/target guard не изменён. Перед fresh prepare root проверяет новый65KB bundle через operation `readonly`, установив `CRM_TASK112_DEPENDENCY_PROBE=1` только в временном Node-процессе. Вывод обязан быть `QA_BUNDLE_PREFLIGHT_PASS`, `cryptoRoundTrip:true`, `dbInstantiated:false`, `s3Instantiated:false`. Это проверка загрузки/dummy crypto, а не инженерная/S3 приёмка.
+
+Failed run845 `intent-prepare.json` сохранить. Его0-fixture marker state физически подтверждён readonly. Новый UUID разрешает новый prepare только после root review этого QA-only packaging fix и exact-image preflight; не использовать old intent, не ослаблять runtime/target guards и не выполнять blanket cleanup.
+
+## PARTIAL run AE recovery
+
+Actual runtime `ae9ce4bb-b574-400b-8fff-30c22f9eec58` остановился на первом original fingerprint capture после двух успешных upload ACK. На стадии остались3 QA-актора,1 клиент/проект/изделие/config/participant,2 files,6 audits/receipts и9 точных Notification. Schema и все original tables кроме OrgSetting совпали. OrgSetting сохранил count2, но общий hash изменился; setter `POST /api/v1/bot/register` меняет value и служебный updatedAt, bot вызывает его при старте и каждые6ч. Старый checkpoint не содержит per-row valueHash, поэтому неизменность старого value не доказана. Это PARTIAL/STOP, не runtime PASS.
+
+Recovery имеет отдельные режимы, только для AE и двух конкретных file IDs; обычные capture/cleanup сохраняют строгую исходную проверку. Root явно принимает сохранение нынешних ОБЕИХ OrgSetting rows по конкретному count/hash, не исправляет или переписывает исходный checkpoint. `partial-capture` работает в RepeatableRead READ ONLY, снова проверяет все остальные исходные таблицы/schema, precise own file graph и full original S3 metadata, затем подписывает текущие QA rows/versions и полные OrgSetting rows. Неизвестный key/version, другие original changes или changed OrgSetting fingerprint останавливают процесс.
+
+`partial-cleanup` требует HMAC/current graph+version CAS, берёт FOR UPDATE только двух известных OrgSetting ключей и НЕ выполняет в них create/update/upsert/delete. Под блокировкой сверяет current captured rows, удаляет только signed own S3 versions/delete markers и собственные9 модельных областей транзакционно; сравнивает все остальные original rows/schema с old baseline, OrgSetting с нынешним signed capture. Следующее внешнее изменение после COMMIT отражается отдельно, не затирается. Итог всегда `runtimePass:false`, `fullOriginalMatch:false`, PARTIAL_CLEANED; это завершённая утилизация QA, а не функциональная приёмка.
+
+Root перед исполнением читает актуальный `partial-policy.json`, со сверенными2 file IDs и нынешним OrgSetting count/hash. Подготовленные команды из112 worktree после независимого review:
+
+```powershell
+node apps/web/tests/engineer-sketch-stage-runner.mjs partial-capture 8f48aafc39e7db98be03421df20bc2b5466ae978 ae9ce4bb-b574-400b-8fff-30c22f9eec58 "C:\Users\admin\.codex\worktrees\crm-task-112\pero_crm_v2\.playwright-mcp\task112-stage-8f48\qa-ae9ce4bb-b574-400b-8fff-30c22f9eec58" --authorized
+node apps/web/tests/engineer-sketch-stage-runner.mjs partial-cleanup 8f48aafc39e7db98be03421df20bc2b5466ae978 ae9ce4bb-b574-400b-8fff-30c22f9eec58 "C:\Users\admin\.codex\worktrees\crm-task-112\pero_crm_v2\.playwright-mcp\task112-stage-8f48\qa-ae9ce4bb-b574-400b-8fff-30c22f9eec58" --authorized
+```
+
+Intent prepare/runtime сохраняются; повтор uploads или обычный capture/cleanup для AE не выполняются. Субагент recovery не исполнял. Для fresh run требуется отдельное BEFORE evidence значения/служебной даты telegram.botUsername и остальных OrgSetting rows; без него нельзя объявлять timestamp-only drift.
+
+## Fresh signed operational evidence
+
+В новой подготовке ДО HTTP-запросов, в томже Serializable snapshot, HMAC-checkpoint сохраняет только для `telegram.botUsername` exact key/valueHash/hash всех недатовых полей/updatedAt, total count и hash всех прочих полных OrgSetting rows. Старые checkpoints не получают эти данные задним числом и сохраняют строгий original fingerprint guard.
+
+Если raw OrgSetting hash затем отличается, допускается только при прежнем valueHash/всех прочих полях/key/count, неизменном hash остальных OrgSetting rows и монотонном обновлении даты; schema и все прочие original table hashes остаются точными. В evidence это `MATCH_EXCEPT_VERIFIED_BOT_REGISTRATION_TIMESTAMP`, а не raw full match. Новое значение username, новая/удалённая строка, другой ключ, любые чужие поля/настройки или отсутствие BEFORE-proof вызывают STOP.
+
+Normal cleanup включает signed whole-state CAS и блокировку ровно известного bot key на время собственных S3/data deletes, проверяет исходные прочие данные и verifiedclock policy до/после. Следующее изменение после COMMIT отражается отдельно. AE partial-records уже очищены; новыеfresh prepare/runtime/cleanup требуют новогоUUID, отсутствующего dependency-probe flag и root/reviewer review пакета72307B. Субагент их не запускает.
+
+Consistent snapshot refinement: normalcapture reads own graph, original whole-table fingerprints and current OrgSetting evidence in SAME RepeatableRead READ ONLY transaction. Postcommit verification uses the same readonly boundary. Insideprepare/cleanup the existingSerializable transaction is reused; nested transactions are not opened. This prevents pairing different database versions into MATCH or timestamp-only claims. Fresh bundle72643B SHA `efe9c15cec172fddef2a65a0dc25e714c3cfc6fad08238806b8eea070564c97b` supersedes unreleased72307B; nativefresh execution waits for root/reviewerACK.
+
+Fresh8c failed at participantreplacement and was safely cleaned through strictnormal mode with fulloriginal/storageMATCH. Do not rerun that runtime/UUID. Actualreadonlycore reproduced DESIGNparticipant fileinvisibility; next deployment must include the narrow assignedread repair before fresh fullacceptance. Initial runtimeACK helper did not retain failing requestId/body; do not invent them or equate mapped404 with capturedHTTP. Exactown manager→assigned, replay and refusals were reached; legacy/concurrency were not reached, and full PASS remains pending.
