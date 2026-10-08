@@ -186,7 +186,19 @@ export function DataTable<TRow extends { id: string }>({
               ])}
             </select>
           </label>
-          {pageRows.map((row) => <article key={row.id} data-slot="mobile-list-card" className={cn("rounded-xl border p-4", rowClassName?.(row))}>{renderMobileCard(row)}</article>)}
+          {pageRows.map((row) => <article key={row.id} data-slot="mobile-list-card"
+            tabIndex={onRowClick ? 0 : undefined}
+            className={cn("rounded-xl border p-4", onRowClick && "cursor-pointer focus-visible:outline-ring", rowClassName?.(row))}
+            onClick={event => {
+              // Ссылки и кнопки внутри карточки сохраняют собственное действие.
+              if (event.target instanceof Element && event.target.closest("a,button,input,select,textarea,[role='button']")) return;
+              onRowClick?.(row);
+            }}
+            onKeyDown={event => {
+              if (onRowClick && event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) {
+                event.preventDefault(); onRowClick(row);
+              }
+            }}>{renderMobileCard(row)}</article>)}
           {pageRows.length === 0 && <p className="py-8 text-center text-sm text-muted-foreground">{emptyText}</p>}
         </div>
       ) : null}

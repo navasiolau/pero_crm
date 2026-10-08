@@ -39,10 +39,11 @@ type Dialog =
       direction: "INCOME" | "EXPENSE";
       step: "project" | "amount" | "currency" | "cash" | "article" | "comment" | "document" | "confirm";
       clientMutationId: string;
+      projectSelected: boolean;
       reportDocument?: { id: string; fileName: string; mimeType: string };
       documentAttempt?: { key: string; clientMutationId: string; attachment: TelegramDocument };
       busy?: boolean;
-      projectId?: string;
+      projectId?: string | null;
       projectNumber?: string;
       projectCurrency?: string;
       amount?: number;
@@ -83,7 +84,7 @@ const dialogs = new Map<string, Dialog>();
 const sessionCache = new Map<string, Session & { at: number }>();
 const noticeAt = new Map<string, number>();
 const SESSION_TTL_MS = 60_000;
-const FINANCE_CALLBACK_ACTIONS = new Set(["payin", "payout", "payproj", "cur", "cash", "art", "nocomment", "payok", "docretry"]);
+const FINANCE_CALLBACK_ACTIONS = new Set(["payin", "payout", "payproj", "paygeneral", "cur", "cash", "art", "nocomment", "payok", "docretry"]);
 
 function getDialog(chatId: number): Dialog | undefined {
   return dialogs.get(String(chatId));
@@ -455,6 +456,7 @@ async function startPayment(
     direction,
     step: "project",
     clientMutationId: randomUUID(),
+    projectSelected: false,
   };
   const label = direction === "INCOME" ? "Приход" : "Расход";
   // /расход 205 4000 — номер и сумму можно указать сразу
@@ -465,6 +467,7 @@ async function startPayment(
       return;
     }
     dialog.projectId = project.id;
+    dialog.projectSelected = true;
     dialog.projectNumber = project.number;
     dialog.projectCurrency = project.currency;
   }
@@ -483,15 +486,20 @@ async function startPayment(
   if (dialog.projectId) {
     dialog.step = "amount";
     setDialog(chatId, dialog);
-    await reply(chatId, `${label} · П-${dialog.projectNumber}. Сумма:`, [
+    await reply(chatId, `${label} · ${paymentContext(dialog)}. Сумма:`, [
       [CANCEL_BUTTON],
     ]);
     return;
   }
   setDialog(chatId, dialog);
-  await reply(chatId, `${label}. 1 — укажите проект (номер или название):`, [
+  await reply(chatId, `${label}. Укажите проект (номер или название) либо выберите общий ${label.toLowerCase()}:`, [
+    [{ text: "Без проекта", callback_data: `paygeneral:${dialog.clientMutationId}` }],
     [CANCEL_BUTTON],
   ]);
+}
+
+function paymentContext(dialog: Extract<Dialog, { kind: "payment" }>): string {
+  return dialog.projectId ? `П-${dialog.projectNumber}` : "Организация";
 }
 
 async function paymentText(
@@ -507,6 +515,7 @@ async function paymentText(
       return;
     }
     dialog.projectId = found.id;
+    dialog.projectSelected = true;
     dialog.projectNumber = found.number;
     dialog.projectCurrency = found.currency;
     await nextPaymentStep(chatId, session, dialog, false);
@@ -577,7 +586,7 @@ async function nextPaymentStep(
   if (!dialog.amount) {
     dialog.step = "amount";
     setDialog(chatId, dialog);
-    await reply(chatId, `${label} · П-${dialog.projectNumber}. Сумма:`, [
+    await reply(chatId, `${label} · ${paymentContext(dialog)}. Сумма:`, [
       [CANCEL_BUTTON],
     ]);
     return;
@@ -588,7 +597,7 @@ async function nextPaymentStep(
   const currency = dialog.projectCurrency ?? "BYN";
   await reply(
     chatId,
-    `${label} · П-${dialog.projectNumber} · ${formatMoney(dialog.amount, currency)}\nВалюта операции:`,
+    `${label} · ${paymentContext(dialog)} · ${formatMoney(dialog.amount, currency)}\nВалюта операции:`,
     [
       [
         { text: `✅ ${currency}`, callback_data: `cur:${currency}` },
@@ -614,7 +623,7 @@ async function confirmPayment(
   const label = dialog.direction === "INCOME" ? "Приход" : "Расход";
   const lines = [
     `❗ Подтвердите: ${label}`,
-    `Проект: П-${dialog.projectNumber}`,
+    dialog.projectId ? `Проект: П-${dialog.projectNumber}` : `Контекст: общий ${label.toLowerCase()} организации`,
     `Сумма: ${formatMoney(dialog.amount ?? 0, dialog.currency ?? "BYN")}`,
     `Касса: ${dialog.cashLabel ?? "—"}`,
   ];
@@ -975,6 +984,7 @@ async function dispatchCallback(
       direction: action === "payin" ? "INCOME" : "EXPENSE",
       step: "amount",
       clientMutationId: randomUUID(),
+      projectSelected: true,
       projectId: card.project.id,
       projectNumber: card.project.number,
       projectCurrency: card.project.currency,
@@ -984,6 +994,14 @@ async function dispatchCallback(
       [CANCEL_BUTTON],
     ]);
     return;
+  }
+  if (action === "paygeneral") {
+    const dialog = getDialog(chatId);
+    if (dialog?.kind !== "payment" || dialog.step !== "project" || rest[0] !== dialog.clientMutationId) {
+      await reply(chatId, "Сессия устарела — начните оформление заново"); return;
+    }
+    dialog.projectSelected = true; dialog.projectId = null; dialog.projectNumber = undefined; dialog.projectCurrency = "BYN";
+    await nextPaymentStep(chatId, session, dialog, false); return;
   }
   if (action === "payproj") {
     const dialog = getDialog(chatId);
@@ -997,6 +1015,7 @@ async function dispatchCallback(
       return;
     }
     dialog.projectId = project.project.id;
+    dialog.projectSelected = true;
     dialog.projectNumber = project.project.number;
     dialog.projectCurrency = project.project.currency;
     await nextPaymentStep(chatId, session, dialog, false);
@@ -1093,7 +1112,7 @@ async function dispatchCallback(
   if (action === "payok") {
     const dialog = getDialog(chatId);
     if (dialog?.kind !== "payment" || dialog.step !== "confirm" || rest[0] !== dialog.clientMutationId ||
-        !dialog.projectId || !dialog.amount || !dialog.currency || !dialog.cashAccountId ||
+        !dialog.projectSelected || !dialog.amount || !dialog.currency || !dialog.cashAccountId ||
         (dialog.direction === "EXPENSE" && !dialog.reportDocument)) {
       await reply(chatId, "Сессия устарела — начните заново");
       return;
@@ -1103,7 +1122,7 @@ async function dispatchCallback(
     try {
     const result = await crm.createPayment(session.userId, {
       clientMutationId: dialog.clientMutationId,
-      projectId: dialog.projectId,
+      projectId: dialog.projectId ?? null,
       direction: dialog.direction,
       amount: dialog.amount,
       currency: dialog.currency,
@@ -1117,7 +1136,7 @@ async function dispatchCallback(
     await reply(
       chatId,
       result.ok
-        ? `✅ ${label} ${formatMoney(dialog.amount, dialog.currency)} · П-${dialog.projectNumber} — записано`
+        ? `✅ ${label} ${formatMoney(dialog.amount, dialog.currency)} · ${paymentContext(dialog)} — записано`
         : `❌ ${result.error}. Данные сохранены — повторите подтверждение или отмените операцию.`,
     );
     } catch (error) {

@@ -23,7 +23,7 @@ globalThis.fetch=async(input,options={})=>{
   if(!uploads.has(body.clientMutationId))uploads.set(body.clientMutationId,{id:randomUUID(),fileName:body.fileName,mimeType:body.mimeType});
   result={ok:true,document:uploads.get(body.clientMutationId)};if(loseUpload){loseUpload=false;throw Error('lost upload ACK');}
  }else if(url.pathname==='/api/v1/bot/payments'){
-  assert.ok(body.reportDocumentId);assert.ok(body.clientMutationId);
+  if(body.direction==='EXPENSE')assert.ok(body.reportDocumentId);else assert.equal(body.expenseArticleId,undefined);assert.ok(body.clientMutationId);
   if(!payments.has(body.clientMutationId))payments.set(body.clientMutationId,body);
   result={ok:true};if(losePayment){losePayment=false;throw Error('lost payment ACK');}
  }else throw Error('Unexpected fixture URL');
@@ -76,4 +76,21 @@ test('pure manager, role revocation and group documents never reach the file pro
  await begin(8804);roles.set('8804',['MANAGER']);await handleUpdate(message(8804,null,file));
  await handleUpdate(message(-100,null,{...file,from:{id:8801}}));
  assert.equal(calls.filter(row=>row.path.endsWith('/getFile')).length,before);
+});
+
+test('explicit organization context supports income and documented expense without a project',async()=>{
+ for(const [chat,direction] of [[8810,'INCOME'],[8811,'EXPENSE']]){
+  await handleUpdate(message(chat,direction==='INCOME'?'/приход':'/расход'));
+  const choice=latestButton(chat,'paygeneral:');assert.ok(choice);
+  await handleUpdate(callback(chat,'paygeneral:'+randomUUID()));
+  await handleUpdate(callback(chat,choice));await handleUpdate(message(chat,'100'));
+  await handleUpdate(callback(chat,'cur:BYN'));await handleUpdate(callback(chat,'cash:cash'));
+  if(direction==='EXPENSE')await handleUpdate(callback(chat,'art:article'));
+  await handleUpdate(message(chat,'Общая операция'));
+  if(direction==='EXPENSE')await handleUpdate(message(chat,null,{document:{file_id:'general',file_unique_id:'general',file_name:'Общий расход.pdf',mime_type:'application/pdf',file_size:4}}));
+  const confirmation=latestButton(chat,'payok:');assert.ok(confirmation);
+  assert.ok(sent.at(-1).text.includes('организации'));assert.ok(!sent.at(-1).text.includes('undefined'));
+  await handleUpdate(callback(chat,confirmation));
+  const saved=payments.get(confirmation.slice(6));assert.equal(saved.projectId,null);assert.equal(saved.direction,direction);
+ }
 });

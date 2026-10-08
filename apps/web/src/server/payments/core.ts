@@ -122,7 +122,7 @@ export async function createPaymentCore(
     type: isIncome ? "payment.added" : "expense.added",
     title: `${kind} ${formatAmount(amount, data.currency)} · ${project?.number ?? "Организация"}`,
     body: data.comment?.trim() || undefined,
-    link: project ? `/finance/projects/${project.id}` : "/finance/income",
+    link: project ? `/finance/projects/${project.id}` : isIncome ? "/finance/income" : "/finance/expenses",
     exceptUserId: actor.id,
   }).catch(() => {});
 
@@ -130,6 +130,7 @@ export async function createPaymentCore(
   if (project) revalidatePath(`/finance/projects/${project.id}`);
   if (data.reportDocumentId) revalidatePath("/finance/documents");
   revalidatePath("/finance/income");
+  revalidatePath("/finance/expenses");
   revalidatePath("/finance/payroll");
   revalidatePath("/finance/accounts");
   return { ok: true };

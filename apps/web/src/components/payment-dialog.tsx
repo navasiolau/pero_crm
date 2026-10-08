@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { formatAmount, formatDate } from "@/lib/format";
 import { addPayment } from "@/server/payments/actions";
 import { fetchNbrbRate } from "@/server/finance/actions";
@@ -40,6 +41,8 @@ export function PaymentDialog({
 }) {
   const isIncome = direction === "INCOME";
   const [selectedProjectId,setSelectedProjectId]=useState(projectId??"");
+  const hasProject = Boolean(projectOptions ? selectedProjectId : projectId);
+  const generalLabel = isIncome ? "Общий приход организации" : "Общий расход организации";
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [currency, setCurrency] = useState(projectCurrency);
@@ -167,29 +170,21 @@ export function PaymentDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>
-            {isIncome ? (projectOptions ? "Приход организации" : "Приход по проекту") : "Расход по проекту"}
+            {isIncome ? (hasProject ? "Приход по проекту" : "Приход организации") : (hasProject ? "Расход по проекту" : "Расход организации")}
           </DialogTitle>
           <DialogDescription>
             {isIncome
               ? "Платёж попадёт в оборот месяца для «% от оборота»"
-              : "Расход уменьшит маржу проекта"}
+              : hasProject ? "Расход уменьшит маржу проекта" : "Расход уменьшит баланс организации и выбранной кассы"}
           </DialogDescription>
         </DialogHeader>
         <fieldset disabled={pending} className="flex min-w-0 max-w-full flex-col gap-3">
           {projectOptions ? (
             <div className="flex min-w-0 max-w-full flex-col gap-1.5">
               <Label htmlFor="income-project">Проект (необязательно)</Label>
-              <select
-                id="income-project"
-                className="h-10 w-full min-w-0 max-w-full rounded-md border bg-background px-3"
-                value={selectedProjectId}
-                onChange={(event) => setSelectedProjectId(event.target.value)}
-              >
-                <option value="">Общий приход организации</option>
-                {projectOptions.map((project) => (
-                  <option key={project.id} value={project.id}>{project.number}</option>
-                ))}
-              </select>
+              <SearchableSelect id="income-project" value={selectedProjectId} onChange={setSelectedProjectId}
+                disabled={pending} placeholder={generalLabel} searchPlaceholder="Номер проекта…"
+                options={[{ value: "", label: generalLabel }, ...projectOptions.map(project => ({ value: project.id, label: project.number }))]} />
             </div>
           ) : null}
           <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
