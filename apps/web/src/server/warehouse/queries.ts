@@ -109,6 +109,7 @@ export const listStock = listMaterials;
 export type StockMovementView = {
   id: string;
   type: "INCOME" | "EXPENSE" | "RETURN";
+  receiptKind: "INVENTORY" | "PAID" | null;
   materialId: string;
   materialName: string;
   materialUnit: string;
@@ -154,6 +155,7 @@ export async function listMovements(actor: VisibilityActor, filter?: {
   return movements.map((movement) => ({
     id: movement.id,
     type: movement.type,
+    receiptKind: movement.receiptKind,
     materialId: movement.materialId,
     materialName: movement.material.name,
     materialUnit: movement.material.unit,

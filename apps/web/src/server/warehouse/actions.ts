@@ -12,7 +12,7 @@ import { notifyOrg } from "@/server/notifications/notify";
 import { revalidateProductPaths } from "@/server/products/revalidate";
 import { withTaskTransaction } from "@/server/tasks/transaction";
 import { addMaterialNorm, updateMaterialNorm, lockMaterialProduct } from "./norm-core";
-import { stockIncomeSchema, stockIssueSchema, stockReturnSchema } from "@/lib/warehouse-input";
+import { stockInventoryReceiptSchema, stockIssueSchema, stockReturnSchema } from "./contracts";
 import { warehouseMove, withWarehouseWrite } from "./accounting";
 import {MANAGER_ROLES,WAREHOUSE_MANAGE_ROLES} from "@/lib/roles";
 import { requireRole } from "@/server/require-role";
@@ -227,12 +227,15 @@ export async function toggleMaterial(
 
 // ─── Приход на склад ──────────────────────────────────────────────────────
 
-export async function addStockIncome(input: z.input<typeof stockIncomeSchema>): Promise<{ok:boolean;error?:string}> {
+export async function addInventoryReceipt(input: z.input<typeof stockInventoryReceiptSchema>): Promise<{ok:boolean;error?:string}> {
   const session=await requireRole(WAREHOUSE_MANAGE_ROLES);
-  const parsed=stockIncomeSchema.safeParse(input);
+  const parsed=stockInventoryReceiptSchema.safeParse(input);
   if(!parsed.success)return {ok:false,error:parsed.error.issues[0]?.message??"Укажите положительную цену"};
   return saveWarehouseMovement(session.user,{...parsed.data,kind:"INCOME"});
 }
+
+// Compatibility for already open forms; no separate business logic.
+export async function addStockIncome(input: z.input<typeof stockInventoryReceiptSchema>) { return addInventoryReceipt(input); }
 
 // ─── Потребность изделия (простой резерв, без проверки остатка) ──────────
 

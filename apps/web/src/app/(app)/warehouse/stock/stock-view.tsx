@@ -19,7 +19,7 @@ import { Label } from "@/components/ui/label";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { formatAmount, formatQty } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { addStockIncome } from "@/server/warehouse/actions";
+import { addInventoryReceipt } from "@/server/warehouse/actions";
 import {priceInput,quantityInput} from '@/lib/warehouse-cost';
 import type { MaterialOption, MaterialView } from "@/server/warehouse/queries";
 
@@ -152,7 +152,7 @@ export function StockView({
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold">Остатки</h1>
           <p className="text-sm text-muted-foreground">
@@ -162,7 +162,7 @@ export function StockView({
         {canManage ? (
           <Button disabled={rows.some(row=>!row.warehouseReady)} onClick={() => setIncomeOpen(true)}>
             <Plus className="size-4" />
-            Приход
+            Инвентарный приход
           </Button>
         ) : null}
       </div>
@@ -177,18 +177,19 @@ export function StockView({
       <Dialog
         open={incomeOpen}
         onOpenChange={(next) => {
+          if (pending) return;
           if (!next) resetIncomeForm();
           setIncomeOpen(next);
         }}
       >
-        <DialogContent>
+        <DialogContent className="max-h-[90dvh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Приход на склад</DialogTitle>
+            <DialogTitle>Инвентарный приход</DialogTitle>
             <DialogDescription>
-              Поступление материала увеличит остаток; цена — BYN за единицу
+              Материал и его стоимость добавятся на склад. Деньги из кассы не списываются; цена — BYN за единицу.
             </DialogDescription>
           </DialogHeader>
-          <div className="flex flex-col gap-3">
+          <fieldset disabled={pending} className="flex min-w-0 flex-col gap-3">
             <div className="flex flex-col gap-1.5">
               <Label>Материал *</Label>
               <SearchableSelect
@@ -232,16 +233,17 @@ export function StockView({
                 placeholder="Необязательно"
               />
             </div>
-          </div>
+          </fieldset>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIncomeOpen(false)}>
+            <Button variant="outline" disabled={pending} onClick={() => { setIncomeOpen(false); resetIncomeForm(); }}>
               Отмена
             </Button>
             <Button
               disabled={pending || !incomeValid}
               onClick={() =>
                 startTransition(async () => {
-                  const result = await addStockIncome({
+                  const result = await addInventoryReceipt({
+                    receiptKind: "INVENTORY",
                     materialId,
                     quantity,
                     unitPrice,
@@ -249,7 +251,7 @@ export function StockView({
                     comment: comment.trim() || undefined,
                   });
                   if (result.ok) {
-                    toast.success("Приход внесён");
+                    toast.success("Инвентарный приход внесён");
                     setIncomeOpen(false);
                     resetIncomeForm();
                   } else {
@@ -258,7 +260,7 @@ export function StockView({
                 })
               }
             >
-              {pending ? "Сохранение…" : "Внести приход"}
+              {pending ? "Сохранение…" : "Внести инвентарный приход"}
             </Button>
           </DialogFooter>
         </DialogContent>

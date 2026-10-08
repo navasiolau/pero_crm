@@ -84,7 +84,7 @@ export async function warehouseMove(tx:Tx,actor:WarehouseActor,input:WarehouseMo
    result=addPosition(position,quantity,price!);
   }
  }
- const movement=await tx.stockMovement.create({data:{id:randomUUID(),materialId,type:input.kind,quantity,unitPrice:averagePrice({quantity:'1',value:result.cost}),totalByn:result.money,productId:line?.productId,projectMaterialId:line?.id,comment:input.comment?.trim()||null,createdById:actor.id}});
+ const movement=await tx.stockMovement.create({data:{id:randomUUID(),materialId,type:input.kind,receiptKind:input.kind==='INCOME'?'INVENTORY':null,quantity,unitPrice:averagePrice({quantity:'1',value:result.cost}),totalByn:result.money,productId:line?.productId,projectMaterialId:line?.id,comment:input.comment?.trim()||null,createdById:actor.id}});
  await tx.warehouseMovementValuation.create({data:{id:randomUUID(),movementId:movement.id,sourceMovementId:input.sourceMovementId??null,runId:state.runId,clientMutationId,requestFingerprint:fingerprint,actorId:actor.id,quantity,unitCost:result.cost,valueByn:result.value,moneyByn:result.money}});
  await tx.warehouseBalance.upsert({where:{materialId},create:{materialId,runId:state.runId,quantity:result.position.quantity,valueByn:result.position.value,revision:1},update:{quantity:result.position.quantity,valueByn:result.position.value,revision:{increment:1}}});
  await tx.$executeRaw`UPDATE "Material" SET "purchasePrice"=CAST(${averagePrice(result.position)} AS numeric) WHERE id=${materialId}`;
