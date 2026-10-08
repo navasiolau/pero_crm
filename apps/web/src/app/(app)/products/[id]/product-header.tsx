@@ -5,7 +5,7 @@ import Link from "next/link";
 import { resolveProductReturn } from "@/lib/product-return-navigation";
 import { ArrowLeft } from "lucide-react";
 import { toast } from "sonner";
-import type { ProductStatus, Role } from "@prisma/client";
+import type { ProductStatus, ProjectStage, Role } from "@prisma/client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -33,6 +33,7 @@ export function ProductHeader({
     quantity: number;
     description: string | null;
     projectId: string;
+    projectStage?: ProjectStage;
     engineerId: string | null;
   };
   currency: string;
@@ -51,7 +52,7 @@ export function ProductHeader({
   const [localStatus, setLocalStatus] = useState(product.status);
   const [statusError, setStatusError] = useState<string | null>(null);
   const assignedEngineer = !!actorUserId && product.engineerId === actorUserId;
-  const allowedStatusTargets = productStatusTargets(actorRoles, { from: localStatus, assignedEngineer, participant: false, hasB3d: false, noModel: false });
+  const allowedStatusTargets = productStatusTargets(actorRoles, { from: localStatus, projectStage: product.projectStage, assignedEngineer, participant: false, hasB3d: false, noModel: false });
   const engineerTarget = allowedStatusTargets[0];
   const canEngineerMove = !canManage && actorRoles.includes("ENGINEER") && assignedEngineer && !!engineerTarget;
   async function moveStatus(toStatus: ProductStatus) {
@@ -72,9 +73,9 @@ export function ProductHeader({
     </div>
     <div className="ml-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2">
     {statusError ? <p role="alert" className="max-w-full break-words text-sm text-destructive">{statusError}</p> : null}
-    {canManage ? <Select value={localStatus} onValueChange={value => { const next = value as ProductStatus | undefined; if (next && next !== localStatus) startTransition(async () => { await moveStatus(next); }); }} disabled={pending}>
+    {canManage ? <Select value={localStatus} onValueChange={value => { const next = value as ProductStatus | undefined; if (next && next !== localStatus) startTransition(async () => { await moveStatus(next); }); }} disabled={pending || allowedStatusTargets.length === 0}>
       <SelectTrigger className="w-48 max-w-full" aria-label="Сменить статус"><SelectValue>{productStatusLabels[localStatus]}</SelectValue></SelectTrigger>
-      <SelectContent>{PRODUCT_STATUSES.map(status => <SelectItem key={status.id} value={status.id}>{status.label}</SelectItem>)}</SelectContent>
+      <SelectContent>{PRODUCT_STATUSES.filter(status => status.id === localStatus || allowedStatusTargets.includes(status.id)).map(status => <SelectItem key={status.id} value={status.id}>{status.label}</SelectItem>)}</SelectContent>
     </Select> : null}
     {canEngineerMove ? <Button type="button" variant="outline" className="min-h-12" disabled={pending} onClick={() => startTransition(async () => { await moveStatus(engineerTarget); })}>{engineerTarget === "DESIGN" ? "Вернуть в проектирование" : "Передать в производство"}</Button> : null}
     <ProductDeleteButton productId={product.id} canManage={canManage} returnHref={returnDestination.href} />

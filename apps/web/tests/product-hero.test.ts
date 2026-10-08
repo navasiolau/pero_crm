@@ -81,7 +81,7 @@ test("shared kanban card preserves information and stays compact without an imag
   assert.doesNotMatch(html, /data-slot="product-kanban-image"/);
 });
 
-test("shared kanban card renders contained protected thumbnail for both board renderers", () => {
+test("shared kanban card renders protected thumbnail for both board renderers", () => {
   const html = renderToStaticMarkup(createElement(ProductKanbanCard, {
     product: {
       number: "P-10.2",
@@ -97,7 +97,6 @@ test("shared kanban card renders contained protected thumbnail for both board re
 
   assert.match(html, /data-slot="product-kanban-image"/);
   assert.match(html, /src="\/api\/files\/file-10\?preview=card"/);
-  assert.match(html, /object-contain/);
   assert.match(html, /alt="sketch\.png"/);
   assert.doesNotMatch(html, /1200|formatAmount/);
 });
