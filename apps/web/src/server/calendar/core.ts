@@ -8,9 +8,11 @@ export type CalendarEntryView={id:string;title:string;description:string;startsA
 export const calendarEntryView=(row:CalendarEntry):CalendarEntryView=>({id:row.id,title:row.title,description:row.description,startsAt:row.startsAt.toISOString(),plannedMinutes:row.plannedMinutes??null,state:row.state,reminderOffsetMinutes:row.reminderOffsetMinutes,revision:row.revision});
 export type CalendarMutationResult={ok:true;entry:CalendarEntryView;repeated:boolean}|{ok:false;kind:'conflict'|'failure';code:string;error:string};
 async function actorInTransaction(actorId:string|null,tx:Prisma.TransactionClient){return resolveCalendarActor(actorId,id=>tx.user.findUnique({where:{id},select:{id:true,active:true,roles:true,calendarEnabled:true}}));}
-export async function listCalendarMonthCore(actorId:string|null,month:string,transaction:CalendarTransaction):Promise<CalendarEntryView[]>{
- const range=calendarMonthRange(month);
+export async function listCalendarIntervalCore(actorId:string|null,range:{start:Date;end:Date},transaction:CalendarTransaction):Promise<CalendarEntryView[]>{
  return transaction(async tx=>{const actor=await actorInTransaction(actorId,tx);return (await tx.calendarEntry.findMany({where:{ownerId:actor.id,startsAt:{gte:range.start,lt:range.end}},orderBy:[{startsAt:'asc'},{id:'asc'}]})).map(calendarEntryView);});
+}
+export async function listCalendarMonthCore(actorId:string|null,month:string,transaction:CalendarTransaction):Promise<CalendarEntryView[]>{
+ return listCalendarIntervalCore(actorId,calendarMonthRange(month),transaction);
 }
 const failure=(code:string,error:string,kind:'conflict'|'failure'='failure'):CalendarMutationResult=>({ok:false,kind,code,error});
 export async function mutateCalendarCore(actorId:string|null,input:unknown,transaction:CalendarTransaction,reminderContext:ReminderContext|null=null):Promise<CalendarMutationResult>{

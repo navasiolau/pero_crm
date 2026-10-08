@@ -1,7 +1,8 @@
 "use client";
 import {useMemo,useState,useTransition} from 'react';
-import {ChevronLeft,ChevronRight,Plus} from 'lucide-react';
-import {Button} from '@/components/ui/button';
+import Link from 'next/link';
+import {BarChart3,ChevronLeft,ChevronRight,Plus} from 'lucide-react';
+import {Button,buttonVariants} from '@/components/ui/button';
 import {Input} from '@/components/ui/input';
 import {Textarea} from '@/components/ui/textarea';
 import {Label} from '@/components/ui/label';
@@ -12,11 +13,11 @@ import {CALENDAR_TIMEZONE,calendarLocalValue,calendarMonthDays,calendarDisplay} 
 import {parseCalendarHours,calendarHoursInput,formatPlannedMinutes} from '@/lib/calendar-duration';
 import {summarizeCalendarEntries,emptyCalendarPeriod} from '@/lib/calendar-summary';
 import {PlanHoursSummary} from '@/components/plan-hours-summary';
+import {calendarStateLabels as stateLabels} from '@/lib/calendar-status';
 import {loadCalendarMonth,mutateCalendar} from '@/server/calendar/actions';
 import type {CalendarEntryView} from '@/server/calendar/core';
 import type {CalendarMutation} from '@/server/calendar/contracts';
 const reminderLabels:Record<string,string>={none:'Без напоминания','0':'В момент события','15':'За 15 минут','60':'За час','1440':'За сутки'};
-const stateLabels={PLANNED:'Запланировано',COMPLETED:'Выполнено',CANCELLED:'Отменено'};
 function monthLabel(month:string){return new Intl.DateTimeFormat('ru-RU',{timeZone:CALENDAR_TIMEZONE,month:'long',year:'numeric'}).format(new Date(`${month}-15T12:00:00Z`));}
 function shiftMonth(month:string,delta:number){const [y,m]=month.split('-').map(Number);return new Date(Date.UTC(y,m-1+delta,15)).toISOString().slice(0,7);}
 type Editor={id:string;revision:number|null;title:string;description:string;localDateTime:string;reminder:string;hours:string};
@@ -45,7 +46,7 @@ export function PersonalCalendar({initialMonth,initialDate,initialEntries}:{init
  if(!result.ok){setError(result.error);if(result.kind==='conflict')setEntries(await loadCalendarMonth(month));return;}accept(result.entry);
  }
  return <section className="min-w-0 space-y-4" aria-labelledby="personal-plan-title">
- <div className="flex flex-wrap items-center justify-between gap-3"><div><h1 id="personal-plan-title" className="text-xl font-semibold">План</h1><p className="text-sm text-muted-foreground">Личный календарь · {CALENDAR_TIMEZONE}</p></div><Button disabled={pending} onClick={openCreate}><Plus className="size-4"/>Добавить запись</Button></div>
+ <div className="flex flex-wrap items-center justify-between gap-3"><div><h1 id="personal-plan-title" className="text-xl font-semibold">План</h1><p className="text-sm text-muted-foreground">Личный календарь · {CALENDAR_TIMEZONE}</p></div><div className="flex flex-wrap gap-2"><Link className={buttonVariants({variant:'outline'})} href={`/plan/analytics?from=${month}-01&to=${days.filter(day=>day.inMonth).at(-1)!.date}`}><BarChart3 className="size-4"/>Аналитика</Link><Button disabled={pending} onClick={openCreate}><Plus className="size-4"/>Добавить запись</Button></div></div>
  {error&&!editor?<p role="alert" className="text-sm text-destructive">{error}</p>:null}
  <PlanHoursSummary title="Часы за месяц" summary={summary.total}/>
  <p className="text-xs text-muted-foreground">Плановые часы по дате записи. Отменённые записи в часы не входят.</p>
