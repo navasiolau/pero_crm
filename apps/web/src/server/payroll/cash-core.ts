@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
-import { calculateCashPayout, isCashCurrency, parseCashAmount, type CashCurrency, type CashRates } from "@/lib/cash-ledger";
+import { calculateCashPayout, cashMovementDelta, isCashCurrency, parseCashAmount, type CashCurrency, type CashRates } from "@/lib/cash-ledger";
 import { requireHistoricalByn } from "@/lib/history-byn";
 import { ADVANCE_ROLES, FINANCE_ROLES, hasAnyRole, type Role } from "@/lib/roles";
 
@@ -46,8 +46,8 @@ export async function readCashBalance(tx: Prisma.TransactionClient, cashAccountI
     tx.payment.groupBy({ by: ["direction"], where: { cashAccountId }, _sum: { amount: true } }),
     tx.payout.aggregate({ where: { cashAccountId }, _sum: { cashAmount: true } }),
   ]);
-  const paymentBalance = payments.reduce((sum, row) => sum.add(row.direction === "INCOME" ? row._sum.amount ?? 0 : new Prisma.Decimal(row._sum.amount ?? 0).neg()), new Prisma.Decimal(0));
-  return paymentBalance.sub(payouts._sum.cashAmount ?? 0);
+  const paymentBalance = payments.reduce((sum, row) => sum.add(cashMovementDelta(row.direction,row._sum.amount ?? 0)), new Prisma.Decimal(0));
+  return paymentBalance.add(cashMovementDelta("EXPENSE",payouts._sum.cashAmount ?? 0));
 }
 
 export async function readOrgBalance(tx: Prisma.TransactionClient, _payrollRate: string, paymentBynDelta = "0.00", newPayoutBynDelta = "0.00"): Promise<Prisma.Decimal> {

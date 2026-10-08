@@ -15,6 +15,12 @@ export function isCashCurrency(value: string): value is CashCurrency {
   return CURRENCIES.includes(value);
 }
 
+/** Common physical ledger sign. Snapshots are never revalued here. */
+export function cashMovementDelta(direction:"INCOME"|"EXPENSE",amount:Prisma.Decimal.Value):Prisma.Decimal {
+ const value=new Prisma.Decimal(amount);
+ return direction==="INCOME"?value:value.negated();
+}
+
 function money(value: string, positive = false): Prisma.Decimal {
   if (typeof value !== "string" || value.length > 32 || !MONEY_RE.test(value)) throw new Error("Некорректная сумма");
   const result = new Prisma.Decimal(value);

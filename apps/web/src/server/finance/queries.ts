@@ -1,3 +1,4 @@
+import { cashMovementDelta } from "@/lib/cash-ledger";
 import { projectTotal as calculateProjectTotal } from "@/lib/product-quantity";
 import { prisma } from "@/lib/prisma";
 import { Prisma,type PrismaClient } from "@prisma/client";
@@ -28,18 +29,18 @@ export async function listCashAccounts(): Promise<CashAccountView[]> {
     }),
     prisma.payout.groupBy({ by: ["cashAccountId"], where: { cashAccountId: { not: null } }, _sum: { cashAmount: true } }),
   ]);
-  const sums = new Map<string, number>();
+  const sums = new Map<string, Prisma.Decimal>();
   for (const row of grouped) {
     if (!row.cashAccountId) continue;
-    const sign = row.direction === "INCOME" ? 1 : -1;
+
     sums.set(
       row.cashAccountId,
-      (sums.get(row.cashAccountId) ?? 0) + sign * Number(row._sum.amount ?? 0),
+      (sums.get(row.cashAccountId) ?? new Prisma.Decimal(0)).plus(cashMovementDelta(row.direction,row._sum.amount ?? 0)),
     );
   }
   for (const row of payouts) {
     if (!row.cashAccountId) continue;
-    sums.set(row.cashAccountId, (sums.get(row.cashAccountId) ?? 0) - Number(row._sum.cashAmount ?? 0));
+    sums.set(row.cashAccountId, (sums.get(row.cashAccountId) ?? new Prisma.Decimal(0)).plus(cashMovementDelta("EXPENSE",row._sum.cashAmount ?? 0)));
   }
   return accounts.map((account) => ({
     id: account.id,
@@ -47,7 +48,7 @@ export async function listCashAccounts(): Promise<CashAccountView[]> {
     currency: account.currency,
     comment: account.comment,
     active: account.active,
-    balance: Math.round((sums.get(account.id) ?? 0) * 100) / 100,
+    balance: (sums.get(account.id) ?? new Prisma.Decimal(0)).toDecimalPlaces(2,Prisma.Decimal.ROUND_HALF_UP).toNumber(),
   }));
 }
 
