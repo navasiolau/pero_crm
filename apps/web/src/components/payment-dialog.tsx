@@ -251,8 +251,8 @@ export function PaymentDialog({
 
           {isStockPurchase ? <StockMaterialFields materials={stockMaterials} materialId={materialId} onMaterialChange={setMaterialId} quantity={quantity} onQuantityChange={setQuantity} unitPrice={unitPrice} onPriceChange={setUnitPrice} currency={currency} prefix="purchase" disabled={pending} /> : null}
           {articleField}
-          {!isIncome && !isStockPurchase ? <div className="min-w-0 space-y-2">
-            <Label htmlFor="pay-document">Отчетный документ *</Label>
+          {!isIncome ? <div className="min-w-0 space-y-2">
+            <Label htmlFor="pay-document">{isStockPurchase ? "Отчетный документ (необязательно)" : "Отчетный документ *"}</Label>
             <FinanceDocumentUpload key={clientMutationId} id="pay-document" disabled={pending}
               onBusyChange={setDocumentLoading} onUploaded={setReportDocument} />
           </div> : null}
@@ -331,7 +331,8 @@ export function PaymentDialog({
                 const common = { clientMutationId, currency, cashAccountId: effectiveAccountId,
                   rate: needsRate ? parsedRate : undefined, rateDate: rateDate || undefined, paidAt: paidAt || undefined, comment: comment.trim() || undefined };
                 const result = isStockPurchase
-                  ? await addPaidStockReceipt({ ...common, materialId, quantity, unitPrice, expenseArticleId: effectiveArticleId })
+                  ? await addPaidStockReceipt({ ...common, materialId, quantity, unitPrice, expenseArticleId: effectiveArticleId,
+                    ...(reportDocument ? { reportDocumentId: reportDocument.id } : {}) })
                   : await addPayment({ ...common,
                     ...(!isIncome && reportDocument ? { reportDocumentId: reportDocument.id } : {}),
                     projectId: projectOptions ? selectedProjectId || null : projectId ?? null, direction, amount: parsedAmount,

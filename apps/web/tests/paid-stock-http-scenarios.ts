@@ -32,6 +32,10 @@ export async function runPaidStockHttp(db: PrismaClient, baseUrl: string) {
     const changedCurrency=await request(create,tokens[0],`${marker}-0`,{...input,currency:"BYN"});
     const refusedCurrency=await changedCurrency.json();assert.equal(refusedCurrency.ok,false);assert.match(refusedCurrency.error,/валют|Касса/);
     const phase=await db.warehouseAccountingState.findUnique({where:{id:"main"},select:{phase:true}});
+    if(phase?.phase==='ACTIVE'){
+      const badDocument=await request(create,tokens[0],`${marker}-0`,{...input,reportDocumentId:'unavailable-document'});
+      const result=await badDocument.json();assert.equal(result.ok,false);assert.match(result.error,/документ/i);
+    }
     const emptyCash=await request(create,tokens[0],`${marker}-0`);
     const refused=await emptyCash.json();assert.equal(refused.ok,false);
     assert.match(refused.error,phase?.phase==="ACTIVE"?/Недостаточно средств в выбранной кассе/:/Склад временно закрыт/);
