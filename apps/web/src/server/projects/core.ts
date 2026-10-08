@@ -11,27 +11,15 @@ import { writeChangeLog } from "@/server/plugins/changelog";
 import { emitDomainEvent } from "@/server/plugins/events";
 import { notifyOrg } from "@/server/notifications/notify";
 
-import { hasAnyRole, MANAGER_ROLES, type Role } from "@/lib/roles";
+import { MANAGER_ROLES } from "@/lib/roles";
+import { requireActorRoles, type DomainActor } from "@/server/actor";
 
 // ─── Актёр доменных действий ─────────────────────────────────────────────────
 // Пользователь, от имени которого совершается действие: сессия веба
 // (source "web") или привязанный пользователь telegram-бота (source "telegram").
 // source попадает в журнал изменений (§5: веб / Telegram / плагин / api).
 
-export interface DomainActor {
-  id: string;
-  name: string;
-  roles: Role[];
-  source: "web" | "telegram" | "api";
-}
-
-// Роли проверяются В ЯДРЕ (а не только на входе в action/route) — единая
-// точка для веба и бота. Нарушение — throw; обёртки/routes переводят в ответ.
-export function requireActorRoles(actor: DomainActor, allowed: Role[]): void {
-  if (!hasAnyRole(actor.roles, allowed)) {
-    throw new Error("Недостаточно прав");
-  }
-}
+export { requireActorRoles, type DomainActor } from "@/server/actor";
 
 // Номер проекта — сплошная нумерация: следующий = max(numberInt) + 1
 // (после миграции нормализации все номера каноничные числа, «205» —
