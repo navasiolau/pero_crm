@@ -7,6 +7,15 @@ import {qaTransport,bundleHash} from './crm-acceptance-transport.mjs';
 const here=path.dirname(fileURLToPath(import.meta.url));
 const require=createRequire(import.meta.url),{build}=createRequire(require.resolve('tsx/package.json'))('esbuild');
 export async function sketchQaBundle(){const result=await build({entryPoints:[path.join(here,'engineer-sketch-qa-entry.mjs')],bundle:true,write:false,platform:'node',format:'esm',target:'node22',external:['@prisma/client','@aws-sdk/client-s3','sharp'],banner:{js:'import { createRequire as task112CreateRequire } from "node:module"; const require = task112CreateRequire(import.meta.url);'},minify:true,logLevel:'silent'});const bytes=Buffer.from(result.outputFiles[0].contents);if(bytes.length>256*1024)throw Error('REVIEWED_BUNDLE_SIZE_LIMIT');return bytes;}
+/** Root-only private IPC: cookies stay in the returned process object, never argv/receipts/log files/stdout. */
+export async function requestSketchBrowserHandoff({revision,checkpoint,outputDir,authorized=false}){
+ if(!authorized||!/^[a-f0-9]{40}$/.test(revision??'')||checkpoint?.revision!==revision||!path.isAbsolute(outputDir))throw Error('HANDOFF_AUTHORIZED_BINDING_REQUIRED');
+ const bytes=await sketchQaBundle(),transport=qaTransport({target:'staging',revision,outputDir});
+ const result=await transport.execute(bytes,'inspect',{operation:'inspect',mode:'handoff',revision,runId:checkpoint.runId,authorized:true,checkpoint});
+ const handoff=result.body;
+ if(handoff.status!=='PRIVATE_BROWSER_HANDOFF'||handoff.runId!==checkpoint.runId||handoff.revision!==revision||handoff.profile?.id!==checkpoint.actors?.manager?.id)throw Error('HANDOFF_RESPONSE_BINDING_MISMATCH');
+ return {authorized:true,expectedRevision:revision,identity:result.receipt.identity,checkpoint,...handoff};
+}
 export async function runSketchQa({operation,revision,runId,outputDir,authorized=false}){
  if(!authorized||!['prepare','runtime','capture','cleanup','partial-capture','partial-cleanup'].includes(operation)||!/^[a-f0-9]{40}$/.test(revision??'')||!/^[a-f0-9-]{36}$/.test(runId??'')||!path.isAbsolute(outputDir))throw Error('AUTHORIZED_EXPLICIT_SCOPE_REQUIRED');
  await mkdir(outputDir,{recursive:true});
