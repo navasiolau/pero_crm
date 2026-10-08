@@ -15,4 +15,9 @@
 
 ## Staging
 
-Ожидаются CI, фактическая ревизия и runtime-проверка. Новых SQL-миграций нет, история денег не меняется.
+- Принят e335146f26aea80c88540ef3ef23ecc1b26081ff, обычный merge feature/99 d48a2c6 и приёмка98.
+- [CI/CD #164](https://github.com/navasiolau/pero_crm/actions/runs/37717450413) Success. Фактический web healthy, OCI revision совпадает, image sha256:94d72e7be4ef93e844c62ad31306cbc3f2ac8afdb7a1a6ae5c08008066c34869.
+- W07-guarded native: новый расход без документа запрещён, документ/касса/receipt/rollback и исторический replay проверены на настоящем PostgreSQL. Реальный bot API отклонил отсутствие файла и поддельный флаг warehouse/skipReportDocument.
+- Реальная multipart загрузка/MinIO bytes/retry/source=telegram и права сохранены. OriginalData MATCH, QA rows/objects0, provider messages0; DB/volume/startedAt/W07 и образ не менялись в окне приёмки.
+- Receipt: ignored .playwright-mcp/finance99/staging-receipt.json, bundle SHA256e0acd4f059683dc0ff44de1094eb456e842459cdf8af95a15e1c829bd315aa5a.
+- Новых SQL-миграций нет. Main/production остаются прежними и ожидают проверки владельца.
