@@ -1,5 +1,6 @@
 import { PRODUCT_STATUSES } from "./product-statuses";
-import type { ProductStatus, Role } from "@prisma/client";
+import type { ProductStatus, ProjectStage, Role } from "@prisma/client";
+import { isProductDraftLocked } from "./product-drafts";
 import type { ProductPercentageKind } from "./product-percentage-pay";
 import type { ProductPercentageSectionView, ProductPercentageState } from "./product-percentage-view";
 import { PERCENTAGE_SHARE_UNITS } from "./product-percentage-pay";
@@ -37,11 +38,13 @@ export function displayProductPercentageMemberAmount(
 
 export function productStatusTargets(roles: readonly Role[], context: {
   from: ProductStatus;
+  projectStage?: ProjectStage;
   assignedEngineer: boolean;
   participant: boolean;
   hasB3d: boolean;
   noModel: boolean;
 }): ProductStatus[] {
+  if (isProductDraftLocked(context.from, context.projectStage)) return [];
   if (MANAGER_ROLES.some((role) => roles.includes(role)))
     return PRODUCT_STATUSES.map((status) => status.id);
   return PRODUCT_STATUSES.map((status) => status.id).filter((to) =>

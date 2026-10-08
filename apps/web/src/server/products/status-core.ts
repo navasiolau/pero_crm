@@ -1,4 +1,7 @@
-import {liveProductWhere} from "@/server/access/live-entities";
+import {liveProductWhere,liveProjectWhere} from "@/server/access/live-entities";
+import {lockProjectRow} from "@/server/projects/lock";
+import {lockProductRow} from "./quantity-core";
+import {isProductDraftLocked} from "@/lib/product-drafts";
 import type { Prisma, ProductStatus } from "@prisma/client";
 import { hasAnyRole, MANAGER_ROLES } from "@/lib/roles";
 import { productStatusLabels } from "@/lib/product-statuses";
@@ -11,6 +14,10 @@ import type { DomainActor } from "@/server/projects/core";
 export async function changeProductStatusTransaction(tx: Prisma.TransactionClient, actor: DomainActor,
   productId: string, toStatus: ProductStatus, comment?: string) {
   if (!Object.hasOwn(productStatusLabels, toStatus)) return { ok: false as const, error: "Неизвестный статус изделия" };
+  const reference = await tx.product.findUnique({ where: {...liveProductWhere, id: productId }, select: {projectId:true} });
+  if (!reference) return { ok: false as const, error: "Изделие не найдено" };
+  await lockProjectRow(tx, reference.projectId);
+  await lockProductRow(tx, productId);
   const product = await tx.product.findUnique({ where: {...liveProductWhere, id: productId } });
   if (!product) return { ok: false as const, error: "Изделие не найдено" };
   const decision = decideProductPercentageStatus(actor.roles, { from: product.status, to: toStatus,
@@ -19,6 +26,11 @@ export async function changeProductStatusTransaction(tx: Prisma.TransactionClien
   if (!decision.allowed) return { ok: false as const, error: decision.error ?? "Недостаточно прав" };
   if (product.status === toStatus) return { ok: true as const, product, eventId: null,
     captured: [] as ("ENGINEERING" | "ASSEMBLY" | "INSTALLATION")[], percentageEffects: {eventIds:[],earnings:[]} as PercentageAccrualEffects };
+  if (product.status === "DRAFT") {
+    const project = await tx.project.findUnique({where:{...liveProjectWhere,id:product.projectId},select:{stage:true}});
+    if (!project) return {ok:false as const,error:"Проект не найден"};
+    if (isProductDraftLocked(product.status,project.stage)) return {ok:false as const,error:"Переведите проект в статус «Договор», чтобы вывести изделие из черновика"};
+  }
   const fromStatus = product.status;
   await tx.product.update({ where: { id: productId }, data: { status: toStatus, statusChangedAt: new Date() } });
   const kinds = percentageCompletionKinds(fromStatus, toStatus, hasAnyRole(actor.roles, MANAGER_ROLES));

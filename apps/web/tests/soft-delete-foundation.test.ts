@@ -33,6 +33,6 @@ test('genuine project stage transaction refuses deleted project before historica
 });
 import {createProductCore} from '../src/server/products/core';
 test('genuine product creation counts deleted sibling suffix without reusing a historical number',async()=>{
- let numberQuery:unknown;const tx={project:{findUnique:async()=>({id:'j',number:'205',currency:'BYN'})},product:{findMany:async({where}:{where:unknown})=>{numberQuery=where;return[{suffixInt:9,deletedAt:new Date()}];},create:async({data}:{data:Record<string,unknown>})=>({id:'new',...data})},orgSetting:{findUnique:async()=>null},changeLog:{create:async()=>({})}} as unknown as Prisma.TransactionClient;
+ let numberQuery:unknown;const tx={$queryRaw:async()=>[],project:{findUnique:async()=>({id:'j',number:'205',currency:'BYN'})},product:{findMany:async({where}:{where:unknown})=>{numberQuery=where;return[{suffixInt:9,deletedAt:new Date()}];},create:async({data}:{data:Record<string,unknown>})=>({id:'new',...data})},orgSetting:{findUnique:async()=>null},changeLog:{create:async()=>({})}} as unknown as Prisma.TransactionClient;
  const result=await createProductCore(actor,{projectId:'j',title:'New',quantity:1},async work=>work(tx));assert.equal(result.ok,true);assert.equal(result.ok&&result.product.number,'205.10');assert.deepEqual(numberQuery,{projectId:'j'},'number allocation intentionally includes deleted rows');
 });
