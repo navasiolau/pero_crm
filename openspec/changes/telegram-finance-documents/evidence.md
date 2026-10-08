@@ -21,4 +21,9 @@
 
 ## Staging
 
-Ожидаются обычный merge, CI, точная ревизия и приёмка. Запуск production Telegram-бота и реальные сообщения сотрудникам не выполняются: этап проверяется на staging API и настоящем PostgreSQL, транспорт Telegram изолирован.
+- Принят c73f4f5651f885200e19b3ef68aaa3e70534e8af, включает обычный merge feature/98 eeb3f59 и приёмку97.
+- [CI/CD #163](https://github.com/navasiolau/pero_crm/actions/runs/37712262214) завершён успешно. Фактический web healthy с этой OCI revision; image sha256:96fba313319ce6d77bf5987fa9be0b830f7a911cc50431f2e97abcd60beaef1c.
+- Под W07/DB/storage guards настоящее денежное ядро и PostgreSQL подтвердили один расход100BYN/одно событие, документ/replay/ошибки и полный rollback. Исходные digest MATCH.
+- Настоящий bot documents API проверил Bearer/write/finance role, multipart, source=telegram, точный retry; оригинальные bytes проверены в MinIO. Собственные тестовые users/tokens/documents/audit/objects удалены, digest MATCH, QA0.
+- Изображение web, DB/volume/startedAt, W07 не менялись во время приёмки. Receipt в ignored .playwright-mcp/finance98/staging-receipt.json, bundle SHA25691662001f3eed88614475f347d9f5ff1c15f6a8a5b5799f8f3b6a5865c75070a.
+- Production Telegram-бот и main не обновлялись, реальных сообщений сотрудникам0. Bot image проверен сборкой/CI, диалог — исполняемым engine с изолированным Telegram transport; отдельно проверен настоящий staging API.
