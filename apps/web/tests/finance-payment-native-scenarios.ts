@@ -6,6 +6,7 @@ import { createTaskTransaction } from "../src/server/tasks/transaction";
 import { readCashBalance, readOrgBalance } from "../src/server/payroll/cash-core";
 import { createFinanceDocumentService } from "../src/server/finance-documents/core";
 import { recordPaymentReceipt } from "../src/server/payments/receipts";
+import { loadOrganizationPayments } from "../src/server/finance/organization-ledger";
 
 export async function financePaymentBaseline(db: PrismaClient) {
   const result: Record<string, unknown> = {};
@@ -15,14 +16,15 @@ export async function financePaymentBaseline(db: PrismaClient) {
 }
 
 /** Реальное денежное ядро/PostgreSQL; вся фикстура откатывается до выхода, dispatch не вызывается. */
-export async function runFinancePaymentNative(db: PrismaClient) {
+export async function runFinancePaymentNative(db: PrismaClient, general = false) {
   const before = await financePaymentBaseline(db), rollback = new Error("FINANCE98_EXPECTED_ROLLBACK");
   const marker = `qa-finance98-${randomUUID()}`;
   let checked = false;
   try {
     await createTaskTransaction(db)(async tx => {
-      const project = await tx.project.findFirst({ where: { currency: "BYN", deletedAt: null }, select: { id: true, number: true, currency: true } });
-      assert.ok(project, "LIVE_BYN_PROJECT_REQUIRED");
+      const project = general ? null : await tx.project.findFirst({ where: { currency: "BYN", deletedAt: null }, select: { id: true, number: true, currency: true } });
+      if (!general) assert.ok(project, "LIVE_BYN_PROJECT_REQUIRED");
+      const projectPaymentsBefore = await tx.payment.count({ where: { projectId: { not: null } } });
       const user = await tx.user.create({ data: { id: marker, name: marker, email: `${marker}@invalid.local`, passwordHash: "qa-login-disabled", roles: ["ACCOUNTANT"] } });
       const other = await tx.user.create({ data: { id: `${marker}-other`, name: marker, email: `${marker}-other@invalid.local`, passwordHash: "qa-login-disabled", roles: ["PROCUREMENT"] } });
       const actor = { id: user.id, name: user.name, roles: user.roles, source: "telegram" as const };
@@ -38,7 +40,7 @@ export async function runFinancePaymentNative(db: PrismaClient) {
         mode: () => "local", put: async (document, bytes) => { storage.set(document.storageKey, bytes); }, open: async () => null,
       } });
       const uploaded = await documents.upload(user.id, { clientMutationId: randomUUID(), fileName: "Документ.pdf", mimeType: "application/pdf", bytes: Buffer.from("%PDF-1.4\nQA98") });
-      const input = { projectId: project.id, direction: "EXPENSE" as const, amount: 100, currency: "BYN", cashAccountId: account.id,
+      const input = { projectId: project?.id ?? null, direction: "EXPENSE" as const, amount: 100, currency: "BYN", cashAccountId: account.id,
         expenseArticleId: article.id, reportDocumentId: uploaded.document.id, clientMutationId: randomUUID(), comment: marker };
       const prepared = { project, account, articleId: article.id, paidAt: new Date(), rate: 1, rateDate: null, amount: 100, bynAmount: 100 };
       await assert.rejects(createPaymentInTransaction(actor, { ...input, reportDocumentId: undefined }, prepared, tx), /документ/i);
@@ -51,7 +53,16 @@ export async function runFinancePaymentNative(db: PrismaClient) {
       const repeated = await createPaymentInTransaction(actor, input, prepared, tx);
       assert.equal(first.payment.id, repeated.payment.id); assert.equal(repeated.repeated, true);
       assert.equal(first.payment.reportDocumentId, uploaded.document.id);
+      if (general) {
+        assert.equal(first.payment.projectId, null); assert.equal(first.payment.projectAmount, null);
+        assert.equal(await tx.payment.count({ where: { projectId: { not: null } } }), projectPaymentsBefore);
+        const ledger = await loadOrganizationPayments(actor, "EXPENSE", tx);
+        const visible = ledger.rows.find(row => row.id === first.payment.id);
+        assert.ok(visible); assert.equal(visible.project, null); assert.equal(visible.bynAmount, 100);
+        assert.equal(visible.reportDocument?.id, uploaded.document.id);
+      }
       assert.equal((await readCashBalance(tx, account.id)).toFixed(2), funding.minus(100).toFixed(2));
+      assert.equal((await readOrgBalance(tx, "1.000000")).toFixed(2), originalBalance.plus(funding).minus(100).toFixed(2));
       assert.equal(await tx.payment.count({ where: { cashAccountId: account.id, direction: "EXPENSE" } }), 1);
       assert.equal(await tx.domainEvent.count({ where: { actor: actor.id, type: "expense.created" } }), 1);
       await assert.rejects(createPaymentInTransaction(actor, { ...input, comment: "changed" }, prepared, tx), /другими данными/);
@@ -59,8 +70,8 @@ export async function runFinancePaymentNative(db: PrismaClient) {
       await tx.payment.delete({ where: { id: first.payment.id } });
       await assert.rejects(createPaymentInTransaction(actor, input, prepared, tx), /удалена/);
       const legacyInput = { ...input, clientMutationId: randomUUID(), reportDocumentId: undefined };
-      const historical = await tx.payment.create({ data: { projectId: project.id, direction: "EXPENSE", amount: 100,
-        bynAmount: 100, projectAmount: 100, currency: "BYN", rate: 1, cashAccountId: account.id,
+      const historical = await tx.payment.create({ data: { projectId: project?.id ?? null, direction: "EXPENSE", amount: 100,
+        bynAmount: 100, projectAmount: project ? 100 : null, currency: "BYN", rate: 1, cashAccountId: account.id,
         expenseArticleId: article.id, createdById: actor.id, comment: marker } });
       await recordPaymentReceipt(actor, legacyInput, historical.id, tx);
       const historyReplay = await createPaymentInTransaction(actor, legacyInput, prepared, tx);
@@ -80,5 +91,10 @@ export async function runFinancePaymentNative(db: PrismaClient) {
   } catch (error) { if (error !== rollback) throw error; }
   assert.ok(checked);
   assert.deepEqual(await financePaymentBaseline(db), before, "ORIGINAL_DATA_CHANGED");
-  return { status: "PASS", cashDebit: "100.00", paymentCount: 1, eventCount: 1, originalData: "MATCH", qaRows: "ROLLED_BACK" };
+  if (general) {
+    await assert.rejects(db.payment.create({ data: { direction: "INCOME", amount: 1, currency: "BYN", rate: 1,
+      bynAmount: 1, projectId: null, projectAmount: 1 } }), /Payment_project_context_check/);
+    assert.deepEqual(await financePaymentBaseline(db), before, "INVALID_CONTEXT_CHANGED_DATA");
+  }
+  return { status: "PASS", context: general ? "organization" : "project", cashDebit: "100.00", paymentCount: 1, eventCount: 1, originalData: "MATCH", qaRows: "ROLLED_BACK" };
 }

@@ -18,7 +18,7 @@ const actor={id:'a',name:'A',roles:['ACCOUNTANT' as const],source:'web' as const
 const input={projectId:'p',direction:'INCOME' as const,amount:100,currency:'USD',cashAccountId:'cash'};
 
 test('general income stores two project NULLs and one physical USD/BYN snapshot without Project reads',async()=>{writes=audits=events=projectReads=fxCalls=0;const result=await createPaymentCore(actor,{...input,projectId:null});assert.equal(result.ok,true);assert.equal(projectReads,0);assert.equal(writes,1);assert.equal(audits,1);assert.equal(events,1);assert.equal(saved.projectId,null);assert.equal(saved.projectAmount,null);assert.equal(saved.amount,100);assert.equal(saved.bynAmount,300);assert.equal(fxCalls,1);});
-test('expense missing target rejects before DB/FX',async()=>{projectReads=fxCalls=writes=0;const result=await createPaymentCore(actor,{...input,projectId:null,direction:'EXPENSE',reportDocumentId:'99999999-9999-4999-8999-999999999999',expenseArticleId:'article'});assert.equal(result.ok,false);assert.equal(projectReads+fxCalls+writes,0);});
+test('undocumented general expense rejects before DB/FX',async()=>{projectReads=fxCalls=writes=0;const result=await createPaymentCore(actor,{...input,projectId:null,direction:'EXPENSE',expenseArticleId:'article'});assert.equal(result.ok,false);assert.match(result.error??'',/документ/);assert.equal(projectReads+fxCalls+writes,0);});
 test('audit failure rolls the general income back with no outbox',async()=>{writes=audits=events=0;auditFails=true;try{assert.equal((await createPaymentCore(actor,{...input,projectId:null,rate:3})).ok,false);assert.equal(writes+audits+events,0);}finally{auditFails=false;}});
 
 

@@ -56,6 +56,7 @@ export async function deletePayment(
 
   if (payment.project) revalidatePath(`/projects/${payment.project.id}`);
   revalidatePath("/finance/income");
+  revalidatePath("/finance/expenses");
   revalidatePath("/finance/payroll");
   revalidatePath("/finance/accounts");
   return { ok: true };

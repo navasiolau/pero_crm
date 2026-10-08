@@ -62,11 +62,17 @@ test('general income has no article and retains optional number-only project and
  await withDialog({__testExpenseArticles:[]},async page=>{
   await assertNoArticle(page);
   assert.equal(await page.locator('[data-slot="dialog-content"] label').first().textContent(),'Проект (необязательно)');
-  assert.equal(await page.locator('#income-project').inputValue(),'');
-  assert.deepEqual(await page.locator('#income-project option').allTextContents(),['Общий приход организации','П-2026-042']);
+  assert.equal((await page.locator('#income-project').textContent()).trim(),'Общий приход организации');
+  await page.locator('#income-project').click();
+  assert.equal(await page.getByPlaceholder('Номер проекта…').count(),1);
+  assert.equal(await page.getByText('Название не должно быть в форме',{exact:true}).count(),0);
+  await page.getByRole('button',{name:'П-2026-042',exact:true}).click();
+  await page.locator('#income-project').click();
+  await page.getByRole('button',{name:'Общий приход организации',exact:true}).last().click();
   assert.equal(await page.locator('#pay-comment').getAttribute('placeholder'),'Комментарий к приходу');
   await submitIncome(page,null);
-  await page.locator('#income-project').selectOption('project-1');
+  await page.locator('#income-project').click();
+  await page.getByRole('button',{name:'П-2026-042',exact:true}).click();
   await submitIncome(page,'project-1');
  });
 });
@@ -116,6 +122,17 @@ test('expense cannot submit when no article is available',async()=>{
   await page.locator('#pay-amount').fill('10');
   assert.equal(await page.getByRole('button',{name:'Внести расход',exact:true}).isDisabled(),true);
   assert.equal(await page.evaluate(()=>window.__paymentInput),undefined);
+ });
+});
+
+test('general expense has explicit organization context and submits document without a project',async()=>{
+ await withDialog({__testDirection:'EXPENSE'},async page=>{
+  assert.ok((await page.locator('#income-project').textContent()).includes('Общий расход организации'));
+  assert.equal(await page.getByRole('heading',{name:'Расход организации',exact:true}).count(),1);
+  assert.equal(await page.getByText('Расход уменьшит маржу проекта',{exact:true}).count(),0);
+  await page.locator('#pay-amount').fill('25');await uploadDocument(page);
+  await page.getByRole('button',{name:'Внести расход',exact:true}).click();await page.waitForFunction(()=>window.__paymentInput);
+  const input=await page.evaluate(()=>window.__paymentInput);assert.equal(input.projectId,null);assert.equal(input.direction,'EXPENSE');assert.ok(input.reportDocumentId);
  });
 });
 

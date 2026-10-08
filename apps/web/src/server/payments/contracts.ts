@@ -14,8 +14,6 @@ export const paymentSchema = object({
   comment: string().optional(),
   clientMutationId: uuid({ error: "Некорректный идентификатор операции" }).transform(value => value.toLowerCase()).optional(),
   reportDocumentId: uuid({ error: "Некорректный идентификатор документа" }).optional(),
-}).refine(data => data.direction !== "EXPENSE" || !!data.projectId, {
-  message: "Для расхода выберите действующий проект", path: ["projectId"],
 }).refine(data => data.direction !== "INCOME" || !data.expenseArticleId, {
   message: "У прихода не может быть статьи расхода", path: ["expenseArticleId"],
 });
