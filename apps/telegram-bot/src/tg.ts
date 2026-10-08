@@ -1,4 +1,5 @@
 import { config } from "./config";
+import { downloadTelegramDocument, type TelegramDocument, type TelegramRemoteFile } from "./telegram-documents";
 
 // Минимальный клиент Telegram Bot API (long polling) — без зависимостей.
 
@@ -14,6 +15,9 @@ export interface TgMessage {
   chat: { id: number };
   from?: TgUser;
   text?: string;
+  caption?: string;
+  document?: { file_id: string; file_unique_id: string; file_name?: string; mime_type?: string; file_size?: number };
+  photo?: { file_id: string; file_unique_id: string; width: number; height: number; file_size?: number }[];
 }
 
 export interface TgCallbackQuery {
@@ -78,6 +82,10 @@ async function call<T>(
 }
 
 export const tg = {
+  downloadDocument(document: TelegramDocument): Promise<Buffer> {
+    return downloadTelegramDocument(document, { origin: config.telegramApiOrigin, token: config.token,
+      getFile: fileId => call<TelegramRemoteFile>("getFile", { file_id: fileId }, 15000) });
+  },
   getMe(): Promise<TgUser> {
     return call<TgUser>("getMe", {}, 10000);
   },

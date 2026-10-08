@@ -76,6 +76,10 @@ function callback(updateId, chatId, data) {
     message: { message_id: updateId, chat: { id: chatId } }, data,
   } };
 }
+function paymentConfirmation(chatId) {
+  return sent.filter(message => message.chat_id === chatId).flatMap(message => message.reply_markup?.inline_keyboard?.flat() ?? [])
+    .filter(button => button.callback_data?.startsWith('payok:')).at(-1).callback_data;
+}
 
 test("engine executes restored link, role, project and payment behavior", async () => {
   const updates = [
@@ -90,9 +94,9 @@ test("engine executes restored link, role, project and payment behavior", async 
     callback(11, 501, "cur:BYN"),
     callback(12, 501, "cash:cash-1"),
     message(13, 501, "—"),
-    callback(14, 501, "payok"),
   ];
   for (const update of updates) await handleUpdate(update);
+  await handleUpdate(callback(14, 501, paymentConfirmation(501)));
 
   assert.ok(sent.some((item) => item.chat_id === 503 && item.text.toLowerCase().includes("привяз")));
   assert.ok(sent.some((item) => item.chat_id === 502 && item.text.includes("доступен только")));
@@ -105,7 +109,9 @@ test("engine executes restored link, role, project and payment behavior", async 
   assert.ok(!sent.some((item) => item.text.includes("Первоначальная цена")));
   const payment = calls.find((item) => item.path === "/api/v1/bot/payments");
   assert.ok(payment, `payment call missing: ${JSON.stringify({ calls, sent })}`);
-  assert.deepEqual(payment.body, {
+  assert.match(payment.body.clientMutationId, /^[a-f0-9-]{36}$/);
+  const {clientMutationId: _paymentRequest, ...paymentData} = payment.body;
+  assert.deepEqual(paymentData, {
     projectId: "project-205", direction: "INCOME", amount: 100,
     currency: "BYN", cashAccountId: "cash-1",
   });
@@ -149,7 +155,7 @@ test("physical payment currency remains selectable independently of project BYN"
   await handleUpdate(callback(202, 701, "cur:USD"));
   await handleUpdate(callback(203, 701, "cash:cash-usd"));
   await handleUpdate(message(204, 701, "—"));
-  await handleUpdate(callback(205, 701, "payok"));
+  await handleUpdate(callback(205, 701, paymentConfirmation(701)));
   const payment = calls.slice(startCalls).find(item => item.path === "/api/v1/bot/payments");
   assert.equal(payment.body.currency, "USD");
   assert.equal(payment.body.amount, 100);

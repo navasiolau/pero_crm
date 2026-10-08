@@ -63,11 +63,11 @@ async function request<T>(
     response = await fetch(`${config.crmBaseUrl}/api/v1/bot${path}`, {
       method,
       headers: {
-        "content-type": "application/json",
+        ...(body instanceof FormData ? {} : { "content-type": "application/json" }),
         authorization: `Bearer ${config.crmApiToken}`,
         ...(actorId ? { "x-acting-user": actorId } : {}),
       },
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body: body === undefined ? undefined : body instanceof FormData ? body : JSON.stringify(body),
       signal: AbortSignal.timeout(30000),
     });
   } catch {
@@ -86,6 +86,12 @@ async function request<T>(
 }
 
 export const crm = {
+  uploadFinanceDocument(actorId: string, input: { clientMutationId: string; fileName: string; mimeType: string; bytes: Buffer }) {
+    const form = new FormData();
+    form.set("clientMutationId", input.clientMutationId);
+    form.set("file", new File([new Uint8Array(input.bytes)], input.fileName, { type: input.mimeType }));
+    return request<{ ok: boolean; error?: string; document?: { id: string; fileName: string; mimeType: string } }>("POST", "/documents/upload", form, actorId);
+  },
   calendarClaim(input:{namespace:string;botId:string;requestId:string}) {return request<{ok:boolean;claim?:import('./calendar-reminders').CalendarTelegramClaim|null}>('POST','/calendar-reminders/claim',input);},
   calendarAuthorize(input:{namespace:string;botId:string;id:string;claimId:string}) {return request<{ok:boolean;claim?:import('./calendar-reminders').CalendarTelegramClaim}>('POST','/calendar-reminders/authorize',input);},
   calendarAck(input:{namespace:string;botId:string;id:string;claimId:string}&import('./calendar-reminders').CalendarTelegramOutcome) {return request<{ok:boolean}>('POST','/calendar-reminders/ack',input);},

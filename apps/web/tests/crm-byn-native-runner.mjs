@@ -22,12 +22,14 @@ const result = await build({ entryPoints: [resolve(web, "tests/crm-byn-native.mj
  metafile: true, bundle: true, platform: "node", format: "esm", target: "node22", external: ["@prisma/client"], minify: true,
  tsconfig: resolve(web, "tsconfig.json"),
  plugins: [{ name: "outer-transaction-and-external-effects", setup(builder) {
-  // Project/payment cores use exactly these four real Zod factories. A static
+  // Project/payment cores use these real Zod factories. A static
   // export projection avoids retaining the unused public namespace (50+ locale
   // packs and JSON schema tools); validation implementations remain unchanged.
   builder.onResolve({ filter: /^zod$/ }, () => ({ path: "zod-domain-factories", namespace: "native-zod" }));
   builder.onLoad({ filter: /.*/, namespace: "native-zod" }, () => ({ loader: "js", resolveDir: web,
-   contents: `import { object, string, number, enum as enumeration } from "zod/v4"; export const z = {object,string,number,enum:enumeration};` }));
+   contents: `import { object, string, number, enum as enumeration, uuid, coerce } from "zod/v4";
+    export { object, string, number, enumeration as enum, uuid, coerce };
+    export const z = {object,string,number,enum:enumeration,uuid,coerce};` }));
   builder.onResolve({ filter: /^(@\/lib\/prisma|next\/cache|@\/server\/notifications\/notify|@\/server\/plugins\/events)$/ }, args => ({ path: args.path, namespace: "native-stubs" }));
   builder.onLoad({ filter: /.*/, namespace: "native-stubs" }, args => ({ loader: "js", contents:
    args.path === "@/lib/prisma" ? proxySource : args.path === "next/cache" ? "export const revalidatePath = () => {};" : args.path.includes("notifications") ? "export const notifyOrg = async () => {}; export const notifyPerson = async () => {}; export const notifyUser = async () => {};" :

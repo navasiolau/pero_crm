@@ -45,6 +45,7 @@ test("long polling drives link, role gate, project and payment through fake HTTP
   const calls = [];
   const sent = [];
   let delivered = false;
+  let confirmationDelivered = false;
   let messageId = 1000;
   const updates = [
     update(1, 303, "/start LINKCODE"),
@@ -58,7 +59,6 @@ test("long polling drives link, role gate, project and payment through fake HTTP
     callback(11, 101, "cur:BYN"),
     callback(12, 101, "cash:cash-1"),
     update(13, 101, "—"),
-    callback(14, 101, "payok"),
   ];
 
   const server = createServer(async (request, response) => {
@@ -79,7 +79,10 @@ test("long polling drives link, role gate, project and payment through fake HTTP
     let payload;
     if (url.pathname.endsWith("/getMe")) payload = { ok: true, result: { id: 1, is_bot: true, username: "recovery_fixture_bot" } };
     else if (url.pathname.endsWith("/getUpdates")) {
-      payload = { ok: true, result: delivered ? [] : updates };
+      const confirmation = sent.flatMap(message => message.reply_markup?.inline_keyboard?.flat() ?? []).find(button => button.callback_data?.startsWith('payok:'));
+      const result = !delivered ? updates : confirmation && !confirmationDelivered ? [callback(14, 101, confirmation.callback_data)] : [];
+      if (delivered && confirmation) confirmationDelivered = true;
+      payload = { ok: true, result };
       delivered = true;
     } else if (url.pathname.endsWith("/sendMessage")) {
       sent.push(body);
@@ -166,7 +169,9 @@ test("long polling drives link, role gate, project and payment through fake HTTP
   assert.deepEqual(project.body, { title: "Восстановленный заказ", clientId: "client-1", managerId: "manager-1" });
   assert.equal(project.actor, "manager-1");
   const payment = calls.find((call) => call.path === "/api/v1/bot/payments");
-  assert.deepEqual(payment.body, { projectId: "project-205", direction: "INCOME", amount: 100, currency: "BYN", cashAccountId: "cash-1" });
+  assert.match(payment.body.clientMutationId, /^[a-f0-9-]{36}$/);
+  const {clientMutationId: _paymentRequest, ...paymentData} = payment.body;
+  assert.deepEqual(paymentData, { projectId: "project-205", direction: "INCOME", amount: 100, currency: "BYN", cashAccountId: "cash-1" });
   assert.equal(payment.actor, "manager-1");
   assert.ok(calls.filter((call) => call.path.startsWith("/botfixture-token/")).length > 0);
   assert.ok(

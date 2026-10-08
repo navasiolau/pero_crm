@@ -1,6 +1,7 @@
 import {randomUUID} from "node:crypto";
 import { crm, CrmError, type ProjectRef,type ProjectBaseline } from "./crm";
-import { tg, TgError, type InlineButton, type TgCallbackQuery, type TgUpdate } from "./tg";
+import { tg, TgError, type InlineButton, type TgCallbackQuery, type TgMessage, type TgUpdate } from "./tg";
+import { documentFromMessage, TelegramDocumentError, type TelegramDocument } from "./telegram-documents";
 import {
   CURRENCIES,
   FINANCE_ROLES,
@@ -36,7 +37,11 @@ type Dialog =
   | {
       kind: "payment";
       direction: "INCOME" | "EXPENSE";
-      step: "project" | "amount" | "currency" | "cash" | "article" | "comment";
+      step: "project" | "amount" | "currency" | "cash" | "article" | "comment" | "document" | "confirm";
+      clientMutationId: string;
+      reportDocument?: { id: string; fileName: string; mimeType: string };
+      documentAttempt?: { key: string; clientMutationId: string; attachment: TelegramDocument };
+      busy?: boolean;
       projectId?: string;
       projectNumber?: string;
       projectCurrency?: string;
@@ -78,6 +83,7 @@ const dialogs = new Map<string, Dialog>();
 const sessionCache = new Map<string, Session & { at: number }>();
 const noticeAt = new Map<string, number>();
 const SESSION_TTL_MS = 60_000;
+const FINANCE_CALLBACK_ACTIONS = new Set(["payin", "payout", "payproj", "cur", "cash", "art", "nocomment", "payok", "docretry"]);
 
 function getDialog(chatId: number): Dialog | undefined {
   return dialogs.get(String(chatId));
@@ -87,9 +93,9 @@ function setDialog(chatId: number, dialog: Dialog | null): void {
   else dialogs.delete(String(chatId));
 }
 
-async function getSession(chatId: string): Promise<Session | null> {
+async function getSession(chatId: string, fresh = false): Promise<Session | null> {
   const cached = sessionCache.get(chatId);
-  if (cached && Date.now() - cached.at < SESSION_TTL_MS) return cached;
+  if (!fresh && cached && Date.now() - cached.at < SESSION_TTL_MS) return cached;
   const response = await crm.session(chatId);
   if (!response.found || !response.user) return null;
   const session: Session = {
@@ -145,10 +151,10 @@ export async function handleUpdate(update: TgUpdate): Promise<void> {
     return;
   }
   const message = update.message;
-  if (!message?.text) return;
+  if (!message) return;
 
   const chatId = message.chat.id;
-  const text = message.text.trim();
+  const text = message.text?.trim() ?? "";
   const { cmd, args } = parseCommand(text);
 
   // /start <код> работает без сессии (привязка доступна любой роли).
@@ -168,11 +174,17 @@ export async function handleUpdate(update: TgUpdate): Promise<void> {
       noticeAt.set(String(chatId), Date.now());
       await reply(
         chatId,
-        `${session.name}, бот доступен только менеджерам, администраторам и директорам.`,
+        `${session.name}, бот доступен только менеджерам, администраторам, директорам, бухгалтерам и снабженцам.`,
       );
     }
     return;
   }
+
+  if (message.document || message.photo?.length) {
+    await paymentDocumentMessage(chatId, message);
+    return;
+  }
+  if (!message.text) return;
 
   if (cmd !== "") {
     await handleCommand(chatId, session, cmd, args);
@@ -214,7 +226,7 @@ async function handleLinkCode(
   if (!result.user.botAllowed) {
     await reply(
       chatId,
-      `Аккаунт привязан: ${who}.\nБот доступен только менеджерам, администраторам и директорам — команды неактивны.`,
+      `Аккаунт привязан: ${who}.\nБот доступен только менеджерам, администраторам, директорам, бухгалтерам и снабженцам — команды неактивны.`,
     );
     return;
   }
@@ -430,10 +442,11 @@ async function startPayment(
   direction: "INCOME" | "EXPENSE",
   args: string[],
 ): Promise<void> {
+  if (chatId <= 0) { await reply(chatId, "Финансовые операции доступны в личном чате с ботом."); return; }
   if (!hasAny(session.roles, FINANCE_ROLES)) {
     await reply(
       chatId,
-      "Платежи доступны администратору, директору и бухгалтеру.",
+      "Платежи доступны администратору, директору, бухгалтеру и снабженцу.",
     );
     return;
   }
@@ -441,6 +454,7 @@ async function startPayment(
     kind: "payment",
     direction,
     step: "project",
+    clientMutationId: randomUUID(),
   };
   const label = direction === "INCOME" ? "Приход" : "Расход";
   // /расход 205 4000 — номер и сумму можно указать сразу
@@ -512,7 +526,43 @@ async function paymentText(
     dialog.comment = text === "-" || text === "—" ? undefined : text;
     setDialog(chatId, dialog);
     await confirmPayment(chatId, session, dialog);
+    return;
   }
+  if (dialog.step === "document") await reply(chatId, "Отправьте отчётный документ файлом или фотографией.", [[CANCEL_BUTTON]]);
+}
+
+async function paymentDocumentMessage(chatId: number, message: TgMessage) {
+  if (!message.from || message.from.id !== chatId || chatId <= 0) return;
+  const session = await getSession(String(chatId), true);
+  const dialog = getDialog(chatId);
+  if (!session || !hasAny(session.roles, FINANCE_ROLES)) { await reply(chatId, "Недостаточно прав для финансовых документов"); return; }
+  if (dialog?.kind !== "payment" || dialog.direction !== "EXPENSE" || !["document", "comment"].includes(dialog.step)) {
+    await reply(chatId, "Сначала начните оформление расхода: /расход"); return;
+  }
+  if (dialog.busy) return;
+  if (dialog.step === "comment") { dialog.comment = message.caption?.trim() || undefined; dialog.step = "document"; }
+  const attachment = documentFromMessage(message); if (!attachment) return;
+  const key = JSON.stringify([attachment.uniqueId, attachment.fileName, attachment.mimeType]);
+  if (dialog.documentAttempt?.key !== key) dialog.documentAttempt = { key, clientMutationId: randomUUID(), attachment };
+  await uploadPaymentDocument(chatId, session, dialog);
+}
+
+async function uploadPaymentDocument(chatId: number, session: Session, dialog: Extract<Dialog, { kind: "payment" }>) {
+  const attempt = dialog.documentAttempt;
+  if (!attempt || dialog.busy) return;
+  dialog.busy = true;
+  try {
+    const bytes = await tg.downloadDocument(attempt.attachment);
+    const result = await crm.uploadFinanceDocument(session.userId, { clientMutationId: attempt.clientMutationId,
+      fileName: attempt.attachment.fileName, mimeType: attempt.attachment.mimeType, bytes });
+    if (!result.ok || !result.document) throw new CrmError(result.error ?? "CRM не подтвердила документ");
+    if (getDialog(chatId) !== dialog) return;
+    dialog.reportDocument = result.document;
+    await confirmPayment(chatId, session, dialog);
+  } catch (error) {
+    const message = error instanceof CrmError || error instanceof TelegramDocumentError ? error.message : "Не удалось загрузить документ";
+    await reply(chatId, `❌ ${message}. Данные расхода сохранены.`, [[{ text: "Повторить загрузку", callback_data: `docretry:${attempt.clientMutationId}` }], [CANCEL_BUTTON]]);
+  } finally { dialog.busy = false; }
 }
 
 // Продвижение диалога платежа к следующему шагу ввода; amountIsSet —
@@ -556,6 +606,11 @@ async function confirmPayment(
   session: Session,
   dialog: Extract<Dialog, { kind: "payment" }>,
 ): Promise<void> {
+  if (dialog.direction === "EXPENSE" && !dialog.reportDocument) {
+    dialog.step = "document"; setDialog(chatId, dialog);
+    await reply(chatId, "Отчетный документ: отправьте файл или фотографию (до 20 МБ).", [[CANCEL_BUTTON]]); return;
+  }
+  dialog.step = "confirm";
   const label = dialog.direction === "INCOME" ? "Приход" : "Расход";
   const lines = [
     `❗ Подтвердите: ${label}`,
@@ -565,12 +620,13 @@ async function confirmPayment(
   ];
   if (dialog.direction === "EXPENSE") {
     lines.push(`Статья: ${dialog.articleLabel ?? "—"}`);
+    lines.push(`Отчетный документ: ${dialog.reportDocument?.fileName ?? "—"}`);
   }
   lines.push(`Комментарий: ${dialog.comment ?? "—"}`);
   setDialog(chatId, dialog);
   await reply(chatId, lines.join("\n"), [
     [
-      { text: "✅ Создать", callback_data: "payok" },
+      { text: "✅ Создать", callback_data: `payok:${dialog.clientMutationId}` },
       { text: "❌ Отмена", callback_data: "cancel" },
     ],
   ]);
@@ -700,9 +756,12 @@ async function handleCallback(query: TgCallbackQuery): Promise<void> {
   const data = query.data ?? "";
   const [action, ...rest] = data.split(":");
 
-  const session = await getSession(String(chatId));
+  const financial = FINANCE_CALLBACK_ACTIONS.has(action);
+  if (financial && (chatId <= 0 || query.from.id !== chatId)) return;
+  const session = await getSession(String(chatId), financial);
   if (!session) return;
   if (!session.botAllowed) return;
+  if (financial && !hasAny(session.roles, FINANCE_ROLES)) { await reply(chatId, "Недостаточно прав для финансовой операции"); return; }
 
   try {
     await dispatchCallback(chatId, session, action, rest);
@@ -915,6 +974,7 @@ async function dispatchCallback(
       kind: "payment",
       direction: action === "payin" ? "INCOME" : "EXPENSE",
       step: "amount",
+      clientMutationId: randomUUID(),
       projectId: card.project.id,
       projectNumber: card.project.number,
       projectCurrency: card.project.currency,
@@ -927,7 +987,7 @@ async function dispatchCallback(
   }
   if (action === "payproj") {
     const dialog = getDialog(chatId);
-    if (dialog?.kind !== "payment") {
+    if (dialog?.kind !== "payment" || dialog.step !== "project") {
       await reply(chatId, "Сессия устарела — начните заново");
       return;
     }
@@ -944,7 +1004,7 @@ async function dispatchCallback(
   }
   if (action === "cur") {
     const dialog = getDialog(chatId);
-    if (dialog?.kind !== "payment" || !dialog.amount) {
+    if (dialog?.kind !== "payment" || dialog.step !== "currency" || !dialog.amount || !CURRENCIES.includes(rest[0])) {
       await reply(chatId, "Сессия устарела — начните заново");
       return;
     }
@@ -973,12 +1033,13 @@ async function dispatchCallback(
   }
   if (action === "cash") {
     const dialog = getDialog(chatId);
-    if (dialog?.kind !== "payment") {
+    if (dialog?.kind !== "payment" || dialog.step !== "cash") {
       await reply(chatId, "Сессия устарела — начните заново");
       return;
     }
     const accounts = (await crm.directory(session.userId, "cash")).items ?? [];
     const account = accounts.find((item) => item.id === rest[0]);
+    if (!account || account.currency !== dialog.currency) { await reply(chatId, "Выберите действующую кассу в валюте операции"); return; }
     dialog.cashAccountId = rest[0];
     dialog.cashLabel = account?.label ?? rest[0];
     if (dialog.direction === "EXPENSE") {
@@ -1006,11 +1067,12 @@ async function dispatchCallback(
   }
   if (action === "art") {
     const dialog = getDialog(chatId);
-    if (dialog?.kind !== "payment") {
+    if (dialog?.kind !== "payment" || dialog.step !== "article") {
       await reply(chatId, "Сессия устарела — начните заново");
       return;
     }
     const articles = (await crm.directory(session.userId, "articles")).items ?? [];
+    if (!articles.some(item => item.id === rest[0])) { await reply(chatId, "Выберите действующую статью расхода"); return; }
     dialog.articleId = rest[0];
     dialog.articleLabel = articles.find((item) => item.id === rest[0])?.label ?? rest[0];
     dialog.step = "comment";
@@ -1020,7 +1082,7 @@ async function dispatchCallback(
   }
   if (action === "nocomment") {
     const dialog = getDialog(chatId);
-    if (dialog?.kind !== "payment") {
+    if (dialog?.kind !== "payment" || dialog.step !== "comment") {
       await reply(chatId, "Сессия устарела — начните заново");
       return;
     }
@@ -1030,27 +1092,45 @@ async function dispatchCallback(
   }
   if (action === "payok") {
     const dialog = getDialog(chatId);
-    if (dialog?.kind !== "payment" || !dialog.projectId || !dialog.amount || !dialog.currency || !dialog.cashAccountId) {
+    if (dialog?.kind !== "payment" || dialog.step !== "confirm" || rest[0] !== dialog.clientMutationId ||
+        !dialog.projectId || !dialog.amount || !dialog.currency || !dialog.cashAccountId ||
+        (dialog.direction === "EXPENSE" && !dialog.reportDocument)) {
       await reply(chatId, "Сессия устарела — начните заново");
       return;
     }
+    if (dialog.busy) return;
+    dialog.busy = true;
+    try {
     const result = await crm.createPayment(session.userId, {
+      clientMutationId: dialog.clientMutationId,
       projectId: dialog.projectId,
       direction: dialog.direction,
       amount: dialog.amount,
       currency: dialog.currency,
       cashAccountId: dialog.cashAccountId,
       ...(dialog.direction === "EXPENSE" ? { expenseArticleId: dialog.articleId } : {}),
+      ...(dialog.reportDocument ? { reportDocumentId: dialog.reportDocument.id } : {}),
       ...(dialog.comment ? { comment: dialog.comment } : {}),
     });
-    setDialog(chatId, null);
+    if (result.ok && getDialog(chatId) === dialog) setDialog(chatId, null);
     const label = dialog.direction === "INCOME" ? "Приход" : "Расход";
     await reply(
       chatId,
       result.ok
         ? `✅ ${label} ${formatMoney(dialog.amount, dialog.currency)} · П-${dialog.projectNumber} — записано`
-        : `❌ ${result.error}`,
+        : `❌ ${result.error}. Данные сохранены — повторите подтверждение или отмените операцию.`,
     );
+    } catch (error) {
+      await reply(chatId, error instanceof CrmError ? `❌ ${error.message}. Повторите подтверждение: идентификатор операции сохранён.` : "Не удалось подтвердить операцию. Повторите подтверждение.");
+    } finally { dialog.busy = false; }
     return;
+  }
+  if (action === "docretry") {
+    const dialog = getDialog(chatId), current = await getSession(String(chatId), true);
+    if (!current || !hasAny(current.roles, FINANCE_ROLES) ||
+        dialog?.kind !== "payment" || dialog.step !== "document" || rest[0] !== dialog.documentAttempt?.clientMutationId) {
+      await reply(chatId, "Загрузка недоступна — начните оформление расхода заново"); return;
+    }
+    await uploadPaymentDocument(chatId, current, dialog);
   }
 }
