@@ -1,0 +1,167 @@
+import assert from "node:assert/strict";
+import { createRequire } from "node:module";
+import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { createServer } from "node:http";
+import path from "node:path";
+import { chromium, expect } from "@playwright/test";
+
+const web = process.cwd(), require = createRequire(import.meta.url);
+const { build } = createRequire(require.resolve("tsx/package.json"))("esbuild");
+const directory = path.resolve(web, "../../.playwright-mcp/search117");
+await mkdir(directory, { recursive: true });
+// Настоящие Views, карточки, DnD, фильтры, контроллер и Sheet. Только
+// Next-навигация и серверные actions заменены контролируемым транспортом.
+const entry = `
+import React from 'react';import {createRoot} from 'react-dom/client';
+import {ProjectsView} from '@/app/(app)/projects/projects-view';
+import {ProductsView} from '@/app/(app)/products/products-view';
+import {ListParamsProvider,useListParams} from '@/lib/list-params';
+import {parseListFilterValue} from '@/lib/list-filter-values';
+import {normalizeListQuery,encodeListPreference} from '@/lib/list-state';
+const section=location.pathname.slice(1), product=section==='products';
+window.__section=section;window.__hold=false;window.__navigation=[];window.__mutations=[];
+const number=product?'199.5':'199';window.__number=number;
+const common={title:'Стеллаж',statusChangedAt:new Date().toISOString(),stageChangedAt:new Date().toISOString(),
+ expectedPrice:null,totalPrice:null,quantity:1,currency:'BYN',clientId:'client',clientName:'Клиент',managerName:null,
+ projectId:'parent',projectStage:'IN_WORK',projectNumber:'199',projectTitle:'Заказ',engineerId:null,engineerName:null,
+ isEngineeringParticipant:false,hasB3d:false,noModel:true,sketchFile:null,coverFile:null,hasMaterialShortage:false,
+ tasksCount:0,filesCount:0,productsCount:1};
+const all=[...Array.from({length:12},(_,i)=>({...common,id:'partial-'+i,number:number+String(99-i),
+ title:'Совпадение '+i,status:'INSTALLATION',stage:'RECLAMATION'})),
+ {...common,id:'target',number,status:'INSTALLATION',stage:'RECLAMATION',title:'Искомая карточка'},
+ {...common,id:'start',number:'100.1',status:'PREPARATION',stage:'LEAD',title:'Начало'},
+ {...common,id:'end',number:'800.1',status:'DONE',stage:'REFUSED',title:'Конец'}];
+function rows(query){const p=new URLSearchParams(query),q=p.get('q')?.trim()||'',selected=parseListFilterValue(p.get(product?'status':'stage'));return all.filter(row=>(!window.__omitTarget||row.id!=='target')&&(!q||row.number.includes(q)||row.title.toLowerCase().includes(q.toLowerCase()))&&(!selected||selected.includes(product?row.status:row.stage))).map(row=>({...row}));}
+window.__all=all;
+function Controls(){const state=useListParams();window.__setFilters=state.set;window.__clientQuery=state.query;window.__pending=state.pending;return null;}
+function App(){const initial=normalizeListQuery(section,location.search.slice(1));
+ const [mounted,setMounted]=React.useState(true);window.__unmount=()=>setMounted(false);
+ const [result,setResult]=React.useState(()=>({query:initial,rows:rows(initial),preference:encodeListPreference(section,initial,'initial')}));
+ window.__accept=query=>setResult({query,rows:rows(query),preference:encodeListPreference(section,query,'accepted')});
+ window.__refresh=()=>setResult(previous=>({...previous,rows:previous.rows.map(row=>({...row}))}));
+ window.__clearTarget=()=>setResult(previous=>({...previous,rows:previous.rows.filter(row=>row.id!=='target')}));
+ const view=new URLSearchParams(result.query).get('view')==='table'?'table':'kanban';
+ return <><aside style={{display:window.innerWidth<768?'none':'block',position:'fixed',top:0,left:0,width:240,height:'100vh',background:'#f2f2f2'}}>PERO QA</aside>
+ <main style={{marginLeft:window.innerWidth<768?0:240,padding:16,minWidth:0}}>{mounted&&<ListParamsProvider section={section} initialQuery={result.query} preference={result.preference}><Controls/>
+ {product?<ProductsView resolvedQuery={result.query} view={view} products={result.rows} total={result.rows.length} page={1} pageSize={10} canManage actorRoles={['ADMIN']} showAmount={false} projectOptions={[]} clientOptions={[]} engineerOptions={[]}/>
+ :<ProjectsView resolvedQuery={result.query} view={view} projects={result.rows} total={result.rows.length} page={1} pageSize={10} canManage showAmount={false} clients={[]} managers={[]} engineers={[]}/>}</ListParamsProvider>}</main><div style={{height:1200}}/></>;
+}createRoot(document.getElementById('root')).render(<App/>);
+`;
+const boundaries = {
+  "next/navigation": `export const useRouter=()=>({replace:(href)=>{const q=href.split('?')[1]||'';window.__navigation.push(q);if(!window.__hold)window.__accept(q);},push:href=>window.__opened=href,refresh:()=>window.__refresh()});export const usePathname=()=>location.pathname;`,
+  "next/link": `import React from 'react';export default function Link({children,...props}){return <a {...props}>{children}</a>}`,
+  "@/server/list-preferences-actions": `import {encodeListPreference} from '@/lib/list-state';export async function saveListPreference(section,query){window.__savedQuery=query;if(window.__holdSave)await new Promise(resolve=>window.__releaseSave=resolve);return {ok:true,value:encodeListPreference(section,query,'saved')}}`,
+  "@/server/projects/stage-actions": `export async function patchProjectStage(value){window.__mutations.push(value);return {ok:true,stage:value.toStage}}`,
+  "@/server/products/actions": `export async function changeProductStatus(id,status){window.__mutations.push({id,status});return {ok:true}}`,
+  "@/server/projects/actions": `export async function createProject(){throw Error('not in QA scope')}`,
+  "@/server/clients/actions": `export async function createClient(){throw Error('not in QA scope')}`,
+};
+const bundle = await build({stdin:{contents:entry,loader:"tsx",resolveDir:web},bundle:true,write:false,platform:"browser",format:"iife",jsx:"automatic",tsconfig:path.join(web,"tsconfig.json"),define:{"process.env.NODE_ENV":'"development"'},plugins:[{
+ name:"http-boundaries",setup(builder){builder.onResolve({filter:/^(?:next\/(?:navigation|link)|@\/server\/)/},args=>boundaries[args.path]?{path:args.path,namespace:"qa-boundary"}:undefined);
+ builder.onLoad({filter:/.*/,namespace:"qa-boundary"},args=>({contents:boundaries[args.path],loader:"tsx",resolveDir:web}));}
+}]});
+const postcss=createRequire(require.resolve("@tailwindcss/postcss"))("postcss"),tailwind=require("@tailwindcss/postcss");
+const css=(await postcss([tailwind({base:web})]).process(await readFile(path.join(web,"src/app/globals.css"),"utf8"),{from:path.join(web,"src/app/globals.css")})).css;
+const server=createServer((request,response)=>{
+ const url=new URL(request.url,"http://localhost");response.setHeader("content-type",url.pathname==="/app.js"?"text/javascript":url.pathname==="/app.css"?"text/css":"text/html");
+ response.end(url.pathname==="/app.js"?bundle.outputFiles[0].text:url.pathname==="/app.css"?css:'<!doctype html><html lang="ru"><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/app.css"></head><body style="font-family:Arial,sans-serif"><div id="root"></div><script src="/app.js"></script></body></html>');
+});
+await new Promise(resolve=>server.listen(0,"127.0.0.1",resolve));
+const origin=`http://127.0.0.1:${server.address().port}`,browser=await chromium.launch({headless:true}),checks=[],screenshots=[];
+function target(page,section){return page.getByText(section==="products"?"199.5":"199",{exact:true}).locator(`xpath=ancestor::*[@data-slot="${section==="products"?"product":"project"}-kanban-card"][1]`);}
+async function geometry(page,section){return target(page,section).evaluate(card=>{
+ const board=card.closest('[data-slot="kanban-scroll"]'),b=board.getBoundingClientRect(),r=card.getBoundingClientRect();
+ const visibleCenter=(Math.max(0,b.left)+Math.min(innerWidth,b.right))/2;
+ const clamp=(value,max)=>Math.max(0,Math.min(max,value));
+ const wantedLeft=clamp(board.scrollLeft+r.left+r.width/2-visibleCenter,board.scrollWidth-board.clientWidth);
+ const wantedTop=clamp(scrollY+r.top+r.height/2-innerHeight/2,document.scrollingElement.scrollHeight-innerHeight);
+ return {left:board.scrollLeft,top:scrollY,wantedLeft,wantedTop,xError:Math.abs(board.scrollLeft-wantedLeft),yError:Math.abs(scrollY-wantedTop),rect:{x:r.x,y:r.y,width:r.width,height:r.height},snap:getComputedStyle(board).scrollSnapType,bottom:document.querySelector('[data-kanban-scrollbar]')?.scrollLeft};
+ });}
+async function settledCenter(page,section){await expect.poll(async()=>{const g=await geometry(page,section);return Math.max(g.xError,g.yError);},{timeout:5000}).toBeLessThan(2);}
+const waitFrames=page=>page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+const position=page=>page.evaluate(()=>({left:document.querySelector('[data-slot="kanban-scroll"]')?.scrollLeft,top:scrollY}));
+async function resetPosition(page){await page.evaluate(()=>{document.querySelector('[data-slot="kanban-scroll"]').scrollTo({left:0,behavior:'instant'});scrollTo({top:0,behavior:'instant'});});await waitFrames(page);}
+async function layout(page){return page.evaluate(()=>({columns:[...document.querySelectorAll('[data-slot="kanban-column"]')].map(column=>({width:column.offsetWidth,x:column.offsetLeft,label:column.firstElementChild.textContent.replace(/\d+$/,'')})),cards:[...document.querySelectorAll('[data-kanban-card-id]')].map(card=>({id:card.dataset.kanbanCardId,width:card.offsetWidth,height:card.offsetHeight}))}));}
+async function makePage(section,viewport={width:1440,height:900},query=''){
+ const page=await browser.newPage({viewport,hasTouch:viewport.width<768,reducedMotion:'reduce'}),errors=[];
+ page.on('pageerror',error=>errors.push(String(error)));page.__errors=errors;
+ await page.goto(origin+'/'+section+(query?'?'+query:''),{waitUntil:'domcontentloaded'});await page.locator('[data-slot="kanban-scroll"]').waitFor();await waitFrames(page);return page;
+}
+async function finish(page){assert.deepEqual(page.__errors,[]);await page.close();}
+const expectedQ=section=>section==='products'?'199.5':'199';
+const search=page=>page.getByPlaceholder('Номер, название…');
+async function apply(page,q){await search(page).fill(q);await expect.poll(()=>page.evaluate(()=>new URLSearchParams(window.__clientQuery).get('q'))).toBe(q||null);await expect.poll(()=>page.evaluate(()=>window.__pending)).toBe(false);await waitFrames(page);}
+try{
+ for(const section of ['projects','products']){
+  const q=expectedQ(section),page=await makePage(section),before=await layout(page);
+  await apply(page,q);await settledCenter(page,section);await waitFrames(page);
+  const g=await geometry(page,section);assert.ok(g.left>0&&g.top>0);assert.ok(Math.abs(g.bottom-g.left)<2);
+  assert.deepEqual(await search(page).evaluate(input=>({active:document.activeElement===input,start:input.selectionStart,end:input.selectionEnd})),{active:true,start:q.length,end:q.length});
+  const after=await layout(page);assert.deepEqual(after.columns,before.columns);assert.deepEqual(after.cards,before.cards.filter(card=>card.id!=='start'&&card.id!=='end'));
+  checks.push(section+':exact_far_column_page_center_caret_bottom_sync_unchanged_layout');
+  let screenshot=path.join(directory,section+'-1440.png');await page.screenshot({path:screenshot});screenshots.push(screenshot);
+
+  await resetPosition(page);const manually=await position(page);await page.evaluate(()=>window.__refresh());await waitFrames(page);assert.deepEqual(await position(page),manually);
+  checks.push(section+':manual_scroll_and_SSE_no_recenter');
+  await apply(page,'');await apply(page,q);await settledCenter(page,section);checks.push(section+':clear_reenter_same_exact_number');
+  await resetPosition(page);await search(page).fill('');await search(page).fill(q);await settledCenter(page,section);checks.push(section+':rapid_draft_clear_reenter_before_debounce');
+  for(const term of ['Искомая',q+'9','NoMatch117']){await resetPosition(page);await apply(page,term);assert.deepEqual(await position(page),{left:0,top:0});}
+  assert.equal(await page.locator('[data-kanban-card-id]').count(),0);checks.push(section+':title_partial_number_no_match_no_autoscroll');
+  await page.getByLabel('Таблица',{exact:true}).click();await expect(page.getByPlaceholder(section==='projects'?'Номер, название, клиент…':'Номер, название, проект, клиент…')).toBeVisible();assert.equal(await page.locator('[data-slot="kanban-scroll"]').count(),0);
+  checks.push(section+':table_keeps_old_placeholder_and_no_board_focus');await finish(page);
+
+  const stale=await makePage(section);await stale.evaluate(()=>{window.__hold=true;window.__holdSave=true;});
+  await search(stale).fill(q+'9');await expect.poll(()=>stale.evaluate(()=>window.__pending)).toBe(true);assert.deepEqual(await position(stale),{left:0,top:0});
+  await stale.evaluate(()=>{window.__holdSave=false;window.__releaseSave();});await expect.poll(()=>stale.evaluate(()=>window.__navigation.length)).toBe(1);
+  await apply(stale,q);assert.deepEqual(await position(stale),{left:0,top:0});
+  await stale.evaluate(()=>window.__accept(window.__navigation[0]));await waitFrames(stale);assert.deepEqual(await position(stale),{left:0,top:0});assert.equal(await search(stale).inputValue(),q);
+  await stale.evaluate(()=>window.__accept(window.__navigation.at(-1)));await settledCenter(stale,section);checks.push(section+':pending_and_stale_RSC_wait_for_current_query_rows');await finish(stale);
+
+  const missing=await makePage(section);await missing.evaluate(()=>window.__omitTarget=true);await apply(missing,q);assert.deepEqual(await position(missing),{left:0,top:0});
+  await missing.evaluate(()=>{window.__omitTarget=false;window.__accept(window.__clientQuery)});await waitFrames(missing);assert.equal(await missing.locator('[data-kanban-card-id="target"]').count(),1);assert.deepEqual(await position(missing),{left:0,top:0});checks.push(section+':missing_exact_consumed_no_late_SSE_focus');await finish(missing);
+
+  const axes=await makePage(section);await axes.evaluate(()=>window.__hold=true);await apply(axes,q);
+  await axes.evaluate(section=>window.__setFilters({[section==='products'?'status':'stage']:'DONE'}),section);await expect.poll(()=>axes.evaluate(()=>window.__navigation.length)).toBe(2);
+  await axes.evaluate(()=>window.__accept(window.__navigation[0]));await waitFrames(axes);assert.deepEqual(await position(axes),{left:0,top:0});
+  await axes.evaluate(()=>window.__accept(window.__navigation[1]));await waitFrames(axes);assert.equal(await axes.locator('[data-kanban-card-id]').count(),0);assert.deepEqual(await position(axes),{left:0,top:0});
+  checks.push(section+':same_search_stale_filter_axes_cannot_center_excluded_card');await finish(axes);
+
+  const drag=await makePage(section);await drag.evaluate(()=>window.__hold=true);await apply(drag,q);
+  const handle=drag.getByRole('button',{name:'Перетащить Начало',exact:true}),box=await handle.boundingBox();assert.ok(box);
+  await drag.mouse.move(box.x+box.width/2,box.y+box.height/2);await drag.mouse.down();await drag.mouse.move(box.x+box.width/2+15,box.y+box.height/2+15,{steps:3});await waitFrames(drag);
+  assert.equal(await drag.locator('[data-kanban-card-id="start"]').count(),1,'DragOverlay is not a focus target');
+  await drag.evaluate(()=>window.__accept(window.__navigation.at(-1)));await waitFrames(drag);assert.deepEqual(await position(drag),{left:0,top:0});
+  await drag.mouse.up();await settledCenter(drag,section);assert.deepEqual(await drag.evaluate(()=>window.__mutations),[]);checks.push(section+':active_DnD_defers_focus_until_finish_overlay_not_target');await finish(drag);
+
+  const resized=await makePage(section,{width:390,height:844});await resized.getByRole('button',{name:'Фильтры',exact:true}).click();await expect(resized.getByRole('dialog')).toBeVisible();
+  await resized.setViewportSize({width:1440,height:900});await expect(resized.getByRole('dialog')).toHaveCount(0);
+  await resized.setViewportSize({width:390,height:844});await expect(resized.getByRole('dialog')).toBeVisible();await apply(resized,q);await waitFrames(resized);
+  assert.equal(await resized.getByRole('dialog').count(),1);assert.deepEqual(await position(resized),{left:0,top:0},'returning mobile open Sheet still blocks focus');
+  await resized.getByRole('button',{name:'Показать результаты',exact:true}).click();await expect(resized.getByRole('dialog')).toHaveCount(0);await settledCenter(resized,section);
+  checks.push(section+':open_Sheet_mobile_desktop_mobile_stays_blocked_until_close');await finish(resized);
+
+  for(const viewport of [{width:390,height:844},{width:360,height:800}]){
+   const restored=await makePage(section,viewport,'view=kanban&q='+encodeURIComponent(q));await settledCenter(restored,section);await restored.waitForTimeout(300);const restoredGeometry=await geometry(restored,section);assert.ok(restoredGeometry.xError<2&&restoredGeometry.yError<2);checks.push(section+':'+viewport.width+':initial_saved_query_mobile_layout_settles');await finish(restored);
+   const mobile=await makePage(section,viewport),initialLayout=await layout(mobile);
+   const nativeSnap=await mobile.locator('[data-slot="kanban-scroll"]').evaluate(board=>getComputedStyle(board).scrollSnapType);assert.ok(nativeSnap==='x'||nativeSnap==='x proximity','Chrome serializes proximity as its default');
+   await mobile.getByRole('button',{name:'Фильтры',exact:true}).click();await expect(mobile.getByRole('dialog')).toBeVisible();await apply(mobile,q);
+   assert.equal(await mobile.getByRole('dialog').count(),1);assert.deepEqual(await position(mobile),{left:0,top:0});
+   await mobile.getByRole('button',{name:'Показать результаты',exact:true}).click();await expect(mobile.getByRole('dialog')).toHaveCount(0);await settledCenter(mobile,section);await mobile.waitForTimeout(300);
+   const focused=await geometry(mobile,section);assert.ok(focused.xError<2&&focused.yError<2);assert.equal(focused.snap,'none');assert.ok(Math.abs(focused.bottom-focused.left)<2);assert.deepEqual((await layout(mobile)).columns,initialLayout.columns);
+   screenshot=path.join(directory,section+'-'+viewport.width+'.png');await mobile.screenshot({path:screenshot});screenshots.push(screenshot);
+   checks.push(section+':'+viewport.width+':Sheet_wait_complete_close_center_layout_and_bottom_sync');
+
+   // Настоящий touch-жест восстанавливает исходный snap до обычной прокрутки.
+   const cdp=await mobile.context().newCDPSession(mobile);await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:viewport.width-30,y:viewport.height/2}]});
+   for(const x of [viewport.width-80,viewport.width-150,70])await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x,y:viewport.height/2}]});
+   await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});await mobile.waitForTimeout(350);await cdp.detach();
+   assert.equal(await mobile.locator('[data-slot="kanban-scroll"]').evaluate(board=>getComputedStyle(board).scrollSnapType),nativeSnap);
+   const manual=await position(mobile);assert.ok(Math.abs(manual.left-focused.left)>10);await mobile.evaluate(()=>window.__refresh());await waitFrames(mobile);assert.deepEqual(await position(mobile),manual);
+   assert.ok(Math.abs((await mobile.locator('[data-kanban-scrollbar]').evaluate(bar=>bar.scrollLeft))-manual.left)<2);
+   assert.equal(await mobile.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);checks.push(section+':'+viewport.width+':real_touch_restores_snap_manual_scroll_and_SSE');await finish(mobile);
+  }
+ }
+ const receipt={status:'PASS',checks,screenshots,mode:'actual React Views, query controller, filters, DnD, Base UI and Tailwind; controlled server transport; no DB'};
+ await writeFile(path.join(directory,'receipt.json'),JSON.stringify(receipt,null,2));console.log(JSON.stringify(receipt));
+}catch(error){const receipt={status:'FAIL',error:String(error),checks};await writeFile(path.join(directory,'receipt.json'),JSON.stringify(receipt,null,2));console.log(JSON.stringify(receipt));throw error;}
+finally{await browser.close();await new Promise(resolve=>server.close(resolve));}

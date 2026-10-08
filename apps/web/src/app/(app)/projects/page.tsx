@@ -41,7 +41,7 @@ export default async function ProjectsPage({
     listProjects(
       session.user.id,
       role,
-      filters,
+      view === "kanban" ? { ...filters, searchScope: "identity" } : filters,
       // Канбану нужна вся отфильтрованная доска, таблице — страница
       view === "table" ? { page, pageSize } : undefined,
     ),
@@ -55,6 +55,7 @@ export default async function ProjectsPage({
     <ListParamsProvider key={session.user.id} section="projects" initialQuery={state.query} preference={state.value}>
     <ProjectsView
       view={view}
+      resolvedQuery={state.query}
       projects={result.rows.map((project) => ({
         id: project.id,
         number: project.number,
