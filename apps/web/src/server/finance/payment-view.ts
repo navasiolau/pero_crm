@@ -2,9 +2,9 @@ import type { Payment } from "@prisma/client";
 import { reportDocumentFile, type ReportDocumentRecord } from "@/server/finance-documents/view";
 import type { PaymentRow } from "./contracts";
 
-type PaymentRecord = Pick<Payment, "id" | "direction" | "amount" | "currency" | "rate" | "bynAmount" | "projectAmount" | "paidAt" | "comment" | "createdById"> & {
+export type PaymentRecord = Pick<Payment, "id" | "direction" | "amount" | "currency" | "rate" | "bynAmount" | "projectAmount" | "paidAt" | "comment" | "createdById"> & {
   cashAccount: { name: string } | null;
-  expenseArticle: { name: string } | null;
+  expenseArticle: { id: string; name: string } | null;
   reportDocument?: ReportDocumentRecord | null;
 };
 export function paymentView(row: PaymentRecord, people: ReadonlyMap<string, string>): PaymentRow {

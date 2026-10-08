@@ -1,4 +1,21 @@
 import type { ViewableFile } from "@/lib/viewable-file";
+import type { ExpenseBreakdownRow } from "./project-expense-facts";
+
+export type ProjectExpenseRow = {
+  id: string;
+  source: "PAYMENT" | "WAREHOUSE_ISSUE" | "WAREHOUSE_RETURN";
+  sourceId: string;
+  date: string;
+  article: { key: string; label: string };
+  bynAmount: number | null;
+  comment: string | null;
+  createdByName: string | null;
+  payment: PaymentRow | null;
+  stock: {
+    materialId: string; materialName: string; unit: string; quantity: string; unitPrice: string | null;
+    product: { id: string; number: string } | null; sourceMovementId: string | null;
+  } | null;
+};
 
 export type PaymentRow = {
   id: string;
@@ -22,7 +39,7 @@ export type ProjectEconomicsView = {
   payrollTotal: number | null;
   margin: number | null;
   marginAtFullPrice: number | null;
-  expenseBreakdown: { label: string; amount: number | null }[];
+  expenseBreakdown: ExpenseBreakdownRow[];
 };
 export type CashAccountOption = { id: string; name: string; currency: string };
 export type ExpenseArticleOption = { id: string; name: string };

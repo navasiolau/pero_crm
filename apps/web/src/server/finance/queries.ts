@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { Prisma,type PrismaClient } from "@prisma/client";
 
 import { sumHistoricalByn, sumByn, subtractByn, BYN_UNAVAILABLE_REASON } from "@/lib/history-byn";
+import { summarizeProjectExpenses, type ProjectExpenseFacts, type ExpenseBreakdownRow } from "./project-expense-facts";
 
 // ─── Финансы (§11): кассы, статьи расходов, экономика проекта ───────────────
 // Раздел доступен администратору, директору и бухгалтеру (middleware + requireFinance).
@@ -80,7 +81,7 @@ export type ProjectEconomics = {
   payrollTotal: number | null; // ЗП по проекту (начисления), в валюте проекта
   margin: number | null; // paidTotal − expensesTotal − payrollTotal
   marginAtFullPrice: number | null; // expectedPrice − расходы − ЗП
-  expenseBreakdown: { label: string; amount: number | null }[]; // по статьям + ЗП + материалы
+  expenseBreakdown: ExpenseBreakdownRow[]; // по статьям + ЗП + материалы
 };
 
 // Внутренняя экономика использует только сохранённые BYN-эквиваленты.
@@ -89,6 +90,7 @@ export type ProjectEconomics = {
 export async function getProjectEconomics(
   projectId: string,
   database:Pick<PrismaClient,"project"|"payment"|"payrollEntry"|"stockMovement"|"productStageSettlement"|"productPercentageCompletion">=prisma,
+  facts?: ProjectExpenseFacts,
 ): Promise<ProjectEconomics | null> {
   const project = await database.project.findUnique({
     where: { id: projectId },
@@ -105,12 +107,12 @@ export async function getProjectEconomics(
   const currency = "BYN";
 
   const [payments, payrollEntries, stockMovements, settlements, completions] = await Promise.all([
-    database.payment.findMany({
+    facts ? Promise.resolve(facts.payments) : database.payment.findMany({
       where: { projectId },
       select: {
         direction: true,
         bynAmount: true,
-        expenseArticle: { select: { name: true } },
+        expenseArticle: { select: { id: true, name: true } },
       },
     }),
     database.payrollEntry.findMany({
@@ -119,7 +121,7 @@ export async function getProjectEconomics(
     }),
     // Списания материалов со склада (§12): цены хранятся в BYN (totalByn),
     // привязка — к изделиям этого проекта
-    database.stockMovement.findMany({
+    facts ? Promise.resolve(facts.stockMovements) : database.stockMovement.findMany({
       where: { product: { projectId }, type: { in: ["EXPENSE", "RETURN"] } },
       select: { type: true, totalByn: true },
     }),
@@ -133,20 +135,7 @@ export async function getProjectEconomics(
     }),
   ]);
 
-  let paidByn = new Prisma.Decimal(0);
-  let expenseByn = new Prisma.Decimal(0);
-  const byArticle = new Map<string, Prisma.Decimal>();
-  for (const payment of payments) {
-    const amount = new Prisma.Decimal(payment.bynAmount);
-    if (payment.direction === "INCOME") paidByn = paidByn.plus(amount);
-    else {
-      expenseByn = expenseByn.plus(amount);
-      const label = payment.expenseArticle?.name ?? "Прочее";
-      byArticle.set(label, (byArticle.get(label) ?? new Prisma.Decimal(0)).plus(amount));
-    }
-  }
-  let paidTotal = paidByn.toNumber();
-  let expensesTotal: number | null = expenseByn.toNumber();
+  const { paidTotal, expensesTotal, expenseBreakdown } = summarizeProjectExpenses({ payments, stockMovements });
 
   // Полные снимки учитывают даже доли, округлённые до нуля; связанные
   // PayrollEntry исключены выше, чтобы не начислять одну сумму дважды.
@@ -156,33 +145,19 @@ export async function getProjectEconomics(
     sumByn(completions.map(row => row.bynAmount?.toNumber() ?? null)),
     sumByn(completions.flatMap(row=>(row.shares??[]).flatMap(share=>(share.adjustments??[]).map(adjustment=>adjustment.delta.toNumber())))),
   ]);
-  const materialsTotal = stockMovements.some(movement => movement.totalByn === null) ? null : stockMovements.reduce((sum, movement) => sum.plus(
-    new Prisma.Decimal(movement.totalByn!).times(movement.type === "RETURN" ? -1 : 1)), new Prisma.Decimal(0)).toNumber();
-  expensesTotal = sumByn([expensesTotal, materialsTotal]);
   const round = (value: number) => new Prisma.Decimal(value).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP).toNumber();
-  paidTotal = round(paidTotal);
-  expensesTotal = expensesTotal === null ? null : round(expensesTotal);
   // Ожидаемая цена = Σ цен изделий + доставка/выгрузка/монтаж проекта
   const expectedRaw =
     calculateProjectTotal(project.products, project);
   const expectedPrice = project.currency === "BYN" && project.products.every(product => product.expectedPrice !== null) ? round(expectedRaw) : null;
 
-  const expenseBreakdown: { label: string; amount: number | null }[] = [...byArticle.entries()]
-    .map(([label, amount]) => ({ label, amount: round(amount.toNumber()) }))
-    .sort((a, b) => b.amount - a.amount);
-  if (materialsTotal === null || materialsTotal > 0) {
-    expenseBreakdown.unshift({
-      label: "Материалы (склад)",
-      amount: materialsTotal === null ? null : round(materialsTotal),
-    });
-  }
   if (payrollTotal === null || payrollTotal > 0) {
-    expenseBreakdown.unshift({ label: "Зарплата", amount: payrollTotal });
+    expenseBreakdown.unshift({ key: "payroll", label: "Зарплата", amount: payrollTotal });
   }
 
   return {
     currency,
-    unavailableReason: payrollTotal === null || expensesTotal === null || project.currency !== "BYN" ? BYN_UNAVAILABLE_REASON : null,
+    unavailableReason: paidTotal === null || payrollTotal === null || expensesTotal === null || project.currency !== "BYN" ? BYN_UNAVAILABLE_REASON : null,
     expectedPrice,
     paidTotal,
     expensesTotal,

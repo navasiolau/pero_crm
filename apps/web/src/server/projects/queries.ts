@@ -285,7 +285,7 @@ export async function getProjectFor(
         where: hasAnyRole(actor.roles,FINANCE_ROLES) ? {} : { id: { in: [] } },
         include: {
           cashAccount: { select: { name: true } },
-          expenseArticle: { select: { name: true } },
+          expenseArticle: { select: { id: true, name: true } },
           reportDocument: { select: reportDocumentSelect },
         },
         orderBy: { paidAt: "desc" },

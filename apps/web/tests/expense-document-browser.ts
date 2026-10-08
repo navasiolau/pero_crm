@@ -56,10 +56,9 @@ async function main() {
     await page.reload({ waitUntil: "networkidle" });
     const searches = page.getByPlaceholder("Поиск по расходам…");
     await searches.fill(fileName);
-    if (general) {
-      await page.getByRole("article").getByText("Общий расход организации", { exact: true }).click();
-      await page.getByRole("dialog").getByRole("button", { name: fileName, exact: true }).click();
-    } else await page.getByRole("button", { name: fileName, exact: true }).click();
+    const card = page.getByRole("article").filter({ hasText: general ? "Общий расход организации" : "Денежный расход" });
+    await card.click();
+    await page.getByRole("dialog").getByRole("button", { name: fileName, exact: true }).click();
     const picture = page.getByRole("img", { name: fileName, exact: true });
     await expect.poll(() => picture.evaluate(node => (node as HTMLImageElement).naturalWidth)).toBe(320);
     assert.equal(await db.payment.count({ where: { id: paymentId, amount: 0 } }), 1);
