@@ -30,7 +30,7 @@ export async function runWarehouseDeletionHttp(db:PrismaClient,ids:Record<string
    const response=await request('/warehouse/movements',marker,{method:'POST',headers:{'content-type':'application/json','next-action':ids[name]},body:JSON.stringify(args)});
    return {status:response.status,value:reply(await response.text())};
   };
-  const adminPage=await request('/warehouse/movements',marker);assert.equal(adminPage.status,200);assert.ok((await adminPage.text()).includes('Удалить'));
+  const adminPage=await request('/warehouse/movements',marker);assert.equal(adminPage.status,200,'ADMIN_SSR');assert.ok((await adminPage.text()).includes('Удалить'));
   for(const role of ['DIRECTOR','PROCUREMENT','ACCOUNTANT','MANAGER'] as const){
    await db.user.update({where:{id:marker},data:{roles:[role]}});
    const page=await request('/warehouse/movements',marker);
@@ -40,7 +40,7 @@ export async function runWarehouseDeletionHttp(db:PrismaClient,ids:Record<string
    const deniedDelete=await call('deleteWarehouseMovement',[{movementId:f.receipt.receipt.movementId,clientMutationId:randomUUID(),planFingerprint:'f'.repeat(64)}]);assert.notEqual(deniedDelete.value?.ok,true);
   }
   await db.user.update({where:{id:marker},data:{roles:['ADMIN']}});
-  const initial=await call('previewWarehouseMovementDeletion',[f.receipt.receipt.movementId]);assert.equal(initial.status,200);
+  const initial=await call('previewWarehouseMovementDeletion',[f.receipt.receipt.movementId]);assert.equal(initial.status,200,'ADMIN_PREVIEW_HTTP');
   if(state.mode==='LOCAL_READ_FIXTURE'){
    assert.equal(initial.value?.ok,false);assert.match(initial.value?.error??'',/Склад временно закрыт/);
    return {status:'PASS',roles:'REAL_SERVER_ACTIONS_AND_SSR',localPhase:'UNINITIALIZED_NO_GLOBAL_CHANGE',acceptedMutation:'STAGING_ONLY',providerMessages:0};
@@ -52,7 +52,7 @@ export async function runWarehouseDeletionHttp(db:PrismaClient,ids:Record<string
   const refreshed=await call('previewWarehouseMovementDeletion',[preview.movementId]);assert.equal(refreshed.value?.ok,true);
   assert.equal(refreshed.value!.preview!.movements.length,2);
   const input={movementId:preview.movementId,clientMutationId:randomUUID(),planFingerprint:refreshed.value!.preview!.planFingerprint};
-  const deleted=await call('deleteWarehouseMovement',[input]);assert.equal(deleted.status,200);assert.equal(deleted.value?.ok,true);
+  const deleted=await call('deleteWarehouseMovement',[input]);assert.equal(deleted.status,200,'ADMIN_DELETE_HTTP');assert.equal(deleted.value?.ok,true);
   const retry=await call('deleteWarehouseMovement',[input]);assert.equal(retry.value?.ok,true);assert.equal(retry.value?.deletionId,deleted.value?.deletionId);assert.equal(retry.value?.repeated,true);
   assert.equal(await db.stockMovement.count({where:{materialId:marker,deletionId:deleted.value!.deletionId}}),2);
   assert.equal((await db.warehouseBalance.findUniqueOrThrow({where:{materialId:marker}})).quantity.toString(),'0');
