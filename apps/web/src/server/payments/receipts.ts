@@ -22,7 +22,7 @@ export async function readPaymentReceipt(actor: DomainActor, data: PaymentData,
       !value || typeof value !== "object" || Array.isArray(value) || value.fingerprint !== paymentFingerprint(actor.id, data))
     throw Error("Идентификатор платежа уже использован с другими данными");
   const payment = await db.payment.findUnique({ where: { id: receipt.entityId } });
-  if (!payment) throw Error("Операция удалена — повторное проведение запрещено");
+  if (!payment || payment.deletionId) throw Error("Операция удалена — повторное проведение запрещено");
   return payment;
 }
 

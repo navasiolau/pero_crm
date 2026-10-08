@@ -32,8 +32,8 @@ export async function createPaymentInTransaction(actor: DomainActor, input: Paym
     // Server-only context, never taken from PaymentInput. The stock writer has
     // already created this owned PAID movement in the same outer transaction.
     const movement = await tx.stockMovement.findUnique({ where: { id: stockPurchase.movementId },
-      select: { type: true, receiptKind: true, productId: true, createdById: true, totalByn: true, stockPurchase: { select: { id: true } } } });
-    if (data.direction !== "EXPENSE" || data.projectId || prepared.project || !movement ||
+      select: { deletionId:true, type: true, receiptKind: true, productId: true, createdById: true, totalByn: true, stockPurchase: { select: { id: true } } } });
+    if (data.direction !== "EXPENSE" || data.projectId || prepared.project || !movement || movement.deletionId ||
         movement.type !== "INCOME" || movement.receiptKind !== "PAID" || movement.productId ||
         movement.createdById !== actor.id || movement.stockPurchase || !movement.totalByn?.eq(prepared.bynAmount))
       throw Error("Нет соответствующего оплаченного прихода для расхода");

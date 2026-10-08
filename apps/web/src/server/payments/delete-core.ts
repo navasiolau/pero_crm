@@ -5,7 +5,7 @@ import {readCashBalance,readOrgBalance} from '@/server/payroll/cash-core';
 export async function deletePaymentInTransaction(actor:DomainActor,paymentId:string,previewDirection:string,payrollCurrency:string,payrollRate:string,tx:Prisma.TransactionClient){
 requireActorRoles(actor,FINANCE_ROLES);
       const current = await tx.payment.findUnique({ where: { id: paymentId }, include: { project: { select: { id: true, number: true, deletedAt: true } }, stockPurchase: { select: { id: true } } } });
-      if (!current) throw new Error("Платёж не найден");
+      if (!current || current.deletionId) throw new Error("Платёж не найден или уже удалён");
       if (current.stockPurchase) throw new Error("Платёж связан с приходом на склад — отдельно удалить его нельзя");
       if (current.project?.deletedAt) throw new Error("Проект в корзине: финансовая история доступна только для просмотра");
       if (current.direction === "INCOME") {

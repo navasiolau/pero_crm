@@ -1,4 +1,5 @@
 import type { PaymentDirection, PrismaClient } from "@prisma/client";
+import {activePaymentWhere} from '@/server/payments/active-records';
 import { requireFinanceWorkspaceActor, listFinanceWorkspaceProjects, type FinanceWorkspaceActor } from "./project-refs";
 import { paymentView } from "./payment-view";
 import { reportDocumentSelect } from "@/server/finance-documents/view";
@@ -8,7 +9,7 @@ export async function loadOrganizationPayments(actor: FinanceWorkspaceActor, dir
   db: Pick<PrismaClient, "project" | "payment" | "cashAccount">) {
   requireFinanceWorkspaceActor(actor);
   const [records, cashAccounts, projects] = await Promise.all([
-    db.payment.findMany({ where: { direction }, select: { id: true, direction: true, amount: true, currency: true,
+    db.payment.findMany({ where: { ...activePaymentWhere, direction }, select: { id: true, direction: true, amount: true, currency: true,
       rate: true, rateDate: true, bynAmount: true, projectAmount: true, paidAt: true, comment: true, createdById: true,
       project: { select: { id: true, number: true, title: true, deletedAt: true } }, cashAccount: { select: { name: true } },
       expenseArticle: { select: { id: true, name: true } }, reportDocument: { select: reportDocumentSelect }, stockPurchase: { select: stockPurchaseSelect } }, orderBy: { paidAt: "desc" } }),

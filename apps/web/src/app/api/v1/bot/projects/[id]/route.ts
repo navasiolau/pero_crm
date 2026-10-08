@@ -1,4 +1,5 @@
 import {liveProjectWhere,liveProductWhere} from "@/server/access/live-entities";
+import {activePaymentWhere} from '@/server/payments/active-records';
 import { projectTotal as calculateProjectTotal } from "@/lib/product-quantity";
 import { NextResponse } from "next/server";
 
@@ -54,7 +55,7 @@ export async function GET(
   if (hasAnyRole(actor.roles, FINANCE_ROLES)) {
     const groups = await prisma.payment.groupBy({
       by: ["direction"],
-      where: { projectId: id },
+      where: { ...activePaymentWhere, projectId: id },
       _sum: { bynAmount: true },
     });
     finance = {

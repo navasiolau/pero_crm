@@ -22,6 +22,7 @@ export async function readStockPurchaseReceipt(actor: DomainActor, data: StockPu
   if (!receipt) return null;
   if (receipt.actorId !== actor.id || receipt.requestFingerprint !== stockPurchaseFingerprint(actor.id, data))
     throw Error("Идентификатор закупки уже использован с другими данными");
+  if (receipt.movement.deletionId || receipt.payment.deletionId) throw Error("Приход удалён — повторное проведение запрещено");
   return receipt;
 }
 function paymentData(data: StockPurchaseData): PaymentData {

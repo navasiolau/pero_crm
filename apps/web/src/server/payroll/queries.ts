@@ -1,4 +1,5 @@
 import {canAccrueOrdinarySalary} from "@/lib/compensation-policy";
+import {activePaymentWhere} from '@/server/payments/active-records';
 import type { PayScheme } from "@prisma/client";
 import { Prisma } from "@prisma/client";
 
@@ -316,7 +317,7 @@ export async function getMonthTurnover(
   const currency = await getPayrollCurrency();
   const { start, end } = monthRange(month);
   const agg = await prisma.payment.aggregate({
-    where: { paidAt: { gte: start, lt: end }, direction: "INCOME" },
+    where: { ...activePaymentWhere, paidAt: { gte: start, lt: end }, direction: "INCOME" },
     _sum: { bynAmount: true },
     _count: { _all: true },
   });
@@ -370,8 +371,8 @@ export function round2(value: number): number {
 // Неизвестный исторический эквивалент делает зависимый баланс недоступным. Кассовые остатки — см. listCashAccounts (§11).
 export async function getOrgBalance(): Promise<number | null> {
   const [income, expense, payouts] = await Promise.all([
-    prisma.payment.aggregate({ where: { direction: "INCOME" }, _sum: { bynAmount: true } }),
-    prisma.payment.aggregate({ where: { direction: "EXPENSE" }, _sum: { bynAmount: true } }),
+    prisma.payment.aggregate({ where: { ...activePaymentWhere, direction: "INCOME" }, _sum: { bynAmount: true } }),
+    prisma.payment.aggregate({ where: { ...activePaymentWhere, direction: "EXPENSE" }, _sum: { bynAmount: true } }),
     prisma.payout.findMany({ select: { amount: true, payrollCurrency: true, bynAmount: true } }),
   ]);
   const payments = new Prisma.Decimal(income._sum.bynAmount ?? 0).minus(expense._sum.bynAmount ?? 0).toNumber();

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -20,15 +20,20 @@ export function ConfirmDeleteDialog({
   onOpenChange,
   onConfirm,
   warning,
+  children,
+  confirmDisabled = false,
 }: {
   entityLabel: string; // "задачу", "работу", "файл", …
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onConfirm: () => Promise<boolean | void>;
   warning?: string; // дополнительное предупреждение, если есть
+  children?: ReactNode;
+  confirmDisabled?: boolean;
 }) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const heading = useRef<HTMLHeadingElement>(null);
 
   return (
     <Dialog
@@ -38,14 +43,15 @@ export function ConfirmDeleteDialog({
         onOpenChange(next);
       }}
     >
-      <DialogContent>
+      <DialogContent initialFocus={heading}>
         <DialogHeader>
-          <DialogTitle>Подтверждение удаления</DialogTitle>
+          <DialogTitle ref={heading} tabIndex={-1} className="outline-none">Подтверждение удаления</DialogTitle>
           <DialogDescription>
             Вы уверены, что хотите удалить {entityLabel}? Действие необратимое.
             {warning ? ` ${warning}` : ""}
           </DialogDescription>
         </DialogHeader>
+        {children}
         {error ? <p className="text-sm text-destructive">{error}</p> : null}
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
@@ -53,7 +59,7 @@ export function ConfirmDeleteDialog({
           </Button>
           <Button
             variant="destructive"
-            disabled={pending}
+            disabled={pending || confirmDisabled}
             onClick={() =>
               startTransition(async () => {
                 const result = await onConfirm();

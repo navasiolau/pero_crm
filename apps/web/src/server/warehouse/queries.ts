@@ -1,4 +1,5 @@
 import type { Prisma } from "@prisma/client";
+import {activeStockMovementWhere} from './active-records';
 import { summarizeProjectExpenses } from "@/server/finance/project-expense-facts";
 import type { StockMovementView, ProjectMaterialLineStatus, ProjectMaterialLine, ProjectMaterialsData, MaterialOption, WarehouseReturnSource } from "./contracts";
 export type { StockMovementView, ProjectMaterialLineStatus, ProjectMaterialLine, ProjectMaterialsData, MaterialOption } from "./contracts";
@@ -123,6 +124,7 @@ export async function listMovements(actor: VisibilityActor, filter?: {
 async function loadMovements(actor: VisibilityActor, filter: {materialId?:string;productId?:string;type?:"INCOME"|"EXPENSE"|"RETURN"}|undefined, database: Prisma.TransactionClient): Promise<StockMovementView[]> {
   const movements = await database.stockMovement.findMany({
     where: {
+      ...activeStockMovementWhere,
       ...(hasFullProjectVisibility(actor) ? {} : { OR: [{ productId: null }, { product: productVisibilityWhere(actor) }] }),
       materialId: filter?.materialId || undefined,
       productId: filter?.productId || undefined,
@@ -187,10 +189,10 @@ export async function getProjectMaterials(
   const showMoney=hasAnyRole(actor.roles,WAREHOUSE_MONEY_ROLES);
   const [issued,allCosts]=await Promise.all([
     stock.current&&stock.runId ? database.warehouseMovementValuation.findMany({
-      where:{runId:stock.runId,movement:{productId,product:productVisibilityWhere(actor),type:"EXPENSE"}},
+      where:{runId:stock.runId,movement:{...activeStockMovementWhere,productId,product:productVisibilityWhere(actor),type:"EXPENSE"}},
       include:{movement:{select:{materialId:true,createdAt:true,material:{select:{name:true,unit:true}}}}}
     }) : Promise.resolve([]),
-    showMoney ? database.stockMovement.findMany({where:{productId,product:productVisibilityWhere(actor),type:{in:["EXPENSE","RETURN"]}},select:{type:true,totalByn:true}}) : Promise.resolve([]),
+    showMoney ? database.stockMovement.findMany({where:{...activeStockMovementWhere,productId,product:productVisibilityWhere(actor),type:{in:["EXPENSE","RETURN"]}},select:{type:true,totalByn:true}}) : Promise.resolve([]),
   ]);
   const returnSources:WarehouseReturnSource[]=issued.map(item=>({id:item.movementId,materialId:item.movement.materialId,
     materialName:item.movement.material.name,unit:item.movement.material.unit,createdAt:item.movement.createdAt.toISOString(),
