@@ -13,6 +13,8 @@ import { productLineTotal } from "@/lib/product-quantity";
 import { productEditWhere, resolveVisibilityActor } from "@/server/access/visibility";
 import { withTaskTransaction, type TaskTransaction } from "@/server/tasks/transaction";
 import { lockProductRow, recalculateQuantity } from "./quantity-core";
+import { lockProjectRow } from "@/server/projects/lock";
+import { productInitialStatus } from "./draft-core";
 import {warehouseMetadataGate} from '@/server/warehouse/gate';
 import { initialPriceCapture, newProductInitialPrice } from "./initial-price";
 import { readProductPercentageDefaults } from "@/server/product-percentage-defaults/core";
@@ -74,9 +76,10 @@ export async function createProductCore(actor: DomainActor, input: CreateProduct
   const data = parsed.data;
   try { productLineTotal(data.expectedPrice ?? null, data.quantity); }
   catch (error) { return { ok: false as const, error: error instanceof Error ? error.message : "Некорректная сумма партии" }; }  const mutation = await transaction(async (tx) => {
+  await lockProjectRow(tx, data.projectId);
   const project = await tx.project.findUnique({
     where: {...liveProjectWhere, id: data.projectId },
-    select: { id: true, number: true, currency: true },
+    select: { id: true, number: true, currency: true, stage: true },
   });
   if (!project) return { ok: false as const, error: "Проект не найден" };
   if (data.expectedPrice !== undefined) {
@@ -86,6 +89,7 @@ export async function createProductCore(actor: DomainActor, input: CreateProduct
   if (data.engineerId && !await tx.user.findFirst({ where: { id: data.engineerId, active: true, roles: { hasSome: ["ENGINEER"] } }, select: { id: true } }))
     return { ok: false as const, error: "Выберите активного сотрудника с ролью инженера" };
 
+  const status = await productInitialStatus(tx, project);
   const suffixInt = await nextProductSuffixInt(project.id, tx);
   const number = `${project.number}.${suffixInt}`;
   const defaults = await readProductPercentageDefaults(tx);
@@ -101,7 +105,7 @@ export async function createProductCore(actor: DomainActor, input: CreateProduct
       number,
       suffixInt,
       title: data.title,
-      status: "PREPARATION",
+      status,
       quantity: data.quantity,
       kind: data.kind?.trim() || null,
       expectedPrice: data.expectedPrice,
@@ -113,7 +117,7 @@ export async function createProductCore(actor: DomainActor, input: CreateProduct
   percentageConfigs: { create: DEFAULT_PERCENTAGE_KINDS.map(kind => ({ kind, ratePercent: defaults.rates[kind] ?? '0.00', revision: 1 })) },
       createdById: actor.id,
       statusHistory: {
-        create: { toStatus: "PREPARATION", changedById: actor.id },
+        create: { toStatus: status, changedById: actor.id },
       },
     },
   });

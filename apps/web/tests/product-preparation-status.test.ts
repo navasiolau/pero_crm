@@ -7,8 +7,8 @@ import { productVisibilityWhere, projectVisibilityWhere, taskVisibilityWhere, ta
 import { matches, type FixtureRow } from './helpers/visibility-fixture';
 
 const preparation='PREPARATION' as ProductStatus;
-test('preparation is the first shared status with label and neutral style',()=>{
- assert.equal(PRODUCT_STATUSES[0].id,preparation);assert.equal(PRODUCT_STATUSES[1].id,'DESIGN');
+test('preparation follows draft with label and neutral style',()=>{
+ assert.equal(PRODUCT_STATUSES[0].id,'DRAFT');assert.equal(PRODUCT_STATUSES[1].id,preparation);assert.equal(PRODUCT_STATUSES[2].id,'DESIGN');
  assert.equal(productStatusLabels[preparation],'Подготовка');assert.ok(productStatusStyles[preparation]);
 });
 

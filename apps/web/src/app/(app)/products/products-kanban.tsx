@@ -99,7 +99,7 @@ function StatusColumn({
     >
       <div className="flex items-center justify-between px-1 pt-1">
         <span className={cn("text-sm font-medium", style.header)}>
-          {status.label}
+          {status.columnLabel ?? status.label}
         </span>
         <Badge variant="secondary">{products.length}</Badge>
       </div>
@@ -124,7 +124,6 @@ function StatusColumn({
 // доску — перетащенное в «Готово» при активной галочке уходит с доски.
 export function ProductsKanban({
   initialProducts,
-  canManage,
   actorRoles,
   showAmount,
 }: {
@@ -173,6 +172,7 @@ export function ProductsKanban({
     if (!product || product.status === toStatus) return;
     const allowedTargets = productStatusTargets(actorRoles, {
       from: product.status,
+      projectStage: product.projectStage,
       assignedEngineer: product.isEngineeringParticipant,
       participant: product.isEngineeringParticipant,
       hasB3d: product.hasB3d,
@@ -218,20 +218,22 @@ export function ProductsKanban({
             status={status}
             products={products.filter((product) => product.status === status.id)}
             showAmount={showAmount}
-            canDrag={(product) => canManage || productStatusTargets(actorRoles, {
+            canDrag={(product) => productStatusTargets(actorRoles, {
               from: product.status,
+              projectStage: product.projectStage,
               assignedEngineer: product.isEngineeringParticipant,
               participant: product.isEngineeringParticipant,
               hasB3d: product.hasB3d,
               noModel: product.noModel,
-            }).length > 0}
-            canDrop={canManage || (!!activeProduct && productStatusTargets(actorRoles, {
+            }).some(target => target !== product.status)}
+            canDrop={!!activeProduct && productStatusTargets(actorRoles, {
               from: activeProduct.status,
+              projectStage: activeProduct.projectStage,
               assignedEngineer: activeProduct.isEngineeringParticipant,
               participant: activeProduct.isEngineeringParticipant,
               hasB3d: activeProduct.hasB3d,
               noModel: activeProduct.noModel,
-            }).includes(status.id))}
+            }).includes(status.id)}
             onOpen={(product) => router.push(productDetailHref(product.number, globalProductsHref(query)))}
           />
         ))}
