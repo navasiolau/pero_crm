@@ -15,4 +15,9 @@
 
 ## Staging
 
-Ожидаются CI, фактический образ, миграция и runtime-приёмка; push не считается приёмкой.
+- CI/CD165 SUCCESS: https://github.com/navasiolau/pero_crm/actions/runs/37721156806.
+- Фактически развёрнут staging6281d811d46672d2a332011998101854594c0d60, образ sha256:f965ba63cf2c44c815ba60eed1e26bbe6bc51d3c4986c8832418bb02cd18eb23, health healthy.
+- Native в этом контейнере: проектный и общий расход100BYN, exact retry, документ, единичный audit/event, rollback и новый CHECK прошли. Реальный bot multipart endpoint/S3: bearer/scope/role, подтверждённая загрузка, retry, обязательность документа PASS.
+- bundle SHA25612e5b970afff382c65545505b723c03c95d074922c338194da08f4130f8b7ad0, exitCode0; исходные digest MATCH, QA rows/objects0, providerMessages0. Receipt: ignored .playwright-mcp/finance100/staging-receipt.json.
+- БД27b8f7342b9d722ab8788e137b37b03a3037442da038c5b8b98dbb30245b8b6a, started2026-09-23T11:42:14.649193151Z, volumecrm-staging_pgdata сохранены. W07 lock/idle/identity guards выполнены, watcher SHA27e3bcd727d9e83170c76a254806fde42590da76cea30c9e1441d873df680139 не изменён.
+- Main/production не изменялись. Restic и дампы не использовались.
