@@ -2,10 +2,12 @@ import {randomUUID} from "node:crypto";
 import { crm, CrmError, type ProjectRef,type ProjectBaseline } from "./crm";
 import { tg, TgError, type InlineButton, type TgCallbackQuery, type TgMessage, type TgUpdate } from "./tg";
 import { documentFromMessage, TelegramDocumentError, type TelegramDocument } from "./telegram-documents";
+import { startStockMovement, stockMovementText, stockMovementCallback, type StockMovementDialog } from "./stock-movement-dialog";
 import { startStockPurchase, stockPurchaseText, stockPurchaseCallback, type StockPurchaseDialog } from "./stock-purchase-dialog";
 import {
   CURRENCIES,
   FINANCE_ROLES,
+  WAREHOUSE_ROLES,
   STAGE_LABELS,
   STAGE_ORDER,
   formatMoney,
@@ -29,6 +31,7 @@ interface Session {
 
 type Dialog =
   | StockPurchaseDialog
+  | StockMovementDialog
   | {
       kind: "newProject";
       step: "title" | "client" | "manager";
@@ -245,6 +248,12 @@ async function handleCommand(
   args: string[],
 ): Promise<void> {
   switch (cmd) {
+    case "/выдача": case "/stockout": case "/возврат": case "/stockreturn": case "/инвприход": case "/stockinventory": {
+      const current=await getSession(String(chatId),true);
+      if(chatId<=0||!current?.botAllowed||!hasAny(current.roles,WAREHOUSE_ROLES)){await reply(chatId,"Складские операции доступны складским ролям в личном чате.");return;}
+      const kind=["/выдача","/stockout"].includes(cmd)?"EXPENSE":["/возврат","/stockreturn"].includes(cmd)?"RETURN":"INCOME";
+      await startStockMovement({reply,getDialog,setDialog},chatId,kind);return;
+    }
     case "/закупка":
     case "/stockin": {
       const current = await getSession(String(chatId),true);
@@ -335,6 +344,7 @@ function helpText(session: Session): string {
       "/закупка — приход материала с оплатой из кассы",
     );
   }
+  if(hasAny(session.roles,WAREHOUSE_ROLES))lines.push("/выдача — выдать материал на изделие","/возврат — вернуть материал по исходной выдаче","/инвприход — инвентарный приход без кассы");
   lines.push("Отвязать бота — в CRM: меню профиля → Telegram");
   return lines.join("\n");
 }
@@ -385,6 +395,11 @@ async function handleDialogText(
   dialog: Dialog,
   text: string,
 ): Promise<void> {
+  if(dialog.kind==="stockMovement"){
+    const current=await getSession(String(chatId),true);
+    if(chatId<=0||!current?.botAllowed||!hasAny(current.roles,WAREHOUSE_ROLES)){await reply(chatId,"Недостаточно прав для склада");return;}
+    await stockMovementText({reply,getDialog,setDialog},chatId,current.userId,dialog,text);return;
+  }
   if (dialog.kind === "stockPurchase") {
     const current = await getSession(String(chatId),true);
     if (chatId <= 0 || !current?.botAllowed || !hasAny(current.roles,FINANCE_ROLES)) { await reply(chatId,"Недостаточно прав для закупки"); return; }
@@ -779,11 +794,12 @@ async function handleCallback(query: TgCallbackQuery): Promise<void> {
   const data = query.data ?? "";
   const [action, ...rest] = data.split(":");
 
-  const financial = FINANCE_CALLBACK_ACTIONS.has(action);
-  if (financial && (chatId <= 0 || query.from.id !== chatId)) return;
-  const session = await getSession(String(chatId), financial);
+  const financial = FINANCE_CALLBACK_ACTIONS.has(action), warehouse = action === "sw", guarded=financial||warehouse;
+  if (guarded && (chatId <= 0 || query.from.id !== chatId)) return;
+  const session = await getSession(String(chatId), guarded);
   if (!session) return;
   if (!session.botAllowed) return;
+  if(warehouse&&!hasAny(session.roles,WAREHOUSE_ROLES)){await reply(chatId,"Недостаточно прав для склада");return;}
   if (financial && !hasAny(session.roles, FINANCE_ROLES)) { await reply(chatId, "Недостаточно прав для финансовой операции"); return; }
 
   try {
@@ -804,6 +820,10 @@ async function dispatchCallback(
   action: string,
   rest: string[],
 ): Promise<void> {
+  if(action==="sw"){
+    const dialog=getDialog(chatId);
+    await stockMovementCallback({reply,getDialog,setDialog},chatId,session.userId,dialog?.kind==="stockMovement"?dialog:undefined,rest);return;
+  }
   if (action === "sp") {
     const dialog = getDialog(chatId);
     await stockPurchaseCallback({ reply, getDialog, setDialog },chatId,session.userId,dialog?.kind === "stockPurchase" ? dialog : undefined,rest); return;

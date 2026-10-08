@@ -6,28 +6,13 @@ import { readCashBalance, readOrgBalance } from "../src/server/payroll/cash-core
 import { stockPurchaseSchema } from "../src/server/warehouse/contracts";
 import { prepareStockPurchase, createStockPurchaseInTransaction } from "../src/server/warehouse/stock-purchase-core";
 import { stockPurchaseBaseline } from "./paid-stock-native-scenarios";
+import { warehouseTestState } from "./helpers/warehouse-test-state";
 
 /** Two real SQL transactions/locks. The optional local-only seam supplies an
  * absent phase reader for OWN materials; it never changes global warehouse state. */
 export async function runPaidStockConcurrent(db: PrismaClient, allowMissingLocalState = false) {
   const before=await stockPurchaseBaseline(db),marker=`qa103-race-${randomUUID()}`;
-  const originalState=await db.warehouseAccountingState.findUnique({where:{id:"main"}});
-  if(originalState)assert.equal(originalState.phase,"ACTIVE");
-  else {
-    assert.ok(allowMissingLocalState,"STAGING_REQUIRES_REAL_ACTIVE_STATE");
-    const target=new URL(process.env.DATABASE_URL??"");
-    assert.ok(["localhost","127.0.0.1"].includes(target.hostname)&&target.port==="5433"&&target.pathname==="/pero_crm");
-  }
-  const transaction=createTaskTransaction(db);
-  function stockTx(tx:Prisma.TransactionClient):Prisma.TransactionClient {
-    if(originalState)return tx;
-    return new Proxy(tx,{get(target,property,receiver){
-      if(property==="warehouseAccountingState")return {findUnique:async(args:{where:{id:string}})=>{
-        assert.equal(args.where.id,"main");return {id:"main",phase:"ACTIVE",runId:marker};
-      }};
-      return Reflect.get(target,property,receiver);
-    }});
-  }
+  const state=await warehouseTestState(db,marker,allowMissingLocalState),transaction=createTaskTransaction(db);
   let materialId="",accountId="",articleId="";
   try{
     const actor=await transaction(async tx=>{
@@ -43,7 +28,7 @@ export async function runPaidStockConcurrent(db: PrismaClient, allowMissingLocal
     });
     const data=stockPurchaseSchema.parse({clientMutationId:randomUUID(),materialId,quantity:"3",unitPrice:"20",currency:"BYN",cashAccountId:accountId,expenseArticleId:articleId,comment:marker});
     const prepared=(await prepareStockPurchase(actor,data,db)).prepared;
-    const execute=(input:typeof data)=>transaction(tx=>createStockPurchaseInTransaction(actor,input,prepared,stockTx(tx)));
+    const execute=(input:typeof data)=>transaction(tx=>createStockPurchaseInTransaction(actor,input,prepared,state.wrap(tx)));
     const duplicates=await Promise.all([execute(data),execute(data)]);
     assert.equal(duplicates[0].receipt.id,duplicates[1].receipt.id);
     assert.equal(duplicates.filter(row=>!row.repeated).length,1);
@@ -59,7 +44,7 @@ export async function runPaidStockConcurrent(db: PrismaClient, allowMissingLocal
     assert.equal(await db.stockPurchase.count({where:{actorId:marker}}),2);
     assert.equal(await db.stockMovement.count({where:{materialId,createdById:marker}}),2);
     assert.equal(await db.payment.count({where:{createdById:marker,direction:"EXPENSE"}}),2);
-    return {status:"PASS",duplicateWrites:1,competingSuccesses:1,competingRejections:1,cashBalance:40,warehouseState:originalState?"REAL_ACTIVE":"LOCAL_READ_FIXTURE",providerMessages:0};
+    return {status:"PASS",duplicateWrites:1,competingSuccesses:1,competingRejections:1,cashBalance:40,warehouseState:state.mode,providerMessages:0};
   }finally{
     await transaction(async tx=>{
       await tx.stockPurchase.deleteMany({where:{actorId:marker}});

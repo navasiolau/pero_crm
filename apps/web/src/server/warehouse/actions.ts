@@ -5,15 +5,16 @@ import {liveProductWhere} from "@/server/access/live-entities";
 import { z } from "zod";
 
 import { prisma } from "@/lib/prisma";
-import { formatQty } from "@/lib/format";
+
 import { writeChangeLog } from "@/server/plugins/changelog";
-import { dispatchEvent } from "@/server/plugins/events";
-import { notifyOrg } from "@/server/notifications/notify";
+
+
 import { revalidateWarehouse } from "./revalidate";
 import { withTaskTransaction } from "@/server/tasks/transaction";
 import { addMaterialNorm, updateMaterialNorm, lockMaterialProduct } from "./norm-core";
 import { stockInventoryReceiptSchema, stockIssueSchema, stockReturnSchema } from "./contracts";
-import { warehouseMove, withWarehouseWrite } from "./accounting";
+import { withWarehouseWrite } from "./accounting";
+import { createStockMovementCore } from "./movement-service";
 import {MANAGER_ROLES,WAREHOUSE_MANAGE_ROLES} from "@/lib/roles";
 import { requireRole } from "@/server/require-role";
 
@@ -22,11 +23,6 @@ import { requireRole } from "@/server/require-role";
 // снимок цены (unitPrice/totalByn) и идут в экономику проекта (§11).
 
 
-
-// Опции интерактивных транзакций списания/возврата: дефолты Prisma
-// (maxWait 2 с / timeout 5 с) на e2e ловили P2028 «Unable to start
-// a transaction» при прогретом пуле соединений
-const TX_OPTIONS = { maxWait: 10_000, timeout: 15_000 } as const;
 
 // ─── Категории ────────────────────────────────────────────────────────────
 
@@ -218,11 +214,8 @@ export async function toggleMaterial(
 
 export async function addInventoryReceipt(input: z.input<typeof stockInventoryReceiptSchema>): Promise<{ok:boolean;error?:string}> {
   const session=await requireRole(WAREHOUSE_MANAGE_ROLES);
-  const parsed=stockInventoryReceiptSchema.safeParse(input);
-  if(!parsed.success)return {ok:false,error:parsed.error.issues[0]?.message??"Укажите положительную цену"};
-  return saveWarehouseMovement(session.user,{...parsed.data,kind:"INCOME"});
+  return createStockMovementCore({id:session.user.id,name:session.user.name??"",roles:session.user.roles,source:"web"},"INCOME",input);
 }
-
 // Compatibility for already open forms; no separate business logic.
 export async function addStockIncome(input: z.input<typeof stockInventoryReceiptSchema>) { return addInventoryReceipt(input); }
 
@@ -338,27 +331,10 @@ export async function deleteProjectMaterial(
 
 export async function requestMaterial(input: z.input<typeof stockIssueSchema>): Promise<{ok:boolean;error?:string}> {
   const session=await requireRole(WAREHOUSE_MANAGE_ROLES);
-  const parsed=stockIssueSchema.safeParse(input);
-  if(!parsed.success)return {ok:false,error:"Укажите количество; цена выдачи рассчитывается автоматически"};
-  return saveWarehouseMovement(session.user,{...parsed.data,kind:"EXPENSE"});
+  return createStockMovementCore({id:session.user.id,name:session.user.name??"",roles:session.user.roles,source:"web"},"EXPENSE",input);
 }
 
 export async function returnMaterial(input: z.input<typeof stockReturnSchema>): Promise<{ok:boolean;error?:string}> {
   const session=await requireRole(WAREHOUSE_MANAGE_ROLES);
-  const parsed=stockReturnSchema.safeParse(input);
-  if(!parsed.success)return {ok:false,error:parsed.error.issues[0]?.message??"Укажите источник возврата"};
-  return saveWarehouseMovement(session.user,{...parsed.data,kind:"RETURN"});
-}
-
-async function saveWarehouseMovement(actor: {id:string;name?:string|null;roles:import("@prisma/client").Role[]}, input: import("./accounting").WarehouseMovementInput): Promise<{ok:boolean;error?:string}> {
-  let result;
-  try {
-    result=await prisma.$transaction(tx=>warehouseMove(tx,actor,input),TX_OPTIONS);
-  } catch(error){return {ok:false,error:error instanceof Error?error.message:"Не удалось сохранить складское движение"};}
-  if(!result.repeated){
-    await dispatchEvent(result.eventId!).catch(()=>console.error('[warehouse] Складское событие осталось в очереди доставки'));
-    if(input.kind==="EXPENSE")await notifyOrg({type:"stock.expense",title:`Списание: ${result.material!.name} × ${formatQty(input.quantity)} · ${result.line!.product.number}`,link:`/products/${result.line!.productId}`,exceptUserId:actor.id}).catch(()=>console.error('[warehouse] Не удалось отправить уведомление о выдаче'));
-  }
-  await revalidateWarehouse(result.movement.productId,result.line?.product.projectId);
-  return {ok:true};
+  return createStockMovementCore({id:session.user.id,name:session.user.name??"",roles:session.user.roles,source:"web"},"RETURN",input);
 }

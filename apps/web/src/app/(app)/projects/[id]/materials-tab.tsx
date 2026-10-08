@@ -19,69 +19,24 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { ConfirmDeleteDialog } from "@/components/confirm-delete-dialog";
-import { scaleNorm } from "@/lib/product-quantity";
-import {priceInput,quantityInput} from '@/lib/warehouse-cost';
-import { formatAmount, formatQty } from "@/lib/format";
+import { StockMovementDialog } from "@/components/stock-movement-dialog";
+import type { WarehouseReturnSource } from "@/server/warehouse/contracts";
+import { scaleNorm, materialPlanFloor } from "@/lib/product-quantity";
+import {quantityInput} from '@/lib/warehouse-cost';
+import { formatAmount, formatMoneyTotal, formatQty } from "@/lib/format";
 import { projectMaterialStatusLabels, stockMovementTypeLabels } from "@/lib/labels";
 import {
   addProjectMaterial,
   deleteProjectMaterial,
-  requestMaterial,
-  returnMaterial,
   updateProjectMaterial,
 } from "@/server/warehouse/actions";
 
-// Локальные представления (структурно совпадают с серверными типами
-// warehouse/queries — серверный модуль в клиент не импортируем)
-export type ProjectMaterialLineStatus = "FULFILLED" | "AVAILABLE" | "SHORTAGE";
-
-export type ProjectMaterialLineView = {
-  id: string;
-  materialId: string;
-  materialName: string;
-  materialSku: string | null;
-  unit: string;
-  purchasePrice: number | null; // учётная цена, BYN
-  quantityPerUnit: number;
-  quantity: number; // сколько нужно
-  issuedQty: number; // сколько уже выдано
-  debt: number; // quantity − issuedQty
-  available: number; // остаток на складе
-  status: ProjectMaterialLineStatus;
-  comment: string | null;
-  warehouseReady?:boolean;
-  returnSources?:{id:string;createdAt:string;quantity:number;unitPrice:number|null}[];
-  legacyReturnQuantity?:number;
-};
-
-export type StockMovementRow = {
-  id: string;
-  type: "INCOME" | "EXPENSE" | "RETURN";
-  materialId: string;
-  materialName: string;
-  materialUnit: string;
-  quantity: number;
-  unitPrice: number | null;
-  totalByn: number | null;
-  productId: string | null;
-  productNumber: string | null;
-  comment: string | null;
-  createdByName: string | null;
-  createdAt: string; // ISO
-};
-
-export type MaterialOptionView = {
-  id: string;
-  name: string;
-  sku: string | null;
-  unit: string;
-  purchasePrice: number | null;
-  stock: number;
-};
-
+import type { ProjectMaterialLine as ProjectMaterialLineView, StockMovementView as StockMovementRow, MaterialOption as MaterialOptionView } from "@/server/warehouse/contracts";
+export type { ProjectMaterialLine as ProjectMaterialLineView, ProjectMaterialLineStatus, StockMovementView as StockMovementRow, MaterialOption as MaterialOptionView } from "@/server/warehouse/contracts";
 type DialogState =
   | { kind: "add" }
-  | { kind: "request" | "return" | "edit" | "delete"; line: ProjectMaterialLineView }
+  | { kind: "issue" | "return"; materialId?: string; sourceId?: string }
+  | { kind: "edit" | "delete"; line: ProjectMaterialLineView }
   | null;
 
 // Вкладка «Материалы» изделия (§12): потребность со статусами обеспечения
@@ -93,6 +48,9 @@ export function MaterialsTab({
   movements,
   materialsTotalByn,
   options,
+  issueOptions,
+  returnSources,
+  warehouseReady,
   canManage,
   canIssueReturn = canManage,
   showMoney,
@@ -101,8 +59,11 @@ export function MaterialsTab({
   productQuantity?: number;
   lines: ProjectMaterialLineView[];
   movements: StockMovementRow[];
-  materialsTotalByn: number;
+  materialsTotalByn: number | null;
   options: MaterialOptionView[];
+  issueOptions: MaterialOptionView[];
+  returnSources: WarehouseReturnSource[];
+  warehouseReady: boolean;
   canManage: boolean;
   canIssueReturn?: boolean;
   showMoney: boolean;
@@ -226,12 +187,12 @@ export function MaterialsTab({
                 <Button
                   variant="ghost"
                   size="icon"
-                  title="Запросить со склада"
-                  aria-label="Запросить со склада"
-                  disabled={row.status === "FULFILLED" || row.available <= 0}
+                  title="Выдать со склада"
+                  aria-label="Выдать со склада"
+                  disabled={!warehouseReady || row.available <= 0}
                   onClick={(event) => {
                     event.stopPropagation();
-                    setDialog({ kind: "request", line: row });
+                    setDialog({ kind: "issue", materialId: row.materialId });
                   }}
                 >
                   <PackagePlus className="size-4 text-muted-foreground" />
@@ -244,7 +205,7 @@ export function MaterialsTab({
                   disabled={row.issuedQty <= 0}
                   onClick={(event) => {
                     event.stopPropagation();
-                    setDialog({ kind: "return", line: row });
+                    setDialog({ kind: "return", materialId: row.materialId });
                   }}
                 >
                   <Undo2 className="size-4 text-muted-foreground" />
@@ -352,6 +313,8 @@ export function MaterialsTab({
     },
   ];
 
+  if(canIssueReturn)movementColumns.push({id:"return",header:"",cell:row=>row.type==="EXPENSE"&&Number(row.returnableQuantity)>0
+    ? <Button variant="ghost" disabled={!warehouseReady} onClick={event=>{event.stopPropagation();setDialog({kind:"return",sourceId:row.id});}}>Вернуть</Button>:null});
   return (
     <div className="flex flex-col gap-6">
       {/* Потребность в материалах (§12) */}
@@ -390,7 +353,10 @@ export function MaterialsTab({
 
       {/* Взято со склада: списания и возвраты по проекту */}
       <div className="flex flex-col gap-3">
-        <h3 className="text-lg font-semibold">Взято со склада</h3>
+        <div className="flex flex-wrap items-center justify-between gap-3"><h3 className="text-lg font-semibold">Взято со склада</h3>
+          {canIssueReturn?<div className="flex flex-wrap gap-2"><Button disabled={!warehouseReady} onClick={()=>setDialog({kind:"issue"})}><PackagePlus className="size-4"/>Выдать материал</Button><Button variant="outline" disabled={!warehouseReady||(!returnSources.length&&!lines.some(line=>line.legacyReturnQuantity>0))} onClick={()=>setDialog({kind:"return"})}><Undo2 className="size-4"/>Вернуть материал</Button></div>:null}
+        </div>
+        {canIssueReturn&&!warehouseReady?<p className="text-sm text-muted-foreground">Склад временно закрыт для операций.</p>:null}
         <DataTable
           columns={movementColumns}
           rows={movements}
@@ -400,10 +366,10 @@ export function MaterialsTab({
         {showMoney ? (
           <div className="flex flex-col gap-1">
             <p className="text-sm font-medium">
-              Итого материалов: {formatAmount(materialsTotalByn, "BYN")}
+              Итого материалов: {formatMoneyTotal(materialsTotalByn, "BYN")}
             </p>
             <p className="text-xs text-muted-foreground">
-              Материалы учитываются в марже автоматически (вкладка
+              Итог учитывает все движения; в журнале показаны последние 500. Материалы учитываются в марже автоматически (вкладка
               «Финансы»).
             </p>
           </div>
@@ -420,11 +386,9 @@ export function MaterialsTab({
         options={options}
       />
 
-      {dialog && dialog.kind !== "add" && dialog.kind !== "delete" ? (
-        <LineActionDialog
-          kind={dialog.kind}
+      {dialog?.kind === "edit" ? (
+        <EditMaterialDialog
           line={dialog.line}
-          showMoney={showMoney}
           productQuantity={productQuantity}
           open
           onOpenChange={(open) => {
@@ -432,6 +396,8 @@ export function MaterialsTab({
           }}
         />
       ) : null}
+
+      {dialog?.kind==="issue"||dialog?.kind==="return"?<StockMovementDialog mode={dialog.kind} productId={productId} options={issueOptions} sources={returnSources} lines={lines} initialMaterialId={dialog.materialId} initialSourceId={dialog.sourceId} warehouseReady={warehouseReady} showMoney={showMoney} onClose={()=>setDialog(null)}/>:null}
 
       <ConfirmDeleteDialog
         entityLabel="строку потребности"
@@ -577,191 +543,20 @@ function AddMaterialDialog({
   );
 }
 
-// Диалог действия со строкой потребности: запрос со склада (списание),
-// возврат на склад или изменение количества/комментария.
-function LineActionDialog({
-  kind,
-  productQuantity,
-  line,
-  showMoney,
-  open,
-  onOpenChange,
-}: {
-  kind: "request" | "return" | "edit";
-  productQuantity: number;
-  line: ProjectMaterialLineView;
-  showMoney: boolean;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-}) {
-  const [pending, startTransition] = useTransition();
-  const [quantity, setQuantity] = useState("");
-  const [unitPrice, setUnitPrice] = useState("");
-  const [comment, setComment] = useState("");
-  const [clientMutationId,setClientMutationId]=useState(()=>crypto.randomUUID());
-  const [sourceId,setSourceId]=useState('legacy');
-  const source=line.returnSources?.find(item=>item.id===sourceId);
-
-  const maxQuantity =
-    kind === "request"
-      ? Math.min(line.debt, line.available)
-      : kind === "return"
-        ? source?.quantity??line.legacyReturnQuantity??line.issuedQty
-        : null; // у правки потолка нет, только пол ≥ выданного
-
-  // Дефолты при каждом открытии
-  useEffect(() => {
-    if (open) {
-      setQuantity(
-        kind === "edit"
-          ? String(line.quantityPerUnit)
-          : String(maxQuantity ?? line.debt),
-      );
-      if(kind!=='return')setUnitPrice(line.purchasePrice === null ? "" : String(line.purchasePrice));
-      setComment(kind === "edit" ? (line.comment ?? "") : "");
-    }
-  }, [open, kind, line, maxQuantity]);
-  useEffect(()=>{if(open){setClientMutationId(crypto.randomUUID());setSourceId(line.returnSources?.[0]?.id??'legacy');if(kind==='return')setUnitPrice('');}},[open,kind,line]);
-
-  let parsedQuantity=NaN;
-  try{parsedQuantity=Number(quantityInput(quantity));}catch{}
-
-  let plannedQuantity = NaN;
-  try { plannedQuantity = Number(scaleNorm(parsedQuantity, productQuantity, 3, 12)); } catch { /* Ошибка ввода блокирует сохранение. */ }
-  const quantityValid =
-    Number.isFinite(parsedQuantity) &&
-    parsedQuantity > 0 &&
-    (maxQuantity === null || parsedQuantity <= maxQuantity) &&
-    (kind !== "edit" || plannedQuantity >= line.issuedQty);
-  let priceValid=kind!=='return'||sourceId!=='legacy';
-  if(kind==='return'&&sourceId==='legacy')try{priceInput(unitPrice);priceValid=true;}catch{}
-  const canSubmit = !pending && quantityValid && priceValid && (kind==='edit'||line.warehouseReady===true);
-
-  const titles = {
-    request: "Запросить со склада",
-    return: "Вернуть на склад",
-    edit: "Изменить потребность",
-  } as const;
-
-  const submitLabels = {
-    request: "Запросить",
-    return: "Вернуть",
-    edit: "Сохранить",
-  } as const;
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{titles[kind]}</DialogTitle>
-          <DialogDescription>
-            {line.materialName}
-            {kind === "request"
-              ? ` · доступно на складе: ${formatQty(line.available)} ${line.unit}`
-              : kind === "return"
-                ? ` · выдано на изделие: ${formatQty(line.issuedQty)} ${line.unit}`
-                : ` · уже выдано: ${formatQty(line.issuedQty)} ${line.unit} — меньше поставить нельзя`}
-          </DialogDescription>
-        </DialogHeader>
-        <div className="flex flex-col gap-3">
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="mat-line-qty">{kind === "edit" ? "На 1 изделие" : "Количество на всю партию"}, {line.unit} *</Label>
-            <Input
-              id="mat-line-qty"
-              type="number"
-              min="0"
-              step="0.001"
-              value={quantity}
-              onChange={(event) => setQuantity(event.target.value)}
-            />
-            {kind === "edit" && Number.isFinite(parsedQuantity) && <p className="text-sm text-muted-foreground">Всего: {formatQty(parsedQuantity)} × {productQuantity} = {formatQty(plannedQuantity)} {line.unit}</p>}
-            {maxQuantity !== null ? (
-              <p className="text-xs text-muted-foreground">
-                Не больше {formatQty(maxQuantity)} {line.unit}
-              </p>
-            ) : null}
-          </div>
-          {kind==='return'&&<div className="flex flex-col gap-1.5">
-            <Label>Исходная выдача *</Label>
-            <SearchableSelect value={sourceId} onChange={value=>{setSourceId(value);setUnitPrice('');}}
-              options={[...(line.returnSources??[]).map(item=>({value:item.id,label:`${new Date(item.createdAt).toLocaleDateString('ru-RU')} · ${formatQty(item.quantity)} ${line.unit}`})),...((line.legacyReturnQuantity??line.issuedQty)>0?[{value:'legacy',label:'Выдано до нового учёта'}]:[])]}
-              placeholder="Выберите выдачу" searchPlaceholder="Поиск выдачи…"/>
-          </div>}
-          {(kind==='return'&&sourceId==='legacy')||(kind==='request'&&showMoney) ? (
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="mat-line-price">Цена, BYN за {line.unit}</Label>
-              <Input
-                id="mat-line-price"
-                type="number"
-                min="0"
-                step="0.01"
-                value={kind==='request'?(line.purchasePrice??''):unitPrice}
-                readOnly={kind==='request'}
-                onChange={(event) => setUnitPrice(event.target.value)}
-                placeholder="Положительная фактическая цена"
-              />
-              <p className="text-xs text-muted-foreground">
-                {kind==='request'?'Цена рассчитывается автоматически по средней стоимости склада':'Укажите фактическую оценку возвращаемого материала больше нуля'}
-              </p>
-            </div>
-          ) : null}
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="mat-line-comment">Комментарий</Label>
-            <Input
-              id="mat-line-comment"
-              value={comment}
-              onChange={(event) => setComment(event.target.value)}
-            />
-          </div>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Отмена
-          </Button>
-          <Button
-            disabled={!canSubmit}
-            onClick={() =>
-              startTransition(async () => {
-                const result =
-                  kind === "request"
-                    ? await requestMaterial({
-                        projectMaterialId: line.id,
-                        quantity: parsedQuantity,
-                        clientMutationId,
-                        comment: comment.trim() || undefined,
-                      })
-                    : kind === "return"
-                      ? await returnMaterial({
-                          projectMaterialId: line.id,
-                          quantity: parsedQuantity,
-                          clientMutationId,
-                          ...(sourceId==='legacy'?{unitPrice}:{sourceMovementId:sourceId}),
-                          comment: comment.trim() || undefined,
-                        })
-                      : await updateProjectMaterial({
-                          id: line.id,
-                          quantityPerUnit: parsedQuantity,
-                          comment: comment.trim() || undefined,
-                        });
-                if (result.ok) {
-                  toast.success(
-                    kind === "request"
-                      ? "Материал списан на изделие"
-                      : kind === "return"
-                        ? "Материал возвращён на склад"
-                        : "Потребность обновлена",
-                  );
-                  onOpenChange(false);
-                } else {
-                  toast.error(result.error ?? "Ошибка");
-                }
-              })
-            }
-          >
-            {pending ? "Сохранение…" : submitLabels[kind]}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
+// План редактируется отдельно от физических движений.
+function EditMaterialDialog({productQuantity,line,open,onOpenChange}:{productQuantity:number;line:ProjectMaterialLineView;open:boolean;onOpenChange:(value:boolean)=>void}) {
+  const [pending,startTransition]=useTransition(),[quantity,setQuantity]=useState(String(line.quantityPerUnit)),[comment,setComment]=useState(line.comment??"");
+  let parsedQuantity=NaN,plannedQuantity=NaN;
+  try{parsedQuantity=Number(quantityInput(quantity));plannedQuantity=Number(scaleNorm(parsedQuantity,productQuantity,3,12));}catch{}
+  const floor=Number(materialPlanFloor(line.quantity,line.issuedQty));
+  return <Dialog open={open} onOpenChange={value=>{if(!pending)onOpenChange(value);}}><DialogContent><DialogHeader>
+    <DialogTitle>Изменить потребность</DialogTitle><DialogDescription>{line.materialName} · уже выдано {formatQty(line.issuedQty)} {line.unit}; минимальный план до возврата: {formatQty(floor)} {line.unit}</DialogDescription>
+  </DialogHeader><fieldset disabled={pending} className="flex flex-col gap-3">
+    <div className="flex flex-col gap-1.5"><Label htmlFor="mat-line-qty">На 1 изделие, {line.unit} *</Label><Input id="mat-line-qty" inputMode="decimal" value={quantity} onChange={event=>setQuantity(event.target.value)}/></div>
+    <p className="text-sm text-muted-foreground">Всего: {Number.isFinite(plannedQuantity)?formatQty(plannedQuantity):"—"} {line.unit}</p>
+    <div className="flex flex-col gap-1.5"><Label htmlFor="mat-line-comment">Комментарий</Label><Input id="mat-line-comment" value={comment} onChange={event=>setComment(event.target.value)}/></div>
+  </fieldset><DialogFooter><Button variant="outline" disabled={pending} onClick={()=>onOpenChange(false)}>Отмена</Button><Button disabled={pending||!Number.isFinite(plannedQuantity)||plannedQuantity<floor} onClick={()=>startTransition(async()=>{
+    const result=await updateProjectMaterial({id:line.id,quantityPerUnit:parsedQuantity,comment:comment.trim()||undefined});
+    if(result.ok){toast.success("Потребность обновлена");onOpenChange(false);}else toast.error(result.error??"Ошибка");
+  })}>{pending?"Сохранение…":"Сохранить"}</Button></DialogFooter></DialogContent></Dialog>;
 }

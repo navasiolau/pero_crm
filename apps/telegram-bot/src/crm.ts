@@ -54,6 +54,7 @@ export interface StockReceiptQuote {
   materialName: string; unit: string; quantity: string; unitPrice: string;
   currency: string; amount: number; bynAmount: number; rate: number; rateDate: string | null;
 }
+export interface StockChoice extends DirectoryItem { available?: number; unitPrice?: string | null; legacyLineId?: string; }
 
 export class CrmError extends Error {}
 
@@ -91,6 +92,13 @@ async function request<T>(
 }
 
 export const crm = {
+  stockChoices(actorId:string,kind:"products"|"materials"|"sources",options:{q?:string;productId?:string;income?:boolean}={}) {
+    const params=new URLSearchParams({kind});if(options.q)params.set("q",options.q);if(options.productId)params.set("productId",options.productId);if(options.income)params.set("income","1");
+    return request<{ok:boolean;error?:string;items?:StockChoice[]}>("GET","/stock-movements?"+params,undefined,actorId);
+  },
+  createStockMovement(actorId:string,input:Record<string,unknown>) {
+    return request<{ok:boolean;error?:string;movementId?:string;repeated?:boolean}>("POST","/stock-movements",input,actorId);
+  },
   quoteStockReceipt(actorId: string, input: Record<string, unknown>) {
     return request<{ ok: boolean; error?: string; quote?: StockReceiptQuote }>("POST", "/stock-receipts/quote", input, actorId);
   },

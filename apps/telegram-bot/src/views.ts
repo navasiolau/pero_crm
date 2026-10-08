@@ -1,3 +1,4 @@
+export const WAREHOUSE_ROLES=["ADMIN","DIRECTOR","MANAGER","PROCUREMENT"];
 import type { ProjectCard, FinanceInfo } from "./crm";
 
 // Подписи и форматирование для сообщений бота. Часть констант повторяет

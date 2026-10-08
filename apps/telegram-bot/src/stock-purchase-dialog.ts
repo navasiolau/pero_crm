@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { crm, CrmError, type DirectoryItem, type StockReceiptQuote } from "./crm";
-import type { InlineButton } from "./tg";
+import { dialogChoices, dialogChoice, positiveDecimalDraft, CANCEL_ROW as cancel, type DialogContext } from "./dialog-choices";
 import { formatMoney } from "./views";
 
 type StockInput = { clientMutationId: string; materialId: string; quantity: string; unitPrice: string; currency: string; cashAccountId: string; expenseArticleId: string;
@@ -10,12 +10,7 @@ export type StockPurchaseDialog = {
   input: StockInput; materialLabel?: string; unit?: string; cashLabel?: string; articleLabel?: string;
   choices?: DirectoryItem[]; choiceToken?: string; quote?: StockReceiptQuote; busy?: boolean;
 };
-type FlowContext = {
-  reply: (chatId: number, text: string, buttons?: InlineButton[][]) => Promise<void>;
-  getDialog: (chatId: number) => unknown;
-  setDialog: (chatId: number, dialog: StockPurchaseDialog | null) => void;
-};
-const cancel = [{ text: "❌ Отмена", callback_data: "cancel" }];
+type FlowContext = DialogContext<StockPurchaseDialog>;
 export async function startStockPurchase(ctx: FlowContext, chatId: number) {
   const dialog: StockPurchaseDialog = { kind: "stockPurchase", step: "material", input: {
     clientMutationId: randomUUID(), materialId: "", quantity: "", unitPrice: "", currency: "", cashAccountId: "", expenseArticleId: "",
@@ -28,11 +23,10 @@ async function choose(ctx: FlowContext, chatId: number, actorId: string, dialog:
   if (ctx.getDialog(chatId) !== dialog) return;
   if (!response.ok) { await ctx.reply(chatId, response.error ?? "Не удалось загрузить список"); return; }
   const items = response.items ?? [];
-  dialog.choices = items; dialog.choiceToken = randomUUID().slice(0,8);
+  dialog.choices = items; const choice=dialogChoices("sp",dialog.input.clientMutationId,items); dialog.choiceToken=choice.token;
   if (!items.length) { await ctx.reply(chatId, type === "materials" ? "Материал не найден. Уточните название:" : "Нет доступных вариантов. Проверьте справочник в CRM.", [cancel]); return; }
   const label = type === "materials" ? "Материал:" : type === "cash" ? "Касса оплаты:" : "Статья расхода:";
-  await ctx.reply(chatId, label, [...items.map((item,index) => [{ text: item.label + (item.currency ? ` · ${item.currency}` : ""),
-    callback_data: `sp:${dialog.input.clientMutationId}:pick:${dialog.choiceToken}:${index}` }]), cancel]);
+  await ctx.reply(chatId,label,[...choice.buttons,cancel]);
 }
 async function confirm(ctx: FlowContext, chatId: number, actorId: string, dialog: StockPurchaseDialog) {
   const response = await crm.quoteStockReceipt(actorId, dialog.input).catch(error => ({ ok: false, quote: undefined,
@@ -63,10 +57,10 @@ export async function stockPurchaseText(ctx: FlowContext, chatId: number, actorI
       case "cash": await choose(ctx,chatId,actorId,dialog,"cash"); break;
       case "article": await choose(ctx,chatId,actorId,dialog,"articles"); break;
       case "quantity":
-        if (!/^\d+(?:[.,]\d{1,3})?$/.test(text) || Number(text.replace(",",".")) <= 0) { await ctx.reply(chatId,"Введите положительное количество (до 3 знаков после запятой):"); break; }
+        if (!positiveDecimalDraft(text,3)) { await ctx.reply(chatId,"Введите положительное количество (до 3 знаков после запятой):"); break; }
         dialog.input.quantity = text; dialog.step = "cash"; await choose(ctx,chatId,actorId,dialog,"cash"); break;
       case "price":
-        if (!/^\d+(?:[.,]\d{1,2})?$/.test(text) || Number(text.replace(",",".")) <= 0) { await ctx.reply(chatId,"Введите положительную цену единицы (до 2 знаков после запятой):"); break; }
+        if (!positiveDecimalDraft(text,2)) { await ctx.reply(chatId,"Введите положительную цену единицы (до 2 знаков после запятой):"); break; }
         dialog.input.unitPrice = text; dialog.step = "article"; await choose(ctx,chatId,actorId,dialog,"articles"); break;
       case "rate": {
         const automatic = ["авто","auto","—","-"].includes(text.toLowerCase());
@@ -88,8 +82,8 @@ export async function stockPurchaseCallback(ctx: FlowContext, chatId: number, ac
   dialog.busy = true;
   try {
     if (args[1] === "pick") {
-      if (!["material","cash","article"].includes(dialog.step) || args[2] !== dialog.choiceToken || !/^\d+$/.test(args[3] ?? "")) { await ctx.reply(chatId,"Выбор устарел — используйте последние кнопки."); return; }
-      const item = dialog.choices?.[Number(args[3])]; if (!item) return;
+      const item=dialogChoice(dialog.choiceToken,dialog.choices,args[2],args[3]);
+      if (!["material","cash","article"].includes(dialog.step) || !item) { await ctx.reply(chatId,"Выбор устарел — используйте последние кнопки."); return; }
       dialog.choiceToken = undefined; dialog.choices = undefined;
       if (dialog.step === "material") {
         dialog.input.materialId = item.id; dialog.materialLabel = item.label; dialog.unit = item.unit;

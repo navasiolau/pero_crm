@@ -10,13 +10,7 @@ export function StockMaterialFields({ materials, materialId, onMaterialChange, q
   currency: string; prefix: string; disabled?: boolean;
 }) {
   return <>
-    <div className="flex min-w-0 flex-col gap-1.5">
-      <Label htmlFor={`${prefix}-material`}>Материал *</Label>
-      <SearchableSelect id={`${prefix}-material`} disabled={disabled} value={materialId} onChange={onMaterialChange}
-        placeholder="Выберите материал…" searchPlaceholder="Поиск материала…" emptyText="Материал не найден"
-        options={materials.map(material => ({ value: material.id, label: material.name,
-          hint: [material.sku, material.stock === undefined ? material.unit : `остаток ${formatQty(material.stock)} ${material.unit}`].filter(Boolean).join(" · ") }))} />
-    </div>
+    <StockMaterialPicker materials={materials} value={materialId} onChange={onMaterialChange} id={`${prefix}-material`} disabled={disabled} />
     <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
       <div className="flex min-w-0 flex-col gap-1.5"><Label htmlFor={`${prefix}-qty`}>Количество *</Label>
         <Input id={`${prefix}-qty`} disabled={disabled} inputMode="decimal" value={quantity} onChange={event => onQuantityChange(event.target.value)} placeholder="0" /></div>
@@ -24,4 +18,14 @@ export function StockMaterialFields({ materials, materialId, onMaterialChange, q
         <Input id={`${prefix}-price`} disabled={disabled} inputMode="decimal" value={unitPrice} onChange={event => onPriceChange(event.target.value)} placeholder="Больше нуля" required /></div>
     </div>
   </>;
+}
+
+export function StockMaterialPicker({materials,value,onChange,id,disabled}:{materials:StockMaterialOption[];value:string;onChange:(value:string)=>void;id:string;disabled?:boolean}) {
+  return <div className="flex min-w-0 flex-col gap-1.5">
+    <Label htmlFor={id}>Материал *</Label>
+    <SearchableSelect id={id} disabled={disabled} value={value} onChange={onChange}
+      placeholder="Выберите материал…" searchPlaceholder="Поиск материала…" emptyText="Материал не найден"
+      options={materials.map(material=>({value:material.id,label:material.name,
+        hint:[material.sku,material.stock===undefined?material.unit:`остаток ${formatQty(material.stock)} ${material.unit}`].filter(Boolean).join(" · ")}))}/>
+  </div>;
 }

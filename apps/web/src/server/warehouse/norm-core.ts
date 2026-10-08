@@ -1,8 +1,9 @@
 import {liveProductWhere} from "@/server/access/live-entities";
 import type { Prisma } from "@prisma/client";
-import { decimalAtoms, decimalText, existingNorm, inputNorm, scaleNorm } from "@/lib/product-quantity";
+import { decimalAtoms, decimalText, existingNorm, inputNorm, scaleNorm, materialPlanFloor } from "@/lib/product-quantity";
 import { lockProductRow } from "@/server/products/quantity-core";
 import {warehouseMetadataGate} from './gate';
+import { readIssuedQuantity } from "./issued-quantity";
 
 export async function lockMaterialProduct(tx: Prisma.TransactionClient, id: string) {
   await warehouseMetadataGate(tx);
@@ -14,6 +15,7 @@ export async function lockMaterialProduct(tx: Prisma.TransactionClient, id: stri
 export async function addMaterialNorm(tx: Prisma.TransactionClient,
   data: { productId: string; materialId: string; quantity?: number; quantityPerUnit?: number; comment?: string }, userId: string) {
   await warehouseMetadataGate(tx);
+  await tx.$queryRaw`SELECT id FROM "Material" WHERE id=${data.materialId} FOR UPDATE`;
   await lockProductRow(tx, data.productId);
   const product = await tx.product.findUnique({ where: {...liveProductWhere, id: data.productId }, select: { id: true, number: true, projectId: true, quantity: true } });
   if (!product) throw new Error("Изделие не найдено");
@@ -24,9 +26,10 @@ export async function addMaterialNorm(tx: Prisma.TransactionClient,
   const atoms = decimalAtoms(norm, 3, 12) + (previous ? decimalAtoms(existingNorm(previous.quantityPerUnit, previous.quantity, product.quantity), 3, 12) : BigInt(0));
   const quantityPerUnit = decimalText(atoms, 3);
   const quantity = scaleNorm(quantityPerUnit, product.quantity, 3, 12);
+  const issuedQty = previous ? previous.issuedQty : await readIssuedQuantity(tx,product.id,material.id);
   const line = await tx.projectMaterial.upsert({
     where: { productId_materialId: { productId: product.id, materialId: material.id } },
-    create: { productId: product.id, materialId: material.id, quantity, quantityPerUnit,
+    create: { productId: product.id, materialId: material.id, quantity, quantityPerUnit, issuedQty,
       comment: data.comment?.trim() || null, createdById: userId },
     update: { quantity, quantityPerUnit },
   });
@@ -40,8 +43,8 @@ export async function updateMaterialNorm(tx: Prisma.TransactionClient,
   if (!line) throw new Error("Строка не найдена");
   const quantityPerUnit = inputNorm(data, line.product.quantity, 3, 12);
   const quantity = scaleNorm(quantityPerUnit, line.product.quantity, 3, 12);
-  if (decimalAtoms(quantity, 3, 12) < decimalAtoms(line.issuedQty, 3, 12))
-    throw new Error(`Нельзя поставить меньше уже выданного (${line.issuedQty})`);
+  if (decimalAtoms(quantity, 3, 12) < decimalAtoms(materialPlanFloor(line.quantity, line.issuedQty), 3, 12))
+    throw new Error(`Нельзя поставить меньше уже выданного по текущему плану (${materialPlanFloor(line.quantity,line.issuedQty)})`);
   await tx.projectMaterial.update({ where: { id: line.id }, data: { quantity, quantityPerUnit, comment: data.comment?.trim() || null } });
   return { line, quantity, quantityPerUnit };
 }
