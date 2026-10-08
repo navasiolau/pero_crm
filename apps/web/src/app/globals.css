@@ -216,7 +216,7 @@
     white-space: normal;
     overflow-wrap: anywhere;
   }
-  [data-slot="dialog-content"]:not([data-file-viewer-variant="cover-fullscreen"]) {
+  [data-slot="dialog-content"]:not([data-file-viewer-variant$="-fullscreen"]) {
     top: var(--dialog-viewport-top, 50%);
     max-height: calc(var(--dialog-viewport-height, 100dvh) - 1.5rem);
     grid-template-columns: minmax(0, 1fr);
@@ -224,7 +224,7 @@
     overscroll-behavior: contain;
     scroll-padding: 1rem;
   }
-  [data-slot="dialog-content"][data-file-viewer-variant="cover-fullscreen"] {
+  [data-slot="dialog-content"][data-file-viewer-variant$="-fullscreen"] {
     top: var(--dialog-viewport-top, 50%);
     height: var(--dialog-viewport-height, 100dvh);
     max-height: none;

@@ -1,5 +1,6 @@
 import { union, string, number, object, uuid, literal, NEVER, type input, type output } from 'zod';
 import {priceInput,quantityInput} from '@/lib/warehouse-cost';
+import type {ViewableFile} from '@/lib/viewable-file';
 function decimal(read:(value:unknown)=>string){return union([string(),number()],{error:'Укажите корректное число'}).transform((value,ctx)=>{try{return read(value);}catch(error){ctx.addIssue({code:'custom',message:error instanceof Error?error.message:'Некорректное число'});return NEVER;}});}
 const base={quantity:decimal(quantityInput),clientMutationId:uuid({error:'Некорректный идентификатор запроса'}).transform(value=>value.toLowerCase()),comment:string().optional()};
 export const stockInventoryReceiptSchema=object({...base,receiptKind:literal('INVENTORY').default('INVENTORY'),materialId:string().min(1,'Выберите материал'),unitPrice:decimal(priceInput)}).strict();
@@ -23,6 +24,7 @@ export type StockMovementView = {
  materialId:string;materialName:string;materialUnit:string;quantity:number;unitPrice:number|null;totalByn:number|null;
  productId:string|null;productNumber:string|null;comment:string|null;createdByName:string|null;createdAt:string;
  returnableQuantity?:number|null;
+ reportDocument?:ViewableFile|null;
 };
 export type ProjectMaterialLineStatus="FULFILLED"|"AVAILABLE"|"SHORTAGE";
 export type ProjectMaterialLine = {

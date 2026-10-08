@@ -99,10 +99,10 @@ test("FileViewer fullscreen variant uses the original without altering the regul
   assert.match(standardPopup, /Имя обычного файла/);
 });
 
-test("mobile dialog sizing excludes the fullscreen cover and gives it the full viewport height", () => {
+test("mobile dialog sizing excludes all fullscreen viewers and gives them the full viewport height", () => {
   const css = readFileSync(resolve(process.cwd(), "src/app/globals.css"), "utf8");
-  assert.match(css, /\[data-slot="dialog-content"\]:not\(\[data-file-viewer-variant="cover-fullscreen"\]\)\s*\{[\s\S]*?max-height:\s*calc\(var\(--dialog-viewport-height,[^}]+\)\s*-/);
-  assert.match(css, /\[data-slot="dialog-content"\]\[data-file-viewer-variant="cover-fullscreen"\]\s*\{[\s\S]*?height:\s*var\(--dialog-viewport-height,\s*100dvh\)[^}]*max-height:\s*none/);
+  assert.match(css, /\[data-slot="dialog-content"\]:not\(\[data-file-viewer-variant\$="-fullscreen"\]\)\s*\{[\s\S]*?max-height:\s*calc\(var\(--dialog-viewport-height,[^}]+\)\s*-/);
+  assert.match(css, /\[data-slot="dialog-content"\]\[data-file-viewer-variant\$="-fullscreen"\]\s*\{[\s\S]*?height:\s*var\(--dialog-viewport-height,\s*100dvh\)[^}]*max-height:\s*none/);
 });
 
 test("failed cover mutation keeps the previous cover id", () => {
