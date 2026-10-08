@@ -1,3 +1,4 @@
+import { paymentView } from "@/server/finance/payment-view";
 import nextDynamic from "next/dynamic";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
@@ -333,22 +334,7 @@ export default async function ProjectPage({
                 marginAtFullPrice: economics.marginAtFullPrice,
                 expenseBreakdown: economics.expenseBreakdown,
               }}
-              payments={project.payments.map((payment) => ({
-                id: payment.id,
-                direction: payment.direction,
-                amount: Number(payment.amount),
-                currency: payment.currency,
-                rate: Number(payment.rate),
-                bynAmount: Number(payment.bynAmount),
-                projectAmount: Number(payment.projectAmount),
-                paidAt: payment.paidAt.toISOString(),
-                comment: payment.comment,
-                cashAccountName: payment.cashAccount?.name ?? null,
-                expenseArticleName: payment.expenseArticle?.name ?? null,
-                createdByName: payment.createdById
-                  ? (uploaderNames.get(payment.createdById) ?? "—")
-                  : "—",
-              }))}
+              payments={project.payments.map(payment => paymentView(payment, uploaderNames))}
               cashAccounts={cashAccounts.map((account) => ({
                 id: account.id,
                 name: account.name,

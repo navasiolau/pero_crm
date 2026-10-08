@@ -8,6 +8,7 @@ import { readCashBalance, readOrgBalance } from "@/server/payroll/cash-core";
 import { requireFinanceDocumentActor } from "@/server/finance-documents/core";
 import { paymentSchema, type PaymentInput } from "./contracts";
 import { readPaymentReceipt, recordPaymentReceipt } from "./receipts";
+import { assertExpenseReportDocument } from "./document-policy";
 
 export type PreparedPayment = {
   project: { id: string; number: string; currency: string } | null;
@@ -27,6 +28,7 @@ export async function createPaymentInTransaction(actor: DomainActor, input: Paym
   const data = paymentSchema.parse(input);
   const previous = await readPaymentReceipt(actor, data, tx);
   if (previous) return { payment: previous, eventId: null, repeated: true as const };
+  assertExpenseReportDocument(data);
 
   if (data.reportDocumentId) {
     await requireFinanceDocumentActor(actor.id, tx);

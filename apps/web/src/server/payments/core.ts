@@ -16,6 +16,7 @@ import { assertProjectMoneyCurrency } from "@/lib/internal-currency";
 import { paymentSchema, type PaymentInput } from "./contracts";
 import { readPaymentReceipt } from "./receipts";
 import { createPaymentInTransaction } from "./transaction";
+import { assertExpenseReportDocument } from "./document-policy";
 export { createPaymentInTransaction, type PreparedPayment } from "./transaction";
 
 export { paymentSchema } from "./contracts";
@@ -35,7 +36,10 @@ export async function createPaymentCore(
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Ошибка данных" };
   }
   const data = parsed.data;
-  try { if (await readPaymentReceipt(actor, data, prisma)) return { ok: true }; }
+  try {
+    if (await readPaymentReceipt(actor, data, prisma)) return { ok: true };
+    assertExpenseReportDocument(data);
+  }
   catch (error) { return { ok: false, error: error instanceof Error ? error.message : "Не удалось проверить повтор платежа" }; }
   if (!isCurrency(data.currency)) return { ok: false, error: "Неизвестная валюта" };
 
@@ -123,6 +127,8 @@ export async function createPaymentCore(
   }).catch(() => {});
 
   if (project) revalidatePath(`/projects/${project.id}`);
+  if (project) revalidatePath(`/finance/projects/${project.id}`);
+  if (data.reportDocumentId) revalidatePath("/finance/documents");
   revalidatePath("/finance/income");
   revalidatePath("/finance/payroll");
   revalidatePath("/finance/accounts");

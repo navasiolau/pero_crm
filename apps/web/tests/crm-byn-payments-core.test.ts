@@ -6,7 +6,7 @@ import {requireHistoricalByn} from '../src/lib/history-byn';
 const require=createRequire(import.meta.url);
 function inject(name:string,exports:Record<string,unknown>){const file=require.resolve(name);const stub=new Module(file);stub.filename=file;stub.loaded=true;stub.exports=exports;require.cache[file]=stub;}
 let projectCurrency='USD',fxCalls=0,writes=0,accountReads=0;let saved:Record<string,unknown>={};
-const tx={changeLog:{create:async()=>({id:"audit"})},domainEvent:{create:async()=>({id:"event"})},project:{findUnique:async()=>({id:'p',number:'P',currency:projectCurrency})},cashAccount:{findUnique:async()=>{accountReads++;return{id:'cash',name:'USD cash',active:true,currency:'USD'}}},orgSetting:{findUnique:async()=>({value:'USD'})},expenseArticle:{findUnique:async()=>({id:'article',active:true})},payment:{create:async({data}:{data:Record<string,unknown>})=>{writes++;saved=data;return{id:'payment',...data}}}};
+const tx={user:{findUnique:async()=>({id:'a',name:'A',active:true,roles:['ACCOUNTANT']})},financeDocument:{findUnique:async()=>({id:'99999999-9999-4999-8999-999999999999',uploadedById:'a',state:'READY',payment:null})},changeLog:{create:async()=>({id:"audit"})},domainEvent:{create:async()=>({id:"event"})},project:{findUnique:async()=>({id:'p',number:'P',currency:projectCurrency})},cashAccount:{findUnique:async()=>{accountReads++;return{id:'cash',name:'USD cash',active:true,currency:'USD'}}},orgSetting:{findUnique:async()=>({value:'USD'})},expenseArticle:{findUnique:async()=>({id:'article',active:true})},payment:{create:async({data}:{data:Record<string,unknown>})=>{writes++;saved=data;return{id:'payment',...data}}}};
 inject('../src/lib/prisma',{prisma:tx});inject('next/cache',{revalidatePath:()=>{}});
 inject('../src/server/projects/core',{requireActorRoles:()=>{}});
 inject('../src/server/plugins/changelog',{writeChangeLog:async()=>{}});inject('../src/server/plugins/events',{emitDomainEvent:async()=>{},dispatchEvent:async()=>{}});inject('../src/server/notifications/notify',{notifyOrg:async()=>{}});
@@ -18,7 +18,7 @@ const actor={id:'a',name:'A',roles:['ACCOUNTANT' as const],source:'web' as const
 const input={projectId:'p',direction:'INCOME' as const,amount:100,currency:'USD',cashAccountId:'cash'};
 test('unprepared foreign project rejects income and expense before FX, cash read or write',async()=>{
  for(const direction of ['INCOME','EXPENSE'] as const){projectCurrency='USD';fxCalls=0;writes=0;accountReads=0;
- const result=await createPaymentCore(actor,{...input,direction,...(direction==='EXPENSE'?{expenseArticleId:'article'}:{})});
+ const result=await createPaymentCore(actor,{...input,direction,...(direction==='EXPENSE'?{expenseArticleId:'article',reportDocumentId:'99999999-9999-4999-8999-999999999999'}:{})});
  assert.equal(result.ok,false);assert.match(result.error??'',/BYN/);assert.equal(fxCalls,0);assert.equal(accountReads,0);assert.equal(writes,0);}
 });
 test('BYN project preserves USD cash100 and fixes BYN300 despite old payroll setting',async()=>{
@@ -29,7 +29,7 @@ test('BYN project preserves USD cash100 and fixes BYN300 despite old payroll set
 
 test('USD expense uses one physical FX rate and internal BYN cap without reading legacy setting',async()=>{
  projectCurrency='BYN';fxCalls=0;writes=0;
- assert.equal((await createPaymentCore(actor,{...input,direction:'EXPENSE',expenseArticleId:'article'})).ok,true);
+ assert.equal((await createPaymentCore(actor,{...input,direction:'EXPENSE',reportDocumentId:'99999999-9999-4999-8999-999999999999',expenseArticleId:'article'})).ok,true);
  assert.equal(fxCalls,1);assert.equal(writes,1);assert.equal(saved.currency,'USD');assert.equal(saved.bynAmount,300);
 });
 

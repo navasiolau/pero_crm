@@ -4,6 +4,7 @@ import { projectTotal as calculateProjectTotal } from "@/lib/product-quantity";
 import type { Prisma, ProjectStage, Role } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
+import { reportDocumentSelect } from "@/server/finance-documents/view";
 import {
   ASSIGNEE_ROLES,
   MANAGER_ROLES,
@@ -285,6 +286,7 @@ export async function getProjectFor(
         include: {
           cashAccount: { select: { name: true } },
           expenseArticle: { select: { name: true } },
+          reportDocument: { select: reportDocumentSelect },
         },
         orderBy: { paidAt: "desc" },
       },

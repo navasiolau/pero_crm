@@ -6,7 +6,7 @@ import {toast} from 'sonner';
 import {Button} from '@/components/ui/button';
 import {DataTable,type DataColumn} from '@/components/ui/data-table';
 import {ConfirmDeleteDialog} from '@/components/confirm-delete-dialog';
-import {PaymentDialog} from '@/app/(app)/projects/[id]/finance-tab';
+import {PaymentDialog} from '@/components/payment-dialog';
 import {formatAmount,formatDate} from '@/lib/format';
 import {deletePayment} from '@/server/payments/actions';
 import type {loadOrganizationIncome} from '@/server/finance/income-ledger';
