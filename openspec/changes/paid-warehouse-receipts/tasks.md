@@ -12,4 +12,4 @@
 
 ## 3. Приёмка
 - [x] 3.1 Пройти local tests/types/lint/build/strict, native/HTTP/UI с сохранением данных; зафиксировать evidence.
-- [ ] 3.2 Влить обычным merge и проверить фактический staging/CI/сценарии, не меняя main.
+- [x] 3.2 Влить обычным merge и проверить фактический staging/CI/сценарии, не меняя main.
