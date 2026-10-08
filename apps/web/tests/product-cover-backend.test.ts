@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { canSetProductCover, validateProductCoverFile } from "../src/lib/product-cover";
-import { setProductCoverCore } from "../src/server/products/cover-core";
+import { authorizeProductCoverUpload, setProductCoverCore } from "../src/server/products/cover-core";
+
+import type {Prisma,Role} from "@prisma/client";
+import {resolveVisibilityActor,fileVisibilityWhere,productVisibilityWhere,projectVisibilityWhere} from "../src/server/access/visibility";
+import {fixtureModel,matches,type FixtureRow} from "./helpers/visibility-fixture";
 
 const product = { id: "product-1", projectId: "project-1", status: "DESIGN" as const,
   engineerId: "engineer-1", sketchFileId: "old-cover" };
@@ -36,4 +40,39 @@ test("cover source must be a supported image bound to this exact product and pro
 test("legacy gallery endpoint without captured baseline is explicitly rejected", async () => {
  const result=await setProductCoverCore({} as never,{id:"manager",roles:["MANAGER"]} as never,product.id,image.id);
  assert.equal(result.ok,false);if(!result.ok)assert.equal(result.kind,"validation");
+});
+function participantCoverFixture(){
+ const parent:FixtureRow={id:'qa-project',number:'216',products:[],tasks:[]};
+ const own:FixtureRow={id:'qa-product',projectId:parent.id,project:parent,status:'DESIGN',engineerId:null,sketchFileId:'manager-sketch'};
+ const foreign:FixtureRow={id:'foreign-product',projectId:parent.id,project:parent,status:'DESIGN',engineerId:'other',sketchFileId:'foreign-sketch'};
+ parent.products=[own,foreign];
+ const current:FixtureRow={id:'manager-sketch',projectId:parent.id,project:parent,productId:own.id,product:own,taskId:null,mimeType:'image/png',uploadedById:'manager'};
+ const foreignFile:FixtureRow={...current,id:'foreign-sketch',productId:foreign.id,product:foreign};
+ const config:FixtureRow={id:'config',productId:own.id,product:own,kind:'ENGINEERING'};
+ const membership:FixtureRow={id:'member',userId:'participant',configId:config.id,config,shareUnits:1};
+ const tx={project:fixtureModel([parent]),product:fixtureModel([own,foreign]),task:fixtureModel([]),productPercentageParticipant:fixtureModel([membership]),file:fixtureModel([current,foreignFile]),changeLog:{findUnique:async()=>null}} as unknown as Prisma.TransactionClient;
+ const actor={id:'participant',roles:['ENGINEER'] as Role[]},input={projectId:parent.id as string,productId:own.id as string,expectedSketchFileId:current.id as string,clientMutationId:'01234567-89ab-4def-8123-456789abcdef'};
+ return {tx,actor,input,parent,own,foreign,current,foreignFile};
+}
+test('112 direct DESIGN engineering participant reads project/product/manager sketch and passes replacement preflight',async()=>{
+ const f=participantCoverFixture(),resolved=await resolveVisibilityActor(f.tx,f.actor);
+ assert.deepEqual(resolved.engineeringParticipantProductIds,['qa-product']);
+ const result=await authorizeProductCoverUpload(f.tx,f.actor,f.input);
+ assert.equal(result.ok,true,`actual core preflight refused: ${result.ok?'':result.kind}`);
+ assert.equal(matches(f.own,productVisibilityWhere(resolved)),true);
+ assert.equal(matches(f.parent,projectVisibilityWhere(resolved)),true);
+ assert.equal(matches(f.current,fileVisibilityWhere(resolved)),true);
+ assert.equal(matches(f.foreign,productVisibilityWhere(resolved)),false);
+ assert.equal(matches(f.foreignFile,fileVisibilityWhere(resolved)),false);
+});
+test('112 participant cover grant never leaks to post-DESIGN/deleted/foreign products or non-engineering roles',async()=>{
+ for(const status of ['PREPARATION','PRODUCTION','STORAGE','INSTALLATION','DONE','RECLAMATION']){
+  const f=participantCoverFixture();f.own.status=status;const resolved=await resolveVisibilityActor(f.tx,f.actor),result=await authorizeProductCoverUpload(f.tx,f.actor,f.input);
+  assert.equal(result.ok,false);if(!result.ok)assert.equal(result.kind,'forbidden');
+  assert.equal(matches(f.own,productVisibilityWhere(resolved)),false);assert.equal(matches(f.current,fileVisibilityWhere(resolved)),false);
+ }
+ for(const scope of ['foreign','deleted-product','deleted-parent','non-engineer']){
+  const f=participantCoverFixture();if(scope==='foreign')f.input.productId=f.foreign.id as string;if(scope==='deleted-product')f.own.deletedAt=new Date();if(scope==='deleted-parent')f.parent.deletedAt=new Date();if(scope==='non-engineer')f.actor.roles=['ACCOUNTANT'];
+  const result=await authorizeProductCoverUpload(f.tx,f.actor,f.input);assert.equal(result.ok,false);if(!result.ok)assert.equal(result.kind,'forbidden');
+ }
 });

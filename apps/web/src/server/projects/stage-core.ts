@@ -4,15 +4,17 @@ import {Prisma} from '@prisma/client';
 import {MANAGER_ROLES,hasAnyRole} from '@/lib/roles';
 import type {DomainActor} from './core';
 import {projectStagePatchSchema,validateStageExtras,type ProjectStageResult} from './stage-contract';
+import {lockProjectRow} from './lock';
+import {promoteProjectDrafts} from '@/server/products/draft-core';
 
 /** Одна транзакция для селекта, доски и бота; проценты изделий не начисляет. */
-export async function patchProjectStageTransaction(actor:DomainActor,input:unknown,tx:Prisma.TransactionClient):Promise<{result:ProjectStageResult;eventIds:string[];project?:{number:string;title:string};fromStage?:string}>{
+export async function patchProjectStageTransaction(actor:DomainActor,input:unknown,tx:Prisma.TransactionClient):Promise<{result:ProjectStageResult;eventIds:string[];project?:{number:string;title:string};fromStage?:string;productIds?:string[]}>{
  const parsed=projectStagePatchSchema.safeParse(input);
  if(!parsed.success)return{result:{ok:false,kind:'validation',error:'Обновите форму: необходимы исходный статус и идентификатор операции'},eventIds:[]};
  const patch=parsed.data;
  const fail=(kind:ProjectStageResult['kind'],error:string,extra:Partial<ProjectStageResult>={})=>({result:{ok:false,kind,error,clientMutationId:patch.clientMutationId,...extra},eventIds:[]});
  if(!hasAnyRole(actor.roles,MANAGER_ROLES))return fail('forbidden','Недостаточно прав');
- await tx.$queryRaw`SELECT id FROM "Project" WHERE id = ${patch.projectId} FOR UPDATE`;
+ await lockProjectRow(tx,patch.projectId);
  const project=await tx.project.findUnique({where:{...liveProjectWhere,id:patch.projectId},select:{id:true,stage:true,number:true,title:true}});
  if(!project)return fail('not-found','Проект не найден');
  const receiptId=`project-stage:${patch.clientMutationId}`;
@@ -28,7 +30,8 @@ export async function patchProjectStageTransaction(actor:DomainActor,input:unkno
  const errors=validateStageExtras(patch.toStage,patch.extras);
  if(Object.keys(errors).length)return fail('validation','Заполните обязательные сведения',{errors});
  const extras=patch.extras??{};
- const data:Prisma.ProjectUpdateManyMutationInput={stage:patch.toStage,stageChangedAt:new Date(),
+ const changedAt=new Date();
+ const data:Prisma.ProjectUpdateManyMutationInput={stage:patch.toStage,stageChangedAt:changedAt,
   ...(patch.toStage==='REFUSED'?{refusalReason:extras.refusalReason!.trim(),refusalComment:extras.refusalComment?.trim()||null}:{}),
   ...(patch.toStage==='RECLAMATION'?{reclamationReason:extras.reclamationReason!.trim(),reclamationDescription:extras.reclamationDescription!.trim(),reclamationFault:extras.reclamationFault!.trim()}:{}),
  };
@@ -36,6 +39,7 @@ export async function patchProjectStageTransaction(actor:DomainActor,input:unkno
  if(updated.count!==1)throw new Error('Статус изменён другим пользователем');
  await tx.projectStageHistory.create({data:{projectId:patch.projectId,fromStage:project.stage,toStage:patch.toStage,changedById:actor.id,comment:patch.toStage==='REFUSED'?extras.refusalReason!.trim():patch.toStage==='RECLAMATION'?extras.reclamationReason!.trim():undefined}});
  await tx.changeLog.create({data:{id:receiptId,actorType:'user',actorId:actor.id,actorName:actor.name,source:actor.source,entity:'project',entityId:patch.projectId,action:'stage',field:'stage',oldValue:project.stage,newValue:{fingerprint,stage:patch.toStage}}});
+ const promoted=patch.toStage==='CONTRACT'?await promoteProjectDrafts(tx,actor,patch.projectId,changedAt):{eventIds:[],productIds:[]};
  const event=await tx.domainEvent.create({data:{type:'project.stageChanged',actor:actor.id,payload:{projectId:patch.projectId,number:project.number,from:project.stage,to:patch.toStage}}});
- return{result:{ok:true,kind:'saved',clientMutationId:patch.clientMutationId,stage:patch.toStage},eventIds:[event.id],project,fromStage:project.stage};
+ return{result:{ok:true,kind:'saved',clientMutationId:patch.clientMutationId,stage:patch.toStage},eventIds:[event.id,...promoted.eventIds],project,fromStage:project.stage,productIds:promoted.productIds};
 }

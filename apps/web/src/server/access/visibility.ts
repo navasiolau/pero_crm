@@ -95,6 +95,9 @@ function assignedProductVisibilityWhereGrants(actor: VisibilityActor): Prisma.Pr
   if (hasFullProjectVisibility(actor)) return {};
   const grants: Prisma.ProductWhereInput[] = [];
   grants.push(currentEngineeringReadWhere(actor));
+  // Участник технического блока сохраняет чтение изделия/эскиза только на DESIGN.
+  if (hasRole(actor.roles, "ENGINEER") && actor.engineeringParticipantProductIds?.length)
+    grants.push(engineeringProductWhere(actor));
   if (hasAnyRole(actor.roles, FIELD_ROLES)) grants.push({
     status: { in: POST_DESIGN_PRODUCT_STATUSES },
     OR: [
