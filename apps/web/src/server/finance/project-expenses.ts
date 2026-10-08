@@ -7,7 +7,7 @@ import type { ProjectExpenseRow } from "./contracts";
 
 const stockExpenseSelect = {
   id: true, type: true, quantity: true, unitPrice: true, totalByn: true, createdAt: true, createdById: true, comment: true,
-  material: { select: { id: true, name: true, unit: true } },
+  material: { select: { id: true, name: true, measurementUnit: { select: { name: true } } } },
   product: { select: { id: true, number: true } },
   warehouseValuation: { select: { unitCost: true, sourceMovementId: true } },
 } satisfies Prisma.StockMovementSelect;
@@ -29,7 +29,7 @@ export function projectExpenseRows(payments: readonly PaymentRecord[], movements
     rows.push({ id: `stock:${row.id}`, source: row.type === "RETURN" ? "WAREHOUSE_RETURN" : "WAREHOUSE_ISSUE", sourceId: row.id,
       date: row.createdAt.toISOString(), article: WAREHOUSE_EXPENSE_ARTICLE, bynAmount: stockExpenseAmount(row),
       comment: row.comment, createdByName: row.createdById ? people.get(row.createdById) ?? null : null, payment: null,
-      stock: { materialId: row.material.id, materialName: row.material.name, unit: row.material.unit,
+      stock: { materialId: row.material.id, materialName: row.material.name, unit: row.material.measurementUnit.name,
         quantity: row.quantity.toString(), unitPrice: (row.warehouseValuation?.unitCost ?? row.unitPrice)?.toString() ?? null,
         product: row.product ? { id: row.product.id, number: row.product.number } : null,
         sourceMovementId: row.warehouseValuation?.sourceMovementId ?? null } });

@@ -35,7 +35,7 @@ export async function prepareStockPurchase(actor: DomainActor, input: StockPurch
   getRate?: Parameters<typeof preparePayment>[2]) {
   requireActorRoles(actor, FINANCE_ROLES);
   const data = stockPurchaseSchema.parse(input);
-  const material = await db.material.findUnique({ where: { id: data.materialId }, select: { id: true, name: true, unit: true, active: true } });
+  const material = await db.material.findUnique({ where: { id: data.materialId }, select: { id: true, name: true, measurementUnit: { select: { name: true } }, active: true } });
   if (!material?.active) throw Error("Материал не найден");
   const prepared = await preparePayment(paymentData(data), db, getRate);
   if (prepared.bynAmount <= 0) throw Error("Стоимость закупки в BYN должна быть больше нуля");
