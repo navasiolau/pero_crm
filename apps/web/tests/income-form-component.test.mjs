@@ -19,12 +19,12 @@ const bundlePromise=build({stdin:{contents:`
   const [direction,setDirection]=React.useState(window.__testDirection||'INCOME');
   window.__setDirection=setDirection;
   const [open,setOpen]=React.useState(true);window.__setOpen=setOpen;
-  return <PaymentDialog direction={direction} open={open} onOpenChange={()=>{}} projectId={window.__testProjectId} projectCurrency="BYN" projectOptions={window.__testProjectId?undefined:[{id:'project-1',number:'П-2026-042',title:'Название не должно быть в форме'}]} cashAccounts={[{id:'cash-1',name:'Основная касса',currency:'BYN'}]} expenseArticles={window.__testExpenseArticles??[{id:'article-1',name:'Материалы'},{id:'article-2',name:'Логистика'}]}/>;
+  return <PaymentDialog direction={direction} open={open} onOpenChange={()=>{}} projectId={window.__testProjectId} projectCurrency="BYN" projectOptions={window.__testProjectId?undefined:[{id:'project-1',number:'П-2026-042',title:'Название не должно быть в форме'}]} cashAccounts={[{id:'cash-1',name:'Основная касса',currency:'BYN'}]} stockMaterials={window.__testStockMaterials} expenseArticles={window.__testExpenseArticles??[{id:'article-1',name:'Материалы'},{id:'article-2',name:'Логистика'}]}/>;
  }
  createRoot(document.getElementById('root')).render(<Harness/>);
  `,resolveDir:web,loader:'tsx'},bundle:true,write:false,platform:'browser',format:'iife',jsx:'automatic',tsconfig:path.join(web,'tsconfig.json'),define:{'process.env.NODE_ENV':'"production"'},plugins:[{name:'test-boundaries',setup(b){
- b.onResolve({filter:/^(next\/navigation|sonner|@\/server\/payments\/actions|@\/server\/finance\/actions)$/},args=>({path:args.path,namespace:'boundary'}));
- b.onLoad({filter:/.*/,namespace:'boundary'},args=>({contents:args.path==='next/navigation'?'export const useRouter=()=>({refresh(){}});':args.path==='sonner'?'export const toast={error(){},success(){}};':args.path.includes('payments')?'export const addPayment=async input=>{window.__paymentInput=input;return window.__paymentResult??{ok:true}};export const deletePayment=async()=>({ok:true});':'export const fetchNbrbRate=async()=>({ok:true,rate:3,date:"2026-10-04"});',loader:'js'}));
+ b.onResolve({filter:/^(next\/navigation|sonner|@\/server\/payments\/actions|@\/server\/finance\/actions|@\/server\/warehouse\/stock-purchase-actions)$/},args=>({path:args.path,namespace:'boundary'}));
+ b.onLoad({filter:/.*/,namespace:'boundary'},args=>({contents:args.path==='next/navigation'?'export const useRouter=()=>({refresh(){}});':args.path==='sonner'?'export const toast={error(){},success(){}};':args.path.includes('stock-purchase')?'export const addPaidStockReceipt=async input=>{window.__stockInput=input;return window.__stockResult??{ok:true}};':args.path.includes('payments')?'export const addPayment=async input=>{window.__paymentInput=input;return window.__paymentResult??{ok:true}};export const deletePayment=async()=>({ok:true});':'export const fetchNbrbRate=async()=>({ok:true,rate:3,date:"2026-10-04"});',loader:'js'}));
  }}],logLevel:'silent'});
 
 async function withDialog(config,run){
@@ -140,6 +140,30 @@ async function uploadDocument(page){
  await page.locator('#pay-document').setInputFiles({name:'Чек.pdf',mimeType:'application/pdf',buffer:Buffer.from('%PDF')});
  await page.getByRole('button',{name:'Чек.pdf',exact:true}).waitFor();
 }
+
+test('paid warehouse mode computes invoice amount, omits document/project and retries the same purchase UUID',async()=>{
+ await withDialog({__testDirection:'EXPENSE',__testStockMaterials:[{id:'material',name:'Петля',unit:'шт',sku:null}],__stockResult:{ok:false,error:'lost acknowledgement'}},async page=>{
+  assert.equal(await page.getByRole('heading',{name:'Приход на склад',exact:true}).count(),1);
+  assert.equal(await page.locator('#pay-document').count(),0);
+  assert.equal(await page.locator('#income-project').count(),0);
+  await page.locator('#purchase-material').click();
+  await page.getByText('Петля',{exact:true}).click();
+  await page.locator('#purchase-qty').fill('3');await page.locator('#purchase-price').fill('20');
+  assert.equal(await page.locator('#pay-amount').inputValue(),'60.00');
+  assert.equal(await page.locator('#pay-amount').getAttribute('readonly'),'');
+  await page.getByRole('button',{name:'Оплатить и принять на склад',exact:true}).click();
+  await page.waitForFunction(()=>window.__stockInput);
+  const first=await page.evaluate(()=>window.__stockInput);
+  assert.equal(first.materialId,'material');assert.equal(first.quantity,'3');assert.equal(first.unitPrice,'20');
+  assert.equal(first.cashAccountId,'cash-1');assert.equal(first.expenseArticleId,'article-1');
+  for(const field of ['amount','projectId','reportDocumentId','skipReportDocument'])assert.equal(Object.hasOwn(first,field),false);
+  assert.equal(await page.evaluate(()=>window.__paymentInput),undefined);
+  await page.evaluate(()=>{window.__stockInput=null});
+  await page.getByRole('button',{name:'Оплатить и принять на склад',exact:true}).click();
+  await page.waitForFunction(()=>window.__stockInput);
+  assert.deepEqual(await page.evaluate(()=>window.__stockInput),first);
+ });
+});
 
 test('failed monetary acknowledgement preserves document and UUID for exact retry',async()=>{
  await withDialog({__testDirection:'EXPENSE',__testProjectId:'project-1',__paymentResult:{ok:false,error:'try again'}},async page=>{

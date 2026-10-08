@@ -37,4 +37,4 @@ const result = await build({ entryPoints: [resolve(web, "tests/crm-byn-native.mj
   }));
  } }] });
 const bytes = readFileSync(out);
-console.log(JSON.stringify({ kind: "crm-byn-native-bundle", out, size: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex"), dbExecuted: false, largestInputs: Object.entries(Object.values(result.metafile.outputs)[0].inputs).sort((a,b) => b[1].bytesInOutput-a[1].bytesInOutput).slice(0,15).map(([path,info]) => ({path,bytes:info.bytesInOutput})) }));
+console.log(JSON.stringify({ kind: "crm-byn-native-bundle", out, size: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex"), dbExecuted: false, includedInputs: Object.entries(Object.values(result.metafile.outputs)[0].inputs).filter(([,info]) => info.bytesInOutput > 0).map(([path]) => path), largestInputs: Object.entries(Object.values(result.metafile.outputs)[0].inputs).sort((a,b) => b[1].bytesInOutput-a[1].bytesInOutput).slice(0,15).map(([path,info]) => ({path,bytes:info.bytesInOutput})) }));

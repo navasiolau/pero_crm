@@ -1,11 +1,12 @@
 import {Prisma} from '@prisma/client';
-import {requireActorRoles,type DomainActor} from '@/server/projects/core';
+import {requireActorRoles,type DomainActor} from '@/server/actor';
 import {FINANCE_ROLES} from '@/lib/roles';
 import {readCashBalance,readOrgBalance} from '@/server/payroll/cash-core';
 export async function deletePaymentInTransaction(actor:DomainActor,paymentId:string,previewDirection:string,payrollCurrency:string,payrollRate:string,tx:Prisma.TransactionClient){
 requireActorRoles(actor,FINANCE_ROLES);
-      const current = await tx.payment.findUnique({ where: { id: paymentId }, include: { project: { select: { id: true, number: true, deletedAt: true } } } });
+      const current = await tx.payment.findUnique({ where: { id: paymentId }, include: { project: { select: { id: true, number: true, deletedAt: true } }, stockPurchase: { select: { id: true } } } });
       if (!current) throw new Error("Платёж не найден");
+      if (current.stockPurchase) throw new Error("Платёж связан с приходом на склад — отдельно удалить его нельзя");
       if (current.project?.deletedAt) throw new Error("Проект в корзине: финансовая история доступна только для просмотра");
       if (current.direction === "INCOME") {
         if (previewDirection !== current.direction) throw new Error("Платёж изменился — повторите операцию");

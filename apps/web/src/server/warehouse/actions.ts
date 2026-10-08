@@ -1,7 +1,7 @@
 "use server";
 import {liveProductWhere} from "@/server/access/live-entities";
 
-import { revalidatePath } from "next/cache";
+
 import { z } from "zod";
 
 import { prisma } from "@/lib/prisma";
@@ -9,7 +9,7 @@ import { formatQty } from "@/lib/format";
 import { writeChangeLog } from "@/server/plugins/changelog";
 import { dispatchEvent } from "@/server/plugins/events";
 import { notifyOrg } from "@/server/notifications/notify";
-import { revalidateProductPaths } from "@/server/products/revalidate";
+import { revalidateWarehouse } from "./revalidate";
 import { withTaskTransaction } from "@/server/tasks/transaction";
 import { addMaterialNorm, updateMaterialNorm, lockMaterialProduct } from "./norm-core";
 import { stockInventoryReceiptSchema, stockIssueSchema, stockReturnSchema } from "./contracts";
@@ -27,17 +27,6 @@ import { requireRole } from "@/server/require-role";
 // (maxWait 2 с / timeout 5 с) на e2e ловили P2028 «Unable to start
 // a transaction» при прогретом пуле соединений
 const TX_OPTIONS = { maxWait: 10_000, timeout: 15_000 } as const;
-
-async function revalidateWarehouse(productId?: string | null, projectId?: string | null) {
-  revalidatePath("/warehouse");
-  revalidatePath("/warehouse/stock");
-  revalidatePath("/warehouse/items");
-  revalidatePath("/warehouse/movements");
-  revalidatePath("/projects"); // бейдж нехватки на канбане/в таблице
-  revalidatePath("/products");
-  if (projectId) revalidatePath(`/projects/${projectId}`);
-  await revalidateProductPaths(productId);
-}
 
 // ─── Категории ────────────────────────────────────────────────────────────
 

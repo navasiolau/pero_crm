@@ -6,6 +6,7 @@ import { STAGES } from "@/lib/stages";
 
 import { authenticate, isErrorResponse } from "@/server/api/auth";
 import { listManagers } from "@/server/projects/queries";
+import { listStockReceiptMaterials } from "@/server/warehouse/stock-purchase-queries";
 import {
   isActorError,
   requireBotManager,
@@ -24,10 +25,14 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const type = url.searchParams.get("type") ?? "";
   const q = url.searchParams.get("q")?.trim() ?? "";
-  const gate = type === "cash" || type === "articles" ? requireBotFinance(actor) : requireBotManager(actor);
+  const gate = type === "cash" || type === "articles" || type === "materials" ? requireBotFinance(actor) : requireBotManager(actor);
   if (gate) return gate;
 
   switch (type) {
+    case "materials": {
+      const materials = await listStockReceiptMaterials(actor, prisma, q, 8);
+      return NextResponse.json({ ok: true, items: materials.map(item => ({ id: item.id, label: item.name, unit: item.unit })) });
+    }
     case "clients": {
       const clients = await prisma.client.findMany({
         where: q

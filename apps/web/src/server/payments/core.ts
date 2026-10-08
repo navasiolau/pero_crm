@@ -1,21 +1,22 @@
-import {liveProjectWhere} from "@/server/access/live-entities";
+
 import { revalidatePath } from "next/cache";
-import { Prisma } from "@prisma/client";
+
 
 import { prisma } from "@/lib/prisma";
 import { formatAmount } from "@/lib/format";
 import { dispatchEvent } from "@/server/plugins/events";
 import { notifyOrg } from "@/server/notifications/notify";
 
-import { getNbrbRate, isCurrency } from "@/server/finance/nbrb";
+
 import { requireActorRoles, type DomainActor } from "@/server/actor";
 import { FINANCE_ROLES } from "@/lib/roles";
 import { withTaskTransaction } from "@/server/tasks/transaction";
 
-import { assertProjectMoneyCurrency } from "@/lib/internal-currency";
+
 import { paymentSchema, type PaymentInput } from "./contracts";
 import { readPaymentReceipt } from "./receipts";
-import { createPaymentInTransaction } from "./transaction";
+import { createPaymentInTransaction, type PreparedPayment } from "./transaction";
+import { preparePayment } from "./prepare";
 import { assertExpenseReportDocument } from "./document-policy";
 export { createPaymentInTransaction, type PreparedPayment } from "./transaction";
 
@@ -41,79 +42,13 @@ export async function createPaymentCore(
     assertExpenseReportDocument(data);
   }
   catch (error) { return { ok: false, error: error instanceof Error ? error.message : "Не удалось проверить повтор платежа" }; }
-  if (!isCurrency(data.currency)) return { ok: false, error: "Неизвестная валюта" };
-
-  const project = data.projectId ? await prisma.project.findUnique({
-    where: {...liveProjectWhere, id: data.projectId },
-    select: { id: true, number: true, currency: true },
-  }) : null;
-  if (data.projectId && !project) return { ok: false, error: "Проект не найден" };
-  try { if (project) assertProjectMoneyCurrency(project.currency); }
-  catch (error) { return { ok: false, error: error instanceof Error ? error.message : "Сначала подготовьте проект в BYN" }; }
-
-  // Касса: операция проводится только в валюте кассы (деньги физически
-  // лежат в кассе в её валюте; эквиваленты — в полях курса операции)
-  const account = await prisma.cashAccount.findUnique({
-    where: { id: data.cashAccountId },
-  });
-  if (!account || !account.active) return { ok: false, error: "Касса не найдена" };
-  if (account.currency !== data.currency) {
-    return {
-      ok: false,
-      error: `Касса «${account.name}» в ${account.currency} — выберите кассу в валюте операции`,
-    };
-  }
-
-  let articleId: string | null = null;
-  if (data.direction === "EXPENSE" && !data.expenseArticleId) {
-    return { ok: false, error: "Выберите статью расхода" };
-  }
-  if (data.expenseArticleId) {
-    const article = await prisma.expenseArticle.findUnique({
-      where: { id: data.expenseArticleId },
-    });
-    if (!article || !article.active) {
-      return { ok: false, error: "Статья расхода не найдена" };
-    }
-    articleId = article.id;
-  }
-
-  const paidAt = data.paidAt ? new Date(`${data.paidAt}T12:00:00`) : new Date();
-  const amountDecimal = new Prisma.Decimal(data.amount).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
-  const amount = amountDecimal.toNumber();
-
-  // Курс: ручной ввод имеет приоритет (§11), иначе — НБ РБ на дату операции.
-  // Если НБ РБ недоступен — просим ввести курс вручную (§19).
-  let rate: number;
-  let rateDate: Date | null = null;
-  if (data.currency === "BYN") {
-    rate = 1;
-  } else if (data.rate) {
-    rate = data.rate;
-    rateDate = data.rateDate ? new Date(`${data.rateDate}T12:00:00`) : paidAt;
-  } else {
-    try {
-      const fetched = await getNbrbRate(data.currency, paidAt);
-      rate = fetched.rate;
-      rateDate = new Date(`${fetched.date}T12:00:00`);
-    } catch {
-      return {
-        ok: false,
-        error: "Не удалось получить курс НБ РБ — введите курс вручную",
-      };
-    }
-  }
-
-  // Проект уже проверен как BYN. Считаем фиксированный эквивалент Decimal:
-  // полкопейки округляется вверх без ошибки двоичного умножения.
-  const rateDecimal = new Prisma.Decimal(rate);
-  const bynDecimal = amountDecimal.times(rateDecimal).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
-  const equiv = { bynAmount: bynDecimal.toNumber(), projectAmount: project ? bynDecimal.toNumber() : null };
-
   let result;
+  let prepared: PreparedPayment;
   try {
-    result = await withTaskTransaction(tx => createPaymentInTransaction(actor, data, {project,account,articleId,paidAt,rate,rateDate,amount,bynAmount:equiv.bynAmount},tx));
+    prepared = await preparePayment(data, prisma);
+    result = await withTaskTransaction(tx => createPaymentInTransaction(actor, data, prepared, tx));
   } catch(error) { return {ok:false,error:error instanceof Error?error.message:"Не удалось внести платёж"}; }
+  const { project, amount } = prepared;
   if (result.repeated) return { ok: true };
   const isIncome = data.direction === "INCOME";
   const kind = isIncome ? "Приход" : "Расход";

@@ -34,6 +34,18 @@ export function addPosition(position:WarehousePosition,quantity:string,price:str
  const v=rounded(q*cost,BigInt(1000));
  return {position:addValue(position,decimalText(q,3),decimalText(v,9)),cost:decimalText(cost,9),value:decimalText(v,9),money:moneyText(v)};
 }
+/** Cash invoice is rounded once in its currency before FX conversion. */
+export function stockPurchaseAmount(quantity:string,price:string) {
+ const result=addPosition({quantity:'0',value:'0'},quantity,price).money;
+ if(decimalAtoms(result,2,12)===BigInt(0))throw Error('Сумма закупки должна быть больше нуля');
+ return result;
+}
+/** Capitalize the exact saved BYN cash equivalent, not a rounded per-unit FX price. */
+export function addPaidPosition(position:WarehousePosition,quantity:string,bynAmount:string) {
+ const q=quantityInput(quantity),money=priceInput(bynAmount);
+ const value=decimalText(decimalAtoms(money,2,12)*BigInt(10_000_000),9);
+ return {position:addValue(position,q,value),cost:unitCost({quantity:q,value}),value,money};
+}
 export function issuePosition(position:WarehousePosition,quantity:string){
  const q=quantityAtoms(position.quantity),take=quantityAtoms(quantityInput(quantity)),v=valueAtoms(position.value);
  if(take>q)throw Error('Недостаточно материала на складе');
