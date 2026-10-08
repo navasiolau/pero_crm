@@ -13,7 +13,9 @@ const receiptInclude = { movement: true, payment: true } as const;
 export function stockPurchaseFingerprint(actorId: string, data: StockPurchaseData) {
   return createHash("sha256").update(JSON.stringify({ actorId, materialId: data.materialId, quantity: data.quantity,
     unitPrice: data.unitPrice, currency: data.currency, cashAccountId: data.cashAccountId, expenseArticleId: data.expenseArticleId,
-    rate: data.rate ?? null, rateDate: data.rateDate ?? null, paidAt: data.paidAt ?? null, comment: data.comment?.trim() || null })).digest("hex");
+    rate: data.rate ?? null, rateDate: data.rateDate ?? null, paidAt: data.paidAt ?? null, comment: data.comment?.trim() || null,
+    // Без файла сохраняем прежний fingerprint для повторов уже проведённых закупок.
+    ...(data.reportDocumentId ? { reportDocumentId: data.reportDocumentId } : {}) })).digest("hex");
 }
 export async function readStockPurchaseReceipt(actor: DomainActor, data: StockPurchaseData, db: Pick<Prisma.TransactionClient, "stockPurchase">) {
   const receipt = await db.stockPurchase.findUnique({ where: { clientMutationId: data.clientMutationId }, include: receiptInclude });
@@ -25,7 +27,7 @@ export async function readStockPurchaseReceipt(actor: DomainActor, data: StockPu
 function paymentData(data: StockPurchaseData): PaymentData {
   return { direction: "EXPENSE", projectId: null, amount: Number(stockPurchaseAmount(data.quantity, data.unitPrice)), currency: data.currency,
     cashAccountId: data.cashAccountId, expenseArticleId: data.expenseArticleId, rate: data.rate, rateDate: data.rateDate,
-    paidAt: data.paidAt, comment: data.comment };
+    paidAt: data.paidAt, comment: data.comment, ...(data.reportDocumentId ? { reportDocumentId: data.reportDocumentId } : {}) };
 }
 export async function prepareStockPurchase(actor: DomainActor, input: StockPurchaseData,
   db: Pick<PrismaClient, "project" | "cashAccount" | "expenseArticle" | "material">,

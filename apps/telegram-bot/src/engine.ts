@@ -1,9 +1,9 @@
 import {randomUUID} from "node:crypto";
 import { crm, CrmError, type ProjectRef,type ProjectBaseline } from "./crm";
 import { tg, TgError, type InlineButton, type TgCallbackQuery, type TgMessage, type TgUpdate } from "./tg";
-import { documentFromMessage, TelegramDocumentError, type TelegramDocument } from "./telegram-documents";
+import { documentAttempt, uploadFinanceDocument, documentUploadError, type DocumentAttempt, type ReportDocument } from "./finance-document-upload";
 import { startStockMovement, stockMovementText, stockMovementCallback, type StockMovementDialog } from "./stock-movement-dialog";
-import { startStockPurchase, stockPurchaseText, stockPurchaseCallback, type StockPurchaseDialog } from "./stock-purchase-dialog";
+import { startStockPurchase, stockPurchaseText, stockPurchaseCallback, stockPurchaseDocument, type StockPurchaseDialog } from "./stock-purchase-dialog";
 import {
   CURRENCIES,
   FINANCE_ROLES,
@@ -45,8 +45,8 @@ type Dialog =
       step: "project" | "amount" | "currency" | "cash" | "article" | "comment" | "document" | "confirm";
       clientMutationId: string;
       projectSelected: boolean;
-      reportDocument?: { id: string; fileName: string; mimeType: string };
-      documentAttempt?: { key: string; clientMutationId: string; attachment: TelegramDocument };
+      reportDocument?: ReportDocument;
+      documentAttempt?: DocumentAttempt;
       busy?: boolean;
       projectId?: string | null;
       projectNumber?: string;
@@ -574,14 +574,15 @@ async function paymentDocumentMessage(chatId: number, message: TgMessage) {
   const session = await getSession(String(chatId), true);
   const dialog = getDialog(chatId);
   if (!session || !hasAny(session.roles, FINANCE_ROLES)) { await reply(chatId, "Недостаточно прав для финансовых документов"); return; }
+  if (dialog?.kind === "stockPurchase") {
+    await stockPurchaseDocument({ reply, getDialog, setDialog }, chatId, session.userId, dialog, message); return;
+  }
   if (dialog?.kind !== "payment" || dialog.direction !== "EXPENSE" || !["document", "comment"].includes(dialog.step)) {
     await reply(chatId, "Сначала начните оформление расхода: /расход"); return;
   }
   if (dialog.busy) return;
   if (dialog.step === "comment") { dialog.comment = message.caption?.trim() || undefined; dialog.step = "document"; }
-  const attachment = documentFromMessage(message); if (!attachment) return;
-  const key = JSON.stringify([attachment.uniqueId, attachment.fileName, attachment.mimeType]);
-  if (dialog.documentAttempt?.key !== key) dialog.documentAttempt = { key, clientMutationId: randomUUID(), attachment };
+  dialog.documentAttempt = documentAttempt(message, dialog.documentAttempt);
   await uploadPaymentDocument(chatId, session, dialog);
 }
 
@@ -590,15 +591,13 @@ async function uploadPaymentDocument(chatId: number, session: Session, dialog: E
   if (!attempt || dialog.busy) return;
   dialog.busy = true;
   try {
-    const bytes = await tg.downloadDocument(attempt.attachment);
-    const result = await crm.uploadFinanceDocument(session.userId, { clientMutationId: attempt.clientMutationId,
-      fileName: attempt.attachment.fileName, mimeType: attempt.attachment.mimeType, bytes });
-    if (!result.ok || !result.document) throw new CrmError(result.error ?? "CRM не подтвердила документ");
+    const document = await uploadFinanceDocument(session.userId, attempt);
     if (getDialog(chatId) !== dialog) return;
-    dialog.reportDocument = result.document;
+    dialog.reportDocument = document;
     await confirmPayment(chatId, session, dialog);
   } catch (error) {
-    const message = error instanceof CrmError || error instanceof TelegramDocumentError ? error.message : "Не удалось загрузить документ";
+    if (getDialog(chatId) !== dialog) return;
+    const message = documentUploadError(error);
     await reply(chatId, `❌ ${message}. Данные расхода сохранены.`, [[{ text: "Повторить загрузку", callback_data: `docretry:${attempt.clientMutationId}` }], [CANCEL_BUTTON]]);
   } finally { dialog.busy = false; }
 }

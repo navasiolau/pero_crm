@@ -21,3 +21,8 @@ test("paid stock contract owns quantity and price, refusing client totals, proje
   assert.equal(stockPurchaseSchema.safeParse({...input,...extra}).success,false);
  assert.equal(stockPurchaseSchema.safeParse({...input,quantity:"3.0001"}).success,false);
 });
+test("paid receipt accepts an optional document but refuses empty identifiers",()=>{
+ assert.equal(stockPurchaseSchema.parse({...input,reportDocumentId:"document"}).reportDocumentId,"document");
+ assert.equal(stockPurchaseSchema.parse(input).reportDocumentId,undefined);
+ assert.equal(stockPurchaseSchema.safeParse({...input,reportDocumentId:""}).success,false);
+});

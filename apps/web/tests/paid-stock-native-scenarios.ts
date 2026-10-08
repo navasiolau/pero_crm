@@ -1,17 +1,18 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { createTaskTransaction } from "../src/server/tasks/transaction";
 import { readCashBalance, readOrgBalance } from "../src/server/payroll/cash-core";
 import { createPaymentInTransaction } from "../src/server/payments/transaction";
 import { deletePaymentInTransaction } from "../src/server/payments/delete-core";
 import { stockPurchaseSchema } from "../src/server/warehouse/contracts";
-import { prepareStockPurchase, createStockPurchaseInTransaction } from "../src/server/warehouse/stock-purchase-core";
+import { prepareStockPurchase, createStockPurchaseInTransaction, stockPurchaseFingerprint } from "../src/server/warehouse/stock-purchase-core";
+import { loadMovementReportDocuments } from "../src/server/warehouse/report-documents";
 import { loadOrganizationPayments } from "../src/server/finance/organization-ledger";
 
 export async function stockPurchaseBaseline(db: PrismaClient) {
   const result:Record<string,unknown>={};
-  for(const table of ["WarehouseAccountingState","WarehouseBalance","WarehouseMovementValuation","StockPurchase","StockMovement","Material","User","CashAccount","ExpenseArticle","Payment","Payout","ChangeLog","DomainEvent"])
+  for(const table of ["WarehouseAccountingState","WarehouseBalance","WarehouseMovementValuation","StockPurchase","StockMovement","Material","User","CashAccount","ExpenseArticle","Payment","Payout","ChangeLog","DomainEvent","FinanceDocument"])
     result[table]=await db.$queryRawUnsafe(`SELECT count(*)::text n,md5(COALESCE(string_agg(h,'' ORDER BY h),'')) digest FROM (SELECT md5(to_jsonb(t)::text) h FROM "${table}" t) x`);
   return result;
 }
@@ -37,6 +38,8 @@ export async function runPaidStockNative(db: PrismaClient) {
         await tx.payment.create({data:{direction:"INCOME",amount:funding,bynAmount:funding,currency:"BYN",rate:1,cashAccountId:account.id,createdById:user.id}});
         const data=stockPurchaseSchema.parse({clientMutationId:randomUUID(),materialId:material.id,quantity:"3",unitPrice:"20",currency:"BYN",cashAccountId:account.id,expenseArticleId:article.id,comment:marker});
         const {prepared}=await prepareStockPurchase(actor,data,tx,async()=>assert.fail("UNEXPECTED_FX"));
+        const legacyFingerprint=createHash('sha256').update(JSON.stringify({actorId:actor.id,materialId:data.materialId,quantity:data.quantity,unitPrice:data.unitPrice,currency:data.currency,cashAccountId:data.cashAccountId,expenseArticleId:data.expenseArticleId,rate:null,rateDate:null,paidAt:null,comment:marker})).digest('hex');
+        assert.equal(stockPurchaseFingerprint(actor.id,data),legacyFingerprint);
         if(mode==="last-write-failure"){
           const faultTx=new Proxy(tx,{get(target,property,receiver){
             if(property==="stockPurchase")return {...target.stockPurchase,create:async()=>{
@@ -79,11 +82,30 @@ export async function runPaidStockNative(db: PrismaClient) {
         const usd=await tx.cashAccount.create({data:{name:marker+"-usd",currency:"USD"}});
         await tx.payment.create({data:{direction:"INCOME",amount:100,bynAmount:300,currency:"USD",rate:3,cashAccountId:usd.id,createdById:user.id}});
         const fxMaterial=await tx.material.create({data:{name:marker+"-fx",purchasePrice:0}});
-        const fxData={...data,clientMutationId:randomUUID(),materialId:fxMaterial.id,cashAccountId:usd.id,currency:"USD",unitPrice:"7.33",rate:3.001};
+        const document=await tx.financeDocument.create({data:{clientMutationId:randomUUID(),requestFingerprint:marker,uploadedById:actor.id,fileName:'Чек.pdf',mimeType:'application/pdf',size:4,contentHash:marker,storageKey:marker,storageMode:'local',state:'READY',readyAt:new Date()}});
+        const fxData={...data,clientMutationId:randomUUID(),materialId:fxMaterial.id,cashAccountId:usd.id,currency:"USD",unitPrice:"7.33",rate:3.001,reportDocumentId:document.id};
         const accountant={...actor,roles:["ACCOUNTANT" as const]};
         const fxPrepared=(await prepareStockPurchase(accountant,fxData,tx)).prepared;
         assert.equal(fxPrepared.amount,21.99);assert.equal(fxPrepared.bynAmount,65.99);
         const fxReceipt=await createStockPurchaseInTransaction(accountant,fxData,fxPrepared,tx);
+        assert.equal(fxReceipt.receipt.payment.reportDocumentId,document.id);
+        assert.equal((await loadMovementReportDocuments(actor,[fxReceipt.receipt.movementId],tx)).get(fxReceipt.receipt.movementId)?.id,document.id);
+        assert.equal((await createStockPurchaseInTransaction(actor,fxData,fxPrepared,tx)).repeated,true);
+        await assert.rejects(createStockPurchaseInTransaction(actor,{...fxData,reportDocumentId:undefined},fxPrepared,tx),/другими данными/);
+        for(const mode of ['bound','pending','foreign','missing'] as const){
+          await tx.$executeRawUnsafe('SAVEPOINT optional_document_guard');
+          if(mode==='pending'){
+            await tx.payment.update({where:{id:fxReceipt.receipt.paymentId},data:{reportDocumentId:null}});
+            await tx.financeDocument.update({where:{id:document.id},data:{state:'PENDING',readyAt:null}});
+          }
+          if(mode==='foreign'){
+            const other=await tx.user.create({data:{name:marker,email:randomUUID()+'@invalid.local',passwordHash:'disabled',roles:['PROCUREMENT']}});
+            await tx.payment.update({where:{id:fxReceipt.receipt.paymentId},data:{reportDocumentId:null}});
+            await tx.financeDocument.update({where:{id:document.id},data:{uploadedById:other.id}});
+          }
+          await assert.rejects(createStockPurchaseInTransaction(actor,{...fxData,clientMutationId:randomUUID(),reportDocumentId:mode==='missing'?'missing':document.id},fxPrepared,tx),/документ/i);
+          await tx.$executeRawUnsafe('ROLLBACK TO SAVEPOINT optional_document_guard');
+        }
         const fxBalance=await tx.warehouseBalance.findUniqueOrThrow({where:{materialId:fxMaterial.id}});
         assert.equal(fxBalance.valueByn.toFixed(9),"65.990000000");
         assert.equal((await readCashBalance(tx,usd.id)).toFixed(2),"78.01");

@@ -10,7 +10,7 @@ export const stockIncomeSchema=stockInventoryReceiptSchema;
 export const stockPurchaseSchema=object({...base,
  materialId:string().min(1,'Выберите материал'),unitPrice:decimal(priceInput),
  currency:string(),cashAccountId:string().min(1,'Выберите кассу'),expenseArticleId:string().min(1,'Выберите статью расхода'),
- rate:number().positive().optional(),rateDate:string().optional(),paidAt:string().optional(),
+ rate:number().positive().optional(),rateDate:string().optional(),paidAt:string().optional(),reportDocumentId:string().min(1).optional(),
 }).strict();
 export type StockPurchaseInput=input<typeof stockPurchaseSchema>;
 export type StockPurchaseData=output<typeof stockPurchaseSchema>;

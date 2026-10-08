@@ -141,10 +141,11 @@ async function uploadDocument(page){
  await page.getByRole('button',{name:'Чек.pdf',exact:true}).waitFor();
 }
 
-test('paid warehouse mode computes invoice amount, omits document/project and retries the same purchase UUID',async()=>{
+test('paid warehouse mode permits no document, computes invoice amount and retries the same purchase UUID',async()=>{
  await withDialog({__testDirection:'EXPENSE',__testStockMaterials:[{id:'material',name:'Петля',unit:'шт',sku:null}],__stockResult:{ok:false,error:'lost acknowledgement'}},async page=>{
   assert.equal(await page.getByRole('heading',{name:'Приход на склад',exact:true}).count(),1);
-  assert.equal(await page.locator('#pay-document').count(),0);
+  assert.equal(await page.locator('#pay-document').count(),1);
+  assert.equal(await page.getByText('Отчетный документ (необязательно)',{exact:true}).count(),1);
   assert.equal(await page.locator('#income-project').count(),0);
   await page.locator('#purchase-material').click();
   await page.getByText('Петля',{exact:true}).click();
@@ -161,6 +162,18 @@ test('paid warehouse mode computes invoice amount, omits document/project and re
   await page.evaluate(()=>{window.__stockInput=null});
   await page.getByRole('button',{name:'Оплатить и принять на склад',exact:true}).click();
   await page.waitForFunction(()=>window.__stockInput);
+  assert.deepEqual(await page.evaluate(()=>window.__stockInput),first);
+ });
+});
+
+test('paid warehouse receipt submits optional uploaded document and preserves it on retry',async()=>{
+ await withDialog({__testDirection:'EXPENSE',__testStockMaterials:[{id:'material',name:'Петля',unit:'шт',sku:null}],__stockResult:{ok:false,error:'lost acknowledgement'}},async page=>{
+  await page.locator('#purchase-material').click();await page.getByText('Петля',{exact:true}).click();
+  await page.locator('#purchase-qty').fill('3');await page.locator('#purchase-price').fill('20');await uploadDocument(page);
+  await page.getByRole('button',{name:'Оплатить и принять на склад',exact:true}).click();await page.waitForFunction(()=>window.__stockInput);
+  const first=await page.evaluate(()=>window.__stockInput);assert.ok(first.reportDocumentId);
+  await page.evaluate(()=>{window.__stockInput=null});
+  await page.getByRole('button',{name:'Оплатить и принять на склад',exact:true}).click();await page.waitForFunction(()=>window.__stockInput);
   assert.deepEqual(await page.evaluate(()=>window.__stockInput),first);
  });
 });

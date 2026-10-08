@@ -2,14 +2,23 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 process.env.BOT_RECOVERY_TEST='1';process.env.TELEGRAM_API_ORIGIN='http://127.0.0.1:9080';
 process.env.TELEGRAM_BOT_TOKEN='fixture-token';process.env.CRM_BASE_URL='http://127.0.0.1:9081';process.env.CRM_API_TOKEN='fixture-crm-token';
-const sent=[],calls=[],receipts=new Map(),roles=new Map();
-let loseAck=false,failQuote=false,updateId=1;
+const sent=[],calls=[],receipts=new Map(),roles=new Map(),uploads=new Map();
+let loseAck=false,failQuote=false,loseUpload=false,updateId=1;
 globalThis.fetch=async(input,options={})=>{
- const url=new URL(String(input)),body=options.body?JSON.parse(String(options.body)):undefined;
+ const url=new URL(String(input));let body;
+ if(options.body instanceof FormData){const file=options.body.get('file');body={clientMutationId:options.body.get('clientMutationId'),fileName:file.name,mimeType:file.type,bytes:Buffer.from(await file.arrayBuffer()).toString('hex')};}
+ else body=options.body?JSON.parse(String(options.body)):undefined;
  calls.push({path:url.pathname,body,actor:options.headers?.['x-acting-user']});
  let value;
  if(url.pathname.endsWith('/sendMessage')){sent.push(body);value={ok:true,result:{message_id:sent.length,chat:{id:body.chat_id}}};}
  else if(url.pathname.endsWith('/answerCallbackQuery'))value={ok:true,result:true};
+ else if(url.pathname.endsWith('/getFile'))value={ok:true,result:{file_path:'documents/file.pdf',file_size:4}};
+ else if(url.pathname.startsWith('/file/'))return new Response('%PDF',{headers:{'content-length':'4'}});
+ else if(url.pathname==='/api/v1/bot/documents/upload'){
+  if(!uploads.has(body.clientMutationId))uploads.set(body.clientMutationId,{id:body.clientMutationId,fileName:body.fileName,mimeType:body.mimeType});
+  value={ok:true,document:uploads.get(body.clientMutationId)};
+  if(loseUpload){loseUpload=false;throw Error('lost upload ACK');}
+ }
  else if(url.pathname==='/api/v1/bot/session'){const id=url.searchParams.get('chatId');value={found:true,user:{id:'actor-'+id,name:'Actor',roles:roles.get(id)??['PROCUREMENT'],botAllowed:true}};}
  else if(url.pathname==='/api/v1/bot/directory'){
   const type=url.searchParams.get('type');
@@ -20,7 +29,7 @@ globalThis.fetch=async(input,options={})=>{
   value={ok:true,quote:{materialName:'Петля',unit:'шт',quantity:'3.000',unitPrice:'7.33',currency:'USD',amount:21.99,bynAmount:Math.round(21.99*rate*100)/100,rate,rateDate:'2026-10-08'}};
  } else if(url.pathname==='/api/v1/bot/stock-receipts'){
   assert.equal(body.materialId,'material');assert.equal(body.quantity,'3');assert.equal(body.unitPrice,'7.33');
-  assert.equal(Object.hasOwn(body,'reportDocumentId'),false);assert.equal(Object.hasOwn(body,'amount'),false);
+  if(body.reportDocumentId)assert.ok([...uploads.values()].some(doc=>doc.id===body.reportDocumentId));assert.equal(Object.hasOwn(body,'amount'),false);
   assert.equal(Object.hasOwn(body,'projectId'),false);assert.ok(body.clientMutationId);
   if(receipts.has(body.clientMutationId))assert.deepEqual(receipts.get(body.clientMutationId),body);
   else receipts.set(body.clientMutationId,body);
@@ -33,12 +42,13 @@ const {handleUpdate}=await import('../dist/engine.js');
 const msg=(id,text)=>({update_id:updateId++,message:{message_id:updateId,chat:{id},from:{id},text}});
 const cb=(id,data,from=id)=>({update_id:updateId++,callback_query:{id:String(updateId),from:{id:from},message:{message_id:updateId,chat:{id}},data}});
 const button=(id,match)=>sent.filter(row=>row.chat_id===id).flatMap(row=>row.reply_markup?.inline_keyboard?.flat()??[]).filter(row=>match(row.callback_data??'')).at(-1)?.callback_data;
-async function begin(id){
+async function begin(id,skipDocument=true){
  await handleUpdate(msg(id,'/закупка'));await handleUpdate(msg(id,'петля'));
  await handleUpdate(cb(id,button(id,value=>value.includes(':pick:'))));
  await handleUpdate(msg(id,'3'));await handleUpdate(cb(id,button(id,value=>value.includes(':pick:'))));
  await handleUpdate(msg(id,'7.33'));await handleUpdate(cb(id,button(id,value=>value.includes(':pick:'))));
  await handleUpdate(msg(id,'авто'));await handleUpdate(msg(id,'—'));
+ if(skipDocument)await handleUpdate(cb(id,button(id,value=>value.endsWith(':nodoc'))));
  return button(id,value=>value.endsWith(':ok'));
 }
 test('paid stock quote and lost commit acknowledgement use one request without a document',async()=>{
@@ -48,7 +58,38 @@ test('paid stock quote and lost commit acknowledgement use one request without a
  assert.equal(receipts.size,before+1);
  const writes=calls.filter(row=>row.path.endsWith('/stock-receipts')&&row.actor==='actor-'+id);
  assert.equal(writes.length,2);assert.deepEqual(writes[0].body,writes[1].body);assert.equal(writes[0].body.rate,3.001);
+ assert.equal(Object.hasOwn(writes[0].body,'reportDocumentId'),false);
  await handleUpdate(cb(id,confirm));assert.equal(calls.filter(row=>row.path.endsWith('/stock-receipts')&&row.actor==='actor-'+id).length,2);
+});
+
+test('optional receipt file retries upload and commit exactly once, stale controls cannot remove it',async()=>{
+ const id=9910;await begin(id,false);const skip=button(id,value=>value.endsWith(':nodoc'));
+ const file={document:{file_id:'receipt',file_unique_id:'receipt',file_name:'Чек.pdf',mime_type:'application/pdf',file_size:4}};
+ loseUpload=true;await handleUpdate({...msg(id,undefined),message:{...msg(id,undefined).message,...file}});
+ const retry=button(id,value=>value.includes(':docretry:'));assert.ok(retry);assert.ok(retry.length<=64);
+ await handleUpdate(cb(id,retry));const confirm=button(id,value=>value.endsWith(':ok'));assert.ok(confirm);
+ assert.match(sent.at(-1).text,/Чек.pdf/);await handleUpdate(cb(id,skip));
+ loseAck=true;await handleUpdate(cb(id,confirm));await handleUpdate(cb(id,confirm));
+ const writes=calls.filter(row=>row.path.endsWith('/stock-receipts')&&row.actor==='actor-'+id);
+ assert.equal(writes.length,2);assert.ok(writes[0].body.reportDocumentId);assert.deepEqual(writes[0].body,writes[1].body);
+ const files=calls.filter(row=>row.path.endsWith('/documents/upload')&&row.actor==='actor-'+id);
+ assert.equal(files.length,2);assert.deepEqual(files[0].body,files[1].body);
+});
+
+test('receipt photos, optional skip after upload error, cancellation and current role protect files',async()=>{
+ const id=9911;await begin(id,false);
+ await handleUpdate({...msg(id,undefined),message:{...msg(id,undefined).message,photo:[{file_id:'large',file_unique_id:'large',width:100,height:100,file_size:4}]}});
+ assert.ok(button(id,value=>value.endsWith(':ok')));assert.match(sent.at(-1).text,/Фото-large.jpg/);
+ await handleUpdate(cb(id,'cancel'));
+ const next=9912;await begin(next,false);loseUpload=true;
+ const file={document:{file_id:'f',file_unique_id:'f',file_name:'f.pdf',mime_type:'application/pdf',file_size:4}};
+ await handleUpdate({...msg(next,undefined),message:{...msg(next,undefined).message,...file}});
+ const retry=button(next,value=>value.includes(':docretry:'));await handleUpdate(cb(next,button(next,value=>value.endsWith(':nodoc'))));
+ assert.match(sent.at(-1).text,/Без документа/);await handleUpdate(cb(next,'cancel'));
+ const before=calls.filter(row=>row.path.endsWith('/getFile')).length;
+ await handleUpdate(cb(next,retry));await begin(next,false);roles.set(String(next),['MANAGER']);
+ await handleUpdate({...msg(next,undefined),message:{...msg(next,undefined).message,...file}});
+ assert.equal(calls.filter(row=>row.path.endsWith('/getFile')).length,before);
 });
 test('quote transport failure permits retry without changing the collected input',async()=>{
  const id=9902;failQuote=true;await begin(id);
