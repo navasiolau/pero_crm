@@ -1,11 +1,11 @@
 import type { Prisma, PrismaClient, Role } from '@prisma/client';
 import { randomUUID, createHash } from 'node:crypto';
 import { prisma } from '@/lib/prisma';
-import { WAREHOUSE_MANAGE_ROLES, hasAnyRole } from '@/lib/roles';
+import { WAREHOUSE_MANAGE_ROLES, FINANCE_ROLES, hasAnyRole } from '@/lib/roles';
 import { liveProductWhere } from '@/server/access/live-entities';
 import { lockProductRow } from '@/server/products/quantity-core';
 import { decimalAtoms, decimalText } from '@/lib/product-quantity';
-import { addPosition, addValue, issuePosition, returnShare, averagePrice, unitCost, quantityInput, priceInput } from '@/lib/warehouse-cost';
+import { addPosition, addPaidPosition, addValue, issuePosition, returnShare, averagePrice, unitCost, quantityInput, priceInput } from '@/lib/warehouse-cost';
 import {warehouseMetadataGate} from './gate';
 
 type Tx=Prisma.TransactionClient;
@@ -33,17 +33,18 @@ export async function warehouseWriteGate(tx:Tx){
 export async function withWarehouseWrite<T>(operation:(tx:Tx)=>Promise<T>,database:Pick<PrismaClient,'$transaction'>=prisma){
  return database.$transaction(async tx=>{await warehouseMetadataGate(tx);return operation(tx);},{maxWait:10000,timeout:15000});
 }
-export type WarehouseActor={id:string;name?:string|null;roles:Role[]};
+export type WarehouseActor={id:string;name?:string|null;roles:Role[];source?:"web"|"telegram"|"api"};
 export type WarehouseMovementInput={kind:'INCOME'|'EXPENSE'|'RETURN';clientMutationId:string;materialId?:string;projectMaterialId?:string;quantity:string|number;unitPrice?:string|number;sourceMovementId?:string;comment?:string};
-export async function warehouseMove(tx:Tx,actor:WarehouseActor,input:WarehouseMovementInput){
- if(!hasAnyRole(actor.roles,WAREHOUSE_MANAGE_ROLES))throw Error('Недостаточно прав');
+export async function warehouseMove(tx:Tx,actor:WarehouseActor,input:WarehouseMovementInput,paidReceipt?:{bynAmount:string}){
+ if(paidReceipt&&input.kind!=='INCOME')throw Error('Оплата допустима только для прихода');
+ if(!hasAnyRole(actor.roles,paidReceipt?FINANCE_ROLES:WAREHOUSE_MANAGE_ROLES))throw Error('Недостаточно прав');
  if(!/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(input.clientMutationId))throw Error('Некорректный идентификатор запроса');
  const clientMutationId=input.clientMutationId.toLowerCase();
  const quantity=quantityInput(input.quantity);
  if(input.kind==='EXPENSE'&&input.unitPrice!==undefined)throw Error('Цена выдачи рассчитывается автоматически');
  if(input.kind==='RETURN'&&input.sourceMovementId&&input.unitPrice!==undefined)throw Error('Цена возврата определяется исходной выдачей');
- const price=input.kind==='INCOME'||(input.kind==='RETURN'&&!input.sourceMovementId)?priceInput(input.unitPrice):null;
- const fingerprint=createHash('sha256').update(JSON.stringify({actor:actor.id,kind:input.kind,materialId:input.materialId??null,projectMaterialId:input.projectMaterialId??null,sourceMovementId:input.sourceMovementId??null,quantity,unitPrice:price,comment:input.comment?.trim()||null})).digest('hex');
+ const price=!paidReceipt&&(input.kind==='INCOME'||(input.kind==='RETURN'&&!input.sourceMovementId))?priceInput(input.unitPrice):null;
+ const fingerprint=createHash('sha256').update(JSON.stringify({actor:actor.id,kind:input.kind,materialId:input.materialId??null,projectMaterialId:input.projectMaterialId??null,sourceMovementId:input.sourceMovementId??null,quantity,unitPrice:price,comment:input.comment?.trim()||null,...(paidReceipt?{paidByn:priceInput(paidReceipt.bynAmount)}:{})})).digest('hex');
  const state=await warehouseWriteGate(tx);
  await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(18437,hashtext(${clientMutationId}))`;
  const previous=await tx.warehouseMovementValuation.findUnique({where:{clientMutationId},include:{movement:true}});
@@ -64,7 +65,7 @@ export async function warehouseMove(tx:Tx,actor:WarehouseActor,input:WarehouseMo
  if(balance&&balance.runId!==state.runId)throw Error('Состояние складского учёта изменилось');
  const position={quantity:balance?.quantity.toString()??'0',value:balance?.valueByn.toString()??'0'};
  let result;
- if(input.kind==='INCOME')result=addPosition(position,quantity,price!);
+ if(input.kind==='INCOME')result=paidReceipt?addPaidPosition(position,quantity,paidReceipt.bynAmount):addPosition(position,quantity,price!);
  else if(input.kind==='EXPENSE'){
   const debt=decimalAtoms(line!.quantity,3,12)-decimalAtoms(line!.issuedQty,3,12);
   if(decimalAtoms(quantity,3,12)>debt)throw Error('Количество превышает оставшуюся потребность');
@@ -84,14 +85,14 @@ export async function warehouseMove(tx:Tx,actor:WarehouseActor,input:WarehouseMo
    result=addPosition(position,quantity,price!);
   }
  }
- const movement=await tx.stockMovement.create({data:{id:randomUUID(),materialId,type:input.kind,receiptKind:input.kind==='INCOME'?'INVENTORY':null,quantity,unitPrice:averagePrice({quantity:'1',value:result.cost}),totalByn:result.money,productId:line?.productId,projectMaterialId:line?.id,comment:input.comment?.trim()||null,createdById:actor.id}});
+ const movement=await tx.stockMovement.create({data:{id:randomUUID(),materialId,type:input.kind,receiptKind:input.kind==='INCOME'?(paidReceipt?'PAID':'INVENTORY'):null,quantity,unitPrice:averagePrice({quantity:'1',value:result.cost}),totalByn:result.money,productId:line?.productId,projectMaterialId:line?.id,comment:input.comment?.trim()||null,createdById:actor.id}});
  await tx.warehouseMovementValuation.create({data:{id:randomUUID(),movementId:movement.id,sourceMovementId:input.sourceMovementId??null,runId:state.runId,clientMutationId,requestFingerprint:fingerprint,actorId:actor.id,quantity,unitCost:result.cost,valueByn:result.value,moneyByn:result.money}});
  await tx.warehouseBalance.upsert({where:{materialId},create:{materialId,runId:state.runId,quantity:result.position.quantity,valueByn:result.position.value,revision:1},update:{quantity:result.position.quantity,valueByn:result.position.value,revision:{increment:1}}});
  await tx.$executeRaw`UPDATE "Material" SET "purchasePrice"=CAST(${averagePrice(result.position)} AS numeric) WHERE id=${materialId}`;
  if(line)await tx.projectMaterial.update({where:{id:line.id},data:{issuedQty:input.kind==='EXPENSE'?{increment:quantity}:{decrement:quantity}}});
  const eventId='warehouse94-'+clientMutationId;
- await tx.changeLog.create({data:{id:eventId,actorType:'user',actorId:actor.id,actorName:actor.name??undefined,entity:'stockMovement',entityId:movement.id,action:'create',newValue:{type:input.kind,material:material.name,quantity,unitPrice:movement.unitPrice?.toString()??null}}});
- await tx.domainEvent.create({data:{id:eventId,type:'stock.movement.created',actor:actor.id,payload:{movementId:movement.id,type:input.kind,materialId,productId:line?.productId??null,quantity:Number(quantity),totalByn:Number(result.money)}}});
+ await tx.changeLog.create({data:{id:eventId,actorType:'user',actorId:actor.id,actorName:actor.name??undefined,source:actor.source,entity:'stockMovement',entityId:movement.id,action:'create',newValue:{type:input.kind,receiptKind:movement.receiptKind,material:material.name,quantity,unitPrice:movement.unitPrice?.toString()??null}}});
+ await tx.domainEvent.create({data:{id:eventId,type:'stock.movement.created',actor:actor.id,payload:{movementId:movement.id,type:input.kind,receiptKind:movement.receiptKind,materialId,productId:line?.productId??null,quantity:Number(quantity),totalByn:Number(result.money)}}});
  return {movement,repeated:false,line,material,eventId};
 }
 export { averagePrice, unitCost };

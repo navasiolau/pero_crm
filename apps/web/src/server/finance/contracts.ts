@@ -1,5 +1,6 @@
 import type { ViewableFile } from "@/lib/viewable-file";
 import type { ExpenseBreakdownRow } from "./project-expense-facts";
+import type { StockPurchaseView } from "@/server/warehouse/stock-purchase-view";
 
 export type ProjectExpenseRow = {
   id: string;
@@ -31,6 +32,7 @@ export type PaymentRow = {
   expenseArticleName: string | null;
   createdByName: string | null;
   reportDocument: ViewableFile | null;
+  stockPurchase: StockPurchaseView | null;
 };
 export type ProjectEconomicsView = {
   expectedPrice: number | null;

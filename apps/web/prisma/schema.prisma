@@ -810,6 +810,7 @@ model Payment {
   expenseArticle   ExpenseArticle?  @relation(fields: [expenseArticleId], references: [id], onDelete: SetNull)
   reportDocumentId String?          @unique
   reportDocument   FinanceDocument? @relation(fields: [reportDocumentId], references: [id], onDelete: Restrict)
+  stockPurchase    StockPurchase?
   paidAt           DateTime         @default(now())
   comment          String?
   createdById      String?
@@ -933,12 +934,28 @@ enum StockReceiptKind {
   PAID
 }
 
+model StockPurchase {
+  id                 String        @id @default(cuid())
+  clientMutationId   String        @unique
+  requestFingerprint String
+  actorId            String
+  unitPrice          Decimal       @db.Decimal(12, 2) // в валюте связанного платежа
+  movementId         String        @unique
+  movement           StockMovement @relation(fields: [movementId], references: [id], onDelete: Restrict)
+  paymentId          String        @unique
+  payment            Payment       @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  createdAt          DateTime      @default(now())
+
+  @@index([actorId])
+}
+
 model StockMovement {
   id                String            @id @default(cuid())
   materialId        String
   material          Material          @relation(fields: [materialId], references: [id], onDelete: Restrict)
   type              StockMovementType
   receiptKind       StockReceiptKind? // NULL: исторический вид не подтверждён
+  stockPurchase     StockPurchase?
   quantity          Decimal           @db.Decimal(12, 3)
   unitPrice         Decimal?          @db.Decimal(12, 2) // BYN/ед., снимок (обязателен для EXPENSE/RETURN)
   totalByn          Decimal?          @db.Decimal(12, 2) // quantity × unitPrice, снимок

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 import { Plus } from "lucide-react";
 import { toast } from "sonner";
 
@@ -16,7 +16,9 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { SearchableSelect } from "@/components/ui/searchable-select";
+import { StockMaterialFields } from "@/components/stock-material-fields";
+import { PaymentDialog } from "@/components/payment-dialog";
+import type { CashAccountOption, ExpenseArticleOption } from "@/server/finance/contracts";
 import { formatAmount, formatQty } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { addInventoryReceipt } from "@/server/warehouse/actions";
@@ -30,29 +32,22 @@ export function StockView({
   materials,
   canManage,
   showMoney,
+  purchaseOptions,
 }: {
   rows: MaterialView[];
   materials: MaterialOption[];
   canManage: boolean;
   showMoney: boolean;
+  purchaseOptions?: { cashAccounts: CashAccountOption[]; expenseArticles: ExpenseArticleOption[] };
 }) {
   const [pending, startTransition] = useTransition();
   const [incomeOpen, setIncomeOpen] = useState(false);
+  const [purchaseOpen, setPurchaseOpen] = useState(false);
   const [materialId, setMaterialId] = useState("");
   const [quantity, setQuantity] = useState("");
   const [unitPrice, setUnitPrice] = useState("");
   const [comment, setComment] = useState("");
   const [clientMutationId,setClientMutationId]=useState(()=>crypto.randomUUID());
-
-  const materialOptions = useMemo(
-    () =>
-      materials.map((material) => ({
-        value: material.id,
-        label: material.name,
-        hint: `${material.sku ? `${material.sku} · ` : ""}остаток ${formatQty(material.stock)} ${material.unit}`,
-      })),
-    [materials],
-  );
 
   const columns: DataColumn<MaterialView>[] = [
     {
@@ -159,12 +154,15 @@ export function StockView({
             Остаток — приходы и возвраты минус списания на проекты
           </p>
         </div>
+        <div className="flex flex-wrap gap-2">
+        {purchaseOptions ? <Button disabled={rows.some(row=>!row.warehouseReady)} onClick={() => setPurchaseOpen(true)}><Plus className="size-4" />Приход</Button> : null}
         {canManage ? (
-          <Button disabled={rows.some(row=>!row.warehouseReady)} onClick={() => setIncomeOpen(true)}>
+          <Button variant="outline" disabled={rows.some(row=>!row.warehouseReady)} onClick={() => setIncomeOpen(true)}>
             <Plus className="size-4" />
             Инвентарный приход
           </Button>
         ) : null}
+        </div>
       </div>
 
       <DataTable
@@ -190,40 +188,7 @@ export function StockView({
             </DialogDescription>
           </DialogHeader>
           <fieldset disabled={pending} className="flex min-w-0 flex-col gap-3">
-            <div className="flex flex-col gap-1.5">
-              <Label>Материал *</Label>
-              <SearchableSelect
-                options={materialOptions}
-                value={materialId}
-                onChange={setMaterialId}
-                placeholder="Выберите материал…"
-                searchPlaceholder="Поиск материала…"
-                emptyText="Материал не найден"
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="income-qty">Количество *</Label>
-                <Input
-                  id="income-qty"
-                  inputMode="decimal"
-                  value={quantity}
-                  onChange={(event) => setQuantity(event.target.value)}
-                  placeholder="0"
-                />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="income-price">Цена, BYN *</Label>
-                <Input
-                  id="income-price"
-                  inputMode="decimal"
-                  value={unitPrice}
-                  onChange={(event) => setUnitPrice(event.target.value)}
-                  placeholder="Больше нуля"
-                  required
-                />
-              </div>
-            </div>
+            <StockMaterialFields materials={materials} materialId={materialId} onMaterialChange={setMaterialId} quantity={quantity} onQuantityChange={setQuantity} unitPrice={unitPrice} onPriceChange={setUnitPrice} currency="BYN" prefix="income" disabled={pending} />
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="income-comment">Комментарий</Label>
               <Input
@@ -265,6 +230,7 @@ export function StockView({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {purchaseOptions ? <PaymentDialog direction="EXPENSE" open={purchaseOpen} onOpenChange={setPurchaseOpen} projectCurrency="BYN" stockMaterials={materials} {...purchaseOptions} /> : null}
     </div>
   );
 }

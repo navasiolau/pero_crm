@@ -2,6 +2,7 @@ import {randomUUID} from "node:crypto";
 import { crm, CrmError, type ProjectRef,type ProjectBaseline } from "./crm";
 import { tg, TgError, type InlineButton, type TgCallbackQuery, type TgMessage, type TgUpdate } from "./tg";
 import { documentFromMessage, TelegramDocumentError, type TelegramDocument } from "./telegram-documents";
+import { startStockPurchase, stockPurchaseText, stockPurchaseCallback, type StockPurchaseDialog } from "./stock-purchase-dialog";
 import {
   CURRENCIES,
   FINANCE_ROLES,
@@ -27,6 +28,7 @@ interface Session {
 }
 
 type Dialog =
+  | StockPurchaseDialog
   | {
       kind: "newProject";
       step: "title" | "client" | "manager";
@@ -84,7 +86,7 @@ const dialogs = new Map<string, Dialog>();
 const sessionCache = new Map<string, Session & { at: number }>();
 const noticeAt = new Map<string, number>();
 const SESSION_TTL_MS = 60_000;
-const FINANCE_CALLBACK_ACTIONS = new Set(["payin", "payout", "payproj", "paygeneral", "cur", "cash", "art", "nocomment", "payok", "docretry"]);
+const FINANCE_CALLBACK_ACTIONS = new Set(["payin", "payout", "payproj", "paygeneral", "cur", "cash", "art", "nocomment", "payok", "docretry", "sp"]);
 
 function getDialog(chatId: number): Dialog | undefined {
   return dialogs.get(String(chatId));
@@ -243,6 +245,12 @@ async function handleCommand(
   args: string[],
 ): Promise<void> {
   switch (cmd) {
+    case "/закупка":
+    case "/stockin": {
+      const current = await getSession(String(chatId),true);
+      if (chatId <= 0 || !current?.botAllowed || !hasAny(current.roles,FINANCE_ROLES)) { await reply(chatId,"Закупки доступны финансовым ролям в личном чате с ботом."); return; }
+      await startStockPurchase({ reply, getDialog, setDialog },chatId); return;
+    }
     case "/start":
     case "/help": {
       await reply(chatId, helpText(session));
@@ -324,6 +332,7 @@ function helpText(session: Session): string {
     lines.push(
       "/приход [номер] [сумма] — приход по проекту",
       "/расход [номер] [сумма] — расход по проекту",
+      "/закупка — приход материала с оплатой из кассы",
     );
   }
   lines.push("Отвязать бота — в CRM: меню профиля → Telegram");
@@ -376,6 +385,11 @@ async function handleDialogText(
   dialog: Dialog,
   text: string,
 ): Promise<void> {
+  if (dialog.kind === "stockPurchase") {
+    const current = await getSession(String(chatId),true);
+    if (chatId <= 0 || !current?.botAllowed || !hasAny(current.roles,FINANCE_ROLES)) { await reply(chatId,"Недостаточно прав для закупки"); return; }
+    await stockPurchaseText({ reply, getDialog, setDialog },chatId,current.userId,dialog,text); return;
+  }
   if (dialog.kind === "newProject") {
     await newProjectText(chatId, session, dialog, text);
     return;
@@ -790,6 +804,10 @@ async function dispatchCallback(
   action: string,
   rest: string[],
 ): Promise<void> {
+  if (action === "sp") {
+    const dialog = getDialog(chatId);
+    await stockPurchaseCallback({ reply, getDialog, setDialog },chatId,session.userId,dialog?.kind === "stockPurchase" ? dialog : undefined,rest); return;
+  }
   if (["proj", "stage", "st", "edit"].includes(action) && !hasAny(session.roles, ["ADMIN", "DIRECTOR", "MANAGER"])) {
     await reply(chatId, "Недостаточно прав"); return;
   }

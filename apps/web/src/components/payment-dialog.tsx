@@ -10,6 +10,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { formatAmount, formatDate } from "@/lib/format";
 import { addPayment } from "@/server/payments/actions";
+import { addPaidStockReceipt } from "@/server/warehouse/stock-purchase-actions";
+import { stockPurchaseAmount } from "@/lib/warehouse-cost";
+import { StockMaterialFields } from "@/components/stock-material-fields";
+import type { StockMaterialOption } from "@/server/warehouse/contracts";
 import { fetchNbrbRate } from "@/server/finance/actions";
 import type { CashAccountOption, ExpenseArticleOption } from "@/server/finance/contracts";
 import type { FinanceDocumentView } from "@/server/finance-documents/contracts";
@@ -29,6 +33,7 @@ export function PaymentDialog({
   projectOptions,
   cashAccounts,
   expenseArticles,
+  stockMaterials,
 }: {
   direction: "INCOME" | "EXPENSE";
   open: boolean;
@@ -38,10 +43,15 @@ export function PaymentDialog({
   projectOptions?: { id: string; number: string; title?: string }[];
   cashAccounts: CashAccountOption[];
   expenseArticles: ExpenseArticleOption[];
+  stockMaterials?: StockMaterialOption[];
 }) {
-  const isIncome = direction === "INCOME";
+  const isStockPurchase = stockMaterials !== undefined;
+  const isIncome = !isStockPurchase && direction === "INCOME";
+  const [materialId, setMaterialId] = useState("");
+  const [quantity, setQuantity] = useState("");
+  const [unitPrice, setUnitPrice] = useState("");
   const [selectedProjectId,setSelectedProjectId]=useState(projectId??"");
-  const hasProject = Boolean(projectOptions ? selectedProjectId : projectId);
+  const hasProject = !isStockPurchase && Boolean(projectOptions ? selectedProjectId : projectId);
   const generalLabel = isIncome ? "Общий приход организации" : "Общий расход организации";
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -69,16 +79,18 @@ export function PaymentDialog({
       setCashAccountId("");
       setArticleId("");
       setAmount("");
+      setMaterialId(""); setQuantity(""); setUnitPrice("");
       setRate("");
       setRateDate("");
       setPaidAt("");
       setComment("");
     }
-  }, [open, projectCurrency, projectId, direction]);
+  }, [open, projectCurrency, projectId, direction, isStockPurchase]);
 
   // Курс НБ РБ — автоматически при смене валюты/даты (§11)
   useEffect(() => {
     if (!open || currency === "BYN") {
+      setRateLoading(false);
       setRate("");
       setRateDate("");
       return;
@@ -116,7 +128,10 @@ export function PaymentDialog({
       ? articleId
       : (expenseArticles[0]?.id ?? "");
 
-  const parsedAmount = amount.trim() === "" ? NaN : Number(amount);
+  let purchaseAmount = "";
+  if (isStockPurchase) { try { purchaseAmount = stockPurchaseAmount(quantity, unitPrice); } catch {} }
+  const effectiveAmount = isStockPurchase ? purchaseAmount : amount;
+  const parsedAmount = effectiveAmount.trim() === "" ? NaN : Number(effectiveAmount);
   const parsedRate = rate.trim() === "" ? NaN : Number(rate);
   const needsRate = currency !== "BYN";
   const bynPreview =
@@ -127,7 +142,9 @@ export function PaymentDialog({
   const canSubmit =
     !pending &&
     !documentLoading &&
-    (isIncome || reportDocument !== null) &&
+    (isIncome || isStockPurchase || reportDocument !== null) &&
+    (!isStockPurchase || materialId !== "") &&
+    (!needsRate || !rateLoading) &&
     Number.isFinite(parsedAmount) &&
     parsedAmount > 0 &&
     effectiveAccountId !== "" &&
@@ -167,19 +184,19 @@ export function PaymentDialog({
 
   return (
     <Dialog open={open} onOpenChange={next => { if (!pending) onOpenChange(next); }}>
-      <DialogContent>
+      <DialogContent className="max-h-[90dvh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
-            {isIncome ? (hasProject ? "Приход по проекту" : "Приход организации") : (hasProject ? "Расход по проекту" : "Расход организации")}
+            {isStockPurchase ? "Приход на склад" : isIncome ? (hasProject ? "Приход по проекту" : "Приход организации") : (hasProject ? "Расход по проекту" : "Расход организации")}
           </DialogTitle>
           <DialogDescription>
-            {isIncome
+            {isStockPurchase ? "Материал поступит на склад, сумма закупки спишется из выбранной кассы. Расход проекта возникнет при выдаче материала." : isIncome
               ? "Платёж попадёт в оборот месяца для «% от оборота»"
               : hasProject ? "Расход уменьшит маржу проекта" : "Расход уменьшит баланс организации и выбранной кассы"}
           </DialogDescription>
         </DialogHeader>
         <fieldset disabled={pending} className="flex min-w-0 max-w-full flex-col gap-3">
-          {projectOptions ? (
+          {projectOptions && !isStockPurchase ? (
             <div className="flex min-w-0 max-w-full flex-col gap-1.5">
               <Label htmlFor="income-project">Проект (необязательно)</Label>
               <SearchableSelect id="income-project" value={selectedProjectId} onChange={setSelectedProjectId}
@@ -232,8 +249,9 @@ export function PaymentDialog({
             </div>
           </div>
 
+          {isStockPurchase ? <StockMaterialFields materials={stockMaterials} materialId={materialId} onMaterialChange={setMaterialId} quantity={quantity} onQuantityChange={setQuantity} unitPrice={unitPrice} onPriceChange={setUnitPrice} currency={currency} prefix="purchase" disabled={pending} /> : null}
           {articleField}
-          {!isIncome ? <div className="min-w-0 space-y-2">
+          {!isIncome && !isStockPurchase ? <div className="min-w-0 space-y-2">
             <Label htmlFor="pay-document">Отчетный документ *</Label>
             <FinanceDocumentUpload key={clientMutationId} id="pay-document" disabled={pending}
               onBusyChange={setDocumentLoading} onUploaded={setReportDocument} />
@@ -247,7 +265,8 @@ export function PaymentDialog({
               type="number"
               min="0"
               step="0.01"
-              value={amount}
+              value={effectiveAmount}
+              readOnly={isStockPurchase}
               onChange={(event) => setAmount(event.target.value)}
               placeholder="0.00"
             />
@@ -309,22 +328,17 @@ export function PaymentDialog({
             onClick={() =>
               startTransition(async () => {
                 try {
-                const result = await addPayment({
-                  clientMutationId,
-                  ...(!isIncome && reportDocument ? { reportDocumentId: reportDocument.id } : {}),
-                  projectId: projectOptions ? selectedProjectId || null : projectId ?? null,
-                  direction,
-                  amount: parsedAmount,
-                  currency,
-                  cashAccountId: effectiveAccountId,
-                  ...(!isIncome ? { expenseArticleId: effectiveArticleId } : {}),
-                  rate: needsRate ? parsedRate : undefined,
-                  rateDate: rateDate || undefined,
-                  paidAt: paidAt || undefined,
-                  comment: comment.trim() || undefined,
-                });
+                const common = { clientMutationId, currency, cashAccountId: effectiveAccountId,
+                  rate: needsRate ? parsedRate : undefined, rateDate: rateDate || undefined, paidAt: paidAt || undefined, comment: comment.trim() || undefined };
+                const result = isStockPurchase
+                  ? await addPaidStockReceipt({ ...common, materialId, quantity, unitPrice, expenseArticleId: effectiveArticleId })
+                  : await addPayment({ ...common,
+                    ...(!isIncome && reportDocument ? { reportDocumentId: reportDocument.id } : {}),
+                    projectId: projectOptions ? selectedProjectId || null : projectId ?? null, direction, amount: parsedAmount,
+                    ...(!isIncome ? { expenseArticleId: effectiveArticleId } : {}),
+                  });
                 if (result.ok) {
-                  toast.success(isIncome ? "Приход внесён" : "Расход внесён");
+                  toast.success(isStockPurchase ? "Материал оплачен и принят на склад" : isIncome ? "Приход внесён" : "Расход внесён");
                   onOpenChange(false);
                   router.refresh();
                 } else {
@@ -338,7 +352,7 @@ export function PaymentDialog({
           >
             {pending
               ? "Сохранение…"
-              : isIncome
+              : isStockPurchase ? "Оплатить и принять на склад" : isIncome
                 ? "Внести приход"
                 : "Внести расход"}
           </Button>

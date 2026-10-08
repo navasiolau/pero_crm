@@ -48,6 +48,11 @@ export interface DirectoryItem {
   label: string;
   phone?: string;
   currency?: string;
+  unit?: string;
+}
+export interface StockReceiptQuote {
+  materialName: string; unit: string; quantity: string; unitPrice: string;
+  currency: string; amount: number; bynAmount: number; rate: number; rateDate: string | null;
 }
 
 export class CrmError extends Error {}
@@ -86,6 +91,12 @@ async function request<T>(
 }
 
 export const crm = {
+  quoteStockReceipt(actorId: string, input: Record<string, unknown>) {
+    return request<{ ok: boolean; error?: string; quote?: StockReceiptQuote }>("POST", "/stock-receipts/quote", input, actorId);
+  },
+  createStockReceipt(actorId: string, input: Record<string, unknown>) {
+    return request<{ ok: boolean; error?: string; receiptId?: string; repeated?: boolean }>("POST", "/stock-receipts", input, actorId);
+  },
   uploadFinanceDocument(actorId: string, input: { clientMutationId: string; fileName: string; mimeType: string; bytes: Buffer }) {
     const form = new FormData();
     form.set("clientMutationId", input.clientMutationId);

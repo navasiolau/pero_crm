@@ -15,9 +15,10 @@ test('real domain native bundle fits reviewed transport budget with real Zod val
   const bytes=readFileSync(output);
   assert.equal(receipt.dbExecuted,false);assert.equal(receipt.size,bytes.length);assert.ok(bytes.length>0&&bytes.length<=256*1024);
   assert.equal(receipt.sha256,createHash('sha256').update(bytes).digest('hex'));
-  assert.ok(receipt.largestInputs.some(input=>input.path.endsWith('/server/payments/core.ts')));
-  assert.ok(receipt.largestInputs.some(input=>input.path.endsWith('/server/projects/core.ts')));
-  assert.ok(receipt.largestInputs.some(input=>input.path.endsWith('/zod/v4/core/schemas.js')));
+  assert.ok(receipt.includedInputs.some(input=>input.endsWith('/server/payments/core.ts')));
+  assert.ok(receipt.includedInputs.some(input=>input.endsWith('/server/projects/core.ts')));
+  assert.ok(receipt.includedInputs.some(input=>input.endsWith('/server/payments/prepare.ts')));
+  assert.ok(receipt.includedInputs.some(input=>input.endsWith('/zod/v4/core/schemas.js')));
   execFileSync(process.execPath,['--check',output]);
  } finally {assert.equal(dirname(resolve(dir)),resolve(tmpdir()));assert.ok(basename(dir).startsWith('crm-byn-native-build-'));rmSync(dir,{recursive:true,force:true});}
 });

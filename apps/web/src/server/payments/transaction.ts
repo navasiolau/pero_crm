@@ -23,12 +23,21 @@ export type PreparedPayment = {
 
 /** Вызывается под общей денежной блокировкой; сеть и уведомления выполняются после commit. */
 export async function createPaymentInTransaction(actor: DomainActor, input: PaymentInput,
-  prepared: PreparedPayment, tx: Prisma.TransactionClient) {
+  prepared: PreparedPayment, tx: Prisma.TransactionClient, stockPurchase?: { movementId: string }) {
   requireActorRoles(actor, FINANCE_ROLES);
   const data = paymentSchema.parse(input);
   const previous = await readPaymentReceipt(actor, data, tx);
   if (previous) return { payment: previous, eventId: null, repeated: true as const };
-  assertExpenseReportDocument(data);
+  if (stockPurchase) {
+    // Server-only context, never taken from PaymentInput. The stock writer has
+    // already created this owned PAID movement in the same outer transaction.
+    const movement = await tx.stockMovement.findUnique({ where: { id: stockPurchase.movementId },
+      select: { type: true, receiptKind: true, productId: true, createdById: true, totalByn: true, stockPurchase: { select: { id: true } } } });
+    if (data.direction !== "EXPENSE" || data.projectId || prepared.project || !movement ||
+        movement.type !== "INCOME" || movement.receiptKind !== "PAID" || movement.productId ||
+        movement.createdById !== actor.id || movement.stockPurchase || !movement.totalByn?.eq(prepared.bynAmount))
+      throw Error("Нет соответствующего оплаченного прихода для расхода");
+  } else assertExpenseReportDocument(data);
 
   if (data.reportDocumentId) {
     await requireFinanceDocumentActor(actor.id, tx);
