@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {createHmac} from 'node:crypto';
-import {stageGuard,ownStorageKey,verifySigned,validatePartialRecovery,originalExceptOrgSettingMatches,describeOrgSettingEvidence,verifyOperationalClockEvidence,readOriginalReadOnly} from './engineer-sketch-qa-entry.mjs';
-import {runSketchQa,sketchQaBundle} from './engineer-sketch-stage-runner.mjs';
+import {stageGuard,ownStorageKey,verifySigned,validatePartialRecovery,originalExceptOrgSettingMatches,describeOrgSettingEvidence,verifyOperationalClockEvidence,readOriginalReadOnly,validateOwnedBrowserState} from './engineer-sketch-qa-entry.mjs';
+import {runSketchQa,sketchQaBundle,requestSketchBrowserHandoff} from './engineer-sketch-stage-runner.mjs';
 import {qaProcess} from './crm-acceptance-transport.mjs';
 import {mkdir,writeFile,readFile} from 'node:fs/promises';
 import path from 'node:path';
@@ -86,4 +86,14 @@ test('112 one readonly snapshot cannot label MATCH with a later bot clock from a
 test('112 a value change present at snapshot cannot become a fake clock-only PASS after an outside revert',async()=>{
  const beforeRows=[{key:'telegram.botUsername',value:'dummy_bot',updatedAt:'2026-10-08T18:00:00Z'}],changed=[{...beforeRows[0],value:'changed_bot',updatedAt:'2026-10-08T19:00:00Z'}],reverted=[{...beforeRows[0],updatedAt:'2026-10-08T19:00:00Z'}],f=interleavedSnapshotFixture(changed,reverted),cp={baseline:f.fingerprint(beforeRows),operationalOrgSettingBefore:describeOrgSettingEvidence(beforeRows)};
  await assert.rejects(readOriginalReadOnly(f.client,cp,f.read),/OPERATIONAL_ORGSETTING_FIELDS_CHANGED/);
+});
+test('112 readonly browser handoff derives exact own paths/current sketch and nullable own project cover',()=>{
+ const cp={runId,revision,ids:{project:'own-project',product:'own-product'},number:'216',productNumber:'216.1',actors:{manager:{id:'own-manager',roles:['MANAGER'],sessionVersion:0}}},manager={...cp.actors.manager,active:true},project={id:cp.ids.project,number:cp.number,title:`QA112 ${runId}`,deletedAt:null,coverFileId:null},product={id:cp.ids.product,projectId:project.id,number:cp.productNumber,title:project.title,deletedAt:null,sketchFileId:'own-sketch'},sketch={id:'own-sketch',projectId:project.id,productId:product.id,taskId:null,fileName:`qa112-${runId}-final.png`,storedName:`${runId}-qa112-${runId}-final.png`,mimeType:'image/png',hasThumb:true};
+ const binding=validateOwnedBrowserState(cp,manager,project,product,sketch,null);
+ assert.equal(binding.origin,'https://staging-crm.peromebel.by');assert.deepEqual(binding.ownedPaths,{project:'/projects/own-project',product:'/products/216.1'});assert.equal(binding.currentSketchFileId,'own-sketch');assert.equal(binding.currentProjectCoverFileId,null);
+ for(const changed of [{...manager,id:'foreign'},{...manager,roles:['ADMIN']},{...manager,active:false},{...manager,sessionVersion:1}])assert.throws(()=>validateOwnedBrowserState(cp,changed,project,product,sketch,null));
+ assert.throws(()=>validateOwnedBrowserState(cp,manager,project,{...product,projectId:'foreign'},sketch,null));assert.throws(()=>validateOwnedBrowserState(cp,manager,project,product,{...sketch,fileName:'real-client.png'},null));assert.throws(()=>validateOwnedBrowserState(cp,manager,{...project,coverFileId:'foreign'},product,sketch,{id:'foreign',projectId:'outside',fileName:'real.png',mimeType:'image/png'}));
+});
+test('112 handoff request has no unauthorized transport, caller URL or actor override',async()=>{
+ await assert.rejects(requestSketchBrowserHandoff({revision,checkpoint:{revision},outputDir:'C:/unused',authorized:false}),/HANDOFF_AUTHORIZED_BINDING_REQUIRED/);
 });
