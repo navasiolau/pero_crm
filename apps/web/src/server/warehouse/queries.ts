@@ -5,6 +5,7 @@ export type { StockMovementView, ProjectMaterialLineStatus, ProjectMaterialLine,
 import {FIELD_ROLES,OFFICE_ROLES,WAREHOUSE_MONEY_ROLES,hasAnyRole} from "@/lib/roles";
 import { prisma } from "@/lib/prisma";
 import { warehouseReadPositions, averagePrice } from './accounting';
+import {loadMovementReportDocuments} from './report-documents';
 import { materialDebt,decimalAtoms,decimalText } from "@/lib/product-quantity";
 import { hasFullProjectVisibility, productVisibilityWhere, resolveVisibilityActor, type VisibilityActor } from "@/server/access/visibility";
 
@@ -137,10 +138,10 @@ async function loadMovements(actor: VisibilityActor, filter: {materialId?:string
   const userIds = [
     ...new Set(movements.map((m) => m.createdById).filter(Boolean)),
   ] as string[];
-  const users = await database.user.findMany({
+  const [users,documents] = await Promise.all([database.user.findMany({
     where: { id: { in: userIds } },
     select: { id: true, name: true },
-  });
+  }),loadMovementReportDocuments(actor,movements.map(movement=>movement.id),database)]);
   const userName = new Map(users.map((user) => [user.id, user.name]));
   return movements.map((movement) => ({
     id: movement.id,
@@ -159,6 +160,7 @@ async function loadMovements(actor: VisibilityActor, filter: {materialId?:string
       ? (userName.get(movement.createdById) ?? null)
       : null,
     createdAt: movement.createdAt.toISOString(),
+    reportDocument: documents.get(movement.id)??null,
   }));
 }
 

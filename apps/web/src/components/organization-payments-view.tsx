@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { ConfirmDeleteDialog } from "@/components/confirm-delete-dialog";
 import { PaymentDialog } from "@/components/payment-dialog";
 import { useFileViewer } from "@/components/file-viewer";
+import {ReportDocumentButton} from '@/components/report-document-button';
 import { formatAmount, formatDate, formatQty, formatMoneyTotal } from "@/lib/format";
 import type { StockMaterialOption } from "@/server/warehouse/contracts";
 import { deletePayment } from "@/server/payments/actions";
@@ -27,7 +28,7 @@ export function OrganizationPaymentsView({ direction, rows, cashAccounts, projec
   const [open, setOpen] = useState(false), [viewing, setViewing] = useState<OrganizationPaymentRow | null>(null);
   const [purchaseOpen, setPurchaseOpen] = useState(false);
   const detailHeading = useRef<HTMLHeadingElement>(null);
-  const [deleting, setDeleting] = useState<OrganizationPaymentRow | null>(null), router = useRouter(), viewer = useFileViewer();
+  const [deleting, setDeleting] = useState<OrganizationPaymentRow | null>(null), router = useRouter(), viewer = useFileViewer('fullscreen');
   const columns: DataColumn<OrganizationPaymentRow>[] = [
     { id: "date", header: "Дата", sortable: true, sortValue: row => row.paidAt, cell: row => formatDate(row.paidAt) },
     { id: "project", header: "Проект / назначение", searchValue: row => row.stockPurchase ? `Приход на склад ${row.stockPurchase.materialName}` : row.project ? `${row.project.number} ${row.project.title}` : general,
@@ -39,9 +40,7 @@ export function OrganizationPaymentsView({ direction, rows, cashAccounts, projec
     { id: "byn", header: "Эквивалент BYN", sortable: true, sortValue: row => row.bynAmount, className: "text-right", cell: row => formatAmount(row.bynAmount, "BYN") },
     { id: "comment", header: "Комментарий", searchValue: row => row.comment ?? "", cell: row => row.comment ?? "—" },
     ...(!income ? [{ id: "document", header: "Отчетный документ", searchValue: (row: OrganizationPaymentRow) => row.reportDocument?.fileName ?? "",
-      cell: (row: OrganizationPaymentRow) => row.reportDocument ? <Button variant="link" className="h-auto max-w-48 whitespace-normal break-all p-0" onClick={event => {
-        event.stopPropagation(); if (row.reportDocument) viewer.open(row.reportDocument);
-      }}>{row.reportDocument.fileName}</Button> : "—" }] : []),
+      cell: (row: OrganizationPaymentRow) => <ReportDocumentButton document={row.reportDocument} onOpen={viewer.open}/> }] : []),
     { id: "actions", header: "", cell: row => <Button variant="ghost" disabled={row.project?.archived || Boolean(row.stockPurchase)} onClick={event => { event.stopPropagation(); setDeleting(row); }}>Удалить</Button> },
   ];
   return <section className="flex min-w-0 flex-col gap-5">
@@ -50,7 +49,7 @@ export function OrganizationPaymentsView({ direction, rows, cashAccounts, projec
     <p className="text-sm text-muted-foreground">{income ? "Общий приход без проекта входит в баланс и оборот организации; экономика отдельных проектов не меняется." : "Общие расходы уменьшают кассу и баланс организации. В расходы проектов они автоматически не распределяются."}</p>
     <DataTable columns={columns} rows={rows} searchPlaceholder={income ? "Поиск по приходам…" : "Поиск по расходам…"}
       emptyText={income ? "Приходов пока нет" : "Расходов пока нет"} onRowClick={setViewing}
-      renderMobileCard={row => <div className="space-y-1"><div className="flex justify-between gap-2"><b>{formatAmount(row.amount, row.currency)}</b><span>{formatDate(row.paidAt)}</span></div><p>{row.stockPurchase ? `Приход на склад · ${row.stockPurchase.materialName}` : row.project ? `${row.project.number} · ${row.project.title}` : general}</p><p className="text-sm text-muted-foreground">{row.cashAccountName ?? "—"}{row.expenseArticleName ? ` · ${row.expenseArticleName}` : ""}</p></div>} />
+      renderMobileCard={row => <div className="space-y-2"><div className="flex justify-between gap-2"><b>{formatAmount(row.amount, row.currency)}</b><span>{formatDate(row.paidAt)}</span></div><p>{row.stockPurchase ? `Приход на склад · ${row.stockPurchase.materialName}` : row.project ? `${row.project.number} · ${row.project.title}` : general}</p><p className="text-sm text-muted-foreground">{row.cashAccountName ?? "—"}{row.expenseArticleName ? ` · ${row.expenseArticleName}` : ""}</p>{!income?<ReportDocumentButton document={row.reportDocument} onOpen={viewer.open}/>:null}</div>} />
     <PaymentDialog direction={direction} open={open} onOpenChange={setOpen} projectCurrency="BYN" projectOptions={projects} cashAccounts={cashAccounts} expenseArticles={expenseArticles} />
     {stockMaterials ? <PaymentDialog direction="EXPENSE" open={purchaseOpen} onOpenChange={setPurchaseOpen} projectCurrency="BYN" stockMaterials={stockMaterials} cashAccounts={cashAccounts} expenseArticles={expenseArticles} /> : null}
     <Dialog open={viewing !== null} onOpenChange={next => { if (!next) setViewing(null); }}>
@@ -68,7 +67,7 @@ export function OrganizationPaymentsView({ direction, rows, cashAccounts, projec
             <dt>Движение</dt><dd className="break-all">{viewing.stockPurchase.movementId}</dd>
             <dd className="col-span-2 text-muted-foreground">Оплата связана с приходом на склад. Отдельно удалить её нельзя.</dd>
           </> : null}
-          {viewing.reportDocument ? <><dt>Документ</dt><dd><Button variant="link" className="h-auto whitespace-normal break-all p-0" onClick={() => { if (viewing.reportDocument) viewer.open(viewing.reportDocument); }}>{viewing.reportDocument.fileName}</Button></dd></> : null}
+          {viewing.reportDocument ? <><dt>Документ</dt><dd><ReportDocumentButton document={viewing.reportDocument} onOpen={viewer.open}/></dd></> : null}
         </dl> : null}
         <DialogFooter><Button variant="outline" onClick={() => setViewing(null)}>Закрыть</Button><Button variant="destructive" disabled={viewing?.project?.archived || Boolean(viewing?.stockPurchase)}
           onClick={() => { setDeleting(viewing); setViewing(null); }}>Удалить</Button></DialogFooter>

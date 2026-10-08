@@ -8,7 +8,7 @@ import { createRequestId } from "@/lib/request-id";
 import { uploadSizeLimitError, uploadSizeLimitFor } from "@/server/files/upload-limits";
 import type { FinanceDocumentView } from "@/server/finance-documents/contracts";
 
-/** Один uploader для списка документов и форм денежных расходов. */
+/** Подтверждённая загрузка документа непосредственно в форме операции. */
 export function FinanceDocumentUpload({ onUploaded, onBusyChange, id, disabled = false }: {
   onUploaded: (document: FinanceDocumentView) => void;
   onBusyChange?: (busy: boolean) => void;
@@ -22,7 +22,7 @@ export function FinanceDocumentUpload({ onUploaded, onBusyChange, id, disabled =
   const busy = useRef(false);
   const [pending, setPending] = useState(false), [error, setError] = useState("");
   const [uploaded, setUploaded] = useState<FinanceDocumentView | null>(null);
-  const viewer = useFileViewer();
+  const viewer = useFileViewer('fullscreen');
 
   async function send(file?: File) {
     if (disabled || busy.current) return;

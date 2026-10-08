@@ -63,7 +63,6 @@ export async function createPaymentCore(
 
   if (project) revalidatePath(`/projects/${project.id}`);
   if (project) revalidatePath(`/finance/projects/${project.id}`);
-  if (data.reportDocumentId) revalidatePath("/finance/documents");
   revalidatePath("/finance/income");
   revalidatePath("/finance/expenses");
   revalidatePath("/finance/payroll");
