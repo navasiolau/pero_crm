@@ -1,6 +1,6 @@
 /** Read-only supplemental QA115. Import creates no browser/files/network connection. */
 import {chromium} from '@playwright/test';
-import {verifyPlainFileListStagingBinding} from './plain-file-lists-staging-contract.mjs';
+import {verifyPlainFileListStagingBinding, isPlainFileListStaticReadPath} from './plain-file-lists-staging-contract.mjs';
 import {disableKanbanQaServiceWorkerApi} from './kanban-cover-staging-browser.mjs';
 const VIEWPORTS = [{width: 1440, height: 900}, {width: 390, height: 844}];
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -12,7 +12,7 @@ export function warehouseReadonlyRequest({url, method, prefetch = false}, origin
  if (!['GET', 'HEAD'].includes(method)) return 'block-write';
  if (prefetch) return 'block-prefetch';
  if (['/api/health', '/api/auth/session', '/warehouse/movements', '/favicon.ico', '/icon.svg', '/apple-icon.png', '/manifest.webmanifest'].includes(parsed.pathname) && [...parsed.searchParams.keys()].every(key => parsed.pathname === '/warehouse/movements' && key === '_rsc')) return 'allow';
- if (/^\/(?:_next\/static|icons)\/[A-Za-z0-9_./@-]+$/.test(parsed.pathname) && !parsed.pathname.includes('..')) return 'allow';
+ if (isPlainFileListStaticReadPath(parsed.pathname)) return 'allow';
  return 'deny'; // No original file GET, proxy, exports, detail navigation, POST or printer invocation.
 }
 

@@ -1,7 +1,7 @@
 /** Opt-in UI transport replacement for ONE ALREADYplanned Root13 finance-image upload. No automatic runtime. */
 import {chromium, expect} from '@playwright/test';
 import {createHash} from 'node:crypto';
-import {verifyPlainFileListStagingBinding} from './plain-file-lists-staging-contract.mjs';
+import {verifyPlainFileListStagingBinding, isPlainFileListStaticReadPath} from './plain-file-lists-staging-contract.mjs';
 import {disableKanbanQaServiceWorkerApi} from './kanban-cover-staging-browser.mjs';
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[0-9a-f]{12}$/i;
 const SHA = /^[a-f0-9]{64}$/;
@@ -28,7 +28,7 @@ export function selectedUiReadRequest({url, method, prefetch = false}, binding) 
  if (prefetch) return 'block-prefetch';
  if (['/api/health', '/api/auth/session'].includes(parsed.pathname) && !parsed.search) return 'allow';
  if (parsed.pathname === binding.paths.financeProject && [...parsed.searchParams.keys()].every(key => key === '_rsc')) return 'allow';
- if ((['/favicon.ico', '/icon.svg', '/apple-icon.png', '/manifest.webmanifest'].includes(parsed.pathname) && !parsed.search) || (/^\/(?:_next\/static|icons)\/[A-Za-z0-9_./@-]+$/.test(parsed.pathname) && !parsed.pathname.includes('..'))) return 'allow';
+ if ((['/favicon.ico', '/icon.svg', '/apple-icon.png', '/manifest.webmanifest'].includes(parsed.pathname) && !parsed.search) || isPlainFileListStaticReadPath(parsed.pathname)) return 'allow';
  return 'deny'; // No file opens, print/download, exports, money/save/preference endpoints.
 }
 
