@@ -175,3 +175,46 @@ Version 2 coherent snapshot охватил все 53 public tables. Target count
 Private ignored artifact: apps/web/test-results/draft111-stage-e07312db-7c2b-4255-baba-6ee9ed4bf6de/before-proof.json. SHA 4fc34425fef36323731fc34ba6c13945afa455e31ba5a7a3d3aa826c4df76ff6. Bundle SHA 248d779f2f6451b9c439a9d7c377c391dc14c7245bfa090a06bf0cb447b8a270.
 
 Это baseline до миграции, не AFTER proof и не завершённая staging-приёмка. После разрешённого commit/обычного merge/push требуется принять exact deployed SHA111 и сравнить AFTER с этим manifest; затем отдельно проверить фактические runtime/browser сценарии. Пункт 4.2 остаётся открытым. Работы110/113 не смешиваются с этим migration delta до завершения приёмки111. Main и production этим разрешением не затрагиваются.
+
+## Последующее staging-доказательство миграции и API clocks
+
+Раздел Accepted staging BEFORE выше фиксирует состояние до интеграции111; его baseline и frozen reader/runner/tests сохранены. После этого root создал commit d8b643e44931e66ed3ad504807517ab6cb30f3c5 и обычным merge интегрировал111. На фактически развёрнутой87c404846bdb659a2f9f45e3b9d7a0a98c5ad17a AFTER сначала остановился (11815d); исходный CLI скрыл CamelCase имя таблицы.
+
+Отдельный reviewed forensic readonly capture a4b094 сохранил private aggregate receipt SHA944c555da3e04de2485f4e37d35dfbbf0fa428c25f8f9cea9dcdbf3bcb9e4101 до неизменённого comparator. Он подтвердил все55 target tuples, сохранность business полей/цен/количеств/FK,55 точных новых history/audit пар, прежних history/audit и финансовых моделей; schema/default/enum и две ledger миграции соответствуют approved SQL. Единственная неожиданная полная byte-разница — ApiToken: count3→3, изменён full hash.
+
+Первоначальный all-public byte guard остаётся STOP ORIGINAL_TABLE_CHANGED_ApiToken. Его comparator/BEFORE не заменялись, исключение lastUsedAt задним числом не добавлялось. Изменение только lastUsedAt в точном первоначальном BEFORE→AFTER не доказано.
+
+Root отдельно проверил неизменность всех stable ApiToken полей по независимому более раннему подписанному accepted112 PRE на322: count3/legacy stable MD5 c3e20487b86c6ab8784656a510201b4c. Guarded readonly capture1f567f на87c дал signatureVerified=true/stableFieldsEqual=true; private receipt SHA d6caa09e35f82b1cd8e6cc501622dda7db9a4f4e8187636f698ae67d0f221c11. Это независимое доказательство322→87c stable facts, а не восстановление точной старой clock-декомпозиции или исправление full-byte STOP.
+
+Для новых QA baselines применяется отдельный reviewed common token-clock helper: полная проекция stable полей исключает только lastUsedAt, token IDs хешируются, clocks должны быть монотонными и не позже capturedAt; остальные поля и набор IDs/counts обязаны совпадать. Исходные111 proof файлы остаются неизменёнными.
+
+## Фактические свежие browser QA lifecycles
+
+Runtime выполнял только root. Каждый новый run имеет отдельный signed PRE, durable intent/journal, короткоживущий private manager handoff в памяти и exact own graph. Closed runs не переиспользуются; ручной повтор prepare/browser после неизвестного ответа запрещён. Root проверяет current protected-data/schema fingerprints и удаляет только собственные записи с CAS; natural API clock разрешён лишь по новому заранее captured stable/clock baseline.
+
+| Run | Фактическая ревизия / результат | Подтверждённое завершение lifecycle |
+| --- | --- | --- |
+| 7a171eae-d77b-4eb3-ad81-0fe9897896a6 | Запрошен cfd065314024fd448c5989964e0cbc7790b196da;815502 WEB_REVISION_MISMATCH до bundle execution. | PRE/fixtures/actors не создавались; cleanup не требовался. |
+| 0fd01856-0b74-4c51-be3e-3e17006d3c81 | Readonly preflight c1627a PRE_DURABLE на87c; prepare не выполнялся. | Созданы только технические private artifacts; actors0. При новой ревизии требуется свежий UUID/PRE. |
+| b67a2311-6bbf-4635-81af-0c714bc41f39 | 0ab5c954d6e5d832c742e54e9500c508768bc0fb; prepare0417bc3own rows; browser714914 DRAFT111_TECHNICAL_PLAIN_VALUE_REQUIRED. | Оба journals empty. Причина маскировки: producer возвращал scopegraph undefined до первой ownGraph; первичная ошибка не сохранилась. Capture4a075f exact3/current originals preserved; cleanup79d32e CLOSED User1/Client1/Project1, остальные0. functionalAcceptance=false. |
+| 5a29f494-45e1-4abd-a00a-08c9c3f843de | 0ab; STOP PROJECTS_BOARD, HTTP200, pageErrors0/actions0. Root readonly DOM b24d70 доказал два nested main и strict generic-main отказ. | Capture3dafbd original54 preserved; cleanup28d52d CLOSED exact3, остальные0. functionalAcceptance=false. Исправлен только QA unique inner-main locator. |
+| 182f813e-f914-4e72-933c-62a0ab958ebf | 0ab; STOP PRODUCT_DIALOG/TIMEOUT, HTTP200/pageErrors0; два ACK: preference/project-create, products0. Readonly probes da50d0/6a5565/af6a55 показали валидный dialog/payload без forwarded business POST. | Capture16bac/e481 originals preserved; cleanupf667e9 CLOSED12 own rows: User1/Client1/Project2/ProjectHistory1/ChangeLog1/DomainEvent1/Notification4/Preference1. functionalAcceptance=false; broad step ещё не выделял действие. |
+| d0833b5e-c97a-467b-bde5-1aebd0219430 | 37f882f69a2d76901b98321ff7824d0d04db4db8; STOP PRODUCT_DIALOG_TITLE/TIMEOUT. Own path/tab products и trigger visible/enabled, dialog/fields hidden; product0. | Capturece7981 original54 preserved; cleanupebc077 CLOSED exact12; functionalAcceptance=false. Root разрешил bounded повтор только локального idempotent OPEN до fill, без повторения submit/server action. |
+| fdf0927a-8fb9-4fee-b9c1-c29cab3a3752 | 37f; LEAD_create_DRAFT_disabled_status_and_global_drag фактически PASS: product1 DRAFT, modalOpenAttempts2. Затем STOP DRAFT111_CLIENT_ERROR на PROJECT_STAGE_PAGE, HTTP200/pageErrors1, ERROR без кода. | Capturebd945b originals preserved; cleanup193633 CLOSED19: User1/Client1/Project2/Product1/Config3/ProductHistory1/ProjectHistory1/ChangeLog2/DomainEvent1/Notification4/Preference2. functionalAcceptance=false; известен только частичный сценарий, полный browser PASS отсутствует. |
+
+Во всех закрытых live runs root сообщил сохранность всех54 original public tables/schema по fresh baseline с допустимым natural API clock; это не означает full-byte equality старого111 миграционного baseline. Для79d32e root отдельно сообщил botClockChanged=false; неподтверждённые clock подробности других запусков здесь не выводятся. Субагент не выполнял DB/SSH/HTTP/browser runtime, cleanup или создание QA actors.
+
+После193633 закрытия добавлена только безопасная диагностика в два QA source файла: bounded React code/family и SHA256 сообщения, фиксированный этап, RSC/action-response флаги и последний recognized RPC phase/HTTP/ACK-durable/fulfilled. Raw message, headers, payload/args, URL, stack, HTML, cookies или финансовые строки не сохраняются. Все page errors по-прежнему приводят к STOP; отсутствующие/конфликтные ACK запрещают следующий бизнес-запрос.34 offline controls282747, lint0 084a76, diff check0, independent review review110_111 NONE.
+
+Полный пункт4.2 остаётся открытым. Partial LEAD PASS и безопасное закрытие отказных fixtures не заменяют остальные этапы/контракт/replay/skip/PAUSED/REFUSED/mobile сценарии. Main/production не изменялись; дампы/restic для этих проверок не использовались.
+
+
+### a348 — доказанная длительность actual ACK и ожидание UI
+
+Root выполнил run a3482000-b25e-4823-8cb9-21b20f9d23cb на37f и остановился в PRODUCT_DIALOG_WAIT_CLOSE при pageErrors0. Local read-only проверка exact CLOSED технического receipt614211 установила: product-create intent06:21:12.623Z, ACK06:21:28.036Z, длительность15413ms; ACK durable и route fulfilled подтверждены. Preference180ms/project-create258ms. Ранее UI close assertion имел default5s и завершался раньше real ACK; глобальный catch дожидался queue, поэтому сохранённая более поздняя provenance уже показывала FULFILLED, а modal state был снят в момент более раннего отказа.
+
+Для own runner onJournal — локальный fsync; remote capture вызывается после успешного закрытия dialog. Следовательно, задержка15413ms доказана для actual route.fetch/full response/RSC пути, но не приписывается SSH capture внутри ACK callback. Исходный run остаётся functionalAcceptance=false.
+
+Root93f00c подтвердил current originals, а5a9204 выполнил CLOSED. Exact cleanup receipt содержит18 собственных строк: User1/Client1/Project2/Product1/Config3/ProductHistory1/ProjectHistory1/ChangeLog2/DomainEvent1/Notification4/Preference1; freshOriginalsPreserved=true/cleanupCommitted=true. Никаких live fixtures этого run не осталось.
+
+По reviewed Root design после единственного submit QA ожидает exact matching product intent с durable ACK и завершённым route.fulfill, ограниченно65s, затем строго проверяет modal hidden с timeout65s. Известная route/page failure немедленно остаётся STOP; submit/server action не повторяется. Failure diagnostic дополнен только busyVisible boolean/null. Offline regression моделирует ACK позже5s, отсутствие повторного submit, немедленный отказ known failure и фиксированный deadline; это не новый actual browser PASS.

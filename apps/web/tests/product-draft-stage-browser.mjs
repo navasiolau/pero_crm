@@ -1,19 +1,60 @@
 // Actual deployed Next UI/actions only. Root creates a fresh signed fixture first.
 // No browser/network action on import; JWT cookies stay in caller memory.
-import {randomUUID} from 'node:crypto';
+import {createHash,randomUUID} from 'node:crypto';
 import {chromium,expect} from '@playwright/test';
 import {disableKanbanQaServiceWorkerApi} from './kanban-cover-staging-browser.mjs';
 const STAGES=new Set(['LEAD','ESTIMATE','CONTRACT','IN_WORK','PAUSED','REFUSED']);
 const STATUSES=new Set(['DRAFT','PREPARATION','DESIGN']);
 function safeStageExtras(data){if(data.extras===undefined||data.extras==='$undefined')return true;return data.toStage==='REFUSED'&&data.extras&&typeof data.extras==='object'&&!Array.isArray(data.extras)&&Object.keys(data.extras).every(key=>['refusalReason','refusalComment'].includes(key))&&typeof data.extras.refusalReason==='string'&&data.extras.refusalReason.startsWith('QA111 ');}
-const SAFE_FAILURE_CODES=new Set(['DRAFT111_ACTION_HTTP_FAILED','DRAFT111_ACTION_RESULT_UNEXPECTED','DRAFT111_ACTUAL_ACTION_ACK_REQUIRED','DRAFT111_ACTUAL_PROJECT_CREATED','DRAFT111_ACTUAL_SESSION_ID','DRAFT111_AUTHORIZED_STAGE_BINDING','DRAFT111_BROWSER_UNKNOWN','DRAFT111_CANONICAL_ACTION_ARGS_REQUIRED','DRAFT111_CLEAN_BROWSER','DRAFT111_CLIENT_ERROR','DRAFT111_DEPLOYED_REFERENCE_REQUIRED','DRAFT111_DURABLE_CALLBACKS_REQUIRED','DRAFT111_FRESH_MANAGER_PROFILE','DRAFT111_GLOBAL_COLUMNS_ORDER','DRAFT111_NESTED_COLUMNS_ORDER','DRAFT111_NEXT_ACTION_HEADER_REQUIRED','DRAFT111_OUTSIDE_ORIGIN_MUTATION','DRAFT111_OWN_GRAPH_REQUIRED','DRAFT111_OWN_PAGE_HTTP','DRAFT111_OWN_PATH_REQUIRED','DRAFT111_OWN_PRODUCT_SLOT','DRAFT111_OWN_TAGS_REQUIRED','DRAFT111_OWNED_ACTION_PAGE_REQUIRED','DRAFT111_PARTIAL_FILTER_ACK_REQUIRED','DRAFT111_PARTIAL_FILTER_WIDENED','DRAFT111_PREFERENCE_CAS_ACK','DRAFT111_PRODUCT_CREATE_ID','DRAFT111_PROJECT_CREATE_ID','DRAFT111_REPLAY_NOOP_GRAPH_CHANGED','DRAFT111_SAVED_PARTIAL_FILTER_WIDENED','DRAFT111_STOP_AFTER_UNKNOWN_RESPONSE','DRAFT111_UNOWNED_MUTATION_BLOCKED' ,'DRAFT111_JOURNAL_PERSIST_FAILED','DRAFT111_BROWSER_CLOSE_FAILED']);
+const SAFE_FAILURE_CODES=new Set(['DRAFT111_ACTION_HTTP_FAILED','DRAFT111_ACTION_RESULT_UNEXPECTED','DRAFT111_ACTUAL_ACTION_ACK_REQUIRED','DRAFT111_ACTUAL_PROJECT_CREATED','DRAFT111_ACTUAL_SESSION_ID','DRAFT111_AUTHORIZED_STAGE_BINDING','DRAFT111_BROWSER_UNKNOWN','DRAFT111_CANONICAL_ACTION_ARGS_REQUIRED','DRAFT111_CLEAN_BROWSER','DRAFT111_CLIENT_ERROR','DRAFT111_DEPLOYED_REFERENCE_REQUIRED','DRAFT111_DURABLE_CALLBACKS_REQUIRED','DRAFT111_FRESH_MANAGER_PROFILE','DRAFT111_GLOBAL_COLUMNS_ORDER','DRAFT111_NESTED_COLUMNS_ORDER','DRAFT111_NEXT_ACTION_HEADER_REQUIRED','DRAFT111_OUTSIDE_ORIGIN_MUTATION','DRAFT111_OWN_GRAPH_REQUIRED','DRAFT111_OWN_PAGE_HTTP','DRAFT111_OWN_PATH_REQUIRED','DRAFT111_OWN_PRODUCT_SLOT','DRAFT111_OWN_TAGS_REQUIRED','DRAFT111_OWNED_ACTION_PAGE_REQUIRED','DRAFT111_PARTIAL_FILTER_ACK_REQUIRED','DRAFT111_PARTIAL_FILTER_WIDENED','DRAFT111_PREFERENCE_CAS_ACK','DRAFT111_PRODUCT_CREATE_ID','DRAFT111_PROJECT_CREATE_ID','DRAFT111_REPLAY_NOOP_GRAPH_CHANGED','DRAFT111_SAVED_PARTIAL_FILTER_WIDENED','DRAFT111_STOP_AFTER_UNKNOWN_RESPONSE','DRAFT111_UNOWNED_MUTATION_BLOCKED' ,'DRAFT111_JOURNAL_PERSIST_FAILED','DRAFT111_BROWSER_CLOSE_FAILED','DRAFT111_PRODUCT_DIALOG_OPEN_TIMEOUT','DRAFT111_PRODUCT_CREATE_ACK_TIMEOUT','DRAFT111_PRODUCT_CREATE_DUPLICATE_INTENT','DRAFT111_STAGE_OPTION_INVALID','DRAFT111_STAGE_POPUP_OPEN_TIMEOUT','DRAFT111_PRODUCT_STATUS_POPUP_TIMEOUT']);
 const ERROR_KINDS=new Map([['Error','ERROR'],['TypeError','TYPE_ERROR'],['RangeError','RANGE_ERROR'],['ReferenceError','REFERENCE_ERROR'],['SyntaxError','SYNTAX_ERROR'],['TimeoutError','TIMEOUT_ERROR']]);
 const safeErrorKind=error=>ERROR_KINDS.get(error?.name)??'UNKNOWN';
+
+export function draftQaPageErrorMetadata(error){
+ const kind=safeErrorKind(error);let message='';try{if(typeof error?.message==='string')message=error.message;}catch{}
+ const prefix=message.slice(0,512),react=/^Minified React error #([1-9]\d{0,2})(?:;|\b)/.exec(prefix);
+ let family='UNKNOWN',reactCode=null;
+ if(react){family='REACT_MINIFIED';reactCode=Number(react[1]);}
+ else if(/serwist/i.test(prefix))family='SERWIST';
+ else if(error?.name==='AbortError'||/^The (?:operation|request|user).*abort/i.test(prefix))family='ABORT';
+ else if(/^(?:Failed to fetch|fetch failed|NetworkError when attempting to fetch resource)/i.test(prefix))family='FETCH';
+ else if(/^(?:Hydration failed|Text content does not match)/.test(prefix))family='HYDRATION';
+ else if(/^Loading chunk .+ failed/.test(prefix))family='CHUNK_LOAD';
+ return {kind,family,reactCode,messageSha256:message&&message.length<=65536?createHash('sha256').update(message).digest('hex'):null};
+}
+
 const LABELS={LEAD:'Лид',ESTIMATE:'Просчёт',CONTRACT:'Договор',IN_WORK:'В работе',PAUSED:'Пауза',REFUSED:'Отказ'};
 const flightRows=bytes=>bytes.toString('utf8').split('\n').flatMap(line=>{try{return[JSON.parse(line.slice(line.indexOf(':')+1))];}catch{return[];}});
 const need=(ok,code)=>{if(!ok)throw Error(code);};
 const uuid=value=>typeof value==='string'&&/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(value);
 const id=value=>typeof value==='string'&&/^[A-Za-z0-9_:-]{1,160}$/.test(value);
+
+export async function selectDraftQaProjectStageOption(page,toStage,{settled=async()=>{},onStep=()=>{}}={}){
+ need(STAGES.has(toStage),'DRAFT111_STAGE_OPTION_INVALID');
+ const trigger=page.locator('[data-slot="select-trigger"][aria-label="Статус"]'),popup=page.locator('[data-slot="select-content"]');let opened=false;
+ for(let attempt=1;attempt<=3;attempt++){
+  await settled();onStep('PROJECT_STAGE_TRIGGER');
+  if(await popup.isVisible()===false)await trigger.click();
+  onStep('PROJECT_STAGE_POPUP');
+  try{await popup.waitFor({state:'visible',timeout:1500});await settled();opened=true;break;}
+  catch(error){await settled();if(error?.name!=='TimeoutError'||await popup.isVisible()!==false)throw error;}
+ }
+ need(opened,'DRAFT111_STAGE_POPUP_OPEN_TIMEOUT');onStep('PROJECT_STAGE_OPTION');
+ await popup.locator('[data-slot="select-item"]').filter({hasText:new RegExp('^'+LABELS[toStage]+'$')}).click();
+}
+
+
+export async function selectDraftQaProductDesign(page,{settled=async()=>{},onStep=()=>{}}={}){
+ const trigger=page.locator('[data-slot="select-trigger"][aria-label="Сменить статус"]'),popup=page.locator('[data-slot="select-content"]');let opened=false;
+ for(let attempt=1;attempt<=3;attempt++){
+  await settled();onStep('PRODUCT_STATUS_TRIGGER');if(await popup.isVisible()===false)await trigger.click();onStep('PRODUCT_STATUS_POPUP');
+  try{await popup.waitFor({state:'visible',timeout:1500});await settled();opened=true;break;}
+  catch(error){await settled();if(error?.name!=='TimeoutError'||await popup.isVisible()!==false)throw error;}
+ }
+ need(opened,'DRAFT111_PRODUCT_STATUS_POPUP_TIMEOUT');onStep('PRODUCT_STATUS_OPTION');
+ await popup.locator('[data-slot="select-item"]').filter({hasText:/^Проектирование$/}).click();
+}
+
 export function classifyDraftQaAction(args,scope){
  if(!Array.isArray(args))return null;
  const [data]=args;
@@ -27,12 +68,31 @@ export function classifyDraftQaAction(args,scope){
  return null;
 }
 
-export async function productDialogTechnicalState({page,project,trigger,dialog,title,price,submit}){
+
+/** Повторяется только локальный onClick setCreateOpen(true) до ввода полей. */
+export async function openDraftQaProductDialog({trigger,dialog,settled,onAttempt=()=>{}}){
+ for(let attempt=1;attempt<=3;attempt++){
+  await settled();onAttempt(attempt);await trigger.click();
+  try{await dialog.waitFor({state:'visible',timeout:1500});await settled();return;}
+  catch(error){await settled();if(error?.name!=='TimeoutError'||await dialog.isVisible()!==false)throw error;}
+ }
+ throw Error('DRAFT111_PRODUCT_DIALOG_OPEN_TIMEOUT');
+}
+
+
+/** Ждём подтверждение единственного actual RPC; бизнес-запрос здесь не отправляется. */
+export async function waitDraftQaProductAck({ready,settled,now=()=>performance.now(),delay=()=>new Promise(resolve=>setTimeout(resolve,100))}){
+ const deadline=now()+65000;
+ while(now()<deadline){await settled();if(now()>=deadline)break;if(ready()===true)return;await delay();}
+ throw Error('DRAFT111_PRODUCT_CREATE_ACK_TIMEOUT');
+}
+
+export async function productDialogTechnicalState({page,project,trigger,dialog,title,price,submit,busy}){
  const bool=async locator=>{try{const value=await locator.isVisible();return typeof value==='boolean'?value:null;}catch{return null;}};
  const enabled=async locator=>{try{const value=await locator.isEnabled({timeout:250});return typeof value==='boolean'?value:null;}catch{return null;}};
  let ownsPath=null,tabIsProducts=null;try{const url=new URL(page.url());ownsPath=url.pathname===project.path;tabIsProducts=url.searchParams.get('tab')==='products';}catch{}
- const values=await Promise.all([bool(trigger),enabled(trigger),bool(dialog),bool(title),enabled(title),bool(price),enabled(price),bool(submit),enabled(submit)]);
- return {ownsPath,tabIsProducts,triggerVisible:values[0],triggerEnabled:values[1],dialogVisible:values[2],titleVisible:values[3],titleEnabled:values[4],priceVisible:values[5],priceEnabled:values[6],submitVisible:values[7],submitEnabled:values[8]};
+ const values=await Promise.all([bool(trigger),enabled(trigger),bool(dialog),bool(title),enabled(title),bool(price),enabled(price),bool(submit),enabled(submit),bool(busy)]);
+ return {ownsPath,tabIsProducts,triggerVisible:values[0],triggerEnabled:values[1],dialogVisible:values[2],titleVisible:values[3],titleEnabled:values[4],priceVisible:values[5],priceEnabled:values[6],submitVisible:values[7],submitEnabled:values[8],busyVisible:values[9]};
 }
 
 export async function runProductDraftStageBrowser({authorized=false,origin,revision,profile,checkpoint,outputDir,basicAuth,onJournal,observe,launchBrowser=options=>chromium.launch(options)}){
@@ -42,14 +102,16 @@ export async function runProductDraftStageBrowser({authorized=false,origin,revis
  const tags=checkpoint.pre.tags,scope={actorId:profile.id,clientId:checkpoint.pre.ids.client,tags,projectIds:new Set([checkpoint.pre.ids.projectB]),productIds:new Set(),paths:new Set(['/projects','/products','/projects/'+checkpoint.pre.ids.projectB])};
  need(tags?.products?.length===10&&typeof tags.projectA==='string'&&typeof tags.client==='string'&&typeof tags.actor==='string','DRAFT111_OWN_TAGS_REQUIRED');
  const journal={runId:checkpoint.runId,revision,actions:[],preferences:{'projects.list':null,'products.list':null}};
- const receipt={kind:'product-draft-stage-browser',revision,runId:checkpoint.runId,status:'STARTED',checks:[],pageErrors:0,pageErrorKinds:[],pageHttpStatus:null,journalPersistFailures:0,closeFailures:0,blockedWrites:0,authentication:'fresh owned manager short-lived private JWT; password login not claimed'};
+ const receipt={kind:'product-draft-stage-browser',revision,runId:checkpoint.runId,status:'STARTED',checks:[],pageErrors:0,pageErrorKinds:[],pageErrorMetadata:[],pageHttpStatus:null,journalPersistFailures:0,closeFailures:0,blockedWrites:0,authentication:'fresh owned manager short-lived private JWT; password login not claimed'};
  const browser=await launchBrowser({headless:true,channel:'chromium'});
  const context=await browser.newContext({viewport:{width:1440,height:900},locale:'ru-RU',timezoneId:'Europe/Minsk',serviceWorkers:'block',httpCredentials:basicAuth});
  await context.addInitScript(disableKanbanQaServiceWorkerApi);await context.addCookies(profile.cookies.map(cookie=>({...cookie,url:origin})));
- const page=await context.newPage();page.on('pageerror',error=>{receipt.pageErrors++;if(receipt.pageErrorKinds.length<5)receipt.pageErrorKinds.push(safeErrorKind(error));});
- let step='BOOTSTRAP',queue=Promise.resolve(),failure,productStatusReference,stageReference,lastGraph,lastObservation;
+ const page=await context.newPage();
+ let step='BOOTSTRAP',queue=Promise.resolve(),failure,productStatusReference,stageReference,lastGraph,lastObservation,lastAction=null,navigation={step:'BOOTSTRAP',rscResponseSeen:false,actionResponseSeen:false};const fulfilledIds=new Set();
+ page.on('pageerror',error=>{receipt.pageErrors++;if(receipt.pageErrorKinds.length<5)receipt.pageErrorKinds.push(safeErrorKind(error));if(receipt.pageErrorMetadata.length<5)receipt.pageErrorMetadata.push({...draftQaPageErrorMetadata(error),step,navigation:{...navigation},lastAction:lastAction?{...lastAction}:null});});
+ page.on('response',response=>{try{const request=response.request(),url=new URL(response.url());if(url.origin!==origin)return;const headers=request.headers();if(url.searchParams.has('_rsc')||headers.rsc==='1')navigation.rscResponseSeen=true;if(request.method()==='POST'&&typeof headers['next-action']==='string')navigation.actionResponseSeen=true;}catch{}});
  async function durable(){try{await onJournal(structuredClone(journal));}catch{receipt.journalPersistFailures++;throw Error('DRAFT111_JOURNAL_PERSIST_FAILED');}}
- function stop(error){receipt.status='STOP';receipt.code=SAFE_FAILURE_CODES.has(error?.message)?error.message:'DRAFT111_BROWSER_UNKNOWN';receipt.failureStep=step;receipt.errorKind=safeErrorKind(error);}
+ function stop(error){receipt.status='STOP';receipt.code=SAFE_FAILURE_CODES.has(error?.message)?error.message:'DRAFT111_BROWSER_UNKNOWN';receipt.failureStep=step;receipt.errorKind=safeErrorKind(error);receipt.failureProvenance={navigation:{...navigation},lastAction:lastAction?{...lastAction}:null};}
  function ackResult(bytes){const rows=flightRows(bytes).filter(row=>row&&typeof row==='object'&&typeof row.ok==='boolean');need(rows.length===1,'DRAFT111_ACTUAL_ACTION_ACK_REQUIRED');return rows[0];}
  async function processWrite(route,request,url,args,action){
   need(!failure,'DRAFT111_STOP_AFTER_UNKNOWN_RESPONSE');
@@ -62,8 +124,8 @@ export async function runProductDraftStageBrowser({authorized=false,origin,revis
   if(classified.kind==='project-stage')intent.actionId=args[0].clientMutationId;
   for(const key of ['projectId','productId','productTitle','toStage','toStatus'])if(classified[key]!==undefined)intent[key]=classified[key];
   if(classified.kind==='preference')intent.preferenceKey=classified.key;
-  journal.actions.push(intent);await durable();
-  const response=await route.fetch({maxRetries:0,maxRedirects:0,timeout:45000}),bytes=await response.body();
+  journal.actions.push(intent);await durable();lastAction={kind:classified.kind,phase:'INTENT_DURABLE',httpStatus:null,ackDurable:false,fulfilled:false};
+  lastAction.phase='REQUEST_FORWARD';const response=await route.fetch({maxRetries:0,maxRedirects:0,timeout:45000}),bytes=await response.body();lastAction.phase='HTTP_RESPONSE';const actionStatus=response.status();lastAction.httpStatus=Number.isInteger(actionStatus)&&actionStatus>=100&&actionStatus<=599?actionStatus:null;
   need(response.status()===200,'DRAFT111_ACTION_HTTP_FAILED');const result=ackResult(bytes);
   if(classified.kind==='project-create'&&result.ok){need(id(result.id),'DRAFT111_PROJECT_CREATE_ID');scope.projectIds.add(result.id);intent.ack={atISO:new Date().toISOString(),projectId:result.id};}
   else if(classified.kind==='product-create'&&result.ok){need(id(result.id),'DRAFT111_PRODUCT_CREATE_ID');scope.productIds.add(result.id);intent.ack={atISO:new Date().toISOString(),projectId:classified.projectId,productId:result.id};}
@@ -77,7 +139,7 @@ export async function runProductDraftStageBrowser({authorized=false,origin,revis
    if(classified.kind==='product-status'&&result.ok)productStatusReference={action,url:url.pathname,headers:request.headers()};
    if(classified.kind==='project-stage'&&result.ok)stageReference={action,url:url.pathname,args,headers:request.headers()};
   }
-  await durable();await route.fulfill({response,body:bytes});
+  await durable();lastAction.phase='ACK_DURABLE';lastAction.ackDurable=true;await route.fulfill({response,body:bytes});lastAction.phase='FULFILLED';lastAction.fulfilled=true;fulfilledIds.add(intent.id);
  }
  await context.route('**/*',async route=>{
   const request=route.request(),url=new URL(request.url());
@@ -94,23 +156,24 @@ export async function runProductDraftStageBrowser({authorized=false,origin,revis
  });
  async function settled(){await queue;if(failure)throw failure;need(receipt.pageErrors===0,'DRAFT111_CLIENT_ERROR');}
  async function ownGraph(){step='OWN_GRAPH';await settled();const observation=await observe(structuredClone(journal));lastObservation=observation.observation??observation;lastGraph=lastObservation.scopegraph;need(lastGraph?.projectB&&Array.isArray(lastGraph.products),'DRAFT111_OWN_GRAPH_REQUIRED');for(const subject of [lastGraph.projectA,lastGraph.projectB,...lastGraph.products].filter(Boolean)){need(typeof subject.path==='string'&&/^\/(?:projects|products)\/[A-Za-z0-9_.:-]+$/.test(subject.path),'DRAFT111_OWN_PATH_REQUIRED');scope.paths.add(subject.path);}return lastGraph;}
- async function goto(url,where='OWN_PAGE'){step=where;const response=await page.goto(origin+url,{waitUntil:'domcontentloaded'});const status=response?.status();receipt.pageHttpStatus=Number.isInteger(status)&&status>=100&&status<=599?status:null;need(status===200,'DRAFT111_OWN_PAGE_HTTP');await page.locator('main[class~="@container/main"]').waitFor({state:'visible'});await settled();}
+ async function goto(url,where='OWN_PAGE'){step=where;navigation={step:where,rscResponseSeen:false,actionResponseSeen:false};const response=await page.goto(origin+url,{waitUntil:'domcontentloaded'});const status=response?.status();receipt.pageHttpStatus=Number.isInteger(status)&&status>=100&&status<=599?status:null;need(status===200,'DRAFT111_OWN_PAGE_HTTP');await page.locator('main[class~="@container/main"]').waitFor({state:'visible'});await settled();}
  async function product(slot){const graph=await ownGraph(),value=graph.products.find(row=>row.titleSlot===slot);need(value&&scope.productIds.has(value.id),'DRAFT111_OWN_PRODUCT_SLOT');return value;}
  async function assertStatus(slot,status){await expect.poll(async()=>{const graph=await ownGraph();return graph.products.find(row=>row.titleSlot===slot)?.status;},{timeout:20000}).toBe(status);}
  async function addProduct(project,slot,status){
   await goto(project.path+'?tab=products','PRODUCTS_TAB');
-  const trigger=page.getByRole('button',{name:'Изделие',exact:true}),dialog=page.getByRole('dialog',{name:'Новое изделие'}),title=dialog.locator('#product-title'),price=dialog.locator('#product-price'),submit=dialog.getByRole('button',{name:'Создать изделие',exact:true});
+  const trigger=page.getByRole('button',{name:'Изделие',exact:true}),dialog=page.getByRole('dialog',{name:'Новое изделие'}),title=dialog.locator('#product-title'),price=dialog.locator('#product-price'),submit=dialog.getByRole('button',{name:'Создать изделие',exact:true}),busy=dialog.getByRole('button',{name:'Создание…',exact:true});
   try{
-   step='PRODUCT_DIALOG_OPEN';await trigger.click();
+   step='PRODUCT_DIALOG_OPEN';await openDraftQaProductDialog({trigger,dialog,settled,onAttempt:attempt=>{receipt.productOpenAttempts=attempt;}});
    step='PRODUCT_DIALOG_TITLE';await title.fill(tags.products[slot-1]);
    step='PRODUCT_DIALOG_PRICE';await price.fill('0');
    step='PRODUCT_DIALOG_CREATE';await submit.click();
-   step='PRODUCT_DIALOG_WAIT_CLOSE';await expect(dialog).not.toBeVisible();
-  }catch(error){receipt.productDialogState=await productDialogTechnicalState({page,project,trigger,dialog,title,price,submit});throw error;}
+   step='PRODUCT_DIALOG_WAIT_ACK';await waitDraftQaProductAck({settled,ready:()=>{const intents=journal.actions.filter(item=>item.kind==='product-create'&&item.projectId===project.id&&item.productTitle===tags.products[slot-1]);need(intents.length<=1,'DRAFT111_PRODUCT_CREATE_DUPLICATE_INTENT');return intents.length===1&&intents[0].ack!==null&&fulfilledIds.has(intents[0].id);}});
+   step='PRODUCT_DIALOG_WAIT_CLOSE';await expect(dialog).not.toBeVisible({timeout:65000});
+  }catch(error){receipt.productDialogState=await productDialogTechnicalState({page,project,trigger,dialog,title,price,submit,busy});throw error;}
   await assertStatus(slot,status);return product(slot);
  }
  async function stage(project,toStage){
-  await goto(project.path+'?tab=overview','PROJECT_STAGE_PAGE');step='PROJECT_STAGE_SELECT';await page.getByRole('combobox',{name:'Статус',exact:true}).click();await page.getByRole('option',{name:LABELS[toStage],exact:true}).click();
+  await goto(project.path+'?tab=overview','PROJECT_STAGE_PAGE');await selectDraftQaProjectStageOption(page,toStage,{settled,onStep:value=>{step=value;}});
   if(toStage==='REFUSED'){const dialog=page.getByRole('dialog');await dialog.locator('#refusalReason').fill('QA111 '+checkpoint.runId);await dialog.getByRole('button',{name:'Перевести в «Отказ»',exact:true}).click();await expect(dialog).not.toBeVisible();}
   await expect.poll(async()=>{const graph=await ownGraph();return graph.projectA?.id===project.id?graph.projectA.stage:graph.projectB.stage;},{timeout:20000}).toBe(toStage);
  }
@@ -137,7 +200,7 @@ export async function runProductDraftStageBrowser({authorized=false,origin,revis
   await stage(A,'ESTIMATE');await addProduct(A,2,'DRAFT');check('ESTIMATE_create_DRAFT');
   await stage(A,'CONTRACT');await assertStatus(1,'PREPARATION');await assertStatus(2,'PREPARATION');
   const firstContract=structuredClone(stageReference);
-  const a3=await addProduct(A,3,'PREPARATION');await goto(a3.path);await page.getByRole('combobox',{name:'Сменить статус'}).click();await page.getByRole('option',{name:'Проектирование',exact:true}).click();await assertStatus(3,'DESIGN');check('CONTRACT_promotes_DRAFT_postcontract_create_PREPARATION');
+  const a3=await addProduct(A,3,'PREPARATION');await goto(a3.path);await selectDraftQaProductDesign(page,{settled,onStep:value=>{step=value;}});await assertStatus(3,'DESIGN');check('CONTRACT_promotes_DRAFT_postcontract_create_PREPARATION');
   await stage(A,'LEAD');await assertStatus(1,'PREPARATION');await assertStatus(2,'PREPARATION');await assertStatus(3,'DESIGN');
   const a4=await addProduct(A,4,'DRAFT');scope.denialProduct=a4.id;await direct(productStatusReference,[a4.id,'PREPARATION']);await assertStatus(4,'DRAFT');scope.denialProduct=null;
   await goto(A.path+'?tab=products');const draftColumn=page.locator('[data-slot="kanban-column"]').filter({has:page.getByText('Черновики',{exact:true})});await expect(draftColumn.getByText(tags.products[3],{exact:true})).toBeVisible();await expect(draftColumn.getByRole('button',{name:'Перетащить '+tags.products[3]})).toHaveCount(0);
