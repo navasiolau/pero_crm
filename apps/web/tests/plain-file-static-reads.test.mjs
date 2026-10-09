@@ -5,7 +5,7 @@ import {selectedUiReadRequest} from './plain-file-lists-selected-upload-ui.mjs';
 import {warehouseReadonlyRequest} from './plain-file-lists-readonly-supplement.mjs';
 const origin = 'https://staging-crm.peromebel.by';
 const binding = {origin, paths: {project: '/projects/owned', product: '/products/199.5', financeProject: '/finance/projects/owned'}, finance: null, files: [], financeDocs: []};
-const assets = ['/_next/static/chunks/app/(app)/layout-abcd1234.js', '/_next/static/chunks/app/(app)/finance/projects/[id]/page-abcd1234.js', '/_next/static/chunks/app/(app)/finance/projects/%5Bid%5D/page-abcd1234.js'];
+const assets = ['/icon.svg?cache-key=20261009', '/_next/static/chunks/app/(app)/layout-abcd1234.js', '/_next/static/chunks/app/(app)/finance/projects/[id]/page-abcd1234.js', '/_next/static/chunks/app/(app)/finance/projects/%5Bid%5D/page-abcd1234.js'];
 const forbidden = ['/_next/static/%2fprivate.js', '/_next/static/%5cprivate.js', '/_next/static/%252e%252e/private.js', '/_next/static/%GG/private.js', '/_next/static/%2e%2e/secret', '/api/files/unowned'];
 const classifiers = [
  ['common115', request => plainFileListRequestDecision(request, binding).kind, 'continue'],
