@@ -16,11 +16,11 @@ function useAttachmentBarrier(key: string) {
 }
 function AttachmentBlock({ title, section, measurement, ...props }: ProductAttachmentProps & { title: string; section: Exclude<FileSection, "GENERAL">; measurement?: boolean }) {
   const busy = useAttachmentBarrier(`attachments-${measurement ? "measurement" : section}`);
-  return <section className="flex min-w-0 flex-col gap-3" aria-label={title}>
-    {!measurement || !props.canEdit ? <h2 className="text-sm font-semibold">{title} <span className="text-muted-foreground">({props.files.length})</span></h2> : null}
+  return <section className="min-w-0" aria-label={title}>
     <Uploader projectId={props.projectId} productId={props.productId} canEdit={props.canEdit} section={section} compact onBusyChange={busy.upload}
-      header={measurement ? <h2 className="min-w-0 flex-1 break-words text-sm font-semibold">{title} <span className="text-muted-foreground">({props.files.length})</span></h2> : undefined} />
-    <FileGridView files={props.files} canEdit={props.canEdit} compact onBusyChange={busy.deletion} />
+      header={<h2 className="min-w-0 flex-1 break-words text-sm font-semibold">{title} <span className="text-muted-foreground">({props.files.length})</span></h2>}>
+      <FileGridView files={props.files} canEdit={props.canEdit} compact onBusyChange={busy.deletion} />
+    </Uploader>
   </section>;
 }
 export function ProductMeasurement(props: ProductAttachmentProps) {

@@ -6,9 +6,9 @@ import { Upload } from "lucide-react";
 import { toast } from "sonner";
 import type { FileSection } from "@prisma/client";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import {FileGroupPanel} from "@/components/file-group-panel";
 import { deleteFile } from "@/server/files/actions";
 import {UploadErrorDetails} from "@/components/upload-error-details";
 import {MULTI_UPLOAD_MAX_FILES,createUploadAttempt,sendUploadBatch,localUploadFailure,type BatchFileFailure,type BatchUploadItem} from "@/lib/file-upload-client";
@@ -28,6 +28,7 @@ export function Uploader({
   canEdit,
   section = "GENERAL",
   header,
+  children,
   onBusyChange,
 }: {
   projectId: string;
@@ -36,6 +37,7 @@ export function Uploader({
   section?: FileSection;
   compact?: boolean;
   header?: ReactNode;
+  children?: ReactNode;
   onBusyChange?: (busy: boolean) => void;
 }) {
   const router = useRouter();
@@ -88,7 +90,7 @@ export function Uploader({
     });
   }
 
-  if (!canEdit) return null;
+  if (!canEdit && !header) return null;
 
   const uploadControl = <>
         <input
@@ -108,20 +110,21 @@ export function Uploader({
         </Button>
   </>;
 
-  return (
-    <Card>
-      <CardContent className="flex min-w-0 flex-wrap items-end gap-3 p-4">
-        {header ? <header className="flex w-full min-w-0 items-center justify-between gap-3">{header}{uploadControl}</header> : uploadControl}
-        {batchSummary && batchFailures.length > 0 ? <div className="w-full min-w-0" role="alert">
-          <p className="break-words text-sm text-destructive">Загружено {batchSummary.succeeded} из {batchSummary.total}. Ошибок: {batchFailures.length}</p>
-          <ul className="mt-1 min-w-0 list-disc space-y-1 pl-5 text-sm text-destructive">
-            {batchFailures.map((entry,index) => <li key={`${entry.fileName}-${index}`} className="break-words">{entry.fileName ? `«${entry.fileName}»: ` : ""}{entry.failure.error}</li>)}
-          </ul>
-        </div> : null}
-        <UploadErrorDetails failure={batchFailures[0]?.failure ?? null} />
-      </CardContent>
-    </Card>
-  );
+  const feedback = <>
+    {batchSummary && batchFailures.length > 0 ? <div className="w-full min-w-0" role="alert">
+      <p className="break-words text-sm text-destructive">Загружено {batchSummary.succeeded} из {batchSummary.total}. Ошибок: {batchFailures.length}</p>
+      <ul className="mt-1 min-w-0 list-disc space-y-1 pl-5 text-sm text-destructive">
+        {batchFailures.map((entry,index) => <li key={`${entry.fileName}-${index}`} className="break-words">{entry.fileName ? `«${entry.fileName}»: ` : ""}{entry.failure.error}</li>)}
+      </ul>
+    </div> : null}
+    <UploadErrorDetails failure={batchFailures[0]?.failure ?? null} />
+  </>;
+
+  if (header) return <FileGroupPanel header={header} actions={canEdit ? uploadControl : null} feedback={canEdit ? feedback : null}>{children}</FileGroupPanel>;
+
+  return <Card><CardContent className="flex min-w-0 flex-wrap items-end gap-3 p-4">
+    {uploadControl}{feedback}{children}
+  </CardContent></Card>;
 }
 
 // Единый список; публичные props контейнеров/разделов сохраняются для существующих экранов.
@@ -145,15 +148,21 @@ export function FilesTab({projectId, productId, files, canEdit}: {
   canEdit: boolean;
   flatProject?: boolean;
 }) {
-  if (!productId) return <div className="flex min-w-0 flex-col gap-4" data-project-files="flat"><Uploader projectId={projectId} canEdit={canEdit} section="GENERAL" /><div className="flex min-w-0 flex-col gap-2"><FileGridView files={files} canEdit={canEdit} flat /></div></div>;
+  if (!productId) return <div className="min-w-0" data-project-files="flat">
+    <Uploader projectId={projectId} canEdit={canEdit} section="GENERAL"
+      header={<h3 className="min-w-0 flex-1 break-words text-sm font-semibold">Файлы <span className="text-muted-foreground">({files.length})</span></h3>}>
+      <FileGridView files={files} canEdit={canEdit} flat />
+    </Uploader>
+  </div>;
 
-  return <div className="flex flex-col gap-6">
+  return <div className="flex min-w-0 flex-col gap-6">
     {PRODUCT_FILE_SECTIONS.map(section => {
       const sectionFiles = files.filter(file => file.section === section || (section === "PRODUCTION" && file.section === "GENERAL"));
-      return <section key={section} className="flex flex-col gap-3">
-        <div className="flex items-center gap-2"><h3 className="text-sm font-semibold">{FILE_SECTION_LABELS[section]}</h3><Badge variant="secondary">{sectionFiles.length}</Badge></div>
-        <Uploader projectId={projectId} productId={productId} canEdit={canEdit} section={section} />
-        <FileGridView files={sectionFiles} canEdit={canEdit} />
+      return <section key={section} className="min-w-0" aria-label={FILE_SECTION_LABELS[section]}>
+        <Uploader projectId={projectId} productId={productId} canEdit={canEdit} section={section}
+          header={<h3 className="min-w-0 flex-1 break-words text-sm font-semibold">{FILE_SECTION_LABELS[section]} <span className="text-muted-foreground">({sectionFiles.length})</span></h3>}>
+          <FileGridView files={sectionFiles} canEdit={canEdit} />
+        </Uploader>
       </section>;
     })}
   </div>;
