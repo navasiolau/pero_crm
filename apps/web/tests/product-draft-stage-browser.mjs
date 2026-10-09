@@ -6,7 +6,7 @@ import {disableKanbanQaServiceWorkerApi} from './kanban-cover-staging-browser.mj
 const STAGES=new Set(['LEAD','ESTIMATE','CONTRACT','IN_WORK','PAUSED','REFUSED']);
 const STATUSES=new Set(['DRAFT','PREPARATION','DESIGN']);
 function safeStageExtras(data){if(data.extras===undefined||data.extras==='$undefined')return true;return data.toStage==='REFUSED'&&data.extras&&typeof data.extras==='object'&&!Array.isArray(data.extras)&&Object.keys(data.extras).every(key=>['refusalReason','refusalComment'].includes(key))&&typeof data.extras.refusalReason==='string'&&data.extras.refusalReason.startsWith('QA111 ');}
-const SAFE_FAILURE_CODES=new Set(['DRAFT111_ACTION_HTTP_FAILED','DRAFT111_ACTION_RESULT_UNEXPECTED','DRAFT111_ACTUAL_ACTION_ACK_REQUIRED','DRAFT111_ACTUAL_PROJECT_CREATED','DRAFT111_ACTUAL_SESSION_ID','DRAFT111_AUTHORIZED_STAGE_BINDING','DRAFT111_BROWSER_UNKNOWN','DRAFT111_CANONICAL_ACTION_ARGS_REQUIRED','DRAFT111_CLEAN_BROWSER','DRAFT111_CLIENT_ERROR','DRAFT111_DEPLOYED_REFERENCE_REQUIRED','DRAFT111_DURABLE_CALLBACKS_REQUIRED','DRAFT111_FRESH_MANAGER_PROFILE','DRAFT111_GLOBAL_COLUMNS_ORDER','DRAFT111_NESTED_COLUMNS_ORDER','DRAFT111_NEXT_ACTION_HEADER_REQUIRED','DRAFT111_OUTSIDE_ORIGIN_MUTATION','DRAFT111_OWN_GRAPH_REQUIRED','DRAFT111_OWN_PAGE_HTTP','DRAFT111_OWN_PATH_REQUIRED','DRAFT111_OWN_PRODUCT_SLOT','DRAFT111_OWN_TAGS_REQUIRED','DRAFT111_OWNED_ACTION_PAGE_REQUIRED','DRAFT111_PARTIAL_FILTER_ACK_REQUIRED','DRAFT111_PARTIAL_FILTER_WIDENED','DRAFT111_PREFERENCE_CAS_ACK','DRAFT111_PRODUCT_CREATE_ID','DRAFT111_PROJECT_CREATE_ID','DRAFT111_REPLAY_NOOP_GRAPH_CHANGED','DRAFT111_SAVED_PARTIAL_FILTER_WIDENED','DRAFT111_STOP_AFTER_UNKNOWN_RESPONSE','DRAFT111_UNOWNED_MUTATION_BLOCKED' ,'DRAFT111_JOURNAL_PERSIST_FAILED','DRAFT111_BROWSER_CLOSE_FAILED']);
+const SAFE_FAILURE_CODES=new Set(['DRAFT111_ACTION_HTTP_FAILED','DRAFT111_ACTION_RESULT_UNEXPECTED','DRAFT111_ACTUAL_ACTION_ACK_REQUIRED','DRAFT111_ACTUAL_PROJECT_CREATED','DRAFT111_ACTUAL_SESSION_ID','DRAFT111_AUTHORIZED_STAGE_BINDING','DRAFT111_BROWSER_UNKNOWN','DRAFT111_CANONICAL_ACTION_ARGS_REQUIRED','DRAFT111_CLEAN_BROWSER','DRAFT111_CLIENT_ERROR','DRAFT111_DEPLOYED_REFERENCE_REQUIRED','DRAFT111_DURABLE_CALLBACKS_REQUIRED','DRAFT111_FRESH_MANAGER_PROFILE','DRAFT111_GLOBAL_COLUMNS_ORDER','DRAFT111_NESTED_COLUMNS_ORDER','DRAFT111_NEXT_ACTION_HEADER_REQUIRED','DRAFT111_OUTSIDE_ORIGIN_MUTATION','DRAFT111_OWN_GRAPH_REQUIRED','DRAFT111_OWN_PAGE_HTTP','DRAFT111_OWN_PATH_REQUIRED','DRAFT111_OWN_PRODUCT_SLOT','DRAFT111_OWN_TAGS_REQUIRED','DRAFT111_OWNED_ACTION_PAGE_REQUIRED','DRAFT111_PARTIAL_FILTER_ACK_REQUIRED','DRAFT111_PARTIAL_FILTER_WIDENED','DRAFT111_PREFERENCE_CAS_ACK','DRAFT111_PRODUCT_CREATE_ID','DRAFT111_PROJECT_CREATE_ID','DRAFT111_REPLAY_NOOP_GRAPH_CHANGED','DRAFT111_SAVED_PARTIAL_FILTER_WIDENED','DRAFT111_STOP_AFTER_UNKNOWN_RESPONSE','DRAFT111_UNOWNED_MUTATION_BLOCKED' ,'DRAFT111_JOURNAL_PERSIST_FAILED','DRAFT111_BROWSER_CLOSE_FAILED','DRAFT111_PRODUCT_DIALOG_OPEN_TIMEOUT']);
 const ERROR_KINDS=new Map([['Error','ERROR'],['TypeError','TYPE_ERROR'],['RangeError','RANGE_ERROR'],['ReferenceError','REFERENCE_ERROR'],['SyntaxError','SYNTAX_ERROR'],['TimeoutError','TIMEOUT_ERROR']]);
 const safeErrorKind=error=>ERROR_KINDS.get(error?.name)??'UNKNOWN';
 const LABELS={LEAD:'Лид',ESTIMATE:'Просчёт',CONTRACT:'Договор',IN_WORK:'В работе',PAUSED:'Пауза',REFUSED:'Отказ'};
@@ -25,6 +25,17 @@ export function classifyDraftQaAction(args,scope){
  if(args.length===2&&scope.productIds.has(args[0])&&STATUSES.has(args[1]))return {kind:'product-status',productId:args[0],toStatus:args[1]};
  if(args.length===3&&['projects','products'].includes(args[0])&&typeof args[1]==='string'&&args[1].length<=32768&&(args[2]===null||typeof args[2]==='string'))return {kind:'preference',key:args[0]+'.list'};
  return null;
+}
+
+
+/** Повторяется только локальный onClick setCreateOpen(true) до ввода полей. */
+export async function openDraftQaProductDialog({trigger,dialog,settled,onAttempt=()=>{}}){
+ for(let attempt=1;attempt<=3;attempt++){
+  await settled();onAttempt(attempt);await trigger.click();
+  try{await dialog.waitFor({state:'visible',timeout:1500});await settled();return;}
+  catch(error){await settled();if(error?.name!=='TimeoutError'||await dialog.isVisible()!==false)throw error;}
+ }
+ throw Error('DRAFT111_PRODUCT_DIALOG_OPEN_TIMEOUT');
 }
 
 export async function productDialogTechnicalState({page,project,trigger,dialog,title,price,submit}){
@@ -101,7 +112,7 @@ export async function runProductDraftStageBrowser({authorized=false,origin,revis
   await goto(project.path+'?tab=products','PRODUCTS_TAB');
   const trigger=page.getByRole('button',{name:'Изделие',exact:true}),dialog=page.getByRole('dialog',{name:'Новое изделие'}),title=dialog.locator('#product-title'),price=dialog.locator('#product-price'),submit=dialog.getByRole('button',{name:'Создать изделие',exact:true});
   try{
-   step='PRODUCT_DIALOG_OPEN';await trigger.click();
+   step='PRODUCT_DIALOG_OPEN';await openDraftQaProductDialog({trigger,dialog,settled,onAttempt:attempt=>{receipt.productOpenAttempts=attempt;}});
    step='PRODUCT_DIALOG_TITLE';await title.fill(tags.products[slot-1]);
    step='PRODUCT_DIALOG_PRICE';await price.fill('0');
    step='PRODUCT_DIALOG_CREATE';await submit.click();

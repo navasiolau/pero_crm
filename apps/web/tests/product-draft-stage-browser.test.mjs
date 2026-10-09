@@ -104,3 +104,23 @@ test('actual route guard failure wins over following UI timeout and never forwar
  const control=fakeBrowser({status:200,afterGotoRequest:{url:'https://staging-crm.peromebel.by/projects',method:'POST',headers:{'next-action':'c'.repeat(40)},body:JSON.stringify(['foreign-operation'])},throwOnClick:secondary}),saved=await controlledEarlyStop(control);
  assert.equal(control.state.aborts,1);assert.equal(saved.receipt.code,'DRAFT111_UNOWNED_MUTATION_BLOCKED');assert.equal(saved.receipt.errorKind,'ERROR');assert.equal(saved.receipt.failureStep,'PROJECT_DIALOG_OPEN');assert.equal(saved.receipt.blockedWrites,1);
 });
+
+test('local product OPEN may be missed before hydration then attached handler opens before any field action',async()=>{
+ const {openDraftQaProductDialog}=await import('./product-draft-stage-browser.mjs');let opens=0,visible=false,guards=0;const attempts=[];
+ const timeout=()=>{const error=Error('private-wait');error.name='TimeoutError';return error;};
+ await openDraftQaProductDialog({trigger:{click:async()=>{opens++;if(opens>=2)visible=true;}},dialog:{waitFor:async options=>{assert.equal(options.state,'visible');assert.equal(options.timeout,1500);if(!visible)throw timeout();},isVisible:async()=>visible},settled:async()=>{guards++;},onAttempt:value=>attempts.push(value)});
+ assert.equal(opens,2);assert.equal(visible,true);assert.deepEqual(attempts,[1,2]);assert.equal(guards,4);
+});
+test('local OPEN stops after three missed handlers with bounded static code',async()=>{
+ const {openDraftQaProductDialog}=await import('./product-draft-stage-browser.mjs');let opens=0;
+ await assert.rejects(()=>openDraftQaProductDialog({trigger:{click:async()=>{opens++;}},dialog:{waitFor:async()=>{const error=Error('private-wait');error.name='TimeoutError';throw error;},isVisible:async()=>false},settled:async()=>{}}),error=>error.message==='DRAFT111_PRODUCT_DIALOG_OPEN_TIMEOUT');assert.equal(opens,3);
+});
+test('a known route failure prevents a local OPEN repeat and submit is never repeated',async()=>{
+ const {openDraftQaProductDialog}=await import('./product-draft-stage-browser.mjs');let opens=0,failed=false;
+ await assert.rejects(()=>openDraftQaProductDialog({trigger:{click:async()=>{opens++;failed=true;}},dialog:{waitFor:async()=>{const error=Error('private-wait');error.name='TimeoutError';throw error;},isVisible:async()=>false},settled:async()=>{if(failed)throw Error('DRAFT111_ACTION_HTTP_FAILED');}}),/DRAFT111_ACTION_HTTP_FAILED/);assert.equal(opens,1);
+});
+test('local OPEN never retries a strict dialog ambiguity or a failed trigger click',async()=>{
+ const {openDraftQaProductDialog}=await import('./product-draft-stage-browser.mjs');let opens=0;
+ await assert.rejects(()=>openDraftQaProductDialog({trigger:{click:async()=>{opens++;}},dialog:{waitFor:async()=>{throw Error('strict ambiguity');},isVisible:async()=>false},settled:async()=>{}}),/strict ambiguity/);assert.equal(opens,1);
+ opens=0;await assert.rejects(()=>openDraftQaProductDialog({trigger:{click:async()=>{opens++;const error=Error('click failed');error.name='TimeoutError';throw error;}},dialog:{waitFor:async()=>{}},settled:async()=>{}}),/click failed/);assert.equal(opens,1);
+});
