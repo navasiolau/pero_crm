@@ -3,7 +3,7 @@
 Рабочая ветка: feature/115. Изменение: plain-file-lists.
 Основные сценарии проверены на 37f882f69a2d76901b98321ff7824d0d04db4db8; последний income-сценарий принят на c1f5cd97041d171b80a03f5a1ace2dab387ed96c.
 Собственный fixture: ff30f55e-dac2-48d2-ac5e-cad6400f3eca.
-Историческая приёмка от 09.10.2026 завершена. Оба Parent fixture закрыты; её неизменяемые доказательства сохранены. Новое уточнение layout ниже пока не принято на staging.
+Историческая приёмка от 09.10.2026 завершена. Оба Parent fixture закрыты; её неизменяемые доказательства сохранены. Новое уточнение layout ниже принято на ed261a3b9d4732d7cd595121f874ea9c9a104847.
 
 ## Реальные результаты
 
@@ -60,6 +60,19 @@ C:/Users/admin/.codex/worktrees/crm-task-113/pero_crm_v2/apps/web/test-results/f
 | 0024-closed.json | bfde943f338450c23668cceba4059e4b9da95376551cacc7168b0378d8c22dc7 |
 | final115-resume1-result.json | 30f2f3918f9cdbcbdac751e50c4348988f057ef01ab68a254b033f1d03d4ddfa |
 
-## Уточнение layout от 09.10.2026 — pending
+## Уточнение layout от 09.10.2026 — принято
 
-После новой обратной связи владельца требуется общая рамка для header и всех файлов группы: название с количеством слева, upload справа, строки одной колонкой внутри. Нужна только короткая geometry-проверка 1440/390/360 и приёмка новой развёрнутой ревизии. Исторические image/download/print/delete/permissions/native сценарии не повторяются, поскольку их код не меняется.
+Общая рамка содержит header и все строки. Название с количеством находится слева, upload справа, файлы идут одной колонкой. Первая приёмка d467d697280eecdfbf57760b530b3ea4ade9cdb7 дала PASS на 1440/390 и выявила перенос количества на 360; scope d192f2a7-9c31-4bf8-8458-6043ba0d71ec закрыт. Исправление 3b57f2d9e701ad48d5a27ec68c3960e4966f91d4 показывает компактный upload при ширине панели до 320 px, сохраняя исходную sr-only надпись; handlers/API/ACL и строгие geometry assertions не менялись. Один existing focused adapter target прошёл 4/4, независимое review NONE.
+
+Финальная фактически развёрнутая ревизия: ed261a3b9d4732d7cd595121f874ea9c9a104847. Run f8faa425-3c78-4c40-bd25-323b57efcf7e дал PASS для product/project на 360 и 390 (4 проверки). Upload/title(count) находятся в одной строке, все известные файлы внутри видимой рамки, переполнения нет. Upstream UI writes=0, deniedReads=0, pageErrors=0; снимки и credentials не сохранялись. Прежние file-action/native/desktop матрицы не повторялись.
+
+После пяти необходимых собственных файлов выполнены native final и обычный cleanup: единственное offline измерение 91096 encoded bytes при cap 98304. OWN_CLOSED подтверждает originalRelations/schema/money по принятому контракту, preferences, S3 и отсутствие собственных actors; разрешённый монотонный ApiToken clock проверен, bot clock не изменился. Удалены собственные File=5, Payment=2, User=3 и остальной graph; FinanceDocument=0.
+
+Каталог доказательств: C:/Users/admin/.codex/worktrees/crm-task-113/pero_crm_v2/apps/web/test-results/final-layout115-f8faa425-3c78-4c40-bd25-323b57efcf7e
+
+| Файл | SHA256 |
+| --- | --- |
+| layout115-geometry.json | d91afc2353448db856ced5d8338fe375c9574c7933fb651600be73d8228456ec |
+| 0020-cleanup-ack.json | 14716985cfda40afdc4b55034989eb79983aa40c1bdc0c8568518dbc5010bbe5 |
+| 0021-closed.json | 03c0294936267de743d369e2cc1d720a053b87261a7bc16097477e38a2e83db3 |
+| layout115-result.json | ed71faef6e04eeed69e399b08603842ee3ed4a24ad9073e91bf15e5f5758e202 |
