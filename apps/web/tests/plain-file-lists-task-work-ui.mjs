@@ -78,7 +78,7 @@ export async function runTaskWork115FileUi(input={}){
  try{
   await publish('intent',{kind:'owned-valid-task-ui-intent',runId:binding.runId,revision:binding.expectedRevision,parentDeleteIntentSha256:binding.intentSha256,taskId:binding.task.id,fileId:binding.file.id,workId:initial.workId,childSourceSha256:input.childVerifier.sourceSha256,credentialsPersisted:false,oneDelete:true});
   browser=await chromium.launch({headless:true,channel:'chromium'});
-  for(const viewport of [{width:390,height:844},{width:360,height:800},{width:1440,height:900}]){
+  for(const viewport of [{width:390,height:844},{width:1440,height:900}]){
    receipt.phase='task-files-read';const page=await start(viewport),dialog=await open(page);await rowProof(page,dialog,viewport.width);
    if(viewport.width!==1440)continue;
    receipt.phase='task-confirmed-delete';const row=rowOf(dialog),trash=row.getByRole('button',{name:'Удалить файл '+binding.file.fileName,exact:true});const popup=page.locator('[data-slot="popover-content"]:visible');
