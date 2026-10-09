@@ -6,7 +6,7 @@ import {readFileSync} from 'node:fs';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {FIXTURE_NAMESPACE as NS,DISABLED_PASSWORD,CLEANUP_ORDER,newFixturePlan,validatePlan,signed,verifySignedFixture,ownFileKey,ownFinanceKey,validateStorageVersions,digest,certificateForHandoff,cleanupIntent,compareFileDelete,fixtureStageGuard,preferencePairs,handoffSubjects,compareCurrentHandoff,publicDeleteMetadata,validateCompiledDeleteDescriptor} from './file-fixture113-protocol.mjs';
-import {mediaBytes,compareOriginal,ownState,lockOwned,deleteOwnedRows,createOwnGraph} from './file-fixture113-entry.mjs';
+import {mediaBytes,compareOriginal,ownState,lockOwned,deleteOwnedRows,createOwnGraph,fixtureCookieProfiles,readFixtureUploadReply,FixtureUploadResponseError,safeFixtureUploadDiagnostic,fixtureUploadStopCode} from './file-fixture113-entry.mjs';
 import {fixture113Bundle,fixture113Coordinator,immutablePublish} from './file-fixture113-runner.mjs';
 import {lifecycleNativeGuard} from './file-fixture113-lifecycle-native.mjs';
 const runId=randomUUID(),revision='a'.repeat(40),secret='QA113_TEST_ONLY_NOT_A_LIVE_SECRET',h=value=>createHash('sha256').update(value).digest('hex');
@@ -220,4 +220,63 @@ test('invalid private manifest JSON diagnostics cannot echo raw secret or body',
 
 test('private publisher refuses nested full-manifest encryption key before any artifact bytes are written',()=>{
  const out=fileURLToPath(new URL('../test-results/forbidden-private-manifest-'+randomUUID()+'.json',import.meta.url));assert.throws(()=>immutablePublish(out,{manifest:deleteManifestFixture()}),/CREDENTIALS_MUST_REMAIN_MEMORY/);
+});
+
+// V6: genuine offline Auth.js decode proves both request protocols; no live profiles or requests.
+test('fresh-only cookie issuer signs each namespace with its own salt for all own actors',async()=>{
+ const p=plan(),calls=[];const profiles=await fixtureCookieProfiles(p,secret,async args=>{calls.push(args);return 'synthetic-token-'+args.token.id+'-'+args.salt;});
+ assert.equal(calls.length,6);assert.deepEqual(Object.keys(profiles).sort(),['admin','engineer','manager']);
+ for(const[key,actor]of Object.entries(p.actors)){
+  assert.equal(profiles[key].id,actor.id);assert.deepEqual(profiles[key].roles,actor.roles);
+  assert.deepEqual(profiles[key].cookies.map(row=>row.name),['__Secure-authjs.session-token','authjs.session-token']);
+  for(const cookie of profiles[key].cookies){const call=calls.find(item=>item.token.id===actor.id&&item.salt===cookie.name);assert.equal(call.secret,secret);assert.equal(call.maxAge,1800);assert.equal(call.token.sessionVersion,0);assert.equal(call.token.sub,actor.id);assert.equal(cookie.domain,'staging-crm.peromebel.by');assert.equal(cookie.path,'/');assert.equal(cookie.secure,true);assert.equal(cookie.httpOnly,true);assert.equal(cookie.sameSite,'Lax');}
+ }
+});
+test('actual Auth.js accepts the fresh issuer on HTTP and HTTPS; cross-namespace salt cannot decrypt',async()=>{
+ const {Auth}=await import('@auth/core'),{decode}=await import('@auth/core/jwt'),p=plan(),profiles=await fixtureCookieProfiles(p,secret);
+ for(const[key,actor]of Object.entries(p.actors))for(const protocol of ['http:','https:']){
+  const profile=profiles[key],cookie=profile.cookies.map(row=>row.name+'='+row.value).join('; ');
+  const response=await Auth(new Request(protocol+'//qa.invalid/api/auth/session',{headers:{cookie}}),{secret,trustHost:true,basePath:'/api/auth',providers:[],session:{strategy:'jwt'},callbacks:{jwt:async({token})=>{assert.equal(token.id,actor.id);assert.equal(token.sessionVersion,0);return token;},session:async({token})=>({user:{id:token.id,roles:token.roles}})},logger:{error(){},warn(){},debug(){}}});
+  assert.equal(response.status,200);const body=await response.json();assert.equal(body.user.id,actor.id);assert.deepEqual(body.user.roles,actor.roles);
+ }
+ const admin=profiles.admin.cookies;for(const row of admin){const other=admin.find(item=>item.name!==row.name);await assert.rejects(()=>decode({token:row.value,secret,salt:other.name}));}
+});
+test('cookie issuer rejects foreign/invalid actor scope and empty or oversized encoder output before use',async()=>{
+ for(const patch of [p=>{p.originalUsersReused=true;},p=>{p.actors.admin.passwordHash='foreign-original';},p=>{p.actors.engineer.roles=['ADMIN'];}]){const p=plan();patch(p);await assert.rejects(()=>fixtureCookieProfiles(p,secret));}
+ for(const value of ['',null,'x'.repeat(8193)])await assert.rejects(()=>fixtureCookieProfiles(plan(),secret,async()=>value),/BOUNDED_PRIVATE_COOKIE_REQUIRED/);
+});
+test('safe upload diagnostics retain actual status and only closed codes/phases without body or headers',()=>{
+ const response={status:401,headers:{'set-cookie':'PRIVATE_COOKIE'}},body={ok:false,code:'UPLOAD_HTTP_401',kind:'validation',details:{phase:'auth',message:'PRIVATE_MESSAGE'},error:'PRIVATE_EMAIL',requestId:'PRIVATE_ID',user:{id:'PRIVATE_USER'}};
+ const diag=safeFixtureUploadDiagnostic(response,body);assert.deepEqual(diag,{httpStatus:401,replyShape:'json-object',ok:false,code:'UPLOAD_HTTP_401',kind:'validation',phase:'auth',commitState:null});assert.doesNotMatch(JSON.stringify(diag),/PRIVATE|user|requestId|headers|message/);
+ const unknown=safeFixtureUploadDiagnostic({status:599},{ok:'PRIVATE',code:'PRIVATE_ACCOUNT_ID',kind:'PRIVATE_KIND',details:{phase:'PRIVATE_PHASE'},commitState:'PRIVATE_STATE'});assert.deepEqual(unknown,{httpStatus:599,replyShape:'json-object',ok:null,code:null,kind:null,phase:null,commitState:null});
+ const storage=safeFixtureUploadDiagnostic({status:503},{ok:false,code:'STORAGE_TIMEOUT',kind:'failure',details:{phase:'storage-original'},commitState:'notCommitted'});assert.equal(storage.code,'STORAGE_TIMEOUT');assert.equal(storage.phase,'storage-original');assert.equal(storage.commitState,'notCommitted');
+ assert.equal(safeFixtureUploadDiagnostic({status:'PRIVATE'},null,'PRIVATE_SHAPE').httpStatus,null);assert.equal(safeFixtureUploadDiagnostic({status:200},null,'PRIVATE_SHAPE').replyShape,'unknown');
+});
+test('bounded upload reply reads the genuine DTO and refuses malformed/array/large replies without leaking JSON text',async()=>{
+ const good={ok:true,id:'own-file',sketchFileId:'own-file'},actual=await readFixtureUploadReply(Response.json(good));assert.deepEqual(actual,good);
+ for(const[value,shape]of [['PRIVATE_SECRET broken','non-json'],['null','json-null'],['[]','json-array'],['"PRIVATE_SECRET"','json-string'],['7','json-number'],['true','json-boolean']]){
+  await assert.rejects(()=>readFixtureUploadReply(new Response(value,{status:401})),error=>error instanceof FixtureUploadResponseError&&error.message==='COMPILED_OWN_UPLOAD_UNCONFIRMED'&&error.diagnostic.httpStatus===401&&error.diagnostic.replyShape===shape&&!JSON.stringify(error.diagnostic).includes('PRIVATE'));
+ }
+ let cancelled=false;const stream=new ReadableStream({start(controller){controller.enqueue(new Uint8Array(16*1024+1));},cancel(){cancelled=true;}});
+ await assert.rejects(()=>readFixtureUploadReply(new Response(stream,{status:500})),error=>error instanceof FixtureUploadResponseError&&error.diagnostic.replyShape==='body-too-large'&&error.diagnostic.httpStatus===500);assert.equal(cancelled,true);
+ const failed=new ReadableStream({start(controller){controller.error(Error('PRIVATE_READ_ERROR'));}});await assert.rejects(()=>readFixtureUploadReply(new Response(failed,{status:503})),error=>error instanceof FixtureUploadResponseError&&error.diagnostic.replyShape==='body-read-failed'&&!JSON.stringify(error.diagnostic).includes('PRIVATE'));
+});
+test('typed upload failure keeps the generic Error message and sanitizes attacker-controlled diagnostic fields',()=>{
+ const error=new FixtureUploadResponseError({status:422},{ok:false,code:'UPLOAD_FORM_OUTDATED',kind:'validation',details:{phase:'request'},commitState:'notCommitted',error:'PRIVATE_USER_DATA'});assert.equal(error.message,'COMPILED_OWN_UPLOAD_UNCONFIRMED');assert.equal(error.diagnostic.code,'UPLOAD_FORM_OUTDATED');assert.doesNotMatch(JSON.stringify(error.diagnostic),/PRIVATE_USER_DATA/);
+ const entry=readFileSync(new URL('./file-fixture113-entry.mjs',import.meta.url),'utf8');assert.match(entry,/error instanceof FixtureUploadResponseError/);assert.match(entry,/await readFixtureUploadReply\(response\)/);assert.doesNotMatch(entry,/const result=await response\.json\(\);need\(\(response\.status/);
+});
+test('actual existing fail-closed transport retains the bounded diagnosis on nonzero exit without emitting private body',async()=>{
+ const {createRequire,syncBuiltinESMExports}=await import('node:module'),{EventEmitter}=await import('node:events'),{qaTransport}=await import('./crm-acceptance-transport.mjs');
+ const require=createRequire(import.meta.url),childProcess=require('node:child_process'),fs=require('node:fs'),path=require('node:path');
+ const outputDir=fs.mkdtempSync(fileURLToPath(new URL('../test-results/v6-transport-',import.meta.url))),wrapper=fileURLToPath(new URL('../../../deploy/acceptance/crm-modernization-staging.py',import.meta.url)),wrapperHash=h(fs.readFileSync(wrapper));
+ const diagnostic=safeFixtureUploadDiagnostic({status:401},{ok:false,code:'UPLOAD_HTTP_401',kind:'validation',details:{phase:'auth'},error:'PRIVATE_SECRET'}),code=fixtureUploadStopCode(diagnostic),commands=[];
+ assert.equal(code,'FILE_QA_HTTP_401_UPLOAD_HTTP_401_AUTH_JSON_OBJECT');assert.match(code,/^[A-Z0-9_]{1,100}$/);assert.doesNotMatch(fixtureUploadStopCode({httpStatus:'PRIVATE',code:'PRIVATE_SECRET',phase:'PRIVATE_PHASE',replyShape:'PRIVATE_SHAPE'}),/PRIVATE/);
+ const previousSpawn=childProcess.spawn;
+ childProcess.spawn=(command,args)=>{
+  const proc=new EventEmitter();proc.stdout=new EventEmitter();proc.stderr=new EventEmitter();proc.stdin=new EventEmitter();commands.push(command);
+  proc.stdin.end=()=>queueMicrotask(()=>{const stdout=command==='scp'?'':args.includes('sha256sum')?wrapperHash+'  synthetic-wrapper.py\n':JSON.stringify({identity:{hostname:'crm-staging',revision},operation:'prepare',exitCode:1,result:{status:'STOP',phase:'upload',code,upload:diagnostic}});proc.stdout.emit('data',Buffer.from(stdout));proc.emit('close',commands.length===3?1:0);});return proc;
+ };
+ syncBuiltinESMExports();
+ try{await assert.rejects(()=>qaTransport({target:'staging',revision,outputDir}).execute(Buffer.from('/* synthetic inert bundle */'),'prepare',{authorized:true}),error=>error.message===code&&!error.message.includes('PRIVATE'));assert.deepEqual(commands,['scp','ssh','ssh']);const saved=fs.readFileSync(path.join(outputDir,'transport-prepare-upload.stderr.private.log'),'utf8');assert.equal(saved,'');}
+ finally{childProcess.spawn=previousSpawn;syncBuiltinESMExports();}
 });

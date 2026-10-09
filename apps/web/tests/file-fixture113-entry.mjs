@@ -153,8 +153,46 @@ export async function prepare(db,s3,pre,input,secret){
   const state=await ownState(tx,pre);await protectedWriteRows(tx,pre,state);return signed({namespace:NS,version:2,kind:'prepared',runId:pre.runId,revision:input.revision,preSha256:digest(pre),currentOwnedStateHash:digest(state.rows),scope:state.scope,commitAck:true},secret);
  },{isolationLevel:'Serializable',maxWait:10000,timeout:120000});
 }
-async function cookies(plan,secret){
- const out={};for(const[key,actor]of Object.entries(plan.actors)){const name='__Secure-authjs.session-token',token=await encode({secret,salt:name,maxAge:1800,token:{sub:actor.id,id:actor.id,name:actor.name,email:actor.email,roles:actor.roles,sessionVersion:0}});out[key]={id:actor.id,roles:actor.roles,cookies:[{name,value:token,domain:'staging-crm.peromebel.by',path:'/',secure:true,httpOnly:true,sameSite:'Lax'}]};}return out;
+// Cookies только свежих тестовых акторов остаются в памяти; оба namespace подписываются своим salt.
+export async function fixtureCookieProfiles(plan,secret,encodeJwt=encode){
+ validatePlan(plan);need(typeof secret==='string'&&secret.length>0&&typeof encodeJwt==='function','PRIVATE_COOKIE_INPUT_REQUIRED');
+ const out={};for(const[key,actor]of Object.entries(plan.actors)){
+  const cookies=[];for(const name of ['__Secure-authjs.session-token','authjs.session-token']){
+   const value=await encodeJwt({secret,salt:name,maxAge:1800,token:{sub:actor.id,id:actor.id,name:actor.name,email:actor.email,roles:actor.roles,sessionVersion:0}});
+   need(typeof value==='string'&&value.length>0&&value.length<=8192,'BOUNDED_PRIVATE_COOKIE_REQUIRED');
+   cookies.push({name,value,domain:'staging-crm.peromebel.by',path:'/',secure:true,httpOnly:true,sameSite:'Lax'});
+  }out[key]={id:actor.id,roles:actor.roles,cookies};
+ }return out;
+}
+async function cookies(plan,secret){return fixtureCookieProfiles(plan,secret);}
+const UPLOAD_REPLY_LIMIT=16*1024;
+const DIAGNOSTIC_CODES=new Set(['UPLOAD_HTTP_400','UPLOAD_HTTP_401','UPLOAD_HTTP_403','UPLOAD_HTTP_404','UPLOAD_HTTP_409','UPLOAD_HTTP_413','UPLOAD_HTTP_415','UPLOAD_HTTP_422','UPLOAD_HTTP_500','UPLOAD_HTTP_503','UPLOAD_FORBIDDEN','UPLOAD_FORM_OUTDATED','UPLOAD_MUTATION_REQUIRED','UPLOAD_CONTEXT_CHANGED','UPLOAD_REPLAY_CONFLICT','UPLOAD_FILE_DELETED','UPLOAD_FAILED','STORAGE_ACCESS_DENIED','STORAGE_AUTH_FAILED','STORAGE_BUCKET_MISSING','STORAGE_TIMEOUT','STORAGE_UNAVAILABLE','STORAGE_CONFIG_INVALID','STORAGE_WRITE_FAILED','FINANCE_AUTH_REQUIRED','FINANCE_DOCUMENT_FORBIDDEN','FINANCE_DOCUMENT_INVALID','FINANCE_DOCUMENT_TOO_LARGE','FINANCE_DOCUMENT_CONFLICT']);
+const DIAGNOSTIC_KINDS=new Set(['validation','failure','forbidden','conflict','not-found']);
+const DIAGNOSTIC_PHASES=new Set(['auth','request','context','validation','image','storage-original','storage-thumb','persist','confirmation']);
+const DIAGNOSTIC_SHAPES=new Set(['json-object','json-array','json-null','json-string','json-number','json-boolean','non-json','body-too-large','body-read-failed']);
+export function safeFixtureUploadDiagnostic(response,body,replyShape='json-object'){
+ const object=body&&typeof body==='object'&&!Array.isArray(body)?body:null,status=response?.status;
+ return {httpStatus:Number.isInteger(status)&&status>=100&&status<=599?status:null,replyShape:DIAGNOSTIC_SHAPES.has(replyShape)?replyShape:'unknown',ok:typeof object?.ok==='boolean'?object.ok:null,code:DIAGNOSTIC_CODES.has(object?.code)?object.code:null,kind:DIAGNOSTIC_KINDS.has(object?.kind)?object.kind:null,phase:DIAGNOSTIC_PHASES.has(object?.details?.phase)?object.details.phase:null,commitState:['notCommitted','committed','unknown'].includes(object?.commitState)?object.commitState:null};
+}
+// Закрытая краткая диагностика переживает fail-closed transport, который возвращает только STOP code.
+export function fixtureUploadStopCode(diagnostic){
+ const safe=safeFixtureUploadDiagnostic({status:diagnostic?.httpStatus},{ok:diagnostic?.ok,code:diagnostic?.code,kind:diagnostic?.kind,details:{phase:diagnostic?.phase},commitState:diagnostic?.commitState},diagnostic?.replyShape);
+ const code='FILE_QA_HTTP_'+(safe.httpStatus??'NONE')+'_'+(safe.code??'NONE')+'_'+(safe.phase??'NONE').replaceAll('-','_').toUpperCase()+'_'+safe.replyShape.replaceAll('-','_').toUpperCase();
+ need(/^[A-Z0-9_]{1,100}$/.test(code),'BOUNDED_UPLOAD_DIAGNOSTIC_CODE_REQUIRED');return code;
+}
+export class FixtureUploadResponseError extends Error{
+ constructor(response,body,replyShape='json-object'){super('COMPILED_OWN_UPLOAD_UNCONFIRMED');this.diagnostic=safeFixtureUploadDiagnostic(response,body,replyShape);}
+}
+export async function readFixtureUploadReply(response){
+ let reader;const chunks=[];let size=0;
+ try{
+  reader=response.body?.getReader();if(!reader)throw new FixtureUploadResponseError(response,null,'non-json');
+  while(true){const part=await reader.read();if(part.done)break;size+=part.value.byteLength;if(size>UPLOAD_REPLY_LIMIT){await reader.cancel().catch(()=>{});throw new FixtureUploadResponseError(response,null,'body-too-large');}chunks.push(Buffer.from(part.value));}
+ }catch(error){if(error instanceof FixtureUploadResponseError)throw error;throw new FixtureUploadResponseError(response,null,'body-read-failed');}
+ finally{reader?.releaseLock();}
+ let result;try{result=JSON.parse(Buffer.concat(chunks,size).toString('utf8'));}catch{throw new FixtureUploadResponseError(response,null,'non-json');}
+ if(result===null||typeof result!=='object'||Array.isArray(result))throw new FixtureUploadResponseError(response,null,result===null?'json-null':Array.isArray(result)?'json-array':'json-'+typeof result);
+ return result;
 }
 function pdf(){
  const stream='BT /F1 18 Tf 40 780 Td (PERO QA113) Tj ET\n';const objects=['<< /Type /Catalog /Pages 2 0 R >>','<< /Type /Pages /Kids [3 0 R] /Count 1 >>','<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>','<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>','<< /Length '+Buffer.byteLength(stream)+' >>\nstream\n'+stream+'endstream'];let text='%PDF-1.4\n',offsets=[0];for(let i=0;i<objects.length;i++){offsets.push(Buffer.byteLength(text));text+=(i+1)+' 0 obj\n'+objects[i]+'\nendobj\n';}const xref=Buffer.byteLength(text);text+='xref\n0 6\n0000000000 65535 f \n'+offsets.slice(1).map(value=>String(value).padStart(10,'0')+' 00000 n \n').join('')+'trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n'+xref+'\n%%EOF\n';return Buffer.from(text);
@@ -173,7 +211,7 @@ export async function upload(db,s3,pre,input,secret){
  const finance=media.key.startsWith('finance-');
  if(!finance){form.append('projectId',p.ids.project);form.append('section',media.section);if(media.target==='product')form.append('productId',p.ids.product);if(media.target==='task')form.append('taskId',p.ids.task);if(media.cover){form.append('assignCover','1');form.append('expectedSketchFileId','null');}}
  const cookie=profile.cookies.map(row=>row.name+'='+row.value).join('; ');
- const response=await fetch('http://127.0.0.1:3000'+(finance?'/api/finance/documents/upload':'/api/files/upload'),{method:'POST',headers:{cookie},body:form,redirect:'manual',signal:AbortSignal.timeout(60000)});const result=await response.json();need((response.status===200||(finance&&response.status===201))&&result.ok===true,'COMPILED_OWN_UPLOAD_UNCONFIRMED');const id=finance?result.document?.id??result.id:result.id;need(typeof id==='string','COMPILED_OWN_FILE_ID_REQUIRED');
+ const response=await fetch('http://127.0.0.1:3000'+(finance?'/api/finance/documents/upload':'/api/files/upload'),{method:'POST',headers:{cookie},body:form,redirect:'manual',signal:AbortSignal.timeout(60000)});const result=await readFixtureUploadReply(response);if(!((response.status===200||(finance&&response.status===201))&&result.ok===true))throw new FixtureUploadResponseError(response,result);const id=finance?result.document?.id??result.id:result.id;need(typeof id==='string','COMPILED_OWN_FILE_ID_REQUIRED');
  const captured=await observe(db,s3,pre,input,secret);return signed({namespace:NS,version:2,kind:'upload-ack',runId:pre.runId,revision:input.revision,preSha256:digest(pre),intentSha256:digest(intent),mediaKey:media.key,fileId:id,responseStatus:response.status,observation:captured},secret);
 }
 export async function linkFinance(db,s3,pre,input,secret){
@@ -257,7 +295,7 @@ export async function main(){
    else throw Error('MODE_NOT_ALLOWED');
   }
   need(Buffer.byteLength(JSON.stringify(result))<=MAX_OUTPUT,'PRIVATE_OUTPUT_CAP');
- }catch(error){result={status:'STOP',phase,code:/^[A-Z0-9_]{1,100}$/.test(error?.message??'')?error.message:'FIXTURE113_STOP_PRESERVE_STATE'};process.exitCode=1;}
+ }catch(error){result={status:'STOP',phase,code:error instanceof FixtureUploadResponseError?fixtureUploadStopCode(error.diagnostic):/^[A-Z0-9_]{1,100}$/.test(error?.message??'')?error.message:'FIXTURE113_STOP_PRESERVE_STATE',...(error instanceof FixtureUploadResponseError?{upload:error.diagnostic}:{})};process.exitCode=1;}
  finally{await db?.$disconnect();s3?.destroy();}
  console.log(JSON.stringify(result));
 }
