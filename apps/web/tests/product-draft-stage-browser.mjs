@@ -26,6 +26,15 @@ export function classifyDraftQaAction(args,scope){
  if(args.length===3&&['projects','products'].includes(args[0])&&typeof args[1]==='string'&&args[1].length<=32768&&(args[2]===null||typeof args[2]==='string'))return {kind:'preference',key:args[0]+'.list'};
  return null;
 }
+
+export async function productDialogTechnicalState({page,project,trigger,dialog,title,price,submit}){
+ const bool=async locator=>{try{const value=await locator.isVisible();return typeof value==='boolean'?value:null;}catch{return null;}};
+ const enabled=async locator=>{try{const value=await locator.isEnabled({timeout:250});return typeof value==='boolean'?value:null;}catch{return null;}};
+ let ownsPath=null,tabIsProducts=null;try{const url=new URL(page.url());ownsPath=url.pathname===project.path;tabIsProducts=url.searchParams.get('tab')==='products';}catch{}
+ const values=await Promise.all([bool(trigger),enabled(trigger),bool(dialog),bool(title),enabled(title),bool(price),enabled(price),bool(submit),enabled(submit)]);
+ return {ownsPath,tabIsProducts,triggerVisible:values[0],triggerEnabled:values[1],dialogVisible:values[2],titleVisible:values[3],titleEnabled:values[4],priceVisible:values[5],priceEnabled:values[6],submitVisible:values[7],submitEnabled:values[8]};
+}
+
 export async function runProductDraftStageBrowser({authorized=false,origin,revision,profile,checkpoint,outputDir,basicAuth,onJournal,observe,launchBrowser=options=>chromium.launch(options)}){
  need(authorized===true&&origin==='https://staging-crm.peromebel.by'&&/^[a-f0-9]{40}$/.test(revision??'')&&checkpoint?.revision===revision&&/^[a-f0-9]{64}$/.test(checkpoint.signature??'')&&uuid(checkpoint.runId),'DRAFT111_AUTHORIZED_STAGE_BINDING');
  need(profile?.id===checkpoint.pre?.ids.actor&&JSON.stringify(profile.roles)===JSON.stringify(['MANAGER'])&&Array.isArray(profile.cookies)&&profile.cookies.length>0,'DRAFT111_FRESH_MANAGER_PROFILE');
@@ -89,9 +98,16 @@ export async function runProductDraftStageBrowser({authorized=false,origin,revis
  async function product(slot){const graph=await ownGraph(),value=graph.products.find(row=>row.titleSlot===slot);need(value&&scope.productIds.has(value.id),'DRAFT111_OWN_PRODUCT_SLOT');return value;}
  async function assertStatus(slot,status){await expect.poll(async()=>{const graph=await ownGraph();return graph.products.find(row=>row.titleSlot===slot)?.status;},{timeout:20000}).toBe(status);}
  async function addProduct(project,slot,status){
-  await goto(project.path+'?tab=products','PRODUCTS_TAB');step='PRODUCT_DIALOG';await page.getByRole('button',{name:'Изделие',exact:true}).click();
-  const dialog=page.getByRole('dialog',{name:'Новое изделие'});await dialog.locator('#product-title').fill(tags.products[slot-1]);await dialog.locator('#product-price').fill('0');
-  await dialog.getByRole('button',{name:'Создать изделие',exact:true}).click();await expect(dialog).not.toBeVisible();await assertStatus(slot,status);return product(slot);
+  await goto(project.path+'?tab=products','PRODUCTS_TAB');
+  const trigger=page.getByRole('button',{name:'Изделие',exact:true}),dialog=page.getByRole('dialog',{name:'Новое изделие'}),title=dialog.locator('#product-title'),price=dialog.locator('#product-price'),submit=dialog.getByRole('button',{name:'Создать изделие',exact:true});
+  try{
+   step='PRODUCT_DIALOG_OPEN';await trigger.click();
+   step='PRODUCT_DIALOG_TITLE';await title.fill(tags.products[slot-1]);
+   step='PRODUCT_DIALOG_PRICE';await price.fill('0');
+   step='PRODUCT_DIALOG_CREATE';await submit.click();
+   step='PRODUCT_DIALOG_WAIT_CLOSE';await expect(dialog).not.toBeVisible();
+  }catch(error){receipt.productDialogState=await productDialogTechnicalState({page,project,trigger,dialog,title,price,submit});throw error;}
+  await assertStatus(slot,status);return product(slot);
  }
  async function stage(project,toStage){
   await goto(project.path+'?tab=overview','PROJECT_STAGE_PAGE');step='PROJECT_STAGE_SELECT';await page.getByRole('combobox',{name:'Статус',exact:true}).click();await page.getByRole('option',{name:LABELS[toStage],exact:true}).click();
@@ -141,7 +157,7 @@ export async function runProductDraftStageBrowser({authorized=false,origin,revis
   for(const slot of [5,6,7])await expect(page.getByText(tags.products[slot-1],{exact:true})).toHaveCount(0);await goto('/products');need(new URL(page.url()).searchParams.get('status')===JSON.stringify(['DESIGN','PREPARATION']),'DRAFT111_SAVED_PARTIAL_FILTER_WIDENED');
   for(const slot of [5,6,7])await expect(page.getByText(tags.products[slot-1],{exact:true})).toHaveCount(0);check('explicit_and_saved_partial_filter_not_extended_with_DRAFT');await settled();need(context.serviceWorkers().length===0&&receipt.pageErrors===0&&receipt.blockedWrites===0,'DRAFT111_CLEAN_BROWSER');
   receipt.status='PASS';
- }catch(error){stop(error);}
+ }catch(error){await queue.catch(()=>{});stop(failure??error);}
  finally{await queue.catch(()=>{});try{await durable();}catch(error){if(receipt.status!=='STOP')stop(error);}for(const resource of [context,browser])try{await resource.close();}catch{receipt.closeFailures++;if(receipt.status!=='STOP'){step='BROWSER_CLOSE';stop(Error('DRAFT111_BROWSER_CLOSE_FAILED'));}}}
  return {receipt,journal,scopegraph:lastGraph??null};
 }
