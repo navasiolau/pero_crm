@@ -30,3 +30,77 @@ test('preference writes are restricted to exact two new-user sections',()=>{
  for(const args of [['my','view=kanban',null],['project.tab','products',null],['products','x'.repeat(32769),null],['projects',{},null]])assert.equal(classifyDraftQaAction(args,scope),null);
 });
 test('arbitrary or malformed action payloads are never accepted',()=>{for(const data of [null,{},'arbitrary',[],[{}],[project,product]])assert.equal(classifyDraftQaAction(data,scope),null);});
+
+import {randomUUID} from 'node:crypto';
+import path from 'node:path';
+import {mkdirSync,readdirSync,unlinkSync,rmdirSync} from 'node:fs';
+import {runProductDraftStageBrowser,productDialogTechnicalState} from './product-draft-stage-browser.mjs';
+import {makeTechnicalStore} from './product-draft-stage-runner.mjs';
+import {assertTechnicalPersistence} from './product-draft-stage-wire.mjs';
+import {acceptanceWeb} from './crm-acceptance-transport.mjs';
+const fixture={runId:'80502171-fcf9-4189-a3f8-c8a77e94efad',revision:'a'.repeat(40),signature:'b'.repeat(64),pre:{ids:{actor:'own-manager',client:'own-client',projectB:'own-paused'},tags:{actor:'QA111 manager run',client:'QA111 client run',projectA:'QA111 primary run',products:Array.from({length:10},(_,i)=>'QA111 product run '+(i+1))}}};
+function fakeBrowser({status=503,pageError,request,afterGotoRequest,throwOnClick,closeThrows=false,mainNodes=[{classes:['@container/main']}]}={}){
+ const handlers=new Map(),state={launches:0,captures:0,fetches:0,aborts:0,contextClosed:false,browserClosed:false,mainWaits:[]},page={
+  on:(event,fn)=>{handlers.set(event,fn);},
+  locator:selector=>({waitFor:async()=>{const match=/^main(?:\[class~="([^"]+)"\])?$/.exec(selector);assert.ok(match,'MAIN_SELECTOR_SUPPORTED');const matchedCount=mainNodes.filter(node=>!match[1]||node.classes.includes(match[1])).length;state.mainWaits.push({selector,matchedCount});if(matchedCount!==1)throw Error('STRICT_MODE_MAIN_COUNT');}}),
+  getByRole:()=>({click:async()=>{if(afterGotoRequest){const request=afterGotoRequest;await state.route({request:()=>({url:()=>request.url,method:()=>request.method,headers:()=>request.headers,postData:()=>request.body}),abort:async()=>{state.aborts++;},fetch:async()=>{state.fetches++;throw Error('UNEXPECTED_LIVE_FETCH');}});}throw throwOnClick??Error('private-unexpected-selector-message');}}),
+  goto:async()=>{
+   if(pageError)handlers.get('pageerror')(pageError);
+   if(request){const route={request:()=>({url:()=>request.url,method:()=>request.method,headers:()=>request.headers,postData:()=>request.body}),abort:async()=>{state.aborts++;},fetch:async()=>{state.fetches++;throw Error('UNEXPECTED_LIVE_FETCH');},continue:async()=>{throw Error('UNEXPECTED_LIVE_CONTINUE');}};
+    await state.route(route);
+   }
+   return {status:()=>status};
+  },
+ },context={addInitScript:async()=>{},addCookies:async()=>{},newPage:async()=>page,route:async(_pattern,fn)=>{state.route=fn;},request:{get:async()=>({status:()=>200,json:async()=>({user:{id:fixture.pre.ids.actor}})})},close:async()=>{state.contextClosed=true;if(closeThrows)throw Error('private-close-error');}},browser={newContext:async()=>context,close:async()=>{state.browserClosed=true;}};
+ return {state,launchBrowser:async()=>{state.launches++;return browser;}};
+}
+async function controlledEarlyStop(control,callbackFailure=false){
+ const directory=path.join(acceptanceWeb,'test-results','draft111-early-stop-pure-'+randomUUID());mkdirSync(directory,{recursive:true});const store=makeTechnicalStore(directory);
+ try{
+  const result=await runProductDraftStageBrowser({authorized:true,origin:'https://staging-crm.peromebel.by',revision:fixture.revision,profile:{id:fixture.pre.ids.actor,roles:['MANAGER'],cookies:[{name:'authjs.session-token',value:'unit-private-never-persisted'}]},checkpoint:fixture,outputDir:directory,launchBrowser:control.launchBrowser,onJournal:async journal=>{if(callbackFailure)throw Error('PRIVATE_DURABLE_ERROR');store.put('journal',journal);},observe:async()=>{control.state.captures++;throw Error('UNEXPECTED_READONLY_OBSERVE');}});
+  assertTechnicalPersistence(result);store.put('browser-result',result);const saved=store.get('browser-result');
+  assert.equal(control.state.launches,1);assert.equal(control.state.contextClosed,true);assert.equal(control.state.browserClosed,true);assert.equal(control.state.captures,0);assert.equal(control.state.fetches,0);assert.equal(saved.scopegraph,null);assert.deepEqual(saved.journal.actions,[]);
+  for(const secret of ['unit-private-never-persisted','private-pageerror-secret','private-selector-user-data','private-close-error','private-unexpected-selector-message'])assert.equal(JSON.stringify(saved).includes(secret),false);assert.equal(JSON.stringify(saved).includes('PRIVATE_DURABLE_ERROR'),false);return saved;
+ }finally{for(const name of readdirSync(directory)){const file=path.join(directory,name);assert.equal(path.dirname(file),directory);unlinkSync(file);}rmdirSync(directory);}
+}
+test('actual browser callbacks persist first-page HTTP STOP with nullable graph and exact primary reason',async()=>{
+ const saved=await controlledEarlyStop(fakeBrowser({status:503}));assert.equal(saved.receipt.status,'STOP');assert.equal(saved.receipt.code,'DRAFT111_OWN_PAGE_HTTP');assert.equal(saved.receipt.failureStep,'PROJECTS_BOARD');assert.equal(saved.receipt.pageHttpStatus,503);
+ assert.throws(()=>assertTechnicalPersistence({...saved,scopegraph:undefined}),/PLAIN_VALUE_REQUIRED/);
+});
+test('actual browser pageerror STOP retains only bounded exception kind without raw sensitive message',async()=>{
+ const saved=await controlledEarlyStop(fakeBrowser({status:200,pageError:TypeError('private-pageerror-secret')}));assert.equal(saved.receipt.code,'DRAFT111_CLIENT_ERROR');assert.equal(saved.receipt.failureStep,'PROJECTS_BOARD');assert.deepEqual(saved.receipt.pageErrorKinds,['TYPE_ERROR']);assert.equal(saved.receipt.pageErrors,1);
+});
+test('actual unknown POST guard aborts before intent/fetch and preserves primary route failure',async()=>{
+ const control=fakeBrowser({status:200,request:{url:'https://staging-crm.peromebel.by/projects',method:'POST',headers:{'next-action':'c'.repeat(40)},body:JSON.stringify(['foreign-operation'])}}),saved=await controlledEarlyStop(control);
+ assert.equal(control.state.aborts,1);assert.equal(saved.receipt.code,'DRAFT111_UNOWNED_MUTATION_BLOCKED');assert.equal(saved.receipt.blockedWrites,1);assert.equal(saved.receipt.failureStep,'PROJECTS_BOARD');
+});
+test('actual selector timeout carries safe step/kind and never stores arbitrary exception message',async()=>{
+ const error=Error('private-selector-user-data');error.name='TimeoutError';const saved=await controlledEarlyStop(fakeBrowser({status:200,throwOnClick:error}));assert.equal(saved.receipt.code,'DRAFT111_BROWSER_UNKNOWN');assert.equal(saved.receipt.errorKind,'TIMEOUT_ERROR');assert.equal(saved.receipt.failureStep,'PROJECT_DIALOG_OPEN');
+});
+test('durable callback failure cannot allow navigation or mask error during final closure',async()=>{
+ const saved=await controlledEarlyStop(fakeBrowser(),true);assert.equal(saved.receipt.code,'DRAFT111_JOURNAL_PERSIST_FAILED');assert.equal(saved.receipt.failureStep,'INITIAL_JOURNAL');assert.equal(saved.receipt.journalPersistFailures,2);
+});
+test('resource close failure keeps original primary HTTP failure and null graph',async()=>{
+ const saved=await controlledEarlyStop(fakeBrowser({status:503,closeThrows:true}));assert.equal(saved.receipt.code,'DRAFT111_OWN_PAGE_HTTP');assert.equal(saved.receipt.failureStep,'PROJECTS_BOARD');assert.equal(saved.receipt.closeFailures,1);
+});
+
+test('nested SidebarInset and AppShell mains select only the intended class-token inner main',async()=>{
+ const error=Error('private-selector-user-data');error.name='TimeoutError';
+ const control=fakeBrowser({status:200,mainNodes:[{classes:['peer','relative']},{classes:['flex','@container/main','min-w-0']}],throwOnClick:error}),saved=await controlledEarlyStop(control);
+ assert.deepEqual(control.state.mainWaits,[{selector:'main[class~="@container/main"]',matchedCount:1}]);
+ assert.equal(saved.receipt.pageHttpStatus,200);assert.equal(saved.receipt.pageErrors,0);assert.equal(saved.receipt.failureStep,'PROJECT_DIALOG_OPEN');
+ const nodes=[{classes:['peer']},{classes:['@container/main']}];assert.equal(nodes.length,2);assert.equal(nodes.filter(node=>node.classes.includes('@container/main')).length,1);
+});
+
+test('product dialog diagnostics expose only bounded state flags, even for failed or nonboolean getters',async()=>{
+ const locator=(visible,enabled)=>({isVisible:async()=>{if(visible instanceof Error)throw visible;return visible;},isEnabled:async()=>{if(enabled instanceof Error)throw enabled;return enabled;}});
+ const state=await productDialogTechnicalState({page:{url:()=> 'https://staging-crm.peromebel.by/projects/217?tab=products'},project:{path:'/projects/217'},trigger:locator(true,true),dialog:locator(true,true),title:locator(true,true),price:locator(true,true),submit:locator(true,false)});
+ assert.deepEqual(state,{ownsPath:true,tabIsProducts:true,triggerVisible:true,triggerEnabled:true,dialogVisible:true,titleVisible:true,titleEnabled:true,priceVisible:true,priceEnabled:true,submitVisible:true,submitEnabled:false});assertTechnicalPersistence(state);
+ const failed=await productDialogTechnicalState({page:{url:()=> 'https://staging-crm.peromebel.by/projects/217'},project:{path:'/projects/217'},trigger:locator(Error('private-data'),true),dialog:locator(false,false),title:locator('private-value',false),price:locator(true,Error('private-value')),submit:locator(true,{password:'private'})});
+ assert.equal(failed.tabIsProducts,false);assert.equal(failed.triggerVisible,null);assert.equal(failed.titleVisible,null);assert.equal(failed.priceEnabled,null);assert.equal(failed.submitEnabled,null);assertTechnicalPersistence(failed);assert.equal(JSON.stringify(failed).includes('private'),false);
+});
+test('actual route guard failure wins over following UI timeout and never forwards business POST',async()=>{
+ const secondary=Error('private-selector-user-data');secondary.name='TimeoutError';
+ const control=fakeBrowser({status:200,afterGotoRequest:{url:'https://staging-crm.peromebel.by/projects',method:'POST',headers:{'next-action':'c'.repeat(40)},body:JSON.stringify(['foreign-operation'])},throwOnClick:secondary}),saved=await controlledEarlyStop(control);
+ assert.equal(control.state.aborts,1);assert.equal(saved.receipt.code,'DRAFT111_UNOWNED_MUTATION_BLOCKED');assert.equal(saved.receipt.errorKind,'ERROR');assert.equal(saved.receipt.failureStep,'PROJECT_DIALOG_OPEN');assert.equal(saved.receipt.blockedWrites,1);
+});
