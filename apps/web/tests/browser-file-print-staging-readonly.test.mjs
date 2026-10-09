@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {readonlyFilePrintRequestDecision,filePrintOwnedCases,nativePdfUriClass,remainingFilePrintOwnedCases} from './browser-file-print-staging-readonly.mjs';
+import {readonlyFilePrintRequestDecision,filePrintOwnedCases,nativePdfUriClass,remainingFilePrintOwnedCases,printPageErrorProvenance} from './browser-file-print-staging-readonly.mjs';
 const binding={origin:'https://staging-crm.peromebel.by',ids:{project:'owned-project',product:'owned-product',task:'owned-task'},files:[{id:'image',fileName:'Image.png',mimeType:'image/png',taskId:null,productId:'owned-product'},{id:'pdf',fileName:'Document.pdf',mimeType:'application/pdf',taskId:'owned-task',productId:'owned-product'},{id:'cad',fileName:'Model.b3d',mimeType:'application/octet-stream',productId:null}],finance:{incomeId:'income',expenseId:'expense'},financeDocs:[{id:'finance-pdf',mimeType:'application/pdf',paymentId:'expense'},{id:'finance-cad',mimeType:'application/octet-stream',paymentId:null}]};
 const deny=()=>({kind:'deny',code:'shared-deny'});
 test('readonly policy never forwards writes, even if shared policy would return a delete candidate',()=>{for(const method of ['POST','PUT','PATCH','DELETE'])assert.equal(readonlyFilePrintRequestDecision({url:binding.origin+'/projects/owned-project',method},binding,()=>({kind:'candidate-delete'})).kind,'abort-write');});
@@ -39,4 +39,12 @@ test('previous canceled ready one-page preview skips only unchanged current own 
  const result=remainingFilePrintOwnedCases(current,previous);assert.equal(result.priorNativeMatched.length,1);assert.equal(result.cases.some(item=>item.file.id==='image'),false);assert.equal(result.cases.some(item=>item.file.id==='pdf'),true);
  for(const change of [{canceled:false},{contentHash:'c'.repeat(64)},{fileId:'deleted-image'}])assert.equal(remainingFilePrintOwnedCases(current,{...previous,native:[{...previous.native[0],...change}]}).priorNativeMatched.length,0);
  assert.throws(()=>remainingFilePrintOwnedCases(current,{...previous,revision:'c'.repeat(40)}),/F116_PREVIOUS_NATIVE_SCOPE_REQUIRED/);
+});
+
+test('pageerror provenance trusts exact native stack sites, keeps CRM and unknown fatal candidates and never returns message or stack',()=>{
+ const message='controlled Minified React error #418',native='chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/pdf_viewer.js:12:3';
+ const result=printPageErrorProvenance({name:'TypeError',message,stack:'TypeError: controlled\n    at cleanup ('+native+')'},binding.origin);assert.equal(result.originClass,'CHROME_PDF_EXTENSION');assert.equal(result.reactCode,418);assert.equal(result.name,'TypeError');assert.match(result.messageSha256,/^[a-f0-9]{64}$/);assert.equal(Object.hasOwn(result,'message'),false);assert.equal(Object.hasOwn(result,'stack'),false);
+ assert.equal(printPageErrorProvenance({message,stack:'Error\n    at cleanup ('+native+')\n    at render ('+binding.origin+'/_next/static/app.js:1:2)'},binding.origin).originClass,'CRM');
+ assert.equal(printPageErrorProvenance({message:native,stack:'Error: '+native},binding.origin).originClass,'UNKNOWN');
+ assert.equal(printPageErrorProvenance({message,stack:'Error\n    at fail (https://example.invalid/app.js:1:2)'},binding.origin).originClass,'UNKNOWN');
 });

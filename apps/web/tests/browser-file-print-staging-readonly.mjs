@@ -18,6 +18,18 @@ export function nativePdfUriClass(value, origin) {
  if(url.protocol==='blob:'&&url.origin===origin&&url.pathname.startsWith(origin+'/')&&/^[a-f0-9-]{36}$/.test(url.pathname.slice(origin.length+1)))return 'SAME_ORIGIN_BLOB';
  return 'OTHER';
 }
+/** Only V8 call-site URLs classify provenance; message text and raw stacks never leave memory. */
+export function printPageErrorProvenance(error, origin) {
+ const message=String(error?.message??''),stack=String(error?.stack??'').slice(0,65536),names=['Error','TypeError','ReferenceError','RangeError','SyntaxError','SecurityError','AbortError','DOMException'];
+ const urls=stack.split('\n').filter(line=>/^\s*at\s/.test(line)).flatMap(line=>{const match=line.match(/(?:\(|\s)([a-z][a-z0-9+.-]*:\/\/[^\s)]+)\)?$/);return match?[match[1].replace(/:\d+(?::\d+)?$/,'')]:[];});
+ const nativeKinds=new Set(['CHROME_PDF_EXTENSION','CHROME_PRINT','CHROME_UNTRUSTED_PDF']);
+ let originClass='UNKNOWN';
+ if(urls.some(value=>{try{return new URL(value).origin===origin;}catch{return false;}}))originClass='CRM';
+ else if(urls.length&&urls.every(value=>nativeKinds.has(nativePdfUriClass(value,origin))))originClass=nativePdfUriClass(urls[0],origin);
+ const react=message.match(/Minified React error #(\d{1,4})/);
+ return {originClass,name:names.includes(error?.name)?error.name:'OTHER',reactCode:react?Number(react[1]):null,messageSha256:createHash('sha256').update(message).digest('hex')};
+}
+
 function currentVerifiedPdf(binding, phase) {
  const files=phase?.source==='project'?binding.files:phase?.source==='finance'?binding.financeDocs:[];
  return SHA.test(phase?.contentHash??'')&&files.some(file=>file.id===phase.fileId&&file.mimeType==='application/pdf'&&file.contentHash===phase.contentHash);
@@ -66,8 +78,8 @@ export async function runFilePrintStagingReadonly(input = {}) {
  check(typeof input.saveNativeScreenshot==='function','NATIVE_EVIDENCE_SINK_REQUIRED');
  const binding = await verifyPlainFileListStagingBinding(input), {cases,priorNativeMatched} = remainingFilePrintOwnedCases(binding,input.previousNativeReceipt);
  const {chromium,expect} = await import('@playwright/test');
- const receipt = {status:'STARTED',runId:binding.runId,revision:binding.expectedRevision,checks:[],native:[],priorNativeMatched,nativeUriCounts:Object.fromEntries(NATIVE_URI_CLASSES.map(kind=>[kind,0])),deniedUriCounts:Object.fromEntries(NATIVE_URI_CLASSES.map(kind=>[kind,0])),blockedWrites:0,blockedPrefetches:0,deniedReads:0,pageErrors:0,storageWriteAttempts:0,upstreamWrites:0};
- let browser,context,fatal=null,verifiedPdf=null;const routes=new Set();
+ const receipt = {status:'STARTED',runId:binding.runId,revision:binding.expectedRevision,checks:[],native:[],priorNativeMatched,nativeUriCounts:Object.fromEntries(NATIVE_URI_CLASSES.map(kind=>[kind,0])),deniedUriCounts:Object.fromEntries(NATIVE_URI_CLASSES.map(kind=>[kind,0])),blockedWrites:0,blockedPrefetches:0,deniedReads:0,pageErrors:0,pageErrorProvenance:[],nativeShutdownErrors:0,storageWriteAttempts:0,upstreamWrites:0};
+ let browser,context,fatal=null,verifiedPdf=null,completedPdf=null,nativeOperationActive=false;const routes=new Set();
  const fail = error => {fatal ??= safeError(error);};
  const assertSafe = () => check(!fatal && receipt.pageErrors===0 && receipt.deniedReads===0 && receipt.upstreamWrites===0 && receipt.storageWriteAttempts===0,'READONLY_OR_PAGE_VIOLATION');
  async function goto(page,path) {
@@ -112,7 +124,13 @@ export async function runFilePrintStagingReadonly(input = {}) {
   await context.addCookies(binding.profiles.admin.cookies);
   const health=await context.request.get(`${binding.origin}/api/health`,{maxRedirects:0});check(health.status()===200,'HEALTH_FAILED');const healthBody=await health.json();check(healthBody.status==='ok'&&healthBody.database==='ok','HEALTH_DEGRADED');
   const session=await context.request.get(`${binding.origin}/api/auth/session`,{maxRedirects:0});check(session.status()===200,'SESSION_FAILED');const current=await session.json();check(current.user?.id===binding.profiles.admin.id&&JSON.stringify(current.user.roles)===JSON.stringify(binding.profiles.admin.roles),'CURRENT_ADMIN_SESSION_MISMATCH');
-  const page=await context.newPage();page.on('pageerror',()=>{receipt.pageErrors++;fail(Error('F116_PAGE_ERROR'));});
+  const page=await context.newPage();page.on('pageerror',error=>{
+   const diagnostic=printPageErrorProvenance(error,binding.origin);
+   const nativeKnown=['CHROME_PDF_EXTENSION','CHROME_PRINT','CHROME_UNTRUSTED_PDF'].includes(diagnostic.originClass);
+   const afterVerifiedPdfCancel=verifiedPdf===null&&!nativeOperationActive&&nativeKnown&&diagnostic.reactCode===null&&currentVerifiedPdf(binding,completedPdf);
+   receipt.pageErrorProvenance.push({...diagnostic,afterVerifiedPdfCancel,fatal:!afterVerifiedPdfCancel});
+   if(afterVerifiedPdfCancel)receipt.nativeShutdownErrors++;else{receipt.pageErrors++;fail(Error('F116_PAGE_ERROR'));}
+  });
   for(const item of cases) {
    const file=item.file,source=item.source==='finance'?`/api/finance/documents/${file.id}`:`/api/files/${file.id}`;
    const original=await context.request.get(binding.origin+source,{maxRedirects:0});check(original.status()===200&&mime(original.headers()['content-type'])===mime(file.mimeType),'OWN_ORIGINAL_METADATA_FAILED');
@@ -124,10 +142,12 @@ export async function runFilePrintStagingReadonly(input = {}) {
    await expect(printer).toBeEnabled();
    let native;
    if(file.mimeType==='application/pdf')verifiedPdf={source:item.source,fileId:file.id,contentHash:file.contentHash};
-   try {native=await inspectNativeFilePrintPreview({browser,isPdf:file.mimeType==='application/pdf',trigger:async()=>{assertSafe();await printer.click();},saveScreenshot:async png=>{await input.saveNativeScreenshot({source:item.source,fileId:file.id,contentHash:file.contentHash,png});}});}
-   finally {verifiedPdf=null;}
+   nativeOperationActive=true;try {native=await inspectNativeFilePrintPreview({browser,isPdf:file.mimeType==='application/pdf',trigger:async()=>{assertSafe();await printer.click();},saveScreenshot:async png=>{await input.saveNativeScreenshot({source:item.source,fileId:file.id,contentHash:file.contentHash,png});}});}
+   finally {verifiedPdf=null;nativeOperationActive=false;}
 
-   assertSafe();receipt.native.push({source:item.source,fileId:file.id,mimeType:file.mimeType,contentHash:file.contentHash,...native});
+   receipt.native.push({source:item.source,fileId:file.id,mimeType:file.mimeType,contentHash:file.contentHash,...native});
+   if(file.mimeType==='application/pdf'&&native.kind==='actual-native-preview'&&native.canceled===true&&native.physicalPrintSubmitted===false&&native.preview?.state==='1'&&native.preview.error==='0'&&native.preview.pageCount==='1'&&native.preview.previewLoaded===true)completedPdf={source:item.source,fileId:file.id,contentHash:file.contentHash};
+   assertSafe();
   }
   await Promise.allSettled([...routes]);assertSafe();
   const after=await verifyPlainFileListStagingBinding(input);
