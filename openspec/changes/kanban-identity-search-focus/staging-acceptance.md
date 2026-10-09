@@ -6,12 +6,12 @@
 
 ## Handoff
 
-Root передаёт в `runKanbanSearchStagingBrowser` объект из свежего owned111 lifecycle в памяти. Старый `staging-browser-session.prepare` запрещён для этой проверки: он выбирает существующих пользователей. JWT/AUTH_SECRET, cookie values, basic credentials не выводятся в tool/chat/logs.
+Root использует отдельный fresh117 lifecycle и передаёт в `runKanbanSearchStagingBrowser` настоящий подписанный producer handoff в памяти. Это не расширяет scope113/115/116 и не меняет111 fixture. Старый `staging-browser-session.prepare` запрещён для этой проверки: он выбирает существующих пользователей. JWT/AUTH_SECRET, cookie values, basic credentials не выводятся в tool/chat/logs.
 
 Обязательные поля:
 
 - `authorized: true`, `origin: https://staging-crm.peromebel.by`, `expectedRevision` полного SHA фактически развёрнутого кандидата; physical receipt с `hostname: crm-staging`, тем же SHA, `databaseVolume: crm-staging_pgdata`, исходным `outerW07Sha256`.
-- Проверенный Root целиком signed checkpoint: `scope: fresh-owned-qa`, UUID runId, тот же revision, `signature`, `originalPreSha256`, `actor` и наборы фактически созданных actor/client/project/product/file IDs. Root сохраняет и проверяет оригинальный PRE/HMAC независимо от браузера; наличие строки signature само по себе этого не доказывает.
+- Проверенный Root целиком signed checkpoint: `scope: fresh-owned-qa`, UUID runId, тот же revision, `signature`, `originalPreSha256`, `actor` и наборы фактически созданных actor/client/project/product/file IDs. Root сохраняет original PRE/HMAC. Перед boot обязателен source-reviewed `verifySignedCurrent` callback, который вызывает actual guarded producer и повторно проверяет HMAC, текущие own rows, оригиналы и compiled manifest; отсутствие callback или несовпадение current certificate останавливают браузер. Наличие строки signature само по себе этого не доказывает.
 - `profile`: один свежий QA MANAGER или ADMIN, id/roles в checkpoint, scoped cookies. Два `originalPreferences` этого актёра для `projects.list` и `products.list` должны быть отсутствующими (`value: null`). Другие пользователи и сохранённые real preferences не используются.
 - `subjects`: readonly текущие owned client (`id`, `name`), project (`id`, `number`, `title`, `clientId`) и product (`id`, `number`, `title`, `description`, `projectId`). `tokens` — четыре уникальных 12–100 ASCII-символьных значения `projectTitle`, `productTitle`, `client`, `technical`, фактически присутствующие в соответствующих owned fields и отсутствующие в собственных identity fields отрицательных сценариев. Root подготовит эти значения в owned fixture lifecycle.
 - `action`: фактический compiled `saveListPreference` из `src/server/list-preferences-actions.ts`, 42-hex id установленного Next15, candidate revision, SHA256 source-reviewed manifest. Другие server actions не передаются.
@@ -51,3 +51,34 @@ Prisma `UserPreference` не имеет FK на User: удаление QA actor 
 Независимое ревью обнаружило P2 старого QA adapter: он строил scalar client/project, а приложение нормализует JSON-array. RED двух actual-service startup тестов показал `%5B%22qa-client%22%5D`/`%5B%22qa-project%22%5D` вместо scalar. Исправлен только QA query builder; application source не изменён. GREEN15/15 фиксируется после исправления.
 
 Полный local unit-набор после QA P2 исправления —1492/1492 PASS; TSC/lint/strict OpenSpec/diff-check PASS. Actual deployment/session/scenarios/cleanup ещё не запускались.
+
+
+## Separate Root117 lifecycle source
+
+`kanban-search-owned-protocol.mjs`, `kanban-search-owned-fixtures.mjs`, `kanban-search-owned-entry.mjs` и `kanban-search-root-runner.mjs` образуют отдельный source-only набор. Только Root вызывает actual transport; worker не запускал DB/SSH/стадж/браузер. Разрешённый local ordinary merge fresh origin/staging0ab дал feature117 merge d2e529; incoming task source не копировался. Dependency junction к111 runtime сохранён, Prisma generate не выполнялся.
+
+Producer создаёт ровно четыре записи: новый MANAGER с NONE/disabled-password, новый client, проект LEAD и изделие DRAFT с настоящим отличающимся technical token. Никакие существующие пользователи, финансовые/складские записи, файлы, S3, модули, миграции или schema не изменяются. Для0/1/2 own preferences предусмотрен actual PostgreSQL outer-rollback prerequisite до committed prepare; signed native proof нельзя заменить caller boolean. Все таблицы/schema fingerprint сравниваются; accepted shared API-token lastUsedAt и bot updatedAt clocks допускаются только при фактически неизменных stable fields и monotonic evidence свежего PRE.
+
+Actual manifest читается только внутри verified web из `.next/server/server-reference-manifest.json`. Требуется один exportedName `saveListPreference` с точным actual filename `server/list-preferences-actions.ts`, двумя workers `app/(app)/products/page`/`app/(app)/projects/page`, string moduleId, async=false и layer=action-browser. Filename нормализуется в public `src/server/list-preferences-actions.ts` до HMAC. ID не hardcoded. Raw manifest/encryptionKey никогда не записываются/не выводятся; остаются только SHA/два public references.
+
+Root API: `createSearch117RootKit` в памяти, basicAuth передаётся из уже разрешённого private context. Методы вызываются последовательно и явно: native → plan (fsync signed PRE) → prepare (fsync intent, один commit) → browser (memory JWT/current producer verification) → capture (exact ACK journal/coherent current state) → cleanup (durable observation и own-row/pref value CAS) → closed (новый post-commit readonly proof). Browser native/source-only успех не даёт PASS без actual cleanup/closed.
+
+Локальный Root-only пример вызова после review и принятого runtime window:
+
+```javascript
+import {createSearch117RootKit} from './tests/kanban-search-root-runner.mjs';
+// options: authorized, full deployed revision, fresh UUID runId,
+// outputDir=<repo>/.playwright-mcp/search117/owned-<runId>, private basicAuth.
+const kit=createSearch117RootKit(options);
+await kit.native();
+await kit.plan();
+await kit.prepare();
+await kit.browser();
+await kit.capture();
+await kit.cleanup();
+const accepted=await kit.closed();
+```
+
+Не запускать эту последовательность автоматически после ошибки. Prepare outcome неизвестен → только явный readonly `recoverPrepare`, затем capture/cleanup; recovered prepare никогда не считается functional PASS. Browser journal с UNCERTAIN/неполным ACK останавливает обычную очистку и требует reviewed discovery. IDs/FKs/scalar backrefs проверяются до удаления, exact UserPreference(userId,key,value) удаляются отдельно (у модели нет FK), четыре rows удаляются по ID+whole-row SHA. Последние исходники/сертификаты удерживаются до closure; source drift запрещён.
+
+Source controlled verification:20/20 tests на actual-manifest shape/privacy, реальном HMAC/tamper, distinct fresh plan, canonical journal, обязательном actual-producer callback certificate и прежнем actual service/controller/genuine Flight; lint PASS. Compile-only injected bundle70009 B — PASS, никаких stage/DB вызовов. Native PostgreSQL rollback, committed fixtures и actual browser ещё не запускались; эти пункты принимает Root после независимого review.
