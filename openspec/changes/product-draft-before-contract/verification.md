@@ -218,3 +218,39 @@ Root выполнил run a3482000-b25e-4823-8cb9-21b20f9d23cb на37f и ост
 Root93f00c подтвердил current originals, а5a9204 выполнил CLOSED. Exact cleanup receipt содержит18 собственных строк: User1/Client1/Project2/Product1/Config3/ProductHistory1/ProjectHistory1/ChangeLog2/DomainEvent1/Notification4/Preference1; freshOriginalsPreserved=true/cleanupCommitted=true. Никаких live fixtures этого run не осталось.
 
 По reviewed Root design после единственного submit QA ожидает exact matching product intent с durable ACK и завершённым route.fulfill, ограниченно65s, затем строго проверяет modal hidden с timeout65s. Известная route/page failure немедленно остаётся STOP; submit/server action не повторяется. Failure diagnostic дополнен только busyVisible boolean/null. Offline regression моделирует ACK позже5s, отсутствие повторного submit, немедленный отказ known failure и фиксированный deadline; это не новый actual browser PASS.
+
+## Принятая staging-приёмка задачи 111 — 09.10.2026
+
+Оркестратор принял все девять обязательных runtime-сценариев задачи и точное закрытие собственного QA lifecycle. Пункт 4.2 завершён. Фактически проверенная ревизия: `37f882f69a2d76901b98321ff7824d0d04db4db8`; исходники браузерного harness закреплены QA-only коммитом `afab829d5db4f6d92c4de79036c3cee0c35590c7`. Предыдущие локальные проверки, native migration/concurrency proofs и независимое review повторно не запускались.
+
+Run `b35adc2a-e806-46de-a115-873fb9a14b94` выполнил субагент finish111_acceptance под эксклюзивным runtime lease оркестратора. Файловой Parent113 fixture был приостановлен и входил в защищённые исходные данные. Не выполнялись main/production release, дампы, restic, изменения сервисов или расписаний.
+
+| Фактический сценарий | Результат |
+| --- | --- |
+| `LEAD_create_DRAFT_disabled_status_and_global_drag` | Новое изделие — DRAFT; ручной селект и drag раннего черновика недоступны. |
+| `ESTIMATE_create_DRAFT` | Новое изделие в «Просчёте» — DRAFT. |
+| `CONTRACT_promotes_DRAFT_postcontract_create_PREPARATION` | Договор переводит оба черновика в подготовку; последующее новое изделие сразу получает PREPARATION и штатно переводится в DESIGN. |
+| `return_preserves_nonDRAFT_denial_and_contract_promotes_only_DRAFT` | Возврат в LEAD сохраняет прежние статусы; сервер отказывает в ручном выводе нового черновика. Повторный договор переводит только DRAFT, оставляя DESIGN. |
+| `actual_deployed_stage_replay_and_noop` | Повтор исходного запроса и переход CONTRACT→CONTRACT не меняют собственный граф записей и событий. |
+| `PAUSED_REFUSED_without_ordinary_history_default_DRAFT` | PAUSED/REFUSED без обычной истории создают DRAFT. |
+| `skip_CONTRACT_no_autopromotion_active_create_PREPARATION` | Пропуск договора при переходе в IN_WORK сохраняет три черновика; новое изделие получает PREPARATION. |
+| `PAUSED_REFUSED_latest_ordinary_stage` | После IN_WORK новые изделия в PAUSED/REFUSED получают PREPARATION по последнему обычному этапу. |
+| `actual_global_and_nested_columns_desktop_mobile` | На общей и вложенной досках при 1440×900, 390×844 и 360×800 первая колонка — «Черновики», следующая — «Подготовка». |
+
+Фактический browser-result: `apps/web/test-results/draft111-functional-b35adc2a-e806-46de-a115-873fb9a14b94/0155-browser-result.json`, SHA256 `110cfb202d96cae21635daf1514c0a4e38b021a19f5dff2facf4e501cb7fcc6f`. Все 28 запросов имеют durable ACK; pageErrors=0, blockedWrites=0, journalPersistFailures=0, closeFailures=0. Это доказательства именно работающего staging, а не только локального рендера или совпадения исходников.
+
+### Ограничение дополнительной проверки фильтра
+
+Общий расширенный harness закончился `STOP_CLOSED`, browserStatus=STOP и wholeEndToEnd=false. Девять перечисленных сценариев были завершены до отказа на `OWN_GRAPH`, последовавшего за записью частичного фильтра статусов. Последний реальный preference ACK200 был durable и fulfilled; сохранённый query содержит ровно `status=["DESIGN","PREPARATION"]`, без добавления DRAFT.
+
+Дополнительные DOM-проверки отсутствия черновиков после применения этого фильтра и после повторного открытия сохранённого списка не завершены в данном actual run. Это дополнительные проверки совместимости harness, а не отдельные требования delta-spec111. Они не выдаются за actual PASS и не нужны для повторного выполнения уже принятых девяти сценариев; локальные проверки фильтра были завершены ранее.
+
+Failure mapping сохранил только `DRAFT111_BROWSER_UNKNOWN`/ERROR, failureStep=OWN_GRAPH. Точный native capture checkId не сохранился; `transport-inspect-unknown.stderr.private.log` пуст. Причина отказа не установлена. Возможная гонка поздней записи preference и capture не объявляется доказанной причиной или дефектом приложения.
+
+### Точное закрытие QA и сохранность данных
+
+Signed PRE `0002-pre.json` имеет SHA256 `992ebb7b55770cf77bc040f26ba7e207453cdf669cea8a8ef27ebad8ee588e46`. Финальное подписанное observation `0157-observation.json` имеет SHA256 `8092d5200f02b8f44258b082b980395fe8f231a73134174550d16f260b08a666`.
+
+`0160-cleanup-result.json`, SHA256 `9e69bdc6c9bd31a8341c677d6447fe0ce4dac3f64667604f811c87bee5561a21`, подтвердил CLEANED, cleanupCommitted=true, originalsPreserved=true и freshOriginalsPreserved=true. Удалены ровно 174 собственные строки: ProductPercentageConfig30, ProductStatusHistory14, ProjectStageHistory10, ChangeLog24, DomainEvent14, Notification66, UserPreference2, Product10, Project2, Client1, User1. Чужие записи не удалялись.
+
+Guards сохранили исходные данные всех 54 public tables, schema/defaults и финансовые факты. В защищённый complement входили в том числе живые File/FinanceDocument и остальные записи Parent113; их fingerprints сохранились. Этот run не читал и не менял S3 и не является отдельным S3 proof Parent113. Допустимый natural ApiToken clock изменился, botClockChanged=false; поэтому fullOriginalByteMatch=false честно сохранён и не подменяется заявлением о полной byte equality прежних token clocks. Сохранность stable original facts и CAS-восстановление собственных записей подтверждены.
