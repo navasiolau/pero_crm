@@ -1,4 +1,4 @@
-import {liveProductWhere} from "../src/server/access/live-entities";
+import {matches} from "./helpers/visibility-fixture";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { PrismaClient, Role } from "@prisma/client";
@@ -33,7 +33,9 @@ test("participant resolver accepts zero-share assignment and rejects every misma
 
 test("participant predicates remain DESIGN scoped; independent manager and field grants survive", () => {
   const participant = { id: "u", roles: ["ENGINEER"] as Role[], engineeringParticipantProductIds: ["p"], engineeringParticipantTaskIds: ["task"] };
-  assert.deepEqual(productEditWhere(participant), {AND:[liveProductWhere,{AND:[liveProductWhere,{ status: "DESIGN", OR: [{ engineerId: "u" }, { id: { in: ["p"] } }] }]}]});
+  const row={id:"p",engineerId:null,status:"DESIGN",deletedAt:null,project:{deletedAt:null}};
+  assert.equal(matches(row,productEditWhere(participant)),true);
+  for(const patch of [{status:"DRAFT"},{status:"PRODUCTION"},{id:"foreign"}])assert.equal(matches({...row,...patch},productEditWhere(participant)),false);
   const read = JSON.stringify(productVisibilityWhere(participant));
   assert.match(read, /DESIGN/);
   assert.match(read, /engineerId/);
@@ -41,11 +43,12 @@ test("participant predicates remain DESIGN scoped; independent manager and field
   const execution = JSON.stringify(taskExecutionWhere(participant));
   assert.match(execution, /"task"/);
   assert.match(execution, /DESIGN/);
-  assert.deepEqual(productEditWhere({ id: "u", roles: ["MANAGER"] }), {AND:[liveProductWhere,{}]});
+  assert.equal(matches(row,productEditWhere({id:"u",roles:["MANAGER"]})),true);
+  assert.equal(matches({...row,status:"DRAFT"},productEditWhere({id:"u",roles:["MANAGER"]})),false);
   const field = JSON.stringify(productVisibilityWhere({ id: "u", roles: ["WORKER"] }));
   assert.match(field, /assigneeId/);
   assert.match(field, /"in":\["PRODUCTION","STORAGE","INSTALLATION","DONE","RECLAMATION"\]/);
-  assert.deepEqual(productVisibilityWhere({ id: "u", roles: [] }), {AND:[liveProductWhere,{ OR: [{AND:[liveProductWhere,{ id: { in: [] } }]}] }]});
+  for(const status of ["DRAFT","PREPARATION","DESIGN","PRODUCTION"])assert.equal(matches({...row,status},productVisibilityWhere({id:"u",roles:[]})),false,status);
 });
 
 test("legacy ENGINEERING recipient facts remain readable but no new split is offered", () => {

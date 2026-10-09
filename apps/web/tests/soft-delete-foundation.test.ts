@@ -9,7 +9,7 @@ test('manager never bypasses deleted product or parent in read/edit predicates',
  assert.equal(matches({...project,deletedAt:new Date()},projectVisibilityWhere(manager)),false);
 });
 test('work task execution and stored-file predicates reject deleted ancestors',()=>{
- for(const predicate of [taskVisibilityWhere(manager),taskExecutionWhere(manager),fileVisibilityWhere(manager),workVisibilityWhere(manager)]){const row={id:'child',productId:'p',project,product};assert.equal(matches(row,predicate),true);assert.equal(matches({...row,product:{...product,deletedAt:new Date()}},predicate),false);assert.equal(matches({...row,project:{...project,deletedAt:new Date()}},predicate),false);}
+ for(const [kind,predicate] of [['task',taskVisibilityWhere(manager)],['execution',taskExecutionWhere(manager)],['file',fileVisibilityWhere(manager)],['work',workVisibilityWhere(manager)]] as const){const row={id:'child',productId:'p',project,product,...(kind==='file'?{taskId:null,task:null}:{})};assert.equal(matches(row,predicate),true);assert.equal(matches({...row,product:{...product,deletedAt:new Date()}},predicate),false);assert.equal(matches({...row,project:{...project,deletedAt:new Date()}},predicate),false);}
 });
 import type {Prisma} from '@prisma/client';
 import {randomUUID} from 'node:crypto';

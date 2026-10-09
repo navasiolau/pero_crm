@@ -21,7 +21,7 @@ const bundlePromise = build({
       function Harness() {
         const [clients, setClients] = useState(Array.from({length: 12}, (_, i) => ({id: 'c'+(i+1), name: 'Клиент '+(i+1)})));
         window.__replaceClients = setClients;
-        if (window.__section === 'products') return <ProductsFilterBar
+        if (window.__section === 'products') return <ProductsFilterBar actorRoles={['MANAGER']}
           projectOptions={[{value:'p1',label:'Проект 1'},{value:'p2',label:'Проект 2'},{value:'p3',label:'Проект 3'}]}
           clientOptions={clients.map(item=>({value:item.id,label:item.name}))}
           engineerOptions={[{value:'e1',label:'Инженер 1'},{value:'e2',label:'Инженер 2'},{value:'e3',label:'Инженер 3'}]}/>;
@@ -243,14 +243,15 @@ test("products multi status/project/engineer and dimension reset preserve other 
     await page.keyboard.press("Escape");
     await page.getByRole("button", { name: "Статус", exact: true }).click();
     popup = page.locator('[data-slot="popover-content"]');
-    assert.equal(await popup.getByRole("checkbox").count(), 8);
+    assert.equal(await popup.getByRole("checkbox").count(), 7);
+    assert.equal(await popup.getByRole("checkbox", { name: "Черновик", exact: true }).count(), 0);
     assert.equal(await popup.getByRole("checkbox", { name: "Проектирование", exact: true }).getAttribute("aria-checked"), "true");
     const scroll = await page.evaluate(() => window.scrollY);
     await popup.getByRole("checkbox", { name: "В производстве", exact: true }).click();
     assert.deepEqual(JSON.parse(await queryValue(page, "status")), ["DESIGN", "PRODUCTION"]);
     assert.equal(await page.evaluate(() => window.scrollY), scroll);
     await popup.getByRole("button", { name: "Сброс", exact: true }).click();
-    for (const name of ["Черновик", "Подготовка", "Проектирование", "В производстве", "На складе ГП", "Установка", "Готово", "Рекламация"]) await popup.getByRole("checkbox", { name, exact: true }).click();
+    for (const name of ["Подготовка", "Проектирование", "В производстве", "На складе ГП", "Установка", "Готово", "Рекламация"]) await popup.getByRole("checkbox", { name, exact: true }).click();
     assert.equal(await queryValue(page, "status"), null);
     assert.equal(await popup.getByRole("checkbox", { checked: true }).count(), 0);
     await popup.getByRole("checkbox", { name: "Проектирование", exact: true }).click();

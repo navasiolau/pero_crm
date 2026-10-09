@@ -10,6 +10,10 @@ const db={task:{findMany:async()=>{order.push('resolve');return [];}},productPer
 inject('../src/auth',{auth:async()=>actor?{user:actor}:null});inject('../src/lib/prisma',{prisma:db});inject('next/cache',{revalidatePath:()=>{}});inject('../src/server/plugins/changelog',{writeChangeLog:async()=>{}});
 const {getActiveTimer}=require('../src/server/time/actions') as typeof import('../src/server/time/actions');
 const {taskExecutionWhere}=require('../src/server/access/visibility') as typeof import('../src/server/access/visibility');
+function containsImpossibleId(scope:FixtureRow):boolean {
+ const id=scope.id as {in?:unknown[]}|undefined;
+ return Array.isArray(id?.in)&&id.in.length===0 || Array.isArray(scope.AND)&&(scope.AND as FixtureRow[]).some(containsImpossibleId);
+}
 function fixture(roles:Role[],status='PRODUCTION'){
  actor={id:'actor',roles};written=0;updates.length=0;order.length=0;
  const task=(id:string,assigneeId='actor',deleted=false)=>({id,assigneeId,productId:'product',project:{id:'project',deletedAt:deleted?new Date():null},product:{id:'product',projectId:'project',engineerId:'actor',status,deletedAt:null,project:{deletedAt:null}}});
@@ -23,10 +27,11 @@ test('denied execution uses an explicit impossible ID predicate inside real time
  for(const role of ['ACCOUNTANT','PROCUREMENT'] as Role[]){
   fixture([role]);
   const scope=taskExecutionWhere({id:'actor',roles:[role]});
-  assert.deepEqual((scope.AND as FixtureRow[])[1],{id:{in:[]}},role);
+  assert.equal(containsImpossibleId(scope as FixtureRow),true,role);
+  for(const row of rows)assert.equal(matches(row.task as FixtureRow,scope as FixtureRow),false,role+' '+row.id);
   await getActiveTimer();
   assert.ok(updates.length>0);
-  for(const where of updates)assert.deepEqual(((where.task as FixtureRow).AND as FixtureRow[])[1],{id:{in:[]}},role);
+  for(const where of updates){assert.equal(containsImpossibleId(where.task as FixtureRow),true,role);for(const row of rows)assert.equal(matches(row.task as FixtureRow,where.task as FixtureRow),false,role+' '+row.id);}
   assert.equal(rows.find(row=>row.id==='fresh-own')?.stoppedAt,null);
  }
 });

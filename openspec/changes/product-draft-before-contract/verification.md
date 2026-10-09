@@ -14,6 +14,14 @@
 - Независимое read-only review review113_files: прежние P1 обходы norm/movement/retry закрыты, итог NONE. Проверка общего integration candidate и фактической staging-ревизии остаётся pending у оркестратора.
 - Создание изделия уже выполняет router.refresh в проекте без redirect на скрытую карточку; этот поток и core создания/договора не изменены. Финансовые факты, количества, free-text история и расчётные формулы не переписаны.
 
+## CI follow-up on 85647a91f095e38f0711faeeec71eff2ed60bcca
+
+Оркестратор передал сохранённый единственный полный TAP: 2134 проверки, 2128 PASS, 6 FAIL. Полный прогон повторно не запускался. Пять failures этой задачи относились к structural AND assertions, числу доступных менеджеру статусов и отсутствующему nullable File.taskId в synthetic fixture.
+
+ACCOUNTANT/PROCUREMENT сохраняют явный невозможный id-предикат как conjunct общей политики исполнения; добавленный DRAFT-filter его не заменяет. Новая проверка требует одновременно impossible-ID в AND и отсутствие совпадений всех реальных fixture задач таймера. Runtime ACL не изменён. File fixture теперь содержит настоящий taskId:null, а проверка удалённых предков сохранена. Manager filter явно проверяет семь статусов и отсутствие DRAFT; этапы проектов остаются восемью. Procurement/engineering проверяются по поведению доступа вместо позиции элементов AND.
+
+Independent ONLY-delta review review113_files: NONE. Единственный разрешённый focused запуск пяти файлов — 24/24 PASS, fail/skipped 0 (procurement-access, product-engineering-access, project-filter-component, soft-delete-foundation, time-autostop-role-boundary). Это не новый полный CI PASS. Оркестратор подтвердил общий integration typecheck/lint на 85647a9: exit 0; фактическая staging-приёмка 5.4 остаётся pending. Source-only stage helpers не вошли в CI correction commit.
+
 ## Feedback staging acceptance
 
 Старый product-draft-stage-browser.mjs проверяет видимость DRAFT менеджеру и сохраняется как исторический helper: для нового контракта не запускать его без уточнения. Использовать guarded root cookies/owned fixture и существующий preference journal с обычными browser/API наблюдениями после exclusive runtime lease.
