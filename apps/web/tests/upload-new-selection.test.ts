@@ -15,3 +15,19 @@ function findBy(node:unknown,predicate:(props:Record<string,unknown>)=>boolean):
 
 function visibleText(node:unknown):string{if(typeof node==='string'||typeof node==='number')return String(node);if(!React.isValidElement(node))return'';return React.Children.toArray((node as React.ReactElement<{children?:React.ReactNode}>).props.children).map(visibleText).join(' ');}
 test('all three actual upload controls remove previous-attempt buttons and expose truthful HTTP500 diagnostics without blocking chooser',async()=>{const posts:FormData[]=[],old=globalThis.fetch;globalThis.fetch=transport(posts);try{for(const[path,name,props]of [['../src/components/project-cover','ProjectCover',{projectId:'j',cover:null,canManage:true}],['../src/components/photo-upload-button','PhotoUploadButton',{projectId:'j',productId:'p',assignCover:true,coverSurface:true,filesCount:0}],['../src/app/(app)/projects/[id]/files-tab','Uploader',{projectId:'j',productId:'p',canEdit:true,section:'MEASUREMENT'}]] as const){const c=mounted(path,name);await choose(c.render(props),'failed.png');const tree=c.render(props);assert.doesNotMatch(visibleText(tree),/\u041f\u043e\u0432\u0442\u043e\u0440\u0438\u0442\u044c.*\u0437\u0430\u0433\u0440\u0443\u0437|\u041f\u0440\u043e\u0432\u0435\u0440\u0438\u0442\u044c.*\u0437\u0430\u0433\u0440\u0443\u0437/);const details=findBy(tree,p=>Boolean(p.failure));assert.ok(details);const failure=details.props.failure as {commitState:string;httpStatus:number;error:string};assert.equal(failure.commitState,'unknown');assert.equal(failure.httpStatus,500);assert.match(failure.error,/500/);assert.notEqual(find(tree)!.props.disabled,true);}}finally{globalThis.fetch=old;}});
+
+test('committed503 sketch cleanup keeps one intent; explicit completion replays it and acknowledges only the winner',async()=>{
+ const posts:FormData[]=[],old=globalThis.fetch;const confirmed:string[]=[],uncertainties:boolean[]=[];
+ globalThis.fetch=(async(_url:unknown,init?:RequestInit)=>{
+  const form=init!.body as FormData;posts.push(form);const nonce=String(form.get('clientMutationId'));
+  if(posts.length===1)return new Response(JSON.stringify({ok:false,kind:'failure',error:'Новый эскиз сохранён; завершите очистку',code:'SKETCH_CLEANUP_PENDING',commitState:'committed',details:{phase:'confirmation',message:'pending'}}),{status:503});
+  return new Response(JSON.stringify({ok:true,id:'winner',sketchFileId:'winner',clientMutationId:nonce,repeated:true,sketch:{id:'winner',fileName:'new.png',mimeType:'image/png',hasThumb:true}}),{status:200});
+ }) as typeof fetch;
+ try{
+  const c=mounted('../src/components/photo-upload-button','PhotoUploadButton'),props={projectId:'j',productId:'p',assignCover:true,coverSurface:true,filesCount:0,onUploaded:(id:string)=>confirmed.push(id),onUncertainChange:(value:boolean)=>uncertainties.push(value)};
+  await choose(c.render(props),'new.png');assert.deepEqual(confirmed,[]);assert.equal(uncertainties.at(-1),true);
+  const retry=findBy(c.render(props),p=>p.children==='Завершить замену');assert.ok(retry);(retry.props.onClick as ()=>void)();await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(posts.length,2);assert.equal(posts[1],posts[0]);assert.equal(posts[1].get('clientMutationId'),posts[0].get('clientMutationId'));
+  assert.deepEqual(confirmed,['winner']);assert.equal(uncertainties.at(-1),false);assert.equal(findBy(c.render(props),p=>p.children==='Завершить замену'),undefined);
+ }finally{globalThis.fetch=old;}
+});

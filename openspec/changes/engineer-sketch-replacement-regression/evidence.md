@@ -1,5 +1,25 @@
 # Evidence
 
+## Feedback09.10.2026 — новая политика удаления
+
+Владелец отменил сохранение вытесненных эскизов при будущей замене: old File + physical original/thumbnail, включая versions/markers, должны исчезать после успешной операции. Proposal/design/tasks и delta в том же change112 обновлены. Local RED→GREEN, independent review и новая actual staging-приёмка будут зафиксированы здесь; сейчас новая staging-приёмка PENDING.
+
+Все следующие receipts и заявления о сохранности прежних own originals относятся к датированной прежней политике. Они сохраняются как исторические факты и не подтверждают новое удаление; raw pins, старые QA файлы и receipts не переписываются.
+
+## Local feedback verification — 09.10.2026
+
+Уточнение удаления реализовано в прежней ветке112 от `3f4c0d9ccd4c90c6002e8168c50d5bff01d648a8`. Один focused RED показал retained old File (`true !== false`); GREEN подтвердил атомарное удаление ровно baseline File, audit и один DomainEvent.
+
+Итоговая focused проверка:52/52 PASS — domain CAS/ACL/shared cover/alias/историческое стороннее вложение14, exact cleanup/recovery/live refs4, physical S3 versions/markers/pagination/postcheck5, actual POST route19, mounted upload/client recovery7, sketch interaction3. Route tests реально вызывают POST/core с контролируемыми storage/transaction границами: rollback сохраняет old bytes, unknown COMMIT не удаляет до подтверждения, committed503 и same-nonce replay завершают старую очистку, superseded replay и concurrent winner сохраняют текущий файл. Существующий test adapter thumbnail key исправлен на настоящий суффикс `.jpg`; это не изменение storage-схемы.
+
+Команды: `pnpm --filter @pero/web exec tsx --test --test-reporter=spec tests/product-sketch-cas.test.ts tests/product-sketch-cleanup.test.ts tests/s3-delete-exact.test.ts tests/upload-route-reliability.test.ts tests/upload-new-selection.test.ts tests/sketch-upload-interaction.test.ts`; `pnpm --filter @pero/web db:generate` (только Client); `pnpm --filter @pero/web exec tsc --noEmit --incremental false` — PASS; scoped ESLint —0 errors/0 warnings после одной правки unused local; `git diff --check` и OpenSpec strict — PASS.
+
+Физический S3 helper никогда не использует marker-only DELETE для cleanup. Его contract сверён с [AWS DeleteObject](https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteObject.html) и [ListObjectVersions](https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectVersions.html): только exact Key + VersionId, отдельный postcheck versions/markers и HEAD. Проверка версии с ID `null` включает unversioned bucket; matching-prefix соседний ключ остаётся нетронутым.
+
+Independent review actual diff перед коммитом — NONE: проверены atomic oldFile/outbox, postcommit exact versions/markers, replay/current-pointer, committed503/dispatcher/UI retry и неизменная ordinary file-delete ACL. Reviewer не запускал runtime и не заявлял actual staging/S3 PASS. Новая actual staging DB/S3/browser acceptance — PENDING; local DI не подтверждает deployed image или physical staging bytes. Historical backend3 harness/raw pins/receipts сохранены. Subagent не выполнял staging/production/infra DB/S3 мутации, дампы или restic.
+
+## Historical evidence — 08–09.10.2026, прежнее retention-поведение superseded
+
 08.10.2026, задача112, ветка `bugfix/112`, базовый staging `20a049b2`.
 
 - Прослежен полный путь `ProductCoverLayout → PhotoUploadButton → sketchUploadForm → POST /api/files/upload → authorizeProductCoverUpload → resolveUploadContext → persistUploadedProductCover`.

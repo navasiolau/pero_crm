@@ -4,6 +4,7 @@ import {canSetProductCover,isCoverImageMime,validateProductCoverFile,type CoverP
 import {MANAGER_ROLES,hasAnyRole,hasRole} from '@/lib/roles';
 import {fileVisibilityWhere,productEditWhere,resolveVisibilityActor,type VisibilityActor} from '@/server/access/visibility';
 import {mayDeleteStoredFile} from '@/server/files/delete-permission';
+import {OBSOLETE_SKETCH_EVENT,obsoleteSketchEventId,obsoleteSketchIntentSchema} from './sketch-cleanup-contract';
 import {sketchUploadTargetSchema,sketchBindSchema,sketchDeleteSchema,type SketchUploadTarget,type SketchBindInput,type SketchDeleteInput,type SketchResult} from './sketch-contract';
 type Tx=Prisma.TransactionClient;
 export type CoverMutationActor=VisibilityActor&{name?:string|null};
@@ -19,12 +20,23 @@ async function permission(tx:Tx,actor:CoverMutationActor,productId:string,projec
 }
 async function replay(tx:Tx,actor:CoverMutationActor,productId:string,mutationId:string,fingerprint:string,currentSketchFileId:string|null):Promise<SketchResult|null>{const row=await tx.changeLog.findUnique({where:{id:`product-sketch:${mutationId}`}});if(!row)return null;const saved=row.newValue;if(row.actorId!==actor.id||row.entity!=='product'||row.entityId!==productId||!saved||typeof saved!=='object'||Array.isArray(saved)||saved.fingerprint!==fingerprint||!saved.result||typeof saved.result!=='object')return fail('validation','Идентификатор операции уже использован');const result=saved.result as unknown as Extract<SketchResult,{ok:true}>;if(result.sketchFileId!==currentSketchFileId)return fail('conflict','Эскиз уже изменён другим пользователем',currentSketchFileId);return{...result,repeated:true};}
 async function receipt(tx:Tx,actor:CoverMutationActor,productId:string,mutationId:string,action:string,fingerprint:string,result:SketchResult){await tx.changeLog.create({data:{id:`product-sketch:${mutationId}`,actorType:'user',actorId:actor.id,actorName:actor.name??undefined,entity:'product',entityId:productId,action,field:'sketchFileId',newValue:json({fingerprint,result})}})}
-async function validateReplacementFile(tx:Tx,actor:VisibilityActor,product:CoverProduct,baseline:string|null):Promise<Extract<SketchResult,{ok:false}>|null>{
- if(baseline===null)return null;
- const file=await tx.file.findFirst({where:{AND:[{id:baseline},fileVisibilityWhere(actor)]},select:{id:true,projectId:true,productId:true,mimeType:true}});
- if(!file)return {ok:false,kind:'not-found',error:'Исходный эскиз не найден'};
+async function replacementFile(tx:Tx,actor:VisibilityActor,product:CoverProduct,baseline:string|null,lock=false){
+ if(baseline===null)return {ok:true as const,file:null};
+ if(lock)await tx.$queryRaw`SELECT id FROM "File" WHERE id=${baseline} FOR UPDATE`;
+ const file=await tx.file.findFirst({where:{AND:[{id:baseline},fileVisibilityWhere(actor)]},select:{
+  id:true,projectId:true,productId:true,mimeType:true,fileName:true,storedName:true,
+  sketchForProduct:{select:{id:true}},coverForProject:{select:{id:true}}
+ }});
+ if(!file)return {ok:false as const,kind:'not-found' as const,error:'Исходный эскиз не найден'};
  const invalid=validateProductCoverFile(product,file);
- return invalid?{ok:false,kind:'validation',error:invalid}:null;
+ if(invalid)return {ok:false as const,kind:'validation' as const,error:invalid};
+ if(file.coverForProject||(file.sketchForProduct&&file.sketchForProduct.id!==product.id)||
+   await tx.file.count({where:{projectId:file.projectId,storedName:file.storedName,id:{not:file.id}}})!==0)
+  return {ok:false as const,kind:'validation' as const,error:'Исходный эскиз используется другой обложкой или вложением'};
+ if(!obsoleteSketchIntentSchema.shape.projectId.safeParse(file.projectId).success||
+   !obsoleteSketchIntentSchema.shape.storedName.safeParse(file.storedName).success)
+  return {ok:false as const,kind:'validation' as const,error:'Нельзя безопасно удалить исходный эскиз'};
+ return {ok:true as const,file};
 }
 export async function authorizeProductCoverUpload(tx:Tx,actor:CoverMutationActor,input:CoverUploadTarget){
  const parsed=sketchUploadTargetSchema.safeParse(input);
@@ -39,8 +51,8 @@ export async function authorizeProductCoverUpload(tx:Tx,actor:CoverMutationActor
   return{ok:true as const,product:allowed.product,replayHint:true};
  }
  if(allowed.product.sketchFileId!==input.expectedSketchFileId)return{ok:false as const,kind:'conflict' as const,error:'Эскиз уже изменён другим пользователем',currentSketchFileId:allowed.product.sketchFileId};
- const invalid=await validateReplacementFile(tx,allowed.visibility,allowed.product,input.expectedSketchFileId);
- if(invalid)return invalid;
+ const baseline=await replacementFile(tx,allowed.visibility,allowed.product,input.expectedSketchFileId);
+ if(!baseline.ok)return baseline;
  return{ok:true as const,product:allowed.product,replayHint:false};
 }
 export async function persistUploadedProductCover(tx:Tx,actor:CoverMutationActor,input:CoverUploadTarget,file:CoverUploadFileInput):Promise<SketchResult>{
@@ -55,14 +67,24 @@ export async function persistUploadedProductCover(tx:Tx,actor:CoverMutationActor
  const previous=await replay(tx,actor,input.productId,input.clientMutationId,fingerprint,allowed.product.sketchFileId);
  if(previous)return previous;
  if(allowed.product.sketchFileId!==input.expectedSketchFileId)return fail('conflict','Эскиз уже изменён другим пользователем',allowed.product.sketchFileId);
- const invalid=await validateReplacementFile(tx,allowed.visibility,allowed.product,input.expectedSketchFileId);
- if(invalid)return invalid;
+ const baseline=await replacementFile(tx,allowed.visibility,allowed.product,input.expectedSketchFileId,true);
+ if(!baseline.ok)return baseline;
+ if(baseline.file?.storedName===file.storedName)return fail('validation','Новый эскиз должен иметь отдельный ключ хранения');
  const created=await tx.file.create({data:{projectId:input.projectId,productId:input.productId,taskId:null,section:'PRODUCTION',fileName:file.fileName,storedName:file.storedName,mimeType:file.mimeType,size:file.size,hasThumb:file.hasThumb,uploadedById:actor.id},select:{id:true}});
  const changed=await tx.product.updateMany({where:{id:input.productId,sketchFileId:input.expectedSketchFileId},data:{sketchFileId:created.id}});
  if(changed.count!==1)throw Error('SKETCH_CAS_RACE');
  await tx.changeLog.create({data:{actorType:'user',actorId:actor.id,actorName:actor.name??undefined,entity:'file',entityId:created.id,action:'create',newValue:{projectId:input.projectId,productId:input.productId,fileName:file.fileName,section:'PRODUCTION'}}});
  await tx.changeLog.create({data:{actorType:'user',actorId:actor.id,actorName:actor.name??undefined,entity:'product',entityId:input.productId,action:'cover.change',field:'sketchFileId',oldValue:{sketchFileId:input.expectedSketchFileId},newValue:{sketchFileId:created.id,uploaded:true}}});
- const result:SketchResult={ok:true,id:created.id,sketchFileId:created.id,clientMutationId:input.clientMutationId};
+ let cleanupEventId:string|undefined;
+ if(baseline.file){
+  const old=baseline.file;
+  cleanupEventId=obsoleteSketchEventId(input.clientMutationId);
+  const intent=obsoleteSketchIntentSchema.parse({projectId:old.projectId,productId:input.productId,fileId:old.id,storedName:old.storedName,newFileId:created.id,clientMutationId:input.clientMutationId});
+  await tx.file.delete({where:{id:old.id}});
+  await tx.changeLog.create({data:{actorType:'user',actorId:actor.id,actorName:actor.name??undefined,entity:'file',entityId:old.id,action:'delete',oldValue:{fileName:old.fileName,replacedById:created.id}}});
+  await tx.domainEvent.create({data:{id:cleanupEventId,type:OBSOLETE_SKETCH_EVENT,actor:actor.id,payload:json(intent)}});
+ }
+ const result:SketchResult={ok:true,id:created.id,sketchFileId:created.id,clientMutationId:input.clientMutationId,...(cleanupEventId?{cleanupEventId}:{})};
  await receipt(tx,actor,input.productId,input.clientMutationId,'cover.upload',fingerprint,result);
  return result;
 }

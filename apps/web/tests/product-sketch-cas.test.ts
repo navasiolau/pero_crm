@@ -6,7 +6,7 @@ import type {Prisma} from '@prisma/client';
 const require=createRequire(import.meta.url);
 const core=(process.env.SKETCH_BASELINE==='1'?require('../../../.playwright-mcp/modernization/cover-core-baseline.ts'):require('../src/server/products/cover-core')) as typeof import('../src/server/products/cover-core');
 const actor={id:'m',name:'Manager',roles:['MANAGER' as const]};
-function fixture(pointer:string|null=null){const product={id:'p',projectId:'j',engineerId:'e',status:'DESIGN',sketchFileId:pointer};const files=new Map<string,Record<string,unknown>>();files.set('old',{id:'old',projectId:'j',productId:'p',taskId:null,mimeType:'image/png',fileName:'old.png',storedName:'old.png',hasThumb:true,uploadedById:'m'});const logs:Record<string,unknown>[]=[];const tx={$queryRaw:async()=>[],task:{findMany:async()=>[]},productPercentageParticipant:{findMany:async()=>[]},product:{findFirst:async()=>product,findUnique:async()=>product,update:async({data}:{data:Record<string,unknown>})=>Object.assign(product,data),updateMany:async({where,data}:{where:Record<string,unknown>;data:Record<string,unknown>})=>{if(where.sketchFileId!==product.sketchFileId)return{count:0};Object.assign(product,data);return{count:1}}},file:{findFirst:async({where}:{where:{AND:{id?:string}[]}})=>files.get(where.AND[0].id!)??null,create:async({data}:{data:Record<string,unknown>})=>{const row={id:files.has('new')?'new-'+files.size:'new',...data};files.set(row.id,row);return row},delete:async({where}:{where:{id:string}})=>{const row=files.get(where.id);files.delete(where.id);return row}},changeLog:{findUnique:async({where}:{where:{id:string}})=>logs.find(row=>row.id===where.id)??null,create:async({data}:{data:Record<string,unknown>})=>{logs.push(data);return data}}} as unknown as Prisma.TransactionClient;return{tx,product,files,logs};}
+function fixture(pointer:string|null=null){const product={id:'p',projectId:'j',engineerId:'e',status:'DESIGN',sketchFileId:pointer};const files=new Map<string,Record<string,unknown>>();files.set('old',{id:'old',projectId:'j',productId:'p',taskId:null,mimeType:'image/png',fileName:'old.png',storedName:'old.png',hasThumb:true,uploadedById:'m'});const logs:Record<string,unknown>[]=[];const events:Record<string,unknown>[]=[];let nextFile=0;const tx={$queryRaw:async()=>[],task:{findMany:async()=>[]},productPercentageParticipant:{findMany:async()=>[]},product:{findFirst:async()=>product,findUnique:async()=>product,update:async({data}:{data:Record<string,unknown>})=>Object.assign(product,data),updateMany:async({where,data}:{where:Record<string,unknown>;data:Record<string,unknown>})=>{if(where.sketchFileId!==product.sketchFileId)return{count:0};Object.assign(product,data);return{count:1}}},file:{count:async({where}:{where:{projectId:string;storedName:string;id:{not:string}}})=>[...files.values()].filter(row=>row.id!==where.id.not&&row.projectId===where.projectId&&row.storedName===where.storedName).length,findFirst:async({where}:{where:{AND:{id?:string}[]}})=>files.get(where.AND[0].id!)??null,create:async({data}:{data:Record<string,unknown>})=>{const row={id:nextFile++===0?'new':'new-'+nextFile,...data};files.set(row.id,row);return row},delete:async({where}:{where:{id:string}})=>{const row=files.get(where.id);files.delete(where.id);return row}},changeLog:{findUnique:async({where}:{where:{id:string}})=>logs.find(row=>row.id===where.id)??null,create:async({data}:{data:Record<string,unknown>})=>{logs.push(data);return data}},domainEvent:{create:async({data}:{data:Record<string,unknown>})=>{events.push(data);return data}}} as unknown as Prisma.TransactionClient;return{tx,product,files,logs,events};}
 const target=()=>({projectId:'j',productId:'p',expectedSketchFileId:null,clientMutationId:randomUUID()});
 const image={fileName:'qa.png',storedName:'new.png',mimeType:'image/png',size:42,hasThumb:true,uploadedById:'m',contentHash:'a'.repeat(64)};
 test('nonempty upload CAS refuses without replacing old pointer or creating file/audit',async()=>{const f=fixture('old');const result=await core.persistUploadedProductCover(f.tx,actor,target(),image);assert.equal(result.ok,false);assert.equal(f.product.sketchFileId,'old');assert.equal(f.files.size,1);assert.equal(f.logs.length,0)});
@@ -23,23 +23,24 @@ test('empty bind rejects foreign/nonimage files and audit failure propagates for
  const f=fixture();const failing=new Proxy(f.tx,{get(target,key){if(key==='changeLog')return{findUnique:target.changeLog.findUnique,create:async()=>{throw new Error('AUDIT_FAILURE')}};return Reflect.get(target,key)}});await assert.rejects(core.persistUploadedProductCover(failing,actor,target(),image),/AUDIT_FAILURE/);
 });
 
-test('assigned DESIGN engineer atomically replaces manager sketch and preserves old attachment',async()=>{
+test('assigned DESIGN engineer atomically replaces manager sketch and removes exact old attachment',async()=>{
  const f=fixture('old'),engineer={id:'e',roles:['ENGINEER' as const]};
- const input={...target(),expectedSketchFileId:'old'},old=f.files.get('old');
+ const input={...target(),expectedSketchFileId:'old'};
  assert.equal((await core.authorizeProductCoverUpload(f.tx,engineer,input)).ok,true);
  const result=await core.persistUploadedProductCover(f.tx,engineer,input,{...image,uploadedById:'e'});
- assert.equal(result.ok,true);assert.equal(f.product.sketchFileId,'new');assert.equal(f.files.get('old'),old);
- assert.equal(f.files.size,2);assert.ok(!f.logs.some(row=>row.entity==='file'&&row.action==='delete'));
+ assert.equal(result.ok,true);assert.equal(f.product.sketchFileId,'new');assert.equal(f.files.has('old'),false);
+ assert.equal(f.files.size,1);assert.ok(f.logs.some(row=>row.entity==='file'&&row.action==='delete'));
+ assert.equal(f.events.length,1);assert.equal(f.events[0].type,'file.sketch-obsolete');
  const audit=f.logs.find(row=>row.entity==='product'&&row.action==='cover.change');
  assert.deepEqual(audit?.oldValue,{sketchFileId:'old'});
  const count=f.logs.length;
  assert.equal((await core.authorizeProductCoverUpload(f.tx,engineer,input)).ok,true);
  const replay=await core.persistUploadedProductCover(f.tx,engineer,input,{...image,uploadedById:'e'});
  assert.equal(replay.ok,true);if(replay.ok)assert.equal(replay.repeated,true);
- assert.equal(f.files.size,2);assert.equal(f.logs.length,count);
+ assert.equal(f.files.size,1);assert.equal(f.logs.length,count);
  assert.equal((await core.persistUploadedProductCover(f.tx,engineer,input,{...image,uploadedById:'e',contentHash:'b'.repeat(64)})).ok,false);
  assert.equal((await core.persistUploadedProductCover(f.tx,engineer,{...input,expectedSketchFileId:null},{...image,uploadedById:'e'})).ok,false);
- assert.equal(f.product.sketchFileId,'new');assert.equal(f.files.size,2);
+ assert.equal(f.product.sketchFileId,'new');assert.equal(f.files.size,1);
 });
 
 test('replacement checks current baseline and exact old-file context before writing',async()=>{
@@ -67,7 +68,7 @@ test('replacement never grants unassigned or stale engineer a technical edit',as
  }
  const f=fixture('old');f.product.status='DONE';
  assert.equal((await core.persistUploadedProductCover(f.tx,{id:'m',roles:['MANAGER','ENGINEER']},{...target(),expectedSketchFileId:'old'},image)).ok,true);
- assert.ok(f.files.has('old'));
+ assert.equal(f.files.has('old'),false);
 });
 
 test('old upload receipt cannot acknowledge its archived file after a later replacement',async()=>{
@@ -79,7 +80,7 @@ test('old upload receipt cannot acknowledge its archived file after a later repl
  const preflight=await core.authorizeProductCoverUpload(f.tx,actor,firstInput);assert.equal(preflight.ok,false);if(!preflight.ok)assert.equal(preflight.kind,'conflict');
  const oldReplay=await core.persistUploadedProductCover(f.tx,actor,firstInput,image);assert.equal(oldReplay.ok,false);if(!oldReplay.ok){assert.equal(oldReplay.kind,'conflict');assert.equal(oldReplay.currentSketchFileId,second.id);}
  assert.equal(f.product.sketchFileId,second.id);assert.deepEqual([...f.files.entries()],filesBefore);assert.equal(f.logs.length,count);
- assert.ok(f.files.has('old'));assert.ok(f.files.has(first.id!));
+ assert.equal(f.files.has('old'),false);assert.equal(f.files.has(first.id!),false);assert.ok(f.files.has(second.id!));
 });
 
 test('old bind or delete receipt cannot acknowledge an outdated pointer after replacement',async()=>{
@@ -95,4 +96,24 @@ test('old bind or delete receipt cannot acknowledge an outdated pointer after re
   assert.equal(replay.ok,false);if(!replay.ok){assert.equal(replay.kind,'conflict');assert.equal(replay.currentSketchFileId,uploaded.id);}
   assert.equal(f.product.sketchFileId,uploaded.id);assert.deepEqual([...f.files.entries()],files);assert.equal(f.logs.length,count);
  }
+});
+
+test('shared active project cover or storage alias prevents replacement before new File/event/audit',async()=>{
+ for(const patch of [{coverForProject:{id:'j'}},{sketchForProduct:{id:'foreign'}}]){
+  const f=fixture('old');Object.assign(f.files.get('old')!,patch);const input={...target(),expectedSketchFileId:'old'};
+  assert.equal((await core.authorizeProductCoverUpload(f.tx,actor,input)).ok,false);
+  assert.equal((await core.persistUploadedProductCover(f.tx,actor,input,image)).ok,false);
+  assert.equal(f.product.sketchFileId,'old');assert.equal(f.files.size,1);assert.equal(f.events.length,0);assert.equal(f.logs.length,0);
+ }
+ const f=fixture('old');f.files.set('alias',{...f.files.get('old')!,id:'alias'});
+ assert.equal((await core.persistUploadedProductCover(f.tx,actor,{...target(),expectedSketchFileId:'old'},image)).ok,false);
+ assert.equal(f.product.sketchFileId,'old');assert.equal(f.files.size,2);assert.equal(f.events.length,0);
+});
+test('new storage key cannot reuse the baseline key; historical unrelated attachment is preserved',async()=>{
+ const f=fixture('old'),input={...target(),expectedSketchFileId:'old'};
+ assert.equal((await core.persistUploadedProductCover(f.tx,actor,input,{...image,storedName:'old.png'})).ok,false);
+ assert.equal(f.product.sketchFileId,'old');assert.equal(f.events.length,0);
+ f.files.set('history',{...f.files.get('old')!,id:'history',storedName:'history.png'});
+ const result=await core.persistUploadedProductCover(f.tx,actor,input,image);assert.equal(result.ok,true);
+ assert.equal(f.files.has('old'),false);assert.equal(f.files.has('history'),true);assert.equal(f.events.length,1);
 });

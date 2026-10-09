@@ -1,4 +1,6 @@
 import { prisma } from "@/lib/prisma";
+import { cleanupObsoleteSketch } from "@/server/products/sketch-cleanup";
+import { OBSOLETE_SKETCH_EVENT } from "@/server/products/sketch-cleanup-contract";
 
 import { buildPluginContext } from "./context";
 import { getManifest } from "./registry";
@@ -26,6 +28,11 @@ export async function emitDomainEvent(
 export async function dispatchEvent(eventId: string): Promise<void> {
   const event = await prisma.domainEvent.findUnique({ where: { id: eventId } });
   if (!event || event.processedAt) return;
+  // Внутренняя storage-задача не доставляется пользовательским плагинам.
+  if (event.type === OBSOLETE_SKETCH_EVENT) {
+    await cleanupObsoleteSketch(event.id);
+    return;
+  }
 
   const enabledPlugins = await prisma.plugin.findMany({
     where: { enabled: true },
