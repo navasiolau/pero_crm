@@ -1,6 +1,6 @@
 # Staging acceptance112
 
-## Feedback09.10.2026 — текущая приёмка удаления эскиза: PENDING
+## Feedback09.10.2026 — текущая приёмка удаления эскиза: PASS / OWN_CLOSED
 
 Новая политика владельца: после успешного upload новый эскиз — единственный текущий; ровно вытесненный File исчезает из вложений, original и thumbnail физически удалены, включая все их versions/delete markers. Ни один результат ниже, проверявший сохранение прежних own originals, не является приёмкой новой политики.
 
@@ -8,13 +8,25 @@
 
 Минимальный новый сценарий — только собственные помеченные QA-изделие и акторы:
 
-1. Назначенный ENGINEER DESIGN заменяет current manager sketch с точным baseline. BEFORE записываются old File ID/context и версии ровно original+thumbnail keys; соседний own attachment и его версии служат контрольными.
+1. Назначенный ENGINEER DESIGN заменяет current ADMIN sketch с точным baseline. BEFORE записываются old File ID/context и версии ровно original+thumbnail keys; соседний own attachment и его версии служат контрольными.
 2. AFTER успешного200 проверяются new pointer/new File, отсутствие old File в SQL/серверном списке вложений, отсутствие любых exact old original/thumb versions/delete markers и доступность новых bytes. Event обработан; соседние own и все чужие записи/ключи сохранены.
-3. Same-mutation replay не пишет новое изображение и не меняет winner. Stale и superseded replay дают409/current pointer без удаления current File; один targeted concurrent сценарий не оставляет второй old/current файл.
+3. Фактический same-mutation replay не пишет новое изображение и не меняет winner. Stale, superseded и concurrent guards подтверждены локальными focused тестами; на staging эти сценарии повторно не разыгрывались.
 4. Domain/runtime failure evidence подтверждает committed503 и recovery; actual storage failure не провоцируется сменой инфраструктуры или broad bucket policy.
-5. Root очищает только собственные точно зафиксированные QA IDs/keys/versions/events после recognised ACK/strict ownership checks; закрывает lifecycle и сохраняет BEFORE/AFTER evidence. До этого задача3.5 остаётся незакрытой.
+5. Root очищает только собственные точно зафиксированные QA IDs/keys/versions/events после recognised ACK/strict ownership checks; lifecycle закрыт actual OWN_CLOSED, BEFORE/AFTER evidence сохранён.
 
 Старый engineer-sketch-stage-runner/backend3 проверял retained sketches и потому не запускается как доказательство этой политики. Его файлы, raw pins, receipts и предыдущие output directories сохраняются без изменений.
+
+## Actual feedback acceptance — PASS / OWN_CLOSED
+
+Принята новая политика удаления на фактически развёрнутой ревизии `d467d697280eecdfbf57760b530b3ea4ade9cdb7`, healthy image `sha256:d8a4b49b78f574e9be73bab53bab40c32f6642507173987ace717ea812705ca7`. Root проверил hostname/web, прежние DB identity/StartedAt/volume/network, staging bucket и W07; CI37973247931 завершён SUCCESS. Root и делегированный координатор выдавали отдельные controlled leases.
+
+Единственный новый scope `d192f2a7-9c31-4bf8-8458-6043ba0d71ec`: назначенный ENGINEER на DESIGN/CONTRACT через реальный authenticated POST заменил текущий ADMIN-эскиз. BEFORE фиксировал old File и две версии original/thumbnail; AFTER подтвердил отсутствие old File и всех exact versions/delete markers обоих ключей, доступность нового original/thumbnail и сохранность соседних own файлов. Выполнен один известный nonce replay: тот же ID, без дополнительных rows, versions или deletes. Конкурентные/ошибочные/stale/superseded пути проверены локально; новых outage/native матриц на staging не выполняли.
+
+Первый совместный readonly browser run остановился на №115 `FILE_GROUP_GEOMETRY_TITLE_COUNT_SAME_LINE` при360 px. STOP сохранён, upload/replace/replay не повторялись. По отдельному решению Root выполнена точная очистка того же scope: `OWN_CLOSED`, commitAck/allOwnRowsGone/originalStorageMatch=true. Исходные54 таблицы, схема, ссылки, финансовые факты и preferences сохранены; единственный допущенный drift — подтверждённый `ApiToken.lastUsedAt` (tokenClockValid=true), botClockChanged=false. Удалены только own Notification32, DomainEvent1, ChangeLog11, Task1, File5, Payment2, Product1, Project1, CashAccount1, ExpenseArticle1, Client1, User3; UserPreference0 и FinanceDocument0.
+
+Затем №115 отдельно принят и закрыт на `ed261a3b9d4732d7cd595121f874ea9c9a104847`; geometry proof `d91afc2353448db856ced5d8338fe375c9574c7933fb651600be73d8228456ec`, CLOSED `03c0294936267de743d369e2cc1d720a053b87261a7bc16097477e38a2e83db3`. Эта отдельная приёмка задокументирована в [plain-file-lists](../plain-file-lists/verification.md); она не является повтором112 storage-сценария.
+
+Приватные неизменяемые receipts остаются ignored вне Git; профили/cookies/JWT существовали только в памяти, не публиковались и не записывались. Старый backend3/raw pins/receipts не переписаны. Main/production, инфраструктура, dumps и restic не затрагивались.
 
 ## Historical acceptance — 08–09.10.2026, прежнее retention-поведение superseded
 

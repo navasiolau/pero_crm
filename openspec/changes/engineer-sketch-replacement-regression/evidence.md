@@ -2,9 +2,9 @@
 
 ## Feedback09.10.2026 — новая политика удаления
 
-Владелец отменил сохранение вытесненных эскизов при будущей замене: old File + physical original/thumbnail, включая versions/markers, должны исчезать после успешной операции. Proposal/design/tasks и delta в том же change112 обновлены. Local RED→GREEN, independent review и новая actual staging-приёмка будут зафиксированы здесь; сейчас новая staging-приёмка PENDING.
+Владелец отменил сохранение вытесненных эскизов при будущей замене: old File + physical original/thumbnail, включая versions/markers, должны исчезать после успешной операции. Proposal/design/tasks и delta в том же change112 обновлены. Local RED→GREEN, independent review и actual staging-приёмка новой политики завершены;112 functional PASS и OWN_CLOSED зафиксированы ниже.
 
-Все следующие receipts и заявления о сохранности прежних own originals относятся к датированной прежней политике. Они сохраняются как исторические факты и не подтверждают новое удаление; raw pins, старые QA файлы и receipts не переписываются.
+Receipts из раздела Historical evidence и заявления о сохранности прежних own originals относятся к датированной прежней политике. Они сохраняются как исторические факты и не подтверждают новое удаление; raw pins, старые QA файлы и receipts не переписываются.
 
 ## Local feedback verification — 09.10.2026
 
@@ -16,13 +16,33 @@
 
 Физический S3 helper никогда не использует marker-only DELETE для cleanup. Его contract сверён с [AWS DeleteObject](https://docs.aws.amazon.com/AmazonS3/latest/API/API_DeleteObject.html) и [ListObjectVersions](https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectVersions.html): только exact Key + VersionId, отдельный postcheck versions/markers и HEAD. Проверка версии с ID `null` включает unversioned bucket; matching-prefix соседний ключ остаётся нетронутым.
 
-Independent review actual diff перед коммитом — NONE: проверены atomic oldFile/outbox, postcommit exact versions/markers, replay/current-pointer, committed503/dispatcher/UI retry и неизменная ordinary file-delete ACL. Reviewer не запускал runtime и не заявлял actual staging/S3 PASS. Новая actual staging DB/S3/browser acceptance — PENDING; local DI не подтверждает deployed image или physical staging bytes. Historical backend3 harness/raw pins/receipts сохранены. Subagent не выполнял staging/production/infra DB/S3 мутации, дампы или restic.
+Independent review actual diff перед коммитом — NONE: проверены atomic oldFile/outbox, postcommit exact versions/markers, replay/current-pointer, committed503/dispatcher/UI retry и неизменная ordinary file-delete ACL. Reviewer не запускал runtime и не заявлял actual staging/S3 PASS. На этом локальном чекпоинте actual staging DB/S3/browser acceptance оставалась PENDING; local DI не подтверждал deployed image или physical staging bytes. Historical backend3 harness/raw pins/receipts сохранены. На локальном чекпоинте subagent ещё не выполнял staging DB/S3 мутации. Последующая authorised112 acceptance приведена отдельно; production/infra, дампы и restic не затрагивались.
 
 ## CI fixture correction — 09.10.2026
 
 Full diagnostic candidate856 завершился2134 tests/2128 PASS/6 FAIL. Собственный112 failure `product-cover-backend.test.ts:61` был вызван неполной relational fixture: два File без обязательного `storedName` проецировались как один ключ `(projectId, undefined)`, и actual key-alias guard корректно отклонял preflight.
 
 Исправлена только fixture: distinct storedName/fileName, реальные reverse sketch refs, nullable project cover и CONTRACT родителя. Дополнительный negative case в том же файле подтверждает отказ при настоящей общей обложке или alias. Application/shared-key guards, ACL и реальная storage cleanup не менялись. Один разрешённый focused прогон `pnpm --filter @pero/web exec tsx --test --test-reporter=spec tests/product-cover-backend.test.ts` —6/6 PASS. Независимый single-file review — NONE; broad/full/native/stage/API-auth проверки повторно не запускались.
+
+## Actual feedback runtime and closure
+
+Фактический112 staging принят на `d467d697280eecdfbf57760b530b3ea4ade9cdb7`, scope `d192f2a7-9c31-4bf8-8458-6043ba0d71ec`. Healthy image `sha256:d8a4b49b78f574e9be73bab53bab40c32f6642507173987ace717ea812705ca7`; physical target/DB/W07/S3 и full revision проверены Root и существующим guarded transport. Новые constructors допускались только после target proof; отдельные leases ограничивали операции собственными QA-строками.
+
+Реальный назначенный ENGINEER DESIGN заменил ADMIN sketch: old File удалён; original+thumbnail versions/delete markers `2→0`; winner и соседние own bytes/versions сохранены. Один exact nonce replay дал тот же file ID без новых rows/versions/deletes. Последующие readonly geometry STOP и диагностика не повторяли upload/replace/replay. После отдельного cleanup-only lease actual `OWN_CLOSED` подтвердил commitAck/allOwnRowsGone/originalStorageMatch=true, исходные54 таблицы/схему/ссылки/деньги/preferences и bounded valid token clock; rawApiToken equality при изменённом `lastUsedAt` не заявляется.
+
+Каталог собственных приватных proofs: `apps/web/test-results/root112-d467-115-d192f2a7-9c31-4bf8-8458-6043ba0d71ec` (ignored):
+
+| Proof | SHA256 |
+| --- | --- |
+| 0008-receipt-replace.json — old File/version pair2→0 | 890669a068ed2fa1c09c01f2d27fe8cfa838e879bf5224127f9195efb7bb2fa7 |
+| 0010-receipt-replay.json — no extras | 85a70841156953a2bbab576a43a1c26b840abc4d1d65260ffbfa06a075c8d270 |
+| resume-geometry-numeric.json — initial115 STOP at360 | 10f22b7fccb19f4e0734475c2978d5e67d77a2c0412051772646dee2c5d82946 |
+| resume-cleanup-intent-ack.json — current CAS intent | 10788b19ab1328c2cae731f8cacd1260e5c8e471fb6965cfa51ec8ed990ece3a |
+| resume-cleanup-closed.json — actual112 OWN_CLOSED | 72ad6499ab57907488852b27015f2cb87f127b7ae407d98221d711f57e2df359 |
+
+Cleanup: Notification32, DomainEvent1, ChangeLog11, Task1, File5, Payment2, Product1, Project1, CashAccount1, ExpenseArticle1, Client1, User3; UserPreference0/FinanceDocument0. `originalRelationsMatch=true`, `preferencesUntouched=true`, `tokenClockValid=true`, `tokenClockChanged=true`, `botClockChanged=false`. Ни один original ID/key не удалялся; full closure проверена после COMMIT.
+
+Начальный №115 `TITLE_COUNT_SAME_LINE` — отдельный честный STOP при360px,4 прежних geometry checks PASS и0 writes/deniedReads/pageErrors. Позднейший отдельный №115 run на `ed261a3b9d4732d7cd595121f874ea9c9a104847` принят и закрыт: geometry `d91afc2353448db856ced5d8338fe375c9574c7933fb651600be73d8228456ec`, CLOSED `03c0294936267de743d369e2cc1d720a053b87261a7bc16097477e38a2e83db3`; см. [отдельную115 verification](../plain-file-lists/verification.md). Повтор112 storage для этого не выполнялся.
 
 ## Historical evidence — 08–09.10.2026, прежнее retention-поведение superseded
 
