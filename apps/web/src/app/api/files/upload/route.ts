@@ -3,7 +3,8 @@ import path from "node:path";
 import { randomUUID, createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 import sharp from "sharp";
-import type { FileCategory, FileStage } from "@prisma/client";
+import type {FileSection} from "@prisma/client";
+import {isFileSection} from "@/lib/file-sections";
 
 import { auth } from "@/auth";
 import {canAccessOperationalPath} from "@/lib/operational-access";
@@ -19,32 +20,16 @@ import { uploadSizeLimitError, uploadSizeLimitFor } from "@/server/files/upload-
 import { persistOrdinaryUpload, readUploadReceipt, uploadFingerprint, uploadMutationPattern } from "@/server/files/upload-core";
 import { afterUploadCommit, uploadFailure, UploadError, type UploadPhase, type CommitState } from "@/server/files/upload-result";
 import { notifyOrg } from "@/server/notifications/notify";
-import { getFileStageConfig } from "@/server/files/stage-config";
 import { withTaskTransaction } from "@/server/tasks/transaction";
 import {projectCoverUploadSchema,type ProjectCoverUpload} from "@/server/projects/cover-contract";
 import {authorizeProjectCoverUpload,persistProjectCoverUpload} from "@/server/projects/cover-core";
 import {revalidatePath} from "next/cache";
-import {
-  FILE_STAGES,
-  validateFileForCategory,
-  type FileStageKey,
-} from "@pero/plugin-file-stages";
-
-const CATEGORIES: FileCategory[] = [
-  "PHOTO",
-  "DRAWING",
-  "QUOTE",
-  "MEASUREMENT",
-  "DOCUMENT",
-  "OTHER",
-];
-
 function sanitizeFileName(name: string): string {
   return name.replace(/[^\wа-яА-ЯёЁ.-]+/g, "_").slice(-80);
 }
 
 // POST /api/files/upload — multipart/form-data:
-// file, projectId, productId?, category?, taskId?
+// file, projectId, productId?, section?, taskId?
 export async function POST(request: Request) {
   const requestId=randomUUID();
   const state:{phase:UploadPhase;commitState:CommitState}={phase:"auth",commitState:"notCommitted"};
@@ -91,7 +76,15 @@ async function upload(request:Request,state:{phase:UploadPhase;commitState:Commi
     return NextResponse.json({ error: uploadSizeLimitError(sizeLimit.kind) }, { status: 413 });
   }
 
-  if (form.get("caption") !== null) return NextResponse.json({ok:false,kind:"validation",error:"Подписи файлов больше не используются"},{status:422});
+  // Старые окна не должны молча перекладывать файл в неверный раздел.
+  if (["category", "stage", "caption"].some(key => form.get(key) !== null)) {
+    return NextResponse.json({ok:false,kind:"validation",code:"UPLOAD_FORM_OUTDATED",error:"Обновите форму загрузки: категории, этапы и комментарии файлов больше не используются"},{status:422});
+  }
+  const sectionRaw = form.get("section");
+  if (sectionRaw !== null && !isFileSection(sectionRaw)) {
+    return NextResponse.json({error:"Обновите форму: неизвестный раздел файла"},{status:422});
+  }
+  const section: FileSection = sectionRaw === null ? "GENERAL" : sectionRaw;
 
   const productIdRaw = form.get("productId");
   const requestedProductId =
@@ -107,7 +100,7 @@ async function upload(request:Request,state:{phase:UploadPhase;commitState:Commi
   const projectCoverRaw=form.get("assignProjectCover"),assignProjectCover=projectCoverRaw==="1";
   let projectCoverTarget:ProjectCoverUpload|undefined,replayProjectCover=false;
   if(projectCoverRaw!==null){
-    if(!assignProjectCover||coverRaw!==null||form.get("productId")!==null||form.get("taskId")!==null||form.get("stage")!==null||form.get("category")!=="PHOTO")
+    if(!assignProjectCover||coverRaw!==null||form.get("productId")!==null||form.get("taskId")!==null||section!=="GENERAL")
       return NextResponse.json({error:"Неверный контекст обложки проекта"},{status:422});
     if(!isCoverImageMime(file.type))return NextResponse.json({error:"Нужно изображение поддерживаемого формата"},{status:415});
     const parsed=projectCoverUploadSchema.safeParse({projectId,expectedCoverFileId:form.get("expectedCoverFileId")==="null"?null:undefined,clientMutationId:form.get("clientMutationId")});
@@ -118,8 +111,8 @@ async function upload(request:Request,state:{phase:UploadPhase;commitState:Commi
     replayProjectCover=permission.replayHint;
   }
   if (assignCover) {
-    if (!requestedProductId || taskId || form.get("category") !== "PHOTO") {
-      return NextResponse.json({ error: "Для обложки нужны изделие и категория Фото без задачи" }, { status: 400 });
+    if (!requestedProductId || taskId || section !== "PRODUCTION") {
+      return NextResponse.json({ error: "Для эскиза нужны изделие и раздел Производство без задачи" }, { status: 400 });
     }
     if (!isCoverImageMime(file.type)) {
       return NextResponse.json({ error: "Нужно изображение поддерживаемого формата" }, { status: 415 });
@@ -142,36 +135,6 @@ async function upload(request:Request,state:{phase:UploadPhase;commitState:Commi
   const { project, productId, productNumber } = context;
 
   state.phase="validation";
-  const categoryRaw = form.get("category");
-  const category: FileCategory = CATEGORIES.includes(categoryRaw as FileCategory)
-    ? (categoryRaw as FileCategory)
-    : "OTHER";
-
-  // Проверка расширения по настройкам плагина file-stages (если включён).
-  // Возвращаем 422 до записи на диск — плагин меняет базовое поведение загрузки.
-  const stageConfig = await getFileStageConfig();
-  if (stageConfig.enabled && stageConfig.extensions) {
-    const extError = validateFileForCategory(
-      category,
-      file.name,
-      stageConfig.extensions[category],
-    );
-    if (extError) {
-      return NextResponse.json({ error: extError }, { status: 422 });
-    }
-  }
-
-  // Группа этапа (file-stages). Если не передана — действует дефолт схемы.
-  const stageRaw = form.get("stage");
-  if (stageRaw !== null && (typeof stageRaw !== "string" || !FILE_STAGES.includes(stageRaw as FileStageKey))) {
-    return NextResponse.json({ error: "Неизвестный этап файла" }, { status: 422 });
-  }
-
-  const stage: FileStage | undefined =
-    typeof stageRaw === "string" && FILE_STAGES.includes(stageRaw as FileStageKey)
-      ? (stageRaw as FileStage)
-      : undefined;
-
   const clientMutationId=form.get("clientMutationId");
   if(typeof clientMutationId!=="string"||!uploadMutationPattern.test(clientMutationId))
     return NextResponse.json({error:"Обновите форму загрузки",code:"UPLOAD_MUTATION_REQUIRED"},{status:422});
@@ -183,7 +146,7 @@ async function upload(request:Request,state:{phase:UploadPhase;commitState:Commi
   if (buffer.length > sizeLimit.maxBytes) return NextResponse.json({ error: uploadSizeLimitError(sizeLimit.kind) }, { status: 413 });
 
   const contentHash = createHash("sha256").update(buffer).digest("hex");
-  const fingerprint=uploadFingerprint({actorId:session.user.id,projectId,productId,taskId,category,stage:stage??"PRODUCTION",
+  const fingerprint=uploadFingerprint({actorId:session.user.id,projectId,productId,taskId,section,
     fileName:file.name,mimeType:file.type,size:buffer.length,contentHash});
   if(!assignCover&&!assignProjectCover){
     const prior=await readUploadReceipt(prisma,session.user.id,clientMutationId,fingerprint);
@@ -199,9 +162,9 @@ async function upload(request:Request,state:{phase:UploadPhase;commitState:Commi
   }
   if (assignCover && replayCover && coverTarget) {
     const result = await withTaskTransaction(tx => persistUploadedProductCover(tx,session.user,coverTarget!,{
-      fileName:file.name,storedName,mimeType:file.type,size:file.size,hasThumb:false,uploadedById:session.user.id,stage,contentHash}));
+      fileName:file.name,storedName,mimeType:file.type,size:file.size,hasThumb:false,uploadedById:session.user.id,contentHash}));
     if (!result.ok) return NextResponse.json(result,{status:result.kind==="conflict"?409:422});
-    const sketch=await prisma.file.findUnique({where:{id:result.id},select:{id:true,fileName:true,mimeType:true,size:true,hasThumb:true,category:true,stage:true,uploadedById:true}});
+    const sketch=await prisma.file.findUnique({where:{id:result.id},select:{id:true,fileName:true,mimeType:true,size:true,hasThumb:true,section:true,uploadedById:true}});
     if (!sketch) return NextResponse.json({ok:false,kind:"conflict",error:"Эскиз уже удалён"},{status:409});
     state.commitState="committed";
     return NextResponse.json({...result,sketch,clientMutationId});
@@ -281,7 +244,7 @@ async function upload(request:Request,state:{phase:UploadPhase;commitState:Commi
       result = await withTaskTransaction(async(tx) => {const saved=await persistUploadedProductCover(tx, session.user,
         coverTarget!, {
           fileName: file.name, storedName, mimeType: file.type, size: file.size,
-          hasThumb, uploadedById: session.user.id, stage, contentHash,
+          hasThumb, uploadedById: session.user.id, contentHash,
         });callbackCompleted=true;return saved;});
     } catch {
       if(!callbackCompleted){state.commitState="notCommitted";await compensateOwnCover();}
@@ -297,7 +260,7 @@ async function upload(request:Request,state:{phase:UploadPhase;commitState:Commi
       body: file.name, link: productNumber ? `/products/${productNumber}` : `/projects/${projectId}`,
       exceptUserId: session.user.id,
     }),requestId);
-    const sketch = await prisma.file.findUnique({where:{id:result.id},select:{id:true,fileName:true,mimeType:true,size:true,hasThumb:true,category:true,stage:true,uploadedById:true}});
+    const sketch = await prisma.file.findUnique({where:{id:result.id},select:{id:true,fileName:true,mimeType:true,size:true,hasThumb:true,section:true,uploadedById:true}});
     return NextResponse.json({...result,sketch,clientMutationId});
   }
 
@@ -312,8 +275,7 @@ async function upload(request:Request,state:{phase:UploadPhase;commitState:Commi
       projectId,
       productId,
       taskId,
-      category,
-      stage,
+      section,
       fileName: file.name,
       storedName,
       mimeType: file.type,

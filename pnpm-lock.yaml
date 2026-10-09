@@ -43,9 +43,6 @@ importers:
       '@pero/plugin-demo':
         specifier: workspace:*
         version: link:../../packages/plugins/demo
-      '@pero/plugin-file-stages':
-        specifier: workspace:*
-        version: link:../../packages/plugins/file-stages
       '@pero/plugin-sdk':
         specifier: workspace:*
         version: link:../../packages/plugin-sdk

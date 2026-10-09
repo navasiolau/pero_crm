@@ -1,9 +1,9 @@
 import {createHash} from 'node:crypto';
-import type {Prisma} from '@prisma/client';
+import type {Prisma, FileSection} from '@prisma/client';
 import {UploadError} from './upload-result';
 
 export const uploadMutationPattern=/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-export function uploadFingerprint(input:{actorId:string;projectId:string;productId:string|null;taskId:string|null;category:string;stage:string;fileName:string;mimeType:string;size:number;contentHash:string}){
+export function uploadFingerprint(input:{actorId:string;projectId:string;productId:string|null;taskId:string|null;section:FileSection;fileName:string;mimeType:string;size:number;contentHash:string}){
   return createHash('sha256').update(JSON.stringify(input)).digest('hex');
 }
 export type UploadReceipt={id:string;repeated:boolean;clientMutationId:string};
@@ -22,7 +22,7 @@ export async function persistOrdinaryUpload(tx:Prisma.TransactionClient,actor:{i
   if(prior)return prior;
   const file=await tx.file.create({data:input.data});
   await tx.changeLog.create({data:{id:`file-upload:${input.clientMutationId}`,actorType:'user',actorId:actor.id,actorName:actor.name??undefined,
-    source:'web',entity:'file',entityId:file.id,action:'create',newValue:{project:input.projectNumber,fileName:file.fileName,category:file.category,
+    source:'web',entity:'file',entityId:file.id,action:'create',newValue:{project:input.projectNumber,fileName:file.fileName,section:file.section,
       uploadFingerprint:input.fingerprint,clientMutationId:input.clientMutationId}}});
   return{id:file.id,repeated:false,clientMutationId:input.clientMutationId};
 }
