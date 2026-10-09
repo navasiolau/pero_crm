@@ -40,7 +40,7 @@ export default async function ProductsPage({
     listProducts(
       session.user.id,
       role,
-      filters,
+      view === "kanban" ? { ...filters, searchScope: "identity" } : filters,
       view === "table" ? { page, pageSize } : undefined,
     ),
     listProductFilterOptions(session.user.id, role),
@@ -51,6 +51,7 @@ export default async function ProductsPage({
     <ListParamsProvider key={session.user.id} section="products" initialQuery={state.query} preference={state.value}>
     <ProductsView
       view={view}
+      resolvedQuery={state.query}
       products={result.rows.map((product) => ({
         id: product.id,
         number: product.number,
