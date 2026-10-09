@@ -38,3 +38,11 @@ Private ignored receipt: `.playwright-mcp/search117/receipt.json`. Скринш�
 ## Remaining acceptance
 
 Фактически развёрнутый staging SHA/OCI/health плюс реальные desktop/mobile сценарии поиска. Для browser на staging использовать только согласованного QA-пользователя и фиксировать/очищать только его предпочтения по reviewed lifecycle; данные существующих пользователей не менять. Новый поиск не требует миграций, новых библиотек или инфраструктурных действий. БД, staging и production этим worker не изменялись; дампы и restic не использовались.
+
+
+## Staging adapter source checkpoint
+
+Новый source-only stage-browser и controlled contract tests описаны в [staging-acceptance.md](staging-acceptance.md). Независимое QA ревью выявило scalar/JSON-array mismatch. После RED actual-service startup обеих секций builder использует реальные normalizeListQuery/encodeListFilterValue; GREEN15/15 controlled tests, включая реальные service/store/controller startup и genuine Flight ACK, lint PASS; appsource не менялся. Это не staging-приёмка; actual runtime/Git/DB этим worker не выполнялись.
+
+
+QA P2 исправление: полный unit-набор1492/1492 PASS, TSC/lint/strict OpenSpec/diff-check PASS. Новые actual server-normalizer/service/controller startup tests дали RED на scalar обеих секций, затем GREEN15/15 с canonical JSON-array. Положительные ACK получены из настоящего service/store; ручной scalar ACK запрещён. Stage/DB/Git не выполнялись.
