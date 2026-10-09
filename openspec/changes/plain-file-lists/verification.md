@@ -3,7 +3,7 @@
 Рабочая ветка: feature/115. Изменение: plain-file-lists.
 Проверенная ревизия приложения: 37f882f69a2d76901b98321ff7824d0d04db4db8.
 Собственный fixture: ff30f55e-dac2-48d2-ac5e-cad6400f3eca.
-Приёмка задачи остаётся открытой до проверки добавленной строки документа прихода на новом deployment и окончательного закрытия Parent fixture.
+Приёмка задачи остаётся открытой до проверки добавленной строки документа прихода на новом deployment (Parent fixture уже закрыт).
 
 ## Реальные результаты
 
@@ -29,7 +29,7 @@ Fixture Task первоначально не отображалась: workId=nu
 
 Достаточна короткая readonly-проверка этой новой строки на 1440 и 390: название с расширением, disabled урна и геометрия. Предпочтительно использовать существующий READY документ дохода, без открытия содержимого, сохранения имени/id или скриншота исходных данных. В evidence сохраняются их хэши. При отсутствии доступного существующего документа — только минимальный собственный fixture; полные загрузки и принятые матрицы не повторять.
 
-Parent cleanup ещё не исполнялась в момент этого отчёта. Штатный restore input содержит две одинаковые полные observation: 129848 encoded bytes при cap 98304. Единственное офлайн измерение выявило превышение до dispatch. Root получил настоящий подписанный cleanup-intent для компактного carrier с одной observation и восстановлением alias перед неизменным original cleanup. Caps, HMAC и CAS не ослаблялись.
+Parent cleanup завершена Root: tool b02c4a дал OWN_CLOSED. Все собственные File/FinanceDocument/Payment/User и остальные строки удалены, 19 собственных версий S3 убраны. 54 исходных таблицы, схема, финансовые факты, preferences и S3 совпали. Штатный restore input содержит две одинаковые полные observation: 129848 encoded bytes при cap 98304. Единственное офлайн измерение выявило превышение до dispatch. Root применил настоящий подписанный cleanup-intent через компактный carrier с одной observation и восстановлением alias перед неизменным original cleanup. Caps, HMAC и CAS не ослаблялись.
 
 ## Неизменяемые доказательства
 
@@ -44,4 +44,4 @@ C:/Users/admin/.codex/worktrees/crm-task-113/pero_crm_v2/apps/web/test-results/f
 | consumer-v15-cleanup-preflight-lists-result.json | d4668c6ce93be80f810fd9595fbb1642c1918c35a6e9025423e897f46c1d3740 |
 | 0118-cleanup-intent.json | b2002a2e410b353f83a72a8e78ffbbde8ab092d931cca22fd599fef188b8fefa |
 
-На момент cleanup-intent: Work=0, File=4, FinanceDocument=3, собственных версий S3=19; originalsMatch=true. Эти оставшиеся собственные записи должен убрать Root carrier с поздним OWN_CLOSED доказательством.
+На момент cleanup-intent: Work=0, File=4, FinanceDocument=3, собственных версий S3=19; originalsMatch=true. Root carrier удалил эти собственные записи; поздний OWN_CLOSED подтверждён tool b02c4a. Единственный оставшийся gate задачи115 — новая income-строка на новом deployment.
