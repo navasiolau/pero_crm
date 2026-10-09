@@ -24,6 +24,7 @@ export const ACTION_CONTRACTS=Object.freeze([
  {key:'delete',name:'deleteMaterialUnit',filename:'server/warehouse/unit-actions.ts',worker:'app/(app)/settings/warehouse-units/page'},
  {key:'material',name:'updateMaterial',filename:'server/warehouse/actions.ts',worker:'app/(app)/warehouse/items/page'},
 ]);
+export const AMBIENT_CONTRACT=Object.freeze({name:'getBellData',filename:'server/notifications/actions.ts',workers:['app/(app)/settings/warehouse-units/page','app/(app)/warehouse/items/page']});
 const ACTION_WORKERS=new Set(['app/(app)/settings/warehouse-units/page','app/(app)/warehouse/items/page','app/(app)/warehouse/stock/page','app/(app)/products/[id]/page']);
 export function projectActionReferences(raw,input,manifestSha256){
  binding(input);need(raw&&typeof raw==='object'&&!Array.isArray(raw)&&raw.node&&typeof raw.node==='object'&&!Array.isArray(raw.node)&&Object.keys(raw.node).length<=2000&&HASH.test(manifestSha256??''),'NODE_ACTION_MANIFEST_REQUIRED');
@@ -36,14 +37,14 @@ export function projectActionReferences(raw,input,manifestSha256){
   for(const route of routes){const worker=entry.workers[route];need(worker&&typeof worker.moduleId==='string'&&/^[0-9]{1,12}$/.test(worker.moduleId)&&worker.async===false&&entry.layer[route]==='action-browser','ACTION_WORKER_CONTRACT_MISMATCH');}
   actions.push({key:contract.key,name:contract.name,filename:contract.filename,id,workers:routes});
  }
- need(new Set(actions.map(a=>a.id)).size===4,'ACTION_REFERENCE_ID_COLLISION');
- return {namespace:NS,kind:'actionReferences',version:1,runId:input.runId,revision:input.revision,manifestSha256,actions};
+ need(new Set(actions.map(a=>a.id)).size===4,'ACTION_REFERENCE_ID_COLLISION');const bell=Object.entries(raw.node).filter(([,entry])=>entry?.exportedName===AMBIENT_CONTRACT.name);need(bell.length===1,'UNIQUE_AMBIENT_READ_ACTION_REQUIRED');const[bellId,bellEntry]=bell[0];need(/^[a-f0-9]{42}$/.test(bellId)&&bellEntry.filename===AMBIENT_CONTRACT.filename&&!actions.some(a=>a.id===bellId),'AMBIENT_SOURCE_CONTRACT');for(const worker of AMBIENT_CONTRACT.workers){const descriptor=bellEntry.workers?.[worker];need(descriptor&&typeof descriptor.moduleId==='string'&&/^[0-9]{1,12}$/.test(descriptor.moduleId)&&descriptor.async===false&&bellEntry.layer?.[worker]==='action-browser','AMBIENT_WORKER_CONTRACT');}const ambient=[{name:AMBIENT_CONTRACT.name,filename:AMBIENT_CONTRACT.filename,id:bellId,workers:[...AMBIENT_CONTRACT.workers].sort()}];
+ return {namespace:NS,kind:'actionReferences',version:1,runId:input.runId,revision:input.revision,manifestSha256,actions,ambient};
 }
 export function validateActionReferences(value,input){
- binding(input);keys(value,['namespace','kind','version','runId','revision','manifestSha256','actions','signature'],'PUBLIC_ACTION_REFERENCE_FIELDS');
+ binding(input);keys(value,['namespace','kind','version','runId','revision','manifestSha256','actions','ambient','signature'],'PUBLIC_ACTION_REFERENCE_FIELDS');
  need(value.namespace===NS&&value.kind==='actionReferences'&&value.version===1&&value.runId===input.runId&&value.revision===input.revision&&HASH.test(value.signature??'')&&HASH.test(value.manifestSha256??'')&&Array.isArray(value.actions)&&value.actions.length===4,'PUBLIC_ACTION_SCOPE_REQUIRED');
  for(let i=0;i<4;i++){const a=value.actions[i],contract=ACTION_CONTRACTS[i];keys(a,['key','name','filename','id','workers'],'PUBLIC_ACTION_DESCRIPTOR_FIELDS');need(a.key===contract.key&&a.name===contract.name&&a.filename===contract.filename&&/^[a-f0-9]{42}$/.test(a.id)&&Array.isArray(a.workers)&&a.workers.includes(contract.worker)&&a.workers.length<=4&&a.workers.every(w=>ACTION_WORKERS.has(w)),'PUBLIC_ACTION_DESCRIPTOR_CONTRACT');same(a.workers,[...new Set(a.workers)].sort(),'PUBLIC_ACTION_WORKER_SET');}
- need(new Set(value.actions.map(a=>a.id)).size===4,'PUBLIC_ACTION_ID_COLLISION');assertTechnical(value);return value;
+ need(new Set(value.actions.map(a=>a.id)).size===4,'PUBLIC_ACTION_ID_COLLISION');need(Array.isArray(value.ambient)&&value.ambient.length===1,'ONE_AMBIENT_READ_DESCRIPTOR_REQUIRED');const bell=value.ambient[0];keys(bell,['name','filename','id','workers'],'AMBIENT_DESCRIPTOR_FIELDS');need(bell.name===AMBIENT_CONTRACT.name&&bell.filename===AMBIENT_CONTRACT.filename&&/^[a-f0-9]{42}$/.test(bell.id)&&!value.actions.some(a=>a.id===bell.id),'AMBIENT_PUBLIC_CONTRACT');same(bell.workers,[...AMBIENT_CONTRACT.workers].sort(),'AMBIENT_EXACT_WORKERS');assertTechnical(value);return value;
 }
 function currentActionReferences(input,secret){
  const file=path.resolve(process.cwd(),'.next/server/server-reference-manifest.json'),info=lstatSync(file);need(info.isFile()&&!info.isSymbolicLink()&&info.size>0&&info.size<=2*1024*1024&&realpathSync(file)===file,'CURRENT_ACTION_MANIFEST_FILE_REQUIRED');
