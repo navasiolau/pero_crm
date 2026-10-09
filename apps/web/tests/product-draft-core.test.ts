@@ -158,14 +158,15 @@ test("returning to early stages and skipping contract leaves all existing status
 test("manual escape from a draft early project is denied before any write, including management", async () => {
   for (const stage of ["LEAD", "ESTIMATE"] as ProjectStage[]) {
     const f = fixture(stage);
-    const denied = await changeProductStatusTransaction(f.tx, actor, "draft", "PREPARATION");
+    const privileged = { ...actor, roles: ["ADMIN" as const] };
+    const denied = await changeProductStatusTransaction(f.tx, privileged, "draft", "PREPARATION");
     assert.equal(denied.ok, false); assert.match(denied.error!, /Договор/);
     assert.equal(f.state.products[0].status, draft);
     assert.equal(f.state.productHistory.length + f.state.audit.length + f.state.events.length, 0);
-    assert.equal((await changeProductStatusTransaction(f.tx, actor, "draft", draft)).ok, true);
+    assert.equal((await changeProductStatusTransaction(f.tx, { ...actor, roles: ["ADMIN"] }, "draft", draft)).ok, true);
   }
   const f = fixture("CONTRACT");
-  assert.equal((await changeProductStatusTransaction(f.tx, actor, "draft", "PREPARATION")).ok, true);
+  assert.equal((await changeProductStatusTransaction(f.tx, { ...actor, roles: ["ADMIN"] }, "draft", "PREPARATION")).ok, true);
 });
 
 test("DRAFT is the first shared status, accepted in persistent filters, and early draft has no UI targets", () => {
@@ -174,7 +175,8 @@ test("DRAFT is the first shared status, accepted in persistent filters, and earl
   assert.deepEqual(JSON.parse(new URLSearchParams(normalizeListQuery("products", "view=kanban&status=DRAFT")).get("status")!), ["DRAFT"]);
   for (const projectStage of ["LEAD", "ESTIMATE"] as ProjectStage[])
     assert.deepEqual(productStatusTargets(actor.roles, { from: draft, projectStage, assignedEngineer: false, participant: false, hasB3d: false, noModel: false }), []);
-  assert.ok(productStatusTargets(actor.roles, { from: draft, projectStage: "CONTRACT", assignedEngineer: false, participant: false, hasB3d: false, noModel: false }).includes("PREPARATION"));
+  assert.deepEqual(productStatusTargets(actor.roles, { from: draft, projectStage: "CONTRACT", assignedEngineer: false, participant: false, hasB3d: false, noModel: false }), []);
+  assert.ok(productStatusTargets(["ADMIN"], { from: draft, projectStage: "CONTRACT", assignedEngineer: false, participant: false, hasB3d: false, noModel: false }).includes("PREPARATION"));
 });
 
 test("DRAFT assignment never opens product, execution or file visibility for engineering/field roles", () => {

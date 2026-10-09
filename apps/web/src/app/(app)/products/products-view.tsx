@@ -104,6 +104,7 @@ export function ProductsView({
       </div>
 
       <ProductsFilterBar
+        actorRoles={actorRoles}
         identitySearch={view === "kanban"}
         onSearchDraftChange={setSearchText}
         onModalActiveChange={setFilterOverlayActive}

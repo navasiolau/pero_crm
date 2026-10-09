@@ -2,9 +2,11 @@
 
 import { EntityListFilterBar } from "@/components/entity-list-filter-bar";
 import type { MultiSelectFilterOption } from "@/components/ui/multi-select-filter";
-import { PRODUCT_STATUSES } from "@/lib/product-statuses";
+import type { Role } from "@prisma/client";
+import { visibleProductStatuses } from "@/lib/product-statuses";
 
-export function ProductsFilterBar({ projectOptions, clientOptions, engineerOptions, hideEngineer, identitySearch, onSearchDraftChange, onModalActiveChange }: {
+export function ProductsFilterBar({ actorRoles, projectOptions, clientOptions, engineerOptions, hideEngineer, identitySearch, onSearchDraftChange, onModalActiveChange }: {
+  actorRoles?: readonly Role[];
   projectOptions: MultiSelectFilterOption[];
   clientOptions: MultiSelectFilterOption[];
   engineerOptions: MultiSelectFilterOption[];
@@ -23,7 +25,7 @@ export function ProductsFilterBar({ projectOptions, clientOptions, engineerOptio
         {
           queryKey: "status", label: "Статус", allLabel: "Все статусы",
           searchPlaceholder: "Поиск статуса…", width: "w-44",
-          options: PRODUCT_STATUSES.map((item) => ({ value: item.id, label: item.label })),
+          options: visibleProductStatuses(actorRoles ?? []).map((item) => ({ value: item.id, label: item.label })),
         },
         {
           queryKey: "project", label: "Проект", allLabel: "Все проекты",

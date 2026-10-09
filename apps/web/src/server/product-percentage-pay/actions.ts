@@ -3,6 +3,8 @@
 import type { ProductPercentageKind } from "@prisma/client";
 import { patchProductPercentageCore } from "./patch-core";
 import type { ProductPercentagePatch,ProductPercentagePatchResult } from "./contracts";
+import { prisma } from "@/lib/prisma";
+import { productVisibilityWhere } from "@/server/access/visibility";
 import { auth } from "@/auth";
 import { MANAGER_ROLES, hasAnyRole } from "@/lib/roles";
 import type { DomainActor } from "@/server/projects/core";
@@ -46,7 +48,16 @@ export async function setProductNoModelAction(input: { productId: string; noMode
 export async function retryProductPercentageAction(input: { productId: string; kind: ProductPercentageKind }) {
   const user = await actor();
   if (!hasAnyRole(user.roles, MANAGER_ROLES)) return { ok: false as const, error: "Недостаточно прав" };
-  return answer(input.productId, () => settlePendingProductPercentage(input.productId, input.kind));
+  if (!await prisma.product.findFirst({ where: { id: input.productId, AND: [productVisibilityWhere(user)] }, select: { id: true } }))
+    return { ok: false as const, error: "Изделие не найдено" };
+  return answer(input.productId, () => settlePendingProductPercentage(input.productId, input.kind, {
+    transaction: operation => withTaskTransaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM "Product" WHERE id=${input.productId} FOR UPDATE`;
+      if (!await tx.product.findFirst({ where: { id: input.productId, AND: [productVisibilityWhere(user)] }, select: { id: true } }))
+        throw new Error("Изделие не найдено");
+      return operation(tx);
+    }),
+  }));
 }
 
 export async function patchProductPercentageAction(input:ProductPercentagePatch):Promise<ProductPercentagePatchResult>{

@@ -1,5 +1,5 @@
 "use server";
-import {liveProductWhere} from "@/server/access/live-entities";
+import { productVisibilityWhere } from "@/server/access/visibility";
 
 
 import { z } from "zod";
@@ -216,7 +216,7 @@ export async function addProjectMaterial(
   }
   const data = parsed.data;
   let mutation;
-  try { mutation = await withTaskTransaction((tx) => addMaterialNorm(tx, data, session.user.id)); }
+  try { mutation = await withTaskTransaction((tx) => addMaterialNorm(tx, data, session.user)); }
   catch (error) { return { ok: false, error: error instanceof Error ? error.message : "Не удалось добавить материал" }; }
   const { line, product, material } = mutation;
   await writeChangeLog({
@@ -253,7 +253,7 @@ export async function updateProjectMaterial(
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Ошибка данных" };
   }
   let mutation;
-  try { mutation = await withTaskTransaction((tx) => updateMaterialNorm(tx, parsed.data)); }
+  try { mutation = await withTaskTransaction((tx) => updateMaterialNorm(tx, parsed.data, session.user)); }
   catch (error) { return { ok: false, error: error instanceof Error ? error.message : "Не удалось изменить материал" }; }
   const { line, quantity, quantityPerUnit } = mutation;
   await writeChangeLog({
@@ -278,8 +278,8 @@ export async function deleteProjectMaterial(
   let line;
   try {
     line = await withTaskTransaction(async (tx) => {
-      await lockMaterialProduct(tx, id);
-      const line = await tx.projectMaterial.findUnique({ where: {product:liveProductWhere, id }, include: {
+      await lockMaterialProduct(tx, id, session.user);
+      const line = await tx.projectMaterial.findUnique({ where: {product:productVisibilityWhere(session.user), id }, include: {
         material: { select: { name: true } }, product: { select: { projectId: true } },
       } });
       if (!line) throw new Error("Строка не найдена");

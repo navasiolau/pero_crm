@@ -1,3 +1,4 @@
+import { canViewProductDrafts } from "@/lib/product-drafts";
 import {liveProductWhere} from "@/server/access/live-entities";
 import { Prisma } from '@prisma/client';
 import { createHash } from 'node:crypto';
@@ -13,7 +14,7 @@ export async function patchProductPercentageCore(actor:DomainActor,input:Product
  const data=parsed.data;const policy=PERCENTAGE_STAGE_POLICY[data.kind];const receiptId=`product-percentage:${data.clientMutationId}`;
  const fingerprint=createHash('sha256').update(JSON.stringify(data)).digest('hex');
   const product=await tx.product.findUnique({where:{...liveProductWhere,id:data.productId},select:{id:true,projectId:true,status:true,engineerId:true,mounterId:true,assemblerId:true}});
-  if(!product)return{ok:false,kind:'not-found',error:'Изделие не найдено'};
+  if(!product||product.status==='DRAFT'&&!canViewProductDrafts(actor.roles))return{ok:false,kind:'not-found',error:'Изделие не найдено'};
  const receipt=await tx.changeLog.findUnique({where:{id:receiptId}});
  if(receipt){const saved=receipt.newValue;
  if(receipt.actorId!==actor.id||receipt.entity!=='product'||receipt.entityId!==data.productId||receipt.action!=='percentage.patch'||!saved||typeof saved!=='object'||Array.isArray(saved)||saved.fingerprint!==fingerprint||!saved.result||typeof saved.result!=='object'||Array.isArray(saved.result))return{ok:false,kind:'validation',error:'Идентификатор запроса уже использован'};

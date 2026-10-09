@@ -1,3 +1,4 @@
+import { matches } from "./helpers/visibility-fixture";
 import assert from "node:assert/strict";
 import test from "node:test";
 import {createRequire} from "node:module";
@@ -8,15 +9,17 @@ const require=createRequire(import.meta.url);
 type FixturePlugin={onResolve:(options:{filter:RegExp},callback:(args:{path:string})=>{path:string;namespace:string}|null)=>void;onLoad:(options:{filter:RegExp;namespace:string},callback:(args:{path:string})=>{contents:string;loader:"js"})=>void};
 type BuildOptions={entryPoints:string[];absWorkingDir:string;bundle:boolean;write:boolean;format:"cjs";platform:"node";target:string;logLevel:"silent";plugins:{name:string;setup:(plugin:FixturePlugin)=>void}[]};
 const {build}=createRequire(require.resolve("tsx/package.json"))("esbuild") as {build:(options:BuildOptions)=>Promise<{outputFiles:{text:string}[]}>};
-async function actualActions(){
- const probe={cacheCalls:0,domainCalls:0,inputs:[] as ProductPercentagePatch[],patch:async(input:ProductPercentagePatch)=>{probe.domainCalls++;probe.inputs.push(input);return{ok:true,kind:"saved",field:input.field,value:input.value,revision:1,clientMutationId:input.clientMutationId,noOp:false,repeated:false}}};
+async function actualActions(options:{draft?:boolean;hideInTransaction?:boolean}={}){
+ const product={id:"own-product",status:options.draft?"DRAFT":"PRODUCTION",deletedAt:null,project:{deletedAt:null}};
+ const probe={visible:(where:Record<string,unknown>)=>matches(product,where),onTransaction:()=>{if(options.hideInTransaction)product.status="DRAFT"},settlementAttempts:0,applied:0,cacheCalls:0,domainCalls:0,inputs:[] as ProductPercentagePatch[],patch:async(input:ProductPercentagePatch)=>{probe.domainCalls++;probe.inputs.push(input);return{ok:true,kind:"saved",field:input.field,value:input.value,revision:1,clientMutationId:input.clientMutationId,noOp:false,repeated:false}}};
  const stubs:Record<string,string>={
+  "@/lib/prisma":'export const prisma={product:{findFirst:async({where})=>globalThis.__pctActionProbe.visible(where)?{id:"own-product"}:null}}',
   "@/auth":'export async function auth(){return {user:{id:"manager",name:"Manager",roles:["MANAGER"]}}}',
   "@/server/products/revalidate":'export async function revalidateProductPaths(){globalThis.__pctActionProbe.cacheCalls++}',
   "@/server/notifications/notify":'export async function notifyPerson(){}',
-  "@/server/tasks/transaction":'export async function withTaskTransaction(fn){return fn({fixture:"transaction"})}',
+  "@/server/tasks/transaction":'export async function withTaskTransaction(fn){globalThis.__pctActionProbe.onTransaction();return fn({$queryRaw:async()=>[],product:{findFirst:async({where})=>globalThis.__pctActionProbe.visible(where)?{id:"own-product"}:null}})}',
   "./patch-core":'export async function patchProductPercentageCore(_actor,input){return globalThis.__pctActionProbe.patch(input)}',
-  "./core":'export async function configureProductPercentageCore(){return {ok:true}};export async function setProductNoModelCore(){return {ok:true}};export async function settlePendingProductPercentage(){return {state:"SETTLED"}};export async function transferProductPercentageCore(){return {ok:false}}',
+  "./core":'export async function configureProductPercentageCore(){return {ok:true}};export async function setProductNoModelCore(){return {ok:true}};export async function settlePendingProductPercentage(_product,_kind,deps){globalThis.__pctActionProbe.settlementAttempts++;return deps.transaction(async()=>{globalThis.__pctActionProbe.applied++;return "SETTLED"})};export async function transferProductPercentageCore(){return {ok:false}}',
  };
  const result=await build({entryPoints:[resolve("src/server/product-percentage-pay/actions.ts")],absWorkingDir:process.cwd(),bundle:true,write:false,format:"cjs",platform:"node",target:"node22",logLevel:"silent",plugins:[{name:"thin-action-fixtures",setup(plugin){plugin.onResolve({filter:/.*/},args=>Object.hasOwn(stubs,args.path)?{path:args.path,namespace:"action-fixture"}:null);plugin.onLoad({filter:/.*/,namespace:"action-fixture"},args=>({contents:stubs[args.path],loader:"js"}));}}]});
  const moduleFixture={exports:{}};runInNewContext(result.outputFiles[0].text,{module:moduleFixture,exports:moduleFixture.exports,__pctActionProbe:probe},{timeout:1000});
@@ -31,4 +34,15 @@ test("actual partial percentage Server Action returns compact domain ACK without
 });
 test("actual legacy frozen retry still revalidates through its existing action boundary",async()=>{
  const {actions,probe}=await actualActions();const result=await actions.retryProductPercentageAction({productId:"own-product",kind:"ASSEMBLY"});assert.equal(result.ok,true);assert.equal(probe.cacheCalls,1);assert.equal(probe.domainCalls,0);
+});
+
+test("percentage retry denies hidden DRAFT before settlement and rechecks a concurrent hide before applying", async () => {
+  for (const options of [{ draft: true }, { hideInTransaction: true }]) {
+    const { actions, probe } = await actualActions(options);
+    const result = await actions.retryProductPercentageAction({ productId: "own-product", kind: "ASSEMBLY" });
+    assert.equal(result.ok, false);
+    assert.equal(probe.applied, 0);
+    assert.equal(probe.cacheCalls, 0);
+    if (options.draft) assert.equal(probe.settlementAttempts, 0);
+  }
 });

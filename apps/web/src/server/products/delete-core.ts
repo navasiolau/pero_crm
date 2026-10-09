@@ -1,5 +1,6 @@
 import {createHash} from 'node:crypto';
 import {Prisma} from '@prisma/client';
+import { canViewProductDrafts } from "@/lib/product-drafts";
 import {MANAGER_ROLES,hasAnyRole} from '@/lib/roles';
 import type {DomainActor} from '../projects/core';
 import {productDeleteSchema,type ProductDeleteInput,type ProductDeleteResult} from './delete-contract';
@@ -12,8 +13,8 @@ export async function softDeleteProductCore(tx:Prisma.TransactionClient,actor:Do
  await tx.$queryRaw`SELECT id FROM "Product" WHERE id=${data.productId} FOR UPDATE`;
  const parent=await tx.project.findUnique({where:{id:initial.projectId},select:{id:true,deletedAt:true}});
  if(!parent||parent.deletedAt!==null)return failure('not-found','Проект удалён или недоступен');
- const product=await tx.product.findUnique({where:{id:data.productId},select:{id:true,projectId:true,number:true,title:true,updatedAt:true,deletedAt:true}});
- if(!product||product.projectId!==parent.id)return failure('not-found','Изделие не найдено');
+ const product=await tx.product.findUnique({where:{id:data.productId},select:{id:true,projectId:true,number:true,title:true,updatedAt:true,deletedAt:true,status:true}});
+ if(!product||product.projectId!==parent.id||product.status==='DRAFT'&&!canViewProductDrafts(actor.roles))return failure('not-found','Изделие не найдено');
  const fingerprint=createHash('sha256').update(JSON.stringify(data)).digest('hex'),receiptId=`product-delete:${data.clientMutationId}`;
  const receipt=await tx.changeLog.findUnique({where:{id:receiptId}});
  if(receipt){const saved=receipt.newValue;if(receipt.actorId!==actor.id||receipt.entity!=='product'||receipt.entityId!==product.id||receipt.action!=='soft-delete'||!saved||typeof saved!=='object'||Array.isArray(saved)||saved.fingerprint!==fingerprint||!saved.result||typeof saved.result!=='object')return failure('conflict','Идентификатор удаления уже использован');return{...saved.result as unknown as Extract<ProductDeleteResult,{ok:true}>,repeated:true};}

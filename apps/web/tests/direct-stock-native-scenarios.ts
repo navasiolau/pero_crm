@@ -50,9 +50,9 @@ export async function runDirectStockNative(db:PrismaClient){
    assert.equal((await warehouseMove(tx,actor,input)).movement.id,first.movement.id);
    await assert.rejects(warehouseMove(tx,actor,{...input,quantity:"100",clientMutationId:randomUUID()}),/Недостаточно материала/);
    await assert.rejects(warehouseMove(tx,actor,{kind:"RETURN",productId:other.id,sourceMovementId:first.movement.id,quantity:"1",clientMutationId:randomUUID()}),/Исходная выдача/);
-   const {line}=await addMaterialNorm(tx,{productId:product.id,materialId:material.id,quantityPerUnit:2},actor.id);
+   const {line}=await addMaterialNorm(tx,{productId:product.id,materialId:material.id,quantityPerUnit:2},actor);
    assert.equal(line.quantity.toString(),"2");assert.equal(line.issuedQty.toString(),"3");
-   await updateMaterialNorm(tx,{id:line.id,quantityPerUnit:2,comment:"same plan after excess issue"});
+   await updateMaterialNorm(tx,{id:line.id,quantityPerUnit:2,comment:"same plan after excess issue"},actor);
    const excess=await warehouseMove(tx,actor,{kind:"EXPENSE",projectMaterialId:line.id,quantity:"1",clientMutationId:randomUUID()});
    const afterExcess=await tx.projectMaterial.findUniqueOrThrow({where:{id:line.id}});
    assert.equal(afterExcess.quantity.toString(),"2");assert.equal(afterExcess.issuedQty.toString(),"4");

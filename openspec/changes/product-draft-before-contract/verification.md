@@ -1,5 +1,28 @@
 # Verification
 
+## Feedback 09.10.2026: новая приёмка ожидается
+
+Уточнение владельца: DRAFT виден только ADMIN/DIRECTOR, включая все точки чтения. Предыдущие проверки ниже не доказывают этот новый контракт и сохранены как исторические результаты. Текущая база исправления — origin/staging 3f4c0d9ccd4c90c6002e8168c50d5bff01d648a8; после feedback она не является новым принятым checkpoint. Main/production не разрешены.
+
+## Local feedback checks 09.10.2026
+
+- Новые RED ACL/UI: 6 ожидаемых падений из 9 на прежнем коде (видимость менеджера, связанные task/work/file, прямые queries, status targets, notification content и колонки).
+- GREEN первой области и прежних grants/create/contract/status regressions: 50/50 PASS в шести целевых test-файлах.
+- После независимого review уточнены direct norm/movement/retry guards и финансовая вложенная ссылка. Целевые тесты этих guards: 31/31 PASS; финансы сохраняют расход 60 и количество 3 при скрытом product reference, итог проекта 667266 при скрытом DRAFT.
+- Последний дополнительный work picker guard использует тот же productVisibilityWhere; canAddProductWork закрыт для DRAFT без ADMIN/DIRECTOR. Его целевой файл: 9/9 PASS, ESLint двух модулей PASS.
+- ESLint собственных runtime модулей и новых guard модулей — PASS. OpenSpec strict validate и git diff --check — PASS. Полный unit suite, миграции, БД и staging этим субагентом в feedback не запускались.
+- Независимое read-only review review113_files: прежние P1 обходы norm/movement/retry закрыты, итог NONE. Проверка общего integration candidate и фактической staging-ревизии остаётся pending у оркестратора.
+- Создание изделия уже выполняет router.refresh в проекте без redirect на скрытую карточку; этот поток и core создания/договора не изменены. Финансовые факты, количества, free-text история и расчётные формулы не переписаны.
+
+## Feedback staging acceptance
+
+Старый product-draft-stage-browser.mjs проверяет видимость DRAFT менеджеру и сохраняется как исторический helper: для нового контракта не запускать его без уточнения. Использовать guarded root cookies/owned fixture и существующий preference journal с обычными browser/API наблюдениями после exclusive runtime lease.
+
+Проверить ADMIN и DIRECTOR: первая колонка DRAFT, собственный черновик доступен. Проверить MANAGER и MANAGER+ENGINEER: первая колонка PREPARATION в общем и вложенном канбане, черновика нет в канбане/таблице/сохранённом DRAFT-фильтре, прямые id/number дают 404, /api/search не возвращает изделие, original/thumb/image preview файла дают 404. Затем создание менеджером остаётся в проекте; после перевода в CONTRACT изделие появляется в PREPARATION. Прежний денежный итог совпадает. Фактический SHA/образ, здоровье и результат записать после исполнения; task 5.4 пока не принят.
+
+## Historical verification before feedback
+
+
 Local candidate прошёл независимое review, 1383 unit tests, PostgreSQL rollback/backfill и фактическую конкуренцию в двух сессиях. Последний concurrency run завершился PASS с полным совпадением исходных данных всех 53 таблиц, схемы и default после удаления собственных QA-записей. Снимок staging до миграции успешно принят для 55 целевых изделий; проверка после миграции и staging runtime/browser приёмка остаются впереди. Владелец прямо разрешил коммит задачи 111 и обычный merge/push в staging; выпуск в main не разрешён.
 
 ## Candidate
