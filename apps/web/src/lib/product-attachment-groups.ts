@@ -1,9 +1,11 @@
-export function productAttachmentGroups<T extends { id: string; category: string; stage: string }>(files: readonly T[], coverFileId?: string | null) {
+import type {FileSection} from "@prisma/client";
+
+export function productAttachmentGroups<T extends {id: string; section: FileSection}>(files: readonly T[], coverFileId?: string | null) {
   const visible = files.filter(file => file.id !== coverFileId);
-  // Категория замера важнее прежнего этапа; объекты и порядок не меняются.
+  // Общие файлы задачи изделия остаются видимыми в документах производства.
   return {
-    measurement: files.filter(file => file.category === "MEASUREMENT"),
-    production: visible.filter(file => file.category !== "MEASUREMENT" && ["PRODUCTION", "ASSEMBLY"].includes(file.stage)),
-    installation: visible.filter(file => file.category !== "MEASUREMENT" && file.stage === "INSTALLATION"),
+    measurement: visible.filter(file => file.section === "MEASUREMENT"),
+    production: visible.filter(file => file.section === "PRODUCTION" || file.section === "GENERAL"),
+    installation: visible.filter(file => file.section === "INSTALLATION"),
   };
 }

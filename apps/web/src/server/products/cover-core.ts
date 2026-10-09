@@ -1,5 +1,5 @@
 import {createHash} from 'node:crypto';
-import {Prisma,type FileStage} from '@prisma/client';
+import {Prisma} from '@prisma/client';
 import {canSetProductCover,isCoverImageMime,validateProductCoverFile,type CoverProduct} from '@/lib/product-cover';
 import {MANAGER_ROLES,hasAnyRole,hasRole} from '@/lib/roles';
 import {fileVisibilityWhere,productEditWhere,resolveVisibilityActor,type VisibilityActor} from '@/server/access/visibility';
@@ -8,7 +8,7 @@ import {sketchUploadTargetSchema,sketchBindSchema,sketchDeleteSchema,type Sketch
 type Tx=Prisma.TransactionClient;
 export type CoverMutationActor=VisibilityActor&{name?:string|null};
 export type CoverUploadTarget=SketchUploadTarget;
-export type CoverUploadFileInput={fileName:string;storedName:string;mimeType:string;size:number;hasThumb:boolean;uploadedById:string;stage?:FileStage;contentHash?:string};
+export type CoverUploadFileInput={fileName:string;storedName:string;mimeType:string;size:number;hasThumb:boolean;uploadedById:string;contentHash?:string};
 const fail=(kind:Extract<SketchResult,{ok:false}>['kind'],error:string,currentSketchFileId?:string|null):SketchResult=>({ok:false,kind,error,...(currentSketchFileId===undefined?{}:{currentSketchFileId})});
 const digest=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const json=(value:unknown):Prisma.InputJsonValue=>JSON.parse(JSON.stringify(value));
@@ -44,7 +44,7 @@ export async function authorizeProductCoverUpload(tx:Tx,actor:CoverMutationActor
  return{ok:true as const,product:allowed.product,replayHint:false};
 }
 export async function persistUploadedProductCover(tx:Tx,actor:CoverMutationActor,input:CoverUploadTarget,file:CoverUploadFileInput):Promise<SketchResult>{
- if(Object.hasOwn(file,'caption'))return fail('validation','Подписи файлов больше не используются');
+ if(['category','stage','caption'].some(key=>Object.hasOwn(file,key)))return fail('validation','Обновите форму: метаданные файлов больше не используются');
  const parsed=sketchUploadTargetSchema.safeParse(input);
  if(!parsed.success)return fail('validation','Обновите форму эскиза');
  await tx.$queryRaw`SELECT id FROM "Product" WHERE id=${input.productId} FOR UPDATE`;
@@ -57,10 +57,10 @@ export async function persistUploadedProductCover(tx:Tx,actor:CoverMutationActor
  if(allowed.product.sketchFileId!==input.expectedSketchFileId)return fail('conflict','Эскиз уже изменён другим пользователем',allowed.product.sketchFileId);
  const invalid=await validateReplacementFile(tx,allowed.visibility,allowed.product,input.expectedSketchFileId);
  if(invalid)return invalid;
- const created=await tx.file.create({data:{projectId:input.projectId,productId:input.productId,taskId:null,category:'PHOTO',stage:file.stage,fileName:file.fileName,storedName:file.storedName,mimeType:file.mimeType,size:file.size,hasThumb:file.hasThumb,uploadedById:actor.id},select:{id:true}});
+ const created=await tx.file.create({data:{projectId:input.projectId,productId:input.productId,taskId:null,section:'PRODUCTION',fileName:file.fileName,storedName:file.storedName,mimeType:file.mimeType,size:file.size,hasThumb:file.hasThumb,uploadedById:actor.id},select:{id:true}});
  const changed=await tx.product.updateMany({where:{id:input.productId,sketchFileId:input.expectedSketchFileId},data:{sketchFileId:created.id}});
  if(changed.count!==1)throw Error('SKETCH_CAS_RACE');
- await tx.changeLog.create({data:{actorType:'user',actorId:actor.id,actorName:actor.name??undefined,entity:'file',entityId:created.id,action:'create',newValue:{projectId:input.projectId,productId:input.productId,fileName:file.fileName,category:'PHOTO'}}});
+ await tx.changeLog.create({data:{actorType:'user',actorId:actor.id,actorName:actor.name??undefined,entity:'file',entityId:created.id,action:'create',newValue:{projectId:input.projectId,productId:input.productId,fileName:file.fileName,section:'PRODUCTION'}}});
  await tx.changeLog.create({data:{actorType:'user',actorId:actor.id,actorName:actor.name??undefined,entity:'product',entityId:input.productId,action:'cover.change',field:'sketchFileId',oldValue:{sketchFileId:input.expectedSketchFileId},newValue:{sketchFileId:created.id,uploaded:true}}});
  const result:SketchResult={ok:true,id:created.id,sketchFileId:created.id,clientMutationId:input.clientMutationId};
  await receipt(tx,actor,input.productId,input.clientMutationId,'cover.upload',fingerprint,result);

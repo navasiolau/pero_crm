@@ -21,7 +21,7 @@ async function main(){
    cashId=(await tx.cashAccount.create({data:{name:marker,currency:"BYN"}})).id;
    const max=await tx.expenseArticle.aggregate({_max:{code:true}});
    articleId=(await tx.expenseArticle.create({data:{name:marker,code:(max._max.code??0)+1}})).id;
-   materialId=(await tx.material.create({data:{name:marker,unit:"шт",purchasePrice:20}})).id;
+   materialId=(await tx.material.create({data:{name:marker,unitId: "warehouse-unit-piece",purchasePrice:20}})).id;
   });
   const secret=process.env.AUTH_SECRET;assert.ok(secret);
   const token=await encode({secret,salt:"authjs.session-token",maxAge:600,token:{id:marker,sub:marker,sessionVersion:0}});

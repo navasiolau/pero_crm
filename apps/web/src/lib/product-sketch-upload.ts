@@ -5,5 +5,5 @@ export function sketchUploadForm(file:File,projectId:string,productId:string,cli
  const target=sketchUploadTargetSchema.parse({projectId,productId,expectedSketchFileId,clientMutationId});
  if(!isCoverImageMime(file.type))throw Error('Выберите изображение поддерживаемого формата.');
  if(file.size<=0||file.size>25*1024*1024)throw Error('Изображение должно быть непустым и не больше 25 МБ.');
- const form=new FormData();form.append('file',file);form.append('projectId',target.projectId);form.append('productId',target.productId);form.append('category','PHOTO');form.append('assignCover','1');form.append('expectedSketchFileId',target.expectedSketchFileId??'null');form.append('clientMutationId',target.clientMutationId);return form;
+ const form=new FormData();form.append('file',file);form.append('projectId',target.projectId);form.append('productId',target.productId);form.append('section','PRODUCTION');form.append('assignCover','1');form.append('expectedSketchFileId',target.expectedSketchFileId??'null');form.append('clientMutationId',target.clientMutationId);return form;
 }

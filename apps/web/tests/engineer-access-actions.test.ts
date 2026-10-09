@@ -50,7 +50,6 @@ before(() => {
   inject("../src/server/plugins/changelog", { writeChangeLog: async () => {} });
   inject("../src/server/plugins/events", { emitDomainEvent: async () => {} });
   inject("../src/server/notifications/notify", { notifyOrg: async () => {}, notifyPerson: async () => {} });
-  inject("../src/server/files/stage-config", { getFileStageConfig: async () => ({ enabled: false }) });
   inject("../src/lib/s3", {
     UPLOADS_ROOT: "never-used",
     s3Enabled: () => true,

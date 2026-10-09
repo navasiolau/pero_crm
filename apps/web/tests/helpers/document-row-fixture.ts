@@ -9,7 +9,7 @@ export async function createDocumentRowFixture(tx:Prisma.TransactionClient,marke
  const cash=await tx.cashAccount.create({data:{id:marker+'-cash',name:marker,currency:'BYN'}});
  const max=await tx.expenseArticle.aggregate({_max:{code:true}});
  const article=await tx.expenseArticle.create({data:{id:marker+'-article',name:marker,code:(max._max.code??0)+1}});
- const material=await tx.material.create({data:{id:marker+'-material',name:marker,unit:'шт',purchasePrice:20}});
+ const material=await tx.material.create({data:{id:marker+'-material',name:marker,unitId: "warehouse-unit-piece",purchasePrice:20}});
  const paid=await tx.stockMovement.create({data:{id:marker+'-paid',materialId:material.id,type:'INCOME',receiptKind:'PAID',quantity:3,unitPrice:20,totalByn:60,createdById:marker,comment:marker}});
  const inventory=await tx.stockMovement.create({data:{id:marker+'-inventory',materialId:material.id,type:'INCOME',receiptKind:'INVENTORY',quantity:1,unitPrice:20,totalByn:20,createdById:marker,comment:marker}});
  const payment=await tx.payment.create({data:{id:marker+'-payment',direction:'EXPENSE',amount:60,bynAmount:60,rate:1,currency:'BYN',cashAccountId:cash.id,expenseArticleId:article.id,createdById:marker,comment:marker}});

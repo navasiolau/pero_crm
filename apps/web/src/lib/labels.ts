@@ -23,18 +23,6 @@ export const projectMaterialStatusLabels: Record<string, string> = {
   SHORTAGE: "Нет на складе",
 };
 
-// Единицы измерения номенклатуры (из legacy 1421, MVP-набор)
-export const MATERIAL_UNITS = [
-  "шт",
-  "м²",
-  "м.п.",
-  "лист",
-  "кг",
-  "м",
-  "компл",
-  "упак",
-] as const;
-
 // Схемы оплаты сотрудника (§10)
 export const paySchemeLabels: Record<string, string> = {
   PIECE: "Сдельная",

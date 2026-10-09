@@ -16,7 +16,7 @@ export async function quoteStockPurchaseCore(actor: DomainActor, input: unknown)
   if (!parsed.success) return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Ошибка данных" };
   try {
     const { prepared, material } = await prepareStockPurchase(actor, parsed.data, prisma);
-    return { ok: true as const, quote: { materialName: material.name, unit: material.unit, quantity: parsed.data.quantity,
+    return { ok: true as const, quote: { materialName: material.name, unit: material.measurementUnit.name, quantity: parsed.data.quantity,
       unitPrice: parsed.data.unitPrice, currency: parsed.data.currency, amount: prepared.amount, bynAmount: prepared.bynAmount,
       rate: prepared.rate, rateDate: prepared.rateDate?.toISOString().slice(0,10) ?? null } };
   } catch (error) { return { ok: false as const, error: error instanceof Error ? error.message : "Не удалось рассчитать закупку" }; }

@@ -25,7 +25,6 @@
     "@dnd-kit/utilities": "^3.2.2",
     "@node-rs/argon2": "^2.1.0",
     "@pero/plugin-demo": "workspace:*",
-    "@pero/plugin-file-stages": "workspace:*",
     "@pero/plugin-sdk": "workspace:*",
     "@prisma/client": "6.19.3",
     "@serwist/next": "9.5.11",
