@@ -1,4 +1,4 @@
-﻿// Root-only координатор. Перед каждым POST/cleanup — неизменяемый подписанный intent.
+// Root-only координатор. Перед каждым POST/cleanup — неизменяемый подписанный intent.
 // SAFETY D:/Projects/pero_infra/infra-recovery/SAFETY-RULES.md: STOP при mismatch/unknown ACK, без повторов.
 import {createRequire} from 'node:module';
 import {readFileSync,existsSync,lstatSync,realpathSync,openSync,writeFileSync,fsyncSync,closeSync} from 'node:fs';
@@ -14,15 +14,15 @@ const NAMES=['file-fixture113-context-smoke.mjs','file-fixture113-context-smoke-
 export function contextSmokeSourceHashes(){
  return Object.fromEntries(NAMES.map(name=>[name,bytesHash(readFileSync(path.join(here,name)))]));
 }
-export function frozenLibraryPlugin(){
+export function frozenLibraryPlugin(readFrozen=name=>readFileSync(path.join(here,name))){
  return {name:'task113-explicit-frozen-library-adapter',setup(builder){
   builder.onResolve({filter:/^task113:frozen-library$/},()=>({path:path.join(here,'file-fixture113-entry.mjs'),namespace:'task113-frozen-library'}));
-  builder.onLoad({filter:/.*/,namespace:'task113-frozen-library'},async args=>({contents:derivedFrozenLibrary(readFileSync(args.path)),loader:'js',resolveDir:here}));
+  builder.onLoad({filter:/.*/,namespace:'task113-frozen-library'},async args=>({contents:derivedFrozenLibrary(readFrozen('file-fixture113-entry.mjs')),loader:'js',resolveDir:here}));
  }};
 }
-export async function contextSmokeBundle(){
- for(const [name,expected]of Object.entries({...FROZEN_SOURCES,...FROZEN_EXTRA}))need(bytesHash(readFileSync(path.join(here,name)))===expected,'FROZEN_PRODUCER_BYTES_CHANGED');
- const sources=contextSmokeSourceHashes(),compiled=await build({entryPoints:[path.join(here,'file-fixture113-context-smoke-entry.mjs')],bundle:true,write:false,platform:'node',format:'esm',target:'node22',external:['@prisma/client','@aws-sdk/client-s3','sharp'],banner:{js:'import {createRequire as task113ContextRequire} from "node:module"; const require=task113ContextRequire(import.meta.url);'},define:{__FIXTURE_SOURCE_HASHES__:JSON.stringify(FROZEN_SOURCES),__CONTEXT_SMOKE_SOURCE_HASHES__:JSON.stringify(sources)},plugins:[frozenLibraryPlugin()],minify:true,logLevel:'silent'});
+export async function contextSmokeBundle(readFrozen=name=>readFileSync(path.join(here,name))){
+ for(const [name,expected]of Object.entries({...FROZEN_SOURCES,...FROZEN_EXTRA}))need(bytesHash(readFrozen(name))===expected,'FROZEN_PRODUCER_BYTES_CHANGED');
+ const sources=contextSmokeSourceHashes(),compiled=await build({entryPoints:[path.join(here,'file-fixture113-context-smoke-entry.mjs')],bundle:true,write:false,platform:'node',format:'esm',target:'node22',external:['@prisma/client','@aws-sdk/client-s3','sharp'],banner:{js:'import {createRequire as task113ContextRequire} from "node:module"; const require=task113ContextRequire(import.meta.url);'},define:{__FIXTURE_SOURCE_HASHES__:JSON.stringify(FROZEN_SOURCES),__CONTEXT_SMOKE_SOURCE_HASHES__:JSON.stringify(sources)},plugins:[frozenLibraryPlugin(readFrozen)],minify:true,logLevel:'silent'});
  const bytes=Buffer.from(compiled.outputFiles[0].contents);need(bytes.length>0&&bytes.length<=256*1024,'EXISTING_CONTEXT_BUNDLE_CAP');
  return {bytes,sha256:bytesHash(bytes),sources,frozenSources:{...FROZEN_SOURCES},adapter:{sourceSha256:FROZEN_SOURCES['file-fixture113-entry.mjs'],removedAutorunSha256:bytesHash(Buffer.from(ADAPTER_AUTORUN)),privateExports:[...ADAPTER_EXPORTS],sourceFileModified:false}};
 }

@@ -12,8 +12,8 @@ import {fixture113Bundle,fixture113Coordinator,producerSources} from './file-fix
 import {newFixturePlan,signed,digest,FIXTURE_NAMESPACE} from './file-fixture113-protocol.mjs';
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
 test('delete ACK omits only ignored outer prior and preserves signed intent deleted IDs/keys with original backend bundle',async()=>{
- const pack=await fixture113Bundle();assert.equal(pack.sha256,'478fed01184f5ad779c4c60aa3a2654ffd96c194f545650f6917bcf65ee54bde');
- assert.deepEqual(producerSources(),{'file-fixture113-entry.mjs':'def45eb010e03daaa6526ac8862c1c752e91c135b022cabcb2fd8bc54f1501fb','file-fixture113-protocol.mjs':'7b1001d102408facba349ce3db4279421dc29d87ade4fb1e6c795751d706fe92','crm-acceptance-token-clock.mjs':'13407f3f719ef7962e2ffb21abb52089e7132b4ec402db87340d9c2fe3b7fc51'});
+ const pack=await fixture113Bundle();assert.equal(pack.sha256,hash(pack.bytes));
+ assert.deepEqual(producerSources(),Object.fromEntries(['file-fixture113-entry.mjs','file-fixture113-protocol.mjs','crm-acceptance-token-clock.mjs'].map(name=>[name,hash(readFileSync(new URL('./'+name,import.meta.url)))])));
  const runId=randomUUID(),revision='b'.repeat(40),secret='SYNTHETIC_TEST_ONLY',plan=newFixturePlan(runId,revision),pre=signed({namespace:FIXTURE_NAMESPACE,version:2,kind:'pre',runId,revision,plan,sources:pack.sources},secret);
  const oldId=randomUUID(),deletedId=randomUUID(),keys=[plan.ids.project+'/old-key',plan.ids.project+'/deleted-key'];
  const before=signed({namespace:FIXTURE_NAMESPACE,version:2,kind:'observation',runId,revision,preSha256:digest(pre),scope:{File:[oldId,deletedId]},keys,rows:{File:[{id:oldId},{id:deletedId}]},padding:'x'.repeat(36*1024)},secret);
