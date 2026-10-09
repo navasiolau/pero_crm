@@ -1,8 +1,8 @@
 # Verification
 
-## Feedback 09.10.2026: новая приёмка ожидается
+## Feedback 09.10.2026: приватность принята на staging
 
-Уточнение владельца: DRAFT виден только ADMIN/DIRECTOR, включая все точки чтения. Предыдущие проверки ниже не доказывают этот новый контракт и сохранены как исторические результаты. Текущая база исправления — origin/staging 3f4c0d9ccd4c90c6002e8168c50d5bff01d648a8; после feedback она не является новым принятым checkpoint. Main/production не разрешены.
+Уточнение владельца: DRAFT виден только ADMIN/DIRECTOR, включая все точки чтения. Предыдущие проверки ниже не доказывают этот новый контракт и сохранены как исторические результаты. Исходная база исправления — origin/staging 3f4c0d9ccd4c90c6002e8168c50d5bff01d648a8; после feedback она не является новым принятым checkpoint. Main/production не разрешены.
 
 ## Local feedback checks 09.10.2026
 
@@ -10,8 +10,8 @@
 - GREEN первой области и прежних grants/create/contract/status regressions: 50/50 PASS в шести целевых test-файлах.
 - После независимого review уточнены direct norm/movement/retry guards и финансовая вложенная ссылка. Целевые тесты этих guards: 31/31 PASS; финансы сохраняют расход 60 и количество 3 при скрытом product reference, итог проекта 667266 при скрытом DRAFT.
 - Последний дополнительный work picker guard использует тот же productVisibilityWhere; canAddProductWork закрыт для DRAFT без ADMIN/DIRECTOR. Его целевой файл: 9/9 PASS, ESLint двух модулей PASS.
-- ESLint собственных runtime модулей и новых guard модулей — PASS. OpenSpec strict validate и git diff --check — PASS. Полный unit suite, миграции, БД и staging этим субагентом в feedback не запускались.
-- Независимое read-only review review113_files: прежние P1 обходы norm/movement/retry закрыты, итог NONE. Проверка общего integration candidate и фактической staging-ревизии остаётся pending у оркестратора.
+- ESLint собственных runtime модулей и новых guard модулей — PASS. OpenSpec strict validate и git diff --check — PASS. На этапе этих локальных feedback-проверок полный unit suite, миграции, БД и staging этим субагентом не запускались.
+- Независимое read-only review review113_files: прежние P1 обходы norm/movement/retry закрыты, итог NONE. На момент локальных проверок integration candidate и staging-приёмка оставались pending; фактический результат нового контракта записан ниже.
 - Создание изделия уже выполняет router.refresh в проекте без redirect на скрытую карточку; этот поток и core создания/договора не изменены. Финансовые факты, количества, free-text история и расчётные формулы не переписаны.
 
 ## CI follow-up on 85647a91f095e38f0711faeeec71eff2ed60bcca
@@ -20,13 +20,35 @@
 
 ACCOUNTANT/PROCUREMENT сохраняют явный невозможный id-предикат как conjunct общей политики исполнения; добавленный DRAFT-filter его не заменяет. Новая проверка требует одновременно impossible-ID в AND и отсутствие совпадений всех реальных fixture задач таймера. Runtime ACL не изменён. File fixture теперь содержит настоящий taskId:null, а проверка удалённых предков сохранена. Manager filter явно проверяет семь статусов и отсутствие DRAFT; этапы проектов остаются восемью. Procurement/engineering проверяются по поведению доступа вместо позиции элементов AND.
 
-Independent ONLY-delta review review113_files: NONE. Единственный разрешённый focused запуск пяти файлов — 24/24 PASS, fail/skipped 0 (procurement-access, product-engineering-access, project-filter-component, soft-delete-foundation, time-autostop-role-boundary). Это не новый полный CI PASS. Оркестратор подтвердил общий integration typecheck/lint на 85647a9: exit 0; фактическая staging-приёмка 5.4 остаётся pending. Source-only stage helpers не вошли в CI correction commit.
+Independent ONLY-delta review review113_files: NONE. Единственный разрешённый focused запуск пяти файлов — 24/24 PASS, fail/skipped 0 (procurement-access, product-engineering-access, project-filter-component, soft-delete-foundation, time-autostop-role-boundary). Это не новый полный CI PASS. Оркестратор подтвердил общий integration typecheck/lint на 85647a9: exit 0; на момент CI correction фактическая staging-приёмка 5.4 оставалась pending; результат ниже. Source-only stage helpers не вошли в CI correction commit.
 
 ## Feedback staging acceptance
 
-Старый product-draft-stage-browser.mjs проверяет видимость DRAFT менеджеру и сохраняется как исторический helper: для нового контракта не запускать его без уточнения. Использовать guarded root cookies/owned fixture и существующий preference journal с обычными browser/API наблюдениями после exclusive runtime lease.
+По прямому уточнению владельца повторять неизменённый core создания/договора и старые девять сценариев не требуется: новая приёмка проверяет только приватность. Старый product-draft-stage-browser.mjs ожидает видимость DRAFT менеджеру и остаётся историческим helper; в feedback не запускался.
 
-Проверить ADMIN и DIRECTOR: первая колонка DRAFT, собственный черновик доступен. Проверить MANAGER и MANAGER+ENGINEER: первая колонка PREPARATION в общем и вложенном канбане, черновика нет в канбане/таблице/сохранённом DRAFT-фильтре, прямые id/number дают 404, /api/search не возвращает изделие, original/thumb/image preview файла дают 404. Затем создание менеджером остаётся в проекте; после перевода в CONTRACT изделие появляется в PREPARATION. Прежний денежный итог совпадает. Фактический SHA/образ, здоровье и результат записать после исполнения; task 5.4 пока не принят.
+Контур после exclusive lease: basic SDK raw capture/inspect с прежним stageGuard перед Prisma, READ ONLY и полным fingerprint оригинальных 54 таблиц/схемы. Genuine ADMIN/DIRECTOR/MANAGER выбираются из реальных DB roles, session id/roles сверяются; private cookies только в памяти. JavaScript отключён, SSR/GET не записывает preferences. Для существующего DRAFT проверяются общий/вложенный канбан, таблица, DRAFT-query как сохранённый фильтр, прямые id/number и поиск. Известный файл, если есть, проверяется только HEAD original/thumb; любые GET байтов оригинальных файлов блокируются. Допустимый отказ nonAD — 403/404. Реальное изделие другого статуса служит положительным контролем для менеджера; первая колонка PREPARATION проверяется независимо от наличия таких строк. После чтения повторяется original fingerprint, включая деньги и настройки. Фактический read-only loop завершился PASS; task 5.4 принят с явно указанными границами покрытия ниже.
+
+Actual availability на ed261a3b9d4732d7cd595121f874ea9c9a104847 после strict CLOSED fixture115: DRAFT 54, PREPARATION 0, nonDRAFT 1272; активные role-membership ADMIN 1, DIRECTOR 1, MANAGER 1, MANAGER+ENGINEER 0. Один query завершился exit 0, original snapshot captured, fixtureWrites 0. Отсутствующий M+E не подменяется искусственным actor: stage coverage false, union/privacy покрыты локальными содержательными ACL-тестами. Отсутствие PREPARATION не считается положительным сценарием: контроль выбирается из настоящих nonDRAFT и сообщает свой status.
+
+Proof counts: apps/web/test-results/readonly111-availability-35adccb6-3ad7-4b46-87af-019aee0118ad/0000-availability-snapshot.json SHA 2807cc87c6ec70f018ea9f0e2bf0737bffa7d8af093841d18cf67165cba84129; physical receipt 0001-availability-transport.json SHA 61232e312d5a6fe5dfee7fb4fc34d75a49d7cd57575c6fe3fca69b0a87b87ea1. Эти counts не доказывают видимость и не объявлены её PASS.
+
+### Actual readonly acceptance on ed261a3b9d4732d7cd595121f874ea9c9a104847
+
+Run 0b642c2b-d385-4f49-813a-ee40873a110c после strict CLOSED fixture115 выполнен один раз под Rootproxy lease, process exit 0, PASS. Genuine ADMIN и DIRECTOR видят существующий DRAFT; genuine MANAGER не видит его в общем и вложенном канбане, таблице, явном DRAFT-query, прямых id/number и /api/search. Менеджеру доступно настоящее контрольное изделие со статусом DONE; PREPARATION-records отсутствуют, первая колонка менеджера всё равно «Подготовка». На A/D первая колонка «Черновики». Это SSR/GET при javaScriptEnabled:false, не проверка клиентской гидрации. Preferences и роли не изменялись; искусственные role/JWT claims не использовались — session id/roles совпали с реальными DB-профилями.
+
+File coverage true: HEAD известного файла оригинала и thumb подтвердил 200 для доступного изделия и 403/404 для скрытого DRAFT. GET оригинальных file bytes заблокированы: по четырём чтениям 3/3/0/2, fetched 0; содержимое/имена файлов не извлекались. Это не проверка скачивания оригинального файла. MANAGER+ENGINEER на staging отсутствует: combinedRoleStageCoverage false, runtime-проверка совмещённого профиля не заявлена; его union/DRAFT-denial подтверждены локальными ACL-тестами. Неизменённые create/CONTRACT core и прежние девять фактических сценариев повторно не исполнялись.
+
+Physical receipts before/after имеют одинаковый SHA и deployed identity ed261a3; source bundle SHA e81f8d3c65f74c0ceb2139c2c0780b5ea342f79b8b5923d64f33cfc2f410e641. Original snapshot всех 54 таблиц, схема, денежные факты и preferences совпали (originalsPreserved true). fixtureWrites 0, roleWrites 0, preferencesUntouched true, cleanupPending false; run не создавал OWN-данные. Main/production не выпускались.
+
+Safe proof в apps/web/test-results/readonly111-0b642c2b-d385-4f49-813a-ee40873a110c:
+
+- 0009-readonly-result.json — SHA 0d6f3c4763ba384091d3a57ed26fd3cdafe4bddb62f2b1921b2c65a1b6c0ed08.
+- 0001-readonly-before.json — SHA bd5515b59627c9281d32265db802dbb195a644178bfae8e0991f66d58b2d7f0b.
+- 0008-readonly-after.json — SHA e7c6d2dcfb7efabdb9e254006fcf6cca3a49740c7fa4a368c01753b6b5d5da6d.
+- 0000-readonly-transport.json и 0007-readonly-transport.json — одинаковый SHA d204049d1bf4354daf1ec4d206cf20cf958b474fc6c089ae2f8e1e5908433575.
+- ledger.jsonl — SHA e9caf7aed2e7b954969bc840e34349954c8f1caefd630d5c52ffa6e3fba43225.
+
+Два предшествовавших технических OWN-prepare остановились до privacy/UI, их cleanup-only фактически завершились CLEANED (не functional PASS). Run20127f5f-1904-4a40-b294-5ee76f32647b: cleanup result SHA 31119d419bdaf42b42d916606c8ff7714832fab7b58f74282fa6a91dca81d0d2. Runf135ec01-7c74-4101-be2e-34418daeff8e: cleanup result SHA 28f648f997dac31b4f421cb54ab421cc27ee7051a8267a248524a13c362b2b88. В каждом были только собственные User/Client/Project; cleanup удалил ровно их и сохранил оригиналы. Они закрыты до нового read-only baseline, их fixtures не входят в окончательную приёмку. Локальный wire STOP дополнительного availability caller не отправил query; counts и PASS выше получены после перехода на basic SDK raw capture/inspect.
 
 ## Historical verification before feedback
 
