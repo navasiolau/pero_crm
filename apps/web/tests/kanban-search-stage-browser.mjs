@@ -10,6 +10,7 @@ import {chromium,expect} from '@playwright/test';
 import {disableKanbanQaServiceWorkerApi} from './kanban-cover-staging-browser.mjs';
 import {normalizeListQuery} from '../src/lib/list-state.ts';
 import {encodeListFilterValue} from '../src/lib/list-filter-values.ts';
+import {SEARCH117_NAMESPACE,canonical117,assertCurrentCertificate117} from './kanban-search-owned-protocol.mjs';
 
 export const SEARCH_STAGE_ORIGIN='https://staging-crm.peromebel.by';
 const ROOT=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../..');
@@ -166,6 +167,16 @@ export function buildKanbanPreferenceCleanup(binding,ownWrites,currentRows){
  });
 }
 
+/** Actual producer сравнивает полный HMAC/текущие rows/compiled manifest внутри guarded web. */
+export async function certifySearch117Start(input,binding,verifySignedCurrent){
+ need(typeof verifySignedCurrent==='function','K117_CURRENT_PRODUCER_CALLBACK_REQUIRED');
+ const h=input.checkpoint;need(h?.namespace===SEARCH117_NAMESPACE&&h.version===1&&h.kind==='browser-handoff'&&/^[a-f0-9]{64}$/.test(h.verifierSourceSha256??'')&&/^[a-f0-9]{64}$/.test(h.currentOwnedStateHash??''),'K117_ACTUAL_SIGNED_PRODUCER_HANDOFF_REQUIRED');
+ need(canonical117(h.subjects)===canonical117(input.subjects)&&canonical117(h.tokens)===canonical117(input.tokens)&&canonical117(h.action)===canonical117(input.action),'K117_PUBLIC_HANDOFF_FIELDS_TAMPERED');
+ const certificate=await verifySignedCurrent(h);
+ assertCurrentCertificate117(certificate,h,{'kanban-search-owned-fixtures.mjs':h.verifierSourceSha256});
+ need(certificate.actorId===binding.actorId&&certificate.revision===binding.revision,'K117_CURRENT_PRODUCER_ACTOR_MISMATCH');return certificate;
+}
+
 async function privateDirectory(input,binding){
  need(path.isAbsolute(input.outputDir??''),'K117_PRIVATE_OUTPUT_REQUIRED');const base=await realpath(path.join(ROOT,'.playwright-mcp','search117')),root=await realpath(ROOT);
  need(path.relative(root,base)&&!path.relative(root,base).startsWith('..'),'K117_PRIVATE_BASE_MISMATCH');
@@ -183,10 +194,10 @@ async function centerMetrics(target){return target.evaluate(card=>{
 /** Здесь нет создания JWT, входа, DB/storage/business mutations, trace/HAR/storageState.
  * Записываются только предпочтения свежего QA actor. Root очищает их через CAS
  * и закрывает все reused own fixtures; BROWSER_CHECKS_PASSED_CLEANUP_REQUIRED ещё не приёмка. */
-export async function runKanbanSearchStagingBrowser(input={}){
- const binding=validateKanbanSearchHandoff(input),directory=await privateDirectory(input,binding);
+export async function runKanbanSearchStagingBrowser(input={},callbacks={}){
+ const binding=validateKanbanSearchHandoff(input),certificate=await certifySearch117Start(input,binding,callbacks.verifySignedCurrent),directory=await privateDirectory(input,binding);
  const journal=new KanbanPreferenceJournal(binding,event=>durable(path.join(directory,`${String(event.sequence).padStart(4,'0')}-${event.kind.toLowerCase()}.json`),event));
- await durable(path.join(directory,'before.json'),{version:1,runId:binding.runId,revision:binding.revision,actorId:binding.actorId,checkpointSignature:binding.checkpointSignature,originalPreSha256:binding.preSha256,originalPreferences:binding.originalPreferences,actionId:binding.actionId,actionManifestSha256:binding.actionManifestSha256});
+ await durable(path.join(directory,'before.json'),{version:1,runId:binding.runId,revision:binding.revision,actorId:binding.actorId,checkpointSignature:binding.checkpointSignature,originalPreSha256:binding.preSha256,originalPreferences:binding.originalPreferences,actionId:binding.actionId,actionManifestSha256:binding.actionManifestSha256,currentVerificationCertificate:certificate});
  const receipt={status:'STARTED',revision:binding.revision,runId:binding.runId,mode:'fixed staging browser; only fresh actor list-preference action; root guarded cleanup still required',checks:[],screenshots:[],blockedOtherPosts:0,blockedPrefetches:0,deniedRequests:0,pageErrors:0,ownWrites:[],unresolvedIntents:0};
  let browser,context,phase='browser-setup',accepting=false,stop=null;const captures=new Set();
  function captureJob(promise){captures.add(promise);void promise.finally(()=>captures.delete(promise)).catch(()=>{});return promise;}
