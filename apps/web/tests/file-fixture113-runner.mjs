@@ -45,6 +45,7 @@ export function fixture113Coordinator(options){
  async function execute(operation,mode,extra={}){
   const pack=await fixture113Bundle();if(!expectedSources)expectedSources=pack.sources;need(canonical(expectedSources)===canonical(pack.sources),'SOURCE_CHANGED_DURING_LIFECYCLE');
   const input={authorized:true,runId:options.runId,revision:options.revision,operation,mode,...(pre?{pre,preSha256:digest(pre)}:{}),...(priorObservation?{priorObservation}:{}),...extra};
+  if(mode==='delete-ack')delete input.priorObservation;
   const transport=qaTransport({target:'staging',revision:options.revision,outputDir:options.outputDir});const result=await transport.execute(pack.bytes,operation,input);return {body:checked(result,options.revision,pack.sha256),receipt:result.receipt,pack};
  }
  return {
