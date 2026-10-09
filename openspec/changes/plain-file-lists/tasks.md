@@ -10,9 +10,9 @@
 
 - [x] 2.1 После ordinary merge reviewed feature/113 в feature/115 подключить общий ряд для ordinary projects/products/measurement/production/installation/tasks и всех существующих файловых renderer (новый catalogue экран не создаётся); проверить File.section и сохранение распределения файлов.
 - [x] 2.2 Подключить financial attachments/report documents/uploaded selections через прежние finance routes; проверить PDF/video downloads и disabled linked-document deletion без изменения финансовых связей.
-- [ ] 2.3 Передать server-safe per-file canDelete по текущим правилам, убрать только display-only author payload, сохранив uploadedById/audit; проверить текущие own-file и stale-access guards на настоящей разрешённой БД вместе с основным агентом.
+- [x] 2.3 Передать server-safe per-file canDelete по текущим правилам, убрать только display-only author payload, сохранив uploadedById/audit; проверить текущие own-file и stale-access guards на настоящей разрешённой БД вместе с основным агентом.
 
 ## 3. Приёмка
 
-- [ ] 3.1 Выполнить full suite, web typecheck/lint/build, OpenSpec strict, browser и визуальную проверку всех адаптеров; записать результат точного candidate diff.
-- [ ] 3.2 Пройти независимый review, затем основному агенту после разрешения на коммит выполнить normal merge и принять фактически развёрнутый staging SHA, здоровье и сценарии. Local receipt не заменяет staging.
+- [x] 3.1 Выполнить full suite, web typecheck/lint/build, OpenSpec strict, browser и визуальную проверку всех адаптеров; записать результат точного candidate diff.
+- [x] 3.2 Пройти независимый review, затем основному агенту после разрешения на коммит выполнить normal merge и принять фактически развёрнутый staging SHA, здоровье и сценарии. Local receipt не заменяет staging.
