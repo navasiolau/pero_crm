@@ -89,9 +89,10 @@ export async function runFilePrintStagingReadonly(input = {}) {
  }
  async function locate(page,item) {
   if (item.surface==='task') {
-   await goto(page,`${binding.paths.project}?tab=tasks`);await page.getByText(binding.taskTitle,{exact:true}).first().click();
-   const dialog=page.getByRole('dialog').filter({has:page.getByText(binding.taskTitle,{exact:true})});await expect(dialog).toBeVisible();
-   return dialog.locator(`[data-file-id="${item.file.id}"]:visible`);
+   // The sealed standalone QA task has no Work and is absent from the task workspace.
+   // Its owned attachment remains in the actual project flat files list with the same printer row.
+   await goto(page,`${binding.paths.project}?tab=files`);
+   return page.locator(`[data-file-id="${item.file.id}"][data-file-source="project"]:visible`);
   }
   if (item.surface==='project') await goto(page,`${binding.paths.project}?tab=files`);
   else if (item.surface==='product') await goto(page,binding.paths.product);
