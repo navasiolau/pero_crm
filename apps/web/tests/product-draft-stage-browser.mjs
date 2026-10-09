@@ -6,6 +6,9 @@ import {disableKanbanQaServiceWorkerApi} from './kanban-cover-staging-browser.mj
 const STAGES=new Set(['LEAD','ESTIMATE','CONTRACT','IN_WORK','PAUSED','REFUSED']);
 const STATUSES=new Set(['DRAFT','PREPARATION','DESIGN']);
 function safeStageExtras(data){if(data.extras===undefined||data.extras==='$undefined')return true;return data.toStage==='REFUSED'&&data.extras&&typeof data.extras==='object'&&!Array.isArray(data.extras)&&Object.keys(data.extras).every(key=>['refusalReason','refusalComment'].includes(key))&&typeof data.extras.refusalReason==='string'&&data.extras.refusalReason.startsWith('QA111 ');}
+const SAFE_FAILURE_CODES=new Set(['DRAFT111_ACTION_HTTP_FAILED','DRAFT111_ACTION_RESULT_UNEXPECTED','DRAFT111_ACTUAL_ACTION_ACK_REQUIRED','DRAFT111_ACTUAL_PROJECT_CREATED','DRAFT111_ACTUAL_SESSION_ID','DRAFT111_AUTHORIZED_STAGE_BINDING','DRAFT111_BROWSER_UNKNOWN','DRAFT111_CANONICAL_ACTION_ARGS_REQUIRED','DRAFT111_CLEAN_BROWSER','DRAFT111_CLIENT_ERROR','DRAFT111_DEPLOYED_REFERENCE_REQUIRED','DRAFT111_DURABLE_CALLBACKS_REQUIRED','DRAFT111_FRESH_MANAGER_PROFILE','DRAFT111_GLOBAL_COLUMNS_ORDER','DRAFT111_NESTED_COLUMNS_ORDER','DRAFT111_NEXT_ACTION_HEADER_REQUIRED','DRAFT111_OUTSIDE_ORIGIN_MUTATION','DRAFT111_OWN_GRAPH_REQUIRED','DRAFT111_OWN_PAGE_HTTP','DRAFT111_OWN_PATH_REQUIRED','DRAFT111_OWN_PRODUCT_SLOT','DRAFT111_OWN_TAGS_REQUIRED','DRAFT111_OWNED_ACTION_PAGE_REQUIRED','DRAFT111_PARTIAL_FILTER_ACK_REQUIRED','DRAFT111_PARTIAL_FILTER_WIDENED','DRAFT111_PREFERENCE_CAS_ACK','DRAFT111_PRODUCT_CREATE_ID','DRAFT111_PROJECT_CREATE_ID','DRAFT111_REPLAY_NOOP_GRAPH_CHANGED','DRAFT111_SAVED_PARTIAL_FILTER_WIDENED','DRAFT111_STOP_AFTER_UNKNOWN_RESPONSE','DRAFT111_UNOWNED_MUTATION_BLOCKED' ,'DRAFT111_JOURNAL_PERSIST_FAILED','DRAFT111_BROWSER_CLOSE_FAILED']);
+const ERROR_KINDS=new Map([['Error','ERROR'],['TypeError','TYPE_ERROR'],['RangeError','RANGE_ERROR'],['ReferenceError','REFERENCE_ERROR'],['SyntaxError','SYNTAX_ERROR'],['TimeoutError','TIMEOUT_ERROR']]);
+const safeErrorKind=error=>ERROR_KINDS.get(error?.name)??'UNKNOWN';
 const LABELS={LEAD:'Лид',ESTIMATE:'Просчёт',CONTRACT:'Договор',IN_WORK:'В работе',PAUSED:'Пауза',REFUSED:'Отказ'};
 const flightRows=bytes=>bytes.toString('utf8').split('\n').flatMap(line=>{try{return[JSON.parse(line.slice(line.indexOf(':')+1))];}catch{return[];}});
 const need=(ok,code)=>{if(!ok)throw Error(code);};
@@ -23,20 +26,21 @@ export function classifyDraftQaAction(args,scope){
  if(args.length===3&&['projects','products'].includes(args[0])&&typeof args[1]==='string'&&args[1].length<=32768&&(args[2]===null||typeof args[2]==='string'))return {kind:'preference',key:args[0]+'.list'};
  return null;
 }
-export async function runProductDraftStageBrowser({authorized=false,origin,revision,profile,checkpoint,outputDir,basicAuth,onJournal,observe}){
+export async function runProductDraftStageBrowser({authorized=false,origin,revision,profile,checkpoint,outputDir,basicAuth,onJournal,observe,launchBrowser=options=>chromium.launch(options)}){
  need(authorized===true&&origin==='https://staging-crm.peromebel.by'&&/^[a-f0-9]{40}$/.test(revision??'')&&checkpoint?.revision===revision&&/^[a-f0-9]{64}$/.test(checkpoint.signature??'')&&uuid(checkpoint.runId),'DRAFT111_AUTHORIZED_STAGE_BINDING');
  need(profile?.id===checkpoint.pre?.ids.actor&&JSON.stringify(profile.roles)===JSON.stringify(['MANAGER'])&&Array.isArray(profile.cookies)&&profile.cookies.length>0,'DRAFT111_FRESH_MANAGER_PROFILE');
  need(typeof onJournal==='function'&&typeof observe==='function'&&outputDir,'DRAFT111_DURABLE_CALLBACKS_REQUIRED');
  const tags=checkpoint.pre.tags,scope={actorId:profile.id,clientId:checkpoint.pre.ids.client,tags,projectIds:new Set([checkpoint.pre.ids.projectB]),productIds:new Set(),paths:new Set(['/projects','/products','/projects/'+checkpoint.pre.ids.projectB])};
  need(tags?.products?.length===10&&typeof tags.projectA==='string'&&typeof tags.client==='string'&&typeof tags.actor==='string','DRAFT111_OWN_TAGS_REQUIRED');
  const journal={runId:checkpoint.runId,revision,actions:[],preferences:{'projects.list':null,'products.list':null}};
- const receipt={kind:'product-draft-stage-browser',revision,runId:checkpoint.runId,status:'STARTED',checks:[],pageErrors:0,blockedWrites:0,authentication:'fresh owned manager short-lived private JWT; password login not claimed'};
- const browser=await chromium.launch({headless:true,channel:'chromium'});
+ const receipt={kind:'product-draft-stage-browser',revision,runId:checkpoint.runId,status:'STARTED',checks:[],pageErrors:0,pageErrorKinds:[],pageHttpStatus:null,journalPersistFailures:0,closeFailures:0,blockedWrites:0,authentication:'fresh owned manager short-lived private JWT; password login not claimed'};
+ const browser=await launchBrowser({headless:true,channel:'chromium'});
  const context=await browser.newContext({viewport:{width:1440,height:900},locale:'ru-RU',timezoneId:'Europe/Minsk',serviceWorkers:'block',httpCredentials:basicAuth});
  await context.addInitScript(disableKanbanQaServiceWorkerApi);await context.addCookies(profile.cookies.map(cookie=>({...cookie,url:origin})));
- const page=await context.newPage();page.on('pageerror',()=>{receipt.pageErrors++;});
- let queue=Promise.resolve(),failure,productStatusReference,stageReference,lastGraph,lastObservation;
- async function durable(){await onJournal(structuredClone(journal));}
+ const page=await context.newPage();page.on('pageerror',error=>{receipt.pageErrors++;if(receipt.pageErrorKinds.length<5)receipt.pageErrorKinds.push(safeErrorKind(error));});
+ let step='BOOTSTRAP',queue=Promise.resolve(),failure,productStatusReference,stageReference,lastGraph,lastObservation;
+ async function durable(){try{await onJournal(structuredClone(journal));}catch{receipt.journalPersistFailures++;throw Error('DRAFT111_JOURNAL_PERSIST_FAILED');}}
+ function stop(error){receipt.status='STOP';receipt.code=SAFE_FAILURE_CODES.has(error?.message)?error.message:'DRAFT111_BROWSER_UNKNOWN';receipt.failureStep=step;receipt.errorKind=safeErrorKind(error);}
  function ackResult(bytes){const rows=flightRows(bytes).filter(row=>row&&typeof row==='object'&&typeof row.ok==='boolean');need(rows.length===1,'DRAFT111_ACTUAL_ACTION_ACK_REQUIRED');return rows[0];}
  async function processWrite(route,request,url,args,action){
   need(!failure,'DRAFT111_STOP_AFTER_UNKNOWN_RESPONSE');
@@ -75,22 +79,22 @@ export async function runProductDraftStageBrowser({authorized=false,origin,revis
    let args;try{args=JSON.parse(request.postData()??'');}catch{throw Error('DRAFT111_CANONICAL_ACTION_ARGS_REQUIRED');}
    const ownedPage=scope.paths.has(url.pathname)||[...scope.projectIds].some(value=>url.pathname==='/projects/'+value);
    need(ownedPage,'DRAFT111_OWNED_ACTION_PAGE_REQUIRED');
-   const task=queue.then(()=>processWrite(route,request,url,args,action));queue=task.catch(error=>{failure=error;});
+   const task=queue.then(()=>processWrite(route,request,url,args,action));queue=task.catch(error=>{failure??=error;});
    await task;
-  }catch(error){failure=error;await route.abort('blockedbyclient').catch(()=>{});}
+  }catch(error){failure??=error;await route.abort('blockedbyclient').catch(()=>{});}
  });
  async function settled(){await queue;if(failure)throw failure;need(receipt.pageErrors===0,'DRAFT111_CLIENT_ERROR');}
- async function ownGraph(){await settled();const observation=await observe(structuredClone(journal));lastObservation=observation.observation??observation;lastGraph=lastObservation.scopegraph;need(lastGraph?.projectB&&Array.isArray(lastGraph.products),'DRAFT111_OWN_GRAPH_REQUIRED');for(const subject of [lastGraph.projectA,lastGraph.projectB,...lastGraph.products].filter(Boolean)){need(typeof subject.path==='string'&&/^\/(?:projects|products)\/[A-Za-z0-9_.:-]+$/.test(subject.path),'DRAFT111_OWN_PATH_REQUIRED');scope.paths.add(subject.path);}return lastGraph;}
- async function goto(url){const response=await page.goto(origin+url,{waitUntil:'domcontentloaded'});need(response?.status()===200,'DRAFT111_OWN_PAGE_HTTP');await page.locator('main').waitFor({state:'visible'});await settled();}
+ async function ownGraph(){step='OWN_GRAPH';await settled();const observation=await observe(structuredClone(journal));lastObservation=observation.observation??observation;lastGraph=lastObservation.scopegraph;need(lastGraph?.projectB&&Array.isArray(lastGraph.products),'DRAFT111_OWN_GRAPH_REQUIRED');for(const subject of [lastGraph.projectA,lastGraph.projectB,...lastGraph.products].filter(Boolean)){need(typeof subject.path==='string'&&/^\/(?:projects|products)\/[A-Za-z0-9_.:-]+$/.test(subject.path),'DRAFT111_OWN_PATH_REQUIRED');scope.paths.add(subject.path);}return lastGraph;}
+ async function goto(url,where='OWN_PAGE'){step=where;const response=await page.goto(origin+url,{waitUntil:'domcontentloaded'});const status=response?.status();receipt.pageHttpStatus=Number.isInteger(status)&&status>=100&&status<=599?status:null;need(status===200,'DRAFT111_OWN_PAGE_HTTP');await page.locator('main').waitFor({state:'visible'});await settled();}
  async function product(slot){const graph=await ownGraph(),value=graph.products.find(row=>row.titleSlot===slot);need(value&&scope.productIds.has(value.id),'DRAFT111_OWN_PRODUCT_SLOT');return value;}
  async function assertStatus(slot,status){await expect.poll(async()=>{const graph=await ownGraph();return graph.products.find(row=>row.titleSlot===slot)?.status;},{timeout:20000}).toBe(status);}
  async function addProduct(project,slot,status){
-  await goto(project.path+'?tab=products');await page.getByRole('button',{name:'Изделие',exact:true}).click();
+  await goto(project.path+'?tab=products','PRODUCTS_TAB');step='PRODUCT_DIALOG';await page.getByRole('button',{name:'Изделие',exact:true}).click();
   const dialog=page.getByRole('dialog',{name:'Новое изделие'});await dialog.locator('#product-title').fill(tags.products[slot-1]);await dialog.locator('#product-price').fill('0');
   await dialog.getByRole('button',{name:'Создать изделие',exact:true}).click();await expect(dialog).not.toBeVisible();await assertStatus(slot,status);return product(slot);
  }
  async function stage(project,toStage){
-  await goto(project.path+'?tab=overview');await page.getByRole('combobox',{name:'Статус',exact:true}).click();await page.getByRole('option',{name:LABELS[toStage],exact:true}).click();
+  await goto(project.path+'?tab=overview','PROJECT_STAGE_PAGE');step='PROJECT_STAGE_SELECT';await page.getByRole('combobox',{name:'Статус',exact:true}).click();await page.getByRole('option',{name:LABELS[toStage],exact:true}).click();
   if(toStage==='REFUSED'){const dialog=page.getByRole('dialog');await dialog.locator('#refusalReason').fill('QA111 '+checkpoint.runId);await dialog.getByRole('button',{name:'Перевести в «Отказ»',exact:true}).click();await expect(dialog).not.toBeVisible();}
   await expect.poll(async()=>{const graph=await ownGraph();return graph.projectA?.id===project.id?graph.projectA.stage:graph.projectB.stage;},{timeout:20000}).toBe(toStage);
  }
@@ -104,12 +108,12 @@ export async function runProductDraftStageBrowser({authorized=false,origin,revis
   await settled();
  }
  try{
-  const session=await context.request.get(origin+'/api/auth/session',{maxRedirects:0});need(session.status()===200&&(await session.json()).user?.id===profile.id,'DRAFT111_ACTUAL_SESSION_ID');
-  await durable();await goto('/projects?view=kanban&q='+checkpoint.runId);
-  await page.getByRole('button',{name:'Проект',exact:true}).click();const projectDialog=page.getByRole('dialog',{name:'Новый проект'});
-  await projectDialog.locator('#title').fill(tags.projectA);await projectDialog.getByRole('button',{name:'Выберите клиента…',exact:true}).click();await page.getByPlaceholder('Поиск клиента…').fill(tags.client);await page.getByRole('button',{name:tags.client,exact:true}).click();
-  await projectDialog.getByRole('button',{name:'не назначен',exact:true}).click();await page.getByPlaceholder('Поиск менеджера…').fill(tags.actor);await page.getByRole('button',{name:tags.actor,exact:true}).click();
-  await projectDialog.getByRole('button',{name:'Создать проект',exact:true}).click();await expect(projectDialog).not.toBeVisible();
+  step='SESSION';const session=await context.request.get(origin+'/api/auth/session',{maxRedirects:0});need(session.status()===200&&(await session.json()).user?.id===profile.id,'DRAFT111_ACTUAL_SESSION_ID');
+  step='INITIAL_JOURNAL';await durable();await goto('/projects?view=kanban&q='+checkpoint.runId,'PROJECTS_BOARD');
+  step='PROJECT_DIALOG_OPEN';await page.getByRole('button',{name:'Проект',exact:true}).click();const projectDialog=page.getByRole('dialog',{name:'Новый проект'});
+  step='PROJECT_TITLE';await projectDialog.locator('#title').fill(tags.projectA);step='PROJECT_CLIENT';await projectDialog.getByRole('button',{name:'Выберите клиента…',exact:true}).click();await page.getByPlaceholder('Поиск клиента…').fill(tags.client);await page.getByRole('button',{name:tags.client,exact:true}).click();
+  step='PROJECT_MANAGER';await projectDialog.getByRole('button',{name:'не назначен',exact:true}).click();await page.getByPlaceholder('Поиск менеджера…').fill(tags.actor);await page.getByRole('button',{name:tags.actor,exact:true}).click();
+  step='PROJECT_CREATE';await projectDialog.getByRole('button',{name:'Создать проект',exact:true}).click();await expect(projectDialog).not.toBeVisible();
   let graph=await ownGraph();need(graph.projectA,'DRAFT111_ACTUAL_PROJECT_CREATED');const A=graph.projectA,B=graph.projectB;
   const a1=await addProduct(A,1,'DRAFT');
   await goto(a1.path);await expect(page.getByRole('combobox',{name:'Сменить статус'})).toBeDisabled();
@@ -137,7 +141,7 @@ export async function runProductDraftStageBrowser({authorized=false,origin,revis
   for(const slot of [5,6,7])await expect(page.getByText(tags.products[slot-1],{exact:true})).toHaveCount(0);await goto('/products');need(new URL(page.url()).searchParams.get('status')===JSON.stringify(['DESIGN','PREPARATION']),'DRAFT111_SAVED_PARTIAL_FILTER_WIDENED');
   for(const slot of [5,6,7])await expect(page.getByText(tags.products[slot-1],{exact:true})).toHaveCount(0);check('explicit_and_saved_partial_filter_not_extended_with_DRAFT');await settled();need(context.serviceWorkers().length===0&&receipt.pageErrors===0&&receipt.blockedWrites===0,'DRAFT111_CLEAN_BROWSER');
   receipt.status='PASS';
- }catch(error){receipt.status='STOP';receipt.code=/^[A-Z0-9_]{1,100}$/.test(error?.message??'')?error.message:'DRAFT111_BROWSER_UNKNOWN';}
- finally{await queue.catch(()=>{});await durable();await context.close();await browser.close();}
- return {receipt,journal,scopegraph:lastGraph};
+ }catch(error){stop(error);}
+ finally{await queue.catch(()=>{});try{await durable();}catch(error){if(receipt.status!=='STOP')stop(error);}for(const resource of [context,browser])try{await resource.close();}catch{receipt.closeFailures++;if(receipt.status!=='STOP'){step='BROWSER_CLOSE';stop(Error('DRAFT111_BROWSER_CLOSE_FAILED'));}}}
+ return {receipt,journal,scopegraph:lastGraph??null};
 }
