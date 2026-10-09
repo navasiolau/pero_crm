@@ -339,8 +339,7 @@ export function ProductsTab({
           <DialogHeader>
             <DialogTitle>Новое изделие</DialogTitle>
             <DialogDescription>
-              Изделие появится в колонке «Проектирование»; номер присвоится
-              автоматически.
+              Начальный статус изделия зависит от этапа проекта.
             </DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-3">
