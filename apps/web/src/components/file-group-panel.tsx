@@ -7,7 +7,7 @@ export function FileGroupPanel({header, actions, feedback, children}: {
   feedback?: ReactNode;
   children?: ReactNode;
 }) {
-  return <Card data-file-group-panel className="min-w-0 gap-0 border py-0 ring-0">
+  return <Card data-file-group-panel className="@container min-w-0 gap-0 border py-0 ring-0">
     <CardContent className="flex min-w-0 flex-col gap-3 p-4">
       <header data-file-group-header className="flex min-w-0 items-center justify-between gap-3">
         {header}

@@ -104,9 +104,10 @@ export function Uploader({
             if (files.length > 0) uploadFiles(files);
           }}
         />
-        <Button disabled={pending} onClick={() => inputRef.current?.click()}>
+        <Button disabled={pending} onClick={() => inputRef.current?.click()}
+          className={header ? "shrink-0 @max-[320px]:size-9 @max-[320px]:p-0" : undefined}>
           <Upload className="size-4" />
-          {pending ? "Загрузка…" : "Загрузить файл"}
+          <span className={header ? "@max-[320px]:sr-only" : undefined}>{pending ? "Загрузка…" : "Загрузить файл"}</span>
         </Button>
   </>;
 
