@@ -33,9 +33,10 @@ function fixture(){
  const columns=BUSINESS_COLUMNS.map((name,index)=>column(name,businessOrdinals[index]));
  columns.push(column('category',5,'FileCategory','NO',"'OTHER'::\"FileCategory\""),column('stage',6,'FileStage','NO',"'PRODUCTION'::\"FileStage\""),column('caption',7));
  columns.sort((a,b)=>a.ordinal-b.ordinal);
- const before={version:1,mode:'before',runId,revision,capturedAt:'2026-10-09T01:00:00.000Z',identity:{name:'crm',schema:'public',readonly:'on',primary:true},tableNames:names,tables:Object.fromEntries(names.map(name=>[name,fp('original '+name,'3')])),files:tupleFingerprint(files,'before'),preservedLedger:fp('original _prisma_migrations','42'),migration:[],schema:{stable:Object.fromEntries(schemaKeys.map(name=>[name,fp('schema '+name)])),columns,enums:[...['PHOTO','DRAWING','QUOTE','MEASUREMENT','DOCUMENT','OTHER'].map(label=>({name:'FileCategory',label})),...['PRODUCTION','ASSEMBLY','INSTALLATION'].map(label=>({name:'FileStage',label}))],enumTypes:[{name:'FileCategory',kind:'e',hash:h('ordinary enum metadata')},{name:'FileStage',kind:'e',hash:h('ordinary enum metadata')}],arrayTypes:[{name:'_FileCategory',kind:'b',category:'A',element:'FileCategory',hash:h('enum array')},{name:'_FileStage',kind:'b',category:'A',element:'FileStage',hash:h('enum array')}],indexes:[{name:'File_projectId_category_idx',shapeOK:true},{name:'File_projectId_stage_idx',shapeOK:true}]},orgSetting:{other:fp('other settings','2'),bot:{valueHash:h('same bot value'),stableHash:h('same stable fields'),updatedAt:'2026-10-09T00:58:00.000Z'}}};
+ const before={version:2,mode:'before',runId,revision,capturedAt:'2026-10-09T01:00:00.000Z',identity:{name:'crm',schema:'public',readonly:'on',primary:true},tableNames:names,tables:Object.fromEntries(names.map(name=>[name,fp('original '+name,'3')])),files:tupleFingerprint(files,'before'),preservedLedger:fp('original _prisma_migrations','42'),migration:[],schema:{stable:Object.fromEntries(schemaKeys.map(name=>[name,fp('schema '+name)])),columns,enums:[...['PHOTO','DRAWING','QUOTE','MEASUREMENT','DOCUMENT','OTHER'].map(label=>({name:'FileCategory',label})),...['PRODUCTION','ASSEMBLY','INSTALLATION'].map(label=>({name:'FileStage',label}))],enumTypes:[{name:'FileCategory',kind:'e',hash:h('ordinary enum metadata')},{name:'FileStage',kind:'e',hash:h('ordinary enum metadata')}],arrayTypes:[{name:'_FileCategory',kind:'b',category:'A',element:'FileCategory',hash:h('enum array')},{name:'_FileStage',kind:'b',category:'A',element:'FileStage',hash:h('enum array')}],indexes:[{name:'File_projectId_category_idx',shapeOK:true},{name:'File_projectId_stage_idx',shapeOK:true}]},orgSetting:{other:fp('other settings','2'),bot:{valueHash:h('same bot value'),stableHash:h('same stable fields'),updatedAt:'2026-10-09T00:58:00.000Z'}}};
+ before.tokenClock={kind:'crm-api-token-clock',version:1,capturedAt:before.capturedAt,stable:fp('alltoken fields except lastused','3'),legacyStable:{count:'3',hash:h('legacy tokens').slice(0,32)},full:before.tables.ApiToken,tokens:['token1','token2','token3'].map(id=>({idHash:h(id),lastUsedAt:'2026-10-09T00:58:00.000Z'})).sort((a,b)=>a.idHash.localeCompare(b.idHash))};
  before.tables.File=fp('full old File',String(files.length));before.tables._prisma_migrations=before.preservedLedger;
- const after=structuredClone(before);after.mode='after';after.revision=afterRevision;after.capturedAt='2026-10-09T01:05:00.000Z';after.files=tupleFingerprint(afterFiles,'after');after.tables.File=fp('full new File',String(afterFiles.length));
+ const after=structuredClone(before);after.mode='after';after.revision=afterRevision;after.capturedAt='2026-10-09T01:05:00.000Z';after.tokenClock.capturedAt=after.capturedAt;after.files=tupleFingerprint(afterFiles,'after');after.tables.File=fp('full new File',String(afterFiles.length));
  after.tables._prisma_migrations=fp('new migration ledger','43');after.migration=[{...MIGRATION,startedAt:'2026-10-09T01:02:00.000Z',finishedAt:'2026-10-09T01:03:00.000Z',rolledBackAt:null,appliedStepsCount:1,logsNull:true,fullHash:h('exact new migration row')}];
  after.schema.columns=structuredClone(before.schema.columns.filter(row=>BUSINESS_COLUMNS.includes(row.name)));after.schema.columns.push(column('section',17,'FileSection','NO',"'GENERAL'::\"FileSection\""));
  after.schema.enums=SECTION_LABELS.map(label=>({name:'FileSection',label}));after.schema.enumTypes=[{name:'FileSection',kind:'e',hash:h('ordinary enum metadata')}];after.schema.indexes=[{name:'File_projectId_section_idx',shapeOK:true}];after.schema.arrayTypes=[{name:'_FileSection',kind:'b',category:'A',element:'FileSection',hash:h('enum array')}];
@@ -45,7 +46,7 @@ function contrast(name,change){test(name,()=>{const f=fixture();change(f);assert
 test('exact case precedence and complete archived/product/task migration produce equal protected tuples',()=>{
  const {before,after,files}=fixture();assert.deepEqual(files.map(expectedSection),['MEASUREMENT','GENERAL','PRODUCTION','INSTALLATION','MEASUREMENT','PRODUCTION']);
  assert.deepEqual(verifyBefore(before,input),{fileCount:'6',protectedTableCount:16,readOnly:true});
- assert.deepEqual(verifyAfter(before,after,afterInput),{fileCount:'6',protectedTableCount:16,originalsPreserved:true,exactSectionsVerified:true,schemaVerified:true,ledgerVerified:true,operationalClockChanged:false,readOnly:true});
+ assert.deepEqual(verifyAfter(before,after,afterInput),{fileCount:'6',protectedTableCount:16,originalsPreserved:true,exactSectionsVerified:true,schemaVerified:true,ledgerVerified:true,operationalClockChanged:false,tokenClockVerified:true,tokenClockChanged:false,readOnly:true});
 });
 test('SQL applies measurement before product-null/install and contains no live/archive filter',()=>{
  const sql=fileTupleSql('before');assert.ok(sql.indexOf('MEASUREMENT')<sql.indexOf('"productId" IS NULL'));assert.ok(sql.indexOf('"productId" IS NULL')<sql.indexOf('"stage"'));assert.doesNotMatch(sql,/WHERE|deletedAt|LIMIT|OFFSET/);assert.match(fileTupleSql('after'),/f\."section"::text/);
@@ -91,7 +92,7 @@ test('only same-value same-stable-fields bot updatedAt freshly advancing in proo
 contrast('bot value is immutable',f=>{f.after.orgSetting.bot.valueHash=h('new value');});
 contrast('bot other fields are immutable',f=>{f.after.orgSetting.bot.stableHash=h('new fields');});
 contrast('bot may not appear/disappear',f=>{f.after.orgSetting.bot=null;f.after.orgSetting.other.count='3';});
-contrast('old timestamp advancement predating capture is not a generic exception',f=>{f.after.orgSetting.bot.updatedAt='2026-10-09T00:59:00.000Z';f.after.tables.OrgSetting=fp('new bot clock','3');});
+test('bot clock movement during BEFORE RR scan is allowed with identical stable value and monotonic paired clock',()=>{const f=fixture();f.after.orgSetting.bot.updatedAt='2026-10-09T00:59:00.000Z';f.after.tables.OrgSetting=fp('new bot clock','3');assert.equal(verifyAfter(f.before,f.after,afterInput).operationalClockChanged,true);});
 contrast('future bot timestamp outside capture is rejected',f=>{f.after.orgSetting.bot.updatedAt='2026-10-09T01:06:00.000Z';});
 contrast('bot clock regression is rejected',f=>{f.after.orgSetting.bot.updatedAt='2026-10-08T00:00:00.000Z';});
 contrast('other setting timestamps/values remain immutable',f=>{f.after.orgSetting.other=fp('changed settings','2');});
@@ -116,6 +117,9 @@ test('capture uses coherent RepeatableRead READ ONLY and binds every placeholder
  const f=fixture(),queries=[],writes=[];let options;
  const tx={$executeRawUnsafe:async sql=>{writes.push(sql);},$queryRawUnsafe:async(sql,...args)=>{
   queries.push({sql,args});assert.ok(args.every(value=>value===null||['string','number','boolean'].includes(typeof value)));
+  if(sql.startsWith("SELECT current_setting('transaction_read_only') readonly,current_setting('transaction_isolation') isolation"))return [{readonly:'on',isolation:'repeatable read'}];
+  if(sql.includes('AS "stableHash"'))return [{count:'3',stableHash:f.before.tokenClock.stable.hash,fullHash:f.before.tables.ApiToken.hash,legacyHash:f.before.tokenClock.legacyStable.hash}];
+  if(sql.includes('AS "idHash"'))return f.before.tokenClock.tokens;
   if(sql.startsWith('SELECT current_database()'))return [f.before.identity];
   if(sql.startsWith('SELECT tablename::text'))return names.map(name=>({name}));
   if(sql.startsWith('SELECT column_name::text'))return f.before.schema.columns;
@@ -164,3 +168,12 @@ contrast('new FileSection type must be enum rather than an alias/domain',f=>{f.a
 contrast('retired companion array cannot survive migration',f=>{f.after.schema.arrayTypes.push({name:'_FileStage',kind:'b',category:'A',element:'FileStage',hash:h('enum array')});});
 contrast('new companion array element and permissions are exact',f=>{f.after.schema.arrayTypes[0].element='OtherType';});
 contrast('new companion array base metadata cannot drift',f=>{f.after.schema.arrayTypes[0].hash=h('changed array metadata');});
+
+contrast('historical snapshot without fresh token evidence is rejected',f=>{delete f.before.tokenClock;});
+contrast('old snapshot profile cannot retrospectively bypass original full-byte STOP',f=>{f.before.version=1;});
+contrast('token protected metadata cannot change',f=>{f.after.tokenClock.stable.hash=h('token scopes or secret changed');});
+contrast('token hashed-ID set cannot change',f=>{f.after.tokenClock.tokens[0].idHash='0'.repeat(64);});
+contrast('token lastUsedAt cannot regress',f=>{f.after.tokenClock.tokens[0].lastUsedAt='2026-10-09T00:57:00.000Z';});
+contrast('token clock cannot exceed captured DB clock',f=>{f.after.tokenClock.tokens[0].lastUsedAt='2026-10-09T01:06:00.000Z';});
+contrast('token raw table bytes must be coherent with shared evidence',f=>{f.after.tokenClock.full.hash=h('incoherent capture');});
+test('fresh paired evidence allows only monotonic token lastUsedAt with every other field/ID unchanged',()=>{const f=fixture();f.after.tokenClock.tokens[0].lastUsedAt='2026-10-09T01:04:00.000Z';f.after.tokenClock.full=fp('newfulltokenclock','3');f.after.tables.ApiToken=f.after.tokenClock.full;assert.equal(verifyAfter(f.before,f.after,afterInput).tokenClockChanged,true);});

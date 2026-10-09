@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { canAccessSettingsPath } from "@/lib/settings-access";
 import { ADMIN_ROLES, hasAnyRole } from "@/lib/roles";
 import Link from "next/link";
-import { Blocks, KeyRound, Users, Wallet } from "lucide-react";
+import { Blocks, KeyRound, Ruler, Users, Wallet } from "lucide-react";
 
 import {
   Card,
@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/card";
 
 const sections = [
+  { href: "/settings/warehouse-units", icon: Ruler, title: "Единицы склада", description: "Обозначения единиц измерения номенклатуры — только для администратора" },
   { href: "/settings/product-percentages", icon: Wallet, title: "Проценты изделий", description: "Стандартные ставки новых изделий: инженер, сборщик и монтажник" },
   {
     href: "/settings/users",

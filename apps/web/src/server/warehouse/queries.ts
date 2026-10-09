@@ -65,6 +65,7 @@ export type MaterialView = {
   name: string;
   sku: string | null;
   unit: string;
+  unitId: string;
   categoryId: string | null;
   categoryName: string | null;
   purchasePrice: number | null; // учётная цена, BYN
@@ -81,7 +82,7 @@ export async function listMaterials(actor: VisibilityActor): Promise<MaterialVie
   const [materials, stock, debt] = await Promise.all([
     prisma.material.findMany({
       orderBy: { name: "asc" },
-      include: { category: { select: { name: true } } },
+      include: { category: { select: { name: true } }, measurementUnit: { select: { name: true } } },
     }),
     warehouseReadPositions(prisma),
     debtByMaterial(actor),
@@ -94,7 +95,8 @@ export async function listMaterials(actor: VisibilityActor): Promise<MaterialVie
       id: material.id,
       name: material.name,
       sku: material.sku,
-      unit: material.unit,
+      unit: material.measurementUnit.name,
+      unitId: material.unitId,
       categoryId: material.categoryId,
       categoryName: material.category?.name ?? null,
       purchasePrice:
@@ -133,7 +135,7 @@ async function loadMovements(actor: VisibilityActor, filter: {materialId?:string
     orderBy: [{ createdAt: "desc" },{id:"desc"}],
     take: 500,
     include: {
-      material: { select: { name: true, unit: true } },
+      material: { select: { name: true, measurementUnit: { select: { name: true } } } },
       product: { select: { number: true } },
     },
   });
@@ -151,7 +153,7 @@ async function loadMovements(actor: VisibilityActor, filter: {materialId?:string
     receiptKind: movement.receiptKind,
     materialId: movement.materialId,
     materialName: movement.material.name,
-    materialUnit: movement.material.unit,
+    materialUnit: movement.material.measurementUnit.name,
     quantity: Number(movement.quantity),
     unitPrice: !hasAnyRole(actor.roles,WAREHOUSE_MONEY_ROLES)||movement.unitPrice === null ? null : Number(movement.unitPrice),
     totalByn: !hasAnyRole(actor.roles,WAREHOUSE_MONEY_ROLES)||movement.totalByn === null ? null : Number(movement.totalByn),
@@ -179,7 +181,7 @@ export async function getProjectMaterials(
       orderBy: { createdAt: "asc" },
       include: {
         material: {
-          select: { id: true, name: true, sku: true, unit: true, purchasePrice: true },
+          select: { id: true, name: true, sku: true, measurementUnit: { select: { name: true } }, purchasePrice: true },
         },
       },
     }),
@@ -190,12 +192,12 @@ export async function getProjectMaterials(
   const [issued,allCosts]=await Promise.all([
     stock.current&&stock.runId ? database.warehouseMovementValuation.findMany({
       where:{runId:stock.runId,movement:{...activeStockMovementWhere,productId,product:productVisibilityWhere(actor),type:"EXPENSE"}},
-      include:{movement:{select:{materialId:true,createdAt:true,material:{select:{name:true,unit:true}}}}}
+      include:{movement:{select:{materialId:true,createdAt:true,material:{select:{name:true,measurementUnit:{select:{name:true}}}}}}}
     }) : Promise.resolve([]),
     showMoney ? database.stockMovement.findMany({where:{...activeStockMovementWhere,productId,product:productVisibilityWhere(actor),type:{in:["EXPENSE","RETURN"]}},select:{type:true,totalByn:true}}) : Promise.resolve([]),
   ]);
   const returnSources:WarehouseReturnSource[]=issued.map(item=>({id:item.movementId,materialId:item.movement.materialId,
-    materialName:item.movement.material.name,unit:item.movement.material.unit,createdAt:item.movement.createdAt.toISOString(),
+    materialName:item.movement.material.name,unit:item.movement.material.measurementUnit.name,createdAt:item.movement.createdAt.toISOString(),
     quantity:item.quantity.minus(item.returnedQuantity).toNumber(),unitPrice:showMoney?item.unitCost.toString():null})).filter(item=>item.quantity>0);
   const sourcesById=new Map(returnSources.map(item=>[item.id,item]));
   let hasShortage = false;
@@ -215,7 +217,7 @@ export async function getProjectMaterials(
       materialId: row.materialId,
       materialName: row.material.name,
       materialSku: row.material.sku,
-      unit: row.material.unit,
+      unit: row.material.measurementUnit.name,
       purchasePrice:
         !hasAnyRole(actor.roles,WAREHOUSE_MONEY_ROLES)?null:stock.current?Number(averagePrice(position)):row.material.purchasePrice===null?null:Number(row.material.purchasePrice),
       quantity,

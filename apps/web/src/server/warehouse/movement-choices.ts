@@ -23,8 +23,8 @@ export async function loadWarehouseChoices(actor:VisibilityActor, db:Prisma.Tran
   return choices.filter(row=>!q||row.label.toLocaleLowerCase("ru-RU").includes(q.toLocaleLowerCase("ru-RU"))).slice(0,8);
  }
  const materials=await db.material.findMany({where:{...(input.income?{active:true}:{}),...(q?{OR:[{name:{contains:q,mode:"insensitive"}},{sku:{contains:q,mode:"insensitive"}}]}:{})},
-  select:{id:true,name:true,unit:true,active:true},orderBy:{name:"asc"}});
+  select:{id:true,name:true,measurementUnit:{select:{name:true}},active:true},orderBy:{name:"asc"}});
  const positions=await warehouseReadPositions(db,materials.map(row=>row.id));
- return materials.map(row=>({id:row.id,label:row.name+(row.active?"":" (архив)"),unit:row.unit,available:Number(positions.positions.get(row.id)?.quantity??0)}))
+ return materials.map(row=>({id:row.id,label:row.name+(row.active?"":" (архив)"),unit:row.measurementUnit.name,available:Number(positions.positions.get(row.id)?.quantity??0)}))
   .filter(row=>input.income||row.available>0).slice(0,8);
 }

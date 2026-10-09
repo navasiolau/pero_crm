@@ -6,6 +6,7 @@ import {existsSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
 import path from 'node:path';
 import {PrismaClient} from '@prisma/client';
+import {captureTokenClockEvidence,validateTokenClockEvidence,compareTokenClockEvidence} from './crm-acceptance-token-clock.mjs';
 
 export const MIGRATION={name:'20261008173000_file_sections',checksum:'7d492603dfcc4426dc3d647f9e1b4146c2472b8bae0ac60998efd1dc4f78567b'};
 export const WIRE_LIMIT=64*1024;
@@ -17,7 +18,7 @@ const REQUIRED=['File','Project','Product','Task','Payment','PayrollEntry','Chan
 const SHA=/^[a-f0-9]{64}$/,REV=/^[a-f0-9]{40}$/,UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 const SCHEMA_KEYS=['columns','constraints','indexes','triggers','routines','sequences','relations','otherEnums','otherTypes','enumTypes','views','policies','namespace'];
 const ISO="YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"";
-const PHASES=new Set(['INPUT','GUARD','CLIENT','TX','IDENTITY','TABLE_NAMES','TABLE_FP','FILE_TUPLES','SCHEMA_COLUMNS','SCHEMA_CONSTRAINTS','SCHEMA_INDEXES','SCHEMA_TRIGGERS','SCHEMA_ROUTINES','SCHEMA_SEQUENCES','SCHEMA_RELATIONS','SCHEMA_OTHERENUMS','SCHEMA_OTHERTYPES','SCHEMA_ENUMTYPES','SCHEMA_VIEWS','SCHEMA_POLICIES','SCHEMA_NAMESPACE','FILE_COLUMNS','FILE_ENUMS','FILE_ENUM_TYPES','FILE_INDEXES','LEDGER_PRESERVED','LEDGER_NEW','BOT_OTHER','BOT_CLOCK','CLOCK','VERIFY','WIRE','DISCONNECT']);
+const PHASES=new Set(['INPUT','GUARD','CLIENT','TX','IDENTITY','TABLE_NAMES','TABLE_FP','FILE_TUPLES','SCHEMA_COLUMNS','SCHEMA_CONSTRAINTS','SCHEMA_INDEXES','SCHEMA_TRIGGERS','SCHEMA_ROUTINES','SCHEMA_SEQUENCES','SCHEMA_RELATIONS','SCHEMA_OTHERENUMS','SCHEMA_OTHERTYPES','SCHEMA_ENUMTYPES','SCHEMA_VIEWS','SCHEMA_POLICIES','SCHEMA_NAMESPACE','FILE_COLUMNS','FILE_ENUMS','FILE_ENUM_TYPES','FILE_INDEXES','LEDGER_PRESERVED','LEDGER_NEW','BOT_OTHER','BOT_CLOCK','TOKEN_CLOCK','CLOCK','VERIFY','WIRE','DISCONNECT']);
 let currentPhase='INPUT';
 const phase=value=>{currentPhase=PHASES.has(value)?value:'INPUT';};
 export class ProofStop extends Error{constructor(code){super(code);this.code=code;}}
@@ -116,8 +117,9 @@ export async function captureSnapshot(db,input,outerProof){
   phase('LEDGER_NEW');const migration=await tx.$queryRawUnsafe('SELECT migration_name::text name,checksum::text checksum,to_char(started_at AT TIME ZONE \'UTC\',\''+ISO+'\') "startedAt",to_char(finished_at AT TIME ZONE \'UTC\',\''+ISO+'\') "finishedAt",to_char(rolled_back_at AT TIME ZONE \'UTC\',\''+ISO+'\') "rolledBackAt",applied_steps_count::int "appliedStepsCount",(logs IS NULL) "logsNull",'+hashSql('to_jsonb(t)')+' "fullHash" FROM "_prisma_migrations" t WHERE migration_name=$1 ORDER BY id',MIGRATION.name);
   const otherOrg=await fp(tx,'SELECT to_jsonb(t) doc FROM "OrgSetting" t WHERE t.key<>$1',['telegram.botUsername'],'BOT_OTHER');
   phase('BOT_CLOCK');const bot=await tx.$queryRawUnsafe('SELECT '+hashSql('to_jsonb(t.value)')+' "valueHash",'+hashSql("to_jsonb(t)-'updatedAt'")+' "stableHash",to_char(t."updatedAt",\''+ISO+'\') "updatedAt" FROM "OrgSetting" t WHERE t.key=$1','telegram.botUsername');need(bot.length<=1,'BOT_SINGLETON_REQUIRED');
+  phase('TOKEN_CLOCK');const tokenClock=await captureTokenClockEvidence(tx);
   phase('CLOCK');const clocks=await tx.$queryRawUnsafe("SELECT to_char(clock_timestamp() AT TIME ZONE 'UTC','"+ISO+"') at");need(clocks.length===1,'CLOCK_REQUIRED');
-  return {version:1,mode:input.mode,runId:input.runId,revision:input.revision,capturedAt:clocks[0].at,identity:identities[0],tableNames,tables,files,preservedLedger,migration,schema,orgSetting:{other:otherOrg,bot:bot[0]??null}};
+  return {version:2,mode:input.mode,runId:input.runId,revision:input.revision,capturedAt:clocks[0].at,identity:identities[0],tableNames,tables,files,preservedLedger,migration,schema,orgSetting:{other:otherOrg,bot:bot[0]??null},tokenClock};
  },{isolationLevel:'RepeatableRead',maxWait:10000,timeout:120000});
 }
 function enumMap(schema){const map={};for(const row of schema.enums){exact(row,['name','label'],'ENUM_FIELDS_INVALID');need(['FileCategory','FileStage','FileSection'].includes(row.name)&&typeof row.label==='string','ENUM_NAME_INVALID');(map[row.name]??=[]).push(row.label);}return map;}
@@ -146,11 +148,12 @@ function checkSchema(snapshot){
  for(const row of schema.indexes){exact(row,['name','shapeOK'],'INDEX_FIELDS_INVALID');need(row.shapeOK===true,'FILE_INDEX_SHAPE_INVALID');}
 }
 function shape(snapshot,input){
- checkInput(input);exact(snapshot,['version','mode','runId','revision','capturedAt','identity','tableNames','tables','files','preservedLedger','migration','schema','orgSetting'],'SNAPSHOT_FIELDS_INVALID');
- need(snapshot.version===1&&snapshot.mode===input.mode&&snapshot.runId===input.runId&&snapshot.revision===input.revision&&validTime(snapshot.capturedAt),'SNAPSHOT_BINDING_INVALID');
+ checkInput(input);exact(snapshot,['version','mode','runId','revision','capturedAt','identity','tableNames','tables','files','preservedLedger','migration','schema','orgSetting','tokenClock'],'SNAPSHOT_FIELDS_INVALID');
+ need(snapshot.version===2&&snapshot.mode===input.mode&&snapshot.runId===input.runId&&snapshot.revision===input.revision&&validTime(snapshot.capturedAt),'SNAPSHOT_BINDING_INVALID');
  exact(snapshot.identity,['name','schema','readonly','primary'],'IDENTITY_FIELDS_INVALID');same(snapshot.identity,{name:'crm',schema:'public',readonly:'on',primary:true},'SNAPSHOT_IDENTITY_INVALID');
  need(Array.isArray(snapshot.tableNames)&&snapshot.tableNames.length<150&&new Set(snapshot.tableNames).size===snapshot.tableNames.length&&REQUIRED.every(name=>snapshot.tableNames.includes(name)),'SNAPSHOT_TABLE_SET_INVALID');snapshot.tableNames.forEach(quote);
  same(Object.keys(snapshot.tables).sort(),[...snapshot.tableNames].sort(),'TABLE_FINGERPRINT_SET_INVALID');Object.values(snapshot.tables).forEach(fingerprintShape);fingerprintShape(snapshot.files);fingerprintShape(snapshot.preservedLedger);same(snapshot.files.count,snapshot.tables.File.count,'ALL_FILE_COUNT_INVALID');
+ validateTokenClockEvidence(snapshot.tokenClock);same(snapshot.tokenClock.full,snapshot.tables.ApiToken,'TOKEN_CLOCK_RAW_TABLE_COHERENCE');need(Date.parse(snapshot.tokenClock.capturedAt)<=Date.parse(snapshot.capturedAt),'TOKEN_CAPTURE_AFTER_DB_CLOCK');
  need(Array.isArray(snapshot.migration)&&snapshot.migration.length<=1,'SINGLE_MIGRATION_REQUIRED');
  for(const row of snapshot.migration){exact(row,['name','checksum','startedAt','finishedAt','rolledBackAt','appliedStepsCount','logsNull','fullHash'],'MIGRATION_FIELDS_INVALID');need(row.name===MIGRATION.name&&SHA.test(row.checksum??'')&&validTime(row.startedAt)&&(row.finishedAt===null||validTime(row.finishedAt))&&(row.rolledBackAt===null||validTime(row.rolledBackAt))&&Number.isInteger(row.appliedStepsCount)&&typeof row.logsNull==='boolean'&&SHA.test(row.fullHash??''),'MIGRATION_SHAPE_INVALID');}
  exact(snapshot.orgSetting,['other','bot'],'ORG_FIELDS_INVALID');fingerprintShape(snapshot.orgSetting.other);
@@ -180,11 +183,12 @@ export function verifyAfter(before,after,input){
  else{
   need(oldBot.valueHash===newBot.valueHash&&oldBot.stableHash===newBot.stableHash,'BOT_VALUE_OR_STABLE_FIELDS_CHANGED');
   need(Date.parse(newBot.updatedAt)>=Date.parse(oldBot.updatedAt),'BOT_CLOCK_REGRESSION');operationalClockChanged=newBot.updatedAt!==oldBot.updatedAt;
-  if(operationalClockChanged)need(Date.parse(newBot.updatedAt)>=Date.parse(before.capturedAt)&&Date.parse(newBot.updatedAt)<=Date.parse(after.capturedAt),'BOT_CLOCK_NOT_FRESH_IN_PROOF_WINDOW');
+  if(operationalClockChanged)need(Date.parse(newBot.updatedAt)<=Date.parse(after.capturedAt),'BOT_CLOCK_AFTER_CAPTURE');
  }
  if(!operationalClockChanged)same(after.tables.OrgSetting,before.tables.OrgSetting,'UNEXPLAINED_BOT_TABLE_CHANGE');
- for(const name of before.tableNames)if(!['File','_prisma_migrations','OrgSetting'].includes(name))same(after.tables[name],before.tables[name],'PROTECTED_TABLE_CHANGED_'+name);
- return {fileCount:after.files.count,protectedTableCount:after.tableNames.length,originalsPreserved:true,exactSectionsVerified:true,schemaVerified:true,ledgerVerified:true,operationalClockChanged,readOnly:true};
+ const tokenClockResult=compareTokenClockEvidence(before.tokenClock,after.tokenClock);
+ for(const name of before.tableNames)if(!['File','_prisma_migrations','OrgSetting','ApiToken'].includes(name))same(after.tables[name],before.tables[name],'PROTECTED_TABLE_CHANGED_'+name);
+ return {fileCount:after.files.count,protectedTableCount:after.tableNames.length,originalsPreserved:true,exactSectionsVerified:true,schemaVerified:true,ledgerVerified:true,operationalClockChanged,tokenClockVerified:true,tokenClockChanged:tokenClockResult.changed,readOnly:true};
 }
 export function safeDiagnostic(error,label=currentPhase){
  const out={phase:PHASES.has(label)?label:'INPUT'};
