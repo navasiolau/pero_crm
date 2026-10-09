@@ -52,6 +52,7 @@ function DraggableProduct({
   return (
     <div
       ref={setNodeRef}
+      data-kanban-card-id={product.id}
       style={{ transform: CSS.Translate.toString(transform) }}
       className={cn("relative", isDragging && "opacity-40")}
       onClick={() => onOpen(product)}
@@ -124,10 +125,15 @@ function StatusColumn({
 // доску — перетащенное в «Готово» при активной галочке уходит с доски.
 export function ProductsKanban({
   initialProducts,
+  searchText = "",
+  searchReady = false,
   actorRoles,
   showAmount,
 }: {
   initialProducts: ProductRow[];
+  // Без подтверждённой пары query/rows обычный caller не запускает поиск.
+  searchText?: string;
+  searchReady?: boolean;
   canManage: boolean;
   actorRoles: readonly Role[];
   showAmount: boolean;
@@ -211,7 +217,11 @@ export function ProductsKanban({
       }}
       onDragCancel={() => setActiveId(null)}
     >
-      <KanbanScrollArea label="Канбан изделий">
+      <KanbanScrollArea label="Канбан изделий" searchFocus={{
+          query: searchText,
+          cardId: products.find(item => item.number === searchText.trim())?.id ?? null,
+          ready: searchReady && products === initialProducts && !activeId,
+        }}>
         {PRODUCT_STATUSES.map((status) => (
           <StatusColumn
             key={status.id}

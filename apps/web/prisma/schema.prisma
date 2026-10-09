@@ -128,21 +128,12 @@ enum TaskStatus {
   DONE // Выполнена
 }
 
-enum FileCategory {
-  PHOTO // фото
-  DRAWING // чертёж
-  QUOTE // КП
-  MEASUREMENT // замер
-  DOCUMENT // документ
-  OTHER // прочее
-}
-
-// Группа файла по этапу мебельного производства (§ плагин file-stages):
-// Производство / Сборка / Монтаж.
-enum FileStage {
-  PRODUCTION // Производство
-  ASSEMBLY // Сборка
-  INSTALLATION // Монтаж
+// Место размещения файла задаётся формой загрузки, без пользовательской категории.
+enum FileSection {
+  GENERAL
+  MEASUREMENT
+  PRODUCTION
+  INSTALLATION
 }
 
 enum CommunicationType {
@@ -1049,9 +1040,7 @@ model File {
   product      Product?     @relation(fields: [productId], references: [id], onDelete: SetNull)
   taskId       String?
   task         Task?        @relation(fields: [taskId], references: [id], onDelete: SetNull)
-  category     FileCategory @default(OTHER)
-  stage        FileStage    @default(PRODUCTION) // группа этапа (file-stages)
-  caption      String? // пояснение
+  section      FileSection  @default(GENERAL)
   fileName     String // оригинальное имя
   storedName   String // имя на диске
   mimeType     String
@@ -1064,8 +1053,7 @@ model File {
   sketchForProduct Product?  @relation("ProductSketch")
   coverForProject Project? @relation("ProjectCover")
 
-  @@index([projectId, category])
-  @@index([projectId, stage])
+  @@index([projectId, section])
 }
 
 model Communication {

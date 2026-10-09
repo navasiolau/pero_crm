@@ -11,9 +11,9 @@ test('final closed command guard forbids foreign/status/payment/frozen fields an
 test('media guard preserves exact bytes/context and cover empty CAS while allowing only own flat project file',async()=>{
  const cases=await finalQaMedia(fixture),cover=cases.find(row=>row.cover),project=cases.find(row=>row.key==='project');
  const file=row=>({name:row.name,mimeType:row.mimeType,size:row.buffer.length,hash:row.hash});
- const fields={projectId:fixture.ids.project,productId:fixture.ids.productA,category:'PHOTO',assignCover:'1',expectedSketchFileId:'null',clientMutationId:nonce};
+ const fields={projectId:fixture.ids.project,productId:fixture.ids.productA,section:'PRODUCTION',assignCover:'1',expectedSketchFileId:'null',clientMutationId:nonce};
  assert.equal(finalUploadOwned(fields,file(cover),fixture,cases),true);assert.equal(finalUploadOwned({...fields,expectedSketchFileId:'old'},file(cover),fixture,cases),false);assert.equal(finalUploadOwned(fields,{...file(cover),hash:'forged'},fixture,cases),false);
- assert.equal(finalUploadOwned({projectId:fixture.ids.project,category:'DOCUMENT'},file(project),fixture,cases),true);assert.equal(finalUploadOwned({projectId:'foreign',category:'DOCUMENT'},file(project),fixture,cases),false);
+ assert.equal(finalUploadOwned({projectId:fixture.ids.project,section:'GENERAL',clientMutationId:nonce},file(project),fixture,cases),true);assert.equal(finalUploadOwned({projectId:'foreign',section:'GENERAL',clientMutationId:nonce},file(project),fixture,cases),false);
 });
 test('import/default authorization cannot launch a browser',async()=>{await assert.rejects(runProductModernizationFinalBrowser({}),/FINAL_ROOT_EXECUTION_AUTH_REQUIRED/);});
 

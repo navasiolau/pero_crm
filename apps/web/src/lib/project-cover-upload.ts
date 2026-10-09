@@ -3,7 +3,7 @@ import {isCoverImageMime} from './product-cover';
 import type {ProjectCoverPreview} from '@/server/projects/cover-contract';
 export function projectCoverAttempt(file:File,projectId:string){
  if(!isCoverImageMime(file.type)||file.size>25*1024*1024)throw Error('Выберите изображение поддерживаемого формата не больше 25 МБ');
- const form=new FormData();form.append('file',file);form.append('projectId',projectId);form.append('category','PHOTO');form.append('assignProjectCover','1');form.append('expectedCoverFileId','null');return createUploadAttempt(form);
+ const form=new FormData();form.append('file',file);form.append('projectId',projectId);form.append('section','GENERAL');form.append('assignProjectCover','1');form.append('expectedCoverFileId','null');return createUploadAttempt(form);
 }
 export function confirmedProjectCover(data:Record<string,unknown>,mutationId:string):ProjectCoverPreview{
  const cover=data.cover as Partial<ProjectCoverPreview>|null;

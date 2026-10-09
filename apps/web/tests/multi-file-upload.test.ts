@@ -11,7 +11,7 @@ function item(name: string, size: number): BatchUploadItem {
   const form = new FormData();
   form.append("file", file(name));
   form.append("projectId", "project");
-  form.append("category", "PHOTO");
+  form.append("section", "GENERAL");
   return { fileName: name, size, attempt: createUploadAttempt(form) };
 }
 function okFetcher(delayMs = 0): typeof fetch {

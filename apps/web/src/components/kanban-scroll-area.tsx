@@ -2,10 +2,13 @@
 
 import { useEffect, useRef, useState, type ReactNode, type KeyboardEvent } from "react";
 
+import { useKanbanSearchFocus, type KanbanSearchFocus } from "@/hooks/use-kanban-search-focus";
+
 type ScrollMetrics = { width: number; maximum: number; step: number };
-export function KanbanScrollArea({ children, label }: { children: ReactNode; label: string }) {
+export function KanbanScrollArea({ children, label, searchFocus }: { children: ReactNode; label: string; searchFocus?: KanbanSearchFocus }) {
   const boardRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+  useKanbanSearchFocus(boardRef, searchFocus);
   const scrollbarRef = useRef<HTMLDivElement>(null);
   const [metrics, setMetrics] = useState<ScrollMetrics>({ width: 0, maximum: 0, step: 256 });
   useEffect(() => {

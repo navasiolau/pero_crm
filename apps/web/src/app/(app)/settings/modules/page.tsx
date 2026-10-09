@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/card";
 import { prisma } from "@/lib/prisma";
 import { syncPlugins } from "@/server/plugins/sync";
+import {getManifest} from "@/server/plugins/registry";
 
 import { PluginToggle } from "./plugin-toggle";
 
@@ -19,7 +20,8 @@ export const dynamic = "force-dynamic";
 // Настройки → Модули: список установленных плагинов (§14).
 export default async function ModulesPage() {
   await syncPlugins();
-  const plugins = await prisma.plugin.findMany({ orderBy: { name: "asc" } });
+  const rows = await prisma.plugin.findMany({ orderBy: { name: "asc" } });
+  const plugins = rows.filter(plugin => Boolean(getManifest(plugin.id)));
 
   return (
     <div className="flex flex-col gap-6">

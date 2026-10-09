@@ -16,7 +16,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { formatAmount, formatQty, formatDateTime } from "@/lib/format";
-import {useFileViewer} from '@/components/file-viewer';
 import {ReportDocumentButton} from '@/components/report-document-button';
 import { warehouseMovementKindLabels, warehouseMovementLabel, matchesWarehouseMovementKind } from "@/lib/warehouse-movement-labels";
 import type {
@@ -39,7 +38,6 @@ export function MovementsView({
 }) {
   const [materialId, setMaterialId] = useState("");
   const [typeFilter, setTypeFilter] = useState("ALL");
-  const viewer=useFileViewer('fullscreen');
   const [deleting,setDeleting]=useState<string|null>(null);
   const deleteButton=(row:StockMovementView)=>canDelete?<Button variant="ghost" size="sm" className="text-destructive" onClick={event=>{event.stopPropagation();setDeleting(row.id);}}>Удалить</Button>:null;
 
@@ -141,7 +139,7 @@ export function MovementsView({
   }
 
   columns.push(
-    {id:'document',header:'Отчетный документ',searchValue:row=>row.reportDocument?.fileName??'',cell:row=><ReportDocumentButton document={row.reportDocument} onOpen={viewer.open}/>},
+    {id:'document',header:'Отчетный документ',searchValue:row=>row.reportDocument?.fileName??'',cell:row=><ReportDocumentButton document={row.reportDocument}/>},
     {
       id: "product",
       header: "Изделие",
@@ -229,9 +227,8 @@ export function MovementsView({
         searchPlaceholder="Поиск по движениям…"
         emptyText="Движений пока нет"
         defaultPageSize={20}
-        renderMobileCard={row=><div className="space-y-2"><div className="flex flex-wrap items-start justify-between gap-2"><b className="break-words">{row.materialName}</b><Badge variant="outline">{warehouseMovementLabel(row)}</Badge></div><p className="text-xs text-muted-foreground">{formatDateTime(row.createdAt)}</p><p>{row.type==='EXPENSE'?'−':row.type==='RETURN'?'+':''}{formatQty(row.quantity)} {row.materialUnit}{showMoney?` · ${formatAmount(row.totalByn,'BYN')}`:''}</p>{row.productId&&row.productNumber?<Link href={`/products/${row.productNumber}`} className="text-primary hover:underline">Изделие {row.productNumber}</Link>:null}{row.comment?<p className="break-words text-sm">{row.comment}</p>:null}{row.createdByName?<p className="text-xs text-muted-foreground">{row.createdByName}</p>:null}<ReportDocumentButton document={row.reportDocument} onOpen={viewer.open}/>{deleteButton(row)}</div>}
+        renderMobileCard={row=><div className="space-y-2"><div className="flex flex-wrap items-start justify-between gap-2"><b className="break-words">{row.materialName}</b><Badge variant="outline">{warehouseMovementLabel(row)}</Badge></div><p className="text-xs text-muted-foreground">{formatDateTime(row.createdAt)}</p><p>{row.type==='EXPENSE'?'−':row.type==='RETURN'?'+':''}{formatQty(row.quantity)} {row.materialUnit}{showMoney?` · ${formatAmount(row.totalByn,'BYN')}`:''}</p>{row.productId&&row.productNumber?<Link href={`/products/${row.productNumber}`} className="text-primary hover:underline">Изделие {row.productNumber}</Link>:null}{row.comment?<p className="break-words text-sm">{row.comment}</p>:null}{row.createdByName?<p className="text-xs text-muted-foreground">{row.createdByName}</p>:null}<ReportDocumentButton document={row.reportDocument}/>{deleteButton(row)}</div>}
       />
-      {viewer.viewer}
       {deleting?<WarehouseMovementDeleteDialog key={deleting} movementId={deleting} onClose={()=>setDeleting(null)}/>:null}
     </div>
   );

@@ -1,3 +1,4 @@
+import {ordinaryFileListView} from "@/server/files/list-view";
 import { paymentView } from "@/server/finance/payment-view";
 import { loadProjectStockExpenses, projectExpenseRows } from "@/server/finance/project-expenses";
 import nextDynamic from "next/dynamic";
@@ -22,7 +23,6 @@ import {
 } from "@/lib/roles";
 import { prisma } from "@/lib/prisma";
 import { getPluginSettings } from "@/server/plugins/run-log";
-import { getFileStageConfig } from "@/server/files/stage-config";
 import { getSlotContributions } from "@/server/plugins/slots";
 import { getProjectPricingProjection } from "@/server/projects/project-field-core";
 import { getProjectEconomics } from "@/server/finance/queries";
@@ -70,8 +70,6 @@ export default async function ProjectPage({
   // Склад (§12): вкладка «Материалы» — офисные роли (+ бухгалтер на просмотр)
   const showMaterials = hasAnyRole(role, OFFICE_ROLES);
 
-  // Группировка файлов по этапам (плагин file-stages), если включён.
-  const stageConfig = await getFileStageConfig();
   const stockExpenses = showFinance ? await loadProjectStockExpenses(session.user, project.id, prisma) : [];
 
   const [clients, managers, engineers, workers, contributions, priceItems, economics, cashAccounts, expenseArticles, materialsGroups] =
@@ -120,7 +118,6 @@ export default async function ProjectPage({
     ...new Set(
       [
         project.createdById,
-        ...project.files.map((f) => f.uploadedById),
         ...project.payments.map((p) => p.createdById),
         ...stockExpenses.map(row => row.createdById),
         ...project.tasks.flatMap((t) => [t.createdById, t.doneById]),
@@ -132,6 +129,7 @@ export default async function ProjectPage({
     select: { id: true, name: true },
   });
   const uploaderNames = new Map(authors.map((user) => [user.id, user.name]));
+  const fileRows = await ordinaryFileListView(prisma, session.user, project.files.filter(file => file.id !== project.coverFileId));
 
   const showOverviewAmount = canViewProductMoney(role);
   const pricingProjection = showOverviewAmount ? await getProjectPricingProjection({id:session.user.id,name:session.user.name??"",roles:role,source:"web"},project.id) : null;
@@ -291,23 +289,9 @@ export default async function ProjectPage({
         <TabsContent value="files" className="mt-4">
           <FilesTab
             projectId={project.id}
-            files={project.files.map((file) => ({
-              id: file.id,
-              fileName: file.fileName,
-              category: file.category,
-              stage: file.stage,
-              mimeType: file.mimeType,
-              size: file.size,
-              hasThumb: file.hasThumb,
-              createdAt: file.createdAt.toISOString(),
-              uploaderName: file.uploadedById
-                ? (uploaderNames.get(file.uploadedById) ?? "—")
-                : "—",
-            }))}
+            files={fileRows}
             canEdit={canEditTech}
             flatProject
-            stagesEnabled={stageConfig.enabled}
-            stageExtensions={stageConfig.extensions}
           />
         </TabsContent>
 

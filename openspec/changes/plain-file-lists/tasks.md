@@ -6,10 +6,10 @@
 - [x] 1.2 Реализовать новые FileList/FileListRow и anchored FileDeletePopover; проверить GREEN, одну отправку, сохранение строки при отказе и обновление вызывающего списка по успеху.
 - [x] 1.3 Выполнить actual React browser scenarios images/download/popover/keyboard/permission/row clicks/pending на desktop/mobile; осмотреть PNG и зафиксировать Phase A receipt.
 
-## 2. Подключение после принятия 113
+## 2. Подключение reviewed dependency 113
 
-- [ ] 2.1 После fast-forward на принятый staging113 подключить общий ряд для ordinary projects/products/measurement/production/installation/tasks/catalogue; проверить File.section и сохранение распределения файлов.
-- [ ] 2.2 Подключить financial attachments/report documents/uploaded selections через прежние finance routes; проверить PDF/video downloads и disabled linked-document deletion без изменения финансовых связей.
+- [x] 2.1 После ordinary merge reviewed feature/113 в feature/115 подключить общий ряд для ordinary projects/products/measurement/production/installation/tasks и всех существующих файловых renderer (новый catalogue экран не создаётся); проверить File.section и сохранение распределения файлов.
+- [x] 2.2 Подключить financial attachments/report documents/uploaded selections через прежние finance routes; проверить PDF/video downloads и disabled linked-document deletion без изменения финансовых связей.
 - [ ] 2.3 Передать server-safe per-file canDelete по текущим правилам, убрать только display-only author payload, сохранив uploadedById/audit; проверить текущие own-file и stale-access guards на настоящей разрешённой БД вместе с основным агентом.
 
 ## 3. Приёмка

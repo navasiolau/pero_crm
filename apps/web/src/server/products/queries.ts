@@ -13,6 +13,8 @@ import { productSketchProjection } from "./sketch-projection";
 
 export interface ProductListFilters {
   q?: string;
+  // Только канбан задаёт область; URL и другие callers её не меняют.
+  searchScope?: "identity";
   status?: ProductStatus;
   projectId?: string;
   clientId?: string;
@@ -88,18 +90,20 @@ function productWhere(
     where.AND = [...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []), { OR: [
       { number: { contains: q } },
       { title: { contains: q, mode: "insensitive" } },
-      { project: { number: { contains: q } } },
-      { project: { title: { contains: q, mode: "insensitive" } } },
-      {
-        project: {
-          client: {
-            OR: [
-              { name: { contains: q, mode: "insensitive" } },
-              { lastName: { contains: q, mode: "insensitive" } },
-            ],
+      ...(filters.searchScope === "identity" ? [] : [
+        { project: { number: { contains: q } } },
+        { project: { title: { contains: q, mode: "insensitive" as const } } },
+        {
+          project: {
+            client: {
+              OR: [
+                { name: { contains: q, mode: "insensitive" as const } },
+                { lastName: { contains: q, mode: "insensitive" as const } },
+              ],
+            },
           },
         },
-      },
+      ]),
     ] }];
   }
   return { AND: [productVisibilityWhere(actor), where] };

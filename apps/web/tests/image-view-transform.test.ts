@@ -69,9 +69,11 @@ test("закрытие размонтирует изображение; file, sc
   assert.notEqual(regular.key,viewport(file,"cover-fullscreen").key);
   assert.equal(regular.key,viewport({...file}).key);
 });
-test("все входы используют центральный viewer; жесты удаляют обработчики при закрытии", () => {
-  for (const file of ["../src/app/(app)/projects/[id]/files-tab.tsx","../src/components/task-dialog.tsx","../src/app/(app)/products/[id]/product-sketch-view.tsx","../src/components/product-kanban-card.tsx"])
+test("файловые списки используют общий image viewer через FileList; detail/kanban и жесты сохранены", () => {
+  for (const file of ["../src/components/file-list.tsx","../src/app/(app)/products/[id]/product-sketch-view.tsx","../src/components/product-kanban-card.tsx"])
     assert.match(readFileSync(new URL(file,import.meta.url),"utf8"),/useFileViewer/);
+  for (const file of ["../src/app/(app)/projects/[id]/files-tab.tsx","../src/components/task-dialog.tsx"])
+    assert.match(readFileSync(new URL(file,import.meta.url),"utf8"),/FileList/);
   const image = readFileSync(new URL("../src/components/fullscreen-image-viewport.tsx",import.meta.url),"utf8");
   assert.doesNotMatch(image,/document\.body|window\.scroll|\.caption/);
   assert.match(image,/removeEventListener\("wheel",wheel\)/);
