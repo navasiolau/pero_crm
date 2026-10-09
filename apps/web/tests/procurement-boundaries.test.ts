@@ -9,7 +9,7 @@ const db={
  warehouseBalance:{findMany:async()=>[{materialId:'material',quantity:'3',valueByn:'37.02'}]},
  $queryRaw:async()=>{calls++;return[];}, $transaction:async(fn:(tx:unknown)=>Promise<unknown>)=>fn(db),
  materialCategory:{create:async({data}:{data:object})=>{calls++;return{id:'category',...data};}},
- material:{findMany:async()=>{calls++;return[{id:'material',name:'M',sku:null,unit:'шт.',categoryId:null,category:null,purchasePrice:12.34,minStock:null,active:true,comment:null}];}},
+ material:{findMany:async()=>{calls++;return[{id:'material',name:'M',sku:null,unitId:'pieces',measurementUnit:{name:'шт.'},categoryId:null,category:null,purchasePrice:12.34,minStock:null,active:true,comment:null}];}},
  stockMovement:{groupBy:async()=>[],findMany:async()=>{calls++;return[];}},
  projectMaterial:{findMany:async()=>[],findUnique:async()=>{calls++;return null;},findFirst:async()=>{calls++;return null;}},
  project:{findMany:async()=>{calls++;return[{id:'project',number:'1',title:'Finance project',currency:'USD',stage:'PRODUCTION',description:'SECRET_TECH',client:{phone:'SECRET_CONTACT'}}];}},

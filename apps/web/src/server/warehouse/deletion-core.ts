@@ -27,7 +27,7 @@ async function loadPlan(tx:Tx,actor:DomainActor,movementId:string){
   if(root.warehouseValuation?.runId!==state.runId)throw incomplete();
   await tx.$queryRaw`SELECT id FROM "Material" WHERE id=${root.materialId} FOR UPDATE`;
   const [material,balance,rows]=await Promise.all([
-    tx.material.findUniqueOrThrow({where:{id:root.materialId}}),
+    tx.material.findUniqueOrThrow({where:{id:root.materialId},include:{measurementUnit:{select:{name:true}}}}),
     tx.warehouseBalance.findUnique({where:{materialId:root.materialId}}),
     tx.warehouseMovementValuation.findMany({where:{runId:state.runId,movement:{...activeStockMovementWhere,materialId:root.materialId}},
       include:{movement:{include:{product:{select:{id:true,number:true,project:{select:{id:true,number:true}}}},stockPurchase:{include:{payment:{include:{cashAccount:true}}}}}}},
@@ -82,7 +82,7 @@ async function loadPlan(tx:Tx,actor:DomainActor,movementId:string){
     }
   }
   const planFingerprint=createHash('sha256').update(JSON.stringify({movementId,runId:state.runId,balance,rows,lines,materialPrice:material.purchasePrice})).digest('hex');
-  const preview:MovementDeletionPreview={movementId,planFingerprint,materialName:material.name,unit:material.unit,before,after:plan.position,
+  const preview:MovementDeletionPreview={movementId,planFingerprint,materialName:material.name,unit:material.measurementUnit.name,before,after:plan.position,
     movements:plan.deleted.map(item=>{const row=affected.find(row=>row.movementId===item.id)!;return {id:item.id,type:row.movement.type,date:row.createdAt.toISOString(),
       quantity:row.quantity.toString(),money:row.moneyByn.toFixed(2),productNumber:row.movement.product?.number??null,reason:item.reason};}),
     refunds:[...refunds.values()],projects:[...projects.values()]};

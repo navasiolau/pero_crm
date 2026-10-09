@@ -886,11 +886,20 @@ model MaterialCategory {
 // Номенклатура (аналог legacy 1441 «Склад номенклатуры», MVP-набор полей).
 // purchasePrice — учётная цена в BYN: подставляется в списание как снимок
 // (в диалоге её можно поправить на конкретное движение).
+model MaterialUnit {
+  id        String     @id @default(cuid())
+  name      String     @unique
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  materials Material[]
+}
+
 model Material {
   id               String            @id @default(cuid())
   name             String
   sku              String? // артикул
-  unit             String            @default("шт") // из MATERIAL_UNITS (src/lib/labels.ts)
+  unitId           String            @default("warehouse-unit-piece")
+  measurementUnit  MaterialUnit      @relation(fields: [unitId], references: [id], onDelete: Restrict)
   categoryId       String?
   category         MaterialCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
   purchasePrice    Decimal?          @db.Decimal(12, 2) // учётная цена, BYN
@@ -904,6 +913,8 @@ model Material {
   movements        StockMovement[]
   projectMaterials ProjectMaterial[]
   warehouseBalance WarehouseBalance?
+
+  @@index([unitId])
 }
 
 // Потребность изделия в материале (аналог legacy 1531 «Номенклатура в заказах»).
