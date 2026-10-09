@@ -32,6 +32,23 @@ export function selectedUiReadRequest({url, method, prefetch = false}, binding) 
  return 'deny'; // No file opens, print/download, exports, money/save/preference endpoints.
 }
 
+/** Only the idempotent local OPEN may repeat while its dialog remains hidden. */
+export async function openSelectedFinanceUploadDialog(page, reportAttempt = () => {}) {
+ const trigger = page.getByRole('button', {name: 'Добавить расход', exact: true});
+ const dialog = page.getByRole('dialog').filter({has: page.locator('#pay-document')});
+ for (let attempt = 1; attempt <= 3; attempt++) {
+  check(await trigger.count() === 1 && await trigger.isEnabled(), 'EXACT_ENABLED_EXPENSE_TRIGGER_REQUIRED');
+  await trigger.click();reportAttempt(attempt);
+  try {await dialog.waitFor({state: 'visible', timeout: 2500});}
+  catch (error) {
+   check(error?.name === 'TimeoutError' && await dialog.count() <= 1, 'EXPENSE_DIALOG_OPEN_FAILED');
+   if (!await dialog.isVisible()) {check(attempt < 3, 'EXPENSE_DIALOG_NOT_VISIBLE');continue;}
+  }
+  check(await dialog.count() === 1 && await dialog.isVisible(), 'UNIQUE_VISIBLE_EXPENSE_DIALOG_REQUIRED');return dialog;
+ }
+ throw Error('U115_EXPENSE_DIALOG_NOT_VISIBLE');
+}
+
 /** Root must omit coordinator.upload('finance-image'): this is that same planned upload, not an extra object.
  * Bridge is the concrete reviewed113 inspector/durable publisher, with no backend upload method. */
 export async function runSelectedFinanceUploadUi(input = {}) {
@@ -39,7 +56,7 @@ export async function runSelectedFinanceUploadUi(input = {}) {
  check(input.bytes instanceof Uint8Array && ['beginUpload', 'beforeUpstream', 'afterActualUpload', 'unknown', 'state'].every(key => typeof input.bridge?.[key] === 'function'), 'CONCRETE_PLANNED_BRIDGE_REQUIRED');
  const prepared = await input.bridge.beginUpload(), intent = prepared.intent;
  check(intent?.kind === 'upload-intent' && intent.namespace === 'PERO_FILE_ACCEPTANCE_113_V2' && intent.runId === binding.runId && intent.revision === binding.expectedRevision && intent.mediaKey === 'finance-image' && SHA.test(intent.signature ?? '') && prepared.actorId === binding.profiles.admin.id && intent.fileName.includes(binding.runId) && intent.mimeType === 'image/png' && intent.size === input.bytes.byteLength && intent.contentHash === digest(input.bytes), 'ACTUAL_SIGNED_PLANNED_IMAGE_REQUIRED');
- const receipt = {kind: 'actual-selected-finance-upload-ui', status: 'STARTED', runId: binding.runId, revision: binding.expectedRevision, requests: 0, genuineAcknowledgements: 0, blockedWrites: 0, blockedPrefetches: 0, deniedReads: 0, pageErrors: 0, otherNonReadResponses: 0, selectedFilenameOnly: false, selectedTrashDisabled: false, cancelledWithoutPayment: false};
+ const receipt = {kind: 'actual-selected-finance-upload-ui', status: 'STARTED', stage: 'NAV', openClicks: 0, runId: binding.runId, revision: binding.expectedRevision, requests: 0, genuineAcknowledgements: 0, blockedWrites: 0, blockedPrefetches: 0, deniedReads: 0, pageErrors: 0, otherNonReadResponses: 0, selectedFilenameOnly: false, selectedTrashDisabled: false, cancelledWithoutPayment: false};
  let browser, context, sent = false, consumed = false, fatal = null, selected = null;
  const pending = new Set();
  const safe = error => /^U115_[A-Z0-9_]+$/.test(error?.message ?? '') ? error.message : 'U115_UI_CHECK_FAILED';
@@ -74,12 +91,17 @@ export async function runSelectedFinanceUploadUi(input = {}) {
   const session = await context.request.get(`${binding.origin}/api/auth/session`, {maxRedirects: 0});check(session.status() === 200, 'SESSION_FAILED');const user = (await session.json()).user;check(user?.id === binding.profiles.admin.id && JSON.stringify(user.roles) === '["ADMIN"]', 'CURRENT_OWN_ADMIN_REQUIRED');
   const page = await context.newPage();page.on('pageerror', () => {receipt.pageErrors++;fatal ??= 'U115_PAGE_ERROR';});
   const response = await page.goto(binding.origin + binding.paths.financeProject, {waitUntil: 'domcontentloaded'});check(response?.status() === 200, 'OWN_FINANCE_PAGE_FAILED');
-  await page.getByRole('button', {name: 'Добавить расход', exact: true}).click();const dialog = page.getByRole('dialog').filter({has: page.locator('#pay-document')});await expect(dialog).toBeVisible();
+  receipt.stage = 'OPEN';
+  const dialog = await openSelectedFinanceUploadDialog(page, attempt => {receipt.openClicks = attempt;check(!fatal, 'LOCAL_OPEN_STOPPED');});
+  receipt.stage = 'FILE_INPUT';await expect(dialog.locator('#pay-document')).toHaveCount(1);await expect(dialog.locator('#pay-document')).toHaveAttribute('type', 'file');
   await dialog.locator('#pay-document').setInputFiles({name: intent.fileName, mimeType: intent.mimeType, buffer: Buffer.from(input.bytes)});
+  receipt.stage = 'ACK';
   await expect.poll(() => Boolean(selected || fatal), {timeout: 60000}).toBe(true);check(!fatal && selected, 'PLANNED_UPLOAD_NOT_ACKNOWLEDGED');await Promise.allSettled([...pending]);
+  receipt.stage = 'ROW';
   const row = dialog.locator(`[data-file-list-row="${selected.id}"]:visible`);await expect(row).toHaveCount(1);check((await row.innerText()).trim() === intent.fileName, 'ACTUAL_SELECTED_NAME_OR_METADATA_FAILED');await expect(row.locator('img,iframe,video,time')).toHaveCount(0);await expect(row.getByRole('button', {name: `Удалить файл ${intent.fileName}`, exact: true})).toBeDisabled();
   const fits = await row.evaluate(node => node.scrollWidth <= node.clientWidth + 1);check(fits, 'SELECTED_NAME_OVERFLOW');receipt.selectedFilenameOnly = true;receipt.selectedTrashDisabled = true;
   // This is the only form action after upload: cancel without ever submitting addPayment.
+  receipt.stage = 'CANCEL';
   await dialog.getByRole('button', {name: 'Отмена', exact: true}).click();await expect(dialog).toHaveCount(0);receipt.cancelledWithoutPayment = true;
   check(receipt.requests === 1 && receipt.genuineAcknowledgements === 1 && receipt.otherNonReadResponses === 0 && receipt.pageErrors === 0 && receipt.deniedReads === 0 && !fatal, 'EXACT_ONE_REAL_UPLOAD_CANCELLED_FORM_REQUIRED');
   receipt.status = 'PASS';

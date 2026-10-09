@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {pinPlannedUiMultipart, selectedUiReadRequest} from './plain-file-lists-selected-upload-ui.mjs';
+import {pinPlannedUiMultipart, selectedUiReadRequest, openSelectedFinanceUploadDialog} from './plain-file-lists-selected-upload-ui.mjs';
 const origin = 'https://staging-crm.peromebel.by', url = origin + '/api/finance/documents/upload';
 const uiNonce = '11111111-1111-4111-8111-111111111111', plannedNonce = '22222222-2222-4222-8222-222222222222';
 async function source(extra = null, nonce = uiNonce) {
@@ -39,4 +39,14 @@ test('selected upload guard allows own finance GET plus exactly one upload candi
  for (const path of ['/api/payments', '/api/files/upload', '/finance/projects/fresh-project', '/api/preferences']) assert.equal(selectedUiReadRequest({url: origin + path, method: 'POST'}, binding), 'block-write');
  for (const path of ['/api/finance/documents/original', '/api/files/original', '/finance/accounts/export', '/finance/projects/original']) assert.equal(selectedUiReadRequest({url: origin + path, method: 'GET'}, binding), 'deny');
  assert.equal(selectedUiReadRequest({url: 'https://crm.peromebel.by/api/finance/documents/upload', method: 'POST'}, binding), 'deny');
+});
+test('cold first OPEN retries only local dialog and stops after three hidden attempts without any upload', async () => {
+ for (const opensAfter of [2, Infinity]) {
+  let clicks = 0, visible = false;const attempts = [];
+  const trigger = {count: async () => 1, isEnabled: async () => true, click: async () => {visible = ++clicks >= opensAfter;}};
+  const dialog = {filter() {return this;}, count: async () => visible ? 1 : 0, isVisible: async () => visible, waitFor: async options => {assert.deepEqual(options, {state: 'visible', timeout: 2500});if (!visible) {const error = Error('controlled-timeout');error.name = 'TimeoutError';throw error;}}};
+  const page = {getByRole: (role, options) => {if (role === 'dialog') return dialog;assert.equal(role, 'button');assert.deepEqual(options, {name: 'Добавить расход', exact: true});return trigger;}, locator: selector => {assert.equal(selector, '#pay-document');return {setInputFiles: () => assert.fail('OPEN must never upload')};}};
+  if (Number.isFinite(opensAfter)) {assert.equal(await openSelectedFinanceUploadDialog(page, attempt => attempts.push(attempt)), dialog);assert.equal(clicks, 2);assert.deepEqual(attempts, [1, 2]);}
+  else {await assert.rejects(openSelectedFinanceUploadDialog(page), /U115_EXPENSE_DIALOG_NOT_VISIBLE/);assert.equal(clicks, 3);}
+ }
 });
