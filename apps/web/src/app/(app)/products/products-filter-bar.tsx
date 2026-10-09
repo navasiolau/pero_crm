@@ -4,16 +4,21 @@ import { EntityListFilterBar } from "@/components/entity-list-filter-bar";
 import type { MultiSelectFilterOption } from "@/components/ui/multi-select-filter";
 import { PRODUCT_STATUSES } from "@/lib/product-statuses";
 
-export function ProductsFilterBar({ projectOptions, clientOptions, engineerOptions, hideEngineer }: {
+export function ProductsFilterBar({ projectOptions, clientOptions, engineerOptions, hideEngineer, identitySearch, onSearchDraftChange, onModalActiveChange }: {
   projectOptions: MultiSelectFilterOption[];
   clientOptions: MultiSelectFilterOption[];
   engineerOptions: MultiSelectFilterOption[];
   hideEngineer?: boolean;
+  identitySearch?: boolean;
+  onSearchDraftChange?: (query: string) => void;
+  onModalActiveChange?: (active: boolean) => void;
 }) {
   return (
     <EntityListFilterBar
       section="products"
-      searchPlaceholder="Номер, название, проект, клиент…"
+      searchPlaceholder={identitySearch ? "Номер, название…" : "Номер, название, проект, клиент…"}
+      onSearchDraftChange={onSearchDraftChange}
+      onModalActiveChange={onModalActiveChange}
       fields={[
         {
           queryKey: "status", label: "Статус", allLabel: "Все статусы",

@@ -50,6 +50,7 @@ function DraggableCard({
   return (
     <div
       ref={setNodeRef}
+      data-kanban-card-id={project.id}
       style={{ transform: CSS.Translate.toString(transform) }}
       className={cn("relative", isDragging && "opacity-40")}
       onClick={() => onOpen(project.id)}
@@ -113,10 +114,15 @@ function StageColumn({
 // после смены этапа revalidate приносит новый список — синхронизируемся.
 export function KanbanBoard({
   initialProjects,
+  searchText = "",
+  searchReady = false,
   canManage,
   showAmount,
 }: {
   initialProjects: ProjectCard[];
+  // Без подтверждённой пары query/rows обычный caller не запускает поиск.
+  searchText?: string;
+  searchReady?: boolean;
   canManage: boolean;
   showAmount: boolean;
 }) {
@@ -206,7 +212,11 @@ export function KanbanBoard({
         onDragEnd={onDragEnd}
         onDragCancel={() => setActiveId(null)}
       >
-        <KanbanScrollArea label="Канбан проектов">
+        <KanbanScrollArea label="Канбан проектов" searchFocus={{
+          query: searchText,
+          cardId: projects.find(item => item.number === searchText.trim())?.id ?? null,
+          ready: searchReady && projects === initialProjects && !activeId,
+        }}>
           {STAGES.map((stage) => (
             <StageColumn
               key={stage.id}

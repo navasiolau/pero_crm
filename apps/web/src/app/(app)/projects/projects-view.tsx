@@ -44,6 +44,7 @@ export interface SelectOption {
 // Фильтрация/сортировка/пагинация — на сервере (listProjects).
 export function ProjectsView({
   view,
+  resolvedQuery,
   projects,
   total,
   page,
@@ -56,6 +57,7 @@ export function ProjectsView({
   hideEngineerFilter,
 }: {
   view: "kanban" | "table";
+  resolvedQuery: string;
   // Канбан — все отфильтрованные проекты; таблица — одна страница
   projects: ProjectCard[];
   total: number;
@@ -69,7 +71,9 @@ export function ProjectsView({
   hideEngineerFilter?: boolean;
 }) {
   const router = useRouter();
-  const { set } = useListParams();
+  const { set, query, pending } = useListParams();
+  const [searchText, setSearchText] = useState(() => new URLSearchParams(resolvedQuery).get("q") ?? "");
+  const [filterOverlayActive, setFilterOverlayActive] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
 
   function switchView(next: "kanban" | "table") {
@@ -105,6 +109,9 @@ export function ProjectsView({
       </div>
 
       <ProjectsFilterBar
+        identitySearch={view === "kanban"}
+        onSearchDraftChange={setSearchText}
+        onModalActiveChange={setFilterOverlayActive}
         clients={clients}
         managers={managers}
         engineers={engineers}
@@ -113,6 +120,9 @@ export function ProjectsView({
 
       {view === "kanban" ? (
         <KanbanBoard
+          searchText={searchText}
+          searchReady={!pending && query === resolvedQuery && !filterOverlayActive
+            && searchText.trim() === (new URLSearchParams(query).get("q") ?? "")}
           initialProjects={projects}
           canManage={canManage}
           showAmount={showAmount}
