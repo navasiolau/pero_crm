@@ -18,6 +18,12 @@
 
 Independent review actual diff перед коммитом — NONE: проверены atomic oldFile/outbox, postcommit exact versions/markers, replay/current-pointer, committed503/dispatcher/UI retry и неизменная ordinary file-delete ACL. Reviewer не запускал runtime и не заявлял actual staging/S3 PASS. Новая actual staging DB/S3/browser acceptance — PENDING; local DI не подтверждает deployed image или physical staging bytes. Historical backend3 harness/raw pins/receipts сохранены. Subagent не выполнял staging/production/infra DB/S3 мутации, дампы или restic.
 
+## CI fixture correction — 09.10.2026
+
+Full diagnostic candidate856 завершился2134 tests/2128 PASS/6 FAIL. Собственный112 failure `product-cover-backend.test.ts:61` был вызван неполной relational fixture: два File без обязательного `storedName` проецировались как один ключ `(projectId, undefined)`, и actual key-alias guard корректно отклонял preflight.
+
+Исправлена только fixture: distinct storedName/fileName, реальные reverse sketch refs, nullable project cover и CONTRACT родителя. Дополнительный negative case в том же файле подтверждает отказ при настоящей общей обложке или alias. Application/shared-key guards, ACL и реальная storage cleanup не менялись. Один разрешённый focused прогон `pnpm --filter @pero/web exec tsx --test --test-reporter=spec tests/product-cover-backend.test.ts` —6/6 PASS. Независимый single-file review — NONE; broad/full/native/stage/API-auth проверки повторно не запускались.
+
 ## Historical evidence — 08–09.10.2026, прежнее retention-поведение superseded
 
 08.10.2026, задача112, ветка `bugfix/112`, базовый staging `20a049b2`.

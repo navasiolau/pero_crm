@@ -42,12 +42,12 @@ test("legacy gallery endpoint without captured baseline is explicitly rejected",
  assert.equal(result.ok,false);if(!result.ok)assert.equal(result.kind,"validation");
 });
 function participantCoverFixture(){
- const parent:FixtureRow={id:'qa-project',number:'216',products:[],tasks:[]};
+ const parent:FixtureRow={id:'qa-project',number:'216',stage:'CONTRACT',products:[],tasks:[]};
  const own:FixtureRow={id:'qa-product',projectId:parent.id,project:parent,status:'DESIGN',engineerId:null,sketchFileId:'manager-sketch'};
  const foreign:FixtureRow={id:'foreign-product',projectId:parent.id,project:parent,status:'DESIGN',engineerId:'other',sketchFileId:'foreign-sketch'};
  parent.products=[own,foreign];
- const current:FixtureRow={id:'manager-sketch',projectId:parent.id,project:parent,productId:own.id,product:own,taskId:null,mimeType:'image/png',uploadedById:'manager'};
- const foreignFile:FixtureRow={...current,id:'foreign-sketch',productId:foreign.id,product:foreign};
+ const current:FixtureRow={id:'manager-sketch',projectId:parent.id,project:parent,productId:own.id,product:own,taskId:null,mimeType:'image/png',uploadedById:'manager',fileName:'manager-sketch.png',storedName:'01234567-89ab-4def-8123-456789abcdef-manager-sketch.png',sketchForProduct:own,coverForProject:null};
+ const foreignFile:FixtureRow={...current,id:'foreign-sketch',productId:foreign.id,product:foreign,fileName:'foreign-sketch.png',storedName:'21234567-89ab-4def-8123-456789abcdef-foreign-sketch.png',sketchForProduct:foreign};
  const config:FixtureRow={id:'config',productId:own.id,product:own,kind:'ENGINEERING'};
  const membership:FixtureRow={id:'member',userId:'participant',configId:config.id,config,shareUnits:1};
  const tx={project:fixtureModel([parent]),product:fixtureModel([own,foreign]),task:fixtureModel([]),productPercentageParticipant:fixtureModel([membership]),file:fixtureModel([current,foreignFile]),changeLog:{findUnique:async()=>null}} as unknown as Prisma.TransactionClient;
@@ -74,5 +74,16 @@ test('112 participant cover grant never leaks to post-DESIGN/deleted/foreign pro
  for(const scope of ['foreign','deleted-product','deleted-parent','non-engineer']){
   const f=participantCoverFixture();if(scope==='foreign')f.input.productId=f.foreign.id as string;if(scope==='deleted-product')f.own.deletedAt=new Date();if(scope==='deleted-parent')f.parent.deletedAt=new Date();if(scope==='non-engineer')f.actor.roles=['ACCOUNTANT'];
   const result=await authorizeProductCoverUpload(f.tx,f.actor,f.input);assert.equal(result.ok,false);if(!result.ok)assert.equal(result.kind,'forbidden');
+ }
+});
+
+test('112 real File context keeps shared-cover and exact storage-alias preflight guards',async()=>{
+ for(const scenario of ['shared-cover','storage-alias']){
+  const f=participantCoverFixture();
+  if(scenario==='shared-cover')f.current.coverForProject=f.parent;
+  else f.foreignFile.storedName=f.current.storedName;
+  const result=await authorizeProductCoverUpload(f.tx,f.actor,f.input);
+  assert.equal(result.ok,false);if(!result.ok)assert.equal(result.kind,'validation');
+  assert.equal(f.own.sketchFileId,f.current.id);
  }
 });
