@@ -5,9 +5,9 @@ import {getFileViewerPresentation,getFileViewerDispatch} from '../src/components
 import {loadMovementReportDocuments} from '../src/server/warehouse/report-documents';
 Object.assign(globalThis,{React});
 const file={id:'document',source:'finance' as const,fileName:'Накладная.pdf',mimeType:'application/pdf'};
-test('document control exists only for a linked file and uses the operation label',()=>{
- const render=(document:typeof file|null|undefined)=>renderToStaticMarkup(React.createElement(ReportDocumentButton,{document,onOpen(){}}));
- assert.equal(render(null),'');assert.equal(render(undefined),'');assert.match(render(file),/Отчетный документ/);assert.match(render(file),/Накладная.pdf/);
+test('document control shows only filename download and disabled financial trash',()=>{
+ const render=(document:typeof file|null|undefined)=>renderToStaticMarkup(React.createElement(ReportDocumentButton ,{document}));
+ assert.equal(render(null),'');assert.equal(render(undefined),'');assert.doesNotMatch(render(file),/Отчетный документ/);assert.match(render(file),/download="Накладная\.pdf"/);assert.match(render(file),/disabled=""/);assert.match(render(file),/Накладная.pdf/);
 });
 test('explicit fullscreen supports financial PDF while ordinary attachments retain their behavior',()=>{
  assert.equal(getFileViewerPresentation('fullscreen',file).fullscreen,true);

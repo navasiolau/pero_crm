@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Pencil, Trash2 } from "lucide-react";
@@ -28,8 +28,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { formatDate } from "@/lib/format";
-import { FileImageThumbnail } from "@/components/file-image-thumbnail";
-import { useFileViewer } from "@/components/file-viewer";
+import {FileList, type FileListItem} from "@/components/file-list";
+import {deleteFile} from "@/server/files/actions";
 import { ConfirmDeleteDialog } from "@/components/confirm-delete-dialog";
 import { QuantityStepper } from "@/components/quantity-stepper";
 import { formatDateTime } from "@/lib/format";
@@ -80,7 +80,7 @@ export interface TaskDetails {
   productId: string | null; // изделие проекта (необязательно)
   productNumber: string | null;
   productTitle: string | null;
-  files: { id: string; fileName: string; hasThumb: boolean; mimeType: string }[];
+  files: FileListItem[];
   createdAt: string;
   doneAt: string | null;
   doneByName: string | null;
@@ -137,7 +137,9 @@ export function TaskDialog({
   const [editing, setEditing] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
-  const fileViewer = useFileViewer();
+  const fileDeleteBusy = useRef(false);
+  const [filePending, setFilePending] = useState(false);
+  const [deletedFiles, setDeletedFiles] = useState<{taskId: string | null; ids: string[]}>({taskId: null, ids: []});
   const [form, setForm] = useState({
     title: "",
     type: "Производство",
@@ -151,6 +153,7 @@ export function TaskDialog({
   });
 
   if (!task) return null;
+  const visibleFiles = task.files.filter(file => deletedFiles.taskId !== task.id || !deletedFiles.ids.includes(file.id));
   const readOnly = task.status === "DONE" || !canEdit;
   const isAllocatedShare = !!task.allocationGroupId;
 
@@ -160,7 +163,7 @@ export function TaskDialog({
   const ownAmount = taskPaymentLabel(task);
 
   function startEdit() {
-    if (!task) return;
+    if (!task || fileDeleteBusy.current) return;
     setForm({
       title: task.title,
       type: task.type ?? "Производство",
@@ -184,6 +187,7 @@ export function TaskDialog({
     <Dialog
       open={open}
       onOpenChange={(next) => {
+        if (!next && fileDeleteBusy.current) return;
         if (!next) {
           setEditing(false);
         }
@@ -512,19 +516,13 @@ export function TaskDialog({
                 Замер: фото обязательны при выполнении
               </div>
             ) : null}
-            {task.files.length > 0 ? (
-              <div className="flex flex-col gap-1.5">
-                <span className="text-muted-foreground">
-                  Файлы ({task.files.length}) — клик открывает просмотр:
-                </span>
-                <div className="flex flex-wrap gap-2">
-                  {task.files.map(file=><div key={file.id} className="flex w-full min-w-0 items-center gap-3 rounded-lg border p-2">
-                    <button type="button" onClick={()=>fileViewer.open(file)} className="min-w-0 flex-1 break-all text-left text-xs underline-offset-2 hover:underline">{file.fileName}</button>
-                    <FileImageThumbnail file={file} onOpen={()=>fileViewer.open(file)}/>
-                  </div>)}
-                </div>
-              </div>
-            ) : null}
+            {visibleFiles.length > 0 ? <FileList files={visibleFiles}
+              onDelete={file => deleteFile(file.id)}
+              onBusyChange={busy => {fileDeleteBusy.current = busy;setFilePending(busy);}}
+              onDeleted={file => {
+                setDeletedFiles(previous => ({taskId: task.id, ids: previous.taskId === task.id ? [...previous.ids, file.id] : [file.id]}));
+                router.refresh();
+              }} /> : null}
           </div>
         )}
 
@@ -578,13 +576,14 @@ export function TaskDialog({
                   <Button
                     variant="destructive"
                     className="sm:mr-auto"
-                    onClick={() => setDeleteOpen(true)}
+                    disabled={filePending}
+                    onClick={() => {if (!fileDeleteBusy.current) setDeleteOpen(true);}}
                   >
                     <Trash2 className="size-4" /> Удалить
                   </Button>
                 ) : null}
                 {!readOnly ? (
-                  <Button variant="outline" onClick={startEdit}>
+                  <Button variant="outline" disabled={filePending} onClick={startEdit}>
                     <Pencil className="size-4" /> Редактировать
                   </Button>
                 ) : null}
@@ -593,13 +592,13 @@ export function TaskDialog({
           )}
         </DialogFooter>
       </DialogContent>
-      {fileViewer.viewer}
       <ConfirmDeleteDialog
         entityLabel="задачу"
         open={deleteOpen}
         onOpenChange={setDeleteOpen}
         warning="Время по ней будет удалено, файлы останутся в проекте."
         onConfirm={async () => {
+          if (fileDeleteBusy.current) return false;
           const result = await deleteTask(task.id);
           if (result.ok) {
             toast.success("Задача удалена");

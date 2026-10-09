@@ -8,7 +8,7 @@ import {Label} from "@/components/ui/label";
 import {Badge} from "@/components/ui/badge";
 import {DataTable,type DataColumn} from "@/components/ui/data-table";
 import {Dialog,DialogContent,DialogHeader,DialogTitle,DialogDescription} from "@/components/ui/dialog";
-import {useFileViewer} from "@/components/file-viewer";
+import {ReportDocumentButton} from "@/components/report-document-button";
 import {formatExactMoney,formatDate,formatDateTime} from "@/lib/format";
 import {cn} from "@/lib/utils";
 import type {CashStatement,CashStatementQuery,CashStatementRow,CashStatementEntry,CashStatementTotals} from "@/server/finance/cash-statement";
@@ -21,7 +21,7 @@ function TotalsGrid({totals,currency}:{totals:CashStatementTotals;currency:strin
  return <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">{(Object.keys(names) as (keyof CashStatementTotals)[]).map(key=><div key={key}><dt className="text-muted-foreground">{names[key]}</dt><dd className={cn(key==="closing"&&"font-semibold")}><Money value={totals[key]} currency={currency}/></dd></div>)}</dl>;
 }
 export function CashStatementView({query,report,error}:{query:CashStatementQuery;report?:CashStatement;error?:string}){
- const [selected,setSelected]=useState<CashStatementRow|null>(null),heading=useRef<HTMLHeadingElement>(null),viewer=useFileViewer();
+ const [selected,setSelected]=useState<CashStatementRow|null>(null),heading=useRef<HTMLHeadingElement>(null);
  const columns:DataColumn<CashStatementRow>[]=[
   {id:"name",header:"Наименование",searchValue:row=>row.name,cell:row=><div className="flex items-center gap-2"><ChevronRight className="size-4 shrink-0 text-muted-foreground"/><div><p className="font-medium">{row.name}</p><p className="text-xs text-muted-foreground">{row.currency==="UNKNOWN"?"Валюта не указана":row.currency}{!row.active&&!row.unassigned?" · неактивна":""}</p>{row.unknownAmounts>0?<Badge variant="outline" className="mt-1">Неполная история</Badge>:null}</div></div>},
   ...(Object.keys(names) as (keyof CashStatementTotals)[]).map(key=>({id:key,header:names[key],headerClassName:"text-right",className:"text-right whitespace-nowrap",cell:(row:CashStatementRow)=><Money value={row.totals[key]} currency={row.currency}/>}))
@@ -32,7 +32,7 @@ export function CashStatementView({query,report,error}:{query:CashStatementQuery
   {id:"project",header:"Проект",searchValue:row=>row.project?.number??"",cell:row=>row.project?<Link href={`/finance/projects/${encodeURIComponent(row.project.id)}`} className="hover:underline">{row.project.number}</Link>:"—"},
   {id:"comment",header:"Комментарий",searchValue:row=>row.comment??"",cell:row=><span className="break-words">{row.comment??"—"}</span>},
   {id:"change",header:"Изменение",className:"text-right whitespace-nowrap",headerClassName:"text-right",cell:row=><div><Money value={row.change} currency={row.currency}/>{query.mode==="BYN"&&row.nativeCurrency&&row.nativeCurrency!=="BYN"&&row.nativeAmount!==null?<p className="text-xs text-muted-foreground">{formatExactMoney(row.nativeAmount,row.nativeCurrency)}</p>:null}</div>},
-  {id:"document",header:"Отчётный документ",searchValue:row=>row.document?.fileName??"",cell:row=>row.document?<Button variant="link" className="h-auto max-w-48 whitespace-normal break-all p-0" onClick={()=>{if(row.document)viewer.open(row.document);}}>{row.document.fileName}</Button>:"—"},
+  {id:"document",header:"Отчётный документ",searchValue:row=>row.document?.fileName??"",cell:row=>row.document?<ReportDocumentButton document={row.document}/>:"—"},
  ];
  return <div className="flex min-w-0 flex-col gap-5">
   <div><Link href="/finance/accounts" className="text-sm text-muted-foreground hover:underline">К кассам</Link><h1 className="mt-2 text-2xl font-semibold">Отчёт по кассам</h1><p className="text-sm text-muted-foreground">Остатки и движение денег, включая зарплаты и авансы. Расходы показаны со знаком минус.</p></div>
@@ -55,9 +55,8 @@ export function CashStatementView({query,report,error}:{query:CashStatementQuery
    <DialogContent initialFocus={heading} className="sm:max-w-5xl"><DialogHeader><DialogTitle ref={heading} tabIndex={-1} className="outline-none">{selected?.name}</DialogTitle><DialogDescription>{formatDate(query.from)} — {formatDate(query.to)} · {selected?.currency==="UNKNOWN"?"валюта не указана":selected?.currency}</DialogDescription></DialogHeader>
     {selected?<><TotalsGrid totals={selected.totals} currency={selected.currency}/>
      <DataTable columns={details} rows={selected.entries} searchPlaceholder="Поиск по операциям…" emptyText="В этом периоде операций нет" defaultPageSize={10}
-      renderMobileCard={row=><div className="space-y-2"><div className="flex items-start justify-between gap-2"><b>{row.label}</b><Money value={row.change} currency={row.currency}/></div><p className="text-xs text-muted-foreground">{formatDateTime(row.at)}{row.project?" · Проект "+row.project.number:""}</p>{row.comment?<p className="break-words text-sm">{row.comment}</p>:null}{row.issues.map(issue=><p key={issue} className="text-xs text-amber-700 dark:text-amber-400">{issue}</p>)}{row.document?<Button variant="link" className="h-auto whitespace-normal break-all p-0" onClick={()=>{if(row.document)viewer.open(row.document);}}>{row.document.fileName}</Button>:null}</div>}/></>:null}
+      renderMobileCard={row=><div className="space-y-2"><div className="flex items-start justify-between gap-2"><b>{row.label}</b><Money value={row.change} currency={row.currency}/></div><p className="text-xs text-muted-foreground">{formatDateTime(row.at)}{row.project?" · Проект "+row.project.number:""}</p>{row.comment?<p className="break-words text-sm">{row.comment}</p>:null}{row.issues.map(issue=><p key={issue} className="text-xs text-amber-700 dark:text-amber-400">{issue}</p>)}{row.document?<ReportDocumentButton document={row.document}/>:null}</div>}/></>:null}
    </DialogContent>
   </Dialog>
-  {viewer.viewer}
  </div>;
 }

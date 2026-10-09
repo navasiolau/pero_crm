@@ -1,3 +1,4 @@
+import {ordinaryFileListView} from "@/server/files/list-view";
 import { paymentView } from "@/server/finance/payment-view";
 import { loadProjectStockExpenses, projectExpenseRows } from "@/server/finance/project-expenses";
 import nextDynamic from "next/dynamic";
@@ -117,7 +118,6 @@ export default async function ProjectPage({
     ...new Set(
       [
         project.createdById,
-        ...project.files.map((f) => f.uploadedById),
         ...project.payments.map((p) => p.createdById),
         ...stockExpenses.map(row => row.createdById),
         ...project.tasks.flatMap((t) => [t.createdById, t.doneById]),
@@ -129,6 +129,7 @@ export default async function ProjectPage({
     select: { id: true, name: true },
   });
   const uploaderNames = new Map(authors.map((user) => [user.id, user.name]));
+  const fileRows = await ordinaryFileListView(prisma, session.user, project.files.filter(file => file.id !== project.coverFileId));
 
   const showOverviewAmount = canViewProductMoney(role);
   const pricingProjection = showOverviewAmount ? await getProjectPricingProjection({id:session.user.id,name:session.user.name??"",roles:role,source:"web"},project.id) : null;
@@ -288,18 +289,7 @@ export default async function ProjectPage({
         <TabsContent value="files" className="mt-4">
           <FilesTab
             projectId={project.id}
-            files={project.files.filter(file => file.id !== project.coverFileId).map((file) => ({
-              id: file.id,
-              fileName: file.fileName,
-              section: file.section,
-              mimeType: file.mimeType,
-              size: file.size,
-              hasThumb: file.hasThumb,
-              createdAt: file.createdAt.toISOString(),
-              uploaderName: file.uploadedById
-                ? (uploaderNames.get(file.uploadedById) ?? "—")
-                : "—",
-            }))}
+            files={fileRows}
             canEdit={canEditTech}
             flatProject
           />

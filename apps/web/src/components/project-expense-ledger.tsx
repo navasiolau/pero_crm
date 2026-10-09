@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { DataTable, type DataColumn } from "@/components/ui/data-table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
-import { useFileViewer } from "@/components/file-viewer";
+import {ReportDocumentButton} from "@/components/report-document-button";
 import { formatAmount, formatDate, formatMoneyTotal } from "@/lib/format";
 import type { PaymentRow, ProjectExpenseRow } from "@/server/finance/contracts";
 import type { ExpenseBreakdownRow } from "@/server/finance/project-expense-facts";
@@ -17,13 +17,10 @@ export function ProjectExpenseLedger({ rows, breakdown, onDelete }: {
 }) {
   const [article, setArticle] = useState("all");
   const [viewing, setViewing] = useState<ProjectExpenseRow | null>(null);
-  const viewer = useFileViewer();
   const groups = breakdown.filter(row => row.key !== "payroll");
   const selected = article === "all" ? rows : rows.filter(row => row.article.key === article);
   const documentButton = (row: ProjectExpenseRow) => row.payment?.reportDocument
-    ? <Button variant="link" className="h-auto max-w-48 whitespace-normal break-all p-0 text-left" onClick={event => {
-      event.stopPropagation(); if (row.payment?.reportDocument) viewer.open(row.payment.reportDocument);
-    }}>{row.payment.reportDocument.fileName}</Button> : "—";
+    ? <ReportDocumentButton document={row.payment.reportDocument} /> : "—";
   const columns: DataColumn<ProjectExpenseRow>[] = [
     { id: "date", header: "Дата", sortable: true, sortValue: row => row.date, cell: row => formatDate(row.date) },
     { id: "source", header: "Операция", searchValue: row => sourceLabel[row.source], cell: row => sourceLabel[row.source] },
@@ -72,7 +69,6 @@ export function ProjectExpenseLedger({ rows, breakdown, onDelete }: {
         </DialogFooter>
       </DialogContent>
     </Dialog>
-    {viewer.viewer}
   </div>;
 }
 

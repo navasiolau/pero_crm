@@ -2,37 +2,24 @@
 
 import { useRef, useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { Download, FileText, Trash2, Upload } from "lucide-react";
+import { Upload } from "lucide-react";
 import { toast } from "sonner";
 import type { FileSection } from "@prisma/client";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { formatDate } from "@/lib/format";
-import { FileImageThumbnail } from "@/components/file-image-thumbnail";
-import { useFileViewer } from "@/components/file-viewer";
-import { ConfirmDeleteDialog } from "@/components/confirm-delete-dialog";
 import { deleteFile } from "@/server/files/actions";
 import {UploadErrorDetails} from "@/components/upload-error-details";
-import {MULTI_UPLOAD_MAX_FILES,createUploadAttempt,sendUploadBatch,localUploadFailure,type BatchFileFailure,type BatchUploadItem,type UploadFailure} from "@/lib/file-upload-client";
+import {MULTI_UPLOAD_MAX_FILES,createUploadAttempt,sendUploadBatch,localUploadFailure,type BatchFileFailure,type BatchUploadItem} from "@/lib/file-upload-client";
 import {PRODUCT_FILE_SECTIONS, FILE_SECTION_LABELS} from "@/lib/file-sections";
 
-export interface FileRow {
-  id: string;
-  fileName: string;
+import {FileList, type FileListItem} from "@/components/file-list";
+
+export interface FileRow extends FileListItem {
   section: FileSection;
-  mimeType: string;
-  size: number;
-  hasThumb: boolean;
-  createdAt: string;
-  uploaderName: string;
 }
 
-function formatSize(size: number): string {
-  if (size > 1024 * 1024) return `${(size / 1024 / 1024).toFixed(1)} МБ`;
-  return `${Math.round(size / 1024)} КБ`;
-}
 
 // Раздел устанавливает место загрузки, без дополнительных полей формы.
 export function Uploader({
@@ -137,13 +124,8 @@ export function Uploader({
   );
 }
 
-// Сетка фото + список документов с просмотром и удалением.
-export function FileGridView({
-  files,
-  canEdit,
-  compact = false,
-  onBusyChange,
-}: {
+// Единый список; публичные props контейнеров/разделов сохраняются для существующих экранов.
+export function FileGridView({files, onBusyChange}: {
   flat?: boolean;
   files: FileRow[];
   canEdit: boolean;
@@ -151,82 +133,8 @@ export function FileGridView({
   onBusyChange?: (busy: boolean) => void;
 }) {
   const router = useRouter();
-  const [pending] = useTransition();
-  const [deleteFor, setDeleteFor] = useState<FileRow | null>(null);
-  const [fileError,setFileError]=useState<UploadFailure|null>(null);
-  const fileViewer = useFileViewer();
-
-  return (
-    <>
-      <UploadErrorDetails failure={fileError} />
-      {files.map((file) => (
-        <Card
-          key={file.id}
-          className="min-w-0 cursor-pointer transition-colors hover:bg-accent/50"
-          data-file-id={file.id}
-          onClick={() => fileViewer.open(file)}
-        >
-          <CardContent className="flex min-w-0 flex-wrap items-center gap-3 p-3">
-            <FileText className="size-5 shrink-0 text-muted-foreground" />
-            <div className="min-w-0 flex-1">
-              <div className={compact ? "break-all text-sm" : "truncate text-sm"}>{file.fileName}</div>
-              <div className="break-words text-xs text-muted-foreground">
-                {formatSize(file.size)} · {file.uploaderName} ·{" "}
-                {formatDate(file.createdAt)}
-              </div>
-            </div>
-            <FileImageThumbnail file={file} onOpen={()=>fileViewer.open(file)}/>
-            <a href={`/api/files/${file.id}`} download onClick={event => event.stopPropagation()}>
-              <Button size="icon" variant="ghost" aria-label="Скачать">
-                <Download className="size-4" />
-              </Button>
-            </a>
-            {canEdit ? (
-              <Button
-                size="icon"
-                variant="ghost"
-                aria-label="Удалить"
-                disabled={pending}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setFileError(null);
-                  setDeleteFor(file);
-                }}
-              >
-                <Trash2 className="size-4" />
-              </Button>
-            ) : null}
-          </CardContent>
-        </Card>
-      ))}
-
-      {files.length === 0 ? (
-        <div className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">
-          Файлов пока нет
-        </div>
-      ) : null}
-      {fileViewer.viewer}
-      <ConfirmDeleteDialog
-        entityLabel={`файл «${deleteFor?.fileName ?? ""}»`}
-        open={!!deleteFor}
-        onOpenChange={(open) => !open && setDeleteFor(null)}
-        onConfirm={async () => {
-          onBusyChange?.(true);
-          try {
-          const result = await deleteFile(deleteFor!.id);
-          if (result.ok) {
-            toast.success("Файл удалён");
-            router.refresh();
-            return true;
-          }
-          const failure=localUploadFailure(result.error??"Не удалось удалить файл.","confirmation");failure.code="FILE_DELETE_REJECTED";setFileError(failure);toast.error(failure.error);
-          return false;
-          } catch { const failure=localUploadFailure("Не удалось подтвердить удаление файла. Проверьте результат и повторите попытку.","confirmation",undefined,"unknown");failure.code="FILE_DELETE_UNKNOWN";setFileError(failure);toast.error(failure.error);return false; }
-          finally { onBusyChange?.(false); }
-        }}
-      />
-    </>
-  );
+  return <FileList files={files} onDelete={file => deleteFile(file.id)}
+    onDeleted={() => {toast.success("Файл удалён");router.refresh();}} onBusyChange={onBusyChange} />;
 }
 
 // Общие файлы проекта остаются плоским списком; изделие использует разделы.
