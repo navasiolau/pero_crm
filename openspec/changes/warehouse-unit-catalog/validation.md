@@ -64,3 +64,14 @@ Guard существующего pero_crm_pg и полного container id пр
 - Штатный Git diff/status с действующей CRLF-нормализацией clean; отключениеautocrlf для диагностического diff давало только newline-noise импортированных файлов, не чужие смысловые правки.
 - Три readonlyproof source пока неизменны (9f8ac972/c6576fe5/50d315e5). Staging/DBQAheld: для будущего110BEFORE необходим свежий generic ApiToken clock helper111 с доказательством всех прежних IDs/полей кроме единственногоlastUsedAt и монотонных bounded clocks. Ожидается normalmerge этого reviewedcommittedhelper через staging; selectivecopy/import из чужого worktree не разрешён. Старый глобальный111STOP не преобразуется вPASS.
 - Actual unitCRUD/deny/inactiveFK/numeric/CAS cleanup пока только sourceplan, ignored handoff node_modules/.cache/task110-stage-crud-plan.md; runtimefixtures/SSH/DB/staging не выполнялись. tasks4.3 остаётся pending.
+
+
+## Fresh staging proof v2 — source-only
+
+- Generic ApiToken helper111 достигнут обычным merge stagingcfd065314024fd448c5989964e0cbc7790b196da (включая117ACL/identity/cardfocus) вe8a84e0443bead21ba32d217b7df01aeb821b886. Helper/app117 не копировались и не изменялись в110adapter.
+- ONLY110entry/runner/tests используют committed crm-acceptance-token-clock.mjs: freshfull/stableминусONLYlastUsedAt, legacyMD5 иhashedID-clocks внутри того жеRRREADONLY. TokenfullFP обязан совпасть сdynamicfullApiTokenFP; helperDBend ограниченouterclock_timestamp snapshotEND. Все прочие tokenfields/IDs exact, толькоlastUsedAt можетмонотонно продвинуться; никакого lowerbound наbeforeCaptureEND. Knownbot OrgSetting допускает лишь samevalue/immutablefields иmonotonicclock≤afterEND без beforeENDlowerbound.
+- Snapshot и privatecheckpoint version2 обязательны; oldv1/missingclockproof отвергаются. Sharedhelper включён вfrozen sourcehash binding. Старый111globalSTOP не переинтерпретируется; actualfresh110BEFORE ещё не запускался.
+- MeaningfulRED80cases10fail → GREEN102/102 (unitadapter85+shared17), включая secret/scopes/owner/revocation/hashedIDmembership, clockregression/future/null, corruptfullFP, oldmissingproof andpositiveobservedclock. Fullmergedlocal1590/1590PASS45.99s, TSC/OpenSpecPASS, lint0warnings/syntax/diffcheckPASS.
+- IndependentstaticreviewNONE точныхSHA: entry8629004951126b7ae5d9ea5d3eb04e6eb5454f825b833b9d8e2f858a8462cc7a; runner34dac1f669b567f395d87f31a6542b3abaed014380064d60a61225a105038529; testsa9b0699441c7d617c959607a2220f2c1b5f19907085de626788b3b94d597db2b; shared13407f3f719ef7962e2ffb21abb52089e7132b4ec402db87340d9c2fe3b7fc51 unchanged.
+- Drybundle36998bytes/SHA104abaeeeba4298337e63fe1f999bc63f0162ef2da1c387bed50f0386f45fb43; buildonly stageExecuted=false/dbExecuted=false. FrozenunitSQL/checksumdeac962.../catalogmapping/index/schema/numericguard unchanged.
+- Rootдержитactual110stage/DB/fixtures untilphysicaldeploymentfreshproof. Sourcebranchcommit/push разрешены; это не stagingacceptance. tasks4.3pending.
