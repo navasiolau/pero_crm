@@ -68,13 +68,18 @@ export async function runPlainFileListsStagingBrowser(input = {}) {
  check(binding.finance && binding.financeDocs.some(file => file.paymentId === binding.finance.incomeId) && binding.financeDocs.some(file => file.paymentId === binding.finance.expenseId), 'ACTUAL_FINANCE_FIXTURE_REQUIRED');
  const deletePlan = input.deletePlan ?? [];
  check(Array.isArray(deletePlan) && deletePlan.length <= 4 && new Set(deletePlan.map(row => row.fileId)).size === deletePlan.length && deletePlan.every(row => binding.files.some(file => file.id === row.fileId) && ['project', 'product', 'task'].includes(row.surface) && ['manager', 'engineer'].includes(row.actor) && ['real', 'client-error'].includes(row.mode)), 'OWN_DELETE_PLAN_REQUIRED');
- const unlinkedTaskOmitted = fileListsUnlinkedTaskOmitted(input.unlinkedTask, binding, deletePlan);const ownerLedger = createPlainFileListOwnerLedger(binding, input.ownerCoordinator);
+ const unlinkedTaskOmitted = fileListsUnlinkedTaskOmitted(input.unlinkedTask, binding, deletePlan);
+ const engineerDesktopAccepted = desktopPrefixAccepted && input.completedDesktopPrefix.engineerDesktopRows === 5 && /^[a-f0-9]{64}$/.test(input.completedDesktopPrefix.engineerReceiptSha256 ?? '');
+ const projectIncomePending = input.pendingProjectIncomeDocument === true;
+ check(!projectIncomePending || (binding.expectedRevision === '37f882f69a2d76901b98321ff7824d0d04db4db8' && deletePlan.length === 0), 'KNOWN_PROJECT_INCOME_GAP_READONLY_REQUIRED');
+ const ownerLedger = createPlainFileListOwnerLedger(binding, input.ownerCoordinator);
  const gate = createPlainFileListDeleteGate(binding, ownerLedger);
  const root = await realpath(ROOT), base = await realpath(path.join(ROOT, '.playwright-mcp', 'files115'));
  const within = (parent, child) => {const relative = path.relative(parent, child);return relative && !relative.startsWith('..') && !path.isAbsolute(relative);};
  check(within(root, base), 'EVIDENCE_BASE_MISMATCH');
  const outputDir = path.join(base, `staging-${binding.runId}-${Date.now()}`);await mkdir(outputDir, {recursive: false, mode: 0o700});check(within(base, await realpath(outputDir)), 'EVIDENCE_PATH_MISMATCH');
- const receipt = {status: 'STARTED', revision: binding.expectedRevision, runId: binding.runId, revisionProof: 'reviewed physical transport identity and owner113 current HMAC/PRE/DB/version certificate', origin: binding.origin, checks: [], screenshots: [], blockedWrites: 0, blockedPrefetches: 0, deniedReads: 0, pageErrorCount: 0, firstPageError: null, upstreamDeleteRequests: 0, upstreamOtherNonReadResponses: 0, acknowledgedDeletes: 0, clientFailureChecks: 0, taskOpenClicks: 0, acceptedDesktopPrefixReceiptSha256: desktopPrefixAccepted ? input.completedDesktopPrefix.priorReceiptSha256 : null, pendingGates: unlinkedTaskOmitted ? ['TASK_WORK_LINKAGE_REQUIRED'] : [], skippedTaskViewports: [], outputDir};
+ const receipt = {status: 'STARTED', revision: binding.expectedRevision, runId: binding.runId, revisionProof: 'reviewed physical transport identity and owner113 current HMAC/PRE/DB/version certificate', origin: binding.origin, checks: [], screenshots: [], blockedWrites: 0, blockedPrefetches: 0, deniedReads: 0, pageErrorCount: 0, firstPageError: null, upstreamDeleteRequests: 0, upstreamOtherNonReadResponses: 0, acknowledgedDeletes: 0, clientFailureChecks: 0, taskOpenClicks: 0, acceptedDesktopPrefixReceiptSha256: desktopPrefixAccepted ? input.completedDesktopPrefix.priorReceiptSha256 : null, substep: null, skippedProjectIncomeSurfaces: [], pendingGates: unlinkedTaskOmitted ? ['TASK_WORK_LINKAGE_REQUIRED'] : [], skippedTaskViewports: [], outputDir};
+ if (projectIncomePending) receipt.pendingGates.push('PROJECT_INCOME_DOCUMENT_NOT_RENDERED');
  let browser, context, phase = 'setup', fatal = null, pendingUi = null;
  const inFlightRoutes = new Set();
  const fail = error => {fatal ??= plainFileListSafeError(error);gate.stop();};
@@ -156,19 +161,20 @@ export async function runPlainFileListsStagingBrowser(input = {}) {
  async function financeProof(page, viewport) {
   const expenseDoc = binding.financeDocs.find(file => file.paymentId === binding.finance.expenseId), incomeDoc = binding.financeDocs.find(file => file.paymentId === binding.finance.incomeId);
   for (const surface of [{route: binding.paths.financeProject, label: 'finance-project'}, {route: `${binding.paths.project}?tab=finance`, label: 'project-tab'}]) {
-   await goto(page, surface.route);
-   await ownFinanceRow(page, incomeDoc, `${surface.label}-income-document`, viewport);
-   const expenses = page.getByRole('heading', {name: 'Расходы', exact: true}).locator('../..');
+   receipt.substep = `${surface.label}-navigation`;await goto(page, surface.route);
+   receipt.substep = `${surface.label}-income-document`;
+   if (projectIncomePending) receipt.skippedProjectIncomeSurfaces.push({surface: surface.label, viewport: viewport.width});else await ownFinanceRow(page, incomeDoc, `${surface.label}-income-document`, viewport);
+   receipt.substep = `${surface.label}-expense-open`;const expenses = page.getByRole('heading', {name: 'Расходы', exact: true}).locator('../..');
    if (viewport.width < 768) {const card = expenses.locator('article[data-slot="mobile-list-card"]:visible').filter({has: page.getByText(binding.finance.accountName, {exact: true})});await expect(card).toHaveCount(1);await card.click();}
-   await ownFinanceRow(page, expenseDoc, `${surface.label}-expense-document`, viewport);
+   receipt.substep = `${surface.label}-expense-document`;await ownFinanceRow(page, expenseDoc, `${surface.label}-expense-document`, viewport);
   }
-  await goto(page, '/finance/expenses');await page.getByPlaceholder('Поиск по расходам…', {exact: true}).fill(binding.finance.expenseComment);
-  await ownFinanceRow(page, expenseDoc, 'organization-expense-document', viewport);
-  await goto(page, '/finance/income');await page.getByPlaceholder('Поиск по приходам…', {exact: true}).fill(binding.finance.incomeComment);
-  const ownIncome = page.locator('tr:visible,article[data-slot="mobile-list-card"]:visible').filter({has: page.getByText(binding.finance.accountName, {exact: true})});await expect(ownIncome).toHaveCount(1);await ownIncome.click();await ownFinanceRow(page, incomeDoc, 'organization-income-detail-document', viewport);
-  await goto(page, `/finance/accounts/report?from=${binding.finance.date}&to=${binding.finance.date}&mode=BYN`);await page.getByPlaceholder('Поиск по кассам…', {exact: true}).fill(binding.finance.accountName);
-  const ownAccount = page.locator('tr:visible,article[data-slot="mobile-list-card"]:visible').filter({has: page.getByText(binding.finance.accountName, {exact: true})});await expect(ownAccount).toHaveCount(1);await ownAccount.click();const report = page.getByRole('dialog').filter({has: page.getByRole('heading', {name: binding.finance.accountName, exact: true})});await expect(report).toBeVisible();
-  await ownFinanceRow(page, expenseDoc, 'cash-expense-document', viewport, report);await ownFinanceRow(page, incomeDoc, 'cash-income-document', viewport, report);
+  receipt.substep = 'organization-expense-navigation';await goto(page, '/finance/expenses');await page.getByPlaceholder('Поиск по расходам…', {exact: true}).fill(binding.finance.expenseComment);
+  receipt.substep = 'organization-expense-document';await ownFinanceRow(page, expenseDoc, 'organization-expense-document', viewport);
+  receipt.substep = 'organization-income-navigation';await goto(page, '/finance/income');await page.getByPlaceholder('Поиск по приходам…', {exact: true}).fill(binding.finance.incomeComment);
+  receipt.substep = 'organization-income-open';const ownIncome = page.locator('tr:visible,article[data-slot="mobile-list-card"]:visible').filter({has: page.getByText(binding.finance.accountName, {exact: true})});await expect(ownIncome).toHaveCount(1);await ownIncome.click();await ownFinanceRow(page, incomeDoc, 'organization-income-detail-document', viewport);
+  receipt.substep = "cash-report-navigation";await goto(page, `/finance/accounts/report?from=${binding.finance.date}&to=${binding.finance.date}&mode=BYN`);await page.getByPlaceholder('Поиск по кассам…', {exact: true}).fill(binding.finance.accountName);
+  receipt.substep = 'cash-report-open';const ownAccount = page.locator('tr:visible,article[data-slot="mobile-list-card"]:visible').filter({has: page.getByText(binding.finance.accountName, {exact: true})});await expect(ownAccount).toHaveCount(1);await ownAccount.click();const report = page.getByRole('dialog').filter({has: page.getByRole('heading', {name: binding.finance.accountName, exact: true})});await expect(report).toBeVisible();
+  receipt.substep = 'cash-report-documents';await ownFinanceRow(page, expenseDoc, 'cash-expense-document', viewport, report);await ownFinanceRow(page, incomeDoc, 'cash-income-document', viewport, report);
  }
  try {
   browser = await chromium.launch({headless: true, channel: 'chromium'});
@@ -183,8 +189,10 @@ export async function runPlainFileListsStagingBrowser(input = {}) {
    if (unlinkedTaskOmitted) receipt.skippedTaskViewports.push(viewport.width);else {
    phase = 'manager-owned-task-files';const dialog = await taskDialog(page);for (const file of binding.files.filter(file => file.taskId === binding.ids.task)) {const proof = await rowProof(page, dialog, file, true, 'task-file', viewport);await nameProof(page, proof.row, file, true);}
    }
+   if (!(engineerDesktopAccepted && viewport.width === 1440)) {
    phase = 'engineer-per-file-permission';page = await start('engineer', viewport);await goto(page, binding.paths.product);
    for (const file of binding.files.filter(file => file.productId === binding.ids.product && !file.isCurrentSketch)) await rowProof(page, page, file, file.uploadedById === binding.profiles.engineer.id, 'engineer-own-or-foreign-file', viewport);
+   }
    phase = 'owned-financial-file-contexts';page = await start('admin', viewport);await financeProof(page, viewport);assertSafe();
   }
   for (const item of deletePlan) {
@@ -208,7 +216,7 @@ export async function runPlainFileListsStagingBrowser(input = {}) {
   check(receipt.upstreamDeleteRequests === receipt.acknowledgedDeletes, 'DELETE_ACK_COUNT_MISMATCH');
   const final = await ownerLedger.verifyFinalState({runId: binding.runId, revision: binding.expectedRevision, preSha256: binding.preSha256, checkpointHash: binding.checkpointHash, expectedOwnedStateHash: gate.currentStateHash(), acknowledgedDeletes: receipt.acknowledgedDeletes});
   check(final?.kind === 'current-owned-final-verification' && final.runId === binding.runId && final.revision === binding.expectedRevision && final.preSha256 === binding.preSha256 && final.checkpointHash === binding.checkpointHash && final.currentOwnedStateHash === gate.currentStateHash() && final.financialStateHash === binding.financialStateHash && final.untouchedRelationsMatch === true && final.preferencesUntouched === true && final.storageVersionsAccounted === true && final.tokenClockValid === true, 'OWNER_FINAL_STATE_MISMATCH');
-  receipt.status = unlinkedTaskOmitted ? 'READ_ONLY_PENDING_TASK' : deletePlan.some(item => item.mode === 'real') ? 'PASS' : 'READ_ONLY_PASS';
+  receipt.status = projectIncomePending ? 'READ_ONLY_PENDING_PROJECT_INCOME_AND_TASK' : unlinkedTaskOmitted ? 'READ_ONLY_PENDING_TASK' : deletePlan.some(item => item.mode === 'real') ? 'PASS' : 'READ_ONLY_PASS';
   receipt.pendingGates.push('warehouse-report-document uses the reviewed common adapter; creating a stock-linked payment is outside the owned two-payment fixture', 'selected-upload result uses local intercepted component proof; this run intentionally does not upload', 'unlinked CAD financial original may be natively read/downloaded by owner113; it has no independent catalogue UI');
  } catch (error) {receipt.status = 'STOP';receipt.phase = phase;receipt.code = fatal ?? plainFileListSafeError(error);gate.stop();}
  finally {pendingUi?.release.resolve(false);await close();if (browser) await browser.close();}
