@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import {useRef, useState} from "react";
+import {FilePrintButton} from "@/components/file-print-button";
 import {FileDeletePopover, type FileDeleteResult} from "@/components/file-delete-popover";
 import {useFileViewer} from "@/components/file-viewer";
 import {getViewableFileSource, type ViewableFile} from "@/lib/viewable-file";
@@ -24,13 +25,14 @@ export function FileListRow({file, onDelete, onDeleted, onBusyChange, disabled =
 }) {
   const viewer = useFileViewer();
   const nameClass = "min-w-0 flex-1 whitespace-normal break-all text-left text-sm underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-ring";
-  return <div data-file-list-row={file.id} role="listitem" className={cn("flex min-w-0 items-center gap-2 py-1", className)}
+  return <div data-file-list-row={file.id} data-file-id={file.id} data-file-source={file.source ?? "project"} role="listitem" className={cn("flex min-w-0 items-center gap-2 py-1", className)}
     onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>
     {file.mimeType.startsWith("image/") ? (
       <button type="button" className={nameClass} onClick={() => viewer.open(file)}>{file.fileName}</button>
     ) : (
       <a href={getViewableFileSource(file)} download={file.fileName} className={nameClass}>{file.fileName}</a>
     )}
+    <FilePrintButton file={file} disabled={disabled} />
     <FileDeletePopover fileName={file.fileName} disabled={disabled || !file.canDelete || !onDelete} onBusyChange={onBusyChange}
       onConfirm={async () => {
         if (!file.canDelete || !onDelete) return {ok: false, error: "Недостаточно прав"};
