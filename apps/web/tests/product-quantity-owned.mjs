@@ -89,7 +89,7 @@ export async function prepareQuantityOwned(db, target) {
     await tx.product.create({ data: { id: ids.control, projectId: ids.project, number: `${number}.1`,
       suffixInt: 1, title: `QA ${marker} Контроль`, quantity: 1, expectedPrice: "0", createdById: ids.manager } });
     await tx.priceItem.create({ data: { id: ids.price, name: `QA ${marker} Сборка`, unit: "шт", price: "30" } });
-    await tx.material.create({ data: { id: ids.material, name: `QA ${marker} Петли`, sku: marker, unit: "шт", purchasePrice: "2" } });
+    await tx.material.create({ data: { id: ids.material, name: `QA ${marker} Петли`, sku: marker, unitId: "warehouse-unit-piece", purchasePrice: "2" } });
     await tx.stockMovement.create({ data: { id: ids.income, materialId: ids.material, type: "INCOME", quantity: "50",
       unitPrice: "2", totalByn: "100", comment: marker, createdById: ids.manager } });
     return { format: "product-quantity-qa/v1", target, runId, marker, ids, number, before,

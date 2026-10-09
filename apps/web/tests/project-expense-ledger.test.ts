@@ -5,7 +5,7 @@ import { summarizeProjectExpenses } from "../src/server/finance/project-expense-
 import { projectExpenseRows, loadProjectStockExpenses, type ProjectStockExpenseRecord } from "../src/server/finance/project-expenses";
 const d = (value: string) => new Prisma.Decimal(value);
 const issue = { id: "same", type: "EXPENSE", quantity: d("3"), unitPrice: d("20"), totalByn: d("60"), createdAt: new Date("2026-10-08T00:00:00Z"), createdById: "u", comment: null,
-  material: { id: "m", name: "Петля", unit: "шт" }, product: { id: "p", number: "204.1" }, warehouseValuation: { unitCost: d("20.000000001"), sourceMovementId: null } } satisfies ProjectStockExpenseRecord;
+  material: { id: "m", name: "Петля", measurementUnit: { name: "шт" } }, product: { id: "p", number: "204.1" }, warehouseValuation: { unitCost: d("20.000000001"), sourceMovementId: null } } satisfies ProjectStockExpenseRecord;
 test("issue, partial and full return use saved costs exactly once with stable source identity", () => {
   const returned = { ...issue, id: "return", type: "RETURN" as const, quantity: d("1"), totalByn: d("20"), warehouseValuation: { unitCost: d("20.000000001"), sourceMovementId: issue.id } };
   const facts = { payments: [], stockMovements: [issue, returned] };

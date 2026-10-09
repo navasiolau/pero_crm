@@ -3,6 +3,7 @@ import {liveProductWhere} from "@/server/access/live-entities";
 
 
 import { z } from "zod";
+import { revalidatePath } from "next/cache";
 
 import { prisma } from "@/lib/prisma";
 
@@ -88,100 +89,76 @@ export async function toggleMaterialCategory(
 const materialSchema = z.object({
   name: z.string().trim().min(1, "Укажите название"),
   sku: z.string().optional(),
-  unit: z.string().trim().min(1, "Укажите единицу"),
+  unitId: z.string().min(1, "Выберите единицу измерения"),
   categoryId: z.string().optional(),
   minStock: z.number().nonnegative("Мин. остаток не может быть отрицательным").optional(),
   comment: z.string().optional(),
 }).strict();
 
-export async function addMaterial(
-  input: z.input<typeof materialSchema>,
-): Promise<{ ok: boolean; error?: string }> {
+async function requireMaterialUnit(tx: import("@prisma/client").Prisma.TransactionClient, unitId: string) {
+  const unit = await tx.materialUnit.findUnique({ where: { id: unitId }, select: { id: true } });
+  if (!unit) throw Error("Единица измерения не найдена. Обновите список единиц.");
+}
+function materialCatalogError(error: unknown): string {
+  if (typeof error === "object" && error !== null && "code" in error && error.code === "P2003") {
+    return "Выбранная единица или категория больше недоступна. Обновите справочник.";
+  }
+  return error instanceof Error ? error.message : "Не удалось сохранить материал";
+}
+
+export async function addMaterial(input: z.input<typeof materialSchema>): Promise<{ ok: boolean; error?: string }> {
   const session = await requireRole(WAREHOUSE_MANAGE_ROLES);
   const parsed = materialSchema.safeParse(input);
-  if (!parsed.success) {
-    return { ok: false, error: parsed.error.issues[0]?.message ?? "Ошибка данных" };
-  }
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Ошибка данных" };
   const data = parsed.data;
   if (data.categoryId) {
-    const category = await prisma.materialCategory.findUnique({
-      where: { id: data.categoryId },
-    });
-    if (!category || !category.active) {
-      return { ok: false, error: "Категория не найдена" };
-    }
+    const category = await prisma.materialCategory.findUnique({ where: { id: data.categoryId } });
+    if (!category || !category.active) return { ok: false, error: "Категория не найдена" };
   }
-  const material = await withWarehouseWrite((tx) => tx.material.create({
-    data: {
-      name: data.name,
-      sku: data.sku?.trim() || null,
-      unit: data.unit,
-      categoryId: data.categoryId || null,
-      purchasePrice: 0,
-      minStock: data.minStock ?? null,
-      comment: data.comment?.trim() || null,
-    },
-  }));
-  await writeChangeLog({
-    actorType: "user",
-    actorId: session.user.id,
-    actorName: session.user.name ?? undefined,
-    entity: "material",
-    entityId: material.id,
-    action: "create",
-    newValue: {
-      name: material.name,
-      sku: material.sku,
-      unit: material.unit,
-      purchasePrice: 0,
-    },
+  let material;
+  try {
+    material = await withWarehouseWrite(async tx => {
+      await requireMaterialUnit(tx, data.unitId);
+      return tx.material.create({ data: {
+        name: data.name, sku: data.sku?.trim() || null, unitId: data.unitId,
+        categoryId: data.categoryId || null, purchasePrice: 0,
+        minStock: data.minStock ?? null, comment: data.comment?.trim() || null,
+      }, include: { measurementUnit: { select: { name: true } } } });
+    });
+  } catch (error) { return { ok: false, error: materialCatalogError(error) }; }
+  await writeChangeLog({ actorType: "user", actorId: session.user.id, actorName: session.user.name ?? undefined,
+    entity: "material", entityId: material.id, action: "create",
+    newValue: { name: material.name, sku: material.sku, unitId: material.unitId, unit: material.measurementUnit.name, purchasePrice: 0 },
   });
   await revalidateWarehouse();
+  revalidatePath("/settings/warehouse-units");
   return { ok: true };
 }
 
-export async function updateMaterial(
-  id: string,
-  input: z.input<typeof materialSchema>,
-): Promise<{ ok: boolean; error?: string }> {
+export async function updateMaterial(id: string, input: z.input<typeof materialSchema>): Promise<{ ok: boolean; error?: string }> {
   const session = await requireRole(WAREHOUSE_MANAGE_ROLES);
   const parsed = materialSchema.safeParse(input);
-  if (!parsed.success) {
-    return { ok: false, error: parsed.error.issues[0]?.message ?? "Ошибка данных" };
-  }
-  const material = await prisma.material.findUnique({ where: { id } });
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Ошибка данных" };
+  const material = await prisma.material.findUnique({ where: { id }, include: { measurementUnit: { select: { name: true } } } });
   if (!material) return { ok: false, error: "Материал не найден" };
   const data = parsed.data;
-  await withWarehouseWrite((tx) => tx.material.update({
-    where: { id },
-    data: {
-      name: data.name,
-      sku: data.sku?.trim() || null,
-      unit: data.unit,
-      categoryId: data.categoryId || null,
-      minStock: data.minStock ?? null,
-      comment: data.comment?.trim() || null,
-    },
-  }));
-  await writeChangeLog({
-    actorType: "user",
-    actorId: session.user.id,
-    actorName: session.user.name ?? undefined,
-    entity: "material",
-    entityId: id,
-    action: "update",
-    oldValue: {
-      name: material.name,
-      sku: material.sku,
-      unit: material.unit,
-    },
-    newValue: {
-      name: data.name,
-      sku: data.sku?.trim() || null,
-      unit: data.unit,
-    },
+  let updated;
+  try {
+    updated = await withWarehouseWrite(async tx => {
+      await requireMaterialUnit(tx, data.unitId);
+      return tx.material.update({ where: { id }, data: {
+        name: data.name, sku: data.sku?.trim() || null, unitId: data.unitId,
+        categoryId: data.categoryId || null, minStock: data.minStock ?? null, comment: data.comment?.trim() || null,
+      }, include: { measurementUnit: { select: { name: true } } } });
+    });
+  } catch (error) { return { ok: false, error: materialCatalogError(error) }; }
+  await writeChangeLog({ actorType: "user", actorId: session.user.id, actorName: session.user.name ?? undefined,
+    entity: "material", entityId: id, action: "update",
+    oldValue: { name: material.name, sku: material.sku, unitId: material.unitId, unit: material.measurementUnit.name },
+    newValue: { name: updated.name, sku: updated.sku, unitId: updated.unitId, unit: updated.measurementUnit.name },
   });
   await revalidateWarehouse();
+  revalidatePath("/settings/warehouse-units");
   return { ok: true };
 }
 
