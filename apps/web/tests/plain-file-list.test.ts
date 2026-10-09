@@ -9,12 +9,12 @@ const original:FileListItem={id:"project-file",fileName:"Эскиз издели
 const hiddenMetadata={...original,size:512000,uploaderName:"Скрытый автор",createdAt:"2026-01-12",category:"Скрытая категория",comment:"Скрытый комментарий",hasThumb:true};
 const remove=async()=>({ok:true});
 
-test("actual file row shows only the original name and delete action without thumbnail or metadata",()=>{
+test("actual file row shows original name and compact print/delete actions without thumbnail or metadata",()=>{
  const html=renderToStaticMarkup(React.createElement(FileListRow,{file:hiddenMetadata,onDelete:remove}));
  assert.match(html,/Эскиз изделия\.v2\.png/);
  assert.match(html,/aria-label="Удалить файл Эскиз изделия\.v2\.png"/);
  assert.doesNotMatch(html,/<img|Скрытый|2026-01-12|512000|Скачать|Отчетный документ|Категория/);
- assert.equal((html.match(/<svg/g)??[]).length,1);
+ assert.equal((html.match(/<svg/g)??[]).length,2);
 });
 
 test("PDF video and CAD names are downloads through their protected ordinary or finance source",()=>{
