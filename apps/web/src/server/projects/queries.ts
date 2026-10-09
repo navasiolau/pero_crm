@@ -32,6 +32,8 @@ function scopedProjectAmounts<T extends { initialPrice: unknown; delivery: unkno
 
 export interface ProjectListFilters {
   q?: string;
+  // Только канбан задаёт область; URL и другие callers её не меняют.
+  searchScope?: "identity";
   stage?: ProjectStage;
   clientId?: string;
   managerId?: string;
@@ -108,15 +110,15 @@ function projectWhere(
     where.OR = [
       { number: { contains: q } },
       { title: { contains: q, mode: "insensitive" } },
-      {
+      ...(filters.searchScope === "identity" ? [] : [{
         client: {
           OR: [
-            { name: { contains: q, mode: "insensitive" } },
-            { lastName: { contains: q, mode: "insensitive" } },
-            { middleName: { contains: q, mode: "insensitive" } },
+            { name: { contains: q, mode: "insensitive" as const } },
+            { lastName: { contains: q, mode: "insensitive" as const } },
+            { middleName: { contains: q, mode: "insensitive" as const } },
           ],
         },
-      },
+      }]),
     ];
   }
   return { AND: [projectVisibilityWhere(actor), where] };
