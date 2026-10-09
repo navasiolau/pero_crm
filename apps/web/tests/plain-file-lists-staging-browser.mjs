@@ -47,10 +47,18 @@ export async function openOwnedTaskFileDialog(page, taskTitle, reportAttempt = (
  throw Error('F115_TASK_DIALOG_NOT_VISIBLE');
 }
 
+/** Root supplies immutable prior receipt/observation digests and verifies that snapshot locally.
+ * Only the already-read desktop project/product prefix may be omitted; all remaining cases still run. */
+export function fileListsDesktopPrefixAccepted(prefix, binding) {
+ if (prefix === undefined) return false;
+ check(prefix?.kind === 'root-verified-desktop-file-prefix' && prefix.runId === binding.runId && prefix.revision === binding.expectedRevision && ['preSha256', 'currentOwnedStateHash', 'storageManifestHash', 'financialStateHash'].every(key => prefix[key] === binding[key]) && ['priorReceiptSha256', 'priorObservationSha256'].every(key => /^[a-f0-9]{64}$/.test(prefix[key] ?? '')) && prefix.checkedDesktopRows > 0 && prefix.checkedDesktopRows <= 64, 'CURRENT_VERIFIED_DESKTOP_PREFIX_REQUIRED');
+ return true;
+}
+
 /** Read scenarios complete before explicitly planned confirmed deletions. No upload, financial mutation,
  * preference save, PDF/video viewer, trace/HAR/storageState, session file or existing-client screenshot. */
 export async function runPlainFileListsStagingBrowser(input = {}) {
- const binding = await verifyPlainFileListStagingBinding(input);
+ const binding = await verifyPlainFileListStagingBinding(input);const desktopPrefixAccepted = fileListsDesktopPrefixAccepted(input.completedDesktopPrefix, binding);
  check(binding.finance && binding.financeDocs.some(file => file.paymentId === binding.finance.incomeId) && binding.financeDocs.some(file => file.paymentId === binding.finance.expenseId), 'ACTUAL_FINANCE_FIXTURE_REQUIRED');
  const deletePlan = input.deletePlan ?? [];
  check(Array.isArray(deletePlan) && deletePlan.length <= 4 && new Set(deletePlan.map(row => row.fileId)).size === deletePlan.length && deletePlan.every(row => binding.files.some(file => file.id === row.fileId) && ['project', 'product', 'task'].includes(row.surface) && ['manager', 'engineer'].includes(row.actor) && ['real', 'client-error'].includes(row.mode)), 'OWN_DELETE_PLAN_REQUIRED');
@@ -60,7 +68,7 @@ export async function runPlainFileListsStagingBrowser(input = {}) {
  const within = (parent, child) => {const relative = path.relative(parent, child);return relative && !relative.startsWith('..') && !path.isAbsolute(relative);};
  check(within(root, base), 'EVIDENCE_BASE_MISMATCH');
  const outputDir = path.join(base, `staging-${binding.runId}-${Date.now()}`);await mkdir(outputDir, {recursive: false, mode: 0o700});check(within(base, await realpath(outputDir)), 'EVIDENCE_PATH_MISMATCH');
- const receipt = {status: 'STARTED', revision: binding.expectedRevision, runId: binding.runId, revisionProof: 'reviewed physical transport identity and owner113 current HMAC/PRE/DB/version certificate', origin: binding.origin, checks: [], screenshots: [], blockedWrites: 0, blockedPrefetches: 0, deniedReads: 0, pageErrorCount: 0, firstPageError: null, upstreamDeleteRequests: 0, upstreamOtherNonReadResponses: 0, acknowledgedDeletes: 0, clientFailureChecks: 0, taskOpenClicks: 0, pendingGates: [], outputDir};
+ const receipt = {status: 'STARTED', revision: binding.expectedRevision, runId: binding.runId, revisionProof: 'reviewed physical transport identity and owner113 current HMAC/PRE/DB/version certificate', origin: binding.origin, checks: [], screenshots: [], blockedWrites: 0, blockedPrefetches: 0, deniedReads: 0, pageErrorCount: 0, firstPageError: null, upstreamDeleteRequests: 0, upstreamOtherNonReadResponses: 0, acknowledgedDeletes: 0, clientFailureChecks: 0, taskOpenClicks: 0, acceptedDesktopPrefixReceiptSha256: desktopPrefixAccepted ? input.completedDesktopPrefix.priorReceiptSha256 : null, pendingGates: [], outputDir};
  let browser, context, phase = 'setup', fatal = null, pendingUi = null;
  const inFlightRoutes = new Set();
  const fail = error => {fatal ??= plainFileListSafeError(error);gate.stop();};
@@ -159,10 +167,13 @@ export async function runPlainFileListsStagingBrowser(input = {}) {
  try {
   browser = await chromium.launch({headless: true, channel: 'chromium'});
   for (const viewport of VIEWPORTS) {
-   phase = 'manager-owned-project-files';let page = await start('manager', viewport);await goto(page, `${binding.paths.project}?tab=files`);
+   let page = await start('manager', viewport);
+   if (!(desktopPrefixAccepted && viewport.width === 1440)) {
+   phase = 'manager-owned-project-files';await goto(page, `${binding.paths.project}?tab=files`);
    const projectFiles = page.locator('[data-project-files="flat"]');for (const file of binding.files.filter(file => !file.isCurrentProjectCover)) {const proof = await rowProof(page, projectFiles, file, true, 'project-file', viewport);if (!file.isCurrentSketch) await nameProof(page, proof.row, file);}
    phase = 'manager-owned-product-sections';await goto(page, binding.paths.product);
    for (const file of binding.files.filter(file => file.productId === binding.ids.product && !file.isCurrentSketch)) {const container = page.locator(file.section === 'MEASUREMENT' ? '[data-product-measurement]' : `[data-product-documents-column="${file.section === 'INSTALLATION' ? 'installation' : 'production'}"]`);const proof = await rowProof(page, container, file, true, 'product-section-file', viewport);await nameProof(page, proof.row, file, true);}
+   }
    phase = 'manager-owned-task-files';const dialog = await taskDialog(page);for (const file of binding.files.filter(file => file.taskId === binding.ids.task)) {const proof = await rowProof(page, dialog, file, true, 'task-file', viewport);await nameProof(page, proof.row, file, true);}
    phase = 'engineer-per-file-permission';page = await start('engineer', viewport);await goto(page, binding.paths.product);
    for (const file of binding.files.filter(file => file.productId === binding.ids.product && !file.isCurrentSketch)) await rowProof(page, page, file, file.uploadedById === binding.profiles.engineer.id, 'engineer-own-or-foreign-file', viewport);
