@@ -18,4 +18,4 @@
 
 - [x] 4.1 Пройти targeted regressions, Prisma generation/validate, TypeScript и ESLint затронутых файлов; результаты записать в validation.md.
 - [x] 4.2 После согласования оркестратора выполнить native PostgreSQL rollback-only harness на существующей guarded local5433 и доказать неизменность данных после rollback.
-- [ ] 4.3 После разрешённой интеграции оркестратором принять фактически развёрнутый staging SHA, CRUD ADMIN, запрет DIRECTOR, селектор и числовые инварианты; записать реальные evidence без выдачи local checks за staging приёмку.
+- [x] 4.3 После разрешённой интеграции оркестратором принять фактически развёрнутый staging SHA, CRUD ADMIN, запрет DIRECTOR, селектор и числовые инварианты; записать реальные evidence без выдачи local checks за staging приёмку. Actual PASS/CLOSED: run3a7345bd-13d5-43ca-afea-6e499a6d8c42, revision37f882f69a2d76901b98321ff7824d0d04db4db8; см. verification.md.
