@@ -7,10 +7,28 @@ const mime = value => String(value ?? '').split(';',1)[0].trim().toLowerCase();
 const printable = file => file.mimeType === 'application/pdf' || /^image\/(?:png|jpeg|gif|webp|avif|bmp|svg\+xml|x-icon|apng)$/.test(file.mimeType);
 const safeError = error => /^F(?:115|116)_[A-Z0-9_]+$/.test(error?.message ?? '') ? error.message : 'F116_ACCEPTANCE_FAILED';
 
+const SHA=/^[a-f0-9]{64}$/;
+const NATIVE_URI_CLASSES=['CHROME_PDF_EXTENSION','CHROME_PRINT','CHROME_UNTRUSTED_PDF','SAME_ORIGIN_BLOB','OTHER'];
+export function nativePdfUriClass(value, origin) {
+ let url;try {url=new URL(value);} catch {return 'OTHER';}
+ if(url.username||url.password||url.hash||url.pathname.includes('..')||/%(?:2e|2f|5c)/i.test(url.pathname))return 'OTHER';
+ if(url.protocol==='chrome-extension:'&&url.hostname==='mhjfbmdgcfjbbpaeojofohoefgiehjai'&&url.pathname.startsWith('/'))return 'CHROME_PDF_EXTENSION';
+ if(url.protocol==='chrome:'&&['print','resources'].includes(url.hostname)&&url.pathname.startsWith('/'))return 'CHROME_PRINT';
+ if(url.protocol==='chrome-untrusted:'&&url.hostname==='pdf'&&url.pathname.startsWith('/'))return 'CHROME_UNTRUSTED_PDF';
+ if(url.protocol==='blob:'&&url.origin===origin&&url.pathname.startsWith(origin+'/')&&/^[a-f0-9-]{36}$/.test(url.pathname.slice(origin.length+1)))return 'SAME_ORIGIN_BLOB';
+ return 'OTHER';
+}
+function currentVerifiedPdf(binding, phase) {
+ const files=phase?.source==='project'?binding.files:phase?.source==='finance'?binding.financeDocs:[];
+ return SHA.test(phase?.contentHash??'')&&files.some(file=>file.id===phase.fileId&&file.mimeType==='application/pdf'&&file.contentHash===phase.contentHash);
+}
+
 /** Only the reviewed common 115 GET allowlist plus exact owned PDF ?view=1. No delete permit exists. */
-export function readonlyFilePrintRequestDecision(request, binding, sharedDecision) {
+export function readonlyFilePrintRequestDecision(request, binding, sharedDecision, verifiedPdf = null) {
  if (!['GET','HEAD'].includes(request.method)) return {kind:'abort-write',code:'F116_WRITE_FORBIDDEN'};
  if (request.prefetch) return {kind:'abort-prefetch'};
+ const nativeClass=nativePdfUriClass(request.url,binding.origin);
+ if(nativeClass!=='OTHER')return currentVerifiedPdf(binding,verifiedPdf)?{kind:'continue'}:{kind:'deny',code:'F116_NATIVE_PDF_GATE_REQUIRED'};
  let url;try {url=new URL(request.url);} catch {return {kind:'deny',code:'F116_INVALID_URL'};}
  if (url.origin !== binding.origin || url.username || url.password || url.hash) return {kind:'deny',code:'F116_CROSS_ORIGIN'};
  const file = binding.files.find(file=>url.pathname===`/api/files/${file.id}`) ?? binding.financeDocs.find(file=>url.pathname===`/api/finance/documents/${file.id}`);
@@ -32,16 +50,24 @@ export function filePrintOwnedCases(binding) {
  return cases;
 }
 
+/** Reuse only Root's actual canceled ready previews for unchanged current IDs/content. */
+export function remainingFilePrintOwnedCases(binding, previous) {
+ const all=filePrintOwnedCases(binding);if(!previous)return {cases:all,priorNativeMatched:[]};
+ check(previous.runId===binding.runId&&previous.revision===binding.expectedRevision&&Array.isArray(previous.native)&&previous.native.length<=16,'PREVIOUS_NATIVE_SCOPE_REQUIRED');
+ const matches=all.filter(item=>previous.native.some(old=>old.source===item.source&&old.fileId===item.file.id&&old.contentHash===item.file.contentHash&&SHA.test(old.contentHash??'')&&old.mimeType===item.file.mimeType&&old.kind==='actual-native-preview'&&old.canceled===true&&old.physicalPrintSubmitted===false&&old.preview?.state==='1'&&old.preview.error==='0'&&old.preview.pageCount==='1'&&old.preview.previewLoaded===true&&old.preview.isPdf===(item.file.mimeType==='application/pdf')));
+ return {cases:all.filter(item=>!matches.includes(item)),priorNativeMatched:matches.map(item=>({source:item.source,fileId:item.file.id,contentHash:item.file.contentHash}))};
+}
+
 /** Called only by root with coordinator113.handoff(), producerReceipt.identity and fixtureVerifier().
  * Credentials remain in the private binding; output/sinks receive no profile, cookie, body, trace or storageState. */
 export async function runFilePrintStagingReadonly(input = {}) {
  const {verifyPlainFileListStagingBinding,plainFileListRequestDecision} = await import('./plain-file-lists-staging-contract.mjs');
  const {disableKanbanQaServiceWorkerApi} = await import('./kanban-cover-staging-browser.mjs');
  check(typeof input.saveNativeScreenshot==='function','NATIVE_EVIDENCE_SINK_REQUIRED');
- const binding = await verifyPlainFileListStagingBinding(input), cases = filePrintOwnedCases(binding);
+ const binding = await verifyPlainFileListStagingBinding(input), {cases,priorNativeMatched} = remainingFilePrintOwnedCases(binding,input.previousNativeReceipt);
  const {chromium,expect} = await import('@playwright/test');
- const receipt = {status:'STARTED',runId:binding.runId,revision:binding.expectedRevision,checks:[],native:[],blockedWrites:0,blockedPrefetches:0,deniedReads:0,pageErrors:0,storageWriteAttempts:0,upstreamWrites:0};
- let browser,context,fatal=null;const routes=new Set();
+ const receipt = {status:'STARTED',runId:binding.runId,revision:binding.expectedRevision,checks:[],native:[],priorNativeMatched,nativeUriCounts:Object.fromEntries(NATIVE_URI_CLASSES.map(kind=>[kind,0])),deniedUriCounts:Object.fromEntries(NATIVE_URI_CLASSES.map(kind=>[kind,0])),blockedWrites:0,blockedPrefetches:0,deniedReads:0,pageErrors:0,storageWriteAttempts:0,upstreamWrites:0};
+ let browser,context,fatal=null,verifiedPdf=null;const routes=new Set();
  const fail = error => {fatal ??= safeError(error);};
  const assertSafe = () => check(!fatal && receipt.pageErrors===0 && receipt.deniedReads===0 && receipt.upstreamWrites===0 && receipt.storageWriteAttempts===0,'READONLY_OR_PAGE_VIOLATION');
  async function goto(page,path) {
@@ -58,6 +84,11 @@ export async function runFilePrintStagingReadonly(input = {}) {
   if (item.surface==='project') await goto(page,`${binding.paths.project}?tab=files`);
   else if (item.surface==='product') await goto(page,binding.paths.product);
   else await goto(page,item.surface==='expense'?'/finance/expenses':'/finance/income');
+  if(item.surface==='income') {
+   await page.getByPlaceholder('Поиск по приходам…',{exact:true}).fill(binding.finance.incomeComment);
+   const ownIncome=page.locator('tr:visible,article[data-slot="mobile-list-card"]:visible').filter({has:page.getByText(binding.finance.accountName,{exact:true})});
+   await expect(ownIncome).toHaveCount(1);await ownIncome.click();
+  }
   return page.locator(`[data-file-id="${item.file.id}"][data-file-source="${item.source}"]:visible`);
  }
  try {
@@ -69,8 +100,9 @@ export async function runFilePrintStagingReadonly(input = {}) {
   await context.route('**/*',async route=>{
    const work=(async()=>{
     const request=route.request(),headers=request.headers();
-    const decision=readonlyFilePrintRequestDecision({url:request.url(),method:request.method(),prefetch:Boolean(headers['next-router-prefetch']||headers.purpose==='prefetch')},binding,plainFileListRequestDecision);
-    if(fatal||decision.kind==='deny'){receipt.deniedReads++;fail(Error(decision.code??'F116_TRANSPORT_STOPPED'));await route.abort('blockedbyclient');}
+    const decision=readonlyFilePrintRequestDecision({url:request.url(),method:request.method(),prefetch:Boolean(headers['next-router-prefetch']||headers.purpose==='prefetch')},binding,plainFileListRequestDecision,verifiedPdf);
+    const uriClass=nativePdfUriClass(request.url(),binding.origin);if(uriClass!=='OTHER')receipt.nativeUriCounts[uriClass]++;
+    if(fatal||decision.kind==='deny'){receipt.deniedUriCounts[uriClass]++;receipt.deniedReads++;fail(Error(decision.code??'F116_TRANSPORT_STOPPED'));await route.abort('blockedbyclient');}
     else if(decision.kind==='abort-write'){receipt.blockedWrites++;await route.abort('blockedbyclient');}
     else if(decision.kind==='abort-prefetch'){receipt.blockedPrefetches++;await route.abort('blockedbyclient');}
     else {check(decision.kind==='continue','READONLY_DECISION_REQUIRED');await route.continue();}
@@ -90,7 +122,11 @@ export async function runFilePrintStagingReadonly(input = {}) {
    if(item.source==='finance')await expect(row.getByRole('button',{name:`Удалить файл ${file.fileName}`,exact:true})).toBeDisabled();
    if(!printable(file)){await expect(printer).toHaveCount(0);receipt.checks.push({kind:'unsupported-no-printer',source:item.source,fileId:file.id});assertSafe();continue;}
    await expect(printer).toBeEnabled();
-   const native=await inspectNativeFilePrintPreview({browser,isPdf:file.mimeType==='application/pdf',trigger:async()=>{assertSafe();await printer.click();},saveScreenshot:async png=>{await input.saveNativeScreenshot({source:item.source,fileId:file.id,contentHash:file.contentHash,png});}});
+   let native;
+   if(file.mimeType==='application/pdf')verifiedPdf={source:item.source,fileId:file.id,contentHash:file.contentHash};
+   try {native=await inspectNativeFilePrintPreview({browser,isPdf:file.mimeType==='application/pdf',trigger:async()=>{assertSafe();await printer.click();},saveScreenshot:async png=>{await input.saveNativeScreenshot({source:item.source,fileId:file.id,contentHash:file.contentHash,png});}});}
+   finally {verifiedPdf=null;}
+
    assertSafe();receipt.native.push({source:item.source,fileId:file.id,mimeType:file.mimeType,contentHash:file.contentHash,...native});
   }
   await Promise.allSettled([...routes]);assertSafe();
