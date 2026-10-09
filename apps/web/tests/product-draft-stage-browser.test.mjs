@@ -160,7 +160,21 @@ test('ACK wait stops at fixed65s when response never becomes acknowledged and fu
 });
 
 test('project stage uses exact source trigger and exact portal item with a single selection',async()=>{
- const {selectDraftQaProjectStageOption}=await import('./product-draft-stage-browser.mjs'),calls=[],popup={waitFor:async value=>{assert.deepEqual(value,{state:'visible'});calls.push('visible');},locator:selector=>{assert.equal(selector,'[data-slot="select-item"]');return {filter:value=>{assert.equal(value.hasText.test('Просчёт'),true);assert.equal(value.hasText.test('Просчёт проекта'),false);return {click:async()=>calls.push('select-once')};}}}};
+ const {selectDraftQaProjectStageOption}=await import('./product-draft-stage-browser.mjs'),calls=[],popup={isVisible:async()=>false,waitFor:async value=>{assert.deepEqual(value,{state:'visible',timeout:1500});calls.push('visible');},locator:selector=>{assert.equal(selector,'[data-slot="select-item"]');return {filter:value=>{assert.equal(value.hasText.test('Просчёт'),true);assert.equal(value.hasText.test('Просчёт проекта'),false);return {click:async()=>calls.push('select-once')};}}}};
  await selectDraftQaProjectStageOption({locator:selector=>selector==='[data-slot="select-content"]'?popup:{click:async()=>{assert.equal(selector,'[data-slot="select-trigger"][aria-label="Статус"]');calls.push('open-once');}}},'ESTIMATE');
  assert.deepEqual(calls,['open-once','visible','select-once']);await assert.rejects(()=>selectDraftQaProjectStageOption({},'DONE'),/DRAFT111_STAGE_OPTION_INVALID/);
+});
+
+test('stage popup may miss SSR local OPEN but exactly one hydrated option selection is sent',async()=>{
+ const {selectDraftQaProjectStageOption}=await import('./product-draft-stage-browser.mjs');let opens=0,options=0,visible=false;
+ const popup={isVisible:async()=>visible,waitFor:async()=>{if(!visible){const error=Error('popup missed');error.name='TimeoutError';throw error;}},locator:()=>({filter:()=>({click:async()=>{options++;}})})};
+ await selectDraftQaProjectStageOption({locator:selector=>selector==='[data-slot="select-content"]'?popup:{click:async()=>{opens++;if(opens===2)visible=true;}}},'ESTIMATE');
+ assert.equal(opens,2);assert.equal(options,1);
+});
+
+test('product status local popup selects one DESIGN option after hydration without another backend click',async()=>{
+ const {selectDraftQaProductDesign}=await import('./product-draft-stage-browser.mjs');let opens=0,options=0,visible=false;
+ const popup={isVisible:async()=>visible,waitFor:async()=>{if(!visible){const error=Error('popup missed');error.name='TimeoutError';throw error;}},locator:()=>({filter:value=>{assert.equal(value.hasText.test('Проектирование'),true);return {click:async()=>{options++;}};}})};
+ await selectDraftQaProductDesign({locator:selector=>selector==='[data-slot="select-content"]'?popup:{click:async()=>{assert.equal(selector,'[data-slot="select-trigger"][aria-label="Сменить статус"]');opens++;if(opens===2)visible=true;}}});
+ assert.equal(opens,2);assert.equal(options,1);
 });

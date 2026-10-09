@@ -6,7 +6,7 @@ import {disableKanbanQaServiceWorkerApi} from './kanban-cover-staging-browser.mj
 const STAGES=new Set(['LEAD','ESTIMATE','CONTRACT','IN_WORK','PAUSED','REFUSED']);
 const STATUSES=new Set(['DRAFT','PREPARATION','DESIGN']);
 function safeStageExtras(data){if(data.extras===undefined||data.extras==='$undefined')return true;return data.toStage==='REFUSED'&&data.extras&&typeof data.extras==='object'&&!Array.isArray(data.extras)&&Object.keys(data.extras).every(key=>['refusalReason','refusalComment'].includes(key))&&typeof data.extras.refusalReason==='string'&&data.extras.refusalReason.startsWith('QA111 ');}
-const SAFE_FAILURE_CODES=new Set(['DRAFT111_ACTION_HTTP_FAILED','DRAFT111_ACTION_RESULT_UNEXPECTED','DRAFT111_ACTUAL_ACTION_ACK_REQUIRED','DRAFT111_ACTUAL_PROJECT_CREATED','DRAFT111_ACTUAL_SESSION_ID','DRAFT111_AUTHORIZED_STAGE_BINDING','DRAFT111_BROWSER_UNKNOWN','DRAFT111_CANONICAL_ACTION_ARGS_REQUIRED','DRAFT111_CLEAN_BROWSER','DRAFT111_CLIENT_ERROR','DRAFT111_DEPLOYED_REFERENCE_REQUIRED','DRAFT111_DURABLE_CALLBACKS_REQUIRED','DRAFT111_FRESH_MANAGER_PROFILE','DRAFT111_GLOBAL_COLUMNS_ORDER','DRAFT111_NESTED_COLUMNS_ORDER','DRAFT111_NEXT_ACTION_HEADER_REQUIRED','DRAFT111_OUTSIDE_ORIGIN_MUTATION','DRAFT111_OWN_GRAPH_REQUIRED','DRAFT111_OWN_PAGE_HTTP','DRAFT111_OWN_PATH_REQUIRED','DRAFT111_OWN_PRODUCT_SLOT','DRAFT111_OWN_TAGS_REQUIRED','DRAFT111_OWNED_ACTION_PAGE_REQUIRED','DRAFT111_PARTIAL_FILTER_ACK_REQUIRED','DRAFT111_PARTIAL_FILTER_WIDENED','DRAFT111_PREFERENCE_CAS_ACK','DRAFT111_PRODUCT_CREATE_ID','DRAFT111_PROJECT_CREATE_ID','DRAFT111_REPLAY_NOOP_GRAPH_CHANGED','DRAFT111_SAVED_PARTIAL_FILTER_WIDENED','DRAFT111_STOP_AFTER_UNKNOWN_RESPONSE','DRAFT111_UNOWNED_MUTATION_BLOCKED' ,'DRAFT111_JOURNAL_PERSIST_FAILED','DRAFT111_BROWSER_CLOSE_FAILED','DRAFT111_PRODUCT_DIALOG_OPEN_TIMEOUT','DRAFT111_PRODUCT_CREATE_ACK_TIMEOUT','DRAFT111_PRODUCT_CREATE_DUPLICATE_INTENT','DRAFT111_STAGE_OPTION_INVALID']);
+const SAFE_FAILURE_CODES=new Set(['DRAFT111_ACTION_HTTP_FAILED','DRAFT111_ACTION_RESULT_UNEXPECTED','DRAFT111_ACTUAL_ACTION_ACK_REQUIRED','DRAFT111_ACTUAL_PROJECT_CREATED','DRAFT111_ACTUAL_SESSION_ID','DRAFT111_AUTHORIZED_STAGE_BINDING','DRAFT111_BROWSER_UNKNOWN','DRAFT111_CANONICAL_ACTION_ARGS_REQUIRED','DRAFT111_CLEAN_BROWSER','DRAFT111_CLIENT_ERROR','DRAFT111_DEPLOYED_REFERENCE_REQUIRED','DRAFT111_DURABLE_CALLBACKS_REQUIRED','DRAFT111_FRESH_MANAGER_PROFILE','DRAFT111_GLOBAL_COLUMNS_ORDER','DRAFT111_NESTED_COLUMNS_ORDER','DRAFT111_NEXT_ACTION_HEADER_REQUIRED','DRAFT111_OUTSIDE_ORIGIN_MUTATION','DRAFT111_OWN_GRAPH_REQUIRED','DRAFT111_OWN_PAGE_HTTP','DRAFT111_OWN_PATH_REQUIRED','DRAFT111_OWN_PRODUCT_SLOT','DRAFT111_OWN_TAGS_REQUIRED','DRAFT111_OWNED_ACTION_PAGE_REQUIRED','DRAFT111_PARTIAL_FILTER_ACK_REQUIRED','DRAFT111_PARTIAL_FILTER_WIDENED','DRAFT111_PREFERENCE_CAS_ACK','DRAFT111_PRODUCT_CREATE_ID','DRAFT111_PROJECT_CREATE_ID','DRAFT111_REPLAY_NOOP_GRAPH_CHANGED','DRAFT111_SAVED_PARTIAL_FILTER_WIDENED','DRAFT111_STOP_AFTER_UNKNOWN_RESPONSE','DRAFT111_UNOWNED_MUTATION_BLOCKED' ,'DRAFT111_JOURNAL_PERSIST_FAILED','DRAFT111_BROWSER_CLOSE_FAILED','DRAFT111_PRODUCT_DIALOG_OPEN_TIMEOUT','DRAFT111_PRODUCT_CREATE_ACK_TIMEOUT','DRAFT111_PRODUCT_CREATE_DUPLICATE_INTENT','DRAFT111_STAGE_OPTION_INVALID','DRAFT111_STAGE_POPUP_OPEN_TIMEOUT','DRAFT111_PRODUCT_STATUS_POPUP_TIMEOUT']);
 const ERROR_KINDS=new Map([['Error','ERROR'],['TypeError','TYPE_ERROR'],['RangeError','RANGE_ERROR'],['ReferenceError','REFERENCE_ERROR'],['SyntaxError','SYNTAX_ERROR'],['TimeoutError','TIMEOUT_ERROR']]);
 const safeErrorKind=error=>ERROR_KINDS.get(error?.name)??'UNKNOWN';
 
@@ -29,11 +29,30 @@ const need=(ok,code)=>{if(!ok)throw Error(code);};
 const uuid=value=>typeof value==='string'&&/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(value);
 const id=value=>typeof value==='string'&&/^[A-Za-z0-9_:-]{1,160}$/.test(value);
 
-export async function selectDraftQaProjectStageOption(page,toStage){
+export async function selectDraftQaProjectStageOption(page,toStage,{settled=async()=>{},onStep=()=>{}}={}){
  need(STAGES.has(toStage),'DRAFT111_STAGE_OPTION_INVALID');
- await page.locator('[data-slot="select-trigger"][aria-label="Статус"]').click();
- const popup=page.locator('[data-slot="select-content"]');await popup.waitFor({state:'visible'});
+ const trigger=page.locator('[data-slot="select-trigger"][aria-label="Статус"]'),popup=page.locator('[data-slot="select-content"]');let opened=false;
+ for(let attempt=1;attempt<=3;attempt++){
+  await settled();onStep('PROJECT_STAGE_TRIGGER');
+  if(await popup.isVisible()===false)await trigger.click();
+  onStep('PROJECT_STAGE_POPUP');
+  try{await popup.waitFor({state:'visible',timeout:1500});await settled();opened=true;break;}
+  catch(error){await settled();if(error?.name!=='TimeoutError'||await popup.isVisible()!==false)throw error;}
+ }
+ need(opened,'DRAFT111_STAGE_POPUP_OPEN_TIMEOUT');onStep('PROJECT_STAGE_OPTION');
  await popup.locator('[data-slot="select-item"]').filter({hasText:new RegExp('^'+LABELS[toStage]+'$')}).click();
+}
+
+
+export async function selectDraftQaProductDesign(page,{settled=async()=>{},onStep=()=>{}}={}){
+ const trigger=page.locator('[data-slot="select-trigger"][aria-label="Сменить статус"]'),popup=page.locator('[data-slot="select-content"]');let opened=false;
+ for(let attempt=1;attempt<=3;attempt++){
+  await settled();onStep('PRODUCT_STATUS_TRIGGER');if(await popup.isVisible()===false)await trigger.click();onStep('PRODUCT_STATUS_POPUP');
+  try{await popup.waitFor({state:'visible',timeout:1500});await settled();opened=true;break;}
+  catch(error){await settled();if(error?.name!=='TimeoutError'||await popup.isVisible()!==false)throw error;}
+ }
+ need(opened,'DRAFT111_PRODUCT_STATUS_POPUP_TIMEOUT');onStep('PRODUCT_STATUS_OPTION');
+ await popup.locator('[data-slot="select-item"]').filter({hasText:/^Проектирование$/}).click();
 }
 
 export function classifyDraftQaAction(args,scope){
@@ -154,7 +173,7 @@ export async function runProductDraftStageBrowser({authorized=false,origin,revis
   await assertStatus(slot,status);return product(slot);
  }
  async function stage(project,toStage){
-  await goto(project.path+'?tab=overview','PROJECT_STAGE_PAGE');step='PROJECT_STAGE_SELECT';await selectDraftQaProjectStageOption(page,toStage);
+  await goto(project.path+'?tab=overview','PROJECT_STAGE_PAGE');await selectDraftQaProjectStageOption(page,toStage,{settled,onStep:value=>{step=value;}});
   if(toStage==='REFUSED'){const dialog=page.getByRole('dialog');await dialog.locator('#refusalReason').fill('QA111 '+checkpoint.runId);await dialog.getByRole('button',{name:'Перевести в «Отказ»',exact:true}).click();await expect(dialog).not.toBeVisible();}
   await expect.poll(async()=>{const graph=await ownGraph();return graph.projectA?.id===project.id?graph.projectA.stage:graph.projectB.stage;},{timeout:20000}).toBe(toStage);
  }
@@ -181,7 +200,7 @@ export async function runProductDraftStageBrowser({authorized=false,origin,revis
   await stage(A,'ESTIMATE');await addProduct(A,2,'DRAFT');check('ESTIMATE_create_DRAFT');
   await stage(A,'CONTRACT');await assertStatus(1,'PREPARATION');await assertStatus(2,'PREPARATION');
   const firstContract=structuredClone(stageReference);
-  const a3=await addProduct(A,3,'PREPARATION');await goto(a3.path);await page.getByRole('combobox',{name:'Сменить статус'}).click();await page.getByRole('option',{name:'Проектирование',exact:true}).click();await assertStatus(3,'DESIGN');check('CONTRACT_promotes_DRAFT_postcontract_create_PREPARATION');
+  const a3=await addProduct(A,3,'PREPARATION');await goto(a3.path);await selectDraftQaProductDesign(page,{settled,onStep:value=>{step=value;}});await assertStatus(3,'DESIGN');check('CONTRACT_promotes_DRAFT_postcontract_create_PREPARATION');
   await stage(A,'LEAD');await assertStatus(1,'PREPARATION');await assertStatus(2,'PREPARATION');await assertStatus(3,'DESIGN');
   const a4=await addProduct(A,4,'DRAFT');scope.denialProduct=a4.id;await direct(productStatusReference,[a4.id,'PREPARATION']);await assertStatus(4,'DRAFT');scope.denialProduct=null;
   await goto(A.path+'?tab=products');const draftColumn=page.locator('[data-slot="kanban-column"]').filter({has:page.getByText('Черновики',{exact:true})});await expect(draftColumn.getByText(tags.products[3],{exact:true})).toBeVisible();await expect(draftColumn.getByRole('button',{name:'Перетащить '+tags.products[3]})).toHaveCount(0);
