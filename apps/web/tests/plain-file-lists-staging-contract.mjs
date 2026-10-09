@@ -81,6 +81,7 @@ export async function verifyPlainFileListStagingBinding(input = {}) {
 
 /** Public Next assets include route groups and dynamic route segment names. */
 export function isPlainFileListStaticReadPath(pathname) {
+ if (pathname === '/icon.svg') return true;
  if (typeof pathname !== 'string' || pathname.includes('\\') || /%(?:2f|5c)/i.test(pathname)) return false;
  let decoded;try {decoded = decodeURIComponent(pathname);} catch {return false;}
  return /^\/(?:_next\/static|icons)\/[-A-Za-z0-9_./@()\[\]]+$/.test(decoded) && !decoded.includes('..');
