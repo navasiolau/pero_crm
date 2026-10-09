@@ -79,6 +79,13 @@ export async function verifyPlainFileListStagingBinding(input = {}) {
  verifiedBindings.add(binding);return binding;
 }
 
+/** Public Next assets include route groups and dynamic route segment names. */
+export function isPlainFileListStaticReadPath(pathname) {
+ if (typeof pathname !== 'string' || pathname.includes('\\') || /%(?:2f|5c)/i.test(pathname)) return false;
+ let decoded;try {decoded = decodeURIComponent(pathname);} catch {return false;}
+ return /^\/(?:_next\/static|icons)\/[-A-Za-z0-9_./@()\[\]]+$/.test(decoded) && !decoded.includes('..');
+}
+
 /** GET/HEAD only, plus a separately armed single compiled deleteFile action. No URLs/bodies in decisions. */
 export function plainFileListRequestDecision(request, binding) {
  let url;try {url = new URL(request.url);} catch {return {kind: 'deny', code: 'F115_INVALID_URL'};}
@@ -95,7 +102,7 @@ export function plainFileListRequestDecision(request, binding) {
  if (own && ownedQuery) return {kind: 'continue'};
  if (financePages && (url.pathname !== '/finance/accounts/report' ? only(key => key === '_rsc') : only((key, value) => key === '_rsc' || (['from', 'to'].includes(key) && value === binding.finance.date) || (key === 'mode' && value === 'BYN')))) return {kind: 'continue'};
  if (['/api/health', '/api/auth/session'].includes(url.pathname) && !url.search) return {kind: 'continue'};
- if ((['/favicon.ico', '/icon.svg', '/apple-icon.png', '/manifest.webmanifest'].includes(url.pathname) && !url.search) || (/^\/(?:_next\/static|icons)\/[A-Za-z0-9_./@-]+$/.test(url.pathname) && !url.pathname.includes('..'))) return {kind: 'continue'};
+ if ((['/favicon.ico', '/icon.svg', '/apple-icon.png', '/manifest.webmanifest'].includes(url.pathname) && !url.search) || isPlainFileListStaticReadPath(url.pathname)) return {kind: 'continue'};
  const ordinary = binding.files.find(file => url.pathname === `/api/files/${file.id}`), financial = binding.financeDocs.find(file => url.pathname === `/api/finance/documents/${file.id}`);
  if ((ordinary && only((key, value) => key === 'preview' && ['card', 'cover', 'thumbnail'].includes(value))) || (financial && !url.search)) return {kind: 'continue'};
  return {kind: 'deny', code: 'F115_GET_ROUTE_FORBIDDEN'};
