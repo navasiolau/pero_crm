@@ -50,6 +50,7 @@ export const ADVANCE_ROLES: Role[] = [...FINANCE_ROLES];
 export const WAREHOUSE_MANAGE_ROLES: Role[] = ["ADMIN", "DIRECTOR", "MANAGER", "PROCUREMENT"];
 export const WAREHOUSE_MONEY_ROLES: Role[] = [...FINANCE_ROLES];
 export const WAREHOUSE_DELETE_ROLES: Role[] = ["ADMIN"];
+export const WAREHOUSE_UNIT_ADMIN_ROLES: Role[] = ["ADMIN"];
 // Эти прежние офисные writes не следуют из readonly supply/finance grants.
 export const OFFICE_WRITE_ROLES: Role[] = [...MANAGER_ROLES,"ENGINEER"];
 // Настройки и журнал изменений.
