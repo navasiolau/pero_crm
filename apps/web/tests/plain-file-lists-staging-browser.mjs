@@ -13,6 +13,24 @@ const visibleRows = (scope, id) => scope.locator(`[data-file-list-row="${id}"]:v
 function deferred() {let resolve;const promise = new Promise(done => {resolve = done;});return {promise, resolve};}
 async function waitPending(promise) {let timer;try {await Promise.race([promise, new Promise((_, reject) => {timer = setTimeout(() => reject(Error('F115_PENDING_UI_TIMEOUT')), 30000);})]);} finally {clearTimeout(timer);}}
 
+/** The heading also contains the task status badge; only its title prefix identifies the dialog.
+ * Repeating setSelected(task) may open it after hydration, but never submits a server action. */
+export async function openOwnedTaskFileDialog(page, taskTitle, reportAttempt = () => {}, assertClient = () => {}) {
+ const escapedTitle = taskTitle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+ const task = page.getByText(taskTitle, {exact: true});
+ const dialog = page.getByRole('dialog').filter({has: page.getByRole('heading', {name: new RegExp(`^${escapedTitle}(?:\\s|$)`)})});
+ for (let attempt = 1; attempt <= 3; attempt++) {
+  assertClient();check(await task.count() === 1 && await task.isVisible(), 'UNIQUE_VISIBLE_TASK_TRIGGER_REQUIRED');
+  await task.click({timeout: 65000});reportAttempt(attempt);
+  try {await dialog.waitFor({state: 'visible', timeout: 2500});}
+  catch (error) {
+   check(error?.name === 'TimeoutError' && await dialog.count() <= 1 && !await dialog.isVisible(), 'TASK_DIALOG_OPEN_FAILED');assertClient();continue;
+  }
+  assertClient();check(await dialog.count() === 1 && await dialog.isVisible(), 'UNIQUE_VISIBLE_TASK_DIALOG_REQUIRED');return dialog;
+ }
+ throw Error('F115_TASK_DIALOG_NOT_VISIBLE');
+}
+
 /** Read scenarios complete before explicitly planned confirmed deletions. No upload, financial mutation,
  * preference save, PDF/video viewer, trace/HAR/storageState, session file or existing-client screenshot. */
 export async function runPlainFileListsStagingBrowser(input = {}) {
@@ -26,7 +44,7 @@ export async function runPlainFileListsStagingBrowser(input = {}) {
  const within = (parent, child) => {const relative = path.relative(parent, child);return relative && !relative.startsWith('..') && !path.isAbsolute(relative);};
  check(within(root, base), 'EVIDENCE_BASE_MISMATCH');
  const outputDir = path.join(base, `staging-${binding.runId}-${Date.now()}`);await mkdir(outputDir, {recursive: false, mode: 0o700});check(within(base, await realpath(outputDir)), 'EVIDENCE_PATH_MISMATCH');
- const receipt = {status: 'STARTED', revision: binding.expectedRevision, runId: binding.runId, revisionProof: 'reviewed physical transport identity and owner113 current HMAC/PRE/DB/version certificate', origin: binding.origin, checks: [], screenshots: [], blockedWrites: 0, blockedPrefetches: 0, deniedReads: 0, pageErrorCount: 0, upstreamDeleteRequests: 0, upstreamOtherNonReadResponses: 0, acknowledgedDeletes: 0, clientFailureChecks: 0, pendingGates: [], outputDir};
+ const receipt = {status: 'STARTED', revision: binding.expectedRevision, runId: binding.runId, revisionProof: 'reviewed physical transport identity and owner113 current HMAC/PRE/DB/version certificate', origin: binding.origin, checks: [], screenshots: [], blockedWrites: 0, blockedPrefetches: 0, deniedReads: 0, pageErrorCount: 0, upstreamDeleteRequests: 0, upstreamOtherNonReadResponses: 0, acknowledgedDeletes: 0, clientFailureChecks: 0, taskOpenClicks: 0, pendingGates: [], outputDir};
  let browser, context, phase = 'setup', fatal = null, pendingUi = null;
  const inFlightRoutes = new Set();
  const fail = error => {fatal ??= plainFileListSafeError(error);gate.stop();};
@@ -99,7 +117,8 @@ export async function runPlainFileListsStagingBrowser(input = {}) {
   receipt.checks.push({kind: image ? 'original-fullscreen' : 'protected-download', keyboard});
  }
  async function taskDialog(page) {
-  await goto(page, `${binding.paths.project}?tab=tasks`);const task = page.getByText(binding.taskTitle, {exact: true});await expect(task).toHaveCount(1);await task.click();const dialog = page.getByRole('dialog').filter({has: page.getByRole('heading', {name: binding.taskTitle, exact: true})});await expect(dialog).toBeVisible();return dialog;
+  await goto(page, `${binding.paths.project}?tab=tasks`);await expect(page.getByText(binding.taskTitle, {exact: true})).toHaveCount(1);
+  return openOwnedTaskFileDialog(page, binding.taskTitle, () => {receipt.taskOpenClicks++;}, assertSafe);
  }
  async function ownFinanceRow(page, file, label, viewport, scope = page) {
   const proof = await rowProof(page, scope, {...file, source: 'finance'}, false, label, viewport);await nameProof(page, proof.row, {...file, source: 'finance'}, true);return proof;
