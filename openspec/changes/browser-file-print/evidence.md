@@ -54,3 +54,35 @@ FileListRow получил один импорт/вызов FilePrintButton пе
 Focused unit/SSR: 38/38 PASS (`tsx --test tests/browser-file-print.test.ts tests/file-print-button.test.ts tests/plain-file-list.test.ts tests/file-list-printing.test.ts`). Scoped ESLint ряда и двух row test файлов — PASS; scoped TypeScript program для ряда, print source и typed tests с действующими строгими web tsconfig options — PASS. Здесь не запускались приложение, браузер, staging/DB/runtime/network QA, Prisma generation, установки или изменения shared dependencies. Новые frontend проверки не заменяют full merged checks и actual staging.
 
 Новый hook/diff готов к независимому ревью; он пока не закоммичен. Требуются ordinary merge финальной reviewed ветки 115 с адаптерами и последующая проверка общей интеграции. Фактический deployment задачи 116 остаётся после принятого 115. Старые четыре actual native preview и 21 controlled browser группы остаются evidence Phase A и не выдаются за приёмку нового общего ряда на staging.
+
+## Финальная локальная интеграция 115 → 116 — 09.10.2026
+
+Четыре файла принтерного hook прошли независимое ревью без замечаний (NONE); commit 7265b72844b5f94eaf0256546a76b71beb8fb454 опубликован только в feature/116. Затем ordinary merge финальной reviewed origin/feature/115 37db1eb09d4413fa45ef20adb2e8adfdb7451172 дал локальную основу c4517334b4c806573c79beadec5327a66b42f67b. Конфликтов не было; общая строка сохранила printer/id/source атрибуты, а все адаптеры/минимальные DTO/серверные ACL/неактивную финансовую урну/task pending задачи 115 получены из Git merge.
+
+Для новых FileSection/DRAFT types regenerated ONLY own116 Prisma outputs после realpath guard в own worktree: 18 generated файлов, у каждого nlink=1 до/после. 115 vendor package файлов сверены SHA256 до/после и остались неизменны; shared runtime, установки и package updates не выполнялись. CLI запускались из locked dependencies с pnpm verify-deps-before-run=false либо напрямую. Build/test окружение использовало нерабочий локальный DATABASE_URL на port9; существующие БД не читались/не менялись.
+
+| Проверка объединённого кода | Результат |
+|---|---|
+| Full web suite | 1632/1632 PASS |
+| Full TypeScript noEmit/incremental=false | PASS, exit0 |
+| Full ESLint через locked pnpm executable resolver | PASS, 0 ошибок/6 существующих warnings |
+| Next production build | PASS, exit0 |
+| OpenSpec strict | PASS |
+| Local coupled browser — настоящий общий FileListRow + ReportDocumentButton + Tailwind | 28/28 controlled-print-spy групп PASS; pageErrors=[] |
+| Actual LOCAL native Chrome print preview из общей строки/финансового адаптера | 5/5 PASS; pageErrors=[]; все Cancel, без физического задания |
+
+Local coupled harness теперь проверяет имя изображения на desktop1440 и finance mobile390: полностью оригинальные 300×1200, object-fit contain, точный viewport fullscreen после штатной Dialog zoom-in-95 анимации. Исходный ранний bbox assertion попал в её 100ms переход; test-only ожидание точного конечного bbox исправило readiness, критерий не ослаблялся и app source не менялся.
+
+Filename PDF project/finance скачивает byte-exact original с расширением, CAD/video также скачиваются; iframe/video viewer не открываются. Настоящий финансовый ReportDocumentButton сохраняет неактивную урну и доступный printer. Связанные callbacks и task pending проверены full suite; local transport синтетический и не заменяет stage ACL/data приёмку.
+
+Пять actual native случаев: projectPDF, financePDF, project tall/wide, financePNG wide. На каждом сохранены actual chrome://print target, state1/error0/pageCount1/ожидаемый is-pdf, один protected GET при повторном клике во время подготовки, закрытие штатной «Отменой». Просмотрены новые projectPDF/financePDF PNG с чёткими чёрными маркерами на белой странице и financePNG с четырьмя цветными краями. Повтор warranted новым coupling общей строки и finance adapter; private Chromium protocol в продукт не добавлен, helpers/button SHA freeze неизменен.
+
+Результаты находятся в прежней ignored папке apps/web/test-results/browser-file-print/: full-web-tests.log, full-typecheck.log, full-lint.log, full-build.log, runtime.json (28 controlled), native-preview.json (5 actual), native-finance-image-wide.png и остальные native PNG. Native/controlled receipts разделены и содержат coupling + pageErrors.
+
+Изменён только TEST harness для этого повторного coupling и OpenSpec evidence/tasks. Новая QA дельта ждёт ревью. Source задачи реализован и проверен локально; фактический staging приёмки ещё не было, 116 разворачивается только после actual accepted115. Протокол stage/DB/root cleanup не запускался. Producer ABI нового 113 memory-only signed handoff ещё не заморожен — stage consumer не угадывает auth/fields и ждёт точный verified интерфейс.
+
+## Финальное ревью локального QA — 09.10.2026
+
+Независимый reviewer114_112 проверил три текущих QA/doc файла на основе c4517334b4c806573c79beadec5327a66b42f67b: FINAL NONE. Неизменность app helpers/button/Row подтверждена. Оркестратор передал прямое разрешение на коммит только этих трёх файлов и push feature/116; обычные merge истории 115/staging сохраняются. Пункт 2.3 закрыт по полным локальным проверкам и ревью; actual staging пункт 2.4 остаётся открытым. Никаких повторных runtime/stage/DB действий для этого документационного закрытия не выполнялось.
+
+Producer113 V2 memory-only verified ABI/paths ещё ожидаются. Source-stage consumer не создаётся по догадкам и не получает existing profiles/prefs; runtime/root cleanup и future linked financial fixtures остаются в согласованном контуре оркестратора. Merge/push staging/main данным коммитом не выполняются.
