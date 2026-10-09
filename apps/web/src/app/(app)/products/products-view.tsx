@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { LayoutGrid, Table2 } from "lucide-react";
 import type { ProductStatus, ProjectStage, Role } from "@prisma/client";
 
@@ -39,6 +40,7 @@ export interface ProductRow {
 // те же принципы, что у проектов. Порядок — «новые сверху» (сервер).
 export function ProductsView({
   view,
+  resolvedQuery,
   products,
   total,
   page,
@@ -52,6 +54,7 @@ export function ProductsView({
   hideEngineerFilter,
 }: {
   view: "kanban" | "table";
+  resolvedQuery: string;
   // Канбан — все отфильтрованные изделия; таблица — одна страница
   products: ProductRow[];
   total: number;
@@ -65,7 +68,9 @@ export function ProductsView({
   engineerOptions: { value: string; label: string; hint?: string }[];
   hideEngineerFilter?: boolean;
 }) {
-  const { set } = useListParams();
+  const { set, query, pending } = useListParams();
+  const [searchText, setSearchText] = useState(() => new URLSearchParams(resolvedQuery).get("q") ?? "");
+  const [filterOverlayActive, setFilterOverlayActive] = useState(false);
 
   function switchView(next: "kanban" | "table") {
     set({ view: next });
@@ -99,6 +104,9 @@ export function ProductsView({
       </div>
 
       <ProductsFilterBar
+        identitySearch={view === "kanban"}
+        onSearchDraftChange={setSearchText}
+        onModalActiveChange={setFilterOverlayActive}
         projectOptions={projectOptions}
         clientOptions={clientOptions}
         engineerOptions={engineerOptions}
@@ -107,6 +115,9 @@ export function ProductsView({
 
       {view === "kanban" ? (
         <ProductsKanban
+          searchText={searchText}
+          searchReady={!pending && query === resolvedQuery && !filterOverlayActive
+            && searchText.trim() === (new URLSearchParams(query).get("q") ?? "")}
           initialProducts={products}
           canManage={canManage}
           actorRoles={actorRoles}
