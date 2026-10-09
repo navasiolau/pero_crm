@@ -19,6 +19,7 @@ import { mapTaskDetails } from "@/server/tasks/queries";
 import { getProjectMaterials, listProductMaterialOptions } from "@/server/warehouse/queries";
 
 import { ProductMeasurement, ProductDocuments } from "@/components/product-attachments";
+import {ordinaryFileListView} from "@/server/files/list-view";
 import { productAttachmentGroups } from "@/lib/product-attachment-groups";
 import { MaterialsTab } from "../../projects/[id]/materials-tab";
 import { TasksTab } from "../../projects/[id]/tasks-tab";
@@ -73,30 +74,7 @@ export default async function ProductPage({
       getProductPercentageView({ id: session.user.id, roles: role }, product.id),
     ]);
 
-  const authorIds = [
-    ...new Set(
-      [
-        ...product.files.map((file) => file.uploadedById),
-      ].filter((value): value is string => !!value),
-    ),
-  ];
-  const authors = await prisma.user.findMany({
-    where: { id: { in: authorIds } },
-    select: { id: true, name: true },
-  });
-  const authorNames = new Map(authors.map((user) => [user.id, user.name]));
-  const fileRows = product.files.map((file) => ({
-              id: file.id,
-              fileName: file.fileName,
-              section: file.section,
-              mimeType: file.mimeType,
-              size: file.size,
-              hasThumb: file.hasThumb,
-              createdAt: file.createdAt.toISOString(),
-              uploaderName: file.uploadedById
-                ? (authorNames.get(file.uploadedById) ?? "—")
-                : "—",
-            }));
+  const fileRows = await ordinaryFileListView(prisma, actor, product.files);
   const attachments = productAttachmentGroups(fileRows, product.sketchFile?.id);
 
   const percentagePeople = workers.map(user => ({ id: user.id, name: user.name, active: true, roles: user.roles }));

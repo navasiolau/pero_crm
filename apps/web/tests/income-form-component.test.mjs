@@ -138,7 +138,9 @@ test('general expense has explicit organization context and submits document wit
 
 async function uploadDocument(page){
  await page.locator('#pay-document').setInputFiles({name:'Чек.pdf',mimeType:'application/pdf',buffer:Buffer.from('%PDF')});
- await page.getByRole('button',{name:'Чек.pdf',exact:true}).waitFor();
+ await page.getByRole('link',{name:'Чек.pdf',exact:true}).waitFor();
+ assert.equal(await page.getByRole('link',{name:'Чек.pdf',exact:true}).getAttribute('download'),'Чек.pdf');
+ assert.equal(await page.getByRole('button',{name:'Удалить файл Чек.pdf',exact:true}).isDisabled(),true);
 }
 
 test('paid warehouse mode permits no document, computes invoice amount and retries the same purchase UUID',async()=>{
@@ -200,7 +202,7 @@ test('late upload acknowledgement cannot attach a document to a newly opened for
    await page.evaluate(()=>window.__setOpen(true));await page.locator('#pay-amount').fill('15');
    const finished=page.waitForResponse(response=>response.url().endsWith('/api/finance/documents/upload'));release();await finished;
    assert.equal(await page.getByRole('button',{name:'Внести расход',exact:true}).isDisabled(),true);
-   assert.equal(await page.getByRole('button',{name:'Late.pdf',exact:true}).count(),0);
+   assert.equal(await page.getByRole('link',{name:'Late.pdf',exact:true}).count(),0);
   }finally{release?.()}
  });
 });

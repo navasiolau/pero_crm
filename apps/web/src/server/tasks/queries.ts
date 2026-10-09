@@ -1,3 +1,4 @@
+import {ordinaryFileListView, type OrdinaryFileForList} from "@/server/files/list-view";
 import {taskWorkspaceEligibility,taskReward} from './workspace-contract';
 import {maskTaskPaymentRead} from "@/server/access/production-read-projection";
 import {canViewProductMoney} from "@/lib/product-financial-access";
@@ -20,7 +21,7 @@ export const taskDetailsInclude = {
   work: { select: { id: true, projectId:true,productId:true,title: true, total: true, priceSnapshot: true, paymentKind: true } },
   allocationGroup: { select: { currency: true, budgetSource: true } },
   _count: { select: { payrollEntries: true } },
-  files: { select: { id: true, fileName: true, hasThumb: true, mimeType: true } },
+  files: { select: { id: true, fileName: true, mimeType: true, section: true, uploadedById: true, projectId: true, productId: true, taskId: true } },
   dependencies: {
     include: {
       dependsOn: { select: { id: true, title: true, status: true } },
@@ -68,7 +69,7 @@ type TaskWithIncludes = {
   product: { id: string; number: string; title: string; engineerId: string | null; status: ProductStatus } | null;
   assignee: { id: string; name: string } | null;
   work: { id: string; projectId?:string;productId?:string|null;title: string; total: unknown; priceSnapshot: unknown; paymentKind?: "LEGACY" | "ENGINEERING" | "INSTALLATION" } | null;
-  files: { id: string; fileName: string; hasThumb: boolean; mimeType: string }[];
+  files: OrdinaryFileForList[];
   dependencies: {
     dependsOn: { id: string; title: string; status: "DRAFT" | "NEW" | "IN_PROGRESS" | "DONE" };
   }[];
@@ -116,6 +117,8 @@ export async function mapTaskDetails(
     try { previews.set(productId, await getEngineeringTaskPreview(prisma, productId)); }
     catch { previewErrors.set(productId, "Предварительная сумма недоступна: проверьте курс или распределение фонда"); }
   }));
+
+  const fileViews = new Map(await Promise.all(tasks.map(async task => [task.id, await ordinaryFileListView(prisma, actor, task.files)] as const)));
 
   return tasks.map((task) => {
     const engineering = task.work?.paymentKind === "ENGINEERING";
@@ -169,7 +172,7 @@ export async function mapTaskDetails(
     productId: task.product?.id ?? null,
     productNumber: task.product?.number ?? null,
     productTitle: task.product?.title ?? null,
-    files: task.files,
+    files: fileViews.get(task.id) ?? [],
     createdAt: task.createdAt.toISOString(),
     doneAt: task.doneAt?.toISOString() ?? null,
     doneByName: task.doneById ? (userNames.get(task.doneById) ?? null) : null,

@@ -3,7 +3,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { FileUp, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useFileViewer } from "@/components/file-viewer";
+import {FileListRow} from "@/components/file-list";
 import { createRequestId } from "@/lib/request-id";
 import { uploadSizeLimitError, uploadSizeLimitFor } from "@/server/files/upload-limits";
 import type { FinanceDocumentView } from "@/server/finance-documents/contracts";
@@ -22,7 +22,6 @@ export function FinanceDocumentUpload({ onUploaded, onBusyChange, id, disabled =
   const busy = useRef(false);
   const [pending, setPending] = useState(false), [error, setError] = useState("");
   const [uploaded, setUploaded] = useState<FinanceDocumentView | null>(null);
-  const viewer = useFileViewer('fullscreen');
 
   async function send(file?: File) {
     if (disabled || busy.current) return;
@@ -68,7 +67,6 @@ export function FinanceDocumentUpload({ onUploaded, onBusyChange, id, disabled =
     {error ? <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive">
       <span>{error}</span>{current.current ? <Button type="button" variant="outline" size="sm" disabled={pending || disabled} onClick={() => void send()}><RotateCcw className="size-4" />Повторить</Button> : null}
     </div> : null}
-    {uploaded ? <Button type="button" variant="link" className="h-auto max-w-full whitespace-normal break-all px-0 text-left" onClick={() => viewer.open(uploaded)}>{uploaded.fileName}</Button> : null}
-    {viewer.viewer}
+    {uploaded ? <FileListRow file={{...uploaded, canDelete: false}} /> : null}
   </div>;
 }
