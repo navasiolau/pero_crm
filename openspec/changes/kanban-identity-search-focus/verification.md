@@ -1,6 +1,6 @@
 # Verification
 
-Задача 117, `feature/117`, база `origin/staging` `87c404846bdb659a2f9f45e3b9d7a0a98c5ad17a`. Локальная проверка завершена 09.10.2026 МСК (08.10.2026 23:25 UTC). Согласованное изменение реализовано в отдельном worktree. Git-коммиты, merge, deployment и staging-приёмку координирует основной агент; независимое ревью завершено, staging пока ожидается.
+Задача 117, `feature/117`, база `origin/staging` `87c404846bdb659a2f9f45e3b9d7a0a98c5ad17a`. Локальная проверка завершена 09.10.2026 МСК (08.10.2026 23:25 UTC). Согласованное изменение реализовано в отдельном worktree. Git-коммиты, merge и deployment координирует основной агент. Независимое ревью завершено. Root подтвердил фактическую staging-приёмку ревизии `37f882f69a2d76901b98321ff7824d0d04db4db8`; её evidence и завершённая очистка описаны ниже.
 
 ## Source freeze
 
@@ -35,9 +35,46 @@ Query-тесты исполняют настоящие listQueries/visibility н
 
 Private ignored receipt: `.playwright-mcp/search117/receipt.json`. Скриншоты: `projects-1440.png`, `products-1440.png`, а также оба раздела на 390/360 px в той же папке. Фактический mobile PNG проверен визуально: карточка целиком в центре, колонки не перестроены.
 
-## Remaining acceptance
+## Actual staging acceptance
 
-Фактически развёрнутый staging SHA/OCI/health плюс реальные desktop/mobile сценарии поиска. Для browser на staging использовать только согласованного QA-пользователя и фиксировать/очищать только его предпочтения по reviewed lifecycle; данные существующих пользователей не менять. Новый поиск не требует миграций, новых библиотек или инфраструктурных действий. БД, staging и production этим worker не изменялись; дампы и restic не использовались.
+Root выполнил run `45724aed-e43c-4bdb-9b90-8ee20610d6dc` после обычной интеграции и публикации CI. Фактически развёрнутый staging: SHA `37f882f69a2d76901b98321ff7824d0d04db4db8`, OCI image `sha256:e59a361d87fb0acd84be943747375115f8aa014225b7dd8d5d39e95d693daf0f`. Подписанные native/PRE/checkpoint/observation/cleanup receipts подтверждают один и тот же web container `5768bed77a88f6ce8309492c86082553801f06ce76c1d5d51a9200cc80b98959`, DB container `27b8f7342b9d722ab8788e137b37b03a3037442da038c5b8b98dbb30245b8b6a` и volume `crm-staging_pgdata`. Actual browser проверил HTTP 200, `status=ok` и `database=ok`. Публикация образа проходит обязательный test gate CI; прямой ответ private GitHub Actions API не используется как отдельное доказательство.
+
+Actual staging browser — **30/30 PASS**: оба канбана на 1440×900, 390×844 и 360×800. Реальные ответы подтверждают собственные номер/название и отсутствие совпадения по клиенту, техническому описанию и названию связанной сущности. При точном номере карточка достигает ближайшего доступного центра с ошибкой менее 2 px, сохраняются колонки, размеры, порядок и синхронизация нижней полосы. На desktop сохраняются DOM-фокус и курсор ввода. На телефоне поиск не закрывает Sheet и не прокручивает доску до закрытия пользователем. Для названия и отрицательных запросов сохраняется предварительно выставленная ручная позиция. Фактические PNG `projects-1440.png` и `products-360.png` просмотрены визуально: целевая карточка видна, структура колонок сохранена. Все шесть PNG лежат в private ignored `.playwright-mcp/search117/staging-45724aed-e43c-4bdb-9b90-8ee20610d6dc/`.
+
+Clear/reenter, частичные номера, stale pending, SSE и active DnD покрыты перечисленными выше **34 локальными React/Chrome группами**. Они не объявляются дополнительными сценариями actual 30-group staging loop. Actual запросы завершены: `requestsDrained=true`, `unresolvedIntents=0`, denied requests и page errors — 0; ledger содержит 36 INTENT и 36 genuine ACK только для двух предпочтений собственного QA-пользователя.
+
+Native prerequisite на настоящем PostgreSQL подтвердил exact CAS cleanup с 0, 1 и 2 предпочтениями и проверенный внешний ROLLBACK: `rollbackVerified=true`, `originalsMatch=true`. Затем Root создал только собственные User/Client/Project/Product (4 записи). После browser были удалены эти четыре записи и два собственных UserPreference; подписанный late closed proof: **`remainingOwnedRows=0`, `originalsMatch=true`**. Защищены исходные данные и схема всех 54 public-таблиц. Только монотонный operational `ApiToken.lastUsedAt` изменился в рамках reviewed token-clock contract (`apiClockChanged=true`); bot clock не изменился. Данные существующих пользователей, файлы, склад и финансовые факты не изменялись.
+
+Первый cleanup вызов Root (tool chunk `6e7d68`) был отклонён protected wrapper: `BROWSER_INPUT_TOO_LARGE`, base64 input 98 512 символов при лимите 98 304. Отказ произошёл после физического guard/lock, **до container/Prisma/SQL dispatch**. Этот неуспешный вызов не отмечается PASS и не выдаётся за cleanup ACK. Исходные intent, signed PRE/checkpoint/observation и 72 ledger-события сохранены без изменений.
+
+Отдельно reviewed one-shot recovery helper передал тот же полный подписанный input в compile-time bundle 140 055 B (SHA256 `455b22245ec9db0d035f4120f35cbb4974173d9ed42b653e71cf9abec2e7a33a`) и минимальный restore envelope 216 base64-символов. Лимиты wrapper остались 96 KiB input / 256 KiB bundle; frozen producer sources и полномочия не расширены. Новый эксклюзивный каталог transport diagnostics сохраняет исходный refusal log. Единственный recovery restore получил настоящий signed commit ACK; отдельное последующее read-only наблюдение подтвердило закрытие run (Root tool chunk `984929`).
+
+Private ignored signed artifacts: `.playwright-mcp/search117/owned-45724aed-e43c-4bdb-9b90-8ee20610d6dc/`. SHA256 исходных bytes:
+
+| Артефакт | SHA256 |
+|---|---|
+| `native.json` | `9ccf3da8f8b5708bc49c19788f19b0127d869567d92faaa306d27af300e4d480` |
+| `pre.json` | `d71ff187c1f76098de6f8c77c4de4e886cbbadbc84dc9171d17c25a81018a508` |
+| `browser-result.json` | `2ad7f034e07b9f5d6922ba8c768125358ca576494cb80cfd7a8f9407debcbbd6` |
+| `observation.json` | `809ee13b004406e7a54dd4f564c697e70abd5b8e9fe2aaf5bdd5b9fc7a03ef4d` |
+| `cleanup-intent.json` | `5218a940125c3949072529137ff8f545d9d6ccea3c566ea8ac43e070c060429f` |
+| `cleanup-events.json` | `c1dccdcdc5627edeffa89ee6a5c6f4a7396cebf140d3481a998fd27d41aa2cc8` |
+| `cleanup-recovery-intent.json` | `f81d4537a161e3673cefe66b2c944abf7f7e7654249504f3b98d0d6716f96045` |
+| `cleanup-recovery-ack.json` | `a9b29e6a1d2d766acb23dc6e359eff54a89bfe9aa4f1b486d22c359f777a99e6` |
+| `cleanup-recovery-closed.json` | `26bbb8d9582cdffdf96cc9a61c8b8640023112fd0c7724b1dddc94bd4928c1a8` |
+
+Приёмка приложения задачи 117 и lifecycle закрыты на указанной ревизии. Main/production не выпускались. После интеграции последующих QA/docs-коммитов Root фиксирует итоговую фактически развёрнутую ревизию всего пула задач. Дампы, restic и инфраструктурные изменения не выполнялись; этот evidence worker читает только локальные receipts и запускает локальные controls.
+
+## Cleanup recovery source verification
+
+Два новых source-only QA файла проверены отдельно; appsource и восемь frozen lifecycle/contract файлов задачи 117 не менялись. Независимое source review `review114_112` — NONE. SHA256:
+
+- `tests/kanban-search-cleanup-recovery.mjs` — `e7296c44d8d3e78a4e5368a1fb43413c24d90521bccc8d74a394b53e7e6ce2e0`.
+- `tests/kanban-search-cleanup-recovery.test.mjs` — `0cdc6f9b9ca56b4c92309d67d0bf394708f38341a94822fb2f45fabbc65b48c4`.
+
+`pnpm --config.verify-deps-before-run=false --filter @pero/web exec tsx --test tests/kanban-search-cleanup-recovery.test.mjs` — **5/5 PASS**, fail/skip 0. Controls проверяют известный remote отказ до dispatch, неизменность signed chain/ledger и лимитов, отказ при unknown outcome/другой границе, совпадение последнего genuine ACK и физической identity, сохранение исходного диагностического журнала. Первоначальный `node --test` остановился до исполнения tests на extensionless TypeScript import; для locked TS импортов использован штатный `tsx` без изменения source/runtime.
+
+`pnpm --config.verify-deps-before-run=false --filter @pero/web exec eslint tests/kanban-search-cleanup-recovery.mjs tests/kanban-search-cleanup-recovery.test.mjs` — PASS. Эти controls не выполняют DB, HTTP, SSH или staging actions.
 
 
 ## Staging adapter source checkpoint
