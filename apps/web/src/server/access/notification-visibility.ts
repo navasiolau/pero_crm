@@ -1,3 +1,4 @@
+import { canViewProductDrafts } from "@/lib/product-drafts";
 import {currentReminderNamespace} from "@/server/calendar/reminder-visibility";
 import type { PrismaClient } from "@prisma/client";
 import {FINANCIAL_ORG_NOTIFICATION_TYPES,canReceiveNotificationContent} from '@/lib/notification-access';
@@ -22,7 +23,8 @@ export async function scopeNotificationContent<T extends NotificationContent>(
     items=items.filter(item=>item.type!=='plan.reminder'||!!item.id&&confirmed.has(item.id));
   }
   actor = await resolveVisibilityActor(db, actor);
-  if (hasFullProjectVisibility(actor)) return items;
+  const fullProjectAccess = hasFullProjectVisibility(actor);
+  if (fullProjectAccess && canViewProductDrafts(actor.roles)) return items;
   const checked = new Map<string, Promise<boolean>>();
   const canReadLink = (link: string | null): Promise<boolean> => {
     if (!link) return Promise.resolve(false);
@@ -49,6 +51,7 @@ export async function scopeNotificationContent<T extends NotificationContent>(
   };
   return Promise.all(items.map(async (item) => {
     if(item.type==="plan.reminder")return item;
+    if (fullProjectAccess && !/^\/(products|tasks)\//.test(item.link ?? "")) return item;
     if(FINANCIAL_ORG_NOTIFICATION_TYPES.includes(item.type))return{...item,link:await canReadLink(item.link)?item.link:'/finance'};
     if (item.type.startsWith("payroll.") || item.type === "user.accountChanged" || await canReadLink(item.link)) return item;
     return { ...item, title: "Список доступных задач обновлён", body: null, link: "/my" };

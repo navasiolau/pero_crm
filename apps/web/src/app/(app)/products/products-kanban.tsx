@@ -26,6 +26,7 @@ import { ProductKanbanCard } from "@/components/product-kanban-card";
 import { Badge } from "@/components/ui/badge";
 import {
   PRODUCT_STATUSES,
+  visibleProductStatuses,
   productStatusLabels,
   productStatusStyles,
 } from "@/lib/product-statuses";
@@ -140,12 +141,14 @@ export function ProductsKanban({
 }) {
   const router = useRouter();
   const { query } = useListParams();
-  const [products, setProducts] = useState(initialProducts);
+  const visibleStatuses = visibleProductStatuses(actorRoles);
+  const visibleRows = initialProducts.filter(product => visibleStatuses.some(status => status.id === product.status));
+  const [products, setProducts] = useState(visibleRows);
   const [activeId, setActiveId] = useState<string | null>(null);
 
   useEffect(() => {
-    setProducts(initialProducts);
-  }, [initialProducts]);
+    setProducts(initialProducts.filter(product => visibleProductStatuses(actorRoles).some(status => status.id === product.status)));
+  }, [initialProducts, actorRoles]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -222,7 +225,7 @@ export function ProductsKanban({
           cardId: products.find(item => item.number === searchText.trim())?.id ?? null,
           ready: searchReady && products === initialProducts && !activeId,
         }}>
-        {PRODUCT_STATUSES.map((status) => (
+        {visibleStatuses.map((status) => (
           <StatusColumn
             key={status.id}
             status={status}

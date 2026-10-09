@@ -1,5 +1,5 @@
 "use server";
-import {liveChildWhere} from "@/server/access/live-entities";
+import { workVisibilityWhere } from "@/server/access/visibility";
 
 import { revalidatePath } from "next/cache";
 import {addWorkCore,type AddWorkInput} from "./core";
@@ -27,7 +27,7 @@ export async function removeWork(
   if (!hasAnyRole(session.user.roles, MANAGER_ROLES)) throw new Error("Недостаточно прав");
 
   const mutation = await withTaskTransaction(async (tx) => {
-  const work = await tx.work.findUnique({ where: {...liveChildWhere, id: workId } });
+  const work = await tx.work.findUnique({ where: { id: workId, AND: [workVisibilityWhere(session.user)] } });
   if (!work) return { ok: false as const, error: "Работа не найдена" };
   if (work.paymentKind === "ENGINEERING") return { ok: false as const, error: "Работа включена в инженерный фонд — используйте настройку его распределения" };
   if (work.paymentKind === "INSTALLATION") return { ok: false as const, error: "Работа отмечена как монтажная; её история сохраняется вместе с настройкой процента изделия" };

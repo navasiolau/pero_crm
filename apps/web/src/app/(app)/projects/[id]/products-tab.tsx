@@ -40,6 +40,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import {
   PRODUCT_STATUSES,
+  visibleProductStatuses,
   productStatusLabels,
   productStatusStyles,
 } from "@/lib/product-statuses";
@@ -176,13 +177,15 @@ export function ProductsTab({
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const [products, setProducts] = useState(initialProducts);
+  const visibleStatuses = visibleProductStatuses(actorRoles);
+  const visibleRows = initialProducts.filter(product => visibleStatuses.some(status => status.id === product.status));
+  const [products, setProducts] = useState(visibleRows);
 
   // Синхронизация с сервером после router.refresh() (создание изделия
   // и revalidatePath из server actions) — иначе канбан не видит новые данные.
   useEffect(() => {
-    setProducts(initialProducts);
-  }, [initialProducts]);
+    setProducts(initialProducts.filter(product => visibleProductStatuses(actorRoles).some(status => status.id === product.status)));
+  }, [initialProducts, actorRoles]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [title, setTitle] = useState("");
@@ -282,7 +285,7 @@ export function ProductsTab({
         onDragCancel={() => setActiveId(null)}
       >
         <KanbanScrollArea label="Изделия проекта">
-          {PRODUCT_STATUSES.map((status) => (
+          {visibleStatuses.map((status) => (
             <StatusColumn
               key={status.id}
               status={status}

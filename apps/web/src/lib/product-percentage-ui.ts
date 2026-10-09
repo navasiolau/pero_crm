@@ -1,4 +1,4 @@
-import { PRODUCT_STATUSES } from "./product-statuses";
+import { visibleProductStatuses } from "./product-statuses";
 import type { ProductStatus, ProjectStage, Role } from "@prisma/client";
 import { isProductDraftLocked } from "./product-drafts";
 import type { ProductPercentageKind } from "./product-percentage-pay";
@@ -44,10 +44,10 @@ export function productStatusTargets(roles: readonly Role[], context: {
   hasB3d: boolean;
   noModel: boolean;
 }): ProductStatus[] {
-  if (isProductDraftLocked(context.from, context.projectStage)) return [];
+  if (!visibleProductStatuses(roles).some(status => status.id === context.from) || isProductDraftLocked(context.from, context.projectStage)) return [];
   if (MANAGER_ROLES.some((role) => roles.includes(role)))
-    return PRODUCT_STATUSES.map((status) => status.id);
-  return PRODUCT_STATUSES.map((status) => status.id).filter((to) =>
+    return visibleProductStatuses(roles).map((status) => status.id);
+  return visibleProductStatuses(roles).map((status) => status.id).filter((to) =>
     to !== context.from && decideProductPercentageStatus([...roles], { ...context, to }).allowed,
   );
 }

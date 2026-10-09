@@ -1,5 +1,7 @@
 import {maskProductionRead,maskProductionWorkRead,maskTaskPaymentRead} from "@/server/access/production-read-projection";
 import {activePaymentWhere} from '@/server/payments/active-records';
+import { canViewProductDrafts } from "@/lib/product-drafts";
+import { liveProductWhere } from "@/server/access/live-entities";
 import {canViewProductMoney} from "@/lib/product-financial-access";
 import { projectTotal as calculateProjectTotal } from "@/lib/product-quantity";
 import type { Prisma, ProjectStage, Role } from "@prisma/client";
@@ -181,7 +183,7 @@ export async function listProjects(
   const orderBy = projectOrderBy(filters.sort, filters.dir ?? "desc");
   // Prisma's relation-count ordering cannot filter the count. Sort the visible
   // counts before pagination so hidden siblings cannot affect ordering.
-  if (filters.sort === "products" && !hasFullProjectVisibility(actor)) {
+  if (filters.sort === "products" && !canViewProductDrafts(actor.roles)) {
     const rows = await fetchProjectRows(where, PROJECT_SORT_MAP.number("desc"), undefined, undefined, actor);
     rows.sort((a, b) => (a._count.products - b._count.products) * (filters.dir === "asc" ? 1 : -1));
     return { rows: paging ? rows.slice((paging.page - 1) * paging.pageSize, paging.page * paging.pageSize) : rows, total: rows.length };
@@ -228,6 +230,19 @@ async function fetchProjectRows(
     skip,
     take,
   });
+  // Денежная область менеджмента сохраняется: скрытие черновых карточек
+  // не меняет стоимость заказа. В DTO отправляется только итог, не скрытые строки.
+  const financialProducts = hasFullProjectVisibility(actor) && canViewProductMoney(actor.roles) && !canViewProductDrafts(actor.roles)
+    ? await prisma.product.findMany({
+      where: { ...liveProductWhere, projectId: { in: projects.map(project => project.id) } },
+      select: { projectId: true, expectedPrice: true, quantity: true },
+    }) : [];
+  const amountsByProject = new Map<string, typeof financialProducts>();
+  for (const product of financialProducts) {
+    const rows = amountsByProject.get(product.projectId) ?? [];
+    rows.push(product);
+    amountsByProject.set(product.projectId, rows);
+  }
   // Бейдж «Нехватка материалов» на канбане/в таблице (§12) — агрегат
   // по изделиям проекта, один запрос на весь список
   const shortages = await listProjectShortages(projects.map((project) => project.id), actor);
@@ -236,7 +251,7 @@ async function fetchProjectRows(
     ...scopedProjectAmounts(project, actor),
     products:canViewProductMoney(actor.roles)?project.products:project.products.map(product=>({...product,expectedPrice:null})),
     totalPrice:
-      canViewProductMoney(actor.roles)?calculateProjectTotal(project.products, project):null,
+      canViewProductMoney(actor.roles)?calculateProjectTotal(amountsByProject.get(project.id) ?? project.products, project):null,
     hasMaterialShortage: shortages.has(project.id),
   }));
 }

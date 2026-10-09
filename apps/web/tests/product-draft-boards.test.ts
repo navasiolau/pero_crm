@@ -30,14 +30,29 @@ function check(html: string, canDrag: boolean) {
 test("project and global boards place early drafts first and disable their management drag", () => {
   check(renderToStaticMarkup(React.createElement(ProductsTab, {
     projectId: "project", projectStage: "ESTIMATE", currency: "BYN", initialProducts: [product],
-    canManage: true, actorRoles: ["MANAGER"], actorUserId: "manager", showAmount: true, engineerOptions: [],
+    canManage: true, actorRoles: ["ADMIN"], actorUserId: "manager", showAmount: true, engineerOptions: [],
   })), false);
   check(renderToStaticMarkup(React.createElement(ProductsKanban, {
-    initialProducts: [product], canManage: true, actorRoles: ["MANAGER"], showAmount: true,
+    initialProducts: [product], canManage: true, actorRoles: ["ADMIN"], showAmount: true,
   })), false);
 });
 test("active project retains normal management drag for an explicitly restored draft", () => {
   check(renderToStaticMarkup(React.createElement(ProductsKanban, {
-    initialProducts: [{ ...product, projectStage: "CONTRACT" }], canManage: true, actorRoles: ["MANAGER"], showAmount: true,
+    initialProducts: [{ ...product, projectStage: "CONTRACT" }], canManage: true, actorRoles: ["ADMIN"], showAmount: true,
   })), true);
+});
+test("all non-admin/director roles render both boards from preparation and cannot expose stale drafts", () => {
+  const prepared = { ...product, id: "prep", number: "111.2", title: "Подтверждённый шкаф", status: "PREPARATION" as const };
+  for (const actorRoles of [["MANAGER"], ["MANAGER", "ENGINEER"], ["ENGINEER"], ["WORKER"], ["MOUNTER"], ["PROCUREMENT"], ["ACCOUNTANT"]] as import("@prisma/client").Role[][]) {
+    for (const component of [ProductsTab, ProductsKanban]) {
+      const html = renderToStaticMarkup(React.createElement(component as React.ComponentType<Record<string, unknown>>, {
+        projectId: "project", projectStage: "ESTIMATE", currency: "BYN", initialProducts: [product, prepared],
+        canManage: actorRoles.includes("MANAGER"), actorRoles, actorUserId: "manager", showAmount: true, engineerOptions: [],
+      }));
+      assert.equal(html.includes(">Черновики<"), false, actorRoles.join("+"));
+      assert.equal(html.includes("Черновой шкаф"), false, actorRoles.join("+"));
+      assert.ok(html.includes(">Подготовка<") && html.includes("Подтверждённый шкаф"));
+      if (component === ProductsTab) assert.ok(html.includes("1 позиция"), "stale hidden draft cannot change the visible count");
+    }
+  }
 });

@@ -5,7 +5,7 @@ import type { ProductStatus } from "@prisma/client";
 import { auth } from "@/auth";
 import {prisma} from '@/lib/prisma';
 import {MANAGER_ROLES,hasAnyRole} from '@/lib/roles';
-import {liveProductWhere} from '../access/live-entities';
+import { productVisibilityWhere } from "../access/visibility";
 import {productDeleteSchema,type ProductDeleteInput,type ProductDeleteResult,type ProductDeleteBaseline} from './delete-contract';
 import { productStatusLabels } from "@/lib/product-statuses";
 import { dispatchEvent } from "@/server/plugins/events";
@@ -60,7 +60,7 @@ export async function patchProduct(input:ProductPatch):Promise<ProductPatchResul
 }
 export async function readProductDeleteBaseline(productId:string):Promise<{ok:true;baseline:ProductDeleteBaseline}|{ok:false;error:string}>{
   const session=await auth();if(!session?.user||!hasAnyRole(session.user.roles,MANAGER_ROLES))return{ok:false,error:'Недостаточно прав'};
-  const product=await prisma.product.findFirst({where:{...liveProductWhere,id:productId},select:{id:true,number:true,title:true,updatedAt:true}});
+  const product=await prisma.product.findFirst({where:{id:productId,AND:[productVisibilityWhere(session.user)]},select:{id:true,number:true,title:true,updatedAt:true}});
   if(!product)return{ok:false,error:'Изделие не найдено'};
   return{ok:true,baseline:{productId:product.id,number:product.number,title:product.title,expectedUpdatedAt:product.updatedAt.toISOString()}};
 }

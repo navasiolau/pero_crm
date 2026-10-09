@@ -102,7 +102,7 @@ test("accounting and field read grants do not widen engineering technical edits"
     assert.equal(canEditProductTechnicalBlock(actor, { engineerId: engineer.id, status: "PRODUCTION" }), false);
     assert.equal(canEditProductTechnicalBlock(actor, { engineerId: "other", status: "DESIGN" }), false);
   }
-  assert.deepEqual(productEditWhere({ id: engineer.id, roles: ["MANAGER", "ENGINEER"] }), {AND:[liveProductWhere,{}]});
+  assert.deepEqual(productEditWhere({ id: engineer.id, roles: ["MANAGER", "ENGINEER"] }), {AND:[liveProductWhere,{status:{not:"DRAFT"}},{}]});
   assert.equal(fixture.products.filter((p) => matches(p, productEditWhere({ id: engineer.id, roles: ["ACCOUNTANT"] }))).length, 0);
 });
 

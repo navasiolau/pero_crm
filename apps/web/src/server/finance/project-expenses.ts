@@ -1,3 +1,4 @@
+import { productDraftVisibilityWhere } from "@/server/access/visibility";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import {activeStockMovementWhere} from '@/server/warehouse/active-records';
 import { requireFinanceWorkspaceActor, type FinanceWorkspaceActor } from "./project-refs";
@@ -15,7 +16,7 @@ export type ProjectStockExpenseRecord = Prisma.StockMovementGetPayload<{ select:
 
 export async function loadProjectStockExpenses(actor: FinanceWorkspaceActor, projectId: string, db: Pick<PrismaClient, "stockMovement">) {
   requireFinanceWorkspaceActor(actor);
-  return db.stockMovement.findMany({ where: { ...activeStockMovementWhere, product: { projectId }, type: { in: ["EXPENSE", "RETURN"] } }, select: stockExpenseSelect, orderBy: [{ createdAt: "desc" }, { id: "desc" }] });
+  return db.stockMovement.findMany({ where: { ...activeStockMovementWhere, product: { projectId }, type: { in: ["EXPENSE", "RETURN"] } }, select: { ...stockExpenseSelect, product: { ...stockExpenseSelect.product, where: productDraftVisibilityWhere(actor) } }, orderBy: [{ createdAt: "desc" }, { id: "desc" }] });
 }
 export function projectExpenseRows(payments: readonly PaymentRecord[], movements: readonly ProjectStockExpenseRecord[], people: ReadonlyMap<string, string>): ProjectExpenseRow[] {
   const rows: ProjectExpenseRow[] = payments.filter(row => row.direction === "EXPENSE").map(row => {

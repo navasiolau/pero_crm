@@ -1,28 +1,30 @@
-import {liveProductWhere} from "@/server/access/live-entities";
+import { productVisibilityWhere, type VisibilityActor } from "@/server/access/visibility";
 import type { Prisma } from "@prisma/client";
 import { decimalAtoms, decimalText, existingNorm, inputNorm, scaleNorm, materialPlanFloor } from "@/lib/product-quantity";
 import { lockProductRow } from "@/server/products/quantity-core";
 import {warehouseMetadataGate} from './gate';
 import { readIssuedQuantity } from "./issued-quantity";
 
-export async function lockMaterialProduct(tx: Prisma.TransactionClient, id: string) {
+export async function lockMaterialProduct(tx: Prisma.TransactionClient, id: string, actor: VisibilityActor) {
   await warehouseMetadataGate(tx);
-  const line = await tx.projectMaterial.findUnique({ where: {product:liveProductWhere, id }, select: { productId: true } });
+  const line = await tx.projectMaterial.findUnique({ where: {product:productVisibilityWhere(actor), id }, select: { productId: true } });
   if (!line) throw new Error("Строка потребности не найдена");
   await lockProductRow(tx, line.productId);
+  if (!await tx.projectMaterial.findUnique({ where: { id, product: productVisibilityWhere(actor) }, select: { id: true } }))
+    throw new Error("Строка потребности не найдена");
 }
 
 export async function addMaterialNorm(tx: Prisma.TransactionClient,
-  data: { productId: string; materialId: string; quantity?: number; quantityPerUnit?: number; comment?: string }, userId: string) {
+  data: { productId: string; materialId: string; quantity?: number; quantityPerUnit?: number; comment?: string }, actor: VisibilityActor) {
   await warehouseMetadataGate(tx);
   await tx.$queryRaw`SELECT id FROM "Material" WHERE id=${data.materialId} FOR UPDATE`;
   await lockProductRow(tx, data.productId);
-  const product = await tx.product.findUnique({ where: {...liveProductWhere, id: data.productId }, select: { id: true, number: true, projectId: true, quantity: true } });
+  const product = await tx.product.findUnique({ where: { id: data.productId, AND: [productVisibilityWhere(actor)] }, select: { id: true, number: true, projectId: true, quantity: true } });
   if (!product) throw new Error("Изделие не найдено");
   const material = await tx.material.findUnique({ where: { id: data.materialId } });
   if (!material?.active) throw new Error("Материал не найден");
   const norm = inputNorm(data, product.quantity, 3, 12);
-  const previous = await tx.projectMaterial.findUnique({ where: {product:liveProductWhere, productId_materialId: { productId: product.id, materialId: material.id } } });
+  const previous = await tx.projectMaterial.findUnique({ where: {product:productVisibilityWhere(actor), productId_materialId: { productId: product.id, materialId: material.id } } });
   const atoms = decimalAtoms(norm, 3, 12) + (previous ? decimalAtoms(existingNorm(previous.quantityPerUnit, previous.quantity, product.quantity), 3, 12) : BigInt(0));
   const quantityPerUnit = decimalText(atoms, 3);
   const quantity = scaleNorm(quantityPerUnit, product.quantity, 3, 12);
@@ -30,16 +32,16 @@ export async function addMaterialNorm(tx: Prisma.TransactionClient,
   const line = await tx.projectMaterial.upsert({
     where: { productId_materialId: { productId: product.id, materialId: material.id } },
     create: { productId: product.id, materialId: material.id, quantity, quantityPerUnit, issuedQty,
-      comment: data.comment?.trim() || null, createdById: userId },
+      comment: data.comment?.trim() || null, createdById: actor.id },
     update: { quantity, quantityPerUnit },
   });
   return { line, product, material };
 }
 
 export async function updateMaterialNorm(tx: Prisma.TransactionClient,
-  data: { id: string; quantity?: number; quantityPerUnit?: number; comment?: string }) {
-  await lockMaterialProduct(tx, data.id);
-  const line = await tx.projectMaterial.findUnique({ where: {product:liveProductWhere, id: data.id }, include: { product: { select: { projectId: true, quantity: true } } } });
+  data: { id: string; quantity?: number; quantityPerUnit?: number; comment?: string }, actor: VisibilityActor) {
+  await lockMaterialProduct(tx, data.id, actor);
+  const line = await tx.projectMaterial.findUnique({ where: {product:productVisibilityWhere(actor), id: data.id }, include: { product: { select: { projectId: true, quantity: true } } } });
   if (!line) throw new Error("Строка не найдена");
   const quantityPerUnit = inputNorm(data, line.product.quantity, 3, 12);
   const quantity = scaleNorm(quantityPerUnit, line.product.quantity, 3, 12);

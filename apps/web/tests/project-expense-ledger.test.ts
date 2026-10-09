@@ -37,3 +37,22 @@ test("financial stock reader rejects manager before query and permits accountant
   assert.equal((await loadProjectStockExpenses({id:"u",roles:["MANAGER","ACCOUNTANT"]}, "j", db)).length,1);
   assert.equal(reads,1);
 });
+
+test("financial DRAFT product references are private while expense facts and amounts remain unchanged", async () => {
+  const { fixtureModel } = await import("./helpers/visibility-fixture");
+  const row = { ...issue, deletionId: null, product: { ...issue.product, projectId: "j", status: "DRAFT", deletedAt: null } };
+  const db = { stockMovement: fixtureModel([row]) } as unknown as Parameters<typeof loadProjectStockExpenses>[2];
+  for (const roles of [["ACCOUNTANT"], ["MANAGER", "ACCOUNTANT"], ["ADMIN"], ["DIRECTOR"]] as import("@prisma/client").Role[][]) {
+    const movements = await loadProjectStockExpenses({ id: "u", roles }, "j", db);
+    assert.equal(movements.length, 1);
+    const allowed = roles.includes("ADMIN") || roles.includes("DIRECTOR");
+    assert.equal(movements[0].product !== null, allowed);
+    const view = projectExpenseRows([], movements, new Map());
+    assert.equal(view[0].stock?.product !== null, allowed);
+    assert.equal(view[0].bynAmount, 60);
+    assert.equal(view[0].stock?.quantity, "3");
+    assert.equal(summarizeProjectExpenses({ payments: [], stockMovements: movements }).expensesTotal, 60);
+  }
+  assert.equal(row.product.id, "p");
+  assert.equal(row.totalByn.toString(), "60");
+});

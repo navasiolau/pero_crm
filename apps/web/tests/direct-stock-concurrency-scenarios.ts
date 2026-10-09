@@ -35,7 +35,7 @@ export async function runDirectStockConcurrent(db:PrismaClient,allowMissingLocal
   const second=competing.find(row=>row.status==="fulfilled");assert.ok(second&&second.status==="fulfilled");
   const rejected=competing.find(row=>row.status==="rejected");assert.ok(rejected&&rejected.status==="rejected");assert.match(String(rejected.reason),/Недостаточно материала/);
   const [extra,norm]=await Promise.all([execute({...input,quantity:"1",clientMutationId:randomUUID()}),
-   setup(tx=>addMaterialNorm(tx,{productId,materialId,quantityPerUnit:2},actor.id))]);
+   setup(tx=>addMaterialNorm(tx,{productId,materialId,quantityPerUnit:2},actor))]);
   const line=await db.projectMaterial.findUniqueOrThrow({where:{id:norm.line.id}});
   assert.equal(line.quantity.toString(),"2");assert.equal(line.issuedQty.toString(),"7");
   assert.equal((await getProjectEconomics(projectId,db))?.expensesTotal,140);

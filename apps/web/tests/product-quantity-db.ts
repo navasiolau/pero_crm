@@ -22,6 +22,7 @@ try {
   }
   const [negative] = await db.$queryRaw<{ stock: string }[]>`SELECT count(*)::text AS stock FROM "StockMovement" WHERE quantity < 0`;
   assert.equal(negative.stock, "0", "UNSUPPORTED_NEGATIVE_MOVEMENT");
+  const qaActor = await db.user.findFirstOrThrow({ where: { active: true, roles: { hasSome: ["ADMIN", "DIRECTOR"] } }, select: { id: true, roles: true } });
   const batch = await db.product.findFirstOrThrow({ where: { projectId: state.ids.project, id: { not: state.ids.control } } });
   const line = await db.projectMaterial.findFirstOrThrow({ where: { productId: batch.id } });
   const baseline = JSON.stringify(await db.product.findUnique({ where: { id: batch.id },
@@ -30,7 +31,7 @@ try {
   let release!: () => void; const releaseHolder = new Promise<void>((done) => { release = done; });
   let competitorFinished = false;
   const holder = db.$transaction(async (tx) => {
-    await lockMaterialProduct(tx, line.id);
+    await lockMaterialProduct(tx, line.id, qaActor);
     await tx.projectMaterial.update({ where: { id: line.id }, data: { issuedQty: "18" } });
     const before = await tx.work.findMany({ where: { productId: batch.id } });
     await assert.rejects(() => recalculateQuantity(tx, batch, 4), /Петли/);

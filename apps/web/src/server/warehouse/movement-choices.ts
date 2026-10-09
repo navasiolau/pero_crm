@@ -1,7 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { hasAnyRole, WAREHOUSE_MANAGE_ROLES } from "@/lib/roles";
-import { liveProductWhere } from "@/server/access/live-entities";
-import type { VisibilityActor } from "@/server/access/visibility";
+import { productVisibilityWhere, type VisibilityActor } from "@/server/access/visibility";
 import { getProjectMaterials } from "./queries";
 import { warehouseReadPositions } from "./accounting";
 
@@ -9,13 +8,13 @@ export async function loadWarehouseChoices(actor:VisibilityActor, db:Prisma.Tran
  if(!hasAnyRole(actor.roles,WAREHOUSE_MANAGE_ROLES))throw Error("Недостаточно прав");
  const q=input.query?.trim().slice(0,100)??"";
  if(input.kind==="products"){
-  const products=await db.product.findMany({where:{...liveProductWhere,...(q?{OR:[{number:{contains:q}},{title:{contains:q,mode:"insensitive"}}]}:{})},
+  const products=await db.product.findMany({where:{AND:[productVisibilityWhere(actor)],...(q?{OR:[{number:{contains:q}},{title:{contains:q,mode:"insensitive"}}]}:{})},
    select:{id:true,number:true,title:true},orderBy:{createdAt:"desc"},take:8});
   return products.map(row=>({id:row.id,label:`${row.number} · ${row.title}`}));
  }
  if(input.kind==="sources"){
   if(!input.productId)throw Error("Выберите изделие");
-  const product=await db.product.findUnique({where:{...liveProductWhere,id:input.productId},select:{id:true}});
+  const product=await db.product.findUnique({where:{id:input.productId,AND:[productVisibilityWhere(actor)]},select:{id:true}});
   if(!product)throw Error("Изделие не найдено");
   const data=await getProjectMaterials(product.id,actor,db);
   const choices=[...data.returnSources.map(row=>({id:row.id,label:`${row.materialName} · ${row.createdAt.slice(0,10)}`,unit:row.unit,available:row.quantity,unitPrice:row.unitPrice,legacyLineId:undefined as string|undefined})),

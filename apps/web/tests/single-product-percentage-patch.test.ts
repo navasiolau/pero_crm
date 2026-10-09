@@ -33,3 +33,11 @@ test('retired workReview rejects without any writes and ordinary same value rema
 test('all three kinds refuse a forged rate above15 before config or audit writes',async()=>{
  for(const kind of ['ENGINEERING','ASSEMBLY','INSTALLATION'] as const){const f=fixture();const result=await patchProductPercentageCore(manager,input({kind,value:'15.01'}),f.tx);assert.equal(result.kind,'validation');if(!result.ok)assert.match(result.error,/15/);assert.deepEqual(f.writes,[]);}
 });
+
+test('DRAFT guard rejects current percentage field previews before conflict/replay and preserves all values',async()=>{
+ const f=fixture();Object.assign(f.product,{status:'DRAFT'});
+ const before=structuredClone({product:f.product,writes:f.writes,logs:f.logs});
+ const result=await patchProductPercentageCore(manager,input({expectedRevision:1}),f.tx);
+ assert.equal(result.kind,'not-found');assert.deepEqual({product:f.product,writes:f.writes,logs:f.logs},before);
+ assert.equal('currentValue' in result,false);assert.equal('currentRevision' in result,false);
+});

@@ -1,4 +1,5 @@
 "use server";
+import { productVisibilityWhere, taskVisibilityWhere } from "@/server/access/visibility";
 import {liveChildWhere} from "@/server/access/live-entities";
 import {liveProductWhere,liveProjectWhere} from "@/server/access/live-entities";
 
@@ -114,7 +115,7 @@ export async function createTask(
 
   // Изделие должно принадлежать проекту задачи
   const product = data.productId ? await tx.product.findFirst({
-      where: {...liveProductWhere, id: data.productId, projectId: data.projectId },
+      where: {...liveProductWhere, id: data.productId, projectId: data.projectId, AND: [productVisibilityWhere(session.user)] },
       select: { id: true, engineerId: true, status: true },
     }) : null;
   if (data.productId && !product) return { ok: false as const, error: "Изделие не найдено в этом проекте" };
@@ -235,7 +236,7 @@ export async function updateTask(
 
   const mutation = await withTaskTransaction(async (tx) => {
   const task = await tx.task.findUnique({
-    where: {...liveChildWhere, id: taskId },
+    where: {...liveChildWhere, id: taskId, AND: [taskVisibilityWhere(session.user)] },
     include: { project: { select: { id: true, number: true, currency: true } }, product: { select: { engineerId: true, status: true, projectId: true } },
       work: { select: { paymentKind: true, projectId: true, productId: true, stagePayPoolId: true, stagePayPool: { select: { id: true, kind: true, state: true, productId: true } } } },
       _count: { select: { payrollEntries: true } } },
@@ -279,7 +280,7 @@ export async function updateTask(
   let product = data.productId === null ? null : task.product;
   if (data.productId) {
     product = await tx.product.findFirst({
-      where: {...liveProductWhere, id: data.productId, projectId: task.project.id },
+      where: {...liveProductWhere, id: data.productId, projectId: task.project.id, AND: [productVisibilityWhere(session.user)] },
       select: { engineerId: true, status: true, projectId: true },
     });
     if (!product) return { ok: false as const, error: "Изделие не найдено в этом проекте" };
@@ -295,7 +296,7 @@ export async function updateTask(
   const effectiveWorkId=data.workId===undefined?task.workId:data.workId;
   if(!nextProductId||!effectiveWorkId||!nextAssigneeId)return {ok:false as const,error:'Выберите изделие, работу и одного исполнителя'};
   if(!engineering){
-    const currentProduct=await tx.product.findFirst({where:{...liveProductWhere,id:nextProductId,projectId:task.projectId},select:{id:true}});
+    const currentProduct=await tx.product.findFirst({where:{...liveProductWhere,id:nextProductId,projectId:task.projectId,AND:[productVisibilityWhere(session.user)]},select:{id:true}});
     const currentWork=await tx.work.findUnique({where:{...liveChildWhere,id:effectiveWorkId},select:{projectId:true,productId:true,priceSnapshot:true,paymentKind:true}});
     if(!currentProduct||!currentWork||currentWork.projectId!==task.projectId||currentWork.productId!==nextProductId)return {ok:false as const,error:'Выберите работу этого живого изделия'};
     const frozenSnapshot=task.allocationGroupId&&effectiveWorkId===task.workId&&nextProductId===task.productId&&nextAssigneeId===task.assigneeId;
@@ -486,7 +487,7 @@ export async function deleteTask(
   }
   const mutation = await withTaskTransaction(async (tx) => {
   const task = await tx.task.findUnique({
-    where: {...liveChildWhere, id: taskId },
+    where: {...liveChildWhere, id: taskId, AND: [taskVisibilityWhere(session.user)] },
     include: { project: { select: { id: true, number: true, currency: true } }, work: { select: { paymentKind: true } }, _count: { select: { payrollEntries: true } } },
   });
   if (!task) return { ok: false as const, error: "Задача не найдена" };

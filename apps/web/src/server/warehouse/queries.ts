@@ -8,6 +8,7 @@ import { prisma } from "@/lib/prisma";
 import { warehouseReadPositions, averagePrice } from './accounting';
 import {loadMovementReportDocuments} from './report-documents';
 import { materialDebt,decimalAtoms,decimalText } from "@/lib/product-quantity";
+import { canViewProductDrafts } from "@/lib/product-drafts";
 import { hasFullProjectVisibility, productVisibilityWhere, resolveVisibilityActor, type VisibilityActor } from "@/server/access/visibility";
 
 // ─── Склад: текущий баланс, неизменённая история и потребность ──
@@ -127,7 +128,7 @@ async function loadMovements(actor: VisibilityActor, filter: {materialId?:string
   const movements = await database.stockMovement.findMany({
     where: {
       ...activeStockMovementWhere,
-      ...(hasFullProjectVisibility(actor) ? {} : { OR: [{ productId: null }, { product: productVisibilityWhere(actor) }] }),
+      ...(hasFullProjectVisibility(actor) && canViewProductDrafts(actor.roles) ? {} : { OR: [{ productId: null }, { product: productVisibilityWhere(actor) }] }),
       materialId: filter?.materialId || undefined,
       productId: filter?.productId || undefined,
       type: filter?.type || undefined,

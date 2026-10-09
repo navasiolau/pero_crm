@@ -2,7 +2,8 @@ import type { Prisma, PrismaClient, Role } from '@prisma/client';
 import { randomUUID, createHash } from 'node:crypto';
 import { prisma } from '@/lib/prisma';
 import { WAREHOUSE_MANAGE_ROLES, FINANCE_ROLES, hasAnyRole } from '@/lib/roles';
-import { liveProductWhere } from '@/server/access/live-entities';
+import { productVisibilityWhere } from "@/server/access/visibility";
+import { canViewProductDrafts } from "@/lib/product-drafts";
 import { lockProductRow } from '@/server/products/quantity-core';
 import { decimalAtoms, decimalText } from '@/lib/product-quantity';
 import { addPosition, addPaidPosition, addValue, issuePosition, returnShare, averagePrice, unitCost, quantityInput, priceInput } from '@/lib/warehouse-cost';
@@ -54,10 +55,12 @@ export async function warehouseMove(tx:Tx,actor:WarehouseActor,input:WarehouseMo
  if(previous){
   if(previous.actorId!==actor.id||previous.requestFingerprint!==fingerprint)throw Error('Идентификатор запроса уже использован с другими данными');
   if(previous.movement.deletionId)throw Error('Движение удалено — повторное проведение запрещено');
-  const product=previous.movement.productId?await tx.product.findUnique({where:{id:previous.movement.productId},select:{id:true,number:true,projectId:true}}):null;
+  const historicalProduct=previous.movement.productId?await tx.product.findUnique({where:{id:previous.movement.productId},select:{id:true,number:true,projectId:true,status:true}}):null;
+  if(historicalProduct?.status==='DRAFT'&&!canViewProductDrafts(actor.roles))throw Error('Изделие не найдено');
+  const product=historicalProduct?{id:historicalProduct.id,number:historicalProduct.number,projectId:historicalProduct.projectId}:null;
   return {movement:previous.movement,repeated:true,line:null,material:null,product};
  }
- const initial=input.projectMaterialId?await tx.projectMaterial.findFirst({where:{id:input.projectMaterialId,product:liveProductWhere},select:{materialId:true,productId:true}}):null;
+ const initial=input.projectMaterialId?await tx.projectMaterial.findFirst({where:{id:input.projectMaterialId,product:productVisibilityWhere(actor)},select:{materialId:true,productId:true}}):null;
  if(input.projectMaterialId&&!initial)throw Error('Строка потребности не найдена');
  const initialSource=input.kind==='RETURN'&&input.sourceMovementId?await tx.warehouseMovementValuation.findUnique({where:{movementId:input.sourceMovementId},include:{movement:true}}):null;
  const materialId=input.kind==='INCOME'?input.materialId:initial?.materialId??(input.kind==='RETURN'?initialSource?.movement.materialId:input.materialId);
@@ -66,7 +69,7 @@ export async function warehouseMove(tx:Tx,actor:WarehouseActor,input:WarehouseMo
  if(input.kind!=='INCOME'&&!productId)throw Error('Выберите изделие');
  await tx.$queryRaw`SELECT id FROM "Material" WHERE id=${materialId} FOR UPDATE`;
  if(productId)await lockProductRow(tx,productId);
- const product=productId?await tx.product.findUnique({where:{...liveProductWhere,id:productId},select:{id:true,number:true,projectId:true}}):null;
+ const product=productId?await tx.product.findUnique({where:{id:productId,AND:[productVisibilityWhere(actor)]},select:{id:true,number:true,projectId:true}}):null;
  if(productId&&!product)throw Error('Изделие не найдено');
  const material=await tx.material.findUnique({where:{id:materialId}});
  if(!material||(input.kind==='INCOME'&&!material.active))throw Error('Материал не найден');
