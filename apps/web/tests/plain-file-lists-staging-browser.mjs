@@ -55,6 +55,12 @@ export function fileListsDesktopPrefixAccepted(prefix, binding) {
  return true;
 }
 
+/** A confirmed invalid owned Task is omitted only from a wholly read-only partial run. */
+export function fileListsUnlinkedTaskOmitted(task, binding, deletePlan) {
+ if (task === undefined) return false;
+ check(task?.kind === 'root-confirmed-unlinked-owned-task' && task.runId === binding.runId && task.revision === binding.expectedRevision && task.taskId === binding.ids.task && task.workId === null && task.currentOwnedStateHash === binding.currentOwnedStateHash && /^[a-f0-9]{64}$/.test(task.signedObservationSha256 ?? '') && deletePlan.length === 0, 'CURRENT_UNLINKED_TASK_READONLY_REQUIRED');return true;
+}
+
 /** Read scenarios complete before explicitly planned confirmed deletions. No upload, financial mutation,
  * preference save, PDF/video viewer, trace/HAR/storageState, session file or existing-client screenshot. */
 export async function runPlainFileListsStagingBrowser(input = {}) {
@@ -62,13 +68,13 @@ export async function runPlainFileListsStagingBrowser(input = {}) {
  check(binding.finance && binding.financeDocs.some(file => file.paymentId === binding.finance.incomeId) && binding.financeDocs.some(file => file.paymentId === binding.finance.expenseId), 'ACTUAL_FINANCE_FIXTURE_REQUIRED');
  const deletePlan = input.deletePlan ?? [];
  check(Array.isArray(deletePlan) && deletePlan.length <= 4 && new Set(deletePlan.map(row => row.fileId)).size === deletePlan.length && deletePlan.every(row => binding.files.some(file => file.id === row.fileId) && ['project', 'product', 'task'].includes(row.surface) && ['manager', 'engineer'].includes(row.actor) && ['real', 'client-error'].includes(row.mode)), 'OWN_DELETE_PLAN_REQUIRED');
- const ownerLedger = createPlainFileListOwnerLedger(binding, input.ownerCoordinator);
+ const unlinkedTaskOmitted = fileListsUnlinkedTaskOmitted(input.unlinkedTask, binding, deletePlan);const ownerLedger = createPlainFileListOwnerLedger(binding, input.ownerCoordinator);
  const gate = createPlainFileListDeleteGate(binding, ownerLedger);
  const root = await realpath(ROOT), base = await realpath(path.join(ROOT, '.playwright-mcp', 'files115'));
  const within = (parent, child) => {const relative = path.relative(parent, child);return relative && !relative.startsWith('..') && !path.isAbsolute(relative);};
  check(within(root, base), 'EVIDENCE_BASE_MISMATCH');
  const outputDir = path.join(base, `staging-${binding.runId}-${Date.now()}`);await mkdir(outputDir, {recursive: false, mode: 0o700});check(within(base, await realpath(outputDir)), 'EVIDENCE_PATH_MISMATCH');
- const receipt = {status: 'STARTED', revision: binding.expectedRevision, runId: binding.runId, revisionProof: 'reviewed physical transport identity and owner113 current HMAC/PRE/DB/version certificate', origin: binding.origin, checks: [], screenshots: [], blockedWrites: 0, blockedPrefetches: 0, deniedReads: 0, pageErrorCount: 0, firstPageError: null, upstreamDeleteRequests: 0, upstreamOtherNonReadResponses: 0, acknowledgedDeletes: 0, clientFailureChecks: 0, taskOpenClicks: 0, acceptedDesktopPrefixReceiptSha256: desktopPrefixAccepted ? input.completedDesktopPrefix.priorReceiptSha256 : null, pendingGates: [], outputDir};
+ const receipt = {status: 'STARTED', revision: binding.expectedRevision, runId: binding.runId, revisionProof: 'reviewed physical transport identity and owner113 current HMAC/PRE/DB/version certificate', origin: binding.origin, checks: [], screenshots: [], blockedWrites: 0, blockedPrefetches: 0, deniedReads: 0, pageErrorCount: 0, firstPageError: null, upstreamDeleteRequests: 0, upstreamOtherNonReadResponses: 0, acknowledgedDeletes: 0, clientFailureChecks: 0, taskOpenClicks: 0, acceptedDesktopPrefixReceiptSha256: desktopPrefixAccepted ? input.completedDesktopPrefix.priorReceiptSha256 : null, pendingGates: unlinkedTaskOmitted ? ['TASK_WORK_LINKAGE_REQUIRED'] : [], skippedTaskViewports: [], outputDir};
  let browser, context, phase = 'setup', fatal = null, pendingUi = null;
  const inFlightRoutes = new Set();
  const fail = error => {fatal ??= plainFileListSafeError(error);gate.stop();};
@@ -174,7 +180,9 @@ export async function runPlainFileListsStagingBrowser(input = {}) {
    phase = 'manager-owned-product-sections';await goto(page, binding.paths.product);
    for (const file of binding.files.filter(file => file.productId === binding.ids.product && !file.isCurrentSketch)) {const container = page.locator(file.section === 'MEASUREMENT' ? '[data-product-measurement]' : `[data-product-documents-column="${file.section === 'INSTALLATION' ? 'installation' : 'production'}"]`);const proof = await rowProof(page, container, file, true, 'product-section-file', viewport);await nameProof(page, proof.row, file, true);}
    }
+   if (unlinkedTaskOmitted) receipt.skippedTaskViewports.push(viewport.width);else {
    phase = 'manager-owned-task-files';const dialog = await taskDialog(page);for (const file of binding.files.filter(file => file.taskId === binding.ids.task)) {const proof = await rowProof(page, dialog, file, true, 'task-file', viewport);await nameProof(page, proof.row, file, true);}
+   }
    phase = 'engineer-per-file-permission';page = await start('engineer', viewport);await goto(page, binding.paths.product);
    for (const file of binding.files.filter(file => file.productId === binding.ids.product && !file.isCurrentSketch)) await rowProof(page, page, file, file.uploadedById === binding.profiles.engineer.id, 'engineer-own-or-foreign-file', viewport);
    phase = 'owned-financial-file-contexts';page = await start('admin', viewport);await financeProof(page, viewport);assertSafe();
@@ -200,7 +208,7 @@ export async function runPlainFileListsStagingBrowser(input = {}) {
   check(receipt.upstreamDeleteRequests === receipt.acknowledgedDeletes, 'DELETE_ACK_COUNT_MISMATCH');
   const final = await ownerLedger.verifyFinalState({runId: binding.runId, revision: binding.expectedRevision, preSha256: binding.preSha256, checkpointHash: binding.checkpointHash, expectedOwnedStateHash: gate.currentStateHash(), acknowledgedDeletes: receipt.acknowledgedDeletes});
   check(final?.kind === 'current-owned-final-verification' && final.runId === binding.runId && final.revision === binding.expectedRevision && final.preSha256 === binding.preSha256 && final.checkpointHash === binding.checkpointHash && final.currentOwnedStateHash === gate.currentStateHash() && final.financialStateHash === binding.financialStateHash && final.untouchedRelationsMatch === true && final.preferencesUntouched === true && final.storageVersionsAccounted === true && final.tokenClockValid === true, 'OWNER_FINAL_STATE_MISMATCH');
-  receipt.status = deletePlan.some(item => item.mode === 'real') ? 'PASS' : 'READ_ONLY_PASS';
+  receipt.status = unlinkedTaskOmitted ? 'READ_ONLY_PENDING_TASK' : deletePlan.some(item => item.mode === 'real') ? 'PASS' : 'READ_ONLY_PASS';
   receipt.pendingGates.push('warehouse-report-document uses the reviewed common adapter; creating a stock-linked payment is outside the owned two-payment fixture', 'selected-upload result uses local intercepted component proof; this run intentionally does not upload', 'unlinked CAD financial original may be natively read/downloaded by owner113; it has no independent catalogue UI');
  } catch (error) {receipt.status = 'STOP';receipt.phase = phase;receipt.code = fatal ?? plainFileListSafeError(error);gate.stop();}
  finally {pendingUi?.release.resolve(false);await close();if (browser) await browser.close();}

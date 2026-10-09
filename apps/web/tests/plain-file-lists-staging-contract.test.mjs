@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {openOwnedTaskFileDialog, plainFileListPageErrorDiagnostic, fileListsDesktopPrefixAccepted} from './plain-file-lists-staging-browser.mjs';
+import {openOwnedTaskFileDialog, plainFileListPageErrorDiagnostic, fileListsDesktopPrefixAccepted, fileListsUnlinkedTaskOmitted} from './plain-file-lists-staging-browser.mjs';
 import {createHash} from 'node:crypto';
 import {FILE_LIST_STAGING_ORIGIN as origin, FILE_LIST_FIXTURE_NAMESPACE as namespace, compiledDeleteFileActionId, verifyPlainFileListStagingBinding, plainFileListRequestDecision, plainFileDeleteFlightOutcome, createPlainFileListDeleteGate, createPlainFileListOwnerLedger, plainFileListSafeError} from './plain-file-lists-staging-contract.mjs';
 const runId = 'a1111111-1111-4111-8111-111111111111', revision = 'a'.repeat(40), actionId = 'b'.repeat(42);
@@ -297,4 +297,12 @@ test('omitting the proven desktop prefix requires the same current signed scope 
  const prefix = {kind: 'root-verified-desktop-file-prefix', runId: binding.runId, revision: binding.expectedRevision, preSha256: binding.preSha256, currentOwnedStateHash: binding.currentOwnedStateHash, storageManifestHash: binding.storageManifestHash, financialStateHash: binding.financialStateHash, priorReceiptSha256: 'a'.repeat(64), priorObservationSha256: 'b'.repeat(64), checkedDesktopRows: 12};
  assert.equal(fileListsDesktopPrefixAccepted(undefined, binding), false);assert.equal(fileListsDesktopPrefixAccepted(prefix, binding), true);
  for (const changed of [{runId: 'other'}, {revision: '0'.repeat(40)}, {currentOwnedStateHash: '0'.repeat(64)}, {financialStateHash: '0'.repeat(64)}, {storageManifestHash: '0'.repeat(64)}, {preSha256: '0'.repeat(64)}, {priorReceiptSha256: 'invalid'}, {checkedDesktopRows: 0}]) assert.throws(() => fileListsDesktopPrefixAccepted({...prefix, ...changed}, binding), /F115_CURRENT_VERIFIED_DESKTOP_PREFIX_REQUIRED/);
+});
+
+
+test('invalid owned Task can be truthfully deferred only in a wholly read-only unchanged current scope', async () => {
+ const binding = await verifyPlainFileListStagingBinding(fixture()), task = {kind:'root-confirmed-unlinked-owned-task',runId:binding.runId,revision:binding.expectedRevision,taskId:binding.ids.task,workId:null,currentOwnedStateHash:binding.currentOwnedStateHash,signedObservationSha256:'a'.repeat(64)};
+ assert.equal(fileListsUnlinkedTaskOmitted(undefined,binding,[]),false);assert.equal(fileListsUnlinkedTaskOmitted(task,binding,[]),true);
+ for(const change of [{taskId:'foreign'},{revision:'0'.repeat(40)},{workId:'existing'},{currentOwnedStateHash:'0'.repeat(64)},{signedObservationSha256:'bad'}])assert.throws(()=>fileListsUnlinkedTaskOmitted({...task,...change},binding,[]),/F115_CURRENT_UNLINKED_TASK_READONLY_REQUIRED/);
+ assert.throws(()=>fileListsUnlinkedTaskOmitted(task,binding,[{mode:'real'}]),/F115_CURRENT_UNLINKED_TASK_READONLY_REQUIRED/);
 });
