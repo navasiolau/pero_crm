@@ -34,18 +34,18 @@ test('arbitrary or malformed action payloads are never accepted',()=>{for(const 
 import {randomUUID} from 'node:crypto';
 import path from 'node:path';
 import {mkdirSync,readdirSync,unlinkSync,rmdirSync} from 'node:fs';
-import {runProductDraftStageBrowser,productDialogTechnicalState} from './product-draft-stage-browser.mjs';
+import {runProductDraftStageBrowser,productDialogTechnicalState,draftQaPageErrorMetadata} from './product-draft-stage-browser.mjs';
 import {makeTechnicalStore} from './product-draft-stage-runner.mjs';
 import {assertTechnicalPersistence} from './product-draft-stage-wire.mjs';
 import {acceptanceWeb} from './crm-acceptance-transport.mjs';
 const fixture={runId:'80502171-fcf9-4189-a3f8-c8a77e94efad',revision:'a'.repeat(40),signature:'b'.repeat(64),pre:{ids:{actor:'own-manager',client:'own-client',projectB:'own-paused'},tags:{actor:'QA111 manager run',client:'QA111 client run',projectA:'QA111 primary run',products:Array.from({length:10},(_,i)=>'QA111 product run '+(i+1))}}};
-function fakeBrowser({status=503,pageError,request,afterGotoRequest,throwOnClick,closeThrows=false,mainNodes=[{classes:['@container/main']}]}={}){
+function fakeBrowser({status=503,pageError,request,afterGotoRequest,reply,rscResponseBeforeError=false,throwOnClick,closeThrows=false,mainNodes=[{classes:['@container/main']}]}={}){
  const handlers=new Map(),state={launches:0,captures:0,fetches:0,aborts:0,contextClosed:false,browserClosed:false,mainWaits:[]},page={
   on:(event,fn)=>{handlers.set(event,fn);},
   locator:selector=>({waitFor:async()=>{const match=/^main(?:\[class~="([^"]+)"\])?$/.exec(selector);assert.ok(match,'MAIN_SELECTOR_SUPPORTED');const matchedCount=mainNodes.filter(node=>!match[1]||node.classes.includes(match[1])).length;state.mainWaits.push({selector,matchedCount});if(matchedCount!==1)throw Error('STRICT_MODE_MAIN_COUNT');}}),
-  getByRole:()=>({click:async()=>{if(afterGotoRequest){const request=afterGotoRequest;await state.route({request:()=>({url:()=>request.url,method:()=>request.method,headers:()=>request.headers,postData:()=>request.body}),abort:async()=>{state.aborts++;},fetch:async()=>{state.fetches++;throw Error('UNEXPECTED_LIVE_FETCH');}});}throw throwOnClick??Error('private-unexpected-selector-message');}}),
-  goto:async()=>{
-   if(pageError)handlers.get('pageerror')(pageError);
+  getByRole:()=>({click:async()=>{if(afterGotoRequest){const request=afterGotoRequest;await state.route({request:()=>({url:()=>request.url,method:()=>request.method,headers:()=>request.headers,postData:()=>request.body}),abort:async()=>{state.aborts++;},fetch:async()=>{state.fetches++;if(reply)return {status:()=>200,body:async()=>Buffer.from('1:'+JSON.stringify(reply)+'\n')};throw Error('UNEXPECTED_LIVE_FETCH');},fulfill:async()=>{state.fulfilled=true;}});}throw throwOnClick??Error('private-unexpected-selector-message');}}),
+  goto:async url=>{
+   if(rscResponseBeforeError)handlers.get('response')({url:()=>url,request:()=>({method:()=>'GET',headers:()=>({rsc:'1',authorization:'unit-private-never-persisted'})})});if(pageError)handlers.get('pageerror')(pageError);
    if(request){const route={request:()=>({url:()=>request.url,method:()=>request.method,headers:()=>request.headers,postData:()=>request.body}),abort:async()=>{state.aborts++;},fetch:async()=>{state.fetches++;throw Error('UNEXPECTED_LIVE_FETCH');},continue:async()=>{throw Error('UNEXPECTED_LIVE_CONTINUE');}};
     await state.route(route);
    }
@@ -54,12 +54,12 @@ function fakeBrowser({status=503,pageError,request,afterGotoRequest,throwOnClick
  },context={addInitScript:async()=>{},addCookies:async()=>{},newPage:async()=>page,route:async(_pattern,fn)=>{state.route=fn;},request:{get:async()=>({status:()=>200,json:async()=>({user:{id:fixture.pre.ids.actor}})})},close:async()=>{state.contextClosed=true;if(closeThrows)throw Error('private-close-error');}},browser={newContext:async()=>context,close:async()=>{state.browserClosed=true;}};
  return {state,launchBrowser:async()=>{state.launches++;return browser;}};
 }
-async function controlledEarlyStop(control,callbackFailure=false){
+async function controlledEarlyStop(control,callbackFailure=false,expectedWrites=0){
  const directory=path.join(acceptanceWeb,'test-results','draft111-early-stop-pure-'+randomUUID());mkdirSync(directory,{recursive:true});const store=makeTechnicalStore(directory);
  try{
   const result=await runProductDraftStageBrowser({authorized:true,origin:'https://staging-crm.peromebel.by',revision:fixture.revision,profile:{id:fixture.pre.ids.actor,roles:['MANAGER'],cookies:[{name:'authjs.session-token',value:'unit-private-never-persisted'}]},checkpoint:fixture,outputDir:directory,launchBrowser:control.launchBrowser,onJournal:async journal=>{if(callbackFailure)throw Error('PRIVATE_DURABLE_ERROR');store.put('journal',journal);},observe:async()=>{control.state.captures++;throw Error('UNEXPECTED_READONLY_OBSERVE');}});
   assertTechnicalPersistence(result);store.put('browser-result',result);const saved=store.get('browser-result');
-  assert.equal(control.state.launches,1);assert.equal(control.state.contextClosed,true);assert.equal(control.state.browserClosed,true);assert.equal(control.state.captures,0);assert.equal(control.state.fetches,0);assert.equal(saved.scopegraph,null);assert.deepEqual(saved.journal.actions,[]);
+  assert.equal(control.state.launches,1);assert.equal(control.state.contextClosed,true);assert.equal(control.state.browserClosed,true);assert.equal(control.state.captures,0);assert.equal(control.state.fetches,expectedWrites);assert.equal(saved.scopegraph,null);assert.equal(saved.journal.actions.length,expectedWrites);
   for(const secret of ['unit-private-never-persisted','private-pageerror-secret','private-selector-user-data','private-close-error','private-unexpected-selector-message'])assert.equal(JSON.stringify(saved).includes(secret),false);assert.equal(JSON.stringify(saved).includes('PRIVATE_DURABLE_ERROR'),false);return saved;
  }finally{for(const name of readdirSync(directory)){const file=path.join(directory,name);assert.equal(path.dirname(file),directory);unlinkSync(file);}rmdirSync(directory);}
 }
@@ -95,7 +95,7 @@ test('nested SidebarInset and AppShell mains select only the intended class-toke
 test('product dialog diagnostics expose only bounded state flags, even for failed or nonboolean getters',async()=>{
  const locator=(visible,enabled)=>({isVisible:async()=>{if(visible instanceof Error)throw visible;return visible;},isEnabled:async()=>{if(enabled instanceof Error)throw enabled;return enabled;}});
  const state=await productDialogTechnicalState({page:{url:()=> 'https://staging-crm.peromebel.by/projects/217?tab=products'},project:{path:'/projects/217'},trigger:locator(true,true),dialog:locator(true,true),title:locator(true,true),price:locator(true,true),submit:locator(true,false)});
- assert.deepEqual(state,{ownsPath:true,tabIsProducts:true,triggerVisible:true,triggerEnabled:true,dialogVisible:true,titleVisible:true,titleEnabled:true,priceVisible:true,priceEnabled:true,submitVisible:true,submitEnabled:false});assertTechnicalPersistence(state);
+ assert.deepEqual(state,{ownsPath:true,tabIsProducts:true,triggerVisible:true,triggerEnabled:true,dialogVisible:true,titleVisible:true,titleEnabled:true,priceVisible:true,priceEnabled:true,submitVisible:true,submitEnabled:false,busyVisible:null});assertTechnicalPersistence(state);
  const failed=await productDialogTechnicalState({page:{url:()=> 'https://staging-crm.peromebel.by/projects/217'},project:{path:'/projects/217'},trigger:locator(Error('private-data'),true),dialog:locator(false,false),title:locator('private-value',false),price:locator(true,Error('private-value')),submit:locator(true,{password:'private'})});
  assert.equal(failed.tabIsProducts,false);assert.equal(failed.triggerVisible,null);assert.equal(failed.titleVisible,null);assert.equal(failed.priceEnabled,null);assert.equal(failed.submitEnabled,null);assertTechnicalPersistence(failed);assert.equal(JSON.stringify(failed).includes('private'),false);
 });
@@ -123,4 +123,38 @@ test('local OPEN never retries a strict dialog ambiguity or a failed trigger cli
  const {openDraftQaProductDialog}=await import('./product-draft-stage-browser.mjs');let opens=0;
  await assert.rejects(()=>openDraftQaProductDialog({trigger:{click:async()=>{opens++;}},dialog:{waitFor:async()=>{throw Error('strict ambiguity');},isVisible:async()=>false},settled:async()=>{}}),/strict ambiguity/);assert.equal(opens,1);
  opens=0;await assert.rejects(()=>openDraftQaProductDialog({trigger:{click:async()=>{opens++;const error=Error('click failed');error.name='TimeoutError';throw error;}},dialog:{waitFor:async()=>{}},settled:async()=>{}}),/click failed/);assert.equal(opens,1);
+});
+
+test('pageerror metadata extracts bounded React code and hashes message without decoded args or URLs',()=>{
+ const raw='Minified React error #185; visit https://react.dev/errors/185?args[]=private-pageerror-secret',meta=draftQaPageErrorMetadata(Error(raw));
+ assert.equal(meta.family,'REACT_MINIFIED');assert.equal(meta.reactCode,185);assert.match(meta.messageSha256,/^[a-f0-9]{64}$/);assert.equal(JSON.stringify(meta).includes('private'),false);assert.equal(JSON.stringify(meta).includes('https'),false);assertTechnicalPersistence(meta);
+ for(const message of ['Minified React error #123456789; secret','Minified React error #000; secret','PREFIX Minified React error #185; secret'])assert.equal(draftQaPageErrorMetadata(Error(message)).reactCode,null);
+ assert.equal(draftQaPageErrorMetadata(Error('x'.repeat(65537))).messageSha256,null);
+});
+test('known pageerror families are diagnostic only and retain fatal pageerror gate with RSC provenance',async()=>{
+ for(const [raw,family] of [['Failed to fetch private-pageerror-secret','FETCH'],['serwist waiting private-pageerror-secret','SERWIST'],['Hydration failed private-pageerror-secret','HYDRATION'],['Loading chunk 12 failed','CHUNK_LOAD']]){const meta=draftQaPageErrorMetadata(Error(raw));assert.equal(meta.family,family);assert.equal(JSON.stringify(meta).includes('private'),false);}
+ const error=Error('request aborted private-pageerror-secret');error.name='AbortError';assert.equal(draftQaPageErrorMetadata(error).family,'ABORT');
+ const saved=await controlledEarlyStop(fakeBrowser({status:200,pageError:Error('Minified React error #185; private-pageerror-secret'),rscResponseBeforeError:true}));
+ assert.equal(saved.receipt.status,'STOP');assert.equal(saved.receipt.code,'DRAFT111_CLIENT_ERROR');assert.equal(saved.receipt.pageErrors,1);assert.equal(saved.receipt.pageErrorMetadata[0].reactCode,185);assert.equal(saved.receipt.pageErrorMetadata[0].step,'PROJECTS_BOARD');assert.equal(saved.receipt.pageErrorMetadata[0].navigation.rscResponseSeen,true);assert.equal(saved.receipt.failureProvenance.lastAction,null);
+});
+test('actual route ACK provenance is recorded only after durable intent ACK and fulfilled response',async()=>{
+ const error=Error('private-selector-user-data');error.name='TimeoutError';
+ const request={url:'https://staging-crm.peromebel.by/projects',method:'POST',headers:{'next-action':'c'.repeat(40)},body:JSON.stringify([{title:fixture.pre.tags.projectA,clientId:fixture.pre.ids.client,managerId:fixture.pre.ids.actor,address:'$undefined'}])};
+ const control=fakeBrowser({status:200,afterGotoRequest:request,reply:{ok:true,id:'217'},throwOnClick:error}),saved=await controlledEarlyStop(control,false,1);
+ assert.equal(control.state.fulfilled,true);assert.equal(saved.journal.actions[0].kind,'project-create');assert.equal(saved.journal.actions[0].ack.projectId,'217');
+ assert.deepEqual(saved.receipt.failureProvenance.lastAction,{kind:'project-create',phase:'FULFILLED',httpStatus:200,ackDurable:true,fulfilled:true});assert.equal(JSON.stringify(saved.receipt.failureProvenance).includes('body'),false);
+});
+
+test('one-shot product action may take 15413ms: ACK and route completion are awaited beyond default UI five seconds',async()=>{
+ const {waitDraftQaProductAck}=await import('./product-draft-stage-browser.mjs');let clock=0,ack=false,fulfilled=false;const submits=1;
+ await waitDraftQaProductAck({now:()=>clock,delay:async()=>{clock+=1000;if(clock>=15000)ack=true;if(clock>=16000)fulfilled=true;},settled:async()=>{},ready:()=>ack&&fulfilled});
+ assert.equal(clock,16000);assert.equal(submits,1);assert.equal(ack,true);assert.equal(fulfilled,true);
+});
+test('known product action failure stops ACK waiting immediately without resubmission',async()=>{
+ const {waitDraftQaProductAck}=await import('./product-draft-stage-browser.mjs');let waits=0;
+ await assert.rejects(()=>waitDraftQaProductAck({now:()=>0,settled:async()=>{throw Error('DRAFT111_ACTION_HTTP_FAILED');},ready:()=>false,delay:async()=>{waits++;}}),/DRAFT111_ACTION_HTTP_FAILED/);assert.equal(waits,0);
+});
+test('ACK wait stops at fixed65s when response never becomes acknowledged and fulfilled',async()=>{
+ const {waitDraftQaProductAck}=await import('./product-draft-stage-browser.mjs');let clock=0;
+ await assert.rejects(()=>waitDraftQaProductAck({now:()=>clock,settled:async()=>{},ready:()=>false,delay:async()=>{clock+=1000;}}),/DRAFT111_PRODUCT_CREATE_ACK_TIMEOUT/);assert.equal(clock,65000);
 });
