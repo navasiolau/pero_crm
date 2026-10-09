@@ -7,6 +7,7 @@ import {fileURLToPath} from 'node:url';
 import path from 'node:path';
 import {gzipSync} from 'node:zlib';
 import {PrismaClient} from '@prisma/client';
+import {captureTokenClockEvidence,validateTokenClockEvidence,compareTokenClockEvidence} from './crm-acceptance-token-clock.mjs';
 
 export const MIGRATION={name:'20261008190000_warehouse_unit_catalog',checksum:'deac962791849c7e24626fb7a8a3b8cc51c466f068707a33506a113c550529f4'};
 export const DEFAULT_UNITS=[
@@ -17,7 +18,7 @@ const SHA40=/^[a-f0-9]{40}$/,SHA64=/^[a-f0-9]{64}$/,UUID=/^[a-f0-9]{8}-[a-f0-9]{
 const REQUIRED=['Material','OrgSetting','ApiToken','Payment','PayrollEntry','ProjectMaterial','StockMovement','ChangeLog','_prisma_migrations'];
 const SCHEMA_KEYS=['columns','constraints','indexes','triggers','routines','sequences','relations','enums','enumTypes','views','policies','namespace','defaultPrivileges','types'];
 const RAW_CAP=8*1024*1024,WIRE_CAP=250*1024;
-const PHASES=new Set(['ENTRY_INPUT','STAGE_GUARD','CLIENT_SETUP','TX_BEGIN','READONLY_SET','QUERY_IDENTITY','QUERY_TABLES','QUERY_TABLE_FP','QUERY_MATERIAL','QUERY_CATALOG','QUERY_LEDGER','QUERY_SCHEMA','QUERY_COLUMNS','QUERY_CONSTRAINTS','QUERY_INDEXES','QUERY_TRIGGERS','QUERY_RELATIONS','QUERY_TYPES','QUERY_ORG','QUERY_CLOCK','VERIFY_SNAPSHOT','WIRE_OUTPUT','EXIT_DISCONNECT']);
+const PHASES=new Set(['ENTRY_INPUT','STAGE_GUARD','CLIENT_SETUP','TX_BEGIN','READONLY_SET','QUERY_IDENTITY','QUERY_TABLES','QUERY_TABLE_FP','QUERY_MATERIAL','QUERY_CATALOG','QUERY_LEDGER','QUERY_SCHEMA','QUERY_COLUMNS','QUERY_CONSTRAINTS','QUERY_INDEXES','QUERY_TRIGGERS','QUERY_RELATIONS','QUERY_TYPES','QUERY_ORG','QUERY_TOKENS','QUERY_CLOCK','VERIFY_SNAPSHOT','WIRE_OUTPUT','EXIT_DISCONNECT']);
 let currentPhase='ENTRY_INPUT';
 function phase(name){currentPhase=PHASES.has(name)?name:'UNKNOWN';}
 function need(ok,code){if(!ok)throw Error(code);}
@@ -145,8 +146,9 @@ export async function captureSnapshot(db,input,proof){
   const schema=await schemaSnapshot(tx);
   const otherRows=await fingerprint(tx,'SELECT t.* FROM "OrgSetting" t WHERE t.key<>$1',['telegram.botUsername'],'ORG_OTHERS');
   phase('QUERY_ORG');const botRows=await tx.$queryRawUnsafe('SELECT /*UNIT110:ORG_BOT*/ key::text key,'+documentHash('to_jsonb(t.value)')+' "valueHash",'+documentHash("to_jsonb(t)-'updatedAt'")+' "stableFieldsHash",to_char(t."updatedAt",\'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"\') "updatedAt" FROM "OrgSetting" t WHERE t.key=$1','telegram.botUsername');need(botRows.length<=1,'BOT_SINGLETON_REQUIRED');
-  phase('QUERY_CLOCK');const [clock]=await tx.$queryRawUnsafe("SELECT /*UNIT110:CLOCK*/ to_char(CURRENT_TIMESTAMP AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') at");
-  return {version:1,mode:input.mode,runId:input.runId,revision:input.revision,capturedAt:clock.at,tableNames,tables,materials:{canonical:canonicalMaterial,tuples,references},catalog:{expectedNames,actualNames,idMismatchCount,timeMismatchCount},ledger:{preserved,records},schema,orgSetting:{count:tables.OrgSetting.count,otherRows,bot:botRows[0]??null},identity};
+  phase('QUERY_TOKENS');const apiTokens=await captureTokenClockEvidence(tx);
+  phase('QUERY_CLOCK');const [clock]=await tx.$queryRawUnsafe("SELECT /*UNIT110:CLOCK*/ to_char(clock_timestamp() AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') at");
+  return {version:2,mode:input.mode,runId:input.runId,revision:input.revision,capturedAt:clock.at,tableNames,tables,materials:{canonical:canonicalMaterial,tuples,references},catalog:{expectedNames,actualNames,idMismatchCount,timeMismatchCount},ledger:{preserved,records},schema,orgSetting:{count:tables.OrgSetting.count,otherRows,bot:botRows[0]??null},apiTokens,identity};
  },{isolationLevel:'RepeatableRead',maxWait:10000,timeout:120000});
 }
 const columnKeys=['table','name','ordinal','default','nullable','dataType','udtSchema','udtName','length','precision','scale','timePrecision','collation','collationSchema','domainSchema','domainName','intervalType','intervalPrecision','identity','identityGeneration','generated','generationExpression'];
@@ -174,8 +176,8 @@ function validateDelta(delta,mode){
 }
 function shape(snapshot,input){
  inputShape(input,Object.hasOwn(input??{},'beforeRevision'));
- keys(snapshot,['version','mode','runId','revision','capturedAt','tableNames','tables','materials','catalog','ledger','schema','orgSetting','identity'],'SNAPSHOT_FIELDS_INVALID');
- need(snapshot.version===1&&snapshot.mode===input.mode&&snapshot.runId===input.runId&&snapshot.revision===input.revision&&time(snapshot.capturedAt),'SNAPSHOT_BINDING_INVALID');
+ keys(snapshot,['version','mode','runId','revision','capturedAt','tableNames','tables','materials','catalog','ledger','schema','orgSetting','apiTokens','identity'],'SNAPSHOT_FIELDS_INVALID');
+ need(snapshot.version===2&&snapshot.mode===input.mode&&snapshot.runId===input.runId&&snapshot.revision===input.revision&&time(snapshot.capturedAt),'SNAPSHOT_BINDING_INVALID');
  keys(snapshot.identity,['name','schema','readonly','primary'],'SNAPSHOT_IDENTITY_FIELDS_INVALID');same(snapshot.identity,{name:'crm',schema:'public',readonly:'on',primary:true},'SNAPSHOT_IDENTITY_INVALID');
  need(Array.isArray(snapshot.tableNames)&&snapshot.tableNames.length>0&&snapshot.tableNames.length<256&&snapshot.tableNames.every(name=>/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)),'SNAPSHOT_TABLE_SET_INVALID');same(snapshot.tableNames,[...new Set(snapshot.tableNames)].sort(),'SNAPSHOT_TABLE_SET_ORDER_INVALID');need(REQUIRED.every(name=>snapshot.tableNames.includes(name)),'SNAPSHOT_REQUIRED_TABLE_MISSING');keys(snapshot.tables,snapshot.tableNames,'SNAPSHOT_TABLE_FINGERPRINT_SET_INVALID');for(const value of Object.values(snapshot.tables))fp(value);
  keys(snapshot.materials,['canonical','tuples','references'],'MATERIAL_PROOF_FIELDS_INVALID');fp(snapshot.materials.canonical);fp(snapshot.materials.tuples);need(snapshot.materials.canonical.count===snapshot.tables.Material.count&&snapshot.materials.tuples.count===snapshot.tables.Material.count,'MATERIAL_AGGREGATE_COUNT_INVALID');
@@ -184,6 +186,7 @@ function shape(snapshot,input){
  if(snapshot.mode==='before')need(snapshot.catalog.actualNames===null&&snapshot.catalog.idMismatchCount===null&&snapshot.catalog.timeMismatchCount===null,'BEFORE_CATALOG_NOT_ABSENT');else{fp(snapshot.catalog.actualNames);need(count(snapshot.catalog.idMismatchCount)&&count(snapshot.catalog.timeMismatchCount),'CATALOG_COUNTERS_INVALID');}
  keys(snapshot.ledger,['preserved','records'],'LEDGER_PROOF_FIELDS_INVALID');fp(snapshot.ledger.preserved);need(Array.isArray(snapshot.ledger.records)&&snapshot.ledger.records.length<8,'LEDGER_RECORDS_INVALID');for(const row of snapshot.ledger.records){keys(row,['id','name','checksum','startedAt','finishedAt','rolledBackAt','appliedStepsCount','logsNull'],'LEDGER_RECORD_FIELDS_INVALID');need(id(row.id)&&row.name===MIGRATION.name&&SHA64.test(row.checksum??'')&&time(row.startedAt)&&(row.finishedAt===null||time(row.finishedAt))&&(row.rolledBackAt===null||time(row.rolledBackAt))&&Number.isInteger(row.appliedStepsCount)&&typeof row.logsNull==='boolean','LEDGER_RECORD_INVALID');}
  keys(snapshot.schema,['stable','delta'],'SCHEMA_PROOF_FIELDS_INVALID');keys(snapshot.schema.stable,SCHEMA_KEYS,'SCHEMA_STABLE_KEYS_INVALID');for(const value of Object.values(snapshot.schema.stable))fp(value);validateDelta(snapshot.schema.delta,snapshot.mode);
+ validateTokenClockEvidence(snapshot.apiTokens);same(snapshot.apiTokens.full,snapshot.tables.ApiToken,'TOKEN_FULL_TABLE_COHERENCE_REQUIRED');need(Date.parse(snapshot.apiTokens.capturedAt)<=Date.parse(snapshot.capturedAt),'TOKEN_END_AFTER_UNIT_END');
  keys(snapshot.orgSetting,['count','otherRows','bot'],'ORGSETTING_FIELDS_INVALID');fp(snapshot.orgSetting.otherRows);need(snapshot.orgSetting.count===snapshot.tables.OrgSetting.count&&BigInt(snapshot.orgSetting.otherRows.count)+(snapshot.orgSetting.bot?1n:0n)===BigInt(snapshot.orgSetting.count),'ORGSETTING_COUNTS_INVALID');
  if(snapshot.orgSetting.bot){const bot=snapshot.orgSetting.bot;keys(bot,['key','valueHash','stableFieldsHash','updatedAt'],'BOT_SETTING_FIELDS_INVALID');need(bot.key==='telegram.botUsername'&&SHA64.test(bot.valueHash??'')&&SHA64.test(bot.stableFieldsHash??'')&&time(bot.updatedAt)&&Date.parse(bot.updatedAt)<=Date.parse(snapshot.capturedAt),'BOT_SETTING_INVALID');}
  return snapshot;
@@ -201,10 +204,11 @@ export function verifyAfter(before,after,input){
  same(after.schema.stable,before.schema.stable,'UNAPPROVED_SCHEMA_CHANGED');same(after.schema.delta.materialOwnerHash,before.schema.delta.materialOwnerHash,'MATERIAL_OWNER_CHANGED');same(after.schema.delta.typeTemplates,before.schema.delta.typeTemplates,'MATERIAL_TYPE_TEMPLATES_CHANGED');need(after.schema.delta.materialColumns.count===before.schema.delta.materialColumns.count&&after.schema.delta.materialColumns.maxOrdinal===before.schema.delta.materialColumns.maxOrdinal+1,'MATERIAL_COLUMN_REPLACEMENT_INVALID');
  same(after.orgSetting.otherRows,before.orgSetting.otherRows,'OTHER_SETTING_ROWS_CHANGED');same(after.orgSetting.count,before.orgSetting.count,'SETTING_COUNT_CHANGED');
  let operationalClockChanged=false;const oldBot=before.orgSetting.bot,newBot=after.orgSetting.bot;need(Boolean(oldBot)===Boolean(newBot),'BOT_SINGLETON_CHANGED');
- if(oldBot){same(newBot.key,oldBot.key,'BOT_KEY_CHANGED');same(newBot.valueHash,oldBot.valueHash,'BOT_VALUE_CHANGED');same(newBot.stableFieldsHash,oldBot.stableFieldsHash,'BOT_IMMUTABLE_FIELDS_CHANGED');operationalClockChanged=newBot.updatedAt!==oldBot.updatedAt;if(operationalClockChanged)need(Date.parse(newBot.updatedAt)>Date.parse(before.capturedAt)&&Date.parse(newBot.updatedAt)>Date.parse(oldBot.updatedAt)&&Date.parse(newBot.updatedAt)<=Date.parse(after.capturedAt),'BOT_CLOCK_NOT_FRESH');}
+ if(oldBot){same(newBot.key,oldBot.key,'BOT_KEY_CHANGED');same(newBot.valueHash,oldBot.valueHash,'BOT_VALUE_CHANGED');same(newBot.stableFieldsHash,oldBot.stableFieldsHash,'BOT_IMMUTABLE_FIELDS_CHANGED');operationalClockChanged=newBot.updatedAt!==oldBot.updatedAt;if(operationalClockChanged)need(Date.parse(newBot.updatedAt)>Date.parse(oldBot.updatedAt)&&Date.parse(newBot.updatedAt)<=Date.parse(after.capturedAt),'BOT_CLOCK_NOT_MONOTONIC');}
  if(!operationalClockChanged)same(after.tables.OrgSetting,before.tables.OrgSetting,'ORGSETTING_UNEXPLAINED_CHANGE');else need(after.tables.OrgSetting.hash!==before.tables.OrgSetting.hash,'BOT_CLOCK_HASH_INCOHERENT');
- for(const table of before.tableNames)if(!['Material','OrgSetting','_prisma_migrations'].includes(table))same(after.tables[table],before.tables[table],'ORIGINAL_TABLE_CHANGED_'+table);
- return {materialsVerified:before.tables.Material.count,tablesVerified:before.tableNames.length,originalsPreserved:true,schemaVerified:true,catalogVerified:true,operationalClockChanged,dbReadOnly:true};
+ const apiTokenClock=compareTokenClockEvidence(before.apiTokens,after.apiTokens);
+ for(const table of before.tableNames)if(!['Material','OrgSetting','_prisma_migrations','ApiToken'].includes(table))same(after.tables[table],before.tables[table],'ORIGINAL_TABLE_CHANGED_'+table);
+ return {materialsVerified:before.tables.Material.count,tablesVerified:before.tableNames.length,originalsPreserved:true,schemaVerified:true,catalogVerified:true,operationalClockChanged,apiTokenClocksChanged:apiTokenClock.changed,apiTokenStableFieldsMatched:apiTokenClock.stableFieldsMatched,dbReadOnly:true};
 }
 export function encodeSnapshot(snapshot,input){
  shape(snapshot,input);const raw=Buffer.from(JSON.stringify(snapshot),'utf8');need(raw.length<=RAW_CAP,'RAW_SNAPSHOT_LIMIT');const body={status:'READ_ONLY_CAPTURED',mode:input.mode,runId:input.runId,revision:input.revision,snapshotEncoding:'gzip-base64',snapshotSha256:createHash('sha256').update(raw).digest('hex'),snapshot:gzipSync(raw).toString('base64')};need(Buffer.byteLength(JSON.stringify(body),'utf8')<=WIRE_CAP,'COMPACT_WIRE_LIMIT');return body;

@@ -7,7 +7,7 @@ import {readFileSync} from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {captureSnapshot,verifyBefore,verifyAfter,stageGuard,diagnosticStop,encodeSnapshot} from './warehouse-units-staging-readonly.mjs';
-import {APPROVED_MIGRATIONS,verifiedMigrationChecksums,validateOptions,decodeReadonlySnapshot} from './warehouse-units-staging-runner.mjs';
+import {APPROVED_MIGRATIONS,verifiedMigrationChecksums,validateOptions,decodeReadonlySnapshot,validateBeforeCheckpoint} from './warehouse-units-staging-runner.mjs';
 
 const hash=value=>createHash('sha256').update(value).digest('hex');
 const fp=(value,count='1')=>({count,hash:hash(value)});
@@ -25,17 +25,18 @@ function index(table,name,key,{primary=false,unique=false}={}){
 function proofFixture(){
  const tableNames=['ApiToken','ChangeLog','Material','OrgSetting','Payment','PayrollEntry','ProjectMaterial','StockMovement','_prisma_migrations'];
  const material=fp('material-before','2'),ownerHash=hash('owner');
- const before={version:1,mode:'before',runId,revision,capturedAt:'2026-10-09T00:00:00.000Z',tableNames,
+ const before={version:2,mode:'before',runId,revision,capturedAt:'2026-10-09T00:00:00.000Z',tableNames,
   tables:Object.fromEntries(tableNames.map(name=>[name,fp(name)])),
   materials:{canonical:material,tuples:fp('material-tuples','2'),references:null},
   catalog:{expectedNames:fp('catalog-expected','11'),actualNames:null,idMismatchCount:null,timeMismatchCount:null},
   ledger:{preserved:fp('ledger-before','3'),records:[]},
   schema:{stable:Object.fromEntries(schemaKeys.map(name=>[name,fp('schema-'+name)])),delta:{columns:[column('Material','unit',4,"'шт'::text")],constraints:[],indexes:[],triggers:[],relations:[],types:[],typeTemplates:{recordHash:hash('record-type'),arrayHash:hash('array-type')},materialColumns:{count:'14',maxOrdinal:14},materialOwnerHash:ownerHash}},
   orgSetting:{count:'2',otherRows:fp('other-settings'),bot:{key:'telegram.botUsername',valueHash:hash('bot-value'),stableFieldsHash:hash('bot-immutable'),updatedAt:'2026-10-08T23:50:00.000Z'}},
+  apiTokens:{kind:'crm-api-token-clock',version:1,capturedAt:'2026-10-09T00:00:00.000Z',stable:fp('api-token-stable'),legacyStable:{count:'1',hash:createHash('md5').update('api-token-stable').digest('hex')},full:fp('ApiToken'),tokens:[{idHash:hash('token-id'),lastUsedAt:'2026-10-08T23:55:00.000Z'}]},
   identity:{name:'crm',schema:'public',readonly:'on',primary:true},
  };
  before.tables.Material=material;before.tables.OrgSetting=fp('settings','2');before.tables._prisma_migrations=before.ledger.preserved;
- const after=structuredClone(before);after.mode='after';after.revision=afterRevision;after.capturedAt='2026-10-09T00:05:00.000Z';
+ const after=structuredClone(before);after.mode='after';after.revision=afterRevision;after.capturedAt='2026-10-09T00:05:00.000Z';after.apiTokens.capturedAt=after.capturedAt;
  after.tableNames=[...before.tableNames,'MaterialUnit'].sort();after.tables.Material=fp('material-new-shape','2');after.tables.MaterialUnit=fp('catalog-rows','11');after.tables._prisma_migrations=fp('ledger-after','4');
  after.materials.references={nulls:'0',orphans:'0'};after.catalog.actualNames=before.catalog.expectedNames;after.catalog.idMismatchCount='0';after.catalog.timeMismatchCount='0';
  after.ledger.records=[{id:'ledger110',...APPROVED_MIGRATIONS[0],startedAt:'2026-10-09T00:02:00.000Z',finishedAt:'2026-10-09T00:03:00.000Z',rolledBackAt:null,appliedStepsCount:1,logsNull:true}];
@@ -90,7 +91,7 @@ contrast('material row maps or secret metadata are refused',(b,a)=>{a.materials.
 test('only fresh coherent same-value bot registration clock may advance',()=>{
  const {before,after}=proofFixture();after.orgSetting.bot.updatedAt='2026-10-09T00:04:00.000Z';after.tables.OrgSetting=fp('fresh-bot-clock','2');assert.equal(verifyAfter(before,after,afterInput).operationalClockChanged,true);
 });
-contrast('stale bot clock advancement outside capture window is not accepted',(b,a)=>{a.orgSetting.bot.updatedAt='2026-10-08T23:59:00.000Z';a.tables.OrgSetting=fp('stale clock','2');});
+contrast('bot clock regression is not accepted',(b,a)=>{a.orgSetting.bot.updatedAt='2026-10-08T23:49:00.000Z';a.tables.OrgSetting=fp('stale clock','2');});
 contrast('bot value cannot change',(b,a)=>{a.orgSetting.bot.valueHash=hash('different value');});
 contrast('other settings cannot change',(b,a)=>{a.orgSetting.otherRows=fp('other setting changed');});
 contrast('bot stable fields cannot change',(b,a)=>{a.orgSetting.bot.stableFieldsHash=hash('different stable fields');});
@@ -126,6 +127,10 @@ for(const mode of ['before','after'])test('coherent '+mode+' capture uses only a
   async $executeRawUnsafe(sql,...args){assert.equal(open,true);assert.deepEqual(args,[]);assert.equal(sql,'SET TRANSACTION READ ONLY');readonly=true;calls.push('readonly');return 0;},
   async $queryRawUnsafe(sql,...args){
    assert.equal(open&&readonly,true);assert.ok(args.every(value=>typeof value==='string'||typeof value==='number'||typeof value==='boolean'||value===null),'raw scalar bindings only; arrays/objects/undefined forbidden');assert.match(sql,/^SELECT /);calls.push(sql);
+   if(sql.includes("current_setting('transaction_isolation')"))return [{readonly:'on',isolation:'repeatable read'}];
+   if(sql.includes('AS "stableHash"')){assert.ok(sql.includes("to_jsonb(t)-'lastUsedAt'"));return [{count:snapshot.apiTokens.full.count,stableHash:snapshot.apiTokens.stable.hash,fullHash:snapshot.apiTokens.full.hash,legacyHash:snapshot.apiTokens.legacyStable.hash}];}
+   if(sql.includes('AS "idHash"'))return snapshot.apiTokens.tokens;
+   if(sql.includes('clock_timestamp()')&&!sql.includes('UNIT110:'))return [{at:snapshot.apiTokens.capturedAt}];
    const tag=/UNIT110:([A-Z_]+)/.exec(sql)?.[1];
    if(tag==='IDENTITY'){assert.ok(sql.includes('current_database()::text'));assert.ok(sql.includes('current_schema()::text'));return [snapshot.identity];}
    if(tag==='TABLES'){assert.ok(sql.includes('tablename::text'));return snapshot.tableNames.map(name=>({name}));}
@@ -139,7 +144,7 @@ for(const mode of ['before','after'])test('coherent '+mode+' capture uses only a
    if(tag==='LEDGER'){assert.deepEqual(args,[APPROVED_MIGRATIONS[0].name]);return snapshot.ledger.records;}
    if(tag==='LEDGER_PRESERVED')return [snapshot.ledger.preserved];
    if(tag==='ORG_OTHERS')return [snapshot.orgSetting.otherRows];if(tag==='ORG_BOT')return [snapshot.orgSetting.bot];
-   if(tag==='CLOCK')return [{at:snapshot.capturedAt}];
+   if(tag==='CLOCK'){assert.ok(sql.includes('clock_timestamp()'));return [{at:snapshot.capturedAt}];}
    if(tag==='SCHEMA_STABLE'){
     const key=/UNIT110:SCHEMA_STABLE:([A-Za-z]+)/.exec(sql)?.[1];
     if(key==='constraints')assert.ok(sql.includes('pg_get_constraintdef'));
@@ -201,3 +206,37 @@ test('unknown exceptions never invent Prisma/SQLSTATE evidence, and throwing get
  for(const code of ['P2010','TOKEN']){const result=diagnosticStop({name:'UnknownPrivateException',code,meta:{code:'TOKEN'}},'QUERY_COLUMNS');assert.equal(result.diagnostic.prismaCode,undefined);assert.equal(result.diagnostic.sqlState,undefined);assert.equal(JSON.stringify(result).includes('TOKEN'),false);}
  const error=new Proxy({}, {get(){throw Error('PRIVATE_GETTER');}});const result=diagnosticStop(error,'QUERY_COLUMNS');assert.equal(result.status,'STOP');assert.equal(JSON.stringify(result).includes('PRIVATE'),false);
 });
+
+function advanceTokenClock(before,after,stamp='2026-10-09T00:02:00.000Z'){
+ after.apiTokens.tokens[0].lastUsedAt=stamp;after.apiTokens.full=fp('token-full-clock-advanced');after.tables.ApiToken=after.apiTokens.full;
+}
+test('future fresh unit proof allows only measured token usage clock advancement',()=>{
+ const {before,after}=proofFixture();advanceTokenClock(before,after);const result=verifyAfter(before,after,afterInput);assert.equal(result.apiTokenClocksChanged,true);assert.equal(result.apiTokenStableFieldsMatched,true);assert.equal(result.originalsPreserved,true);
+});
+test('token clock need not be newer than before capture END',()=>{
+ const {before,after}=proofFixture();advanceTokenClock(before,after,'2026-10-08T23:59:00.000Z');assert.equal(verifyAfter(before,after,afterInput).apiTokenClocksChanged,true);
+});
+test('bot registration may advance monotonically before prior capture END',()=>{
+ const {before,after}=proofFixture();after.orgSetting.bot.updatedAt='2026-10-08T23:59:00.000Z';after.tables.OrgSetting=fp('monotonic-bot-clock','2');assert.equal(verifyAfter(before,after,afterInput).operationalClockChanged,true);
+});
+for(const field of ['tokenHash','scopes','userId','name','revokedAt'])contrast('token '+field+' cannot drift even alongside valid clock movement',(b,a)=>{advanceTokenClock(b,a);a.apiTokens.stable.hash=hash('changed-token-'+field);});
+contrast('token membership/hash-ID set is exact',(b,a)=>{advanceTokenClock(b,a);a.apiTokens.tokens[0].idHash=hash('different-token-id');});
+contrast('token lastUsedAt regression refuses',(b,a)=>{advanceTokenClock(b,a,'2026-10-08T23:54:00.000Z');});
+contrast('token date may never exceed after DB snapshot END',(b,a)=>{advanceTokenClock(b,a,'2026-10-09T00:05:00.001Z');});
+contrast('token full hash and dynamic table aggregate must be coherent',(b,a)=>{a.apiTokens.full=fp('unmatched-full');});
+contrast('token capture END must lie within enclosing unit snapshot END',(b,a)=>{a.apiTokens.capturedAt='2026-10-09T00:05:00.001Z';});
+contrast('missing clock proof cannot reinterpret an older aggregate snapshot',(b)=>{delete b.apiTokens;b.version=1;});
+contrast('old unit version is refused even if a token proof is appended later',(b)=>{b.version=1;});
+contrast('plaintext token identities and secret-derived fields never enter saved proof',(b,a)=>{a.apiTokens.tokens[0].tokenHash='PRIVATE';});
+
+test('runner requires a new v2 before checkpoint with actual fresh shared clock evidence',()=>{
+ const {before}=proofFixture(),checkpoint={kind:'warehouse-units-staging-before',version:2,runId,revision,snapshot:before};
+ assert.equal(validateBeforeCheckpoint(checkpoint,afterInput),checkpoint);
+ assert.throws(()=>validateBeforeCheckpoint({...checkpoint,version:1},afterInput));
+ const missing=structuredClone(checkpoint);delete missing.snapshot.apiTokens;assert.throws(()=>validateBeforeCheckpoint(missing,afterInput));
+ const legacy=structuredClone(checkpoint);legacy.snapshot.version=1;assert.throws(()=>validateBeforeCheckpoint(legacy,afterInput));
+});
+contrast('API token timestamp cannot become null after observed use',(b,a)=>{advanceTokenClock(b,a);a.apiTokens.tokens[0].lastUsedAt=null;});
+contrast('API token stable legacy projection cannot drift',(b,a)=>{advanceTokenClock(b,a);a.apiTokens.legacyStable.hash='0'.repeat(32);});
+contrast('API token clock delta requires changed whole-row fingerprint',(b,a)=>{a.apiTokens.tokens[0].lastUsedAt='2026-10-09T00:02:00.000Z';});
+contrast('API token added/deleted membership cannot hide behind counts',(b,a)=>{advanceTokenClock(b,a);a.apiTokens.tokens=[];});

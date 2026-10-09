@@ -36,7 +36,7 @@ function publish(file,value){
  const fd=openSync(absolute,'wx',0o600);try{writeFileSync(fd,bytes);fsyncSync(fd);}finally{closeSync(fd);}return {file:absolute,sha256:sha(bytes)};
 }
 function currentSources(){
- const sources={};for(const file of ['warehouse-units-staging-readonly.mjs','warehouse-units-staging-runner.mjs','warehouse-units-staging-readonly.test.mjs','crm-acceptance-transport.mjs'])sources[file]=sha(readFileSync(path.join(here,file)));
+ const sources={};for(const file of ['warehouse-units-staging-readonly.mjs','warehouse-units-staging-runner.mjs','warehouse-units-staging-readonly.test.mjs','crm-acceptance-token-clock.mjs','crm-acceptance-transport.mjs'])sources[file]=sha(readFileSync(path.join(here,file)));
  sources['crm-modernization-staging.py']=sha(readFileSync(path.join(root,'deploy/acceptance/crm-modernization-staging.py')));return sources;
 }
 function approvedSql(){return verifiedMigrationChecksums([readFileSync(path.join(acceptanceWeb,'prisma/migrations',MIGRATION.name,'migration.sql'))]);}
@@ -53,18 +53,23 @@ function verifiedResponse(result,input,bundleSha256){
  need(result?.body?.status==='READ_ONLY_CAPTURED'&&result.body.mode===input.mode&&result.body.runId===input.runId&&result.body.revision===input.revision,'CAPTURE_RESPONSE_BINDING_MISMATCH');
  const receipt=result.receipt;need(receipt?.identity?.hostname==='crm-staging'&&receipt.identity.revision===input.revision&&receipt.bundleSha256===bundleSha256&&receipt.operation==='inspect'&&receipt.exitCode===0,'LOCKED_STAGE_RECEIPT_REQUIRED');need(receipt.identity.databaseVolume==='crm-staging_pgdata'&&SHA64.test(receipt.identity.database??'')&&SHA64.test(receipt.identity.outerW07Sha256??''),'PHYSICAL_STAGE_RECEIPT_REQUIRED');return decodeReadonlySnapshot(result.body);
 }
+export function validateBeforeCheckpoint(previous,input){
+ need(previous?.kind==='warehouse-units-staging-before'&&previous.version===2&&previous.runId===input.runId&&SHA40.test(previous.revision??'')&&previous.revision!==input.revision,'FRESH_V2_BEFORE_CHECKPOINT_REQUIRED');
+ const beforeInput={...input,mode:'before',revision:previous.revision};delete beforeInput.beforeRevision;
+ verifyBefore(previous.snapshot,beforeInput);return previous;
+}
 export async function runUnitStagingProof(options){
  validateOptions(options);privatePath(options.outputDir);mkdirSync(options.outputDir,{recursive:true});need(!existsSync(privatePath(path.join(options.outputDir,options.mode+'-proof.json'))),'IMMUTABLE_PROOF_ALREADY_EXISTS_STOP');
  const sources=currentSources(),expectedMigrations=approvedSql(),bytes=await readonlyBundle(),bundleSha256=bundleHash(bytes),input={operation:'inspect',mode:options.mode,authorized:true,revision:options.revision,runId:options.runId,expectedMigrations};
  let previous;if(options.mode==='after'){
   const beforePath=privatePath(options.beforeFile);need(statSync(beforePath).isFile()&&statSync(beforePath).size<=RAW_CAP+64*1024,'BOUNDED_PRIVATE_BEFORE_REQUIRED');const oldBytes=readFileSync(beforePath);need(sha(oldBytes)===options.beforeSha256,'EXACT_BEFORE_FILE_DIGEST_REQUIRED');previous=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(oldBytes));
-  need(previous?.kind==='warehouse-units-staging-before'&&previous.version===1&&previous.runId===options.runId&&SHA40.test(previous.revision??'')&&previous.revision!==options.revision,'BEFORE_SCOPE_BINDING_MISMATCH');same(previous.sources,sources,'FROZEN_PROOF_SOURCES_CHANGED_STOP');same(previous.expectedMigrations,expectedMigrations,'FROZEN_SQL_CHECKSUMS_CHANGED_STOP');need(previous.bundleSha256===bundleSha256&&previous.identity?.hostname==='crm-staging'&&previous.identity.revision===previous.revision,'BEFORE_REVIEWED_BUNDLE_PROOF_REQUIRED');verifyBefore(previous.snapshot,{...input,mode:'before',revision:previous.revision});
+  validateBeforeCheckpoint(previous,input);same(previous.sources,sources,'FROZEN_PROOF_SOURCES_CHANGED_STOP');same(previous.expectedMigrations,expectedMigrations,'FROZEN_SQL_CHECKSUMS_CHANGED_STOP');need(previous.bundleSha256===bundleSha256&&previous.identity?.hostname==='crm-staging'&&previous.identity.revision===previous.revision,'BEFORE_REVIEWED_BUNDLE_PROOF_REQUIRED');verifyBefore(previous.snapshot,{...input,mode:'before',revision:previous.revision});
  }
  // inspect сохраняет physical guard и workflow lock существующего strong wrapper.
  const transport=qaTransport({target:'staging',revision:options.revision,outputDir:options.outputDir});const result=await transport.execute(bytes,'inspect',input),snapshot=verifiedResponse(result,input,bundleSha256);same(currentSources(),sources,'CAPTURE_SOURCE_CHANGED_STOP');
  const verification=previous?verifyAfter(previous.snapshot,snapshot,{...input,beforeRevision:previous.revision}):verifyBefore(snapshot,input);
  if(previous){for(const field of ['database','databaseVolume','databaseStartedAt','outerW07Sha256'])same(result.receipt.identity[field],previous.identity[field],'PHYSICAL_DATABASE_PROOF_CHANGED_STOP');}
- const descriptor={kind:'warehouse-units-staging-'+options.mode,version:1,runId:options.runId,revision:options.revision,sources,expectedMigrations,bundleSha256,identity:result.receipt.identity,snapshot,verification,...(previous?{beforeSha256:options.beforeSha256,beforeRevision:previous.revision}:{})};const saved=publish(path.join(options.outputDir,options.mode+'-proof.json'),descriptor);
+ const descriptor={kind:'warehouse-units-staging-'+options.mode,version:2,runId:options.runId,revision:options.revision,sources,expectedMigrations,bundleSha256,identity:result.receipt.identity,snapshot,verification,...(previous?{beforeSha256:options.beforeSha256,beforeRevision:previous.revision}:{})};const saved=publish(path.join(options.outputDir,options.mode+'-proof.json'),descriptor);
  return {status:previous?'AFTER_VERIFIED':'BEFORE_CAPTURED',mode:options.mode,runId:options.runId,revision:options.revision,...saved,verification,dbReadOnly:true,fixturesCreated:false,migrationExecuted:false};
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
