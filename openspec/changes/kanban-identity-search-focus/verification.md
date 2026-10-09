@@ -46,3 +46,8 @@ Private ignored receipt: `.playwright-mcp/search117/receipt.json`. Скринш�
 
 
 QA P2 исправление: полный unit-набор1492/1492 PASS, TSC/lint/strict OpenSpec/diff-check PASS. Новые actual server-normalizer/service/controller startup tests дали RED на scalar обеих секций, затем GREEN15/15 с canonical JSON-array. Положительные ACK получены из настоящего service/store; ручной scalar ACK запрещён. Stage/DB/Git не выполнялись.
+
+
+## Separate producer/Root caller source
+
+Для117 подготовлен самостоятельный fresh4-row lifecycle, настоящий producer-HMAC/current verifier и actual manifest ABI (`server/...`→public`src/...`, unique42hex, две typed worker/layer routes), без расширения113 scope. Source controlled20/20 и lint PASS; compile-only bundle70009 B PASS. Actual native PostgreSQL prerequisite/DB/SSH/browser не выполнялись worker; shared111 dependency runtime и generated client не менялись. Detailed Root-only API и failure/closure boundaries — staging-acceptance.md.
