@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import {openOwnedTaskFileDialog, plainFileListPageErrorDiagnostic, fileListsDesktopPrefixAccepted, fileListsUnlinkedTaskOmitted} from './plain-file-lists-staging-browser.mjs';
 import {createHash} from 'node:crypto';
 import {FILE_LIST_STAGING_ORIGIN as origin, FILE_LIST_FIXTURE_NAMESPACE as namespace, compiledDeleteFileActionId, verifyPlainFileListStagingBinding, plainFileListRequestDecision, plainFileDeleteFlightOutcome, createPlainFileListDeleteGate, createPlainFileListOwnerLedger, plainFileListSafeError} from './plain-file-lists-staging-contract.mjs';
 const runId = 'a1111111-1111-4111-8111-111111111111', revision = 'a'.repeat(40), actionId = 'b'.repeat(42);
@@ -242,4 +243,66 @@ test('producer final proof rejects unrelated original/preferences/financial chan
   const f = await producerLedgerFixture(), owner = createPlainFileListOwnerLedger(f.binding, f.coordinator), gate = createPlainFileListDeleteGate(f.binding, owner);gate.arm({fileId: 'qa-engineer', actor: 'engineer', path: f.binding.paths.product});const intent = gate.consume(request(f.binding), 'engineer');await gate.execute(intent, goodResponse);f.patchFinal(patch);
   await assert.rejects(owner.verifyFinalState(finalInput(f.binding, gate.currentStateHash())), /F115_PRODUCER_FINAL_PROOF_MISMATCH/);
  }
+});
+
+test('owned task OPEN accepts heading status badge and only retries a hidden hydration timeout', async () => {
+ const title = 'QA(task).1+ [files]';
+ function surface({opensAfter = 1, count = 1, waitError = null, visibleOnError = false} = {}) {
+  let clicks = 0, visible = false;
+  const trigger = {count: async () => count, isVisible: async () => true, click: async options => {assert.deepEqual(options, {timeout: 65000});visible = ++clicks >= opensAfter;}};
+  const dialog = {filter(options) {assert.equal(options.has.kind, 'owned-heading');return this;}, count: async () => visible ? 1 : 0, isVisible: async () => visible, waitFor: async options => {
+   assert.deepEqual(options, {state: 'visible', timeout: 2500});
+   if (waitError) {visible = visibleOnError;const error = Error('controlled');error.name = waitError;throw error;}
+   if (!visible) {const error = Error('controlled');error.name = 'TimeoutError';throw error;}
+  }};
+  const page = {getByText: (value, options) => {assert.equal(value, title);assert.deepEqual(options, {exact: true});return trigger;}, getByRole: (role, options) => {
+   if (role === 'dialog') return dialog;
+   assert.equal(role, 'heading');assert.equal(options.name.test(title + ' Новая'), true);assert.equal(options.name.test(title), true);assert.equal(options.name.test(title + '-foreign'), false);assert.equal(options.name.test('QAxtaskx.1+ [files] Новая'), false);return {kind: 'owned-heading'};
+  }};
+  return {page, dialog, clicks: () => clicks};
+ }
+ for (const opensAfter of [1, 2, Infinity]) {
+  const s = surface({opensAfter}), attempts = [];
+  if (Number.isFinite(opensAfter)) {assert.equal(await openOwnedTaskFileDialog(s.page, title, attempt => attempts.push(attempt)), s.dialog);assert.equal(s.clicks(), opensAfter);assert.equal(attempts.length, opensAfter);}
+  else {await assert.rejects(openOwnedTaskFileDialog(s.page, title), /F115_TASK_DIALOG_NOT_VISIBLE/);assert.equal(s.clicks(), 3);}
+ }
+ for (const settings of [{waitError: 'Error'}, {waitError: 'TimeoutError', visibleOnError: true}, {count: 2}]) {
+  const s = surface(settings);await assert.rejects(openOwnedTaskFileDialog(s.page, title), /^Error: F115_/);assert.equal(s.clicks(), settings.count === 2 ? 0 : 1);
+ }
+});
+
+
+test('pageerror diagnostic emits only finite technical classes and a message digest', () => {
+ const cases = [
+  ['Minified React error #418; visit https://react.dev/errors/418?args[]=private', 'REACT_MINIFIED', 418],
+  ['ResizeObserver loop completed with undelivered notifications.', 'RESIZE_OBSERVER_LOOP', null],
+  ["Cannot read properties of undefined (reading 'then')", 'UNDEFINED_THEN', null],
+  ['An error occurred in the Server Components render. The specific message is omitted in production builds.', 'SERVER_COMPONENT_OPAQUE', null],
+  ['Failed to fetch', 'NETWORK_READ_FAILED', null],
+  ['private customer secret with https://private.invalid/file', 'OTHER', null],
+ ];
+ for (const [message, family, reactCode] of cases) {
+  const d = plainFileListPageErrorDiagnostic({name: 'TypeError', message, stack: 'at fn (https://staging-crm.peromebel.by/_next/static/chunks/private.js:1:4)'});
+  assert.deepEqual(d, {family, errorKind: 'TypeError', reactCode, messageSha256: createHash('sha256').update(message).digest('hex'), sourceClass: 'CRM_STATIC'});assert.equal(JSON.stringify(d).includes('private'), false);
+ }
+ assert.equal(plainFileListPageErrorDiagnostic({message: cases[2][0], stack: 'at Serwist.register'}).family, 'SERWIST_UNDEFINED_THEN');
+ assert.equal(plainFileListPageErrorDiagnostic({name: 'private-unknown', message: 'private', stack: 'at chrome://print/native.js'}).sourceClass, 'NATIVE_PRINT');
+ assert.equal(plainFileListPageErrorDiagnostic({name: 'private-unknown'}).errorKind, 'OtherError');
+ assert.equal(plainFileListPageErrorDiagnostic(null).family, 'OTHER');
+});
+
+
+test('omitting the proven desktop prefix requires the same current signed scope state and immutable prior digests', async () => {
+ const binding = await verifyPlainFileListStagingBinding(fixture());
+ const prefix = {kind: 'root-verified-desktop-file-prefix', runId: binding.runId, revision: binding.expectedRevision, preSha256: binding.preSha256, currentOwnedStateHash: binding.currentOwnedStateHash, storageManifestHash: binding.storageManifestHash, financialStateHash: binding.financialStateHash, priorReceiptSha256: 'a'.repeat(64), priorObservationSha256: 'b'.repeat(64), checkedDesktopRows: 12};
+ assert.equal(fileListsDesktopPrefixAccepted(undefined, binding), false);assert.equal(fileListsDesktopPrefixAccepted(prefix, binding), true);
+ for (const changed of [{runId: 'other'}, {revision: '0'.repeat(40)}, {currentOwnedStateHash: '0'.repeat(64)}, {financialStateHash: '0'.repeat(64)}, {storageManifestHash: '0'.repeat(64)}, {preSha256: '0'.repeat(64)}, {priorReceiptSha256: 'invalid'}, {checkedDesktopRows: 0}]) assert.throws(() => fileListsDesktopPrefixAccepted({...prefix, ...changed}, binding), /F115_CURRENT_VERIFIED_DESKTOP_PREFIX_REQUIRED/);
+});
+
+
+test('invalid owned Task can be truthfully deferred only in a wholly read-only unchanged current scope', async () => {
+ const binding = await verifyPlainFileListStagingBinding(fixture()), task = {kind:'root-confirmed-unlinked-owned-task',runId:binding.runId,revision:binding.expectedRevision,taskId:binding.ids.task,workId:null,currentOwnedStateHash:binding.currentOwnedStateHash,signedObservationSha256:'a'.repeat(64)};
+ assert.equal(fileListsUnlinkedTaskOmitted(undefined,binding,[]),false);assert.equal(fileListsUnlinkedTaskOmitted(task,binding,[]),true);
+ for(const change of [{taskId:'foreign'},{revision:'0'.repeat(40)},{workId:'existing'},{currentOwnedStateHash:'0'.repeat(64)},{signedObservationSha256:'bad'}])assert.throws(()=>fileListsUnlinkedTaskOmitted({...task,...change},binding,[]),/F115_CURRENT_UNLINKED_TASK_READONLY_REQUIRED/);
+ assert.throws(()=>fileListsUnlinkedTaskOmitted(task,binding,[{mode:'real'}]),/F115_CURRENT_UNLINKED_TASK_READONLY_REQUIRED/);
 });

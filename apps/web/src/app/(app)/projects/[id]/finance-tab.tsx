@@ -15,6 +15,7 @@ import { formatAmount, formatMoneyTotal, formatDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { deletePayment } from "@/server/payments/actions";
 import { ProjectExpenseLedger } from "@/components/project-expense-ledger";
+import { ReportDocumentButton } from "@/components/report-document-button";
 
 
 import type { PaymentRow, ProjectExpenseRow, ProjectEconomicsView, CashAccountOption, ExpenseArticleOption } from "@/server/finance/contracts";
@@ -115,6 +116,12 @@ export function FinanceTab({
         className: "text-right font-medium",
         headerClassName: "text-right",
         cell: amountCell,
+      },
+      {
+        id: "document",
+        header: "Отчетный документ",
+        searchValue: (row) => row.reportDocument?.fileName ?? "",
+        cell: (row) => <ReportDocumentButton document={row.reportDocument} />,
       },
       {
         id: "actions",
