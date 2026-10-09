@@ -39,10 +39,10 @@ import {makeTechnicalStore} from './product-draft-stage-runner.mjs';
 import {assertTechnicalPersistence} from './product-draft-stage-wire.mjs';
 import {acceptanceWeb} from './crm-acceptance-transport.mjs';
 const fixture={runId:'80502171-fcf9-4189-a3f8-c8a77e94efad',revision:'a'.repeat(40),signature:'b'.repeat(64),pre:{ids:{actor:'own-manager',client:'own-client',projectB:'own-paused'},tags:{actor:'QA111 manager run',client:'QA111 client run',projectA:'QA111 primary run',products:Array.from({length:10},(_,i)=>'QA111 product run '+(i+1))}}};
-function fakeBrowser({status=503,pageError,request,throwOnClick,closeThrows=false}={}){
- const handlers=new Map(),state={launches:0,captures:0,fetches:0,aborts:0,contextClosed:false,browserClosed:false},page={
+function fakeBrowser({status=503,pageError,request,throwOnClick,closeThrows=false,mainNodes=[{classes:['@container/main']}]}={}){
+ const handlers=new Map(),state={launches:0,captures:0,fetches:0,aborts:0,contextClosed:false,browserClosed:false,mainWaits:[]},page={
   on:(event,fn)=>{handlers.set(event,fn);},
-  locator:()=>({waitFor:async()=>{}}),
+  locator:selector=>({waitFor:async()=>{const match=/^main(?:\[class~="([^"]+)"\])?$/.exec(selector);assert.ok(match,'MAIN_SELECTOR_SUPPORTED');const matchedCount=mainNodes.filter(node=>!match[1]||node.classes.includes(match[1])).length;state.mainWaits.push({selector,matchedCount});if(matchedCount!==1)throw Error('STRICT_MODE_MAIN_COUNT');}}),
   getByRole:()=>({click:async()=>{throw throwOnClick??Error('private-unexpected-selector-message');}}),
   goto:async()=>{
    if(pageError)handlers.get('pageerror')(pageError);
@@ -82,4 +82,12 @@ test('durable callback failure cannot allow navigation or mask error during fina
 });
 test('resource close failure keeps original primary HTTP failure and null graph',async()=>{
  const saved=await controlledEarlyStop(fakeBrowser({status:503,closeThrows:true}));assert.equal(saved.receipt.code,'DRAFT111_OWN_PAGE_HTTP');assert.equal(saved.receipt.failureStep,'PROJECTS_BOARD');assert.equal(saved.receipt.closeFailures,1);
+});
+
+test('nested SidebarInset and AppShell mains select only the intended class-token inner main',async()=>{
+ const error=Error('private-selector-user-data');error.name='TimeoutError';
+ const control=fakeBrowser({status:200,mainNodes:[{classes:['peer','relative']},{classes:['flex','@container/main','min-w-0']}],throwOnClick:error}),saved=await controlledEarlyStop(control);
+ assert.deepEqual(control.state.mainWaits,[{selector:'main[class~="@container/main"]',matchedCount:1}]);
+ assert.equal(saved.receipt.pageHttpStatus,200);assert.equal(saved.receipt.pageErrors,0);assert.equal(saved.receipt.failureStep,'PROJECT_DIALOG_OPEN');
+ const nodes=[{classes:['peer']},{classes:['@container/main']}];assert.equal(nodes.length,2);assert.equal(nodes.filter(node=>node.classes.includes('@container/main')).length,1);
 });
