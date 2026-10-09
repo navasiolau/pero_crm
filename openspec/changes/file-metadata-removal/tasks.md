@@ -15,4 +15,4 @@
 
 - [x] 3.1 Подготовить и выполнить через root последовательную PostgreSQL rollback проверку DDL/mapping/File/FK/storage invariants на существующей разрешённой БД.
 - [x] 3.2 Пройти локальные typecheck/test/build/OpenSpec validation, записать честные результаты в verification.md.
-- [ ] 3.3 После разрешённых коммитов/merge принять фактически развёрнутый staging: revision/health/sections/uploads/old references; не отмечать до реальной проверки.
+- [x] 3.3 Принят фактически развёрнутый staging37f882f: sections/uploads/replay/сохранность старого эскиза и ссылок; Parentff30 PASS/CLOSED с сохранением всех54 исходных таблиц, схемы, финансов, preferences и originalS3.
