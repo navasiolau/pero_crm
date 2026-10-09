@@ -17,15 +17,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SearchableSelect } from "@/components/ui/searchable-select";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { formatAmount, formatQty } from "@/lib/format";
-import { MATERIAL_UNITS } from "@/lib/labels";
+import type { MaterialUnitOption } from "@/server/warehouse/unit-contracts";
 import { cn } from "@/lib/utils";
 import {
   addMaterial,
@@ -43,7 +36,7 @@ const emptyForm = {
   name: "",
   sku: "",
   categoryId: "",
-  unit: "шт",
+  unitId: "",
   purchasePrice: "",
   minStock: "",
   comment: "",
@@ -54,11 +47,13 @@ const emptyForm = {
 export function ItemsView({
   rows,
   categories,
+  units,
   canManage,
   showMoney,
 }: {
   rows: MaterialView[];
   categories: MaterialCategoryView[];
+  units: MaterialUnitOption[];
   canManage: boolean;
   showMoney: boolean;
 }) {
@@ -86,7 +81,7 @@ export function ItemsView({
 
   function openCreate() {
     setEditing(null);
-    setForm(emptyForm);
+    setForm({ ...emptyForm, unitId: units.find(unit => unit.id === "warehouse-unit-piece")?.id ?? units[0]?.id ?? "" });
     setEditOpen(true);
   }
 
@@ -96,7 +91,7 @@ export function ItemsView({
       name: material.name,
       sku: material.sku ?? "",
       categoryId: material.categoryId ?? "",
-      unit: material.unit,
+      unitId: material.unitId,
       purchasePrice:
         material.purchasePrice === null ? "" : String(material.purchasePrice),
       minStock: material.minStock === null ? "" : String(material.minStock),
@@ -108,6 +103,7 @@ export function ItemsView({
   const minStock = Number(form.minStock);
   const formValid =
     form.name.trim() !== "" &&
+    units.some(unit => unit.id === form.unitId) &&
     (form.minStock.trim() === "" ||
       (Number.isFinite(minStock) && minStock >= 0));
 
@@ -411,23 +407,14 @@ export function ItemsView({
             <div className="grid grid-cols-3 gap-3">
               <div className="flex flex-col gap-1.5">
                 <Label>Единица *</Label>
-                <Select
-                  value={form.unit}
-                  onValueChange={(next) =>
-                    setForm((prev) => ({ ...prev, unit: next ?? "шт" }))
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue>{form.unit}</SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {MATERIAL_UNITS.map((unit) => (
-                      <SelectItem key={unit} value={unit}>
-                        {unit}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <SearchableSelect
+                  options={units.map(unit => ({ value: unit.id, label: unit.name }))}
+                  value={form.unitId}
+                  onChange={unitId => setForm(prev => ({ ...prev, unitId }))}
+                  placeholder="Выберите единицу"
+                  searchPlaceholder="Поиск единицы…"
+                  emptyText="Единиц нет — администратор может добавить их в настройках"
+                />
               </div>
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor="m-price">Учётная цена, BYN</Label>
@@ -471,7 +458,7 @@ export function ItemsView({
                   const payload = {
                     name: form.name.trim(),
                     sku: form.sku.trim() || undefined,
-                    unit: form.unit,
+                    unitId: form.unitId,
                     categoryId: form.categoryId || undefined,
                     minStock:
                       form.minStock.trim() === "" ? undefined : minStock,

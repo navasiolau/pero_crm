@@ -19,7 +19,7 @@ export async function deletionBaseline(db:PrismaClient){
 export async function createDeletionFixture(tx:Prisma.TransactionClient,marker:string,currency='BYN'){
  const user=await tx.user.create({data:{id:marker,name:marker,email:marker+'@invalid.local',passwordHash:'qa-login-disabled',roles:['ADMIN']}});
  const actor={id:user.id,name:user.name,roles:user.roles,source:'web' as const};
- const material=await tx.material.create({data:{id:marker,name:marker,unit:'кг',purchasePrice:0}});
+ const material=await tx.material.create({data:{id:marker,name:marker,unitId: "warehouse-unit-kilogram",purchasePrice:0}});
  const cash=await tx.cashAccount.create({data:{id:marker,name:marker,currency}});
  const maxCode=await tx.expenseArticle.aggregate({_max:{code:true}});
  const article=await tx.expenseArticle.create({data:{id:marker,name:marker,code:(maxCode._max.code??0)+1}});

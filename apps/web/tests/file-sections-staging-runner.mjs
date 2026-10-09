@@ -38,7 +38,7 @@ function publish(file,value){
  return {file:absolute,sha256:sha(bytes)};
 }
 function sources(){
- const out={};for(const name of ['file-sections-staging-readonly.mjs','file-sections-staging-runner.mjs','crm-acceptance-transport.mjs'])out[name]=sha(readFileSync(path.join(here,name)));
+ const out={};for(const name of ['file-sections-staging-readonly.mjs','file-sections-staging-runner.mjs','crm-acceptance-token-clock.mjs','crm-acceptance-transport.mjs'])out[name]=sha(readFileSync(path.join(here,name)));
  out['crm-modernization-staging.py']=sha(readFileSync(path.join(root,'deploy/acceptance/crm-modernization-staging.py')));return out;
 }
 function approvedSql(){return verifiedMigrationChecksum(readFileSync(path.join(acceptanceWeb,'prisma/migrations',MIGRATION.name,'migration.sql')));}
@@ -59,7 +59,7 @@ export async function runFileSectionsStagingProof(options){
  const input={operation:'inspect',authorized:true,mode:options.mode,revision:options.revision,runId:options.runId,expectedMigration};let previous;
  if(options.mode==='after'){
   const beforeBytes=readFileSync(privatePath(options.beforeFile));need(beforeBytes.length<=128*1024&&sha(beforeBytes)===options.beforeSha256,'BEFORE_BYTES_DIGEST_INVALID');previous=JSON.parse(beforeBytes.toString('utf8'));
-  need(previous?.kind==='file-sections-staging-before'&&previous.version===1&&previous.runId===options.runId&&REV.test(previous.revision??'')&&previous.revision!==options.revision,'BEFORE_PROOF_BINDING_INVALID');
+  need(previous?.kind==='file-sections-staging-before'&&previous.version===2&&previous.runId===options.runId&&REV.test(previous.revision??'')&&previous.revision!==options.revision,'BEFORE_PROOF_BINDING_INVALID');
   same(previous.sources,sourceHashes,'PROOF_SOURCE_CHANGED');same(previous.expectedMigration,expectedMigration,'PROOF_MIGRATION_CHANGED');need(previous.bundleSha256===bundleSha256&&previous.identity?.hostname==='crm-staging'&&previous.identity.revision===previous.revision,'BEFORE_BUNDLE_IDENTITY_INVALID');
   verifyBefore(previous.snapshot,{...input,mode:'before',revision:previous.revision});
  }
@@ -67,7 +67,7 @@ export async function runFileSectionsStagingProof(options){
  const result=await transport.execute(bytes,'inspect',input),snapshot=verifiedResponse(result,input,bundleSha256);same(sources(),sourceHashes,'CAPTURE_SOURCE_CHANGED');
  const verification=options.mode==='before'?verifyBefore(snapshot,input):verifyAfter(previous.snapshot,snapshot,{...input,beforeRevision:previous.revision});
  if(previous)for(const key of ['database','databaseStartedAt','databaseVolume','outerW07Sha256'])same(result.receipt.identity[key],previous.identity[key],'PHYSICAL_STAGE_CHANGED_'+key.toUpperCase());
- const descriptor={kind:'file-sections-staging-'+options.mode,version:1,runId:options.runId,revision:options.revision,sources:sourceHashes,expectedMigration,bundleSha256,identity:result.receipt.identity,snapshot,verification,...(previous?{beforeSha256:options.beforeSha256,beforeRevision:previous.revision}:{})};
+ const descriptor={kind:'file-sections-staging-'+options.mode,version:2,runId:options.runId,revision:options.revision,sources:sourceHashes,expectedMigration,bundleSha256,identity:result.receipt.identity,snapshot,verification,...(previous?{beforeSha256:options.beforeSha256,beforeRevision:previous.revision}:{})};
  const saved=publish(path.join(options.outputDir,options.mode+'-proof.json'),descriptor);
  return {status:options.mode==='before'?'BEFORE_CAPTURED':'AFTER_VERIFIED',mode:options.mode,runId:options.runId,revision:options.revision,...saved,verification,readOnly:true,fixturesCreated:false,migrationExecuted:false};
 }
