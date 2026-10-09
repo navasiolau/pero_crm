@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {readonlyFilePrintRequestDecision,filePrintOwnedCases,nativePdfUriClass,remainingFilePrintOwnedCases,printPageErrorProvenance} from './browser-file-print-staging-readonly.mjs';
+import {readonlyFilePrintRequestDecision,filePrintOwnedCases,nativePdfUriClass,remainingFilePrintOwnedCases,printPageErrorProvenance,filePrintHandlerAttached} from './browser-file-print-staging-readonly.mjs';
 const binding={origin:'https://staging-crm.peromebel.by',ids:{project:'owned-project',product:'owned-product',task:'owned-task'},files:[{id:'image',fileName:'Image.png',mimeType:'image/png',taskId:null,productId:'owned-product'},{id:'pdf',fileName:'Document.pdf',mimeType:'application/pdf',taskId:'owned-task',productId:'owned-product'},{id:'cad',fileName:'Model.b3d',mimeType:'application/octet-stream',productId:null}],finance:{incomeId:'income',expenseId:'expense'},financeDocs:[{id:'finance-pdf',mimeType:'application/pdf',paymentId:'expense'},{id:'finance-cad',mimeType:'application/octet-stream',paymentId:null}]};
 const deny=()=>({kind:'deny',code:'shared-deny'});
 test('readonly policy never forwards writes, even if shared policy would return a delete candidate',()=>{for(const method of ['POST','PUT','PATCH','DELETE'])assert.equal(readonlyFilePrintRequestDecision({url:binding.origin+'/projects/owned-project',method},binding,()=>({kind:'candidate-delete'})).kind,'abort-write');});
@@ -48,3 +48,5 @@ test('pageerror provenance trusts exact native stack sites, keeps CRM and unknow
  assert.equal(printPageErrorProvenance({message:native,stack:'Error: '+native},binding.origin).originClass,'UNKNOWN');
  assert.equal(printPageErrorProvenance({message,stack:'Error\n    at fail (https://example.invalid/app.js:1:2)'},binding.origin).originClass,'UNKNOWN');
 });
+
+test('printer readiness observes an attached React click handler without invoking it',()=>{let clicks=0;const node={};assert.equal(filePrintHandlerAttached(node),false);node['__reactProps$actual']={onClick:()=>clicks++};assert.equal(filePrintHandlerAttached(node),true);assert.equal(clicks,0);});

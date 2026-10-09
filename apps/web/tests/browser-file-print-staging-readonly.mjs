@@ -7,6 +7,7 @@ const mime = value => String(value ?? '').split(';',1)[0].trim().toLowerCase();
 const printable = file => file.mimeType === 'application/pdf' || /^image\/(?:png|jpeg|gif|webp|avif|bmp|svg\+xml|x-icon|apng)$/.test(file.mimeType);
 const safeError = error => /^F(?:115|116)_[A-Z0-9_]+$/.test(error?.message ?? '') ? error.message : 'F116_ACCEPTANCE_FAILED';
 
+export function filePrintHandlerAttached(node) {return Object.keys(node).some(key=>key.startsWith('__reactProps$')&&typeof node[key]?.onClick==='function');}
 const SHA=/^[a-f0-9]{64}$/;
 const NATIVE_URI_CLASSES=['CHROME_PDF_EXTENSION','CHROME_PRINT','CHROME_UNTRUSTED_PDF','SAME_ORIGIN_BLOB','OTHER'];
 export function nativePdfUriClass(value, origin) {
@@ -78,7 +79,7 @@ export async function runFilePrintStagingReadonly(input = {}) {
  check(typeof input.saveNativeScreenshot==='function','NATIVE_EVIDENCE_SINK_REQUIRED');
  const binding = await verifyPlainFileListStagingBinding(input), {cases,priorNativeMatched} = remainingFilePrintOwnedCases(binding,input.previousNativeReceipt);
  const {chromium,expect} = await import('@playwright/test');
- const receipt = {status:'STARTED',runId:binding.runId,revision:binding.expectedRevision,checks:[],native:[],priorNativeMatched,nativeUriCounts:Object.fromEntries(NATIVE_URI_CLASSES.map(kind=>[kind,0])),deniedUriCounts:Object.fromEntries(NATIVE_URI_CLASSES.map(kind=>[kind,0])),blockedWrites:0,blockedPrefetches:0,deniedReads:0,pageErrors:0,pageErrorProvenance:[],nativeShutdownErrors:0,storageWriteAttempts:0,upstreamWrites:0};
+ const receipt = {status:'STARTED',runId:binding.runId,revision:binding.expectedRevision,checks:[],native:[],step:'SETUP',currentCase:null,printerReadiness:[],priorNativeMatched,nativeUriCounts:Object.fromEntries(NATIVE_URI_CLASSES.map(kind=>[kind,0])),deniedUriCounts:Object.fromEntries(NATIVE_URI_CLASSES.map(kind=>[kind,0])),blockedWrites:0,blockedPrefetches:0,deniedReads:0,pageErrors:0,pageErrorProvenance:[],nativeShutdownErrors:0,storageWriteAttempts:0,upstreamWrites:0};
  let browser,context,fatal=null,verifiedPdf=null,completedPdf=null,nativeOperationActive=false;const routes=new Set();
  const fail = error => {fatal ??= safeError(error);};
  const assertSafe = () => check(!fatal && receipt.pageErrors===0 && receipt.deniedReads===0 && receipt.upstreamWrites===0 && receipt.storageWriteAttempts===0,'READONLY_OR_PAGE_VIOLATION');
@@ -134,13 +135,17 @@ export async function runFilePrintStagingReadonly(input = {}) {
   });
   for(const item of cases) {
    const file=item.file,source=item.source==='finance'?`/api/finance/documents/${file.id}`:`/api/files/${file.id}`;
+   receipt.currentCase={source:item.source,surface:item.surface,fileId:file.id,mimeType:file.mimeType};receipt.step='ORIGINAL';
    const original=await context.request.get(binding.origin+source,{maxRedirects:0});check(original.status()===200&&mime(original.headers()['content-type'])===mime(file.mimeType),'OWN_ORIGINAL_METADATA_FAILED');
    const bytes=await original.body();check(createHash('sha256').update(bytes).digest('hex')===file.contentHash,'OWN_ORIGINAL_BYTES_CHANGED');
-   const row=await locate(page,item);await expect(row).toHaveCount(1);await row.scrollIntoViewIfNeeded();check((await row.innerText()).trim()===file.fileName,'OWN_FILENAME_OR_METADATA_FAILED');await expect(row.locator('img,iframe,video,time')).toHaveCount(0);
+   receipt.step='LOCATE';const row=await locate(page,item);await expect(row).toHaveCount(1);await row.scrollIntoViewIfNeeded();check((await row.innerText()).trim()===file.fileName,'OWN_FILENAME_OR_METADATA_FAILED');await expect(row.locator('img,iframe,video,time')).toHaveCount(0);
    const printer=row.getByRole('button',{name:`Распечатать ${file.fileName}`,exact:true});
    if(item.source==='finance')await expect(row.getByRole('button',{name:`Удалить файл ${file.fileName}`,exact:true})).toBeDisabled();
    if(!printable(file)){await expect(printer).toHaveCount(0);receipt.checks.push({kind:'unsupported-no-printer',source:item.source,fileId:file.id});assertSafe();continue;}
-   await expect(printer).toBeEnabled();
+   receipt.step='PRINTER_READY';await expect(printer).toBeEnabled();
+   const initiallyAttached=await printer.evaluate(filePrintHandlerAttached);
+   await expect.poll(()=>printer.evaluate(filePrintHandlerAttached),{timeout:15000}).toBe(true);
+   receipt.printerReadiness.push({fileId:file.id,initiallyAttached,handlerAttached:true});receipt.step='NATIVE_PREVIEW';
    let native;
    if(file.mimeType==='application/pdf')verifiedPdf={source:item.source,fileId:file.id,contentHash:file.contentHash};
    nativeOperationActive=true;try {native=await inspectNativeFilePrintPreview({browser,isPdf:file.mimeType==='application/pdf',trigger:async()=>{assertSafe();await printer.click();},saveScreenshot:async png=>{await input.saveNativeScreenshot({source:item.source,fileId:file.id,contentHash:file.contentHash,png});}});}
@@ -151,7 +156,7 @@ export async function runFilePrintStagingReadonly(input = {}) {
    assertSafe();
   }
   await Promise.allSettled([...routes]);assertSafe();
-  const after=await verifyPlainFileListStagingBinding(input);
+  receipt.step='FINAL';const after=await verifyPlainFileListStagingBinding(input);
   check(['currentOwnedStateHash','storageManifestHash','financialStateHash','preSha256','checkpointHash','expectedRevision'].every(key=>after[key]===binding[key]),'CURRENT_OWNER_STATE_CHANGED');
   receipt.status='READ_ONLY_CAPTURED';receipt.visualReviewRequired=true;receipt.ownerCertificateRevalidated=true;receipt.credentialsPersisted=false;receipt.physicalPrintSubmitted=false;
  }catch(error){receipt.status='STOP';receipt.code=fatal??safeError(error);}
