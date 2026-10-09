@@ -1,4 +1,5 @@
 import path from "node:path";
+import { deleteExactS3Object } from "./s3-delete-exact";
 
 import {
   S3Client,
@@ -91,4 +92,11 @@ export async function s3Delete(key: string): Promise<void> {
   await s3().send(
     new DeleteObjectCommand({ Bucket: process.env.S3_BUCKET, Key: key }),
   );
+}
+
+/** Физическая точечная очистка original/thumbnail; обычный s3Delete сохраняет прежний контракт. */
+export async function s3DeleteExact(key: string): Promise<void> {
+  const config = storageConfiguration();
+  if (config.mode !== "s3") throw Error("STORAGE_CONFIG_INVALID");
+  await deleteExactS3Object(s3(), config.bucket, key);
 }

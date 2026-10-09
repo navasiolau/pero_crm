@@ -4,24 +4,25 @@ import {test} from 'node:test';
 import sharp from 'sharp';
 const require=createRequire(import.meta.url);
 function inject(name:string,exports:Record<string,unknown>){const filename=require.resolve(name),stub=new Module(filename);stub.filename=filename;stub.loaded=true;stub.exports=exports;require.cache[filename]=stub;}
-const files=new Map<string,Record<string,unknown>>(),receipts=new Map<string,Record<string,unknown>>();
+const files=new Map<string,Record<string,unknown>>(),receipts=new Map<string,Record<string,unknown>>(),events=new Map<string,Record<string,unknown>>();
+const erasedExactKeys=new Set<string>();let cleanupFailure=false,nextFile=0,commits=0;
 let storageFailure=false,auditFailure=false,notifyFailure=false,commitAckFailure=false,failPut=0,puts=0,deletes=0,notifies=0;
 const storedBytes:Buffer[]=[],deletedKeys:string[]=[];
 const projectRow={id:'j',number:'1',products:[],tasks:[],coverFileId:null as string|null};
 const productRow={id:'p',number:'1.1',projectId:'j',engineerId:'e',status:'DESIGN',sketchFileId:null as string|null};
 let actorRoles=['MANAGER'],actorId='m',sessionMissing=false;
-const tx={$queryRaw:async()=>[],project:{findFirst:async()=>projectRow,updateMany:async({where,data}:{where:{coverFileId:string|null};data:{coverFileId:string|null}})=>{if(projectRow.coverFileId!==where.coverFileId)return{count:0};projectRow.coverFileId=data.coverFileId;return{count:1}}},product:{findFirst:async()=>productRow,updateMany:async({where,data}:{where:{sketchFileId:string|null};data:{sketchFileId:string|null}})=>{if(productRow.sketchFileId!==where.sketchFileId)return{count:0};productRow.sketchFileId=data.sketchFileId;return{count:1}}},task:{findMany:async()=>[]},file:{create:async({data}:{data:Record<string,unknown>})=>{const row={...data,id:'c'+files.size};files.set(row.id,row);return row},findUnique:async({where}:{where:{id:string}})=>files.get(where.id)??null,findFirst:async({where}:{where:{AND:{id?:string}[]}})=>files.get(where.AND[0].id!)??null},changeLog:{findUnique:async({where}:{where:{id:string}})=>receipts.get(where.id)??null,create:async({data}:{data:Record<string,unknown>})=>{if(auditFailure)throw Error('PRIVATE_DB');receipts.set((data.id as string)??'audit'+receipts.size,data);return data}}};
+const tx={$queryRaw:async()=>[],project:{findFirst:async()=>projectRow,updateMany:async({where,data}:{where:{coverFileId:string|null};data:{coverFileId:string|null}})=>{if(projectRow.coverFileId!==where.coverFileId)return{count:0};projectRow.coverFileId=data.coverFileId;return{count:1}}},product:{findFirst:async()=>productRow,findUnique:async()=>productRow,updateMany:async({where,data}:{where:{sketchFileId:string|null};data:{sketchFileId:string|null}})=>{if(productRow.sketchFileId!==where.sketchFileId)return{count:0};productRow.sketchFileId=data.sketchFileId;return{count:1}}},task:{findMany:async()=>[]},file:{create:async({data}:{data:Record<string,unknown>})=>{const row={...data,id:'c'+nextFile++};files.set(row.id,row);return row},findUnique:async({where}:{where:{id:string}})=>files.get(where.id)??null,findFirst:async({where}:{where:{AND?:{id?:string}[];OR?:{id?:string;projectId?:string;storedName?:string}[]}})=>where.AND?files.get(where.AND[0].id!)??null:[...files.values()].find(row=>where.OR?.some(condition=>condition.id?row.id===condition.id:row.projectId===condition.projectId&&row.storedName===condition.storedName))??null,count:async({where}:{where:{id:{not:string};projectId:string;storedName:string}})=>[...files.values()].filter(row=>row.id!==where.id.not&&row.projectId===where.projectId&&row.storedName===where.storedName).length,delete:async({where}:{where:{id:string}})=>{const old=files.get(where.id);files.delete(where.id);return old}},changeLog:{findUnique:async({where}:{where:{id:string}})=>receipts.get(where.id)??null,create:async({data}:{data:Record<string,unknown>})=>{if(auditFailure)throw Error('PRIVATE_DB');receipts.set((data.id as string)??'audit'+receipts.size,data);return data}},domainEvent:{create:async({data}:{data:Record<string,unknown>})=>{const row={processedAt:null,attempts:0,...data};events.set(String(data.id),row);return row},findUnique:async({where}:{where:{id:string}})=>events.get(where.id)??null,update:async({where,data}:{where:{id:string};data:Record<string,unknown>})=>{const row=events.get(where.id)!;const count=Number(row.attempts)+1;Object.assign(row,data,{attempts:count});return row},updateMany:async({where,data}:{where:{id:string;processedAt:null};data:Record<string,unknown>})=>{const row=events.get(where.id);if(!row||row.processedAt)return{count:0};Object.assign(row,data,{attempts:Number(row.attempts)+1});return{count:1}}}};
 inject('../src/auth',{auth:async()=>sessionMissing?null:({user:{id:actorId,name:'M',roles:actorRoles}})});
 inject('../src/lib/prisma',{prisma:tx});
-inject('../src/server/tasks/transaction',{withTaskTransaction:async(fn:(t:typeof tx)=>Promise<unknown>)=>{const before=new Map(files),logs=new Map(receipts),oldProductCover=productRow.sketchFileId,oldProjectCover=projectRow.coverFileId;let result;try{result=await fn(tx)}catch(e){files.clear();before.forEach((v,k)=>files.set(k,v));receipts.clear();logs.forEach((v,k)=>receipts.set(k,v));productRow.sketchFileId=oldProductCover;projectRow.coverFileId=oldProjectCover;throw e}if(commitAckFailure)throw Error('PRIVATE_COMMIT_ACK');return result}});
-inject('../src/lib/s3',{UPLOADS_ROOT:'unused',s3Enabled:()=>true,fileKey:(id:string,n:string)=>id+'/'+n,thumbKey:(id:string,n:string)=>id+'/thumbs/'+n,s3Put:async(_key:string,bytes:Buffer)=>{puts++;storedBytes.push(bytes);if(storageFailure||puts===failPut)throw Error('PRIVATE_ENDPOINT_SECRET')},s3Delete:async(key:string)=>{deletes++;deletedKeys.push(key)}});
+inject('../src/server/tasks/transaction',{withTaskTransaction:async(fn:(t:typeof tx)=>Promise<unknown>)=>{const before=new Map(files),logs=new Map(receipts),beforeEvents=new Map(events),oldProductCover=productRow.sketchFileId,oldProjectCover=projectRow.coverFileId;let result;try{result=await fn(tx)}catch(e){files.clear();before.forEach((v,k)=>files.set(k,v));receipts.clear();logs.forEach((v,k)=>receipts.set(k,v));events.clear();beforeEvents.forEach((v,k)=>events.set(k,v));productRow.sketchFileId=oldProductCover;projectRow.coverFileId=oldProjectCover;throw e}commits++;if(commitAckFailure)throw Error('PRIVATE_COMMIT_ACK');return result}});
+inject('../src/lib/s3',{UPLOADS_ROOT:'unused',s3Enabled:()=>true,fileKey:(id:string,n:string)=>id+'/'+n,thumbKey:(id:string,n:string)=>id+'/thumbs/'+n+'.jpg',s3Put:async(_key:string,bytes:Buffer)=>{puts++;storedBytes.push(bytes);if(storageFailure||puts===failPut)throw Error('PRIVATE_ENDPOINT_SECRET')},s3Delete:async(key:string)=>{deletes++;deletedKeys.push(key)},s3DeleteExact:async(key:string)=>{assert.ok(commits>0,'old storage deletion starts after COMMIT');assert.equal(files.has('old'),false);if(cleanupFailure&&key==='j/thumbs/old.png.jpg')throw Error('PRIVATE_CLEANUP_ENDPOINT');if(!erasedExactKeys.has(key)){erasedExactKeys.add(key);deletes++;deletedKeys.push(key);}}});
 inject('../src/server/plugins/changelog',{writeChangeLog:async()=>{if(auditFailure)throw Error('PRIVATE_DB')}});
 inject('../src/server/notifications/notify',{notifyOrg:async()=>{notifies++;if(notifyFailure)throw Error('PRIVATE_NOTIFY')}});
 inject('next/cache',{revalidatePath:()=>{}});
 const {POST}=require('../src/app/api/files/upload/route') as typeof import('../src/app/api/files/upload/route');
 const uuid='12222222-2222-4222-8222-222222222222';
 function request(bytes:string|Uint8Array<ArrayBuffer>='original',mutation=uuid,image=false,section:'GENERAL'|'MEASUREMENT'|'PRODUCTION'|'INSTALLATION'='GENERAL'){const values={file:new File([bytes],image?'qa.png':'qa.pdf',{type:image?'image/png':'application/pdf'}),projectId:'j',productId:'p',section,clientMutationId:mutation};return {formData:async()=>({get:(key:string)=>values[key as keyof typeof values]??null})} as unknown as Request}
-function reset(){sessionMissing=false;files.clear();receipts.clear();storedBytes.length=deletedKeys.length=0;projectRow.coverFileId=productRow.sketchFileId=null;productRow.status='DESIGN';actorId='m';actorRoles=['MANAGER'];storageFailure=auditFailure=notifyFailure=commitAckFailure=false;failPut=puts=deletes=notifies=0;}
+function reset(){sessionMissing=false;files.clear();receipts.clear();events.clear();erasedExactKeys.clear();cleanupFailure=false;nextFile=commits=0;storedBytes.length=deletedKeys.length=0;projectRow.coverFileId=productRow.sketchFileId=null;productRow.status='DESIGN';actorId='m';actorRoles=['MANAGER'];storageFailure=auditFailure=notifyFailure=commitAckFailure=false;failPut=puts=deletes=notifies=0;}
 test('storage exception becomes sanitized JSON with phase; no file recorded',async()=>{reset();storageFailure=true;const r=await POST(request());assert.equal(r.status,500);const x=await r.json();assert.equal(x.details.phase,'storage-original');assert.equal(x.commitState,'notCommitted');assert.equal(typeof x.requestId,'string');assert.equal(JSON.stringify(x).includes('PRIVATE'),false);assert.equal(files.size,0)});
 test('lost ACK exact replay does not store or notify twice; changed bytes conflict',async()=>{reset();const first=await(await POST(request())).json();assert.equal(first.ok,true);const second=await(await POST(request())).json();assert.equal(second.id,first.id);assert.equal(second.repeated,true);assert.equal(puts,1);assert.equal(notifies,1);const changed=await POST(request('different'));assert.equal(changed.status,409);assert.equal(files.size,1);assert.equal(puts,1)});
 test('audit failure rolls back file and compensates exact storage; notify failure keeps success',async()=>{reset();auditFailure=true;const fail=await POST(request());assert.equal(fail.status,500);assert.equal(files.size,0);assert.equal(receipts.size,0);assert.equal(deletes,1);reset();notifyFailure=true;const good=await POST(request());assert.equal(good.status,200);assert.equal((await good.json()).ok,true);assert.equal(files.size,1);assert.equal(receipts.size,1)});
@@ -31,14 +32,14 @@ function projectRequest(file:File,extra:Record<string,unknown>={}){const values:
 test('project target rejects mixed product/task modes and engineer before bytes/storage',async()=>{reset();const file=new File(['not read'],'qa.png',{type:'image/png'});file.arrayBuffer=async()=>{throw Error('BYTES_MUST_NOT_BE_READ')};for(const extra of [{productId:'p'},{taskId:'t'},{assignCover:'1'},{stage:'PRODUCTION'}]){const r=await POST(projectRequest(file,extra));assert.equal(r.status,422);}actorRoles=['ENGINEER'];assert.equal((await POST(projectRequest(file))).status,404);assert.equal(puts,0);assert.equal(files.size,0);});
 test('project cover actual POST preserves original bytes and replay has no extra storage writes',async()=>{reset();const bytes=await sharp({create:{width:2,height:2,channels:3,background:'#00ff00'}}).png().toBuffer(),file=new File([new Uint8Array(bytes)],'qa.png',{type:'image/png'});const first=await(await POST(projectRequest(file))).json();assert.equal(first.ok,true);assert.equal(first.coverFileId,first.id);assert.equal(first.cover.id,first.id);assert.deepEqual(storedBytes[0],bytes);assert.equal(projectRow.coverFileId,first.id);const again=await(await POST(projectRequest(file))).json();assert.equal(again.id,first.id);assert.equal(again.repeated,true);assert.equal(puts,2);assert.equal(files.size,1);});
 
-function sketchRequest(file:File,baseline:unknown='old'){const values:Record<string,unknown>={file,projectId:'j',productId:'p',section:'PRODUCTION',assignCover:'1',expectedSketchFileId:baseline,clientMutationId:uuid};return{formData:async()=>({get:(key:string)=>values[key]??null})} as unknown as Request;}
+function sketchRequest(file:File,baseline:unknown='old',mutation=uuid){const values:Record<string,unknown>={file,projectId:'j',productId:'p',section:'PRODUCTION',assignCover:'1',expectedSketchFileId:baseline,clientMutationId:mutation};return{formData:async()=>({get:(key:string)=>values[key]??null})} as unknown as Request;}
 function oldSketch(){const old={id:'old',projectId:'j',productId:'p',taskId:null,mimeType:'image/png',fileName:'old.png',storedName:'old.png',hasThumb:true,uploadedById:'m'};files.set('old',old);productRow.sketchFileId='old';actorId='e';actorRoles=['ENGINEER'];return old;}
 
-test('sketch replacement actual POST keeps original bytes, old manager file and idempotent receipt',async()=>{
- reset();const old=oldSketch(),bytes=await sharp({create:{width:2,height:2,channels:3,background:'#0000ff'}}).png().toBuffer(),file=new File([new Uint8Array(bytes)],'replacement.png',{type:'image/png'});
+test('sketch replacement actual POST keeps new bytes, removes old manager file and replays exact cleanup',async()=>{
+ reset();oldSketch();const bytes=await sharp({create:{width:2,height:2,channels:3,background:'#0000ff'}}).png().toBuffer(),file=new File([new Uint8Array(bytes)],'replacement.png',{type:'image/png'});
  const response=await POST(sketchRequest(file));assert.equal(response.status,200);const first=await response.json();
- assert.equal(first.ok,true);assert.equal(productRow.sketchFileId,first.id);assert.equal(first.sketch.id,first.id);assert.equal(files.get('old'),old);assert.equal(files.size,2);assert.equal(deletes,0);assert.deepEqual(storedBytes[0],bytes);
- const replay=await(await POST(sketchRequest(file))).json();assert.equal(replay.repeated,true);assert.equal(replay.id,first.id);assert.equal(puts,2);assert.equal(files.size,2);
+ assert.equal(first.ok,true);assert.equal(productRow.sketchFileId,first.id);assert.equal(first.sketch.id,first.id);assert.equal(files.has('old'),false);assert.equal(files.size,1);assert.equal(deletes,2);assert.equal(events.size,1);assert.deepEqual(storedBytes[0],bytes);
+ const replay=await(await POST(sketchRequest(file))).json();assert.equal(replay.repeated,true);assert.equal(replay.id,first.id);assert.equal(puts,2);assert.equal(files.size,1);
 });
 
 test('missing or stale sketch baseline is refused before reading bytes/storage',async()=>{
@@ -83,7 +84,7 @@ require.cache[require.resolve('../src/lib/s3')]!.exports.s3Put = async (key: str
 };
 
 test('112 concurrent identical engineer replacement keeps one receipt and compensates only duplicate upload keys', async () => {
- reset(); const old = oldSketch();
+ reset(); oldSketch();
  const bytes = await sharp({create:{width:2,height:2,channels:3,background:'#112233'}}).png().toBuffer();
  const image = () => new File([new Uint8Array(bytes)],'replacement.png',{type:'image/png'});
  let arrivals = 0; let release!: () => void;
@@ -97,24 +98,68 @@ test('112 concurrent identical engineer replacement keeps one receipt and compen
   assert.equal(results[0].id, results[1].id);
   assert.equal(results.filter(result => result.repeated === true).length, 1);
   assert.equal(productRow.sketchFileId, results[0].id);
-  assert.equal(files.get('old'), old);
-  assert.equal(files.size, 2);
+  assert.equal(files.has('old'), false);
+  assert.equal(files.size, 1);
+  assert.equal(events.size, 1);
   assert.equal(puts, 4);
-  assert.equal(deletes, 2, 'discard duplicate original and thumbnail after receipt replay');
+  assert.equal(deletes, 4, 'remove obsolete original/thumb and discard duplicate original/thumb');
   assert.equal(notifies, 1, 'the already committed replacement must not notify twice');
   const accepted = files.get(results[0].id)!;
-  assert.ok(deletedKeys.every(key => key !== `j/${accepted.storedName}` && key !== `j/thumbs/${accepted.storedName}.jpg` && !key.endsWith('/old.png')));
+  assert.ok(deletedKeys.every(key => key !== `j/${accepted.storedName}` && key !== `j/thumbs/${accepted.storedName}.jpg`));
  } finally { serializeSketchTransactions = false; originalBarrier = null; }
 });
 
-test('112 engineer replacement also preserves a legacy sketch with no upload author', async () => {
+test('112 engineer replacement also removes a legacy current sketch with no upload author', async () => {
  reset(); const old = oldSketch(); Object.assign(old,{uploadedById:null});
  const bytes = await sharp({create:{width:2,height:2,channels:3,background:'#223344'}}).png().toBuffer();
  const response = await POST(sketchRequest(new File([new Uint8Array(bytes)],'replacement.png',{type:'image/png'})));
  assert.equal(response.status, 200);
  assert.equal((await response.json()).ok, true);
- assert.equal(files.get('old'), old);
+ assert.equal(files.has('old'), false);
  assert.equal(old.uploadedById, null);
- assert.equal(files.size, 2);
- assert.equal(deletes, 0);
+ assert.equal(files.size, 1);
+ assert.equal(deletes, 2);
+});
+
+test('committed cleanup failure returns503 without success and same nonce finishes old thumb without new file',async()=>{
+ reset();oldSketch();cleanupFailure=true;
+ const bytes=await sharp({create:{width:2,height:2,channels:3,background:'#445566'}}).png().toBuffer(),file=new File([new Uint8Array(bytes)],'replacement.png',{type:'image/png'});
+ const first=await POST(sketchRequest(file));assert.equal(first.status,503);const failure=await first.json();
+ assert.equal(failure.ok,false);assert.equal(failure.code,'SKETCH_CLEANUP_PENDING');assert.equal(failure.commitState,'committed');assert.equal(JSON.stringify(failure).includes('PRIVATE'),false);
+ assert.equal(files.has('old'),false);assert.equal(files.size,1);const winner=productRow.sketchFileId;
+ assert.equal(events.size,1);assert.equal([...events.values()][0].processedAt,null);assert.equal(notifies,1);assert.equal(puts,2);
+ cleanupFailure=false;const repeated=await POST(sketchRequest(file));assert.equal(repeated.status,200);const ack=await repeated.json();
+ assert.equal(ack.repeated,true);assert.equal(ack.id,winner);assert.equal(ack.cleanupEventId,undefined);assert.ok([...events.values()][0].processedAt);
+ assert.equal(puts,2);assert.equal(notifies,1);assert.equal(deletes,2);assert.equal(files.size,1);
+});
+
+test('unknown replacement commit leaves old blobs until exact replay confirms commit and finishes cleanup',async()=>{
+ reset();oldSketch();commitAckFailure=true;
+ const bytes=await sharp({create:{width:2,height:2,channels:3,background:'#446677'}}).png().toBuffer(),file=new File([new Uint8Array(bytes)],'replacement.png',{type:'image/png'});
+ const first=await POST(sketchRequest(file));assert.equal(first.status,500);assert.equal(deletes,0);assert.equal(files.has('old'),false);assert.equal(events.size,1);
+ commitAckFailure=false;const replay=await POST(sketchRequest(file));assert.equal(replay.status,200);assert.equal((await replay.json()).repeated,true);assert.equal(deletes,2);assert.equal(puts,2);
+});
+
+test('superseded failed cleanup replay reports current winner; existing dispatcher completes only obsolete keys',async()=>{
+ reset();oldSketch();cleanupFailure=true;
+ const bytes=await sharp({create:{width:2,height:2,channels:3,background:'#556677'}}).png().toBuffer(),file=new File([new Uint8Array(bytes)],'first.png',{type:'image/png'});
+ assert.equal((await POST(sketchRequest(file))).status,503);const firstId=productRow.sketchFileId!;
+ cleanupFailure=false;
+ const second=await POST(sketchRequest(new File([new Uint8Array(bytes)],'second.png',{type:'image/png'}),firstId,'32222222-2222-4222-8222-222222222222'));
+ assert.equal(second.status,200);const winner=await second.json();assert.equal(files.has(firstId),false);
+ const writes=puts;const stale=await POST(sketchRequest(file));assert.equal(stale.status,409);const refusal=await stale.json();assert.equal(refusal.currentSketchFileId,winner.id);assert.equal(refusal.sketch,undefined);assert.equal(puts,writes);
+ const current=files.get(winner.id)!;const {dispatchEvent}=require('../src/server/plugins/events') as typeof import('../src/server/plugins/events');
+ await dispatchEvent('sketch-cleanup:'+uuid);assert.ok(events.get('sketch-cleanup:'+uuid)!.processedAt);
+ assert.ok(!deletedKeys.includes('j/'+current.storedName));assert.ok(!deletedKeys.includes('j/thumbs/'+current.storedName+'.jpg'));assert.equal(productRow.sketchFileId,winner.id);
+});
+
+test('two different concurrent replacements give one winner and remove only obsolete and losing fresh keys',async()=>{
+ reset();oldSketch();const bytes=await sharp({create:{width:2,height:2,channels:3,background:'#667788'}}).png().toBuffer();
+ let arrivals=0;let release!:()=>void;const both=new Promise<void>(resolve=>{release=resolve});serializeSketchTransactions=true;
+ originalBarrier=async()=>{if(++arrivals===2)release();await both;};
+ try{
+  const responses=await Promise.all([POST(sketchRequest(new File([new Uint8Array(bytes)],'a.png',{type:'image/png'}))),POST(sketchRequest(new File([new Uint8Array(bytes)],'b.png',{type:'image/png'}),'old','42222222-2222-4222-8222-222222222222'))]);
+  assert.deepEqual(responses.map(r=>r.status).sort(),[200,409]);assert.equal(files.size,1);assert.equal(events.size,1);assert.equal(files.has('old'),false);assert.equal(deletes,4);
+  const current=files.get(productRow.sketchFileId!)!;assert.ok(deletedKeys.every(key=>key!=='j/'+current.storedName&&key!=='j/thumbs/'+current.storedName+'.jpg'));
+ }finally{serializeSketchTransactions=false;originalBarrier=null;}
 });

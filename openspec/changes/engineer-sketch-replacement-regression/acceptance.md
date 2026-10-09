@@ -1,5 +1,23 @@
 # Staging acceptance112
 
+## Feedback09.10.2026 — текущая приёмка удаления эскиза: PENDING
+
+Новая политика владельца: после успешного upload новый эскиз — единственный текущий; ровно вытесненный File исчезает из вложений, original и thumbnail физически удалены, включая все их versions/delete markers. Ни один результат ниже, проверявший сохранение прежних own originals, не является приёмкой новой политики.
+
+Приёмку исполняет root после exclusive staging lease, independent review и проверки full deployed SHA/image/health, прежних DB identity/volume/network и idle W07. SAFETY-RULES обязательны; guard/identity anomaly → STOP без повторов. Production, dumps/restic и исторические backend3 файлы/пины не затрагиваются.
+
+Минимальный новый сценарий — только собственные помеченные QA-изделие и акторы:
+
+1. Назначенный ENGINEER DESIGN заменяет current manager sketch с точным baseline. BEFORE записываются old File ID/context и версии ровно original+thumbnail keys; соседний own attachment и его версии служат контрольными.
+2. AFTER успешного200 проверяются new pointer/new File, отсутствие old File в SQL/серверном списке вложений, отсутствие любых exact old original/thumb versions/delete markers и доступность новых bytes. Event обработан; соседние own и все чужие записи/ключи сохранены.
+3. Same-mutation replay не пишет новое изображение и не меняет winner. Stale и superseded replay дают409/current pointer без удаления current File; один targeted concurrent сценарий не оставляет второй old/current файл.
+4. Domain/runtime failure evidence подтверждает committed503 и recovery; actual storage failure не провоцируется сменой инфраструктуры или broad bucket policy.
+5. Root очищает только собственные точно зафиксированные QA IDs/keys/versions/events после recognised ACK/strict ownership checks; закрывает lifecycle и сохраняет BEFORE/AFTER evidence. До этого задача3.5 остаётся незакрытой.
+
+Старый engineer-sketch-stage-runner/backend3 проверял retained sketches и потому не запускается как доказательство этой политики. Его файлы, raw pins, receipts и предыдущие output directories сохраняются без изменений.
+
+## Historical acceptance — 08–09.10.2026, прежнее retention-поведение superseded
+
 Исполняет только root после чтения `engineer-sketch-qa-entry.mjs` и `engineer-sketch-stage-runner.mjs`. Обязательные правила: `D:/Projects/pero_infra/infra-recovery/SAFETY-RULES.md`; guard mismatch означает STOP. Коммит и интеграция принадлежат root; проверка прежнего deployed baseline не подтверждает новый fix. Итоговая фактическая ревизия и закрытый lifecycle записаны в конце документа и в `evidence.md`.
 
 ## Guards and scope
