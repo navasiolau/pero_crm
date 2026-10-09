@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {openOwnedTaskFileDialog} from './plain-file-lists-staging-browser.mjs';
+import {openOwnedTaskFileDialog, plainFileListPageErrorDiagnostic} from './plain-file-lists-staging-browser.mjs';
 import {createHash} from 'node:crypto';
 import {FILE_LIST_STAGING_ORIGIN as origin, FILE_LIST_FIXTURE_NAMESPACE as namespace, compiledDeleteFileActionId, verifyPlainFileListStagingBinding, plainFileListRequestDecision, plainFileDeleteFlightOutcome, createPlainFileListDeleteGate, createPlainFileListOwnerLedger, plainFileListSafeError} from './plain-file-lists-staging-contract.mjs';
 const runId = 'a1111111-1111-4111-8111-111111111111', revision = 'a'.repeat(40), actionId = 'b'.repeat(42);
@@ -269,4 +269,24 @@ test('owned task OPEN accepts heading status badge and only retries a hidden hyd
  for (const settings of [{waitError: 'Error'}, {waitError: 'TimeoutError', visibleOnError: true}, {count: 2}]) {
   const s = surface(settings);await assert.rejects(openOwnedTaskFileDialog(s.page, title), /^Error: F115_/);assert.equal(s.clicks(), settings.count === 2 ? 0 : 1);
  }
+});
+
+
+test('pageerror diagnostic emits only finite technical classes and a message digest', () => {
+ const cases = [
+  ['Minified React error #418; visit https://react.dev/errors/418?args[]=private', 'REACT_MINIFIED', 418],
+  ['ResizeObserver loop completed with undelivered notifications.', 'RESIZE_OBSERVER_LOOP', null],
+  ["Cannot read properties of undefined (reading 'then')", 'UNDEFINED_THEN', null],
+  ['An error occurred in the Server Components render. The specific message is omitted in production builds.', 'SERVER_COMPONENT_OPAQUE', null],
+  ['Failed to fetch', 'NETWORK_READ_FAILED', null],
+  ['private customer secret with https://private.invalid/file', 'OTHER', null],
+ ];
+ for (const [message, family, reactCode] of cases) {
+  const d = plainFileListPageErrorDiagnostic({name: 'TypeError', message, stack: 'at fn (https://staging-crm.peromebel.by/_next/static/chunks/private.js:1:4)'});
+  assert.deepEqual(d, {family, errorKind: 'TypeError', reactCode, messageSha256: createHash('sha256').update(message).digest('hex'), sourceClass: 'CRM_STATIC'});assert.equal(JSON.stringify(d).includes('private'), false);
+ }
+ assert.equal(plainFileListPageErrorDiagnostic({message: cases[2][0], stack: 'at Serwist.register'}).family, 'SERWIST_UNDEFINED_THEN');
+ assert.equal(plainFileListPageErrorDiagnostic({name: 'private-unknown', message: 'private', stack: 'at chrome://print/native.js'}).sourceClass, 'NATIVE_PRINT');
+ assert.equal(plainFileListPageErrorDiagnostic({name: 'private-unknown'}).errorKind, 'OtherError');
+ assert.equal(plainFileListPageErrorDiagnostic(null).family, 'OTHER');
 });

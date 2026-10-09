@@ -2,6 +2,7 @@
 import {chromium, expect} from '@playwright/test';
 import {mkdir, realpath} from 'node:fs/promises';
 import path from 'node:path';
+import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {disableKanbanQaServiceWorkerApi} from './kanban-cover-staging-browser.mjs';
 import {verifyPlainFileListStagingBinding, plainFileListRequestDecision, createPlainFileListDeleteGate, createPlainFileListOwnerLedger, plainFileListSafeError} from './plain-file-lists-staging-contract.mjs';
@@ -12,6 +13,21 @@ const rolesMatch = (a, b) => JSON.stringify([...(a ?? [])].sort()) === JSON.stri
 const visibleRows = (scope, id) => scope.locator(`[data-file-list-row="${id}"]:visible`);
 function deferred() {let resolve;const promise = new Promise(done => {resolve = done;});return {promise, resolve};}
 async function waitPending(promise) {let timer;try {await Promise.race([promise, new Promise((_, reject) => {timer = setTimeout(() => reject(Error('F115_PENDING_UI_TIMEOUT')), 30000);})]);} finally {clearTimeout(timer);}}
+
+/** Closed technical classes and a digest only. Raw messages/stacks may contain client data. */
+export function plainFileListPageErrorDiagnostic(error) {
+ const message = typeof error?.message === 'string' ? error.message : '', stack = typeof error?.stack === 'string' ? error.stack : '';
+ const errorKind = ['Error', 'TypeError', 'RangeError', 'SyntaxError', 'ReferenceError', 'TimeoutError'].includes(error?.name) ? error.name : 'OtherError';
+ const reactMatch = /Minified React error #([0-9]{1,4})(?:;|\b)/.exec(message);
+ let family = 'OTHER';
+ if (reactMatch) family = 'REACT_MINIFIED';
+ else if (/ResizeObserver loop (?:limit exceeded|completed with undelivered notifications)/.test(message)) family = 'RESIZE_OBSERVER_LOOP';
+ else if (/Cannot read properties of undefined \(reading ['"]then['"]\)/.test(message)) family = /serwist/i.test(stack) ? 'SERWIST_UNDEFINED_THEN' : 'UNDEFINED_THEN';
+ else if (/An error occurred in the Server Components render\./.test(message)) family = 'SERVER_COMPONENT_OPAQUE';
+ else if (/^(?:Failed to fetch|NetworkError when attempting to fetch resource\.)$/.test(message)) family = 'NETWORK_READ_FAILED';
+ const sourceClass = /chrome:\/\/print\b|chrome:\/\/print-preview\b/.test(stack) ? 'NATIVE_PRINT' : /https:\/\/staging-crm\.peromebel\.by\/_next\/static\//.test(stack) ? 'CRM_STATIC' : 'OTHER';
+ return {family, errorKind, reactCode: reactMatch ? Number(reactMatch[1]) : null, messageSha256: createHash('sha256').update(message).digest('hex'), sourceClass};
+}
 
 /** The heading also contains the task status badge; only its title prefix identifies the dialog.
  * Repeating setSelected(task) may open it after hydration, but never submits a server action. */
@@ -44,7 +60,7 @@ export async function runPlainFileListsStagingBrowser(input = {}) {
  const within = (parent, child) => {const relative = path.relative(parent, child);return relative && !relative.startsWith('..') && !path.isAbsolute(relative);};
  check(within(root, base), 'EVIDENCE_BASE_MISMATCH');
  const outputDir = path.join(base, `staging-${binding.runId}-${Date.now()}`);await mkdir(outputDir, {recursive: false, mode: 0o700});check(within(base, await realpath(outputDir)), 'EVIDENCE_PATH_MISMATCH');
- const receipt = {status: 'STARTED', revision: binding.expectedRevision, runId: binding.runId, revisionProof: 'reviewed physical transport identity and owner113 current HMAC/PRE/DB/version certificate', origin: binding.origin, checks: [], screenshots: [], blockedWrites: 0, blockedPrefetches: 0, deniedReads: 0, pageErrorCount: 0, upstreamDeleteRequests: 0, upstreamOtherNonReadResponses: 0, acknowledgedDeletes: 0, clientFailureChecks: 0, taskOpenClicks: 0, pendingGates: [], outputDir};
+ const receipt = {status: 'STARTED', revision: binding.expectedRevision, runId: binding.runId, revisionProof: 'reviewed physical transport identity and owner113 current HMAC/PRE/DB/version certificate', origin: binding.origin, checks: [], screenshots: [], blockedWrites: 0, blockedPrefetches: 0, deniedReads: 0, pageErrorCount: 0, firstPageError: null, upstreamDeleteRequests: 0, upstreamOtherNonReadResponses: 0, acknowledgedDeletes: 0, clientFailureChecks: 0, taskOpenClicks: 0, pendingGates: [], outputDir};
  let browser, context, phase = 'setup', fatal = null, pendingUi = null;
  const inFlightRoutes = new Set();
  const fail = error => {fatal ??= plainFileListSafeError(error);gate.stop();};
@@ -84,7 +100,7 @@ export async function runPlainFileListsStagingBrowser(input = {}) {
   await context.addCookies(binding.profiles[actor].cookies);
   const health = await context.request.get(`${binding.origin}/api/health`, {maxRedirects: 0});check(health.status() === 200, 'HEALTH_HTTP_FAILED');const healthBody = await health.json();check(healthBody.status === 'ok' && healthBody.database === 'ok', 'HEALTH_DEGRADED');
   const session = await context.request.get(`${binding.origin}/api/auth/session`, {maxRedirects: 0});check(session.status() === 200, 'SESSION_HTTP_FAILED');const current = await session.json();check(current.user?.id === binding.profiles[actor].id && rolesMatch(current.user.roles, binding.profiles[actor].roles), 'CURRENT_SESSION_MISMATCH');
-  const page = await context.newPage();page.on('pageerror', () => {receipt.pageErrorCount++;fail(Error('F115_PAGE_ERROR'));});return page;
+  const page = await context.newPage();page.on('pageerror', error => {receipt.pageErrorCount++;receipt.firstPageError ??= plainFileListPageErrorDiagnostic(error);fail(Error('F115_PAGE_ERROR'));});return page;
  }
  async function goto(page, route) {
   const response = await page.goto(binding.origin + route, {waitUntil: 'domcontentloaded'});check(response?.status() === 200 && new URL(page.url()).origin === binding.origin, 'OWN_NAVIGATION_FAILED');
