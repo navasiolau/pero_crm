@@ -6,7 +6,7 @@ import {disableKanbanQaServiceWorkerApi} from './kanban-cover-staging-browser.mj
 const STAGES=new Set(['LEAD','ESTIMATE','CONTRACT','IN_WORK','PAUSED','REFUSED']);
 const STATUSES=new Set(['DRAFT','PREPARATION','DESIGN']);
 function safeStageExtras(data){if(data.extras===undefined||data.extras==='$undefined')return true;return data.toStage==='REFUSED'&&data.extras&&typeof data.extras==='object'&&!Array.isArray(data.extras)&&Object.keys(data.extras).every(key=>['refusalReason','refusalComment'].includes(key))&&typeof data.extras.refusalReason==='string'&&data.extras.refusalReason.startsWith('QA111 ');}
-const SAFE_FAILURE_CODES=new Set(['DRAFT111_ACTION_HTTP_FAILED','DRAFT111_ACTION_RESULT_UNEXPECTED','DRAFT111_ACTUAL_ACTION_ACK_REQUIRED','DRAFT111_ACTUAL_PROJECT_CREATED','DRAFT111_ACTUAL_SESSION_ID','DRAFT111_AUTHORIZED_STAGE_BINDING','DRAFT111_BROWSER_UNKNOWN','DRAFT111_CANONICAL_ACTION_ARGS_REQUIRED','DRAFT111_CLEAN_BROWSER','DRAFT111_CLIENT_ERROR','DRAFT111_DEPLOYED_REFERENCE_REQUIRED','DRAFT111_DURABLE_CALLBACKS_REQUIRED','DRAFT111_FRESH_MANAGER_PROFILE','DRAFT111_GLOBAL_COLUMNS_ORDER','DRAFT111_NESTED_COLUMNS_ORDER','DRAFT111_NEXT_ACTION_HEADER_REQUIRED','DRAFT111_OUTSIDE_ORIGIN_MUTATION','DRAFT111_OWN_GRAPH_REQUIRED','DRAFT111_OWN_PAGE_HTTP','DRAFT111_OWN_PATH_REQUIRED','DRAFT111_OWN_PRODUCT_SLOT','DRAFT111_OWN_TAGS_REQUIRED','DRAFT111_OWNED_ACTION_PAGE_REQUIRED','DRAFT111_PARTIAL_FILTER_ACK_REQUIRED','DRAFT111_PARTIAL_FILTER_WIDENED','DRAFT111_PREFERENCE_CAS_ACK','DRAFT111_PRODUCT_CREATE_ID','DRAFT111_PROJECT_CREATE_ID','DRAFT111_REPLAY_NOOP_GRAPH_CHANGED','DRAFT111_SAVED_PARTIAL_FILTER_WIDENED','DRAFT111_STOP_AFTER_UNKNOWN_RESPONSE','DRAFT111_UNOWNED_MUTATION_BLOCKED' ,'DRAFT111_JOURNAL_PERSIST_FAILED','DRAFT111_BROWSER_CLOSE_FAILED','DRAFT111_PRODUCT_DIALOG_OPEN_TIMEOUT','DRAFT111_PRODUCT_CREATE_ACK_TIMEOUT','DRAFT111_PRODUCT_CREATE_DUPLICATE_INTENT']);
+const SAFE_FAILURE_CODES=new Set(['DRAFT111_ACTION_HTTP_FAILED','DRAFT111_ACTION_RESULT_UNEXPECTED','DRAFT111_ACTUAL_ACTION_ACK_REQUIRED','DRAFT111_ACTUAL_PROJECT_CREATED','DRAFT111_ACTUAL_SESSION_ID','DRAFT111_AUTHORIZED_STAGE_BINDING','DRAFT111_BROWSER_UNKNOWN','DRAFT111_CANONICAL_ACTION_ARGS_REQUIRED','DRAFT111_CLEAN_BROWSER','DRAFT111_CLIENT_ERROR','DRAFT111_DEPLOYED_REFERENCE_REQUIRED','DRAFT111_DURABLE_CALLBACKS_REQUIRED','DRAFT111_FRESH_MANAGER_PROFILE','DRAFT111_GLOBAL_COLUMNS_ORDER','DRAFT111_NESTED_COLUMNS_ORDER','DRAFT111_NEXT_ACTION_HEADER_REQUIRED','DRAFT111_OUTSIDE_ORIGIN_MUTATION','DRAFT111_OWN_GRAPH_REQUIRED','DRAFT111_OWN_PAGE_HTTP','DRAFT111_OWN_PATH_REQUIRED','DRAFT111_OWN_PRODUCT_SLOT','DRAFT111_OWN_TAGS_REQUIRED','DRAFT111_OWNED_ACTION_PAGE_REQUIRED','DRAFT111_PARTIAL_FILTER_ACK_REQUIRED','DRAFT111_PARTIAL_FILTER_WIDENED','DRAFT111_PREFERENCE_CAS_ACK','DRAFT111_PRODUCT_CREATE_ID','DRAFT111_PROJECT_CREATE_ID','DRAFT111_REPLAY_NOOP_GRAPH_CHANGED','DRAFT111_SAVED_PARTIAL_FILTER_WIDENED','DRAFT111_STOP_AFTER_UNKNOWN_RESPONSE','DRAFT111_UNOWNED_MUTATION_BLOCKED' ,'DRAFT111_JOURNAL_PERSIST_FAILED','DRAFT111_BROWSER_CLOSE_FAILED','DRAFT111_PRODUCT_DIALOG_OPEN_TIMEOUT','DRAFT111_PRODUCT_CREATE_ACK_TIMEOUT','DRAFT111_PRODUCT_CREATE_DUPLICATE_INTENT','DRAFT111_STAGE_OPTION_INVALID']);
 const ERROR_KINDS=new Map([['Error','ERROR'],['TypeError','TYPE_ERROR'],['RangeError','RANGE_ERROR'],['ReferenceError','REFERENCE_ERROR'],['SyntaxError','SYNTAX_ERROR'],['TimeoutError','TIMEOUT_ERROR']]);
 const safeErrorKind=error=>ERROR_KINDS.get(error?.name)??'UNKNOWN';
 
@@ -28,6 +28,14 @@ const flightRows=bytes=>bytes.toString('utf8').split('\n').flatMap(line=>{try{re
 const need=(ok,code)=>{if(!ok)throw Error(code);};
 const uuid=value=>typeof value==='string'&&/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(value);
 const id=value=>typeof value==='string'&&/^[A-Za-z0-9_:-]{1,160}$/.test(value);
+
+export async function selectDraftQaProjectStageOption(page,toStage){
+ need(STAGES.has(toStage),'DRAFT111_STAGE_OPTION_INVALID');
+ await page.locator('[data-slot="select-trigger"][aria-label="Статус"]').click();
+ const popup=page.locator('[data-slot="select-content"]');await popup.waitFor({state:'visible'});
+ await popup.locator('[data-slot="select-item"]').filter({hasText:new RegExp('^'+LABELS[toStage]+'$')}).click();
+}
+
 export function classifyDraftQaAction(args,scope){
  if(!Array.isArray(args))return null;
  const [data]=args;
@@ -146,7 +154,7 @@ export async function runProductDraftStageBrowser({authorized=false,origin,revis
   await assertStatus(slot,status);return product(slot);
  }
  async function stage(project,toStage){
-  await goto(project.path+'?tab=overview','PROJECT_STAGE_PAGE');step='PROJECT_STAGE_SELECT';await page.getByRole('combobox',{name:'Статус',exact:true}).click();await page.getByRole('option',{name:LABELS[toStage],exact:true}).click();
+  await goto(project.path+'?tab=overview','PROJECT_STAGE_PAGE');step='PROJECT_STAGE_SELECT';await selectDraftQaProjectStageOption(page,toStage);
   if(toStage==='REFUSED'){const dialog=page.getByRole('dialog');await dialog.locator('#refusalReason').fill('QA111 '+checkpoint.runId);await dialog.getByRole('button',{name:'Перевести в «Отказ»',exact:true}).click();await expect(dialog).not.toBeVisible();}
   await expect.poll(async()=>{const graph=await ownGraph();return graph.projectA?.id===project.id?graph.projectA.stage:graph.projectB.stage;},{timeout:20000}).toBe(toStage);
  }

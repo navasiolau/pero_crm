@@ -158,3 +158,9 @@ test('ACK wait stops at fixed65s when response never becomes acknowledged and fu
  const {waitDraftQaProductAck}=await import('./product-draft-stage-browser.mjs');let clock=0;
  await assert.rejects(()=>waitDraftQaProductAck({now:()=>clock,settled:async()=>{},ready:()=>false,delay:async()=>{clock+=1000;}}),/DRAFT111_PRODUCT_CREATE_ACK_TIMEOUT/);assert.equal(clock,65000);
 });
+
+test('project stage uses exact source trigger and exact portal item with a single selection',async()=>{
+ const {selectDraftQaProjectStageOption}=await import('./product-draft-stage-browser.mjs'),calls=[],popup={waitFor:async value=>{assert.deepEqual(value,{state:'visible'});calls.push('visible');},locator:selector=>{assert.equal(selector,'[data-slot="select-item"]');return {filter:value=>{assert.equal(value.hasText.test('Просчёт'),true);assert.equal(value.hasText.test('Просчёт проекта'),false);return {click:async()=>calls.push('select-once')};}}}};
+ await selectDraftQaProjectStageOption({locator:selector=>selector==='[data-slot="select-content"]'?popup:{click:async()=>{assert.equal(selector,'[data-slot="select-trigger"][aria-label="Статус"]');calls.push('open-once');}}},'ESTIMATE');
+ assert.deepEqual(calls,['open-once','visible','select-once']);await assert.rejects(()=>selectDraftQaProjectStageOption({},'DONE'),/DRAFT111_STAGE_OPTION_INVALID/);
+});
