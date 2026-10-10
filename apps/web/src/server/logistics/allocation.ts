@@ -9,11 +9,12 @@ export function allocateLogisticsMoney(total: string, shares: readonly { project
     throw Error("Проверьте общую стоимость рейса");
   if (!rate.isFinite() || rate.lte(0) || rate.gt("99999999.999999") || !rate.eq(rate.toDecimalPlaces(6))) throw Error("Проверьте сохранённый курс");
   const cents = BigInt(amount.toFixed(2).replace(".", ""));
+  const percentageBase = BigInt(10000);
   const ranked = shares.map(share => {
     const numerator = cents * BigInt(share.percentBps);
-    return { ...share, cents: numerator / 10000n, remainder: numerator % 10000n };
+    return { ...share, cents: numerator / percentageBase, remainder: numerator % percentageBase };
   }).sort((a, b) => a.remainder === b.remainder ? compareProject(a, b) : a.remainder > b.remainder ? -1 : 1);
-  const rest = Number(cents - ranked.reduce((sum, row) => sum + row.cents, 0n));
+  const rest = Number(cents - ranked.reduce((sum, row) => sum + row.cents, BigInt(0)));
   for (let index = 0; index < rest; index++) ranked[index].cents++;
   const allocations = ranked.sort(compareProject).map(({ projectId, percentBps, cents }) => {
     const part = new Prisma.Decimal(cents.toString()).div(100);
