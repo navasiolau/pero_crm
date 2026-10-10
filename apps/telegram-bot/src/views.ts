@@ -13,6 +13,7 @@ export const ROLE_LABELS: Record<string, string> = {
   MOUNTER: "Монтажник",
   ACCOUNTANT: "Бухгалтер",
   PROCUREMENT: "Снабженец",
+  WORK_COORDINATOR: "Ответственный за работы",
 };
 
 export const STAGE_LABELS: Record<string, string> = {

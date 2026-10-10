@@ -1,8 +1,9 @@
-import type {Role} from './roles';
+import {baseRoles,type Role} from './roles';
 import {moneyAtoms,type DecimalInput} from './work-shares';
 /** Только чистый инженер исключён из новых обычных начислений; совмещённые роли сохраняют выбранную схему. */
 export function canAccrueOrdinarySalary(roles:Role[]):boolean{
- return !(roles.length===1 && roles[0]==='ENGINEER');
+ const base=baseRoles(roles);
+ return !(base.length===1 && base[0]==='ENGINEER');
 }
 /** Старый денежный снимок остаётся обязательством; физическая/процентная доля сама по себе его не создаёт. */
 export function hasFrozenTaskPieceObligation(task:{allocationGroupId:string|null;workId:string|null;shareUnits:number|null;shareAmount:DecimalInput|null;physicalOnlyShare:boolean;allocationGroup:{id:string;workId:string|null;budgetSource:string;budget:DecimalInput|null}|null}):boolean{

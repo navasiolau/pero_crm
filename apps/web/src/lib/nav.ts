@@ -21,6 +21,7 @@ import {
   FINANCE_ROLES,
   MANAGER_ROLES,
   OFFICE_ROLES,
+  canReadPrices,
   type Role,
 } from "@/lib/roles";
 
@@ -50,7 +51,7 @@ export const navItems: NavItem[] = [
   { href: "/products", label: "Изделия", icon: Package, roles: [...OFFICE_ROLES,...FIELD_ROLES], group: "manage" },
   { href: "/clients", label: "Клиенты", icon: Users, roles: OFFICE_ROLES, group: "manage" },
   { href: "/tasks", label: "Задачи", icon: ListChecks, roles: OFFICE_ROLES, group: "manage" },
-  { href: "/prices", label: "Прайсы", icon: Receipt, roles: OFFICE_ROLES, group: "manage" },
+  { href: "/prices", label: "Прайсы", icon: Receipt, roles: [...OFFICE_ROLES, "WORK_COORDINATOR"], group: "manage" },
   { href: "/warehouse", label: "Склад", icon: Warehouse, roles: OFFICE_ROLES, group: "manage" },
   { href: "/finance", label: "Финансы", icon: Banknote, roles: FINANCE_ROLES, group: "manage" },
   { href: "/changelog", label: "Журнал", icon: History, roles: ["ADMIN"], group: "manage" },
@@ -62,7 +63,7 @@ export const navItems: NavItem[] = [
 const planItem: NavItem = {href: "/plan", label: "План", icon: CalendarDays, roles: ALL_ROLES, group: "main"};
 export function navItemsForRole(roles: Role[], calendarEnabled = false): NavItem[] {
   const visible = navItems.filter((item) =>
-    item.roles.some((role) => roles.includes(role)),
+    item.href === "/prices" ? canReadPrices(roles) : item.roles.some((role) => roles.includes(role)),
   );
   if (calendarEnabled) visible.splice(visible.findIndex(item => item.href === "/") + 1, 0, planItem);
   return visible;

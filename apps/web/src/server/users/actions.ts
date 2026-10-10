@@ -9,9 +9,8 @@ import { requireAdmin } from "@/server/require-role";
 import { writeChangeLog } from "@/server/plugins/changelog";
 import { notifyPerson } from "@/server/notifications/notify";
 import { paySchemeLabels } from "@/lib/labels";
-import { roleComboLabel, isValidRolesCombination, normalizeRoles } from "@/lib/roles";
+import { ROLE_VALUES, roleComboLabel, roleCombinationError, normalizeRoles } from "@/lib/roles";
 
-const ROLES = ["ADMIN", "DIRECTOR", "MANAGER", "ENGINEER", "WORKER", "MOUNTER", "ACCOUNTANT", "PROCUREMENT"] as const;
 const PAY_SCHEMES = ["PIECE", "PERCENT_PROJECT", "PERCENT_TURNOVER", "NONE"] as const;
 
 const userSchema = z.object({
@@ -20,7 +19,7 @@ const userSchema = z.object({
   position: z.string().optional(),
   phone: z.string().optional(),
   telegram: z.string().optional(),
-  roles: z.array(z.enum(ROLES)).min(1, "Выберите хотя бы одну роль"),
+  roles: z.array(z.enum(ROLE_VALUES)).min(1, "Выберите хотя бы одну роль"),
   payScheme: z.enum(PAY_SCHEMES),
   payPercent: z.number().min(0).max(100).nullable().optional(),
   active: z.boolean().default(true),
@@ -67,10 +66,11 @@ export async function createUser(
   }
   // Комбинированные роли (§4): нормализация + ADMIN/DIRECTOR не сочетаются
   const roles = normalizeRoles(data.roles);
-  if (!isValidRolesCombination(roles)) {
+  const roleError = roleCombinationError(roles);
+  if (roleError) {
     return {
       ok: false,
-      error: "Роли «Администратор» и «Директор» не сочетаются с другими ролями",
+      error: roleError,
     };
   }
   const exists = await prisma.user.findUnique({ where: { email: data.email } });
@@ -135,10 +135,11 @@ export async function updateUser(
 
   // Комбинированные роли (§4): нормализация + ADMIN/DIRECTOR не сочетаются
   const roles = normalizeRoles(data.roles);
-  if (!isValidRolesCombination(roles)) {
+  const roleError = roleCombinationError(roles);
+  if (roleError) {
     return {
       ok: false,
-      error: "Роли «Администратор» и «Директор» не сочетаются с другими ролями",
+      error: roleError,
     };
   }
 

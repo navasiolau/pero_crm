@@ -6,9 +6,9 @@ import { z } from "zod";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { writeChangeLog } from "@/server/plugins/changelog";
-import { MANAGER_ROLES, hasAnyRole } from "@/lib/roles";
+import { canManagePrices } from "@/lib/roles";
 
-// Прайсы: управление — админ/директор/менеджер (§4, §9);
+// Прайсы: управление — менеджмент или дополнительный ответственный (§4, §9);
 // любое изменение — в журнал изменений. Цена в работах не переписывается.
 
 const priceSchema = z.object({
@@ -21,7 +21,7 @@ const priceSchema = z.object({
 async function requireManage() {
   const session = await auth();
   if (!session?.user) throw new Error("Не авторизован");
-  if (!hasAnyRole(session.user.roles, MANAGER_ROLES)) throw new Error("Недостаточно прав");
+  if (!canManagePrices(session.user.roles)) throw new Error("Недостаточно прав");
   return session;
 }
 

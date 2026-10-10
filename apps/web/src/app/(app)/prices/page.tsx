@@ -2,18 +2,18 @@ import { redirect } from "next/navigation";
 
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { MANAGER_ROLES, OFFICE_ROLES, hasAnyRole } from "@/lib/roles";
+import { canReadPrices, canManagePrices } from "@/lib/roles";
 
 import { PricesView } from "./prices-view";
 
 export const dynamic = "force-dynamic";
 
-// Прайсы (§9): управление — менеджмент, просмотр — офисные роли (§4).
+// Прайсы (§9): прежние офисные grants и узкое дополнение ответственного.
 export default async function PricesPage() {
   const session = await auth();
   if (!session?.user) redirect("/login");
   const role = session.user.roles;
-  if (!hasAnyRole(role, OFFICE_ROLES)) {
+  if (!canReadPrices(role)) {
     redirect("/");
   }
 
@@ -23,7 +23,7 @@ export default async function PricesPage() {
 
   return (
     <PricesView
-      canManage={hasAnyRole(role, MANAGER_ROLES)}
+      canManage={canManagePrices(role)}
       items={items.map((item) => ({
         id: item.id,
         name: item.name,

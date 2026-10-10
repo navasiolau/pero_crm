@@ -10,7 +10,7 @@ export type { Role };
 // владельца) — их привилегии особые, «половинчатый» админ недопустим.
 
 // Лестница приоритета: от старшей к младшей.
-export const ROLE_PRIORITY: Role[] = [
+export const ROLE_VALUES = [
   "ADMIN",
   "DIRECTOR",
   "MANAGER",
@@ -19,7 +19,10 @@ export const ROLE_PRIORITY: Role[] = [
   "ACCOUNTANT",
   "WORKER",
   "MOUNTER",
-];
+  "WORK_COORDINATOR",
+] as const satisfies readonly Role[];
+export const ROLE_PRIORITY: Role[] = [...ROLE_VALUES];
+export const ADDITIONAL_ROLES: Role[] = ["WORK_COORDINATOR"];
 
 export const roleLabels: Record<Role, string> = {
   ADMIN: "Администратор",
@@ -30,6 +33,7 @@ export const roleLabels: Record<Role, string> = {
   MOUNTER: "Монтажник",
   ACCOUNTANT: "Бухгалтер",
   PROCUREMENT: "Снабженец",
+  WORK_COORDINATOR: "Ответственный за работы",
 };
 
 // Ролевые наборы — единый источник истины (вместо инлайн-массивов по коду).
@@ -77,7 +81,12 @@ export function hasAnyRole(
 // Пустой массив (теоретически невозможен — БД и валидация требуют минимум
 // одну) трактуется как самая ограниченная роль, а не как расширение прав.
 export function primaryRole(userRoles: Role[] | null | undefined): Role {
-  return ROLE_PRIORITY.find((role) => userRoles?.includes(role)) ?? "WORKER";
+  return baseRoles(userRoles ?? [])[0] ?? "WORKER";
+}
+
+/** Добавочные способности не меняют классификацию сотрудника и схему оплаты. */
+export function baseRoles(userRoles: readonly Role[]): Role[] {
+  return ROLE_PRIORITY.filter(role => !ADDITIONAL_ROLES.includes(role) && userRoles.includes(role));
 }
 
 // Дедупликация + канонический порядок по приоритету.
@@ -87,10 +96,31 @@ export function normalizeRoles(roles: Role[]): Role[] {
 
 // Валидация комбинации: минимум одна роль; ADMIN и DIRECTOR — только поодиночке.
 export function isValidRolesCombination(roles: Role[]): boolean {
-  const normalized = normalizeRoles(roles);
-  if (normalized.length === 0) return false;
+  return roleCombinationError(roles) === null;
+}
+
+export function roleCombinationError(roles: readonly Role[]): string | null {
+  const normalized = normalizeRoles([...roles]);
+  if (normalized.length === 0) return "Выберите хотя бы одну роль";
+  if (baseRoles(normalized).length === 0)
+    return "Для роли «Ответственный за работы» выберите базовую роль";
   const exclusive = normalized.some((role) => role === "ADMIN" || role === "DIRECTOR");
-  return exclusive ? normalized.length === 1 : true;
+  return exclusive && normalized.length !== 1
+    ? "Роли «Администратор» и «Директор» не сочетаются с другими ролями"
+    : null;
+}
+
+/** Узкая способность требует допустимой базовой роли, не образуя нового read grant. */
+export function hasWorkCoordinator(roles: readonly Role[]): boolean {
+  return roles.includes("WORK_COORDINATOR") && isValidRolesCombination([...roles]);
+}
+
+export function canReadPrices(roles: readonly Role[]): boolean {
+  return OFFICE_ROLES.some(role => roles.includes(role)) || hasWorkCoordinator(roles);
+}
+
+export function canManagePrices(roles: readonly Role[]): boolean {
+  return MANAGER_ROLES.some(role => roles.includes(role)) || hasWorkCoordinator(roles);
 }
 
 // Подпись для бейджей: все роли по приоритету — «Менеджер · Инженер».
