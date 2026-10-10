@@ -10,8 +10,8 @@ import { formatExactMoney } from "../src/lib/format";
 Object.assign(globalThis, { React });
 const require = createRequire(import.meta.url);
 function stubModule(name: string, exports: unknown) {
-  const filename = require.resolve(name), module = new Module(filename);
-  module.filename = filename; module.loaded = true; module.exports = exports; require.cache[filename] = module;
+  const filename = require.resolve(name), fixtureModule = new Module(filename);
+  fixtureModule.filename = filename; fixtureModule.loaded = true; fixtureModule.exports = exports; require.cache[filename] = fixtureModule;
 }
 const tripId = "a1000000-0000-4000-8000-000000000001";
 const document = { id: "a1000000-0000-4000-8000-000000000002", tripId, source: "logistics" as const,
