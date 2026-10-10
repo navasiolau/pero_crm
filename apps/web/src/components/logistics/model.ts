@@ -31,8 +31,8 @@ export function normalizedMoney(value: string): string | null {
   const cleaned = value.trim().replace(",", ".");
   if (!/^\d{1,10}(?:\.\d{1,2})?$/.test(cleaned)) return null;
   const [whole, fraction = ""] = cleaned.split(".");
-  const cents = BigInt(whole) * 100n + BigInt(fraction.padEnd(2, "0"));
-  return cents > 0n ? (cents / 100n).toString() + "." + (cents % 100n).toString().padStart(2, "0") : null;
+  const cents = BigInt(whole) * BigInt(100) + BigInt(fraction.padEnd(2, "0"));
+  return cents > BigInt(0) ? (cents / BigInt(100)).toString() + "." + (cents % BigInt(100)).toString().padStart(2, "0") : null;
 }
 // Предварительный расчёт только в валюте кассы; BYN берётся из серверного проведения.
 export function previewAllocations(amount: string, shares: { projectId: string; percentBps: number }[]): Map<string, string> {
@@ -42,15 +42,15 @@ export function previewAllocations(amount: string, shares: { projectId: string; 
   const cents = BigInt(normalized.replace(".", ""));
   const parts = shares.map(share => {
     const weighted = cents * BigInt(share.percentBps);
-    return { projectId: share.projectId, cents: weighted / 10000n, remainder: weighted % 10000n };
+    return { projectId: share.projectId, cents: weighted / BigInt(10000), remainder: weighted % BigInt(10000) };
   });
-  let remaining = cents - parts.reduce((sum, part) => sum + part.cents, 0n);
+  let remaining = cents - parts.reduce((sum, part) => sum + part.cents, BigInt(0));
   for (const part of [...parts].sort((a, b) => a.remainder === b.remainder
     ? a.projectId.localeCompare(b.projectId) : a.remainder > b.remainder ? -1 : 1)) {
-    if (remaining === 0n) break;
-    part.cents += 1n; remaining -= 1n;
+    if (remaining === BigInt(0)) break;
+    part.cents += BigInt(1); remaining -= BigInt(1);
   }
-  return new Map(parts.map(part => [part.projectId, (part.cents / 100n).toString() + "." + (part.cents % 100n).toString().padStart(2, "0")]));
+  return new Map(parts.map(part => [part.projectId, (part.cents / BigInt(100)).toString() + "." + (part.cents % BigInt(100)).toString().padStart(2, "0")]));
 }
 export function shipmentToday(): string {
   const parts = new Intl.DateTimeFormat("en", { timeZone: "Europe/Moscow", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
