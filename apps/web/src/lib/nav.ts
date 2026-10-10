@@ -12,6 +12,7 @@ import {
   Users,
   Wallet,
   Warehouse,
+  Truck,
   type LucideIcon,
 } from "lucide-react";
 
@@ -23,6 +24,8 @@ import {
   OFFICE_ROLES,
   type Role,
 } from "@/lib/roles";
+
+import { LOGISTICS_DOCUMENT_ROLES } from "@/lib/logistics-access";
 
 // re-export для совместимости: подписи ролей теперь живут в lib/roles
 export { roleLabels } from "@/lib/roles";
@@ -53,6 +56,7 @@ export const navItems: NavItem[] = [
   { href: "/prices", label: "Прайсы", icon: Receipt, roles: OFFICE_ROLES, group: "manage" },
   { href: "/warehouse", label: "Склад", icon: Warehouse, roles: OFFICE_ROLES, group: "manage" },
   { href: "/finance", label: "Финансы", icon: Banknote, roles: FINANCE_ROLES, group: "manage" },
+  { href: "/logistics", label: "Логистика", icon: Truck, roles: LOGISTICS_DOCUMENT_ROLES, group: "manage" },
   { href: "/changelog", label: "Журнал", icon: History, roles: ["ADMIN"], group: "manage" },
   { href: "/settings", label: "Настройки", icon: Settings, roles: MANAGER_ROLES, group: "manage" },
 ];
