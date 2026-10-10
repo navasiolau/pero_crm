@@ -52,7 +52,7 @@ export async function createPaymentCore(
   if (result.repeated) return { ok: true };
   const isIncome = data.direction === "INCOME";
   const kind = isIncome ? "Приход" : "Расход";
-  await dispatchEvent(result.eventId).catch(() => {});
+  if (result.eventId) await dispatchEvent(result.eventId).catch(() => {});
   await notifyOrg({
     type: isIncome ? "payment.added" : "expense.added",
     title: `${kind} ${formatAmount(amount, data.currency)} · ${project?.number ?? "Организация"}`,
