@@ -40,7 +40,7 @@ export function OrganizationPaymentsView({ direction, rows, cashAccounts, projec
     { id: "comment", header: "Комментарий", searchValue: row => row.comment ?? "", cell: row => row.comment ?? "—" },
     ...(!income ? [{ id: "document", header: "Отчетный документ", searchValue: (row: OrganizationPaymentRow) => row.reportDocument?.fileName ?? "",
       cell: (row: OrganizationPaymentRow) => <ReportDocumentButton document={row.reportDocument}/> }] : []),
-    { id: "actions", header: "", cell: row => <Button variant="ghost" disabled={row.project?.archived || Boolean(row.stockPurchase)} onClick={event => { event.stopPropagation(); setDeleting(row); }}>Удалить</Button> },
+    { id: "actions", header: "", cell: row => <Button variant="ghost" disabled={row.project?.archived || Boolean(row.stockPurchase) || Boolean(row.logisticsTripId)} onClick={event => { event.stopPropagation(); setDeleting(row); }}>Удалить</Button> },
   ];
   return <section className="flex min-w-0 flex-col gap-5">
     <Link href="/finance" className="text-sm text-muted-foreground">Назад к финансам</Link>
@@ -67,8 +67,9 @@ export function OrganizationPaymentsView({ direction, rows, cashAccounts, projec
             <dd className="col-span-2 text-muted-foreground">Оплата связана с приходом на склад. Отдельно удалить её нельзя.</dd>
           </> : null}
           {viewing.reportDocument ? <><dt>Документ</dt><dd><ReportDocumentButton document={viewing.reportDocument}/></dd></> : null}
+          {viewing.logisticsTripId ? <dd className="col-span-2 text-muted-foreground"><Link href={`/logistics/${viewing.logisticsTripId}`} className="underline">Расход относится к общему рейсу</Link>. Исправления выполняются в логистике.</dd> : null}
         </dl> : null}
-        <DialogFooter><Button variant="outline" onClick={() => setViewing(null)}>Закрыть</Button><Button variant="destructive" disabled={viewing?.project?.archived || Boolean(viewing?.stockPurchase)}
+        <DialogFooter><Button variant="outline" onClick={() => setViewing(null)}>Закрыть</Button><Button variant="destructive" disabled={viewing?.project?.archived || Boolean(viewing?.stockPurchase) || Boolean(viewing?.logisticsTripId)}
           onClick={() => { setDeleting(viewing); setViewing(null); }}>Удалить</Button></DialogFooter>
       </DialogContent>
     </Dialog>
