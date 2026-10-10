@@ -91,6 +91,10 @@ model User {
   assignedTasks   Task[]         @relation("TaskAssignee")
   calendarEntries CalendarEntry[]
   financeDocuments FinanceDocument[]
+  createdLogisticsTrips LogisticsTrip[] @relation("LogisticsTripCreator")
+  updatedLogisticsTrips LogisticsTrip[] @relation("LogisticsTripUpdater")
+  logisticsDocuments LogisticsDocument[]
+  logisticsMutations LogisticsMutation[]
   warehouseDeletions WarehouseMovementDeletion[]
   calendarReminderFacts CalendarReminderFact[]
   telegramReminderOutboxes TelegramReminderOutbox[]
@@ -209,6 +213,7 @@ model Project {
   coverFile              File? @relation("ProjectCover", fields: [coverFileId], references: [id], onDelete: SetNull)
   communications         Communication[]
   payments               Payment[]
+  logisticsShares        LogisticsProjectShare[]
   stageSettlements       ProductStageSettlement[]
   legacyProtectedStagePools ProductStagePayPool[] @relation("StagePayPoolLegacyProject")
 
@@ -284,6 +289,8 @@ model Product {
   payrollEntries   PayrollEntry[]
   percentageConfigs ProductPercentageConfig[]
   percentageCompletions ProductPercentageCompletion[]
+
+  logisticsShipmentLines LogisticsShipmentLine[]
 
   @@index([projectId])
   @@index([projectId, suffixInt])
@@ -851,6 +858,114 @@ model OrgSetting {
   updatedAt DateTime @updatedAt
 }
 
+// Рейс и общий комплект ТТН не являются обычными файлами одного проекта.
+enum LogisticsShipmentKind {
+  PRODUCT
+  MATERIAL
+}
+
+enum LogisticsDocumentState {
+  PENDING
+  READY
+}
+
+enum LogisticsDocumentStage {
+  ISSUED
+  SIGNED
+}
+
+model LogisticsTrip {
+  id String @id @default(uuid())
+  date DateTime @db.Date
+  comment String @default("")
+  revision Int @default(1)
+  createdById String
+  createdBy User @relation("LogisticsTripCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  updatedById String
+  updatedBy User @relation("LogisticsTripUpdater", fields: [updatedById], references: [id], onDelete: Restrict)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  shares LogisticsProjectShare[]
+  lines LogisticsShipmentLine[]
+  documents LogisticsDocument[]
+  mutations LogisticsMutation[]
+
+  @@index([date, id])
+}
+
+model LogisticsProjectShare {
+  id String @id @default(uuid())
+  tripId String
+  trip LogisticsTrip @relation(fields: [tripId], references: [id], onDelete: Restrict)
+  projectId String
+  project Project @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  percentBps Int
+  lines LogisticsShipmentLine[]
+
+  @@unique([tripId, projectId])
+  @@index([projectId, tripId])
+}
+
+model LogisticsShipmentLine {
+  id String @id @default(uuid())
+  tripId String
+  trip LogisticsTrip @relation(fields: [tripId], references: [id], onDelete: Restrict)
+  projectId String
+  share LogisticsProjectShare @relation(fields: [tripId, projectId], references: [tripId, projectId], onDelete: Restrict, map: "LogisticsShipmentLine_share_fkey")
+  kind LogisticsShipmentKind
+  productId String?
+  product Product? @relation(fields: [productId], references: [id], onDelete: Restrict)
+  materialId String?
+  material Material? @relation(fields: [materialId], references: [id], onDelete: Restrict)
+  nameSnapshot String
+  numberSnapshot String?
+  unitSnapshot String
+  quantity Decimal @db.Decimal(12, 3)
+
+  @@unique([tripId, projectId, productId])
+  @@unique([tripId, projectId, materialId])
+  @@index([productId])
+  @@index([materialId])
+}
+
+model LogisticsDocument {
+  id String @id @default(uuid())
+  tripId String
+  trip LogisticsTrip @relation(fields: [tripId], references: [id], onDelete: Restrict)
+  clientMutationId String @unique
+  requestFingerprint String
+  uploadedById String
+  uploadedBy User @relation(fields: [uploadedById], references: [id], onDelete: Restrict)
+  fileName String
+  mimeType String
+  size Int
+  contentHash String
+  storageKey String @unique
+  storageMode String
+  state LogisticsDocumentState @default(PENDING)
+  stage LogisticsDocumentStage
+  ttnNumber String?
+  createdAt DateTime @default(now())
+  readyAt DateTime?
+
+  @@index([tripId, state, createdAt])
+  @@index([ttnNumber])
+}
+
+model LogisticsMutation {
+  clientMutationId String @id
+  actorId String
+  actor User @relation(fields: [actorId], references: [id], onDelete: Restrict)
+  tripId String
+  trip LogisticsTrip @relation(fields: [tripId], references: [id], onDelete: Restrict)
+  operation String
+  requestFingerprint String
+  revision Int
+  createdAt DateTime @default(now())
+
+  @@index([tripId, createdAt])
+}
+
 // ─── Склад (§12, фаза 6) ────────────────────────────────────────────────
 // Остатки не хранятся — вычисляются из StockMovement
 // (остаток = Σ INCOME + Σ RETURN − Σ EXPENSE).
@@ -904,6 +1019,7 @@ model Material {
   movements        StockMovement[]
   projectMaterials ProjectMaterial[]
   warehouseBalance WarehouseBalance?
+  logisticsShipmentLines LogisticsShipmentLine[]
 
   @@index([unitId])
 }
