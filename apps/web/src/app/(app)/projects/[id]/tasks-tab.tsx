@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Check, Play, Plus, Trash2 } from "lucide-react";
+import { Check, Play, Plus, Trash2, Pencil } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -37,12 +37,14 @@ import {
   type TaskDetails,
 } from "@/components/task-dialog";
 import {WorkerTaskAllocationDialog,type WorkerAllocationData} from "@/components/worker-task-allocation-dialog";
+import {WorkDialog} from "@/components/work-dialog";
+import type {WorkOperation} from "@/server/works/queries";
 import { formatDate,formatAmount } from "@/lib/format";
 import { workPaymentAmountLabel, workPaymentSourceLabel, taskPaymentLabel } from "@/lib/task-payment-display";
 import { cn } from "@/lib/utils";
 import { isPositiveQuantity, quantityInputError, remainingWorkQuantity } from "@/lib/work-quantity";
 import { changeTaskStatus, createTask } from "@/server/tasks/actions";
-import { addWork, removeWork } from "@/server/works/actions";
+import { removeWork } from "@/server/works/actions";
 
 import type { SelectOption } from "../projects-view";
 
@@ -55,6 +57,7 @@ export interface WorkRow {
   allocated: string;
   stagePayPoolId?:string|null;
   canAllocateWorker?:boolean;
+  operation?:WorkOperation;
   priceSnapshot: string | null;
   total: string | null;
   paymentKind?: "LEGACY" | "ENGINEERING" | "INSTALLATION";
@@ -86,6 +89,7 @@ export function TasksTab({
   projectId,
   productId,
   productQuantity = 1,
+  productStatus,
   products = [],
   tasks,
   works,
@@ -99,6 +103,7 @@ export function TasksTab({
 }: {
   projectId: string;
   productQuantity?: number;
+  productStatus?:string;
   productId?: string; // зафиксированное изделие (карточка изделия)
   products?: ProductOption[]; // изделия проекта — выбор в диалоге задачи
   tasks: TaskDetails[];
@@ -123,15 +128,18 @@ export function TasksTab({
   const [estimate, setEstimate] = useState("");
   const [dueAt, setDueAt] = useState(tomorrow);
   const [workOpen, setWorkOpen] = useState(false);
+  const [editWork,setEditWork]=useState<WorkRow|null>(null);
+  const [workDialogRevision,setWorkDialogRevision]=useState(0);
+  const [ownAllocation,setOwnAllocation]=useState(false);
   const [allocationWork,setAllocationWork]=useState<WorkRow|null>(null);
   const [deleteWorkFor, setDeleteWorkFor] = useState<WorkRow | null>(null);
   const [actualFor, setActualFor] = useState<TaskDetails | null>(null);
-  const [priceItemId, setPriceItemId] = useState("");
   const [quantity, setQuantity] = useState("1");
 
   const pieceWorks = works.filter((work) => work.paymentKind !== "ENGINEERING" && work.paymentKind !== "INSTALLATION");
   const worksTotal = pieceWorks.reduce((sum, work) => sum + Number(work.total ?? 0), 0);
   const hasPercentageSource = works.some((work) => work.paymentKind === "ENGINEERING" || work.paymentKind === "INSTALLATION");
+  function closeWorkDialog(){setWorkOpen(false);setEditWork(null);setWorkDialogRevision(value=>value+1);}
 
   return (
     <div className="flex flex-col gap-5">
@@ -148,7 +156,7 @@ export function TasksTab({
           ) : null}
         </div>
         {works.map((work) => {
-          const remaining = remainingWorkQuantity(work.quantity, work.allocated);
+          const remaining = work.operation?.remaining ?? remainingWorkQuantity(work.quantity, work.allocated);
           return (
             <div
               key={work.id}
@@ -173,7 +181,8 @@ export function TasksTab({
               <span className="font-medium">
                 {workPaymentAmountLabel(work)}
               </span>
-            {canAllocateWork&&!canManage&&productId&&allocationData&&work.canAllocateWorker&&isPositiveQuantity(remaining)?<Button size="sm" variant="outline" onClick={()=>setAllocationWork(work)}>Назначить задачу</Button>:null}
+            {work.operation?.canEdit&&productId?<Button size="icon-xs" variant="ghost" aria-label="Редактировать работу" onClick={()=>setEditWork(work)}><Pencil className="size-3.5"/></Button>:null}
+            {canAllocateWork&&!canManage&&productId&&allocationData&&work.canAllocateWorker&&isPositiveQuantity(remaining)?<><Button size="sm" variant="outline" onClick={()=>{setOwnAllocation(true);setAllocationWork(work);}}>Взять себе</Button><Button size="sm" variant="outline" onClick={()=>{setOwnAllocation(false);setAllocationWork(work);}}>Назначить задачу</Button></>:null}
             {canManage && productId && work.paymentKind !== "ENGINEERING" && work.paymentKind !== "INSTALLATION" && work.priceSnapshot !== null && isPositiveQuantity(remaining) ? <Button size="sm" variant="outline" onClick={() => {setWorkId(work.id);setTitle(work.title);setTaskProductId(productId);setQuantity(remaining);setAssigneeId("");setOpen(true);}}>Назначить задачу</Button> : null}
             {canManage && work.paymentKind !== "ENGINEERING" && work.paymentKind !== "INSTALLATION" ? (
               <Button
@@ -193,7 +202,7 @@ export function TasksTab({
       </div>
 
       {canAllocateWork&&!canManage&&allocationData?.createdAssignments.length?<section className="flex flex-col gap-2" aria-label="Созданные назначения"><h3 className="text-sm font-medium">Мои назначения работникам</h3>{allocationData.createdAssignments.map(task=><div key={task.id} className="rounded-xl border p-3 text-sm"><span>{task.title} · {task.assigneeName} · количество {task.quantity} · Вознаграждение: {taskPaymentLabel(task)}</span><Badge variant="outline" className="ml-2">{taskStatusLabels[task.status as keyof typeof taskStatusLabels]??task.status}</Badge>{task.dueAt?<p className="text-xs text-muted-foreground">Срок: {formatDate(task.dueAt)}</p>:null}</div>)}</section>:null}
-      {allocationWork&&productId&&allocationData?<WorkerTaskAllocationDialog key={allocationWork.id} projectId={projectId} productId={productId} actorUserId={actorUserId} work={{id:allocationWork.id,title:allocationWork.title,unit:allocationWork.unitSnapshot,remaining:remainingWorkQuantity(allocationWork.quantity,allocationWork.allocated)}} data={allocationData} onClose={()=>setAllocationWork(null)}/>:null}
+      {allocationWork&&productId&&allocationData?<WorkerTaskAllocationDialog key={`${allocationWork.id}:${ownAllocation}`} own={ownAllocation} defaultType={productStatus==='INSTALLATION'?'Монтаж':'Производство'} projectId={projectId} productId={productId} actorUserId={actorUserId} work={{id:allocationWork.id,title:allocationWork.title,unit:allocationWork.unitSnapshot,remaining:allocationWork.operation?.remaining??remainingWorkQuantity(allocationWork.quantity,allocationWork.allocated)}} data={allocationData} onClose={()=>setAllocationWork(null)}/>:null}
       <div className="flex flex-col gap-3">
 
       {tasks.map((task) => (
@@ -498,87 +507,9 @@ export function TasksTab({
         onOpenChange={(next) => !next && setSelected(null)}
       />
 
-      {/* Добавление работы из прайса (§9) */}
-      <Dialog open={workOpen} onOpenChange={setWorkOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Новая работа</DialogTitle>
-          </DialogHeader>
-          <div className="flex flex-col gap-3">
-            <div className="flex flex-col gap-1.5">
-              <Label>Расценка из прайса *</Label>
-              <SearchableSelect
-                options={priceItems.map((item) => ({
-                  value: item.id,
-                  label: item.name,
-                  hint: `${formatAmount(item.price, "BYN")} / ${item.unit}`,
-                }))}
-                value={priceItemId}
-                onChange={setPriceItemId}
-                placeholder="Выберите расценку…"
-                searchPlaceholder="Поиск расценки…"
-              />
-              {priceItems.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  Прайс пуст — обратитесь к менеджеру.
-                </p>
-              ) : null}
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="work-qty">{productId ? "Количество на 1 изделие *" : "Количество *"}</Label>
-              <Input
-                id="work-qty"
-                type="number"
-                min="0.01"
-                step="0.01"
-                value={quantity}
-                onChange={(event) => setQuantity(event.target.value)}
-              />
-            </div>
-            {priceItemId && Number(quantity) > 0 ? (
-              <p className="text-sm text-muted-foreground">
-                {productId ? `${quantity} × ${productQuantity} = ${Number(quantity) * productQuantity}; ` : ""}Итого:{" "}
-                {formatAmount(
-                  Number(
-                    priceItems.find((item) => item.id === priceItemId)?.price,
-                  ) * Number(quantity) * (productId ? productQuantity : 1),
-                  "BYN",
-                )}{" "}
-                — цена зафиксируется снимком (смена прайса её не изменит).
-              </p>
-            ) : null}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setWorkOpen(false)}>
-              Отмена
-            </Button>
-            <Button
-              disabled={!priceItemId || !(Number(quantity) > 0) || pending}
-              onClick={() =>
-                startTransition(async () => {
-                  const result = await addWork({
-                    projectId,
-                    productId: productId || undefined,
-                    priceItemId,
-                    ...(productId ? { quantityPerUnit: Number(quantity) } : { quantity: Number(quantity) }),
-                  });
-                  if (result.ok) {
-                    toast.success("Работа добавлена");
-                    setWorkOpen(false);
-                    setPriceItemId("");
-                    setQuantity("1");
-                    router.refresh();
-                  } else {
-                    toast.error(result.error ?? "Ошибка");
-                  }
-                })
-              }
-            >
-              Добавить
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <WorkDialog key={`${editWork?.id??'create'}:${workDialogRevision}`} open={workOpen||editWork!==null} onClose={closeWorkDialog}
+        projectId={projectId} productId={productId} productQuantity={productQuantity} priceItems={priceItems}
+        work={editWork?(works.find(work=>work.id===editWork.id)??editWork):undefined}/>
       <ConfirmDeleteDialog
         entityLabel={`работу «${deleteWorkFor?.title ?? ""}»`}
         open={!!deleteWorkFor}

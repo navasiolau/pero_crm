@@ -25,10 +25,10 @@ before(()=>{
  TasksTab=require('../src/app/(app)/projects/[id]/tasks-tab').TasksTab;
 });
 
-// Кейс 1: монтажник создал работу в PRODUCTION; в DESIGN кнопок нет.
-test('field creation gate allows MOUNTER in PRODUCTION and denies DESIGN/non-field',()=>{
- assert.equal(canAddProductWork(['MOUNTER'],'PRODUCTION'),true);
- assert.equal(canAddProductWork(['WORKER'],'PRODUCTION'),true);
+// Кейс 1: монтажник создал работу в INSTALLATION; в DESIGN кнопок нет.
+test('field creation gate allows MOUNTER in INSTALLATION and denies DESIGN/non-field',()=>{
+ assert.equal(canAddProductWork(['MOUNTER'],'PRODUCTION'),false);
+ assert.equal(canAddProductWork(['WORKER'],'PRODUCTION'),true);assert.equal(canAddProductWork(['MOUNTER'],'INSTALLATION'),true);assert.equal(canAddProductWork(['WORKER'],'STORAGE'),true);
  assert.equal(canAddProductWork(['MOUNTER'],'DESIGN'),false);
  assert.equal(canAddProductWork(['ENGINEER'],'PRODUCTION'),false);
 });
@@ -39,8 +39,8 @@ function allocationInput(assigneeId:string){
  return{projectId:'project',productId:'product',workId:'work',assigneeId,title:'Монтаж',type:'Производство',quantity:'1.00',dueAt:'2026-10-10',estimateMinutes:60,dependencyIds:[],clientMutationId:randomUUID()};
 }
 function allocationFixture(){
- const users=new Map([['creator',{id:'creator',name:'Creator',roles:['MOUNTER'],active:true}],['worker',{id:'worker',name:'Worker',roles:['WORKER'],active:true}],['mounter2',{id:'mounter2',name:'Mounter2',roles:['MOUNTER'],active:true}]]);
- const product={id:'product',projectId:'project',status:'PRODUCTION',deletedAt:null,project:{deletedAt:null}};
+ const users=new Map([['creator',{id:'creator',name:'Creator',roles:['MOUNTER'],active:true}],['worker',{id:'worker',name:'Worker',roles:['WORKER','MOUNTER'],active:true}],['mounter2',{id:'mounter2',name:'Mounter2',roles:['MOUNTER'],active:true}]]);
+ const product={id:'product',projectId:'project',status:'INSTALLATION',deletedAt:null,project:{deletedAt:null}};
  const work={id:'work',projectId:'project',productId:'product',quantity:new Prisma.Decimal('5.00'),priceSnapshot:new Prisma.Decimal('12.34'),paymentKind:'LEGACY',stagePayPoolId:null};
  const tasks:Record<string,unknown>[]=[],logs:Record<string,unknown>[]=[],events:Record<string,unknown>[]=[];
  const tx={$queryRaw:async()=>[],user:{findUnique:async({where}:{where:{id:string}})=>users.get(where.id)??null},project:{findUnique:async()=>({id:'project',currency:'BYN',deletedAt:null})},product:{findFirst:async()=>product},work:{findUnique:async()=>({...work,tasks}),findFirst:async()=>({...work,tasks})},task:{findUnique:async({where}:{where:{id:string}})=>tasks.find(task=>task.id===where.id)??null,findMany:async()=>[],create:async({data}:{data:Record<string,unknown>})=>{const row={id:'task-'+tasks.length,...data,quantity:new Prisma.Decimal(String(data.quantity))};tasks.push(row);return row;}},changeLog:{findUnique:async({where}:{where:{id:string}})=>logs.find(row=>row.id===where.id)??null,create:async({data}:{data:Record<string,unknown>})=>{logs.push(data);return data;}},domainEvent:{create:async({data}:{data:Record<string,unknown>})=>{const row={id:'event-'+events.length,...data};events.push(row);return row;}}} as unknown as Prisma.TransactionClient;
@@ -73,7 +73,7 @@ const priceItem={id:'tariff',name:'Монтаж',unit:'шт.',price:'12.34'};
 function tabProps(extra:Record<string,unknown>={}){
  return{projectId:'j',productId:'p',productQuantity:5,products:[],tasks:[],priceItems:[priceItem],workers:[],works:[{...workRow}],canManage:false,canAddWork:true,canAllocateWork:true,actorUserId:'me',allocationData:{workerOptions:[{id:'me',name:'Я'},{id:'other',name:'Коллега'}],createdAssignments:[{id:'t',title:'Монтаж',assigneeName:'Коллега',quantity:'1.00',status:'NEW' as const,workId:'w',dueAt:null,rewardAmount:'12.34',rewardCurrency:'BYN',rewardSource:'WORK_SNAPSHOT' as const}],dependencyOptions:[],eligibleWorkIds:['w']},...extra};
 }
-test('mounter sees work and allocation controls plus own assignments in PRODUCTION',()=>{
+test('mounter sees work and allocation controls plus own assignments in INSTALLATION',()=>{
  const html=renderToStaticMarkup(React.createElement(TasksTab,tabProps()));
  assert.match(html,/>\s*Работа<\/button>/);
  assert.match(html,/Назначить задачу/);
