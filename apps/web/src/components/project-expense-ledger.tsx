@@ -65,7 +65,7 @@ export function ProjectExpenseLedger({ rows, breakdown, onDelete }: {
           <dt>Операция</dt><dd className="break-all text-muted-foreground">{viewing.sourceId}</dd>
         </dl> : null}
         <DialogFooter><Button variant="outline" onClick={() => setViewing(null)}>Закрыть</Button>
-          {viewing?.payment && onDelete ? <Button variant="destructive" onClick={() => { onDelete(viewing.payment!); setViewing(null); }}>Удалить расход</Button> : null}
+          {viewing?.payment?.logisticsTripId ? <span className="text-sm text-muted-foreground">Расход исправляется в логистике</span> : viewing?.payment && onDelete ? <Button variant="destructive" onClick={() => { onDelete(viewing.payment!); setViewing(null); }}>Удалить расход</Button> : null}
         </DialogFooter>
       </DialogContent>
     </Dialog>

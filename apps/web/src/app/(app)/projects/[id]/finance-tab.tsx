@@ -132,6 +132,7 @@ export function FinanceTab({
             variant="ghost"
             size="icon"
             aria-label={row.direction === "INCOME" ? "Удалить приход" : "Удалить расход"}
+            disabled={Boolean(row.logisticsTripId)}
             onClick={(event) => {
               event.stopPropagation();
               setDeleting(row);

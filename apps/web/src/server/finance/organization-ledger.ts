@@ -4,6 +4,7 @@ import { requireFinanceWorkspaceActor, listFinanceWorkspaceProjects, type Financ
 import { paymentView } from "./payment-view";
 import { reportDocumentSelect } from "@/server/finance-documents/view";
 import { stockPurchaseSelect } from "@/server/warehouse/stock-purchase-view";
+import { logisticsAllocationSelect } from "@/server/logistics/payment-view";
 
 export async function loadOrganizationPayments(actor: FinanceWorkspaceActor, direction: PaymentDirection,
   db: Pick<PrismaClient, "project" | "payment" | "cashAccount">) {
@@ -12,7 +13,8 @@ export async function loadOrganizationPayments(actor: FinanceWorkspaceActor, dir
     db.payment.findMany({ where: { ...activePaymentWhere, direction }, select: { id: true, direction: true, amount: true, currency: true,
       rate: true, rateDate: true, bynAmount: true, projectAmount: true, paidAt: true, comment: true, createdById: true,
       project: { select: { id: true, number: true, title: true, deletedAt: true } }, cashAccount: { select: { name: true } },
-      expenseArticle: { select: { id: true, name: true } }, reportDocument: { select: reportDocumentSelect }, stockPurchase: { select: stockPurchaseSelect } }, orderBy: { paidAt: "desc" } }),
+      expenseArticle: { select: { id: true, name: true } }, reportDocument: { select: reportDocumentSelect }, stockPurchase: { select: stockPurchaseSelect },
+      logisticsAllocation: { select: logisticsAllocationSelect } }, orderBy: { paidAt: "desc" } }),
     db.cashAccount.findMany({ where: { active: true }, select: { id: true, name: true, currency: true }, orderBy: { createdAt: "asc" } }),
     listFinanceWorkspaceProjects(actor, db),
   ]);

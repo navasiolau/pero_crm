@@ -95,6 +95,7 @@ model User {
   updatedLogisticsTrips LogisticsTrip[] @relation("LogisticsTripUpdater")
   logisticsDocuments LogisticsDocument[]
   logisticsMutations LogisticsMutation[]
+  logisticsPostings LogisticsPosting[]
   warehouseDeletions WarehouseMovementDeletion[]
   calendarReminderFacts CalendarReminderFact[]
   telegramReminderOutboxes TelegramReminderOutbox[]
@@ -214,6 +215,7 @@ model Project {
   communications         Communication[]
   payments               Payment[]
   logisticsShares        LogisticsProjectShare[]
+  logisticsAllocations   LogisticsPostingAllocation[]
   stageSettlements       ProductStageSettlement[]
   legacyProtectedStagePools ProductStagePayPool[] @relation("StagePayPoolLegacyProject")
 
@@ -770,6 +772,7 @@ model CashAccount {
   updatedAt DateTime  @updatedAt
   payments  Payment[]
   payouts   Payout[]
+  logisticsPostings LogisticsPosting[]
 }
 
 // Статья расходов (§8): справочник для расходов по проектам
@@ -784,6 +787,7 @@ model ExpenseArticle {
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   payments  Payment[]
+  logisticsPostings LogisticsPosting[]
 }
 
 // Платёж по проекту (§11): приход или расход в любой из 4 валют.
@@ -811,6 +815,8 @@ model Payment {
   reportDocumentId String?          @unique
   reportDocument   FinanceDocument? @relation(fields: [reportDocumentId], references: [id], onDelete: Restrict)
   stockPurchase    StockPurchase?
+  logisticsAllocationId String? @unique
+  logisticsAllocation LogisticsPostingAllocation? @relation(fields: [logisticsAllocationId], references: [id], onDelete: Restrict)
   deletionId       String?
   deletion         WarehouseMovementDeletion? @relation(fields: [deletionId], references: [id], onDelete: Restrict)
   paidAt           DateTime         @default(now())
@@ -889,6 +895,7 @@ model LogisticsTrip {
   lines LogisticsShipmentLine[]
   documents LogisticsDocument[]
   mutations LogisticsMutation[]
+  postings LogisticsPosting[]
 
   @@index([date, id])
 }
@@ -947,7 +954,9 @@ model LogisticsDocument {
   ttnNumber String?
   createdAt DateTime @default(now())
   readyAt DateTime?
+  postingDocuments LogisticsPostingDocument[]
 
+  @@unique([id, tripId])
   @@index([tripId, state, createdAt])
   @@index([ttnNumber])
 }
@@ -964,6 +973,72 @@ model LogisticsMutation {
   createdAt DateTime @default(now())
 
   @@index([tripId, createdAt])
+}
+
+enum LogisticsPostingStatus {
+  ACTIVE
+  SUPERSEDED
+}
+
+// Снимок одного кассового проведения; исправление добавляет следующую ревизию.
+model LogisticsPosting {
+  id String @id @default(uuid())
+  tripId String
+  trip LogisticsTrip @relation(fields: [tripId], references: [id], onDelete: Restrict)
+  tripRevision Int
+  clientMutationId String @unique
+  requestFingerprint String
+  actorId String
+  actor User @relation(fields: [actorId], references: [id], onDelete: Restrict)
+  actorNameSnapshot String
+  status LogisticsPostingStatus @default(ACTIVE)
+  amount Decimal @db.Decimal(12, 2)
+  bynAmount Decimal @db.Decimal(12, 2)
+  currency String
+  cashAccountId String
+  cashAccount CashAccount @relation(fields: [cashAccountId], references: [id], onDelete: Restrict)
+  cashAccountNameSnapshot String
+  expenseArticleId String
+  expenseArticle ExpenseArticle @relation(fields: [expenseArticleId], references: [id], onDelete: Restrict)
+  rate Decimal @db.Decimal(14, 6)
+  rateDate DateTime?
+  paidAt DateTime
+  manifestSnapshot Json
+  createdAt DateTime @default(now())
+  allocations LogisticsPostingAllocation[]
+  documents LogisticsPostingDocument[]
+
+  @@unique([tripId, tripRevision])
+  @@unique([id, tripId])
+  @@index([tripId, status])
+}
+
+// Текущие LogisticsProjectShare можно удалять при правке состава; эти снимки сохраняются.
+model LogisticsPostingAllocation {
+  id String @id @default(uuid())
+  postingId String
+  posting LogisticsPosting @relation(fields: [postingId], references: [id], onDelete: Restrict)
+  projectId String
+  project Project @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  projectNumberSnapshot String
+  percentBps Int
+  amount Decimal @db.Decimal(12, 2)
+  bynAmount Decimal @db.Decimal(12, 2)
+  payment Payment?
+
+  @@unique([postingId, projectId])
+  @@index([projectId])
+}
+
+model LogisticsPostingDocument {
+  postingId String
+  tripId String
+  posting LogisticsPosting @relation(fields: [postingId, tripId], references: [id, tripId], onDelete: Restrict)
+  documentId String
+  document LogisticsDocument @relation(fields: [documentId, tripId], references: [id, tripId], onDelete: Restrict)
+
+  @@id([postingId, documentId])
+  @@index([documentId, tripId])
 }
 
 // ─── Склад (§12, фаза 6) ────────────────────────────────────────────────
