@@ -5,7 +5,6 @@ import { createLogisticsTripCore, updateLogisticsTripCore, type LogisticsTransac
 import { createLogisticsDocumentService, type LogisticsDocumentStorage } from "../src/server/logistics/documents";
 import { createLogisticsPostingCore } from "../src/server/logistics/posting-core";
 import { getLogisticsProjectBudgetCore, getLogisticsTripMoneyCore } from "../src/server/logistics/money-query-core";
-import { LOGISTICS_ARTICLE_SETTING } from "../src/server/logistics/money-contracts";
 import { createPaymentInTransaction } from "../src/server/payments/transaction";
 import { preparePayment } from "../src/server/payments/prepare";
 import { deletePaymentInTransaction } from "../src/server/payments/delete-core";
@@ -44,8 +43,7 @@ export async function runLogisticsCashAcceptance(tx: Prisma.TransactionClient) {
   const account = await tx.cashAccount.create({ data: { id: randomUUID(), name: marker, currency: "BYN" } });
   const smallAccount = await tx.cashAccount.create({ data: { id: randomUUID(), name: `${marker}-empty`, currency: "BYN" } });
   const maxCode = (await tx.expenseArticle.aggregate({ _max: { code: true } }))._max.code ?? 0;
-  const article = await tx.expenseArticle.create({ data: { id: randomUUID(), code: maxCode + 1, name: marker } });
-  await tx.orgSetting.upsert({ where: { key: LOGISTICS_ARTICLE_SETTING }, create: { key: LOGISTICS_ARTICLE_SETTING, value: article.id }, update: { value: article.id } });
+  const article = await tx.expenseArticle.create({ data: { id: randomUUID(), code: maxCode + 1, name: "Логистика", comment: marker } });
   const beforeFunding = await readOrgBalance(tx, "1.000000");
   const funding = Prisma.Decimal.max(5000, beforeFunding.negated().plus(5000)).toNumber();
   const income = { direction: "INCOME" as const, amount: funding, currency: "BYN", cashAccountId: account.id, paidAt: "2026-10-10" };
@@ -56,6 +54,7 @@ export async function runLogisticsCashAcceptance(tx: Prisma.TransactionClient) {
     expenseArticleId: article.id, reportDocumentId: report.id, paidAt: "2026-10-10" };
   await transaction(async current => createPaymentInTransaction(actor, other, await preparePayment(other, current), current));
   await assert.rejects(transaction(async current => createPaymentInTransaction(actor, { ...other, reportDocumentId: undefined }, await preparePayment(other, current), current)), /отчетный документ/);
+  await assert.rejects(preparePayment({ ...other, expenseArticleId: undefined }, tx), /статью расхода/);
   const manifest = { date: "2026-10-10", comment: marker,
     shares: [{ projectId: a.projectId, percentBps: 4000 }, { projectId: b.projectId, percentBps: 6000 }],
     lines: [{ projectId: a.projectId, kind: "PRODUCT" as const, productId: a.id, quantity: 2 },
@@ -76,6 +75,8 @@ export async function runLogisticsCashAcceptance(tx: Prisma.TransactionClient) {
   const initialCash = await readCashBalance(tx, account.id), initialOrg = await readOrgBalance(tx, "1.000000");
   const posted = await createLogisticsPostingCore(actorId, input, "post", dependencies);
   const first = await getLogisticsTripMoneyCore(actorId, trip.tripId, tx);
+  assert.equal((await tx.logisticsPosting.findUniqueOrThrow({ where: { id: posted.postingId } })).expenseArticleId, null);
+  assert.ok((await tx.payment.findMany({ where: { logisticsAllocation: { postingId: posted.postingId } }, select: { expenseArticleId: true } })).every(row => row.expenseArticleId === null));
   assert.deepEqual(first.current!.allocations.map(row => [row.projectId, row.amount]).sort(), [[a.projectId, "400.00"], [b.projectId, "600.00"]].sort());
   assert.equal((await readCashBalance(tx, account.id)).toFixed(2), initialCash.minus(1000).toFixed(2));
   assert.equal((await readOrgBalance(tx, "1.000000")).toFixed(2), initialOrg.minus(1000).toFixed(2));
@@ -90,8 +91,8 @@ export async function runLogisticsCashAcceptance(tx: Prisma.TransactionClient) {
   await assert.rejects(transaction(current => current.payment.update({ where: { id: originalPayments[0] }, data: { amount: 1 } })), /IMMUTABLE/);
   await assert.rejects(transaction(current => current.logisticsDocument.delete({ where: { id: ready.document.id } })), /IMMUTABLE/);
   const budgetBefore = await getLogisticsProjectBudgetCore(actorId, a.projectId, tx);
-  assert.equal(budgetBefore.tripSpent, 400); assert.equal(budgetBefore.otherSpent, 50); assert.equal(budgetBefore.spent, 450);
-  assert.equal(budgetBefore.remaining, budgetBefore.deliveryBudget === null ? null : new Prisma.Decimal(budgetBefore.deliveryBudget).minus(450).toNumber());
+  assert.equal(budgetBefore.tripSpent, 400); assert.equal(budgetBefore.spent, 400);
+  assert.equal(budgetBefore.remaining, budgetBefore.deliveryBudget === null ? null : new Prisma.Decimal(budgetBefore.deliveryBudget).minus(400).toNumber());
   const correction = { ...input, amount: "1200.00", expectedRevision: posted.revision, clientMutationId: randomUUID() };
   await assert.rejects(createLogisticsPostingCore(actorId, { ...correction, cashAccountId: smallAccount.id }, "correct", dependencies), /Недостаточно средств/);
   assert.equal((await getLogisticsTripMoneyCore(actorId, trip.tripId, tx)).current!.id, posted.postingId);
@@ -118,11 +119,11 @@ export async function runLogisticsCashAcceptance(tx: Prisma.TransactionClient) {
     clientMutationId: randomUUID(), manifest: oneProject }, "correct", dependencies);
   assert.equal(await tx.logisticsProjectShare.count({ where: { tripId: trip.tripId } }), 1);
   assert.equal((await getLogisticsTripMoneyCore(actorId, trip.tripId, tx)).history.length, 2);
-  assert.equal((await getLogisticsProjectBudgetCore(actorId, a.projectId, tx)).spent, 50);
+  assert.equal((await getLogisticsProjectBudgetCore(actorId, a.projectId, tx)).spent, 0);
   assert.equal(one.revision, corrected.revision + 1);
   const fx = allocateLogisticsMoney("0.02", [{ projectId: a.projectId, percentBps: 5000 }, { projectId: b.projectId, percentBps: 5000 }], "2.5");
   assert.equal(fx.bynAmount, "0.06");
   await tx.$executeRawUnsafe("SET CONSTRAINTS ALL IMMEDIATE");
-  return { assertions: "TTN, 1000=>400/600, replay/CAS, correction1200=>480/720, immutable history, cash/org/budget, project replacement, signed, generic report policy",
+  return { assertions: "TTN, 1000=>400/600, no article dependency, project-only fact400, replay/CAS, correction1200=>480/720, immutable history, cash/org/budget, project replacement, signed, generic report/article policy",
     originalCounts, ownedMarker: marker };
 }

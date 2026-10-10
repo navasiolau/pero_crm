@@ -22,7 +22,7 @@ export function projectExpenseRows(payments: readonly PaymentRecord[], movements
   const rows: ProjectExpenseRow[] = payments.filter(row => row.direction === "EXPENSE").map(row => {
     const payment = paymentView(row, people);
     return { id: `payment:${row.id}`, source: "PAYMENT", sourceId: row.id, date: payment.paidAt,
-      article: paymentExpenseArticle(row.expenseArticle), bynAmount: payment.bynAmount,
+      article: paymentExpenseArticle(row.expenseArticle, Boolean(row.logisticsAllocationId || row.logisticsAllocation)), bynAmount: payment.bynAmount,
       comment: row.comment, createdByName: payment.createdByName, payment, stock: null };
   });
   for (const row of movements) {

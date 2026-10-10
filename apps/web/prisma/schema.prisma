@@ -999,8 +999,8 @@ model LogisticsPosting {
   cashAccountId String
   cashAccount CashAccount @relation(fields: [cashAccountId], references: [id], onDelete: Restrict)
   cashAccountNameSnapshot String
-  expenseArticleId String
-  expenseArticle ExpenseArticle @relation(fields: [expenseArticleId], references: [id], onDelete: Restrict)
+  expenseArticleId String?
+  expenseArticle ExpenseArticle? @relation(fields: [expenseArticleId], references: [id], onDelete: Restrict)
   rate Decimal @db.Decimal(14, 6)
   rateDate DateTime?
   paidAt DateTime

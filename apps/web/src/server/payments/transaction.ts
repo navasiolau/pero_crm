@@ -68,7 +68,7 @@ export async function createPaymentInTransaction(actor: DomainActor, input: Paym
   if (project) assertProjectMoneyCurrency(project.currency);
 
   if (data.direction === "EXPENSE") {
-    if (!prepared.articleId) throw Error("Выберите статью расхода");
+    if (!prepared.articleId && !logisticsAllocationId) throw Error("Выберите статью расхода");
     const [cash, org] = await Promise.all([
       readCashBalance(tx, prepared.account.id),
       readOrgBalance(tx, "1.000000", new Prisma.Decimal(prepared.bynAmount).negated().toFixed(2)),

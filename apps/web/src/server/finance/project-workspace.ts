@@ -21,6 +21,7 @@ export async function loadFinanceProjectWorkspace(
       id: true, direction: true, amount: true, currency: true, rate: true, bynAmount: true, projectAmount: true, paidAt: true, comment: true, createdById: true,
       cashAccount: { select: { name: true } }, expenseArticle: { select: { id: true, name: true } }, reportDocument: { select: reportDocumentSelect },
       logisticsAllocation: { select: logisticsAllocationSelect },
+      logisticsAllocationId: true,
     }, orderBy: { paidAt: "desc" } }),
     loadProjectStockExpenses(actor, project.id, db),
     db.cashAccount.findMany({ where: { active: true }, select: { id: true, name: true, currency: true }, orderBy: { createdAt: "asc" } }),

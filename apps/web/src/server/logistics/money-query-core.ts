@@ -1,10 +1,9 @@
 import { Prisma } from "@prisma/client";
-import { ADMIN_ROLES, hasAnyRole } from "@/lib/roles";
 import { BYN_UNAVAILABLE_REASON, sumByn, subtractByn } from "@/lib/history-byn";
 import { activePaymentWhere } from "@/server/payments/active-records";
 import { readCashBalance } from "@/server/payroll/cash-core";
 import { requireLogisticsActor } from "./core";
-import { LOGISTICS_ARTICLE_SETTING, type LogisticsMoneyOptions, type LogisticsPostingView, type LogisticsProjectBudget } from "./money-contracts";
+import { type LogisticsMoneyOptions, type LogisticsPostingView, type LogisticsProjectBudget } from "./money-contracts";
 
 const postingReadInclude = { allocations: { include: { payment: { select: { id: true } } }, orderBy: { projectId: "asc" } },
   documents: { orderBy: { documentId: "asc" } } } satisfies Prisma.LogisticsPostingInclude;
@@ -12,7 +11,7 @@ type PostingRecord = Prisma.LogisticsPostingGetPayload<{ include: typeof posting
 function postingView(row: PostingRecord): LogisticsPostingView {
   return { id: row.id, tripId: row.tripId, tripRevision: row.tripRevision, status: row.status,
     amount: row.amount.toFixed(2), currency: row.currency, cashAccountId: row.cashAccountId,
-    cashAccountName: row.cashAccountNameSnapshot, expenseArticleId: row.expenseArticleId,
+    cashAccountName: row.cashAccountNameSnapshot,
     rate: row.rate.toFixed(6), rateDate: row.rateDate?.toISOString().slice(0, 10) ?? null, bynAmount: row.bynAmount.toFixed(2),
     paidAt: row.paidAt.toISOString().slice(0, 10), createdAt: row.createdAt.toISOString(), createdByName: row.actorNameSnapshot,
     allocations: row.allocations.map(allocation => ({ id: allocation.id, projectId: allocation.projectId,
@@ -28,36 +27,20 @@ export async function getLogisticsTripMoneyCore(actorId: string | null | undefin
     history: records.filter(row => row.status === "SUPERSEDED").map(postingView) };
 }
 export async function getLogisticsMoneyOptionsCore(actorId: string | null | undefined, tx: Prisma.TransactionClient): Promise<LogisticsMoneyOptions> {
-  const actor = await requireLogisticsActor(actorId, tx);
-  const [accounts, setting] = await Promise.all([
-    tx.cashAccount.findMany({ where: { active: true }, select: { id: true, name: true, currency: true }, orderBy: { createdAt: "asc" } }),
-    tx.orgSetting.findUnique({ where: { key: LOGISTICS_ARTICLE_SETTING } }),
-  ]);
-  const canConfigureArticle = hasAnyRole(actor.roles, ADMIN_ROLES);
-  const [logisticsArticle, articleOptions] = await Promise.all([
-    setting?.value ? tx.expenseArticle.findUnique({ where: { id: setting.value }, select: { id: true, name: true, active: true } }) : null,
-    canConfigureArticle ? tx.expenseArticle.findMany({ select: { id: true, name: true, active: true }, orderBy: { code: "asc" } }) : [],
-  ]);
+  await requireLogisticsActor(actorId, tx);
+  const accounts = await tx.cashAccount.findMany({ where: { active: true }, select: { id: true, name: true, currency: true }, orderBy: { createdAt: "asc" } });
   const cashAccounts = await Promise.all(accounts.map(async account => ({ ...account, balance: (await readCashBalance(tx, account.id)).toNumber() })));
-  return { cashAccounts, logisticsArticle, articleOptions, canConfigureArticle };
+  return { cashAccounts };
 }
 export async function getLogisticsProjectBudgetCore(actorId: string | null | undefined, projectId: string,
   tx: Prisma.TransactionClient): Promise<LogisticsProjectBudget> {
   await requireLogisticsActor(actorId, tx);
-  const [project, setting] = await Promise.all([
-    tx.project.findUnique({ where: { id: projectId }, select: { currency: true, delivery: true } }),
-    tx.orgSetting.findUnique({ where: { key: LOGISTICS_ARTICLE_SETTING } }),
-  ]);
+  const project = await tx.project.findUnique({ where: { id: projectId }, select: { currency: true, delivery: true } });
   if (!project) throw Error("Проект не найден");
-  const payments = await tx.payment.findMany({ where: { AND: [activePaymentWhere, { projectId, direction: "EXPENSE" },
-    { OR: [{ logisticsAllocationId: { not: null } }, ...(setting?.value ? [{ expenseArticleId: setting.value }] : [])] }] },
-  select: { bynAmount: true, logisticsAllocationId: true } });
-  const tripSpent = sumByn(payments.filter(row => row.logisticsAllocationId !== null).map(row => row.bynAmount?.toNumber() ?? null));
-  const otherSpent = setting?.value ? sumByn(payments.filter(row => row.logisticsAllocationId === null).map(row => row.bynAmount?.toNumber() ?? null)) : null;
-  const spent = sumByn([tripSpent, otherSpent]);
+  const payments = await tx.payment.findMany({ where: { AND: [activePaymentWhere, { projectId, direction: "EXPENSE", logisticsAllocationId: { not: null } }] },
+    select: { bynAmount: true } });
+  const spent = sumByn(payments.map(row => row.bynAmount?.toNumber() ?? null));
   const deliveryBudget = project.currency === "BYN" ? project.delivery?.toNumber() ?? null : null;
-  const unavailableReason = project.currency !== "BYN" || spent === null && !!setting?.value ? BYN_UNAVAILABLE_REASON :
-    !setting?.value ? "Статья «Логистика» не настроена" : null;
-  return { currency: "BYN", deliveryBudget, tripSpent, otherSpent, spent, remaining: subtractByn(deliveryBudget, spent),
-    unavailableReason, articleConfigured: !!setting?.value };
+  const unavailableReason = project.currency !== "BYN" || spent === null ? BYN_UNAVAILABLE_REASON : null;
+  return { currency: "BYN", deliveryBudget, tripSpent: spent, spent, remaining: subtractByn(deliveryBudget, spent), unavailableReason };
 }
