@@ -78,7 +78,7 @@ async function main() {
     assert.equal(await db.changeLog.count({ where: { actorId: ids.user } }), 0);
     console.log(JSON.stringify({ ok: true, nativeEnum: true, catalogCreateUpdateRevoke: true,
       oldSnapshotPreserved: true, newSnapshotUsesCurrentPrice: true, paySchemeUnchanged: true,
-      baseProductVisibilityPreserved: true, rollbackConfirmed: true, sharedCoordinatorOnlyWorkCreatePending120: true }));
+      baseProductVisibilityPreserved: true, rollbackConfirmed: true }));
   } finally {
     await db.$disconnect();
   }
