@@ -41,9 +41,12 @@ test("active project retains normal management drag for an explicitly restored d
     initialProducts: [{ ...product, projectStage: "CONTRACT" }], canManage: true, actorRoles: ["ADMIN"], showAmount: true,
   })), true);
 });
-test("all non-admin/director roles render both boards from preparation and cannot expose stale drafts", () => {
-  const prepared = { ...product, id: "prep", number: "111.2", title: "Подтверждённый шкаф", status: "PREPARATION" as const };
+test("non-admin/director boards follow visible role columns and cannot expose stale drafts", () => {
   for (const actorRoles of [["MANAGER"], ["MANAGER", "ENGINEER"], ["ENGINEER"], ["WORKER"], ["MOUNTER"], ["PROCUREMENT"], ["ACCOUNTANT"]] as import("@prisma/client").Role[][]) {
+    const full = actorRoles.includes("MANAGER") || actorRoles.includes("PROCUREMENT");
+    const status = full ? "PREPARATION" : actorRoles.includes("ENGINEER") ? "DESIGN" : actorRoles.includes("WORKER") ? "PRODUCTION" : actorRoles.includes("MOUNTER") ? "INSTALLATION" : null;
+    const label = status === "PREPARATION" ? "Подготовка" : status === "DESIGN" ? "Проектирование" : status === "PRODUCTION" ? "В производстве" : status === "INSTALLATION" ? "Установка" : null;
+    const prepared = { ...product, id: "prep", number: "111.2", title: "Подтверждённый шкаф", status: status ?? "PREPARATION" };
     for (const component of [ProductsTab, ProductsKanban]) {
       const html = renderToStaticMarkup(React.createElement(component as React.ComponentType<Record<string, unknown>>, {
         projectId: "project", projectStage: "ESTIMATE", currency: "BYN", initialProducts: [product, prepared],
@@ -51,8 +54,9 @@ test("all non-admin/director roles render both boards from preparation and canno
       }));
       assert.equal(html.includes(">Черновики<"), false, actorRoles.join("+"));
       assert.equal(html.includes("Черновой шкаф"), false, actorRoles.join("+"));
-      assert.ok(html.includes(">Подготовка<") && html.includes("Подтверждённый шкаф"));
-      if (component === ProductsTab) assert.ok(html.includes("1 позиция"), "stale hidden draft cannot change the visible count");
+      if (label) assert.ok(html.includes(`>${label}<`) && html.includes("Подтверждённый шкаф"), actorRoles.join("+"));
+      else assert.equal(html.includes("Подтверждённый шкаф"), false, "accountant has no technical product board grant");
+      if (component === ProductsTab) assert.ok(html.includes(label ? "1 позиция" : "0 позиций"), "stale hidden draft cannot change the visible count");
     }
   }
 });

@@ -6,6 +6,7 @@ export async function deletePaymentInTransaction(actor:DomainActor,paymentId:str
 requireActorRoles(actor,FINANCE_ROLES);
       const current = await tx.payment.findUnique({ where: { id: paymentId }, include: { project: { select: { id: true, number: true, deletedAt: true } }, stockPurchase: { select: { id: true } } } });
       if (!current || current.deletionId) throw new Error("Платёж не найден или уже удалён");
+      if (current.logisticsAllocationId) throw new Error("Расход связан с рейсом — исправьте общий рейс в логистике");
       if (current.stockPurchase) throw new Error("Платёж связан с приходом на склад — отдельно удалить его нельзя");
       if (current.project?.deletedAt) throw new Error("Проект в корзине: финансовая история доступна только для просмотра");
       if (current.direction === "INCOME") {

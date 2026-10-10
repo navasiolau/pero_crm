@@ -9,6 +9,7 @@ import { requireFinanceDocumentActor } from "@/server/finance-documents/core";
 import { paymentSchema, type PaymentInput } from "./contracts";
 import { readPaymentReceipt, recordPaymentReceipt } from "./receipts";
 import { assertExpenseReportDocument } from "./document-policy";
+import { assertLogisticsPaymentContext } from "@/server/logistics/payment-context";
 
 export type PreparedPayment = {
   project: { id: string; number: string; currency: string } | null;
@@ -23,21 +24,23 @@ export type PreparedPayment = {
 
 /** Вызывается под общей денежной блокировкой; сеть и уведомления выполняются после commit. */
 export async function createPaymentInTransaction(actor: DomainActor, input: PaymentInput,
-  prepared: PreparedPayment, tx: Prisma.TransactionClient, stockPurchase?: { movementId: string }) {
+  prepared: PreparedPayment, tx: Prisma.TransactionClient, context?: { movementId: string } | { logisticsAllocationId: string }) {
   requireActorRoles(actor, FINANCE_ROLES);
   const data = paymentSchema.parse(input);
   const previous = await readPaymentReceipt(actor, data, tx);
   if (previous) return { payment: previous, eventId: null, repeated: true as const };
-  if (stockPurchase) {
+  const logisticsAllocationId = context && "logisticsAllocationId" in context
+    ? await assertLogisticsPaymentContext(actor, data, prepared, tx, context.logisticsAllocationId) : null;
+  if (context && "movementId" in context) {
     // Server-only context, never taken from PaymentInput. The stock writer has
     // already created this owned PAID movement in the same outer transaction.
-    const movement = await tx.stockMovement.findUnique({ where: { id: stockPurchase.movementId },
+    const movement = await tx.stockMovement.findUnique({ where: { id: context.movementId },
       select: { deletionId:true, type: true, receiptKind: true, productId: true, createdById: true, totalByn: true, stockPurchase: { select: { id: true } } } });
     if (data.direction !== "EXPENSE" || data.projectId || prepared.project || !movement || movement.deletionId ||
         movement.type !== "INCOME" || movement.receiptKind !== "PAID" || movement.productId ||
         movement.createdById !== actor.id || movement.stockPurchase || !movement.totalByn?.eq(prepared.bynAmount))
       throw Error("Нет соответствующего оплаченного прихода для расхода");
-  } else assertExpenseReportDocument(data);
+  } else if (!logisticsAllocationId) assertExpenseReportDocument(data);
 
   if (data.reportDocumentId) {
     await requireFinanceDocumentActor(actor.id, tx);
@@ -81,6 +84,7 @@ export async function createPaymentInTransaction(actor: DomainActor, input: Paym
     cashAccountId: prepared.account.id, expenseArticleId: prepared.articleId,
     paidAt: prepared.paidAt, comment: data.comment?.trim() || null, createdById: actor.id,
     ...(data.reportDocumentId ? { reportDocumentId: data.reportDocumentId } : {}),
+    ...(logisticsAllocationId ? { logisticsAllocationId } : {}),
   } });
   await tx.changeLog.create({ data: {
     actorType: "user", actorId: actor.id, actorName: actor.name || undefined, entity: "payment", entityId: payment.id,
@@ -90,11 +94,12 @@ export async function createPaymentInTransaction(actor: DomainActor, input: Paym
       projectAmount: prepared.project ? prepared.bynAmount : null, cashAccount: prepared.account.name,
     },
   } });
-  const event = await tx.domainEvent.create({ data: {
+  // Составной логистический writer создаёт одно событие на целый рейс после всех долей.
+  const event = logisticsAllocationId ? null : await tx.domainEvent.create({ data: {
     type: data.direction === "INCOME" ? "payment.created" : "expense.created", actor: actor.id,
     payload: { paymentId: payment.id, projectId: prepared.project?.id ?? null, direction: data.direction,
       amount: prepared.amount, currency: data.currency, bynAmount: prepared.bynAmount },
   } });
   await recordPaymentReceipt(actor, data, payment.id, tx);
-  return { payment, eventId: event.id, repeated: false as const };
+  return { payment, eventId: event?.id ?? null, repeated: false as const };
 }

@@ -1,4 +1,4 @@
-import { productDraftVisibilityWhere } from "@/server/access/visibility";
+import { productVisibilityWhere } from "@/server/access/visibility";
 import {z} from 'zod';
 import {hasAnyRole,FIELD_ROLES,MANAGER_ROLES} from '@/lib/roles';
 import {assertInternalCurrency,assertProjectMoneyCurrency} from '@/lib/internal-currency';
@@ -20,7 +20,7 @@ export async function addWorkCore(actor:DomainActor,input:unknown,transaction:Ta
   if(data.productId)await lockProductRow(tx,data.productId);
   const project=await tx.project.findUnique({where:{...liveProjectWhere,id:data.projectId},select:{id:true,number:true,currency:true}});
   if(!project)throw Error('Проект не найден');
-  const product=data.productId?await tx.product.findFirst({where:{...liveProductWhere,id:data.productId,projectId:data.projectId,AND:[productDraftVisibilityWhere(current)]},select:{id:true,status:true,quantity:true}}):null;
+  const product=data.productId?await tx.product.findFirst({where:{...liveProductWhere,id:data.productId,projectId:data.projectId,AND:[productVisibilityWhere(current)]},select:{id:true,status:true,quantity:true}}):null;
   if(data.productId&&!product)throw Error('Изделие не найдено в этом проекте');
    if(!manager&&(!hasAnyRole(current.roles,FIELD_ROLES)||product?.status!=='PRODUCTION'))throw Error('Работу можно добавить только в изделие в производстве');
   assertProjectMoneyCurrency(project.currency);assertInternalCurrency((await tx.orgSetting.findUnique({where:{key:'payrollCurrency'}}))?.value??'BYN');

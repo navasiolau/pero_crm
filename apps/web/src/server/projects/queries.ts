@@ -8,6 +8,7 @@ import type { Prisma, ProjectStage, Role } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
 import { reportDocumentSelect } from "@/server/finance-documents/view";
+import { logisticsAllocationSelect } from "@/server/logistics/payment-view";
 import {
   ASSIGNEE_ROLES,
   MANAGER_ROLES,
@@ -305,6 +306,7 @@ export async function getProjectFor(
           cashAccount: { select: { name: true } },
           expenseArticle: { select: { id: true, name: true } },
           reportDocument: { select: reportDocumentSelect },
+          logisticsAllocation: { select: logisticsAllocationSelect },
         },
         orderBy: { paidAt: "desc" },
       },
