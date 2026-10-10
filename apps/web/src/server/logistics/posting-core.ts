@@ -2,18 +2,18 @@ import { createHash, randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { assertProjectMoneyCurrency } from "@/lib/internal-currency";
 import { UploadError } from "@/server/files/upload-result";
-import { preparePayment } from "@/server/payments/prepare";
+import { prepareLogisticsPayment } from "./prepare-payment";
 import { createPaymentInTransaction, type PreparedPayment } from "@/server/payments/transaction";
 import { readCashBalance, readOrgBalance } from "@/server/payroll/cash-core";
 import { allocateLogisticsMoney } from "./allocation";
 import { logisticsManifestInclude, lockLogisticsTrip, requireLogisticsActor, validateTripManifest,
   replaceTripManifestInTransaction, type LogisticsManifestRecord, type LogisticsTransaction } from "./core";
 import { shipmentLineKey, type LogisticsTripManifestInput } from "./contracts";
-import { LOGISTICS_ARTICLE_SETTING, logisticsPostingSchema, type LogisticsPostingData, type LogisticsPostingResult } from "./money-contracts";
+import { logisticsPostingSchema, type LogisticsPostingData, type LogisticsPostingResult } from "./money-contracts";
 
-type PreparationDatabase = Pick<Prisma.TransactionClient, "user" | "project" | "cashAccount" | "expenseArticle" | "orgSetting" | "logisticsTrip" | "logisticsPosting">;
+type PreparationDatabase = Pick<Prisma.TransactionClient, "user" | "project" | "cashAccount" | "logisticsTrip" | "logisticsPosting">;
 export type LogisticsMoneyDependencies = {
-  db: PreparationDatabase; transaction: LogisticsTransaction; getRate?: Parameters<typeof preparePayment>[2];
+  db: PreparationDatabase; transaction: LogisticsTransaction; getRate?: Parameters<typeof prepareLogisticsPayment>[3];
 };
 type PostingMode = "post" | "correct";
 export type LogisticsPostingCoreResult = LogisticsPostingResult & { eventId: string | null; projectIds: string[] };
@@ -58,16 +58,10 @@ export async function createLogisticsPostingCore(actorId: string | null | undefi
   const fingerprint = logisticsPostingFingerprint(actor.id, mode, data);
   const receipt = await readReceipt(actor.id, fingerprint, data, dependencies.db);
   if (receipt) return receipt;
-  const [setting, trip] = await Promise.all([
-    dependencies.db.orgSetting.findUnique({ where: { key: LOGISTICS_ARTICLE_SETTING } }),
-    dependencies.db.logisticsTrip.findUnique({ where: { id: data.tripId }, select: { date: true } }),
-  ]);
+  const trip = await dependencies.db.logisticsTrip.findUnique({ where: { id: data.tripId }, select: { date: true } });
   if (!trip) failure("Рейс не найден");
-  if (!setting?.value) failure("Администратор должен выбрать общую статью «Логистика»");
   const date = data.manifest?.date ?? trip.date.toISOString().slice(0, 10);
-  const prepared = await preparePayment({ direction: "EXPENSE", amount: Number(data.amount), currency: data.currency,
-    cashAccountId: data.cashAccountId, expenseArticleId: setting.value, paidAt: date, rate: data.rate, rateDate: data.rateDate },
-  dependencies.db, dependencies.getRate);
+  const prepared = await prepareLogisticsPayment(data, date, dependencies.db, dependencies.getRate);
   return dependencies.transaction(tx => postLogisticsInTransaction(actor.id, data, mode, prepared, tx));
 }
 
@@ -88,22 +82,20 @@ export async function postLogisticsInTransaction(actorId: string, input: Logisti
   if (mode === "correct" && !current) failure("Рейс ещё не оплачен — сначала проведите расход", true);
   const manifest = data.manifest ?? manifestOf(previous);
   const replacement = data.manifest ? await validateTripManifest(tx, manifest, previous, actor) : null;
-  const [projects, account, article, setting, documents] = await Promise.all([
+  const [projects, account, documents] = await Promise.all([
     tx.project.findMany({ where: { id: { in: manifest.shares.map(share => share.projectId) }, deletedAt: null },
       select: { id: true, number: true, currency: true } }),
     tx.cashAccount.findUnique({ where: { id: data.cashAccountId }, select: { id: true, name: true, currency: true, active: true } }),
-    prepared.articleId ? tx.expenseArticle.findUnique({ where: { id: prepared.articleId }, select: { active: true } }) : null,
-    tx.orgSetting.findUnique({ where: { key: LOGISTICS_ARTICLE_SETTING } }),
     tx.logisticsDocument.findMany({ where: { id: { in: data.documentIds }, tripId: data.tripId, state: "READY", stage: { in: ["ISSUED", "SIGNED"] } },
       select: { id: true, contentHash: true, stage: true, ttnNumber: true } }),
   ]);
   if (projects.length !== manifest.shares.length) failure("Один из проектов не найден или находится в корзине");
   for (const project of projects) assertProjectMoneyCurrency(project.currency);
   if (!account?.active || account.currency !== data.currency || prepared.account.id !== account.id ||
-      prepared.project || !article?.active || !prepared.articleId || setting?.value !== prepared.articleId ||
+      prepared.project || prepared.articleId !== null ||
       !new Prisma.Decimal(data.amount).eq(prepared.amount) || (data.currency === "BYN" && prepared.rate !== 1) ||
       prepared.paidAt.toISOString().slice(0, 10) !== manifest.date)
-    failure("Касса, статья или дата изменились — обновите рейс");
+    failure("Касса или дата изменились — обновите рейс");
   if (documents.length !== data.documentIds.length) failure("Для списания нужна сохранённая ТТН этого рейса с одной печатью");
   const split = allocateLogisticsMoney(data.amount, manifest.shares, new Prisma.Decimal(prepared.rate).toFixed(6));
 
@@ -128,7 +120,7 @@ export async function postLogisticsInTransaction(actorId: string, input: Logisti
   await tx.logisticsPosting.create({ data: { id: postingId, tripId: previous.id, tripRevision: revision,
     clientMutationId: data.clientMutationId, requestFingerprint: fingerprint, actorId: actor.id, actorNameSnapshot: actor.name,
     amount: split.amount, bynAmount: split.bynAmount, currency: data.currency, cashAccountId: account.id,
-    cashAccountNameSnapshot: account.name, expenseArticleId: prepared.articleId,
+    cashAccountNameSnapshot: account.name, expenseArticleId: null,
     rate: split.rate, rateDate: prepared.rateDate, paidAt: prepared.paidAt, manifestSnapshot: snapshot,
   } });
   await tx.logisticsPostingDocument.createMany({ data: documents.map(document => ({ postingId, tripId: previous.id, documentId: document.id })) });
@@ -138,7 +130,7 @@ export async function postLogisticsInTransaction(actorId: string, input: Logisti
     if (saved.amount.isZero()) continue;
     const partPrepared = { ...prepared, account, project, amount: saved.amount.toNumber(), bynAmount: saved.bynAmount.toNumber() };
     await createPaymentInTransaction({ ...actor, source: "web" }, { direction: "EXPENSE", projectId: project.id,
-      amount: partPrepared.amount, currency: data.currency, cashAccountId: account.id, expenseArticleId: prepared.articleId,
+      amount: partPrepared.amount, currency: data.currency, cashAccountId: account.id,
       comment: manifest.comment || `Логистика · ${manifest.date}` }, partPrepared, tx, { logisticsAllocationId: saved.id });
   }
   const event = await tx.domainEvent.create({ data: { type: current ? "logistics.trip.corrected" : "logistics.trip.posted", actor: actor.id,

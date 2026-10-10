@@ -10,12 +10,13 @@ export type PaymentRecord = Pick<Payment, "id" | "direction" | "amount" | "curre
   reportDocument?: ReportDocumentRecord | null;
   stockPurchase?: StockPurchaseRecord | null;
   logisticsAllocation?: LogisticsPaymentRecord | null;
+  logisticsAllocationId?: string | null;
 };
 export function paymentView(row: PaymentRecord, people: ReadonlyMap<string, string>): PaymentRow {
   return { id: row.id, direction: row.direction, amount: row.amount.toNumber(), currency: row.currency,
     rate: row.rate.toNumber(), bynAmount: row.bynAmount.toNumber(), projectAmount: row.projectAmount?.toNumber() ?? null,
     paidAt: row.paidAt.toISOString(), comment: row.comment, cashAccountName: row.cashAccount?.name ?? null,
-    expenseArticleName: row.expenseArticle?.name ?? null, createdByName: row.createdById ? people.get(row.createdById) ?? null : null,
+    expenseArticleName: row.logisticsAllocation || row.logisticsAllocationId ? "Логистика" : row.expenseArticle?.name ?? null, createdByName: row.createdById ? people.get(row.createdById) ?? null : null,
     reportDocument: reportDocumentFile(row.reportDocument) ?? logisticsPaymentDocument(row.logisticsAllocation), stockPurchase: stockPurchaseView(row.stockPurchase),
     ...(row.logisticsAllocation ? { logisticsTripId: row.logisticsAllocation.posting.tripId } : {}) };
 }

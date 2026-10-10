@@ -2,12 +2,14 @@ import { Prisma } from "@prisma/client";
 import { sumByn } from "@/lib/history-byn";
 
 export type ProjectExpenseFacts = {
-  payments: readonly { direction: string; bynAmount: Prisma.Decimal.Value | null; expenseArticle: { id: string; name: string } | null }[];
+  payments: readonly { direction: string; bynAmount: Prisma.Decimal.Value | null; expenseArticle: { id: string; name: string } | null;
+    logisticsAllocationId?: string | null }[];
   stockMovements: readonly { type: string; totalByn: Prisma.Decimal.Value | null }[];
 };
 export type ExpenseBreakdownRow = { key: string; label: string; amount: number | null };
 export const WAREHOUSE_EXPENSE_ARTICLE = { key: "warehouse", label: "Материалы (склад)" };
-export function paymentExpenseArticle(article: { id: string; name: string } | null) {
+export function paymentExpenseArticle(article: { id: string; name: string } | null, logistics = false) {
+  if (logistics) return { key: "logistics", label: "Логистика" };
   return { key: article ? `article:${article.id}` : "article:none", label: article?.name ?? "Прочее" };
 }
 export function stockExpenseAmount(row: ProjectExpenseFacts["stockMovements"][number]) {
@@ -24,7 +26,7 @@ export function summarizeProjectExpenses(facts: ProjectExpenseFacts) {
   for (const row of facts.payments) {
     const amount = row.bynAmount === null ? null : new Prisma.Decimal(row.bynAmount).toNumber();
     if (row.direction === "INCOME") income.push(amount);
-    else add(paymentExpenseArticle(row.expenseArticle), amount);
+    else add(paymentExpenseArticle(row.expenseArticle, Boolean(row.logisticsAllocationId)), amount);
   }
   for (const row of facts.stockMovements) {
     if (row.type === "EXPENSE" || row.type === "RETURN") add(WAREHOUSE_EXPENSE_ARTICLE, stockExpenseAmount(row));

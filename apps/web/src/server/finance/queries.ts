@@ -115,6 +115,7 @@ export async function getProjectEconomics(
       where: { ...activePaymentWhere, projectId },
       select: {
         direction: true,
+        logisticsAllocationId: true,
         bynAmount: true,
         expenseArticle: { select: { id: true, name: true } },
       },

@@ -1,7 +1,6 @@
 import { z } from "zod";
 import { logisticsTripCreateSchema } from "./contracts";
 
-export const LOGISTICS_ARTICLE_SETTING = "logisticsExpenseArticleId";
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(value => {
   const parsed = new Date(`${value}T00:00:00.000Z`);
   return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
@@ -28,17 +27,14 @@ export type LogisticsAllocationView = {
 };
 export type LogisticsPostingView = {
   id: string; tripId: string; tripRevision: number; status: "ACTIVE" | "SUPERSEDED";
-  amount: string; currency: string; cashAccountId: string; cashAccountName: string; expenseArticleId: string;
+  amount: string; currency: string; cashAccountId: string; cashAccountName: string;
   rate: string; rateDate: string | null; bynAmount: string; paidAt: string; createdAt: string; createdByName: string;
   allocations: LogisticsAllocationView[]; documentIds: string[];
 };
 export type LogisticsMoneyOptions = {
   cashAccounts: { id: string; name: string; currency: string; balance: number }[];
-  logisticsArticle: { id: string; name: string; active: boolean } | null;
-  articleOptions: { id: string; name: string; active: boolean }[];
-  canConfigureArticle: boolean;
 };
 export type LogisticsProjectBudget = {
-  currency: "BYN"; deliveryBudget: number | null; tripSpent: number | null; otherSpent: number | null;
-  spent: number | null; remaining: number | null; unavailableReason: string | null; articleConfigured: boolean;
+  currency: "BYN"; deliveryBudget: number | null; tripSpent: number | null;
+  spent: number | null; remaining: number | null; unavailableReason: string | null;
 };

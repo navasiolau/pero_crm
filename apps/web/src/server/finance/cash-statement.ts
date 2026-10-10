@@ -86,7 +86,7 @@ export async function loadCashStatement(actor:FinanceWorkspaceActor,query:CashSt
  ]);
  const facts:CashStatementFact[]=payments.map(row=>({id:"payment:"+row.id,source:"PAYMENT",accountId:row.cashAccountId,at:row.paidAt.toISOString(),
   direction:row.direction,nativeAmount:exact(row.amount),nativeCurrency:row.currency,bynAmount:exact(row.bynAmount),
-  label:row.stockPurchase?"Закупка · "+row.stockPurchase.movement.material.name:row.direction==="INCOME"?"Приход":row.expenseArticle?.name??"Расход",
+  label:row.logisticsAllocation?"Логистика":row.stockPurchase?"Закупка · "+row.stockPurchase.movement.material.name:row.direction==="INCOME"?"Приход":row.expenseArticle?.name??"Расход",
   comment:row.comment,project:row.project?{id:row.project.id,number:row.project.number}:null,document:reportDocumentFile(row.reportDocument)??logisticsPaymentDocument(row.logisticsAllocation)}));
  for(const row of payouts)facts.push({id:"payout:"+row.id,source:row.kind==="ADVANCE"?"ADVANCE":"SALARY",accountId:row.cashAccountId,at:row.createdAt.toISOString(),
   direction:"EXPENSE",nativeAmount:exact(row.cashAmount),nativeCurrency:row.cashCurrency,bynAmount:exact(historicalByn(row)),
