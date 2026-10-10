@@ -120,6 +120,7 @@ export async function getMyPayroll(userId: string, month: string) {
   const creatorNames = new Map(creators.map((u) => [u.id, u.name]));
 
   return {
+    currentPeriod: now,
     unavailableReason: BYN_UNAVAILABLE_REASON,
     accrued: monthAccrued._sum.amount,
     paid: monthPaid._sum.amount,
