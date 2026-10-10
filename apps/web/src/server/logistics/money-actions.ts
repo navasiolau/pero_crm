@@ -42,7 +42,7 @@ export async function setLogisticsExpenseArticle(articleId: string) {
       if (old?.value === article.id) return;
       await tx.orgSetting.upsert({ where: { key: LOGISTICS_ARTICLE_SETTING }, create: { key: LOGISTICS_ARTICLE_SETTING, value: article.id }, update: { value: article.id } });
       await tx.changeLog.create({ data: { actorType: "user", actorId: actor.id, actorName: actor.name, entity: "orgSetting",
-        entityId: LOGISTICS_ARTICLE_SETTING, action: "update", oldValue: old?.value ?? null, newValue: article.id } });
+        entityId: LOGISTICS_ARTICLE_SETTING, action: "update", oldValue: { articleId: old?.value ?? null }, newValue: { articleId: article.id } } });
     });
     await (async () => { revalidatePath("/logistics"); revalidatePath("/projects"); })().catch(() => {});
     return { ok: true as const };

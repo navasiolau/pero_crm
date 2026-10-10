@@ -68,7 +68,7 @@ export async function runLogisticsCashAcceptance(tx: Prisma.TransactionClient) {
   const upload = { tripId: trip.tripId, clientMutationId: randomUUID(), stage: "ISSUED" as const, ttnNumber: marker,
     fileName: "ТТН.pdf", mimeType: "application/pdf", bytes: Buffer.from("%PDF-1.4\nQA124") };
   const input = { tripId: trip.tripId, expectedRevision: trip.revision, clientMutationId: randomUUID(), amount: "1000.00",
-    currency: "BYN" as const, cashAccountId: account.id, documentIds: [randomUUID()] };
+    currency: "BYN" as const, cashAccountId: account.id, documentIds: [randomUUID()] as string[] };
   const dependencies = { db: tx, transaction };
   await assert.rejects(createLogisticsPostingCore(actorId, input, "post", dependencies), /сохранённая ТТН/);
   const ready = await documents.upload(actorId, upload);

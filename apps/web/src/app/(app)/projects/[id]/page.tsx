@@ -32,6 +32,10 @@ import { getProjectMaterials } from "@/server/warehouse/queries";
 import { hasFullProjectVisibility } from "@/server/access/visibility";
 import {canViewProductMoney} from "@/lib/product-financial-access";
 import { allocatedWorkQuantity } from "@/lib/work-shares";
+import { canManageLogistics } from "@/lib/logistics-access";
+import { LogisticsWorkspace } from "@/components/logistics/workspace";
+import { logisticsQueryFromParams } from "@/components/logistics/model";
+import { loadLogisticsWorkspace } from "../../logistics/workspace-data";
 
 import { FilesTab } from "./files-tab";
 import { FinanceTab } from "./finance-tab";
@@ -59,6 +63,7 @@ export default async function ProjectPage({
   if (!session?.user) redirect("/login");
   const { id } = await params;
   const role = session.user.roles;
+  const queryParams = await searchParams;
 
   const project = await getProjectFor(session.user.id, role, id, { includeHistory: false });
   if (!project) notFound();
@@ -69,6 +74,7 @@ export default async function ProjectPage({
   const showAmount = canViewProductMoney(role);
   // Склад (§12): вкладка «Материалы» — офисные роли (+ бухгалтер на просмотр)
   const showMaterials = hasAnyRole(role, OFFICE_ROLES);
+  const showLogistics = canManageLogistics(role);
 
   const stockExpenses = showFinance ? await loadProjectStockExpenses(session.user, project.id, prisma) : [];
 
@@ -135,7 +141,10 @@ export default async function ProjectPage({
   const pricingProjection = showOverviewAmount ? await getProjectPricingProjection({id:session.user.id,name:session.user.name??"",roles:role,source:"web"},project.id) : null;
   const hasShortage = materialsGroups.some(group => group.hasShortage);
 
-  const initialTab = resolveProjectTab((await searchParams).tab, ["overview", "products", "files", "tasks", ...(showMaterials ? ["materials"] : []), ...(showFinance ? ["finance"] : []), ...pluginTabs.map(tab => tab.pluginId)]);
+  // Закрытые роли не вызывают логистические queries и не получают их RSC-проекции.
+  const logisticsData = showLogistics ? await loadLogisticsWorkspace(logisticsQueryFromParams(queryParams), project.id,
+    typeof queryParams.trip === "string" ? queryParams.trip : undefined) : null;
+  const initialTab = resolveProjectTab(queryParams.tab, ["overview", "products", "files", "tasks", ...(showMaterials ? ["materials"] : []), ...(showFinance ? ["finance"] : []), ...(showLogistics ? ["logistics"] : []), ...pluginTabs.map(tab => tab.pluginId)]);
 
   return (
     <ProjectInlineProvider key={project.id} projectId={project.id} stage={project.stage} pricingProjection={pricingProjection} initial={{
@@ -172,6 +181,7 @@ export default async function ProjectPage({
           <TabsTrigger className="shrink-0" value="tasks">Задачи ({project.tasks.length})</TabsTrigger>
           {showMaterials ? <TabsTrigger className="shrink-0" value="materials">Материалы</TabsTrigger> : null}
           {showFinance ? <TabsTrigger className="shrink-0" value="finance">Финансы</TabsTrigger> : null}
+          {showLogistics ? <TabsTrigger className="shrink-0" value="logistics">Логистика</TabsTrigger> : null}
           {pluginTabs.map((tab) => (
             <TabsTrigger key={tab.pluginId} value={tab.pluginId}>
               {tab.pluginName}
@@ -305,6 +315,12 @@ export default async function ProjectPage({
                 lines: materialsGroups[index]?.lines ?? [],
               }))}
             />
+          </TabsContent>
+        ) : null}
+
+        {showLogistics && logisticsData ? (
+          <TabsContent value="logistics" className="mt-4">
+            <LogisticsWorkspace key={"project-logistics:" + project.id + ":" + (logisticsData.initialTrip?.id ?? "list")} data={logisticsData} />
           </TabsContent>
         ) : null}
 

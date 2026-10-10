@@ -14,11 +14,15 @@ export function QuantityStepper({
   onChange,
   remaining,
   unit = "шт",
+  context = "allocation",
+  id,
 }: {
   value: string;
   onChange: (value: string) => void;
   remaining: string; // точная decimal-строка свободного объёма, без Number-арифметики
   unit?: string;
+  context?: "allocation" | "plan";
+  id?: string;
 }) {
   const error = quantityInputError(value);
   const current = error ? BigInt(0) : quantityAtoms(value.trim() || "0");
@@ -42,6 +46,7 @@ export function QuantityStepper({
           <Minus className="size-4" />
         </Button>
         <Input
+          id={id}
           type="number"
           min="0.01"
           max={remaining}
@@ -61,20 +66,20 @@ export function QuantityStepper({
         >
           <Plus className="size-4" />
         </Button>
-        <Button
+        {context === "allocation" ? <Button
           type="button"
           variant="secondary"
           disabled={limit <= BigInt(0)}
           onClick={() => onChange(remaining)}
         >
           Все
-        </Button>
+        </Button> : null}
       </div>
-      <p className="text-xs text-muted-foreground">
+      {context === "allocation" ? <p className="text-xs text-muted-foreground">
         {limit > BigInt(0)
           ? `Свободно ${remaining} ${unit} — пусто заберёт весь остаток`
           : "Вся работа распределена между задачами"}
-      </p>
+      </p> : null}
       {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
     </div>
   );

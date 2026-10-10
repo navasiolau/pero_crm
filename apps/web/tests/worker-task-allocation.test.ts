@@ -28,7 +28,7 @@ test('worker assigns another active WORKER; task/audit/event/receipt once, immut
 });
 test('live role, active WORKER recipient, PRODUCTION and exact work context are required',async()=>{
  for(const change of ['creator-role','recipient-role','inactive','stage','context','pool','missing-price'] as const){
-  const f=fixture();if(change==='creator-role')f.users.get('creator')!.roles=['MANAGER'];if(change==='recipient-role')f.users.get('recipient')!.roles=['ENGINEER'];if(change==='inactive')f.users.get('recipient')!.active=false;if(change==='stage')f.product.status='STORAGE';if(change==='context')f.work.productId='other';if(change==='pool')Object.assign(f.work,{stagePayPoolId:'pool'});if(change==='missing-price')Object.assign(f.work,{priceSnapshot:null});
+  const f=fixture();if(change==='creator-role')f.users.get('creator')!.roles=['MANAGER'];if(change==='recipient-role')f.users.get('recipient')!.roles=['ENGINEER'];if(change==='inactive')f.users.get('recipient')!.active=false;if(change==='stage')f.product.status='INSTALLATION';if(change==='context')f.work.productId='other';if(change==='pool')Object.assign(f.work,{stagePayPoolId:'pool'});if(change==='missing-price')Object.assign(f.work,{priceSnapshot:null});
   assert.equal((await createWorkerTaskAllocationCore(actor,input(),f.transaction)).ok,false,change);assert.equal(f.tasks.length,0);assert.equal(f.logs.length,0);assert.equal(f.events.length,0);
  }
 });
@@ -45,10 +45,10 @@ test('strict quantity, mandatory estimate and monetary injection fail without mu
 test('audit failure rolls back new task and outbox facts',async()=>{
  const f=fixture();f.failAudit();assert.equal((await createWorkerTaskAllocationCore(actor,input(),f.transaction)).ok,false);assert.equal(f.tasks.length,0);assert.equal(f.logs.length,0);assert.equal(f.events.length,0);
 });
-test('mounter actor and cross-role WORKER↔MOUNTER assignments are allowed',async()=>{
- const pairs:[Role[],Role[]][]=[[ ['MOUNTER'],['WORKER'] ],[ ['WORKER'],['MOUNTER'] ],[ ['MOUNTER'],['MOUNTER'] ]];
- for(const [actorRoles,recipientRoles] of pairs){
-  const f=fixture();f.users.get('creator')!.roles=[...actorRoles];f.users.get('recipient')!.roles=[...recipientRoles];
+test('field assignments require a matching recipient status, including combined roles',async()=>{
+ const pairs:[Role[],Role[],string][]=[[ ['MOUNTER'],['WORKER','MOUNTER'],'INSTALLATION' ],[ ['WORKER'],['WORKER','MOUNTER'],'STORAGE' ],[ ['MOUNTER'],['MOUNTER'],'INSTALLATION' ]];
+ for(const [actorRoles,recipientRoles,status] of pairs){
+  const f=fixture();f.product.status=status;f.users.get('creator')!.roles=[...actorRoles];f.users.get('recipient')!.roles=[...recipientRoles];
   const result=await createWorkerTaskAllocationCore({...actor,roles:actorRoles},input(),f.transaction);
   assert.equal(result.ok,true);assert.equal(f.tasks.length,1);assert.equal(f.events.length,1);
  }

@@ -3,6 +3,7 @@ import { workVisibilityWhere } from "@/server/access/visibility";
 
 import { revalidatePath } from "next/cache";
 import {addWorkCore,type AddWorkInput} from "./core";
+import {updateWorkCore,type UpdateWorkInput} from "./update-core";
 
 import { auth } from "@/auth";
 import { writeChangeLog } from "@/server/plugins/changelog";
@@ -16,6 +17,13 @@ export async function addWork(input:AddWorkInput):Promise<{ok:boolean;error?:str
  const session=await auth();if(!session?.user)throw Error('Не авторизован');
  const result=await addWorkCore({id:session.user.id,name:session.user.name??'',roles:session.user.roles,source:'web'},input);
  if(result.ok){revalidatePath(`/projects/${input.projectId}`);await revalidateProductPaths(input.productId);}
+ return result;
+}
+
+export async function updateWork(input:UpdateWorkInput) {
+ const session=await auth();if(!session?.user)return{ok:false as const,kind:'forbidden' as const,error:'Не авторизован'};
+ const result=await updateWorkCore({id:session.user.id,name:session.user.name??'',roles:session.user.roles,source:'web'},input);
+ if(result.ok){try{revalidatePath(`/projects/${input.projectId}`);await revalidateProductPaths(input.productId);}catch{/* Правка уже подтверждена; receipt защищает повтор. */}}
  return result;
 }
 
