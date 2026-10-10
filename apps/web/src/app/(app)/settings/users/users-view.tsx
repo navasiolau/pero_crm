@@ -25,7 +25,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { roleLabels, roleComboLabel, isValidRolesCombination, normalizeRoles } from "@/lib/roles";
+import { roleLabels, roleComboLabel, isValidRolesCombination, roleCombinationError, normalizeRoles, baseRoles } from "@/lib/roles";
 import { cn } from "@/lib/utils";
 import { createUser, revokeUserSessions, updateUser } from "@/server/users/actions";
 import {
@@ -132,10 +132,12 @@ export function UsersView({
       const exclusiveSelected = prev.roles.some(
         (r) => r === "ADMIN" || r === "DIRECTOR",
       );
-      if (exclusiveSelected) return { ...prev, roles: [role] };
+      if (exclusiveSelected) return role === "WORK_COORDINATOR" ? prev : { ...prev, roles: [role] };
       const roles = has
         ? prev.roles.filter((r) => r !== role)
         : [...prev.roles, role];
+      // Дополнение нельзя оставить без базовой роли даже промежуточным нажатием.
+      if (roles.includes("WORK_COORDINATOR") && !isValidRolesCombination(roles)) return prev;
       return { ...prev, roles: normalizeRoles(roles) };
     });
   }
@@ -336,9 +338,10 @@ export function UsersView({
                         type="button"
                         aria-pressed={selected}
                         disabled={
-                          !selected &&
-                          (role === "ADMIN" || role === "DIRECTOR") &&
-                          form.roles.length > 1
+                          (!selected && (role === "ADMIN" || role === "DIRECTOR") && form.roles.length > 1) ||
+                          (!selected && role === "WORK_COORDINATOR" &&
+                            (baseRoles(form.roles).length === 0 || form.roles.some(item => item === "ADMIN" || item === "DIRECTOR"))) ||
+                          (selected && role !== "WORK_COORDINATOR" && form.roles.includes("WORK_COORDINATOR") && baseRoles(form.roles).length === 1)
                         }
                         onClick={() => toggleRole(role)}
                         className={cn(
@@ -353,8 +356,11 @@ export function UsersView({
                     );
                   })}
                 </div>
-                {form.roles.length === 0 ? (
-                  <p className="text-xs text-destructive">Выберите хотя бы одну роль</p>
+                {roleCombinationError(form.roles) ? (
+                  <p className="text-xs text-destructive">{roleCombinationError(form.roles)}</p>
+                ) : null}
+                {form.roles.includes("WORK_COORDINATOR") ? (
+                  <p className="text-xs text-muted-foreground">Ответственный за работы — дополнительная роль. Чтобы снять последнюю базовую роль, сначала снимите это дополнение.</p>
                 ) : null}
               </div>
               <div className="flex flex-col gap-1.5">

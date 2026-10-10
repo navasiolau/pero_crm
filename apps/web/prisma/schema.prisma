@@ -19,6 +19,7 @@ enum Role {
   MOUNTER
   ACCOUNTANT
   PROCUREMENT
+  WORK_COORDINATOR
 }
 
 enum PayScheme {
