@@ -33,6 +33,7 @@ export type PaymentRow = {
   createdByName: string | null;
   reportDocument: ViewableFile | null;
   stockPurchase: StockPurchaseView | null;
+  logisticsTripId?: string | null;
 };
 export type ProjectEconomicsView = {
   expectedPrice: number | null;

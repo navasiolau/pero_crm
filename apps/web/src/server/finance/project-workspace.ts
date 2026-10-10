@@ -6,6 +6,7 @@ import type { ProjectExpenseFacts } from "./project-expense-facts";
 import { loadProjectStockExpenses, projectExpenseRows } from "./project-expenses";
 import { paymentView } from "./payment-view";
 import { reportDocumentSelect } from "@/server/finance-documents/view";
+import { logisticsAllocationSelect } from "@/server/logistics/payment-view";
 
 export async function loadFinanceProjectWorkspace(
   actor: FinanceWorkspaceActor, identifier: string,
@@ -19,6 +20,7 @@ export async function loadFinanceProjectWorkspace(
     db.payment.findMany({ where: { ...activePaymentWhere, projectId: project.id }, select: {
       id: true, direction: true, amount: true, currency: true, rate: true, bynAmount: true, projectAmount: true, paidAt: true, comment: true, createdById: true,
       cashAccount: { select: { name: true } }, expenseArticle: { select: { id: true, name: true } }, reportDocument: { select: reportDocumentSelect },
+      logisticsAllocation: { select: logisticsAllocationSelect },
     }, orderBy: { paidAt: "desc" } }),
     loadProjectStockExpenses(actor, project.id, db),
     db.cashAccount.findMany({ where: { active: true }, select: { id: true, name: true, currency: true }, orderBy: { createdAt: "asc" } }),

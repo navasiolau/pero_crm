@@ -1,3 +1,6 @@
 import type {Prisma} from '@prisma/client';
-/** Отменённая закупка не влияет на баланс, расходы или денежный оборот. */
-export const activePaymentWhere = {deletionId:null} satisfies Prisma.PaymentWhereInput;
+/** Отменённая закупка и прежняя ревизия рейса остаются историей без влияния на баланс. */
+export const activePaymentWhere = {
+  deletionId: null,
+  OR: [{ logisticsAllocationId: null }, { logisticsAllocation: { posting: { status: "ACTIVE" } } }],
+} satisfies Prisma.PaymentWhereInput;
