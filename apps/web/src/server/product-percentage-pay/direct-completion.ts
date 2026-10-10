@@ -4,6 +4,7 @@ import type { DomainActor } from '@/server/projects/core';
 import { PERCENTAGE_STAGE_POLICY } from './stage-policy';
 import { calculateWholeProductPercentage } from '@/lib/product-percentage-ceil';
 import { parseProductPercentageRate } from '@/lib/product-percentage-rate-limit';
+import { NO_ASSIGNEE_COMPLETION_REASON, isPermanentUnassignedCompletion } from './skip-reason';
 
 export type PercentageAccrualEffects={eventIds:string[];earnings:{userId:string;userName:string;amount:string;currency:string}[]};
 export async function captureDirectPercentage(tx:Prisma.TransactionClient,actor:DomainActor,productId:string,kind:ProductPercentageKind,statusAtCompletion:ProductStatus,effects?:PercentageAccrualEffects){
@@ -20,17 +21,18 @@ export async function captureDirectPercentage(tx:Prisma.TransactionClient,actor:
  const eligible=!!recipient?.active&&recipient.roles.includes(policy.role);
  const positive=rate!==null&&rate.gt(0);
  const protectedReason:string|null=kind==='ENGINEERING'&&product.stagePayPools.some(pool=>pool.state==='SETTLED'||pool.state==='LEGACY_PROTECTED')?'Уже защищено прежним способом оплаты':null;
- if(positive&&!protectedReason)parseProductPercentageRate(rate!.toString());
- if(positive&&!protectedReason&&price===null)throw new Error('Для положительной ставки укажите цену изделия');
- if(positive&&!protectedReason&&!eligible)throw new Error(policy.recipientError);
+ const noAssignee=!protectedReason&&recipient==null;
+ if(positive&&!protectedReason&&!noAssignee)parseProductPercentageRate(rate!.toString());
+ if(positive&&!protectedReason&&!noAssignee&&price===null)throw new Error('Для положительной ставки укажите цену изделия');
+ if(positive&&!protectedReason&&!noAssignee&&!eligible)throw new Error(policy.recipientError);
  const total=price?.mul(product.quantity)??null;
  if(total?.gt('9999999999999999.99'))throw new Error('Сумма процентного этапа превышает допустимую');
- const calculated=calculateWholeProductPercentage({kind,unitPrice:price?.toString()??null,quantity:product.quantity,rate:rate?.toString()??null});
+ const calculated=noAssignee?null:calculateWholeProductPercentage({kind,unitPrice:price?.toString()??null,quantity:product.quantity,rate:rate?.toString()??null});
  const exact=calculated?new Prisma.Decimal(calculated.sourceFundExact):null;
- const state=protectedReason?'LEGACY_PROTECTED':rate===null?'SKIPPED_ONCE':'SETTLED';
+ const state=protectedReason?'LEGACY_PROTECTED':noAssignee||rate===null?'SKIPPED_ONCE':'SETTLED';
  const amount=state==='SETTLED'?calculated!.amount:null;
  const now=new Date();const recipientSnapshot=eligible?recipient!:null;
- const completion=await tx.productPercentageCompletion.create({data:{productId,kind,state,statusAtCompletion,calculationVersion:4,quantitySnapshot:product.quantity,totalSnapshot:total,recipientId:recipientSnapshot?.id??null,completedAt:now,completedById:actor.id,reason:protectedReason??(rate===null?'Ставка не задана при первом завершении':null),priceSnapshot:price,ratePercentSnapshot:rate,productCurrency:'BYN',payrollCurrency:'BYN',configRevision:config?.revision??null,
+  const completion=await tx.productPercentageCompletion.create({data:{productId,kind,state,statusAtCompletion,calculationVersion:4,quantitySnapshot:product.quantity,totalSnapshot:total,recipientId:recipientSnapshot?.id??null,completedAt:now,completedById:actor.id,reason:protectedReason??(noAssignee?NO_ASSIGNEE_COMPLETION_REASON:rate===null?'Ставка не задана при первом завершении':null),priceSnapshot:price,ratePercentSnapshot:noAssignee?null:rate,productCurrency:'BYN',payrollCurrency:'BYN',configRevision:config?.revision??null,
  ...(state==='SETTLED'?{productRateByn:1,payrollRateByn:1,productRateDate:now,payrollRateDate:now,sourceFundExact:exact,amount,bynAmount:amount,projectAmount:amount,settledAt:now}:{})}});
  if(recipientSnapshot){
  const share=await tx.productPercentageCompletionShare.create({data:{completionId:completion.id,userId:recipientSnapshot.id,userNameSnapshot:recipientSnapshot.name,shareUnits:1000000,...(amount!==null?{amount,bynAmount:amount,projectAmount:amount}:{})}});
@@ -51,6 +53,7 @@ export async function settleSkippedPercentage(tx:Prisma.TransactionClient,actor:
   if(!product)throw new Error('Изделие не найдено');
   const completion=await tx.productPercentageCompletion.findUnique({where:{productId_kind:{productId,kind}},include:{shares:true}});
   if(!completion||completion.state!=='SKIPPED_ONCE')return completion?.state??'SKIPPED_ONCE';
+  if(isPermanentUnassignedCompletion(completion))return'SKIPPED_ONCE';
   const policy=PERCENTAGE_STAGE_POLICY[kind];
   const protectedReason:string|null=kind==='ENGINEERING'&&product.stagePayPools.some(pool=>pool.state==='SETTLED'||pool.state==='LEGACY_PROTECTED')?'Уже защищено прежним способом оплаты':null;
   if(protectedReason){await tx.productPercentageCompletion.update({where:{id:completion.id},data:{state:'LEGACY_PROTECTED',reason:protectedReason}});return'LEGACY_PROTECTED';}
@@ -65,6 +68,8 @@ export async function settleSkippedPercentage(tx:Prisma.TransactionClient,actor:
   assertProjectMoneyCurrency(product.project.currency);
   const recipient=product[policy.recipient];
   const eligible=!!recipient?.active&&recipient.roles.includes(policy.role);
+  // Исторический пропуск ставки сохраняется без начисления до появления получателя.
+  if(recipient==null)return'SKIPPED_ONCE';
   if(price===null)throw new Error('Для положительной ставки укажите цену изделия');
   if(!eligible)throw new Error(policy.recipientError);
   const total=price?.mul(product.quantity)??null;
