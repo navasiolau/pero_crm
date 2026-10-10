@@ -1,5 +1,6 @@
 import {canAddProductWork} from "@/server/works/access";
-import {listWorkPriceOptions} from "@/server/works/queries";
+import {listWorkPriceOptions,listProductWorkOperations} from "@/server/works/queries";
+import {fieldProductStatuses} from "@/lib/field-product-visibility";
 import { notFound, redirect } from "next/navigation";
 import { TriangleAlert } from "lucide-react";
 
@@ -54,9 +55,10 @@ export default async function ProductPage({
   const canManage = hasAnyRole(role, MANAGER_ROLES);
   const canViewAllPercentage = canViewProductMoney(role);
   const canEditTech = canEditProductTechnicalBlock(actor, product);
-  const canAllocateWork=hasAnyRole(role,FIELD_ROLES)&&product.status==="PRODUCTION"&&!canManage;
+  const canAllocateWork=hasAnyRole(role,FIELD_ROLES)&&fieldProductStatuses(role).includes(product.status)&&!canManage;
   const allocationData=canAllocateWork?await listWorkerAllocationData(session.user.id,product.id):undefined;
   const canAddWork=canAddProductWork(role,product.status);
+  const workOperations=await listProductWorkOperations(actor,product.id);
   const showAmount = canViewProductMoney(role);
   const showMaterials = hasAnyRole(role, OFFICE_ROLES);
   const showMoney = hasAnyRole(role, WAREHOUSE_MONEY_ROLES);
@@ -109,6 +111,7 @@ export default async function ProductPage({
             projectId={product.project.id}
             productId={product.id}
             productQuantity={product.quantity}
+            productStatus={product.status}
             products={[
               { id: product.id, number: product.number, title: product.title },
             ]}
@@ -119,7 +122,8 @@ export default async function ProductPage({
               quantity: work.quantity.toString(),
               quantityPerUnit: work.quantityPerUnit?.toString() ?? null,
               unitSnapshot:work.unitSnapshot,
-              allocated: allocatedWorkQuantity(work.tasks),
+              allocated: workOperations[work.id]?.allocated ?? allocatedWorkQuantity(work.tasks),
+              operation:workOperations[work.id],
               priceSnapshot: work.priceSnapshot?.toString() ?? null,
               total: work.total?.toString() ?? null,
               paymentKind: work.paymentKind,
