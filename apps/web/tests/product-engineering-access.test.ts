@@ -47,7 +47,7 @@ test("participant predicates remain DESIGN scoped; independent manager and field
   assert.equal(matches({...row,status:"DRAFT"},productEditWhere({id:"u",roles:["MANAGER"]})),false);
   const field = JSON.stringify(productVisibilityWhere({ id: "u", roles: ["WORKER"] }));
   assert.match(field, /assigneeId/);
-  assert.match(field, /"in":\["PRODUCTION","STORAGE","INSTALLATION","DONE","RECLAMATION"\]/);
+  assert.match(field, /"in":\["PRODUCTION","STORAGE"\]/);
   for(const status of ["DRAFT","PREPARATION","DESIGN","PRODUCTION"])assert.equal(matches({...row,status},productVisibilityWhere({id:"u",roles:[]})),false,status);
 });
 
@@ -75,7 +75,7 @@ test("direct participant grants are stage-scoped; pure field cannot see DESIGN s
   assert.deepEqual(mounter.fieldParticipantProductIds, ["install-own"]);
   const product = JSON.stringify(productVisibilityWhere(mounter));
   assert.match(product, /install-own/);
-  assert.match(product, /"in":\["PRODUCTION","STORAGE","INSTALLATION","DONE","RECLAMATION"\]/);
+  assert.match(product, /"in":\["INSTALLATION"\]/);
   const project = JSON.stringify(projectVisibilityWhere(mounter));
   assert.match(project, /"products"/);
   assert.match(project, /"none":\{\}/);

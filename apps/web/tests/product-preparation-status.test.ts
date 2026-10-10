@@ -33,11 +33,12 @@ test('management can start preparation, engineering cannot and early transitions
  assert.deepEqual(percentageCompletionKinds(preparation,'PRODUCTION',true),['ENGINEERING']);
 });
 
-test('field visibility of existing subsequent statuses is preserved',()=>{
+test('field visibility of existing subsequent statuses follows the role matrix',()=>{
  for(const status of ['PRODUCTION','STORAGE','INSTALLATION','DONE','RECLAMATION'] as ProductStatus[]){
  for(const role of ['WORKER','MOUNTER'] as Role[]){
  const actor={id:'worker',roles:[role]};
- assert.equal(matches({deletedAt:null,status,tasks:[],project:{tasks:[]}},productVisibilityWhere(actor) as FixtureRow),true,`${role} ${status}`);
+ const allowed=role==='WORKER'?status==='PRODUCTION'||status==='STORAGE':status==='INSTALLATION';
+ assert.equal(matches({deletedAt:null,status,tasks:[],project:{tasks:[]}},productVisibilityWhere(actor) as FixtureRow),allowed,`${role} ${status}`);
  }
  }
 });

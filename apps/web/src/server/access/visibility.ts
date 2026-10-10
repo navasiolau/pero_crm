@@ -1,8 +1,8 @@
 import {liveProjectWhere,liveProductWhere,liveChildWhere} from "./live-entities";
 import type { Prisma, ProductStatus, Role } from "@prisma/client";
-import { ASSIGNEE_ROLES,FIELD_ROLES, MANAGER_ROLES, hasAnyRole, hasRole } from "@/lib/roles";
+import { FIELD_ROLES, MANAGER_ROLES, hasAnyRole, hasRole } from "@/lib/roles";
 import { canViewProductDrafts } from "@/lib/product-drafts";
-import { POST_DESIGN_PRODUCT_STATUSES } from "@/lib/product-statuses";
+import { fieldProductStatuses } from "@/lib/field-product-visibility";
 
 export type VisibilityActor = { id: string; roles: Role[]; engineeringParticipantProductIds?: string[];
   engineeringParticipantTaskIds?: string[]; fieldParticipantProductIds?: string[] };
@@ -30,13 +30,13 @@ export async function resolveVisibilityActor(
   db: Pick<Prisma.TransactionClient, "task"> & Partial<Pick<Prisma.TransactionClient, "productPercentageParticipant">>,
   actor: VisibilityActor,
 ): Promise<VisibilityActor> {
-  const assignments = hasAnyRole(actor.roles,ASSIGNEE_ROLES) ? await engineeringAssignments(db, actor.id, true) : [];
+  const assignments = hasRole(actor.roles, "ENGINEER") ? await engineeringAssignments(db, actor.id, true) : [];
   const direct = hasRole(actor.roles, "ENGINEER") && db.productPercentageParticipant ? await db.productPercentageParticipant.findMany({
     where: { userId: actor.id, config: { kind: "ENGINEERING", product: { status: "DESIGN" } } },
     select: { config: { select: { productId: true } } },
   }) : [];
   const field = hasAnyRole(actor.roles, FIELD_ROLES) && db.productPercentageParticipant ? await db.productPercentageParticipant.findMany({
-    where: { userId: actor.id, config: { kind: "INSTALLATION", product: { status: { in: POST_DESIGN_PRODUCT_STATUSES } } } },
+    where: { userId: actor.id, config: { kind: "INSTALLATION", product: { status: { in: fieldProductStatuses(actor.roles) } } } },
     select: { config: { select: { productId: true } } },
   }) : [];
   return { ...actor, engineeringParticipantProductIds: [...new Set([
@@ -100,7 +100,7 @@ function assignedProductVisibilityWhereGrants(actor: VisibilityActor): Prisma.Pr
   if (hasRole(actor.roles, "ENGINEER") && actor.engineeringParticipantProductIds?.length)
     grants.push(engineeringProductWhere(actor));
   if (hasAnyRole(actor.roles, FIELD_ROLES)) grants.push({
-    status: { in: POST_DESIGN_PRODUCT_STATUSES },
+    status: { in: fieldProductStatuses(actor.roles) },
     OR: [
       { tasks: { some: { assigneeId: actor.id } } },
       ...(hasRole(actor.roles, "MOUNTER") ? [{ mounterId: actor.id }] : []),
@@ -128,7 +128,7 @@ function taskVisibilityWhereGrants(actor: VisibilityActor): Prisma.TaskWhereInpu
   grants.push({ product: engineeringProductWhere(actor) });
   if (hasAnyRole(actor.roles, FIELD_ROLES)) grants.push({
     assigneeId: actor.id, OR: [
-      { product: { status: { in: POST_DESIGN_PRODUCT_STATUSES } } },
+      { product: { status: { in: fieldProductStatuses(actor.roles) } } },
       { productId: null, project: projectVisibilityWhere(actor) },
     ],
   });
@@ -138,13 +138,13 @@ function taskVisibilityWhereGrants(actor: VisibilityActor): Prisma.TaskWhereInpu
 /** Execution is an assignee/manager grant, not a consequence of read access. */
 function taskExecutionWhereGrants(actor: VisibilityActor): Prisma.TaskWhereInput {
   if (hasAnyRole(actor.roles, MANAGER_ROLES)) return {};
-  const grants: Prisma.TaskWhereInput[] = hasAnyRole(actor.roles,ASSIGNEE_ROLES) ? [
+  const grants: Prisma.TaskWhereInput[] = hasRole(actor.roles, "ENGINEER") ? [
     { id: { in: actor.engineeringParticipantTaskIds ?? [] }, assigneeId: actor.id, product: { status: "DESIGN" } },
   ] : [];
   // Исполнение даёт производственная или инженерная роль; финансовая роль
   // сама по себе не добавляет задач, а сочетание сохраняет независимые права.
   if (hasAnyRole(actor.roles, FIELD_ROLES)) grants.push({ assigneeId: actor.id, OR: [
-    { product: { status: { in: POST_DESIGN_PRODUCT_STATUSES } } },
+    { product: { status: { in: fieldProductStatuses(actor.roles) } } },
     { productId: null, project: projectVisibilityWhere(actor) },
   ] });
   if (hasRole(actor.roles, "ENGINEER")) grants.push({ assigneeId: actor.id, product: { engineerId: actor.id, status: "DESIGN" } });
@@ -157,19 +157,24 @@ function assignedWorkVisibilityWhereGrants(actor: VisibilityActor): Prisma.WorkW
   grants.push({ product: engineeringProductWhere(actor) });
   if (hasAnyRole(actor.roles, FIELD_ROLES)) grants.push({
     tasks: { some: { assigneeId: actor.id } }, OR: [
-      { product: { status: { in: POST_DESIGN_PRODUCT_STATUSES } } },
+      { product: { status: { in: fieldProductStatuses(actor.roles) } } },
       { productId: null, project: projectVisibilityWhere(actor) },
     ],
   });
   return grants.length ? { OR: grants } : { id: { in: [] } };
 }
 
-/** Цех и монтажники читают файлы только последующих этапов изделия. */
-function fieldPostDesignFileWhere(): Prisma.FileWhereInput {
+/** Каждый указанный контекст файла должен проходить производственную матрицу. */
+function fieldFileWhere(actor: VisibilityActor): Prisma.FileWhereInput {
+  const product: Prisma.ProductWhereInput = {
+    AND: [liveProductWhere, { status: { in: fieldProductStatuses(actor.roles) } }],
+  };
+  const task: Prisma.TaskWhereInput = { AND: [liveChildWhere, { product }] };
   return {
-    OR: [
-      { product: { status: { in: POST_DESIGN_PRODUCT_STATUSES } } },
-      { task: { product: { status: { in: POST_DESIGN_PRODUCT_STATUSES }, deletedAt: null } } },
+    AND: [
+      { OR: [{ product }, { task }] },
+      { OR: [{ productId: null }, { product }] },
+      { OR: [{ taskId: null }, { task }] },
     ],
   };
 }
@@ -183,10 +188,10 @@ function fileVisibilityWhereGrants(actor: VisibilityActor): Prisma.FileWhereInpu
       { OR: [{ taskId: null }, { task: taskVisibilityWhere(actor) }] },
     ],
   };
-  // Полевая ветка рядом с productVisibilityWhere: Файлы не наследуют глобальное чтение,
-  // но WORKER/MOUNTER видят файлы изделия только после проектирования.
+  // Общие проектные файлы сохраняют прежний assigned grant; файлы изделий
+  // доступны по матрице, включая неназначенного исполнителя.
   if (!hasAnyRole(actor.roles, FIELD_ROLES)) return base;
-  return { OR: [base, fieldPostDesignFileWhere()] };
+  return { OR: [base, fieldFileWhere(actor)] };
 }
 
 export function clientVisibilityWhere(actor: VisibilityActor): Prisma.ClientWhereInput {
@@ -215,7 +220,7 @@ function draftFileVisibilityWhere(actor: VisibilityActor): Prisma.FileWhereInput
 export function productEditWhere(actor:VisibilityActor):Prisma.ProductWhereInput {return {AND:[liveProductWhere,productDraftVisibilityWhere(actor),productEditWhereGrants(actor)]};}
 
 export function productVisibilityWhere(actor:VisibilityActor):Prisma.ProductWhereInput {return {AND:[liveProductWhere,productDraftVisibilityWhere(actor),hasAnyRole(actor.roles,FIELD_ROLES) && !hasFullProjectVisibility(actor)
- ? {OR:[assignedProductVisibilityWhere(actor),{status:{in:POST_DESIGN_PRODUCT_STATUSES}}]} : assignedProductVisibilityWhereGrants(actor)]};}
+ ? {OR:[assignedProductVisibilityWhere(actor),{status:{in:fieldProductStatuses(actor.roles)}}]} : assignedProductVisibilityWhereGrants(actor)]};}
 
 export function projectVisibilityWhere(actor:VisibilityActor):Prisma.ProjectWhereInput {return {AND:[liveProjectWhere,hasAnyRole(actor.roles,FIELD_ROLES) && !hasFullProjectVisibility(actor)
  ? {OR:[assignedProjectVisibilityWhere(actor),{products:{some:productVisibilityWhere(actor)}}]} : assignedProjectVisibilityWhereGrants(actor)]};}
@@ -224,8 +229,8 @@ export function taskVisibilityWhere(actor:VisibilityActor):Prisma.TaskWhereInput
 
 export function taskExecutionWhere(actor:VisibilityActor):Prisma.TaskWhereInput {return {AND:[liveChildWhere,draftChildVisibilityWhere(actor),taskExecutionWhereGrants(actor)]};}
 
-export function workVisibilityWhere(actor:VisibilityActor):Prisma.WorkWhereInput {return {AND:[liveChildWhere,draftChildVisibilityWhere(actor),hasRole(actor.roles,"WORKER")&&!hasFullProjectVisibility(actor)
- ? {OR:[assignedWorkVisibilityWhere(actor),{paymentKind:"LEGACY",stagePayPoolId:null,poolWeightUnits:null,product:{status:"PRODUCTION"}}]} : assignedWorkVisibilityWhereGrants(actor)]};}
+export function workVisibilityWhere(actor:VisibilityActor):Prisma.WorkWhereInput {return {AND:[liveChildWhere,draftChildVisibilityWhere(actor),hasAnyRole(actor.roles,FIELD_ROLES)&&!hasFullProjectVisibility(actor)
+ ? {OR:[assignedWorkVisibilityWhere(actor),{paymentKind:"LEGACY",stagePayPoolId:null,poolWeightUnits:null,product:{status:{in:fieldProductStatuses(actor.roles)}}}]} : assignedWorkVisibilityWhereGrants(actor)]};}
 
 export function fileVisibilityWhere(actor:VisibilityActor):Prisma.FileWhereInput {return {AND:[liveChildWhere,draftFileVisibilityWhere(actor),fileVisibilityWhereGrants(actor)]};}
 
