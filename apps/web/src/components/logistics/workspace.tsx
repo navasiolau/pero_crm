@@ -11,7 +11,6 @@ import { SearchableSelect } from "@/components/ui/searchable-select";
 import { DataTable, type DataColumn } from "@/components/ui/data-table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { formatDate, formatExactMoney, formatMoneyTotal, formatQty } from "@/lib/format";
-import { setLogisticsExpenseArticle } from "@/server/logistics/money-actions";
 import { LogisticsDocuments } from "./documents";
 import { LogisticsTripDialog } from "./trip-editor";
 import { logisticsQueryUrl, percentLabel } from "./model";
@@ -42,7 +41,6 @@ function BudgetSummary({ budget }: { budget: ProjectBudget }) {
             <CardContent className="text-xl font-semibold">{card.value}</CardContent></Card>
         ))}
       </div>
-      {budget.otherSpent !== 0 && <p className="text-sm text-muted-foreground">В том числе расходы вне рейсов: {formatMoneyTotal(budget.otherSpent)}.</p>}
       {budget.unavailableReason && <p className="text-sm text-muted-foreground">{budget.unavailableReason}</p>}
     </div>
   );
@@ -55,8 +53,7 @@ export function LogisticsWorkspace({ data }: { data: LogisticsWorkspaceData }) {
   const [projectFilter, setProjectFilter] = useState(data.query.projectId ?? "");
   const [selected, setSelected] = useState<TripRow | null>(data.initialTrip);
   const [creating, setCreating] = useState(false);
-  const [articleId, setArticleId] = useState(data.mode === "manage" ? data.moneyOptions.logisticsArticle?.id ?? "" : "");
-  const [setting, setSetting] = useState(false), [error, setError] = useState("");
+  const [error, setError] = useState("");
   const manage = data.mode === "manage", projectId = data.projectId;
   function change(values: Record<string, string | number | undefined>) {
     router.replace(logisticsQueryUrl(pathname, searchParams.toString(), data.query, { page: 1, ...(projectId ? { tab: "logistics" } : {}), ...values }));
@@ -87,16 +84,6 @@ export function LogisticsWorkspace({ data }: { data: LogisticsWorkspaceData }) {
   }
   columns.push({ id: "documents", header: "ТТН", className: "whitespace-normal", cell: row => <div>{row.documents.length ? row.documents.length + " файл(ов)" : "Нет ТТН"}{row.documents[0]?.ttnNumber && <p className="text-xs text-muted-foreground">№ {row.documents[0].ttnNumber}</p>}</div> });
 
-  async function configureArticle() {
-    if (setting || !articleId || data.mode !== "manage") return;
-    setSetting(true); setError("");
-    try {
-      const result = await setLogisticsExpenseArticle(articleId);
-      if (!result.ok) setError(result.error); else router.refresh();
-    } catch { setError("Не удалось подтвердить настройку статьи"); }
-    finally { setSetting(false); }
-  }
-
   return (
     <div className="flex min-w-0 flex-col gap-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -106,17 +93,6 @@ export function LogisticsWorkspace({ data }: { data: LogisticsWorkspaceData }) {
         {manage && <Button type="button" onClick={() => { setSelected(null); setCreating(true); }}><Plus className="size-4" />Новый рейс</Button>}
       </div>
       {data.mode === "manage" && data.budget && <BudgetSummary budget={data.budget} />}
-      {data.mode === "manage" && (!data.moneyOptions.logisticsArticle?.active || data.moneyOptions.canConfigureArticle) && (
-        <details className="rounded-lg border p-3 text-sm" open={!data.moneyOptions.logisticsArticle?.active}>
-          <summary className="cursor-pointer font-medium">Статья расходов логистики</summary>
-          <p className="mt-2 text-muted-foreground">Одна общая статья для всех рейсов: {data.moneyOptions.logisticsArticle?.name ?? "не настроена"}.</p>
-          {data.moneyOptions.canConfigureArticle ? <div className="mt-3 flex min-w-0 flex-wrap items-center gap-2">
-            <SearchableSelect className="min-w-0 flex-1" value={articleId} disabled={setting} onChange={setArticleId} placeholder="Выберите активную статью…"
-              options={data.moneyOptions.articleOptions.filter(article => article.active).map(article => ({ value: article.id, label: article.name }))} />
-            <Button type="button" variant="outline" disabled={setting || !articleId} onClick={() => void configureArticle()}>Сохранить статью</Button>
-          </div> : <p className="mt-2 text-muted-foreground">Для списания администратор или директор должен настроить активную статью.</p>}
-        </details>
-      )}
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
       <form className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-4" onSubmit={event => { event.preventDefault(); if (dateFrom && dateTo && dateFrom > dateTo) { setError("Дата начала должна быть не позже даты окончания"); return; } setError(""); change({ q: query, projectId: projectId ?? (projectFilter || undefined), dateFrom: dateFrom || undefined, dateTo: dateTo || undefined }); }}>
         <label className="min-w-0 space-y-1 text-sm">Поиск по проекту или ТТН<Input value={query} maxLength={200} onChange={event => setQuery(event.target.value)} placeholder="Номер проекта, ТТН или рейса…" /></label>
