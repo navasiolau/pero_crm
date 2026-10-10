@@ -3,6 +3,9 @@ import test from 'node:test';
 import type { Prisma } from '@prisma/client';
 import { changeProductStatusTransaction } from '../src/server/products/status-core';
 import { captureProductPercentageCompletion } from '../src/server/product-percentage-pay/core';
+import { settleSkippedPercentage } from '../src/server/product-percentage-pay/direct-completion';
+import { NO_ASSIGNEE_COMPLETION_REASON } from '../src/server/product-percentage-pay/skip-reason';
+import { PERCENTAGE_STAGE_POLICY } from '../src/server/product-percentage-pay/stage-policy';
 const actor={id:'manager',name:'Manager',roles:['MANAGER' as const],source:'web' as const};
 function fixture(rate:string|null='5',price:string|null='1000',recipient=true){
  const history:unknown[]=[];let failAudit=false;
@@ -28,7 +31,23 @@ test('nullrate is once-skipped, later positive rate settles on next capture',asy
 });
 test('zero rate or price produces settled zero withoutPayroll, missingpositivebasis refuses beforewrites',async()=>{
  for(const [rate,price] of [['0',null],['5','0']] as const){const f=fixture(rate,price);assert.equal(await captureProductPercentageCompletion(f.tx,actor,'p','ENGINEERING','PRODUCTION'),'SETTLED');assert.equal(String(f.completions[0].amount),'0.00');assert.equal(f.payroll.length,0);}
- for(const f of [fixture('5',null),fixture('5','1000',false)]){await assert.rejects(captureProductPercentageCompletion(f.tx,actor,'p','ENGINEERING','PRODUCTION'));assert.equal(f.completions.length,0);assert.equal(f.payroll.length,0);}
+ const missingPrice=fixture('5',null);await assert.rejects(captureProductPercentageCompletion(missingPrice.tx,actor,'p','ENGINEERING','PRODUCTION'));assert.equal(missingPrice.completions.length,0);assert.equal(missingPrice.payroll.length,0);
+});
+
+test('all three unassigned stages skip permanently even with a rate and without price',async()=>{
+ for(const [kind,status] of [['ENGINEERING','PRODUCTION'],['ASSEMBLY','STORAGE'],['INSTALLATION','DONE']] as const){
+  const f=fixture('5',null,false);f.product.percentageConfigs[0].kind=kind;
+  assert.equal(await captureProductPercentageCompletion(f.tx,actor,'p',kind,status),'SKIPPED_ONCE');
+  const completion=f.completions[0],before=JSON.stringify(completion);
+  assert.equal(completion.reason,NO_ASSIGNEE_COMPLETION_REASON);assert.equal(completion.recipientId,null);
+  assert.equal(completion.ratePercentSnapshot,null);assert.equal(completion.amount,undefined);assert.equal(f.payroll.length,0);
+  const policy=PERCENTAGE_STAGE_POLICY[kind];
+  f.product.expectedPrice='1000';Object.assign(f.product,{[policy.assignment]:'late',[policy.recipient]:{id:'late',name:'Late',active:true,roles:[policy.role]}});
+  f.tx.productPercentageCompletionShare.create=(async()=>{assert.fail('permanent skip must not create a share');}) as never;
+  assert.equal(await captureProductPercentageCompletion(f.tx,actor,'p',kind,status),'SKIPPED_ONCE');
+  assert.equal(await settleSkippedPercentage(f.tx,actor,'p',kind,status),'SKIPPED_ONCE');
+  assert.equal(JSON.stringify(completion),before);assert.equal(f.completions.length,1);assert.equal(f.payroll.length,0);
+ }
 });
 
 test('directmanagerDONE closesboth thresholds once, return/reclamation neverpayagain',async()=>{
