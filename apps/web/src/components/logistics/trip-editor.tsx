@@ -72,7 +72,7 @@ export function LogisticsTripForm({ trip, options, moneyOptions, projectId, onSa
       : { projectId: line.projectId, kind: "MATERIAL", materialId: line.entityId, quantity: Number(line.quantity.replace(",", ".")) }),
   };
   const validation = logisticsTripCreateSchema.safeParse({ ...manifest, clientMutationId: "00000000-0000-4000-8000-000000000001" });
-  const canPost = validation.success && !!tripId && !!cash && !!normalizedMoney(amount) && documents.length > 0 && !!moneyOptions.logisticsArticle?.active;
+  const canPost = validation.success && !!tripId && !!cash && !!normalizedMoney(amount) && documents.length > 0;
   const affectedIds = [...new Set([...shares.map(share => share.projectId), ...(current?.allocations.map(allocation => allocation.projectId) ?? [])])];
 
   function addProject(id: string) {
@@ -203,8 +203,7 @@ export function LogisticsTripForm({ trip, options, moneyOptions, projectId, onSa
           </label>
           <label className="space-y-1 text-sm">Общая сумма, {cash?.currency ?? "валюта кассы"}<Input inputMode="decimal" value={amount} disabled={disabled} onChange={event => setAmount(event.target.value)} /></label>
         </div>
-        <p className="text-xs text-muted-foreground">Одна общая сумма без разбивки на отдельные затраты. Статья: {moneyOptions.logisticsArticle?.name ?? "не настроена"}.</p>
-        {!moneyOptions.logisticsArticle?.active && <p role="alert" className="text-sm text-destructive">Для списания администратор или директор должен выбрать активную статью логистики.</p>}
+        <p className="text-xs text-muted-foreground">Одна общая сумма. Затраты распределяются по долям проектов.</p>
         {preview.size > 0 && cash && (
           <div className="space-y-2 rounded-lg bg-muted/30 p-3 text-sm">
             <p className="font-medium">Распределение в валюте кассы</p>

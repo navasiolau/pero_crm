@@ -33,7 +33,7 @@ const managed: ManagedTrip = {
   ...tripBase,
   money: { current: {
     id: "posting-1", tripId, tripRevision: 2, status: "ACTIVE", amount: "1000.00", currency: "BYN",
-    cashAccountId: "cash-1", cashAccountName: "PRIVATE_CASH", expenseArticleId: "article-1", rate: "1.000000", rateDate: null,
+    cashAccountId: "cash-1", cashAccountName: "PRIVATE_CASH", rate: "1.000000", rateDate: null,
     bynAmount: "1000.00", paidAt: "2026-10-10", createdAt: "2026-10-10T09:00:00Z", createdByName: "PRIVATE_OPERATOR",
     documentIds: [document.id],
     allocations: [
@@ -51,10 +51,8 @@ const options: TripOptions = {
 };
 const moneyOptions: MoneyOptions = {
   cashAccounts: [{ id: "cash-1", name: "PRIVATE_CASH", currency: "BYN", balance: 5000 }],
-  logisticsArticle: { id: "article-1", name: "Логистика", active: true },
-  articleOptions: [{ id: "article-1", name: "Логистика", active: true }], canConfigureArticle: false,
 };
-const budget: ProjectBudget = { currency: "BYN", deliveryBudget: 500, tripSpent: 400, otherSpent: 0, spent: 400, remaining: 100, unavailableReason: null, articleConfigured: true };
+const budget: ProjectBudget = { currency: "BYN", deliveryBudget: 500, tripSpent: 400, spent: 400, remaining: 100, unavailableReason: null };
 const documentTrip = { mode: "documents" as const, id: tripId, date: tripBase.date,
   projects: [{ id: "project-a", number: "П-001" }, { id: "project-b", number: "П-002" }], documents: [document] };
 const query = { query: "", page: 1, pageSize: 20, direction: "desc" as const };
@@ -79,7 +77,6 @@ stubModule("../src/server/logistics/actions", { createLogisticsTrip: async () =>
 stubModule("../src/server/logistics/money-actions", {
   postLogisticsTrip: async () => { throw Error("UI render must not spend"); },
   correctLogisticsTripPosting: async () => { throw Error("UI render must not spend"); },
-  setLogisticsExpenseArticle: async () => { throw Error("UI render must not configure"); },
 });
 stubModule("../src/server/logistics/money-queries", {
   getLogisticsTripMoney: async () => { moneyReads += 1; return managed.money; },
@@ -153,4 +150,27 @@ test("one shared trip renders once, preserves 40/60 project costs and gives acco
   }
   assert.equal(canManageLogistics(["ACCOUNTANT"]), false);
   assert.equal(canManageLogistics(["ACCOUNTANT", "PROCUREMENT"]), true);
+});
+
+test("article-free logistics UI enables a valid trip without setup", () => {
+  const callbacks = { onSaved: () => {}, onReload: () => {}, onBusyChange: () => {} };
+  const formHtml = renderToStaticMarkup(React.createElement(LogisticsTripForm, { trip: managed, options, moneyOptions, ...callbacks }));
+  const correction = /<button\b([^>]*)>Исправить списание и состав рейса<\/button>/.exec(formHtml);
+  assert.ok(correction, "A valid trip with cash, amount, shares and TTN must offer the cash action");
+  assert.doesNotMatch(correction[1], /\bdisabled=/);
+  assert.doesNotMatch(formHtml, /Статья:|статью логистики|настроить активную|администратор или директор/);
+  const data = { mode: "manage" as const, rows: [managed], options, moneyOptions, query, total: 1,
+    projectId: "project-a", budget, initialTrip: null };
+  const workspaceHtml = renderToStaticMarkup(React.createElement(LogisticsWorkspace, { data }));
+  assert.doesNotMatch(workspaceHtml, /Статья расходов логистики|Сохранить статью|расходы вне рейсов/);
+  assert.match(workspaceHtml, /Потрачено/);
+  assert.ok(workspaceHtml.includes(">400 BYN<"));
+  assert.ok(workspaceHtml.includes(">100 BYN<"));
+  assert.ok(workspaceHtml.includes(formatExactMoney("400.00", "BYN")));
+  const missingTtn = { ...managed, documents: [] };
+  const noTtnHtml = renderToStaticMarkup(React.createElement(LogisticsTripForm, { trip: missingTtn, options, moneyOptions, ...callbacks }));
+  const blocked = /<button\b([^>]*)>Исправить списание и состав рейса<\/button>/.exec(noTtnHtml);
+  assert.ok(blocked);
+  assert.match(blocked[1], /\bdisabled=/);
+  assert.deepEqual(Object.keys(moneyOptions), ["cashAccounts"]);
 });
