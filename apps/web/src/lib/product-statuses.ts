@@ -1,5 +1,7 @@
 import type { ProductStatus, Role } from "@prisma/client";
 import { canViewProductDrafts } from "./product-drafts";
+import { fieldProductStatuses } from "./field-product-visibility";
+import { MANAGER_ROLES } from "./roles";
 
 // Статусы изделия (§6): производственная цепочка от подготовки
 // до готовности + служебная «Рекламация». Общий модуль для сервера и клиента.
@@ -21,13 +23,16 @@ export const PRODUCT_STATUSES: {
 
 /** Один порядок колонок, фильтров и селектов с учётом приватности черновиков. */
 export function visibleProductStatuses(roles: readonly Role[]) {
-  return PRODUCT_STATUSES.filter(status => status.id !== "DRAFT" || canViewProductDrafts(roles));
+  const full = MANAGER_ROLES.some(role => roles.includes(role)) || roles.includes("PROCUREMENT");
+  const statuses = new Set(fieldProductStatuses(roles));
+  if (roles.includes("ENGINEER")) {
+    statuses.add("DESIGN");
+    statuses.add("PRODUCTION");
+  }
+  return PRODUCT_STATUSES.filter(status =>
+    (full || statuses.has(status.id)) && (status.id !== "DRAFT" || canViewProductDrafts(roles)),
+  );
 }
-
-// Производственные grants используют явные этапы: подготовка не открывает доступ цеху.
-export const POST_DESIGN_PRODUCT_STATUSES: ProductStatus[] = [
-  "PRODUCTION", "STORAGE", "INSTALLATION", "DONE", "RECLAMATION",
-];
 
 export const productStatusLabels = Object.fromEntries(
   PRODUCT_STATUSES.map((status) => [status.id, status.label]),

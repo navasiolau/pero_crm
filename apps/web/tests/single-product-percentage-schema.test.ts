@@ -6,12 +6,12 @@ import { productEditWhere, productVisibilityWhere, projectVisibilityWhere } from
 
 const sql = readFileSync(new URL("../prisma/migrations/20261002120000_single_product_percentage_pay/migration.sql", import.meta.url), "utf8");
 
-test("assigned mounter reads non-DESIGN product/project without a synthetic task or write grant", () => {
+test("assigned mounter reads INSTALLATION product/project without a synthetic task or write grant", () => {
   const actor = { id: "m", roles: ["MOUNTER"] as const };
   const input = { ...actor, roles: [...actor.roles] };
   assert.match(JSON.stringify(productVisibilityWhere(input)), /"mounterId":"m"/);
   assert.match(JSON.stringify(projectVisibilityWhere(input)), /"mounterId":"m"/);
-  assert.match(JSON.stringify(productVisibilityWhere(input)), /"in":\["PRODUCTION","STORAGE","INSTALLATION","DONE","RECLAMATION"\]/);
+  assert.match(JSON.stringify(productVisibilityWhere(input)), /"in":\["INSTALLATION"\]/);
   assert.deepEqual(productEditWhere(input), {AND:[liveProductWhere,{status:{not:"DRAFT"}},{AND:[liveProductWhere,{ id: { in: [] } }]}]});
   assert.doesNotMatch(JSON.stringify(productVisibilityWhere({ id: "m", roles: ["WORKER"] })), /mounterId/);
   assert.deepEqual(productVisibilityWhere({ id: "m", roles: ["MOUNTER", "MANAGER"] }), {AND:[liveProductWhere,{status:{not:"DRAFT"}},{}]});

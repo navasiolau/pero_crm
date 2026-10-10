@@ -17,11 +17,11 @@ test('real list/direct URL allow non-DESIGN without Task and filters never add D
  assert.equal(await query.getProductFor(worker.id,worker.roles,'foreign'),null);assert.equal((await query.listProducts(worker.id,worker.roles,{activeOnly:false,status:'DESIGN'})).total,0);
  const row=fixture.products.find(row=>row.id==='field-product')!;row.status='STORAGE';try{assert.ok(await query.getProductFor(worker.id,worker.roles,'field-product'));}finally{row.status='PRODUCTION';}
 });
-test('pure mounter has global non-DESIGN read but keeps assigned edit/task/upload grants',async()=>{
- assert.equal(fixture.products.filter(row=>matches(row,productVisibilityWhere({id:'unassigned',roles:['MOUNTER']}))).length,2);
+test('pure mounter reads INSTALLATION only and keeps assigned edit/task/upload grants',async()=>{
+ assert.equal(fixture.products.filter(row=>matches(row,productVisibilityWhere({id:'unassigned',roles:['MOUNTER']}))).length,0);
  assert.equal(fixture.products.filter(row=>matches(row,productEditWhere(worker))).length,0);assert.equal(fixture.tasks.filter(row=>matches(row,taskExecutionWhere(worker))).length,0);
  assert.deepEqual(fixture.files.filter(row=>matches(row,fileVisibilityWhere(worker))).map(row=>row.id),['file-production']);
- assert.deepEqual(fixture.files.filter(row=>matches(row,fileVisibilityWhere({id:'unassigned',roles:['MOUNTER']}))).map(row=>row.id),['file-production']);
+ assert.deepEqual(fixture.files.filter(row=>matches(row,fileVisibilityWhere({id:'unassigned',roles:['MOUNTER']}))).map(row=>row.id),[]);
  assert.equal(await resolveUploadContext(fixture.db as unknown as PrismaClient,worker,{projectId:'mixed',productId:'production',taskId:null}),null);
  assert.ok(matches(fixture.projects[0],projectVisibilityWhere(worker)));assert.ok(matches(fixture.products[2],productVisibilityWhere({id:'unassigned',roles:['ENGINEER','WORKER']})));assert.equal(matches(fixture.products[2],productEditWhere({id:'unassigned',roles:['ENGINEER','WORKER']})),false);
 });

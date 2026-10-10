@@ -89,7 +89,8 @@ test("role grants are united, while empty roles fail closed even inside AND", as
   }
   for (const role of ["WORKER", "MOUNTER"] as Role[]) {
     const result = await products.listProducts(engineer.id, [role, "ENGINEER"], { activeOnly: false });
-    assert.deepEqual(new Set(result.rows.map((p) => p.id)), new Set(["own", "production", "field-product"]));
+    assert.deepEqual(new Set(result.rows.map((p) => p.id)), new Set(role === "WORKER"
+      ? ["own", "production", "field-product"] : ["own", "production"]));
   }
   assert.equal((await products.listProducts(engineer.id, [], { activeOnly: false })).total, 0);
 });
