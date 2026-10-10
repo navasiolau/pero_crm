@@ -3,6 +3,8 @@ import { test } from "node:test";
 import { allocateLogisticsMoney } from "../src/server/logistics/allocation";
 import { createLogisticsPostingCore, logisticsPostingFingerprint, type LogisticsMoneyDependencies } from "../src/server/logistics/posting-core";
 import { logisticsPostingSchema } from "../src/server/logistics/money-contracts";
+import { prepareLogisticsPayment } from "../src/server/logistics/prepare-payment";
+import { preparePayment } from "../src/server/payments/prepare";
 
 test("one cash total is allocated exactly, including cents and shared saved FX", () => {
   const shares = [{ projectId: "a", percentBps: 4000 }, { projectId: "b", percentBps: 6000 }];
@@ -40,4 +42,16 @@ test("retry after an unknown outcome returns its saved snapshot without fetching
   await assert.rejects(createLogisticsPostingCore(actor.id, { ...input, amount: "1200" }, "post", dependencies), /другими данными/);
   actor.roles = ["ACCOUNTANT"];
   await assert.rejects(createLogisticsPostingCore(actor.id, input, "post", dependencies), /Недостаточно прав/);
+});
+
+test("only internal logistics preparation can omit an expense article", async () => {
+  const data = logisticsPostingSchema.parse({ tripId: "00000000-0000-4000-8000-000000000001", expectedRevision: 1,
+    clientMutationId: "00000000-0000-4000-8000-000000000002", amount: "1000.00", currency: "BYN",
+    cashAccountId: "cash", documentIds: ["00000000-0000-4000-8000-000000000003"] });
+  const db = { cashAccount: { async findUnique() { return { id: "cash", name: "Cash", active: true, currency: "BYN" }; } } } as unknown as Parameters<typeof prepareLogisticsPayment>[2];
+  const prepared = await prepareLogisticsPayment(data, "2026-10-10", db);
+  assert.equal(prepared.articleId, null); assert.equal(prepared.project, null);
+  assert.equal(prepared.amount, 1000); assert.equal(prepared.bynAmount, 1000); assert.equal(prepared.rate, 1);
+  await assert.rejects(preparePayment({ direction: "EXPENSE", amount: 1000, currency: "BYN", cashAccountId: "cash" },
+    db as unknown as Parameters<typeof preparePayment>[1]), /Выберите статью расхода/);
 });

@@ -1,5 +1,7 @@
 # Evidence
 
+Прямое уточнение владельца 10.10.2026 отменяет первоначальное требование статьи. Актуальный writer создаёт расходы непосредственно на проектах, без настройки; факт доставки содержит только активные расходы связанных рейсов. Первоначальная проверка ниже описывает предыдущую принятую версию; результат уточнённого поведения записан в конце.
+
 ## Scope and source
 
 Задача №124, `feature/124`, исходный staging `a491e974b26fa0d80f0ecb1296188b09c90d4a16`. Реализация зависит от №123. Git, коммиты, CI и развёртывание ведёт оркестратор; этот исполнитель не выполнял push, deployment или production-операции.
@@ -21,12 +23,28 @@
 
 ## API for 125
 
-- `money-actions.ts`: `postLogisticsTrip`, `correctLogisticsTripPosting`, `setLogisticsExpenseArticle`.
+- `money-actions.ts`: `postLogisticsTrip`, `correctLogisticsTripPosting`.
 - `money-queries.ts`: `getLogisticsTripMoney`, `getLogisticsMoneyOptions`, `getLogisticsProjectBudget`.
 - `money-contracts.ts`: точные DTO; деньги snapshot — строки, бюджет/preview кассы — nullable number. `rate` — строка с шестью знаками, `rateDate`/`paidAt` — YYYY-MM-DD, `createdAt` — ISO.
 - Опциональный `manifest` в post/correct сохраняет состав/доли/дату вместе с расходом. Каждое успешное проведение увеличивает trip revision на один. Обычный update №123 для оплаченного рейса получает объяснимый 409.
-- Общую статью по устойчивому ID выбирает ADMIN/DIRECTOR; PROCUREMENT получает её состояние и доступные кассы. ACCOUNTANT сохраняет документальный режим №123 без новых логистических writes.
+- `getLogisticsMoneyOptions` содержит только доступные кассы. DTO бюджета исключает `otherSpent`/`articleConfigured`, DTO проведения исключает `expenseArticleId`. ACCOUNTANT сохраняет документальный режим №123 без новых логистических writes.
 
 ## Pending
 
 Приёмка зависимого №123 на фактическом staging, разрешённый коммит/ordinary merge, полный CI и staging-проверка №124 остаются у оркестратора. Успех local не объявляет эти этапы завершёнными. Production/main не разрешены этим исполнением.
+
+## Prepared staging entry
+
+По поручению оркестратора подготовлен короткий `tests/logistics-cash-staging.ts`, вызывающий тот же `runLogisticsCashAcceptance` без дополнительных сценариев. Он принимает `CRM_STAGING_BROWSER_INPUT=base64(JSON)` только с `operation=prepare` и полным `confirmedStagingRevision`, требует `S3_BUCKET=pero-crm-staging` и проверяет `current_database()=crm` до записей. Внешний `staging-first-wave.py` проверяет фактическую ревизию/identity/health и блокировку W07; entry не заменяет эти проверки.
+
+Все деньги, fixtures и настройки находятся во внешней откатываемой транзакции; storage остаётся в памяти. После rollback сравниваются исходные счётчики. Stdout содержит один JSON PASS либо фиксированный FAIL-код; exception text, stack, PII и DSN не выводятся. Entry подготовлен, но исполнителем не запускался; SSH, CI и feature-код не изменялись.
+
+## Owner correction acceptance
+
+Подготовлена отдельная `20261010163000_logistics_project_expenses` с единственным DROP NOT NULL исторического `LogisticsPosting.expenseArticleId`. Оркестратор проверил и применил её на существующую local `localhost:5433/pero_crm`, контейнер `bf45c761b5687e54bff1aafea82e8647925b5b425d6743ebdc7d33f4824b0ed5`. Ранее применённая миграция и исторические строки не менялись; deferred IS DISTINCT FROM уже поддерживает NULL/NULL.
+
+Отдельный внутренний `prepareLogisticsPayment` готовит прежний снимок кассы/FX с nullable статьёй. В денежном ядре исключение статьи допускается только после валидации сохранённой allocation и ТТН. Обычный `preparePayment` не изменён. Config action, чтение OrgSetting и поля настройки удалены из логистики. Факт доставки определяется только active linked project Payment; обычные расходы остаются в общей экономике. Финансовые views подписывают принадлежность рейсу «Логистика» по allocation.
+
+Один обновлённый общий PostgreSQL-сценарий прошёл командой `pnpm --filter @pero/web exec tsx tests/logistics-cash-native.ts`: новые Posting/Payment имеют NULL статью, расход рейса 400 BYN даёт факт доставки 400 при наличии обычных 50 BYN; обычный расход без статьи или отчётного файла отклонён. ТТН, доли, валютные/денежные снимки, повторы, исправления и immutable история продолжают проходить прежний сценарий. Все QA изменения откатились, исходные счётчики совпали, физических файлов нет.
+
+Для CI добавлен точечный регрессионный тест внутренней подготовки без статьи и отказа обычной подготовки. При первом локальном запуске исправлен синтаксис переноса assertion; завершившийся запуск 3/3 и native PASS занял 5,4 секунды. Дополнительные локальные прогоны не выполняются. Следующий полный CI и приёмка изменённых №124/125 на фактическом staging остаются у оркестратора.
