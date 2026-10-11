@@ -4,27 +4,15 @@ import type { PayScheme } from "@prisma/client";
 import { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
+import { payrollMonth as currentMonth, isValidPayrollMonth as isValidMonth,
+  payrollMonthRange as monthRange, parsePayrollMonth } from "@/lib/payroll-month";
 import { historicalByn, sumHistoricalByn, subtractByn, sumByn, BYN_UNAVAILABLE_REASON } from "@/lib/history-byn";
 
 
 // ─── Зарплата (§10): запросы для страниц «Моя зарплата» и «Финансы → Зарплата»
 
-const MONTH_RE = /^\d{4}-\d{2}$/;
 
-// Текущий расчётный месяц в формате YYYY-MM
-export function currentMonth(): string {
-  return new Date().toISOString().slice(0, 7);
-}
-
-export function isValidMonth(month: string | undefined): month is string {
-  return !!month && MONTH_RE.test(month);
-}
-
-// Границы расчётного месяца (локальное время сервера)
-export function monthRange(month: string): { start: Date; end: Date } {
-  const [year, num] = month.split("-").map(Number);
-  return { start: new Date(year, num - 1, 1), end: new Date(year, num, 1) };
-}
+export { currentMonth, isValidMonth, monthRange };
 
 // Новые начисления используют BYN независимо от прежней настройки.
 // Исторические строки сохраняют собственную валюту и фиксированный эквивалент.
@@ -80,6 +68,7 @@ export type PayoutView = {
 // два главных числа: ДОЛГ к выплате сейчас (начислено за прошлые месяцы −
 // все выплаты) и ПРИБЛИЗИТЕЛЬНАЯ зарплата текущего месяца (ещё не payable).
 export async function getMyPayroll(userId: string, month: string) {
+  parsePayrollMonth(month);
   const now = currentMonth();
   const [entries, payouts, monthAccrued, monthPaid, pastAccrued, curAccrued, totalPaid] =
     await Promise.all([
@@ -174,6 +163,7 @@ export type PayrollSummaryRow = {
 // «К выплате» — ТЕКУЩИЙ долг: начислено за прошлые месяцы − все выплаты
 // (деньги платятся только за прошлый месяц — правило владельца).
 export async function getPayrollSummary(month: string) {
+  parsePayrollMonth(month);
   const now = currentMonth();
   const [accruedByUser, paidByUser, advanceByUser, schemeUsers, entryUsers, payoutUsers, payouts, pastAccrued, totalPaidByUser] =
     await Promise.all([
@@ -314,10 +304,11 @@ export async function getPayrollSummary(month: string) {
 // внутренний итог всегда BYN, сохранённый курс не переоценивается.
 export async function getMonthTurnover(
   month: string,
+  database: Pick<Prisma.TransactionClient, "payment"> = prisma,
 ): Promise<{ total: number; paymentsCount: number; currency: string }> {
   const currency = await getPayrollCurrency();
   const { start, end } = monthRange(month);
-  const agg = await prisma.payment.aggregate({
+  const agg = await database.payment.aggregate({
     where: { ...activePaymentWhere, paidAt: { gte: start, lt: end }, direction: "INCOME" },
     _sum: { bynAmount: true },
     _count: { _all: true },
@@ -422,6 +413,7 @@ export async function getEmployeeDues(): Promise<EmployeeDue[]> {
 // со схемой PERCENT_TURNOVER и СУММА уже начисленного (записей может
 // быть несколько: первичное начисление + доначисления при росте оборота).
 export async function getTurnoverAccruals(month: string) {
+  parsePayrollMonth(month);
   const users = await prisma.user.findMany({
     where: { active: true, payScheme: "PERCENT_TURNOVER", payPercent: { gt: 0 } },
     select: { id: true, name: true, payPercent: true, roles: true },

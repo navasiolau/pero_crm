@@ -32,7 +32,7 @@ import {
   round2,
 } from "./queries";
 
-const MONTH_RE = /^\d{4}-\d{2}$/;
+
 
 function revalidatePayroll() {
   revalidatePath("/payroll");
@@ -48,7 +48,7 @@ const payoutSchema = z.object({
   cashAccountId: z.string().optional(),
   expectedCashCurrency: z.string().optional(),
   requestId: z.string().optional(),
-  month: z.string().regex(MONTH_RE, "Месяц в формате ГГГГ-ММ"),
+  month: z.string().refine(isValidMonth, "Некорректный расчётный месяц"),
   kind: z.enum(["SALARY", "ADVANCE"]).default("SALARY"),
   comment: z.string().optional(),
 });

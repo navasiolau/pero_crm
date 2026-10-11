@@ -2,10 +2,11 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {createRequire,Module} from 'node:module';
 import {Prisma} from '@prisma/client';
+import {payrollMonth} from '../src/lib/payroll-month';
 const require=createRequire(import.meta.url);
 function inject(path:string,exports:Record<string,unknown>){const id=require.resolve(path),stub=new Module(id);stub.filename=id;stub.loaded=true;stub.exports=exports;require.cache[id]=stub;}
 type Row=Record<string,unknown>;
-const now=new Date().toISOString().slice(0,7), past='2000-01';
+const now=payrollMonth(), past='2000-01';
 const employee={id:'combined',name:'Combined',roles:['ENGINEER','MANAGER'],payScheme:'PERCENT_TURNOVER',payPercent:new Prisma.Decimal(5)};
 const history:Row[]=[{userId:employee.id,scheme:'PRODUCT_PERCENT_ENGINEERING',amount:'150',bynAmount:'150',currency:'BYN',month:past},{userId:employee.id,scheme:'PIECE',amount:'1000',bynAmount:'1000',currency:'BYN',month:past}];
 const payouts=[{userId:employee.id,amount:'100',bynAmount:'100',payrollCurrency:'BYN'}];

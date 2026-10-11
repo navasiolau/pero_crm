@@ -1,3 +1,4 @@
+import { payrollMonth } from "@/lib/payroll-month";
 import { Prisma, type PrismaClient, type ProductPercentageKind, type ProductStatus } from "@prisma/client";
 import { allocatePercentageShares, type PercentageShare } from "@/lib/product-percentage-pay";
 import { calculateStageFund, type StageCurrency } from "@/lib/product-stage-pay";
@@ -133,7 +134,7 @@ export async function settlePendingProductPercentage(productId: string, kind: Pr
           percentageCompletionShareId: row.id, amount, bynAmount, projectAmount,
           projectCurrency: current.productCurrency, currency: current.payrollCurrency!,
           scheme: PERCENTAGE_STAGE_POLICY[kind].scheme,
-          month: current.completedAt.toISOString().slice(0, 7), comment: `${PERCENTAGE_STAGE_POLICY[kind].label} изделия ${pending.product.number}` } });
+          month: payrollMonth(current.completedAt), comment: `${PERCENTAGE_STAGE_POLICY[kind].label} изделия ${pending.product.number}` } });
         const event = await tx.domainEvent.create({ data: { type: "payroll.accrued", actor: current.completedById ?? undefined,
           payload: { userId: row.userId, productId, projectId: pending.product.projectId, kind, amount: Number(amount) } } });
         eventIds.push(event.id);
