@@ -14,16 +14,19 @@ function inject(specifier: string, exports: Record<string, unknown>) {
   stubModule.exports = exports; stubModule.filename = filename; stubModule.loaded = true; require.cache[filename] = stubModule;
 }
 let fixture = taskShareFixture();
+let sessionActor = { id: "manager", name: "Manager", roles: ["MANAGER"] };
+let externalEffects = 0;
+const revalidated: string[] = [];
 let actions: typeof import("../src/server/tasks/actions");
 let shares: typeof import("../src/server/tasks/share-actions");
 
 before(() => {
   const proxy = new Proxy({}, { get: (_target, key) => fixture.database[key as keyof typeof fixture.database] });
   (globalThis as { prisma?: PrismaClient }).prisma = proxy as PrismaClient;
-  inject("../src/auth", { auth: async () => ({ user: { id: "manager", name: "Manager", roles: ["MANAGER"] } }) });
-  inject("next/cache", { revalidatePath: () => {} });
-  inject("../src/server/products/revalidate", { revalidateProductPaths: async () => {} });
-  const outsideTransaction = async () => { assert.equal(fixture.inTransaction(), false, "External effect ran before commit"); };
+  inject("../src/auth", { auth: async () => ({ user: sessionActor }) });
+  inject("next/cache", { revalidatePath: (path: string) => { revalidated.push(path); } });
+  inject("../src/server/products/revalidate", { revalidateProductPaths: async (id: string | null) => { revalidated.push(`product:${id}`); } });
+  const outsideTransaction = async () => { externalEffects++; assert.equal(fixture.inTransaction(), false, "External effect ran before commit"); };
   inject("../src/server/plugins/changelog", { writeChangeLog: outsideTransaction });
   inject("../src/server/plugins/events", { emitDomainEvent: outsideTransaction, dispatchEvent: outsideTransaction });
   inject("../src/server/notifications/notify", { notifyOrg: outsideTransaction, notifyPerson: outsideTransaction });
@@ -217,4 +220,29 @@ test('two unfinished legacy allocations finish with fixed40+60 and no new groups
  assert.deepEqual(fixture.state().entries.map(row=>Number(row.amount)).sort((a,b)=>a-b),[40,60]);
  assert.ok(fixture.state().entries.every(row=>row.currency==='BYN'));
  assert.equal(fixture.state().groups.length,1);
+});
+
+test("исторический split replay сохраняет revalidation без уведомлений, событий и новых записей", async () => {
+  fixture = taskShareFixture(); historicalTaskAllocation(fixture);
+  const input = { taskId: "source", recipientId: "recipient", percent: "30", expectedRevision: 0, requestId: randomUUID() };
+  fixture.state().logs.push({ id: `task-split:${input.requestId}`, actorId: "manager", entityId: "source", action: "split",
+    newValue: { recipientId: "recipient", percent: "30.00", expectedRevision: 0, childTaskId: "historic-child", groupId: "historic-group" } });
+  const before = structuredClone(fixture.state());
+  externalEffects = 0; revalidated.length = 0;
+  try {
+    assert.deepEqual(await shares.splitTask(input), { ok: true, childTaskId: "historic-child" });
+    assert.deepEqual(revalidated, ["/my", "/tasks", "/projects/project", "product:product"]);
+    revalidated.length = 0;
+    for (const change of [{ percent: "50" }, { recipientId: "accountant" }, { expectedRevision: 1 }, { requestId: randomUUID() }]) {
+      assert.equal((await shares.splitTask({ ...input, ...change })).ok, false);
+    }
+    sessionActor = { id: "worker", name: "Worker", roles: ["WORKER"] };
+    assert.equal((await shares.splitTask(input)).ok, false);
+    assert.deepEqual(revalidated, []);
+    assert.equal(externalEffects, 0);
+    assert.deepEqual(fixture.writes, []);
+    assert.deepEqual(fixture.state(), before);
+  } finally {
+    sessionActor = { id: "manager", name: "Manager", roles: ["MANAGER"] };
+  }
 });
