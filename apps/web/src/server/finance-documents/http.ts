@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { privateFileHeaders } from "@/server/files/private-response";
 import { UploadError, uploadFailure, type UploadPhase } from "@/server/files/upload-result";
 import { uploadSizeLimitError, uploadSizeLimitFor } from "@/server/files/upload-limits";
 import type { createFinanceDocumentService } from "./core";
@@ -43,12 +44,9 @@ export async function readFinanceDocumentResponse(request: Request, id: string, 
     const result = await dependencies.service.read(actorId, id);
     if (!result) return Response.json({ error: "Документ не найден" }, { status: 404, headers: privateHeaders });
     const file = result.document;
-    const inline = /^(image\/(jpeg|png|gif|webp|avif))$/.test(file.mimeType) ||
-      (file.mimeType === "application/pdf" && new URL(request.url).searchParams.get("view") === "1");
-    return new Response(result.body, { headers: { ...privateHeaders,
-      "Content-Type": file.mimeType, "Content-Length": String(file.size),
-      "Content-Disposition": `${inline ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(file.fileName)}`,
-      "Content-Security-Policy": "sandbox" } });
+    return new Response(result.body, { headers: privateFileHeaders({ mimeType: file.mimeType,
+      fileName: file.fileName, size: file.size, vary: "Cookie, Authorization",
+      inline: new URL(request.url).searchParams.get("view") === "1" ? "raster-or-pdf" : "raster" }) });
   } catch (error) {
     return Response.json({ error: error instanceof UploadError ? error.message : "Не удалось открыть документ" },
       { status: error instanceof UploadError ? error.status : 503, headers: privateHeaders });

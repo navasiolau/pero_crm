@@ -5,9 +5,10 @@ import { NextResponse } from "next/server";
 
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { UPLOADS_ROOT, s3Enabled, s3Get, fileKey, thumbKey } from "@/lib/s3";
+import { UPLOADS_ROOT, s3Enabled, s3Get, fileKey } from "@/lib/s3";
 import { fileVisibilityWhere, resolveVisibilityActor, type VisibilityActor } from "@/server/access/visibility";
 import { createImagePreviewService, type PreviewFile, type ImagePreviewVariant } from "@/server/files/image-preview";
+import { privateFileHeaders } from "@/server/files/private-response";
 
 function safeImageKey(file: PreviewFile): boolean {
   return !!file.projectId && !!file.storedName &&
@@ -85,6 +86,11 @@ export async function GET(
     return previews.respond({ actor, fileId: id, variant: variant as ImagePreviewVariant,
       ifNoneMatch: request.headers.get("If-None-Match") });
   }
+  // Legacy thumb также проходит текущую ACL и проверенное bounded перекодирование.
+  if (query.get("thumb") === "1") {
+    return previews.respond({ actor, fileId: id, variant: "thumbnail",
+      ifNoneMatch: request.headers.get("If-None-Match") });
+  }
   const file = await prisma.file.findFirst({
     where: { AND: [{ id }, fileVisibilityWhere(actor)] },
   });
@@ -92,24 +98,12 @@ export async function GET(
     return NextResponse.json({ error: "Файл не найден" }, { status: 404 });
   }
 
-  const thumb = query.get("thumb") === "1";
-  // Просмотр PDF явно запрашивается после проверки доступа; прочие MIME
-  // и исходный URI сохраняют режим скачивания и прежние storage keys.
-  const pdfView = !thumb && query.get("view") === "1" && file.mimeType === "application/pdf";
-  const headers = new Headers({
-    "Content-Type": thumb && file.hasThumb ? "image/jpeg" : file.mimeType,
-    "Content-Disposition": thumb
-      ? "inline"
-      : `${pdfView ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(file.fileName)}`,
-    "Cache-Control": "private, no-store",
-  });
-
-  if (pdfView) headers.set("X-Content-Type-Options", "nosniff");
+  // Оригиналы сохраняют байты и storage keys; inline PDF включается явно после ACL.
+  const headers = privateFileHeaders({ mimeType: file.mimeType, fileName: file.fileName,
+    inline: query.get("view") === "1" ? "pdf" : undefined });
 
   if (s3Enabled()) {
-    const key = thumb && file.hasThumb
-      ? thumbKey(file.projectId, file.storedName)
-      : fileKey(file.projectId, file.storedName);
+    const key = fileKey(file.projectId, file.storedName);
     const stream = await s3Get(key);
     if (!stream) {
       return NextResponse.json({ error: "Файл не найден в хранилище" }, { status: 404 });
@@ -117,9 +111,7 @@ export async function GET(
     return new NextResponse(stream, { headers });
   }
 
-  const relative = thumb && file.hasThumb
-    ? path.join(file.projectId, "thumbs", `${file.storedName}.jpg`)
-    : path.join(file.projectId, file.storedName);
+  const relative = path.join(file.projectId, file.storedName);
   const fullPath = path.join(UPLOADS_ROOT, relative);
   if (!fullPath.startsWith(UPLOADS_ROOT) || !existsSync(fullPath)) {
     return NextResponse.json({ error: "Файл не найден на диске" }, { status: 404 });
