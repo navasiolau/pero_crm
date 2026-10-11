@@ -5,12 +5,9 @@ import {useRef, useState} from "react";
 import {FilePrintButton} from "@/components/file-print-button";
 import {FileDeletePopover, type FileDeleteResult} from "@/components/file-delete-popover";
 import {useFileViewer} from "@/components/file-viewer";
-import {getViewableFileSource, type ViewableFile} from "@/lib/viewable-file";
+import {getViewableFileSource, type FileListItem} from "@/lib/viewable-file";
 import {cn} from "@/lib/utils";
 
-export interface FileListItem extends ViewableFile {
-  canDelete: boolean;
-}
 
 interface FileListActions {
   onDelete?: (file: FileListItem) => Promise<FileDeleteResult>;

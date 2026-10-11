@@ -10,8 +10,8 @@ import {
   TaskDialog,
   taskStatusBadge,
   taskStatusLabels,
-  type TaskDetails,
 } from "@/components/task-dialog";
+import type { TaskDetails } from "@/lib/task-details";
 import { cn } from "@/lib/utils";
 import { saveViewPreference } from "@/server/preferences-actions";
 

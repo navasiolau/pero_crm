@@ -1,5 +1,5 @@
 import type {File, Prisma} from "@prisma/client";
-import type {FileListItem} from "@/components/file-list";
+import type {FileListItem} from "@/lib/viewable-file";
 import type {VisibilityActor} from "@/server/access/visibility";
 import {mayDeleteStoredFile} from "./delete-permission";
 
