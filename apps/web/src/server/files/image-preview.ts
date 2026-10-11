@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import sharp from "sharp";
 
 import { isCoverImageMime } from "@/lib/product-cover";
+import { privateFileHeaders } from "./private-response";
 
 export type ImagePreviewVariant = "card" | "cover" | "thumbnail";
 export type PreviewFile = {
@@ -132,14 +133,9 @@ export function createImagePreviewService<Actor, File extends ImagePreviewBase =
     if (result.kind === "missing") return errorResponse(404, "Файл не найден в хранилище");
     if (result.kind === "invalid") return errorResponse(422, "Не удалось создать превью");
     const { bytes, etag } = result.asset;
-    const headers = new Headers({
-      "Cache-Control": "private, max-age=0, must-revalidate",
-      "Vary": "Cookie",
-      "ETag": etag,
-      "Content-Type": "image/webp",
-      "Content-Disposition": "inline",
-      "X-Content-Type-Options": "nosniff",
-    });
+    const headers = privateFileHeaders({ mimeType: "image/webp", inline: "raster",
+      cacheControl: "private, max-age=0, must-revalidate" });
+    headers.set("ETag", etag);
     const conditions = input.ifNoneMatch?.split(",").map((item) => item.trim()) ?? [];
     if (conditions.includes(etag) || conditions.includes(`W/${etag}`) || conditions.includes("*"))
       return new Response(null, { status: 304, headers });

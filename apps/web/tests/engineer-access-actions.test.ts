@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import sharp from "sharp";
 import { createRequire, Module } from "node:module";
 import { before, beforeEach, test } from "node:test";
 import type { PrismaClient, Role } from "@prisma/client";
@@ -29,7 +30,11 @@ let uploadRoute: typeof import("../src/app/api/files/upload/route");
 
 beforeEach(() => { writes.length = 0; storage.length = 0; roles = ["ENGINEER"]; });
 
-before(() => {
+before(async () => {
+  const validImage = await sharp({ create: { width: 8, height: 8, channels: 3, background: "#4488aa" } }).png().toBuffer();
+  Object.assign(fixture.files.find(file => file.id === "file-production")!, {
+    mimeType: "image/png", fileName: "allowed.png", storedName: "allowed.png", size: validImage.length, hasThumb: false,
+  });
   const db = {
     ...fixture.db,
     changeLog: { create: async () => ({}) },
@@ -55,7 +60,7 @@ before(() => {
     s3Enabled: () => true,
     fileKey: (project: string, name: string) => `${project}/${name}`,
     thumbKey: (project: string, name: string) => `${project}/thumb/${name}`,
-    s3Get: async (key: string) => { storage.push(`get:${key}`); return new ReadableStream({ start(controller) { controller.enqueue(new TextEncoder().encode("allowed file")); controller.close(); } }); },
+    s3Get: async (key: string) => { storage.push(`get:${key}`); return new ReadableStream({ start(controller) { controller.enqueue(validImage); controller.close(); } }); },
     s3Put: async () => { storage.push("put"); },
     s3Delete: async () => { storage.push("delete"); },
   });
