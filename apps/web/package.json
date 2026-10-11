@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "test": "tsx --test tests/*.test.ts tests/*.test.mjs",
+    "test:coverage:baseline": "node tests/coverage-baseline.mjs",
     "test:auth-db": "tsx tests/auth-revocation-db.ts",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",

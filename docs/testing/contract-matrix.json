@@ -1,0 +1,888 @@
+{
+  "schemaVersion": 1,
+  "baselineRevision": "3819f175dca3f69f40da92760cf746bad430f4bc",
+  "ci": {
+    "workflow": ".github/workflows/ci-cd.yml",
+    "testStep": "pnpm -r --if-present test",
+    "webEntry": "tsx --test tests/*.test.ts tests/*.test.mjs",
+    "botEntry": "pnpm --filter @pero/telegram-bot test"
+  },
+  "evidenceLevels": [
+    "unit",
+    "DI",
+    "SSR",
+    "source-guard",
+    "Chromium-component",
+    "native-PostgreSQL",
+    "HTTP-runtime",
+    "staging-browser",
+    "device"
+  ],
+  "statuses": [
+    "PASS",
+    "FAIL",
+    "NOT_RUN",
+    "BLOCKED"
+  ],
+  "baselinePolicy": {
+    "metrics": "source-mapped authored V8 functions/ranges observed in Node",
+    "lineCoverage": null,
+    "branchCoverage": null,
+    "globalThreshold": null,
+    "missingModules": "NOT_RUN",
+    "helpersTestsVendor": "excluded",
+    "limitation": "Node tsx helpers inflate built-in line/branch summary; authored observations do not establish complete TS branch/line coverage. Browser bundles, VM-transpiled snippets without valid sourcemaps and native SQL are separate evidence."
+  },
+  "contracts": [
+    {
+      "id": "acl-role-union",
+      "domain": "acl",
+      "requirement": "Серверные права объединяют роли; пустые роли отказывают, revoked/hidden IDs не доходят до mutations/storage.",
+      "productionModules": [
+        "apps/web/src/server/access/visibility.ts",
+        "apps/web/src/lib/roles.ts"
+      ],
+      "tests": [
+        {
+          "file": "apps/web/tests/engineer-access.test.ts",
+          "block": "role grants are united",
+          "evidenceLevel": "DI"
+        },
+        {
+          "file": "apps/web/tests/engineer-access-actions.test.ts",
+          "block": "real task and time actions reject stale hidden IDs",
+          "evidenceLevel": "DI"
+        }
+      ],
+      "acceptance": [
+        {
+          "scenario": "Проверить роли, чужие/прежние назначения и прямые URLs на runtime.",
+          "evidenceLevel": "HTTP-runtime",
+          "target": "existing-local-5433/staging",
+          "status": "NOT_RUN",
+          "revision": null,
+          "gapTask": 128,
+          "entrypoints": [
+            "apps/web/tests/engineer-access-runtime.ts"
+          ]
+        }
+      ],
+      "gapTasks": []
+    },
+    {
+      "id": "acl-current-engineer-status",
+      "domain": "acl",
+      "requirement": "Текущий назначенный инженер видит собственные DESIGN/PRODUCTION и может возвращать PRODUCTION→DESIGN; historical participant не получает право текущего инженера.",
+      "productionModules": [
+        "apps/web/src/server/products/queries.ts",
+        "apps/web/src/server/access/visibility.ts"
+      ],
+      "tests": [
+        {
+          "file": "apps/web/tests/engineer-access.test.ts",
+          "block": "queries return current own DESIGN and PRODUCTION",
+          "evidenceLevel": "DI"
+        },
+        {
+          "file": "apps/web/tests/product-percentage-pay.test.ts",
+          "block": "менеджер свободен; текущий инженер DESIGN↔PRODUCTION",
+          "evidenceLevel": "DI"
+        }
+      ],
+      "acceptance": [
+        {
+          "scenario": "Глобальный канбан и мини-канбан: текущий, прежний и неназначенный инженер; frozen financial history остаётся прежней.",
+          "evidenceLevel": "staging-browser",
+          "target": "existing-local-5433/staging",
+          "status": "NOT_RUN",
+          "revision": null,
+          "gapTask": 128,
+          "entrypoints": []
+        }
+      ],
+      "gapTasks": [
+        127,
+        128
+      ]
+    },
+    {
+      "id": "money-cash-shared-lock",
+      "domain": "money",
+      "requirement": "Расход и аванс используют общую блокировку баланса; разрешённые выплаты и Decimal-снимки сохраняются.",
+      "productionModules": [
+        "apps/web/src/server/tasks/transaction.ts",
+        "apps/web/src/server/payroll/cash-core.ts",
+        "apps/web/src/server/payments/core.ts"
+      ],
+      "tests": [
+        {
+          "file": "apps/web/tests/cash-mixed-writers.test.ts",
+          "block": "actual expense writer and actual advance core share ReadCommitted lock",
+          "evidenceLevel": "DI",
+          "notes": "Сериализующий fake проверяет бизнес-поток; PostgreSQL lock/race/rollback этим не доказаны."
+        }
+      ],
+      "acceptance": [
+        {
+          "scenario": "Два независимых SQL соединения: расход500 и аванс600 при1000 дают один успех, нет отрицательного баланса.",
+          "evidenceLevel": "native-PostgreSQL",
+          "target": "existing-local-5433/staging",
+          "status": "NOT_RUN",
+          "revision": null,
+          "gapTask": 150,
+          "entrypoints": [
+            "apps/web/tests/cash-native-acceptance.ts"
+          ]
+        }
+      ],
+      "gapTasks": [
+        150
+      ]
+    },
+    {
+      "id": "money-turnover-atomic",
+      "domain": "money",
+      "requirement": "Начисление оборота атомарно с audit/outbox; конкурирующие команды не удваивают сумму, выросший оборот законно доначисляет разницу.",
+      "productionModules": [
+        "apps/web/src/server/payroll/actions.ts",
+        "apps/web/src/server/payroll/queries.ts"
+      ],
+      "tests": [
+        {
+          "file": "apps/web/tests/crm-byn-domain-payroll-actions.test.ts",
+          "block": "turnover top-up uses fixed BYN equivalent",
+          "evidenceLevel": "DI"
+        },
+        {
+          "file": "apps/web/tests/combined-engineering-turnover.test.ts",
+          "block": "combined chosen turnover accrues",
+          "evidenceLevel": "DI"
+        }
+      ],
+      "acceptance": [
+        {          "scenario": "Два SQL соединения/UUID, rollback аудита и законная доплата после роста оборота.",
+          "evidenceLevel": "native-PostgreSQL",
+          "target": "existing-local-5433/staging",
+          "status": "NOT_RUN",
+          "revision": null,
+          "gapTask": 130,
+          "entrypoints": []
+        }
+      ],
+      "gapTasks": [
+        130
+      ]
+    },
+    {
+      "id": "money-payroll-month",
+      "domain": "money",
+      "requirement": "Только действительные YYYY-MM периоды; расчётный месяц и границы Europe/Moscow согласованы, текущий/будущий месяц не закрываются.",
+      "productionModules": [
+        "apps/web/src/server/payroll/queries.ts",
+        "apps/web/src/server/payroll/actions.ts"
+      ],
+      "tests": [
+        {
+          "file": "apps/web/tests/combined-engineering-turnover.test.ts",
+          "block": "combined ordinary plus engineering current month remains estimate",
+          "evidenceLevel": "DI"
+        }
+      ],
+      "acceptance": [
+        {
+          "scenario": "Invalid00/13 и граница00:30+03 до writer; исторические месяцы/FX UTC asOf сохраняются.",
+          "evidenceLevel": "HTTP-runtime",
+          "target": "existing-local-5433/staging",
+          "status": "NOT_RUN",
+          "revision": null,
+          "gapTask": 131,
+          "entrypoints": []
+        }
+      ],
+      "gapTasks": [
+        131
+      ]
+    },
+    {
+      "id": "money-percentage-history",
+      "domain": "money",
+      "requirement": "Frozen суммы, валюты и получатели сохраняются; поздняя правка создаёт отдельную adjustment delta, повтор не начисляет второй раз.",
+      "productionModules": [
+        "apps/web/src/server/product-percentage-pay/direct-completion.ts",
+        "apps/web/src/server/product-percentage-pay/core.ts"
+      ],
+      "tests": [
+        {
+          "file": "apps/web/tests/product-percentage-pay.test.ts",
+          "block": "положительное начисление создаётся по frozen input",
+          "evidenceLevel": "DI"
+        },
+        {
+          "file": "apps/web/tests/product-percentage-rate-adjust.test.ts",
+          "block": "",
+          "evidenceLevel": "DI"
+        },
+        {
+          "file": "apps/web/tests/work-shares-settlement.test.ts",
+          "block": "two unfinished legacy allocations finish with fixed40+60",
+          "evidenceLevel": "DI",
+          "notes": "Сериализующий fake проверяет бизнес-поток; PostgreSQL lock/race/rollback этим не доказаны."
+        },
+        {
+          "file": "apps/web/tests/product-engineering-legacy.test.ts",
+          "block": "previous legacy history is not edited",
+          "evidenceLevel": "DI"
+        }
+      ],
+      "acceptance": [
+        {
+          "scenario": "Реальные PostgreSQL immutable triggers/unique FK/append-only/replay на текущей v4 схеме.",
+          "evidenceLevel": "native-PostgreSQL",
+          "target": "existing-local-5433/staging",
+          "status": "NOT_RUN",
+          "revision": null,
+          "gapTask": 163,
+          "entrypoints": [
+            "apps/web/tests/product-percentage-adjustments-native.ts"
+          ]
+        }
+      ],
+      "gapTasks": [
+        163
+      ]
+    },
+    {
+      "id": "money-payment-intent",
+      "domain": "money",
+      "requirement": "UUID обязателен; серверный нормализованный fingerprint и actor receipt сохраняют одно намерение при неизвестном ACK и reopen.",
+      "productionModules": [
+        "apps/web/src/server/payments/core.ts",
+        "apps/web/src/server/payments/contracts.ts",
+        "apps/web/src/components/payment-dialog.tsx"
+      ],
+      "tests": [
+        {
+          "file": "apps/web/tests/payment-receipts.test.ts",
+          "block": "expense binds confirmed document",
+          "evidenceLevel": "DI"
+        },
+        {
+          "file": "apps/web/tests/payment-receipts.test.ts",
+          "block": "mutation UUID cannot be reused with different data",
+          "evidenceLevel": "DI"
+        }
+      ],
+      "acceptance": [
+        {
+          "scenario": "Native rollback и два подключения; потерянный ответ+reopen/reload повторяет тот же UUID, новая команда допустима.",
+          "evidenceLevel": "native-PostgreSQL",
+          "target": "existing-local-5433/staging",
+          "status": "NOT_RUN",
+          "revision": null,
+          "gapTask": 134,
+          "entrypoints": [
+            "apps/web/tests/finance-payment-native.ts"
+          ]
+        },
+        {
+          "scenario": "Форма сохраняет неизвестный intent до результата receipt.",
+          "evidenceLevel": "staging-browser",
+          "target": "existing-local-5433/staging",
+          "status": "NOT_RUN",
+          "revision": null,
+          "gapTask": 134,
+          "entrypoints": []
+        }
+      ],
+      "gapTasks": [
+        133,
+        134
+      ]
+    },
+    {
+      "id": "money-warehouse-weighted-average",
+      "domain": "money",
+      "requirement": "Количество и средняя стоимость Decimal, exact receipt/replay, phase ACTIVE и сохранность защищённой истории.",
+      "productionModules": [
+        "apps/web/src/server/warehouse/accounting.ts"
+      ],
+      "tests": [
+        {
+          "file": "apps/web/tests/warehouse-average.test.ts",
+          "block": "",
+          "evidenceLevel": "unit"
+        },
+        {
+          "file": "apps/web/tests/warehouse-receipt-kinds.test.ts",
+          "block": "",
+          "evidenceLevel": "unit"
+        },
+        {
+          "file": "apps/web/tests/warehouse-units-stage-fixtures.test.mjs",
+          "block": "",
+          "evidenceLevel": "source-guard"
+        }
+      ],      "acceptance": [
+        {
+          "scenario": "Native issue/return/retry на существующем разрешённом state без замены accounting lifecycle.",
+          "evidenceLevel": "native-PostgreSQL",
+          "target": "existing-local-5433/staging",
+          "status": "BLOCKED",
+          "revision": null,
+          "gapTask": 163,
+          "entrypoints": [
+            "apps/web/tests/warehouse-concurrency-native.ts"
+          ],
+          "reason": "Старый runner требует warehouseAccountingState.count()==0 и сам создаёт main; использовать на текущем state нельзя, prerequisite исправляется reviewed задачей163."
+        }
+      ],
+      "gapTasks": [
+        163
+      ]
+    },
+    {
+      "id": "mutation-postcommit-ack",
+      "domain": "money",
+      "requirement": "Подтверждённый commit, rollback и неизвестный commit outcome различаются; dispatch/notify/cache failure не предлагает новую денежную команду.",
+      "productionModules": [
+        "apps/web/src/server/tasks/actions.ts",
+        "apps/web/src/server/payments/core.ts"
+      ],
+      "tests": [
+        {
+          "file": "apps/web/tests/work-shares-settlement.test.ts",
+          "block": "payroll write failure rolls back status and time",
+          "evidenceLevel": "DI",
+          "notes": "Сериализующий fake проверяет бизнес-поток; PostgreSQL lock/race/rollback этим не доказаны."
+        }
+      ],
+      "acceptance": [
+        {
+          "scenario": "Fault injection до commit, после commit и потеря ACK; повтор receipt не создаёт новых денег/событий.",
+          "evidenceLevel": "HTTP-runtime",
+          "target": "existing-local-5433/staging",
+          "status": "NOT_RUN",
+          "revision": null,
+          "gapTask": 133,
+          "entrypoints": []
+        }
+      ],
+      "gapTasks": [
+        133
+      ]
+    },
+    {
+      "id": "task-create-receipt",
+      "domain": "money",
+      "requirement": "Создание Task, receipt, audit и outbox атомарно; повтор одного UUID сохраняет taskID и quantity, сознательно новое создание разрешено.",
+      "productionModules": [
+        "apps/web/src/server/tasks/actions.ts"
+      ],
+      "tests": [
+        {
+          "file": "apps/web/tests/work-shares-settlement.test.ts",
+          "block": "ordinary quantity4+6 consumes10 once",
+          "evidenceLevel": "DI"
+        }
+      ],
+      "acceptance": [
+        {
+          "scenario": "Отказ аудита и10 конкурентных/последовательных повторов quantity1 дают один task; actor/payload conflict закрыт.",
+          "evidenceLevel": "native-PostgreSQL",
+          "target": "existing-local-5433/staging",
+          "status": "NOT_RUN",
+          "revision": null,
+          "gapTask": 165,
+          "entrypoints": []
+        }
+      ],
+      "gapTasks": [
+        165
+      ]
+    },
+    {
+      "id": "file-safe-read",
+      "domain": "file",
+      "requirement": "Обычные downloads/thumbnails/PDF проверяют auth/visibility до storage; HTML/SVG fallback не получает активный inline тип.",
+      "productionModules": [
+        "apps/web/src/app/api/files/[id]/route.ts"
+      ],
+      "tests": [
+        {
+          "file": "apps/web/tests/file-pdf-view-route.test.ts",
+          "block": "view mode does not inline HTML",
+          "evidenceLevel": "DI"
+        },
+        {
+          "file": "apps/web/tests/engineer-access-actions.test.ts",
+          "block": "real file download, thumbnail and delete deny hidden IDs",
+          "evidenceLevel": "DI"
+        }
+      ],
+      "acceptance": [
+        {
+          "scenario": "Настоящий GET HTML/SVG с thumb1 без thumb остаётся безопасным; image/PDF/original byte hashes сохраняются.",
+          "evidenceLevel": "HTTP-runtime",
+          "target": "existing-local-5433/staging",
+          "status": "NOT_RUN",
+          "revision": null,
+          "gapTask": 129,
+          "entrypoints": []
+        }
+      ],
+      "gapTasks": [
+        129
+      ]
+    },
+    {
+      "id": "file-delete-durable",
+      "domain": "file",
+      "requirement": "Metadata/audit/delete intent атомарны; storage retry удаляет только разрешённый selected key и не теряется при рестарте.",
+      "productionModules": [
+        "apps/web/src/server/files/actions.ts"
+      ],
+      "tests": [
+        {
+          "file": "apps/web/tests/plain-file-delete-action-controlled.test.ts",
+          "block": "manager deletes only the selected ordinary ID",
+          "evidenceLevel": "DI"
+        },
+        {
+          "file": "apps/web/tests/plain-file-delete-action-controlled.test.ts",
+          "block": "audit failure after metadata deletion",
+          "evidenceLevel": "DI"
+        }
+      ],
+      "acceptance": [
+        {
+          "scenario": "Storage down/after-metadata/audit failure/restart/retry, original/thumbnail exact keys и чужие версии сохраняются.",
+          "evidenceLevel": "HTTP-runtime",
+          "target": "existing-local-5433/staging",
+          "status": "NOT_RUN",
+          "revision": null,
+          "gapTask": 137,
+          "entrypoints": []
+        }
+      ],
+      "gapTasks": [
+        137
+      ]
+    },
+    {
+      "id": "file-cover-delete-durable",
+      "domain": "file",
+      "requirement": "Замена и ручное удаление sketch/project cover сохраняют durable cleanup с прежней семантикой DeleteObject/exact-version purge.",
+      "productionModules": [
+        "apps/web/src/server/products/cover-core.ts",
+        "apps/web/src/server/projects/cover-core.ts"
+      ],
+      "tests": [
+        {
+          "file": "apps/web/tests/s3-delete-exact.test.ts",
+          "block": "",
+          "evidenceLevel": "unit"
+        },
+        {          "file": "apps/web/tests/file-fixture113-protocol.test.mjs",
+          "block": "exact version cleanup cannot become prefix",
+          "evidenceLevel": "source-guard"
+        }
+      ],
+      "acceptance": [
+        {
+          "scenario": "Manual sketch/project cover delete + crash/storage fault, без broad prefix deletion.",
+          "evidenceLevel": "HTTP-runtime",
+          "target": "existing-local-5433/staging",
+          "status": "NOT_RUN",
+          "revision": null,
+          "gapTask": 138,
+          "entrypoints": []
+        }
+      ],
+      "gapTasks": [
+        138
+      ]
+    },
+    {
+      "id": "file-upload-bounded",
+      "domain": "file",
+      "requirement": "Загрузка сохраняет25MiB images/1GiB documents, ограниченные части/body и потоковую память; права и domain lifecycle прежние.",
+      "productionModules": [
+        "apps/web/src/app/api/files/upload/route.ts"
+      ],
+      "tests": [
+        {
+          "file": "apps/web/tests/multi-file-upload.test.ts",
+          "block": "",
+          "evidenceLevel": "unit"
+        },
+        {
+          "file": "apps/web/tests/engineer-access-actions.test.ts",
+          "block": "real upload route rejects task/product mismatch",
+          "evidenceLevel": "DI"
+        }
+      ],
+      "acceptance": [
+        {
+          "scenario": "HTTP slow/large/interrupted uploads, invalid parts и пик transport buffer≤32MiB без полного arrayBuffer.",
+          "evidenceLevel": "HTTP-runtime",
+          "target": "existing-local-5433/staging",
+          "status": "NOT_RUN",
+          "revision": null,
+          "gapTask": 139,
+          "entrypoints": []
+        }
+      ],
+      "gapTasks": [
+        139
+      ]
+    },
+    {
+      "id": "file-finance-logistics-upload",
+      "domain": "file",
+      "requirement": "Finance/logistics/web/bot переиспользуют потоковый transport, сохраняя разные подтверждения/ACL/domain lifecycle.",
+      "productionModules": [
+        "apps/web/src/server/finance-documents/core.ts",
+        "apps/web/src/server/logistics/documents.ts"
+      ],
+      "tests": [
+        {
+          "file": "apps/web/tests/finance-documents-http.test.ts",
+          "block": "",
+          "evidenceLevel": "DI"
+        },
+        {
+          "file": "apps/web/tests/bot-finance-documents.test.ts",
+          "block": "",
+          "evidenceLevel": "DI"
+        }
+      ],
+      "acceptance": [
+        {
+          "scenario": "Настоящие web/bot finance uploads/TTN, interrupted/temp cleanup, content hashes и permissions.",
+          "evidenceLevel": "HTTP-runtime",
+          "target": "existing-local-5433/staging",
+          "status": "NOT_RUN",
+          "revision": null,
+          "gapTask": 140,
+          "entrypoints": [
+            "apps/web/tests/bot-finance-document-http-native.ts"
+          ]
+        }
+      ],
+      "gapTasks": [
+        140
+      ]
+    },
+    {
+      "id": "timer-cap-atomic",
+      "domain": "timer",
+      "requirement": "Stop/switch/completion/autoStop однократно закрывают запись с cap720, сохраняя офисной ручной ввод и запрет для field-only.",
+      "productionModules": [
+        "apps/web/src/server/time/actions.ts",
+        "apps/web/src/server/tasks/completion-core.ts"
+      ],
+      "tests": [
+        {
+          "file": "apps/web/tests/time-autostop-role-boundary.test.ts",
+          "block": "allowed worker timeout is limited to own live executable task",
+          "evidenceLevel": "DI"
+        },
+        {
+          "file": "apps/web/tests/engineer-access-actions.test.ts",
+          "block": "real task and time actions reject stale hidden IDs",
+          "evidenceLevel": "DI"
+        }
+      ],
+      "acceptance": [
+        {
+          "scenario": "Все пути20h→720; stop/autoStop race, одинаковая record identity и rollback на настоящем PostgreSQL.",
+          "evidenceLevel": "native-PostgreSQL",
+          "target": "existing-local-5433/staging",
+          "status": "NOT_RUN",
+          "revision": null,
+          "gapTask": 132,
+          "entrypoints": []
+        }
+      ],
+      "gapTasks": [
+        132
+      ]
+    },
+    {
+      "id": "queue-progress-claim",
+      "domain": "queue",
+      "requirement": "Poison events не мешают здоровым; несколько worker claim/lease не теряют progress, runtime consumer существует.",
+      "productionModules": [
+        "apps/web/src/server/plugins/events.ts"
+      ],
+      "tests": [],
+      "acceptance": [
+        {
+          "scenario": "50 poison + healthy51; два worker, lease expiry/crash/restart и bounded backoff.",
+          "evidenceLevel": "native-PostgreSQL",
+          "target": "existing-local-5433/staging",
+          "status": "NOT_RUN",
+          "revision": null,
+          "gapTask": 135,
+          "entrypoints": []
+        }
+      ],
+      "gapTasks": [
+        135
+      ]
+    },
+    {
+      "id": "queue-subscriber-delivery",
+      "domain": "queue",
+      "requirement": "Доставка subscriber имеет определённый replay/idempotency/ACK контракт; exactly-once внешнего эффекта не обещается.",
+      "productionModules": [
+        "apps/web/src/server/plugins/events.ts",
+        "apps/web/src/server/plugins/context.ts"
+      ],
+      "tests": [],
+      "acceptance": [
+        {
+          "scenario": "Subscriber exception/duplicate/crash после внешнего эффекта до ACK; бизнес-consumers при их наличии.",
+          "evidenceLevel": "HTTP-runtime",
+          "target": "existing-local-5433/staging",
+          "status": "NOT_RUN",
+          "revision": null,
+          "gapTask": 136,
+          "entrypoints": []
+        }
+      ],
+      "gapTasks": [
+        136      ]
+    },
+    {
+      "id": "ui-input-preservation",
+      "domain": "acl",
+      "requirement": "Внешний вид, keyboard/dirty drafts/CAS/binding и роль read-only сохраняются; browser компонент проверяет реальный input.",
+      "productionModules": [
+        "apps/web/src/components/project-inline-fields.tsx",
+        "apps/web/src/components/product-inline-fields.tsx"
+      ],
+      "tests": [
+        {
+          "file": "apps/web/tests/project-client-contact-component.test.mjs",
+          "block": "real project contact inputs save Client fields",
+          "evidenceLevel": "Chromium-component"
+        },
+        {
+          "file": "apps/web/tests/project-contact-controllers.test.ts",
+          "block": "",
+          "evidenceLevel": "unit"
+        },
+        {
+          "file": "apps/web/tests/product-card-navigation.test.ts",
+          "block": "actual shared card renders accessible",
+          "evidenceLevel": "SSR"
+        }
+      ],
+      "acceptance": [
+        {
+          "scenario": "Same-SHA baseline/after на1440×900,390×844,360×800 без необъяснённых отличий и с одинаковыми сценариями.",
+          "evidenceLevel": "staging-browser",
+          "target": "existing-local-5433/staging",
+          "status": "NOT_RUN",
+          "revision": null,
+          "gapTask": 163,
+          "entrypoints": []
+        },
+        {
+          "scenario": "20 клавиш/5 повторов на самом проблемном iMac p95≤100ms, max≤200ms.",
+          "evidenceLevel": "device",
+          "target": "iMac2017 Windows11 Chrome16GB",
+          "status": "BLOCKED",
+          "revision": null,
+          "gapTask": 141,
+          "entrypoints": [],
+          "reason": "Устройство сейчас недоступно по ответу владельца."
+        }
+      ],
+      "gapTasks": [
+        141,
+        142,
+        143,
+        144,
+        145,
+        146,
+        163
+      ]
+    }
+  ],
+  "dispositions": [
+    {
+      "file": "apps/web/tests/product-card-navigation.test.ts",
+      "block": "handler/SSR tests1–4",
+      "decision": "KEEP",
+      "reason": "Наблюдаемая политика navigation/fullscreen и drag overlay; rendered HTML assertions полезны.",
+      "remainingProtection": [
+        "product-card-navigation.test.ts"
+      ]
+    },
+    {
+      "file": "apps/web/tests/product-card-navigation.test.ts",
+      "block": "project tab passes shared onOpen policy while global board",
+      "decision": "REWRITE",
+      "task": 160,
+      "reason": "Буквальный regex JSX хрупок и не исполняет клик.",
+      "remainingProtection": [
+        "Настоящий Chromium клик по project/global cover + no-navigation drag preview, mutation checks отключённого handler/неверногоID."
+      ]
+    },
+    {
+      "file": "apps/web/tests/file-image-thumbnail.test.ts",
+      "block": "all shared file lists show only original filename",
+      "decision": "KEEP",
+      "reason": "Живой FileGridView, права/имена/отсутствие image requests.",
+      "remainingProtection": [
+        "plain-file-list tests, actual file list"
+      ]
+    },
+    {
+      "file": "apps/web/tests/file-image-thumbnail.test.ts",
+      "block": "nonimage thumbnail adds no image fetch",
+      "decision": "RETIRE",
+      "task": 155,
+      "reason": "Только вместе с доказанно orphan FileImageThumbnail; соседний live test сохраняется.",
+      "remainingProtection": [
+        "KEEP предыдущий block FileGridView."
+      ]
+    },
+    {
+      "file": "apps/web/tests/inline-phone-dependency.test.ts",
+      "block": "whole orphan-helper suite",
+      "decision": "RETIRE",
+      "task": 155,
+      "reason": "Helper не используется runtime; live controller покрывает phone/client binding/ACK/dirty conflict.",
+      "remainingProtection": [
+        "apps/web/tests/project-contact-controllers.test.ts",
+        "apps/web/tests/project-client-contact-component.test.mjs"
+      ]
+    },
+    {
+      "file": "apps/web/tests/inline-percentage-projection.test.ts",
+      "block": "orphan helper projection",
+      "decision": "RETIRE",
+      "task": 156,
+      "reason": "Только после переноса null/zero/dirty/frozen/ACK на актуальный controller/UI.",
+      "remainingProtection": [
+        "apps/web/tests/product-percentage-rate-adjust.test.ts"
+      ]
+    },
+    {
+      "file": "apps/web/tests/inline-engineer-fallback.test.ts",
+      "block": "query explicitly distinguishes fallback member from real configuration even when revision0",
+      "decision": "KEEP",
+      "reason": "Живой query contract различает real revision0 и fallback.",
+      "remainingProtection": [
+        "apps/web/tests/inline-engineer-fallback.test.ts"
+      ]
+    },
+    {
+      "file": "apps/web/tests/inline-engineer-fallback.test.ts",
+      "block": "real query fallback follows new acknowledged engineer while configured/frozen members stay",
+      "decision": "REWRITE",
+      "task": 156,
+      "reason": "Смешанный block содержит действующий query и старые UI-helper assertions; сохраняются query/revision0/frozen contracts.",
+      "remainingProtection": [
+        "Предыдущий query block и актуальные engineer controller/DTO assertions."
+      ]
+    },
+    {
+      "file": "apps/web/tests/product-engineering-fund-ui.test.ts",
+      "block": "SSR old fund/helper blocks16–55",
+      "decision": "RETIRE",
+      "task": 156,
+      "reason": "Orphan UI только после проверки graph/compatibility; historic reader/facts не удаляются.",
+      "remainingProtection": [
+        "apps/web/tests/product-engineering-legacy.test.ts",
+        "apps/web/tests/work-shares-settlement.test.ts"
+      ]
+    },
+    {
+      "file": "apps/web/tests/product-engineering-fund-ui.test.ts",      "block": "request id falls back to cryptographic random bytes",
+      "decision": "KEEP",
+      "reason": "Живой createRequestId fallback используется формами.",
+      "remainingProtection": [
+        "Перенести в отдельный live UUID suite в156."
+      ]
+    },
+    {
+      "file": "apps/web/tests/work-shares-settlement.test.ts",
+      "block": "two unfinished legacy allocations finish with fixed40+60",
+      "decision": "KEEP",
+      "reason": "Исторические40+60, отсутствие новой группы/повторных денег.",
+      "remainingProtection": [
+        "apps/web/tests/work-shares-settlement.test.ts"
+      ]
+    },
+    {
+      "file": "apps/web/tests/product-engineering-legacy.test.ts",
+      "block": "previous legacy history is not edited or charged again",
+      "decision": "KEEP",
+      "reason": "Неизменность старых обязательств и запрет повторного начисления.",
+      "remainingProtection": [
+        "apps/web/tests/product-engineering-legacy.test.ts"
+      ]
+    },
+    {
+      "file": "apps/web/tests/product-engineering-schema.test.ts",
+      "block": "migration is a single transaction",
+      "decision": "KEEP",
+      "reason": "Source guard запрещает разрушительное изменение; дополнить native proof вместо удаления regex.",
+      "remainingProtection": [
+        "PostgreSQL native constraints/restore semantics."
+      ]
+    },
+    {
+      "file": "apps/web/tests/product-percentage-sql-constraints.test.ts",
+      "block": "new Work/Group/Task checks retain every old accepted branch",
+      "decision": "KEEP",
+      "reason": "Защищает legacy CHECK branches; textual assertions не заменяют SQL semantics.",
+      "remainingProtection": [
+        "Native PostgreSQL CHECK/trigger proof."
+      ]
+    },
+    {
+      "file": "apps/web/tests/file-fixture113-protocol.test.mjs",
+      "block": "signed PRE and observation cannot be forged or borrowed",
+      "decision": "KEEP",
+      "reason": "Подписи/runId/точные storage keys/production refusal/cold import/owned cleanup.",
+      "remainingProtection": [
+        "Весь operator guard suite сохраняется."
+      ]
+    },
+    {
+      "file": "apps/web/tests/crm-byn-domain-payroll-actions.test.ts",
+      "block": "Module/require.cache/global fixtures",
+      "decision": "CONSOLIDATE",
+      "task": 161,
+      "reason": "Один безопасный helper с restore при успехе/исключении и unexpected Prisma/network denial.",
+      "remainingProtection": [
+        "Тот же настоящий production module и все прежние business assertions; native остаётся отдельным."
+      ]
+    },
+    {
+      "file": "apps/web/tests/work-shares-settlement.test.ts",
+      "block": "Module/require.cache/global fixtures",
+      "decision": "CONSOLIDATE",
+      "task": 161,
+      "reason": "Один безопасный helper с restore при успехе/исключении и unexpected Prisma/network denial.",
+      "remainingProtection": [
+        "Тот же настоящий production module и все прежние business assertions; native остаётся отдельным."
+      ]
+    },
+    {
+      "file": "apps/web/tests/file-pdf-view-route.test.ts",
+      "block": "Module/require.cache/global fixtures",
+      "decision": "CONSOLIDATE",
+      "task": 161,
+      "reason": "Один безопасный helper с restore при успехе/исключении и unexpected Prisma/network denial.",
+      "remainingProtection": [
+        "Тот же настоящий production module и все прежние business assertions; native остаётся отдельным."
+      ]
+    }
+  ]
+}
