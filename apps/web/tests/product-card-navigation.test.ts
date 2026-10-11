@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import {readFileSync} from "node:fs";
 import * as React from "react";
 import {createElement} from "react";
 import {renderToStaticMarkup} from "react-dom/server";
@@ -29,11 +28,4 @@ test("number token enlarges only its own content and recent project keeps naviga
  const number=renderToStaticMarkup(createElement(CardNumber,null,"205"));assert.match(number,/text-\[1.25em\] font-bold/);
  const recent=renderToStaticMarkup(createElement(RecentProjects,{projects:[{id:"project",number:"205",client:"Клиент",product:"Название заказа",status:"В работе",statusClass:"",sum:"10 BYN"}]}));
  assert.match(recent,/href="\/projects\/project"/);assert.equal((recent.match(/data-card-number/g)??[]).length,1);assert.match(recent,/>Название заказа</);assert.match(recent,/>Клиент</);
-});
-test("project tab passes shared onOpen policy while global board now explicitly navigates and drag handles remain intact",()=>{
- const tab=readFileSync(new URL("../src/app/(app)/projects/[id]/products-tab.tsx",import.meta.url),"utf8");
- assert.match(tab,/coverAction=\{\{type:"navigate",onOpen:\(\)=>onOpen\(product\)\}\}/);assert.match(tab,/onClick=\{\(\) => onOpen\(product\)\}/);assert.match(tab,/setActivatorNodeRef/);
- const general=readFileSync(new URL("../src/app/(app)/products/products-kanban.tsx",import.meta.url),"utf8");assert.match(general,/coverAction=\{\{type:"navigate",onOpen:\(\)=>onOpen\(product\)\}\}/);assert.match(general,/setActivatorNodeRef/);
- for(const file of ["../src/components/project-kanban-card.tsx","../src/app/(app)/projects/projects-table.tsx","../src/app/(app)/products/products-table.tsx"])
-  assert.match(readFileSync(new URL(file,import.meta.url),"utf8"),/<CardNumber>\{(?:project|row)\.number\}<\/CardNumber>/);
 });

@@ -49,3 +49,14 @@ PASS отчёта означает полный успешный measured Node s
 Изменение production-контракта обновляет соответствующий stable ID, точные тесты и gaps; новый negative/rollback/concurrency сценарий появляется в его атомарной задаче. Перед приёмкой фактические revision/target/scenario/status и source inputs сверяются заново. Старый PASS другой ревизии не считается приёмкой кандидата.
 
 Задача163 связывает evidence с реально развёрнутым staging image/identity и собирает native/runtime receipts. Используется существующий qaTransport и reviewed crm-modernization-staging wrapper с W07/DB/S3 guards. Старый first-wave coordinator hardcodes a1123c5 и не запускается как проверка нового SHA. main разрешается только отдельным приказом владельца.
+
+## Навигация карточек (160)
+
+product-card-navigation-browser.test.mjs исполняет настоящие ProductsTab/ProductsKanban/shared card и PointerSensor в Chromium. Синтетические rows/PNG, закрытые Next/server-action boundaries и loopback server не доказывают server ACL или staging. Missing browser даёт failed/BLOCKED gate, silent skip отсутствует. CI уже устанавливает Chromium; workflow не меняется.
+
+Baseline и formatting проверяют trusted cover и отдельный body/title click: ровно один product.number/returnTo route без fullscreen. Реальный drag создаёт disabled overlay; trusted gesture и native disabled-button DOM click() не вызывают переход или fullscreen (DOM click() сам не выдаётся за trusted input). Реальные mobile tables защищают CardNumber. Два faults проходят source provenance/build/mount и отвергаются только после trusted click через NAVIGATION_MISSING/TARGET_MISMATCH; build/hash ошибки не считаются mutation-killed. Browser/server всегда закрываются, PASS artifact сохраняется после cleanup.
+
+Сохраняются четыре handler/SSR tests и project-kanban-card-layout.test.ts. Удалён только последний смешанный буквальный JSX блок. Scope160 не удаляет migration/source guards и не переписывает исторический baseline159. Runtime receipt содержит browser/version, actual source/metafile hashes pre/post, отдельные action/fault rows и честный staging NOT_RUN.
+
+    pnpm --filter @pero/web exec node --import tsx --test tests/product-card-navigation.test.ts tests/project-kanban-card-layout.test.ts
+    pnpm --filter @pero/web exec node --test tests/product-card-navigation-browser.test.mjs
