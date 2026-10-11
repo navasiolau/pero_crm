@@ -2,7 +2,7 @@
 
 ## Current Status
 
-LOCAL_CANDIDATE_CODE_GO, ветка `bugfix/142` от принятого `cd38cb745759becd58dbbad4d6d37afa03f0ab7a`. Независимые DESIGN_GO и ACTUAL_BEFORE_GO получены до source changes; root разрешил ровно три production файла. Main/production запрещены. Владелец напрямую разрешил необходимые коммиты по всему плану; preliminary local candidate commit возможен только после component checks/CODE_GO, а staging integration — после всех metric/visual checks.
+LOCAL_VALIDATION_PASSED_STAGING_PENDING. Ветка `bugfix/142` от принятого `cd38cb745759becd58dbbad4d6d37afa03f0ab7a`; локальный candidate commit `f49baaee0a59a31dfc0e672e68935d3db30d5819` после preliminary CODE_GO. Независимые DESIGN_GO и ACTUAL_BEFORE_GO получены до изменений трёх production файлов. Actual AFTER assets, measurements и visual comparison прошли независимую приёмку на доступном ПК. Main/production запрещены; ordinary root staging integration, совместная регрессия128/145 и фактическая staging-приёмка ещё требуются.
 
 OpenSpec context/list/root/status/artifacts/apply instructions прочитаны; planningHome — этот worktree. Pure rendering refactor, skip_specs:true; требования persistent-list-state, имеющихся navigation/focus deltas сохраняются. Source128/145 не копировался; их обычная интеграция и совместная регрессия ещё требуются.
 
@@ -67,7 +67,7 @@ TEST_FIXTURE_COMPILED_ONLY,61physical inputs под текущим web,8authored
 
 ## Still required
 
-Preliminary CODE_GO получен, владелец разрешил atomic local candidate commit; фактический commit ещё предстоит; новая strict clean-candidate AFTER compilation/runtime recipe с independent review и root quiet window; matched5×20metrics0card bodies/rootp95≤16ms; full responsive/preservation comparison; ordinary root staging merge/CI/exact deployed SHA/image/health/data/role/query acceptance и joined128/145 regressions. Все эти пункты пока NOT_RUN/PENDING; задача142 не завершена.
+Финальные independent METRICS_VISUAL_GO и LOCAL_DOC_REVIEW_GO получены; root разрешил отдельный documentation commit только evidence/tasks после освобождения quiet window. Измеренная ревизия f49 сохраняется как source anchor; documentation commit не меняет production source/tests/66 QA controls. Root фиксирует SHA документационного коммита отдельно. Ещё требуются ordinary merge задачи, CI и приёмка реального staging SHA/image/health, desktop/mobile search/returnTo/focus/DnD/role/data preservation и совместная регрессия128/145. Эти integration/staging пункты PENDING; задача142 не завершена. Physical iMac недоступен, полный Next/runtime приложения этим компонентным замером не покрыт.
 
 SAFETY D:/Projects/pero_infra/infra-recovery/SAFETY-RULES.md; STOP при guard mismatch. Restic/dumps/reset/seed/newDB/production не затрагивались. Другие авторы/рабочие деревья сохранены.
 ## Actual functional browser and preliminary review
@@ -84,6 +84,44 @@ Fullwidth mobile harness имеетpadding16 без sidebar offset;390/360 дл�
 
 Харнесс до запуска прошёл independent protocol review b24f5854…; исправлены test-only PASS-before-finally и back-reset masking. Каждая попытка пишет вfresh UUID; authoritative receipt создан после успешных awaited browser/server cleanup и повторных61physical source hashes. Actions/preferences/navigation — controlled memory fixtures; все unknown server imports/HTTP requests отвергаются. SQL/реальные business writes отсутствуют. Это не evidence100ms SLO/physical iMac/native constraints.
 
-Независимый PRELIMINARY_CODE_REVIEW_GO: source3/test4, actual61pins0mismatch/17checks/cleanup приняты, runtime findings0. Root разрешил atomic LOCALcandidate commit после documentation update. Source иtests после проверенного packet не менялись; последние изменения только этот evidence/tasks. AFTERmetrics/pixelcomparison на том же500fixture, joined128/145 и realstaging остаются PENDING. Stagingpush/merge не выполняет автор до этих gates; main/production запрещены.
+Независимый PRELIMINARY_CODE_REVIEW_GO: source3/test4, actual61pins0mismatch/17checks/cleanup приняты, runtime findings0. Root разрешил atomic LOCALcandidate commit после documentation update. Source иtests после проверенного packet не менялись; последние изменения только этот evidence/tasks. AFTER metrics/pixel comparison на том же500 fixture выполнены (см.ниже); joined128/145 и realstaging остаются PENDING. Stagingpush/merge не выполняет автор до этих gates; main/production запрещены.
 
 Общий source guard163 изменён отдельно на33c0a…(Next config/Docker pins); frozen9c/c915 bytes+provenance сохранены tests owner. Accepted старые6ace/c5e/568c historical CLOSED anchors не переписываются. Их старые absolute caller нельзя запускать с заменённым shared helper. AFTER142/new143 используют fresh reviewed source/context/helper seals и явную связь с historical anchors.
+
+## Actual clean-candidate AFTER compilation
+
+Source candidate: `f49baaee0a59a31dfc0e672e68935d3db30d5819`. Root compile session90193/exit0; `test-results/render142-protocol/after/build/7b83b76b-40f4-4f43-9d18-086f1fad2700/compiled-receipt.json` SHA256 `25c1a0a0eff61eb3b501043ca5a933848a1ce781bea01ee21b1f8c0690085188`. CLOSED: full source/dependency/artifacts pre/post PASS;725 source pins, own frozen dependency inventory50513/digestabdf0…, common source guard33c0a… с Next config/Docker pins.
+
+Обе sealed IIFE имеют2120 actual compiler inputs и2049 фактических dependency inputs, логически и побайтно совпадающих с historical141 build. Production closure72→74 отличается только тремя согласованными f49 source файлами и двумя новыми обязательными config pins; normal7/profiling11 reviewed virtual inputs. React/ReactDOM19.1.0, scheduler0.26.0, production normal/profiling; authored body bindings normal0/profiling8. Перед actual operation reviewed AST-derived resolver направляет только React/ReactDOM/JSX-runtime импорт точного historical entry в own frozen dependencies, сохраняя guard остальных imports. Failed прежняя сборкаbff/INVALID сохранена; повтор не выдан за исходный PASS.
+
+JS normal1070935/gzip204168, profiling1084611/gzip206868: каждый вырос на410 байт (gzip+152/+146); снижение bundle size не заявляется. CSS170815 вместо170783: ровно одна добавленная утилита `.row-1 { grid-row: 1; }` из synthetic test ID, отсутствующего вsrc/packages/frozen fixture. Globals CSS source SHA одинаковый6727419d…; before CSS87a8a3de…/after7d170221… . CSS/source/fixture/golden не менялись ради совпадения; actual6PNG comparison ниже совпал. DOM selector count отдельно NOT_RUN.
+
+Независимые COMPILE_PROTOCOL_GO, ACTUAL_ASSETS_GO и separate CAPTURE/BENCH_PROTOCOL_GO получены для packete7e31e…/preparedf35d8c…/metadata662107…;66 QA producer pins сохранялись на протяжении операций. Root выдавал отдельный one capture и quiet benchmark; renderer/binary/cadence/observer semantics исходного141 сохранены.
+
+## Actual AFTER available-PC measurement
+
+Команда: существующий reviewed `node apps/web/test-results/render142-protocol/after/after142-caller.mjs <root-approved benchmark args>`; root session38146/exit0, отдельное quiet window. Output `test-results/render142-protocol/after/benchmark/46a10c97-7c7e-494f-87bc-a8467402aaa8/`.
+
+Authoritative accepted-receipt SHA256 `a0aff4af83c0ac11c27c67074417cb6364201ad4f11ff8abcb5e9cdf7341592b`; provisional raw receipt `dd2ec4c5a248beb13c90fdba3b0e3ffc42ef6779232d9c582a472d0368654f55`. Final CLOSED с full source/dependency/artifacts postproof PASS; authoritative PASS после own browser/server cleanup. Ровно20 серий,400 trusted keydown/keyup/input,5×20 клавиш для каждой из двух досок в normal и profiling cohorts. Dataset500raw/500projects/437visible products; MANAGER,1440×900,DPR1,Arial,sans-serif,Chrome153.0.8010.12,Windows10/i9-10900F/32GB,без throttling. Enqueue80±20мс: максимальный jitter15.1867мс; caret active20/20 во всех сериях; long tasks внутри записанных серий0. Никакие медленные samples не отброшены.
+
+| Метрика | Проекты | Изделия |
+| --- | ---: | ---: |
+| Profiling React root actualDuration p95 before → after, мс | 42.10 → 2.10 | 41.60 → 1.90 |
+| Profiling after observations / max, мс | 200 / 3.10 | 200 / 2.60 |
+| Каждая Draggable/common-card body на20клавиш before → after | 10000 → 0 | 8740 → 0 |
+| Каждая Draggable/common-card body post-idle before → after | 1000 → 0 | 874 → 0 |
+| Normal Event Timing observed / expected | 78 / 100 | 85 / 100 |
+| Normal missing или censored | 22 | 15 |
+| Normal observed-only latency p95 / max, мс | 40 / 48 | 40 / 56 |
+
+React actualDuration описывает длительность React commit в отдельном profiling cohort; это не keyboard-to-paint/input latency. Root p95 снизился примерно95.01%/95.43%, бюджет≤16мс выполнен. Колонки также имеют0 authored-body calls на ввод и после idle, пока rows не заменены. Board bodies продолжают выполнять21/20 вызовов на ввод и2 после idle; утверждения «вся доска больше не рендерится» нет. Normal build не инструментирован, его body counters не выдаются за нули.
+
+Event Timing имеет threshold16мс и granularity8мс;37 из200 normal interactions отсутствуют либо censored. Полный p95 для всех100 клавиш каждой доски неизвестен (null), пропущенные записи не считаются нулями или гарантированно быстрыми. Только observed subset имеет p95=40мс; per-repetition p95 projects40/40/48/40/40, products48/40/40/56/40. Доказательства не устанавливают полный100мс SLO CRM и не решают инцидент на недоступном iMac. Счётчики keyboards полны независимо от Event Timing coverage.
+
+Независимый METRICS_VISUAL_GO получен: raw20 samples/400trusted/cadence/0cards/React summaries повторно проверены reviewer. Дополнительный readonly пересчёт frozen metrics141 каждого sample и aggregated summaries сохранён в root visualization `after142-final-verification.json` SHA256 `702bcc75e06941105eb225be0147ff26f5fd49da1b3aacb1ca13bf8c5103ddfd`.
+
+## Actual AFTER immutable visual comparison
+
+Root capture session71525; `test-results/render142-protocol/after/capture/f21d3b58-1bd7-4177-afa0-cad838ca852b/accepted-receipt.json` SHA256 `2c344d42411cb9ea6f2bd4d3cd4f20612a17c8a5f2bececfe14b99ac7cbc99b3`, CLOSED/awaited cleanup/full source/dependency/artifacts proof.6/6 PNG hashes и полная geometry exact равны before568c2…: projects/product1440×900,390×844,360×800. В benchmark дополнительно4 normal/profiling desktop screenshots byte-equal исходным141 screenshots. Ни один before anchor не обновлялся.
+
+Mobile500-fixture сохраняет historical desktop sidebar offset; это byte/geometry comparison того же cropped fixture. Отдельный fullwidth mobile functional harness4PNG/Sheet/drafts принят ранее. Полная responsive приёмка реального Next/Onest/staging остаётся отдельным integration gate. Physical iMac BLOCKED_DEVICE_UNAVAILABLE; fullNext/staging/joined128145 PENDING. Production source/tests и66 frozen controls после измерений не менялись; настоящих business writes/SQL/RESTIC/dumps/reset/seed/newDB не было.

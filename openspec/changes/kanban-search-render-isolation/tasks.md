@@ -12,10 +12,10 @@
 
 ## 3. Local validation and measurement
 
-- [ ] 3.1 Run scoped lint/TSC/targeted existing navigation/controller/focus/draft/role suites and realbrowser desktop+mobile caret/search/Sheet/DnD/RSC/rollback regressions; exactcommands/results andbeforeafter geometry/hashes recorded, no goldenautoupdate.
-- [ ] 3.2 После supporting sourcevariant/protocol review иrootquietGO измеритьsamefamily500MANAGER5×20trusted80ms normal/profile after; verify0unchanged card calls untilrowsreplacement andprofilingrootp95≤16ms against immutablec5e07; reportcoverage/outliers/currentsource provenance honestly, noiMac/fullNextclaim.
+- [x] 3.1 Run scoped lint/TSC/targeted existing navigation/controller/focus/draft/role suites and realbrowser desktop+mobile caret/search/Sheet/DnD/RSC/rollback regressions; exactcommands/results andbeforeafter geometry/hashes recorded, no goldenautoupdate.
+- [x] 3.2 После supporting sourcevariant/protocol review иrootquietGO измеритьsamefamily500MANAGER5×20trusted80ms normal/profile after; verify0unchanged card calls untilrowsreplacement andprofilingrootp95≤16ms against immutablec5e07; reportcoverage/outliers/currentsource provenance honestly, noiMac/fullNextclaim.
 
 ## 4. Review and staging acceptance
 
-- [ ] 4.1 Получить independentCODE_REVIEW_GO дляexactfinaldiff/evidence/metrics; после human explicitcommit authorization атомарныйcommit bugfix/142, no private/env/otherWIP paths, SHAroot; main/prod forbidden.
+- [x] 4.1 Получить независимую локальную приёмку source/tests/evidence/metrics/visual и финальный documentation GO; по явному разрешению владельца и root оформить локальные commits bugfix/142 только собственных файлов. Измеренный source candidate f49 и documentation commit имеют одинаковые production/test bytes; это не staging-приёмка. Main/production запрещены.
 - [ ] 4.2 Root ordinarymerge→CI→actualstagingcandidateSHA/image/health; reviewed desktop/mobile search/returnTo/focus/DnD/role/data preservation acceptance andjoined128/145 regressions; actualrole/status source-parent changes checked, stage evidence beforetaskDONE.
