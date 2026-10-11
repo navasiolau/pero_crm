@@ -1,13 +1,12 @@
 // Private technical wire for fresh task111 QA. No runtime/DB/HTTP work on import.
 // SAFETY: D:/Projects/pero_infra/infra-recovery/SAFETY-RULES.md; STOP on guard mismatch.
-import {createHash} from 'node:crypto';
+import {canonical as technicalCanonical,sha} from './helpers/qa-private-primitives.mjs';
+export {technicalCanonical};
 import {gzipSync,gunzipSync} from 'node:zlib';
 export const INPUT_WIRE_LIMIT=64*1024,OUTPUT_WIRE_LIMIT=192*1024,DECODED_LIMIT=2*1024*1024;
 const HASH=/^[a-f0-9]{64}$/,B64=/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 const need=(value,code)=>{if(!value)throw Error(code);};
-const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
 const forbiddenKeys=new Set(['cookies','cookie','password','passwordHash','authSecret','AUTH_SECRET','NEXTAUTH_SECRET','secret','authorization','Authorization','basicAuth','token','sessionToken','profile','email','phone','address']);
-export function technicalCanonical(value){return Array.isArray(value)?'['+value.map(technicalCanonical).join(',')+']':value&&typeof value==='object'?'{'+Object.keys(value).sort().map(key=>JSON.stringify(key)+':'+technicalCanonical(value[key])).join(',')+'}':JSON.stringify(value);}
 export function assertTechnicalPersistence(value){
  let count=0;
  function visit(item,depth){
