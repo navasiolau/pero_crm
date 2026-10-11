@@ -92,7 +92,15 @@ async function geometry(page,section){return target(page,section).evaluate(card=
 async function settledCenter(page,section){await expect.poll(async()=>{const g=await geometry(page,section);return Math.max(g.xError,g.yError);},{timeout:5000}).toBeLessThan(2);}
 const waitFrames=page=>page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
 const position=page=>page.evaluate(()=>({left:document.querySelector('[data-slot="kanban-scroll"]')?.scrollLeft,top:scrollY}));
-async function resetPosition(page){await page.evaluate(()=>{document.querySelector('[data-slot="kanban-scroll"]').scrollTo({left:0,behavior:'instant'});scrollTo({top:0,behavior:'instant'});});await waitFrames(page);}
+async function resetPosition(page){
+ // Сначала завершаем предыдущий поиск: прежний центр не доказывает завершённый focus RAF.
+ await expect.poll(()=>page.evaluate(()=>{const focus=window.__focusStates.at(-1),q=new URLSearchParams(window.__clientQuery).get('q')??'';return !window.__pending&&focus?.ready===true&&focus.query.trim()===q;}),{timeout:5000}).toBe(true);
+ await waitFrames(page);
+ await page.evaluate(()=>{document.querySelector('[data-slot="kanban-scroll"]').scrollTo({left:0,behavior:'instant'});scrollTo({top:0,behavior:'instant'});});
+ // Два RAF сами по себе не подтверждают доставку scroll-событий между двумя полосами.
+ await expect.poll(()=>page.evaluate(()=>({left:document.querySelector('[data-slot="kanban-scroll"]').scrollLeft,bottom:document.querySelector('[data-kanban-scrollbar]')?.scrollLeft??0,top:scrollY})),{timeout:5000}).toEqual({left:0,bottom:0,top:0});
+ await waitFrames(page);
+}
 async function layout(page){return page.evaluate(()=>({columns:[...document.querySelectorAll('[data-slot="kanban-column"]')].map(column=>({width:column.offsetWidth,x:column.offsetLeft,label:column.firstElementChild.textContent.replace(/\d+$/,'')})),cards:[...document.querySelectorAll('[data-kanban-card-id]')].map(card=>({id:card.dataset.kanbanCardId,width:card.offsetWidth,height:card.offsetHeight}))}));}
 async function makePage(section,viewport={width:1440,height:900},query=''){
  const page=await browser.newPage({viewport,hasTouch:viewport.width<768,reducedMotion:'reduce'}),errors=[];
