@@ -27,3 +27,12 @@
 ## Migration Plan
 
 Миграций нет. После targeted local tests, lint/typecheck и независимого review ветка вливается обычным merge в staging оркестратором. Принять фактический SHA/образ, health, raster thumbnail/fullscreen, PDFview/печать, download hash и deny ACL. При регрессии возвращается совместимый образ приложения либо исправляется эта ветка. Main и production не затрагиваются.
+## Tiny auxiliary cohort129 — 11.10.2026
+
+QA-only allowlist: `apps/web/tests/file-fixture129-cohort.mjs`, `file-fixture129-cohort.test.mjs`, design/evidence/tasks данного change. Reuse pure HMAC/canonical helpers113 и shared163 qualification/snapshot/journal/FK bindings; строгий plan/guard113 не расширяется.
+
+Exact14 rows:3 fresh disabled-password actors (ADMIN, ENGINEER, foreign ENGINEER),1 client,2 fresh projects,2 products PRODUCTION,6 exact File rows. Варианты: PNG no-thumb/PDF/inert HTML/inert SVG with inert legacy-thumb/corrupt raster/missing original. Сохраняются все исходные actors/assignments/preferences/data. Five original objects +one inert legacy thumb, каждый≤64KiB; missing original остаётся только File metadata. Все IDs/keys/byte hashes объявлены до durable signed PRE; version ACK пишется сразу после каждого own Put. UNKNOWN удерживает namespace до separate current inspection и Root approval.
+
+Cleanup сверяет current HMAC observation, блокирует exact PK, проверяет все incoming FK и original fingerprints до первого delete; сравнивает точные current versions, удаляет лишь эти own versions, затем14 own DB rows с повторной preservation проверкой. Не удаляет borrowed113/117 fixtures; каждый cohort имеет отдельный runId/manifest.
+
+Bounded actual-HTTP executor использует существующий113 transport/request и private fresh-own-cookie profiles, только GET. Проверяет PNG thumbnail/card, exact original hashes/download attachment, inline PDF, HTML/SVG415 even hasThumb=true, corrupt422, missing404, pure ENGINEER PRODUCTION access/foreign404/anonymous401; conditional304 без body/Content-Length с ETag/Vary/private headers. Preview ожидается WebP как в accepted source. Браузер PDF/view/native print проходят отдельно существующим116 helper после Root ONE; HTTP/cold не заменяют native print.
