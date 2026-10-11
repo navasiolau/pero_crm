@@ -261,6 +261,7 @@ export default async function ProjectPage({
 
         <TabsContent value="tasks" className="mt-4">
           <TasksTab
+            actorUserId={session.user.id}
             projectId={project.id}
             products={project.products.map((product) => ({
               id: product.id,

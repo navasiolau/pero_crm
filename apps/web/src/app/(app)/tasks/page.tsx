@@ -37,6 +37,7 @@ export default async function TasksPage() {
 
   return (
     <TasksPageView
+      actorUserId={session.user.id}
       tasks={mapped}
       canEdit={hasAnyRole(role, MANAGER_ROLES)}
       initialView={view === "table" ? "table" : "kanban"}

@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { changeTaskStatus } from "@/server/tasks/actions";
+import { useTaskStatusCommand } from "@/components/use-task-status-command";
 import type { TaskDetails } from "@/components/task-dialog";
 
 // Обязательное фактическое время при «Выполнена» (§9):
@@ -22,18 +22,22 @@ import type { TaskDetails } from "@/components/task-dialog";
 // Работник/инженер обычно покрывают таймером; админ/менеджер — этим вводом.
 export function ActualTimeDialog({
   task,
+  actorUserId = "",
   open,
   onOpenChange,
   onDone,
 }: {
   task: TaskDetails | null;
+  actorUserId?: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onDone: () => void;
 }) {
+  const changeTaskStatus = useTaskStatusCommand(actorUserId);
   const [minutes, setMinutes] = useState("");
   const [pending, startTransition] = useTransition();
 
+  const displayedMinutes = String(changeTaskStatus.peek(task?.id ?? "")?.actualMinutes ?? minutes);
   return (
     <Dialog
       open={open}
@@ -64,7 +68,8 @@ export function ActualTimeDialog({
             type="number"
             min="1"
             autoFocus
-            value={minutes}
+            value={displayedMinutes}
+            disabled={Boolean(changeTaskStatus.peek(task?.id ?? ""))}
             onChange={(event) => setMinutes(event.target.value)}
           />
         </div>
@@ -73,14 +78,16 @@ export function ActualTimeDialog({
             Отмена
           </Button>
           <Button
-            disabled={!(Number(minutes) >= 1) || pending}
+            disabled={!(Number(displayedMinutes) >= 1) || pending}
             onClick={() =>
               startTransition(async () => {
                 const result = await changeTaskStatus(
                   task!.id,
                   "DONE",
-                  Number(minutes),
+                  Number(displayedMinutes),
                 );
+                if (!result) return;
+                if (result.ok && result.replayed) { onOpenChange(false); return; }
                 if (result.ok) {
                   toast.success("Выполнено!");
                   onOpenChange(false);

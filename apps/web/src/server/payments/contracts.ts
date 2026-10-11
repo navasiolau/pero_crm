@@ -20,3 +20,7 @@ export const paymentSchema = object({
 
 export type PaymentInput = input<typeof paymentSchema>;
 export type PaymentData = output<typeof paymentSchema>;
+
+export type PaymentMutationResult = { ok: true; outcome: "COMMITTED"; resultId: string; paymentId: string } | {
+  ok: false; error: string; outcome?: "ROLLED_BACK" | "UNKNOWN"; retrySafe?: boolean;
+};

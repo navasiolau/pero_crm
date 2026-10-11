@@ -4,6 +4,7 @@ import { productVisibilityWhere } from "@/server/access/visibility";
 
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
+import { deliverPostCommit } from "@/server/operations/post-commit";
 
 import { prisma } from "@/lib/prisma";
 
@@ -216,11 +217,11 @@ export async function addProjectMaterial(
   }
   const data = parsed.data;
   let mutation;
-  try { mutation = await withTaskTransaction((tx) => addMaterialNorm(tx, data, session.user)); }
-  catch (error) { return { ok: false, error: error instanceof Error ? error.message : "Не удалось добавить материал" }; }
-  const { line, product, material } = mutation;
-  await writeChangeLog({
-    actorType: "user",
+  try { mutation = await withTaskTransaction(async tx => {
+    const result = await addMaterialNorm(tx, data, session.user);
+    const { line, product, material } = result;
+  await tx.changeLog.create({ data: {
+    actorType: "user", source: "web",
     actorId: session.user.id,
     actorName: session.user.name ?? undefined,
     entity: "projectMaterial",
@@ -232,8 +233,13 @@ export async function addProjectMaterial(
       quantity: line.quantity.toString(),
       quantityPerUnit: line.quantityPerUnit?.toString() ?? null,
     },
-  });
-  await revalidateWarehouse(product.id, product.projectId);
+  } });
+    return result;
+  }); }
+  catch (error) { return { ok: false, error: error instanceof Error ? error.message : "Не удалось добавить материал" }; }
+  const { line, product } = mutation;
+
+  await deliverPostCommit("material-norm-create", line.id, [{kind:"cache",run:()=>revalidateWarehouse(product.id, product.projectId)}]);
   return { ok: true };
 }
 
@@ -253,11 +259,11 @@ export async function updateProjectMaterial(
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Ошибка данных" };
   }
   let mutation;
-  try { mutation = await withTaskTransaction((tx) => updateMaterialNorm(tx, parsed.data, session.user)); }
-  catch (error) { return { ok: false, error: error instanceof Error ? error.message : "Не удалось изменить материал" }; }
-  const { line, quantity, quantityPerUnit } = mutation;
-  await writeChangeLog({
-    actorType: "user",
+  try { mutation = await withTaskTransaction(async tx => {
+    const result = await updateMaterialNorm(tx, parsed.data, session.user);
+    const { line, quantity, quantityPerUnit } = result;
+  await tx.changeLog.create({ data: {
+    actorType: "user", source: "web",
     actorId: session.user.id,
     actorName: session.user.name ?? undefined,
     entity: "projectMaterial",
@@ -266,8 +272,13 @@ export async function updateProjectMaterial(
     field: "quantity",
     oldValue: Number(line.quantity),
     newValue: { quantity, quantityPerUnit },
-  });
-  await revalidateWarehouse(line.productId, line.product.projectId);
+  } });
+    return result;
+  }); }
+  catch (error) { return { ok: false, error: error instanceof Error ? error.message : "Не удалось изменить материал" }; }
+  const { line } = mutation;
+
+  await deliverPostCommit("material-norm-update", line.id, [{kind:"cache",run:()=>revalidateWarehouse(line.productId, line.product.projectId)}]);
   return { ok: true };
 }
 
@@ -285,11 +296,8 @@ export async function deleteProjectMaterial(
       if (!line) throw new Error("Строка не найдена");
       if (Number(line.issuedQty) > 0) throw new Error("По строке уже есть выдача со склада — сначала верните материал");
       await tx.projectMaterial.delete({ where: { id } });
-      return line;
-    });
-  } catch (error) { return { ok: false, error: error instanceof Error ? error.message : "Не удалось удалить потребность" }; }
-  await writeChangeLog({
-    actorType: "user",
+  await tx.changeLog.create({ data: {
+    actorType: "user", source: "web",
     actorId: session.user.id,
     actorName: session.user.name ?? undefined,
     entity: "projectMaterial",
@@ -299,8 +307,12 @@ export async function deleteProjectMaterial(
       material: line.material.name,
       quantity: Number(line.quantity),
     },
-  });
-  await revalidateWarehouse(line.productId, line.product.projectId);
+  } });
+      return line;
+    });
+  } catch (error) { return { ok: false, error: error instanceof Error ? error.message : "Не удалось удалить потребность" }; }
+
+  await deliverPostCommit("material-norm-delete", id, [{kind:"cache",run:()=>revalidateWarehouse(line.productId, line.product.projectId)}]);
   return { ok: true };
 }
 

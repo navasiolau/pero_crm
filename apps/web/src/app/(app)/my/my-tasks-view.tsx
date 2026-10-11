@@ -48,7 +48,7 @@ import { useElapsed } from "@/lib/use-elapsed";
 import { cn } from "@/lib/utils";
 import { OFFICE_WRITE_ROLES, hasAnyRole } from "@/lib/roles";
 import { saveViewPreference } from "@/server/preferences-actions";
-import { changeTaskStatus } from "@/server/tasks/actions";
+import { useTaskStatusCommand } from "@/components/use-task-status-command";
 import { addManualTime, startTimer, stopTimer } from "@/server/time/actions";
 import type { TaskDetails } from "@/components/task-dialog";
 
@@ -87,6 +87,7 @@ export function MyTasksView({
   active,
   done,
   userName,
+  actorUserId = "",
   timer,
   role,
   initialView,
@@ -94,11 +95,13 @@ export function MyTasksView({
   active: TaskDetails[];
   done: TaskDetails[];
   userName: string;
+  actorUserId?: string;
   timer: ActiveTimer | null;
   role: Role[];
   initialView: "list" | "kanban";
 }) {
   const router = useRouter();
+  const changeTaskStatus = useTaskStatusCommand(actorUserId);
   const [pending, startTransition] = useTransition();
   const [view, setView] = useState(initialView);
   const [tasks, setTasks] = useState<TaskDetails[]>([...active, ...done]);
@@ -138,6 +141,7 @@ export function MyTasksView({
     }
     startTransition(async () => {
       const result = await changeTaskStatus(task.id, "DONE");
+      if (!result || result.ok && result.replayed) return;
       if (result.ok) {
         toast.success("Выполнено!");
         router.refresh();
@@ -255,6 +259,7 @@ export function MyTasksView({
                   onClick={() =>
                     startTransition(async () => {
                       const result = await changeTaskStatus(task.id, "IN_PROGRESS");
+                      if (!result || result.ok && result.replayed) return;
                       if (result.ok) {
                         toast.success("В работе — таймер запущен");
                         router.refresh();
@@ -363,6 +368,7 @@ export function MyTasksView({
         return;
       }
       const result = await changeTaskStatus(task.id, to as "IN_PROGRESS" | "DONE");
+      if (!result || result.ok && result.replayed) return;
       if (!result.ok) {
         moveLocal(task.id, from); // откат оптимистичного обновления
         toast.error(result.error ?? "Ошибка");
@@ -543,6 +549,7 @@ export function MyTasksView({
       ) : null}
 
       <ActualTimeDialog
+        actorUserId={actorUserId}
         task={actualFor}
         open={!!actualFor}
         onOpenChange={(open) => !open && setActualFor(null)}

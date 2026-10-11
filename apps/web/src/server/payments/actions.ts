@@ -9,6 +9,7 @@ import { deletePaymentInTransaction } from "./delete-core";
 import { getPayrollCurrency } from "@/server/payroll/queries";
 import { getNbrbRate } from "@/server/finance/nbrb";
 
+import type { PaymentMutationResult } from "./contracts";
 import { createPaymentCore } from "./core";
 
 // Server actions — тонкие обёртки над ядром (./core): сессия → актёр
@@ -17,7 +18,7 @@ import { createPaymentCore } from "./core";
 
 export async function addPayment(
   input: Parameters<typeof createPaymentCore>[1],
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<PaymentMutationResult> {
   const session = await requireFinance();
   return createPaymentCore(
     {
