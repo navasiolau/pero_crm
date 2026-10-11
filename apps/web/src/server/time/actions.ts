@@ -6,38 +6,23 @@ import { z } from "zod";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import {withTaskTransaction} from '../tasks/transaction';
+import { startTaskTimer, stopTimers } from "./timers";
 import { writeChangeLog } from "@/server/plugins/changelog";
 
 import { MANAGER_ROLES, OFFICE_WRITE_ROLES, hasAnyRole } from "@/lib/roles";
-import { resolveVisibilityActor, taskExecutionWhere, taskVisibilityWhere, type VisibilityActor } from "@/server/access/visibility";
+import { resolveVisibilityActor, taskExecutionWhere, taskVisibilityWhere } from "@/server/access/visibility";
 
-const AUTOSTOP_MINUTES = 12 * 60; // §19: автостоп по таймауту 12 ч с пометкой
-
-// Автостоп «забытых» таймеров (вызывается при чтении/старте/стопе).
-async function autostopExpired(actor: VisibilityActor): Promise<void> {
-  const edge = new Date(Date.now() - AUTOSTOP_MINUTES * 60 * 1000);
-  await prisma.timeEntry.updateMany({
-    where: { userId: actor.id, stoppedAt: null, startedAt: { lt: edge }, task: taskExecutionWhere(actor) },
-    data: { stoppedAt: new Date(), autoStopped: true, minutes: AUTOSTOP_MINUTES },
-  });
-}
-
+// Автостоп и чтение используют текущий scope под той же task transaction.
 export async function getActiveTimer() {
   const session = await auth();
   if (!session?.user) throw new Error("Не авторизован");
-  const actor = await resolveVisibilityActor(prisma, session.user);
-  await autostopExpired(actor);
-  return prisma.timeEntry.findFirst({
-    where: { userId: session.user.id, stoppedAt: null, task: taskExecutionWhere(actor) },
-    include: {
-      task: {
-        select: {
-          id: true,
-          title: true,
-          project: { select: { id: true, number: true } },
-        },
-      },
-    },
+  return withTaskTransaction(async tx => {
+    const instant = new Date();
+    const actor = await resolveVisibilityActor(tx, session.user);
+    const scope = { userId: session.user.id, task: taskExecutionWhere(actor) };
+    await stopTimers(tx, scope, instant, true);
+    return tx.timeEntry.findFirst({ where: { ...scope, source: "timer", stoppedAt: null },
+      include: { task: { select: { id: true, title: true, project: { select: { id: true, number: true } } } } } });
   });
 }
 
@@ -49,6 +34,7 @@ export async function startTimer(
   const session = await auth();
   if (!session?.user) throw new Error("Не авторизован");
   const result=await withTaskTransaction(async tx=>{
+  const instant = new Date();
   const actor = await resolveVisibilityActor(tx, session.user);
 
   const task = await tx.task.findFirst({ where: { AND: [{ id: taskId }, taskExecutionWhere(actor)] } });
@@ -59,19 +45,7 @@ export async function startTimer(
     return { ok: false, error: "Недостаточно прав" };
   }
 
-  // Один активный таймер: прежний останавливаем
-  await tx.timeEntry.updateMany({
-    where: { userId: session.user.id, stoppedAt: null },
-    data: { stoppedAt: new Date() },
-  });
-  await tx.$executeRaw`
-    UPDATE "TimeEntry" SET "minutes" = GREATEST(1, FLOOR(EXTRACT(EPOCH FROM ("stoppedAt" - "startedAt")) / 60)::int)
-    WHERE "userId" = ${session.user.id} AND "stoppedAt" IS NOT NULL AND "minutes" = 0
-  `;
-
-  await tx.timeEntry.create({
-    data: { taskId, userId: session.user.id, source: "timer" },
-  });
+  await startTaskTimer(tx, taskId, session.user.id, instant);
   return { ok: true };
   });
   if(result.ok)revalidatePath("/my");
@@ -79,30 +53,20 @@ export async function startTimer(
 }
 
 // Стоп активного таймера — пишет факт (§9).
-export async function stopTimer(): Promise<{
-  ok: boolean;
-  minutes?: number;
-  error?: string;
-}> {
+export async function stopTimer(): Promise<{ ok: boolean; minutes?: number; error?: string }> {
   const session = await auth();
   if (!session?.user) throw new Error("Не авторизован");
-  const actor = await resolveVisibilityActor(prisma, session.user);
-
-  const active = await prisma.timeEntry.findFirst({
-    where: { userId: session.user.id, stoppedAt: null, task: taskExecutionWhere(actor) },
+  const result = await withTaskTransaction(async tx => {
+    const instant = new Date();
+    const actor = await resolveVisibilityActor(tx, session.user);
+    const scope = { userId: session.user.id, task: taskExecutionWhere(actor) };
+    const active = await tx.timeEntry.findFirst({ where: { ...scope, source: "timer", stoppedAt: null } });
+    if (!active) return { ok: false, error: "Активного таймера нет" };
+    const [stopped] = await stopTimers(tx, { ...scope, id: active.id }, instant);
+    return stopped ? { ok: true, minutes: stopped.minutes } : { ok: false, error: "Активного таймера нет" };
   });
-  if (!active) return { ok: false, error: "Активного таймера нет" };
-
-  const minutes = Math.max(
-    1,
-    Math.floor((Date.now() - active.startedAt.getTime()) / 60000),
-  );
-  await prisma.timeEntry.update({
-    where: { id: active.id },
-    data: { stoppedAt: new Date(), minutes },
-  });
-  revalidatePath("/my");
-  return { ok: true, minutes };
+  if (result.ok) revalidatePath("/my");
+  return result;
 }
 
 const manualSchema = z.object({

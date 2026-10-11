@@ -20,7 +20,7 @@ export function taskShareFixture(productStatus: "DESIGN" | "PRODUCTION" = "PRODU
     works: [{ id: "work", projectId: "project", productId: "product", title: "work", quantity: "10", priceSnapshot: "100", total: "1000", paymentKind: "LEGACY" }] as Row[],
     groups: [] as Row[], entries: [] as Row[], logs: [] as Row[], events: [] as Row[], history: [] as Row[],
     dependencies: [{ taskId: "source", dependsOnId: "predecessor" }, { taskId: "dependent", dependsOnId: "source" }] as Row[],
-    times: [{ id: "timer", taskId: "source", userId: "worker", minutes: 20, stoppedAt: null, startedAt: now }] as Row[],
+    times: [{ id: "timer", taskId: "source", userId: "worker", source: "timer", minutes: 20, stoppedAt: null, startedAt: now, autoStopped: false }] as Row[],
     files: [{ id: "photo", taskId: "source", projectId: "project", productId: "product" }] as Row[],
     sequence: 0, currency: "BYN", projectCurrency: "BYN",
   };
@@ -105,6 +105,7 @@ export function taskShareFixture(productStatus: "DESIGN" | "PRODUCTION" = "PRODU
     orgSetting: { findUnique: async () => ({ value: state.currency }) },
     file: { updateMany: async ({ where, data }: { where: Row; data: Row }) => { write("file.updateMany"); const rows = filtered(state.files, where); for (const row of rows) Object.assign(row, data); return { count: rows.length }; } },
     timeEntry: {
+      findMany: async ({ where }: { where: Row }) => filtered(state.times, where),
       findFirst: async ({ where }: { where: Row }) => filtered(state.times, where)[0] ?? null,
       updateMany: async ({ where, data }: { where: Row; data: Row }) => { write("time.updateMany"); const rows = filtered(state.times, where); for (const row of rows) Object.assign(row, data); return { count: rows.length }; },
       aggregate: async ({ where }: { where: Row }) => ({ _sum: { minutes: filtered(state.times, where).reduce((sum, row) => sum + Number(row.minutes ?? 0), 0) } }),
