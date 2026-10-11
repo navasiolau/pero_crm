@@ -146,25 +146,12 @@ export function ProductsKanban({
   const router = useRouter();
   const { getQuery } = useListParams();
   const visibleStatuses = useMemo(() => visibleProductStatuses(actorRoles), [actorRoles]);
-  const [board, setBoard] = useState<{
-    products: ProductRow[];
-    source: ProductRow[] | null;
-    roles: readonly Role[];
-  }>(() => ({
-    products: initialProducts.filter(product => visibleStatuses.some(status => status.id === product.status)),
-    source: initialProducts,
-    roles: actorRoles,
-  }));
-  const products = board.products;
+  const [products, setProducts] = useState(() => initialProducts.filter(product => visibleStatuses.some(status => status.id === product.status)));
   const [activeId, setActiveId] = useState<string | null>(null);
 
   useEffect(() => {
-    setBoard({
-      products: initialProducts.filter(product => visibleStatuses.some(status => status.id === product.status)),
-      source: initialProducts,
-      roles: actorRoles,
-    });
-  }, [initialProducts, visibleStatuses, actorRoles]);
+    setProducts(initialProducts.filter(product => visibleStatuses.some(status => status.id === product.status)));
+  }, [initialProducts, visibleStatuses]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, POINTER_SENSOR_OPTIONS),
@@ -179,16 +166,17 @@ export function ProductsKanban({
   ), [router, getQuery]);
 
   function applyStatus(productId: string, toStatus: ProductStatus) {
-    setBoard((previous) => ({
-      ...previous,
-      // Локальное изменение не подтверждает строки нового серверного поиска.
-      source: null,
-      products: previous.products.map((product) =>
+    setProducts((prev) =>
+      prev.map((product) =>
         product.id === productId
-          ? { ...product, status: toStatus, statusChangedAt: new Date().toISOString() }
+          ? {
+              ...product,
+              status: toStatus,
+              statusChangedAt: new Date().toISOString(),
+            }
           : product,
       ),
-    }));
+    );
   }
 
   function onDragStart(event: DragStartEvent) {
@@ -239,7 +227,7 @@ export function ProductsKanban({
       <KanbanScrollArea label="Канбан изделий" searchFocus={{
           query: searchText,
           cardId: products.find(item => item.number === searchText.trim())?.id ?? null,
-          ready: searchReady && board.source === initialProducts && board.roles === actorRoles && !activeId,
+          ready: searchReady && products === initialProducts && !activeId,
         }}>
         {columns.map(({ status, products }) => (
           <StatusColumn
