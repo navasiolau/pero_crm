@@ -112,3 +112,8 @@ RootKit actorProfile возвращает fresh actor handoff только в з
 Browser V2 допускает bounded own-prefix queries только с mandatory own client/project filter, exact owned detail GET/HEAD, manager preference POST и отдельно registered compiled getBellData/args[]. Foreign engineer и accountant не получают preference grant. Статус/денежный POST, неизвестный export/path/payload, новые profile roles/IDs и неучтённые побочные строки блокируются. Текущие source checks не подменяют actual navigation, financial/native128 или staging closure.
 
 Source allowlist: apps/web/tests/kanban-search-owned-{protocol,fixtures,entry}.mjs, kanban-search-root-runner.mjs, kanban-search-stage-browser.mjs, helpers/staging-acceptance-qualification.mjs; four existing117 tests. Existing native target/snapshot/rollback/local-db helpers и transport используются без изменений.
+
+
+## Compiled worker async flag — observed 5fbc
+
+Фактический Next 15.5.20 manifest на staging 5fbc содержит у saveListPreference worker.async=true для projects/products; это флаг асинхронной загрузки server module, который создаёт Next через moduleGraph.isAsync. QA принимает только boolean true/false и сохраняет фактическое значение в подписанных routes. String numeric moduleId, точные action/source/route/layer и hash manifest остаются обязательными. Browser executor не переключает dispatch по этому флагу: он передаёт точный Next-Action id и аргументы, проверяет настоящий Flight ACK и прежний CAS. Production код не меняется.
