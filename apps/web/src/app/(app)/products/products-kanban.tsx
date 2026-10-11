@@ -2,7 +2,7 @@
 
 import { KanbanScrollArea } from "@/components/kanban-scroll-area";
 
-import { useEffect, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   DndContext,
@@ -36,7 +36,9 @@ import { changeProductStatus } from "@/server/products/actions";
 
 import type { ProductRow } from "./products-view";
 
-function DraggableProduct({
+const POINTER_SENSOR_OPTIONS = { activationConstraint: { distance: 8 } };
+
+const DraggableProduct = memo(function DraggableProduct({
   product,
   showAmount,
   canDrag,
@@ -69,9 +71,9 @@ function DraggableProduct({
       />
     </div>
   );
-}
+});
 
-function StatusColumn({
+const StatusColumn = memo(function StatusColumn({
   status,
   products,
   showAmount,
@@ -118,7 +120,7 @@ function StatusColumn({
       </div>
     </div>
   );
-}
+});
 
 // Канбан изделий: колонки = статусы §6, доступность перехода определяется
 // ролью и данными изделия. Порядок и фильтры —
@@ -140,19 +142,33 @@ export function ProductsKanban({
   showAmount: boolean;
 }) {
   const router = useRouter();
-  const { query } = useListParams();
-  const visibleStatuses = visibleProductStatuses(actorRoles);
-  const visibleRows = initialProducts.filter(product => visibleStatuses.some(status => status.id === product.status));
-  const [products, setProducts] = useState(visibleRows);
+  const { getQuery } = useListParams();
+  const visibleStatuses = useMemo(() => visibleProductStatuses(actorRoles), [actorRoles]);
+  const [products, setProducts] = useState(() => initialProducts.filter(product => visibleStatuses.some(status => status.id === product.status)));
   const [activeId, setActiveId] = useState<string | null>(null);
 
   useEffect(() => {
-    setProducts(initialProducts.filter(product => visibleProductStatuses(actorRoles).some(status => status.id === product.status)));
-  }, [initialProducts, actorRoles]);
+    setProducts(initialProducts.filter(product => visibleStatuses.some(status => status.id === product.status)));
+  }, [initialProducts, visibleStatuses]);
 
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(PointerSensor, POINTER_SENSOR_OPTIONS),
   );
+
+  const columns = useMemo(() => visibleStatuses.map(status => ({
+    status, products: products.filter(product => product.status === status.id),
+  })), [products, visibleStatuses]);
+  const canDrag = useCallback((product: ProductRow) => productStatusTargets(actorRoles, {
+    from: product.status,
+    projectStage: product.projectStage,
+    assignedEngineer: product.isEngineeringParticipant,
+    participant: product.isEngineeringParticipant,
+    hasB3d: product.hasB3d,
+    noModel: product.noModel,
+  }).some(target => target !== product.status), [actorRoles]);
+  const onOpen = useCallback((product: ProductRow) => router.push(
+    productDetailHref(product.number, globalProductsHref(getQuery())),
+  ), [router, getQuery]);
 
   function applyStatus(productId: string, toStatus: ProductStatus) {
     setProducts((prev) =>
@@ -225,20 +241,13 @@ export function ProductsKanban({
           cardId: products.find(item => item.number === searchText.trim())?.id ?? null,
           ready: searchReady && products === initialProducts && !activeId,
         }}>
-        {visibleStatuses.map((status) => (
+        {columns.map(({ status, products }) => (
           <StatusColumn
             key={status.id}
             status={status}
-            products={products.filter((product) => product.status === status.id)}
+            products={products}
             showAmount={showAmount}
-            canDrag={(product) => productStatusTargets(actorRoles, {
-              from: product.status,
-              projectStage: product.projectStage,
-              assignedEngineer: product.isEngineeringParticipant,
-              participant: product.isEngineeringParticipant,
-              hasB3d: product.hasB3d,
-              noModel: product.noModel,
-            }).some(target => target !== product.status)}
+            canDrag={canDrag}
             canDrop={!!activeProduct && productStatusTargets(actorRoles, {
               from: activeProduct.status,
               projectStage: activeProduct.projectStage,
@@ -247,7 +256,7 @@ export function ProductsKanban({
               hasB3d: activeProduct.hasB3d,
               noModel: activeProduct.noModel,
             }).includes(status.id)}
-            onOpen={(product) => router.push(productDetailHref(product.number, globalProductsHref(query)))}
+            onOpen={onOpen}
           />
         ))}
       </KanbanScrollArea>

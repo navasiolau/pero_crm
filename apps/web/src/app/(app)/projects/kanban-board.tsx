@@ -2,7 +2,7 @@
 
 import { KanbanScrollArea } from "@/components/kanban-scroll-area";
 
-import { useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   DndContext,
@@ -33,7 +33,9 @@ import { StageFormDialog, type StageFormRequest } from "./stage-form-dialog";
 
 export { formatAmount };
 
-function DraggableCard({
+const POINTER_SENSOR_OPTIONS = { activationConstraint: { distance: 8 } };
+
+const DraggableCard = memo(function DraggableCard({
   project,
   showAmount,
   canManage,
@@ -59,9 +61,9 @@ function DraggableCard({
       <ProjectCardView project={project} showAmount={showAmount} dragging={isDragging} onOpen={onOpen} />
     </div>
   );
-}
+});
 
-function StageColumn({
+const StageColumn = memo(function StageColumn({
   stage,
   projects,
   showAmount,
@@ -106,7 +108,7 @@ function StageColumn({
       </div>
     </div>
   );
-}
+});
 
 // Канбан проектов (§7): колонки = этапы §6, свободные переходы,
 // оптимистичное обновление с откатом; мини-формы для Отказа/Рекламации (§6).
@@ -142,8 +144,13 @@ export function KanbanBoard({
   }, [initialProjects]);
 
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(PointerSensor, POINTER_SENSOR_OPTIONS),
   );
+
+  const columns = useMemo(() => STAGES.map(stage => ({
+    stage, projects: projects.filter(project => project.stage === stage.id),
+  })), [projects]);
+  const onOpen = useCallback((id: string) => router.push(`/projects/${id}`), [router]);
 
   function applyStage(projectId: string, toStage: ProjectStage) {
     setProjects((prev) =>
@@ -217,14 +224,14 @@ export function KanbanBoard({
           cardId: projects.find(item => item.number === searchText.trim())?.id ?? null,
           ready: searchReady && projects === initialProjects && !activeId,
         }}>
-          {STAGES.map((stage) => (
+          {columns.map(({ stage, projects }) => (
             <StageColumn
               key={stage.id}
               stage={stage}
-              projects={projects.filter((project) => project.stage === stage.id)}
+              projects={projects}
               showAmount={showAmount}
               canManage={canManage}
-              onOpen={(id) => router.push(`/projects/${id}`)}
+              onOpen={onOpen}
             />
           ))}
         </KanbanScrollArea>
