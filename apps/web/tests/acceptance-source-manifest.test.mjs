@@ -121,3 +121,10 @@ test('standalone config allowlist does not permit sibling, env or private app pa
  for(const file of ['apps/web/next.extra.ts','apps/web/Dockerfile.debug','apps/web/.env','apps/web/private-config.json'])
   await assert.rejects(pinSources({revision,sourceRoot:root,productionFiles:[file]}),/PRODUCTION_PATH_NOT_ALLOWED/);
 }));
+test('shared162 transitive QA primitive requires explicit reviewed physical pin and keeps outsider denied',()=>fixture(async({root,revision})=>{
+ const helper=path.resolve(new URL('./helpers/qa-private-primitives.mjs',import.meta.url).pathname.replace(/^\/([A-Z]:)/,'$1')),qaRoot=path.resolve(path.dirname(helper),'../../../..'),sha256=evidenceHash(await readFile(helper));assert.equal(sha256,'529b3c835400553eb632ee057315c0c0784e7645d06f7d7ebcc6815e99a9499b');
+ const entry=path.join(root,'producer.mjs');await writeFile(entry,'import {canonical} from '+JSON.stringify(helper)+';export const value=canonical({fixture:true});\n');const approved={entry,revision,sourceRoot:root,producerRoots:[root,qaRoot],reviewedProducers:[{file:entry,sha256:evidenceHash(await readFile(entry))}]};
+ await assert.rejects(reviewedBundle(approved),/UNREVIEWED_PRODUCER_IMPORT/);const pack=await reviewedBundle({...approved,reviewedProducers:[...approved.reviewedProducers,{file:helper,sha256}]});assert.ok(pack.manifest.pins.some(pin=>pin.scope==='producer'&&pin.file===helper&&pin.sha256===sha256));await assertSourcePins(pack.manifest);
+ const outsider=path.join(root,'outsider.mjs');await writeFile(outsider,'export const outsider=true;\n');await writeFile(entry,'import {canonical} from '+JSON.stringify(helper)+';import {outsider} from '+JSON.stringify(outsider)+';export const value=canonical({outsider});\n');await assert.rejects(reviewedBundle({...approved,reviewedProducers:[{file:entry,sha256:evidenceHash(await readFile(entry))},{file:helper,sha256}]}),/UNREVIEWED_PRODUCER_IMPORT/);
+ const source=await readFile(new URL('./kanban-search-root-runner.mjs',import.meta.url),'utf8');assert.ok(source.includes("'helpers/qa-private-primitives.mjs'"),'cohort RootKit must register this actual transitive dependency');
+}));
