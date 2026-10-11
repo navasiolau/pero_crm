@@ -1363,10 +1363,16 @@ model DomainEvent {
   actor       String    @default("system") // userId | plugin:<id> | system
   createdAt   DateTime  @default(now())
   processedAt DateTime?
-  attempts    Int       @default(0)
-  lastError   String?
+  attempts      Int       @default(0)
+  lastError     String?
+  queueAttempts Int       @default(0)
+  claimToken    String?
+  leaseUntil    DateTime?  @db.Timestamptz(6)
+  nextAttemptAt DateTime   @default(now()) @db.Timestamptz(6)
+  exhaustedAt   DateTime?  @db.Timestamptz(6)
 
   @@index([processedAt, createdAt])
+  @@index([processedAt, exhaustedAt, nextAttemptAt, createdAt], map: "DomainEvent_ready_queue_idx")
 }
 
 // Токены публичного REST API (/api/v1) — для плагинов и внешних интеграций.
