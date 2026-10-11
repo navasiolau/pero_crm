@@ -1,40 +1,35 @@
 import assert from "node:assert/strict";
 import {randomUUID} from "node:crypto";
-import {readFileSync} from "node:fs";
-import {PrismaClient,type Prisma,type ProductPercentageKind} from "@prisma/client";
-import {existingLocalCrmDatabaseUrl} from "./helpers/local-crm-database";
-import {captureDirectPercentage,settleSkippedPercentage} from "../src/server/product-percentage-pay/direct-completion";
-import {patchProductPercentageCore} from "../src/server/product-percentage-pay/patch-core";
-import {getProductPercentageView} from "../src/server/product-percentage-pay/queries";
-import {getProjectEconomics} from "../src/server/finance/queries";
+import path from "node:path";
+import {fileURLToPath} from "node:url";
+import type {Prisma,ProductPercentageKind} from "@prisma/client";
+import {nativeAcceptanceBinding,nativeDatabaseIdentity,type NativeDeclaration} from "./helpers/native-acceptance-target";
+import {nativeSnapshot,verifiedRollback} from "./helpers/native-acceptance-snapshot";
+import {assertPercentagePrerequisites} from "./helpers/native-percentage-prerequisites";
 
-const db=new PrismaClient({datasourceUrl:existingLocalCrmDatabaseUrl()});
-const abort=new Error("QA90_ROLLBACK");
-const checks:string[]=[];
-async function fingerprint(){
- const tables=await db.$queryRawUnsafe<{tablename:string}[]>("SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename");
- const rows:Record<string,unknown>={};
- for(const {tablename} of tables){
-  assert.match(tablename,/^[A-Za-z_][A-Za-z0-9_]*$/);
-  rows[tablename]=await db.$queryRawUnsafe(`SELECT count(*)::text AS count,md5(COALESCE(string_agg(row_to_json(t)::text,'' ORDER BY row_to_json(t)::text),'')) AS hash FROM "${tablename}" t`);
- }
- const schema=await db.$queryRawUnsafe("SELECT md5(COALESCE(string_agg(pg_get_constraintdef(c.oid),'' ORDER BY t.relname,c.conname),'')) AS hash FROM pg_constraint c JOIN pg_class t ON t.oid=c.conrelid JOIN pg_namespace n ON n.oid=t.relnamespace WHERE n.nspname='public'");
- const functions=await db.$queryRawUnsafe("SELECT md5(string_agg(pg_get_functiondef(p.oid),'' ORDER BY p.proname)) AS hash FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.prokind='f'");
- return {rows,schema,functions};
-}
 async function rejected(tx:Prisma.TransactionClient,operation:()=>Promise<unknown>){
  await tx.$executeRawUnsafe("SAVEPOINT qa90_failure");
  try{await assert.rejects(operation);}finally{await tx.$executeRawUnsafe("ROLLBACK TO SAVEPOINT qa90_failure");await tx.$executeRawUnsafe("RELEASE SAVEPOINT qa90_failure");}
 }
-async function main(){
- const before=await fingerprint(),originalFetch=globalThis.fetch;let outbound=0;
+export async function runPercentageAdjustmentsAcceptance(input:NativeDeclaration){
+ const binding=nativeAcceptanceBinding(input);
+ const {PrismaClient}=await import("@prisma/client");
+ const db=new PrismaClient({datasourceUrl:binding.url});
+ try {
+ await nativeDatabaseIdentity(db,input);
+ const {captureDirectPercentage,settleSkippedPercentage}=await import("../src/server/product-percentage-pay/direct-completion");
+ const {patchProductPercentageCore}=await import("../src/server/product-percentage-pay/patch-core");
+ const {getProductPercentageView}=await import("../src/server/product-percentage-pay/queries");
+ const {getProjectEconomics}=await import("../src/server/finance/queries");
+ const abort=new Error("QA163_ROLLBACK"),checks:string[]=[];
+ const configured=await db.orgSetting.findUnique({where:{key:"payrollCurrency"}});
+ assert.equal(configured?.value??"BYN","BYN","PAYROLL_CURRENCY_PREREQUISITE");
+ await assertPercentagePrerequisites(db);
+ const before=await nativeSnapshot(db),originalFetch=globalThis.fetch;let outbound=0,after:Awaited<ReturnType<typeof nativeSnapshot>>|undefined;
  globalThis.fetch=async()=>{outbound++;throw Error("QA90_NO_NETWORK");};
  try{
-  await assert.rejects(db.$transaction(async tx=>{
-   const ceil=readFileSync(require.resolve("../prisma/migrations/20261005120000_product_percentage_ceil_accrual/migration.sql"),"utf8");
-   for(const sql of ceil.slice(ceil.indexOf("BEGIN;")+6,ceil.lastIndexOf("COMMIT;")).split(";").filter(value=>value.trim()))await tx.$executeRawUnsafe(sql);
-   const migration=readFileSync(require.resolve("../prisma/migrations/20261007100000_product_percentage_adjustments/migration.sql"),"utf8");
-   for(const sql of migration.split("-- statement-breakpoint"))await tx.$executeRawUnsafe(sql);
+  await verifiedRollback(async()=>{
+  try {await db.$transaction(async tx=>{
    const tag=randomUUID();
    const users=await Promise.all((["MANAGER","ENGINEER","WORKER","MOUNTER"] as const).map(role=>tx.user.create({data:{name:`Проверка90 ${role}`,email:`qa90-${tag}-${role}@example.invalid`,passwordHash:"QA90_NO_LOGIN",roles:[role]}})));
    const [manager,engineer,assembler,mounter]=users,actor={id:manager.id,name:manager.name,roles:manager.roles,source:"web" as const};
@@ -88,7 +83,11 @@ async function main(){
    checks.push("zero_delta_has_receipt_and_no_payroll_or_notification");
    const configBefore=await tx.productPercentageConfig.findUnique({where:{productId_kind:{productId:product.id,kind:"ENGINEERING"}}});
    await rejected(tx,()=>tx.productPercentageCompletion.update({where:{id:original[0].id},data:{amount:"999"}}));
-   const adjustment=(await tx.productPercentageAdjustment.findFirst())!;
+   const ownedCompletion=original.find(row=>row.kind==="ENGINEERING")!;
+   assert.equal(ownedCompletion.productId,product.id,"TASK_OWNED_COMPLETION_REQUIRED");
+   const ownedShareId=ownedCompletion.shares[0].id;
+   const adjustment=(await tx.productPercentageAdjustment.findFirst({where:{completionShareId:ownedShareId,kind:"ENGINEERING"}}))!;
+   assert.equal(adjustment.completionShareId,ownedShareId,"TASK_OWNED_ADJUSTMENT_REQUIRED");
    await rejected(tx,()=>tx.productPercentageAdjustment.update({where:{id:adjustment.id},data:{amount:"999"}}));
    await rejected(tx,()=>tx.payrollEntry.delete({where:{id:initialPayroll[0].id}}));
    // Ошибка после UPDATE конфига обязана вылететь наружу, чтобы весь tx откатился.
@@ -114,9 +113,12 @@ async function main(){
    assert.equal((await tx.payrollEntry.findFirst({where:{productId:zero.id}}))!.amount.toNumber(),150);
    checks.push("zero_without_original_recipient_can_gain_first_adjustment");
    throw abort;
-  },{timeout:120000,maxWait:10000}),error=>error===abort);
-  assert.deepEqual(await fingerprint(),before);assert.equal(outbound,0);
-  console.log(JSON.stringify({status:"PASS",target:"existing_local_pero_crm_5433",checks,allOriginalRowsMatch:true,schemaAndFunctionsRestored:true,persistedRows:0,outbound}));
- }finally{globalThis.fetch=originalFetch;await db.$disconnect();}
+  }, {timeout:120000,maxWait:10000});throw Error("ROLLBACK_MARKER_NOT_RAISED");}
+  catch(error){if(error!==abort)throw error;}
+  },async()=>{after=await nativeSnapshot(db);assert.deepEqual(after,before,"ORIGINAL_DATA_SCHEMA_CHANGED_AFTER_ROLLBACK");assert.equal(outbound,0,"NATIVE_OUTBOUND_REFUSED");});
+  return {status:"PASS",level:"native-PostgreSQL",identity:binding.identity,revision:input.revision,target:input.target,runId:input.runId,scenarioId:input.scenarioId,producerId:"percentage-adjustments",producerVersion:2,checks:checks.map(id=>({id:id.replaceAll("_","-"),status:"PASS"})),preservation:{mode:"rollback",status:"PASS",rollback:"VERIFIED",beforeDigest:before.digest,afterDigest:after!.digest},persistedRows:0,outbound};
+ }finally{globalThis.fetch=originalFetch;}
+ } finally {await db.$disconnect();}
 }
-main().catch(error=>{console.error(error);process.exitCode=1;});
+const direct=process.argv[1]&&path.basename(process.argv[1])==="product-percentage-adjustments-native.ts"&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url);
+if(direct){const [target,revision,runId,scenarioId]=process.argv.slice(2);if(target!=="local"&&target!=="staging")throw Error("EXPLICIT_NATIVE_TARGET_REQUIRED");void runPercentageAdjustmentsAcceptance({target,revision,runId,scenarioId}).then(result=>console.log(JSON.stringify(result))).catch(()=>{console.error(JSON.stringify({status:"BLOCKED",code:"NATIVE_ACCEPTANCE_FAILED"}));process.exitCode=1;});}
