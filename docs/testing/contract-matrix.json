@@ -726,10 +726,16 @@
       "block": "project tab passes shared onOpen policy while global board",
       "decision": "REWRITE",
       "task": 160,
-      "reason": "Буквальный regex JSX хрупок и не исполняет клик.",
+      "reason": "Буквальный JSX regex заменён действиями реального Chromium; четыре handler/SSR cases остаются.",
       "remainingProtection": [
-        "Настоящий Chromium клик по project/global cover + no-navigation drag preview, mutation checks отключённого handler/неверногоID."
-      ]
+        "apps/web/tests/product-card-navigation-browser.test.mjs: trusted project/global cover и body/title, exact product.number/returnTo; real PointerSensor/disabled DragOverlay/no navigation; mobile tables CardNumber; formatting и два controlled behavior faults.",
+        "Существующие четыре handler/SSR cases product-card-navigation.test.ts и project-kanban-card-layout.test.ts."
+      ],
+      "replacement": {
+        "file": "apps/web/tests/product-card-navigation-browser.test.mjs",
+        "block": "actual Chromium cover/body navigation, drag preview, mobile numbers and two faults",
+        "evidenceLevel": "Chromium-component"
+      }
     },
     {
       "file": "apps/web/tests/file-image-thumbnail.test.ts",
