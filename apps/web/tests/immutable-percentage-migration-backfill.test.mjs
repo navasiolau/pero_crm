@@ -28,8 +28,8 @@ test('канонический Git SQL применённой миграции �
 });
 
 test('композиция исходных пяти строк и нового INSERT сохраняет прежние операции', () => {
-  const baseline = execFileSync('git', ['-c', `safe.directory=${root.replaceAll('\\', '/')}`, '-C', root,
-    'cat-file', 'blob', '32c0a45982c8a8a42164f7716b7ebb6d99f32584']);
+  // Точные bytes blob32c0… закреплены SHA; shallow CI содержит только текущие Git objects.
+  const baseline = Buffer.from("-- Backfill пустых процентных ставок нулями (решение владельца 06.10.2026: пустое = 0).\n-- Начислений, ревизий и истории не создаёт и не меняет; только заполняет NULL.\nUPDATE \"ProductPercentageConfig\" SET \"ratePercent\" = 0 WHERE \"ratePercent\" IS NULL;\nUPDATE \"OrgSetting\" SET \"value\" = REPLACE(\"value\", ':null', ':\"0.00\"')\nWHERE \"key\" = 'productPercentageDefaults' AND \"value\" LIKE '%null%';\n-- Изделия без конфигов (legacy-импорт) получают все три ставки 0: поле никогда не пустое.\nINSERT INTO \"ProductPercentageConfig\" (\"id\",\"productId\",\"kind\",\"ratePercent\",\"revision\",\"reviewedLegacyWorkIds\",\"createdAt\",\"updatedAt\")\nSELECT gen_random_uuid(), p.\"id\", k.\"kind\"::\"ProductPercentageKind\", 0, 1, '{}', NOW(), NOW()\nFROM \"Product\" p CROSS JOIN (VALUES ('ENGINEERING'),('ASSEMBLY'),('INSTALLATION')) AS k(\"kind\")\nWHERE NOT EXISTS (SELECT 1 FROM \"ProductPercentageConfig\" c WHERE c.\"productId\" = p.\"id\" AND c.\"kind\" = k.\"kind\"::\"ProductPercentageKind\");\n");
   assert.equal(sha(baseline), '277540457e9b832e483e0f3de3d09ee47d313bf845388605c6fd03be0488ee96');
   const insertWithoutConflict = additive().replace(/\s+ON CONFLICT\s*\(\s*"productId"\s*,\s*"kind"\s*\)\s+DO NOTHING\s*;/i, ';');
   assert.deepEqual(statements(`${readFileSync(oldPath, 'utf8')}\n${insertWithoutConflict}`), statements(baseline.toString('utf8')));
