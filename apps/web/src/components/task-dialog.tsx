@@ -28,7 +28,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { formatDate } from "@/lib/format";
-import {FileList, type FileListItem} from "@/components/file-list";
+import {FileList} from "@/components/file-list";
+import type { TaskDetails } from "@/lib/task-details";
 import {deleteFile} from "@/server/files/actions";
 import { ConfirmDeleteDialog } from "@/components/confirm-delete-dialog";
 import { QuantityStepper } from "@/components/quantity-stepper";
@@ -40,52 +41,6 @@ import { isPositiveQuantity, quantityInputError, remainingWorkQuantity } from "@
 import { deleteTask, updateTask } from "@/server/tasks/actions";
 
 
-export interface TaskDetails {
-  id: string;
-  title: string;
-  type: string | null;
-  status: TaskStatus;
-  dueAt: string | null;
-  assigneeId: string | null;
-  assigneeName: string | null;
-  requiresPhoto: boolean;
-  estimateMinutes: number | null;
-  spentMinutes: number;
-  rewardAmount?: string | null;
-  rewardCurrency?: string | null;
-  rewardSource?: "WORK_SNAPSHOT" | "FROZEN_TASK_SNAPSHOT" | "UNAVAILABLE";
-  workId: string | null;
-  workTitle: string | null;
-  workTotal: string | null; // итого по всей работе
-  workPriceSnapshot: string | null; // цена-снимок за единицу
-  quantity: string | null; // исходный объём; у разделённых задач общий для группы
-  allocationGroupId?: string | null;
-  shareUnits?: number;
-  shareAmount?: string | null;
-  shareCurrency?: string | null;
-  paymentKind?: "LEGACY" | "ENGINEERING" | "INSTALLATION";
-  physicalShareUnits?: number;
-  stageShareUnits?: number | null;
-  previewAmount?: string | null;
-  previewCurrency?: string | null;
-  previewReason?: string | null;
-  settledSource?: boolean;
-  personalQuantity?: string | null;
-  splitRevision?: number;
-  canSplit?: boolean;
-  dependencies: { id: string; title: string; status: TaskStatus }[];
-  projectId: string;
-  projectNumber: string;
-  projectTitle: string;
-  productId: string | null; // изделие проекта (необязательно)
-  productNumber: string | null;
-  productTitle: string | null;
-  files: FileListItem[];
-  createdAt: string;
-  doneAt: string | null;
-  doneByName: string | null;
-  createdByName: string | null;
-}
 
 export const TASK_TYPES = ["Замер", "Проектирование", "Производство", "Доставка", "Монтаж", "Прочее"];
 

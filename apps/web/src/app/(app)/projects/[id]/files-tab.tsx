@@ -14,7 +14,8 @@ import {UploadErrorDetails} from "@/components/upload-error-details";
 import {MULTI_UPLOAD_MAX_FILES,createUploadAttempt,sendUploadBatch,localUploadFailure,type BatchFileFailure,type BatchUploadItem} from "@/lib/file-upload-client";
 import {PRODUCT_FILE_SECTIONS, FILE_SECTION_LABELS} from "@/lib/file-sections";
 
-import {FileList, type FileListItem} from "@/components/file-list";
+import {FileList} from "@/components/file-list";
+import type { FileListItem } from "@/lib/viewable-file";
 
 export interface FileRow extends FileListItem {
   section: FileSection;

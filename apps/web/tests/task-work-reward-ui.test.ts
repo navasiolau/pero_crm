@@ -3,7 +3,7 @@ import { createRequire, Module } from "node:module";
 import { before, test } from "node:test";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import type { TaskDetails } from "../src/components/task-dialog";
+import type { TaskDetails } from "../src/lib/task-details";
 const require = createRequire(import.meta.url);
 let TaskDialog: typeof import("../src/components/task-dialog").TaskDialog;
 function inject(name: string, exports: Record<string, unknown>) {
