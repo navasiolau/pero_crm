@@ -52,6 +52,22 @@ export function productStatusTargets(roles: readonly Role[], context: {
   );
 }
 
+/** Переходы UI зависят от текущего назначения, без подмены прежним участием. */
+export function currentProductStatusTargets(roles: readonly Role[], product: {
+  status: ProductStatus;
+  engineerId: string | null;
+  projectStage?: ProjectStage;
+}, actorUserId?: string): ProductStatus[] {
+  return productStatusTargets(roles, {
+    from: product.status,
+    projectStage: product.projectStage,
+    assignedEngineer: Boolean(actorUserId) && product.engineerId === actorUserId,
+    participant: false,
+    hasB3d: false,
+    noModel: false,
+  });
+}
+
 export function shouldRollbackProductStatus(result: { ok: boolean; error?: string; result?: unknown }): boolean {
   return !result.ok;
 }

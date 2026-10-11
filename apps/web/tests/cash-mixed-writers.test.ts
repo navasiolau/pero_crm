@@ -14,6 +14,8 @@ type Money = { id: string; direction?: string; amount: string | number; bynAmoun
   cashAmount?: string | number; cashAccountId?: string | null; userId?: string };
 let payments: Money[] = [], payouts: Money[] = [], receipts = new Map<string, unknown>();
 let activeTransactions = 0, maxActiveTransactions = 0, advisoryCalls = 0;
+type TransactionTrace = { calls: string[]; failed: boolean };
+let transactionTraces: TransactionTrace[] = [];
 let serviceErrors: string[] = [];
 let createPaymentCore: typeof import("../src/server/payments/core").createPaymentCore;
 let issuePayoutCore: typeof import("../src/server/payroll/cash-core").issuePayoutCore;
@@ -22,7 +24,7 @@ const date = new Date().toISOString().slice(0, 10);
 
 function reset() {
   payments = [{ id: "funding", direction: "INCOME", amount: "1000.00", bynAmount: "1000.00", cashAccountId: "cash" }];
-  payouts = []; receipts = new Map(); activeTransactions = 0; maxActiveTransactions = 0; advisoryCalls = 0; serviceErrors = [];
+  payouts = []; receipts = new Map(); activeTransactions = 0; maxActiveTransactions = 0; advisoryCalls = 0; transactionTraces = []; serviceErrors = [];
 }
 const sum = (list: Money[], field: "amount" | "bynAmount" | "cashAmount") =>
   list.reduce((value, row) => value + Number(row[field] ?? 0), 0);
@@ -66,12 +68,28 @@ before(() => {
   };
   let tail = Promise.resolve();
   const database = { ...tx, $transaction: async (operation: (transaction: typeof tx) => Promise<unknown>, options: {
-    isolationLevel: string }) => {
-    assert.equal(options.isolationLevel, Prisma.TransactionIsolationLevel.ReadCommitted);
+    isolationLevel: string; maxWait: number; timeout: number }) => {
+    assert.deepEqual(options, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, maxWait: 5_000, timeout: 15_000 });
     const prior = tail; let release!: () => void;
     tail = new Promise<void>((resolve) => { release = resolve; });
     await prior; activeTransactions++; maxActiveTransactions = Math.max(maxActiveTransactions, activeTransactions);
-    try { return await operation(tx); } finally { activeTransactions--; release(); }
+    const trace: TransactionTrace = { calls: [], failed: false }; transactionTraces.push(trace);
+    const observed = new Proxy(tx, { get(database, key, receiver) {
+      const value = Reflect.get(database, key, receiver);
+      if (typeof value === "function") return (...args: unknown[]) => {
+        trace.calls.push(String(key)); return Reflect.apply(value, database, args);
+      };
+      if (value && typeof value === "object") return new Proxy(value, { get(delegate, method, delegateReceiver) {
+        const call = Reflect.get(delegate, method, delegateReceiver);
+        return typeof call === "function" ? (...args: unknown[]) => {
+          trace.calls.push(`${String(key)}.${String(method)}`); return Reflect.apply(call, delegate, args);
+        } : call;
+      } });
+      return value;
+    } });
+    try { return await operation(observed); }
+    catch (failure) { trace.failed = true; throw failure; }
+    finally { activeTransactions--; release(); }
   } };
   (globalThis as { prisma?: PrismaClient }).prisma = database as unknown as PrismaClient;
   inject("next/cache", { revalidatePath: () => {} });
@@ -108,7 +126,19 @@ test("actual expense writer and actual advance core share ReadCommitted lock; on
     assert.equal(success.length, 1);
     assert.equal(payments.length - 1 + payouts.length, 1);
     assert.ok(sum(payments.filter((row) => row.direction === "EXPENSE"), "amount") + sum(payouts, "cashAmount") <= 1000);
-    assert.equal(advisoryCalls, 2);
+    const writers = transactionTraces.slice(0, 2), verification = transactionTraces.slice(2);
+    assert.equal(writers.length, 2);
+    assert.ok(writers.every(trace => trace.calls[0] === "$queryRaw"));
+    assert.equal(writers.filter(trace => trace.failed).length, 1);
+    assert.equal(writers.filter(trace => trace.calls.some(call => call.endsWith(".create"))).length, 1);
+    const expenseOutcome = outcomes[expenseFirst ? 0 : 1];
+    assert.equal(expenseOutcome.status, "fulfilled");
+    const expenseResult = (expenseOutcome as PromiseFulfilledResult<unknown>).value as { ok: boolean; outcome?: string };
+    // Порядок вызовов не равен порядку lock: preparePayment имеет async preflight.
+    // Только actual отказ EXPENSE требует отдельную SELECT-only confirmation fence.
+    if (!expenseResult.ok) assert.equal(expenseResult.outcome, "ROLLED_BACK");
+    assert.deepEqual(verification, expenseResult.ok ? [] : [{ calls: ["$queryRaw"], failed: false }]);
+    assert.equal(advisoryCalls, writers.length + verification.length);
     assert.equal(maxActiveTransactions, 1);
   }
 });

@@ -24,10 +24,10 @@ import { ActualTimeDialog } from "@/components/actual-time-dialog";
 import {
   taskStatusBadge,
   taskStatusLabels,
-  type TaskDetails,
 } from "@/components/task-dialog";
+import type { TaskDetails } from "@/lib/task-details";
 import { cn } from "@/lib/utils";
-import { changeTaskStatus } from "@/server/tasks/actions";
+import { useTaskStatusCommand } from "@/components/use-task-status-command";
 
 const COLUMNS: { id: TaskStatus; label: string }[] = [
   { id: "DRAFT", label: "Черновики" },
@@ -100,14 +100,17 @@ function DraggableTask({
 // с теми же правилами, что и кнопки (поток, замер с фото — §6.2).
 export function TasksKanban({
   initialTasks,
+  actorUserId = "",
   canManage,
   onOpen,
 }: {
   initialTasks: TaskDetails[];
+  actorUserId?: string;
   canManage: boolean;
   onOpen: (task: TaskDetails) => void;
 }) {
   const router = useRouter();
+  const changeTaskStatus = useTaskStatusCommand(actorUserId);
   const [tasks, setTasks] = useState(initialTasks);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [actualFor, setActualFor] = useState<TaskDetails | null>(null);
@@ -135,6 +138,7 @@ export function TasksKanban({
     const fromStatus = task.status;
     applyStatus(task.id, toStatus);
     const result = await changeTaskStatus(task.id, toStatus as "IN_PROGRESS" | "DONE");
+    if (!result || result.ok && result.replayed) return;
     if (!result.ok) {
       applyStatus(task.id, fromStatus); // откат
       toast.error(result.error ?? "Не удалось сменить статус");
@@ -190,6 +194,7 @@ export function TasksKanban({
         {activeTask ? <TaskCardView task={activeTask} dragging /> : null}
       </DragOverlay>
       <ActualTimeDialog
+        actorUserId={actorUserId}
         task={actualFor}
         open={!!actualFor}
         onOpenChange={(open) => !open && setActualFor(null)}

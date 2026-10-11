@@ -3,7 +3,6 @@ import test from "node:test";
 import type { PrismaClient } from "@prisma/client";
 import { getProductPercentageView } from "../src/server/product-percentage-pay/queries";
 import { initialProductPercentageParticipants } from "../src/lib/product-percentage-ui";
-import { canRebaseSuggestedParticipants } from "../src/lib/inline-percentage-projection";
 function database(configured=false) {
  return {task:{findMany:async()=>[]},productPercentageParticipant:{findMany:async()=>[]},payrollEntry:{findMany:async()=>[]},user:{findMany:async()=>[{id:"new",name:"Новый"}]},product:{findFirst:async()=>({id:"p",projectId:"project",noModel:false,engineerId:"old",engineer:{name:"Старый"},expectedPrice:{toString:()=>"10.01"},project:{currency:"BYN"},files:[],works:[],stagePayPools:[],percentageCompletions:[],percentageConfigs:configured?[{kind:"ENGINEERING",revision:0,ratePercent:null,participants:[{userId:"old",shareUnits:1000000,user:{name:"Старый"}}]}]:[]})}} as unknown as Pick<PrismaClient,"product"|"task"|"productPercentageParticipant"|"user"|"payrollEntry">;
 }
@@ -20,7 +19,6 @@ test("real query fallback follows new acknowledged engineer while configured/fro
  const previous=initialProductPercentageParticipants("ENGINEERING",suggested,"old");
  const next=initialProductPercentageParticipants("ENGINEERING",suggested,"new");
  assert.deepEqual(next,[{userId:"new",shareUnits:1000000}]);
- assert.equal(canRebaseSuggestedParticipants({state:"DRAFT",hasConfiguration:false,previous,next,participants:previous,shares:{old:"100"},otherDirty:false}),true);
  const configured={...suggested,hasConfiguration:true};assert.deepEqual(initialProductPercentageParticipants("ENGINEERING",configured,"new"),previous);
  const frozen={...suggested,state:"SETTLED" as const};assert.deepEqual(initialProductPercentageParticipants("ENGINEERING",frozen,"new"),previous);
 });

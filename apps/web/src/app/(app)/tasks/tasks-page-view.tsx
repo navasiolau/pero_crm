@@ -10,8 +10,8 @@ import {
   TaskDialog,
   taskStatusBadge,
   taskStatusLabels,
-  type TaskDetails,
 } from "@/components/task-dialog";
+import type { TaskDetails } from "@/lib/task-details";
 import { cn } from "@/lib/utils";
 import { saveViewPreference } from "@/server/preferences-actions";
 
@@ -20,11 +20,13 @@ import { TasksKanban } from "./tasks-kanban";
 // Раздел «Задачи»: канбан (по умолчанию) / таблица, выбор сохраняется (§7).
 export function TasksPageView({
   tasks,
+  actorUserId = "",
   canEdit,
   initialView,
   workers,
 }: {
   tasks: TaskDetails[];
+  actorUserId?: string;
   canEdit: boolean;
   initialView: "kanban" | "table";
   workers: { id: string; name: string; hint?: string }[];
@@ -133,6 +135,7 @@ export function TasksPageView({
 
       {view === "kanban" ? (
         <TasksKanban
+          actorUserId={actorUserId}
           initialTasks={tasks}
           canManage={canEdit}
           onOpen={setSelected}

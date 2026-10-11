@@ -7,6 +7,8 @@ export type GlobalChangeLogFilters = { actor?: string; entity?: string; from?: s
 export async function listGlobalChangeLog({ actor, entity, from, to }: GlobalChangeLogFilters) {
   await requireRole(["ADMIN"]);
   const where = {
+    // Durable receipt хранится в БД; интерфейс показывает один прежний business audit.
+    NOT: { entity: "task", action: "task.status.request", id: { startsWith: "task-status:" } },
     ...(actor ? { OR: [
       { actorName: { contains: actor, mode: "insensitive" as const } },
       { actorId: { contains: actor, mode: "insensitive" as const } },

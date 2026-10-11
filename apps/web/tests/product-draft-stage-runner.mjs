@@ -1,18 +1,18 @@
 // Root-only fresh task111 functional QA; no runtime/auth/DB/network action on import.
 // SAFETY: D:/Projects/pero_infra/infra-recovery/SAFETY-RULES.md; STOP on guard mismatch.
-import {createHash} from 'node:crypto';
+import {sha,checkAncestors,durableWrite} from './helpers/qa-private-primitives.mjs';
 import {createRequire} from 'node:module';
 import {fileURLToPath} from 'node:url';
 import path from 'node:path';
-import {closeSync,existsSync,fsyncSync,lstatSync,mkdirSync,openSync,readFileSync,realpathSync,writeFileSync} from 'node:fs';
+import {existsSync,lstatSync,mkdirSync,readFileSync,realpathSync} from 'node:fs';
 import {qaTransport,bundleHash,acceptanceWeb,qaBasicAuth} from './crm-acceptance-transport.mjs';
 import {runProductDraftStageBrowser} from './product-draft-stage-browser.mjs';
 import {technicalCanonical,assertTechnicalPersistence,packFunctionalInput,decodeFunctionalWire,OUTPUT_WIRE_LIMIT} from './product-draft-stage-wire.mjs';
 const here=path.dirname(fileURLToPath(import.meta.url)),results=path.join(acceptanceWeb,'test-results'),root=path.resolve(acceptanceWeb,'../..');
 const require=createRequire(import.meta.url),{build}=createRequire(require.resolve('tsx/package.json'))('esbuild');
 const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/,SHA=/^[a-f0-9]{40}$/,HASH=/^[a-f0-9]{64}$/;
-const need=(ok,code)=>{if(!ok)throw Error(code);},sha=value=>createHash('sha256').update(value).digest('hex'),same=(a,b,code)=>need(technicalCanonical(a)===technicalCanonical(b),code);
-const SOURCE_FILES=['product-draft-stage-runner.mjs','product-draft-stage-browser.mjs','product-draft-stage-fixtures.mjs','product-draft-stage-wire.mjs','crm-acceptance-token-clock.mjs','crm-acceptance-transport.mjs','kanban-cover-staging-browser.mjs'];
+const need=(ok,code)=>{if(!ok)throw Error(code);},same=(a,b,code)=>need(technicalCanonical(a)===technicalCanonical(b),code);
+const SOURCE_FILES=['helpers/qa-private-primitives.mjs','product-draft-stage-runner.mjs','product-draft-stage-browser.mjs','product-draft-stage-fixtures.mjs','product-draft-stage-wire.mjs','crm-acceptance-token-clock.mjs','crm-acceptance-transport.mjs','kanban-cover-staging-browser.mjs'];
 export function functionalOptions(options){
  need(options&&Object.keys(options).every(key=>['phase','revision','runId','outputDir','authorized','noHookPolicy'].includes(key)),'DRAFT111_OPTIONS_FIELDS');
  need(options.authorized===true&&['plan','prepare','browser','capture','cleanup'].includes(options.phase)&&SHA.test(options.revision??'')&&UUID.test(options.runId??''),'DRAFT111_AUTHORIZED_OPTIONS');
@@ -21,12 +21,12 @@ export function functionalOptions(options){
 function privatePath(file){
  const absolute=path.resolve(file),relative=path.relative(results,absolute);need(relative.length>0&&!relative.startsWith('..')&&!path.isAbsolute(relative),'DRAFT111_PRIVATE_RESULTS_PATH');
  need(existsSync(results)&&realpathSync(results).toLowerCase()===results.toLowerCase(),'DRAFT111_PRIVATE_ROOT_IDENTITY');
- let current=absolute;while(current.toLowerCase()!==results.toLowerCase()){if(existsSync(current))need(!lstatSync(current).isSymbolicLink(),'DRAFT111_PRIVATE_REPARSE_POINT');const parent=path.dirname(current);need(parent!==current,'DRAFT111_PRIVATE_ANCESTOR');current=parent;}return absolute;
+ checkAncestors(absolute,results,false,'DRAFT111_PRIVATE_REPARSE_POINT','DRAFT111_PRIVATE_ANCESTOR',value=>value.toLowerCase());return absolute;
 }
 function sources(){return {...Object.fromEntries(SOURCE_FILES.map(name=>[name,sha(readFileSync(path.join(here,name)))])),outerWrapper:sha(readFileSync(path.join(root,'deploy/acceptance/crm-modernization-staging.py'))),fileStages:sha(readFileSync(path.join(root,'packages/plugins/file-stages/src/plugin.ts')))};}
 function syncWrite(file,value){
  assertTechnicalPersistence(value);const bytes=Buffer.from(technicalCanonical(value)+'\n'),absolute=privatePath(file);
- const fd=openSync(absolute,'wx',0o600);try{writeFileSync(fd,bytes);fsyncSync(fd);}finally{closeSync(fd);}
+ durableWrite(absolute,bytes);
  need(sha(readFileSync(absolute))===sha(bytes),'DRAFT111_DURABLE_READBACK');return {file:absolute,sha256:sha(bytes)};
 }
 export function makeTechnicalStore(directory){
@@ -41,7 +41,7 @@ export function makeTechnicalStore(directory){
  function put(kind,value){
   need(/^[a-z][a-z0-9-]{1,40}$/.test(kind),'DRAFT111_ARTIFACT_KIND');const filename=String(records.length).padStart(4,'0')+'-'+kind+'.json',saved=syncWrite(path.join(directory,filename),value),body={index:records.length,previous:records.at(-1)?.hash??null,kind,filename,sha256:saved.sha256},record={...body,hash:sha(technicalCanonical(body))};
   const old=existsSync(ledger)?readFileSync(ledger):Buffer.alloc(0);same(old.toString('utf8'),records.map(item=>technicalCanonical(item)+'\n').join(''),'DRAFT111_LEDGER_CURRENT_CAS');
-  const fd=openSync(ledger,existsSync(ledger)?'a':'wx',0o600);try{writeFileSync(fd,technicalCanonical(record)+'\n');fsyncSync(fd);}finally{closeSync(fd);}
+  durableWrite(ledger,technicalCanonical(record)+'\n',existsSync(ledger)?'a':'wx');
   records.push(record);need(readFileSync(ledger).toString('utf8')===records.map(item=>technicalCanonical(item)+'\n').join(''),'DRAFT111_LEDGER_DURABLE_READBACK');return {...saved,kind,index:body.index};
  }
  function get(kind,{optional=false}={}){

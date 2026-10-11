@@ -3,6 +3,8 @@ import { Prisma } from "@prisma/client";
 import type { DomainActor } from "@/server/actor";
 import type { PaymentData } from "./contracts";
 
+export class PaymentReceiptError extends Error {}
+
 export const paymentReceiptId = (id: string) => `payment-request:${id}`;
 export function paymentFingerprint(actorId: string, data: PaymentData) {
   return createHash("sha256").update(JSON.stringify({ actorId, projectId: data.projectId ?? null,
@@ -20,9 +22,9 @@ export async function readPaymentReceipt(actor: DomainActor, data: PaymentData,
   const value = receipt.newValue;
   if (receipt.actorId !== actor.id || receipt.entity !== "payment" || receipt.action !== "request" ||
       !value || typeof value !== "object" || Array.isArray(value) || value.fingerprint !== paymentFingerprint(actor.id, data))
-    throw Error("Идентификатор платежа уже использован с другими данными");
+    throw new PaymentReceiptError("Идентификатор платежа уже использован с другими данными");
   const payment = await db.payment.findUnique({ where: { id: receipt.entityId } });
-  if (!payment || payment.deletionId) throw Error("Операция удалена — повторное проведение запрещено");
+  if (!payment || payment.deletionId) throw new PaymentReceiptError("Операция удалена — повторное проведение запрещено");
   return payment;
 }
 

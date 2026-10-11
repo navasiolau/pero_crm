@@ -5,7 +5,7 @@ import {canViewProductMoney} from "@/lib/product-financial-access";
 import type {Prisma} from '@prisma/client';
 export async function taskWorkspaceWhere(actor:VisibilityActor):Promise<Prisma.TaskWhereInput>{return {AND:[taskVisibilityWhere(actor),await taskWorkspaceEligibility(prisma)]};}
 import { prisma } from "@/lib/prisma";
-import type { TaskDetails } from "@/components/task-dialog";
+import type { TaskDetails } from "@/lib/task-details";
 import type { ProductStatus } from "@prisma/client";
 import { fileVisibilityWhere, taskVisibilityWhere, workVisibilityWhere, type VisibilityActor } from "@/server/access/visibility";
 import { FULL_SHARE_UNITS, personalQuantity, taskPieceAmount } from "@/lib/work-shares";

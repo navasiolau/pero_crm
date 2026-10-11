@@ -4,6 +4,8 @@ import {liveChildWhere} from "@/server/access/live-entities";
 import {liveProductWhere,liveProjectWhere} from "@/server/access/live-entities";
 
 import { revalidatePath } from "next/cache";
+import { deliverPostCommit } from "@/server/operations/post-commit";
+import type { TaskStatusContext, TaskStatusAck } from "./status-receipts";
 import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 
@@ -18,7 +20,8 @@ import { notifyOrg, notifyPerson } from "@/server/notifications/notify";
 import { MANAGER_ROLES, hasAnyRole } from "@/lib/roles";
 import { revalidateProductPaths } from "@/server/products/revalidate";
 import { withTaskTransaction } from "./transaction";
-import { changeTaskStatusCore, stopTaskTimers } from "./completion-core";
+import { changeTaskStatusCore } from "./completion-core";
+import { stopTimers } from "@/server/time/timers";
 import { engineeringRecipientError, taskRecipientError } from "./share-policy";
 import { bumpEngineeringPoolRevision } from "@/server/product-stage-pay/core";
 
@@ -235,6 +238,7 @@ export async function updateTask(
   const data = parsed.data;
 
   const mutation = await withTaskTransaction(async (tx) => {
+  const instant = new Date();
   const task = await tx.task.findUnique({
     where: {...liveChildWhere, id: taskId, AND: [taskVisibilityWhere(session.user)] },
     include: { project: { select: { id: true, number: true, currency: true } }, product: { select: { engineerId: true, status: true, projectId: true } },
@@ -330,7 +334,8 @@ export async function updateTask(
 
   const dependencies = data.dependencyIds === undefined ? null : await expandDependencies(tx, data.dependencyIds, taskId);
   if (dependencies?.error) return { ok: false as const, error: dependencies.error };
-  if (reassignedEngineering) await stopTaskTimers(tx, taskId);
+  if (data.assigneeId !== undefined && data.assigneeId !== task.assigneeId)
+    await stopTimers(tx, { taskId }, instant);
   await tx.task.update({
     where: { id: taskId },
     data: {
@@ -354,27 +359,18 @@ export async function updateTask(
     await tx.taskDependency.createMany({ data: dependencies.ids.map((dependsOnId) => ({ taskId, dependsOnId })) });
   }
   if (engineeringPoolId) await bumpEngineeringPoolRevision(tx, engineeringPoolId);
-  return { ok: true as const, task, becameAssigned, newStatus };
+  await tx.changeLog.create({ data: {
+    actorType: "user", actorId: session.user.id, actorName: session.user.name ?? undefined,
+    entity: "task", entityId: taskId, action: "update", source: "web",
+    oldValue: JSON.parse(JSON.stringify({ title: task.title, type: task.type, assigneeId: task.assigneeId,
+      dueAt: task.dueAt, status: task.status })) as Prisma.InputJsonValue,
+    newValue: JSON.parse(JSON.stringify({ ...data, status: newStatus })) as Prisma.InputJsonValue,
+  } });
+  return { ok: true as const, task, becameAssigned };
   });
   if (!mutation.ok) return mutation;
-  const { task, becameAssigned, newStatus } = mutation;
+  const { task, becameAssigned } = mutation;
 
-  await writeChangeLog({
-    actorType: "user",
-    actorId: session.user.id,
-    actorName: session.user.name ?? undefined,
-    entity: "task",
-    entityId: taskId,
-    action: "update",
-    oldValue: {
-      title: task.title,
-      type: task.type,
-      assigneeId: task.assigneeId,
-      dueAt: task.dueAt,
-      status: task.status,
-    },
-    newValue: { ...data, status: newStatus },
-  });
 
   if (becameAssigned && data.assigneeId) {
     await emitDomainEvent(
@@ -444,36 +440,38 @@ export async function changeTaskStatus(
   taskId: string,
   toStatus: "IN_PROGRESS" | "DONE",
   actualMinutes?: number,
-): Promise<{ ok: boolean; error?: string; timeRequired?: boolean }> {
+  context?: TaskStatusContext,
+): Promise<TaskStatusAck> {
   const session = await requireUser();
-  const result = await changeTaskStatusCore({ id: session.user.id, name: session.user.name ?? "", roles: session.user.roles, source: "web" }, taskId, toStatus, actualMinutes, withTaskTransaction);
+  const result = await changeTaskStatusCore({ id: session.user.id, name: session.user.name ?? "", roles: session.user.roles, source: "web" }, taskId, toStatus, actualMinutes, withTaskTransaction, context);
   if (!result.ok) return result;
+  const effects: Parameters<typeof deliverPostCommit>[2] = [];
   if (!result.repeated) {
-    if (result.eventId) await dispatchEvent(result.eventId);
-    if (result.payroll) await notifyOrg({
+    if (result.eventId) effects.push({ kind: "dispatch", run: () => dispatchEvent(result.eventId!) });
+    if (result.payroll) effects.push({ kind: "payroll", run: () => notifyOrg({
       type: "payroll.orgAccrued",
-      title: `Начислено ${result.payroll.name}: ${formatAmount(result.payroll.amount, result.payroll.currency)}`,
+      title: `Начислено ${result.payroll!.name}: ${formatAmount(result.payroll!.amount, result.payroll!.currency)}`,
       body: `Сдельно · ${result.task.title} · ${result.task.projectNumber}`,
       link: "/finance/payroll", exceptUserId: session.user.id,
-    });
-    if (result.task.assigneeId && result.task.assigneeId !== session.user.id) await notifyPerson({
-      userId: result.task.assigneeId, type: "task.statusChanged",
+    }) });
+    if (result.task.assigneeId && result.task.assigneeId !== session.user.id) effects.push({ kind: "person", run: () => notifyPerson({
+      userId: result.task.assigneeId!, type: "task.statusChanged",
       title: `Задача «${result.task.title}»: ${toStatus === "DONE" ? "выполнена" : "в работе"}`,
       body: `Проект ${result.task.projectNumber}`, link: "/my",
-    });
-    await notifyOrg({
+    }) });
+    effects.push({ kind: "org", run: () => notifyOrg({
       type: "task.statusChanged",
       title: `Задача «${result.task.title}»: ${toStatus === "DONE" ? "выполнена" : "в работе"}`,
       body: `Проект ${result.task.projectNumber} · ${session.user.name ?? ""}`,
       link: result.task.productNumber ? `/products/${result.task.productNumber}` : `/projects/${result.task.projectId}`,
       exceptUserId: session.user.id,
-    });
+    }) });
   }
-  revalidatePath(`/projects/${result.task.projectId}`);
-  await revalidateProductPaths(result.task.productId);
-  revalidatePath("/my");
-  revalidatePath("/tasks");
-  return { ok: true };
+  effects.push({ kind: "cache", run: () => revalidatePath(`/projects/${result.task.projectId}`) },
+    { kind: "cache", run: () => revalidateProductPaths(result.task.productId) },
+    { kind: "cache", run: () => revalidatePath("/my") }, { kind: "cache", run: () => revalidatePath("/tasks") });
+  await deliverPostCommit("task-status", result.task.id, effects);
+  return { ok: true, outcome: "COMMITTED", resultId: result.task.id, replayed: result.repeated || result.recovered === true, ...(context ? { clientMutationId: context.clientMutationId.toLowerCase() } : {}) };
 }
 // Удаление задачи — админ/директор/менеджер (§4).
 // Выполненную удалять нельзя: там начисления, время и история.

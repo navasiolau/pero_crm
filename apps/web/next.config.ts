@@ -19,7 +19,7 @@ const isWindows = process.platform === "win32";
 
 const nextConfig: NextConfig = {
   // Нативный модуль argon2 не бандлим — нужен .node-бинарник в standalone-сборке
-  serverExternalPackages: ["@node-rs/argon2"],
+  serverExternalPackages: ["@node-rs/argon2", "zod"],
   // Плагины и SDK — TS-пакеты монорепо без отдельной сборки (§14: общая сборка)
   transpilePackages: [
     "@pero/plugin-sdk",

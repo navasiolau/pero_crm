@@ -14,7 +14,8 @@ const capturedReact={...React,createElement:(type:unknown,props:Record<string,un
 }};
 inject('react',capturedReact);Object.assign(globalThis,{React:capturedReact});
 inject('next/navigation',{useRouter:()=>({push:(href:string)=>pushes.push(href),refresh(){throw Error('REFRESH_FORBIDDEN')}})});
-inject('../src/lib/list-params',{useListParams:()=>({query:'view=kanban&q=filter&page=3'})});
+let currentQuery='view=kanban&q=filter&page=3';
+inject('../src/lib/list-params',{useListParams:()=>({query:currentQuery,getQuery:()=>currentQuery})});
 inject('../src/server/products/actions',{changeProductStatus(){throw Error('STATUS_WRITE_FORBIDDEN')}});
 inject('../src/components/file-viewer',{useFileViewer:()=>({open(){fullscreen++},viewer:null})});
 inject('@dnd-kit/core',{DndContext:({children}:{children:React.ReactNode})=>children,DragOverlay:()=>null,PointerSensor:()=>null,useDraggable:()=>({attributes:{},listeners:{},setActivatorNodeRef(){},setNodeRef(){},transform:null,isDragging:dragging}),useDroppable:()=>({setNodeRef(){},isOver:false}),useSensors:()=>[],useSensor:()=>({})});
@@ -27,4 +28,13 @@ test('actual global cover DOM callback navigates once and preserves same row con
 });
 test('actual global cover drag guard prevents navigation and fullscreen even when callback invoked',()=>{
  const html=render(true);assert.ok(coverClick);coverClick!({preventDefault(){},stopPropagation(){}});assert.deepEqual(pushes,[]);assert.equal(fullscreen,0);assert.match(html,/<button[^>]+disabled/);
+});
+
+test('cached real row/cover callbacks read newest query at activation without rerender',()=>{
+ currentQuery='view=kanban&q=filter&page=3';render();const cachedRow=rowClick!,cachedCover=coverClick!;
+ currentQuery='view=kanban&q=new%20filter&status=%5B%22PRODUCTION%22%5D';cachedRow();
+ const expected=productDetailHref(product.number,globalProductsHref(currentQuery));assert.deepEqual(pushes,[expected]);
+ pushes.length=0;currentQuery='view=kanban&active=1';cachedCover({preventDefault(){},stopPropagation(){}});
+ assert.deepEqual(pushes,[productDetailHref(product.number,globalProductsHref(currentQuery))]);assert.equal(fullscreen,0);
+ currentQuery='view=kanban&q=filter&page=3';
 });

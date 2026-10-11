@@ -4,7 +4,7 @@ import {randomUUID} from 'node:crypto';
 process.env.BOT_RECOVERY_TEST='1';process.env.TELEGRAM_API_ORIGIN='http://127.0.0.1:9080';
 process.env.TELEGRAM_BOT_TOKEN='fixture-token';process.env.CRM_BASE_URL='http://127.0.0.1:9081';process.env.CRM_API_TOKEN='fixture-crm-token';
 const sent=[],calls=[],uploads=new Map(),payments=new Map(),roles=new Map();
-let loseUpload=false,losePayment=false;
+let loseUpload=false,losePayment=false,unknownPayment=false;
 globalThis.fetch=async(input,options={})=>{
  const url=new URL(String(input));
  let body;
@@ -25,7 +25,7 @@ globalThis.fetch=async(input,options={})=>{
  }else if(url.pathname==='/api/v1/bot/payments'){
   if(body.direction==='EXPENSE')assert.ok(body.reportDocumentId);else assert.equal(body.expenseArticleId,undefined);assert.ok(body.clientMutationId);
   if(!payments.has(body.clientMutationId))payments.set(body.clientMutationId,body);
-  result={ok:true};if(losePayment){losePayment=false;throw Error('lost payment ACK');}
+  result=unknownPayment?{ok:false,outcome:"UNKNOWN",retrySafe:true,error:"Подтверждение неизвестно"}:{ok:true};unknownPayment=false;if(losePayment){losePayment=false;throw Error('lost payment ACK');}
  }else throw Error('Unexpected fixture URL');
  return Response.json(result);
 };
@@ -93,4 +93,19 @@ test('explicit organization context supports income and documented expense witho
   await handleUpdate(callback(chat,confirmation));
   const saved=payments.get(confirmation.slice(6));assert.equal(saved.projectId,null);assert.equal(saved.direction,direction);
  }
+});
+
+test('UNKNOWN payment body keeps the existing dialog and retries the identical UUID/payload',async()=>{
+ const chat=8817;await begin(chat);await handleUpdate(message(chat,'Комментарий'));
+ await handleUpdate(message(chat,null,{document:{file_id:'unknown-invoice',file_unique_id:'unknown-invoice',file_name:'Счёт.pdf',mime_type:'application/pdf',file_size:4}}));
+ const confirm=latestButton(chat,'payok:');assert.ok(confirm);
+ const before=payments.size;unknownPayment=true;
+ await handleUpdate(callback(chat,confirm));assert.equal(payments.size,before+1);
+ const first=calls.filter(row=>row.path.endsWith('/payments')&&row.actor==='actor-'+chat).at(-1);
+ assert.ok(sent.at(-1).text.includes('Подтверждение неизвестно'));
+ await handleUpdate(callback(chat,confirm));assert.equal(payments.size,before+1);
+ const retry=calls.filter(row=>row.path.endsWith('/payments')&&row.actor==='actor-'+chat).at(-1);
+ assert.deepEqual(retry.body,first.body);assert.equal(retry.body.clientMutationId,first.body.clientMutationId);
+ const count=calls.filter(row=>row.path.endsWith('/payments')&&row.actor==='actor-'+chat).length;
+ await handleUpdate(callback(chat,confirm));assert.equal(calls.filter(row=>row.path.endsWith('/payments')&&row.actor==='actor-'+chat).length,count);
 });

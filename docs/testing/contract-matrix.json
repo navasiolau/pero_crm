@@ -726,10 +726,16 @@
       "block": "project tab passes shared onOpen policy while global board",
       "decision": "REWRITE",
       "task": 160,
-      "reason": "Буквальный regex JSX хрупок и не исполняет клик.",
+      "reason": "Буквальный JSX regex заменён действиями реального Chromium; четыре handler/SSR cases остаются.",
       "remainingProtection": [
-        "Настоящий Chromium клик по project/global cover + no-navigation drag preview, mutation checks отключённого handler/неверногоID."
-      ]
+        "apps/web/tests/product-card-navigation-browser.test.mjs: trusted project/global cover и body/title, exact product.number/returnTo; real PointerSensor/disabled DragOverlay/no navigation; mobile tables CardNumber; formatting и два controlled behavior faults.",
+        "Существующие четыре handler/SSR cases product-card-navigation.test.ts и project-kanban-card-layout.test.ts."
+      ],
+      "replacement": {
+        "file": "apps/web/tests/product-card-navigation-browser.test.mjs",
+        "block": "actual Chromium cover/body navigation, drag preview, mobile numbers and two faults",
+        "evidenceLevel": "Chromium-component"
+      }
     },
     {
       "file": "apps/web/tests/file-image-thumbnail.test.ts",
@@ -762,16 +768,6 @@
       ]
     },
     {
-      "file": "apps/web/tests/inline-percentage-projection.test.ts",
-      "block": "orphan helper projection",
-      "decision": "RETIRE",
-      "task": 156,
-      "reason": "Только после переноса null/zero/dirty/frozen/ACK на актуальный controller/UI.",
-      "remainingProtection": [
-        "apps/web/tests/product-percentage-rate-adjust.test.ts"
-      ]
-    },
-    {
       "file": "apps/web/tests/inline-engineer-fallback.test.ts",
       "block": "query explicitly distinguishes fallback member from real configuration even when revision0",
       "decision": "KEEP",
@@ -791,22 +787,12 @@
       ]
     },
     {
-      "file": "apps/web/tests/product-engineering-fund-ui.test.ts",
-      "block": "SSR old fund/helper blocks16–55",
-      "decision": "RETIRE",
-      "task": 156,
-      "reason": "Orphan UI только после проверки graph/compatibility; historic reader/facts не удаляются.",
-      "remainingProtection": [
-        "apps/web/tests/product-engineering-legacy.test.ts",
-        "apps/web/tests/work-shares-settlement.test.ts"
-      ]
-    },
-    {
-      "file": "apps/web/tests/product-engineering-fund-ui.test.ts",      "block": "request id falls back to cryptographic random bytes",
+      "file": "apps/web/tests/request-id.test.ts",
+      "block": "request id falls back to cryptographic random bytes when randomUUID is unavailable",
       "decision": "KEEP",
       "reason": "Живой createRequestId fallback используется формами.",
       "remainingProtection": [
-        "Перенести в отдельный live UUID suite в156."
+        "apps/web/tests/request-id.test.ts"
       ]
     },
     {

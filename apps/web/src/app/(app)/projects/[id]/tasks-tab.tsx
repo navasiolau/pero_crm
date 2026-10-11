@@ -34,8 +34,8 @@ import {
   TASK_TYPES,
   taskStatusBadge,
   taskStatusLabels,
-  type TaskDetails,
 } from "@/components/task-dialog";
+import type { TaskDetails } from "@/lib/task-details";
 import {WorkerTaskAllocationDialog,type WorkerAllocationData} from "@/components/worker-task-allocation-dialog";
 import {WorkDialog} from "@/components/work-dialog";
 import type {WorkOperation} from "@/server/works/queries";
@@ -43,7 +43,8 @@ import { formatDate,formatAmount } from "@/lib/format";
 import { workPaymentAmountLabel, workPaymentSourceLabel, taskPaymentLabel } from "@/lib/task-payment-display";
 import { cn } from "@/lib/utils";
 import { isPositiveQuantity, quantityInputError, remainingWorkQuantity } from "@/lib/work-quantity";
-import { changeTaskStatus, createTask } from "@/server/tasks/actions";
+import { createTask } from "@/server/tasks/actions";
+import { useTaskStatusCommand } from "@/components/use-task-status-command";
 import { removeWork } from "@/server/works/actions";
 
 import type { SelectOption } from "../projects-view";
@@ -117,6 +118,7 @@ export function TasksTab({
   workers: SelectOption[];
 }) {
   const router = useRouter();
+  const changeTaskStatus = useTaskStatusCommand(actorUserId);
   const [pending, startTransition] = useTransition();
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState<TaskDetails | null>(null);
@@ -256,6 +258,7 @@ export function TasksTab({
                   onClick={() =>
                     startTransition(async () => {
                       const result = await changeTaskStatus(task.id, "IN_PROGRESS");
+                      if (!result || result.ok && result.replayed) return;
                       if (!result.ok) toast.error(result.error ?? "Ошибка");
                     })
                   }
@@ -284,6 +287,7 @@ export function TasksTab({
                       }
                       startTransition(async () => {
                         const result = await changeTaskStatus(task.id, "DONE");
+                        if (!result || result.ok && result.replayed) return;
                         if (result.ok) {
                           toast.success("Задача выполнена");
                         } else {
@@ -526,6 +530,7 @@ export function TasksTab({
       />
 
       <ActualTimeDialog
+        actorUserId={actorUserId}
         task={actualFor}
         open={!!actualFor}
         onOpenChange={(open) => !open && setActualFor(null)}

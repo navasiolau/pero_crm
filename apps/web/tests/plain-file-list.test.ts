@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import * as React from "react";
 import {renderToStaticMarkup} from "react-dom/server";
-import {FileList, FileListRow, type FileListItem} from "../src/components/file-list";
+import {FileList, FileListRow} from "../src/components/file-list";
+import type {FileListItem} from "../src/lib/viewable-file";
 
 Object.assign(globalThis,{React});
 const original:FileListItem={id:"project-file",fileName:"Эскиз изделия.v2.png",mimeType:"image/png",canDelete:true};

@@ -1,5 +1,6 @@
 import {canAccrueOrdinarySalary} from "@/lib/compensation-policy";
 import {activePaymentWhere} from '@/server/payments/active-records';
+import { readMonthTurnoverSnapshot } from "./turnover-query";
 import type { PayScheme } from "@prisma/client";
 import { Prisma } from "@prisma/client";
 
@@ -306,20 +307,9 @@ export async function getMonthTurnover(
   month: string,
   database: Pick<Prisma.TransactionClient, "payment"> = prisma,
 ): Promise<{ total: number; paymentsCount: number; currency: string }> {
-  const currency = await getPayrollCurrency();
-  const { start, end } = monthRange(month);
-  const agg = await database.payment.aggregate({
-    where: { ...activePaymentWhere, paidAt: { gte: start, lt: end }, direction: "INCOME" },
-    _sum: { bynAmount: true },
-    _count: { _all: true },
-  });
-  return {
-    total: Number(agg._sum.bynAmount ?? 0),
-    paymentsCount: agg._count._all,
-    currency,
-  };
+  const turnover = await readMonthTurnoverSnapshot(month, database);
+  return { total: turnover.total.toNumber(), paymentsCount: turnover.paymentsCount, currency: turnover.currency };
 }
-
 // Схема NONE и деактивация не отменяют уже заработанную оплату.
 // Проверки месяца, долга и прав выплаты остаются в существующем action.
 export async function listPayrollUsers() {
