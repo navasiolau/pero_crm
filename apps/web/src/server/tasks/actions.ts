@@ -18,7 +18,8 @@ import { notifyOrg, notifyPerson } from "@/server/notifications/notify";
 import { MANAGER_ROLES, hasAnyRole } from "@/lib/roles";
 import { revalidateProductPaths } from "@/server/products/revalidate";
 import { withTaskTransaction } from "./transaction";
-import { changeTaskStatusCore, stopTaskTimers } from "./completion-core";
+import { changeTaskStatusCore } from "./completion-core";
+import { stopTimers } from "@/server/time/timers";
 import { engineeringRecipientError, taskRecipientError } from "./share-policy";
 import { bumpEngineeringPoolRevision } from "@/server/product-stage-pay/core";
 
@@ -235,6 +236,7 @@ export async function updateTask(
   const data = parsed.data;
 
   const mutation = await withTaskTransaction(async (tx) => {
+  const instant = new Date();
   const task = await tx.task.findUnique({
     where: {...liveChildWhere, id: taskId, AND: [taskVisibilityWhere(session.user)] },
     include: { project: { select: { id: true, number: true, currency: true } }, product: { select: { engineerId: true, status: true, projectId: true } },
@@ -330,7 +332,8 @@ export async function updateTask(
 
   const dependencies = data.dependencyIds === undefined ? null : await expandDependencies(tx, data.dependencyIds, taskId);
   if (dependencies?.error) return { ok: false as const, error: dependencies.error };
-  if (reassignedEngineering) await stopTaskTimers(tx, taskId);
+  if (data.assigneeId !== undefined && data.assigneeId !== task.assigneeId)
+    await stopTimers(tx, { taskId }, instant);
   await tx.task.update({
     where: { id: taskId },
     data: {
@@ -354,27 +357,18 @@ export async function updateTask(
     await tx.taskDependency.createMany({ data: dependencies.ids.map((dependsOnId) => ({ taskId, dependsOnId })) });
   }
   if (engineeringPoolId) await bumpEngineeringPoolRevision(tx, engineeringPoolId);
-  return { ok: true as const, task, becameAssigned, newStatus };
+  await tx.changeLog.create({ data: {
+    actorType: "user", actorId: session.user.id, actorName: session.user.name ?? undefined,
+    entity: "task", entityId: taskId, action: "update", source: "web",
+    oldValue: JSON.parse(JSON.stringify({ title: task.title, type: task.type, assigneeId: task.assigneeId,
+      dueAt: task.dueAt, status: task.status })) as Prisma.InputJsonValue,
+    newValue: JSON.parse(JSON.stringify({ ...data, status: newStatus })) as Prisma.InputJsonValue,
+  } });
+  return { ok: true as const, task, becameAssigned };
   });
   if (!mutation.ok) return mutation;
-  const { task, becameAssigned, newStatus } = mutation;
+  const { task, becameAssigned } = mutation;
 
-  await writeChangeLog({
-    actorType: "user",
-    actorId: session.user.id,
-    actorName: session.user.name ?? undefined,
-    entity: "task",
-    entityId: taskId,
-    action: "update",
-    oldValue: {
-      title: task.title,
-      type: task.type,
-      assigneeId: task.assigneeId,
-      dueAt: task.dueAt,
-      status: task.status,
-    },
-    newValue: { ...data, status: newStatus },
-  });
 
   if (becameAssigned && data.assigneeId) {
     await emitDomainEvent(

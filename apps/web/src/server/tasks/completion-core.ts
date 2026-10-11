@@ -1,7 +1,7 @@
+import { startTaskTimer, stopTimers } from "@/server/time/timers";
 import { payrollMonth } from "@/lib/payroll-month";
 import {canAccrueOrdinarySalary,hasFrozenTaskPieceObligation} from "@/lib/compensation-policy";
 import { assertInternalCurrency, assertProjectMoneyCurrency } from "@/lib/internal-currency";
-import type { Prisma } from "@prisma/client";
 import { fileVisibilityWhere, hasFullProjectVisibility, resolveVisibilityActor, taskExecutionWhere } from "@/server/access/visibility";
 import { bumpEngineeringPoolRevision } from "@/server/product-stage-pay/core";
 import { moneyAtoms, taskPieceAmount } from "@/lib/work-shares";
@@ -19,28 +19,11 @@ class CompletionError extends Error {
   constructor(message: string, readonly timeRequired = false) { super(message); }
 }
 
-async function startTimer(tx: Prisma.TransactionClient, taskId: string, userId: string) {
-  if (await tx.timeEntry.findFirst({ where: { taskId, userId, stoppedAt: null }, select: { id: true } })) return;
-  await tx.timeEntry.updateMany({ where: { userId, stoppedAt: null }, data: { stoppedAt: new Date() } });
-  await tx.$executeRaw`
-    UPDATE "TimeEntry" SET "minutes" = GREATEST(1, FLOOR(EXTRACT(EPOCH FROM ("stoppedAt" - "startedAt")) / 60)::int)
-    WHERE "userId" = ${userId} AND "stoppedAt" IS NOT NULL AND "minutes" = 0
-  `;
-  await tx.timeEntry.create({ data: { taskId, userId, source: "timer" } });
-}
-
-export async function stopTaskTimers(tx: Prisma.TransactionClient, taskId: string) {
-  await tx.timeEntry.updateMany({ where: { taskId, stoppedAt: null }, data: { stoppedAt: new Date() } });
-  await tx.$executeRaw`
-    UPDATE "TimeEntry" SET "minutes" = GREATEST(1, FLOOR(EXTRACT(EPOCH FROM ("stoppedAt" - "startedAt")) / 60)::int)
-    WHERE "taskId" = ${taskId} AND "stoppedAt" IS NOT NULL AND "minutes" = 0
-  `;
-}
-
 export async function changeTaskStatusCore(actor: DomainActor, taskId: string, toStatus: "IN_PROGRESS" | "DONE", actualMinutes: number | undefined, transaction: TaskTransaction): Promise<CompletionResult> {
   if (toStatus !== "IN_PROGRESS" && toStatus !== "DONE") return { ok: false, error: "Недопустимый переход статуса" };
   try {
     return await transaction(async (tx): Promise<CompletionResult> => {
+      const instant = new Date();
       const visibilityActor = await resolveVisibilityActor(tx, actor);
       const task = await tx.task.findFirst({
         where: { AND: [{ id: taskId }, taskExecutionWhere(visibilityActor)] },
@@ -71,10 +54,10 @@ export async function changeTaskStatusCore(actor: DomainActor, taskId: string, t
         ? `Задача заблокирована — сначала выполните: ${blockers.map((edge) => `«${edge.dependsOn.title}»`).join(", ")}`
         : "Задача заблокирована — сначала должны быть выполнены предыдущие задачи");
       if (toStatus === "DONE" && task.requiresPhoto && !task.files.length) throw new CompletionError("Приложите файлы (фото/замерный лист) перед выполнением");
-      if (toStatus === "IN_PROGRESS" && task.assigneeId) await startTimer(tx, task.id, task.assigneeId);
-      const doneAt = toStatus === "DONE" ? new Date() : null;
+      if (toStatus === "IN_PROGRESS" && task.assigneeId) await startTaskTimer(tx, task.id, task.assigneeId, instant);
+      const doneAt = toStatus === "DONE" ? instant : null;
       if (doneAt) {
-        await stopTaskTimers(tx, task.id);
+        await stopTimers(tx, { taskId: task.id }, instant);
         const spent = await tx.timeEntry.aggregate({ where: { taskId, stoppedAt: { not: null } }, _sum: { minutes: true } });
         if ((spent._sum.minutes ?? 0) === 0) {
           if (!hasAnyRole(actor.roles, OFFICE_WRITE_ROLES)) throw new CompletionError("Нет записей времени. Возьмите задачу «В работу» — время посчитается таймером автоматически");
