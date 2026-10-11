@@ -44,3 +44,14 @@ FINAL_CODE_REVIEW_GO получен: independent reviewer сверил exact25so
 ## Owner explicit commit authorization11.10.2026
 
 Владелец ответил «Разрешаю коммиты по всему плану», после чего root отдельно разрешил atomic commit этого FINAL_CODE_REVIEW_GO кандидата. Прежние HOLD записи выше являются историческими. Source/test/native evidence неизменны, main/production запрещены. Actual staging ещё NOT_RUN; parent выполняет normal merge/CI и отдельную приёмку.
+
+## CI integration compatibility correction12.10.2026
+
+Actual GitHub API run38174167158/job114572882139 for merged staging8e9b6a8 failed two web tests; build-push skipped, actual staging remained5fbc. Saved log: `.playwright-mcp/application-improvements/stage167-ci-8e9b6a8f83da9b333b3b0bdc46706b65b50cd127/job-114572882139-1791752472309.private.log`. Relevant ranges1921–1942 and6009+. Source-only diagnosis; no CI retry of unchanged SHA.
+
+Own branch bugfix/133 reproduced both failures before correction (d98246:2/4PASS). Production code and original native proof are unchanged. Minimal test-only corrections:
+
+- Cash mixed writers now trace the actual transaction methods. Two competing writers each take18435/55001 under exact ReadCommitted/maxWait5000/timeout15000; exactly one writes and one aborts. An actual failed EXPENSE additionally runs one successful SELECT-only confirmation fence (`calls:["$queryRaw"],failed:false`), with no model writes. Successful EXPENSE requires no verification transaction. Invocation order is not assumed to be lock order because preparePayment has async preflight. Existing one-fits1000/one financial row/nonnegative remaining funds/maxActiveTransactions1 assertions remain intact. The first outcome expectation used the expenseFirst boolean and was corrected after14/15PASS observed the same actual lock order in both invocation orders; this failed intermediate result is not a PASS.
+- Journal ADMIN-only/pre-read denial remains unchanged. Exact expected query now includes the133 durable receipt exclusion NOT tuple(entity task/action task.status.request/id task-status:). Existing confirmed-action-effects runtime query-shape+SSR test proves normal business status remains visible, internal payload/UUID is absent and all208 stored records remain; no duplicate fixture framework or production filtering change.
+
+Final affected suites:32/32PASS e61948 (cash-mixed-writers, journal-admin-only, confirmed-action-effects, mutation-outcomes, task-status-receipts). Narrow strict TSC inherits repository config and includes only the two edited tests/type augmentations:144d5a exit0; scoped ESLint two files b5fd52 exit0; diffcheck69b384 PASS. No fullsuite/native/SQL/browser/migration/production calls. Independent review and Root commit/normal integration are required before publication; actual staging acceptance stays pending.
