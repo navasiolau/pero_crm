@@ -6,8 +6,8 @@ import type { TaskTransaction } from "./transaction";
 
 export type SplitTaskInput = { taskId: string; recipientId: string; percent: string; expectedRevision: number; requestId: string };
 export type SplitTaskResult = { ok: false; error: string } | {
-  ok: true; childTaskId: string; groupId: string; repeated: boolean;
-  projectId: string; productId: string | null; projectNumber: string; title: string; recipientId: string; eventId: string | null;
+  ok: true; childTaskId: string; groupId: string; repeated: true;
+  projectId: string; productId: string | null;
 };
 
 const schema = z.object({
@@ -39,7 +39,6 @@ export async function splitTaskCore(actor: DomainActor, input: SplitTaskInput, t
       },
     });
     if (!task) return { ok: false, error: "Задача не найдена или недоступна" };
-    const context = { projectId: task.projectId, productId: task.productId, projectNumber: task.project.number, title: task.title, recipientId: data.recipientId };
     const receiptId = `task-split:${data.requestId}`;
     const receipt = await tx.changeLog.findUnique({ where: { id: receiptId } });
     if (receipt) {
@@ -48,7 +47,7 @@ export async function splitTaskCore(actor: DomainActor, input: SplitTaskInput, t
         saved.recipientId !== data.recipientId || saved.percent !== percent || saved.expectedRevision !== data.expectedRevision || typeof saved.childTaskId !== "string" || typeof saved.groupId !== "string") {
         return { ok: false, error: "Этот запрос уже использован для другого разделения" };
       }
-      return { ok: true, childTaskId: saved.childTaskId, groupId: saved.groupId, repeated: true, eventId: null, ...context };
+      return { ok: true, childTaskId: saved.childTaskId, groupId: saved.groupId, repeated: true, projectId: task.projectId, productId: task.productId };
     }
     return { ok: false, error: "Деление задач и передача долей больше недоступны" };
   });

@@ -2,8 +2,6 @@
 
 import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
-import { notifyPerson } from "@/server/notifications/notify";
-import { dispatchEvent } from "@/server/plugins/events";
 import { revalidateProductPaths } from "@/server/products/revalidate";
 import { splitTaskCore, type SplitTaskInput } from "./share-core";
 import { withTaskTransaction } from "./transaction";
@@ -24,10 +22,6 @@ export async function splitTask(input: SplitTaskInput): Promise<{ ok: boolean; e
   if (!session?.user) return { ok: false, error: "Не авторизован" };
   const result = await splitTaskCore({ id: session.user.id, name: session.user.name ?? "", roles: session.user.roles, source: "web" }, input, withTaskTransaction);
   if (!result.ok) return result;
-  if (!result.repeated) {
-    if (result.eventId) await dispatchEvent(result.eventId).catch(() => {});
-    await notifyPerson({ userId: result.recipientId, type: "task.assigned", title: `Вам передана часть задачи: ${result.title}`, body: `Проект ${result.projectNumber}`, link: "/my" }).catch(() => {});
-  }
   revalidatePath("/my"); revalidatePath("/tasks"); revalidatePath(`/projects/${result.projectId}`);
   await revalidateProductPaths(result.productId);
   return { ok: true, childTaskId: result.childTaskId };
