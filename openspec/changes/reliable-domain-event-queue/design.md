@@ -65,3 +65,20 @@ Root разрешил design update после truthful shared-memory upload ada
 Terminal matrix: same-intent durable processedAt → true; missing/released/exhausted/current owner failure/expired lease → false; исторический lastError при active lease не считается новым failure. Pending claimToken сменился → conservative false. Durable completion того же intent допускается независимо от завершившего текущего владельца. Abort прекращает только ожидание, не отменяет эффект владельца. Observer не вызывает claim/renew/complete/fail/remove, generic/nested/background dispatchOne не ждёт.
 
 Source-only early native diagnostic расширяется на arguments/source/Docker/private-config/URL/client фазы и выдаёт только bounded F135/errno/Pcode/phase/hash. Старый failed native run не повторяется; source pins/new run/private memory launcher получают отдельное reviewer/root approval.
+## Узкая staging-приёмка на собственных событиях — 11.10.2026
+
+QA-only allowlist: `apps/web/tests/event-queue-stage.mjs`, `event-queue-stage.test.mjs`, `event-queue-native-cases.ts`, узкий import/call в `event-queue-store-native.ts`; design/evidence/tasks данного change. Приложение, миграция и глобальные flags не меняются.
+
+Сценарии прежнего native-runner вынесены в один shared helper: двухсессионный SKIP LOCKED, lease/reclaim/stale ACK-renew-fail, clock после ожидания row lock, exhaustion/manual internal retry, completed preservation, пустой scope и50 failing +1 healthy. Локальные Docker/5433/pre-migration guards сохранены; прежние подписанные receipts относятся к старым bytes и не перепривязываются.
+
+Stage producer получает из общего163 adapter guardStageContext/qualified catalog, nativeSnapshot с exact DomainEvent IDs, durable nativeJournal и FK guard. Перед INSERT обязательный durable PRE; перед cleanup — current mutable hash, exact PK row lock, active lease rejection, incoming FK и original fingerprints внутри одной RR-транзакции. UNKNOWN требует отдельной observation/approval, автоматического retry/cleanup нет.
+
+Global worker остаётся disabled; все54 IDs/actor/payload заранее перечислены. Existing production store всегда scoped, literal handler проверяет exact ID/nonce/index и не импортирует плагины/Telegram/S3. Production worker body выполняется в существующем closed CJS source-map loader с QA lexical process/globalThis/setInterval и private require cache. Prefix записан в WORKER_QA_PREFIX, исходное тело сохраняется и должно быть independently bound к accepted deployed SHA. Только constructor/start/non-overlap/two controlled ticks; глобальная activation не тестируется. Сам processor/store работают с настоящим stage PostgreSQL после отдельного Root ONE.
+
+Source map разрешает только literal worker/core/store/contract/sketch-contract/shared-native-cases/QA producer и необходимые qualified packages; общая реализация loader и target/catalog принадлежит163/retired. Env, app registry, реальные pending events и outbound providers не затрагиваются. Require producer-bound к apps/web/tests; CJS prefix worker-bound к его actual source path.
+
+### Shared scope contract dependency and correction
+
+Additional QA-only allowlist: `apps/web/tests/event-queue-stage-snapshot.test.mjs`. Canonical import is `./helpers/native-acceptance-snapshot.ts`; this is a declared163 integration dependency. No committed sibling fallback, copied validator or compiler wrapper. Before ordinary dependency merge, the identical cold test body was executed from an ignored temporary artifact with only two import URLs bound to actual shared helper and own stage producer. It is not CI-ready evidence for an independent pre163 worktree.
+
+Both post-prepare and post-verify captureOriginal calls now use exact `{DomainEvent:{column:'id',ids:plan.ids}}`. The regression exercises actual nativeSnapshot/checkedOwned, including successful3-row prepare +54-row verify boundaries and malformed scope rejected before any query/PRE/insert. Database objects in this test are controlled fakes; PostgreSQL/staging proof is still separate.

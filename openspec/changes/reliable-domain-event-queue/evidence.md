@@ -152,3 +152,15 @@ Oldbb6de6fc STOP/reconciliation остаются immutable, никаких retry
 Root phase approval guards correspond to time: prepare approval74/pre-own0; fresh cleanup approval75/owned54/active0. Old signed parts/approval files не переписывались. All signed checkpoints remain ignored/private; only related source/tests/docs/OpenSpec enteratomiccommit.
 
 Staging/actual enabled backgroundworker/HTTP and sideeffectisolation **NOT_RUN**. Flags не переключались; source/local PASS не закрывает task5.1/5.2. Root normalmerge/push/deployment+ownedstageacceptance separately. Production/main forbidden.
+
+## QA staging preparation — source-only, 11.10.2026
+
+Новый adapter: 6/6 cold tests PASS (последний63f5fa); прежний local native body переиспользуется одним helper. Full web TSC41484 exit0; scoped lint579881 exit0, позднее изменение Date hash относится только к .mjs. First sandbox wrappers не запустили tsc/eslint; это не code failure. Corrected lint after QA variable/import fix — PASS.
+
+SQL/HTTP/staging/config/session/storage effects:0. Ни global activation, ни staged native cases, ни stage original fingerprints этими cold-тестами не доказаны. Original applied135 migration/native/cleanup evidence выше остаётся историческим фактом для исходных6077 bytes. Перед actual stage нужен current shared163 policy/source/CJS packet и отдельный Root ONE.
+
+### Independent scope blocker — RED to GREEN
+
+Actual shared validator source SHA907a43d40fe5427faee9d55c2e5faccec13e6191f6a6b17a2dda327d2b17110a. RED6a11ad reproduced SCHEMA_IDENTIFIER_INVALID at post-prepare (cold mock had inserted3 owned rows); negative pre-effect case already passed. After exact two-scope fix, GREENed9500 exit0/2testsPASS; original6 checks067031 exit0/6PASS. Scoped lintbbe437 exit0/0warnings. No typed source change; full TSC41484 remains applicable to shared extraction. Canonical dependency must be available by normal163 integration before CI-ready/135commit qualification.
+
+Temporary artifact: D:/Projects/pero_crm_v2/.playwright-mcp/application-improvements/stage135-snapshot-preintegration.test.mjs SHA5272bf8935f07aa3cb7a50a2ef473bd8c71b6a7b024e9e11d067f537312c7d42. Canonical test SHA92a2a2558e28e1f788e765596bbee68afd06b693a9f8cd0a105a9d053356f032. It changes only import URLs, does not embed/copy/relax the actual helper. Real SQL/S3/HTTP/stage/session effects remain0. Module-type warning concerns the existing source package format; no package/version changes made.

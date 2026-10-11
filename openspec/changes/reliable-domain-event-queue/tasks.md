@@ -27,3 +27,10 @@
 
 - [ ] 5.1 После root normalmerge/CI/migration принять actual deployed SHA/image/health и preservation completed/pending/internal fixtures; worker до isolation proof остаётся disabled.
 - [ ] 5.2 После root DB/storage/side-effect isolation proof проверить настоящий background tick без ручного REST dispatch, singleton/metrics/50+1/lease-recovery/staleACK/exhaustion/internal cleanup на owned staging fixtures; записать PASS/NOT_RUN/BLOCKED, main/production не трогать.
+
+## 6. Staging adapter (QA-only)
+
+- [x] 6.1 Подготовить exact54-owned producer и переиспользовать native cases без расширения local target guard.
+- [x] 6.2 Cold negative scope/worker isolation/active lease/FK/Date fingerprints; необходимые typing/lint.
+- [ ] 6.3 Независимый source/protocol review, current shared163 catalog/runtime/source map binding.
+- [ ] 6.4 Root-approved actual stage prepare/verify/observe/exact cleanup, original fingerprints unchanged, foreign pending untouched; global activation NOT_RUN.
