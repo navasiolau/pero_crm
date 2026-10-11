@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { createRequire, Module } from "node:module";
 import { before, test } from "node:test";
-import type { PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 
 const require = createRequire(import.meta.url);
 let history: { userId: string; amount: string; currency: string; bynAmount: string | null }[] = [];
 let due: number | null = 10;
 let balance: number | null = 100;
-const writes: { amount: number; bynAmount: number; currency: string }[] = [];
+const writes: { amount: string; bynAmount: string; currency: string }[] = [];
 const actor = { id: "accountant", name: "Бухгалтер", roles: ["ACCOUNTANT"] };
 let actions: typeof import("../src/server/payroll/actions");
 function inject(path: string, exports: Record<string, unknown>) {
@@ -17,12 +17,15 @@ function inject(path: string, exports: Record<string, unknown>) {
 before(() => {
   (globalThis as { prisma?: PrismaClient }).prisma = {
     user: { findMany: async () => [{ id: "u", name: "U", roles: ["MANAGER"], payPercent: "5" }] },
-    payrollEntry: { findMany: async () => history, create: async ({ data }: { data: typeof writes[number] }) => { writes.push(data); return {}; } },
+    payrollEntry: { findMany: async () => history, create: async ({ data }: { data: typeof writes[number] }) => { writes.push(data); return { id: "payroll" }; } },
+    payment: { aggregate: async () => ({ _sum: { bynAmount: new Prisma.Decimal(1000) }, _count: { _all: 1 } }) },
+    changeLog: { create: async () => ({ id: "audit" }) }, domainEvent: { create: async () => ({ id: "event" }) },
   } as unknown as PrismaClient;
+  inject("../src/server/tasks/transaction", { withTaskTransaction: async (operation: (tx: Prisma.TransactionClient) => Promise<unknown>) => operation((globalThis as unknown as { prisma: PrismaClient }).prisma) });
   inject("next/cache", { revalidatePath: () => {} });
   inject("../src/server/require-role", { requireAdmin: async () => ({ user: actor }), requireFinance: async () => ({ user: actor }) });
   inject("../src/server/plugins/changelog", { writeChangeLog: async () => {} });
-  inject("../src/server/plugins/events", { emitDomainEvent: async () => {} });
+  inject("../src/server/plugins/events", { emitDomainEvent: async () => {}, dispatchEvent: async () => {} });
   inject("../src/server/notifications/notify", { notifyOrg: async () => {}, notifyPerson: async () => {} });
   inject("../src/server/finance/queries", { listCashAccounts: async () => [{ id: "cash", active: true, currency: "BYN", balance: 100 }] });
   inject("../src/server/payroll/queries", {
@@ -43,8 +46,8 @@ test("unknown turnover history stops new accrual without writes", async () => {
 test("turnover top-up uses fixed BYN equivalent, writes a BYN snapshot and Decimal rounding", async () => {
   history = [{ userId: "u", amount: "10", currency: "USD", bynAmount: "30" }]; writes.length = 0;
   assert.equal((await actions.accrueTurnover("2026-09")).ok, true);
-  assert.equal(writes.length, 1); assert.equal(writes[0].amount, 20);
-  assert.equal(writes[0].bynAmount, 20); assert.equal(writes[0].currency, "BYN");
+  assert.equal(writes.length, 1); assert.equal(new Prisma.Decimal(writes[0].amount).toNumber(), 20);
+  assert.equal(new Prisma.Decimal(writes[0].bynAmount).toNumber(), 20); assert.equal(writes[0].currency, "BYN");
 });
 
 test("unknown debt or organization balance stops settleAll before rates or money writes", async () => {

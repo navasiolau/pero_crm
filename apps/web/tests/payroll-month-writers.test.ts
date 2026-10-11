@@ -41,9 +41,12 @@ const database = {
       key === "userId" && typeof value === "object" ? true : key === "month" && value && typeof value === "object" && "lt" in value ? String(row.month) < String(value.lt) : row[key] === value)),
     create: async ({ data }: { data: Row }) => { const row = { id: `entry-${ledger.length}`, createdAt: new Date(), ...data }; ledger.push(row); return row; },
   },
+  changeLog: { create: async () => { auditWrites += 1; return { id: "audit" }; } },
+  domainEvent: { create: async () => { eventWrites += 1; return { id: "event" }; } },
   payout: { findMany: async () => [] },
   user: { findMany: async () => [employee] },
 };
+inject("../src/server/tasks/transaction", { withTaskTransaction: async (operation: (tx: Prisma.TransactionClient) => Promise<unknown>) => operation(database as unknown as Prisma.TransactionClient) });
 inject("../src/lib/prisma", { prisma: database });
 inject("next/cache", { revalidatePath() {} });
 inject("../src/server/require-role", { requireFinance: async () => ({ user: accountant }), requireAdmin: async () => ({ user: accountant }) });
@@ -96,7 +99,7 @@ const fixedRates = { asOf: "2026-10-31", cash: { currency: "BYN", rate: "1.00000
 test("sequential alias attempt is refused after the only valid accrual with no additional effects", async () => {
   ledger.length = 0;
   assert.equal((await actions.accrueTurnover("2026-01")).ok, true);
-  assert.equal(ledger.length, 1); assert.equal(ledger[0].amount, 300);
+  assert.equal(ledger.length, 1); assert.equal(new Prisma.Decimal(String(ledger[0].amount)).toNumber(), 300);
   const before = { ledger: JSON.stringify(ledger), reads: financialReads, audit: auditWrites, events: eventWrites };
   for (const invalid of ["2025-13", "2026-00", "0000-01", "2026-01\n"])
     assert.equal((await actions.accrueTurnover(invalid)).ok, false);
