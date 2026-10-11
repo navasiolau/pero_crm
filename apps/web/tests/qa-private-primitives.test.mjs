@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import {syncBuiltinESMExports} from 'node:module';
 import {randomUUID} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
+import {gzipSync,gunzipSync} from 'node:zlib';
 import {fileURLToPath} from 'node:url';
 import path from 'node:path';
 import {canonical,sha,checkAncestors,durableWrite} from './helpers/qa-private-primitives.mjs';
@@ -42,10 +43,35 @@ test('canonical and SHA exports share one implementation and retain former value
  assert.equal(canonical([undefined,,1]),'[, ,1]'.replace(' ',''));
 });
 
-test('both former wire descriptors retain exact bytes including different gzip levels',()=>{
+// В frozen Windows fixtures служебный gzip OS byte9=10; Unix Node/zlib использует3.
+// Только этот байт адаптируется к той же платформе; header/payload/CRC/ISIZE остаются точными.
+const stageFrozen='H4sIAAAAAAAACqtWSlSyqlZKzCnISFSyUjIw1DMwUNJRSkotSVSyMqrVUapSsorOK83J0SkpKk3VMdBRujD/YsOFHRf2XNh6sUEpthYAJv8vZUEAAAA=';
+const draftFrozen='H4sIAAAAAAACCqtWSlSyqlZKzCnISFSyUjIw1DMwUNJRSkotSVSyMqrVUapSsorOK83J0SkpKk3VMdBRujD/YsOFHRf2XNh6sUEpthYAJv8vZUEAAAA=';
+function assertFrozenGzip(actual,frozen,os=process.platform==='win32'?10:3){
+ assert.ok(os===3||os===10,'KNOWN_GZIP_OS_REQUIRED');assert.equal(actual[9],os,'SAME_PLATFORM_GZIP_OS');
+ const expected=Buffer.from(frozen,'base64');assert.equal(expected[9],10);expected[9]=os;
+ assert.deepEqual(actual,expected,'EXACT_GZIP_BYTES_EXCEPT_DECLARED_OS');
+}
+test('both former wire descriptors retain same-platform exact bytes including different gzip levels',()=>{
  const value={z:[null,true,0,'Пример'],a:{beta:2,alpha:'01.00'}},hash='0fffa52d18d0fa9989f5a9b5f17eba1f7205d9c747aef99279d41514fb001be6';
- assert.deepEqual(encodeStageWire(value),{kind:'warehouse-unit-stage-wire',version:1,encoding:'gzip-base64',bytes:65,sha256:hash,data:'H4sIAAAAAAAACqtWSlSyqlZKzCnISFSyUjIw1DMwUNJRSkotSVSyMqrVUapSsorOK83J0SkpKk3VMdBRujD/YsOFHRf2XNh6sUEpthYAJv8vZUEAAAA='});
- assert.deepEqual(encodeFunctionalWire(value),{kind:'product-draft-stage-wire',version:1,encoding:'gzip-base64',decodedBytes:65,decodedSha256:hash,data:'H4sIAAAAAAACCqtWSlSyqlZKzCnISFSyUjIw1DMwUNJRSkotSVSyMqrVUapSsorOK83J0SkpKk3VMdBRujD/YsOFHRf2XNh6sUEpthYAJv8vZUEAAAA='});
+ const formerBytes=Buffer.from('{"a":{"alpha":"01.00","beta":2},"z":[null,true,0,"Пример"]}');
+ assert.equal(formerBytes.length,65);assert.equal(sha(formerBytes),hash);
+ const formerStage=gzipSync(formerBytes),formerDraft=gzipSync(formerBytes,{level:9});
+ const stage=encodeStageWire(value),draft=encodeFunctionalWire(value);
+ assert.deepEqual(stage,{kind:'warehouse-unit-stage-wire',version:1,encoding:'gzip-base64',bytes:65,sha256:hash,data:formerStage.toString('base64')});
+ assert.deepEqual(draft,{kind:'product-draft-stage-wire',version:1,encoding:'gzip-base64',decodedBytes:65,decodedSha256:hash,data:formerDraft.toString('base64')});
+ const stageBytes=Buffer.from(stage.data,'base64'),draftBytes=Buffer.from(draft.data,'base64');
+ assertFrozenGzip(stageBytes,stageFrozen);assertFrozenGzip(draftBytes,draftFrozen);
+ assert.equal(stageBytes[8],0);assert.equal(draftBytes[8],2); // default и level9 сохраняют различие XFL.
+ for(const bytes of [stageBytes,draftBytes]){const decoded=gunzipSync(bytes);assert.deepEqual(decoded,formerBytes);assert.equal(decoded.length,65);assert.equal(sha(decoded),hash);}
+});
+test('gzip fixture accepts only declared OS adaptation and rejects changed header/payload/trailer bytes',()=>{
+ for(const frozen of [stageFrozen,draftFrozen])for(const os of [3,10]){
+  const expected=Buffer.from(frozen,'base64');expected[9]=os;assertFrozenGzip(expected,frozen,os);
+  for(const offset of [0,3,4,8,10,expected.length-8,expected.length-1]){const changed=Buffer.from(expected);changed[offset]^=1;assert.throws(()=>assertFrozenGzip(changed,frozen,os));}
+  const otherOs=Buffer.from(expected);otherOs[9]=os===3?10:3;assert.throws(()=>assertFrozenGzip(otherOs,frozen,os),/SAME_PLATFORM_GZIP_OS/);
+  const unknownOs=Buffer.from(expected);unknownOs[9]=255;assert.throws(()=>assertFrozenGzip(unknownOs,frozen,os),/SAME_PLATFORM_GZIP_OS/);
+ }
 });
 
 test('ancestor policies retain inclusive, exclusive, case-fold and filesystem-root boundaries',()=>{
