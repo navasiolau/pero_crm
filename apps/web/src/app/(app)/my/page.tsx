@@ -39,6 +39,7 @@ export default async function MyTasksPage() {
 
   return (
     <MyTasksView
+      actorUserId={session.user.id}
       active={active}
       done={done}
       userName={session.user.name ?? ""}

@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { deliverPostCommit } from "@/server/operations/post-commit";
 import type { ProductStatus } from "@prisma/client";
 import { auth } from "@/auth";
 import {prisma} from '@/lib/prisma';
@@ -28,8 +29,8 @@ function domainActor(session: Awaited<ReturnType<typeof requireUser>>) {
   return {id:session.user.id,name:session.user.name??"",roles:session.user.roles,source:"web" as const};
 }
 async function revalidateProduct(product: { id: string; projectId: string }) {
-  await revalidateProductPaths(product.id);
-  revalidatePath("/projects");
+  await deliverPostCommit("product-cache", product.id, [{ kind: "cache", run: () => revalidateProductPaths(product.id) },
+    { kind: "cache", run: () => revalidatePath("/projects") }]);
 }
 export async function createProduct(input:CreateProductInput):Promise<{ok:boolean;id?:string;error?:string}> {
   const session=await requireUser();
@@ -45,7 +46,7 @@ export async function updateProduct(productId:string,input:UpdateProductInput,ba
   if(!result.ok)return result;
   if(result.noOp)return{ok:true};
   await revalidateProduct(result.before);
-  if(input.quantity!==undefined) for(const path of ["/","/warehouse","/warehouse/stock","/warehouse/items","/finance"]) revalidatePath(path);
+  if(input.quantity!==undefined) await deliverPostCommit("product-update", productId, ["/","/warehouse","/warehouse/stock","/warehouse/items","/finance"].map(path => ({ kind: "cache" as const, run: () => revalidatePath(path) })));
   return{ok:true};
 }
 /** Compact field action: no Next cache invalidation, no full RSC/card reload. */
@@ -82,7 +83,7 @@ export async function changeProductStatus(
       { id: session.user.id, name: session.user.name ?? "", roles: session.user.roles, source: "web" },
       productId, toStatus, comment));
     if (!result.ok) return result;
-    await deliverProductPercentageEffects(result.percentageEffects, productId, session.user.id).catch(()=>{});
+    await deliverPostCommit("product-status", productId, [{ kind: "payroll", run: () => deliverProductPercentageEffects(result.percentageEffects, productId, session.user.id) }]);
     let financeState: FinanceState = result.percentageEffects.earnings.length ? "SETTLED" : null;
     for (const kind of result.captured) {
       let current: FinanceState;
@@ -91,11 +92,12 @@ export async function changeProductStatus(
       financeState = current === "PENDING_FX" || (financeState as FinanceState) === "PENDING_FX" ? "PENDING_FX" : current;
     }
     if (result.eventId) {
-      await dispatchEvent(result.eventId).catch(() => {});
-      await notifyOrg({ type: "product.statusChanged",
+      await deliverPostCommit("product-status", productId, [{ kind: "dispatch", run: () => dispatchEvent(result.eventId!) },
+      { kind: "org", run: () => notifyOrg({ type: "product.statusChanged",
         title: `${result.product.number}: ${productStatusLabels[result.product.status]} → ${productStatusLabels[toStatus]}`,
         body: result.product.title, link: `/products/${productId}`, exceptUserId: session.user.id,
-      }).catch(() => {});
+      }) }]);
+
     }
     await revalidateProduct(result.product);
     return { ok: true, financeState };

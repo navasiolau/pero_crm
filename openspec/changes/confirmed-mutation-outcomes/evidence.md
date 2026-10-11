@@ -1,0 +1,46 @@
+# Evidence
+
+Задача133, implementation11.10.2026 после independent DESIGN_GO/root RELEASE. Worktree D:/Projects/pero_crm_worktrees/improvements-133, bugfix/133, base cd38cb745759becd58dbbad4d6d37afa03f0ab7a. Exact root-approved scope25source/6tests, OpenSpec собственныйchange. Production schema/config/packages/lock не изменены. Main/production/restic/dumps/seed/reset/newDB не затронуты. Commits HOLD до прямого human-разрешения: technical review не заменяет Git authorization.
+
+## Baseline and actual contracts
+
+Прочитаны актуальные AGENTS.md, README, CRM_IMPROVEMENTS_PLAN, root application plan preservation/133/verification и D:/Projects/pero_infra/infra-recovery/SAFETY-RULES.md. Nearest OpenSpec root/context/list/status/instructions proposal/design/spec/tasks выполнены; основной engineer-product-access spec не меняется.
+
+Initial RED0/8:3task/3payment faults,1mandatory removeWork audit fault,1global ADMIN audit reader leakage. Actual action/core showed dispatch/cache throw after сохранения, ignored actor precondition/lost commit ACK and work deletion surviving failed audit. GREEN требует separate proof, не маскирует business failure.
+
+SUPERSEDED narrowread предполагал engineering reset поформуле306–310, но full actual updateTask guard255 запрещает изменение assignee раньше. Root/reviewer подтвердили correction и сохранили optional receipt как exact intent correlation после response loss. Актуальные tests используют lawful START→DONE→oldSTART_UUID, engineering reassign reject/no-write и ordinary reassign keepsIN_PROGRESS. Guard не ослаблен, unreachable fixture не принимается как feature proof.
+
+Pinned Prisma6.19.3 runtime прочитан: callback resolve предшествует engine commit; catch пытается rollback и глотает его failure. Candidate/Prisma reject сами по себе не доказывают commit/rollback. Confirmation tests требуют fresh same-lock fence/exact actor/type/payload receipt, prior committed receipt first, failed/absent proof UNKNOWN/no automatic mutation rerun.
+
+## Local production and test results
+
+Own pnpm install --frozen-lockfile --offline PASS, downloaded0/lock unchanged. Own pnpm --filter @pero/web exec prisma generate PASS6.19.3 без DB. Initial pnpm exec openspec auto-install EPERM happened before file writes; used existing global openspec CLI, versions not changed.
+
+- Relevant16webfiles previously98/98PASS. Latest changes add own visibility-loss replay, PaymentDialog Chrome and2native guard/closure cases; final relevant103/103PASS:101cases in15files plus2cases in actual product-status-percentage-barrier.test.ts. The first expanded list used a wrong final percentage filename that tsx did not match; the actual missing2cases were then explicitly run PASS. Previous98 is historical.
+- Actual task/core8cases PASS: independent dispatch/person/org/payroll/cache faults; expectedActorId changed before DB; exact receipt/retry-read IO; changed time/task/foreignactor rejects; START→DONE→oldSTART no-new-state; engineering reject/ordinary keepsprogress; visibility removed by lawful ordinary reassignment then minimal own receipt ACK only. No private current data returned.
+- Shared confirmation/effect+native guard/closure9cases PASS: ACK/phases/abort/fresh read failures, no mutation rerun, sync/async/diagnostic fault isolation,8approval negatives and exact unregistered file-stages policy negatives. Runner/runtime/schema/target/registry pins are checked without SQL.
+- Actual confirmed-action-effects11cases PASS: payment6effects stableID/UNKNOWN/typed rejects/priorreceipt; real removeWork audit rollback; exact SQL-shape global receipt exclusion beforetake200 with actual ChangelogTable SSR and business audit exactly1; actual bot POST envelope/ACL; projectMaterial3audit rollback; product/work/movement actual wrappers with explicitly injected domain cores; actual shared cache helper early/middle/lookup/missing/null fault matrix. Injected domain cores are DI evidence, not native accounting proof.
+- Chrome browser file8/8PASS:6pure controller cases and2actual components at390×844, real installed Chrome, all physical network denied. ActualTimeDialog UNKNOWN preserves20minutes/same actor/UUID/payload even after React remount, historical ACK closes+refreshes without onDone/current status apply. Actual PaymentDialog UNKNOWN→transport throw→COMMITTED sends3identical UUID/payloads, preserves open form until ACK, refresh exactly1. Server-action/router adapters are declared QA IO. These are component/logic tests without application CSS, not whole-app visual/staging proof. Initial pointer click harness lacked production CSS/BaseUI overlay readiness and timed out; corrected keyboard submission PASS, no production style change.
+- Own pnpm --filter @pero/telegram-bot build PASS; finance-engine.test.mjs5/5PASS including UNKNOWN JSON→sameUUID/payload retry→confirmed dialog close/onepayment. Fetch/TG RPC mocked, no real Telegram/network.
+- TSC133 first pass37526 failed only test React-global delete typing; test-only Reflect.deleteProperty fix. Pass58523 covered25source/currenttests; latest pass29355 covered native runner/new PaymentDialog, exit0. Later protocol-only guard/cleanup refinements require a final typing rerun after independent review.
+- Scoped ESLint API30files (25source/5tests including native runner) PASS0errors/0warnings. Pnpm frozen Next peer directory supplied via task-process-only NODE_PATH; no dependency/config/rule mutation. Final scoped rerun includes the reviewed native runner/current tests. Earlier shell-array pattern/line-ending listing attempts failed before lint, not counted as checks.
+- Readonly TS AST cache caller map34directcalls,0lexicalTXancestors; manual shared-call review verified business/audit before cache and mandatory upload/current-sketch cleanup after helper outside catches.0modulecycles.
+
+## Native and staging state
+
+Исторически до EXECUTE_ONCE Native133 runner был PREPARED/NOT_RUN; --describe source closure66physical/runtime/config inputs PASS, connectionOpened=false, no Docker/SQL/DB calls. Concrete manifest/approval/PRE/backendIDs/fault boundaries/cleanup/STOP are in native-protocol.md. Independent reviewer P1 cleanup race: advisory lock alone does not fence all FK writers. QA-only correction adds exact parent rows FOR UPDATE before FK inspection and full original fingerprint inside cleanup transaction after deletes before commit; root/reviewer must approve final source hash before any execute.
+
+На этом промежуточном этапе Native execution и stage133 были NOT_RUN; актуальный native результат приведён ниже. Existing reviewed130 WIP stays immutable in its separate worktree, no copy/cherry-pick/commit. Accepted stage is cd38;133WIP cannot serve as staged131 evidence. Other task's SQL/DDL/runtime windows are controlled by root. Real native133 proof, independent FINAL_CODE_REVIEW_GO, owner commit/normal merge/CI and actual deployed SHA/image/health/W07/browser/native acceptance remain outstanding.
+
+Independent native PROTOCOL_GO received for reviewed hash698c39fe152642c2adeb293310f00b61cd0e5f8ec084e3abfa6664ed3c9aa398; conditional final typing/QA/fresh root execution approval. Final phase/guard/closure9/9PASS after correction. На промежуточном этапе actual SQL/native ожидал индивидуальный root window/GO; далее получен EXECUTE_ONCE.
+
+## Final local acceptance
+
+Final relevant103/103PASS (101+2actual percentage barrier), Chrome8/8PASS включая React remount, botbuild/engine5/5PASS, scopedESLint30files0errors0warnings. Final typing76006PASS exit0 после P1 QA protocol fixes. Native PROTOCOL_GO и ROOT_EXECUTE_ONCE: run d2a3378e-4798-42b8-821b-6130a01b848b/hash698c39fe152642c2adeb293310f00b61cd0e5f8ec084e3abfa6664ed3c9aa398/66pins, root independent04:34:17Z observation, exactexistinglocal5433.
+Actual native session73839 exit0 NATIVE_PASS:2independent clients/backendPIDs, realCOMMIT→injectedACKloss→freshreadonlysame-lock proof, historical START→DONE replay, expected UNKNOWN→sameUUID validated/no-write,5latefaults/fullrollback, stabletask/paymentIDs. Immutable PRE beforewrites, all-FK+exact parent FORUPDATE, full originals FP before and inside cleanup beforeCOMMIT+externalpostcheck PASS. Persistentfixture rows0/outbound0/protected-finally=true. Оба клиента disconnected до returnedbody, никакого retry/новойnativeоперации не выполнялось.
+Proofs private C:/Users/admin/AppData/Local/Temp/pero-crm-qa133/d2a3378e-4798-42b8-821b-6130a01b848b; sanitized cleanup/finally readback подтвердилhash/0rows/0outbound/protectedtrue. Это localSQLproof/sourceworkingtreehash, неstagePASS. Final independent code review pending; stage133NOT_RUN, ownercommitHOLD/mainproductionforbidden.
+FINAL_CODE_REVIEW_GO получен: independent reviewer сверил exact25source/6tests, все66currentpins==executed698c,2actualbackendPIDs и privatefinalcapture/cleanup/finally. Local tasks1–5 complete;6.1actualstagingNOT_RUN/ownercommitsHOLD. Source/runtime/native не менялись после executed proof.
+
+## Owner explicit commit authorization11.10.2026
+
+Владелец ответил «Разрешаю коммиты по всему плану», после чего root отдельно разрешил atomic commit этого FINAL_CODE_REVIEW_GO кандидата. Прежние HOLD записи выше являются историческими. Source/test/native evidence неизменны, main/production запрещены. Actual staging ещё NOT_RUN; parent выполняет normal merge/CI и отдельную приёмку.

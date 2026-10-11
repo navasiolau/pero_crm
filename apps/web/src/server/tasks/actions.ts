@@ -4,6 +4,8 @@ import {liveChildWhere} from "@/server/access/live-entities";
 import {liveProductWhere,liveProjectWhere} from "@/server/access/live-entities";
 
 import { revalidatePath } from "next/cache";
+import { deliverPostCommit } from "@/server/operations/post-commit";
+import type { TaskStatusContext, TaskStatusAck } from "./status-receipts";
 import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 
@@ -438,36 +440,38 @@ export async function changeTaskStatus(
   taskId: string,
   toStatus: "IN_PROGRESS" | "DONE",
   actualMinutes?: number,
-): Promise<{ ok: boolean; error?: string; timeRequired?: boolean }> {
+  context?: TaskStatusContext,
+): Promise<TaskStatusAck> {
   const session = await requireUser();
-  const result = await changeTaskStatusCore({ id: session.user.id, name: session.user.name ?? "", roles: session.user.roles, source: "web" }, taskId, toStatus, actualMinutes, withTaskTransaction);
+  const result = await changeTaskStatusCore({ id: session.user.id, name: session.user.name ?? "", roles: session.user.roles, source: "web" }, taskId, toStatus, actualMinutes, withTaskTransaction, context);
   if (!result.ok) return result;
+  const effects: Parameters<typeof deliverPostCommit>[2] = [];
   if (!result.repeated) {
-    if (result.eventId) await dispatchEvent(result.eventId);
-    if (result.payroll) await notifyOrg({
+    if (result.eventId) effects.push({ kind: "dispatch", run: () => dispatchEvent(result.eventId!) });
+    if (result.payroll) effects.push({ kind: "payroll", run: () => notifyOrg({
       type: "payroll.orgAccrued",
-      title: `Начислено ${result.payroll.name}: ${formatAmount(result.payroll.amount, result.payroll.currency)}`,
+      title: `Начислено ${result.payroll!.name}: ${formatAmount(result.payroll!.amount, result.payroll!.currency)}`,
       body: `Сдельно · ${result.task.title} · ${result.task.projectNumber}`,
       link: "/finance/payroll", exceptUserId: session.user.id,
-    });
-    if (result.task.assigneeId && result.task.assigneeId !== session.user.id) await notifyPerson({
-      userId: result.task.assigneeId, type: "task.statusChanged",
+    }) });
+    if (result.task.assigneeId && result.task.assigneeId !== session.user.id) effects.push({ kind: "person", run: () => notifyPerson({
+      userId: result.task.assigneeId!, type: "task.statusChanged",
       title: `Задача «${result.task.title}»: ${toStatus === "DONE" ? "выполнена" : "в работе"}`,
       body: `Проект ${result.task.projectNumber}`, link: "/my",
-    });
-    await notifyOrg({
+    }) });
+    effects.push({ kind: "org", run: () => notifyOrg({
       type: "task.statusChanged",
       title: `Задача «${result.task.title}»: ${toStatus === "DONE" ? "выполнена" : "в работе"}`,
       body: `Проект ${result.task.projectNumber} · ${session.user.name ?? ""}`,
       link: result.task.productNumber ? `/products/${result.task.productNumber}` : `/projects/${result.task.projectId}`,
       exceptUserId: session.user.id,
-    });
+    }) });
   }
-  revalidatePath(`/projects/${result.task.projectId}`);
-  await revalidateProductPaths(result.task.productId);
-  revalidatePath("/my");
-  revalidatePath("/tasks");
-  return { ok: true };
+  effects.push({ kind: "cache", run: () => revalidatePath(`/projects/${result.task.projectId}`) },
+    { kind: "cache", run: () => revalidateProductPaths(result.task.productId) },
+    { kind: "cache", run: () => revalidatePath("/my") }, { kind: "cache", run: () => revalidatePath("/tasks") });
+  await deliverPostCommit("task-status", result.task.id, effects);
+  return { ok: true, outcome: "COMMITTED", resultId: result.task.id, replayed: result.repeated || result.recovered === true, ...(context ? { clientMutationId: context.clientMutationId.toLowerCase() } : {}) };
 }
 // Удаление задачи — админ/директор/менеджер (§4).
 // Выполненную удалять нельзя: там начисления, время и история.
