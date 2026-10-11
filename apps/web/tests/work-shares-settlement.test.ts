@@ -1,39 +1,46 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { createRequire, Module } from "node:module";
-import { before, test } from "node:test";
+import { beforeEach, afterEach, test } from "node:test";
 import type { PrismaClient } from "@prisma/client";
 import { splitTaskCore } from "../src/server/tasks/share-core";
 import { changeTaskStatusCore } from "../src/server/tasks/completion-core";
 import { taskShareFixture, historicalTaskAllocation } from "./helpers/task-share-fixture";
 import { remainingWorkQuantity } from "../src/lib/work-quantity";
+import { guardedModuleCache } from "./helpers/guarded-module-cache";
 
-const require = createRequire(import.meta.url);
-function inject(specifier: string, exports: Record<string, unknown>) {
-  const filename = require.resolve(specifier); const stubModule = new Module(filename);
-  stubModule.exports = exports; stubModule.filename = filename; stubModule.loaded = true; require.cache[filename] = stubModule;
-}
 let fixture = taskShareFixture();
 let sessionActor = { id: "manager", name: "Manager", roles: ["MANAGER"] };
 let externalEffects = 0;
 const revalidated: string[] = [];
 let actions: typeof import("../src/server/tasks/actions");
 let shares: typeof import("../src/server/tasks/share-actions");
-
-before(() => {
-  const proxy = new Proxy({}, { get: (_target, key) => fixture.database[key as keyof typeof fixture.database] });
-  (globalThis as { prisma?: PrismaClient }).prisma = proxy as PrismaClient;
-  inject("../src/auth", { auth: async () => ({ user: sessionActor }) });
-  inject("next/cache", { revalidatePath: (path: string) => { revalidated.push(path); } });
-  inject("../src/server/products/revalidate", { revalidateProductPaths: async (id: string | null) => { revalidated.push(`product:${id}`); } });
+let queries: typeof import("../src/server/tasks/queries");
+let scope: ReturnType<typeof guardedModuleCache>;
+function prepareScope() {
+  sessionActor = { id: "manager", name: "Manager", roles: ["MANAGER"] };
+  externalEffects = 0; revalidated.length = 0;
+  fixture = taskShareFixture();
+  const emptyParticipants = { findMany: async () => [] };
+  const transactionWithParticipants: typeof fixture.transaction = operation => fixture.transaction(tx => operation(new Proxy(tx, { get: (target, key, receiver) => key === "productPercentageParticipant" ? emptyParticipants : Reflect.get(target, key, receiver) })));
+  const proxy = new Proxy({}, { get: (_target, key) => key === "$transaction" ? transactionWithParticipants : key === "productPercentageParticipant" ? emptyParticipants : fixture.database[key as keyof typeof fixture.database] });
   const outsideTransaction = async () => { externalEffects++; assert.equal(fixture.inTransaction(), false, "External effect ran before commit"); };
-  inject("../src/server/plugins/changelog", { writeChangeLog: outsideTransaction });
-  inject("../src/server/plugins/events", { emitDomainEvent: outsideTransaction, dispatchEvent: outsideTransaction });
-  inject("../src/server/notifications/notify", { notifyOrg: outsideTransaction, notifyPerson: outsideTransaction });
-  inject("../src/server/payroll/queries", { getPayrollCurrency: async () => "BYN" });
-  actions = require("../src/server/tasks/actions");
-  shares = require("../src/server/tasks/share-actions");
-});
+  const overrides = {
+    "../src/auth": { auth: async () => ({ user: sessionActor }) },
+    "next/cache": { revalidatePath: (path: string) => { revalidated.push(path); } },
+    "../src/server/products/revalidate": { revalidateProductPaths: async (id: string | null) => { revalidated.push(`product:${id}`); } },
+    "../src/server/plugins/changelog": { writeChangeLog: outsideTransaction },
+    "../src/server/plugins/events": { emitDomainEvent: outsideTransaction, dispatchEvent: outsideTransaction },
+    "../src/server/notifications/notify": { notifyOrg: outsideTransaction, notifyPerson: outsideTransaction },
+    "../src/server/payroll/queries": { getPayrollCurrency: async () => "BYN" },
+  };
+  scope = guardedModuleCache(import.meta.url, { targets: ["../src/server/tasks/actions", "../src/server/tasks/share-actions", "../src/server/tasks/queries"], allowedOverrides: Object.keys(overrides), overrides, prisma: proxy as PrismaClient });
+  actions = scope.load("../src/server/tasks/actions"); shares = scope.load("../src/server/tasks/share-actions");
+  queries = scope.load("../src/server/tasks/queries");
+}
+beforeEach(prepareScope);
+afterEach(() => scope?.restore());
+
+
 
 test("completion pays only the fixed remaining split budget", async () => {
   fixture = taskShareFixture();
@@ -147,7 +154,7 @@ test("retired split action refuses while historical DTO remains read-only", asyn
   fixture = taskShareFixture(); historicalTaskAllocation(fixture);
   assert.equal((await shares.getTaskSplitOptions("source")).ok, false);
   assert.equal((await shares.splitTask({taskId:"source",recipientId:"recipient",percent:"30",expectedRevision:1,requestId:randomUUID()})).ok,false);
-  const { mapTaskDetails } = await import("../src/server/tasks/queries");
+  const { mapTaskDetails } = queries;
   const row=await fixture.database.task.findFirst({where:{id:"source"}});
   const [mapped]=await mapTaskDetails([row as never],{id:"worker",roles:["WORKER"]});
   assert.equal(mapped.personalQuantity,"7"); assert.equal(mapped.shareAmount,"700.00");
@@ -176,7 +183,7 @@ test("engineering DTO never presents retained legacy money as the current work p
   Object.assign(fixture.state().works[0], { paymentKind: "ENGINEERING", stagePayPoolId: "pool", poolWeightUnits: 1_000_000 });
   fixture.state().tasks[0].stageShareUnits = 1_000_000;
   const row = await fixture.database.task.findFirst({ where: { id: "source" } });
-  const { mapTaskDetails } = await import("../src/server/tasks/queries");
+  const { mapTaskDetails } = queries;
   const [mapped] = await mapTaskDetails([row as never], { id: "manager", roles: ["MANAGER"] });
   assert.equal(mapped.paymentKind, "ENGINEERING");
   assert.equal(mapped.workPriceSnapshot, null); assert.equal(mapped.workTotal, null); assert.equal(mapped.shareAmount, null);
@@ -245,4 +252,13 @@ test("исторический split replay сохраняет revalidation бе
   } finally {
     sessionActor = { id: "manager", name: "Manager", roles: ["MANAGER"] };
   }
+});
+
+// ESM namespace живёт дольше require.cache; stale owner обязан отказать.
+test("fixture ESM mapper rejects a closed owner while the current real mapper works", async () => {
+  const stale = await import("../src/server/tasks/queries");
+  const row = await fixture.database.task.findFirst({ where: { id: "source" } });
+  scope.restore(); prepareScope();
+  await assert.rejects(stale.mapTaskDetails([row as never], { id: "manager", roles: ["MANAGER"] }), /FIXTURE_SCOPE_CLOSED/);
+  assert.equal((await queries.mapTaskDetails([row as never], { id: "manager", roles: ["MANAGER"] })).length, 1);
 });
