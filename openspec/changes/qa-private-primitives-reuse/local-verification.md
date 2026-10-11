@@ -35,3 +35,15 @@ Offline frozen install --ignore-scripts: pnpm11.10.0, +724 пакета/download
 ## Независимое review и staging
 
 Независимое SOURCE_CODE_REVIEW_GO получено для exact helper529b3c83/testf0854ef1 и четырёх QA-модулей; ROOT_ATOMIC_COMMIT_GO подтверждён. Коммит выполняется после повторной проверки этих шести SHA. Push/обычный merge/CI и реальная staging-приёмка ещё не выполнены. Main/production остаются запрещены. SAFETY-RULES D:/Projects/pero_infra/infra-recovery/SAFETY-RULES.md соблюдаются; STOP при guard mismatch. Restic/dumps/reset/seed/new stand не применялись.
+
+## Исправление платформенного gzip-теста для CI — 11.10.2026
+
+Root сообщил actual CI failure test1844: frozen Windows gzip fixture имеет OS byte9=10, Unix runtime выдаёт3; декодированный payload65bytes и SHA0fffa52d18d0fa9989f5a9b5f17eba1f7205d9c747aef99279d41514fb001be6 совпадают. Это зависимость теста от платформы, helper/wire/primitives не изменены.
+
+Изменены только qa-private-primitives.test.mjs и этот evidence. Новый тест независимо воспроизводит прежнее сжатие frozen UTF8 bytes на той же платформе: default gzip и level9; проверяет полные wire descriptors, decode65/SHA и XFL0/2. Frozen compressed bytes сравниваются полностью, ожидаемый OS byte9 адаптируется строго к известной платформе3/10. Все остальные header/DEFLATE payload/CRC/ISIZE bytes остаются точными. Negative controls меняют magic/flags/mtime/XFL/payload/trailer, неверный известный и неизвестный OS — каждый отвергается.
+
+Affected command: node --test tests/qa-private-primitives.test.mjs tests/warehouse-units-stage-wire.test.mjs tests/product-draft-stage-wire.test.mjs. Actual f6965c exit0/22PASS (11primitive+7draft wire+4warehouse wire), включая прежние лимиты/scopes/error policies. Это точечная проверка; полный201suite и реальная Linux CI после правки не объявлены выполненными. Scoped eslint only changed test --max-warnings0:17015→74c97f exit0. TSC не требуется для test-only.mjs; версии/package/env не менялись.
+
+Первый default-sandbox запуск7e745e: новые compression cases прошли, две прежние own-FS cases отказали EPERMmkdir до создания артефактов; scoped authorized run дал22PASS. Target Git-C routing anomaly был read-only и согласован: exact Root worktree list5a3e5d, pointer6cec3c и exec workdir162 подтвердили feature162@ebee3eaff92dcecf4486c10f343892e8f540b050/clean; Root main/docs не изменялись.
+
+Independent review/commit/paired normal merge/CI/staging по этой правке ещё NOT_RUN. SQL/HTTP/browser/S3/staging/production/restic/dumps/newDB effects0.
