@@ -46,7 +46,7 @@ import {
 } from "@/lib/product-statuses";
 import { cn } from "@/lib/utils";
 import type { SketchFilePreview } from "@/lib/product-hero";
-import { productStatusTargets, shouldRollbackProductStatus } from "@/lib/product-percentage-ui";
+import { currentProductStatusTargets, shouldRollbackProductStatus } from "@/lib/product-percentage-ui";
 import { changeProductStatus, createProduct } from "@/server/products/actions";
 
 export interface ProductCard {
@@ -225,14 +225,7 @@ export function ProductsTab({
     const toStatus = over.id as ProductStatus;
     if (!product || product.status === toStatus) return;
 
-    const allowedTargets = productStatusTargets(actorRoles, {
-      from: product.status,
-      projectStage,
-      assignedEngineer: product.engineerId === actorUserId,
-      participant: product.isEngineeringParticipant,
-      hasB3d: product.hasB3d,
-      noModel: product.noModel,
-    });
+    const allowedTargets = currentProductStatusTargets(actorRoles, { ...product, projectStage }, actorUserId);
     if (!allowedTargets.includes(toStatus)) {
       toast.error("Нет права на такой переход статуса");
       return;
@@ -292,22 +285,8 @@ export function ProductsTab({
               products={products.filter((product) => product.status === status.id)}
               currency={currency}
               showAmount={showAmount}
-              canDrag={(product) => productStatusTargets(actorRoles, {
-                from: product.status,
-                projectStage,
-                assignedEngineer: product.engineerId === actorUserId,
-                participant: product.isEngineeringParticipant,
-                hasB3d: product.hasB3d,
-                noModel: product.noModel,
-              }).some(target => target !== product.status)}
-              canDrop={!!activeProduct && productStatusTargets(actorRoles, {
-                from: activeProduct.status,
-                projectStage,
-                assignedEngineer: activeProduct.engineerId === actorUserId,
-                participant: activeProduct.isEngineeringParticipant,
-                hasB3d: activeProduct.hasB3d,
-                noModel: activeProduct.noModel,
-              }).includes(status.id)}
+              canDrag={(product) => currentProductStatusTargets(actorRoles, { ...product, projectStage }, actorUserId).some(target => target !== product.status)}
+              canDrop={!!activeProduct && currentProductStatusTargets(actorRoles, { ...activeProduct, projectStage }, actorUserId).includes(status.id)}
               onOpen={(product) => router.push(productDetailHref(product.number, projectProductsHref(projectId)))}
             />
           ))}
