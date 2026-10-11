@@ -47,6 +47,7 @@ export function ProductsView({
   pageSize,
   canManage,
   actorRoles,
+  actorUserId,
   showAmount,
   projectOptions,
   clientOptions,
@@ -62,6 +63,7 @@ export function ProductsView({
   pageSize: number;
   canManage: boolean;
   actorRoles: readonly Role[];
+  actorUserId: string;
   showAmount: boolean;
   projectOptions: { value: string; label: string; hint?: string }[];
   clientOptions: { value: string; label: string; hint?: string }[];
@@ -122,6 +124,7 @@ export function ProductsView({
           initialProducts={products}
           canManage={canManage}
           actorRoles={actorRoles}
+          actorUserId={actorUserId}
           showAmount={showAmount}
         />
       ) : (

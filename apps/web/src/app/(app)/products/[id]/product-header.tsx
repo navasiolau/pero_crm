@@ -13,7 +13,7 @@ import { ProductDeleteButton } from "@/components/product-delete-button";
 import { useProductInline } from "@/components/product-inline-provider";
 import { PRODUCT_STATUSES, productStatusLabels, productStatusStyles } from "@/lib/product-statuses";
 import { cn } from "@/lib/utils";
-import { productStatusTargets, shouldRollbackProductStatus } from "@/lib/product-percentage-ui";
+import { currentProductStatusTargets, shouldRollbackProductStatus } from "@/lib/product-percentage-ui";
 import { changeProductStatus } from "@/server/products/actions";
 
 export function ProductHeader({
@@ -51,10 +51,9 @@ export function ProductHeader({
   const [pending, startTransition] = useTransition();
   const [localStatus, setLocalStatus] = useState(product.status);
   const [statusError, setStatusError] = useState<string | null>(null);
-  const assignedEngineer = !!actorUserId && product.engineerId === actorUserId;
-  const allowedStatusTargets = productStatusTargets(actorRoles, { from: localStatus, projectStage: product.projectStage, assignedEngineer, participant: false, hasB3d: false, noModel: false });
+  const allowedStatusTargets = currentProductStatusTargets(actorRoles, { ...product, status: localStatus }, actorUserId);
   const engineerTarget = allowedStatusTargets[0];
-  const canEngineerMove = !canManage && actorRoles.includes("ENGINEER") && assignedEngineer && !!engineerTarget;
+  const canEngineerMove = !canManage && actorRoles.includes("ENGINEER") && !!engineerTarget;
   async function moveStatus(toStatus: ProductStatus) {
     setStatusError(null);
     if (!await inline.flush()) { setStatusError("Сначала сохраните цену, количество, инженера и настройки процентных этапов. Ошибки показаны рядом с полями."); return; }

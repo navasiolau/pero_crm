@@ -80,6 +80,7 @@ export default async function ProductsPage({
       pageSize={pageSize}
       canManage={hasAnyRole(role, MANAGER_ROLES)}
       actorRoles={role}
+      actorUserId={session.user.id}
       showAmount={canViewProductMoney(role)}
       hideEngineerFilter={role.includes("ENGINEER") && !hasAnyRole(role, MANAGER_ROLES)}
       engineerOptions={engineers.map((engineer) => ({
