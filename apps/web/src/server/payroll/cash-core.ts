@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { isValidPayrollMonth, payrollMonth } from "@/lib/payroll-month";
 import {activePaymentWhere} from '@/server/payments/active-records';
 import { Prisma } from "@prisma/client";
 import { calculateCashPayout, cashMovementDelta, isCashCurrency, parseCashAmount, type CashCurrency, type CashRates } from "@/lib/cash-ledger";
@@ -25,7 +26,7 @@ export function assertPayoutRole(actor: PayoutActor, kind: CashPayoutInput["kind
   if (!hasAnyRole(actor.roles, kind === "ADVANCE" ? ADVANCE_ROLES : FINANCE_ROLES)) fail("Недостаточно прав");
 }
 
-function normalizedInput(actor: PayoutActor, input: CashPayoutInput) {
+function normalizedInput(actor: PayoutActor, input: CashPayoutInput, now: Date) {
   assertPayoutRole(actor, input.kind);
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(input.requestId)) fail("Некорректный идентификатор запроса");
   if (!input.userId || !input.cashAccountId) fail("Выберите сотрудника и кассу");
@@ -34,8 +35,8 @@ function normalizedInput(actor: PayoutActor, input: CashPayoutInput) {
   const description = input.description?.trim() ?? "";
   const comment = input.comment?.trim() ?? "";
   if (input.kind === "ADVANCE" && !description) fail("Укажите описание работы");
-  if (input.kind === "SALARY" && !/^\d{4}-(0[1-9]|1[0-2])$/.test(input.month ?? "")) fail("Некорректный расчётный месяц");
-  const month = input.kind === "ADVANCE" ? new Date().toISOString().slice(0, 7) : input.month!;
+  if (input.kind === "SALARY" && !isValidPayrollMonth(input.month)) fail("Некорректный расчётный месяц");
+  const month = input.kind === "ADVANCE" ? payrollMonth(now) : input.month!;
   const fingerprint = createHash("sha256").update(JSON.stringify({ actorId: actor.id, kind: input.kind, userId: input.userId,
     cashAccountId: input.cashAccountId, cashAmount, expectedCashCurrency: input.expectedCashCurrency,
     description, comment, month: input.kind === "SALARY" ? month : null })).digest("hex");
@@ -62,7 +63,8 @@ export async function readOrgBalance(tx: Prisma.TransactionClient, _payrollRate:
 }
 
 export async function issuePayoutCore(actor: PayoutActor, input: CashPayoutInput, rates: CashRates, tx: Prisma.TransactionClient) {
-  const normalized = normalizedInput(actor, input); // role/input validation before any DB read
+  const now = new Date();
+  const normalized = normalizedInput(actor, input, now); // role/input validation before any DB read
   const receiptId = `payout-issue:${input.requestId}`;
   const receipt = await tx.changeLog.findUnique({ where: { id: receiptId } });
   if (receipt) {
@@ -78,7 +80,7 @@ export async function issuePayoutCore(actor: PayoutActor, input: CashPayoutInput
       userId: original.userId, month: original.month, eventId: null };
   }
 
-  if (rates.asOf !== new Date().toISOString().slice(0, 10)) fail("Дата расчёта изменилась; обновите форму");
+  if (rates.asOf !== now.toISOString().slice(0, 10)) fail("Дата расчёта изменилась; обновите форму");
 
   const [user, account] = await Promise.all([
     tx.user.findUnique({ where: { id: input.userId }, select: { id: true, name: true, active: true } }),
@@ -94,7 +96,7 @@ export async function issuePayoutCore(actor: PayoutActor, input: CashPayoutInput
   if (orgBalanceAfter.lt(0)) fail("Недостаточно средств на балансе организации");
   if (input.kind === "SALARY") {
     const [accrued, paid] = await Promise.all([
-      tx.payrollEntry.findMany({ where: { userId: user.id, month: { lt: new Date().toISOString().slice(0, 7) } }, select: { amount: true, currency: true, bynAmount: true } }),
+      tx.payrollEntry.findMany({ where: { userId: user.id, month: { lt: payrollMonth(now) } }, select: { amount: true, currency: true, bynAmount: true } }),
       tx.payout.findMany({ where: { userId: user.id }, select: { amount: true, payrollCurrency: true, bynAmount: true } }),
     ]);
     const due = requireHistoricalByn(accrued).sub(requireHistoricalByn(paid));

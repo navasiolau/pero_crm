@@ -1,3 +1,4 @@
+import { payrollMonth } from "@/lib/payroll-month";
 import {canAccrueOrdinarySalary,hasFrozenTaskPieceObligation} from "@/lib/compensation-policy";
 import { assertInternalCurrency, assertProjectMoneyCurrency } from "@/lib/internal-currency";
 import type { Prisma } from "@prisma/client";
@@ -97,7 +98,7 @@ export async function changeTaskStatusCore(actor: DomainActor, taskId: string, t
             const currency = task.allocationGroup?.currency ?? (await tx.orgSetting.findUnique({ where: { key: "payrollCurrency" } }))?.value ?? "BYN";
             try { assertProjectMoneyCurrency(task.project.currency); assertInternalCurrency(currency); }
             catch (error) { throw new CompletionError(error instanceof Error ? error.message : "Не определена валюта работы"); }
-            await tx.payrollEntry.create({ data: { userId: task.assigneeId, taskId: task.id, workId: task.work.id, projectId: task.projectId, amount, bynAmount: amount, currency, scheme: "PIECE", month: doneAt.toISOString().slice(0, 7), comment: `${task.title} · ${task.project.number}` } });
+            await tx.payrollEntry.create({ data: { userId: task.assigneeId, taskId: task.id, workId: task.work.id, projectId: task.projectId, amount, bynAmount: amount, currency, scheme: "PIECE", month: payrollMonth(doneAt), comment: `${task.title} · ${task.project.number}` } });
             payroll = { name: assignee.name, amount, currency };
           }
         }

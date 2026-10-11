@@ -1,5 +1,6 @@
 "use client";
 
+import { payrollMonth } from "@/lib/payroll-month";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Download, HandCoins, Plus, Trash2, Calculator } from "lucide-react";
@@ -259,7 +260,7 @@ export function FinancePayrollView({
 
   // Начисление — только за прошлый месяц (правило владельца): в текущем
   // месяце показываем приблизительную зарплату, кнопки начисления нет.
-  const isCurrentMonth = month >= new Date().toISOString().slice(0, 7);
+  const isCurrentMonth = month >= payrollMonth();
   // Кому требуется (до)начисление: расчёт от текущего оборота больше начисленного
   const pendingAccruals = turnoverAccruals.filter((accrual) => {
     const expected = round2((turnover.total * accrual.percent) / 100);

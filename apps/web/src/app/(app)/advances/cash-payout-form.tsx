@@ -1,5 +1,6 @@
 "use client";
 
+import { payrollMonth } from "@/lib/payroll-month";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { AlertCircle, CheckCircle2, RotateCcw } from "lucide-react";
@@ -141,7 +142,7 @@ export function CashPayoutForm({
       mode,
       payload,
       requestId: createRequestId(),
-      month: mode === "SALARY" ? (month ?? new Date().toISOString().slice(0, 7)) : undefined,
+      month: mode === "SALARY" ? (month ?? payrollMonth()) : undefined,
     };
     setSubmitting(true);
     onUncertainChange?.(true);
@@ -149,7 +150,7 @@ export function CashPayoutForm({
     try {
       const result = operation.mode === "ADVANCE"
         ? await issueAdvance({ ...operation.payload, requestId: operation.requestId })
-        : await addPayout(buildSalaryPayoutRetry(operation, month ?? new Date().toISOString().slice(0, 7)));
+        : await addPayout(buildSalaryPayoutRetry(operation, month ?? payrollMonth()));
       if (!result.ok) {
         setUncertain(null);
         onUncertainChange?.(false);

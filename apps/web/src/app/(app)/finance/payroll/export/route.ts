@@ -17,7 +17,8 @@ export async function GET(request: Request) {
   }
 
   const param = new URL(request.url).searchParams.get("month") ?? undefined;
-  const month = isValidMonth(param) ? param : currentMonth();
+  if (param !== undefined && !isValidMonth(param)) return new Response("Некорректный расчётный месяц", { status: 400 });
+  const month = param ?? currentMonth();
 
   const [summary, currency] = await Promise.all([
     getPayrollSummary(month),
