@@ -143,11 +143,20 @@ export function ProductsKanban({
   const { query } = useListParams();
   const visibleStatuses = visibleProductStatuses(actorRoles);
   const visibleRows = initialProducts.filter(product => visibleStatuses.some(status => status.id === product.status));
-  const [products, setProducts] = useState(visibleRows);
+  const [board, setBoard] = useState<{
+    products: ProductRow[];
+    source: ProductRow[] | null;
+    roles: readonly Role[];
+  }>(() => ({ products: visibleRows, source: initialProducts, roles: actorRoles }));
+  const products = board.products;
   const [activeId, setActiveId] = useState<string | null>(null);
 
   useEffect(() => {
-    setProducts(initialProducts.filter(product => visibleProductStatuses(actorRoles).some(status => status.id === product.status)));
+    setBoard({
+      products: initialProducts.filter(product => visibleProductStatuses(actorRoles).some(status => status.id === product.status)),
+      source: initialProducts,
+      roles: actorRoles,
+    });
   }, [initialProducts, actorRoles]);
 
   const sensors = useSensors(
@@ -155,17 +164,16 @@ export function ProductsKanban({
   );
 
   function applyStatus(productId: string, toStatus: ProductStatus) {
-    setProducts((prev) =>
-      prev.map((product) =>
+    setBoard((previous) => ({
+      ...previous,
+      // Локальное изменение не подтверждает строки нового серверного поиска.
+      source: null,
+      products: previous.products.map((product) =>
         product.id === productId
-          ? {
-              ...product,
-              status: toStatus,
-              statusChangedAt: new Date().toISOString(),
-            }
+          ? { ...product, status: toStatus, statusChangedAt: new Date().toISOString() }
           : product,
       ),
-    );
+    }));
   }
 
   function onDragStart(event: DragStartEvent) {
@@ -223,7 +231,7 @@ export function ProductsKanban({
       <KanbanScrollArea label="Канбан изделий" searchFocus={{
           query: searchText,
           cardId: products.find(item => item.number === searchText.trim())?.id ?? null,
-          ready: searchReady && products === initialProducts && !activeId,
+          ready: searchReady && board.source === initialProducts && board.roles === actorRoles && !activeId,
         }}>
         {visibleStatuses.map((status) => (
           <StatusColumn
