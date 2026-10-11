@@ -762,16 +762,6 @@
       ]
     },
     {
-      "file": "apps/web/tests/inline-percentage-projection.test.ts",
-      "block": "orphan helper projection",
-      "decision": "RETIRE",
-      "task": 156,
-      "reason": "Только после переноса null/zero/dirty/frozen/ACK на актуальный controller/UI.",
-      "remainingProtection": [
-        "apps/web/tests/product-percentage-rate-adjust.test.ts"
-      ]
-    },
-    {
       "file": "apps/web/tests/inline-engineer-fallback.test.ts",
       "block": "query explicitly distinguishes fallback member from real configuration even when revision0",
       "decision": "KEEP",
@@ -791,22 +781,12 @@
       ]
     },
     {
-      "file": "apps/web/tests/product-engineering-fund-ui.test.ts",
-      "block": "SSR old fund/helper blocks16–55",
-      "decision": "RETIRE",
-      "task": 156,
-      "reason": "Orphan UI только после проверки graph/compatibility; historic reader/facts не удаляются.",
-      "remainingProtection": [
-        "apps/web/tests/product-engineering-legacy.test.ts",
-        "apps/web/tests/work-shares-settlement.test.ts"
-      ]
-    },
-    {
-      "file": "apps/web/tests/product-engineering-fund-ui.test.ts",      "block": "request id falls back to cryptographic random bytes",
+      "file": "apps/web/tests/request-id.test.ts",
+      "block": "request id falls back to cryptographic random bytes when randomUUID is unavailable",
       "decision": "KEEP",
       "reason": "Живой createRequestId fallback используется формами.",
       "remainingProtection": [
-        "Перенести в отдельный live UUID suite в156."
+        "apps/web/tests/request-id.test.ts"
       ]
     },
     {

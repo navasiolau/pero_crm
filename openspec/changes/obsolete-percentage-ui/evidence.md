@@ -49,3 +49,15 @@ Original approved design60cc сохранён separately как approved-design-
 - DB/native SQL, models/rows/migrations changes, MinIO/storage, dumps/restic, Next full build, main/production — не выполнялись. Bundle/latency savings NOT_MEASURED.
 - Outbound network traffic отдельно не инструментировался: NOT_MEASURED. Ноль downloads install и blocked external engine mirror не являются доказанным сетевым counter для всего test-run; no-egress/native-row claims не делаются.
 - Работа153 commit761b0fc остаётся в её отдельной ветке неизменной;156 не копирует её или Finance147 WIP. Интеграция между ветками — обычным root merge.
+
+## Matrix maintenance156 — local verification pending
+
+Root назначил data-only maintenance перед integration. RED affb39: node apps/web/tests/coverage-baseline.mjs --check фактически отказал ENOENT на inline-percentage-projection.test.ts. Source/test/runtime/schema/CI и validator не изменяются. Active map18→16: два resolved RETIRE entries сохранены в retired-test-dispositions.md, UUID KEEP перенаправлен на live request-id.test.ts. Contract/target/CI-policy data и остальные active rows equal; original corrected baseline3819 SHA28f264d9b30245e188393973b02399e4ef96cc495f23573c1320f6c151069722 до/после equal. Supporting before/diff proof находится в ignored visualization qa156-matrix-maintenance. GREEN/check/tests/review фиксируются следующим отдельным evidence update, до фактических результатов не считаются PASS; staging NOT_RUN.
+
+### Matrix maintenance actual checks
+
+- GREEN b257e6: node apps/web/tests/coverage-baseline.mjs --check, exit0,19contracts/16active dispositions/27targets/323testFiles.19contract definitions, CI entry/baselinePolicy и15прочих active rows семантически unchanged; два RETIRE records архивированы, один UUID KEEP remapped. Новый measured V8/fullsuite не запускался.
+- Existing source-map/negative matrix guard suite8 и live request-id1:9/9 PASS,0fail/skip,1136.90ms, elevated4414d9/exit0. Первый default-sandbox f6a4ca отказал в tsx startup uv_os_get_passwd ENOMEM до cases; он сохраняется как tooling failure, не application failure или PASS. Один повтор использовал прежние Node/tsx без установки/обновлений/Source changes.
+- Strict OpenSpec6468fd PASS, git diff check19c8f5 PASS; git diff src/tests/prisma/packages/lock/CI пуст. JS/TS paths не менялись, lint/fullTSC не требуются для этих JSON/Markdown изменений; прежние109/TSC72044 доказательства приложения не повторялись.
+- Matrix physical SHA c9dbf5158f07f6cc4ec8c4759f7e63d22a27c4c42be5adfed993674ac6c65b4c→55515e6ca2764d0eb308657a27f5388e3f062268056f8c3f1d7bee7bbd2f14e7. Frozen corrected3819report SHA28f264d9b30245e188393973b02399e4ef96cc495f23573c1320f6c151069722 before/after byteequal; baseline/raw не правились. Validator/core tests unchanged.
+- Scope этой доработки: docs/testing/contract-matrix.json плюс proposal/design/tasks/evidence/retired-test-dispositions.md задачи156. Independent CODE review и related commit pending; staging acceptance NOT_RUN. Main/production/SQL/restic/dumps не затрагивались.

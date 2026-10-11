@@ -94,3 +94,7 @@ Source deletion использует literal абсолютные пути вн�
 ## Migration Plan
 
 Миграций нет. После planning scope-review и отдельного ROOT_RELEASE_IMPLEMENTATION: feature/156 → local checks → independent CODE_GO → разрешённый atomic commit → root normal merge staging/CI → actual staging acceptance. Main/production запрещены до прямого указания владельца. Implementation выполнена после independent DESIGN_GO60cc и отдельного ROOT_RELEASE. Local checks — по evidence.md; независимое CODE review пройдено, root разрешил atomic commit; staging acceptance NOT_RUN.
+
+## Reviewed map maintenance156
+
+Перед staged integration фактический --check affb39 упал ENOENT на удалённом inline-percentage-projection.test.ts: validateMatrix читает каждый active disposition.file, включая RETIRE. Minimal data-only scope: docs/testing/contract-matrix.json плюс proposal/design/tasks/evidence и retired-test-dispositions.md этой задачи. Ровно два resolved RETIRE rows убраны из active18→16 и сохранены исторически; UUID KEEP перенаправлен на фактический request-id.test.ts. Все19contracts/27targets/CI/baselinePolicy и прочие active rows семантически неизменны. Validator и source guards не ослаблены/не редактируются; fresh current --check отдельно от frozen3819coverage, полный baseline не повторять.

@@ -29,3 +29,7 @@
 - Не включать engineering-fund-view, server/products/engineering-view, preview старых обязательств, settlement DTO, financial models/rows/migrations, shared product-percentage-ui, request-id implementation или действующую SinglePercentageRow.
 - Product-card chunks и executed-JS savings не измерены и не обещаются. Версии и lockfile не меняются; БД/хранилища/production не затрагиваются.
 - Scope прошёл independent DESIGN_GO и ROOT_RELEASE_IMPLEMENTATION; локальная реализация и проверки зафиксированы в evidence.md. Independent CODE review пройден; root разрешил atomic156commit, фактический SHA фиксируется Git. Staging-приёмка не выполнена; main запрещён.
+
+## Reviewed map maintenance156
+
+Root дополнительно разрешил data-only исправление карты159: две завершённые RETIRE записи архивируются в retired-test-dispositions.md с parent/blob/retirement provenance; live UUID KEEP указывает на request-id.test.ts. Validator/core/CI/contracts/targets не меняются. Это уточняет документацию уже выполненного удаления; source/test allowlist6 и production поведение прежние.

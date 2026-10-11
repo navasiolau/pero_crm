@@ -20,3 +20,10 @@
 ## 4. Staging acceptance
 
 - [ ] 4.1 После root normal merge/CI принять actual staging SHA/image/health и read-only management/limited-employee product-card scenarios с прежним видом/own amounts/null-zero/frozen values; source inspection/build не заменяют runtime/visual acceptance, до результата STAGING_NOT_RUN, main/production запрещены.
+
+## 5. Matrix maintenance156
+
+- [x] 5.1 В своём feature/156 воспроизвести --check ENOENT на удалённом test file; сохранить affb39 и source/code unchanged.
+- [x] 5.2 Архивировать ровно две resolved RETIRE rows с parent/Gitblob/retirement provenance и remap live UUID KEEP; проверить19contracts/27targets/CI-policy/остальные active rows unchanged, validator/source0changes, frozen3819byteequal.
+- [x] 5.3 Подтвердить GREEN --check b257e6,9existing map/UUID guards4414d9, strict/diff и source/test/core unchanged; default-sandbox startup failure сохранён отдельно, fullTSC/новые tests не нужны.
+- [ ] 5.4 Получить independent CODE_GO exactdata/doc diff и создать related maintenance commit только по rootGO; actual staging остаётся отдельной4.1.
