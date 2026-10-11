@@ -50,7 +50,7 @@ import { OFFICE_WRITE_ROLES, hasAnyRole } from "@/lib/roles";
 import { saveViewPreference } from "@/server/preferences-actions";
 import { changeTaskStatus } from "@/server/tasks/actions";
 import { addManualTime, startTimer, stopTimer } from "@/server/time/actions";
-import type { TaskDetails } from "@/components/task-dialog";
+import type { TaskDetails } from "@/lib/task-details";
 
 // Ручной ввод времени — только если есть офисная роль (комбинированные
 // роли, §4): чистый работник/монтажник вводит время только таймером.

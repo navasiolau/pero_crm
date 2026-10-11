@@ -1,3 +1,4 @@
+import { payrollMonth } from "@/lib/payroll-month";
 import { Prisma, type ProductPercentageKind, type ProductStatus } from '@prisma/client';
 import { assertProjectMoneyCurrency } from "@/lib/internal-currency";
 import type { DomainActor } from '@/server/projects/core';
@@ -37,7 +38,7 @@ export async function captureDirectPercentage(tx:Prisma.TransactionClient,actor:
  if(recipientSnapshot){
  const share=await tx.productPercentageCompletionShare.create({data:{completionId:completion.id,userId:recipientSnapshot.id,userNameSnapshot:recipientSnapshot.name,shareUnits:1000000,...(amount!==null?{amount,bynAmount:amount,projectAmount:amount}:{})}});
  if(amount!==null&&new Prisma.Decimal(amount).gt(0)){
- await tx.payrollEntry.create({data:{userId:recipientSnapshot.id,productId,projectId:product.projectId,percentageCompletionShareId:share.id,amount,bynAmount:amount,projectAmount:amount,projectCurrency:'BYN',currency:'BYN',scheme:policy.scheme,month:now.toISOString().slice(0,7),comment:`${policy.label} изделия ${product.number}`}});
+ await tx.payrollEntry.create({data:{userId:recipientSnapshot.id,productId,projectId:product.projectId,percentageCompletionShareId:share.id,amount,bynAmount:amount,projectAmount:amount,projectCurrency:'BYN',currency:'BYN',scheme:policy.scheme,month:payrollMonth(now),comment:`${policy.label} изделия ${product.number}`}});
  const event=await tx.domainEvent.create({data:{type:'payroll.accrued',actor:actor.id,payload:{userId:recipientSnapshot.id,productId,projectId:product.projectId,kind,amount:Number(amount)}}});
  effects?.eventIds.push(event.id);effects?.earnings.push({userId:recipientSnapshot.id,userName:recipientSnapshot.name,amount,currency:'BYN'});
  }
@@ -82,7 +83,7 @@ export async function settleSkippedPercentage(tx:Prisma.TransactionClient,actor:
     let share=(completion.shares ?? []).at(0);
     share=share?await tx.productPercentageCompletionShare.update({where:{id:share.id},data:{userId:recipientSnapshot.id,userNameSnapshot:recipientSnapshot.name,shareUnits:1000000,amount,bynAmount:amount,projectAmount:amount}}):await tx.productPercentageCompletionShare.create({data:{completionId:completion.id,userId:recipientSnapshot.id,userNameSnapshot:recipientSnapshot.name,shareUnits:1000000,amount,bynAmount:amount,projectAmount:amount}});
     if(new Prisma.Decimal(amount).gt(0)){
-      await tx.payrollEntry.create({data:{userId:recipientSnapshot.id,productId,projectId:product.project.id,percentageCompletionShareId:share.id,amount,bynAmount:amount,projectAmount:amount,projectCurrency:'BYN',currency:'BYN',scheme:policy.scheme,month:now.toISOString().slice(0,7),comment:`${policy.label} изделия ${product.number}`}});
+      await tx.payrollEntry.create({data:{userId:recipientSnapshot.id,productId,projectId:product.project.id,percentageCompletionShareId:share.id,amount,bynAmount:amount,projectAmount:amount,projectCurrency:'BYN',currency:'BYN',scheme:policy.scheme,month:payrollMonth(now),comment:`${policy.label} изделия ${product.number}`}});
       const event=await tx.domainEvent.create({data:{type:'payroll.accrued',actor:actor.id,payload:{userId:recipientSnapshot.id,productId,projectId:product.project.id,kind,amount:Number(amount)}}});
       effects?.eventIds.push(event.id);effects?.earnings.push({userId:recipientSnapshot.id,userName:recipientSnapshot.name,amount,currency:'BYN'});
     }
@@ -123,7 +124,7 @@ export async function adjustSettledPercentage(tx:Prisma.TransactionClient,actor:
   const delta=new Prisma.Decimal(newAmount).minus(oldAmount).toFixed(2);
   const adjustment=await tx.productPercentageAdjustment.create({data:{completionShareId:share.id,recipientId:share.userId,actorId:actor.id,clientMutationId,configRevision:config!.revision,kind,unitPrice:product.expectedPrice,quantity:product.quantity,ratePercent:rate,previousAmount:oldAmount,amount:newAmount,delta,calculationVersion:4}});
   if(delta!=='0.00'){
-    await tx.payrollEntry.create({data:{userId:share.userId,productId,projectId:product.project.id,percentageAdjustmentId:adjustment.id,amount:delta,bynAmount:delta,projectAmount:delta,projectCurrency:'BYN',currency:'BYN',scheme:policy.scheme,month:now.toISOString().slice(0,7),comment:`Корректировка ${policy.label} изделия ${product.number} (было ${oldAmount} → стало ${newAmount})`}});
+    await tx.payrollEntry.create({data:{userId:share.userId,productId,projectId:product.project.id,percentageAdjustmentId:adjustment.id,amount:delta,bynAmount:delta,projectAmount:delta,projectCurrency:'BYN',currency:'BYN',scheme:policy.scheme,month:payrollMonth(now),comment:`Корректировка ${policy.label} изделия ${product.number} (было ${oldAmount} → стало ${newAmount})`}});
   }
   await tx.changeLog.create({data:{actorType:'user',actorId:actor.id,actorName:actor.name,source:actor.source,entity:'product',entityId:productId,action:'percentage.rateAdjust',newValue:{kind,oldRate:completion.ratePercentSnapshot?.toString()??null,newRate:rate,oldAmount,newAmount,delta}}});
   return{adjusted:true,delta,...(delta!=='0.00'?{notice:{userId:share.userId,label:policy.label,number:product.number,oldAmount,newAmount,delta}}:{})};

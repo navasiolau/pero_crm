@@ -32,7 +32,8 @@ export default async function FinancePayrollPage({
   if (!hasAnyRole(session.user.roles, FINANCE_ROLES)) redirect("/");
 
   const { month: param } = await searchParams;
-  const month = isValidMonth(param) ? param : currentMonth();
+  if (param !== undefined && !isValidMonth(param)) redirect("/finance/payroll?month=" + currentMonth());
+  const month = param ?? currentMonth();
 
   const [summary, currency, turnover, turnoverAccruals, users, orgBalance, dues, estimates, cashOptions] =
     await Promise.all([

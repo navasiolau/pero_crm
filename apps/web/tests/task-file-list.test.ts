@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {createRequire,Module} from 'node:module';
 import * as React from 'react';
-import type {TaskDetails} from '../src/components/task-dialog';
+import type {TaskDetails} from '../src/lib/task-details';
 import type {FileList} from '../src/components/file-list';
 const require=createRequire(import.meta.url),states:unknown[]=[];let cursor=0,refreshes=0,closed=0,deleteOk=true;
 function inject(name:string,exports:Record<string,unknown>){const file=require.resolve(name),stub=new Module(file);stub.filename=file;stub.loaded=true;stub.exports=exports;require.cache[file]=stub;}

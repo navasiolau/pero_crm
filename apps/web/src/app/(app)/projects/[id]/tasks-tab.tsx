@@ -34,8 +34,8 @@ import {
   TASK_TYPES,
   taskStatusBadge,
   taskStatusLabels,
-  type TaskDetails,
 } from "@/components/task-dialog";
+import type { TaskDetails } from "@/lib/task-details";
 import {WorkerTaskAllocationDialog,type WorkerAllocationData} from "@/components/worker-task-allocation-dialog";
 import {WorkDialog} from "@/components/work-dialog";
 import type {WorkOperation} from "@/server/works/queries";

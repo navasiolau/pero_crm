@@ -15,7 +15,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { changeTaskStatus } from "@/server/tasks/actions";
-import type { TaskDetails } from "@/components/task-dialog";
+import type { TaskDetails } from "@/lib/task-details";
 
 // Обязательное фактическое время при «Выполнена» (§9):
 // если по задаче нет записей времени — спрашиваем перед закрытием.

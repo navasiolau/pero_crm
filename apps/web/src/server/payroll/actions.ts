@@ -5,34 +5,33 @@ import { randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
 
-import {canAccrueOrdinarySalary} from "@/lib/compensation-policy";
+
 import { INTERNAL_CURRENCY, INTERNAL_CURRENCY_ERROR } from "@/lib/internal-currency";
-import { historicalByn, BYN_UNAVAILABLE_REASON } from "@/lib/history-byn";
+import { BYN_UNAVAILABLE_REASON } from "@/lib/history-byn";
 import { prisma } from "@/lib/prisma";
 import { formatAmount } from "@/lib/format";
 import { writeChangeLog } from "@/server/plugins/changelog";
-import { emitDomainEvent } from "@/server/plugins/events";
+import { dispatchEvent } from "@/server/plugins/events";
 import { notifyOrg, notifyPerson } from "@/server/notifications/notify";
 import { requireAdmin, requireFinance } from "@/server/require-role";
 import { withTaskTransaction } from "@/server/tasks/transaction";
 import { assertPayrollCurrencyChange } from "@/server/product-stage-pay/core";
 import { assertPercentagePayrollCurrencyChange } from "@/server/product-percentage-pay/core";
 import { executeCashPayout } from "./cash-service";
+import { accrueTurnoverCore } from "./turnover-core";
 import { calculateCashPayout, isCashCurrency, parseCashRate } from "@/lib/cash-ledger";
 import { listCashAccounts } from "@/server/finance/queries";
 import { getNbrbRate } from "@/server/finance/nbrb";
 
 import {
-  currentMonth,
   getEmployeeDues,
-  getMonthTurnover,
   getOrgBalance,
   getPayrollCurrency,
   isValidMonth,
   round2,
 } from "./queries";
 
-const MONTH_RE = /^\d{4}-\d{2}$/;
+
 
 function revalidatePayroll() {
   revalidatePath("/payroll");
@@ -48,7 +47,7 @@ const payoutSchema = z.object({
   cashAccountId: z.string().optional(),
   expectedCashCurrency: z.string().optional(),
   requestId: z.string().optional(),
-  month: z.string().regex(MONTH_RE, "Месяц в формате ГГГГ-ММ"),
+  month: z.string().refine(isValidMonth, "Некорректный расчётный месяц"),
   kind: z.enum(["SALARY", "ADVANCE"]).default("SALARY"),
   comment: z.string().optional(),
 });
@@ -101,99 +100,32 @@ export async function deletePayout(
 // Сумма начисления всегда сравнивается с ТЕКУЩИМ оборотом: вырос — создаётся
 // доначисление разницы, снизился — не трогаем (переплату разбирает вручную).
 
+async function attemptPayrollEffect(effect: () => unknown): Promise<void> {
+  try { await effect(); } catch { /* Сохранённое начисление и его outbox остаются подтверждёнными. */ }
+}
+
 export async function accrueTurnover(
   month: string,
 ): Promise<{ ok: boolean; error?: string; accruedCount?: number }> {
   const session = await requireFinance();
-  if (!isValidMonth(month)) return { ok: false, error: "Некорректный месяц" };
-  if (month >= currentMonth()) {
-    return {
-      ok: false,
-      error: "Начислять можно только за прошлый месяц — текущий ещё не закрыт",
-    };
+  const result = await accrueTurnoverCore({ id: session.user.id, name: session.user.name ?? "",
+    roles: session.user.roles, source: "web" }, month, withTaskTransaction).catch((error: unknown) => ({
+      ok: false as const, error: error instanceof Error ? error.message : "Не удалось начислить процент от оборота",
+    }));
+  if (!result.ok) return { ok: false, error: result.error };
+  for (const earning of result.earnings) {
+    await attemptPayrollEffect(() => dispatchEvent(earning.eventId));
+    await attemptPayrollEffect(() => notifyPerson({ userId: earning.userId, type: "payroll.accrued",
+      title: `${earning.isTopUp ? "Доначислена" : "Начислена"} зарплата: ${formatAmount(earning.amount, result.currency)}`,
+      body: `${earning.percent}% от оборота за ${month}`, link: "/payroll" }));
   }
-
-  const { total } = await getMonthTurnover(month);
-  const currency = INTERNAL_CURRENCY;
-  const candidates = await prisma.user.findMany({
-    where: { active: true, payScheme: "PERCENT_TURNOVER", payPercent: { gt: 0 } },
-    select: { id: true, name: true, payPercent: true, roles: true },
-  });
-  const users = candidates.filter(user => canAccrueOrdinarySalary(user.roles));
-  if (users.length === 0) {
-    return { ok: false, error: "Нет сотрудников со схемой «% от оборота»" };
+  if (result.accruedCount > 0) {
+    await attemptPayrollEffect(() => notifyOrg({ type: "payroll.orgAccrued", title: `Начислено % от оборота за ${month}: ${result.accruedCount} сотр.`,
+      body: `Оборот ${formatAmount(result.total, result.currency)}`, link: "/finance/payroll", exceptUserId: session.user.id }));
   }
-
-  const existing = await prisma.payrollEntry.findMany({
-    where: { month, scheme: "PERCENT_TURNOVER", userId: { in: users.map((user) => user.id) } },
-    select: { userId: true, amount: true, currency: true, bynAmount: true },
-  });
-  const accruedMap = new Map<string, Prisma.Decimal>();
-  for (const row of existing) {
-    const amount = historicalByn(row);
-    if (amount === null) return { ok: false, error: BYN_UNAVAILABLE_REASON };
-    accruedMap.set(row.userId, (accruedMap.get(row.userId) ?? new Prisma.Decimal(0)).plus(amount));
-  }
-  let accruedCount = 0;
-  for (const user of users) {
-    const percent = Number(user.payPercent);
-    const expected = new Prisma.Decimal(total).mul(percent).div(100).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
-    const already = accruedMap.get(user.id) ?? new Prisma.Decimal(0);
-    const diff = expected.minus(already).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP).toNumber();
-    if (diff <= 0) continue; // начислено актуально или больше расчётного
-    const isTopUp = already.gt(0);
-    await prisma.payrollEntry.create({
-      data: {
-        userId: user.id,
-        projectId: null, // начисление на организацию целиком, не на проект
-        amount: diff,
-        bynAmount: diff,
-        currency,
-        scheme: "PERCENT_TURNOVER",
-        month,
-        comment: isTopUp
-          ? `${percent}% от оборота за ${month} · доначисление (оборот ${formatAmount(total, currency)})`
-          : `${percent}% от оборота за ${month} · оборот ${formatAmount(total, currency)}`,
-      },
-    });
-    accruedCount += 1;
-    await writeChangeLog({
-      actorType: "user",
-      actorId: session.user.id,
-      actorName: session.user.name ?? undefined,
-      entity: "payrollEntry",
-      entityId: `${user.id}:${month}`,
-      action: isTopUp ? "accrue-topup" : "accrue",
-      newValue: { user: user.name, scheme: "PERCENT_TURNOVER", amount: diff, month },
-    });
-    await emitDomainEvent(
-      "payroll.accrued",
-      { userId: user.id, scheme: "PERCENT_TURNOVER", amount: diff, month },
-      session.user.id,
-    );
-    await notifyPerson({
-      userId: user.id,
-      type: "payroll.accrued",
-      title: `${isTopUp ? "Доначислена" : "Начислена"} зарплата: ${formatAmount(diff, currency)}`,
-      body: `${percent}% от оборота за ${month}`,
-      link: "/payroll",
-    });
-  }
-
-  if (accruedCount > 0) {
-    await notifyOrg({
-      type: "payroll.orgAccrued",
-      title: `Начислено % от оборота за ${month}: ${accruedCount} сотр.`,
-      body: `Оборот ${formatAmount(total, currency)}`,
-      link: "/finance/payroll",
-      exceptUserId: session.user.id,
-    });
-  }
-
-  revalidatePayroll();
-  return { ok: true, accruedCount };
+  await attemptPayrollEffect(revalidatePayroll);
+  return { ok: true, accruedCount: result.accruedCount };
 }
-
 // ─── «Рассчитать всех» (§10): массовые выплаты по задолженности ─────────────
 // Каждому сотруднику с долгом создаётся выплата min(долг, остаток баланса)
 // с комментарием «Выплата зарплаты от <текущая дата>». Если баланса не

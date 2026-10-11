@@ -42,3 +42,8 @@
 - CODE_REVIEW: PASS. Независимый reviewer подтвердил CODE_REVIEW_GO129 после проверки финального tsc/evidence; actionable замечаний нет.
 - FINAL_TYPECHECK: PASS, pnpm --filter @pero/web exec tsc --noEmit --incremental false, exit0.
 - STAGING: NOT_RUN. Требуются принятый deployed SHA/образ и health, реальная карточка с thumbnail/fullscreen, обычный и финансовый/логистический PDF view/печать, download SHA256, HTML/SVG legacy thumb deny и actor ACL. Main запрещён владельцем.
+## Auxiliary staging preparation — source-only, 11.10.2026
+
+New129 cold RED import-missing → GREEN7/7 (fbb526 exit0). Meaningful negatives: invalid scope/foreign key/modified original before delete, durable PRE falsy failure before first effect, thumb returning original bytes,304 Content-Length. Scoped stdin lint of129 source/test under identical existing config/deps: ab2b68/df751a exit0, no warnings. Dependencies not installed/changed.
+
+Actual SQL/S3/HTTP/session/stage/browser/native print: NOT_RUN (effects0). Independent review and current accepted deployed SHA/catalog/source/owned fixture approval remain mandatory before Root ONE. Stage acceptance tasks below/above remain unchecked.

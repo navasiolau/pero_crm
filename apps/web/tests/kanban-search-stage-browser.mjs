@@ -10,7 +10,7 @@ import {chromium,expect} from '@playwright/test';
 import {disableKanbanQaServiceWorkerApi} from './kanban-cover-staging-browser.mjs';
 import {normalizeListQuery} from '../src/lib/list-state.ts';
 import {encodeListFilterValue} from '../src/lib/list-filter-values.ts';
-import {SEARCH117_NAMESPACE,canonical117,assertCurrentCertificate117} from './kanban-search-owned-protocol.mjs';
+import {SEARCH117_NAMESPACE,COHORT163_NAMESPACE,COHORT163_ACTORS,canonical117,digest117,ownTerm117,assertCurrentCertificate117} from './kanban-search-owned-protocol.mjs';
 
 export const SEARCH_STAGE_ORIGIN='https://staging-crm.peromebel.by';
 const ROOT=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../..');
@@ -36,7 +36,7 @@ export function validateKanbanSearchHandoff(input={}){
  for(const key of ['createdActorIds','createdClientIds','createdProjectIds','createdProductIds'])need(Array.isArray(checkpoint[key])&&checkpoint[key].length>0&&checkpoint[key].length<=32&&checkpoint[key].every(id)&&new Set(checkpoint[key]).size===checkpoint[key].length,'K117_CREATED_ID_SET_INVALID');
  need(checkpoint.createdFileIds===undefined||Array.isArray(checkpoint.createdFileIds)&&checkpoint.createdFileIds.length<=64&&checkpoint.createdFileIds.every(id)&&new Set(checkpoint.createdFileIds).size===checkpoint.createdFileIds.length,'K117_CREATED_FILE_SET_INVALID');
  need(id(profile?.id)&&Array.isArray(checkpoint.createdActorIds)&&checkpoint.createdActorIds.includes(profile.id)&&
-  (rolesSame(profile.roles,['MANAGER'])||rolesSame(profile.roles,['ADMIN']))&&rolesSame(profile.roles,checkpoint.actor?.roles)&&checkpoint.actor.id===profile.id,'K117_FRESH_OWN_ACTOR_REQUIRED');
+  (checkpoint.version===2?cohortActor163(checkpoint,profile):rolesSame(profile.roles,['MANAGER'])||rolesSame(profile.roles,['ADMIN']))&&rolesSame(profile.roles,checkpoint.actor?.roles)&&checkpoint.actor.id===profile.id,'K117_FRESH_OWN_ACTOR_REQUIRED');
  need(exact(subjects,['client','project','product'])&&id(subjects.client?.id)&&id(subjects.project?.id)&&id(subjects.product?.id)&&
   checkpoint.createdClientIds?.includes(subjects.client.id)&&checkpoint.createdProjectIds?.includes(subjects.project.id)&&checkpoint.createdProductIds?.includes(subjects.product.id),'K117_OWN_SUBJECTS_REQUIRED');
  const {client,project,product}=subjects;
@@ -55,14 +55,16 @@ export function validateKanbanSearchHandoff(input={}){
   return{name:cookie.name,value:cookie.value,url:origin,httpOnly:true,secure:true,sameSite:'Lax'};
  });
  need(!input.basicAuth||(typeof input.basicAuth.username==='string'&&typeof input.basicAuth.password==='string'),'K117_PRIVATE_BASIC_AUTH_INVALID');
+ if(checkpoint.version===2)validateCohortHandoff163(checkpoint,identity);
  const terms={projects:[project.number,tokens.projectTitle,tokens.client,tokens.technical,tokens.productTitle],products:[product.number,tokens.productTitle,tokens.client,tokens.technical,tokens.projectTitle]};
  return{origin,revision:expectedRevision,runId:checkpoint.runId,preSha256:checkpoint.originalPreSha256,checkpointSignature:checkpoint.signature,actorId:profile.id,roles:[...profile.roles],cookies,
   actionId:action.id,actionManifestSha256:action.manifestSha256,subjects:structuredClone(subjects),tokens:{...tokens},terms,
+  ownPrefix:checkpoint.version===2,readPaths:checkpoint.version===2?[...checkpoint.readPaths]:[],readonlyActions:checkpoint.version===2?checkpoint.actionGrants.filter(g=>g.actor===checkpoint.actors.find(a=>a.id===profile.id).key):[],preferenceAllowed:checkpoint.version!==2||rolesSame(profile.roles,['MANAGER']),
   ownIds:{projects:[...checkpoint.createdProjectIds],products:[...checkpoint.createdProductIds],files:[...(checkpoint.createdFileIds??[])]},originalPreferences:structuredClone(originals)};
 }
 
 export function kanbanSearchQuery(section,term,binding){
- need(['projects','products'].includes(section)&&(term===''||binding.terms[section].includes(term)),'K117_QUERY_TERM_NOT_OWNED');
+ need(['projects','products'].includes(section)&&ownTerm117(term,binding.terms[section],binding.ownPrefix===true),'K117_QUERY_TERM_NOT_OWNED');
  const params=new URLSearchParams({view:'kanban'});if(term)params.set('q',term);
  const ownId=section==='projects'?binding.subjects.client.id:binding.subjects.project.id;
  params.set(section==='projects'?'client':'project',encodeListFilterValue([ownId]));params.set('active','0');
@@ -77,7 +79,9 @@ export function kanbanSearchRequest({url,method,headers={},body='',prefetch=fals
  if(parsed.origin!==binding.origin||parsed.username||parsed.password)return{kind:'deny',code:'K117_CROSS_ORIGIN_FORBIDDEN'};
  const board=parsed.pathname==='/projects'||parsed.pathname==='/products',section=parsed.pathname.slice(1);
  if(method==='POST'){
-  if(!board||headers['next-action']!==binding.actionId)return{kind:'abort-unrelated-action',code:'K117_OTHER_POST_BLOCKED'};
+  const grant=binding.readonlyActions?.find(g=>g.id===headers['next-action']&&g.paths.includes(parsed.pathname));
+  if(grant){try{need(headers.origin===binding.origin&&/^(?:text\/plain|application\/json)(?:;|$)/i.test(headers['content-type']??'')&&body==='[]','K117_READONLY_ACTION_ARGS_SCOPE');if(board)canonicalQuery(section,parsed.search.slice(1),binding);else need(!parsed.search,'K117_READONLY_DETAIL_QUERY_SCOPE');return{kind:'continue-readonly-action'};}catch(error){return{kind:'deny',code:safeCode(error)};}}
+  if(binding.preferenceAllowed===false||!board||headers['next-action']!==binding.actionId)return{kind:'abort-unrelated-action',code:'K117_OTHER_POST_BLOCKED'};
   try{
    canonicalQuery(section,parsed.search.slice(1),binding);
    need(headers.origin===binding.origin&&/^(?:text\/plain|application\/json)(?:;|$)/i.test(headers['content-type']??''),'K117_PREFERENCE_HTTP_BOUNDARY');
@@ -91,6 +95,7 @@ export function kanbanSearchRequest({url,method,headers={},body='',prefetch=fals
  if(board){
   try{const params=new URLSearchParams(parsed.search);if(params.has('_rsc')){need(params.getAll('_rsc').length===1&&/^[A-Za-z0-9_.-]{1,128}$/.test(params.get('_rsc')),'K117_RSC_QUERY_INVALID');params.delete('_rsc');}canonicalQuery(section,params.toString(),binding);return{kind:'continue-read'};}catch(error){return{kind:'deny',code:safeCode(error)};}
  }
+ if(binding.readPaths?.includes(parsed.pathname)){try{const params=new URLSearchParams(parsed.search);if(params.has('_rsc')){need(params.getAll('_rsc').length===1&&/^[A-Za-z0-9_.-]{1,128}$/.test(params.get('_rsc')),'K117_RSC_QUERY_INVALID');params.delete('_rsc');}if(parsed.pathname===binding.readPaths[0]){need(params.size===0||params.size===1&&params.getAll('tab').length===1&&params.get('tab')==='products','K117_UNOWNED_DETAIL_QUERY');}else if(params.size){need(params.size===1&&params.getAll('returnTo').length===1,'K117_UNOWNED_DETAIL_QUERY');const back=params.get('returnTo');if(back!==binding.readPaths[0]+'?tab=products'){need(back.startsWith('/products?'),'K117_UNOWNED_RETURN_PATH');canonicalQuery('products',back.slice('/products?'.length),binding);}}return{kind:'continue-read'};}catch(error){return{kind:'deny',code:safeCode(error)};}}
  const staticPath=new Set(['/favicon.ico','/icon.svg','/apple-icon.png','/manifest.webmanifest','/sw.js']);
  if((staticPath.has(parsed.pathname)||parsed.pathname==='/api/health'||parsed.pathname==='/api/auth/session')&&!parsed.search)return{kind:'continue-read'};
  if((parsed.pathname.startsWith('/_next/static/')||parsed.pathname.startsWith('/icons/'))&&!parsed.pathname.includes('%2e')&&!parsed.pathname.includes('%2f'))return{kind:'continue-read'};
@@ -170,7 +175,7 @@ export function buildKanbanPreferenceCleanup(binding,ownWrites,currentRows){
 /** Actual producer сравнивает полный HMAC/текущие rows/compiled manifest внутри guarded web. */
 export async function certifySearch117Start(input,binding,verifySignedCurrent){
  need(typeof verifySignedCurrent==='function','K117_CURRENT_PRODUCER_CALLBACK_REQUIRED');
- const h=input.checkpoint;need(h?.namespace===SEARCH117_NAMESPACE&&h.version===1&&h.kind==='browser-handoff'&&/^[a-f0-9]{64}$/.test(h.verifierSourceSha256??'')&&/^[a-f0-9]{64}$/.test(h.currentOwnedStateHash??''),'K117_ACTUAL_SIGNED_PRODUCER_HANDOFF_REQUIRED');
+ const h=input.checkpoint;need(((h?.namespace===SEARCH117_NAMESPACE&&h.version===1)||(h?.namespace===COHORT163_NAMESPACE&&h.version===2))&&h.kind==='browser-handoff'&&/^[a-f0-9]{64}$/.test(h.verifierSourceSha256??'')&&/^[a-f0-9]{64}$/.test(h.currentOwnedStateHash??''),'K117_ACTUAL_SIGNED_PRODUCER_HANDOFF_REQUIRED');
  need(canonical117(h.subjects)===canonical117(input.subjects)&&canonical117(h.tokens)===canonical117(input.tokens)&&canonical117(h.action)===canonical117(input.action),'K117_PUBLIC_HANDOFF_FIELDS_TAMPERED');
  const certificate=await verifySignedCurrent(h);
  assertCurrentCertificate117(certificate,h,{'kanban-search-owned-fixtures.mjs':h.verifierSourceSha256});
@@ -209,7 +214,7 @@ export async function runKanbanSearchStagingBrowser(input={},callbacks={}){
    await context.addInitScript(disableKanbanQaServiceWorkerApi);await context.addCookies(binding.cookies);accepting=true;
    await context.route('**/*',async route=>{
     const request=route.request(),headers=request.headers(),decision=kanbanSearchRequest({url:request.url(),method:request.method(),headers,body:request.postData()??'',prefetch:Boolean(headers['next-router-prefetch']||headers.purpose==='prefetch')},binding);
-    if(decision.kind==='continue-read'){await route.continue();return;}
+    if(decision.kind==='continue-read'||decision.kind==='continue-readonly-action'){await route.continue();return;}
     if(decision.kind==='abort-prefetch'){receipt.blockedPrefetches++;await route.abort();return;}
     if(decision.kind==='abort-unrelated-action'||!accepting){receipt.blockedOtherPosts++;await route.abort();return;}
     if(decision.kind==='own-preference'){
@@ -261,4 +266,17 @@ export function finalizeKanbanSearchAcceptance(binding,browserReceipt,cleanupRec
  need(cleanupReceipt?.status==='CAS_RESTORED'&&cleanupReceipt.runId===binding.runId&&cleanupReceipt.actorId===binding.actorId&&cleanupReceipt.checkedKeys===2&&cleanupReceipt.remainingPreferenceRows===0&&cleanupReceipt.requestOutcomesSettled===true,'K117_ACTUAL_PREFERENCE_CLEANUP_REQUIRED');
  need(afterProof?.status==='ORIGINALS_MATCH_OWNED_CLOSED'&&afterProof.runId===binding.runId&&afterProof.revision===binding.revision&&afterProof.originalPreSha256===binding.preSha256&&afterProof.originalsMatch===true&&afterProof.remainingOwnedRows===0&&afterProof.physicalIdentityMatch===true,'K117_ACTUAL_POST_CLEANUP_PROOF_REQUIRED');
  return{status:'PASS',revision:binding.revision,runId:binding.runId,checks:browserReceipt.checks.length,preferencesRestored:true,originalsMatch:true,ownedRowsRemaining:0};
+}
+
+function cohortActor163(checkpoint,profile){const actor=checkpoint.actors?.find(a=>a.id===profile.id);return Boolean(actor&&COHORT163_ACTORS.includes(actor.key)&&rolesSame(actor.roles,profile.roles)&&rolesSame(profile.roles,[actor.key==='manager'?'MANAGER':actor.key==='accountant'?'ACCOUNTANT':'ENGINEER']));}
+export function validateCohortHandoff163(h,identity){
+ need(h.namespace===COHORT163_NAMESPACE&&h.version===2&&h.registry?.runId===h.runId&&h.registry.revision===h.revision&&digest117(h.registry)===h.registrySha256&&canonical117(h.registry.identity)===canonical117(identity),'K117_COHORT_HANDOFF_REGISTRY_MISMATCH');
+ const expected=h.registry.ids;need(expected&&Object.keys(expected).length===8&&new Set(Object.values(expected)).size===8,'K117_COHORT_EXACT_IDS_REQUIRED');
+ for(const [key,ids]of [['createdActorIds',COHORT163_ACTORS.map(k=>expected[k])],['createdClientIds',[expected.client]],['createdProjectIds',[expected.project]],['createdProductIds',[expected.productA,expected.productB]]])need(canonical117([...h[key]].sort())===canonical117([...ids].sort()),'K117_COHORT_HANDOFF_IDS_MISMATCH');
+ need(h.createdFileIds.length===0&&h.subjects.client.id===expected.client&&h.subjects.project.id===expected.project&&h.subjects.product.id===expected.productA&&h.productB.id===expected.productB&&h.productB.projectId===expected.project,'K117_COHORT_SUBJECTS_MISMATCH');
+ need(Array.isArray(h.actors)&&h.actors.length===4&&new Set(h.actors.map(a=>a.key)).size===4&&h.actors.every(a=>COHORT163_ACTORS.includes(a.key)&&a.id===expected[a.key]&&rolesSame(a.roles,[a.key==='manager'?'MANAGER':a.key==='accountant'?'ACCOUNTANT':'ENGINEER'])),'K117_COHORT_ACTOR_MAP_MISMATCH');
+ need(canonical117(h.readPaths)===canonical117(['/projects/'+expected.project,'/products/'+h.subjects.product.number,'/products/'+h.productB.number]),'K117_COHORT_READ_PATHS_MISMATCH');
+ need(Array.isArray(h.actionGrants)&&h.actionGrants.length===h.registry.actionGrants.length,'K117_COHORT_ACTION_MAP_MISMATCH');
+ for(const [index,g]of h.actionGrants.entries()){const source=h.registry.actionGrants[index],{id,revision,manifestSha256,args,...declared}=g;need(canonical117(declared)===canonical117(source)&&g.kind==='readonly-bell'&&g.exportedName==='getBellData'&&g.filename==='src/server/notifications/actions.ts'&&/^[a-f0-9]{42}$/.test(id)&&revision===h.revision&&SHA64.test(manifestSha256??'')&&canonical117(args)==='[]','K117_COHORT_ACTION_EFFECT_SCOPE_MISMATCH');}
+ return h;
 }

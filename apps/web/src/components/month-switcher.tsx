@@ -4,25 +4,20 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { CALENDAR_TIMEZONE } from "@/lib/calendar-dates";
+import { payrollMonth, payrollMonthRange, shiftPayrollMonth } from "@/lib/payroll-month";
 
 // Переключатель расчётного месяца (зарплата, §10): месяц хранится
 // в ?month=ГГГГ-ММ, чтобы ссылку можно было переслать.
 
 export function monthLabel(month: string): string {
-  const [year, num] = month.split("-").map(Number);
   const label = new Intl.DateTimeFormat("ru-RU", {
-    month: "long",
-    year: "numeric",
-  }).format(new Date(year, num - 1, 1));
+    timeZone: CALENDAR_TIMEZONE, month: "long", year: "numeric",
+  }).format(payrollMonthRange(month).start);
   return label.charAt(0).toUpperCase() + label.slice(1);
 }
 
-export function shiftMonth(month: string, delta: number): string {
-  const [year, num] = month.split("-").map(Number);
-  const date = new Date(year, num - 1 + delta, 1);
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
-}
-
+export const shiftMonth = shiftPayrollMonth;
 export function MonthSwitcher({ month }: { month: string }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -34,7 +29,7 @@ export function MonthSwitcher({ month }: { month: string }) {
     router.replace(`${pathname}?${params.toString()}`);
   }
 
-  const isCurrent = month >= new Date().toISOString().slice(0, 7);
+  const isCurrent = month >= payrollMonth();
 
   return (
     <div className="flex items-center gap-1">
@@ -42,6 +37,7 @@ export function MonthSwitcher({ month }: { month: string }) {
         variant="outline"
         size="icon"
         onClick={() => go(shiftMonth(month, -1))}
+        disabled={month === "0001-01"}
         aria-label="Предыдущий месяц"
       >
         <ChevronLeft className="size-4" />

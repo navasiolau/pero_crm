@@ -25,7 +25,8 @@ export default async function PayrollPage({
   if (hasRole(session.user.roles, "DIRECTOR")) redirect("/");
 
   const { month: param } = await searchParams;
-  const month = isValidMonth(param) ? param : currentMonth();
+  if (param !== undefined && !isValidMonth(param)) redirect("/payroll?month=" + currentMonth());
+  const month = param ?? currentMonth();
 
   const [data, currency] = await Promise.all([
     getMyPayroll(session.user.id, month),
