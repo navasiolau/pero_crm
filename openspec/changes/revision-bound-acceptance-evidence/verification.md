@@ -56,3 +56,16 @@ Root normal merge/CI API → actual new staging SHA/image/health и meaningful r
 ## Qualification HOLD: migration history
 
 Root обнаружил семантическое расхождение четвёртой staging migration nonempty_rates: applied SHA d0948074ff79ac17f365490440c851650550910a6909d952ca278464b3f80a62 соответствует старому SQL с двумя NULL→0 UPDATE, а текущий Git277540… добавляет INSERT для трёх отсутствующих zero ProductPercentageConfig. Это не CRLF-only отличие. Alias/checksum normalization не разрешены. Владелец отдельно разрешил исправление167 у финансового автора; оно не входит в25path scope163. Native qualification163 остаётся HOLD до exact исправления/нового ledger proof и fresh protected fingerprint. Local checksums не предполагаются по staging данным: необходима новая root readonly observation в отдельном window. Linux packaging/file-only work не доказывает исправление history и не закрывает native.
+
+## Shared18 source preparation
+
+Только source/local-cold, actual SQL/session/HTTP/browser/setup0. feature163 a509 является исходной точкой, а актуальный deployed SHA/catalog назначает Root после167/135. Новая группа не объявляется принятым stage75/76 до отдельной qualification.
+
+- Original29 existing117 cold cases PASS (tool468fb4). Расширенная final matrix37/37 PASS (tool3c41d8), concurrency1: V1/V2 HMAC/registry, восемь IDs/четыре роли, single row blueprint, prefix arrays, exact ledger/checksum/catalog refusal, compiled Bell closure, own detail GET и manager-only preference boundary. Реальный Next15 compact ACK codec сохранён.
+- Первый restricted-token run8d2acd завершился os.userInfo/uv_os_get_passwd ENOMEM до cases; сохранён как environment failure. Elevated targeted run использует те же pinned dependencies без install/version/env changes.
+- Source grammar и git diff --check PASS (133384). Application/config/dependencies/schema/transport source0diff в cohort дополнении. Common33c source helper, old CLOSED artifacts, local c665/80CJS/full22 proof не изменяются и не повторяются.
+- Code/protocol review, accepted closure build и actual cohort lifecycle пока NOT_RUN. Статус/DnD actions остаются failclosed до конкретного audited effect registry; frozen money assertions не подменяются row blueprint или browser evidence.
+
+Final shared18 source delta: actual handoff body regression проверяет fresh engineer profile после known manager ACK и refusal manager mint при nonempty current preferences. Final38/38 PASS f5346e, scope — cold QA body / genuine Next codec, не SQL/native/session. Scoped lint da4a4d PASS0warnings через уже установленный own .pnpm plugin resolution с finally-restored NODE_PATH, без reinstall/version changes. Strict/diff51aa0a PASS. Previous37/source-packet-v1 сохраняется как история. Actual accepted-source bundle/catalog/lifecycle/status-effect registry по-прежнему NOT_RUN.
+
+Shared18 detail-navigation v3: accepted own product GET позволяет только returnTo с canonical own products query либо exact own project ?tab=products; project detail допускает только tab=products. Actual source lib/product-return-navigation.ts подтверждает эти две формы. Foreign/finance/external/missing-own-filter/duplicate query отказ сохраняется. Final39/39 cold PASS9e80f2. Actual app navigation по-прежнему NOT_RUN. Source-v2 immutable, use v3 for review.

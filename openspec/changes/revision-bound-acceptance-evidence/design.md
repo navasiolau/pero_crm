@@ -98,3 +98,17 @@ Independent packaging/dependency design review → отдельный source rel
 ## Migration Plan
 
 Миграций нет. Packaging меняет только серверную упаковку по отдельному release; actual Linux standalone/package checks обязательны. Default Docker CMD для QA не запускается. Local meaningful protocol/source/fault tests + typecheck/lint/native только после review/lease. Independent review всех runner/source/target/cleanup changes. Обычный merge163 в staging выполняет root, затем CI API и actual image/identity/native/HTTP/browser accepted scenarios.1593.2 закрывается только после relevant tool runtime/HTTP proof. Main остаётся3819f17 и не выпускается.
+
+## Shared18 core cohort implementation
+
+Root-approved registry связывает run/revision/exact image/webCID/DBCID/volume/W07, восемь UUID, producer/source digest и exact catalog policy digest. plan117 V2 выводит четыре роли и nonce labels из registry, без real user lookup. fixtureRows117 является единственной спецификацией writer; она не включает immutable monetary rows. Signed PRE/checkpoint/observation/ACK/certificate включают registry digest. Другой registry при том же run/revision не проходит HMAC boundary.
+
+Existing whole-row/schema/clock fingerprints исключают только восемь ID и две manager composite preference keys. Incoming composite FK/typed-reference guards и exact row-hash CAS deletion переиспользуются; собственные users/products представлены несколькими IDs. Native117 всегда вызывает existing verifiedRollback, включая unexpected/falsy errors. Existing117 table-lock policy не расширяется: фактическая lease/lock/timeout policy требует отдельного Root/native protocol GO.
+
+guardStageContext переиспользует nativeAcceptanceBinding и сравнивает exact approval identity/provenance. qualifyStageSnapshot принимает READONLY metadata после actual identity query: полный ordered ledger id/name/checksum/finished/rolledBack и schemaHash. Policy получает Root после167 и135 из actual deployed environment; local76 и прежний stage74 не являются alias. SQL collector не дублируется в adapter.
+
+RootKit actorProfile возвращает fresh actor handoff только в защищённой памяти. Cookies/basicAuth не сохраняются в public artifacts. Перед и после transport проверяются producer files/accepted production manifest; source compiler переиспользует existing163 reviewedBundle с physical production imports только из accepted sourceRoot. Actual metafile/manifest/bundle связываются с registry и same accepted revision. Import не вызывает SSH/DB/browser.
+
+Browser V2 допускает bounded own-prefix queries только с mandatory own client/project filter, exact owned detail GET/HEAD, manager preference POST и отдельно registered compiled getBellData/args[]. Foreign engineer и accountant не получают preference grant. Статус/денежный POST, неизвестный export/path/payload, новые profile roles/IDs и неучтённые побочные строки блокируются. Текущие source checks не подменяют actual navigation, financial/native128 или staging closure.
+
+Source allowlist: apps/web/tests/kanban-search-owned-{protocol,fixtures,entry}.mjs, kanban-search-root-runner.mjs, kanban-search-stage-browser.mjs, helpers/staging-acceptance-qualification.mjs; four existing117 tests. Existing native target/snapshot/rollback/local-db helpers и transport используются без изменений.

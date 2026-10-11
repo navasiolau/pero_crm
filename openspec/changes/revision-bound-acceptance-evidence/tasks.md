@@ -23,3 +23,10 @@
 - [ ] 3.1 Повторить затронутые targeted tests/lint/typecheck/OpenSpec strict и independent review expanded packaging/dependency/protocol/source/native scope; прежний QA-only review остаётся историческим proof. Source/schema/UI preservation и результаты записаны.
 - [ ] 3.2 После root обычного merge/CI API проверить новое actual image/identity и readonly whole-dependency proof; затем отдельно разрешённые genuine native/HTTP/runtime/protocol/tool scenarios с new run/fresh baseline. Missing/BLOCKED не даёт readiness PASS; прежние UNKNOWN/HOLD не переписываются.
 - [ ] 3.3 Для затронутого UI/DTO присоединить проверенное visual/behavior/data comparison доменного владельца;159 stage отметить только после meaningful tool/runtime/HTTP accepted proof, main не изменять.
+
+## 4. Shared18 QA cohort
+
+- [x] 4.1 Реализовать versioned8-row Root registry, четыре exact роли, nonDRAFT graph и signed registry bindings; сохранить V1 historical tests и production0diff.
+- [x] 4.2 Реализовать actor-specific private handoff, own-prefix/detail GET, manager PREF CAS и closed compiled readonly Bell grants; meaningful cold negatives проходят.
+- [ ] 4.3 Получить independent code/protocol GO и actual accepted-source bundle/metafile на текущем merged SHA; exact catalog policy после167/135 не выводить из local76.
+- [ ] 4.4 По отдельному RootONE выполнить actual rollback→durable PRE→setup→browser/domain cases→CAS cleanup→closed; статусные audit/outbox effects и native128 money proof требуют registered owned protocol. Missing business/native evidence остаётся NOT_RUN/BLOCKED.

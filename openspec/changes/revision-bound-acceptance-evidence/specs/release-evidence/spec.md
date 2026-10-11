@@ -85,3 +85,23 @@ PASS изменяющего QA SHALL требовать доказанный rol
 #### Scenario: Build без проверки упаковки
 - **WHEN** build завершился, но actual target artifact, public dependency files и новый image/source binding не проверены
 - **THEN** runtime scenario SHALL оставаться NOT_RUN; build не подменяет dependency/native proof
+
+### Requirement: Shared18 exact own cohort
+
+Общая QA группа SHALL содержать только Root-registered восемь core IDs с четырьмя раздельными ролями и nonDRAFT изделиями. Подписанные V2 документы MUST связывать тот же registry/run/revision/physical stage/source/catalog до и после эффекта. V1 historical receipts SHALL сохраняться без переобозначения.
+
+#### Scenario: Чужой registry или прежний MANAGER DRAFT
+- **WHEN** текущий запуск не имеет V2 Root registry, содержит другой ID/роль либо использует V1 как разрешение нового setup
+- **THEN** producer MUST отказать до создания client/QA rows
+
+#### Scenario: Поиск префикса и read-only actor
+- **WHEN** браузер печатает префикс собственной строки
+- **THEN** query SHALL сохранять mandatory own client/project filter; foreign/detail/action/payload вне точной области MUST блокироваться, engineer/accountant SHALL не получать manager preference grant
+
+#### Scenario: Неучтённый status effect
+- **WHEN** действие может создать audit/outbox/history/financial строки без exact Root-approved effect manifest
+- **THEN** оно SHALL оставаться BLOCKED; core8 cleanup MUST не маскировать и не удалять такие строки
+
+#### Scenario: Actual catalog отличается
+- **WHEN** ledger checksum/row state/catalog/schema fingerprint не совпадает с Root policy текущего deployed SHA после согласованных миграций
+- **THEN** entry SHALL отказать до fixtures; совпавший local migration count MUST не использоваться как замена actual stage qualification
