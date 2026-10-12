@@ -1,0 +1,13 @@
+# Evidence
+
+## Current source READY — 12.10.2026
+
+Root approved one critical direct-completion.ts formatter-only after155commit. Fresh fetch e177d7 confirmedpublishedorigin/staginged2f00966831597d8d3e9d773cd4efcfba874b3a; feature/164 isolatedworktree e9d425 fromthatref. Finowner150 ACK fileoutofhis4wrapperscope. 155/149source notborrowed/copied. Ownfrozenofflineignore-scripts installab9474 downloaded0/locksame; source-onlyPrisma6.19.3 generation, no versions/dependency/lock changes or DB.
+
+Chosenexistingformatter TypeScript5.9.3: parse same file; add only newline before objectproperties/arrayelements/conditionalquestion+colon tokens/longfunctionparams, using ASTgetStart offsets; printFile appliesstandardindent/spacing. No regex logic replacement/helper extraction/comment/eslint disable. Finalformatter fixedpointtrue. Implementation guardedsource SHA beforewrite9bee8157e729f6271b111ce7dba88afd1fe956655282c7e6138c138c774d66dc; after219cb447206a371c46e838ea5e8f1f9bee8688a73e1abda140f520b76f3a7c1f. Sourceartifact751589 before131lines/max564chars →675lines/max216chars. Growth is line separation, not runtimebyteeconomy.
+
+Beforeeffect semantic AST comparison includes nodekind/children order/literal+identifier text/operators/variable-declaration flags/typeOnly; positions/trivia ignored. Sourcecanonical AST SHA before=afterd3d9b58a355badb41323b4b4bdda169adeffe2e2ef1956a121339a5692d9201a. TypeScript transpile ES2022/ESNext/removeComments/noSourceMaps emitted canonical AST SHA before=aftera579a0f96c530d5d9a4801342b723d5910de8c03cbad4e7b88f39f1f57b6c24f. Fullsource/emittedAST/stability assertions passedbeforewrite; outputreadbackexact. No function export/API/condition/Decimal/FX/month/ACL/query/mutation/effect/settledhistory semantic changes. Comments/Russianmessages retained.
+
+Existing6targetedsuites56/56PASSd6062c: single-product-percentage-core/product-percentage-rate-adjust/product-percentage-pay/product-engineering-legacy/product-status-percentage-barrier/combined-engineering-turnover. Affectedstrictone-source31d562 diagnostics0, scopedlint016ced exit0/diff0; finalphysicalSHA219cb unchanged. OpenSpecstrictcfa53b PASS/skip_specs:true. No tests added/removed/relaxed, frameworks/build/native/DB/UI/priceconvert/moneywriters executed. No massformat, only1prod source +5ownOpenSpec paths. Root review/authorizedcommit/CI-stage stillpending; no push/main/prod/restic/dumps/seed/newDB. SAFETY-RULES D:/Projects/pero_infra/infra-recovery/SAFETY-RULES.md STOPguardmismatch.
+
+Independent CODE_GO +LOCAL_CHECKS_ACCEPTED confirms source219cb formatting only and boundAST/emittedAST proof;56retainedchecks/type/lint accepted. Ownerallplan6pathcommit authorized, no extra native/UI checks required; stage still pending.
