@@ -43,3 +43,19 @@ test("quoted JSON camelCase credentials and raw signed URL fields never reach di
  const secretMessage='{"password":"pw-sensitive","token":"tok-sensitive","Authorization":"Bearer auth-sensitive","secretAccessKey":"secret-sensitive","accessKeyId":"key-sensitive"} X-Amz-Signature=sig-sensitive&X-Amz-Credential=cred-sensitive&X-Amz-Security-Token=security-sensitive';
  const result=await sendFileUpload(attempt(),{fetcher:async()=>new Response(JSON.stringify({ok:false,error:secretMessage,details:{phase:"storage-original",message:secretMessage},commitState:"notCommitted"}),{status:500})});assert.equal(result.ok,false);if(result.ok)return;assert.doesNotMatch(result.failure.error,/sensitive/);assert.doesNotMatch(formatUploadDiagnostics(result.failure),/sensitive/);let copied="";await copyUploadDiagnostics(result.failure,async text=>{copied=text;});assert.doesNotMatch(copied,/sensitive/);
 });
+
+test("declared target header preserves the same form and nonce without reading file bytes",async()=>{
+ const original=attempt(),file=original.form.get("file") as File;let byteReads=0,streamReads=0,called=false;
+ file.arrayBuffer=async()=>{byteReads++;throw Error("FILE_BYTES_BEFORE_FETCH");};
+ file.stream=()=>{streamReads++;throw Error("FILE_STREAM_BEFORE_FETCH");};
+ const result=await sendFileUpload(original,{fetcher:async(_url,init)=>{
+  called=true;assert.equal(init!.body,original.form);const headers=new Headers(init!.headers);
+  assert.equal(headers.get("x-request-id"),cid);
+  const header=headers.get("x-pero-upload-context");assert.ok(header,"declared context must be sent");
+  assert.ok(/^[\x20-\x7e]+$/.test(header));assert.ok(Buffer.byteLength(header)<=4096);
+  assert.deepEqual(JSON.parse(decodeURIComponent(header)),{version:1,fields:{projectId:"project",section:"MEASUREMENT",clientMutationId:cid}});
+  assert.equal(byteReads,0);assert.equal(streamReads,0);
+  return new Response(JSON.stringify({ok:true,id:"file",clientMutationId:cid}),{status:200});
+ }});
+ assert.equal(called,true);assert.equal(result.ok,true);assert.equal(byteReads,0);assert.equal(streamReads,0);
+});

@@ -1,30 +1,29 @@
 import { mkdir, writeFile, unlink } from "node:fs/promises";
 import path from "node:path";
-import { randomUUID, createHash } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import sharp from "sharp";
-import type {FileSection} from "@prisma/client";
-import {isFileSection} from "@/lib/file-sections";
 
 import { auth } from "@/auth";
 import {canAccessOperationalPath} from "@/lib/operational-access";
 import {ASSIGNEE_ROLES,hasAnyRole} from "@/lib/roles";
-import { isCoverImageMime } from "@/lib/product-cover";
 import { prisma } from "@/lib/prisma";
 import { UPLOADS_ROOT, s3Enabled, s3Put, s3Delete, fileKey, thumbKey } from "@/lib/s3";
-import { sketchUploadTargetSchema, type SketchUploadTarget, type SketchResult } from "@/server/products/sketch-contract";
-import { authorizeProductCoverUpload, persistUploadedProductCover } from "@/server/products/cover-core";
+import { type SketchResult } from "@/server/products/sketch-contract";
+import { persistUploadedProductCover } from "@/server/products/cover-core";
 import { cleanupObsoleteSketch } from "@/server/products/sketch-cleanup";
 import { revalidateProductPaths } from "@/server/products/revalidate";
 import { resolveUploadContext } from "@/server/files/upload-context";
-import { uploadSizeLimitError, uploadSizeLimitFor } from "@/server/files/upload-limits";
-import { persistOrdinaryUpload, readUploadReceipt, uploadFingerprint, uploadMutationPattern } from "@/server/files/upload-core";
+import { persistOrdinaryUpload, readUploadReceipt, uploadFingerprint } from "@/server/files/upload-core";
 import { afterUploadCommit, uploadFailure, UploadError, type UploadPhase, type CommitState } from "@/server/files/upload-result";
 import { notifyOrg } from "@/server/notifications/notify";
 import { withTaskTransaction } from "@/server/tasks/transaction";
-import {projectCoverUploadSchema,type ProjectCoverUpload} from "@/server/projects/cover-contract";
-import {authorizeProjectCoverUpload,persistProjectCoverUpload} from "@/server/projects/cover-core";
+import {persistProjectCoverUpload} from "@/server/projects/cover-core";
 import {revalidatePath} from "next/cache";
+import {UPLOAD_CONTEXT_HEADER,parseUploadContextHeader,matchesDeclaredUploadContext} from "@/lib/upload-request-context";
+import {parseUploadTarget,authorizeUploadTarget,rejectFileUploadField} from "@/server/files/upload-target";
+import {spoolMultipartUpload} from "@/server/files/multipart-upload";
+import {publishUploadOriginal,knownStorageRejection} from "@/server/files/upload-storage";
 function sanitizeFileName(name: string): string {
   return name.replace(/[^\wа-яА-ЯёЁ.-]+/g, "_").slice(-80);
 }
@@ -44,6 +43,16 @@ async function committedSketchReply(result:Extract<SketchResult,{ok:true}>,produ
   if(!current.sketch)return NextResponse.json({ok:false,kind:"conflict",error:"Эскиз уже изменён другим пользователем",currentSketchFileId:current.currentSketchFileId},{status:409});
   const {cleanupEventId:_cleanup,...ack}=result;void _cleanup;
   return NextResponse.json({...ack,sketch:current.sketch});
+}
+
+type UploadTransaction=Parameters<Parameters<typeof withTaskTransaction>[0]>[0];
+type UploadActor=Parameters<typeof persistUploadedProductCover>[1];
+async function currentUploadActor(expectedId:string,signal:AbortSignal):Promise<UploadActor>{
+  if(signal.aborted)throw new UploadError("UPLOAD_ABORTED",400,"context","Загрузка прервана","validation");
+  const session=await auth();
+  if(!session?.user||session.user.id!==expectedId||!canAccessOperationalPath(session.user.roles,"/api/files/upload")||!hasAnyRole(session.user.roles,ASSIGNEE_ROLES))
+    throw new UploadError("UPLOAD_CONTEXT_CHANGED",409,"context","Права или состояние пользователя изменились. Обновите карточку.","conflict");
+  return session.user;
 }
 
 // POST /api/files/upload — multipart/form-data:
@@ -81,97 +90,46 @@ async function upload(request:Request,state:{phase:UploadPhase;commitState:Commi
     throw new UploadError("UPLOAD_FORBIDDEN",403,"auth","Недостаточно прав для загрузки файлов","forbidden");
 
   state.phase="request";
-  const form = await request.formData().catch(() => null);
-  const file = form?.get("file");
-  const projectId = form?.get("projectId");
-  if (!form || !(file instanceof File) || typeof projectId !== "string") {
-    return NextResponse.json({ error: "Нужны file и projectId" }, { status: 400 });
+  const declared=parseUploadContextHeader(request.headers.get(UPLOAD_CONTEXT_HEADER));
+  if(declared===false)throw new UploadError("UPLOAD_CONTEXT_INVALID",400,"request","Неверный контекст загрузки","validation");
+  if(declared){
+    const parsed=parseUploadTarget(declared);
+    if(!parsed.ok)return NextResponse.json(parsed.body,{status:parsed.status});
+    state.phase="context";
+    const permission=await authorizeUploadTarget(prisma,session.user,parsed.target);
+    if(!permission.ok)return NextResponse.json(permission.body,{status:permission.status});
   }
-  // Дифференцированный лимит: изображения и обложки — 25 МБ, не-изображения — 1 ГБ.
-  // Обложки — всегда image/*, поэтому ранняя проверка по типу содержимого их покрывает.
-  const sizeLimit = uploadSizeLimitFor({ mimeType: file.type });
-  if (file.size > sizeLimit.maxBytes) {
-    return NextResponse.json({ error: uploadSizeLimitError(sizeLimit.kind) }, { status: 413 });
-  }
-
-  // Старые окна не должны молча перекладывать файл в неверный раздел.
-  if (["category", "stage", "caption"].some(key => form.get(key) !== null)) {
-    return NextResponse.json({ok:false,kind:"validation",code:"UPLOAD_FORM_OUTDATED",error:"Обновите форму загрузки: категории, этапы и комментарии файлов больше не используются"},{status:422});
-  }
-  const sectionRaw = form.get("section");
-  if (sectionRaw !== null && !isFileSection(sectionRaw)) {
-    return NextResponse.json({error:"Обновите форму: неизвестный раздел файла"},{status:422});
-  }
-  const section: FileSection = sectionRaw === null ? "GENERAL" : sectionRaw;
-
-  const productIdRaw = form.get("productId");
-  const requestedProductId =
-    typeof productIdRaw === "string" && productIdRaw ? productIdRaw : null;
-  const taskId = typeof form.get("taskId") === "string" && form.get("taskId") ? (form.get("taskId") as string) : null;
-  const coverRaw = form.get("assignCover");
-  const assignCover = coverRaw === "1";
-  if (coverRaw !== null && !assignCover) {
-    return NextResponse.json({ error: "Неверный режим загрузки обложки" }, { status: 400 });
-  }
-  let coverTarget: SketchUploadTarget | undefined;
-  let replayCover = false;
-  const projectCoverRaw=form.get("assignProjectCover"),assignProjectCover=projectCoverRaw==="1";
-  let projectCoverTarget:ProjectCoverUpload|undefined,replayProjectCover=false;
-  if(projectCoverRaw!==null){
-    if(!assignProjectCover||coverRaw!==null||form.get("productId")!==null||form.get("taskId")!==null||section!=="GENERAL")
-      return NextResponse.json({error:"Неверный контекст обложки проекта"},{status:422});
-    if(!isCoverImageMime(file.type))return NextResponse.json({error:"Нужно изображение поддерживаемого формата"},{status:415});
-    const parsed=projectCoverUploadSchema.safeParse({projectId,expectedCoverFileId:form.get("expectedCoverFileId")==="null"?null:undefined,clientMutationId:form.get("clientMutationId")});
-    if(!parsed.success)return NextResponse.json({error:"Обновите форму обложки проекта"},{status:422});
-    projectCoverTarget=parsed.data;
-    const permission=await authorizeProjectCoverUpload(prisma,session.user,parsed.data);
-    if(!permission.ok)return NextResponse.json(permission,{status:permission.kind==="conflict"?409:404});
-    replayProjectCover=permission.replayHint;
-  }
-  if (assignCover) {
-    if (!requestedProductId || taskId || section !== "PRODUCTION") {
-      return NextResponse.json({ error: "Для эскиза нужны изделие и раздел Производство без задачи" }, { status: 400 });
-    }
-    if (!isCoverImageMime(file.type)) {
-      return NextResponse.json({ error: "Нужно изображение поддерживаемого формата" }, { status: 415 });
-    }
-    const parsedCover = sketchUploadTargetSchema.safeParse({projectId,productId:requestedProductId,
-      expectedSketchFileId:form.get("expectedSketchFileId") === "null" ? null : form.get("expectedSketchFileId") ?? undefined,
-      clientMutationId:form.get("clientMutationId")});
-    if (!parsedCover.success) return NextResponse.json({ok:false,kind:"validation",error:"Обновите форму эскиза"},{status:422});
-    coverTarget = parsedCover.data;
-    // The generic task/project upload grant is broader than cover-edit rights.
-    // Resolve exact product and role before file.arrayBuffer or storage writes.
-    const permission = await authorizeProductCoverUpload(prisma, session.user,
-      coverTarget);
-    if (!permission.ok) return NextResponse.json(permission, { status: permission.kind === "conflict" ? 409 : 404 });
-    replayCover = permission.replayHint;
-  }
+  state.phase="request";
+  const multipart=await spoolMultipartUpload(request,{onFileField:rejectFileUploadField});
+  try{
+  const file=multipart.file;
+  if(declared&&!matchesDeclaredUploadContext(declared,multipart.fields))throw new UploadError("UPLOAD_CONTEXT_MISMATCH",422,"context","Контекст файла не совпадает с объявленной загрузкой","validation");
+  const parsed=parseUploadTarget(multipart.fields,file.type);
+  if(!parsed.ok)return NextResponse.json(parsed.body,{status:parsed.status});
+  const target=parsed.target;
   state.phase="context";
-  const context = await resolveUploadContext(prisma, session.user, { projectId, productId: requestedProductId, taskId });
-  if (!context) return NextResponse.json({ error: "Проект, изделие или задача не найдены" }, { status: 404 });
-  const { project, productId, productNumber } = context;
-
+  const actor=await currentUploadActor(session.user.id,request.signal);
+  const permission=await authorizeUploadTarget(prisma,actor,target);
+  if(!permission.ok)return NextResponse.json(permission.body,{status:permission.status});
+  const {projectId,requestedProductId,taskId,section,clientMutationId,coverTarget,projectCoverTarget}=target;
+  const {project,productId,productNumber}=permission.context;
+  const {replayCover,replayProjectCover}=permission;
+  const assignCover=target.mode==="sketch",assignProjectCover=target.mode==="project-cover";
+  const transaction=<T>(work:(tx:UploadTransaction,actor:UploadActor)=>Promise<T>)=>withTaskTransaction(async tx=>work(tx,await currentUploadActor(actor.id,request.signal)));
   state.phase="validation";
-  const clientMutationId=form.get("clientMutationId");
-  if(typeof clientMutationId!=="string"||!uploadMutationPattern.test(clientMutationId))
-    return NextResponse.json({error:"Обновите форму загрузки",code:"UPLOAD_MUTATION_REQUIRED"},{status:422});
-  // Validate the declared target before reading bytes or writing SQL/storage.
   const useS3=s3Enabled();
 
   const storedName = `${randomUUID()}-${sanitizeFileName(file.name)}`;
-  const buffer = Buffer.from(await file.arrayBuffer());
-  if (buffer.length > sizeLimit.maxBytes) return NextResponse.json({ error: uploadSizeLimitError(sizeLimit.kind) }, { status: 413 });
 
-  const contentHash = createHash("sha256").update(buffer).digest("hex");
-  const fingerprint=uploadFingerprint({actorId:session.user.id,projectId,productId,taskId,section,
-    fileName:file.name,mimeType:file.type,size:buffer.length,contentHash});
+  const contentHash = file.contentHash;
+  const fingerprint=uploadFingerprint({actorId:actor.id,projectId,productId,taskId,section,
+    fileName:file.name,mimeType:file.type,size:file.size,contentHash});
   if(!assignCover&&!assignProjectCover){
-    const prior=await readUploadReceipt(prisma,session.user.id,clientMutationId,fingerprint);
+    const prior=await readUploadReceipt(prisma,actor.id,clientMutationId,fingerprint);
     if(prior)return NextResponse.json({ok:true,...prior});
   }
   if(assignProjectCover&&replayProjectCover&&projectCoverTarget){
-    const result=await withTaskTransaction(tx=>persistProjectCoverUpload(tx,session.user,projectCoverTarget!,{fileName:file.name,storedName,mimeType:file.type,size:file.size,hasThumb:false,contentHash}));
+    const result=await transaction((tx,freshActor)=>persistProjectCoverUpload(tx,freshActor,projectCoverTarget!,{fileName:file.name,storedName,mimeType:file.type,size:file.size,hasThumb:false,contentHash}));
     if(!result.ok)return NextResponse.json(result,{status:result.kind==="conflict"?409:422});
     state.commitState="committed";
     const cover=await prisma.file.findUnique({where:{id:result.id},select:{id:true,fileName:true,mimeType:true,hasThumb:true}});
@@ -179,11 +137,11 @@ async function upload(request:Request,state:{phase:UploadPhase;commitState:Commi
     return NextResponse.json({...result,cover});
   }
   if (assignCover && replayCover && coverTarget) {
-    const result = await withTaskTransaction(tx => persistUploadedProductCover(tx,session.user,coverTarget!,{
-      fileName:file.name,storedName,mimeType:file.type,size:file.size,hasThumb:false,uploadedById:session.user.id,contentHash}));
+    const result = await transaction((tx,freshActor) => persistUploadedProductCover(tx,freshActor,coverTarget!,{
+      fileName:file.name,storedName,mimeType:file.type,size:file.size,hasThumb:false,uploadedById:actor.id,contentHash}));
     if (!result.ok) return NextResponse.json(result,{status:result.kind==="conflict"?409:422});
     state.commitState="committed";state.phase="confirmation";
-    return committedSketchReply(result,coverTarget.productId,requestId);
+    return await committedSketchReply(result,coverTarget.productId,requestId);
   }
   // Превью для изображений
   let hasThumb = false;
@@ -191,7 +149,7 @@ async function upload(request:Request,state:{phase:UploadPhase;commitState:Commi
   if (file.type.startsWith("image/")) {
     state.phase="image";
     try {
-      const image = sharp(buffer);
+      const image = sharp(await file.imageBuffer());
       thumbBuffer = await (assignCover||assignProjectCover ? image.rotate() : image)
         .resize(480, 480, { fit: "inside", withoutEnlargement: true })
         .jpeg({ quality: 80 })
@@ -215,7 +173,7 @@ async function upload(request:Request,state:{phase:UploadPhase;commitState:Commi
   state.phase="storage-original";
   if (useS3) {
     // S3 (MinIO) — основное хранилище (§13)
-    await s3Put(fileKey(projectId, storedName), buffer, file.type || "application/octet-stream");
+    await publishUploadOriginal(file,{projectId,storedName,useS3,signal:request.signal});
     if (thumbBuffer) {
       state.phase="storage-thumb";
       await s3Put(thumbKey(projectId, storedName), thumbBuffer, "image/jpeg");
@@ -223,8 +181,7 @@ async function upload(request:Request,state:{phase:UploadPhase;commitState:Commi
   } else {
     // Локальный фолбэк (dev без S3)
     const projectDir = path.join(UPLOADS_ROOT, projectId);
-    await mkdir(projectDir, { recursive: true });
-    await writeFile(path.join(projectDir, storedName), buffer);
+    await publishUploadOriginal(file,{projectId,storedName,useS3,signal:request.signal});
     if (thumbBuffer) {
       state.phase="storage-thumb";
       const thumbDir = path.join(projectDir, "thumbs");
@@ -234,8 +191,10 @@ async function upload(request:Request,state:{phase:UploadPhase;commitState:Commi
   }
 
   } catch (error) {
-    await compensateOwnCover();
-    throw error;
+    if(knownStorageRejection(error)){await compensateOwnCover();throw error;}
+    state.commitState="unknown";
+    const failure=uploadFailure(requestId,state.phase,error,"unknown");
+    throw new UploadError(failure.body.code,failure.status,state.phase,failure.body.error,"failure","unknown");
   }
 
   state.phase="persist";
@@ -243,13 +202,13 @@ async function upload(request:Request,state:{phase:UploadPhase;commitState:Commi
   if(assignProjectCover&&projectCoverTarget){
     let callbackCompleted=false;
     let result:Awaited<ReturnType<typeof persistProjectCoverUpload>>;
-    try{result=await withTaskTransaction(async tx=>{const saved=await persistProjectCoverUpload(tx,session.user,projectCoverTarget!,{fileName:file.name,storedName,mimeType:file.type,size:file.size,hasThumb,contentHash});callbackCompleted=true;return saved;});}
+    try{result=await transaction(async(tx,freshActor)=>{const saved=await persistProjectCoverUpload(tx,freshActor,projectCoverTarget!,{fileName:file.name,storedName,mimeType:file.type,size:file.size,hasThumb,contentHash});callbackCompleted=true;return saved;});}
     catch(error){if(!callbackCompleted){state.commitState="notCommitted";await compensateOwnCover();}throw error;}
     if(!result.ok){state.commitState="notCommitted";await compensateOwnCover();return NextResponse.json(result,{status:result.kind==="conflict"?409:404});}
     if(result.repeated)await compensateOwnCover();
     state.commitState="committed";state.phase="confirmation";
     await afterUploadCommit(async()=>{revalidatePath(`/projects/${projectId}`);},requestId);
-    if(!result.repeated)await afterUploadCommit(()=>notifyOrg({type:"file.added",title:`Обложка проекта ${project.number}`,body:file.name,link:`/projects/${projectId}`,exceptUserId:session.user.id}),requestId);
+    if(!result.repeated)await afterUploadCommit(()=>notifyOrg({type:"file.added",title:`Обложка проекта ${project.number}`,body:file.name,link:`/projects/${projectId}`,exceptUserId:actor.id}),requestId);
     const cover=await prisma.file.findUnique({where:{id:result.id},select:{id:true,fileName:true,mimeType:true,hasThumb:true}});
     return NextResponse.json({...result,cover});
   }
@@ -257,10 +216,10 @@ async function upload(request:Request,state:{phase:UploadPhase;commitState:Commi
     let result: Awaited<ReturnType<typeof persistUploadedProductCover>>;
     let callbackCompleted=false;
     try {
-      result = await withTaskTransaction(async(tx) => {const saved=await persistUploadedProductCover(tx, session.user,
+      result = await transaction(async(tx,freshActor) => {const saved=await persistUploadedProductCover(tx, freshActor,
         coverTarget!, {
           fileName: file.name, storedName, mimeType: file.type, size: file.size,
-          hasThumb, uploadedById: session.user.id, contentHash,
+          hasThumb, uploadedById: actor.id, contentHash,
         });callbackCompleted=true;return saved;});
     } catch {
       if(!callbackCompleted){state.commitState="notCommitted";await compensateOwnCover();}
@@ -273,19 +232,19 @@ async function upload(request:Request,state:{phase:UploadPhase;commitState:Commi
     if(!result.repeated)await afterUploadCommit(()=>notifyOrg({
       type: "file.added", title: `Файл к проекту ${project.number}`,
       body: file.name, link: productNumber ? `/products/${productNumber}` : `/projects/${projectId}`,
-      exceptUserId: session.user.id,
+      exceptUserId: actor.id,
     }),requestId);
-    return committedSketchReply(result,requestedProductId,requestId);
+    return await committedSketchReply(result,requestedProductId,requestId);
   }
 
   let receipt:Awaited<ReturnType<typeof persistOrdinaryUpload>>;
   let callbackCompleted=false;
   try {
-  receipt=await withTaskTransaction(async tx=>{
+  receipt=await transaction(async(tx,freshActor)=>{
     // Recheck current ACL inside the transaction; it may change during storage.
-    const current=await resolveUploadContext(tx,session.user,{projectId,productId:requestedProductId,taskId});
+    const current=await resolveUploadContext(tx,freshActor,{projectId,productId:requestedProductId,taskId});
     if(!current||current.productId!==productId)throw new UploadError("UPLOAD_CONTEXT_CHANGED",409,"persist","Права или состояние изделия изменились. Обновите карточку.","conflict");
-    const saved=await persistOrdinaryUpload(tx,session.user,{clientMutationId,fingerprint,projectNumber:project.number,data:{
+    const saved=await persistOrdinaryUpload(tx,freshActor,{clientMutationId,fingerprint,projectNumber:project.number,data:{
       projectId,
       productId,
       taskId,
@@ -295,7 +254,7 @@ async function upload(request:Request,state:{phase:UploadPhase;commitState:Commi
       mimeType: file.type,
       size: file.size,
       hasThumb,
-      uploadedById: session.user.id,
+      uploadedById: actor.id,
     }});
     callbackCompleted=true;return saved;
   });
@@ -308,8 +267,9 @@ async function upload(request:Request,state:{phase:UploadPhase;commitState:Commi
     title: `Файл к проекту ${project.number}`,
     body: file.name,
     link: productNumber ? `/products/${productNumber}` : `/projects/${projectId}`,
-    exceptUserId: session.user.id,
+    exceptUserId: actor.id,
   }),requestId);
 
   return NextResponse.json({ok:true,...receipt});
+  }finally{await multipart.dispose();}
 }

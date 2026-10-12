@@ -1,4 +1,5 @@
 import {createRequestId} from "./request-id";
+import {declaredUploadHeader,UPLOAD_CONTEXT_HEADER} from "./upload-request-context";
 import {DOCUMENT_UPLOAD_MAX_BYTES,IMAGE_UPLOAD_MAX_BYTES} from "@/server/files/upload-limits";
 export type UploadCommitState="notCommitted"|"committed"|"unknown";
 const PHASES=["auth","request","context","validation","image","storage-original","storage-thumb","persist","confirmation"] as const;
@@ -59,7 +60,8 @@ export async function sendFileUpload(attempt:UploadAttempt,{fetcher=fetch,timeou
  const timeout=new Promise<UploadResult>(resolve=>{timer=setTimeout(()=>{timedOut=true;controller.abort();resolve(unknown("UPLOAD_TIMEOUT","Загрузка не завершилась вовремя.","Время ожидания ответа истекло; результат записи не подтверждён."));},effectiveTimeout);});
  const work=(async():Promise<UploadResult>=>{
   try{
-   response=await fetcher(endpoint,{method:"POST",body:attempt.form,headers:{"x-request-id":attempt.clientMutationId},signal:controller.signal});
+   const contextHeader=declaredUploadHeader(attempt.form);
+   response=await fetcher(endpoint,{method:"POST",body:attempt.form,headers:{"x-request-id":attempt.clientMutationId,...(contextHeader?{[UPLOAD_CONTEXT_HEADER]:contextHeader}:{})},signal:controller.signal});
    let data:unknown;try{data=await response.json();}catch{return unknown("UPLOAD_NON_JSON_RESPONSE","Сервер вернул неожиданный ответ.","Ответ сервера не удалось прочитать как JSON.");}
    if(plain(data)&&response.ok&&data.ok===true&&typeof data.id==="string"&&data.id&&data.clientMutationId===attempt.clientMutationId)return {ok:true,data:data as UploadSuccessData,httpStatus:response.status,requestId:safeId(data.requestId,safeId(response.headers.get("x-request-id"),attempt.clientMutationId))};
    if(plain(data)&&data.ok===false){const details=plain(data.details)?data.details:{};const phase=PHASES.includes(details.phase as UploadPhase)?details.phase as UploadPhase:"confirmation";const commitState=["notCommitted","committed","unknown"].includes(String(data.commitState))?data.commitState as UploadCommitState:response.status>=400&&response.status<500?"notCommitted":"unknown";
