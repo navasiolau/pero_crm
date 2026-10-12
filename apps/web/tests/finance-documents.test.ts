@@ -10,14 +10,17 @@ import type {LogisticsDocument} from '@prisma/client';
 import {guardedModuleCache} from './helpers/guarded-module-cache';
 import {atomicLocalWrite,documentLocalPath,type FileContentSource} from '../src/server/files/document-storage';
 type StorageRow=Pick<FinanceDocument,'storageMode'|'storageKey'|'mimeType'|'size'>;
-async function actualStorageCases(work:(context:{adapters:{kind:string;prefix:string;put:(row:StorageRow,bytes:Buffer)=>Promise<void>;open:(row:StorageRow)=>Promise<ReadableStream<Uint8Array>|null>}[];base:string;root:string;directories:string[];files:string[];mode:(value:'local'|'s3')=>void;puts:{key:string;bytes:Buffer;mime:string}[];get:()=>Buffer|null;set:(value:Buffer|null)=>void})=>Promise<void>){
+async function actualStorageCases(work:(context:{adapters:{kind:string;prefix:string;put:(row:StorageRow,bytes:Buffer|FileContentSource)=>Promise<void>;open:(row:StorageRow)=>Promise<ReadableStream<Uint8Array>|null>}[];base:string;root:string;directories:string[];files:string[];mode:(value:'local'|'s3')=>void;puts:{key:string;bytes:Buffer;mime:string}[];streamPuts:()=>number;get:()=>Buffer|null;set:(value:Buffer|null)=>void})=>Promise<void>){
  const base=await mkdtemp(path.join(tmpdir(),'pero151-')),root=path.join(base,'uploads'),directories=[base,root],files:string[]=[],puts:{key:string;bytes:Buffer;mime:string}[]=[];let mode:'local'|'s3'='local',body:Buffer|null=Buffer.from('s3-owned');
- const scope=guardedModuleCache(import.meta.url,{targets:['../src/server/finance-documents/storage','../src/server/logistics/storage'],allowedOverrides:['../src/lib/s3'],overrides:{'../src/lib/s3':{UPLOADS_ROOT:root,storageConfiguration:()=>({mode}),s3Put:async(key:string,bytes:Buffer,mime:string)=>{puts.push({key,bytes:Buffer.from(bytes),mime});},s3Get:async()=>body===null?null:Readable.from([body])}},prisma:{}});
- try{await scope.run(async()=>{const finance=scope.load<typeof import('../src/server/finance-documents/storage')>('../src/server/finance-documents/storage').financeDocumentStorage,logistics=scope.load<typeof import('../src/server/logistics/storage')>('../src/server/logistics/storage').logisticsDocumentStorage;await work({adapters:[{kind:'finance-documents',prefix:'FINANCE',put:(row,bytes)=>finance.put(row as FinanceDocument,bytes),open:row=>finance.open(row as FinanceDocument)},{kind:'logistics-documents',prefix:'LOGISTICS',put:(row,bytes)=>logistics.put(row as LogisticsDocument,bytes),open:row=>logistics.open(row as LogisticsDocument)}],base,root,directories,files,mode:value=>{mode=value;},puts,get:()=>body,set:value=>{body=value;}});});}
+ let streamPuts=0;
+ const scope=guardedModuleCache(import.meta.url,{targets:['../src/server/finance-documents/storage','../src/server/logistics/storage'],allowedOverrides:['../src/lib/s3'],overrides:{'../src/lib/s3':{UPLOADS_ROOT:root,storageConfiguration:()=>({mode}),s3Put:async(key:string,bytes:Buffer,mime:string)=>{puts.push({key,bytes:Buffer.from(bytes),mime});},s3PutStream:async(key:string,source:FileContentSource,mime:string)=>{streamPuts++;const parts:Buffer[]=[];for await(const part of await source.openRead())parts.push(Buffer.from(part));const bytes=Buffer.concat(parts);assert.equal(bytes.length,source.size);assert.equal(createHash('sha256').update(bytes).digest('hex'),source.contentHash);puts.push({key,bytes,mime});},s3Get:async()=>body===null?null:Readable.from([body])}},prisma:{}});
+ try{await scope.run(async()=>{const finance=scope.load<typeof import('../src/server/finance-documents/storage')>('../src/server/finance-documents/storage').financeDocumentStorage,logistics=scope.load<typeof import('../src/server/logistics/storage')>('../src/server/logistics/storage').logisticsDocumentStorage;await work({adapters:[{kind:'finance-documents',prefix:'FINANCE',put:(row,bytes)=>finance.put(row as FinanceDocument,bytes),open:row=>finance.open(row as FinanceDocument)},{kind:'logistics-documents',prefix:'LOGISTICS',put:(row,bytes)=>logistics.put(row as LogisticsDocument,bytes),open:row=>logistics.open(row as LogisticsDocument)}],base,root,directories,files,mode:value=>{mode=value;},puts,streamPuts:()=>streamPuts,get:()=>body,set:value=>{body=value;}});});}
  finally{assert.equal(await realpath(base),base);for(const file of [...files].reverse()){assert.ok(path.relative(base,file)&&!path.relative(base,file).startsWith('..')&&!path.isAbsolute(path.relative(base,file)));await unlink(file).catch((error:NodeJS.ErrnoException)=>{if(error.code!=='ENOENT')throw error;});}for(const directory of [...directories].reverse())await rmdir(directory).catch((error:NodeJS.ErrnoException)=>{if(error.code!=='ENOENT')throw error;});}
 }
 
 type Row = FinanceDocument & { payment: { id: string } | null };
+const streamed = (bytes: Buffer): FileContentSource => ({ size: bytes.length,
+  contentHash: createHash("sha256").update(bytes).digest("hex"), openRead: async () => Readable.from([bytes.subarray(0, 2), bytes.subarray(2)]) });
 function fixture() {
   const users = new Map<string, { id: string; name: string; active: boolean; roles: Role[] }>([
     ["accountant", { id: "accountant", name: "Бухгалтер", active: true, roles: ["ACCOUNTANT"] }],
@@ -52,7 +55,14 @@ function fixture() {
   };
   const storage: FinanceDocumentStorage = {
     mode: () => "local",
-    put: async () => { puts++; if (failStore) throw Error("storage unavailable"); onPut(); },
+    put: async (row, content) => {
+      puts++; if (failStore) throw Error("storage unavailable");
+      const parts: Buffer[] = [];
+      if (Buffer.isBuffer(content)) parts.push(content);
+      else for await (const part of await content.openRead()) parts.push(Buffer.from(part));
+      const bytes = Buffer.concat(parts); assert.equal(bytes.length, row.size);
+      assert.equal(createHash("sha256").update(bytes).digest("hex"), row.contentHash); onPut();
+    },
     open: async () => { reads++; return new ReadableStream({ start(controller) { controller.enqueue(new Uint8Array([1, 2, 3])); controller.close(); } }); },
   };
   const service = createFinanceDocumentService({ transaction, storage });
@@ -64,7 +74,9 @@ function fixture() {
 test("finance-only user can upload without a project; exact retry preserves document and audit", async () => {
   const f = fixture();
   const first = await f.service.upload("accountant", f.input);
-  const repeated = await f.service.upload("accountant", f.input);
+  const repeated = await f.service.upload("accountant", { ...f.input, bytes: {
+    ...streamed(f.input.bytes), openRead: async () => { throw Error("READY_REPLAY_MUST_NOT_READ_AGAIN"); },
+  } });
   assert.equal(first.document.id, repeated.document.id);
   assert.equal(repeated.repeated, true);
   assert.equal(f.rows.length, 1); assert.equal(f.rows[0].state, "READY");
@@ -103,19 +115,19 @@ test("same mutation cannot change contents, metadata or owner", async () => {
 });
 
 test("storage failure remains pending and unreadable, then same request recovers", async () => {
-  const f = fixture(); f.failStorage(true);
-  await assert.rejects(f.service.upload("accountant", f.input), /storage unavailable/);
+  const f = fixture(), input = { ...f.input, bytes: streamed(f.input.bytes) }; f.failStorage(true);
+  await assert.rejects(f.service.upload("accountant", input), /storage unavailable/);
   assert.equal(f.rows[0].state, "PENDING"); assert.equal(f.audits.length, 0);
   assert.equal(await f.service.read("accountant", f.rows[0].id), null);
   f.failStorage(false);
-  const saved = await f.service.upload("accountant", f.input);
+  const saved = await f.service.upload("accountant", input);
   assert.equal(saved.document.id, f.rows[0].id); assert.equal(f.audits.length, 1);
 });
 
 test("role revoked during transfer prevents confirmation and document use", async () => {
   const f = fixture();
   f.afterStorage(() => { f.users.get("accountant")!.active = false; });
-  await assert.rejects(f.service.upload("accountant", f.input), /прав/);
+  await assert.rejects(f.service.upload("accountant", { ...f.input, bytes: streamed(f.input.bytes) }), /прав/);
   assert.equal(f.rows[0].state, "PENDING"); assert.equal(f.audits.length, 0);
 });
 
@@ -129,7 +141,7 @@ test("empty file and malformed request are rejected without a reservation", asyn
 // Настоящие storage adapters, реальные собственные temp bytes, сетевые/Prisma effects запрещены existing guard161.
 test('оба adapters сохраняют bytes/retry и свои key/mode errors, missing/partial не выдаются',async()=>actualStorageCases(async c=>{
  for(const adapter of c.adapters){const id=randomUUID(),key=adapter.kind+'/'+id+'/'+'a'.repeat(64),bytes=Buffer.from('owned151-document'),row:StorageRow={storageMode:'local',storageKey:key,mimeType:'application/pdf',size:bytes.length},target=path.join(c.root,...key.split('/'));c.directories.push(path.join(c.root,adapter.kind),path.join(c.root,adapter.kind,id));c.files.push(target);
-  await adapter.put(row,bytes);assert.deepEqual(await readFile(target),bytes);await adapter.put(row,bytes);const opened=await adapter.open(row);assert.ok(opened);assert.deepEqual(Buffer.from(await new Response(opened).arrayBuffer()),bytes);assert.deepEqual(await readdir(path.dirname(target)),['a'.repeat(64)]);
+  await adapter.put(row,bytes);assert.deepEqual(await readFile(target),bytes);await adapter.put(row,streamed(bytes));const opened=await adapter.open(row);assert.ok(opened);assert.deepEqual(Buffer.from(await new Response(opened).arrayBuffer()),bytes);assert.deepEqual(await readdir(path.dirname(target)),['a'.repeat(64)]);
   assert.equal(await adapter.open({...row,size:bytes.length+1}),null);assert.equal(await adapter.open({...row,storageKey:adapter.kind+'/'+randomUUID()+'/'+'b'.repeat(64)}),null);await assert.rejects(adapter.open({...row,storageKey:adapter.kind+'/'+id+'/'+'b'.repeat(64)}),error=>(error as NodeJS.ErrnoException).code==='ENOENT');
   for(const key of ['../../outside','foreign/'+id+'/'+'a'.repeat(64)])await assert.rejects(adapter.put({...row,storageKey:key},bytes),error=>(error as {code?:string}).code===adapter.prefix+'_STORAGE_KEY_INVALID');await assert.rejects(adapter.open({...row,storageMode:'s3'}),error=>(error as {code?:string}).code===adapter.prefix+'_STORAGE_CHANGED');
  }
@@ -141,7 +153,7 @@ test('оба adapters отвергают symlink escape до чтения/зап
 }));
 
 test('оба adapters сохраняют прежние S3 key/MIME/bytes и Node stream/null contracts',async()=>actualStorageCases(async c=>{
- c.mode('s3');for(const adapter of c.adapters){const bytes=Buffer.from('s3-owned'),row:StorageRow={storageMode:'s3',storageKey:adapter.kind+'/'+randomUUID()+'/'+'a'.repeat(64),mimeType:'application/pdf',size:bytes.length};await adapter.put(row,bytes);assert.deepEqual(c.puts.at(-1),{key:row.storageKey,bytes,mime:row.mimeType});const stream=await adapter.open(row);assert.ok(stream);assert.deepEqual(Buffer.from(await new Response(stream).arrayBuffer()),bytes);c.set(null);assert.equal(await adapter.open(row),null);c.set(bytes);}
+ c.mode('s3');for(const adapter of c.adapters){const bytes=Buffer.from('s3-owned'),row:StorageRow={storageMode:'s3',storageKey:adapter.kind+'/'+randomUUID()+'/'+'a'.repeat(64),mimeType:'application/pdf',size:bytes.length};const before=c.streamPuts();await adapter.put(row,bytes);assert.deepEqual(c.puts.at(-1),{key:row.storageKey,bytes,mime:row.mimeType});assert.equal(c.streamPuts(),before);await adapter.put(row,streamed(bytes));assert.equal(c.streamPuts(),before+1);assert.deepEqual(c.puts.at(-1),{key:row.storageKey,bytes,mime:row.mimeType});const stream=await adapter.open(row);assert.ok(stream);assert.deepEqual(Buffer.from(await new Response(stream).arrayBuffer()),bytes);c.set(null);assert.equal(await adapter.open(row),null);c.set(bytes);}
 }));
 
 test('общая FileContentSource запись проверяет declared bytes/SHA, rollback и закрытие source для обоих key namespaces',async()=>actualStorageCases(async c=>{

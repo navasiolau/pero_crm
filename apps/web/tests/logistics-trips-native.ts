@@ -74,7 +74,7 @@ async function main() {
       let failStorage = true;
       const bytes = new Map<string, Buffer>();
       const storage: LogisticsDocumentStorage = { mode: () => "local", async put(row, content) {
-        if (failStorage) throw Error("TEST_STORAGE_FAILURE"); bytes.set(row.storageKey, Buffer.from(content));
+        if (failStorage) throw Error("TEST_STORAGE_FAILURE"); assert.ok(Buffer.isBuffer(content), "LEGACY_NATIVE_BUFFER_FIXTURE"); bytes.set(row.storageKey, Buffer.from(content));
       }, async open(row) { const content = bytes.get(row.storageKey); return content ? new ReadableStream({ start(controller) { controller.enqueue(content); controller.close(); } }) : null; } };
       const service = createLogisticsDocumentService({ transaction, storage });
       const document = { tripId: created.tripId, clientMutationId: randomUUID(), stage: "ISSUED" as const,

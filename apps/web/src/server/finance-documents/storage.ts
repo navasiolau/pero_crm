@@ -1,6 +1,6 @@
 import {documentLocalPath,atomicLocalWrite,asWebFileStream,openLocalDocument} from "@/server/files/document-storage";
 import type { FinanceDocument } from "@prisma/client";
-import { UPLOADS_ROOT, s3Get, s3Put, storageConfiguration } from "@/lib/s3";
+import { UPLOADS_ROOT, s3Get, s3Put, s3PutStream, storageConfiguration } from "@/lib/s3";
 import { UploadError } from "@/server/files/upload-result";
 import type { FinanceDocumentStorage } from "./core";
 
@@ -19,7 +19,9 @@ export const financeDocumentStorage: FinanceDocumentStorage = {
   mode: () => storageConfiguration().mode,
   async put(document, bytes) {
     validateStorage(document);
-    if (document.storageMode === "s3") return s3Put(document.storageKey, bytes, document.mimeType);
+    if (document.storageMode === "s3") return Buffer.isBuffer(bytes)
+      ? s3Put(document.storageKey, bytes, document.mimeType)
+      : s3PutStream(document.storageKey, bytes, document.mimeType);
     await atomicLocalWrite(await localPath(document, true), bytes);
   },
   async open(document) {

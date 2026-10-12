@@ -2,17 +2,18 @@ import { createHash, randomUUID } from "node:crypto";
 import type { LogisticsDocument, Prisma } from "@prisma/client";
 import { uploadSizeLimitError, uploadSizeLimitFor } from "@/server/files/upload-limits";
 import { UploadError, type UploadPhase } from "@/server/files/upload-result";
+import type { FileContentSource } from "@/server/files/document-storage";
 import { logisticsDocumentUploadSchema, type LogisticsDocumentView } from "./contracts";
 import { requireLogisticsActor, type LogisticsTransaction } from "./core";
 
 export type LogisticsDocumentStorage = {
   mode(): "local" | "s3";
-  put(document: LogisticsDocument, bytes: Buffer): Promise<void>;
+  put(document: LogisticsDocument, bytes: LogisticsDocumentUploadInput["bytes"]): Promise<void>;
   open(document: LogisticsDocument): Promise<ReadableStream<Uint8Array> | null>;
 };
 export type LogisticsDocumentUploadInput = {
   tripId: string; clientMutationId: string; stage: "ISSUED" | "SIGNED"; ttnNumber?: string | null;
-  fileName: string; mimeType: string; bytes: Buffer;
+  fileName: string; mimeType: string; bytes: Buffer | FileContentSource;
 };
 export function logisticsDocumentView(row: LogisticsDocument): LogisticsDocumentView {
   return { id: row.id, tripId: row.tripId, source: "logistics", fileName: row.fileName, mimeType: row.mimeType,
@@ -36,12 +37,15 @@ export function createLogisticsDocumentService({ transaction, storage }: {
       await transaction(tx => requireLogisticsActor(actorId, tx));
       const parsed = logisticsDocumentUploadSchema.safeParse({ tripId: input.tripId, clientMutationId: input.clientMutationId,
         stage: input.stage, ttnNumber: input.ttnNumber, fileName: input.fileName, mimeType: input.mimeType });
-      if (!parsed.success || !Buffer.isBuffer(input.bytes) || input.bytes.length === 0)
+      const content = input.bytes, buffered = Buffer.isBuffer(content);
+      const size = buffered ? content.length : content?.size;
+      if (!parsed.success || !Number.isSafeInteger(size) || size <= 0 || (!buffered &&
+        (typeof content?.contentHash !== "string" || !/^[a-f0-9]{64}$/.test(content.contentHash) || typeof content?.openRead !== "function")))
         throw new UploadError("LOGISTICS_DOCUMENT_INVALID", 422, "validation", parsed.error?.issues[0]?.message ?? "Выберите непустой файл ТТН", "validation");
-      const data = parsed.data, size = input.bytes.length;
+      const data = parsed.data;
       const limit = uploadSizeLimitFor(data);
       if (size > limit.maxBytes) throw new UploadError("LOGISTICS_DOCUMENT_TOO_LARGE", 413, "validation", uploadSizeLimitError(limit.kind), "validation");
-      const contentHash = createHash("sha256").update(input.bytes).digest("hex");
+      const contentHash = buffered ? createHash("sha256").update(content).digest("hex") : content.contentHash;
       const requestFingerprint = createHash("sha256").update(JSON.stringify({ actorId, ...data, size, contentHash })).digest("hex");
       options.onPhase?.("persist");
       const reserved = await transaction(async tx => {

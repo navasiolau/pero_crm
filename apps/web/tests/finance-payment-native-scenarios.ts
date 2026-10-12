@@ -37,7 +37,7 @@ export async function runFinancePaymentNative(db: PrismaClient, general = false)
         cashAccountId: account.id, comment: marker, createdById: actor.id } });
       const storage = new Map<string, Buffer>();
       const documents = createFinanceDocumentService({ transaction: operation => operation(tx), storage: {
-        mode: () => "local", put: async (document, bytes) => { storage.set(document.storageKey, bytes); }, open: async () => null,
+        mode: () => "local", put: async (document, bytes) => { assert.ok(Buffer.isBuffer(bytes), "LEGACY_NATIVE_BUFFER_FIXTURE"); storage.set(document.storageKey, bytes); }, open: async () => null,
       } });
       const uploaded = await documents.upload(user.id, { clientMutationId: randomUUID(), fileName: "Документ.pdf", mimeType: "application/pdf", bytes: Buffer.from("%PDF-1.4\nQA98") });
       const input = { projectId: project?.id ?? null, direction: "EXPENSE" as const, amount: 100, currency: "BYN", cashAccountId: account.id,
