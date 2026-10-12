@@ -167,19 +167,6 @@ importers:
         specifier: ^19
         version: 19.2.17
 
-  packages/plugins/file-stages:
-    dependencies:
-      '@pero/plugin-sdk':
-        specifier: workspace:*
-        version: link:../../plugin-sdk
-      react:
-        specifier: ^19
-        version: 19.1.0
-    devDependencies:
-      '@types/react':
-        specifier: ^19
-        version: 19.2.17
-
 packages:
 
   '@alloc/quick-lru@5.2.0':
