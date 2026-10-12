@@ -1,4 +1,5 @@
 
+import { uuid } from "zod";
 import { revalidatePath } from "next/cache";
 import { Prisma } from "@prisma/client";
 import { isDeepStrictEqual } from "node:util";
@@ -36,20 +37,21 @@ export async function createPaymentCore(
   input: PaymentInput,
 ): Promise<PaymentMutationResult> {
   requireActorRoles(actor, FINANCE_ROLES);
+  const recognizedId = uuid().safeParse(input?.clientMutationId);
   const parsed = paymentSchema.safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: parsed.error.issues[0]?.message ?? "Ошибка данных" };
+    return { ok: false, outcome: "ROLLED_BACK", kind: "invalid-request", clientMutationId: recognizedId.success ? recognizedId.data.toLowerCase() : undefined, error: parsed.error.issues[0]?.message ?? "Ошибка данных" };
   }
   const data = parsed.data;
   try {
     const existing = await readPaymentReceipt(actor, data, prisma);
-    if (existing) return { ok: true, outcome: "COMMITTED", resultId: existing.id, paymentId: existing.id };
+    if (existing) return { ok: true, outcome: "COMMITTED", resultId: existing.id, paymentId: existing.id, clientMutationId: data.clientMutationId, replayed: true };
   } catch (error) {
-    if (error instanceof PaymentReceiptError) return { ok: false, error: error.message };
-    return { ok: false, outcome: "UNKNOWN", retrySafe: Boolean(data.clientMutationId), error: "Не удалось проверить подтверждение платежа. Повторите тот же запрос с сохранённым идентификатором." };
+    if (error instanceof PaymentReceiptError) return { ok: false, outcome: "ROLLED_BACK", kind: error.kind, removedPaymentId: error.removedPaymentId, clientMutationId: data.clientMutationId, error: error.message };
+    return { ok: false, outcome: "UNKNOWN", retrySafe: true, clientMutationId: data.clientMutationId, error: "Не удалось проверить подтверждение платежа. Повторите тот же запрос с сохранённым идентификатором." };
   }
   try { assertExpenseReportDocument(data); }
-  catch (error) { return { ok: false, error: error instanceof Error ? error.message : "Проверьте отчётный документ" }; }
+  catch (error) { return { ok: false, outcome: "ROLLED_BACK", clientMutationId: data.clientMutationId, error: error instanceof Error ? error.message : "Проверьте отчётный документ" }; }
   let result;
   let prepared: PreparedPayment;
   try {
@@ -82,13 +84,13 @@ export async function createPaymentCore(
         direction: data.direction, amount: prepared.amount, currency: data.currency, bynAmount: prepared.bynAmount };
       return isDeepStrictEqual(event.payload, payload) ? candidate : null;
     });
-    if (outcome.outcome === "UNKNOWN") return { ok: false, outcome: "UNKNOWN", retrySafe: Boolean(data.clientMutationId),
+    if (outcome.outcome === "UNKNOWN") return { ok: false, outcome: "UNKNOWN", retrySafe: true, clientMutationId: data.clientMutationId,
       error: data.clientMutationId ? "Подтверждение не получено. Повторите тот же платёж с сохранённым идентификатором." : "Подтверждение не получено. Проверьте историю платежей; не повторяйте операцию автоматически." };
-    if (outcome.outcome === "ROLLED_BACK") return { ok: false, outcome: "ROLLED_BACK", error: outcome.error instanceof Error ? outcome.error.message : "Не удалось внести платёж" };
+    if (outcome.outcome === "ROLLED_BACK") return { ok: false, outcome: "ROLLED_BACK", clientMutationId: data.clientMutationId, error: outcome.error instanceof Error ? outcome.error.message : "Не удалось внести платёж" };
     result = outcome.value;
-  } catch(error) { return {ok:false,error:error instanceof Error?error.message:"Не удалось внести платёж"}; }
+  } catch(error) { return {ok:false,outcome:"ROLLED_BACK",clientMutationId:data.clientMutationId,error:error instanceof Error?error.message:"Не удалось внести платёж"}; }
   const { project, amount } = prepared;
-  const ack: PaymentMutationResult = { ok: true, outcome: "COMMITTED", resultId: result.payment.id, paymentId: result.payment.id };
+  const ack: PaymentMutationResult = { ok: true, outcome: "COMMITTED", resultId: result.payment.id, paymentId: result.payment.id, clientMutationId: data.clientMutationId, ...(result.repeated ? {replayed:true} : {}) };
   if (result.repeated) return ack;
   const isIncome = data.direction === "INCOME";
   const kind = isIncome ? "Приход" : "Расход";

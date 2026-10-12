@@ -9,8 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { formatAmount, formatDate } from "@/lib/format";
-import { addPayment } from "@/server/payments/actions";
-import { addPaidStockReceipt } from "@/server/warehouse/stock-purchase-actions";
+import { usePaymentCreateCommand } from "@/components/use-payment-create-command";
 import { stockPurchaseAmount } from "@/lib/warehouse-cost";
 import { StockMaterialFields } from "@/components/stock-material-fields";
 import type { StockMaterialOption } from "@/server/warehouse/contracts";
@@ -46,6 +45,9 @@ export function PaymentDialog({
   stockMaterials?: StockMaterialOption[];
 }) {
   const isStockPurchase = stockMaterials !== undefined;
+  const command = usePaymentCreateCommand(open, {kind: isStockPurchase ? "stock" : "payment", direction, projectId});
+  const saved = command.intent && !("blocked" in command.intent) ? command.intent.command : undefined;
+  const blocked = command.intent && "blocked" in command.intent ? command.intent.error : "";
   const isIncome = !isStockPurchase && direction === "INCOME";
   const [materialId, setMaterialId] = useState("");
   const [quantity, setQuantity] = useState("");
@@ -68,9 +70,19 @@ export function PaymentDialog({
   const [reportDocument, setReportDocument] = useState<FinanceDocumentView | null>(null);
   const [documentLoading, setDocumentLoading] = useState(false);
 
-  // Сброс формы при каждом открытии
+  // Обычный open сбрасывает draft; неизвестное намерение восстанавливается после current actor check.
   useEffect(() => {
-    if (open) {
+    if (open && !command.loading && command.actorId) {
+      const restored = command.restored;
+      if (restored) {
+        const data = restored.data;
+        setClientMutationId(data.clientMutationId); setCurrency(data.currency); setCashAccountId(data.cashAccountId);
+        setArticleId(data.expenseArticleId ?? ""); setRate(data.rate === undefined ? "" : String(data.rate)); setRateDate(data.rateDate ?? "");
+        setPaidAt(data.paidAt ?? ""); setComment(data.comment ?? ""); setDocumentLoading(false);
+        if (restored.kind === "payment") {setSelectedProjectId(restored.data.projectId ?? ""); setAmount(String(restored.data.amount));}
+        else {setMaterialId(restored.data.materialId); setQuantity(String(restored.data.quantity)); setUnitPrice(String(restored.data.unitPrice));}
+        return;
+      }
       setClientMutationId(createRequestId());
       setReportDocument(null);
       setDocumentLoading(false);
@@ -85,10 +97,11 @@ export function PaymentDialog({
       setPaidAt("");
       setComment("");
     }
-  }, [open, projectCurrency, projectId, direction, isStockPurchase]);
+  }, [open, projectCurrency, projectId, direction, isStockPurchase, command.actorId, command.loading, command.restored]);
 
   // Курс НБ РБ — автоматически при смене валюты/даты (§11)
   useEffect(() => {
+    if (saved || command.loading) {setRateLoading(false); return;}
     if (!open || currency === "BYN") {
       setRateLoading(false);
       setRate("");
@@ -112,7 +125,7 @@ export function PaymentDialog({
     return () => {
       cancelled = true;
     };
-  }, [currency, paidAt, open]);
+  }, [currency, paidAt, open, saved, command.loading]);
 
   const accountOptions = cashAccounts.filter(
     (account) => account.currency === currency,
@@ -195,7 +208,7 @@ export function PaymentDialog({
               : hasProject ? "Расход уменьшит маржу проекта" : "Расход уменьшит баланс организации и выбранной кассы"}
           </DialogDescription>
         </DialogHeader>
-        <fieldset disabled={pending} className="flex min-w-0 max-w-full flex-col gap-3">
+        <fieldset disabled={pending || command.loading || !!saved || !!blocked} className="flex min-w-0 max-w-full flex-col gap-3">
           {projectOptions && !isStockPurchase ? (
             <div className="flex min-w-0 max-w-full flex-col gap-1.5">
               <Label htmlFor="income-project">Проект (необязательно)</Label>
@@ -319,25 +332,29 @@ export function PaymentDialog({
             />
           </div>
         </fieldset>
+        {saved ? <p role="status" className="text-sm text-destructive">Результат операции требует подтверждения. Проверьте прежний запрос.</p> : null}
+        {saved?.data.reportDocumentId && !reportDocument ? <p className="text-sm text-muted-foreground">Отчётный документ закреплён в сохранённом запросе.</p> : null}
+        {blocked || command.error ? <p role="alert" className="text-sm text-destructive">{blocked || command.error}</p> : null}
         <DialogFooter>
           <Button variant="outline" disabled={pending} onClick={() => onOpenChange(false)}>
             Отмена
           </Button>
           <Button
-            disabled={!canSubmit}
+            disabled={pending || command.loading || !command.actorId || !!blocked || (!saved && !canSubmit)}
             onClick={() =>
               startTransition(async () => {
                 try {
                 const common = { clientMutationId, currency, cashAccountId: effectiveAccountId,
                   rate: needsRate ? parsedRate : undefined, rateDate: rateDate || undefined, paidAt: paidAt || undefined, comment: comment.trim() || undefined };
-                const result = isStockPurchase
-                  ? await addPaidStockReceipt({ ...common, materialId, quantity, unitPrice, expenseArticleId: effectiveArticleId,
-                    ...(reportDocument ? { reportDocumentId: reportDocument.id } : {}) })
-                  : await addPayment({ ...common,
+                const result = await command.run(saved ?? (isStockPurchase
+                  ? {kind: "stock", data: { ...common, materialId, quantity, unitPrice, expenseArticleId: effectiveArticleId,
+                    ...(reportDocument ? { reportDocumentId: reportDocument.id } : {}) }}
+                  : {kind: "payment", data: { ...common,
                     ...(!isIncome && reportDocument ? { reportDocumentId: reportDocument.id } : {}),
                     projectId: projectOptions ? selectedProjectId || null : projectId ?? null, direction, amount: parsedAmount,
                     ...(!isIncome ? { expenseArticleId: effectiveArticleId } : {}),
-                  });
+                  }}));
+                if (!result) return;
                 if (result.ok) {
                   toast.success(isStockPurchase ? "Материал оплачен и принят на склад" : isIncome ? "Приход внесён" : "Расход внесён");
                   onOpenChange(false);
@@ -353,6 +370,7 @@ export function PaymentDialog({
           >
             {pending
               ? "Сохранение…"
+              : saved ? "Проверить"
               : isStockPurchase ? "Оплатить и принять на склад" : isIncome
                 ? "Внести приход"
                 : "Внести расход"}

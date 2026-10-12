@@ -116,7 +116,7 @@ test("actual expense writer and actual advance core share ReadCommitted lock; on
         expectedCashCurrency: "BYN", description: "QA work", requestId: randomUUID() },
       { asOf: date, cash: { currency: "BYN", rate: "1.000000", date },
         payroll: { currency: "BYN", rate: "1.000000", date } } as const, tx));
-    const expense = () => createPaymentCore(actor as never, { projectId: "project", direction: "EXPENSE", reportDocumentId: "99999999-9999-4999-8999-999999999998",
+    const expense = () => createPaymentCore(actor as never, { clientMutationId: "00000134-0000-4000-8000-000000000104", projectId: "project", direction: "EXPENSE", reportDocumentId: "99999999-9999-4999-8999-999999999998",
       amount: 500, currency: "BYN", cashAccountId: "cash", expenseArticleId: "article" });
     const first = expenseFirst ? expense() : advance();
     const second = expenseFirst ? advance() : expense();
@@ -137,7 +137,7 @@ test("actual expense writer and actual advance core share ReadCommitted lock; on
     // Порядок вызовов не равен порядку lock: preparePayment имеет async preflight.
     // Только actual отказ EXPENSE требует отдельную SELECT-only confirmation fence.
     if (!expenseResult.ok) assert.equal(expenseResult.outcome, "ROLLED_BACK");
-    assert.deepEqual(verification, expenseResult.ok ? [] : [{ calls: ["$queryRaw"], failed: false }]);
+    assert.deepEqual(verification, expenseResult.ok ? [] : [{ calls: ["$queryRaw", "changeLog.findUnique"], failed: false }]);
     assert.equal(advisoryCalls, writers.length + verification.length);
     assert.equal(maxActiveTransactions, 1);
   }
@@ -172,7 +172,7 @@ test("actual settleAll delegates each payout to the same guarded core while an e
   assert.equal(Number(payouts[0].cashAmount), 600);
   assert.equal(advisoryCalls, 1);
   reset();
-  const expense = createPaymentCore(actor as never, { projectId: "project", direction: "EXPENSE", reportDocumentId: "99999999-9999-4999-8999-999999999999",
+  const expense = createPaymentCore(actor as never, { clientMutationId: "00000134-0000-4000-8000-000000000104", projectId: "project", direction: "EXPENSE", reportDocumentId: "99999999-9999-4999-8999-999999999999",
     amount: 500, currency: "BYN", cashAccountId: "cash", expenseArticleId: "article" });
   const bulk = settleAll(currentMonth, "cash");
   const results = await Promise.all([expense, bulk]);
