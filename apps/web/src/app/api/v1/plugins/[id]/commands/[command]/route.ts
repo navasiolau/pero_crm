@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 
 import { authenticate, isErrorResponse } from "@/server/api/auth";
 import { buildPluginContext } from "@/server/plugins/context";
+import { emitDomainEvent } from "@/server/plugins/events";
 import { getManifest } from "@/server/plugins/registry";
 import { logPluginRun } from "@/server/plugins/run-log";
 
@@ -28,7 +29,7 @@ export async function POST(
 
   const started = Date.now();
   try {
-    const ctx = await buildPluginContext(id);
+    const ctx = await buildPluginContext(id, emitDomainEvent);
     const result = await command.run(ctx);
     await logPluginRun({
       pluginId: id,

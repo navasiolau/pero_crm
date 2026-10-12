@@ -44,7 +44,7 @@ export async function togglePlugin(
   if (hook) {
     const started = Date.now();
     try {
-      const ctx = await buildPluginContext(pluginId);
+      const ctx = await buildPluginContext(pluginId, emitDomainEvent);
       await hook(ctx);
       await logPluginRun({
         pluginId,
@@ -133,7 +133,7 @@ export async function runPluginCommand(
 
   const started = Date.now();
   try {
-    const ctx = await buildPluginContext(pluginId);
+    const ctx = await buildPluginContext(pluginId, emitDomainEvent);
     const result = await command.run(ctx);
     await logPluginRun({
       pluginId,
