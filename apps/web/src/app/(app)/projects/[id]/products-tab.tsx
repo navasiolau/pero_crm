@@ -26,19 +26,6 @@ import { ProductKanbanCard } from "@/components/product-kanban-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { ProductQuantityInput } from "@/components/product-quantity-input";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { SearchableSelect } from "@/components/ui/searchable-select";
-import {
   PRODUCT_STATUSES,
   visibleProductStatuses,
   productStatusLabels,
@@ -47,7 +34,8 @@ import {
 import { cn } from "@/lib/utils";
 import type { SketchFilePreview } from "@/lib/product-hero";
 import { currentProductStatusTargets, shouldRollbackProductStatus } from "@/lib/product-percentage-ui";
-import { changeProductStatus, createProduct } from "@/server/products/actions";
+import { changeProductStatus } from "@/server/products/actions";
+import { CreateProductDialog } from "./create-product-dialog";
 
 export interface ProductCard {
   id: string;
@@ -188,12 +176,6 @@ export function ProductsTab({
   }, [initialProducts, actorRoles]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
-  const [title, setTitle] = useState("");
-  const [kind, setKind] = useState("");
-  const [quantity, setQuantity] = useState("1");
-  const [price, setPrice] = useState("");
-  const [description, setDescription] = useState("");
-  const [engineerId, setEngineerId] = useState("");
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -248,12 +230,6 @@ export function ProductsTab({
   }
 
   const activeProduct = products.find((product) => product.id === activeId);
-  const parsedPrice = price.trim() === "" ? undefined : Number(price);
-  const parsedQuantity = Number(quantity);
-  const canCreate =
-    Number.isInteger(parsedQuantity) && parsedQuantity >= 1 && parsedQuantity <= 2_147_483_647 &&
-    title.trim().length > 0 &&
-    (parsedPrice === undefined || (!Number.isNaN(parsedPrice) && parsedPrice >= 0));
 
   return (
     <div className="flex flex-col gap-3">
@@ -303,116 +279,16 @@ export function ProductsTab({
         </DragOverlay>
       </DndContext>
 
-      <Dialog
+      <CreateProductDialog
         open={createOpen}
-        onOpenChange={(next) => {
-          setCreateOpen(next);
-          if (!next) {
-            setTitle("");
-            setKind("");
-            setPrice("");
-                    setQuantity("1");
-            setDescription("");
-            setEngineerId("");
-          }
-        }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Новое изделие</DialogTitle>
-            <DialogDescription>
-              Начальный статус изделия зависит от этапа проекта.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex flex-col gap-3">
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="product-title">Название *</Label>
-              <Input
-                id="product-title"
-                value={title}
-                onChange={(event) => setTitle(event.target.value)}
-                placeholder="Кухня «Модерн», шкаф-купе…"
-              />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="product-kind">Вид изделия</Label>
-              <Input
-                id="product-kind"
-                value={kind}
-                onChange={(event) => setKind(event.target.value)}
-                placeholder="Кухня, шкаф, перегородка…"
-              />
-            </div>
-            <ProductQuantityInput value={quantity} onChange={setQuantity} price={price.trim() || null} currency={currency} showAmount={showAmount} />
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="product-price">Цена за 1 шт., {currency}</Label>
-              <Input
-                id="product-price"
-                type="number"
-                min="0"
-                value={price}
-                onChange={(event) => setPrice(event.target.value)}
-                placeholder="не обязательно"
-              />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="product-description">Технический блок</Label>
-              <Textarea
-                id="product-description"
-                value={description}
-                onChange={(event) => setDescription(event.target.value)}
-                placeholder="Материалы, размеры, особенности…"
-              />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label>Инженер</Label>
-              <SearchableSelect
-                options={engineerOptions}
-                value={engineerId}
-                onChange={(value) => setEngineerId(value ?? "")}
-                placeholder="не назначен"
-                searchPlaceholder="Поиск инженера…"
-                allowClear
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setCreateOpen(false)}>
-              Отмена
-            </Button>
-            <Button
-              disabled={!canCreate || pending}
-              onClick={() =>
-                startTransition(async () => {
-                  const result = await createProduct({
-                    projectId,
-                    title: title.trim(),
-                    kind: kind.trim() || undefined,
-                    expectedPrice: parsedPrice,
-                    quantity: parsedQuantity,
-                    description,
-                    engineerId: engineerId || undefined,
-                  });
-                  if (result.ok) {
-                    toast.success("Изделие создано");
-                    setCreateOpen(false);
-                    setTitle("");
-                    setKind("");
-                    setPrice("");
-                    setQuantity("1");
-                    setDescription("");
-                    router.refresh();
-                  } else {
-                    toast.error(result.error ?? "Ошибка");
-                  }
-                })
-              }
-            >
-              {pending ? "Создание…" : "Создать изделие"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        onOpenChange={setCreateOpen}
+        onCreated={() => router.refresh()}
+        projectId={projectId}
+        currency={currency}
+        showAmount={showAmount}
+        engineerOptions={engineerOptions}
+        statusPending={pending}
+      />
     </div>
   );
 }
