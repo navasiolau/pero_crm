@@ -14,7 +14,7 @@ const bytes = new Map<string, Buffer>();
 let failStorage = false, loads = 0;
 const storage: FinanceDocumentStorage = {
   mode: () => "local",
-  async put(row, content) { if (failStorage) throw Error("TEST_STORAGE_FAILURE"); bytes.set(row.storageKey, Buffer.from(content)); },
+  async put(row, content) { if (failStorage) throw Error("TEST_STORAGE_FAILURE"); assert.ok(Buffer.isBuffer(content), "LEGACY_NATIVE_BUFFER_FIXTURE"); bytes.set(row.storageKey, Buffer.from(content)); },
   async open(row) { loads++; const content = bytes.get(row.storageKey); return content ? new ReadableStream({ start(controller) { controller.enqueue(content); controller.close(); } }) : null; },
 };
 const service = createFinanceDocumentService({ storage, transaction: operation => db.$transaction(operation, { maxWait: 10_000, timeout: 15_000 }) });

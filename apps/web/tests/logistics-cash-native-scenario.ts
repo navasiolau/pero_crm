@@ -61,7 +61,7 @@ export async function runLogisticsCashAcceptance(tx: Prisma.TransactionClient) {
       { projectId: b.projectId, kind: "PRODUCT" as const, productId: b.id, quantity: 3 }] };
   const trip = await createLogisticsTripCore(actorId, { ...manifest, clientMutationId: randomUUID() }, transaction);
   const contents = new Map<string, Buffer>();
-  const storage: LogisticsDocumentStorage = { mode: () => "local", async put(document, bytes) { contents.set(document.storageKey, bytes); },
+  const storage: LogisticsDocumentStorage = { mode: () => "local", async put(document, bytes) { assert.ok(Buffer.isBuffer(bytes), "LEGACY_NATIVE_BUFFER_FIXTURE"); contents.set(document.storageKey, bytes); },
     async open(document) { const bytes = contents.get(document.storageKey); return bytes ? new ReadableStream({ start(controller) { controller.enqueue(bytes); controller.close(); } }) : null; } };
   const documents = createLogisticsDocumentService({ transaction, storage });
   const upload = { tripId: trip.tripId, clientMutationId: randomUUID(), stage: "ISSUED" as const, ttnNumber: marker,

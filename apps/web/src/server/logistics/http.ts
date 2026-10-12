@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { privateFileHeaders } from "@/server/files/private-response";
 import { UploadError, uploadFailure, type UploadPhase } from "@/server/files/upload-result";
-import { uploadSizeLimitError, uploadSizeLimitFor } from "@/server/files/upload-limits";
+import { spoolMultipartUpload, type MultipartUpload } from "@/server/files/multipart-upload";
 import type { createLogisticsDocumentService } from "./documents";
 
 type HttpDependencies = { authorize: () => Promise<string>; service: ReturnType<typeof createLogisticsDocumentService> };
@@ -10,25 +10,32 @@ const privateHeaders = { "Cache-Control": "private, no-store", "Vary": "Cookie, 
 export async function uploadLogisticsDocumentResponse(request: Request, dependencies: HttpDependencies) {
   const requestId = randomUUID();
   let phase: UploadPhase = "auth";
+  let upload: MultipartUpload | undefined;
   try {
     const actorId = await dependencies.authorize();
     phase = "request";
-    const form = await request.formData().catch(() => null), file = form?.get("file");
-    const mutation = form?.get("clientMutationId"), tripId = form?.get("tripId"), stage = form?.get("stage");
-    const ttnNumber = form?.get("ttnNumber");
-    if (!form || !(file instanceof File) || typeof mutation !== "string" || typeof tripId !== "string" ||
-      (stage !== "ISSUED" && stage !== "SIGNED") || (ttnNumber !== null && typeof ttnNumber !== "string"))
+    upload = await spoolMultipartUpload(request, { onFileField: () => {
       throw new UploadError("LOGISTICS_DOCUMENT_INVALID", 422, "request", "Выберите ТТН и отметьте одну или две печати", "validation");
-    const mimeType = file.type || "application/octet-stream", limit = uploadSizeLimitFor({ mimeType });
-    if (file.size > limit.maxBytes)
-      throw new UploadError("LOGISTICS_DOCUMENT_TOO_LARGE", 413, "validation", uploadSizeLimitError(limit.kind), "validation");
+    } });
+    const file = upload.file, { clientMutationId: mutation, tripId, stage } = upload.fields;
+    const ttnNumber = upload.fields.ttnNumber ?? null;
+    if (typeof mutation !== "string" || typeof tripId !== "string" ||
+      (stage !== "ISSUED" && stage !== "SIGNED"))
+      throw new UploadError("LOGISTICS_DOCUMENT_INVALID", 422, "request", "Выберите ТТН и отметьте одну или две печати", "validation");
+    const mimeType = file.type || "application/octet-stream";
     const result = await dependencies.service.upload(actorId, { tripId, clientMutationId: mutation, stage,
-      ttnNumber, fileName: file.name, mimeType, bytes: Buffer.from(await file.arrayBuffer()) }, { onPhase: next => { phase = next; } });
+      ttnNumber, fileName: file.name, mimeType, bytes: file }, { onPhase: next => { phase = next; } });
     return Response.json({ ok: true, ...result, requestId }, { status: result.repeated ? 200 : 201, headers: privateHeaders });
   } catch (error) {
     const failedPhase = phase as UploadPhase;
-    const failure = uploadFailure(requestId, failedPhase, error, failedPhase === "persist" ? "unknown" : "notCommitted");
+    const failureError = error instanceof UploadError && ["UPLOAD_MULTIPART_INVALID", "UPLOAD_DUPLICATE_FIELD"].includes(error.code)
+      ? new UploadError("LOGISTICS_DOCUMENT_INVALID", 422, "request", "Выберите ТТН и отметьте одну или две печати", "validation")
+      : error instanceof UploadError && ["UPLOAD_FILE_TOO_LARGE", "UPLOAD_MULTIPART_LIMIT"].includes(error.code)
+        ? new UploadError("LOGISTICS_DOCUMENT_TOO_LARGE", 413, "validation", error.message, "validation") : error;
+    const failure = uploadFailure(requestId, failedPhase, failureError, failedPhase === "persist" ? "unknown" : "notCommitted");
     return Response.json(failure.body, { status: failure.status, headers: privateHeaders });
+  } finally {
+    await upload?.dispose();
   }
 }
 

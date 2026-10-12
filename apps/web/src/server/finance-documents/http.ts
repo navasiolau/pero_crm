@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { privateFileHeaders } from "@/server/files/private-response";
 import { UploadError, uploadFailure, type UploadPhase } from "@/server/files/upload-result";
-import { uploadSizeLimitError, uploadSizeLimitFor } from "@/server/files/upload-limits";
+import { spoolMultipartUpload, type MultipartUpload } from "@/server/files/multipart-upload";
 import type { createFinanceDocumentService } from "./core";
 
 type HttpDependencies = {
@@ -15,26 +15,32 @@ const privateHeaders = { "Cache-Control": "private, no-store", "Vary": "Cookie, 
 export async function uploadFinanceDocumentResponse(request: Request, dependencies: HttpDependencies) {
   const requestId = randomUUID();
   let phase: UploadPhase = "auth";
+  let upload: MultipartUpload | undefined;
   try {
     const actorId = await dependencies.authorize();
     phase = "request";
-    const form = await request.formData().catch(() => null), file = form?.get("file");
-    const mutation = form?.get("clientMutationId");
-    if (!form || !(file instanceof File) || typeof mutation !== "string")
+    upload = await spoolMultipartUpload(request, { onFileField: () => {
+      throw new UploadError("FINANCE_DOCUMENT_INVALID", 422, "request", "Выберите файл отчётного документа", "validation");
+    } });
+    const file = upload.file, mutation = upload.fields.clientMutationId;
+    if (typeof mutation !== "string")
       throw new UploadError("FINANCE_DOCUMENT_INVALID", 422, "request", "Выберите файл отчётного документа", "validation");
     const mimeType = file.type || "application/octet-stream";
-    const limit = uploadSizeLimitFor({ mimeType });
-    if (file.size > limit.maxBytes)
-      throw new UploadError("FINANCE_DOCUMENT_TOO_LARGE", 413, "validation", uploadSizeLimitError(limit.kind), "validation");
     const result = await dependencies.service.upload(actorId, { clientMutationId: mutation, fileName: file.name,
-      mimeType, bytes: Buffer.from(await file.arrayBuffer()) }, { source: dependencies.source,
+      mimeType, bytes: file }, { source: dependencies.source,
       onPhase: next => { phase = next; } });
     return Response.json({ ok: true, ...result, requestId }, { status: result.repeated ? 200 : 201, headers: privateHeaders });
   } catch (error) {
     // Фаза может измениться внутри onPhase при ожидании сервиса.
     const failedPhase = phase as UploadPhase;
-    const failure = uploadFailure(requestId, failedPhase, error, failedPhase === "persist" ? "unknown" : "notCommitted");
+    const failureError = error instanceof UploadError && ["UPLOAD_MULTIPART_INVALID", "UPLOAD_DUPLICATE_FIELD"].includes(error.code)
+      ? new UploadError("FINANCE_DOCUMENT_INVALID", 422, "request", "Выберите файл отчётного документа", "validation")
+      : error instanceof UploadError && ["UPLOAD_FILE_TOO_LARGE", "UPLOAD_MULTIPART_LIMIT"].includes(error.code)
+        ? new UploadError("FINANCE_DOCUMENT_TOO_LARGE", 413, "validation", error.message, "validation") : error;
+    const failure = uploadFailure(requestId, failedPhase, failureError, failedPhase === "persist" ? "unknown" : "notCommitted");
     return Response.json(failure.body, { status: failure.status, headers: privateHeaders });
+  } finally {
+    await upload?.dispose();
   }
 }
 

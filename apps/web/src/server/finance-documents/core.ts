@@ -3,19 +3,20 @@ import type { FinanceDocument, Prisma } from "@prisma/client";
 import { FINANCE_ROLES, hasAnyRole } from "@/lib/roles";
 import { uploadSizeLimitError, uploadSizeLimitFor } from "@/server/files/upload-limits";
 import { UploadError, type UploadPhase } from "@/server/files/upload-result";
+import type { FileContentSource } from "@/server/files/document-storage";
 import { financeDocumentUploadSchema, financeDocumentListSchema, type FinanceDocumentView } from "./contracts";
 
 export type FinanceDocumentTransaction = <T>(operation: (tx: Prisma.TransactionClient) => Promise<T>) => Promise<T>;
 export type FinanceDocumentStorage = {
   mode(): "local" | "s3";
-  put(document: FinanceDocument, bytes: Buffer): Promise<void>;
+  put(document: FinanceDocument, bytes: FinanceDocumentUploadInput["bytes"]): Promise<void>;
   open(document: FinanceDocument): Promise<ReadableStream<Uint8Array> | null>;
 };
 export type FinanceDocumentUploadInput = {
   clientMutationId: string;
   fileName: string;
   mimeType: string;
-  bytes: Buffer;
+  bytes: Buffer | FileContentSource;
 };
 
 export async function requireFinanceDocumentActor(actorId: string | null | undefined, db: Pick<Prisma.TransactionClient, "user">) {
@@ -46,12 +47,15 @@ export function createFinanceDocumentService({ transaction, storage }: {
       await transaction(tx => requireFinanceDocumentActor(actorId, tx));
       const parsed = financeDocumentUploadSchema.safeParse({ clientMutationId: input.clientMutationId,
         fileName: input.fileName, mimeType: input.mimeType });
-      if (!parsed.success || !Buffer.isBuffer(input.bytes) || input.bytes.length === 0)
+      const content = input.bytes, buffered = Buffer.isBuffer(content);
+      const size = buffered ? content.length : content?.size;
+      if (!parsed.success || !Number.isSafeInteger(size) || size <= 0 || (!buffered &&
+        (typeof content?.contentHash !== "string" || !/^[a-f0-9]{64}$/.test(content.contentHash) || typeof content?.openRead !== "function")))
         throw new UploadError("FINANCE_DOCUMENT_INVALID", 422, "validation", "Выберите непустой файл с корректными реквизитами", "validation");
-      const data = parsed.data, size = input.bytes.length;
+      const data = parsed.data;
       const limit = uploadSizeLimitFor(data);
       if (size > limit.maxBytes) throw new UploadError("FINANCE_DOCUMENT_TOO_LARGE", 413, "validation", uploadSizeLimitError(limit.kind), "validation");
-      const contentHash = createHash("sha256").update(input.bytes).digest("hex");
+      const contentHash = buffered ? createHash("sha256").update(content).digest("hex") : content.contentHash;
       const requestFingerprint = createHash("sha256").update(JSON.stringify({ actorId, ...data, size, contentHash })).digest("hex");
       options.onPhase?.("persist");
       const reserved = await transaction(async tx => {
