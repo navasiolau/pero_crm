@@ -6,5 +6,6 @@ export type ProjectCoverUpload=z.infer<typeof projectCoverUploadSchema>;
 export type ProjectCoverDelete=z.infer<typeof projectCoverDeleteSchema>;
 export type ProjectCoverPreview={id:string;fileName:string;mimeType:string;hasThumb:boolean};
 export type ProjectCoverResult={ok:true;coverFileId:string|null;clientMutationId:string;id?:string;repeated?:boolean;
+  cleanupEventId?:string;cleanupPending?:boolean;cleanupReconciliation?:boolean;
   storageIntent?:{projectId:string;fileId:string;storedName:string;hasThumb:boolean}}|
   {ok:false;kind:'validation'|'conflict'|'forbidden'|'not-found'|'failure';error:string;currentCoverFileId?:string|null};

@@ -3,6 +3,9 @@ import {Prisma} from '@prisma/client';
 import {MANAGER_ROLES,hasAnyRole} from '@/lib/roles';
 import {isCoverImageMime} from '@/lib/product-cover';
 import {assertWritableFileStorageKey} from '@/server/files/storage-binding-fence';
+import {lockFileDeletionRequest,persistFileDeleteIntent} from '@/server/files/delete-intent';
+import {currentFileDeleteStorageIdentity} from '@/server/files/delete-storage';
+import type {FileDeleteStorageIdentity} from '@/server/files/delete-contract';
 import {projectVisibilityWhere,type VisibilityActor} from '../access/visibility';
 import {projectCoverUploadSchema,projectCoverDeleteSchema,type ProjectCoverUpload,type ProjectCoverDelete,type ProjectCoverResult} from './cover-contract';
 type Tx=Prisma.TransactionClient;
@@ -56,8 +59,9 @@ export async function persistProjectCoverUpload(tx:Tx,actor:Actor,input:ProjectC
  const result:ProjectCoverResult={ok:true,id:row.id,coverFileId:row.id,clientMutationId:input.clientMutationId};
  await receipt(tx,actor,project.id,input.clientMutationId,fingerprint,result);return result;
 }
-export async function deleteProjectCoverCore(tx:Tx,actor:Actor,input:ProjectCoverDelete):Promise<ProjectCoverResult>{
+export async function deleteProjectCoverCore(tx:Tx,actor:Actor,input:ProjectCoverDelete,storage?:FileDeleteStorageIdentity):Promise<ProjectCoverResult>{
  if(!projectCoverDeleteSchema.safeParse(input).success)return fail('validation','Подтвердите точный файл обложки');
+ await lockFileDeletionRequest(tx,input.clientMutationId);
  await tx.$queryRaw`SELECT id FROM "Project" WHERE id=${input.projectId} FOR UPDATE`;
  const project=await permission(tx,actor,input.projectId);if(!project)return fail('forbidden','Недостаточно прав');
  const fingerprint=digest({operation:'delete',...input}),previous=await replay(tx,actor,project.id,input.clientMutationId,fingerprint,project.coverFileId);if(previous)return previous;
@@ -66,10 +70,11 @@ export async function deleteProjectCoverCore(tx:Tx,actor:Actor,input:ProjectCove
  const file=await tx.file.findUnique({where:{id:input.expectedCoverFileId}});
  if(!file)return fail('not-found','Файл не найден');
  if(file.projectId!==project.id||file.productId!==null||file.taskId!==null||!isCoverImageMime(file.mimeType))return fail('validation','Файл не является обложкой этого проекта');
+ const identity=storage??currentFileDeleteStorageIdentity();
+ const cleanup=await persistFileDeleteIntent(tx,actor,file,input.clientMutationId,identity);
  if((await tx.project.updateMany({where:{id:project.id,coverFileId:file.id},data:{coverFileId:null}})).count!==1)throw Error('PROJECT_COVER_DELETE_CAS_RACE');
  await tx.file.delete({where:{id:file.id}});
- await tx.changeLog.create({data:{actorType:'user',actorId:actor.id,actorName:actor.name??undefined,entity:'file',entityId:file.id,action:'delete',oldValue:{fileName:file.fileName}}});
  await tx.changeLog.create({data:{actorType:'user',actorId:actor.id,actorName:actor.name??undefined,entity:'project',entityId:project.id,action:'cover.delete',field:'coverFileId',oldValue:{coverFileId:file.id},newValue:{coverFileId:null}}});
- const result:ProjectCoverResult={ok:true,coverFileId:null,clientMutationId:input.clientMutationId,storageIntent:{projectId:project.id,fileId:file.id,storedName:file.storedName,hasThumb:file.hasThumb}};
+ const result:ProjectCoverResult={ok:true,coverFileId:null,clientMutationId:input.clientMutationId,cleanupEventId:cleanup.eventId};
  await receipt(tx,actor,project.id,input.clientMutationId,fingerprint,result);return result;
 }
