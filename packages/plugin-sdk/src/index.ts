@@ -91,6 +91,9 @@ export interface PluginCommand {
 }
 
 export interface PluginHooks {
+  /** Подтверждённый subscriber не повторяется из-за чужой ошибки. До ACK действует
+   * at-least-once: consumer обязан дедуплицировать эффект по event.id, включая
+   * crash после эффекта/ctx.emit до ACK. ctx.emit сам по себе не дедуплицирует. */
   onDomainEvent?: (
     event: DomainEventPayload,
     ctx: PluginContext,

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { memorySubscriberFixture } from "./helpers/subscriber-delivery-fixture";
 import { createRequire, Module } from "node:module";
 import { test } from "node:test";
 import type { PluginContext, DomainEventPayload } from "@pero/plugin-sdk";
@@ -42,6 +43,7 @@ test("actual plugin context keeps explicit emitter, trusted actor/audit and nest
   });
   inject("../src/server/plugins/changelog", { writeChangeLog: async (entry: Record<string, unknown>) => { audit.push(entry); } });
   inject("../src/server/plugins/event-queue-store", { createPostgresEventQueueStore: () => fixture.store });
+  inject("../src/server/plugins/event-subscriber-store", { createPostgresSubscriberStore: () => memorySubscriberFixture(fixture).store });
   inject("../src/server/products/sketch-cleanup-core", { executeObsoleteSketchCleanup: async () => { internalCalls++; } });
   for (const specifier of ["../src/server/plugins/context", "../src/server/plugins/events"]) {
     const filename = require.resolve(specifier); originals.set(filename, require.cache[filename]); delete require.cache[filename];
