@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { memorySubscriberFixture } from "./helpers/subscriber-delivery-fixture";
 import { nativeFailureDiagnostic } from "./event-queue-store-native";
 import { createRequire, Module } from "node:module";
 import { after, before, beforeEach, test } from "node:test";
@@ -28,6 +29,7 @@ before(() => {
     plugin: { findMany: async () => [{ id: "qa135" }] },
   } });
   inject("../src/server/plugins/event-queue-store", { createPostgresEventQueueStore: () => f.store });
+  inject("../src/server/plugins/event-subscriber-store", { createPostgresSubscriberStore: () => memorySubscriberFixture(f).store });
   inject("../src/server/plugins/registry", { getManifest: () => ({ hooks: { onDomainEvent: async (row: QueuedDomainEvent) => hook(row) } }) });
   inject("../src/server/plugins/context", { buildPluginContext: async () => ({ emit: (type: string, payload: unknown) => events.emitDomainEvent(type, payload) }) });
   inject("../src/server/plugins/run-log", { logPluginRun: async () => {} });

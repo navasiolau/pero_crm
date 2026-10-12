@@ -1370,9 +1370,34 @@ model DomainEvent {
   leaseUntil    DateTime?  @db.Timestamptz(6)
   nextAttemptAt DateTime   @default(now()) @db.Timestamptz(6)
   exhaustedAt   DateTime?  @db.Timestamptz(6)
+  deliveryPlan  DomainEventDeliveryPlan?
 
   @@index([processedAt, createdAt])
   @@index([processedAt, exhaustedAt, nextAttemptAt, createdAt], map: "DomainEvent_ready_queue_idx")
+}
+
+// EMPTY snapshot тоже долговечна; completed DomainEvent не переоткрывается.
+model DomainEventDeliveryPlan {
+  eventId String @id
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  event DomainEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  deliveries DomainEventDelivery[]
+}
+
+model DomainEventDelivery {
+  eventId String
+  subscriberId String
+  position Int
+  attempts Int @default(0)
+  nextAttemptAt DateTime @default(now()) @db.Timestamptz(6)
+  deliveredAt DateTime? @db.Timestamptz(6)
+  skippedAt DateTime? @db.Timestamptz(6)
+  lastError String?
+  claimToken String?
+  plan DomainEventDeliveryPlan @relation(fields: [eventId], references: [eventId], onDelete: Cascade)
+
+  @@id([eventId, subscriberId])
+  @@unique([eventId, position])
 }
 
 // Токены публичного REST API (/api/v1) — для плагинов и внешних интеграций.
