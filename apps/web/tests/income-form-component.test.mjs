@@ -24,7 +24,7 @@ const bundlePromise=build({stdin:{contents:`
  createRoot(document.getElementById('root')).render(<Harness/>);
  `,resolveDir:web,loader:'tsx'},bundle:true,write:false,platform:'browser',format:'iife',jsx:'automatic',tsconfig:path.join(web,'tsconfig.json'),define:{'process.env.NODE_ENV':'"production"'},plugins:[{name:'test-boundaries',setup(b){
  b.onResolve({filter:/^(next\/navigation|sonner|@\/server\/payments\/actions|@\/server\/finance\/actions|@\/server\/warehouse\/stock-purchase-actions)$/},args=>({path:args.path,namespace:'boundary'}));
- b.onLoad({filter:/.*/,namespace:'boundary'},args=>({contents:args.path==='next/navigation'?'export const useRouter=()=>({refresh(){}});':args.path==='sonner'?'export const toast={error(){},success(){}};':args.path.includes('stock-purchase')?'export const addPaidStockReceipt=async input=>{window.__stockInput=input;return window.__stockResult??{ok:true}};':args.path.includes('payments')?'export const addPayment=async input=>{window.__paymentInput=input;return window.__paymentResult??{ok:true}};export const deletePayment=async()=>({ok:true});':'export const fetchNbrbRate=async()=>({ok:true,rate:3,date:"2026-10-04"});',loader:'js'}));
+ b.onLoad({filter:/.*/,namespace:'boundary'},args=>({contents:args.path==='next/navigation'?'export const useRouter=()=>({refresh(){}});':args.path==='sonner'?'export const toast={error(){},success(){}};':args.path.includes('stock-purchase')?'export const addPaidStockReceipt=async input=>{window.__stockInput=input;return {clientMutationId:input.clientMutationId,...(window.__stockResult??{ok:true,outcome:"COMMITTED",resultId:"stock-fixture"})}};':args.path.includes('payments')?'export const getPaymentActorId=async()=>({ok:true,actorId:"00000134-0000-4000-8000-000000000010"});export const addPayment=async input=>{window.__paymentInput=input;return {clientMutationId:input.clientMutationId,...(window.__paymentResult??{ok:true,outcome:"COMMITTED",resultId:"payment-fixture",paymentId:"payment-fixture"})}};export const deletePayment=async()=>({ok:true});':'export const fetchNbrbRate=async()=>({ok:true,rate:3,date:"2026-10-04"});',loader:'js'}));
  }}],logLevel:'silent'});
 
 async function withDialog(config,run){
@@ -157,12 +157,12 @@ test('paid warehouse mode permits no document, computes invoice amount and retri
   await page.getByRole('button',{name:'Оплатить и принять на склад',exact:true}).click();
   await page.waitForFunction(()=>window.__stockInput);
   const first=await page.evaluate(()=>window.__stockInput);
-  assert.equal(first.materialId,'material');assert.equal(first.quantity,'3');assert.equal(first.unitPrice,'20');
+  assert.equal(first.materialId,'material');assert.equal(first.quantity,'3.000');assert.equal(first.unitPrice,'20.00');
   assert.equal(first.cashAccountId,'cash-1');assert.equal(first.expenseArticleId,'article-1');
   for(const field of ['amount','projectId','reportDocumentId','skipReportDocument'])assert.equal(Object.hasOwn(first,field),false);
   assert.equal(await page.evaluate(()=>window.__paymentInput),undefined);
   await page.evaluate(()=>{window.__stockInput=null});
-  await page.getByRole('button',{name:'Оплатить и принять на склад',exact:true}).click();
+  await page.getByRole('button',{name:'Проверить',exact:true}).click();
   await page.waitForFunction(()=>window.__stockInput);
   assert.deepEqual(await page.evaluate(()=>window.__stockInput),first);
  });
@@ -175,7 +175,7 @@ test('paid warehouse receipt submits optional uploaded document and preserves it
   await page.getByRole('button',{name:'Оплатить и принять на склад',exact:true}).click();await page.waitForFunction(()=>window.__stockInput);
   const first=await page.evaluate(()=>window.__stockInput);assert.ok(first.reportDocumentId);
   await page.evaluate(()=>{window.__stockInput=null});
-  await page.getByRole('button',{name:'Оплатить и принять на склад',exact:true}).click();await page.waitForFunction(()=>window.__stockInput);
+  await page.getByRole('button',{name:'Проверить',exact:true}).click();await page.waitForFunction(()=>window.__stockInput);
   assert.deepEqual(await page.evaluate(()=>window.__stockInput),first);
  });
 });
@@ -185,7 +185,7 @@ test('failed monetary acknowledgement preserves document and UUID for exact retr
   await page.locator('#pay-amount').fill('15');await uploadDocument(page);
   await page.getByRole('button',{name:'Внести расход',exact:true}).click();await page.waitForFunction(()=>window.__paymentInput);
   const first=await page.evaluate(()=>window.__paymentInput);await page.evaluate(()=>{window.__paymentInput=null});
-  await page.getByRole('button',{name:'Внести расход',exact:true}).click();await page.waitForFunction(()=>window.__paymentInput);
+  await page.getByRole('button',{name:'Проверить',exact:true}).click();await page.waitForFunction(()=>window.__paymentInput);
   assert.deepEqual(await page.evaluate(()=>window.__paymentInput),first);
  });
 });

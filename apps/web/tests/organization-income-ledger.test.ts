@@ -11,7 +11,7 @@ test('actual cash/org aggregates include general income once and preserve unknow
  assert.equal((await readCashBalance(db,'cash')).toFixed(2),'110.00');assert.equal((await readOrgBalance(db,'1')).toFixed(2),'330.00');unknown=true;await assert.rejects(readOrgBalance(db,'1'),/BYN/);
 });
 test('general payment context is accepted and forward migration preserves nullable pair without rewriting history',()=>{
- for(const direction of ['INCOME','EXPENSE'])assert.equal(paymentSchema.safeParse({direction,amount:1,currency:'BYN',cashAccountId:'cash'}).success,true);
+ for(const direction of ['INCOME','EXPENSE'])assert.equal(paymentSchema.safeParse({direction,amount:1,currency:'BYN',cashAccountId:'cash',clientMutationId:'00000134-0000-4000-8000-000000000012'}).success,true);
  const sql=readFileSync('prisma/migrations/20261008120000_organization_expenses/migration.sql','utf8');
  assert.match(sql,/"projectId" IS NULL\) = \("projectAmount" IS NULL/);assert.doesNotMatch(sql,/UPDATE|DELETE|TRUNCATE/i);
 });

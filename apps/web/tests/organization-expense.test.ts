@@ -16,7 +16,7 @@ test("ordinary expense can have no project, while document remains required", ()
 });
 
 test("general income still cannot disguise an expense article", () => {
-  const input = { direction: "INCOME", amount: 100, currency: "BYN", cashAccountId: "cash" };
+  const input = { direction: "INCOME", amount: 100, currency: "BYN", cashAccountId: "cash", clientMutationId: "00000134-0000-4000-8000-000000000011" };
   assert.equal(paymentSchema.safeParse(input).success, true);
   assert.equal(paymentSchema.safeParse({ ...input, expenseArticleId: "article" }).success, false);
 });
