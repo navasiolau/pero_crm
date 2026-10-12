@@ -41,7 +41,7 @@ async function compile(variant){
   b.onLoad({filter:/.*/,namespace:'memory143'},args=>({contents:boundaries[args.path],loader:'tsx',resolveDir:web}));
   b.onLoad({filter:/\.(?:tsx?|jsx?|mjs|cjs|json)$/,namespace:'file'},async args=>{
    const bytes=await readFile(args.path),relative=path.relative(web,args.path).split(path.sep).join('/');pins.set(args.path,hash(bytes));
-   let text=relative===parent&&variant==='before'?original:bytes.toString('utf8'),binding=KANBAN_RENDER_BINDINGS.find(item=>item.relative===relative);
+   let text=relative===parent&&variant==='before'?original:bytes.toString('utf8'),binding=[parent,'src/components/product-kanban-card.tsx'].includes(relative)?KANBAN_RENDER_BINDINGS.find(item=>item.relative===relative):undefined;
    if(binding){const transformed=observeKanbanRenders(ts,text,binding);text=transformed.contents;observed.push(transformed);}
    const ext=path.extname(args.path);return{contents:text,loader:ext==='.tsx'?'tsx':ext==='.ts'?'ts':ext==='.json'?'json':ext==='.jsx'?'jsx':'js',resolveDir:path.dirname(args.path)};
   });
