@@ -2,6 +2,7 @@ import {createHash} from 'node:crypto';
 import {Prisma} from '@prisma/client';
 import {MANAGER_ROLES,hasAnyRole} from '@/lib/roles';
 import {isCoverImageMime} from '@/lib/product-cover';
+import {assertWritableFileStorageKey} from '@/server/files/storage-binding-fence';
 import {projectVisibilityWhere,type VisibilityActor} from '../access/visibility';
 import {projectCoverUploadSchema,projectCoverDeleteSchema,type ProjectCoverUpload,type ProjectCoverDelete,type ProjectCoverResult} from './cover-contract';
 type Tx=Prisma.TransactionClient;
@@ -47,6 +48,7 @@ export async function persistProjectCoverUpload(tx:Tx,actor:Actor,input:ProjectC
  const fingerprint=digest({operation:'upload',...input,fileName:file.fileName,mimeType:file.mimeType,size:file.size,contentHash:file.contentHash});
  const previous=await replay(tx,actor,input.projectId,input.clientMutationId,fingerprint,project.coverFileId);if(previous)return previous;
  if(project.coverFileId!==null)return fail('conflict','Обложка проекта уже изменена',project.coverFileId);
+ await assertWritableFileStorageKey(tx,input.projectId,file.storedName);
  const row=await tx.file.create({data:{projectId:input.projectId,productId:null,taskId:null,section:'GENERAL',fileName:file.fileName,storedName:file.storedName,mimeType:file.mimeType,size:file.size,hasThumb:file.hasThumb,uploadedById:actor.id}});
  if((await tx.project.updateMany({where:{id:input.projectId,coverFileId:null},data:{coverFileId:row.id}})).count!==1)throw Error('PROJECT_COVER_CAS_RACE');
  await tx.changeLog.create({data:{actorType:'user',actorId:actor.id,actorName:actor.name??undefined,entity:'file',entityId:row.id,action:'create',newValue:{project:project.number,fileName:file.fileName,section:'GENERAL'}}});

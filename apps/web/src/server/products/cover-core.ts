@@ -4,6 +4,7 @@ import {canSetProductCover,isCoverImageMime,validateProductCoverFile,type CoverP
 import {MANAGER_ROLES,hasAnyRole,hasRole} from '@/lib/roles';
 import {fileVisibilityWhere,productEditWhere,resolveVisibilityActor,type VisibilityActor} from '@/server/access/visibility';
 import {mayDeleteStoredFile} from '@/server/files/delete-permission';
+import {assertWritableFileStorageKey} from '@/server/files/storage-binding-fence';
 import {OBSOLETE_SKETCH_EVENT,obsoleteSketchEventId,obsoleteSketchIntentSchema} from './sketch-cleanup-contract';
 import {sketchUploadTargetSchema,sketchBindSchema,sketchDeleteSchema,type SketchUploadTarget,type SketchBindInput,type SketchDeleteInput,type SketchResult} from './sketch-contract';
 type Tx=Prisma.TransactionClient;
@@ -70,6 +71,7 @@ export async function persistUploadedProductCover(tx:Tx,actor:CoverMutationActor
  const baseline=await replacementFile(tx,allowed.visibility,allowed.product,input.expectedSketchFileId,true);
  if(!baseline.ok)return baseline;
  if(baseline.file?.storedName===file.storedName)return fail('validation','Новый эскиз должен иметь отдельный ключ хранения');
+ await assertWritableFileStorageKey(tx,input.projectId,file.storedName);
  const created=await tx.file.create({data:{projectId:input.projectId,productId:input.productId,taskId:null,section:'PRODUCTION',fileName:file.fileName,storedName:file.storedName,mimeType:file.mimeType,size:file.size,hasThumb:file.hasThumb,uploadedById:actor.id},select:{id:true}});
  const changed=await tx.product.updateMany({where:{id:input.productId,sketchFileId:input.expectedSketchFileId},data:{sketchFileId:created.id}});
  if(changed.count!==1)throw Error('SKETCH_CAS_RACE');

@@ -26,7 +26,7 @@ test('confirmed task file deletion removes the cached selected row without mutat
 });
 
 test('failed task file deletion preserves the selected filename and sends no task or finance mutation',async()=>{
- reset();deleteOk=false;const files=list(render());assert.ok(files?.onDelete);const result=await files.onDelete(task.files[0]);assert.equal(result.ok,false);assert.equal(list(render())?.files[0].fileName,'Original.pdf');assert.equal(refreshes,0);
+ reset();deleteOk=false;const files=list(render());assert.ok(files?.onDelete);const result=await files.onDelete(task.files[0],'00000000-0000-4000-8000-000000000137');assert.equal(result.ok,false);assert.equal(list(render())?.files[0].fileName,'Original.pdf');assert.equal(refreshes,0);
 });
 
 test('file pending prevents dialog close immediately and releases it after completion',()=>{
