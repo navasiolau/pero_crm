@@ -26,7 +26,7 @@ async function deliverEvent(event: OwnedDomainEvent, ownership: EventDeliveryCon
     if (!ownership.isActive() || !await ownership.ensureOwned()) throw new EventDeliveryError("EVENT_CLAIM_LOST");
     const started = Date.now();
     try {
-      const base = await buildPluginContext(plugin.id);
+      const base = await buildPluginContext(plugin.id, emitDomainEvent);
       if (!ownership.isActive()) throw new EventDeliveryError("EVENT_CLAIM_LOST");
       const ctx = { ...base, emit: async (type: string, payload: unknown) => {
         if (!ownership.isActive() || !await ownership.ensureOwned()) throw new EventDeliveryError("EVENT_CLAIM_LOST");

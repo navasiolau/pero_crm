@@ -3,15 +3,17 @@ import type { PluginContext } from "@pero/plugin-sdk";
 import { prisma } from "@/lib/prisma";
 
 import { writeChangeLog } from "./changelog";
-import { emitDomainEvent } from "./events";
 import { getManifest } from "./registry";
 import { getPluginSettings, logPluginRun } from "./run-log";
+
+type DomainEventEmitter = (type: string, payload: unknown, actor: string) => Promise<void>;
 
 // Контекст, выдаваемый хукам и командам плагина (§14).
 // requirePermission — прагматичная проверка прав из манифеста:
 // доверенный код в процессе, но объявленные permissions контролируются.
 export async function buildPluginContext(
   pluginId: string,
+  emitter: DomainEventEmitter,
 ): Promise<PluginContext> {
   const manifest = getManifest(pluginId);
   if (!manifest) {
@@ -45,7 +47,7 @@ export async function buildPluginContext(
         source: "plugin",
       });
     },
-    emit: (type, payload) => emitDomainEvent(type, payload, actor),
+    emit: (type, payload) => emitter(type, payload, actor),
     requirePermission: (permission: string) => {
       if (!manifest.permissions.includes(permission)) {
         throw new Error(
