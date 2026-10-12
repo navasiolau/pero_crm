@@ -210,9 +210,17 @@ try{
    checks.push(section+':'+viewport.width+':Sheet_wait_complete_close_center_layout_and_bottom_sync');
 
    // Настоящий touch-жест восстанавливает исходный snap до обычной прокрутки.
+   // Ручную позицию фиксируем после настоящего scrollend, включая инерцию и CSS snap.
+   await mobile.locator('[data-slot="kanban-scroll"]').evaluate(board=>{
+    window.__manualTouchSettled=false;
+    window.addEventListener('touchend',()=>board.addEventListener('scrollend',()=>{window.__manualTouchSettled=true;},{once:true}),{once:true});
+   });
    const cdp=await mobile.context().newCDPSession(mobile);await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:viewport.width-30,y:viewport.height/2}]});
    for(const x of [viewport.width-80,viewport.width-150,70])await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x,y:viewport.height/2}]});
-   await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});await mobile.waitForTimeout(350);await cdp.detach();
+   await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+   await expect.poll(()=>mobile.evaluate(()=>window.__manualTouchSettled),{timeout:5000}).toBe(true);
+   await expect.poll(()=>mobile.evaluate(()=>{const board=document.querySelector('[data-slot="kanban-scroll"]'),bar=document.querySelector('[data-kanban-scrollbar]');return Math.abs(board.scrollLeft-(bar?.scrollLeft??board.scrollLeft));}),{timeout:5000}).toBeLessThan(2);
+   await cdp.detach();
    assert.equal(await mobile.locator('[data-slot="kanban-scroll"]').evaluate(board=>getComputedStyle(board).scrollSnapType),nativeSnap);
    const manual=await position(mobile);assert.ok(Math.abs(manual.left-focused.left)>10);await mobile.evaluate(()=>window.__refresh());await waitFrames(mobile);assert.deepEqual(await position(mobile),manual);
    // Основная полоса уже подтверждена; её scroll-событие ещё может не доставить зеркало в CI.
