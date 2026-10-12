@@ -1,7 +1,9 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
 import type {Prisma} from '@prisma/client';
-import {authorizeProjectCoverUpload,persistProjectCoverUpload,deleteProjectCoverCore} from '../src/server/projects/cover-core';
+import {authorizeProjectCoverUpload,persistProjectCoverUpload,deleteProjectCoverCore as actualDelete} from '../src/server/projects/cover-core';
+const deleteProjectCoverCore=(...args:Parameters<typeof actualDelete>)=>actualDelete(args[0],args[1],args[2],{mode:'s3',endpoint:'https://qa138.invalid/',bucket:'qa138-fixture'});
 const input={projectId:'j',expectedCoverFileId:null,clientMutationId:'12222222-2222-4222-8222-222222222222'} as const;
 test('only manager union may upload own project cover; engineer is readonly',async()=>{
  const tx={project:{findFirst:async()=>({id:'j',number:'1',coverFileId:null})},changeLog:{findUnique:async()=>null}} as unknown as Prisma.TransactionClient;
@@ -11,15 +13,16 @@ test('only manager union may upload own project cover; engineer is readonly',asy
 });
 const actor={id:'m',roles:['MANAGER'] as ['MANAGER']};
 const upload={fileName:'original.png',storedName:'owned.png',mimeType:'image/png',size:5,hasThumb:true,contentHash:'exact-original-hash'};
-function fixture(){
- const project={id:'j',number:'1',coverFileId:null as string|null},files=new Map<string,Record<string,unknown>>(),logs=new Map<string,Record<string,unknown>>();let failAudit=false,fileSequence=0;
+function fixture(failIntent=false){
+ const project={id:'j',number:'1',coverFileId:null as string|null},files=new Map<string,Record<string,unknown>>(),logs=new Map<string,Record<string,unknown>>(),events=new Map<string,Record<string,unknown>>();let failAudit=false,fileSequence=0;
  const tx={
-  $queryRaw:async()=>[],project:{findFirst:async()=>project,updateMany:async({where,data}:{where:{coverFileId:string|null};data:{coverFileId:string|null}})=>{if(project.coverFileId!==where.coverFileId)return{count:0};project.coverFileId=data.coverFileId;return{count:1}}},
+  $queryRaw:async(query:{strings?:readonly string[];values?:unknown[]})=>(query.strings??[]).join('').includes('FROM "DomainEvent"')?[...events.values()].filter(row=>{const payload=row.payload as {projectId:string;storedName:string};return row.type===query.values?.[0]&&payload.projectId.toLowerCase()===query.values?.[1]&&payload.storedName.toLowerCase()===query.values?.[2];}):[],project:{findFirst:async()=>project,updateMany:async({where,data}:{where:{coverFileId:string|null};data:{coverFileId:string|null}})=>{if(project.coverFileId!==where.coverFileId)return{count:0};project.coverFileId=data.coverFileId;return{count:1}}},
   file:{create:async({data}:{data:Record<string,unknown>})=>{const row={...data,id:'file-'+fileSequence++};files.set(row.id,row);return row},findUnique:async({where}:{where:{id:string}})=>files.get(where.id)??null,delete:async({where}:{where:{id:string}})=>files.delete(where.id)},
   changeLog:{findUnique:async({where}:{where:{id:string}})=>logs.get(where.id)??null,create:async({data}:{data:Record<string,unknown>})=>{if(failAudit)throw Error('AUDIT_FAILURE');logs.set((data.id as string)??'audit-'+logs.size,data);return data}},
+  domainEvent:{create:async({data}:{data:Record<string,unknown>})=>{if(failIntent)throw Error('CONTROLLED_INTENT_FAILURE');events.set(String(data.id),data);return data;}},
  } as unknown as Prisma.TransactionClient;
- async function transaction<T>(fn:()=>Promise<T>){const before=project.coverFileId,f=new Map(files),l=new Map(logs);try{return await fn()}catch(e){project.coverFileId=before;files.clear();f.forEach((v,k)=>files.set(k,v));logs.clear();l.forEach((v,k)=>logs.set(k,v));throw e;}}
- return{tx,project,files,logs,transaction,failAudit:()=>{failAudit=true;}};
+ async function transaction<T>(fn:()=>Promise<T>){const before=project.coverFileId,f=new Map(files),l=new Map(logs),v=new Map(events);try{return await fn()}catch(e){project.coverFileId=before;files.clear();f.forEach((v,k)=>files.set(k,v));logs.clear();l.forEach((v,k)=>logs.set(k,v));events.clear();v.forEach((v,k)=>events.set(k,v));throw e;}}
+ return{tx,project,files,logs,events,transaction,failAudit:()=>{failAudit=true;}};
 }
 test('upload empty project stores one original metadata/pointer/audit, exact replay and reused UUID conflict',async()=>{
  const f=fixture(),first=await persistProjectCoverUpload(f.tx,actor,input,upload);assert.equal(first.ok,true);assert.equal(f.files.size,1);assert.equal(f.project.coverFileId,'file-0');
@@ -35,13 +38,13 @@ test('stale delete and foreign/product-bound file refuse without pointer/file/au
 });
 test('confirmed delete emits exact storage intents, replay does not delete another file',async()=>{
  const f=fixture();await persistProjectCoverUpload(f.tx,actor,input,upload);const request={projectId:'j',expectedCoverFileId:'file-0',clientMutationId:'32222222-2222-4222-8222-222222222222'};
- const result=await deleteProjectCoverCore(f.tx,actor,request);assert.equal(result.ok,true);if(result.ok)assert.deepEqual(result.storageIntent,{projectId:'j',fileId:'file-0',storedName:'owned.png',hasThumb:true});assert.equal(f.files.size,0);assert.equal(f.project.coverFileId,null);
+ const result=await deleteProjectCoverCore(f.tx,actor,request);assert.equal(result.ok,true);if(result.ok){assert.equal(result.cleanupEventId,'file-delete:'+request.clientMutationId);assert.deepEqual((f.events.get(result.cleanupEventId!)!.payload as {keys:string[]}).keys,['j/owned.png','j/thumbs/owned.png.jpg']);}assert.equal(f.files.size,0);assert.equal(f.project.coverFileId,null);
  const repeated=await deleteProjectCoverCore(f.tx,actor,request);assert.equal(repeated.ok,true);if(repeated.ok)assert.equal(repeated.repeated,true);
 });
 test('audit error rolls back new file and pointer in transaction',async()=>{const f=fixture();f.failAudit();await assert.rejects(f.transaction(()=>persistProjectCoverUpload(f.tx,actor,input,upload)),/AUDIT_FAILURE/);assert.equal(f.project.coverFileId,null);assert.equal(f.files.size,0);assert.equal(f.logs.size,0);});
 
 const deleteCid='22222222-2222-4222-8222-222222222222',newUploadCid='32222222-2222-4222-8222-222222222222';
-const stateOf=(f:ReturnType<typeof fixture>)=>JSON.stringify({project:f.project,files:[...f.files],logs:[...f.logs]});
+const stateOf=(f:ReturnType<typeof fixture>)=>JSON.stringify({project:f.project,files:[...f.files],logs:[...f.logs],events:[...f.events]});
 test('historical upload CID after delete and after a new cover is refused in preflight and persist without writes',async()=>{
  const f=fixture();const initial=await persistProjectCoverUpload(f.tx,actor,input,upload);assert.ok(initial.ok&&initial.id);
  assert.ok((await deleteProjectCoverCore(f.tx,actor,{projectId:'j',expectedCoverFileId:initial.id,clientMutationId:deleteCid})).ok);
@@ -68,4 +71,16 @@ test('upload preflight accepts current upload replay but refuses delete CID or u
  assert.equal((await authorizeProjectCoverUpload(f.tx,actor,{...input,clientMutationId:deleteCid})).ok,false);
  const receipt=f.logs.get(`project-cover:${input.clientMutationId}`)!;
  for(const corrupt of [{actorId:'foreign'},{entity:'product'},{entityId:'other-project'},{newValue:{fingerprint:'unknown',result:{ok:false}}}]){const snapshot={...receipt};Object.assign(receipt,corrupt);const current=stateOf(f);assert.equal((await authorizeProjectCoverUpload(f.tx,actor,input)).ok,false);assert.equal(stateOf(f),current);Object.assign(receipt,snapshot);}
+});
+
+test('legacy confirmed project-cover receipt remains unchanged and is not retargeted to a new storage identity',async()=>{
+ const f=fixture(),request={projectId:'j',expectedCoverFileId:'old',clientMutationId:deleteCid};
+ const legacy={ok:true,coverFileId:null,clientMutationId:request.clientMutationId,storageIntent:{projectId:'j',storedName:'historical.png',hasThumb:true}};
+ f.logs.set('project-cover:'+request.clientMutationId,{actorId:actor.id,entity:'project',entityId:'j',action:'cover.receipt',newValue:{fingerprint:createHash('sha256').update(JSON.stringify({operation:'delete',...request})).digest('hex'),result:legacy}});
+ const before=stateOf(f),result=await actualDelete(f.tx,actor,request);assert.deepEqual(result,{...legacy,repeated:true});assert.equal(stateOf(f),before);assert.equal(f.events.size,0);
+});
+
+test('manual project-cover intent failure atomically rolls back file audit and preserves the exact cover',async()=>{
+ const f=fixture(true);f.project.coverFileId='old';f.files.set('old',{id:'old',projectId:'j',productId:null,taskId:null,mimeType:'image/png',fileName:'old.png',storedName:'old.png',hasThumb:true,uploadedById:'m'});
+ const before=stateOf(f);await assert.rejects(f.transaction(()=>deleteProjectCoverCore(f.tx,actor,{projectId:'j',expectedCoverFileId:'old',clientMutationId:deleteCid})),/CONTROLLED_INTENT_FAILURE/);assert.equal(stateOf(f),before);
 });
