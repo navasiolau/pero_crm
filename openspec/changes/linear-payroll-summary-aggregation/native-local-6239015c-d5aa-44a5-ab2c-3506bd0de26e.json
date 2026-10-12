@@ -1,0 +1,49 @@
+{
+  "ok": true,
+  "runId": "6239015c-d5aa-44a5-ab2c-3506bd0de26e",
+  "target": {
+    "target": "local",
+    "revision": "cfc4f91a8be070b8f160b3c9de6abeb2af8fce83",
+    "containerId": "bf45c761b5687e54bff1aafea82e8647925b5b425d6743ebdc7d33f4824b0ed5",
+    "databaseName": "pero_crm",
+    "schema": "public",
+    "port": 5433
+  },
+  "sourceDigest": "94cd03d55d26e0916707b0f0b3dc8880fafc6ab5f9757257d96634dbf9c8143b",
+  "mode": "OWNED_ROLLBACK",
+  "counts": [
+    {
+      "employees": 1,
+      "previousSelectors": 8,
+      "sharedInputs": 2,
+      "financeRead": 14
+    },
+    {
+      "employees": 5,
+      "previousSelectors": 8,
+      "sharedInputs": 2,
+      "financeRead": 14
+    },
+    {
+      "employees": 20,
+      "previousSelectors": 8,
+      "sharedInputs": 2,
+      "financeRead": 14
+    }
+  ],
+  "benchmark": {
+    "smallRows": 160,
+    "largeRows": 1600,
+    "smallMs": 0.3002999999998792,
+    "largeMs": 2.284599999999955
+  },
+  "fixtureRows": 2221,
+  "rolledBack": true,
+  "originalDigest": "b373ec8ec1ab293abc175e1e2e89b9f99f84e4a331dfd22be2b39e0d62fee6d4",
+  "originalsEqual": true,
+  "ownedRowsAfter": 0,
+  "outbound": 0,
+  "noReplay": true,
+  "clientsDisconnected": true,
+  "fetchRestored": true
+}

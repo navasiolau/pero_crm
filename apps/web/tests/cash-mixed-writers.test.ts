@@ -152,6 +152,7 @@ test("actual settleAll delegates each payout to the same guarded core while an e
     currency: "BYN", balance: 1000 - sum(payments.filter((row) => row.direction === "EXPENSE"), "amount") -
       sum(payouts, "cashAmount") }] });
   inject("../src/server/payroll/queries", { getPayrollCurrency: async () => "BYN",
+    readPayrollSummary: async (month: string, userScope: string | null = null) => ({ selectedMonth: month, userScope }),
     getEmployeeDues: async () => [{ userId: "worker", name: "QA worker", due: 600 - sum(payouts, "amount") }],
     getOrgBalance: async () => 1000 - sum(payments.filter((row) => row.direction === "EXPENSE"), "bynAmount") -
       sum(payouts, "bynAmount"), isValidMonth: (value: string) => /^\d{4}-\d{2}$/.test(value),

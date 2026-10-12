@@ -8,6 +8,7 @@ import { prisma } from "@/lib/prisma";
 import { payrollMonth as currentMonth, isValidPayrollMonth as isValidMonth,
   payrollMonthRange as monthRange, parsePayrollMonth } from "@/lib/payroll-month";
 import { historicalByn, sumHistoricalByn, subtractByn, sumByn, BYN_UNAVAILABLE_REASON } from "@/lib/history-byn";
+import { groupHistoricalByn, summarizePayrollHistory, requirePayrollReadScope, type PayrollReadModel } from "./summary-read-model";
 
 
 // ─── Зарплата (§10): запросы для страниц «Моя зарплата» и «Финансы → Зарплата»
@@ -21,24 +22,27 @@ export async function getPayrollCurrency(): Promise<string> {
   return "BYN";
 }
 
-async function aggregatePayroll(args: { where?: Prisma.PayrollEntryWhereInput; _sum: { amount: true } }) {
-  const rows = await prisma.payrollEntry.findMany({ where: args.where, select: { amount: true, currency: true, bynAmount: true } });
-  return { _sum: { amount: sumHistoricalByn(rows) } };
-}
-async function aggregatePayout(args: { where?: Prisma.PayoutWhereInput; _sum: { amount: true } }) {
-  const rows = await prisma.payout.findMany({ where: args.where, select: { amount: true, payrollCurrency: true, bynAmount: true } });
-  return { _sum: { amount: sumHistoricalByn(rows) } };
-}
 async function groupPayroll(args: { where?: Prisma.PayrollEntryWhereInput; by: string[]; _sum: { amount: true } }) {
   const rows = await prisma.payrollEntry.findMany({ where: args.where, select: { userId: true, amount: true, currency: true, bynAmount: true } });
-  const ids = [...new Set(rows.map(row => row.userId))];
-  return ids.map(userId => ({ userId, _sum: { amount: sumHistoricalByn(rows.filter(row => row.userId === userId)) } }));
+  return [...groupHistoricalByn(rows)].map(([userId, amount]) => ({ userId, _sum: { amount } }));
 }
 async function groupPayout(args: { where?: Prisma.PayoutWhereInput; by: string[]; _sum: { amount: true } }) {
   const rows = await prisma.payout.findMany({ where: args.where, select: { userId: true, amount: true, payrollCurrency: true, bynAmount: true } });
-  const ids = [...new Set(rows.map(row => row.userId))];
-  return ids.map(userId => ({ userId, _sum: { amount: sumHistoricalByn(rows.filter(row => row.userId === userId)) } }));
+  return [...groupHistoricalByn(rows)].map(([userId, amount]) => ({ userId, _sum: { amount } }));
 }
+// Один снимок для текущей сводки или одной preview-итерации выплаты.
+export async function readPayrollSummary(month: string, userScope: string | null = null): Promise<PayrollReadModel> {
+  parsePayrollMonth(month);
+  const now = currentMonth();
+  const [entries, payouts] = await Promise.all([
+    prisma.payrollEntry.findMany({ where: userScope === null ? undefined : { userId: userScope },
+      select: { userId: true, month: true, scheme: true, amount: true, currency: true, bynAmount: true } }),
+    // Организационный баланс требует выплаты ВСЕХ сотрудников.
+    prisma.payout.findMany({ select: { userId: true, month: true, kind: true, amount: true, payrollCurrency: true, bynAmount: true } }),
+  ]);
+  return summarizePayrollHistory(entries, payouts, month, now, userScope);
+}
+
 export type PayrollEntryView = {
   id: string;
   amount: number;
@@ -71,34 +75,13 @@ export type PayoutView = {
 export async function getMyPayroll(userId: string, month: string) {
   parsePayrollMonth(month);
   const now = currentMonth();
-  const [entries, payouts, monthAccrued, monthPaid, pastAccrued, curAccrued, totalPaid] =
-    await Promise.all([
-      prisma.payrollEntry.findMany({
-        where: { userId, month },
-        orderBy: { createdAt: "desc" },
-      }),
-      prisma.payout.findMany({
-        where: { userId, month },
-        include: { cashAccount: { select: { name: true } } },
-        orderBy: { createdAt: "desc" },
-      }),
-      aggregatePayroll({
-        where: { userId, month },
-        _sum: { amount: true },
-      }),
-      aggregatePayout({ where: { userId, month }, _sum: { amount: true } }),
-      // долг: начислено за месяцы до текущего − все выплаты
-      aggregatePayroll({
-        where: { userId, month: { lt: now } },
-        _sum: { amount: true },
-      }),
-      // приблизительная зарплата: начислено за текущий месяц
-      aggregatePayroll({
-        where: { userId, month: now },
-        _sum: { amount: true },
-      }),
-      aggregatePayout({ where: { userId }, _sum: { amount: true } }),
-    ]);
+  const [entries, payouts, payrollHistory, payoutHistory] = await Promise.all([
+    prisma.payrollEntry.findMany({ where: { userId, month }, orderBy: { createdAt: "desc" } }),
+    prisma.payout.findMany({ where: { userId, month }, include: { cashAccount: { select: { name: true } } }, orderBy: { createdAt: "desc" } }),
+    prisma.payrollEntry.findMany({ where: { userId, month: { lte: now } },
+      select: { month: true, amount: true, currency: true, bynAmount: true } }),
+    prisma.payout.findMany({ where: { userId }, select: { amount: true, payrollCurrency: true, bynAmount: true } }),
+  ]);
 
   const creatorIds = [
     ...new Set(payouts.map((p) => p.createdById).filter((v): v is string => !!v)),
@@ -112,11 +95,11 @@ export async function getMyPayroll(userId: string, month: string) {
   return {
     currentPeriod: now,
     unavailableReason: BYN_UNAVAILABLE_REASON,
-    accrued: monthAccrued._sum.amount,
-    paid: monthPaid._sum.amount,
+    accrued: sumHistoricalByn(entries),
+    paid: sumHistoricalByn(payouts),
     debt:
-      subtractByn(pastAccrued._sum.amount, totalPaid._sum.amount),
-    estimate: curAccrued._sum.amount,
+      subtractByn(sumHistoricalByn(payrollHistory.filter(row => row.month < now)), sumHistoricalByn(payoutHistory)),
+    estimate: sumHistoricalByn(payrollHistory.filter(row => row.month === now)),
     entries: entries.map(
       (entry): PayrollEntryView => ({
         id: entry.id,
@@ -163,68 +146,24 @@ export type PayrollSummaryRow = {
 // с расчётной схемой + все, у кого есть движения в этом месяце.
 // «К выплате» — ТЕКУЩИЙ долг: начислено за прошлые месяцы − все выплаты
 // (деньги платятся только за прошлый месяц — правило владельца).
-export async function getPayrollSummary(month: string) {
+export async function getPayrollSummary(month: string, snapshot?: PayrollReadModel) {
   parsePayrollMonth(month);
-  const now = currentMonth();
-  const [accruedByUser, paidByUser, advanceByUser, schemeUsers, entryUsers, payoutUsers, payouts, pastAccrued, totalPaidByUser] =
-    await Promise.all([
-      groupPayroll({
-        by: ["userId"],
-        where: { month },
-        _sum: { amount: true },
-      }),
-      groupPayout({
-        by: ["userId"],
-        where: { month },
-        _sum: { amount: true },
-      }),
-      // авансы месяца — отдельной колонкой в сводке
-      groupPayout({
-        by: ["userId"],
-        where: { month, kind: "ADVANCE" },
-        _sum: { amount: true },
-      }),
-      prisma.user.findMany({
-        where: { active: true, payScheme: { not: "NONE" } },
-        select: { id: true, name: true, payScheme: true, payPercent: true },
-        orderBy: { name: "asc" },
-      }),
-      prisma.payrollEntry.findMany({
-        where: { month },
-        select: { userId: true },
-        distinct: ["userId"],
-      }),
-      prisma.payout.findMany({
-        where: { month },
-        select: { userId: true },
-        distinct: ["userId"],
-      }),
-      prisma.payout.findMany({
-        where: { month },
-        include: { user: { select: { id: true, name: true } }, cashAccount: { select: { name: true } } },
-        orderBy: { createdAt: "desc" },
-      }),
-      // для текущего долга: начислено за месяцы до текущего, выплаты — все
-      groupPayroll({
-        by: ["userId"],
-        where: { month: { lt: now } },
-        _sum: { amount: true },
-      }),
-      groupPayout({ by: ["userId"], _sum: { amount: true } }),
-    ]);
-
-  const pastAccruedMap = new Map(
-    pastAccrued.map((row) => [row.userId, row._sum.amount]),
-  );
-  const totalPaidMap = new Map(
-    totalPaidByUser.map((row) => [row.userId, row._sum.amount]),
-  );
+  const model = snapshot ?? await readPayrollSummary(month);
+  requirePayrollReadScope(model, month, null, currentMonth());
+  const [schemeUsers, payouts] = await Promise.all([
+    prisma.user.findMany({ where: { active: true, payScheme: { not: "NONE" } },
+      select: { id: true, name: true, payScheme: true, payPercent: true }, orderBy: { name: "asc" } }),
+    prisma.payout.findMany({ where: { month },
+      include: { user: { select: { id: true, name: true } }, cashAccount: { select: { name: true } } }, orderBy: { createdAt: "desc" } }),
+  ]);
+  const pastAccruedMap = model.pastAccrued;
+  const totalPaidMap = model.totalPaid;
   const debtIds = [...new Set([...pastAccruedMap.keys(), ...totalPaidMap.keys()])]
     .filter((id) => subtractByn((pastAccruedMap.has(id) ? pastAccruedMap.get(id)! : 0), (totalPaidMap.has(id) ? totalPaidMap.get(id)! : 0)) !== 0);
   const ids = new Set<string>([
     ...schemeUsers.map((u) => u.id),
-    ...entryUsers.map((u) => u.userId),
-    ...payoutUsers.map((u) => u.userId),
+    ...model.accrued.keys(),
+    ...model.paid.keys(),
     ...debtIds,
   ]);
   const users = await prisma.user.findMany({
@@ -233,15 +172,9 @@ export async function getPayrollSummary(month: string) {
     orderBy: { name: "asc" },
   });
 
-  const accruedMap = new Map(
-    accruedByUser.map((row) => [row.userId, row._sum.amount]),
-  );
-  const paidMap = new Map(
-    paidByUser.map((row) => [row.userId, row._sum.amount]),
-  );
-  const advanceMap = new Map(
-    advanceByUser.map((row) => [row.userId, row._sum.amount]),
-  );
+  const accruedMap = model.accrued;
+  const paidMap = model.paid;
+  const advanceMap = model.advances;
   const rows: PayrollSummaryRow[] = users.map((user) => {
     const accrued = accruedMap.has(user.id) ? accruedMap.get(user.id)! : 0;
     const paid = paidMap.has(user.id) ? paidMap.get(user.id)! : 0;
@@ -312,8 +245,9 @@ export async function getMonthTurnover(
 }
 // Схема NONE и деактивация не отменяют уже заработанную оплату.
 // Проверки месяца, долга и прав выплаты остаются в существующем action.
-export async function listPayrollUsers() {
-  const owed = (await getEmployeeDues()).filter((row) => row.due === null || row.due > 0).map((row) => row.userId);
+export async function listPayrollUsers(snapshot?: PayrollReadModel) {
+  if (snapshot) requirePayrollReadScope(snapshot, undefined, null, currentMonth());
+  const owed = (await getEmployeeDues(snapshot)).filter((row) => row.due === null || row.due > 0).map((row) => row.userId);
   const users = await prisma.user.findMany({
     where: { OR: [
       { active: true, payScheme: { not: "NONE" } },
@@ -330,7 +264,8 @@ export async function listPayrollUsers() {
 // за текущий месяц) — для предупреждения в диалоге аванса, что сумма
 // превышает уже набежавшую оценку. Аванс выдаётся в пределах баланса
 // организации, это мягкая подсказка, а не потолок.
-export async function getCurrentMonthEstimates(): Promise<Record<string, number | null>> {
+export async function getCurrentMonthEstimates(snapshot?: PayrollReadModel): Promise<Record<string, number | null>> {
+  if (snapshot) { requirePayrollReadScope(snapshot, undefined, null, currentMonth()); return Object.fromEntries(snapshot.estimates); }
   const rows = await groupPayroll({
     by: ["userId"],
     where: { month: currentMonth() },
@@ -351,14 +286,15 @@ export function round2(value: number): number {
 // и расходы — мультивалютные, суммируются по BYN-эквиваленту (курс НБ РБ
 // сохранён в каждой операции); выплаты используют фиксированный BYN-снимок.
 // Неизвестный исторический эквивалент делает зависимый баланс недоступным. Кассовые остатки — см. listCashAccounts (§11).
-export async function getOrgBalance(): Promise<number | null> {
+export async function getOrgBalance(snapshot?: PayrollReadModel): Promise<number | null> {
+  if (snapshot) requirePayrollReadScope(snapshot, undefined, snapshot.userScope, currentMonth());
   const [income, expense, payouts] = await Promise.all([
     prisma.payment.aggregate({ where: { ...activePaymentWhere, direction: "INCOME" }, _sum: { bynAmount: true } }),
     prisma.payment.aggregate({ where: { ...activePaymentWhere, direction: "EXPENSE" }, _sum: { bynAmount: true } }),
-    prisma.payout.findMany({ select: { amount: true, payrollCurrency: true, bynAmount: true } }),
+    snapshot ? Promise.resolve(snapshot.allPaid) : prisma.payout.findMany({ select: { amount: true, payrollCurrency: true, bynAmount: true } }).then(sumHistoricalByn),
   ]);
   const payments = new Prisma.Decimal(income._sum.bynAmount ?? 0).minus(expense._sum.bynAmount ?? 0).toNumber();
-  return subtractByn(payments, sumHistoricalByn(payouts));
+  return subtractByn(payments, payouts);
 }
 
 export type EmployeeDue = { userId: string; name: string; due: number | null };
@@ -367,22 +303,22 @@ export type EmployeeDue = { userId: string; name: string; due: number | null };
 // все выплаты (правило владельца: деньги платятся только за прошлый месяц;
 // начисления текущего месяца — приблизительная зарплата, к выплате недоступна).
 // Потолок выплаты конкретному человеку.
-export async function getEmployeeDues(): Promise<EmployeeDue[]> {
+export async function getEmployeeDues(snapshot?: PayrollReadModel): Promise<EmployeeDue[]> {
   const before = currentMonth();
-  const [accrued, paid] = await Promise.all([
-    groupPayroll({
-      by: ["userId"],
-      where: { month: { lt: before } },
-      _sum: { amount: true },
-    }),
-    groupPayout({ by: ["userId"], _sum: { amount: true } }),
-  ]);
-  const accruedMap = new Map(
-    accrued.map((row) => [row.userId, row._sum.amount]),
-  );
-  const paidMap = new Map(
-    paid.map((row) => [row.userId, row._sum.amount]),
-  );
+  if (snapshot) requirePayrollReadScope(snapshot, undefined, snapshot.userScope, before);
+  let accruedMap: PayrollReadModel["pastAccrued"];
+  let paidMap: PayrollReadModel["totalPaid"];
+  if (snapshot) {
+    accruedMap = snapshot.pastAccrued;
+    paidMap = snapshot.totalPaid;
+  } else {
+    const [accrued, paid] = await Promise.all([
+      groupPayroll({ by: ["userId"], where: { month: { lt: before } }, _sum: { amount: true } }),
+      groupPayout({ by: ["userId"], _sum: { amount: true } }),
+    ]);
+    accruedMap = new Map(accrued.map(row => [row.userId, row._sum.amount]));
+    paidMap = new Map(paid.map(row => [row.userId, row._sum.amount]));
+  }
   const ids = [...new Set([...accruedMap.keys(), ...paidMap.keys()])];
   if (ids.length === 0) return [];
   const users = await prisma.user.findMany({
@@ -402,21 +338,20 @@ export async function getEmployeeDues(): Promise<EmployeeDue[]> {
 // Кому начисляется «% от оборота» за месяц: активные сотрудники
 // со схемой PERCENT_TURNOVER и СУММА уже начисленного (записей может
 // быть несколько: первичное начисление + доначисления при росте оборота).
-export async function getTurnoverAccruals(month: string) {
+export async function getTurnoverAccruals(month: string, snapshot?: PayrollReadModel) {
+  if (snapshot) requirePayrollReadScope(snapshot, month, null, currentMonth());
   parsePayrollMonth(month);
   const users = await prisma.user.findMany({
     where: { active: true, payScheme: "PERCENT_TURNOVER", payPercent: { gt: 0 } },
     select: { id: true, name: true, payPercent: true, roles: true },
     orderBy: { name: "asc" },
   });
-  const existing = await groupPayroll({
+  const existing = snapshot ? [] : await groupPayroll({
     by: ["userId"],
     where: { month, scheme: "PERCENT_TURNOVER" },
     _sum: { amount: true },
   });
-  const accruedMap = new Map(
-    existing.map((row) => [row.userId, row._sum.amount]),
-  );
+  const accruedMap = snapshot?.turnoverAccrued ?? new Map(existing.map((row) => [row.userId, row._sum.amount]));
   return users.filter(user => canAccrueOrdinarySalary(user.roles)).map((user) => ({
     userId: user.id,
     name: user.name,
