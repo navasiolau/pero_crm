@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {createHash} from "node:crypto";
 import {before, test} from "node:test";
 import {createRequire, Module} from "node:module";
+import {resolve} from "node:path";
 import {Prisma, type Role} from "@prisma/client";
 import {fixtureModel, matches, queryRows, type FixtureRow} from "./helpers/visibility-fixture";
 import type {VisibilityActor} from "../src/server/access/visibility";
@@ -222,11 +223,12 @@ test("native148 loaded-engine validator refuses missing, foreign and multiple li
  const helper=Reflect.get(native,"native148AssertLoadedEngine");
  assert.equal(typeof helper,"function");
  const validate=helper as (values:unknown,expected:string)=>string;
- const own="D:/Projects/pero_crm_worktrees/improvements-148/node_modules/.pnpm/owned/node_modules/.prisma/client/query_engine-windows.dll.node";
- assert.equal(validate([own],own).replaceAll(String.fromCharCode(92),"/"),own);
+ const own=resolve("node_modules/.pnpm/owned/node_modules/.prisma/client/query_engine-windows.dll.node");
+ const foreign=resolve("foreign/query_engine-windows.dll.node");
+ assert.equal(validate([own],own),own);
  assert.throws(()=>validate([],own),/F148_LOADED_ENGINE/);
- assert.throws(()=>validate(["D:/foreign/query_engine-windows.dll.node"],own),/F148_LOADED_ENGINE/);
- assert.throws(()=>validate([own,"D:/foreign/query_engine-windows.dll.node"],own),/F148_LOADED_ENGINE/);
+ assert.throws(()=>validate([foreign],own),/F148_LOADED_ENGINE/);
+ assert.throws(()=>validate([own,foreign],own),/F148_LOADED_ENGINE/);
  assert.throws(()=>validate({env:"DO_NOT_SERIALIZE"},own),/F148_LOADED_ENGINE/);
 });
 

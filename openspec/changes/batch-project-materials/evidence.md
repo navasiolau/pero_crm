@@ -109,3 +109,13 @@ Root-approved v2 source-only AST derivation f44ca0 completed exit0: collector na
 ProposedNOTAUTHORIZED source-build954eb725-28d2-4ee3-90d7-07531e1af3d9 saved903bb2 at D:/Projects/pero_crm_v2/.playwright-mcp/application-improvements/native148-source-ready-954eb725-28d2-4ee3-90d7-07531e1af3d9.json SHA5dfa0faa6f2f3e87b6521e4acb55b7c9620f5ccde10e64db073ea6689255f7c0. Exact16currentpins rechecked; parent apps/web/test-results absent and must be created only by Root after exactguard. Standalone mjs command --authorized-source-prepare --mode prepare --file <rootsealedJSON> --expected-file-sha <hash>; no tsx preload/no app evaluation. Current native19da remains frozen; Root freshonce compiler approval/fullclosureactual review pending. Later native engineenv override rejection and actual same-owned-process loadedDLL proof are separate source/runtime requirements; inventory263 alone is not loadedproof.
 
 Root accepted one immutable baseline whitespace exception: cached whole-diff check reports only frozen reference line133 new blank line at EOF. Reference87fc bytes preserved; check of the other13 agreed paths exits0. Whole-diff exit0 is not claimed. No semantic/source change or repeated SQL/tests.
+
+## Portable cold engine fixture — 12.10.2026
+
+Published ed2f CI38276725639 case1939 exposed Windows-only literal in native148 loaded-engine-validator test: Linux path.resolve treats D:/ as a relative filename. Root authorized TEST_ONLY fixture repair. Ownbugfix148 normalFF from2f63 to freshorigin/staginged2f preserves all staged topics. Existingcase now builds both owned and foreign absolute fixtures using host path.resolve; success still compares the exact canonical owned path. Missing/foreign/multiple libraries and invalid values rejection assertions are unchanged. Engine validator/native artifact/runtime guards/app source/reference unchanged; no actual engine/library loading/DB/native rerun.
+
+Target existingcase4ac6c8 PASS1/1, scoped lint/diff PASS; fixture bytepin recorded below. This is portable path construction, not engine validation relaxation. No other CI finance failures claimed fixed; Root handles finance134 independently. Exact2paths test+own evidence, allplancommit permission afterCODEreview; newCI/stage acceptance pending, no push by author.
+
+Final portabletest SHAeb3d4d4a3ef3b6452ca1eb291e3ec555aa57cccb982fe2d0a88d0ec1f10052b0; lint c50165 exit0. Runtime/native/application source diff0.
+
+Independent CI CODE_GO confirms exacteb3d fixture and2pathscope/runtime0; authorized owncommit, subsequentCI/stage Root only.
