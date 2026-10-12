@@ -3,7 +3,6 @@ import test from 'node:test';
 import {createRequire,Module} from 'node:module';
 import * as React from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
-import {FileImageThumbnail} from '../src/components/file-image-thumbnail';
 const require=createRequire(import.meta.url);
 function inject(path:string,exports:Record<string,unknown>){const file=require.resolve(path),stub=new Module(file);stub.filename=file;stub.loaded=true;stub.exports=exports;require.cache[file]=stub;}
 inject('next/navigation',{useRouter:()=>({refresh(){throw Error('SSR_REFRESH_FORBIDDEN')}})});
@@ -14,4 +13,3 @@ const file:import('../src/app/(app)/projects/[id]/files-tab').FileRow={id:'image
 test('all shared file lists show only original filename and disabled trash without image requests',()=>{
  for(const flat of [false,true]){const html=renderToStaticMarkup(React.createElement(FileGridView,{files:[file],canEdit:false,flat}));assert.match(html,/Длинное имя\.png/);assert.match(html,/aria-label="Удалить файл/);assert.match(html,/disabled=""/);assert.doesNotMatch(html,/preview=|thumb=1|data-file-thumbnail|<img/);}
 });
-test('nonimage thumbnail adds no image fetch and filename download/view is unaffected',()=>{const html=renderToStaticMarkup(React.createElement(FileImageThumbnail,{file:{...file,mimeType:'application/pdf'},onOpen(){throw Error('SSR_OPEN_FORBIDDEN')}}));assert.equal(html,'');});

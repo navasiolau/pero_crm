@@ -1,0 +1,14 @@
+## Current source READY — 12.10.2026
+
+Root direct155_SCOPE_GO подтверждает159/160 staged acceptance и exact9orphan allowlist. Existing feature/155 planning preserved namedstash155-preserve-openspec-before-staging-20261012; fresh fetch/ordinaryFF tooriginCFCcfc4f91a8be070b8f160b3c9de6abeb2af8fce83, restored без конфликтов. Current direct rg names/modulepaths covered source/tests/scripts/packages/plugin/bot/API/deploy/GitHub and found only internalCommunicationsTab→addCommunication and2obsolete test consumers; product-single-page negativeSurveyorLink guard preserved. Старый1199AST census не перезапускался; новых inventory/frameworks нет.
+
+Implemented exact11source/test paths:9source files removed,781physical LOC unchanged fromapprovedbaseline; orphan inline-phone suite16lines removed; mixed file-image-thumbnail test lost only1import+1one-line obsolete block. All4obsoleteblocks retired, liveFileGridView block/setup/imports keepliteral, filename unchanged. 9e5a77 compares remaining file against HEAD minusONLYthose2lines and reports LITERAL_IDENTICAL, LFfileSHA26e6712abaf748cff6eca9c35e197d6a570bea83f8a39cd889d75fdea68e5bf2. Directpostrg has onlyretained negativeguard; scripts/packages/APIexports consumers0. Absolute fullpath/files/reparse ancestors checked for all10literaldeletion paths beforeeffects, no broad cleanup or directory deletion.
+
+Protected before/after bytes unchanged: five contact-controller blocks/file636c709df748296740ae45fbca34c145dea132d112d49fed6d759745d4b27c6c; projectsqueries/historicalgetProjectForf485ca20b96b4f39cfb3a7775282ceff20ff693e0b513b49ba95122647781352; warehousecontracts09b9184b7ae63e665ddecd9a285c502ccf5818b1cffc3968b8170d40cba68fc5; schemad74c1d04856782e9c7b1b6d68e1ea386c52f541ede0862366e28b94d76eb90bd; livefiles-tabd20b15cd861f667de7234be956623485766bc192a1115cc756a9735df24fa86e. No model/migration/history/financial/ACL/data/API edits or DB effects.
+
+Own frozen/offline/ignore-scripts install9f1013→ee5367 PASS18s/downloaded0/lockunchanged; own6.19.3generate source-only. Retained8existing suites40/40PASSb73293, affectedproject/product/history/files/contact/warehouse strictc98acc diagnostics0, mixedtestlint8b3a78 exit0, trackedDiff0. OpenSpecstrictba74ea PASS/skip_specs:true. Independent CODE_GO +LOCAL_CHECKS_ACCEPTED accepted exact11diff; CIbuild/read-onlystagesmoke requestedbyRoot afterintegration. Production chunk/CSS/JS savings NOT_MEASURED, sourceLOC is not executed savings. Local browser/native/DB/source census were not rerun; actual155staging NOT_RUN. Owner all-plan authorization permits atomic17path commit now; stage155 pending. Main/prod/restic/dumps/seed/newDB forbidden; SAFETY-RULES D:/Projects/pero_infra/infra-recovery/SAFETY-RULES.md mismatchSTOP.
+
+Historical planning below does not override current authorized READY.
+# disconnected-nonfinancial-ui
+
+Задача155: убрать подтверждённо отключённые нефинансовые source цепочки и только obsolete test blocks
