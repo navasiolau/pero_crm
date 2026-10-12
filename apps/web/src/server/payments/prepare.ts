@@ -2,11 +2,11 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 import { liveProjectWhere } from "@/server/access/live-entities";
 import { assertProjectMoneyCurrency } from "@/lib/internal-currency";
 import { getNbrbRate, isCurrency } from "@/server/finance/nbrb";
-import type { PaymentData } from "./contracts";
+import type { PaymentDetails } from "./contracts";
 import type { PreparedPayment } from "./transaction";
 
 /** Shared web/bot/stock preparation. Network work stays outside the money transaction. */
-export async function preparePayment(data: PaymentData,
+export async function preparePayment(data: PaymentDetails,
   db: Pick<PrismaClient, "project" | "cashAccount" | "expenseArticle">,
   getRate: typeof getNbrbRate = getNbrbRate): Promise<PreparedPayment> {
   if (!isCurrency(data.currency)) throw Error("Неизвестная валюта");

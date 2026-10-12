@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createRequire, Module } from "node:module";
 import { after, test } from "node:test";
+import { mkdir, readFile } from "node:fs/promises";
 import type { TaskStatusAck, TaskStatusContext } from "../src/server/tasks/status-receipts";
 const require = createRequire(import.meta.url), originals = new Map<string, NodeJS.Module | undefined>();
 function inject(name: string, exports: Record<string, unknown>) { const file = require.resolve(name); originals.set(file, require.cache[file]); const stubModule = new Module(file); stubModule.filename = file; stubModule.loaded = true; stubModule.exports = exports; require.cache[file] = stubModule; }
@@ -107,55 +108,78 @@ function App(){const[open,setOpen]=useState(true);const[key,setKey]=useState(0);
   } finally { await browser.close(); }
 });
 
-test("Chromium actual PaymentDialog preserves exact UUID/payload through UNKNOWN and transport loss", async () => {
+test("Chromium actual PaymentDialog preserves UUID/manual FX through UNKNOWN, reopen and reload", async () => {
   const sourceRoot = path.resolve(process.cwd(), "src").replaceAll("\\", "/");
   const modules: Record<string, string> = {
     "next/navigation": "export const useRouter=()=>({refresh:()=>{window.__refreshes++}});",
-    "@/server/payments/actions": "export const addPayment=(data)=>window.__pay(data);",
+    "@/server/payments/actions": "export const getPaymentActorId=async()=>({ok:true,actorId:'actor'});export const addPayment=(data,actor)=>window.__pay(data,actor);",
     "@/server/warehouse/stock-purchase-actions": "export const addPaidStockReceipt=()=>{throw Error('unexpected stock RPC')};",
-    "@/server/finance/actions": "export const fetchNbrbRate=()=>{throw Error('unexpected FX RPC')};",
+    "@/server/finance/actions": "export const fetchNbrbRate=async()=>{window.__fxCalls++;sessionStorage.setItem('qa134:fx',String(window.__fxCalls));return{ok:true,rate:2.5,date:'2026-10-10'}};",
     "@/components/finance-document-upload": "export const FinanceDocumentUpload=()=>null;",
     "@/components/stock-material-fields": "export const StockMaterialFields=()=>null;",
   };
   const entry = `
 import React,{useState} from 'react';import{createRoot}from'react-dom/client';import{Toaster}from'sonner';
 import{PaymentDialog}from${JSON.stringify(sourceRoot + "/components/payment-dialog.tsx")};
-window.__requests=[];window.__mode='UNKNOWN';window.__refreshes=0;
-window.__pay=async(data)=>{window.__requests.push(data);if(window.__mode==='THROW')throw Error('lost response');return window.__mode==='UNKNOWN'?{ok:false,outcome:'UNKNOWN',retrySafe:true,error:'Подтверждение неизвестно'}:{ok:true,outcome:'COMMITTED',resultId:'own-payment',paymentId:'own-payment'};};
-function App(){const[open,setOpen]=useState(true);return <><PaymentDialog direction='INCOME' open={open} onOpenChange={setOpen} projectCurrency='BYN' cashAccounts={[{id:'cash',name:'QA cash',currency:'BYN'}]} expenseArticles={[]}/><Toaster/></>};createRoot(document.getElementById('root')).render(<App/>);`;
-  const bundled = await compiler.build({ stdin: { contents: entry, loader: "jsx", resolveDir: process.cwd(), sourcefile: "qa133-payment-dialog-entry.jsx" },
+window.__requests=JSON.parse(sessionStorage.getItem('qa134:requests')||'[]');window.__mode='UNKNOWN';window.__refreshes=0;window.__fxCalls=Number(sessionStorage.getItem('qa134:fx')||'0');
+window.__pay=async(data,actor)=>{if(actor!=='actor')throw Error('wrong actor');window.__requests.push(data);sessionStorage.setItem('qa134:requests',JSON.stringify(window.__requests));if(window.__mode==='THROW')throw Error('lost response');return window.__mode==='UNKNOWN'?{ok:false,outcome:'UNKNOWN',retrySafe:true,clientMutationId:data.clientMutationId,error:'Подтверждение неизвестно'}:{ok:true,outcome:'COMMITTED',resultId:'own-payment',paymentId:'own-payment',clientMutationId:data.clientMutationId};};
+function App(){const[open,setOpen]=useState(true);return <><button onClick={()=>setOpen(true)}>Открыть повторно</button><PaymentDialog direction='INCOME' open={open} onOpenChange={setOpen} projectCurrency='USD' cashAccounts={[{id:'cash',name:'QA cash',currency:'USD'}]} expenseArticles={[]}/><Toaster/></>};createRoot(document.getElementById('root')).render(<App/>);`;
+  const bundled = await compiler.build({ stdin: { contents: entry, loader: "jsx", resolveDir: process.cwd(), sourcefile: "qa134-payment-dialog-entry.jsx" },
     bundle: true, write: false, platform: "browser", format: "iife", jsx: "automatic", target: "es2022", logLevel: "silent",
     tsconfig: path.resolve("tsconfig.json"), define: { "process.env.NODE_ENV": '"production"' },
     plugins: [{ name: "declared-qa-io", setup(engine: QaBuild) {
       engine.onResolve({ filter: /.*/ }, args => modules[args.path] ? { path: args.path, namespace: "qa-io" } : undefined);
       engine.onLoad({ filter: /.*/, namespace: "qa-io" }, args => ({ contents: modules[args.path], loader: "js" }));
     } }] });
+  const output = path.resolve("../../.playwright-mcp/payment-command-134"); await mkdir(output, {recursive: true});
+  const postcss = createRequire(require.resolve("@tailwindcss/postcss"))("postcss") as {(plugins: unknown[]): {process(css: string, options: {from: string}): Promise<{css: string}>}};
+  const tailwind = require("@tailwindcss/postcss") as (options: {base: string}) => unknown;
+  const css = (await postcss([tailwind({base: process.cwd()})]).process(await readFile("src/app/globals.css", "utf8"), {from: path.resolve("src/app/globals.css")})).css;
   const browser = await chromium.launch({ channel: "chrome", headless: true });
   try {
     const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
-    await page.route("**/*", route => route.abort());
-    await page.setContent('<div id="root"></div>');
-    await page.addScriptTag({ content: Buffer.from(bundled.outputFiles[0].contents).toString("utf8") });
+    const qaUrl = "http://localhost/qa134-payment-dialog";
+    const html = '<!doctype html><html lang="ru"><meta name="viewport" content="width=device-width,initial-scale=1"><style>' + css + '*{animation:none!important;transition:none!important;caret-color:transparent}</style><body style="font-family:Arial,sans-serif"><div id="root"></div><script>' + Buffer.from(bundled.outputFiles[0].contents).toString("utf8").replaceAll("</script", "<\\/script") + "</script></body></html>";
+    await page.route("**/*", route => route.request().url() === qaUrl ? route.fulfill({status: 200, contentType: "text/html", body: html}) : route.abort());
+    await page.goto(qaUrl);
+    await page.waitForFunction(() => !document.querySelector<HTMLInputElement>("#pay-rate")?.matches(":disabled") && document.querySelector<HTMLInputElement>("#pay-rate")?.value === "2.5");
     await page.locator("#pay-amount").fill("100.25");
+    await page.locator("#pay-rate").fill("3.5");
     await page.locator("#pay-comment").fill("QA exact intent");
-    const submit = page.getByRole("button", { name: "Внести приход", exact: true });
+    await page.screenshot({path: path.join(output, "390-normal.png")});
     for (const [index, mode] of ["UNKNOWN", "THROW", "ACK"].entries()) {
       await page.evaluate(next => { (window as unknown as { __mode: string }).__mode = next; }, mode);
+      const submit = page.getByRole("button", { name: index === 0 ? "Внести приход" : "Проверить", exact: true });
       await submit.focus(); await submit.press("Enter");
       await page.waitForFunction(expected => (window as unknown as { __requests: unknown[] }).__requests.length === expected, index + 1);
       if (index < 2) {
-        await submit.waitFor({ state: "visible" });
-        await page.waitForFunction(() => !document.querySelector<HTMLFieldSetElement>("fieldset")?.disabled);
+        const verify = page.getByRole("button", { name: "Проверить", exact: true });
+        await verify.waitFor({ state: "visible" });
+        assert.equal(await page.locator("#pay-amount").isDisabled(), true);
+        assert.equal(await page.locator("#pay-amount").inputValue(), "100.25");
+        assert.equal(await page.locator("#pay-rate").inputValue(), "3.5");
+        if (index === 0) {
+          const cancel = page.getByRole("button", { name: "Отмена", exact: true }); await cancel.focus(); await cancel.press("Enter");
+          await page.getByRole("dialog").waitFor({ state: "hidden" });
+          const reopen = page.getByRole("button", { name: "Открыть повторно", exact: true }); await reopen.focus(); await reopen.press("Enter");
+        } else await page.reload();
+        await page.getByRole("button", { name: "Проверить", exact: true }).waitFor({ state: "visible" });
+        await page.waitForFunction(() => document.querySelector<HTMLInputElement>("#pay-rate")?.value === "3.5");
+        assert.equal(await page.locator("#pay-amount").isDisabled(), true);
         assert.equal(await page.locator("#pay-amount").inputValue(), "100.25");
         assert.equal(await page.getByRole("dialog").isVisible(), true);
+        if (index === 1) await page.screenshot({path: path.join(output, "390-unknown-reloaded.png")});
+        assert.equal(await page.evaluate(() => (window as unknown as {__requests: unknown[]}).__requests.length), index + 1);
+        assert.equal(await page.evaluate(() => (window as unknown as {__fxCalls: number}).__fxCalls), 1, "Pinned intent must not refetch FX");
       }
     }
     await page.getByRole("dialog").waitFor({ state: "hidden", timeout: 3000 });
-    const observed = await page.evaluate(() => { const state = window as unknown as { __requests: Record<string, unknown>[]; __refreshes: number }; return { requests: state.__requests, refreshes: state.__refreshes }; });
+    const observed = await page.evaluate(() => { const state = window as unknown as { __requests: Record<string, unknown>[]; __refreshes: number; __fxCalls: number }; return { requests: state.__requests, refreshes: state.__refreshes, fxCalls: state.__fxCalls }; });
     assert.equal(observed.requests.length, 3);
     assert.match(String(observed.requests[0].clientMutationId), /^[a-f0-9-]{36}$/);
     assert.deepEqual(observed.requests[0], observed.requests[1]); assert.deepEqual(observed.requests[0], observed.requests[2]);
-    assert.equal(observed.requests[0].amount, 100.25); assert.equal(observed.refreshes, 1);
+    assert.equal(observed.requests[0].amount, 100.25); assert.equal(observed.requests[0].rate, 3.5);
+    assert.equal(observed.requests[0].rateDate, "2026-10-10"); assert.equal(observed.refreshes, 1);
   } finally { await browser.close(); }
 });
 

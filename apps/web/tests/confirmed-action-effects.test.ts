@@ -243,3 +243,53 @@ test("actual nested cache helpers retain all later paths and one lookup after ea
   reset(); lookups = 0; await product.revalidateProductPaths(null); await warehouse.revalidateWarehouse();
   assert.equal(lookups, 0); assert.equal(calls.length, 6);
 });
+
+
+test("required payment UUID rejects old/forged ingress before receipts, money and effects", async () => {
+  reset(); receiptReads = ["error"];
+  for (const id of [undefined, "bad"]) {
+    const result = await payment(actor, {...input(), clientMutationId: id} as never);
+    assert.equal(result.ok, false); assert.equal(result.outcome, "ROLLED_BACK");
+  }
+  assert.deepEqual(receiptReads, ["error"]); assert.deepEqual({rows, logs, events, calls}, {rows:[], logs:[], events:[], calls:[]});
+  const data = {...input(), clientMutationId: "00000134-0000-4000-8000-000000000210"}; receiptReads = [];
+  const oldAccount = tx.cashAccount.findUnique;
+  const first = await payment(actor, data); assert.equal(first.ok, true);
+  tx.cashAccount.findUnique = async () => {throw Error("Currency preparation outage");};
+  try {const replay = await payment(actor, {...data, clientMutationId: data.clientMutationId.toUpperCase()}); assert.equal(replay.ok, true); assert.equal(replay.resultId, first.resultId); assert.equal(rows.length,1);}
+  finally {tx.cashAccount.findUnique = oldAccount;}
+});
+
+test("ten serialized actual payment commands and deleted receipt preserve one original ID", async () => {
+  reset(); let tail = Promise.resolve();
+  alternateTransaction = async operation => {const before = tail; let release!:()=>void; tail=new Promise<void>(done=>{release=done;}); await before; try{return await operation(tx);}finally{release();}};
+  const data = {...input(), clientMutationId:"00000134-0000-4000-8000-000000000211"};
+  const results = await Promise.all(Array.from({length:10},()=>payment(actor,data)));
+  assert.ok(results.every(row=>row.ok&&row.resultId===results[0].resultId)); assert.equal(rows.length,1); assert.equal(logs.length,2); assert.equal(events.length,1);
+  rows[0].deletionId="owned-removal";
+  const removed = await payment(actor,data) as Awaited<ReturnType<typeof import("../src/server/payments/core").createPaymentCore>>;
+  assert.equal(removed.ok,false); if(!removed.ok){assert.equal(removed.kind,"removed");assert.equal(removed.removedPaymentId,results[0].resultId);assert.equal(removed.clientMutationId,data.clientMutationId);}
+  assert.equal(rows.length,1);assert.equal(events.length,1);
+  const independent = await Promise.all(["00000134-0000-4000-8000-000000000212", "00000134-0000-4000-8000-000000000213"].map(clientMutationId=>payment(actor,{...data,clientMutationId})));
+  assert.ok(independent.every(result=>result.ok)); assert.equal(new Set(independent.map(result=>result.ok&&result.resultId)).size,2);
+  assert.equal(rows.length,3);assert.equal(events.length,3);
+});
+
+test("actual web actor getter/precondition denies stale account before core and bot rejects missing UUID", async () => {
+  reset();
+  inject("../src/server/require-role",{requireFinance:async()=>({user:actor})});
+  const {getPaymentActorId,addPayment}=require("../src/server/payments/actions") as typeof import("../src/server/payments/actions");
+  assert.deepEqual(await getPaymentActorId(),{ok:true,actorId:actor.id});
+  const stale=await addPayment(input(),"other-account");assert.equal(stale.ok,false);if(!stale.ok)assert.equal(stale.kind,"actor-changed");assert.equal(rows.length+logs.length+events.length,0);
+  for(const clientMutationId of [undefined,"bad"]){const rejected=await addPayment({...input(),clientMutationId} as never,actor.id);assert.equal(rejected.ok,false);if(!rejected.ok)assert.equal(rejected.kind,"invalid-request");}
+  const {addPaidStockReceipt}=require("../src/server/warehouse/stock-purchase-actions") as typeof import("../src/server/warehouse/stock-purchase-actions");
+  const stock=await addPaidStockReceipt({clientMutationId:"00000134-0000-4000-8000-000000000214",materialId:"material",quantity:"1",unitPrice:"1",currency:"BYN",cashAccountId:"cash",expenseArticleId:"article"},"other-account");
+  assert.equal(stock.ok,false);if(!stock.ok)assert.equal("kind"in stock?stock.kind:undefined,"actor-changed");assert.equal(rows.length+logs.length+events.length,0);
+  const apiAuth=require("../src/server/api/auth") as typeof import("../src/server/api/auth"), previousAuthenticate=apiAuth.authenticate;
+  apiAuth.authenticate=async()=>({}) as never;
+  try {
+    const {POST}=require("../src/app/api/v1/bot/payments/route") as typeof import("../src/app/api/v1/bot/payments/route");
+    const reply=await POST(new Request("http://qa.invalid/api/v1/bot/payments",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({...input(),clientMutationId:undefined})}));
+    assert.equal((await reply.json()).ok,false);assert.equal(rows.length+logs.length+events.length,0);
+  } finally {apiAuth.authenticate=previousAuthenticate;}
+});

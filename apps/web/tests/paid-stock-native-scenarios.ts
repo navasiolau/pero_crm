@@ -73,7 +73,7 @@ export async function runPaidStockNative(db: PrismaClient) {
         await assert.rejects(createStockPurchaseInTransaction(actor,{...data,unitPrice:"21.00"},prepared,tx),/другими данными/);
         await assert.rejects(prepareStockPurchase({...actor,roles:["MANAGER"]},data,tx),/прав/);
         const plain={direction:"EXPENSE" as const,projectId:null,amount:60,currency:"BYN",cashAccountId:account.id,expenseArticleId:article.id};
-        await assert.rejects(createPaymentInTransaction(actor,plain,prepared,tx),/документ/i);
+        await assert.rejects(createPaymentInTransaction(actor,{...plain,clientMutationId:"00000134-0000-4000-8000-000000000105"},prepared,tx),/документ/i);
         await assert.rejects(createPaymentInTransaction(actor,plain,prepared,tx,{movementId:first.receipt.movementId}),/прихода/);
         await assert.rejects(deletePaymentInTransaction(actor,first.receipt.paymentId,"EXPENSE","BYN","1",tx),/связан/);
         await tx.$executeRawUnsafe("SAVEPOINT stock_purchase_delete_guard");

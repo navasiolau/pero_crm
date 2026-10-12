@@ -6,7 +6,7 @@ import {requireHistoricalByn} from '../src/lib/history-byn';
 const require=createRequire(import.meta.url);
 function inject(name:string,exports:Record<string,unknown>){const file=require.resolve(name);const stub=new Module(file);stub.filename=file;stub.loaded=true;stub.exports=exports;require.cache[file]=stub;}
 let projectCurrency='USD',fxCalls=0,writes=0,accountReads=0;let saved:Record<string,unknown>={};
-const tx={user:{findUnique:async()=>({id:'a',name:'A',active:true,roles:['ACCOUNTANT']})},financeDocument:{findUnique:async()=>({id:'99999999-9999-4999-8999-999999999999',uploadedById:'a',state:'READY',payment:null})},changeLog:{create:async()=>({id:"audit"})},domainEvent:{create:async()=>({id:"event"})},project:{findUnique:async()=>({id:'p',number:'P',currency:projectCurrency})},cashAccount:{findUnique:async()=>{accountReads++;return{id:'cash',name:'USD cash',active:true,currency:'USD'}}},orgSetting:{findUnique:async()=>({value:'USD'})},expenseArticle:{findUnique:async()=>({id:'article',active:true})},payment:{create:async({data}:{data:Record<string,unknown>})=>{writes++;saved=data;return{id:'payment',...data}}}};
+const tx={user:{findUnique:async()=>({id:'a',name:'A',active:true,roles:['ACCOUNTANT']})},financeDocument:{findUnique:async()=>({id:'99999999-9999-4999-8999-999999999999',uploadedById:'a',state:'READY',payment:null})},changeLog:{findUnique:async()=>null,create:async()=>({id:"audit"})},domainEvent:{create:async()=>({id:"event"})},project:{findUnique:async()=>({id:'p',number:'P',currency:projectCurrency})},cashAccount:{findUnique:async()=>{accountReads++;return{id:'cash',name:'USD cash',active:true,currency:'USD'}}},orgSetting:{findUnique:async()=>({value:'USD'})},expenseArticle:{findUnique:async()=>({id:'article',active:true})},payment:{create:async({data}:{data:Record<string,unknown>})=>{writes++;saved=data;return{id:'payment',...data}}}};
 inject('../src/lib/prisma',{prisma:tx});inject('next/cache',{revalidatePath:()=>{}});
 inject('../src/server/projects/core',{requireActorRoles:()=>{}});
 inject('../src/server/plugins/changelog',{writeChangeLog:async()=>{}});inject('../src/server/plugins/events',{emitDomainEvent:async()=>{},dispatchEvent:async()=>{}});inject('../src/server/notifications/notify',{notifyOrg:async()=>{}});
@@ -15,7 +15,7 @@ inject('../src/server/finance/nbrb',{isCurrency:(v:string)=>['BYN','USD','EUR','
 inject('../src/server/payroll/cash-core',{readCashBalance:async()=>new Prisma.Decimal(1000),readOrgBalance:async(_tx:unknown,rate:string,delta:string)=>{assert.equal(rate,'1.000000');assert.equal(delta,'-300.00');return new Prisma.Decimal(1000)}});
 const {createPaymentCore}=require('../src/server/payments/core') as typeof import('../src/server/payments/core');
 const actor={id:'a',name:'A',roles:['ACCOUNTANT' as const],source:'web' as const};
-const input={projectId:'p',direction:'INCOME' as const,amount:100,currency:'USD',cashAccountId:'cash'};
+const input={clientMutationId:'00000134-0000-4000-8000-000000000101',projectId:'p',direction:'INCOME' as const,amount:100,currency:'USD',cashAccountId:'cash'};
 test('unprepared foreign project rejects income and expense before FX, cash read or write',async()=>{
  for(const direction of ['INCOME','EXPENSE'] as const){projectCurrency='USD';fxCalls=0;writes=0;accountReads=0;
  const result=await createPaymentCore(actor,{...input,direction,...(direction==='EXPENSE'?{expenseArticleId:'article',reportDocumentId:'99999999-9999-4999-8999-999999999999'}:{})});

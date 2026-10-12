@@ -1,4 +1,4 @@
-import { Prisma } from "@prisma/client";
+import { Prisma, type Payment } from "@prisma/client";
 import { liveProjectWhere } from "@/server/access/live-entities";
 import { requireActorRoles, type DomainActor } from "@/server/actor";
 import { FINANCE_ROLES } from "@/lib/roles";
@@ -6,7 +6,7 @@ import { assertProjectMoneyCurrency } from "@/lib/internal-currency";
 import { isCurrency } from "@/server/finance/nbrb";
 import { readCashBalance, readOrgBalance } from "@/server/payroll/cash-core";
 import { requireFinanceDocumentActor } from "@/server/finance-documents/core";
-import { paymentSchema, type PaymentInput } from "./contracts";
+import { paymentSchema, paymentDetailsSchema, type PaymentInput, type InternalPaymentInput } from "./contracts";
 import { readPaymentReceipt, recordPaymentReceipt } from "./receipts";
 import { assertExpenseReportDocument } from "./document-policy";
 import { assertLogisticsPaymentContext } from "@/server/logistics/payment-context";
@@ -23,10 +23,19 @@ export type PreparedPayment = {
 };
 
 /** Вызывается под общей денежной блокировкой; сеть и уведомления выполняются после commit. */
-export async function createPaymentInTransaction(actor: DomainActor, input: PaymentInput,
-  prepared: PreparedPayment, tx: Prisma.TransactionClient, context?: { movementId: string } | { logisticsAllocationId: string }) {
+type InternalPaymentContext = {movementId: string} | {logisticsAllocationId: string};
+type PaymentTransactionResult = {payment: Payment; eventId: string | null; repeated: boolean};
+export function createPaymentInTransaction(actor: DomainActor, input: PaymentInput, prepared: PreparedPayment,
+  tx: Prisma.TransactionClient): Promise<PaymentTransactionResult>;
+export function createPaymentInTransaction(actor: DomainActor, input: InternalPaymentInput, prepared: PreparedPayment,
+  tx: Prisma.TransactionClient, context: InternalPaymentContext): Promise<PaymentTransactionResult>;
+export async function createPaymentInTransaction(actor: DomainActor, input: PaymentInput | InternalPaymentInput,
+  prepared: PreparedPayment, tx: Prisma.TransactionClient, context?: InternalPaymentContext) {
   requireActorRoles(actor, FINANCE_ROLES);
-  const data = paymentSchema.parse(input);
+  if (context && (Object.keys(context).length !== 1 || !("movementId" in context || "logisticsAllocationId" in context) ||
+    typeof ("movementId" in context ? context.movementId : context.logisticsAllocationId) !== "string" ||
+    !("movementId" in context ? context.movementId : context.logisticsAllocationId))) throw Error("Некорректный внутренний контекст платежа");
+  const data: InternalPaymentInput & {clientMutationId?: string} = context ? paymentDetailsSchema.parse(input) : paymentSchema.parse(input);
   const previous = await readPaymentReceipt(actor, data, tx);
   if (previous) return { payment: previous, eventId: null, repeated: true as const };
   const logisticsAllocationId = context && "logisticsAllocationId" in context

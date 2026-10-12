@@ -16,10 +16,16 @@ import { createPaymentCore } from "./core";
 // (source "web"), вся логика платежа и проверка FINANCE_ROLES — в ядре
 // (переиспользуется telegram-ботом, source "telegram").
 
+export async function getPaymentActorId(): Promise<{ok: true; actorId: string} | {ok: false; error: string}> {
+  try {const session = await requireFinance(); return {ok: true, actorId: session.user.id};}
+  catch {return {ok: false, error: "Не удалось подтвердить учётную запись — обновите страницу"};}
+}
 export async function addPayment(
-  input: Parameters<typeof createPaymentCore>[1],
+  input: Parameters<typeof createPaymentCore>[1], expectedActorId: string,
 ): Promise<PaymentMutationResult> {
   const session = await requireFinance();
+  if (!expectedActorId || expectedActorId !== session.user.id) return {ok: false, outcome: "ROLLED_BACK", kind: "actor-changed", clientMutationId: input.clientMutationId,
+    error: "Учётная запись изменилась — обновите страницу"};
   return createPaymentCore(
     {
       id: session.user.id,

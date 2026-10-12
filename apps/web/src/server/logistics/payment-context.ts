@@ -1,11 +1,11 @@
 import { Prisma } from "@prisma/client";
 import type { DomainActor } from "@/server/actor";
-import type { PaymentData } from "@/server/payments/contracts";
+import type { PaymentDetails } from "@/server/payments/contracts";
 import type { PreparedPayment } from "@/server/payments/transaction";
 import { requireLogisticsActor } from "./core";
 
 /** Только сохранённая доля текущего проведения. Публичный PaymentInput не содержит этот контекст. */
-export async function assertLogisticsPaymentContext(actor: DomainActor, data: PaymentData, prepared: PreparedPayment,
+export async function assertLogisticsPaymentContext(actor: DomainActor, data: PaymentDetails & {clientMutationId?: string}, prepared: PreparedPayment,
   tx: Prisma.TransactionClient, allocationId: string) {
   await requireLogisticsActor(actor.id, tx);
   const allocation = await tx.logisticsPostingAllocation.findUnique({ where: { id: allocationId }, include: {
