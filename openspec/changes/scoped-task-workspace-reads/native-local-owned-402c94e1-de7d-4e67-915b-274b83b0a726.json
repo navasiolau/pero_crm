@@ -1,0 +1,25 @@
+{
+  "runId": "402c94e1-de7d-4e67-915b-274b83b0a726",
+  "mode": "OWNED_ROLLBACK",
+  "ok": false,
+  "failure": "TASK147_NATIVE_HOLD",
+  "diagnostic": {
+    "phase": "MATRIX",
+    "errorName": "AssertionError",
+    "prismaCode": null,
+    "sqlState": null,
+    "assertionLabel": "NATIVE_SCOPE_OR_ACL_MISMATCH",
+    "beforeDigest": "6f82f00e5ddec0fdf0daf766913e8c387724752ead4e0a9d23d958a5880c3671",
+    "afterDigest": "6f82f00e5ddec0fdf0daf766913e8c387724752ead4e0a9d23d958a5880c3671",
+    "originalsMatch": true,
+    "sourceMatch": true,
+    "rollbackVerified": true,
+    "ownedRowsAfter": 0,
+    "foreignCreated": 10000,
+    "matrixCasesDone": 17,
+    "outbound": 0
+  },
+  "noReplay": true,
+  "clientsDisconnected": true,
+  "fetchRestored": true
+}

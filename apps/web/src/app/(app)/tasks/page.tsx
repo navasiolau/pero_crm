@@ -24,7 +24,7 @@ export default async function TasksPage() {
 
   const [tasks, workers, view] = await Promise.all([
     prisma.task.findMany({
-      where: await taskWorkspaceWhere(actor),
+      where: await taskWorkspaceWhere(actor,{tasks:{}}),
       include: taskDetailsIncludeFor(actor),
       orderBy: [{ status: "asc" }, { dueAt: "asc" }, { createdAt: "desc" }],
       take: 300,

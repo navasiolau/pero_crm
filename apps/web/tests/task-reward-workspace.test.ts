@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';import {test} from 'node:test';
 import {taskReward,taskWorkspaceBindings,taskWorkspaceEligibility} from '../src/server/tasks/workspace-contract';
-import {matches,type FixtureRow} from './helpers/visibility-fixture';
+import {matches,queryRows,type FixtureRow} from './helpers/visibility-fixture';
 import type {PrismaClient} from '@prisma/client';
 test('zero and exact allocated Work amount remain known',()=>{
   assert.deepEqual(taskReward({quantity:'2',executorShare:'1'},'0','BYN'),{rewardAmount:'0.00',rewardCurrency:'BYN',rewardSource:'WORK_SNAPSHOT'});
@@ -26,11 +26,16 @@ test('frozen amount never waives a real live Work Product binding',()=>{
   for(const work of [{...row.work as FixtureRow,productId:null},{...row.work as FixtureRow,product:null},{...row.work as FixtureRow,product:{...product,deletedAt:new Date(0)}},{...row.work as FixtureRow,project:{deletedAt:new Date(0)}}])assert.equal(matches({...row,work},taskWorkspaceBindings as FixtureRow),false);
   assert.equal(row.shareAmount,'17.89');
 });
-test('eligibility join binds both task/work coordinates and an empty result remains an explicit deny',async()=>{
-  let sql='',parameters:unknown[]=[];
-  const db={$queryRaw:async(strings:TemplateStringsArray,...args:unknown[])=>{sql=strings.join('?');parameters=args;return[];}} as unknown as Pick<PrismaClient,'$queryRaw'>;
+test('coordinate eligibility binds task/work/product without changing historical facts; an empty area denies',async()=>{
+  const project:FixtureRow={id:'project',deletedAt:null};
+  const product:FixtureRow={id:'product',projectId:'project',project,deletedAt:null,tasks:[]};
+  const work:FixtureRow={id:'work',projectId:'project',productId:'product',project,product,priceSnapshot:'0'};
+  const task:FixtureRow={id:'task',projectId:'project',productId:'product',workId:'work',assigneeId:'user',work,product,project,allocationGroupId:'old',shareAmount:'17.89'};
+  product.tasks=[task];
+  const db={product:{findMany:async(args:Parameters<typeof queryRows>[1])=>queryRows([product],args)}} as unknown as Pick<PrismaClient,'product'>;
   const result=await taskWorkspaceEligibility(db,{projectId:'project',productId:'product'});
-  assert.match(sql,/w\."projectId"=t\."projectId"/);assert.match(sql,/w\."productId"=t\."productId"/);assert.match(sql,/p\."deletedAt" IS NULL/);assert.match(sql,/j\."deletedAt" IS NULL/);
-  assert.deepEqual(parameters,['project','project','product','product']);
-  assert.deepEqual((result.AND as object[])[1],{id:{in:[]}});
+  assert.equal(matches(task,result as FixtureRow),true);
+  for(const changed of [{...task,projectId:'elsewhere'},{...task,productId:'elsewhere'},{...task,work:{...work,projectId:'elsewhere'}},{...task,work:{...work,productId:'elsewhere'}},{...task,product:{...product,projectId:'elsewhere'}}])assert.equal(matches(changed,result as FixtureRow),false);
+  assert.equal(task.shareAmount,'17.89');assert.equal(work.priceSnapshot,'0');
+  const absent=await taskWorkspaceEligibility(db,{projectId:'absent'});assert.equal(matches(task,absent as FixtureRow),false);
 });

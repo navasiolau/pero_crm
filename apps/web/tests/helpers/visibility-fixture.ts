@@ -1,6 +1,6 @@
 /** A small relational fixture adapter: never opens a socket or writes a database. */
 export type FixtureRow = Record<string, unknown>;
-type Query = { where?: FixtureRow; select?: FixtureRow; include?: FixtureRow; skip?: number; take?: number; orderBy?: unknown; _sum?: FixtureRow };
+type Query = { where?: FixtureRow; select?: FixtureRow; include?: FixtureRow; skip?: number; take?: number; orderBy?: unknown; _sum?: FixtureRow; by?: string[]; _count?: FixtureRow | boolean };
 const object = (value: unknown): value is FixtureRow => typeof value === "object" && value !== null && !Array.isArray(value) && !(value instanceof Date);
 
 export function matches(row: FixtureRow | null, where: FixtureRow = {}): boolean {
@@ -11,12 +11,14 @@ export function matches(row: FixtureRow | null, where: FixtureRow = {}): boolean
     if (key === "OR") return (condition as FixtureRow[]).some((part) => matches(row, part));
     if (key === "NOT") return !matches(row, condition as FixtureRow);
     const value = key === "deletedAt" && row[key] === undefined ? null : row[key];
+    if (condition instanceof Date) return value instanceof Date && value.getTime() === condition.getTime();
     if (!object(condition)) return value === condition;
     if ("in" in condition) return (condition.in as unknown[]).includes(value);
     if ("notIn" in condition) return !(condition.notIn as unknown[]).includes(value);
     if ("not" in condition) return value !== condition.not;
     if ("is" in condition) return condition.is === null ? value === null : matches(value as FixtureRow | null, condition.is as FixtureRow);
-    if ("lt" in condition) return (value as string | number) < (condition.lt as string | number);
+    if ("lt" in condition) return value != null && (value as string | number) < (condition.lt as string | number);
+    if ("lte" in condition) return value != null && (value as string | number) <= (condition.lte as string | number);
     if ("contains" in condition) {
       const text = String(value ?? "");
       return condition.mode === "insensitive"
@@ -56,9 +58,9 @@ export function queryRows(rows: FixtureRow[], query: Query = {}) {
         const nested = compare(left[key] as FixtureRow, right[key] as FixtureRow, direction);
         if (nested) return nested;
       } else {
-        const a = left[key] as string | number | null;
-        const b = right[key] as string | number | null;
-        if (a === b) continue;
+        const a = left[key] as string | number | Date | null;
+        const b = right[key] as string | number | Date | null;
+        if (a === b || a instanceof Date && b instanceof Date && a.getTime() === b.getTime()) continue;
         if (a === null) return 1;
         if (b === null) return -1;
         return (a < b ? -1 : 1) * ((object(direction) ? direction.sort : direction) === "desc" ? -1 : 1);
@@ -81,7 +83,19 @@ export function fixtureModel(rows: FixtureRow[]) {
     findMany: async (query: Query = {}) => queryRows(rows, query),
     findFirst: async (query: Query = {}) => queryRows(rows, { ...query, take: 1 })[0] ?? null,
     count: async (query: Query = {}) => rows.filter((row) => matches(row, query.where)).length,
-    groupBy: async () => [],
+    groupBy: async (query: Query = {}) => {
+      if (!query.by?.length) return [];
+      const groups = new Map<string, FixtureRow[]>();
+      for (const row of rows.filter((item) => matches(item, query.where))) {
+        const key = JSON.stringify(query.by.map((field) => row[field]));
+        const group = groups.get(key) ?? []; group.push(row); groups.set(key, group);
+      }
+      return [...groups.values()].map((group) => ({
+        ...Object.fromEntries(query.by!.map((field) => [field, group[0][field]])),
+        ...(query._count ? { _count: query._count === true ? group.length : Object.fromEntries(Object.keys(query._count).map((field) => [field, field === "_all" ? group.length : group.filter((row) => row[field] != null).length])) } : {}),
+        ...(query._sum ? { _sum: Object.fromEntries(Object.keys(query._sum).map((field) => [field, group.reduce((sum, row) => sum + Number(row[field] ?? 0), 0)])) } : {}),
+      }));
+    },
     aggregate: async (query: Query = {}) => ({ _sum: Object.fromEntries(Object.keys(query._sum ?? {}).map((field) => [
       field, rows.filter((row) => matches(row, query.where)).reduce((sum, row) => sum + Number(row[field] ?? 0), 0),
     ])) }),

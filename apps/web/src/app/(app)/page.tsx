@@ -31,10 +31,11 @@ export default async function DashboardPage() {
   const todayEnd = new Date();
   todayEnd.setHours(23, 59, 59, 999);
 
+  const taskPredicate={...liveChildWhere,status:{not:"DONE" as const},dueAt:{lte:todayEnd}};
   const [inWork, tasksToday, activeUsers, recent] = await Promise.all([
     prisma.project.count({ where: { ...liveProjectWhere,stage: "IN_WORK" } }),
     prisma.task.count({
-      where: { AND:[liveChildWhere,await taskWorkspaceEligibility(prisma)],status: { not: "DONE" }, dueAt: { lte: todayEnd } },
+      where: await taskWorkspaceEligibility(prisma,{tasks:taskPredicate}),
     }),
     prisma.user.count({ where: { active: true } }),
     prisma.project.findMany({
