@@ -1,5 +1,5 @@
 export type PostCommitEffect = { kind: "dispatch" | "person" | "org" | "payroll" | "cache"; run: () => unknown | Promise<unknown> };
-const OPERATIONS = ["task-status", "payment-create", "product-cache", "product-update", "product-status", "work-create", "work-update", "work-delete", "material-norm-create", "material-norm-update", "material-norm-delete", "stock-movement", "warehouse-cache"] as const;
+const OPERATIONS = ["task-status", "task-create", "payment-create", "product-cache", "product-update", "product-status", "work-create", "work-update", "work-delete", "material-norm-create", "material-norm-update", "material-norm-delete", "stock-movement", "warehouse-cache"] as const;
 export type PostCommitOperation = typeof OPERATIONS[number];
 type Diagnostic = { code: "POST_COMMIT_EFFECT_FAILED"; operation: string; resultId: string; effect: PostCommitEffect["kind"] };
 const diagnose = (entry: Diagnostic) => console.error("[crm.post-commit]", entry);

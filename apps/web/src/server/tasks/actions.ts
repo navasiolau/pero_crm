@@ -6,6 +6,9 @@ import {liveProductWhere,liveProjectWhere} from "@/server/access/live-entities";
 import { revalidatePath } from "next/cache";
 import { deliverPostCommit } from "@/server/operations/post-commit";
 import type { TaskStatusContext, TaskStatusAck } from "./status-receipts";
+import { confirmMutation } from "@/server/operations/confirmation";
+import { readTaskCreateReceipt, recordTaskCreateReceipt, taskCreateFingerprint, TaskCreateRequestError, type TaskCreateAck } from "./creation-receipts";
+import type { DomainActor } from "@/server/actor";
 import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 
@@ -26,6 +29,8 @@ import { engineeringRecipientError, taskRecipientError } from "./share-policy";
 import { bumpEngineeringPoolRevision } from "@/server/product-stage-pay/core";
 
 const createSchema = z.object({
+  clientMutationId: z.uuid().transform(value => value.toLowerCase()),
+  expectedActorId: z.string().min(1).max(160),
   projectId: z.string(),
   productId: z.string().optional(), // изделие проекта (необязательно)
   title: z.string().min(1, "Укажите название задачи"),
@@ -41,6 +46,9 @@ const createSchema = z.object({
   dependencyIds: z.array(z.string()).default([]),
 }).strict().superRefine((data,ctx)=>{
   for(const key of ['productId','workId','assigneeId'] as const)if(!data[key]?.trim())ctx.addIssue({code:'custom',path:[key],message:'Выберите изделие, работу и одного исполнителя'});
+  if (!Number.isFinite(new Date(data.dueAt).getTime())) ctx.addIssue({code:'custom',path:['dueAt'],message:'Проверьте срок задачи'});
+  try { if (data.quantity !== undefined) quantityAtoms(data.quantity); }
+  catch { ctx.addIssue({code:'custom',path:['quantity'],message:'Количество должно содержать не больше двух знаков после запятой'}); }
 });
 
 async function requireUser() {
@@ -99,17 +107,35 @@ async function estimateFromHistory(tx: Prisma.TransactionClient, type: string): 
 // Создание задачи — админ/директор/менеджер (§4).
 export async function createTask(
   input: z.input<typeof createSchema>,
-): Promise<{ ok: boolean; error?: string }> {
-  const session = await requireUser();
-  if (!hasAnyRole(session.user.roles, MANAGER_ROLES)) {
-    throw new Error("Недостаточно прав");
-  }
+): Promise<TaskCreateAck> {
+  const recognizedId = z.uuid().safeParse(input?.clientMutationId);
+  const clientMutationId = recognizedId.success ? recognizedId.data.toLowerCase() : undefined;
+  const refuse = (error: string, kind: Extract<TaskCreateAck, {ok:false}>["kind"], outcome: "ROLLED_BACK" | "UNKNOWN" = "ROLLED_BACK",
+    intentResolution: "attempt-only" | "verified-absent" = "attempt-only"): TaskCreateAck =>
+    ({ ok: false, error, kind, outcome, retrySafe: outcome === "UNKNOWN", clientMutationId, intentResolution });
   const parsed = createSchema.safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: parsed.error.issues[0]?.message ?? "Ошибка данных" };
+    return refuse(parsed.error.issues[0]?.message ?? "Ошибка данных", "invalid-request");
   }
   const data = parsed.data;
-  const mutation = await withTaskTransaction(async (tx) => {
+  let session: Awaited<ReturnType<typeof requireUser>>;
+  try { session = await requireUser(); } catch { return refuse("Обновите страницу и войдите в CRM", "forbidden"); }
+  if (data.expectedActorId !== session.user.id) return refuse("Учётная запись изменилась — обновите страницу", "actor-changed");
+  if (!hasAnyRole(session.user.roles, MANAGER_ROLES)) return refuse("Недостаточно прав", "forbidden");
+  const actor: DomainActor = { id: session.user.id, name: session.user.name ?? "", roles: session.user.roles, source: "web" };
+  // Fingerprint закрепляет исходный запрос, а не вычисленный остаток или оценку из истории.
+  taskCreateFingerprint(actor.id, data);
+  let absenceVerified = false;
+  async function currentActor(tx: Prisma.TransactionClient) {
+    const user = await tx.user.findUnique({ where: { id: actor.id }, select: { id: true, active: true, roles: true } });
+    if (!user?.active || !hasAnyRole(user.roles, MANAGER_ROLES)) throw new TaskCreateRequestError("Недостаточно прав", "forbidden");
+    return user;
+  }
+  const outcome = await confirmMutation(withTaskTransaction, async (tx) => {
+  const user = await currentActor(tx);
+  const replay = await readTaskCreateReceipt(actor, data, tx);
+  if (replay) return { ok: true as const, ack: replay, eventId: null, notification: null };
+  absenceVerified = true;
   const project = await tx.project.findUnique({
     where: {...liveProjectWhere, id: data.projectId },
     select: { id: true, number: true, currency: true },
@@ -118,7 +144,7 @@ export async function createTask(
 
   // Изделие должно принадлежать проекту задачи
   const product = data.productId ? await tx.product.findFirst({
-      where: {...liveProductWhere, id: data.productId, projectId: data.projectId, AND: [productVisibilityWhere(session.user)] },
+      where: {...liveProductWhere, id: data.productId, projectId: data.projectId, AND: [productVisibilityWhere(user)] },
       select: { id: true, engineerId: true, status: true },
     }) : null;
   if (data.productId && !product) return { ok: false as const, error: "Изделие не найдено в этом проекте" };
@@ -171,38 +197,46 @@ export async function createTask(
       },
     },
   });
-  return { ok: true as const, task, project };
-  });
-  if (!mutation.ok) return mutation;
-  const { task, project } = mutation;
-
-  await writeChangeLog({
+  await tx.changeLog.create({ data: {
     actorType: "user",
-    actorId: session.user.id,
-    actorName: session.user.name ?? undefined,
+    actorId: actor.id,
+    actorName: actor.name,
+    source: "web",
     entity: "task",
     entityId: task.id,
     action: "create",
     newValue: { title: task.title, project: project.number },
+  } });
+  const event = await tx.domainEvent.create({ data: { type: "task.assigned", actor: actor.id,
+    payload: { taskId: task.id, projectId: project.id, assigneeId: task.assigneeId } } });
+  await recordTaskCreateReceipt(actor, data, task.id, tx);
+  return { ok: true as const, ack: { ok: true as const, outcome: "COMMITTED" as const, resultId: task.id, clientMutationId: data.clientMutationId },
+    eventId: event.id, notification: { userId: task.assigneeId!, title: task.title, projectNumber: project.number } };
+  }, async tx => {
+    await currentActor(tx);
+    const ack = await readTaskCreateReceipt(actor, data, tx);
+    if (!ack) { absenceVerified = true; return null; }
+    return { ok: true as const, ack, eventId: null, notification: null };
   });
-  if (task.assigneeId) {
-    await emitDomainEvent(
-      "task.assigned",
-      { taskId: task.id, projectId: project.id, assigneeId: task.assigneeId },
-      session.user.id,
-    );
-    await notifyPerson({
-      userId: task.assigneeId,
-      type: "task.assigned",
-      title: `Вам назначена задача: ${task.title}`,
-      body: `Проект ${project.number}`,
-      link: "/my",
-    });
+  if (outcome.outcome !== "COMMITTED") {
+    const error = outcome.error;
+    return refuse(error instanceof TaskCreateRequestError ? error.message : outcome.outcome === "UNKNOWN"
+      ? "Ответ не подтверждён. Проверьте результат тем же запросом." : "Назначение не сохранено. Повторите запрос.",
+      error instanceof TaskCreateRequestError ? error.kind : "unavailable", outcome.outcome,
+      outcome.outcome === "ROLLED_BACK" && absenceVerified ? "verified-absent" : "attempt-only");
   }
-  revalidatePath(`/projects/${data.projectId}`);
-  await revalidateProductPaths(data.productId);
-  revalidatePath("/my");
-  return { ok: true };
+  const mutation = outcome.value;
+  if (!mutation.ok) return refuse(mutation.error, "rejected", "ROLLED_BACK", "verified-absent");
+  const { eventId, notification } = mutation;
+  await deliverPostCommit("task-create", mutation.ack.resultId, [
+    ...(eventId ? [{ kind: "dispatch" as const, run: () => dispatchEvent(eventId) }] : []),
+    ...(notification ? [{ kind: "person" as const, run: () => notifyPerson({ userId: notification.userId, type: "task.assigned",
+      title: `Вам назначена задача: ${notification.title}`, body: `Проект ${notification.projectNumber}`, link: "/my" }) }] : []),
+    { kind: "cache", run: () => revalidatePath(`/projects/${data.projectId}`) },
+    { kind: "cache", run: () => revalidateProductPaths(data.productId) },
+    { kind: "cache", run: () => revalidatePath("/my") },
+  ]);
+  return mutation.ack;
 }
 
 const updateSchema = z.object({
