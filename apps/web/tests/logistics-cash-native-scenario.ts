@@ -46,14 +46,14 @@ export async function runLogisticsCashAcceptance(tx: Prisma.TransactionClient) {
   const article = await tx.expenseArticle.create({ data: { id: randomUUID(), code: maxCode + 1, name: "Логистика", comment: marker } });
   const beforeFunding = await readOrgBalance(tx, "1.000000");
   const funding = Prisma.Decimal.max(5000, beforeFunding.negated().plus(5000)).toNumber();
-  const income = { direction: "INCOME" as const, amount: funding, currency: "BYN", cashAccountId: account.id, paidAt: "2026-10-10" };
+  const income = { clientMutationId: "00000134-0000-4000-8000-000000000106", direction: "INCOME" as const, amount: funding, currency: "BYN", cashAccountId: account.id, paidAt: "2026-10-10" };
   await transaction(async current => createPaymentInTransaction(actor, income, await preparePayment(income, current), current));
   const report = await tx.financeDocument.create({ data: { clientMutationId: randomUUID(), requestFingerprint: marker, uploadedById: actorId,
     fileName: "qa124-report.pdf", mimeType: "application/pdf", size: 20, contentHash: marker, storageKey: `qa124/${marker}/report`, storageMode: "local", state: "READY", readyAt: new Date() } });
-  const other = { direction: "EXPENSE" as const, projectId: a.projectId, amount: 50, currency: "BYN", cashAccountId: account.id,
+  const other = { clientMutationId: "00000134-0000-4000-8000-000000000107", direction: "EXPENSE" as const, projectId: a.projectId, amount: 50, currency: "BYN", cashAccountId: account.id,
     expenseArticleId: article.id, reportDocumentId: report.id, paidAt: "2026-10-10" };
   await transaction(async current => createPaymentInTransaction(actor, other, await preparePayment(other, current), current));
-  await assert.rejects(transaction(async current => createPaymentInTransaction(actor, { ...other, reportDocumentId: undefined }, await preparePayment(other, current), current)), /отчетный документ/);
+  await assert.rejects(transaction(async current => createPaymentInTransaction(actor, { ...other, clientMutationId: "00000134-0000-4000-8000-000000000108", reportDocumentId: undefined }, await preparePayment(other, current), current)), /отчетный документ/);
   await assert.rejects(preparePayment({ ...other, expenseArticleId: undefined }, tx), /статью расхода/);
   const manifest = { date: "2026-10-10", comment: marker,
     shares: [{ projectId: a.projectId, percentBps: 4000 }, { projectId: b.projectId, percentBps: 6000 }],
