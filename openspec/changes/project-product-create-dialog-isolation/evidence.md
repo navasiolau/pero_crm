@@ -42,3 +42,11 @@ Closed/open1440×900/390×844/360×800 →6matching pairs: final WHOLE decodedRG
 No DB/full Next/staging create исполнены этим компонентным harness; memory action не заменяет серверную/staging приёмку. Independent review, atomiccommit, root normalstaging integration/CI/image/health иactualdesktop/mobile scenario ещёPENDING. Main/production запрещены.
 
 По прямому решению владельца141 скорость оценивается на доступномПК: iMac не проверяется, его отсутствие не блокирует; specific hardwarefix/driver cause не заявляются. Итоговые latency/longtasks measurements141 после143/144/146 отдельно. SAFETY-RULES прочитан; STOP приguard mismatch, restic/dumps/seed/reset/newDB не использовались.
+
+## Integration regression correction
+
+CI d339ce56 (run38248941946/notok1910) failed ONLY compiler observer bookkeeping: transitive inline-fields144 registry made observedfiles3 instead of2. The form/application was not executed at failure. Cleanbugfix143 ordinaryFFupdated from48c5b88 toorigin/staging d339ce56a66c5831753423b492521a3797bb4f6d.
+
+One-line existingtest change scopes observer to literal ProductsTab+ProductKanbanCard modules. Strict2files/4authoredbodies and allrender/lifecycle/caret/visual assertions stayunchanged; otherregistrytargets remainfor their own tests. No production/controller/CSS edits.
+
+AffecteddefaultactualReact/Chromium command →PASS19.1s/8contracts/0unchangedcardrenders, ownbrowser/serverawaitedclosed. Receipt apps/web/test-results/create-product-dialog/1de1e21c-91a4-40d0-8262-57d9dc0a7b83/receipt.json SHAc28548f7e0fe6652ec38e72d57bdb6d7bcd8fc9c8824e8685491ebbe82a7295a. Scopedtestlint/diffcheckPASS; no repeatedprofiling/visualmatrix/DB/stage. Independentreview/commit/rootnormalintegrationpending. Prior source-bound before/after artifacts preserved.
