@@ -1,0 +1,209 @@
+# Design
+
+## Context
+
+См. proposal.md. Root-created clean bugfix/148@cd38cb745759becd58dbbad4d6d37afa03f0ab7a, D:/Projects/pero_crm_worktrees/improvements-148. AGENTS/README/plan148+preservation/SAFETY-RULES прочитаны; mismatchSTOP. Appsource/dependencies/install/DB/runtime0.
+
+Project page108 Promise.all(getProjectMaterials(product)) даёт N readers;315 materialsGroups[index].lines влияет на порядок UI. Scalar warehouse queries172: role resolve, needs+movements, warehouse positions/state, valuations, all costs. loadMovements125-169 имеет take500 и sort createdAt/idDESC до incomefilter в240; users/docs загружаются для каждого product. Existing direct-stock-native501case требует500 display, total501 и null when unknown cost. ACCOUNTANT-only фактически не OFFICE: комментарий page не расширяет grants. Memory истории WAC использована только как ориентир, действующие helpers проверены в source.
+
+## Goals / Non-Goals
+
+**Goals:** один bounded-query read mechanism scalar/batch, shared hydration/stock/users/documents и точный positional DTO.
+**Non-Goals:** новые роли/таблицы/writers/indexes, смена WAC/phase/history arithmetic, pagination/cap policy, UI/CSS/SDK/bot/API/финансовый рефакторинг, WIP135/139, install/runtime доGO.
+
+## Decisions
+
+1. New getProjectMaterialsBatch(productIds:readonly string[],actor,database=prisma):Promise<ProjectMaterialsData[]> возвращает positional groups; getProjectMaterials использует batch([id])[0]. Empty input[] немедленно[], без SQL/role side-effects как old Promise.all[]; nonempty сохраняет OFFICE gate. Dedup IDs только для query scopes, значения/порядок/duplicates результата не теряются.
+2. Resolve actor один раз. Needs/current-run valuations/full costs сохраняют productVisibilityWhere +exact requested IDs. Movement scope независимо повторяет прежний loadMovements predicate: active deletionIdNULL и для hasFullProjectVisibility(actor)&&canViewProductDrafts(actor.roles) без product live/visibility restriction; иначе OR(productIdNULL, product:productVisibilityWhere(actor)). Requested IDs ограничивают ranked scope и не заменяют ACL. Единого live authorized-product ID set для всех stages нет. ADMIN/DIRECTOR сохраняют active historical movements soft-deleted product/project, даже когда needs/cost/valuation пусты; остальные роли сохраняют прежний отказ/пустые scopes. Каждый input сохраняет позиционный exact old DTO/global warehouse-ready/money masks, не предполагается универсально empty DTO.
+3. Shared queries: needs include material/unit; warehouseReadPositions(union needs materials) один раз; active current-run expense valuations include movement.productId; all active EXPENSE/RETURN costs with productId; movement metadata +authors +loadMovementReportDocuments по общему набору. group by productId/materialId в memory, existing materialDebt/decimalAtoms/decimalText/averagePrice/summarizeProjectExpenses/role masks переиспользуются.
+4. Per-product latest500: scoped ranked ID query PostgreSQL row_number PARTITIONBYproductId ORDERcreatedAtDESC,idDESC on exact requested IDs под независимым existing movement grant, active deletionIdNULL. Hydrate эти IDs одним existing select/include shape и тем же movement predicate; не повторно фильтровать их через needs/cost live-product scope. Нет globaltake500/500*N и нет income exclusion before limit. Authors/docs общий loader. Existing listMovements scalar/public globalcap500 сохраняется; общий formatter переносится внутри queries без новых grants. SQL parameterized Prisma.sql/join, никаких interpolated untrusted identifiers/SQL.
+5. Row/return-source order и DTO не получают новых полей/сортировки. Needs сохраняет createdAtASC; equal-timestamp/unspecified-order native cases должны сравниваться с frozen old reader и visual baseline, не маскироваться unordered comparator. Valuation grouping сохраняет все active sources, including direct issue with zero needs; costs не выводятся из capped movement list.
+6. Independent reference: immutable pre-change accepted cd38 source/DTO capture на тех же fixtures до code, затем current scalar/batch1/5/20/duplicates/empty/crossproject сравниваются property/null/value/order-wise. Unit fixed reference DTO и query observer не используют new scalarwrapper как sole oracle. Native old/new в одинаковом readonly/rollback scope, captured original fingerprints; 501 history+INCOME+softdeleted+archived cases обязательны. Отдельный frozen-old ADMIN/DIRECTOR soft-deleted product и soft-deleted project сохраняет historical movements/report docs при пустых needs/costs/valuations; ENGINEER/PROCUREMENT на том же exact graph ничего не получают по прежнему predicate.
+7. No new deps/install до root slot. Native fixture/execution protocol отдельно: existing5433 only, exact owned graph или guarded readonly existing scope, no singleton warehouse phase/reset/import/dump/newDB. Native/currentphase proof не подменяется controlled mock phases. Stage code only accepted image/source closure; actual UI1440/390/360 и protected DB facts, writer side-effects0.
+
+## Proposed exact allowed paths
+
+- apps/web/src/server/warehouse/queries.ts: batch/scalar/read grouping/shared movement formatter only.
+- apps/web/src/app/(app)/projects/[id]/page.tsx: import+single batch loader, current groups/props/layout unchanged.
+- apps/web/tests/project-materials-batch.test.ts (new): reference DTO/querycount1/5/20 and role/current/legacy cases.
+- apps/web/tests/project-materials-batch-native.ts (new): inert import, guarded old/new SQL observer/preservation protocol, execution separate.
+- docs/PROJECT_MATERIALS_READ.md (new).
+- openspec/changes/batch-project-materials/**: required artifacts/evidence.
+
+Existing product page/movement choices/contracts/accounting/report-documents/roles/visibility/schema/writers/source135139 remain unchanged unless reviewer concrete need and root scope addition. Existing direct-stock-native/deletion regressions may run targeted, not rewrite/drop assertions.
+
+## Risks / Trade-offs
+
+- [Global history cap starves another product] → partitioned500 IDs, complete costs separately,501+multiple fixtures.
+- [Mixed material IDs mix return sources/prices] → product-first grouping and exact native DTO.
+- [Prisma relation loading adds SQL] → actual query observer includes all domain hydration SQL;20<=1+2 bound fixed.
+- [Tie ordering/no explicit valuation order] → frozen reference exact comparator/real baseline; source findings resolve before acceptance, no automatic baseline update.
+- [Identity/phase changes during read] → same provided transaction when supplied; shared warehouse snapshot makes groups consistent, current helpers unchanged. Native current-phase facts prove that mode only.
+- [Too broad IN scopes] → server product visibility/active flags on every stage, empty inputs never global.
+
+## Migration Plan
+
+Нет migrations. Required OpenSpec/design/reviewerGO→rootRELEASE→RED actual reader/querycount→GREEN/reference→targeted/types/lint→independentreview→explicitcommitGO→rootnormalmerge/actualstaging. Application rollback compatible old reader/image, data rollback не нужен. Main/prod/restic forbidden.
+
+## Independent design correction: separate movement history grant
+
+Reviewer P2 принят по queries.ts131-132: loadMovements сознательно обходит productVisibilityWhere при full visibility +draft grant (ADMIN/DIRECTOR). Общий live-authorized IDs для batch нарушил бы существующую историю; design теперь имеет независимые movement и needs/cost/valuation scopes. listMovements глобальная политика/cap не меняется. Corrected planning only; source/install/DB0, strict revalidation после quiet window.
+
+## Review-only native query-count / preservation protocol
+
+**PROPOSED/NOT_RUN.** Нужны независимый protocol review, root window и exact approval. Source код runner ещё не создан; никаких подключений или fixture effects. Existing loopback5433/pero_crm/userpero/full CID bf45c761b5687e54bff1aafea82e8647925b5b425d6743ebdc7d33f4824b0ed5, actual schema/warehouse phase проверяются перед выполнением. SAFETY-RULES/mismatch STOP; no restic/dumps/newDB/reset/seed/S3/Next/events/plugins invocation.
+
+1. Frozen old reference для unit и native хранить один раз в proposed tests/helpers/project-materials-reference.ts, извлечённый из cd38 queries physical SHA24a428a52659afa54596d5b03df9c5549f8be2ed7d0ffb3e67244da4b94a532d. Только explicit database argument, old formatter/reader, canonical неизменённые grants/Decimal/WAC helpers. Это additional scope request, не разрешение писать helper доrootGO. Existing unit oracle из test переносится, assertions сохраняются.
+2. Native entry tests/project-materials-batch-native.ts inert-on-import/explicit authorized run. Private memory launcher reuse existingLocalCrmDatabaseUrl и approved CID; никаких env-file изменений/копирования/секретов в stdout. Physical source/ref/helper/schema/lock/entry pins +actual Node/Prisma versions связываются с fresh runId/approval.
+3. До первого fixture SQL durable PRE wx/fsync/readback: все owned IDs/names, expected row cardinalities/types/scale/timestamps, protected original hashes, exact local target и current warehouse state/run fingerprint. Root independently checks quiescence; imports не стартуют runtime/worker/consumer.
+4. Предпочтительно один rollback-only REPEATABLE READ transaction на существующей БД, fixture graph полностью uncommitted. Rollback — единственный normal cleanup; никаких committed fixtures/deleteMany/global state mutation. После отказа/UNKNOWN не повторять runner автоматически; root inspect exact IDs +transaction disconnect, preserve receipt.
+5. Owned graph: actor roles ADMIN/DIRECTOR/ENGINEER/PROCUREMENT/MANAGER+ACCOUNTANT, projects/products20 +dedicated soft-deleted product/project/DRAFT/foreign cases, own units/materials/needs/movements/valuations/balances. Exact expanded IDs/manifests нужен перед DBwrite GO. Borrowed current WarehouseAccountingRun/state только reading/FK, их не менять/удалять. Warehouse phase и historical price/issuedQty originals не менять.
+6. Main history501 EXPENSE плюс latest INCOME/RETURN и excluded deletionId case; второй продукт с собственной history. Two needs/materials одного изделия с equal createdAt обязателен, order сравнивается буквально с old snapshot. Partial return/source/direct issue/archived material/null cost beyond display cap. Current actual phase доказывает только себя; controlled unit legacy/VERIFYING не считается actual phase proof.
+7. В том же transaction frozen old иnew batch/scalar читают одинаковые fixtures/actor. Comparator strict DTO fields/nulls/value/array order; no sorting or automatic baseline acceptance. 1/5/20/duplicates/empty, live/deleted history scopes, Money/NoMoney/RoleUnion/ENGINEER PRODUCTION and ordinary foreign denial. Any unexplained difference FAIL→fix доacceptance.
+8. Actual PostgreSQL query events считают ВСЕ domain hydration statements, не только ORM invocations и не mocks. SQL/params/raw DTO приватны; published receipt counts/normalized query hashes/levels. Prepared fixture/auth/instrumentation excluded by fixed capture boundary; observer delivery synchronization проверяется. Frozen target count20<=count1+2 без posthoc exclusions.
+9. Original protected tables/row IDs/Decimal/relations and warehouse phase/run hash сравнить внутри tx после каждого scenario и послеrollback отдельным readonly observation. В transaction передrollback записываются controlled counts/reference/results; наружу только sanitized receipt/hashes. Exact own IDs0 и clients disconnected mandatory. No uncertain rollback success claim.
+10. Source/unit/type/lint REVIEW_READY отделены от actual-native/staging status. Root chooses current74/75 additive queue compatibility window explicitly; author не дописывает старые SQL/checksums/DDL. Stage native/browser1440/390/360/returns/read permissions — отдельный acceptedcandidate/sourceclosure proof.
+
+## Concrete native148 fixture manifest draft (schema75, review-only)
+
+ROOT latest local schema75 additive queue migration is known; native148 does not change schema. Run da24fd79-c99f-409a-a72b-4ce662dd19c1 is NEW/NOT_RUN. Proposed prefix qa148:da24fd79-c99f-409a-a72b-4ce662dd19c1:, all IDs deterministic suffixes. Exact source/native/fullclosure +known75 schema/context approval required; common next.config.ts/Dockerfile control strengthened bindings reused onlyafternewhelperpin review, no concurrentmutablecontrol. No signedPRE/approval created, no SQL.
+
+Source boundaries: own native entry +shared frozen reference, actualcompiled source/lock/schema/next.config/Dockerfile pins and complete dependency closure; sourcebeforeafter. Existing DB tuple fullCIDbf45…/5433/pero_crm/userpero. Root must independently prove no app/consumer/SQL clients and reserve shortexclusivewindow. No warehouse init/freeze/reset/seed/newDB/dumps/restic/S3/Next/events.
+
+Exact deterministic blueprint cardinalities:
+- User8 (root-approved refinement): suffix user-admin/user-director/user-engineer/user-procurement/user-manager/user-manager-accountant/user-foreign-engineer/user-accountant, respective roles ADMIN/DIRECTOR/ENGINEER/PROCUREMENT/MANAGER/MANAGER+ACCOUNTANT/ENGINEER/ACCOUNTANT. Emails qa148.<suffix>.<run>@invalid.local, passwordHash QA148_LOGIN_DISABLED; no telegram/session/notifications. Native actors берут реальные roles своих fixture-users, не подменяют их. Total owned graph625.
+- Client1 suffix client; project2 suffix project-main/project-deleted; proposednumbers2147148001/2147148002:numberInt equal, preflightcollisions0. Mainproject liveCONTRACT, deletedproject same+deletedAt fixedstamp. Allrelateonlyownclient/users.
+- Product25 suffix product-01..product-25. 01..20 live mainproject;21 softdeleted ownmain;22 live product underdeletedproject;23 ownengineer PRODUCTION;24 otherengineer DESIGN;25 ownengineer DRAFT. Numbers projectnumber+'.'+suffix; allIDs/numbers collisionchecked beforewrite.
+- MaterialUnit1 suffix unit, unique nameQA148-run. Material2 suffix material-a(archivedpurchasePrice9.99)/material-b(active12.34), ownunit, no globalunit borrow.
+- ProjectMaterial48: product01..19 and21..25 ×2materials; product20 directissuewithoutneeds. IDs need-Pxx-a/b, quantity/quantityPerUnit/issuedQty/comments explicit frozenvalues; rows samecreatedAt withinproduct for2materialtie. Allrequireprotected exactnativearrayorder, notunorderedcomparison.
+- StockMovement531: p01 expense-001..501 +return-heavy +latest-income +deleted-expense (504); p02..20 oneexpense each (19); return-p02 (1); p21..25 oneexpenseeach(5); globalincome-a/globalincome-b withproductNULL(2). AllIDs suffix explicit generatorranges, unique/deterministic; perproduct createdAt/idDESC ordering checked.
+- WarehouseMovementDeletion1 suffix deletion, ownadmin/rootdeleted-expense relation; movementdeletionId assignedonlyownedrow. No real deletion runner/audit invocation.
+- Valuation4 suffix valuation-heavy/valuation-p02/valuation-direct/valuation-deleted-product; ownexpense movements, ownactor, exactquarter/partialreturned quantities/unitCost/value/money/revision/clientMutationIDs/64hex fingerprint. AllclientMutationIDs fixed UUIDs recordedPREbeforewrite, notgeneratedlater.
+- WarehouseBalance2 ownmaterials only. Current phase/run borrowed READONLY from main state ifactualACTIVE/VERIFYING; otherwise owned runIdstring is allowed byschema (no WarehouseRunFK) and ignored bylegacyreader. State/mainphase NEVER created ormodified; actuallegacy/inactive proof labelsitself, activeWAC onlyonrealstateACTIVE/VERIFYING.
+Expectedother writes/callbacks/seed/DDL0.
+
+OneRR rollback-only transaction: explicitdurablePRE wx/fsync/readback allrowIDs+newsource+currenttarget/phase+protected tablehashes beforeDBfixture writes; exactcurrentidentity/migration75/columnscontextguard. Allcollisionreads andbeforeprotectedFP beforefirstINSERT. Fixturewrites visibleonlyowntransaction; deliberate typed sentinel endsrollback evenPASS. Afterrollback independentreadonlyown0/protectedoriginals/state/run unchanged andallclientsdisconnect, no deleteMany cleanup. UNKNOWN recordsSTOP androotinspects no replay.
+
+Actualqueryobserver counts realPostgreSQL statements fromold/new reads includingrelationhydration,1/5/20 underownADMIN afterfixture/authsetup. NativeCode validatesobservationsynchronization andexclusions fixedbeforemeasurement; count20<=count1+2. SQLparams/DTO/privateactor IDs neverpublic, only counts/queryhashes/levels. Frozenreferencehelperf16991f9… singlecopy, fullsource lineagecd38 marker24a428a… unchanged.
+
+Matrix strict old/batch/scalar values+order/nulls:1/5/20; duplicates/empty[];25ACLcases;ADMIN/DIRECTORdeletedhistory vsENGINEER/PROCUREMENTdenial;MANAGERvsManager+ACCOUNTANTmasks; directissue/archived material/partialreturn/unknowncost outside500/latestINCOME/softdeletedmoves; nativeequal-timestampneeds andmovementidtie. Querymodel6PASS counts9/9/9+controlledties isnotactualSQL. Realphase maynotbeACTIVE: preserve/currentactualmode andownedrollbackvalidity do NOT requirechangingwarehouse singleton. Native/stage tasksstillpending.
+
+
+## CURRENT exact native148 payload SOURCE_PREPARE
+
+Pure builder теперь существует: apps/web/tests/project-materials-batch-native.ts. Он импортирует только node:crypto и erased Prisma/Role types, не app/client/launcher; нет footer, connect, SQL или network. Это ещё НЕ executable native runner/GO. Shared frozen reference остаётся одним helper f16991f9…; old lineage cd38/24a428a… не меняется.
+
+All rows/formulas/types/nonces находятся в одной функции native148FixtureManifest(readOnlyState). До SQL root отдельно проверяет fullCID/5433/pero_crm/userpero/schema75/migration ledger/context13 DomainEvent fields/no app-consumer-client и readonly warehouse main fingerprint. State не создаётся/не обновляется. ACTIVE/VERIFYING используют только observed runId; остальные approved actual modes используют собственный строковый legacy-read-run (без FK/state write), native evidence маркирует только фактический режим.
+
+Literal generation:
+- Fixed UTC 2026-10-11T00:00:00.000Z; every createdAt/updatedAt/deletedAt указан явно. at(offset) означает millisecond offset от этой даты. IDs только approved prefix+фиксированные ranges; nonce UUIDs deterministic run-owned hash, версия/variant нормализованы и все5 actual strings в payload ДО insert.
+- User8/Client1/Project2/Product25/MaterialUnit1/Material2/ProjectMaterial48/StockMovement531/WarehouseMovementDeletion1/WarehouseMovementValuation4/WarehouseBalance2 =625. No missing PK/default cuid/UUID генерируется при insert.
+- Product01 quantity4; остальные2. Engineer own01/02/23/25, foreign все прочие;23 PRODUCTION,25 DRAFT,21 soft-deleted,22 under deleted project. Assignments только новые own rows.
+- Needs a/b createdAt одинаковый внутри product at(index*100); p20 needs0. A quantities5/7/2, per-unit1.25/3.5/1, issued4/2/0; B quantities1.25/0.5, p01 per-unitNULL/issued1.2, прочие per-unit0.25/issued0. Fingerprints сохраняют точные Decimal scale и порядки.
+- Expense001..501 p01 createdAt at(index), qty1/unitPrice1/total1 кроме001 unitPrice+totalNULL (unknown original cost outside displayed500),501 qty3/total3. Return-heavy qty2 at650; latest-INCOME qty7 at9999; deleted-expense qty999 at10000 excluded by own deletion. P02..25 expenses qty1 at(700+index). Return-p02 qty0.5 at702 — native createdAt tie проверяет idDESC. Global a income519.5 и b0.025 дают legacy stock2/0.025 без phase modification.
+- Valuation-heavy expense501 qty3/value3/money3/returned2/value2/money2; p02 qty1/value1/money1/returned0.5; directp20 и deleted-productp21 qty1/value1/money1/return0; unitCost1 во всех. Все sourceMovementIdNULL (expense source snapshots), actor own-admin/accountingRevision1..4; valuation/nonce/fingerprint/createdAt explicit.
+- Balances a qty2/value5/revision7, b qty0.025/value0.3085/revision1, только own material keys. Archived material-a purchasePrice9.99 не переписывается; actual current mode WAC2.5 и legacy price9.99 остаются old oracle semantics.
+- Cyclic deletion FK: PRE содержит FINAL movement deletionId plus exact initial insert exception deletionIdNULL для own deleted-expense. Затем own deletion row(rootMovementId exactowned) и ровно одно own movement patch. Никакие реальные deletion writer/audit/hooks не вызываются; protected original graph не меняется.
+
+Uniqueness/collision guards до первого write перечислены в payload: table PKs, emails, project/product numbers, unitname, compound productId+materialId, deletion root/nonce, valuation movement/nonce, balance materialId. READONLY actual collisions должны0; synthetic strings не считаются доказательством0 в БД.
+
+Native flow pending separate code/protocol review: durablePRE wx/fsync/readback содержит actual readonly state/protected full hashes, полный rows JSON+rowsHash/source/context/target/nonce IDs/insert exception. Затем одна RR rollback-only transaction создаёт exact graph, strict old/new/positional+500/fullcost/order/mask/native query events; callback typed sentinel заставляет rollback даже PASS. PASS возможен только known rollback ACK плюс отдельный readonly own0/fullprotectedFP/state same и disconnect. Falsy/unexpected throw не трактуется как successful sentinel. UNKNOWN сохраняет PRE/attempt и требует root observe, без rerun/deleteMany.
+
+One source-only capsule attempt6a66ce via pnpm exec tsx -e exited0, expected sanitized JSON отсутствовал: statusUNKNOWN, не count/runtime PASS; не повторён. Pure manifest source не имеет DB paths, SQL0. Native entry typing/actual catalog/query events/rollback/fixtures/browser/staging всё ещё NOT_RUN. Root independent review+once window обязательны.
+
+
+## Source-only capsule forensic and current pins
+
+Native manifest33b408360acb28ebbb1682ff7c5724f2e30b48c223dcd4d59770598d72f30db1; frozen shared referencef16991f9850dbed6f1fcfcf638a3cfd1a58273d6c951249c32dfef2226577cdc; queries46deb014a9b17e9fd54b345411b3bf50adb559caf773aeb7c152abf42c1e6606; pageb9422777842f982c6773f9ce79780b2aca7c50a6d3cf77c240941897cfcd6b00.
+
+Old6a66ce remains UNKNOWN/non-PASS. Readonly launcher inspection3ec00c/5d0df7: pnpm.ps1 forwards native args to Node/corepack. New forensic single-line sentinel f8fd99 printed148; two-line sentinel25b03a printed only14801, second14802 absent. This confirms multiline inline-e loss on this pnpm/tsx invocation, not a native DB target error. No old capsule replay.
+
+Root conditional GO allowed new explicit Node --import tsx --input-type=module invocation v2. Actual422195 exit0 printed complete sanitized JSON: User8/Client1/Project2/Product25/MaterialUnit1/Material2/ProjectMaterial48/StockMovement531/Deletion1/Valuation4/Balance2,total625,nonceCount5; template(null-state) rowsHash0ecd2c71a1280299e8fcf86f12d6fd43209a562de0c96fa6e2a1c421888a3fd1. This proves only pure generated payload cardinalities for that template; actual warehouse phase/source closure/schema/native/querycounts/rollback NOT_RUN.
+
+Native scopedlint28fe18 PASS0errors0warnings, OpenSpecstrictba1744 PASS, diffcheckPASS. Full native-entry typing awaits separately coordinated root slot, earlier33492 predates manifest file. Current readonly state will change parameterized runId/rowsHash; exact actual payload must be durably sealed before fixture writes after fresh guard. No DB/S3/Next/seed/restic/dump/staging effects.
+
+
+## Inert executable native148 runner SOURCE_PREPARE (SQL NOT_RUN)
+
+Root release permits current native entry source+approved625payload. Actual runner source698b4356b6afaaf7fecc16623b6b14389fb4f74e74edf47173a4ced04a4ec54e; unit/cold8 sourceeda54b0aafd86c8bc89f26ecfd6a972dadb270119468e93f2160ee39f50a8038. Pure-builder33b history above remains template-only. App read sources/ref/fixtures/grants unchanged.
+
+Command skeleton:
+node --import tsx <exact-current-native148.ts> --authorized-local-native --approval-file <root-owned-absolute-approval.json> --expected-file-sha <externally-pinned-approval-byteSHA>
+Only independent executable/source protocol review +fresh root once-SQL window allows this. No top-level Prisma client, Docker, DB callbacks or app imports. Missing auth/relative path guards execute before reading approval/initializing clients. ColdREDb5c8b5:6PASS2FAIL missing API →GREEN4354f9:8PASS0FAIL, existing6modelcases unchanged counts9/9/9. Current native+suite lint3daa3e PASS0errors0warnings. Full new-runner typing pending separate root slot;24301 covered earlier pure builder.
+
+Approval version1/kind native148-rollback/runId da24…/exactCIDbf45…/nodeVersion/sourceRoot/sourcePins+orderedJSsourceHash/entryHash/catalogHash/originalHash/warehouseHash/expectedFinished75/expectedOwned625/PRE-result-stop exactpaths. Required source controls include entry+frozenreferencef169/localhelper0b/queries/accounting/visibility/schema/tsconfig/Next config/Dockerfile/lock plus actual full transitive production/dependency closure, reviewed separately. Source arrays include realpath/physical checks; no stale sourcepoint/native PASS.
+
+Existing local helper is reused after approval/source checks, CID set/restored only currentprocess memory. It readonly-inspects exact Docker5433 mapping/databasepero_crm/userpero and keeps password onlymemory. URL guard exact127.0.0.1/5433/pero_crm/pero;connection_limit1. Prisma6.19.3 checked. Never env-file fallback/copy/logging. Native baseclient uses no extensions/business writer/TaskTransaction/events/storage. Imported unused application singleton disconnect capability is captured before query/reference imports and disconnected in finally; it is never used for fixture SQL.
+
+Fresh nativeCatalog proves currentdatabase/user/backendPID/no otherclient,75finished/0unresolved/latest20261011120000_domain_event_queue/checksumab60, exact13DomainEvent cols/new5types/nullability/budget/default/indexready/checkvalidated and externally approved catalog hash. Queue75 persists; no DDL/ledger rewrites. FulloriginalFP covers every public table on server: sorted full-row JSON MD5+count, outwardonly SHA of ordered tablehashes, freshownedprefix count0. Original rows/Decimals/relations/singletonstate retained. This is preservation metadata, not data dump.
+
+One REPEATABLE READ transaction/maxWait10s/timeout120s:
+- Recheck samebackendPID/catalog/quiescence and main warehouse hash; current observedphase readonly. Construct same approved625manifest(actualstate influences readonly valuationrun scope), allcollisionreads and originals before DML.
+- Durable PRE wx/fsync/readback before firstINSERT: full synthetic625rows/nonce/hash/insert exception/source-target-catalog/authoritative original hashes/minimal warehouse metadata+hash. Raw original beforePrices/protectedSnapshot are NOT archived.
+- Base createMany only exact own models, deletioncycle exactownpatch, totals625 and eachmodelcount matchmanifest, originals unchanged. Actors fetched from the actual own User.rows/roles after insertion; no caller role shadow. All callbacks/storage/seed0 by call path.
+- Public Prisma query events fenced by two exact own parameterized SELECT markers (capture boundary fixed beforedata). Marker-event delivery wait bounded10s; all observed intermediate domain SQL statements counted, relationhydration included. Actual1/5/20 count20<=count1+2. Raw SQL/params remain process-only, publishedDTO hashes/counts only.
+- Frozen old/scalar/batch strict value/null/array-order equality; role/money/engineering/deleted/draft/foreign/crossproject/duplicates/empty/cap-beforeincome/fullcostoutside500/archive/ties/direct/nullable. No sorting/baseline update. Actual warehouseReady only observedACTIVE; activeWac label onlyACTIVЕ/VERIFYING, no state initialization.
+- Callback finally always compares original hash/mainstate even when primary error is falsy. Successful matrix ends by a unique branded rollback sentinel; only identity-equal sentinel marks expected rollback, unexpected/falsy failures remain STOP.
+- Outer finally always observes exactown0/originalbeforehash/state/catalog/source again, disconnects both own and unused sourceclient, restores process env. Primary/secondary failure facts retained; uncertain rollback or postcheck producesSTOP/PREretained/no replay. Exact known rollback+fresh post0/FP+all disconnect required beforePASS. No deleteMany/broadcleanup.
+
+Concrete source/catalog/original/warehouse/operator pins still need independently reviewed full source closure and fresh readonly root preflight. Target SQL/realcurrentphase/querycount/finally/rollback/browser/staging remain NOT_RUN until actual separate approved run. Do not take model9/9/9,625template or current code as native proof.
+
+
+## CURRENT inert native source / meaningful actor-id typing fix
+
+Current native7ab6a7aa48d15bba0b8a94cd69681f44bca931d33961de2c87bdceb6477ee532; cold/model suite3b198bac15de7fcaae308d94b1b2d9158929f0db3e989a2d320746e4c8e5bf48. Frozenreferencef169/queries46de/pageb942 unchanged. Prior698b/33b source packets are historical. Stale native file header corrected to inertactualrunner, no top-levelctor/SQL.
+
+TSC57918 actualFAIL1 TS2322 optional UserCreateManyInput.id array atfresh own-role query. Root meaningful guard fixed typeofstring+exactownprefix beforeid-in; cast-only/role replacement not used. Added cold absent/foreign-ID refusal beforeanyDML, actualmanifest8valid IDs preserve values. Latest cold4580189PASS0FAIL, scopedlintbdbe1d0errors0warnings, coordinated fullwebTSC35650 exit0PASS078fa7/nooutput. Cold80a02e imports inert prior698b mainfalse/no newTCP/Process, DB/Docker0; current cold cases execute only auth/path/pure IDguards.
+
+Readonly generated-client3c761b: actualown .pnpm @prisma/client6.19.3→own .prisma/client, clientVersion6.19.3/engineVersionc2990dca591cba766e3b7ef5d9e8a84796e47ab7/engineTypelibrary/copyEngine true/query_engine-windows.dll.node21182976bytes. This worktree is not no-engine generatedstate. Nothing was constructed/replaced/regenerated to obtain this evidence. Actual constructor/SQL0. Fullruntimeclosure must include resolvedgenerated JS/schema/enginebinary/publicclient/runtime imports, not just require-generated config orsource schema hash.
+
+Actual native imports afterguards may create TWO Prisma objects: scoped baseclient (single SQLconnection_limit1) and idle application's default object for readerdefault signatures. Reader/oracle alwayspassedtx, defaultsource object neverused forSQL; bothdisconnect attempted inouterfinally. Objectcount is not SQLconnection count; actualpgpid/client observation required, source-onlytyping doesnotprovetheabsence ofliveconnections.
+
+Independent preliminary SOURCE_PROTOCOL_GO applies source/direction, notexecution. Rootactualcurrent75/catalog/originalalltableFP/mainstate/pins/approved625/freshwindow and reviewedruntimeclosure/operatorapproval stillrequired. Warehousemainstate not initialized/updated, stored PRE usesminimal originalstate metadata+SHA only, synthetic625rows fullyrecordedbeforewrite. Actualrealphase/events/querycount/RRrollback/postown0/FP/disconnect/browser/stage NOT_RUN.
+
+
+## CURRENT native148 primary/public target boundary verified statically
+
+Current native19da1c5426d7b9ee81f6a11a1cbf936ea25ac13336b618289747261f3e1818cd; cold/model59b9971159930798e303146a60104868e099e1925af3f14c4a0d41626b9f39c5. Appqueries46de/pageb942/frozenreff169/625literalpayload unchanged.
+Reviewer narrowP2 closed in source: nativeCatalog reads current_schema()/pg_is_in_recovery() and calls pure identity validator requiring public/primary(false) before ledger/DML and again insideRR. Wrong-schema/recovery cold denies before anyclient/insert. Latestcold64513810PASS0FAIL/scopedlint7e42550errors0warnings, latestfullweb61527 exit0PASS15eafd/nooutput. Prior35650/7ab is earlier source.
+
+Readonly native engine148593 actual21,182,976bytes SHA263946105f428384d2318dc3241b85b1c3dd98fbb1bfac62d3e81f513ab35897 in own generated .prisma/client. Generatedindex6.19.3/c299/library/copyEngine true describedabove; noconstructor/regeneration/engine replacement/SQL.
+Historical local75 catalogue provenance Root exactfile D:/Projects/pero_crm_v2/.playwright-mcp/application-improvements/native135-03825ccd-3a4f-48b4-84bd-663b82237817-ddl-observation.json SHA a3fc6eb5bdce96894395667ed4b9989cd5ad444230ce602771d11fa311002604,07:50:75/queueab60/13cols/index/check. Then135preparedown3, lateracceptedcleanupown0. This is NOT fresh148 schema/state/originalFP orstageproof. Root freshownexistinglocal qualification and full runtime/generatedengine closure stillpending; no ledger rewrite/alias/SQLreplay.
+
+Current source/protocol independent review required beforeexecuteapproval, fresh75/currentSchema/primary/no-otherSQLclients/mainphase/pre-625/body/finally/querymarkers/rollback/post0 proof stillNOT_RUN. Two constructedPrismaobjects vsoneSQLconnection explicit; neverinitialized warehousemainstate. Main/prod/infra/restic/dumps/newDB/seed untouched.
+
+## CURRENT source-only native closure derivation (compiler/native NOT_RUN)
+
+Root assigned ignored-only AST derivation scope, preserving current139ba8/e062 and all actual139 source receipts. New adapter D:/Projects/pero_crm_v2/.playwright-mcp/application-improvements/native148-source-derive.mjs is inert unless directly invoked with exactly --derive-reviewed-source. It reads accepted139collector ba8 physical bytes and its own source, uses the installed own public TypeScript AST to select declarations, and emits native148-source-closure-v1.mjs plus native148-source-derivation-v1.json in the same existing ignored parent with wx/fsync/readback. It does not invoke the emitted collector, app/Prisma modules, engine, Docker, HTTP or DB. Actual AST derivation/cold checks remain NOT_RUN while root142 quiet window is active.
+
+Twelve retained declarations must be source-byte identical: sha/slash/within/ordered/noRedirect/filePin/externalPin/publish/listPackageFiles/dependencyName/resolvePackage/sourceFamilyQueue. Audit records exact original AST offsets and original/derived body SHA256; any equality failure stops before a valid packet. Native patches are separate recorded declarations: generated namespace excluded from locked packageFamily interpretation; loader seeds tsx/TypeScript/@prisma/client (esbuild resolved through its declared tsx owner plus separate compiler seal); native constants/kinds/output/count; no RSS matrix parser; fullSnapshot includes explicit generated namespace. Existing350distinct families/30000physicalfiles/256MiB perfile/64KiB streamed hashes, canonical dedup, external builtin-only and before/after/unknown guards are preserved.
+
+Native minimum review16 pins include current19da entry/unit suite/single frozen reference/local URL helper/two changed production paths/accounting/visibility/schema and exact package/lock/workspace/TypeScript/Next/Docker controls. These are a review candidate, never the full runtime proof. The emitted source-only collector uses two public esbuild0.28.1 write:false/metafile captures and complete actual input package-family/declared dependency/optional/peer/loader inventory, with Node executable/external controls and public resolution links. No diagnostic output bundle is executed. Root source-build once/UUID/file seals/current source freeze and independent actual artifact review precede native execution.
+
+Generated .prisma/client is separately resolved from the actual public @prisma/client package using createRequire.resolve('.prisma/client/package.json'). It must be the exact canonical own sibling namespace, never a foreign alias or presumed locked family. Full namespace tree includes generated JS/declarations/package metadata/schema and query_engine-windows.dll.node (263946105f428384d2318dc3241b85b1c3dd98fbb1bfac62d3e81f513ab35897). Source schema0db52a715efadccabcfd45ef69c246bcb27dc4297ff38f9a4a45c9daefbb4aae and generated schemaccc664b63dce5510d4632ed3edca8ffdd5cbf4476fc079c0f353e70e00e186be remain independent physical pins. Read-only f693f2/e2ced0 observed byte/LF difference, dc8e7b ignore-all-space/blank-lines diff exited0 without differences: formatting difference qualified, never claimed byte equal. Generated package metadata name is schema-hash-derived, not a normal pnpm locked package name/version. Full context includes namespace resolution and metadata/schema/engine seals before/after, plus every generated file.
+
+Existing local target additive75/current public-primary/native625 one-RR rollback protocol is unchanged; generated/source reader schema74 can read the separately qualified additive queue75 bridge. Root independently verifies exact current75/catalog/history/original fingerprints/mainwarehouse state/window before native approval. A future167 migration/current schema change requires new exact qualification, never silently raising expectedFinished. Native19da/source+10cold+TSC61527 independent SOURCE_PROTOCOL_GO is not actual native closure/current SQL proof. No warehouse initialization, dumps/restic/storage/production/main changes.
+
+### AST source derivation v1 STOP / reconciled v2 source candidate
+
+Syntax7ae013 passed. Source-only AST derivation attempt610d8e stopped N148_DERIVE_OUTPUT_PARENT before publishDerived open(wx): a configured D:/ forward-slash parent was compared directly to Node canonical Windows backslashes. This was a metadata path guard failure, not a native/app/compiler run. No retry occurred.
+
+Readonly6150f1 observed exact parent D:/Projects/pero_crm_v2/.playwright-mcp/application-improvements with reparse=false and both native148-source-closure-v1.mjs/native148-source-derivation-v1.json absent. Original source adapter edf60b437106c7195453228743230fc955f9ced2ecd2cbd226bae14921a750ac and tool STOP are preserved.
+
+Versioned candidate native148-source-derive-v2.mjs was saved02b646, SHA d1e6dd164e58c2aafe9e8def37619c8ca4612ddc3833fbedbb578a7c9c3d36f6: only path.resolve(target) before unchanged canonical/no-symlink checks and distinct v2 output/audit names. It is SOURCE_PREPARED_NOT_EXECUTED pending source-cold resource slot/independent review; old v1 is not overwritten or replayed. Actual AST audit/public compiler/full closure/Prisma constructor/SQL/RR/native/staging proof still NOT_RUN. Source139/RSS current bindings and native148entry19da unchanged.
+
+Native operator condition from Root139 early CLI STOP: direct Node --import tsx must run with cwd D:/Projects/pero_crm_worktrees/improvements-148/apps/web, where its declared pinned loader resolves. The native collector itself is pure mjs using explicit installed-owner resolution and needs no tsx preload. No global alias/install/copy is authorized; actual source/native operator still requires independent reviewed closure and Root window.
+
+### Source-derived collector actual packet and Root-only proposed build
+
+Root-approved v2 source-only AST derivation f44ca0 completed exit0: collector native148-source-closure-v2.mjs SHA b3ea39daf2b2a0d595c7921947bd7cf651e6cd4200caac5fa9dc677f0f5d6189; audit native148-source-derivation-v2.json SHA985dba3ce7263df0b3fefb1a50f59fa58422ded027b2d9ae5c47350c80ad3436; ordered16review7f9b2dd852ed8eee341240a5c7405b2af1888a70a1749dca5494db605d41ee04. Twelve declaration bodies byteequal with source-offset/SHA audit; separate native/namespace patches recorded. Syntaxd7ea94/79a910 passed, inert38ce52 early4guards/350familydedup/351distinctreject/noRSSmatrix/TCPProcess[] passed. No compiler/Prisma/DB. Independent SOURCE_BUILD_PROTOCOL_GO confirmed that exact packet, never native execution.
+
+ProposedNOTAUTHORIZED source-build954eb725-28d2-4ee3-90d7-07531e1af3d9 saved903bb2 at D:/Projects/pero_crm_v2/.playwright-mcp/application-improvements/native148-source-ready-954eb725-28d2-4ee3-90d7-07531e1af3d9.json SHA5dfa0faa6f2f3e87b6521e4acb55b7c9620f5ccde10e64db073ea6689255f7c0. Exact16currentpins rechecked; parent apps/web/test-results absent and must be created only by Root after exactguard. Standalone mjs command --authorized-source-prepare --mode prepare --file <rootsealedJSON> --expected-file-sha <hash>; no tsx preload/no app evaluation. Current native19da remains frozen; Root freshonce compiler approval/fullclosureactual review pending. Later native engineenv override rejection and actual same-owned-process loadedDLL proof are separate source/runtime requirements; inventory263 alone is not loadedproof.
+
+## Current thin native entry — 12.10.2026
+
+SOURCE_REVIEW_GO6865cf received for unchanged2production paths. Actual native is prepared through existing-file export `runMaterialsBatchNative`, using shared `nativeAcceptanceBinding`/`nativeSnapshot`/`verifiedRollback` and existing625-row manifest/insert parts. No source-closure collector/registry/build or old455-line execution path is invoked. Fixture generation accepts a fresh UUID and owns11 exact tables; existing default UUID remains only for old inert validation compatibility. P1 stale needId closure was corrected locally; pure freshUUID625 PK/FK check passed without constructors/SQL.
+
+Current UPDATED_INERT_PROTOCOL_GO on byte68ac562237f0d22da049aa9a94d0d8e3ac91eed7231e8a46989f1ae291869916 and10-source digest83bfbb92f4b432b77cf8c1d86a506e80e1a846ce24189fe54ccf94ab5eea9d2e. Mode/source/target/run/expected-original guards precede constructor. One RR TX, actual SQL fences for1/5/20, strict oldDTO/scalar/role/deleted-history/empty/current-phase/cap checks; sentinel rollback and existing full-data+schema snapshot comparisons before/during-owned-excluded/after, actual11own-prefix counts0, sourcepost equality and awaited disconnect/fetch restore. Warehouse global state is observed and must remain unchanged; no initialization or writer actions.
+
+Execution remains NOT_RUN. Root must release136 local DB window, qualify fresh post-DDL original fingerprint and supply a separate ONE intent. Prior6f82/old schema76/oldsource closure approvals are historical and MUST NOT serve as a fresh baseline. Stage/browser/actual deployed revision acceptance remains separate.

@@ -1,0 +1,69 @@
+{
+  "ok": true,
+  "runId": "6bcf6c6d-c73a-40b1-83ba-0d4a373a3aeb",
+  "target": {
+    "target": "local",
+    "revision": "465a59d0709edabf4396a966bb53cd76868f7b86",
+    "containerId": "bf45c761b5687e54bff1aafea82e8647925b5b425d6743ebdc7d33f4824b0ed5",
+    "databaseName": "pero_crm",
+    "schema": "public",
+    "port": 5433
+  },
+  "sourceDigest": "84be5358106edaf862cf95f000a372f8ed440f0e4661d00ebdc538027bf6769d",
+  "mode": "OWNED_ROLLBACK",
+  "rolledBack": true,
+  "ownedRowsAfter": 0,
+  "originalDigest": "b373ec8ec1ab293abc175e1e2e89b9f99f84e4a331dfd22be2b39e0d62fee6d4",
+  "originalsEqual": true,
+  "outbound": 0,
+  "counts": [
+    14,
+    14,
+    14
+  ],
+  "results": [
+    {
+      "scenario": "batch-1",
+      "dtoHash": "79b3b669d552d50e07c34ca80144c20ec27c1716ef0ed6edabcf01d9680e4ae5"
+    },
+    {
+      "scenario": "batch-5",
+      "dtoHash": "e01ef6e260f278bced8b2f652fccfdf9cf305d3495cc8ec9f25ee35ac43c064b"
+    },
+    {
+      "scenario": "batch-20",
+      "dtoHash": "bdfab1b177186f403a2bfcf1e9f6619c81634427a6fb4b057e8076180814fbac"
+    },
+    {
+      "scenario": "admin",
+      "dtoHash": "952d62ddda93cf4c2610b9e9605336615912828c124f8acfe79a2b86c5e3f622"
+    },
+    {
+      "scenario": "director",
+      "dtoHash": "952d62ddda93cf4c2610b9e9605336615912828c124f8acfe79a2b86c5e3f622"
+    },
+    {
+      "scenario": "engineer",
+      "dtoHash": "11ec093fd65c0f05e328e5429fa45db5173f87bd9935cd426d8342004753db13"
+    },
+    {
+      "scenario": "procurement",
+      "dtoHash": "e92d4ea8cc43951bc1bf683a26db7237d4e26f67723a38ff0a35ab5258d89751"
+    },
+    {
+      "scenario": "manager",
+      "dtoHash": "6c7efe02f1f81fa6bfc04886934cc053f2c05037a2e03a776c471f4b5e1bdb6f"
+    },
+    {
+      "scenario": "manager-accountant",
+      "dtoHash": "e92d4ea8cc43951bc1bf683a26db7237d4e26f67723a38ff0a35ab5258d89751"
+    }
+  ],
+  "actualPhase": "UNINITIALIZED",
+  "activeWacProved": false,
+  "fixtureRows": 625,
+  "warehouseGlobalUnchanged": true,
+  "noReplay": true,
+  "clientsDisconnected": true,
+  "fetchRestored": true
+}

@@ -28,7 +28,7 @@ import { getProjectPricingProjection } from "@/server/projects/project-field-cor
 import { getProjectEconomics } from "@/server/finance/queries";
 import { getProjectFor, listClients, listEngineers, listManagers, listWorkers } from "@/server/projects/queries";
 import { mapTaskDetails } from "@/server/tasks/queries";
-import { getProjectMaterials } from "@/server/warehouse/queries";
+import { getProjectMaterialsBatch } from "@/server/warehouse/queries";
 import { hasFullProjectVisibility } from "@/server/access/visibility";
 import {canViewProductMoney} from "@/lib/product-financial-access";
 import { allocatedWorkQuantity } from "@/lib/work-shares";
@@ -105,7 +105,7 @@ export default async function ProjectPage({
         : Promise.resolve([]),
       // Сводная потребность по изделиям (вкладка «Материалы», read-only)
       showMaterials
-        ? Promise.all(project.products.map((product) => getProjectMaterials(product.id, session.user)))
+        ? getProjectMaterialsBatch(project.products.map((product) => product.id), session.user)
         : Promise.resolve([]),
     ]);
 
