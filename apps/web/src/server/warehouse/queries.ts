@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import {activeStockMovementWhere} from './active-records';
 import { summarizeProjectExpenses } from "@/server/finance/project-expense-facts";
 import type { StockMovementView, ProjectMaterialLineStatus, ProjectMaterialLine, ProjectMaterialsData, MaterialOption, WarehouseReturnSource } from "./contracts";
@@ -124,79 +124,115 @@ export async function listMovements(actor: VisibilityActor, filter?: {
   actor = await resolveVisibilityActor(database, actor);
   return loadMovements(actor,filter,database);
 }
-async function loadMovements(actor: VisibilityActor, filter: {materialId?:string;productId?:string;type?:"INCOME"|"EXPENSE"|"RETURN"}|undefined, database: Prisma.TransactionClient): Promise<StockMovementView[]> {
-  const movements = await database.stockMovement.findMany({
-    where: {
-      ...activeStockMovementWhere,
-      ...(hasFullProjectVisibility(actor) && canViewProductDrafts(actor.roles) ? {} : { OR: [{ productId: null }, { product: productVisibilityWhere(actor) }] }),
-      materialId: filter?.materialId || undefined,
-      productId: filter?.productId || undefined,
-      type: filter?.type || undefined,
-    },
-    orderBy: [{ createdAt: "desc" },{id:"desc"}],
-    take: 500,
-    include: {
-      material: { select: { name: true, measurementUnit: { select: { name: true } } } },
-      product: { select: { number: true } },
-    },
-  });
-  const userIds = [
-    ...new Set(movements.map((m) => m.createdById).filter(Boolean)),
-  ] as string[];
-  const [users,documents] = await Promise.all([database.user.findMany({
-    where: { id: { in: userIds } },
-    select: { id: true, name: true },
-  }),loadMovementReportDocuments(actor,movements.map(movement=>movement.id),database)]);
-  const userName = new Map(users.map((user) => [user.id, user.name]));
-  return movements.map((movement) => ({
-    id: movement.id,
-    type: movement.type,
-    receiptKind: movement.receiptKind,
-    materialId: movement.materialId,
-    materialName: movement.material.name,
-    materialUnit: movement.material.measurementUnit.name,
-    quantity: Number(movement.quantity),
-    unitPrice: !hasAnyRole(actor.roles,WAREHOUSE_MONEY_ROLES)||movement.unitPrice === null ? null : Number(movement.unitPrice),
-    totalByn: !hasAnyRole(actor.roles,WAREHOUSE_MONEY_ROLES)||movement.totalByn === null ? null : Number(movement.totalByn),
-    productId: movement.productId,
-    productNumber: movement.product?.number ?? null,
-    comment: movement.comment,
-    createdByName: movement.createdById
-      ? (userName.get(movement.createdById) ?? null)
-      : null,
-    createdAt: movement.createdAt.toISOString(),
-    reportDocument: documents.get(movement.id)??null,
-  }));
+const movementInclude={
+ material:{select:{name:true,measurementUnit:{select:{name:true}}}},
+ product:{select:{number:true}},
+} satisfies Prisma.StockMovementInclude;
+type MovementRow=Prisma.StockMovementGetPayload<{include:typeof movementInclude}>;
+/** История администраторов сохраняет отдельный grant для удалённого изделия/проекта. */
+function movementVisibilityWhere(actor:VisibilityActor):Prisma.StockMovementWhereInput{
+ return {...activeStockMovementWhere,...(hasFullProjectVisibility(actor)&&canViewProductDrafts(actor.roles)?{}:{OR:[{productId:null},{product:productVisibilityWhere(actor)}]})};
 }
-
-export async function getProjectMaterials(
-  productId: string,
-  actor: VisibilityActor,
-  database: Prisma.TransactionClient = prisma,
-): Promise<ProjectMaterialsData> {
-  if(!hasAnyRole(actor.roles,OFFICE_ROLES))throw new Error("Недостаточно прав");
-  actor = await resolveVisibilityActor(database, actor);
-  const [rows, movements] = await Promise.all([
-    database.projectMaterial.findMany({
-      where: { productId, product: productVisibilityWhere(actor) },
-      orderBy: { createdAt: "asc" },
-      include: {
-        material: {
-          select: { id: true, name: true, sku: true, measurementUnit: { select: { name: true } }, purchasePrice: true },
-        },
-      },
-    }),
-    loadMovements(actor, { productId }, database),
-  ]);
-  const stock = await warehouseReadPositions(database,rows.map((row) => row.materialId));
-  const showMoney=hasAnyRole(actor.roles,WAREHOUSE_MONEY_ROLES);
-  const [issued,allCosts]=await Promise.all([
-    stock.current&&stock.runId ? database.warehouseMovementValuation.findMany({
-      where:{runId:stock.runId,movement:{...activeStockMovementWhere,productId,product:productVisibilityWhere(actor),type:"EXPENSE"}},
-      include:{movement:{select:{materialId:true,createdAt:true,material:{select:{name:true,measurementUnit:{select:{name:true}}}}}}}
-    }) : Promise.resolve([]),
-    showMoney ? database.stockMovement.findMany({where:{...activeStockMovementWhere,productId,product:productVisibilityWhere(actor),type:{in:["EXPENSE","RETURN"]}},select:{type:true,totalByn:true}}) : Promise.resolve([]),
-  ]);
+async function movementViews(movements:MovementRow[],actor:VisibilityActor,database:Prisma.TransactionClient):Promise<StockMovementView[]>{
+ const userIds=[...new Set(movements.map(row=>row.createdById).filter((id):id is string=>id!==null))];
+ const [users,documents]=await Promise.all([
+  database.user.findMany({where:{id:{in:userIds}},select:{id:true,name:true}}),
+  loadMovementReportDocuments(actor,movements.map(row=>row.id),database),
+ ]);
+ const userName=new Map(users.map(user=>[user.id,user.name]));
+ return movements.map(movement=>({
+  id:movement.id,type:movement.type,receiptKind:movement.receiptKind,
+  materialId:movement.materialId,materialName:movement.material.name,materialUnit:movement.material.measurementUnit.name,
+  quantity:Number(movement.quantity),
+  unitPrice:!hasAnyRole(actor.roles,WAREHOUSE_MONEY_ROLES)||movement.unitPrice===null?null:Number(movement.unitPrice),
+  totalByn:!hasAnyRole(actor.roles,WAREHOUSE_MONEY_ROLES)||movement.totalByn===null?null:Number(movement.totalByn),
+  productId:movement.productId,productNumber:movement.product?.number??null,comment:movement.comment,
+  createdByName:movement.createdById?(userName.get(movement.createdById)??null):null,
+  createdAt:movement.createdAt.toISOString(),reportDocument:documents.get(movement.id)??null,
+ }));
+}
+async function loadMovements(actor:VisibilityActor,filter:{materialId?:string;productId?:string;type?:"INCOME"|"EXPENSE"|"RETURN"}|undefined,database:Prisma.TransactionClient){
+ const rows=await database.stockMovement.findMany({
+  where:{...movementVisibilityWhere(actor),materialId:filter?.materialId||undefined,productId:filter?.productId||undefined,type:filter?.type||undefined},
+  orderBy:[{createdAt:"desc"},{id:"desc"}],take:500,include:movementInclude,
+ });
+ return movementViews(rows,actor,database);
+}
+async function loadBatchMovements(productIds:string[],actor:VisibilityActor,database:Prisma.TransactionClient){
+ const unrestricted=hasFullProjectVisibility(actor)&&canViewProductDrafts(actor.roles);
+ const movementProductIds=unrestricted?productIds:(await database.product.findMany({
+  where:{AND:[{id:{in:productIds}},productVisibilityWhere(actor)]},select:{id:true},
+ })).map(row=>row.id);
+ if(!movementProductIds.length)return [];
+ // Лимит относится к каждому изделию; INCOME исключается только после ранжирования и hydration.
+ const selected=await database.$queryRaw<{id:string}[]>(Prisma.sql`
+  SELECT id FROM (
+   SELECT id,row_number() OVER (PARTITION BY "productId" ORDER BY "createdAt" DESC,id DESC) AS ordinal
+   FROM "StockMovement"
+   WHERE "deletionId" IS NULL AND "productId" IN (${Prisma.join(movementProductIds)})
+  ) ranked WHERE ordinal<=500
+ `);
+ if(!selected.length)return [];
+ const rows=await database.stockMovement.findMany({
+  where:{...movementVisibilityWhere(actor),id:{in:selected.map(row=>row.id)},productId:{in:productIds}},
+  orderBy:[{createdAt:"desc"},{id:"desc"}],include:movementInclude,
+ });
+ return movementViews(rows,actor,database);
+}
+function productGroups<T>(rows:readonly T[],key:(row:T)=>string|null){
+ const result=new Map<string,T[]>();
+ for(const row of rows){const id=key(row);if(id!==null){const group=result.get(id)??[];group.push(row);result.set(id,group);}}
+ return result;
+}
+export async function getProjectMaterials(productId:string,actor:VisibilityActor,database:Prisma.TransactionClient=prisma):Promise<ProjectMaterialsData>{
+ return (await getProjectMaterialsBatch([productId],actor,database))[0];
+}
+export async function getProjectMaterialsBatch(productIds:readonly string[],actor:VisibilityActor,database:Prisma.TransactionClient=prisma):Promise<ProjectMaterialsData[]>{
+ if(!productIds.length)return [];
+ if(!hasAnyRole(actor.roles,OFFICE_ROLES))throw new Error("Недостаточно прав");
+ actor=await resolveVisibilityActor(database,actor);
+ const uniqueIds=[...new Set(productIds)],visibleProduct=productVisibilityWhere(actor);
+ const [allRows,allMovements]=await Promise.all([
+  database.projectMaterial.findMany({
+   where:{productId:{in:uniqueIds},product:visibleProduct},orderBy:{createdAt:"asc"},
+   include:{material:{select:{id:true,name:true,sku:true,measurementUnit:{select:{name:true}},purchasePrice:true}}},
+  }),
+  loadBatchMovements(uniqueIds,actor,database),
+ ]);
+ const needProducts=[...new Set(allRows.map(row=>row.productId))];
+ // Сортировка выполняется отдельно для изделия, как у прежнего одиночного reader.
+ // При равных датах SQL не обещает универсального порядка: native сравнивает DTO буквально.
+ const orderedNeeds=needProducts.length?await database.$queryRaw<{id:string}[]>(Prisma.sql`
+  SELECT ranked.id FROM unnest(ARRAY[${Prisma.join(needProducts)}]::text[]) AS requested("productId")
+  CROSS JOIN LATERAL (
+   SELECT needed.id,row_number() OVER () AS ordinal FROM (
+    SELECT id FROM "ProjectMaterial" WHERE "productId"=requested."productId" ORDER BY "createdAt" ASC
+   ) needed
+  ) ranked ORDER BY requested."productId",ranked.ordinal
+ `):[];
+ const allowedNeeds=new Map(allRows.map(row=>[row.id,row]));
+ const orderedRows=orderedNeeds.flatMap(row=>{const allowed=allowedNeeds.get(row.id);return allowed?[allowed]:[];});
+ const rankedIds=new Set(orderedNeeds.map(row=>row.id));
+ // Исходная разрешённая выборка сохраняется и при удалении строки между чтениями.
+ orderedRows.push(...allRows.filter(row=>!rankedIds.has(row.id)));
+ const stock=await warehouseReadPositions(database,[...new Set(allRows.map(row=>row.materialId))]);
+ const showMoney=hasAnyRole(actor.roles,WAREHOUSE_MONEY_ROLES);
+ const [allIssued,allProductCosts]=await Promise.all([
+  stock.current&&stock.runId?database.warehouseMovementValuation.findMany({
+   where:{runId:stock.runId,movement:{...activeStockMovementWhere,productId:{in:uniqueIds},product:visibleProduct,type:"EXPENSE"}},
+   include:{movement:{select:{productId:true,materialId:true,createdAt:true,material:{select:{name:true,measurementUnit:{select:{name:true}}}}}}},
+  }):Promise.resolve([]),
+  showMoney?database.stockMovement.findMany({
+   where:{...activeStockMovementWhere,productId:{in:uniqueIds},product:visibleProduct,type:{in:["EXPENSE","RETURN"]}},
+   select:{productId:true,type:true,totalByn:true},
+  }):Promise.resolve([]),
+ ]);
+ const rowsByProduct=productGroups(orderedRows,row=>row.productId),movementsByProduct=productGroups(allMovements,row=>row.productId);
+ const issuedByProduct=productGroups(allIssued,row=>row.movement.productId),costsByProduct=productGroups(allProductCosts,row=>row.productId);
+ const result=new Map<string,ProjectMaterialsData>();
+ for(const productId of uniqueIds){
+  const rows=rowsByProduct.get(productId)??[],movements=movementsByProduct.get(productId)??[];
+  const issued=issuedByProduct.get(productId)??[],allCosts=costsByProduct.get(productId)??[];
   const returnSources:WarehouseReturnSource[]=issued.map(item=>({id:item.movementId,materialId:item.movement.materialId,
     materialName:item.movement.material.name,unit:item.movement.material.measurementUnit.name,createdAt:item.movement.createdAt.toISOString(),
     quantity:item.quantity.minus(item.returnedQuantity).toNumber(),unitPrice:showMoney?item.unitCost.toString():null})).filter(item=>item.quantity>0);
@@ -236,13 +272,15 @@ export async function getProjectMaterials(
 
   const materialsTotalByn = showMoney ? summarizeProjectExpenses({payments:[],stockMovements:allCosts}).expensesTotal : null;
 
-  return {
+  result.set(productId, {
     lines,
     movements: movements.filter((movement) => movement.type !== "INCOME").map(movement=>({...movement,returnableQuantity:sourcesById.get(movement.id)?.quantity??null})),
     materialsTotalByn,
     returnSources, warehouseReady:stock.ready,
     hasShortage,
-  };
+  });
+ }
+ return productIds.map(id=>result.get(id)!);
 }
 
 // Флаги нехватки для списков изделий: изделие помечается, если у него есть

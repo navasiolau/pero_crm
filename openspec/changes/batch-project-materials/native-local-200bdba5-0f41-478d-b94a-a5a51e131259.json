@@ -1,0 +1,24 @@
+{
+  "ok": false,
+  "runId": "200bdba5-0f41-478d-b94a-a5a51e131259",
+  "mode": "OWNED_ROLLBACK",
+  "failure": "F148_THIN_HOLD",
+  "diagnostic": {
+    "phase": "QUERY_COUNT_20",
+    "errorName": "AssertionError",
+    "prismaCode": null,
+    "sqlState": null,
+    "actualRows": 20,
+    "expectedRows": 20,
+    "beforeDigest": "b373ec8ec1ab293abc175e1e2e89b9f99f84e4a331dfd22be2b39e0d62fee6d4",
+    "afterDigest": "b373ec8ec1ab293abc175e1e2e89b9f99f84e4a331dfd22be2b39e0d62fee6d4",
+    "originalsMatch": true,
+    "sourceMatch": true,
+    "rollbackVerified": true,
+    "ownRowsAfter": 0,
+    "outbound": 0
+  },
+  "noReplay": true,
+  "clientsDisconnected": true,
+  "fetchRestored": true
+}
