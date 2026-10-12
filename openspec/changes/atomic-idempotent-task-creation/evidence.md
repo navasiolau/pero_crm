@@ -30,4 +30,9 @@ Native CLOSED receipt SHA256: `63f0748e7955cab86837564adc6e703ef9cf170151be73952
 
 Root ACTUAL_LOCAL_GO + CODE_COMMIT_GO `18679b` подтвердил фактический CLOSED и разрешил один atomic commit exact6production/5tests+OpenSpec. Native runner входит в эти5tests. Узкий `scope-manifest.json` хранит11 file hashes/LOC; отдельные deployment/staging/actor-negative proofs остаются pending. Main/production не переносились.
 
+CI интеграционного `ed04cfec` run38242899375 выявил один существующий stale assertion: journal-admin-only.test.ts42 ожидал только status receipt exclusion. Denial loop/reads0 для всех non-ADMIN и ADMIN reads1 до этой строки прошли; фактического ACL regression не обнаружено. По поручению Root обновлено только ожидаемое NOT/OR двух точных receipt exclusions, все role/filter/order/take assertions сохранены. Scope дополнен одним existing affected test (production6/tests6); новый source/runtime/SQL не добавлялся. Native byte/source hashes остаются прежними. Normal business audits/internal hiding отдельно защищены actual-reader test task-creation.
+
+Affected correction verification: `tsx --test tests/journal-admin-only.test.ts tests/task-creation.test.ts` exit0,12/12; scoped eslint journal-admin-only и diff check exit0. Никакой повторной native/SQL/browser приёмки для test-only изменения нет.
+Независимый correction CODE_GO `bcfd0b` разрешил exact3 paths: existing Journal test, evidence и scope manifest; production/native diff0.
+
 Никаких local/staging dumps, seed/reset/newDB, restic, original person/account preferences или глобального worker. Native AUTH и optional network/cache effects изолированы и будут отдельно помечены; строки native сценария должны закрыться0 exact-owned rows и сохранностью всех original fingerprints. UNKNOWN/guard mismatch — HOLD без автоматического cleanup/replay.
