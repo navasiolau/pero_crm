@@ -37,7 +37,8 @@ before(async () => {
   });
   const db = {
     ...fixture.db,
-    changeLog: { create: async () => ({}) },
+    changeLog: { create: async () => ({}), findUnique: async () => null },
+    user: { findUnique: async () => ({id:"engineer",name:"Engineer",roles,active:true}) },
     product: { ...fixture.db.product, update: async ({ where }: { where: { id: string } }) => { writes.push(`product.update:${where.id}`); } },
     file: { ...fixture.db.file, delete: async () => { writes.push("file.delete"); } },
     task: { ...fixture.db.task, update: async () => { writes.push("task.update"); } },
@@ -58,6 +59,7 @@ before(async () => {
   inject("../src/lib/s3", {
     UPLOADS_ROOT: "never-used",
     s3Enabled: () => true,
+    storageConfiguration: () => ({mode:"s3",endpoint:"https://qa137.invalid/",bucket:"qa137-fixture"}),
     fileKey: (project: string, name: string) => `${project}/${name}`,
     thumbKey: (project: string, name: string) => `${project}/thumb/${name}`,
     s3Get: async (key: string) => { storage.push(`get:${key}`); return new ReadableStream({ start(controller) { controller.enqueue(validImage); controller.close(); } }); },
@@ -116,7 +118,7 @@ test("real file download, thumbnail and delete deny hidden IDs before storage ac
       const response = await fileRoute.GET(new Request(`http://example.invalid/api/files/${id}${suffix}`), { params: Promise.resolve({ id }) });
       assert.equal(response.status, 404);
     }
-    assert.equal((await fileActions.deleteFile(id)).ok, false);
+    assert.equal((await fileActions.deleteFile(id,"00000000-0000-4000-8000-000000000137")).ok, false);
   }
   assert.deepEqual(writes, []);
   assert.deepEqual(storage, []);
@@ -131,7 +133,7 @@ test("current assigned engineer reads production originals and thumbnails but ca
   assert.equal(storage.filter(call => call.startsWith("get:")).length, 2);
   assert.deepEqual(writes, []);
   storage.length = 0;
-  assert.equal((await fileActions.deleteFile(id)).ok, false);
+  assert.equal((await fileActions.deleteFile(id,"00000000-0000-4000-8000-000000000137")).ok, false);
   assert.deepEqual(writes, []);
   assert.deepEqual(storage, []);
 });
@@ -154,7 +156,7 @@ test("accounting read grant cannot delete own historical files outside engineeri
   const target = fixture.files[2];
   target.uploadedById = "engineer";
   try {
-    assert.equal((await fileActions.deleteFile(String(target.id))).ok, false);
+    assert.equal((await fileActions.deleteFile(String(target.id),"00000000-0000-4000-8000-000000000137")).ok, false);
     assert.deepEqual(writes, []);
     assert.deepEqual(storage, []);
   } finally {

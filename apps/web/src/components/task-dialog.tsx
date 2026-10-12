@@ -472,7 +472,7 @@ export function TaskDialog({
               </div>
             ) : null}
             {visibleFiles.length > 0 ? <FileList files={visibleFiles}
-              onDelete={file => deleteFile(file.id)}
+              onDelete={(file, clientMutationId) => deleteFile(file.id, clientMutationId)}
               onBusyChange={busy => {fileDeleteBusy.current = busy;setFilePending(busy);}}
               onDeleted={file => {
                 setDeletedFiles(previous => ({taskId: task.id, ids: previous.taskId === task.id ? [...previous.ids, file.id] : [file.id]}));

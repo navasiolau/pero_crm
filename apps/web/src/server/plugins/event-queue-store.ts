@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { OBSOLETE_SKETCH_EVENT } from "@/server/products/sketch-cleanup-contract";
+import { FILE_STORAGE_DELETE_EVENT } from "@/server/files/delete-contract";
 import { eventRetryDelay, type ClaimRequest, type EventQueueSettings, type EventQueueStore,
   type OwnedDomainEvent, type QueuedDomainEvent, type QueueStats } from "./event-queue-contract";
 
@@ -27,7 +28,7 @@ export function createPostgresEventQueueStore(db: QueueDatabase, settings: Reado
     async claim(request: ClaimRequest = {}) {
       const token = randomUUID(), retry = request.internalRetry === true && request.eventId !== undefined;
       const target = request.eventId === undefined ? Prisma.sql`TRUE` : Prisma.sql`e."id" = ${request.eventId}`;
-      const retryAllowed = retry ? Prisma.sql`e."type" = ${OBSOLETE_SKETCH_EVENT}` : Prisma.sql`FALSE`;
+      const retryAllowed = retry ? Prisma.sql`e."type" IN (${OBSOLETE_SKETCH_EVENT},${FILE_STORAGE_DELETE_EVENT})` : Prisma.sql`FALSE`;
       const rows = await db.$queryRaw<QueuedDomainEvent[]>(Prisma.sql`
         WITH candidate AS (
           SELECT e."id", CASE WHEN ${retryAllowed} AND e."queueAttempts" >= ${settings.maxAttempts}

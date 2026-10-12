@@ -138,7 +138,7 @@ export function FileGridView({files, onBusyChange}: {
   onBusyChange?: (busy: boolean) => void;
 }) {
   const router = useRouter();
-  return <FileList files={files} onDelete={file => deleteFile(file.id)}
+  return <FileList files={files} onDelete={(file, clientMutationId) => deleteFile(file.id, clientMutationId)}
     onDeleted={() => {toast.success("Файл удалён");router.refresh();}} onBusyChange={onBusyChange} />;
 }
 

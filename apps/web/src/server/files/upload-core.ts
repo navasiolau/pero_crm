@@ -1,6 +1,7 @@
 import {createHash} from 'node:crypto';
 import type {Prisma, FileSection} from '@prisma/client';
 import {UploadError} from './upload-result';
+import {assertWritableFileStorageKey} from './storage-binding-fence';
 
 export const uploadMutationPattern=/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 export function uploadFingerprint(input:{actorId:string;projectId:string;productId:string|null;taskId:string|null;section:FileSection;fileName:string;mimeType:string;size:number;contentHash:string}){
@@ -20,6 +21,7 @@ export async function readUploadReceipt(tx:Pick<Prisma.TransactionClient,'change
 export async function persistOrdinaryUpload(tx:Prisma.TransactionClient,actor:{id:string;name?:string|null},input:{clientMutationId:string;fingerprint:string;projectNumber:string;data:Prisma.FileUncheckedCreateInput}):Promise<UploadReceipt>{
   const prior=await readUploadReceipt(tx,actor.id,input.clientMutationId,input.fingerprint);
   if(prior)return prior;
+  await assertWritableFileStorageKey(tx,input.data.projectId,input.data.storedName);
   const file=await tx.file.create({data:input.data});
   await tx.changeLog.create({data:{id:`file-upload:${input.clientMutationId}`,actorType:'user',actorId:actor.id,actorName:actor.name??undefined,
     source:'web',entity:'file',entityId:file.id,action:'create',newValue:{project:input.projectNumber,fileName:file.fileName,section:file.section,
