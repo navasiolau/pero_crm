@@ -1,99 +1,57 @@
 import { prisma } from "@/lib/prisma";
-import { cleanupObsoleteSketch } from "@/server/products/sketch-cleanup";
+import { executeObsoleteSketchCleanup } from "@/server/products/sketch-cleanup-core";
 import { OBSOLETE_SKETCH_EVENT } from "@/server/products/sketch-cleanup-contract";
-
 import { buildPluginContext } from "./context";
 import { getManifest } from "./registry";
 import { logPluginRun } from "./run-log";
+import { EventDeliveryError, getEventQueueSettings, type OwnedDomainEvent } from "./event-queue-contract";
+import { createEventQueueProcessor, type EventDeliveryContext } from "./event-queue-core";
+import { createPostgresEventQueueStore } from "./event-queue-store";
 
-// Шина доменных событий — outbox в PostgreSQL (§14). Запись события и
-// изменение данных выполняются в одной транзакции на стороне вызывающего
-// кода; доставка подписчикам — сразу после коммита (MVP), недоставленные
-// добирает dispatchPendingEvents() (cron / REST).
-
-export async function emitDomainEvent(
-  type: string,
-  payload: unknown,
-  actor = "system",
-): Promise<void> {
-  const event = await prisma.domainEvent.create({
-    data: { type, payload: JSON.parse(JSON.stringify(payload ?? {})), actor },
-  });
-  // Синхронная доставка; ошибки подписчиков не роняют основной сценарий
-  await dispatchEvent(event.id).catch((error) => {
-    console.error(`[plugins] Доставка события ${type} не удалась:`, error);
-  });
+export async function emitDomainEvent(type: string, payload: unknown, actor = "system"): Promise<void> {
+  const event = await prisma.domainEvent.create({ data: { type, payload: JSON.parse(JSON.stringify(payload ?? {})), actor } });
+  await dispatchEvent(event.id).catch(() => { console.error("[plugins] delivery unavailable; outbox will retry"); });
 }
 
-export async function dispatchEvent(eventId: string): Promise<void> {
-  const event = await prisma.domainEvent.findUnique({ where: { id: eventId } });
-  if (!event || event.processedAt) return;
-  // Внутренняя storage-задача не доставляется пользовательским плагинам.
+async function deliverEvent(event: OwnedDomainEvent, ownership: EventDeliveryContext): Promise<void> {
   if (event.type === OBSOLETE_SKETCH_EVENT) {
-    await cleanupObsoleteSketch(event.id);
+    await executeObsoleteSketchCleanup(event, prisma, ownership);
     return;
   }
-
-  const enabledPlugins = await prisma.plugin.findMany({
-    where: { enabled: true },
-  });
-
+  const enabledPlugins = await prisma.plugin.findMany({ where: { enabled: true } });
   let failed = 0;
   for (const plugin of enabledPlugins) {
     const hook = getManifest(plugin.id)?.hooks?.onDomainEvent;
     if (!hook) continue;
+    if (!ownership.isActive() || !await ownership.ensureOwned()) throw new EventDeliveryError("EVENT_CLAIM_LOST");
     const started = Date.now();
     try {
-      const ctx = await buildPluginContext(plugin.id);
-      await hook(
-        {
-          id: event.id,
-          type: event.type,
-          payload: event.payload,
-          actor: event.actor,
-          createdAt: event.createdAt,
-        },
-        ctx,
-      );
-      await logPluginRun({
-        pluginId: plugin.id,
-        kind: "hook",
-        ref: `onDomainEvent:${event.type}`,
-        status: "ok",
-        durationMs: Date.now() - started,
-      });
+      const base = await buildPluginContext(plugin.id);
+      if (!ownership.isActive()) throw new EventDeliveryError("EVENT_CLAIM_LOST");
+      const ctx = { ...base, emit: async (type: string, payload: unknown) => {
+        if (!ownership.isActive() || !await ownership.ensureOwned()) throw new EventDeliveryError("EVENT_CLAIM_LOST");
+        return base.emit(type, payload);
+      } };
+      await hook({ id: event.id, type: event.type, payload: event.payload, actor: event.actor, createdAt: event.createdAt }, ctx);
+      await logPluginRun({ pluginId: plugin.id, kind: "hook", ref: `onDomainEvent:${event.type}`,
+        status: "ok", durationMs: Date.now() - started });
     } catch (error) {
-      failed += 1;
-      await logPluginRun({
-        pluginId: plugin.id,
-        kind: "hook",
-        ref: `onDomainEvent:${event.type}`,
-        status: "error",
-        message: error instanceof Error ? error.message : String(error),
-        durationMs: Date.now() - started,
-      });
+      if (error instanceof EventDeliveryError && error.code === "EVENT_CLAIM_LOST") throw error;
+      failed++;
+      await logPluginRun({ pluginId: plugin.id, kind: "hook", ref: `onDomainEvent:${event.type}`,
+        status: "error", message: error instanceof Error ? error.message : String(error), durationMs: Date.now() - started });
     }
   }
-
-  await prisma.domainEvent.update({
-    where: { id: event.id },
-    data: {
-      processedAt: failed === 0 ? new Date() : null,
-      attempts: { increment: 1 },
-      lastError: failed > 0 ? `${failed} подписчик(ов) завершились ошибкой` : null,
-    },
-  });
+  if (failed) throw new EventDeliveryError("EVENT_DELIVERY_FAILED");
 }
 
-/** Повторная доставка недоставленных событий (для cron/REST). */
-export async function dispatchPendingEvents(limit = 50): Promise<number> {
-  const pending = await prisma.domainEvent.findMany({
-    where: { processedAt: null },
-    orderBy: { createdAt: "asc" },
-    take: limit,
-  });
-  for (const event of pending) {
-    await dispatchEvent(event.id);
-  }
-  return pending.length;
+function dispatcher() {
+  const settings = getEventQueueSettings();
+  return createEventQueueProcessor({ store: createPostgresEventQueueStore(prisma, settings), settings, deliver: deliverEvent });
+}
+export async function dispatchEvent(eventId: string): Promise<void> { await dispatcher().dispatchOne(eventId); }
+export async function dispatchPendingEvents(limit = 50): Promise<number> { return dispatcher().dispatchPending(limit); }
+export async function readEventQueueStats() {
+  const settings = getEventQueueSettings();
+  return createPostgresEventQueueStore(prisma, settings).stats();
 }
