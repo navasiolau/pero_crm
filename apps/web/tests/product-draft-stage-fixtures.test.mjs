@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {tags,stageGuard,sign,verifySigned,validatePluginPolicy,validateJournal,validateManager,compareOrgClock,originalMatch,exactCleanupState,prepare,FILE_STAGES_POLICY,PREFERENCE_KEYS} from './product-draft-stage-fixtures.mjs';
+import {tags,stageGuard,sign,verifySigned,validatePluginPolicy,validateJournal,validateManager,compareOrgClock,originalMatch,exactCleanupState,prepare,RETIRED_FILE_STAGES_POLICY,PREFERENCE_KEYS} from './product-draft-stage-fixtures.mjs';
+import {getManifest,listManifests} from '../src/server/plugins/registry.ts';
 
 const runId='11111111-1111-4111-8111-111111111111',revision='b'.repeat(40),secret='QA_OWNERSHIP_SIGNATURE_ONLY';
 const input={authorized:true,runId,revision};
@@ -30,13 +31,21 @@ test('physical staging guard rejects production, alternate DB route and mismatch
  const container={host:'a'.repeat(12),docker:true};assert.equal(stageGuard(input,env,container).proof.revision,revision);
  for(const patch of [{CRM_MODERNIZATION_TARGET:'production'},{DATABASE_URL:'postgresql://qa:qa@localhost:5433/pero_crm'},{DATABASE_URL:env.DATABASE_URL+'&options=unsafe'},{S3_BUCKET:'pero-crm'},{CRM_MODERNIZATION_STAGE_PROOF:JSON.stringify({...proof,revision:'e'.repeat(40)})}])assert.throws(()=>stageGuard(input,{...env,...patch},container));
 });
-test('enabled demo/unknown plugins stop before prepare; only reviewed revision-bound nohook file-stages is accepted',()=>{
+test('enabled registered/unknown plugins stop before effects; only revision-bound retired file-stages absent from actual registry is accepted',()=>{
  validatePluginPolicy([],input);
- const policy={...input,noHookPolicy:{revision,plugins:[FILE_STAGES_POLICY]}};
+ const policy={...input,noHookPolicy:{revision,plugins:[RETIRED_FILE_STAGES_POLICY]}};
  validatePluginPolicy([{id:'file-stages',version:'0.1.0',apiVersion:1}],policy);
- for(const rows of [[{id:'demo',version:'0.1.0',apiVersion:1}],[{id:'unknown',version:'0.1.0',apiVersion:1}],[{id:'file-stages',version:'0.2.0',apiVersion:1}]])assert.throws(()=>validatePluginPolicy(rows,policy));
+ let effects=0;const afterPreflight=(rows,value=policy)=>{validatePluginPolicy(rows,value);effects++;};
+ for(const rows of [[{id:'demo',version:'0.1.0',apiVersion:1}],[{id:'unknown',version:'0.1.0',apiVersion:1}],[{id:'file-stages',version:'0.2.0',apiVersion:1}],[{id:'file-stages',version:'0.1.0',apiVersion:2}]])assert.throws(()=>afterPreflight(rows));
  assert.throws(()=>validatePluginPolicy([{id:'file-stages',version:'0.1.0',apiVersion:1}],input));
- assert.throws(()=>validatePluginPolicy([{id:'file-stages',version:'0.1.0',apiVersion:1}],{...policy,noHookPolicy:{revision:'c'.repeat(40),plugins:[FILE_STAGES_POLICY]}}));
+ assert.throws(()=>afterPreflight([{id:'file-stages',version:'0.1.0',apiVersion:1}],{...policy,noHookPolicy:{revision:'c'.repeat(40),plugins:[RETIRED_FILE_STAGES_POLICY]}}));
+ assert.throws(()=>afterPreflight([{id:'file-stages',version:'0.1.0',apiVersion:1}],{...policy,noHookPolicy:{revision,plugins:[{...RETIRED_FILE_STAGES_POLICY,sourceHash:'d'.repeat(64)}]}}));
+ const manifests=listManifests(),registered={id:'file-stages',version:'0.1.0',apiVersion:1,name:'QA registered hook',permissions:[],hooks:{onDomainEvent:async()=>{throw Error('HOOK_MUST_NOT_RUN');}}};
+ assert.equal(getManifest('file-stages'),undefined);assert.equal(typeof getManifest('demo')?.hooks?.onDomainEvent,'function');
+ manifests.push(registered);
+ try{assert.throws(()=>afterPreflight([{id:'file-stages',version:'0.1.0',apiVersion:1}]),/ENABLED_PLUGIN_REGISTERED_STOP/);}
+ finally{assert.equal(manifests.pop(),registered);}
+ assert.equal(effects,0);assert.equal(getManifest('file-stages'),undefined);
 });
 test('current actor requires exact fresh MANAGER role, active flag, session version and NONE pay',()=>{
  validateManager(manager,pre);

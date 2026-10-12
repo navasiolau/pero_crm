@@ -5,6 +5,7 @@ import {hostname} from 'node:os';
 import {existsSync} from 'node:fs';
 import {PrismaClient} from '@prisma/client';
 import {encode} from '@auth/core/jwt';
+import {getManifest} from '../src/server/plugins/registry.ts';
 import {captureTokenClockEvidence,compareTokenClockEvidence,validateTokenClockEvidence} from './crm-acceptance-token-clock.mjs';
 import {unpackFunctionalInput,encodeFunctionalWire,OUTPUT_WIRE_LIMIT} from './product-draft-stage-wire.mjs';
 
@@ -17,7 +18,7 @@ const STAGES=['LEAD','ESTIMATE','CONTRACT','PAUSED','REFUSED','IN_WORK'];
 const STATUSES=['DRAFT','PREPARATION','DESIGN'];
 const TABLES=['User','Client','Project','Product','ProductPercentageConfig','ProductStatusHistory','ProjectStageHistory','ChangeLog','DomainEvent','Notification'];
 const ORDER=['ProductPercentageConfig','ProductStatusHistory','ProjectStageHistory','ChangeLog','DomainEvent','Notification','UserPreference','Product','Project','Client','User'];
-export const FILE_STAGES_POLICY={id:'file-stages',version:'0.1.0',apiVersion:1,sourceHash:'d01325f64ecd7a2cb1cbcefcd7193d4a1c27f280470239f26a74ad95cb253544'};
+export const RETIRED_FILE_STAGES_POLICY=Object.freeze({id:'file-stages',version:'0.1.0',apiVersion:1});
 class QaStop extends Error {constructor(code){super(code);this.checkId=code;}}
 const need=(ok,code)=>{if(!ok)throw new QaStop(code);};
 export function canonical(value){const v=JSON.parse(JSON.stringify(value));const walk=item=>Array.isArray(item)?'['+item.map(walk).join(',')+']':item&&typeof item==='object'?'{'+Object.keys(item).sort().map(key=>JSON.stringify(key)+':'+walk(item[key])).join(',')+'}':JSON.stringify(item);return walk(v);}
@@ -60,8 +61,11 @@ export function validatePluginPolicy(enabled,input){
  if(!enabled.length)return;
  const policy=input.noHookPolicy;
  keys(policy,['revision','plugins'],'NOHOOK_POLICY_REQUIRED');need(policy.revision===input.revision&&Array.isArray(policy.plugins)&&policy.plugins.length===1,'NOHOOK_POLICY_REVISION_REQUIRED');
- same(policy.plugins[0],FILE_STAGES_POLICY,'NOHOOK_POLICY_SOURCE_REQUIRED');
- need(enabled.every(row=>row.id==='file-stages'&&row.version==='0.1.0'&&row.apiVersion===1),'UNKNOWN_ENABLED_PLUGIN_STOP');
+ same(policy.plugins[0],RETIRED_FILE_STAGES_POLICY,'NOHOOK_POLICY_RETIRED_METADATA_REQUIRED');
+ for(const row of enabled){
+  need(getManifest(row.id)===undefined,'ENABLED_PLUGIN_REGISTERED_STOP');
+  need(row.id===RETIRED_FILE_STAGES_POLICY.id&&row.version===RETIRED_FILE_STAGES_POLICY.version&&row.apiVersion===RETIRED_FILE_STAGES_POLICY.apiVersion,'UNKNOWN_ENABLED_PLUGIN_STOP');
+ }
 }
 export function validateJournal(journal,pre,{complete=false}={}){
  keys(journal,['runId','revision','actions','preferences'],'JOURNAL_FIELDS_INVALID');

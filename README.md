@@ -55,7 +55,7 @@ Prisma 6, Auth.js v5, shadcn/ui / Base UI, Tailwind v4, Serwist.
 | `apps/web/tests` | Unit/DI, DB/runtime и browser-проверки |
 | `apps/telegram-bot` | Изолированный сервис бота, long polling + CRM REST API |
 | `packages/plugin-sdk` | Контракт плагинов |
-| `packages/plugins` | Установленные плагины demo и file-stages |
+| `packages/plugins` | Установленный demo-плагин |
 | `deploy` | Compose, CI-приёмка и операторские инструкции |
 
 ## Локальная работа

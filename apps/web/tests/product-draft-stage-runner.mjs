@@ -8,6 +8,7 @@ import {existsSync,lstatSync,mkdirSync,readFileSync,realpathSync} from 'node:fs'
 import {qaTransport,bundleHash,acceptanceWeb,qaBasicAuth} from './crm-acceptance-transport.mjs';
 import {runProductDraftStageBrowser} from './product-draft-stage-browser.mjs';
 import {technicalCanonical,assertTechnicalPersistence,packFunctionalInput,decodeFunctionalWire,OUTPUT_WIRE_LIMIT} from './product-draft-stage-wire.mjs';
+import {RETIRED_FILE_STAGES_POLICY} from './product-draft-stage-fixtures.mjs';
 const here=path.dirname(fileURLToPath(import.meta.url)),results=path.join(acceptanceWeb,'test-results'),root=path.resolve(acceptanceWeb,'../..');
 const require=createRequire(import.meta.url),{build}=createRequire(require.resolve('tsx/package.json'))('esbuild');
 const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/,SHA=/^[a-f0-9]{40}$/,HASH=/^[a-f0-9]{64}$/;
@@ -23,7 +24,7 @@ function privatePath(file){
  need(existsSync(results)&&realpathSync(results).toLowerCase()===results.toLowerCase(),'DRAFT111_PRIVATE_ROOT_IDENTITY');
  checkAncestors(absolute,results,false,'DRAFT111_PRIVATE_REPARSE_POINT','DRAFT111_PRIVATE_ANCESTOR',value=>value.toLowerCase());return absolute;
 }
-function sources(){return {...Object.fromEntries(SOURCE_FILES.map(name=>[name,sha(readFileSync(path.join(here,name)))])),outerWrapper:sha(readFileSync(path.join(root,'deploy/acceptance/crm-modernization-staging.py'))),fileStages:sha(readFileSync(path.join(root,'packages/plugins/file-stages/src/plugin.ts')))};}
+function sources(){return {...Object.fromEntries(SOURCE_FILES.map(name=>[name,sha(readFileSync(path.join(here,name)))])),outerWrapper:sha(readFileSync(path.join(root,'deploy/acceptance/crm-modernization-staging.py'))),...Object.fromEntries(['apps/web/src/server/plugins/registry.ts','packages/plugins/demo/package.json','packages/plugins/demo/src/plugin.ts','packages/plugin-sdk/package.json','packages/plugin-sdk/src/index.ts'].map(name=>[name,sha(readFileSync(path.join(root,name)))]))};}
 function syncWrite(file,value){
  assertTechnicalPersistence(value);const bytes=Buffer.from(technicalCanonical(value)+'\n'),absolute=privatePath(file);
  durableWrite(absolute,bytes);
@@ -54,7 +55,7 @@ export function makeTechnicalStore(directory){
 export async function functionalBundle({privateHandoff=false}={}){
  const mainCode=privateHandoff?String.raw`import {PrismaClient} from '@prisma/client';import {handoff,stageGuard} from './product-draft-stage-fixtures.mjs';import {unpackFunctionalInput} from './product-draft-stage-wire.mjs';
 let db;try{const input=unpackFunctionalInput(JSON.parse(Buffer.from(process.env.CRM_STAGING_BROWSER_INPUT??'','base64').toString('utf8')));if(input.phase!=='handoff'||input.operation!=='inspect')throw Error('DRAFT111_PRIVATE_HANDOFF_PHASE');const{secret}=stageGuard(input);db=new PrismaClient({log:[],errorFormat:'minimal'});const result=await handoff(db,input,input.checkpoint,secret);console.log(JSON.stringify({status:'PRIVATE_BROWSER_HANDOFF',...result}));}catch{process.exitCode=1;console.log(JSON.stringify({status:'STOP',code:'DRAFT111_PRIVATE_HANDOFF_STOP'}));}finally{if(db)await db.$disconnect();}`:"import {main} from './product-draft-stage-fixtures.mjs'; console.log(JSON.stringify(await main()));";
- const result=await build({stdin:{contents:mainCode,resolveDir:here,sourcefile:privateHandoff?'draft111-private-handoff.mjs':'draft111-functional-entry.mjs'},bundle:true,write:false,platform:'node',format:'esm',target:'node22',external:['@prisma/client'],banner:{js:'import {createRequire as draft111Require} from "node:module"; const require=draft111Require(import.meta.url);'},minify:true,logLevel:'silent'}),bytes=Buffer.from(result.outputFiles[0].contents);
+ const result=await build({stdin:{contents:mainCode,resolveDir:here,sourcefile:privateHandoff?'draft111-private-handoff.mjs':'draft111-functional-entry.mjs'},bundle:true,write:false,platform:'node',format:'esm',target:'node22',external:['@prisma/client','./slots/dashboard-widget','./slots/project-tab','./slots/settings-note'],banner:{js:'import {createRequire as draft111Require} from "node:module"; const require=draft111Require(import.meta.url);'},minify:true,logLevel:'silent'}),bytes=Buffer.from(result.outputFiles[0].contents);
  need(bytes.length>0&&bytes.length<=256*1024,'DRAFT111_REVIEWED_BUNDLE_LIMIT');return bytes;
 }
 function responseBinding(result,input,bytes,identity){
@@ -110,6 +111,6 @@ export async function runDraftFunctionalQa(options){
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
  const[phase,revision,runId,outputDir,authorization]=process.argv.slice(2);
- try{need(authorization==='--authorized','DRAFT111_EXPLICIT_ROOT_REVIEW_REQUIRED');console.log(JSON.stringify(await runDraftFunctionalQa({phase,revision,runId,outputDir,authorized:true,noHookPolicy:{revision,plugins:[{id:'file-stages',version:'0.1.0',apiVersion:1,sourceHash:'d01325f64ecd7a2cb1cbcefcd7193d4a1c27f280470239f26a74ad95cb253544'}]}})));}
+ try{need(authorization==='--authorized','DRAFT111_EXPLICIT_ROOT_REVIEW_REQUIRED');console.log(JSON.stringify(await runDraftFunctionalQa({phase,revision,runId,outputDir,authorized:true,noHookPolicy:{revision,plugins:[RETIRED_FILE_STAGES_POLICY]}})));}
  catch(error){console.log(JSON.stringify({status:'STOP',phase,code:/^[A-Z0-9_]{1,110}$/.test(error?.message??'')?error.message:'DRAFT111_FUNCTIONAL_STOP_PRESERVE_STATE',outputDir,cleanupMayBeRequired:true}));process.exitCode=1;}
 }
