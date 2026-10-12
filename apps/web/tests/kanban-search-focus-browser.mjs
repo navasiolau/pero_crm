@@ -215,6 +215,9 @@ try{
    await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});await mobile.waitForTimeout(350);await cdp.detach();
    assert.equal(await mobile.locator('[data-slot="kanban-scroll"]').evaluate(board=>getComputedStyle(board).scrollSnapType),nativeSnap);
    const manual=await position(mobile);assert.ok(Math.abs(manual.left-focused.left)>10);await mobile.evaluate(()=>window.__refresh());await waitFrames(mobile);assert.deepEqual(await position(mobile),manual);
+   // Основная полоса уже подтверждена; её scroll-событие ещё может не доставить зеркало в CI.
+   await expect.poll(async()=>Math.abs((await mobile.locator('[data-kanban-scrollbar]').evaluate(bar=>bar.scrollLeft))-manual.left),{timeout:5000}).toBeLessThan(2);
+   assert.deepEqual(await position(mobile),manual);
    assert.ok(Math.abs((await mobile.locator('[data-kanban-scrollbar]').evaluate(bar=>bar.scrollLeft))-manual.left)<2);
    assert.equal(await mobile.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);checks.push(section+':'+viewport.width+':real_touch_restores_snap_manual_scroll_and_SSE');await finish(mobile);
   }
