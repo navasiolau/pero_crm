@@ -4,6 +4,7 @@ import fs from 'node:fs';import os from 'node:os';import path from 'node:path';
 import {PrismaClient} from '@prisma/client';
 import {createQueueStageAdapter,newQueueStagePlan} from './event-queue-stage.mjs';
 import {verifyNative135Cases} from './event-queue-native-cases.ts';
+import {startDomainEventWorker,domainEventWorkerStatus} from '../src/server/plugins/event-worker.ts';
 import {nativeSnapshot,assertNoForeignReferences} from './helpers/native-acceptance-snapshot.ts';
 import {DEFAULT_EVENT_QUEUE_SETTINGS,getEventQueueSettings} from '../src/server/plugins/event-queue-contract.ts';
 async function main135Stage(){
@@ -24,8 +25,13 @@ try{
  if(input.mode==='run'){
   assert.deepEqual(before,input.before,'PRE_MIGRATION_ORIGINAL_FIELDS_CHANGED');peer=new PrismaClient({datasourceUrl:url.toString(),log:[],errorFormat:'minimal'});plan=newQueueStagePlan(input.runId,input.revision);await publish('owned-plan',plan);const context={target:'staging',runId:input.runId,revision:input.revision};
   const adapter=createQueueStageAdapter({db,peer,settings:{...DEFAULT_EVENT_QUEUE_SETTINGS,enabled:false},guard:async(c,operation,p)=>{assert.deepEqual(c,context);assert.equal(p.runId,input.runId);assert.ok(['prepare','verify','inspect','cleanup'].includes(operation));assert.equal(getEventQueueSettings(process.env).enabled,false);},publish,captureOriginal:nativeSnapshot,compareOriginal:assert.deepEqual,assertNoForeignReferences,
-   // Пять аргументов выбирают существующие default cycles; private/global worker callback не вызывается.
-   nativeCases:(d,p,owned,settings,setPhase)=>verifyNative135Cases(d,p,owned,settings,setPhase)});
+   // Настоящий production worker в отдельном QA Node: только scoped dispatch, реальный timer, точная остановка.
+   nativeCases:(d,p,owned,settings,setPhase)=>verifyNative135Cases(d,p,owned,settings,setPhase,async processor=>{
+    assert.equal(globalThis.peroDomainEventWorker,undefined,'QA135_WORKER_ALREADY_STARTED');assert.equal(globalThis.__QA135_WORKER__,undefined,'QA135_WORKER_BINDING_OCCUPIED');const counts=[],started=performance.now(),deadline=started+90000,previousRuntime=process.env.NEXT_RUNTIME;let active,failed=false,failure;
+    globalThis.__QA135_WORKER__={settings:{...settings,enabled:true},dispatch:limit=>{active=Promise.resolve().then(()=>{assert.equal(limit,50);assert.ok(counts.length<2,'QA135_EXTRA_WORKER_CYCLE');return processor.dispatchPending(limit);}).then(count=>{counts.push(count);if(counts.length===2)clearInterval(globalThis.peroDomainEventWorker.timer);return count;},error=>{failed=true;failure=error;throw error;});return active;}};process.env.NEXT_RUNTIME='nodejs';
+    try{startDomainEventWorker();const worker=globalThis.peroDomainEventWorker;assert.ok(worker?.timer&&typeof worker.timer.hasRef==='function'&&!worker.timer.hasRef(),'QA135_REAL_NODE_TIMER_REQUIRED');startDomainEventWorker();assert.equal(globalThis.peroDomainEventWorker,worker,'QA135_SINGLE_WORKER_REQUIRED');while(counts.length<2||domainEventWorkerStatus().running){if(failed)throw failure;assert.ok(performance.now()<deadline,'QA135_BACKGROUND_DEADLINE');await new Promise(resolve=>setTimeout(resolve,20));}await publish('background-worker',{actualWorkerStarted:true,realNodeTimer:true,startIdempotent:true,intervalMs:settings.intervalMs,counts:[...counts],elapsedMs:Math.round(performance.now()-started),globalAppWorker:false});return counts;}
+    finally{if(globalThis.peroDomainEventWorker)clearInterval(globalThis.peroDomainEventWorker.timer);await active?.catch(()=>{});delete globalThis.peroDomainEventWorker;delete globalThis.__QA135_WORKER__;if(previousRuntime===undefined)delete process.env.NEXT_RUNTIME;else process.env.NEXT_RUNTIME=previousRuntime;}
+   })});
   phase='prepare';await adapter.prepare(context,plan);const pre=parts.find(part=>part.name==='pre').value;phase='verify';const verified=await adapter.verify(context,pre);phase='inspect';const observation=await adapter.inspect(context,pre);phase='cleanup';await adapter.cleanup(context,pre,observation);assert.equal(parts.at(-1).value.current.ids.length,0);assert.deepEqual(await readonly(legacy),before,'TERMINAL_ORIGINAL_FIELDS_CHANGED');await publish('closed',{remainingOwned:0,originalsMatch:true,cases:verified.result.cases,backendPids:verified.result.backendPids,outboundProviders:0,globalWorker:false});
  }
  output={status:input.mode==='snapshot'?'QA135_LEGACY_SNAPSHOT':'QA135_SCOPED_CLOSED',runId:input.runId,revision:input.revision,sourceHash:input.sourceHash,parts,remoteDirectory:folder,globalWorker:false,outboundProviders:0};
