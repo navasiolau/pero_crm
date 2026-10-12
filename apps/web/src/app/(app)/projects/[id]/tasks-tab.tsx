@@ -43,7 +43,7 @@ import { formatDate,formatAmount } from "@/lib/format";
 import { workPaymentAmountLabel, workPaymentSourceLabel, taskPaymentLabel } from "@/lib/task-payment-display";
 import { cn } from "@/lib/utils";
 import { isPositiveQuantity, quantityInputError, remainingWorkQuantity } from "@/lib/work-quantity";
-import { createTask } from "@/server/tasks/actions";
+import { useTaskCreateCommand } from "@/components/use-task-create-command";
 import { useTaskStatusCommand } from "@/components/use-task-status-command";
 import { removeWork } from "@/server/works/actions";
 
@@ -119,6 +119,7 @@ export function TasksTab({
 }) {
   const router = useRouter();
   const changeTaskStatus = useTaskStatusCommand(actorUserId);
+  const createCommand = useTaskCreateCommand(actorUserId);
   const [pending, startTransition] = useTransition();
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState<TaskDetails | null>(null);
@@ -137,6 +138,18 @@ export function TasksTab({
   const [deleteWorkFor, setDeleteWorkFor] = useState<WorkRow | null>(null);
   const [actualFor, setActualFor] = useState<TaskDetails | null>(null);
   const [quantity, setQuantity] = useState("1");
+  const pinnedCreate = createCommand.peek({ projectId, productId, workId });
+  function openTaskCreation(work: WorkRow, remaining: string) {
+    const saved = createCommand.peek({ projectId, productId, workId: work.id })?.request;
+    setWorkId(work.id); setTaskProductId(saved?.productId ?? productId ?? "");
+    setTitle(saved?.title ?? work.title); setQuantity(saved?.quantity === undefined ? remaining : String(saved.quantity));
+    setAssigneeId(saved?.assigneeId ?? "");
+    if (saved) {
+      setType(saved.type); setEstimate(saved.estimateMinutes === undefined ? "" : String(saved.estimateMinutes));
+      setDueAt(saved.dueAt);
+    }
+    setOpen(true);
+  }
 
   const pieceWorks = works.filter((work) => work.paymentKind !== "ENGINEERING" && work.paymentKind !== "INSTALLATION");
   const worksTotal = pieceWorks.reduce((sum, work) => sum + Number(work.total ?? 0), 0);
@@ -185,7 +198,7 @@ export function TasksTab({
               </span>
             {work.operation?.canEdit&&productId?<Button size="icon-xs" variant="ghost" aria-label="Редактировать работу" onClick={()=>setEditWork(work)}><Pencil className="size-3.5"/></Button>:null}
             {canAllocateWork&&!canManage&&productId&&allocationData&&work.canAllocateWorker&&isPositiveQuantity(remaining)?<><Button size="sm" variant="outline" onClick={()=>{setOwnAllocation(true);setAllocationWork(work);}}>Взять себе</Button><Button size="sm" variant="outline" onClick={()=>{setOwnAllocation(false);setAllocationWork(work);}}>Назначить задачу</Button></>:null}
-            {canManage && productId && work.paymentKind !== "ENGINEERING" && work.paymentKind !== "INSTALLATION" && work.priceSnapshot !== null && isPositiveQuantity(remaining) ? <Button size="sm" variant="outline" onClick={() => {setWorkId(work.id);setTitle(work.title);setTaskProductId(productId);setQuantity(remaining);setAssigneeId("");setOpen(true);}}>Назначить задачу</Button> : null}
+            {canManage && productId && work.paymentKind !== "ENGINEERING" && work.paymentKind !== "INSTALLATION" && work.priceSnapshot !== null && (isPositiveQuantity(remaining) || createCommand.peek({projectId,productId,workId:work.id})) ? <Button size="sm" variant="outline" onClick={() => openTaskCreation(work, remaining)}>Назначить задачу</Button> : null}
             {canManage && work.paymentKind !== "ENGINEERING" && work.paymentKind !== "INSTALLATION" ? (
               <Button
                 size="icon-xs"
@@ -316,7 +329,7 @@ export function TasksTab({
           <DialogHeader>
             <DialogTitle>Новая задача</DialogTitle>
           </DialogHeader>
-          <div className="flex flex-col gap-3">
+          <fieldset disabled={!!pinnedCreate || pending} className="flex min-w-0 flex-col gap-3 border-0 p-0">
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="task-title">Название *</Label>
               <Input
@@ -441,16 +454,17 @@ export function TasksTab({
                 «Замер».
               </p>
             ) : null}
-          </div>
+          </fieldset>
+          {pinnedCreate?.uncertain ? <p role="status" className="text-sm text-destructive">Результат назначения неизвестен. Проверьте прежний запрос, прежде чем создавать новую задачу.</p> : null}
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)}>
               Отмена
             </Button>
             <Button
-              disabled={!title.trim() || !type || !dueAt || !productId || taskProductId !== productId || !workId || !assigneeId || !isPositiveQuantity(quantity) || !!quantityInputError(quantity) || pending}
+              disabled={pending || !pinnedCreate && (!title.trim() || !type || !dueAt || !productId || taskProductId !== productId || !workId || !assigneeId || !isPositiveQuantity(quantity) || !!quantityInputError(quantity))}
               onClick={() =>
                 startTransition(async () => {
-                  const result = await createTask({
+                  const result = await createCommand.run(pinnedCreate?.request ?? {
                     projectId,
                     productId,
                     title: title.trim(),
@@ -466,8 +480,9 @@ export function TasksTab({
                       estimate.trim() === "" ? undefined : Number(estimate),
                     requiresPhoto: type === "Замер",
                   });
+                  if (!result) return;
                   if (result.ok) {
-                    toast.success("Задача создана");
+                    toast.success(result.replayed ? "Результат назначения подтверждён" : "Задача создана");
                     setOpen(false);
                     setTitle("");
                     setType("Производство");
@@ -483,7 +498,7 @@ export function TasksTab({
                 })
               }
             >
-              Создать
+              {pinnedCreate?.uncertain ? "Проверить" : "Создать"}
             </Button>
           </DialogFooter>
         </DialogContent>

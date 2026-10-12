@@ -8,7 +8,10 @@ export async function listGlobalChangeLog({ actor, entity, from, to }: GlobalCha
   await requireRole(["ADMIN"]);
   const where = {
     // Durable receipt хранится в БД; интерфейс показывает один прежний business audit.
-    NOT: { entity: "task", action: "task.status.request", id: { startsWith: "task-status:" } },
+    NOT: { OR: [
+      { entity: "task", action: "task.status.request", id: { startsWith: "task-status:" } },
+      { entity: "task", action: "task.create.request", id: { startsWith: "task-create:" } },
+    ] },
     ...(actor ? { OR: [
       { actorName: { contains: actor, mode: "insensitive" as const } },
       { actorId: { contains: actor, mode: "insensitive" as const } },

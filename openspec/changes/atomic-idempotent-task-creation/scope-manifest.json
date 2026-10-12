@@ -1,0 +1,63 @@
+{
+  "branch": "bugfix/165",
+  "base": "c6508448450813450b5dbb6a67d77494c37f6cdb",
+  "productionFiles": 6,
+  "testFiles": 5,
+  "files": [
+    {
+      "path": "apps/web/src/server/tasks/actions.ts",
+      "sha256": "14af0550b9c7c6f22ebeb40f008990f818a170f721b50ce13459bd2827e462cd",
+      "lines": 560
+    },
+    {
+      "path": "apps/web/src/server/tasks/creation-receipts.ts",
+      "sha256": "7330ef884ce221e48584126e2c19d7a4d63b33ed32c79a54b15ff73c84a323b7",
+      "lines": 50
+    },
+    {
+      "path": "apps/web/src/components/use-task-create-command.ts",
+      "sha256": "a7c0bd23eee90095a89863cca890cb403f5202c52fc7ea906729ee1623ec12d9",
+      "lines": 78
+    },
+    {
+      "path": "apps/web/src/app/(app)/projects/[id]/tasks-tab.tsx",
+      "sha256": "c7aee8cf1b8ce6d7a384a15a6926ba28d968b5763c0d16da7bccf2326671ea75",
+      "lines": 556
+    },
+    {
+      "path": "apps/web/src/server/operations/post-commit.ts",
+      "sha256": "0eab5fa10aa0cc69dbf79fab450fd5df92a98f41c0cb8d5ba5ef1d25c2e0b4a8",
+      "lines": 18
+    },
+    {
+      "path": "apps/web/src/server/changelog/queries.ts",
+      "sha256": "d25ea67f2745f6542f4e33f2ca0146167a86eb88532ea143c0c0270f0cce4f8d",
+      "lines": 26
+    },
+    {
+      "path": "apps/web/tests/task-creation.test.ts",
+      "sha256": "e8ab5a1aeb7001049c05ef6b7bc59d65af86f2612590fffdfd65db37655ca8d5",
+      "lines": 175
+    },
+    {
+      "path": "apps/web/tests/task-creation-command.browser.test.ts",
+      "sha256": "8a9de85490f3f7de1a5393182994066d01fa09cc41c4c25bf4584a763791ac43",
+      "lines": 90
+    },
+    {
+      "path": "apps/web/tests/task-creation-native.ts",
+      "sha256": "2593db18e79b0d8ff1e702291d5410ef68f93632d2299109511686cee6247a50",
+      "lines": 162
+    },
+    {
+      "path": "apps/web/tests/task-work-required.test.ts",
+      "sha256": "4661645c52777dd8d2c04779a9e4f670412541865fd17b914814c10d3dc589a9",
+      "lines": 21
+    },
+    {
+      "path": "apps/web/tests/work-shares-settlement.test.ts",
+      "sha256": "ce97ea966d72144fbd2ec993761e67df2db771dd3f624d876f983fead7a4d4c3",
+      "lines": 264
+    }
+  ]
+}
