@@ -9,6 +9,7 @@ import {confirmedProductClientContacts,type ProductClientContact} from "@/lib/pr
 import {InlineQuantityField} from "@/components/product-quantity-input";
 import {productDraftTotal} from "@/lib/product-quantity-input";
 import { formatAmount } from "@/lib/format";
+import type { InlineSaveController } from "@/lib/inline-save-controller";
 export function ProductInlineTitle({ number, canManage }: { number: string; canManage: boolean }) {
   const { controller } = useProductInline();
   const title = controller("title");
@@ -28,21 +29,27 @@ export function ProductInlineContacts({canManage,clients}:{canManage:boolean;cli
   <ClientDialog open={createOpen} onOpenChange={setCreateOpen} onCreated={async id=>{client.setDraft(id);await client.commit();}}/>
  </CardContent></Card>;
 }
+function ProductLiveTotal({ price, quantity, currency }: {
+  price: InlineSaveController; quantity: InlineSaveController; currency: string;
+}) {
+  const p = useSyncExternalStore(price.subscribe, () => price.getSnapshot().draft, () => price.getServerSnapshot().draft);
+  const q = useSyncExternalStore(quantity.subscribe, () => quantity.getSnapshot().draft, () => quantity.getServerSnapshot().draft);
+  const total = productDraftTotal(p, q);
+  return <div className="min-w-0 break-words pt-6" aria-live="polite">Сумма: {formatAmount(total,currency)}</div>;
+}
 export function ProductInlineDetails({ canManage, canEditTech, showAmount, currency, measurement, engineer, notice }: {
   canManage: boolean; canEditTech: boolean; showAmount: boolean; currency: string;
   notice?: ReactNode; measurement: ReactNode; engineer: ReactNode;
 }) {
   const { controller } = useProductInline();
   const price = controller("expectedPrice"); const quantity = controller("quantity");
-  const p = useSyncExternalStore(price.subscribe, price.getSnapshot, price.getServerSnapshot);
-  const q = useSyncExternalStore(quantity.subscribe, quantity.getSnapshot, quantity.getServerSnapshot);
-  const total=productDraftTotal(p.draft,q.draft);
+
   return <div className="flex min-w-0 flex-col gap-4" data-product-details>
     {notice?<Card className="min-w-0"><CardContent className="p-4 text-sm">{notice}</CardContent></Card>:null}
     <Card className="min-w-0"><CardContent className={showAmount?"grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,6.5rem)_minmax(0,1fr)] items-start gap-3 p-4 text-sm":"min-w-0 p-4 text-sm"} data-product-price-quantity>
       {showAmount?<InlineTextField id="product-inline-price" label="Цена, BYN" controller={price} inputMode="decimal" readOnly={!canManage}/>:null}
       <InlineQuantityField controller={quantity} readOnly={!canManage}/>
-      {showAmount?<div className="min-w-0 break-words pt-6" aria-live="polite">Сумма: {formatAmount(total,currency)}</div>:null}
+      {showAmount?<ProductLiveTotal price={price} quantity={quantity} currency={currency}/>:null}
     </CardContent></Card>
     <Card className="min-w-0"><CardContent className="min-w-0 p-4"><InlineTextField id="product-inline-description" label="Техническое описание" controller={controller("description")} readOnly={!canEditTech} multiline largeDescription /></CardContent></Card>
     {measurement}

@@ -7,6 +7,9 @@ export const KANBAN_RENDER_BINDINGS = Object.freeze([
  {relative:'src/components/project-kanban-card.tsx',names:['ProjectKanbanCard']},
  {relative:'src/components/product-kanban-card.tsx',names:['ProductKanbanCard']},
  {relative:'src/app/(app)/projects/[id]/products-tab.tsx',names:['DraggableProduct','StatusColumn','ProductsTab']},
+ {relative:'src/components/product-inline-fields.tsx',names:['ProductInlineDetails']},
+ {relative:'src/components/project-inline-fields.tsx',names:['ProjectConfirmedTotal']},
+ {relative:'src/components/inline-fields.tsx',names:['InlineTextField']},
 ]);
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
 function nameOf(ts,node){if(node.name&&ts.isIdentifier(node.name))return node.name.text;let parent=node.parent;if(ts.isCallExpression(parent)&&parent.arguments.includes(node))parent=parent.parent;return ts.isVariableDeclaration(parent)&&ts.isIdentifier(parent.name)?parent.name.text:null;}
