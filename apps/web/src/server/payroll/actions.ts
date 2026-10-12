@@ -29,6 +29,7 @@ import {
   getPayrollCurrency,
   isValidMonth,
   round2,
+  readPayrollSummary,
 } from "./queries";
 
 
@@ -146,8 +147,9 @@ export async function settleAll(
   if (!cashAccountId) return { ok: false, error: "Выберите кассу для расчёта" };
   const account = (await listCashAccounts()).find((row) => row.id === cashAccountId && row.active);
   if (!account || !isCashCurrency(account.currency)) return { ok: false, error: "Активная касса не найдена" };
-  const dues = await getEmployeeDues();
-  if (dues.some((row) => row.due === null) || await getOrgBalance() === null) return { ok: false, error: BYN_UNAVAILABLE_REASON };
+  const initialSnapshot = await readPayrollSummary(month);
+  const dues = await getEmployeeDues(initialSnapshot);
+  if (dues.some((row) => row.due === null) || await getOrgBalance(initialSnapshot) === null) return { ok: false, error: BYN_UNAVAILABLE_REASON };
   const debtors = dues.filter((row): row is typeof row & { due: number } => row.due !== null && row.due > 0);
   if (debtors.length === 0) {
     return { ok: false, error: "Задолженности перед сотрудниками нет" };
@@ -169,7 +171,8 @@ export async function settleAll(
   let totalPaid = 0;
   const shortPaid: string[] = [];
   for (const debtor of debtors) {
-    const [cashRows, orgAvailable, currentDues] = await Promise.all([listCashAccounts(), getOrgBalance(), getEmployeeDues()]);
+    const preview = await readPayrollSummary(month, debtor.userId);
+    const [cashRows, orgAvailable, currentDues] = await Promise.all([listCashAccounts(), getOrgBalance(preview), getEmployeeDues(preview)]);
     const cashAvailable = cashRows.find((row) => row.id === cashAccountId)?.balance ?? 0;
     const currentDue = currentDues.find((row) => row.userId === debtor.userId);
     if (orgAvailable === null || currentDue?.due === null) return { ok: false, error: BYN_UNAVAILABLE_REASON, paidCount, totalPaid, shortPaid };

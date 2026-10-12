@@ -13,6 +13,7 @@ import {
   getTurnoverAccruals,
   isValidMonth,
   listPayrollUsers,
+  readPayrollSummary,
 } from "@/server/payroll/queries";
 import { listAdvanceOptions } from "@/server/payroll/cash-actions";
 
@@ -35,16 +36,17 @@ export default async function FinancePayrollPage({
   if (param !== undefined && !isValidMonth(param)) redirect("/finance/payroll?month=" + currentMonth());
   const month = param ?? currentMonth();
 
+  const snapshot = await readPayrollSummary(month);
   const [summary, currency, turnover, turnoverAccruals, users, orgBalance, dues, estimates, cashOptions] =
     await Promise.all([
-      getPayrollSummary(month),
+      getPayrollSummary(month, snapshot),
       getPayrollCurrency(),
       getMonthTurnover(month),
-      getTurnoverAccruals(month),
-      listPayrollUsers(),
-      getOrgBalance(),
-      getEmployeeDues(),
-      getCurrentMonthEstimates(),
+      getTurnoverAccruals(month, snapshot),
+      listPayrollUsers(snapshot),
+      getOrgBalance(snapshot),
+      getEmployeeDues(snapshot),
+      getCurrentMonthEstimates(snapshot),
       listAdvanceOptions(),
     ]);
 
