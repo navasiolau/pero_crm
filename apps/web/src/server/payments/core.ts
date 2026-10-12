@@ -15,11 +15,11 @@ export { createPaymentInTransaction, type PreparedPayment } from "./transaction"
 
 export { paymentSchema } from "./contracts";
 
-import type { TaskTransaction } from "@/server/tasks/transaction";
+import type { MutationTransaction } from "@/server/transactions/coordinator";
 import type { PaymentEffectContext } from "./post-commit";
 export type PaymentScenarioResult = {ack: PaymentMutationResult; effects?: PaymentEffectContext};
 export type PaymentScenarioDependencies = {reader: Pick<Prisma.TransactionClient, "changeLog" | "payment">;
-  transaction: TaskTransaction; prepare(data: PaymentData): Promise<PreparedPayment>};
+  transaction: MutationTransaction; prepare(data: PaymentData): Promise<PreparedPayment>};
 
 // Ядро создания платежа (§11): приход от клиента или расход на проект.
 // Используется и вебом (finance-tab), и telegram-ботом — актёр передаётся
