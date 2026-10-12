@@ -2,7 +2,7 @@
   "branch": "bugfix/165",
   "base": "c6508448450813450b5dbb6a67d77494c37f6cdb",
   "productionFiles": 6,
-  "testFiles": 5,
+  "testFiles": 6,
   "files": [
     {
       "path": "apps/web/src/server/tasks/actions.ts",
@@ -58,6 +58,11 @@
       "path": "apps/web/tests/work-shares-settlement.test.ts",
       "sha256": "ce97ea966d72144fbd2ec993761e67df2db771dd3f624d876f983fead7a4d4c3",
       "lines": 264
+    },
+    {
+      "path": "apps/web/tests/journal-admin-only.test.ts",
+      "sha256": "4b3107320d1b30994896daf73a6ab9a77f84b16a5924cbfa964ec28f0b8f4520",
+      "lines": 46
     }
   ]
 }
