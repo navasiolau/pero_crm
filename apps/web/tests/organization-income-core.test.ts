@@ -13,7 +13,7 @@ inject('../src/server/plugins/changelog',{writeChangeLog:async()=>{}});inject('.
 inject('../src/server/tasks/transaction',{withTaskTransaction:async(fn:(t:typeof tx)=>unknown)=>{const before={writes,audits,events,saved};try{if(deactivateBeforeTransaction)articleActive=false;return await fn(tx)}catch(e){({writes,audits,events,saved}=before);throw e}}});
 inject('../src/server/finance/nbrb',{isCurrency:(v:string)=>['BYN','USD','EUR','RUB'].includes(v),getNbrbRate:async()=>{fxCalls++;return{rate:3,date:'2026-10-02'}},equivalents:(amount:number,rate:number,projectRate:number)=>({bynAmount:Math.round(amount*rate*100)/100,projectAmount:Math.round(amount*rate/projectRate*100)/100})});
 inject('../src/server/payroll/cash-core',{readCashBalance:async()=>new Prisma.Decimal(1000),readOrgBalance:async(_tx:unknown,rate:string,delta:string)=>{assert.equal(rate,'1.000000');assert.equal(delta,'-300.00');return new Prisma.Decimal(1000)}});
-const {createPaymentCore,createPaymentInTransaction}=require('../src/server/payments/core') as typeof import('../src/server/payments/core');
+const {createPaymentCore,createPaymentInTransaction}=require('../src/server/payments/service') as typeof import('../src/server/payments/service');
 const actor={id:'a',name:'A',roles:['ACCOUNTANT' as const],source:'web' as const};
 const input={clientMutationId:'00000134-0000-4000-8000-000000000102',projectId:'p',direction:'INCOME' as const,amount:100,currency:'USD',cashAccountId:'cash'};
 

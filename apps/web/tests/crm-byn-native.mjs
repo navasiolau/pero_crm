@@ -7,7 +7,7 @@ import { existsSync } from "node:fs";
 let phase = "target_guard";
 import { PrismaClient } from "@prisma/client";
 import { createProjectCore } from "../src/server/projects/core.ts";
-import { createPaymentCore } from "../src/server/payments/core.ts";
+import { createPaymentCore } from "../src/server/payments/service.ts";
 import { getProjectEconomics } from "../src/server/finance/queries.ts";
 import { getMyPayroll, currentMonth } from "../src/server/payroll/queries.ts";
 

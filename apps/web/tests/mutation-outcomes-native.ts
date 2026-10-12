@@ -305,7 +305,7 @@ export async function executeMutationNative(approval: MutationNativeApproval) {
     inject("../src/server/notifications/notify", { notifyOrg: async () => { run.effects.push("org"); throw Error("QA133_INJECTED_EFFECT"); } });
     const { createTaskTransaction } = require("../src/server/tasks/transaction") as typeof import("../src/server/tasks/transaction");
     const { changeTaskStatusCore } = require("../src/server/tasks/completion-core") as typeof import("../src/server/tasks/completion-core");
-    const { createPaymentCore } = require("../src/server/payments/core") as typeof import("../src/server/payments/core");
+    const { createPaymentCore } = require("../src/server/payments/service") as typeof import("../src/server/payments/service");
     const transaction: TaskTransaction = createTaskTransaction(facade);
     const actor = (key: "worker" | "manager" | "accountant"): DomainActor => ({ id: owner[key], name: prefix + "-" + key, roles: [key === "worker" ? "WORKER" : key === "manager" ? "MANAGER" : "ACCOUNTANT"], source: "web" });
     const begin = (phase: Phase, options: Pick<Run, "mode" | "fault"> = {}) => { run = { phase, ...options, transactionCalls: 0, writes: 0, partialBeforeFault: 0, effects: [] }; };
