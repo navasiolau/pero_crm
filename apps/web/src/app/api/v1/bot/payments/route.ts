@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { authenticate, isErrorResponse } from "@/server/api/auth";
-import { createPaymentCore } from "@/server/payments/core";
+import { createPaymentCore } from "@/server/payments/service";
 import {
   domainError,
   isActorError,

@@ -14,7 +14,7 @@ const receiptLookup = {findUnique: async () => null};
 const forbidden = new Proxy({}, { get(_target, key) {if(key === "changeLog") return receiptLookup; reads++; throw Error("DATABASE_BEFORE_DOCUMENT_VALIDATION"); } });
 inject("../src/lib/prisma", { prisma: forbidden });
 inject("next/cache", { revalidatePath() {} });
-const { createPaymentCore, createPaymentInTransaction } = require("../src/server/payments/core") as typeof import("../src/server/payments/core");
+const { createPaymentCore, createPaymentInTransaction } = require("../src/server/payments/service") as typeof import("../src/server/payments/service");
 const actor = { id: "actor", name: "Actor", roles: ["ACCOUNTANT" as const], source: "web" as const };
 const input = { clientMutationId: "00000134-0000-4000-8000-000000000109", projectId: "project", direction: "EXPENSE" as const, amount: 10, currency: "BYN", cashAccountId: "cash", expenseArticleId: "article" };
 const prepared = { project: { id: "project", number: "1", currency: "BYN" }, account: { id: "cash", name: "Cash" }, articleId: "article", paidAt: new Date(), rate: 1, rateDate: null, amount: 10, bynAmount: 10 };

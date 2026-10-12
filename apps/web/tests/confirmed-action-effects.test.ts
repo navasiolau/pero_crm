@@ -47,7 +47,7 @@ inject("../src/server/tasks/transaction", { withTaskTransaction: async (operatio
   if (loseAck) { loseAck = false; if (fault === "proof") failProof = true; throw Error("Injected lost commit ACK"); }
   return value;
 } });
-const payment = require("../src/server/payments/core").createPaymentCore as (actor: object, input: PaymentInput) => Promise<{ ok: boolean; resultId?: string; paymentId?: string; outcome?: string; retrySafe?: boolean }>;
+const payment = require("../src/server/payments/service").createPaymentCore as (actor: object, input: PaymentInput) => Promise<{ ok: boolean; resultId?: string; paymentId?: string; outcome?: string; retrySafe?: boolean }>;
 const actor = { id: "accountant", name: "QA", roles: ["ACCOUNTANT"], source: "web" };
 function reset() { alternateTransaction = null; receiptReads = []; workFixture = null; rows = []; logs = []; events = []; sequence = 0; fault = null; loseAck = false; failProof = false; calls.length = 0; }
 const input = (): PaymentInput => ({ direction: "INCOME", amount: 100, currency: "BYN", cashAccountId: "cash", clientMutationId: randomUUID() });
@@ -267,7 +267,7 @@ test("ten serialized actual payment commands and deleted receipt preserve one or
   const results = await Promise.all(Array.from({length:10},()=>payment(actor,data)));
   assert.ok(results.every(row=>row.ok&&row.resultId===results[0].resultId)); assert.equal(rows.length,1); assert.equal(logs.length,2); assert.equal(events.length,1);
   rows[0].deletionId="owned-removal";
-  const removed = await payment(actor,data) as Awaited<ReturnType<typeof import("../src/server/payments/core").createPaymentCore>>;
+  const removed = await payment(actor,data) as Awaited<ReturnType<typeof import("../src/server/payments/service").createPaymentCore>>;
   assert.equal(removed.ok,false); if(!removed.ok){assert.equal(removed.kind,"removed");assert.equal(removed.removedPaymentId,results[0].resultId);assert.equal(removed.clientMutationId,data.clientMutationId);}
   assert.equal(rows.length,1);assert.equal(events.length,1);
   const independent = await Promise.all(["00000134-0000-4000-8000-000000000212", "00000134-0000-4000-8000-000000000213"].map(clientMutationId=>payment(actor,{...data,clientMutationId})));

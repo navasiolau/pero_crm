@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type {Role} from '@prisma/client';
 import {authConfig} from '../src/auth.config';
-import {createPaymentCore} from '../src/server/payments/core';
+import {createPaymentCore} from '../src/server/payments/service';
 import {createProjectCore} from '../src/server/projects/core';
 const actor=(roles:Role[])=>({id:'actor',name:'Actor',roles,source:'web' as const});
 test('actual route policy admits finance workspace but keeps accountant outside general projects',()=>{

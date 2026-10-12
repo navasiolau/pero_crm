@@ -10,7 +10,7 @@ import { getPayrollCurrency } from "@/server/payroll/queries";
 import { getNbrbRate } from "@/server/finance/nbrb";
 
 import type { PaymentMutationResult } from "./contracts";
-import { createPaymentCore } from "./core";
+import { createPaymentCore } from "./service";
 
 // Server actions — тонкие обёртки над ядром (./core): сессия → актёр
 // (source "web"), вся логика платежа и проверка FINANCE_ROLES — в ядре

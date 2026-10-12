@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';import {randomUUID} from 'node:crypto';
 import {Prisma,PrismaClient} from '@prisma/client';
 import {guard} from './product-attachments-native.mjs';
-import {createPaymentCore,createPaymentInTransaction} from '../src/server/payments/core.ts';
+import {createPaymentCore,createPaymentInTransaction} from '../src/server/payments/service.ts';
 import {readCashBalance,readOrgBalance} from '../src/server/payroll/cash-core.ts';
 async function fingerprint(db){const tables=await db.$queryRawUnsafe("SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename"),data={};for(const {tablename} of tables){assert.match(tablename,/^[A-Za-z_][A-Za-z0-9_]*$/);const value=tablename==='ApiToken'?"(to_jsonb(t)-'lastUsedAt')::text":'row_to_json(t)::text';const [row]=await db.$queryRawUnsafe(`SELECT count(*)::text AS count,md5(COALESCE(string_agg(${value},'' ORDER BY ${value}),'')) AS hash FROM "${tablename}" t`);data[tablename]=row;}const [shape]=await db.$queryRawUnsafe("SELECT md5(COALESCE(string_agg(v,'' ORDER BY v),'')) AS hash FROM (SELECT row_to_json(c)::text AS v FROM information_schema.columns c WHERE table_schema='public' UNION ALL SELECT json_build_object('table',t.relname,'constraint',c.conname,'definition',pg_get_constraintdef(c.oid))::text AS v FROM pg_constraint c JOIN pg_class t ON t.oid=c.conrelid JOIN pg_namespace n ON n.oid=t.relnamespace WHERE n.nspname='public') s");return{data,schemaHash:shape.hash};}
 let phase='guard',referenceAvailability=null;

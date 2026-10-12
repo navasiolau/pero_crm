@@ -17,7 +17,7 @@ let activeTransactions = 0, maxActiveTransactions = 0, advisoryCalls = 0;
 type TransactionTrace = { calls: string[]; failed: boolean };
 let transactionTraces: TransactionTrace[] = [];
 let serviceErrors: string[] = [];
-let createPaymentCore: typeof import("../src/server/payments/core").createPaymentCore;
+let createPaymentCore: typeof import("../src/server/payments/service").createPaymentCore;
 let issuePayoutCore: typeof import("../src/server/payroll/cash-core").issuePayoutCore;
 let withTaskTransaction: typeof import("../src/server/tasks/transaction").withTaskTransaction;
 const date = new Date().toISOString().slice(0, 10);
@@ -104,7 +104,7 @@ before(() => {
   withTaskTransaction = realTransaction.createTaskTransaction(database);
   inject("../src/server/tasks/transaction", { withTaskTransaction });
   issuePayoutCore = require("../src/server/payroll/cash-core").issuePayoutCore;
-  createPaymentCore = require("../src/server/payments/core").createPaymentCore;
+  createPaymentCore = require("../src/server/payments/service").createPaymentCore;
 });
 
 test("actual expense writer and actual advance core share ReadCommitted lock; only one fits 1000 BYN", async () => {
