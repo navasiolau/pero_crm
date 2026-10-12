@@ -1,4 +1,5 @@
 import path from "node:path";
+import type {Readable} from "node:stream";
 import { deleteExactS3Object } from "./s3-delete-exact";
 
 import {
@@ -35,11 +36,13 @@ export function storageConfiguration() {
 }
 
 let client: S3Client | null = null;
+let streamClient: S3Client | null = null;
 
-function s3(): S3Client {
+function s3(streaming=false): S3Client {
   const config = storageConfiguration();
   if (config.mode !== "s3") throw new Error("STORAGE_CONFIG_INVALID");
-  client ??= new S3Client({
+  const makeClient = () => new S3Client({
+    ...(streaming?{maxAttempts:1}:{}),
     endpoint: config.endpoint,
     region: config.region,
     forcePathStyle: true,
@@ -48,7 +51,7 @@ function s3(): S3Client {
       secretAccessKey: config.secretAccessKey,
     },
   });
-  return client;
+  return streaming?(streamClient??=makeClient()):(client??=makeClient());
 }
 
 export function fileKey(projectId: string, storedName: string): string {
@@ -74,6 +77,18 @@ export async function s3Put(
   );
 }
 
+export type S3UploadSource={size:number;contentHash:string;openRead:()=>Promise<Readable>};
+/** Один Put для готового spool: неизвестный ACK не повторяем автоматически. */
+export async function s3PutStream(key:string,source:S3UploadSource,contentType?:string,signal?:AbortSignal):Promise<void>{
+  if(!Number.isSafeInteger(source.size)||source.size<0||!/^[a-f0-9]{64}$/.test(source.contentHash))throw Error("UPLOAD_STREAM_FACTS_INVALID");
+  const body=await source.openRead();
+  try{
+    await s3(true).send(new PutObjectCommand({
+      Bucket:process.env.S3_BUCKET,Key:key,Body:body,ContentLength:source.size,ContentType:contentType,
+      ChecksumSHA256:Buffer.from(source.contentHash,"hex").toString("base64"),
+    }),{abortSignal:signal});
+  }finally{body.destroy();}
+}
 /** Стрим объекта или null, если ключа нет. */
 export async function s3Get(key: string): Promise<ReadableStream | null> {
   try {
