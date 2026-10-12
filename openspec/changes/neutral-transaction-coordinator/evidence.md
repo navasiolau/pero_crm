@@ -1,0 +1,49 @@
+# Evidence
+
+## Source and local checks
+
+feature/150 создана от свежего origin/staging cfc4f91a; зависимость154 принята обычным FF-слиянием aa0a65dd. Четыре production-файла переносят прежнюю реализацию в нейтральный модуль и меняют два type imports. SQL lock18435/55001, lock→callback, ReadCommitted, maxWait5000/timeout15000 и тела денежных writers/confirmation сохранены. Factory/singleton compatibility aliases указывают на те же объекты.
+
+Selected existing suites: work-shares-transaction, cash-mixed-writers, confirmed-action-effects, payment-scenario, task-creation — **29/29 PASS**. Проверены aliases/options/order и callback rollback, денежный cap, UUID replay, task atomicity и подтверждённые/неясные outcomes. Полный strict TypeScript и scoped ESLint PASS; после добавления native helper strict TypeScript/его ESLint PASS. git diff --check PASS.
+
+`shared-transaction-native.ts` импортирован через существующий tsx без вызова execute: **INERT**, effects0; source4 digest `c6a7bafea527472016f703ec65f4a35adc346cbd73929a6fbd3689bb1f1b88c0`. Значения по DI не выдаются за фактическую проверку PostgreSQL. Independent SOURCE_CODE_GO + INERT_EXEC_PROTOCOL_GO получен: neutral factory/aliases/types и один actual-writer race/fence/own-journal/cleanup protocol без blocking findings. Byte pin native `eceb8cb12f150137a914cdc3e5b047f40cb268a1e7c0acebf54aeb8d49f0c789`, thin private launcher `2dc12ae321351c040d46d3533968255ed9c98a69100fdffa801b2102e124adc6`.
+
+## Native preparation
+
+Один запланированный run `8e951393-210b-4683-ae90-eb627bdc380e`, существующая local5433/pero_crm, container bf45c761…, qualified original64/schema digest `b373ec8ec1ab293abc175e1e2e89b9f99f84e4a331dfd22be2b39e0d62fee6d4`. Target/source guards выполняются до constructors, Root-reviewed approval привязан к run/revision/source/baseline/exclusive window/outbox disabled.
+
+Три own actors (MANAGER/ACCOUNTANT/WORKER, payNONE, no login), BYN cash с own funding1000, own article и READY document metadata без blob. Отдельный own INCOME вне кассы только обеспечивает достаточный баланс организации. Настоящие `createPaymentInTransaction` и `issuePayoutCore` вызываются через нейтральный factory на двух connection_limit1 клиентах. PID2 должен ждать advisory lock; после расхода500 аванс600 должен отклониться, cash500. Same expense UUID должен вернуть один ID без новых audit/event. Отдельный own INSERT затем callback abort проверяется через существующий133 fresh fence на втором соединении.
+
+Статические own UUID и динамические payment/payout/audit/event IDs журналируются до commit. Exact current PKs блокируются, все FK проверяются существующим helper; неизвестные ссылки/дрейф originals означают HOLD. Cleanup удаляет только известные own IDs, fingerprints originals/schema должны совпасть до/во время/после, own0. Pending writers ожидаются, clients disconnect ожидается; post-source/restore/disconnect failure не допускают CLOSED/PASS. Ошибка оставляет HOLD и own manifest, без автоповтора.
+
+Первый actual native attempt завершился HOLD, как описано ниже; денежные критерии не приняты. Auth native явный domain actor; HTTP/session и document blob не покрываются. Warehouse/global state/settlements/history не меняются. Staging/CI/actual acceptance **NOT_RUN**, commit pending. Remote57e reconciliation/cleanup закрыта acceptance observer с честным historical evidence limit; эта задача не обращается к remote dataset/executor. Main/production/restic/dumps запрещены.
+
+## Native loader HOLD and inert correction
+
+Root ONE разрешил один первоначальный run8e951393 на pin eceb8cb1…/launcher2dc12ae3…. Он завершился EXIT1 за3.29s, HOLD без replay. Сохранены только intent/baseline/hold/module-restore-hold; actual baseline before b373 совпал. Нет owned-N, cleanup-intent, CLOSED. Журнал содержит только planned IDs; after-originals/actual owned counts в этом запуске NOT_VERIFIED. Предыдущий exact native caller Node process count0 подтверждён отдельным read-only OS inventory; текст finally сам по себе не объявлен CLOSED.
+
+Bounded inert воспроизведение тех же пяти load с constructor-fail guard и stub Prisma доказало failure в cash-core: FIXTURE_CACHE_CONFLICT, restore FIXTURE_RESTORE_CONFLICT, SQLcalls0/constructors0/datasource false. payments/transaction транзитивно загружает cash-core до его explicit scope.load. Native helper теперь сначала explicit load cash-core, затем payments/transaction; app sources/locks/roles/payload/writers не менялись. Тот же corrected inert sequence PASS, no failure/restore code, SQLcalls0/constructors0. Добавлены только безопасные phase/error-name/known-code/P-code поля HOLD для диагностики будущего разрешённого запуска.
+
+Подготовлен отдельный finite read-only caller для прежних exact planned PKs и snapshot текущих originals; default INERT/effects0 PASS. Он не выполняется до собственного Root READONLY ONE после review. Денежный native не повторяется; очистка/расширение ownership/new UUID не выполняются. Новый EXEC_PROTOCOL review и Root решение после reconciliation pending.
+
+## Reconciliation and second fixture correction
+
+Root READONLY ONE старого8e: PASS2.25s/EXIT0, exact planned PK counts0, current/excluded-originals full64/schema b373, source4c6a7 pre/post, client disconnect awaited. Receipt reconcile-closed.json SHAa83e74ce7ccfe9f6e6bcd7c15a59219502fdf4ce5818a7b5675ecc440ced30db. Денежные writers не запускались; isolation default + SET TRANSACTION READ ONLY, без заявления RR. Old loader HOLD сохранён.
+
+Root fresh ONE cc1547d2-82e0-4cf8-b557-e907660e69f3: native a87dcec1… отличается от reviewed9b234701… только новым run literal, old journals не перезаписаны. EXIT1/3.41s, phase race/CASH_CAP_REJECTION_REQUIRED. Расход fulfilled/advance rejected/pg-lock-wait assertions прошли, но конкретная cash-cap причина отказа не подтвердилась; actual reason enum не был сохранён. Динамические payment/audit/event/receipt IDs журналированы до commit, cleanup не выполнялся автоматически. Это partial evidence, без Native PASS.
+
+Source fact: ADVANCE_ROLES в roles.ts51–53 равны FINANCE_ROLES и не включают MANAGER; native-фактура передавала MANAGER, а accepted DI-case использует ADMIN. Production policy не менялась. Следующая фикстура использует уже предусмотренного ACCOUNTANT и согласованный createdBy guard, без добавления users/roles. Pure existing assertPayoutRole: ACCOUNTANT allowed/MANAGER denied — INERT PASS, SQL0. Corrected five-module inert sequence constructors0/SQL0, no failure/restore code. Future race-result сохраняет только исходы/enum/finite error-name/P-code/PIDs/wait перед строгими прежними assertions.
+
+Root отдельные inspect/cleanup ONE на reviewed lifecycle60c35adb…: inspect2.49s/EXIT0, exact known12 (User3/Cash1/Article1/Document1/Payment3/ChangeLog2/Event1), typed expense500/receipt/audit/event и все FK проверены, payout candidate count0, protected64/schema b373; client closed. Receipt cc-inspect-closed.json SHA170878338707d50dd1e23cc08b131e99e95650ddc2fae817d481b753b3f4790b. Cleanup3.11s/EXIT0 только этих12 после общей блокировки/exact PK/all FK/current-original guard; inside/after full64/schema b373, all known PK0, source4 pre/post, disconnect awaited before CLOSED. Receipt cc-cleanup-closed.json SHA023e8d4700e89cf6bbc1dfd0c155fc7061f7c18c4bddc03b54e1e3d15c88f9be. Все файлы старогоCC сохранены; original payroll/FX/roles/prefs и warehouse не изменялись.
+
+Критерий actual mixed500/600 + replay/fresh fence для разрешённого финансового actor ещё pending. Future helper code review/Root new ONE необходимы; нового native/UUID самостоятельно не запущено. App source4/coordinator неизменны.
+
+## Final actual native acceptance
+
+После independent updated EXEC_PROTOCOL_GO a948ba932… Root разрешил один свежий nonce afb6e5bb-d309-4658-9bac-0314f4d4cce2. Native byte edc092a19f9cc8fd09c0f7143bf7c1d0d5f5fda4e4822d6abdd0740ad2638a68 после нормализации только run literal совпадает с reviewed a948ba932adba8c6d3ecc217a8e89d4a005140917643e906677f18e6e6a0792c. Source4c6a7 и launcher2dc12ae3… неизменны, прежние журналы сохранены. Существующая local5433/pero_crm/BF45 qualified до обоих constructors, без нового стенда/schema/seed/backup.
+
+Actual **NATIVE_PASS/CLOSED**, process6.50s/EXIT0. Настоящие соединения PID753795/753796, connection_limit1; second advisory lock wait наблюдался через pg_locks,27.04ms до снятия barrier. Expense500 fulfilled, valid ACCOUNTANT advance600 rejected, сохранённая до строгого assert категория CASH_CAP/error-name Error. Cash1000→500, expenseCount1/payoutCount0. Same expense UUID replay вернул прежний ID без дополнительных business audit/receipt/outbox. Own INSERTprobe затем callback abort подтверждён accepted133 fresh fence на втором соединении, ROLLED_BACK/probe0.
+
+Known static и dynamic IDs записаны до commit. Перед own-delete взяты общая денежная блокировка/exact PK locks, проверены все FK и current protected originals. После exact own cleanup inside/post ALL64 tables+constraints/functions/triggers/indexes digest равен before b373ec8ec1ab293abc175e1e2e89b9f99f84e4a331dfd22be2b39e0d62fee6d4, all known own PK0. Source4 post c6a7 matched, module/network guards восстановлены, оба disconnect awaited до CLOSED. Никаких original payroll/FX/roles/history/prefs или warehouse-state изменений и outbound delivery.
+
+Private closed journal `.playwright-mcp/revision-acceptance/afb6e5bb-d309-4658-9bac-0314f4d4cce2/closed.json`, SHA256e955796000b4c347286c8ec8d9fd5d25ac9ad7a9d79bac85464abc1b20ff1f77. race-result.json содержит два исхода/CASH_CAP/PIDs/wait. Native seams: явный own actor вместо HTTP auth, READY document metadata без blob, raw own funding. Actual deployed staging/CI №150 **NOT_RUN**; final receipt review/own authorized commit pending, Root integration/push only. После PASS дополнительные native/UI/full-suite/TS loops не выполняются. №139/140 ownership не открыто до Root handoff.

@@ -1,5 +1,5 @@
 import type { Prisma } from "@prisma/client";
-import type { TaskTransaction } from "@/server/tasks/transaction";
+import type { MutationTransaction } from "@/server/transactions/coordinator";
 
 export type MutationOutcome<T> =
   | { outcome: "COMMITTED"; value: T; recovered: boolean }
@@ -7,7 +7,7 @@ export type MutationOutcome<T> =
   | { outcome: "UNKNOWN"; error: unknown };
 
 /** Возвращённый callback ещё не подтверждает commit. Проверка никогда не повторяет запись. */
-export async function confirmMutation<T>(transaction: TaskTransaction,
+export async function confirmMutation<T>(transaction: MutationTransaction,
   mutation: (tx: Prisma.TransactionClient) => Promise<T>,
   verify: (tx: Prisma.TransactionClient, candidate: T | undefined) => Promise<T | null>,
 ): Promise<MutationOutcome<T>> {
