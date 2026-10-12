@@ -1,0 +1,9 @@
+{
+  "runId": "a8cbd9bd-c54c-4ca9-bec9-ac542a9e3abb",
+  "mode": "OWNED_ROLLBACK",
+  "ok": false,
+  "failure": "TASK147_NATIVE_FAILED_NO_RUNTIME_CONTEXT",
+  "noReplay": true,
+  "clientsDisconnected": true,
+  "fetchRestored": true
+}

@@ -26,6 +26,7 @@ export async function GET(request: Request) {
   }
   const contains = { contains: q, mode: "insensitive" as const };
   const visibility = projectVisibilityWhere(actor);
+  const taskPredicate={AND:[office ? {} : { assigneeId:session.user.id },{OR:[{title:contains},{project:{number:contains}}]}]};
 
   const [projects, products, tasks, clients] = await Promise.all([
     prisma.project.findMany({
@@ -66,13 +67,7 @@ export async function GET(request: Request) {
       take: 6,
     }),
     prisma.task.findMany({
-      where: {
-        AND: [
-          await taskWorkspaceWhere(actor),
-          office ? {} : { assigneeId: session.user.id },
-          { OR: [{ title: contains }, { project: { number: contains } }] },
-        ],
-      },
+      where: await taskWorkspaceWhere(actor,{tasks:taskPredicate}),
       include: {
         project: { select: { id: true, number: true, title: true } },
         product: { select: { id: true, number: true } },

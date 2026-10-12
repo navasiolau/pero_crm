@@ -175,7 +175,7 @@ export async function listProjects(
   roles: Role[],
   filters: ProjectListFilters,
   paging?: ListPaging,
-): Promise<{ rows: Awaited<ReturnType<typeof fetchProjectRows>>; total: number }> {
+): Promise<{ rows: Awaited<ReturnType<typeof addProjectTaskCounts>>; total: number }> {
   const actor = await resolveVisibilityActor(prisma, { id: userId, roles });
   const engineerIds = filters.engineerIds ?? (filters.engineerId ? [filters.engineerId] : []);
   const filterParticipantIds = [...new Set((await Promise.all([...new Set(engineerIds)].map((id) =>
@@ -187,11 +187,12 @@ export async function listProjects(
   if (filters.sort === "products" && !canViewProductDrafts(actor.roles)) {
     const rows = await fetchProjectRows(where, PROJECT_SORT_MAP.number("desc"), undefined, undefined, actor);
     rows.sort((a, b) => (a._count.products - b._count.products) * (filters.dir === "asc" ? 1 : -1));
-    return { rows: paging ? rows.slice((paging.page - 1) * paging.pageSize, paging.page * paging.pageSize) : rows, total: rows.length };
+    const selected=paging ? rows.slice((paging.page - 1) * paging.pageSize, paging.page * paging.pageSize) : rows;
+    return { rows:await addProjectTaskCounts(selected,actor), total:rows.length };
   }
   if (!paging) {
     const rows = await fetchProjectRows(where, orderBy, undefined, undefined, actor);
-    return { rows, total: rows.length };
+    return { rows:await addProjectTaskCounts(rows,actor), total:rows.length };
   }
   const [rows, total] = await Promise.all([
     fetchProjectRows(
@@ -203,7 +204,16 @@ export async function listProjects(
     ),
     prisma.project.count({ where }),
   ]);
-  return { rows, total };
+  return { rows:await addProjectTaskCounts(rows,actor), total };
+}
+
+// Счётчики задач добавляются после окончательной сортировки и выбора страницы.
+async function addProjectTaskCounts(rows:Awaited<ReturnType<typeof fetchProjectRows>>,actor:VisibilityActor){
+  const counts=rows.length?await prisma.task.groupBy({
+    by:['projectId'],where:await taskWorkspaceWhere(actor,{projectIds:rows.map(row=>row.id)}),_count:{_all:true},
+  }):[];
+  const byProject=new Map(counts.map(row=>[row.projectId,row._count._all]));
+  return rows.map(row=>({...row,_count:{...row._count,tasks:byProject.get(row.id)??0}}));
 }
 
 async function fetchProjectRows(
@@ -222,7 +232,6 @@ async function fetchProjectRows(
       stageHistory: { orderBy: { createdAt: "desc" }, take: 1, select: { toStage: true, createdAt: true } },
       products: { where: productVisibilityWhere(actor), select: { id: true, expectedPrice: true, quantity: true } },
       _count: { select: {
-        tasks: { where: await taskWorkspaceWhere(actor) },
         files: { where: fileVisibilityWhere(actor) },
         products: { where: productVisibilityWhere(actor) },
       } },
@@ -287,7 +296,7 @@ export async function getProjectFor(
         ],
       },
       tasks: {
-        where: await taskWorkspaceWhere(actor),
+        where: await taskWorkspaceWhere(actor,{projectId}),
         include: taskDetailsIncludeFor(actor),
         orderBy: { createdAt: "desc" },
       },

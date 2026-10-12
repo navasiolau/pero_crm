@@ -20,7 +20,7 @@ export default async function MyTasksPage() {
 
   const [tasks, activeTimer, view] = await Promise.all([
     prisma.task.findMany({
-      where: { AND: [{ assigneeId: session.user.id }, await taskWorkspaceWhere(actor)] },
+      where: await taskWorkspaceWhere(actor,{tasks:{assigneeId:session.user.id}}),
       include: taskDetailsIncludeFor(actor),
       orderBy: [
         { status: "asc" },

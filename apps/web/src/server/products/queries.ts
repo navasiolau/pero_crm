@@ -290,7 +290,7 @@ export async function getProductFor(
       assembler: { select: { id: true, name: true, position: true, phone: true } },
       sketchFile: productSketchProjection(actor),
       tasks: {
-        where: await taskWorkspaceWhere(actor),
+        where: await taskWorkspaceWhere(actor,{productKey:key}),
         include: taskDetailsIncludeFor(actor),
         orderBy: { createdAt: "desc" },
       },

@@ -1,9 +1,12 @@
 import {ordinaryFileListView, type OrdinaryFileForList} from "@/server/files/list-view";
-import {taskWorkspaceEligibility,taskReward} from './workspace-contract';
+import {taskWorkspaceEligibility,taskReward,type TaskWorkspaceScope} from './workspace-contract';
 import {maskTaskPaymentRead} from "@/server/access/production-read-projection";
 import {canViewProductMoney} from "@/lib/product-financial-access";
 import type {Prisma} from '@prisma/client';
-export async function taskWorkspaceWhere(actor:VisibilityActor):Promise<Prisma.TaskWhereInput>{return {AND:[taskVisibilityWhere(actor),await taskWorkspaceEligibility(prisma)]};}
+export async function taskWorkspaceWhere(actor:VisibilityActor,scope:TaskWorkspaceScope):Promise<Prisma.TaskWhereInput>{
+  const visibility=taskVisibilityWhere(actor);
+  return{AND:[visibility,await taskWorkspaceEligibility(prisma,scope,visibility)]};
+}
 import { prisma } from "@/lib/prisma";
 import type { TaskDetails } from "@/lib/task-details";
 import type { ProductStatus } from "@prisma/client";

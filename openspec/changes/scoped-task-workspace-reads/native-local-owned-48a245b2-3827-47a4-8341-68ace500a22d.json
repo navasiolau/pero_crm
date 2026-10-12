@@ -1,0 +1,612 @@
+{
+  "ok": true,
+  "runId": "48a245b2-3827-47a4-8341-68ace500a22d",
+  "target": {
+    "target": "local",
+    "revision": "c6508448450813450b5dbb6a67d77494c37f6cdb",
+    "containerId": "bf45c761b5687e54bff1aafea82e8647925b5b425d6743ebdc7d33f4824b0ed5",
+    "databaseName": "pero_crm",
+    "schema": "public",
+    "port": 5433
+  },
+  "sourceDigest": "c9955be6f2e390e3bee62b1ed5c492439d81d16f9fc9a1d364574890ed9dc361",
+  "mode": "OWNED_ROLLBACK",
+  "rolledBack": true,
+  "rollbackVerified": true,
+  "ownedRowsAfter": 0,
+  "outbound": 0,
+  "originalDigest": "6f82f00e5ddec0fdf0daf766913e8c387724752ead4e0a9d23d958a5880c3671",
+  "originalsEqual": true,
+  "checks": [
+    {
+      "scope": "project",
+      "roles": "ADMIN",
+      "rows": 7,
+      "predicateBytes": 1570
+    },
+    {
+      "scope": "product",
+      "roles": "ADMIN",
+      "rows": 3,
+      "predicateBytes": 848
+    },
+    {
+      "scope": "selected-projects",
+      "roles": "ADMIN",
+      "rows": 10007,
+      "predicateBytes": 1942
+    },
+    {
+      "scope": "product-number",
+      "roles": "ADMIN",
+      "rows": 3,
+      "predicateBytes": 848
+    },
+    {
+      "scope": "search",
+      "roles": "ADMIN",
+      "rows": 7,
+      "predicateBytes": 1999
+    },
+    {
+      "scope": "my",
+      "roles": "ADMIN",
+      "rows": 6,
+      "predicateBytes": 2002
+    },
+    {
+      "scope": "global",
+      "roles": "ADMIN",
+      "rows": 10007,
+      "predicateBytes": 1942
+    },
+    {
+      "scope": "project",
+      "roles": "MANAGER",
+      "rows": 6,
+      "predicateBytes": 1278
+    },
+    {
+      "scope": "product",
+      "roles": "MANAGER",
+      "rows": 3,
+      "predicateBytes": 912
+    },
+    {
+      "scope": "selected-projects",
+      "roles": "MANAGER",
+      "rows": 10006,
+      "predicateBytes": 1650
+    },
+    {
+      "scope": "project",
+      "roles": "PROCUREMENT",
+      "rows": 6,
+      "predicateBytes": 1278
+    },
+    {
+      "scope": "product",
+      "roles": "PROCUREMENT",
+      "rows": 3,
+      "predicateBytes": 912
+    },
+    {
+      "scope": "selected-projects",
+      "roles": "PROCUREMENT",
+      "rows": 10006,
+      "predicateBytes": 1650
+    },
+    {
+      "scope": "project",
+      "roles": "ENGINEER",
+      "rows": 3,
+      "predicateBytes": 1148
+    },
+    {
+      "scope": "product",
+      "roles": "ENGINEER",
+      "rows": 3,
+      "predicateBytes": 1148
+    },
+    {
+      "scope": "selected-projects",
+      "roles": "ENGINEER",
+      "rows": 3,
+      "predicateBytes": 1148
+    },
+    {
+      "scope": "project",
+      "roles": "WORKER",
+      "rows": 2,
+      "predicateBytes": 2650
+    },
+    {
+      "scope": "product",
+      "roles": "WORKER",
+      "rows": 0,
+      "predicateBytes": 1953
+    },
+    {
+      "scope": "selected-projects",
+      "roles": "WORKER",
+      "rows": 2,
+      "predicateBytes": 3022
+    },
+    {
+      "scope": "project",
+      "roles": "WORKER+ACCOUNTANT",
+      "rows": 2,
+      "predicateBytes": 2650
+    },
+    {
+      "scope": "product",
+      "roles": "WORKER+ACCOUNTANT",
+      "rows": 0,
+      "predicateBytes": 1953
+    },
+    {
+      "scope": "selected-projects",
+      "roles": "WORKER+ACCOUNTANT",
+      "rows": 2,
+      "predicateBytes": 3022
+    },
+    {
+      "scope": "project",
+      "roles": "ENGINEER+ACCOUNTANT",
+      "rows": 3,
+      "predicateBytes": 1148
+    },
+    {
+      "scope": "product",
+      "roles": "ENGINEER+ACCOUNTANT",
+      "rows": 3,
+      "predicateBytes": 1148
+    },
+    {
+      "scope": "selected-projects",
+      "roles": "ENGINEER+ACCOUNTANT",
+      "rows": 3,
+      "predicateBytes": 1148
+    },
+    {
+      "scope": "project",
+      "roles": "ACCOUNTANT",
+      "rows": 0,
+      "predicateBytes": 316
+    },
+    {
+      "scope": "product",
+      "roles": "ACCOUNTANT",
+      "rows": 0,
+      "predicateBytes": 316
+    },
+    {
+      "scope": "selected-projects",
+      "roles": "ACCOUNTANT",
+      "rows": 0,
+      "predicateBytes": 316
+    },
+    {
+      "scope": "project",
+      "roles": "EMPTY",
+      "rows": 0,
+      "predicateBytes": 316
+    },
+    {
+      "scope": "product",
+      "roles": "EMPTY",
+      "rows": 0,
+      "predicateBytes": 316
+    },
+    {
+      "scope": "selected-projects",
+      "roles": "EMPTY",
+      "rows": 0,
+      "predicateBytes": 316
+    }
+  ],
+  "dashboardCount": 10005,
+  "legacyBaselineRows": 10007,
+  "foreignTasks": [
+    1,
+    10000
+  ],
+  "scopedRows": 7,
+  "predicateBytes": [
+    1570,
+    1570
+  ],
+  "queryBytes": [
+    1781,
+    2650
+  ],
+  "parameterBytes": [
+    54,
+    792
+  ],
+  "plans": [
+    {
+      "queryBytes": 1781,
+      "parameters": 2,
+      "parameterBytes": 54,
+      "plan": {
+        "node": "Nested Loop",
+        "estimatedRows": 1,
+        "cost": 74.79,
+        "children": [
+          {
+            "node": "Merge Join",
+            "estimatedRows": 1,
+            "cost": 66.49,
+            "children": [
+              {
+                "node": "Sort",
+                "estimatedRows": 1,
+                "cost": 8.31,
+                "children": [
+                  {
+                    "node": "Index Scan",
+                    "relation": "Product",
+                    "index": "Product_projectId_suffixInt_idx",
+                    "estimatedRows": 1,
+                    "cost": 8.29
+                  }
+                ]
+              },
+              {
+                "node": "Sort",
+                "estimatedRows": 1,
+                "cost": 58.16,
+                "children": [
+                  {
+                    "node": "Nested Loop",
+                    "estimatedRows": 1,
+                    "cost": 58.15,
+                    "children": [
+                      {
+                        "node": "Nested Loop",
+                        "estimatedRows": 1,
+                        "cost": 57.75,
+                        "children": [
+                          {
+                            "node": "Nested Loop",
+                            "estimatedRows": 1,
+                            "cost": 49.45,
+                            "children": [
+                              {
+                                "node": "Nested Loop",
+                                "estimatedRows": 1,
+                                "cost": 41.07,
+                                "children": [
+                                  {
+                                    "node": "Nested Loop",
+                                    "estimatedRows": 1,
+                                    "cost": 32.76,
+                                    "children": [
+                                      {
+                                        "node": "Nested Loop",
+                                        "estimatedRows": 1,
+                                        "cost": 25.53,
+                                        "children": [
+                                          {
+                                            "node": "Nested Loop",
+                                            "estimatedRows": 1,
+                                            "cost": 24.93,
+                                            "children": [
+                                              {
+                                                "node": "Nested Loop",
+                                                "estimatedRows": 1,
+                                                "cost": 24.62,
+                                                "children": [
+                                                  {
+                                                    "node": "Index Scan",
+                                                    "relation": "Task",
+                                                    "index": "Task_workId_idx",
+                                                    "estimatedRows": 1,
+                                                    "cost": 8.3
+                                                  },
+                                                  {
+                                                    "node": "Index Scan",
+                                                    "relation": "Work",
+                                                    "index": "Work_pkey",
+                                                    "estimatedRows": 1,
+                                                    "cost": 8.3
+                                                  }
+                                                ]
+                                              },
+                                              {
+                                                "node": "Index Scan",
+                                                "relation": "Project",
+                                                "index": "Project_pkey",
+                                                "estimatedRows": 1,
+                                                "cost": 0.31
+                                              }
+                                            ]
+                                          },
+                                          {
+                                            "node": "Index Scan",
+                                            "relation": "Product",
+                                            "index": "Product_pkey",
+                                            "estimatedRows": 1,
+                                            "cost": 0.53
+                                          }
+                                        ]
+                                      },
+                                      {
+                                        "node": "Index Scan",
+                                        "relation": "Project",
+                                        "index": "Project_pkey",
+                                        "estimatedRows": 1,
+                                        "cost": 7.15
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "node": "Index Scan",
+                                    "relation": "Work",
+                                    "index": "Work_pkey",
+                                    "estimatedRows": 1,
+                                    "cost": 8.3
+                                  }
+                                ]
+                              },
+                              {
+                                "node": "Index Scan",
+                                "relation": "Project",
+                                "index": "Project_pkey",
+                                "estimatedRows": 1,
+                                "cost": 8.29
+                              }
+                            ]
+                          },
+                          {
+                            "node": "Index Scan",
+                            "relation": "Product",
+                            "index": "Product_pkey",
+                            "estimatedRows": 1,
+                            "cost": 8.29
+                          }
+                        ]
+                      },
+                      {
+                        "node": "Index Scan",
+                        "relation": "Project",
+                        "index": "Project_pkey",
+                        "estimatedRows": 1,
+                        "cost": 0.38
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "node": "Index Scan",
+            "relation": "Project",
+            "index": "Project_pkey",
+            "estimatedRows": 1,
+            "cost": 8.29
+          }
+        ]
+      }
+    },
+    {
+      "queryBytes": 2650,
+      "parameters": 16,
+      "parameterBytes": 792,
+      "plan": {
+        "node": "Sort",
+        "estimatedRows": 1,
+        "cost": 123.98,
+        "children": [
+          {
+            "node": "Nested Loop",
+            "estimatedRows": 1,
+            "cost": 123.96,
+            "children": [
+              {
+                "node": "Nested Loop",
+                "estimatedRows": 1,
+                "cost": 115.62,
+                "children": [
+                  {
+                    "node": "Nested Loop",
+                    "estimatedRows": 1,
+                    "cost": 107.31,
+                    "children": [
+                      {
+                        "node": "Nested Loop",
+                        "estimatedRows": 1,
+                        "cost": 99.01,
+                        "children": [
+                          {
+                            "node": "Nested Loop",
+                            "estimatedRows": 1,
+                            "cost": 82.69,
+                            "children": [
+                              {
+                                "node": "Nested Loop",
+                                "estimatedRows": 1,
+                                "cost": 74.38,
+                                "children": [
+                                  {
+                                    "node": "Nested Loop",
+                                    "estimatedRows": 1,
+                                    "cost": 58.06,
+                                    "children": [
+                                      {
+                                        "node": "Nested Loop",
+                                        "estimatedRows": 1,
+                                        "cost": 49.75,
+                                        "children": [
+                                          {
+                                            "node": "Nested Loop",
+                                            "estimatedRows": 1,
+                                            "cost": 42.53,
+                                            "children": [
+                                              {
+                                                "node": "Nested Loop",
+                                                "estimatedRows": 1,
+                                                "cost": 41.93,
+                                                "children": [
+                                                  {
+                                                    "node": "Nested Loop",
+                                                    "estimatedRows": 1,
+                                                    "cost": 41.62,
+                                                    "children": [
+                                                      {
+                                                        "node": "Nested Loop",
+                                                        "estimatedRows": 1,
+                                                        "cost": 25.3,
+                                                        "children": [
+                                                          {
+                                                            "node": "Nested Loop",
+                                                            "estimatedRows": 1,
+                                                            "cost": 17,
+                                                            "children": [
+                                                              {
+                                                                "node": "Index Scan",
+                                                                "relation": "Task",
+                                                                "index": "Task_workId_idx",
+                                                                "estimatedRows": 1,
+                                                                "cost": 8.31
+                                                              },
+                                                              {
+                                                                "node": "Nested Loop",
+                                                                "estimatedRows": 1,
+                                                                "cost": 8.68,
+                                                                "children": [
+                                                                  {
+                                                                    "node": "Index Scan",
+                                                                    "relation": "Product",
+                                                                    "index": "Product_pkey",
+                                                                    "estimatedRows": 1,
+                                                                    "cost": 8.29
+                                                                  },
+                                                                  {
+                                                                    "node": "Index Scan",
+                                                                    "relation": "Project",
+                                                                    "index": "Project_pkey",
+                                                                    "estimatedRows": 1,
+                                                                    "cost": 0.38
+                                                                  }
+                                                                ]
+                                                              }
+                                                            ]
+                                                          },
+                                                          {
+                                                            "node": "Index Scan",
+                                                            "relation": "Project",
+                                                            "index": "Project_pkey",
+                                                            "estimatedRows": 1,
+                                                            "cost": 8.29
+                                                          }
+                                                        ]
+                                                      },
+                                                      {
+                                                        "node": "Index Scan",
+                                                        "relation": "Work",
+                                                        "index": "Work_pkey",
+                                                        "estimatedRows": 1,
+                                                        "cost": 8.3
+                                                      }
+                                                    ]
+                                                  },
+                                                  {
+                                                    "node": "Index Scan",
+                                                    "relation": "Project",
+                                                    "index": "Project_pkey",
+                                                    "estimatedRows": 1,
+                                                    "cost": 0.31
+                                                  }
+                                                ]
+                                              },
+                                              {
+                                                "node": "Index Scan",
+                                                "relation": "Product",
+                                                "index": "Product_pkey",
+                                                "estimatedRows": 1,
+                                                "cost": 0.53
+                                              }
+                                            ]
+                                          },
+                                          {
+                                            "node": "Index Scan",
+                                            "relation": "Project",
+                                            "index": "Project_pkey",
+                                            "estimatedRows": 1,
+                                            "cost": 7.15
+                                          }
+                                        ]
+                                      },
+                                      {
+                                        "node": "Index Scan",
+                                        "relation": "Work",
+                                        "index": "Work_pkey",
+                                        "estimatedRows": 1,
+                                        "cost": 8.3
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "node": "Index Scan",
+                                    "relation": "Work",
+                                    "index": "Work_pkey",
+                                    "estimatedRows": 1,
+                                    "cost": 8.3
+                                  }
+                                ]
+                              },
+                              {
+                                "node": "Index Scan",
+                                "relation": "Product",
+                                "index": "Product_pkey",
+                                "estimatedRows": 1,
+                                "cost": 8.29
+                              }
+                            ]
+                          },
+                          {
+                            "node": "Index Scan",
+                            "relation": "Work",
+                            "index": "Work_pkey",
+                            "estimatedRows": 1,
+                            "cost": 8.3
+                          }
+                        ]
+                      },
+                      {
+                        "node": "Index Scan",
+                        "relation": "Product",
+                        "index": "Product_pkey",
+                        "estimatedRows": 1,
+                        "cost": 8.29
+                      }
+                    ]
+                  },
+                  {
+                    "node": "Index Scan",
+                    "relation": "Product",
+                    "index": "Product_pkey",
+                    "estimatedRows": 1,
+                    "cost": 8.29
+                  }
+                ]
+              },
+              {
+                "node": "Index Scan",
+                "relation": "Work",
+                "index": "Work_pkey",
+                "estimatedRows": 1,
+                "cost": 8.3
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "clientsDisconnected": true,
+  "fetchRestored": true
+}

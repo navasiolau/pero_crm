@@ -1,0 +1,25 @@
+{
+  "runId": "af2c86a1-3898-479b-905a-664506e5ff00",
+  "mode": "OWNED_ROLLBACK",
+  "ok": false,
+  "failure": "TASK147_NATIVE_HOLD",
+  "diagnostic": {
+    "phase": "FIXTURE_WORK",
+    "errorName": "PrismaClientUnknownRequestError",
+    "prismaCode": null,
+    "sqlState": null,
+    "assertionLabel": null,
+    "beforeDigest": "6f82f00e5ddec0fdf0daf766913e8c387724752ead4e0a9d23d958a5880c3671",
+    "afterDigest": "6f82f00e5ddec0fdf0daf766913e8c387724752ead4e0a9d23d958a5880c3671",
+    "originalsMatch": true,
+    "sourceMatch": true,
+    "rollbackVerified": true,
+    "ownedRowsAfter": 0,
+    "foreignCreated": 0,
+    "matrixCasesDone": 0,
+    "outbound": 0
+  },
+  "noReplay": true,
+  "clientsDisconnected": true,
+  "fetchRestored": true
+}
