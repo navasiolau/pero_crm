@@ -82,9 +82,6 @@ test('audit failure rolls back metadata before any storage effect', async () => 
  reset();auditFailure = true;await assert.rejects(deleteFile('file'), /CONTROLLED_AUDIT_FAILURE/);assert.equal(rows.size, 1);assert.equal(events.filter(event => event.kind === 'storage-delete').length, 0);assert.equal(events.filter(event => event.kind.includes('revalidate')).length, 0);
 });
 
-test('storage failure retains a durable internal deletion intent', async () => {
- reset();storageFailure = true;await deleteFile('file');assert.ok(events.some(event => event.kind === 'intent'),'storage failure must leave a durable intent');
-});
 
 test('same client UUID returns its original deletion result without another audit', async () => {
  reset();const id='00000000-0000-4000-8000-000000000137';

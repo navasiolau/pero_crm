@@ -3,7 +3,7 @@ import {test} from 'node:test';
 import {correctionProductActionOwned,correctionClientInputOwned,correctionProductListPreferenceOwned,correctionRecoveryAllowed,deriveCorrectionAck,finalUploadOwned,runUiCorrectionsBrowser} from './ui-corrections-browser.mjs';
 import {createHash} from 'node:crypto';
 import {validateRecoveryReadonlyEvidence} from './ui-corrections-recovery.mjs';
-import {finalQaMedia} from './product-modernization-final-browser.mjs';
+import {finalQaMedia,finalFileId,finalFullscreenVisible} from './ui-corrections-browser.mjs';
 import {correctionJournalScope} from './ui-corrections-stage-runner.mjs';
 const id='00000000-0000-4000-8000-000000000001';
 const fixture={checkpoint:{runId:id,correctionMode:true},numbers:{productA:'1.1',productB:'1.2'},ids:{project:'p',productA:'a',productB:'b',clientA:'ca',clientB:'cb'},paths:{productA:'/products/1.1',productB:'/products/1.2',project:'/projects/p'},actors:{admin:{id:'admin',roles:['ADMIN']},engineer:{id:'engineer',roles:['ENGINEER']}}};
@@ -44,6 +44,8 @@ test('decoded Action ACK authorizes captured client CAS only after journal updat
 });
 test('closed scalar seven excludes retired contact/status/money writers, permits only captured extra client',()=>{
  const patch={productId:'a',field:'quantity',value:3,expectedValue:1,clientMutationId:id};assert.equal(correctionProductActionOwned(patch,fixture,fixture.paths.productA),'scalar');
+ for(const change of [{productId:'foreign'},{clientMutationId:'guess'}])assert.equal(correctionProductActionOwned({...patch,...change},fixture,fixture.paths.productA),null);
+ assert.equal(correctionProductActionOwned({...patch,kind:'ASSEMBLY',field:'assigneeId',value:'foreign',expectedValue:null,expectedRevision:0},fixture,fixture.paths.productA),null);
  for(const field of ['client.phone','project.address','initialPrice','status'])assert.equal(correctionProductActionOwned({...patch,field},fixture,fixture.paths.productA),null);
  assert.equal(correctionProductActionOwned({...patch,field:'project.clientId',value:id},fixture,fixture.paths.productA),null);assert.equal(correctionProductActionOwned({...patch,field:'project.clientId',value:id},fixture,fixture.paths.productA,[{id}]),'scalar');
  assert.equal(correctionProductActionOwned({...patch,kind:'ASSEMBLY',field:'ratePercent',value:'0',expectedValue:null,expectedRevision:0},fixture,fixture.paths.productA),'percentage');
@@ -55,5 +57,36 @@ test('one captured bounded new-client and backward-only status journal; no arbit
 });
 test('all seven exact-byte uploads exclude caption and context substitutions',async()=>{
  const cases=await finalQaMedia(fixture);assert.equal(cases.length,7);const row=cases.find(item=>item.key==='measurement'),file={name:row.name,mimeType:row.mimeType,size:row.buffer.length,hash:row.hash},fields={projectId:'p',productId:'a',section:row.section,clientMutationId:id};assert.equal(finalUploadOwned(fields,file,fixture,cases),true);assert.equal(finalUploadOwned({...fields,caption:'any'},file,fixture,cases),false);assert.equal(finalUploadOwned({...fields,projectId:'foreign'},file,fixture,cases),false);
+ const cover=cases.find(item=>item.cover),project=cases.find(item=>item.key==='project');
+ const asFile=item=>({name:item.name,mimeType:item.mimeType,size:item.buffer.length,hash:item.hash});
+ const coverFields={projectId:fixture.ids.project,productId:fixture.ids.productA,section:'PRODUCTION',assignCover:'1',expectedSketchFileId:'null',clientMutationId:id};
+ assert.equal(finalUploadOwned(coverFields,asFile(cover),fixture,cases),true);assert.equal(finalUploadOwned({...coverFields,expectedSketchFileId:'old'},asFile(cover),fixture,cases),false);assert.equal(finalUploadOwned(coverFields,{...asFile(cover),hash:'forged'},fixture,cases),false);
+ assert.equal(finalUploadOwned({projectId:fixture.ids.project,section:'GENERAL',clientMutationId:id},asFile(project),fixture,cases),true);assert.equal(finalUploadOwned({projectId:'foreign',section:'GENERAL',clientMutationId:id},asFile(project),fixture,cases),false);
 });
 test('import/default authorization never opens browser or database',async()=>{await assert.rejects(runUiCorrectionsBrowser({}),/EXECUTION_AUTH_REQUIRED/);});
+
+test('actual generic File CUID and explicit cover UUID are accepted; arbitrary/traversal IDs remain rejected',async()=>{
+ assert.equal(finalFileId('c'+'a'.repeat(24)),true);assert.equal(finalFileId(id),true);
+ for(const value of [null,'foreign','c'+'a'.repeat(23),'../file','c'+ '/'.repeat(24)])assert.equal(finalFileId(value),false);
+});
+
+test('fullscreen capture requires loaded opaque modal covering viewport and actual hit-test ownership',async()=>{
+ const ready={popup:{x:0,y:0,width:1440,height:900},viewport:{x:0,y:0,width:1440,height:900},imageLoaded:true,centerInside:true,opacity:1};
+ assert.equal(finalFullscreenVisible(ready),true);
+ for(const change of [{imageLoaded:false},{centerInside:false},{opacity:0},{popup:{...ready.popup,y:900}},{popup:{...ready.popup,width:400}}])assert.equal(finalFullscreenVisible({...ready,...change}),false);
+});
+
+const upload={type:'file-upload',actorId:'admin',projectId:fixture.ids.project,productId:null,fileId:'file',saved:true};
+const journal=ownWrites=>({ownWrites,preferenceOwnWrites:[],extraClientWrites:[],statusWrites:[]});
+test('flat own project upload/delete is bounded to its captured file subject',()=>{
+ assert.deepEqual(correctionJournalScope(fixture,journal([upload,{...upload,type:'file-delete'}])).mutationIds,[]);
+ assert.throws(()=>correctionJournalScope(fixture,journal([{...upload,type:'file-delete',fileId:'unknown'}])),/DELETE_WITHOUT_CAPTURED_UPLOAD/);
+});
+test('unknown project file is rejected before inspection or cleanup',()=>{
+ assert.throws(()=>correctionJournalScope(fixture,journal([{...upload,projectId:'foreign'}])),/SUBJECT_STOP/);
+ assert.throws(()=>correctionJournalScope(fixture,journal([{...upload,productId:'a',projectId:'foreign'}])),/FILE_SCOPE_STOP/);
+});
+test('project scope never permits scalar or percentage writers without an owned product',()=>{
+ assert.throws(()=>correctionJournalScope(fixture,journal([{...upload,type:'field',field:'title'}])),/SUBJECT_STOP/);
+ assert.throws(()=>correctionJournalScope(fixture,journal([{...upload,type:'percentage'}])),/SUBJECT_STOP/);
+});

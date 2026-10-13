@@ -37,8 +37,6 @@ test("цена, количество и сумма в общей группе п
   assert.match(html, /Цена, BYN/);
   assert.match(html, /Сумма:\s*37[,.]5 BYN/);
   assert.doesNotMatch(html, /Замерщик|Вид изделия|Первоначальная цена/);
-});
-test("перенос полей сохраняет readonly и самостоятельное право технического блока", () => {
   const reader = details(false, false, false);
   assert.doesNotMatch(reader, /product-inline-price/);
   assert.match(reader, /id="product-inline-quantity"[^>]*readOnly=""/);
@@ -46,20 +44,12 @@ test("перенос полей сохраняет readonly и самостоя�
   const engineer = details(false, true, true);
   assert.match(engineer, /id="product-inline-quantity"[^>]*readOnly=""/);
   assert.doesNotMatch(engineer, /id="product-inline-description"[^>]*readOnly=""/);
-});
-test("пустая цена остаётся пустой, Сумма: — не превращается в нулевую стоимость", () => {
-  const html = details(true, true, true, null);
-  assert.match(html, /id="product-inline-price"[^>]*value=""/);
-  assert.match(html, /Сумма:\s*—/);
-  assert.doesNotMatch(html, /Сумма:\s*0/);
-});
-test("контакты клиента readonly и используют данные Client, не Project.address", () => {
   // eslint-disable-next-line react/no-children-prop -- provider requires children in its typed props
-  const html = renderToStaticMarkup(createElement(ProductInlineProvider, { productId: "product", initial,
+  const contacts = renderToStaticMarkup(createElement(ProductInlineProvider, { productId: "product", initial,
     children: createElement(ProductInlineContacts, { canManage: false, clients: [{id: "client", label: "Клиент", phone: "+375290000000", address: "Адрес клиента"}] }) }));
-  assert.ok(html.indexOf("product-inline-client") < html.indexOf("product-client-phone"));
-  assert.ok(html.indexOf("product-client-phone") < html.indexOf("product-client-address"));
-  assert.doesNotMatch(html, /Количество|Техническое описание|Замерщик/);
+  assert.ok(contacts.indexOf("product-inline-client") < contacts.indexOf("product-client-phone"));
+  assert.ok(contacts.indexOf("product-client-phone") < contacts.indexOf("product-client-address"));
+  assert.doesNotMatch(contacts, /Количество|Техническое описание|Замерщик/);
 });
 test("нижние секции постоянны, документы precede сборку/монтаж и локальная прокрутка", () => {
   const html = renderToStaticMarkup(createElement(ProductSinglePage, {

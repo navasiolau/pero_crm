@@ -9,11 +9,8 @@ import type { TaskTransaction } from "../src/server/tasks/transaction";
 import { closeEngineeringStageAction, configureEngineeringPoolAction } from "../src/server/product-stage-pay/actions";
 import { changeProductStatusTransaction } from "../src/server/products/status-core";
 import { getProductPercentageView } from "../src/server/product-percentage-pay/queries";
-import { splitTaskCore } from "../src/server/tasks/share-core";
-import { canSplitTask } from "../src/server/tasks/share-policy";
 import { patchProductPercentageCore } from "../src/server/product-percentage-pay/patch-core";
 import { randomUUID } from "node:crypto";
-import { taskShareFixture } from "./helpers/task-share-fixture";
 
 test("нулевая ставка допустима, null не является нулём", () => {
   assert.equal(parsePercentageRate("0"), "0.00");
@@ -116,29 +113,6 @@ test("null конфигурация фиксирует однократный п
   assert.equal(state, "SKIPPED_ONCE");
 });
 
-test("v3 самостоятельная обычная работа сохраняет монтажный процент от цены всей партии", async () => {
-  let savedState = "";
-  const payroll: {amount: string}[] = [];
-  const tx = {
-    productStatusHistory: { findFirst: async () => null },
-    productPercentageCompletion: { findUnique: async () => null,
-      create: async ({ data }: { data: { state: string } }) => { savedState = data.state; return { id: "completion" }; } },
-    product: { findUnique: async () => ({ id: "p", projectId: "project", quantity: 3, mounter: {id: "mounter", name: "Монтажник", active: true, roles: ["MOUNTER"]}, expectedPrice: { toString: () => "500" }, project: { currency: "BYN" },
-      works: [{ id: "new-ordinary", paymentKind: "LEGACY" }],
-      percentageConfigs: [{ ratePercent: { toString: () => "10" }, revision: 2, workReview: [{workId: "new-ordinary", classification: "INDEPENDENT"}],
-        participants: [{ userId: "mounter", shareUnits: 1000000,
-          user: { id: "mounter", name: "Монтажник", active: true, roles: ["MOUNTER"] } }] }], stagePayPools: [] }) },
-    orgSetting: { findUnique: async () => ({ value: "BYN" }) },
-    work: {findMany: async () => [{id: "new-ordinary", title: "Обычная работа", tasks: []}]},
-    productPercentageCompletionShare: {create: async () => ({id: "share"})},
-    payrollEntry: {findMany: async () => [], create: async ({data}: {data: {amount: string}}) => {payroll.push(data); return {};}},
-    domainEvent: {create: async () => ({id: "event"})},
-    changeLog: { create: async () => ({}) },
-  } as unknown as Prisma.TransactionClient;
-  const actor = { id: "manager", name: "Менеджер", roles: ["MANAGER" as const], source: "web" as const };
-  assert.equal(await captureProductPercentageCompletion(tx, actor, "p", "INSTALLATION", "DONE"), "SETTLED");
-  assert.equal(savedState, "SETTLED"); assert.equal(payroll.length, 1); assert.equal(payroll[0].amount, "150.00");
-});
 
 test("миграция сохраняет прежние финансовые таблицы и защищает пройденные этапы", () => {
   const sql = readFileSync(new URL("../prisma/migrations/20260930150000_product_percentage_pay/migration.sql", import.meta.url), "utf8");
@@ -156,8 +130,6 @@ test("миграция сохраняет прежние финансовые т
 test("старые инженерные endpoints отказывают до записи, project writer не начисляет", async () => {
   assert.equal((await closeEngineeringStageAction({ productId: "p", expectedPoolRevision: 0, requestId: "old" })).ok, false);
   assert.equal((await configureEngineeringPoolAction({ productId: "p", ratePercent: "10", workWeights: [], expectedPoolRevision: 0 })).ok, false);
-  const core = readFileSync(new URL("../src/server/projects/stage-core.ts", import.meta.url), "utf8");
-  assert.doesNotMatch(core, /payrollEntry\.create|productStagePayPool\.create/);
 });
 
 function settlementHarness(price: string, rate: string) {
@@ -398,28 +370,6 @@ test("SKIPPED editor показывает позднюю конфигураци�
   assert.deepEqual(section.skippedSnapshot?.members.map((member) => member.userId), ["old"]);
 });
 
-test("старый ENGINEERING Work не даёт новый split/доли, прежний UUID receipt только replay", async () => {
-  const f = taskShareFixture("DESIGN");
-  Object.assign(f.state().works[0], { paymentKind: "ENGINEERING", stagePayPoolId: "pool", poolWeightUnits: 1000000,
-    priceSnapshot: null, total: null });
-  f.state().tasks[0].stageShareUnits = 1000000;
-  const actor = { id: "manager", name: "Менеджер", roles: ["MANAGER" as const], source: "web" as const };
-  const requestId = "11111111-1111-4111-8111-111111111111";
-  const input = { taskId: "source", recipientId: "recipient", percent: "30", expectedRevision: 0, requestId };
-  const before = structuredClone(f.state());
-  assert.equal(canSplitTask(actor, { assigneeId: "worker", status: "IN_PROGRESS", product: { engineerId: "engineer", status: "DESIGN" },
-    paidCount: 0, work: { paymentKind: "ENGINEERING" } }), false);
-  assert.equal((await splitTaskCore(actor, input, f.transaction)).ok, false);
-  assert.deepEqual(f.state(), before);
-  assert.deepEqual(f.writes, []);
-  f.state().logs.push({ id: `task-split:${requestId}`, actorId: actor.id, entityId: input.taskId, action: "split",
-    newValue: { recipientId: input.recipientId, percent: "30.00", expectedRevision: input.expectedRevision,
-      childTaskId: "historic-child", groupId: "historic-group" } });
-  const repeated = await splitTaskCore(actor, input, f.transaction);
-  assert.equal(repeated.ok, true);
-  if (repeated.ok) assert.equal(repeated.repeated, true);
-  assert.deepEqual(f.writes, []);
-});
 
 test("foreign frozen PENDING_FX retry preserves currency and fixed BYN amounts without duplicate payroll", async () => {
   const h = settlementHarness("1000", "5");

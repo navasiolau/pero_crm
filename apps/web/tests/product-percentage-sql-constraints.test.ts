@@ -5,7 +5,6 @@ import { test } from "node:test";
 const prior = readFileSync(new URL("../prisma/migrations/20260928220000_product_engineering_pay/migration.sql", import.meta.url), "utf8");
 const enums = readFileSync(new URL("../prisma/migrations/20260930145000_product_percentage_enum_values/migration.sql", import.meta.url), "utf8");
 const next = readFileSync(new URL("../prisma/migrations/20260930150000_product_percentage_pay/migration.sql", import.meta.url), "utf8");
-const shareCore = readFileSync(new URL("../src/server/tasks/share-core.ts", import.meta.url), "utf8");
 
 function check(sql: string, table: string, name: string): string {
   const marker = `ALTER TABLE "${table}" ADD CONSTRAINT "${name}" CHECK (`;
@@ -51,13 +50,6 @@ test("INSTALLATION and PHYSICAL_ONLY SQL admit exactly the new service shape", (
   assert.match(next, /source_product_id IS DISTINCT FROM NEW\."productId"/);
 });
 
-test("retired split retains historical receipt reads without allocation writers", () => {
-  // Runtime denial and exact historical receipt replay are covered by
-  // task-share-retirement.test.ts and product-engineering-split.test.ts.
-  assert.match(shareCore, /Деление задач и передача долей больше недоступны/);
-  assert.match(shareCore, /tx\.changeLog\.findUnique\(/);
-  assert.doesNotMatch(shareCore, /tx\.(?:task|taskAllocationGroup|work|changeLog)\.(?:create|createMany|update|updateMany|upsert|delete|deleteMany)\(/);
-});
 
 test("forward migration does not remove old tables, columns, or rows", () => {
   assert.doesNotMatch(enums + next, /\b(?:DROP TABLE|DROP COLUMN|TRUNCATE|DELETE FROM|UPDATE "(?:PayrollEntry|Payout|Work|Task)")\b/i);

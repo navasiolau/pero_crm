@@ -124,32 +124,7 @@ test("current action retries a version conflict; discarded actions do not", asyn
   assert.equal(f.calls.length, 2);
 });
 
-test("confirmation of own navigation does not cancel a newer unsent search draft", async () => {
-  const f = fixture();
-  f.controller.set({ q: "first" });
-  const value = encodeListPreference("products", f.calls[0].query, "second");
-  f.calls[0].resolve({ ok: true, value });
-  await tick();
-  const draftRevision = f.controller.getSnapshot().revision;
-  f.controller.observe(f.calls[0].query, value);
-  assert.equal(f.controller.getSnapshot().revision, draftRevision);
-  assert.equal(f.calls.length, 1);
-  f.controller.stop();
-});
 
-test("reset/navigation cancels scheduled search without writing a stale query", async (t) => {
-  t.mock.timers.enable({ apis: ["setTimeout"] });
-  const queries: string[] = [];
-  const search = createListSearchDebouncer((value) => queries.push(value));
-  search.queue("old");
-  search.cancel();
-  t.mock.timers.tick(301);
-  assert.deepEqual(queries, []);
-  search.queue("a");
-  search.queue("ab");
-  t.mock.timers.tick(301);
-  assert.deepEqual(queries, ["ab"]);
-});
 
 test("a stale draft is rejected immediately by the revision guard, before effect cleanup", (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });

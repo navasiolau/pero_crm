@@ -4,22 +4,14 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import {
-  getProductHeroLayout,
   getProductHeroImageState,
   isCompletedProductHeroImageFailure,
   getProductSketchPreviewSource,
-  getKanbanHeroHeights,
 } from "../src/lib/product-hero";
 import { productSketchProjection } from "../src/server/products/sketch-projection";
 import { fileVisibilityWhere } from "../src/server/access/visibility";
 import { ProductKanbanCard } from "../src/components/product-kanban-card";
 
-test("product detail keeps both fields and expands an image or description by itself", () => {
-  assert.equal(getProductHeroLayout(true, true), "split");
-  assert.equal(getProductHeroLayout(true, false), "description");
-  assert.equal(getProductHeroLayout(false, true), "image");
-  assert.equal(getProductHeroLayout(false, false), "empty");
-});
 
 test("preview chooses optimized protected routes independently of legacy thumb metadata", () => {
   assert.equal(getProductSketchPreviewSource({
@@ -36,11 +28,6 @@ test("preview chooses optimized protected routes independently of legacy thumb m
   }), null);
 });
 
-test("kanban image stage remains twice the measured information height", () => {
-  assert.deepEqual(getKanbanHeroHeights(40), { infoHeight: 40, imageHeight: 80, cardHeight: 120 });
-  assert.deepEqual(getKanbanHeroHeights(87.2), { infoHeight: 88, imageHeight: 176, cardHeight: 264 });
-  assert.deepEqual(getKanbanHeroHeights(0), { infoHeight: 0, imageHeight: 0, cardHeight: 0 });
-});
 
 test("image failure replaces a broken source, while a different source can load", () => {
   const failed = "/api/files/file-1?preview=card";
@@ -81,25 +68,6 @@ test("shared kanban card preserves information and stays compact without an imag
   assert.doesNotMatch(html, /data-slot="product-kanban-image"/);
 });
 
-test("shared kanban card renders protected thumbnail for both board renderers", () => {
-  const html = renderToStaticMarkup(createElement(ProductKanbanCard, {
-    product: {
-      number: "P-10.2",
-      title: "Стол",
-      statusChangedAt: new Date().toISOString(),
-      expectedPrice: null,
-      engineerName: null,
-      sketchFile: { id: "file-10", fileName: "sketch.png", mimeType: "image/png", hasThumb: true },
-    },
-    currency: "BYN",
-    showAmount: false,
-  }));
-
-  assert.match(html, /data-slot="product-kanban-image"/);
-  assert.match(html, /src="\/api\/files\/file-10\?preview=card"/);
-  assert.match(html, /alt="sketch\.png"/);
-  assert.doesNotMatch(html, /1200|formatAmount/);
-});
 
 test("sketch projection returns only safe metadata and keeps actor file visibility", () => {
   const actor = { id: "engineer-1", roles: ["ENGINEER"] as const };

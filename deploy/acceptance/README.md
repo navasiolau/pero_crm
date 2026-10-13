@@ -1,4 +1,4 @@
-# Приёмка первой группы изменений CRM
+# Историческая приёмка первой группы изменений CRM
 
 Проверенная ревизия приложения: `a1123c5f8a498dc916a67e609a4a550720367fc2`.
 Локальная и staging-приёмка предшествовали push в main; затем подтверждены CI и
@@ -34,30 +34,21 @@ Deployment receipts: [staging](../evidence/2026-09-28-first-wave-stage-deploymen
 [production](../evidence/2026-09-28-first-wave-production.json).
 История TDD и подробная приёмка находятся в `openspec/changes/archive/2026-09-28-*`.
 
-## Ограничения helpers
+## Вывод одноразовых helpers из эксплуатации — №168
 
-`staging-first-wave.py` запускается только на `crm-staging`, проверяет Docker
-identity/image revision, DB container/том, S3 bucket и существующий W07 guard.
-Он использует безопасно открытый workflow lock и проверяет active-run marker.
-Ограничитель времени находится внутри контейнера. Установка пакетов, создание
-новых серверов/БД, reset/seed и вмешательство в refresh не выполняются.
+Закреплённые на `a1123c5` wrapper `staging-first-wave.py`, координатор
+`staging-first-wave-runner.mjs`, его read-only/browser helpers и
+`staging-browser-session.mjs` удалены после завершённой приёмки. Их команды
+`readonly`, `browser`, `inspect` и `restore` больше не поддерживаются.
+Результаты выше, deployment receipts и архивные OpenSpec evidence сохраняют
+историческое значение; они не подтверждают приёмку новой ревизии.
 
-Локальный координатор — `apps/web/tests/staging-first-wave-runner.mjs`:
+Для действующей приёмки используются согласованный change и существующие
+qaTransport/crm-modernization wrappers с W07, DB/S3 и image identity guards.
+Точный SHA и сценарии подтверждаются отдельно; общий порядок описан в
+[действующих инструкциях проверки](../../docs/testing/README.md).
 
-- `readonly` — проверки ролей, доступа, файлов и сохранности.
-- `browser` — UI и list preferences; `CRM_STAGE_QA_WIDTHS=390,1440` позволяет
-  запускать оставшиеся размеры после уже принятого 360 px.
-- `inspect <private-run-directory>` — read-only диагностика точных сохранённых
-  настроек с подписанным checkpoint; совпадение query не доказывает ownership.
-- `restore <private-run-directory>` — только точный CAS собственных записей;
-  при конфликте откатывается вся транзакция.
-
-Перед запуском root обязан проверить исходники и текущую ревизию, доставить
-wrapper по имени с SHA256 и сверить remote checksum. Значения env передаются
-через окружение процесса, не argv. AUTH_SECRET остаётся на сервере; временные
-JWT — только в памяти приватного координатора/браузера. Пароль Basic Auth
-берётся из защищённого локального handover без вывода в лог.
-
-Checkpoints, ответы, JWT, PII, traces и PNG не включаются в Git. Приватные
-артефакты находятся в gitignored `.playwright-mcp/staging-first-wave/`.
-Скрипты не являются разрешением на повторную запись данных вне описанного scope.
+Приватные checkpoints, ответы, JWT, PII, traces и PNG исторической приёмки
+остаются вне Git в `.playwright-mcp/staging-first-wave/`. Этот архив не даёт
+разрешения на повторные записи в БД. По AGENTS.md local/staging дампы для
+задач не создаются; nightly refresh и W07 сохраняются.

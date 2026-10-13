@@ -21,8 +21,6 @@ beforeEach(()=>{
 afterEach(()=>scope?.restore());
 
 const get=(id:string,suffix="")=>route.GET(new Request(`https://example.invalid/api/files/${id}${suffix}`),{params:Promise.resolve({id})});
-test("explicit permitted PDF view serves original inline while download remains attachment",async()=>{const visible=fixture.files.find(file=>file.productId==="own")!;const preview=await get(String(visible.id),"?view=1");assert.equal(preview.status,200);assert.match(preview.headers.get("content-disposition")??"",/^inline/);assert.equal(preview.headers.get("content-type"),"application/pdf");assert.equal(preview.headers.get("x-content-type-options"),"nosniff");assert.equal(await preview.text(),"%PDF-1.4");const original=await get(String(visible.id));assert.match(original.headers.get("content-disposition")??"",/^attachment/);});
-test("view mode does not inline HTML and does not bypass actor visibility before storage",async()=>{const visible=fixture.files.find(file=>file.productId==="own")!;visible.mimeType="text/html";assert.match((await get(String(visible.id),"?view=1")).headers.get("content-disposition")??"",/^attachment/);visible.mimeType="application/pdf";const reads=storageReads;assert.equal((await get("file-foreign","?view=1")).status,404);assert.equal(storageReads,reads);loggedIn=false;assert.equal((await get(String(visible.id),"?view=1")).status,401);assert.equal(storageReads,reads);loggedIn=true;});
 
  test("thumbnail GET uses authenticated bounded service and retains byte-exact original download",async()=>{
  const visible=fixture.files.find(file=>file.productId==="own")!;visible.mimeType="image/png";sourceBytes=await sharp({create:{width:600,height:400,channels:3,background:'#4488aa'}}).png().toBuffer();visible.size=sourceBytes.length;

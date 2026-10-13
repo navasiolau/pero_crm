@@ -27,7 +27,7 @@ const safeCode=error=>/^K117_[A-Z0-9_]+$/.test(error?.message??'')?error.message
 
 /** Root заранее проверяет полный HMAC исходного checkpoint и physical PRE.
  * Браузер проверяет фиксированную цель, собственную живую сессию и каждый action.
- * staging-browser-session.prepare запрещён здесь: он выбирает реальных пользователей. */
+ * Допускаются только собственные свежие QA-сессии, без выбора реальных пользователей. */
 export function validateKanbanSearchHandoff(input={}){
  const {authorized,origin,expectedRevision,identity,checkpoint,profile,subjects,tokens,action}=input;
  need(authorized===true&&origin===SEARCH_STAGE_ORIGIN,'K117_ROOT_STAGE_AUTH_REQUIRED');
