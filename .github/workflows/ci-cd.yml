@@ -21,7 +21,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        cohort: [backend, components]
+        cohort: [backend, components-0, components-1]
     steps:
       - uses: actions/checkout@v4
 
@@ -50,17 +50,24 @@ jobs:
       - name: Prisma Client (generate)
         run: pnpm --filter @pero/web exec prisma generate
 
+      - name: Lint
+        if: matrix.cohort == 'backend'
+        run: pnpm lint
+
       - name: Chromium для компонентных тестов формы
-        if: matrix.cohort == 'components'
+        if: matrix.cohort != 'backend'
         run: pnpm --filter @pero/web exec playwright install --with-deps chromium
 
       - name: Тесты приложений
         run: |
           # Каждый файл прежних web globs исполняется ровно в одной cohort.
           files=()
+          component_index=0
           for file in apps/web/tests/*.test.ts apps/web/tests/*.test.mjs; do
             case "$file" in
-              *.test.mjs|*.browser.test.ts) cohort=components ;;
+              *.test.mjs|*.browser.test.ts)
+                cohort=components-$((component_index % 2))
+                component_index=$((component_index + 1)) ;;
               *) cohort=backend ;;
             esac
             if [ "$cohort" = "$COHORT" ]; then files+=("${file#apps/web/}"); fi
@@ -137,9 +144,6 @@ jobs:
           key: types-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.node.outputs.node-version }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'apps/web/package.json', 'apps/web/tsconfig.json', 'apps/web/next.config.ts', 'packages/*/package.json', 'packages/plugins/*/package.json', 'packages/*/tsconfig.json', 'packages/plugins/*/tsconfig.json') }}-${{ hashFiles('apps/web/src/**', 'apps/web/tests/**', 'apps/web/*.ts', 'apps/web/prisma/schema.prisma', 'packages/*/src/**', 'packages/plugins/*/src/**') }}
           restore-keys: |
             types-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.node.outputs.node-version }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'apps/web/package.json', 'apps/web/tsconfig.json', 'apps/web/next.config.ts', 'packages/*/package.json', 'packages/plugins/*/package.json', 'packages/*/tsconfig.json', 'packages/plugins/*/tsconfig.json') }}-
-
-      - name: Lint
-        run: pnpm lint
 
       - name: Сборка (Next.js production)
         id: next-build
