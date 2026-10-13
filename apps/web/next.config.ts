@@ -40,7 +40,9 @@ const nextConfig: NextConfig = {
   ...(isWindows
     ? {}
     : {
-        output: "standalone",
+        // Native CI запускает next start из полной .next; standalone в его
+        // artifact не входит. Local/Docker сохраняют standalone-сборку.
+        ...(hasExternalCiChecks ? {} : { output: "standalone" }),
         // Корень монорепо — для корректной трассировки файлов standalone-сборки
         outputFileTracingRoot: path.join(__dirname, "../../"),
       }),
