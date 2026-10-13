@@ -17,6 +17,7 @@ test('CI guard accepts only the explicit ephemeral run', () => {
   const target = assertCiRuntimeTarget(ci);
   assert.equal(target.runId, '169');
   assert.equal(target.s3.bucket, 'ci-169-1');
+  assert.equal(target.minioImage, 'pero-ci-169-1-minio:source');
 });
 
 test('CI guard refuses working/local targets and incomplete identity before connecting', () => {

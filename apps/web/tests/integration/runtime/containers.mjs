@@ -1,10 +1,10 @@
 import { execFileSync } from 'node:child_process';
-import { MINIO_IMAGE, POSTGRES_IMAGE, REPOSITORY, requireCi } from './target.mjs';
+import { MINIO_COMMIT, MINIO_GO_IMAGE, MINIO_RELEASE, MINIO_SOURCE_SHA256, POSTGRES_IMAGE, REPOSITORY, requireCi } from './target.mjs';
 
 /** @typedef {import('./target.mjs').CiJob} CiJob */
-/** @param {string[]} args */
-export function docker(args) {
-  return execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 120_000 }).trim();
+/** @param {string[]} args @param {number} [timeout] */
+export function docker(args, timeout = 120_000) {
+  return execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout }).trim();
 }
 
 /** @param {CiJob} target @param {'postgres'|'minio'} service */
@@ -13,13 +13,27 @@ function labels(target, service) {
     'pero.ci.attempt': target.attempt, 'pero.ci.service': service };
 }
 
+/** @param {CiJob} target */
+function inspectMinioImage(target) {
+  const image = JSON.parse(docker(['image', 'inspect', target.minioImage]))[0];
+  for (const [key, value] of Object.entries({ ...labels(target, 'minio'), 'pero.ci.minio.commit': MINIO_COMMIT,
+    'pero.ci.go.image': MINIO_GO_IMAGE, 'pero.ci.source.sha256': MINIO_SOURCE_SHA256 })) {
+    requireCi(image.Config.Labels?.[key] === value, `image-${key}`);
+  }
+  requireCi(image.Os === 'linux' && image.Architecture === 'amd64' &&
+    image.Config.Entrypoint.join(' ') === '/minio' && image.RepoTags?.length === 1 &&
+    image.RepoTags[0] === target.minioImage, 'minio-image');
+  return image;
+}
+
 /** Только metadata; полный inspect/env никогда не выводится в журнал.
  * @param {CiJob} target @param {string} id @param {'postgres'|'minio'} service */
 export function inspectService(target, id, service) {
   requireCi(/^[a-f0-9]{64}$/.test(id), 'container-id');
   const container = JSON.parse(docker(['inspect', '--type', 'container', id]))[0];
   const postgres = service === 'postgres', port = postgres ? '5432/tcp' : '9000/tcp';
-  requireCi(container.Id === id && container.Config.Image === (postgres ? POSTGRES_IMAGE : MINIO_IMAGE), 'container-image');
+  requireCi(container.Id === id && container.Config.Image === (postgres ? POSTGRES_IMAGE : target.minioImage), 'container-image');
+  if (!postgres) requireCi(container.Image === inspectMinioImage(target).Id, 'minio-image-id');
   for (const [key, value] of Object.entries(labels(target, service))) {
     requireCi(container.Config.Labels?.[key] === value, `container-${key}`);
   }
@@ -48,13 +62,25 @@ export function inspectService(target, id, service) {
 export function startMinio(target) {
   inspectService(target, target.postgresId, 'postgres');
   requireCi(!docker(['ps', '-aq', '--filter', `name=^/${target.minioName}$`]), 'minio-already-exists');
+  requireCi(!docker(['image', 'ls', '-q', target.minioImage]), 'minio-image-already-exists');
+  console.log(JSON.stringify({ ciRuntime: 'minio-building', release: MINIO_RELEASE, commit: MINIO_COMMIT }));
+  const build = ['build', '--quiet', '--file', 'tests/integration/runtime/Dockerfile.minio', '--tag', target.minioImage];
+  for (const [key, value] of Object.entries({ ...labels(target, 'minio'), 'pero.ci.minio.commit': MINIO_COMMIT })) {
+    build.push('--label', `${key}=${value}`);
+  }
+  docker([...build, 'tests/integration/runtime'], 600_000);
+  inspectMinioImage(target);
   const args = ['run', '-d', '--rm', '--name', target.minioName, '--network', target.network,
     '--publish', '127.0.0.1:59000:9000', '--tmpfs', '/data:rw,nosuid,size=512m'];
   for (const [key, value] of Object.entries(labels(target, 'minio'))) args.push('--label', `${key}=${value}`);
   args.push('--env', `MINIO_ROOT_USER=${target.s3.accessKeyId}`, '--env', `MINIO_ROOT_PASSWORD=${target.s3.secretAccessKey}`,
-    MINIO_IMAGE, 'server', '/data', '--address', ':9000');
+    target.minioImage, 'server', '/data', '--address', ':9000');
   const id = docker(args);
   inspectService(target, id, 'minio');
+  const version = docker(['exec', id, '/minio', '--version']);
+  requireCi(version.includes(MINIO_RELEASE) && version.includes(MINIO_COMMIT) && version.includes('go1.24.2'), 'minio-binary-version');
+  console.log(JSON.stringify({ ciRuntime: 'minio-version', release: MINIO_RELEASE, commit: MINIO_COMMIT,
+    go: 'go1.24.2', imageId: inspectMinioImage(target).Id }));
   return id;
 }
 
@@ -69,8 +95,13 @@ export function removeMinio(target) {
     docker(['rm', '--force', id]);
   }
   requireCi(!docker(['ps', '-aq', '--no-trunc', '--filter', `name=^/${target.minioName}$`]), 'minio-remains');
+  if (docker(['image', 'ls', '-q', target.minioImage])) {
+    inspectMinioImage(target);
+    docker(['image', 'rm', target.minioImage]);
+  }
+  requireCi(!docker(['image', 'ls', '-q', target.minioImage]), 'minio-image-remains');
   requireCi(!docker(['volume', 'ls', '-q', '--filter', `label=pero.ci.run=${target.runId}`,
     '--filter', `label=pero.ci.attempt=${target.attempt}`]), 'data-volume-remains');
   console.log(JSON.stringify({ ciRuntime: 'minio-removed', runId: target.runId, attempt: target.attempt,
-    containers: 0, persistentDataVolumes: 0, postgresNetworkCleanup: 'github-post-job' }));
+    containers: 0, images: 0, persistentDataVolumes: 0, postgresNetworkCleanup: 'github-post-job' }));
 }
