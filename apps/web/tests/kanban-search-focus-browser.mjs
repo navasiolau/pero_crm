@@ -188,7 +188,9 @@ try{
    const optimistic=await makePage(section);await optimistic.evaluate(fail=>{window.__hold=true;window.__holdStatus=true;window.__holdRefresh=true;window.__statusFail=fail;},failStatus);
    await apply(optimistic,'100.1');const handle=optimistic.getByRole('button',{name:'Перетащить Начало',exact:true}),box=await handle.boundingBox();assert.ok(box);
    await optimistic.mouse.move(box.x+box.width/2,box.y+box.height/2);await optimistic.mouse.down();await optimistic.mouse.move(box.x+box.width/2+15,box.y+box.height/2+15,{steps:3});await waitFrames(optimistic);
+   await expect(optimistic.locator('[data-slot="product-kanban-card"].rotate-2')).toHaveCount(2);
    await optimistic.evaluate(()=>window.__accept(window.__clientQuery));await waitFrames(optimistic);assert.deepEqual(await optimistic.evaluate(()=>window.__focusMoves),{board:0,page:0});
+   await expect(optimistic.locator('[data-slot="product-kanban-card"].rotate-2')).toHaveCount(2);
    const destination=await optimistic.locator('[data-slot="kanban-column"]').filter({has:optimistic.getByText('Проектирование',{exact:true})}).boundingBox();assert.ok(destination);
    await optimistic.mouse.move(destination.x+destination.width/2,destination.y+80,{steps:8});await waitFrames(optimistic);await expect(optimistic.locator('[data-slot="kanban-column"]').filter({has:optimistic.getByText('Проектирование',{exact:true})})).toHaveClass(/border-primary/);await optimistic.mouse.up();await expect.poll(()=>optimistic.evaluate(()=>window.__mutations.length)).toBe(1);await waitFrames(optimistic);
    assert.deepEqual(await optimistic.evaluate(()=>window.__focusMoves),{board:0,page:0},'optimistic rows cannot confirm current search after DnD ends');
