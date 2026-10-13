@@ -17,7 +17,19 @@ const withSerwist = withSerwistInit({
 // (локальная проверка prod-сборки на Windows идёт обычной .next-сборкой).
 const isWindows = process.platform === "win32";
 
+// В GitHub CI lint проверяется отдельно, а полный tsc — после свежих .next/types.
+// Обычные local/Docker build сохраняют встроенные проверки Next.
+const hasExternalCiChecks =
+  process.env.GITHUB_ACTIONS === "true" &&
+  process.env.PERO_CI_EXTERNAL_CHECKS === "1";
+
 const nextConfig: NextConfig = {
+  ...(hasExternalCiChecks
+    ? {
+        eslint: { ignoreDuringBuilds: true },
+        typescript: { ignoreBuildErrors: true },
+      }
+    : {}),
   // Нативный модуль argon2 не бандлим — нужен .node-бинарник в standalone-сборке
   serverExternalPackages: ["@node-rs/argon2", "zod"],
   // Плагины и SDK — TS-пакеты монорепо без отдельной сборки (§14: общая сборка)
