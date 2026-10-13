@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, before, test } from "node:test";
-import type { Prisma, ProductPercentageKind } from "@prisma/client";
+import { Prisma, type ProductPercentageKind } from "@prisma/client";
 import { createPostgresFixture, rejectedSql, type PostgresRows } from "./postgres.fixture";
 
 let fixture: Awaited<ReturnType<typeof createPostgresFixture>>;
@@ -118,16 +118,19 @@ test("percentage/adjustments-immutable-cas-replay-and-native-constraints", async
     return { notices, saved };
   };
   for (const step of [
-    { rate: "6", totals: ["60.00", "180.00", "180.00"], deltas: ["10.00", "30.00", "30.00"], total: 420 },
-    { rate: "4", totals: ["40.00", "120.00", "120.00"], deltas: ["-20.00", "-60.00", "-60.00"], total: 280 },
-    { rate: "0", totals: ["0.00", "0.00", "0.00"], deltas: ["-40.00", "-120.00", "-120.00"], total: 0 },
+    { rate: "6", totals: ["60.00", "180.00", "180.00"], dtoTotals: ["60", "180", "180"], deltas: ["10.00", "30.00", "30.00"], total: 420 },
+    { rate: "4", totals: ["40.00", "120.00", "120.00"], dtoTotals: ["40", "120", "120"], deltas: ["-20.00", "-60.00", "-60.00"], total: 280 },
+    { rate: "0", totals: ["0.00", "0.00", "0.00"], dtoTotals: ["0", "0", "0"], deltas: ["-40.00", "-120.00", "-120.00"], total: 0 },
   ]) {
     for (const [index, kind] of kinds.entries()) {
       const { notices, saved } = await patchRate(kind, step.rate);
       assert.equal(saved.amount.toFixed(2), step.totals[index]); assert.equal(saved.delta.toFixed(2), step.deltas[index]); assert.equal(notices.length, 1);
       const employee = c.recipients[index], view = await views.getProductPercentageView({ id: employee.id, roles: employee.roles }, product.id, tx);
-      assert.equal(view.sections[kind].total, step.totals[index]);
-      assert.equal((await views.getProductPercentageView(c.actor, product.id, tx)).sections[kind].total, step.totals[index]);
+      const managerView = await views.getProductPercentageView(c.actor, product.id, tx);
+      for (const total of [view.sections[kind].total, managerView.sections[kind].total]) {
+        assert.notEqual(total, null); assert.ok(new Prisma.Decimal(total!).eq(step.totals[index]));
+        assert.equal(total, step.dtoTotals[index]);
+      }
       assert.equal((await tx.payrollEntry.aggregate({ where: { productId: product.id, userId: employee.id }, _sum: { amount: true } }))._sum.amount!.toFixed(2), step.totals[index]);
     }
     assert.equal((await finance.getProjectEconomics(c.project.id, tx))!.payrollTotal, step.total);

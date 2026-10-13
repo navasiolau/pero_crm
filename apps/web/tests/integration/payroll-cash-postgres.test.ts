@@ -25,17 +25,30 @@ async function cashRows(tx: Prisma.TransactionClient, rows: PostgresRows, amount
   return { actor: { id: manager.id, name: manager.name, roles: manager.roles, source: "web" as const }, employee, account,
     input: { kind: "ADVANCE" as const, userId: employee.id, cashAccountId: account.id, cashAmount: "120.00", expectedCashCurrency: "BYN" as const, requestId: randomUUID(), description: "Синтетическая работа169" } };
 }
+async function historicalPayout(tx: Prisma.TransactionClient, rows: PostgresRows, userId: string, bynAmount: "60" | "0") {
+  const stamp = new Date("2020-01-01T00:00:00.000Z"), rate = bynAmount === "60" ? "3.000000" : "0.000001";
+  const account = await tx.cashAccount.create({ data: { id: rows.id("historical-usd"), name: "Историческая USD касса169", currency: "USD" } });
+  await tx.payment.create({ data: { cashAccountId: account.id, direction: "INCOME", amount: "20", currency: "USD", rate, bynAmount, rateDate: stamp, paidAt: stamp } });
+  // Существующий расход прошлого периода компенсирует финансирование старой кассы: заданный баланс организации не меняется.
+  if (bynAmount === "60") await tx.payment.create({ data: { direction: "EXPENSE", amount: "60", currency: "BYN", rate: "1", bynAmount: "60", rateDate: stamp, paidAt: stamp } });
+  const payout = await tx.payout.create({ data: { userId, month: "2020-01", kind: "SALARY", amount: "20", payrollCurrency: "USD", bynAmount,
+    cashAccountId: account.id, cashAmount: "20", cashCurrency: "USD", cashRate: rate, payrollRate: rate, cashRateDate: stamp, payrollRateDate: stamp } });
+  assert.equal((await cash.readCashBalance(tx, account.id)).toFixed(2), "0.00", "HISTORICAL_CASH_FULLY_FUNDED_AND_PAID");
+  return payout;
+}
 
 for (const vector of [
   { id: "fixed-usd", accruedByn: "300", payoutCurrency: "USD", payoutByn: "60", due: 240, balance: "890.00" },
   { id: "unknown", accruedByn: "300", payoutCurrency: null, payoutByn: null, due: null, balance: null },
-  { id: "fixed-zero", accruedByn: "0", payoutCurrency: null, payoutByn: "0", due: 0, balance: "950.00" },
-]) test(`cash/fixed-history-nulls-zero/${vector.id}`, async () => fixture.rollback(async (tx, rows) => {
+  { id: "fixed-zero", accruedByn: "0", payoutCurrency: "USD", payoutByn: "0", due: 0, balance: "950.00" },
+] as const) test(`cash/fixed-history-nulls-zero/${vector.id}`, async () => fixture.rollback(async (tx, rows) => {
   const c = await cashRows(tx, rows);
   await tx.payment.create({ data: { direction: "EXPENSE", amount: "50", bynAmount: "50", cashAccountId: c.account.id } });
   await tx.payrollEntry.create({ data: { userId: c.employee.id, month: "2020-01", scheme: "PIECE", amount: "100", currency: "USD", bynAmount: vector.accruedByn } });
-  await tx.payout.create({ data: { userId: c.employee.id, month: "2020-01", kind: "SALARY", amount: "20", payrollCurrency: vector.payoutCurrency, bynAmount: vector.payoutByn } });
+  if (vector.payoutByn === null) await tx.payout.create({ data: { userId: c.employee.id, month: "2020-01", kind: "SALARY", amount: "20", payrollCurrency: null, bynAmount: null } });
+  else await historicalPayout(tx, rows, c.employee.id, vector.payoutByn);
   const entries = await tx.payrollEntry.findMany({ where: { userId: c.employee.id } }), payouts = await tx.payout.findMany({ where: { userId: c.employee.id } });
+  assert.equal(payouts[0].payrollCurrency, vector.payoutCurrency);
   const model = summarizePayrollHistory(entries, payouts, "2020-01", "2026-11", c.employee.id);
   const due = model.pastAccrued.get(c.employee.id) === null || model.totalPaid.get(c.employee.id) === null ? null : new Prisma.Decimal(model.pastAccrued.get(c.employee.id)!).sub(model.totalPaid.get(c.employee.id)!).toNumber();
   assert.equal(due, vector.due); assert.equal(model.allPaid, vector.payoutByn === null ? null : Number(vector.payoutByn));
@@ -76,11 +89,12 @@ test("cash/salary-past-moscow-month-and-current-record-currencies", async t => {
       { userId: c.employee.id, month: "2026-10", amount: "1000", currency: "BYN", bynAmount: "1000" },
       { userId: c.employee.id, month: "2026-11", amount: "99999", currency: "BYN", bynAmount: "99999" },
     ] });
-    await tx.payout.create({ data: { userId: c.employee.id, month: "2020-01", amount: "20", payrollCurrency: "USD", bynAmount: "60" } });
+    await historicalPayout(tx, rows, c.employee.id, "60");
     const input = { ...c.input, kind: "SALARY" as const, month: "2026-10" };
     const first = await cash.issuePayoutCore(c.actor, input, fixedRates, tx);
     assert.equal(first.month, "2026-10"); assert.equal(first.amount, "120.00");
     assert.equal((await cash.readOrgBalance(tx, "9")).toFixed(2), "820.00");
+    assert.equal((await cash.readCashBalance(tx, c.account.id)).toFixed(2), "880.00");
     await assert.rejects(cash.issuePayoutCore(c.actor, { ...input, requestId: randomUUID(), cashAmount: "821.00" }, fixedRates, tx), /долг|балансе организации/);
     await tx.cashAccount.update({ where: { id: c.account.id }, data: { currency: "USD" } });
     await assert.rejects(cash.issuePayoutCore(c.actor, { ...c.input, requestId: randomUUID() }, fixedRates, tx), /Валюта или состояние/);
