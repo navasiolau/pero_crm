@@ -2,17 +2,64 @@
  * root captures it privately; never echo or log. No business CRUD or new users.
  * CRM_STAGING_BROWSER_INPUT carries prepare/restore/inspect envelopes.
  * Checkpoint is immutable HMAC; ownWrites are actual successful response bytes.
- * Only projects.list, project.tab and product.tab for existing admin/manager/combined/engineer.
+ * Точные namespaces, preferences, роли и tabs задаются закрытыми политиками ниже.
  * Local and staging environment guards run before any Prisma connection.
  */
 import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { PrismaClient } from "@prisma/client";
 import { encode } from "@auth/core/jwt";
 
-const NAMESPACE = "PERO_CRM_MODERNIZATION_SESSION_V1";
+// Области фиксируются сборщиком; переменные окружения не расширяют полномочия.
+const SESSION_SCOPE = typeof __QA_SESSION_POLICY__ === "undefined" ? "modernization" : __QA_SESSION_POLICY__;
+const SESSION_POLICIES = Object.freeze({
+  modernization: {
+    namespace: "PERO_CRM_MODERNIZATION_SESSION_V1",
+    preferences: ["projects.list", "project.tab", "product.tab"],
+    profiles: ["admin", "manager", "combined", "engineer"],
+    optionalProfiles: ["combined"],
+    projectTabs: ["overview", "finance"],
+    productTabs: ["percentage", "engineering", "tasks", "materials", "files", "history"],
+    correction: false, resume: false,
+  },
+  project: {
+    namespace: "PERO_CRM_PROJECT_INLINE_SESSION_V1",
+    preferences: ["projects.list", "project.tab"],
+    profiles: ["admin", "manager", "combined", "engineer", "accountant", "worker", "mounter"],
+    optionalProfiles: ["combined", "accountant", "worker", "mounter"],
+    projectTabs: ["overview", "products", "files", "tasks", "materials", "finance"],
+    productTabs: [],
+    correction: false, resume: false,
+  },
+  description: {
+    namespace: "PERO_PRODUCT_DESCRIPTION_SESSION_V1",
+    preferences: ["projects.list", "project.tab", "product.tab"],
+    profiles: ["admin", "manager", "combined", "engineer", "accountant", "worker", "mounter"],
+    optionalProfiles: ["combined", "accountant", "worker", "mounter"],
+    projectTabs: ["overview", "products", "files", "tasks", "materials", "finance"],
+    productTabs: [],
+    correction: false, resume: false,
+  },
+  attachments: {
+    namespace: "PERO_PRODUCT_ATTACHMENTS_SESSION_V1",
+    preferences: ["projects.list", "project.tab", "product.tab"],
+    profiles: ["admin", "manager", "combined", "engineer", "accountant", "worker", "mounter"],
+    optionalProfiles: ["combined", "accountant", "worker", "mounter"],
+    projectTabs: ["overview", "products", "files", "tasks", "materials", "finance"],
+    productTabs: ["percentage", "engineering", "tasks", "materials", "files", "history"],
+    correction: true, resume: true,
+  },
+});
+if (!Object.hasOwn(SESSION_POLICIES, SESSION_SCOPE)) throw new Error("SESSION_SCOPE_NOT_ALLOWLISTED");
+const POLICY = SESSION_POLICIES[SESSION_SCOPE];
+const NAMESPACE = POLICY.namespace;
 const MAX_INPUT = 96 * 1024;
-const PREF_KEYS = ["projects.list", "project.tab", "product.tab"];
-const PROFILE_KEYS = ["admin", "manager", "combined", "engineer"];
+const PREF_KEYS = POLICY.preferences;
+const CORRECTION_PRODUCT_LIST_LIMIT = 1024;
+function preferenceKeys(roles, correctionMode) {
+  return correctionMode && roles.some(role => ["ADMIN", "DIRECTOR", "MANAGER", "ENGINEER", "ACCOUNTANT"].includes(role))
+    ? [...PREF_KEYS, "products.list"] : PREF_KEYS;
+}
+const PROFILE_KEYS = POLICY.profiles;
 const BUSINESS_TABLES = ["User", "Client", "Project", "Product", "Task", "Work", "File", "Payment", "Payout", "PayrollEntry", "Material", "ProjectMaterial", "StockMovement"];
 const AUDIT_TIME_TABLES = ["ChangeLog", "TimeEntry"];
 
@@ -48,8 +95,9 @@ function readEnvelope() {
   requireThat(bytes.toString("base64") === encoded, "PRIVATE_INPUT_BASE64_NONCANONICAL");
   let input;
   try { input = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)); } catch { throw new SafeFailure("PRIVATE_INPUT_JSON_INVALID"); }
-  requireThat(["prepare", "restore", "inspect"].includes(input?.operation), "OPERATION_REQUIRED");
-  requireThat(exactKeys(input, input.operation === "prepare" ? ["operation"] : ["operation", "checkpoint", "ownWrites"]), "INPUT_FIELDS_INVALID");
+  requireThat((POLICY.resume ? ["prepare", "restore", "inspect", "resume"] : ["prepare", "restore", "inspect"]).includes(input?.operation), "OPERATION_REQUIRED");
+  requireThat(!Object.hasOwn(input, "correctionMode") || (POLICY.correction && input.correctionMode === true), "INPUT_FIELDS_INVALID");
+  requireThat(exactKeys(input, input.operation === "prepare" ? input.correctionMode === true ? ["operation", "correctionMode"] : ["operation"] : input.operation === "resume" ? ["operation", "checkpoint"] : ["operation", "checkpoint", "ownWrites"]), "INPUT_FIELDS_INVALID");
   return input;
 }
 
@@ -102,11 +150,12 @@ function validateCheckpoint(checkpoint, secret) {
   requireThat(record(checkpoint) && checkpoint.version === 1 && checkpoint.namespace === NAMESPACE, "CHECKPOINT_FORMAT_INVALID");
   requireThat(typeof checkpoint.signature === "string" && /^[a-f0-9]{64}$/.test(checkpoint.signature), "CHECKPOINT_SIGNATURE_REQUIRED");
   requireThat(timingSafeEqual(Buffer.from(checkpoint.signature, "hex"), Buffer.from(checkpointSignature(checkpoint, secret), "hex")), "CHECKPOINT_SIGNATURE_MISMATCH");
-  requireThat(exactKeys(checkpoint.availability, ["combined"]) && typeof checkpoint.availability.combined === "boolean", "CHECKPOINT_AVAILABILITY_INVALID");
-  const profileKeys = PROFILE_KEYS.filter((key) => key !== "combined" || checkpoint.availability.combined);
+  requireThat(!Object.hasOwn(checkpoint,"correctionMode") || (POLICY.correction && checkpoint.correctionMode === true),"CHECKPOINT_CORRECTION_MODE_INVALID");
+  requireThat(exactKeys(checkpoint.availability, POLICY.optionalProfiles) && Object.values(checkpoint.availability).every(value => typeof value === "boolean"), "CHECKPOINT_AVAILABILITY_INVALID");
+  const profileKeys = PROFILE_KEYS.filter((key) => !Object.hasOwn(checkpoint.availability,key) || checkpoint.availability[key]);
   requireThat(exactKeys(checkpoint.profiles, profileKeys), "CHECKPOINT_PROFILES_INVALID");
   const ids = [];
-  const expectedRoles = { admin: ["ADMIN"], manager: ["MANAGER"], combined: ["MANAGER", "ENGINEER"], engineer: ["ENGINEER"] };
+  const expectedRoles = { admin: ["ADMIN"], manager: ["MANAGER"], combined: ["MANAGER", "ENGINEER"], engineer: ["ENGINEER"], accountant:["ACCOUNTANT"], worker:["WORKER"], mounter:["MOUNTER"] };
   for (const key of profileKeys) {
     const profile = checkpoint.profiles[key];
     requireThat(exactKeys(profile, ["id", "roles"]) && typeof profile.id === "string" && profile.id.length > 0 && profile.id.length <= 128, "CHECKPOINT_PROFILE_ID_INVALID");
@@ -115,10 +164,11 @@ function validateCheckpoint(checkpoint, secret) {
   }
   requireThat(new Set(ids).size === profileKeys.length, "DISTINCT_PROFILE_USERS_REQUIRED");
   const originals = checkpoint.originalPreferences;
-  requireThat(Array.isArray(originals) && originals.length === profileKeys.length * PREF_KEYS.length, "EXACT_ORIGINAL_PREFERENCE_SET_REQUIRED");
+  const expectedPreferences = profileKeys.flatMap(key => preferenceKeys(checkpoint.profiles[key].roles,checkpoint.correctionMode === true).map(pref => preferenceId({userId:checkpoint.profiles[key].id,key:pref})));
+  requireThat(Array.isArray(originals) && originals.length === expectedPreferences.length, "EXACT_ORIGINAL_PREFERENCE_SET_REQUIRED");
   const seen = new Set();
   for (const row of originals) {
-    requireThat(exactKeys(row, ["userId", "key", "value"]) && ids.includes(row.userId) && PREF_KEYS.includes(row.key), "ORIGINAL_PREFERENCE_NOT_ALLOWLISTED");
+    requireThat(exactKeys(row, ["userId", "key", "value"]) && expectedPreferences.includes(preferenceId(row)), "ORIGINAL_PREFERENCE_NOT_ALLOWLISTED");
     requireThat(row.value === null || (typeof row.value === "string" && row.value.length <= (row.key.endsWith(".tab") ? 64 : 8192)), "ORIGINAL_PREFERENCE_VALUE_INVALID");
     requireThat(!seen.has(preferenceId(row)), "DUPLICATE_ORIGINAL_PREFERENCE");
     seen.add(preferenceId(row));
@@ -140,9 +190,9 @@ function validateOwnWrites(originals, ownWrites) {
   const writes = new Map();
   for (const row of ownWrites) {
     requireThat(exactKeys(row, ["userId", "key", "value"]) && allowed.has(preferenceId(row)), "OWN_WRITE_NOT_ALLOWLISTED");
-    requireThat(typeof row.value === "string" && row.value.length > 0 && row.value.length <= (row.key.endsWith(".tab") ? 64 : 8192), "OWN_WRITE_VALUE_INVALID");
+    requireThat(typeof row.value === "string" && row.value.length > 0 && row.value.length <= (row.key === "products.list" ? CORRECTION_PRODUCT_LIST_LIMIT : row.key.endsWith(".tab") ? 64 : 8192), "OWN_WRITE_VALUE_INVALID");
     if (row.key.endsWith(".tab")) {
-      const allowed = row.key === "project.tab" ? ["overview", "finance"] : ["percentage", "engineering", "tasks", "materials", "files", "history"];
+      const allowed = row.key === "project.tab" ? POLICY.projectTabs : POLICY.productTabs;
       requireThat(allowed.includes(row.value), "OWN_TAB_RESPONSE_VALUE_REQUIRED");
     } else {
       let parsed;
@@ -150,6 +200,10 @@ function validateOwnWrites(originals, ownWrites) {
       requireThat(parsed?.version === 1 && typeof parsed.revision === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(parsed.revision) && typeof parsed.query === "string", "OWN_WRITE_RESPONSE_VALUE_REQUIRED");
       requireThat(new URLSearchParams(parsed.query).toString() === parsed.query && /^[\x20-\x7e]*$/.test(parsed.query), "OWN_WRITE_CANONICAL_QUERY_REQUIRED");
       requireThat(row.value === JSON.stringify({ version: 1, revision: parsed.revision, query: parsed.query }), "EXACT_SUCCESS_RESPONSE_BYTES_REQUIRED");
+      if (row.key === "products.list") {
+        const params = new URLSearchParams(parsed.query);
+        requireThat([...params.keys()].join("|") === "view|q" && params.get("view") === "kanban" && /^\d{1,15}\.\d{1,10}$/.test(params.get("q") ?? ""),"CORRECTION_PRODUCT_LIST_QUERY_REQUIRED");
+      }
     }
     requireThat(!writes.has(preferenceId(row)), "DUPLICATE_OWN_WRITE");
     writes.set(preferenceId(row), row.value);
@@ -267,13 +321,17 @@ async function inspect(db, secret, checkpoint, ownWrites) {
   }, { isolationLevel: "RepeatableRead", maxWait: 10_000, timeout: 120_000 });
 }
 
-async function prepare(db, secret) {
+async function prepare(db, secret, correctionMode = false) {
+  requireThat(typeof correctionMode === "boolean" && (!correctionMode || POLICY.correction),"PREPARE_CORRECTION_MODE_INVALID");
   const source = await db.$transaction(async (tx) => {
     await tx.$executeRawUnsafe("SET TRANSACTION READ ONLY");
     await databaseGuard(tx, true);
     const users = await tx.user.findMany({ where: { active: true }, select: { id: true, roles: true, sessionVersion: true }, orderBy: { id: "asc" } });
     const admin = users.find((user) => sameRoles(user.roles, ["ADMIN"]));
     const manager = users.find((user) => sameRoles(user.roles, ["MANAGER"]));
+    const accountant = users.find(user=>sameRoles(user.roles,["ACCOUNTANT"]));
+    const worker = users.find(user=>sameRoles(user.roles,["WORKER"]));
+    const mounter = users.find(user=>sameRoles(user.roles,["MOUNTER"]));
     const combined = users.find((user) => sameRoles(user.roles, ["MANAGER", "ENGINEER"]));
     const engineerCandidates = users.filter((user) => sameRoles(user.roles, ["ENGINEER"]));
     requireThat(admin && manager && engineerCandidates.length, "EXISTING_ROLE_COHORT_MISSING");
@@ -288,17 +346,18 @@ async function prepare(db, secret) {
     const project = longest(projects);
     const product = longest(products);
     const ownProduct = longest(ownProducts);
-    const actors = { admin, manager, ...(combined ? { combined } : {}), engineer };
+    const cohort = { admin, manager, combined, engineer, accountant, worker, mounter };
+    const actors = Object.fromEntries(PROFILE_KEYS.filter(key => cohort[key]).map(key => [key, cohort[key]]));
     const profileKeys = PROFILE_KEYS.filter((key) => key in actors);
     const userIds = profileKeys.map((key) => actors[key].id);
     const [preferences, timers] = await Promise.all([
-      tx.userPreference.findMany({ where: { userId: { in: userIds }, key: { in: PREF_KEYS } }, select: { userId: true, key: true, value: true } }),
+      tx.userPreference.findMany({ where: correctionMode ? { OR: profileKeys.map(key => ({userId:actors[key].id,key:{in:preferenceKeys(actors[key].roles,true)}})) } : { userId: { in: userIds }, key: { in: PREF_KEYS } }, select: { userId: true, key: true, value: true } }),
       tx.timeEntry.findMany({ where: { userId: { in: userIds }, stoppedAt: null }, select: { userId: true } }),
     ]);
-    const originals = userIds.flatMap((userId) => PREF_KEYS.map((key) => ({ userId, key, value: preferences.find((row) => row.userId === userId && row.key === key)?.value ?? null })));
+    const originals = profileKeys.flatMap(profile => preferenceKeys(actors[profile].roles,correctionMode).map((key) => ({ userId:actors[profile].id, key, value: preferences.find((row) => row.userId === actors[profile].id && row.key === key)?.value ?? null })));
     return {
       actors,
-      availability: { combined: Boolean(combined) },
+      availability: Object.fromEntries(POLICY.optionalProfiles.map(key => [key, Boolean(actors[key])])),
       activeTimerUsers: new Set(timers.map((timer) => timer.userId)),
       originals,
       paths: { project: `/projects/${encodeURIComponent(project.id)}`, engineerProject: `/projects/${encodeURIComponent(ownProduct.projectId)}`, product: `/products/${encodeURIComponent(product.number)}`, engineerProduct: `/products/${encodeURIComponent(ownProduct.number)}` },
@@ -311,26 +370,18 @@ async function prepare(db, secret) {
       baseline: await snapshots(tx),
     };
   }, { isolationLevel: "RepeatableRead", maxWait: 10_000, timeout: 120_000 });
-  const profiles = {};
-  const identities = {};
-  for (const key of PROFILE_KEYS.filter((key) => key in source.actors)) {
-    const actor = source.actors[key];
-    const cookies = await Promise.all(["authjs.session-token", "__Secure-authjs.session-token"].map(async (name) => ({
-      name, value: await encode({ secret, salt: name, token: { id: actor.id, roles: actor.roles, sessionVersion: actor.sessionVersion }, maxAge: 15 * 60 }),
-    })));
-    profiles[key] = { id: actor.id, roles: actor.roles, cookies, canVisitMy: !source.activeTimerUsers.has(actor.id) };
-    identities[key] = { id: actor.id, roles: actor.roles };
-  }
+  const {profiles,identities}=await encodeProfiles(source.actors,secret,source.activeTimerUsers,true);
   const checkpoint = {
     version: 1, namespace: NAMESPACE, runId: randomUUID(), issuedAt: new Date().toISOString(),
     profiles: identities, availability: source.availability, originalPreferences: source.originals, baseline: source.baseline,
+    ...(correctionMode ? {correctionMode:true} : {}),
   };
   checkpoint.signature = checkpointSignature(checkpoint, secret);
   validateCheckpoint(checkpoint, secret);
   // Conservative budget for every allowed key at the maximum response length.
   // URLSearchParams response queries are ASCII and never contain JSON quotes or
   // backslashes; the fixed JSON wrapper below overestimates their escaping cost.
-  const maximumWrites = source.originals.map(({ userId, key }) => ({ userId, key, value: key.endsWith(".tab") ? "x".repeat(64) : "x".repeat(8192) }));
+  const maximumWrites = source.originals.map(({ userId, key }) => ({ userId, key, value: "x".repeat(key === "products.list" ? CORRECTION_PRODUCT_LIST_LIMIT : key.endsWith(".tab") ? 64 : 8192) }));
   const restoreSkeleton = { operation: "restore", checkpoint, ownWrites: maximumWrites };
   requireThat(Buffer.byteLength(Buffer.from(JSON.stringify(restoreSkeleton)).toString("base64"), "ascii") <= MAX_INPUT, "CHECKPOINT_TOO_LARGE_FOR_PRIVATE_TRANSPORT");
   return {
@@ -338,6 +389,34 @@ async function prepare(db, secret) {
     originalPreferences: source.originals, availability: source.availability,
     sessionExpiresAt: new Date(Date.now() + 15 * 60_000).toISOString(),
   };
+}
+
+async function encodeProfiles(actors,secret,activeTimerUsers=new Set(),allowMy=false){
+  const profiles={},identities={};
+  for(const key of PROFILE_KEYS.filter(key=>key in actors)){
+    const actor=actors[key];
+    const cookies=await Promise.all(["authjs.session-token","__Secure-authjs.session-token"].map(async name=>({name,value:await encode({secret,salt:name,token:{id:actor.id,roles:actor.roles,sessionVersion:actor.sessionVersion},maxAge:15*60})})));
+    profiles[key]={id:actor.id,roles:actor.roles,cookies,canVisitMy:allowMy&&!activeTimerUsers.has(actor.id)};
+    identities[key]={id:actor.id,roles:actor.roles};
+  }
+  return{profiles,identities};
+}
+
+// Возобновляется только локальная сессия прежних акторов; checkpoint и данные не меняются.
+async function resume(db,secret,checkpoint){
+  requireThat(POLICY.resume, "SESSION_RESUME_NOT_ALLOWLISTED");
+  requireThat(process.env.CRM_MODERNIZATION_TARGET==="local","LOCAL_SESSION_RESUME_ONLY");
+  environmentGuard();validateCheckpoint(checkpoint,secret);
+  const actors=await db.$transaction(async tx=>{
+    await tx.$executeRawUnsafe("SET TRANSACTION READ ONLY");await databaseGuard(tx,true);
+    const keys=Object.keys(checkpoint.profiles),ids=keys.map(key=>checkpoint.profiles[key].id);
+    const users=await tx.user.findMany({where:{id:{in:ids}},select:{id:true,roles:true,active:true,sessionVersion:true}});
+    requireThat(users.length===ids.length,"ORIGINAL_USERS_MISSING");
+    const actors={};for(const key of keys){const original=checkpoint.profiles[key],current=users.find(user=>user.id===original.id);requireThat(current?.active&&sameRoles(current.roles,original.roles),"USER_IDENTITY_CHANGED");requireThat(Number.isSafeInteger(current.sessionVersion)&&current.sessionVersion>=0,"CURRENT_SESSION_VERSION_INVALID");actors[key]=current;}
+    return actors;
+  },{isolationLevel:"RepeatableRead",maxWait:10000,timeout:120000});
+  const {profiles}=await encodeProfiles(actors,secret);
+  return{status:"RESUMED",checkpointSignature:checkpoint.signature,profiles,sessionExpiresAt:new Date(Date.now()+15*60000).toISOString(),scope:"sessions-only; business integrity and preference restoration require separate guarded cleanup"};
 }
 
 async function restore(db, secret, checkpoint, ownWrites) {
@@ -356,7 +435,7 @@ async function restore(db, secret, checkpoint, ownWrites) {
     }
     const before = await snapshots(tx);
     requireThat(canonical(before) === canonical(checkpoint.baseline), "BUSINESS_AUDIT_OR_TIME_CHANGED_BEFORE_RESTORE");
-    // Lock only the nine/twelve exact preference keys. Missing rows are covered by the
+    // Lock only the exact bounded preferences of existing captured actors. Missing rows are covered by the
     // serializable predicate; no unrelated rows or whole tables are locked.
     const sorted = [...originals].sort((a, b) => preferenceId(a).localeCompare(preferenceId(b)));
     const placeholders = sorted.map((_, i) => `($${i * 2 + 1},$${i * 2 + 2})`).join(",");
@@ -391,9 +470,11 @@ async function main() {
     operation = input.operation;
     const secret = environmentGuard();
     // Validate authenticated diagnostic/cleanup scope BEFORE a database client.
-    if (operation !== "prepare") validateOwnWrites(validateCheckpoint(input.checkpoint, secret), input.ownWrites);
+    if(operation==="resume"){requireThat(process.env.CRM_MODERNIZATION_TARGET==="local","LOCAL_SESSION_RESUME_ONLY");validateCheckpoint(input.checkpoint,secret);}
+    else if (operation !== "prepare") validateOwnWrites(validateCheckpoint(input.checkpoint, secret), input.ownWrites);
     db = new PrismaClient({ log: [], errorFormat: "minimal" });
-    const result = operation === "prepare" ? await prepare(db, secret)
+    const result = operation === "prepare" ? await prepare(db, secret,input.correctionMode === true)
+      : operation === "resume" ? await resume(db,secret,input.checkpoint)
       : operation === "inspect" ? await inspect(db, secret, input.checkpoint, input.ownWrites)
         : await restore(db, secret, input.checkpoint, input.ownWrites);
     await db.$disconnect();

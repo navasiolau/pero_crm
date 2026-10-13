@@ -11,6 +11,7 @@ import { mock } from "node:test";
 import { pathToFileURL } from "node:url";
 import { Prisma, PrismaClient } from "@prisma/client";
 import { existingLocalCrmDatabaseUrl } from "./helpers/local-crm-database";
+import { nativeOwnedIds, nativeSnapshot } from "./helpers/native-acceptance-snapshot";
 import type { DomainActor } from "../src/server/actor";
 
 const require = createRequire(import.meta.url);
@@ -50,7 +51,7 @@ export async function timerNativePins(): Promise<Pins> {
     .map(file => `import ${JSON.stringify("./src/server/" + file + ".ts")};`).join("\n"), sourcefile: "qa132-closure.ts", resolveDir: process.cwd(), loader: "ts" },
     bundle: true, write: false, metafile: true, packages: "external", platform: "node", format: "cjs", tsconfig: resolve("tsconfig.json"), logLevel: "silent" });
   const files = Object.keys(closure.metafile.inputs).filter(file => file !== "<stdin>" && file !== "qa132-closure.ts");
-  files.push("tests/timer-stop-cap-native.ts", "tests/timer-stop-cap.test.ts", "tests/helpers/local-crm-database.ts", "prisma/schema.prisma", "package.json", "tsconfig.json",
+  files.push("tests/timer-stop-cap-native.ts", "tests/timer-stop-cap.test.ts", "tests/helpers/local-crm-database.ts", "tests/helpers/native-acceptance-snapshot.ts", "prisma/schema.prisma", "package.json", "tsconfig.json",
     "../../pnpm-lock.yaml", "../../package.json", "../../pnpm-workspace.yaml", "../../packages/plugins/demo/src/plugin.ts", "../../packages/plugins/demo/package.json",
     "../../packages/plugin-sdk/src/index.ts", "../../packages/plugin-sdk/package.json");
   const clientRequire = createRequire(require.resolve("@prisma/client"));
@@ -98,14 +99,8 @@ function durable(name: string, value: unknown) {
 }
 function sqlName(name: string) { assert.match(name, /^[A-Za-z_][A-Za-z0-9_]{0,62}$/, "QA132_SQL_NAME_STOP"); return '"' + name + '"'; }
 const ownedIds = (table: string) => (TIMER_NATIVE_MANIFEST.ids as Record<string, string[]>)[table] ?? [];
-async function fingerprint(db: Database, excludeOwned = false) {
-  const tables = await db.$queryRaw<{ tablename: string }[]>`SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename`;
-  const result: Record<string, unknown> = {};
-  for (const { tablename } of tables) { const ids = excludeOwned ? ownedIds(tablename) : [], where = ids.length ? "WHERE id <> ALL($1::text[])" : "";
-    result[tablename] = await db.$queryRawUnsafe(`SELECT count(*)::text AS count,md5(COALESCE(string_agg(row_to_json(t)::text,'' ORDER BY row_to_json(t)::text),'')) AS digest FROM ${sqlName(tablename)} t ${where}`, ...ids.length ? [ids] : []); }
-  result.constraints = await db.$queryRaw`SELECT md5(COALESCE(string_agg(pg_get_constraintdef(c.oid),'' ORDER BY t.relname,c.conname),'')) AS digest FROM pg_constraint c JOIN pg_class t ON t.oid=c.conrelid JOIN pg_namespace n ON n.oid=t.relnamespace WHERE n.nspname='public'`;
-  return result;
-}
+const fingerprint = (db: Database, excludeOwned = false) =>
+  nativeSnapshot(db, excludeOwned ? nativeOwnedIds(TIMER_NATIVE_MANIFEST.ids) : {});
 async function captureOwned(db: Database) {
   const result: Record<string, unknown> = {};
   for (const [table, ids] of Object.entries(TIMER_NATIVE_MANIFEST.ids))

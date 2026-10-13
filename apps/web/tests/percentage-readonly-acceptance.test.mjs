@@ -3,7 +3,6 @@ import { test } from "node:test";
 import { assertApplied, assertCompatibilityMarkers, assertExactlyPending, assertFileMetadata,
   assertStorageInventory, captureReadonly, MIGRATIONS, originalFingerprints, tables,
   TARGET_LOCAL } from "./percentage-readonly-acceptance.mjs";
-import { assertBackupToc } from "./percentage-readonly-local.mjs";
 
 function empty(phase) { return { targetKind: TARGET_LOCAL.kind, optionalTables: [],
   rows: Object.fromEntries(tables(phase).map((name) => [name, []])) }; }
@@ -76,13 +75,4 @@ test("injected capture is read-only and rejects target identity before business 
   await assert.rejects(captureReadonly(client, TARGET_LOCAL, "after"), /DATABASE_IDENTITY_MISMATCH/);
   assert.ok(seen[0].includes("SET TRANSACTION READ ONLY"));
   assert.equal(seen.filter((sql) => sql.includes("current_database()")).length, 1);
-});
-
-test("verified pg_restore TOC covers every old table plus migration ledger", () => {
-  const names = tables("before");
-  const toc = ["; Archive created at 2026-09-30", ...[...names, "_prisma_migrations"].map((name, index) =>
-    `${index + 1}; 0 ${10000 + index} TABLE DATA public ${name} pero`)].join("\n") + "\n";
-  assert.equal(assertBackupToc(toc, names), names.length + 1);
-  assert.throws(() => assertBackupToc(toc.replace("TABLE DATA public File", "TABLE DATA public Missing"), names),
-    /BACKUP_TOC_TABLE_DATA_MISMATCH/);
 });

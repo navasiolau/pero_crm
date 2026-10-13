@@ -5,6 +5,9 @@ import {existsSync,lstatSync,openSync,writeFileSync,fsyncSync,closeSync} from 'n
 import path from 'node:path';
 export const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
 export function canonical(value){return Array.isArray(value)?'['+value.map(canonical).join(',')+']':value&&typeof value==='object'?'{'+Object.keys(value).sort().map(key=>JSON.stringify(key)+':'+canonical(value[key])).join(',')+'}':JSON.stringify(value);}
+// Прежние source-manifest hashes сохраняют точные bytes и canonical ordering.
+export const evidenceHash=sha;
+export const declarationHash=value=>evidenceHash(canonical(value));
 export function checkAncestors(current,stop,includeStop,reparseCode,ancestorCode,compare=value=>value){
  while(true){
   const atStop=stop!==null&&compare(current)===compare(stop);

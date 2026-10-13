@@ -3,7 +3,7 @@ import test from 'node:test';
 import {execFileSync} from 'node:child_process';
 import {mkdtemp,mkdir,writeFile,readFile,realpath,rm,lstat} from 'node:fs/promises';
 import path from 'node:path';
-import {evidenceHash} from './acceptance-evidence-protocol.mjs';
+import {evidenceHash} from './helpers/qa-private-primitives.mjs';
 import os from 'node:os';
 import {pinSources,assertSourcePins,reviewedBundle} from './acceptance-source-manifest.mjs';
 const required=['pnpm-lock.yaml','package.json','pnpm-workspace.yaml','apps/web/package.json','apps/web/tsconfig.json','apps/web/prisma/schema.prisma','apps/web/next.config.ts','apps/web/Dockerfile'];
@@ -123,9 +123,11 @@ test('standalone config allowlist does not permit sibling, env or private app pa
 }));
 test('shared162 transitive QA primitive requires explicit reviewed physical pin and keeps outsider denied',()=>fixture(async({root,revision})=>{
  const helper=path.resolve(new URL('./helpers/qa-private-primitives.mjs',import.meta.url).pathname.replace(/^\/([A-Z]:)/,'$1')),qaRoot=path.resolve(path.dirname(helper),'../../../..'),helperBytes=await readFile(helper),sha256=evidenceHash(helperBytes),canonical=helperBytes.toString('utf8').replaceAll('\r\n','\n');
- const checkCanonical=bytes=>assert.equal(evidenceHash(Buffer.from(bytes.toString('utf8').replaceAll('\r\n','\n'))),'917a1fd8a7d12824bda1d269d038c22a8e3ee5e8b6b7717e8293f8912b0b5072');
+ const checkCanonical=bytes=>assert.equal(evidenceHash(Buffer.from(bytes.toString('utf8').replaceAll('\r\n','\n'))),'f4026b73efc86c02e3cb25c59f4598dd8e193eae1662858f3f3754f4598b19b8');
  checkCanonical(helperBytes);checkCanonical(Buffer.from(canonical));checkCanonical(Buffer.from(canonical.replaceAll('\n','\r\n')));assert.throws(()=>checkCanonical(Buffer.from(canonical+'export const altered=true;\n')),/AssertionError/);
- const accepted=execFileSync('git',['-C',qaRoot,'show','HEAD:apps/web/tests/helpers/qa-private-primitives.mjs']);assert.equal(canonical,accepted.toString('utf8').replaceAll('\r\n','\n'));
+ const movedHashes='// Прежние source-manifest hashes сохраняют точные bytes и canonical ordering.\nexport const evidenceHash=sha;\nexport const declarationHash=value=>evidenceHash(canonical(value));\n';
+ const accepted=execFileSync('git',['-C',qaRoot,'show','HEAD:apps/web/tests/helpers/qa-private-primitives.mjs']);
+ assert.equal(canonical.replace(movedHashes,''),accepted.toString('utf8').replaceAll('\r\n','\n').replace(movedHashes,''));
  const entry=path.join(root,'producer.mjs');await writeFile(entry,'import {canonical} from '+JSON.stringify(helper)+';export const value=canonical({fixture:true});\n');const approved={entry,revision,sourceRoot:root,producerRoots:[root,qaRoot],reviewedProducers:[{file:entry,sha256:evidenceHash(await readFile(entry))}]};
  await assert.rejects(reviewedBundle(approved),/UNREVIEWED_PRODUCER_IMPORT/);const pack=await reviewedBundle({...approved,reviewedProducers:[...approved.reviewedProducers,{file:helper,sha256}]});assert.ok(pack.manifest.pins.some(pin=>pin.scope==='producer'&&pin.file===helper&&pin.sha256===sha256));await assertSourcePins(pack.manifest);
  const outsider=path.join(root,'outsider.mjs');await writeFile(outsider,'export const outsider=true;\n');await writeFile(entry,'import {canonical} from '+JSON.stringify(helper)+';import {outsider} from '+JSON.stringify(outsider)+';export const value=canonical({outsider});\n');await assert.rejects(reviewedBundle({...approved,reviewedProducers:[{file:entry,sha256:evidenceHash(await readFile(entry))},{file:helper,sha256}]}),/UNREVIEWED_PRODUCER_IMPORT/);

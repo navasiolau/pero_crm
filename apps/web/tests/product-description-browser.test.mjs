@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {DESCRIPTION_LF,descriptionPatchOwned,descriptionBrowserValue,descriptionPrivateDiagnostic,descriptionCapturedWrite} from './product-description-browser.mjs';
-import {descriptionMutationIds} from './product-description-stage-runner.mjs';
+import {descriptionMutationIds} from './product-description-browser.mjs';
 import {runCrmBrowserZoom} from './crm-browser-zoom.mjs';
 const fixture={ids:{productA:'own-a',productB:'own-b'},actors:{admin:{id:'a'},manager:{id:'m'},engineer:{id:'e'}}};
 const id='b5428289-23f7-4e42-a967-212da990d141';

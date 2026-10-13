@@ -5,46 +5,24 @@ import type { Prisma } from "@prisma/client";
 import type { DomainActor } from "../src/server/projects/core";
 import { configureEngineeringPool, configureEngineeringTaskShares, createEngineeringWorkCore, closeEngineeringStageCore, prepareEngineeringQuote } from "../src/server/product-stage-pay/core";
 import { deliverEngineeringClosed, deliverEngineeringCreated } from "../src/server/product-stage-pay/post-commit";
+import { engineeringIntegrationFixture } from "./helpers/product-engineering-integration-fixture";
 
 const manager: DomainActor = { id: "manager", name: "Manager", roles: ["MANAGER"], source: "web" };
 const noDb = new Proxy({}, { get: () => { throw new Error("unauthorized operation touched database"); } }) as Prisma.TransactionClient;
 
-function fixture() {
-  const writes: string[] = [];
-  const task = { id: "t", workId: "w", projectId: "j", productId: "p", status: "DONE", assigneeId: "u", assignee: { id: "u", name: "User" },
-    stageShareUnits: 1_000_000, splitRevision: 0, quantity: { toString: () => "1.00" }, shareUnits: 1_000_000, allocationGroupId: "g",
-    allocationGroup: { id: "g", workId: "w", quantity: { toString: () => "1.00" } }, createdAt: new Date("2026-01-01"), title: "Task" };
-  const work = { id: "w", projectId: "j", productId: "p", paymentKind: "ENGINEERING", stagePayPoolId: "pool", poolWeightUnits: 1_000_000,
-    createdAt: new Date("2026-01-01"), title: "Work", tasks: [task] };
-  const pool = { id: "pool", kind: "ENGINEERING", state: "DRAFT", revision: 0, ratePercent: { toString: () => "5.00" },
-    legacyPayrollEntryIds: [], works: [work] };
-  const product = { id: "p", number: "205.1", title: "Desk", projectId: "j", status: "DESIGN", expectedPrice: { toString: () => "100.00" }, engineerId: "u",
-    engineer: { id: "u", name: "User" }, project: { id: "j", number: "205", currency: "BYN" }, works: [work], stagePayPools: [pool] };
-  const db = { product: { findUnique: async () => product }, orgSetting: { findUnique: async () => null },
-    work: { update: async () => { writes.push("work"); } },
-    productStagePayPool: { update: async () => { writes.push("pool"); return pool; } },
-    productStageSettlement: { count: async () => 0, create: async () => ({ id: "s" }) },
-    productStageSettlementShare: { create: async () => ({ id: "ss" }) },
-    payrollEntry: { count: async () => 0, create: async () => ({ id: "e" }) },
-    productStatusHistory: { create: async () => ({ id: "h" }) },
-    domainEvent: { create: async () => ({ id: "event" }) },
-    changeLog: { findUnique: async () => null, create: async () => ({ id: "receipt" }) } } as unknown as Prisma.TransactionClient;
-  return { db, product, pool, work, task, writes };
-}
-
 test("repeat close receipt requires the same entity and action", async () => {
-  const f = fixture();
-  f.db.changeLog.findUnique = (async () => ({ actorId: manager.id, entityId: "p", action: "unrelated", newValue: {
+  const f = engineeringIntegrationFixture();
+  f.db.changeLog.findUnique = (async () => ({ actorId: manager.id, entityId: "product", action: "unrelated", newValue: {
     expectedPoolRevision: 0, settlementId: "old" } })) as never;
-  await assert.rejects(closeEngineeringStageCore(manager, { productId: "p", expectedPoolRevision: 0, requestId: randomUUID() }, null, f.db), /использован/);
+  await assert.rejects(closeEngineeringStageCore(manager, { productId: "product", expectedPoolRevision: 0, requestId: randomUUID() }, null, f.db), /использован/);
 });
 
 test("repeat close returns the original settlement after product advances, without requiring FX", async () => {
-  const f = fixture();
-  f.product.status = "DONE";
-  f.db.changeLog.findUnique = (async () => ({ actorId: manager.id, entity: "product", entityId: "p", action: "engineering.close",
+  const f = engineeringIntegrationFixture();
+  f.state().product.status = "DONE";
+  f.db.changeLog.findUnique = (async () => ({ actorId: manager.id, entity: "product", entityId: "product", action: "engineering.close",
     newValue: { expectedPoolRevision: 0, settlementId: "old" } })) as never;
-  const result = await closeEngineeringStageCore(manager, { productId: "p", expectedPoolRevision: 0, requestId: randomUUID() }, null, f.db);
+  const result = await closeEngineeringStageCore(manager, { productId: "product", expectedPoolRevision: 0, requestId: randomUUID() }, null, f.db);
   assert.deepEqual(result, { settlementId: "old", repeated: true, eventId: null, eventIds: [], earnings: [], product: null });
   assert.deepEqual(f.writes, []);
 });
@@ -75,7 +53,7 @@ test("new fund configuration/taskshare/work creation deny all roles before any d
  }
 });
 test("new close with stale/valid quote preserves all historical facts withoutwrites",async()=>{
- const f=fixture();const quote=await prepareEngineeringQuote("p",f.db);
- await assert.rejects(closeEngineeringStageCore(manager,{productId:"p",expectedPoolRevision:0,requestId:randomUUID()},quote,f.db),/запрещено/);
+ const f=engineeringIntegrationFixture();const quote=await prepareEngineeringQuote("product",f.db);
+ await assert.rejects(closeEngineeringStageCore(manager,{productId:"product",expectedPoolRevision:0,requestId:randomUUID()},quote,f.db),/запрещено/);
  assert.deepEqual(f.writes,[]);
 });

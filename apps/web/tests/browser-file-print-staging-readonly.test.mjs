@@ -9,7 +9,7 @@ test('cross-origin and prefetch cannot request PDF outside approved current tran
 test('current signed arrays drive rows; no fake ids.financeDocuments or unlinked-finance UI is invented',()=>{const cases=filePrintOwnedCases(binding);assert.deepEqual(cases.map(item=>[item.source,item.surface,item.file.id]),[['project','product','image'],['project','task','pdf'],['project','project','cad'],['finance','expense','finance-pdf']]);});
 
 import {runFilePrintStagingReadonly} from './browser-file-print-staging-readonly.mjs';
-import {digest} from './file-fixture113-protocol.mjs';
+import {declarationHash as digest} from './helpers/qa-private-primitives.mjs';
 function currentV5Input() {
  const revision='a'.repeat(40),hash='b'.repeat(64),descriptor={id:'c'.repeat(42),exportedName:'deleteFile',source:'src/server/files/actions.ts',routes:['/products/[id]','/projects/[id]'],revision,rawManifestSha256:'d'.repeat(64),actionManifestHash:'e'.repeat(64)};
  return {authorized:true,origin:binding.origin,expectedRevision:revision,identity:{hostname:'crm-staging',revision},handoff:{namespace:'PERO_FILE_ACCEPTANCE_113_V2',version:2,kind:'handoff',runId:'10000000-0000-4000-8000-000000000001',revision,preSha256:hash,checkpointHash:hash,signature:hash,currentOwnedStateHash:hash,storageManifestHash:hash,financialStateHash:hash,compiledDeleteFile:descriptor,actionManifestHash:descriptor.actionManifestHash,rawManifestSha256:descriptor.rawManifestSha256},saveNativeScreenshot:async()=>{throw Error('NATIVE_SINK_MUST_NOT_RUN');}};

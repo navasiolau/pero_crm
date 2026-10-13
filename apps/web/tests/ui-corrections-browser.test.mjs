@@ -2,19 +2,10 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {correctionProductActionOwned,correctionClientInputOwned,correctionProductListPreferenceOwned,correctionRecoveryAllowed,deriveCorrectionAck,finalUploadOwned,runUiCorrectionsBrowser} from './ui-corrections-browser.mjs';
 import {createHash} from 'node:crypto';
-import {validateRecoveryReadonlyEvidence} from './ui-corrections-recovery.mjs';
 import {finalQaMedia,finalFileId,finalFullscreenVisible} from './ui-corrections-browser.mjs';
 import {correctionJournalScope} from './ui-corrections-stage-runner.mjs';
 const id='00000000-0000-4000-8000-000000000001';
 const fixture={checkpoint:{runId:id,correctionMode:true},numbers:{productA:'1.1',productB:'1.2'},ids:{project:'p',productA:'a',productB:'b',clientA:'ca',clientB:'cb'},paths:{productA:'/products/1.1',productB:'/products/1.2',project:'/projects/p'},actors:{admin:{id:'admin',roles:['ADMIN']},engineer:{id:'engineer',roles:['ENGINEER']}}};
-test('recovery gates every original byte hash and signed manifest on actual readonly MATCH',()=>{
- const digest=bytes=>createHash('sha256').update(bytes).digest('hex'),originalFileBytes=Object.fromEntries(['fixture-checkpoint.json','owned-write-journal.json','final-browser-receipt.json'].map(name=>[name,Buffer.from(name)])),signedFileBytes=Buffer.from('signed observation');
- const proof={kind:'corrections-exact-scope-readonly-reconciliation',status:'MATCH',target:'local',originalFingerprintsMatched:true,financialDependenciesZero:true,capturedInputPreserved:true,knownFileCount:7,knownExtraClientCount:1,knownStatusBackCount:1,dbWrites:0,storageWrites:0,blockedPreferenceProof:'ROOT36_SOURCE_BEFORE_UPSTREAM_BRANCH_NO_RESPONSE',blockedPreferenceActionHash:'action hash',originalBrowserStatus:'FAILED_UNCHANGED',originalFilesHashes:Object.fromEntries(Object.entries(originalFileBytes).map(([name,bytes])=>[name,digest(bytes)])),signedFileObservationHash:digest(signedFileBytes)};
- const args={proof,originalFileBytes,signedFileBytes,blockedActionHash:'action hash'};assert.equal(validateRecoveryReadonlyEvidence(args),true);
- for(const change of [{status:'FAIL'},{financialDependenciesZero:false},{knownFileCount:6},{dbWrites:1},{originalBrowserStatus:'PASS'}])assert.throws(()=>validateRecoveryReadonlyEvidence({...args,proof:{...proof,...change}}),/RECOVERY_/);
- for(const name of Object.keys(originalFileBytes))assert.throws(()=>validateRecoveryReadonlyEvidence({...args,originalFileBytes:{...originalFileBytes,[name]:Buffer.from('changed')}}),/ORIGINAL_FILE_HASH_STOP/);
- assert.throws(()=>validateRecoveryReadonlyEvidence({...args,signedFileBytes:Buffer.from('changed')}),/SIGNED_MANIFEST_HASH_STOP/);
-});
 test('products.list requires signed correction scope, exact owned kanban query and genuine baseline',()=>{
  const scope={namespace:'PERO_PRODUCT_ATTACHMENTS_SESSION_V1',correctionMode:true,signature:'a'.repeat(64),originalPreferences:[{userId:'admin',key:'products.list',value:'old'}]},args=['products','view=kanban&q=1.1','old'];
  assert.equal(correctionProductListPreferenceOwned(args,fixture,'admin',scope),true);

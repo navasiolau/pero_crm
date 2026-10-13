@@ -2,24 +2,15 @@
 // Every owned fixture and audit/outbox row is inside one outer transaction which aborts.
 import assert from 'node:assert/strict';
 import {randomUUID,createHash} from 'node:crypto';
-import {hostname} from 'node:os';
-import {existsSync} from 'node:fs';
 import {PrismaClient} from '@prisma/client';
 import {patchProductCore,updateProductCore} from '../src/server/products/core.ts';
 import {createTaskTransaction} from '../src/server/tasks/transaction.ts';
 import {updateProjectCore} from '../src/server/projects/core.ts';
+import {modernizationNativeGuard,modernizationNativeFingerprint} from './product-description-qa-bundle.mjs';
 let phase='target_guard';
 const TABLES=['User','Client','Project','Product','Task','Work','File','Payment','Payout','PayrollEntry','Material','ProjectMaterial','StockMovement','ChangeLog','TimeEntry','DomainEvent'];
-function guard(){
- const target=process.env.CRM_MODERNIZATION_TARGET;const url=new URL(process.env.DATABASE_URL??'');
- assert.equal(url.protocol,'postgresql:');assert.ok(!url.hash);assert.ok(!url.searchParams.has('schema')||url.searchParams.get('schema')==='public');
- if(target==='local'){assert.equal(process.platform,'win32');assert.ok(['localhost','127.0.0.1'].includes(url.hostname));assert.equal(url.port,'5433');assert.equal(url.pathname,'/pero_crm');}
- else if(target==='staging'){
-  assert.ok(existsSync('/.dockerenv')&&/^[a-f0-9]{12,64}$/.test(hostname()));assert.equal(url.hostname,'db');assert.equal(url.port||'5432','5432');assert.equal(url.pathname,'/crm');assert.equal(process.env.S3_BUCKET,'pero-crm-staging');
-  const proof=JSON.parse(process.env.CRM_MODERNIZATION_STAGE_PROOF??'');assert.equal(proof.hostname,'crm-staging');assert.match(proof.revision,/^[a-f0-9]{40}$/);assert.equal(proof.databaseVolume,'crm-staging_pgdata');assert.match(proof.outerW07Sha256,/^[a-f0-9]{64}$/);assert.ok(proof.web&&proof.database);
- }else throw new Error('EXPLICIT_LOCAL_OR_STAGING_TARGET_REQUIRED');return target;
-}
-async function fingerprint(db){const result={};for(const table of TABLES){const [row]=await db.$queryRawUnsafe(`SELECT count(*)::text AS count, md5(COALESCE(string_agg(row_to_json(t)::text, '' ORDER BY row_to_json(t)::text), '')) AS hash FROM "${table}" t`);result[table]=row;}return result;}
+const guard=()=>modernizationNativeGuard('product-inline');
+const fingerprint=db=>modernizationNativeFingerprint(db,TABLES,false);
 async function main(){
  const target=guard();const db=new PrismaClient({log:[{emit:'event',level:'query'}]});const queryProfiles=[];let activeProfile=null;
  db.$on('query',event=>{if(activeProfile)activeProfile.queries.push(event.query)});
