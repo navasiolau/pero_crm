@@ -21,7 +21,8 @@ test("files.crud: file113, документы, attachment ACL и inline-дейс
   const f = await createHttpS3Fixture("files-crud"); t.after(() => f.dispose());
   const manager = await f.user("manager", ["MANAGER"]), second = await f.user("second", ["MANAGER"]);
   const engineer = await f.user("engineer", ["ENGINEER"]), foreign = await f.user("foreign", ["ENGINEER"]);
-  const combined = await f.user("combined", ["MANAGER", "ENGINEER"]), accountant = await f.user("accountant", ["ACCOUNTANT"]);
+  const combined = await f.user("combined", ["MANAGER", "ENGINEER"]);
+  let accountant = await f.user("accountant", ["ACCOUNTANT"]);
   const procurement = await f.user("procurement", ["PROCUREMENT"]), worker = await f.user("worker", ["WORKER"]), mounter = await f.user("mounter", ["MOUNTER"]);
   for (const actor of [manager, engineer, accountant]) await f.session(actor);
   const project = await f.project("project", { stage: "CONTRACT", currency: "BYN", managerId: manager.id, initialPrice: "123.45" });
@@ -133,9 +134,13 @@ test("files.crud: file113, документы, attachment ACL и inline-дейс
       assert.equal((await tx.payment.updateMany({ where: { id: income.id, reportDocumentId: docs[1].id }, data: { reportDocumentId: docs[0].id } })).count, 0);
     });
     assert.deepEqual(await f.db.payment.findUnique({ where: { id: income.id } }), income); assert.deepEqual(await f.db.payment.findUnique({ where: { id: expense.id } }), expense);
-    await f.db.user.update({ where: { id: accountant.id }, data: { roles: ["MANAGER"] } });
-    assert.equal((await f.request(`/api/finance/documents/${docs[0].id}`, accountant)).status, 403);
-    await f.db.user.update({ where: { id: accountant.id }, data: { roles: ["ACCOUNTANT"] } });
+    try {
+      // Смена роли отзывает старый JWT; ролевой 403 проверяем с актуальной версией сессии.
+      const formerAccountant = await f.db.user.update({ where: { id: accountant.id }, data: { roles: ["MANAGER"] } });
+      assert.equal((await f.request(`/api/finance/documents/${docs[0].id}`, formerAccountant)).status, 403);
+    } finally {
+      accountant = await f.db.user.update({ where: { id: accountant.id }, data: { roles: ["ACCOUNTANT"] } });
+    }
     assert.equal((await f.financeUpload(manager, { fileName: "denied.pdf", mimeType: "application/pdf", bytes: pdf, clientMutationId: randomUUID() })).response.status, 403);
     assert.equal((await f.financeUpload(undefined, { fileName: "anonymous.pdf", mimeType: "application/pdf", bytes: pdf, clientMutationId: randomUUID() })).response.status, 401);
     assert.equal((await f.financeUpload(accountant, { fileName: "empty.pdf", mimeType: "application/pdf", bytes: new Uint8Array(), clientMutationId: randomUUID() })).response.status, 422);
