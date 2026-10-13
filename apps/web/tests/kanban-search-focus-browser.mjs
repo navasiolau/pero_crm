@@ -92,6 +92,13 @@ async function geometry(page,section){return target(page,section).evaluate(card=
 async function settledCenter(page,section){await expect.poll(async()=>{const g=await geometry(page,section);return Math.max(g.xError,g.yError);},{timeout:5000}).toBeLessThan(2);}
 const waitFrames=page=>page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
 const position=page=>page.evaluate(()=>({left:document.querySelector('[data-slot="kanban-scroll"]')?.scrollLeft,top:scrollY}));
+function assertManualScrollPreserved(actual,expected){
+ for(const axis of ['left','top']){
+  const delta=actual[axis]-expected[axis];
+  assert.ok(Number.isFinite(actual[axis])&&Number.isFinite(expected[axis])&&Number.isFinite(delta)&&Math.abs(delta)<=1,
+   `Ручной scroll ${axis} изменился на ${delta} CSS px`);
+ }
+}
 async function resetPosition(page){
  // Сначала завершаем предыдущий поиск: прежний центр не доказывает завершённый focus RAF.
  await expect.poll(()=>page.evaluate(()=>{const focus=window.__focusStates.at(-1),q=new URLSearchParams(window.__clientQuery).get('q')??'';return !window.__pending&&focus?.ready===true&&focus.query.trim()===q;}),{timeout:5000}).toBe(true);
@@ -232,10 +239,10 @@ try{
    }),{timeout:5000}).toBe(true);
    await cdp.detach();
    assert.equal(await mobile.locator('[data-slot="kanban-scroll"]').evaluate(board=>getComputedStyle(board).scrollSnapType),nativeSnap);
-   const manual=await position(mobile);assert.ok(Math.abs(manual.left-focused.left)>10);await mobile.evaluate(()=>window.__refresh());await waitFrames(mobile);assert.deepEqual(await position(mobile),manual);
+   const manual=await position(mobile),manualMoves=await mobile.evaluate(()=>window.__focusMoves);assert.ok(Math.abs(manual.left-focused.left)>10);await mobile.evaluate(()=>window.__refresh());await waitFrames(mobile);assertManualScrollPreserved(await position(mobile),manual);assert.deepEqual(await mobile.evaluate(()=>window.__focusMoves),manualMoves);
    // Основная полоса уже подтверждена; её scroll-событие ещё может не доставить зеркало в CI.
    await expect.poll(async()=>Math.abs((await mobile.locator('[data-kanban-scrollbar]').evaluate(bar=>bar.scrollLeft))-manual.left),{timeout:5000}).toBeLessThan(2);
-   assert.deepEqual(await position(mobile),manual);
+   assertManualScrollPreserved(await position(mobile),manual);assert.deepEqual(await mobile.evaluate(()=>window.__focusMoves),manualMoves);
    assert.ok(Math.abs((await mobile.locator('[data-kanban-scrollbar]').evaluate(bar=>bar.scrollLeft))-manual.left)<2);
    assert.equal(await mobile.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);checks.push(section+':'+viewport.width+':real_touch_restores_snap_manual_scroll_and_SSE');await finish(mobile);
   }

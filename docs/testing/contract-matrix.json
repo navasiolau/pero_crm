@@ -116,10 +116,10 @@
       ],
       "tests": [
         {
-          "file": "apps/web/tests/cash-mixed-writers.test.ts",
-          "block": "actual expense writer and actual advance core share ReadCommitted lock",
-          "evidenceLevel": "DI",
-          "notes": "Сериализующий fake проверяет бизнес-поток; PostgreSQL lock/race/rollback этим не доказаны."
+          "file": "apps/web/tests/integration/finance-postgres.test.ts",
+          "block": "cash/mixed-expense-advance-real-lock-both-orders",
+          "evidenceLevel": "native-PostgreSQL",
+          "notes": "Оба порядка настоящих expense/advance writers; разные PID, удерживаемый peer lock и точные суммы. Runtime evidence №169 хранится в change; static matrix не объявляет будущую staging-приёмку."
         }
       ],
       "acceptance": [
@@ -131,7 +131,7 @@
           "revision": null,
           "gapTask": 150,
           "entrypoints": [
-            "apps/web/tests/cash-native-acceptance.ts"
+            "apps/web/tests/integration/finance-postgres.test.ts"
           ]
         }
       ],
@@ -154,9 +154,9 @@
           "evidenceLevel": "DI"
         },
         {
-          "file": "apps/web/tests/combined-engineering-turnover.test.ts",
-          "block": "combined chosen turnover accrues",
-          "evidenceLevel": "DI"
+          "file": "apps/web/tests/integration/finance-postgres.test.ts",
+          "block": "turnover/ten-real-commands-serialized-reread-rate-and-turnover",
+          "evidenceLevel": "native-PostgreSQL"
         }
       ],
       "acceptance": [
@@ -184,9 +184,9 @@
       ],
       "tests": [
         {
-          "file": "apps/web/tests/combined-engineering-turnover.test.ts",
-          "block": "combined ordinary plus engineering current month remains estimate",
-          "evidenceLevel": "DI"
+          "file": "apps/web/tests/integration/finance-postgres.test.ts",
+          "block": "turnover/combined-estimate-debt-pure-engineer-unknown-and-period-refusal",
+          "evidenceLevel": "native-PostgreSQL"
         }
       ],
       "acceptance": [
@@ -244,7 +244,7 @@
           "revision": null,
           "gapTask": 163,
           "entrypoints": [
-            "apps/web/tests/product-percentage-adjustments-native.ts"
+            "apps/web/tests/integration/percentage-postgres.test.ts"
           ]
         }
       ],
@@ -263,14 +263,14 @@
       ],
       "tests": [
         {
-          "file": "apps/web/tests/payment-receipts.test.ts",
-          "block": "expense binds confirmed document",
-          "evidenceLevel": "DI"
+          "file": "apps/web/tests/integration/finance-postgres.test.ts",
+          "block": "payment/report-owner-ready-context-replay-deleted/",
+          "evidenceLevel": "native-PostgreSQL"
         },
         {
-          "file": "apps/web/tests/payment-receipts.test.ts",
-          "block": "mutation UUID cannot be reused with different data",
-          "evidenceLevel": "DI"
+          "file": "apps/web/tests/integration/finance-postgres.test.ts",
+          "block": "payment/foreign-preflight-decimal-snapshots-article-fences-and-delete-caps",
+          "evidenceLevel": "native-PostgreSQL"
         }
       ],
       "acceptance": [
@@ -282,7 +282,7 @@
           "revision": null,
           "gapTask": 134,
           "entrypoints": [
-            "apps/web/tests/finance-payment-native.ts"
+            "apps/web/tests/integration/finance-postgres.test.ts"
           ]
         },
         {
