@@ -19,6 +19,8 @@ COPY apps/web apps/web
 # Значения-заглушки: нужны только на время сборки (prerender), в образ не попадают
 ENV DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy" \
     AUTH_SECRET="build-time-dummy"
+ARG GITHUB_ACTIONS=false
+ARG PERO_CI_EXTERNAL_CHECKS=0
 RUN pnpm --filter @pero/web exec prisma generate \
     && pnpm --filter @pero/web build
 

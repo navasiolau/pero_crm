@@ -21,4 +21,8 @@
 
 ## 4. Следующая малая итерация: 180 секунд
 
-- [ ] 4.1 Сократить critical path объединением существующих build/checks и native на одном runner без повторной подготовки и передачи artifact, с независимыми unit suites. CI с двумя существующими флагами не создаёт standalone. Сохранить полный набор прежних проверок/suites, full tsc/lint/route types, SHA/run/Node/OS binding, последовательные native files, `always` cleanup и итоговый успех всех обязательных checks независимо от числа jobs; после review измерить полный обычный обязательный CI с целью не более 180 с и принять реальный staging. Отдельные benchmark/QA-прогоны не добавлять; прежняя приёмка остаётся историческим DONE, фактические 485 с CI251 не закрывают новую цель.
+- [x] 4.1 Сократить critical path объединением существующих build/checks и native на одном runner без повторной подготовки и передачи artifact, с независимыми unit suites. CI с двумя существующими флагами не создаёт standalone. Сохранить полный набор прежних проверок/suites, full tsc/lint/route types, SHA/run/Node/OS binding, последовательные native files, `always` cleanup и итоговый успех всех обязательных checks независимо от числа jobs; после review измерить полный обычный обязательный CI с целью не более 180 с и принять реальный staging. Отдельные benchmark/QA-прогоны не добавлять; цель подтверждена принятым CI256 **168 с**, `FINAL_GO_170_ACTUAL`, **ACHIEVED_THIS_WARM_RUN**, без гарантии такого времени для каждого запуска/cold cache.
+
+## 5. Повторные Docker checks
+
+- [ ] 5.1 Только после успеха полной unit matrix и native пропустить повтор Next inline lint/types в web Docker CI, сохранив свежий standalone; отделить native no-standalone флаг от external-checks режима. Сохранить default local/Docker checks, build-stage-only ARG, полный tsc/lint и все gates; получить review и измерить эффект в следующем обычном обязательном CI без benchmark/нового QA. Приёмка 4.1 остаётся DONE; новый выигрыш ещё не доказан.

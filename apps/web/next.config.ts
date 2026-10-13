@@ -18,10 +18,12 @@ const withSerwist = withSerwistInit({
 const isWindows = process.platform === "win32";
 
 // В GitHub CI lint проверяется отдельно, а полный tsc — после свежих .next/types.
-// Обычные local/Docker build сохраняют встроенные проверки Next.
+// Обычные local/Docker build без CI args сохраняют встроенные проверки Next.
 const hasExternalCiChecks =
   process.env.GITHUB_ACTIONS === "true" &&
   process.env.PERO_CI_EXTERNAL_CHECKS === "1";
+const omitCiStandalone =
+  hasExternalCiChecks && process.env.PERO_CI_NATIVE_BUILD === "1";
 
 const nextConfig: NextConfig = {
   ...(hasExternalCiChecks
@@ -40,9 +42,9 @@ const nextConfig: NextConfig = {
   ...(isWindows
     ? {}
     : {
-        // Native CI запускает next start из полной .next; standalone в его
-        // artifact не входит. Local/Docker сохраняют standalone-сборку.
-        ...(hasExternalCiChecks ? {} : { output: "standalone" }),
+        // Native CI запускает next start из полной .next. Local и Docker CI
+        // сохраняют standalone-сборку для production-образа.
+        ...(omitCiStandalone ? {} : { output: "standalone" }),
         // Корень монорепо — для корректной трассировки файлов standalone-сборки
         outputFileTracingRoot: path.join(__dirname, "../../"),
       }),
