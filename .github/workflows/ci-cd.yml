@@ -167,6 +167,7 @@ jobs:
         env:
           # Все исходники, включая *.test.ts и свежие route types, проверяются ниже.
           PERO_CI_EXTERNAL_CHECKS: '1'
+          PERO_CI_NATIVE_BUILD: '1'
           # Значения-заглушки — только для prerender, как в Dockerfile
           DATABASE_URL: postgresql://dummy:dummy@localhost:5432/dummy
           AUTH_SECRET: ci-dummy
@@ -241,6 +242,9 @@ jobs:
           context: .
           file: apps/web/Dockerfile
           push: true
+          build-args: |
+            GITHUB_ACTIONS=true
+            PERO_CI_EXTERNAL_CHECKS=1
           cache-from: type=gha,scope=pero-web
           cache-to: type=gha,mode=max,scope=pero-web
           tags: |

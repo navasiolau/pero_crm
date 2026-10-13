@@ -19,8 +19,8 @@ CI SHALL выполнять существующие тесты, lint, productio
 - **THEN** native SHALL использовать только эту свежую сборку без повторной подготовки и передачи artifact, а публикация SHALL оставаться закрытой до успеха всех обязательных suites/checks и cleanup независимо от числа jobs
 
 #### Scenario: CI не создаёт ненужный standalone
-- **WHEN** GITHUB_ACTIONS=true и PERO_CI_EXTERNAL_CHECKS=1 одновременно разрешают обязательные внешние checks
-- **THEN** CI SHALL сохранять полную свежую сборку, route types и native next start без standalone, а остальные локальные и production Docker сборки SHALL сохранять прежний standalone
+- **WHEN** GITHUB_ACTIONS=true и PERO_CI_EXTERNAL_CHECKS=1 разрешают обязательные внешние checks, а PERO_CI_NATIVE_BUILD=1 выбирает native CI build
+- **THEN** native CI SHALL сохранять полную свежую сборку, route types и next start без standalone, а Docker CI и обычные local/Docker сборки SHALL сохранять свежий standalone
 
 ### Requirement: Кэш ускоряет подготовку без повторного использования рабочих данных
 
