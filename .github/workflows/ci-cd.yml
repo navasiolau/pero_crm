@@ -17,6 +17,35 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: pero_ci
+          POSTGRES_USER: ci_runner
+          POSTGRES_PASSWORD: ci-only-${{ github.run_id }}-${{ github.run_attempt }}
+        ports:
+          - 127.0.0.1:55432:5432
+        options: >-
+          --tmpfs /var/lib/postgresql/data:rw,nosuid,size=512m
+          --label pero.ci.repository=navasiolau/pero_crm
+          --label pero.ci.run=${{ github.run_id }}
+          --label pero.ci.attempt=${{ github.run_attempt }}
+          --label pero.ci.service=postgres
+          --health-cmd "pg_isready -U ci_runner -d pero_ci"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      DATABASE_URL: postgresql://ci_runner:ci-only-${{ github.run_id }}-${{ github.run_attempt }}@127.0.0.1:55432/pero_ci?schema=public
+      CRM_FILE_STORAGE: s3
+      S3_ENDPOINT: http://127.0.0.1:59000
+      S3_BUCKET: ci-${{ github.run_id }}-${{ github.run_attempt }}
+      S3_ACCESS_KEY: ci_runner
+      S3_SECRET_KEY: ci-only-${{ github.run_id }}-${{ github.run_attempt }}-s3
+      S3_REGION: us-east-1
+      AUTH_SECRET: ci-only-${{ github.run_id }}-${{ github.run_attempt }}-auth
+      AUTH_URL: http://127.0.0.1:3100
+      AUTH_TRUST_HOST: 'true'
     steps:
       - uses: actions/checkout@v4
 
@@ -64,6 +93,21 @@ jobs:
           # Значения-заглушки — только для prerender, как в Dockerfile
           DATABASE_URL: postgresql://dummy:dummy@localhost:5432/dummy
           AUTH_SECRET: ci-dummy
+
+      - name: Интеграционные PostgreSQL + HTTP/S3 контракты
+        run: pnpm --filter @pero/web test:integration
+        env:
+          PERO_CI_POSTGRES_ID: ${{ job.services.postgres.id }}
+          PERO_CI_NETWORK: ${{ job.services.postgres.network }}
+
+      - name: Удалить временный MinIO и завершить web
+        if: always()
+        run: node apps/web/tests/integration/runtime/cleanup.mjs
+        env:
+          PERO_CI_POSTGRES_ID: ${{ job.services.postgres.id }}
+          PERO_CI_NETWORK: ${{ job.services.postgres.network }}
+        # PostgreSQL и job network удаляет штатный GitHub Stop containers;
+        # данные обоих сервисов в tmpfs, постоянные тома не создаются.
 
   build-push:
     if: github.event_name == 'push'
