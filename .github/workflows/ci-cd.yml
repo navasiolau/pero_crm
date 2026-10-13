@@ -141,7 +141,8 @@ jobs:
           retention-days: 1
 
   native-tests:
-    needs: [unit-tests, build-checks]
+    # Native нужен свежий build; unit остаётся обязательным в общем gate test.
+    needs: build-checks
     runs-on: ubuntu-latest
     timeout-minutes: 25
     services:

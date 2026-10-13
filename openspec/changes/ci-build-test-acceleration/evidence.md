@@ -42,3 +42,9 @@ CI №245: обязательные unit/build/native/test gates прошли, �
 - Все обязательные gates №248 прошли: web 1954 PASS / 2 SKIP / 0 FAIL, bot 39 PASS, native 71/71 PASS, target guards 2/2 PASS, build/types и итоговый test gate успешны. Native cases/guards сохранены; временные MinIO container/image, PostgreSQL service и network удалены.
 - Реально принят staging `21e1b85617271d3b928be26c06f55bfb1a615ebe`: deployed image `sha256:ea53fde2db54622f95657e5b4338daa8740fed71de9962f12e5604ffca53631b` совпадает с CI и содержит точную ревизию; контейнеры здоровы. Identity/start/volume staging-БД и W07 сохранены; GET health/login — 200. Официальный архив №248 SHA256 `36b5c506495535ebae7851257e72a9648a593ff76327a19fdd676895d428896f` проверен публикатором один раз.
 - Root подтвердил `FINAL170GOACHIEVED`. Этот receipt содержит только metadata, присоединяется обычной историей к следующему реальному №168 retirement batch без отдельного staging CI. Main/production не изменялись.
+
+## Следующая малая итерация — OPEN
+
+Root подтвердил следующий обычный обязательный CI №249: 293 с против 789 с №244, 2,69× быстрее; принят staging `2f6573b7b8ffe52ad12c364ac9df9e8ed1a39fdc`. Web 1950 PASS / 2 SKIP, bot 39 PASS, native 71 PASS; все gates и удаление временного стенда подтверждены. Реальная ревизия/образ, staging DB/W07 и GET-only smoke приняты Root. Это продолжает историческую приёмку выше и не доказывает новую цель.
+
+По явному поручению владельца цель следующей итерации — полный обычный обязательный CI не более 180 с. Разрешённый scope: убрать ожидание unit job перед native при сохранённом build/artifact prerequisite и убрать standalone только из CI с двумя существующими флагами. Полный tsc/lint, свежие route types, SHA/run/Node/OS binding, последовательность native files, cleanup и итоговый gate всех трёх jobs сохраняются. Новые результаты и фактическая длительность добавляются после обычного required CI; benchmark, новый QA и обещание времени cold cache отсутствуют.
