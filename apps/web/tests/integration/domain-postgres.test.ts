@@ -6,14 +6,17 @@ import { after, before, test } from "node:test";
 import type { Prisma, PrismaClient, ProductStatus, ProjectStage, Role } from "@prisma/client";
 import type { DomainActor } from "../../src/server/actor";
 import { guardedModuleCache } from "../helpers/guarded-module-cache";
-import { nativeSnapshot } from "../helpers/native-acceptance-snapshot";
+import { nativeOwnedIds, nativeSnapshot } from "../helpers/native-acceptance-snapshot";
 import { createPostgresFixture, rejectedSql, type PostgresRows } from "./postgres.fixture";
 
 type Db = PrismaClient | Prisma.TransactionClient;
+type MutationProbe = { taskId?: string; workerId?: string; workId?: string; projectId?: string; cashId?: string; paymentId?: string; receiptId?: string; payment: boolean;
+  actor: DomainActor; mode?: "lost-ack" | "failed-proof"; fault?: "payroll" | "audit" | "event" | "receipt";
+  calls: number; writes: number; partials: number; effects: string[]; connections: { proof: boolean; pid: number }[]; owned: Record<string, string[]>; creates: Set<string> };
 type Context = { actor: DomainActor; db: Db; onRequested?: (pid: number) => void;
   onHeld?: (tx: Prisma.TransactionClient, pid: number) => Promise<void>; failAuditId?: string;
   onTimerLookup?: (tx: Prisma.TransactionClient, rows: readonly { id: string }[]) => Promise<void>;
-  beforeAudit?: (tx: Prisma.TransactionClient) => Promise<void> };
+  beforeAudit?: (tx: Prisma.TransactionClient) => Promise<void>; mutation?: MutationProbe };
 const contexts = new AsyncLocalStorage<Context>();
 const current = () => { const value = contexts.getStore(); assert.ok(value, "SYNTHETIC_ACTOR_CONTEXT_REQUIRED"); return value; };
 const run = <T>(actor: DomainActor, db: Db, operation: () => Promise<T>, extra: Partial<Context> = {}) => contexts.run({ actor, db, ...extra }, operation);
@@ -26,11 +29,115 @@ let stages: typeof import("../../src/server/projects/stage-core"), deletion: typ
 let productQueries: typeof import("../../src/server/products/queries");
 let visibility: typeof import("../../src/server/access/visibility"), notifications: typeof import("../../src/server/access/notification-visibility");
 let tasks: typeof import("../../src/server/tasks/actions"), completion: typeof import("../../src/server/tasks/completion-core");
+let taskQueries: typeof import("../../src/server/tasks/queries"), workspace: typeof import("../../src/server/tasks/workspace-contract");
 let time: typeof import("../../src/server/time/actions");
 let units: typeof import("../../src/server/warehouse/unit-core");
 let norms: typeof import("../../src/server/warehouse/norm-core"), warehouse: typeof import("../../src/server/warehouse/queries");
 let coordinator: typeof import("../../src/server/transactions/coordinator");
 let frozenReference: typeof import("../helpers/project-materials-reference");
+let payments: typeof import("../../src/server/payments/service");
+
+function mutationTx(tx: Prisma.TransactionClient, probe: MutationProbe, proof: boolean): Prisma.TransactionClient {
+  const writeMethods = new Set(["create", "createMany", "createManyAndReturn", "update", "updateMany", "updateManyAndReturn", "upsert", "delete", "deleteMany"]);
+  const hasTaskId = (where: unknown): boolean => {
+    if (!where || typeof where !== "object" || !probe.taskId) return false;
+    if ("id" in where && where.id === probe.taskId) return true;
+    return "AND" in where && (Array.isArray(where.AND) ? where.AND : [where.AND]).some(hasTaskId);
+  };
+  return new Proxy(tx, { get(db, table) {
+    if (table === "$queryRaw") return (strings: TemplateStringsArray, ...values: unknown[]) => {
+      assert.equal(strings.join("?").trim(), "SELECT 1 AS locked FROM pg_advisory_xact_lock(18435, 55001)", "CI133_WRITE_STOP");
+      assert.equal(values.length, 0, "CI133_WRITE_STOP"); return db.$queryRaw(strings, ...values);
+    };
+    if (table === "$executeRaw") return (strings: TemplateStringsArray, ...values: unknown[]) => {
+      assert.equal(proof, false, "CI133_WRITE_STOP"); assert.equal(probe.payment, false, "CI133_WRITE_STOP");
+      assert.ok(strings.join("?").trim().startsWith('UPDATE "TimeEntry" SET "minutes"'), "CI133_WRITE_STOP");
+      assert.equal(values.length, 1, "CI133_WRITE_STOP"); assert.equal(typeof values[0], "string", "CI133_WRITE_STOP");
+      assert.ok(values[0] === probe.workerId || values[0] === probe.taskId, "CI133_WRITE_STOP");
+      probe.writes++; return db.$executeRaw(strings, ...values);
+    };
+    assert.ok(!["$executeRawUnsafe", "$queryRawUnsafe"].includes(String(table)), "CI133_WRITE_STOP");
+    const delegate = Reflect.get(db, table);
+    if (typeof table !== "string" || table.startsWith("$")) return typeof delegate === "function" ? delegate.bind(db) : delegate;
+    if (!delegate || typeof delegate !== "object") return delegate;
+    return new Proxy(delegate, { get(model, method) {
+      const value = Reflect.get(model, method); if (typeof value !== "function") return value;
+      return async (...args: unknown[]) => {
+        if (!writeMethods.has(String(method))) {
+          if (proof && probe.mode === "failed-proof" && ["changeLog", "domainEvent", "payment"].includes(table)) throw Error("CI133_INJECTED_PROOF_READ");
+          return Reflect.apply(value, model, args);
+        }
+        assert.equal(proof, false, "PROOF_TRANSACTION_MUST_BE_READ_ONLY");
+        const { data, where } = args[0] as { data?: Record<string, unknown>; where?: Record<string, unknown> };
+        assert.ok(data, "CI133_WRITE_STOP");
+        if (table === "task" && method === "update") {
+          assert.equal(probe.payment, false, "CI133_WRITE_STOP"); assert.ok(hasTaskId(where), "CI133_WRITE_STOP");
+          assert.ok(data.status === "IN_PROGRESS" || data.status === "DONE", "CI133_WRITE_STOP");
+          if (data.doneById) assert.equal(data.doneById, probe.actor.id, "CI133_WRITE_STOP");
+        } else if (table === "timeEntry" && method === "updateMany") {
+          assert.equal(probe.payment, false, "CI133_WRITE_STOP"); assert.ok(where, "CI133_WRITE_STOP");
+          assert.ok(where.userId === probe.workerId || where.taskId === probe.taskId, "CI133_WRITE_STOP");
+          assert.equal(where.stoppedAt, null, "CI133_WRITE_STOP");
+        } else if (table === "timeEntry" && method === "create") {
+          assert.equal(probe.payment, false, "CI133_WRITE_STOP"); assert.equal(data.taskId, probe.taskId, "CI133_WRITE_STOP");
+          assert.equal(data.userId, probe.workerId, "CI133_WRITE_STOP");
+        } else if (table === "payrollEntry" && method === "create") {
+          assert.equal(probe.payment, false, "CI133_WRITE_STOP");
+          assert.equal(data?.userId, probe.workerId); assert.equal(data?.taskId, probe.taskId);
+          assert.equal(data?.workId, probe.workId); assert.equal(data?.projectId, probe.projectId); assert.equal(data?.scheme, "PIECE");
+          assert.equal(data?.currency, "BYN"); assert.equal(String(data?.amount), "100.00"); assert.equal(String(data?.bynAmount), "100.00");
+        } else if (table === "payment" && method === "create") {
+          assert.equal(probe.payment, true, "CI133_WRITE_STOP");
+          assert.equal(data?.createdById, probe.actor.id); assert.equal(data?.cashAccountId, probe.cashId);
+          assert.equal(data?.currency, "BYN"); assert.equal(data?.projectId, null); assert.equal(data?.direction, "INCOME");
+          assert.equal(String(data?.amount), "100.25"); assert.equal(String(data?.bynAmount), "100.25");
+        } else if (table === "changeLog" && method === "create") {
+          assert.equal(data?.actorId, probe.actor.id); assert.equal(data?.entity, probe.payment ? "payment" : "task");
+          assert.equal(data?.entityId, probe.payment ? probe.paymentId : probe.taskId);
+          if (data.action === "task.status.request" || data.action === "request") {
+            assert.equal(data.action, probe.payment ? "request" : "task.status.request", "CI133_WRITE_STOP");
+            assert.equal(typeof probe.receiptId, "string", "CI133_WRITE_STOP"); assert.equal(data.id, probe.receiptId, "CI133_WRITE_STOP");
+          } else assert.ok(["time", "status", "create"].includes(String(data.action)), "CI133_WRITE_STOP");
+        } else if (table === "domainEvent" && method === "create") {
+          assert.equal(data?.actor, probe.actor.id); assert.equal(data?.type, probe.payment ? "payment.created" : "task.statusChanged");
+        } else assert.fail("CI133_WRITE_STOP");
+        if (method === "create") {
+          // Прежний manifest давал один фиксированный ID каждому kind/action; лишнее create отклоняется до SQL.
+          const key = table === "changeLog" ? `${table}:${data.action}` : table;
+          assert.equal(probe.creates.has(key), false, "CI133_WRITE_STOP"); probe.creates.add(key);
+        }
+        probe.writes++;
+        const receipt = table === "changeLog" && data?.action === "task.status.request";
+        const fail = method === "create" && (table === "payrollEntry" && probe.fault === "payroll" ||
+          table === "changeLog" && data?.action === "status" && probe.fault === "audit" ||
+          table === "domainEvent" && probe.fault === "event" || receipt && probe.fault === "receipt");
+        if (fail) {
+          if (probe.payment) {
+            assert.equal(await tx.payment.count({ where: { id: probe.paymentId } }), 1);
+            assert.equal(await tx.changeLog.count({ where: { entityId: probe.paymentId, entity: "payment", action: "create" } }), 1);
+          } else {
+            assert.equal(await tx.task.count({ where: { id: probe.taskId, status: "DONE" } }), 1);
+            assert.equal(await tx.timeEntry.count({ where: { taskId: probe.taskId, minutes: { gt: 0 } } }), 1);
+            if (probe.fault !== "payroll") assert.equal(await tx.payrollEntry.count({ where: { taskId: probe.taskId } }), 1);
+            if (probe.fault === "event" || probe.fault === "receipt") assert.equal(await tx.changeLog.count({ where: { entityId: probe.taskId, action: "status" } }), 1);
+            if (probe.fault === "receipt") assert.equal(await tx.domainEvent.count({ where: { payload: { path: ["taskId"], equals: probe.taskId } } }), 1);
+          }
+          probe.partials++; throw Error("CI133_INJECTED_MANDATORY_WRITE");
+        }
+        const result = await Reflect.apply(value, model, args);
+        if (method === "create") {
+          assert.ok(result && typeof result === "object" && "id" in result && typeof result.id === "string");
+          const ids = probe.owned[table[0].toUpperCase() + table.slice(1)] ??= [];
+          if (!ids.includes(result.id)) ids.push(result.id);
+        }
+        if (table === "payment" && method === "create") {
+          assert.ok(result && typeof result === "object" && "id" in result && typeof result.id === "string"); probe.paymentId = result.id;
+        }
+        return result;
+      };
+    } });
+  } });
+}
 
 function commandTx(tx: Prisma.TransactionClient, context: Context): Prisma.TransactionClient {
   return new Proxy(tx, { get(db, key) {
@@ -68,26 +175,43 @@ before(async () => {
   fixture = await createPostgresFixture("domain");
   const facade = new Proxy({}, { get(_db, key) {
     const context = current(), value = Reflect.get(context.db, key);
-    if (key === "$transaction" && typeof value === "function") return (operation: (tx: Prisma.TransactionClient) => Promise<unknown>, options: unknown) =>
-      Reflect.apply(value, context.db, [(tx: Prisma.TransactionClient) => operation(commandTx(tx, context)), options]);
+    if (key === "$transaction" && typeof value === "function") return async (operation: (tx: Prisma.TransactionClient) => Promise<unknown>, options: unknown) => {
+      const probe = context.mutation, proof = probe ? probe.calls++ > 0 : false, connection = proof ? fixture.peer : context.db;
+      const result = await Reflect.apply(Reflect.get(connection, "$transaction"), connection, [async (tx: Prisma.TransactionClient) => {
+        if (probe) {
+          if (proof) await tx.$executeRawUnsafe("SET TRANSACTION READ ONLY");
+          const [{ pid }] = await tx.$queryRaw<{ pid: number }[]>`SELECT pg_backend_pid() AS pid`;
+          if (proof) assert.ok(!probe.connections.some(row => !row.proof && row.pid === pid), "INDEPENDENT_COMMIT_PROOF_CONNECTION_REQUIRED");
+          probe.connections.push({ proof, pid });
+        }
+        return operation(commandTx(probe ? mutationTx(tx, probe, proof) : tx, context));
+      }, options]);
+      // Потеря ACK вводится только ПОСЛЕ resolve настоящего SQL COMMIT.
+      if (probe?.mode && !proof) throw Error("CI133_INJECTED_LOST_ACK_AFTER_COMMIT");
+      return result;
+    };
     return typeof value === "function" ? value.bind(context.db) : value;
   } });
   // Child targets загружаются раньше родителей: guardedModuleCache сохраняет installed entry каждого target.
   const names = ["transactions/coordinator", "time/timers", "access/visibility", "access/notification-visibility", "tasks/workspace-contract",
     "tasks/queries", "warehouse/unit-core", "warehouse/norm-core", "warehouse/queries", "products/core", "projects/stage-core", "projects/delete-core",
-    "products/status-core", "products/queries", "projects/queries", "tasks/completion-core", "tasks/actions", "warehouse/actions", "time/actions"];
+    "products/status-core", "products/queries", "projects/queries", "tasks/completion-core", "tasks/actions", "warehouse/actions", "time/actions", "payments/service"];
+  const effect = (name: string) => () => { const probe = current().mutation; if (probe) { probe.effects.push(name); throw Error("CI133_INJECTED_OPTIONAL_EFFECT"); } };
   const overrides = { "../src/auth": { auth: async () => ({ user: current().actor }) },
-    "next/cache": { revalidatePath: () => {}, revalidateTag: () => {} } };
+    "next/cache": { revalidatePath: effect("cache"), revalidateTag: effect("cache") },
+    "../src/server/plugins/events": { dispatchEvent: effect("dispatch"), emitDomainEvent: () => { throw Error("OUTSIDE_DOMAIN_EVENT_WRITE"); } },
+    "../src/server/notifications/notify": { notifyOrg: effect("org"), notifyPerson: effect("person") } };
   scope = guardedModuleCache(new URL("../ci169-domain-scope.ts", import.meta.url).href,
     { targets: [...names.map(name => `../src/server/${name}`), "./helpers/project-materials-reference"], allowedOverrides: Object.keys(overrides), overrides, prisma: facade });
   coordinator = scope.load("../src/server/transactions/coordinator"); scope.load("../src/server/time/timers");
   visibility = scope.load("../src/server/access/visibility"); notifications = scope.load("../src/server/access/notification-visibility");
-  scope.load("../src/server/tasks/workspace-contract"); scope.load("../src/server/tasks/queries");
+  workspace = scope.load("../src/server/tasks/workspace-contract"); taskQueries = scope.load("../src/server/tasks/queries");
   units = scope.load("../src/server/warehouse/unit-core"); norms = scope.load("../src/server/warehouse/norm-core"); warehouse = scope.load("../src/server/warehouse/queries");
   products = scope.load("../src/server/products/core"); stages = scope.load("../src/server/projects/stage-core"); deletion = scope.load("../src/server/projects/delete-core");
   statuses = scope.load("../src/server/products/status-core"); productQueries = scope.load("../src/server/products/queries"); scope.load("../src/server/projects/queries");
   completion = scope.load("../src/server/tasks/completion-core"); tasks = scope.load("../src/server/tasks/actions"); scope.load("../src/server/warehouse/actions"); time = scope.load("../src/server/time/actions");
   frozenReference = scope.load("./helpers/project-materials-reference");
+  payments = scope.load("../src/server/payments/service");
 });
 after(async () => { if (fixture) try { scope?.restore(); await fixture.verifyProtected(); } finally { await fixture.dispose(); } });
 
@@ -341,6 +465,134 @@ test("quantity/locked-rescaling-group-floor-frozen-state-and-facts", async () =>
   assert.equal((await tx.projectMaterial.findUniqueOrThrow({ where: { id: line.id } })).issuedQty.toFixed(3), "8.000");
 }));
 
+test("task/workspace-31-scope-ACL-counts-10000-foreign-constant-SQL-and-EXPLAIN", async t => fixture.rollback(async (tx, rows) => {
+  const before = await nativeSnapshot(tx);
+  const own = await rows.user("workspace-own", ["ENGINEER", "WORKER"]), foreignUser = await rows.user("workspace-foreign", ["ENGINEER", "WORKER"]);
+  const projects = await Promise.all(["own", "foreign", "deleted"].map((label, index) => rows.project(`workspace-${label}`, {
+    stage: "IN_WORK", managerId: own.id, ...(index === 2 ? { deletedAt: new Date(0) } : {}),
+  })));
+  const products = await Promise.all([
+    { status: "DESIGN" as const, engineerId: own.id }, { status: "PRODUCTION" as const, engineerId: own.id },
+    { status: "DRAFT" as const }, { status: "PRODUCTION" as const, deletedAt: new Date(0) },
+    { status: "PRODUCTION" as const, engineerId: foreignUser.id }, { status: "PRODUCTION" as const },
+  ].map((fields, index) => rows.product(`workspace-product-${index}`, projects[index === 4 ? 1 : index === 5 ? 2 : 0].id,
+    { ...fields, assemblerId: index === 4 ? foreignUser.id : own.id })));
+  const pools = await Promise.all(products.slice(0, 2).map(product => tx.productStagePayPool.create({ data: {
+    id: rows.id(`workspace-pool-${product.status.toLowerCase()}`), productId: product.id, kind: "ENGINEERING", state: "DRAFT", createdById: own.id,
+  } })));
+  const works = await Promise.all(products.map((product, index) => tx.work.create({ data: {
+    id: rows.id(`workspace-work-${index}`), projectId: product.projectId, productId: product.id, title: "Проверка147",
+    quantity: "1", priceSnapshot: "0", total: "0", paymentKind: index === 0 ? "ENGINEERING" : "LEGACY",
+    stagePayPoolId: index === 0 ? pools[0].id : null, poolWeightUnits: index === 0 ? 1_000_000 : null,
+  } })));
+  const unpriced = await tx.work.create({ data: { id: rows.id("workspace-work-unpriced"), projectId: projects[0].id,
+    productId: products[1].id, title: "Без расценки", quantity: "1", paymentKind: "ENGINEERING", stagePayPoolId: pools[1].id, poolWeightUnits: 1_000_000 } });
+  const unbound = await tx.work.create({ data: { id: rows.id("workspace-work-unbound"), projectId: projects[0].id,
+    title: "Без изделия", quantity: "1", priceSnapshot: "0", total: "0", paymentKind: "LEGACY" } });
+  const groups = await Promise.all(([
+    { workId: unpriced.id, budget: "17.89", currency: "BYN" }, { workId: null, budget: "17.89", currency: "BYN" },
+    { workId: unpriced.id, budget: null, currency: null, budgetSource: "STAGE_PREVIEW" },
+  ] as const).map((fields, index) => tx.taskAllocationGroup.create({ data: { ...fields, id: rows.id(`workspace-group-${index}`), quantity: "1", createdById: own.id } })));
+  const today = new Date(); today.setHours(12, 0, 0, 0);
+  const task = (label: string, patch: Partial<Prisma.TaskCreateManyInput> = {}): Prisma.TaskCreateManyInput => ({
+    id: rows.id(label), projectId: projects[0].id, productId: products[0].id, workId: works[0].id,
+    assigneeId: own.id, title: "Поиск147", quantity: "1", dueAt: today, ...patch,
+  });
+  const variants = [
+    task("workspace-zero"), task("workspace-production", { productId: products[1].id, workId: works[1].id }),
+    task("workspace-other-assignee", { productId: products[1].id, workId: works[1].id, assigneeId: foreignUser.id }),
+    task("workspace-draft", { productId: products[2].id, workId: works[2].id }),
+    task("workspace-frozen", { productId: products[1].id, workId: unpriced.id, allocationGroupId: groups[0].id, shareUnits: 1_000_000, shareAmount: "17.89" }),
+    task("workspace-done", { status: "DONE" }), task("workspace-no-date", { dueAt: null }),
+    task("workspace-orphan", { productId: null, workId: null, allocationGroupId: groups[1].id, shareUnits: 1_000_000, shareAmount: "17.89" }),
+    task("workspace-no-work", { workId: null }), task("workspace-unbound-work", { workId: unbound.id }),
+    task("workspace-cross-product", { workId: works[1].id }), task("workspace-cross-project", { workId: works[4].id }),
+    task("workspace-cross-parent", { productId: products[4].id, workId: works[4].id }),
+    task("workspace-deleted-product", { productId: products[3].id, workId: works[3].id }),
+    task("workspace-deleted-project", { projectId: projects[2].id, productId: products[5].id, workId: works[5].id }),
+    task("workspace-no-assignee", { assigneeId: null }), task("workspace-unknown-price", { productId: products[1].id, workId: unpriced.id }),
+    task("workspace-frozen-no-amount", { productId: products[1].id, workId: unpriced.id, allocationGroupId: groups[2].id, shareUnits: 1_000_000, stageShareUnits: 1_000_000 }),
+  ];
+  await tx.task.createMany({ data: variants });
+  const foreign = (index: number) => task(`workspace-foreign-task-${index}`, { projectId: projects[1].id,
+    productId: products[4].id, workId: works[4].id, assigneeId: foreignUser.id, title: "Чужая147" });
+  await tx.task.create({ data: foreign(0) });
+  const admin = { ...actorOf(own), roles: ["ADMIN"] as Role[] };
+  const probe = () => run(admin, tx, async () => {
+    const begin = await fence("workspace-probe-begin");
+    const where = await taskQueries.taskWorkspaceWhere(admin, { projectId: projects[0].id });
+    const selected = await tx.task.findMany({ where, select: { id: true, projectId: true }, orderBy: { id: "asc" } });
+    const end = await fence("workspace-probe-end"), queries = fixture.queryEvents.slice(begin + 1, end);
+    assert.equal(queries.length, 2, "EXPECTED_COORDINATE_AND_FINAL_SQL");
+    return { queries, profile: { rows: selected, predicateBytes: Buffer.byteLength(JSON.stringify(where)),
+      queryBytes: queries.map(event => Buffer.byteLength(event.query)), parameterBytes: queries.map(event => Buffer.byteLength(event.params)) } };
+  });
+  const small = await probe(), additionalForeign = Array.from({ length: 9999 }, (_, index) => foreign(index + 1));
+  await tx.task.createMany({ data: additionalForeign });
+  const large = await probe();
+  assert.deepEqual(large.profile, small.profile, "FOREIGN_TASKS_CHANGED_SCOPED_RESULT_OR_QUERY_SIZE");
+  type Plan = { "Node Type"?: string; "Relation Name"?: string; "Index Name"?: string; "Plan Rows"?: number; "Total Cost"?: number; Plans?: Plan[] };
+  const safePlan = (node: Plan): unknown => ({ node: node["Node Type"], relation: node["Relation Name"], index: node["Index Name"],
+    estimatedRows: node["Plan Rows"], cost: node["Total Cost"], children: node.Plans?.map(safePlan) });
+  const plans = [];
+  for (const event of large.queries) {
+    assert.match(event.query, /^SELECT\s/i, "EXPLAIN_SELECT_ONLY");
+    const parameters = JSON.parse(event.params) as unknown[];
+    assert.ok(parameters.every(value => value === null || ["string", "number", "boolean"].includes(typeof value)), "EXPLAIN_SCALAR_PARAMETERS_REQUIRED");
+    const result = await tx.$queryRawUnsafe<{ "QUERY PLAN": { Plan: Plan }[] }[]>("EXPLAIN (FORMAT JSON) " + event.query, ...parameters);
+    plans.push(safePlan(result[0]["QUERY PLAN"][0].Plan));
+  }
+  // Независимый SQL baseline сохраняет прежний JOIN, включая несовпадающие связи fixture.
+  const legacy = await tx.$queryRaw<{ id: string }[]>`
+    SELECT t.id FROM "Task" t
+    JOIN "Work" w ON w.id=t."workId" AND w."projectId"=t."projectId" AND w."productId"=t."productId"
+    JOIN "Product" p ON p.id=t."productId" AND p.id=w."productId" AND p."projectId"=t."projectId"
+    JOIN "Project" j ON j.id=t."projectId"
+    WHERE t."assigneeId" IS NOT NULL AND p."deletedAt" IS NULL AND j."deletedAt" IS NULL
+      AND (w."priceSnapshot" IS NOT NULL OR (t."allocationGroupId" IS NOT NULL AND t."shareAmount" IS NOT NULL))
+    ORDER BY t.id`;
+  const baseline: Prisma.TaskWhereInput = { AND: [workspace.taskWorkspaceBindings, { id: { in: legacy.map(row => row.id) } }] };
+  let matrixCases = 0;
+  for (const roles of [["ADMIN"], ["MANAGER"], ["PROCUREMENT"], ["ENGINEER"], ["WORKER"], ["WORKER", "ACCOUNTANT"], ["ENGINEER", "ACCOUNTANT"], ["ACCOUNTANT"], []] as Role[][]) {
+    const actor = await visibility.resolveVisibilityActor(tx, { id: own.id, roles });
+    const projectIds = projects.slice(0, 2).map(project => project.id);
+    const scopes: [string, Parameters<typeof taskQueries.taskWorkspaceWhere>[1], Prisma.TaskWhereInput][] = [
+      ["project", { projectId: projects[0].id }, { projectId: projects[0].id }],
+      ["product", { productKey: products[0].id }, { productId: products[0].id }],
+      ["selected-projects", { projectIds }, { projectId: { in: projectIds } }],
+    ];
+    if (roles[0] === "ADMIN") {
+      const search = { title: { contains: "Поиск147", mode: "insensitive" as const } };
+      scopes.push(["product-number", { productKey: products[0].number }, { productId: products[0].id }],
+        ["search", { tasks: search }, search], ["my", { tasks: { assigneeId: own.id } }, { assigneeId: own.id }], ["global", { tasks: {} }, {}]);
+    }
+    await run({ ...actorOf(own), roles }, tx, async () => {
+      for (const [name, limit, expectedLimit] of scopes) {
+        const where = await taskQueries.taskWorkspaceWhere(actor, limit);
+        const expected = await tx.task.findMany({ where: { AND: [baseline, expectedLimit, visibility.taskVisibilityWhere(actor)] }, select: { id: true, projectId: true }, orderBy: { id: "asc" } });
+        const actual = await tx.task.findMany({ where, select: { id: true, projectId: true }, orderBy: { id: "asc" } });
+        assert.deepEqual(actual, expected, `NATIVE_SCOPE_OR_ACL_MISMATCH:${roles.join("+") || "EMPTY"}:${name}`);
+        if (name === "selected-projects") {
+          const counts = await tx.task.groupBy({ by: ["projectId"], where, _count: { _all: true } });
+          for (const projectId of projectIds) assert.equal(counts.find(row => row.projectId === projectId)?._count._all ?? 0, expected.filter(row => row.projectId === projectId).length, "SELECTED_COUNT_MISMATCH");
+        }
+        matrixCases++;
+      }
+    });
+  }
+  assert.equal(matrixCases, 31);
+  const todayEnd = new Date(); todayEnd.setHours(23, 59, 59, 999);
+  const dashboard = { status: { not: "DONE" as const }, dueAt: { lte: todayEnd }, project: { deletedAt: null } };
+  const dashboardCount = await tx.task.count({ where: await workspace.taskWorkspaceEligibility(tx, { tasks: dashboard }) });
+  assert.equal(dashboardCount, await tx.task.count({ where: { AND: [baseline, dashboard] } }), "DASHBOARD_COUNT_MISMATCH");
+  assert.equal(await tx.task.count({ where: await workspace.taskWorkspaceEligibility(tx, { projectIds: [] }) }), 0, "EMPTY_SCOPE_DENY_REQUIRED");
+  const owned = nativeOwnedIds({ User: [own.id, foreignUser.id], Client: projects.map(project => project.clientId), Project: projects.map(project => project.id),
+    Product: products.map(product => product.id), Work: [...works, unpriced, unbound].map(work => work.id), ProductStagePayPool: pools.map(pool => pool.id),
+    TaskAllocationGroup: groups.map(group => group.id), Task: [...variants, foreign(0), ...additionalForeign].map(row => row.id!) });
+  assert.deepEqual(await nativeSnapshot(tx, owned), before, "ORIGINAL_CHANGED_INSIDE_FIXTURE_TX");
+  t.diagnostic(JSON.stringify({ matrixCases, dashboardCount, foreignTasks: [1, 10000], profile: { ...large.profile, rows: large.profile.rows.length }, plans }));
+}));
+
 test("warehouse/unit-catalog-CRUD-current-admin-inactive-usage-and-unchanged-numbers", async () => fixture.rollback(async (tx, rows) => {
   const c = await tree(tx, rows, "units"), before = await tx.material.update({ where: { id: c.material.id }, data: { active: false, purchasePrice: "15.55" } });
   const name = `л-${rows.id("litre").slice(-18)}`;
@@ -368,6 +620,87 @@ test("warehouse/unit-catalog-CRUD-current-admin-inactive-usage-and-unchanged-num
   await assert.rejects(units.createMaterialUnitInTransaction(tx, c.admin, { name: "  " }));
   await rejectedSql(tx, () => tx.material.update({ where: { id: c.material.id }, data: { unitId: c.unit.id } }), /Foreign key constraint/);
 }));
+
+test("mutation/real-COMMIT-lost-ACK-UNKNOWN-readonly-peer-replay-and-five-partial-rollbacks", async t => {
+  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-10-11T12:00:00Z").getTime() });
+  const original = await nativeSnapshot(fixture.db);
+  const c = await tree(fixture.db, fixture, "mutation133");
+  await fixture.db.work.update({ where: { id: c.work.id }, data: { quantity: "10", quantityPerUnit: "2", priceSnapshot: "100", total: "1000" } });
+  const accountant = actorOf(await fixture.user("mutation133-accountant", ["ACCOUNTANT"]));
+  const cash = await fixture.db.cashAccount.create({ data: { id: fixture.id("mutation133-cash"), name: "Проверка133", currency: "BYN" } });
+  const owned: Record<string, string[]> = { User: [c.manager.id, c.engineer.id, c.worker.id, c.mounter.id, c.admin.id, accountant.id],
+    Client: [c.project.clientId], Project: [c.project.id], Product: [c.product.id], Work: [c.work.id], MaterialUnit: [c.unit.id], Material: [c.material.id], CashAccount: [cash.id], Task: [] };
+  const task = async (label: string) => {
+    const created = await fixture.db.task.create({ data: { id: fixture.id(`mutation133-${label}`), projectId: c.project.id,
+      productId: c.product.id, workId: c.work.id, assigneeId: c.worker.id, quantity: "1", title: label, createdById: c.manager.id } });
+    owned.Task.push(created.id); return created;
+  };
+  const makeProbe = (actor: DomainActor, taskId?: string, options: Pick<MutationProbe, "mode" | "fault"> = {}): MutationProbe => ({
+    actor, taskId, workerId: c.worker.id, workId: c.work.id, projectId: c.project.id, cashId: cash.id, payment: !taskId,
+    ...options, calls: 0, writes: 0, partials: 0, effects: [], connections: [], owned, creates: new Set(),
+  });
+  const status = (probe: MutationProbe, to: "IN_PROGRESS" | "DONE", context?: { clientMutationId: string; expectedActorId: string }) => {
+    probe.receiptId = context ? `task-status:${context.clientMutationId}` : undefined;
+    return run(probe.actor, fixture.db, () => completion.changeTaskStatusCore(probe.actor, probe.taskId!, to, to === "DONE" && probe.actor.id === c.manager.id ? 20 : undefined,
+      coordinator.withMutationTransaction, context), { mutation: probe });
+  };
+  const capture = async (taskId: string) => {
+    // Сначала независимая SELECT-проверка committed facts; UNKNOWN не инициирует новую запись.
+    const observed = await fixture.peer.task.findUniqueOrThrow({ where: { id: taskId } });
+    assert.equal(observed.status, "IN_PROGRESS");
+    assert.equal(await fixture.peer.domainEvent.count({ where: { payload: { path: ["taskId"], equals: taskId } } }), 1);
+    assert.equal(await fixture.peer.timeEntry.count({ where: { taskId } }), 1);
+  };
+  const startedTask = await task("started"), startContext = { clientMutationId: randomUUID(), expectedActorId: c.worker.id };
+  const lost = makeProbe(c.worker, startedTask.id, { mode: "lost-ack" }), started = await status(lost, "IN_PROGRESS", startContext);
+  assert.ok(started.ok); assert.equal(started.outcome, "COMMITTED"); assert.equal(started.resultId, startedTask.id); assert.equal(started.recovered, true); assert.equal(lost.calls, 2);
+  assert.equal(lost.connections.length, 2); assert.equal(lost.connections[1].proof, true); assert.notEqual(lost.connections[0].pid, lost.connections[1].pid);
+  t.mock.timers.tick(60_000);
+  const done = await status(makeProbe(c.worker, startedTask.id), "DONE", { clientMutationId: randomUUID(), expectedActorId: c.worker.id });
+  assert.ok(done.ok); assert.equal(done.payroll?.amount, "100.00");
+  const completed = await nativeSnapshot(fixture.db), historicalProbe = makeProbe(c.worker, startedTask.id);
+  const historical = await status(historicalProbe, "IN_PROGRESS", startContext);
+  assert.ok(historical.ok && historical.repeated); assert.equal(historicalProbe.writes, 0); assert.deepEqual(await nativeSnapshot(fixture.db), completed);
+  const switchedProbe = makeProbe(c.manager, startedTask.id), switched = await status(switchedProbe, "IN_PROGRESS", startContext);
+  assert.ok(!switched.ok && switched.kind === "actor-changed"); assert.equal(switchedProbe.calls, 0); assert.equal(switchedProbe.writes, 0);
+  const legacyTask = await task("legacy"), legacyProbe = makeProbe(c.manager, legacyTask.id, { mode: "lost-ack" });
+  const legacy = await status(legacyProbe, "IN_PROGRESS");
+  assert.ok(legacy.ok && legacy.recovered); assert.equal(legacy.resultId, legacyTask.id); assert.equal(legacyProbe.calls, 2);
+  const uncertainTask = await task("unknown"), uncertainContext = { clientMutationId: randomUUID(), expectedActorId: c.manager.id };
+  const uncertainProbe = makeProbe(c.manager, uncertainTask.id, { mode: "failed-proof" }), uncertain = await status(uncertainProbe, "IN_PROGRESS", uncertainContext);
+  assert.ok(!uncertain.ok && uncertain.outcome === "UNKNOWN"); assert.equal(uncertainProbe.calls, 2);
+  await capture(uncertainTask.id);
+  const unknownBefore = await nativeSnapshot(fixture.db), verifyProbe = makeProbe(c.manager, uncertainTask.id);
+  const verified = await status(verifyProbe, "IN_PROGRESS", uncertainContext);
+  assert.ok(verified.ok && verified.repeated); assert.equal(verifyProbe.writes, 0); assert.deepEqual(await nativeSnapshot(fixture.db), unknownBefore);
+  for (const fault of ["payroll", "audit", "event", "receipt"] as const) {
+    const failedTask = await task(`fault-${fault}`), before = await nativeSnapshot(fixture.db), probe = makeProbe(c.manager, failedTask.id, { fault });
+    await assert.rejects(status(probe, "DONE", { clientMutationId: randomUUID(), expectedActorId: c.manager.id }), /CI133_INJECTED_MANDATORY_WRITE/);
+    assert.equal(probe.partials, 1); assert.equal(probe.calls, 2); assert.deepEqual(await nativeSnapshot(fixture.db), before);
+  }
+  const payment = (clientMutationId: string) => ({ direction: "INCOME" as const, amount: 100.25, currency: "BYN", cashAccountId: cash.id,
+    comment: "Проверка133", paidAt: "2000-01-15", clientMutationId });
+  const pay = (probe: MutationProbe, input: ReturnType<typeof payment>) => {
+    probe.receiptId = `payment-request:${input.clientMutationId}`;
+    return run(accountant, fixture.db, () => payments.createPaymentCore(accountant, input), { mutation: probe });
+  };
+  const paymentInput = payment(randomUUID()), paymentProbe = makeProbe(accountant, undefined, { mode: "lost-ack" }), paid = await pay(paymentProbe, paymentInput);
+  assert.ok(paid.ok); assert.equal(paid.resultId, paid.paymentId); assert.equal(paid.paymentId, paymentProbe.paymentId); assert.equal(paid.outcome, "COMMITTED"); assert.equal(paymentProbe.calls, 2);
+  assert.deepEqual(paymentProbe.effects, ["dispatch", "org", "cache", "cache", "cache", "cache"]);
+  const paidBefore = await nativeSnapshot(fixture.db), replayProbe = makeProbe(accountant), paidAgain = await pay(replayProbe, paymentInput);
+  assert.ok(paidAgain.ok && paidAgain.paymentId === paid.paymentId); assert.equal(replayProbe.calls, 0); assert.equal(replayProbe.writes, 0); assert.deepEqual(await nativeSnapshot(fixture.db), paidBefore);
+  const unknownInput = payment(randomUUID()), unknownProbe = makeProbe(accountant, undefined, { mode: "failed-proof" }), unknownPayment = await pay(unknownProbe, unknownInput);
+  assert.ok(!unknownPayment.ok && unknownPayment.outcome === "UNKNOWN"); assert.equal(unknownProbe.calls, 2); assert.equal(unknownProbe.effects.length, 0);
+  const committedPayment = await fixture.peer.payment.findUniqueOrThrow({ where: { id: unknownProbe.paymentId } });
+  assert.equal(committedPayment.amount.toFixed(2), "100.25"); assert.equal(committedPayment.bynAmount.toFixed(2), "100.25");
+  assert.equal(committedPayment.createdById, accountant.id); assert.equal(committedPayment.cashAccountId, cash.id);
+  const unknownPaymentBefore = await nativeSnapshot(fixture.db), inspectedProbe = makeProbe(accountant), inspected = await pay(inspectedProbe, unknownInput);
+  assert.ok(inspected.ok && inspected.paymentId === committedPayment.id); assert.equal(inspectedProbe.writes, 0); assert.deepEqual(await nativeSnapshot(fixture.db), unknownPaymentBefore);
+  const faultBefore = await nativeSnapshot(fixture.db), paymentFault = makeProbe(accountant, undefined, { fault: "event" }), refused = await pay(paymentFault, payment(randomUUID()));
+  assert.ok(!refused.ok && refused.outcome === "ROLLED_BACK"); assert.equal(paymentFault.partials, 1); assert.equal(paymentFault.calls, 2); assert.deepEqual(await nativeSnapshot(fixture.db), faultBefore);
+  assert.deepEqual(await nativeSnapshot(fixture.db, nativeOwnedIds(owned)), original, "MUTATION_ORIGINAL_DATA_SCHEMA_CHANGED");
+  t.diagnostic(JSON.stringify({ independentCommitProofConnections: 2, lostAckRecovery: true, unknownInspectedBeforeReplay: true, rollbackFaults: 5, optionalEffects: paymentProbe.effects.length }));
+});
 
 test("task/create-ten-identical-receipts-collisions-revocation-deleted-ACK-and-SQL-rollback", async () => {
   const c = await tree(fixture.db, fixture, "commands");
