@@ -19,6 +19,8 @@ type BasicReply = { ok: boolean; id?: string; error?: string; result?: null; fin
 
 test("files.crud: file113, документы, attachment ACL и inline-действия", { timeout: 300_000 }, async t => {
   const f = await createHttpS3Fixture("files-crud"); t.after(() => f.dispose());
+  // NextURL канонизирует loopback 127.0.0.1 в localhost; протокол и порт берём из guarded CI target.
+  const financeLocation = new URL("/finance", f.target.baseUrl); financeLocation.hostname = "localhost";
   const manager = await f.user("manager", ["MANAGER"]), second = await f.user("second", ["MANAGER"]);
   const engineer = await f.user("engineer", ["ENGINEER"]), foreign = await f.user("foreign", ["ENGINEER"]);
   const combined = await f.user("combined", ["MANAGER", "ENGINEER"]);
@@ -147,7 +149,7 @@ test("files.crud: file113, документы, attachment ACL и inline-дейс
     for (const state of ["PENDING", "READY"] as const) {
       const id = randomUUID(); await f.db.financeDocument.create({ data: { id, uploadedById: accountant.id, clientMutationId: randomUUID(),
         fileName: "missing.pdf", mimeType: "application/pdf", size: pdf.length, contentHash: hash(pdf), requestFingerprint: hash(pdf),
-        storageMode: "s3", storageKey: `finance-documents/${id}/${hash(pdf)}`, state } });
+        storageMode: "s3", storageKey: `finance-documents/${id}/${hash(pdf)}`, state, readyAt: state === "READY" ? new Date() : null } });
       assert.equal((await f.request(`/api/finance/documents/${id}`, accountant)).status, 404);
     }
   });
@@ -206,7 +208,7 @@ test("files.crud: file113, документы, attachment ACL и inline-дейс
     assert.equal(saved(await patchProduct(combined, "description", texts[0], texts[3])).value, texts[0]);
     for (const actor of [worker, mounter]) { const reply = await patchProduct(actor, "description", "hidden", texts[0]); assert.equal(reply.kind, "forbidden"); assert.equal("currentValue" in reply, false); }
     const denied = await f.actionResponse("patchProduct", productPage, accountant, [exact]); assert.equal(denied.status, 302);
-    assert.equal(new URL(denied.headers.get("location") ?? "", f.target.baseUrl).href, `${f.target.baseUrl}/finance`);
+    assert.equal(denied.headers.get("location"), financeLocation.href);
     await f.db.product.update({ where: { id: product.id }, data: { status: "PRODUCTION" } });
     const revoked = await patchProduct(engineer, "description", "stale", texts[0]); assert.ok(["forbidden", "not-found"].includes(revoked.kind)); assert.equal("currentValue" in revoked, false);
     await f.db.product.update({ where: { id: product.id }, data: { status: "DESIGN" } });
@@ -315,7 +317,7 @@ test("files.crud: file113, документы, attachment ACL и inline-дейс
     assert.equal((await f.db.project.findUniqueOrThrow({ where: { id: own.id } })).address, "Shared address");
     for (const actor of [engineer, worker, mounter]) { const reply = await call(actor, "title", "Hidden", "First title"); assert.equal(reply.kind, "forbidden"); assert.equal("currentValue" in reply, false); }
     const denied = await f.actionResponse("patchProject", page, accountant, [title]); assert.equal(denied.status, 302);
-    assert.equal(new URL(denied.headers.get("location") ?? "", f.target.baseUrl).href, `${f.target.baseUrl}/finance`);
+    assert.equal(denied.headers.get("location"), financeLocation.href);
     assert.equal(saved(await call(combined, "title", "Combined title", "First title")).value, "Combined title");
     const baseline = { title: "Original project", address: null, clientId: own.clientId };
     const legacy = await f.action<BasicReply>("updateProject", page, manager, [own.id, { title: "Legacy title", address: null, clientId: own.clientId,
