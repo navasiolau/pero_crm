@@ -2,14 +2,31 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {randomUUID,createHash} from 'node:crypto';
 import {Prisma} from '@prisma/client';
-import {readFileSync} from 'node:fs';
+import {readFileSync,lstatSync,realpathSync,mkdirSync,mkdtempSync,readdirSync,unlinkSync,rmdirSync} from 'node:fs';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
+import path from 'node:path';
 import {FIXTURE_NAMESPACE as NS,DISABLED_PASSWORD,CLEANUP_ORDER,newFixturePlan,validatePlan,signed,verifySignedFixture,ownFileKey,ownFinanceKey,validateStorageVersions,digest,certificateForHandoff,cleanupIntent,compareFileDelete,fixtureStageGuard,preferencePairs,handoffSubjects,compareCurrentHandoff,publicDeleteMetadata,validateCompiledDeleteDescriptor} from './file-fixture113-protocol.mjs';
 import {mediaBytes,compareOriginal,ownState,lockOwned,deleteOwnedRows,createOwnGraph,fixtureCookieProfiles,readFixtureUploadReply,FixtureUploadResponseError,safeFixtureUploadDiagnostic,fixtureUploadStopCode} from './file-fixture113-entry.mjs';
 import {fixture113Bundle,fixture113Coordinator,immutablePublish} from './file-fixture113-runner.mjs';
 import {lifecycleNativeGuard} from './file-fixture113-lifecycle-native.mjs';
 const runId=randomUUID(),revision='a'.repeat(40),secret='QA113_TEST_ONLY_NOT_A_LIVE_SECRET',h=value=>createHash('sha256').update(value).digest('hex');
+const privateResultsRoot=fileURLToPath(new URL('../test-results',import.meta.url));
+function privateTestDirectory(t,prefix,allowedFiles=[]){
+ const directoryGuard=directory=>{assert.equal(lstatSync(directory).isSymbolicLink(),false,'REPARSE_PATH_FORBIDDEN');assert.equal(lstatSync(directory).isDirectory(),true);assert.equal(realpathSync(directory).toLowerCase(),path.resolve(directory).toLowerCase(),'PRIVATE_RESULTS_ROOT_REQUIRED');};
+ directoryGuard(path.dirname(privateResultsRoot));
+ mkdirSync(privateResultsRoot,{recursive:true});
+ directoryGuard(privateResultsRoot);
+ const directory=mkdtempSync(path.join(privateResultsRoot,prefix));directoryGuard(directory);
+ t.after(()=>{
+  directoryGuard(privateResultsRoot);directoryGuard(directory);
+  const names=readdirSync(directory);assert.ok(names.every(name=>allowedFiles.includes(name)),'UNEXPECTED_PRIVATE_TEST_ARTIFACT');
+  const files=names.map(name=>{const file=path.join(directory,name);assert.equal(lstatSync(file).isSymbolicLink(),false,'REPARSE_PATH_FORBIDDEN');assert.equal(lstatSync(file).isFile(),true);assert.equal(realpathSync(file).toLowerCase(),path.resolve(file).toLowerCase(),'PRIVATE_TEST_FILE_CHANGED');return file;});
+  // Только собственный leaf и заранее известные файлы; общий root сохраняется.
+  for(const file of files)unlinkSync(file);rmdirSync(directory);
+ });
+ return directory;
+}
 function plan(){return newFixturePlan(runId,revision);}
 function deleteManifestFixture(){
  const product='app/(app)/products/[id]/page',project='app/(app)/projects/[id]/page';
@@ -218,8 +235,8 @@ test('invalid private manifest JSON diagnostics cannot echo raw secret or body',
  assert.throws(()=>publicDeleteMetadata(Buffer.from('{"encryptionKey":"SYNTHETIC_PRIVATE_TEST_ONLY_KEY" broken'),revision),error=>error.message==='PRIVATE_SERVER_MANIFEST_INVALID_JSON');
 });
 
-test('private publisher refuses nested full-manifest encryption key before any artifact bytes are written',()=>{
- const out=fileURLToPath(new URL('../test-results/forbidden-private-manifest-'+randomUUID()+'.json',import.meta.url));assert.throws(()=>immutablePublish(out,{manifest:deleteManifestFixture()}),/CREDENTIALS_MUST_REMAIN_MEMORY/);
+test('private publisher refuses nested full-manifest encryption key before any artifact bytes are written',t=>{
+ const out=path.join(privateTestDirectory(t,'forbidden-private-manifest-'),'forbidden.json');assert.throws(()=>immutablePublish(out,{manifest:deleteManifestFixture()}),/CREDENTIALS_MUST_REMAIN_MEMORY/);
 });
 
 // V6: genuine offline Auth.js decode proves both request protocols; no live profiles or requests.
@@ -265,10 +282,10 @@ test('typed upload failure keeps the generic Error message and sanitizes attacke
  const error=new FixtureUploadResponseError({status:422},{ok:false,code:'UPLOAD_FORM_OUTDATED',kind:'validation',details:{phase:'request'},commitState:'notCommitted',error:'PRIVATE_USER_DATA'});assert.equal(error.message,'COMPILED_OWN_UPLOAD_UNCONFIRMED');assert.equal(error.diagnostic.code,'UPLOAD_FORM_OUTDATED');assert.doesNotMatch(JSON.stringify(error.diagnostic),/PRIVATE_USER_DATA/);
  const entry=readFileSync(new URL('./file-fixture113-entry.mjs',import.meta.url),'utf8');assert.match(entry,/error instanceof FixtureUploadResponseError/);assert.match(entry,/await readFixtureUploadReply\(response\)/);assert.doesNotMatch(entry,/const result=await response\.json\(\);need\(\(response\.status/);
 });
-test('actual existing fail-closed transport retains the bounded diagnosis on nonzero exit without emitting private body',async()=>{
+test('actual existing fail-closed transport retains the bounded diagnosis on nonzero exit without emitting private body',async t=>{
  const {createRequire,syncBuiltinESMExports}=await import('node:module'),{EventEmitter}=await import('node:events'),{qaTransport}=await import('./crm-acceptance-transport.mjs');
  const require=createRequire(import.meta.url),childProcess=require('node:child_process'),fs=require('node:fs'),path=require('node:path');
- const outputDir=fs.mkdtempSync(fileURLToPath(new URL('../test-results/v6-transport-',import.meta.url))),wrapper=fileURLToPath(new URL('../../../deploy/acceptance/crm-modernization-staging.py',import.meta.url)),wrapperHash=h(fs.readFileSync(wrapper));
+ const outputDir=privateTestDirectory(t,'v6-transport-',['transport-prepare-upload.stderr.private.log']),wrapper=fileURLToPath(new URL('../../../deploy/acceptance/crm-modernization-staging.py',import.meta.url)),wrapperHash=h(fs.readFileSync(wrapper));
  const diagnostic=safeFixtureUploadDiagnostic({status:401},{ok:false,code:'UPLOAD_HTTP_401',kind:'validation',details:{phase:'auth'},error:'PRIVATE_SECRET'}),code=fixtureUploadStopCode(diagnostic),commands=[];
  assert.equal(code,'FILE_QA_HTTP_401_UPLOAD_HTTP_401_AUTH_JSON_OBJECT');assert.match(code,/^[A-Z0-9_]{1,100}$/);assert.doesNotMatch(fixtureUploadStopCode({httpStatus:'PRIVATE',code:'PRIVATE_SECRET',phase:'PRIVATE_PHASE',replyShape:'PRIVATE_SHAPE'}),/PRIVATE/);
  const previousSpawn=childProcess.spawn;
