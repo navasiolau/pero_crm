@@ -18,6 +18,7 @@ apps/web/test-results
 apps/web/playwright-report
 apps/web/tests
 apps/telegram-bot/tests
+apps/web/scripts/byn-price-conversion/coordinator.ts
 test_bazis_models
 uploads
 
