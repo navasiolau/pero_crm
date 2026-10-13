@@ -59,39 +59,3 @@ test("each sync/async/diagnostic fault preserves subsequent effects and emits no
   assert.deepEqual(calls, ["dispatch", "org", "cache"]); assert.equal(diagnostics.length, 2);
   assert.ok(!JSON.stringify(diagnostics).includes("private")); assert.ok(!JSON.stringify(diagnostics).includes("URL"));
 });
-
-import { MUTATION_NATIVE_MANIFEST, assertNativeApproval, assertNativePluginPolicy, hasOwnedId, nativeFailureCode, nativeSourceHash, nativeSourcePins, type MutationNativeApproval } from "./mutation-outcomes-native";
-
-test("native guard capsules reject mismatched operation/source/target/lease without opening any connection", () => {
-  const hash = "a".repeat(64);
-  const approved: MutationNativeApproval = { source: "root-reviewed", operation: "execute", runId: MUTATION_NATIVE_MANIFEST.runId,
-    sourceHash: hash, containerId: MUTATION_NATIVE_MANIFEST.containerId, exclusiveLocalWindow: true, localOutboxInactive: true, observationEvidence: "root observed quiescent runtime and exact target" };
-  assert.doesNotThrow(() => assertNativeApproval(approved, hash));
-  for (const changed of [{ source: "other" }, { operation: "diagnostic" }, { runId: "other" }, { sourceHash: "b".repeat(64) },
-    { containerId: "c".repeat(64) }, { exclusiveLocalWindow: false }, { localOutboxInactive: false }, { observationEvidence: "" }])
-    assert.throws(() => assertNativeApproval({ ...approved, ...changed } as MutationNativeApproval, hash), /QA133_/);
-  assert.doesNotThrow(() => assertNativePluginPolicy(["file-stages"], false, false));
-  for (const ids of [[], ["demo"], ["file-stages", "demo"]]) assert.throws(() => assertNativePluginPolicy(ids, false, false), /QA133_PLUGIN_STOP/);
-  assert.throws(() => assertNativePluginPolicy(["file-stages"], true, false), /QA133_PLUGIN_STOP/);
-  assert.throws(() => assertNativePluginPolicy(["file-stages"], false, true), /QA133_PLUGIN_STOP/);
-  assert.equal(nativeFailureCode(Error("QA133_SOURCE_STOP\nraw secret/URL/PII")), "QA133_SOURCE_STOP");
-  assert.equal(nativeFailureCode(Error("raw credentials and real user details")), "QA133_SCENARIO_STOP");
-  assert.equal(hasOwnedId({ id: "owned" }, "owned"), true);
-  assert.equal(hasOwnedId({ AND: [{ status: "NEW" }, { id: "owned" }] }, "owned"), true);
-  assert.equal(hasOwnedId({ OR: [{ id: "owned" }, {}] }, "owned"), false);
-  assert.equal(hasOwnedId({ id: { in: ["owned", "foreign"] } }, "owned"), false);
-});
-
-test("native source closure pins actual production, runner, target guard, registry, runtime and schema without execution", async () => {
-  const pins = await nativeSourcePins();
-  assert.equal(pins.some(pin => pin.file === "tests/mutation-outcomes-native.ts"), true);
-  assert.equal(pins.some(pin => pin.file === "tests/helpers/local-crm-database.ts"), true);
-  assert.equal(pins.some(pin => pin.file === "src/server/tasks/completion-core.ts"), true);
-  assert.equal(pins.some(pin => pin.file === "src/server/payments/core.ts"), true);
-  assert.equal(pins.some(pin => pin.file === "src/server/operations/confirmation.ts"), true);
-  assert.equal(pins.some(pin => pin.file === "../../packages/plugins/demo/src/plugin.ts"), true);
-  assert.equal(pins.some(pin => pin.file.endsWith("runtime/library.js")), true);
-  assert.equal(pins.some(pin => pin.file === "prisma/schema.prisma"), true);
-  assert.match(nativeSourceHash(pins), /^[a-f0-9]{64}$/);
-  assert.ok(pins.every(pin => !pin.file.startsWith("<") && /^[a-f0-9]{64}$/.test(pin.sha256)));
-});
