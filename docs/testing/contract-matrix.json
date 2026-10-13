@@ -5,7 +5,9 @@
     "workflow": ".github/workflows/ci-cd.yml",
     "testStep": "pnpm -r --if-present test",
     "webEntry": "tsx --test tests/*.test.ts tests/*.test.mjs",
-    "botEntry": "pnpm --filter @pero/telegram-bot test"
+    "botEntry": "pnpm --filter @pero/telegram-bot test",
+    "integrationEntry": "pnpm --filter @pero/web test:integration",
+    "integrationRuntime": "apps/web/tests/integration/runtime/run.mjs"
   },
   "evidenceLevels": [
     "unit",
@@ -589,17 +591,31 @@
           "file": "apps/web/tests/engineer-access-actions.test.ts",
           "block": "real task and time actions reject stale hidden IDs",
           "evidenceLevel": "DI"
+        },
+        {
+          "file": "apps/web/tests/integration/domain-postgres.test.ts",
+          "block": "timer/all-stop-switch-read-complete-reassign-routes-boundaries-and-closed-history",
+          "evidenceLevel": "native-PostgreSQL"
+        },
+        {
+          "file": "apps/web/tests/integration/domain-postgres.test.ts",
+          "block": "timer/parallel-same-start-switch-expiry-start-DONE-and-audit-rollback",
+          "evidenceLevel": "native-PostgreSQL",
+          "notes": "Actual CI248, staging21e1b85617271d3b928be26c06f55bfb1a615ebe: обе timer группы PASS; immutable proof и retirement границы в openspec/changes/test-basis-reduction/reduction-map.md."
         }
       ],
       "acceptance": [
         {
-          "scenario": "Все пути20h→720; stop/autoStop race, одинаковая record identity и rollback на настоящем PostgreSQL.",
+          "scenario": "Повторить все пути20h→720, stop/autoStop race, record identity и rollback через общий guarded ephemeral CI runtime на новой ревизии.",
           "evidenceLevel": "native-PostgreSQL",
-          "target": "existing-local-5433/staging",
+          "target": "owned ephemeral CI PostgreSQL, обязательный whole-stand teardown",
           "status": "NOT_RUN",
           "revision": null,
           "gapTask": 132,
-          "entrypoints": []
+          "entrypoints": [
+            "apps/web/tests/integration/domain-postgres.test.ts",
+            "apps/web/tests/integration/runtime/run.mjs"
+          ]
         }
       ],
       "gapTasks": [
