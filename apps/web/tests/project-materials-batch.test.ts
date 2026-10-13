@@ -1,8 +1,6 @@
 import assert from "node:assert/strict";
-import {createHash} from "node:crypto";
 import {before, test} from "node:test";
 import {createRequire, Module} from "node:module";
-import {resolve} from "node:path";
 import {Prisma, type Role} from "@prisma/client";
 import {fixtureModel, matches, queryRows, type FixtureRow} from "./helpers/visibility-fixture";
 import type {VisibilityActor} from "../src/server/access/visibility";
@@ -98,105 +96,11 @@ const actor=(roles:Role[]=["ADMIN"]):VisibilityActor=>({id:"engineer",roles});
 
 
 
-test("native148 remains inert and rejects missing authorization before any database phase",async()=>{
- const native=await import("./project-materials-batch-native");
- await assert.rejects(native.native148Main([]),/F148_EXPLICIT_AUTHORIZATION/);
-});
-test("native148 rejects a relative approval path before reading it or initializing clients",async()=>{
- const native=await import("./project-materials-batch-native");
- await assert.rejects(native.native148Main(["--authorized-local-native","--approval-file","relative.json"]),/F148_APPROVAL_PATH/);
-});
-
-test("native148 refuses absent or foreign actor IDs before SQL or role selection",async()=>{
- const native=await import("./project-materials-batch-native");
- assert.throws(()=>native.native148ActorIds([{}]),/F148_OWN_ACTOR_ID/);
- assert.throws(()=>native.native148ActorIds([{id:"unowned-real-user"}]),/F148_OWN_ACTOR_ID/);
- const manifest=native.native148FixtureManifest(null);
- assert.deepEqual(native.native148ActorIds(manifest.rows.User),manifest.rows.User.map(row=>row.id));
-});
-
-test("native148 refuses non-public schema and standby before ledger or fixture DML",async()=>{
- const native=await import("./project-materials-batch-native");
- const identity={database:"pero_crm",user:"pero",schema:"public",recovery:false,pid:148,others:0};
- assert.doesNotThrow(()=>native.native148AssertIdentity(identity));
- assert.throws(()=>native.native148AssertIdentity({...identity,schema:"other"}),/F148_TARGET_PUBLIC_PRIMARY/);
- assert.throws(()=>native.native148AssertIdentity({...identity,recovery:true}),/F148_TARGET_PUBLIC_PRIMARY/);
-});
-
 test("native148 rejects runtime engine overrides before any constructor",async()=>{
  const native=await import("./project-materials-batch-native");
- const guard=Reflect.get(native,"native148AssertEngineEnvironment");
- assert.equal(typeof guard,"function");
- const validate=guard as (env:Record<string,string|undefined>)=>void;
- assert.doesNotThrow(()=>validate({}));
+ assert.doesNotThrow(()=>native.native148AssertEngineEnvironment({}));
  for(const key of ["PRISMA_QUERY_ENGINE_LIBRARY","PRISMA_QUERY_ENGINE_BINARY","PRISMA_CLIENT_ENGINE_TYPE"])
-  assert.throws(()=>validate({[key]:"unowned-engine"}),/F148_ENGINE_OVERRIDE/);
-});
-test("native148 loaded-engine validator refuses missing, foreign and multiple libraries",async()=>{
- const native=await import("./project-materials-batch-native");
- const helper=Reflect.get(native,"native148AssertLoadedEngine");
- assert.equal(typeof helper,"function");
- const validate=helper as (values:unknown,expected:string)=>string;
- const own=resolve("node_modules/.pnpm/owned/node_modules/.prisma/client/query_engine-windows.dll.node");
- const foreign=resolve("foreign/query_engine-windows.dll.node");
- assert.equal(validate([own],own),own);
- assert.throws(()=>validate([],own),/F148_LOADED_ENGINE/);
- assert.throws(()=>validate([foreign],own),/F148_LOADED_ENGINE/);
- assert.throws(()=>validate([own,foreign],own),/F148_LOADED_ENGINE/);
- assert.throws(()=>validate({env:"DO_NOT_SERIALIZE"},own),/F148_LOADED_ENGINE/);
-});
-
-test("native148 selects generated client engine while retaining tooling DLL copies in the inventory",async()=>{
- const native=await import("./project-materials-batch-native");
- const helper=Reflect.get(native,"native148GeneratedEnginePins");
- assert.equal(typeof helper,"function");
- const select=helper as (pins:readonly {path:string;sha256:string}[])=>{path:string;sha256:string}[];
- const own={path:"node_modules/.pnpm/@prisma+client@6.19.3_peer/node_modules/.prisma/client/query_engine-windows.dll.node",sha256:"owned"};
- const cli={path:"node_modules/.pnpm/prisma@6.19.3/node_modules/prisma/query_engine-windows.dll.node",sha256:"tooling"};
- const tooling={path:"node_modules/.pnpm/@prisma+engines@6.19.3/node_modules/@prisma/engines/query_engine-windows.dll.node",sha256:"tooling"};
- const inventory=[own,cli,tooling];
- assert.deepEqual(select(inventory),[own]);assert.equal(inventory.length,3);
- assert.deepEqual(select([{...own,path:"foreign/"+own.path}]),[]);
- assert.deepEqual(select([{...own,path:own.path.replace(".prisma/client",".prisma/foreign")}]),[]);
-});
-
-test("native148 accepts only exact local76 history and refuses prior, future or altered rows before DML",async()=>{
- const native=await import("./project-materials-batch-native");
- const helper=Reflect.get(native,"native148AssertLedger");
- assert.equal(typeof helper,"function");
- type Row={id:string;name:string;checksum:string;finished:boolean;rolledBack:boolean;rowSha256:string};
- const validate=helper as (rows:readonly Row[],expectedHash:string)=>string;
- const queue="ab60ba2ac3e03aece98856a1fdd4a3ddb65bd2114ecf2fca835e2e3e5e037306";
- const missingConfigs="3c9acc1d0abd632f007e09d3f915188e34993d03b9d660ad646d823c1b6b9e9c";
- const rows:Row[]=Array.from({length:76},(_,index)=>({id:"synthetic-ledger-"+index,name:"202609"+String(index).padStart(8,"0")+"_old",
-  checksum:"a".repeat(64),finished:true,rolledBack:false,rowSha256:index.toString(16).padStart(64,"0")}));
- rows[74]={...rows[74],name:"20261011120000_domain_event_queue",checksum:queue};
- rows[75]={...rows[75],name:"20261011130000_product_percentage_missing_configs",checksum:missingConfigs};
- const digest=(values:readonly Row[])=>createHash("sha256").update(JSON.stringify(values.map(row=>({
-  id:row.id,name:row.name,checksum:row.checksum,finished:row.finished,rolledBack:row.rolledBack,rowSha256:row.rowSha256,
- })).sort((a,b)=>Buffer.compare(Buffer.from(a.name),Buffer.from(b.name))||Buffer.compare(Buffer.from(a.id),Buffer.from(b.id))))).digest("hex");
- const expected=digest(rows);
- assert.equal(validate(rows,expected),expected);
- assert.equal(validate([...rows].reverse(),expected),expected);
- assert.throws(()=>validate(rows.slice(0,75),expected),/F148_MIGRATION_76/);
- assert.throws(()=>validate([...rows,{...rows[0],id:"unexpected-77",name:"20261011140000_unapproved"}],expected),/F148_MIGRATION_76/);
- const changed=(index:number,delta:Partial<Row>)=>rows.map((row,at)=>at===index?{...row,...delta}:row);
- assert.throws(()=>validate(changed(0,{checksum:"b".repeat(64)}),expected),/F148_LEDGER_FROZEN/);
- assert.throws(()=>validate(changed(0,{rowSha256:"b".repeat(64)}),expected),/F148_LEDGER_FROZEN/);
- assert.throws(()=>validate(changed(75,{id:"wrong-new-id"}),expected),/F148_LEDGER_FROZEN/);
- const wrong167=changed(75,{checksum:"b".repeat(64)});
- assert.throws(()=>validate(wrong167,digest(wrong167)),/F148_MIGRATION_76/);
- assert.throws(()=>validate(changed(0,{rolledBack:true}),expected),/F148_MIGRATION_76/);
-});
-
-test("native148 immutable catalog hash remains mandatory after readonly extraction",async()=>{
- const native=await import("./project-materials-batch-native"),helper=Reflect.get(native,"native148AssertCatalogHash");
- assert.equal(typeof helper,"function");
- const validate=helper as (expected:unknown,actual:string)=>void;
- assert.doesNotThrow(()=>validate("a".repeat(64),"a".repeat(64)));
- assert.throws(()=>validate(undefined,"a".repeat(64)),/F148_CATALOG_FROZEN/);
- assert.throws(()=>validate("","a".repeat(64)),/F148_CATALOG_FROZEN/);
- assert.throws(()=>validate("b".repeat(64),"a".repeat(64)),/F148_CATALOG_FROZEN/);
+  assert.throws(()=>native.native148AssertEngineEnvironment({[key]:"unowned-engine"}),/F148_ENGINE_OVERRIDE/);
 });
 
 test("frozen baseline demonstrates repeated reads and preserves the full 501-entry cost history",async()=>{

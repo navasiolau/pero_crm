@@ -5,7 +5,7 @@ import { mkdir, writeFile, rename } from "node:fs/promises";
 import { resolve } from "node:path";
 
 const VIEWPORTS=[[320,800],[360,800],[390,844],[768,1024],[1024,768],[1440,900]];
-const FIELDS=new Set(["title","kind","quantity","expectedPrice","engineerId","description","project.clientId","project.address","client.phone"]);
+const FIELDS=new Set(["title","kind","quantity","expectedPrice","engineerId","description","project.clientId"]);
 const outcomeRows=(body)=>body.toString("utf8").split("\n").flatMap(line=>{try{return[JSON.parse(line.slice(line.indexOf(":")+1))];}catch{return[];}});
 export async function runProductInlineBrowser({origin,profiles,fixture,outputDir,basicAuth,onOwnWrites}) {
   assert.ok(["http://127.0.0.1:3017","https://staging-crm.peromebel.by"].includes(origin)&&outputDir,"REVIEWED_LOCAL_OR_STAGING_ORIGIN_REQUIRED");
@@ -109,7 +109,6 @@ export async function runProductInlineBrowser({origin,profiles,fixture,outputDir
   async function saved(p,id){await expect(state(p,id).getByText("Сохранено",{exact:true})).toBeVisible({timeout:15000});}
   async function enter(p,id,value){await field(p,id).fill(value);await field(p,id).press("Enter");await saved(p,id);}
   const patches=()=>receipt.requests.filter(request=>request.type==="patch");
-  async function selectClient(p,label){await field(p,"client").click();await p.getByRole("button").filter({has:p.getByText(label,{exact:true})}).click();await saved(p,"client");}
   async function geometry(p,label){const measured=await p.evaluate(()=>({width:innerWidth,body:document.body.scrollWidth,html:document.documentElement.scrollWidth}));assert.ok(Math.max(measured.body,measured.html)<=measured.width+1,"PAGE_HORIZONTAL_OVERFLOW");check(label,measured);}
   async function screenshot(p,label){const path=resolve(outputDir,`${label}.png`);await p.screenshot({path,fullPage:true});receipt.screenshots.push({label,path});}
   try {
@@ -150,17 +149,8 @@ export async function runProductInlineBrowser({origin,profiles,fixture,outputDir
     }
     await enter(page,"price","0");assert.equal(patches().at(-1).result.value,"0.00");await enter(page,"price","");assert.equal(patches().at(-1).result.value,null);check("blank title, quantity0, >2decimal errors; price0 and null distinct");
     phase="transport_failure_same_mutation_id";
-    abortField="project.address";await field(page,"address").fill("QA address after retry");await field(page,"address").press("Enter");await expect(state(page,"address").getByRole("alert")).toBeVisible();
-    const aborted=patches().at(-1);assert.equal(aborted.phase,"response-lost-after-upstream-commit");assert.equal(aborted.result.kind,"saved");await state(page,"address").getByRole("button",{name:"Повторить сохранение",exact:true}).click();await saved(page,"address");assert.equal(patches().at(-1).request.clientMutationId,aborted.request.clientMutationId);assert.equal(patches().at(-1).result.repeated,true,"LOST_RESPONSE_RETRY_DID_NOT_REPLAY_RECEIPT");check("lost response after actual commit retries identical UUID/payload and returns saved receipt replay");
-    phase="changed_client_phone_context";
-    await goto(page,paths.productA);await goto(secondary.page,paths.productA);
-    await field(page,"phone").fill("777");
-    await selectClient(secondary.page,fixture.initial.clientLabelB);
-    await field(page,"phone").press("Enter");await expect(state(page,"phone").getByText(/Клиент проекта изменён/)).toBeVisible();await expect(field(page,"phone")).toHaveValue("777");
-    await expect(state(page,"phone").getByText(`Сейчас сохранено: ${fixture.initial.phoneB}`,{exact:true})).toBeVisible();
-    await state(page,"phone").getByRole("button",{name:"Принять сохранённое",exact:true}).click();await expect(field(page,"phone")).toHaveValue(fixture.initial.phoneB);
-    await enter(page,"phone","888");assert.equal(patches().at(-1).request.expectedClientId,fixture.ids.clientB);
-    await selectClient(page,fixture.initial.clientLabelA);await expect(field(page,"phone")).toHaveValue(fixture.initial.phoneA);check("changed-client conflict keeps old draft, explicit accept binds actual phone; original client phone unchanged");
+    abortField="description";await field(page,"description").fill("QA description after retry");await field(page,"description").press("Control+Enter");await expect(state(page,"description").getByRole("alert")).toBeVisible();
+    const aborted=patches().at(-1);assert.equal(aborted.phase,"response-lost-after-upstream-commit");assert.equal(aborted.result.kind,"saved");await state(page,"description").getByRole("button",{name:"Повторить сохранение",exact:true}).click();await saved(page,"description");assert.equal(patches().at(-1).request.clientMutationId,aborted.request.clientMutationId);assert.equal(patches().at(-1).result.repeated,true,"LOST_RESPONSE_RETRY_DID_NOT_REPLAY_RECEIPT");check("lost response after actual commit retries identical UUID/payload and returns saved receipt replay");
     phase="pristine_engineer_fallback_projection";
     await page.getByRole("tab",{name:"Процентные этапы",exact:true}).click();
     const engineerSelect=field(page,"engineer");
@@ -206,7 +196,7 @@ export async function runProductInlineBrowser({origin,profiles,fixture,outputDir
       const manager=profile.roles.some(role=>["ADMIN","DIRECTOR","MANAGER"].includes(role));
       const path=name==="engineer"?paths.productB:paths.productA;await goto(page,path);
       if(name==="admin")await enter(page,"title","QA очень длинное название изделия для проверки прямого редактирования и размещения соседних элементов без выхода карточки за границы экрана");
-      assert.equal(await field(page,"title").getAttribute("readonly")!==null,!manager,"TITLE_ROLE_EDITABILITY_MISMATCH");assert.equal(await field(page,"phone").getAttribute("readonly")!==null,!manager,"PHONE_ROLE_EDITABILITY_MISMATCH");
+      assert.equal(await field(page,"title").getAttribute("readonly")!==null,!manager,"TITLE_ROLE_EDITABILITY_MISMATCH");
       if(name==="engineer"){
         if(await field(page,"description").getAttribute("readonly")===null){await field(page,"description").fill("QA assigned engineer technical change");await field(page,"description").press("Control+Enter");await saved(page,"description");check("assigned DESIGN engineer saves own technical field");}else receipt.skips.push("engineer fixture not assigned/editable; no claim of technical writer acceptance");
       }

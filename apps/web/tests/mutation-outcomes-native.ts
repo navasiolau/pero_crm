@@ -9,6 +9,7 @@ import { dirname, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Prisma, PrismaClient } from "@prisma/client";
 import { existingLocalCrmDatabaseUrl } from "./helpers/local-crm-database";
+import { nativeOwnedIds, nativeSnapshot } from "./helpers/native-acceptance-snapshot";
 import type { DomainActor } from "../src/server/actor";
 import type { TaskTransaction } from "../src/server/tasks/transaction";
 
@@ -51,7 +52,7 @@ export async function nativeSourcePins(): Promise<Pins> {
     .map(name => `import ${JSON.stringify("./src/server/" + name + ".ts")};`).join("\n"), resolveDir: process.cwd(), sourcefile: "qa133-source-closure.ts", loader: "ts" },
     bundle: true, write: false, metafile: true, packages: "external", platform: "node", format: "cjs", logLevel: "silent", tsconfig: resolve("tsconfig.json") });
   const files = Object.keys(compiled.metafile.inputs).filter(name => name !== "qa133-source-closure.ts" && name !== "<stdin>");
-  files.push("tests/mutation-outcomes-native.ts", "tests/helpers/local-crm-database.ts", "prisma/schema.prisma", "package.json", "tsconfig.json",
+  files.push("tests/mutation-outcomes-native.ts", "tests/helpers/local-crm-database.ts", "tests/helpers/native-acceptance-snapshot.ts", "prisma/schema.prisma", "package.json", "tsconfig.json",
     "../../package.json", "../../pnpm-lock.yaml", "../../pnpm-workspace.yaml", "tests/mutation-outcomes.test.ts",
     "../../packages/plugins/demo/package.json", "../../packages/plugins/demo/src/plugin.ts", "../../packages/plugin-sdk/package.json", "../../packages/plugin-sdk/src/index.ts");
   // Pinned runtime объясняет callback/commit/catch; generated schema должна соответствовать own source.
@@ -97,16 +98,8 @@ function durable(name: string, value: unknown) {
 }
 function sqlName(name: string) { assert.match(name, /^[A-Za-z_][A-Za-z0-9_]{0,62}$/, "QA133_SQL_NAME_STOP"); return '"' + name + '"'; }
 const ownedIds = (table: string) => (MUTATION_NATIVE_MANIFEST.ids as Record<string, string[]>)[table] ?? [];
-async function fingerprints(db: Database, excludeOwned = false) {
-  const tables = await db.$queryRaw<{ tablename: string }[]>`SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename`;
-  const result: Record<string, unknown> = {};
-  for (const { tablename } of tables) {
-    const ids = excludeOwned ? ownedIds(tablename) : [], where = ids.length ? "WHERE id <> ALL($1::text[])" : "";
-    result[tablename] = await db.$queryRawUnsafe(`SELECT count(*)::text AS count,md5(COALESCE(string_agg(row_to_json(t)::text,'' ORDER BY row_to_json(t)::text),'')) AS digest FROM ${sqlName(tablename)} t ${where}`, ...ids.length ? [ids] : []);
-  }
-  result.constraints = await db.$queryRaw`SELECT md5(COALESCE(string_agg(pg_get_constraintdef(c.oid),'' ORDER BY t.relname,c.conname),'')) AS digest FROM pg_constraint c JOIN pg_class t ON t.oid=c.conrelid JOIN pg_namespace n ON n.oid=t.relnamespace WHERE n.nspname='public'`;
-  return result;
-}
+const fingerprints = (db: Database, excludeOwned = false) =>
+  nativeSnapshot(db, excludeOwned ? nativeOwnedIds(MUTATION_NATIVE_MANIFEST.ids) : {});
 async function captureOwned(db: Database) {
   const result: Record<string, unknown> = {};
   for (const [table, ids] of Object.entries(MUTATION_NATIVE_MANIFEST.ids))

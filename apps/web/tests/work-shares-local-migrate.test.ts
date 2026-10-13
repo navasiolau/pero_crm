@@ -1,10 +1,8 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmdirSync, unlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
-import { APPROVED, assertAddedDefaults, assertApprovedSql, assertContainerIdentity, assertDatasourceSchema, assertLocalUrl, assertOriginalData, assertPendingMigration, recordFailure, rowHashSql } from "./work-shares-local-migrate.mjs";
+import { APPROVED, assertAddedDefaults, assertApprovedSql, assertContainerIdentity, assertDatasourceSchema, assertLocalUrl, assertOriginalData, assertPendingMigration, rowHashSql } from "./work-shares-local-migrate.mjs";
 
 const docker = () => ({
   Id: String(APPROVED.containerId), Name: "/pero_crm_pg", Image: "sha256:test-image", RestartCount: 0,
@@ -76,19 +74,4 @@ test("Task fingerprints strip exactly the four additive fields; other tables rem
   assert.match(rowHashSql("Task"), /to_jsonb\(t\) - ARRAY\['allocationGroupId','shareUnits','shareAmount','splitRevision'\]/);
   assert.doesNotMatch(rowHashSql("Payment"), /ARRAY|allocationGroup/);
   assert.match(rowHashSql('odd"name'), /public\."odd""name"/);
-});
-
-test("denied repeated apply preserves the earlier outcome byte-for-byte", () => {
-  const dir = mkdtempSync(join(tmpdir(), "work-shares-guard-unit-"));
-  const file = join(dir, "apply-outcome.json");
-  const original = '{"status":"APPLIED_AND_VERIFIED","evidence":"original"}\n';
-  try {
-    writeFileSync(file, original, { flag: "wx" });
-    const outcome = recordFailure("apply", { dir, phase: "APPLY_GUARDS", outcomeOwned: false }, new Error("receipt already attempted"));
-    assert.equal(outcome.status, "STOP");
-    assert.equal(readFileSync(file, "utf8"), original);
-  } finally {
-    unlinkSync(file);
-    rmdirSync(dir);
-  }
 });

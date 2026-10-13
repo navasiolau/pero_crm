@@ -4,6 +4,7 @@ import {createRequire,Module} from "node:module";
 import {readFileSync} from "node:fs";
 import {PrismaClient,ProductStatus,type Prisma} from "@prisma/client";
 import {existingLocalCrmDatabaseUrl} from "./helpers/local-crm-database";
+import {nativeSnapshot} from "./helpers/native-acceptance-snapshot";
 const db=new PrismaClient({datasourceUrl:existingLocalCrmDatabaseUrl()}),require=createRequire(import.meta.url);
 let currentTx:Prisma.TransactionClient|null=null;
 const filename=require.resolve("../src/lib/prisma"),stub=new Module(filename);
@@ -12,14 +13,7 @@ const products=require("../src/server/products/queries") as typeof import("../sr
 const projects=require("../src/server/projects/queries") as typeof import("../src/server/projects/queries");
 const percentages=require("../src/server/product-percentage-pay/queries") as typeof import("../src/server/product-percentage-pay/queries");
 const abort=new Error("QA91_ROLLBACK");
-async function fingerprint(){
- const rows:Record<string,unknown>={};
- for(const {tablename} of await db.$queryRawUnsafe<{tablename:string}[]>("SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename")){
-  assert.match(tablename,/^[A-Za-z_][A-Za-z0-9_]*$/);
-  rows[tablename]=await db.$queryRawUnsafe(`SELECT count(*)::text AS count,md5(COALESCE(string_agg(row_to_json(t)::text,'' ORDER BY row_to_json(t)::text),'')) AS hash FROM "${tablename}" t`);
- }
- return rows;
-}
+const fingerprint=()=>nativeSnapshot(db);
 async function main(){
  const before=await fingerprint(),checks:string[]=[];
  try{

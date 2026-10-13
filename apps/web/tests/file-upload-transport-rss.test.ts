@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import {EventEmitter} from "node:events";
 import test from "node:test";
-import {rss139ChildMessage,rss139DrainHandlers,rss139OwnChild,rss139OverrideSend,rss139Cleanup,rss139HttpOperation,rss139ReadResponse,rss139WaitDrain,rss139JoinSenders} from "./file-upload-transport-rss";
+import {
+ rss139ChildMessage, rss139DrainHandlers, rss139OwnChild, rss139OverrideSend, rss139Cleanup,
+ rss139HttpOperation, rss139ReadResponse, rss139WaitDrain, rss139JoinSenders, rss139WorkerJournal,
+ rss139AssertPurpose, rss139RequestClosed, rss139CaptureMemory, rss139TransportBudget,
+ rss139AssertPhaseIntegrity, rss139SourceDigest, rss139HashOpenedFile,
+} from "./file-upload-transport-rss";
 
 function deferred<T=void>(){
  let resolve!:(value:T|PromiseLike<T>)=>void,reject!:(reason?:unknown)=>void;
@@ -216,22 +221,14 @@ test("already cancelled HTTP scope never starts a request or leaves unhandled wo
 });
 
 test("worker phase journal refuses raw fields and keeps only safe fixed error facts",async()=>{
- const source=await import("./file-upload-transport-rss");
- const helper=Reflect.get(source,"rss139WorkerJournal");
- assert.equal(typeof helper,"function");
- const make=helper as ()=>{record:(phase:string,facts:Record<string,unknown>)=>unknown;values:()=>unknown[]};
- const journal=make(),facts={requestComplete:true,requestEnded:true,requestDestroyed:false,requestAborted:false,responseFinished:false,responseDestroyed:false,bytes:64,status:200,errorName:"TypeError",errorCode:"RSS139_RUNTIME_FAILED"};
+ const journal=rss139WorkerJournal(),facts={requestComplete:true,requestEnded:true,requestDestroyed:false,requestAborted:false,responseFinished:false,responseDestroyed:false,bytes:64,status:200,errorName:"TypeError",errorCode:"RSS139_RUNTIME_FAILED"};
  const event=journal.record("caught",facts);
  assert.ok(event);assert.equal(JSON.stringify(event).includes("SECRET"),false);
  assert.throws(()=>journal.record("raw-message",{...facts,message:"SECRET"}),/RSS139_PHASE_/);
  assert.throws(()=>journal.record("caught",{...facts,token:"SECRET"}),/RSS139_PHASE_/);
 });
 test("warmup journal is bounded and cannot retain arbitrary Error names or codes",async()=>{
- const source=await import("./file-upload-transport-rss");
- const helper=Reflect.get(source,"rss139WorkerJournal");
- assert.equal(typeof helper,"function");
- const make=helper as ()=>{record:(phase:string,facts:Record<string,unknown>)=>unknown;values:()=>unknown[]};
- const journal=make(),facts={requestComplete:false,requestEnded:false,requestDestroyed:false,requestAborted:false,responseFinished:false,responseDestroyed:false,bytes:0,status:500,errorName:"Error",errorCode:"RSS139_RUNTIME_FAILED"};
+ const journal=rss139WorkerJournal(),facts={requestComplete:false,requestEnded:false,requestDestroyed:false,requestAborted:false,responseFinished:false,responseDestroyed:false,bytes:0,status:500,errorName:"Error",errorCode:"RSS139_RUNTIME_FAILED"};
  assert.throws(()=>journal.record("caught",{...facts,errorName:"SECRET"}),/RSS139_PHASE_/);
  assert.throws(()=>journal.record("caught",{...facts,errorCode:"UPLOAD_SECRET"}),/RSS139_PHASE_/);
  for(let index=0;index<128;index++)journal.record("caught",facts);
@@ -239,7 +236,6 @@ test("warmup journal is bounded and cannot retain arbitrary Error names or codes
 });
 
 test("warmup purpose cannot enter the full matrix and full purpose cannot enter warmup",async()=>{
- const {rss139AssertPurpose}=await import("./file-upload-transport-rss");
  assert.doesNotThrow(()=>rss139AssertPurpose("WARMUP_ONLY","warmup"));
  assert.doesNotThrow(()=>rss139AssertPurpose("RSS_MATRIX","run"));
  assert.throws(()=>rss139AssertPurpose("WARMUP_ONLY","run"),/RSS139_PURPOSE_MODE/);
@@ -248,77 +244,62 @@ test("warmup purpose cannot enter the full matrix and full purpose cannot enter 
 });
 
 test("keepalive request-close between native response end and its Promise continuation keeps the valid body",async()=>{
- const source=await import("./file-upload-transport-rss");
- const close=Reflect.get(source,"rss139RequestClosed") as ((response:object|undefined,reject:(error:Error)=>void)=>void)|undefined;
- assert.equal(typeof close,"function");
  const response=new EventEmitter(),controller=new AbortController();let rejection:Error|undefined,settled=false;
- const body=source.rss139ReadResponse(response,controller.signal).then(value=>{settled=true;return value;});
+ const body=rss139ReadResponse(response,controller.signal).then(value=>{settled=true;return value;});
  response.emit("data",Buffer.from('{"size":65536,"sha256":"verified"}'));response.emit("end");
- assert.equal(settled,false);close!(response,error=>{rejection=error;});
+ assert.equal(settled,false);rss139RequestClosed(response,error=>{rejection=error;});
  assert.equal(rejection,undefined);assert.deepEqual(await body,{size:65536,sha256:"verified"});
- const beforeHeaders:Error[]=[];close!(undefined,error=>beforeHeaders.push(error));assert.deepEqual(beforeHeaders.map(error=>error.message),["RSS139_HTTP_CLOSED"]);
+ const beforeHeaders:Error[]=[];rss139RequestClosed(undefined,error=>beforeHeaders.push(error));assert.deepEqual(beforeHeaders.map(error=>error.message),["RSS139_HTTP_CLOSED"]);
 });
 test("postheader request-close defers to the real response reader; incomplete response never becomes success",async()=>{
- const source=await import("./file-upload-transport-rss");
- const close=Reflect.get(source,"rss139RequestClosed") as ((response:object|undefined,reject:(error:Error)=>void)=>void)|undefined;
- assert.equal(typeof close,"function");
  const response=new EventEmitter(),controller=new AbortController();let rejection:Error|undefined;
- const body=source.rss139ReadResponse(response,controller.signal);
- response.emit("data",Buffer.from('{"size":'));close!(response,error=>{rejection=error;});
+ const body=rss139ReadResponse(response,controller.signal);
+ response.emit("data",Buffer.from('{"size":'));rss139RequestClosed(response,error=>{rejection=error;});
  assert.equal(rejection,undefined);response.emit("close");await assert.rejects(body,/RSS139_RESPONSE_CLOSED/);
 });
 
 test("memory observation preserves signed deltas separately from the complete hard transport budget",async()=>{
- const source=await import("./file-upload-transport-rss");
- const helper=Reflect.get(source,"rss139CaptureMemory");
- assert.equal(typeof helper,"function");
- type Facts={id:string;size:number;parallel:number;statuses:number[];limit:number;baseline:{rss:number;external:number;arrayBuffers:number};peak:{rss:number;external:number;arrayBuffers:number};delta:{rss:number;external:number;arrayBuffers:number}};
- const capture=helper as (id:string,sha:string,base:unknown,peak:unknown,statuses:readonly number[],publish:(part:string,facts:Facts)=>Promise<{file:string;sha256:string}>)=>Promise<{facts:Facts;receipt:{file:string;sha256:string}}>;
+ type Facts=Awaited<ReturnType<typeof rss139CaptureMemory>>["facts"];
  const base={rss:100*1024*1024,external:5*1024*1024,arrayBuffers:3*1024*1024,secret:"never serialize"};
  const peak={rss:140*1024*1024,external:4*1024*1024,arrayBuffers:2*1024*1024};
  const writes:{part:string;facts:Facts}[]=[];
- const observed=await capture("doc25","a".repeat(64),base,peak,[200],async(part,facts)=>{writes.push({part,facts});return {file:"case-doc25.json",sha256:"b".repeat(64)};});
+ const observed=await rss139CaptureMemory("doc25","a".repeat(64),base,peak,[200],async(part,facts)=>{writes.push({part,facts});return {file:"case-doc25.json",sha256:"b".repeat(64)};});
  assert.equal(writes.length,1);assert.equal(writes[0].part,"case-doc25.json");
  assert.equal(observed.facts.delta.rss,40*1024*1024);assert.equal(observed.facts.delta.external,-1024*1024);
  assert.equal(observed.facts.delta.arrayBuffers,-1024*1024);assert.equal(observed.facts.limit,32*1024*1024);
  assert.equal(observed.facts.id,"doc25");assert.equal(observed.facts.size,25*1024*1024);assert.equal(observed.facts.parallel,1);
  assert.deepEqual(observed.facts.statuses,[200]);assert.equal(JSON.stringify(observed).includes("secret"),false);
  assert.equal(observed.facts.delta.rss>observed.facts.limit,true);assert.equal(observed.receipt.sha256,"b".repeat(64));
- const parallel=await capture("parallel100","a".repeat(64),base,peak,[200,200],async()=>({file:"case-parallel100.json",sha256:"b".repeat(64)}));
+ const parallel=await rss139CaptureMemory("parallel100","a".repeat(64),base,peak,[200,200],async()=>({file:"case-parallel100.json",sha256:"b".repeat(64)}));
  assert.equal(parallel.facts.limit,64*1024*1024);assert.equal(parallel.facts.parallel,2);
  const queues={pending:0,parser:14495,part:65536,transformRead:65536,transformWrite:79455,
   fileWrite:65536,spoolReaders:0,networkRead:65072,storageRead:0};
- const transport=source.rss139TransportBudget(queues,1,65536);
+ const transport=rss139TransportBudget(queues,1,65536);
  assert.equal(transport.limit,32*1024*1024);
  assert.equal(transport.upperBound,Object.values(queues).reduce((total,bytes)=>total+bytes,0)+transport.reservedBytes);
  assert.equal(transport.reservedBytes,Object.values(transport.reserves).reduce((total,bytes)=>total+bytes,0));
  assert.equal(transport.theoreticalUpperBound<=transport.limit,true);
- const paired=source.rss139TransportBudget(queues,2,65536);
+ const paired=rss139TransportBudget(queues,2,65536);
  assert.equal(paired.limit,64*1024*1024);assert.equal(paired.theoreticalUpperBound,2*transport.theoreticalUpperBound);
- assert.throws(()=>source.rss139TransportBudget({...queues,pending:32*1024*1024+1},1,65536),/RSS139_TRANSPORT_QUEUE_BOUND/);
+ assert.throws(()=>rss139TransportBudget({...queues,pending:32*1024*1024+1},1,65536),/RSS139_TRANSPORT_QUEUE_BOUND/);
 });
 test("memory diagnostic refuses unknown or non-finite data and never treats failed durable write as receipt",async()=>{
- const source=await import("./file-upload-transport-rss");
- const helper=Reflect.get(source,"rss139CaptureMemory");
- assert.equal(typeof helper,"function");
- const capture=helper as (id:string,sha:string,base:unknown,peak:unknown,statuses:readonly number[],publish:()=>Promise<{file:string;sha256:string}>)=>Promise<unknown>;
  const memory={rss:0,external:0,arrayBuffers:0};let writes=0;
  const publish=async()=>{writes++;return {file:"case-doc25.json",sha256:"b".repeat(64)};};
- await assert.rejects(capture("foreign","a".repeat(64),memory,memory,[200],publish),/RSS139_MEMORY_SCENARIO/);
- await assert.rejects(capture("doc25","a".repeat(64),memory,{...memory,rss:Infinity},[200],publish),/RSS139_MEMORY_FACTS/);
- await assert.rejects(capture("doc25","a".repeat(64),memory,memory,[500],publish),/RSS139_MEMORY_STATUS/);
+ await assert.rejects(rss139CaptureMemory("foreign","a".repeat(64),memory,memory,[200],publish),/RSS139_MEMORY_SCENARIO/);
+ await assert.rejects(rss139CaptureMemory("doc25","a".repeat(64),memory,{...memory,rss:Infinity},[200],publish),/RSS139_MEMORY_FACTS/);
+ await assert.rejects(rss139CaptureMemory("doc25","a".repeat(64),memory,memory,[500],publish),/RSS139_MEMORY_STATUS/);
  assert.equal(writes,0);
  const queues={pending:0,parser:0,part:0,transformRead:0,transformWrite:0,fileWrite:0,spoolReaders:0,networkRead:0,storageRead:0};
- assert.throws(()=>source.rss139TransportBudget({...queues,storageRead:Infinity},1,65536),/RSS139_TRANSPORT_QUEUE_BOUND/);
- assert.throws(()=>source.rss139TransportBudget({...queues,unknown:1},1,65536),/RSS139_TRANSPORT_QUEUES/);
- assert.throws(()=>source.rss139TransportBudget(queues,1,1024*1024+1),/RSS139_TRANSPORT_INPUT/);
- assert.throws(()=>source.rss139TransportBudget(queues,3,65536),/RSS139_TRANSPORT_PARALLEL/);
- const rejection=0;await assert.rejects(capture("doc25","a".repeat(64),memory,memory,[200],async()=>{throw rejection;}),error=>error===rejection);
+ assert.throws(()=>rss139TransportBudget({...queues,storageRead:Infinity},1,65536),/RSS139_TRANSPORT_QUEUE_BOUND/);
+ assert.throws(()=>rss139TransportBudget({...queues,unknown:1},1,65536),/RSS139_TRANSPORT_QUEUES/);
+ assert.throws(()=>rss139TransportBudget(queues,1,1024*1024+1),/RSS139_TRANSPORT_INPUT/);
+ assert.throws(()=>rss139TransportBudget(queues,3,65536),/RSS139_TRANSPORT_PARALLEL/);
+ const rejection=0;await assert.rejects(rss139CaptureMemory("doc25","a".repeat(64),memory,memory,[200],async()=>{throw rejection;}),error=>error===rejection);
 });
 
 test("allocation checkpoints accept only fixed numeric shapes in the existing bounded journal",async()=>{
- const source=await import("./file-upload-transport-rss");
- const journal=source.rss139WorkerJournal(),facts={ordinal:0,rss:100,external:80,arrayBuffers:60,heapUsed:20,heapTotal:40};
+ const journal=rss139WorkerJournal(),facts={ordinal:0,rss:100,external:80,arrayBuffers:60,heapUsed:20,heapTotal:40};
  const event=journal.record("memory-worker-start",facts);assert.deepEqual(event.facts,facts);
  facts.rss=0;assert.equal(Reflect.get(journal.values()[0].facts,"rss"),100);
  assert.throws(()=>journal.record("memory-source-verified",{...facts,token:"SECRET"}),/RSS139_PHASE_/);
@@ -329,53 +310,40 @@ test("allocation checkpoints accept only fixed numeric shapes in the existing bo
  assert.equal(journal.values().length,128);assert.throws(()=>journal.record("memory-source-verified",facts),/RSS139_PHASE_BOUND/);
 });
 test("malformed allocation journal prevents acceptance in every runtime purpose",async()=>{
- const source=await import("./file-upload-transport-rss");
- const check=Reflect.get(source,"rss139AssertPhaseIntegrity");
- assert.equal(typeof check,"function");
- const validate=check as (failure:string|null)=>void;
- assert.doesNotThrow(()=>validate(null));
- assert.throws(()=>validate("RSS139_PHASE_INVALID"),/RSS139_PHASE_INVALID/);
+ assert.doesNotThrow(()=>rss139AssertPhaseIntegrity(null));
+ assert.throws(()=>rss139AssertPhaseIntegrity("RSS139_PHASE_INVALID"),/RSS139_PHASE_INVALID/);
 });
 
 test("source SHA stream matches native bytes at exact64KiB boundaries with owned handle cleanup",async()=>{
- const source=await import("./file-upload-transport-rss");
- const digestFile=Reflect.get(source,"rss139SourceDigest"),digestHandle=Reflect.get(source,"rss139HashOpenedFile");
- assert.equal(typeof digestFile,"function");assert.equal(typeof digestHandle,"function");
  const fs=await import("node:fs/promises"),path=await import("node:path"),os=await import("node:os"),crypto=await import("node:crypto");
  const root=await fs.mkdtemp(path.join(os.tmpdir(),"pero-rss139-hash-")),files:string[]=[];
- const digest=digestFile as (file:string)=>Promise<string>;
- type Reader=AsyncIterable<unknown>&{destroy:()=>void};
- const hashOpened=digestHandle as (handle:{createReadStream:(options:{highWaterMark:number;autoClose:false})=>Reader;close:()=>Promise<void>})=>Promise<string>;
  try{
   assert.equal(await fs.realpath(root),path.resolve(root));assert.equal((await fs.lstat(root)).isSymbolicLink(),false);
   for(const size of [0,1,65535,65536,65537,196733]){
    const bytes=Buffer.alloc(size);for(let index=0;index<size;index++)bytes[index]=index%251;
    const file=path.join(root,"size-"+size+".bin");files.push(file);await fs.writeFile(file,bytes,{flag:"wx"});
    const expected=crypto.createHash("sha256").update(await fs.readFile(file)).digest("hex");
-   assert.equal(await digest(file),expected);
+   assert.equal(await rss139SourceDigest(file),expected);
    const handle=await fs.open(file,"r");let maxChunk=0,closed=false;
-   assert.equal(await hashOpened({
+   assert.equal(await rss139HashOpenedFile({
     createReadStream:options=>{assert.equal(options.highWaterMark,65536);assert.equal(options.autoClose,false);
      const stream=handle.createReadStream(options);assert.equal(stream.readableHighWaterMark,65536);
      return {[Symbol.asyncIterator]:async function*(){for await(const chunk of stream){maxChunk=Math.max(maxChunk,chunk.length);yield chunk;}},destroy:()=>{stream.destroy();}};},
     close:async()=>{await handle.close();closed=true;},
    }),expected);assert.equal(closed,true);assert.equal(maxChunk<=65536,true);
-   if(size===65537){await fs.appendFile(file,Buffer.from([1]));assert.notEqual(await digest(file),expected);}
+   if(size===65537){await fs.appendFile(file,Buffer.from([1]));assert.notEqual(await rss139SourceDigest(file),expected);}
   }
-  await assert.rejects(digest(path.join(root,"missing.bin")),error=>Boolean(error&&typeof error==="object"&&"code" in error&&error.code==="ENOENT"));
+  await assert.rejects(rss139SourceDigest(path.join(root,"missing.bin")),error=>Boolean(error&&typeof error==="object"&&"code" in error&&error.code==="ENOENT"));
  }finally{
   for(const file of files){assert.equal(path.dirname(path.resolve(file)),path.resolve(root));assert.equal((await fs.lstat(file)).isSymbolicLink(),false);await fs.unlink(file);}
   assert.deepEqual(await fs.readdir(root),[]);await fs.rmdir(root);
  }
 });
 test("source SHA stops own reader before handle close and preserves falsy read and secondary close failure",async()=>{
- const source=await import("./file-upload-transport-rss"),helper=Reflect.get(source,"rss139HashOpenedFile");
- assert.equal(typeof helper,"function");
  type Reader=AsyncIterable<unknown>&{destroy:()=>void};
- const digest=helper as (handle:{createReadStream:()=>Reader;close:()=>Promise<void>})=>Promise<string>;
  for(const closeFails of [false,true]){
   const order:string[]=[];let destroyed=false;
-  const operation=digest({createReadStream:()=>({
+  const operation=rss139HashOpenedFile({createReadStream:()=>({
    [Symbol.asyncIterator]:async function*(){yield Buffer.from([1]);throw 0;},
    destroy:()=>{destroyed=true;order.push("destroy");},
   }),close:async()=>{assert.equal(destroyed,true);order.push("close");if(closeFails)throw 0;}});
@@ -386,5 +354,5 @@ test("source SHA stops own reader before handle close and preserves falsy read a
   assert.deepEqual(order,["destroy","close"]);
  }
  const stream:Reader={[Symbol.asyncIterator]:async function*(){yield Buffer.from([1]);},destroy:()=>{}};
- await assert.rejects(digest({createReadStream:()=>stream,close:async()=>{throw Error("CONTROLLED_CLOSE");}}),/RSS139_CLEANUP_UNKNOWN/);
+ await assert.rejects(rss139HashOpenedFile({createReadStream:()=>stream,close:async()=>{throw Error("CONTROLLED_CLOSE");}}),/RSS139_CLEANUP_UNKNOWN/);
 });

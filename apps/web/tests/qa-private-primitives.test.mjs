@@ -11,7 +11,6 @@ import {canonical,sha,checkAncestors,durableWrite} from './helpers/qa-private-pr
 import {canonical as warehouseCanonical,sha as warehouseSha,encodeStageWire,checkedDirectory} from './warehouse-units-stage-wire.mjs';
 import {technicalCanonical,encodeFunctionalWire} from './product-draft-stage-wire.mjs';
 import {makeTechnicalStore as draftStore} from './product-draft-stage-runner.mjs';
-import {sourceManifest} from './warehouse-units-stage-runner.mjs';
 
 // Только собственные локальные технические файлы. БД, HTTP и браузер не вызываются.
 const here=path.dirname(fileURLToPath(import.meta.url)),results=path.resolve(here,'../test-results');
@@ -130,9 +129,7 @@ test('draft symlink artifact refuses changed path before ledger append',()=>owne
  assert.equal(fs.lstatSync(artifact).isSymbolicLink(),true);assert.equal(fs.existsSync(path.join(directory,'ledger.jsonl')),false);
 }));
 
-test('new shared dependency remains explicitly pinned by both runner families',()=>{
- const helper='helpers/qa-private-primitives.mjs';
- assert.equal(sourceManifest()['apps/web/tests/'+helper],sha(fs.readFileSync(path.join(here,helper))));
+test('new shared dependency remains explicitly pinned by the retained draft runner',()=>{
  const draft=fs.readFileSync(path.join(here,'product-draft-stage-runner.mjs'),'utf8');
  assert.match(draft,/SOURCE_FILES=\[[^\]]*'helpers\/qa-private-primitives\.mjs'/);
  assert.equal(draft.includes('SOURCE_FILES.map(name=>[name,sha(readFileSync(path.join(here,name)))])'),true);
@@ -140,7 +137,7 @@ test('new shared dependency remains explicitly pinned by both runner families',(
 
 test('cold shared-helper import has no file writes, process spawn or network',()=>{
  const helper=new URL('./helpers/qa-private-primitives.mjs',import.meta.url).href;
- const program=`import fs from 'node:fs';import cp from 'node:child_process';import net from 'node:net';import http from 'node:http';import path from 'node:path';import {fileURLToPath} from 'node:url';import {syncBuiltinESMExports} from 'node:module';const fail=()=>{throw Error('COLD_EFFECT_FORBIDDEN');};const originalOpen=fs.openSync;fs.openSync=(file,flags,...rest)=>{if(flags!=='r'||path.resolve(file instanceof URL?fileURLToPath(file):file)!==${JSON.stringify(fileURLToPath(helper))})fail();return originalOpen(file,flags,...rest);};for(const key of ['mkdirSync','writeFileSync','fsyncSync','unlinkSync'])fs[key]=fail;for(const key of ['spawn','spawnSync','execFile','execFileSync'])cp[key]=fail;net.connect=fail;http.request=fail;syncBuiltinESMExports();const m=await import(${JSON.stringify(helper)});if(Object.keys(m).sort().join(',')!=='canonical,checkAncestors,durableWrite,sha')throw Error('EXACT_HELPER_EXPORTS_REQUIRED');console.log('COLD_IMPORT_PASS');`;
+ const program=`import fs from 'node:fs';import cp from 'node:child_process';import net from 'node:net';import http from 'node:http';import path from 'node:path';import {fileURLToPath} from 'node:url';import {syncBuiltinESMExports} from 'node:module';const fail=()=>{throw Error('COLD_EFFECT_FORBIDDEN');};const originalOpen=fs.openSync;fs.openSync=(file,flags,...rest)=>{if(flags!=='r'||path.resolve(file instanceof URL?fileURLToPath(file):file)!==${JSON.stringify(fileURLToPath(helper))})fail();return originalOpen(file,flags,...rest);};for(const key of ['mkdirSync','writeFileSync','fsyncSync','unlinkSync'])fs[key]=fail;for(const key of ['spawn','spawnSync','execFile','execFileSync'])cp[key]=fail;net.connect=fail;http.request=fail;syncBuiltinESMExports();const m=await import(${JSON.stringify(helper)});if(Object.keys(m).sort().join(',')!=='canonical,checkAncestors,declarationHash,durableWrite,evidenceHash,sha')throw Error('EXACT_HELPER_EXPORTS_REQUIRED');console.log('COLD_IMPORT_PASS');`;
  const output=execFileSync(process.execPath,['--input-type=module','-e',program],{encoding:'utf8',timeout:10000,windowsHide:true});
  assert.equal(output,'COLD_IMPORT_PASS\n');
 });

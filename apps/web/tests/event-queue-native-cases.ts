@@ -95,3 +95,14 @@ export async function verifyNative135Cases(db:PrismaClient,peer:PrismaClient,pre
 
  return {backendPids:[pid1,pid2],heldOverlapWitness:true,waitWitness,cases};
 }
+
+const safeErrnos = new Set(["EACCES", "EPERM", "ENOENT", "ENOTDIR", "EISDIR", "ELOOP", "ENOSPC", "EIO", "EMFILE", "ENFILE", "EAGAIN", "EINVAL", "ECONNREFUSED", "ECONNRESET", "ETIMEDOUT", "ENOTFOUND", "EAI_AGAIN", "ENOMEM", "ENOEXEC"]);
+/** Приватные raw message/URL/stack/cause не выходят даже при ошибке до первого DB connection. */
+export function nativeFailureDiagnostic(error: unknown, phase: string, sourceHash: string | null) {
+  const row = typeof error === "object" && error !== null ? error as { message?: unknown; code?: unknown } : {};
+  const code = typeof row.message === "string" && /^F135_[A-Z0-9_]{1,64}$/.test(row.message) ? row.message : "F135_NATIVE_FAILED";
+  const databaseCode = typeof row.code === "string" && /^P\d{4}$/.test(row.code) ? row.code : null;
+  const errno = typeof row.code === "string" && safeErrnos.has(row.code) ? row.code : null;
+  return { ok: false, phase: /^[a-z][a-z0-9-]{0,47}$/.test(phase) ? phase : "native", code, databaseCode, errno,
+    hold: true, sourceHash: typeof sourceHash === "string" && /^[a-f0-9]{64}$/.test(sourceHash) ? sourceHash : null };
+}

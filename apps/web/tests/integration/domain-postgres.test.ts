@@ -6,11 +6,14 @@ import { after, before, test } from "node:test";
 import type { Prisma, PrismaClient, ProductStatus, ProjectStage, Role } from "@prisma/client";
 import type { DomainActor } from "../../src/server/actor";
 import { guardedModuleCache } from "../helpers/guarded-module-cache";
+import { nativeSnapshot } from "../helpers/native-acceptance-snapshot";
 import { createPostgresFixture, rejectedSql, type PostgresRows } from "./postgres.fixture";
 
 type Db = PrismaClient | Prisma.TransactionClient;
 type Context = { actor: DomainActor; db: Db; onRequested?: (pid: number) => void;
-  onHeld?: (tx: Prisma.TransactionClient, pid: number) => Promise<void>; failAuditId?: string };
+  onHeld?: (tx: Prisma.TransactionClient, pid: number) => Promise<void>; failAuditId?: string;
+  onTimerLookup?: (tx: Prisma.TransactionClient, rows: readonly { id: string }[]) => Promise<void>;
+  beforeAudit?: (tx: Prisma.TransactionClient) => Promise<void> };
 const contexts = new AsyncLocalStorage<Context>();
 const current = () => { const value = contexts.getStore(); assert.ok(value, "SYNTHETIC_ACTOR_CONTEXT_REQUIRED"); return value; };
 const run = <T>(actor: DomainActor, db: Db, operation: () => Promise<T>, extra: Partial<Context> = {}) => contexts.run({ actor, db, ...extra }, operation);
@@ -41,8 +44,16 @@ function commandTx(tx: Prisma.TransactionClient, context: Context): Prisma.Trans
       if (locked) await context.onHeld?.(tx, pid);
       return value;
     };
+    if (key === "timeEntry" && context.onTimerLookup) return new Proxy(db.timeEntry, { get(model, method) {
+      if (method === "findMany") return async (...args: unknown[]) => {
+        const rows: { id: string }[] = await Reflect.apply(model.findMany, model, args);
+        await context.onTimerLookup?.(tx, rows); return rows;
+      };
+      const value = Reflect.get(model, method); return typeof value === "function" ? value.bind(model) : value;
+    } });
     if (key === "changeLog" && context.failAuditId) return new Proxy(db.changeLog, { get(model, method) {
       if (method === "create") return async (...args: unknown[]) => {
+        if ((args[0] as Prisma.ChangeLogCreateArgs).data.action === "update") await context.beforeAudit?.(tx);
         const value = await Reflect.apply(model.create, model, args);
         // Настоящая SQL unique-ошибка после записи audit; enclosing transaction обязан откатить всё.
         await tx.changeLog.create({ data: { id: context.failAuditId, actorType: "user", actorId: context.actor.id, entity: "test", entityId: "ci169", action: "collision" } });
@@ -113,7 +124,7 @@ async function fence(label: string) {
 }
 const realTransaction = (db: PrismaClient) => async <T>(operation: (tx: Prisma.TransactionClient) => Promise<T>) =>
   db.$transaction(tx => operation(commandTx(tx, current())), { timeout: 15_000, maxWait: 5000 });
-async function overlap<A, B>(actor: DomainActor, firstOperation: () => Promise<A>, secondOperation: () => Promise<B>) {
+async function overlap<A, B>(actor: DomainActor, firstOperation: () => Promise<A>, secondOperation: () => Promise<B>, timerLock = false) {
   const ready = gate(), requested = gate(), release = gate(); let holder: Prisma.TransactionClient | undefined, holderPid = 0, waiterPid = 0;
   const first = run(actor, fixture.db, firstOperation, { onHeld: async (tx, pid) => { holder = tx; holderPid = pid; ready.resolve(); await release.promise; } });
   void first.catch(() => {}); let second: Promise<B> | undefined;
@@ -129,6 +140,16 @@ async function overlap<A, B>(actor: DomainActor, firstOperation: () => Promise<A
       witnessed = row.waiting; if (!witnessed) await new Promise(resolve => setTimeout(resolve, 10));
     }
     assert.equal(witnessed, true, "DISTINCT_BACKENDS_HELD_LOCK_AND_ACTUAL_WAITER");
+    if (timerLock) {
+      const locks = await holder.$queryRaw<{ pid: number; locktype: string; database: number; classid: number;
+        objid: number; objsubid: number; mode: string; granted: boolean }[]>`SELECT pid,locktype,database,classid,objid,objsubid,mode,granted
+          FROM pg_locks WHERE pid IN (${holderPid}::int4,${waiterPid}::int4) AND locktype='advisory'`;
+      assert.equal(locks.length, 2);
+      assert.ok(locks.every(row => row.locktype === "advisory" && row.classid === 18435 && row.objid === 55001 &&
+        row.objsubid === 2 && row.mode === "ExclusiveLock" && Number.isSafeInteger(row.database) && row.database > 0));
+      const granted = locks.find(row => row.pid === holderPid && row.granted), waiting = locks.find(row => row.pid === waiterPid && !row.granted);
+      assert.ok(granted && waiting); assert.equal(granted.database, waiting.database);
+    }
     release.resolve(); return await Promise.all([first, second]);
   } finally { release.resolve(); await Promise.allSettled([first, ...(second ? [second] : [])]); }
 }
@@ -471,6 +492,9 @@ test("timer/all-stop-switch-read-complete-reassign-routes-boundaries-and-closed-
   assert.equal((await fixture.db.timeEntry.findUniqueOrThrow({ where: { id: priorTimer.id } })).minutes, 720);
   assert.equal((await fixture.db.timeEntry.findFirstOrThrow({ where: { taskId: started.id, stoppedAt: null } })).startedAt.getTime(), instant.getTime());
   await run(actors.worker, fixture.db, () => time.stopTimer());
+  const generated = await fixture.db.timeEntry.findMany({ where: { userId: actors.worker.id, source: "timer", id: { notIn: closed.map(row => row.id) } } });
+  assert.ok(generated.every(row => Number.isInteger(row.minutes) && row.minutes >= 1 && row.minutes <= 720 && row.stoppedAt !== null));
+  assert.equal(await fixture.db.timeEntry.count({ where: { userId: actors.worker.id, stoppedAt: null } }), 0);
 });
 
 test("timer/parallel-same-start-switch-expiry-start-DONE-and-audit-rollback", async t => {
@@ -483,17 +507,24 @@ test("timer/parallel-same-start-switch-expiry-start-DONE-and-audit-rollback", as
   const same = await Promise.all(Array.from({ length: 10 }, (_, index) => run(c.worker, index % 2 ? fixture.db : fixture.peer, () => time.startTimer(a.id))));
   assert.ok(same.every(row => row.ok)); assert.equal(await fixture.db.timeEntry.count({ where: { userId: c.worker.id, stoppedAt: null } }), 1);
   const original = await fixture.db.timeEntry.findFirstOrThrow({ where: { userId: c.worker.id, stoppedAt: null } });
+  assert.equal(original.startedAt.getTime(), instant.getTime());
+  assert.equal(await fixture.db.timeEntry.count({ where: { taskId: a.id, userId: c.worker.id, source: "timer" } }), 1);
   await Promise.all(Array.from({ length: 10 }, (_, index) => run(c.worker, index % 2 ? fixture.db : fixture.peer, () => time.startTimer(index % 2 ? a.id : b.id))));
   assert.equal(await fixture.db.timeEntry.count({ where: { userId: c.worker.id, stoppedAt: null } }), 1);
   assert.equal((await fixture.db.timeEntry.findUniqueOrThrow({ where: { id: original.id } })).minutes, 1);
+  const closedBeforeStops = await fixture.db.timeEntry.findMany({ where: { userId: c.worker.id, stoppedAt: { not: null } }, orderBy: { id: "asc" } });
   await Promise.all([run(c.worker, fixture.db, () => time.stopTimer()), run(c.worker, fixture.peer, () => time.stopTimer()), run(c.worker, fixture.peer, () => time.getActiveTimer())]);
   assert.equal(await fixture.db.timeEntry.count({ where: { userId: c.worker.id, stoppedAt: null } }), 0);
+  assert.deepEqual(await fixture.db.timeEntry.findMany({ where: { id: { in: closedBeforeStops.map(row => row.id) } }, orderBy: { id: "asc" } }), closedBeforeStops);
   const expired = await fixture.db.timeEntry.create({ data: { taskId: a.id, userId: c.worker.id, source: "timer", startedAt: new Date(instant.getTime() - 1200 * 60000) } });
   await Promise.all([run(c.worker, fixture.db, () => time.getActiveTimer()), run(c.worker, fixture.peer, () => time.stopTimer())]);
-  assert.equal((await fixture.db.timeEntry.findUniqueOrThrow({ where: { id: expired.id } })).minutes, 720);
+  const savedExpired = await fixture.db.timeEntry.findUniqueOrThrow({ where: { id: expired.id } });
+  assert.equal(savedExpired.minutes, 720); assert.equal(savedExpired.autoStopped, true);
+  assert.equal(savedExpired.stoppedAt!.getTime(), instant.getTime() - 480 * 60000);
   const completing = await seed("Гонка завершения");
+  await fixture.db.timeEntry.create({ data: { taskId: completing.id, userId: c.worker.id, source: "timer", startedAt: new Date(instant.getTime() - 1200 * 60000) } });
   const results = await overlap(c.worker, () => time.startTimer(completing.id),
-    () => completion.changeTaskStatusCore(c.worker, completing.id, "DONE", undefined, coordinator.withMutationTransaction));
+    () => completion.changeTaskStatusCore(c.worker, completing.id, "DONE", undefined, coordinator.withMutationTransaction), true);
   assert.ok(results.every(row => row.ok));
   await run(c.worker, fixture.peer, () => completion.changeTaskStatusCore(c.worker, completing.id, "DONE", undefined, coordinator.withMutationTransaction));
   assert.equal(await fixture.db.payrollEntry.count({ where: { taskId: completing.id } }), 1);
@@ -503,10 +534,33 @@ test("timer/parallel-same-start-switch-expiry-start-DONE-and-audit-rollback", as
   const collision = await fixture.db.changeLog.create({ data: { id: fixture.id("timer-audit-collision"), actorType: "user", actorId: c.manager.id, entity: "test", entityId: "ci169", action: "fixture" } });
   const before = await fixture.db.task.findUniqueOrThrow({ where: { id: fault.id } });
   const recipient = await fixture.user("timer-fault-recipient", ["WORKER"], { payScheme: "PIECE" });
-  await assert.rejects(run(c.manager, fixture.db, () => tasks.updateTask(fault.id, { assigneeId: recipient.id }), { failAuditId: collision.id }));
+  const faultBefore = await nativeSnapshot(fixture.db); let partialBeforeFault = 0;
+  await assert.rejects(run(c.manager, fixture.db, () => tasks.updateTask(fault.id, { assigneeId: recipient.id }), {
+    failAuditId: collision.id, beforeAudit: async tx => {
+      assert.equal(await tx.task.count({ where: { id: fault.id, assigneeId: recipient.id } }), 1);
+      assert.equal(await tx.timeEntry.count({ where: { id: timer.id, stoppedAt: { not: null }, minutes: 720, autoStopped: true } }), 1);
+      partialBeforeFault++;
+    },
+  }));
+  assert.equal(partialBeforeFault, 1); assert.deepEqual(await nativeSnapshot(fixture.db), faultBefore);
   assert.deepEqual(await fixture.db.task.findUnique({ where: { id: fault.id } }), before);
   assert.deepEqual(await fixture.db.timeEntry.findUnique({ where: { id: timer.id } }), timer);
   await run(c.worker, fixture.db, () => time.stopTimer());
+  const casTask = await seed("CAS после чужого закрытия"), casTimer = await fixture.db.timeEntry.create({ data: {
+    taskId: casTask.id, userId: c.worker.id, source: "timer", startedAt: new Date(instant.getTime() - 1200 * 60000),
+  } }); let raceTriggered = false;
+  const cas = await run(c.worker, fixture.db, () => time.stopTimer(), { onTimerLookup: async (_tx, seen) => {
+    if (raceTriggered) return; assert.ok(seen.some(row => row.id === casTimer.id));
+    const changed = await fixture.peer.timeEntry.updateMany({ where: { id: casTimer.id, taskId: casTask.id, userId: c.worker.id, source: "timer", stoppedAt: null },
+      data: { minutes: 720, autoStopped: true, stoppedAt: new Date(instant.getTime() - 480 * 60000) } });
+    assert.equal(changed.count, 1); raceTriggered = true;
+  } });
+  assert.equal(raceTriggered, true); assert.equal(cas.ok, false);
+  const late = await fixture.db.timeEntry.findUniqueOrThrow({ where: { id: casTimer.id } });
+  assert.equal(late.minutes, 720); assert.equal(late.autoStopped, true); assert.equal(late.stoppedAt!.getTime(), instant.getTime() - 480 * 60000);
+  const generated = await fixture.db.timeEntry.findMany({ where: { userId: c.worker.id, source: "timer" } });
+  assert.ok(generated.every(row => Number.isInteger(row.minutes) && row.minutes >= 1 && row.minutes <= 720 && row.stoppedAt !== null));
+  assert.equal(await fixture.db.timeEntry.count({ where: { userId: c.worker.id, stoppedAt: null } }), 0);
 });
 
 async function materialsFixture(tx: Prisma.TransactionClient, rows: PostgresRows) {
@@ -567,6 +621,7 @@ async function materialsFixture(tx: Prisma.TransactionClient, rows: PostgresRows
 
 test("materials/frozen-501-costs-batch-scalar-positional-ACL-1-5-20-real-SQL-budget", async () => fixture.rollback(async (tx, rows) => {
   const c = await materialsFixture(tx, rows), ids = c.items.map(row => row.id), counts: number[] = [];
+  const protectedBefore = await nativeSnapshot(tx), state = await tx.warehouseAccountingState.findUnique({ where: { id: "main" } });
   await run(c.users.admin, tx, async () => {
     for (const size of [1, 5, 20]) {
       const selected = ids.slice(0, size), expected = await Promise.all(selected.map(id => frozenReference.frozenGetProjectMaterials(id, c.users.admin, tx)));
@@ -589,9 +644,13 @@ test("materials/frozen-501-costs-batch-scalar-positional-ACL-1-5-20-real-SQL-bud
   const begin = fixture.queryEvents.length;
   assert.deepEqual(await warehouse.getProjectMaterialsBatch([], c.users.accountant, tx), []); assert.equal(fixture.queryEvents.length, begin);
   await assert.rejects(warehouse.getProjectMaterialsBatch([ids[0]], c.users.accountant, tx), /Недостаточно прав/);
+  assert.deepEqual(await nativeSnapshot(tx), protectedBefore, "F148_ORIGINAL_INSIDE");
+  assert.deepEqual(await tx.warehouseAccountingState.findUnique({ where: { id: "main" } }), state, "F148_GLOBAL_WAREHOUSE_CHANGED");
   for (const phase of ["VERIFYING", "FROZEN", "RESTORED"]) {
     await tx.warehouseAccountingState.update({ where: { id: "main" }, data: { phase } });
+    const observedState = await tx.warehouseAccountingState.findUnique({ where: { id: "main" } });
     assert.deepEqual(await warehouse.getProjectMaterialsBatch([ids[0], ids[1]], c.users.admin, tx),
       await Promise.all([ids[0], ids[1]].map(id => frozenReference.frozenGetProjectMaterials(id, c.users.admin, tx))));
+    assert.deepEqual(await tx.warehouseAccountingState.findUnique({ where: { id: "main" } }), observedState, "F148_GLOBAL_WAREHOUSE_CHANGED");
   }
 }));

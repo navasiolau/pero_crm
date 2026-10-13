@@ -10,8 +10,8 @@ test('native entrypoints cold import has zero client construction, Docker, netwo
  "const Module=req('node:module');const original=Module._load;let clients=0,docker=0,network=0;",
  "Module._load=function(name,...args){if(name==='@prisma/client')return{PrismaClient:class{constructor(){clients++;throw Error('CLIENT_FORBIDDEN')}}};if(name==='node:child_process')return{execFileSync(){docker++;throw Error('DOCKER_FORBIDDEN')}};return original.call(this,name,...args);};",
  "globalThis.fetch=async()=>{network++;throw Error('NETWORK_FORBIDDEN')};",
- "const a=await import('./tests/shared-transaction-native.ts'),b=await import('./tests/warehouse-concurrency-native.ts'),c=await import('./tests/acceptance-evidence-runner.mjs');",
- "if(typeof a.executeSharedTransactionNative!=='function'||typeof b.runWarehouseConcurrencyAcceptance!=='function'||typeof c.executeApprovedScenario!=='function')throw Error('ENTRY_EXPORT_MISSING');",
+ "const a=await import('./tests/shared-transaction-native.ts'),b=await import('./tests/warehouse-concurrency-native.ts');",
+ "if(typeof a.executeSharedTransactionNative!=='function'||typeof b.runWarehouseConcurrencyAcceptance!=='function')throw Error('ENTRY_EXPORT_MISSING');",
  "console.log(JSON.stringify({clients,docker,network}));"
  ].join('\n');
  const environment={...process.env};

@@ -4,7 +4,7 @@ import {execFileSync} from 'node:child_process';
 import {createRequire} from 'node:module';
 import {readFile,realpath,lstat} from 'node:fs/promises';
 import path from 'node:path';
-import {evidenceHash,declarationHash} from './acceptance-evidence-protocol.mjs';
+import {evidenceHash,declarationHash} from './helpers/qa-private-primitives.mjs';
 const REQUIRED=['pnpm-lock.yaml','package.json','pnpm-workspace.yaml','apps/web/package.json','apps/web/tsconfig.json','apps/web/prisma/schema.prisma','apps/web/next.config.ts','apps/web/Dockerfile'];
 const REV=/^[a-f0-9]{40}$/,SHA=/^[a-f0-9]{64}$/;
 const git=(root,args)=>execFileSync('git',['--no-optional-locks','-c','safe.directory='+root,'-C',root,...args],{encoding:'utf8',windowsHide:true}).trim();

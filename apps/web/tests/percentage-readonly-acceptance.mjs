@@ -1,6 +1,19 @@
-/** Existing-data acceptance only. No QA fixtures, domain actions or cleanup writes. */
+/** Чистые проверки сохранности исторической percentage-миграции; без CLI, дампов и записи. */
 import { createHash } from "node:crypto";
-import { CASH_QA_TABLES, canonical } from "./cash-owned-fixtures.mjs";
+
+const BASE_TABLES = Object.freeze(["User", "Client", "Project", "Product", "ProductStatusHistory", "ProjectStageHistory",
+  "Task", "TaskAllocationGroup", "TaskDependency", "PriceItem", "Work", "TimeEntry", "PayrollEntry", "ProductStagePayPool",
+  "WorkPaymentConversion", "ProductStageSettlement", "ProductStageSettlementShare", "Payout", "CashAccount", "ExpenseArticle",
+  "Payment", "OrgSetting", "MaterialCategory", "Material", "ProjectMaterial", "StockMovement", "File", "Communication",
+  "Notification", "NotificationPreference", "UserPreference", "Plugin", "PluginSetting", "PluginRunLog", "DomainEvent",
+  "ApiToken", "ChangeLog", "TelegramLink"]);
+function canonical(value) {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return JSON.stringify(value);
+  if (typeof value === "number") { check(Number.isFinite(value), "INVALID_JSON_NUMBER"); return JSON.stringify(value); }
+  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+  check(value && typeof value === "object" && Object.getPrototypeOf(value) === Object.prototype, "INVALID_JSON_OBJECT");
+  return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}`;
+}
 
 export const TARGET_LOCAL = Object.freeze({ kind: "EXISTING_LOCAL",
   containerId: "bf45c761b5687e54bff1aafea82e8647925b5b425d6743ebdc7d33f4824b0ed5",
@@ -25,7 +38,7 @@ export function digest(value) { return sha(canonical(value) + "\n"); }
 export function tables(phase, optional = []) {
   check(["before", "after"].includes(phase) && Array.isArray(optional) && new Set(optional).size === optional.length &&
     optional.every((name) => OPTIONAL.has(name)), "SCHEMA_TABLE_ALLOWLIST_INVALID");
-  return [...CASH_QA_TABLES, ...(phase === "after" ? NEW_TABLES : []), ...optional].sort();
+  return [...BASE_TABLES, ...(phase === "after" ? NEW_TABLES : []), ...optional].sort();
 }
 export function key(table, row) {
   if (table === "OrgSetting") return row.key;
