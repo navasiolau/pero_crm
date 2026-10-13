@@ -10,8 +10,8 @@ Watcher соответствующего сервера скачивает об�
 | `main` | `crm` (CT100) | `/opt/crm` / `crm` | `ghcr.io/navasiolau/pero_crm:main` |
 
 В CI обязательны тесты watcher, проверки приложений, lint, typecheck и сборка.
-Оба jobs публикации, CRM и Telegram-бот, сохраняют `needs: test`: упавшая проверка
-не позволяет опубликовать новый moving tag. Образы имеют дополнительный тег
+Оба jobs публикации, CRM и Telegram-бот, требуют `success` полной unit matrix и native job:
+failure, skipped или cancelled блокируют новый moving tag. Образы имеют дополнительный тег
 `sha-<полный Git SHA>` и OCI label `org.opencontainers.image.revision`.
 
 ## Файлы и запуск watcher

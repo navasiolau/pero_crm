@@ -3,7 +3,7 @@ name: CI/CD
 # Модель деплоя (решение 09.2026): сборка образа в облаке, публикация в GHCR,
 # серверы сами забирают образ watcher-кроном (исходящий трафик, NAT не мешает).
 # Тег образа = имя ветки (main, staging) + sha-тег для отката.
-# Деплой возможен ТОЛЬКО при зелёных тестах (needs: test).
+# Публикация разрешена только после успеха всех unit и native проверок.
 
 on:
   push:
@@ -217,23 +217,10 @@ jobs:
         # PostgreSQL и job network удаляет штатный GitHub Stop containers;
         # данные обоих сервисов в tmpfs, постоянные тома не создаются.
 
-  # Итоговый обязательный gate не допускает публикацию при failure/cancelled/skipped.
-  test:
-    if: always()
-    needs: [unit-tests, native-tests]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Все обязательные проверки завершились успешно
-        run: |
-          test "$UNIT_RESULT" = success
-          test "$NATIVE_RESULT" = success
-        env:
-          UNIT_RESULT: ${{ needs.unit-tests.result }}
-          NATIVE_RESULT: ${{ needs.native-tests.result }}
-
+  # Прямой gate блокирует публикацию при failure/cancelled/skipped любой проверки.
   build-push:
-    if: github.event_name == 'push'
-    needs: test
+    if: github.event_name == 'push' && needs.unit-tests.result == 'success' && needs.native-tests.result == 'success'
+    needs: [unit-tests, native-tests]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -265,8 +252,8 @@ jobs:
   # Telegram-бот — изолированный сервис (LXC tgbot), свой образ,
   # та же pull-модель деплоя (watcher-крон на контейнере)
   build-push-bot:
-    if: github.event_name == 'push'
-    needs: test
+    if: github.event_name == 'push' && needs.unit-tests.result == 'success' && needs.native-tests.result == 'success'
+    needs: [unit-tests, native-tests]
     runs-on: ubuntu-latest
     permissions:
       contents: read
