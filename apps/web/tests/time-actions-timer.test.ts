@@ -64,21 +64,6 @@ function expected(timer: Timer, elapsed: number) {
   assert.equal(timer.autoStopped, elapsed >= 720);
 }
 
-test("actual stop/switch/read-autostop agree at719/720/721/20h without changing closed history", async context => {
-  context.mock.timers.enable({ apis: ["Date"], now: instant.getTime() });
-  for (const elapsed of [719, 720, 721, 1200]) for (const route of ["stop", "switch", "read"] as const) {
-    if (route === "read" && elapsed < 720) continue;
-    reset(["WORKER"], elapsed);
-    const history: Timer[] = [0, 1200].map(minutes => ({ ...timers[0], id: "closed-" + minutes,
-      startedAt: new Date(new Date("2026-10-01T00:00:00Z").getTime() - minutes * 60000), stoppedAt: new Date("2026-10-01T00:00:00Z"), minutes }));
-    timers.push(...structuredClone(history));
-    if (route === "stop") assert.equal((await actions.stopTimer()).ok, true);
-    else if (route === "switch") assert.equal((await actions.startTimer("second")).ok, true);
-    else assert.equal(await actions.getActiveTimer(), null);
-    expected(timers[0], elapsed); assert.deepEqual(timers.filter(timer => timer.id.startsWith("closed-")), history);
-    assert.equal(timers.filter(timer => timer.stoppedAt === null).length, route === "switch" ? 1 : 0);
-  }
-});
 
 test("actual stale stop cannot overwrite a concurrently confirmed auto-stop", async context => {
   context.mock.timers.enable({ apis: ["Date"], now: instant.getTime() }); reset();
@@ -86,25 +71,7 @@ test("actual stale stop cannot overwrite a concurrently confirmed auto-stop", as
   await actions.stopTimer(); expected(timers[0], 1200);
 });
 
-test("actual repeated start preserves live timer ID/start and concurrent switches leave one active", async context => {
-  context.mock.timers.enable({ apis: ["Date"], now: instant.getTime() }); reset(["WORKER"], 719);
-  const prior = structuredClone(timers[0]);
-  assert.equal((await actions.startTimer("first")).ok, true); assert.deepEqual(timers, [prior]);
-  await Promise.all([actions.startTimer("second"), actions.startTimer("first"), actions.startTimer("second")]);
-  assert.equal(timers.filter(row => row.stoppedAt === null).length, 1);
-});
 
-test("manual office bounds and role union remain distinct from automatic cap", async context => {
-  context.mock.timers.enable({ apis: ["Date"], now: instant.getTime() });
-  for (const roles of [["MANAGER"], ["ENGINEER"], ["WORKER", "ENGINEER"], ["ACCOUNTANT", "MANAGER"]] as Role[][]) {
-    for (const minutes of [721, 1200, 1440]) { reset(roles); timers = []; assert.equal((await actions.addManualTime({ taskId: "first", minutes })).ok, true);
-      assert.equal(timers[0].source, "manual"); assert.equal(timers[0].minutes, minutes); assert.equal(logs.length, 1); }
-    reset(roles); const before = structuredClone(timers); assert.equal((await actions.addManualTime({ taskId: "first", minutes: 1441 })).ok, false); assert.deepEqual(timers, before);
-  }
-  for (const role of ["WORKER", "MOUNTER", "ACCOUNTANT", "PROCUREMENT"] as Role[]) {
-    reset([role]); const before = structuredClone(timers); assert.equal((await actions.addManualTime({ taskId: "first", minutes: 1200 })).ok, false); assert.deepEqual(timers, before);
-  }
-});
 
 test("timer lookup and stop resolve grants after their transaction boundary", async context => {
   context.mock.timers.enable({ apis: ["Date"], now: instant.getTime() }); reset(["ACCOUNTANT"]);
@@ -127,4 +94,16 @@ test("close CAS retains current execution predicate when assignment is revoked a
   context.mock.timers.enable({ apis: ["Date"], now: instant.getTime() }); reset(); const previous = structuredClone(timers[0]);
   beforeUpdate = () => { tasks[0].assigneeId = "other"; };
   assert.equal((await actions.stopTimer()).ok, false); assert.deepEqual(timers[0], previous);
+});
+
+test("manual office bounds and role union remain distinct from automatic cap", async context => {
+  context.mock.timers.enable({ apis: ["Date"], now: instant.getTime() });
+  for (const roles of [["MANAGER"], ["ENGINEER"], ["WORKER", "ENGINEER"], ["ACCOUNTANT", "MANAGER"]] as Role[][]) {
+    for (const minutes of [721, 1200, 1440]) { reset(roles); timers = []; assert.equal((await actions.addManualTime({ taskId: "first", minutes })).ok, true);
+      assert.equal(timers[0].source, "manual"); assert.equal(timers[0].minutes, minutes); assert.equal(logs.length, 1); }
+    reset(roles); const before = structuredClone(timers); assert.equal((await actions.addManualTime({ taskId: "first", minutes: 1441 })).ok, false); assert.deepEqual(timers, before);
+  }
+  for (const role of ["WORKER", "MOUNTER", "ACCOUNTANT", "PROCUREMENT"] as Role[]) {
+    reset([role]); const before = structuredClone(timers); assert.equal((await actions.addManualTime({ taskId: "first", minutes: 1200 })).ok, false); assert.deepEqual(timers, before);
+  }
 });

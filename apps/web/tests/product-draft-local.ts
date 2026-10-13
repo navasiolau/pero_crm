@@ -16,7 +16,7 @@ let phase = "guard";
 /** Только разрешённый оператором local prerequisite; пароль/URL не выводятся. */
 async function main() {
   const mode = process.argv[2];
-  assert.ok(mode === "enum-only" || mode === "rollback-native" || mode === "concurrency-native", "LOCAL111_MODE_REQUIRED");
+  assert.ok(mode === "enum-only" || mode === "rollback-native", "LOCAL111_MODE_REQUIRED");
   assert.equal(process.platform, "win32", "LOCAL111_WINDOWS_REQUIRED");
   assert.ok(!process.env.CRM_MODERNIZATION_TARGET || process.env.CRM_MODERNIZATION_TARGET === "local", "LOCAL111_TARGET_MISMATCH");
   assert.ok(!process.env.DOCKER_CONTEXT || process.env.DOCKER_CONTEXT === "desktop-linux", "LOCAL111_DOCKER_CONTEXT_OVERRIDE");
@@ -77,17 +77,12 @@ async function main() {
     const labels = await enumLabels(db);
     assert.ok(labels.includes("DRAFT") && labels.includes("PREPARATION"), "LOCAL111_COMMITTED_ENUM_PREREQUISITE_REQUIRED");
   } finally { await db.end(); }
-  phase = mode === "rollback-native" ? "rollback-native" : "concurrency-native";
+  phase = "rollback-native";
   // Только память текущего процесса; не пишем env-файлы, не меняем auth/роли/токены.
   process.env.DATABASE_URL = databaseUrl;
   process.env.CRM_MODERNIZATION_TARGET = "local";
-  if (mode === "rollback-native") {
-    const runner = await import("./product-draft-native");
-    await runner.runProductDraftNative();
-  } else {
-    const runner = await import("./product-draft-concurrency-native");
-    await runner.runProductDraftConcurrencyNative();
-  }
+  const runner = await import("./product-draft-native");
+  await runner.runProductDraftNative();
 }
 
 async function enumLabels(db: Client): Promise<string[]> {

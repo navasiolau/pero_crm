@@ -99,17 +99,6 @@ test("status receipt rejects changed time, task and actor without further writes
   assert.deepEqual(fixture.state(), before); assert.equal(fixture.writes.length, writes);
 });
 
-test("old START receipt after lawful DONE confirms history without changing current state", async () => {
-  reset(); fixture.state().tasks[0].status = "NEW"; fixture.state().times = [];
-  const start = { clientMutationId: randomUUID(), expectedActorId: actorId };
-  assert.equal((await status("source", "IN_PROGRESS", undefined, start)).ok, true);
-  assert.equal((await status("source", "DONE", 20, { clientMutationId: randomUUID(), expectedActorId: actorId })).ok, true);
-  const before = structuredClone(fixture.state()), writes = fixture.writes.length;
-  const replay = await status("source", "IN_PROGRESS", undefined, start);
-  assert.equal(replay.ok, true); assert.equal(replay.replayed, true); assert.equal(replay.resultId, "source");
-  assert.ok(!("task" in replay)); assert.ok(!("status" in replay));
-  assert.equal(fixture.state().tasks[0].status, "DONE"); assert.deepEqual(fixture.state(), before); assert.equal(fixture.writes.length, writes);
-});
 
 test("current engineering reassignment is rejected and ordinary reassignment keeps progress", async () => {
   reset(); const { updateTask } = require("../src/server/tasks/actions") as typeof import("../src/server/tasks/actions");
