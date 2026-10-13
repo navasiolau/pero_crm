@@ -22,7 +22,7 @@
 ## 5. Owner refinement: 50 percent
 
 - [ ] 5.1 Дополнить карту точными сокращаемыми блоками, retained contracts и завершёнными historical workflows; согласовать границы параллельных edits до удаления.
-- [ ] 5.2 Консолидировать повторяемые test/QA/native setup и fixture lifecycle через существующие доменные helpers; сохранить уникальные money/ACL/CAS/idempotency/rollback/S3/browser/target guards и уровень каждого доказательства.
-- [ ] 5.3 Достичь web не более 32 361 и совокупно не более 34 831 строк от исходной базы 64 722/69 662 в неизменном tracked-text scope; подтвердить отсутствие minify, уплотнения строк, runtime/Prisma/package/lock/dependency изменений.
+- [ ] 5.2 Консолидировать повторяемые test/QA/native setup и fixture lifecycle через существующие доменные helpers или малый общий runner замены с чистым сокращением строк; сохранить уникальные money/ACL/CAS/idempotency/rollback/S3/browser/target/ownership/cleanup условия и уровень каждого доказательства, сопоставить и фактически выполнить перенесённые cases до снятия прежнего контура.
+- [ ] 5.3 Достичь web не более 32 361 и совокупно не более 34 831 строк от исходной базы 64 722/69 662 в неизменном tracked-text scope с включением всего добавленного test/QA кода, общего runner и перенесённых cases; подтвердить отсутствие minify, уплотнения строк, скрытия кода из счётчика, runtime/Prisma/package/lock/dependency изменений.
 - [ ] 5.4 Проверить live refs и контрактную карту; после всех edits один раз выполнить итоговые автоматические suites, typecheck/lint и OpenSpec validation, записать реальные результаты.
 - [ ] 5.5 Получить независимое review уникальных контрактов и итогового diff; после обычного merge подтвердить CI и реально развёрнутый новый staging SHA/образ/здоровье/GET-only smoke.
