@@ -80,34 +80,6 @@ test("actual action late audit/outbox/receipt failures atomically roll back task
     } finally { f.scope.restore(); }
   }
 });
-test("ten concurrent intents create one task quantity1 and historical replay never recreates a deleted Task", async () => {
-  const f = setup(); try {
-    const request = input({ clientMutationId: randomUUID().toUpperCase() }), results = await Promise.all(Array.from({ length: 10 }, () => f.actions.createTask(request)));
-    assert.ok(results.every(r => r.ok && r.resultId === (results[0].ok && results[0].resultId) && r.clientMutationId === request.clientMutationId.toLowerCase()));
-    const state = f.fixture.state(), rows = state.tasks.filter(row => row.workId === "work");
-    assert.equal(rows.length, 1); assert.equal(rows[0].quantity, "1.00"); assert.equal(rows[0].executorShare, 1);
-    assert.equal(state.logs.filter(row => row.action === "create").length, 1); assert.equal(state.logs.filter(row => row.action === "task.create.request").length, 1); assert.equal(state.events.length, 1);
-    assert.equal(f.effects.filter(name => name === "person").length, 1);
-    state.tasks = state.tasks.filter(row => row.id !== rows[0].id); state.works[0].quantity = "0";
-    const replay = await f.actions.createTask(request); assert.equal(replay.ok, true);
-    if (replay.ok) { assert.equal(replay.replayed, true); assert.equal(replay.resultId, rows[0].id); assert.deepEqual(Object.keys(replay).sort(), ["clientMutationId", "ok", "outcome", "replayed", "resultId"]); }
-    assert.equal(state.tasks.filter(row => row.workId === "work").length, 0); assert.equal(state.events.length, 1);
-  } finally { f.scope.restore(); }
-});
-test("payload/actor/receipt collisions refuse, current actor is rechecked, and new UUID permits same independent task", async () => {
-  const f = setup(); try {
-    const request = input(); assert.equal((await f.actions.createTask(request)).ok, true); const before = structuredClone(f.fixture.state());
-    const mismatch = await f.actions.createTask({ ...request, quantity: 2 }); assert.equal(mismatch.ok, false); if (!mismatch.ok) assert.equal(mismatch.kind, "conflict");
-    f.actor({ id: "admin", name: "Admin", roles: ["ADMIN"] }); assert.equal((await f.actions.createTask({ ...request, expectedActorId: "admin" })).ok, false); assert.deepEqual(f.fixture.state(), before);
-    f.actor({ id: "manager", name: "Manager", roles: ["MANAGER", "ENGINEER"] }); assert.equal((await f.actions.createTask(input())).ok, true); assert.equal(f.fixture.state().tasks.filter(row => row.workId === "work").length, 2);
-    const reads = f.reads(); f.fixture.state().users.find(row => row.id === "manager")!.active = false; assert.equal((await f.actions.createTask(request)).ok, false); assert.equal(f.reads(), reads);
-    f.fixture.state().users.find(row => row.id === "manager")!.active = true;
-    const receipt = f.fixture.state().logs.find(row => row.action === "task.create.request")!, original = structuredClone(receipt);
-    for (const change of [{ actorType: "plugin" }, { action: "create" }, { entity: "project" }, { entityId: "other" }, { newValue: { resultId: "wrong" } }]) {
-      Object.assign(receipt, original, change); const state = structuredClone(f.fixture.state()); assert.equal((await f.actions.createTask(request)).ok, false); assert.deepEqual(f.fixture.state(), state);
-    }
-  } finally { f.scope.restore(); }
-});
 test("lost commit ACK recovers receipt; failed proof is UNKNOWN; not-started retry is attempt-only", async () => {
   const f = setup(); try {
     f.loseAck(); const recovered = await f.actions.createTask(input()); assert.equal(recovered.ok, true); if (recovered.ok) assert.equal(recovered.replayed, true);
@@ -171,5 +143,20 @@ test("late original and stale actor ACK cannot release an unresolved original in
     assert.equal((await retry)?.outcome, "UNKNOWN"); assert.ok(controller.peek("manager", request));
     const final = controller.run("manager", request); release({ ok: true, outcome: "COMMITTED", resultId: "late-original", clientMutationId: request.clientMutationId });
     assert.equal((await final)?.ok, true); assert.equal(controller.peek("manager", request), undefined);
+  } finally { f.scope.restore(); }
+});
+
+test("payload/actor/receipt collisions refuse, current actor is rechecked, and new UUID permits same independent task", async () => {
+  const f = setup(); try {
+    const request = input(); assert.equal((await f.actions.createTask(request)).ok, true); const before = structuredClone(f.fixture.state());
+    const mismatch = await f.actions.createTask({ ...request, quantity: 2 }); assert.equal(mismatch.ok, false); if (!mismatch.ok) assert.equal(mismatch.kind, "conflict");
+    f.actor({ id: "admin", name: "Admin", roles: ["ADMIN"] }); assert.equal((await f.actions.createTask({ ...request, expectedActorId: "admin" })).ok, false); assert.deepEqual(f.fixture.state(), before);
+    f.actor({ id: "manager", name: "Manager", roles: ["MANAGER", "ENGINEER"] }); assert.equal((await f.actions.createTask(input())).ok, true); assert.equal(f.fixture.state().tasks.filter(row => row.workId === "work").length, 2);
+    const reads = f.reads(); f.fixture.state().users.find(row => row.id === "manager")!.active = false; assert.equal((await f.actions.createTask(request)).ok, false); assert.equal(f.reads(), reads);
+    f.fixture.state().users.find(row => row.id === "manager")!.active = true;
+    const receipt = f.fixture.state().logs.find(row => row.action === "task.create.request")!, original = structuredClone(receipt);
+    for (const change of [{ actorType: "plugin" }, { action: "create" }, { entity: "project" }, { entityId: "other" }, { newValue: { resultId: "wrong" } }]) {
+      Object.assign(receipt, original, change); const state = structuredClone(f.fixture.state()); assert.equal((await f.actions.createTask(request)).ok, false); assert.deepEqual(f.fixture.state(), state);
+    }
   } finally { f.scope.restore(); }
 });

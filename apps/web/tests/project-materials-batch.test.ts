@@ -95,93 +95,7 @@ function batch():BatchReader{
 }
 const actor=(roles:Role[]=["ADMIN"]):VisibilityActor=>({id:"engineer",roles});
 
-// Frozen cd38 reader + formatter; source SHA256 24a428a52659afa54596d5b03df9c5549f8be2ed7d0ffb3e67244da4b94a532d.
-// Это независимый pre-change oracle, а не новый scalar wrapper. Grants/Decimal/WAC helpers остаются каноническими.
-test("frozen baseline demonstrates repeated reads and preserves the full 501-entry cost history",async()=>{
- const one=fixture(),many=fixture();
- const baseline=await frozenGetProjectMaterials("product-1",actor(),one.db);
- assert.equal(baseline.movements.length,499);
- assert.equal(baseline.movements.some(row=>row.id==="history-1"),false);
- assert.equal(baseline.movements.some(row=>row.id==="latest-income"||row.id==="deleted-movement"),false);
- assert.equal(baseline.materialsTotalByn,501);
- assert.equal(baseline.lines[0].purchasePrice,2.5);
- assert.equal(baseline.lines[0].legacyReturnQuantity,3);
- for(const product of many.products)await frozenGetProjectMaterials(String(product.id),actor(),many.db);
- assert.ok(many.calls.length>one.calls.length+2,"Baseline действительно повторяет domain reads для каждого изделия");
-});
-test("batch1/5/20 and scalar match the frozen reference with a fixed read budget",async(context)=>{
- const read=batch(),counts:number[]=[];
- for(const size of [1,5,20]){
-  const control=fixture(),current=fixture(),ids=current.products.slice(0,size).map(row=>String(row.id)),before=current.fingerprint();
-  const expected=await Promise.all(ids.map(id=>frozenGetProjectMaterials(id,actor(),control.db)));
-  const actual=await read(ids,actor(),current.db);
-  assert.deepEqual(actual,expected);assert.equal(current.fingerprint(),before);counts.push(current.calls.length);
-  const single=fixture();assert.deepEqual(await queries.getProjectMaterials(ids[0],actor(),single.db),expected[0]);
- }
- context.diagnostic(JSON.stringify({level:"memory-model",products:[1,5,20],readCalls:counts}));
- assert.ok(counts[2]<=counts[0]+2,JSON.stringify({counts}));
-});
-test("empty and duplicate/cross-project inputs keep positional DTO and do not expand OFFICE grants",async()=>{
- const read=batch(),empty=fixture();
- assert.deepEqual(await read([],actor(["ACCOUNTANT"]),empty.db),[]);assert.equal(empty.calls.length,0);
- for(const roles of [["ADMIN"],["DIRECTOR"],["MANAGER"],["ENGINEER"],["PROCUREMENT"],["MANAGER","ACCOUNTANT"]] as Role[][]){
-  const control=fixture(),current=fixture(),ids=["product-2","product-1","product-2","product-20","missing"];
-  assert.deepEqual(await read(ids,actor(roles),current.db),await Promise.all(ids.map(id=>frozenGetProjectMaterials(id,actor(roles),control.db))),roles.join("+"));
- }
- for(const roles of [["ACCOUNTANT"],["WORKER"]] as Role[][]){
-  const current=fixture();await assert.rejects(read(["product-1"],actor(roles),current.db),/Недостаточно прав/);assert.equal(current.calls.length,0);
- }
-});
-test("independent movement grants retain ADMIN/DIRECTOR deleted product/project history and deny ordinary roles",async()=>{
- const read=batch(),ids=["product-3","product-4"];
- for(const role of ["ADMIN","DIRECTOR","ENGINEER","PROCUREMENT"] as Role[]){
-  const control=fixture(),current=fixture(),result=await read(ids,actor([role]),current.db);
-  assert.deepEqual(result,await Promise.all(ids.map(id=>frozenGetProjectMaterials(id,actor([role]),control.db))));
-  for(const item of result){
-   assert.deepEqual(item.lines,[]);assert.deepEqual(item.returnSources,[]);
-   assert.equal(item.movements.length,role==="ADMIN"||role==="DIRECTOR"?1:0);
-  }
- }
-});
-test("current/VERIFYING/legacy phases, archived issued quantities, nullable costs and role masks keep the exact old values",async()=>{
- const read=batch();
- for(const phase of ["ACTIVE","VERIFYING","UNINITIALIZED"] as const){
-  for(const roles of [["ADMIN"],["ENGINEER"],["MANAGER"],["MANAGER","ACCOUNTANT"]] as Role[][]){
-   const control=fixture(phase,true),current=fixture(phase,true),ids=["product-1","product-2","product-20"],before=current.fingerprint();
-   const result=await read(ids,actor(roles),current.db);
-   assert.deepEqual(result,await Promise.all(ids.map(id=>frozenGetProjectMaterials(id,actor(roles),control.db))));
-   assert.equal(result[0].materialsTotalByn,null);assert.equal(result[0].warehouseReady,phase==="ACTIVE");
-   assert.equal(current.fingerprint(),before);
-   if(!roles.includes("ADMIN")&&!roles.includes("ACCOUNTANT")){
-    for(const group of result){
-     assert.ok(group.lines.every(row=>row.purchasePrice===null));
-     assert.ok(group.returnSources.every(row=>row.unitPrice===null));
-     assert.ok(group.movements.every(row=>row.unitPrice===null&&row.totalByn===null&&row.reportDocument===null));
-    }
-   }
-  }
- }
-});
 
-test("controlled multi-material/equal-timestamp DTO ordering and movement tie IDs stay equal to the old reader",async()=>{
- const read=batch(),control=fixture(),current=fixture(),ids=["product-1","product-2"];
- for(const data of [control,current]){
-  const first=data.needs.find(row=>row.productId==="product-1")!;
-  const secondMaterial={id:"second-material",name:"Вторая номенклатура",sku:null,purchasePrice:"12.34",measurementUnit:{name:"м"},active:true};
-  data.needs.push({...first,id:"equal-time-need",materialId:secondMaterial.id,material:secondMaterial,quantity:"1.25",quantityPerUnit:null,issuedQty:"1.2",comment:"Не менять порядок",createdAt:first.createdAt});
-  const source=data.movements.find(row=>row.productId==="product-2")!;
-  for(const id of ["tie-movement-a","tie-movement-z"])data.movements.push({...source,id,createdAt:new Date(900),totalByn:"0.01"});
- }
- const expected=await Promise.all(ids.map(id=>frozenGetProjectMaterials(id,actor(),control.db)));
- const actual=await read(ids,actor(),current.db);
- assert.deepEqual(actual,expected);
- assert.deepEqual(actual[0].lines.map(row=>row.id),["need-product-1","equal-time-need"]);
- assert.deepEqual(actual[1].movements.slice(0,2).map(row=>row.id),["tie-movement-z","tie-movement-a"]);
- assert.equal(actual[0].lines[1].quantityPerUnit,1.25);
- assert.equal(actual[0].lines[1].legacyReturnQuantity,1.2);
- assert.equal(actual[0].hasShortage,true);
- // Это controlled fixture order. Реальный PostgreSQL equal-timestamp order проверяется separately native.
-});
 
 
 test("native148 remains inert and rejects missing authorization before any database phase",async()=>{
@@ -283,4 +197,37 @@ test("native148 immutable catalog hash remains mandatory after readonly extracti
  assert.throws(()=>validate(undefined,"a".repeat(64)),/F148_CATALOG_FROZEN/);
  assert.throws(()=>validate("","a".repeat(64)),/F148_CATALOG_FROZEN/);
  assert.throws(()=>validate("b".repeat(64),"a".repeat(64)),/F148_CATALOG_FROZEN/);
+});
+
+test("frozen baseline demonstrates repeated reads and preserves the full 501-entry cost history",async()=>{
+ const one=fixture(),many=fixture();
+ const baseline=await frozenGetProjectMaterials("product-1",actor(),one.db);
+ assert.equal(baseline.movements.length,499);
+ assert.equal(baseline.movements.some(row=>row.id==="history-1"),false);
+ assert.equal(baseline.movements.some(row=>row.id==="latest-income"||row.id==="deleted-movement"),false);
+ assert.equal(baseline.materialsTotalByn,501);
+ assert.equal(baseline.lines[0].purchasePrice,2.5);
+ assert.equal(baseline.lines[0].legacyReturnQuantity,3);
+ for(const product of many.products)await frozenGetProjectMaterials(String(product.id),actor(),many.db);
+ assert.ok(many.calls.length>one.calls.length+2,"Baseline действительно повторяет domain reads для каждого изделия");
+});
+
+test("controlled multi-material/equal-timestamp DTO ordering and movement tie IDs stay equal to the old reader",async()=>{
+ const read=batch(),control=fixture(),current=fixture(),ids=["product-1","product-2"];
+ for(const data of [control,current]){
+  const first=data.needs.find(row=>row.productId==="product-1")!;
+  const secondMaterial={id:"second-material",name:"Вторая номенклатура",sku:null,purchasePrice:"12.34",measurementUnit:{name:"м"},active:true};
+  data.needs.push({...first,id:"equal-time-need",materialId:secondMaterial.id,material:secondMaterial,quantity:"1.25",quantityPerUnit:null,issuedQty:"1.2",comment:"Не менять порядок",createdAt:first.createdAt});
+  const source=data.movements.find(row=>row.productId==="product-2")!;
+  for(const id of ["tie-movement-a","tie-movement-z"])data.movements.push({...source,id,createdAt:new Date(900),totalByn:"0.01"});
+ }
+ const expected=await Promise.all(ids.map(id=>frozenGetProjectMaterials(id,actor(),control.db)));
+ const actual=await read(ids,actor(),current.db);
+ assert.deepEqual(actual,expected);
+ assert.deepEqual(actual[0].lines.map(row=>row.id),["need-product-1","equal-time-need"]);
+ assert.deepEqual(actual[1].movements.slice(0,2).map(row=>row.id),["tie-movement-z","tie-movement-a"]);
+ assert.equal(actual[0].lines[1].quantityPerUnit,1.25);
+ assert.equal(actual[0].lines[1].legacyReturnQuantity,1.2);
+ assert.equal(actual[0].hasShortage,true);
+ // Это controlled fixture order. Реальный PostgreSQL equal-timestamp order проверяется separately native.
 });

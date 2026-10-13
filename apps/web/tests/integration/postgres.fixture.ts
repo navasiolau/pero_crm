@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { PrismaClient, type Prisma, type Role } from "@prisma/client";
+import { PrismaClient, Prisma, type Role } from "@prisma/client";
+import { activePaymentWhere } from "../../src/server/payments/active-records";
 import { nativeSnapshot, verifiedRollback } from "../helpers/native-acceptance-snapshot";
 import { assertCiRuntimeTarget } from "./runtime/target.mjs";
 
@@ -84,3 +85,23 @@ export async function rejectedSql(tx: Prisma.TransactionClient, operation: () =>
     await tx.$executeRawUnsafe("RELEASE SAVEPOINT ci169_rejected_sql");
   }
 }
+
+export function fixedBynTotal(history: readonly { amount: Prisma.Decimal; bynAmount: Prisma.Decimal | null; currency?: string; payrollCurrency?: string | null }[]) {
+  let total = new Prisma.Decimal(0);
+  for (const row of history) {
+    const value = row.bynAmount ?? ((row.currency ?? row.payrollCurrency) === "BYN" ? row.amount : null);
+    if (value === null) return null;
+    total = total.plus(value);
+  }
+  return total.toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+}
+export async function savedOrgBalance(tx: Prisma.TransactionClient) {
+  const [records, payouts] = await Promise.all([tx.payment.findMany({ where: activePaymentWhere }), tx.payout.findMany()]);
+  const paid = fixedBynTotal(payouts);
+  assert.notEqual(paid, null, "SYNTHETIC_BASELINE_BYN_UNAVAILABLE");
+  return records.reduce((total, row) => row.direction === "INCOME" ? total.plus(row.bynAmount) : total.minus(row.bynAmount), new Prisma.Decimal(0)).minus(paid!);
+}
+export const moneyRows = (tx: Prisma.TransactionClient) => Promise.all([
+  tx.payment.findMany({ orderBy: { id: "asc" } }), tx.payrollEntry.findMany({ orderBy: { id: "asc" } }),
+  tx.payout.findMany({ orderBy: { id: "asc" } }), tx.changeLog.findMany({ orderBy: { id: "asc" } }), tx.domainEvent.findMany({ orderBy: { id: "asc" } }),
+]);

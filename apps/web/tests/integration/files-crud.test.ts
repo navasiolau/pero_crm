@@ -19,9 +19,12 @@ type BasicReply = { ok: boolean; id?: string; error?: string; result?: null; fin
 
 test("files.crud: file113, документы, attachment ACL и inline-действия", { timeout: 300_000 }, async t => {
   const f = await createHttpS3Fixture("files-crud"); t.after(() => f.dispose());
+  // NextURL канонизирует loopback 127.0.0.1 в localhost; протокол и порт берём из guarded CI target.
+  const financeLocation = new URL("/finance", f.target.baseUrl); financeLocation.hostname = "localhost";
   const manager = await f.user("manager", ["MANAGER"]), second = await f.user("second", ["MANAGER"]);
   const engineer = await f.user("engineer", ["ENGINEER"]), foreign = await f.user("foreign", ["ENGINEER"]);
-  const combined = await f.user("combined", ["MANAGER", "ENGINEER"]), accountant = await f.user("accountant", ["ACCOUNTANT"]);
+  const combined = await f.user("combined", ["MANAGER", "ENGINEER"]);
+  let accountant = await f.user("accountant", ["ACCOUNTANT"]);
   const procurement = await f.user("procurement", ["PROCUREMENT"]), worker = await f.user("worker", ["WORKER"]), mounter = await f.user("mounter", ["MOUNTER"]);
   for (const actor of [manager, engineer, accountant]) await f.session(actor);
   const project = await f.project("project", { stage: "CONTRACT", currency: "BYN", managerId: manager.id, initialPrice: "123.45" });
@@ -58,7 +61,15 @@ test("files.crud: file113, документы, attachment ACL и inline-дейс
     const deleted = await f.action<FileDeleteResult>("deleteFile", productPage, engineer, [file.id, nonce]); assert.equal(deleted.ok, true);
     if (deleted.ok) { assert.equal(deleted.fileId, file.id); assert.equal(deleted.cleanupPending, false); }
     assert.equal(await f.db.file.findUnique({ where: { id: file.id } }), null);
-    const after = await f.versions(project.id); assert.ok(!after.some(row => keys.includes(row.key)));
+    // Ordinary DeleteObject скрывает текущий ключ и сохраняет историю; purge относится к obsolete sketch.
+    const after = await f.versions(project.id);
+    for (const key of keys) {
+      const previous = versions.filter(row => row.key === key), current = after.filter(row => row.key === key);
+      assert.equal(current.length, previous.length + 1);
+      assert.deepEqual(current.filter(row => previous.some(old => old.versionId === row.versionId)), previous.map(row => ({ ...row, latest: false })));
+      assert.equal(current.filter(row => row.latest && row.marker).length, 1); assert.ok(!current.some(row => row.latest && !row.marker));
+      await assert.rejects(() => f.get(key), error => error instanceof Error && error.name === "NoSuchKey");
+    }
     assert.deepEqual(after.filter(row => row.key === neighbor), versions.filter(row => row.key === neighbor)); assert.deepEqual(await f.get(neighbor), cad);
     const audit = await f.db.changeLog.findUniqueOrThrow({ where: { id: `file-delete:${nonce}` } });
     assert.equal(audit.actorId, engineer.id); assert.equal(audit.entityId, file.id); assert.equal(audit.action, "delete");
@@ -81,14 +92,14 @@ test("files.crud: file113, документы, attachment ACL и inline-дейс
     for (const [name, mime, bytes] of [["113.pdf", "application/pdf", pdf], ["113.png", "image/png", png], ["113.b3d", cadMime, cad],
       ["inert.html", "text/html", Buffer.from("<!doctype html><p>inert</p>")], ["inert.svg", "image/svg+xml", Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>')]] as const) {
       const nonce = randomUUID(), input = { fileName: name, mimeType: mime, bytes, clientMutationId: nonce };
-      const reply = await f.financeUpload(accountant, input); assert.equal(reply.response.status, 200); assert.equal(reply.body.ok, true);
+      const reply = await f.financeUpload(accountant, input); assert.equal(reply.response.status, 201); assert.equal(reply.body.ok, true);
       const row = await f.db.financeDocument.findUniqueOrThrow({ where: { id: reply.body.document!.id } });
       assert.equal(row.state, "READY"); assert.ok(row.readyAt); assert.equal(row.storageMode, "s3"); assert.equal(row.contentHash, hash(bytes));
       assert.equal(row.storageKey, `finance-documents/${row.id}/${hash(bytes)}`); assert.deepEqual(await f.get(row.storageKey), bytes);
       assert.deepEqual(Object.keys(reply.body.document!).sort(), ["id", "source", "fileName", "mimeType", "size", "createdAt", "paymentId"].sort());
       const stored = await f.versions(row.storageKey), audit = await f.db.changeLog.findUniqueOrThrow({ where: { id: `finance-document:${row.id}` } });
       assert.equal(audit.actorId, accountant.id); assert.equal(audit.action, "create");
-      const replay = await f.financeUpload(accountant, input); assert.equal(replay.body.document?.id, row.id); assert.equal(replay.body.repeated, true);
+      const replay = await f.financeUpload(accountant, input); assert.equal(replay.response.status, 200); assert.equal(replay.body.document?.id, row.id); assert.equal(replay.body.repeated, true);
       for (const [who, changed] of [[accountant, { ...input, bytes: Buffer.from("changed169") }], [accountant, { ...input, fileName: "changed.bin" }], [procurement, input]] as const) {
         assert.equal((await f.financeUpload(who, changed)).response.status, 409);
       }
@@ -125,16 +136,20 @@ test("files.crud: file113, документы, attachment ACL и inline-дейс
       assert.equal((await tx.payment.updateMany({ where: { id: income.id, reportDocumentId: docs[1].id }, data: { reportDocumentId: docs[0].id } })).count, 0);
     });
     assert.deepEqual(await f.db.payment.findUnique({ where: { id: income.id } }), income); assert.deepEqual(await f.db.payment.findUnique({ where: { id: expense.id } }), expense);
-    await f.db.user.update({ where: { id: accountant.id }, data: { roles: ["MANAGER"] } });
-    assert.equal((await f.request(`/api/finance/documents/${docs[0].id}`, accountant)).status, 403);
-    await f.db.user.update({ where: { id: accountant.id }, data: { roles: ["ACCOUNTANT"] } });
+    try {
+      // Смена роли отзывает старый JWT; ролевой 403 проверяем с актуальной версией сессии.
+      const formerAccountant = await f.db.user.update({ where: { id: accountant.id }, data: { roles: ["MANAGER"] } });
+      assert.equal((await f.request(`/api/finance/documents/${docs[0].id}`, formerAccountant)).status, 403);
+    } finally {
+      accountant = await f.db.user.update({ where: { id: accountant.id }, data: { roles: ["ACCOUNTANT"] } });
+    }
     assert.equal((await f.financeUpload(manager, { fileName: "denied.pdf", mimeType: "application/pdf", bytes: pdf, clientMutationId: randomUUID() })).response.status, 403);
     assert.equal((await f.financeUpload(undefined, { fileName: "anonymous.pdf", mimeType: "application/pdf", bytes: pdf, clientMutationId: randomUUID() })).response.status, 401);
     assert.equal((await f.financeUpload(accountant, { fileName: "empty.pdf", mimeType: "application/pdf", bytes: new Uint8Array(), clientMutationId: randomUUID() })).response.status, 422);
     for (const state of ["PENDING", "READY"] as const) {
       const id = randomUUID(); await f.db.financeDocument.create({ data: { id, uploadedById: accountant.id, clientMutationId: randomUUID(),
         fileName: "missing.pdf", mimeType: "application/pdf", size: pdf.length, contentHash: hash(pdf), requestFingerprint: hash(pdf),
-        storageMode: "s3", storageKey: `finance-documents/${id}/${hash(pdf)}`, state } });
+        storageMode: "s3", storageKey: `finance-documents/${id}/${hash(pdf)}`, state, readyAt: state === "READY" ? new Date() : null } });
       assert.equal((await f.request(`/api/finance/documents/${id}`, accountant)).status, 404);
     }
   });
@@ -173,7 +188,7 @@ test("files.crud: file113, документы, attachment ACL и inline-дейс
     const texts = ["  A\n\tB\n\nC  \n\n", "  A\r\n\tB\r\n\r\nC  \r\n", " <script>alert(1)</script>\n**literal**  \n", " \t\r\n "];
     for (const description of texts) {
       const reply = await f.action<BasicReply>("createProduct", projectPage, manager, [{ projectId: project.id, title: "CI raw description", description,
-        engineerId: engineer.id, expectedPrice: 10.01, initialPrice: 123.45 }]); assert.equal(reply.ok, true);
+        engineerId: engineer.id, expectedPrice: 10.01 }]); assert.equal(reply.ok, true);
       assert.equal((await f.db.product.findUniqueOrThrow({ where: { id: reply.id! } })).description, description.trim() ? description : null);
     }
     const exact = { productId: product.id, field: "description", value: texts[1], expectedValue: "Tech", clientMutationId: randomUUID() };
@@ -192,7 +207,8 @@ test("files.crud: file113, документы, attachment ACL и inline-дейс
     assert.deepEqual(await nativeSnapshot(f.db), noopBefore);
     assert.equal(saved(await patchProduct(combined, "description", texts[0], texts[3])).value, texts[0]);
     for (const actor of [worker, mounter]) { const reply = await patchProduct(actor, "description", "hidden", texts[0]); assert.equal(reply.kind, "forbidden"); assert.equal("currentValue" in reply, false); }
-    const denied = await f.actionResponse("patchProduct", productPage, accountant, [exact]); assert.equal(denied.status, 307);
+    const denied = await f.actionResponse("patchProduct", productPage, accountant, [exact]); assert.equal(denied.status, 302);
+    assert.equal(denied.headers.get("location"), financeLocation.href);
     await f.db.product.update({ where: { id: product.id }, data: { status: "PRODUCTION" } });
     const revoked = await patchProduct(engineer, "description", "stale", texts[0]); assert.ok(["forbidden", "not-found"].includes(revoked.kind)); assert.equal("currentValue" in revoked, false);
     await f.db.product.update({ where: { id: product.id }, data: { status: "DESIGN" } });
@@ -206,7 +222,7 @@ test("files.crud: file113, документы, attachment ACL и inline-дейс
   });
 
   await t.test("inline/product-field-contact-CAS-roles: одна запись, Decimal, нормы работ и issued/allocated guards", async () => {
-    await f.db.product.update({ where: { id: product.id }, data: { title: "Original" } });
+    await f.db.product.update({ where: { id: product.id }, data: { title: "Original", description: "Tech" } });
     const work = await f.db.work.create({ data: { id: f.id("norm-work"), projectId: project.id, productId: product.id, title: "CI norm",
       quantity: "1.00", quantityPerUnit: "1.00", priceSnapshot: "0.10", total: "0.10" } });
     const title = { productId: product.id, field: "title", value: "First", expectedValue: "Original", clientMutationId: randomUUID() };
@@ -221,7 +237,7 @@ test("files.crud: file113, документы, attachment ACL и inline-дейс
     assert.equal(saved(await f.action<ProductPatchResult>("patchProduct", productPage, actors[winner], [inputs[winner]])).repeated, true);
     assert.equal((await f.action<ProductPatchResult>("patchProduct", productPage, actors[winner], [{ ...inputs[winner], value: "Reuse" }])).kind, "validation");
     assert.deepEqual(await nativeSnapshot(f.db), before);
-    const different = await Promise.all([patchProduct(second, "kind", "Cabinet", null), patchProduct(manager, "description", "Different field", "  A\n\tB\n\nC  \n\n")]);
+    const different = await Promise.all([patchProduct(second, "kind", "Cabinet", null), patchProduct(manager, "description", "Different field", "Tech")]);
     assert.ok(different.every(reply => reply.kind === "saved"));
     const target = await f.project("product-client"), oldClient = await f.db.client.findUniqueOrThrow({ where: { id: project.clientId } });
     const moneyBefore = await f.db.payment.findMany({ where: { projectId: project.id }, orderBy: { id: "asc" } });
@@ -300,7 +316,8 @@ test("files.crud: file113, документы, attachment ACL и inline-дейс
     assert.equal((await f.db.project.findUniqueOrThrow({ where: { id: other.id }, include: { client: true } })).client.address, "Shared orders");
     assert.equal((await f.db.project.findUniqueOrThrow({ where: { id: own.id } })).address, "Shared address");
     for (const actor of [engineer, worker, mounter]) { const reply = await call(actor, "title", "Hidden", "First title"); assert.equal(reply.kind, "forbidden"); assert.equal("currentValue" in reply, false); }
-    assert.equal((await f.actionResponse("patchProject", page, accountant, [title])).status, 307);
+    const denied = await f.actionResponse("patchProject", page, accountant, [title]); assert.equal(denied.status, 302);
+    assert.equal(denied.headers.get("location"), financeLocation.href);
     assert.equal(saved(await call(combined, "title", "Combined title", "First title")).value, "Combined title");
     const baseline = { title: "Original project", address: null, clientId: own.clientId };
     const legacy = await f.action<BasicReply>("updateProject", page, manager, [own.id, { title: "Legacy title", address: null, clientId: own.clientId,

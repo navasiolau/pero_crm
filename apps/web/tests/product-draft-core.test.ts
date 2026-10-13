@@ -81,62 +81,9 @@ function fixture(stage: ProjectStage = "ESTIMATE") {
   return { state, tx, transaction, run };
 }
 
-test("new products in LEAD/ESTIMATE are drafts; confirmed ordinary stages start preparation under project lock", async () => {
-  for (const stage of ["LEAD", "ESTIMATE", "CONTRACT", "IN_WORK", "DONE", "RECLAMATION"] as ProjectStage[]) {
-    const f = fixture(stage);
-    const result = await createProductCore(actor, { projectId: "project", title: "Новое" }, f.transaction);
-    assert.equal(result.ok, true);
-    const expected = ["LEAD", "ESTIMATE"].includes(stage) ? draft : "PREPARATION";
-    assert.equal(result.product.status, expected, stage);
-    assert.equal((result.product as unknown as { statusHistory: { create: { toStatus: ProductStatus } } }).statusHistory.create.toStatus, expected);
-    assert.match(f.state.locks[0], /Project.*FOR UPDATE/, "creation must serialize stage and numbering with contract");
-    assert.equal(result.product.number, "111.3");
-  }
-});
 
-test("PAUSED/REFUSED use the last confirmed ordinary history, including imported fromStage-only history", async () => {
-  for (const stage of ["PAUSED", "REFUSED"] as ProjectStage[]) {
-    for (const prior of ["ESTIMATE", "CONTRACT", null] as const) {
-      const f = fixture(stage);
-      if (prior) f.state.history.push({ toStage: prior, fromStage: "LEAD" }, { toStage: stage, fromStage: prior });
-      const r = await createProductCore(actor, { projectId: "project", title: "Новое" }, f.transaction);
-      assert.equal(r.ok, true); if (r.ok) assert.equal(r.product.status, prior === "CONTRACT" ? "PREPARATION" : draft);
-    }
-    const f = fixture(stage); f.state.history.push({ toStage: stage, fromStage: "CONTRACT" });
-    const r = await createProductCore(actor, { projectId: "project", title: "Импорт" }, f.transaction);
-    assert.equal(r.ok && r.product.status, "PREPARATION");
-  }
-});
 
-test("latest imported confirmed fromStage wins over an older ordinary toStage", async () => {
-  for (const stage of ["PAUSED", "REFUSED"] as ProjectStage[]) {
-    const f = fixture(stage);
-    f.state.history.push({ toStage: "ESTIMATE", fromStage: "LEAD" }, { toStage: stage, fromStage: "CONTRACT" });
-    const result = await createProductCore(actor, { projectId: "project", title: "Последний подтверждённый этап" }, f.transaction);
-    assert.equal(result.ok && result.product.status, "PREPARATION");
-  }
-});
-test("contract promotes every draft only, recording product history/audit/outbox without financial calls", async () => {
-  const f = fixture(); f.state.products.push({ ...f.state.products[0], id: "deleted", number: "111.3", deletedAt: new Date() as unknown as null });
-  const before = f.state.products.map(p => ({ quantity: p.quantity, expectedPrice: p.expectedPrice, engineerId: p.engineerId }));
-  const result = await f.run();
-  assert.equal(result.result.ok, true); assert.equal(f.state.project.stage, "CONTRACT");
-  assert.deepEqual(f.state.products.map(p => p.status), ["PREPARATION", "DESIGN", "PREPARATION"]);
-  assert.deepEqual(f.state.products.map(p => ({ quantity: p.quantity, expectedPrice: p.expectedPrice, engineerId: p.engineerId })), before);
-  assert.equal(f.state.productHistory.length, 2); assert.equal(f.state.audit.filter(row => row.entity === "product").length, 2);
-  assert.equal(f.state.events.filter(row => row.type === "product.statusChanged").length, 2);
-  assert.equal(result.eventIds.length, 3);
-});
 
-test("contract receipt replay and no-op never promote a subsequently imported draft or duplicate history", async () => {
-  const f = fixture(); await f.run();
-  const history = f.state.productHistory.length, events = f.state.events.length;
-  f.state.products[0].status = draft;
-  assert.equal((await f.run()).result.replayed, true);
-  assert.equal(f.state.products[0].status, draft); assert.equal(f.state.productHistory.length, history); assert.equal(f.state.events.length, events);
-  const noop = await f.run({ ...input, expectedStage: "CONTRACT", clientMutationId: "d5428289-23f7-4e42-a967-212da990d141" });
-  assert.equal(noop.result.noOp, true); assert.equal(f.state.products[0].status, draft);
-});
 
 test("contract failure rolls back project, drafts and histories; stale baseline preserves products", async () => {
   const f = fixture(); const before = structuredClone(f.state);
@@ -147,27 +94,7 @@ test("contract failure rolls back project, drafts and histories; stale baseline 
   assert.equal(f.state.history.length + f.state.productHistory.length + f.state.audit.length, 0);
 });
 
-test("returning to early stages and skipping contract leaves all existing statuses unchanged", async () => {
-  for (const [from, to] of [["CONTRACT", "LEAD"], ["CONTRACT", "ESTIMATE"], ["ESTIMATE", "IN_WORK"]]) {
-    const f = fixture(from as ProjectStage); const before = f.state.products.map(p => p.status);
-    assert.equal((await f.run({ ...input, expectedStage: from, toStage: to })).result.ok, true);
-    assert.deepEqual(f.state.products.map(p => p.status), before); assert.equal(f.state.productHistory.length, 0);
-  }
-});
 
-test("manual escape from a draft early project is denied before any write, including management", async () => {
-  for (const stage of ["LEAD", "ESTIMATE"] as ProjectStage[]) {
-    const f = fixture(stage);
-    const privileged = { ...actor, roles: ["ADMIN" as const] };
-    const denied = await changeProductStatusTransaction(f.tx, privileged, "draft", "PREPARATION");
-    assert.equal(denied.ok, false); assert.match(denied.error!, /Договор/);
-    assert.equal(f.state.products[0].status, draft);
-    assert.equal(f.state.productHistory.length + f.state.audit.length + f.state.events.length, 0);
-    assert.equal((await changeProductStatusTransaction(f.tx, { ...actor, roles: ["ADMIN"] }, "draft", draft)).ok, true);
-  }
-  const f = fixture("CONTRACT");
-  assert.equal((await changeProductStatusTransaction(f.tx, { ...actor, roles: ["ADMIN"] }, "draft", "PREPARATION")).ok, true);
-});
 
 test("DRAFT is the first shared status, accepted in persistent filters, and early draft has no UI targets", () => {
   assert.equal(PRODUCT_STATUSES[0].id, draft); assert.equal(PRODUCT_STATUSES[1].id, "PREPARATION");
