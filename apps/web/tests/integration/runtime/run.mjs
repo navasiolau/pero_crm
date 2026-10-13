@@ -1,5 +1,5 @@
-import { spawn, spawnSync } from 'node:child_process';
-import { appendFileSync, existsSync, readdirSync, realpathSync } from 'node:fs';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
+import { appendFileSync, existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { CreateBucketCommand, PutBucketVersioningCommand, S3Client } from '@aws-sdk/client-s3';
 import { assertCiJob, assertCiRuntimeTarget, requireCi } from './target.mjs';
@@ -13,6 +13,12 @@ for (const directory of [process.env.GITHUB_WORKSPACE, process.cwd(), path.join(
   requireCi(!readdirSync(directory).some(name => /^\.env(?:\.(?:local|production|production\.local))?$/.test(name)), 'env-file');
 }
 requireCi(existsSync('.next/BUILD_ID'), 'existing-build');
+// Сборка выполнена ранее в том же job; её actual SHA/BUILD_ID выдаёт шаг build.
+requireCi(Boolean(process.env.PERO_CI_BUILD_ID) && readFileSync('.next/BUILD_ID', 'utf8').trim() ===
+  process.env.PERO_CI_BUILD_ID, 'current-build-id');
+requireCi(process.env.PERO_CI_BUILD_REVISION === process.env.GITHUB_SHA &&
+  execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim() ===
+  process.env.GITHUB_SHA, 'current-build-revision');
 
 /** @param {string} url @param {boolean} [databaseHealth] */
 async function ready(url, databaseHealth = false) {

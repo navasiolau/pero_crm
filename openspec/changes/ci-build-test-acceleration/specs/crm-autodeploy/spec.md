@@ -14,9 +14,9 @@ CI SHALL выполнять существующие тесты, lint, productio
 - **WHEN** существующие suites и build запускаются одновременно
 - **THEN** успешный результат CI возможен только при успехе всех обязательных suites и gates с сохранением изоляции тестовых процессов
 
-#### Scenario: Native начинается после необходимых build checks
-- **WHEN** build-checks успешно создаёт и проверяет artifact текущего SHA, а независимый unit job ещё выполняется
-- **THEN** native SHALL использовать только этот проверенный artifact без ожидания unit job, а публикация SHALL оставаться закрытой до успеха всех трёх jobs и cleanup
+#### Scenario: Native использует свежую сборку того же run
+- **WHEN** на одном runner production build и полный tsc успешно проверили свежую сборку текущего SHA, а независимые unit suites ещё выполняются
+- **THEN** native SHALL использовать только эту свежую сборку без повторной подготовки и передачи artifact, а публикация SHALL оставаться закрытой до успеха всех обязательных suites/checks и cleanup независимо от числа jobs
 
 #### Scenario: CI не создаёт ненужный standalone
 - **WHEN** GITHUB_ACTIONS=true и PERO_CI_EXTERNAL_CHECKS=1 одновременно разрешают обязательные внешние checks

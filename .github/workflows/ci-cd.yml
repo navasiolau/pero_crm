@@ -18,14 +18,20 @@ jobs:
   unit-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        cohort: [backend, components]
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
+        if: matrix.cohort == 'backend'
         with:
           python-version: '3.12'
 
       - name: Тесты безопасного автодеплоя (без Docker и БД)
+        if: matrix.cohort == 'backend'
         run: python -m unittest discover -s deploy/tests -v
 
       - uses: pnpm/action-setup@v4
@@ -45,17 +51,60 @@ jobs:
         run: pnpm --filter @pero/web exec prisma generate
 
       - name: Chromium для компонентных тестов формы
+        if: matrix.cohort == 'components'
         run: pnpm --filter @pero/web exec playwright install --with-deps chromium
 
       - name: Тесты приложений
-        run: pnpm -r --if-present test
+        run: |
+          # Каждый файл прежних web globs исполняется ровно в одной cohort.
+          files=()
+          for file in apps/web/tests/*.test.ts apps/web/tests/*.test.mjs; do
+            case "$file" in
+              *.test.mjs|*.browser.test.ts) cohort=components ;;
+              *) cohort=backend ;;
+            esac
+            if [ "$cohort" = "$COHORT" ]; then files+=("${file#apps/web/}"); fi
+          done
+          test "${#files[@]}" -gt 0
+          if [ "$COHORT" = backend ]; then
+            pnpm -r --if-present --filter '!@pero/web' test
+          fi
+          pnpm --filter @pero/web exec tsx --test "${files[@]}"
+        env:
+          COHORT: ${{ matrix.cohort }}
 
-  build-checks:
+  # Build и native используют один свежий checkout/runtime без повторного install.
+  native-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 25
-    outputs:
-      node-version: ${{ steps.node.outputs.node-version }}
-      next-artifact-name: ${{ steps.next-pack.outputs.name }}
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: pero_ci
+          POSTGRES_USER: ci_runner
+          POSTGRES_PASSWORD: ci-only-${{ github.run_id }}-${{ github.run_attempt }}
+        ports:
+          - 127.0.0.1:55432:5432
+        options: >-
+          --tmpfs /var/lib/postgresql/data:rw,nosuid,size=512m
+          --label pero.ci.repository=navasiolau/pero_crm
+          --label pero.ci.run=${{ github.run_id }}
+          --label pero.ci.attempt=${{ github.run_attempt }}
+          --label pero.ci.service=postgres
+          --health-cmd "pg_isready -U ci_runner -d pero_ci"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      DATABASE_URL: postgresql://ci_runner:ci-only-${{ github.run_id }}-${{ github.run_attempt }}@127.0.0.1:55432/pero_ci?schema=public
+      CRM_FILE_STORAGE: s3
+      S3_ENDPOINT: http://127.0.0.1:59000
+      S3_BUCKET: ci-${{ github.run_id }}-${{ github.run_attempt }}
+      S3_ACCESS_KEY: ci_runner
+      S3_SECRET_KEY: ci-only-${{ github.run_id }}-${{ github.run_attempt }}-s3
+      S3_REGION: us-east-1
+      AUTH_SECRET: ci-only-${{ github.run_id }}-${{ github.run_attempt }}-auth
+      AUTH_URL: http://127.0.0.1:3100
+      AUTH_TRUST_HOST: 'true'
     steps:
       - uses: actions/checkout@v4
 
@@ -93,7 +142,24 @@ jobs:
         run: pnpm lint
 
       - name: Сборка (Next.js production)
-        run: pnpm build
+        id: next-build
+        run: |
+          test ! -f apps/web/.next/BUILD_ID
+          pnpm build
+          node --input-type=module <<'NODE'
+          import { appendFileSync, readFileSync } from 'node:fs';
+          import { execFileSync } from 'node:child_process';
+          const env = process.env;
+          const revision = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+          const buildId = readFileSync('apps/web/.next/BUILD_ID', 'utf8').trim();
+          if (revision !== env.GITHUB_SHA || !buildId || /[\r\n]/.test(buildId)) {
+            throw Error('CI_BUILD_REVISION_REFUSED');
+          }
+          appendFileSync(env.GITHUB_OUTPUT, `revision=${revision}\nbuild-id=${buildId}\n`);
+          console.log(JSON.stringify({ ciRuntime: 'next-build-ready', revision, buildId,
+            runId: env.GITHUB_RUN_ID, attempt: env.GITHUB_RUN_ATTEMPT, node: process.version,
+            platform: process.platform, arch: process.arch }));
+          NODE
         env:
           # Все исходники, включая *.test.ts и свежие route types, проверяются ниже.
           PERO_CI_EXTERNAL_CHECKS: '1'
@@ -106,127 +172,6 @@ jobs:
 
       - name: Typecheck (telegram-bot)
         run: pnpm --filter @pero/telegram-bot exec tsc --noEmit
-
-      - name: Подготовить свежую Next-сборку для native job
-        id: next-pack
-        run: |
-          tar --exclude=.next/cache --exclude=.next/standalone -czf "$RUNNER_TEMP/next-output.tar.gz" -C apps/web .next public
-          node --input-type=module <<'NODE'
-          import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
-          import { createHash } from 'node:crypto';
-          import { execFileSync } from 'node:child_process';
-          import path from 'node:path';
-          const env = process.env;
-          const revision = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
-          if (revision !== env.GITHUB_SHA) throw Error('CI_BUILD_REVISION_REFUSED');
-          const provenance = { repository: env.GITHUB_REPOSITORY, revision,
-            runId: env.GITHUB_RUN_ID, attempt: env.GITHUB_RUN_ATTEMPT,
-            node: process.version, platform: process.platform, arch: process.arch,
-            runnerOS: env.RUNNER_OS, imageOS: env.ImageOS,
-            buildId: readFileSync('apps/web/.next/BUILD_ID', 'utf8').trim(),
-            sha256: createHash('sha256').update(readFileSync(path.join(env.RUNNER_TEMP, 'next-output.tar.gz'))).digest('hex') };
-          writeFileSync(path.join(env.RUNNER_TEMP, 'next-provenance.json'), JSON.stringify(provenance));
-          appendFileSync(env.GITHUB_OUTPUT, `name=next-${revision}-${env.GITHUB_RUN_ID}-${env.GITHUB_RUN_ATTEMPT}-${env.RUNNER_OS}-${process.arch}-${process.version}\n`);
-          NODE
-
-      - name: Next output только текущего run/SHA
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ steps.next-pack.outputs.name }}
-          path: |
-            ${{ runner.temp }}/next-output.tar.gz
-            ${{ runner.temp }}/next-provenance.json
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 1
-
-  native-tests:
-    # Native нужен свежий build; unit остаётся обязательным в общем gate test.
-    needs: build-checks
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-    services:
-      postgres:
-        image: postgres:17-alpine
-        env:
-          POSTGRES_DB: pero_ci
-          POSTGRES_USER: ci_runner
-          POSTGRES_PASSWORD: ci-only-${{ github.run_id }}-${{ github.run_attempt }}
-        ports:
-          - 127.0.0.1:55432:5432
-        options: >-
-          --tmpfs /var/lib/postgresql/data:rw,nosuid,size=512m
-          --label pero.ci.repository=navasiolau/pero_crm
-          --label pero.ci.run=${{ github.run_id }}
-          --label pero.ci.attempt=${{ github.run_attempt }}
-          --label pero.ci.service=postgres
-          --health-cmd "pg_isready -U ci_runner -d pero_ci"
-          --health-interval 5s --health-timeout 5s --health-retries 20
-    env:
-      DATABASE_URL: postgresql://ci_runner:ci-only-${{ github.run_id }}-${{ github.run_attempt }}@127.0.0.1:55432/pero_ci?schema=public
-      CRM_FILE_STORAGE: s3
-      S3_ENDPOINT: http://127.0.0.1:59000
-      S3_BUCKET: ci-${{ github.run_id }}-${{ github.run_attempt }}
-      S3_ACCESS_KEY: ci_runner
-      S3_SECRET_KEY: ci-only-${{ github.run_id }}-${{ github.run_attempt }}-s3
-      S3_REGION: us-east-1
-      AUTH_SECRET: ci-only-${{ github.run_id }}-${{ github.run_attempt }}-auth
-      AUTH_URL: http://127.0.0.1:3100
-      AUTH_TRUST_HOST: 'true'
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ needs.build-checks.outputs.node-version }}
-          cache: pnpm
-
-      - name: Зависимости
-        run: pnpm install --frozen-lockfile
-
-      - name: Prisma Client (generate)
-        run: pnpm --filter @pero/web exec prisma generate
-
-      - name: Получить Next output этого run
-        uses: actions/download-artifact@v4
-        with:
-          name: ${{ needs.build-checks.outputs.next-artifact-name }}
-          path: ${{ runner.temp }}/pero-ci-next
-
-      - name: Проверить принадлежность Next output до DB/S3 операций
-        run: |
-          node --input-type=module <<'NODE'
-          import { readFileSync } from 'node:fs';
-          import { createHash } from 'node:crypto';
-          import { execFileSync } from 'node:child_process';
-          import path from 'node:path';
-          const env = process.env;
-          const directory = path.join(env.RUNNER_TEMP, 'pero-ci-next');
-          const provenance = JSON.parse(readFileSync(path.join(directory, 'next-provenance.json'), 'utf8'));
-          const expected = { repository: env.GITHUB_REPOSITORY, revision: env.GITHUB_SHA,
-            runId: env.GITHUB_RUN_ID, attempt: env.GITHUB_RUN_ATTEMPT,
-            node: process.version, platform: process.platform, arch: process.arch,
-            runnerOS: env.RUNNER_OS, imageOS: env.ImageOS };
-          for (const [key, value] of Object.entries(expected)) {
-            if (!value || provenance[key] !== value) throw Error(`CI_NEXT_ARTIFACT_REFUSED:${key}`);
-          }
-          if (execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim() !== env.GITHUB_SHA ||
-            !provenance.buildId || provenance.sha256 !== createHash('sha256')
-              .update(readFileSync(path.join(directory, 'next-output.tar.gz'))).digest('hex')) {
-            throw Error('CI_NEXT_ARTIFACT_REFUSED:content');
-          }
-          NODE
-          tar -xzf "$RUNNER_TEMP/pero-ci-next/next-output.tar.gz" -C apps/web
-          node --input-type=module <<'NODE'
-          import { readFileSync } from 'node:fs';
-          import path from 'node:path';
-          const provenance = JSON.parse(readFileSync(path.join(process.env.RUNNER_TEMP, 'pero-ci-next/next-provenance.json'), 'utf8'));
-          if (readFileSync('apps/web/.next/BUILD_ID', 'utf8').trim() !== provenance.buildId) {
-            throw Error('CI_NEXT_ARTIFACT_REFUSED:build-id');
-          }
-          NODE
 
       - uses: docker/setup-buildx-action@v3
 
@@ -252,6 +197,8 @@ jobs:
       - name: Интеграционные PostgreSQL + HTTP/S3 контракты
         run: pnpm --filter @pero/web test:integration
         env:
+          PERO_CI_BUILD_REVISION: ${{ steps.next-build.outputs.revision }}
+          PERO_CI_BUILD_ID: ${{ steps.next-build.outputs.build-id }}
           PERO_CI_POSTGRES_ID: ${{ job.services.postgres.id }}
           PERO_CI_NETWORK: ${{ job.services.postgres.network }}
           PERO_CI_MINIO_IMAGE_ID: ${{ steps.minio.outputs.imageid }}
@@ -269,17 +216,15 @@ jobs:
   # Итоговый обязательный gate не допускает публикацию при failure/cancelled/skipped.
   test:
     if: always()
-    needs: [unit-tests, build-checks, native-tests]
+    needs: [unit-tests, native-tests]
     runs-on: ubuntu-latest
     steps:
       - name: Все обязательные проверки завершились успешно
         run: |
           test "$UNIT_RESULT" = success
-          test "$BUILD_RESULT" = success
           test "$NATIVE_RESULT" = success
         env:
           UNIT_RESULT: ${{ needs.unit-tests.result }}
-          BUILD_RESULT: ${{ needs.build-checks.result }}
           NATIVE_RESULT: ${{ needs.native-tests.result }}
 
   build-push:

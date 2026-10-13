@@ -12,7 +12,7 @@ CI последовательно повторяет lint и часть типи
 - Production Docker context исключает только каталоги web/bot tests, сохраняя suites и полную типизацию в CI checkout; изменения тестов не инвалидируют Next build layer.
 - После принятия №169 его закреплённый MinIO используется через Buildx cache с проверкой исходных pins и текущего владельца запуска до DB/S3 операций.
 - Независимые существующие suites и production build могут работать параллельно; process isolation, сценарии и cleanup сохраняются.
-- В следующей итерации native job ждёт только необходимые build/checks и использует их свежий artifact, перекрывая время независимых unit suites. Только CI build с существующими двумя флагами не создаёт ненужный standalone; полная `.next`, route types, `next start` и итоговый gate всех трёх jobs сохраняются.
+- Следующая итерация объединяет существующие build/checks и native на одном runner: native использует только что собранную `.next` без повторной подготовки и передачи artifact, перекрывая время независимых unit suites. Только CI build с существующими двумя флагами не создаёт ненужный standalone; полная `.next`, route types, `next start` и итоговый gate всех обязательных suites/checks сохраняются независимо от числа jobs.
 
 ## Capabilities
 
