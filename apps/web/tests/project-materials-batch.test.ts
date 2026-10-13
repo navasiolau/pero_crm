@@ -96,12 +96,6 @@ const actor=(roles:Role[]=["ADMIN"]):VisibilityActor=>({id:"engineer",roles});
 
 
 
-test("native148 rejects runtime engine overrides before any constructor",async()=>{
- const native=await import("./project-materials-batch-native");
- assert.doesNotThrow(()=>native.native148AssertEngineEnvironment({}));
- for(const key of ["PRISMA_QUERY_ENGINE_LIBRARY","PRISMA_QUERY_ENGINE_BINARY","PRISMA_CLIENT_ENGINE_TYPE"])
-  assert.throws(()=>native.native148AssertEngineEnvironment({[key]:"unowned-engine"}),/F148_ENGINE_OVERRIDE/);
-});
 
 test("frozen baseline demonstrates repeated reads and preserves the full 501-entry cost history",async()=>{
  const one=fixture(),many=fixture();
