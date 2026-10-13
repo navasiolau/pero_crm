@@ -15,7 +15,10 @@ function labels(target, service) {
 
 /** @param {CiJob} target */
 function inspectMinioImage(target) {
+  const expectedId = process.env.PERO_CI_MINIO_IMAGE_ID;
+  requireCi(/^sha256:[a-f0-9]{64}$/.test(expectedId ?? ''), 'minio-loaded-image-id');
   const image = JSON.parse(docker(['image', 'inspect', target.minioImage]))[0];
+  requireCi(image.Id === expectedId, 'minio-loaded-image-id');
   for (const [key, value] of Object.entries({ ...labels(target, 'minio'), 'pero.ci.minio.commit': MINIO_COMMIT,
     'pero.ci.go.image': MINIO_GO_IMAGE, 'pero.ci.source.sha256': MINIO_SOURCE_SHA256 })) {
     requireCi(image.Config.Labels?.[key] === value, `image-${key}`);
@@ -60,16 +63,12 @@ export function inspectService(target, id, service) {
 
 /** @param {CiJob} target */
 export function startMinio(target) {
+  requireCi(process.env.GITHUB_JOB === 'native-tests', 'minio-job');
   inspectService(target, target.postgresId, 'postgres');
   requireCi(!docker(['ps', '-aq', '--filter', `name=^/${target.minioName}$`]), 'minio-already-exists');
-  requireCi(!docker(['image', 'ls', '-q', target.minioImage]), 'minio-image-already-exists');
-  console.log(JSON.stringify({ ciRuntime: 'minio-building', release: MINIO_RELEASE, commit: MINIO_COMMIT }));
-  const build = ['build', '--quiet', '--file', 'tests/integration/runtime/Dockerfile.minio', '--tag', target.minioImage];
-  for (const [key, value] of Object.entries({ ...labels(target, 'minio'), 'pero.ci.minio.commit': MINIO_COMMIT })) {
-    build.push('--label', `${key}=${value}`);
-  }
-  docker([...build, 'tests/integration/runtime'], 600_000);
-  inspectMinioImage(target);
+  const image = inspectMinioImage(target);
+  console.log(JSON.stringify({ ciRuntime: 'minio-image-ready', release: MINIO_RELEASE,
+    commit: MINIO_COMMIT, imageId: image.Id }));
   const args = ['run', '-d', '--rm', '--name', target.minioName, '--network', target.network,
     '--publish', '127.0.0.1:59000:9000', '--tmpfs', '/data:rw,nosuid,size=512m'];
   for (const [key, value] of Object.entries(labels(target, 'minio'))) args.push('--label', `${key}=${value}`);

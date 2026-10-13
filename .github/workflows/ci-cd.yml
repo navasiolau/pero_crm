@@ -194,7 +194,7 @@ jobs:
           name: ${{ needs.build-checks.outputs.next-artifact-name }}
           path: ${{ runner.temp }}/pero-ci-next
 
-      - name: Проверить принадлежность Next output до запуска стенда
+      - name: Проверить принадлежность Next output до DB/S3 операций
         run: |
           node --input-type=module <<'NODE'
           import { readFileSync } from 'node:fs';
