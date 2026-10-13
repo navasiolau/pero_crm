@@ -1,6 +1,8 @@
 # Cash advances QA plan — локальное выполнение и staging acceptance
 
-Этот план описывает выполненную проверку на **существующей** локальной БД 5433 и изолированном staging. Миграция `20260929120000_manager_cash_advances`, ограниченная native/browser приёмка и exact-ID cleanup завершены на обеих целях; staging дополнительно доказал положительную USD-выдачу. SQL adapter `cash-qa-adapter.mjs`, opt-in `cash-native-acceptance.ts` и local backup/migration runner `cash-local-migrate.mjs` сохраняют точные guard. Правила остановки: `D:/Projects/pero_infra/infra-recovery/SAFETY-RULES.md`; при несовпадении цели, guard или снимка — STOP без исправления наугад и без автоматического повтора.
+Этот план описывает выполненную проверку на **существующей** локальной БД 5433 и изолированном staging. Миграция `20260929120000_manager_cash_advances`, ограниченная native/browser приёмка и exact-ID cleanup завершены на обеих целях; staging дополнительно доказал положительную USD-выдачу. SQL adapter `cash-qa-adapter.mjs` и opt-in `cash-native-acceptance.ts` сохраняют точные guard. Правила остановки: `D:/Projects/pero_infra/infra-recovery/SAFETY-RULES.md`; при несовпадении цели, guard или снимка — STOP без исправления наугад и без автоматического повтора.
+
+**Вывод одноразового workflow из эксплуатации — №168:** старые `cash-qa-runner.mjs`, `cash-local-app.mjs`, `cash-local-migrate.mjs` и cash staging diagnostics удалены после завершённой приёмки `3f6da0d`. Их команды больше не поддерживаются. Операторские шаги и backup-указания ниже сохранены как история выполненной проверки; local/staging дампы для новых задач запрещены действующим AGENTS.md. Сохранившиеся native API, adapter, fixtures и browser/stage workflow не дают разрешения на повтор этого старого run. Исходные результаты, hashes и receipts не изменены.
 
 ## Наблюдённое выполнение
 

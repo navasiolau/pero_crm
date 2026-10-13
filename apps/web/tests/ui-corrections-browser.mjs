@@ -4,7 +4,11 @@ import {createHash} from 'node:crypto';
 import {mkdir,writeFile,rename} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {chromium,expect} from '@playwright/test';
-import {decodeFinalAction,finalQaMedia} from './product-modernization-final-browser.mjs';
+import {createRequire} from 'node:module';
+import {readFileSync} from 'node:fs';
+import {runInNewContext} from 'node:vm';
+import sharp from 'sharp';
+const require=createRequire(import.meta.url);
 import {descriptionPrivateDiagnostic} from './product-description-browser.mjs';
 import {attachmentColumnShape} from './product-attachments-browser.mjs';
 import {runCrmBrowserZoom} from './crm-browser-zoom.mjs';
@@ -67,6 +71,33 @@ export function finalUploadOwned(fields,file,fixture,cases){
  if(!item||fields.projectId!==fixture.ids.project||(fields.productId??null)!==item.productId||fields.section!==item.section||fields.taskId||file.mimeType!==item.mimeType||file.hash!==item.hash||file.size!==item.buffer.length)return false;
  const allowed=item.cover?['projectId','productId','section','assignCover','expectedSketchFileId','clientMutationId']:['projectId','productId','section','clientMutationId'];
  return Object.keys(fields).every(key=>allowed.includes(key))&&UUID.test(fields.clientMutationId??'')&&(item.cover?fields.assignCover==='1'&&fields.expectedSketchFileId==='null'&&UUID.test(fields.clientMutationId??''):!fields.assignCover);
+}
+function pdf(){
+ const objects=['<< /Type /Catalog /Pages 2 0 R >>','<< /Type /Pages /Kids [3 0 R] /Count 1 >>','<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Contents 4 0 R >>','<< /Length 0 >>\nstream\n\nendstream'];
+ let body='%PDF-1.4\n';const offsets=[];for(const[i,object]of objects.entries()){offsets.push(Buffer.byteLength(body));body+=`${i+1} 0 obj\n${object}\nendobj\n`;}const xref=Buffer.byteLength(body);body+=`xref\n0 5\n0000000000 65535 f \n${offsets.map(n=>`${String(n).padStart(10,'0')} 00000 n \n`).join('')}trailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;return Buffer.from(body);
+}
+export async function finalQaMedia(fixture){
+ const png=await sharp({create:{width:128,height:96,channels:3,background:{r:25,g:85,b:180}}}).png().toBuffer(),A=fixture.ids.productA,B=fixture.ids.productB,P=fixture.ids.project;
+ return [
+  {key:'cover',productId:A,section:'PRODUCTION',cover:true,mimeType:'image/png',buffer:png},
+  {key:'measurement',productId:A,section:'MEASUREMENT',mimeType:'image/png',buffer:png},
+  {key:'production-one',productId:A,section:'PRODUCTION',mimeType:'application/pdf',buffer:pdf()},
+  {key:'production-two',productId:A,section:'PRODUCTION',mimeType:'application/pdf',buffer:pdf()},
+  {key:'installation',productId:A,section:'INSTALLATION',mimeType:'image/png',buffer:png},
+  {key:'foreign',productId:B,section:'PRODUCTION',mimeType:'application/pdf',buffer:pdf()},
+  {key:'project',productId:null,section:'GENERAL',mimeType:'application/pdf',buffer:pdf()},
+ ].map(item=>({...item,name:`qa20-${item.productId??P}-финал_${item.key}_длинное_имя_для_проверки_переноса.${item.mimeType==='image/png'?'png':'pdf'}`,hash:hash(item.buffer)}));
+}
+export async function decodeFinalAction({body,status,headers,compact}){
+ assert.equal(require('next/package.json').version,'15.5.20','FINAL_FLIGHT_VERSION_STOP');
+ const bytes=Buffer.from(body),metadata=new Headers(headers);assert.ok(status===200&&bytes.length<(compact?24000:2*1024*1024)&&metadata.get('content-type')?.startsWith('text/x-component')&&!metadata.has('x-action-redirect')&&metadata.get('x-nextjs-action-not-found')!=='1','FINAL_FLIGHT_BOUNDARY_STOP');
+ const inert=()=>{throw Error('FINAL_OBSERVER_EXECUTION_STOP')},exports=new Proxy(Object.create(null),{get(_target,key){if(key==='then')return undefined;if(key==='__esModule')return true;return inert}}),info={id:'final-inert',chunks:[],name:'*',async:false};
+ const map=new Proxy(Object.create(null),{get(){if(compact)throw Error('FINAL_COMPACT_MODULE_STOP');return new Proxy(Object.create(null),{get(){return info}})}}),serverMap=new Proxy(Object.create(null),{get(){return{...info,name:'default'}}});
+ const codecModule={exports:{}},sandbox={module:codecModule,exports:codecModule.exports,require:name=>{assert.ok(['react','react-dom'].includes(name));return require(name)},process:{env:{NODE_ENV:'production'}},TextDecoder,TextEncoder,ReadableStream,Response,Headers,FormData,Blob,AbortController,performance,URL,setTimeout,clearTimeout,queueMicrotask,console:{log(){},warn(){},error(){}},__webpack_chunk_load__:inert,__next_require__:id=>{assert.equal(id,'final-inert');return exports}};
+ const edge=require.resolve('next/dist/compiled/react-server-dom-webpack/client.edge'),source=readFileSync(new URL('./cjs/react-server-dom-webpack-client.edge.production.js',`file:///${edge.replaceAll('\\','/')}`),'utf8');runInNewContext(source,sandbox,{timeout:1000});
+ const envelope=await codecModule.exports.createFromFetch(Promise.resolve(new Response(bytes,{status,headers:metadata})),{serverConsumerManifest:{moduleMap:map,serverModuleMap:serverMap,moduleLoading:null},replayConsoleLogs:false});
+ assert.ok(plain(envelope)&&envelope.a&&typeof envelope.a.then==='function','FINAL_ACTION_PROMISE_STOP');if(compact)assert.ok(envelope.f===undefined||envelope.f===null||envelope.f===''||(Array.isArray(envelope.f)&&envelope.f.length===0),'FINAL_FULL_RSC_FOR_FIELD_STOP');
+ let timer;try{return await Promise.race([envelope.a,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('FINAL_ACTION_TIMEOUT_STOP')),10000)})]);}finally{clearTimeout(timer)}
 }
 export async function runUiCorrectionsBrowser({origin,expectedRevision,authorized=false,profiles,fixture,outputDir,basicAuth,onOwnWrites,onOwnFiles,runZoom=true,cleanupFilesOnly=false,knownJournal=null,signedPreferenceScope=null,recoveryProof=null,round2Factory=null}){
  assert.equal(authorized,true,'FINAL_ROOT_EXECUTION_AUTH_REQUIRED');assert.ok(['http://127.0.0.1:3019','https://staging-crm.peromebel.by'].includes(origin),'FINAL_ORIGIN_STOP');assert.match(expectedRevision??'',/^[a-f0-9]{40}$/,'FINAL_EXPECTED_REVISION_REQUIRED');assert.equal(fixture?.checkpoint?.target,origin.startsWith('http://127.')?'local':'staging','FINAL_FIXTURE_TARGET_STOP');assert.equal(typeof onOwnWrites,'function');assert.equal(typeof onOwnFiles,'function');assert.ok(profiles.admin?.cookies?.length&&profiles.manager?.cookies?.length,'FINAL_SHORT_SESSIONS_REQUIRED');

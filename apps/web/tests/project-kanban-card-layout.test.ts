@@ -26,3 +26,11 @@ test('current stage transition wins even after return to LEAD; createdAt only in
  test('legacy different-stage history never resets age to project creation; future date is unavailable',async()=>{
  const {projectStageAgeStart,projectStageDays}=await import('../src/lib/project-kanban-values');const changed='2026-10-02T12:00:00Z';assert.equal(projectStageAgeStart({stage:'IN_WORK',createdAt:'2025-01-01T00:00:00Z',stageChangedAt:changed,latestTransition:{toStage:'ESTIMATE',createdAt:'2026-02-01T00:00:00Z'}}),changed);assert.equal(projectStageDays('2026-10-04T00:00:00Z',new Date('2026-10-03T00:00:00Z').getTime()),null);
  });
+
+const {CardNumber}=require('../src/components/card-number') as typeof import('../src/components/card-number');
+const {RecentProjects}=require('../src/components/recent-projects') as typeof import('../src/components/recent-projects');
+test("number token enlarges only its own content and recent project keeps navigation and labels",()=>{
+ const number=renderToStaticMarkup(React.createElement(CardNumber,null,"205"));assert.match(number,/text-\[1.25em\] font-bold/);
+ const recent=renderToStaticMarkup(React.createElement(RecentProjects,{projects:[{id:"project",number:"205",client:"Клиент",product:"Название заказа",status:"В работе",statusClass:"",sum:"10 BYN"}]}));
+ assert.match(recent,/href="\/projects\/project"/);assert.equal((recent.match(/data-card-number/g)??[]).length,1);assert.match(recent,/>Название заказа</);assert.match(recent,/>Клиент</);
+});

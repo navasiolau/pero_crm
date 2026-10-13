@@ -160,7 +160,8 @@
         }
       ],
       "acceptance": [
-        {          "scenario": "Два SQL соединения/UUID, rollback аудита и законная доплата после роста оборота.",
+        {
+          "scenario": "Два SQL соединения/UUID, rollback аудита и законная доплата после роста оборота.",
           "evidenceLevel": "native-PostgreSQL",
           "target": "existing-local-5433/staging",
           "status": "NOT_RUN",
@@ -322,7 +323,8 @@
           "block": "",
           "evidenceLevel": "source-guard"
         }
-      ],      "acceptance": [
+      ],
+      "acceptance": [
         {
           "scenario": "Native issue/return/retry на существующем разрешённом state без замены accounting lifecycle.",
           "evidenceLevel": "native-PostgreSQL",
@@ -409,8 +411,8 @@
       ],
       "tests": [
         {
-          "file": "apps/web/tests/file-pdf-view-route.test.ts",
-          "block": "view mode does not inline HTML",
+          "file": "apps/web/tests/safe-file-response.test.ts",
+          "block": "active original downloads preserve exact bytes and never receive inline even with view",
           "evidenceLevel": "DI"
         },
         {
@@ -449,7 +451,7 @@
         },
         {
           "file": "apps/web/tests/plain-file-delete-action-controlled.test.ts",
-          "block": "audit failure after metadata deletion",
+          "block": "audit failure rolls back metadata before any storage effect",
           "evidenceLevel": "DI"
         }
       ],
@@ -482,7 +484,8 @@
           "block": "",
           "evidenceLevel": "unit"
         },
-        {          "file": "apps/web/tests/file-fixture113-protocol.test.mjs",
+        {
+          "file": "apps/web/tests/file-fixture113-protocol.test.mjs",
           "block": "exact version cleanup cannot become prefix",
           "evidenceLevel": "source-guard"
         }
@@ -652,7 +655,8 @@
         }
       ],
       "gapTasks": [
-        136      ]
+        136
+      ]
     },
     {
       "id": "ui-input-preservation",
@@ -674,9 +678,9 @@
           "evidenceLevel": "unit"
         },
         {
-          "file": "apps/web/tests/product-card-navigation.test.ts",
-          "block": "actual shared card renders accessible",
-          "evidenceLevel": "SSR"
+          "file": "apps/web/tests/product-card-navigation-browser.test.mjs",
+          "block": "actual Chromium cover/body navigation, drag preview, mobile numbers and two faults",
+          "evidenceLevel": "Chromium-component"
         }
       ],
       "acceptance": [
@@ -713,23 +717,25 @@
   ],
   "dispositions": [
     {
-      "file": "apps/web/tests/product-card-navigation.test.ts",
-      "block": "handler/SSR tests1–4",
-      "decision": "KEEP",
-      "reason": "Наблюдаемая политика navigation/fullscreen и drag overlay; rendered HTML assertions полезны.",
+      "file": "apps/web/tests/product-card-navigation-browser.test.mjs",
+      "block": "actual Chromium cover/body navigation, drag preview, mobile numbers and two faults",
+      "decision": "CONSOLIDATE",
+      "reason": "Реальные Chromium navigation/drag/mobile/fault проверки заменяют перекрывающиеся handler/SSR cases; уникальный RecentProjects case перенесён в существующий project-kanban-card-layout suite.",
       "remainingProtection": [
-        "product-card-navigation.test.ts"
-      ]
+        "product-card-navigation-browser.test.mjs",
+        "project-kanban-card-layout.test.ts: number token enlarges only its own content and recent project keeps navigation and labels"
+      ],
+      "task": 168
     },
     {
-      "file": "apps/web/tests/product-card-navigation.test.ts",
+      "file": "apps/web/tests/product-card-navigation-browser.test.mjs",
       "block": "project tab passes shared onOpen policy while global board",
       "decision": "REWRITE",
       "task": 160,
-      "reason": "Буквальный JSX regex заменён действиями реального Chromium; четыре handler/SSR cases остаются.",
+      "reason": "Буквальный JSX regex заменён действиями реального Chromium; в №168 уникальный RecentProjects case сохранён в project-kanban-card-layout.",
       "remainingProtection": [
         "apps/web/tests/product-card-navigation-browser.test.mjs: trusted project/global cover и body/title, exact product.number/returnTo; real PointerSensor/disabled DragOverlay/no navigation; mobile tables CardNumber; formatting и два controlled behavior faults.",
-        "Существующие четыре handler/SSR cases product-card-navigation.test.ts и project-kanban-card-layout.test.ts."
+        "project-kanban-card-layout.test.ts: RecentProjects link/client/title/CardNumber case."
       ],
       "replacement": {
         "file": "apps/web/tests/product-card-navigation-browser.test.mjs",
@@ -757,11 +763,11 @@
       ]
     },
     {
-      "file": "apps/web/tests/inline-phone-dependency.test.ts",
-      "block": "whole orphan-helper suite",
-      "decision": "RETIRE",
+      "file": "apps/web/tests/project-contact-controllers.test.ts",
+      "block": "client switch waits for delayed contact ACK and binds only canonical new contacts",
+      "decision": "KEEP",
       "task": 155,
-      "reason": "Helper не используется runtime; live controller покрывает phone/client binding/ACK/dirty conflict.",
+      "reason": "Live controller сохраняется: phone/client binding/ACK/dirty conflict. Исторически в №155 удалён только whole orphan-helper suite inline-phone-dependency.test.ts: helper не использовался runtime.",
       "remainingProtection": [
         "apps/web/tests/project-contact-controllers.test.ts",
         "apps/web/tests/project-client-contact-component.test.mjs"
@@ -867,7 +873,7 @@
       "task": 161,
       "reason": "Один безопасный helper с restore при успехе/исключении и unexpected Prisma/network denial.",
       "remainingProtection": [
-        "Тот же настоящий production module и все прежние business assertions; native остаётся отдельным."
+        "Настоящий GET preview=thumbnail и byte-exact original сохраняются здесь; PDF/MIME/disposition/auth/ACL матрица — safe-file-response.test.ts. Native остаётся отдельным."
       ]
     }
   ]
