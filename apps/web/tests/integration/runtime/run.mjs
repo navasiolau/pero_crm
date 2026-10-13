@@ -1,0 +1,78 @@
+import { spawn, spawnSync } from 'node:child_process';
+import { appendFileSync, existsSync, readdirSync, realpathSync } from 'node:fs';
+import path from 'node:path';
+import { CreateBucketCommand, PutBucketVersioningCommand, S3Client } from '@aws-sdk/client-s3';
+import { assertCiJob, assertCiRuntimeTarget, requireCi } from './target.mjs';
+import { inspectService, startMinio } from './containers.mjs';
+import { cleanup, processOwner, recordProcesses } from './cleanup.mjs';
+
+const job = assertCiJob();
+requireCi(process.platform === 'linux' && realpathSync(process.cwd()) ===
+  path.join(process.env.GITHUB_WORKSPACE, 'apps/web'), 'checkout-directory');
+for (const directory of [process.env.GITHUB_WORKSPACE, process.cwd(), path.join(process.cwd(), 'prisma')]) {
+  requireCi(!readdirSync(directory).some(name => /^\.env(?:\.(?:local|production|production\.local))?$/.test(name)), 'env-file');
+}
+requireCi(existsSync('.next/BUILD_ID'), 'existing-build');
+
+/** @param {string} url @param {boolean} [databaseHealth] */
+async function ready(url, databaseHealth = false) {
+  for (let attempt = 0; attempt < 90; attempt++) {
+    try {
+      const response = await fetch(url, { signal: AbortSignal.timeout(1000), redirect: 'error' });
+      if (response.ok && (!databaseHealth || (await response.json()).database === 'ok')) return;
+    } catch { /* Ожидаем только собственный временный сервер. */ }
+    await new Promise(resolve => setTimeout(resolve, 500));
+  }
+  throw Error('CI_RUNTIME_HEALTH_TIMEOUT');
+}
+
+let tests, finishing;
+const processes = {};
+function finish() {
+  return finishing ??= (async () => {
+    await cleanup(job, processes);
+  })();
+}
+for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => {
+  void finish().then(() => process.exit(130), () => process.exit(1));
+});
+
+try {
+  process.env.PERO_CI_MINIO_ID = startMinio(job);
+  requireCi(Boolean(process.env.GITHUB_ENV) && path.isAbsolute(process.env.GITHUB_ENV), 'github-env-file');
+  appendFileSync(process.env.GITHUB_ENV, `PERO_CI_MINIO_ID=${process.env.PERO_CI_MINIO_ID}\n`);
+  const target = assertCiRuntimeTarget();
+  inspectService(target, target.postgresId, 'postgres');
+  inspectService(target, target.minioId, 'minio');
+  console.log(JSON.stringify({ ciRuntime: 'guarded', runId: target.runId, attempt: target.attempt,
+    postgresId: target.postgresId, minioId: target.minioId, network: target.network, persistentDataVolumes: 0 }));
+  const migration = spawnSync('pnpm', ['exec', 'prisma', 'migrate', 'deploy'], { stdio: 'inherit', timeout: 120_000 });
+  requireCi(migration.status === 0, 'migration-failed');
+  await ready(`${target.s3.endpoint}/minio/health/ready`);
+  const s3 = new S3Client({ endpoint: target.s3.endpoint, region: 'us-east-1', forcePathStyle: true,
+    credentials: { accessKeyId: target.s3.accessKeyId, secretAccessKey: target.s3.secretAccessKey } });
+  try {
+    await s3.send(new CreateBucketCommand({ Bucket: target.s3.bucket }));
+    await s3.send(new PutBucketVersioningCommand({ Bucket: target.s3.bucket, VersioningConfiguration: { Status: 'Enabled' } }));
+  } finally { s3.destroy(); }
+  requireCi(!finishing, 'cancelled');
+  const web = spawn(process.execPath, ['node_modules/next/dist/bin/next', 'start', '--hostname', '127.0.0.1', '--port', '3100'],
+    { detached: true, stdio: 'inherit', env: { ...process.env,
+      PERO_CI_OWNER: `${target.runId}-${target.attempt}`, PERO_CI_PURPOSE: 'web' } });
+  requireCi(Boolean(web.pid), 'web-start');
+  processes.web = processOwner(web.pid);
+  recordProcesses(target, processes);
+  await ready(`${target.baseUrl}/api/health`, true);
+  const cases = readdirSync('tests/integration').filter(file => file.endsWith('.test.ts')).map(file => `tests/integration/${file}`);
+  requireCi(cases.length > 0, 'contract-cases');
+  requireCi(!finishing, 'cancelled');
+  tests = spawn('pnpm', ['exec', 'tsx', '--test', '--test-concurrency=1', ...cases], { detached: true, stdio: 'inherit',
+    env: { ...process.env, PERO_CI_OWNER: `${target.runId}-${target.attempt}`, PERO_CI_PURPOSE: 'tests' } });
+  requireCi(Boolean(tests.pid), 'tests-start');
+  processes.tests = processOwner(tests.pid);
+  recordProcesses(target, processes);
+  const code = await new Promise((resolve, reject) => { tests.once('error', reject); tests.once('exit', resolve); });
+  if (code !== 0) throw Error(`CI_CONTRACTS_FAILED:${code}`);
+} finally {
+  await finish();
+}

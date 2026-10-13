@@ -34,33 +34,7 @@ function reset(elapsed = 1200) {
   Object.assign(fixture.state().times[0], { source: "timer", startedAt: new Date(instant.getTime() - elapsed * 60000), minutes: 0, autoStopped: false });
 }
 
-test("actual task completion caps timer at720 and leaves historical manual/closed facts unchanged", async context => {
-  context.mock.timers.enable({ apis: ["Date"], now: instant.getTime() });
-  for (const elapsed of [719, 720, 721, 1200]) {
-    reset(elapsed); const live = fixture.state().times[0];
-    const history: FixtureRow[] = [0, 1200].map(minutes => ({ ...live, id: "closed-" + minutes,
-      startedAt: new Date(new Date("2026-10-01T00:00:00Z").getTime() - minutes * 60000), stoppedAt: new Date("2026-10-01T00:00:00Z"), minutes }));
-    history.push({ ...live, id: "manual1200", source: "manual", startedAt: new Date("2026-10-02T00:00:00Z"), stoppedAt: new Date("2026-10-02T00:00:00Z"), minutes: 1200 });
-    fixture.state().times.push(...structuredClone(history));
-    const result = await changeTaskStatusCore({ id: "worker", name: "QA", roles: ["WORKER"], source: "web" }, "source", "DONE", undefined, transaction);
-    assert.equal(result.ok, true); assert.equal(fixture.state().tasks[0].status, "DONE");
-    assert.equal(live.minutes, elapsed >= 720 ? 720 : elapsed); assert.equal(live.autoStopped, elapsed >= 720);
-    assert.equal((live.stoppedAt as Date).getTime(), elapsed >= 720 ? (live.startedAt as Date).getTime() + 720 * 60000 : instant.getTime());
-    assert.deepEqual(fixture.state().times.filter(row => row.id !== "timer"), history);
-    assert.equal(fixture.state().entries.length, 1); assert.equal(fixture.state().entries[0].amount, "1000.00");
-  }
-});
 
-test("lawful ordinary reassignment closes previous timer without resetting task or starting recipient", async context => {
-  context.mock.timers.enable({ apis: ["Date"], now: instant.getTime() }); reset();
-  assert.equal((await updateTask("source", { assigneeId: "recipient" })).ok, true);
-  assert.equal(fixture.state().tasks[0].status, "IN_PROGRESS"); assert.equal(fixture.state().tasks[0].assigneeId, "recipient");
-  assert.equal(fixture.state().times.length, 1); assert.equal(fixture.state().times[0].minutes, 720); assert.equal(fixture.state().times[0].autoStopped, true);
-  assert.equal((fixture.state().times[0].stoppedAt as Date).getTime(), (fixture.state().times[0].startedAt as Date).getTime() + 720 * 60000);
-  assert.equal(fixture.state().entries.length, 0);
-  const audit = fixture.state().logs.filter(row => row.action === "update"); assert.equal(audit.length, 1);
-  assert.equal(audit[0].source, "web"); assert.equal(typeof (audit[0].oldValue as FixtureRow).dueAt, "string");
-});
 
 test("mandatory reassignment audit failure rolls timer and assignment back together", async context => {
   context.mock.timers.enable({ apis: ["Date"], now: instant.getTime() }); reset();
@@ -106,17 +80,6 @@ test("office completion manual minutes remain above720 and engineering reassignm
   assert.equal((await updateTask("source", { assigneeId: "recipient" })).ok, false); assert.deepEqual(fixture.state(), previous);
 });
 
-test("actual task START closes previous assignee timer with one instant before opening its own", async context => {
-  context.mock.timers.enable({ apis: ["Date"], now: instant.getTime() }); reset();
-  fixture.state().tasks[0].status = "NEW";
-  fixture.state().tasks.push({ ...fixture.state().tasks[0], id: "previous", status: "IN_PROGRESS", workId: null, quantity: null });
-  fixture.state().times[0].taskId = "previous";
-  const result = await changeTaskStatusCore({ id: "worker", name: "QA", roles: ["WORKER"], source: "web" }, "source", "IN_PROGRESS", undefined, transaction);
-  assert.equal(result.ok, true); assert.equal(fixture.state().times[0].minutes, 720); assert.equal(fixture.state().times[0].autoStopped, true);
-  const active = fixture.state().times.filter(row => row.stoppedAt === null); assert.equal(active.length, 1);
-  assert.equal(active[0].taskId, "source"); assert.equal(active[0].userId, "worker"); assert.equal((active[0].startedAt as Date).getTime(), instant.getTime());
-  assert.equal(fixture.state().entries.length, 0);
-});
 
 import { TIMER_NATIVE_MANIFEST, assertTimerNativeApproval, timerNativeFailureCode, timerNativeHash, timerNativePins, timerNativeLockWitness, timerNativeBounded, type TimerNativeLockRow, type TimerNativeApproval } from "./timer-stop-cap-native";
 

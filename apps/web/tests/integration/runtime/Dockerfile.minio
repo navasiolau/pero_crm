@@ -1,0 +1,10 @@
+FROM golang:1.24.2-alpine@sha256:7772cb5322baa875edd74705556d08f0eeca7b9c4b5367754ce3f2f00041ccee AS build
+WORKDIR /build
+ADD --checksum=sha256:8819e3e7817e46b7b3798f8f200ead208562e571563c2e040352378031abe9f2 https://codeload.github.com/minio/minio/tar.gz/07c3a429bfed433e49018cb0f78a52145d4bedeb /source.tar.gz
+RUN tar -xzf /source.tar.gz --strip-components=1 -C /build && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOTOOLCHAIN=local go build -mod=readonly -trimpath -ldflags='-s -w -X github.com/minio/minio/cmd.Version=2025-09-07T16:13:09Z -X github.com/minio/minio/cmd.ReleaseTag=RELEASE.2025-09-07T16-13-09Z -X github.com/minio/minio/cmd.CommitID=07c3a429bfed433e49018cb0f78a52145d4bedeb' -o /minio . && GOTOOLCHAIN=local go mod verify
+FROM scratch
+ENV HOME=/tmp
+LABEL pero.ci.go.image="golang:1.24.2-alpine@sha256:7772cb5322baa875edd74705556d08f0eeca7b9c4b5367754ce3f2f00041ccee" pero.ci.source.sha256="8819e3e7817e46b7b3798f8f200ead208562e571563c2e040352378031abe9f2"
+COPY --from=build /minio /minio
+COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+ENTRYPOINT ["/minio"]

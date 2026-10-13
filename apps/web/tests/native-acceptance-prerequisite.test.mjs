@@ -10,8 +10,8 @@ test('native entrypoints cold import has zero client construction, Docker, netwo
  "const Module=req('node:module');const original=Module._load;let clients=0,docker=0,network=0;",
  "Module._load=function(name,...args){if(name==='@prisma/client')return{PrismaClient:class{constructor(){clients++;throw Error('CLIENT_FORBIDDEN')}}};if(name==='node:child_process')return{execFileSync(){docker++;throw Error('DOCKER_FORBIDDEN')}};return original.call(this,name,...args);};",
  "globalThis.fetch=async()=>{network++;throw Error('NETWORK_FORBIDDEN')};",
- "const a=await import('./tests/product-percentage-adjustments-native.ts'),b=await import('./tests/warehouse-concurrency-native.ts'),c=await import('./tests/acceptance-evidence-runner.mjs');",
- "if(typeof a.runPercentageAdjustmentsAcceptance!=='function'||typeof b.runWarehouseConcurrencyAcceptance!=='function'||typeof c.executeApprovedScenario!=='function')throw Error('ENTRY_EXPORT_MISSING');",
+ "const a=await import('./tests/shared-transaction-native.ts'),b=await import('./tests/warehouse-concurrency-native.ts'),c=await import('./tests/acceptance-evidence-runner.mjs');",
+ "if(typeof a.executeSharedTransactionNative!=='function'||typeof b.runWarehouseConcurrencyAcceptance!=='function'||typeof c.executeApprovedScenario!=='function')throw Error('ENTRY_EXPORT_MISSING');",
  "console.log(JSON.stringify({clients,docker,network}));"
  ].join('\n');
  const environment={...process.env};
@@ -27,7 +27,7 @@ test('bundled native imports do not execute either CLI footer in a local qa-hash
  const directory=await mkdtemp(path.join(fixtureParent,'pero-native-cold-bundle-'));
  try {
   const {build}=createRequire(require.resolve('tsx/package.json'))('esbuild');
-  const source="import {runPercentageAdjustmentsAcceptance as a} from './tests/product-percentage-adjustments-native.ts';import {runWarehouseConcurrencyAcceptance as b} from './tests/warehouse-concurrency-native.ts';console.log(JSON.stringify({a:typeof a,b:typeof b}));";
+  const source="import {executeSharedTransactionNative as a} from './tests/shared-transaction-native.ts';import {runWarehouseConcurrencyAcceptance as b} from './tests/warehouse-concurrency-native.ts';console.log(JSON.stringify({a:typeof a,b:typeof b}));";
   const bundle=await build({stdin:{contents:source,resolveDir:process.cwd(),sourcefile:'cold-producer.mjs'},bundle:true,write:false,packages:'external',platform:'node',format:'esm',target:'node22',tsconfig:path.join(process.cwd(),'tsconfig.json'),logLevel:'silent'});
   const file=path.join(directory,'qa-cold-import.mjs');await writeFile(file,bundle.outputFiles[0].contents);
   const environment={...process.env};

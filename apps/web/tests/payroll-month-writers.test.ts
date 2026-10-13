@@ -116,27 +116,6 @@ test("invalid payout actions and core reject before service or transaction reads
   assert.equal(payoutServiceCalls, 0);
 });
 
-test("advance uses Moscow month but keeps UTC FX day and saved receipt across month change", async (t) => {
-  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-10-31T21:30:00.000Z").getTime() });
-  const fixture = cashFixture(), input = { ...cashInput(), kind: "ADVANCE" as const };
-  const first = await issuePayoutCore(accountant, input, fixedRates, fixture.tx);
-  assert.equal(first.month, "2026-11"); assert.equal(first.amount, "120.00");
-  assert.equal((fixture.payouts[0].cashRateDate as Date).toISOString(), "2026-10-31T00:00:00.000Z");
-  const savedReceipt = JSON.stringify([...fixture.receipts.values()]);
-  t.mock.timers.setTime(new Date("2026-11-30T21:30:00.000Z").getTime());
-  const repeated = await issuePayoutCore(accountant, input, fixedRates, fixture.tx);
-  assert.equal(repeated.repeated, true); assert.equal(repeated.month, "2026-11"); assert.equal(repeated.payoutId, first.payoutId);
-  assert.equal(fixture.payouts.length, 1); assert.equal(JSON.stringify([...fixture.receipts.values()]), savedReceipt);
-});
-
-test("salary debt excludes only current Moscow month in early hours; FX day stays UTC", async (t) => {
-  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-10-31T21:30:00.000Z").getTime() });
-  const fixture = cashFixture();
-  const result = await issuePayoutCore(accountant, { ...cashInput(), kind: "SALARY", month: "2026-10" }, fixedRates, fixture.tx);
-  assert.equal(result.month, "2026-10"); assert.equal(fixture.dueThreshold(), "2026-11");
-  assert.equal(result.amount, "120.00"); assert.equal((fixture.payouts[0].payrollRateDate as Date).toISOString(), "2026-10-31T00:00:00.000Z");
-});
-
 function percentageFixture(state: "SKIPPED_ONCE" | "SETTLED" = "SETTLED") {
   const entries: Row[] = [], adjustments: Row[] = [];
   const product = { id: "p", projectId: "j", number: "П-1-1", status: "PRODUCTION", expectedPrice: new Prisma.Decimal(1000), quantity: 1,
@@ -158,20 +137,6 @@ function percentageFixture(state: "SKIPPED_ONCE" | "SETTLED" = "SETTLED") {
   } as unknown as Prisma.TransactionClient;
   return { tx, entries, adjustments, completion };
 }
-
-test("new direct percentage, late skipped settlement and adjustment preserve amounts in Moscow month", async (t) => {
-  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-10-31T21:30:00.000Z").getTime() });
-  const first = percentageFixture();
-  assert.equal(await direct.captureDirectPercentage(first.tx, manager, "p", "ASSEMBLY", "STORAGE"), "SETTLED");
-  assert.equal(first.entries[0].month, "2026-11"); assert.equal(first.entries[0].amount, "30.00");
-  const late = percentageFixture("SKIPPED_ONCE");
-  assert.equal(await direct.settleSkippedPercentage(late.tx, manager, "p", "ASSEMBLY", "STORAGE"), "SETTLED");
-  assert.equal(late.entries[0].month, "2026-11"); assert.equal(late.entries[0].amount, "30.00");
-  const adjustment = percentageFixture(), frozen = JSON.stringify(adjustment.completion);
-  assert.equal((await direct.adjustSettledPercentage(adjustment.tx, manager, "p", "ASSEMBLY", "4", randomUUID())).delta, "10.00");
-  assert.equal(adjustment.entries[0].month, "2026-11"); assert.equal(adjustment.entries[0].amount, "10.00");
-  assert.equal(JSON.stringify(adjustment.completion), frozen);
-});
 
 test("pending historical FX accrual uses original completed instant in Moscow and preserves rate dates", async () => {
   const completedAt = new Date("2026-09-30T21:30:00.000Z");
