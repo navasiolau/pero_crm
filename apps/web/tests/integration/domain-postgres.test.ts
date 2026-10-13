@@ -142,7 +142,8 @@ async function overlap<A, B>(actor: DomainActor, firstOperation: () => Promise<A
     assert.equal(witnessed, true, "DISTINCT_BACKENDS_HELD_LOCK_AND_ACTUAL_WAITER");
     if (timerLock) {
       const locks = await holder.$queryRaw<{ pid: number; locktype: string; database: number; classid: number;
-        objid: number; objsubid: number; mode: string; granted: boolean }[]>`SELECT pid,locktype,database,classid,objid,objsubid,mode,granted
+        objid: number; objsubid: number; mode: string; granted: boolean }[]>`SELECT pid,locktype,database::integer AS database,classid::integer AS classid,
+          objid::integer AS objid,objsubid,mode,granted
           FROM pg_locks WHERE pid IN (${holderPid}::int4,${waiterPid}::int4) AND locktype='advisory'`;
       assert.equal(locks.length, 2);
       assert.ok(locks.every(row => row.locktype === "advisory" && row.classid === 18435 && row.objid === 55001 &&
