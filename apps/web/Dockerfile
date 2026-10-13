@@ -7,11 +7,14 @@ WORKDIR /app
 # --- Сборка ---
 FROM base AS build
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
-# Workspace-пакеты (@pero/plugin-sdk, плагины) — часть монорепо,
-# без них pnpm install --frozen-lockfile не разрешит workspace:*-зависимости
-COPY packages packages
+# Все workspace manifests нужны для frozen lockfile; исходники идут после install,
+# чтобы изменение плагина не заставляло повторно устанавливать зависимости.
+COPY packages/plugin-sdk/package.json packages/plugin-sdk/
+COPY packages/plugins/demo/package.json packages/plugins/demo/
 COPY apps/web/package.json apps/web/
-RUN pnpm install --frozen-lockfile
+COPY apps/telegram-bot/package.json apps/telegram-bot/
+RUN pnpm install --frozen-lockfile --filter @pero/web...
+COPY packages packages
 COPY apps/web apps/web
 # Значения-заглушки: нужны только на время сборки (prerender), в образ не попадают
 ENV DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy" \

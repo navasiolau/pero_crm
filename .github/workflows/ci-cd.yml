@@ -15,7 +15,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  test:
+  unit-tests:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -43,27 +43,78 @@ jobs:
       - name: Prisma Client (generate)
         run: pnpm --filter @pero/web exec prisma generate
 
-      - name: Lint
-        run: pnpm lint
-
-      - name: Typecheck (backend + frontend)
-        run: pnpm --filter @pero/web exec tsc --noEmit
-
-      - name: Typecheck (telegram-bot)
-        run: pnpm --filter @pero/telegram-bot exec tsc --noEmit
-
       - name: Chromium для компонентных тестов формы
         run: pnpm --filter @pero/web exec playwright install --with-deps chromium
 
       - name: Тесты приложений
         run: pnpm -r --if-present test
 
+  build-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        id: node
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Зависимости
+        run: pnpm install --frozen-lockfile
+
+      - name: Prisma Client (generate)
+        run: pnpm --filter @pero/web exec prisma generate
+
+      - name: Next compiler cache
+        uses: actions/cache@v4
+        with:
+          path: apps/web/.next/cache
+          key: next-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.node.outputs.node-version }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'apps/web/package.json', 'apps/web/*config.*', 'packages/*/package.json', 'packages/plugins/*/package.json', 'packages/*/tsconfig.json', 'packages/plugins/*/tsconfig.json') }}-${{ hashFiles('apps/web/src/**', 'apps/web/public/**', 'apps/web/prisma/**', 'packages/*/src/**', 'packages/plugins/*/src/**') }}
+          restore-keys: |
+            next-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.node.outputs.node-version }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'apps/web/package.json', 'apps/web/*config.*', 'packages/*/package.json', 'packages/plugins/*/package.json', 'packages/*/tsconfig.json', 'packages/plugins/*/tsconfig.json') }}-
+
+      - name: TypeScript incremental cache
+        uses: actions/cache@v4
+        with:
+          path: apps/web/tsconfig.tsbuildinfo
+          key: types-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.node.outputs.node-version }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'apps/web/package.json', 'apps/web/tsconfig.json', 'apps/web/next.config.ts', 'packages/*/package.json', 'packages/plugins/*/package.json', 'packages/*/tsconfig.json', 'packages/plugins/*/tsconfig.json') }}-${{ hashFiles('apps/web/src/**', 'apps/web/tests/**', 'apps/web/*.ts', 'apps/web/prisma/schema.prisma', 'packages/*/src/**', 'packages/plugins/*/src/**') }}
+          restore-keys: |
+            types-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.node.outputs.node-version }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'apps/web/package.json', 'apps/web/tsconfig.json', 'apps/web/next.config.ts', 'packages/*/package.json', 'packages/plugins/*/package.json', 'packages/*/tsconfig.json', 'packages/plugins/*/tsconfig.json') }}-
+
+      - name: Lint
+        run: pnpm lint
+
       - name: Сборка (Next.js production)
         run: pnpm build
         env:
+          # Все исходники, включая *.test.ts и свежие route types, проверяются ниже.
+          PERO_CI_EXTERNAL_CHECKS: '1'
           # Значения-заглушки — только для prerender, как в Dockerfile
           DATABASE_URL: postgresql://dummy:dummy@localhost:5432/dummy
           AUTH_SECRET: ci-dummy
+
+      - name: Typecheck (backend + frontend + tests + fresh routes)
+        run: pnpm --filter @pero/web exec tsc --noEmit
+
+      - name: Typecheck (telegram-bot)
+        run: pnpm --filter @pero/telegram-bot exec tsc --noEmit
+
+  # Итоговый обязательный gate не допускает публикацию при failure/cancelled/skipped.
+  test:
+    if: always()
+    needs: [unit-tests, build-checks]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Все обязательные проверки завершились успешно
+        run: |
+          test "$UNIT_RESULT" = success
+          test "$BUILD_RESULT" = success
+        env:
+          UNIT_RESULT: ${{ needs.unit-tests.result }}
+          BUILD_RESULT: ${{ needs.build-checks.result }}
 
   build-push:
     if: github.event_name == 'push'
@@ -88,8 +139,8 @@ jobs:
           context: .
           file: apps/web/Dockerfile
           push: true
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=pero-web
+          cache-to: type=gha,mode=max,scope=pero-web
           tags: |
             ghcr.io/navasiolau/pero_crm:${{ github.ref_name }}
             ghcr.io/navasiolau/pero_crm:sha-${{ github.sha }}
@@ -121,8 +172,8 @@ jobs:
           context: .
           file: apps/telegram-bot/Dockerfile
           push: true
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=pero-telegram-bot
+          cache-to: type=gha,mode=max,scope=pero-telegram-bot
           tags: |
             ghcr.io/navasiolau/pero_telegram_bot:${{ github.ref_name }}
             ghcr.io/navasiolau/pero_telegram_bot:sha-${{ github.sha }}
