@@ -51,8 +51,8 @@ qaTransport/crm-modernization wrappers с W07, DB/S3 и image identity guards.
 В продолжении №168 закрыты старые cash staging seal/FX и engineering
 backup/window/QA/metadata/preflight операторы, а также завершённый quantity
 staging/CI комплект. Они привязаны к прежним выпуску, worktree и QA-графу;
-их повторный запуск больше не поддерживается. Общие `staging-work-shares.py`,
-`crm-modernization-staging.py` сохраняют защиту цели и W07. Одноразовый
+их повторный запуск больше не поддерживается. Закрытый `staging-work-shares.py`
+выведен из эксплуатации; текущий `crm-modernization-staging.py` сохраняет защиту цели и W07. Одноразовый
 percentage backup/release-контур закрыт; чистые проверки сохранности его
 legacy markers и строк остаются в web tests. Исторические receipts и архивные результаты
 не изменяются и не доказывают проверку нового SHA.

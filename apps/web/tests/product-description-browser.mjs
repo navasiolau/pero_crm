@@ -5,13 +5,6 @@ import {mkdir,writeFile,rename} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {createHash} from 'node:crypto';
 import {decodeProductDescriptionAction} from './product-description-flight.mjs';
-export function descriptionMutationIds(fixture,journal){
- const requireThat=(ok,code)=>{if(!ok)throw Error(code)};
- const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
- requireThat(Array.isArray(journal.ownWrites)&&journal.ownWrites.length<=100,'DESCRIPTION_JOURNAL_REQUIRED');const actors=new Set(Object.values(fixture.actors).map(row=>row.id)),ids=new Set();
- for(const row of journal.ownWrites){requireThat(actors.has(row.actorId)&&[fixture.ids.productA,fixture.ids.productB].includes(row.productId)&&row.field==='description'&&UUID.test(row.clientMutationId??''),'DESCRIPTION_OWNED_RECEIPT_SCOPE_STOP');if(!row.noOp)ids.add(row.clientMutationId)}
- for(const row of journal.preferenceOwnWrites??[])requireThat(actors.has(row.userId)&&row.key==='product.tab'&&row.value==='overview','DESCRIPTION_PREFERENCE_SCOPE_STOP');return[...ids].sort();
-}
 export const DESCRIPTION_LF='  Начало\n\tПункт\n\nКонец  \n\n';
 export const DESCRIPTION_BROWSER_LAUNCH=Object.freeze({headless:true,channel:'chromium'});
 export const descriptionBrowserValue=value=>value.replace(/\r\n/g,'\n');

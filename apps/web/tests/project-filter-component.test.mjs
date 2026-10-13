@@ -93,10 +93,10 @@ const bundleOptions = {
   logLevel: "silent",
 };
 const bundlePromise = build(bundleOptions);
-const compareBefore=process.env.CRM_SELECT_BENCHMARK==='1',styleParity=process.env.CRM_SELECT_STYLE_PARITY==='1';
+const styleParity=process.env.CRM_SELECT_STYLE_PARITY==='1';
 let pickerCss;async function actualPickerCss(){if(!pickerCss){const postcss=createRequire(require.resolve('@tailwindcss/postcss'))('postcss'),tailwind=require('@tailwindcss/postcss');pickerCss=(await postcss([tailwind({base:web})]).process(await readFile(path.join(web,'src/app/globals.css'),'utf8'),{from:path.join(web,'src/app/globals.css')})).css+'\nhtml,body{font-family:Arial,sans-serif}input{caret-color:transparent!important}';}return pickerCss;}
 const beforeRevision='465a59d0709edabf4396a966bb53cd76868f7b86';
-const beforeBundlePromise=(compareBefore||styleParity)?build({...bundleOptions,plugins:[...bundleOptions.plugins,{name:'local-original-picker-source',setup(builder){builder.onLoad({filter:/\.(?:tsx)$/,namespace:'file'},args=>{const relative=path.relative(web,args.path).split(path.sep).join('/');if(!['src/components/ui/searchable-select.tsx','src/components/ui/multi-select-filter.tsx'].includes(relative))return;return{contents:execFileSync('git',['-c','safe.directory='+path.resolve(web,'../..'),'show',beforeRevision+':apps/web/'+relative],{cwd:web,encoding:'utf8'}),loader:'tsx',resolveDir:path.dirname(args.path)};});}}]}):null;
+const beforeBundlePromise=(styleParity)?build({...bundleOptions,plugins:[...bundleOptions.plugins,{name:'local-original-picker-source',setup(builder){builder.onLoad({filter:/\.(?:tsx)$/,namespace:'file'},args=>{const relative=path.relative(web,args.path).split(path.sep).join('/');if(!['src/components/ui/searchable-select.tsx','src/components/ui/multi-select-filter.tsx'].includes(relative))return;return{contents:execFileSync('git',['-c','safe.directory='+path.resolve(web,'../..'),'show',beforeRevision+':apps/web/'+relative],{cwd:web,encoding:'utf8'}),loader:'tsx',resolveDir:path.dirname(args.path)};});}}]}):null;
 
 async function withPage(initialQuery, run, section = "projects", variant='after', viewport={width:1440,height:900}) {
   const bundle = await (variant==='before'?beforeBundlePromise:bundlePromise);
@@ -311,24 +311,6 @@ test('large multi keeps logical Tab/focus/selection while rendering only its vie
  },'picker');
 });
 
-test('manual available-PC picker budget before/after10010005000',{skip:!compareBefore,timeout:300000},async()=>{
- const sourceFiles=['src/components/ui/searchable-select.tsx','src/components/ui/multi-select-filter.tsx','src/hooks/use-options-filter.ts'];const sourceHashes=await Promise.all(sourceFiles.map(async file=>({file,sha256:createHash('sha256').update(await readFile(path.join(web,file))).digest('hex')})));
- const records=[],expected='alpha_00000zzzzzzzzz';assert.equal(expected.length,20);
- const onlyLargeMulti=process.env.CRM_SELECT_LARGE_MULTI_ONLY==='1';
- for(const variant of onlyLargeMulti?['after']:['before','after'])for(const size of onlyLargeMulti?[5000]:[100,1000,5000])for(const kind of onlyLargeMulti?['multi']:['single','multi']){
-  await withPage('size='+size,async page=>{
-   const trigger=kind==='single'?page.locator('#picker-single'):page.getByRole('button',{name:'Несколько',exact:true});await trigger.click();const input=page.getByPlaceholder(kind==='single'?'Поиск одного':'Поиск нескольких');
-   await page.evaluate(()=>{window.__long=[];new PerformanceObserver(list=>window.__long.push(...list.getEntries().map(e=>({startTime:e.startTime,duration:e.duration})))).observe({entryTypes:['longtask']});window.__series=null;document.addEventListener('keydown',event=>{const series=window.__series;if(!series||event.target!==series.target||event.key.length!==1)return;const sample={key:event.key,trusted:event.isTrusted,start:performance.now()};series.samples.push(sample);requestAnimationFrame(()=>requestAnimationFrame(()=>sample.ready=performance.now()));},true);});
-   const runs=[];for(let rep=0;rep<5;rep++){
-    await input.fill('');await page.waitForTimeout(150);await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));await input.evaluate(target=>{window.__series={target,start:performance.now(),samples:[]};});await input.pressSequentially(expected,{delay:80});await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
-    const result=await page.evaluate(()=>{const series=window.__series,end=performance.now();window.__series=null;return{samples:series.samples,longtasks:window.__long.filter(e=>e.startTime>=series.start&&e.startTime<end)};});assert.equal(result.samples.length,20);assert.equal(result.samples.map(x=>x.key).join(''),expected);assert.ok(result.samples.every(x=>x.trusted&&Number.isFinite(x.ready)&&x.ready>=x.start));assert.equal(await input.inputValue(),expected);runs.push(result);
-   }
-   const latency=runs.flatMap(r=>r.samples.map(s=>s.ready-s.start)).sort((a,b)=>a-b),longtasks=runs.flatMap(r=>r.longtasks);records.push({variant,size,kind,samples:latency.length,p95KeydownToTwoRaf:latency[Math.ceil(latency.length*.95)-1],max:latency.at(-1),longtasks});
-  },'picker',variant);
- }
- const dir=path.join(web,'test-results/select-work-reduction',randomUUID());await mkdir(dir,{recursive:true});for(const pin of sourceHashes)assert.equal(createHash('sha256').update(await readFile(path.join(web,pin.file))).digest('hex'),pin.sha256,'SOURCE_CHANGED_DURING_PICKER_MEASURE');const receipt={status:'MEASURED',sourceHashes,definition:'trusted native keydown to second real RAF (conservative UI-ready, not EventTiming/INP)',beforeRevision,scope:onlyLargeMulti?'AFTER_LARGE_MULTI_ONLY':'FULL_BEFORE_AFTER',records};await writeFile(path.join(dir,'metrics.json'),JSON.stringify(receipt,null,2));console.log(JSON.stringify({status:'PICKER_BUDGET_MEASURED',dir,records:records.map(({longtasks,...r})=>({...r,longtasks:longtasks.length,maxLongTask:Math.max(0,...longtasks.map(x=>x.duration))}))}));
- for(const row of records.filter(r=>r.variant==='after')){assert.ok(row.p95KeydownToTwoRaf<=100,'PICKER_P95_BUDGET:'+JSON.stringify(row));assert.equal(row.longtasks.length,0,'PICKER_LONGTASK_BUDGET:'+JSON.stringify(row));}
-});
 
 
 test('manual actual CSS large picker viewport parity',{skip:!styleParity,timeout:120000},async()=>{

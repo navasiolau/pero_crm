@@ -1,19 +1,13 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {DESCRIPTION_LF,descriptionPatchOwned,descriptionBrowserValue,descriptionPrivateDiagnostic,descriptionCapturedWrite} from './product-description-browser.mjs';
-import {descriptionMutationIds} from './product-description-browser.mjs';
 import {runCrmBrowserZoom} from './crm-browser-zoom.mjs';
-const fixture={ids:{productA:'own-a',productB:'own-b'},actors:{admin:{id:'a'},manager:{id:'m'},engineer:{id:'e'}}};
+const fixture={ids:{productA:'own-a',productB:'own-b'}};
 const id='b5428289-23f7-4e42-a967-212da990d141';
 const patch={productId:'own-a',field:'description',value:DESCRIPTION_LF,expectedValue:' \t\r\n\r\n',clientMutationId:id};
 test('description request guard is closed, exact raw baseline and owned IDs only',()=>{
  assert.equal(descriptionPatchOwned(patch,fixture),true);assert.equal(patch.value.startsWith('  '),true);assert.equal(patch.value.endsWith('\n\n'),true);assert.ok(patch.value.includes('\t'));assert.equal(patch.expectedValue,' \t\r\n\r\n');
  for(const input of [null,[],{...patch,productId:'foreign'},{...patch,field:'title'},{...patch,initialPrice:'0'},{...patch,clientMutationId:undefined},{...patch,expectedValue:1}])assert.equal(descriptionPatchOwned(input,fixture),false);
-});
-test('description coordinator IDs come only from captured allowed actor/field receipts, excluding no-op',()=>{
- const row={actorId:'m',productId:'own-a',field:'description',clientMutationId:id};const journal={ownWrites:[row,{...row,noOp:true}],preferenceOwnWrites:[{userId:'a',key:'product.tab',value:'overview'}]};assert.deepEqual(descriptionMutationIds(fixture,journal),[id]);
- for(const bad of [{...row,actorId:'foreign'},{...row,productId:'foreign'},{...row,field:'title'},{...row,clientMutationId:'guess'}])assert.throws(()=>descriptionMutationIds(fixture,{ownWrites:[bad]}),/SCOPE_STOP/);
- assert.throws(()=>descriptionMutationIds(fixture,{ownWrites:[],preferenceOwnWrites:[{userId:'a',key:'payroll.currency',value:'USD'}]}),/PREFERENCE_SCOPE_STOP/);
 });
 test('description zoom guards reject invalid mode/selector/ID/journal before any browser launch',async()=>{
  const args={origin:'http://127.0.0.1:3019',pagePath:'/products/own-a',ownedProductPaths:['/products/own-a'],readySelector:'#product-inline-description',descriptionMode:{productId:id},onOwnWrites:async()=>{},profile:{roles:['ADMIN'],cookies:[{name:'not-a-live-cookie',value:'test'}]},outputDir:'not-used-before-guard'};

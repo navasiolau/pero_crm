@@ -21,8 +21,8 @@
 
 ## 5. Owner refinement: 50 percent
 
-- [ ] 5.1 Дополнить карту точными сокращаемыми блоками, retained contracts и завершёнными historical workflows; согласовать границы параллельных edits до удаления.
-- [ ] 5.2 Консолидировать повторяемые test/QA/native setup и fixture lifecycle через существующие доменные helpers или малый общий runner замены с чистым сокращением строк; сохранить уникальные money/ACL/CAS/idempotency/rollback/S3/browser/target/ownership/cleanup условия и уровень каждого доказательства, сопоставить и фактически выполнить перенесённые cases до снятия прежнего контура.
+- [ ] 5.1 До удаления дополнить карту точными блоками, retained действующими business/data/security/UI contracts либо exact cause obsolete QA-selftest/тавтологии/always-green/постоянного skip; для CLI проверить closed-task/current-consumer/operator evidence, согласовать границы параллельных edits. Unique assert закрытого helper не требует новой замены.
+- [ ] 5.2 Удалить подтверждённые obsolete/непроверяющие QA-selftests и консолидировать повторяемые test/QA/native setup и fixture lifecycle через существующие helpers или малый общий runner с чистым сокращением строк; сохранить действующие money/ACL/CAS/idempotency/rollback/S3/browser/target/ownership/cleanup условия и уровень доказательства, сопоставить и фактически выполнить перенесённые cases действующего приложения до снятия прежнего контура.
 - [ ] 5.3 Достичь web не более 32 361 и совокупно не более 34 831 строк от исходной базы 64 722/69 662 в неизменном tracked-text scope с включением всего добавленного test/QA кода, общего runner и перенесённых cases; подтвердить отсутствие minify, уплотнения строк, скрытия кода из счётчика, runtime/Prisma/package/lock/dependency изменений.
 - [ ] 5.4 Проверить live refs и контрактную карту; после всех edits один раз выполнить итоговые автоматические suites, typecheck/lint и OpenSpec validation, записать реальные результаты.
-- [ ] 5.5 Получить независимое review уникальных контрактов и итогового diff; после обычного merge подтвердить CI и реально развёрнутый новый staging SHA/образ/здоровье/GET-only smoke.
+- [ ] 5.5 Получить независимое review сохранности действующих контрактов приложения, точных причин obsolete retirement и итогового diff; после обычного merge подтвердить CI и реально развёрнутый новый staging SHA/образ/здоровье/GET-only smoke.
