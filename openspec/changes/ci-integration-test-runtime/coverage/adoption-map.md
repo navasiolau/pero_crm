@@ -1,6 +1,7 @@
 # Карта покрытия и принятия №169
 
 Состояние по evidence Root: **CI243 — 71/71 native PASS, guard2/2, owned cleanup PASS; выбранный retirement ниже выполнен по Root GO в собственном №169**. Текущий code diff после retirement ждёт централизованные checks/review. Прежние исследовательские таблицы ниже относятся к WIP №168; они не являются blanket allowlist. Новые cases — `tests/integration/*.test.ts` в checkout №169.
+Текущий retirement №168 дополнительно закрывает unused manual/operator graphs по точной карте `openspec/changes/test-basis-reduction/reduction-map.md`; таблицы A–H ниже остаются историческим inventory. В частности, closed167 protocol helper/operator controls retired с сохранением первых пяти canonical SQL/byte checks; старые Required PG vectors не объявляются новым фактическим PASS, исторические receipts и NOT_RUN сохраняются.
 Исходный знаменатель №168: **69 662 LF → ≤34 831**. Read-only снимок WIP №168: **604 файла, 51 109 LF, 5 097 400 UTF-8 bytes** после CRLF→LF; автоматические suites, включая `deploy/tests/test_*.py`: **346 файлов, 25 514 LF, 2 333 714 bytes**. Это инвентаризация, не приёмка WIP.
 Формула исходной цели №168: `final = 51 109 − deleted + added`; требуется `deleted − added ≥16 278 LF`. `added` включает весь новый runtime, guard, fixtures, cases, companions и CI/команду; считать bytes той же нормализацией. Фактический вклад №169 записан в Applied batch ниже; 50% всей области здесь не заявлены.
 

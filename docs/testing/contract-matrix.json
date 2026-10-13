@@ -480,11 +480,6 @@
           "file": "apps/web/tests/s3-delete-exact.test.ts",
           "block": "",
           "evidenceLevel": "unit"
-        },
-        {
-          "file": "apps/web/tests/file-fixture113-protocol.test.mjs",
-          "block": "exact version cleanup cannot become prefix",
-          "evidenceLevel": "source-guard"
         }
       ],
       "acceptance": [
@@ -846,15 +841,6 @@
       "reason": "Защищает legacy CHECK branches; textual assertions не заменяют SQL semantics.",
       "remainingProtection": [
         "Native PostgreSQL CHECK/trigger proof."
-      ]
-    },
-    {
-      "file": "apps/web/tests/file-fixture113-protocol.test.mjs",
-      "block": "signed PRE and observation cannot be forged or borrowed",
-      "decision": "KEEP",
-      "reason": "Подписи/runId/точные storage keys/production refusal/cold import/owned cleanup.",
-      "remainingProtection": [
-        "Весь operator guard suite сохраняется."
       ]
     },
     {
