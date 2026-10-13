@@ -13,12 +13,14 @@ function labels(target, service) {
     'pero.ci.attempt': target.attempt, 'pero.ci.service': service };
 }
 
-/** @param {CiJob} target */
-function inspectMinioImage(target) {
+/** @param {CiJob} target @param {'runtime'|'cleanup'} [purpose] */
+function inspectMinioImage(target, purpose = 'runtime') {
   const expectedId = process.env.PERO_CI_MINIO_IMAGE_ID;
-  requireCi(/^sha256:[a-f0-9]{64}$/.test(expectedId ?? ''), 'minio-loaded-image-id');
+  // Buildx может загрузить образ до ошибки/отмены выдачи imageid.
+  const unpublishedCleanup = purpose === 'cleanup' && !expectedId;
+  requireCi(unpublishedCleanup || /^sha256:[a-f0-9]{64}$/.test(expectedId ?? ''), 'minio-loaded-image-id');
   const image = JSON.parse(docker(['image', 'inspect', target.minioImage]))[0];
-  requireCi(image.Id === expectedId, 'minio-loaded-image-id');
+  if (!unpublishedCleanup) requireCi(image.Id === expectedId, 'minio-loaded-image-id');
   for (const [key, value] of Object.entries({ ...labels(target, 'minio'), 'pero.ci.minio.commit': MINIO_COMMIT,
     'pero.ci.go.image': MINIO_GO_IMAGE, 'pero.ci.source.sha256': MINIO_SOURCE_SHA256 })) {
     requireCi(image.Config.Labels?.[key] === value, `image-${key}`);
@@ -95,7 +97,7 @@ export function removeMinio(target) {
   }
   requireCi(!docker(['ps', '-aq', '--no-trunc', '--filter', `name=^/${target.minioName}$`]), 'minio-remains');
   if (docker(['image', 'ls', '-q', target.minioImage])) {
-    inspectMinioImage(target);
+    inspectMinioImage(target, 'cleanup');
     docker(['image', 'rm', target.minioImage]);
   }
   requireCi(!docker(['image', 'ls', '-q', target.minioImage]), 'minio-image-remains');
