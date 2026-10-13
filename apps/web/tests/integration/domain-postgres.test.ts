@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import { after, before, test } from "node:test";
 import type { Prisma, PrismaClient, ProductStatus, ProjectStage, Role } from "@prisma/client";
 import type { DomainActor } from "../../src/server/actor";
+import { deliverPaymentEffects } from "../../src/server/payments/post-commit";
 import { guardedModuleCache } from "../helpers/guarded-module-cache";
 import { nativeOwnedIds, nativeSnapshot } from "../helpers/native-acceptance-snapshot";
 import { createPostgresFixture, rejectedSql, type PostgresRows } from "./postgres.fixture";
@@ -175,6 +176,10 @@ before(async () => {
   fixture = await createPostgresFixture("domain");
   const facade = new Proxy({}, { get(_db, key) {
     const context = current(), value = Reflect.get(context.db, key);
+    if (context.mutation && key === "domainEvent") return new Proxy(value, { get(model, method) {
+      if (method === "create") return () => { throw Error("OUTSIDE_DOMAIN_EVENT_WRITE"); };
+      const member = Reflect.get(model, method); return typeof member === "function" ? member.bind(model) : member;
+    } });
     if (key === "$transaction" && typeof value === "function") return async (operation: (tx: Prisma.TransactionClient) => Promise<unknown>, options: unknown) => {
       const probe = context.mutation, proof = probe ? probe.calls++ > 0 : false, connection = proof ? fixture.peer : context.db;
       const result = await Reflect.apply(Reflect.get(connection, "$transaction"), connection, [async (tx: Prisma.TransactionClient) => {
@@ -199,7 +204,8 @@ before(async () => {
   const effect = (name: string) => () => { const probe = current().mutation; if (probe) { probe.effects.push(name); throw Error("CI133_INJECTED_OPTIONAL_EFFECT"); } };
   const overrides = { "../src/auth": { auth: async () => ({ user: current().actor }) },
     "next/cache": { revalidatePath: effect("cache"), revalidateTag: effect("cache") },
-    "../src/server/plugins/events": { dispatchEvent: effect("dispatch"), emitDomainEvent: () => { throw Error("OUTSIDE_DOMAIN_EVENT_WRITE"); } },
+    "../src/server/payments/post-commit": { deliverPaymentEffects: (effects: Parameters<typeof deliverPaymentEffects>[0], dependencies: Parameters<typeof deliverPaymentEffects>[1]) =>
+      deliverPaymentEffects(effects, current().mutation ? { ...dependencies, dispatchEvent: async () => effect("dispatch")() } : dependencies) },
     "../src/server/notifications/notify": { notifyOrg: effect("org"), notifyPerson: effect("person") } };
   scope = guardedModuleCache(new URL("../ci169-domain-scope.ts", import.meta.url).href,
     { targets: [...names.map(name => `../src/server/${name}`), "./helpers/project-materials-reference"], allowedOverrides: Object.keys(overrides), overrides, prisma: facade });
@@ -679,7 +685,8 @@ test("mutation/real-COMMIT-lost-ACK-UNKNOWN-readonly-peer-replay-and-five-partia
     assert.equal(probe.partials, 1); assert.equal(probe.calls, 2); assert.deepEqual(await nativeSnapshot(fixture.db), before);
   }
   const payment = (clientMutationId: string) => ({ direction: "INCOME" as const, amount: 100.25, currency: "BYN", cashAccountId: cash.id,
-    comment: "Проверка133", paidAt: "2000-01-15", clientMutationId });
+    // Отдельный fixture месяц сохраняет receipts и real COMMIT, не попадая в turnover vectors за 2000-01.
+    comment: "Проверка133", paidAt: "1900-01-15", clientMutationId });
   const pay = (probe: MutationProbe, input: ReturnType<typeof payment>) => {
     probe.receiptId = `payment-request:${input.clientMutationId}`;
     return run(accountant, fixture.db, () => payments.createPaymentCore(accountant, input), { mutation: probe });
