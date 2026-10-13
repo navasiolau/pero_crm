@@ -1,0 +1,760 @@
+import assert from "node:assert/strict";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { randomUUID } from "node:crypto";
+import { createRequire } from "node:module";
+import { after, before, test } from "node:test";
+import { Prisma, type PrismaClient, type Role } from "@prisma/client";
+import { payrollMonth, payrollMonthRange } from "../../src/lib/payroll-month";
+import type { CashRates } from "../../src/lib/cash-ledger";
+import type { CashPayoutInput, PayoutActor } from "../../src/server/payroll/cash-core";
+import type { PaymentInput } from "../../src/server/payments/contracts";
+import { activePaymentWhere } from "../../src/server/payments/active-records";
+import { guardedModuleCache } from "../helpers/guarded-module-cache";
+import { createPostgresFixture, rejectedSql, type PostgresRows } from "./postgres.fixture";
+
+let fixture: Awaited<ReturnType<typeof createPostgresFixture>>;
+let scope: ReturnType<typeof guardedModuleCache>;
+let cash: typeof import("../../src/server/payroll/cash-core");
+let actions: typeof import("../../src/server/payroll/actions");
+let service: typeof import("../../src/server/payroll/cash-service");
+let payroll: typeof import("../../src/server/payroll/queries");
+let turnover: typeof import("../../src/server/payroll/turnover-core");
+let payments: typeof import("../../src/server/payments/service");
+let paymentCore: typeof import("../../src/server/payments/core");
+let preparation: typeof import("../../src/server/payments/prepare");
+let receipts: typeof import("../../src/server/payments/receipts");
+let paymentDelete: typeof import("../../src/server/payments/delete-core");
+let ledger: typeof import("../../src/server/finance/organization-ledger");
+let direct: typeof import("../../src/server/product-percentage-pay/direct-completion");
+let statuses: typeof import("../../src/server/products/status-core");
+const session = new AsyncLocalStorage<{ db: PrismaClient | Prisma.TransactionClient; actor: PayoutActor }>();
+const dispatches: string[] = [], cachePaths: string[] = [];
+let rateReads = 0, savepoint = 0;
+const on = <T>(db: PrismaClient | Prisma.TransactionClient, actor: PayoutActor, operation: () => T) => session.run({ db, actor }, operation);
+const actorFor = (user: { id: string; name: string; roles: Role[] }): PayoutActor => ({ ...user, source: "web" });
+const rates = (): CashRates => {
+  const day = new Date().toISOString().slice(0, 10);
+  return { asOf: day, cash: { currency: "BYN", rate: "1.000000", date: day }, payroll: { currency: "BYN", rate: "1.000000", date: day } };
+};
+
+before(async () => {
+  fixture = await createPostgresFixture("finance");
+  // Только auth/cache/FX/dispatch требуют границы без Next request. Все ORM delegate исполняют настоящий SQL.
+  const facade = new Proxy({}, { get(_target, key) {
+    const db = session.getStore()?.db ?? fixture.db;
+    if (key === "$transaction" && !("$transaction" in db)) return async (operation: (tx: Prisma.TransactionClient) => Promise<unknown>) => {
+      const tx = db as Prisma.TransactionClient, name = `finance169_${++savepoint}`;
+      await tx.$executeRawUnsafe(`SAVEPOINT ${name}`);
+      try { const result = await operation(tx); await tx.$executeRawUnsafe(`RELEASE SAVEPOINT ${name}`); return result; }
+      catch (error) { await tx.$executeRawUnsafe(`ROLLBACK TO SAVEPOINT ${name}`); await tx.$executeRawUnsafe(`RELEASE SAVEPOINT ${name}`); throw error; }
+    };
+    const value: unknown = Reflect.get(db, key);
+    return typeof value === "function" ? value.bind(db) : value;
+  } });
+  const anchor = new URL("../ci169-finance-scope.ts", import.meta.url).href, require = createRequire(anchor);
+  const targets = ["payroll/actions", "payments/service", "payments/delete-core", "finance/organization-ledger", "products/status-core"].map(path => `../src/server/${path}`);
+  scope = guardedModuleCache(anchor, {
+    targets, prisma: facade,
+    allowedOverrides: ["next/cache", "../src/server/require-role", "../src/server/finance/nbrb", "../src/server/plugins/events"],
+    overrides: {
+      "next/cache": { revalidatePath: (path: string) => cachePaths.push(path) },
+      "../src/server/require-role": { requireFinance: async () => ({ user: session.getStore()!.actor }), requireAdmin: async () => ({ user: session.getStore()!.actor }) },
+      "../src/server/finance/nbrb": { isCurrency: (value: string) => ["BYN", "USD", "EUR", "RUB"].includes(value),
+        getNbrbRate: async (currency: string) => { rateReads++; return { rate: currency === "USD" ? 3 : currency === "RUB" ? 0.03 : 1, date: new Date().toISOString().slice(0, 10) }; } },
+      "../src/server/plugins/events": { dispatchEvent: async (id: string) => { dispatches.push(id); } },
+    },
+  });
+  actions = scope.load("../src/server/payroll/actions"); payments = scope.load("../src/server/payments/service");
+  paymentDelete = scope.load("../src/server/payments/delete-core"); ledger = scope.load("../src/server/finance/organization-ledger");
+  statuses = scope.load("../src/server/products/status-core");
+  // Эти модули уже загружены дочерними real entrypoints и принадлежат тому же cache scope.
+  cash = require("../src/server/payroll/cash-core"); service = require("../src/server/payroll/cash-service");
+  payroll = require("../src/server/payroll/queries"); turnover = require("../src/server/payroll/turnover-core");
+  paymentCore = require("../src/server/payments/core"); preparation = require("../src/server/payments/prepare");
+  receipts = require("../src/server/payments/receipts"); direct = require("../src/server/product-percentage-pay/direct-completion");
+});
+after(async () => {
+  if (fixture) try { await fixture.verifyProtected(); } finally { try { scope?.restore(); } finally { await fixture.dispose(); } }
+});
+
+async function cashContext(tx: Prisma.TransactionClient, rows: PostgresRows, amount = "1000") {
+  const actor = actorFor(await rows.user("accountant", ["ACCOUNTANT"]));
+  const employee = await rows.user("employee", ["WORKER"], { payScheme: "NONE" });
+  const account = await tx.cashAccount.create({ data: { id: rows.id("cash"), name: "Касса169", currency: "BYN" } });
+  await tx.payment.create({ data: { cashAccountId: account.id, direction: "INCOME", amount, bynAmount: amount, currency: "BYN" } });
+  const input = { kind: "ADVANCE" as const, userId: employee.id, cashAccountId: account.id, cashAmount: "120.00",
+    expectedCashCurrency: "BYN" as const, description: "Работа над шкафом", requestId: randomUUID() };
+  return { actor, employee, account, input };
+}
+const money = (tx: Prisma.TransactionClient) => Promise.all([
+  tx.payment.findMany({ orderBy: { id: "asc" } }), tx.payrollEntry.findMany({ orderBy: { id: "asc" } }),
+  tx.payout.findMany({ orderBy: { id: "asc" } }), tx.changeLog.findMany({ orderBy: { id: "asc" } }), tx.domainEvent.findMany({ orderBy: { id: "asc" } }),
+]);
+function fixedBynTotal(history: readonly { amount: Prisma.Decimal; bynAmount: Prisma.Decimal | null; currency?: string; payrollCurrency?: string | null }[]) {
+  let total = new Prisma.Decimal(0);
+  for (const row of history) {
+    const value = row.bynAmount ?? ((row.currency ?? row.payrollCurrency) === "BYN" ? row.amount : null);
+    if (value === null) return null;
+    total = total.plus(value);
+  }
+  return total.toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+}
+async function savedOrgBalance(tx: Prisma.TransactionClient) {
+  const [records, payouts] = await Promise.all([tx.payment.findMany({ where: activePaymentWhere }), tx.payout.findMany()]);
+  const paid = fixedBynTotal(payouts);
+  assert.notEqual(paid, null, "SYNTHETIC_BASELINE_BYN_UNAVAILABLE");
+  return records.reduce((total, row) => row.direction === "INCOME" ? total.plus(row.bynAmount) : total.minus(row.bynAmount), new Prisma.Decimal(0)).minus(paid!);
+}
+function observed(tx: Prisma.TransactionClient) {
+  const calls: string[] = [];
+  return { calls, tx: new Proxy(tx, { get(target, key) {
+    const value: unknown = Reflect.get(target, key);
+    if (typeof value === "function") return (...args: unknown[]) => { calls.push(String(key)); return Reflect.apply(value, target, args); };
+    return value && typeof value === "object" ? new Proxy(value, { get(delegate, method) {
+      const fn: unknown = Reflect.get(delegate, method);
+      return typeof fn === "function" ? (...args: unknown[]) => { calls.push(`${String(key)}.${String(method)}`); return Reflect.apply(fn, delegate, args); } : fn;
+    } }) : value;
+  } }) };
+}
+
+test("cash/role-union-active-none-current-currencies-and-refusals", async () => fixture.rollback(async (tx, rows) => {
+  const startingOrg = await savedOrgBalance(tx);
+  const c = await cashContext(tx, rows), watched = observed(tx);
+  for (const roles of [["MANAGER"], ["MANAGER", "ENGINEER"], ["ENGINEER"], ["WORKER"], ["MOUNTER"], ["ENGINEER", "WORKER"]] as Role[][])
+    await assert.rejects(cash.issuePayoutCore({ ...c.actor, roles }, c.input, rates(), watched.tx), /прав/);
+  await assert.rejects(cash.issuePayoutCore(c.actor, { ...c.input, description: " " }, rates(), watched.tx), /описание/);
+  assert.equal(watched.calls.length, 0, "ROLE_AND_DESCRIPTION_BEFORE_SQL");
+  const previousDay = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
+  await assert.rejects(cash.issuePayoutCore(c.actor, c.input, { ...rates(), asOf: previousDay }, tx), /Дата расчёта/);
+  for (const roles of [["ADMIN"], ["DIRECTOR"], ["PROCUREMENT"], ["ACCOUNTANT"], ["MANAGER", "ACCOUNTANT"]] as Role[][]) {
+    const request = { ...c.input, requestId: randomUUID() };
+    const result = await cash.issuePayoutCore({ ...c.actor, roles }, request, rates(), tx);
+    assert.equal(result.cashAmount, "120.00");
+    assert.equal((await tx.payout.findUniqueOrThrow({ where: { id: result.payoutId } })).comment, "Работа над шкафом");
+  }
+  assert.equal(await tx.payrollEntry.count({ where: { userId: c.employee.id } }), 0);
+  assert.equal(await tx.payment.count({ where: { cashAccountId: c.account.id } }), 1);
+  assert.equal((await cash.readCashBalance(tx, c.account.id)).toFixed(2), "400.00");
+  const before = await money(tx);
+  for (const field of ["employee", "account"] as const) {
+    if (field === "employee") await tx.user.update({ where: { id: c.employee.id }, data: { active: false } });
+    else await tx.cashAccount.update({ where: { id: c.account.id }, data: { active: false } });
+    await assert.rejects(cash.issuePayoutCore(c.actor, { ...c.input, requestId: randomUUID() }, rates(), tx), /сотрудник|касса/);
+    if (field === "employee") await tx.user.update({ where: { id: c.employee.id }, data: { active: true } });
+    else await tx.cashAccount.update({ where: { id: c.account.id }, data: { active: true } });
+  }
+  await assert.rejects(cash.issuePayoutCore(c.actor, { ...c.input, cashAmount: "400.01", requestId: randomUUID() }, rates(), tx), /кассе/);
+  const expense = startingOrg.plus("280.01");
+  await tx.payment.create({ data: { direction: "EXPENSE", amount: expense, bynAmount: expense } });
+  assert.equal((await cash.readOrgBalance(tx, "1")).toFixed(2), "119.99");
+  await assert.rejects(cash.issuePayoutCore(c.actor, { ...c.input, requestId: randomUUID() }, rates(), tx), /организации/);
+  assert.deepEqual((await money(tx)).slice(1), before.slice(1));
+  await tx.cashAccount.update({ where: { id: c.account.id }, data: { currency: "USD" } });
+  await assert.rejects(cash.issuePayoutCore(c.actor, { ...c.input, requestId: randomUUID() }, rates(), tx), /Валюта/);
+  await assert.rejects(cash.issuePayoutCore(c.actor, { ...c.input, requestId: randomUUID() }, { ...rates(), cash: { ...rates().cash, currency: "USD", rate: "3.000000" } }, tx), /Валюта/);
+  await rejectedSql(tx, () => tx.payout.create({ data: { userId: c.employee.id, month: "2020-01", amount: "1", kind: "ADVANCE", cashAccountId: c.account.id } }), /Payout_cash_fields_complete/);
+}));
+
+for (const mode of ["usd", "byn-fallback"] as const) test(`cash/operator-full-cycle-delete-bulk-recipients/${mode}`, async () => fixture.rollback(async (tx, rows) => {
+  const [office, preferences, previousNotifications, previousMoney] = await Promise.all([
+    tx.user.findMany({ where: { active: true, roles: { hasSome: ["ADMIN", "DIRECTOR", "ACCOUNTANT", "PROCUREMENT"] } } }),
+    tx.notificationPreference.findMany({ where: { type: "payroll.orgPayout" } }),
+    tx.notification.findMany({ orderBy: { id: "asc" } }), money(tx),
+  ]);
+  const c = await cashContext(tx, rows), procurement = actorFor(await rows.user("procurement", ["PROCUREMENT"]));
+  const recipient = await rows.user("director", ["DIRECTOR"]), inactive = await rows.user("inactive", ["WORKER"], { active: false, payScheme: "NONE" });
+  const usd = await tx.cashAccount.create({ data: { id: rows.id("usd"), name: "USD169", currency: "USD" } });
+  await tx.payment.create({ data: { cashAccountId: mode === "usd" ? usd.id : c.account.id, amount: "1000", currency: mode === "usd" ? "USD" : "BYN", rate: mode === "usd" ? "3" : "1", bynAmount: mode === "usd" ? "3000" : "1000" } });
+  const accrued = await tx.payrollEntry.create({ data: { userId: inactive.id, month: "2000-01", amount: "500", currency: "BYN", bynAmount: "500" } });
+  const pairs: string[] = [], requests: CashPayoutInput[] = [c.input, { ...c.input, kind: "SALARY" as const, userId: inactive.id, cashAmount: "200.00", month: "2000-01", comment: "Работа169 зарплата", requestId: randomUUID() },
+    { ...c.input, cashAmount: "10.00", requestId: randomUUID() }];
+  if (mode === "usd") requests.push({ ...c.input, cashAccountId: usd.id, expectedCashCurrency: "USD", cashAmount: "50.00", requestId: randomUUID() });
+  const actors = [procurement, c.actor, procurement, procurement];
+  const recipients = [...office, c.actor, procurement, recipient].filter(user => !preferences.some(pref => pref.userId === user.id && !pref.enabled));
+  const outcomes: { payoutId: string; requestId: string }[] = [];
+  for (const [index, request] of requests.entries()) {
+    const actor = actors[index], result = await on(tx, actor, () => service.executeCashPayout(actor, request));
+    assert.equal(result.ok, true); assert.equal(result.repeated, false); assert.ok(result.payoutId);
+    outcomes.push({ payoutId: result.payoutId, requestId: request.requestId });
+    if (request.userId === c.employee.id) pairs.push(`payroll.payout|${c.employee.id}`);
+    for (const user of recipients) if (user.id !== actor.id) pairs.push(`payroll.orgPayout|${user.id}`);
+    const entry = await tx.payout.findUniqueOrThrow({ where: { id: result.payoutId } });
+    assert.equal(entry.cashAmount!.toFixed(2), request.cashAmount); assert.equal(entry.cashCurrency, request.expectedCashCurrency);
+    assert.equal(entry.payrollCurrency, "BYN"); assert.equal(entry.bynAmount!.toFixed(2), index === 3 ? "150.00" : request.cashAmount);
+    const receipt = await tx.changeLog.findUniqueOrThrow({ where: { id: `payout-issue:${request.requestId}` } });
+    assert.equal(receipt.actorId, actor.id); assert.equal(receipt.entityId, entry.id); assert.equal(receipt.action, "issue");
+  }
+  const effectCounts = [await tx.notification.count(), await tx.domainEvent.count()];
+  const rateCount = rateReads, repeated = await on(tx, procurement, () => service.executeCashPayout(procurement, requests[0]));
+  assert.equal(repeated.payoutId, outcomes[0].payoutId); assert.equal(repeated.repeated, true); assert.equal(rateReads, rateCount);
+  assert.deepEqual([await tx.notification.count(), await tx.domainEvent.count()], effectCounts);
+  assert.equal((await on(tx, c.actor, () => actions.deletePayout(outcomes[2].payoutId))).ok, true);
+  await assert.rejects(cash.issuePayoutCore(procurement, requests[2], rates(), tx), /отменена/);
+  assert.equal(await tx.payout.count({ where: { userId: { in: [c.employee.id, inactive.id] } } }), mode === "usd" ? 3 : 2);
+  assert.deepEqual(await tx.payrollEntry.findMany({ where: { userId: { in: [c.employee.id, inactive.id] } } }), [accrued]);
+  const allNotifications = await tx.notification.findMany({ orderBy: { id: "asc" } });
+  const notifications = allNotifications.filter(row => !previousNotifications.some(before => before.id === row.id));
+  assert.deepEqual(notifications.map(row => `${row.type}|${row.userId}`).sort(), pairs.sort());
+  assert.equal(allNotifications.length, previousNotifications.length + pairs.length);
+  assert.deepEqual(allNotifications.filter(row => previousNotifications.some(before => before.id === row.id)), previousNotifications);
+  assert.ok(notifications.every(row => ["/payroll", "/finance/payroll"].includes(row.link!)));
+  assert.equal(await tx.changeLog.count({ where: { entity: "payout", action: "delete", actorId: c.actor.id, entityId: outcomes[2].payoutId } }), 1);
+  const allEvents = await tx.domainEvent.findMany({ orderBy: { id: "asc" } });
+  const events = allEvents.filter(row => !previousMoney[4].some(before => before.id === row.id));
+  assert.equal(events.length, outcomes.length);
+  assert.ok(events.every(row => row.type === "payroll.payout"));
+  assert.deepEqual(allEvents.filter(row => previousMoney[4].some(before => before.id === row.id)), previousMoney[4]);
+  assert.deepEqual(events.map(row => (row.payload as { payoutId: string }).payoutId).sort(), outcomes.map(row => row.payoutId).sort());
+  assert.equal((await cash.readCashBalance(tx, c.account.id)).toFixed(2), mode === "usd" ? "680.00" : "1680.00");
+  assert.equal((await cash.readCashBalance(tx, usd.id)).toFixed(2), mode === "usd" ? "950.00" : "0.00");
+  assert.equal((await on(tx, c.actor, () => payroll.getEmployeeDues())).find(row => row.userId === inactive.id)?.due, 300);
+  // Реальный bulk consumer погашает оставшиеся 300, хотя сотрудник inactive/NONE; новых начислений нет.
+  const bulk = await on(tx, c.actor, () => actions.settleAll("2000-01", c.account.id));
+  assert.equal(bulk.ok, true); assert.equal(bulk.paidCount, 1); assert.equal(bulk.totalPaid, 300);
+  assert.deepEqual(await tx.payrollEntry.findMany({ where: { userId: inactive.id } }), [accrued]);
+  const afterMoney = await money(tx);
+  for (const [index, beforeRows] of previousMoney.entries())
+    assert.deepEqual(afterMoney[index].filter(row => beforeRows.some(before => before.id === row.id)), beforeRows, "FOREIGN_CASH_ROWS_UNCHANGED");
+}));
+
+async function paymentContext(tx: Prisma.TransactionClient, rows: PostgresRows, projectLinked: boolean) {
+  const c = await cashContext(tx, rows), project = projectLinked ? await rows.project("payment-project") : null;
+  const code = ((await tx.expenseArticle.aggregate({ _max: { code: true } }))._max.code ?? 0) + 1;
+  const article = await tx.expenseArticle.create({ data: { id: rows.id("article"), name: "Расход169", code } });
+  const document = await tx.financeDocument.create({ data: { uploadedById: c.actor.id, clientMutationId: randomUUID(), requestFingerprint: "ci169",
+    fileName: "Чек.pdf", mimeType: "application/pdf", size: 12, contentHash: "ci169", storageKey: rows.id("private-key"), storageMode: "s3", state: "READY", readyAt: new Date() } });
+  const input: PaymentInput = { projectId: project?.id ?? null, direction: "EXPENSE", amount: 100, currency: "BYN", cashAccountId: c.account.id,
+    expenseArticleId: article.id, reportDocumentId: document.id, clientMutationId: randomUUID(), comment: "Расход169" };
+  const prepared = await preparation.preparePayment(input, tx);
+  return { ...c, project, article, document, input, prepared };
+}
+
+for (const linked of [false, true]) test(`payment/report-owner-ready-context-replay-deleted/${linked ? "project" : "organization"}`, async () => fixture.rollback(async (tx, rows) => {
+  const startingOrg = await savedOrgBalance(tx), originalMoney = await money(tx);
+  const c = await paymentContext(tx, rows, linked), other = actorFor(await rows.user("other", ["PROCUREMENT"])), before = await money(tx);
+  for (const change of [{ reportDocumentId: undefined }, { reportDocumentId: randomUUID() }])
+    await assert.rejects(payments.createPaymentInTransaction(c.actor, { ...c.input, ...change }, c.prepared, tx), /документ/i);
+  await assert.rejects(payments.createPaymentInTransaction(other, c.input, c.prepared, tx), /документ/i);
+  await tx.financeDocument.update({ where: { id: c.document.id }, data: { state: "PENDING", readyAt: null } });
+  await assert.rejects(payments.createPaymentInTransaction(c.actor, c.input, c.prepared, tx), /документ/i);
+  assert.deepEqual(await money(tx), before);
+  await tx.financeDocument.update({ where: { id: c.document.id }, data: { state: "READY", readyAt: c.document.readyAt } });
+  const first = await payments.createPaymentInTransaction(c.actor, c.input, c.prepared, tx), saved = await money(tx);
+  const repeated = await payments.createPaymentInTransaction(c.actor, c.input, c.prepared, tx);
+  assert.equal(repeated.repeated, true); assert.equal(repeated.payment.id, first.payment.id); assert.equal(repeated.eventId, null);
+  assert.deepEqual(await money(tx), saved); assert.equal(first.payment.reportDocumentId, c.document.id);
+  assert.equal(first.payment.projectId, c.project?.id ?? null); assert.equal(first.payment.projectAmount?.toFixed(2) ?? null, linked ? "100.00" : null);
+  const view = await ledger.loadOrganizationPayments(c.actor, "EXPENSE", tx), visible = view.rows.find(row => row.id === first.payment.id)!;
+  assert.equal(visible.bynAmount, 100); assert.equal(visible.reportDocument?.id, c.document.id); assert.ok(!JSON.stringify(view).includes(c.document.storageKey));
+  assert.equal((await cash.readCashBalance(tx, c.account.id)).toFixed(2), "900.00");
+  assert.equal((await cash.readOrgBalance(tx, "1")).minus(startingOrg).toFixed(2), "900.00");
+  assert.equal(await tx.domainEvent.count({ where: { actor: c.actor.id, type: "expense.created" } }), 1);
+  for (const [actor, input, pattern] of [[c.actor, { ...c.input, comment: "changed" }, /другими данными/], [other, c.input, /другими данными/],
+    [c.actor, { ...c.input, clientMutationId: randomUUID() }, /документ/i]] as const)
+    await assert.rejects(payments.createPaymentInTransaction(actor, input, c.prepared, tx), pattern);
+  await tx.payment.delete({ where: { id: first.payment.id } });
+  await assert.rejects(payments.createPaymentInTransaction(c.actor, c.input, c.prepared, tx), /удалена/);
+  const legacyInput = { ...c.input, reportDocumentId: undefined, clientMutationId: randomUUID() };
+  const historical = await tx.payment.create({ data: { projectId: c.project?.id, projectAmount: linked ? "100" : null, direction: "EXPENSE", amount: "100",
+    bynAmount: "100", currency: "BYN", cashAccountId: c.account.id, expenseArticleId: c.article.id, createdById: c.actor.id } });
+  await receipts.recordPaymentReceipt(c.actor, legacyInput, historical.id, tx);
+  assert.equal((await payments.createPaymentInTransaction(c.actor, legacyInput, c.prepared, tx)).payment.id, historical.id);
+  await rejectedSql(tx, () => tx.payment.create({ data: { amount: "1", bynAmount: "1", projectAmount: "1", projectId: null } }), /Payment_project_context_check/);
+  // Последний receipt сталкивается с реально существующим PK после Payment/audit/outbox: откат всех записей.
+  const snapshot = await money(tx);
+  // receipt ID берём из фактического первого запроса, без знания внутреннего префикса.
+  const oldReceipt = await tx.changeLog.findFirstOrThrow({ where: { action: "request", entityId: first.payment.id } });
+  const collision = new Proxy(tx, { get(target, key) {
+    if (key !== "changeLog") return Reflect.get(target, key);
+    return new Proxy(tx.changeLog, { get(model, method) { return method === "create" ? (args: Prisma.ChangeLogCreateArgs) => model.create(args.data.action === "request" ? { ...args, data: { ...args.data, id: oldReceipt.id } } : args) : Reflect.get(model, method); } });
+  } });
+  await rejectedSql(tx, () => payments.createPaymentInTransaction(c.actor, { ...c.input, clientMutationId: randomUUID() }, c.prepared, collision), /Unique constraint/);
+  assert.deepEqual(await money(tx), snapshot, "PAYMENT_RECEIPT_SQL_FAILURE_ROLLS_BACK_ALL_MONEY_AUDIT_OUTBOX");
+  const finalMoney = await money(tx);
+  for (const [index, beforeRows] of originalMoney.entries())
+    assert.deepEqual(finalMoney[index].filter(row => beforeRows.some(before => before.id === row.id)), beforeRows, "FOREIGN_PAYMENT_ROWS_UNCHANGED");
+}));
+
+test("payment/foreign-preflight-decimal-snapshots-article-fences-and-delete-caps", async () => fixture.rollback(async (tx, rows) => {
+  const c = await paymentContext(tx, rows, true), usd = await tx.cashAccount.create({ data: { name: "USD169", currency: "USD" } });
+  await tx.payment.create({ data: { cashAccountId: usd.id, amount: "1000", currency: "USD", bynAmount: "3000", rate: "3" } });
+  const input = { ...c.input, direction: "INCOME" as const, expenseArticleId: undefined, reportDocumentId: undefined, cashAccountId: usd.id, currency: "USD" };
+  await tx.project.update({ where: { id: c.project!.id }, data: { currency: "USD" } });
+  for (const direction of ["INCOME", "EXPENSE"] as const) {
+    const read = observed(tx), priorRates = rateReads;
+    const result = await on(read.tx, c.actor, () => payments.createPaymentCore(c.actor, { ...c.input, direction, cashAccountId: usd.id, currency: "USD", clientMutationId: randomUUID(),
+      ...(direction === "INCOME" ? { expenseArticleId: undefined, reportDocumentId: undefined } : {}) }));
+    assert.equal(result.ok, false); assert.match(result.error ?? "", /BYN/); assert.equal(rateReads, priorRates);
+    assert.ok(!read.calls.some(call => /cashAccount|\.create/.test(call)));
+  }
+  await tx.project.update({ where: { id: c.project!.id }, data: { currency: "BYN" } });
+  for (const projectId of [null, c.project!.id]) {
+    const watched = observed(tx), rateCount = rateReads;
+    const invalid = await on(watched.tx, c.actor, () => payments.createPaymentCore(c.actor, { ...input, projectId, expenseArticleId: c.article.id, clientMutationId: randomUUID() }));
+    assert.equal(invalid.ok, false); assert.equal(watched.calls.length, 0); assert.equal(rateReads, rateCount);
+    const success = await on(watched.tx, c.actor, () => payments.createPaymentCore(c.actor, { ...input, projectId, clientMutationId: randomUUID() }));
+    assert.equal(success.ok, true); assert.equal(rateReads, rateCount + 1);
+    if (projectId === null) assert.ok(!watched.calls.some(call => call.startsWith("project.")));
+    const row = await tx.payment.findUniqueOrThrow({ where: { id: success.paymentId! } });
+    assert.equal(row.amount.toFixed(2), "100.00"); assert.equal(row.bynAmount.toFixed(2), "300.00"); assert.equal(row.expenseArticleId, null);
+    assert.equal(row.projectAmount?.toFixed(2) ?? null, projectId ? "300.00" : null);
+  }
+  const fraction = await on(tx, c.actor, () => payments.createPaymentCore(c.actor, { ...input, amount: 0.05, rate: 0.7, clientMutationId: randomUUID() }));
+  assert.equal(fraction.ok, true);
+  const rounded = await tx.payment.findUniqueOrThrow({ where: { id: fraction.paymentId! } });
+  assert.equal(rounded.amount.toFixed(2), "0.05"); assert.equal(rounded.rate.toString(), "0.7"); assert.equal(rounded.bynAmount.toFixed(2), "0.04"); assert.equal(rounded.projectAmount!.toFixed(2), "0.04");
+  const prepared = await preparation.preparePayment(c.input, tx), baseline = await money(tx);
+  for (const [supplied, expected] of [[undefined, c.article.id], [c.article.id, null], [rows.id("missing"), c.article.id]] as const)
+    await assert.rejects(payments.createPaymentInTransaction(c.actor, { ...c.input, expenseArticleId: supplied }, { ...prepared, articleId: expected }, tx), /стат/);
+  await tx.expenseArticle.update({ where: { id: c.article.id }, data: { active: false } });
+  await assert.rejects(payments.createPaymentInTransaction(c.actor, c.input, prepared, tx), /Реквизиты платежа/);
+  assert.deepEqual(await money(tx), baseline);
+  const income = await tx.payment.create({ data: { cashAccountId: c.account.id, amount: "100", bynAmount: "100" } });
+  await assert.rejects(paymentDelete.deletePaymentInTransaction({ ...c.actor, roles: ["MANAGER"] }, income.id, "INCOME", "BYN", "1", tx), /прав/);
+  const spent = await tx.payment.create({ data: { cashAccountId: c.account.id, direction: "EXPENSE", amount: "1000.01", bynAmount: "1000.01" } });
+  await assert.rejects(paymentDelete.deletePaymentInTransaction(c.actor, income.id, "INCOME", "BYN", "1", tx), /остаток кассы/);
+  await tx.payment.delete({ where: { id: spent.id } });
+  assert.equal((await paymentDelete.deletePaymentInTransaction(c.actor, income.id, "INCOME", "BYN", "1", tx)).id, income.id);
+  const audit = await tx.changeLog.findFirstOrThrow({ where: { entity: "payment", entityId: income.id, action: "delete" } });
+  assert.equal((audit.oldValue as { project: unknown }).project, null);
+  assert.equal(await tx.changeLog.count({ where: { entity: "payment", entityId: income.id, action: "delete" } }), 1);
+  const archived = await tx.payment.create({ data: { projectId: c.project!.id, projectAmount: "1", direction: "EXPENSE", amount: "1", bynAmount: "1" } });
+  await tx.project.update({ where: { id: c.project!.id }, data: { deletedAt: new Date() } });
+  await assert.rejects(paymentDelete.deletePaymentInTransaction(c.actor, archived.id, "EXPENSE", "BYN", "1", tx), /только для просмотра/);
+}));
+
+test("payment/scenario-minimal-effects-replay-skips-fx", async () => fixture.rollback(async (tx, rows) => {
+  const c = await cashContext(tx, rows), input: PaymentInput = { direction: "INCOME", cashAccountId: c.account.id, amount: 100, currency: "BYN", comment: "own", clientMutationId: randomUUID() };
+  let prepared = 0;
+  const deps = { reader: tx, transaction: async <T>(operation: (inner: Prisma.TransactionClient) => Promise<T>) => operation(tx),
+    prepare: async (data: PaymentInput) => { prepared++; assert.equal(prepared, 1); return preparation.preparePayment(data, tx); } };
+  const first = await paymentCore.createPaymentScenario(c.actor, input, deps);
+  assert.equal(first.ack.ok, true);
+  assert.deepEqual(first.effects, { paymentId: first.ack.paymentId, eventId: (await tx.domainEvent.findFirstOrThrow({ where: { actor: c.actor.id } })).id,
+    actorId: c.actor.id, project: null, direction: "INCOME", amount: 100, currency: "BYN", comment: "own" });
+  assert.deepEqual(await paymentCore.createPaymentScenario(c.actor, input, deps), { ack: { ...first.ack, replayed: true } });
+  assert.equal(prepared, 1); assert.equal(await tx.changeLog.count({ where: { actorId: c.actor.id } }), 2);
+}));
+
+test("payroll/native-moscow-boundaries-invalid-period-zero-writes", async () => fixture.rollback(async (tx, rows) => {
+  const c = await cashContext(tx, rows, "0"), watched = observed(tx);
+  for (const month of ["2025-13", "2026-00", "0000-01", "2026-1", "2026-01\n"]) {
+    await assert.rejects(cash.issuePayoutCore(c.actor, { ...c.input, kind: "SALARY", month }, rates(), watched.tx), /месяц/);
+    await assert.rejects(payroll.getMonthTurnover(month, watched.tx), /месяц/);
+    await on(watched.tx, c.actor, async () => {
+      await assert.rejects(payroll.getMyPayroll(c.employee.id, month), /месяц/);
+      await assert.rejects(payroll.getPayrollSummary(month), /месяц/);
+      await assert.rejects(payroll.getTurnoverAccruals(month), /месяц/);
+    });
+  }
+  assert.equal(watched.calls.length, 0);
+  for (const month of ["2024-02", "2026-01", "2014-10", "1981-03", "1981-04"]) {
+    const { start, end } = payrollMonthRange(month);
+    for (const [index, instant] of [start.getTime() - 1, start.getTime(), end.getTime() - 1, end.getTime()].entries()) {
+      const amount = index === 1 ? "1.01" : index === 2 ? "3.21" : "99.00";
+      await tx.payment.create({ data: { cashAccountId: c.account.id, paidAt: new Date(instant), amount, bynAmount: amount } });
+    }
+    assert.deepEqual(await payroll.getMonthTurnover(month, tx), { total: 4.22, paymentsCount: 2, currency: "BYN" });
+    await tx.payment.deleteMany({ where: { cashAccountId: c.account.id } });
+  }
+}));
+
+test("payroll/shared-native-inputs-consumer-dto-1-5-20-tenfold-history", async () => fixture.rollback(async (tx, rows) => {
+  const [originalUsers, originalEntries, originalPayouts] = await Promise.all([
+    tx.user.findMany({ orderBy: { id: "asc" } }), tx.payrollEntry.findMany({ orderBy: { id: "asc" } }), tx.payout.findMany({ orderBy: { id: "asc" } }),
+  ]);
+  const actor = actorFor(await rows.user("reader", ["ACCOUNTANT"])), current = payrollMonth();
+  // До-case DTO строим из сохранённых Decimal-фактов, не из проверяемого summary reader.
+  const foreign = originalUsers.map(user => {
+    const ledger = originalEntries.filter(row => row.userId === user.id), payouts = originalPayouts.filter(row => row.userId === user.id);
+    const past = fixedBynTotal(ledger.filter(row => row.month < current)), paid = fixedBynTotal(payouts);
+    const due = past === null || paid === null ? null : past.minus(paid).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP).toNumber();
+    return { userId: user.id, name: user.name, activeScheme: user.active && user.payScheme !== "NONE",
+      selectedEntries: ledger.some(row => row.month === "2020-01"), selectedPayouts: payouts.some(row => row.month === "2020-01"),
+      accrued: fixedBynTotal(ledger.filter(row => row.month === "2020-01"))?.toNumber() ?? null,
+      paid: fixedBynTotal(payouts.filter(row => row.month === "2020-01"))?.toNumber() ?? null,
+      advance: fixedBynTotal(payouts.filter(row => row.month === "2020-01" && row.kind === "ADVANCE"))?.toNumber() ?? null, due };
+  });
+  const foreignSummary = foreign.filter(row => row.activeScheme || row.selectedEntries || row.selectedPayouts || row.due !== 0)
+    .map(({ userId, accrued, paid, advance, due }) => ({ userId, accrued, paid, advance, due }));
+  const foreignDues = foreign.filter(row => row.due !== 0).map(({ userId, name, due }) => ({ userId, name, due }));
+  const users = Array.from({ length: 20 }, (_, index) => ({ id: rows.id(`reader-${index}`), name: `Зарплата ${String(index).padStart(2, "0")}`, email: `${rows.id(`reader-${index}`)}@example.invalid`, passwordHash: "CI_NO_LOGIN",
+    roles: index === 3 ? ["ENGINEER" as const] : ["MANAGER" as const, "ENGINEER" as const], active: index !== 0,
+    payScheme: index === 0 ? "NONE" as const : index % 3 === 0 ? "PERCENT_TURNOVER" as const : "PIECE" as const, payPercent: index % 3 === 0 ? "3" : null }));
+  const account = await tx.cashAccount.create({ data: { name: "Историческая касса RUB", currency: "RUB" } });
+  const entries: Prisma.PayrollEntryCreateManyInput[] = [], paid: Prisma.PayoutCreateManyInput[] = [];
+  for (const [index, user] of users.entries()) {
+    for (const [position, pattern] of [
+      { month: "2020-01", amount: "100", currency: "BYN", bynAmount: null, scheme: "PIECE" },
+      { month: "2020-01", amount: "-0.03", currency: "BYN", bynAmount: "-0.03", scheme: "PIECE" },
+      { month: "2020-01", amount: "0.03", currency: "BYN", bynAmount: "0.03", scheme: "PIECE" },
+      { month: "2020-01", amount: "10", currency: "USD", bynAmount: "30", scheme: "PERCENT_TURNOVER" },
+      { month: "2020-01", amount: "999", currency: "USD", bynAmount: "0", scheme: "PIECE" },
+      { month: current, amount: "6", currency: "BYN", bynAmount: "6", scheme: "PIECE" },
+      { month: current, amount: "9", currency: "USD", bynAmount: index === 0 ? null : "27", scheme: "PIECE" },
+      { month: "2999-01", amount: "7", currency: "BYN", bynAmount: "7", scheme: "PIECE" },
+    ].entries()) entries.push({ id: rows.id(`entry-${index}-${position}`), userId: user.id, ...pattern });
+    for (let position = 0; position < 3; position++) {
+      const legacy = index === 0 && position === 2, amount = position === 1 ? "0.01" : "2";
+      paid.push({ id: rows.id(`paid-${index}-${position}`), userId: user.id, createdById: actor.id, amount, kind: position === 1 ? "ADVANCE" : "SALARY", month: position === 2 ? "2999-01" : "2020-01",
+        cashAccountId: legacy ? null : account.id, cashAmount: legacy ? null : amount, cashCurrency: legacy ? null : "RUB", payrollCurrency: legacy ? null : "RUB", bynAmount: legacy ? null : position === 1 ? "0" : "0.06",
+        cashRate: legacy ? null : "0.030000", payrollRate: legacy ? null : "0.030000", cashRateDate: legacy ? null : new Date("2020-01-03"), payrollRateDate: legacy ? null : new Date("2020-01-03") });
+    }
+  }
+  const fence = async () => {
+    const marker = randomUUID(); await tx.$queryRaw`SELECT ${marker}::text AS "finance169Fence"`;
+    const deadline = performance.now() + 5000;
+    let index = -1;
+    while ((index = fixture.queryEvents.findIndex(event => event.query.includes('"finance169Fence"') && event.params.includes(marker))) < 0) {
+      assert.ok(performance.now() < deadline, "SQL_QUERY_LOG_FENCE_TIMEOUT"); await new Promise(resolve => setTimeout(resolve, 1));
+    }
+    return index;
+  };
+  const measure = async <T>(read: () => Promise<T>) => { const start = await fence(), value = await read(), end = await fence(); return { value, count: end - start - 1 }; };
+  let inserted = 0;
+  const counts: number[] = [], consumerCounts: number[] = [];
+  const verify = async (size: number, multiplier: number) => on(tx, actor, async () => {
+    const measured = await measure(() => payroll.readPayrollSummary("2020-01")), model = measured.value;
+    assert.equal(measured.count, 2); counts.push(measured.count);
+    for (const [index, user] of users.slice(0, size).entries()) {
+      assert.equal(model.accrued.get(user.id), 130 * multiplier); assert.equal(model.paid.get(user.id), 0.06 * multiplier);
+      assert.equal(model.advances.get(user.id), 0); assert.equal(model.pastAccrued.get(user.id), 130 * multiplier);
+      assert.equal(model.estimates.get(user.id), index === 0 ? null : 33 * multiplier); assert.equal(model.turnoverAccrued.get(user.id), 30 * multiplier);
+      assert.equal(model.totalPaid.get(user.id), index === 0 ? null : 0.12 * multiplier);
+    }
+    assert.equal(model.allPaid, null);
+    const consumer = await measure(async () => {
+      const snapshot = await payroll.readPayrollSummary("2020-01");
+      return Promise.all([payroll.getPayrollSummary("2020-01", snapshot), payroll.getEmployeeDues(snapshot), payroll.getCurrentMonthEstimates(snapshot),
+        payroll.getOrgBalance(snapshot), payroll.getTurnoverAccruals("2020-01", snapshot), payroll.listPayrollUsers(snapshot)]);
+    });
+    consumerCounts.push(consumer.count);
+    const [summary, dues, estimates, balance, accruals, eligible] = consumer.value;
+    assert.deepEqual(new Map(summary.rows.map(({ userId, accrued, paid, advance, due }) => [userId, { userId, accrued, paid, advance, due }])),
+      new Map([...foreignSummary, ...users.slice(0, size).map((user, index) => ({ userId: user.id, accrued: 130 * multiplier, paid: 0.06 * multiplier, advance: 0, due: index === 0 ? null : 129.88 * multiplier }))].map(row => [row.userId, row])));
+    assert.equal(summary.rows.length, foreignSummary.length + size);
+    assert.deepEqual(await payroll.getPayrollSummary("2020-01"), summary);
+    assert.deepEqual(new Map(dues.map(row => [row.userId, row])), new Map([...foreignDues,
+      ...users.slice(0, size).map((user, index) => ({ userId: user.id, name: user.name, due: index === 0 ? null : 129.88 * multiplier }))].map(row => [row.userId, row])));
+    assert.equal(dues.length, foreignDues.length + size);
+    assert.equal(estimates[users[0].id], null); assert.equal(balance, null); assert.ok(eligible.some(user => user.id === users[0].id));
+    assert.ok(!accruals.some(user => user.userId === users[3].id));
+    const personal = await payroll.getMyPayroll(users[0].id, "2020-01");
+    assert.deepEqual({ accrued: personal.accrued, paid: personal.paid, debt: personal.debt, estimate: personal.estimate }, { accrued: 130 * multiplier, paid: 0.06 * multiplier, debt: null, estimate: null });
+    assert.equal(personal.entries.length, 5 * multiplier); assert.equal(personal.payouts.length, 2 * multiplier);
+    if (size > 1) for (const selected of ["2020-01", current, "2999-01"]) {
+      const own = await payroll.getMyPayroll(users[1].id, selected);
+      assert.deepEqual({ accrued: own.accrued, paid: own.paid, debt: own.debt, estimate: own.estimate }, {
+        accrued: (selected === "2020-01" ? 130 : selected === current ? 33 : 7) * multiplier,
+        paid: (selected === current ? 0 : 0.06) * multiplier, debt: 129.88 * multiplier, estimate: 33 * multiplier,
+      });
+    }
+  });
+  for (const size of [1, 5, 20]) {
+    const incoming = users.slice(inserted, size), ids = incoming.map(user => user.id);
+    await tx.user.createMany({ data: incoming }); await tx.payrollEntry.createMany({ data: entries.filter(row => ids.includes(row.userId)) });
+    await tx.payout.createMany({ data: paid.filter(row => ids.includes(row.userId)) }); inserted = size;
+    await verify(size, 1);
+  }
+  assert.deepEqual(counts, [2, 2, 2]); assert.ok(consumerCounts[2] <= consumerCounts[0] + 2);
+  for (let copy = 0; copy < 9; copy++) {
+    await tx.payrollEntry.createMany({ data: entries.map(row => ({ ...row, id: `${row.id}-copy-${copy}` })) });
+    await tx.payout.createMany({ data: paid.map(row => ({ ...row, id: `${row.id}-copy-${copy}` })) });
+  }
+  await verify(20, 10);
+  assert.equal(await tx.payrollEntry.count(), originalEntries.length + 1600); assert.equal(await tx.payout.count(), originalPayouts.length + 600);
+  assert.equal(await tx.payrollEntry.count({ where: { userId: { in: users.map(user => user.id) } } }), 1600);
+  assert.equal(await tx.payout.count({ where: { userId: { in: users.map(user => user.id) } } }), 600);
+  assert.deepEqual(await tx.payrollEntry.findMany({ where: { id: { in: originalEntries.map(row => row.id) } }, orderBy: { id: "asc" } }), originalEntries);
+  assert.deepEqual(await tx.payout.findMany({ where: { id: { in: originalPayouts.map(row => row.id) } }, orderBy: { id: "asc" } }), originalPayouts);
+  assert.deepEqual(await tx.user.findMany({ where: { id: { in: originalUsers.map(row => row.id) } }, orderBy: { id: "asc" } }), originalUsers);
+}));
+
+test("percentage/native-v1-v2-v3-v4-shape-immutable-and-ceiling-overflow", async () => fixture.rollback(async (tx, rows) => {
+  const manager = actorFor(await rows.user("percentage-manager", ["MANAGER"])), engineer = await rows.user("engineer", ["ENGINEER"]), assembler = await rows.user("assembler", ["WORKER"]);
+  const project = await rows.project("percentage-project", { managerId: manager.id });
+  const product = await rows.product("shape", project.id, { expectedPrice: "999.30", engineerId: engineer.id, status: "DESIGN" }), stamp = new Date();
+  const valid = { productId: product.id, kind: "ENGINEERING" as const, state: "SETTLED" as const, statusAtCompletion: "PRODUCTION" as const, calculationVersion: 4,
+    quantitySnapshot: 1, priceSnapshot: "999.30", totalSnapshot: "999.30", ratePercentSnapshot: "100", recipientId: engineer.id,
+    productCurrency: "BYN", payrollCurrency: "BYN", productRateByn: "1", payrollRateByn: "1", productRateDate: stamp, payrollRateDate: stamp,
+    sourceFundExact: "999.30", amount: "1000.00", bynAmount: "1000.00", projectAmount: "1000.00", settledAt: stamp };
+  for (const bad of [{ amount: "999.30", bynAmount: "999.30", projectAmount: "999.30" }, { amount: "1001.00", bynAmount: "1001.00", projectAmount: "1001.00" },
+    { quantitySnapshot: 0 }, { totalSnapshot: "1998.60" }, { recipientId: null }])
+    await rejectedSql(tx, () => tx.productPercentageCompletion.create({ data: { ...valid, ...bad } }), /ProductPercentageCompletion_version_shape/);
+  const saved = await tx.productPercentageCompletion.create({ data: valid });
+  await rejectedSql(tx, () => tx.productPercentageCompletion.update({ where: { id: saved.id }, data: { priceSnapshot: "1000" } }), /append-only|immutable/);
+  await rejectedSql(tx, () => tx.productPercentageCompletion.delete({ where: { id: saved.id } }), /append-only|immutable/);
+  for (const version of [1, 2, 3]) {
+    const prior = await rows.product(`v${version}`, project.id, { status: "PRODUCTION", expectedPrice: "999.30", engineerId: engineer.id });
+    const old = await tx.productPercentageCompletion.create({ data: version === 1 ? { productId: prior.id, kind: "ENGINEERING", state: "LEGACY_PROTECTED", statusAtCompletion: "PRODUCTION", calculationVersion: 1,
+      priceSnapshot: "999.30", productCurrency: "BYN" } : { ...valid, productId: prior.id, calculationVersion: version, amount: "999.30", bynAmount: "999.30", projectAmount: "999.30" } });
+    await tx.product.update({ where: { id: prior.id }, data: { expectedPrice: "1", quantity: 3 } });
+    for (const status of ["DESIGN", "PRODUCTION"] as const) assert.equal((await statuses.changeProductStatusTransaction(tx, manager, prior.id, status)).ok, true);
+    assert.deepEqual(await tx.productPercentageCompletion.findUnique({ where: { id: old.id } }), old);
+  }
+  const overflow = await rows.product("overflow", project.id, { status: "PRODUCTION", expectedPrice: "8333333332.51", quantity: 8, assemblerId: assembler.id });
+  await tx.productPercentageConfig.create({ data: { productId: overflow.id, kind: "ASSEMBLY", ratePercent: "15" } });
+  await assert.rejects(statuses.changeProductStatusTransaction(tx, manager, overflow.id, "STORAGE"), /превышает допустимую/);
+  assert.equal(await tx.productPercentageCompletion.count({ where: { productId: overflow.id } }), 0);
+}));
+
+test("percentage/direct-late-adjustment-moscow-month", async t => {
+  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-10-31T21:30:00.000Z").getTime() });
+  await fixture.rollback(async (tx, rows) => {
+    const manager = actorFor(await rows.user("manager", ["MANAGER"])), worker = await rows.user("worker", ["WORKER"]), project = await rows.project("month-project", { managerId: manager.id });
+    for (const skipped of [false, true]) {
+      const product = await rows.product(skipped ? "late" : "direct", project.id, { status: "PRODUCTION", expectedPrice: "1000", assemblerId: worker.id });
+      await tx.productPercentageConfig.create({ data: { productId: product.id, kind: "ASSEMBLY", ratePercent: skipped ? null : "3", revision: 1 } });
+      assert.equal(await direct.captureDirectPercentage(tx, manager, product.id, "ASSEMBLY", "STORAGE"), skipped ? "SKIPPED_ONCE" : "SETTLED");
+      if (skipped) {
+        await tx.productPercentageConfig.update({ where: { productId_kind: { productId: product.id, kind: "ASSEMBLY" } }, data: { ratePercent: "3", revision: 2 } });
+        assert.equal(await direct.settleSkippedPercentage(tx, manager, product.id, "ASSEMBLY", "STORAGE"), "SETTLED");
+      }
+      const original = await tx.productPercentageCompletion.findUniqueOrThrow({ where: { productId_kind: { productId: product.id, kind: "ASSEMBLY" } } });
+      const first = await tx.payrollEntry.findFirstOrThrow({ where: { productId: product.id } });
+      assert.equal(first.month, "2026-11"); assert.equal(first.amount.toFixed(2), "30.00");
+      assert.equal((await direct.adjustSettledPercentage(tx, manager, product.id, "ASSEMBLY", "4", randomUUID())).delta, "10.00");
+      const adjustment = await tx.payrollEntry.findFirstOrThrow({ where: { productId: product.id, percentageAdjustmentId: { not: null } } });
+      assert.equal(adjustment.month, "2026-11"); assert.equal(adjustment.amount.toFixed(2), "10.00");
+      assert.deepEqual(await tx.productPercentageCompletion.findUnique({ where: { id: original.id } }), original);
+    }
+  });
+});
+
+async function turnoverContext(tx: Prisma.TransactionClient, rows: PostgresRows, total = "10000", percent = "3") {
+  const c = await cashContext(tx, rows, "0"), employee = await rows.user("turnover-payee", ["MANAGER", "ENGINEER"], { payScheme: "PERCENT_TURNOVER", payPercent: percent });
+  const paidAt = new Date("2000-01-15T09:00:00Z"), large = total === "90071992547409.99";
+  const account = large ? await tx.cashAccount.create({ data: { name: "Исторический USD169", currency: "USD" } }) : c.account;
+  // Физические суммы помещаются в Decimal(12,2), сохранённый BYN — в Decimal(18,2).
+  const payment = await tx.payment.create({ data: { cashAccountId: account.id, amount: large ? "9007199254.74" : total,
+    bynAmount: large ? "90071992547400.00" : total, currency: large ? "USD" : "BYN", rate: large ? "10000" : "1", paidAt } });
+  if (large) await tx.payment.create({ data: { cashAccountId: c.account.id, amount: "9.99", bynAmount: "9.99", paidAt } });
+  const transaction = async <T>(operation: (inner: Prisma.TransactionClient) => Promise<T>) => operation(tx);
+  return { ...c, employee, payment, transaction };
+}
+
+for (const vector of [
+  { id: "topup", total: "10000", percent: "3", prior: null, amount: "300.00" },
+  { id: "saved-foreign", total: "1000", percent: "5", prior: "30", amount: "20.00" },
+  { id: "decimal-large", total: "90071992547409.99", percent: "0.01", prior: null, amount: "9007199254.74" },
+  { id: "zero", total: "0", percent: "3", prior: null, amount: null },
+]) test(`turnover/immutable-history-basis/${vector.id}`, async () => fixture.rollback(async (tx, rows) => {
+  const c = await turnoverContext(tx, rows, vector.total, vector.percent);
+  const frozen = await tx.payrollEntry.create({ data: { userId: c.employee.id, month: "2000-01", scheme: "PRODUCT_PERCENT_ENGINEERING", amount: "150", bynAmount: "150", currency: "BYN" } });
+  if (vector.prior) await tx.payrollEntry.create({ data: { userId: c.employee.id, month: "2000-01", scheme: "PERCENT_TURNOVER", amount: "10", bynAmount: vector.prior, currency: "USD" } });
+  await rows.user("pure-engineer", ["ENGINEER"], { payScheme: "PERCENT_TURNOVER", payPercent: vector.percent });
+  const first = await turnover.accrueTurnoverCore(c.actor, "2000-01", c.transaction);
+  assert.equal(first.ok, true); if (!first.ok) return;
+  assert.equal(first.accruedCount, vector.amount === null ? 0 : 1);
+  if (vector.amount) {
+    assert.equal(first.earnings[0].amount, vector.amount); assert.equal(first.earnings[0].userId, c.employee.id);
+    const audit = await tx.changeLog.findFirstOrThrow({ where: { entityId: first.earnings[0].payrollEntryId } });
+    assert.deepEqual((audit.newValue as { basis: unknown }).basis, { start: "1999-12-31T21:00:00.000Z", end: "2000-01-31T21:00:00.000Z", currency: "BYN",
+      totalByn: new Prisma.Decimal(vector.total).toFixed(2), paymentsCount: vector.id === "decimal-large" ? 2 : 1, percent: vector.percent, priorByn: vector.prior ? "30.00" : "0.00",
+      expectedByn: vector.prior ? "50.00" : vector.amount, deltaByn: vector.amount });
+    const event = await tx.domainEvent.findUniqueOrThrow({ where: { id: first.earnings[0].eventId } });
+    assert.equal((event.payload as { payrollEntryId: string }).payrollEntryId, audit.entityId); assert.equal((event.payload as { basis?: unknown }).basis, undefined);
+  }
+  assert.deepEqual(await tx.payrollEntry.findUnique({ where: { id: frozen.id } }), frozen);
+  if (vector.id === "topup") {
+    const initial = await money(tx);
+    await tx.payment.update({ where: { id: c.payment.id }, data: { amount: "12000", bynAmount: "12000" } });
+    const topup = await turnover.accrueTurnoverCore(c.actor, "2000-01", c.transaction);
+    assert.ok(topup.ok); assert.equal(topup.earnings[0].amount, "60.00"); assert.equal(topup.earnings[0].isTopUp, true);
+    const history = await tx.payrollEntry.findMany({ orderBy: { id: "asc" } });
+    assert.equal((await turnover.accrueTurnoverCore(c.actor, "2000-01", c.transaction)).ok, true);
+    await tx.payment.update({ where: { id: c.payment.id }, data: { amount: "8000", bynAmount: "8000" } });
+    const decrease = await turnover.accrueTurnoverCore(c.actor, "2000-01", c.transaction);
+    assert.ok(decrease.ok); assert.equal(decrease.accruedCount, 0); assert.deepEqual(await tx.payrollEntry.findMany({ orderBy: { id: "asc" } }), history);
+    for (const row of initial[1]) assert.ok(history.some(actual => actual.id === row.id && actual.amount.eq(row.amount)));
+  }
+}));
+
+test("turnover/combined-estimate-debt-pure-engineer-unknown-and-period-refusal", async () => fixture.rollback(async (tx, rows) => {
+  const c = await turnoverContext(tx, rows, "2000", "5"), now = payrollMonth();
+  const frozen = await tx.payrollEntry.createMany({ data: [
+    { userId: c.employee.id, month: "2000-01", scheme: "PRODUCT_PERCENT_ENGINEERING", amount: "150", bynAmount: "150" },
+    { userId: c.employee.id, month: "2000-01", scheme: "PIECE", amount: "1000", bynAmount: "1000" },
+    { userId: c.employee.id, month: now, scheme: "PRODUCT_PERCENT_ENGINEERING", amount: "50", bynAmount: "50" },
+    { userId: c.employee.id, month: now, scheme: "PIECE", amount: "25", bynAmount: "25" },
+  ] }); assert.equal(frozen.count, 4);
+  const stamp = new Date("2000-01-02T00:00:00.000Z");
+  await tx.payout.create({ data: { userId: c.employee.id, amount: "100", month: "2000-01", payrollCurrency: "BYN", bynAmount: "100",
+    cashAccountId: c.account.id, cashAmount: "100", cashCurrency: "BYN", cashRate: "1", payrollRate: "1", cashRateDate: stamp, payrollRateDate: stamp } });
+  const originalHistory = await tx.payrollEntry.findMany({ where: { userId: c.employee.id }, orderBy: { id: "asc" } });
+  await turnover.accrueTurnoverCore(c.actor, "2000-01", c.transaction);
+  assert.deepEqual(await tx.payrollEntry.findMany({ where: { id: { in: originalHistory.map(row => row.id) } }, orderBy: { id: "asc" } }), originalHistory);
+  assert.equal((await tx.user.findUniqueOrThrow({ where: { id: c.employee.id } })).payScheme, "PERCENT_TURNOVER");
+  await on(tx, c.actor, async () => {
+    assert.equal((await payroll.getCurrentMonthEstimates())[c.employee.id], 75);
+    assert.equal((await payroll.getEmployeeDues()).find(user => user.userId === c.employee.id)?.due, 1150);
+    await tx.user.update({ where: { id: c.employee.id }, data: { roles: ["ENGINEER"] } });
+    const prior = await money(tx), pure = await turnover.accrueTurnoverCore(c.actor, "2000-01", c.transaction);
+    assert.equal(pure.ok, false); assert.deepEqual(await payroll.getTurnoverAccruals("2000-01"), []); assert.deepEqual(await money(tx), prior);
+    assert.equal((await payroll.getEmployeeDues()).find(user => user.userId === c.employee.id)?.due, 1150);
+  });
+  const second = await rows.user("unknown-payee", ["MANAGER"], { payScheme: "PERCENT_TURNOVER", payPercent: "3" });
+  await tx.payrollEntry.create({ data: { userId: second.id, month: "2000-01", scheme: "PERCENT_TURNOVER", amount: "10", currency: "USD", bynAmount: null } });
+  const before = await money(tx), unknown = await turnover.accrueTurnoverCore(c.actor, "2000-01", c.transaction);
+  assert.equal(unknown.ok, false); if (!unknown.ok) assert.match(unknown.error, /BYN/); assert.deepEqual(await money(tx), before);
+  let entered = 0;
+  const forbidden = async <T>(operation: (inner: Prisma.TransactionClient) => Promise<T>): Promise<T> => { void operation; entered++; throw Error("UNEXPECTED_TRANSACTION"); };
+  await assert.rejects(turnover.accrueTurnoverCore({ ...c.actor, roles: ["WORKER"] }, "2000-01", forbidden), /прав/);
+  for (const month of ["2025-13", "0000-01", now, "9999-12"]) assert.equal((await turnover.accrueTurnoverCore(c.actor, month, forbidden)).ok, false);
+  assert.equal(entered, 0);
+}));
+
+for (const step of ["payrollEntry", "changeLog", "domainEvent"] as const) test(`turnover/second-payee-native-${step}-failure-whole-command-rollback`, async () => fixture.rollback(async (tx, rows) => {
+  const c = await turnoverContext(tx, rows), second = await rows.user("turnover-second", ["MANAGER"], { payScheme: "PERCENT_TURNOVER", payPercent: "3" }), before = await money(tx);
+  let creates = 0, firstId = "", witnessed = false;
+  const fault = new Proxy(tx, { get(target, key) {
+    if (key !== step) return Reflect.get(target, key);
+    return new Proxy(target[step], { get(model, method) {
+      if (method !== "create") return Reflect.get(model, method);
+      return async (args: { data: Record<string, unknown> }) => {
+        const create = Reflect.get(model, "create") as unknown as (data: { data: Record<string, unknown> }) => Promise<{ id: string }>;
+        if (++creates === 2) {
+          assert.equal(await tx.payrollEntry.count({ where: { userId: { in: [c.employee.id, second.id] } } }), step === "payrollEntry" ? 1 : 2);
+          assert.equal(await tx.domainEvent.count({ where: { actor: c.actor.id } }), 1); witnessed = true;
+          return Reflect.apply(create, model, [{ ...args, data: { ...args.data, id: firstId } }]);
+        }
+        const saved = await Reflect.apply(create, model, [args]); firstId = saved.id; return saved;
+      };
+    } });
+  } });
+  await rejectedSql(tx, () => turnover.accrueTurnoverCore(c.actor, "2000-01", async operation => operation(fault)), /Unique constraint/);
+  assert.equal(witnessed, true, "FIRST_PAYEE_WRITES_EXISTED_BEFORE_SECOND_FAILED"); assert.deepEqual(await money(tx), before);
+}));
+
+const gate = () => { let resolve = () => {}; const promise = new Promise<void>(yes => { resolve = yes; }); return { promise, resolve }; };
+function observedClient(db: PrismaClient, begin: (tx: Prisma.TransactionClient) => Promise<void>) {
+  return new Proxy(db, { get(target, key) {
+    if (key === "$transaction") return <T>(operation: (tx: Prisma.TransactionClient) => Promise<T>, options?: { maxWait?: number; timeout?: number; isolationLevel?: Prisma.TransactionIsolationLevel }) =>
+      target.$transaction(async tx => { await begin(tx); return operation(tx); }, options);
+    const value: unknown = Reflect.get(target, key);
+    return typeof value === "function" ? value.bind(target) : value;
+  } });
+}
+async function waitForMoneyLock(holder: Prisma.TransactionClient, pid: number) {
+  const deadline = performance.now() + 5000;
+  while (performance.now() < deadline) {
+    const rows = await holder.$queryRaw<{ pid: number }[]>`SELECT l.pid FROM pg_locks l JOIN pg_stat_activity a ON a.pid=l.pid
+      WHERE l.pid=${pid} AND l.locktype='advisory' AND l.classid=18435 AND l.objid=55001 AND NOT l.granted AND a.wait_event_type='Lock'`;
+    if (rows.length) return;
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  assert.fail("REAL_DISTINCT_BACKEND_LOCK_WAIT_NOT_OBSERVED");
+}
+
+test("cash/mixed-expense-advance-real-lock-both-orders", async () => {
+  const coordinator = await import("../../src/server/transactions/coordinator");
+  for (const expenseFirst of [false, true]) {
+    const label = expenseFirst ? "expense-first" : "advance-first", rows = { ...fixture, id: (name: string) => fixture.id(`${label}-${name}`),
+      user: (name: string, roles: Role[]) => fixture.user(`${label}-${name}`, roles), project: (name: string) => fixture.project(`${label}-${name}`) };
+    const c = await paymentContext(fixture.db, rows, true), ready = gate(), release = gate(), secondStarted = gate();
+    let holder: Prisma.TransactionClient | undefined, firstPid = 0, secondPid = 0, entered = false;
+    const advanceInput: CashPayoutInput = { kind: "ADVANCE", userId: c.employee.id, cashAccountId: c.account.id, cashAmount: "600.00", expectedCashCurrency: "BYN", requestId: randomUUID(), description: "Шкаф169" };
+    const advance = (tx: Prisma.TransactionClient) => cash.issuePayoutCore(c.actor, advanceInput, rates(), tx);
+    const expense = (tx: Prisma.TransactionClient) => payments.createPaymentInTransaction(c.actor, { ...c.input, amount: 500 }, { ...c.prepared, amount: 500, bynAmount: 500 }, tx);
+    const first = coordinator.createMutationTransaction(fixture.db)(async tx => {
+      holder = tx; firstPid = (await tx.$queryRaw<{ pid: number }[]>`SELECT pg_backend_pid() AS pid`)[0].pid;
+      const result = await (expenseFirst ? expense(tx) : advance(tx)); ready.resolve(); await release.promise; return result;
+    });
+    void first.catch(() => ready.resolve());
+    let second: Promise<Awaited<ReturnType<typeof payments.createPaymentCore>> | Awaited<ReturnType<typeof service.executeCashPayout>>> | undefined;
+    try {
+      await ready.promise; assert.ok(holder);
+      const peer = observedClient(fixture.peer, async tx => {
+        secondPid = (await tx.$queryRaw<{ pid: number }[]>`SELECT pg_backend_pid() AS pid`)[0].pid;
+        secondStarted.resolve();
+      });
+      second = on(peer, c.actor, () => expenseFirst ? service.executeCashPayout(c.actor, advanceInput)
+        : payments.createPaymentCore(c.actor, { ...c.input, amount: 500 }));
+      void second.then(() => { entered = true; secondStarted.resolve(); }, () => secondStarted.resolve());
+      await secondStarted.promise; assert.notEqual(firstPid, secondPid); await waitForMoneyLock(holder, secondPid); assert.equal(entered, false);
+      release.resolve(); await first;
+      const loser = await second;
+      assert.equal(loser.ok, false); assert.match(loser.error ?? "", /Недостаточно средств/);
+      if (!expenseFirst) assert.equal((loser as Awaited<ReturnType<typeof payments.createPaymentCore>>).outcome, "ROLLED_BACK");
+      assert.equal(await fixture.db.payout.count({ where: { userId: c.employee.id } }), expenseFirst ? 0 : 1);
+      assert.equal(await fixture.db.payment.count({ where: { cashAccountId: c.account.id, direction: "EXPENSE" } }), expenseFirst ? 1 : 0);
+      assert.equal((await cash.readCashBalance(fixture.db, c.account.id)).toFixed(2), expenseFirst ? "500.00" : "400.00");
+      assert.equal(await fixture.db.domainEvent.count({ where: { actor: c.actor.id } }), 1);
+    } finally { release.resolve(); await Promise.allSettled([first, ...(second ? [second] : [])]); }
+  }
+});
+
+test("cash/actual-bulk-settlement-solo-and-held-expense-race", async () => {
+  const coordinator = await import("../../src/server/transactions/coordinator");
+  for (const race of [false, true]) {
+    const label = race ? "bulk-race" : "bulk-solo", rows = { ...fixture, id: (name: string) => fixture.id(`${label}-${name}`),
+      user: (name: string, roles: Role[]) => fixture.user(`${label}-${name}`, roles), project: (name: string) => fixture.project(`${label}-${name}`) };
+    const c = await paymentContext(fixture.db, rows, true);
+    const accrued = await fixture.db.payrollEntry.create({ data: { userId: c.employee.id, month: "2000-01", amount: "600", bynAmount: "600" } });
+    if (!race) {
+      const solo = await on(fixture.db, c.actor, () => actions.settleAll(payrollMonth(), c.account.id));
+      assert.equal(solo.ok, true); assert.equal(solo.paidCount, 1); assert.equal(solo.totalPaid, 600);
+      assert.equal((await cash.readCashBalance(fixture.db, c.account.id)).toFixed(2), "400.00");
+      continue;
+    }
+    const ready = gate(), release = gate(), started = gate();
+    let holder: Prisma.TransactionClient | undefined, holderPid = 0, waiterPid = 0, complete = false;
+    const expense = coordinator.createMutationTransaction(fixture.db)(async tx => {
+      holder = tx; holderPid = (await tx.$queryRaw<{ pid: number }[]>`SELECT pg_backend_pid() AS pid`)[0].pid;
+      await payments.createPaymentInTransaction(c.actor, { ...c.input, amount: 500 }, { ...c.prepared, amount: 500, bynAmount: 500 }, tx);
+      ready.resolve(); await release.promise;
+    });
+    void expense.catch(() => ready.resolve());
+    let bulk: Promise<Awaited<ReturnType<typeof actions.settleAll>>> | undefined;
+    try {
+      await ready.promise; assert.ok(holder);
+      const peer = observedClient(fixture.peer, async tx => {
+        waiterPid = (await tx.$queryRaw<{ pid: number }[]>`SELECT pg_backend_pid() AS pid`)[0].pid; started.resolve();
+      });
+      bulk = on(peer, c.actor, () => actions.settleAll(payrollMonth(), c.account.id));
+      void bulk.then(() => { complete = true; started.resolve(); }, () => started.resolve());
+      await started.promise; assert.notEqual(holderPid, waiterPid); await waitForMoneyLock(holder, waiterPid); assert.equal(complete, false);
+      release.resolve(); await expense;
+      const result = await bulk;
+      assert.equal(result.ok, true); assert.equal(result.paidCount, 0); assert.ok(result.shortPaid?.includes(c.employee.name));
+      assert.equal(await fixture.db.payout.count({ where: { userId: c.employee.id } }), 0);
+      assert.deepEqual(await fixture.db.payrollEntry.findUnique({ where: { id: accrued.id } }), accrued);
+      assert.equal((await cash.readCashBalance(fixture.db, c.account.id)).toFixed(2), "500.00");
+    } finally { release.resolve(); await Promise.allSettled([expense, ...(bulk ? [bulk] : [])]); }
+  }
+});
+
+test("turnover/ten-real-commands-serialized-reread-rate-and-turnover", async () => {
+  const c = await turnoverContext(fixture.db, { ...fixture, user: (label: string, roles: Role[], fields = {}) => fixture.user(`concurrent-${label}`, roles, fields),
+    id: (label: string) => fixture.id(`concurrent-${label}`) }), coordinator = await import("../../src/server/transactions/coordinator");
+  const initial = await Promise.all(Array.from({ length: 10 }, (_, index) => turnover.accrueTurnoverCore(c.actor, "2000-01", coordinator.createMutationTransaction(index % 2 ? fixture.db : fixture.peer))));
+  assert.ok(initial.every(result => result.ok)); assert.equal(initial.reduce((sum, result) => sum + (result.ok ? result.accruedCount : 0), 0), 1);
+  const original = await fixture.db.payrollEntry.findFirstOrThrow({ where: { userId: c.employee.id, month: "2000-01" } });
+  assert.equal(original.amount.toFixed(2), "300.00");
+  assert.equal(await fixture.db.payrollEntry.count({ where: { userId: c.employee.id } }), 1);
+  const ready = gate(), release = gate(), started = gate(); let holder: Prisma.TransactionClient | undefined, holderPid = 0, waiterPid = 0;
+  const held = fixture.db.$transaction(async tx => {
+    await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(18435, 55001)`;
+    holder = tx; holderPid = (await tx.$queryRaw<{ pid: number }[]>`SELECT pg_backend_pid() AS pid`)[0].pid; ready.resolve(); await release.promise;
+    await tx.payment.update({ where: { id: c.payment.id }, data: { amount: "12000", bynAmount: "12000" } });
+    await tx.user.update({ where: { id: c.employee.id }, data: { payPercent: "5" } });
+  }, { timeout: 15000 });
+  void held.catch(() => ready.resolve());
+  let first: Promise<Awaited<ReturnType<typeof turnover.accrueTurnoverCore>>> | undefined;
+  try {
+    await ready.promise; assert.ok(holder);
+    first = turnover.accrueTurnoverCore(c.actor, "2000-01", async operation => fixture.peer.$transaction(async tx => {
+      waiterPid = (await tx.$queryRaw<{ pid: number }[]>`SELECT pg_backend_pid() AS pid`)[0].pid; started.resolve();
+      await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(18435, 55001)`; return operation(tx);
+    }, { isolationLevel: "ReadCommitted", maxWait: 5000, timeout: 15000 }));
+    void first.catch(() => started.resolve());
+    await started.promise; assert.notEqual(holderPid, waiterPid); await waitForMoneyLock(holder, waiterPid); release.resolve(); await held;
+    const result = await first; assert.ok(result.ok); assert.equal(result.accruedCount, 1); assert.equal(result.earnings[0].amount, "300.00");
+    const audit = await fixture.db.changeLog.findFirstOrThrow({ where: { actorId: c.actor.id, entityId: result.earnings[0].payrollEntryId } });
+    assert.equal((audit.newValue as { basis: { expectedByn: string } }).basis.expectedByn, "600.00");
+    assert.deepEqual(await fixture.db.payrollEntry.findUnique({ where: { id: original.id } }), original);
+    assert.equal((await fixture.db.payrollEntry.aggregate({ where: { userId: c.employee.id }, _sum: { amount: true } }))._sum.amount!.toFixed(2), "600.00");
+    assert.equal(await fixture.db.payrollEntry.count({ where: { userId: c.employee.id } }), 2);
+    assert.equal(await fixture.db.changeLog.count({ where: { actorId: c.actor.id } }), 2); assert.equal(await fixture.db.domainEvent.count({ where: { actor: c.actor.id } }), 2);
+  } finally { release.resolve(); await Promise.allSettled([held, ...(first ? [first] : [])]); }
+});

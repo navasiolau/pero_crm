@@ -38,7 +38,9 @@ export type PostgresRows = ReturnType<typeof syntheticRows>;
 export async function createPostgresFixture(scenarioId: string) {
   assert.match(scenarioId, /^[a-z0-9][a-z0-9.-]{0,50}$/, "CI_SCENARIO_INVALID");
   const target = assertCiRuntimeTarget();
-  const db = new PrismaClient({ datasourceUrl: target.databaseUrl });
+  const db = new PrismaClient({ datasourceUrl: target.databaseUrl, log: [{ emit: "event", level: "query" }] });
+  const queryEvents: Prisma.QueryEvent[] = [];
+  db.$on("query", event => queryEvents.push(event));
   const peer = new PrismaClient({ datasourceUrl: target.databaseUrl });
   const rows = syntheticRows(db, `ci169-${target.runId}-${target.attempt}-${scenarioId}`);
   try {
@@ -68,7 +70,7 @@ export async function createPostgresFixture(scenarioId: string) {
       }, async () => assert.deepEqual(await nativeSnapshot(db), before, "CI_ROLLBACK_DATA_SCHEMA_CHANGED"));
       return result as T;
     };
-    return { target, db, peer, ...rows, verifyProtected, rollback,
+    return { target, db, peer, queryEvents, ...rows, verifyProtected, rollback,
       // Append-only деньги не удаляем поштучно: runtime уничтожает весь synthetic stand.
       dispose: async () => { await Promise.all([db.$disconnect(), peer.$disconnect()]); } };
   } catch (error) { await Promise.allSettled([db.$disconnect(), peer.$disconnect()]); throw error; }

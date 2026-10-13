@@ -123,6 +123,8 @@ test("percentage/adjustments-immutable-cas-replay-and-native-constraints", async
     { rate: "0", totals: ["0.00", "0.00", "0.00"], dtoTotals: ["0", "0", "0"], deltas: ["-40.00", "-120.00", "-120.00"], total: 0 },
   ]) {
     for (const [index, kind] of kinds.entries()) {
+      // Монтажник читает изделие на установке; инженер — на производстве. ACL остаётся настоящим.
+      await tx.product.update({ where: { id: product.id }, data: { status: kind === "INSTALLATION" ? "INSTALLATION" : "PRODUCTION" } });
       const { notices, saved } = await patchRate(kind, step.rate);
       assert.equal(saved.amount.toFixed(2), step.totals[index]); assert.equal(saved.delta.toFixed(2), step.deltas[index]); assert.equal(notices.length, 1);
       const employee = c.recipients[index], view = await views.getProductPercentageView({ id: employee.id, roles: employee.roles }, product.id, tx);
