@@ -3,7 +3,7 @@ import {test} from 'node:test';
 import {readFile} from 'node:fs/promises';
 import sharp from 'sharp';
 import {attachmentQaCases,attachmentUploadOwned,attachmentColumnShape,attachmentTitleShape,controlledClipboardDispatch} from './product-attachments-browser.mjs';
-import {attachmentsJournalScope} from './product-attachments-stage-runner.mjs';
+import {attachmentsJournalScope} from './product-attachments-browser.mjs';
 import {runCrmBrowserZoom} from './crm-browser-zoom.mjs';
 const fixture={ids:{project:'p',productA:'a',productB:'b'},actors:{admin:{id:'admin'},engineer:{id:'engineer'}}};
 test('finite nine upload cases use genuine PNG128x96, PDF, contextual B3D and exact owned fields',async()=>{

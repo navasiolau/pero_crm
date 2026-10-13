@@ -317,11 +317,6 @@
           "file": "apps/web/tests/warehouse-receipt-kinds.test.ts",
           "block": "",
           "evidenceLevel": "unit"
-        },
-        {
-          "file": "apps/web/tests/warehouse-units-stage-fixtures.test.mjs",
-          "block": "",
-          "evidenceLevel": "source-guard"
         }
       ],
       "acceptance": [

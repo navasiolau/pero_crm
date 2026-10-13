@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { PrismaClient, type Prisma, type ProductPercentageKind } from "@prisma/client";
 import { existingLocalCrmDatabaseUrl } from "./helpers/local-crm-database";
+import { nativeSnapshot } from "./helpers/native-acceptance-snapshot";
 import { changeProductStatusTransaction } from "../src/server/products/status-core";
 import { getProductPercentageView } from "../src/server/product-percentage-pay/queries";
 import { singleProductPercentagePreview } from "../src/lib/single-product-percentage-ui";
@@ -14,16 +15,7 @@ const fetchBefore = globalThis.fetch;
 let outbound = 0;
 globalThis.fetch = async () => { outbound++; throw new Error("QA77_EXTERNAL_REQUEST_FORBIDDEN"); };
 
-async function fingerprint() {
-  const tables = await db.$queryRawUnsafe<{ tablename: string }[]>("SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename");
-  const rows: Record<string, unknown> = {};
-  for (const { tablename } of tables) {
-    assert.match(tablename, /^[A-Za-z_][A-Za-z0-9_]*$/);
-    rows[tablename] = await db.$queryRawUnsafe(`SELECT count(*)::text AS count,md5(COALESCE(string_agg(row_to_json(t)::text,'' ORDER BY row_to_json(t)::text),'')) AS hash FROM "${tablename}" t`);
-  }
-  const schema = await db.$queryRawUnsafe("SELECT md5(COALESCE(string_agg(pg_get_constraintdef(c.oid),'' ORDER BY t.relname,c.conname),'')) AS hash FROM pg_constraint c JOIN pg_class t ON t.oid=c.conrelid JOIN pg_namespace n ON n.oid=t.relnamespace WHERE n.nspname='public'");
-  return { rows, schema };
-}
+const fingerprint = () => nativeSnapshot(db);
 
 async function rejected(tx: Prisma.TransactionClient, operation: () => Promise<unknown>) {
   await tx.$executeRawUnsafe("SAVEPOINT qa77_invalid");

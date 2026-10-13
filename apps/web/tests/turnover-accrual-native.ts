@@ -7,6 +7,7 @@ import { dirname, resolve, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Prisma, PrismaClient } from "@prisma/client";
 import { existingLocalCrmDatabaseUrl } from "./helpers/local-crm-database";
+import { nativeOwnedIds, nativeSnapshot } from "./helpers/native-acceptance-snapshot";
 import { createTaskTransaction } from "../src/server/tasks/transaction";
 import { accrueTurnoverCore } from "../src/server/payroll/turnover-core";
 import { payrollMonthRange } from "../src/lib/payroll-month";
@@ -36,6 +37,7 @@ export const TURNOVER_NATIVE_MANIFEST = {
 };
 const protectedSource = ["src/server/payroll/turnover-core.ts", "src/server/payroll/turnover-query.ts", "src/server/tasks/transaction.ts",
   "src/server/actor.ts", "src/server/payments/active-records.ts", "src/lib/payroll-month.ts", "src/lib/compensation-policy.ts", "src/lib/roles.ts", "src/lib/history-byn.ts", "tests/turnover-accrual-native.ts", "tests/helpers/local-crm-database.ts", "src/server/plugins/registry.ts", "../../packages/plugins/demo/src/plugin.ts", "../../packages/plugin-sdk/src/index.ts", "src/lib/calendar-dates.ts", "src/lib/internal-currency.ts", "src/lib/format.ts", "src/lib/work-shares.ts", "package.json", "tsconfig.json", "../../pnpm-lock.yaml"];
+protectedSource.push("tests/helpers/native-acceptance-snapshot.ts");
 export const sourceHash = () => createHash("sha256").update(protectedSource.map((name) => name + "\n" + readFileSync(resolve(name))).join("\n")).digest("hex");
 function durable(name: string, value: unknown) {
   const directory = resolve(TURNOVER_NATIVE_MANIFEST.outputDir);
@@ -46,19 +48,8 @@ function durable(name: string, value: unknown) {
   const fd = openSync(file, "wx", 0o600); try { writeFileSync(fd, bytes); fsyncSync(fd); } finally { closeSync(fd); }
   assert.deepEqual(readFileSync(file), bytes, "QA130_DURABLE_READBACK");
 }
-type Fingerprints = Record<string, unknown>;
-async function fingerprint(db: PrismaClient | Prisma.TransactionClient, excludeOwned = false): Promise<Fingerprints> {
-  const tables = await db.$queryRaw<{ tablename: string }[]>`SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename`;
-  const rows: Fingerprints = {};
-  for (const { tablename } of tables) {
-    assert.match(tablename, /^[A-Za-z_][A-Za-z0-9_]{0,62}$/, "QA130_TABLE_NAME_GUARD");
-    const ownedIds = excludeOwned ? (TURNOVER_NATIVE_MANIFEST.ids as Record<string, string[]>)[tablename] ?? [] : [];
-    const where = ownedIds.length ? "WHERE id <> ALL($1::text[])" : "";
-    rows[tablename] = await db.$queryRawUnsafe(`SELECT count(*)::text AS count,md5(COALESCE(string_agg(row_to_json(t)::text,'' ORDER BY row_to_json(t)::text),'')) AS digest FROM "${tablename}" t ${where}`, ...ownedIds.length ? [ownedIds] : []);
-  }
-  rows.constraints = await db.$queryRaw`SELECT md5(COALESCE(string_agg(pg_get_constraintdef(c.oid),'' ORDER BY t.relname,c.conname),'')) AS digest FROM pg_constraint c JOIN pg_class t ON t.oid=c.conrelid JOIN pg_namespace n ON n.oid=t.relnamespace WHERE n.nspname='public'`;
-  return rows;
-}
+const fingerprint = (db: PrismaClient | Prisma.TransactionClient, excludeOwned = false) =>
+  nativeSnapshot(db, excludeOwned ? nativeOwnedIds(TURNOVER_NATIVE_MANIFEST.ids) : {});
 export type GuardTrace = { stage: "identity" | "outside-payees" | "outside-income" | "plugins" | "fresh-ids" | "complete";
   counts: Partial<{ identityMatches: boolean; outsidePayees: number; outsideIncome: number; enabledPlugins: number; freshIdRows: number }> };
 const knownGuardCodes = new Set(["QA130_DATABASE_GUARD", "QA130_OUTSIDE_ELIGIBLE_PAYEE_STOP", "QA130_OUTSIDE_INCOME_STOP", "QA130_ENABLED_PLUGIN_STOP", "QA130_FRESH_IDS_GUARD", "QA130_ENABLED_PLUGIN_ID_STOP", "QA130_REGISTERED_PLUGIN_STOP", "QA130_RUNTIME_HOOK_STOP"]);

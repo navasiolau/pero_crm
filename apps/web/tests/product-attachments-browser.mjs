@@ -8,6 +8,12 @@ import {chromium,expect} from '@playwright/test';
 import {decodeProductDescriptionAction} from './product-description-flight.mjs';
 import {decodeAttachmentAction} from './product-attachments-flight.mjs';
 import {descriptionPrivateDiagnostic} from './product-description-browser.mjs';
+export function attachmentsJournalScope(fixture,journal){
+ const requireThat=(ok,code)=>{if(!ok)throw Error(code)};
+ requireThat(Array.isArray(journal.ownWrites)&&journal.ownWrites.length<=100,'ATTACHMENT_JOURNAL_REQUIRED');const actors=new Set(Object.values(fixture.actors).map(row=>row.id)),products=[fixture.ids.productA,fixture.ids.productB],mutationIds=new Set(),noModelWrites=[],coverWrites=[];
+ for(const row of journal.ownWrites){requireThat(actors.has(row.actorId),'ATTACHMENT_JOURNAL_ACTOR_STOP');if(row.type==='field'){requireThat(products.includes(row.productId)&&row.field==='description'&&/^[a-f0-9-]{36}$/i.test(row.clientMutationId??''),'ATTACHMENT_SCALAR_SCOPE_STOP');if(!row.noOp)mutationIds.add(row.clientMutationId)}else if(row.type==='no-model'){requireThat(products.includes(row.productId)&&typeof row.before==='boolean'&&typeof row.value==='boolean'&&row.ok===true,'ATTACHMENT_NOMODEL_CAPTURE_STOP');noModelWrites.push({actorId:row.actorId,productId:row.productId,before:row.before,value:row.value,ok:true})}else if(row.type==='cover'){requireThat(products.includes(row.productId)&&row.previousFileId===null&&typeof row.fileId==='string'&&row.ok===true,'ATTACHMENT_COVER_CAPTURE_STOP');coverWrites.push({actorId:row.actorId,productId:row.productId,previousFileId:null,fileId:row.fileId,ok:true})}else if(row.type==='file-upload'||row.type==='file-delete'){requireThat(products.includes(row.productId)&&typeof row.fileId==='string'&&row.saved===true,'ATTACHMENT_FILE_CAPTURE_STOP')}else throw Error('ATTACHMENT_UNKNOWN_OWN_WRITE_STOP');}
+ requireThat(!(journal.preferenceOwnWrites??[]).length,'ATTACHMENT_UNEXPECTED_PREFERENCE_WRITE_STOP');return{mutationIds:[...mutationIds].sort(),noModelWrites,coverWrites};
+}
 const UUID=/^[a-f0-9-]{36}$/i,sha=bytes=>createHash('sha256').update(bytes).digest('hex');
 const VIEWPORTS=[[320,800],[360,800],[390,844],[768,1024],[1024,768],[1440,900]];
 const GROUPS={measurement:'[data-product-measurement]',production:'[data-product-documents-column="production"]',installation:'[data-product-documents-column="installation"]'};

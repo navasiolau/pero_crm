@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { memorySubscriberFixture } from "./helpers/subscriber-delivery-fixture";
-import { nativeFailureDiagnostic } from "./event-queue-store-native";
+import { nativeFailureDiagnostic } from "./event-queue-native-cases";
 import { createRequire, Module } from "node:module";
 import { after, before, beforeEach, test } from "node:test";
 import { createEventQueueProcessor } from "../src/server/plugins/event-queue-core";

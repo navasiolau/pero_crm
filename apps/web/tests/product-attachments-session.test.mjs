@@ -2,11 +2,11 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {createHash,createHmac,randomUUID,timingSafeEqual} from 'node:crypto';
 import {test} from 'node:test';
-const source=readFileSync(new URL('./product-attachments-session.mjs',import.meta.url),'utf8').replace(/^import .*;\r?\n/gm,'').replace(/await main\(\);\s*$/,'');
-function load(env={},platform='win32') {
+const source=readFileSync(new URL('./crm-modernization-session.mjs',import.meta.url),'utf8').replace(/^import .*;\r?\n/gm,'').replace(/await main\(\);\s*$/,'');
+function loadScope(scope,env={},platform='win32') {
  const process={env:{CRM_MODERNIZATION_TARGET:'local',DATABASE_URL:'postgresql://u:p@localhost:5433/pero_crm',AUTH_SECRET:'test-only-secret',...env},platform};
  const tokenCalls=[];
- const api=Function('createHash','createHmac','randomUUID','timingSafeEqual','process','encode',`${source};return {readEnvelope,environmentGuard,prepare,resume,restore,validateCheckpoint,validateOwnWrites,buildRestorePlan,checkpointSignature};`)(createHash,createHmac,randomUUID,timingSafeEqual,process,async options=>{tokenCalls.push(options);return 'private-test-token'});
+ const api=Function('createHash','createHmac','randomUUID','timingSafeEqual','process','encode','__QA_SESSION_POLICY__',`${source};return {readEnvelope,environmentGuard,prepare,resume,restore,validateCheckpoint,validateOwnWrites,buildRestorePlan,checkpointSignature};`)(createHash,createHmac,randomUUID,timingSafeEqual,process,async options=>{tokenCalls.push(options);return 'private-test-token'},scope);
  return {api,process,tokenCalls};
 }
 function fixture(combined=true){
@@ -24,33 +24,41 @@ function fixture(combined=true){
  const db={$transaction:async fn=>{const before=structuredClone(prefs);readonly=false;try{return await fn(tx)}catch(error){prefs.splice(0,prefs.length,...before);throw error}}};
  return{db,users,prefs,changeProtectedData(){businessHash="b".repeat(32)},get mutations(){return mutations}};
 }
-test('prepare existing profiles has exact bounded prefs, real session versions and no business writes',async()=>{
+// Каждая прежняя политика выполняет собственные проверки на едином production QA-коде.
+const policies = {
+ modernization: {namespace:'PERO_CRM_MODERNIZATION_SESSION_V1',keys:['projects.list','project.tab','product.tab'],full:12,withoutCombined:9},
+ project: {namespace:'PERO_CRM_PROJECT_INLINE_SESSION_V1',keys:['projects.list','project.tab'],full:8,withoutCombined:6},
+ attachments: {namespace:'PERO_PRODUCT_ATTACHMENTS_SESSION_V1',keys:['projects.list','project.tab','product.tab'],full:12,withoutCombined:9},
+};
+for(const [scope,expected] of Object.entries(policies)) {
+ const load=(env,platform)=>loadScope(scope,env,platform);
+test(`${scope}: prepare existing profiles has exact bounded prefs, real session versions and no business writes`,async()=>{
  const {api,tokenCalls}=load();const f=fixture();const result=await api.prepare(f.db,'test-only-secret');
- assert.deepEqual(Object.keys(result.profiles),['admin','manager','combined','engineer']);assert.equal(result.originalPreferences.length,12);
- assert.deepEqual(new Set(result.originalPreferences.map(r=>r.key)),new Set(['projects.list','project.tab','product.tab']));
+ assert.deepEqual(Object.keys(result.profiles),['admin','manager','combined','engineer']);assert.equal(result.originalPreferences.length,expected.full);
+ assert.deepEqual(new Set(result.originalPreferences.map(r=>r.key)),new Set(expected.keys));
  assert.equal(result.paths.engineerProject,'/projects/project');assert.equal(result.paths.project,'/projects/project');
  assert.equal(tokenCalls.length,8);assert.ok(tokenCalls.every(call=>call.maxAge===900));assert.equal(tokenCalls.find(call=>call.token.id==='a').token.sessionVersion,4);
- assert.equal(f.mutations,0);assert.equal(result.checkpoint.namespace,'PERO_PRODUCT_ATTACHMENTS_SESSION_V1');
+ assert.equal(f.mutations,0);assert.equal(result.checkpoint.namespace,expected.namespace);
  const changed=structuredClone(result.checkpoint);changed.profiles.admin.id='other';assert.throws(()=>api.validateCheckpoint(changed,'test-only-secret'),/SIGNATURE_MISMATCH/);
 });
-test('missing combined stays unavailable and admin is required',async()=>{
- const {api}=load();const f=fixture(false);const result=await api.prepare(f.db,'test-only-secret');assert.equal(result.availability.combined,false);assert.equal(result.originalPreferences.length,9);
+test(`${scope}: missing combined stays unavailable and admin is required`,async()=>{
+ const {api}=load();const f=fixture(false);const result=await api.prepare(f.db,'test-only-secret');assert.equal(result.availability.combined,false);assert.equal(result.originalPreferences.length,expected.withoutCombined);
  f.users.splice(0,1);await assert.rejects(api.prepare(f.db,'test-only-secret'),/EXISTING_ROLE_COHORT_MISSING/);
 });
-test('raw successful tab writes and exact normalized list bytes only',()=>{
+test(`${scope}: raw successful tab writes and exact normalized list bytes only`,()=>{
  const {api}=load();const originals=[{userId:'u',key:'project.tab',value:'history'},{userId:'u',key:'projects.list',value:null}];
  assert.equal(api.validateOwnWrites(originals,[{userId:'u',key:'project.tab',value:'finance'}]).size,1);
  const value=JSON.stringify({version:1,revision:randomUUID(),query:'view=table'});assert.equal(api.validateOwnWrites(originals,[{userId:'u',key:'projects.list',value}]).size,1);
  for(const row of [{userId:'u',key:'product.tab',value:'finance'},{userId:'u',key:'project.tab',value:'history'},{userId:'u',key:'projects.list',value:'view=table'}])assert.throws(()=>api.validateOwnWrites(originals,[row]));
 });
-test('restore exact owned value CAS deletes missing originals, conflicts roll back without writes',async()=>{
+test(`${scope}: restore exact owned value CAS deletes missing originals, conflicts roll back without writes`,async()=>{
  const {api}=load();const f=fixture(false);const result=await api.prepare(f.db,'test-only-secret');
  f.prefs.push({userId:'a',key:'project.tab',value:'finance'});
  const writes=[{userId:'a',key:'project.tab',value:'finance'}];const restored=await api.restore(f.db,'test-only-secret',result.checkpoint,writes);assert.equal(restored.counts.deleted,1);assert.equal(f.prefs.length,0);
  f.prefs.push({userId:'a',key:'project.tab',value:'finance'},{userId:'m',key:'project.tab',value:'overview'});const before=structuredClone(f.prefs);const previous=f.mutations;
  await assert.rejects(api.restore(f.db,'test-only-secret',result.checkpoint,writes),/PREFERENCE_CONFLICT/);assert.deepEqual(f.prefs,before);assert.equal(f.mutations,previous);
 });
-test('local and verified staging guards reject remote targets and missing outer proof',()=>{
+test(`${scope}: local and verified staging guards reject remote targets and missing outer proof`,()=>{
  assert.equal(load().api.environmentGuard(),'test-only-secret');assert.throws(()=>load({},'linux').api.environmentGuard(),/LOCAL_DATABASE_REQUIRED/);
  assert.throws(()=>load({DATABASE_URL:'postgresql://u:p@production:5433/pero_crm'}).api.environmentGuard(),/LOCAL_DATABASE_REQUIRED/);
  const env={CRM_MODERNIZATION_TARGET:'staging',DATABASE_URL:'postgresql://u:p@db:5432/crm',S3_BUCKET:'pero-crm-staging'};
@@ -60,17 +68,42 @@ test('local and verified staging guards reject remote targets and missing outer 
  assert.throws(()=>load({...env,CRM_MODERNIZATION_STAGE_PROOF:JSON.stringify({...proof,databaseVolume:'prod'})},'linux').api.environmentGuard(),/VERIFIED_STAGE_PROOF_REQUIRED/);
 });
 
-test('project six tabs use exact returned values and cannot cross actor/key scope',()=>{
+ if(scope==='modernization') {
+test(`${scope}: product tabs accept only exact raw successful values within their own key scope`,()=>{
+ const {api}=load();const originals=[{userId:'u',key:'product.tab',value:'history'},{userId:'u',key:'project.tab',value:null}];
+ for(const value of ['percentage','engineering','tasks','materials','files','history'])assert.equal(api.validateOwnWrites(originals,[{userId:'u',key:'product.tab',value}]).size,1);
+ for(const row of [{userId:'u',key:'product.tab',value:'finance'},{userId:'u',key:'project.tab',value:'tasks'},{userId:'other',key:'product.tab',value:'tasks'},{userId:'u',key:'product.tab',value:JSON.stringify({value:'tasks'})}])assert.throws(()=>api.validateOwnWrites(originals,[row]));
+});
+test(`${scope}: product tab restoration uses exact owned CAS and conflicts roll back all preferences`,async()=>{
+ const {api}=load();const f=fixture(false);const prepared=await api.prepare(f.db,'test-only-secret');
+ f.prefs.push({userId:'a',key:'product.tab',value:'percentage'});const writes=[{userId:'a',key:'product.tab',value:'percentage'}];
+ const result=await api.restore(f.db,'test-only-secret',prepared.checkpoint,writes);assert.equal(result.counts.deleted,1);assert.equal(f.prefs.length,0);
+ f.prefs.push({userId:'a',key:'product.tab',value:'percentage'},{userId:'m',key:'product.tab',value:'files'});const before=structuredClone(f.prefs);const mutations=f.mutations;
+ await assert.rejects(api.restore(f.db,'test-only-secret',prepared.checkpoint,writes),/PREFERENCE_CONFLICT/);assert.deepEqual(f.prefs,before);assert.equal(f.mutations,mutations);
+});
+
+test(`${scope}: product preferences never bypass the unchanged protected business fingerprint guard`,async()=>{
+ const {api}=load();const f=fixture(false);const prepared=await api.prepare(f.db,'test-only-secret');
+ f.prefs.push({userId:'a',key:'product.tab',value:'percentage'});f.changeProtectedData();
+ await assert.rejects(api.restore(f.db,'test-only-secret',prepared.checkpoint,[{userId:'a',key:'product.tab',value:'percentage'}]),/BUSINESS_AUDIT_OR_TIME_CHANGED_BEFORE_RESTORE/);
+ assert.equal(f.prefs[0].value,'percentage');assert.equal(f.mutations,0);
+});
+ } else {
+test(`${scope}: project six tabs use exact returned values and cannot cross actor/key scope`,()=>{
  const {api}=load();const originals=[{userId:'u',key:'project.tab',value:'communications'}];for(const value of ['overview','products','files','tasks','materials','finance'])assert.equal(api.validateOwnWrites(originals,[{userId:'u',key:'project.tab',value}]).size,1);
  for(const row of [{userId:'u',key:'project.tab',value:'history'},{userId:'u',key:'product.tab',value:'tasks'},{userId:'other',key:'project.tab',value:'tasks'}])assert.throws(()=>api.validateOwnWrites(originals,[row]));
 });
-test('existing accountant and field cohorts are optional and produce no timer/user changes',async()=>{
- const {api}=load();const f=fixture(false);f.users.push({id:'accountant',roles:['ACCOUNTANT'],active:true,sessionVersion:1},{id:'worker',roles:['WORKER'],active:true,sessionVersion:2},{id:'mounter',roles:['MOUNTER'],active:true,sessionVersion:3});const initial=structuredClone(f.users);const result=await api.prepare(f.db,'test-only-secret');assert.equal(result.originalPreferences.length,18);assert.equal(result.availability.accountant,true);assert.equal(result.availability.worker,true);assert.equal(result.availability.mounter,true);assert.deepEqual(f.users,initial);assert.equal(f.mutations,0);
+test(`${scope}: existing accountant and field cohorts are optional and produce no timer/user changes`,async()=>{
+ const {api}=load();const f=fixture(false);f.users.push({id:'accountant',roles:['ACCOUNTANT'],active:true,sessionVersion:1},{id:'worker',roles:['WORKER'],active:true,sessionVersion:2},{id:'mounter',roles:['MOUNTER'],active:true,sessionVersion:3});const initial=structuredClone(f.users);const result=await api.prepare(f.db,'test-only-secret');assert.equal(result.originalPreferences.length,scope==='project'?12:18);assert.equal(result.availability.accountant,true);assert.equal(result.availability.worker,true);assert.equal(result.availability.mounter,true);assert.deepEqual(f.users,initial);assert.equal(f.mutations,0);
 });
-test('project prefs preserve unchanged business fingerprint protection',async()=>{
+test(`${scope}: project prefs preserve unchanged business fingerprint protection`,async()=>{
  const {api}=load();const f=fixture(false);const result=await api.prepare(f.db,'test-only-secret');f.prefs.push({userId:'a',key:'project.tab',value:'files'});f.changeProtectedData();await assert.rejects(api.restore(f.db,'test-only-secret',result.checkpoint,[{userId:'a',key:'project.tab',value:'files'}]),/BUSINESS_AUDIT_OR_TIME_CHANGED_BEFORE_RESTORE/);assert.equal(f.mutations,0);
 });
 
+ }
+}
+
+const load=(env,platform)=>loadScope('attachments',env,platform);
 test('20 product tab preferences are exact raw successful values and cannot cross scope',()=>{const {api}=load();const originals=[{userId:'u',key:'product.tab',value:null}];for(const value of ['percentage','engineering','tasks','materials','files','history'])assert.equal(api.validateOwnWrites(originals,[{userId:'u',key:'product.tab',value}]).size,1);assert.throws(()=>api.validateOwnWrites(originals,[{userId:'u',key:'product.tab',value:'finance'}]));});
 
 test('local resume uses current exact actors/session versions and retains immutable CP despite pending own business changes',async()=>{

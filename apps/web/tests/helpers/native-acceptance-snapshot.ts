@@ -11,6 +11,14 @@ function checkedOwned(owned:OwnedRowKeys) {
   assert.ok(value.ids.length>0&&new Set(value.ids).size===value.ids.length&&value.ids.every(id=>typeof id==='string'&&id.length>0&&id.length<256),'EXACT_OWNED_KEYS_REQUIRED');
  }
 }
+export function nativeOwnedIds(tables:Record<string,readonly string[]>):OwnedRowKeys {
+ const owned:OwnedRowKeys={};
+ for(const [table,ids] of Object.entries(tables)) {
+  if(ids.length)owned[table]={column:'id',ids:[...ids]};
+ }
+ checkedOwned(owned);
+ return owned;
+}
 // Fingerprints existing данных: наружу не выходят строки/Decimal values и dump не создаётся.
 export async function nativeSnapshot(db:SnapshotDb,owned:OwnedRowKeys={}) {
  checkedOwned(owned);

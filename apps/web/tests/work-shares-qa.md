@@ -1,6 +1,8 @@
 # Guarded QA: universal-work-shares
 
-Helper — ES module `work-shares-owned-fixtures.mjs`, без auto-run, console и подключения при import. В этой подготовке БД, runtime, миграции и remote не запускались. Root выполняет отдельное ревью и разрешённый rollout по `D:\Projects\pero_infra\infra-recovery\SAFETY-RULES.md`; guard mismatch означает STOP.
+В №168 этот завершённый one-shot QA-комплект выведен из эксплуатации: owned-fixture/browser helpers и новые split 30% больше не поддерживаются. Ниже сохранено историческое описание подготовки; команды и прежние результаты не являются инструкцией или приёмкой нового SHA. Действующие settlement, split-retirement, engineering legacy и quantity контракты остаются в автоматических и native проверках; общий порядок — `docs/testing/README.md`.
+
+Исторический helper — ES module `work-shares-owned-fixtures.mjs`, без auto-run, console и подключения при import. В этой подготовке БД, runtime, миграции и remote не запускались. Root выполнял отдельное ревью и разрешённый rollout по `D:\Projects\pero_infra\infra-recovery\SAFETY-RULES.md`; guard mismatch означает STOP.
 
 ## Контракт транспорта
 
