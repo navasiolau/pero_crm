@@ -4,7 +4,7 @@ import { after, before, test } from "node:test";
 import { Prisma } from "@prisma/client";
 import type { CashRates } from "../../src/lib/cash-ledger";
 import { summarizePayrollHistory } from "../../src/server/payroll/summary-read-model";
-import { createPostgresFixture, type PostgresRows } from "./postgres.fixture";
+import { createPostgresFixture, moneyRows, savedOrgBalance, type PostgresRows } from "./postgres.fixture";
 
 let fixture: Awaited<ReturnType<typeof createPostgresFixture>>;
 let cash: typeof import("../../src/server/payroll/cash-core");
@@ -42,6 +42,7 @@ for (const vector of [
   { id: "unknown", accruedByn: "300", payoutCurrency: null, payoutByn: null, due: null, balance: null },
   { id: "fixed-zero", accruedByn: "0", payoutCurrency: "USD", payoutByn: "0", due: 0, balance: "950.00" },
 ] as const) test(`cash/fixed-history-nulls-zero/${vector.id}`, async () => fixture.rollback(async (tx, rows) => {
+  const startingOrg = await savedOrgBalance(tx), originalMoney = await moneyRows(tx);
   const c = await cashRows(tx, rows);
   await tx.payment.create({ data: { direction: "EXPENSE", amount: "50", bynAmount: "50", cashAccountId: c.account.id } });
   await tx.payrollEntry.create({ data: { userId: c.employee.id, month: "2020-01", scheme: "PIECE", amount: "100", currency: "USD", bynAmount: vector.accruedByn } });
@@ -53,21 +54,30 @@ for (const vector of [
   const due = model.pastAccrued.get(c.employee.id) === null || model.totalPaid.get(c.employee.id) === null ? null : new Prisma.Decimal(model.pastAccrued.get(c.employee.id)!).sub(model.totalPaid.get(c.employee.id)!).toNumber();
   assert.equal(due, vector.due); assert.equal(model.allPaid, vector.payoutByn === null ? null : Number(vector.payoutByn));
   if (vector.balance === null) await assert.rejects(cash.readOrgBalance(tx, "9"), /сохранённого BYN/);
-  else { assert.equal((await cash.readOrgBalance(tx, "9")).toFixed(2), vector.balance); if (vector.id === "fixed-usd") assert.equal((await cash.readOrgBalance(tx, "9", "0", "30")).toFixed(2), "860.00"); }
+  else {
+    assert.equal((await cash.readOrgBalance(tx, "9")).minus(startingOrg).toFixed(2), vector.balance);
+    if (vector.id === "fixed-usd") assert.equal((await cash.readOrgBalance(tx, "9", "0", "30")).minus(startingOrg).toFixed(2), "860.00");
+  }
   assert.deepEqual(await tx.payrollEntry.findMany({ where: { userId: c.employee.id } }), entries);
   assert.deepEqual(await tx.payout.findMany({ where: { userId: c.employee.id } }), payouts);
+  const finalMoney = await moneyRows(tx);
+  assert.deepEqual(finalMoney.map(group => group.length), originalMoney.map((group, index) => group.length +
+    [vector.id === "fixed-usd" ? 4 : vector.id === "fixed-zero" ? 3 : 2, 1, 1, 0, 0][index]));
+  for (const [index, beforeRows] of originalMoney.entries())
+    assert.deepEqual(finalMoney[index].filter(row => beforeRows.some(before => before.id === row.id)), beforeRows, "FOREIGN_FIXED_HISTORY_MONEY_UNCHANGED");
 }));
 
 test("cash/advance-month-replay-and-rollback-outbox", async t => {
   t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-10-31T21:30:00.000Z").getTime() });
   await fixture.rollback(async (tx, rows) => {
+    const startingOrg = await savedOrgBalance(tx), originalMoney = await moneyRows(tx);
     const c = await cashRows(tx, rows), first = await cash.issuePayoutCore(c.actor, c.input, fixedRates, tx);
     assert.equal(first.repeated, false); assert.equal(first.month, "2026-11"); assert.equal(first.amount, "120.00"); assert.equal(first.bynAmount, "120.00");
     const payout = await tx.payout.findUniqueOrThrow({ where: { id: first.payoutId } });
     assert.equal(payout.cashRateDate!.toISOString(), "2026-10-31T00:00:00.000Z"); assert.equal(payout.payrollRateDate!.toISOString(), "2026-10-31T00:00:00.000Z");
     assert.equal(payout.payrollCurrency, "BYN"); assert.equal(payout.comment, "Синтетическая работа169");
     assert.equal((await cash.readCashBalance(tx, c.account.id)).toFixed(2), "880.00");
-    assert.equal((await cash.readOrgBalance(tx, "1")).toFixed(2), "880.00");
+    assert.equal((await cash.readOrgBalance(tx, "1")).minus(startingOrg).toFixed(2), "880.00");
     const receipt = await tx.changeLog.findUniqueOrThrow({ where: { id: `payout-issue:${c.input.requestId}` } });
     t.mock.timers.setTime(new Date("2026-11-30T21:30:00.000Z").getTime());
     const repeated = await cash.issuePayoutCore(c.actor, c.input, fixedRates, tx);
@@ -77,6 +87,10 @@ test("cash/advance-month-replay-and-rollback-outbox", async t => {
     assert.equal(await tx.domainEvent.count({ where: { actor: c.actor.id, type: "payroll.payout" } }), 1);
     assert.deepEqual(await tx.changeLog.findUnique({ where: { id: receipt.id } }), receipt);
     await assert.rejects(cash.issuePayoutCore(c.actor, { ...c.input, cashAmount: "121.00" }, fixedRates, tx), /уже использован/);
+    const finalMoney = await moneyRows(tx);
+    assert.deepEqual(finalMoney.map(group => group.length), originalMoney.map((group, index) => group.length + [1, 0, 1, 1, 1][index]));
+    for (const [index, beforeRows] of originalMoney.entries())
+      assert.deepEqual(finalMoney[index].filter(row => beforeRows.some(before => before.id === row.id)), beforeRows, "FOREIGN_ADVANCE_MONEY_UNCHANGED");
     // Общая fixture после abort сравнивает все строки и SQL schema: payout, receipt и outbox не сохраняются.
   });
 });
@@ -84,6 +98,7 @@ test("cash/advance-month-replay-and-rollback-outbox", async t => {
 test("cash/salary-past-moscow-month-and-current-record-currencies", async t => {
   t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-10-31T21:30:00.000Z").getTime() });
   await fixture.rollback(async (tx, rows) => {
+    const startingOrg = await savedOrgBalance(tx), originalMoney = await moneyRows(tx);
     const c = await cashRows(tx, rows);
     await tx.payrollEntry.createMany({ data: [
       { userId: c.employee.id, month: "2026-10", amount: "1000", currency: "BYN", bynAmount: "1000" },
@@ -93,12 +108,16 @@ test("cash/salary-past-moscow-month-and-current-record-currencies", async t => {
     const input = { ...c.input, kind: "SALARY" as const, month: "2026-10" };
     const first = await cash.issuePayoutCore(c.actor, input, fixedRates, tx);
     assert.equal(first.month, "2026-10"); assert.equal(first.amount, "120.00");
-    assert.equal((await cash.readOrgBalance(tx, "9")).toFixed(2), "820.00");
+    assert.equal((await cash.readOrgBalance(tx, "9")).minus(startingOrg).toFixed(2), "820.00");
     assert.equal((await cash.readCashBalance(tx, c.account.id)).toFixed(2), "880.00");
     await assert.rejects(cash.issuePayoutCore(c.actor, { ...input, requestId: randomUUID(), cashAmount: "821.00" }, fixedRates, tx), /долг|балансе организации/);
     await tx.cashAccount.update({ where: { id: c.account.id }, data: { currency: "USD" } });
     await assert.rejects(cash.issuePayoutCore(c.actor, { ...c.input, requestId: randomUUID() }, fixedRates, tx), /Валюта или состояние/);
     assert.equal(await tx.payout.count({ where: { userId: c.employee.id } }), 2);
+    const finalMoney = await moneyRows(tx);
+    assert.deepEqual(finalMoney.map(group => group.length), originalMoney.map((group, index) => group.length + [3, 2, 2, 1, 1][index]));
+    for (const [index, beforeRows] of originalMoney.entries())
+      assert.deepEqual(finalMoney[index].filter(row => beforeRows.some(before => before.id === row.id)), beforeRows, "FOREIGN_SALARY_MONEY_UNCHANGED");
   });
 });
 

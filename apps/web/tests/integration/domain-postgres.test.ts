@@ -125,7 +125,7 @@ async function overlap<A, B>(actor: DomainActor, firstOperation: () => Promise<A
     assert.ok(holder && holderPid > 0 && waiterPid > 0 && holderPid !== waiterPid);
     const deadline = performance.now() + 5000; let witnessed = false;
     while (!witnessed && performance.now() < deadline) {
-      const [row] = await holder.$queryRaw<{ waiting: boolean }[]>`SELECT ${holderPid} = ANY(pg_blocking_pids(${waiterPid})) AS waiting`;
+      const [row] = await holder.$queryRaw<{ waiting: boolean }[]>`SELECT ${holderPid}::int4 = ANY(pg_blocking_pids(${waiterPid}::int4)) AS waiting`;
       witnessed = row.waiting; if (!witnessed) await new Promise(resolve => setTimeout(resolve, 10));
     }
     assert.equal(witnessed, true, "DISTINCT_BACKENDS_HELD_LOCK_AND_ACTUAL_WAITER");
@@ -136,7 +136,7 @@ async function overlap<A, B>(actor: DomainActor, firstOperation: () => Promise<A
 test("draft/bootstrap-history-defaults-numbering-and-stage-promotion", async () => fixture.rollback(async (tx, rows) => {
   const actors = await people(rows, "bootstrap");
   for (const stage of ["LEAD", "ESTIMATE", "CONTRACT", "IN_WORK", "DONE", "RECLAMATION"] as const) {
-    const project = await rows.project(`stage-${stage.toLowerCase()}`, { stage }), result = await products.createProductCore(actors.manager,
+    const project = await rows.project(`stage-${stage.toLowerCase().replaceAll("_", "-")}`, { stage }), result = await products.createProductCore(actors.manager,
       { projectId: project.id, title: "Новое", quantity: 3, expectedPrice: 123.45 }, transactionIn(tx));
     assert.equal(result.ok, true); if (!result.ok) assert.fail("PRODUCT_CREATE_REQUIRED");
     const expected = stage === "LEAD" || stage === "ESTIMATE" ? "DRAFT" : "PREPARATION";
@@ -372,9 +372,14 @@ test("task/create-ten-identical-receipts-collisions-revocation-deleted-ACK-and-S
   assert.equal(failed.ok, false); assert.equal(failed.outcome, "ROLLED_BACK");
   assert.equal(await fixture.db.task.count({ where: { projectId: c.project.id, title: "Откат audit" } }), 0);
   assert.equal(await fixture.db.changeLog.count({ where: { actorId: c.manager.id, action: "create" } }), 1);
+  const receipt = await fixture.db.changeLog.findUniqueOrThrow({ where: { id: `task-create:${input.clientMutationId}` } });
   await fixture.db.task.delete({ where: { id: saved.id } });
-  assert.equal((await run(c.manager, fixture.db, () => tasks.createTask(input))).ok, false);
+  const historical = await run(c.manager, fixture.db, () => tasks.createTask(input));
+  assert.equal(historical.ok, true); assert.equal(historical.outcome, "COMMITTED");
+  if (historical.ok) { assert.equal(historical.replayed, true); assert.equal(historical.resultId, saved.id); }
   assert.equal(await fixture.db.task.count({ where: { workId: c.work.id } }), 0);
+  assert.deepEqual(await fixture.db.changeLog.findUnique({ where: { id: receipt.id } }), receipt);
+  assert.equal(await fixture.db.domainEvent.count({ where: { actor: c.manager.id, type: "task.assigned" } }), 1);
 });
 
 test("task/status-real-receipts-start-after-DONE-and-changed-context-refusal", async () => {

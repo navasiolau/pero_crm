@@ -8,9 +8,8 @@ import { payrollMonth, payrollMonthRange } from "../../src/lib/payroll-month";
 import type { CashRates } from "../../src/lib/cash-ledger";
 import type { CashPayoutInput, PayoutActor } from "../../src/server/payroll/cash-core";
 import type { PaymentInput } from "../../src/server/payments/contracts";
-import { activePaymentWhere } from "../../src/server/payments/active-records";
 import { guardedModuleCache } from "../helpers/guarded-module-cache";
-import { createPostgresFixture, rejectedSql, type PostgresRows } from "./postgres.fixture";
+import { createPostgresFixture, fixedBynTotal, moneyRows as money, rejectedSql, savedOrgBalance, type PostgresRows } from "./postgres.fixture";
 
 let fixture: Awaited<ReturnType<typeof createPostgresFixture>>;
 let scope: ReturnType<typeof guardedModuleCache>;
@@ -85,25 +84,6 @@ async function cashContext(tx: Prisma.TransactionClient, rows: PostgresRows, amo
   const input = { kind: "ADVANCE" as const, userId: employee.id, cashAccountId: account.id, cashAmount: "120.00",
     expectedCashCurrency: "BYN" as const, description: "Работа над шкафом", requestId: randomUUID() };
   return { actor, employee, account, input };
-}
-const money = (tx: Prisma.TransactionClient) => Promise.all([
-  tx.payment.findMany({ orderBy: { id: "asc" } }), tx.payrollEntry.findMany({ orderBy: { id: "asc" } }),
-  tx.payout.findMany({ orderBy: { id: "asc" } }), tx.changeLog.findMany({ orderBy: { id: "asc" } }), tx.domainEvent.findMany({ orderBy: { id: "asc" } }),
-]);
-function fixedBynTotal(history: readonly { amount: Prisma.Decimal; bynAmount: Prisma.Decimal | null; currency?: string; payrollCurrency?: string | null }[]) {
-  let total = new Prisma.Decimal(0);
-  for (const row of history) {
-    const value = row.bynAmount ?? ((row.currency ?? row.payrollCurrency) === "BYN" ? row.amount : null);
-    if (value === null) return null;
-    total = total.plus(value);
-  }
-  return total.toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
-}
-async function savedOrgBalance(tx: Prisma.TransactionClient) {
-  const [records, payouts] = await Promise.all([tx.payment.findMany({ where: activePaymentWhere }), tx.payout.findMany()]);
-  const paid = fixedBynTotal(payouts);
-  assert.notEqual(paid, null, "SYNTHETIC_BASELINE_BYN_UNAVAILABLE");
-  return records.reduce((total, row) => row.direction === "INCOME" ? total.plus(row.bynAmount) : total.minus(row.bynAmount), new Prisma.Decimal(0)).minus(paid!);
 }
 function observed(tx: Prisma.TransactionClient) {
   const calls: string[] = [];
@@ -513,6 +493,7 @@ test("percentage/direct-late-adjustment-moscow-month", async t => {
       const original = await tx.productPercentageCompletion.findUniqueOrThrow({ where: { productId_kind: { productId: product.id, kind: "ASSEMBLY" } } });
       const first = await tx.payrollEntry.findFirstOrThrow({ where: { productId: product.id } });
       assert.equal(first.month, "2026-11"); assert.equal(first.amount.toFixed(2), "30.00");
+      await tx.productPercentageConfig.update({ where: { productId_kind: { productId: product.id, kind: "ASSEMBLY" } }, data: { ratePercent: "4", revision: { increment: 1 } } });
       assert.equal((await direct.adjustSettledPercentage(tx, manager, product.id, "ASSEMBLY", "4", randomUUID())).delta, "10.00");
       const adjustment = await tx.payrollEntry.findFirstOrThrow({ where: { productId: product.id, percentageAdjustmentId: { not: null } } });
       assert.equal(adjustment.month, "2026-11"); assert.equal(adjustment.amount.toFixed(2), "10.00");
@@ -523,12 +504,10 @@ test("percentage/direct-late-adjustment-moscow-month", async t => {
 
 async function turnoverContext(tx: Prisma.TransactionClient, rows: PostgresRows, total = "10000", percent = "3") {
   const c = await cashContext(tx, rows, "0"), employee = await rows.user("turnover-payee", ["MANAGER", "ENGINEER"], { payScheme: "PERCENT_TURNOVER", payPercent: percent });
-  const paidAt = new Date("2000-01-15T09:00:00Z"), large = total === "90071992547409.99";
-  const account = large ? await tx.cashAccount.create({ data: { name: "Исторический USD169", currency: "USD" } }) : c.account;
-  // Физические суммы помещаются в Decimal(12,2), сохранённый BYN — в Decimal(18,2).
-  const payment = await tx.payment.create({ data: { cashAccountId: account.id, amount: large ? "9007199254.74" : total,
-    bynAmount: large ? "90071992547400.00" : total, currency: large ? "USD" : "BYN", rate: large ? "10000" : "1", paidAt } });
-  if (large) await tx.payment.create({ data: { cashAccountId: c.account.id, amount: "9.99", bynAmount: "9.99", paidAt } });
+  const paidAt = new Date("2000-01-15T09:00:00Z"), split = total === "19999999999.98", amount = split ? "9999999999.99" : total;
+  // Два максимальных Decimal(12,2) дают больший SUM; отдельные amount/BYN остаются допустимыми.
+  const payment = await tx.payment.create({ data: { cashAccountId: c.account.id, amount, bynAmount: amount, paidAt } });
+  if (split) await tx.payment.create({ data: { cashAccountId: c.account.id, amount, bynAmount: amount, paidAt } });
   const transaction = async <T>(operation: (inner: Prisma.TransactionClient) => Promise<T>) => operation(tx);
   return { ...c, employee, payment, transaction };
 }
@@ -536,7 +515,7 @@ async function turnoverContext(tx: Prisma.TransactionClient, rows: PostgresRows,
 for (const vector of [
   { id: "topup", total: "10000", percent: "3", prior: null, amount: "300.00" },
   { id: "saved-foreign", total: "1000", percent: "5", prior: "30", amount: "20.00" },
-  { id: "decimal-large", total: "90071992547409.99", percent: "0.01", prior: null, amount: "9007199254.74" },
+  { id: "decimal-large", total: "19999999999.98", percent: "0.01", prior: null, amount: "2000000.00" },
   { id: "zero", total: "0", percent: "3", prior: null, amount: null },
 ]) test(`turnover/immutable-history-basis/${vector.id}`, async () => fixture.rollback(async (tx, rows) => {
   const c = await turnoverContext(tx, rows, vector.total, vector.percent);
