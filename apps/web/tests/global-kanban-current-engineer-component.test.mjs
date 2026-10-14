@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { before, after } from "node:test";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,6 +8,9 @@ const require = createRequire(import.meta.url);
 const { build } = createRequire(require.resolve("tsx/package.json"))("esbuild");
 const { chromium } = require("@playwright/test");
 const web = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+let browser;
+before(async () => { browser = await chromium.launch({ headless: true }); });
+after(async () => { await browser?.close(); });
 const bundle = build({
   stdin: { contents: `
     import React from 'react'; import {createRoot} from 'react-dom/client';
@@ -31,9 +34,9 @@ const bundle = build({
   } }],
 });
 async function withBoard(board, options, run) {
-  const browser = await chromium.launch({ headless: true });
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   try {
-    const page = await browser.newPage({ viewport: { width: 1440, height: 900 } }); page.setDefaultTimeout(8000);
+    const page = await context.newPage(); page.setDefaultTimeout(8000);
     await page.setContent(`<style>
       body{margin:0;font-family:Arial}.relative{position:relative}[data-slot=product-kanban-card]{min-height:120px}[data-slot=kanban-column]{display:flex;flex-direction:column;flex-shrink:0;width:256px;min-height:300px;padding:8px;border:1px solid #aaa}
       [data-slot=kanban-track]{display:flex;gap:16px;overflow-x:auto}
@@ -44,7 +47,7 @@ async function withBoard(board, options, run) {
     await page.addScriptTag({ content: (await bundle).outputFiles[0].text });
     await page.getByText("Контрольное изделие",{exact:true}).waitFor();
     await run(page);
-  } finally { await browser.close(); }
+  } finally { await context.close(); }
 }
 async function dragToDesign(page, cancel = false) {
   const handle = page.getByRole("button", { name: /^Перетащить / });

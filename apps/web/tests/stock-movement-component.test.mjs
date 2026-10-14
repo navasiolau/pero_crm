@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import test, {before, after} from 'node:test';
 import {createRequire} from 'node:module';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 const require=createRequire(import.meta.url),{build}=createRequire(require.resolve('tsx/package.json'))('esbuild'),{chromium}=require('@playwright/test');
 const web=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
+let browser;
+before(async()=>{browser=await chromium.launch({headless:true});});
+after(async()=>{await browser?.close();});
 const bundle=build({stdin:{contents:`
  import React from 'react';import {createRoot} from 'react-dom/client';
  import {MaterialsTab} from '@/app/(app)/projects/[id]/materials-tab';
@@ -23,15 +26,15 @@ const bundle=build({stdin:{contents:`
  'export const requestMaterial=async input=>{window.__requests.push(input);return{ok:false,error:"retry"}};export const returnMaterial=async input=>{window.__returns.push(input);return{ok:false,error:"retry"}};export const addProjectMaterial=async()=>({ok:true});export const updateProjectMaterial=async()=>({ok:true});export const deleteProjectMaterial=async()=>({ok:true});'}));
  }}],logLevel:'silent'});
 async function withPage(legacy,run){
- const built=await bundle,browser=await chromium.launch({headless:true});
+ const built=await bundle,context=await browser.newContext();
  try{
-  const page=await browser.newPage();page.setDefaultTimeout(5000);
+  const page=await context.newPage();page.setDefaultTimeout(5000);
   await page.route('http://localhost:3199/stock',route=>route.fulfill({contentType:'text/html',body:'<style>.z-50{z-index:50}.isolate{isolation:isolate}[data-slot=dialog-content]{position:relative;z-index:50}</style><div id="root"></div>'}));
   await page.goto('http://localhost:3199/stock');
   await page.evaluate(value=>{window.__legacy=value;window.__requests=[];window.__returns=[]},legacy);
   await page.addScriptTag({content:built.outputFiles[0].text});
   await page.getByRole('button',{name:'Выдать материал',exact:true}).waitFor();await run(page);
- }finally{await browser.close();}
+ }finally{await context.close();}
 }
 test('procurement issues without a need; quantity is bounded by stock and retry retains UUID',async()=>{
  await withPage(false,async page=>{

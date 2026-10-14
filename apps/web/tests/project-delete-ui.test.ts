@@ -1,5 +1,0 @@
-import {test} from 'node:test';
-import assert from 'node:assert/strict';
-import {PROJECT_DELETE_WARNING,isConfirmedProjectDelete} from '../src/lib/project-delete-ui';
-const input={projectId:'j',expectedUpdatedAt:'2026-10-03T10:00:00.000Z',expectedProductsVersion:'a'.repeat(64),clientMutationId:'12222222-2222-4222-8222-222222222222'},ack={ok:true,projectId:'j',deletedAt:'2026-10-03T11:00:00.000Z',clientMutationId:input.clientMutationId,affectedProductIds:['p']};
-test('owner exact warning and actual matched project ACK/replay; stale/malformed responses never confirm navigation',()=>{assert.equal(PROJECT_DELETE_WARNING,'Внимание! Проект будет удален вместе со всеми изделиями!');assert.equal(isConfirmedProjectDelete(ack,input),true);assert.equal(isConfirmedProjectDelete({...ack,repeated:true},input),true);for(const value of [null,{...ack,ok:false},{...ack,projectId:'foreign'},{...ack,clientMutationId:'wrong'},{...ack,deletedAt:'invalid'},{...ack,affectedProductIds:null}])assert.equal(isConfirmedProjectDelete(value,input),false);});

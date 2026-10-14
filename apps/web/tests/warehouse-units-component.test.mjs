@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { before, after } from "node:test";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7,6 +7,9 @@ import { readFile, mkdir } from "node:fs/promises";
 const require=createRequire(import.meta.url), {build}=createRequire(require.resolve("tsx/package.json"))("esbuild"), {chromium}=require("@playwright/test");
 const postcss=createRequire(require.resolve("@tailwindcss/postcss"))("postcss"), tailwind=require("@tailwindcss/postcss");
 const web=path.resolve(path.dirname(fileURLToPath(import.meta.url)),".."), screenshots=path.join(web,"../../node_modules/.cache/warehouse-units-ui");
+let browser;
+before(async()=>{browser=await chromium.launch({headless:true});});
+after(async()=>{await browser?.close();});
 const fixtureUnits=[{id:"warehouse-unit-piece",name:"шт",materialCount:1},{id:"liter",name:"л",materialCount:0},{id:"tenth",name:"1/10 листа",materialCount:0},{id:"custom",name:"собственная",materialCount:0}];
 const bundle=build({stdin:{contents:`
 import React from 'react';import {createRoot} from 'react-dom/client';
@@ -26,13 +29,13 @@ function App(){
  `: 'export async function addMaterial(input){window.__materials.push({kind:"add",input});return{ok:true}};export async function updateMaterial(id,input){window.__materials.push({kind:"update",id,input});return{ok:true}};export const addMaterialCategory=async()=>({ok:true});export const toggleMaterial=async()=>({ok:true});export const toggleMaterialCategory=async()=>({ok:true});'}));
 }}],logLevel:"silent"});
 const css=(async()=>{const file=path.join(web,"src/app/globals.css");return (await postcss([tailwind({base:web,optimize:true})]).process(await readFile(file,"utf8"),{from:file})).css;})();
-async function withPage(mode,run,width=1440){const browser=await chromium.launch({headless:true});try{
- const page=await browser.newPage({viewport:{width,height:width===1440?900:844}});page.setDefaultTimeout(7000);
+async function withPage(mode,run,width=1440){const context=await browser.newContext({viewport:{width,height:width===1440?900:844}});try{
+ const page=await context.newPage();page.setDefaultTimeout(7000);
  await page.route("http://unit.fixture/",route=>route.fulfill({contentType:"text/html",body:'<div id="root" style="padding:16px"></div>'}));
  await page.goto("http://unit.fixture/");await page.addStyleTag({content:await css});
  await page.evaluate(({mode,units})=>{window.__mode=mode;window.__units=units;window.__catalog=[];window.__materials=[];window.__errors=[];},{mode,units:fixtureUnits});
  await page.addScriptTag({content:(await bundle).outputFiles[0].text});await page.getByRole("heading",{name:mode==="catalog"?"Единицы склада":"Номенклатура",exact:true}).waitFor();await run(page);
-}finally{await browser.close();}}
+}finally{await context.close();}}
 
 test("catalog UI adds and renames by id; used delete is blocked and cancel never calls deletion",async()=>{
  await withPage("catalog",async page=>{

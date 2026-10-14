@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import test, {before, after} from 'node:test';
 import {createRequire} from 'node:module';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -7,6 +7,9 @@ const require=createRequire(import.meta.url);
 const {build}=createRequire(require.resolve('tsx/package.json'))('esbuild');
 const {chromium}=require('@playwright/test');
 const web=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
+let browser;
+before(async()=>{browser=await chromium.launch({headless:true});});
+after(async()=>{await browser?.close();});
 const bundle=build({stdin:{contents:`
 import React from 'react';import {createRoot} from 'react-dom/client';
 import {ProjectInlineProvider} from '@/components/project-inline-provider';
@@ -17,11 +20,11 @@ b.onResolve({filter:/^(next\/navigation|sonner|@\/lib\/independent-project-actio
 b.onLoad({filter:/.*/,namespace:'boundary'},args=>({contents:args.path==='next/navigation'?'export const useRouter=()=>({refresh(){}});':args.path==='sonner'?'export const toast={error(){},success(){}};':args.path.includes('independent-project')?'export const invokeProjectPatch=input=>window.__save(input);':'export const createClient=async()=>({ok:false});export const updateClient=async()=>({ok:false});',loader:'js'}));
 }}],logLevel:'silent'});
 async function withContacts(canManage,run){
- const browser=await chromium.launch({headless:true});
- try{const page=await browser.newPage();page.setDefaultTimeout(5000);await page.route('http://127.0.0.1/contacts-component',route=>route.fulfill({contentType:'text/html',body:'<div id="root"></div>'}));await page.goto('http://127.0.0.1/contacts-component');
+ const context=await browser.newContext();
+ try{const page=await context.newPage();page.setDefaultTimeout(5000);await page.route('http://127.0.0.1/contacts-component',route=>route.fulfill({contentType:'text/html',body:'<div id="root"></div>'}));await page.goto('http://127.0.0.1/contacts-component');
  await page.evaluate(value=>{window.__canManage=value;window.__calls=[];window.__save=async input=>{window.__calls.push(input);return{kind:'saved',field:input.field,value:input.value,clientMutationId:input.clientMutationId,derived:{clientId:'a',...(input.field==='client.phone'?{phone:input.value}:{clientAddress:input.value})}}};},canManage);
  await page.addScriptTag({content:(await bundle).outputFiles[0].text});await page.getByLabel('Клиент',{exact:true}).waitFor();await run(page);
- }finally{await browser.close();}
+ }finally{await context.close();}
 }
 test('real project contact inputs save Client fields with binding and support null address',async()=>{
  await withContacts(true,async page=>{
