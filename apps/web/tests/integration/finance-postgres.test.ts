@@ -236,9 +236,12 @@ for (const linked of [false, true]) test(`payment/report-owner-ready-context-rep
   for (const change of [{ reportDocumentId: undefined }, { reportDocumentId: randomUUID() }])
     await assert.rejects(payments.createPaymentInTransaction(c.actor, { ...c.input, ...change }, c.prepared, tx), /документ/i);
   for (const forged of [{ skipReportDocument: true }, { source: "warehouse" }]) {
-    const watched = observed(tx), input = { ...c.input, ...forged, reportDocumentId: undefined, clientMutationId: randomUUID() };
-    await assert.rejects(payments.createPaymentInTransaction(c.actor, input, c.prepared, watched.tx), error => error instanceof Error && error.name === "ZodError");
-    assert.equal(watched.calls.length, 0, "CLIENT_POLICY_FLAGS_REFUSED_BEFORE_SQL");
+    const watched = observed(tx), input = { ...c.input, ...forged, clientMutationId: randomUUID() };
+    await assert.rejects(payments.createPaymentInTransaction(c.actor, { ...input, reportDocumentId: undefined }, c.prepared, watched.tx), { message: "Прикрепите отчетный документ — без него расход создать нельзя" });
+    assert.deepEqual(watched.calls, ["changeLog.findUnique"], "CLIENT_FLAGS_CANNOT_BYPASS_DOCUMENT_POLICY_OR_WRITE");
+    watched.calls.length = 0;
+    await assert.rejects(payments.createPaymentInTransaction(c.actor, input, c.prepared, watched.tx, { movementId: randomUUID() }), error => error instanceof Error && error.name === "ZodError");
+    assert.equal(watched.calls.length, 0, "INTERNAL_CONTEXT_REJECTS_CLIENT_POLICY_FLAGS_BEFORE_SQL");
   }
   await assert.rejects(payments.createPaymentInTransaction(other, c.input, c.prepared, tx), /документ/i);
   await tx.financeDocument.update({ where: { id: c.document.id }, data: { state: "PENDING", readyAt: null } });
@@ -247,7 +250,11 @@ for (const linked of [false, true]) test(`payment/report-owner-ready-context-rep
   await assert.rejects(payments.createPaymentInTransaction(c.actor, c.input, c.prepared, tx), { message: "Отчётный документ недоступен или уже прикреплён к другой операции" });
   assert.deepEqual(await money(tx), before);
   await tx.financeDocument.update({ where: { id: c.document.id }, data: { state: "READY", readyAt: c.document.readyAt } });
-  const first = await payments.createPaymentInTransaction(c.actor, c.input, c.prepared, tx), saved = await money(tx);
+  const ordinaryInput = { ...c.input, skipReportDocument: true, source: "warehouse" };
+  const first = await payments.createPaymentInTransaction(c.actor, ordinaryInput, c.prepared, tx), saved = await money(tx);
+  assert.equal(first.payment.logisticsAllocationId, null); assert.equal(await tx.stockMovement.count({ where: { createdById: c.actor.id } }), 0);
+  const request = await tx.changeLog.findUniqueOrThrow({ where: { id: receipts.paymentReceiptId(c.input.clientMutationId) } });
+  assert.deepEqual(request.newValue, { fingerprint: receipts.paymentFingerprint(c.actor.id, c.input) });
   const repeated = await payments.createPaymentInTransaction(c.actor, c.input, c.prepared, tx);
   assert.equal(repeated.repeated, true); assert.equal(repeated.payment.id, first.payment.id); assert.equal(repeated.eventId, null);
   assert.deepEqual(await money(tx), saved); assert.equal(first.payment.reportDocumentId, c.document.id);
@@ -422,9 +429,9 @@ for (const currency of ["BYN", "USD"] as const) test(`warehouse/paid-receipt-cas
     for (const mode of ["missing", "pending", "owner", "linked"] as const) {
       const invalid = mode === "pending" || mode === "owner" ? await tx.financeDocument.create({ data: { uploadedById: mode === "owner" ? c.actor.id : actor.id, clientMutationId: randomUUID(), requestFingerprint: rows.id(`paid-doc-${mode}`),
         fileName: "Чек.pdf", mimeType: "application/pdf", size: 4, contentHash: "test", storageKey: rows.id(`paid-doc-${mode}`), storageMode: "s3", state: mode === "pending" ? "PENDING" : "READY", readyAt: mode === "pending" ? null : new Date() } }) : null;
-      const beforeDocument = await money(tx);
-      await assert.rejects(purchase.createStockPurchaseInTransaction(actor, { ...data, clientMutationId: randomUUID(), reportDocumentId: mode === "missing" ? randomUUID() : mode === "linked" ? document.id : invalid!.id }, prepared, tx), /документ/i);
-      assert.deepEqual(await money(tx), beforeDocument);
+      const beforeDocument = await nativeSnapshot(tx);
+      await rejectedSql(tx, () => purchase.createStockPurchaseInTransaction(actor, { ...data, clientMutationId: randomUUID(), reportDocumentId: mode === "missing" ? randomUUID() : mode === "linked" ? document.id : invalid!.id }, prepared, tx), /документ/i);
+      assert.deepEqual(await nativeSnapshot(tx), beforeDocument, "COMPOSITE_DOCUMENT_DENIAL_ROLLS_BACK_WAREHOUSE_MONEY_AUDIT_OUTBOX");
     }
   }
   await assert.rejects(paymentDelete.deletePaymentInTransaction(actor, receipt.paymentId, "EXPENSE", currency, "1", tx), /связан/);
@@ -763,9 +770,11 @@ test("payroll/shared-native-inputs-consumer-dto-1-5-20-tenfold-history", async (
   assert.deepEqual(await tx.payout.findMany({ where: { id: { in: originalPayouts.map(row => row.id) } }, orderBy: { id: "asc" } }), originalPayouts);
   assert.deepEqual(await tx.user.findMany({ where: { id: { in: originalUsers.map(row => row.id) } }, orderBy: { id: "asc" } }), originalUsers);
   const former = await Promise.all(["owed", "paid"].map(label => rows.user(`former-${label}`, ["WORKER"], { active: false, payScheme: "NONE" })));
+  const formerCash = await tx.cashAccount.create({ data: { name: rows.id("former-cash"), currency: "BYN" } });
   for (const [index, employee] of former.entries()) {
     await tx.payrollEntry.create({ data: { userId: employee.id, amount: "100", currency: "BYN", month: "2001-01" } });
-    await tx.payout.create({ data: { userId: employee.id, amount: index ? "100" : "20", payrollCurrency: "BYN", bynAmount: index ? "100" : "20", month: "2001-01" } });
+    await tx.payout.create({ data: { userId: employee.id, amount: index ? "100" : "20", payrollCurrency: "BYN", bynAmount: index ? "100" : "20", month: "2001-01",
+      cashAccountId: formerCash.id, cashAmount: index ? "100" : "20", cashCurrency: "BYN", cashRate: "1", payrollRate: "1", cashRateDate: new Date("2001-01-01"), payrollRateDate: new Date("2001-01-01") } });
   }
   const eligibleFormer = await on(tx, actor, () => payroll.listPayrollUsers());
   assert.equal(eligibleFormer.some(user => user.id === former[0].id), true); assert.equal(eligibleFormer.some(user => user.id === former[1].id), false);
