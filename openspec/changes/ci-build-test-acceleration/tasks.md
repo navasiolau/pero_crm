@@ -47,15 +47,18 @@
 
 CI269/e0ae9a10 принят Root функционально: all6 SUCCESS, 283 с, exact OCI/DB/W07/GET/cleanup сохранены. Временная цель пункта7.6 остаётся OPEN; исторические failed267/268 и warm168 не заменяют её.
 
-## 8. Metadata cache records after CI269 — APPROVED / OPEN
+## 8. Metadata cache records after CI269 — DONE (CI271; цель 7.6 OPEN)
 
 - [x] 8.1 Только в существующем workflow поставить dedicated metadata cache importer первым и сохранить промежуточные records через mode=max; Dockerfile/BUILD_CONFIG, graph inputs и все checks/guards не менять.
 - [x] 8.2 Один affected YAML/Bake static check, source freeze и независимый review; без повторных suites/benchmark/DB/CI со стороны исполнителя.
-- [ ] 8.3 Root выполняет ordinary required CI и actual staging; это же измерение завершает временную цель7.6. Записать фактические metadata materialization/cache/timing и exact OCI/все gates/cleanup. Цель менее180с остаётся OPEN до успешного измеренного run.
+- [x] 8.3 Root выполнил ordinary required CI и actual staging; metadata materialization/cache/timing, exact OCI, все gates и cleanup зафиксированы в CI271. Измерение завершено, но временная цель 7.6 <180 с не достигнута и остаётся OPEN.
 
-## 9. Tested bot OCI packaging after CI270 — APPROVED / OPEN
+## 9. Tested bot OCI packaging after CI270 — DONE (CI271; цель 7.6 OPEN)
 
 - [x] 9.1 Bounded readiness проверяет current backend producer SUCCESS и exact run/attempt/SHA tested-dist, затем existing native Buildx упаковывает no-push bot OCI; без сериализации native за unit matrix.
 - [x] 9.2 Общая OCI proof/promotion обвязка сохраняет truthful web/bot identity, source/config/provenance/digest binding; bot publisher переносит original OCI только после прежних gates. Root ACK включает ровно existing runtime/target.mjs с optional закрытым web|bot kind и прежним web default.
 - [x] 9.3 Один affected static check после freeze, независимое review; без новых files/framework/jobs/tests/build/CI/DB/hosts со стороны исполнителя. Получены GO_170_TARGET_BOT_OCI и GO_170_WORKFLOW_BOT_OCI.
-- [ ] 9.4 Root выполняет обычный required CI/actual staging и фиксирует bot bootstrap/packaging/promotion/общий wall time; цель180с OPEN до фактического успешного результата.
+- [x] 9.4 Root выполнил обычный required CI/actual staging и зафиксировал bot readiness/packaging/promotion/общий wall time в CI271. Source/runtime приняты; измерение завершено, цель7.6<180с остаётся OPEN.
+
+
+CI271/484e15b9 принят по [receipt](D:/Projects/pero_crm_v2/.playwright-mcp/application-improvements/deep-test-reduction-20261014-45186c70/acceptance-484e15b9.json): все шесть заданий SUCCESS, exact OCI, GET 200, DB/W07 и cleanup подтверждены. Bot readiness 1 с, packaging 4 с, publisher 13 с без второго Buildx; весь CI 299 с (4:59). Пункты 8.3 и 9.4 завершают измерение и приёмку; временная цель 7.6 <180 с остаётся OPEN. Metadata 62 с/414,58 MB сохраняется; подтверждённая минимальная дальнейшая правка не найдена, новых bench/изменений нет. История CI266/269/270 сохранена.
