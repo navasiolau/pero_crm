@@ -6,7 +6,7 @@ import type { Role } from "../src/lib/roles";
 import { authConfig } from "../src/auth.config";
 import { navItemsForRole } from "../src/lib/nav";
 
-const session = (roles: Role[]): Session => ({ user: { id: "home-test", roles }, expires: "2099-01-01" });
+const session = (roles: Role[]): Session => ({ user: { id: "home-test", roles, sessionVersion: 0 }, expires: "2099-01-01" });
 const authorize = (roles: Role[] | null, path = "/") => authConfig.callbacks.authorized({
   auth: roles ? session(roles) : null, request: { nextUrl: new URL("https://crm.example.invalid" + path) } as NextRequest,
 });

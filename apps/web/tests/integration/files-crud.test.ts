@@ -371,7 +371,7 @@ test("files.crud: file113, документы, attachment ACL и inline-дейс
       materialId: material.id, type: "INCOME", receiptKind, quantity: "1", createdById: accountant.id } })));
     const reader = await f.user("document-row-reader", ["MANAGER", "PROCUREMENT"]), movementIds = [movement.id, ...withoutDocument.map(row => row.id)];
     const reportMap = await loadMovementReportDocuments(reader, movementIds, f.db);
-    const ledger = await loadOrganizationPayments({ ...reader, source: "web" as const }, "EXPENSE", f.db);
+    const ledger = await loadOrganizationPayments(reader, "EXPENSE", f.db);
     assert.deepEqual(reportMap.get(movement.id), ledger.rows.find(row => row.id === expense.id)?.reportDocument);
     assert.equal(reportMap.get(movement.id)?.id, docs[0].id); assert.equal(reportMap.size, 1);
     assert.equal((await loadMovementReportDocuments(manager, movementIds, f.db)).size, 0);
@@ -408,13 +408,13 @@ test("files.crud: file113, документы, attachment ACL и inline-дейс
     await f.db.financeDocument.update({ where: { id: docs[0].id }, data: { state: "PENDING", readyAt: null } });
     assert.ok((await listMovements(reader, { materialId: material.id }, f.db)).every(row => row.reportDocument === null));
     assert.equal((await loadMovementReportDocuments(reader, movementIds, f.db)).size, 0);
-    assert.equal((await loadOrganizationPayments({ ...reader, source: "web" as const }, "EXPENSE", f.db)).rows.find(row => row.id === expense.id)?.reportDocument, null);
+    assert.equal((await loadOrganizationPayments(reader, "EXPENSE", f.db)).rows.find(row => row.id === expense.id)?.reportDocument, null);
     await f.db.financeDocument.update({ where: { id: docs[0].id }, data: { state: "READY", readyAt: new Date() } });
     const keptVersions = await f.versions(docs[0].key);
     await f.db.payment.update({ where: { id: expense.id }, data: { reportDocumentId: null } });
     await f.db.financeDocument.delete({ where: { id: docs[0].id } });
     assert.equal((await loadMovementReportDocuments(reader, movementIds, f.db)).size, 0);
-    assert.equal((await loadOrganizationPayments({ ...reader, source: "web" as const }, "EXPENSE", f.db)).rows.find(row => row.id === expense.id)?.reportDocument, null);
+    assert.equal((await loadOrganizationPayments(reader, "EXPENSE", f.db)).rows.find(row => row.id === expense.id)?.reportDocument, null);
     assert.deepEqual(await f.versions(docs[0].key), keptVersions);
   });
 

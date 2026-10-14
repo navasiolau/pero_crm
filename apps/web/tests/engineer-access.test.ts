@@ -1,11 +1,9 @@
-import {liveProductWhere} from "../src/server/access/live-entities";
 import assert from "node:assert/strict";
 import { before, test } from "node:test";
 import type { PrismaClient, Role } from "@prisma/client";
-import { canEditProductTechnicalBlock, fileVisibilityWhere, productEditWhere, productVisibilityWhere } from "../src/server/access/visibility";
 import { resolveUploadContext } from "../src/server/files/upload-context";
 import { scopeNotificationContent } from "../src/server/access/notification-visibility";
-import { engineerFixture, fixtureModel, matches } from "./helpers/visibility-fixture";
+import { engineerFixture, fixtureModel } from "./helpers/visibility-fixture";
 
 const fixture = engineerFixture();
 // The workspace now contains real priced Work tasks; generic orphan fixtures

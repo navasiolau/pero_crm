@@ -30,7 +30,7 @@ test("browser update cannot promote the signed version or roles after revocation
 test("credential change between password check and sign-in cannot mint a current JWT", async () => {
   const callbacks = createSessionCallbacks(async () => ({ ...account, sessionVersion: 4 }));
   const result = await callbacks.jwt({
-    token: {}, trigger: "signIn", account: null, user: { ...account, sessionVersion: 3 },
+    token: {} as Parameters<typeof callbacks.jwt>[0]["token"], trigger: "signIn", account: null, user: { ...account, sessionVersion: 3 },
   });
   assert.equal(result, null);
 });

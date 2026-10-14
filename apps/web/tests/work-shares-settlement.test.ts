@@ -8,19 +8,18 @@ import { guardedModuleCache } from "./helpers/guarded-module-cache";
 
 let fixture = taskShareFixture();
 let sessionActor = { id: "manager", name: "Manager", roles: ["MANAGER"] };
-let externalEffects = 0;
 const revalidated: string[] = [];
 let actions: typeof import("../src/server/tasks/actions");
 let queries: typeof import("../src/server/tasks/queries");
 let scope: ReturnType<typeof guardedModuleCache>;
 function prepareScope() {
   sessionActor = { id: "manager", name: "Manager", roles: ["MANAGER"] };
-  externalEffects = 0; revalidated.length = 0;
+  revalidated.length = 0;
   fixture = taskShareFixture();
   const emptyParticipants = { findMany: async () => [] };
   const transactionWithParticipants: typeof fixture.transaction = operation => fixture.transaction(tx => operation(new Proxy(tx, { get: (target, key, receiver) => key === "productPercentageParticipant" ? emptyParticipants : Reflect.get(target, key, receiver) })));
   const proxy = new Proxy({}, { get: (_target, key) => key === "$transaction" ? transactionWithParticipants : key === "productPercentageParticipant" ? emptyParticipants : fixture.database[key as keyof typeof fixture.database] });
-  const outsideTransaction = async () => { externalEffects++; assert.equal(fixture.inTransaction(), false, "External effect ran before commit"); };
+  const outsideTransaction = async () => { assert.equal(fixture.inTransaction(), false, "External effect ran before commit"); };
   const overrides = {
     "../src/auth": { auth: async () => ({ user: sessionActor }) },
     "next/cache": { revalidatePath: (path: string) => { revalidated.push(path); } },

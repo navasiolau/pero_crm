@@ -1224,7 +1224,7 @@ test("warehouse/paid-and-delete-real-replay-capacity-stale-preview-and-held-issu
       release.resolve(); const results = await Promise.allSettled([first, second]);
       assert.equal(results[0].status, "fulfilled");
       if (mode.endsWith("replay")) {
-        const values = results.map(result => { assert.equal(result.status, "fulfilled"); if (result.status !== "fulfilled") throw result.reason; return result.value as { id?: string; receipt?: { id: string }; repeated: boolean }; });
+        const values = results.map(result => { assert.equal(result.status, "fulfilled"); return result.value as { id?: string; receipt?: { id: string }; repeated: boolean }; });
         const id = values[0].receipt?.id ?? values[0].id; assert.equal(typeof id, "string"); assert.equal(values[1].receipt?.id ?? values[1].id, id);
         assert.equal(values.filter(value => !value.repeated).length, 1);
       } else {
