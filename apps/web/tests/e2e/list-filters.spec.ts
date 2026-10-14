@@ -109,7 +109,7 @@ for (const section of ["projects", "products"] as const) {
     const engineer = required("CRM_E2E_ENGINEER_ID");
     await page.goto(`/${section}?engineer=${encodeURIComponent(engineer)}`);
     await expect(page.getByRole("button", { name: "Канбан", exact: true })).toHaveAttribute("aria-pressed", "true");
-    await expect(page.getByPlaceholder(section === "projects" ? "Номер, название, клиент…" : "Номер, название, проект, клиент…")).toHaveValue("");
+    await expect(page.getByPlaceholder(/^Номер, название/)).toHaveValue("");
     await tableRoundTrip(page);
     await page.goto("/clients");
     await page.locator(`a[href="/${section}"]`).first().click();
@@ -121,19 +121,19 @@ for (const section of ["projects", "products"] as const) {
 test("search resets page; reset cancels draft search and remains cleared on return", async ({ page }) => {
   await login(page);
   await page.goto("/products?view=table&page=2&pageSize=10");
-  const search = page.getByPlaceholder("Номер, название, проект, клиент…");
+  const search = page.getByPlaceholder(/^Номер, название/);
   await search.fill(required("CRM_E2E_PRODUCT_SEARCH"));
   await expect(page).toHaveURL(/q=/);
   expect(new URL(page.url()).searchParams.has("page")).toBe(false);
   await search.fill("Устаревшее значение");
-  await page.getByRole("button", { name: "Сбросить", exact: true }).click();
+  await page.getByRole("button", { name: "Сброс", exact: true }).click();
   await expect(search).toHaveValue("");
   await expect(page).toHaveURL(/\/products\?view=kanban$/);
   await page.goto("/projects?view=kanban");
   await tableRoundTrip(page);
   await page.locator('a[href="/products"]').first().click();
   await expect(page).toHaveURL(/\/products\?view=kanban$/);
-  await expect(page.getByPlaceholder("Номер, название, проект, клиент…")).toHaveValue("");
+  await expect(page.getByPlaceholder(/^Номер, название/)).toHaveValue("");
 });
 
 test("fresh login restores own state without replacing another existing account's preference", async ({ page, browser, baseURL }) => {
@@ -161,7 +161,7 @@ test("fresh login restores own state without replacing another existing account'
     await login(freshPage);
     await freshPage.goto("/products");
     await expect(freshPage).toHaveURL(/q=/);
-    await expect(freshPage.getByPlaceholder("Номер, название, проект, клиент…")).toHaveValue(searchText);
+    await expect(freshPage.getByPlaceholder(/^Номер, название/)).toHaveValue(searchText);
     await otherPage.goto("/products");
     await expect(otherPage).toHaveURL(/\/products\?/);
     expect(query(otherPage)).toEqual(otherBefore);
@@ -185,7 +185,7 @@ test("leaving while a save is delayed does not bounce back to the list", async (
     if (request.method() === "POST" && request.postData()?.startsWith('["products",')) { entered(); await gate; }
     await route.continue();
   });
-  await page.getByPlaceholder("Номер, название, проект, клиент…").fill(required("CRM_E2E_PRODUCT_SEARCH"));
+  await page.getByPlaceholder(/^Номер, название/).fill(required("CRM_E2E_PRODUCT_SEARCH"));
   await saving;
   await page.locator('a[href="/clients"]').first().click();
   await expect(page).toHaveURL(/\/clients$/);
@@ -202,15 +202,15 @@ test("pending search is retained when status changes before debounce", async ({ 
   await page.clock.install();
   await page.clock.pauseAt(new Date());
   try {
-    const search = page.getByPlaceholder("Номер, название, проект, клиент…");
+    const search = page.getByPlaceholder(/^Номер, название/);
     await search.fill("desk");
-    await page.getByRole("combobox").first().click();
-    // Base UI открывает Select через timeout(0); время всё ещё меньше debounce.
+    await page.getByRole("button", { name: "Статус", exact: true }).click();
+    // Открываем Popover до окончания задержки сохранения поиска.
     await page.clock.runFor(100);
-    await page.getByRole("option", { name: "Проектирование", exact: true }).click({ timeout: 10_000 });
+    await page.locator('[data-slot="popover-content"]').getByRole("checkbox", { name: "Проектирование", exact: true }).check({ timeout: 10_000 });
     await expect(search).toHaveValue("desk");
     await page.clock.runFor(350);
-    await expect(page).toHaveURL((url) => url.searchParams.get("q") === "desk" && url.searchParams.get("status") === "DESIGN");
+    await expect(page).toHaveURL((url) => url.searchParams.get("q") === "desk" && url.searchParams.get("status") === '["DESIGN"]');
     await expect(search).toHaveValue("desk");
   } finally {
     if (!page.isClosed()) await page.clock.resume();
@@ -221,7 +221,7 @@ test("explicit same-page return to A after B keeps controls and server query ali
   await login(page);
   await page.goto("/products?view=kanban");
   await tableRoundTrip(page);
-  const search = page.getByPlaceholder("Номер, название, проект, клиент…");
+  const search = page.getByPlaceholder(/^Номер, название/);
   await search.fill("Alpha");
   await expect(page).toHaveURL((url) => url.searchParams.get("q") === "Alpha");
   await search.fill("Beta");
@@ -241,14 +241,14 @@ test("explicit same-page return to A after B keeps controls and server query ali
   await page.goto("/clients");
   await page.locator('a[href="/products"]').first().click();
   await expect(page).toHaveURL((url) => url.searchParams.get("q") === "Alpha");
-  await expect(page.getByPlaceholder("Номер, название, проект, клиент…")).toHaveValue("Alpha");
+  await expect(page.getByPlaceholder(/^Номер, название/)).toHaveValue("Alpha");
 });
 
 test("multiword search keeps a typed space across a debounce pause", async ({ page }) => {
   await login(page);
   await page.goto("/products?view=kanban");
   await tableRoundTrip(page);
-  const search = page.getByPlaceholder("Номер, название, проект, клиент…");
+  const search = page.getByPlaceholder(/^Номер, название/);
   await search.fill("Шкаф ");
   // Дожидаемся сохранения после >300 мс, а не продолжаем ввод до debounce.
   await expect(page).toHaveURL((url) => url.searchParams.get("q") === "Шкаф");

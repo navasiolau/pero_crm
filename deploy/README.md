@@ -145,15 +145,10 @@ openspec validate --specs --strict
 git diff --check
 ```
 
-Исторический RED воспроизводится отдельно (намеренно exit 1):
-
-```text
-python deploy/tests/test_watch_crm.py --legacy-baseline ImageRegressionTests -v
-```
-
-Это модель подтверждённого чтением старого source-алгоритма, а не выполнение live
-watcher. Ни она, ни зелёные unit-тесты не считаются подтверждением установленного
-cron, server health или фактического deployment.
+Исторический RED старого алгоритма сохраняется в archived
+`restore-crm-autodeploy/evidence.md`; его отдельная executable модель закрыта.
+Зелёные unit-тесты не подтверждают установленный cron, здоровье сервера или
+фактический deployment.
 
 Linux-тест отдельно запускает дочерний процесс с потомком, который игнорирует
 SIGTERM, проверяет их завершение после timeout и права локального журнала.

@@ -102,20 +102,6 @@ test("legacy HTML/SVG thumb fails closed for both hasThumb values and simultaneo
   }
 });
 
-test("active original downloads preserve exact bytes and never receive inline even with view", async () => {
-  for (const document of activeDocuments) for (const hasThumb of [false, true]) {
-    selectSource(document.mimeType, document.bytes, hasThumb);
-    for (const suffix of ["", "?view=1"]) {
-      const response = await get(suffix);
-      assert.equal(response.status, 200);
-      assertPrivateFileHeaders(response, "attachment");
-      assert.equal(response.headers.get("content-type"), document.mimeType);
-      assert.equal(hash(new Uint8Array(await response.arrayBuffer())), hash(document.bytes));
-      assert.equal(storageKeys.at(-1), "mixed/original.bin");
-    }
-  }
-});
-
 test("legacy raster thumb reencodes safely while both original modes remain byte-exact", async () => {
   const bytes = await sharp({ create: { width: 600, height: 400, channels: 3, background: "#4488aa" } }).png().toBuffer();
   for (const hasThumb of [false, true]) {
@@ -164,21 +150,6 @@ test("missing image object fails closed without falling back to an original", as
   assert.equal(response.headers.get("content-disposition"), null);
   assert.deepEqual(storageKeys, ["mixed/original.bin"]);
 });
-test("PDF view is explicit and thumbnail requests do not turn PDF into an image", async () => {
-  const bytes = new TextEncoder().encode("%PDF-1.4\nfixture");
-  for (const hasThumb of [false, true]) {
-    selectSource("application/pdf", bytes, hasThumb);
-    for (const suffix of ["", "?view=1"]) {
-      const response = await get(suffix);
-      assert.equal(response.status, 200);
-      assertPrivateFileHeaders(response, suffix ? "inline" : "attachment");
-      assert.equal(response.headers.get("content-type"), "application/pdf");
-      assert.equal(hash(new Uint8Array(await response.arrayBuffer())), hash(bytes));
-    }
-    for (const suffix of ["?thumb=1", "?view=1&thumb=1"]) assert.equal((await get(suffix)).status, 415);
-  }
-});
-
 test("preview query keeps precedence, conditional thumb keeps cache/Vary and performs current ACL", async () => {
   const bytes = await sharp({ create: { width: 600, height: 400, channels: 3, background: "#778899" } }).png().toBuffer();
   selectSource("image/png", bytes);

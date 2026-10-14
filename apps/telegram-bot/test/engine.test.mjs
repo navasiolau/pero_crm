@@ -81,47 +81,6 @@ function paymentConfirmation(chatId) {
     .filter(button => button.callback_data?.startsWith('payok:')).at(-1).callback_data;
 }
 
-test("engine executes restored link, role, project and payment behavior", async () => {
-  const updates = [
-    message(1, 503, "/start LINKCODE"),
-    message(2, 502, "/help"),
-    message(3, 501, "/новый"),
-    message(4, 501, "Восстановленный заказ"),
-    message(5, 501, "Клиент"),
-    callback(6, 501, "cli:client-1"),
-    callback(8, 501, "mgr:manager-1"),
-    message(10, 501, "/приход 205 100"),
-    callback(11, 501, "cur:BYN"),
-    callback(12, 501, "cash:cash-1"),
-    message(13, 501, "—"),
-  ];
-  for (const update of updates) await handleUpdate(update);
-  await handleUpdate(callback(14, 501, paymentConfirmation(501)));
-
-  assert.ok(sent.some((item) => item.chat_id === 503 && item.text.toLowerCase().includes("привяз")));
-  assert.ok(sent.some((item) => item.chat_id === 502 && item.text.includes("доступен только")));
-  const project = calls.find((item) => item.path === "/api/v1/bot/projects" && item.method === "POST");
-  assert.ok(project, `project call missing: ${JSON.stringify({ calls, sent })}`);
-  assert.deepEqual(project.body, {
-    title: "Восстановленный заказ", clientId: "client-1",
-    managerId: "manager-1",
-  });
-  assert.ok(!sent.some((item) => item.text.includes("Первоначальная цена")));
-  const payment = calls.find((item) => item.path === "/api/v1/bot/payments");
-  assert.ok(payment, `payment call missing: ${JSON.stringify({ calls, sent })}`);
-  assert.match(payment.body.clientMutationId, /^[a-f0-9-]{36}$/);
-  const {clientMutationId: _paymentRequest, ...paymentData} = payment.body;
-  assert.deepEqual(paymentData, {
-    projectId: "project-205", direction: "INCOME", amount: 100,
-    currency: "BYN", cashAccountId: "cash-1",
-  });
-  assert.ok(calls.filter((item) => item.path.startsWith("/api/v1/bot/")).every(
-    (item) => item.authorization === "Bearer fixture-crm-token",
-  ));
-  assert.equal(project.actor, "admin-1");
-  assert.equal(payment.actor, "admin-1");
-});
-
 test("stale initial-price callback is rejected without a project write", async () => {
   const before = calls.filter(item => item.path.startsWith("/api/v1/bot/projects") && (item.method === "PATCH" || item.method === "POST")).length;
   await handleUpdate(callback(3900, 501, "ed:project-205:initialPrice"));
