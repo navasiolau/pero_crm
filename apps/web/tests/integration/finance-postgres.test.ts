@@ -32,6 +32,7 @@ let stock: typeof import("../../src/server/warehouse/accounting"), purchase: typ
 let stockDeletion: typeof import("../../src/server/warehouse/deletion-core");
 let trips: typeof import("../../src/server/logistics/core"), logistics: typeof import("../../src/server/logistics/posting-core");
 let logisticsQueries: typeof import("../../src/server/logistics/money-query-core");
+let logisticsDocuments: typeof import("../../src/server/logistics/documents"), logisticsViews: typeof import("../../src/server/logistics/query-core"), logisticsHttp: typeof import("../../src/server/logistics/http");
 const session = new AsyncLocalStorage<{ db: PrismaClient | Prisma.TransactionClient; actor: PayoutActor }>();
 const dispatches: string[] = [], cachePaths: string[] = [];
 let rateReads = 0, savepoint = 0;
@@ -58,7 +59,7 @@ before(async () => {
   } });
   const anchor = new URL("../ci169-finance-scope.ts", import.meta.url).href, require = createRequire(anchor);
   const targets = ["payroll/actions", "payments/service", "payments/delete-core", "finance/organization-ledger", "products/status-core",
-    "warehouse/accounting", "warehouse/stock-purchase-core", "warehouse/deletion-core", "logistics/core", "logistics/posting-core", "logistics/money-query-core"].map(path => `../src/server/${path}`);
+    "warehouse/accounting", "warehouse/stock-purchase-core", "warehouse/deletion-core", "logistics/core", "logistics/documents", "logistics/query-core", "logistics/http", "logistics/posting-core", "logistics/money-query-core"].map(path => `../src/server/${path}`);
   scope = guardedModuleCache(anchor, {
     targets, prisma: facade,
     allowedOverrides: ["next/cache", "../src/server/require-role", "../src/server/finance/nbrb", "../src/server/plugins/events"],
@@ -71,6 +72,8 @@ before(async () => {
     },
   });
   stock = scope.load("../src/server/warehouse/accounting"); trips = scope.load("../src/server/logistics/core");
+  logisticsDocuments = scope.load("../src/server/logistics/documents"); logisticsViews = scope.load("../src/server/logistics/query-core");
+  logisticsHttp = scope.load("../src/server/logistics/http");
   purchase = scope.load("../src/server/warehouse/stock-purchase-core"); stockDeletion = scope.load("../src/server/warehouse/deletion-core");
   logistics = scope.load("../src/server/logistics/posting-core"); logisticsQueries = scope.load("../src/server/logistics/money-query-core");
   actions = scope.load("../src/server/payroll/actions"); payments = scope.load("../src/server/payments/service");
@@ -430,6 +433,12 @@ for (const currency of ["BYN", "USD"] as const) test(`warehouse/paid-receipt-cas
 test("logistics/real-posting-correction-CAS-history-budget-and-SQL-rollback", async () => fixture.rollback(async (tx, rows) => {
   const originalMoney = await money(tx), c = await cashContext(tx, rows, "5000"), actor = actorFor(await rows.user("logistics-procurement", ["PROCUREMENT"]));
   const a = await rows.project("logistics-a", { delivery: "700" }), b = await rows.project("logistics-b", { delivery: "1000" });
+  const report = await tx.financeDocument.create({ data: { clientMutationId: randomUUID(), requestFingerprint: rows.id("ordinary-report"), uploadedById: actor.id,
+    fileName: "Отчёт.pdf", mimeType: "application/pdf", size: 3, contentHash: "f".repeat(64), storageKey: rows.id("ordinary-report"), storageMode: "s3", state: "READY", readyAt: new Date() } });
+  const article = await tx.expenseArticle.create({ data: { name: rows.id("ordinary-article"), code: ((await tx.expenseArticle.aggregate({ _max: { code: true } }))._max.code ?? 0) + 1 } });
+  const ordinary = { direction: "EXPENSE" as const, projectId: a.id, amount: 50, currency: "BYN" as const, cashAccountId: c.account.id,
+    expenseArticleId: article.id, reportDocumentId: report.id, clientMutationId: randomUUID() };
+  await paymentCore.createPaymentInTransaction(actor, ordinary, await preparation.preparePayment(ordinary, tx), tx);
   const products = [await rows.product("logistics-a", a.id, { status: "PRODUCTION" }), await rows.product("logistics-b", b.id, { status: "PRODUCTION" })];
   let savepoint = 0;
   const transaction = async <T>(operation: (db: Prisma.TransactionClient) => Promise<T>) => {
@@ -441,9 +450,43 @@ test("logistics/real-posting-correction-CAS-history-budget-and-SQL-rollback", as
   };
   const manifest = { date: "2026-10-10", comment: "Рейс169", shares: [{ projectId: a.id, percentBps: 4000 }, { projectId: b.id, percentBps: 6000 }],
     lines: products.map(product => ({ projectId: product.projectId, kind: "PRODUCT" as const, productId: product.id, quantity: 2 })) };
-  const trip = await trips.createLogisticsTripCore(actor.id, { ...manifest, clientMutationId: randomUUID() }, transaction);
-  const document = await tx.logisticsDocument.create({ data: { tripId: trip.tripId, clientMutationId: randomUUID(), requestFingerprint: rows.id("ttn"), uploadedById: actor.id,
-    fileName: "ТТН.pdf", mimeType: "application/pdf", size: 12, contentHash: rows.id("ttn"), storageKey: rows.id("ttn"), storageMode: "s3", state: "READY", stage: "ISSUED", ttnNumber: "CI169", readyAt: new Date() } });
+  const draft = await rows.product("logistics-draft", a.id, { status: "DRAFT" }), admin = await rows.user("logistics-admin", ["ADMIN"]);
+  const draftInput = { date: manifest.date, shares: [{ projectId: a.id, percentBps: 10000 }], lines: [{ projectId: a.id, kind: "PRODUCT" as const, productId: draft.id, quantity: 1 }], clientMutationId: randomUUID() };
+  await assert.rejects(trips.createLogisticsTripCore(actor.id, draftInput, transaction), /не принадлежит/);
+  assert.equal((await logisticsViews.getLogisticsOptionsCore(actor.id, transaction)).projects.some(row => row.products.some(item => item.id === draft.id)), false);
+  assert.ok(await trips.createLogisticsTripCore(admin.id, { ...draftInput, clientMutationId: randomUUID() }, transaction));
+  assert.equal((await logisticsViews.getLogisticsOptionsCore(admin.id, transaction)).projects.some(row => row.products.some(item => item.id === draft.id)), true);
+  const tripInput = { ...manifest, clientMutationId: randomUUID() }; let trip = await trips.createLogisticsTripCore(actor.id, tripInput, transaction);
+  assert.equal((await trips.createLogisticsTripCore(actor.id, tripInput, transaction)).tripId, trip.tripId);
+  await assert.rejects(trips.createLogisticsTripCore(actor.id, { ...tripInput, clientMutationId: randomUUID(), shares: [{ projectId: a.id, percentBps: 4000 }, { projectId: b.id, percentBps: 5000 }] }, transaction), /100%/);
+  await assert.rejects(trips.createLogisticsTripCore(actor.id, { ...tripInput, clientMutationId: randomUUID(), lines: [{ ...manifest.lines[0], productId: products[1].id }] }, transaction), /не принадлежит/);
+  const shares = await tx.logisticsProjectShare.findMany({ where: { tripId: trip.tripId }, orderBy: { projectId: "asc" } });
+  await rejectedSql(tx, () => tx.logisticsProjectShare.create({ data: { tripId: trip.tripId, projectId: a.id, percentBps: 1 } }));
+  await rejectedSql(tx, () => tx.logisticsProjectShare.create({ data: { tripId: trip.tripId, projectId: rows.id("missing-logistics-project"), percentBps: 1 } }));
+  await rejectedSql(tx, async () => { await tx.logisticsProjectShare.update({ where: { id: shares[0].id }, data: { percentBps: 1 } }); await tx.$executeRawUnsafe("SET CONSTRAINTS ALL IMMEDIATE"); });
+  const edited = { ...tripInput, tripId: trip.tripId, expectedRevision: trip.revision, comment: "Рейс169 исправлен", clientMutationId: randomUUID() };
+  trip = await trips.updateLogisticsTripCore(actor.id, edited, transaction); assert.equal(trip.revision, 2);
+  assert.deepEqual((await tx.logisticsProjectShare.findMany({ where: { tripId: trip.tripId }, orderBy: { projectId: "asc" } })).map(row => row.id), shares.map(row => row.id));
+  assert.equal((await trips.updateLogisticsTripCore(actor.id, edited, transaction)).repeated, true);
+  await assert.rejects(trips.updateLogisticsTripCore(actor.id, { ...edited, clientMutationId: randomUUID() }, transaction), /уже изменён/);
+  let unavailable = true; const contents = new Map<string, Buffer>();
+  const documents = logisticsDocuments.createLogisticsDocumentService({ transaction, storage: {
+    mode: () => "s3", async put(row, content) { assert.ok(Buffer.isBuffer(content)); if (unavailable) throw Error("CI169_TTN_STORAGE_UNAVAILABLE"); contents.set(row.storageKey, Buffer.from(content)); },
+    async open(row) { const bytes = contents.get(row.storageKey); return bytes ? new ReadableStream({ start(controller) { controller.enqueue(bytes); controller.close(); } }) : null; },
+  } });
+  const upload = { tripId: trip.tripId, clientMutationId: randomUUID(), stage: "ISSUED" as const, ttnNumber: "CI169", fileName: "ТТН.pdf", mimeType: "application/pdf", bytes: Buffer.from("%PDF-1.4\nCI169") };
+  await assert.rejects(documents.upload(actor.id, upload), /CI169_TTN_STORAGE_UNAVAILABLE/);
+  const pending = await tx.logisticsDocument.findUniqueOrThrow({ where: { clientMutationId: upload.clientMutationId } });
+  assert.equal(pending.state, "PENDING"); assert.equal(await documents.read(c.actor.id, pending.id), null);
+  unavailable = false; const ready = await documents.upload(actor.id, upload); assert.equal(ready.document.id, pending.id);
+  assert.equal((await documents.upload(actor.id, upload)).repeated, true); await assert.rejects(documents.upload(c.actor.id, { ...upload, clientMutationId: randomUUID() }), /прав/);
+  const response = await logisticsHttp.readLogisticsDocumentResponse(new Request(`${fixture.target.baseUrl}/api/logistics/documents/${pending.id}?view=1`), pending.id, { authorize: async () => c.actor.id, service: documents });
+  assert.equal(response.status, 200); assert.deepEqual(Buffer.from(await response.arrayBuffer()), upload.bytes);
+  assert.equal(response.headers.get("x-content-type-options"), "nosniff"); assert.ok(response.headers.get("cache-control")?.startsWith("private"));
+  const document = await tx.logisticsDocument.findUniqueOrThrow({ where: { id: ready.document.id } });
+  const deniedActor = await rows.user("logistics-denied", ["MANAGER"]);
+  assert.equal((await logisticsHttp.readLogisticsDocumentResponse(new Request(`${fixture.target.baseUrl}/api/logistics/documents/${pending.id}`), pending.id,
+    { authorize: async () => deniedActor.id, service: documents })).status, 403);
   const input = { tripId: trip.tripId, expectedRevision: trip.revision, clientMutationId: randomUUID(), amount: "1000.00", currency: "BYN" as const,
     cashAccountId: c.account.id, documentIds: [document.id] }, dependencies = { db: tx, transaction };
   await assert.rejects(logistics.createLogisticsPostingCore(actor.id, { ...input, documentIds: [randomUUID()] }, "post", dependencies), /сохранённая ТТН/);
@@ -464,7 +507,8 @@ test("logistics/real-posting-correction-CAS-history-budget-and-SQL-rollback", as
   await rejectedSql(tx, () => tx.payment.update({ where: { id: oldPayments[0].id }, data: { amount: "1" } }), /IMMUTABLE/);
   await rejectedSql(tx, () => tx.logisticsDocument.delete({ where: { id: document.id } }), /IMMUTABLE/);
   const budget = await logisticsQueries.getLogisticsProjectBudgetCore(actor.id, a.id, tx);
-  assert.equal(budget.deliveryBudget, 700); assert.equal(budget.spent, 400); assert.equal(budget.remaining, 300);
+  assert.equal(budget.deliveryBudget, 700); assert.equal(budget.spent, 400); assert.equal(budget.tripSpent, 400); assert.equal(budget.remaining, 300);
+  assert.equal((await tx.payment.aggregate({ where: { projectId: a.id, direction: "EXPENSE" }, _sum: { bynAmount: true } }))._sum.bynAmount!.toFixed(2), "450.00");
   const correction = { ...input, amount: "1200.00", expectedRevision: posted.revision, clientMutationId: randomUUID() };
   const empty = await tx.cashAccount.create({ data: { name: rows.id("empty-logistics"), currency: "BYN" } });
   const shortageBefore = await nativeSnapshot(tx);
@@ -477,6 +521,12 @@ test("logistics/real-posting-correction-CAS-history-budget-and-SQL-rollback", as
   assert.deepEqual(await nativeSnapshot(tx), faultBefore, "CORRECTION_FINAL_AUDIT_FAILURE_ROLLS_BACK_POSTING_PAYMENT_TRIP");
   await tx.$executeRawUnsafe('DROP TRIGGER ci169_logistics_failure ON "ChangeLog"'); await tx.$executeRawUnsafe("DROP FUNCTION ci169_logistics_failure()");
   const corrected = await logistics.createLogisticsPostingCore(actor.id, correction, "correct", dependencies);
+  const signed = await documents.upload(actor.id, { ...upload, clientMutationId: randomUUID(), stage: "SIGNED", bytes: Buffer.from("%PDF-1.4\nSIGNED") });
+  assert.notEqual(signed.document.id, document.id); assert.equal((await documents.list(c.actor.id, trip.tripId)).length, 2);
+  assert.equal((await logisticsQueries.getLogisticsTripMoneyCore(actor.id, trip.tripId, tx)).current!.id, corrected.postingId);
+  const accountantView = await logisticsViews.getLogisticsTripCore(c.actor.id, trip.tripId, transaction);
+  assert.equal(accountantView?.mode, "documents"); assert.equal("lines" in accountantView!, false); assert.equal("comment" in accountantView!, false);
+  for (const projectId of [a.id, b.id]) assert.ok((await logisticsViews.listLogisticsTripsCore(actor.id, { projectId, query: "Рейс169" }, transaction)).rows.some(row => row.id === trip.tripId));
   const current = await tx.logisticsPosting.findUniqueOrThrow({ where: { id: corrected.postingId }, include: { allocations: true } });
   assert.deepEqual(new Map(current.allocations.map(row => [row.projectId, row.amount.toFixed(2)])), new Map([[a.id, "480.00"], [b.id, "720.00"]]));
   assert.deepEqual(await tx.logisticsPosting.findUnique({ where: { id: original.id }, include: { allocations: { orderBy: { projectId: "asc" } } } }), { ...original, status: "SUPERSEDED" });
@@ -491,6 +541,8 @@ test("logistics/real-posting-correction-CAS-history-budget-and-SQL-rollback", as
     manifest: { ...manifest, shares: [{ projectId: b.id, percentBps: 10000 }], lines: [manifest.lines[1]] } }, "correct", dependencies);
   assert.equal(replaced.revision, corrected.revision + 1); assert.equal((await logisticsQueries.getLogisticsProjectBudgetCore(actor.id, a.id, tx)).spent, 0);
   assert.equal(await tx.logisticsPosting.count({ where: { tripId: trip.tripId, status: "SUPERSEDED" } }), 2);
+  await tx.user.update({ where: { id: actor.id }, data: { roles: ["MANAGER"] } });
+  await assert.rejects(documents.read(actor.id, document.id), /прав/);
   const finalMoney = await money(tx);
   for (const [index, before] of originalMoney.entries()) assert.deepEqual(finalMoney[index].filter(row => before.some(old => old.id === row.id)), before, "FOREIGN_LOGISTICS_MONEY_UNCHANGED");
 }));
@@ -598,7 +650,8 @@ test("payroll/shared-native-inputs-consumer-dto-1-5-20-tenfold-history", async (
     assert.equal(dues.length, foreignDues.length + size);
     assert.equal(estimates[users[0].id], null); assert.equal(balance, null); assert.ok(eligible.some(user => user.id === users[0].id));
     assert.ok(!accruals.some(user => user.userId === users[3].id));
-    const personal = await payroll.getMyPayroll(users[0].id, "2020-01");
+    const personalRead = await measure(() => payroll.getMyPayroll(users[0].id, "2020-01")), personal = personalRead.value;
+    assert.equal(personalRead.count, 5, "TWO_PAYROLL_TWO_PAYOUT_AND_CREATOR_SQL_READS");
     assert.deepEqual({ accrued: personal.accrued, paid: personal.paid, debt: personal.debt, estimate: personal.estimate }, { accrued: 130 * multiplier, paid: 0.06 * multiplier, debt: null, estimate: null });
     assert.equal(personal.entries.length, 5 * multiplier); assert.equal(personal.payouts.length, 2 * multiplier);
     if (size > 1) for (const selected of ["2020-01", current, "2999-01"]) {

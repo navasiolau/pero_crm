@@ -28,3 +28,7 @@
 ## Impact
 
 `.github/workflows/ci-cd.yml`, одна команда `apps/web/package.json`, `apps/web/tests/integration`, заменяемые тесты и QA, OpenSpec. Зависимости и production-конфигурация не меняются. Разрешение владельца на новый стенд и синтетические фикстуры относится только к CI №169; рабочие БД, S3, PVE/VPS, main и production исключены.
+
+## Согласованные следующие native/HTTP ports — OPEN
+
+Продолжение переносит уникальные task/percentage/auth/warehouse/logistics/queue/subscriber/file/cover/payroll/description/inline условия из старых manual/mock contours в existing integration files и fixtures; old verifyNative135 и meaningful snapshot/foreign-FK/falsy guards сохраняются. Случаи, не подтверждённые реальным PG/HTTP, не объявляются PASS. Для actual Auth.js fail-closed разрешён второй OWNED CI web того же проверяемого image на loopback3101 с DB127.0.0.1:1 только ВНУТРИ child container; PostgreSQL service не останавливается/не reset. Прежняя CI260/259f приёмка сохраняется; новых framework/runners/test/helper файлов, working DB/S3/stand writes нет.

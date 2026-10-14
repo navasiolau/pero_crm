@@ -33,3 +33,7 @@
 ## Migration Plan
 
 Local: pure guards/type/lint и OpenSpec. Далее draft PR с реальными CI services, tests и cleanup logs на точном SHA; обычный merge feature/169 в staging и приёмка фактического образа/здоровья. Разрешение на staging уже действует; main/production только по отдельному прямому поручению владельца. Откат CI — возврат изменения workflow и тестовой команды через обычную ветку задачи.
+
+## Текущий native/runtime scope после 259f
+
+Сохраняются уникальные реальные SQL/Decimal/locks/rollback/idempotency/ACL/HTTP/storage vectors и exact protected baseline, names/case IDs учитываются вместо квоты. Existing runtime испытывает ту же Alpine OCI runtime-конфигурацию и layers, которые №170 затем публикует: host .next/node_modules/ABI не копируются в runtime. Основной owned web3100 стартует стандартным production CMD с migrate deploy; отдельная host double-migration убирается. Fault child3101 запускает literal node apps/web/server.js без migration ТОЛЬКО для fault и получает DB localhost:1 внутри собственного контейнера; реальный PG service не ломается. Before DB/S3 — repo/SHA/run/attempt/image/config/diff_ids/BUILD_ID/ownership guards. Finally/always удаляют обе web children/processes, MinIO/images и подтверждают GitHub PG/network cleanup при success/failure/cancel. Старые recovery/reset/archive workflows не становятся recurring CI. Новые cases/retirement доказаны только после ordinary CI/Stage.

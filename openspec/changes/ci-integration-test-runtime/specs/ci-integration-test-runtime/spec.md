@@ -9,6 +9,7 @@
 ### Requirement: Явная изолированная цель
 
 Runtime MUST допускать только текущий GitHub hosted Linux run репозитория PERO CRM, принадлежащие ему контейнеры/сеть, точные loopback endpoints, БД `pero_ci` и bucket этого run. Guard MUST выполняться до соединений, миграций и фикстур. Несоответствие SHALL останавливать выполнение без обращения к рабочим целям и без загрузки env по умолчанию.
+Основной и дополнительный fault web MUST принадлежать этому run и проверенному Alpine OCI runtime. Host endpoints остаются loopback; внутри main child разрешены только проверенные owned service addresses текущей job network. Единственное fault исключение — DB `127.0.0.1:1` внутри second child, без stop/reset PG или обращения к рабочим целям.
 
 #### Scenario: Подмена цели
 - **WHEN** endpoint ведёт на production, staging, legacy, local 5433 или контейнер не принадлежит текущему job
@@ -24,7 +25,7 @@ Runtime MUST допускать только текущий GitHub hosted Linux 
 
 ### Requirement: Удаление временного стенда
 
-После успеха, ошибки или отмены runtime MUST завершать собственные tests/web-процессы и удалять принадлежащий ему MinIO-контейнер, образ и данные. GitHub post-job MUST удалять PostgreSQL service, его данные и сеть. Удаление MUST подтверждаться журналом; остановленный контейнер SHALL NOT считаться удалённым стендом.
+После успеха, ошибки или отмены runtime MUST завершать собственные tests/web-процессы, удалять обе owned main/fault web children и принадлежащие ему runtime/MinIO контейнеры, образы и данные. GitHub post-job MUST удалять PostgreSQL service, его данные и сеть. Удаление MUST подтверждаться журналом; остановленный контейнер SHALL NOT считаться удалённым стендом.
 
 #### Scenario: Завершение run
 - **WHEN** CI job завершён

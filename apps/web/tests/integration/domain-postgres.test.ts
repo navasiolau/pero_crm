@@ -17,6 +17,7 @@ type MutationProbe = { taskId?: string; workerId?: string; workId?: string; proj
 type Context = { actor: DomainActor; db: Db; onRequested?: (pid: number) => void;
   onHeld?: (tx: Prisma.TransactionClient, pid: number) => Promise<void>; failAuditId?: string;
   onTimerLookup?: (tx: Prisma.TransactionClient, rows: readonly { id: string }[]) => Promise<void>;
+  createFault?: { kind: "event" | "receipt"; collisionId: string; title: string }; createAck?: { lost: boolean; transactions: number };
   beforeAudit?: (tx: Prisma.TransactionClient) => Promise<void>; mutation?: MutationProbe };
 const contexts = new AsyncLocalStorage<Context>();
 const current = () => { const value = contexts.getStore(); assert.ok(value, "SYNTHETIC_ACTOR_CONTEXT_REQUIRED"); return value; };
@@ -143,6 +144,18 @@ function mutationTx(tx: Prisma.TransactionClient, probe: MutationProbe, proof: b
 
 function commandTx(tx: Prisma.TransactionClient, context: Context): Prisma.TransactionClient {
   return new Proxy(tx, { get(db, key) {
+    if (context.createFault && ["domainEvent", "changeLog"].includes(String(key))) return new Proxy(Reflect.get(db, key), { get(model, method) {
+      const value = Reflect.get(model, method); if (method !== "create") return typeof value === "function" ? value.bind(model) : value;
+      return async (...args: unknown[]) => {
+        const data = (args[0] as { data: { action?: string } }).data, fault = context.createFault!;
+        const row = await Reflect.apply(value, model, args);
+        if (fault.kind === "event" && key === "domainEvent" || fault.kind === "receipt" && data.action === "task.create.request") {
+          assert.equal(await tx.task.count({ where: { title: fault.title, createdById: context.actor.id } }), 1, "TASK_PARTIAL_SQL_WRITE_REQUIRED");
+          await tx.changeLog.create({ data: { id: fault.collisionId, actorType: "user", entity: "test", entityId: fault.collisionId, action: "collision" } });
+        }
+        return row;
+      };
+    } });
     if (key === "$queryRaw") return async (...args: unknown[]) => {
       const sql = Array.isArray(args[0]) ? args[0].join("") : "";
       const locked = /pg_advisory_xact_lock\(18435,\s*55001\)|FROM "Project".*FOR UPDATE/.test(sql);
@@ -182,7 +195,8 @@ before(async () => {
       const member = Reflect.get(model, method); return typeof member === "function" ? member.bind(model) : member;
     } });
     if (key === "$transaction" && typeof value === "function") return async (operation: (tx: Prisma.TransactionClient) => Promise<unknown>, options: unknown) => {
-      const probe = context.mutation, proof = probe ? probe.calls++ > 0 : false, connection = proof ? fixture.peer : context.db;
+      const probe = context.mutation, proof = probe ? probe.calls++ > 0 : false, createProof = context.createAck ? context.createAck.transactions++ > 0 : false;
+      const connection = proof || createProof ? fixture.peer : context.db;
       const result = await Reflect.apply(Reflect.get(connection, "$transaction"), connection, [async (tx: Prisma.TransactionClient) => {
         if (probe) {
           if (proof) await tx.$executeRawUnsafe("SET TRANSACTION READ ONLY");
@@ -194,6 +208,7 @@ before(async () => {
       }, options]);
       // Потеря ACK вводится только ПОСЛЕ resolve настоящего SQL COMMIT.
       if (probe?.mode && !proof) throw Error("CI133_INJECTED_LOST_ACK_AFTER_COMMIT");
+      if (context.createAck?.lost) { context.createAck.lost = false; throw Error("CI165_LOST_ACK_AFTER_REAL_COMMIT"); }
       return result;
     };
     return typeof value === "function" ? value.bind(context.db) : value;
@@ -269,10 +284,17 @@ test("warehouse/real-weighted-movements-replay-return-rounding-and-SQL-rollback"
   assert.deepEqual(await nativeSnapshot(tx), stable);
   const issued = await stock.warehouseMove(tx, c.admin, { kind: "EXPENSE", clientMutationId: randomUUID(), projectMaterialId: line.id, quantity: "10" });
   assert.equal(issued.movement.totalByn!.toFixed(2), "73.33");
+  assert.equal((await stock.warehouseReadPositions(tx, [c.material.id])).positions.get(c.material.id)!.quantity, "20");
+  assert.equal((await tx.material.findUniqueOrThrow({ where: { id: c.material.id } })).purchasePrice!.toFixed(2), "7.33");
   await assert.rejects(stock.warehouseMove(tx, c.admin, { kind: "EXPENSE", clientMutationId: randomUUID(), projectMaterialId: line.id, quantity: "21" }), /Недостаточно/);
   await stock.warehouseMove(tx, c.admin, { kind: "RETURN", clientMutationId: randomUUID(), projectMaterialId: line.id, quantity: "10", sourceMovementId: issued.movement.id });
   assert.equal((await tx.warehouseBalance.findUniqueOrThrow({ where: { materialId: c.material.id } })).valueByn.toFixed(9), "220.000000000");
   assert.equal((await tx.projectMaterial.findUniqueOrThrow({ where: { id: line.id } })).issuedQty.toString(), "0");
+  await tx.projectMaterial.update({ where: { id: line.id }, data: { issuedQty: "5" } });
+  await assert.rejects(stock.warehouseMove(tx, c.admin, { kind: "RETURN", clientMutationId: randomUUID(), projectMaterialId: line.id, quantity: "2", unitPrice: "0" }), /Цена должна/);
+  await stock.warehouseMove(tx, c.admin, { kind: "RETURN", clientMutationId: randomUUID(), projectMaterialId: line.id, quantity: "2", unitPrice: "11" });
+  assert.equal((await tx.warehouseBalance.findUniqueOrThrow({ where: { materialId: c.material.id } })).quantity.toString(), "32");
+  assert.equal((await tx.projectMaterial.findUniqueOrThrow({ where: { id: line.id } })).issuedQty.toString(), "3");
   const tiny = await tx.material.create({ data: { name: rows.id("tiny-stock"), unitId: c.unit.id } });
   const tinyLine = await tx.projectMaterial.create({ data: { productId: c.product.id, materialId: tiny.id, quantity: "1" } });
   await stock.warehouseMove(tx, c.admin, { kind: "INCOME", materialId: tiny.id, quantity: "1", unitPrice: "0.02", clientMutationId: randomUUID() });
@@ -281,10 +303,38 @@ test("warehouse/real-weighted-movements-replay-return-rounding-and-SQL-rollback"
     quantity: "0.25", sourceMovementId: tinyIssue.movement.id, clientMutationId: randomUUID() });
   assert.equal((await tx.warehouseMovementValuation.findUniqueOrThrow({ where: { movementId: tinyIssue.movement.id } })).returnedMoneyByn.toFixed(2), "0.02");
   assert.equal((await tx.warehouseBalance.findUniqueOrThrow({ where: { materialId: tiny.id } })).valueByn.toFixed(9), "0.020000000");
-  assert.equal(await tx.stockMovement.count({ where: { materialId: c.material.id } }), 5);
-  assert.equal(await tx.changeLog.count({ where: { actorId: c.admin.id, entity: "stockMovement" } }), 11);
-  assert.equal(await tx.domainEvent.count({ where: { actor: c.admin.id, type: "stock.movement.created" } }), 11);
+  assert.equal(await tx.stockMovement.count({ where: { materialId: c.material.id } }), 6);
+  assert.equal(await tx.changeLog.count({ where: { actorId: c.admin.id, entity: "stockMovement" } }), 12);
+  assert.equal(await tx.domainEvent.count({ where: { actor: c.admin.id, type: "stock.movement.created" } }), 12);
 }));
+test("warehouse/two-connection-issue-replay-return-real-lock-and-exact-facts", async () => {
+  const c = await tree(fixture.db, fixture, "stock-race"); await warehouseState(fixture.db, fixture);
+  const line = await fixture.db.projectMaterial.create({ data: { productId: c.product.id, materialId: c.material.id, quantity: "100" } });
+  const pids = new Set<number>();
+  const move = (db: PrismaClient, input: Parameters<typeof stock.warehouseMove>[2]) => db.$transaction(async tx => {
+    pids.add((await tx.$queryRaw<{ pid: number }[]>`SELECT pg_backend_pid() AS pid`)[0].pid);
+    return stock.warehouseMove(tx, c.admin, input);
+  }, { maxWait: 10_000, timeout: 15_000 });
+  await move(fixture.db, { kind: "INCOME", materialId: c.material.id, quantity: "5", unitPrice: "5", clientMutationId: randomUUID() });
+  const issue = await Promise.allSettled([fixture.db, fixture.peer].map(db => move(db, { kind: "EXPENSE", projectMaterialId: line.id, quantity: "4", clientMutationId: randomUUID() })));
+  assert.equal(issue.filter(row => row.status === "fulfilled").length, 1); assert.equal(pids.size, 2);
+  const refused = issue.find(row => row.status === "rejected"); assert.ok(refused && refused.status === "rejected"); assert.match(String(refused.reason), /Недостаточно/);
+  assert.equal((await fixture.db.warehouseBalance.findUniqueOrThrow({ where: { materialId: c.material.id } })).quantity.toString(), "1");
+  const input = { kind: "INCOME" as const, materialId: c.material.id, quantity: "2", unitPrice: "9", clientMutationId: randomUUID() };
+  const repeated = await Promise.all([move(fixture.db, input), move(fixture.peer, input)]);
+  assert.equal(repeated.filter(row => row.repeated).length, 1); assert.equal(repeated[0].movement.id, repeated[1].movement.id);
+  const issued = await fixture.db.stockMovement.findFirstOrThrow({ where: { materialId: c.material.id, type: "EXPENSE" } });
+  const returned = await Promise.allSettled([fixture.db, fixture.peer].map(db => move(db, { kind: "RETURN", projectMaterialId: line.id, sourceMovementId: issued.id, quantity: "3", clientMutationId: randomUUID() })));
+  assert.equal(returned.filter(row => row.status === "fulfilled").length, 1);
+  const returnRefusal = returned.find(row => row.status === "rejected"); assert.ok(returnRefusal && returnRefusal.status === "rejected");
+  assert.equal((await fixture.db.warehouseMovementValuation.findUniqueOrThrow({ where: { movementId: issued.id } })).returnedQuantity.toString(), "3");
+  assert.equal((await fixture.db.warehouseBalance.findUniqueOrThrow({ where: { materialId: c.material.id } })).quantity.toString(), "6");
+  assert.equal((await fixture.db.projectMaterial.findUniqueOrThrow({ where: { id: line.id } })).issuedQty.toString(), "1");
+  assert.equal(await fixture.db.stockMovement.count({ where: { materialId: c.material.id } }), 4);
+  assert.equal(await fixture.db.warehouseMovementValuation.count({ where: { movement: { materialId: c.material.id } } }), 4);
+  assert.equal(await fixture.db.domainEvent.count({ where: { actor: c.admin.id, type: "stock.movement.created" } }), 4);
+  assert.equal(await fixture.db.changeLog.count({ where: { actorId: c.admin.id, entity: "stockMovement" } }), 4);
+});
 const transactionIn = (tx: Prisma.TransactionClient) => async <T>(operation: (db: Prisma.TransactionClient) => Promise<T>) => {
   await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(18435,55001)`; return operation(tx);
 };
@@ -789,6 +839,21 @@ test("task/create-ten-identical-receipts-collisions-revocation-deleted-ACK-and-S
   assert.equal(await fixture.db.task.count({ where: { workId: c.work.id } }), 0);
   assert.deepEqual(await fixture.db.changeLog.findUnique({ where: { id: receipt.id } }), receipt);
   assert.equal(await fixture.db.domainEvent.count({ where: { actor: c.manager.id, type: "task.assigned" } }), 1);
+  for (const kind of ["event", "receipt"] as const) {
+    const title = `Откат ${kind}`, snapshot = await nativeSnapshot(fixture.db);
+    const refused = await run(c.manager, fixture.db, () => tasks.createTask({ ...input, title, clientMutationId: randomUUID() }),
+      { createFault: { kind, collisionId: collision.id, title } });
+    assert.equal(refused.ok, false); assert.equal(refused.outcome, "ROLLED_BACK"); assert.deepEqual(await nativeSnapshot(fixture.db), snapshot);
+  }
+  const ackInput = { ...input, title: "SQL ACK", clientMutationId: randomUUID() }, ack = { lost: true, transactions: 0 };
+  const recovered = await run(c.manager, fixture.db, () => tasks.createTask(ackInput), { createAck: ack });
+  assert.equal(recovered.ok, true); assert.equal(recovered.outcome, "COMMITTED"); if (!recovered.ok) assert.fail("REAL_TASK_ACK_RECOVERY_REQUIRED");
+  assert.equal(recovered.replayed, true); assert.ok(ack.transactions >= 2);
+  const repeat = await run(c.manager, fixture.peer, () => tasks.createTask(ackInput)); assert.ok(repeat.ok && repeat.replayed);
+  if (repeat.ok) assert.equal(repeat.resultId, recovered.resultId);
+  assert.equal(await fixture.db.task.count({ where: { projectId: c.project.id, title: "SQL ACK" } }), 1);
+  assert.equal(await fixture.db.changeLog.count({ where: { id: `task-create:${ackInput.clientMutationId}` } }), 1);
+  assert.equal(await fixture.db.domainEvent.count({ where: { actor: c.manager.id, type: "task.assigned" } }), 2);
 });
 
 test("task/status-real-receipts-start-after-DONE-and-changed-context-refusal", async () => {

@@ -7,6 +7,15 @@ import type { ProductPatchResult, ProductPatch } from "../../src/server/products
 import type { ProjectPatchResult, ProjectPatch } from "../../src/server/projects/patch-contract";
 import type { ProjectStageResult } from "../../src/server/projects/stage-contract";
 import type { FileDeleteResult } from "../../src/server/files/delete-contract";
+import { Prisma } from "@prisma/client";
+import { deleteOrdinaryFileCore } from "../../src/server/files/delete-core";
+import { executeFileDeleteCleanup } from "../../src/server/files/delete-storage";
+import { persistOrdinaryUpload } from "../../src/server/files/upload-core";
+import { deleteProductSketchCore } from "../../src/server/products/cover-core";
+import { deleteProjectCoverCore } from "../../src/server/projects/cover-core";
+import { DEFAULT_EVENT_QUEUE_SETTINGS } from "../../src/server/plugins/event-queue-contract";
+import { createEventQueueProcessor } from "../../src/server/plugins/event-queue-core";
+import { createPostgresEventQueueStore } from "../../src/server/plugins/event-queue-store";
 import { nativeSnapshot } from "../helpers/native-acceptance-snapshot";
 import { rejectedSql } from "./postgres.fixture";
 import { assertPrivateFileHeaders, createHttpS3Fixture, type HttpActor } from "./http-s3.fixture";
@@ -85,6 +94,92 @@ test("files.crud: file113, документы, attachment ACL и inline-дейс
     const original = await f.request(`/api/files/${other.id}`, engineer); assert.equal(original.status, 200); await original.arrayBuffer();
     assert.equal((await f.action<FileDeleteResult>("deleteFile", productPage, engineer, [other.id, randomUUID()])).ok, false);
     await f.db.product.update({ where: { id: product.id }, data: { status: "DESIGN" } });
+  });
+
+  await t.test("file/native-durable-UUID-pending-rebind-new-processor-and-cover-CAS-rollback", async () => {
+    const identity = { mode: "s3" as const, endpoint: f.target.s3.endpoint, bucket: f.target.s3.bucket };
+    const settings = { ...DEFAULT_EVENT_QUEUE_SETTINGS, leaseMs: 3000, heartbeatMs: 500, deliveryTimeoutMs: 2000, backoffBaseMs: 100, backoffMaxMs: 400 };
+    const own = await f.file("durable-delete", { projectId: project.id, productId: product.id }, cad, cadMime, { uploadedById: engineer.id, hasThumb: true });
+    const key = `${project.id}/${own.storedName}`, thumb = `${project.id}/thumbs/${own.storedName}.jpg`, neighbor = `${key}.neighbor`;
+    await f.put(thumb, png, "image/jpeg"); await f.put(neighbor, cad, cadMime);
+    const collision = await f.db.changeLog.create({ data: { id: f.id("durable-collision"), actorType: "user", entity: "test", entityId: own.id, action: "fixture" } });
+    for (const table of ["changeLog", "domainEvent"] as const) {
+      const before = await nativeSnapshot(f.db);
+      await assert.rejects(f.db.$transaction(tx => deleteOrdinaryFileCore(new Proxy(tx, { get(target, key) {
+        if (key === table) return new Proxy(Reflect.get(target, key), { get(model, method) {
+          if (method === "create") return async (...args: unknown[]) => {
+            const row = await Reflect.apply(Reflect.get(model, method), model, args);
+            assert.equal(await tx.file.count({ where: { id: own.id } }), 0, "ACTUAL_METADATA_DELETE_BEFORE_FAULT");
+            await tx.changeLog.create({ data: { id: collision.id, actorType: "user", entity: "test", entityId: own.id, action: "collision" } }); return row;
+          };
+          const value = Reflect.get(model, method); return typeof value === "function" ? value.bind(model) : value;
+        } });
+        const value = Reflect.get(target, key); return typeof value === "function" ? value.bind(target) : value;
+      } }), engineer, { fileId: own.id, clientMutationId: randomUUID() }, identity)), error => error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002");
+      assert.deepEqual(await nativeSnapshot(f.db), before); assert.deepEqual(await f.get(key), cad);
+    }
+    const nonce = randomUUID(), input = { fileId: own.id, clientMutationId: nonce }, eventId = `file-delete:${nonce}`, pids = new Set<number>();
+    const replies = await Promise.all([f.db, f.peer].map(db => db.$transaction(async tx => {
+      pids.add((await tx.$queryRaw<{ pid: number }[]>`SELECT pg_backend_pid() AS pid`)[0].pid); return deleteOrdinaryFileCore(tx, engineer, input, identity);
+    })));
+    assert.equal(pids.size, 2); assert.ok(replies.every(row => row.ok)); assert.equal(replies.filter(row => row.ok && row.repeated).length, 1);
+    assert.equal(await f.db.changeLog.count({ where: { id: eventId } }), 1); assert.equal(await f.db.domainEvent.count({ where: { id: eventId } }), 1);
+    let unavailable = true, criticalCreator = false;
+    const data = { ...own, id: f.id("durable-rebound") }, retired = (error: unknown) => (error as { code?: string }).code === "FILE_STORAGE_KEY_RETIRED";
+    const cannotUpload = (db: typeof f.db) => assert.rejects(db.$transaction(tx => persistOrdinaryUpload(tx, engineer, {
+      clientMutationId: randomUUID(), fingerprint: "b".repeat(64), projectNumber: project.number, data,
+    })), retired);
+    const processor = (db: typeof f.db) => createEventQueueProcessor({ settings, store: createPostgresEventQueueStore(db, settings, [eventId]),
+      deliver: (event, ownership) => executeFileDeleteCleanup(event, db, ownership, async (_storage, exactKey) => {
+        assert.ok([key, thumb].includes(exactKey)); if (unavailable) throw Error("CI169_STORAGE_UNAVAILABLE");
+        if (exactKey === key && !criticalCreator) { await cannotUpload(db === f.db ? f.peer : f.db); criticalCreator = true; }
+        await f.deleteMarker(exactKey);
+      }, () => identity) });
+    assert.equal(await processor(f.db).dispatchOne(eventId), false); assert.equal((await f.db.domainEvent.findUniqueOrThrow({ where: { id: eventId } })).processedAt, null);
+    assert.deepEqual(await f.get(key), cad); await cannotUpload(f.peer);
+    unavailable = false; await f.db.file.create({ data });
+    assert.equal(await processor(f.db).dispatchOne(eventId, true), false); assert.deepEqual(await f.get(key), cad);
+    await f.db.file.delete({ where: { id: data.id } });
+    assert.equal(await processor(f.peer).dispatchOne(eventId, true), true); assert.equal(criticalCreator, true); await cannotUpload(f.db);
+    assert.ok((await f.db.domainEvent.findUniqueOrThrow({ where: { id: eventId } })).processedAt);
+    assert.equal(await f.db.changeLog.count({ where: { id: eventId } }), 1); assert.deepEqual(await f.get(neighbor), cad);
+    for (const exactKey of [key, thumb]) await assert.rejects(f.get(exactKey), error => error instanceof Error && error.name === "NoSuchKey");
+
+    for (const kind of ["product", "project"] as const) {
+      const cover = await f.file(`manual-cover-${kind}`, { projectId: project.id, productId: kind === "product" ? product.id : null }, png, "image/png", { uploadedById: manager.id });
+      if (kind === "product") await f.db.product.update({ where: { id: product.id }, data: { sketchFileId: cover.id } });
+      else await f.db.project.update({ where: { id: project.id }, data: { coverFileId: cover.id } });
+      const nonce = randomUUID(), call = (tx: Prisma.TransactionClient, expected = cover.id): Promise<Awaited<ReturnType<typeof deleteProductSketchCore>> | Awaited<ReturnType<typeof deleteProjectCoverCore>>> => kind === "product"
+        ? deleteProductSketchCore(tx, manager, { productId: product.id, expectedSketchFileId: expected, clientMutationId: nonce }, identity)
+        : deleteProjectCoverCore(tx, manager, { projectId: project.id, expectedCoverFileId: expected, clientMutationId: nonce }, identity);
+      const before = await nativeSnapshot(f.db), stale = await f.db.$transaction(tx => call(tx, f.id("stale-cover"))); assert.equal(stale.ok, false);
+      assert.deepEqual(await nativeSnapshot(f.db), before);
+      const faultId = f.id(`cover-collision-${kind}`); await f.db.changeLog.create({ data: { id: faultId, actorType: "user", entity: "test", entityId: cover.id, action: "fixture" } });
+      const stable = await nativeSnapshot(f.db); let inserted = false;
+      await assert.rejects(f.db.$transaction(tx => call(new Proxy(tx, { get(target, key) {
+        if (key === "domainEvent") return new Proxy(target.domainEvent, { get(model, method) {
+          if (method === "create") return async (args: Prisma.DomainEventCreateArgs) => {
+            const row = await model.create(args); inserted = true;
+            await tx.changeLog.create({ data: { id: faultId, actorType: "user", entity: "test", entityId: cover.id, action: "collision" } }); return row;
+          };
+          const value = Reflect.get(model, method); return typeof value === "function" ? value.bind(model) : value;
+        } });
+        const value = Reflect.get(target, key); return typeof value === "function" ? value.bind(target) : value;
+      } }))), error => error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002");
+      assert.equal(inserted, true); assert.deepEqual(await nativeSnapshot(f.db), stable, "COVER_REAL_INTENT_SQL_FAILURE_ROLLBACK");
+      const removed = await f.db.$transaction(call); assert.equal(removed.ok, true);
+      const committed = await nativeSnapshot(f.db), replay = await f.peer.$transaction(call); assert.ok(replay.ok && replay.repeated);
+      assert.deepEqual(await nativeSnapshot(f.db), committed); assert.equal(await f.db.file.count({ where: { id: cover.id } }), 0);
+      const coverEvent = `file-delete:${nonce}`, coverKey = `${project.id}/${cover.storedName}`; let storageFailed = true;
+      const cleanup = () => createEventQueueProcessor({ settings, store: createPostgresEventQueueStore(f.db, settings, [coverEvent]),
+        deliver: (event, ownership) => executeFileDeleteCleanup(event, f.db, ownership, async (_storage, exactKey) => {
+          assert.equal(exactKey, coverKey); if (storageFailed) throw Error("CI169_STORAGE_UNAVAILABLE"); await f.deleteMarker(exactKey);
+        }, () => identity) });
+      assert.equal(await cleanup().dispatchOne(coverEvent), false); assert.deepEqual(await f.get(coverKey), png);
+      storageFailed = false; assert.equal(await cleanup().dispatchOne(coverEvent, true), true);
+      assert.equal(await f.db.changeLog.count({ where: { id: coverEvent } }), 1);
+      await assert.rejects(f.get(coverKey), error => error instanceof Error && error.name === "NoSuchKey");
+    }
   });
 
   await t.test("finance/linked-upload-mime-byte-ACL: реальные PDF/PNG/CAD, READY/private/linked и уникальный FK", async () => {
@@ -199,6 +294,8 @@ test("files.crud: file113, документы, attachment ACL и inline-дейс
     if (stale.kind === "conflict") assert.equal(stale.currentValue, texts[1]);
     assert.equal((await f.action<BasicReply>("updateProduct", productPage, manager, [product.id, { description: texts[2] }, { description: texts[1] }])).ok, true);
     assert.equal((await f.db.product.findUniqueOrThrow({ where: { id: product.id } })).description, texts[2]);
+    assert.equal(saved(await patchProduct(manager, "description", texts[3], texts[2])).value, null);
+    assert.equal((await f.action<BasicReply>("updateProduct", productPage, manager, [product.id, { description: texts[2] }, { description: null }])).ok, true);
     assert.equal((await f.action<BasicReply>("updateProduct", productPage, manager, [product.id, { description: texts[3] }, { description: texts[2] }])).ok, true);
     assert.equal((await f.db.product.findUniqueOrThrow({ where: { id: product.id } })).description, null);
     await f.db.product.update({ where: { id: product.id }, data: { description: texts[3] } });
@@ -260,6 +357,9 @@ test("files.crud: file113, документы, attachment ACL и inline-дейс
     const issued = await nativeSnapshot(f.db); assert.notEqual((await patchProduct(manager, "quantity", 1, 3)).kind, "saved"); assert.deepEqual(await nativeSnapshot(f.db), issued);
     assert.equal((await patchProduct(engineer, "title", "Hidden", currentTitle)).kind, "forbidden");
     assert.equal(saved(await patchProduct(combined, "title", "Combined", currentTitle)).value, "Combined");
+    const legacyNoop = await nativeSnapshot(f.db);
+    assert.equal((await f.action<BasicReply>("updateProduct", productPage, manager, [product.id, { title: "Combined" }, { title: "Combined" }])).ok, true);
+    assert.deepEqual(await nativeSnapshot(f.db), legacyNoop, "LEGACY_TITLE_NOOP_ZERO_WRITES");
     assert.equal((await patchProduct(foreign, "description", "Hidden", "wrong")).kind, "not-found");
     assert.equal((await f.action<BasicReply>("updateProduct", productPage, manager, [product.id, { title: "Bypass" }])).ok, false);
     await f.fault("ChangeLog", manager.id, async () => {
