@@ -44,3 +44,11 @@
 - [x] 7.4 Выполнить локальную read-only OCI/log inventory; prune только по доказанному allowlist, иначе сохранить весь runtime/Prisma CLI/migrations и записать ограничение.
 - [x] 7.5 После freeze один affected static check, evidence и передача Root/независимому reviewer без новых tests/benchmarks/CI/DB/infra.
 - [ ] 7.6 Следующий ordinary required CI и actual staging подтверждают exact OCI/все gates/cleanup/time; цель180с не закрывается по оценкам или cold/warm предположениям.
+
+CI269/e0ae9a10 принят Root функционально: all6 SUCCESS, 283 с, exact OCI/DB/W07/GET/cleanup сохранены. Временная цель пункта7.6 остаётся OPEN; исторические failed267/268 и warm168 не заменяют её.
+
+## 8. Metadata cache records after CI269 — APPROVED / OPEN
+
+- [x] 8.1 Только в существующем workflow поставить dedicated metadata cache importer первым и сохранить промежуточные records через mode=max; Dockerfile/BUILD_CONFIG, graph inputs и все checks/guards не менять.
+- [x] 8.2 Один affected YAML/Bake static check, source freeze и независимый review; без повторных suites/benchmark/DB/CI со стороны исполнителя.
+- [ ] 8.3 Root выполняет ordinary required CI и actual staging; это же измерение завершает временную цель7.6. Записать фактические metadata materialization/cache/timing и exact OCI/все gates/cleanup. Цель менее180с остаётся OPEN до успешного измеренного run.

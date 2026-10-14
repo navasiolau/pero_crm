@@ -4,6 +4,12 @@
 
 Baseline — принятый61f9bc14, CI266196с/native155с/promotion32с, цель180с OPEN. Compiler-cache restore получает id; inject остаётся обязательным, extract пропускается только при `cache-hit == 'true'`. Miss/fallback/failure сохраняют прежний `always`/prepare-success guard. Browser binaries cache использует OS/architecture/реальную установленную Playwright version и lockfile, без restore fallback; `playwright install --with-deps chromium` остаётся обязательным для системных зависимостей и проверки нужной версии. По CI266 TasksTab/status suite имеет сумму case durations39,10с против8,62с global-kanban; меняются местами только эти два файла между прежними cohorts60,4/24,2с. File isolation/default concurrency/commands и все gates сохраняются; суммы пересекающихся case durations не обещают whole-run выигрыш. OCI runtime pruning без per-file/usage proof не выполняется: Prisma CLI/engines/migrations и остальные runtime packages остаются.
 
+## Metadata cache follow-up after CI269
+
+Принятый `e0ae9a10`/CI269: all6 SUCCESS, 283 с; native 100 raw registrations = 96 leaf + 4 parent groups, web884/bot38/Python53/guards2, cleanup и tested/promoted OCI подтверждены. Цель менее 180 с OPEN. В том же сохранённом Bake log три metadata COPY CACHED, но vertex `#52` материализует 414,58 MB builder layer (28,5 с download + 20,4 с extract) и дополнительные 64,85 MB; всего vertex 53,2 с, Bake 60 с.
+
+Коррекция ограничена metadata cache records: dedicated `pero-web-metadata` importer идёт перед production fallback, а exporter меняет `mode=min` на `mode=max`, включая промежуточные build/COPY dependency records. Общее production cache/provenance max не меняется. Это не прямое восстановление готовых `.next/types`/BUILD_ID: прежний shared build graph и проверки текущих inputs/revision/run/attempt/config/diff_ids/manifest продолжают связывать metadata с испытываемым OCI. Dockerfile и compiler BUILD_CONFIG byte-unchanged; cold miss остаётся корректным. Увеличение metadata cache export может стоить времени и места, поэтому чистая экономия и цель180 подтверждаются только следующим обычным required CI.
+
 ## Context
 
 Исходная ветка №170 создана от `origin/staging=e986e290`; там ещё нет runtime №169. Мотивация описана в proposal.md. В установленном Next 15.5.20 встроенная типизация исключает `*.test.*` и `__tests__`, поэтому она не заменяет полный web `tsc`.
