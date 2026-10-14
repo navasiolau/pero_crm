@@ -76,7 +76,7 @@ export async function createHttpS3Fixture(scenarioId: string) {
   }
   async function actionResponse(name: string, page: string, actor: HttpActor | undefined, args: unknown[]) {
     assertCiRuntimeTarget();
-    const manifest = await (actionManifest ??= readFile(path.resolve(".next/server/server-reference-manifest.json"), "utf8").then(JSON.parse));
+    const manifest: Awaited<NonNullable<typeof actionManifest>> = await (actionManifest ??= readFile(path.resolve(".next/server/server-reference-manifest.json"), "utf8").then(JSON.parse));
     const found = Object.entries(manifest.node).filter(([, entry]) => entry.exportedName === name);
     assert.equal(found.length, 1, `CI_ACTION_EXPORT:${name}`); assert.match(found[0][0], /^[a-f0-9]{42}$/);
     return request(page, actor, { method: "POST", headers: { "Next-Action": found[0][0],
