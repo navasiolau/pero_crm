@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1
 
-FROM node:22-alpine AS base
+ARG NODE_IMAGE=node:22-alpine
+FROM ${NODE_IMAGE} AS base
 RUN apk add --no-cache libc6-compat && corepack enable pnpm
 WORKDIR /app
 
@@ -21,8 +22,16 @@ ENV DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy" \
     AUTH_SECRET="build-time-dummy"
 ARG GITHUB_ACTIONS=false
 ARG PERO_CI_EXTERNAL_CHECKS=0
-RUN pnpm --filter @pero/web exec prisma generate \
+ARG PERO_CI_CACHE_ID=pero-next-local
+RUN --mount=type=cache,id=${PERO_CI_CACHE_ID},target=/app/apps/web/.next/cache,sharing=locked \
+    pnpm --filter @pero/web exec prisma generate \
     && pnpm --filter @pero/web build
+
+# Свежие types и action manifest принадлежат той же сборке, что и runtime-образ.
+FROM scratch AS ci-metadata
+COPY --from=build /app/apps/web/.next/types /types
+COPY --from=build /app/apps/web/.next/BUILD_ID /BUILD_ID
+COPY --from=build /app/apps/web/.next/server/server-reference-manifest.json /server/server-reference-manifest.json
 
 # --- Рантайм ---
 FROM base AS runner

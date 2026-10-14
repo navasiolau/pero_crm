@@ -15,12 +15,12 @@ CI SHALL выполнять существующие тесты, lint, productio
 - **THEN** успешный результат CI возможен только при успехе всех обязательных suites и gates с сохранением изоляции тестовых процессов
 
 #### Scenario: Native использует свежую сборку того же run
-- **WHEN** на одном runner production build и полный tsc успешно проверили свежую сборку текущего SHA, а независимые unit suites ещё выполняются
-- **THEN** native SHALL использовать только эту свежую сборку без повторной подготовки и передачи artifact, а публикация SHALL оставаться закрытой до успеха всех обязательных suites/checks и cleanup независимо от числа jobs
+- **WHEN** shared Bake DAG выпускает full OCI с provenance, no-attest Docker projection и fresh metadata текущего SHA, а полная типизация и required unit suites проверяют те же source inputs
+- **THEN** native SHALL испытывать совпадающие Alpine runtime image config/diff_ids/revision/BUILD_ID, а публикация SHALL только после успеха всех обязательных suites/checks/cleanup переносить исходный immutable OCI/referrers без rebuild/early tags
 
-#### Scenario: CI не создаёт ненужный standalone
-- **WHEN** GITHUB_ACTIONS=true и PERO_CI_EXTERNAL_CHECKS=1 разрешают обязательные внешние checks, а PERO_CI_NATIVE_BUILD=1 выбирает native CI build
-- **THEN** native CI SHALL сохранять полную свежую сборку, route types и next start без standalone, а Docker CI и обычные local/Docker сборки SHALL сохранять свежий standalone
+#### Scenario: Native испытывает production standalone без отдельной host сборки
+- **WHEN** CI тестирует production OCI runtime, собранный единственным shared build graph
+- **THEN** native SHALL использовать тот же Alpine standalone/runtime packaging; отдельная host no-standalone сборка и cross-ABI .next/node_modules копирование SHALL NOT заменять испытываемый образ, а обычный local Docker fallback SHALL сохраняться
 
 ### Requirement: Кэш ускоряет подготовку без повторного использования рабочих данных
 
