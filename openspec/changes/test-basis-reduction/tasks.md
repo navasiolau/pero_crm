@@ -39,3 +39,12 @@
 - [ ] 7.1 До удаления записать FULL literal pure/browser/manual/native allowlists и old→retained case IDs, levels, closed causes и last-consumer closure; сохранять actual named cases, без квоты/100% claim.
 - [ ] 7.2 Консолидировать согласованные existing pure-domain/browser CSS suites с exact bodies/isolation; кандидат может удалить только mapped old manual/mock contours после source case mapping/local proof, сохранив действующие guards/warehouse recovery. Финальная замена принимается только по actual native/HTTP PASS №169 в общем required CI; отдельный before-delete CI не требуется, failure блокирует deploy и сохраняет прежний принятый staging.
 - [ ] 7.3 После freeze обновить существующие matrix/README/maps, измерить ALLnew-inclusive строки/файлы/actual cases, пройти один итоговый набор проверок/review/обычный CI и actual Stage; historical DONE сохраняются, new acceptance пока pending.
+
+## 8. Глубокая итерация после61f9 — OPEN
+
+- [x] 8.1 До удаления дополнить existing reduction-map FULL literal closures/keeper semantics/owner boundaries; сохранить accepted61f9 и priortracking2a234ef при обычной интеграции истории.
+- [x] 8.2 Закрыть согласованные821+428 QA namespaces/companions, sandbox45/closedBYNtransport13 и заменить V8 measurement thin existing mapcheck с прежним path guard; проверить retained existing validator test без новых framework/checkers/files.
+- [x] 8.3 После ACK A/B/C exact useful case vectors в existing169 suites удалить только mapped79 manual contours; UNKNOWN79/currentpins/warehouse94 guards KEEP. Учитывать все новые переносимые строки, не добиваться forecast сокращением assertions.
+- [ ] 8.4 После sourcefreeze обновить current README/map refs и actualnet; Root выполняет один общий local/types/lint/review/ordinaryCI/actualStage. До нового evidence не отмечать native/runtime/staging PASS; main/production/workingdata остаются вне scope.
+
+Source checkpoint глубокой итерации: все mapped79 manual/3817 LF retired по A/B/C keeper ACK; total104 literal file deletions, thincoverage380→69, два существующих Chrome файла +143LF; own168 rawLFnet−5316 до новых169 ports. A targeted28/28 и D stock5/5+warehouse4/4 PASS; combined native/HTTP/CI/Stage нового кандидата NOT_RUN, 8.4 остаётсяOPEN. Historical accepted61f9/CI266196с и priortracking2a234ef не переопределяются.
