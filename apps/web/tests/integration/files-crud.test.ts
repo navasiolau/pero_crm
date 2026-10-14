@@ -2,6 +2,8 @@
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import test from "node:test";
+import { createFinanceDocumentService, type FinanceDocumentStorage } from "../../src/server/finance-documents/core";
+import { loadMovementReportDocuments } from "../../src/server/warehouse/report-documents";
 import sharp from "sharp";
 import type { ProductPatchResult, ProductPatch } from "../../src/server/products/patch-contract";
 import type { ProjectPatchResult, ProjectPatch } from "../../src/server/projects/patch-contract";
@@ -183,6 +185,8 @@ test("files.crud: file113, документы, attachment ACL и inline-дейс
   });
 
   await t.test("finance/linked-upload-mime-byte-ACL: реальные PDF/PNG/CAD, READY/private/linked и уникальный FK", async () => {
+    const { loadOrganizationPayments } = await import("../../src/server/finance/organization-ledger");
+    const { listMovements } = await import("../../src/server/warehouse/queries");
     const docs = [] as { id: string; key: string; bytes: Uint8Array; mime: string; name: string; nonce: string }[];
     for (const [name, mime, bytes] of [["113.pdf", "application/pdf", pdf], ["113.png", "image/png", png], ["113.b3d", cadMime, cad],
       ["inert.html", "text/html", Buffer.from("<!doctype html><p>inert</p>")], ["inert.svg", "image/svg+xml", Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>')]] as const) {
@@ -208,6 +212,18 @@ test("files.crud: file113, документы, attachment ACL и inline-дейс
       assert.equal((await f.request(`/api/finance/documents/${row.id}`, procurement)).status, 404);
       docs.push({ id: row.id, key: row.storageKey, bytes, mime, name, nonce });
     }
+    const concurrentInput = { fileName: "parallel.pdf", mimeType: "application/pdf", bytes: pdf, clientMutationId: randomUUID() };
+    const parallel = await Promise.all(Array.from({ length: 4 }, () => f.financeUpload(accountant, concurrentInput)));
+    for (const reply of parallel) { assert.ok([200, 201].includes(reply.response.status), "CONCURRENT_UPLOAD_STATUS:" + reply.response.status); assert.equal(reply.body.ok, true); }
+    const parallelId = parallel[0].body.document!.id;
+    assert.ok(parallel.every(reply => reply.body.document?.id === parallelId));
+    assert.equal(parallel.filter(reply => reply.response.status === 201).length, 1);
+    assert.equal(await f.db.financeDocument.count({ where: { clientMutationId: concurrentInput.clientMutationId } }), 1);
+    assert.equal(await f.db.changeLog.count({ where: { entityId: parallelId, action: "create" } }), 1);
+    const parallelRow = await f.db.financeDocument.findUniqueOrThrow({ where: { id: parallelId } });
+    const parallelVersions = await f.versions(parallelRow.storageKey);
+    assert.equal((await f.financeUpload(accountant, concurrentInput)).body.document?.id, parallelId);
+    assert.deepEqual(await f.versions(parallelRow.storageKey), parallelVersions);
     const cash = await f.db.cashAccount.create({ data: { id: f.id("cash"), name: "CI113", currency: "BYN" } });
     const code = ((await f.db.expenseArticle.aggregate({ _max: { code: true } }))._max.code ?? 0) + 1;
     const article = await f.db.expenseArticle.create({ data: { id: f.id("article"), code, name: "CI113" } });
@@ -241,12 +257,165 @@ test("files.crud: file113, документы, attachment ACL и inline-дейс
     assert.equal((await f.financeUpload(manager, { fileName: "denied.pdf", mimeType: "application/pdf", bytes: pdf, clientMutationId: randomUUID() })).response.status, 403);
     assert.equal((await f.financeUpload(undefined, { fileName: "anonymous.pdf", mimeType: "application/pdf", bytes: pdf, clientMutationId: randomUUID() })).response.status, 401);
     assert.equal((await f.financeUpload(accountant, { fileName: "empty.pdf", mimeType: "application/pdf", bytes: new Uint8Array(), clientMutationId: randomUUID() })).response.status, 422);
+    assert.equal((await f.financeUpload(accountant, { fileName: "invalid.pdf", mimeType: "application/pdf", bytes: pdf, clientMutationId: "bad" })).response.status, 422);
+    let failPut = true, revokeDuringPut = false, opens = 0, storagePuts = 0;
+    const storageFailure = Error("CI169_DOCUMENT_STORAGE_FAILURE");
+    const storage: FinanceDocumentStorage = {
+      mode: () => "s3",
+      put: async (row, content) => {
+        storagePuts++;
+        if (failPut) throw storageFailure;
+        const chunks: Buffer[] = [];
+        if (Buffer.isBuffer(content)) chunks.push(content);
+        else for await (const chunk of await content.openRead()) chunks.push(Buffer.from(chunk));
+        await f.put(row.storageKey, Buffer.concat(chunks), row.mimeType);
+        if (revokeDuringPut) await f.db.user.update({ where: { id: row.uploadedById }, data: { active: false } });
+      },
+      open: async row => {
+        opens++; const bytes = await f.get(row.storageKey);
+        return new ReadableStream({ start(controller) { controller.enqueue(bytes); controller.close(); } });
+      },
+    };
+    const service = createFinanceDocumentService({ transaction: operation => f.db.$transaction(operation), storage });
+    const pendingInput = { fileName: "retry.pdf", mimeType: "application/pdf", bytes: pdf, clientMutationId: randomUUID() };
+    const beforeInvalid = { rows: await f.db.financeDocument.count({ where: { uploadedById: accountant.id } }),
+      audits: await f.db.changeLog.count({ where: { actorId: accountant.id, entity: "financeDocument" } }) };
+    for (const patch of [{ bytes: Buffer.alloc(0) }, { clientMutationId: "bad" }, { mimeType: "text/html\r\nX-Test:value" }]) {
+      await assert.rejects(service.upload(accountant.id, { ...pendingInput, ...patch }), error => (error as { code?: string }).code === "FINANCE_DOCUMENT_INVALID");
+    }
+    assert.equal(await f.db.financeDocument.count({ where: { uploadedById: accountant.id } }), beforeInvalid.rows);
+    assert.equal(await f.db.changeLog.count({ where: { actorId: accountant.id, entity: "financeDocument" } }), beforeInvalid.audits);
+    assert.equal(storagePuts, 0);
+    await assert.rejects(service.upload(accountant.id, pendingInput), error => error === storageFailure);
+    const pending = await f.db.financeDocument.findUniqueOrThrow({ where: { clientMutationId: pendingInput.clientMutationId } });
+    assert.equal(pending.state, "PENDING"); assert.equal(await service.read(accountant.id, pending.id), null); assert.equal(opens, 0);
+    assert.equal(await f.db.changeLog.count({ where: { entityId: pending.id } }), 0);
+    failPut = false; assert.equal((await service.upload(accountant.id, pendingInput)).document.id, pending.id);
+    assert.equal(await service.read(procurement.id, pending.id), null); assert.equal(opens, 0);
+    await f.db.payment.create({ data: { id: f.id("document-read-linked"), cashAccountId: cash.id, createdById: accountant.id,
+      direction: "INCOME", amount: "0.01", bynAmount: "0.01", currency: "BYN", reportDocumentId: pending.id } });
+    const linked = await service.read(procurement.id, pending.id); assert.ok(linked);
+    assert.deepEqual(Buffer.from(await new Response(linked.body).arrayBuffer()), pdf); assert.equal(opens, 1);
+    const revokedWriter = await f.user("document-revoked-put", ["ACCOUNTANT"]), revokedInput = { ...pendingInput, clientMutationId: randomUUID() };
+    revokeDuringPut = true;
+    await assert.rejects(service.upload(revokedWriter.id, revokedInput), error => (error as { code?: string }).code === "FINANCE_DOCUMENT_FORBIDDEN");
+    const revoked = await f.db.financeDocument.findUniqueOrThrow({ where: { clientMutationId: revokedInput.clientMutationId } });
+    assert.equal(revoked.state, "PENDING"); assert.equal(await f.db.changeLog.count({ where: { entityId: revoked.id } }), 0);
+    const rawToken = "pero_" + randomUUID().replaceAll("-", "");
+    await f.db.apiToken.create({ data: { id: f.id("document-bot-token"), name: "CI document service", prefix: rawToken.slice(0, 11), tokenHash: hash(Buffer.from(rawToken)), scopes: ["write"], createdById: null } });
+    const readToken = "pero_" + randomUUID().replaceAll("-", "");
+    await f.db.apiToken.create({ data: { id: f.id("document-bot-readonly"), name: "CI readonly", prefix: readToken.slice(0, 11), tokenHash: hash(Buffer.from(readToken)), scopes: ["read"], createdById: null } });
+    const botInput = { fileName: "telegram.pdf", mimeType: "application/pdf", bytes: pdf, clientMutationId: randomUUID() };
+    assert.equal((await f.financeUpload(procurement, botInput, { token: readToken })).response.status, 403);
+    assert.equal((await f.financeUpload(procurement, botInput, { token: "pero_unknown" })).response.status, 401);
+    assert.equal((await f.financeUpload(manager, botInput, { token: rawToken })).response.status, 403);
+    assert.equal((await f.financeUpload(procurement, botInput, { token: rawToken, actorId: f.id("absent-bot-actor") })).response.status, 403);
+    const botUpload = await f.financeUpload(procurement, botInput, { token: rawToken }); assert.equal(botUpload.response.status, 201);
+    const botId = botUpload.body.document!.id;
+    const botReplay = await f.financeUpload(procurement, botInput, { token: rawToken });
+    assert.equal(botReplay.response.status, 200); assert.equal(botReplay.body.document?.id, botId); assert.equal(botReplay.body.repeated, true);
+    assert.equal(await f.db.financeDocument.count({ where: { clientMutationId: botInput.clientMutationId } }), 1);
+    const botAudit = await f.db.changeLog.findUniqueOrThrow({ where: { id: "finance-document:" + botId } });
+    assert.equal(botAudit.source, "telegram"); assert.equal(botAudit.actorId, procurement.id);
     for (const state of ["PENDING", "READY"] as const) {
       const id = randomUUID(); await f.db.financeDocument.create({ data: { id, uploadedById: accountant.id, clientMutationId: randomUUID(),
         fileName: "missing.pdf", mimeType: "application/pdf", size: pdf.length, contentHash: hash(pdf), requestFingerprint: hash(pdf),
         storageMode: "s3", storageKey: `finance-documents/${id}/${hash(pdf)}`, state, readyAt: state === "READY" ? new Date() : null } });
       assert.equal((await f.request(`/api/finance/documents/${id}`, accountant)).status, 404);
     }
+    const unit = await f.db.materialUnit.create({ data: { id: f.id("document-unit"), name: f.id("document-unit") } });
+    const material = await f.db.material.create({ data: { id: f.id("document-material"), name: f.id("document-material"), unitId: unit.id } });
+    const movement = await f.db.stockMovement.create({ data: { id: f.id("document-movement"), materialId: material.id,
+      type: "INCOME", receiptKind: "PAID", quantity: "1", unitPrice: "1", totalByn: "1", createdById: accountant.id } });
+    await f.db.stockPurchase.create({ data: { id: f.id("document-purchase"), clientMutationId: randomUUID(), requestFingerprint: "d".repeat(64),
+      actorId: accountant.id, unitPrice: "1", movementId: movement.id, paymentId: expense.id } });
+    const stockCash = await f.db.cashAccount.create({ data: { id: f.id("stock-usd-cash"), name: f.id("stock-usd-cash"), currency: "USD" } });
+    const purchaseInput = { materialId: material.id, quantity: "3", unitPrice: "7.33", currency: "USD", cashAccountId: stockCash.id,
+      expenseArticleId: article.id, rate: 3.001, clientMutationId: randomUUID() };
+    const stockBefore = [await f.db.stockMovement.count({ where: { materialId: material.id } }), await f.db.stockPurchase.count({ where: { actorId: procurement.id } }),
+      await f.db.payment.count({ where: { cashAccountId: stockCash.id } })];
+    for (const endpoint of ["stock-movements", "stock-receipts"]) {
+      const body = endpoint === "stock-movements" ? { kind: "EXPENSE", productId: product.id, materialId: material.id, quantity: "100", clientMutationId: randomUUID() } : purchaseInput;
+      for (const [token, actor, status] of [["pero_unknown", procurement, 401], [readToken, procurement, 403], [rawToken, worker, 403]] as const) {
+        const denied = await f.request("/api/v1/bot/" + endpoint, undefined, { method: "POST", headers: { Authorization: "Bearer " + token,
+          "x-acting-user": actor.id, "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        assert.equal(denied.status, status, endpoint + ":" + actor.roles); await denied.arrayBuffer();
+      }
+    }
+    const quoteResponse = await f.request("/api/v1/bot/stock-receipts/quote", undefined, { method: "POST", headers: { Authorization: "Bearer " + readToken,
+      "x-acting-user": procurement.id, "Content-Type": "application/json" }, body: JSON.stringify(purchaseInput) });
+    assert.equal(quoteResponse.status, 200); const quoted = await quoteResponse.json(); assert.equal(quoted.ok, true);
+    assert.equal(quoted.quote.amount, 21.99); assert.equal(quoted.quote.bynAmount, 65.99);
+    for (const [path, actor, expectedId] of [["stock-movements?kind=products&q=" + encodeURIComponent(product.number), manager, product.id],
+      ["stock-movements?kind=materials&income=1&q=" + encodeURIComponent(material.name), manager, material.id],
+      ["directory?type=materials&q=" + encodeURIComponent(material.name), procurement, material.id]] as const) {
+      const reply = await f.request("/api/v1/bot/" + path, undefined, { headers: { Authorization: "Bearer " + readToken, "x-acting-user": actor.id } });
+      assert.equal(reply.status, 200); const data = await reply.json(); assert.equal(data.ok, true);
+      assert.ok(data.items.some((row: { id: string }) => row.id === expectedId)); assert.ok(data.items.every((row: object) => !Object.hasOwn(row, "purchasePrice")));
+    }
+    const rejectedPurchase = await f.request("/api/v1/bot/stock-receipts", undefined, { method: "POST", headers: { Authorization: "Bearer " + rawToken,
+      "x-acting-user": procurement.id, "Content-Type": "application/json" }, body: JSON.stringify({ ...purchaseInput, currency: "BYN" }) });
+    assert.equal(rejectedPurchase.status, 200); const rejectedBody = await rejectedPurchase.json(); assert.equal(rejectedBody.ok, false); assert.match(rejectedBody.error, /валют|Касс/i);
+    assert.deepEqual([await f.db.stockMovement.count({ where: { materialId: material.id } }), await f.db.stockPurchase.count({ where: { actorId: procurement.id } }),
+      await f.db.payment.count({ where: { cashAccountId: stockCash.id } })], stockBefore);
+    const administrator = await f.user("stock-administrator", ["ADMIN"]), director = await f.user("stock-director", ["DIRECTOR"]);
+    for (const actor of [director, procurement, accountant, manager]) {
+      const denied = await f.actionResponse("previewWarehouseMovementDeletion", "/warehouse/movements", actor, [movement.id]);
+      assert.equal(denied.status, 500); assert.ok(denied.headers.get("content-type")?.startsWith("text/x-component")); await denied.arrayBuffer();
+    }
+    const preview = await f.action<{ ok: boolean; error?: string }>("previewWarehouseMovementDeletion", "/warehouse/movements", administrator, [movement.id]);
+    const accounting = await f.db.warehouseAccountingState.findUnique({ where: { id: "main" } });
+    assert.equal(preview.ok, false); assert.match(preview.error!, accounting?.phase === "ACTIVE" ? /движение не входит в проверяемый текущий учёт/ : /Склад временно закрыт/);
+    assert.deepEqual(await f.db.stockMovement.findUnique({ where: { id: movement.id } }), movement);
+    const withoutDocument = await Promise.all((["INVENTORY", null] as const).map(receiptKind => f.db.stockMovement.create({ data: {
+      materialId: material.id, type: "INCOME", receiptKind, quantity: "1", createdById: accountant.id } })));
+    const reader = await f.user("document-row-reader", ["MANAGER", "PROCUREMENT"]), movementIds = [movement.id, ...withoutDocument.map(row => row.id)];
+    const reportMap = await loadMovementReportDocuments(reader, movementIds, f.db);
+    const ledger = await loadOrganizationPayments({ ...reader, source: "web" as const }, "EXPENSE", f.db);
+    assert.deepEqual(reportMap.get(movement.id), ledger.rows.find(row => row.id === expense.id)?.reportDocument);
+    assert.equal(reportMap.get(movement.id)?.id, docs[0].id); assert.equal(reportMap.size, 1);
+    assert.equal((await loadMovementReportDocuments(manager, movementIds, f.db)).size, 0);
+    const movementRows = await listMovements(reader, { materialId: material.id }, f.db);
+    assert.deepEqual(movementRows.find(row => row.id === movement.id)?.reportDocument, ledger.rows.find(row => row.id === expense.id)?.reportDocument);
+    assert.ok(withoutDocument.every(item => movementRows.find(row => row.id === item.id)?.reportDocument === null));
+    const managerRows = await listMovements(manager, { materialId: material.id }, f.db);
+    assert.ok(managerRows.every(row => row.reportDocument === null)); assert.ok(!JSON.stringify(managerRows).includes(docs[0].id));
+    for (const mode of ["BYN", "NATIVE"]) {
+      const cashReport = await f.request("/finance/accounts/report?from=2026-10-07&to=2026-10-07&mode=" + mode, reader);
+      assert.equal(cashReport.status, 200); assert.ok((await cashReport.text()).includes("Отчёт по кассам"));
+    }
+    const invalidReport = await f.request("/finance/accounts/report?from=2026-10-08&to=2026-10-07", reader);
+    assert.equal(invalidReport.status, 200); assert.ok((await invalidReport.text()).includes("Укажите корректный период"));
+    const deniedReport = await f.request("/finance/accounts/report?from=2026-10-07&to=2026-10-07", manager);
+    assert.ok([302, 307].includes(deniedReport.status)); assert.ok(!(await deniedReport.text()).includes("Отчёт по кассам"));
+    for (const actor of [accountant, reader]) {
+      const expensePage = await f.request("/finance/projects/" + project.id, actor); assert.equal(expensePage.status, 200);
+      const expenseHtml = await expensePage.text(); assert.ok(expenseHtml.includes(project.number)); assert.ok(expenseHtml.includes(project.title));
+      assert.ok(expenseHtml.includes(expense.id)); assert.ok(expenseHtml.includes(article.name));
+    }
+    const deniedProjectFinance = await f.request("/finance/projects/" + project.id, manager);
+    assert.ok([302, 303, 307, 308].includes(deniedProjectFinance.status)); assert.ok(!(await deniedProjectFinance.text()).includes(expense.id));
+    const combinedFinancePage = await f.request("/projects/" + project.id + "?tab=finance", reader);
+    assert.equal(combinedFinancePage.status, 200); assert.ok((await combinedFinancePage.text()).includes(expense.id));
+    const legacyPage = await f.request("/finance/documents", reader); assert.equal(legacyPage.status, 307);
+    assert.equal(new URL(legacyPage.headers.get("location")!, f.target.baseUrl).pathname, "/finance/expenses");
+    for (const path of ["/finance/expenses", "/warehouse/movements"]) {
+      const response = await f.request(path, reader); assert.equal(response.status, 200);
+      const html = await response.text(); assert.ok(html.includes(docs[0].name)); assert.ok(html.includes("/api/finance/documents/" + docs[0].id));
+    }
+    const hiddenMovement = await f.request("/warehouse/movements", manager); assert.equal(hiddenMovement.status, 200);
+    const hiddenHtml = await hiddenMovement.text(); assert.ok(!hiddenHtml.includes(docs[0].id)); assert.ok(!hiddenHtml.includes(docs[0].name));
+    await f.db.financeDocument.update({ where: { id: docs[0].id }, data: { state: "PENDING", readyAt: null } });
+    assert.ok((await listMovements(reader, { materialId: material.id }, f.db)).every(row => row.reportDocument === null));
+    assert.equal((await loadMovementReportDocuments(reader, movementIds, f.db)).size, 0);
+    assert.equal((await loadOrganizationPayments({ ...reader, source: "web" as const }, "EXPENSE", f.db)).rows.find(row => row.id === expense.id)?.reportDocument, null);
+    await f.db.financeDocument.update({ where: { id: docs[0].id }, data: { state: "READY", readyAt: new Date() } });
+    const keptVersions = await f.versions(docs[0].key);
+    await f.db.payment.update({ where: { id: expense.id }, data: { reportDocumentId: null } });
+    await f.db.financeDocument.delete({ where: { id: docs[0].id } });
+    assert.equal((await loadMovementReportDocuments(reader, movementIds, f.db)).size, 0);
+    assert.equal((await loadOrganizationPayments({ ...reader, source: "web" as const }, "EXPENSE", f.db)).rows.find(row => row.id === expense.id)?.reportDocument, null);
+    assert.deepEqual(await f.versions(docs[0].key), keptVersions);
   });
 
   await t.test("attachments/all-groups-parent-child-ACL: project/product/task и четыре секции без скрытых детей", async () => {
@@ -285,6 +454,8 @@ test("files.crud: file113, документы, attachment ACL и inline-дейс
       const reply = await f.action<BasicReply>("createProduct", projectPage, manager, [{ projectId: project.id, title: "CI raw description", description,
         engineerId: engineer.id, expectedPrice: 10.01 }]); assert.equal(reply.ok, true);
       assert.equal((await f.db.product.findUniqueOrThrow({ where: { id: reply.id! } })).description, description.trim() ? description : null);
+      const same = await f.action<ProductPatchResult>("patchProduct", productPage, engineer, [{ productId: reply.id!, field: "description", value: description, expectedValue: description.trim() ? description : null, clientMutationId: randomUUID() }]);
+      assert.equal(saved(same).value, description.trim() ? description : null);
     }
     const exact = { productId: product.id, field: "description", value: texts[1], expectedValue: "Tech", clientMutationId: randomUUID() };
     assert.equal(saved(await f.action<ProductPatchResult>("patchProduct", productPage, engineer, [exact])).value, texts[1]);
@@ -372,6 +543,32 @@ test("files.crud: file113, документы, attachment ACL и inline-дейс
   });
 
   await t.test("inline/project-field-atomic-roles-history: поля, shared Client, Decimal total и история статуса", async () => {
+    const clientInput = { name: f.id("client-created"), phone: "111", email: "first@example.invalid", address: "Client original" };
+    const created = await f.action<BasicReply>("createClient", "/clients", manager, [clientInput]); assert.equal(created.ok, true); assert.ok(created.id);
+    const createdClient = await f.db.client.findUniqueOrThrow({ where: { id: created.id } });
+    assert.equal(createdClient.name, clientInput.name); assert.equal(createdClient.phone, "111");
+    const clientBase = { name: createdClient.name, phone: createdClient.phone ?? "", lastName: createdClient.lastName,
+      middleName: createdClient.middleName, email: createdClient.email, address: createdClient.address, comment: createdClient.comment };
+    assert.equal((await f.action<BasicReply>("updateClient", "/clients", manager, [created.id, { ...clientInput, email: "new@example.invalid" }, clientBase])).ok, true);
+    assert.equal((await f.action<BasicReply>("updateClient", "/clients", second, [created.id, { ...clientInput, phone: "222" }, clientBase])).ok, true);
+    const independentlyChanged = await f.db.client.findUniqueOrThrow({ where: { id: created.id } });
+    assert.equal(independentlyChanged.email, "new@example.invalid"); assert.equal(independentlyChanged.phone, "222");
+    const staleClient = await f.action<BasicReply>("updateClient", "/clients", manager, [created.id, { ...clientInput, phone: "333" }, clientBase]);
+    assert.equal(staleClient.ok, false); assert.match(staleClient.error ?? "", /изменён/);
+    assert.deepEqual(await f.db.client.findUniqueOrThrow({ where: { id: created.id } }), independentlyChanged);
+    const { createClientInTransaction, updateClientInTransaction } = await import("../../src/server/clients/core");
+    const noRead = new Proxy(f.db, { get() { throw Error("FORBIDDEN_CLIENT_ADAPTER_READ"); } }) as unknown as Prisma.TransactionClient;
+    for (const operation of [() => createClientInTransaction(noRead, { ...engineer, source: "web" }, clientInput),
+      () => updateClientInTransaction(noRead, { ...engineer, source: "web" }, created.id!, clientInput, clientBase)]) {
+      const rejected = await operation(); assert.equal(rejected.ok, false); if (!rejected.ok) assert.equal(rejected.error, "Недостаточно прав");
+    }
+    const nextClientBase = { ...clientBase, phone: "222", email: "new@example.invalid" };
+    await f.fault("DomainEvent", manager.id, async () => {
+      const before = await nativeSnapshot(f.db);
+      assert.equal((await f.action<BasicReply>("updateClient", "/clients", manager, [created.id, { ...clientInput, phone: "444", email: "new@example.invalid" }, nextClientBase])).ok, false);
+      assert.deepEqual(await nativeSnapshot(f.db), before);
+    });
+    assert.equal((await f.action<BasicReply>("updateClient", "/clients", manager, [created.id, { ...clientInput, phone: "444", email: "new@example.invalid" }, nextClientBase])).ok, true);
     const own = await f.project("inline-project", { stage: "LEAD", currency: "BYN", initialPrice: "123.45", managerId: manager.id });
     await f.db.project.update({ where: { id: own.id }, data: { title: "Original project" } });
     await f.db.client.update({ where: { id: own.clientId }, data: { phone: "100" } });
@@ -387,9 +584,17 @@ test("files.crud: file113, документы, attachment ACL и inline-дейс
     assert.equal(saved(await f.action<ProjectPatchResult>("patchProject", page, manager, [title])).repeated, true);
     assert.equal((await f.action<ProjectPatchResult>("patchProject", page, manager, [{ ...title, value: "Reuse" }])).kind, "validation");
     assert.deepEqual(await nativeSnapshot(f.db), noopBefore);
+    const receipt = await f.db.changeLog.findUniqueOrThrow({ where: { id: "project-inline:" + title.clientMutationId } });
+    await f.db.changeLog.update({ where: { id: receipt.id }, data: { action: "update" } });
+    try {
+      const corrupted = await nativeSnapshot(f.db), replay = await f.action<ProjectPatchResult>("patchProject", page, manager, [title]);
+      assert.equal(replay.kind, "validation"); assert.deepEqual(await nativeSnapshot(f.db), corrupted);
+      assert.equal((await f.db.project.findUniqueOrThrow({ where: { id: own.id } })).title, "First title");
+    } finally { await f.db.changeLog.update({ where: { id: receipt.id }, data: { action: receipt.action } }); }
     const zero = saved(await call(manager, "delivery", "0", null)); assert.equal(zero.value, "0.00"); assert.equal(zero.derived?.expectedTotalBYN, "20.02");
     assert.match(zero.derived?.pricingVersion ?? "", /^\d+$/);
-    assert.equal(saved(await call(manager, "delivery", "0.10", "0.00")).derived?.expectedTotalBYN, "20.12");
+    const laterPrice = saved(await call(manager, "delivery", "0.10", "0.00")); assert.equal(laterPrice.derived?.expectedTotalBYN, "20.12");
+    assert.ok(BigInt(laterPrice.derived!.pricingVersion!) > BigInt(zero.derived!.pricingVersion!));
     assert.equal(saved(await call(manager, "unloading", "0.20", null)).derived?.expectedTotalBYN, "20.32");
     assert.equal((await call(manager, "installation", "1.005", null)).kind, "validation");
     assert.equal(saved(await call(manager, "unloading", null, "0.20")).derived?.expectedTotalBYN, "20.12");
@@ -402,7 +607,12 @@ test("files.crud: file113, документы, attachment ACL и inline-дейс
     assert.equal((await call(manager, "client.phone", " ", "200", { expectedClientId: own.clientId })).kind, "validation");
     const other = await f.project("other-client"), oldClient = await f.db.client.findUniqueOrThrow({ where: { id: own.clientId } });
     await f.db.client.update({ where: { id: other.clientId }, data: { phone: "999" } });
-    assert.equal(saved(await call(second, "clientId", other.clientId, own.clientId)).value, other.clientId);
+    const switched = saved(await call(second, "clientId", other.clientId, own.clientId)); assert.equal(switched.value, other.clientId);
+    assert.equal(switched.derived?.clientId, other.clientId); assert.equal(switched.derived?.phone, "999");
+    assert.equal(switched.derived?.clientAddress, null); assert.ok(switched.derived?.clientLabel);
+    const afterSwitch = await f.db.project.findUniqueOrThrow({ where: { id: own.id } });
+    assert.equal(afterSwitch.address, "Shared address"); assert.equal(afterSwitch.delivery?.toFixed(2), "0.10");
+    assert.equal(afterSwitch.unloading, null); assert.equal(afterSwitch.installation?.toFixed(2), "0.30");
     const binding = await call(manager, "client.phone", "300", "200", { expectedClientId: own.clientId }); assert.equal(binding.kind, "conflict");
     if (binding.kind === "conflict") { assert.equal(binding.currentClientId, other.clientId); assert.equal(binding.currentValue, "999"); }
     assert.deepEqual(await f.db.client.findUnique({ where: { id: own.clientId } }), oldClient);
@@ -427,6 +637,15 @@ test("files.crud: file113, документы, attachment ACL и inline-дейс
     const legacyBefore = await nativeSnapshot(f.db);
     assert.equal((await f.action<BasicReply>("updateProject", page, second, [own.id, { title: "Lost", address: "Stale", baseline: { ...baseline, title: "Legacy title" } }])).ok, false);
     assert.equal((await f.action<BasicReply>("updateProject", page, manager, [own.id, { title: "Bypass" }])).ok, false); assert.deepEqual(await nativeSnapshot(f.db), legacyBefore);
+    for (const vector of [{ label: "empty", price: undefined, subtotal: "0.00", total: "0.10" },
+      { label: "unknown", price: null, subtotal: null, total: null }, { label: "zero", price: "0", subtotal: "0.00", total: "0.10" }] as const) {
+      const target = await f.project("pricing-" + vector.label, { stage: "LEAD", currency: "BYN", managerId: manager.id });
+      if (vector.price !== undefined) await f.product("pricing-" + vector.label, target.id, { status: "DESIGN", expectedPrice: vector.price, quantity: 3 });
+      const projection = saved(await f.action<ProjectPatchResult>("patchProject", "/projects/" + target.id, manager, [{
+        projectId: target.id, field: "delivery", value: "0.10", expectedValue: null, clientMutationId: randomUUID(),
+      }]));
+      assert.equal(projection.derived?.productsSubtotalBYN, vector.subtotal); assert.equal(projection.derived?.expectedTotalBYN, vector.total);
+    }
     const stageInput = (toStage: "REFUSED" | "RECLAMATION", expectedStage: "LEAD" | "REFUSED" | "RECLAMATION", extras?: object) =>
       ({ projectId: own.id, toStage, expectedStage, clientMutationId: randomUUID(), ...(extras ? { extras } : {}) });
     const stage = (actor: HttpActor, input: object) => f.action<ProjectStageResult>("patchProjectStage", page, actor, [input]);

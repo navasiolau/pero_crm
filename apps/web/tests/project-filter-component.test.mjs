@@ -32,13 +32,15 @@ const bundleOptions = {
       import {ProductsFilterBar} from '@/app/(app)/products/products-filter-bar';
       function Harness() {
         const [clients, setClients] = useState(Array.from({length: 12}, (_, i) => ({id: 'c'+(i+1), name: 'Клиент '+(i+1)})));
+        const [hideEngineer, setHideEngineer] = useState(false);
+        window.__hideEngineer = setHideEngineer;
         window.__replaceClients = setClients;
         if(window.__section==='picker')return <PickerHarness/>;
-        if (window.__section === 'products') return <ProductsFilterBar actorRoles={['MANAGER']}
+        if (window.__section === 'products') return <ProductsFilterBar actorRoles={['MANAGER']} hideEngineer={hideEngineer}
           projectOptions={[{value:'p1',label:'Проект 1'},{value:'p2',label:'Проект 2'},{value:'p3',label:'Проект 3'}]}
           clientOptions={clients.map(item=>({value:item.id,label:item.name}))}
           engineerOptions={[{value:'e1',label:'Инженер 1'},{value:'e2',label:'Инженер 2'},{value:'e3',label:'Инженер 3'}]}/>;
-        return <ProjectsFilterBar clients={clients} managers={[{id:'m1',name:'Менеджер 1'},{id:'m2',name:'Менеджер 2'}]} engineers={[{id:'e1',name:'Инженер 1'},{id:'e2',name:'Инженер 2'},{id:'e3',name:'Инженер 3'}]}/>;
+        return <ProjectsFilterBar hideEngineer={hideEngineer} clients={clients} managers={[{id:'m1',name:'Менеджер 1'},{id:'m2',name:'Менеджер 2'}]} engineers={[{id:'e1',name:'Инженер 1'},{id:'e2',name:'Инженер 2'},{id:'e3',name:'Инженер 3'}]}/>;
       }
       createRoot(document.getElementById('root')).render(<Harness/>);
     `,
@@ -146,6 +148,11 @@ test(`${section} filters default to all and Незавершённые writes ex
     await page.getByRole("button", { name: "Сброс", exact: true }).click();
     assert.equal(await page.evaluate(() => window.__query), "");
     assert.equal(await page.locator(`#${section}-active-only`).isChecked(), false);
+    await page.evaluate(() => window.__hideEngineer(true));
+    await page.getByRole("button", { name: "Инженер", exact: true }).waitFor({ state: "detached" });
+    for (const name of ["Статус", "Клиент", section === "projects" ? "Менеджер" : "Проект"]) {
+      assert.equal(await page.getByRole("button", { name, exact: true }).count(), 1);
+    }
   }, section);
 });
 }

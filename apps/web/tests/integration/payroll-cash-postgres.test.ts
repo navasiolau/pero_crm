@@ -186,6 +186,7 @@ test("percentage/frozen-fx-retry-original-month-after-commit", async () => {
   await assert.rejects(percentage.settlePendingProductPercentage(product.id, "ENGINEERING", { ...deps, resolveRates: async () => { throw Error("CI_FX_UNAVAILABLE"); } }), /CI_FX_UNAVAILABLE/);
   assert.deepEqual(await fixture.db.productPercentageCompletion.findUnique({ where: { id: pending.id }, include: { shares: true } }), pending);
   assert.equal(await fixture.db.payrollEntry.count({ where: { productId: product.id } }), 0); assert.equal(deliveries, 0);
+  assert.equal(await fixture.db.domainEvent.count({ where: { actor: manager.id } }), 0, "FX_FAILURE_HAS_NO_OUTBOX");
   assert.equal(await percentage.settlePendingProductPercentage(product.id, "ENGINEERING", deps), "SETTLED");
   const settled = await fixture.db.productPercentageCompletion.findUniqueOrThrow({ where: { id: pending.id }, include: { shares: true } });
   assert.equal(settled.amount!.toFixed(2), "37.50"); assert.equal(settled.bynAmount!.toFixed(2), "150.00"); assert.equal(settled.projectAmount!.toFixed(2), "50.00");

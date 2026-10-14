@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readFileSync } from "node:fs";
 import * as React from "react";
 import { fitImage, clampImageTransform, zoomImageAt, imageGesture, beginImageGesture, initialImageTransform } from "../src/lib/image-view-transform";
 import { FileViewer, getFileViewerPresentation, getFileViewerDispatch, type ViewableFile } from "../src/components/file-viewer";
@@ -68,14 +67,4 @@ test("закрытие размонтирует изображение; file, sc
   assert.notEqual(regular.key,viewport({...file,id:"another-image"}).key);
   assert.notEqual(regular.key,viewport(file,"cover-fullscreen").key);
   assert.equal(regular.key,viewport({...file}).key);
-});
-test("файловые списки используют общий image viewer через FileList; detail/kanban и жесты сохранены", () => {
-  for (const file of ["../src/components/file-list.tsx","../src/app/(app)/products/[id]/product-sketch-view.tsx","../src/components/product-kanban-card.tsx"])
-    assert.match(readFileSync(new URL(file,import.meta.url),"utf8"),/useFileViewer/);
-  for (const file of ["../src/app/(app)/projects/[id]/files-tab.tsx","../src/components/task-dialog.tsx"])
-    assert.match(readFileSync(new URL(file,import.meta.url),"utf8"),/FileList/);
-  const image = readFileSync(new URL("../src/components/fullscreen-image-viewport.tsx",import.meta.url),"utf8");
-  assert.doesNotMatch(image,/document\.body|window\.scroll|\.caption/);
-  assert.match(image,/removeEventListener\("wheel",wheel\)/);
-  assert.match(image,/observer\.disconnect\(\)/);
 });

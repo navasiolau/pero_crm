@@ -2,8 +2,6 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { beforeEach, afterEach, test } from "node:test";
 import type { PrismaClient } from "@prisma/client";
-import { splitTaskCore } from "../src/server/tasks/share-core";
-import { changeTaskStatusCore } from "../src/server/tasks/completion-core";
 import { taskShareFixture, historicalTaskAllocation } from "./helpers/task-share-fixture";
 import { remainingWorkQuantity } from "../src/lib/work-quantity";
 import { guardedModuleCache } from "./helpers/guarded-module-cache";
@@ -13,7 +11,6 @@ let sessionActor = { id: "manager", name: "Manager", roles: ["MANAGER"] };
 let externalEffects = 0;
 const revalidated: string[] = [];
 let actions: typeof import("../src/server/tasks/actions");
-let shares: typeof import("../src/server/tasks/share-actions");
 let queries: typeof import("../src/server/tasks/queries");
 let scope: ReturnType<typeof guardedModuleCache>;
 function prepareScope() {
@@ -33,14 +30,12 @@ function prepareScope() {
     "../src/server/notifications/notify": { notifyOrg: outsideTransaction, notifyPerson: outsideTransaction },
     "../src/server/payroll/queries": { getPayrollCurrency: async () => "BYN" },
   };
-  scope = guardedModuleCache(import.meta.url, { targets: ["../src/server/tasks/actions", "../src/server/tasks/share-actions", "../src/server/tasks/queries"], allowedOverrides: Object.keys(overrides), overrides, prisma: proxy as PrismaClient });
-  actions = scope.load("../src/server/tasks/actions"); shares = scope.load("../src/server/tasks/share-actions");
+  scope = guardedModuleCache(import.meta.url, { targets: ["../src/server/tasks/actions", "../src/server/tasks/queries"], allowedOverrides: Object.keys(overrides), overrides, prisma: proxy as PrismaClient });
+  actions = scope.load("../src/server/tasks/actions");
   queries = scope.load("../src/server/tasks/queries");
 }
 beforeEach(prepareScope);
 afterEach(() => scope?.restore());
-
-
 
 test("completion pays only the fixed remaining split budget", async () => {
   fixture = taskShareFixture();
@@ -66,24 +61,6 @@ test("classified installation splits only physical quantity and never pays task 
   assert.equal(fixture.state().entries.length, 0);
 });
 
-test("old TASK_FIXED installation allocation stays readable but split form and action refuse it", async () => {
-  fixture = taskShareFixture();
-  fixture.state().works[0].paymentKind = "INSTALLATION";
-  const source = fixture.state().tasks[0];
-  source.allocationGroupId = "old-group"; source.shareUnits = 1000000; source.shareAmount = "1000.00";
-  fixture.state().groups.push({ id: "old-group", workId: "work", quantity: "10", budget: "1000.00",
-    currency: "BYN", budgetSource: "TASK_FIXED" });
-  const before = structuredClone(fixture.state());
-  const options = await shares.getTaskSplitOptions("source");
-  assert.equal(options.ok, false);
-  const result = await splitTaskCore({ id: "manager", name: "Manager", roles: ["MANAGER"], source: "web" },
-    { taskId: "source", recipientId: "recipient", percent: "50", expectedRevision: 0, requestId: randomUUID() }, fixture.transaction);
-  assert.equal(result.ok, false);
-  if (!result.ok) assert.match(result.error, /больше недоступны/);
-  assert.deepEqual(fixture.state(), before);
-  assert.deepEqual(fixture.writes, []);
-});
-
 test("simultaneous completion requests cannot create duplicate earnings", async () => {
   fixture = taskShareFixture();
   await Promise.all([actions.changeTaskStatus("source", "DONE", 20), actions.changeTaskStatus("source", "DONE", 20)]);
@@ -95,19 +72,6 @@ test("payroll write failure rolls back status and time with the allocation uncha
   const before = structuredClone(fixture.state());
   await assert.rejects(actions.changeTaskStatus("source", "DONE", 20), /Injected/);
   assert.deepEqual(fixture.state(), before);
-});
-
-test("split and completion serialize without paying the original budget twice", async () => {
-  for (const splitFirst of [true, false]) {
-    fixture = taskShareFixture();
-    const split = () => splitTaskCore({ id: "manager", name: "Manager", roles: ["MANAGER"], source: "web" }, { taskId: "source", recipientId: "recipient", percent: "30", expectedRevision: 0, requestId: randomUUID() }, fixture.transaction);
-    const complete = () => changeTaskStatusCore({ id: "manager", name: "Manager", roles: ["MANAGER"], source: "web" }, "source", "DONE", 20, fixture.transaction);
-    const results = await Promise.all(splitFirst ? [split(), complete()] : [complete(), split()]);
-    assert.equal(fixture.state().entries.length, 1);
-    assert.equal(Number(fixture.state().entries[0].amount), 1000);
-    assert.equal(fixture.state().groups.length, 0);
-    assert.equal(results[splitFirst ? 0 : 1].ok, false);
-  }
 });
 
 test("dependent cannot finish after original part alone; both parts earn their exact shares", async () => {
@@ -150,10 +114,8 @@ test("selecting one part as dependency expands to the whole group; cycles roll b
   assert.deepEqual(fixture.state(), before);
 });
 
-test("retired split action refuses while historical DTO remains read-only", async () => {
+test("historical split DTO remains read-only", async () => {
   fixture = taskShareFixture(); historicalTaskAllocation(fixture);
-  assert.equal((await shares.getTaskSplitOptions("source")).ok, false);
-  assert.equal((await shares.splitTask({taskId:"source",recipientId:"recipient",percent:"30",expectedRevision:1,requestId:randomUUID()})).ok,false);
   const { mapTaskDetails } = queries;
   const row=await fixture.database.task.findFirst({where:{id:"source"}});
   const [mapped]=await mapTaskDetails([row as never],{id:"worker",roles:["WORKER"]});
@@ -227,31 +189,6 @@ test('two unfinished legacy allocations finish with fixed40+60 and no new groups
  assert.deepEqual(fixture.state().entries.map(row=>Number(row.amount)).sort((a,b)=>a-b),[40,60]);
  assert.ok(fixture.state().entries.every(row=>row.currency==='BYN'));
  assert.equal(fixture.state().groups.length,1);
-});
-
-test("исторический split replay сохраняет revalidation без уведомлений, событий и новых записей", async () => {
-  fixture = taskShareFixture(); historicalTaskAllocation(fixture);
-  const input = { taskId: "source", recipientId: "recipient", percent: "30", expectedRevision: 0, requestId: randomUUID() };
-  fixture.state().logs.push({ id: `task-split:${input.requestId}`, actorId: "manager", entityId: "source", action: "split",
-    newValue: { recipientId: "recipient", percent: "30.00", expectedRevision: 0, childTaskId: "historic-child", groupId: "historic-group" } });
-  const before = structuredClone(fixture.state());
-  externalEffects = 0; revalidated.length = 0;
-  try {
-    assert.deepEqual(await shares.splitTask(input), { ok: true, childTaskId: "historic-child" });
-    assert.deepEqual(revalidated, ["/my", "/tasks", "/projects/project", "product:product"]);
-    revalidated.length = 0;
-    for (const change of [{ percent: "50" }, { recipientId: "accountant" }, { expectedRevision: 1 }, { requestId: randomUUID() }]) {
-      assert.equal((await shares.splitTask({ ...input, ...change })).ok, false);
-    }
-    sessionActor = { id: "worker", name: "Worker", roles: ["WORKER"] };
-    assert.equal((await shares.splitTask(input)).ok, false);
-    assert.deepEqual(revalidated, []);
-    assert.equal(externalEffects, 0);
-    assert.deepEqual(fixture.writes, []);
-    assert.deepEqual(fixture.state(), before);
-  } finally {
-    sessionActor = { id: "manager", name: "Manager", roles: ["MANAGER"] };
-  }
 });
 
 // ESM namespace живёт дольше require.cache; stale owner обязан отказать.

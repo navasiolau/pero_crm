@@ -9,13 +9,14 @@ import { deliverPaymentEffects } from "../../src/server/payments/post-commit";
 import { guardedModuleCache } from "../helpers/guarded-module-cache";
 import { nativeOwnedIds, nativeSnapshot } from "../helpers/native-acceptance-snapshot";
 import { createPostgresFixture, rejectedSql, type PostgresRows } from "./postgres.fixture";
+import { summarizeCalendarEntries } from "../../src/lib/calendar-summary";
 
 type Db = PrismaClient | Prisma.TransactionClient;
 type MutationProbe = { taskId?: string; workerId?: string; workId?: string; projectId?: string; cashId?: string; paymentId?: string; receiptId?: string; payment: boolean;
   actor: DomainActor; mode?: "lost-ack" | "failed-proof"; fault?: "payroll" | "audit" | "event" | "receipt";
   calls: number; writes: number; partials: number; effects: string[]; connections: { proof: boolean; pid: number }[]; owned: Record<string, string[]>; creates: Set<string> };
-type Context = { actor: DomainActor; db: Db; onRequested?: (pid: number) => void;
-  onHeld?: (tx: Prisma.TransactionClient, pid: number) => Promise<void>; failAuditId?: string;
+type Context = { actor: DomainActor; db: Db; unauthenticated?: boolean; onRequested?: (pid: number) => void;
+  onHeld?: (tx: Prisma.TransactionClient, pid: number) => Promise<void>; failAuditId?: string; failEventId?: string;
   onTimerLookup?: (tx: Prisma.TransactionClient, rows: readonly { id: string }[]) => Promise<void>;
   createFault?: { kind: "event" | "receipt"; collisionId: string; title: string }; createAck?: { lost: boolean; transactions: number };
   beforeAudit?: (tx: Prisma.TransactionClient) => Promise<void>; mutation?: MutationProbe };
@@ -28,9 +29,18 @@ let fixture: Awaited<ReturnType<typeof createPostgresFixture>>;
 let scope: ReturnType<typeof guardedModuleCache>;
 let products: typeof import("../../src/server/products/core"), statuses: typeof import("../../src/server/products/status-core");
 let stages: typeof import("../../src/server/projects/stage-core"), deletion: typeof import("../../src/server/projects/delete-core");
+let productDeletion: typeof import("../../src/server/products/delete-core");
 let productQueries: typeof import("../../src/server/products/queries");
+let projectQueries: typeof import("../../src/server/projects/queries");
+let changelog: typeof import("../../src/server/changelog/queries");
+let calendar: typeof import("../../src/server/calendar/core"), calendarAnalytics: typeof import("../../src/server/calendar/analytics");
 let visibility: typeof import("../../src/server/access/visibility"), notifications: typeof import("../../src/server/access/notification-visibility");
 let tasks: typeof import("../../src/server/tasks/actions"), completion: typeof import("../../src/server/tasks/completion-core");
+let worksCore: typeof import("../../src/server/works/core");
+let workUpdate: typeof import("../../src/server/works/update-core"), workQueries: typeof import("../../src/server/works/queries");
+let priceActions: typeof import("../../src/server/prices/actions");
+let percentageQueries: typeof import("../../src/server/product-percentage-pay/queries");
+let workerAllocation: typeof import("../../src/server/tasks/worker-allocation-core"), warehouseActions: typeof import("../../src/server/warehouse/actions");
 let taskQueries: typeof import("../../src/server/tasks/queries"), workspace: typeof import("../../src/server/tasks/workspace-contract");
 let time: typeof import("../../src/server/time/actions");
 let units: typeof import("../../src/server/warehouse/unit-core");
@@ -144,6 +154,14 @@ function mutationTx(tx: Prisma.TransactionClient, probe: MutationProbe, proof: b
 
 function commandTx(tx: Prisma.TransactionClient, context: Context): Prisma.TransactionClient {
   return new Proxy(tx, { get(db, key) {
+    if (key === "domainEvent" && context.failEventId) return new Proxy(db.domainEvent, { get(model, method) {
+      const value = Reflect.get(model, method); if (method !== "create") return typeof value === "function" ? value.bind(model) : value;
+      return async (...args: unknown[]) => {
+        const row = await Reflect.apply(value, model, args);
+        await tx.domainEvent.create({ data: { id: context.failEventId, type: "ci.unique-collision", actor: context.actor.id, payload: {} } });
+        return row;
+      };
+    } });
     if (context.createFault && ["domainEvent", "changeLog"].includes(String(key))) return new Proxy(Reflect.get(db, key), { get(model, method) {
       const value = Reflect.get(model, method); if (method !== "create") return typeof value === "function" ? value.bind(model) : value;
       return async (...args: unknown[]) => {
@@ -158,7 +176,7 @@ function commandTx(tx: Prisma.TransactionClient, context: Context): Prisma.Trans
     } });
     if (key === "$queryRaw") return async (...args: unknown[]) => {
       const sql = Array.isArray(args[0]) ? args[0].join("") : "";
-      const locked = /pg_advisory_xact_lock\(18435,\s*55001\)|FROM "Project".*FOR UPDATE/.test(sql);
+      const locked = /pg_advisory_xact_lock\(18435,\s*55001\)|FROM "(?:Project|Product|Work|User)".*FOR UPDATE/.test(sql);
       const pid = locked && (context.onRequested || context.onHeld)
         ? (await tx.$queryRaw<{ pid: number }[]>`SELECT pg_backend_pid() AS pid`)[0].pid : 0;
       if (locked) context.onRequested?.(pid);
@@ -214,11 +232,11 @@ before(async () => {
     return typeof value === "function" ? value.bind(context.db) : value;
   } });
   // Child targets загружаются раньше родителей: guardedModuleCache сохраняет installed entry каждого target.
-  const names = ["transactions/coordinator", "time/timers", "access/visibility", "access/notification-visibility", "tasks/workspace-contract",
-    "tasks/queries", "warehouse/unit-core", "warehouse/norm-core", "warehouse/queries", "products/core", "projects/stage-core", "projects/delete-core",
-    "products/status-core", "products/queries", "projects/queries", "tasks/completion-core", "tasks/actions", "warehouse/accounting", "warehouse/actions", "time/actions", "payments/service"];
+  const names = ["transactions/coordinator", "time/timers", "access/visibility", "access/notification-visibility", "tasks/workspace-contract", "prices/actions", "works/core", "works/update-core", "works/queries", "tasks/worker-allocation-core",
+    "tasks/queries", "warehouse/unit-core", "warehouse/norm-core", "warehouse/queries", "products/delete-core", "products/core", "projects/stage-core", "projects/delete-core",
+    "products/status-core", "products/queries", "projects/queries", "product-percentage-pay/queries", "changelog/queries", "calendar/core", "calendar/analytics", "tasks/completion-core", "tasks/actions", "warehouse/accounting", "warehouse/actions", "time/actions", "payments/service"];
   const effect = (name: string) => () => { const probe = current().mutation; if (probe) { probe.effects.push(name); throw Error("CI133_INJECTED_OPTIONAL_EFFECT"); } };
-  const overrides = { "../src/auth": { auth: async () => ({ user: current().actor }) },
+  const overrides = { "../src/auth": { auth: async () => current().unauthenticated ? null : ({ user: current().actor }) },
     "next/cache": { revalidatePath: effect("cache"), revalidateTag: effect("cache") },
     "../src/server/payments/post-commit": { deliverPaymentEffects: (effects: Parameters<typeof deliverPaymentEffects>[0], dependencies: Parameters<typeof deliverPaymentEffects>[1]) =>
       deliverPaymentEffects(effects, current().mutation ? { ...dependencies, dispatchEvent: async () => effect("dispatch")() } : dependencies) },
@@ -228,11 +246,18 @@ before(async () => {
   coordinator = scope.load("../src/server/transactions/coordinator"); scope.load("../src/server/time/timers");
   visibility = scope.load("../src/server/access/visibility"); notifications = scope.load("../src/server/access/notification-visibility");
   stock = scope.load("../src/server/warehouse/accounting");
+  priceActions = scope.load("../src/server/prices/actions");
+  worksCore = scope.load("../src/server/works/core");
+  workUpdate = scope.load("../src/server/works/update-core"); workQueries = scope.load("../src/server/works/queries");
+  workerAllocation = scope.load("../src/server/tasks/worker-allocation-core");
   workspace = scope.load("../src/server/tasks/workspace-contract"); taskQueries = scope.load("../src/server/tasks/queries");
   units = scope.load("../src/server/warehouse/unit-core"); norms = scope.load("../src/server/warehouse/norm-core"); warehouse = scope.load("../src/server/warehouse/queries");
-  products = scope.load("../src/server/products/core"); stages = scope.load("../src/server/projects/stage-core"); deletion = scope.load("../src/server/projects/delete-core");
-  statuses = scope.load("../src/server/products/status-core"); productQueries = scope.load("../src/server/products/queries"); scope.load("../src/server/projects/queries");
-  completion = scope.load("../src/server/tasks/completion-core"); tasks = scope.load("../src/server/tasks/actions"); scope.load("../src/server/warehouse/actions"); time = scope.load("../src/server/time/actions");
+  productDeletion = scope.load("../src/server/products/delete-core"); products = scope.load("../src/server/products/core"); stages = scope.load("../src/server/projects/stage-core"); deletion = scope.load("../src/server/projects/delete-core");
+  statuses = scope.load("../src/server/products/status-core"); productQueries = scope.load("../src/server/products/queries"); projectQueries = scope.load("../src/server/projects/queries");
+  changelog = scope.load("../src/server/changelog/queries");
+  calendar = scope.load("../src/server/calendar/core"); calendarAnalytics = scope.load("../src/server/calendar/analytics");
+  percentageQueries = scope.load("../src/server/product-percentage-pay/queries");
+  completion = scope.load("../src/server/tasks/completion-core"); tasks = scope.load("../src/server/tasks/actions"); warehouseActions = scope.load("../src/server/warehouse/actions"); time = scope.load("../src/server/time/actions");
   frozenReference = scope.load("./helpers/project-materials-reference");
   payments = scope.load("../src/server/payments/service");
 });
@@ -429,16 +454,25 @@ test("draft/bootstrap-history-defaults-numbering-and-stage-promotion", async () 
   }
   const next = await products.createProductCore(c.manager, { projectId: c.project.id, title: "Номер после удалённого" }, transactionIn(tx));
   assert.equal(next.ok, true); if (next.ok) assert.ok(next.product.suffixInt! > deleted.suffixInt!);
+  const failing = await tree(tx, rows, "promotion-fault", "ESTIMATE", "DRAFT");
+  const event = await tx.domainEvent.create({ data: { type: "ci.promotion-collision", actor: c.manager.id, payload: {} } });
+  const snapshot = await nativeSnapshot(tx);
+  await rejectedSql(tx, () => stages.patchProjectStageTransaction(c.manager,
+    { projectId: failing.project.id, expectedStage: "ESTIMATE", toStage: "CONTRACT", clientMutationId: randomUUID() },
+    commandTx(tx, { actor: c.manager, db: tx, failEventId: event.id })), /Unique constraint/);
+  assert.deepEqual(await nativeSnapshot(tx), snapshot);
 }));
 
 test("draft/privacy-real-readers-joins-notifications-and-operational-denials", async () => fixture.rollback(async (tx, rows) => {
   const c = await tree(tx, rows, "privacy", "ESTIMATE", "DRAFT"), assigned = c.engineer.id;
+  const visible = await rows.product("privacy-normal", c.project.id, { status: "DESIGN", engineerId: assigned, expectedPrice: "30.00", quantity: 2 });
   const task = await tx.task.create({ data: { projectId: c.project.id, productId: c.product.id, workId: c.work.id, assigneeId: assigned, title: "Черновая задача", quantity: "1" } });
   const files = await Promise.all([true, false].map(direct => tx.file.create({ data: { projectId: c.project.id, productId: direct ? c.product.id : null,
     taskId: direct ? null : task.id, fileName: "draft.pdf", storedName: randomUUID(), mimeType: "application/pdf", size: 1, uploadedById: assigned } })));
   for (const roles of [["MANAGER"], ["MANAGER", "ENGINEER"], ["MANAGER", "WORKER"], ["ENGINEER"], ["ACCOUNTANT"], ["PROCUREMENT"],
     ["WORKER"], ["MOUNTER"], ["ACCOUNTANT", "ENGINEER"], ["ADMIN"], ["DIRECTOR"]] as Role[][]) {
     const actor = { ...c.engineer, roles }, allowed = roles.includes("ADMIN") || roles.includes("DIRECTOR");
+    assert.equal(visibility.canEditProductTechnicalBlock(actor, { id: c.product.id, engineerId: assigned, status: "DRAFT" }), allowed);
     const checks = [tx.product.count({ where: { AND: [{ id: c.product.id }, visibility.productVisibilityWhere(actor)] } }),
       tx.task.count({ where: { AND: [{ id: task.id }, visibility.taskVisibilityWhere(actor)] } }),
       tx.task.count({ where: { AND: [{ id: task.id }, visibility.taskExecutionWhere(actor)] } }),
@@ -448,8 +482,38 @@ test("draft/privacy-real-readers-joins-notifications-and-operational-denials", a
     await run(actor, tx, async () => {
       for (const key of [c.product.id, c.product.number]) assert.equal(Boolean(await productQueries.getProductFor(actor.id, roles, key)), allowed);
       const selected = await productQueries.listProductOptions(c.project.id, actor); assert.equal(selected.some(row => row.id === c.product.id), allowed);
+      assert.equal((await productQueries.listProducts(actor.id, roles, { activeOnly: false, projectId: c.project.id, statuses: ["DRAFT"] })).total, allowed ? 1 : 0);
+      if (roles.includes("MANAGER")) {
+        const detail = await projectQueries.getProjectFor(actor.id, roles, c.project.id); assert.ok(detail);
+        assert.deepEqual(detail.products.map(row => row.id), [visible.id]);
+        const summary = (await projectQueries.listProjects(actor.id, roles, { activeOnly: false })).rows.find(row => row.id === c.project.id)!;
+        assert.equal(summary._count.products, 1); assert.equal(summary.totalPrice, 1060);
+      }
     });
   }
+  const currentProduction = await rows.product("engineer-current-production", c.project.id, { status: "PRODUCTION", engineerId: assigned });
+  const hidden = await rows.product("engineer-foreign-design", c.project.id, { status: "DESIGN", engineerId: c.worker.id });
+  const ownPool = await tx.productStagePayPool.create({ data: { id: rows.id("engineer-visibility-pool"), productId: visible.id, kind: "ENGINEERING", state: "DRAFT", createdById: assigned } });
+  const ownWork = await tx.work.create({ data: { projectId: c.project.id, productId: visible.id, title: "Инженерная", paymentKind: "ENGINEERING",
+    stagePayPoolId: ownPool.id, poolWeightUnits: 1_000_000, quantity: "1", priceSnapshot: "30", total: "30" } });
+  const ownTask = await tx.task.create({ data: { projectId: c.project.id, productId: visible.id, workId: ownWork.id, assigneeId: assigned, title: "Инженерная задача", quantity: "1" } });
+  const visibleFiles = await Promise.all([visible.id, null].map(productId => tx.file.create({ data: { projectId: c.project.id, productId,
+    fileName: "visible.pdf", storedName: randomUUID(), mimeType: "application/pdf", size: 1, uploadedById: assigned } })));
+  await tx.file.create({ data: { projectId: c.project.id, productId: hidden.id, fileName: "hidden.pdf", storedName: randomUUID(), mimeType: "application/pdf", size: 1, uploadedById: assigned } });
+  await tx.project.update({ where: { id: c.project.id }, data: { initialPrice: "900", delivery: "10", unloading: "20", installation: "30" } });
+  await run(c.engineer, tx, async () => {
+    assert.equal((await productQueries.listProducts(assigned, c.engineer.roles, { activeOnly: false, projectId: c.project.id, statuses: ["PRODUCTION"] })).total, 1);
+    assert.equal((await productQueries.listProducts(assigned, c.engineer.roles, { activeOnly: false, projectId: c.project.id, engineerId: c.worker.id })).total, 0);
+    assert.deepEqual((await productQueries.listProductFilterOptions(assigned, c.engineer.roles)).projects.map(row => row.id), [c.project.id]);
+    const detail = await projectQueries.getProjectFor(assigned, c.engineer.roles, c.project.id); assert.ok(detail);
+    assert.deepEqual(detail.products.map(row => row.id).sort(), [visible.id, currentProduction.id].sort());
+    assert.ok(detail.products.every(row => row.expectedPrice === null));
+    assert.deepEqual(detail.tasks.map(row => row.id), [ownTask.id]); assert.deepEqual(detail.files.map(row => row.id).sort(), visibleFiles.map(row => row.id).sort());
+    for (const key of ["initialPrice", "delivery", "unloading", "installation"] as const) assert.equal(detail[key], null);
+    const summary = (await projectQueries.listProjects(assigned, c.engineer.roles, { activeOnly: false })).rows.find(row => row.id === c.project.id)!;
+    assert.equal(summary._count.products, 2); assert.equal(summary.totalPrice, null);
+    assert.equal(await productQueries.getProductFor(assigned, c.engineer.roles, hidden.id), null);
+  });
   await run(c.manager, tx, async () => {
     const message = { type: "product.statusChanged", title: "Черновой шкаф", body: "Secret", link: `/products/${c.product.id}` };
     const normal = { type: "project.stageChanged", title: "Договор", body: "Normal", link: `/projects/${c.project.id}` };
@@ -491,6 +555,19 @@ test("draft/create-contract-number-races-real-project-lock", async () => {
     () => products.createProductCore(actors.manager, { projectId: project.id, title: "Два" }, realTransaction(fixture.peer)));
   assert.ok(created.every(row => row.ok));
   assert.deepEqual((await fixture.db.product.findMany({ where: { projectId: project.id }, orderBy: { suffixInt: "asc" } })).map(row => row.number), [`${project.number}.1`, `${project.number}.2`]);
+  const firstPrice = await fixture.product("capture-race", project.id, { status: "PREPARATION", expectedPrice: null, initialPrice: null, initialPriceCaptureEligible: true });
+  const prices = await overlap(actors.manager,
+    () => products.updateProductCore(actors.manager, firstPrice.id, { expectedPrice: 10 }, { expectedPrice: null }, realTransaction(fixture.db)),
+    () => products.updateProductCore(actors.manager, firstPrice.id, { expectedPrice: 20 }, { expectedPrice: null }, realTransaction(fixture.peer)));
+  assert.equal(prices.filter(row => row.ok).length, 1); assert.equal(prices.filter(row => !row.ok).length, 1);
+  const captured = await fixture.db.product.findUniqueOrThrow({ where: { id: firstPrice.id } });
+  assert.equal(captured.initialPrice!.toFixed(2), captured.expectedPrice!.toFixed(2));
+  assert.equal(await fixture.db.changeLog.count({ where: { entityId: firstPrice.id, action: "initialPrice.capture" } }), 1);
+  const failedPrice = await fixture.product("capture-rollback", project.id, { status: "PREPARATION", expectedPrice: null, initialPrice: null, initialPriceCaptureEligible: true });
+  const collision = await fixture.db.changeLog.create({ data: { actorType: "user", actorId: actors.manager.id, entity: "test", entityId: failedPrice.id, action: "fixture" } });
+  const before = await nativeSnapshot(fixture.db);
+  assert.equal((await run(actors.manager, fixture.db, () => products.updateProductCore(actors.manager, failedPrice.id, { expectedPrice: 25 }, { expectedPrice: null }, realTransaction(fixture.db)), { failAuditId: collision.id })).ok, false);
+  assert.deepEqual(await nativeSnapshot(fixture.db), before);
 });
 
 test("delete/product-project-CAS-replay-live-children-timers-and-history", async () => fixture.rollback(async (tx, rows) => {
@@ -524,10 +601,33 @@ test("delete/product-project-CAS-replay-live-children-timers-and-history", async
   assert.ok((await tx.product.findUniqueOrThrow({ where: { id: sibling.id } })).deletedAt);
   const projectReplay = await deletion.softDeleteProjectCore(tx, c.manager, input); assert.equal(projectReplay.ok, true); if (projectReplay.ok) assert.equal(projectReplay.repeated, true);
   assert.equal((await products.deleteProductCore(c.manager, prior.id, transactionIn(tx), baseline)).ok, false);
+  const liveProject = await rows.project("delete-audit-project"), liveProduct = await rows.product("delete-audit-product", liveProject.id, { status: "PREPARATION" });
+  const collision = await tx.changeLog.create({ data: { actorType: "user", actorId: c.manager.id, entity: "test", entityId: liveProduct.id, action: "fixture" } });
+  const before = await nativeSnapshot(tx);
+  await rejectedSql(tx, () => productDeletion.softDeleteProductCore(commandTx(tx, { actor: c.manager, db: tx, failAuditId: collision.id }), c.manager,
+    { productId: liveProduct.id, expectedUpdatedAt: liveProduct.updatedAt.toISOString(), clientMutationId: randomUUID() }), /Unique constraint/);
+  assert.deepEqual(await nativeSnapshot(tx), before);
 }));
 
 test("quantity/locked-rescaling-group-floor-frozen-state-and-facts", async () => fixture.rollback(async (tx, rows) => {
   const c = await tree(tx, rows, "quantity"), group = await tx.taskAllocationGroup.create({ data: { workId: c.work.id, quantity: "4", budget: "120", currency: "BYN", createdById: c.manager.id } });
+  const first = await rows.product("initial-eligible", c.project.id, { status: "PREPARATION", expectedPrice: null, initialPrice: null, initialPriceCaptureEligible: true });
+  assert.equal((await products.updateProductCore(c.manager, first.id, { expectedPrice: 120 }, { expectedPrice: null }, transactionIn(tx))).ok, true);
+  assert.equal((await tx.product.findUniqueOrThrow({ where: { id: first.id } })).initialPrice!.toFixed(2), "120.00");
+  assert.equal((await products.updateProductCore(c.manager, first.id, { expectedPrice: 150 }, { expectedPrice: "120" }, transactionIn(tx))).ok, true);
+  assert.equal((await tx.product.findUniqueOrThrow({ where: { id: first.id } })).initialPrice!.toFixed(2), "120.00");
+  const legacy = await rows.product("initial-legacy", c.project.id, { status: "PREPARATION", expectedPrice: null, initialPrice: null, initialPriceCaptureEligible: false });
+  assert.equal((await products.updateProductCore(c.manager, legacy.id, { expectedPrice: 120 }, { expectedPrice: null }, transactionIn(tx))).ok, true);
+  assert.equal((await tx.product.findUniqueOrThrow({ where: { id: legacy.id } })).initialPrice, null);
+  const zero = await rows.product("initial-zero", c.project.id, { status: "PREPARATION", expectedPrice: null, initialPrice: null, initialPriceCaptureEligible: true });
+  assert.equal((await products.patchProductCore(c.manager, { productId: zero.id, field: "expectedPrice", value: "0", expectedValue: null, clientMutationId: randomUUID() }, transactionIn(tx))).kind, "saved");
+  assert.equal((await tx.product.findUniqueOrThrow({ where: { id: zero.id } })).initialPrice!.toFixed(2), "0.00");
+  const tariff = await tx.priceItem.create({ data: { name: rows.id("quantity-tariff"), unit: "шт.", price: "30", active: true } });
+  const add = { projectId: c.project.id, productId: c.product.id, priceItemId: tariff.id, clientMutationId: randomUUID() };
+  assert.equal((await worksCore.addWorkCore(c.manager, { ...add, quantity: 1 }, transactionIn(tx))).ok, false);
+  const added = await worksCore.addWorkCore(c.manager, { ...add, quantityPerUnit: 1 }, transactionIn(tx)); assert.ok(added.ok);
+  const work = await tx.work.findUniqueOrThrow({ where: { id: added.workId } });
+  assert.equal(work.quantity.toFixed(2), "5.00"); assert.equal(work.total!.toFixed(2), "150.00");
   await tx.task.createMany({ data: [c.worker, c.mounter].map(user => ({ projectId: c.project.id, productId: c.product.id, workId: c.work.id, title: "Доля", assigneeId: user.id,
     quantity: "4", allocationGroupId: group.id, shareUnits: 500000, shareAmount: "60" })) });
   const line = await tx.projectMaterial.create({ data: { productId: c.product.id, materialId: c.material.id, quantity: "20", quantityPerUnit: "4", issuedQty: "8" } });
@@ -552,6 +652,9 @@ test("quantity/locked-rescaling-group-floor-frozen-state-and-facts", async () =>
     await warehouseState(tx, rows, phase);
     const denied = await products.updateProductCore(c.manager, c.product.id, { quantity: 7 }, { quantity: 6 }, transactionIn(tx));
     assert.equal(denied.ok, false); assert.match(denied.error!, /Склад временно закрыт/);
+    await assert.rejects(norms.updateMaterialNorm(tx, { id: line.id, quantityPerUnit: 5 }, c.manager), /Склад временно закрыт/);
+    const current = await tx.product.findUniqueOrThrow({ where: { id: c.product.id } });
+    assert.equal((await products.updateProductCore(c.manager, c.product.id, { title: phase }, { title: current.title }, transactionIn(tx))).ok, true);
   }
   await warehouseState(tx, rows, "ACTIVE");
   assert.equal((await products.updateProductCore(c.manager, c.product.id, { quantity: 4 }, { quantity: 6 }, transactionIn(tx))).ok, true);
@@ -563,6 +666,10 @@ test("quantity/locked-rescaling-group-floor-frozen-state-and-facts", async () =>
   await norms.updateMaterialNorm(tx, { id: line.id, quantityPerUnit: 2 }, c.manager);
   assert.equal((await tx.projectMaterial.findUniqueOrThrow({ where: { id: line.id } })).quantity.toFixed(3), "8.000");
   assert.equal((await tx.projectMaterial.findUniqueOrThrow({ where: { id: line.id } })).issuedQty.toFixed(3), "8.000");
+  const onlyMaterial = await rows.product("quantity-only-material", c.project.id, { status: "PRODUCTION", quantity: 5 });
+  await tx.projectMaterial.create({ data: { productId: onlyMaterial.id, materialId: c.material.id, quantity: "10", quantityPerUnit: "2", issuedQty: "8" } });
+  assert.equal((await products.updateProductCore(c.manager, onlyMaterial.id, { quantity: 3 }, { quantity: 5 }, transactionIn(tx))).ok, false);
+  assert.equal((await tx.product.findUniqueOrThrow({ where: { id: onlyMaterial.id } })).quantity, 5);
 }));
 
 test("task/workspace-31-scope-ACL-counts-10000-foreign-constant-SQL-and-EXPLAIN", async t => fixture.rollback(async (tx, rows) => {
@@ -651,7 +758,7 @@ test("task/workspace-31-scope-ACL-counts-10000-foreign-constant-SQL-and-EXPLAIN"
     WHERE t."assigneeId" IS NOT NULL AND p."deletedAt" IS NULL AND j."deletedAt" IS NULL
       AND (w."priceSnapshot" IS NOT NULL OR (t."allocationGroupId" IS NOT NULL AND t."shareAmount" IS NOT NULL))
     ORDER BY t.id`;
-  const baseline: Prisma.TaskWhereInput = { AND: [workspace.taskWorkspaceBindings, { id: { in: legacy.map(row => row.id) } }] };
+  const legacyIds = new Set(legacy.map(row => row.id));
   let matrixCases = 0;
   for (const roles of [["ADMIN"], ["MANAGER"], ["PROCUREMENT"], ["ENGINEER"], ["WORKER"], ["WORKER", "ACCOUNTANT"], ["ENGINEER", "ACCOUNTANT"], ["ACCOUNTANT"], []] as Role[][]) {
     const actor = await visibility.resolveVisibilityActor(tx, { id: own.id, roles });
@@ -669,7 +776,8 @@ test("task/workspace-31-scope-ACL-counts-10000-foreign-constant-SQL-and-EXPLAIN"
     await run({ ...actorOf(own), roles }, tx, async () => {
       for (const [name, limit, expectedLimit] of scopes) {
         const where = await taskQueries.taskWorkspaceWhere(actor, limit);
-        const expected = await tx.task.findMany({ where: { AND: [baseline, expectedLimit, visibility.taskVisibilityWhere(actor)] }, select: { id: true, projectId: true }, orderBy: { id: "asc" } });
+        const eligible = await tx.task.findMany({ where: { AND: [workspace.taskWorkspaceBindings, expectedLimit, visibility.taskVisibilityWhere(actor)] }, select: { id: true, projectId: true }, orderBy: { id: "asc" } });
+        const expected = eligible.filter(row => legacyIds.has(row.id));
         const actual = await tx.task.findMany({ where, select: { id: true, projectId: true }, orderBy: { id: "asc" } });
         assert.deepEqual(actual, expected, `NATIVE_SCOPE_OR_ACL_MISMATCH:${roles.join("+") || "EMPTY"}:${name}`);
         if (name === "selected-projects") {
@@ -684,7 +792,8 @@ test("task/workspace-31-scope-ACL-counts-10000-foreign-constant-SQL-and-EXPLAIN"
   const todayEnd = new Date(); todayEnd.setHours(23, 59, 59, 999);
   const dashboard = { status: { not: "DONE" as const }, dueAt: { lte: todayEnd }, project: { deletedAt: null } };
   const dashboardCount = await tx.task.count({ where: await workspace.taskWorkspaceEligibility(tx, { tasks: dashboard }) });
-  assert.equal(dashboardCount, await tx.task.count({ where: { AND: [baseline, dashboard] } }), "DASHBOARD_COUNT_MISMATCH");
+  const dashboardEligible = await tx.task.findMany({ where: { AND: [workspace.taskWorkspaceBindings, dashboard] }, select: { id: true } });
+  assert.equal(dashboardCount, dashboardEligible.filter(row => legacyIds.has(row.id)).length, "DASHBOARD_COUNT_MISMATCH");
   assert.equal(await tx.task.count({ where: await workspace.taskWorkspaceEligibility(tx, { projectIds: [] }) }), 0, "EMPTY_SCOPE_DENY_REQUIRED");
   const owned = nativeOwnedIds({ User: [own.id, foreignUser.id], Client: projects.map(project => project.clientId), Project: projects.map(project => project.id),
     Product: products.map(product => product.id), Work: [...works, unpriced, unbound].map(work => work.id), ProductStagePayPool: pools.map(pool => pool.id),
@@ -693,7 +802,8 @@ test("task/workspace-31-scope-ACL-counts-10000-foreign-constant-SQL-and-EXPLAIN"
   t.diagnostic(JSON.stringify({ matrixCases, dashboardCount, foreignTasks: [1, 10000], profile: { ...large.profile, rows: large.profile.rows.length }, plans }));
 }));
 
-test("warehouse/unit-catalog-CRUD-current-admin-inactive-usage-and-unchanged-numbers", async () => fixture.rollback(async (tx, rows) => {
+test("warehouse/unit-catalog-CRUD-current-admin-inactive-usage-and-unchanged-numbers", async () => {
+ await fixture.rollback(async (tx, rows) => {
   const c = await tree(tx, rows, "units"), before = await tx.material.update({ where: { id: c.material.id }, data: { active: false, purchasePrice: "15.55" } });
   const name = `л-${rows.id("litre").slice(-18)}`;
   const created = await units.createMaterialUnitInTransaction(tx, c.admin, { name: `  ${name}  ` });
@@ -719,7 +829,30 @@ test("warehouse/unit-catalog-CRUD-current-admin-inactive-usage-and-unchanged-num
   await assert.rejects(units.renameMaterialUnitInTransaction(tx, c.admin, rows.id("missing"), { name: "л" }), /не найдена/);
   await assert.rejects(units.createMaterialUnitInTransaction(tx, c.admin, { name: "  " }));
   await rejectedSql(tx, () => tx.material.update({ where: { id: c.material.id }, data: { unitId: c.unit.id } }), /Foreign key constraint/);
-}));
+  const collision = await tx.changeLog.create({ data: { actorType: "user", actorId: c.admin.id, entity: "test", entityId: created.id, action: "fixture" } });
+  const snapshot = await nativeSnapshot(tx);
+  await rejectedSql(tx, () => units.renameMaterialUnitInTransaction(commandTx(tx, { actor: c.admin, db: tx, failAuditId: collision.id }), c.admin, created.id, { name: "audit rollback" }), /Unique constraint/);
+  assert.deepEqual(await nativeSnapshot(tx), snapshot);
+ });
+ const c = await tree(fixture.db, fixture, "unit-material-actions");
+ await warehouseState(fixture.db, fixture);
+ const alternate = await fixture.db.materialUnit.create({ data: { name: fixture.id("unit-material-alternate") } });
+ await fixture.db.material.update({ where: { id: c.material.id }, data: { active: false, purchasePrice: "15.55" } });
+ const norm = await fixture.db.projectMaterial.create({ data: { productId: c.product.id, materialId: c.material.id, quantity: "1.250", quantityPerUnit: "0.250", issuedQty: "0.125" } });
+ const stock = await fixture.db.stockMovement.create({ data: { materialId: c.material.id, type: "INCOME", quantity: "10.325", unitPrice: "15.55", totalByn: "160.55" } });
+ for (const role of ["ADMIN", "DIRECTOR", "MANAGER", "PROCUREMENT"] as Role[]) {
+   assert.equal((await run({ ...c.manager, roles: [role] }, fixture.db, () => warehouseActions.updateMaterial(c.material.id, { name: c.material.name, unitId: alternate.id }))).ok, true);
+   const material = await fixture.db.material.findUniqueOrThrow({ where: { id: c.material.id } });
+   assert.equal(material.active, false); assert.equal(material.purchasePrice!.toFixed(2), "15.55"); assert.equal(material.unitId, alternate.id);
+   assert.deepEqual(await fixture.db.projectMaterial.findUnique({ where: { id: norm.id } }), norm);
+   assert.deepEqual(await fixture.db.stockMovement.findUnique({ where: { id: stock.id } }), stock);
+ }
+ const before = await fixture.db.material.findUniqueOrThrow({ where: { id: c.material.id } });
+ for (const invalid of [{ name: c.material.name, unitId: fixture.id("missing-unit") }, { name: c.material.name, unitId: alternate.id, unit: "л" }, { name: c.material.name, unitId: alternate.id, purchasePrice: 1 }])
+   assert.equal((await run(c.manager, fixture.db, () => warehouseActions.updateMaterial(c.material.id, invalid))).ok, false);
+ await assert.rejects(run(c.engineer, fixture.db, () => warehouseActions.updateMaterial(c.material.id, { name: c.material.name, unitId: alternate.id })), /прав/);
+ assert.deepEqual(await fixture.db.material.findUnique({ where: { id: c.material.id } }), before);
+});
 
 test("mutation/real-COMMIT-lost-ACK-UNKNOWN-readonly-peer-replay-and-five-partial-rollbacks", async t => {
   t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-10-11T12:00:00Z").getTime() });
@@ -854,6 +987,71 @@ test("task/create-ten-identical-receipts-collisions-revocation-deleted-ACK-and-S
   assert.equal(await fixture.db.task.count({ where: { projectId: c.project.id, title: "SQL ACK" } }), 1);
   assert.equal(await fixture.db.changeLog.count({ where: { id: `task-create:${ackInput.clientMutationId}` } }), 1);
   assert.equal(await fixture.db.domainEvent.count({ where: { actor: c.manager.id, type: "task.assigned" } }), 2);
+  const w = await tree(fixture.db, fixture, "worker-native"), recipient = await fixture.user("allocation-recipient", ["WORKER"]);
+  const group = await fixture.db.taskAllocationGroup.create({ data: { workId: w.work.id, quantity: "2", budget: "60", currency: "BYN", createdById: w.manager.id } });
+  const parts = await fixture.db.task.createManyAndReturn({ data: [w.worker, recipient].map(person => ({ projectId: w.project.id, productId: w.product.id, workId: w.work.id,
+    title: "Старые доли", quantity: "2", allocationGroupId: group.id, assigneeId: person.id, shareUnits: 500000, shareAmount: "30" })) });
+  const request = { projectId: w.project.id, productId: w.product.id, workId: w.work.id, assigneeId: recipient.id, title: w.work.title,
+    type: "Производство", quantity: "2.00", dueAt: "2026-10-10", estimateMinutes: 60, dependencyIds: [parts[0].id], clientMutationId: randomUUID() };
+  await fixture.db.task.update({ where: { id: parts[1].id }, data: { projectId: c.project.id, productId: c.product.id } });
+  assert.equal((await run(w.worker, fixture.db, () => workerAllocation.createWorkerTaskAllocationCore(w.worker, request, realTransaction(fixture.db)))).ok, false);
+  assert.equal(await fixture.db.task.count({ where: { createdById: w.worker.id } }), 0);
+  assert.equal(await fixture.db.changeLog.count({ where: { actorId: w.worker.id } }), 0);
+  assert.equal(await fixture.db.domainEvent.count({ where: { actor: w.worker.id } }), 0);
+  await fixture.db.task.update({ where: { id: parts[1].id }, data: { projectId: w.project.id, productId: w.product.id } });
+  const allocation = await run(w.worker, fixture.db, () => workerAllocation.createWorkerTaskAllocationCore(w.worker, request, realTransaction(fixture.db))); assert.ok(allocation.ok);
+  const original = await fixture.db.task.findUniqueOrThrow({ where: { id: allocation.id } });
+  assert.equal(original.assigneeId, recipient.id); assert.equal(original.createdById, w.worker.id); assert.equal(original.quantity!.toFixed(2), "2.00"); assert.equal(original.allocationGroupId, null);
+  assert.deepEqual((await fixture.db.taskDependency.findMany({ where: { taskId: original.id }, orderBy: { dependsOnId: "asc" } })).map(row => row.dependsOnId), parts.map(row => row.id).sort());
+  const repeatedAllocation = await run(w.worker, fixture.db, () => workerAllocation.createWorkerTaskAllocationCore(w.worker, request, realTransaction(fixture.db))); assert.ok(repeatedAllocation.ok && repeatedAllocation.repeated);
+  for (const invalid of [{ quantity: "3.00", clientMutationId: request.clientMutationId }, { assigneeId: w.engineer.id }, { quantity: "1.001" }, { quantity: "11" },
+    { executorShare: 0.5 }, { estimateMinutes: 0 }, { dependencyIds: ["missing"] }]) {
+    assert.equal((await run(w.worker, fixture.db, () => workerAllocation.createWorkerTaskAllocationCore(w.worker, { ...request, clientMutationId: randomUUID(), ...invalid }, realTransaction(fixture.db)))).ok, false);
+  }
+  await fixture.db.user.update({ where: { id: w.worker.id }, data: { roles: ["MANAGER"] } });
+  assert.equal((await run(w.worker, fixture.db, () => workerAllocation.createWorkerTaskAllocationCore(w.worker, request, realTransaction(fixture.db)))).ok, false);
+  await fixture.db.user.update({ where: { id: w.worker.id }, data: { roles: ["WORKER"] } });
+  const allocationCollision = await fixture.db.domainEvent.create({ data: { actor: w.worker.id, type: "ci.allocation-collision", payload: {} } });
+  const beforeAllocationFault = await nativeSnapshot(fixture.db);
+  const fault = await run(w.worker, fixture.db, () => workerAllocation.createWorkerTaskAllocationCore(w.worker,
+    { ...request, quantity: "1", dependencyIds: [], clientMutationId: randomUUID() }, realTransaction(fixture.db)), { failEventId: allocationCollision.id });
+  assert.equal(fault.ok, false); assert.deepEqual(await nativeSnapshot(fixture.db), beforeAllocationFault);
+  const race = await overlap(w.worker,
+    () => workerAllocation.createWorkerTaskAllocationCore(w.worker, { ...request, quantity: "1", dependencyIds: [], clientMutationId: randomUUID() }, realTransaction(fixture.db)),
+    () => workerAllocation.createWorkerTaskAllocationCore(w.worker, { ...request, quantity: "1", dependencyIds: [], clientMutationId: randomUUID() }, realTransaction(fixture.peer)));
+  assert.equal(race.filter(row => row.ok).length, 1); assert.equal(race.filter(row => !row.ok).length, 1);
+  await fixture.db.task.update({ where: { id: allocation.id }, data: { quantity: "3" } });
+  const changedAllocation = await run(w.worker, fixture.db, () => workerAllocation.createWorkerTaskAllocationCore(w.worker, request, realTransaction(fixture.db)));
+  assert.ok(!changedAllocation.ok && changedAllocation.kind === "conflict");
+  const measuredWork = await fixture.db.work.create({ data: { projectId: w.project.id, productId: w.product.id, title: "Замер", paymentKind: "LEGACY", quantity: "1", priceSnapshot: "30", total: "30" } });
+  const measure = { ...request, workId: measuredWork.id, quantity: "1", type: "Замер", dependencyIds: [], requiresPhoto: false, clientMutationId: randomUUID() };
+  await fixture.db.user.update({ where: { id: recipient.id }, data: { active: false } });
+  assert.equal((await run(w.worker, fixture.db, () => workerAllocation.createWorkerTaskAllocationCore(w.worker, measure, realTransaction(fixture.db)))).ok, false);
+  await fixture.db.user.update({ where: { id: recipient.id }, data: { active: true } });
+  const measuredPool = await fixture.db.productStagePayPool.create({ data: { id: fixture.id("measurement-legacy-pool"), productId: w.product.id, kind: "ENGINEERING", state: "DRAFT", createdById: w.manager.id } });
+  await fixture.db.work.update({ where: { id: measuredWork.id }, data: { paymentKind: "ENGINEERING", stagePayPoolId: measuredPool.id, poolWeightUnits: 1_000_000 } });
+  assert.equal((await run(w.worker, fixture.db, () => workerAllocation.createWorkerTaskAllocationCore(w.worker, measure, realTransaction(fixture.db)))).ok, false);
+  await fixture.db.work.update({ where: { id: measuredWork.id }, data: { paymentKind: "LEGACY", stagePayPoolId: null, poolWeightUnits: null } });
+  const measured = await run(w.worker, fixture.db, () => workerAllocation.createWorkerTaskAllocationCore(w.worker, measure, realTransaction(fixture.db))); assert.ok(measured.ok);
+  const measuredTask = await fixture.db.task.findUniqueOrThrow({ where: { id: measured.id } }); assert.equal(measuredTask.requiresPhoto, true); assert.equal(measuredTask.status, "NEW");
+  assert.equal(await fixture.db.changeLog.count({ where: { actorId: w.worker.id, action: "worker-allocation.receipt" } }), 3);
+  assert.equal(await fixture.db.domainEvent.count({ where: { actor: w.worker.id, type: "task.assigned" } }), 3);
+  await fixture.db.task.create({ data: { projectId: w.project.id, productId: w.product.id, workId: measuredWork.id, title: "Неизвестный старый объём", quantity: null } });
+  const unknown = await run(w.worker, fixture.db, () => workerAllocation.createWorkerTaskAllocationCore(w.worker, { ...measure, quantity: "0.01", clientMutationId: randomUUID() }, realTransaction(fixture.db)));
+  assert.ok(!unknown.ok); assert.match(unknown.error, /не определён объём/);
+  await fixture.db.taskDependency.deleteMany({ where: { taskId: allocation.id } });
+  await fixture.db.task.delete({ where: { id: allocation.id } });
+  const missing = await run(w.worker, fixture.db, () => workerAllocation.createWorkerTaskAllocationCore(w.worker, request, realTransaction(fixture.db)));
+  assert.ok(!missing.ok && missing.kind === "conflict"); assert.equal(await fixture.db.task.count({ where: { id: allocation.id } }), 0);
+  const reader = actorOf(await fixture.user("journal-reader", ["ADMIN"])), businessId = fixture.id("journal-business"), stamp = new Date();
+  await fixture.db.changeLog.createMany({ data: [
+    ...Array.from({ length: 205 }, (_, index) => ({ id: `${index % 2 ? "task-create:" : "task-status:"}${randomUUID()}`, actorType: "user", actorId: reader.id,
+      actorName: reader.name, entity: "task", entityId: fixture.id("journal-source"), action: index % 2 ? "task.create.request" : "task.status.request",
+      newValue: { fingerprint: "PRIVATE_RECEIPT" }, createdAt: new Date(stamp.getTime() + 1000) })),
+    { id: businessId, actorType: "user", actorId: reader.id, entity: "task", entityId: fixture.id("journal-source"), action: "create", createdAt: stamp },
+  ] });
+  assert.deepEqual((await run(reader, fixture.db, () => changelog.listGlobalChangeLog({ actor: reader.id, entity: "task" }))).map(row => row.id), [businessId]);
+  assert.equal(await fixture.db.changeLog.count({ where: { actorId: reader.id } }), 206);
 });
 
 test("task/status-real-receipts-start-after-DONE-and-changed-context-refusal", async () => {
@@ -874,11 +1072,22 @@ test("task/status-real-receipts-start-after-DONE-and-changed-context-refusal", a
   assert.equal((await run(c.manager, fixture.db, () => tasks.changeTaskStatus(task.id, "DONE", 30, done))).ok, false);
   const other = await fixture.db.task.create({ data: { projectId: c.project.id, productId: c.product.id, workId: c.work.id, assigneeId: c.worker.id, title: "Другой", quantity: "1" } });
   assert.equal((await run(c.manager, fixture.db, () => tasks.changeTaskStatus(other.id, "DONE", 20, done))).ok, false);
+  const ownReceipt = { clientMutationId: randomUUID(), expectedActorId: c.worker.id };
+  assert.equal((await run(c.worker, fixture.db, () => tasks.changeTaskStatus(other.id, "IN_PROGRESS", undefined, ownReceipt))).ok, true);
+  const recipient = actorOf(await fixture.user("receipt-next-worker", ["WORKER"]));
+  assert.equal((await run(c.manager, fixture.db, () => tasks.updateTask(other.id, { assigneeId: recipient.id }))).ok, true);
+  const before = await nativeSnapshot(fixture.db);
+  assert.equal((await run(c.worker, fixture.db, () => tasks.changeTaskStatus(other.id, "IN_PROGRESS"))).ok, false);
+  const repeated = await run(c.worker, fixture.db, () => tasks.changeTaskStatus(other.id, "IN_PROGRESS", undefined, ownReceipt));
+  assert.ok(repeated.ok && repeated.replayed);
+  for (const key of ["task", "status", "payroll"]) assert.equal(key in repeated, false);
+  assert.deepEqual(await nativeSnapshot(fixture.db), before);
 });
 
 test("timer/all-stop-switch-read-complete-reassign-routes-boundaries-and-closed-history", async t => {
   const instant = new Date("2026-10-11T12:00:00.000Z"); t.mock.timers.enable({ apis: ["Date"], now: instant.getTime() });
   const actors = await people(fixture, "timer-matrix"), project = await fixture.project("timer-matrix-project", { stage: "IN_WORK", managerId: actors.manager.id });
+  await assert.rejects(run(actors.worker, fixture.db, () => time.getActiveTimer(), { unauthenticated: true }), /Не авторизован/);
   const product = await fixture.product("timer-matrix-product", project.id, { status: "PRODUCTION", assemblerId: actors.worker.id });
   const recipient = actorOf(await fixture.user("timer-recipient", ["WORKER"], { payScheme: "PIECE" }));
   const task = async (label: string, quantity = "10") => {
@@ -918,6 +1127,8 @@ test("timer/all-stop-switch-read-complete-reassign-routes-boundaries-and-closed-
       const audit = await fixture.db.changeLog.findFirstOrThrow({ where: { entityId: source.id, action: "update" } });
       assert.deepEqual(audit.oldValue, JSON.parse(JSON.stringify({ title: previous.title, type: previous.type, assigneeId: previous.assigneeId, dueAt: previous.dueAt, status: previous.status })));
       assert.deepEqual(audit.newValue, { ...input, status: "IN_PROGRESS" });
+      assert.equal(audit.actorType, "user"); assert.equal(audit.actorId, actors.manager.id); assert.equal(audit.actorName, actors.manager.name);
+      assert.equal(audit.source, "web");
       assert.equal(await fixture.db.timeEntry.count({ where: { taskId: source.id, stoppedAt: null } }), 0);
     }
     const saved = await fixture.db.timeEntry.findUniqueOrThrow({ where: { id: row.id } });
@@ -935,6 +1146,43 @@ test("timer/all-stop-switch-read-complete-reassign-routes-boundaries-and-closed-
     const result = await run({ ...actors.worker, roles }, fixture.db, () => time.addManualTime({ taskId: manual.id, minutes: 1200 }));
     assert.equal(result.ok, roles.includes("MANAGER"));
   }
+  assert.equal((await run(actors.manager, fixture.db, () => time.addManualTime({ taskId: manual.id, minutes: 1441 }))).ok, false);
+  const inherited = await task("inherited-role-timer");
+  for (const role of ["ACCOUNTANT", "PROCUREMENT"] as Role[]) {
+    const row = await fixture.db.timeEntry.create({ data: { taskId: inherited.id, userId: actors.worker.id, source: "timer", startedAt: new Date(instant.getTime() - 780 * 60000) } });
+    const before = await fixture.db.timeEntry.findUniqueOrThrow({ where: { id: row.id } });
+    await run({ ...actors.worker, roles: [role] }, fixture.db, async () => {
+      assert.equal(await time.getActiveTimer(), null); assert.equal((await time.stopTimer()).ok, false);
+    });
+    assert.deepEqual(await fixture.db.timeEntry.findUnique({ where: { id: row.id } }), before);
+    await fixture.db.timeEntry.delete({ where: { id: row.id } });
+  }
+  for (const actor of [actors.worker, actors.engineer, actors.manager]) {
+    await fixture.db.product.update({ where: { id: product.id }, data: { status: actor.id === actors.engineer.id ? "DESIGN" : "PRODUCTION", engineerId: actors.engineer.id } });
+    await fixture.db.task.update({ where: { id: inherited.id }, data: { assigneeId: actor.id } });
+    for (const roles of [["ACCOUNTANT", ...actor.roles], [...actor.roles, "ACCOUNTANT"]] as Role[][]) {
+      const row = await fixture.db.timeEntry.create({ data: { taskId: inherited.id, userId: actor.id, source: "timer", startedAt: new Date(instant.getTime() - 780 * 60000) } });
+      assert.equal(await run({ ...actor, roles }, fixture.db, () => time.getActiveTimer()), null);
+      const saved = await fixture.db.timeEntry.findUniqueOrThrow({ where: { id: row.id } });
+      assert.equal(saved.minutes, 720); assert.equal(saved.autoStopped, true); assert.ok(saved.stoppedAt);
+    }
+  }
+  await fixture.db.product.update({ where: { id: product.id }, data: { status: "PRODUCTION" } });
+  await fixture.db.task.update({ where: { id: inherited.id }, data: { assigneeId: actors.worker.id } });
+  const deletedProject = await fixture.project("timer-deleted-project", { deletedAt: instant });
+  const deletedTask = await fixture.db.task.create({ data: { projectId: deletedProject.id, title: "Удалённый контекст", assigneeId: actors.worker.id } });
+  const protectedTimers = await fixture.db.timeEntry.createManyAndReturn({ data: [
+    { taskId: inherited.id, userId: recipient.id, source: "timer", startedAt: new Date(instant.getTime() - 780 * 60000) },
+    { taskId: deletedTask.id, userId: actors.worker.id, source: "timer", startedAt: new Date(instant.getTime() - 780 * 60000) },
+  ] });
+  assert.equal(await run(actors.worker, fixture.db, () => time.getActiveTimer()), null);
+  assert.deepEqual(await fixture.db.timeEntry.findMany({ where: { id: { in: protectedTimers.map(row => row.id) } }, orderBy: { id: "asc" } }),
+    [...protectedTimers].sort((left, right) => left.id.localeCompare(right.id)));
+  await fixture.db.timeEntry.deleteMany({ where: { id: { in: protectedTimers.map(row => row.id) } } });
+  const unavailable = await fixture.db.timeEntry.create({ data: { taskId: inherited.id, userId: actors.worker.id, source: "timer", startedAt: new Date(instant.getTime() - 780 * 60000) } });
+  assert.equal((await run(actors.worker, fixture.db, () => time.startTimer(fixture.id("missing-timer-task")))).ok, false);
+  assert.deepEqual(await fixture.db.timeEntry.findUnique({ where: { id: unavailable.id } }), unavailable);
+  await run(actors.worker, fixture.db, () => time.stopTimer());
   const started = await task("start-closes-prior"); await fixture.db.task.update({ where: { id: started.id }, data: { status: "NEW" } });
   const previous = await task("prior-running");
   const priorTimer = await fixture.db.timeEntry.create({ data: { taskId: previous.id, userId: actors.worker.id, source: "timer", startedAt: new Date(instant.getTime() - 1200 * 60000) } });
@@ -1008,10 +1256,190 @@ test("timer/parallel-same-start-switch-expiry-start-DONE-and-audit-rollback", as
   assert.equal(raceTriggered, true); assert.equal(cas.ok, false);
   const late = await fixture.db.timeEntry.findUniqueOrThrow({ where: { id: casTimer.id } });
   assert.equal(late.minutes, 720); assert.equal(late.autoStopped, true); assert.equal(late.stoppedAt!.getTime(), instant.getTime() - 480 * 60000);
+  const revoked = await seed("Назначение отозвано перед закрытием"), revokedTimer = await fixture.db.timeEntry.create({ data: {
+    taskId: revoked.id, userId: c.worker.id, source: "timer", startedAt: new Date(instant.getTime() - 1200 * 60000),
+  } }); let revokedOnce = false;
+  const denied = await run(c.worker, fixture.db, () => time.stopTimer(), { onTimerLookup: async () => {
+    if (revokedOnce) return; revokedOnce = true; await fixture.peer.task.update({ where: { id: revoked.id }, data: { assigneeId: recipient.id } });
+  } });
+  assert.equal(revokedOnce, true); assert.equal(denied.ok, false);
+  assert.deepEqual(await fixture.db.timeEntry.findUnique({ where: { id: revokedTimer.id } }), revokedTimer);
+  await fixture.db.task.update({ where: { id: revoked.id }, data: { assigneeId: c.worker.id } });
+  await run(c.worker, fixture.db, () => time.stopTimer());
   const generated = await fixture.db.timeEntry.findMany({ where: { userId: c.worker.id, source: "timer" } });
   assert.ok(generated.every(row => Number.isInteger(row.minutes) && row.minutes >= 1 && row.minutes <= 720 && row.stoppedAt !== null));
   assert.equal(await fixture.db.timeEntry.count({ where: { userId: c.worker.id, stoppedAt: null } }), 0);
 });
+
+test("work/field-edit-self-assignment-CAS-current-roles-and-preserved-facts", async () => fixture.rollback(async (tx, rows) => {
+  const transaction = transactionIn(tx);
+  const worker = await rows.user("field-worker", ["WORKER"], { payScheme: "PIECE" }), mounter = await rows.user("field-mounter", ["MOUNTER"], { payScheme: "PIECE" });
+  const combined = await rows.user("field-combined", ["WORKER", "MOUNTER"], { payScheme: "PIECE" }), actors = [worker, mounter, combined].map(actorOf);
+  const project = await rows.project("field-works", { stage: "CONTRACT", currency: "BYN" });
+  const production = await rows.product("field-production", project.id, { status: "PRODUCTION", quantity: 2 });
+  const storage = await rows.product("field-storage", project.id, { status: "STORAGE", quantity: 2 });
+  const installation = await rows.product("field-installation", project.id, { status: "INSTALLATION", quantity: 2 });
+  const first = await tx.priceItem.create({ data: { name: "Первая", unit: "шт", price: "10" } });
+  const next = await tx.priceItem.create({ data: { name: "Следующая", unit: "м.п.", price: "20" } });
+  const create = { projectId: project.id, productId: storage.id, priceItemId: first.id, quantityPerUnit: 5, clientMutationId: randomUUID() };
+  const added = await worksCore.addWorkCore(actors[0], create, transaction); assert.ok(added.ok); const workId = added.workId;
+  assert.deepEqual(await worksCore.addWorkCore(actors[0], create, transaction), { ok: true, workId, repeated: true });
+  assert.equal(await tx.work.count({ where: { productId: storage.id } }), 1);
+  for (const [actor, productId] of [[actors[0], production.id], [actors[1], installation.id], [actors[2], production.id], [actors[2], storage.id], [actors[2], installation.id]] as const)
+    assert.ok((await worksCore.addWorkCore(actor, { ...create, productId, clientMutationId: randomUUID() }, transaction)).ok);
+  for (const [actor, productId] of [[actors[0], installation.id], [actors[1], production.id], [actors[1], storage.id]] as const)
+    assert.equal((await worksCore.addWorkCore(actor, { ...create, productId, clientMutationId: randomUUID() }, transaction)).ok, false);
+  assert.equal((await worksCore.addWorkCore(actors[0], { ...create, clientMutationId: randomUUID(), priceSnapshot: 1 }, transaction)).ok, false);
+  assert.deepEqual(await workQueries.listWorkPriceOptions({ id: mounter.id, roles: ["MOUNTER"] }, production.id, tx), []);
+  let operations = await workQueries.listProductWorkOperations(actors[0], storage.id, tx);
+  assert.ok((await workUpdate.updateWorkCore(actors[0], { projectId: project.id, productId: storage.id, workId, quantityPerUnit: 5, priceItemId: next.id,
+    expectedRevision: operations[workId].revision, clientMutationId: randomUUID() }, transaction)).ok);
+  const repriced = await tx.work.findUniqueOrThrow({ where: { id: workId } });
+  assert.equal(repriced.priceSnapshot!.toString(), "20"); assert.equal(repriced.unitSnapshot, "м.п."); assert.equal(repriced.quantity.toString(), "10");
+  await tx.priceItem.update({ where: { id: next.id }, data: { price: "99" } });
+  assert.equal((await tx.work.findUniqueOrThrow({ where: { id: workId } })).priceSnapshot!.toString(), "20");
+  const self = { projectId: project.id, productId: storage.id, workId, title: "Своя задача", type: "Производство", quantity: "6.00", dueAt: "2026-10-12", estimateMinutes: 30, dependencyIds: [], clientMutationId: randomUUID() };
+  const taken = await workerAllocation.createOwnWorkTaskCore(actors[0], self, transaction); assert.ok(taken.ok); assert.equal(taken.assigneeId, worker.id);
+  const repeated = await workerAllocation.createOwnWorkTaskCore(actors[0], self, transaction); assert.ok(repeated.ok && repeated.repeated);
+  assert.equal((await workerAllocation.createOwnWorkTaskCore(actors[0], { ...self, clientMutationId: randomUUID(), assigneeId: mounter.id }, transaction)).ok, false);
+  await tx.task.update({ where: { id: taken.id }, data: { status: "DONE", doneAt: new Date("2026-09-30T09:00Z"), doneById: worker.id } });
+  await tx.timeEntry.create({ data: { taskId: taken.id, userId: worker.id, source: "manual", minutes: 30, startedAt: new Date("2026-09-30T08:30Z"), stoppedAt: new Date("2026-09-30T09:00Z") } });
+  await tx.payrollEntry.create({ data: { userId: worker.id, taskId: taken.id, workId, productId: storage.id, projectId: project.id, amount: "120", bynAmount: "120", currency: "BYN", month: "2026-09", scheme: "PIECE" } });
+  const snapshot = () => tx.task.findUniqueOrThrow({ where: { id: taken.id }, include: { timeEntries: true, payrollEntries: true } }), before = await snapshot();
+  operations = await workQueries.listProductWorkOperations(actors[0], storage.id, tx);
+  assert.equal(operations[workId].allocated, "6.00"); assert.equal(operations[workId].remaining, "4.00"); assert.equal(operations[workId].canChangePrice, false);
+  assert.equal("priceSnapshot" in operations[workId], false); assert.equal("tasks" in operations[workId], false);
+  const edit = { projectId: project.id, productId: storage.id, workId, quantityPerUnit: 6, expectedRevision: operations[workId].revision, clientMutationId: randomUUID() };
+  assert.ok((await workUpdate.updateWorkCore(actors[0], edit, transaction)).ok);
+  const editRepeat = await workUpdate.updateWorkCore(actors[0], edit, transaction); assert.ok(editRepeat.ok && editRepeat.repeated);
+  operations = await workQueries.listProductWorkOperations(actors[0], storage.id, tx);
+  assert.equal(operations[workId].allocated, "6.00"); assert.equal(operations[workId].remaining, "6.00");
+  assert.equal((await tx.work.findUniqueOrThrow({ where: { id: workId } })).total!.toString(), "240");
+  for (const denied of [{ ...edit, quantityPerUnit: 2.5, expectedRevision: operations[workId].revision }, { ...edit, priceItemId: first.id, expectedRevision: operations[workId].revision }, { ...edit }, { ...edit, priceSnapshot: "0" }])
+    assert.equal((await workUpdate.updateWorkCore(actors[0], { ...denied, clientMutationId: randomUUID() }, transaction)).ok, false);
+  assert.deepEqual(await snapshot(), before);
+  const last = { ...self, quantity: "6.00", clientMutationId: randomUUID() }; assert.ok((await workerAllocation.createOwnWorkTaskCore(actors[0], last, transaction)).ok);
+  assert.equal((await workerAllocation.createOwnWorkTaskCore(actors[0], { ...last, quantity: "0.01", clientMutationId: randomUUID() }, transaction)).ok, false);
+  const lastRepeat = await workerAllocation.createOwnWorkTaskCore(actors[0], last, transaction); assert.ok(lastRepeat.ok && lastRepeat.repeated); assert.deepEqual(await snapshot(), before);
+  const special = await tx.work.findFirstOrThrow({ where: { productId: storage.id, createdById: combined.id } });
+  await tx.work.update({ where: { id: special.id }, data: { paymentKind: "INSTALLATION" } });
+  const refused = await workUpdate.updateWorkCore(actors[0], { ...edit, workId: special.id, clientMutationId: randomUUID() }, transaction);
+  assert.ok(!refused.ok); assert.equal(refused.kind, "validation");
+  assert.equal((await workerAllocation.createOwnWorkTaskCore(actors[0], { ...last, workId: special.id, clientMutationId: randomUUID() }, transaction)).ok, false);
+  const coordinator = await rows.user("field-coordinator", ["WORKER", "WORK_COORDINATOR"], { payScheme: "PIECE" }), coordinatorActor = actorOf(coordinator);
+  const priceInput = { name: rows.id("coordinator-price"), unit: "шт.", price: 100 };
+  const createdPrice = await run(coordinatorActor, tx, () => priceActions.createPriceItem(priceInput)); assert.ok(createdPrice.ok && createdPrice.id);
+  const assigned = { projectId: project.id, productId: production.id, priceItemId: createdPrice.id, quantityPerUnit: 1 };
+  const priorWork = await worksCore.addWorkCore(coordinatorActor, assigned, transaction); assert.ok(priorWork.ok);
+  assert.equal((await run(coordinatorActor, tx, () => priceActions.updatePriceItem(createdPrice.id!, { ...priceInput, price: 125 }))).ok, true);
+  const nextWork = await worksCore.addWorkCore(coordinatorActor, assigned, transaction); assert.ok(nextWork.ok);
+  assert.equal((await tx.work.findUniqueOrThrow({ where: { id: priorWork.workId } })).priceSnapshot!.toString(), "100");
+  const changedWork = await tx.work.findUniqueOrThrow({ where: { id: nextWork.workId } });
+  assert.equal(changedWork.priceSnapshot!.toString(), "125"); assert.equal(changedWork.total!.toString(), "250");
+  assert.equal(await tx.changeLog.count({ where: { entity: "priceItem", entityId: createdPrice.id, actorId: coordinator.id } }), 2);
+  assert.equal(await tx.product.count({ where: { AND: [{ id: production.id }, visibility.productVisibilityWhere({ id: coordinator.id, roles: ["MOUNTER", "WORK_COORDINATOR"] })] } }), 0);
+  const revoked = await tx.user.update({ where: { id: coordinator.id }, data: { roles: ["WORKER"] } });
+  await assert.rejects(run(actorOf(revoked), tx, () => priceActions.updatePriceItem(createdPrice.id!, { ...priceInput, price: 999 })), /Недостаточно прав/);
+  assert.equal((await tx.priceItem.findUniqueOrThrow({ where: { id: createdPrice.id } })).price.toString(), "125");
+  for (const [actor, statuses] of [[actors[0], ["PRODUCTION", "STORAGE"]], [actors[1], ["INSTALLATION"]], [actors[2], ["PRODUCTION", "STORAGE", "INSTALLATION"]]] as [DomainActor, ProductStatus[]][]) {
+    for (const product of [production, storage, installation]) {
+      const work = await tx.work.findFirstOrThrow({ where: { productId: product.id } });
+      const assigned = await tx.task.create({ data: { projectId: project.id, productId: product.id, workId: work.id, assigneeId: actor.id, title: "Назначение не расширяет статусы", quantity: "1" } });
+      await tx.file.create({ data: { projectId: project.id, productId: product.id, taskId: assigned.id, fileName: "field.pdf", storedName: randomUUID(), mimeType: "application/pdf", size: 1, uploadedById: actor.id } });
+    }
+    const resolved = await visibility.resolveVisibilityActor(tx, actor);
+    const selected = await tx.product.findMany({ where: { AND: [{ projectId: project.id }, visibility.productVisibilityWhere(resolved)] }, select: { id: true }, orderBy: { id: "asc" } });
+    assert.deepEqual(selected.map(row => row.id), [production, storage, installation].filter(row => statuses.includes(row.status)).map(row => row.id).sort());
+    assert.equal(await tx.task.count({ where: { AND: [{ projectId: project.id, product: { status: { notIn: statuses } } }, visibility.taskExecutionWhere(resolved)] } }), 0);
+    assert.equal(await tx.work.count({ where: { AND: [{ projectId: project.id, product: { status: { notIn: statuses } } }, visibility.workVisibilityWhere(resolved)] } }), 0);
+    assert.equal(await tx.file.count({ where: { AND: [{ projectId: project.id, OR: [{ product: { status: { notIn: statuses } } }, { task: { product: { status: { notIn: statuses } } } }] }, visibility.fileVisibilityWhere(resolved)] } }), 0);
+  }
+  const engineer = await rows.user("privacy-assigned-engineer", ["ENGINEER"]);
+  const paidProduct = await rows.product("privacy-shares", project.id, { status: "PRODUCTION", quantity: 3, expectedPrice: "1000", initialPrice: "1200", engineerId: engineer.id, assemblerId: worker.id, mounterId: mounter.id });
+  await tx.productPercentageConfig.createMany({ data: (["ENGINEERING", "ASSEMBLY", "INSTALLATION"] as const).map(kind => ({ productId: paidProduct.id, kind, ratePercent: "5", revision: 1 })) });
+  for (const [person, ownKind, amount, status] of [[engineer, "ENGINEERING", 50, "PRODUCTION"], [worker, "ASSEMBLY", 150, "PRODUCTION"], [mounter, "INSTALLATION", 150, "INSTALLATION"]] as const) {
+    await tx.product.update({ where: { id: paidProduct.id }, data: { status } });
+    const view = await percentageQueries.getProductPercentageView(actorOf(person), paidProduct.id, tx);
+    for (const [kind, section] of Object.entries(view.sections)) {
+      for (const key of ["price", "unitPrice", "productTotal", "ratePercent", "currentRatePercent"] as const) assert.equal(section[key], null);
+      assert.equal(Number(section.total), kind === ownKind ? amount : 0);
+      if (kind !== ownKind) assert.deepEqual(section.members, []);
+    }
+  }
+  const manager = actorOf(await rows.user("privacy-manager", ["MANAGER"]));
+  await run(manager, tx, async () => assert.equal((await productQueries.getProductFor(manager.id, manager.roles, paidProduct.id))!.expectedPrice!.toString(), "1000"));
+  await tx.product.update({ where: { id: paidProduct.id }, data: { deletedAt: new Date() } });
+  for (const person of [manager, actorOf(engineer), actors[0], actors[1]]) await run(person, tx, async () => assert.equal(await productQueries.getProductFor(person.id, person.roles, paidProduct.id), null));
+}));
+
+test("calendar/real-duration-CAS-Moscow-boundaries-owner-analytics-and-totals", async () => fixture.rollback(async (tx, rows) => {
+  const transaction = <T>(operation: (db: Prisma.TransactionClient) => Promise<T>) => operation(tx);
+  const duration = await rows.user("calendar-duration", ["PROCUREMENT"], { calendarEnabled: true });
+  const foreign = await rows.user("calendar-foreign", ["ADMIN"], { calendarEnabled: true });
+  const input = { operation: "create" as const, entryId: randomUUID(), title: "Часы", localDateTime: "2026-10-07T09:00", plannedMinutes: 90, reminderOffsetMinutes: null };
+  const created = await calendar.mutateCalendarCore(duration.id, input, transaction); assert.ok(created.ok); assert.equal(created.entry.plannedMinutes, 90);
+  const repeated = await calendar.mutateCalendarCore(duration.id, input, transaction); assert.ok(repeated.ok && repeated.repeated);
+  const conflict = await calendar.mutateCalendarCore(duration.id, { ...input, plannedMinutes: 60 }, transaction); assert.ok(!conflict.ok && conflict.kind === "conflict");
+  const { plannedMinutes: omitted, ...oldInput } = input; assert.equal(omitted, 90);
+  const old = await calendar.mutateCalendarCore(duration.id, { ...oldInput, operation: "update", expectedRevision: 0 }, transaction); assert.ok(old.ok); assert.equal(old.entry.plannedMinutes, 90);
+  const done = await calendar.mutateCalendarCore(duration.id, { operation: "state", entryId: input.entryId, expectedRevision: 1, state: "COMPLETED" }, transaction); assert.ok(done.ok); assert.equal(done.entry.plannedMinutes, 90);
+  for (const [revision, value] of [[2, null], [3, 0]] as const) {
+    const reply = await calendar.mutateCalendarCore(duration.id, { ...input, operation: "update", expectedRevision: revision, plannedMinutes: value }, transaction);
+    assert.ok(reply.ok); assert.equal(reply.entry.plannedMinutes, value);
+  }
+  const stale = await calendar.mutateCalendarCore(duration.id, { ...input, operation: "update", expectedRevision: 3 }, transaction); assert.ok(!stale.ok && stale.kind === "conflict");
+  assert.deepEqual(await calendar.listCalendarMonthCore(foreign.id, "2026-10", transaction), []);
+  const denied = await calendar.mutateCalendarCore(foreign.id, { ...input, operation: "update", expectedRevision: 4 }, transaction); assert.ok(!denied.ok); assert.equal(denied.code, "CALENDAR_ENTRY_NOT_FOUND");
+  const legacy = await calendar.mutateCalendarCore(duration.id, { ...oldInput, entryId: randomUUID() }, transaction); assert.ok(legacy.ok); assert.equal(legacy.entry.plannedMinutes, null);
+  assert.deepEqual((await calendar.listCalendarMonthCore(duration.id, "2026-10", transaction)).map(row => row.plannedMinutes).sort(), [0, null].sort());
+  await rejectedSql(tx, () => tx.calendarEntry.update({ where: { id: input.entryId }, data: { plannedMinutes: -1 } }), /plannedMinutes_nonnegative/);
+  await tx.user.update({ where: { id: duration.id }, data: { calendarEnabled: false } });
+  await assert.rejects(calendar.listCalendarMonthCore(duration.id, "2026-10", transaction), /CALENDAR_DISABLED/);
+  const disabled = await calendar.mutateCalendarCore(duration.id, { ...input, operation: "update", expectedRevision: 4 }, transaction); assert.ok(!disabled.ok); assert.equal(disabled.code, "CALENDAR_DISABLED");
+  const owner = await rows.user("calendar-totals", ["PROCUREMENT"], { calendarEnabled: true }), plannedId = randomUUID();
+  await tx.calendarEntry.createMany({ data: [
+    { id: randomUUID(), ownerId: owner.id, title: "Начало месяца", startsAt: new Date("2026-09-30T21:00Z"), plannedMinutes: 30 },
+    { id: plannedId, ownerId: owner.id, title: "Запланировано", startsAt: new Date("2026-10-07T06:00Z"), plannedMinutes: 90 },
+    { id: randomUUID(), ownerId: owner.id, title: "Выполнено", startsAt: new Date("2026-10-07T07:00Z"), state: "COMPLETED", plannedMinutes: 60 },
+    { id: randomUUID(), ownerId: owner.id, title: "Отменено", startsAt: new Date("2026-10-07T08:00Z"), state: "CANCELLED", plannedMinutes: 120 },
+    { id: randomUUID(), ownerId: owner.id, title: "Пусто", startsAt: new Date("2026-10-07T09:00Z"), state: "COMPLETED", plannedMinutes: null },
+    { id: randomUUID(), ownerId: owner.id, title: "Ноль", startsAt: new Date("2026-10-07T10:00Z"), plannedMinutes: 0 },
+    { id: randomUUID(), ownerId: owner.id, title: "OUTSIDE_BEFORE", startsAt: new Date("2026-09-30T20:59:59.999Z"), plannedMinutes: 999 },
+    { id: randomUUID(), ownerId: owner.id, title: "OUTSIDE_AFTER", startsAt: new Date("2026-10-31T21:00Z"), plannedMinutes: 999 },
+    { id: randomUUID(), ownerId: foreign.id, title: "FOREIGN_SECRET", startsAt: new Date("2026-10-07T06:00Z"), plannedMinutes: 9999 },
+  ] });
+  const load = async () => summarizeCalendarEntries(await calendar.listCalendarMonthCore(owner.id, "2026-10", transaction));
+  const initial = await load(); assert.equal(initial.total.hours.minutes, 180); assert.equal(initial.total.hours.missingCount, 1);
+  assert.equal(initial.total.completedHours.minutes, 60); assert.equal(initial.total.completedCount, 2); assert.equal(initial.total.totalCount, 6);
+  assert.equal(initial.days.find(day => day.date === "2026-10-07")?.summary.hours.minutes, 150);
+  const extraIds = Array.from({ length: 4 }, () => randomUUID());
+  await tx.calendarEntry.createMany({ data: [
+    { id: extraIds[0], ownerId: owner.id, title: "Начало диапазона", startsAt: new Date("2026-10-06T21:00Z"), plannedMinutes: 15 },
+    { id: extraIds[1], ownerId: owner.id, title: "Конец диапазона", startsAt: new Date("2026-10-08T20:59:59.999Z"), plannedMinutes: 45, state: "COMPLETED", updatedAt: new Date("2026-11-01") },
+    { id: extraIds[2], ownerId: owner.id, title: "BEFORE_SECRET", startsAt: new Date("2026-10-06T20:59:59.999Z"), plannedMinutes: 111 },
+    { id: extraIds[3], ownerId: owner.id, title: "AFTER_SECRET", startsAt: new Date("2026-10-08T21:00Z"), plannedMinutes: 111 },
+  ] });
+  const range = { from: "2026-10-07", to: "2026-10-08" }, result = await calendarAnalytics.loadCalendarAnalyticsCore(owner.id, range, transaction);
+  assert.equal(result.entries.length, 7); assert.equal(result.summary.total.hours.minutes, 210); assert.equal(result.summary.total.completedCount, 3);
+  assert.equal(result.summary.total.completedHours.minutes, 105); assert.equal(result.summary.total.hours.missingCount, 1);
+  assert.deepEqual(result.summary.days.map(day => [day.date, day.summary.hours.minutes]), [["2026-10-07", 165], ["2026-10-08", 45]]);
+  for (const secret of ["BEFORE_SECRET", "AFTER_SECRET", "FOREIGN_SECRET"]) assert.ok(!JSON.stringify(result).includes(secret));
+  assert.equal((await calendarAnalytics.loadCalendarAnalyticsCore(foreign.id, range, transaction)).summary.total.hours.minutes, 9999);
+  await assert.rejects(calendarAnalytics.loadCalendarAnalyticsCore(owner.id, { ...range, ownerId: foreign.id }, transaction));
+  assert.deepEqual((await calendarAnalytics.loadCalendarAnalyticsCore(owner.id, { from: "2026-10-01", to: "2026-10-31" }, transaction)).summary, await load());
+  const empty = await calendarAnalytics.loadCalendarAnalyticsCore(owner.id, { from: "2026-12-01", to: "2026-12-02" }, transaction);
+  assert.equal(empty.summary.total.hours.minutes, 0); assert.equal(empty.entries.length, 0);
+  await tx.calendarEntry.deleteMany({ where: { ownerId: owner.id, id: { in: extraIds } } });
+  for (const [revision, state, minutes] of [[0, "CANCELLED", 90], [1, "PLANNED", 180]] as const) {
+    assert.ok((await calendar.mutateCalendarCore(owner.id, { operation: "state", entryId: plannedId, expectedRevision: revision, state }, transaction)).ok);
+    assert.equal((await load()).total.hours.minutes, minutes);
+  }
+  assert.ok((await calendar.mutateCalendarCore(owner.id, { operation: "update", entryId: plannedId, expectedRevision: 2, title: "Изменено", localDateTime: "2026-10-08T09:00", plannedMinutes: 120, reminderOffsetMinutes: null }, transaction)).ok);
+  const moved = await load(); assert.equal(moved.total.hours.minutes, 210); assert.equal(moved.days.find(day => day.date === "2026-10-07")?.summary.hours.minutes, 60);
+  assert.equal(moved.days.find(day => day.date === "2026-10-08")?.summary.hours.minutes, 120);
+  await tx.user.update({ where: { id: owner.id }, data: { calendarEnabled: false } });
+  await assert.rejects(calendarAnalytics.loadCalendarAnalyticsCore(owner.id, range, transaction), /CALENDAR_DISABLED/);
+}));
 
 async function materialsFixture(tx: Prisma.TransactionClient, rows: PostgresRows) {
   const roleSets: [string, Role[]][] = [["admin", ["ADMIN"]], ["director", ["DIRECTOR"]], ["engineer", ["ENGINEER"]],
@@ -1103,4 +1531,7 @@ test("materials/frozen-501-costs-batch-scalar-positional-ACL-1-5-20-real-SQL-bud
       await Promise.all([ids[0], ids[1]].map(id => frozenReference.frozenGetProjectMaterials(id, c.users.admin, tx))));
     assert.deepEqual(await tx.warehouseAccountingState.findUnique({ where: { id: "main" } }), observedState, "F148_GLOBAL_WAREHOUSE_CHANGED");
   }
+  await tx.stockMovement.update({ where: { id: rows.id("expense-001") }, data: { unitPrice: "1", totalByn: "1" } });
+  assert.equal((await warehouse.getProjectMaterialsBatch([ids[0]], c.users.admin, tx))[0].materialsTotalByn, 501);
+  await tx.stockMovement.update({ where: { id: rows.id("expense-001") }, data: { unitPrice: null, totalByn: null } });
 }));

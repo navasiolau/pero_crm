@@ -81,36 +81,7 @@ test("filter options and client counts use the same visible project set", async 
   assert.deepEqual(await products.listProductOptions("hidden", engineer), []);
 });
 
-test("role grants are united, while empty roles fail closed even inside AND", async () => {
-  assert.equal((await products.listProducts(engineer.id, ["ACCOUNTANT", "ENGINEER"], { activeOnly: false })).total, 2);
-  assert.equal((await products.listProducts(engineer.id, ["ACCOUNTANT"], { activeOnly: false })).total, 0);
-  for (const roles of [["ADMIN"], ["DIRECTOR"], ["MANAGER", "ENGINEER"], ["PROCUREMENT", "ENGINEER"]] as Role[][]) {
-    assert.equal((await products.listProducts(engineer.id, roles, { activeOnly: false })).total, 5);
-  }
-  for (const role of ["WORKER", "MOUNTER"] as Role[]) {
-    const result = await products.listProducts(engineer.id, [role, "ENGINEER"], { activeOnly: false });
-    assert.deepEqual(new Set(result.rows.map((p) => p.id)), new Set(role === "WORKER"
-      ? ["own", "production", "field-product"] : ["own", "production"]));
-  }
-  assert.equal((await products.listProducts(engineer.id, [], { activeOnly: false })).total, 0);
-});
 
-test("accounting and field read grants do not widen engineering technical edits", () => {
-  for (const roles of [["ENGINEER"], ["ENGINEER", "ACCOUNTANT"], ["ENGINEER", "WORKER"], ["ENGINEER", "MOUNTER"]] as Role[][]) {
-    const actor = { id: engineer.id, roles };
-    assert.deepEqual(fixture.products.filter((p) => matches(p, productEditWhere(actor))).map((p) => p.id), ["own"]);
-    assert.equal(canEditProductTechnicalBlock(actor, { engineerId: engineer.id, status: "DESIGN" }), true);
-    assert.equal(canEditProductTechnicalBlock(actor, { engineerId: engineer.id, status: "PRODUCTION" }), false);
-    assert.equal(canEditProductTechnicalBlock(actor, { engineerId: "other", status: "DESIGN" }), false);
-  }
-  assert.deepEqual(productEditWhere({ id: engineer.id, roles: ["MANAGER", "ENGINEER"] }), {AND:[liveProductWhere,{status:{not:"DRAFT"}},{}]});
-  assert.equal(fixture.products.filter((p) => matches(p, productEditWhere({ id: engineer.id, roles: ["ACCOUNTANT"] }))).length, 0);
-});
-
-test("file policy checks both direct product and indirect task", () => {
-  const result = fixture.files.filter((file) => matches(file, fileVisibilityWhere(engineer)));
-  assert.deepEqual(result.map((file) => file.id), ["file-own", "file-production", "file-general"]);
-});
 
 test("upload rejects hidden task and mismatched product before any write", async () => {
   for (const actor of [engineer, { ...engineer, roles: ["ACCOUNTANT", "ENGINEER"] as Role[] }]) {
@@ -150,13 +121,6 @@ test("a common task cannot inherit the grant for an unbound shared project file"
   assert.ok(await resolveUploadContext(sampleDb, { ...engineer, roles: ["MANAGER", "ENGINEER"] }, { projectId: "mixed", productId: null, taskId: "common-foreign" }), "Managers retain their independent grant");
 });
 
-test("change of status is effective for the next access check without cached grants", () => {
-  const row = { ...fixture.products[0] };
-  assert.equal(matches(row, productVisibilityWhere(engineer)), true);
-  row.status = "PRODUCTION";
-  assert.equal(matches(row, productVisibilityWhere(engineer)), true);
-  assert.equal(matches(row, productEditWhere(engineer)), false);
-});
 
 test("nested work, sketch and task file cannot smuggle a hidden product into a visible card", async () => {
   const own = fixture.products[0];

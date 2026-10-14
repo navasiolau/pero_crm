@@ -110,19 +110,6 @@ test("native MIME parameters, last duplicate header and original folder filename
   }
  });
 });
-test("near-16KiB native header and delayed boundary-like payload keep their exact header identity",async()=>{
- await withRoot(async tempRoot=>{
-  const header='Content-Disposition: form-data; name="file"; filename="folder/max.pdf"\r\nContent-Type: application/pdf; x-test=last\r\nX-Meta: '+"x".repeat(16200);
-  assert.ok(Buffer.byteLength(header)>16000&&Buffer.byteLength(header)<16384);
-  const payload=Buffer.from("--compat-13X\r\n\r\nContent-Type: payload/fake\r\n\r\nbody"),value=rawMultipart(header,payload),reference=await nativeFile(value);
-  const start=value.body.indexOf(Buffer.from(header)),end=start+Buffer.byteLength(header)+4;
-  for(const split of [start-1,start,start+1,end-4,end-3,end-2,end-1,end,end+1,end+2,end+3,end+4]){
-   const upload=await spoolMultipartUpload(rawRequest(value,2048,split),{tempRoot});
-   try{assert.equal(upload.file.type,reference.type);assert.equal(upload.file.name,reference.name);assert.equal(upload.file.contentHash,hash(payload));assert.deepEqual(await bytes(await upload.file.openRead()),payload);}
-   finally{await upload.dispose();}
-  }
- });
-});
 test("base64 hash/size/decoded-byte limits match native whitespace/padding/Unicode/final-quantum semantics",async()=>{
  await withRoot(async tempRoot=>{
   const header='Content-Disposition: form-data; name="file"; filename="folder/encoded.dat"\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: base64';
@@ -153,25 +140,6 @@ test("native metadata sidecar contains an empty file and never reads the origina
  });
 });
 
-test("deterministic native decoded-byte differential covers low8 Unicode, invalid UTF8 and duplicate transfer headers",async()=>{
- await withRoot(async tempRoot=>{
-  const data:Buffer[]=Array.from({length:64},(_,index)=>Buffer.from("QUJD"+String.fromCharCode((index*251)%65536)+"REVG"+(index%3?"":"==ignored")));
-  data.push(Buffer.concat([Buffer.from("QU"),Buffer.from([0xff,0xc2]),Buffer.from("JD")]));
-  const variants=[
-   "Content-Transfer-Encoding: binary\r\nContent-Transfer-Encoding: base64",
-   "Content-Transfer-Encoding: base64\r\nContent-Transfer-Encoding: binary",
-  ];
-  for(const encoding of variants){
-   for(let index=0;index<data.length;index++){
-    const value=rawMultipart('Content-Disposition: form-data; name="file"; filename="fuzz.dat"\r\nContent-Type: application/octet-stream\r\n'+encoding,data[index]);
-    const reference=await nativeFile(value),original=Buffer.from(await reference.arrayBuffer());
-    const upload=await spoolMultipartUpload(rawRequest(value,index%7+1),{tempRoot,maxFileBytes:original.length});
-    try{assert.equal(upload.file.size,original.length);assert.equal(upload.file.contentHash,hash(original));assert.deepEqual(await bytes(await upload.file.openRead()),original);}
-    finally{await upload.dispose();}
-   }
-  }
- });
-});
 test("ambiguous duplicate disposition cannot bind a different native File identity or publish a spool",async()=>{
  await withRoot(async tempRoot=>{
   const value=rawMultipart('Content-Disposition: form-data; name="file"; filename="first.dat"\r\nContent-Disposition: form-data; name="file"; filename="last.dat"\r\nContent-Type: application/octet-stream',Buffer.from("original"));

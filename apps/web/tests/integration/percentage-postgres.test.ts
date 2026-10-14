@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { after, before, test } from "node:test";
 import { Prisma, type ProductPercentageKind } from "@prisma/client";
 import { createPostgresFixture, rejectedSql, type PostgresRows } from "./postgres.fixture";
+import { NO_ASSIGNEE_COMPLETION_REASON } from "../../src/server/product-percentage-pay/skip-reason";
 
 let fixture: Awaited<ReturnType<typeof createPostgresFixture>>;
 let core: typeof import("../../src/server/product-percentage-pay/core");
@@ -36,9 +37,16 @@ for (const vector of [
   { id: "tiny", price: "0.01", quantity: 1, rates: ["1", "1", "1"], amounts: ["1.00", "1.00", "1.00"] },
   { id: "batch", price: "1000.00", quantity: 3, rates: ["5", "4", "7"], amounts: ["50.00", "120.00", "210.00"] },
   { id: "zero", price: null, quantity: 3, rates: ["0", "0", "0"], amounts: ["0.00", "0.00", "0.00"] },
+  { id: "zero-price", price: "0", quantity: 3, rates: ["5", "4", "7"], amounts: ["0.00", "0.00", "0.00"] },
+  { id: "upper", price: "9999999999", quantity: 1, rates: ["15", "15", "15"], amounts: ["1500000000.00", "1500000000.00", "1500000000.00"] },
 ]) test(`percentage/ceil-matrix/${vector.id}`, async () => fixture.rollback(async (tx, rows) => {
   const c = await context(rows), product = await rows.product("item", c.project.id, { ...c.assigned, status: "DESIGN", expectedPrice: vector.price, quantity: vector.quantity });
   await tx.productPercentageConfig.createMany({ data: kinds.map((kind, index) => ({ productId: product.id, kind, ratePercent: vector.rates[index], revision: 1 })) });
+  if (vector.id === "batch") {
+    const work = await tx.work.create({ data: { projectId: c.project.id, productId: product.id, title: "Обычная уже оплаченная работа", quantity: "1", priceSnapshot: "10", total: "10", paymentKind: "LEGACY" } });
+    const task = await tx.task.create({ data: { projectId: c.project.id, productId: product.id, workId: work.id, title: work.title, assigneeId: c.recipients[0].id, quantity: "1", status: "DONE" } });
+    await tx.payrollEntry.create({ data: { userId: c.recipients[0].id, projectId: c.project.id, productId: product.id, taskId: task.id, workId: work.id, scheme: "PIECE", amount: "10", bynAmount: "10", currency: "BYN", month: "2000-01" } });
+  }
   const draft = await views.getProductPercentageView(c.actor, product.id, tx);
   assert.deepEqual(kinds.map(kind => draft.sections[kind].total), vector.amounts);
   assert.ok(kinds.every(kind => draft.sections[kind].calculationVersion === 4));
@@ -53,7 +61,7 @@ for (const vector of [
     assert.equal(paid.length, vector.amounts[index] === "0.00" ? 0 : 1);
     if (paid.length) assert.equal(paid[0].amount.toFixed(2), vector.amounts[index]);
   }
-  assert.equal(await tx.domainEvent.count({ where: { actor: c.actor.id, type: "payroll.accrued" } }), vector.id === "zero" ? 0 : 3);
+  assert.equal(await tx.domainEvent.count({ where: { actor: c.actor.id, type: "payroll.accrued" } }), vector.amounts.filter(amount => amount !== "0.00").length);
   for (const status of ["DESIGN", "DONE", "RECLAMATION", "DONE"] as const)
     assert.equal((await statuses.changeProductStatusTransaction(tx, c.actor, product.id, status)).ok, true);
   assert.deepEqual(await snapshots(tx, product.id), frozen); assert.deepEqual(await tx.payrollEntry.findMany({ where: { productId: product.id }, orderBy: { id: "asc" } }), payroll);
@@ -83,11 +91,12 @@ test("percentage/null-config-vs-zero-and-late-settlement", async () => fixture.r
 }));
 
 test("percentage/permanent-unassigned-and-history-protected", async () => fixture.rollback(async (tx, rows) => {
-  const c = await context(rows), product = await rows.product("unassigned", c.project.id, { status: "DESIGN", expectedPrice: "1000", quantity: 3 });
+  const c = await context(rows), product = await rows.product("unassigned", c.project.id, { status: "DESIGN", expectedPrice: null, quantity: 3 });
   await tx.productPercentageConfig.createMany({ data: kinds.map(kind => ({ productId: product.id, kind, ratePercent: "5" })) });
   for (const kind of kinds) assert.equal(await core.captureProductPercentageCompletion(tx, c.actor, product.id, kind, "DONE"), "SKIPPED_ONCE");
   const frozen = await snapshots(tx, product.id);
-  await tx.product.update({ where: { id: product.id }, data: c.assigned });
+  assert.ok(frozen.every(row => row.reason === NO_ASSIGNEE_COMPLETION_REASON && row.recipientId === null && row.ratePercentSnapshot === null));
+  await tx.product.update({ where: { id: product.id }, data: { ...c.assigned, expectedPrice: "500" } });
   for (const kind of kinds) assert.equal(await core.captureProductPercentageCompletion(tx, c.actor, product.id, kind, "DONE"), "SKIPPED_ONCE");
   assert.deepEqual(await snapshots(tx, product.id), frozen); assert.equal(await tx.payrollEntry.count({ where: { productId: product.id } }), 0);
   for (const status of ["PRODUCTION", "STORAGE", "INSTALLATION", "DONE"] as const) {
@@ -96,6 +105,29 @@ test("percentage/permanent-unassigned-and-history-protected", async () => fixtur
     assert.equal(await tx.productPercentageCompletion.count({ where: { productId: historical.id } }), 0);
     assert.equal(await tx.payrollEntry.count({ where: { productId: historical.id } }), 0);
   }
+  for (const mode of ["missing-price", "inactive", "role", "rate"] as const) {
+    const recipient = await rows.user(`invalid-${mode}`, mode === "role" ? ["WORKER"] : ["ENGINEER"], { active: mode !== "inactive" });
+    const invalid = await rows.product(`invalid-${mode}`, c.project.id, { status: "DESIGN", engineerId: recipient.id, expectedPrice: mode === "missing-price" ? null : "1000" });
+    await tx.productPercentageConfig.create({ data: { productId: invalid.id, kind: "ENGINEERING", ratePercent: mode === "rate" ? "15.01" : "5" } });
+    await assert.rejects(core.captureProductPercentageCompletion(tx, c.actor, invalid.id, "ENGINEERING", "PRODUCTION"), mode === "missing-price" ? /укажите цену/ : mode === "rate" ? /15/ : /активного.*инженер/i);
+    assert.equal(await tx.productPercentageCompletion.count({ where: { productId: invalid.id } }), 0);
+    assert.equal(await tx.payrollEntry.count({ where: { productId: invalid.id } }), 0);
+  }
+  const returned = await rows.product("returned-history", c.project.id, { ...c.assigned, status: "DESIGN", expectedPrice: "1000" });
+  await tx.productStatusHistory.create({ data: { productId: returned.id, fromStatus: "DESIGN", toStatus: "DONE", changedById: c.actor.id } });
+  assert.equal((await statuses.changeProductStatusTransaction(tx, c.actor, returned.id, "DONE")).ok, true);
+  assert.equal(await tx.productPercentageCompletion.count({ where: { productId: returned.id } }), 0);
+  assert.equal(await tx.payrollEntry.count({ where: { productId: returned.id } }), 0);
+  const late = await rows.product("late-mounter-only", c.project.id, { status: "DESIGN", expectedPrice: "1000", quantity: 2 });
+  await tx.productPercentageConfig.createMany({ data: kinds.map(kind => ({ productId: late.id, kind, ratePercent: "5" })) });
+  for (const status of ["PRODUCTION", "STORAGE", "INSTALLATION"] as const) assert.equal((await statuses.changeProductStatusTransaction(tx, c.actor, late.id, status)).ok, true);
+  const skipped = await snapshots(tx, late.id);
+  assert.equal(skipped.length, 2); assert.ok(skipped.every(row => row.state === "SKIPPED_ONCE" && row.kind !== "INSTALLATION"));
+  await tx.product.update({ where: { id: late.id }, data: { mounterId: c.recipients[2].id } });
+  assert.equal((await statuses.changeProductStatusTransaction(tx, c.actor, late.id, "DONE")).ok, true);
+  assert.equal((await tx.payrollEntry.findFirstOrThrow({ where: { productId: late.id } })).amount.toFixed(2), "100.00");
+  assert.equal(await tx.payrollEntry.count({ where: { productId: late.id } }), 1);
+  assert.deepEqual((await snapshots(tx, late.id)).filter(row => row.kind !== "INSTALLATION"), skipped);
 }));
 
 test("percentage/status-SKIPPED-patch-next-transition-settlement-adjustment-DONE", async () => fixture.rollback(async (tx, rows) => {
@@ -123,8 +155,26 @@ test("percentage/status-SKIPPED-patch-next-transition-settlement-adjustment-DONE
 test("percentage/adjustments-immutable-cas-replay-and-native-constraints", async () => fixture.rollback(async (tx, rows) => {
   const c = await context(rows), product = await rows.product("adjusted", c.project.id, { ...c.assigned, status: "PRODUCTION", expectedPrice: "1000", quantity: 3 });
   await tx.productPercentageConfig.createMany({ data: kinds.map(kind => ({ productId: product.id, kind, ratePercent: "5", revision: 1 })) });
+  const oldConfig = await tx.productPercentageConfig.findUniqueOrThrow({ where: { productId_kind: { productId: product.id, kind: "ENGINEERING" } } });
+  const participant = await tx.productPercentageParticipant.create({ data: { configId: oldConfig.id, userId: c.recipients[0].id, shareUnits: 1000000 } });
+  const invalidRate = await patch.patchProductPercentageCore(c.actor, { productId: product.id, kind: "ENGINEERING", field: "ratePercent", value: "15.01", expectedValue: "5", expectedRevision: 1, clientMutationId: randomUUID() }, tx);
+  assert.equal(invalidRate.kind, "validation"); assert.deepEqual(await tx.productPercentageConfig.findUnique({ where: { id: oldConfig.id } }), oldConfig);
+  const noOp = await patch.patchProductPercentageCore(c.actor, { productId: product.id, kind: "ENGINEERING", field: "ratePercent", value: "5", expectedValue: "5", expectedRevision: 1, clientMutationId: randomUUID() }, tx);
+  assert.ok(noOp.ok && noOp.noOp); assert.deepEqual(await tx.productPercentageConfig.findUnique({ where: { id: oldConfig.id } }), oldConfig);
   for (const kind of kinds) await direct.captureDirectPercentage(tx, c.actor, product.id, kind, "INSTALLATION");
   const frozen = await snapshots(tx, product.id), originalPayroll = await tx.payrollEntry.findMany({ where: { productId: product.id }, orderBy: { id: "asc" } });
+  const assemblyConfig = await tx.productPercentageConfig.findUniqueOrThrow({ where: { productId_kind: { productId: product.id, kind: "ASSEMBLY" } } });
+  const replacement = await rows.user("replacement-assembler", ["MANAGER", "WORKER"]), inactive = await rows.user("inactive-assembler", ["WORKER"], { active: false });
+  const assignment = { productId: product.id, kind: "ASSEMBLY" as const, field: "assigneeId" as const, value: replacement.id, expectedValue: c.recipients[1].id, expectedRevision: assemblyConfig.revision, clientMutationId: randomUUID() };
+  for (const recipient of [inactive, c.recipients[2]]) {
+    const denied = await patch.patchProductPercentageCore(c.actor, { ...assignment, value: recipient.id }, tx);
+    assert.equal(denied.kind, "validation"); assert.deepEqual(await tx.productPercentageConfig.findUnique({ where: { id: assemblyConfig.id } }), assemblyConfig);
+  }
+  assert.equal((await patch.patchProductPercentageCore(c.actor, assignment, tx)).ok, true);
+  assert.equal((await tx.product.findUniqueOrThrow({ where: { id: product.id } })).assemblerId, replacement.id);
+  assert.deepEqual(await snapshots(tx, product.id), frozen); assert.deepEqual(await tx.payrollEntry.findMany({ where: { productId: product.id }, orderBy: { id: "asc" } }), originalPayroll);
+  assert.equal((await patch.patchProductPercentageCore(c.actor, { ...assignment, value: c.recipients[1].id }, tx)).kind, "validation", "SAME_UUID_CHANGED_PAYLOAD_REFUSED");
+  assert.equal((await patch.patchProductPercentageCore(c.actor, { ...assignment, value: c.recipients[1].id, expectedValue: replacement.id, expectedRevision: assemblyConfig.revision + 1, clientMutationId: randomUUID() }, tx)).ok, true);
   const patchRate = async (kind: ProductPercentageKind, value: string) => {
     const config = await tx.productPercentageConfig.findUniqueOrThrow({ where: { productId_kind: { productId: product.id, kind } } });
     const input = { productId: product.id, kind, field: "ratePercent" as const, value, expectedValue: config.ratePercent!.toString(), expectedRevision: config.revision, clientMutationId: randomUUID() };
@@ -160,6 +210,7 @@ test("percentage/adjustments-immutable-cas-replay-and-native-constraints", async
     assert.equal((await finance.getProjectEconomics(c.project.id, tx))!.payrollTotal, step.total);
   }
   assert.deepEqual(await snapshots(tx, product.id), frozen);
+  assert.deepEqual(await tx.productPercentageParticipant.findUnique({ where: { id: participant.id } }), participant);
   assert.deepEqual(await tx.payrollEntry.findMany({ where: { id: { in: originalPayroll.map(row => row.id) } }, orderBy: { id: "asc" } }), originalPayroll);
   await tx.product.update({ where: { id: product.id }, data: { expectedPrice: "1" } });
   await patchRate("ASSEMBLY", "1"); const count = await tx.payrollEntry.count({ where: { productId: product.id } });
@@ -188,6 +239,10 @@ test("percentage/adjustments-immutable-cas-replay-and-native-constraints", async
   const blocked = await patch.patchProductPercentageCore(c.actor, { productId: product.id, kind: "ENGINEERING", field: "ratePercent", value: "6", expectedValue: "5", expectedRevision: configBefore.revision, clientMutationId: randomUUID() }, tx);
   assert.equal(blocked.ok, false); if (!blocked.ok) assert.equal(blocked.kind, "forbidden");
   assert.deepEqual(await tx.productPercentageConfig.findUnique({ where: { id: configBefore.id } }), configBefore);
+  const hidden = await rows.product("hidden-patch", c.project.id, { status: "DRAFT" });
+  const invisible = await patch.patchProductPercentageCore(c.actor, { productId: hidden.id, kind: "ASSEMBLY", field: "ratePercent", value: "5", expectedValue: null, expectedRevision: 9, clientMutationId: randomUUID() }, tx);
+  assert.equal(invisible.kind, "not-found"); assert.equal("currentValue" in invisible || "currentRevision" in invisible, false);
+  assert.equal(await tx.productPercentageConfig.count({ where: { productId: hidden.id } }), 0);
 }));
 
 test("percentage/historical-zero-without-recipient-first-adjustment", async () => fixture.rollback(async (tx, rows) => {

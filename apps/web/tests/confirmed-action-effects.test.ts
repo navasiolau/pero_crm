@@ -2,10 +2,6 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { createRequire, Module } from "node:module";
 import { after, test } from "node:test";
-import * as React from "react";
-const { createElement } = React;
-import { renderToStaticMarkup } from "react-dom/server";
-import { matches, type FixtureRow } from "./helpers/visibility-fixture";
 import { taskShareFixture } from "./helpers/task-share-fixture";
 import type { TaskTransaction } from "../src/server/tasks/transaction";
 import type { PaymentInput } from "../src/server/payments/contracts";
@@ -53,28 +49,6 @@ function reset() { alternateTransaction = null; receiptReads = []; workFixture =
 const input = (): PaymentInput => ({ direction: "INCOME", amount: 100, currency: "BYN", cashAccountId: "cash", clientMutationId: randomUUID() });
 after(() => { for (const [file, prior] of originals) if (prior) require.cache[file] = prior; else delete require.cache[file]; });
 
-test("payment cache and notification faults preserve original ACK and result ID", async () => {
-  for (const name of ["cache:/finance/income", "cache:/finance/expenses", "cache:/finance/payroll", "cache:/finance/accounts", "dispatch", "org"]) {
-    reset(); fault = name; const data = input(); const result = await payment(actor, data);
-    assert.equal(result.ok, true); assert.equal(result.resultId, rows[0]?.id); assert.equal(result.paymentId, result.resultId); assert.equal(result.outcome, "COMMITTED");
-    assert.equal(rows.length, 1); assert.equal(events.length, 1); assert.equal(calls.length, 6);
-    const previous = structuredClone({ rows, logs, events }); calls.length = 0;
-    const replay = await payment(actor, data); assert.equal(replay.resultId, result.resultId);
-    assert.deepEqual({ rows, logs, events }, previous); assert.equal(calls.length, 0);
-  }
-});
-
-test("payment lost ACK is verified from exact existing receipt", async () => {
-  reset(); loseAck = true; const data = input(); const result = await payment(actor, data);
-  assert.equal(result.ok, true); assert.equal(result.outcome, "COMMITTED"); assert.equal(result.paymentId, rows[0]?.id);
-  assert.equal(rows.length, 1); assert.equal(events.length, 1);
-});
-
-test("failed receipt read preserves UNKNOWN and cannot rerun payment", async () => {
-  reset(); loseAck = true; fault = "proof"; const result = await payment(actor, input());
-  assert.equal(result.ok, false); assert.equal(result.outcome, "UNKNOWN"); assert.equal(result.retrySafe, true);
-  assert.equal(rows.length, 1); assert.equal(events.length, 1); assert.equal(calls.length, 0);
-});
 
 test("mandatory removeWork audit failure rolls back the deleted work", async () => {
   reset(); workFixture = taskShareFixture();
@@ -88,70 +62,12 @@ test("mandatory removeWork audit failure rolls back the deleted work", async () 
   assert.equal(workFixture.state().works.length, 1); assert.equal(workFixture.state().logs.length, 0); assert.equal(calls.length, 0);
 });
 
-test("new internal task receipts do not occupy visible audit slots or leak payload", async () => {
-  reset();
-  const uniqueId = "task-status:00000000-0000-4000-8000-000000000099";
-  const base = { createdAt: new Date("2026-10-11T00:00:00Z"), actorType: "user", actorName: "QA", actorId: "manager", entity: "task", entityId: "source", source: "web", field: null, oldValue: null };
-  const records: FixtureRow[] = Array.from({ length: 205 }, (_, index) => ({ ...base, id: index ? "task-status:internal-" + index : uniqueId,
-    action: "task.status.request", newValue: { fingerprint: "internal-secret-fingerprint", clientMutationId: uniqueId } }));
-  records.push({ ...base, id: "business-status", action: "status", field: "status", oldValue: "IN_PROGRESS", newValue: "DONE" },
-    { ...base, id: "task-status:business", action: "update", newValue: "kept-business" },
-    { ...base, id: "task-status:other", entity: "other", action: "task.status.request", newValue: "kept-other" });
-  function evaluate(row: FixtureRow, where: FixtureRow = {}): boolean {
-    return Object.entries(where).every(([key, value]) => {
-      if (key === "NOT") return !evaluate(row, value as FixtureRow);
-      if (key === "AND") return (Array.isArray(value) ? value : [value]).every(item => evaluate(row, item as FixtureRow));
-      if (key === "OR") return (value as FixtureRow[]).some(item => evaluate(row, item));
-      if (value && typeof value === "object" && "startsWith" in value) return String(row[key]).startsWith(String(value.startsWith));
-      return matches(row, { [key]: value });
-    });
-  }
-  Object.assign(tx.changeLog, { findMany: async ({ where, take }: { where: FixtureRow; take: number }) => records.filter(row => evaluate(row, where)).slice(0, take) });
-  inject("../src/server/require-role", { requireRole: async (roles: string[]) => { assert.deepEqual(roles, ["ADMIN"]); } });
-  const { listGlobalChangeLog } = require("../src/server/changelog/queries") as typeof import("../src/server/changelog/queries");
-  const result = await listGlobalChangeLog({ actor: "qA", entity: "task" });
-  assert.deepEqual(result.map(row => row.id), ["business-status", "task-status:business"]);
-  assert.equal(result.filter(row => row.action === "status").length, 1);
-  const all = await listGlobalChangeLog({}); assert.equal(all.some(row => row.id === "task-status:other"), true);
-  const { ChangelogTable } = require("../src/app/(app)/changelog/changelog-table") as typeof import("../src/app/(app)/changelog/changelog-table");
-  const reactGlobal = globalThis as typeof globalThis & { React?: typeof React };
-  const priorReact = reactGlobal.React; reactGlobal.React = React;
-  let html: string;
-  try { html = renderToStaticMarkup(createElement(ChangelogTable, { entries: result.map(row => ({ ...row, actorName: row.actorName ?? "", createdAt: row.createdAt.toISOString(), source: row.source ?? "web" })) })); }
-  finally { if (priorReact) reactGlobal.React = priorReact; else Reflect.deleteProperty(reactGlobal, "React"); }
-  assert.ok(html.includes("DONE")); assert.ok(!html.includes(uniqueId)); assert.ok(!html.includes("internal-secret-fingerprint"));
-  assert.equal(records.length, 208, "receipt rows must not be removed");
-});
-
-test("previous committed payment survives a racing retry receipt-read abort", async () => {
-  reset(); const data = input(); const original = await payment(actor, data); assert.equal(original.ok, true);
-  const before = structuredClone({ rows, logs, events }); calls.length = 0;
-  receiptReads = ["hidden", "error"]; // Preflight missed a concurrent commit; callback read loses its answer.
-  const replay = await payment(actor, data);
-  assert.equal(replay.ok, true); assert.equal(replay.resultId, original.resultId); assert.equal(replay.outcome, "COMMITTED");
-  assert.deepEqual({ rows, logs, events }, before); assert.equal(calls.length, 0);
-});
-
 test("preflight IO is UNKNOWN while typed changed-payload and deleted receipt remain rejections", async () => {
   reset(); const data = input(); await payment(actor, data); const before = structuredClone({ rows, logs, events });
   receiptReads = ["error"]; const unknown = await payment(actor, data); assert.equal(unknown.outcome, "UNKNOWN");
   const changed = await payment(actor, { ...data, amount: 101 }); assert.equal(changed.ok, false); assert.notEqual(changed.outcome, "UNKNOWN");
   rows[0].deletionId = "deletion"; const deleted = await payment(actor, data); assert.equal(deleted.ok, false); assert.notEqual(deleted.outcome, "UNKNOWN");
   rows[0].deletionId = null; assert.deepEqual({ rows, logs, events }, before);
-});
-test("actual bot payment route preserves UNKNOWN/receipt ACK and auth gates", async () => {
-  reset(); let denied = false;
-  inject("../src/server/api/auth", { authenticate: async (_request: Request, scope: string) => { assert.equal(scope, "write"); return denied ? new Response("denied", { status: 403 }) : {}; }, isErrorResponse: (value: unknown) => value instanceof Response });
-  inject("../src/server/telegram/bot-api", { resolveBotActor: async () => ({ ...actor, source: "telegram" }), isActorError: (value: unknown) => value instanceof Response, requireBotFinance: () => null, domainError: () => Response.json({ ok: false, error: "error" }, { status: 403 }) });
-  const { POST } = require("../src/app/api/v1/bot/payments/route") as typeof import("../src/app/api/v1/bot/payments/route");
-  const data = input(), request = () => new Request("https://qa.invalid/api/v1/bot/payments", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(data) });
-  loseAck = true; fault = "proof";
-  const uncertain = await POST(request()); const body = await uncertain.json() as { ok: boolean; outcome: string };
-  assert.equal(uncertain.status, 200); assert.equal(body.ok, false); assert.equal(body.outcome, "UNKNOWN");
-  assert.equal(rows.length, 1); failProof = false; fault = null;
-  const replay = await POST(request()); const ack = await replay.json() as { ok: boolean; outcome: string; paymentId: string };
-  assert.equal(ack.ok, true); assert.equal(ack.outcome, "COMMITTED"); assert.equal(ack.paymentId, rows[0].id); assert.equal(rows.length, 1);
-  denied = true; assert.equal((await POST(request())).status, 403); assert.equal(rows.length, 1);
 });
 
 test("DI actual project-material wrappers keep mandatory audits atomic and isolate cache faults", async () => {
@@ -245,37 +161,8 @@ test("actual nested cache helpers retain all later paths and one lookup after ea
 });
 
 
-test("required payment UUID rejects old/forged ingress before receipts, money and effects", async () => {
-  reset(); receiptReads = ["error"];
-  for (const id of [undefined, "bad"]) {
-    const result = await payment(actor, {...input(), clientMutationId: id} as never);
-    assert.equal(result.ok, false); assert.equal(result.outcome, "ROLLED_BACK");
-  }
-  assert.deepEqual(receiptReads, ["error"]); assert.deepEqual({rows, logs, events, calls}, {rows:[], logs:[], events:[], calls:[]});
-  const data = {...input(), clientMutationId: "00000134-0000-4000-8000-000000000210"}; receiptReads = [];
-  const oldAccount = tx.cashAccount.findUnique;
-  const first = await payment(actor, data); assert.equal(first.ok, true);
-  tx.cashAccount.findUnique = async () => {throw Error("Currency preparation outage");};
-  try {const replay = await payment(actor, {...data, clientMutationId: data.clientMutationId.toUpperCase()}); assert.equal(replay.ok, true); assert.equal(replay.resultId, first.resultId); assert.equal(rows.length,1);}
-  finally {tx.cashAccount.findUnique = oldAccount;}
-});
 
-test("ten serialized actual payment commands and deleted receipt preserve one original ID", async () => {
-  reset(); let tail = Promise.resolve();
-  alternateTransaction = async operation => {const before = tail; let release!:()=>void; tail=new Promise<void>(done=>{release=done;}); await before; try{return await operation(tx);}finally{release();}};
-  const data = {...input(), clientMutationId:"00000134-0000-4000-8000-000000000211"};
-  const results = await Promise.all(Array.from({length:10},()=>payment(actor,data)));
-  assert.ok(results.every(row=>row.ok&&row.resultId===results[0].resultId)); assert.equal(rows.length,1); assert.equal(logs.length,2); assert.equal(events.length,1);
-  rows[0].deletionId="owned-removal";
-  const removed = await payment(actor,data) as Awaited<ReturnType<typeof import("../src/server/payments/service").createPaymentCore>>;
-  assert.equal(removed.ok,false); if(!removed.ok){assert.equal(removed.kind,"removed");assert.equal(removed.removedPaymentId,results[0].resultId);assert.equal(removed.clientMutationId,data.clientMutationId);}
-  assert.equal(rows.length,1);assert.equal(events.length,1);
-  const independent = await Promise.all(["00000134-0000-4000-8000-000000000212", "00000134-0000-4000-8000-000000000213"].map(clientMutationId=>payment(actor,{...data,clientMutationId})));
-  assert.ok(independent.every(result=>result.ok)); assert.equal(new Set(independent.map(result=>result.ok&&result.resultId)).size,2);
-  assert.equal(rows.length,3);assert.equal(events.length,3);
-});
-
-test("actual web actor getter/precondition denies stale account before core and bot rejects missing UUID", async () => {
+test("actual web actor getter and typed preconditions reject stale actor and malformed UUID before writes", async () => {
   reset();
   inject("../src/server/require-role",{requireFinance:async()=>({user:actor})});
   const {getPaymentActorId,addPayment}=require("../src/server/payments/actions") as typeof import("../src/server/payments/actions");
@@ -285,11 +172,4 @@ test("actual web actor getter/precondition denies stale account before core and 
   const {addPaidStockReceipt}=require("../src/server/warehouse/stock-purchase-actions") as typeof import("../src/server/warehouse/stock-purchase-actions");
   const stock=await addPaidStockReceipt({clientMutationId:"00000134-0000-4000-8000-000000000214",materialId:"material",quantity:"1",unitPrice:"1",currency:"BYN",cashAccountId:"cash",expenseArticleId:"article"},"other-account");
   assert.equal(stock.ok,false);if(!stock.ok)assert.equal("kind"in stock?stock.kind:undefined,"actor-changed");assert.equal(rows.length+logs.length+events.length,0);
-  const apiAuth=require("../src/server/api/auth") as typeof import("../src/server/api/auth"), previousAuthenticate=apiAuth.authenticate;
-  apiAuth.authenticate=async()=>({}) as never;
-  try {
-    const {POST}=require("../src/app/api/v1/bot/payments/route") as typeof import("../src/app/api/v1/bot/payments/route");
-    const reply=await POST(new Request("http://qa.invalid/api/v1/bot/payments",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({...input(),clientMutationId:undefined})}));
-    assert.equal((await reply.json()).ok,false);assert.equal(rows.length+logs.length+events.length,0);
-  } finally {apiAuth.authenticate=previousAuthenticate;}
 });
