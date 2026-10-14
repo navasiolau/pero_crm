@@ -96,3 +96,9 @@ Baseline и formatting проверяют trusted cover и отдельный bo
 
     pnpm --filter @pero/web exec node --import tsx --test tests/project-kanban-card-layout.test.ts
     pnpm --filter @pero/web exec node --test tests/product-card-navigation-browser.test.mjs
+
+## Принятый текущий результат CI266 /61f9bc14
+
+[CI266](https://github.com/navasiolau/pero_crm/actions/runs/38583170771) и actual staging61f9 приняты `FINAL_GO_61f9`: web1441/native91/bot38/watch53/guards2 PASS, same tested/promoted OCI/GET200/DB-W07 unchanged/full cleanup. Web30586/64722 (−52,74249869%), prefix31663+385grossoutside = ALL32048/69662 (−53,99500445%);349prefixfiles/198flat. Receipt `.playwright-mcp/application-improvements/dead49-delivery-61f9bc14/acceptance.json`. Подготовительные candidate NOT_RUN выше сохранены как история; baseline static NOT_RUN/BLOCKED и manual E2E/device/full-page gaps остаются, 100% coverage не заявляется.
+
+Auth qualifiers: email/password/manual sessionVersion отзывают WEB session, не меняя API Bearer; roles/active применяют Bearer revoke. Personal O(1) —6 query vectors:2Payroll+2Payout+CashAccount+User. CI196 с (−78vs264/−42vs265/+14vs260),3metadata COPY CACHED/no420MB metadata transfer; **≤180 NOT_MET**, без cold/warm guarantees.
