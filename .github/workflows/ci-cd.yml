@@ -187,7 +187,9 @@ jobs:
             'web-oci': { ...common, attest: ['type=provenance,mode=max'],
               'cache-to': ['type=gha,mode=max,scope=pero-web'], output: [`type=oci,dest=${directory}/web.oci.tar`] },
             'web-runtime': { ...common, attest: ['type=provenance,disabled=true'], output: [`type=docker,dest=${directory}/web.runtime.tar`] },
-            metadata: { ...common, target: 'ci-metadata', attest: ['type=provenance,disabled=true'], output: [`type=local,dest=${directory}/metadata`] },
+            metadata: { ...common, target: 'ci-metadata', attest: ['type=provenance,disabled=true'],
+              'cache-from': [...common['cache-from'], 'type=gha,scope=pero-web-metadata'],
+              'cache-to': ['type=gha,mode=min,scope=pero-web-metadata'], output: [`type=local,dest=${directory}/metadata`] },
             minio: { context: 'apps/web/tests/integration/runtime', dockerfile: 'Dockerfile.minio', platforms: ['linux/amd64'],
               attest: ['type=provenance,disabled=true'], tags: [job.minioImage],
               labels: { ...labels, 'pero.ci.service': 'minio', 'pero.ci.minio.commit': '07c3a429bfed433e49018cb0f78a52145d4bedeb' },
@@ -284,11 +286,17 @@ jobs:
           PERO_CI_POSTGRES_ID: ${{ job.services.postgres.id }}
           PERO_CI_NETWORK: ${{ job.services.postgres.network }}
 
-      - name: Typecheck (backend + frontend + tests + fresh routes)
-        run: pnpm --filter @pero/web exec tsc --noEmit
-
-      - name: Интеграционные PostgreSQL + HTTP/S3 контракты
-        run: pnpm --filter @pero/web test:integration
+      - name: Typecheck и интеграционные PostgreSQL + HTTP/S3 контракты
+        run: |
+          pnpm --filter @pero/web exec tsc --noEmit &
+          types_pid=$!
+          types_status=0
+          native_status=0
+          pnpm --filter @pero/web test:integration || native_status=$?
+          wait "$types_pid" || types_status=$?
+          printf 'Typecheck exit: %s; integration exit: %s\n' "$types_status" "$native_status"
+          test "$types_status" -eq 0
+          exit "$native_status"
         env:
           PERO_CI_BUILD_REVISION: ${{ steps.next-build.outputs.revision }}
           PERO_CI_BUILD_ID: ${{ steps.next-build.outputs.build-id }}
