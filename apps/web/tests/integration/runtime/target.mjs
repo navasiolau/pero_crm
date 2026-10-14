@@ -62,16 +62,18 @@ async function fileDigest(file) {
   return `sha256:${hash.digest('hex')}`;
 }
 
-/** Полный OCI-граф проверяется до запуска образа и повторно до публикации.
- * @param {boolean} [receipt] @param {NodeJS.ProcessEnv} [env] */
-export async function readWebArtifact(receipt = true, env = process.env) {
+/** Полный OCI-граф проверяется до запуска/публикации; web остаётся прежним default.
+ * @param {boolean} [receipt] @param {NodeJS.ProcessEnv} [env] @param {'web'|'bot'} [kind] */
+export async function readWebArtifact(receipt = true, env = process.env, kind = 'web') {
+  requireCi(kind === 'web' || kind === 'bot', 'artifact-kind');
   requireCi(env.CI === 'true' && env.GITHUB_ACTIONS === 'true' && env.RUNNER_OS === 'Linux' &&
     env.RUNNER_ENVIRONMENT === 'github-hosted' && env.GITHUB_REPOSITORY === REPOSITORY, 'artifact-owner');
   requireCi(/^[a-f0-9]{40}$/.test(env.GITHUB_SHA ?? '') && /^[1-9]\d*$/.test(env.GITHUB_RUN_ID ?? '') &&
     /^[1-9]\d*$/.test(env.GITHUB_RUN_ATTEMPT ?? ''), 'artifact-revision');
   const runId = env.GITHUB_RUN_ID, attempt = env.GITHUB_RUN_ATTEMPT, revision = env.GITHUB_SHA;
-  const directory = path.join(env.RUNNER_TEMP, `pero-web-${runId}-${attempt}-${revision}`);
-  requireCi(env.PERO_CI_WEB_ARTIFACT_DIR === directory && realpathSync(directory) === directory, 'artifact-directory');
+  const directory = path.join(env.RUNNER_TEMP, `pero-${kind}-${runId}-${attempt}-${revision}`);
+  const suppliedDirectory = kind === 'web' ? env.PERO_CI_WEB_ARTIFACT_DIR : env.PERO_CI_BOT_ARTIFACT_DIR;
+  requireCi(suppliedDirectory === directory && realpathSync(directory) === directory, 'artifact-directory');
   const layout = path.join(directory, 'oci');
   requireCi(realpathSync(layout) === layout && JSON.parse(readFileSync(path.join(layout, 'oci-layout'), 'utf8')).imageLayoutVersion === '1.0.0', 'oci-layout');
   const root = JSON.parse(readFileSync(path.join(layout, 'index.json'), 'utf8'));
@@ -106,19 +108,41 @@ export async function readWebArtifact(receipt = true, env = process.env) {
   const runtimeNode = image.config.config.Env.find(value => value.startsWith('NODE_VERSION='))?.slice(13);
   requireCi(/^22\.\d+\.\d+$/.test(runtimeNode ?? ''), 'oci-node-version');
   for (const [key, value] of Object.entries({ 'org.opencontainers.image.revision': revision,
-    'pero.ci.repository': REPOSITORY, 'pero.ci.run': runId, 'pero.ci.attempt': attempt, 'pero.ci.service': 'web' })) {
+    'pero.ci.repository': REPOSITORY, 'pero.ci.run': runId, 'pero.ci.attempt': attempt, 'pero.ci.service': kind })) {
     requireCi(labels?.[key] === value, `oci-${key}`);
   }
-  const buildId = readFileSync(path.join(directory, 'metadata', 'BUILD_ID'), 'utf8').trim();
-  requireCi(Boolean(buildId) && !/[\r\n]/.test(buildId), 'oci-build-id');
-  const record = { runId, attempt, revision, buildId, runtimeNode, indexDigest: root.manifests[0].digest,
+  const imageRecord = { runtimeNode, indexDigest: root.manifests[0].digest,
     manifestDigest: image.descriptor.digest, configDigest: image.manifest.config.digest,
     diffIds: image.config.rootfs.diff_ids, layerDigests: image.manifest.layers.map(layer => layer.digest),
-    attestations, ociSha256: await fileDigest(path.join(directory, 'web.oci.tar')),
-    actionManifestSha256: await fileDigest(path.join(directory, 'metadata', 'server', 'server-reference-manifest.json')) };
+    attestations, ociSha256: await fileDigest(path.join(directory, `${kind}.oci.tar`)) };
+  let record;
+  if (kind === 'web') {
+    const buildId = readFileSync(path.join(directory, 'metadata', 'BUILD_ID'), 'utf8').trim();
+    requireCi(Boolean(buildId) && !/[\r\n]/.test(buildId), 'oci-build-id');
+    record = { runId, attempt, revision, buildId, ...imageRecord,
+      actionManifestSha256: await fileDigest(path.join(directory, 'metadata', 'server', 'server-reference-manifest.json')) };
+  } else {
+    const testedFile = path.join(directory, 'metadata', 'tested.json'), producerFile = path.join(directory, 'metadata', 'producer.json');
+    requireCi(realpathSync(testedFile) === testedFile && realpathSync(producerFile) === producerFile, 'bot-manifest-path');
+    const tested = JSON.parse(readFileSync(testedFile, 'utf8')), producer = JSON.parse(readFileSync(producerFile, 'utf8'));
+    requireCi(tested.revision === revision && tested.runId === runId && tested.attempt === attempt, 'bot-tested-owner');
+    requireCi(tested.files && !Array.isArray(tested.files) && typeof tested.files === 'object' &&
+      Object.hasOwn(tested.files, 'index.js') && Object.entries(tested.files).every(([name, digest]) =>
+        name.endsWith('.js') && !path.posix.isAbsolute(name) && !name.includes('\\') &&
+        name.split('/').every(part => part && part !== '.' && part !== '..') && /^[a-f0-9]{64}$/.test(digest)), 'bot-tested-files');
+    requireCi(producer.repository === REPOSITORY && producer.runId === runId && producer.attempt === attempt &&
+      producer.revision === revision && producer.name === 'unit-tests (backend)' && producer.conclusion === 'success' &&
+      /^[1-9]\d*$/.test(producer.jobId) && /^[1-9]\d*$/.test(producer.artifactId) &&
+      producer.artifactName === `bot-dist-${runId}-${attempt}-${revision}` &&
+      /^sha256:[a-f0-9]{64}$/.test(producer.artifactDigest), 'bot-producer');
+    const testedDistManifestSha256 = await fileDigest(testedFile), producerManifestSha256 = await fileDigest(producerFile);
+    requireCi(labels['pero.ci.tested-dist'] === testedDistManifestSha256 && labels['pero.ci.producer'] === producerManifestSha256, 'bot-manifest-binding');
+    record = { runId, attempt, revision, ...imageRecord, testedDistManifestSha256, producerManifestSha256,
+      testedDistFiles: tested.files, producer };
+  }
   if (receipt) {
     requireCi(JSON.stringify(JSON.parse(readFileSync(path.join(directory, 'image.json'), 'utf8'))) === JSON.stringify(record), 'oci-receipt');
-    requireCi(env.PERO_CI_EXPECTED_OCI_SHA256 === record.ociSha256, 'oci-job-binding');
+    requireCi((kind === 'web' ? env.PERO_CI_EXPECTED_OCI_SHA256 : env.PERO_CI_EXPECTED_BOT_OCI_SHA256) === record.ociSha256, 'oci-job-binding');
   }
   return record;
 }
