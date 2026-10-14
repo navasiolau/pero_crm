@@ -1,9 +1,9 @@
-import { execFileSync, spawn, spawnSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { appendFileSync, existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { CreateBucketCommand, PutBucketVersioningCommand, S3Client } from '@aws-sdk/client-s3';
 import { assertCiJob, assertCiRuntimeTarget, requireCi } from './target.mjs';
-import { inspectService, startMinio } from './containers.mjs';
+import { inspectService, startMinio, startWeb } from './containers.mjs';
 import { cleanup, processOwner, recordProcesses } from './cleanup.mjs';
 
 const job = assertCiJob();
@@ -20,12 +20,13 @@ requireCi(process.env.PERO_CI_BUILD_REVISION === process.env.GITHUB_SHA &&
   execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim() ===
   process.env.GITHUB_SHA, 'current-build-revision');
 
-/** @param {string} url @param {boolean} [databaseHealth] */
-async function ready(url, databaseHealth = false) {
+/** @param {string} url @param {'ok'|'unavailable'} [databaseHealth] */
+async function ready(url, databaseHealth) {
   for (let attempt = 0; attempt < 90; attempt++) {
     try {
       const response = await fetch(url, { signal: AbortSignal.timeout(1000), redirect: 'error' });
-      if (response.ok && (!databaseHealth || (await response.json()).database === 'ok')) return;
+      if ((!databaseHealth && response.ok) || (databaseHealth &&
+        response.status === (databaseHealth === 'ok' ? 200 : 503) && (await response.json()).database === databaseHealth)) return;
     } catch { /* Ожидаем только собственный временный сервер. */ }
     await new Promise(resolve => setTimeout(resolve, 500));
   }
@@ -52,8 +53,6 @@ try {
   inspectService(target, target.minioId, 'minio');
   console.log(JSON.stringify({ ciRuntime: 'guarded', runId: target.runId, attempt: target.attempt,
     postgresId: target.postgresId, minioId: target.minioId, network: target.network, persistentDataVolumes: 0 }));
-  const migration = spawnSync('pnpm', ['exec', 'prisma', 'migrate', 'deploy'], { stdio: 'inherit', timeout: 120_000 });
-  requireCi(migration.status === 0, 'migration-failed');
   await ready(`${target.s3.endpoint}/minio/health/ready`);
   const s3 = new S3Client({ endpoint: target.s3.endpoint, region: 'us-east-1', forcePathStyle: true,
     credentials: { accessKeyId: target.s3.accessKeyId, secretAccessKey: target.s3.secretAccessKey } });
@@ -62,13 +61,10 @@ try {
     await s3.send(new PutBucketVersioningCommand({ Bucket: target.s3.bucket, VersioningConfiguration: { Status: 'Enabled' } }));
   } finally { s3.destroy(); }
   requireCi(!finishing, 'cancelled');
-  const web = spawn(process.execPath, ['node_modules/next/dist/bin/next', 'start', '--hostname', '127.0.0.1', '--port', '3100'],
-    { detached: true, stdio: 'inherit', env: { ...process.env,
-      PERO_CI_OWNER: `${target.runId}-${target.attempt}`, PERO_CI_PURPOSE: 'web' } });
-  requireCi(Boolean(web.pid), 'web-start');
-  processes.web = processOwner(web.pid);
-  recordProcesses(target, processes);
-  await ready(`${target.baseUrl}/api/health`, true);
+  startWeb(target);
+  await ready(`${target.baseUrl}/api/health`, 'ok');
+  startWeb(target, true);
+  await ready(`${target.faultBaseUrl}/api/health`, 'unavailable');
   const cases = readdirSync('tests/integration').filter(file => file.endsWith('.test.ts')).map(file => `tests/integration/${file}`);
   requireCi(cases.length > 0, 'contract-cases');
   requireCi(!finishing, 'cancelled');

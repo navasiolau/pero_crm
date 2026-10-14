@@ -2,7 +2,7 @@ import { existsSync, readFileSync, readdirSync, realpathSync, writeFileSync } fr
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { assertCiJob, requireCi } from './target.mjs';
-import { removeMinio } from './containers.mjs';
+import { removeMinio, removeWeb } from './containers.mjs';
 
 /** @typedef {import('./target.mjs').CiJob} CiJob */
 /** @typedef {{pid:number,startedAt:string}} OwnedProcess */
@@ -80,6 +80,7 @@ export async function cleanup(target, current = {}) {
     processes = { ...state.processes, ...current };
   }
   for (const purpose of ['tests', 'web']) if (processes[purpose]) await stopGroup(target, purpose, processes[purpose]);
+  removeWeb(target);
   removeMinio(target);
 }
 

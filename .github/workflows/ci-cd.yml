@@ -64,8 +64,8 @@ jobs:
           files=()
           component_index=0
           for file in apps/web/tests/*.test.ts apps/web/tests/*.test.mjs; do
-            case "$file" in
-              *.test.mjs|*.browser.test.ts)
+            case "${file##*/}" in
+              global-kanban-current-engineer-component.test.mjs|income-form-component.test.mjs|inline-field-subscriptions.test.mjs|kanban-render-isolation.test.mjs|product-card-navigation-browser.test.mjs|project-client-contact-component.test.mjs|project-filter-component.test.mjs|project-product-create-dialog.test.mjs|stock-movement-component.test.mjs|warehouse-deletion-component.test.mjs|warehouse-units-component.test.mjs|task-status-command.browser.test.ts)
                 cohort=components-$((component_index % 2))
                 component_index=$((component_index + 1)) ;;
               *) cohort=backend ;;
@@ -80,10 +80,38 @@ jobs:
         env:
           COHORT: ${{ matrix.cohort }}
 
+      - name: Закрепить проверенный plain JS бота
+        if: matrix.cohort == 'backend'
+        run: |
+          node --input-type=module <<'NODE'
+          import { cpSync, mkdirSync, writeFileSync } from 'node:fs';
+          import { execFileSync } from 'node:child_process';
+          import path from 'node:path';
+          import { botDistDigest } from './apps/web/tests/integration/runtime/target.mjs';
+          const env = process.env, directory = path.join(env.RUNNER_TEMP, 'pero-bot-dist');
+          if (execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim() !== env.GITHUB_SHA) throw Error('BOT_REVISION_REFUSED');
+          const files = botDistDigest('apps/telegram-bot/dist');
+          mkdirSync(directory); cpSync('apps/telegram-bot/dist', path.join(directory, 'dist'), { recursive: true });
+          writeFileSync(path.join(directory, 'tested.json'), JSON.stringify({ revision: env.GITHUB_SHA,
+            runId: env.GITHUB_RUN_ID, attempt: env.GITHUB_RUN_ATTEMPT, files }));
+          NODE
+
+      - uses: actions/upload-artifact@v4
+        if: matrix.cohort == 'backend'
+        with:
+          name: bot-dist-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
+          path: ${{ runner.temp }}/pero-bot-dist
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
   # Build и native используют один свежий checkout/runtime без повторного install.
   native-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    outputs:
+      oci-sha256: ${{ steps.next-build.outputs.oci-sha256 }}
+      index-digest: ${{ steps.next-build.outputs.index-digest }}
     services:
       postgres:
         image: postgres:17-alpine
@@ -129,13 +157,94 @@ jobs:
       - name: Prisma Client (generate)
         run: pnpm --filter @pero/web exec prisma generate
 
-      - name: Next compiler cache
+      - uses: docker/setup-buildx-action@v3
+        id: builder
+
+      - name: Подготовить один OCI build и совместимый compiler cache
+        id: prepare
+        run: |
+          node --input-type=module <<'NODE'
+          import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
+          import { execFileSync } from 'node:child_process';
+          import path from 'node:path';
+          import { assertCiJob, requireCi } from './apps/web/tests/integration/runtime/target.mjs';
+          const job = assertCiJob(), env = process.env;
+          requireCi(execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim() === env.GITHUB_SHA, 'checkout-revision');
+          const base = execFileSync('docker', ['buildx', 'imagetools', 'inspect', 'node:22-alpine', '--format', '{{json .Manifest}}'], { encoding: 'utf8' });
+          const baseDigest = JSON.parse(base).digest;
+          requireCi(/^sha256:[a-f0-9]{64}$/.test(baseDigest), 'node-base-digest');
+          const nodeImage = `node:22-alpine@${baseDigest}`;
+          const cacheId = `pero-next-musl-${baseDigest.slice(7, 23)}-${env.BUILD_CONFIG.slice(0, 16)}`;
+          const directory = path.join(env.RUNNER_TEMP, `pero-web-${job.runId}-${job.attempt}-${env.GITHUB_SHA}`);
+          mkdirSync(directory); mkdirSync('apps/web/.next/cache', { recursive: true });
+          const labels = { 'org.opencontainers.image.revision': env.GITHUB_SHA, 'pero.ci.repository': env.GITHUB_REPOSITORY,
+            'pero.ci.run': job.runId, 'pero.ci.attempt': job.attempt, 'pero.ci.service': 'web' };
+          const common = { context: '.', dockerfile: 'apps/web/Dockerfile', target: 'runner', platforms: ['linux/amd64'], labels,
+            args: { NODE_IMAGE: nodeImage, GITHUB_ACTIONS: 'true', PERO_CI_EXTERNAL_CHECKS: '1', PERO_CI_CACHE_ID: cacheId },
+            tags: [job.webImage], 'cache-from': ['type=gha,scope=pero-web'] };
+          const cacheMount = `type=cache,id=${cacheId},target=/app/apps/web/.next/cache,sharing=locked`;
+          const bake = { group: { default: { targets: ['web-oci', 'web-runtime', 'metadata', 'minio'] } }, target: {
+            'web-oci': { ...common, attest: ['type=provenance,mode=max'],
+              'cache-to': ['type=gha,mode=max,scope=pero-web'], output: [`type=oci,dest=${directory}/web.oci.tar`] },
+            'web-runtime': { ...common, attest: ['type=provenance,disabled=true'], output: [`type=docker,dest=${directory}/web.runtime.tar`] },
+            metadata: { ...common, target: 'ci-metadata', attest: ['type=provenance,disabled=true'], output: [`type=local,dest=${directory}/metadata`] },
+            minio: { context: 'apps/web/tests/integration/runtime', dockerfile: 'Dockerfile.minio', platforms: ['linux/amd64'],
+              attest: ['type=provenance,disabled=true'], tags: [job.minioImage],
+              labels: { ...labels, 'pero.ci.service': 'minio', 'pero.ci.minio.commit': '07c3a429bfed433e49018cb0f78a52145d4bedeb' },
+              'cache-from': ['type=gha,scope=pero-ci-minio'], 'cache-to': ['type=gha,mode=max,scope=pero-ci-minio'],
+              output: [`type=docker,dest=${directory}/minio.runtime.tar`] },
+            'cache-inject': { context: '.', contexts: { incoming: './apps/web/.next/cache' },
+              'dockerfile-inline': `FROM ${nodeImage}\nRUN --mount=${cacheMount} --mount=type=bind,from=incoming,target=/incoming cp -a /incoming/. /app/apps/web/.next/cache/`,
+              output: ['type=cacheonly'] },
+            'cache-extract': { context: '.',
+              'dockerfile-inline': `FROM ${nodeImage} AS extract\nRUN --mount=${cacheMount} mkdir /result && cp -a /app/apps/web/.next/cache/. /result/\nFROM scratch\nCOPY --from=extract /result /`,
+              output: ['type=local,dest=./apps/web/.next/cache'] },
+          }};
+          writeFileSync(path.join(directory, 'bake.json'), JSON.stringify(bake));
+          appendFileSync(env.GITHUB_OUTPUT, `directory=${directory}\nbase-digest=${baseDigest.slice(7)}\n`);
+          appendFileSync(env.GITHUB_ENV, `PERO_CI_WEB_ARTIFACT_DIR=${directory}\n`);
+          NODE
+        env:
+          BUILD_CONFIG: ${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'apps/web/package.json', 'apps/web/*config.*', 'apps/web/Dockerfile', 'packages/*/package.json', 'packages/plugins/*/package.json', 'packages/*/tsconfig.json', 'packages/plugins/*/tsconfig.json') }}
+          PERO_CI_POSTGRES_ID: ${{ job.services.postgres.id }}
+          PERO_CI_NETWORK: ${{ job.services.postgres.network }}
+
+      - name: Alpine Next compiler cache
         uses: actions/cache@v4
         with:
           path: apps/web/.next/cache
-          key: next-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.node.outputs.node-version }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'apps/web/package.json', 'apps/web/*config.*', 'packages/*/package.json', 'packages/plugins/*/package.json', 'packages/*/tsconfig.json', 'packages/plugins/*/tsconfig.json') }}-${{ hashFiles('apps/web/src/**', 'apps/web/public/**', 'apps/web/prisma/**', 'packages/*/src/**', 'packages/plugins/*/src/**') }}
+          key: next-oci-musl-v1-${{ runner.arch }}-${{ steps.prepare.outputs.base-digest }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'apps/web/package.json', 'apps/web/*config.*', 'apps/web/Dockerfile', 'packages/*/package.json', 'packages/plugins/*/package.json', 'packages/*/tsconfig.json', 'packages/plugins/*/tsconfig.json') }}-${{ hashFiles('apps/web/src/**', 'apps/web/public/**', 'apps/web/prisma/**', 'packages/*/src/**', 'packages/plugins/*/src/**') }}
           restore-keys: |
-            next-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.node.outputs.node-version }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'apps/web/package.json', 'apps/web/*config.*', 'packages/*/package.json', 'packages/plugins/*/package.json', 'packages/*/tsconfig.json', 'packages/plugins/*/tsconfig.json') }}-
+            next-oci-musl-v1-${{ runner.arch }}-${{ steps.prepare.outputs.base-digest }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'apps/web/package.json', 'apps/web/*config.*', 'apps/web/Dockerfile', 'packages/*/package.json', 'packages/plugins/*/package.json', 'packages/*/tsconfig.json', 'packages/plugins/*/tsconfig.json') }}-
+
+      - name: Восстановить compiler cache mount
+        uses: docker/bake-action@5be5f02ff8819ecd3092ea6b2e6261c31774f2b4 # v6
+        with:
+          source: .
+          builder: ${{ steps.builder.outputs.name }}
+          files: ${{ steps.prepare.outputs.directory }}/bake.json
+          targets: cache-inject
+          provenance: false
+
+      - name: Один production OCI и закреплённый MinIO
+        id: images
+        uses: docker/bake-action@5be5f02ff8819ecd3092ea6b2e6261c31774f2b4 # v6
+        with:
+          source: .
+          builder: ${{ steps.builder.outputs.name }}
+          files: ${{ steps.prepare.outputs.directory }}/bake.json
+          targets: web-oci,web-runtime,metadata,minio
+          allow: fs.write=${{ steps.prepare.outputs.directory }}
+
+      - name: Сохранить compiler cache mount
+        if: always() && steps.prepare.outcome == 'success'
+        uses: docker/bake-action@5be5f02ff8819ecd3092ea6b2e6261c31774f2b4 # v6
+        with:
+          source: .
+          builder: ${{ steps.builder.outputs.name }}
+          files: ${{ steps.prepare.outputs.directory }}/bake.json
+          targets: cache-extract
+          provenance: false
 
       - name: TypeScript incremental cache
         uses: actions/cache@v4
@@ -145,59 +254,38 @@ jobs:
           restore-keys: |
             types-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.node.outputs.node-version }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'apps/web/package.json', 'apps/web/tsconfig.json', 'apps/web/next.config.ts', 'packages/*/package.json', 'packages/plugins/*/package.json', 'packages/*/tsconfig.json', 'packages/plugins/*/tsconfig.json') }}-
 
-      - name: Сборка (Next.js production)
+      - name: Проверить OCI и загрузить точную runtime projection
         id: next-build
         run: |
           test ! -f apps/web/.next/BUILD_ID
-          pnpm build
+          mkdir "$PERO_CI_WEB_ARTIFACT_DIR/oci"
+          tar -xf "$PERO_CI_WEB_ARTIFACT_DIR/web.oci.tar" --directory "$PERO_CI_WEB_ARTIFACT_DIR/oci" --no-same-owner
+          docker load --input "$PERO_CI_WEB_ARTIFACT_DIR/web.runtime.tar"
+          docker load --input "$PERO_CI_WEB_ARTIFACT_DIR/minio.runtime.tar"
           node --input-type=module <<'NODE'
-          import { appendFileSync, readFileSync } from 'node:fs';
+          import { appendFileSync, cpSync, writeFileSync } from 'node:fs';
           import { execFileSync } from 'node:child_process';
+          import { assertCiJob, readWebArtifact, requireCi } from './apps/web/tests/integration/runtime/target.mjs';
           const env = process.env;
-          const revision = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
-          const buildId = readFileSync('apps/web/.next/BUILD_ID', 'utf8').trim();
-          if (revision !== env.GITHUB_SHA || !buildId || /[\r\n]/.test(buildId)) {
-            throw Error('CI_BUILD_REVISION_REFUSED');
-          }
-          appendFileSync(env.GITHUB_OUTPUT, `revision=${revision}\nbuild-id=${buildId}\n`);
-          console.log(JSON.stringify({ ciRuntime: 'next-build-ready', revision, buildId,
-            runId: env.GITHUB_RUN_ID, attempt: env.GITHUB_RUN_ATTEMPT, node: process.version,
-            platform: process.platform, arch: process.arch }));
+          const job = assertCiJob(), record = await readWebArtifact(false);
+          const metadata = JSON.parse(env.BUILD_METADATA);
+          requireCi(metadata['web-oci']['containerimage.digest'] === record.indexDigest, 'bake-oci-digest');
+          const inspect = tag => JSON.parse(execFileSync('docker', ['image', 'inspect', tag], { encoding: 'utf8' }))[0];
+          const web = inspect(job.webImage), minio = inspect(job.minioImage);
+          requireCi(web.Id === record.configDigest && JSON.stringify(web.RootFS.Layers) === JSON.stringify(record.diffIds), 'docker-oci-projection');
+          writeFileSync(`${env.PERO_CI_WEB_ARTIFACT_DIR}/image.json`, JSON.stringify(record));
+          cpSync(`${env.PERO_CI_WEB_ARTIFACT_DIR}/metadata`, 'apps/web/.next', { recursive: true });
+          appendFileSync(env.GITHUB_OUTPUT, `revision=${record.revision}\nbuild-id=${record.buildId}\noci-sha256=${record.ociSha256}\nindex-digest=${record.indexDigest}\n`);
+          appendFileSync(env.GITHUB_ENV, `PERO_CI_WEB_IMAGE_ID=${web.Id}\nPERO_CI_MINIO_IMAGE_ID=${minio.Id}\nPERO_CI_EXPECTED_OCI_SHA256=${record.ociSha256}\n`);
+          console.log(JSON.stringify({ ciRuntime: 'next-build-ready', ...record, node: process.version, platform: process.platform, arch: process.arch }));
           NODE
         env:
-          # Все исходники, включая *.test.ts и свежие route types, проверяются ниже.
-          PERO_CI_EXTERNAL_CHECKS: '1'
-          PERO_CI_NATIVE_BUILD: '1'
-          # Значения-заглушки — только для prerender, как в Dockerfile
-          DATABASE_URL: postgresql://dummy:dummy@localhost:5432/dummy
-          AUTH_SECRET: ci-dummy
+          BUILD_METADATA: ${{ steps.images.outputs.metadata }}
+          PERO_CI_POSTGRES_ID: ${{ job.services.postgres.id }}
+          PERO_CI_NETWORK: ${{ job.services.postgres.network }}
 
       - name: Typecheck (backend + frontend + tests + fresh routes)
         run: pnpm --filter @pero/web exec tsc --noEmit
-
-      - name: Typecheck (telegram-bot)
-        run: pnpm --filter @pero/telegram-bot exec tsc --noEmit
-
-      - uses: docker/setup-buildx-action@v3
-
-      - name: Закреплённый source MinIO с отдельным build cache
-        id: minio
-        uses: docker/build-push-action@v6
-        with:
-          context: apps/web/tests/integration/runtime
-          file: apps/web/tests/integration/runtime/Dockerfile.minio
-          platforms: linux/amd64
-          load: true
-          provenance: false
-          cache-from: type=gha,scope=pero-ci-minio
-          cache-to: type=gha,mode=max,scope=pero-ci-minio
-          tags: pero-ci-${{ github.run_id }}-${{ github.run_attempt }}-minio:source
-          labels: |
-            pero.ci.repository=navasiolau/pero_crm
-            pero.ci.run=${{ github.run_id }}
-            pero.ci.attempt=${{ github.run_attempt }}
-            pero.ci.service=minio
-            pero.ci.minio.commit=07c3a429bfed433e49018cb0f78a52145d4bedeb
 
       - name: Интеграционные PostgreSQL + HTTP/S3 контракты
         run: pnpm --filter @pero/web test:integration
@@ -206,7 +294,6 @@ jobs:
           PERO_CI_BUILD_ID: ${{ steps.next-build.outputs.build-id }}
           PERO_CI_POSTGRES_ID: ${{ job.services.postgres.id }}
           PERO_CI_NETWORK: ${{ job.services.postgres.network }}
-          PERO_CI_MINIO_IMAGE_ID: ${{ steps.minio.outputs.imageid }}
 
       - name: Удалить временный MinIO и завершить web
         if: always()
@@ -214,9 +301,20 @@ jobs:
         env:
           PERO_CI_POSTGRES_ID: ${{ job.services.postgres.id }}
           PERO_CI_NETWORK: ${{ job.services.postgres.network }}
-          PERO_CI_MINIO_IMAGE_ID: ${{ steps.minio.outputs.imageid }}
         # PostgreSQL и job network удаляет штатный GitHub Stop containers;
         # данные обоих сервисов в tmpfs, постоянные тома не создаются.
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-oci-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
+          path: |
+            ${{ steps.prepare.outputs.directory }}/web.oci.tar
+            ${{ steps.prepare.outputs.directory }}/image.json
+            ${{ steps.prepare.outputs.directory }}/metadata/BUILD_ID
+            ${{ steps.prepare.outputs.directory }}/metadata/server/server-reference-manifest.json
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
 
   # Прямой gate блокирует публикацию при failure/cancelled/skipped любой проверки.
   build-push:
@@ -229,29 +327,46 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: docker/setup-buildx-action@v3
-
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: docker/build-push-action@v6
+      - uses: actions/download-artifact@v4
         with:
-          context: .
-          file: apps/web/Dockerfile
-          push: true
-          build-args: |
-            GITHUB_ACTIONS=true
-            PERO_CI_EXTERNAL_CHECKS=1
-          cache-from: type=gha,scope=pero-web
-          cache-to: type=gha,mode=max,scope=pero-web
-          tags: |
-            ghcr.io/navasiolau/pero_crm:${{ github.ref_name }}
-            ghcr.io/navasiolau/pero_crm:sha-${{ github.sha }}
-          labels: |
-            org.opencontainers.image.revision=${{ github.sha }}
+          name: web-oci-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
+          path: ${{ runner.temp }}/pero-web-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
+
+      - name: Проверить и опубликовать испытанный OCI без пересборки
+        run: |
+          mkdir "$PERO_CI_WEB_ARTIFACT_DIR/oci"
+          tar -xf "$PERO_CI_WEB_ARTIFACT_DIR/web.oci.tar" --directory "$PERO_CI_WEB_ARTIFACT_DIR/oci" --no-same-owner
+          curl --fail --silent --show-error --location https://github.com/regclient/regclient/releases/download/v0.11.6/regctl-linux-amd64 --output "$RUNNER_TEMP/regctl"
+          printf '8e0e62a497fcdb8048d18aa927a139613176ba0531f412bc541044e28f9856bd  %s\n' "$RUNNER_TEMP/regctl" | sha256sum --check
+          chmod +x "$RUNNER_TEMP/regctl"
+          node --input-type=module <<'NODE'
+          import { execFileSync } from 'node:child_process';
+          import { readWebArtifact, requireCi } from './apps/web/tests/integration/runtime/target.mjs';
+          const env = process.env, record = await readWebArtifact();
+          requireCi(execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim() === record.revision &&
+            record.indexDigest === env.PERO_CI_EXPECTED_INDEX_DIGEST, 'promotion-checkout');
+          requireCi(env.GITHUB_EVENT_NAME === 'push' && ['staging', 'main'].includes(env.GITHUB_REF_NAME), 'promotion-branch');
+          const cli = args => execFileSync(`${env.RUNNER_TEMP}/regctl`, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+          const source = `ocidir://${env.PERO_CI_WEB_ARTIFACT_DIR}/oci@${record.indexDigest}`;
+          const repository = 'ghcr.io/navasiolau/pero_crm';
+          cli(['image', 'copy', '--referrers', '--force-recursive', source, `${repository}:sha-${record.revision}`]);
+          requireCi(cli(['image', 'digest', `${repository}:sha-${record.revision}`]) === record.indexDigest, 'promoted-index');
+          // Равный digest сохраняет исходный OCI index вместе с attestation descriptors.
+          cli(['image', 'copy', '--referrers', '--force-recursive', `${repository}@${record.indexDigest}`, `${repository}:${env.GITHUB_REF_NAME}`]);
+          requireCi(cli(['image', 'digest', `${repository}:${env.GITHUB_REF_NAME}`]) === record.indexDigest, 'branch-index');
+          console.log(JSON.stringify({ ciRuntime: 'tested-oci-promoted', revision: record.revision, runId: record.runId,
+            attempt: record.attempt, buildId: record.buildId, indexDigest: record.indexDigest, attestations: record.attestations }));
+          NODE
+        env:
+          PERO_CI_WEB_ARTIFACT_DIR: ${{ runner.temp }}/pero-web-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
+          PERO_CI_EXPECTED_OCI_SHA256: ${{ needs.native-tests.outputs.oci-sha256 }}
+          PERO_CI_EXPECTED_INDEX_DIGEST: ${{ needs.native-tests.outputs.index-digest }}
 
   # Telegram-бот — изолированный сервис (LXC tgbot), свой образ,
   # та же pull-модель деплоя (watcher-крон на контейнере)
@@ -267,6 +382,24 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: bot-dist-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
+          path: ${{ runner.temp }}/pero-bot-dist
+
+      - name: Проверить принадлежность и байты plain JS бота
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs';
+          import path from 'node:path';
+          import { botDistDigest } from './apps/web/tests/integration/runtime/target.mjs';
+          const env = process.env, directory = path.join(env.RUNNER_TEMP, 'pero-bot-dist');
+          const record = JSON.parse(readFileSync(path.join(directory, 'tested.json'), 'utf8'));
+          if (record.revision !== env.GITHUB_SHA || record.runId !== env.GITHUB_RUN_ID || record.attempt !== env.GITHUB_RUN_ATTEMPT) throw Error('BOT_ARTIFACT_OWNER_REFUSED');
+          const files = botDistDigest(path.join(directory, 'dist'));
+          if (!files['index.js'] || JSON.stringify(files) !== JSON.stringify(record.files)) throw Error('BOT_ARTIFACT_BYTES_REFUSED');
+          NODE
+
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -277,6 +410,8 @@ jobs:
         with:
           context: .
           file: apps/telegram-bot/Dockerfile
+          target: ci-runner
+          build-contexts: pero-bot-dist=${{ runner.temp }}/pero-bot-dist
           push: true
           cache-from: type=gha,scope=pero-telegram-bot
           cache-to: type=gha,mode=max,scope=pero-telegram-bot

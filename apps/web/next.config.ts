@@ -22,8 +22,6 @@ const isWindows = process.platform === "win32";
 const hasExternalCiChecks =
   process.env.GITHUB_ACTIONS === "true" &&
   process.env.PERO_CI_EXTERNAL_CHECKS === "1";
-const omitCiStandalone =
-  hasExternalCiChecks && process.env.PERO_CI_NATIVE_BUILD === "1";
 
 const nextConfig: NextConfig = {
   ...(hasExternalCiChecks
@@ -42,9 +40,8 @@ const nextConfig: NextConfig = {
   ...(isWindows
     ? {}
     : {
-        // Native CI запускает next start из полной .next. Local и Docker CI
-        // сохраняют standalone-сборку для production-образа.
-        ...(omitCiStandalone ? {} : { output: "standalone" }),
+        // Native CI проверяет тот же standalone-образ, который публикуется.
+        output: "standalone",
         // Корень монорепо — для корректной трассировки файлов standalone-сборки
         outputFileTracingRoot: path.join(__dirname, "../../"),
       }),

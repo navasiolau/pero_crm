@@ -41,6 +41,13 @@ export async function createHttpS3Fixture(scenarioId: string) {
     const headers = new Headers(init.headers); if (actor) headers.set("cookie", await cookie(actor));
     return fetch(url, { ...init, headers, redirect: "manual", signal: AbortSignal.timeout(30_000) });
   }
+  async function faultRequest(path: string, actor?: HttpActor, init: RequestInit = {}) {
+    assertCiRuntimeTarget();
+    assert.ok(path.startsWith("/") && !path.startsWith("//"));
+    const url = new URL(path, target.faultBaseUrl); assert.equal(url.origin, target.faultBaseUrl);
+    const headers = new Headers(init.headers); if (actor) headers.set("cookie", await cookie(actor));
+    return fetch(url, { ...init, headers, redirect: "manual", signal: AbortSignal.timeout(30_000) });
+  }
   async function session(actor: HttpActor) {
     const response = await request("/api/auth/session", actor);
     assert.equal(response.status, 200);
@@ -164,7 +171,7 @@ export async function createHttpS3Fixture(scenarioId: string) {
     if (row) { assert.ok(row.uploadedById.startsWith(`ci169-${target.runId}-${target.attempt}-${scenarioId}-`)); assert.match(row.storageKey, /^finance-documents\/[0-9a-f-]{36}\/[a-f0-9]{64}$/); documents.add(row.storageKey); }
     return { response, body: await response.json() as { ok?: boolean; document?: FinanceDocumentView; repeated?: boolean; code?: string } };
   }
-  return { ...pg, project, cookie, request, session, login, actionResponse, action, fault, put, get, versions, deleteMarker, file, upload, financeUpload,
+  return { ...pg, project, cookie, request, faultRequest, session, login, actionResponse, action, fault, put, get, versions, deleteMarker, file, upload, financeUpload,
     async dispose() { s3.destroy(); await pg.dispose(); } };
 }
 
