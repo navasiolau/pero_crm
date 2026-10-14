@@ -70,12 +70,12 @@ before(async () => {
       "../src/server/plugins/events": { dispatchEvent: async (id: string) => { dispatches.push(id); } },
     },
   });
+  stock = scope.load("../src/server/warehouse/accounting"); trips = scope.load("../src/server/logistics/core");
+  purchase = scope.load("../src/server/warehouse/stock-purchase-core"); stockDeletion = scope.load("../src/server/warehouse/deletion-core");
+  logistics = scope.load("../src/server/logistics/posting-core"); logisticsQueries = scope.load("../src/server/logistics/money-query-core");
   actions = scope.load("../src/server/payroll/actions"); payments = scope.load("../src/server/payments/service");
   paymentDelete = scope.load("../src/server/payments/delete-core"); ledger = scope.load("../src/server/finance/organization-ledger");
   statuses = scope.load("../src/server/products/status-core");
-  stock = scope.load("../src/server/warehouse/accounting"); purchase = scope.load("../src/server/warehouse/stock-purchase-core");
-  stockDeletion = scope.load("../src/server/warehouse/deletion-core"); trips = scope.load("../src/server/logistics/core");
-  logistics = scope.load("../src/server/logistics/posting-core"); logisticsQueries = scope.load("../src/server/logistics/money-query-core");
   // Эти модули уже загружены дочерними real entrypoints и принадлежат тому же cache scope.
   cash = require("../src/server/payroll/cash-core"); service = require("../src/server/payroll/cash-service");
   payroll = require("../src/server/payroll/queries"); turnover = require("../src/server/payroll/turnover-core");

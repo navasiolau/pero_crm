@@ -212,6 +212,7 @@ before(async () => {
     { targets: [...names.map(name => `../src/server/${name}`), "./helpers/project-materials-reference"], allowedOverrides: Object.keys(overrides), overrides, prisma: facade });
   coordinator = scope.load("../src/server/transactions/coordinator"); scope.load("../src/server/time/timers");
   visibility = scope.load("../src/server/access/visibility"); notifications = scope.load("../src/server/access/notification-visibility");
+  stock = scope.load("../src/server/warehouse/accounting");
   workspace = scope.load("../src/server/tasks/workspace-contract"); taskQueries = scope.load("../src/server/tasks/queries");
   units = scope.load("../src/server/warehouse/unit-core"); norms = scope.load("../src/server/warehouse/norm-core"); warehouse = scope.load("../src/server/warehouse/queries");
   products = scope.load("../src/server/products/core"); stages = scope.load("../src/server/projects/stage-core"); deletion = scope.load("../src/server/projects/delete-core");
@@ -219,7 +220,6 @@ before(async () => {
   completion = scope.load("../src/server/tasks/completion-core"); tasks = scope.load("../src/server/tasks/actions"); scope.load("../src/server/warehouse/actions"); time = scope.load("../src/server/time/actions");
   frozenReference = scope.load("./helpers/project-materials-reference");
   payments = scope.load("../src/server/payments/service");
-  stock = scope.load("../src/server/warehouse/accounting");
 });
 after(async () => { if (fixture) try { scope?.restore(); await fixture.verifyProtected(); } finally { await fixture.dispose(); } });
 
