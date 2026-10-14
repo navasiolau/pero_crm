@@ -5,11 +5,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import {
   getProductHeroImageState,
-  isCompletedProductHeroImageFailure,
   getProductSketchPreviewSource,
 } from "../src/lib/product-hero";
-import { productSketchProjection } from "../src/server/products/sketch-projection";
-import { fileVisibilityWhere } from "../src/server/access/visibility";
 import { ProductKanbanCard } from "../src/components/product-kanban-card";
 
 
@@ -37,12 +34,6 @@ test("image failure replaces a broken source, while a different source can load"
   assert.equal(getProductHeroImageState(null, failed), "empty");
 });
 
-test("completed failed image is detected without rejecting loading or valid images", () => {
-  assert.equal(isCompletedProductHeroImageFailure(true, 0), true);
-  assert.equal(isCompletedProductHeroImageFailure(false, 0), false);
-  assert.equal(isCompletedProductHeroImageFailure(true, 640), false);
-  assert.equal(isCompletedProductHeroImageFailure(false, 640), false);
-});
 
 test("shared kanban card preserves information and stays compact without an image", () => {
   const html = renderToStaticMarkup(createElement(ProductKanbanCard, {
@@ -66,14 +57,4 @@ test("shared kanban card preserves information and stays compact without an imag
   assert.match(html, /Инженер: Инженер/);
   assert.match(html, /data-has-image="false"/);
   assert.doesNotMatch(html, /data-slot="product-kanban-image"/);
-});
-
-
-test("sketch projection returns only safe metadata and keeps actor file visibility", () => {
-  const actor = { id: "engineer-1", roles: ["ENGINEER"] as const };
-  const projection = productSketchProjection(actor as never);
-
-  assert.deepEqual(Object.keys(projection.select).sort(), ["fileName", "hasThumb", "id", "mimeType"]);
-  assert.deepEqual(projection.where, fileVisibilityWhere(actor as never));
-  assert.notDeepEqual(projection.where, {});
 });

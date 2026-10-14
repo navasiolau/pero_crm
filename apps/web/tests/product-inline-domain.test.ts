@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { randomUUID } from "node:crypto";
-import type { Prisma } from "@prisma/client";
 import { patchProductCore } from "../src/server/products/core";
 import { productPatchSchema, type ProductPatch } from "../src/server/products/patch-contract";
 import type { TaskTransaction } from "../src/server/tasks/transaction";

@@ -46,14 +46,16 @@
       ],
       "tests": [
         {
-          "file": "apps/web/tests/engineer-access.test.ts",
-          "block": "role grants are united",
-          "evidenceLevel": "DI"
+          "file": "apps/web/tests/integration/domain-postgres.test.ts",
+          "block": "draft/privacy-real-readers-joins-notifications-and-operational-denials",
+          "evidenceLevel": "native-PostgreSQL",
+          "notes": "Current real readers/role union/nested DTO/denials; new runtime NOT_RUN."
         },
         {
           "file": "apps/web/tests/engineer-access-actions.test.ts",
-          "block": "real task and time actions reject stale hidden IDs",
-          "evidenceLevel": "DI"
+          "block": "current ACL and session refuse original/preview before storage, while an allowed original reaches it",
+          "evidenceLevel": "DI",
+          "notes": "Current early ACL/session gate verifies zero storage effects and positive allowed control."
         }
       ],
       "acceptance": [
@@ -65,7 +67,7 @@
           "revision": null,
           "gapTask": 128,
           "entrypoints": [
-            "apps/web/tests/engineer-access-runtime.ts"
+            "apps/web/tests/integration/file-responses.test.ts"
           ]
         }
       ],
@@ -87,7 +89,7 @@
         },
         {
           "file": "apps/web/tests/product-percentage-pay.test.ts",
-          "block": "менеджер свободен; текущий инженер DESIGN↔PRODUCTION",
+          "block": "менеджер свободен; текущий инженер DESIGN↔PRODUCTION без модели",
           "evidenceLevel": "DI"
         }
       ],
@@ -238,9 +240,10 @@
           "notes": "Сериализующий fake проверяет бизнес-поток; PostgreSQL lock/race/rollback этим не доказаны."
         },
         {
-          "file": "apps/web/tests/product-engineering-legacy.test.ts",
-          "block": "previous legacy history is not edited",
-          "evidenceLevel": "DI"
+          "file": "apps/web/tests/integration/finance-postgres.test.ts",
+          "block": "finance/economics-saved-BYN-unknown-zero-and-legacy-settlement-cents-once",
+          "evidenceLevel": "native-PostgreSQL",
+          "notes": "Retires product-engineering-legacy.test.ts fake history contour; current saved legacy settlement/cents/unknown and no repeated history mutations in actual SQL source, runtime NOT_RUN."
         }
       ],
       "acceptance": [
@@ -427,9 +430,10 @@
       ],
       "tests": [
         {
-          "file": "apps/web/tests/safe-file-response.test.ts",
-          "block": "anonymous and foreign original/view/thumb/preview requests do not read storage",
-          "evidenceLevel": "DI"
+          "file": "apps/web/tests/engineer-access-actions.test.ts",
+          "block": "current ACL and session refuse original/preview before storage, while an allowed original reaches it",
+          "evidenceLevel": "DI",
+          "notes": "Retained compact zero-storage witness replaces deleted safe-file-response.test.ts duplicated adapter fixture."
         },
         {
           "file": "apps/web/tests/integration/file-responses.test.ts",
@@ -442,9 +446,10 @@
           "evidenceLevel": "HTTP-runtime"
         },
         {
-          "file": "apps/web/tests/engineer-access-actions.test.ts",
-          "block": "real file download, thumbnail and delete deny hidden IDs",
-          "evidenceLevel": "DI"
+          "file": "apps/web/tests/integration/file-responses.test.ts",
+          "block": "media.access: current production ENGINEER200, foreign404, anonymous middleware307",
+          "evidenceLevel": "HTTP-runtime",
+          "notes": "Actual route/current ACL including search and direct pages; source ready, new runtime NOT_RUN."
         }
       ],
       "acceptance": [
@@ -471,14 +476,10 @@
       ],
       "tests": [
         {
-          "file": "apps/web/tests/plain-file-delete-action-controlled.test.ts",
-          "block": "manager deletes only the selected ordinary ID",
-          "evidenceLevel": "DI"
-        },
-        {
-          "file": "apps/web/tests/plain-file-delete-action-controlled.test.ts",
-          "block": "audit failure rolls back metadata before any storage effect",
-          "evidenceLevel": "DI"
+          "file": "apps/web/tests/integration/files-crud.test.ts",
+          "block": "file/ordinary-delete-cancel-audit: точный UUID, версии, сосед, replay и текущие роли",
+          "evidenceLevel": "HTTP-runtime",
+          "notes": "Whole plain-file-delete-action-controlled.test.ts retired; real action +current role/selected-ID/audit/metadata/version behavior in existing runtime case, actual new runtime NOT_RUN."
         },
         {
           "file": "apps/web/tests/integration/files-crud.test.ts",
@@ -552,9 +553,10 @@
           "evidenceLevel": "unit"
         },
         {
-          "file": "apps/web/tests/engineer-access-actions.test.ts",
-          "block": "real upload route rejects task/product mismatch",
-          "evidenceLevel": "DI"
+          "file": "apps/web/tests/integration/files-crud.test.ts",
+          "block": "attachments/all-groups-parent-child-ACL: project/product/task и четыре секции без скрытых детей",
+          "evidenceLevel": "HTTP-runtime",
+          "notes": "Replaces removed engineer-access-actions upload fixture; actual upload/current-context/ACL source. Large/slow/memory acceptance remains NOT_RUN, not inferred from this functional case."
         }
       ],
       "acceptance": [
@@ -601,7 +603,7 @@
           "revision": null,
           "gapTask": 140,
           "entrypoints": [
-            "apps/web/tests/bot-finance-document-http-native.ts"
+            "apps/web/tests/integration/files-crud.test.ts"
           ]
         }
       ],
@@ -619,14 +621,10 @@
       ],
       "tests": [
         {
-          "file": "apps/web/tests/time-autostop-role-boundary.test.ts",
-          "block": "allowed worker timeout is limited to own live executable task",
-          "evidenceLevel": "DI"
-        },
-        {
-          "file": "apps/web/tests/engineer-access-actions.test.ts",
-          "block": "real task and time actions reject stale hidden IDs",
-          "evidenceLevel": "DI"
+          "file": "apps/web/tests/timer-stop-cap.test.ts",
+          "block": "one pure snapshot covers second/minute/12h boundaries without mutating input dates",
+          "evidenceLevel": "unit",
+          "notes": "Old time-autostop-role-boundary.test.ts fake actor transaction retired; actual actor/race/reassign boundaries remain next native cases."
         },
         {
           "file": "apps/web/tests/integration/domain-postgres.test.ts",
@@ -738,7 +736,7 @@
         },
         {
           "file": "apps/web/tests/inline-field-subscriptions.test.mjs",
-          "block": "beforeReadonly",
+          "block": "inline total subscriptions preserve fields and avoid unrelated renders",
           "evidenceLevel": "Chromium-component"
         },
         {
@@ -791,8 +789,9 @@
       "tests": [
         {
           "file": "apps/web/tests/auth-security.test.ts",
-          "block": "Auth.js rejects a mismatched sessionVersion and removes the old cookie",
-          "evidenceLevel": "DI"
+          "block": "legacy or malformed JWT version refuses before a current-user lookup",
+          "evidenceLevel": "DI",
+          "notes": "Retained pre-lookup guard; cookie/session SQL revocation and cleanup covered by actual credentials/revoke child, source runtime NOT_RUN."
         },
         {
           "file": "apps/web/tests/integration/file-responses.test.ts",
@@ -819,7 +818,7 @@
           "file": "apps/web/tests/integration/file-responses.test.ts",
           "block": "credentials/owned-web-db-fault:",
           "evidenceLevel": "HTTP-runtime",
-          "notes": "Second owned web same verified image, fault-only DB127.0.0.1:1; health503/Auth.js failclosed/recovery cookie. No PG stop/reset; runtime NOT_RUN."
+          "notes": "Second owned web uses same verified OCI/main PG/network and its own NOSUPERUSER ci_fault_run_attempt role: healthy bootstrap then CONNECTION LIMIT0 and terminate only exact owned role/datname pero_ci for actual postboot outage; health503/Auth.js failclosed/recovery cookie. Main role/PG stop/reset untouched; new runtime NOT_RUN."
         }
       ],
       "acceptance": [
@@ -937,22 +936,23 @@
       "file": "apps/web/tests/product-card-navigation-browser.test.mjs",
       "block": "actual Chromium cover/body navigation, drag preview, mobile numbers and two faults",
       "decision": "CONSOLIDATE",
-      "reason": "Реальные Chromium navigation/drag/mobile/fault проверки заменяют перекрывающиеся handler/SSR cases; уникальный RecentProjects case перенесён в существующий project-kanban-card-layout suite.",
+      "reason": "Реальные Chromium navigation/drag/mobile/fault и Current RecentProjects/natural-image checks заменяют handler/SSR; old project-kanban-card-layout.test.ts retired, date/age remains current date-time-display.",
       "remainingProtection": [
-        "product-card-navigation-browser.test.mjs",
-        "project-kanban-card-layout.test.ts: number token enlarges only its own content and recent project keeps navigation and labels"
+        "apps/web/tests/product-card-navigation-browser.test.mjs: actual Chromium cover/body navigation, drag preview, mobile numbers and two faults",
+        "apps/web/tests/product-card-navigation-browser.mjs: actual RecentProjects/natural images/detail/drag/mobile",
+        "apps/web/tests/date-time-display.test.ts"
       ],
       "task": 168
     },
     {
       "file": "apps/web/tests/product-card-navigation-browser.test.mjs",
-      "block": "project tab passes shared onOpen policy while global board",
+      "block": "actual Chromium cover/body navigation, drag preview, mobile numbers and two faults",
       "decision": "REWRITE",
       "task": 160,
-      "reason": "Буквальный JSX regex заменён действиями реального Chromium; в №168 уникальный RecentProjects case сохранён в project-kanban-card-layout.",
+      "reason": "Исторический JSX regex replaced actual Chromium; old project-kanban-card-layout.test.ts retired после current RecentProjects/card keeper mapping.",
       "remainingProtection": [
-        "apps/web/tests/product-card-navigation-browser.test.mjs: trusted project/global cover и body/title, exact product.number/returnTo; real PointerSensor/disabled DragOverlay/no navigation; mobile tables CardNumber; formatting и два controlled behavior faults.",
-        "project-kanban-card-layout.test.ts: RecentProjects link/client/title/CardNumber case."
+        "apps/web/tests/product-card-navigation-browser.test.mjs: actual Chromium cover/body navigation, drag preview, mobile numbers and two faults",
+        "apps/web/tests/product-card-navigation-browser.mjs: RecentProjects link/client/title/CardNumber/natural images"
       ],
       "replacement": {
         "file": "apps/web/tests/product-card-navigation-browser.test.mjs",
@@ -961,22 +961,23 @@
       }
     },
     {
-      "file": "apps/web/tests/file-image-thumbnail.test.ts",
-      "block": "all shared file lists show only original filename",
-      "decision": "KEEP",
-      "reason": "Живой FileGridView, права/имена/отсутствие image requests.",
+      "file": "apps/web/tests/file-list-printing.test.ts",
+      "block": "real file rows preserve names, protected downloads, permissions and transactional confirmation",
+      "decision": "CONSOLIDATE",
+      "reason": "Whole apps/web/tests/file-image-thumbnail.test.ts retired as duplicate SSR: live original filename/protected download/permissions now actual FileList Chromium; unique server-grant/canEdit and FinanceTab INCOME caller wiring retained plain-file-adapters.",
       "remainingProtection": [
-        "plain-file-list tests, actual file list"
+        "apps/web/tests/file-list-printing.test.ts: real file rows preserve names, protected downloads, permissions and transactional confirmation",
+        "apps/web/tests/plain-file-adapters.test.ts"
       ]
     },
     {
-      "file": "apps/web/tests/file-image-thumbnail.test.ts",
-      "block": "nonimage thumbnail adds no image fetch",
+      "file": "apps/web/tests/file-list-printing.test.ts",
+      "block": "real file rows preserve names, protected downloads, permissions and transactional confirmation",
       "decision": "RETIRE",
       "task": 155,
-      "reason": "Только вместе с доказанно orphan FileImageThumbnail; соседний live test сохраняется.",
+      "reason": "Old file-image-thumbnail.test.ts nonimage thumbnail/helper contract retired with unused helper; actual FileList rows retain no premature image fetch/original filename/protected source.",
       "remainingProtection": [
-        "KEEP предыдущий block FileGridView."
+        "apps/web/tests/file-list-printing.test.ts: real file rows preserve names, protected downloads, permissions and transactional confirmation"
       ]
     },
     {
@@ -1028,50 +1029,53 @@
       ]
     },
     {
-      "file": "apps/web/tests/product-engineering-legacy.test.ts",
-      "block": "previous legacy history is not edited or charged again",
-      "decision": "KEEP",
-      "reason": "Неизменность старых обязательств и запрет повторного начисления.",
+      "file": "apps/web/tests/integration/finance-postgres.test.ts",
+      "block": "finance/economics-saved-BYN-unknown-zero-and-legacy-settlement-cents-once",
+      "decision": "CONSOLIDATE",
+      "reason": "Whole apps/web/tests/product-engineering-legacy.test.ts retired; saved legacy settlement counted once, original history/unknown/cents preserved in actual native source and current pure DTO/fund guards. New native NOT_RUN.",
       "remainingProtection": [
-        "apps/web/tests/product-engineering-legacy.test.ts"
+        "apps/web/tests/integration/finance-postgres.test.ts: finance/economics-saved-BYN-unknown-zero-and-legacy-settlement-cents-once",
+        "apps/web/tests/integration/percentage-postgres.test.ts: percentage/adjustments-immutable-cas-replay-and-native-constraints"
       ]
     },
     {
-      "file": "apps/web/tests/product-engineering-schema.test.ts",
-      "block": "migration is a single transaction",
-      "decision": "KEEP",
-      "reason": "Source guard запрещает разрушительное изменение; дополнить native proof вместо удаления regex.",
+      "file": "apps/web/tests/integration/finance-postgres.test.ts",
+      "block": "percentage/native-v1-v2-v3-v4-shape-immutable-and-ceiling-overflow",
+      "decision": "CONSOLIDATE",
+      "reason": "Whole apps/web/tests/product-engineering-schema.test.ts closed textual migration/shape capsule retired; current accepted legacy/native shape branches, immutable triggers and ceiling-overflow validated in actual SQL source; canonical backfill SQL/byte guards remain, new runtime NOT_RUN.",
       "remainingProtection": [
-        "PostgreSQL native constraints/restore semantics."
+        "apps/web/tests/integration/finance-postgres.test.ts: percentage/native-v1-v2-v3-v4-shape-immutable-and-ceiling-overflow",
+        "apps/web/tests/immutable-percentage-migration-backfill.test.mjs"
       ]
     },
     {
-      "file": "apps/web/tests/product-percentage-sql-constraints.test.ts",
-      "block": "new Work/Group/Task checks retain every old accepted branch",
-      "decision": "KEEP",
-      "reason": "Защищает legacy CHECK branches; textual assertions не заменяют SQL semantics.",
+      "file": "apps/web/tests/integration/finance-postgres.test.ts",
+      "block": "percentage/native-v1-v2-v3-v4-shape-immutable-and-ceiling-overflow",
+      "decision": "CONSOLIDATE",
+      "reason": "Whole apps/web/tests/product-percentage-sql-constraints.test.ts closed textual migration/shape capsule retired; current accepted legacy/native shape branches, immutable triggers and ceiling-overflow validated in actual SQL source; canonical backfill SQL/byte guards remain, new runtime NOT_RUN.",
       "remainingProtection": [
-        "Native PostgreSQL CHECK/trigger proof."
+        "apps/web/tests/integration/finance-postgres.test.ts: percentage/native-v1-v2-v3-v4-shape-immutable-and-ceiling-overflow",
+        "apps/web/tests/immutable-percentage-migration-backfill.test.mjs"
       ]
     },
     {
       "file": "apps/web/tests/crm-byn-domain-payroll-actions.test.ts",
-      "block": "Module/require.cache/global fixtures",
+      "block": "fixture refuses unknown target, nested scopes and late mock effects",
       "decision": "CONSOLIDATE",
       "task": 161,
       "reason": "Один безопасный helper с restore при успехе/исключении и unexpected Prisma/network denial.",
       "remainingProtection": [
-        "Тот же настоящий production module и все прежние business assertions; native остаётся отдельным."
+        "apps/web/tests/crm-byn-domain-payroll-actions.test.ts: retained fixture isolation and typed/UNKNOWN/Decimal business guards; actual SQL native remains separate."
       ]
     },
     {
       "file": "apps/web/tests/work-shares-settlement.test.ts",
-      "block": "Module/require.cache/global fixtures",
+      "block": "fixture ESM mapper rejects a closed owner while the current real mapper works",
       "decision": "CONSOLIDATE",
       "task": 161,
       "reason": "Один безопасный helper с restore при успехе/исключении и unexpected Prisma/network denial.",
       "remainingProtection": [
-        "Тот же настоящий production module и все прежние business assertions; native остаётся отдельным."
+        "apps/web/tests/work-shares-settlement.test.ts: retained legacy40+60/strict payload/isolation; native lock/rollback proof remains separate."
       ]
     }
   ]

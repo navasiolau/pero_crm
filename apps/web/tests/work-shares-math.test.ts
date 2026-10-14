@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFileSync } from "node:fs";
-import { allocatedWorkQuantity, personalQuantity, sharePercent, splitAllocation, taskPieceAmount, type TaskAllocationValues } from "../src/lib/work-shares";
+import { allocatedWorkQuantity, personalQuantity, taskPieceAmount, type TaskAllocationValues } from "../src/lib/work-shares";
 
 const part = (shareUnits: number, shareAmount: string, quantity = "10"): TaskAllocationValues => ({
   quantity, executorShare: "1", allocationGroupId: "group", shareUnits, shareAmount,
@@ -36,27 +36,8 @@ test("a task without Work has no allocated quantity or generated budget", () => 
   assert.equal(allocatedWorkQuantity([{ quantity: null, allocationGroupId: "unpaid" }, { quantity: null, allocationGroupId: "unpaid" }]), "0.00");
   assert.equal(taskPieceAmount({ quantity: null, executorShare: "1", shareAmount: "0.00", allocationGroupId: "unpaid" }, "0"), "0.00");
 });
-
-test("split calculation preserves units and cents across repeated 30 and 50 percent transfers", () => {
-  const first = splitAllocation(1_000_000, "1000.00", "30");
-  assert.deepEqual(first, { remainingUnits: 700_000, transferredUnits: 300_000, remainingAmount: "700.00", transferredAmount: "300.00", percent: "30.00" });
-  const second = splitAllocation(first.remainingUnits, first.remainingAmount, "50");
-  assert.deepEqual(second, { remainingUnits: 350_000, transferredUnits: 350_000, remainingAmount: "350.00", transferredAmount: "350.00", percent: "50.00" });
-  assert.equal(second.remainingUnits + second.transferredUnits + first.transferredUnits, 1_000_000);
-  assert.equal(personalQuantity(part(second.remainingUnits, second.remainingAmount)), "3.5");
-  assert.equal(sharePercent(second.remainingUnits), "35");
-});
-
-test("residual cent stays with original task and zero budget stays zero", () => {
-  assert.deepEqual(splitAllocation(1_000_000, "10.01", 50), { remainingUnits: 500_000, transferredUnits: 500_000, remainingAmount: "5.01", transferredAmount: "5.00", percent: "50.00" });
-  assert.equal(splitAllocation(1_000_000, "0.01", 50).transferredAmount, "0.00");
-  assert.equal(splitAllocation(1_000_000, "0", "33.33").remainingAmount, "0.00");
+test("historical fractional quantity and missing fixed money remain distinct", () => {
   assert.equal(personalQuantity(part(500_000, "0.00", "0.01")), "0.005");
-});
-
-test("invalid, excessive and unrepresentable shares are rejected", () => {
-  for (const percent of [0, 100, -1, "NaN", "12.345", "1e2"]) assert.throws(() => splitAllocation(1_000_000, "100", percent));
-  assert.throws(() => splitAllocation(1, "0.01", 50), /слишком мала/);
   assert.throws(() => taskPieceAmount({ quantity: "1", executorShare: "1", allocationGroupId: "group", shareAmount: null }, "100"), /снимок/);
 });
 

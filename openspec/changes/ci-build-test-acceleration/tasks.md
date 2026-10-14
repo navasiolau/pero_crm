@@ -27,9 +27,20 @@
 
 - [x] 5.1 Только после успеха полной unit matrix и native пропустить повтор Next inline lint/types в web Docker CI, сохранив свежий standalone; отделить native no-standalone флаг от external-checks режима. Сохранить default local/Docker checks, build-stage-only ARG, полный tsc/lint и все gates; получить review и измерить эффект в следующем обычном обязательном CI без benchmark/нового QA. Actual ce0679/CI257 confirms duplicate-check removal/standalone/all gates; текущие 411 с не достигают180, отдельный общий выигрыш не приписывается новому шагу. Историческая 4.1/warm168 остаётся DONE.
 
-## 6. One OCI build/test/promotion и tested bot — OPEN
+## 6. One OCI build/test/promotion и tested bot — DONE (CI266/61f9)
 
-- [ ] 6.1 В existing Docker/config/workflow/runtime собрать один shared Bake DAG full immutable OCI/provenance + no-attest test projection + fresh metadata; проверить config/diff_ids/SHA/run/attempt/BUILD_ID/source binding и испытать именно Alpine runtime без cross-ABI host-copy.
-- [ ] 6.2 После полного успеха unit matrix/native/main+fault cleanup promote original immutable OCI/referrers pinned regctl без rebuild/early tags; failure/skipped/cancelled блокируют оба publishers.
-- [ ] 6.3 Backend-tested plain-JS bot dist bound to same SHA/run/attempt/source inputs reuse guarded minimal Alpine named context без второго install/tsc; сохранить обычный Docker fallback, zero runtime deps и .dockerignore env protections/actual bot test exclusion.
-- [ ] 6.4 После source freeze один affected proof/review/ordinary CI; записать actual time/cache limits/OCI identity/health/DBW07GET/owned cleanup, не закрывать pending по source/config и не запускать benchmark/docs-only CI.
+- [x] 6.1 В existing Docker/config/workflow/runtime собрать один shared Bake DAG full immutable OCI/provenance + no-attest test projection + fresh metadata; проверить config/diff_ids/SHA/run/attempt/BUILD_ID/source binding и испытать именно Alpine runtime без cross-ABI host-copy.
+- [x] 6.2 После полного успеха unit matrix/native/main+fault cleanup promote original immutable OCI/referrers pinned regctl без rebuild/early tags; failure/skipped/cancelled блокируют оба publishers.
+- [x] 6.3 Backend-tested plain-JS bot dist bound to same SHA/run/attempt/source inputs reuse guarded minimal Alpine named context без второго install/tsc; сохранить обычный Docker fallback, zero runtime deps и .dockerignore env protections/actual bot test exclusion.
+- [x] 6.4 После source freeze один affected proof/review/ordinary CI; записать actual time/cache limits/OCI identity/health/DBW07GET/owned cleanup, не закрывать pending по source/config и не запускать benchmark/docs-only CI.
+
+Финальная приёмка: `FINAL_GO_61f9`, staging61f9bc14/CI266 all6SUCCESS; native91/web1441/bot38/watch53/guards2, FAIL/SKIP0, both parallel0/0 и owned cleanup0. Actual OCI/health/GET200/DB/start/volume/W07 подтверждены, source/main/production unchanged. **196 с, ≤180 NOT_MET**; receipt `.playwright-mcp/application-improvements/dead49-delivery-61f9bc14/acceptance.json`.
+
+## 7. Follow-up после CI266 — APPROVED / OPEN
+
+- [x] 7.1 Задать id compiler-cache restore и пропускать extract только при exact primary cache hit; inject, fallback/miss и failure guards сохранить.
+- [x] 7.2 Кэшировать Chromium по OS/architecture/установленной Playwright version/lockfile; обязательную установку browser/system dependencies сохранить.
+- [x] 7.3 Перераспределить только существующие browser files по CI266 durations без новых jobs, пропусков/повторов и изменения file isolation/default concurrency.
+- [x] 7.4 Выполнить локальную read-only OCI/log inventory; prune только по доказанному allowlist, иначе сохранить весь runtime/Prisma CLI/migrations и записать ограничение.
+- [x] 7.5 После freeze один affected static check, evidence и передача Root/независимому reviewer без новых tests/benchmarks/CI/DB/infra.
+- [ ] 7.6 Следующий ordinary required CI и actual staging подтверждают exact OCI/все gates/cleanup/time; цель180с не закрывается по оценкам или cold/warm предположениям.

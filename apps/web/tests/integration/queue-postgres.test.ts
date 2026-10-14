@@ -49,7 +49,7 @@ test("queue/db-clock-and-utc-processing-in-non-utc-session", async () => fixture
 
 test("queue/subscriber-freeze-unique-empty-dispatch-ack-idempotency-and-expiry-rollback", async () => {
   const settings = { ...DEFAULT_EVENT_QUEUE_SETTINGS, leaseMs: 3000, heartbeatMs: 500, deliveryTimeoutMs: 2000, backoffBaseMs: 100, backoffMaxMs: 400 };
-  const names = ["concurrent", "empty", "parent", "child", "idempotent", "effect", "fence", "rollback", "completed"] as const;
+  const names = ["concurrent", "empty", "parent", "disabled", "child", "idempotent", "effect", "fence", "rollback", "completed"] as const;
   const ids = Object.fromEntries(names.map(name => [name, fixture.id(`subscriber-${name}`)])) as Record<typeof names[number], string>;
   const scopeIds = Object.values(ids), actor = fixture.id("subscriber-actor");
   await fixture.db.domainEvent.createMany({ data: names.filter(name => !["child", "effect"].includes(name)).map(name => ({ id: ids[name], actor,
@@ -106,7 +106,7 @@ test("queue/subscriber-freeze-unique-empty-dispatch-ack-idempotency-and-expiry-r
     "../src/server/plugins/event-queue-contract": { DEFAULT_EVENT_QUEUE_SETTINGS, EventDeliveryError, getEventQueueSettings: () => settings },
     "../src/server/plugins/context": { buildPluginContext: async (id: string, emit: (type: string, payload: unknown, actor: string) => Promise<void>) => ({ emit: (type: string, payload: unknown) => emit(type, payload, `plugin:${id}`) }) },
     "../src/server/plugins/registry": { getManifest: (id: string) => ({ hooks: { onDomainEvent: async (event: { id: string; type: string }, ctx: { emit: (type: string, payload: unknown) => Promise<void> }) => {
-      assert.ok(scopeIds.includes(event.id)); if (event.id === ids.parent) { calls.push(id); if (id === "a") await ctx.emit("ci169.child", { owner: actor }); if (id === "b" && failB) throw Error("CI169_SUBSCRIBER_RETRY"); }
+      assert.ok(scopeIds.includes(event.id)); if (event.id === ids.parent || event.id === ids.disabled) { calls.push(id); if (id === "a" && event.id === ids.parent) await ctx.emit("ci169.child", { owner: actor }); if (id === "b" && failB) throw Error("CI169_SUBSCRIBER_RETRY"); }
       if (event.id === ids.idempotent && id === "a") { effectCalls++; await fixture.db.domainEvent.createMany({ data: [{ id: ids.effect, actor, type: "ci169.effect", payload: {} }], skipDuplicates: true }); if (failEffect) throw Error("CI169_EFFECT_BEFORE_ACK"); }
     } } }) },
     "../src/server/plugins/run-log": { logPluginRun: async () => {} },
@@ -125,6 +125,16 @@ test("queue/subscriber-freeze-unique-empty-dispatch-ack-idempotency-and-expiry-r
     await events.dispatchEvent(ids.parent); assert.deepEqual(calls, ["a", "b", "b"]);
     assert.deepEqual(await fixture.db.domainEventDelivery.findUniqueOrThrow({ where: { eventId_subscriberId: { eventId: ids.parent, subscriberId: "a" } } }), ack);
     assert.ok((await fixture.db.domainEvent.findUniqueOrThrow({ where: { id: ids.parent } })).processedAt); assert.equal(await fixture.db.domainEvent.count({ where: { id: ids.child } }), 1);
+    enabled = ["a", "b"]; failB = true; await events.dispatchEvent(ids.disabled);
+    const delivered = await fixture.db.domainEventDelivery.findUniqueOrThrow({ where: { eventId_subscriberId: { eventId: ids.disabled, subscriberId: "a" } } });
+    assert.ok(delivered.deliveredAt); enabled = ["a"];
+    await fixture.db.domainEvent.update({ where: { id: ids.disabled }, data: { nextAttemptAt: new Date(0) } });
+    await fixture.db.domainEventDelivery.update({ where: { eventId_subscriberId: { eventId: ids.disabled, subscriberId: "b" } }, data: { nextAttemptAt: new Date(0) } });
+    await events.dispatchEvent(ids.disabled);
+    const skipped = await fixture.db.domainEventDelivery.findUniqueOrThrow({ where: { eventId_subscriberId: { eventId: ids.disabled, subscriberId: "b" } } });
+    assert.ok(skipped.skippedAt); assert.equal(skipped.lastError, "SUBSCRIBER_DISABLED");
+    assert.deepEqual(await fixture.db.domainEventDelivery.findUniqueOrThrow({ where: { eventId_subscriberId: { eventId: ids.disabled, subscriberId: "a" } } }), delivered);
+    assert.ok((await fixture.db.domainEvent.findUniqueOrThrow({ where: { id: ids.disabled } })).processedAt);
     enabled = ["a"]; await events.dispatchEvent(ids.idempotent); failEffect = false;
     await fixture.db.domainEvent.update({ where: { id: ids.idempotent }, data: { nextAttemptAt: new Date(0) } });
     await fixture.db.domainEventDelivery.update({ where: { eventId_subscriberId: { eventId: ids.idempotent, subscriberId: "a" } }, data: { nextAttemptAt: new Date(0) } });

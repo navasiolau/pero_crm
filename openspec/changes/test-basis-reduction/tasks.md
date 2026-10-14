@@ -34,8 +34,19 @@
 - [x] 6.3 Дополнить существующую карту реализованных функций действующими сценариями №168/169, явно отделить автоматическое/ручное покрытие и пробелы; измерить все строки/файлы/независимые сценарии без изменения scope. Matrix23 contracts/14 dispositions и14 feature directions; exact259f census web32296/64722 (50,10042953%), prefix33373+outside207=ALL33580/69662 (51,79581407%),453 prefix files/286flat. Нового100% coverage claim нет.
 - [x] 6.4 После freeze пройти affected suites и один итоговый local прогон/types/lint/OpenSpec, независимое review и один обычный CI; принять exact staging SHA/image/health/GET и cleanup, main/production не затрагивать. Local/full+source review PASS; после factual failure258/259 исправлены test-only callers/fixtures, CI260 all6SUCCESS/85 native/owned cleanup и actual259f stage image/DB/W07/GET200 приняты Root ACTUAL_STAGE_GO и независимым FINAL_GO_STAGE_259f8447. Receipt refinement-delivery-259f8447/acceptance.json; tracking local WIP без docs-only push/CI.
 
-## 7. Следующее согласованное сокращение — OPEN
+## 7. Следующее согласованное сокращение — DONE (CI266/61f9)
 
-- [ ] 7.1 До удаления записать FULL literal pure/browser/manual/native allowlists и old→retained case IDs, levels, closed causes и last-consumer closure; сохранять actual named cases, без квоты/100% claim.
-- [ ] 7.2 Консолидировать согласованные existing pure-domain/browser CSS suites с exact bodies/isolation; кандидат может удалить только mapped old manual/mock contours после source case mapping/local proof, сохранив действующие guards/warehouse recovery. Финальная замена принимается только по actual native/HTTP PASS №169 в общем required CI; отдельный before-delete CI не требуется, failure блокирует deploy и сохраняет прежний принятый staging.
-- [ ] 7.3 После freeze обновить существующие matrix/README/maps, измерить ALLnew-inclusive строки/файлы/actual cases, пройти один итоговый набор проверок/review/обычный CI и actual Stage; historical DONE сохраняются, new acceptance пока pending.
+- [x] 7.1 До удаления записать FULL literal pure/browser/manual/native allowlists и old→retained case IDs, levels, closed causes и last-consumer closure; сохранять actual named cases, без квоты/100% claim.
+- [x] 7.2 Консолидировать согласованные existing pure-domain/browser CSS suites с exact bodies/isolation; кандидат может удалить только mapped old manual/mock contours после source case mapping/local proof, сохранив действующие guards/warehouse recovery. Финальная замена принимается только по actual native/HTTP PASS №169 в общем required CI; отдельный before-delete CI не требуется, failure блокирует deploy и сохраняет прежний принятый staging.
+- [x] 7.3 После freeze обновить существующие matrix/README/maps, измерить ALLnew-inclusive строки/файлы/actual cases, пройти один итоговый набор проверок/review/обычный CI и actual Stage; historical DONE сохраняются; финальная actual приёмка CI266/61f9 подтверждена.
+
+Финальная приёмка: `FINAL_GO_61f9`, staging61f9bc14/CI266 all6SUCCESS; native91/web1441/bot38/watch53/guards2, FAIL/SKIP0, both parallel0/0 и owned cleanup0. Actual OCI/health/GET200/DB/start/volume/W07 подтверждены, source/main/production unchanged. **196 с, ≤180 NOT_MET**; receipt `.playwright-mcp/application-improvements/dead49-delivery-61f9bc14/acceptance.json`.
+
+## 8. Глубокая итерация после61f9 — OPEN
+
+- [x] 8.1 До удаления дополнить existing reduction-map FULL literal closures/keeper semantics/owner boundaries; сохранить accepted61f9 и priortracking2a234ef при обычной интеграции истории.
+- [x] 8.2 Закрыть согласованные821+428 QA namespaces/companions, sandbox45/closedBYNtransport13 и заменить V8 measurement thin existing mapcheck с прежним path guard; проверить retained existing validator test без новых framework/checkers/files.
+- [x] 8.3 После ACK A/B/C exact useful case vectors в existing169 suites удалить только mapped79 manual contours; UNKNOWN79/currentpins/warehouse94 guards KEEP. Учитывать все новые переносимые строки, не добиваться forecast сокращением assertions.
+- [ ] 8.4 После sourcefreeze обновить current README/map refs и actualnet; Root выполняет один общий local/types/lint/review/ordinaryCI/actualStage. До нового evidence не отмечать native/runtime/staging PASS; main/production/workingdata остаются вне scope.
+
+Source checkpoint глубокой итерации: все mapped79 manual/3817 LF retired по A/B/C keeper ACK; total104 literal file deletions, thincoverage380→69, два существующих Chrome файла +143LF; own168 rawLFnet−5316 до новых169 ports. A targeted28/28 и D stock5/5+warehouse4/4 PASS; combined native/HTTP/CI/Stage нового кандидата NOT_RUN, 8.4 остаётсяOPEN. Historical accepted61f9/CI266196с и priortracking2a234ef не переопределяются.

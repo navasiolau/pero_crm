@@ -6,11 +6,6 @@ const id="40"+"a".repeat(40);
 const reference=()=>{const data=new FormData();data.set("0",'"$h1"');data.set("1",JSON.stringify({id,bound:null}));return data;};
 const response=(value:unknown,f:unknown="",headers:Record<string,string>={})=>new Response(JSON.stringify({a:value,f}),{headers:{"content-type":"text/x-component",...headers}});
 const codec={encodeReference:async()=>reference(),encodeArguments:async(args:readonly unknown[])=>JSON.stringify(args),decode:async(res:Response)=>res.json()};
-test("registered proxy invocation stays serialized without independent transport (RED baseline)",async()=>{
- let release!:()=>void;const gate=new Promise<void>(done=>{release=done;});let invoked=0;
- let queue=Promise.resolve();const proxy=()=>{queue=queue.then(async()=>{invoked++;await gate;});return queue;};
- const first=proxy();const second=proxy();await Promise.resolve();assert.equal(invoked,1);release();await Promise.all([first,second]);assert.equal(invoked,2);
-});
 test("compact action calls send neighboring field while first ACK is still held",async()=>{
  let complete!:(res:Response)=>void;const slow=new Promise<Response>(done=>{complete=done;});const calls:RequestInit[]=[];let proxyCalls=0;
  const action=async(_input:{field:string})=>{void _input;proxyCalls++;throw Error("Next global proxy must not be invoked");};

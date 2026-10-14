@@ -45,11 +45,7 @@ test("таймаут зависит от размера: 60с до 25 МБ, до
   assert.ok(uploadTimeoutMsForSize(900 * MB) > mid, "таймаут растёт с размером");
 });
 
-test("таймаут по умолчанию выводится из размера файла, явный приоритетнее", async () => {
-  // Мелкий файл с медленным ответом в пределах 60с — успех без явного timeoutMs.
-  const slow = okFetcher(50);
-  const result = await sendFileUpload(item("photo.png", 3 * MB).attempt, { fetcher: slow });
-  assert.equal(result.ok, true);
+test("явный короткий таймаут прерывает медленный ответ", async () => {
   // Явный короткий таймаут по-прежнему прерывает.
   const timed = await sendFileUpload(item("photo.png", 3 * MB).attempt, { fetcher: okFetcher(100), timeoutMs: 5 });
   assert.equal(timed.ok, false);

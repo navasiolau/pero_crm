@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { createRequire, Module } from "node:module";
 import * as React from "react";
 import { createElement } from "react";
@@ -60,21 +59,4 @@ test("нижние секции постоянны, документы precede �
   assert.doesNotMatch(html, /role="tab|Материалы|История|Процентные этапы/);
   assert.match(html, /data-product-section="works"/);
   assert.match(html, /overflow-x-auto/);
-});
-test("страница подключает один keyed provider и прежние server ACL без вкладок истории", () => {
-  const page = readFileSync(new URL("../src/app/(app)/products/[id]/page.tsx", import.meta.url), "utf8");
-  assert.equal((page.match(/<ProductInlineProvider/g) ?? []).length, 1);
-  assert.match(page, /<ProductInlineProvider key=\{product.id\}/);
-  assert.match(page, /showMaterials \? getProjectMaterials/);
-  assert.match(page, /canEditTech=\{canEditTech\}/);
-  assert.doesNotMatch(page, /TabsTrigger|SurveyorLink|EngineeringFund|<FilesTab|statusHistory\.map/);
-  const cover = readFileSync(new URL("../src/app/(app)/products/[id]/product-sketch-view.tsx", import.meta.url), "utf8");
-  assert.match(cover, /data-slot="product-cover-header" className="order-1/);
-  assert.match(cover, /data-slot="product-cover-image"[^>]*order-2/);
-  assert.match(cover, /data-slot="product-cover-details" className="order-3/);
-  assert.match(cover, /lg:col-start-2 lg:row-start-1 lg:row-span-2/);
-  const documents = readFileSync(new URL("../src/components/product-attachments.tsx", import.meta.url), "utf8");
-  assert.match(documents, /@min-\[640px\]:grid-cols-2/);
-  assert.ok(documents.indexOf('data-product-documents-column="production"') < documents.indexOf('data-product-documents-column="installation"'));
-  assert.doesNotMatch(documents, /<ProductNoModel/);
 });

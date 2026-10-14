@@ -1,4 +1,4 @@
-const ENTRY="import React from 'react';import {createRoot} from 'react-dom/client';\nimport {ProductsTab} from '@/app/(app)/projects/[id]/products-tab';\nimport {ProductsKanban} from '@/app/(app)/products/products-kanban';\nimport {ProjectsTable} from '@/app/(app)/projects/projects-table';\nimport {ProductsTable} from '@/app/(app)/products/products-table';\nimport {ListParamsProvider} from '@/lib/list-params';\nconst query='view=kanban&q=qa160&active=0&sort=number&dir=asc';\nconst common={status:'DESIGN',statusChangedAt:'2026-10-01T00:00:00.000Z',quantity:1,\n expectedPrice:null,engineerId:null,engineerName:null,isEngineeringParticipant:false,hasB3d:false,noModel:true,\n currency:'BYN',projectStage:'IN_WORK',projectId:'qa160-project',projectNumber:'160',projectTitle:'Проект QA160',\n clientId:'qa160-client',clientName:'Клиент QA160',kind:null};\nconst rows=['a','b'].map((key,index)=>({...common,id:'qa160-'+key,number:'160.'+(index+1),title:'Карточка '+key.toUpperCase(),\n sketchFile:{id:'qa160-'+key+'-cover',fileName:'cover.png',mimeType:'image/png',hasThumb:true}}));\nconst projects=[{id:'qa160-project',number:'160',title:'Проект QA160',clientName:'Клиент QA160',currency:'BYN',\n totalPrice:null,stage:'IN_WORK',stageChangedAt:'2026-10-01T00:00:00.000Z',productsCount:2,\n managerName:null,coverFile:null,hasMaterialShortage:false}];\nconst roles=['ADMIN'],scope=location.pathname.slice(1);\nwindow.__qa={scope,pushes:[],unexpected:[],clicks:[],query};\ndocument.addEventListener('click',event=>window.__qa.clicks.push({trusted:event.isTrusted,\n cover:!!event.target.closest('[data-slot=\"product-kanban-image\"]')}),true);\nfunction App(){return <main style={{padding:16}}>{scope==='project'?\n <ProductsTab projectId=\"qa160-project\" projectStage=\"IN_WORK\" currency=\"BYN\" initialProducts={rows}\n canManage={false} actorRoles={roles} actorUserId=\"qa160-admin\" showAmount={false} engineerOptions={[]}/>:\n <ListParamsProvider section={scope==='project-table'?'projects':'products'} initialQuery={query} preference={null}>\n {scope==='global'?<ProductsKanban initialProducts={rows} actorRoles={roles} canManage={false} showAmount={false}/>:\n scope==='project-table'?<ProjectsTable projects={projects} total={1} page={1} pageSize={10} showAmount={false}\n onOpen={()=>window.__qa.unexpected.push('project-table-navigation')}/>:\n <ProductsTable products={rows} total={2} page={1} pageSize={10} showAmount={false}/>}\n </ListParamsProvider>}</main>;}\ncreateRoot(document.getElementById('root')).render(<App/>);\n";
+const ENTRY="import React from 'react';import {createRoot} from 'react-dom/client';\nimport {ProductsTab} from '@/app/(app)/projects/[id]/products-tab';\nimport {ProductsKanban} from '@/app/(app)/products/products-kanban';\nimport {ProjectsTable} from '@/app/(app)/projects/projects-table';\nimport {ProductsTable} from '@/app/(app)/products/products-table';\nimport {ListParamsProvider} from '@/lib/list-params';\nimport {ProductKanbanCard} from '@/components/product-kanban-card';import {ProjectKanbanCard} from '@/components/project-kanban-card';import {ProductHeroImage} from '@/components/product-hero-image';\nconst query='view=kanban&q=qa160&active=0&sort=number&dir=asc';\nconst common={status:'DESIGN',statusChangedAt:'2026-10-01T00:00:00.000Z',quantity:1,\n expectedPrice:null,engineerId:null,engineerName:null,isEngineeringParticipant:false,hasB3d:false,noModel:true,\n currency:'BYN',projectStage:'IN_WORK',projectId:'qa160-project',projectNumber:'160',projectTitle:'Проект QA160',\n clientId:'qa160-client',clientName:'Клиент QA160',kind:null};\nconst rows=['a','b'].map((key,index)=>({...common,id:'qa160-'+key,number:'160.'+(index+1),title:'Карточка '+key.toUpperCase(),\n sketchFile:{id:'qa160-'+key+'-cover',fileName:'cover.png',mimeType:'image/png',hasThumb:true}}));\nconst projects=[{id:'qa160-project',number:'160',title:'Проект QA160',clientName:'Клиент QA160',currency:'BYN',\n totalPrice:null,stage:'IN_WORK',stageChangedAt:'2026-10-01T00:00:00.000Z',productsCount:2,\n managerName:null,coverFile:null,hasMaterialShortage:false}];\nconst roles=['ADMIN'],scope=location.pathname.slice(1);\nwindow.__qa={scope,pushes:[],unexpected:[],clicks:[],query,naturalOpened:0,naturalBubbled:0};\ndocument.addEventListener('click',event=>window.__qa.clicks.push({trusted:event.isTrusted,\n cover:!!event.target.closest('[data-slot=\"product-kanban-image\"]')}),true);\nfunction Natural(){const [dragging,setDragging]=React.useState(false);return <><button id=\"natural-dragging\" onClick={()=>setDragging(!dragging)}>Переключить dragging</button><main className=\"grid grid-cols-1 gap-4 md:grid-cols-2\" style={{maxWidth:616,margin:16,alignItems:'start'}}>{['landscape','square','portrait','slow','fullscreen','broken','empty'].flatMap(shape=>['product','project'].map(kind=>{const cover=shape==='empty'?null:{id:'qa160-natural-'+shape,fileName:shape+'.png',mimeType:'image/png',hasThumb:true};return <div data-natural={kind+'-'+shape} key={kind+shape} onClick={()=>window.__qa.naturalBubbled++}>{kind==='product'?<ProductKanbanCard product={{...common,number:'224.2',title:shape+' — изделие',expectedPrice:'1000',quantity:3,sketchFile:cover}} showAmount currency=\"BYN\" dragging={dragging} coverAction={shape==='fullscreen'?{type:'fullscreen'}:{type:'navigate',onOpen:()=>window.__qa.naturalOpened++}}/>:<ProjectKanbanCard project={{...projects[0],number:'224',title:shape+' — проект',totalPrice:'3000',coverFile:cover}} showAmount dragging={dragging} onOpen={()=>window.__qa.naturalOpened++}/>}</div>;}))}</main><div data-detail style={{width:240,height:320}}><ProductHeroImage sketch={{id:'qa160-natural-portrait',fileName:'original.png',mimeType:'image/png',hasThumb:true}} preview=\"cover\" className=\"h-full w-full\"/></div></>;}\nfunction App(){return <main style={{padding:16}}>{scope==='project'?\n <ProductsTab projectId=\"qa160-project\" projectStage=\"IN_WORK\" currency=\"BYN\" initialProducts={rows}\n canManage={false} actorRoles={roles} actorUserId=\"qa160-admin\" showAmount={false} engineerOptions={[]}/>:\n <ListParamsProvider section={scope==='project-table'?'projects':'products'} initialQuery={query} preference={null}>\n {scope==='global'?<ProductsKanban initialProducts={rows} actorRoles={roles} canManage={false} showAmount={false}/>:\n scope==='project-table'?<ProjectsTable projects={projects} total={1} page={1} pageSize={10} showAmount={false}\n onOpen={()=>window.__qa.unexpected.push('project-table-navigation')}/>:\n <ProductsTable products={rows} total={2} page={1} pageSize={10} showAmount={false}/>}\n </ListParamsProvider>}</main>;}\ncreateRoot(document.getElementById('root')).render(scope==='natural'?<Natural/>:<App/>);\n";
 const BOUNDARIES={"next/navigation":"const unexpected=name=>{window.__qa.unexpected.push(name);throw Error('UNEXPECTED_QA_CALLBACK')};export const useRouter=()=>({push:href=>window.__qa.pushes.push(href),replace:()=>unexpected('replace'),refresh:()=>unexpected('refresh')});export const usePathname=()=>location.pathname;","next/link":"import React from 'react';export default function Link({children,...props}){return <a {...props}>{children}</a>}","@/server/products/actions":"const reject=()=>{window.__qa.unexpected.push('products-action');throw Error('UNEXPECTED_SERVER_ACTION')};export async function changeProductStatus(){return reject()}export async function createProduct(){return reject()}","@/server/projects/stage-actions":"export async function patchProjectStage(){window.__qa.unexpected.push('project-stage-action');throw Error('UNEXPECTED_SERVER_ACTION')}","@/server/list-preferences-actions":"export async function saveListPreference(){window.__qa.unexpected.push('save-list-preference');throw Error('UNEXPECTED_SERVER_ACTION')}","@/server/projects/actions":"export async function createProject(){window.__qa.unexpected.push('create-project');throw Error('UNEXPECTED_SERVER_ACTION')}","@/server/clients/actions":"export async function createClient(){window.__qa.unexpected.push('create-client');throw Error('UNEXPECTED_SERVER_ACTION')}"};
 // Проверяет реальные client components в Chromium; данные и transport синтетические.
 import assert from 'node:assert/strict';
@@ -19,10 +19,10 @@ const fail=(code,phase,evidence)=>{throw new CardBrowserFailure(code,phase,evide
 export function fixtureRequestAllowed(method,url){
  const parsed=new URL(url,'http://qa160.invalid');
  if(method!=='GET'||parsed.origin!=='http://qa160.invalid')return false;
- if(['/project','/global','/project-table','/product-table'].includes(parsed.pathname))
+ if(['/project','/global','/project-table','/product-table','/natural'].includes(parsed.pathname))
   return parsed.searchParams.size===1&&parsed.searchParams.has('variant')&&VARIANTS.includes(parsed.searchParams.get('variant'));
  return parsed.search===''&&(parsed.pathname==='/app.css'||VARIANTS.some(v=>parsed.pathname==='/bundles/'+v+'.js'))||
-  ['/api/files/qa160-a-cover','/api/files/qa160-b-cover'].includes(parsed.pathname)&&
+  ['/api/files/qa160-a-cover','/api/files/qa160-b-cover',...['landscape','square','portrait','slow','fullscreen','broken'].map(shape=>'/api/files/qa160-natural-'+shape)].includes(parsed.pathname)&&
   (parsed.searchParams.size===0||(parsed.searchParams.size===1&&parsed.searchParams.has('preview')&&['card','cover'].includes(parsed.searchParams.get('preview'))));
 }
 export async function launchCardBrowser(launch){
@@ -147,6 +147,39 @@ async function closeOwned(browser,server){
  const promises=[];if(browser)promises.push(browser.close());if(server?.listening){server.closeAllConnections();promises.push(new Promise((resolve,reject)=>server.close(error=>error?reject(error):resolve())));}
  return(await Promise.allSettled(promises)).filter(result=>result.status==='rejected').map(result=>result.reason);
 }
+async function naturalImages(browser,origin,expect,release){
+ const sizes={landscape:[1600,400],square:[800,800],portrait:[200,2000]},checks=[];
+ for(const viewport of [{width:1440,height:900},{width:390,height:844},{width:360,height:800}]){
+  const page=await browser.newPage({viewport}),errors=[];page.on('pageerror',error=>errors.push(error.message));
+  const geometry=img=>img.evaluate(image=>{const r=image.getBoundingClientRect(),p=image.parentElement.getBoundingClientRect(),style=getComputedStyle(image);return{width:r.width,height:r.height,left:r.left-p.left,top:r.top-p.top,right:p.right-r.right,bottom:p.bottom-r.bottom,fit:style.objectFit,position:style.objectPosition,naturalWidth:image.naturalWidth,naturalHeight:image.naturalHeight};});
+  const frame=(box,label)=>{assert.ok(box.width>0&&Math.abs(box.height-box.width*4/3)<1,label);for(const edge of ['left','top','right','bottom'])assert.ok(Math.abs(box[edge])<1,label+' '+edge);};
+  try{
+   release(false);await page.goto(origin+'/natural?variant=baseline',{waitUntil:'domcontentloaded'});
+   for(const kind of ['product','project']){const img=page.locator(`[data-natural="${kind}-slow"] img`);await img.scrollIntoViewIfNeeded();frame(await geometry(img),kind+' loading');assert.equal(await img.evaluate(image=>image.complete),false);}
+   release(true);
+   for(const kind of ['product','project']){
+    for(const[shape,[width,height]]of Object.entries(sizes)){
+     const img=page.locator(`[data-natural="${kind}-${shape}"] img`);await img.scrollIntoViewIfNeeded();await expect.poll(()=>img.evaluate(image=>image.complete&&image.naturalWidth>0)).toBe(true);
+     const box=await geometry(img);frame(box,kind+' '+shape);assert.equal(box.fit,'cover');assert.equal(box.position,'50% 50%');assert.deepEqual([box.naturalWidth,box.naturalHeight],[width,height]);
+    }
+    const slow=page.locator(`[data-natural="${kind}-slow"] img`);await slow.scrollIntoViewIfNeeded();await expect.poll(()=>slow.evaluate(image=>image.complete&&image.naturalWidth>0)).toBe(true);frame(await geometry(slow),kind+' loaded');
+    const broken=page.locator(`[data-natural="${kind}-broken"]`);await broken.scrollIntoViewIfNeeded();const placeholder=broken.getByRole('img',{name:'Эскиз не загрузился'});await expect(placeholder).toBeVisible();const box=await placeholder.boundingBox();assert.ok(Math.abs(box.height-box.width*4/3)<1);
+    const empty=page.locator(`[data-natural="${kind}-empty"]`);assert.equal(await empty.locator('img,[role="img"]').count(),0);assert.ok((await empty.boundingBox()).height<200);
+   }
+   const detail=page.locator('[data-detail] img');await detail.scrollIntoViewIfNeeded();await expect.poll(()=>detail.evaluate(image=>image.complete&&image.naturalWidth>0)).toBe(true);assert.equal((await geometry(detail)).fit,'contain');assert.equal(await detail.getAttribute('src'),'/api/files/qa160-natural-portrait?preview=cover');
+   for(const kind of ['project','product'])await page.locator(`[data-natural="${kind}-landscape"] button`).click();assert.equal(await page.evaluate(()=>window.__qa.naturalOpened),2);assert.equal(await page.evaluate(()=>window.__qa.naturalBubbled),0);
+   await page.locator('[data-natural="product-fullscreen"] button').click();const full=page.getByRole('dialog').locator('img');await expect(full).toBeVisible();await expect.poll(()=>full.evaluate(image=>image.complete&&image.naturalWidth>0)).toBe(true);assert.equal(await full.getAttribute('src'),'/api/files/qa160-natural-fullscreen');assert.equal((await geometry(full)).fit,'contain');
+   await page.getByRole('button',{name:'Закрыть полноэкранный просмотр',exact:true}).click();await expect(page.getByRole('dialog')).toHaveCount(0);
+   await page.locator('#natural-dragging').click();for(const kind of ['product','project'])await expect(page.locator(`[data-natural="${kind}-landscape"] button`)).toBeDisabled();
+   await page.locator('#natural-dragging').click();await page.setViewportSize({width:viewport.width-20,height:viewport.height});for(const kind of ['product','project'])frame(await geometry(page.locator(`[data-natural="${kind}-portrait"] img`)),kind+' resized');
+   await page.setViewportSize(viewport);await page.reload({waitUntil:'domcontentloaded'});
+   for(const kind of ['product','project'])for(const shape of ['landscape','square','portrait','slow','fullscreen']){const img=page.locator(`[data-natural="${kind}-${shape}"] img`);await img.scrollIntoViewIfNeeded();await expect.poll(()=>img.evaluate(image=>image.complete&&image.naturalWidth>0)).toBe(true);frame(await geometry(img),kind+' cached '+shape);}
+   assert.deepEqual(errors,[]);checks.push({width:viewport.width,shapes:3,loading:true,broken:true,detail:true,fullscreen:true,resize:true,cached:true});
+  }finally{release(true);await page.close();}
+ }
+ return checks;
+}
+
 export async function runProductCardNavigationGate(){
  let browser,server,failure,hasFailure=false,receipt;
  try{
@@ -159,11 +192,18 @@ export async function runProductCardNavigationGate(){
   const fixtures={};for(const variant of VARIANTS)fixtures[variant]=await compileFixture(variant,{build,ts});
   const postcss=createRequire(require.resolve('@tailwindcss/postcss'))('postcss'),tailwind=require('@tailwindcss/postcss'),cssSource=await readFile(path.join(SOURCE,'app/globals.css'));
   const css=(await postcss([tailwind({base:WEB})]).process(cssSource.toString('utf8'),{from:path.join(SOURCE,'app/globals.css')})).css;
+  const sharp=require('sharp'),assets=new Map();for(const[shape,width,height]of [['landscape',1600,400],['square',800,800],['portrait',200,2000]])assets.set(shape,await sharp({create:{width,height,channels:3,background:'#497b89'}}).png().toBuffer());
+  let slowReleased=true;const slowResponses=[];
+  const release=value=>{slowReleased=value;if(value){for(const pending of slowResponses)pending.end(assets.get('landscape'));slowResponses.length=0;}};
   const httpUnexpected=[];
   server=createServer((request,response)=>{
    if(!fixtureRequestAllowed(request.method,request.url)){httpUnexpected.push('UNEXPECTED_HTTP_REQUEST');response.writeHead(405);response.end();return;}
    const url=new URL(request.url,'http://qa160.invalid');
-   if(url.pathname.startsWith('/api/files/')){response.setHeader('content-type','image/png');response.end(IMAGE);return;}
+   if(url.pathname.startsWith('/api/files/')){
+    const shape=url.pathname.replace('/api/files/qa160-natural-','');if(shape==='broken'){response.writeHead(404);response.end();return;}
+    response.setHeader('content-type','image/png');response.setHeader('cache-control','public,max-age=3600');
+    if(shape==='slow'&&!slowReleased)slowResponses.push(response);else response.end(assets.get(shape==='slow'||shape==='fullscreen'?'landscape':shape)??IMAGE);return;
+   }
    if(url.pathname==='/app.css'){response.setHeader('content-type','text/css');response.end(css);return;}
    if(url.pathname.startsWith('/bundles/')){response.setHeader('content-type','text/javascript');response.end(fixtures[url.pathname.split('/').at(-1).slice(0,-3)].bytes);return;}
    response.setHeader('content-type','text/html');
@@ -179,7 +219,7 @@ export async function runProductCardNavigationGate(){
    assert.equal(error.evidence.ready,true);assert.equal(error.evidence.trusted,true);
    mutants.push({variant,scope,killed:true,code:error.code,phase:error.phase,provenanceAccepted:true,ready:true,trusted:true});
   }
-  const numbers=await mobileNumbers(browser,origin,expect);assert.deepEqual(httpUnexpected,[]);
+  const numbers=await mobileNumbers(browser,origin,expect),natural=await naturalImages(browser,origin,expect,release);assert.deepEqual(httpUnexpected,[]);
   for(const variant of VARIANTS)for(const[file,expected]of fixtures[variant].files)assert.equal(sha(await readFile(file)),expected,'INPUT_CHANGED_DURING_RUN');
   assert.equal(sha(await readFile(path.join(SOURCE,'app/globals.css'))),sha(cssSource),'CSS_CHANGED_DURING_RUN');
   for(const[file,expected]of configuration)assert.equal(sha(await readFile(file)),expected,'CONFIGURATION_CHANGED_DURING_RUN');assert.equal(sha(await readFile(fileURLToPath(import.meta.url))),producerBefore,'PRODUCER_CHANGED_DURING_RUN');
@@ -189,7 +229,7 @@ export async function runProductCardNavigationGate(){
    await writeFile(path.join(directory,variant+'.metafile.json'),JSON.stringify(fixture.metafile,null,2)+'\n',{flag:'wx'});provenance.push(manifest);
   }
   receipt={status:'COMPONENT_RUNTIME_PASS',scope:'real-client-components-synthetic-transport',stagingStatus:'NOT_RUN',browser:browser.version(),react:require('react/package.json').version,playwright:require('@playwright/test/package.json').version,
-   producerSha256:sha(await readFile(fileURLToPath(import.meta.url))),checks,mutants,numbers,sourceUnchanged:true,fullAppACL:'NOT_PROVEN',directory,provenance:provenance.map(p=>({variant:p.variant,bundleSha256:p.bundleSha256,metafileSha256:p.metafileSha256,inputs:p.inputs.length}))};
+   producerSha256:sha(await readFile(fileURLToPath(import.meta.url))),checks,mutants,numbers,natural,sourceUnchanged:true,fullAppACL:'NOT_PROVEN',directory,provenance:provenance.map(p=>({variant:p.variant,bundleSha256:p.bundleSha256,metafileSha256:p.metafileSha256,inputs:p.inputs.length}))};
  }catch(error){hasFailure=true;failure=error;}
  const cleanupErrors=await closeOwned(browser,server);
  if(cleanupErrors.length)throw new AggregateError(hasFailure?[failure,...cleanupErrors]:cleanupErrors,'OWN_BROWSER_SERVER_CLEANUP_FAILED');

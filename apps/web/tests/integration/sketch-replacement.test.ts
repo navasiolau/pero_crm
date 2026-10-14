@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { authorizeProductCoverUpload, persistUploadedProductCover, deleteProductSketchCore, bindProductSketchCore, setProductCoverCore } from "../../src/server/products/cover-core";
+import { nativeSnapshot } from "../helpers/native-acceptance-snapshot";
 import test from "node:test";
 import sharp from "sharp";
 import { acceptedSketch, createHttpS3Fixture } from "./http-s3.fixture";
@@ -132,6 +134,46 @@ test("media.sketch: настоящие upload, receipts, CAS, аудит и exac
     pointer = ids[0]; successfulCovers++; await assertNotifications(duplicate.fileName, engineer.id);
     const before = await snapshot(); const superseded = await f.upload(engineer, assigned.upload);
     assert.equal(superseded.response.status, 409); assert.equal(superseded.body.kind, "conflict"); assert.deepEqual(await snapshot(), before);
+    await f.rollback(async tx => {
+      const current = await tx.file.findUniqueOrThrow({ where: { id: pointer } }), actor = { ...manager, source: "web" as const };
+      const target = { productId: product.id, projectId: project.id, expectedSketchFileId: pointer, clientMutationId: randomUUID() };
+      const image = { fileName: "separate.png", storedName: randomUUID() + ".png", mimeType: "image/png", size: png.length,
+        hasThumb: true, uploadedById: manager.id, contentHash: createHash("sha256").update(png).digest("hex") };
+      const alias = await tx.file.create({ data: { projectId: project.id, productId: product.id, fileName: "alias.png", storedName: current.storedName,
+        mimeType: "image/png", size: png.length, hasThumb: true, uploadedById: manager.id } });
+      let stable = await nativeSnapshot(tx);
+      assert.equal((await authorizeProductCoverUpload(tx, actor, target)).ok, false);
+      assert.equal((await persistUploadedProductCover(tx, actor, target, image)).ok, false);
+      assert.deepEqual(await nativeSnapshot(tx), stable); await tx.file.delete({ where: { id: alias.id } });
+      await tx.project.update({ where: { id: project.id }, data: { coverFileId: pointer } }); stable = await nativeSnapshot(tx);
+      assert.equal((await persistUploadedProductCover(tx, actor, target, image)).ok, false); assert.deepEqual(await nativeSnapshot(tx), stable);
+      await tx.project.update({ where: { id: project.id }, data: { coverFileId: null } }); stable = await nativeSnapshot(tx);
+      assert.equal((await persistUploadedProductCover(tx, actor, target, { ...image, storedName: current.storedName })).ok, false);
+      assert.equal((await setProductCoverCore(tx, actor, product.id, pointer)).ok, false); assert.deepEqual(await nativeSnapshot(tx), stable);
+      for (const operation of ["bind", "delete"] as const) {
+        await tx.$executeRawUnsafe("SAVEPOINT ci169_sketch_receipt");
+        try {
+        await tx.product.update({ where: { id: product.id }, data: { sketchFileId: operation === "bind" ? null : pointer } });
+        const nonce = randomUUID(), bind = { productId: product.id, fileId: pointer, expectedSketchFileId: null, clientMutationId: nonce };
+        const remove = { productId: product.id, expectedSketchFileId: pointer, clientMutationId: nonce };
+        const first = operation === "bind" ? await bindProductSketchCore(tx, actor, bind) : await deleteProductSketchCore(tx, actor, remove);
+        assert.equal(first.ok, true);
+        const upload = await persistUploadedProductCover(tx, actor, { ...target, expectedSketchFileId: operation === "bind" ? pointer : null, clientMutationId: randomUUID() },
+          { ...image, storedName: randomUUID() + ".png" }); assert.equal(upload.ok, true); stable = await nativeSnapshot(tx);
+        const replay = operation === "bind" ? await bindProductSketchCore(tx, actor, bind) : await deleteProductSketchCore(tx, actor, remove);
+        assert.equal(replay.ok, false); if (!replay.ok) { assert.equal(replay.kind, "conflict"); assert.equal(replay.currentSketchFileId, upload.ok && upload.id); }
+        assert.deepEqual(await nativeSnapshot(tx), stable);
+        } finally { await tx.$executeRawUnsafe("ROLLBACK TO SAVEPOINT ci169_sketch_receipt"); await tx.$executeRawUnsafe("RELEASE SAVEPOINT ci169_sketch_receipt"); }
+      }
+      await tx.product.update({ where: { id: product.id }, data: { sketchFileId: null } });
+      const input = { productId: product.id, expectedSketchFileId: pointer, clientMutationId: randomUUID() };
+      const result = { ok: true, sketchFileId: null, clientMutationId: input.clientMutationId,
+        storageIntent: { projectId: project.id, storedName: current.storedName, hasThumb: current.hasThumb } };
+      await tx.changeLog.create({ data: { id: "product-sketch:" + input.clientMutationId, actorType: "user", actorId: manager.id, entity: "product", entityId: product.id,
+        action: "cover.delete.receipt", newValue: { fingerprint: createHash("sha256").update(JSON.stringify({ operation: "delete", ...input })).digest("hex"), result } } });
+      stable = await nativeSnapshot(tx); assert.deepEqual(await deleteProductSketchCore(tx, actor, input), { ...result, repeated: true });
+      assert.deepEqual(await nativeSnapshot(tx), stable);
+    });
   });
   const after = await snapshot(); assert.equal(after.product.sketchFileId, pointer);
   assert.deepEqual(unchangedFields(after.product), unchangedFields(product)); assert.deepEqual(await f.db.project.findUnique({ where: { id: project.id } }), project);

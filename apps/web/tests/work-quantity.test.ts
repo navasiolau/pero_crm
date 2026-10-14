@@ -3,13 +3,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { remainingWorkQuantity, stepWorkQuantity } from "../src/lib/work-quantity";
 import { quantityAtoms, allocatedWorkQuantity, taskPieceAmount } from "../src/lib/work-shares";
-import { randomUUID } from "node:crypto";
-import { type DomainActor } from "../src/server/projects/core";
-import { splitTaskCore, type SplitTaskInput } from "../src/server/tasks/share-core";
-import { taskShareFixture, historicalTaskAllocation } from "./helpers/task-share-fixture";
-import { canSplitTask } from "../src/server/tasks/share-policy";
 import { taskPaymentLabel } from "../src/lib/task-payment-display";
-import { TaskSplitDialog } from "../src/components/task-split-dialog";
 import { requiresManualCompletionTime } from "../src/lib/task-completion-prompt";
 import { createElement } from "react";
 import { renderToString } from "react-dom/server";
@@ -50,86 +44,11 @@ test("all additive DDL is enclosed in one explicit transaction", () => {
   assert.doesNotMatch(sql, /\bCONCURRENTLY\b/);
 });
 
-// Источник: work-shares-core.test.ts
-const actor:DomainActor={id:'worker',name:'Worker',roles:['WORKER'],source:'web'};
-const input=(changes:Partial<SplitTaskInput>={}):SplitTaskInput=>({taskId:'source',recipientId:'recipient',percent:'30',expectedRevision:0,requestId:randomUUID(),...changes});
-test('retirement rejects inactive recipients, stale revision, completed/paid and standalone tasks without modifying state',async()=>{
- for(const variation of ['inactive','stale','done','paid','standalone','oldgroup']) {
- const f=taskShareFixture(); const request=input();
- if(variation==='inactive')f.state().users.find(user=>user.id==='recipient')!.active=false;
- if(variation==='stale')request.expectedRevision=5;
- if(variation==='done')f.state().tasks[0].status='DONE';
- if(variation==='paid')f.state().entries.push({id:'paid',taskId:'source',amount:'1000.00'});
- if(variation==='standalone')f.state().tasks[0].workId=null;
- if(variation==='oldgroup')historicalTaskAllocation(f);
- const before=structuredClone(f.state());
- assert.equal((await splitTaskCore(actor,request,f.transaction)).ok,false,variation);
- assert.deepEqual(f.state(),before);assert.deepEqual(f.writes,[]);
- }
-});
-test('prior committed receipt replays only the same actor and exact payload without writes',async()=>{
- const f=taskShareFixture();historicalTaskAllocation(f);const request=input();
- f.state().logs.push({id:`task-split:${request.requestId}`,actorId:'worker',entityId:'source',action:'split',newValue:{recipientId:'recipient',percent:'30.00',expectedRevision:0,childTaskId:'historic-child',groupId:'historic-group'}});
- const before=structuredClone(f.state());
- const replay=await splitTaskCore(actor,request,f.transaction);assert.ok(replay.ok);assert.equal(replay.repeated,true);
- for(const change of [{percent:'50'},{recipientId:'accountant'},{expectedRevision:1}])assert.equal((await splitTaskCore(actor,{...request,...change},f.transaction)).ok,false);
- assert.equal((await splitTaskCore({...actor,id:'manager',roles:['MANAGER']},request,f.transaction)).ok,false);
- assert.deepEqual(f.state(),before);assert.deepEqual(f.writes,[]);
-});
-test('concurrent new requests create no allocation, children, dependencies, audit or outbox',async()=>{
- const f=taskShareFixture();const before=structuredClone(f.state());
- const results=await Promise.all([splitTaskCore(actor,input(),f.transaction),splitTaskCore(actor,input(),f.transaction)]);
- assert.ok(results.every(result=>!result.ok));assert.deepEqual(f.state(),before);assert.deepEqual(f.writes,[]);
-});
-
-// Источник: task-share-retirement.test.ts
-for (const roles of [['ADMIN'],['DIRECTOR'],['MANAGER'],['WORKER'],['MOUNTER'],['ACCOUNTANT'],['ENGINEER'],['MANAGER','ENGINEER']] as DomainActor['roles'][]) {
- test(`new split denied without writes ${roles}`,async()=>{
- const f=taskShareFixture(); const actor:DomainActor={id:roles.includes('WORKER')?'worker':'manager',name:'actor',roles,source:'web'};
- const result=await splitTaskCore(actor,{taskId:'source',recipientId:'recipient',percent:'30',expectedRevision:0,requestId:randomUUID()},f.transaction);
- assert.equal(result.ok,false); assert.deepEqual(f.writes,[]);
- assert.equal(canSplitTask(actor,{assigneeId:actor.id,status:'NEW',product:null,paidCount:0}),false);
- });
-}
 test('historical grouped budget counts quantity once and preserves fixed40+60',()=>{
  const rows=[{quantity:'10',allocationGroupId:'old',shareAmount:'40',executorShare:'0.4'},{quantity:'10',allocationGroupId:'old',shareAmount:'60',executorShare:'0.6'}];
  assert.equal(allocatedWorkQuantity(rows),'10.00');
  assert.deepEqual(rows.map(row=>taskPieceAmount(row,'10')),['40.00','60.00']);
  assert.equal(taskPieceAmount({quantity:'4',executorShare:'0.5',shareAmount:null},'10'),'20.00');
-});
-
-// Источник: task-share-retired-ui.test.ts
-test("task and personal views expose no stale split launcher regardless of canSplit projection",()=>{
- for(const path of ["src/components/task-dialog.tsx","src/app/(app)/my/my-tasks-view.tsx"]){
-  const source=readFileSync(path,"utf8");
-  assert.equal(/TaskSplitDialog|setSplitOpen|setSplitFor|Разделить/.test(source),false);
-  assert.doesNotMatch(source,/sharePercent\(task.shareUnits\)|Сумма доли|Доля прежнего фонда|Ваша доля|Доля объёма/);
-  assert.match(source,/taskPaymentLabel\(task\)/);assert.match(source,/Вознаграждение/);
- }
-});
-test("percentage settings cannot launch transfer or change participant allocation",()=>{
- const source=readFileSync("src/app/(app)/products/[id]/product-percentage-panel.tsx","utf8");
- assert.equal(/transferProductPercentageShareAction|transferShare|addParticipant|removeParticipant|Добавить участника|Передать долю/.test(source),false);
- assert.equal(/participants:\s*configuredShares/.test(source),false);
- assert.doesNotMatch(source,/Сохранённый результат этапа|Прежнее начисление, только история/);
- assert.doesNotMatch(source,/shareUnitsToPercentageText\(row.shareUnits\)/);
-});
-
-test("stale split dialog is inert for every role/combined role even when old projection says canSplit",()=>{
- let commands=0;
- for(const roles of [["ADMIN"],["DIRECTOR"],["MANAGER"],["ENGINEER"],["ACCOUNTANT"],["WORKER"],["MOUNTER"],["MANAGER","ENGINEER"]]){
-  const props={task:{id:"legacy-task",title:"Old unfinished",roles,canSplit:true},open:true,onOpenChange:()=>{commands++},onDone:()=>{commands++}};
-  assert.equal(TaskSplitDialog(props),null);
- }
- assert.equal(commands,0);
-});
-
-test("historical 40+60 snapshots remain exact and group quantity counts once",()=>{
- const left={quantity:"10.00",executorShare:"0.400",allocationGroupId:"legacy-group",shareUnits:400000,shareAmount:"40.00"};
- const right={...left,executorShare:"0.600",shareUnits:600000,shareAmount:"60.00"};
- assert.equal(allocatedWorkQuantity([left,right]),"10.00");
- assert.equal(taskPieceAmount(left,"999.00"),"40.00");assert.equal(taskPieceAmount(right,"999.00"),"60.00");
- assert.equal(taskPieceAmount({quantity:"10.00",executorShare:"0.400"},"10.00"),"40.00");
 });
 
 test("ordinary quantity distribution 4+6 of10 keeps full per-task pay and no remaining excess",()=>{

@@ -125,6 +125,13 @@ export async function createHttpS3Fixture(scenarioId: string) {
     } finally { await pg.db.$executeRawUnsafe(`DROP FUNCTION "${name}"()`); }
   }
   async function put(key: string, bytes: Uint8Array, contentType: string) {
+    if (key.startsWith("finance-documents/") && !documents.has(key)) {
+      assert.match(key, /^finance-documents\/[0-9a-f-]{36}\/[a-f0-9]{64}$/);
+      const row = await pg.db.financeDocument.findFirst({ where: { storageKey: key,
+        uploadedById: { startsWith: `ci169-${target.runId}-${target.attempt}-${scenarioId}-` } } });
+      assert.ok(row); assert.equal(row.storageMode, "s3");
+      assert.equal(key, `finance-documents/${row.id}/${row.contentHash}`); documents.add(key);
+    }
     const result = await s3.send(new PutObjectCommand({ Bucket: bucket, Key: ownedKey(key), Body: bytes, ContentType: contentType }));
     assert.ok(result.VersionId && result.VersionId !== "null"); return result.VersionId;
   }
@@ -163,10 +170,11 @@ export async function createHttpS3Fixture(scenarioId: string) {
     const response = await request("/api/files/upload", actor, { method: "POST", body: form });
     return { response, body: await response.json() as UploadReply["body"] };
   }
-  async function financeUpload(actor: HttpActor | undefined, input: { fileName: string; mimeType: string; bytes: Uint8Array; clientMutationId: string }) {
+  async function financeUpload(actor: HttpActor | undefined, input: { fileName: string; mimeType: string; bytes: Uint8Array; clientMutationId: string }, bot?: { token: string; actorId?: string }) {
     const form = new FormData(); form.append("file", new File([new Uint8Array(input.bytes)], input.fileName, { type: input.mimeType }));
     form.append("clientMutationId", input.clientMutationId);
-    const response = await request("/api/finance/documents/upload", actor, { method: "POST", body: form });
+    const response = await request(bot ? "/api/v1/bot/documents/upload" : "/api/finance/documents/upload", bot ? undefined : actor,
+      { method: "POST", body: form, headers: bot ? { Authorization: "Bearer " + bot.token, "x-acting-user": bot.actorId ?? actor?.id ?? "" } : undefined });
     const row = await pg.db.financeDocument.findUnique({ where: { clientMutationId: input.clientMutationId } });
     if (row) { assert.ok(row.uploadedById.startsWith(`ci169-${target.runId}-${target.attempt}-${scenarioId}-`)); assert.match(row.storageKey, /^finance-documents\/[0-9a-f-]{36}\/[a-f0-9]{64}$/); documents.add(row.storageKey); }
     return { response, body: await response.json() as { ok?: boolean; document?: FinanceDocumentView; repeated?: boolean; code?: string } };

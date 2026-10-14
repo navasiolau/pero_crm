@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { after, before, test } from "node:test";
 import { Prisma, type PrismaClient, type Role } from "@prisma/client";
@@ -8,6 +8,7 @@ import { payrollMonth, payrollMonthRange } from "../../src/lib/payroll-month";
 import type { CashRates } from "../../src/lib/cash-ledger";
 import type { CashPayoutInput, PayoutActor } from "../../src/server/payroll/cash-core";
 import type { PaymentInput } from "../../src/server/payments/contracts";
+import { stockPurchaseSchema } from "../../src/server/warehouse/contracts";
 import { activePaymentWhere } from "../../src/server/payments/active-records";
 import { guardedModuleCache } from "../helpers/guarded-module-cache";
 import { nativeSnapshot } from "../helpers/native-acceptance-snapshot";
@@ -33,6 +34,9 @@ let stockDeletion: typeof import("../../src/server/warehouse/deletion-core");
 let trips: typeof import("../../src/server/logistics/core"), logistics: typeof import("../../src/server/logistics/posting-core");
 let logisticsQueries: typeof import("../../src/server/logistics/money-query-core");
 let logisticsDocuments: typeof import("../../src/server/logistics/documents"), logisticsViews: typeof import("../../src/server/logistics/query-core"), logisticsHttp: typeof import("../../src/server/logistics/http");
+let economics: typeof import("../../src/server/finance/queries"), productActions: typeof import("../../src/server/products/actions");
+let statements: typeof import("../../src/server/finance/cash-statement"), workspaces: typeof import("../../src/server/finance/project-workspace");
+let productCore: typeof import("../../src/server/products/core"), projectStages: typeof import("../../src/server/projects/stage-core");
 const session = new AsyncLocalStorage<{ db: PrismaClient | Prisma.TransactionClient; actor: PayoutActor }>();
 const dispatches: string[] = [], cachePaths: string[] = [];
 let rateReads = 0, savepoint = 0;
@@ -58,19 +62,22 @@ before(async () => {
     return typeof value === "function" ? value.bind(db) : value;
   } });
   const anchor = new URL("../ci169-finance-scope.ts", import.meta.url).href, require = createRequire(anchor);
-  const targets = ["payroll/actions", "payments/service", "payments/delete-core", "finance/organization-ledger", "products/status-core",
+  const targets = ["payroll/actions", "payments/service", "payments/delete-core", "finance/organization-ledger", "finance/queries", "finance/cash-statement", "finance/project-workspace", "products/core", "projects/stage-core", "products/status-core", "products/actions",
     "warehouse/accounting", "warehouse/stock-purchase-core", "warehouse/deletion-core", "logistics/core", "logistics/documents", "logistics/query-core", "logistics/http", "logistics/posting-core", "logistics/money-query-core"].map(path => `../src/server/${path}`);
   scope = guardedModuleCache(anchor, {
     targets, prisma: facade,
-    allowedOverrides: ["next/cache", "../src/server/require-role", "../src/server/finance/nbrb", "../src/server/plugins/events"],
+    allowedOverrides: ["../src/auth", "next/cache", "../src/server/require-role", "../src/server/finance/nbrb", "../src/server/plugins/events"],
     overrides: {
+      "../src/auth": { auth: async () => ({ user: session.getStore()!.actor }) },
       "next/cache": { revalidatePath: (path: string) => cachePaths.push(path) },
-      "../src/server/require-role": { requireFinance: async () => ({ user: session.getStore()!.actor }), requireAdmin: async () => ({ user: session.getStore()!.actor }) },
+      "../src/server/require-role": { requireFinance: async () => ({ user: session.getStore()!.actor }), requireAdmin: async () => ({ user: session.getStore()!.actor }), requireUser: async () => ({ user: session.getStore()!.actor }) },
       "../src/server/finance/nbrb": { isCurrency: (value: string) => ["BYN", "USD", "EUR", "RUB"].includes(value),
         getNbrbRate: async (currency: string) => { rateReads++; return { rate: currency === "USD" ? 3 : currency === "RUB" ? 0.03 : 1, date: new Date().toISOString().slice(0, 10) }; } },
       "../src/server/plugins/events": { dispatchEvent: async (id: string) => { dispatches.push(id); } },
     },
   });
+  productCore = scope.load("../src/server/products/core"); projectStages = scope.load("../src/server/projects/stage-core"); economics = scope.load("../src/server/finance/queries");
+  statements = scope.load("../src/server/finance/cash-statement"); workspaces = scope.load("../src/server/finance/project-workspace");
   stock = scope.load("../src/server/warehouse/accounting"); trips = scope.load("../src/server/logistics/core");
   logisticsDocuments = scope.load("../src/server/logistics/documents"); logisticsViews = scope.load("../src/server/logistics/query-core");
   logisticsHttp = scope.load("../src/server/logistics/http");
@@ -79,6 +86,7 @@ before(async () => {
   actions = scope.load("../src/server/payroll/actions"); payments = scope.load("../src/server/payments/service");
   paymentDelete = scope.load("../src/server/payments/delete-core"); ledger = scope.load("../src/server/finance/organization-ledger");
   statuses = scope.load("../src/server/products/status-core");
+  productActions = scope.load("../src/server/products/actions");
   // Эти модули уже загружены дочерними real entrypoints и принадлежат тому же cache scope.
   cash = require("../src/server/payroll/cash-core"); service = require("../src/server/payroll/cash-service");
   payroll = require("../src/server/payroll/queries"); turnover = require("../src/server/payroll/turnover-core");
@@ -227,6 +235,11 @@ for (const linked of [false, true]) test(`payment/report-owner-ready-context-rep
   const c = await paymentContext(tx, rows, linked), other = actorFor(await rows.user("other", ["PROCUREMENT"])), before = await money(tx);
   for (const change of [{ reportDocumentId: undefined }, { reportDocumentId: randomUUID() }])
     await assert.rejects(payments.createPaymentInTransaction(c.actor, { ...c.input, ...change }, c.prepared, tx), /документ/i);
+  for (const forged of [{ skipReportDocument: true }, { source: "warehouse" }]) {
+    const watched = observed(tx), input = { ...c.input, ...forged, reportDocumentId: undefined, clientMutationId: randomUUID() };
+    await assert.rejects(payments.createPaymentInTransaction(c.actor, input, c.prepared, watched.tx), error => error instanceof Error && error.name === "ZodError");
+    assert.equal(watched.calls.length, 0, "CLIENT_POLICY_FLAGS_REFUSED_BEFORE_SQL");
+  }
   await assert.rejects(payments.createPaymentInTransaction(other, c.input, c.prepared, tx), /документ/i);
   await tx.financeDocument.update({ where: { id: c.document.id }, data: { state: "PENDING", readyAt: null } });
   const pending = await tx.financeDocument.findUniqueOrThrow({ where: { id: c.document.id }, include: { payment: true } });
@@ -321,6 +334,9 @@ test("payment/foreign-preflight-decimal-snapshots-article-fences-and-delete-caps
   assert.equal(await tx.payment.count({ where: { reportDocumentId: articleDocument.id } }), 0);
   c.input.reportDocumentId = articleDocument.id;
   const prepared = await preparation.preparePayment(c.input, tx), baseline = await money(tx);
+  const forgedIncome = observed(tx);
+  await assert.rejects(payments.createPaymentInTransaction(c.actor, { ...c.input, direction: "INCOME", expenseArticleId: c.article.id, reportDocumentId: undefined }, { ...prepared, articleId: c.article.id }, forgedIncome.tx), /стать/i);
+  assert.equal(forgedIncome.calls.length, 0, "FORGED_INCOME_ARTICLE_REFUSED_BEFORE_SQL");
   for (const [supplied, expected] of [[undefined, c.article.id], [c.article.id, null], [rows.id("missing"), c.article.id]] as const)
     await assert.rejects(payments.createPaymentInTransaction(c.actor, { ...c.input, expenseArticleId: supplied }, { ...prepared, articleId: expected }, tx), /стат/);
   await tx.expenseArticle.update({ where: { id: c.article.id }, data: { active: false } });
@@ -370,6 +386,12 @@ for (const currency of ["BYN", "USD"] as const) test(`warehouse/paid-receipt-cas
   const data = { clientMutationId: randomUUID(), materialId: material.id, quantity: currency === "BYN" ? "37" : "3", unitPrice: currency === "BYN" ? "100" : "7.33",
     currency, cashAccountId: account.id, expenseArticleId: article.id, ...(currency === "USD" ? { rate: 3.001, reportDocumentId: document.id } : {}) };
   const prepared = (await purchase.prepareStockPurchase(actor, data, tx, async () => assert.fail("UNEXPECTED_NETWORK_FX"))).prepared;
+  if (currency === "BYN") {
+    const old = stockPurchaseSchema.parse(data);
+    const fingerprint = createHash("sha256").update(JSON.stringify({ actorId: actor.id, materialId: old.materialId, quantity: old.quantity, unitPrice: old.unitPrice, currency: old.currency, cashAccountId: old.cashAccountId, expenseArticleId: old.expenseArticleId,
+      rate: null, rateDate: null, paidAt: null, comment: old.comment ?? null })).digest("hex");
+    assert.equal(purchase.stockPurchaseFingerprint(actor.id, old), fingerprint, "LEGACY_RECEIPT_FINGERPRINT_PROFILE");
+  }
   const baseline = await nativeSnapshot(tx);
   await tx.$executeRawUnsafe("CREATE FUNCTION ci169_purchase_failure() RETURNS trigger AS $$ BEGIN RAISE EXCEPTION 'CI169_PURCHASE_FAILURE'; END; $$ LANGUAGE plpgsql");
   await tx.$executeRawUnsafe('CREATE TRIGGER ci169_purchase_failure BEFORE INSERT ON "StockPurchase" FOR EACH ROW EXECUTE FUNCTION ci169_purchase_failure()');
@@ -384,6 +406,9 @@ for (const currency of ["BYN", "USD"] as const) test(`warehouse/paid-receipt-cas
   assert.equal(receipt.movement.receiptKind, "PAID"); assert.equal(receipt.payment.projectId, null); assert.equal(receipt.payment.projectAmount, null);
   assert.equal(receipt.payment.amount.toFixed(2), expectedAmount); assert.equal(receipt.payment.bynAmount.toFixed(2), expectedByn);
   assert.equal(receipt.movement.totalByn!.toFixed(2), expectedByn); assert.equal(receipt.payment.reportDocumentId, currency === "USD" ? document.id : null);
+  const valuation = await tx.warehouseMovementValuation.findUniqueOrThrow({ where: { movementId: receipt.movementId } });
+  assert.equal(valuation.valueByn.toFixed(9), currency === "USD" ? "65.990000000" : "3700.000000000");
+  assert.equal(valuation.unitCost.toFixed(9), currency === "USD" ? "21.996666667" : "100.000000000");
   assert.equal((await cash.readCashBalance(tx, account.id)).toFixed(2), beforeCash.minus(expectedAmount).toFixed(2));
   const repeat = await purchase.createStockPurchaseInTransaction(actor, data, { ...prepared, rate: 999, bynAmount: 999 }, tx);
   assert.equal(repeat.receipt.id, receipt.id); assert.equal(repeat.repeated, true); assert.deepEqual(repeat.eventIds, []);
@@ -391,13 +416,67 @@ for (const currency of ["BYN", "USD"] as const) test(`warehouse/paid-receipt-cas
   await assert.rejects(purchase.prepareStockPurchase({ ...actor, roles: ["MANAGER"] }, data, tx), /прав/);
   const visible = (await ledger.loadOrganizationPayments(actor, "EXPENSE", tx)).rows.find(row => row.id === receipt.paymentId);
   assert.equal(visible?.stockPurchase?.movementId, receipt.movementId); assert.ok(!JSON.stringify(visible).includes(receipt.requestFingerprint));
+  assert.equal(visible!.stockPurchase!.stockValueByn, Number(expectedByn));
+  if (currency === "USD") {
+    await assert.rejects(purchase.createStockPurchaseInTransaction(actor, { ...data, reportDocumentId: undefined }, prepared, tx), /другими данными/);
+    for (const mode of ["missing", "pending", "owner", "linked"] as const) {
+      const invalid = mode === "pending" || mode === "owner" ? await tx.financeDocument.create({ data: { uploadedById: mode === "owner" ? c.actor.id : actor.id, clientMutationId: randomUUID(), requestFingerprint: rows.id(`paid-doc-${mode}`),
+        fileName: "Чек.pdf", mimeType: "application/pdf", size: 4, contentHash: "test", storageKey: rows.id(`paid-doc-${mode}`), storageMode: "s3", state: mode === "pending" ? "PENDING" : "READY", readyAt: mode === "pending" ? null : new Date() } }) : null;
+      const beforeDocument = await money(tx);
+      await assert.rejects(purchase.createStockPurchaseInTransaction(actor, { ...data, clientMutationId: randomUUID(), reportDocumentId: mode === "missing" ? randomUUID() : mode === "linked" ? document.id : invalid!.id }, prepared, tx), /документ/i);
+      assert.deepEqual(await money(tx), beforeDocument);
+    }
+  }
   await assert.rejects(paymentDelete.deletePaymentInTransaction(actor, receipt.paymentId, "EXPENSE", currency, "1", tx), /связан/);
   await rejectedSql(tx, () => tx.payment.delete({ where: { id: receipt.paymentId } }), /constraint/i);
   const line = await tx.projectMaterial.create({ data: { productId: product.id, materialId: material.id, quantity: "40", quantityPerUnit: "40" } });
   const issued = await stock.warehouseMove(tx, actor, { kind: "EXPENSE", projectMaterialId: line.id, quantity: currency === "BYN" ? "10" : "1", clientMutationId: randomUUID() });
   const returned = await stock.warehouseMove(tx, actor, { kind: "RETURN", projectMaterialId: line.id, sourceMovementId: issued.movement.id,
     quantity: currency === "BYN" ? "3" : "0.3", clientMutationId: randomUUID() });
+  await tx.$executeRawUnsafe("SAVEPOINT ci169_project_expenses");
+  try {
+    await tx.product.update({ where: { id: product.id }, data: { description: "PRIVATE_TECH_FINANCE", quantity: 1, expectedPrice: "1000" } });
+    await tx.payment.create({ data: { projectId: project.id, projectAmount: "10", amount: "10", bynAmount: "10", direction: "EXPENSE", expenseArticleId: article.id, createdById: actor.id } });
+    const read = (viewer = c.actor) => workspaces.loadFinanceProjectWorkspace(viewer, project.id, tx, (id, facts) => economics.getProjectEconomics(id, tx, facts));
+    const beforeRead = await money(tx), view = await read(), expectedStock = currency === "BYN" ? 700 : 15.4;
+    assert.equal(view!.expenseRows.length, 3); assert.equal(view!.economics.expensesTotal, expectedStock + 10);
+    assert.equal(view!.economics.marginAtFullPrice, 990 - expectedStock);
+    assert.equal(view!.economics.expenseBreakdown.find(row => row.key === "warehouse")!.amount, expectedStock);
+    assert.equal(view!.expenseRows.find(row => row.source === "WAREHOUSE_ISSUE")!.stock!.unitPrice, valuation.unitCost.toString());
+    assert.equal(JSON.stringify(view).includes("PRIVATE_TECH_FINANCE"), false); assert.deepEqual(await money(tx), beforeRead);
+    const denied = observed(tx);
+    await assert.rejects(workspaces.loadFinanceProjectWorkspace({ ...c.actor, roles: ["MANAGER"] }, project.id, denied.tx, () => { throw Error("UNEXPECTED_ECONOMICS"); }), /прав/);
+    assert.equal(denied.calls.length, 0);
+    await tx.product.update({ where: { id: product.id }, data: { status: "DRAFT" } });
+    for (const roles of [["ACCOUNTANT"], ["MANAGER", "ACCOUNTANT"]] as Role[][]) {
+      const hidden = await read({ ...c.actor, roles });
+      assert.equal(hidden!.economics.expensesTotal, expectedStock + 10); assert.ok(hidden!.expenseRows.filter(row => row.stock).every(row => row.stock!.product === null));
+    }
+    assert.ok((await read(actor))!.expenseRows.some(row => row.stock?.product?.id === product.id));
+    await tx.product.update({ where: { id: product.id }, data: { status: "PRODUCTION" } });
+    const completeReturn = { kind: "RETURN" as const, projectMaterialId: line.id, sourceMovementId: issued.movement.id, quantity: currency === "BYN" ? "7" : "0.7", clientMutationId: randomUUID() };
+    await stock.warehouseMove(tx, actor, completeReturn); const full = await read();
+    assert.equal(full!.economics.expensesTotal, 10); assert.equal(full!.expenseRows.length, 4);
+    const completedRows = full!.expenseRows; assert.equal((await stock.warehouseMove(tx, actor, completeReturn)).repeated, true);
+    assert.deepEqual((await read())!.expenseRows, completedRows);
+    await tx.stockMovement.create({ data: { materialId: material.id, productId: product.id, type: "EXPENSE", quantity: "1", totalByn: null } });
+    const unknown = await read(); assert.equal(unknown!.economics.expensesTotal, null); assert.equal(unknown!.expenseRows.filter(row => row.bynAmount === null).length, 1);
+  } finally { await tx.$executeRawUnsafe("ROLLBACK TO SAVEPOINT ci169_project_expenses"); await tx.$executeRawUnsafe("RELEASE SAVEPOINT ci169_project_expenses"); }
   const independent = await stock.warehouseMove(tx, actor, { kind: "INCOME", materialId: material.id, quantity: "5", unitPrice: "200", clientMutationId: randomUUID() });
+  if (currency === "BYN") for (const leaf of [returned.movement, issued.movement]) {
+    await tx.$executeRawUnsafe("SAVEPOINT ci169_stock_leaf");
+    try {
+      const leafPreview = await stockDeletion.previewMovementDeletionInTransaction(tx, actor, leaf.id);
+      assert.deepEqual(leafPreview.refunds, []);
+      await stockDeletion.deleteMovementInTransaction(tx, actor, { clientMutationId: randomUUID(), movementId: leaf.id, planFingerprint: leafPreview.planFingerprint });
+      const position = await tx.warehouseBalance.findUniqueOrThrow({ where: { materialId: material.id } });
+      assert.equal(position.quantity.toString(), leaf.type === "RETURN" ? "32" : "42"); assert.equal(position.valueByn.toFixed(2), leaf.type === "RETURN" ? "3700.00" : "4700.00");
+      assert.equal((await cash.readCashBalance(tx, account.id)).toFixed(2), "6300.00");
+      assert.equal((await tx.payment.findUniqueOrThrow({ where: { id: receipt.paymentId } })).deletionId, null);
+      assert.equal((await tx.projectMaterial.findUniqueOrThrow({ where: { id: line.id } })).issuedQty.toString(), leaf.type === "RETURN" ? "10" : "0");
+      assert.equal((await economics.getProjectEconomics(project.id, tx))!.expensesTotal, leaf.type === "RETURN" ? 1000 : 0);
+    } finally { await tx.$executeRawUnsafe("ROLLBACK TO SAVEPOINT ci169_stock_leaf"); await tx.$executeRawUnsafe("RELEASE SAVEPOINT ci169_stock_leaf"); }
+  }
   const preview = await stockDeletion.previewMovementDeletionInTransaction(tx, actor, receipt.movementId);
   assert.deepEqual(new Set(preview.movements.map(row => row.id)), new Set([receipt.movementId, issued.movement.id, returned.movement.id]));
   assert.equal(preview.refunds[0].amount, expectedAmount); assert.equal(preview.refunds[0].bynAmount, expectedByn);
@@ -655,6 +734,8 @@ test("payroll/shared-native-inputs-consumer-dto-1-5-20-tenfold-history", async (
     assert.deepEqual([personalRead.count, ...models], [6, 2, 2, 1, 1], "TWO_PAYROLL_TWO_PAYOUT_CASH_ACCOUNT_AND_CREATOR_SQL_READS");
     assert.deepEqual({ accrued: personal.accrued, paid: personal.paid, debt: personal.debt, estimate: personal.estimate }, { accrued: 130 * multiplier, paid: 0.06 * multiplier, debt: null, estimate: null });
     assert.equal(personal.entries.length, 5 * multiplier); assert.equal(personal.payouts.length, 2 * multiplier);
+    const savedForeign = personal.entries.find(row => row.id === rows.id("entry-0-3"))!;
+    assert.deepEqual({ currency: savedForeign.currency, amount: savedForeign.amount, byn: savedForeign.bynAmount }, { currency: "USD", amount: 10, byn: 30 });
     if (size > 1) for (const selected of ["2020-01", current, "2999-01"]) {
       const own = await payroll.getMyPayroll(users[1].id, selected);
       assert.deepEqual({ accrued: own.accrued, paid: own.paid, debt: own.debt, estimate: own.estimate }, {
@@ -681,6 +762,135 @@ test("payroll/shared-native-inputs-consumer-dto-1-5-20-tenfold-history", async (
   assert.deepEqual(await tx.payrollEntry.findMany({ where: { id: { in: originalEntries.map(row => row.id) } }, orderBy: { id: "asc" } }), originalEntries);
   assert.deepEqual(await tx.payout.findMany({ where: { id: { in: originalPayouts.map(row => row.id) } }, orderBy: { id: "asc" } }), originalPayouts);
   assert.deepEqual(await tx.user.findMany({ where: { id: { in: originalUsers.map(row => row.id) } }, orderBy: { id: "asc" } }), originalUsers);
+  const former = await Promise.all(["owed", "paid"].map(label => rows.user(`former-${label}`, ["WORKER"], { active: false, payScheme: "NONE" })));
+  for (const [index, employee] of former.entries()) {
+    await tx.payrollEntry.create({ data: { userId: employee.id, amount: "100", currency: "BYN", month: "2001-01" } });
+    await tx.payout.create({ data: { userId: employee.id, amount: index ? "100" : "20", payrollCurrency: "BYN", bynAmount: index ? "100" : "20", month: "2001-01" } });
+  }
+  const eligibleFormer = await on(tx, actor, () => payroll.listPayrollUsers());
+  assert.equal(eligibleFormer.some(user => user.id === former[0].id), true); assert.equal(eligibleFormer.some(user => user.id === former[1].id), false);
+  const formerSummary = await on(tx, actor, () => payroll.getPayrollSummary(current));
+  assert.equal(formerSummary.rows.find(row => row.userId === former[0].id)!.due, 80);
+}));
+
+test("finance/cash-statement-real-Moscow-edges-saved-FX-no-cash-and-role-boundary", async () => fixture.rollback(async (tx, rows) => {
+  const actor = actorFor(await rows.user("statement-reader", ["PROCUREMENT"]));
+  const accounts = await Promise.all(["BYN", "USD", "EUR"].map(currency => tx.cashAccount.create({ data: { name: rows.id(`statement-${currency.toLowerCase()}`), currency, active: currency !== "USD" } })));
+  await tx.payment.createMany({ data: [
+    { cashAccountId: accounts[0].id, amount: "100", bynAmount: "100", paidAt: new Date("2026-10-06T20:59:59.999Z") },
+    { cashAccountId: accounts[0].id, amount: "50", bynAmount: "50", paidAt: new Date("2026-10-06T21:00:00.000Z") },
+    { cashAccountId: accounts[0].id, direction: "EXPENSE", amount: "10", bynAmount: "10", paidAt: new Date("2026-10-07T08:00:00Z") },
+    { cashAccountId: accounts[0].id, amount: "999", bynAmount: "999", paidAt: new Date("2026-10-07T21:00:00.000Z") },
+    { cashAccountId: accounts[1].id, amount: "100", currency: "USD", bynAmount: "300", rate: "3", paidAt: new Date("2026-10-06T20:59:59.999Z") },
+    { cashAccountId: accounts[1].id, direction: "EXPENSE", amount: "10", currency: "USD", bynAmount: "33", rate: "3.3", paidAt: new Date("2026-10-07T08:00:00Z") },
+  ] });
+  const rateFields = { cashRate: "1", payrollRate: "1", cashRateDate: new Date("2026-10-07"), payrollRateDate: new Date("2026-10-07"), payrollCurrency: "BYN" };
+  await tx.payout.createMany({ data: [
+    { ...rateFields, userId: actor.id, kind: "SALARY", month: "2026-09", amount: "20", cashAccountId: accounts[0].id, cashAmount: "20", cashCurrency: "BYN", bynAmount: "20", createdAt: new Date("2026-10-07T10:00:00Z") },
+    { ...rateFields, userId: actor.id, kind: "ADVANCE", month: "2026-10", amount: "5", cashAccountId: accounts[0].id, cashAmount: "5", cashCurrency: "BYN", bynAmount: "5", createdAt: new Date("2026-10-07T20:59:59.999Z") },
+    { ...rateFields, cashRate: "3", userId: actor.id, kind: "SALARY", month: "2026-09", amount: "15", cashAccountId: accounts[1].id, cashAmount: "5", cashCurrency: "USD", bynAmount: "15", createdAt: new Date("2026-10-07T10:00:00Z") },
+    { id: rows.id("statement-unassigned"), userId: actor.id, amount: "3", month: "2026-10", kind: "ADVANCE", createdAt: new Date("2026-10-07T10:00:00Z") },
+  ] });
+  await tx.payrollEntry.create({ data: { userId: actor.id, amount: "999999", bynAmount: "999999", currency: "BYN", month: "2026-10" } });
+  const query = { from: "2026-10-07", to: "2026-10-07", mode: "BYN" as const }, before = await money(tx), rateCount = rateReads;
+  const byn = await statements.loadCashStatement(actor, query, tx), native = await statements.loadCashStatement(actor, { ...query, mode: "NATIVE" }, tx);
+  assert.deepEqual(byn.rows.find(row => row.id === accounts[0].id)!.totals, { opening: "100.00", income: "50.00", expense: "-35.00", closing: "115.00" });
+  assert.equal(byn.rows.find(row => row.id === accounts[0].id)!.entries.length, 4);
+  assert.equal(byn.rows.find(row => row.id === accounts[1].id)!.totals.closing, "252.00");
+  assert.equal(native.rows.find(row => row.id === accounts[1].id)!.totals.closing, "85.00"); assert.equal(native.rows.find(row => row.id === accounts[1].id)!.active, false);
+  assert.equal(byn.rows.find(row => row.id === accounts[2].id)!.totals.closing, "0.00");
+  for (const result of [byn, native]) assert.ok(result.rows.some(row => row.unassigned && row.totals.closing === null && row.entries.some(entry => entry.id === `payout:${rows.id("statement-unassigned")}` && entry.change === null)));
+  const denied = observed(tx); await assert.rejects(statements.loadCashStatement({ ...actor, roles: ["MANAGER"] }, query, denied.tx), /прав/); assert.equal(denied.calls.length, 0);
+  assert.deepEqual(await statements.loadCashStatement({ ...actor, roles: ["MANAGER", "ACCOUNTANT"] }, query, tx), byn);
+  assert.equal(JSON.stringify(byn).includes("CI_NO_LOGIN"), false); assert.deepEqual(await money(tx), before); assert.equal(rateReads, rateCount);
+}));
+
+test("finance/economics-saved-BYN-unknown-zero-and-legacy-settlement-cents-once", async () => fixture.rollback(async (tx, rows) => {
+  const reader = actorFor(await rows.user("economics-reader", ["MANAGER", "ACCOUNTANT"])), engineer = await rows.user("economics-engineer", ["ENGINEER"]);
+  const bootstrap = await rows.project("economics-bootstrap", { stage: "CONTRACT", managerId: reader.id });
+  await tx.user.update({ where: { id: engineer.id }, data: { payScheme: "PERCENT_PROJECT", payPercent: "5" } });
+  const inactive = await rows.user("bootstrap-inactive", ["ENGINEER"], { active: false }), wrongRole = await rows.user("bootstrap-worker", ["WORKER"]);
+  for (const engineerId of [inactive.id, wrongRole.id]) {
+    const rejected = await productCore.createProductCore(reader, { projectId: bootstrap.id, title: "Недоступный инженер", engineerId }, operation => operation(tx));
+    assert.equal(rejected.ok, false); if (!rejected.ok) assert.match(rejected.error ?? "", /активного.*инженера/);
+    assert.equal(await tx.product.count({ where: { projectId: bootstrap.id } }), 0);
+  }
+  const created = await productCore.createProductCore(reader, { projectId: bootstrap.id, title: "Новое изделие", engineerId: engineer.id, expectedPrice: 100 }, operation => operation(tx));
+  assert.equal(created.ok, true); if (!created.ok) return;
+  assert.equal(created.product.status, "PREPARATION"); assert.equal(await tx.productStagePayPool.count({ where: { productId: created.product.id } }), 0);
+  const noPrice = await rows.product("bootstrap-zero", bootstrap.id, { expectedPrice: "0", engineerId: engineer.id });
+  const oldPool = await tx.productStagePayPool.create({ data: { productId: noPrice.id, kind: "ENGINEERING", state: "DRAFT", ratePercent: "5", createdById: reader.id } });
+  await tx.payrollEntry.create({ data: { userId: engineer.id, projectId: bootstrap.id, scheme: "PERCENT_PROJECT", amount: "321", currency: "USD", month: "2000-01" } });
+  const oldPayroll = await tx.payrollEntry.findMany({ where: { projectId: bootstrap.id } });
+  const patch = { projectId: bootstrap.id, expectedStage: "CONTRACT", toStage: "IN_WORK", clientMutationId: randomUUID() };
+  const advanced = await projectStages.patchProjectStageTransaction(reader, patch, tx); assert.equal(advanced.result.ok, true);
+  const replayed = await projectStages.patchProjectStageTransaction(reader, patch, tx); assert.equal(replayed.result.ok, true); assert.equal(replayed.result.replayed, true);
+  assert.equal(await tx.projectStageHistory.count({ where: { projectId: bootstrap.id } }), 1);
+  assert.equal(await tx.changeLog.count({ where: { id: `project-stage:${patch.clientMutationId}` } }), 1); assert.equal(advanced.eventIds.length, 1); assert.equal(replayed.eventIds.length, 0);
+  assert.deepEqual(await tx.payrollEntry.findMany({ where: { projectId: bootstrap.id } }), oldPayroll);
+  assert.deepEqual(await tx.productStagePayPool.findMany({ where: { productId: { in: [created.product.id, noPrice.id] } } }), [oldPool]);
+  const invalidDelete = await on(tx, reader, () => productActions.deleteProduct(created.product.id)); assert.equal(invalidDelete.ok, false); assert.equal(invalidDelete.kind, "validation");
+  assert.equal(await tx.product.count({ where: { projectId: bootstrap.id } }), 2);
+  for (const mode of ["unknown", "zero", "missing-price"] as const) {
+    const project = await rows.project(`economics-${mode}`), product = await rows.product(`economics-${mode}`, project.id, { expectedPrice: mode === "missing-price" ? null : "0" });
+    await tx.payment.create({ data: { projectId: project.id, amount: "100", currency: "USD", rate: "3", bynAmount: "300", projectAmount: "100" } });
+    await tx.payrollEntry.create({ data: { userId: engineer.id, projectId: project.id, amount: mode === "unknown" ? "1" : "0", currency: "USD", bynAmount: mode === "unknown" ? null : "0", month: "2000-01" } });
+    const result = await economics.getProjectEconomics(project.id, tx);
+    assert.deepEqual({ paid: result!.paidTotal, payroll: result!.payrollTotal, margin: result!.margin, full: result!.marginAtFullPrice },
+      { paid: 300, payroll: mode === "unknown" ? null : 0, margin: mode === "unknown" ? null : 300, full: mode === "zero" ? 0 : null });
+    assert.equal((await tx.product.findUniqueOrThrow({ where: { id: product.id } })).expectedPrice?.toString() ?? null, mode === "missing-price" ? null : "0");
+  }
+  const project = await rows.project("economics-frozen"), stamp = new Date("2020-01-01");
+  await tx.payment.create({ data: { projectId: project.id, amount: "100", currency: "USD", rate: "3", bynAmount: "300", projectAmount: "100" } });
+  for (const v of [
+    { label: "frozen", price: "1000", rate: "5", productCurrency: "USD", payrollCurrency: "BYN", productRate: "3", payrollRate: "1", exact: "50", amount: "150", byn: "150", project: "50", parts: [["150", "150", "50"]] },
+    { label: "residual", price: "0.03", rate: "100", productCurrency: "BYN", payrollCurrency: "USD", productRate: "1", payrollRate: "3", exact: "0.03", amount: "0.01", byn: "0.03", project: "0.03", parts: [["0.01", "0.02", "0.02"], ["0", "0.01", "0.01"]] },
+  ]) {
+    const product = await rows.product(`economics-${v.label}`, project.id, { expectedPrice: v.price, quantity: 1, status: "DESIGN" });
+    const pool = await tx.productStagePayPool.create({ data: { productId: product.id, kind: "ENGINEERING", state: "SETTLED", revision: 1, ratePercent: v.rate, createdById: reader.id } });
+    const work = await tx.work.create({ data: { projectId: project.id, productId: product.id, title: v.label, paymentKind: "ENGINEERING", stagePayPoolId: pool.id, poolWeightUnits: 1000000, quantity: "1" } });
+    const settlement = await tx.productStageSettlement.create({ data: { poolId: pool.id, productId: product.id, projectId: project.id, closedById: reader.id, closedAt: stamp, poolRevision: 1,
+      primaryEngineerIdSnapshot: engineer.id, primaryEngineerNameSnapshot: engineer.name, priceSnapshot: v.price, ratePercentSnapshot: v.rate, productCurrency: v.productCurrency, payrollCurrency: v.payrollCurrency,
+      productRateByn: v.productRate, payrollRateByn: v.payrollRate, productRateDate: stamp, payrollRateDate: stamp, sourceFundExact: v.exact, amount: v.amount, bynAmount: v.byn, projectAmount: v.project } });
+    for (const [index, [amount, byn, projectAmount]] of v.parts.entries()) {
+      const task = await tx.task.create({ data: { projectId: project.id, productId: product.id, workId: work.id, title: `Сохранённая доля ${index}`, assigneeId: engineer.id, quantity: "1" } });
+      const share = await tx.productStageSettlementShare.create({ data: { settlementId: settlement.id, taskId: task.id, workId: work.id, userId: engineer.id, taskTitleSnapshot: task.title,
+        workTitleSnapshot: work.title, userNameSnapshot: engineer.name, workWeightUnits: 1000000, stageShareUnits: v.parts.length === 1 ? 1000000 : 500000, quantitySnapshot: "1", quantityShareUnitsSnapshot: 1000000, amount, bynAmount: byn, projectAmount } });
+      if (amount !== "0") await tx.payrollEntry.create({ data: { userId: engineer.id, projectId: project.id, productId: product.id, workId: work.id, taskId: task.id, settlementShareId: share.id,
+        scheme: "PRODUCT_ENGINEERING", month: "2000-01", amount, currency: v.payrollCurrency, bynAmount: byn, projectAmount, projectCurrency: v.productCurrency } });
+    }
+    const savedShare = await tx.productStageSettlementShare.findFirstOrThrow({ where: { settlementId: settlement.id } });
+    for (const [index, invalid] of [{ stageShareUnits: -1 }, { quantityShareUnitsSnapshot: 0 }, { amount: "-0.01" }].entries())
+      await rejectedSql(tx, () => tx.productStageSettlementShare.create({ data: { ...savedShare, id: rows.id(`share-invalid-${v.label}-${index}`), ...invalid } }), /ProductStageSettlementShare_bounds/);
+    await rejectedSql(tx, () => tx.$executeRaw`INSERT INTO "ProductStageSettlementShare" ("id","settlementId","taskId","workId","userId","taskTitleSnapshot","workTitleSnapshot","userNameSnapshot","workWeightUnits","stageShareUnits","quantityShareUnitsSnapshot","amount","bynAmount","projectAmount")
+      SELECT ${rows.id(`share-nan-${v.label}`)},"settlementId","taskId","workId","userId","taskTitleSnapshot","workTitleSnapshot","userNameSnapshot","workWeightUnits","stageShareUnits","quantityShareUnitsSnapshot",'NaN'::numeric,"bynAmount","projectAmount"
+      FROM "ProductStageSettlementShare" WHERE "id"=${savedShare.id}`, /ProductStageSettlementShare_bounds/);
+    await rejectedSql(tx, () => tx.payrollEntry.create({ data: { userId: engineer.id, productId: product.id, projectId: project.id, settlementShareId: savedShare.id,
+      scheme: "PRODUCT_ENGINEERING", amount: "1", currency: "BYN", bynAmount: null, projectAmount: "1", projectCurrency: "BYN", month: "2000-01" } }), /PayrollEntry_settlement_fields/);
+    const group = await tx.taskAllocationGroup.create({ data: { workId: work.id, quantity: "1", budget: "1", currency: "BYN", createdById: reader.id } });
+    await rejectedSql(tx, () => tx.task.create({ data: { projectId: project.id, productId: product.id, workId: work.id, title: "Неполный старый снимок", quantity: "1", allocationGroupId: group.id, shareUnits: null, shareAmount: "1" } }), /Task_allocation_complete/);
+    const nextPrice = new Prisma.Decimal(v.price).plus(1).toNumber();
+    assert.equal((await productCore.updateProductCore(reader, product.id, { expectedPrice: nextPrice }, { expectedPrice: v.price }, operation => operation(tx))).ok, true);
+    assert.deepEqual(await tx.productStagePayPool.findUnique({ where: { id: pool.id } }), pool); assert.deepEqual(await tx.productStageSettlement.findUnique({ where: { id: settlement.id } }), settlement);
+    await tx.product.update({ where: { id: product.id }, data: { expectedPrice: v.price } });
+  }
+  const draft = await rows.product("economics-draft-pool", project.id, { status: "DESIGN", expectedPrice: "0", quantity: 1 });
+  const draftPool = await tx.productStagePayPool.create({ data: { productId: draft.id, kind: "ENGINEERING", state: "DRAFT", createdById: reader.id } });
+  assert.equal((await productCore.updateProductCore(reader, draft.id, { expectedPrice: 1 }, { expectedPrice: "0" }, operation => operation(tx))).ok, true);
+  assert.equal((await tx.productStagePayPool.findUniqueOrThrow({ where: { id: draftPool.id } })).revision, 1);
+  await tx.product.update({ where: { id: draft.id }, data: { expectedPrice: "0" } });
+  await tx.payrollEntry.create({ data: { userId: engineer.id, projectId: project.id, amount: "30", currency: "BYN", month: "2000-01" } });
+  const original = await money(tx), rateCount = rateReads;
+  await tx.project.update({ where: { id: project.id }, data: { currency: "USD" } });
+  const frozen = await economics.getProjectEconomics(project.id, tx);
+  assert.equal(frozen!.paidTotal, 300); assert.equal(frozen!.payrollTotal, 180.03); assert.equal(frozen!.margin, 119.97); assert.equal(frozen!.expectedPrice, null);
+  await tx.project.update({ where: { id: project.id }, data: { currency: "BYN" } });
+  const current = await economics.getProjectEconomics(project.id, tx);
+  assert.equal(current!.payrollTotal, 180.03); assert.equal(current!.expectedPrice, 1000.03); assert.equal(current!.marginAtFullPrice, 820);
+  const facts = { payments: await tx.payment.findMany({ where: { projectId: project.id }, include: { expenseArticle: true } }), stockMovements: [] };
+  const watched = observed(tx); assert.deepEqual(await economics.getProjectEconomics(project.id, watched.tx, facts), current);
+  assert.ok(!watched.calls.some(call => call === "payment.findMany" || call === "stockMovement.findMany"));
+  assert.deepEqual(await money(tx), original); assert.equal(rateReads, rateCount);
 }));
 
 test("percentage/native-v1-v2-v3-v4-shape-immutable-and-ceiling-overflow", async () => fixture.rollback(async (tx, rows) => {
@@ -709,6 +919,43 @@ test("percentage/native-v1-v2-v3-v4-shape-immutable-and-ceiling-overflow", async
   await tx.productPercentageConfig.create({ data: { productId: overflow.id, kind: "ASSEMBLY", ratePercent: "15" } });
   await assert.rejects(statuses.changeProductStatusTransaction(tx, manager, overflow.id, "STORAGE"), /превышает допустимую/);
   assert.equal(await tx.productPercentageCompletion.count({ where: { productId: overflow.id } }), 0);
+}));
+
+test("percentage/status-action-rolls-back-earlier-engineering-on-invalid-assembly", async () => fixture.rollback(async (tx, rows) => {
+  const manager = actorFor(await rows.user("partial-manager", ["MANAGER"]));
+  const engineer = await rows.user("partial-engineer", ["ENGINEER"]), assembler = await rows.user("partial-assembler", ["WORKER"], { active: false });
+  const project = await rows.project("partial-project", { managerId: manager.id });
+  const product = await rows.product("partial-product", project.id, { status: "DESIGN", quantity: 3, expectedPrice: "1000", engineerId: engineer.id, assemblerId: assembler.id });
+  await tx.productPercentageConfig.createMany({ data: [{ productId: product.id, kind: "ENGINEERING", ratePercent: "2" }, { productId: product.id, kind: "ASSEMBLY", ratePercent: "5" }] });
+  const before = await money(tx), trace = observed(tx);
+  const result = await on(trace.tx, manager, () => productActions.changeProductStatus(product.id, "DONE"));
+  assert.equal(result.ok, false); assert.match(result.error ?? "", /активного сборщика.*рабочего/);
+  assert.ok(trace.calls.includes("productPercentageCompletion.create") && trace.calls.includes("payrollEntry.create"), "EARLIER_ENGINEERING_SQL_WRITES_REQUIRED");
+  assert.deepEqual(await tx.product.findUnique({ where: { id: product.id } }), product);
+  assert.equal(await tx.productPercentageCompletion.count({ where: { productId: product.id } }), 0);
+  assert.deepEqual(await money(tx), before);
+  await tx.user.update({ where: { id: assembler.id }, data: { active: true } });
+  const collisionId = rows.id("product-status-audit-collision"), collision = { id: collisionId, actorType: "user", actorId: manager.id, entity: "test", entityId: product.id, action: "collision" };
+  await tx.changeLog.create({ data: collision }); const auditBefore = await money(tx);
+  const auditFault = new Proxy(tx, { get(db, table) {
+    if (table === "changeLog") return new Proxy(db.changeLog, { get(model, method) {
+      if (method === "create") return async (args: Prisma.ChangeLogCreateArgs) => {
+        const saved = await model.create(args);
+        if (args.data.action === "status") {
+          assert.equal(await tx.productPercentageCompletion.count({ where: { productId: product.id } }), 3);
+          assert.equal(await tx.payrollEntry.count({ where: { productId: product.id } }), 2);
+          await tx.changeLog.create({ data: collision });
+        }
+        return saved;
+      };
+      const value = Reflect.get(model, method); return typeof value === "function" ? value.bind(model) : value;
+    } });
+    const value = Reflect.get(db, table); return typeof value === "function" ? value.bind(db) : value;
+  } });
+  const failedAudit = await on(auditFault, manager, () => productActions.changeProductStatus(product.id, "DONE"));
+  assert.equal(failedAudit.ok, false); assert.match(failedAudit.error ?? "", /Unique constraint/);
+  assert.deepEqual(await tx.product.findUnique({ where: { id: product.id } }), product);
+  assert.equal(await tx.productPercentageCompletion.count({ where: { productId: product.id } }), 0); assert.deepEqual(await money(tx), auditBefore);
 }));
 
 test("percentage/direct-late-adjustment-moscow-month", async t => {
@@ -927,6 +1174,69 @@ test("cash/payment-stock-logistics-versus-advance-real-lock-both-orders", async 
       if (mode === "logistics") assert.equal(await fixture.db.logisticsPosting.count({ where: { actorId: c.actor.id } }), expenseFirst ? 1 : 0);
     } finally { release.resolve(); await Promise.allSettled([first, ...(second ? [second] : [])]); }
   }
+});
+
+test("warehouse/paid-and-delete-real-replay-capacity-stale-preview-and-held-issue", async () => {
+  const coordinator = await import("../../src/server/transactions/coordinator");
+  const rows = { ...fixture, id: (name: string) => fixture.id(`stock-race-${name}`), user: (name: string, roles: Role[]) => fixture.user(`stock-race-${name}`, roles) };
+  const c = await cashContext(fixture.db, rows, "100");
+  await fixture.db.user.update({ where: { id: c.actor.id }, data: { roles: ["ADMIN"] } }); c.actor.roles = ["ADMIN"];
+  const state = await fixture.db.warehouseAccountingState.upsert({ where: { id: "main" }, create: { id: "main", phase: "ACTIVE", runId: rows.id("run"), beforePrices: [], beforeBalances: [] }, update: {} });
+  assert.equal(state.phase, "ACTIVE", "CI_WAREHOUSE_PHASE_MISMATCH");
+  const unit = await fixture.db.materialUnit.create({ data: { name: rows.id("unit") } }), material = await fixture.db.material.create({ data: { name: rows.id("material"), unitId: unit.id } });
+  const article = await fixture.db.expenseArticle.create({ data: { name: rows.id("article"), code: ((await fixture.db.expenseArticle.aggregate({ _max: { code: true } }))._max.code ?? 0) + 1 } });
+  const project = await fixture.project("stock-race-project"), product = await fixture.product("stock-race-product", project.id, { status: "PRODUCTION" });
+  const input = { clientMutationId: randomUUID(), materialId: material.id, quantity: "3", unitPrice: "20", currency: "BYN" as const, cashAccountId: c.account.id, expenseArticleId: article.id };
+  const prepared = (await purchase.prepareStockPurchase(c.actor, input, fixture.db)).prepared;
+  for (const mode of ["purchase-replay", "purchase-cap", "delete-replay", "delete-issue"] as const) {
+    if (mode === "purchase-cap") await fixture.db.payment.create({ data: { cashAccountId: c.account.id, direction: "INCOME", amount: "60", bynAmount: "60" } });
+    let firstOperation: (tx: Prisma.TransactionClient) => Promise<unknown>, secondOperation: (tx: Prisma.TransactionClient) => Promise<unknown>;
+    if (mode.startsWith("purchase")) {
+      const data = mode === "purchase-replay" ? input : { ...input, clientMutationId: randomUUID() };
+      firstOperation = tx => purchase.createStockPurchaseInTransaction(c.actor, data, prepared, tx);
+      secondOperation = tx => purchase.createStockPurchaseInTransaction(c.actor, mode === "purchase-replay" ? data : { ...data, clientMutationId: randomUUID() }, prepared, tx);
+    } else {
+      const receipt = await fixture.db.stockPurchase.findFirstOrThrow({ where: { actorId: c.actor.id, movement: { deletionId: null } } });
+      if (mode === "delete-issue") {
+        const stale = await stockDeletion.previewMovementDeletionInTransaction(fixture.db, c.actor, receipt.movementId);
+        await coordinator.createMutationTransaction(fixture.db)(tx => stock.warehouseMove(tx, c.actor, { kind: "INCOME", materialId: material.id, quantity: "1", unitPrice: "20", clientMutationId: randomUUID() }));
+        const before = await money(fixture.db), balance = await fixture.db.warehouseBalance.findUnique({ where: { materialId: material.id } });
+        await assert.rejects(coordinator.createMutationTransaction(fixture.db)(tx => stockDeletion.deleteMovementInTransaction(tx, c.actor, { movementId: receipt.movementId, planFingerprint: stale.planFingerprint, clientMutationId: randomUUID() })), /Обновите расчёт/);
+        assert.deepEqual(await money(fixture.db), before); assert.deepEqual(await fixture.db.warehouseBalance.findUnique({ where: { materialId: material.id } }), balance);
+      }
+      const preview = await stockDeletion.previewMovementDeletionInTransaction(fixture.db, c.actor, receipt.movementId);
+      const data = { movementId: receipt.movementId, planFingerprint: preview.planFingerprint, clientMutationId: randomUUID() };
+      firstOperation = tx => stockDeletion.deleteMovementInTransaction(tx, c.actor, data);
+      secondOperation = mode === "delete-replay" ? firstOperation : tx => stock.warehouseMove(tx, c.actor, { kind: "EXPENSE", productId: product.id, materialId: material.id, quantity: "2", clientMutationId: randomUUID() });
+    }
+    const ready = gate(), release = gate(), entered = gate(); let holder: Prisma.TransactionClient | undefined, firstPid = 0, secondPid = 0;
+    const first = fixture.db.$transaction(async tx => {
+      await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(18435,55001)`;
+      holder = tx; firstPid = (await tx.$queryRaw<{ pid: number }[]>`SELECT pg_backend_pid() AS pid`)[0].pid;
+      const value = await firstOperation(tx); ready.resolve(); await release.promise; return value;
+    }, { maxWait: 5000, timeout: 15000 });
+    void first.catch(() => ready.resolve()); let second: Promise<unknown> | undefined;
+    try {
+      await ready.promise; assert.ok(holder);
+      const peer = observedClient(fixture.peer, async tx => { secondPid = (await tx.$queryRaw<{ pid: number }[]>`SELECT pg_backend_pid() AS pid`)[0].pid; entered.resolve(); });
+      second = coordinator.createMutationTransaction(peer)(secondOperation); void second.catch(() => entered.resolve());
+      await entered.promise; assert.ok(firstPid > 0 && secondPid > 0 && firstPid !== secondPid); await waitForMoneyLock(holder, secondPid);
+      release.resolve(); const results = await Promise.allSettled([first, second]);
+      assert.equal(results[0].status, "fulfilled");
+      if (mode.endsWith("replay")) {
+        const values = results.map(result => { assert.equal(result.status, "fulfilled"); return result.value as { id?: string; receipt?: { id: string }; repeated: boolean }; });
+        const id = values[0].receipt?.id ?? values[0].id; assert.equal(typeof id, "string"); assert.equal(values[1].receipt?.id ?? values[1].id, id);
+        assert.equal(values.filter(value => !value.repeated).length, 1);
+      } else {
+        assert.equal(results[1].status, "rejected"); if (results[1].status === "rejected") assert.match(String(results[1].reason), mode === "purchase-cap" ? /Недостаточно средств в выбранной кассе/ : /Недостаточно материала/);
+      }
+    } finally { release.resolve(); await Promise.allSettled([first, ...(second ? [second] : [])]); }
+    assert.equal((await cash.readCashBalance(fixture.db, c.account.id)).toFixed(2), mode.startsWith("purchase") ? "40.00" : mode === "delete-replay" ? "100.00" : "160.00");
+  }
+  assert.equal(await fixture.db.stockPurchase.count({ where: { actorId: c.actor.id } }), 2);
+  assert.equal(await fixture.db.warehouseMovementDeletion.count({ where: { actorId: c.actor.id } }), 2);
+  const balance = await fixture.db.warehouseBalance.findUniqueOrThrow({ where: { materialId: material.id } });
+  assert.equal(balance.quantity.toString(), "1"); assert.equal(balance.valueByn.toFixed(2), "20.00");
 });
 
 test("cash/actual-bulk-settlement-solo-and-held-expense-race", async () => {

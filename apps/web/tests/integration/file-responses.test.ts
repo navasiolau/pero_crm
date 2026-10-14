@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import test from "node:test";
+import { createRequire } from "node:module";
+import { readFile } from "node:fs/promises";
+import { verifiedRollback } from "../helpers/native-acceptance-snapshot";
+import { assertCiRuntimeTarget } from "./runtime/target.mjs";
 import sharp from "sharp";
 import { assertPrivateFileHeaders, createHttpS3Fixture } from "./http-s3.fixture";
 import { hashPassword } from "../../src/lib/password";
@@ -100,10 +104,39 @@ test("media.responses: настоящий Next.js, Auth.js и versioned MinIO", 
     assert.deepEqual(await f.versions(project.id), originals);
   });
   await t.test("media.access: current production ENGINEER200, foreign404, anonymous middleware307", async () => {
+    const hiddenProject = await f.project("hidden-engineering"), hidden = await f.product("hidden-engineering", hiddenProject.id, { status: "DESIGN", engineerId: foreign.id });
+    assert.equal((await f.request("/products/" + product.number, engineer)).status, 200);
+    assert.equal((await f.request("/products/" + hidden.number, engineer)).status, 404);
+    for (const item of [product, hidden]) {
+      const response = await f.request("/api/search?q=" + encodeURIComponent(item.number), engineer); assert.equal(response.status, 200);
+      const result = await response.json() as { products: { id: string }[]; projects: { id: string }[]; tasks: { id: string }[] };
+      assert.ok(result.products.every(row => [product.id, production.id].includes(row.id)));
+      assert.ok(result.projects.every(row => row.id === project.id)); assert.deepEqual(result.tasks, []);
+      if (item.id === product.id) assert.ok(result.products.some(row => row.id === product.id));
+      assert.ok(!result.products.some(row => row.id === hidden.id)); assert.ok(!result.projects.some(row => row.id === hiddenProject.id));
+    }
+    const searchMarker = f.id("eligible-search"), searchWork = await f.db.work.create({ data: { id: f.id("eligible-search-work"),
+      projectId: project.id, productId: product.id, title: searchMarker, quantity: "7", priceSnapshot: "1", total: "7" } });
+    const foreignWork = await f.db.work.create({ data: { id: f.id("hidden-search-work"), projectId: hiddenProject.id,
+      productId: hidden.id, title: searchMarker, quantity: "1", priceSnapshot: "1", total: "1" } });
+    const expectedTaskIds = Array.from({ length: 7 }, (_, index) => f.id("eligible-search-" + index));
+    const orphanId = f.id("search-orphan"), foreignTaskId = f.id("search-foreign");
+    await f.db.task.createMany({ data: [
+      ...expectedTaskIds.map((id, index) => ({ id, projectId: project.id, productId: product.id, workId: searchWork.id,
+        assigneeId: engineer.id, title: searchMarker + index, status: "NEW" as const, quantity: "1", updatedAt: new Date(Date.UTC(2026, 9, 7, 12, 0, 7 - index)) })),
+      { id: orphanId, projectId: project.id, productId: product.id, assigneeId: engineer.id, title: searchMarker,
+        status: "NEW", updatedAt: new Date("2026-10-07T12:00:20Z") },
+      { id: foreignTaskId, projectId: hiddenProject.id, productId: hidden.id, workId: foreignWork.id, assigneeId: foreign.id,
+        title: searchMarker, status: "NEW", quantity: "1", updatedAt: new Date("2026-10-07T12:00:21Z") },
+    ] });
+    const taskSearch = await f.request("/api/search?q=" + encodeURIComponent(searchMarker), engineer); assert.equal(taskSearch.status, 200);
+    const searchedTasks = (await taskSearch.json() as { tasks: { id: string }[] }).tasks;
+    assert.deepEqual(searchedTasks.map(row => row.id), expectedTaskIds.slice(0, 6)); assert.ok(!searchedTasks.some(row => [orphanId, foreignTaskId].includes(row.id)));
     const image = files.find(item => item.source.label === "png")!.row;
     for (const suffix of deniedUrls) {
       const allowed = await read(productionFile.id, suffix); assert.equal(allowed.status, 200); await allowed.arrayBuffer();
       const denied = await read(image.id, suffix, foreign); assert.equal(denied.status, 404); assert.equal(denied.headers.get("etag"), null);
+      assert.deepEqual(await denied.json(), { error: "Файл не найден" });
       const anonymous = await f.request(`/api/files/${image.id}${suffix}`); assert.equal(anonymous.status, 307);
       assert.equal(new URL(anonymous.headers.get("location")!, f.target.baseUrl).pathname, "/login");
       assert.notEqual(hash(new Uint8Array(await anonymous.arrayBuffer())), hash(png));
@@ -151,6 +184,28 @@ test("security.routes: credentials, Bearer, Telegram и команды чере�
     body: body ? JSON.stringify(body) : undefined,
   });
   await t.test("credentials/login: пароль проверяется настоящим provider; unknown/wrong/inactive отказ", async () => {
+    const target = assertCiRuntimeTarget();
+    const { Client } = createRequire(import.meta.url)("pg") as { Client: new (options: { connectionString: string }) => {
+      connect(): Promise<void>; query(sql: string): Promise<{ rows: Record<string, unknown>[] }>; end(): Promise<void>;
+    } };
+    const client = new Client({ connectionString: target.databaseUrl }), schema = "ci169_auth_" + randomUUID().replaceAll("-", "");
+    assert.match(schema, /^ci169_auth_[a-f0-9]{32}$/); let begun = false;
+    await verifiedRollback(async () => {
+      await client.connect(); assert.equal((await client.query("SELECT current_database() AS name")).rows[0].name, "pero_ci");
+      await client.query("BEGIN"); begun = true;
+      await client.query('CREATE SCHEMA "' + schema + '"; SET LOCAL search_path TO "' + schema + '", public');
+      assert.equal((await client.query("SELECT current_schema() AS name")).rows[0].name, schema);
+      await client.query('CREATE TABLE "User" (id text PRIMARY KEY, email text UNIQUE NOT NULL, name text, "passwordHash" text NOT NULL, roles text[] NOT NULL, active boolean NOT NULL); CREATE TABLE "ApiToken" (id text PRIMARY KEY, "createdById" text, "revokedAt" timestamptz)');
+      await client.query(`INSERT INTO "User" VALUES ('a','a@test.invalid','Test A','hash1',ARRAY['ADMIN'],true),('b','b@test.invalid','Test B','hash1',ARRAY['MANAGER'],true),('disabled','disabled@test.invalid','Disabled','hash1',ARRAY['WORKER'],false); INSERT INTO "ApiToken" (id,"createdById") VALUES ('disabled-token','disabled'),('orphan-token','missing'),('service-token',NULL),('a-token','a'),('b-token','b')`);
+      await client.query(await readFile(new URL("../../prisma/migrations/20260922160000_session_revocation/migration.sql", import.meta.url), "utf8"));
+      assert.equal((await client.query(`SELECT "sessionVersion" FROM "User" WHERE id='a'`)).rows[0].sessionVersion, 0);
+      const revoked = (await client.query('SELECT id, "revokedAt" IS NOT NULL AS revoked FROM "ApiToken" ORDER BY id')).rows;
+      assert.deepEqual(revoked, [{ id: "a-token", revoked: false }, { id: "b-token", revoked: false }, { id: "disabled-token", revoked: true }, { id: "orphan-token", revoked: true }, { id: "service-token", revoked: false }]);
+    }, async () => { try { if (begun) await client.query("ROLLBACK"); } finally { await client.end(); } });
+    const fieldActor = await f.user("task-page-field", ["WORKER"]), officeActor = await f.user("task-page-office", ["MANAGER"]);
+    const fieldPage = await f.request("/tasks", fieldActor); assert.ok([302, 307].includes(fieldPage.status));
+    assert.equal(new URL(fieldPage.headers.get("location")!, f.target.baseUrl).pathname, "/my");
+    assert.equal((await f.request("/tasks", officeActor)).status, 200);
     const active = await passwordUser("login-active"), inactive = await passwordUser("login-inactive", false);
     const logged = await f.login(active.email, password); assert.equal(new URL(logged.url).searchParams.has("error"), false);
     assert.equal((await session(logged.cookie)).body?.user?.id, active.id);
@@ -297,6 +352,54 @@ test("security.routes: credentials, Bearer, Telegram и команды чере�
       const { id, ...data } = original; await f.db.plugin.update({ where: { id }, data });
       assert.deepEqual(await f.db.plugin.findUnique({ where: { id } }), original);
     }
+  });
+  await t.test("calendar/http-duration-totals-analytics-own-only-and-disabled", async () => {
+    const own = await f.user("calendar-http", ["PROCUREMENT"], { calendarEnabled: true });
+    const other = await f.user("calendar-http-other", ["ADMIN"], { calendarEnabled: true });
+    await f.db.calendarEntry.createMany({ data: [
+      { id: randomUUID(), ownerId: own.id, title: "Часы 90", startsAt: new Date("2026-10-07T06:00Z"), plannedMinutes: 90, reminderOffsetMinutes: null },
+      { id: randomUUID(), ownerId: own.id, title: "Не указана", startsAt: new Date("2026-10-07T07:00Z"), plannedMinutes: null, reminderOffsetMinutes: null },
+      { id: randomUUID(), ownerId: own.id, title: "Ноль", startsAt: new Date("2026-10-07T08:00Z"), plannedMinutes: 0, reminderOffsetMinutes: null },
+      { id: randomUUID(), ownerId: other.id, title: "FOREIGN_CALENDAR_SECRET", startsAt: new Date("2026-10-07T06:00Z"), plannedMinutes: 9999, reminderOffsetMinutes: null },
+    ] });
+    const durationPath = "/plan?date=2026-10-07", duration = await f.request(durationPath, own); assert.equal(duration.status, 200);
+    const durationHtml = await duration.text();
+    for (const value of ["Часы 90", "1 ч 30 мин", "Не указана", "0 ч"]) assert.ok(durationHtml.includes(value), value);
+    for (const value of ["FOREIGN_CALENDAR_SECRET", own.passwordHash, other.passwordHash]) assert.ok(!durationHtml.includes(value));
+    const adminHtml = await (await f.request(durationPath, other)).text(); assert.ok(adminHtml.includes("FOREIGN_CALENDAR_SECRET")); assert.ok(!adminHtml.includes("Часы 90"));
+    const totalOwner = await f.user("calendar-report", ["PROCUREMENT"], { calendarEnabled: true });
+    await f.db.calendarEntry.createMany({ data: [
+      { id: randomUUID(), ownerId: totalOwner.id, title: "Начало месяца", startsAt: new Date("2026-09-30T21:00Z"), plannedMinutes: 30, reminderOffsetMinutes: null },
+      { id: randomUUID(), ownerId: totalOwner.id, title: "Запланировано", startsAt: new Date("2026-10-07T06:00Z"), plannedMinutes: 90, reminderOffsetMinutes: null },
+      { id: randomUUID(), ownerId: totalOwner.id, title: "Выполнено", startsAt: new Date("2026-10-07T07:00Z"), plannedMinutes: 60, state: "COMPLETED", reminderOffsetMinutes: null },
+      { id: randomUUID(), ownerId: totalOwner.id, title: "Отменено", startsAt: new Date("2026-10-07T08:00Z"), plannedMinutes: 120, state: "CANCELLED", reminderOffsetMinutes: null },
+      { id: randomUUID(), ownerId: totalOwner.id, title: "Пусто", startsAt: new Date("2026-10-07T09:00Z"), plannedMinutes: null, state: "COMPLETED", reminderOffsetMinutes: null },
+      { id: randomUUID(), ownerId: totalOwner.id, title: "Ноль", startsAt: new Date("2026-10-07T10:00Z"), plannedMinutes: 0, reminderOffsetMinutes: null },
+      { id: randomUUID(), ownerId: totalOwner.id, title: "OUTSIDE_BEFORE", startsAt: new Date("2026-09-30T20:59:59.999Z"), plannedMinutes: 999, reminderOffsetMinutes: null },
+      { id: randomUUID(), ownerId: totalOwner.id, title: "OUTSIDE_AFTER", startsAt: new Date("2026-10-31T21:00Z"), plannedMinutes: 999, reminderOffsetMinutes: null },
+    ] });
+    const month = await f.request(durationPath, totalOwner); assert.equal(month.status, 200); const monthHtml = await month.text();
+    for (const value of ["Часы за месяц", "Часы за день", "3 ч", "2 ч 30 мин", "Указанные плановые часы", "Плановые часы выполненных записей", "Без длительности:"]) assert.ok(monthHtml.includes(value), value);
+    for (const value of ["OUTSIDE_BEFORE", "OUTSIDE_AFTER", "FOREIGN_CALENDAR_SECRET"]) assert.ok(!monthHtml.includes(value));
+    assert.ok((await (await f.request("/plan?date=2026-12-01", totalOwner)).text()).includes("0 ч"));
+    await f.db.calendarEntry.createMany({ data: [
+      { id: randomUUID(), ownerId: totalOwner.id, title: "Начало диапазона", startsAt: new Date("2026-10-06T21:00Z"), plannedMinutes: 15, reminderOffsetMinutes: null },
+      { id: randomUUID(), ownerId: totalOwner.id, title: "Конец диапазона", startsAt: new Date("2026-10-08T20:59:59.999Z"), plannedMinutes: 45, state: "COMPLETED", updatedAt: new Date("2026-11-01"), reminderOffsetMinutes: null },
+      { id: randomUUID(), ownerId: totalOwner.id, title: "BEFORE_RANGE_SECRET", startsAt: new Date("2026-10-06T20:59:59.999Z"), plannedMinutes: 111, reminderOffsetMinutes: null },
+      { id: randomUUID(), ownerId: totalOwner.id, title: "AFTER_RANGE_SECRET", startsAt: new Date("2026-10-08T21:00Z"), plannedMinutes: 111, reminderOffsetMinutes: null },
+    ] });
+    const analyticsPath = "/plan/analytics?from=2026-10-07&to=2026-10-08";
+    const report = await f.request(analyticsPath + "&ownerId=" + other.id, totalOwner); assert.equal(report.status, 200); const html = await report.text();
+    for (const value of ["Аналитика плана", "Итоги периода", "3 ч 30 мин", "1 ч 45 мин", "Начало диапазона", "Конец диапазона"]) assert.ok(html.includes(value), value);
+    for (const value of ["BEFORE_RANGE_SECRET", "AFTER_RANGE_SECRET", "FOREIGN_CALENDAR_SECRET", totalOwner.passwordHash]) assert.ok(!html.includes(value));
+    const otherHtml = await (await f.request(analyticsPath, other)).text(); assert.ok(otherHtml.includes("FOREIGN_CALENDAR_SECRET")); assert.ok(!otherHtml.includes("Начало диапазона"));
+    assert.ok((await (await f.request("/plan/analytics?from=2026-10-08&to=2026-10-07", totalOwner)).text()).includes("Укажите корректный период"));
+    assert.ok((await (await f.request("/plan/analytics?from=2026-12-01&to=2026-12-02", totalOwner)).text()).includes("Записей в выбранном периоде нет"));
+    assert.ok((await (await f.request(durationPath, totalOwner)).text()).includes("/plan/analytics?from=2026-10-01&amp;to=2026-10-31"));
+    const [disabledOwn, disabledReportOwner] = await Promise.all([own, totalOwner].map(actor => f.db.user.update({ where: { id: actor.id }, data: { calendarEnabled: false, sessionVersion: { increment: 1 } } })));
+    await f.session(disabledOwn); await f.session(disabledReportOwner);
+    assert.ok(!(await (await f.request(durationPath, disabledOwn)).text()).includes("Часы 90"));
+    assert.ok(!(await (await f.request(analyticsPath, disabledReportOwner)).text()).includes("Начало диапазона"));
   });
   await f.verifyProtected();
 });

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { createRequire, Module } from "node:module";
 import { after, test } from "node:test";
-import { Prisma, type PrismaClient } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { payrollMonth, payrollMonthRange, shiftPayrollMonth } from "../src/lib/payroll-month";
@@ -63,7 +63,7 @@ inject("next/navigation", {
 const actions = load<typeof import("../src/server/payroll/actions")>("../src/server/payroll/actions");
 const { issuePayoutCore } = load<typeof import("../src/server/payroll/cash-core")>("../src/server/payroll/cash-core");
 load<typeof import("../src/server/product-percentage-pay/direct-completion")>("../src/server/product-percentage-pay/direct-completion");
-const percentage = load<typeof import("../src/server/product-percentage-pay/core")>("../src/server/product-percentage-pay/core");
+load<typeof import("../src/server/product-percentage-pay/core")>("../src/server/product-percentage-pay/core");
 const { changeTaskStatusCore } = load<typeof import("../src/server/tasks/completion-core")>("../src/server/tasks/completion-core");
 const monthSwitcher = load<typeof import("../src/components/month-switcher")>("../src/components/month-switcher");
 const csv = load<typeof import("../src/app/(app)/finance/payroll/export/route")>("../src/app/(app)/finance/payroll/export/route");
@@ -90,28 +90,6 @@ test("invalid payout actions and core reject before service or transaction reads
     await assert.rejects(issuePayoutCore(accountant, { ...cashInput(), kind: "SALARY", month }, fixedRates, noDatabase), /месяц/);
   }
   assert.equal(payoutServiceCalls, 0);
-});
-
-test("pending historical FX accrual uses original completed instant in Moscow and preserves rate dates", async () => {
-  const completedAt = new Date("2026-09-30T21:30:00.000Z");
-  const completion = { id: "c", calculationVersion: 1, productId: "p", state: "PENDING_FX", completedAt, completedById: "manager",
-    priceSnapshot: new Prisma.Decimal(1000), ratePercentSnapshot: new Prisma.Decimal(3), productCurrency: "BYN", payrollCurrency: "BYN",
-    shares: [{ id: "s", userId: "worker", userNameSnapshot: "Worker", shareUnits: 1000000 }], product: { projectId: "j", number: "П-1-1" } };
-  const entries: Row[] = [];
-  const tx = { productPercentageCompletion: { findUnique: async () => completion, update: async () => ({}) },
-    productPercentageCompletionShare: { update: async () => ({}) }, payrollEntry: { create: async ({ data }: { data: Row }) => { entries.push(data); return data; } },
-    domainEvent: { create: async () => ({ id: "event" }) } } as unknown as Prisma.TransactionClient;
-  const state = await percentage.settlePendingProductPercentage("p", "ASSEMBLY", {
-    db: { productPercentageCompletion: { findUnique: async () => completion } } as unknown as Pick<PrismaClient, "productPercentageCompletion">,
-    transaction: async (operation) => operation(tx),
-    resolveRates: async (_productCurrency, _payrollCurrency, instant) => {
-      assert.equal(instant.toISOString(), completedAt.toISOString());
-      const rate = { currency: "BYN" as const, rate: "1.000000", date: "2026-09-30" };
-      return { asOf: "2026-09-30", product: rate, payroll: rate };
-    }, deliver: async () => {},
-  });
-  assert.equal(state, "SETTLED"); assert.equal(entries[0].month, "2026-10"); assert.equal(entries[0].amount, "30.00");
-  assert.equal(entries[0].percentageCompletionShareId, "s");
 });
 
 test("piece task completion uses its done instant in Moscow and preserves frozen reward", async (t) => {

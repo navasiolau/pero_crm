@@ -15,7 +15,6 @@ const coordinator = "WORK_COORDINATOR" as Role;
 let roles: Role[] = ["WORKER", coordinator];
 const stored = { id: "price", name: "Расценка", unit: "шт.", price: 10, active: true };
 const audits: unknown[] = [];
-const history = { work: { priceSnapshot: "10.00" }, task: { shareAmount: "20.00" }, payroll: { amount: "20.00" } };
 let writes = 0;
 const db = {
   priceItem: {
@@ -39,12 +38,10 @@ before(async () => {
 });
 
 test("coordinator manages a price, keeps base access/pay, and loses catalog writes when removed", async () => {
-  const originalHistory = JSON.stringify(history);
   assert.equal((await prices.createPriceItem({ name: "Новая расценка", unit: "шт.", price: 100 })).ok, true);
   assert.equal((await prices.updatePriceItem(stored.id, { name: "Новая расценка", unit: "шт.", price: 125 })).ok, true);
   assert.equal(stored.price, 125);
   assert.equal(audits.length, 2, "Price changes retain administrative audit");
-  assert.equal(JSON.stringify(history), originalHistory, "Catalog editing never touches existing monetary facts");
   assert.deepEqual(role.normalizeRoles([coordinator, "WORKER", "WORKER"]), ["WORKER", coordinator]);
   assert.equal(role.isValidRolesCombination([coordinator]), false);
   assert.equal(role.isValidRolesCombination(["ADMIN", coordinator]), false);
@@ -78,5 +75,4 @@ test("coordinator manages a price, keeps base access/pay, and loses catalog writ
   const writesBeforeRemoval = writes;
   await assert.rejects(prices.updatePriceItem(stored.id, { name: "Запрещено", unit: "шт.", price: 999 }), /Недостаточно прав/);
   assert.equal(writes, writesBeforeRemoval);
-  assert.equal(JSON.stringify(history), originalHistory);
 });
