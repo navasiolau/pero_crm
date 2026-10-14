@@ -1,13 +1,13 @@
 # Tasks
 
-## 6. Глубокая консолидация после принятого 61f9bc14
+## 6. Глубокая консолидация после принятого 61f9bc14 — DONE (CI269/e0ae9a10)
 
 - [x] 6.1. Удалить закрытые финансовые ветви и ложные отрицательные сценарии; перенести недостающие реальные финансовые/складские условия.
 - [x] 6.2. Свести platform/file/auth/queue проверки к существующим native/HTTP suites с сохранением раннего отказа и клиентских ACK условий.
 - [x] 6.3. Удалить перекрывающиеся UI/contact/draft/timer fixtures после переноса уникальных PostgreSQL/Chromium утверждений.
-- [ ] 6.4. Принять полезные складские, календарные, bootstrap и browser условия из закрываемых операторских контуров №168.
-- [ ] 6.5. Независимое ревью, затронутые и один итоговый локальный прогон; затем один обычный CI и приёмка реального staging с cleanup и неизменной идентичностью данных.
-- [ ] 6.6. Итоговый LF/files/scenarios census и актуальная карта удалений/сохраняемых проверок без двойного счёта и новых QA систем.
+- [x] 6.4. Принять полезные складские, календарные, bootstrap и browser условия из закрываемых операторских контуров №168.
+- [x] 6.5. Независимое ревью, затронутые и один итоговый локальный прогон; затем один обычный CI и приёмка реального staging с cleanup и неизменной идентичностью данных.
+- [x] 6.6. Итоговый LF/files/scenarios census и актуальная карта удалений/сохраняемых проверок без двойного счёта и новых QA систем.
 
 ## 1. Runtime
 
@@ -73,3 +73,5 @@ Tiny исправление после CI №242: один общий own169 web
 - [x] 5.3 После source mapping/local proof выполнить mapped candidate retirement №168; после freeze подтвердить actual cases/parity/runtime/provenance/cleanup, независимое review и один ordinary CI/Stage. Нет отдельного before-delete CI: actual native PASS требуется для приёмки, failure блокирует публикацию и сохраняет прежний accepted stage. Historical CLOSED/NOT_RUN остаются history.
 
 Финальная приёмка: `FINAL_GO_61f9`, staging61f9bc14/CI266 all6SUCCESS; native91/web1441/bot38/watch53/guards2, FAIL/SKIP0, both parallel0/0 и owned cleanup0. Actual OCI/health/GET200/DB/start/volume/W07 подтверждены, source/main/production unchanged. **196 с, ≤180 NOT_MET**; receipt `.playwright-mcp/application-improvements/dead49-delivery-61f9bc14/acceptance.json`.
+
+Раздел6 принят на e0ae9a109506d2bc1d11d667781571815bd7cfbc /CI269 run38636433849: all6SUCCESS; web884, native100raw=96leaf+4parents (не100 independentcontracts), bot38/watcher53/guards2, FAIL/SKIP0, fulltypes/nativeparallel0/0 иcompleteownedcleanup. Один full local884PASS, boundedcorrections/types/lint/map23/14/OpenSpec strict иindependentGO — existinglocal-summary; native fixes actualconfirmedCI269. Census ALL21973LF (prefix21575+grossoutside398),200prefixfiles/144flat; original−68.4577%, extra−10075LF vs61f9. Actualstage sameOCI/health-login200/DBstart-volume-W07 unchanged: D:/Projects/pero_crm_v2/.playwright-mcp/application-improvements/deep-test-reduction-20261014-45186c70/acceptance-e0ae9a10.json. CI283с/<180NOT_MET;170performance remainsOPEN. Historical failed267/268/local pending snapshots остаются history, без новогоcoverage100%claim.
