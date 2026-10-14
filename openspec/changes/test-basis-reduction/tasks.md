@@ -41,3 +41,12 @@
 - [x] 7.3 После freeze обновить существующие matrix/README/maps, измерить ALLnew-inclusive строки/файлы/actual cases, пройти один итоговый набор проверок/review/обычный CI и actual Stage; historical DONE сохраняются; финальная actual приёмка CI266/61f9 подтверждена.
 
 Финальная приёмка: `FINAL_GO_61f9`, staging61f9bc14/CI266 all6SUCCESS; native91/web1441/bot38/watch53/guards2, FAIL/SKIP0, both parallel0/0 и owned cleanup0. Actual OCI/health/GET200/DB/start/volume/W07 подтверждены, source/main/production unchanged. **196 с, ≤180 NOT_MET**; receipt `.playwright-mcp/application-improvements/dead49-delivery-61f9bc14/acceptance.json`.
+
+## 8. Глубокая итерация после61f9 — OPEN
+
+- [x] 8.1 До удаления дополнить existing reduction-map FULL literal closures/keeper semantics/owner boundaries; сохранить accepted61f9 и priortracking2a234ef при обычной интеграции истории.
+- [x] 8.2 Закрыть согласованные821+428 QA namespaces/companions, sandbox45/closedBYNtransport13 и заменить V8 measurement thin existing mapcheck с прежним path guard; проверить retained existing validator test без новых framework/checkers/files.
+- [x] 8.3 После ACK A/B/C exact useful case vectors в existing169 suites удалить только mapped79 manual contours; UNKNOWN79/currentpins/warehouse94 guards KEEP. Учитывать все новые переносимые строки, не добиваться forecast сокращением assertions.
+- [ ] 8.4 После sourcefreeze обновить current README/map refs и actualnet; Root выполняет один общий local/types/lint/review/ordinaryCI/actualStage. До нового evidence не отмечать native/runtime/staging PASS; main/production/workingdata остаются вне scope.
+
+Source checkpoint глубокой итерации: все mapped79 manual/3817 LF retired по A/B/C keeper ACK; total104 literal file deletions, thincoverage380→69, два существующих Chrome файла +143LF; own168 rawLFnet−5316 до новых169 ports. A targeted28/28 и D stock5/5+warehouse4/4 PASS; combined native/HTTP/CI/Stage нового кандидата NOT_RUN, 8.4 остаётсяOPEN. Historical accepted61f9/CI266196с и priortracking2a234ef не переопределяются.
