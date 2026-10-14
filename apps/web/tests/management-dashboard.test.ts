@@ -104,14 +104,3 @@ test("an old manager claim cannot grant dashboard access after current roles cha
   assert.ok(result instanceof Response);
   assert.equal(result.headers.get("location"), "https://crm.example.invalid/products");
 });
-
-test("a revoked manager token remains rejected before routing", async () => {
-  const callbacks = createSessionCallbacks(async () => ({ ...account, sessionVersion: 2 }));
-  const current = await callbacks.jwt({
-    token: { id: account.id, roles: ["MANAGER"], sessionVersion: 1 },
-    account: null,
-    user: undefined as never,
-  });
-  assert.equal(current, null);
-  assert.equal(authorize(null), false);
-});

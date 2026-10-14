@@ -26,7 +26,15 @@ async function withContacts(canManage,run){
 test('real project contact inputs save Client fields with binding and support null address',async()=>{
  await withContacts(true,async page=>{
   assert.equal(await page.getByLabel('Телефон клиента').count(),1);
-  await page.getByLabel('Телефон клиента').fill('300');await page.getByLabel('Телефон клиента').press('Enter');
+  const phoneInput=page.getByLabel('Телефон клиента');await phoneInput.fill('');await phoneInput.focus();
+  await phoneInput.evaluate(node=>{window.__imeKeys=[];node.addEventListener('keydown',event=>window.__imeKeys.push({key:event.key,composing:event.isComposing,trusted:event.isTrusted}));});
+  const ime=await page.context().newCDPSession(page);
+  try{
+   await ime.send('Input.imeSetComposition',{text:'300',selectionStart:3,selectionEnd:3});await phoneInput.press('Enter');
+   assert.ok(await page.evaluate(()=>window.__imeKeys.some(event=>event.key==='Enter'&&event.composing&&event.trusted)));assert.equal(await page.evaluate(()=>window.__calls.length),0);
+   await ime.send('Input.insertText',{text:'300'});
+  }finally{await ime.detach();}
+  assert.equal(await phoneInput.inputValue(),'300');await phoneInput.press('Enter');
   await page.waitForFunction(()=>window.__calls.length===1);
   const phone=await page.evaluate(()=>window.__calls[0]);assert.equal(phone.field,'client.phone');assert.equal(phone.expectedClientId,'a');assert.equal(phone.expectedValue,'100');assert.equal(phone.value,'300');
   await page.getByLabel('Адрес клиента').fill('');await page.getByLabel('Адрес клиента').press('Tab');await page.waitForFunction(()=>window.__calls.length===2);
@@ -37,6 +45,10 @@ test('readonly project contacts retain values and never submit writes',async()=>
  await withContacts(false,async page=>{
  assert.equal(await page.getByLabel('Телефон клиента').count(),1);assert.equal(await page.getByLabel('Телефон клиента').getAttribute('readonly'),'');
  assert.equal(await page.getByLabel('Адрес клиента').getAttribute('readonly'),'');assert.equal(await page.getByLabel('Телефон клиента').inputValue(),'100');
+ for(const [label,value]of [['Телефон клиента','100'],['Адрес клиента','Client A']]){
+  const input=page.getByLabel(label);await input.focus();await input.pressSequentially('999');await input.press('Enter');await input.press('Tab');assert.equal(await input.inputValue(),value);
+ }
+ assert.equal(await page.locator('[role="alert"]').count(),0);
  assert.equal(await page.evaluate(()=>window.__calls.length),0);
  });
 });

@@ -1,8 +1,4 @@
-"""Fake Docker acceptance; never contacts Docker or a server.
-
---legacy-baseline runs the regression against the old source algorithm confirmed
-by the root agent's live read on 2026-09-28. It is not a live execution test.
-"""
+"""Fake Docker acceptance; never contacts Docker or a server."""
 import contextlib
 import copy
 import importlib.util
@@ -22,17 +18,12 @@ OLD_IMAGE = "sha256:" + "1" * 64
 NEW_IMAGE = "sha256:" + "2" * 64
 DB_IMAGE = "sha256:" + "3" * 64
 REVISION = "a" * 40
-LEGACY_BASELINE = "--legacy-baseline" in sys.argv
-if LEGACY_BASELINE:
-    sys.argv.remove("--legacy-baseline")
-    watcher = None
-else:
-    spec = importlib.util.spec_from_file_location(
-        "watch_crm", Path(__file__).resolve().parents[1] / "watch-crm.py"
-    )
-    watcher = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = watcher
-    spec.loader.exec_module(watcher)
+spec = importlib.util.spec_from_file_location(
+    "watch_crm", Path(__file__).resolve().parents[1] / "watch-crm.py"
+)
+watcher = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = watcher
+spec.loader.exec_module(watcher)
 
 
 def container(project, service, image):
@@ -154,24 +145,10 @@ class FakeRuntime:
         self.now += seconds
 
 
-def legacy_watch(runtime):
-    """Exact relevant before/pull/after decision from the read-only source read."""
-    before = runtime.inspect_image(None)["Id"]
-    runtime.pull(None)
-    after = runtime.inspect_image(None)["Id"]
-    if after and before != after:
-        runtime.up(None)
-        return {"status": "deployed"}
-    return {"status": "unchanged"}
-
-
 class ImageRegressionTests(unittest.TestCase):
-    def run_watcher(self, runtime):
-        return legacy_watch(runtime) if LEGACY_BASELINE else watcher.watch(runtime)
-
     def test_pre_pulled_image_still_replaces_old_running_web(self):
         runtime = FakeRuntime()
-        self.run_watcher(runtime)
+        watcher.watch(runtime)
         self.assertEqual(runtime.web["Image"], NEW_IMAGE,
                          "Cached tag already changed, but the running web is still old")
         self.assertEqual(runtime.calls.count("up:web"), 1)
@@ -179,12 +156,11 @@ class ImageRegressionTests(unittest.TestCase):
     def test_pre_pulled_image_already_running_is_unchanged(self):
         runtime = FakeRuntime()
         runtime.web["Image"] = NEW_IMAGE
-        result = self.run_watcher(runtime)
+        result = watcher.watch(runtime)
         self.assertEqual(result["status"], "unchanged")
         self.assertNotIn("up:web", runtime.calls)
 
 
-@unittest.skipIf(LEGACY_BASELINE, "The historical source model only covers image selection")
 class WatcherTests(unittest.TestCase):
     def assert_refused(self, runtime, code=None):
         with self.assertRaises(watcher.WatchError) as caught:
@@ -376,7 +352,6 @@ def process_is_stopped(state_path):
     return state.rsplit(")", 1)[1].split()[0] == "Z"
 
 
-@unittest.skipIf(LEGACY_BASELINE, "Runtime adapter is new")
 class DockerAdapterTests(unittest.TestCase):
 
     def test_process_state_probe_treats_vanishing_proc_entries_as_stopped(self):
@@ -474,7 +449,6 @@ class DockerAdapterTests(unittest.TestCase):
         self.assertEqual(command.call_args.kwargs["timeout"], 5)
 
 
-@unittest.skipIf(LEGACY_BASELINE, "Protected journal is new")
 class ResultJournalTests(unittest.TestCase):
     def test_captured_stdout_does_not_remove_persistent_result(self):
         with tempfile.TemporaryDirectory() as directory:

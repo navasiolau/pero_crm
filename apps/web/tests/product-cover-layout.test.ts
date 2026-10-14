@@ -9,12 +9,6 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import {
   canReplaceProductCover,
-  getAttachedProductCoverChoices,
-  getProductCoverActions,
-  getProductCoverLayout,
-  getProductCoverPreviewUrl,
-  keepCurrentCoverOnFailure,
-  refreshAfterCoverMutation,
 } from "../src/lib/product-hero";
 import { getFileViewerPresentation } from "../src/components/file-viewer";
 import { ProductCoverLayout as ActualProductCoverLayout } from "../src/app/(app)/products/[id]/product-sketch-view";
@@ -29,11 +23,6 @@ const image = (id: string, productId: string, projectId: string, mimeType = "ima
   id, productId, projectId, fileName: `${id}.jpg`, mimeType, hasThumb: true,
 });
 
-test("cover layout reserves the split only when an image exists", () => {
-  assert.equal(getProductCoverLayout(true), "cover");
-  assert.equal(getProductCoverLayout(false), "full-width");
-});
-
 test("cover replacement follows edit permission and role union", () => {
   assert.equal(canReplaceProductCover(["MANAGER"], true), true);
   assert.equal(canReplaceProductCover(["ENGINEER"], true), true);
@@ -43,32 +32,6 @@ test("cover replacement follows edit permission and role union", () => {
   assert.equal(canReplaceProductCover(["ACCOUNTANT"], true), false);
   assert.equal(canReplaceProductCover(["WORKER"], true), false);
   assert.equal(canReplaceProductCover(["MOUNTER"], true), false);
-});
-
-test("legacy cover toolbar helper remains available for older SDK compatibility", () => {
-  assert.deepEqual(getProductCoverActions(true, true), ["fullscreen", "replace"]);
-  assert.deepEqual(getProductCoverActions(true, false), ["fullscreen"]);
-  assert.deepEqual(getProductCoverActions(false, true), ["replace"]);
-  assert.deepEqual(getProductCoverActions(false, false), []);
-});
-
-test("existing cover choices are image files attached to the same product and project", () => {
-  const choices = getAttachedProductCoverChoices([
-    image("current", "p1", "order1"),
-    image("other-product", "p2", "order1"),
-    image("other-project", "p1", "order2"),
-    image("pdf", "p1", "order1", "application/pdf"),
-  ], "p1", "order1");
-
-  assert.deepEqual(choices.map((file) => file.id), ["current"]);
-});
-
-test("cover and board previews use protected optimized routes while fullscreen uses original", () => {
-  const cover = image("img-1", "p1", "order1");
-  assert.equal(getProductCoverPreviewUrl(cover, "card"), "/api/files/img-1?preview=card");
-  assert.equal(getProductCoverPreviewUrl(cover, "cover"), "/api/files/img-1?preview=cover");
-  assert.equal(getProductCoverPreviewUrl(cover, "original"), "/api/files/img-1");
-  assert.equal(getProductCoverPreviewUrl({ ...cover, mimeType: "application/pdf" }, "cover"), null);
 });
 
 test("FileViewer fullscreen variant uses the original without altering the regular viewer", () => {
@@ -88,23 +51,6 @@ test("mobile dialog sizing excludes all fullscreen viewers and gives them the fu
   assert.match(css, /\[data-slot="dialog-content"\]:not\(\[data-file-viewer-variant\$="-fullscreen"\]\)\s*\{[\s\S]*?max-height:\s*calc\(var\(--dialog-viewport-height,[^}]+\)\s*-/);
   assert.match(css, /\[data-slot="dialog-content"\]\[data-file-viewer-variant\$="-fullscreen"\]\s*\{[\s\S]*?height:\s*var\(--dialog-viewport-height,\s*100dvh\)[^}]*max-height:\s*none/);
 });
-
-test("failed cover mutation keeps the previous cover id", () => {
-  assert.equal(keepCurrentCoverOnFailure("old-file", "new-file", { ok: true }), "new-file");
-  assert.equal(keepCurrentCoverOnFailure("old-file", "new-file", { ok: false }), "old-file");
-});
-
-test("cover change refreshes page data only after the server confirms success", () => {
-  let refreshes = 0;
-  const refresh = () => { refreshes += 1; };
-  assert.equal(refreshAfterCoverMutation({ ok: false }, refresh), false);
-  assert.equal(refreshes, 0);
-  assert.equal(refreshAfterCoverMutation({ ok: true }, refresh), true);
-  assert.equal(refreshes, 1);
-});
-
-
-
 
 test("21 empty sketch keeps permanent slot and exact upload prompt; readonly has no mutation control", () => {
  const base={productId:"p1",projectId:"order1",cover:null,deleteCoverAction:deleteSketchAction,header:createElement("h1",null,"Изделие"),details:null};

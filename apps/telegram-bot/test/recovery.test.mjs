@@ -163,6 +163,8 @@ test("long polling drives link, role gate, project and payment through fake HTTP
   assert.ok(Date.parse(evidence.crm.lastSuccessAt));
   assert.ok(calls.some((call) => call.path === "/api/v1" && call.method === "GET"));
   assert.ok(calls.some((call) => call.path === "/api/v1/bot/link" && call.body.code === "LINKCODE"));
+  assert.ok(sent.some((message) => message.chat_id === 303 && message.text.toLowerCase().includes("привяз")));
+  assert.ok(!sent.some((message) => message.text.includes("Первоначальная цена")));
   assert.ok(sent.some((message) => message.chat_id === 202 && message.text.includes("доступен только")));
 
   const project = calls.find((call) => call.path === "/api/v1/bot/projects" && call.method === "POST");
