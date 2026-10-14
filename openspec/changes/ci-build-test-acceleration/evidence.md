@@ -1,5 +1,13 @@
 # Evidence
 
+## Follow-up CI271 — source ready, runtime acceptance OPEN
+
+Согласованный source scope 10.1–10.4 реализован в existing workflow/Dockerfile/runtime helpers без новых файлов/jobs/framework/deps. Metadata берётся из never-started immutable runtime projection; full OCI verifier вызывается единожды до types upload и любых app/migration/test запусков. Full tsc и прежний incremental cache находятся в backend после раннего полного types artifact; bot-dist выпускается только после его успеха. Native остаётся независимым от unit matrix и ждёт backend SUCCESS только перед bot packaging. Deps group имеет recorded PID/birth, GO, atomic exit status,300с deadline, inherited RUNNER_TRACKING_ID и merge-safe owned cleanup.
+
+Один affected static bundle: YAML PASS, Node syntax 5 runtime modules/11 workflow heredocs PASS, Bash syntax21 run bodies PASS, прежние оба publisher gates и отсутствие циклических job needs PASS,144 flatfiles/14 explicit component assignments/no duplicate PASS; целый navigation файл перенесён components-1→0. Existing target guards2/2PASS: действительный полный metadata inventory с package.json; чужие SHA/attempt, изменённые bytes, failure producer, повреждённый ZIP digest отклоняются actual helper. Focused ESLint4 runtime files EXIT0; OpenSpec strict PASS; git diff check PASS. Full web/types/CI/DB/build здесь не запускались; их выполняет Root на объединённом кандидате. Новые секунды и <180с пока НЕ подтверждены, baseline CI271299с сохранён.
+
+PR source-head из event используется только для GitHub API run/job/artifact origin; checkout/manifest/OCI/name остаются GITHUB_SHA merge. @actions/artifact2.3.2 (upload-artifactv4) подтверждает SHA256 исходного ZIP потока: явный digest guard выполняется до Python stdlib extraction, которая отклоняет unsafe paths/symlinks/дубликаты/oversize. Types upload включает hidden files только из собственного payload inventory; env/checkout туда не входят. Независимое review и actual staging остаются OPEN.
+
 ## Tested bot OCI packaging after CI270 — SOURCE_FROZEN / workflow review and runtime pending
 
 Root принял actual98b68cc4/CI270 all6SUCCESS, native100raw=96leaf+4parents/web884/bot38/Python53/guards2/parallel0/0/cleanup0 и exact tested/promoted/deployed OCI38f607bff4e058e346289c5c9435d329d238b8b70841d0d29ce523a128a21b20, прежние DB/W07/GET200. Wall378с; **<180 NOT_MET**. Official summary — `.playwright-mcp/application-improvements/deep-test-reduction-20261014-45186c70/ci-270-official-summary.json`. Bot setup143с включает `docker buildx inspect --bootstrap`: pull BuildKit image21:27:12.960–21:29:34.323Z=141,5с; binary/version≈0,05с, create≈0,06с. Причина медленного registry transfer глубже этих фактов не установлена.

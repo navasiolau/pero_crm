@@ -18,6 +18,9 @@ jobs:
   unit-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    permissions:
+      contents: read
+      actions: read
     strategy:
       fail-fast: false
       matrix:
@@ -38,6 +41,7 @@ jobs:
         # версия берётся из packageManager в package.json (pnpm@11)
 
       - uses: actions/setup-node@v4
+        id: node
         with:
           node-version: 22
           cache: pnpm
@@ -77,9 +81,9 @@ jobs:
           files=()
           for file in apps/web/tests/*.test.ts apps/web/tests/*.test.mjs; do
             case "${file##*/}" in
-              global-kanban-current-engineer-component.test.mjs|income-form-component.test.mjs|kanban-render-isolation.test.mjs|product-kanban-search-readiness.test.mjs|project-filter-component.test.mjs|stock-movement-component.test.mjs|warehouse-units-component.test.mjs)
+              global-kanban-current-engineer-component.test.mjs|income-form-component.test.mjs|kanban-render-isolation.test.mjs|product-card-navigation-browser.test.mjs|product-kanban-search-readiness.test.mjs|project-filter-component.test.mjs|stock-movement-component.test.mjs|warehouse-units-component.test.mjs)
                 cohort=components-0 ;;
-              file-list-printing.test.ts|inline-field-subscriptions.test.mjs|product-card-navigation-browser.test.mjs|project-client-contact-component.test.mjs|project-product-create-dialog.test.mjs|warehouse-deletion-component.test.mjs|task-status-command.browser.test.ts)
+              file-list-printing.test.ts|inline-field-subscriptions.test.mjs|project-client-contact-component.test.mjs|project-product-create-dialog.test.mjs|warehouse-deletion-component.test.mjs|task-status-command.browser.test.ts)
                 cohort=components-1 ;;
               *) cohort=backend ;;
             esac
@@ -92,6 +96,40 @@ jobs:
           pnpm --filter @pero/web exec tsx --test "${files[@]}"
         env:
           COHORT: ${{ matrix.cohort }}
+
+      - name: Получить проверенные свежие types текущего OCI
+        if: matrix.cohort == 'backend'
+        run: |
+          node --input-type=module <<'NODE'
+          import { cpSync, existsSync } from 'node:fs';
+          import { receiveCiArtifact, requireCi, verifyTypesArtifact } from './apps/web/tests/integration/runtime/target.mjs';
+          const { directory } = await receiveCiArtifact('types');
+          const manifest = verifyTypesArtifact(directory);
+          requireCi(!existsSync('apps/web/.next/BUILD_ID') && !existsSync('apps/web/.next/types'), 'backend-fresh-types');
+          cpSync(`${directory}/metadata`, 'apps/web/.next', { recursive: true });
+          console.log(JSON.stringify({ ciRuntime: 'types-ready', buildId: manifest.buildId, indexDigest: manifest.indexDigest }));
+          NODE
+        env:
+          CI_ARTIFACT_TOKEN: ${{ github.token }}
+          CI_WORKFLOW_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: TypeScript incremental cache
+        if: matrix.cohort == 'backend'
+        uses: actions/cache@v4
+        with:
+          path: apps/web/tsconfig.tsbuildinfo
+          key: types-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.node.outputs.node-version }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'apps/web/package.json', 'apps/web/tsconfig.json', 'apps/web/next.config.ts', 'packages/*/package.json', 'packages/plugins/*/package.json', 'packages/*/tsconfig.json', 'packages/plugins/*/tsconfig.json') }}-${{ hashFiles('apps/web/src/**', 'apps/web/tests/**', 'apps/web/*.ts', 'apps/web/prisma/schema.prisma', 'packages/*/src/**', 'packages/plugins/*/src/**') }}
+          restore-keys: |
+            types-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.node.outputs.node-version }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'apps/web/package.json', 'apps/web/tsconfig.json', 'apps/web/next.config.ts', 'packages/*/package.json', 'packages/plugins/*/package.json', 'packages/*/tsconfig.json', 'packages/plugins/*/tsconfig.json') }}-
+
+      - name: Полная типизация web после свежего build
+        if: matrix.cohort == 'backend'
+        run: |
+          started=$SECONDS
+          status=0
+          pnpm --filter @pero/web exec tsc --noEmit || status=$?
+          printf 'Full web tsc: %ss; exit: %s\n' "$((SECONDS-started))" "$status"
+          exit "$status"
 
       - name: Закрепить проверенный plain JS бота
         if: matrix.cohort == 'backend'
@@ -169,11 +207,16 @@ jobs:
           node-version: 22
           cache: pnpm
 
-      - name: Зависимости
-        run: pnpm install --frozen-lockfile
-
-      - name: Prisma Client (generate)
-        run: pnpm --filter @pero/web exec prisma generate
+      - name: Фоновая принадлежащая job установка dependencies
+        run: |
+          node --input-type=module <<'NODE'
+          import { assertCiJob } from './apps/web/tests/integration/runtime/target.mjs';
+          import { startDependencies } from './apps/web/tests/integration/runtime/cleanup.mjs';
+          startDependencies(assertCiJob());
+          NODE
+        env:
+          PERO_CI_POSTGRES_ID: ${{ job.services.postgres.id }}
+          PERO_CI_NETWORK: ${{ job.services.postgres.network }}
 
       - uses: docker/setup-buildx-action@v3
         id: builder
@@ -201,13 +244,10 @@ jobs:
             args: { NODE_IMAGE: nodeImage, GITHUB_ACTIONS: 'true', PERO_CI_EXTERNAL_CHECKS: '1', PERO_CI_CACHE_ID: cacheId },
             tags: [job.webImage], 'cache-from': ['type=gha,scope=pero-web'] };
           const cacheMount = `type=cache,id=${cacheId},target=/app/apps/web/.next/cache,sharing=locked`;
-          const bake = { group: { default: { targets: ['web-oci', 'web-runtime', 'metadata', 'minio'] } }, target: {
+          const bake = { group: { default: { targets: ['web-oci', 'web-runtime', 'minio'] } }, target: {
             'web-oci': { ...common, attest: ['type=provenance,mode=max'],
               'cache-to': ['type=gha,mode=max,scope=pero-web'], output: [`type=oci,dest=${directory}/web.oci.tar`] },
             'web-runtime': { ...common, attest: ['type=provenance,disabled=true'], output: [`type=docker,dest=${directory}/web.runtime.tar`] },
-            metadata: { ...common, target: 'ci-metadata', attest: ['type=provenance,disabled=true'],
-              'cache-from': ['type=gha,scope=pero-web-metadata', ...common['cache-from']],
-              'cache-to': ['type=gha,mode=max,scope=pero-web-metadata'], output: [`type=local,dest=${directory}/metadata`] },
             minio: { context: 'apps/web/tests/integration/runtime', dockerfile: 'Dockerfile.minio', platforms: ['linux/amd64'],
               attest: ['type=provenance,disabled=true'], tags: [job.minioImage],
               labels: { ...labels, 'pero.ci.service': 'minio', 'pero.ci.minio.commit': '07c3a429bfed433e49018cb0f78a52145d4bedeb' },
@@ -240,6 +280,9 @@ jobs:
 
       - name: Восстановить compiler cache mount
         uses: docker/bake-action@5be5f02ff8819ecd3092ea6b2e6261c31774f2b4 # v6
+        env:
+          DOCKER_BUILD_SUMMARY: false
+          DOCKER_BUILD_RECORD_UPLOAD: false
         with:
           source: .
           builder: ${{ steps.builder.outputs.name }}
@@ -250,30 +293,28 @@ jobs:
       - name: Один production OCI и закреплённый MinIO
         id: images
         uses: docker/bake-action@5be5f02ff8819ecd3092ea6b2e6261c31774f2b4 # v6
+        env:
+          DOCKER_BUILD_SUMMARY: false
+          DOCKER_BUILD_RECORD_UPLOAD: false
         with:
           source: .
           builder: ${{ steps.builder.outputs.name }}
           files: ${{ steps.prepare.outputs.directory }}/bake.json
-          targets: web-oci,web-runtime,metadata,minio
+          targets: web-oci,web-runtime,minio
           allow: fs.write=${{ steps.prepare.outputs.directory }}
 
       - name: Сохранить compiler cache mount
         if: always() && steps.prepare.outcome == 'success' && steps.compiler-cache.outputs.cache-hit != 'true'
         uses: docker/bake-action@5be5f02ff8819ecd3092ea6b2e6261c31774f2b4 # v6
+        env:
+          DOCKER_BUILD_SUMMARY: false
+          DOCKER_BUILD_RECORD_UPLOAD: false
         with:
           source: .
           builder: ${{ steps.builder.outputs.name }}
           files: ${{ steps.prepare.outputs.directory }}/bake.json
           targets: cache-extract
           provenance: false
-
-      - name: TypeScript incremental cache
-        uses: actions/cache@v4
-        with:
-          path: apps/web/tsconfig.tsbuildinfo
-          key: types-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.node.outputs.node-version }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'apps/web/package.json', 'apps/web/tsconfig.json', 'apps/web/next.config.ts', 'packages/*/package.json', 'packages/plugins/*/package.json', 'packages/*/tsconfig.json', 'packages/plugins/*/tsconfig.json') }}-${{ hashFiles('apps/web/src/**', 'apps/web/tests/**', 'apps/web/*.ts', 'apps/web/prisma/schema.prisma', 'packages/*/src/**', 'packages/plugins/*/src/**') }}
-          restore-keys: |
-            types-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.node.outputs.node-version }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'apps/web/package.json', 'apps/web/tsconfig.json', 'apps/web/next.config.ts', 'packages/*/package.json', 'packages/plugins/*/package.json', 'packages/*/tsconfig.json', 'packages/plugins/*/tsconfig.json') }}-
 
       - name: Проверить OCI и загрузить точную runtime projection
         id: next-build
@@ -286,16 +327,21 @@ jobs:
           node --input-type=module <<'NODE'
           import { appendFileSync, cpSync, writeFileSync } from 'node:fs';
           import { execFileSync } from 'node:child_process';
-          import { assertCiJob, readWebArtifact, requireCi } from './apps/web/tests/integration/runtime/target.mjs';
-          const env = process.env;
-          const job = assertCiJob(), record = await readWebArtifact(false);
-          const metadata = JSON.parse(env.BUILD_METADATA);
+          import { artifactIdentity, assertCiJob, readWebArtifact, requireCi, typesDigest } from './apps/web/tests/integration/runtime/target.mjs';
+          import { extractWebMetadata } from './apps/web/tests/integration/runtime/containers.mjs';
+          const env = process.env, job = assertCiJob(), metadata = JSON.parse(env.BUILD_METADATA);
+          const web = extractWebMetadata(job, metadata['web-runtime']['containerimage.config.digest']);
+          const record = await readWebArtifact(false);
           requireCi(metadata['web-oci']['containerimage.digest'] === record.indexDigest, 'bake-oci-digest');
           const inspect = tag => JSON.parse(execFileSync('docker', ['image', 'inspect', tag], { encoding: 'utf8' }))[0];
-          const web = inspect(job.webImage), minio = inspect(job.minioImage);
+          const minio = inspect(job.minioImage);
           requireCi(web.Id === record.configDigest && JSON.stringify(web.RootFS.Layers) === JSON.stringify(record.diffIds), 'docker-oci-projection');
           writeFileSync(`${env.PERO_CI_WEB_ARTIFACT_DIR}/image.json`, JSON.stringify(record));
           cpSync(`${env.PERO_CI_WEB_ARTIFACT_DIR}/metadata`, 'apps/web/.next', { recursive: true });
+          const payload = `${env.PERO_CI_WEB_ARTIFACT_DIR}/types-artifact`;
+          cpSync(`${env.PERO_CI_WEB_ARTIFACT_DIR}/metadata`, `${payload}/metadata`, { recursive: true });
+          writeFileSync(`${payload}/types.json`, JSON.stringify({ ...artifactIdentity(), buildId: record.buildId,
+            indexDigest: record.indexDigest, configDigest: record.configDigest, files: typesDigest(`${payload}/metadata`) }));
           appendFileSync(env.GITHUB_OUTPUT, `revision=${record.revision}\nbuild-id=${record.buildId}\noci-sha256=${record.ociSha256}\nindex-digest=${record.indexDigest}\n`);
           appendFileSync(env.GITHUB_ENV, `PERO_CI_WEB_IMAGE_ID=${web.Id}\nPERO_CI_MINIO_IMAGE_ID=${minio.Id}\nPERO_CI_EXPECTED_OCI_SHA256=${record.ociSha256}\n`);
           console.log(JSON.stringify({ ciRuntime: 'next-build-ready', ...record, node: process.version, platform: process.platform, arch: process.arch }));
@@ -305,17 +351,34 @@ jobs:
           PERO_CI_POSTGRES_ID: ${{ job.services.postgres.id }}
           PERO_CI_NETWORK: ${{ job.services.postgres.network }}
 
-      - name: Typecheck и интеграционные PostgreSQL + HTTP/S3 контракты
+      - name: Свежие types из проверенного OCI
+        uses: actions/upload-artifact@v4
+        with:
+          name: types-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
+          path: ${{ steps.prepare.outputs.directory }}/types-artifact
+          include-hidden-files: true
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+      - name: Подтвердить завершение host dependencies
         run: |
-          pnpm --filter @pero/web exec tsc --noEmit &
-          types_pid=$!
-          types_status=0
-          native_status=0
-          pnpm --filter @pero/web test:integration || native_status=$?
-          wait "$types_pid" || types_status=$?
-          printf 'Typecheck exit: %s; integration exit: %s\n' "$types_status" "$native_status"
-          test "$types_status" -eq 0
-          exit "$native_status"
+          node --input-type=module <<'NODE'
+          import { assertCiJob } from './apps/web/tests/integration/runtime/target.mjs';
+          import { waitDependencies } from './apps/web/tests/integration/runtime/cleanup.mjs';
+          await waitDependencies(assertCiJob());
+          NODE
+        env:
+          PERO_CI_POSTGRES_ID: ${{ job.services.postgres.id }}
+          PERO_CI_NETWORK: ${{ job.services.postgres.network }}
+
+      - name: Интеграционные PostgreSQL + HTTP/S3 контракты
+        run: |
+          started=$SECONDS
+          status=0
+          pnpm --filter @pero/web test:integration || status=$?
+          printf 'Native contracts: %ss; exit: %s\n' "$((SECONDS-started))" "$status"
+          exit "$status"
         env:
           PERO_CI_BUILD_REVISION: ${{ steps.next-build.outputs.revision }}
           PERO_CI_BUILD_ID: ${{ steps.next-build.outputs.build-id }}
@@ -333,76 +396,22 @@ jobs:
 
       - name: Дождаться проверенного backend artifact текущего запуска
         if: github.event_name == 'push'
-        id: bot-producer
         run: |
           node --input-type=module <<'NODE'
           import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
           import path from 'node:path';
-          import { assertCiJob, requireCi, REPOSITORY } from './apps/web/tests/integration/runtime/target.mjs';
-          const job = assertCiJob(), env = process.env, revision = env.GITHUB_SHA;
-          requireCi(/^[a-f0-9]{40}$/.test(revision) && ['main', 'staging'].includes(env.GITHUB_REF_NAME), 'bot-producer-revision');
-          const deadline = Date.now() + 180000, artifactName = `bot-dist-${job.runId}-${job.attempt}-${revision}`;
-          async function api(resource) {
-            const remaining = deadline - Date.now(); requireCi(remaining > 0, 'bot-producer-timeout');
-            let response;
-            try { response = await fetch(`https://api.github.com/repos/${REPOSITORY}/${resource}`, {
-              headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${env.BOT_PRODUCER_TOKEN}`,
-                'X-GitHub-Api-Version': '2022-11-28' }, redirect: 'error', signal: AbortSignal.timeout(Math.min(10000, remaining)) }); }
-            catch { throw Error('BOT_PRODUCER_API_UNAVAILABLE'); }
-            requireCi(response.ok, `bot-producer-http-${response.status}`);
-            const body = await response.text(); requireCi(body.length <= 8 * 1024 * 1024, 'bot-producer-response-size');
-            return JSON.parse(body);
-          }
-          const run = await api(`actions/runs/${job.runId}/attempts/${job.attempt}`);
-          requireCi(run.id === Number(job.runId) && run.run_attempt === Number(job.attempt) && run.head_sha === revision &&
-            run.head_branch === env.GITHUB_REF_NAME && run.event === 'push' && run.repository?.full_name === REPOSITORY &&
-            run.path?.split('@')[0] === '.github/workflows/ci-cd.yml', 'bot-producer-run');
-          let producer;
-          while (Date.now() < deadline) {
-            const jobs = await api(`actions/runs/${job.runId}/attempts/${job.attempt}/jobs?per_page=100`);
-            requireCi(Array.isArray(jobs.jobs) && jobs.total_count === jobs.jobs.length && jobs.total_count <= 100, 'bot-producer-jobs');
-            const matches = jobs.jobs.filter(item => item.name === 'unit-tests (backend)');
-            requireCi(matches.length <= 1, 'bot-producer-unique');
-            const backend = matches[0];
-            if (backend?.status === 'completed') {
-              requireCi(backend.conclusion === 'success' && backend.run_id === Number(job.runId) &&
-                backend.run_attempt === Number(job.attempt) && backend.head_sha === revision, 'bot-producer-success');
-              const listed = await api(`actions/runs/${job.runId}/artifacts?per_page=100`);
-              requireCi(Array.isArray(listed.artifacts) && listed.total_count === listed.artifacts.length && listed.total_count <= 100, 'bot-producer-artifacts');
-              const artifacts = listed.artifacts.filter(item => item.name === artifactName && !item.expired);
-              requireCi(artifacts.length <= 1, 'bot-producer-artifact-unique');
-              if (artifacts[0]) {
-                const artifact = artifacts[0];
-                requireCi(Number.isSafeInteger(backend.id) && backend.id > 0 && Number.isSafeInteger(artifact.id) && artifact.id > 0 &&
-                  artifact.workflow_run?.id === Number(job.runId) && artifact.workflow_run?.head_sha === revision &&
-                  /^sha256:[a-f0-9]{64}$/.test(artifact.digest), 'bot-producer-artifact-owner');
-                producer = { repository: REPOSITORY, runId: job.runId, attempt: job.attempt, revision,
-                  name: backend.name, jobId: String(backend.id), conclusion: backend.conclusion,
-                  artifactId: String(artifact.id), artifactName, artifactDigest: artifact.digest };
-                break;
-              }
-            }
-            await new Promise(resolve => setTimeout(resolve, Math.min(5000, Math.max(0, deadline - Date.now()))));
-          }
-          requireCi(Boolean(producer), 'bot-producer-timeout');
-          const directory = path.join(env.RUNNER_TEMP, `pero-bot-${job.runId}-${job.attempt}-${revision}`);
+          import { assertCiJob, receiveCiArtifact } from './apps/web/tests/integration/runtime/target.mjs';
+          const job = assertCiJob(), env = process.env;
+          const { directory: source, producer } = await receiveCiArtifact('bot-dist');
+          const directory = path.join(env.RUNNER_TEMP, `pero-bot-${job.runId}-${job.attempt}-${env.GITHUB_SHA}`);
           mkdirSync(directory); mkdirSync(path.join(directory, 'metadata'));
           writeFileSync(path.join(directory, 'metadata', 'producer.json'), JSON.stringify(producer));
-          appendFileSync(env.GITHUB_ENV, `PERO_CI_BOT_ARTIFACT_DIR=${directory}\n`);
-          appendFileSync(env.GITHUB_OUTPUT, `artifact-id=${producer.artifactId}\n`);
-          console.log(JSON.stringify({ ciRuntime: 'bot-producer-ready', ...producer }));
+          appendFileSync(env.GITHUB_ENV, `PERO_CI_BOT_ARTIFACT_DIR=${directory}\nPERO_CI_BOT_DIST_DIR=${source}\n`);
           NODE
         env:
-          BOT_PRODUCER_TOKEN: ${{ github.token }}
+          CI_ARTIFACT_TOKEN: ${{ github.token }}
           PERO_CI_POSTGRES_ID: ${{ job.services.postgres.id }}
           PERO_CI_NETWORK: ${{ job.services.postgres.network }}
-
-      - uses: actions/download-artifact@v4
-        if: github.event_name == 'push'
-        with:
-          artifact-ids: ${{ steps.bot-producer.outputs.artifact-id }}
-          merge-multiple: true
-          path: ${{ runner.temp }}/pero-bot-dist
 
       - name: Подготовить bot OCI из проверенных plain JS байтов
         if: github.event_name == 'push'
@@ -412,7 +421,7 @@ jobs:
           import { cpSync, readFileSync, writeFileSync } from 'node:fs';
           import path from 'node:path';
           import { botDistDigest, requireCi, REPOSITORY } from './apps/web/tests/integration/runtime/target.mjs';
-          const env = process.env, source = path.join(env.RUNNER_TEMP, 'pero-bot-dist'), directory = env.PERO_CI_BOT_ARTIFACT_DIR;
+          const env = process.env, source = env.PERO_CI_BOT_DIST_DIR, directory = env.PERO_CI_BOT_ARTIFACT_DIR;
           const tested = JSON.parse(readFileSync(path.join(source, 'tested.json'), 'utf8'));
           requireCi(tested.revision === env.GITHUB_SHA && tested.runId === env.GITHUB_RUN_ID &&
             tested.attempt === env.GITHUB_RUN_ATTEMPT, 'bot-tested-owner');
@@ -436,6 +445,9 @@ jobs:
         if: github.event_name == 'push'
         id: bot-image
         uses: docker/bake-action@5be5f02ff8819ecd3092ea6b2e6261c31774f2b4 # v6
+        env:
+          DOCKER_BUILD_SUMMARY: false
+          DOCKER_BUILD_RECORD_UPLOAD: false
         with:
           source: .
           builder: ${{ steps.builder.outputs.name }}

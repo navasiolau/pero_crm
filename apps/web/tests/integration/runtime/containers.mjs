@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { MINIO_COMMIT, MINIO_GO_IMAGE, MINIO_RELEASE, MINIO_SOURCE_SHA256, POSTGRES_IMAGE, REPOSITORY, requireCi } from './target.mjs';
 
 /** @typedef {import('./target.mjs').CiJob} CiJob */
@@ -100,6 +100,49 @@ function inspectWebImage(target, purpose = 'runtime') {
   return image;
 }
 
+/** Независимый от возвращённого CID cleanup покрывает отмену между create и stdout. */
+function metadataContainer(target) {
+  const name = `${target.webName}-metadata`, id = docker(['ps', '-aq', '--no-trunc', '--filter', `name=^/${name}$`]);
+  if (id) {
+    const container = JSON.parse(docker(['inspect', '--type', 'container', id]))[0];
+    requireCi(container.Id === id && container.Name === `/${name}` &&
+      container.Image === inspectWebImage(target, 'cleanup').Id && container.Config.Image === container.Image &&
+      container.State.Status === 'created' && container.State.Running === false &&
+      container.State.StartedAt === '0001-01-01T00:00:00Z' && container.HostConfig.ReadonlyRootfs === true &&
+      container.HostConfig.NetworkMode === 'none' && container.Mounts.length === 0 &&
+      Object.keys(container.HostConfig.PortBindings ?? {}).length === 0, 'metadata-container');
+    for (const [key, value] of Object.entries(labels(target, 'web-metadata')))
+      requireCi(container.Config.Labels?.[key] === value, `metadata-${key}`);
+  }
+  return id;
+}
+
+export function removeMetadata(target) {
+  const id = metadataContainer(target), name = `${target.webName}-metadata`;
+  if (id) docker(['rm', id]);
+  requireCi(!docker(['ps', '-aq', '--no-trunc', '--filter', `name=^/${name}$`]), 'metadata-remains');
+}
+
+/** Никакие процессы образа не запускаются до полного OCI proof. */
+export function extractWebMetadata(target, configDigest) {
+  requireCi(/^sha256:[a-f0-9]{64}$/.test(configDigest ?? ''), 'runtime-bake-config');
+  process.env.PERO_CI_WEB_IMAGE_ID = configDigest;
+  const image = inspectWebImage(target), name = `${target.webName}-metadata`;
+  requireCi(image.Id === configDigest && !docker(['ps', '-aq', '--filter', `name=^/${name}$`]), 'metadata-fresh-image');
+  const directory = `${process.env.PERO_CI_WEB_ARTIFACT_DIR}/metadata`;
+  mkdirSync(directory); mkdirSync(`${directory}/server`);
+  const args = ['create', '--name', name, '--network', 'none', '--read-only', '--entrypoint', 'node'];
+  for (const [key, value] of Object.entries(labels(target, 'web-metadata'))) args.push('--label', `${key}=${value}`);
+  args.push(image.Id, '--version');
+  try {
+    const id = docker(args);
+    requireCi(/^[a-f0-9]{64}$/.test(id) && metadataContainer(target) === id, 'metadata-id');
+    for (const relative of ['types', 'BUILD_ID', 'server/server-reference-manifest.json'])
+      docker(['cp', `${id}:/app/apps/web/.next/${relative}`, `${directory}/${relative}`]);
+  } finally { removeMetadata(target); }
+  return image;
+}
+
 /** @param {CiJob} target @param {boolean} [fault] */
 function webEnvironment(target, fault = false) {
   const db = new URL(target.databaseUrl);
@@ -174,6 +217,7 @@ export function startWeb(target, fault = false) {
 
 /** @param {CiJob} target */
 export function removeWeb(target) {
+  removeMetadata(target);
   for (const fault of [true, false]) {
     const name = fault ? target.faultName : target.webName;
     const id = docker(['ps', '-aq', '--no-trunc', '--filter', `name=^/${name}$`]);

@@ -1,5 +1,14 @@
 # Tasks
 
+## 10. Перестройка критического пути после CI271 — APPROVED / OPEN
+
+- [x] 10.1 Удалить scratch metadata export/cache, извлекать полные свежие metadata из immutable never-started runtime projection с прежним однократным OCI proof и cancel-safe owned cleanup.
+- [x] 10.2 Передавать ранний exact-ID/hash-bound types artifact также для PR; перенести full tsc/type cache в backend, объединить bounded poll/download для types|bot-dist и сохранить оба publisher gates.
+- [x] 10.3 Перекрыть host install/generate Docker через owned deps process GO handshake/status/300с timeout и merge-safe finally/always cleanup.
+- [x] 10.4 Перенести целый navigation suite components-1→0, сохранить partition/isolation; отключить только Bake summary/build-record upload.
+- [ ] 10.5 После freeze выполнить один affected static/guard bundle и независимое review, Root — один итоговый local web без новых QA/files/benchmark.
+- [ ] 10.6 Root выполняет один ordinary CI и actual staging, фиксирует timing/OCI/DB/W07/GET/cleanup и inclusive code census; цель <180с закрывается только фактическим сопоставимым SUCCESS.
+
 ## 1. Независимые изменения CI
 
 - [x] 1.1 Добавить совместимые Next/TypeScript build caches и перенести полный web tsc после свежего production build; проверить порядок и содержимое cache paths по workflow/config diff.
