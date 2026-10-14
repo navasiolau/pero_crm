@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
-import { runInNewContext } from "node:vm";
+import { Script } from "node:vm";
 import type { File as FileRow, FileSection, User } from "@prisma/client";
 import { DeleteObjectCommand, GetBucketVersioningCommand, GetObjectCommand, ListObjectVersionsCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { encode } from "next-auth/jwt";
@@ -21,6 +21,9 @@ export async function createHttpS3Fixture(scenarioId: string) {
   const s3 = new S3Client({ endpoint: target.s3.endpoint, region: "us-east-1", forcePathStyle: true,
     credentials: { accessKeyId: target.s3.accessKeyId, secretAccessKey: target.s3.secretAccessKey }, maxAttempts: 1 });
   const bucket = target.s3.bucket, projects = new Set<string>(), documents = new Set<string>();
+  const require = createRequire(import.meta.url);
+  let actionManifest: Promise<{ node: Record<string, { exportedName?: string; workers: Record<string, unknown> }> }> | undefined;
+  let flightDecoder: Promise<Script> | undefined;
   const ownedKey = (key: string) => {
     assert.ok(projects.has(key.split("/")[0]) || documents.has(key), "Только ключ собственной CI-фикстуры");
     assert.ok(!key.includes("\\") && !key.split("/").some(part => !part || part === "." || part === ".."));
@@ -73,8 +76,7 @@ export async function createHttpS3Fixture(scenarioId: string) {
   }
   async function actionResponse(name: string, page: string, actor: HttpActor | undefined, args: unknown[]) {
     assertCiRuntimeTarget();
-    const manifest = JSON.parse(await readFile(path.resolve(".next/server/server-reference-manifest.json"), "utf8")) as {
-      node: Record<string, { exportedName?: string; workers: Record<string, unknown> }> };
+    const manifest = await (actionManifest ??= readFile(path.resolve(".next/server/server-reference-manifest.json"), "utf8").then(JSON.parse));
     const found = Object.entries(manifest.node).filter(([, entry]) => entry.exportedName === name);
     assert.equal(found.length, 1, `CI_ACTION_EXPORT:${name}`); assert.match(found[0][0], /^[a-f0-9]{42}$/);
     return request(page, actor, { method: "POST", headers: { "Next-Action": found[0][0],
@@ -85,7 +87,11 @@ export async function createHttpS3Fixture(scenarioId: string) {
     assert.equal(response.status, 200, name); assert.ok(response.headers.get("content-type")?.startsWith("text/x-component"));
     assert.equal(response.headers.has("x-action-redirect"), false); assert.notEqual(response.headers.get("x-nextjs-action-not-found"), "1");
     const bytes = new Uint8Array(await response.arrayBuffer()); assert.ok(bytes.length <= 2 * 1024 * 1024);
-    const require = createRequire(import.meta.url); assert.equal(require("next/package.json").version, "15.5.20");
+    const decoder = await (flightDecoder ??= (async () => {
+      assert.equal(require("next/package.json").version, "15.5.20");
+      const source = path.join(path.dirname(require.resolve("next/dist/compiled/react-server-dom-webpack/client.edge")), "cjs/react-server-dom-webpack-client.edge.production.js");
+      return new Script(await readFile(source, "utf8"), { filename: source });
+    })());
     const inert = () => { throw Error("CI_FLIGHT_FUNCTION_EXECUTION_REFUSED"); };
     const exports = new Proxy(Object.create(null), { get: (_target, key) => key === "then" ? undefined : key === "__esModule" ? true : inert });
     const info = { id: "ci-inert", chunks: [], name: "*", async: false };
@@ -96,8 +102,7 @@ export async function createHttpS3Fixture(scenarioId: string) {
       process: { env: { NODE_ENV: "production" } }, TextDecoder, TextEncoder, ReadableStream, Response, Headers, FormData, Blob, AbortController,
       performance, URL, setTimeout, clearTimeout, queueMicrotask, console: { log() {}, warn() {}, error() {} },
       __webpack_chunk_load__: () => { throw Error("CI_FLIGHT_CHUNK_REFUSED"); }, __next_require__: (id: string) => { assert.equal(id, "ci-inert"); return exports; } };
-    const decoder = path.join(path.dirname(require.resolve("next/dist/compiled/react-server-dom-webpack/client.edge")), "cjs/react-server-dom-webpack-client.edge.production.js");
-    runInNewContext(await readFile(decoder, "utf8"), sandbox, { timeout: 1000 });
+    decoder.runInNewContext(sandbox, { timeout: 1000 });
     const decoded = (async () => {
       const envelope = await actionModule.exports.createFromFetch(Promise.resolve(new Response(bytes, { headers: response.headers })),
         { serverConsumerManifest: { moduleMap, serverModuleMap, moduleLoading: null }, replayConsoleLogs: false });
