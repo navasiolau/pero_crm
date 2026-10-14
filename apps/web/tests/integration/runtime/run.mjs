@@ -3,7 +3,7 @@ import { appendFileSync, existsSync, readFileSync, readdirSync, realpathSync } f
 import path from 'node:path';
 import { CreateBucketCommand, PutBucketVersioningCommand, S3Client } from '@aws-sdk/client-s3';
 import { assertCiJob, assertCiRuntimeTarget, requireCi } from './target.mjs';
-import { inspectService, startMinio, startWeb } from './containers.mjs';
+import { docker, inspectService, inspectWeb, startMinio, startWeb } from './containers.mjs';
 import { cleanup, processOwner, recordProcesses } from './cleanup.mjs';
 
 const job = assertCiJob();
@@ -22,13 +22,41 @@ requireCi(process.env.PERO_CI_BUILD_REVISION === process.env.GITHUB_SHA &&
 
 /** @param {string} url @param {'ok'|'unavailable'} [databaseHealth] */
 async function ready(url, databaseHealth) {
+  /** @type {{status?:number,database?:string,error?:string,cause?:string,elapsedMs?:number}} */
+  let last = {};
   for (let attempt = 0; attempt < 90; attempt++) {
+    last = {};
+    const started = performance.now();
     try {
       const response = await fetch(url, { signal: AbortSignal.timeout(1000), redirect: 'error' });
+      last.status = response.status;
+      const body = databaseHealth ? await response.json() : null;
+      last.database = ['ok', 'unavailable'].includes(body?.database) ? body.database : 'OTHER';
       if ((!databaseHealth && response.ok) || (databaseHealth &&
-        response.status === (databaseHealth === 'ok' ? 200 : 503) && (await response.json()).database === databaseHealth)) return;
-    } catch { /* Ожидаем только собственный временный сервер. */ }
+        response.status === (databaseHealth === 'ok' ? 200 : 503) && body.database === databaseHealth)) return;
+    } catch (error) {
+      const code = error?.cause?.code;
+      last = { ...last, error: ['TimeoutError', 'AbortError', 'TypeError', 'SyntaxError'].includes(error?.name) ? error.name : 'OTHER',
+        cause: ['ECONNREFUSED', 'ENOTFOUND', 'ETIMEDOUT', 'UND_ERR_SOCKET', 'UND_ERR_CONNECT_TIMEOUT'].includes(code) ? code
+          : error?.cause?.message === 'unexpected redirect' ? 'REDIRECT_REFUSED' : 'OTHER' };
+    }
+    last.elapsedMs = Math.round(performance.now() - started);
     await new Promise(resolve => setTimeout(resolve, 500));
+  }
+  console.log(JSON.stringify({ ciRuntime: 'health-timeout', port: new URL(url).port, expectedDatabase: databaseHealth, last }));
+  const target = assertCiRuntimeTarget(), fault = url === `${target.faultBaseUrl}/api/health`;
+  if (fault || url === `${target.baseUrl}/api/health`) {
+    const id = docker(['ps', '-aq', '--no-trunc', '--filter', `name=^/${fault ? target.faultName : target.webName}$`]);
+    if (id) {
+      const container = inspectWeb(target, id, fault);
+      let stdout = docker(['logs', id]);
+      for (const value of [target.authSecret, target.s3.accessKeyId, target.s3.secretAccessKey, decodeURIComponent(new URL(target.databaseUrl).password)])
+        stdout = stdout.split(value).join('[REDACTED]');
+      stdout = stdout.replace(/postgres(?:ql)?:\/\/[^\s"']+/g, '[REDACTED_CONNECTION]');
+      stdout = stdout.split(/\r?\n/).slice(-40).join('\n').slice(-8000);
+      console.log(JSON.stringify({ ciRuntime: 'owned-web-health-failure', fault, containerId: id,
+        state: container.State.Status, exitCode: container.State.ExitCode, stdout }));
+    }
   }
   throw Error('CI_RUNTIME_HEALTH_TIMEOUT');
 }

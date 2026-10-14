@@ -110,7 +110,7 @@ function webEnvironment(target, fault = false) {
 }
 
 /** @param {CiJob} target @param {string} id @param {boolean} [fault] */
-function inspectWeb(target, id, fault = false) {
+export function inspectWeb(target, id, fault = false) {
   requireCi(/^[a-f0-9]{64}$/.test(id), 'web-container-id');
   const container = JSON.parse(docker(['inspect', '--type', 'container', id]))[0];
   requireCi(container.Id === id && container.Image === inspectWebImage(target).Id &&
