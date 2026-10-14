@@ -1,8 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { Prisma, ProductStatus, ProjectStage } from "@prisma/client";
-import { createProductCore } from "../src/server/products/core";
-import { changeProductStatusTransaction } from "../src/server/products/status-core";
 import { patchProjectStageTransaction } from "../src/server/projects/stage-core";
 import type { TaskTransaction } from "../src/server/tasks/transaction";
 import { PRODUCT_STATUSES, productStatusLabels } from "../src/lib/product-statuses";

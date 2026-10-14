@@ -62,37 +62,13 @@ inject("next/navigation", {
 });
 const actions = load<typeof import("../src/server/payroll/actions")>("../src/server/payroll/actions");
 const { issuePayoutCore } = load<typeof import("../src/server/payroll/cash-core")>("../src/server/payroll/cash-core");
-const direct = load<typeof import("../src/server/product-percentage-pay/direct-completion")>("../src/server/product-percentage-pay/direct-completion");
+load<typeof import("../src/server/product-percentage-pay/direct-completion")>("../src/server/product-percentage-pay/direct-completion");
 const percentage = load<typeof import("../src/server/product-percentage-pay/core")>("../src/server/product-percentage-pay/core");
 const { changeTaskStatusCore } = load<typeof import("../src/server/tasks/completion-core")>("../src/server/tasks/completion-core");
 const monthSwitcher = load<typeof import("../src/components/month-switcher")>("../src/components/month-switcher");
 const csv = load<typeof import("../src/app/(app)/finance/payroll/export/route")>("../src/app/(app)/finance/payroll/export/route");
 const ownPage = load<typeof import("../src/app/(app)/payroll/page")>("../src/app/(app)/payroll/page");
 const financePage = load<typeof import("../src/app/(app)/finance/payroll/page")>("../src/app/(app)/finance/payroll/page");
-
-function cashFixture() {
-  const payouts: Row[] = [], receipts = new Map<string, Row>();
-  let dueThreshold = "";
-  const tx = {
-    changeLog: { findUnique: async ({ where }: { where: { id: string } }) => receipts.get(where.id) ?? null,
-      create: async ({ data }: { data: Row }) => { receipts.set(String(data.id), data); return data; } },
-    user: { findUnique: async () => employee },
-    cashAccount: { findUnique: async () => ({ id: "cash", active: true, currency: "BYN" }) },
-    payment: { groupBy: async () => [{ direction: "INCOME", _sum: { amount: 1000 } }],
-      aggregate: async ({ where }: { where: { direction: string } }) => ({ _sum: { bynAmount: where.direction === "INCOME" ? 1000 : 0 } }) },
-    payout: { findMany: async () => payouts, findUnique: async ({ where }: { where: { id: string } }) => payouts.find((row) => row.id === where.id) ?? null,
-      aggregate: async () => ({ _sum: { cashAmount: payouts.reduce((sum, row) => sum + Number(row.cashAmount), 0) } }),
-      create: async ({ data }: { data: Row }) => { const row = { ...data, id: `payout-${payouts.length}`, amount: new Prisma.Decimal(String(data.amount)),
-        cashAmount: new Prisma.Decimal(String(data.cashAmount)), bynAmount: new Prisma.Decimal(String(data.bynAmount)) }; payouts.push(row); return row; } },
-    payrollEntry: { findMany: async ({ where }: { where: { month: { lt: string } } }) => {
-      dueThreshold = where.month.lt;
-      return [{ month: "2026-10", amount: "300", currency: "BYN", bynAmount: "300" }, { month: "2026-11", amount: "900", currency: "BYN", bynAmount: "900" }]
-        .filter((row) => row.month < where.month.lt);
-    } },
-    domainEvent: { create: async () => ({ id: "event" }) },
-  } as unknown as Prisma.TransactionClient;
-  return { tx, payouts, receipts, dueThreshold: () => dueThreshold };
-}
 const cashInput = () => ({ userId: "employee", cashAccountId: "cash", cashAmount: "120.00", expectedCashCurrency: "BYN" as const, requestId: randomUUID(), description: "QA работа" });
 const fixedRates = { asOf: "2026-10-31", cash: { currency: "BYN", rate: "1.000000", date: "2026-10-31" }, payroll: { currency: "BYN", rate: "1.000000", date: "2026-10-31" } } as const;
 
@@ -115,28 +91,6 @@ test("invalid payout actions and core reject before service or transaction reads
   }
   assert.equal(payoutServiceCalls, 0);
 });
-
-function percentageFixture(state: "SKIPPED_ONCE" | "SETTLED" = "SETTLED") {
-  const entries: Row[] = [], adjustments: Row[] = [];
-  const product = { id: "p", projectId: "j", number: "П-1-1", status: "PRODUCTION", expectedPrice: new Prisma.Decimal(1000), quantity: 1,
-    engineerId: null, mounterId: null, assemblerId: "worker", project: { id: "j", currency: "BYN" },
-    percentageConfigs: [{ ratePercent: "3", revision: 2 }], stagePayPools: [],
-    engineer: null, mounter: null, assembler: { id: "worker", name: "Worker", active: true, roles: ["WORKER"] } };
-  const completion = { id: "c", state, amount: new Prisma.Decimal(30), ratePercentSnapshot: new Prisma.Decimal(3), reason: null,
-    shares: [{ id: "s", userId: "worker", userNameSnapshot: "Worker", shareUnits: 1000000, amount: new Prisma.Decimal(30) }] };
-  const tx = {
-    product: { findUnique: async () => product },
-    productPercentageCompletion: { findUnique: async () => completion, create: async ({ data }: { data: Row }) => ({ id: "c", ...data }),
-      update: async () => ({ id: "c" }) },
-    productPercentageCompletionShare: { create: async ({ data }: { data: Row }) => ({ id: "s", ...data }),
-      update: async ({ data }: { data: Row }) => ({ id: "s", ...data }) },
-    productPercentageConfig: { findUnique: async () => ({ revision: 2 }) },
-    productPercentageAdjustment: { findFirst: async () => null, create: async ({ data }: { data: Row }) => { const row = { id: "adjustment", ...data }; adjustments.push(row); return row; } },
-    payrollEntry: { create: async ({ data }: { data: Row }) => { entries.push(data); return data; } },
-    domainEvent: { create: async () => ({ id: "event" }) }, changeLog: { create: async () => ({ id: "audit" }) },
-  } as unknown as Prisma.TransactionClient;
-  return { tx, entries, adjustments, completion };
-}
 
 test("pending historical FX accrual uses original completed instant in Moscow and preserves rate dates", async () => {
   const completedAt = new Date("2026-09-30T21:30:00.000Z");

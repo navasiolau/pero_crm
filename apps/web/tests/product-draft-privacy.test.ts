@@ -4,7 +4,6 @@ import type { PrismaClient, Role } from "@prisma/client";
 import { canEditProductTechnicalBlock, fileVisibilityWhere, productEditWhere, productVisibilityWhere, taskExecutionWhere, taskVisibilityWhere, workVisibilityWhere } from "../src/server/access/visibility";
 import { decideProductPercentageStatus } from "../src/lib/product-percentage-status";
 import { productStatusTargets } from "../src/lib/product-percentage-ui";
-import { scopeNotificationContent } from "../src/server/access/notification-visibility";
 import { engineerFixture, matches } from "./helpers/visibility-fixture";
 
 const fixture = engineerFixture();
