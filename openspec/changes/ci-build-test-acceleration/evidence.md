@@ -1,5 +1,7 @@
 # Evidence
 
+Integration follow-up после63b2476: existing `file-list-printing.test.ts` получает реальные Chromium FileList/printing cases в №168/169 и потому один exact filename перенесён из default backend в `components-1`, где обязательны browser cache/install с системными зависимостями. Остальные assignments/jobs/gates unchanged. Literal присутствует в selector ровно один раз; прежний full static proof185+7+6 относится к пакету до этого follow-up, полный static bundle не повторялся. Runtime нового combined кандидата и независимое review этого literal остаются PENDING; новые tests/CI/DB/network не запускались.
+
 ## Одобренный follow-up от принятого 61f9bc14 — SOURCE_READY, actual CI PENDING
 
 Baseline: CI266/run38583170771,196с, native155с/promotion32с, native91/web1441/bot38/watcher53/guards2, оба parallel exits0, tested/promoted/deployed OCI и owned cleanup подтверждены receipt `D:/Projects/pero_crm_v2/.playwright-mcp/application-improvements/dead49-delivery-61f9bc14/acceptance.json`. Новый follow-up не приписывает себе этот результат; цель180с OPEN.
