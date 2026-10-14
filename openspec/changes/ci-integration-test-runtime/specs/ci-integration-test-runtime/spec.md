@@ -6,6 +6,18 @@
 
 ## ADDED Requirements
 
+### Requirement: Ускорение без изменения доказательства сохранности
+
+`nativeSnapshot()` MUST получать ordered table list, все table fingerprints и четыре catalog fingerprints тремя SQL-запросами. Формулы и JSON-форма результата/digest MUST сохраняться; owned IDs SHALL передаваться одним связанным JSON-параметром, SQL identifiers SHALL проходить whitelist, неполный либо повторный результат SHALL отклоняться. Кеш данных и DDL запрещён. HTTP fixture MUST повторно использовать только immutable manifest и compiled Flight script, сохраняя свежий sandbox/module/consumer каждого ответа и действующие протокольные ограничения.
+
+#### Scenario: Изменение своих данных и DDL
+- **WHEN** существующий складской rollback-case меняет свою строку и создаёт предусмотренные fault function/trigger
+- **THEN** соответствующие fingerprints меняются, owned-exclusion исключает только свою строку, а rollback восстанавливает полный исходный snapshot
+
+#### Scenario: Повторный ответ Server Action
+- **WHEN** одна HTTP fixture декодирует несколько настоящих ответов
+- **THEN** используются один manifest/compiled script и отдельное состояние decoder каждого ответа без ослабления HTTP, size, timeout, chunk и function guards
+
 ### Requirement: Явная изолированная цель
 
 Runtime MUST допускать только текущий GitHub hosted Linux run репозитория PERO CRM, принадлежащие ему контейнеры/сеть, точные loopback endpoints, БД `pero_ci` и bucket этого run. Guard MUST выполняться до соединений, миграций и фикстур. Несоответствие SHALL останавливать выполнение без обращения к рабочим целям и без загрузки env по умолчанию.

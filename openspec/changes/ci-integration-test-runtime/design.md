@@ -1,5 +1,11 @@
 # Design
 
+## Ускорение без потери fingerprints — 15.10.2026
+
+`nativeSnapshot()` выполняет ordered table list, один `UNION ALL` fingerprints всех таблиц и один `SELECT` четырёх catalog fingerprints. Формулы count/MD5/row_to_json, порядок и JSON-форма snapshots/digest остаются точными; owned IDs находятся только в одном связанном JSON-параметре. SQL identifier проходит прежний whitelist, missing/duplicate table results отклоняются; данные и DDL не кешируются. Складской существующий case через savepoint меняет собственный material, проверяет полный/excluded snapshot, откатывает изменение и повторно использует уже создаваемые fault function/trigger для DDL-чувствительности.
+
+Manifest и скомпилированный `vm.Script` лениво кешируются только в пределах одной HTTP/S3 fixture. Каждый response получает свежие sandbox, module.exports и consumer; версия Next 15.5.20, unique 42-hex action, HTTP/size/time limits и запреты chunk/function execution сохраняются. Это оптимизация обвязки, а не приложения.
+
 ## Продолжение покрытия — 14.10.2026
 
 Новые проверяемые условия добавляются в существующие domain/finance/HTTP cases и существующие fixture modules. Login использует actual Auth.js credentials flow; бизнес-изменения и Bearer/Telegram/plugin проверки идут через реальные разрешённые серверные границы. Session cookie не выдаётся самостоятельно подписанным JWT за credentials login. Денежные операции сверяют raw Decimal/factual rows, защищённые snapshots, rollback и независимые DB connections для гонок. Пробелы/ручные сценарии отражаются честно в прежней карте; 100% покрытие не заявляется по числу tests.

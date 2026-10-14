@@ -1,5 +1,13 @@
 # Tasks
 
+## 7. Ускорение runtime — согласовано 15.10.2026
+
+- [x] 7.1 Свести nativeSnapshot к трём SQL с одним связанным owned JSON, сохранив точные fingerprints, JSON-форму и digest; добавить sensitivity утверждения внутри существующего складского rollback-case. Actual PostgreSQL proof входит в 7.3.
+- [x] 7.2 Повторно использовать immutable action manifest и compiled Flight Script в существующей HTTP fixture; сохранить новое состояние decoder каждого ответа и все ограничения. Actual HTTP proof входит в 7.3.
+- [ ] 7.3 Затронутая local static-проверка и независимое review; один общий ordinary CI с прежними actual PostgreSQL/HTTP/S3 cases и полным cleanup, затем реальный staging acceptance. До actual CI новый native PASS не заявлять.
+
+Source checkpoint: три изменённых TypeScript-файла прошли один локальный ESLint существующим toolchain (exit0, без предупреждений). Новых файлов/cases нет; Native/HTTP/DB не запускались локально, новый runtime PASS не заявлен. Независимое review и объединённый ordinary CI/staging остаются OPEN.
+
 ## 6. Глубокая консолидация после принятого 61f9bc14 — DONE (CI269/e0ae9a10)
 
 - [x] 6.1. Удалить закрытые финансовые ветви и ложные отрицательные сценарии; перенести недостающие реальные финансовые/складские условия.

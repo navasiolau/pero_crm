@@ -23,16 +23,32 @@ export function nativeOwnedIds(tables:Record<string,readonly string[]>):OwnedRow
 export async function nativeSnapshot(db:SnapshotDb,owned:OwnedRowKeys={}) {
  checkedOwned(owned);
  const tables=await db.$queryRawUnsafe<{tablename:string}[]>("SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename");
+ assert.equal(new Set(tables.map(row=>row.tablename)).size,tables.length,'SNAPSHOT_TABLE_LIST_DUPLICATE');
  assert.ok(Object.keys(owned).every(table=>tables.some(row=>row.tablename===table)),'OWNED_TABLE_MISSING');
+ const branches=tables.map(({tablename})=>{
+  const table=identifier(tablename),exclusion=owned[tablename];
+  const filter=exclusion?' WHERE NOT (t.'+identifier(exclusion.column)+'::text = ANY(ARRAY(SELECT jsonb_array_elements_text((SELECT keys FROM owned)->\''+tablename+'\'->\'ids\'))))':'';
+  return 'SELECT \''+tablename+'\'::text AS tablename,count(*)::text AS count,md5(COALESCE(string_agg(row_to_json(t)::text,\'\' ORDER BY row_to_json(t)::text),\'\')) AS hash FROM public.'+table+' t'+filter;
+ });
+ const fingerprints=await db.$queryRawUnsafe<{tablename:string;count:string;hash:string}[]>('WITH owned AS (SELECT $1::jsonb AS keys) '+(branches.join(' UNION ALL ')||'SELECT NULL::text AS tablename,NULL::text AS count,NULL::text AS hash WHERE false'),JSON.stringify(owned));
+ const byTable=new Map(fingerprints.map(row=>[row.tablename,row]));
+ assert.equal(fingerprints.length,tables.length,'SNAPSHOT_TABLE_RESULT_MISSING');
+ assert.equal(byTable.size,tables.length,'SNAPSHOT_TABLE_RESULT_DUPLICATE');
  const rows:Record<string,unknown>={};
  for(const {tablename} of tables) {
-  const exclusion=owned[tablename],filter=exclusion?' WHERE NOT ('+selection('t',exclusion.column)+')':'';
-  rows[tablename]=await db.$queryRawUnsafe('SELECT count(*)::text AS count,md5(COALESCE(string_agg(row_to_json(t)::text,\'\' ORDER BY row_to_json(t)::text),\'\')) AS hash FROM public.'+identifier(tablename)+' t'+filter,...(exclusion?[JSON.stringify(exclusion.ids)]:[]));
+  const row=byTable.get(tablename);assert.ok(row,'SNAPSHOT_TABLE_RESULT_MISSING');
+  assert.match(row.count,/^\d+$/);assert.match(row.hash,/^[a-f0-9]{32}$/);
+  rows[tablename]=[{count:row.count,hash:row.hash}];
  }
- const constraints=await db.$queryRawUnsafe("SELECT md5(COALESCE(string_agg(t.relname::text||c.conname::text||c.convalidated::text||pg_get_constraintdef(c.oid),'' ORDER BY t.relname,c.conname),'')) AS hash FROM pg_constraint c JOIN pg_class t ON t.oid=c.conrelid JOIN pg_namespace n ON n.oid=t.relnamespace WHERE n.nspname='public'");
- const functions=await db.$queryRawUnsafe("SELECT md5(COALESCE(string_agg(pg_get_functiondef(p.oid),'' ORDER BY p.proname,p.oid),'')) AS hash FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.prokind='f'");
- const triggers=await db.$queryRawUnsafe("SELECT md5(COALESCE(string_agg(t.relname::text||g.tgname::text||g.tgenabled::text||g.tgtype::text||pg_get_triggerdef(g.oid),'' ORDER BY t.relname,g.tgname),'')) AS hash FROM pg_trigger g JOIN pg_class t ON t.oid=g.tgrelid JOIN pg_namespace n ON n.oid=t.relnamespace WHERE n.nspname='public' AND NOT g.tgisinternal");
- const indexes=await db.$queryRawUnsafe("SELECT md5(COALESCE(string_agg(t.relname::text||i.indisvalid::text||i.indisready::text||pg_get_indexdef(i.indexrelid),'' ORDER BY t.relname,i.indexrelid),'')) AS hash FROM pg_index i JOIN pg_class t ON t.oid=i.indrelid JOIN pg_namespace n ON n.oid=t.relnamespace WHERE n.nspname='public'");
+ const catalog=await db.$queryRawUnsafe<{constraints:string;functions:string;triggers:string;indexes:string}[]>(`SELECT
+  (SELECT md5(COALESCE(string_agg(t.relname::text||c.conname::text||c.convalidated::text||pg_get_constraintdef(c.oid),'' ORDER BY t.relname,c.conname),'')) FROM pg_constraint c JOIN pg_class t ON t.oid=c.conrelid JOIN pg_namespace n ON n.oid=t.relnamespace WHERE n.nspname='public') AS constraints,
+  (SELECT md5(COALESCE(string_agg(pg_get_functiondef(p.oid),'' ORDER BY p.proname,p.oid),'')) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.prokind='f') AS functions,
+  (SELECT md5(COALESCE(string_agg(t.relname::text||g.tgname::text||g.tgenabled::text||g.tgtype::text||pg_get_triggerdef(g.oid),'' ORDER BY t.relname,g.tgname),'')) FROM pg_trigger g JOIN pg_class t ON t.oid=g.tgrelid JOIN pg_namespace n ON n.oid=t.relnamespace WHERE n.nspname='public' AND NOT g.tgisinternal) AS triggers,
+  (SELECT md5(COALESCE(string_agg(t.relname::text||i.indisvalid::text||i.indisready::text||pg_get_indexdef(i.indexrelid),'' ORDER BY t.relname,i.indexrelid),'')) FROM pg_index i JOIN pg_class t ON t.oid=i.indrelid JOIN pg_namespace n ON n.oid=t.relnamespace WHERE n.nspname='public') AS indexes`);
+ assert.equal(catalog.length,1,'SNAPSHOT_CATALOG_RESULT_REQUIRED');
+ for(const hash of Object.values(catalog[0]))assert.match(hash,/^[a-f0-9]{32}$/);
+ const {constraints:constraintHash,functions:functionHash,triggers:triggerHash,indexes:indexHash}=catalog[0];
+ const constraints=[{hash:constraintHash}],functions=[{hash:functionHash}],triggers=[{hash:triggerHash}],indexes=[{hash:indexHash}];
  const snapshot={rows,constraints,functions,triggers,indexes};
  return {snapshot,digest:createHash('sha256').update(JSON.stringify(snapshot)).digest('hex')};
 }
