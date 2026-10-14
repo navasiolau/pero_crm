@@ -28,6 +28,12 @@ CI последовательно повторяет lint и часть типи
 
 `.github/workflows/ci-cd.yml`, `apps/web/next.config.ts`, Dockerfiles web/bot и после обычной интеграции принятого №169 — его существующий runtime контейнеров. Версии зависимостей, lockfile, бизнес-логика, рабочие БД и production не меняются. №170 начинается от свежего `origin/staging`; зависимость №169 переносится только обычным merge после её приёмки.
 
+## Metadata cache follow-up after CI269 — APPROVED / OPEN
+
+Владелец разрешил следующий workflow-only шаг от принятого `e0ae9a10`: CI269 прошёл все шесть jobs за 283 с, поэтому цель менее 180 с остаётся OPEN. В существующем Bake log metadata vertex `#52` занял 53,2 с на загрузку/распаковку builder layers, включая 414,58 MB, хотя три финальных metadata COPY были CACHED.
+
+Только metadata target сначала импортирует собственный `pero-web-metadata`, затем прежний production fallback; его exporter сохраняет `mode=max` для промежуточных cache records. Dockerfiles, BUILD_CONFIG, build inputs, свежие types/BUILD_ID/action manifest, immutable OCI/provenance, полный tsc/lint, все suites/gates и cleanup сохраняются. Результат измеряется следующим обычным required CI после независимого review; новых jobs/helpers/checkers/benchmark/стендов и гарантии экономии 53,2 с нет.
+
 ## Следующий single-build/test/promotion scope — ACCEPTED CI266 / 61f9bc14
 
 Принятый CI266196с подтверждает all6SUCCESS/native91/web1441/bot38/watcher53/guards2, оба parallel exit codes0, exact tested/promoted/deployed OCI и owned cleanup. Цель180с остаётся OPEN; прежний scope принят функционально.
