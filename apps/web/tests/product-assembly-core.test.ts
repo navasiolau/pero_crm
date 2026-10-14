@@ -1,10 +1,17 @@
-import assert from 'node:assert/strict';
-import test from 'node:test';
-import { randomUUID } from 'node:crypto';
-import type { Prisma, ProductStatus } from '@prisma/client';
-import { captureProductPercentageCompletion } from '../src/server/product-percentage-pay/core';
-import { patchProductPercentageCore } from '../src/server/product-percentage-pay/patch-core';
-import { changeProductStatusTransaction } from '../src/server/products/status-core';
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { randomUUID } from "node:crypto";
+import { type Prisma, type ProductStatus, type Role } from "@prisma/client";
+import { captureProductPercentageCompletion } from "../src/server/product-percentage-pay/core";
+import { patchProductPercentageCore } from "../src/server/product-percentage-pay/patch-core";
+import { changeProductStatusTransaction } from "../src/server/products/status-core";
+import { assignedProductVisibilityWhere, productVisibilityWhere, projectVisibilityWhere, productEditWhere, taskExecutionWhere, canEditProductTechnicalBlock } from "../src/server/access/visibility";
+import { matches, type FixtureRow } from "./helpers/visibility-fixture";
+import { percentageCompletionKinds, decideProductPercentageStatus } from "../src/lib/product-percentage-status";
+import { entrySchemeLabels } from "../src/lib/labels";
+import { readFileSync } from "node:fs";
+
+// Источник: product-assembly-core.test.ts
 const manager={id:'manager',name:'Manager',roles:['MANAGER' as const],source:'web' as const};
 function fixture(rate:string|null='5',price:string|null='1000'){
  const completions:Record<string,unknown>[]=[];const payroll:Record<string,unknown>[]=[];const logs:Record<string,unknown>[]=[];
@@ -53,4 +60,62 @@ test('corrupt retired cross-stage reviews have no effect on independent direct a
  const f=fixture();f.works.push({id:'w',title:'sameidnotname',tasks:[]});f.product.percentageConfigs[0].workReview=[{workId:'w',classification:'COVERED'}];
  f.tx.productPercentageConfig.findMany=(async()=>{throw new Error('must not inspect retired coverage')}) as never;
  assert.equal(await captureProductPercentageCompletion(f.tx,manager,'p','ASSEMBLY','STORAGE'),'SETTLED');assert.equal(f.payroll.length,1);
+});
+
+// Источник: product-assembly-access.test.ts
+const worker = {id:"assembler", roles:["WORKER" as Role]};
+const product = {id:"p", assemblerId:"assembler", engineerId:null, status:"PRODUCTION", assembler:{id:"assembler",active:true,roles:["WORKER"]},tasks:[],project:{tasks:[]}};
+const assignedVisible = (actor:typeof worker,row:FixtureRow) => matches(row,assignedProductVisibilityWhere(actor) as FixtureRow);
+const visible = (actor:typeof worker, row:FixtureRow) => matches(row, productVisibilityWhere(actor) as FixtureRow);
+test("assigned active assembler reads nonDESIGN product and parent without a task", () => {
+  assert.equal(visible(worker, product), true);
+  assert.equal(matches({products:[product],tasks:[]},projectVisibilityWhere(worker) as FixtureRow), true);
+});
+test("assembler assignment is scoped to active eligible worker and nonDESIGN", () => {
+  assert.equal(assignedVisible(worker,{...product,status:"DESIGN"}),false);
+  assert.equal(assignedVisible(worker,{...product,assemblerId:"foreign"}),false);
+  assert.equal(assignedVisible(worker,{...product,assembler:{...product.assembler,active:false}}),false);
+  assert.equal(assignedVisible(worker,{...product,assembler:{...product.assembler,roles:["MOUNTER"]}}),false);
+  assert.equal(assignedVisible({id:"assembler",roles:["MOUNTER"]},product),false);
+  assert.equal(assignedVisible({id:"assembler",roles:["WORKER","ENGINEER"]},product),true);
+});
+test("assigned read never grants technical edits or somebody else's task execution", () => {
+  assert.equal(matches(product,productEditWhere(worker) as FixtureRow),false);
+  assert.equal(canEditProductTechnicalBlock(worker,product as Parameters<typeof canEditProductTechnicalBlock>[1]),false);
+  assert.equal(matches({id:"task",assigneeId:"other",product},taskExecutionWhere(worker) as FixtureRow),false);
+});
+
+// Источник: product-assembly-status.test.ts
+test("STORAGE closes engineering and assembly in order on a direct manager jump", () => {
+  assert.deepEqual(percentageCompletionKinds("DESIGN", "STORAGE", true), ["ENGINEERING", "ASSEMBLY"]);
+  assert.deepEqual(percentageCompletionKinds("DESIGN", "DONE", true), ["ENGINEERING", "ASSEMBLY", "INSTALLATION"]);
+});
+test("assembly completion is reached at delivery and later manager transitions, never production", () => {
+  assert.deepEqual(percentageCompletionKinds("PRODUCTION", "STORAGE", true), ["ENGINEERING", "ASSEMBLY"]);
+  assert.deepEqual(percentageCompletionKinds("STORAGE", "INSTALLATION", true), ["ENGINEERING", "ASSEMBLY"]);
+  assert.deepEqual(percentageCompletionKinds("RECLAMATION", "DONE", true), ["ENGINEERING", "ASSEMBLY", "INSTALLATION"]);
+  assert.deepEqual(percentageCompletionKinds("DESIGN", "PRODUCTION", true), ["ENGINEERING"]);
+  assert.deepEqual(percentageCompletionKinds("DONE", "PRODUCTION", true), ["ENGINEERING"]);
+});
+test("assigned worker read rights do not confer product status write rights", () => {
+  assert.equal(decideProductPercentageStatus(["WORKER"], {from:"PRODUCTION",to:"STORAGE",assignedEngineer:false,participant:false,hasB3d:false,noModel:false}).allowed, false);
+  assert.deepEqual(percentageCompletionKinds("PRODUCTION", "STORAGE", false), []);
+});
+test("assembly payroll has its own readable label", () => {
+  assert.equal(entrySchemeLabels.PRODUCT_PERCENT_ASSEMBLY, "Процентные отчисления сборщика");
+});
+test("manager late transition closes every reached missing threshold", () => {
+  assert.deepEqual(percentageCompletionKinds("INSTALLATION", "DONE", true), ["ENGINEERING", "ASSEMBLY", "INSTALLATION"]);
+});
+
+// Источник: product-assembly-payroll-migration.test.ts
+const migration = "prisma/migrations/20261002140000_product_assembly_payroll_fields/migration.sql";
+test("forward assembly payroll migration extends only the existing scheme allowlist", () => {
+  const oldSql = readFileSync("prisma/migrations/20260930150000_product_percentage_pay/migration.sql", "utf8");
+  const newSql = readFileSync(migration, "utf8");
+  const check = (sql:string) => sql.match(/ADD CONSTRAINT "PayrollEntry_percentage_fields" CHECK \([\s\S]*?\n\);/)?.[0].replace(/\s+/g," ");
+  assert.ok(check(oldSql));
+  assert.equal(check(newSql),check(oldSql)?.replace("'PRODUCT_PERCENT_ENGINEERING','PRODUCT_PERCENT_INSTALLATION'","'PRODUCT_PERCENT_ENGINEERING','PRODUCT_PERCENT_INSTALLATION','PRODUCT_PERCENT_ASSEMBLY'"));
+  assert.match(newSql,/DROP CONSTRAINT "PayrollEntry_percentage_fields"/);
+  assert.doesNotMatch(newSql,/CREATE OR REPLACE FUNCTION|UPDATE|INSERT|DELETE|TRIGGER/);
 });

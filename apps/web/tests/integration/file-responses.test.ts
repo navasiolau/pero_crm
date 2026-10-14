@@ -163,6 +163,7 @@ test("security.routes: credentials, Bearer, Telegram и команды чере�
     const independent = await passwordUser("independent"), unaffected = await f.login(independent.email, password);
     for (const reason of ["password", "roles", "email", "active", "manual"] as const) {
       const user = await passwordUser(`revoke-${reason}`), logged = await f.login(user.email, password);
+      const personal = await token(`revoke-${reason}-token`, ["read"], user.id);
       assert.equal((await session(logged.cookie)).body?.user?.id, user.id);
       const changed = await f.db.user.update({ where: { id: user.id }, data: reason === "password" ? { passwordHash: changedHash }
         : reason === "roles" ? { roles: ["WORKER"] } : reason === "email" ? { email: `${f.id("changed-email")}@example.invalid` }
@@ -171,10 +172,49 @@ test("security.routes: credentials, Bearer, Telegram и команды чере�
       if (reason === "active") await f.db.user.update({ where: { id: user.id }, data: { active: true } });
       const revoked = await session(logged.cookie); assert.equal(revoked.body, null, reason);
       assert.match(revoked.response.headers.get("set-cookie") ?? "", /Max-Age=0/);
+      const apiStatus = await api("/api/v1/plugins", personal.raw);
+      assert.equal(apiStatus.status, reason === "password" || reason === "manual" ? 200 : 401, reason);
+      for (const path of ["/api/search?q=security", "/api/files/missing-owned-fixture"]) {
+        const hidden = await f.request(path, undefined, { headers: { cookie: logged.cookie } });
+        assert.ok([401, 403, 307].includes(hidden.status), `REVOKED_COOKIE_NO_ROUTE_DATA:${path}`);
+      }
       const denied = await f.request("/my", undefined, { headers: { cookie: logged.cookie } }); assert.equal(denied.status, 307);
       assert.equal(new URL(denied.headers.get("location")!, f.target.baseUrl).pathname, "/login");
     }
     assert.equal((await session(unaffected.cookie)).body?.user?.id, independent.id);
+  });
+  await t.test("credentials/monotonic-noop-token-owner: rewind, пароль, удалённый владелец и чужая сессия", async () => {
+    const user = await passwordUser("monotonic"), logged = await f.login(user.email, password);
+    const personal = await token("monotonic-token", ["read"], user.id), service = await token("monotonic-service", ["read"], null);
+    const path = "/api/v1/plugins", unchanged = await f.db.user.update({ where: { id: user.id }, data: { name: "Новое имя", passwordHash: initialHash } });
+    assert.equal(unchanged.sessionVersion, user.sessionVersion); assert.equal((await session(logged.cookie)).body?.user?.id, user.id);
+    const changed = await f.db.user.update({ where: { id: user.id }, data: { passwordHash: changedHash } });
+    assert.equal(changed.sessionVersion, user.sessionVersion + 1); assert.equal((await session(logged.cookie)).body, null);
+    assert.equal((await api(path, personal.raw)).status, 200, "PASSWORD_ONLY_PRESERVES_API_CREDENTIAL");
+    const rewind = await f.db.user.update({ where: { id: user.id }, data: { sessionVersion: user.sessionVersion } });
+    assert.equal(rewind.sessionVersion, changed.sessionVersion); assert.equal((await session(logged.cookie)).body, null);
+    const noop = await f.db.user.update({ where: { id: user.id }, data: { passwordHash: changedHash } });
+    assert.equal(noop.sessionVersion, changed.sessionVersion);
+    const current = await f.login(user.email, `${password}-changed`), independent = await passwordUser("delete-independent"), other = await f.login(independent.email, password);
+    await f.db.user.delete({ where: { id: user.id } });
+    assert.equal((await session(current.cookie)).body, null); assert.equal((await api(path, personal.raw)).status, 401);
+    await f.db.apiToken.update({ where: { id: personal.row.id }, data: { createdById: null } });
+    assert.ok((await f.db.apiToken.findUniqueOrThrow({ where: { id: personal.row.id } })).revokedAt);
+    assert.equal((await api(path, personal.raw)).status, 401); assert.equal((await api(path, service.raw)).status, 200);
+    assert.equal((await session(other.cookie)).body?.user?.id, independent.id);
+  });
+  await t.test("credentials/owned-web-db-fault: health503, auth fail-closed и сохранённая cookie после recovery", async () => {
+    const user = await passwordUser("outage"), logged = await f.login(user.email, password), before = await f.db.user.findUniqueOrThrow({ where: { id: user.id } });
+    const healthy = await f.request("/api/health"); assert.equal(healthy.status, 200);
+    const fault = await f.faultRequest("/api/health"); assert.equal(fault.status, 503); assert.equal(fault.headers.get("cache-control"), "no-store");
+    const body = await fault.json() as { status: string; database: string; checkedAt: string };
+    assert.equal(body.status, "degraded"); assert.equal(body.database, "unavailable"); assert.ok(Number.isFinite(Date.parse(body.checkedAt)));
+    const rejected = await f.faultRequest("/api/auth/session", undefined, { headers: { cookie: logged.cookie } });
+    assert.equal(rejected.status, 200); assert.equal(await rejected.json(), null);
+    const denied = await f.faultRequest("/my", undefined, { headers: { cookie: logged.cookie } }); assert.equal(denied.status, 307);
+    assert.equal(new URL(denied.headers.get("location")!, f.target.faultBaseUrl).pathname, "/login");
+    assert.equal((await f.request("/api/health")).status, 200); assert.equal((await session(logged.cookie)).body?.user?.id, user.id);
+    assert.deepEqual(await f.db.user.findUniqueOrThrow({ where: { id: user.id } }), before, "FAULT_WEB_CANNOT_MUTATE_HEALTHY_DATABASE");
   });
   await t.test("bearer/scopes: реальные read/write/admin, absent/unknown/revoked/inactive токены", async () => {
     const path = "/api/v1/plugins", inactive = await f.user("inactive-token-owner", ["MANAGER"], { active: false });

@@ -221,9 +221,10 @@
       ],
       "tests": [
         {
-          "file": "apps/web/tests/product-percentage-pay.test.ts",
-          "block": "положительное начисление создаётся по frozen input",
-          "evidenceLevel": "DI"
+          "file": "apps/web/tests/integration/percentage-postgres.test.ts",
+          "block": "percentage/status-SKIPPED-patch-next-transition-settlement-adjustment-DONE",
+          "evidenceLevel": "native-PostgreSQL",
+          "notes": "Mapped source port текущего кандидата; actual native NOT_RUN до required CI, existing FX-fail/history/currency/DTO/retirement guards сохранены."
         },
         {
           "file": "apps/web/tests/product-percentage-rate-adjust.test.ts",
@@ -323,11 +324,6 @@
           "evidenceLevel": "unit"
         },
         {
-          "file": "apps/web/tests/warehouse-receipt-kinds.test.ts",
-          "block": "",
-          "evidenceLevel": "unit"
-        },
-        {
           "file": "apps/web/tests/integration/domain-postgres.test.ts",
           "block": "warehouse/real-weighted-movements-replay-return-rounding-and-SQL-rollback",
           "evidenceLevel": "native-PostgreSQL"
@@ -336,6 +332,12 @@
           "file": "apps/web/tests/integration/finance-postgres.test.ts",
           "block": "warehouse/paid-receipt-cascade-delete-history-and-rollback/",
           "evidenceLevel": "native-PostgreSQL"
+        },
+        {
+          "file": "apps/web/tests/integration/domain-postgres.test.ts",
+          "block": "warehouse/two-connection-issue-replay-return-real-lock-and-exact-facts",
+          "evidenceLevel": "native-PostgreSQL",
+          "notes": "Mapped independent connections/held lock/exact facts; ordinary CI не запускает reset/archive/restore, new runtime NOT_RUN."
         }
       ],
       "acceptance": [
@@ -347,9 +349,9 @@
           "revision": null,
           "gapTask": 163,
           "entrypoints": [
-            "apps/web/tests/warehouse-concurrency-native.ts"
+            "apps/web/tests/integration/domain-postgres.test.ts"
           ],
-          "reason": "Старый runner требует warehouseAccountingState.count()==0 и сам создаёт main; использовать на текущем state нельзя, prerequisite исправляется reviewed задачей163."
+          "reason": "Historical existing-target acceptance остаётся BLOCKED: прежний runner требовал count0 и создавал main. Closed operator retired по exact map; новый owned-CI case source-mapped, actual native NOT_RUN. Current existing DB/recovery guards не обходятся."
         }
       ],
       "gapTasks": [
@@ -477,6 +479,12 @@
           "file": "apps/web/tests/plain-file-delete-action-controlled.test.ts",
           "block": "audit failure rolls back metadata before any storage effect",
           "evidenceLevel": "DI"
+        },
+        {
+          "file": "apps/web/tests/integration/files-crud.test.ts",
+          "block": "file/native-durable-UUID-pending-rebind-new-processor-and-cover-CAS-rollback",
+          "evidenceLevel": "native-PostgreSQL",
+          "notes": "Actual PostgreSQL/two PIDs/MinIO get+DeleteObject source port: UUID/pending/rebind/CAS/intent rollback. Только remove callback fault injection; actual HTTP wrapper отсутствует. Current runtime NOT_RUN; existing HTTP wrappers сохраняются."
         }
       ],
       "acceptance": [
@@ -507,6 +515,12 @@
           "file": "apps/web/tests/s3-delete-exact.test.ts",
           "block": "",
           "evidenceLevel": "unit"
+        },
+        {
+          "file": "apps/web/tests/integration/files-crud.test.ts",
+          "block": "file/native-durable-UUID-pending-rebind-new-processor-and-cover-CAS-rollback",
+          "evidenceLevel": "native-PostgreSQL",
+          "notes": "Actual PostgreSQL/two PIDs/MinIO get+DeleteObject source port: UUID/pending/rebind/CAS/intent rollback. Только remove callback fault injection; actual HTTP wrapper отсутствует. Current runtime NOT_RUN; existing HTTP wrappers сохраняются."
         }
       ],
       "acceptance": [
@@ -675,7 +689,14 @@
         "apps/web/src/server/plugins/events.ts",
         "apps/web/src/server/plugins/context.ts"
       ],
-      "tests": [],
+      "tests": [
+        {
+          "file": "apps/web/tests/integration/queue-postgres.test.ts",
+          "block": "queue/subscriber-freeze-unique-empty-dispatch-ack-idempotency-and-expiry-rollback",
+          "evidenceLevel": "native-PostgreSQL",
+          "notes": "Actual SQL/queue source port; внешние callback effects controlled DI, не external HTTP/runtime PASS. Current native NOT_RUN."
+        }
+      ],
       "acceptance": [
         {
           "scenario": "Subscriber exception/duplicate/crash после внешнего эффекта до ACK; бизнес-consumers при их наличии.",
@@ -761,41 +782,153 @@
       "id": "auth-credentials-session-bearer",
       "domain": "acl",
       "requirement": "Настоящий credentials provider проверяет пароль/active; PostgreSQL sensitive updates отзывают cookie и personal API tokens; каждый route проверяет Bearer/scopes.",
-      "productionModules": ["apps/web/src/auth.ts", "apps/web/src/server/auth/session-callbacks.ts", "apps/web/src/server/plugins/token-verification.ts", "apps/web/src/server/api/auth.ts"],
-      "tests": [
-        { "file": "apps/web/tests/auth-security.test.ts", "block": "Auth.js rejects a mismatched sessionVersion and removes the old cookie", "evidenceLevel": "DI" },
-        { "file": "apps/web/tests/integration/file-responses.test.ts", "block": "credentials/login:", "evidenceLevel": "HTTP-runtime" },
-        { "file": "apps/web/tests/integration/file-responses.test.ts", "block": "credentials/revoke:", "evidenceLevel": "HTTP-runtime" },
-        { "file": "apps/web/tests/integration/file-responses.test.ts", "block": "bearer/scopes:", "evidenceLevel": "HTTP-runtime" }
+      "productionModules": [
+        "apps/web/src/auth.ts",
+        "apps/web/src/server/auth/session-callbacks.ts",
+        "apps/web/src/server/plugins/token-verification.ts",
+        "apps/web/src/server/api/auth.ts"
       ],
-      "acceptance": [{ "scenario": "Actual login, sensitive SQL trigger updates, cookie cleanup, route denial и token scopes на новом CI SHA.", "evidenceLevel": "HTTP-runtime", "target": "owned-ci-169", "status": "NOT_RUN", "revision": null, "gapTask": 169, "entrypoints": ["apps/web/tests/integration/file-responses.test.ts"] }],
+      "tests": [
+        {
+          "file": "apps/web/tests/auth-security.test.ts",
+          "block": "Auth.js rejects a mismatched sessionVersion and removes the old cookie",
+          "evidenceLevel": "DI"
+        },
+        {
+          "file": "apps/web/tests/integration/file-responses.test.ts",
+          "block": "credentials/login:",
+          "evidenceLevel": "HTTP-runtime"
+        },
+        {
+          "file": "apps/web/tests/integration/file-responses.test.ts",
+          "block": "credentials/revoke:",
+          "evidenceLevel": "HTTP-runtime"
+        },
+        {
+          "file": "apps/web/tests/integration/file-responses.test.ts",
+          "block": "bearer/scopes:",
+          "evidenceLevel": "HTTP-runtime"
+        },
+        {
+          "file": "apps/web/tests/integration/file-responses.test.ts",
+          "block": "credentials/monotonic-noop-token-owner:",
+          "evidenceLevel": "HTTP-runtime",
+          "notes": "Mapped source port: actual sensitive version/no-op/token-owner behavior; current runtime NOT_RUN."
+        },
+        {
+          "file": "apps/web/tests/integration/file-responses.test.ts",
+          "block": "credentials/owned-web-db-fault:",
+          "evidenceLevel": "HTTP-runtime",
+          "notes": "Second owned web same verified image, fault-only DB127.0.0.1:1; health503/Auth.js failclosed/recovery cookie. No PG stop/reset; runtime NOT_RUN."
+        }
+      ],
+      "acceptance": [
+        {
+          "scenario": "Actual login, sensitive SQL trigger updates, cookie cleanup, route denial и token scopes на новом CI SHA.",
+          "evidenceLevel": "HTTP-runtime",
+          "target": "owned-ci-169",
+          "status": "NOT_RUN",
+          "revision": null,
+          "gapTask": 169,
+          "entrypoints": [
+            "apps/web/tests/integration/file-responses.test.ts"
+          ]
+        }
+      ],
       "gapTasks": []
     },
     {
       "id": "telegram-link-lifecycle",
       "domain": "acl",
       "requirement": "Bot routes применяют Bearer scopes и одноразовый link code; expiry, occupied/disabled/replayed привязки запрещены; разрешённый ENGINEER получает корректную session и unlink.",
-      "productionModules": ["apps/web/src/app/api/v1/bot/link/route.ts", "apps/web/src/app/api/v1/bot/session/route.ts", "apps/web/src/app/api/v1/bot/unlink/route.ts", "apps/web/src/server/telegram/bot-api.ts"],
-      "tests": [{ "file": "apps/web/tests/integration/file-responses.test.ts", "block": "telegram/link-session-unlink:", "evidenceLevel": "HTTP-runtime" }],
-      "acceptance": [{ "scenario": "Link/expiry/replay/disabled/session/unlink через actual routes без внешней Telegram сети.", "evidenceLevel": "HTTP-runtime", "target": "owned-ci-169", "status": "NOT_RUN", "revision": null, "gapTask": 169, "entrypoints": ["apps/web/tests/integration/file-responses.test.ts"] }],
+      "productionModules": [
+        "apps/web/src/app/api/v1/bot/link/route.ts",
+        "apps/web/src/app/api/v1/bot/session/route.ts",
+        "apps/web/src/app/api/v1/bot/unlink/route.ts",
+        "apps/web/src/server/telegram/bot-api.ts"
+      ],
+      "tests": [
+        {
+          "file": "apps/web/tests/integration/file-responses.test.ts",
+          "block": "telegram/link-session-unlink:",
+          "evidenceLevel": "HTTP-runtime"
+        }
+      ],
+      "acceptance": [
+        {
+          "scenario": "Link/expiry/replay/disabled/session/unlink через actual routes без внешней Telegram сети.",
+          "evidenceLevel": "HTTP-runtime",
+          "target": "owned-ci-169",
+          "status": "NOT_RUN",
+          "revision": null,
+          "gapTask": 169,
+          "entrypoints": [
+            "apps/web/tests/integration/file-responses.test.ts"
+          ]
+        }
+      ],
       "gapTasks": []
     },
     {
       "id": "plugin-command-route-log",
       "domain": "queue",
       "requirement": "Plugin command route проверяет права/token scopes, rejects disabled/missing commands и сохраняет настоящий run-log для успешного ping и ошибки.",
-      "productionModules": ["apps/web/src/app/api/v1/plugins/[id]/commands/[command]/route.ts", "apps/web/src/server/plugins/registry.ts"],
-      "tests": [{ "file": "apps/web/tests/integration/file-responses.test.ts", "block": "plugins/commands:", "evidenceLevel": "HTTP-runtime" }],
-      "acceptance": [{ "scenario": "Actual command route 403/404/409/200/500 и persisted run-log на новом CI SHA.", "evidenceLevel": "HTTP-runtime", "target": "owned-ci-169", "status": "NOT_RUN", "revision": null, "gapTask": 169, "entrypoints": ["apps/web/tests/integration/file-responses.test.ts"] }],
+      "productionModules": [
+        "apps/web/src/app/api/v1/plugins/[id]/commands/[command]/route.ts",
+        "apps/web/src/server/plugins/registry.ts"
+      ],
+      "tests": [
+        {
+          "file": "apps/web/tests/integration/file-responses.test.ts",
+          "block": "plugins/commands:",
+          "evidenceLevel": "HTTP-runtime"
+        }
+      ],
+      "acceptance": [
+        {
+          "scenario": "Actual command route 403/404/409/200/500 и persisted run-log на новом CI SHA.",
+          "evidenceLevel": "HTTP-runtime",
+          "target": "owned-ci-169",
+          "status": "NOT_RUN",
+          "revision": null,
+          "gapTask": 169,
+          "entrypoints": [
+            "apps/web/tests/integration/file-responses.test.ts"
+          ]
+        }
+      ],
       "gapTasks": []
     },
     {
       "id": "logistics-cash-posting-correction",
       "domain": "money",
       "requirement": "Logistics posting/correction сохраняет cash allocations, historical FX/amount snapshots, CAS/replay, caps и atomic SQL rollback.",
-      "productionModules": ["apps/web/src/server/logistics/core.ts", "apps/web/src/server/logistics/posting-core.ts", "apps/web/src/server/logistics/money-query-core.ts"],
-      "tests": [{ "file": "apps/web/tests/integration/finance-postgres.test.ts", "block": "logistics/real-posting-correction-CAS-history-budget-and-SQL-rollback", "evidenceLevel": "native-PostgreSQL" }],
-      "acceptance": [{ "scenario": "Реальные денежные строки и correction/history/rollback под owned PostgreSQL; race vectors входят в cash shared-lock case.", "evidenceLevel": "native-PostgreSQL", "target": "owned-ci-169", "status": "NOT_RUN", "revision": null, "gapTask": 169, "entrypoints": ["apps/web/tests/integration/finance-postgres.test.ts"] }],
+      "productionModules": [
+        "apps/web/src/server/logistics/core.ts",
+        "apps/web/src/server/logistics/posting-core.ts",
+        "apps/web/src/server/logistics/money-query-core.ts"
+      ],
+      "tests": [
+        {
+          "file": "apps/web/tests/integration/finance-postgres.test.ts",
+          "block": "logistics/real-posting-correction-CAS-history-budget-and-SQL-rollback",
+          "evidenceLevel": "native-PostgreSQL",
+          "notes": "TTN PENDING retry/private/two-stamps extended inside existing real SQL case; document reads use injected BufferMap (DI), not actual MinIO/HTTP. Current native runtime NOT_RUN."
+        }
+      ],
+      "acceptance": [
+        {
+          "scenario": "Реальные денежные строки и correction/history/rollback под owned PostgreSQL; race vectors входят в cash shared-lock case.",
+          "evidenceLevel": "native-PostgreSQL",
+          "target": "owned-ci-169",
+          "status": "NOT_RUN",
+          "revision": null,
+          "gapTask": 169,
+          "entrypoints": [
+            "apps/web/tests/integration/finance-postgres.test.ts"
+          ]
+        }
+      ],
       "gapTasks": []
     }
   ],
@@ -858,16 +991,16 @@
       ]
     },
     {
-      "file": "apps/web/tests/inline-engineer-fallback.test.ts",
+      "file": "apps/web/tests/project-contact-controllers.test.ts",
       "block": "query explicitly distinguishes fallback member from real configuration even when revision0",
       "decision": "KEEP",
       "reason": "Живой query contract различает real revision0 и fallback.",
       "remainingProtection": [
-        "apps/web/tests/inline-engineer-fallback.test.ts"
+        "apps/web/tests/project-contact-controllers.test.ts"
       ]
     },
     {
-      "file": "apps/web/tests/inline-engineer-fallback.test.ts",
+      "file": "apps/web/tests/project-contact-controllers.test.ts",
       "block": "real query fallback follows new acknowledged engineer while configured/frozen members stay",
       "decision": "REWRITE",
       "task": 156,
@@ -877,12 +1010,12 @@
       ]
     },
     {
-      "file": "apps/web/tests/request-id.test.ts",
+      "file": "apps/web/tests/work-shares-transaction.test.ts",
       "block": "request id falls back to cryptographic random bytes when randomUUID is unavailable",
       "decision": "KEEP",
       "reason": "Живой createRequestId fallback используется формами.",
       "remainingProtection": [
-        "apps/web/tests/request-id.test.ts"
+        "apps/web/tests/work-shares-transaction.test.ts"
       ]
     },
     {

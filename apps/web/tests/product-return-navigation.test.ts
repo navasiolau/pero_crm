@@ -1,7 +1,11 @@
-import assert from 'node:assert/strict';
-import test from 'node:test';
-import {productDetailHref,projectProductsHref,globalProductsHref,resolveProductReturn,resolveProjectTab} from '../src/lib/product-return-navigation';
-import {MAX_LIST_QUERY_LENGTH} from '../src/lib/list-state';
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { productDetailHref, projectProductsHref, globalProductsHref, resolveProductReturn, resolveProjectTab } from "../src/lib/product-return-navigation";
+import { MAX_LIST_QUERY_LENGTH } from "../src/lib/list-state";
+import { navItemsForRole } from "../src/lib/nav";
+import { type Role } from "@prisma/client";
+
+// Источник: product-return-navigation.test.ts
 test('project entry opens actual parent products tab; direct entry uses same fallback',()=>{
  const parent=projectProductsHref('parent');assert.equal(parent,'/projects/parent?tab=products');const href=productDetailHref('205.1',parent);assert.equal(new URL(href,'https://crm.invalid').searchParams.get('returnTo'),parent);assert.deepEqual(resolveProductReturn(parent,'parent'),{href:parent,label:'Назад к изделиям проекта'});assert.equal(resolveProductReturn(undefined,'parent').href,parent);
 });
@@ -39,4 +43,11 @@ test('foreign project and unsafe or ambiguous URLs never become navigation desti
 });
 test('project tab allowlist keeps normal overview and only available tabs',()=>{
  const allowed=['overview','products','files','plugin-active'];assert.equal(resolveProjectTab(undefined,allowed),'overview');assert.equal(resolveProjectTab('products',allowed),'products');assert.equal(resolveProjectTab('plugin-active',allowed),'plugin-active');for(const value of ['finance','../products',['products','files']])assert.equal(resolveProjectTab(value,allowed),'overview');
+});
+
+// Источник: finish-removal-navigation.test.ts
+test("cancelled finish catalogue is absent for every real role union while product navigation remains",()=>{
+ const roles:Role[]=["ADMIN","DIRECTOR","MANAGER","PROCUREMENT","ENGINEER","ACCOUNTANT","WORKER","MOUNTER"];
+ for(const role of roles) assert.equal(navItemsForRole([role]).some(item=>item.href==="/finishes"),false);
+ assert.ok(navItemsForRole(["MANAGER","ENGINEER"]).some(item=>item.href==="/products"));
 });

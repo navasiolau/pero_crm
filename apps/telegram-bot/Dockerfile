@@ -16,9 +16,16 @@ RUN pnpm install --frozen-lockfile --filter @pero/telegram-bot
 COPY apps/telegram-bot apps/telegram-bot
 RUN pnpm --filter @pero/telegram-bot build
 
-FROM base AS runner
+FROM base AS runtime
 ENV NODE_ENV=production
-COPY --from=build /app/apps/telegram-bot/dist ./dist
 # dist не имеет внешних зависимостей — node_modules в образ не попадают
 USER node
 CMD ["node", "dist/index.js"]
+
+# Только CI передаёт проверенный plain JS через именованный context.
+FROM runtime AS ci-runner
+COPY --from=pero-bot-dist /dist ./dist
+
+# Последняя/default стадия сохраняет обычную локальную сборку из исходников.
+FROM runtime AS runner
+COPY --from=build /app/apps/telegram-bot/dist ./dist
