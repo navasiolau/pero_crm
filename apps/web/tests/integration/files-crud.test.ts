@@ -359,9 +359,14 @@ test("files.crud: file113, документы, attachment ACL и inline-дейс
     assert.deepEqual([await f.db.stockMovement.count({ where: { materialId: material.id } }), await f.db.stockPurchase.count({ where: { actorId: procurement.id } }),
       await f.db.payment.count({ where: { cashAccountId: stockCash.id } })], stockBefore);
     const administrator = await f.user("stock-administrator", ["ADMIN"]), director = await f.user("stock-director", ["DIRECTOR"]);
-    for (const actor of [director, procurement, accountant, manager]) {
+    const financeOnlyDeny = await f.actionResponse("previewWarehouseMovementDeletion", "/warehouse/movements", accountant, [movement.id]);
+    assert.equal(financeOnlyDeny.status, 302); assert.equal(financeOnlyDeny.headers.get("location"), financeLocation.href); await financeOnlyDeny.arrayBuffer();
+    const officeAccountant = await f.user("stock-office-accountant", ["ACCOUNTANT", "MANAGER"]);
+    for (const actor of [director, procurement, officeAccountant, manager]) {
+      await f.session(actor);
+      const page = await f.request("/warehouse/movements", actor); assert.equal(page.status, 200, actor.roles.join(",")); await page.arrayBuffer();
       const denied = await f.actionResponse("previewWarehouseMovementDeletion", "/warehouse/movements", actor, [movement.id]);
-      assert.equal(denied.status, 500); assert.ok(denied.headers.get("content-type")?.startsWith("text/x-component")); await denied.arrayBuffer();
+      assert.equal(denied.status, 500, actor.roles.join(",")); assert.ok(denied.headers.get("content-type")?.startsWith("text/x-component")); await denied.arrayBuffer();
     }
     const preview = await f.action<{ ok: boolean; error?: string }>("previewWarehouseMovementDeletion", "/warehouse/movements", administrator, [movement.id]);
     const accounting = await f.db.warehouseAccountingState.findUnique({ where: { id: "main" } });
@@ -449,12 +454,15 @@ test("files.crud: file113, документы, attachment ACL и inline-дейс
   });
 
   await t.test("description/raw-whitespace-noop-audit-rollback-role-CAS: create, inline и legacy сохраняют raw bytes", async () => {
+    await f.session(manager); await f.session(engineer);
     const texts = ["  A\n\tB\n\nC  \n\n", "  A\r\n\tB\r\n\r\nC  \r\n", " <script>alert(1)</script>\n**literal**  \n", " \t\r\n "];
     for (const description of texts) {
       const reply = await f.action<BasicReply>("createProduct", projectPage, manager, [{ projectId: project.id, title: "CI raw description", description,
         engineerId: engineer.id, expectedPrice: 10.01 }]); assert.equal(reply.ok, true);
-      assert.equal((await f.db.product.findUniqueOrThrow({ where: { id: reply.id! } })).description, description.trim() ? description : null);
-      const same = await f.action<ProductPatchResult>("patchProduct", productPage, engineer, [{ productId: reply.id!, field: "description", value: description, expectedValue: description.trim() ? description : null, clientMutationId: randomUUID() }]);
+      const created = await f.db.product.findUniqueOrThrow({ where: { id: reply.id! } });
+      assert.equal(created.description, description.trim() ? description : null);
+      assert.deepEqual([created.projectId, created.engineerId, created.status, created.deletedAt], [project.id, engineer.id, "PREPARATION", null]);
+      const same = await f.action<ProductPatchResult>("patchProduct", "/products/" + created.number, manager, [{ productId: created.id, field: "description", value: description, expectedValue: description.trim() ? description : null, clientMutationId: randomUUID() }]);
       assert.equal(saved(same).value, description.trim() ? description : null);
     }
     const exact = { productId: product.id, field: "description", value: texts[1], expectedValue: "Tech", clientMutationId: randomUUID() };
