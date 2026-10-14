@@ -192,7 +192,7 @@
         },
         {
           "file": "apps/web/tests/integration/payroll-cash-postgres.test.ts",
-          "block": "cash/current-month-salary-cannot-use-current-accrual-or-ignore-legacy-org-cap",
+          "block": "cash/current-month-salary-cannot-use-current-accrual-or-ignore-saved-org-payout",
           "evidenceLevel": "native-PostgreSQL"
         }
       ],
