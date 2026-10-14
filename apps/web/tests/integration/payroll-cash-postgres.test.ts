@@ -1,21 +1,31 @@
 import assert from "node:assert/strict";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import { after, before, test } from "node:test";
 import { Prisma } from "@prisma/client";
 import type { CashRates } from "../../src/lib/cash-ledger";
-import { summarizePayrollHistory } from "../../src/server/payroll/summary-read-model";
+import { guardedModuleCache } from "../helpers/guarded-module-cache";
 import { createPostgresFixture, moneyRows, savedOrgBalance, type PostgresRows } from "./postgres.fixture";
 
 let fixture: Awaited<ReturnType<typeof createPostgresFixture>>;
 let cash: typeof import("../../src/server/payroll/cash-core");
 let percentage: typeof import("../../src/server/product-percentage-pay/core");
 let coordinator: typeof import("../../src/server/transactions/coordinator");
+let queries: typeof import("../../src/server/payroll/queries"), scope: ReturnType<typeof guardedModuleCache>;
+const readers = new AsyncLocalStorage<Prisma.TransactionClient>();
 before(async () => {
   fixture = await createPostgresFixture("payroll-cash");
+  scope = guardedModuleCache(new URL("../ci169-payroll-cash-scope.ts", import.meta.url).href, {
+    targets: ["../src/server/payroll/queries"], allowedOverrides: [], overrides: {}, prisma: new Proxy({}, { get(_target, key) {
+      const db = readers.getStore() ?? fixture.db, value: unknown = Reflect.get(db, key);
+      return typeof value === "function" ? value.bind(db) : value;
+    } }),
+  });
+  queries = scope.load("../src/server/payroll/queries");
   [cash, percentage, coordinator] = await Promise.all([import("../../src/server/payroll/cash-core"),
     import("../../src/server/product-percentage-pay/core"), import("../../src/server/transactions/coordinator")]);
 });
-after(async () => { if (fixture) try { await fixture.verifyProtected(); } finally { await fixture.dispose(); } });
+after(async () => { if (fixture) try { scope?.restore(); await fixture.verifyProtected(); } finally { await fixture.dispose(); } });
 const fixedRates: CashRates = { asOf: "2026-10-31", cash: { currency: "BYN", rate: "1.000000", date: "2026-10-31" }, payroll: { currency: "BYN", rate: "1.000000", date: "2026-10-31" } };
 const gate = () => { let resolve = () => {}; const promise = new Promise<void>(yes => { resolve = yes; }); return { promise, resolve }; };
 async function cashRows(tx: Prisma.TransactionClient, rows: PostgresRows, amount = "1000") {
@@ -48,11 +58,16 @@ for (const vector of [
   await tx.payrollEntry.create({ data: { userId: c.employee.id, month: "2020-01", scheme: "PIECE", amount: "100", currency: "USD", bynAmount: vector.accruedByn } });
   if (vector.payoutByn === null) await tx.payout.create({ data: { userId: c.employee.id, month: "2020-01", kind: "SALARY", amount: "20", payrollCurrency: null, bynAmount: null } });
   else await historicalPayout(tx, rows, c.employee.id, vector.payoutByn);
+  if (vector.id === "fixed-zero") await tx.payout.create({ data: { userId: c.employee.id, month: "2020-01", kind: "SALARY", amount: "20", payrollCurrency: null, bynAmount: "0" } });
   const entries = await tx.payrollEntry.findMany({ where: { userId: c.employee.id } }), payouts = await tx.payout.findMany({ where: { userId: c.employee.id } });
   assert.equal(payouts[0].payrollCurrency, vector.payoutCurrency);
-  const model = summarizePayrollHistory(entries, payouts, "2020-01", "2026-11", c.employee.id);
-  const due = model.pastAccrued.get(c.employee.id) === null || model.totalPaid.get(c.employee.id) === null ? null : new Prisma.Decimal(model.pastAccrued.get(c.employee.id)!).sub(model.totalPaid.get(c.employee.id)!).toNumber();
-  assert.equal(due, vector.due); assert.equal(model.allPaid, vector.payoutByn === null ? null : Number(vector.payoutByn));
+  await readers.run(tx, async () => {
+    const dues = await queries.getEmployeeDues(), own = dues.find(row => row.userId === c.employee.id);
+    if (vector.due === 0) assert.equal(own, undefined); else assert.equal(own?.due, vector.due);
+    const org = await queries.getOrgBalance();
+    assert.equal(org === null ? null : new Prisma.Decimal(org).minus(startingOrg).toFixed(2), vector.balance);
+    if (vector.id === "fixed-usd") assert.equal(await queries.getPayrollCurrency(), "BYN");
+  });
   if (vector.balance === null) await assert.rejects(cash.readOrgBalance(tx, "9"), /сохранённого BYN/);
   else {
     assert.equal((await cash.readOrgBalance(tx, "9")).minus(startingOrg).toFixed(2), vector.balance);
@@ -62,7 +77,7 @@ for (const vector of [
   assert.deepEqual(await tx.payout.findMany({ where: { userId: c.employee.id } }), payouts);
   const finalMoney = await moneyRows(tx);
   assert.deepEqual(finalMoney.map(group => group.length), originalMoney.map((group, index) => group.length +
-    [vector.id === "fixed-usd" ? 4 : vector.id === "fixed-zero" ? 3 : 2, 1, 1, 0, 0][index]));
+    [vector.id === "fixed-usd" ? 4 : vector.id === "fixed-zero" ? 3 : 2, 1, vector.id === "fixed-zero" ? 2 : 1, 0, 0][index]));
   for (const [index, beforeRows] of originalMoney.entries())
     assert.deepEqual(finalMoney[index].filter(row => beforeRows.some(before => before.id === row.id)), beforeRows, "FOREIGN_FIXED_HISTORY_MONEY_UNCHANGED");
 }));
@@ -110,14 +125,29 @@ test("cash/salary-past-moscow-month-and-current-record-currencies", async t => {
     assert.equal(first.month, "2026-10"); assert.equal(first.amount, "120.00");
     assert.equal((await cash.readOrgBalance(tx, "9")).minus(startingOrg).toFixed(2), "820.00");
     assert.equal((await cash.readCashBalance(tx, c.account.id)).toFixed(2), "880.00");
+    const currentMonth = await cash.issuePayoutCore(c.actor, { ...input, month: "2026-11", requestId: randomUUID() }, fixedRates, tx);
+    assert.equal(currentMonth.month, "2026-11"); assert.equal(currentMonth.amount, "120.00");
     await assert.rejects(cash.issuePayoutCore(c.actor, { ...input, requestId: randomUUID(), cashAmount: "821.00" }, fixedRates, tx), /долг|балансе организации/);
     await tx.cashAccount.update({ where: { id: c.account.id }, data: { currency: "USD" } });
     await assert.rejects(cash.issuePayoutCore(c.actor, { ...c.input, requestId: randomUUID() }, fixedRates, tx), /Валюта или состояние/);
-    assert.equal(await tx.payout.count({ where: { userId: c.employee.id } }), 2);
+    assert.equal(await tx.payout.count({ where: { userId: c.employee.id } }), 3);
     const finalMoney = await moneyRows(tx);
-    assert.deepEqual(finalMoney.map(group => group.length), originalMoney.map((group, index) => group.length + [3, 2, 2, 1, 1][index]));
+    assert.deepEqual(finalMoney.map(group => group.length), originalMoney.map((group, index) => group.length + [3, 2, 3, 2, 2][index]));
     for (const [index, beforeRows] of originalMoney.entries())
       assert.deepEqual(finalMoney[index].filter(row => beforeRows.some(before => before.id === row.id)), beforeRows, "FOREIGN_SALARY_MONEY_UNCHANGED");
+  });
+});
+
+test("cash/current-month-salary-cannot-use-current-accrual-or-ignore-legacy-org-cap", async t => {
+  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-10-31T21:30:00.000Z").getTime() });
+  await fixture.rollback(async (tx, rows) => {
+    const c = await cashRows(tx, rows), month = "2026-11";
+    await tx.payrollEntry.create({ data: { userId: c.employee.id, month, amount: "99999", currency: "BYN", bynAmount: "99999" } });
+    await assert.rejects(cash.issuePayoutCore(c.actor, { ...c.input, kind: "SALARY", month }, fixedRates, tx), /долг/);
+    await tx.payout.create({ data: { userId: c.employee.id, month: "2020-01", amount: "200", payrollCurrency: "BYN", bynAmount: null } });
+    await assert.rejects(cash.issuePayoutCore(c.actor, { ...c.input, requestId: randomUUID(), cashAmount: "850.00" }, fixedRates, tx), /организации/);
+    assert.equal(await tx.domainEvent.count({ where: { actor: c.actor.id } }), 0);
+    assert.equal(await tx.changeLog.count({ where: { actorId: c.actor.id } }), 0);
   });
 });
 

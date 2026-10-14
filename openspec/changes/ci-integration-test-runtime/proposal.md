@@ -1,5 +1,9 @@
 # Proposal
 
+## Согласованное продолжение — 14.10.2026
+
+Владелец поручил закрыть найденные пробелы в существующем integration runner: реальный credentials login, отзыв сессии после чувствительных изменений и Bearer/scopes; складские/логистические денежные writers, исправления, rollback и конкурентность; Telegram одноразовая привязка/expiry/replay/disabled user и plugin command permissions/run-log через реальные routes. Все случаи размещаются в существующих тестах/фикстурах №169, без нового framework/runner/helper/test-файла, дополнительных jobs или новых стендов. Данные только синтетические внутри уже разрешённого CI; guards/ownership/finally/always cleanup сохраняются. Source/schema/deps/public APIs/main/production не меняются.
+
 ## Why
 
 №168 сократил повторяющиеся тесты и QA, но оставил отдельные native runners и mock-хранилища. №169 переносит их контракты в общий CI с настоящими PostgreSQL/S3, чтобы дополнительно уменьшить проверочный код без потери содержательных случаев.

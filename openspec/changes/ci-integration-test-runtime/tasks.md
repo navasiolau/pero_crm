@@ -17,6 +17,13 @@
 - [x] 3.1 Пройти local type/lint/pure guards и `openspec validate ci-integration-test-runtime --strict`; записать результаты.
 - [x] 3.2 Пройти draft PR CI на точном SHA, записать contracts и удаление стенда; обычным merge принять feature/169 в staging и проверить фактический образ/здоровье. Main/production только по отдельному прямому поручению владельца.
 
+## 4. Продолжение покрытия — согласовано 14.10.2026
+
+- [ ] 4.1 Добавить в существующие HTTP cases реальный credentials login, чувствительные изменения/session revoke и Bearer/scopes без fake authorization.
+- [ ] 4.2 Перенести полезные warehouse/logistics writer cases в существующие PostgreSQL suites: фактические деньги/исправления/rollback/concurrency и сохранность снимков.
+- [ ] 4.3 Проверить actual Telegram link lifecycle и plugin command access/run-log в существующих HTTP/domain cases; сохранить target/provenance/cleanup guards.
+- [ ] 4.4 Дополнить существующую adoption/contract map реальными case IDs и уровнями; после local types/lint/pure guards и review пройти один CI/staging acceptance и доказать удаление owned runtime.
+
 ### Локальная проверка — 13.10.2026
 
 Рабочее дерево №169 от `e986e2900f9a7911b4863ec3e6e3ecae3715545a`: собственные зависимости `pnpm install --frozen-lockfile --ignore-scripts`, Prisma Client 6.19.3; версия и lockfile сохранены.

@@ -1,5 +1,11 @@
 # Design
 
+## Продолжение покрытия — 14.10.2026
+
+Новые проверяемые условия добавляются в существующие domain/finance/HTTP cases и существующие fixture modules. Login использует actual Auth.js credentials flow; бизнес-изменения и Bearer/Telegram/plugin проверки идут через реальные разрешённые серверные границы. Session cookie не выдаётся самостоятельно подписанным JWT за credentials login. Денежные операции сверяют raw Decimal/factual rows, защищённые snapshots, rollback и независимые DB connections для гонок. Пробелы/ручные сценарии отражаются честно в прежней карте; 100% покрытие не заявляется по числу tests.
+
+Нет local/staging fixture writes/stand/seed/reset/dumps. Реальные native/HTTP проверки выполняются одним обычным CI на существующем owned runtime после local checks и независимого review. Историческая приёмка разделов 1–3 сохранена; новый раздел 4 закрывается только по новому CI/staging SHA и exact cleanup evidence.
+
 ## Context
 
 Существующий `test` job уже устанавливает pnpm/Node 22, генерирует Prisma, проверяет lint/types/tests и собирает Next.js. Production Compose использует PostgreSQL 17. Инвентаризация MinIO фиксирует `RELEASE.2025-09-07T16-13-09Z`. Первый CI доказал отказ Docker Hub; Quay не даёт anonymous pull, официальный binary archive отвечает 410. Поэтому временный CI-образ собирается из официального исходного кода того же release.

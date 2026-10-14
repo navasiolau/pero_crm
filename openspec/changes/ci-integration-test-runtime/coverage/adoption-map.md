@@ -1,5 +1,23 @@
 # Карта покрытия и принятия №169
 
+## Продолжение после ce0679c7 — согласовано 14.10.2026
+
+| Existing169 suite / exact case ID | Действующее проверяемое поведение нового кандидата |
+|---|---|
+| `file-responses.test.ts` — `credentials/login`, `credentials/revoke`, `bearer/scopes` | Actual Auth.js credentials provider/CSRF/cookie, wrong/unknown/inactive refusal, sensitive PostgreSQL trigger updates/password/roles/email/disable-reenable/manual version, cookie cleanup и independent account. Actual personal/service tokens, 401/403/read/write/admin и owner revoke. Auth fixture login не выдаётся за самостоятельно подписанный JWT. |
+| `file-responses.test.ts` — `telegram/link-session-unlink` | Actual link/session/unlink routes: expiry/occupied/inactive/replay и разрешённый ENGINEER; внешняя Telegram сеть не вызывается. |
+| `file-responses.test.ts` — `plugins/commands` | Actual plugin route: missing404/disabled409, настоящий ping и error500, persisted run-log; forbidden scopes покрывает соседний bearer case. |
+| `file-responses.test.ts` — `media.retired-caption` | Stale upload422 сохраняет actual File rows и все S3 versions; fabricated local legacy object assertion в №168 удалён, pre-read/storage denial DI KEEP. |
+| `domain-postgres.test.ts` — `warehouse/real-weighted-movements-replay-return-rounding-and-SQL-rollback` | Actual weighted-average issue/return/replay/Decimal rounding/SQL rollback без замены protected accounting lifecycle. |
+| `finance-postgres.test.ts` — `warehouse/paid-receipt-cascade-delete-history-and-rollback/{BYN,USD}` | Paid receipt actual money rows, deletion/cascade, fixed historical FX/BYN и rollback. |
+| `finance-postgres.test.ts` — `logistics/real-posting-correction-CAS-history-budget-and-SQL-rollback` | Actual posting/correction/replay/CAS, snapshots, cash budget и transactional SQL fault rollback. |
+| `finance-postgres.test.ts` — `cash/payment-stock-logistics-versus-advance-real-lock-both-orders` | Старый mixed-expense case расширен 2→6 order vectors: payment/stock/logistics против advance; distinct PID/held wait и exact balance KEEP. |
+| `payroll-cash-postgres.test.ts` — `cash/current-month-salary-cannot-use-current-accrual-or-ignore-legacy-org-cap`, existing salary-past и `cash/fixed-history-nulls-zero` vectors | Actual dues/org balance/currency queries; текущая зарплата ограничена прошлым долгом, current accrual/org cap отказ; historical fixed FX/null-vs-zero. Exceptional DI ветви и large Decimal KEEP. |
+
+Авторские изменения: money existing6 files — №168 −129 LF/№169 +276 LF; own helper/security/file/watch/bot cuts −392 LF (web−327, watcher−26, bot−39 net). Это scoped before/after, не финальный frozen denominator; gross outside новые2 bot assertions учитываются отдельно. UI seven files−78 LF, реальные IME/readonly Enter/Tab existing cases26/26 PASS, E2E listing8 cases не authenticated PASS. New actual native/HTTP cases NOT_RUN до одного обычного CI; старые native71/73 receipts не используются как приёмка этих новых cases. Новых файлов/helpers/frameworks/runner/jobs нет.
+
+Используется тот же owned CI runtime без новых runners/helpers/test-файлов или jobs. Существующий `integration/runtime/target.test.mjs` negative case дополняется недостающими guard families: GITHUB_ACTIONS/run attempt, credentials/schema/query/Auth trust, env fallbacks и distinct service IDs. Это pure отказ до соединений, не native/runtime PASS. Actual login/revoke/Bearer, warehouse/logistics и Telegram/plugins case IDs добавляются сюда по отчётам профильных авторов; до нового CI всё остаётся NOT_RUN для нового кандидата. Historical CI243/244 и старые required vectors ниже неизменны.
+
 Состояние по evidence Root: **CI243 — 71/71 native PASS, guard2/2, owned cleanup PASS; выбранный retirement ниже выполнен по Root GO в собственном №169**. Текущий code diff после retirement ждёт централизованные checks/review. Прежние исследовательские таблицы ниже относятся к WIP №168; они не являются blanket allowlist. Новые cases — `tests/integration/*.test.ts` в checkout №169.
 Текущий retirement №168 дополнительно закрывает unused manual/operator graphs по точной карте `openspec/changes/test-basis-reduction/reduction-map.md`; таблицы A–H ниже остаются историческим inventory. В частности, closed167 protocol helper/operator controls retired с сохранением первых пяти canonical SQL/byte checks; старые Required PG vectors не объявляются новым фактическим PASS, исторические receipts и NOT_RUN сохраняются.
 Исходный знаменатель №168: **69 662 LF → ≤34 831**. Read-only снимок WIP №168: **604 файла, 51 109 LF, 5 097 400 UTF-8 bytes** после CRLF→LF; автоматические suites, включая `deploy/tests/test_*.py`: **346 файлов, 25 514 LF, 2 333 714 bytes**. Это инвентаризация, не приёмка WIP.

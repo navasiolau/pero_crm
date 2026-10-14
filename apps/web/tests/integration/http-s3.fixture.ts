@@ -47,6 +47,23 @@ export async function createHttpS3Fixture(scenarioId: string) {
     const body = await response.json() as { user?: { id?: string; roles?: string[] } };
     assert.equal(body.user?.id, actor.id); assert.deepEqual(body.user?.roles, actor.roles);
   }
+  async function login(email: string, password: string) {
+    const cookies = new Map<string, string>();
+    const receive = (response: Response) => {
+      for (const value of response.headers.getSetCookie()) {
+        const pair = value.split(";", 1)[0], split = pair.indexOf("=");
+        assert.ok(split > 0); cookies.set(pair.slice(0, split), pair);
+      }
+      return [...cookies.values()].join("; ");
+    };
+    const csrf = await request("/api/auth/csrf"); assert.equal(csrf.status, 200);
+    const { csrfToken } = await csrf.json() as { csrfToken: string }; assert.equal(typeof csrfToken, "string");
+    const response = await request("/api/auth/callback/credentials", undefined, { method: "POST",
+      headers: { cookie: receive(csrf), "Content-Type": "application/x-www-form-urlencoded", "X-Auth-Return-Redirect": "1", Origin: target.baseUrl },
+      body: new URLSearchParams({ csrfToken, email, password, callbackUrl: `${target.baseUrl}/` }) });
+    assert.equal(response.status, 200);
+    return { response, cookie: receive(response), url: (await response.json() as { url: string }).url };
+  }
   async function actionResponse(name: string, page: string, actor: HttpActor | undefined, args: unknown[]) {
     assertCiRuntimeTarget();
     const manifest = JSON.parse(await readFile(path.resolve(".next/server/server-reference-manifest.json"), "utf8")) as {
@@ -83,15 +100,20 @@ export async function createHttpS3Fixture(scenarioId: string) {
     try { return JSON.parse(JSON.stringify(await Promise.race([decoded, new Promise((_, reject) => { timer = setTimeout(() => reject(Error("CI_FLIGHT_TIMEOUT")), 10_000); })]))) as T; }
     finally { clearTimeout(timer); }
   }
-  async function fault<T>(table: "ChangeLog" | "DomainEvent", actorId: string, operation: () => Promise<T>): Promise<T> {
+  async function fault<T>(table: "ChangeLog" | "DomainEvent", actorId: string, operation: () => Promise<T>, pluginOwnerId?: string): Promise<T> {
     assertCiRuntimeTarget(); assert.ok(["ChangeLog", "DomainEvent"].includes(table));
-    assert.equal((await pg.db.user.findUniqueOrThrow({ where: { id: actorId } })).id, actorId);
-    assert.ok(actorId.startsWith(`ci169-${target.runId}-${target.attempt}-${scenarioId}-`)); assert.match(actorId, /^[a-z0-9.-]+$/);
+    const ownerId = pluginOwnerId ?? actorId;
+    assert.ok(ownerId.startsWith(`ci169-${target.runId}-${target.attempt}-${scenarioId}-`)); assert.match(ownerId, /^[a-z0-9.-]+$/);
+    assert.equal((await pg.db.user.findUniqueOrThrow({ where: { id: ownerId } })).id, ownerId);
+    if (pluginOwnerId) {
+      assert.equal(table, "ChangeLog"); assert.equal(actorId, "plugin:demo");
+      assert.equal((await pg.db.plugin.findUniqueOrThrow({ where: { id: "demo" } })).name, pg.id("demo-plugin"));
+    }
     const name = `ci169_fail_${randomUUID().replaceAll("-", "")}`;
     const [{ quoted }] = await pg.db.$queryRaw<{ quoted: string }[]>`SELECT quote_literal(${actorId}::text) AS quoted`;
     await pg.db.$executeRawUnsafe(`CREATE FUNCTION "${name}"() RETURNS trigger LANGUAGE plpgsql AS $ci169$ BEGIN RAISE EXCEPTION 'CI169_EXPECTED_FAULT'; END; $ci169$`);
     try {
-      await pg.db.$executeRawUnsafe(`CREATE TRIGGER "${name}" BEFORE INSERT ON "${table}" FOR EACH ROW WHEN (NEW.${table === "ChangeLog" ? '"actorId"' : '"actor"'} = ${quoted}) EXECUTE FUNCTION "${name}"()`);
+      await pg.db.$executeRawUnsafe(`CREATE TRIGGER "${name}" BEFORE INSERT ON "${table}" FOR EACH ROW WHEN (NEW.${table === "ChangeLog" ? '"actorId"' : '"actor"'} = ${quoted}${pluginOwnerId ? ' AND NEW."entity" = \'plugin\' AND NEW."entityId" = \'demo\' AND NEW."action" = \'command.ping\'' : ""}) EXECUTE FUNCTION "${name}"()`);
       try { return await operation(); } finally { await pg.db.$executeRawUnsafe(`DROP TRIGGER "${name}" ON "${table}"`); }
     } finally { await pg.db.$executeRawUnsafe(`DROP FUNCTION "${name}"()`); }
   }
@@ -142,7 +164,7 @@ export async function createHttpS3Fixture(scenarioId: string) {
     if (row) { assert.ok(row.uploadedById.startsWith(`ci169-${target.runId}-${target.attempt}-${scenarioId}-`)); assert.match(row.storageKey, /^finance-documents\/[0-9a-f-]{36}\/[a-f0-9]{64}$/); documents.add(row.storageKey); }
     return { response, body: await response.json() as { ok?: boolean; document?: FinanceDocumentView; repeated?: boolean; code?: string } };
   }
-  return { ...pg, project, cookie, request, session, actionResponse, action, fault, put, get, versions, deleteMarker, file, upload, financeUpload,
+  return { ...pg, project, cookie, request, session, login, actionResponse, action, fault, put, get, versions, deleteMarker, file, upload, financeUpload,
     async dispose() { s3.destroy(); await pg.dispose(); } };
 }
 
