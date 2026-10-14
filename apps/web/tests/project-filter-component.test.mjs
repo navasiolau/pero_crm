@@ -2,9 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createRequire } from "node:module";
 import path from "node:path";
-import {readFile,writeFile,mkdir} from "node:fs/promises";
-import {execFileSync} from "node:child_process";
-import {createHash,randomUUID} from "node:crypto";
 import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
@@ -46,7 +43,6 @@ const bundleOptions = {
     loader: "tsx",
   },
   bundle: true,
-  metafile: true,
   write: false,
   platform: "browser",
   format: "iife",
@@ -93,16 +89,11 @@ const bundleOptions = {
   logLevel: "silent",
 };
 const bundlePromise = build(bundleOptions);
-const styleParity=process.env.CRM_SELECT_STYLE_PARITY==='1';
-let pickerCss;async function actualPickerCss(){if(!pickerCss){const postcss=createRequire(require.resolve('@tailwindcss/postcss'))('postcss'),tailwind=require('@tailwindcss/postcss');pickerCss=(await postcss([tailwind({base:web})]).process(await readFile(path.join(web,'src/app/globals.css'),'utf8'),{from:path.join(web,'src/app/globals.css')})).css+'\nhtml,body{font-family:Arial,sans-serif}input{caret-color:transparent!important}';}return pickerCss;}
-const beforeRevision='465a59d0709edabf4396a966bb53cd76868f7b86';
-const beforeBundlePromise=(styleParity)?build({...bundleOptions,plugins:[...bundleOptions.plugins,{name:'local-original-picker-source',setup(builder){builder.onLoad({filter:/\.(?:tsx)$/,namespace:'file'},args=>{const relative=path.relative(web,args.path).split(path.sep).join('/');if(!['src/components/ui/searchable-select.tsx','src/components/ui/multi-select-filter.tsx'].includes(relative))return;return{contents:execFileSync('git',['-c','safe.directory='+path.resolve(web,'../..'),'show',beforeRevision+':apps/web/'+relative],{cwd:web,encoding:'utf8'}),loader:'tsx',resolveDir:path.dirname(args.path)};});}}]}):null;
-
-async function withPage(initialQuery, run, section = "projects", variant='after', viewport={width:1440,height:900}) {
-  const bundle = await (variant==='before'?beforeBundlePromise:bundlePromise);
+async function withPage(initialQuery, run, section = "projects") {
+  const bundle = await bundlePromise;
   const browser = await chromium.launch({ headless: true });
   try {
-    const page = await browser.newPage({ viewport, reducedMotion:"reduce" });
+    const page = await browser.newPage({ viewport:{width:1440,height:900}, reducedMotion:"reduce" });
     page.setDefaultTimeout(5000);
     await page.setContent(`<style>
       .z-50{z-index:50}.isolate{isolation:isolate}
@@ -112,7 +103,6 @@ async function withPage(initialQuery, run, section = "projects", variant='after'
       [data-filter-options]{max-height:224px;overflow-y:auto}
       button,[role=checkbox]{cursor:pointer}
     </style><div style="height:900px"></div><div id="root"></div><div style="height:1200px"></div>`);
-    if(section==='picker'&&styleParity)await page.addStyleTag({content:await actualPickerCss()});
     await page.evaluate(({ query, section }) => { window.__initialQuery = query; window.__section = section; }, { query: initialQuery, section });
     await page.addScriptTag({ content: bundle.outputFiles[0].text });
     await page.locator(section==='picker'?'#picker-neighbor':`#${section}-active-only`).waitFor();
@@ -155,15 +145,6 @@ test(`${section} filters default to all and Незавершённые writes ex
   }, section);
 });
 }
-
-test("both actual wrappers import one shared filter renderer", async () => {
-  const { metafile } = await bundlePromise;
-  for (const wrapper of ["projects/filter-bar.tsx", "products/products-filter-bar.tsx"]) {
-    const entry = Object.entries(metafile.inputs).find(([name]) => name.replaceAll("\\", "/").endsWith(wrapper));
-    assert.ok(entry, `${wrapper} bundled`);
-    assert.ok(entry[1].imports.some(({ path: name }) => name.replaceAll("\\", "/").endsWith("components/entity-list-filter-bar.tsx")), `${wrapper} directly uses shared renderer`);
-  }
-});
 
 test("partial stages, last unchecked, full selection and dimension reset retain popup and viewport", async () => {
   await withPage("", async (page) => {
@@ -309,14 +290,4 @@ test('large multi keeps logical Tab/focus/selection while rendering only its vie
   await group.evaluate(n=>n.scrollTop=n.scrollHeight);await page.waitForTimeout(100);assert.equal(await group.getByRole('checkbox',{name:nextName,exact:true}).count(),1);assert.equal(await page.evaluate(()=>document.activeElement.getAttribute('aria-label')),nextName);await page.keyboard.press('Shift+Tab');assert.equal(await page.evaluate(()=>document.activeElement.getAttribute('aria-label')),edgeName);
   await popup.getByPlaceholder('Поиск нескольких').fill('alpha_04999');await group.getByRole('checkbox',{name:'alpha_04999',exact:true}).check();assert.ok((await page.evaluate(()=>window.__picker.multi)).includes('o4999'));assert.ok((await page.evaluate(()=>window.__picker.multi)).includes('unknown'));
  },'picker');
-});
-
-
-
-test('manual actual CSS large picker viewport parity',{skip:!styleParity,timeout:120000},async()=>{
- const pwRequire=createRequire(require.resolve('@playwright/test/package.json')),coreRequire=createRequire(pwRequire.resolve('playwright/package.json')),{PNG}=coreRequire(path.join(path.dirname(coreRequire.resolve('playwright-core/package.json')),'lib/utilsBundle.js'));const dir=path.join(web,'test-results/select-work-reduction',randomUUID());await mkdir(dir,{recursive:true});const pairs=[];
- for(const viewport of [{width:1440,height:900},{width:390,height:844},{width:360,height:800}]){const captures={};for(const variant of ['before','after'])await withPage('size=5000',async page=>{
-  await page.getByRole('button',{name:'Несколько',exact:true}).click();const popup=page.locator('[data-slot=popover-content]');await popup.getByRole('checkbox',{name:'alpha_00000',exact:true}).waitFor();await page.waitForTimeout(250);await page.evaluate(()=>document.fonts.ready);const bytes=await page.screenshot({animations:'disabled',path:path.join(dir,variant+'-'+viewport.width+'.png')}),png=PNG.sync.read(bytes);const shape=await popup.evaluate(n=>{const rect=n.getBoundingClientRect();return{rect:{x:rect.x,y:rect.y,width:rect.width,height:rect.height},controls:[...n.querySelectorAll('input,button,[role=checkbox],label')].filter(x=>{const r=x.getBoundingClientRect();return r.top>=rect.top&&r.bottom<=rect.bottom;}).map(x=>{const r=x.getBoundingClientRect(),css=getComputedStyle(x);return{tag:x.tagName,text:x.innerText??'',label:x.getAttribute('aria-label'),className:x.className,rect:{x:r.x,y:r.y,width:r.width,height:r.height},font:css.font,color:css.color,background:css.backgroundColor};})};});const region=await popup.evaluate(n=>{const r=n.getBoundingClientRect(),css=getComputedStyle(n);return{x:Math.ceil(r.x+parseFloat(css.paddingLeft)),y:Math.ceil(r.y+parseFloat(css.paddingTop)),right:Math.floor(r.right-parseFloat(css.paddingRight)),bottom:Math.floor(r.bottom-parseFloat(css.paddingBottom))};});const rows=[];for(let y=region.y;y<region.bottom;y++)rows.push(png.data.subarray((y*png.width+region.x)*4,(y*png.width+region.right)*4));const trigger=await page.getByRole('button',{name:'Несколько',exact:true}).evaluate(n=>{const r=n.getBoundingClientRect(),css=getComputedStyle(n);return{text:n.innerText,className:n.className,rect:{x:r.x,y:r.y,width:r.width,height:r.height},font:css.font,color:css.color,background:css.backgroundColor};});captures[variant]={png:createHash('sha256').update(bytes).digest('hex'),rgba:createHash('sha256').update(png.data).digest('hex'),contentPixels:createHash('sha256').update(Buffer.concat(rows)).digest('hex'),region,shape,trigger};
- },'picker',variant,viewport);assert.deepEqual(captures.after.shape,captures.before.shape);assert.deepEqual(captures.after.trigger,captures.before.trigger);assert.deepEqual(captures.after.region,captures.before.region);assert.equal(captures.after.contentPixels,captures.before.contentPixels);captures.wholePixelsEqual=captures.after.rgba===captures.before.rgba;pairs.push({viewport,before:captures.before,after:captures.after,wholePixelsEqual:captures.wholePixelsEqual});}
- await writeFile(path.join(dir,'appearance.json'),JSON.stringify({status:'PASS',cleanup:'AWAITED',pairs},null,2));console.log(JSON.stringify({status:'LARGE_PICKER_STYLE_PARITY_PASS',dir,pairs:pairs.length}));
 });

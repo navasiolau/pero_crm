@@ -119,9 +119,9 @@
       "tests": [
         {
           "file": "apps/web/tests/integration/finance-postgres.test.ts",
-          "block": "cash/mixed-expense-advance-real-lock-both-orders",
+          "block": "cash/payment-stock-logistics-versus-advance-real-lock-both-orders",
           "evidenceLevel": "native-PostgreSQL",
-          "notes": "Оба порядка настоящих expense/advance writers; разные PID, удерживаемый peer lock и точные суммы. Runtime evidence №169 хранится в change; static matrix не объявляет будущую staging-приёмку."
+          "notes": "Оба порядка payment/stock/logistics writer против advance; разные PID, удерживаемый peer lock и точные суммы. Runtime нового кандидата NOT_RUN до CI; static matrix не объявляет staging-приёмку."
         }
       ],
       "acceptance": [
@@ -188,6 +188,11 @@
         {
           "file": "apps/web/tests/integration/finance-postgres.test.ts",
           "block": "turnover/combined-estimate-debt-pure-engineer-unknown-and-period-refusal",
+          "evidenceLevel": "native-PostgreSQL"
+        },
+        {
+          "file": "apps/web/tests/integration/payroll-cash-postgres.test.ts",
+          "block": "cash/current-month-salary-cannot-use-current-accrual-or-ignore-legacy-org-cap",
           "evidenceLevel": "native-PostgreSQL"
         }
       ],
@@ -307,7 +312,9 @@
       "domain": "money",
       "requirement": "Количество и средняя стоимость Decimal, exact receipt/replay, phase ACTIVE и сохранность защищённой истории.",
       "productionModules": [
-        "apps/web/src/server/warehouse/accounting.ts"
+        "apps/web/src/server/warehouse/accounting.ts",
+        "apps/web/src/server/warehouse/stock-purchase-core.ts",
+        "apps/web/src/server/warehouse/deletion-core.ts"
       ],
       "tests": [
         {
@@ -319,6 +326,16 @@
           "file": "apps/web/tests/warehouse-receipt-kinds.test.ts",
           "block": "",
           "evidenceLevel": "unit"
+        },
+        {
+          "file": "apps/web/tests/integration/domain-postgres.test.ts",
+          "block": "warehouse/real-weighted-movements-replay-return-rounding-and-SQL-rollback",
+          "evidenceLevel": "native-PostgreSQL"
+        },
+        {
+          "file": "apps/web/tests/integration/finance-postgres.test.ts",
+          "block": "warehouse/paid-receipt-cascade-delete-history-and-rollback/",
+          "evidenceLevel": "native-PostgreSQL"
         }
       ],
       "acceptance": [
@@ -409,8 +426,18 @@
       "tests": [
         {
           "file": "apps/web/tests/safe-file-response.test.ts",
-          "block": "active original downloads preserve exact bytes and never receive inline even with view",
+          "block": "anonymous and foreign original/view/thumb/preview requests do not read storage",
           "evidenceLevel": "DI"
+        },
+        {
+          "file": "apps/web/tests/integration/file-responses.test.ts",
+          "block": "media.active:",
+          "evidenceLevel": "HTTP-runtime"
+        },
+        {
+          "file": "apps/web/tests/integration/file-responses.test.ts",
+          "block": "media.retired-caption:",
+          "evidenceLevel": "HTTP-runtime"
         },
         {
           "file": "apps/web/tests/engineer-access-actions.test.ts",
@@ -684,6 +711,16 @@
           "evidenceLevel": "unit"
         },
         {
+          "file": "apps/web/tests/project-client-contact-component.test.mjs",
+          "block": "readonly project contacts retain values and never submit writes",
+          "evidenceLevel": "Chromium-component"
+        },
+        {
+          "file": "apps/web/tests/inline-field-subscriptions.test.mjs",
+          "block": "beforeReadonly",
+          "evidenceLevel": "Chromium-component"
+        },
+        {
           "file": "apps/web/tests/product-card-navigation-browser.test.mjs",
           "block": "actual Chromium cover/body navigation, drag preview, mobile numbers and two faults",
           "evidenceLevel": "Chromium-component"
@@ -719,6 +756,47 @@
         146,
         163
       ]
+    },
+    {
+      "id": "auth-credentials-session-bearer",
+      "domain": "acl",
+      "requirement": "Настоящий credentials provider проверяет пароль/active; PostgreSQL sensitive updates отзывают cookie и personal API tokens; каждый route проверяет Bearer/scopes.",
+      "productionModules": ["apps/web/src/auth.ts", "apps/web/src/server/auth/session-callbacks.ts", "apps/web/src/server/plugins/token-verification.ts", "apps/web/src/server/api/auth.ts"],
+      "tests": [
+        { "file": "apps/web/tests/auth-security.test.ts", "block": "Auth.js rejects a mismatched sessionVersion and removes the old cookie", "evidenceLevel": "DI" },
+        { "file": "apps/web/tests/integration/file-responses.test.ts", "block": "credentials/login:", "evidenceLevel": "HTTP-runtime" },
+        { "file": "apps/web/tests/integration/file-responses.test.ts", "block": "credentials/revoke:", "evidenceLevel": "HTTP-runtime" },
+        { "file": "apps/web/tests/integration/file-responses.test.ts", "block": "bearer/scopes:", "evidenceLevel": "HTTP-runtime" }
+      ],
+      "acceptance": [{ "scenario": "Actual login, sensitive SQL trigger updates, cookie cleanup, route denial и token scopes на новом CI SHA.", "evidenceLevel": "HTTP-runtime", "target": "owned-ci-169", "status": "NOT_RUN", "revision": null, "gapTask": 169, "entrypoints": ["apps/web/tests/integration/file-responses.test.ts"] }],
+      "gapTasks": []
+    },
+    {
+      "id": "telegram-link-lifecycle",
+      "domain": "acl",
+      "requirement": "Bot routes применяют Bearer scopes и одноразовый link code; expiry, occupied/disabled/replayed привязки запрещены; разрешённый ENGINEER получает корректную session и unlink.",
+      "productionModules": ["apps/web/src/app/api/v1/bot/link/route.ts", "apps/web/src/app/api/v1/bot/session/route.ts", "apps/web/src/app/api/v1/bot/unlink/route.ts", "apps/web/src/server/telegram/bot-api.ts"],
+      "tests": [{ "file": "apps/web/tests/integration/file-responses.test.ts", "block": "telegram/link-session-unlink:", "evidenceLevel": "HTTP-runtime" }],
+      "acceptance": [{ "scenario": "Link/expiry/replay/disabled/session/unlink через actual routes без внешней Telegram сети.", "evidenceLevel": "HTTP-runtime", "target": "owned-ci-169", "status": "NOT_RUN", "revision": null, "gapTask": 169, "entrypoints": ["apps/web/tests/integration/file-responses.test.ts"] }],
+      "gapTasks": []
+    },
+    {
+      "id": "plugin-command-route-log",
+      "domain": "queue",
+      "requirement": "Plugin command route проверяет права/token scopes, rejects disabled/missing commands и сохраняет настоящий run-log для успешного ping и ошибки.",
+      "productionModules": ["apps/web/src/app/api/v1/plugins/[id]/commands/[command]/route.ts", "apps/web/src/server/plugins/registry.ts"],
+      "tests": [{ "file": "apps/web/tests/integration/file-responses.test.ts", "block": "plugins/commands:", "evidenceLevel": "HTTP-runtime" }],
+      "acceptance": [{ "scenario": "Actual command route 403/404/409/200/500 и persisted run-log на новом CI SHA.", "evidenceLevel": "HTTP-runtime", "target": "owned-ci-169", "status": "NOT_RUN", "revision": null, "gapTask": 169, "entrypoints": ["apps/web/tests/integration/file-responses.test.ts"] }],
+      "gapTasks": []
+    },
+    {
+      "id": "logistics-cash-posting-correction",
+      "domain": "money",
+      "requirement": "Logistics posting/correction сохраняет cash allocations, historical FX/amount snapshots, CAS/replay, caps и atomic SQL rollback.",
+      "productionModules": ["apps/web/src/server/logistics/core.ts", "apps/web/src/server/logistics/posting-core.ts", "apps/web/src/server/logistics/money-query-core.ts"],
+      "tests": [{ "file": "apps/web/tests/integration/finance-postgres.test.ts", "block": "logistics/real-posting-correction-CAS-history-budget-and-SQL-rollback", "evidenceLevel": "native-PostgreSQL" }],
+      "acceptance": [{ "scenario": "Реальные денежные строки и correction/history/rollback под owned PostgreSQL; race vectors входят в cash shared-lock case.", "evidenceLevel": "native-PostgreSQL", "target": "owned-ci-169", "status": "NOT_RUN", "revision": null, "gapTask": 169, "entrypoints": ["apps/web/tests/integration/finance-postgres.test.ts"] }],
+      "gapTasks": []
     }
   ],
   "dispositions": [
@@ -861,16 +939,6 @@
       "reason": "Один безопасный helper с restore при успехе/исключении и unexpected Prisma/network denial.",
       "remainingProtection": [
         "Тот же настоящий production module и все прежние business assertions; native остаётся отдельным."
-      ]
-    },
-    {
-      "file": "apps/web/tests/file-pdf-view-route.test.ts",
-      "block": "Module/require.cache/global fixtures",
-      "decision": "CONSOLIDATE",
-      "task": 161,
-      "reason": "Один безопасный helper с restore при успехе/исключении и unexpected Prisma/network denial.",
-      "remainingProtection": [
-        "Настоящий GET preview=thumbnail и byte-exact original сохраняются здесь; PDF/MIME/disposition/auth/ACL матрица — safe-file-response.test.ts. Native остаётся отдельным."
       ]
     }
   ]

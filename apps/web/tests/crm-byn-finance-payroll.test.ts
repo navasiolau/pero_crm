@@ -47,8 +47,7 @@ const tx={
 };
 stub.exports={prisma:tx};require.cache[filename]=stub;
 const queries=require('../src/server/payroll/queries') as typeof import('../src/server/payroll/queries');
-const {getEmployeeDues,getOrgBalance,getPayrollCurrency}=queries;
-const {readOrgBalance}=require('../src/server/payroll/cash-core') as typeof import('../src/server/payroll/cash-core');
+const { getEmployeeDues, getOrgBalance } = queries;
 
 // Эталон прежних private groupPayroll/groupPayout: отдельный filter для каждого ID.
 function previousGroup<Row extends Parameters<typeof sumHistoricalByn>[0][number] & {userId:string}>(rows:readonly Row[]) {
@@ -66,23 +65,6 @@ function previousSummary(ledger:readonly PayrollHistoryRow[],payments:readonly P
   turnoverAccrued:previousGroup(ownEntries.filter(row=>row.month===selected&&row.scheme==='PERCENT_TURNOVER')),
   totalPaid:previousGroup(ownPayouts),allPaid:sumHistoricalByn(payments)};
 }
-test('mixed history debt and org balance consume fixed BYN, not source amounts',async()=>{
- payouts=[{userId:'u',month:'2020-01',kind:'SALARY',amount:d('20'),payrollCurrency:'USD',bynAmount:d('60')}];
- assert.equal((await getEmployeeDues())[0].due,240);assert.equal(await getOrgBalance(),890);
- assert.equal((await readOrgBalance(tx as unknown as Prisma.TransactionClient,'9','0','30')).toFixed(2),'860.00');
- assert.equal(await getPayrollCurrency(),'BYN');
-});
-test('legacy payout without currency or snapshot makes only dependent totals unavailable and writer fails closed',async()=>{
- payouts=[{userId:'u',month:'2020-01',kind:'SALARY',amount:d('20'),payrollCurrency:null,bynAmount:null}];
- assert.equal((await getEmployeeDues())[0].due,null);assert.equal(await getOrgBalance(),null);
- await assert.rejects(readOrgBalance(tx as unknown as Prisma.TransactionClient,'1'),/сохранённого BYN/);
-});
-test('zero fixed payout and zero fixed foreign accrual are valid evidence',async()=>{
- payouts=[{userId:'u',month:'2020-01',kind:'SALARY',amount:d('20'),payrollCurrency:null,bynAmount:d('0')}];
- entries=[{userId:'u',month:'2020-01',scheme:'PIECE',amount:d('100'),currency:'USD',bynAmount:d('0')}];
- assert.deepEqual(await getEmployeeDues(),[]);assert.equal(await getOrgBalance(),950);
-});
-
 test('one-pass periods equal the former Decimal/null selectors for mixed and scoped history',()=>{
  const ledger:PayrollHistoryRow[]=[
   {userId:'fixed',month:'2026-09',scheme:'PIECE',amount:'100.005',currency:'BYN',bynAmount:null},

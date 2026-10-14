@@ -13,8 +13,8 @@ function request(caption:unknown,cover=false){const file=new File(['QA'],cover?'
 test('new/stale caption includingempty andcover context refuses beforestoredbytes/storage/DB',async()=>{
  for(const cover of [false,true])for(const caption of ['','legacy caption',new File(['caption'],'caption.txt')]){reads=storage=dbWrites=0;const response=await POST(request(caption,cover));assert.equal(response.status,422);assert.equal(reads,0);assert.equal(storage,0);assert.equal(dbWrites,0);}
 });
-test('caption-free ordinary upload retains actualstorage boundary and leaveslegacy metadata untouched',async()=>{
- const legacy={id:'old',caption:'historical value'},before=structuredClone(legacy);reads=storage=dbWrites=0;const response=await POST(request(undefined));assert.equal(response.status,500);assert.equal((await response.json()).details.phase,'storage-original');assert.equal(reads,1);assert.equal(storage,1);assert.deepEqual(legacy,before);
+test('caption-free ordinary upload reaches the actual storage boundary',async()=>{
+ reads=storage=dbWrites=0;const response=await POST(request(undefined));assert.equal(response.status,500);assert.equal((await response.json()).details.phase,'storage-original');assert.equal(reads,1);assert.equal(storage,1);assert.equal(dbWrites,0);
 });
 test('directtyped coverwriter rejects staleextra caption before anytransactionaccess',async()=>{
  const {persistUploadedProductCover}=require('../src/server/products/cover-core') as typeof import('../src/server/products/cover-core');

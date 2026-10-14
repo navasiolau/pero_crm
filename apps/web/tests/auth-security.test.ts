@@ -58,15 +58,13 @@ test("Auth.js validates an encrypted JWT against the database and projects curre
   assert.equal(body.user.sessionVersion, undefined);
 });
 
-for (const reason of ["password", "roles", "email", "manual revoke", "disable then reenable"]) {
-  test(`Auth.js rejects the old cookie after ${reason} and removes its cookie`, async () => {
-    const { body, response } = await sessionRequest(issuedToken(), async () => ({
-      ...account, sessionVersion: account.sessionVersion + 1,
-    }));
-    assert.equal(body, null);
-    assert.match(response.headers.get("set-cookie") ?? "", /Max-Age=0/);
-  });
-}
+test("Auth.js rejects a mismatched sessionVersion and removes the old cookie", async () => {
+  const { body, response } = await sessionRequest(issuedToken(), async () => ({
+    ...account, sessionVersion: account.sessionVersion + 1,
+  }));
+  assert.equal(body, null);
+  assert.match(response.headers.get("set-cookie") ?? "", /Max-Age=0/);
+});
 
 test("disabled and deleted users cannot use even a matching version", async () => {
   for (const current of [{ ...account, active: false }, null]) {
