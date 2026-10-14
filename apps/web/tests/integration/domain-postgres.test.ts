@@ -37,6 +37,7 @@ let norms: typeof import("../../src/server/warehouse/norm-core"), warehouse: typ
 let coordinator: typeof import("../../src/server/transactions/coordinator");
 let frozenReference: typeof import("../helpers/project-materials-reference");
 let payments: typeof import("../../src/server/payments/service");
+let stock: typeof import("../../src/server/warehouse/accounting");
 
 function mutationTx(tx: Prisma.TransactionClient, probe: MutationProbe, proof: boolean): Prisma.TransactionClient {
   const writeMethods = new Set(["create", "createMany", "createManyAndReturn", "update", "updateMany", "updateManyAndReturn", "upsert", "delete", "deleteMany"]);
@@ -200,7 +201,7 @@ before(async () => {
   // Child targets загружаются раньше родителей: guardedModuleCache сохраняет installed entry каждого target.
   const names = ["transactions/coordinator", "time/timers", "access/visibility", "access/notification-visibility", "tasks/workspace-contract",
     "tasks/queries", "warehouse/unit-core", "warehouse/norm-core", "warehouse/queries", "products/core", "projects/stage-core", "projects/delete-core",
-    "products/status-core", "products/queries", "projects/queries", "tasks/completion-core", "tasks/actions", "warehouse/actions", "time/actions", "payments/service"];
+    "products/status-core", "products/queries", "projects/queries", "tasks/completion-core", "tasks/actions", "warehouse/accounting", "warehouse/actions", "time/actions", "payments/service"];
   const effect = (name: string) => () => { const probe = current().mutation; if (probe) { probe.effects.push(name); throw Error("CI133_INJECTED_OPTIONAL_EFFECT"); } };
   const overrides = { "../src/auth": { auth: async () => ({ user: current().actor }) },
     "next/cache": { revalidatePath: effect("cache"), revalidateTag: effect("cache") },
@@ -218,6 +219,7 @@ before(async () => {
   completion = scope.load("../src/server/tasks/completion-core"); tasks = scope.load("../src/server/tasks/actions"); scope.load("../src/server/warehouse/actions"); time = scope.load("../src/server/time/actions");
   frozenReference = scope.load("./helpers/project-materials-reference");
   payments = scope.load("../src/server/payments/service");
+  stock = scope.load("../src/server/warehouse/accounting");
 });
 after(async () => { if (fixture) try { scope?.restore(); await fixture.verifyProtected(); } finally { await fixture.dispose(); } });
 
@@ -241,6 +243,48 @@ async function tree(db: Db, rows: PostgresRows, tag: string, stage: ProjectStage
 async function warehouseState(tx: Prisma.TransactionClient, rows: PostgresRows, phase = "ACTIVE") {
   return tx.warehouseAccountingState.upsert({ where: { id: "main" }, create: { id: "main", phase, runId: rows.id("warehouse-run"), beforePrices: [], beforeBalances: [] }, update: { phase } });
 }
+test("warehouse/real-weighted-movements-replay-return-rounding-and-SQL-rollback", async () => fixture.rollback(async (tx, rows) => {
+  const c = await tree(tx, rows, "stock-writers"), originalMaterial = c.material;
+  await warehouseState(tx, rows);
+  const line = await tx.projectMaterial.create({ data: { productId: c.product.id, materialId: c.material.id, quantity: "100", quantityPerUnit: "20" } });
+  const requests = ["5", "7", "10"].map(unitPrice => ({ kind: "INCOME" as const, clientMutationId: randomUUID(), materialId: c.material.id, quantity: "10", unitPrice }));
+  for (const input of requests) await stock.warehouseMove(tx, c.admin, input);
+  const material = await tx.material.findUniqueOrThrow({ where: { id: c.material.id } });
+  assert.equal(material.purchasePrice!.toFixed(2), "7.33"); assert.deepEqual(material.updatedAt, originalMaterial.updatedAt);
+  assert.equal((await stock.warehouseMove(tx, c.admin, { ...requests[0], clientMutationId: requests[0].clientMutationId.toUpperCase() })).repeated, true);
+  await assert.rejects(stock.warehouseMove(tx, c.admin, { ...requests[0], quantity: "11" }), /другими данными/);
+  await assert.rejects(stock.warehouseMove(tx, c.worker, { ...requests[0], clientMutationId: randomUUID() }), /прав/);
+  const stable = await nativeSnapshot(tx);
+  await tx.$executeRawUnsafe("CREATE FUNCTION ci169_stock_failure() RETURNS trigger AS $$ BEGIN RAISE EXCEPTION 'CI169_STOCK_FAILURE'; END; $$ LANGUAGE plpgsql");
+  for (const table of ["ProjectMaterial", "DomainEvent"] as const) {
+    await tx.$executeRawUnsafe(`CREATE TRIGGER ci169_stock_failure BEFORE ${table === "ProjectMaterial" ? "UPDATE" : "INSERT"} ON "${table}" FOR EACH ROW EXECUTE FUNCTION ci169_stock_failure()`);
+    const before = await nativeSnapshot(tx);
+    await rejectedSql(tx, () => stock.warehouseMove(tx, c.admin, table === "ProjectMaterial"
+      ? { kind: "EXPENSE", clientMutationId: randomUUID(), projectMaterialId: line.id, quantity: "1" }
+      : { ...requests[0], clientMutationId: randomUUID() }), /CI169_STOCK_FAILURE/);
+    assert.deepEqual(await nativeSnapshot(tx), before, "MOVEMENT_FAILURE_ROLLS_BACK_ALL_ROWS");
+    await tx.$executeRawUnsafe(`DROP TRIGGER ci169_stock_failure ON "${table}"`);
+  }
+  await tx.$executeRawUnsafe("DROP FUNCTION ci169_stock_failure()");
+  assert.deepEqual(await nativeSnapshot(tx), stable);
+  const issued = await stock.warehouseMove(tx, c.admin, { kind: "EXPENSE", clientMutationId: randomUUID(), projectMaterialId: line.id, quantity: "10" });
+  assert.equal(issued.movement.totalByn!.toFixed(2), "73.33");
+  await assert.rejects(stock.warehouseMove(tx, c.admin, { kind: "EXPENSE", clientMutationId: randomUUID(), projectMaterialId: line.id, quantity: "21" }), /Недостаточно/);
+  await stock.warehouseMove(tx, c.admin, { kind: "RETURN", clientMutationId: randomUUID(), projectMaterialId: line.id, quantity: "10", sourceMovementId: issued.movement.id });
+  assert.equal((await tx.warehouseBalance.findUniqueOrThrow({ where: { materialId: c.material.id } })).valueByn.toFixed(9), "220.000000000");
+  assert.equal((await tx.projectMaterial.findUniqueOrThrow({ where: { id: line.id } })).issuedQty.toString(), "0");
+  const tiny = await tx.material.create({ data: { name: rows.id("tiny-stock"), unitId: c.unit.id } });
+  const tinyLine = await tx.projectMaterial.create({ data: { productId: c.product.id, materialId: tiny.id, quantity: "1" } });
+  await stock.warehouseMove(tx, c.admin, { kind: "INCOME", materialId: tiny.id, quantity: "1", unitPrice: "0.02", clientMutationId: randomUUID() });
+  const tinyIssue = await stock.warehouseMove(tx, c.admin, { kind: "EXPENSE", projectMaterialId: tinyLine.id, quantity: "1", clientMutationId: randomUUID() });
+  for (let part = 0; part < 4; part++) await stock.warehouseMove(tx, c.admin, { kind: "RETURN", projectMaterialId: tinyLine.id,
+    quantity: "0.25", sourceMovementId: tinyIssue.movement.id, clientMutationId: randomUUID() });
+  assert.equal((await tx.warehouseMovementValuation.findUniqueOrThrow({ where: { movementId: tinyIssue.movement.id } })).returnedMoneyByn.toFixed(2), "0.02");
+  assert.equal((await tx.warehouseBalance.findUniqueOrThrow({ where: { materialId: tiny.id } })).valueByn.toFixed(9), "0.020000000");
+  assert.equal(await tx.stockMovement.count({ where: { materialId: c.material.id } }), 5);
+  assert.equal(await tx.changeLog.count({ where: { actorId: c.admin.id, entity: "stockMovement" } }), 11);
+  assert.equal(await tx.domainEvent.count({ where: { actor: c.admin.id, type: "stock.movement.created" } }), 11);
+}));
 const transactionIn = (tx: Prisma.TransactionClient) => async <T>(operation: (db: Prisma.TransactionClient) => Promise<T>) => {
   await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(18435,55001)`; return operation(tx);
 };
