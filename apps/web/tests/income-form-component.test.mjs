@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import test, {before, after} from 'node:test';
 import {randomUUID} from 'node:crypto';
 import {createRequire} from 'node:module';
 import path from 'node:path';
@@ -9,6 +9,9 @@ const require=createRequire(import.meta.url);
 const {build}=createRequire(require.resolve('tsx/package.json'))('esbuild');
 const {chromium}=require('@playwright/test');
 const web=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
+let browser;
+before(async()=>{browser=await chromium.launch({headless:true});});
+after(async()=>{await browser?.close();});
 
 // Реальный PaymentDialog и UI-компоненты; подменяются только внешние границы.
 // Минимальная CSS здесь обеспечивает stacking для кликов, но не проверяет layout.
@@ -29,9 +32,9 @@ const bundlePromise=build({stdin:{contents:`
 
 async function withDialog(config,run){
  const bundle=await bundlePromise;
- const browser=await chromium.launch({headless:true});
+ const context=await browser.newContext();
  try{
-  const page=await browser.newPage();page.setDefaultTimeout(5000);
+  const page=await context.newPage();page.setDefaultTimeout(5000);
   await page.route('http://finance.fixture/',route=>route.fulfill({contentType:'text/html',body:'<style>.z-50{z-index:50}.isolate{isolation:isolate}[data-slot=dialog-content]{position:relative;z-index:50}</style><div id="root"></div>'}));
   await page.route('**/api/finance/documents/upload',route=>route.fulfill({status:201,contentType:'application/json',body:JSON.stringify({ok:true,document:{id:randomUUID(),source:'finance',fileName:'Чек.pdf',mimeType:'application/pdf',size:4,createdAt:new Date().toISOString(),paymentId:null}})}));
   await page.goto('http://finance.fixture/');
@@ -39,7 +42,7 @@ async function withDialog(config,run){
   await page.addScriptTag({content:bundle.outputFiles[0].text});
   await page.locator('[data-slot="dialog-content"] label').first().waitFor();
   await run(page);
- }finally{await browser.close()}
+ }finally{await context.close()}
 }
 
 async function assertNoArticle(page){

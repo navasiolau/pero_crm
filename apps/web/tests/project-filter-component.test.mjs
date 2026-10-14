@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { before, after } from "node:test";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,6 +8,9 @@ const require = createRequire(import.meta.url);
 const { build } = createRequire(require.resolve("tsx/package.json"))("esbuild");
 const { chromium } = require("@playwright/test");
 const web = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+let browser;
+before(async () => { browser = await chromium.launch({ headless: true }); });
+after(async () => { await browser?.close(); });
 
 // Монтируется настоящий фильтр-бар, React и Base UI. Подменяется только
 // граница состояния списка: она записывает payload и обновляет входной query.
@@ -91,9 +94,9 @@ const bundleOptions = {
 const bundlePromise = build(bundleOptions);
 async function withPage(initialQuery, run, section = "projects") {
   const bundle = await bundlePromise;
-  const browser = await chromium.launch({ headless: true });
+  const context = await browser.newContext({ viewport:{width:1440,height:900}, reducedMotion:"reduce" });
   try {
-    const page = await browser.newPage({ viewport:{width:1440,height:900}, reducedMotion:"reduce" });
+    const page = await context.newPage();
     page.setDefaultTimeout(5000);
     await page.setContent(`<style>
       .z-50{z-index:50}.isolate{isolation:isolate}
@@ -108,7 +111,7 @@ async function withPage(initialQuery, run, section = "projects") {
     await page.locator(section==='picker'?'#picker-neighbor':`#${section}-active-only`).waitFor();
     await run(page);
   } finally {
-    await browser.close();
+    await context.close();
   }
 }
 
@@ -135,6 +138,7 @@ test(`${section} filters default to all and Незавершённые writes ex
     assert.deepEqual(await popup.getByRole("button").allTextContents(), ["Сброс"]);
     assert.equal(await popup.getByRole("checkbox", { checked: true }).count(), 0);
     await page.keyboard.press("Escape");
+    await popup.waitFor({ state: "hidden" });
     const searchPlaceholder = section === "projects" ? "Номер, название, клиент…" : "Номер, название, проект, клиент…";
     await page.getByPlaceholder(searchPlaceholder, { exact: true }).fill("новый поиск");
     assert.equal(await queryValue(page, "q"), "новый поиск");

@@ -1,6 +1,0 @@
-import assert from 'node:assert/strict';
-import test from 'node:test';
-import {readFileSync} from 'node:fs';
-import {nextExpenseArticleCode,parseExpenseArticleCode,MAX_EXPENSE_ARTICLE_CODE} from '../src/lib/expense-article-code';
-test('UI parser accepts digits only, distinguishes exhausted auto code from a free custom code',()=>{assert.equal(nextExpenseArticleCode(null),1);assert.equal(nextExpenseArticleCode(9),10);assert.equal(parseExpenseArticleCode('0012'),12);for(const input of ['','0','-1','+2','1.2','1e2','１２','2147483648'])assert.throws(()=>parseExpenseArticleCode(input));assert.throws(()=>nextExpenseArticleCode(MAX_EXPENSE_ARTICLE_CODE));assert.equal(parseExpenseArticleCode('2147483647'),MAX_EXPENSE_ARTICLE_CODE);});
-test('migration numbers missing articles deterministically and leaves Payment and existing codes intact',()=>{const sql=readFileSync(new URL('../prisma/migrations/20261003020000_expense_article_codes/migration.sql',import.meta.url),'utf8');assert.match(sql,/ROW_NUMBER\(\) OVER \(ORDER BY "createdAt", "id"\)/);assert.match(sql,/a\."code" IS NULL/);assert.match(sql,/MAX\("code"\)/);assert.match(sql,/CHECK \("code" > 0\)/);assert.match(sql,/CREATE UNIQUE INDEX/);assert.doesNotMatch(sql,/WHERE[^;]*"active"/);assert.doesNotMatch(sql,/(?:ALTER TABLE|UPDATE|DELETE FROM) "(?:Payment|CashAccount|PayrollEntry)"/);});

@@ -30,3 +30,7 @@
 ## Impact
 
 Allowlist реализации — только согласованные файлы тестов, helpers, QA, общий runner замены и существующие ссылки; окончательный список записан в `reduction-map.md` до удаления. Весь добавленный test/QA код, включая общий runner и перенесённые cases, входит в прежний scope итогового счётчика; вынос кода за его границы не сокращает denominator. Новые planning-артефакты не создаются; прежний cash QA-plan получает лишь актуальную отметку retirement. Runtime `src`, Prisma, зависимости и lockfile неизменны. Деньги, ACL, CAS, idempotency, rollback, S3, native guards и Chromium остаются покрыты существующими проверками. БД, данные, инфраструктура, main и production в задачу не входят.
+
+## Согласованное продолжение после 259f — OPEN
+
+Владелец разрешил дальнейшую консолидацию существующих pure-domain suites и browser CSS/lifecycle: сохраняются имена и тела всех действующих cases, lexical isolation и все money/ACL/CAS/rollback/S3/ownership/UI assertions; mutable global/cache/env suites не объединяются без доказанного isolation. Старые manual native/mocked контуры закрываются только после exact case map и фактического паритета существующих native/HTTP cases №169. Точные FULL literal paths и сохранившиеся case IDs вносятся в reduction-map до удаления. 70/~79 — исследовательские оценки, не квота и не заявление о 100% coverage. Исторические DONE/принятый259f и local WIP сохраняются; новое продолжение OPEN, без src/schema/deps/новых файлов/framework/runners.
