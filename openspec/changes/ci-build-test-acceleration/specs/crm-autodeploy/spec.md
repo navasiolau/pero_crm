@@ -2,6 +2,22 @@
 
 ## ADDED Requirements
 
+### Requirement: Metadata из проверенного runtime и параллельная типизация
+
+CI SHALL извлекать полные свежие generated types, BUILD_ID и manifest из принадлежащей текущему запуску незапущенной immutable runtime projection без сети/mounts; проверка OCI/config/layers/provenance/SHA MUST завершаться до приложения, миграций и tsc. Полный tsc SHALL выполняться в backend после exact-ID artifact с проверенными archive digest, identity и всеми file hashes, также для PR. Отдельный metadata builder export SHALL NOT использоваться.
+
+#### Scenario: Producer ещё выполняет интеграции
+- **WHEN** Native успешно загрузил ранний types artifact и продолжает интеграции
+- **THEN** backend SHALL выполнить полный tsc параллельно; Native SHALL ждать весь backend SUCCESS перед bot packaging, а publishers SHALL по-прежнему ждать все unit/native gates
+
+#### Scenario: Повреждение metadata или ошибка producer
+- **WHEN** artifact имеет чужой SHA/attempt, неверный archive/file hash, лишний путь или symlink, либо producer/tsc завершился ошибкой
+- **THEN** CI MUST завершиться ошибкой без публикации; bounded ожидание и owned cleanup SHALL сохраняться
+
+#### Scenario: Отмена фоновой установки или metadata copy
+- **WHEN** job отменён после создания owned deps group или metadata container
+- **THEN** existing finally/always cleanup SHALL удалить только exact owned ресурсы с проверкой identity; незавершённая установка, смерть без status и timeout300с MUST запрещать использование dependencies
+
 ### Requirement: Полные обязательные проверки при использовании CI-кэша
 
 CI SHALL выполнять существующие тесты, lint, production build и полную типизацию web, включая тестовые исходники и заново сгенерированные типы routes. Полная типизация MUST выполняться после build. Отключение дублирующихся проверок внутри build SHALL допускаться только при обязательных внешних gates; обычная локальная сборка SHALL сохранять свои проверки. Оба jobs публикации SHALL требовать успеха полной unit matrix и native job с cleanup; failure, skipped или cancelled любого обязательного gate MUST блокировать публикацию образов.

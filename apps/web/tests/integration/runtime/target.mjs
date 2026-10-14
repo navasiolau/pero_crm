@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
-import { createReadStream, lstatSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { createReadStream, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 export const MINIO_RELEASE = 'RELEASE.2025-09-07T16-13-09Z';
@@ -164,4 +165,133 @@ export function botDistDigest(directory) {
   }
   visit(directory); requireCi(Boolean(files['index.js']), 'bot-dist-entry');
   return files;
+}
+
+/** Artifact consumer не получает DB credentials и не ослабляет native target guard. */
+export function artifactIdentity(env = process.env) {
+  requireCi(env.CI === 'true' && env.GITHUB_ACTIONS === 'true' && env.RUNNER_OS === 'Linux' &&
+    env.RUNNER_ENVIRONMENT === 'github-hosted' && env.GITHUB_REPOSITORY === REPOSITORY, 'artifact-consumer');
+  requireCi(/^[a-f0-9]{40}$/.test(env.GITHUB_SHA ?? '') && /^[1-9]\d*$/.test(env.GITHUB_RUN_ID ?? '') &&
+    /^[1-9]\d*$/.test(env.GITHUB_RUN_ATTEMPT ?? '') && ['push', 'pull_request'].includes(env.GITHUB_EVENT_NAME), 'artifact-consumer-run');
+  return { repository: REPOSITORY, runId: env.GITHUB_RUN_ID, attempt: env.GITHUB_RUN_ATTEMPT, revision: env.GITHUB_SHA };
+}
+
+/** Полный inventory: не только *.ts, без symlinks и неявных дополнительных файлов. */
+export function typesDigest(directory) {
+  const files = {};
+  function visit(current, prefix = '') {
+    requireCi(realpathSync(current) === current, 'types-directory-link');
+    for (const name of readdirSync(current).sort()) {
+      requireCi(name && !/[\\\r\n]/.test(name) && name !== '.' && name !== '..', 'types-path');
+      const file = path.join(current, name), relative = prefix + name, stat = lstatSync(file);
+      requireCi(!stat.isSymbolicLink(), 'types-link');
+      if (stat.isDirectory()) visit(file, relative + '/');
+      else { requireCi(stat.isFile(), 'types-file'); files[relative] = createHash('sha256').update(readFileSync(file)).digest('hex'); }
+    }
+  }
+  visit(directory);
+  requireCi(Boolean(files.BUILD_ID) && Boolean(files['server/server-reference-manifest.json']) &&
+    Object.keys(files).some(name => name.startsWith('types/') && name.endsWith('.ts')) &&
+    Object.keys(files).every(name => name === 'BUILD_ID' || name === 'server/server-reference-manifest.json' || name.startsWith('types/')), 'types-inventory');
+  return files;
+}
+
+/** Проверка payload выполняется отдельно от API/archive proof, до полного tsc. */
+export function verifyTypesArtifact(directory, env = process.env) {
+  const identity = artifactIdentity(env), manifest = JSON.parse(readFileSync(path.join(directory, 'types.json'), 'utf8'));
+  for (const [key, value] of Object.entries(identity)) requireCi(manifest[key] === value, `types-${key}`);
+  requireCi(readdirSync(directory).sort().join(',') === 'metadata,types.json' &&
+    lstatSync(path.join(directory, 'types.json')).isFile() && !lstatSync(path.join(directory, 'types.json')).isSymbolicLink(), 'types-root');
+  const metadata = path.join(directory, 'metadata'), files = typesDigest(metadata);
+  requireCi(JSON.stringify(files) === JSON.stringify(manifest.files) &&
+    manifest.buildId === readFileSync(path.join(metadata, 'BUILD_ID'), 'utf8').trim() &&
+    Boolean(manifest.buildId) && !/[\r\n]/.test(manifest.buildId) &&
+    /^sha256:[a-f0-9]{64}$/.test(manifest.indexDigest) && /^sha256:[a-f0-9]{64}$/.test(manifest.configDigest), 'types-binding');
+  return manifest;
+}
+
+/** Два закрытых назначения используют один bounded poller и один строгий download. */
+export async function receiveCiArtifact(purpose, env = process.env) {
+  requireCi(purpose === 'types' || purpose === 'bot-dist', 'producer-purpose');
+  const identity = artifactIdentity(env), types = purpose === 'types';
+  const apiHead = env.GITHUB_EVENT_NAME === 'pull_request' ? env.CI_WORKFLOW_HEAD_SHA : identity.revision;
+  requireCi(/^[a-f0-9]{40}$/.test(apiHead ?? ''), 'producer-api-head');
+  requireCi(types || (env.GITHUB_EVENT_NAME === 'push' && ['main', 'staging'].includes(env.GITHUB_REF_NAME)), 'producer-event');
+  const artifactName = `${purpose}-${identity.runId}-${identity.attempt}-${identity.revision}`;
+  let deadline = Date.now() + (types ? 1080000 : 180000), producer;
+  async function api(resource, raw = false) {
+    const remaining = deadline - Date.now(); requireCi(remaining > 0, 'producer-timeout');
+    const response = await fetch(`https://api.github.com/repos/${REPOSITORY}/${resource}`, {
+      headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${env.CI_ARTIFACT_TOKEN}`,
+        'X-GitHub-Api-Version': '2022-11-28' }, redirect: 'manual', signal: AbortSignal.timeout(Math.min(10000, remaining)) });
+    if (raw) { requireCi(response.status === 302, 'artifact-download-redirect'); return response.headers.get('location'); }
+    requireCi(response.ok, `producer-http-${response.status}`);
+    const body = await response.text(); requireCi(body.length <= 8 * 1024 * 1024, 'producer-response-size'); return JSON.parse(body);
+  }
+  const run = await api(`actions/runs/${identity.runId}/attempts/${identity.attempt}`);
+  requireCi(run.id === Number(identity.runId) && run.run_attempt === Number(identity.attempt) && run.head_sha === apiHead &&
+    run.repository?.full_name === REPOSITORY && run.event === env.GITHUB_EVENT_NAME &&
+    run.path?.split('@')[0] === '.github/workflows/ci-cd.yml' &&
+    (env.GITHUB_EVENT_NAME !== 'push' || run.head_branch === env.GITHUB_REF_NAME), 'producer-run');
+  while (Date.now() < deadline) {
+    const listed = await api(`actions/runs/${identity.runId}/attempts/${identity.attempt}/jobs?per_page=100`);
+    requireCi(Array.isArray(listed.jobs) && listed.total_count === listed.jobs.length && listed.total_count <= 100, 'producer-jobs');
+    const consumerName = types ? 'unit-tests (backend)' : 'native-tests';
+    const consumer = listed.jobs.filter(item => item.name === consumerName);
+    requireCi(consumer.length === 1 && Number.isFinite(Date.parse(consumer[0].started_at)) &&
+      consumer[0].run_id === Number(identity.runId) && consumer[0].run_attempt === Number(identity.attempt) &&
+      consumer[0].head_sha === apiHead, 'consumer-start');
+    deadline = Math.min(deadline, Date.parse(consumer[0].started_at) + (types ? 1200000 : 1380000));
+    const matches = listed.jobs.filter(item => item.name === (types ? 'native-tests' : 'unit-tests (backend)'));
+    requireCi(matches.length <= 1, 'producer-unique');
+    const job = matches[0];
+    if (job) {
+      requireCi(job.run_id === Number(identity.runId) && job.run_attempt === Number(identity.attempt) && job.head_sha === apiHead, 'producer-job-owner');
+      if (job.status === 'completed') requireCi(job.conclusion === 'success', 'producer-success');
+      const steps = job.steps?.filter(step => step.name === 'Свежие types из проверенного OCI') ?? [];
+      requireCi(steps.length <= 1, 'types-step-unique');
+      if (types && steps[0]?.status === 'completed') requireCi(steps[0].conclusion === 'success', 'types-step-success');
+      if (types ? steps[0]?.conclusion === 'success' : job.status === 'completed') {
+        const result = await api(`actions/runs/${identity.runId}/artifacts?per_page=100`);
+        requireCi(Array.isArray(result.artifacts) && result.total_count === result.artifacts.length && result.total_count <= 100, 'producer-artifacts');
+        const artifacts = result.artifacts.filter(item => item.name === artifactName && !item.expired);
+        requireCi(artifacts.length <= 1, 'producer-artifact-unique');
+        if (artifacts[0]) {
+          const artifact = artifacts[0];
+          requireCi(Number.isSafeInteger(job.id) && job.id > 0 && Number.isSafeInteger(artifact.id) && artifact.id > 0 &&
+            artifact.workflow_run?.id === Number(identity.runId) && artifact.workflow_run?.head_sha === apiHead &&
+            /^sha256:[a-f0-9]{64}$/.test(artifact.digest), 'producer-artifact-owner');
+          producer = { ...identity, name: job.name, jobId: String(job.id), conclusion: types ? 'upload-success' : job.conclusion,
+            artifactId: String(artifact.id), artifactName, artifactDigest: artifact.digest }; break;
+        }
+      }
+    }
+    await new Promise(resolve => setTimeout(resolve, Math.min(5000, Math.max(0, deadline - Date.now()))));
+  }
+  requireCi(Boolean(producer), 'producer-timeout');
+  const location = new URL(await api(`actions/artifacts/${producer.artifactId}/zip`, true));
+  requireCi(location.protocol === 'https:' && location.hostname.endsWith('.blob.core.windows.net') && !location.username && !location.password, 'artifact-storage');
+  const response = await fetch(location, { redirect: 'error', signal: AbortSignal.timeout(Math.min(10000, Math.max(1, deadline - Date.now()))) });
+  requireCi(response.ok, 'artifact-download');
+  const chunks = []; let size = 0;
+  for await (const chunk of response.body) {
+    size += chunk.byteLength; requireCi(size <= 16 * 1024 * 1024, 'artifact-archive-size'); chunks.push(chunk);
+  }
+  const bytes = Buffer.concat(chunks);
+  requireCi(`sha256:${createHash('sha256').update(bytes).digest('hex')}` === producer.artifactDigest, 'artifact-archive-digest');
+  const directory = path.join(env.RUNNER_TEMP, `pero-${purpose}-${identity.runId}-${identity.attempt}-${identity.revision}`);
+  mkdirSync(directory); writeFileSync(`${directory}.zip`, bytes);
+  // Python stdlib проверяет все ZIP paths/типы до извлечения; токен не передаётся redirect endpoint.
+  execFileSync('python', ['-c', `import pathlib,stat,sys,zipfile
+with zipfile.ZipFile(sys.argv[1]) as z:
+ names=set(); total=0
+ for f in z.infolist():
+  p=pathlib.PurePosixPath(f.filename); mode=f.external_attr>>16; total+=f.file_size
+  assert f.filename and not p.is_absolute() and not any(v in ('','.', '..') for v in f.filename.rstrip('/').split('/')) and '\\\\' not in f.filename and not p.drive
+  assert f.filename not in names and not stat.S_ISLNK(mode) and (stat.S_IFMT(mode) in (0,stat.S_IFREG,stat.S_IFDIR))
+  names.add(f.filename)
+ assert total<=32*1024*1024
+ z.extractall(sys.argv[2])`, `${directory}.zip`, directory], { stdio: ['ignore', 'pipe', 'pipe'] });
+  console.log(JSON.stringify({ ciRuntime: 'producer-ready', purpose, ...producer }));
+  return { directory, producer };
 }

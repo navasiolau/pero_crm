@@ -25,13 +25,8 @@ ARG PERO_CI_EXTERNAL_CHECKS=0
 ARG PERO_CI_CACHE_ID=pero-next-local
 RUN --mount=type=cache,id=${PERO_CI_CACHE_ID},target=/app/apps/web/.next/cache,sharing=locked \
     pnpm --filter @pero/web exec prisma generate \
-    && pnpm --filter @pero/web build
-
-# Свежие types и action manifest принадлежат той же сборке, что и runtime-образ.
-FROM scratch AS ci-metadata
-COPY --from=build /app/apps/web/.next/types /types
-COPY --from=build /app/apps/web/.next/BUILD_ID /BUILD_ID
-COPY --from=build /app/apps/web/.next/server/server-reference-manifest.json /server/server-reference-manifest.json
+    && pnpm --filter @pero/web build \
+    && cp -a apps/web/.next/types apps/web/.next/standalone/apps/web/.next/types
 
 # --- Рантайм ---
 FROM base AS runner

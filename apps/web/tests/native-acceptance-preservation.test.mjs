@@ -48,13 +48,17 @@ test('full original fingerprint excludes only exact declared keys, never tag/cur
  const calls=[];
  const db={$queryRawUnsafe:async(query,...parameters)=>{
   calls.push({query,parameters});
-  if(query.startsWith('SELECT tablename'))return[{tablename:'Product'},{tablename:'PayrollEntry'}];
-  return[{count:'1',hash:'fixture'}];
+  if(query.startsWith('SELECT tablename'))return[{tablename:'PayrollEntry'},{tablename:'Product'}];
+  if(query.startsWith('WITH owned AS'))return[{tablename:'Product',count:'1',hash:'a'.repeat(32)},{tablename:'PayrollEntry',count:'1',hash:'b'.repeat(32)}];
+  return[{constraints:'c'.repeat(32),functions:'d'.repeat(32),triggers:'e'.repeat(32),indexes:'f'.repeat(32)}];
  }};
- await nativeSnapshot(db,{Product:{column:'id',ids:['qa-product']}});
+ const result=await nativeSnapshot(db,{Product:{column:'id',ids:['qa-product']}});
+ assert.equal(calls.length,3);assert.deepEqual(Object.keys(result.snapshot.rows),['PayrollEntry','Product']);
  const selected=calls.find(item=>item.query.includes('FROM public."Product"'));
- assert.match(selected.query,/WHERE NOT/);assert.deepEqual(selected.parameters,['["qa-product"]']);
- assert.ok(!calls.find(item=>item.query.includes('FROM public."PayrollEntry"')).query.includes('WHERE'));
+ const branches=selected.query.split(' UNION ALL ');
+ assert.match(branches.find(query=>query.includes('FROM public."Product"')),/WHERE NOT/);
+ assert.deepEqual(selected.parameters,['{"Product":{"column":"id","ids":["qa-product"]}}']);assert.ok(!selected.query.includes('qa-product'));
+ assert.ok(!branches.find(query=>query.includes('FROM public."PayrollEntry"')).includes('WHERE'));
  assert.ok(calls.every(item=>!/(DELETE|UPDATE|INSERT| LIKE )/.test(item.query)));
 });
 

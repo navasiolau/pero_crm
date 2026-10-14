@@ -295,10 +295,30 @@ test("warehouse/real-weighted-movements-replay-return-rounding-and-SQL-rollback"
   await assert.rejects(stock.warehouseMove(tx, c.admin, { ...requests[0], quantity: "11" }), /другими данными/);
   await assert.rejects(stock.warehouseMove(tx, c.worker, { ...requests[0], clientMutationId: randomUUID() }), /прав/);
   const stable = await nativeSnapshot(tx);
+  const ownedMaterial = nativeOwnedIds({ Material: [c.material.id] }), excluded = await nativeSnapshot(tx, ownedMaterial);
+  const materialCount = (snapshot: typeof stable) => BigInt((snapshot.snapshot.rows.Material as { count: string }[])[0].count);
+  assert.equal(materialCount(excluded), materialCount(stable) - BigInt(1), "SNAPSHOT_EXCLUDES_EXACT_OWNED_ROW");
+  await tx.$executeRawUnsafe("SAVEPOINT ci169_snapshot_sensitivity");
+  try {
+    await tx.material.update({ where: { id: c.material.id }, data: { name: rows.id("snapshot-probe") } });
+    const changed = await nativeSnapshot(tx);
+    assert.notDeepEqual(changed.snapshot.rows.Material, stable.snapshot.rows.Material, "SNAPSHOT_DATA_FINGERPRINT_SENSITIVE");
+    assert.notEqual(changed.digest, stable.digest, "SNAPSHOT_DATA_DIGEST_SENSITIVE");
+    assert.deepEqual(await nativeSnapshot(tx, ownedMaterial), excluded, "SNAPSHOT_EXCLUDES_ONLY_OWNED_CHANGE");
+  } finally {
+    await tx.$executeRawUnsafe("ROLLBACK TO SAVEPOINT ci169_snapshot_sensitivity");
+    await tx.$executeRawUnsafe("RELEASE SAVEPOINT ci169_snapshot_sensitivity");
+  }
+  assert.deepEqual(await nativeSnapshot(tx), stable, "SNAPSHOT_SAVEPOINT_RESTORES_DATA");
   await tx.$executeRawUnsafe("CREATE FUNCTION ci169_stock_failure() RETURNS trigger AS $$ BEGIN RAISE EXCEPTION 'CI169_STOCK_FAILURE'; END; $$ LANGUAGE plpgsql");
+  const withFunction = await nativeSnapshot(tx);
+  assert.notDeepEqual(withFunction.snapshot.functions, stable.snapshot.functions, "SNAPSHOT_FUNCTION_FINGERPRINT_SENSITIVE");
+  assert.deepEqual(withFunction.snapshot.triggers, stable.snapshot.triggers);
   for (const table of ["ProjectMaterial", "DomainEvent"] as const) {
     await tx.$executeRawUnsafe(`CREATE TRIGGER ci169_stock_failure BEFORE ${table === "ProjectMaterial" ? "UPDATE" : "INSERT"} ON "${table}" FOR EACH ROW EXECUTE FUNCTION ci169_stock_failure()`);
     const before = await nativeSnapshot(tx);
+    assert.notDeepEqual(before.snapshot.triggers, withFunction.snapshot.triggers, "SNAPSHOT_TRIGGER_FINGERPRINT_SENSITIVE");
+    assert.deepEqual(before.snapshot.functions, withFunction.snapshot.functions);
     await rejectedSql(tx, () => stock.warehouseMove(tx, c.admin, table === "ProjectMaterial"
       ? { kind: "EXPENSE", clientMutationId: randomUUID(), projectMaterialId: line.id, quantity: "1" }
       : { ...requests[0], clientMutationId: randomUUID() }), /CI169_STOCK_FAILURE/);
