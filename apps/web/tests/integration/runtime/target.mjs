@@ -10,7 +10,7 @@ export const POSTGRES_IMAGE = 'postgres:17-alpine';
 export const REPOSITORY = 'navasiolau/pero_crm';
 
 /** @typedef {{runId:string,attempt:string,postgresId:string,network:string,minioName:string,minioImage:string,
- * databaseUrl:string,baseUrl:string,faultBaseUrl:string,webName:string,faultName:string,webImage:string,authSecret:string,
+ * databaseUrl:string,baseUrl:string,faultBaseUrl:string,faultRole:string,webName:string,faultName:string,webImage:string,authSecret:string,
  * s3:{endpoint:string,bucket:string,accessKeyId:string,secretAccessKey:string}}} CiJob */
 /** @typedef {CiJob & {minioId:string}} CiRuntimeTarget */
 
@@ -39,7 +39,7 @@ export function assertCiJob(env = process.env) {
   requireCi(!env.DIRECT_URL && !env.SHADOW_DATABASE_URL && !env.NEXTAUTH_URL && !env.NEXTAUTH_SECRET, 'env-fallback');
   return { runId, attempt, postgresId: env.PERO_CI_POSTGRES_ID, network: env.PERO_CI_NETWORK,
     minioName: `pero-ci-${runId}-${attempt}-minio`, minioImage: `pero-ci-${runId}-${attempt}-minio:source`,
-    databaseUrl, baseUrl, faultBaseUrl: 'http://127.0.0.1:3101',
+    databaseUrl, baseUrl, faultBaseUrl: 'http://127.0.0.1:3101', faultRole: `ci_fault_${runId}_${attempt}`,
     webName: `pero-ci-${runId}-${attempt}-web`, faultName: `pero-ci-${runId}-${attempt}-web-fault`,
     webImage: `pero-ci-${runId}-${attempt}-web:tested`, authSecret: expected.AUTH_SECRET,
     s3: { endpoint: expected.S3_ENDPOINT, bucket: expected.S3_BUCKET,

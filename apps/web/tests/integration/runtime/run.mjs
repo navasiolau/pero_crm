@@ -92,6 +92,23 @@ try {
   startWeb(target);
   await ready(`${target.baseUrl}/api/health`, 'ok');
   startWeb(target, true);
+  await ready(`${target.faultBaseUrl}/api/health`, 'ok');
+  // Instrumentation сначала проходит с доступной БД; затем обрываются только соединения собственной CI-роли.
+  inspectService(target, target.postgresId, 'postgres');
+  requireCi(/^[1-9]\d*$/.test(target.runId) && /^[1-9]\d*$/.test(target.attempt) &&
+    target.faultRole === `ci_fault_${target.runId}_${target.attempt}` && target.faultRole.length < 63, 'fault-role-owned');
+  const role = JSON.parse(docker(['exec', target.postgresId, 'psql', '-X', '-v', 'ON_ERROR_STOP=1', '-U', 'ci_runner', '-d', 'pero_ci', '-At', '-c',
+    `SELECT json_build_object('database',current_database(),'user',current_user,'primary',NOT pg_is_in_recovery(),
+      'role',rolname,'superuser',rolsuper,'inherit',rolinherit,'createDb',rolcreatedb,'createRole',rolcreaterole,'replication',rolreplication,'bypassRls',rolbypassrls,
+      'login',rolcanlogin,'limit',rolconnlimit,'memberships',(SELECT count(*) FROM pg_auth_members WHERE member=pg_roles.oid),
+      'connections',(SELECT count(*) FROM pg_stat_activity WHERE usename=rolname AND datname='pero_ci')) FROM pg_roles WHERE rolname='${target.faultRole}'`]));
+  requireCi(role.database === 'pero_ci' && role.user === 'ci_runner' && role.primary && role.role === target.faultRole &&
+    !role.superuser && !role.inherit && !role.createDb && !role.createRole && !role.replication && !role.bypassRls &&
+    role.login && role.limit === 5 && role.memberships === 0 && role.connections > 0, 'fault-role-restricted-and-connected');
+  docker(['exec', target.postgresId, 'psql', '-X', '-v', 'ON_ERROR_STOP=1', '-U', 'ci_runner', '-d', 'pero_ci', '-c',
+    `ALTER ROLE "${target.faultRole}" CONNECTION LIMIT 0;
+     SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usename='${target.faultRole}' AND datname='pero_ci' AND pid<>pg_backend_pid()`]);
+  console.log(JSON.stringify({ ciRuntime: 'owned-role-db-outage', runId: target.runId, attempt: target.attempt, role: target.faultRole }));
   await ready(`${target.faultBaseUrl}/api/health`, 'unavailable');
   const cases = readdirSync('tests/integration').filter(file => file.endsWith('.test.ts')).map(file => `tests/integration/${file}`);
   requireCi(cases.length > 0, 'contract-cases');

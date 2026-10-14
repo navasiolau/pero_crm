@@ -103,7 +103,8 @@ function inspectWebImage(target, purpose = 'runtime') {
 /** @param {CiJob} target @param {boolean} [fault] */
 function webEnvironment(target, fault = false) {
   const db = new URL(target.databaseUrl);
-  db.hostname = fault ? '127.0.0.1' : 'postgres'; db.port = fault ? '1' : '5432';
+  db.hostname = 'postgres'; db.port = '5432';
+  if (fault) db.username = target.faultRole;
   return { DATABASE_URL: db.toString(), CRM_FILE_STORAGE: 's3', S3_ENDPOINT: `http://${target.minioName}:9000`,
     S3_BUCKET: target.s3.bucket, S3_ACCESS_KEY: target.s3.accessKeyId, S3_SECRET_KEY: target.s3.secretAccessKey,
     S3_REGION: 'us-east-1', AUTH_SECRET: target.authSecret, AUTH_URL: fault ? target.faultBaseUrl : target.baseUrl, AUTH_TRUST_HOST: 'true' };
@@ -139,6 +140,19 @@ export function startWeb(target, fault = false) {
   requireCi(postgres.NetworkSettings.Networks[target.network].Aliases.includes('postgres'), 'postgres-alias');
   const name = fault ? target.faultName : target.webName;
   requireCi(!docker(['ps', '-aq', '--filter', `name=^/${name}$`]), 'web-already-exists');
+  if (fault) {
+    requireCi(/^[1-9]\d*$/.test(target.runId) && /^[1-9]\d*$/.test(target.attempt) &&
+      target.faultRole === `ci_fault_${target.runId}_${target.attempt}` && target.faultRole.length < 63, 'fault-role-owned');
+    const identity = JSON.parse(docker(['exec', target.postgresId, 'psql', '-X', '-v', 'ON_ERROR_STOP=1', '-U', 'ci_runner', '-d', 'pero_ci', '-At', '-c',
+      `SELECT json_build_object('database',current_database(),'user',current_user,'primary',NOT pg_is_in_recovery(),'existingRole',EXISTS(SELECT 1 FROM pg_roles WHERE rolname='${target.faultRole}'))`]));
+    requireCi(identity.database === 'pero_ci' && identity.user === 'ci_runner' && identity.primary && identity.existingRole === false, 'fault-role-fresh-database');
+    const password = `ci-only-${target.runId}-${target.attempt}`;
+    requireCi(new URL(target.databaseUrl).password === password, 'fault-role-synthetic-password');
+    docker(['exec', target.postgresId, 'psql', '-X', '-v', 'ON_ERROR_STOP=1', '-U', 'ci_runner', '-d', 'pero_ci', '-c',
+      `CREATE ROLE "${target.faultRole}" LOGIN NOSUPERUSER NOINHERIT NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS CONNECTION LIMIT 5 PASSWORD '${password}';
+       GRANT CONNECT ON DATABASE pero_ci TO "${target.faultRole}"; GRANT USAGE ON SCHEMA public TO "${target.faultRole}";
+       GRANT SELECT,INSERT,UPDATE ON public."Plugin" TO "${target.faultRole}"; GRANT SELECT ON public."User" TO "${target.faultRole}"`]);
+  }
   const receipt = JSON.parse(readFileSync(`${process.env.PERO_CI_WEB_ARTIFACT_DIR}/image.json`, 'utf8'));
   const image = inspectWebImage(target);
   requireCi(image.Id === receipt.configDigest && JSON.stringify(image.RootFS.Layers) === JSON.stringify(receipt.diffIds), 'web-oci-projection');
