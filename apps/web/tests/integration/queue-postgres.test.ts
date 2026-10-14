@@ -64,17 +64,21 @@ test("queue/subscriber-freeze-unique-empty-dispatch-ack-idempotency-and-expiry-r
   const gate = () => { let resolve = () => {}; const promise = new Promise<void>(yes => { resolve = yes; }); return { promise, resolve }; };
   const frozen = await claim(queue, ids.concurrent), locked = gate(), requested = gate(), release = gate();
   let holder: Prisma.TransactionClient | undefined, holderPid = 0, waiterPid = 0;
-  const controlled = (db: typeof fixture.db, first: boolean) => ({ async $transaction<T>(operation: (tx: Prisma.TransactionClient) => Promise<T>, options?: { maxWait?: number; timeout?: number; isolationLevel?: Prisma.TransactionIsolationLevel }) {
-    return db.$transaction(async tx => {
-      const [{ pid }] = await tx.$queryRaw<{ pid: number }[]>`SELECT pg_backend_pid() AS pid`;
-      if (first) { holder = tx; holderPid = pid; } else { waiterPid = pid; requested.resolve(); }
-      return operation(new Proxy(tx, { get(target, key) {
-        if (first && key === "$queryRaw") return async (sql: Prisma.Sql) => {
-          const result = await target.$queryRaw(sql); if (sql.strings.join("").includes("FOR UPDATE")) { locked.resolve(); await release.promise; } return result;
-        };
-        const value = Reflect.get(target, key); return typeof value === "function" ? value.bind(target) : value;
-      } }));
-    }, options);
+  const controlled = (db: typeof fixture.db, first: boolean) => new Proxy(db, { get(client, key) {
+    if (key === "$transaction") return new Proxy(client.$transaction, { apply(transaction, _receiver, [operation, options]) {
+      if (typeof operation !== "function") return Reflect.apply(transaction, client, [operation, options]);
+      return Reflect.apply(transaction, client, [async (tx: Prisma.TransactionClient) => {
+        const [{ pid }] = await tx.$queryRaw<{ pid: number }[]>`SELECT pg_backend_pid() AS pid`;
+        if (first) { holder = tx; holderPid = pid; } else { waiterPid = pid; requested.resolve(); }
+        return operation(new Proxy(tx, { get(target, key) {
+          if (first && key === "$queryRaw") return async (sql: Prisma.Sql) => {
+            const result = await target.$queryRaw(sql); if (sql.strings.join("").includes("FOR UPDATE")) { locked.resolve(); await release.promise; } return result;
+          };
+          const value = Reflect.get(target, key); return typeof value === "function" ? value.bind(target) : value;
+        } }));
+      }, options]);
+    } });
+    const value = Reflect.get(client, key); return typeof value === "function" ? value.bind(client) : value;
   } });
   const first = createPostgresSubscriberStore(controlled(fixture.db, true), settings, scopeIds).initialize(frozen, ["a", "b"]);
   void first.catch(() => {}); let second: Promise<Awaited<ReturnType<typeof store.initialize>>> | undefined;
@@ -149,18 +153,22 @@ test("queue/subscriber-freeze-unique-empty-dispatch-ack-idempotency-and-expiry-r
   assert.ok(waitingCompletion); await waitingCompletion;
   assert.deepEqual(await fixture.db.domainEventDelivery.findMany({ where: { eventId: old.id } }), before, "POST_LOCK_EXPIRED_ACK_ZERO_WRITES");
   const rollback = await claim(queue, ids.rollback); let inserted = false;
-  const delayed = { async $transaction<T>(operation: (tx: Prisma.TransactionClient) => Promise<T>, options?: { maxWait?: number; timeout?: number; isolationLevel?: Prisma.TransactionIsolationLevel }) {
-    return fixture.db.$transaction(async tx => operation(new Proxy(tx, { get(target, key) {
-      if (key === "domainEventDeliveryPlan") return new Proxy(target.domainEventDeliveryPlan, { get(model, method) {
-        if (method === "create") return async (args: Prisma.DomainEventDeliveryPlanCreateArgs) => {
-          const result = await model.create(args); inserted = true;
-          await tx.domainEvent.update({ where: { id: rollback.id }, data: { leaseUntil: new Date(0) } }); return result;
-        };
-        const value = Reflect.get(model, method); return typeof value === "function" ? value.bind(model) : value;
-      } });
-      const value = Reflect.get(target, key); return typeof value === "function" ? value.bind(target) : value;
-    } })), options);
-  } };
+  const delayed = new Proxy(fixture.db, { get(client, key) {
+    if (key === "$transaction") return new Proxy(client.$transaction, { apply(transaction, _receiver, [operation, options]) {
+      if (typeof operation !== "function") return Reflect.apply(transaction, client, [operation, options]);
+      return Reflect.apply(transaction, client, [async (tx: Prisma.TransactionClient) => operation(new Proxy(tx, { get(target, key) {
+        if (key === "domainEventDeliveryPlan") return new Proxy(target.domainEventDeliveryPlan, { get(model, method) {
+          if (method === "create") return async (args: Prisma.DomainEventDeliveryPlanCreateArgs) => {
+            const result = await model.create(args); inserted = true;
+            await tx.domainEvent.update({ where: { id: rollback.id }, data: { leaseUntil: new Date(0) } }); return result;
+          };
+          const value = Reflect.get(model, method); return typeof value === "function" ? value.bind(model) : value;
+        } });
+        const value = Reflect.get(target, key); return typeof value === "function" ? value.bind(target) : value;
+      } })), options]);
+    } });
+    const value = Reflect.get(client, key); return typeof value === "function" ? value.bind(client) : value;
+  } });
   await assert.rejects(createPostgresSubscriberStore(delayed, settings, scopeIds).initialize(rollback, ["a"]), lost);
   assert.equal(inserted, true); assert.equal(await fixture.db.domainEventDeliveryPlan.count({ where: { eventId: rollback.id } }), 0);
   assert.equal(await fixture.db.domainEventDelivery.count({ where: { eventId: rollback.id } }), 0);

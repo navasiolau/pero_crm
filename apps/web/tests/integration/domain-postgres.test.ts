@@ -151,7 +151,7 @@ function commandTx(tx: Prisma.TransactionClient, context: Context): Prisma.Trans
         const row = await Reflect.apply(value, model, args);
         if (fault.kind === "event" && key === "domainEvent" || fault.kind === "receipt" && data.action === "task.create.request") {
           assert.equal(await tx.task.count({ where: { title: fault.title, createdById: context.actor.id } }), 1, "TASK_PARTIAL_SQL_WRITE_REQUIRED");
-          await tx.changeLog.create({ data: { id: fault.collisionId, actorType: "user", entity: "test", entityId: fault.collisionId, action: "collision" } });
+          await tx.changeLog.create({ data: { id: fault.collisionId, actorType: "user", actorId: context.actor.id, entity: "test", entityId: fault.collisionId, action: "collision" } });
         }
         return row;
       };

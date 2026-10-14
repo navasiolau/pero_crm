@@ -102,7 +102,7 @@ test("files.crud: file113, документы, attachment ACL и inline-дейс
     const own = await f.file("durable-delete", { projectId: project.id, productId: product.id }, cad, cadMime, { uploadedById: engineer.id, hasThumb: true });
     const key = `${project.id}/${own.storedName}`, thumb = `${project.id}/thumbs/${own.storedName}.jpg`, neighbor = `${key}.neighbor`;
     await f.put(thumb, png, "image/jpeg"); await f.put(neighbor, cad, cadMime);
-    const collision = await f.db.changeLog.create({ data: { id: f.id("durable-collision"), actorType: "user", entity: "test", entityId: own.id, action: "fixture" } });
+    const collision = await f.db.changeLog.create({ data: { id: f.id("durable-collision"), actorType: "user", actorId: engineer.id, entity: "test", entityId: own.id, action: "fixture" } });
     for (const table of ["changeLog", "domainEvent"] as const) {
       const before = await nativeSnapshot(f.db);
       await assert.rejects(f.db.$transaction(tx => deleteOrdinaryFileCore(new Proxy(tx, { get(target, key) {
@@ -110,7 +110,7 @@ test("files.crud: file113, документы, attachment ACL и inline-дейс
           if (method === "create") return async (...args: unknown[]) => {
             const row = await Reflect.apply(Reflect.get(model, method), model, args);
             assert.equal(await tx.file.count({ where: { id: own.id } }), 0, "ACTUAL_METADATA_DELETE_BEFORE_FAULT");
-            await tx.changeLog.create({ data: { id: collision.id, actorType: "user", entity: "test", entityId: own.id, action: "collision" } }); return row;
+            await tx.changeLog.create({ data: { id: collision.id, actorType: "user", actorId: engineer.id, entity: "test", entityId: own.id, action: "collision" } }); return row;
           };
           const value = Reflect.get(model, method); return typeof value === "function" ? value.bind(model) : value;
         } });
@@ -154,13 +154,13 @@ test("files.crud: file113, документы, attachment ACL и inline-дейс
         : deleteProjectCoverCore(tx, manager, { projectId: project.id, expectedCoverFileId: expected, clientMutationId: nonce }, identity);
       const before = await nativeSnapshot(f.db), stale = await f.db.$transaction(tx => call(tx, f.id("stale-cover"))); assert.equal(stale.ok, false);
       assert.deepEqual(await nativeSnapshot(f.db), before);
-      const faultId = f.id(`cover-collision-${kind}`); await f.db.changeLog.create({ data: { id: faultId, actorType: "user", entity: "test", entityId: cover.id, action: "fixture" } });
+      const faultId = f.id(`cover-collision-${kind}`); await f.db.changeLog.create({ data: { id: faultId, actorType: "user", actorId: manager.id, entity: "test", entityId: cover.id, action: "fixture" } });
       const stable = await nativeSnapshot(f.db); let inserted = false;
       await assert.rejects(f.db.$transaction(tx => call(new Proxy(tx, { get(target, key) {
         if (key === "domainEvent") return new Proxy(target.domainEvent, { get(model, method) {
           if (method === "create") return async (args: Prisma.DomainEventCreateArgs) => {
             const row = await model.create(args); inserted = true;
-            await tx.changeLog.create({ data: { id: faultId, actorType: "user", entity: "test", entityId: cover.id, action: "collision" } }); return row;
+            await tx.changeLog.create({ data: { id: faultId, actorType: "user", actorId: manager.id, entity: "test", entityId: cover.id, action: "collision" } }); return row;
           };
           const value = Reflect.get(model, method); return typeof value === "function" ? value.bind(model) : value;
         } });
