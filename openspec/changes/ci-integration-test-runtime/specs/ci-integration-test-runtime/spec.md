@@ -9,7 +9,7 @@
 ### Requirement: Явная изолированная цель
 
 Runtime MUST допускать только текущий GitHub hosted Linux run репозитория PERO CRM, принадлежащие ему контейнеры/сеть, точные loopback endpoints, БД `pero_ci` и bucket этого run. Guard MUST выполняться до соединений, миграций и фикстур. Несоответствие SHALL останавливать выполнение без обращения к рабочим целям и без загрузки env по умолчанию.
-Основной и дополнительный fault web MUST принадлежать этому run и проверенному Alpine OCI runtime. Host endpoints остаются loopback; внутри main child разрешены только проверенные owned service addresses текущей job network. Единственное fault исключение — DB `127.0.0.1:1` внутри second child, без stop/reset PG или обращения к рабочим целям.
+Основной и дополнительный fault web MUST принадлежать этому run и проверенному Alpine OCI runtime; host endpoints остаются loopback, оба child используют проверенный owned PG/current job network. Second child MUST использовать unique `ci_fault_<run>_<attempt>` NOSUPERUSER LOGIN role с CONNECTION LIMIT5/minimal plugin DML/User SELECT и завершить real instrumentation/syncPlugins bootstrap с health200 до fault. POSTBOOT outage MUST менять только fault role CONNECTION LIMIT0 и завершать только exact role/datname=pero_ci sessions; health503/session null/my307 assertions сохраняются. Main role/PG/S3/protected data MUST оставаться неизменными; stop/reset, mocks/NEXT_PHASE bypass и working targets запрещены.
 
 #### Scenario: Подмена цели
 - **WHEN** endpoint ведёт на production, staging, legacy, local 5433 или контейнер не принадлежит текущему job
