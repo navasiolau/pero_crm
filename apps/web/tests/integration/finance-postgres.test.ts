@@ -459,7 +459,7 @@ test("logistics/real-posting-correction-CAS-history-budget-and-SQL-rollback", as
   const tripInput = { ...manifest, clientMutationId: randomUUID() }; let trip = await trips.createLogisticsTripCore(actor.id, tripInput, transaction);
   assert.equal((await trips.createLogisticsTripCore(actor.id, tripInput, transaction)).tripId, trip.tripId);
   await assert.rejects(trips.createLogisticsTripCore(actor.id, { ...tripInput, clientMutationId: randomUUID(), shares: [{ projectId: a.id, percentBps: 4000 }, { projectId: b.id, percentBps: 5000 }] }, transaction), /100%/);
-  await assert.rejects(trips.createLogisticsTripCore(actor.id, { ...tripInput, clientMutationId: randomUUID(), lines: [{ ...manifest.lines[0], productId: products[1].id }] }, transaction), /не принадлежит/);
+  await assert.rejects(trips.createLogisticsTripCore(actor.id, { ...tripInput, clientMutationId: randomUUID(), lines: [{ ...manifest.lines[0], productId: products[1].id }, manifest.lines[1]] }, transaction), /не принадлежит/);
   const shares = await tx.logisticsProjectShare.findMany({ where: { tripId: trip.tripId }, orderBy: { projectId: "asc" } });
   await rejectedSql(tx, () => tx.logisticsProjectShare.create({ data: { tripId: trip.tripId, projectId: a.id, percentBps: 1 } }));
   await rejectedSql(tx, () => tx.logisticsProjectShare.create({ data: { tripId: trip.tripId, projectId: rows.id("missing-logistics-project"), percentBps: 1 } }));
@@ -621,7 +621,7 @@ test("payroll/shared-native-inputs-consumer-dto-1-5-20-tenfold-history", async (
     }
     return index;
   };
-  const measure = async <T>(read: () => Promise<T>) => { const start = await fence(), value = await read(), end = await fence(); return { value, count: end - start - 1 }; };
+  const measure = async <T>(read: () => Promise<T>) => { const start = await fence(), value = await read(), end = await fence(); return { value, count: end - start - 1, queries: fixture.queryEvents.slice(start + 1, end) }; };
   let inserted = 0;
   const counts: number[] = [], consumerCounts: number[] = [];
   const verify = async (size: number, multiplier: number) => on(tx, actor, async () => {
@@ -651,7 +651,8 @@ test("payroll/shared-native-inputs-consumer-dto-1-5-20-tenfold-history", async (
     assert.equal(estimates[users[0].id], null); assert.equal(balance, null); assert.ok(eligible.some(user => user.id === users[0].id));
     assert.ok(!accruals.some(user => user.userId === users[3].id));
     const personalRead = await measure(() => payroll.getMyPayroll(users[0].id, "2020-01")), personal = personalRead.value;
-    assert.equal(personalRead.count, 5, "TWO_PAYROLL_TWO_PAYOUT_AND_CREATOR_SQL_READS");
+    const models = ["PayrollEntry", "Payout", "CashAccount", "User"].map(table => personalRead.queries.filter(event => event.query.includes(`FROM "public"."${table}"`)).length);
+    assert.deepEqual([personalRead.count, ...models], [6, 2, 2, 1, 1], "TWO_PAYROLL_TWO_PAYOUT_CASH_ACCOUNT_AND_CREATOR_SQL_READS");
     assert.deepEqual({ accrued: personal.accrued, paid: personal.paid, debt: personal.debt, estimate: personal.estimate }, { accrued: 130 * multiplier, paid: 0.06 * multiplier, debt: null, estimate: null });
     assert.equal(personal.entries.length, 5 * multiplier); assert.equal(personal.payouts.length, 2 * multiplier);
     if (size > 1) for (const selected of ["2020-01", current, "2999-01"]) {

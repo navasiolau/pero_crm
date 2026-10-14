@@ -173,7 +173,9 @@ test("security.routes: credentials, Bearer, Telegram и команды чере�
       const revoked = await session(logged.cookie); assert.equal(revoked.body, null, reason);
       assert.match(revoked.response.headers.get("set-cookie") ?? "", /Max-Age=0/);
       const apiStatus = await api("/api/v1/plugins", personal.raw);
-      assert.equal(apiStatus.status, reason === "password" || reason === "manual" ? 200 : 401, reason);
+      const revokeApi = reason === "roles" || reason === "active";
+      assert.equal(apiStatus.status, revokeApi ? 401 : 200, reason);
+      assert.equal((await f.db.apiToken.findUniqueOrThrow({ where: { id: personal.row.id } })).revokedAt !== null, revokeApi, reason);
       for (const path of ["/api/search?q=security", "/api/files/missing-owned-fixture"]) {
         const hidden = await f.request(path, undefined, { headers: { cookie: logged.cookie } });
         assert.ok([401, 403, 307].includes(hidden.status), `REVOKED_COOKIE_NO_ROUTE_DATA:${path}`);
