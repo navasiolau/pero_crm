@@ -41,7 +41,8 @@ test("queue/db-clock-and-utc-processing-in-non-utc-session", async () => fixture
   const claim = await store.claim({ eventId: id }); assert.equal(claim?.kind, "claimed");
   if (claim?.kind !== "claimed") assert.fail("REAL_QUEUE_CLAIM_REQUIRED");
   assert.equal((await store.observe(id))?.leaseActive, true); assert.equal(await store.complete(claim.event), true);
-  const [{ observed: after }] = await tx.$queryRaw<{ observed: Date }[]>(Prisma.sql`SELECT clock_timestamp() AS observed`);
+  // processedAt хранится в TIMESTAMP(3): верхнюю границу округляет сама БД.
+  const [{ observed: after }] = await tx.$queryRaw<{ observed: Date }[]>(Prisma.sql`SELECT clock_timestamp()::timestamptz(3) AS observed`);
   const processed = (await store.read(id))!.processedAt!;
   assert.ok(processed.getTime() >= before.getTime() && processed.getTime() <= after.getTime(), "PROCESSED_AT_IS_UTC_INSTANT");
   assert.deepEqual(await store.stats(), { ready: 0, active: 0, exhausted: 0, oldestPendingAgeMs: null });
