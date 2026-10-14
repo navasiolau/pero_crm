@@ -1,5 +1,15 @@
 # Evidence
 
+## Одобренный follow-up от принятого 61f9bc14 — SOURCE_READY, actual CI PENDING
+
+Baseline: CI266/run38583170771,196с, native155с/promotion32с, native91/web1441/bot38/watcher53/guards2, оба parallel exits0, tested/promoted/deployed OCI и owned cleanup подтверждены receipt `D:/Projects/pero_crm_v2/.playwright-mcp/application-improvements/dead49-delivery-61f9bc14/acceptance.json`. Новый follow-up не приписывает себе этот результат; цель180с OPEN.
+
+Изменён только workflow: compiler-cache id и skip extract при exact primary hit, без удаления inject или прежнего always/prepare-success failure guard; Chromium binary cache по OS/architecture/установленной Playwright version/lockfile, без restore fallback и с прежним обязательным `playwright install --with-deps chromium`; два прежних browser files меняются cohorts (task-status-command из0→1, global-kanban-current-engineer из1→0), остальные assignments/commands/isolation/gates остаются. CI266 component suites60,403/24,216с; сумма отдельных task-status case durations39,102с против8,619с global-kanban измерена в существующих log5/log4. Из-за overlap/concurrency эти суммы не являются прогнозом whole-run ускорения.
+
+Read-only OCI inventory ограничена существующими sealed config/layer digests, CI266 logs и Dockerfile. В runtime явно нужны Prisma CLI6.19.3, migrations, standalone/.next/public и base Node/libc; per-file usage proof для дополнительного pruning отсутствует, локальный Docker/build для его получения не разрешён. Поэтому web/bot Dockerfiles и .dockerignore byte-unchanged: безопасного runtime allowlist сокращения не заявляется. Исходный полный OCI/provenance и same-image promotion сохраняются; transfer208MB/~20с из baseline не уменьшается этим source diff.
+
+Один affected static bundle — PASS: YAML parse,16 Bash scripts syntax, exact partition185+7+6=198 без пропусков/дублей, только два указанных moves, прежний backend/commands/publishers/native deep-equal baseline кроме compiler-cache id/условия extract; Chromium key/system install guard и inject/failure guards проверены. Strict OpenSpec и diff-check PASS. Начальная попытка остановилась до проверок на отсутствии пакета `yaml`; использован уже установленный `js-yaml` без установки зависимостей. новые suites/benchmark/CI/DB/infra/main/production не запускались. Ожидается лишь устранение повторного cache-extract на exact hit, browser download при совместимом cache hit и более равные cohorts. Фактические wall time/cache outcomes и actual staging остаются за следующим одним ordinary required CI; новый выигрыш пока NOT_MEASURED.
+
 ## Independent preparation
 
 - 13.10.2026: `feature/170` создана от свежего `origin/staging=e986e2900f9a7911b4863ec3e6e3ecae3715545a`; номер 170 отсутствовал в local/remote refs всех трёх типов задачи.

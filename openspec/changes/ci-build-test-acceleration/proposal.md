@@ -28,6 +28,10 @@ CI последовательно повторяет lint и часть типи
 
 `.github/workflows/ci-cd.yml`, `apps/web/next.config.ts`, Dockerfiles web/bot и после обычной интеграции принятого №169 — его существующий runtime контейнеров. Версии зависимостей, lockfile, бизнес-логика, рабочие БД и production не меняются. №170 начинается от свежего `origin/staging`; зависимость №169 переносится только обычным merge после её приёмки.
 
-## Следующий single-build/test/promotion scope — OPEN
+## Следующий single-build/test/promotion scope — ACCEPTED CI266 / 61f9bc14
+
+Принятый CI266196с подтверждает all6SUCCESS/native91/web1441/bot38/watcher53/guards2, оба parallel exit codes0, exact tested/promoted/deployed OCI и owned cleanup. Цель180с остаётся OPEN; прежний scope принят функционально.
+
+Follow-up одобрен владельцем: пропуск повторного compiler-cache extract только на exact primary hit с сохранением inject/failure guards; Chromium binaries cache по OS/architecture/установленной pinned Playwright version/lockfile с обязательной установкой системных зависимостей; балансировка существующих browser files по CI266 durations без новых jobs/потери cases/смены isolation. OCI/log inventory выполняется только read-only; runtime pruning допускается лишь по доказанному allowlist, иначе runtime сохраняется. Prisma CLI/migrations/API/provenance/same-image publish обязательны; новый результат измеряется одним обычным CI, без benchmark/DB/infra/main/production.
 
 Одно shared Buildx Bake DAG выпускает полный immutable OCI runner с provenance max, Docker test projection без attestations и scratch fresh-build metadata. Проверяются actual runtime image config/diff_ids, revision/BUILD_ID и source inputs; полный OCI bindится к SHA/repository/run/attempt и публикуется после всех required gates без rebuild/early tags, с сохранением attestations/referrers. Backend уже проверяет plain-JS bot dist без runtime deps; тот же bound artifact передаётся минимальным named context в Alpine packaging, без второго tsc/install. Default local Docker fallback/checks и все env exclusions сохраняются, .dockerignore исправляет только actual bot/test path. Никаких app/schema/deps/version/framework/runner/новых repo files и дополнительного benchmark.
