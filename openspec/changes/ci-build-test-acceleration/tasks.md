@@ -1,13 +1,13 @@
 # Tasks
 
-## 10. Перестройка критического пути после CI271 — APPROVED / OPEN
+## 10. Перестройка критического пути после CI271 — STAGING ACCEPTED / цель 7.6 OPEN
 
 - [x] 10.1 Удалить scratch metadata export/cache, извлекать полные свежие metadata из immutable never-started runtime projection с прежним однократным OCI proof и cancel-safe owned cleanup.
 - [x] 10.2 Передавать ранний exact-ID/hash-bound types artifact также для PR; перенести full tsc/type cache в backend, объединить bounded poll/download для types|bot-dist и сохранить оба publisher gates.
 - [x] 10.3 Перекрыть host install/generate Docker через owned deps process GO handshake/status/300с timeout и merge-safe finally/always cleanup.
 - [x] 10.4 Перенести целый navigation suite components-1→0, сохранить partition/isolation; отключить только Bake summary/build-record upload.
 - [x] 10.5 После freeze выполнить один affected static/guard bundle и независимое review, Root — один итоговый local web без новых QA/files/benchmark.
-- [ ] 10.6 Root выполняет один ordinary CI и actual staging, фиксирует timing/OCI/DB/W07/GET/cleanup и inclusive code census; цель <180с закрывается только фактическим сопоставимым SUCCESS.
+- [x] 10.6 Root выполняет один ordinary CI и actual staging, фиксирует timing/OCI/DB/W07/GET/cleanup и inclusive code census; цель <180с закрывается только фактическим сопоставимым SUCCESS.
 
 ## 1. Независимые изменения CI
 
@@ -71,3 +71,5 @@ CI269/e0ae9a10 принят Root функционально: all6 SUCCESS, 283 �
 
 
 CI271/484e15b9 принят по [receipt](D:/Projects/pero_crm_v2/.playwright-mcp/application-improvements/deep-test-reduction-20261014-45186c70/acceptance-484e15b9.json): все шесть заданий SUCCESS, exact OCI, GET 200, DB/W07 и cleanup подтверждены. Bot readiness 1 с, packaging 4 с, publisher 13 с без второго Buildx; весь CI 299 с (4:59). Пункты 8.3 и 9.4 завершают измерение и приёмку; временная цель 7.6 <180 с остаётся OPEN. Metadata 62 с/414,58 MB сохраняется; подтверждённая минимальная дальнейшая правка не найдена, новых bench/изменений нет. История CI266/269/270 сохранена.
+
+Раздел10 реализован и принят на exact staging812be24e, CI272 all6SUCCESS/360с. Измерение и runtime-приёмка выполнены; **цель7.6<180с НЕ ДОСТИГНУТА**. Первый Dockerfile/BUILD_CONFIG запуск: compilerMISS, freshNext65.6с/materialization42.3с/Bake152с; warmCI не измерялся, rerun/benchmark отсутствует. Точный OCI/DB/W07/GET/cleanup — [receipt](D:/Projects/pero_crm_v2/.playwright-mcp/application-improvements/ci-under180-20261015-4a7156d4/acceptance-812be24e.json). Acceptance tracking сохранён локально для следующего реального code batch, отдельного docs-onlyCI нет.
