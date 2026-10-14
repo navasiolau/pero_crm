@@ -1,5 +1,9 @@
 # Design
 
+## Одобренный follow-up после CI266
+
+Baseline — принятый61f9bc14, CI266196с/native155с/promotion32с, цель180с OPEN. Compiler-cache restore получает id; inject остаётся обязательным, extract пропускается только при `cache-hit == 'true'`. Miss/fallback/failure сохраняют прежний `always`/prepare-success guard. Browser binaries cache использует OS/architecture/реальную установленную Playwright version и lockfile, без restore fallback; `playwright install --with-deps chromium` остаётся обязательным для системных зависимостей и проверки нужной версии. По CI266 TasksTab/status suite имеет сумму case durations39,10с против8,62с global-kanban; меняются местами только эти два файла между прежними cohorts60,4/24,2с. File isolation/default concurrency/commands и все gates сохраняются; суммы пересекающихся case durations не обещают whole-run выигрыш. OCI runtime pruning без per-file/usage proof не выполняется: Prisma CLI/engines/migrations и остальные runtime packages остаются.
+
 ## Context
 
 Исходная ветка №170 создана от `origin/staging=e986e290`; там ещё нет runtime №169. Мотивация описана в proposal.md. В установленном Next 15.5.20 встроенная типизация исключает `*.test.*` и `__tests__`, поэтому она не заменяет полный web `tsc`.
