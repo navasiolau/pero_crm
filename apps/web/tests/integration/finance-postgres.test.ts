@@ -226,7 +226,9 @@ for (const linked of [false, true]) test(`payment/report-owner-ready-context-rep
     await assert.rejects(payments.createPaymentInTransaction(c.actor, { ...c.input, ...change }, c.prepared, tx), /документ/i);
   await assert.rejects(payments.createPaymentInTransaction(other, c.input, c.prepared, tx), /документ/i);
   await tx.financeDocument.update({ where: { id: c.document.id }, data: { state: "PENDING", readyAt: null } });
-  await assert.rejects(payments.createPaymentInTransaction(c.actor, c.input, c.prepared, tx), /документ/i);
+  const pending = await tx.financeDocument.findUniqueOrThrow({ where: { id: c.document.id }, include: { payment: true } });
+  assert.equal(pending.state, "PENDING"); assert.equal(pending.payment, null);
+  await assert.rejects(payments.createPaymentInTransaction(c.actor, c.input, c.prepared, tx), { message: "Отчётный документ недоступен или уже прикреплён к другой операции" });
   assert.deepEqual(await money(tx), before);
   await tx.financeDocument.update({ where: { id: c.document.id }, data: { state: "READY", readyAt: c.document.readyAt } });
   const first = await payments.createPaymentInTransaction(c.actor, c.input, c.prepared, tx), saved = await money(tx);
@@ -310,6 +312,11 @@ test("payment/foreign-preflight-decimal-snapshots-article-fences-and-delete-caps
     assert.equal(denied.ok, false); assert.match(denied.error ?? "", /балансе организации/); assert.deepEqual(await money(tx), before);
     throw Error("EXPECTED_USD_ORG_CAP");
   }, /EXPECTED_USD_ORG_CAP/);
+  const { id: priorDocumentId, ...documentFields } = c.document;
+  const articleDocument = await tx.financeDocument.create({ data: { ...documentFields, clientMutationId: randomUUID(), storageKey: rows.id("article-fence-document") } });
+  assert.notEqual(articleDocument.id, priorDocumentId); assert.equal(articleDocument.state, "READY");
+  assert.equal(await tx.payment.count({ where: { reportDocumentId: articleDocument.id } }), 0);
+  c.input.reportDocumentId = articleDocument.id;
   const prepared = await preparation.preparePayment(c.input, tx), baseline = await money(tx);
   for (const [supplied, expected] of [[undefined, c.article.id], [c.article.id, null], [rows.id("missing"), c.article.id]] as const)
     await assert.rejects(payments.createPaymentInTransaction(c.actor, { ...c.input, expenseArticleId: supplied }, { ...prepared, articleId: expected }, tx), /стат/);
@@ -833,7 +840,7 @@ test("cash/payment-stock-logistics-versus-advance-real-lock-both-orders", async 
         expense = tx => logistics.postLogisticsInTransaction(c.actor.id, input, "post", prepared, tx);
       }
     }
-    const originalEvents = await fixture.db.domainEvent.count({ where: { actor: c.actor.id } });
+    const originalEvents = await fixture.db.domainEvent.findMany({ where: { actor: c.actor.id }, select: { id: true } });
     const first = coordinator.createMutationTransaction(fixture.db)(async tx => {
       holder = tx; firstPid = (await tx.$queryRaw<{ pid: number }[]>`SELECT pg_backend_pid() AS pid`)[0].pid;
       const result = await (expenseFirst ? expense(tx) : advance(tx)); ready.resolve(); await release.promise; return result;
@@ -858,7 +865,10 @@ test("cash/payment-stock-logistics-versus-advance-real-lock-both-orders", async 
       assert.equal(await fixture.db.payout.count({ where: { userId: c.employee.id } }), expenseFirst ? 0 : 1);
       assert.equal(await fixture.db.payment.count({ where: { cashAccountId: c.account.id, direction: "EXPENSE" } }), expenseFirst ? 1 : 0);
       assert.equal((await cash.readCashBalance(fixture.db, c.account.id)).toFixed(2), expenseFirst ? "500.00" : "400.00");
-      assert.equal(await fixture.db.domainEvent.count({ where: { actor: c.actor.id } }), originalEvents + (expenseFirst && mode !== "payment" ? 2 : 1));
+      const expectedEventTypes = !expenseFirst ? ["payroll.payout"] : mode === "stock" ? ["stock.movement.created", "expense.created"]
+        : mode === "logistics" ? ["logistics.trip.posted"] : ["expense.created"];
+      const newEvents = await fixture.db.domainEvent.findMany({ where: { actor: c.actor.id, id: { notIn: originalEvents.map(row => row.id) } }, select: { type: true } });
+      assert.deepEqual(newEvents.map(row => row.type).sort(), expectedEventTypes.sort());
       if (mode === "stock") assert.equal(await fixture.db.stockPurchase.count({ where: { actorId: c.actor.id } }), expenseFirst ? 1 : 0);
       if (mode === "logistics") assert.equal(await fixture.db.logisticsPosting.count({ where: { actorId: c.actor.id } }), expenseFirst ? 1 : 0);
     } finally { release.resolve(); await Promise.allSettled([first, ...(second ? [second] : [])]); }
