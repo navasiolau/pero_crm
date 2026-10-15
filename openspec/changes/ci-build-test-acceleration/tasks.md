@@ -1,5 +1,13 @@
 # Tasks
 
+## 11. Слои и compiler compatibility после CI272 — APPROVED / OPEN
+
+- [x] 11.1 Ввести compilercompatv2 по strict normalized base/build prefix, config hash без Dockerfile и actual base/platform/flags; единожды вычислять key/mount compatibility без legacy aliases.
+- [x] 11.2 Отделить pnpm store cache mount от node_modules layer с прежним frozen filtered install/copy import и проверкой supply chain.
+- [x] 11.3 Загружать web-runtime/MinIO прямым Docker exporter без временных tar/load, сохранив original OCI/provenance, config/diff_ids proof, cleanup и все gates.
+- [x] 11.4 После freeze один affected static bundle и независимое review; без новых QA/files/framework/full suites/build/DB/benchmark.
+- [ ] 11.5 Root выполняет один ordinaryCI/actualstaging, фиксирует cold/warm условия/время/размеры/OCI/cleanup; цель7.6<180с остаётся OPEN до факта.
+
 ## 10. Перестройка критического пути после CI271 — STAGING ACCEPTED / цель 7.6 OPEN
 
 - [x] 10.1 Удалить scratch metadata export/cache, извлекать полные свежие metadata из immutable never-started runtime projection с прежним однократным OCI proof и cancel-safe owned cleanup.

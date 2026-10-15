@@ -14,7 +14,8 @@ COPY packages/plugin-sdk/package.json packages/plugin-sdk/
 COPY packages/plugins/demo/package.json packages/plugins/demo/
 COPY apps/web/package.json apps/web/
 COPY apps/telegram-bot/package.json apps/telegram-bot/
-RUN pnpm install --frozen-lockfile --filter @pero/web...
+RUN --mount=type=cache,id=pero-web-pnpm11-musl,target=/pnpm-store,sharing=locked \
+    pnpm install --frozen-lockfile --filter @pero/web... --store-dir /pnpm-store --package-import-method=copy
 COPY packages packages
 COPY apps/web apps/web
 # Значения-заглушки: нужны только на время сборки (prerender), в образ не попадают

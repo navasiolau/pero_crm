@@ -225,7 +225,8 @@ jobs:
         id: prepare
         run: |
           node --input-type=module <<'NODE'
-          import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
+          import { createHash } from 'node:crypto';
+          import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
           import { execFileSync } from 'node:child_process';
           import path from 'node:path';
           import { assertCiJob, requireCi } from './apps/web/tests/integration/runtime/target.mjs';
@@ -235,24 +236,29 @@ jobs:
           const baseDigest = JSON.parse(base).digest;
           requireCi(/^sha256:[a-f0-9]{64}$/.test(baseDigest), 'node-base-digest');
           const nodeImage = `node:22-alpine@${baseDigest}`;
-          const cacheId = `pero-next-musl-${baseDigest.slice(7, 23)}-${env.BUILD_CONFIG.slice(0, 16)}`;
+          const dockerStages = readFileSync('apps/web/Dockerfile', 'utf8').replace(/\r\n?/g, '\n').split(/^FROM base AS runner\s*$/m);
+          requireCi(dockerStages.length === 2 && /^[a-f0-9]{64}$/.test(env.BUILD_CONFIG), 'compiler-build-prefix');
+          const platform = 'linux/amd64', buildFlags = { GITHUB_ACTIONS: 'true', PERO_CI_EXTERNAL_CHECKS: '1' };
+          const compat = createHash('sha256').update(JSON.stringify({ version: 2, buildPrefix: dockerStages[0],
+            config: env.BUILD_CONFIG, baseDigest, platform, buildFlags })).digest('hex');
+          const cacheId = `pero-next-musl-v2-${compat}`;
           const directory = path.join(env.RUNNER_TEMP, `pero-web-${job.runId}-${job.attempt}-${env.GITHUB_SHA}`);
           mkdirSync(directory); mkdirSync('apps/web/.next/cache', { recursive: true });
           const labels = { 'org.opencontainers.image.revision': env.GITHUB_SHA, 'pero.ci.repository': env.GITHUB_REPOSITORY,
             'pero.ci.run': job.runId, 'pero.ci.attempt': job.attempt, 'pero.ci.service': 'web' };
-          const common = { context: '.', dockerfile: 'apps/web/Dockerfile', target: 'runner', platforms: ['linux/amd64'], labels,
-            args: { NODE_IMAGE: nodeImage, GITHUB_ACTIONS: 'true', PERO_CI_EXTERNAL_CHECKS: '1', PERO_CI_CACHE_ID: cacheId },
+          const common = { context: '.', dockerfile: 'apps/web/Dockerfile', target: 'runner', platforms: [platform], labels,
+            args: { NODE_IMAGE: nodeImage, ...buildFlags, PERO_CI_CACHE_ID: cacheId },
             tags: [job.webImage], 'cache-from': ['type=gha,scope=pero-web'] };
           const cacheMount = `type=cache,id=${cacheId},target=/app/apps/web/.next/cache,sharing=locked`;
           const bake = { group: { default: { targets: ['web-oci', 'web-runtime', 'minio'] } }, target: {
             'web-oci': { ...common, attest: ['type=provenance,mode=max'],
               'cache-to': ['type=gha,mode=max,scope=pero-web'], output: [`type=oci,dest=${directory}/web.oci.tar`] },
-            'web-runtime': { ...common, attest: ['type=provenance,disabled=true'], output: [`type=docker,dest=${directory}/web.runtime.tar`] },
+            'web-runtime': { ...common, attest: ['type=provenance,disabled=true'], output: ['type=docker'] },
             minio: { context: 'apps/web/tests/integration/runtime', dockerfile: 'Dockerfile.minio', platforms: ['linux/amd64'],
               attest: ['type=provenance,disabled=true'], tags: [job.minioImage],
               labels: { ...labels, 'pero.ci.service': 'minio', 'pero.ci.minio.commit': '07c3a429bfed433e49018cb0f78a52145d4bedeb' },
               'cache-from': ['type=gha,scope=pero-ci-minio'], 'cache-to': ['type=gha,mode=max,scope=pero-ci-minio'],
-              output: [`type=docker,dest=${directory}/minio.runtime.tar`] },
+              output: ['type=docker'] },
             'cache-inject': { context: '.', contexts: { incoming: './apps/web/.next/cache' },
               'dockerfile-inline': `FROM ${nodeImage}\nRUN --mount=${cacheMount} --mount=type=bind,from=incoming,target=/incoming cp -a /incoming/. /app/apps/web/.next/cache/`,
               output: ['type=cacheonly'] },
@@ -261,11 +267,11 @@ jobs:
               output: ['type=local,dest=./apps/web/.next/cache'] },
           }};
           writeFileSync(path.join(directory, 'bake.json'), JSON.stringify(bake));
-          appendFileSync(env.GITHUB_OUTPUT, `directory=${directory}\nbase-digest=${baseDigest.slice(7)}\n`);
+          appendFileSync(env.GITHUB_OUTPUT, `directory=${directory}\ncompat=${compat}\n`);
           appendFileSync(env.GITHUB_ENV, `PERO_CI_WEB_ARTIFACT_DIR=${directory}\n`);
           NODE
         env:
-          BUILD_CONFIG: ${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'apps/web/package.json', 'apps/web/*config.*', 'apps/web/Dockerfile', 'packages/*/package.json', 'packages/plugins/*/package.json', 'packages/*/tsconfig.json', 'packages/plugins/*/tsconfig.json') }}
+          BUILD_CONFIG: ${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'apps/web/package.json', 'apps/web/*config.*', 'packages/*/package.json', 'packages/plugins/*/package.json', 'packages/*/tsconfig.json', 'packages/plugins/*/tsconfig.json') }}
           PERO_CI_POSTGRES_ID: ${{ job.services.postgres.id }}
           PERO_CI_NETWORK: ${{ job.services.postgres.network }}
 
@@ -274,9 +280,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: apps/web/.next/cache
-          key: next-oci-musl-v1-${{ runner.arch }}-${{ steps.prepare.outputs.base-digest }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'apps/web/package.json', 'apps/web/*config.*', 'apps/web/Dockerfile', 'packages/*/package.json', 'packages/plugins/*/package.json', 'packages/*/tsconfig.json', 'packages/plugins/*/tsconfig.json') }}-${{ hashFiles('apps/web/src/**', 'apps/web/public/**', 'apps/web/prisma/**', 'packages/*/src/**', 'packages/plugins/*/src/**') }}
+          key: next-oci-musl-v2-${{ steps.prepare.outputs.compat }}-${{ hashFiles('apps/web/src/**', 'apps/web/public/**', 'apps/web/prisma/**', 'packages/*/src/**', 'packages/plugins/*/src/**') }}
           restore-keys: |
-            next-oci-musl-v1-${{ runner.arch }}-${{ steps.prepare.outputs.base-digest }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'apps/web/package.json', 'apps/web/*config.*', 'apps/web/Dockerfile', 'packages/*/package.json', 'packages/plugins/*/package.json', 'packages/*/tsconfig.json', 'packages/plugins/*/tsconfig.json') }}-
+            next-oci-musl-v2-${{ steps.prepare.outputs.compat }}-
 
       - name: Восстановить compiler cache mount
         uses: docker/bake-action@5be5f02ff8819ecd3092ea6b2e6261c31774f2b4 # v6
@@ -322,8 +328,6 @@ jobs:
           test ! -f apps/web/.next/BUILD_ID
           mkdir "$PERO_CI_WEB_ARTIFACT_DIR/oci"
           tar -xf "$PERO_CI_WEB_ARTIFACT_DIR/web.oci.tar" --directory "$PERO_CI_WEB_ARTIFACT_DIR/oci" --no-same-owner
-          docker load --input "$PERO_CI_WEB_ARTIFACT_DIR/web.runtime.tar"
-          docker load --input "$PERO_CI_WEB_ARTIFACT_DIR/minio.runtime.tar"
           node --input-type=module <<'NODE'
           import { appendFileSync, cpSync, writeFileSync } from 'node:fs';
           import { execFileSync } from 'node:child_process';
