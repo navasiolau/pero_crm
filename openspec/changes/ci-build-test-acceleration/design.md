@@ -1,5 +1,11 @@
 # Design
 
+## Слои и compiler compatibility v2 после CI272
+
+Dockerfile читается с CRLF/CR→LF normalization и строго делится ровно на две части regexp `^FROM base AS runner\s*$` в multiline; отсутствие/повтор границы fail closed. SHA256 compatibility включает весь base/build prefix, config hash прежних glob без Dockerfile, actual node base digest, platform linux/amd64 и effective GITHUB_ACTIONS=true/PERO_CI_EXTERNAL_CHECKS=1. Prepare выдаёт один compat output; exact compiler key добавляет прежний source hash, restore prefix и mount ID используют тот же compat без run/SHA/legacy aliases. Все build commands остаются в conservative prefix. Первый переход v2 может дать MISS.
+
+Только frozen filtered install получает `--mount=type=cache,id=pero-web-pnpm11-musl,target=/pnpm-store,sharing=locked` и `--store-dir /pnpm-store --package-import-method=copy`: store не попадает в dependency layer, node_modules сохраняется; нового store exporter/importer нет. Actual shrink414MB не измерен. Existing Bake web-runtime/minio exporters используют `type=docker` без dest для прямого Engine load; убираются только два tar/load, не original web-oci tar и не attestation max. Full config/diff_ids proof, never-started metadata finally/always cleanup, publishers и dependency verification не меняются. Нет новых repo files/jobs/helpers/tests/deps/DB/host операций; после source freeze один affected static bundle/review, Root — ordinaryCI/actualstaging.
+
 ## Утверждённая перестройка после CI271
 
 Metadata читается через `docker cp` из immutable image ID принадлежащего текущему run never-started контейнера (network none, readonly, no mounts); loaded config сверяется с Bake, полный старый OCI verifier выполняется один раз до приложения/миграций/tsc. Exact-name/labels/config cleanup работает и при отмене до возврата CID. Полный `.next/types`, включая package-файлы, копируется в standalone в прежнем build RUN; scratch target/cache удаляются.

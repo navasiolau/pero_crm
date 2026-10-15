@@ -1,5 +1,9 @@
 # Proposal
 
+## Слои и compiler compatibility после CI272 — APPROVED / OPEN
+
+Владелец разрешил следующую малую итерацию №170: принятый CI272/staging812be24e завершился за360с, цель<180с остаётся OPEN. Compiler key v2 учитывает нормализованный Dockerfile только до единственной границы `FROM base AS runner`, отдельный config hash, реальный base digest, linux/amd64 и действующие CI flags; runtime-only Docker изменения больше не сбрасывают compiler cache. Frozen filtered pnpm install использует cache mount store с copy import, оставляя node_modules в образе. Test projection и MinIO загружаются Docker exporter непосредственно в Engine; промежуточные runtime tar/load удаляются, исходный OCI/provenance и полный proof/gates/cleanup сохраняются. Экономия размера/времени не заявляется до единственного обычного CI; первый v2 MISS допустим, прогрев и benchmark запрещены.
+
 ## Ускорение после CI271 — APPROVED / OPEN
 
 Владелец утвердил продолжение №169/170 от принятого `484e15b9`: CI271 299 с, цель полного CI <180 с OPEN. Убирается scratch metadata export и его тяжёлая материализация builder: полные `.next/types` входят в тот же standalone RUN, metadata извлекается из проверенной незапущенной runtime projection. Полный tsc переходит в existing backend через ранний hash-bound artifact; Native выполняет прежние интеграции параллельно и ждёт целиком успешный backend перед bot packaging. Host install/generate перекрывает Docker через existing owned-process cleanup. Сохраняются все gates/сценарии/OCI proof, Prisma CLI и миграции; меняются только группировка одного browser файла и необязательные build-history artifacts. Никаких новых jobs/files/framework/стендов, main/production. Один итоговый local web, независимое review и один ordinary CI; cold и warm результаты различаются, повтор ради прогрева запрещён.

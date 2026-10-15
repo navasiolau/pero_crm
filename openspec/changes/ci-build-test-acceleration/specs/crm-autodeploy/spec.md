@@ -2,6 +2,18 @@
 
 ## ADDED Requirements
 
+### Requirement: Compiler compatibility не зависит от runtime-only упаковки
+
+Compiler cache SHALL учитывать весь нормализованный base/build Docker prefix до единственной явной runner boundary, config inputs, actual base digest/platform/effective flags и прежний source hash. Изменения runtime-only части SHALL NOT сбрасывать compiler compatibility, а отсутствие/повтор границы MUST запрещать подготовку. Pnpm store SHALL находиться только в cache mount с copy import, node_modules SHALL оставаться в image layer; прямой Docker exporter SHALL сохранять полный immutable OCI/provenance proof и cleanup до тестирования.
+
+#### Scenario: Меняется только runner упаковка
+- **WHEN** runtime-only Dockerfile часть меняется при прежних base/build/config/platform/flags
+- **THEN** compiler compatibility SHALL оставаться прежней, а свежий build, config/diff_ids/OCI proof и все проверки SHALL выполняться
+
+#### Scenario: Меняется build или его совместимость
+- **WHEN** меняется любой base/build command, конфигурация, actual base/platform либо effective build flag
+- **THEN** compiler compatibility MUST измениться без fallback на несовместимые ключи; ordinary local frozen install и supply-chain проверки SHALL сохраняться
+
 ### Requirement: Metadata из проверенного runtime и параллельная типизация
 
 CI SHALL извлекать полные свежие generated types, BUILD_ID и manifest из принадлежащей текущему запуску незапущенной immutable runtime projection без сети/mounts; проверка OCI/config/layers/provenance/SHA MUST завершаться до приложения, миграций и tsc. Полный tsc SHALL выполняться в backend после exact-ID artifact с проверенными archive digest, identity и всеми file hashes, также для PR. Отдельный metadata builder export SHALL NOT использоваться.
