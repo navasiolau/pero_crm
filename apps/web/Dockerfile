@@ -20,7 +20,8 @@ COPY packages packages
 COPY apps/web apps/web
 # Значения-заглушки: нужны только на время сборки (prerender), в образ не попадают
 ENV DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy" \
-    AUTH_SECRET="build-time-dummy"
+    AUTH_SECRET="build-time-dummy" \
+    PNPM_CONFIG_STORE_DIR=/pnpm-store
 ARG GITHUB_ACTIONS=false
 ARG PERO_CI_EXTERNAL_CHECKS=0
 ARG PERO_CI_CACHE_ID=pero-next-local

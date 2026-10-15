@@ -7,6 +7,7 @@
 - [x] 11.3 Загружать web-runtime/MinIO прямым Docker exporter без временных tar/load, сохранив original OCI/provenance, config/diff_ids proof, cleanup и все gates.
 - [x] 11.4 После freeze один affected static bundle и независимое review; без новых QA/files/framework/full suites/build/DB/benchmark.
 - [ ] 11.5 Root выполняет один ordinaryCI/actualstaging, фиксирует cold/warm условия/время/размеры/OCI/cleanup; цель7.6<180с остаётся OPEN до факта.
+- [ ] 11.6 Исправить обнаруженный CI273 store-path mismatch одной build-only ENV строкой после install, подтвердить pnpm11 config/unchanged layer/runtime, получить review; отсутствие повторного install принять следующим ordinaryCI вместе с 11.5.
 
 ## 10. Перестройка критического пути после CI271 — STAGING ACCEPTED / цель 7.6 OPEN
 

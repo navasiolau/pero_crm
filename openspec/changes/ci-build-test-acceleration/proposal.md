@@ -1,5 +1,9 @@
 # Proposal
 
+## Узкое исправление регрессии CI273 — APPROVED / OPEN
+
+Реальный CI273 выявил повторную установку node_modules перед Prisma/Next после перехода install на /pnpm-store. Разрешено привести store path последующих pnpm команд к тому же значению через поддерживаемый pnpm11 build-stage ENV, сохранив install layer, runtime suffix, проверки зависимостей и все gates. Исправление требует одного ordinaryCI с проверкой отсутствия повторного install; CI273428с не выдаётся за ускорение, размер dependency layer/store savings NOT_MEASURED.
+
 ## Слои и compiler compatibility после CI272 — APPROVED / OPEN
 
 Владелец разрешил следующую малую итерацию №170: принятый CI272/staging812be24e завершился за360с, цель<180с остаётся OPEN. Compiler key v2 учитывает нормализованный Dockerfile только до единственной границы `FROM base AS runner`, отдельный config hash, реальный base digest, linux/amd64 и действующие CI flags; runtime-only Docker изменения больше не сбрасывают compiler cache. Frozen filtered pnpm install использует cache mount store с copy import, оставляя node_modules в образе. Test projection и MinIO загружаются Docker exporter непосредственно в Engine; промежуточные runtime tar/load удаляются, исходный OCI/provenance и полный proof/gates/cleanup сохраняются. Экономия размера/времени не заявляется до единственного обычного CI; первый v2 MISS допустим, прогрев и benchmark запрещены.
