@@ -1,13 +1,13 @@
 # Tasks
 
-## 11. Слои и compiler compatibility после CI272 — APPROVED / OPEN
+## 11. Слои и compiler compatibility после CI272 — STAGING ACCEPTED / цель 7.6 OPEN
 
 - [x] 11.1 Ввести compilercompatv2 по strict normalized base/build prefix, config hash без Dockerfile и actual base/platform/flags; единожды вычислять key/mount compatibility без legacy aliases.
 - [x] 11.2 Отделить pnpm store cache mount от node_modules layer с прежним frozen filtered install/copy import и проверкой supply chain.
 - [x] 11.3 Загружать web-runtime/MinIO прямым Docker exporter без временных tar/load, сохранив original OCI/provenance, config/diff_ids proof, cleanup и все gates.
 - [x] 11.4 После freeze один affected static bundle и независимое review; без новых QA/files/framework/full suites/build/DB/benchmark.
-- [ ] 11.5 Root выполняет один ordinaryCI/actualstaging, фиксирует cold/warm условия/время/размеры/OCI/cleanup; цель7.6<180с остаётся OPEN до факта.
-- [ ] 11.6 Исправить обнаруженный CI273 store-path mismatch одной build-only ENV строкой после install, подтвердить pnpm11 config/unchanged layer/runtime, получить review; отсутствие повторного install принять следующим ordinaryCI вместе с 11.5.
+- [x] 11.5 Root выполняет один ordinaryCI/actualstaging, фиксирует cold/warm условия/время/размеры/OCI/cleanup; цель7.6<180с остаётся OPEN до факта.
+- [x] 11.6 Исправить обнаруженный CI273 store-path mismatch одной build-only ENV строкой после install, подтвердить pnpm11 config/unchanged layer/runtime, получить review; отсутствие повторного install принять следующим ordinaryCI вместе с 11.5.
 
 ## 10. Перестройка критического пути после CI271 — STAGING ACCEPTED / цель 7.6 OPEN
 
@@ -82,3 +82,5 @@ CI269/e0ae9a10 принят Root функционально: all6 SUCCESS, 283 �
 CI271/484e15b9 принят по [receipt](D:/Projects/pero_crm_v2/.playwright-mcp/application-improvements/deep-test-reduction-20261014-45186c70/acceptance-484e15b9.json): все шесть заданий SUCCESS, exact OCI, GET 200, DB/W07 и cleanup подтверждены. Bot readiness 1 с, packaging 4 с, publisher 13 с без второго Buildx; весь CI 299 с (4:59). Пункты 8.3 и 9.4 завершают измерение и приёмку; временная цель 7.6 <180 с остаётся OPEN. Metadata 62 с/414,58 MB сохраняется; подтверждённая минимальная дальнейшая правка не найдена, новых bench/изменений нет. История CI266/269/270 сохранена.
 
 Раздел10 реализован и принят на exact staging812be24e, CI272 all6SUCCESS/360с. Измерение и runtime-приёмка выполнены; **цель7.6<180с НЕ ДОСТИГНУТА**. Первый Dockerfile/BUILD_CONFIG запуск: compilerMISS, freshNext65.6с/materialization42.3с/Bake152с; warmCI не измерялся, rerun/benchmark отсутствует. Точный OCI/DB/W07/GET/cleanup — [receipt](D:/Projects/pero_crm_v2/.playwright-mcp/application-improvements/ci-under180-20261015-4a7156d4/acceptance-812be24e.json). Acceptance tracking сохранён локально для следующего реального code batch, отдельного docs-onlyCI нет.
+
+Раздел11 принят Root на exact staging1f931bfcfc3c145c38439af5a7f98d6e36324f94 после исправления конкретной ошибки CI273 (повторный pnpm install). CI274/run38660128047 all6SUCCESS, 322с: −38кпоследнему принятомуCI272360с, +23кисходномуCI271299с; цель7.6<180с НЕ ДОСТИГНУТА. Actual pnpm initialinstallCACHED, NextRUN без Recreating/downloads, preflight1.3с; оба publishers, полные прежние suites и cleanup прошли. Root exactOCI/DB-start-volume-W07/GET200 — [receipt](D:/Projects/pero_crm_v2/.playwright-mcp/application-improvements/ci-cache-layers-20261015-b9d243c7/acceptance-1f931bfc.json). Acceptance tracking local only, отдельного docs-only CI нет.
