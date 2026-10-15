@@ -2,6 +2,18 @@
 
 ## ADDED Requirements
 
+### Requirement: Ранние PostgreSQL проверки сохраняют свежую image migration
+
+CI SHALL исполнять пять существующих PostgreSQL-only файлов во время Bake после strict owned PostgreSQL/currentSHA guards и host migration. Ранняя фаза MUST NOT требовать поддельных MinIO/image IDs. До HTTP writers SHALL требоваться successful owned-phase join и полный OCI proof. Все восемь исходных integration файлов SHALL исполняться ровно однажды; concurrent PG/HTTP writers MUST NOT допускаться.
+
+#### Scenario: Ранняя host migration уже применена
+- **WHEN** основные PostgreSQL проверки выполнились до готовности образа
+- **THEN** тот же immutable tested image SHALL отдельно применить current migrations к изначально пустой temporary DB того же owned CI PostgreSQL cluster, подтвердив папки/checksums/finished records; production CMD/main+fault HTTP proof SHALL сохраняться
+
+#### Scenario: Ранняя фаза упала или принадлежность цели не совпала
+- **WHEN** PG-only phase имеет ошибку, timeout, чужой SHA/container/database либо незавершённую process group
+- **THEN** HTTP writers и оба publishers MUST оставаться заблокированы, а finally/always cleanup SHALL завершать только exact owned ресурсы
+
 ### Requirement: Compiler compatibility не зависит от runtime-only упаковки
 
 Compiler cache SHALL учитывать весь нормализованный base/build Docker prefix до единственной явной runner boundary, config inputs, actual base digest/platform/effective flags и прежний source hash. Изменения runtime-only части SHALL NOT сбрасывать compiler compatibility, а отсутствие/повтор границы MUST запрещать подготовку. Pnpm store SHALL находиться только в cache mount с copy import, node_modules SHALL оставаться в image layer; прямой Docker exporter SHALL сохранять полный immutable OCI/provenance proof и cleanup до тестирования.
@@ -20,7 +32,7 @@ Compiler cache SHALL учитывать весь нормализованный 
 
 ### Requirement: Metadata из проверенного runtime и параллельная типизация
 
-CI SHALL извлекать полные свежие generated types, BUILD_ID и manifest из принадлежащей текущему запуску незапущенной immutable runtime projection без сети/mounts; проверка OCI/config/layers/provenance/SHA MUST завершаться до приложения, миграций и tsc. Полный tsc SHALL выполняться в backend после exact-ID artifact с проверенными archive digest, identity и всеми file hashes, также для PR. Отдельный metadata builder export SHALL NOT использоваться.
+CI SHALL извлекать полные свежие generated types, BUILD_ID и manifest из принадлежащей текущему запуску незапущенной immutable runtime projection без сети/mounts; проверка OCI/config/layers/provenance/SHA MUST завершаться до приложения, image/runtime миграций, HTTP/S3 сценариев и tsc. Единственное исключение SHALL составлять ранняя host migration основной owned CI-БД под PostgreSQL-only guard фазы12; она MUST NOT заменять fresh migration proof испытанного immutable image. Полный tsc SHALL выполняться в backend после exact-ID artifact с проверенными archive digest, identity и всеми file hashes, также для PR. Отдельный metadata builder export SHALL NOT использоваться.
 
 #### Scenario: Producer ещё выполняет интеграции
 - **WHEN** Native успешно загрузил ранний types artifact и продолжает интеграции

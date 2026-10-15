@@ -50,10 +50,26 @@ export function assertCiJob(env = process.env) {
 /** @param {NodeJS.ProcessEnv} [env] @returns {CiRuntimeTarget} */
 export function assertCiRuntimeTarget(env = process.env) {
   const job = assertCiJob(env);
+  requireCi(!env.PERO_CI_CONTRACT_PHASE || ['all', 'http'].includes(env.PERO_CI_CONTRACT_PHASE), 'runtime-phase');
   requireCi(/^[a-f0-9]{64}$/.test(env.PERO_CI_MINIO_ID ?? ''), 'minio-id');
   requireCi(env.PERO_CI_MINIO_ID !== job.postgresId, 'distinct-services');
   requireCi(/^sha256:[a-f0-9]{64}$/.test(env.PERO_CI_WEB_IMAGE_ID ?? ''), 'web-image-id');
   return { ...job, minioId: env.PERO_CI_MINIO_ID };
+}
+
+/** Ранний PG context не принимает подставные runtime IDs; live PG проверяет runner. */
+export function assertCiPostgresTarget(env = process.env) {
+  const job = assertCiJob(env);
+  requireCi(env.GITHUB_JOB === 'native-tests' && env.PERO_CI_CONTRACT_PHASE === 'postgres' &&
+    /^[a-f0-9]{40}$/.test(env.GITHUB_SHA ?? '') && !env.PERO_CI_MINIO_ID && !env.PERO_CI_WEB_IMAGE_ID, 'postgres-phase');
+  return job;
+}
+
+export function integrationFiles(phase) {
+  requireCi(['all', 'postgres', 'http'].includes(phase), 'contract-phase');
+  const postgres = ['domain-postgres', 'finance-postgres', 'payroll-cash-postgres', 'percentage-postgres', 'queue-postgres'];
+  const http = ['file-responses', 'files-crud', 'sketch-replacement'];
+  return (phase === 'all' ? [...postgres, ...http] : phase === 'postgres' ? postgres : http).map(name => `tests/integration/${name}.test.ts`);
 }
 /** @param {string} file */
 async function fileDigest(file) {

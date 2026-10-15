@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { lstatSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { MINIO_COMMIT, MINIO_GO_IMAGE, MINIO_RELEASE, MINIO_SOURCE_SHA256, POSTGRES_IMAGE, REPOSITORY, requireCi } from './target.mjs';
 
 /** @typedef {import('./target.mjs').CiJob} CiJob */
@@ -143,6 +144,70 @@ export function extractWebMetadata(target, configDigest) {
   return image;
 }
 
+const migrationDatabase = 'pero_ci_image_migration';
+const migrationCommand = ['prisma', 'migrate', 'deploy', '--schema', 'apps/web/prisma/schema.prisma'];
+function imageMigrationUrl(target) {
+  const url = new URL(target.databaseUrl);
+  url.hostname = 'postgres'; url.port = '5432'; url.pathname = `/${migrationDatabase}`;
+  return url.toString();
+}
+function migrationContainer(target) {
+  const name = `${target.webName}-migration`, id = docker(['ps', '-aq', '--no-trunc', '--filter', `name=^/${name}$`]);
+  if (!id) return null;
+  const container = JSON.parse(docker(['inspect', '--type', 'container', id]))[0];
+  requireCi(container.Id === id && container.Name === `/${name}` && container.Config.Image === container.Image &&
+    container.Image === inspectWebImage(target, 'cleanup').Id && container.HostConfig.NetworkMode === target.network &&
+    Object.keys(container.NetworkSettings.Networks).length === 1 && container.NetworkSettings.Networks[target.network] &&
+    !container.HostConfig.AutoRemove && container.Mounts.length === 0 && Object.keys(container.HostConfig.PortBindings ?? {}).length === 0 &&
+    JSON.stringify(container.Config.Cmd) === JSON.stringify(migrationCommand) &&
+    container.Config.Env.filter(value => value.startsWith('DATABASE_URL=')).join() === `DATABASE_URL=${imageMigrationUrl(target)}`, 'image-migration-container');
+  for (const [key, value] of Object.entries(labels(target, 'web-migration')))
+    requireCi(container.Config.Labels?.[key] === value, `migration-${key}`);
+  return container;
+}
+export function removeImageMigration(target) {
+  const container = migrationContainer(target);
+  if (container) docker(['rm', '--force', container.Id]);
+  requireCi(!migrationContainer(target), 'image-migration-remains');
+}
+
+/** Host migration не заменяет fresh proof тем же испытанным immutable image. */
+export function proveImageMigrations(target) {
+  const started = Date.now(), pg = inspectService(target, target.postgresId, 'postgres');
+  requireCi(pg.NetworkSettings.Networks[target.network].Aliases.includes('postgres') && !migrationContainer(target), 'image-migration-fresh');
+  const query = (database, sql) => JSON.parse(docker(['exec', target.postgresId, 'psql', '-X', '-v', 'ON_ERROR_STOP=1', '-U', 'ci_runner', '-d', database, '-At', '-c', sql]));
+  const identity = query('pero_ci', `SELECT json_build_object('database',current_database(),'role',current_user,'primary',NOT pg_is_in_recovery(),'exists',EXISTS(SELECT 1 FROM pg_database WHERE datname='${migrationDatabase}'))`);
+  requireCi(identity.database === 'pero_ci' && identity.role === 'ci_runner' && identity.primary && !identity.exists, 'image-migration-database-owner');
+  docker(['exec', target.postgresId, 'psql', '-X', '-v', 'ON_ERROR_STOP=1', '-U', 'ci_runner', '-d', 'pero_ci', '-c',
+    `CREATE DATABASE ${migrationDatabase} WITH TEMPLATE template0 OWNER ci_runner`]);
+  const fresh = query(migrationDatabase, "SELECT json_build_object('database',current_database(),'role',current_user,'tables',(SELECT count(*) FROM pg_tables WHERE schemaname='public'))");
+  requireCi(fresh.database === migrationDatabase && fresh.role === 'ci_runner' && fresh.tables === 0, 'image-migration-empty');
+  const record = JSON.parse(readFileSync(`${process.env.PERO_CI_WEB_ARTIFACT_DIR}/image.json`, 'utf8')), image = inspectWebImage(target);
+  requireCi(image.Id === record.configDigest && JSON.stringify(image.RootFS.Layers) === JSON.stringify(record.diffIds), 'migration-oci-projection');
+  const args = ['create', '--name', `${target.webName}-migration`, '--network', target.network, '--env', `DATABASE_URL=${imageMigrationUrl(target)}`];
+  for (const [key, value] of Object.entries(labels(target, 'web-migration'))) args.push('--label', `${key}=${value}`);
+  args.push(image.Id, ...migrationCommand);
+  try {
+    const id = docker(args), container = migrationContainer(target);
+    requireCi(container?.Id === id && container.State.Status === 'created' && !container.State.Running &&
+      container.State.StartedAt === '0001-01-01T00:00:00Z', 'image-migration-not-started');
+    const directory = `${process.env.PERO_CI_WEB_ARTIFACT_DIR}/migration-proof`; mkdirSync(directory);
+    docker(['cp', `${id}:/app/apps/web/prisma/migrations`, `${directory}/migrations`]);
+    const folders = directory => readdirSync(directory).filter(name => lstatSync(`${directory}/${name}`).isDirectory()).sort();
+    const host = folders('prisma/migrations'), actual = folders(`${directory}/migrations`);
+    requireCi(host.length > 0 && JSON.stringify(host) === JSON.stringify(actual), 'image-migration-folders');
+    const checksum = file => createHash('sha256').update(readFileSync(file)).digest('hex');
+    const expected = host.map(name => ({ name, checksum: checksum(`prisma/migrations/${name}/migration.sql`), finished: true }));
+    requireCi(expected.every(row => row.checksum === checksum(`${directory}/migrations/${row.name}/migration.sql`)), 'image-migration-source');
+    docker(['start', id]); requireCi(docker(['wait', id]) === '0', 'image-migration-exit');
+    const exited = migrationContainer(target); requireCi(exited.State.Status === 'exited' && exited.State.ExitCode === 0, 'image-migration-complete');
+    const records = query(migrationDatabase, `SELECT coalesce(json_agg(json_build_object('name',migration_name,'checksum',checksum,'finished',finished_at IS NOT NULL AND rolled_back_at IS NULL) ORDER BY migration_name COLLATE "C"),'[]') FROM public._prisma_migrations`);
+    requireCi(JSON.stringify(records) === JSON.stringify(expected), 'image-migration-records');
+    console.log(JSON.stringify({ ciRuntime: 'fresh-image-migrations', database: migrationDatabase, imageId: image.Id,
+      indexDigest: record.indexDigest, migrations: expected.length, completedMigrations: records.length, allChecksumsFinished: true, elapsedMs: Date.now() - started }));
+  } finally { removeImageMigration(target); }
+}
+
 /** @param {CiJob} target @param {boolean} [fault] */
 function webEnvironment(target, fault = false) {
   const db = new URL(target.databaseUrl);
@@ -217,6 +282,7 @@ export function startWeb(target, fault = false) {
 
 /** @param {CiJob} target */
 export function removeWeb(target) {
+  removeImageMigration(target);
   removeMetadata(target);
   for (const fault of [true, false]) {
     const name = fault ? target.faultName : target.webName;

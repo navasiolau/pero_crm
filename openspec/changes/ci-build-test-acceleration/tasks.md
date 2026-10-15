@@ -1,5 +1,13 @@
 # Tasks
 
+## 12. Next workers и PostgreSQL во время Bake — APPROVED / OPEN
+
+- [x] 12.1 Включить только webpackBuildWorker/parallelServerBuildTraces, проверить существующим config loader все четыре режима без build/full suites.
+- [x] 12.2 После final design D/Root ввести строгий PG-only guard и раннюю owned фазу пяти существующих PostgreSQL файлов с host migrations; без fake MinIO/image context и без параллельных HTTP writers.
+- [x] 12.3 Сохранить fresh migration proof тем же immutable tested image на пустой temporary DB внутри того же owned PG cluster, с current migration checksum/completion проверкой и exact cleanup.
+- [x] 12.4 После обязательного join/полного OCI proof выполнить три прежних HTTP/S3 файла, main production CMD и fault branch; все8файлов ровно однажды, прежние gates/cleanup неизменны.
+- [ ] 12.5 Один affected static/config/guard bundle и независимое review; fulltsc Root только при TS fixture изменении, один обычный combined CI и actual staging без benchmark/новых QA/tests/files.
+
 ## 11. Слои и compiler compatibility после CI272 — STAGING ACCEPTED / цель 7.6 OPEN
 
 - [x] 11.1 Ввести compilercompatv2 по strict normalized base/build prefix, config hash без Dockerfile и actual base/platform/flags; единожды вычислять key/mount compatibility без legacy aliases.

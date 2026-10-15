@@ -24,6 +24,10 @@ const hasExternalCiChecks =
   process.env.PERO_CI_EXTERNAL_CHECKS === "1";
 
 const nextConfig: NextConfig = {
+  experimental: {
+    webpackBuildWorker: true,
+    parallelServerBuildTraces: true,
+  },
   ...(hasExternalCiChecks
     ? {
         eslint: { ignoreDuringBuilds: true },

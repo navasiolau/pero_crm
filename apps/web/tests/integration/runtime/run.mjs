@@ -2,15 +2,31 @@ import { execFileSync, spawn } from 'node:child_process';
 import { appendFileSync, existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { CreateBucketCommand, PutBucketVersioningCommand, S3Client } from '@aws-sdk/client-s3';
-import { assertCiJob, assertCiRuntimeTarget, requireCi } from './target.mjs';
-import { docker, inspectService, inspectWeb, startMinio, startWeb } from './containers.mjs';
+import { assertCiJob, assertCiPostgresTarget, assertCiRuntimeTarget, integrationFiles, requireCi } from './target.mjs';
+import { docker, inspectService, inspectWeb, proveImageMigrations, startMinio, startWeb } from './containers.mjs';
 import { cleanup, processOwner, recordProcesses } from './cleanup.mjs';
 
-const job = assertCiJob();
+const job = assertCiJob(), phase = process.argv[2] ?? 'all', cases = integrationFiles(phase);
 requireCi(process.platform === 'linux' && realpathSync(process.cwd()) ===
   path.join(process.env.GITHUB_WORKSPACE, 'apps/web'), 'checkout-directory');
 for (const directory of [process.env.GITHUB_WORKSPACE, process.cwd(), path.join(process.cwd(), 'prisma')]) {
   requireCi(!readdirSync(directory).some(name => /^\.env(?:\.(?:local|production|production\.local))?$/.test(name)), 'env-file');
+}
+requireCi(JSON.stringify(readdirSync('tests/integration').filter(file => file.endsWith('.test.ts')).sort()) ===
+  JSON.stringify(integrationFiles('all').map(file => path.basename(file)).sort()), 'contract-file-inventory');
+requireCi(execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim() === process.env.GITHUB_SHA, 'checkout-revision');
+if (phase === 'postgres') {
+  const target = assertCiPostgresTarget(), started = Date.now();
+  inspectService(target, target.postgresId, 'postgres');
+  const identity = JSON.parse(docker(['exec', target.postgresId, 'psql', '-X', '-v', 'ON_ERROR_STOP=1', '-U', 'ci_runner', '-d', 'pero_ci', '-At', '-c',
+    "SELECT json_build_object('database',current_database(),'role',current_user,'primary',NOT pg_is_in_recovery(),'major',current_setting('server_version_num')::int/10000,'tables',(SELECT count(*) FROM pg_tables WHERE schemaname='public'))"]));
+  requireCi(identity.database === 'pero_ci' && identity.role === 'ci_runner' && identity.primary && identity.major === 17 && identity.tables === 0, 'early-postgres-fresh');
+  execFileSync(process.execPath, ['--test', 'tests/integration/runtime/target.test.mjs'], { stdio: 'inherit' });
+  execFileSync('pnpm', ['exec', 'prisma', 'migrate', 'deploy', '--schema', 'prisma/schema.prisma'], { stdio: 'inherit' });
+  execFileSync('pnpm', ['exec', 'tsx', '--test', '--test-concurrency=1', ...cases], { stdio: 'inherit' });
+  console.log(JSON.stringify({ ciRuntime: 'postgres-phase-complete', files: cases, elapsedMs: Date.now() - started,
+    startedAt: new Date(started).toISOString(), finishedAt: new Date().toISOString() }));
+  process.exit(0); // Группа deps владеет процессами; shared images/services очищает только parent.
 }
 requireCi(existsSync('.next/BUILD_ID'), 'existing-build');
 // Сборка выполнена ранее в том же job; её actual SHA/BUILD_ID выдаёт шаг build.
@@ -73,6 +89,7 @@ for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => {
 });
 
 try {
+  if (phase === 'http') proveImageMigrations(job);
   process.env.PERO_CI_MINIO_ID = startMinio(job);
   requireCi(Boolean(process.env.GITHUB_ENV) && path.isAbsolute(process.env.GITHUB_ENV), 'github-env-file');
   appendFileSync(process.env.GITHUB_ENV, `PERO_CI_MINIO_ID=${process.env.PERO_CI_MINIO_ID}\n`);
@@ -110,11 +127,9 @@ try {
      SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usename='${target.faultRole}' AND datname='pero_ci' AND pid<>pg_backend_pid()`]);
   console.log(JSON.stringify({ ciRuntime: 'owned-role-db-outage', runId: target.runId, attempt: target.attempt, role: target.faultRole }));
   await ready(`${target.faultBaseUrl}/api/health`, 'unavailable');
-  const cases = readdirSync('tests/integration').filter(file => file.endsWith('.test.ts')).map(file => `tests/integration/${file}`);
-  requireCi(cases.length > 0, 'contract-cases');
   requireCi(!finishing, 'cancelled');
   tests = spawn('pnpm', ['exec', 'tsx', '--test', '--test-concurrency=1', ...cases], { detached: true, stdio: 'inherit',
-    env: { ...process.env, PERO_CI_OWNER: `${target.runId}-${target.attempt}`, PERO_CI_PURPOSE: 'tests' } });
+    env: { ...process.env, PERO_CI_CONTRACT_PHASE: phase, PERO_CI_OWNER: `${target.runId}-${target.attempt}`, PERO_CI_PURPOSE: 'tests' } });
   requireCi(Boolean(tests.pid), 'tests-start');
   processes.tests = processOwner(tests.pid);
   recordProcesses(target, processes);

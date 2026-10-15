@@ -1,5 +1,11 @@
 # Proposal
 
+## Next workers и ранний PostgreSQL после CI274 — APPROVED / OPEN
+
+Владелец разрешил продолжить минимизацию CI после принятого staging1f931bfc/CI274322с. Next использует только experimental webpackBuildWorker=true и parallelServerBuildTraces=true, без parallelServerCompiles. Пять существующих PostgreSQL-only файлов выполняются во время Bake в том же owned CI PostgreSQL после строгих guards/host migration; три HTTP/S3 файла остаются после OCI proof и обязательного join. Все восемь файлов запускаются ровно один раз, writers ранней и HTTP фаз не пересекаются.
+
+Доказательство fresh migrations сохраняется отдельно: после полного OCI proof тот же immutable испытываемый образ выполняет migrate deploy в изначально пустую временную БД того же owned PostgreSQL cluster, с проверкой папок/checksums/finished records и exact owned cleanup. Production CMD продолжает migration+boot основной CI-БД, fault branch и все пользовательские сценарии сохраняются. Новые services/стенды/jobs/files/framework не создаются; main/production/local/staging БД и dumps запрещены. Детали ранних интерфейсов/guards фиксируются после финального design review до PG реализации; независимая Next config правка допускается по этому scope. Цель<180с остаётся OPEN до actual ordinaryCI/staging.
+
 ## Узкое исправление регрессии CI273 — APPROVED / OPEN
 
 Реальный CI273 выявил повторную установку node_modules перед Prisma/Next после перехода install на /pnpm-store. Разрешено привести store path последующих pnpm команд к тому же значению через поддерживаемый pnpm11 build-stage ENV, сохранив install layer, runtime suffix, проверки зависимостей и все gates. Исправление требует одного ordinaryCI с проверкой отсутствия повторного install; CI273428с не выдаётся за ускорение, размер dependency layer/store savings NOT_MEASURED.

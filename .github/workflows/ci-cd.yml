@@ -365,7 +365,7 @@ jobs:
           compression-level: 0
           retention-days: 1
 
-      - name: Подтвердить завершение host dependencies
+      - name: Подтвердить завершение host dependencies и PostgreSQL
         run: |
           node --input-type=module <<'NODE'
           import { assertCiJob } from './apps/web/tests/integration/runtime/target.mjs';
@@ -380,7 +380,7 @@ jobs:
         run: |
           started=$SECONDS
           status=0
-          pnpm --filter @pero/web test:integration || status=$?
+          pnpm --filter @pero/web exec node tests/integration/runtime/run.mjs http || status=$?
           printf 'Native contracts: %ss; exit: %s\n' "$((SECONDS-started))" "$status"
           exit "$status"
         env:

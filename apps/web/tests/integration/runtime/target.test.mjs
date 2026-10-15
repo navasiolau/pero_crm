@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { artifactIdentity, assertCiRuntimeTarget, receiveCiArtifact, typesDigest, verifyTypesArtifact } from './target.mjs';
+import { artifactIdentity, assertCiPostgresTarget, assertCiRuntimeTarget, integrationFiles, receiveCiArtifact, typesDigest, verifyTypesArtifact } from './target.mjs';
 
 const ci = {
   CI: 'true', GITHUB_ACTIONS: 'true', RUNNER_OS: 'Linux', RUNNER_ENVIRONMENT: 'github-hosted',
@@ -16,13 +16,20 @@ const ci = {
   S3_ACCESS_KEY: 'ci_runner', S3_SECRET_KEY: 'ci-only-169-1-s3', S3_REGION: 'us-east-1',
   AUTH_SECRET: 'ci-only-169-1-auth', AUTH_URL: 'http://127.0.0.1:3100', AUTH_TRUST_HOST: 'true',
   GITHUB_SHA: 'e'.repeat(40), GITHUB_EVENT_NAME: 'push', GITHUB_REF_NAME: 'staging',
+  GITHUB_JOB: 'native-tests',
 };
+const postgres = { ...ci, PERO_CI_CONTRACT_PHASE: 'postgres', PERO_CI_MINIO_ID: undefined, PERO_CI_WEB_IMAGE_ID: undefined };
 
 test('CI guard accepts only the explicit ephemeral run', () => {
   const target = assertCiRuntimeTarget(ci);
   assert.equal(target.runId, '169');
   assert.equal(target.s3.bucket, 'ci-169-1');
   assert.equal(target.minioImage, 'pero-ci-169-1-minio:source');
+  assert.equal(assertCiPostgresTarget(postgres).databaseUrl, target.databaseUrl);
+  assert.equal(integrationFiles('postgres').length, 5); assert.equal(integrationFiles('http').length, 3);
+  assert.equal(new Set([...integrationFiles('postgres'), ...integrationFiles('http')]).size, 8);
+  assert.deepEqual(integrationFiles('all').map(file => path.basename(file)).sort(),
+    readdirSync(new URL('../', import.meta.url)).filter(file => file.endsWith('.test.ts')).sort());
   const directory = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'pero-ci-types-')));
   try {
     const metadata = path.join(directory, 'metadata');
@@ -64,6 +71,12 @@ test('CI guard refuses working/local targets and incomplete identity before conn
     { AUTH_TRUST_HOST: 'false' }, { DIRECT_URL: ci.DATABASE_URL }, { SHADOW_DATABASE_URL: ci.DATABASE_URL },
     { NEXTAUTH_URL: ci.AUTH_URL }, { NEXTAUTH_SECRET: ci.AUTH_SECRET },
   ]) assert.throws(() => assertCiRuntimeTarget({ ...ci, ...override }), /CI_TARGET_REFUSED/);
+  for (const override of [{ GITHUB_JOB: 'other' }, { GITHUB_SHA: 'wrong' }, { PERO_CI_CONTRACT_PHASE: 'http' },
+    { PERO_CI_MINIO_ID: ci.PERO_CI_MINIO_ID }, { PERO_CI_WEB_IMAGE_ID: ci.PERO_CI_WEB_IMAGE_ID },
+    { DATABASE_URL: ci.DATABASE_URL.replace('pero_ci', 'pero_crm') }])
+    assert.throws(() => assertCiPostgresTarget({ ...postgres, ...override }), /CI_TARGET_REFUSED/);
+  assert.throws(() => assertCiRuntimeTarget(postgres), /CI_TARGET_REFUSED:runtime-phase/);
+  assert.throws(() => integrationFiles('other'), /CI_TARGET_REFUSED:contract-phase/);
   const originalFetch = globalThis.fetch, revision = ci.GITHUB_SHA;
   const run = { id: 169, run_attempt: 1, head_sha: revision, head_branch: 'staging', event: 'push',
     repository: { full_name: ci.GITHUB_REPOSITORY }, path: '.github/workflows/ci-cd.yml' };
