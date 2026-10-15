@@ -120,6 +120,8 @@ async function dependenciesChild(target) {
   try {
     execFileSync('pnpm', ['install', '--frozen-lockfile'], { stdio: 'inherit', timeout: Math.max(1, owner.launchedAt + 300000 - Date.now()) });
     execFileSync('pnpm', ['--filter', '@pero/web', 'exec', 'prisma', 'generate'], { stdio: 'inherit', timeout: Math.max(1, owner.launchedAt + 300000 - Date.now()) });
+    execFileSync(process.execPath, ['tests/integration/runtime/run.mjs', 'postgres'], { cwd: path.join(process.env.GITHUB_WORKSPACE, 'apps/web'),
+      env: { ...process.env, PERO_CI_CONTRACT_PHASE: 'postgres' }, stdio: 'inherit', timeout: Math.max(1, owner.launchedAt + 300000 - Date.now()) });
   } catch (error) { code = Number.isInteger(error.status) && error.status > 0 && error.status <= 255 ? error.status : 1; }
   const file = `${statePath(target)}.deps-status`;
   writeFileSync(`${file}.tmp`, JSON.stringify({ pid: owner.pid, startedAt: owner.startedAt, code,

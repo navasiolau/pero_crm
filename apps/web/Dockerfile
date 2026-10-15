@@ -28,6 +28,7 @@ ARG PERO_CI_CACHE_ID=pero-next-local
 RUN --mount=type=cache,id=${PERO_CI_CACHE_ID},target=/app/apps/web/.next/cache,sharing=locked \
     pnpm --filter @pero/web exec prisma generate \
     && pnpm --filter @pero/web build \
+    && test -s apps/web/public/sw.js \
     && cp -a apps/web/.next/types apps/web/.next/standalone/apps/web/.next/types
 
 # --- Рантайм ---

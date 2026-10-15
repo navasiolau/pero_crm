@@ -1,5 +1,11 @@
 # Design
 
+## Next workers и ранний PostgreSQL — утверждённая фаза12
+
+Next config получает только webpackBuildWorker/parallelServerBuildTraces=true. Root дополнительно разрешил одну проверку `test -s apps/web/public/sw.js` в существующем Docker build RUN после Next: успешный worker build должен действительно выдать Serwist PWA asset; нового test/helper файла нет. Ранний PostgreSQL runner не подделывает MinIO/image identity: отдельный закрытый PG-only guard требует реального CIjob/PostgreSQL контейнера, network/tmpfs, synthetic role/database и текущего checkoutSHA. После host dependencies/generate и host migrate deploy основная pero_ci исполняет пять имеющихся PG-only файлов последовательно в owned process group одновременно с Bake. Existing atomic GO/PID birth/status/timeout/always cleanup переиспользуются. После полного OCI proof обязательный join этой группы предшествует HTTP writers; три оставшихся HTTP/S3 файла исполняются однажды с прежними target guards/main+fault runtime.
+
+Host migration не заменяет свежую image migration. Испытанный immutable image ID после полного OCI proof запускается one-shot только с Prisma migrate deploy на уникальную пустую temporary DB внутри того же owned CI PostgreSQL service/tmpfs. До запуска проверяются fresh DB/role/current ownership; после — полный список текущих migration folders, SHA256checksums и completed records. Exact container/network/labels/image guard, finally/always cleanup обязательны; auxiliary DB исчезает со штатным owned PostgreSQL service. Основной image production CMD не меняется и продолжает migrate deploy+boot основной CI-БД; fault branch сохраняется. Root DESIGN_GO зафиксировал closed all|postgres|http в existing runner: postgres вызывается после install/generate внутри существующей deps group и её atomic300с result, HTTP запускается после успешного waitDependencies join. Ранняя ветка не вызывает shared cleanup; образы/services принадлежат только parent finally/always. Private migration-purpose URL не расширяет main/fault/default guard. Новых файлов/jobs/фреймворков нет.
+
 ## Исправление повторной установки, обнаруженной CI273
 
 CI273 прошёл все6gates за428с (+68 к CI272): install26.4с, затем build RUN неожиданно повторил `Recreating /app/node_modules` и install16.8с/726 downloads. После явного `--store-dir /pnpm-store` последующие pnpm команды использовали иной default store. Установленный pnpm11.10.0 config reader принимает `pnpm_config_`/`PNPM_CONFIG_`, а npm_config_store_dir не учитывает; read-only CLI подтвердил PNPM_CONFIG_STORE_DIR=/pnpm-store. checkCompatibility сравнивает modules.storeDir с opts.storeDir, mismatch вызывает UnexpectedStore и force purge; packageImportMethod не входит в workspace-state setting keys/этот compatibility check.
@@ -14,7 +20,7 @@ Dockerfile читается с CRLF/CR→LF normalization и строго дел
 
 ## Утверждённая перестройка после CI271
 
-Metadata читается через `docker cp` из immutable image ID принадлежащего текущему run never-started контейнера (network none, readonly, no mounts); loaded config сверяется с Bake, полный старый OCI verifier выполняется один раз до приложения/миграций/tsc. Exact-name/labels/config cleanup работает и при отмене до возврата CID. Полный `.next/types`, включая package-файлы, копируется в standalone в прежнем build RUN; scratch target/cache удаляются.
+Metadata читается через `docker cp` из immutable image ID принадлежащего текущему run never-started контейнера (network none, readonly, no mounts); loaded config сверяется с Bake, полный старый OCI verifier выполняется один раз до приложения/image migrations/HTTP/tsc. Единственное исключение новой фазы12 — ранняя host migration основной owned CI-БД под PG-only guard; fresh migration proof испытанного image остаётся после OCI verifier. Exact-name/labels/config cleanup работает и при отмене до возврата CID. Полный `.next/types`, включая package-файлы, копируется в standalone в прежнем build RUN; scratch target/cache удаляются.
 
 Ранний types artifact содержит все file SHA-256, repository/run/attempt/SHA/BUILD_ID/index/config digests. Existing target helper имеет только purposes types|bot-dist: types ждёт successful upload step Native, bot-dist — весь backend SUCCESS. API archive digest проверяется явно до безопасного stdlib ZIP extraction; файлы/пути/symlinks/identity проверяются после extraction. Backend не получает DB env и использует отдельный hosted artifact identity guard, assertCiJob не ослабляется. Types доступен также PR. Poll 5 с, request <=10 с; types <=18 мин ожидания и <=20-й минуты backend, bot-dist <=180 с и <=23-й минуты Native. Producer failure/cancelled/ошибка types/tsc блокируют bot-dist и прежние publishers.
 
@@ -71,7 +77,7 @@ Baseline — принятый61f9bc14, CI266196с/native155с/promotion32с, ц�
 
 ## Migration Plan
 
-Следующая малая итерация №170 проверяется локально по затронутым конфигурациям и проходит независимый review. Корневой агент выполняет обычную staging-интеграцию и измеряет полный обязательный CI; отдельные benchmark или дополнительные QA-прогоны не создаются. Публикация требует прямого успеха полной unit matrix и native job, fresh source/run binding и `always` cleanup. Main/production и миграции БД в эту задачу не входят.
+Следующая малая итерация №170 проверяется локально по затронутым конфигурациям и проходит независимый review. Корневой агент выполняет обычную staging-интеграцию и измеряет полный обязательный CI; отдельные benchmark или дополнительные QA-прогоны не создаются. Публикация требует прямого успеха полной unit matrix и native job, fresh source/run binding и `always` cleanup. Main/production и новые schema migrations в эту задачу не входят; фаза12 выполняет только существующие migrations на явно разрешённых synthetic CI целях.
 
 ## Текущая OCI/provenance архитектура после 259f
 

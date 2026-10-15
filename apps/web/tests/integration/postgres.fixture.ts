@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { PrismaClient, Prisma, type Role } from "@prisma/client";
 import { activePaymentWhere } from "../../src/server/payments/active-records";
 import { nativeSnapshot, verifiedRollback } from "../helpers/native-acceptance-snapshot";
-import { assertCiRuntimeTarget } from "./runtime/target.mjs";
+import { assertCiPostgresTarget, assertCiRuntimeTarget } from "./runtime/target.mjs";
 
 type RowsDb = Pick<Prisma.TransactionClient, "user" | "client" | "project" | "product">;
 type UserFields = Omit<Prisma.UserUncheckedCreateInput, "id" | "email" | "name" | "passwordHash" | "roles">;
@@ -38,7 +38,7 @@ export type PostgresRows = ReturnType<typeof syntheticRows>;
 /** Import ничего не подключает; все строки принадлежат временному CI-стенду. */
 export async function createPostgresFixture(scenarioId: string) {
   assert.match(scenarioId, /^[a-z0-9][a-z0-9.-]{0,50}$/, "CI_SCENARIO_INVALID");
-  const target = assertCiRuntimeTarget();
+  const target = process.env.PERO_CI_CONTRACT_PHASE === "postgres" ? assertCiPostgresTarget() : assertCiRuntimeTarget();
   const db = new PrismaClient({ datasourceUrl: target.databaseUrl, log: [{ emit: "event", level: "query" }] });
   const queryEvents: Prisma.QueryEvent[] = [];
   db.$on("query", event => queryEvents.push(event));
