@@ -1,5 +1,11 @@
 # Evidence
 
+## CI273 и исправление store path — SOURCE FROZEN / ordinaryCI OPEN
+
+CI273/run38658778707 all6SUCCESS за428с (+68 к CI272360/+129 к CI271299), web884/native100raw/bot38/watcher53/guards2 и cleanup0. Bake246с: store migration install#31 26.4с, затем `Recreating /app/node_modules` и повторный install16.8с/726downloads перед NextRUN102.8с; compilercompatv2MISS. Dependency layer bytes/store savings NOT_MEASURED. Direct Engine web import8.7с выполнен, runtime tar/load отсутствуют; GHAexport103.4с. Точный overlap не доказывается buffered progress; это не подтверждённое ускорение. Official summary/ZIP1download1parse находятся в `.playwright-mcp/application-improvements/ci-cache-layers-20261015-b9d243c7/ci-273-official-summary.json`.
+
+Узкое исправление: PNPM_CONFIG_STORE_DIR=/pnpm-store в существующем build ENV после install/COPY. Read-only pnpm11.10.0 config-get: npm_config_store_dir→undefined, PNPM_CONFIG_STORE_DIR→/pnpm-store. Installed source читает PNPM_CONFIG_ prefix и проверяет store compatibility; проверки зависимостей/supply-chain не отключены. Static comparison подтверждает byte-unchanged install/COPY prefix и runner suffix, workflow/helpers/tests не менялись, extra mount не добавлен; gitdiff-check PASS. Старый YAML/Node/Bash/full suite bundle не повторялся. Отсутствие reinstall и фактические время/слои должен подтвердить следующий ordinaryCI, оправданный исправлением этой регрессии; standalone warm rerun/benchmark не выполняется.
+
 ## Compiler compatibility/store/direct Engine после CI272 — SOURCE READY / приёмка OPEN
 
 Continuation11 меняет только existing workflow/webDockerfile и эти OpenSpec артефакты. Compatv2 включает normalized base/build prefix с единственной runner boundary, config hash без Dockerfile, actual base digest и общие с Bake platform/effective flags; один compat output питает mount ID/exact key/restore prefix. Store вынесен в cache mount с copy import при прежнем frozen filtered install. Два Docker exporters загружают web-runtime/MinIO непосредственно в Engine; tar/load этих projection удалены, original web-oci/provenance max и все прежние proof/cleanup/gates сохранены.
@@ -130,3 +136,5 @@ CI266/current61f9 ACTUAL ACCEPTED/FINAL_GO_61f9: [CI266](https://github.com/nava
 Census по прежней методике: web20866LF, три prefix21943LF/200files/144flat, outside gross555LF, **ALL22498LF** (+352 к принятому22146; original69662 −67.7041%). Новых source/test/helper файлов и независимых сценариев нет; app/src/schema/deps неизменны. [Полный receipt](D:/Projects/pero_crm_v2/.playwright-mcp/application-improvements/ci-under180-20261015-4a7156d4/acceptance-812be24e.json); officialZIP скачан/разобран один раз, SHA e9fdf656347a578f6dff65901d906cdbe73f8fdfce11d0323592fe37c1edb5cf. Main3819f175dca3f69f40da92760cf746bad430f4bc/production unchanged. Local tracking commit не отправляется отдельно в staging, чтобы не создавать docs-only CI.
 
 Section11 source получил независимые GO_170_COMPILER_CACHE и GO metadata/Engine/store: P1/P2 нет, code hashes совпадают с frozen proof. Один affected static bundle PASS; исходники тестов/runtime/app/schema/deps неизменны, новых files/helpers нет, code net+5LF. Actual CI/staging и цель180 остаются OPEN.
+
+Store-path fix получил независимый GO_STORE_FIX_170: pnpm11 config/source подтверждены, install/COPY и final runtime byte-unchanged; только 1 build ENV строка, новых mounts/files/tests нет. Отсутствие повторной установки и speed принимаются следующим обычным CI, повтор оправдан конкретной ошибкой CI273, прогревочный rerun не выполняется.

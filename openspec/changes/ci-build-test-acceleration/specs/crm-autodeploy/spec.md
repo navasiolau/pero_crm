@@ -6,6 +6,10 @@
 
 Compiler cache SHALL учитывать весь нормализованный base/build Docker prefix до единственной явной runner boundary, config inputs, actual base digest/platform/effective flags и прежний source hash. Изменения runtime-only части SHALL NOT сбрасывать compiler compatibility, а отсутствие/повтор границы MUST запрещать подготовку. Pnpm store SHALL находиться только в cache mount с copy import, node_modules SHALL оставаться в image layer; прямой Docker exporter SHALL сохранять полный immutable OCI/provenance proof и cleanup до тестирования.
 
+#### Scenario: Prisma и Next используют существующий install
+- **WHEN** frozen install создал node_modules с /pnpm-store
+- **THEN** последующие build-stage pnpm команды SHALL использовать тот же store path без отключения проверки зависимостей; runner SHALL NOT наследовать build-only store ENV
+
 #### Scenario: Меняется только runner упаковка
 - **WHEN** runtime-only Dockerfile часть меняется при прежних base/build/config/platform/flags
 - **THEN** compiler compatibility SHALL оставаться прежней, а свежий build, config/diff_ids/OCI proof и все проверки SHALL выполняться

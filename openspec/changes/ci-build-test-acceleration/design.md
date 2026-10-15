@@ -1,5 +1,11 @@
 # Design
 
+## Исправление повторной установки, обнаруженной CI273
+
+CI273 прошёл все6gates за428с (+68 к CI272): install26.4с, затем build RUN неожиданно повторил `Recreating /app/node_modules` и install16.8с/726 downloads. После явного `--store-dir /pnpm-store` последующие pnpm команды использовали иной default store. Установленный pnpm11.10.0 config reader принимает `pnpm_config_`/`PNPM_CONFIG_`, а npm_config_store_dir не учитывает; read-only CLI подтвердил PNPM_CONFIG_STORE_DIR=/pnpm-store. checkCompatibility сравнивает modules.storeDir с opts.storeDir, mismatch вызывает UnexpectedStore и force purge; packageImportMethod не входит в workspace-state setting keys/этот compatibility check.
+
+Однострочное исправление добавляет PNPM_CONFIG_STORE_DIR=/pnpm-store в существующий build-only ENV после COPY/install. Install RUN byte-unchanged, node_modules остаётся независимым copy import, дополнительный mount в build RUN не нужен для уже установленных байтов; verify-deps-before-run/supply-chain проверки не отключаются. Runner FROMbase не наследует новый ENV. Эффект и отсутствие reinstall проверяются следующим ordinaryCI, оправданным найденной регрессией; cache/layer экономия заранее не заявляется, warm rerun запрещён.
+
 ## Слои и compiler compatibility v2 после CI272
 
 Dockerfile читается с CRLF/CR→LF normalization и строго делится ровно на две части regexp `^FROM base AS runner\s*$` в multiline; отсутствие/повтор границы fail closed. SHA256 compatibility включает весь base/build prefix, config hash прежних glob без Dockerfile, actual node base digest, platform linux/amd64 и effective GITHUB_ACTIONS=true/PERO_CI_EXTERNAL_CHECKS=1. Prepare выдаёт один compat output; exact compiler key добавляет прежний source hash, restore prefix и mount ID используют тот же compat без run/SHA/legacy aliases. Все build commands остаются в conservative prefix. Первый переход v2 может дать MISS.
