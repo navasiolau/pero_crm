@@ -1,0 +1,932 @@
+{
+  "version": 1,
+  "task": 178,
+  "status": "PASS_SCOPED_WITH_EXPLICIT_COVERAGE_LIMITS",
+  "candidate": {
+    "revision": "0d399e96d56010b05cd8f4df077aef03a7064e05",
+    "image": "sha256:0f89f9de9c0e8a4ee0437a4e443a41784e0a173c3e429ce42a266974c8f2b189"
+  },
+  "acceptedRuns": [
+    {
+      "runId": "6cbccff5-d00a-42df-a78b-f09090146cf2",
+      "status": "PASS_SCOPED_WITH_EXPLICIT_COVERAGE_LIMITS",
+      "materialCreateLocation": "org-stock",
+      "bundleSha256": "4ed50f0328e83a32f48abadb471b01cbc243707ce335a23255ce408a260138c9",
+      "producerSha256": "00c651bd4bfac94f6f7aa7dcdb03753583fb87311fb54da084b53a4e4420257f",
+      "checksTotal": 28,
+      "checksPass": 27,
+      "complementaryNotRun": [
+        {
+          "scope": "warehouse-stock-material-create",
+          "status": "NOT_RUN_THIS_RUN_CANONICAL_SELECT_AND_CANCEL_ONLY",
+          "reason": "one material create per run; use opposite reviewed materialCreateLocation for second serialized run"
+        }
+      ],
+      "checks": [
+        {
+          "scope": "org-expense-article-layout",
+          "status": "PASS",
+          "documentOverflow": 0,
+          "dialogOverflow": 0,
+          "left": 443.2225036621094,
+          "right": 996.7775573730469,
+          "viewport": 1440
+        },
+        {
+          "scope": "org-expense-article-cancel",
+          "status": "PASS",
+          "parentDraftPreserved": true,
+          "serverCreate": false,
+          "financialSubmit": false,
+          "documentStageCoverage": "NOT_RUN_LOCAL_COMPONENT_COVERAGE"
+        },
+        {
+          "scope": "org-expense-article-create-layout",
+          "status": "PASS",
+          "documentOverflow": 0,
+          "dialogOverflow": 0,
+          "left": 438.08612060546875,
+          "right": 1001.9138793945312,
+          "viewport": 1440
+        },
+        {
+          "scope": "org-expense-after-refresh-layout",
+          "status": "PASS",
+          "documentOverflow": 0,
+          "dialogOverflow": 0,
+          "left": 432,
+          "right": 1008,
+          "viewport": 1440
+        },
+        {
+          "scope": "org-expense-article-create",
+          "status": "PASS",
+          "actualUiAction": true,
+          "fullRowAndAllAuditsConfirmed": true,
+          "realRscRefresh": true,
+          "parentDraftPreserved": true,
+          "financialSubmit": false,
+          "documentStageCoverage": "NOT_RUN_LOCAL_COMPONENT_COVERAGE",
+          "canonicalOptionFields": [
+            "id",
+            "name"
+          ],
+          "canonicalOptionOwnId": "cmvbuyiae000tly016217cfap"
+        },
+        {
+          "scope": "org-stock-article-layout",
+          "status": "PASS",
+          "documentOverflow": 0,
+          "dialogOverflow": 0,
+          "left": 443.2225036621094,
+          "right": 996.7775573730469,
+          "viewport": 1440
+        },
+        {
+          "scope": "org-stock-article-cancel",
+          "status": "PASS",
+          "parentDraftPreserved": true,
+          "serverCreate": false,
+          "financialSubmit": false,
+          "documentStageCoverage": "NOT_RUN_LOCAL_COMPONENT_COVERAGE"
+        },
+        {
+          "scope": "org-stock-material-layout",
+          "status": "PASS",
+          "documentOverflow": 0,
+          "dialogOverflow": 0,
+          "left": 432,
+          "right": 1008,
+          "viewport": 1440
+        },
+        {
+          "scope": "org-stock-material-cancel",
+          "status": "PASS",
+          "parentDraftPreserved": true,
+          "serverCreate": false,
+          "financialSubmit": false,
+          "documentStageCoverage": "NOT_RUN_LOCAL_COMPONENT_COVERAGE"
+        },
+        {
+          "scope": "org-stock-material-create-layout",
+          "status": "PASS",
+          "documentOverflow": 0,
+          "dialogOverflow": 0,
+          "left": 432,
+          "right": 1008,
+          "viewport": 1440
+        },
+        {
+          "scope": "org-stock-after-refresh-layout",
+          "status": "PASS",
+          "documentOverflow": 0,
+          "dialogOverflow": 0,
+          "left": 432,
+          "right": 1008,
+          "viewport": 1440
+        },
+        {
+          "scope": "org-stock-material-create",
+          "status": "PASS",
+          "actualUiAction": true,
+          "fullRowAndAllAuditsConfirmed": true,
+          "realRscRefresh": true,
+          "parentDraftPreserved": true,
+          "financialSubmit": false,
+          "documentStageCoverage": "NOT_RUN_LOCAL_COMPONENT_COVERAGE",
+          "canonicalOptionFields": [
+            "id",
+            "name",
+            "sku",
+            "stock",
+            "unit"
+          ],
+          "canonicalOptionOwnId": "cmvbuynj9000wly01qe7gydf7"
+        },
+        {
+          "scope": "warehouse-stock-article-layout",
+          "status": "PASS",
+          "documentOverflow": 0,
+          "dialogOverflow": 0,
+          "left": 438.0958557128906,
+          "right": 1001.9040832519531,
+          "viewport": 1440
+        },
+        {
+          "scope": "warehouse-stock-article-cancel",
+          "status": "PASS",
+          "parentDraftPreserved": true,
+          "serverCreate": false,
+          "financialSubmit": false,
+          "documentStageCoverage": "NOT_RUN_LOCAL_COMPONENT_COVERAGE"
+        },
+        {
+          "scope": "warehouse-stock-material-layout",
+          "status": "PASS",
+          "documentOverflow": 0,
+          "dialogOverflow": 0,
+          "left": 432,
+          "right": 1008,
+          "viewport": 1440
+        },
+        {
+          "scope": "warehouse-stock-material-cancel",
+          "status": "PASS",
+          "parentDraftPreserved": true,
+          "serverCreate": false,
+          "financialSubmit": false,
+          "documentStageCoverage": "NOT_RUN_LOCAL_COMPONENT_COVERAGE"
+        },
+        {
+          "scope": "warehouse-stock-material-create",
+          "status": "NOT_RUN_THIS_RUN_CANONICAL_SELECT_AND_CANCEL_ONLY",
+          "reason": "one material create per run; use opposite reviewed materialCreateLocation for second serialized run"
+        },
+        {
+          "scope": "catalog-shared-material",
+          "status": "PASS",
+          "canonicalRowOpened": true,
+          "sharedDialog": true,
+          "accountingPriceReadonly": true,
+          "serverCreate": false
+        },
+        {
+          "scope": "mobile-390-parent-layout",
+          "status": "PASS",
+          "documentOverflow": 0,
+          "dialogOverflow": 0,
+          "left": 16,
+          "right": 374,
+          "viewport": 390
+        },
+        {
+          "scope": "mobile-390-article-layout",
+          "status": "PASS",
+          "documentOverflow": 0,
+          "dialogOverflow": 0,
+          "left": 19.80918312072754,
+          "right": 370.1908359527588,
+          "viewport": 390
+        },
+        {
+          "scope": "mobile-390-article-cancel",
+          "status": "PASS",
+          "parentDraftPreserved": true,
+          "serverCreate": false,
+          "financialSubmit": false,
+          "documentStageCoverage": "NOT_RUN_LOCAL_COMPONENT_COVERAGE"
+        },
+        {
+          "scope": "mobile-390-material-layout",
+          "status": "PASS",
+          "documentOverflow": 0,
+          "dialogOverflow": 0,
+          "left": 16,
+          "right": 374,
+          "viewport": 390
+        },
+        {
+          "scope": "mobile-390-material-cancel",
+          "status": "PASS",
+          "parentDraftPreserved": true,
+          "serverCreate": false,
+          "financialSubmit": false,
+          "documentStageCoverage": "NOT_RUN_LOCAL_COMPONENT_COVERAGE"
+        },
+        {
+          "scope": "mobile-360-parent-layout",
+          "status": "PASS",
+          "documentOverflow": 0,
+          "dialogOverflow": 0,
+          "left": 16,
+          "right": 344,
+          "viewport": 360
+        },
+        {
+          "scope": "mobile-360-article-layout",
+          "status": "PASS",
+          "documentOverflow": 0,
+          "dialogOverflow": 0,
+          "left": 19.474767684936523,
+          "right": 340.5252437591553,
+          "viewport": 360
+        },
+        {
+          "scope": "mobile-360-article-cancel",
+          "status": "PASS",
+          "parentDraftPreserved": true,
+          "serverCreate": false,
+          "financialSubmit": false,
+          "documentStageCoverage": "NOT_RUN_LOCAL_COMPONENT_COVERAGE"
+        },
+        {
+          "scope": "mobile-360-material-layout",
+          "status": "PASS",
+          "documentOverflow": 0,
+          "dialogOverflow": 0,
+          "left": 16,
+          "right": 344,
+          "viewport": 360
+        },
+        {
+          "scope": "mobile-360-material-cancel",
+          "status": "PASS",
+          "parentDraftPreserved": true,
+          "serverCreate": false,
+          "financialSubmit": false,
+          "documentStageCoverage": "NOT_RUN_LOCAL_COMPONENT_COVERAGE"
+        }
+      ],
+      "dictionaryWrites": [
+        {
+          "kind": "article",
+          "id": "cmvbuyiae000tly016217cfap"
+        },
+        {
+          "kind": "material",
+          "id": "cmvbuynj9000wly01qe7gydf7"
+        }
+      ],
+      "serverPropsProofs": [
+        {
+          "kind": "article",
+          "id": "cmvbuyiae000tly016217cfap",
+          "path": "/finance/expenses",
+          "channel": "action-flight",
+          "status": 200,
+          "sha256": "eaed8274fa2c88ac16adb464e6b6c0a860b8ae27d17fc3f66a5d46145abdb3f9",
+          "bytes": 392938,
+          "phase": "org-expense",
+          "hasFlight": true,
+          "modelRows": 10,
+          "matchingPanelCount": 1,
+          "canonicalInServerProps": true,
+          "delivered": true
+        },
+        {
+          "kind": "article",
+          "id": "cmvbuyiae000tly016217cfap",
+          "path": "/finance/expenses",
+          "channel": "router-refresh-get",
+          "status": 200,
+          "sha256": "d40208c6f9df1f7e446ee721c039823990667b301a2b8795386ebc0ea027f430",
+          "bytes": 392809,
+          "phase": "org-expense",
+          "hasFlight": true,
+          "modelRows": 9,
+          "matchingPanelCount": 1,
+          "canonicalInServerProps": true,
+          "delivered": true
+        },
+        {
+          "kind": "material",
+          "id": "cmvbuynj9000wly01qe7gydf7",
+          "path": "/finance/expenses",
+          "channel": "action-flight",
+          "status": 200,
+          "sha256": "6f856a16cfcb66952a1607f2a27a537e47aa13b150676b8544e1049e76fd0fce",
+          "bytes": 393204,
+          "phase": "org-stock",
+          "hasFlight": true,
+          "modelRows": 10,
+          "matchingPanelCount": 1,
+          "canonicalInServerProps": true,
+          "delivered": true
+        },
+        {
+          "kind": "material",
+          "id": "cmvbuynj9000wly01qe7gydf7",
+          "path": "/finance/expenses",
+          "channel": "router-refresh-get",
+          "status": 200,
+          "sha256": "9830759633054420b6af99b88910e3a82b7f3e9de6cb7456a2fb97d1e1db9b99",
+          "bytes": 392988,
+          "phase": "org-stock",
+          "hasFlight": true,
+          "modelRows": 9,
+          "matchingPanelCount": 1,
+          "canonicalInServerProps": true,
+          "delivered": true
+        }
+      ],
+      "screenshots": [
+        "org-expense-article-cancel.png",
+        "org-expense-after-article-refresh.png",
+        "org-stock-article-cancel.png",
+        "org-stock-material-cancel.png",
+        "org-stock-after-material-refresh.png",
+        "warehouse-stock-article-cancel.png",
+        "warehouse-stock-material-cancel.png",
+        "warehouse-stock-canonical-selection.png",
+        "catalog-shared-material-cancel.png",
+        "mobile-390-article-cancel.png",
+        "mobile-390-material-cancel.png",
+        "mobile-360-article-cancel.png",
+        "mobile-360-material-cancel.png"
+      ],
+      "tables": 65,
+      "beforeFullDigest": "36e80dcf3f706c0dafcea460880eeb0e7b381da52d10f1d9ce128714261f5706",
+      "afterFullDigest": "ec353bbb008225c4d82a46f3d49fc321fa161cfae5199f890b5686e6496e0df3",
+      "beforeStableDigest": "bbe0ce10eddb2bb35d619df80c43e5898d977e72bde09c97ac20abf16cbedecb",
+      "afterStableDigest": "bbe0ce10eddb2bb35d619df80c43e5898d977e72bde09c97ac20abf16cbedecb",
+      "exactOwnRowsAndAuditsCleaned": true,
+      "preservation": {
+        "stableUnchanged": true,
+        "fullUnchanged": false,
+        "tokenDrift": [
+          {
+            "idHash": "8bb4e80b4a7c6902d0ee526023ee83e1",
+            "before": "2026-10-17 03:49:12.716",
+            "after": "2026-10-17 03:50:12.786"
+          }
+        ],
+        "onlyVolatileField": "ApiToken.lastUsedAt"
+      },
+      "independentReadonlyInspect": {
+        "baselineAvailable": true,
+        "stableMatchesBaseline": true,
+        "possibleOwnArticleIds": [],
+        "possibleOwnMaterialIds": [],
+        "allPossibleOwnAuditIds": []
+      },
+      "deniedCount": 0,
+      "clientErrorCount": 0,
+      "artifacts": [
+        {
+          "path": "D:/Projects/pero_crm_v2/.playwright-mcp/requests-171-179/staging178179/run-6cbccff5-d00a-42df-a78b-f09090146cf2/receipt.json",
+          "sha256": "307d484a70333bf4b22a0c3c493631b5d7466cdb3ea1f313061329b5991f39a7"
+        },
+        {
+          "path": "D:/Projects/pero_crm_v2/.playwright-mcp/requests-171-179/staging178179/run-6cbccff5-d00a-42df-a78b-f09090146cf2/baseline.json",
+          "sha256": "ff386e7b4fa7aa11fa109f87f3cae80c1d83171648e1890df26341bdb4918a0a"
+        },
+        {
+          "path": "D:/Projects/pero_crm_v2/.playwright-mcp/requests-171-179/staging178179/run-6cbccff5-d00a-42df-a78b-f09090146cf2/restore.receipt.json",
+          "sha256": "5147221ed7a9bcb806decc4091db5cf95b71dcf68517967787f23d917cc1bf7b"
+        },
+        {
+          "path": "D:/Projects/pero_crm_v2/.playwright-mcp/requests-171-179/staging178179/run-6cbccff5-d00a-42df-a78b-f09090146cf2/final-readonly-inspect.json",
+          "sha256": "bdaa6076db26d69c0ba444bd7ea968bb46ee6bd9167e0e5edf0ca200238adae4"
+        },
+        {
+          "path": "D:/Projects/pero_crm_v2/.playwright-mcp/requests-171-179/staging178179/run-6cbccff5-d00a-42df-a78b-f09090146cf2/bundle-provenance.json",
+          "sha256": "1e156273f4d396a29c498d59d344e433f2a44eb53fb5f989b136fa76ebdfac40"
+        },
+        {
+          "path": "D:/Projects/pero_crm_v2/.playwright-mcp/requests-171-179/staging178179/run-6cbccff5-d00a-42df-a78b-f09090146cf2/confirm-article.json",
+          "sha256": "135a89ade272a46ce17b41fb84e81151591499bab4918ad767263e106d9e41a9"
+        },
+        {
+          "path": "D:/Projects/pero_crm_v2/.playwright-mcp/requests-171-179/staging178179/run-6cbccff5-d00a-42df-a78b-f09090146cf2/confirm-material.json",
+          "sha256": "43f73009083e4db31ea0d338b02c9c5c4574c0c09e4c81de1b1fcb8fd3156823"
+        },
+        {
+          "path": "D:/Projects/pero_crm_v2/.playwright-mcp/requests-171-179/staging178179/run-6cbccff5-d00a-42df-a78b-f09090146cf2/microphases.private.jsonl",
+          "sha256": "7c3832239a001b4779c0b858ca21e11252c2ed3af0b022125f71cdd8fa97e537"
+        }
+      ]
+    },
+    {
+      "runId": "13ae6a94-379e-47b4-9ad9-5a7614a97cef",
+      "status": "PASS_SCOPED_WITH_EXPLICIT_COVERAGE_LIMITS",
+      "materialCreateLocation": "warehouse-stock",
+      "bundleSha256": "4ed50f0328e83a32f48abadb471b01cbc243707ce335a23255ce408a260138c9",
+      "producerSha256": "183badc267f01eef7fc954f5c3b8c8ba80ffc908ce60549846ec8e3ff4a90f75",
+      "checksTotal": 28,
+      "checksPass": 27,
+      "complementaryNotRun": [
+        {
+          "scope": "org-stock-material-create",
+          "status": "NOT_RUN_THIS_RUN_CANONICAL_SELECT_AND_CANCEL_ONLY",
+          "reason": "one material create per run; use opposite reviewed materialCreateLocation for second serialized run"
+        }
+      ],
+      "checks": [
+        {
+          "scope": "org-expense-article-layout",
+          "status": "PASS",
+          "documentOverflow": 0,
+          "dialogOverflow": 0,
+          "left": 443.2225036621094,
+          "right": 996.7775573730469,
+          "viewport": 1440
+        },
+        {
+          "scope": "org-expense-article-cancel",
+          "status": "PASS",
+          "parentDraftPreserved": true,
+          "serverCreate": false,
+          "financialSubmit": false,
+          "documentStageCoverage": "NOT_RUN_LOCAL_COMPONENT_COVERAGE"
+        },
+        {
+          "scope": "org-expense-article-create-layout",
+          "status": "PASS",
+          "documentOverflow": 0,
+          "dialogOverflow": 0,
+          "left": 438.1017761230469,
+          "right": 1001.8982849121094,
+          "viewport": 1440
+        },
+        {
+          "scope": "org-expense-after-refresh-layout",
+          "status": "PASS",
+          "documentOverflow": 0,
+          "dialogOverflow": 0,
+          "left": 432,
+          "right": 1008,
+          "viewport": 1440
+        },
+        {
+          "scope": "org-expense-article-create",
+          "status": "PASS",
+          "actualUiAction": true,
+          "fullRowAndAllAuditsConfirmed": true,
+          "realRscRefresh": true,
+          "parentDraftPreserved": true,
+          "financialSubmit": false,
+          "documentStageCoverage": "NOT_RUN_LOCAL_COMPONENT_COVERAGE",
+          "canonicalOptionFields": [
+            "id",
+            "name"
+          ],
+          "canonicalOptionOwnId": "cmvbv137r000yly019kqtm5uk"
+        },
+        {
+          "scope": "warehouse-stock-article-layout",
+          "status": "PASS",
+          "documentOverflow": 0,
+          "dialogOverflow": 0,
+          "left": 438.10382080078125,
+          "right": 1001.8961791992188,
+          "viewport": 1440
+        },
+        {
+          "scope": "warehouse-stock-article-cancel",
+          "status": "PASS",
+          "parentDraftPreserved": true,
+          "serverCreate": false,
+          "financialSubmit": false,
+          "documentStageCoverage": "NOT_RUN_LOCAL_COMPONENT_COVERAGE"
+        },
+        {
+          "scope": "warehouse-stock-material-layout",
+          "status": "PASS",
+          "documentOverflow": 0,
+          "dialogOverflow": 0,
+          "left": 432,
+          "right": 1008,
+          "viewport": 1440
+        },
+        {
+          "scope": "warehouse-stock-material-cancel",
+          "status": "PASS",
+          "parentDraftPreserved": true,
+          "serverCreate": false,
+          "financialSubmit": false,
+          "documentStageCoverage": "NOT_RUN_LOCAL_COMPONENT_COVERAGE"
+        },
+        {
+          "scope": "warehouse-stock-material-create-layout",
+          "status": "PASS",
+          "documentOverflow": 0,
+          "dialogOverflow": 0,
+          "left": 432,
+          "right": 1008,
+          "viewport": 1440
+        },
+        {
+          "scope": "warehouse-stock-after-refresh-layout",
+          "status": "PASS",
+          "documentOverflow": 0,
+          "dialogOverflow": 0,
+          "left": 432,
+          "right": 1008,
+          "viewport": 1440
+        },
+        {
+          "scope": "warehouse-stock-material-create",
+          "status": "PASS",
+          "actualUiAction": true,
+          "fullRowAndAllAuditsConfirmed": true,
+          "realRscRefresh": true,
+          "parentDraftPreserved": true,
+          "financialSubmit": false,
+          "documentStageCoverage": "NOT_RUN_LOCAL_COMPONENT_COVERAGE",
+          "canonicalOptionFields": [
+            "id",
+            "name",
+            "sku",
+            "stock",
+            "unit"
+          ],
+          "canonicalOptionOwnId": "cmvbv18ik0011ly01sn7nzb26"
+        },
+        {
+          "scope": "org-stock-article-layout",
+          "status": "PASS",
+          "documentOverflow": 0,
+          "dialogOverflow": 0,
+          "left": 443.2225036621094,
+          "right": 996.7775573730469,
+          "viewport": 1440
+        },
+        {
+          "scope": "org-stock-article-cancel",
+          "status": "PASS",
+          "parentDraftPreserved": true,
+          "serverCreate": false,
+          "financialSubmit": false,
+          "documentStageCoverage": "NOT_RUN_LOCAL_COMPONENT_COVERAGE"
+        },
+        {
+          "scope": "org-stock-material-layout",
+          "status": "PASS",
+          "documentOverflow": 0,
+          "dialogOverflow": 0,
+          "left": 432,
+          "right": 1008,
+          "viewport": 1440
+        },
+        {
+          "scope": "org-stock-material-cancel",
+          "status": "PASS",
+          "parentDraftPreserved": true,
+          "serverCreate": false,
+          "financialSubmit": false,
+          "documentStageCoverage": "NOT_RUN_LOCAL_COMPONENT_COVERAGE"
+        },
+        {
+          "scope": "org-stock-material-create",
+          "status": "NOT_RUN_THIS_RUN_CANONICAL_SELECT_AND_CANCEL_ONLY",
+          "reason": "one material create per run; use opposite reviewed materialCreateLocation for second serialized run"
+        },
+        {
+          "scope": "catalog-shared-material",
+          "status": "PASS",
+          "canonicalRowOpened": true,
+          "sharedDialog": true,
+          "accountingPriceReadonly": true,
+          "serverCreate": false
+        },
+        {
+          "scope": "mobile-390-parent-layout",
+          "status": "PASS",
+          "documentOverflow": 0,
+          "dialogOverflow": 0,
+          "left": 16,
+          "right": 374,
+          "viewport": 390
+        },
+        {
+          "scope": "mobile-390-article-layout",
+          "status": "PASS",
+          "documentOverflow": 0,
+          "dialogOverflow": 0,
+          "left": 22.975095748901367,
+          "right": 367.02490043640137,
+          "viewport": 390
+        },
+        {
+          "scope": "mobile-390-article-cancel",
+          "status": "PASS",
+          "parentDraftPreserved": true,
+          "serverCreate": false,
+          "financialSubmit": false,
+          "documentStageCoverage": "NOT_RUN_LOCAL_COMPONENT_COVERAGE"
+        },
+        {
+          "scope": "mobile-390-material-layout",
+          "status": "PASS",
+          "documentOverflow": 0,
+          "dialogOverflow": 0,
+          "left": 16,
+          "right": 374,
+          "viewport": 390
+        },
+        {
+          "scope": "mobile-390-material-cancel",
+          "status": "PASS",
+          "parentDraftPreserved": true,
+          "serverCreate": false,
+          "financialSubmit": false,
+          "documentStageCoverage": "NOT_RUN_LOCAL_COMPONENT_COVERAGE"
+        },
+        {
+          "scope": "mobile-360-parent-layout",
+          "status": "PASS",
+          "documentOverflow": 0,
+          "dialogOverflow": 0,
+          "left": 16,
+          "right": 344,
+          "viewport": 360
+        },
+        {
+          "scope": "mobile-360-article-layout",
+          "status": "PASS",
+          "documentOverflow": 0,
+          "dialogOverflow": 0,
+          "left": 22.39059066772461,
+          "right": 337.60940170288086,
+          "viewport": 360
+        },
+        {
+          "scope": "mobile-360-article-cancel",
+          "status": "PASS",
+          "parentDraftPreserved": true,
+          "serverCreate": false,
+          "financialSubmit": false,
+          "documentStageCoverage": "NOT_RUN_LOCAL_COMPONENT_COVERAGE"
+        },
+        {
+          "scope": "mobile-360-material-layout",
+          "status": "PASS",
+          "documentOverflow": 0,
+          "dialogOverflow": 0,
+          "left": 16,
+          "right": 344,
+          "viewport": 360
+        },
+        {
+          "scope": "mobile-360-material-cancel",
+          "status": "PASS",
+          "parentDraftPreserved": true,
+          "serverCreate": false,
+          "financialSubmit": false,
+          "documentStageCoverage": "NOT_RUN_LOCAL_COMPONENT_COVERAGE"
+        }
+      ],
+      "dictionaryWrites": [
+        {
+          "kind": "article",
+          "id": "cmvbv137r000yly019kqtm5uk"
+        },
+        {
+          "kind": "material",
+          "id": "cmvbv18ik0011ly01sn7nzb26"
+        }
+      ],
+      "serverPropsProofs": [
+        {
+          "kind": "article",
+          "id": "cmvbv137r000yly019kqtm5uk",
+          "path": "/finance/expenses",
+          "channel": "action-flight",
+          "status": 200,
+          "sha256": "67381ccab4b3085fd463353b52b26f9ef8ad71a0d3116da2179680628a5ee59a",
+          "bytes": 392938,
+          "phase": "org-expense",
+          "hasFlight": true,
+          "modelRows": 10,
+          "matchingPanelCount": 1,
+          "canonicalInServerProps": true,
+          "delivered": true
+        },
+        {
+          "kind": "article",
+          "id": "cmvbv137r000yly019kqtm5uk",
+          "path": "/finance/expenses",
+          "channel": "router-refresh-get",
+          "status": 200,
+          "sha256": "16560b54b473b630a857c8b27c0f39987b1c28e13ed872c940c0c715acc86e4b",
+          "bytes": 392809,
+          "phase": "org-expense",
+          "hasFlight": true,
+          "modelRows": 9,
+          "matchingPanelCount": 1,
+          "canonicalInServerProps": true,
+          "delivered": true
+        },
+        {
+          "kind": "material",
+          "id": "cmvbv18ik0011ly01sn7nzb26",
+          "path": "/warehouse/stock",
+          "channel": "action-flight",
+          "status": 200,
+          "sha256": "801b46127d3358efa07b6ef162fa85fd85bab86440f3fc482b32dcb28325af41",
+          "bytes": 1277499,
+          "phase": "warehouse-stock",
+          "hasFlight": true,
+          "modelRows": 10,
+          "matchingPanelCount": 1,
+          "canonicalInServerProps": true,
+          "delivered": true
+        },
+        {
+          "kind": "material",
+          "id": "cmvbv18ik0011ly01sn7nzb26",
+          "path": "/warehouse/stock",
+          "channel": "router-refresh-get",
+          "status": 200,
+          "sha256": "95930e8a1eda6b5fb15abfe97d1060a4db20f3f932f85c388385c34c567ade47",
+          "bytes": 1277283,
+          "phase": "warehouse-stock",
+          "hasFlight": true,
+          "modelRows": 9,
+          "matchingPanelCount": 1,
+          "canonicalInServerProps": true,
+          "delivered": true
+        }
+      ],
+      "screenshots": [
+        "org-expense-article-cancel.png",
+        "org-expense-after-article-refresh.png",
+        "warehouse-stock-article-cancel.png",
+        "warehouse-stock-material-cancel.png",
+        "warehouse-stock-after-material-refresh.png",
+        "org-stock-article-cancel.png",
+        "org-stock-material-cancel.png",
+        "org-stock-canonical-selection.png",
+        "catalog-shared-material-cancel.png",
+        "mobile-390-article-cancel.png",
+        "mobile-390-material-cancel.png",
+        "mobile-360-article-cancel.png",
+        "mobile-360-material-cancel.png"
+      ],
+      "tables": 65,
+      "beforeFullDigest": "f549888ba0f7aafbc08084633b086c45f42585c3b730ef94bf50490dee6e1793",
+      "afterFullDigest": "e51193f6b3ac0194b6e74a01592002ac2b7295778411420c05b4df37bf0ac9d0",
+      "beforeStableDigest": "bbe0ce10eddb2bb35d619df80c43e5898d977e72bde09c97ac20abf16cbedecb",
+      "afterStableDigest": "bbe0ce10eddb2bb35d619df80c43e5898d977e72bde09c97ac20abf16cbedecb",
+      "exactOwnRowsAndAuditsCleaned": true,
+      "preservation": {
+        "stableUnchanged": true,
+        "fullUnchanged": false,
+        "tokenDrift": [
+          {
+            "idHash": "8bb4e80b4a7c6902d0ee526023ee83e1",
+            "before": "2026-10-17 03:51:12.812",
+            "after": "2026-10-17 03:52:12.833"
+          }
+        ],
+        "onlyVolatileField": "ApiToken.lastUsedAt"
+      },
+      "independentReadonlyInspect": {
+        "baselineAvailable": true,
+        "stableMatchesBaseline": true,
+        "possibleOwnArticleIds": [],
+        "possibleOwnMaterialIds": [],
+        "allPossibleOwnAuditIds": []
+      },
+      "deniedCount": 0,
+      "clientErrorCount": 0,
+      "artifacts": [
+        {
+          "path": "D:/Projects/pero_crm_v2/.playwright-mcp/requests-171-179/staging178179/run-13ae6a94-379e-47b4-9ad9-5a7614a97cef/receipt.json",
+          "sha256": "2b9fd7733e589e1385312eef2223aed3693d15514ccb676f0fdf0b634fce567a"
+        },
+        {
+          "path": "D:/Projects/pero_crm_v2/.playwright-mcp/requests-171-179/staging178179/run-13ae6a94-379e-47b4-9ad9-5a7614a97cef/baseline.json",
+          "sha256": "ad3c4f56e898272d36554763859a1179dcc348463975c84819e8014fabf38913"
+        },
+        {
+          "path": "D:/Projects/pero_crm_v2/.playwright-mcp/requests-171-179/staging178179/run-13ae6a94-379e-47b4-9ad9-5a7614a97cef/restore.receipt.json",
+          "sha256": "798752ec3f2c877d78dff8a5685be01291fc4818ddb183bb109f3a30832811ba"
+        },
+        {
+          "path": "D:/Projects/pero_crm_v2/.playwright-mcp/requests-171-179/staging178179/run-13ae6a94-379e-47b4-9ad9-5a7614a97cef/final-readonly-inspect.json",
+          "sha256": "88b896317860b17a6e4a03d31aae46befa0f211516e4b8c63e375ba275e27959"
+        },
+        {
+          "path": "D:/Projects/pero_crm_v2/.playwright-mcp/requests-171-179/staging178179/run-13ae6a94-379e-47b4-9ad9-5a7614a97cef/bundle-provenance.json",
+          "sha256": "8e579c148a493c85bc56485638d6e55720bb29b4d1a2fb7cc44bbc82bd0dd0c3"
+        },
+        {
+          "path": "D:/Projects/pero_crm_v2/.playwright-mcp/requests-171-179/staging178179/run-13ae6a94-379e-47b4-9ad9-5a7614a97cef/confirm-article.json",
+          "sha256": "dd81edce11c0e34321e1344404377fc56027a2fbfb71b3a08b77a12f652acc24"
+        },
+        {
+          "path": "D:/Projects/pero_crm_v2/.playwright-mcp/requests-171-179/staging178179/run-13ae6a94-379e-47b4-9ad9-5a7614a97cef/confirm-material.json",
+          "sha256": "f8711fabba91f91a386e64470e8ef73d0d8b9c7b89276d82340dbc0556b8704a"
+        },
+        {
+          "path": "D:/Projects/pero_crm_v2/.playwright-mcp/requests-171-179/staging178179/run-13ae6a94-379e-47b4-9ad9-5a7614a97cef/microphases.private.jsonl",
+          "sha256": "a983a81f05bed880b62cd9d0a3349423d45614b11930f0f1f6bac33e476bfc1e"
+        }
+      ]
+    }
+  ],
+  "requiredRuns": {
+    "orgStock": "6cbccff5-d00a-42df-a78b-f09090146cf2",
+    "warehouseStock": "13ae6a94-379e-47b4-9ad9-5a7614a97cef"
+  },
+  "documentStage": "NOT_RUN_LOCAL_REAL_COMPONENT_COVERAGE_ONLY",
+  "sourceRightsAndNegativeCasesCoverage": "LOCAL_UNIT_DI_NATIVE_AND_CI; staging real existing ADMIN only",
+  "priorHold": {
+    "runId": "0826f264-059e-413d-bdfa-546e144a5a04",
+    "status": "HOLD",
+    "cause": "QA observer body unavailable / mandatory GET proof timeout; not a demonstrated CRM defect",
+    "oneArticleCreatedAndConfirmed": true,
+    "exactOwnCleanup": true,
+    "all65StableUnchanged": true,
+    "onlyVolatileChange": "forward ApiToken.lastUsedAt +60 seconds"
+  },
+  "limits": [
+    "Both material-create entrypoints covered across two serialized runs; one intentional complementary NOT_RUN per run is covered by the opposite run",
+    "New FinanceDocument upload stage NOT_RUN; real document/documentId coverage LOCAL_REAL_COMPONENT only; no fake FileList probe",
+    "Project inline creation, other/combined role negatives, invalid codes/unit/category, errors and UNKNOWN/mutation ID are LOCAL/native/CI coverage, not extra staging claims",
+    "No money/payout/stock/logistics submit, preview, save or post; no historical financial facts edited"
+  ],
+  "artifacts": [],
+  "additionalHolds": [
+    {
+      "runId": "668cd124-25e5-4d92-9aeb-5c96909028c0",
+      "status": "HOLD",
+      "cause": "QA Response.finished wait after headers had no timeout; no demonstrated CRM defect",
+      "events": 0,
+      "writes": 0,
+      "ownRowsOrAudits": 0,
+      "all65StableAndCatalogPreserved": true,
+      "independentInspectBeforeAndFinally": true
+    }
+  ],
+  "identity": {
+    "file": "D:/Projects/pero_crm_v2/.playwright-mcp/application-improvements/staging-0d399e96-identity-0c6c79bb-7ede-4c12-88c5-8042bacc962e/identity.json",
+    "sha256": "7f8bd9c91f899f2688de9e0814b8e3f5bbb1a3ac666c0af63fffbc9f3389342c"
+  },
+  "counts": {
+    "runs": 2,
+    "checkEntries": 56,
+    "passEntries": 54,
+    "complementaryNotRunEntries": 2,
+    "screenshots": 26,
+    "dictionaryWrites": 4,
+    "serverPropsProofs": 8
+  },
+  "planReview": {
+    "path": "D:/Projects/pero_crm_v2/.playwright-mcp/requests-171-179/staging178179/warehouse-plan-root-review.json",
+    "sha256": "5965b5f44704d7e593ef667707268e876994e2a9d884a2c9409d6551646cfd5b",
+    "allProducerFilesAndImmutableSourceIdentical": true,
+    "onlyExecutionPlanLocationDiffers": true
+  },
+  "visuallyConfirmedDraft": {
+    "currency": "USD",
+    "manualRate": "0.037",
+    "expenseAmount": "12.34",
+    "quantity": "2",
+    "unitPrice": "3.45",
+    "total": "6.90",
+    "operationDate": "2026-10-17",
+    "cashAndCommentPreserved": true,
+    "source": "root PNG review; not a claim about acceptable provider rate or a posted payment"
+  },
+  "visualReview": {
+    "reviewer": "root",
+    "reviewed": [
+      {
+        "runId": "6cbccff5-d00a-42df-a78b-f09090146cf2",
+        "files": [
+          "org-expense-after-article-refresh.png",
+          "org-stock-after-material-refresh.png",
+          "mobile-390-material-cancel.png"
+        ]
+      },
+      {
+        "runId": "13ae6a94-379e-47b4-9ad9-5a7614a97cef",
+        "files": [
+          "warehouse-stock-after-material-refresh.png"
+        ]
+      }
+    ]
+  }
+}
