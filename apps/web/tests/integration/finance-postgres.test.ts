@@ -14,6 +14,7 @@ import { activePaymentWhere } from "../../src/server/payments/active-records";
 import { guardedModuleCache } from "../helpers/guarded-module-cache";
 import { nativeSnapshot } from "../helpers/native-acceptance-snapshot";
 import { createPostgresFixture, fixedBynTotal, moneyRows as money, rejectedSql, savedOrgBalance, type PostgresRows } from "./postgres.fixture";
+import { verifyDefaultCashAccountNative } from "../helpers/default-cash-native";
 
 let fixture: Awaited<ReturnType<typeof createPostgresFixture>>;
 let scope: ReturnType<typeof guardedModuleCache>;
@@ -128,6 +129,13 @@ function observed(tx: Prisma.TransactionClient) {
     } }) : value;
   } }) };
 }
+
+test("cash/default-setting-roles-cas-audit-and-atomic-deactivation", async () => fixture.rollback(async (tx, rows) => {
+  const actor = actorFor(await rows.user("default-cash-owner", ["PROCUREMENT"]));
+  const account = await tx.cashAccount.create({ data: { id: rows.id("default-cash-rub"), name: "QA175 RUB", currency: "RUB" } });
+  const other = await tx.cashAccount.create({ data: { id: rows.id("default-cash-byn"), name: "QA175 BYN", currency: "BYN" } });
+  assert.ok(await verifyDefaultCashAccountNative(tx, actor, account.id, other.id));
+}));
 
 test("cash/role-union-active-none-current-currencies-and-refusals", async () => fixture.rollback(async (tx, rows) => {
   const startingOrg = await savedOrgBalance(tx);

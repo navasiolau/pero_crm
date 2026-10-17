@@ -11,7 +11,7 @@ import { useState } from "react";
 import { CashPayoutForm } from "./cash-payout-form";
 
 type EmployeeOption = { id: string; name: string; position: string | null };
-type CashAccountOption = { id: string; name: string; currency: string; active: boolean; balance: number };
+type CashAccountOption = { id: string; name: string; currency: string; active: boolean; balance: number; isDefault?: boolean };
 
 export function AdvancePayoutDialog({
   open,

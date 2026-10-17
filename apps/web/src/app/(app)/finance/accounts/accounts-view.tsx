@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
 import { Plus, Power } from "lucide-react";
@@ -18,6 +19,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import {
   Select,
   SelectContent,
@@ -27,14 +29,16 @@ import {
 } from "@/components/ui/select";
 import { formatAmount } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { addCashAccount, toggleCashAccount } from "@/server/finance/actions";
+import { addCashAccount, toggleCashAccount, setDefaultCashAccount } from "@/server/finance/actions";
 import type { CashAccountView } from "@/server/finance/queries";
+import type { DefaultCashAccountSnapshot } from "@/server/finance/default-cash-contracts";
 
 const CURRENCIES = ["BYN", "RUB", "USD", "EUR"];
 
 // Кассы организации (§11): каждая в своей валюте. Касса с историей
 // операций не удаляется — деактивируется (исчезает из выбора).
-export function AccountsView({ accounts }: { accounts: CashAccountView[] }) {
+export function AccountsView({ accounts, defaultCashAccount, canManageDefault }: { accounts: CashAccountView[]; defaultCashAccount: DefaultCashAccountSnapshot; canManageDefault: boolean }) {
+  const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [addOpen, setAddOpen] = useState(false);
   const [name, setName] = useState("");
@@ -49,7 +53,7 @@ export function AccountsView({ accounts }: { accounts: CashAccountView[] }) {
       sortValue: (row) => row.name,
       cell: (row) => (
         <span className={cn(!row.active && "text-muted-foreground line-through")}>
-          {row.name}
+          {row.name}{row.isDefault ? <Badge variant="outline" className="ml-2">По умолчанию</Badge> : null}
         </span>
       ),
     },
@@ -140,6 +144,21 @@ export function AccountsView({ accounts }: { accounts: CashAccountView[] }) {
       </div>
 
       <Link href="/finance/accounts/report" className="text-sm font-medium text-primary hover:underline">Отчёт по кассам за период →</Link>
+      <div className="flex max-w-xl flex-col gap-2 rounded-lg border p-4">
+        <Label htmlFor="default-cash-account">Касса по умолчанию</Label>
+        {canManageDefault ? <SearchableSelect id="default-cash-account" disabled={pending}
+          value={defaultCashAccount.accountId ?? ""} placeholder="Без кассы по умолчанию" searchPlaceholder="Поиск кассы…"
+          options={[{ value: "", label: "Без кассы по умолчанию" }, ...accounts.filter(account => account.active).map(account => ({ value: account.id, label: `${account.name} · ${account.currency}` }))]}
+          onChange={accountId => startTransition(async () => {
+            try {
+              const result = await setDefaultCashAccount({ accountId: accountId || null, expectedRevision: defaultCashAccount.revision });
+              if (result.ok) toast.success(accountId ? "Касса по умолчанию назначена" : "Назначение кассы снято");
+              else toast.error(result.error);
+              router.refresh();
+            } catch { toast.error("Не удалось подтвердить изменение. Обновите список касс."); }
+          })} /> : <p>{accounts.find(account => account.id === defaultCashAccount.accountId && account.active)?.name ?? "Не назначена"}</p>}
+        <p className="text-sm text-muted-foreground">Выбирается вместе со своей валютой в новых денежных операциях. Открытые формы сохраняют ваш выбор.</p>
+      </div>
       <DataTable
         columns={columns}
         rows={accounts}

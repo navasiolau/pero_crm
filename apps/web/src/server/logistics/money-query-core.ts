@@ -3,6 +3,7 @@ import { BYN_UNAVAILABLE_REASON, sumByn, subtractByn } from "@/lib/history-byn";
 import { activePaymentWhere } from "@/server/payments/active-records";
 import { readCashBalance } from "@/server/payroll/cash-core";
 import { requireLogisticsActor } from "./core";
+import { listActiveCashAccountOptions } from "@/server/finance/default-cash-core";
 import { type LogisticsMoneyOptions, type LogisticsPostingView, type LogisticsProjectBudget } from "./money-contracts";
 
 const postingReadInclude = { allocations: { include: { payment: { select: { id: true } } }, orderBy: { projectId: "asc" } },
@@ -28,7 +29,7 @@ export async function getLogisticsTripMoneyCore(actorId: string | null | undefin
 }
 export async function getLogisticsMoneyOptionsCore(actorId: string | null | undefined, tx: Prisma.TransactionClient): Promise<LogisticsMoneyOptions> {
   await requireLogisticsActor(actorId, tx);
-  const accounts = await tx.cashAccount.findMany({ where: { active: true }, select: { id: true, name: true, currency: true }, orderBy: { createdAt: "asc" } });
+  const accounts = await listActiveCashAccountOptions(tx);
   const cashAccounts = await Promise.all(accounts.map(async account => ({ ...account, balance: (await readCashBalance(tx, account.id)).toNumber() })));
   return { cashAccounts };
 }

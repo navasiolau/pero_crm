@@ -1,6 +1,7 @@
 "use client";
 
 import { payrollMonth } from "@/lib/payroll-month";
+import { initialCashAccount } from "@/lib/cash-account-default";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Download, HandCoins, Plus, Trash2, Calculator } from "lucide-react";
@@ -482,7 +483,10 @@ export function FinancePayrollView({
               variant="outline"
               className="min-h-12 h-auto whitespace-normal"
               disabled={settlementUnavailable || settlePreview.every((row) => row.pay <= 0) || !hasFundedActiveCash}
-              onClick={() => setSettleOpen(true)}
+              onClick={() => {
+                setSettleCashAccountId(initialCashAccount(activeCashAccounts).cashAccountId);
+                setSettleOpen(true);
+              }}
             >
               <Calculator className="size-4" />
               Рассчитать всех

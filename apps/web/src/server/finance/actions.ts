@@ -4,8 +4,11 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { writeChangeLog } from "@/server/plugins/changelog";
-import { requireFinance } from "@/server/require-role";
+import { requireFinance, requireRole } from "@/server/require-role";
 import { withTaskTransaction } from "@/server/tasks/transaction";
+import { DEFAULT_CASH_ACCOUNT_MANAGE_ROLES } from "@/lib/cash-account-default";
+import { saveDefaultCashAccount, toggleCashAccountCore } from "./default-cash-core";
+import type { DefaultCashAccountPatch, DefaultCashAccountResult } from "./default-cash-contracts";
 
 import { getNbrbRate, isCurrency } from "./nbrb";
 import { createExpenseArticleCore, toggleExpenseArticleCore, expenseArticleCreateError, type ExpenseArticleInput } from "./article-core";
@@ -77,26 +80,20 @@ export async function toggleCashAccount(
   accountId: string,
 ): Promise<{ ok: boolean; error?: string }> {
   const session = await requireFinance();
-  const account = await withTaskTransaction(async (tx) => {
-    const current = await tx.cashAccount.findUnique({ where: { id: accountId } });
-    if (!current) return null;
-    await tx.cashAccount.update({ where: { id: accountId }, data: { active: !current.active } });
-    return current;
-  });
-  if (!account) return { ok: false, error: "Касса не найдена" };
-  await writeChangeLog({
-    actorType: "user",
-    actorId: session.user.id,
-    actorName: session.user.name ?? undefined,
-    entity: "cashAccount",
-    entityId: accountId,
-    action: "update",
-    field: "active",
-    oldValue: account.active,
-    newValue: !account.active,
-  });
-  revalidatePath("/finance/accounts");
-  return { ok: true };
+  try {
+    const result = await withTaskTransaction(tx => toggleCashAccountCore({ id: session.user.id, name: session.user.name ?? "", roles: session.user.roles, source: "web" }, accountId, tx));
+    if (result.ok) revalidatePath("/", "layout");
+    return result;
+  } catch { return { ok: false, error: "Не удалось изменить активность кассы" }; }
+}
+
+export async function setDefaultCashAccount(input: DefaultCashAccountPatch): Promise<DefaultCashAccountResult> {
+  const session = await requireRole(DEFAULT_CASH_ACCOUNT_MANAGE_ROLES);
+  try {
+    const result = await withTaskTransaction(tx => saveDefaultCashAccount({ id: session.user.id, name: session.user.name ?? "", roles: session.user.roles, source: "web" }, input, tx));
+    if (result.ok) revalidatePath("/", "layout");
+    return result;
+  } catch { return { ok: false, kind: "failure", error: "Не удалось сохранить кассу по умолчанию" }; }
 }
 
 // ─── Статьи расходов ────────────────────────────────────────────────────────

@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { createRequestId } from "@/lib/request-id";
+import { initialCashAccount } from "@/lib/cash-account-default";
 import { formatAmount } from "@/lib/format";
 import { isCashCurrency, type CashCurrency } from "@/lib/cash-ledger";
 import { addPayout } from "@/server/payroll/actions";
@@ -17,7 +18,7 @@ import { issueAdvance, previewCashPayout } from "@/server/payroll/cash-actions";
 import { buildSalaryPayoutRetry, salaryRetryBlockedByLimit, type FrozenCashPayoutRequest } from "./cash-payout-operation";
 
 type EmployeeOption = { id: string; name: string; position: string | null };
-type CashAccountOption = { id: string; name: string; currency: string; active: boolean; balance: number };
+type CashAccountOption = { id: string; name: string; currency: string; active: boolean; balance: number; isDefault?: boolean };
 type CashPreview = {
   amount: string;
   payrollCurrency: CashCurrency;
@@ -70,7 +71,7 @@ export function CashPayoutForm({
 }) {
   const router = useRouter();
   const [userId, setUserId] = useState("");
-  const [cashAccountId, setCashAccountId] = useState("");
+  const [cashAccountId, setCashAccountId] = useState(() => initialCashAccount(accounts).cashAccountId);
   const [cashAmount, setCashAmount] = useState("");
   const [description, setDescription] = useState("");
   const [preview, setPreview] = useState<{ key: string; value: CashPreview } | null>(null);
@@ -185,7 +186,7 @@ export function CashPayoutForm({
   function startNewOperation() {
     setReceipt(null);
     setUserId("");
-    setCashAccountId("");
+    setCashAccountId(initialCashAccount(accounts).cashAccountId);
     setCashAmount("");
     setDescription("");
     setPreview(null);

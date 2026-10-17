@@ -3,6 +3,9 @@ import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { FINANCE_ROLES, hasAnyRole } from "@/lib/roles";
 import { listCashAccounts } from "@/server/finance/queries";
+import { prisma } from "@/lib/prisma";
+import { DEFAULT_CASH_ACCOUNT_MANAGE_ROLES } from "@/lib/cash-account-default";
+import { readDefaultCashAccount } from "@/server/finance/default-cash-core";
 
 import { AccountsView } from "./accounts-view";
 
@@ -15,6 +18,6 @@ export default async function FinanceAccountsPage() {
   if (!session?.user) redirect("/login");
   if (!hasAnyRole(session.user.roles, FINANCE_ROLES)) redirect("/");
 
-  const accounts = await listCashAccounts();
-  return <AccountsView accounts={accounts} />;
+  const [accounts, defaultCashAccount] = await Promise.all([listCashAccounts(), readDefaultCashAccount(prisma)]);
+  return <AccountsView accounts={accounts} defaultCashAccount={defaultCashAccount} canManageDefault={hasAnyRole(session.user.roles, DEFAULT_CASH_ACCOUNT_MANAGE_ROLES)} />;
 }

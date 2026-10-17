@@ -26,6 +26,7 @@ import { getPluginSettings } from "@/server/plugins/run-log";
 import { getSlotContributions } from "@/server/plugins/slots";
 import { getProjectPricingProjection } from "@/server/projects/project-field-core";
 import { getProjectEconomics } from "@/server/finance/queries";
+import { listActiveCashAccountOptions } from "@/server/finance/default-cash-core";
 import { getProjectFor, listClients, listEngineers, listManagers, listWorkers } from "@/server/projects/queries";
 import { mapTaskDetails } from "@/server/tasks/queries";
 import { getProjectMaterialsBatch } from "@/server/warehouse/queries";
@@ -92,10 +93,7 @@ export default async function ProjectPage({
       // Данные вкладки «Финансы» (§11) — админу/директору/бухгалтеру
       showFinance ? getProjectEconomics(project.id, prisma, { payments: project.payments, stockMovements: stockExpenses }) : Promise.resolve(null),
       showFinance
-        ? prisma.cashAccount.findMany({
-            where: { active: true },
-            orderBy: { createdAt: "asc" },
-          })
+        ? listActiveCashAccountOptions(prisma)
         : Promise.resolve([]),
       showFinance
         ? prisma.expenseArticle.findMany({
@@ -345,6 +343,7 @@ export default async function ProjectPage({
                 id: account.id,
                 name: account.name,
                 currency: account.currency,
+                isDefault: account.isDefault,
               }))}
               expenseArticles={expenseArticles.map((article) => ({
                 id: article.id,

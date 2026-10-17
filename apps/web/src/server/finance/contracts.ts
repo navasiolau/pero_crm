@@ -44,5 +44,5 @@ export type ProjectEconomicsView = {
   marginAtFullPrice: number | null;
   expenseBreakdown: ExpenseBreakdownRow[];
 };
-export type CashAccountOption = { id: string; name: string; currency: string };
+export type CashAccountOption = { id: string; name: string; currency: string; isDefault?: boolean };
 export type ExpenseArticleOption = { id: string; name: string };

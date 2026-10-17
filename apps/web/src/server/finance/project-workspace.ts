@@ -7,10 +7,11 @@ import { loadProjectStockExpenses, projectExpenseRows } from "./project-expenses
 import { paymentView } from "./payment-view";
 import { reportDocumentSelect } from "@/server/finance-documents/view";
 import { logisticsAllocationSelect } from "@/server/logistics/payment-view";
+import { listActiveCashAccountOptions } from "./default-cash-core";
 
 export async function loadFinanceProjectWorkspace(
   actor: FinanceWorkspaceActor, identifier: string,
-  db: Pick<PrismaClient, "project" | "payment" | "cashAccount" | "expenseArticle" | "user" | "stockMovement">,
+  db: Pick<PrismaClient, "project" | "payment" | "cashAccount" | "expenseArticle" | "user" | "stockMovement" | "orgSetting">,
   getEconomics: (projectId: string, facts: ProjectExpenseFacts) => Promise<ProjectEconomics | null>,
 ) {
   requireFinanceWorkspaceActor(actor);
@@ -24,7 +25,7 @@ export async function loadFinanceProjectWorkspace(
       logisticsAllocationId: true,
     }, orderBy: { paidAt: "desc" } }),
     loadProjectStockExpenses(actor, project.id, db),
-    db.cashAccount.findMany({ where: { active: true }, select: { id: true, name: true, currency: true }, orderBy: { createdAt: "asc" } }),
+    listActiveCashAccountOptions(db),
     db.expenseArticle.findMany({ where: { active: true }, select: { id: true, name: true }, orderBy: { createdAt: "asc" } }),
   ]);
   const ids = [...new Set([...records, ...movements].map(row => row.createdById).filter((id): id is string => id !== null))];
