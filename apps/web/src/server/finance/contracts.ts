@@ -46,3 +46,4 @@ export type ProjectEconomicsView = {
 };
 export type CashAccountOption = { id: string; name: string; currency: string; isDefault?: boolean };
 export type ExpenseArticleOption = { id: string; name: string };
+export type ExpenseArticleCreateResult = { ok: true; article: ExpenseArticleOption } | { ok: false; error: string };

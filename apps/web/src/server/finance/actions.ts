@@ -9,6 +9,7 @@ import { withTaskTransaction } from "@/server/tasks/transaction";
 import { DEFAULT_CASH_ACCOUNT_MANAGE_ROLES } from "@/lib/cash-account-default";
 import { saveDefaultCashAccount, toggleCashAccountCore } from "./default-cash-core";
 import type { DefaultCashAccountPatch, DefaultCashAccountResult } from "./default-cash-contracts";
+import type { ExpenseArticleCreateResult } from "./contracts";
 
 import { getNbrbRate, isCurrency } from "./nbrb";
 import { createExpenseArticleCore, toggleExpenseArticleCore, expenseArticleCreateError, type ExpenseArticleInput } from "./article-core";
@@ -98,12 +99,12 @@ export async function setDefaultCashAccount(input: DefaultCashAccountPatch): Pro
 
 // ─── Статьи расходов ────────────────────────────────────────────────────────
 
-export async function addExpenseArticle(input: ExpenseArticleInput): Promise<{ok:boolean;error?:string}> {
+export async function addExpenseArticle(input: ExpenseArticleInput): Promise<ExpenseArticleCreateResult> {
   const session=await requireFinance();
   try{
     const result=await withTaskTransaction(tx=>createExpenseArticleCore(session.user,input,tx));
     if(result.ok)revalidatePath('/finance/articles');
-    return result.ok?{ok:true}:result;
+    return result.ok?{ok:true,article:{id:result.article.id,name:result.article.name}}:result;
   }catch(error){return{ok:false,error:expenseArticleCreateError(error)};}
 }
 export async function toggleExpenseArticle(articleId:string):Promise<{ok:boolean;error?:string}>{

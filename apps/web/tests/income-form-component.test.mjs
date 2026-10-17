@@ -27,7 +27,7 @@ const bundlePromise=build({stdin:{contents:`
  createRoot(document.getElementById('root')).render(<Harness/>);
  `,resolveDir:web,loader:'tsx'},bundle:true,write:false,platform:'browser',format:'iife',jsx:'automatic',tsconfig:path.join(web,'tsconfig.json'),define:{'process.env.NODE_ENV':'"production"'},plugins:[{name:'test-boundaries',setup(b){
  b.onResolve({filter:/^(next\/navigation|sonner|@\/server\/payments\/actions|@\/server\/finance\/actions|@\/server\/warehouse\/stock-purchase-actions)$/},args=>({path:args.path,namespace:'boundary'}));
- b.onLoad({filter:/.*/,namespace:'boundary'},args=>({contents:args.path==='next/navigation'?'export const useRouter=()=>({refresh(){}});':args.path==='sonner'?'export const toast={error(){},success(){}};':args.path.includes('stock-purchase')?'export const addPaidStockReceipt=async input=>{window.__stockInput=input;return {clientMutationId:input.clientMutationId,...(window.__stockResult??{ok:true,outcome:"COMMITTED",resultId:"stock-fixture"})}};':args.path.includes('payments')?'export const getPaymentActorId=async()=>({ok:true,actorId:"00000134-0000-4000-8000-000000000010"});export const addPayment=async input=>{window.__paymentInput=input;return {clientMutationId:input.clientMutationId,...(window.__paymentResult??{ok:true,outcome:"COMMITTED",resultId:"payment-fixture",paymentId:"payment-fixture"})}};export const deletePayment=async()=>({ok:true});':'export const fetchNbrbRate=async()=>({ok:true,rate:3,date:"2026-10-04"});',loader:'js'}));
+ b.onLoad({filter:/.*/,namespace:'boundary'},args=>({contents:args.path==='next/navigation'?'export const useRouter=()=>({refresh(){}});':args.path==='sonner'?'export const toast={error(){},success(){}};':args.path.includes('stock-purchase')?'export const addPaidStockReceipt=async input=>{window.__stockInput=input;return {clientMutationId:input.clientMutationId,...(window.__stockResult??{ok:true,outcome:"COMMITTED",resultId:"stock-fixture"})}};':args.path.includes('payments')?'export const getPaymentActorId=async()=>({ok:true,actorId:"00000134-0000-4000-8000-000000000010"});export const addPayment=async input=>{window.__paymentInput=input;return {clientMutationId:input.clientMutationId,...(window.__paymentResult??{ok:true,outcome:"COMMITTED",resultId:"payment-fixture",paymentId:"payment-fixture"})}};export const deletePayment=async()=>({ok:true});':'export const addExpenseArticle=async()=>({ok:true,article:{id:"fixture-article",name:"Статья"}});export const fetchNbrbRate=async()=>({ok:true,rate:3,date:"2026-10-04"});',loader:'js'}));
  }}],logLevel:'silent'});
 
 async function withDialog(config,run){
@@ -92,7 +92,7 @@ test('project income has no article and submits the fixed project',async()=>{
 test('income omits an article left in shared state after switching from expense',async()=>{
  await withDialog({__testDirection:'EXPENSE',__testProjectId:'project-1'},async page=>{
   await page.locator('#pay-article').click();
-  await page.getByRole('option',{name:'Логистика',exact:true}).click();
+  await page.getByRole('button',{name:'Логистика',exact:true}).click();
   await page.evaluate(()=>window.__setDirection('INCOME'));
   await page.getByRole('button',{name:'Внести приход',exact:true}).waitFor();
   await submitIncome(page,'project-1');
@@ -112,7 +112,7 @@ test('expense keeps its required article and submits the selected article',async
   assert.equal(submitted.expenseArticleId,'article-1');assert.ok(submitted.reportDocumentId);assert.match(submitted.clientMutationId,/^[a-f0-9-]{36}$/);
   await page.evaluate(()=>{window.__paymentInput=null});
   await page.locator('#pay-article').click();
-  await page.getByRole('option',{name:'Логистика',exact:true}).click();
+  await page.getByRole('button',{name:'Логистика',exact:true}).click();
   await page.getByRole('button',{name:'Внести расход',exact:true}).click();
   await page.waitForFunction(()=>window.__paymentInput);
   assert.equal((await page.evaluate(()=>window.__paymentInput)).expenseArticleId,'article-2');
