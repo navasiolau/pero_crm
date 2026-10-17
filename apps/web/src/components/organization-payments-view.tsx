@@ -12,14 +12,16 @@ import { PaymentDialog } from "@/components/payment-dialog";
 import {ReportDocumentButton} from '@/components/report-document-button';
 import { formatAmount, formatDate, formatQty, formatMoneyTotal } from "@/lib/format";
 import type { StockMaterialOption } from "@/server/warehouse/contracts";
+import type { MaterialCreateOptions } from "@/server/warehouse/material-contracts";
 import { deletePayment } from "@/server/payments/actions";
 import type { ExpenseArticleOption } from "@/server/finance/contracts";
 import type { OrganizationLedgerData, OrganizationPaymentRow } from "@/server/finance/organization-ledger";
 
-export function OrganizationPaymentsView({ direction, rows, cashAccounts, projects, expenseArticles = [], stockMaterials }: OrganizationLedgerData & {
+export function OrganizationPaymentsView({ direction, rows, cashAccounts, projects, expenseArticles = [], stockMaterials, materialCreateOptions }: OrganizationLedgerData & {
   direction: "INCOME" | "EXPENSE";
   expenseArticles?: ExpenseArticleOption[];
   stockMaterials?: StockMaterialOption[];
+  materialCreateOptions?: MaterialCreateOptions;
 }) {
   const income = direction === "INCOME", noun = income ? "приход" : "расход";
   const title = income ? "Приходы организации" : "Расходы организации";
@@ -50,7 +52,7 @@ export function OrganizationPaymentsView({ direction, rows, cashAccounts, projec
       emptyText={income ? "Приходов пока нет" : "Расходов пока нет"} onRowClick={setViewing}
       renderMobileCard={row => <div className="space-y-2"><div className="flex justify-between gap-2"><b>{formatAmount(row.amount, row.currency)}</b><span>{formatDate(row.paidAt)}</span></div><p>{row.stockPurchase ? `Приход на склад · ${row.stockPurchase.materialName}` : row.project ? `${row.project.number} · ${row.project.title}` : general}</p><p className="text-sm text-muted-foreground">{row.cashAccountName ?? "—"}{row.expenseArticleName ? ` · ${row.expenseArticleName}` : ""}</p>{!income?<ReportDocumentButton document={row.reportDocument}/>:null}</div>} />
     <PaymentDialog direction={direction} open={open} onOpenChange={setOpen} projectCurrency="BYN" projectOptions={projects} cashAccounts={cashAccounts} expenseArticles={expenseArticles} />
-    {stockMaterials ? <PaymentDialog direction="EXPENSE" open={purchaseOpen} onOpenChange={setPurchaseOpen} projectCurrency="BYN" stockMaterials={stockMaterials} cashAccounts={cashAccounts} expenseArticles={expenseArticles} /> : null}
+    {stockMaterials ? <PaymentDialog direction="EXPENSE" open={purchaseOpen} onOpenChange={setPurchaseOpen} projectCurrency="BYN" stockMaterials={stockMaterials} cashAccounts={cashAccounts} expenseArticles={expenseArticles} materialCreateOptions={materialCreateOptions} /> : null}
     <Dialog open={viewing !== null} onOpenChange={next => { if (!next) setViewing(null); }}>
       <DialogContent initialFocus={detailHeading}><DialogHeader><DialogTitle ref={detailHeading} tabIndex={-1} className="outline-none">{income ? "Приход" : "Расход"}</DialogTitle><DialogDescription>{viewing?.stockPurchase ? "Оплаченный приход материала" : viewing?.project ? `${viewing.project.number} · ${viewing.project.title}` : general}</DialogDescription></DialogHeader>
         {viewing ? <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-3 text-sm">

@@ -21,12 +21,12 @@ function App(){
  return window.__mode==='catalog'?<MaterialUnitsView rows={units}/>:<ItemsView rows={materials} categories={[]} units={units} canManage={true} showMoney={true}/>;
 }createRoot(document.getElementById('root')).render(<App/>);
 `,resolveDir:web,loader:"tsx"},bundle:true,write:false,platform:"browser",format:"iife",jsx:"automatic",tsconfig:path.join(web,"tsconfig.json"),define:{"process.env.NODE_ENV":'"production"'},plugins:[{name:"server-boundaries",setup(b){
- b.onResolve({filter:/^(sonner|@\/server\/warehouse\/(unit-actions|actions))$/},args=>({path:args.path,namespace:"qa"}));
- b.onLoad({filter:/.*/,namespace:"qa"},args=>({loader:"js",contents:args.path==="sonner"?'export const toast={success(){},error(message){window.__errors.push(message)}};':args.path.endsWith("unit-actions")?`
+ b.onResolve({filter:/^(next\/navigation|sonner|@\/server\/warehouse\/(unit-actions|actions))$/},args=>({path:args.path,namespace:"qa"}));
+ b.onLoad({filter:/.*/,namespace:"qa"},args=>({loader:"js",contents:args.path==="next/navigation"?'export const useRouter=()=>({refresh(){}});':args.path==="sonner"?'export const toast={success(){},error(message){window.__errors.push(message)}};':args.path.endsWith("unit-actions")?`
  export async function addMaterialUnit(input){window.__catalog.push({kind:'add',input});return{ok:true}};
  export async function renameMaterialUnit(id,input){window.__catalog.push({kind:'rename',id,input});return{ok:true}};
  export async function deleteMaterialUnit(id){window.__catalog.push({kind:'delete',id});return{ok:true}};
- `: 'export async function addMaterial(input){window.__materials.push({kind:"add",input});return{ok:true}};export async function updateMaterial(id,input){window.__materials.push({kind:"update",id,input});return{ok:true}};export const addMaterialCategory=async()=>({ok:true});export const toggleMaterial=async()=>({ok:true});export const toggleMaterialCategory=async()=>({ok:true});'}));
+ `: 'export async function addMaterial(input){window.__materials.push({kind:"add",input});return{ok:true,material:{id:"created",name:input.name,unit:window.__units.find(unit=>unit.id===input.unitId)?.name??"шт",sku:input.sku??null,stock:0}}};export async function updateMaterial(id,input){window.__materials.push({kind:"update",id,input});return{ok:true}};export const addMaterialCategory=async()=>({ok:true});export const toggleMaterial=async()=>({ok:true});export const toggleMaterialCategory=async()=>({ok:true});'}));
 }}],logLevel:"silent"});
 const css=(async()=>{const file=path.join(web,"src/app/globals.css");return (await postcss([tailwind({base:web,optimize:true})]).process(await readFile(file,"utf8"),{from:file})).css;})();
 async function withPage(mode,run,width=1440){const context=await browser.newContext({viewport:{width,height:width===1440?900:844}});try{
@@ -51,11 +51,11 @@ test("catalog UI adds and renames by id; used delete is blocked and cancel never
 test("material picker uses dynamic labels and submits stable unit id with fractional stock unchanged",async()=>{
  await withPage("items",async page=>{
   await page.getByRole("button",{name:"Редактировать материал",exact:true}).click();const dialog=page.getByRole("dialog",{name:"Редактировать материал",exact:true});
-  await dialog.getByRole("button",{name:"шт",exact:true}).click();await page.getByRole("button",{name:"1/10 листа",exact:true}).click();
+  await dialog.locator("#m-unit").click();await page.getByRole("button",{name:"1/10 листа",exact:true}).click();
   await dialog.getByRole("button",{name:"Сохранить",exact:true}).click();await page.waitForFunction(()=>window.__materials.length===1);
   const [saved]=await page.evaluate(()=>window.__materials);assert.equal(saved.input.unitId,"tenth");assert.equal(saved.input.minStock,0.125);assert.equal(saved.input.unit,undefined);assert.equal(saved.input.purchasePrice,undefined);
   await page.evaluate(units=>window.__setUnits(units),fixtureUnits.map(unit=>unit.id==="liter"?{...unit,name:"литр"}:unit));
-  await page.getByRole("button",{name:"Добавить материал",exact:true}).click();const creating=page.getByRole("dialog",{name:"Новый материал",exact:true});await creating.getByRole("button",{name:"шт",exact:true}).click();assert.equal(await page.getByRole("button",{name:"литр",exact:true}).count(),1);
+  await page.getByRole("button",{name:"Добавить материал",exact:true}).click();const creating=page.getByRole("dialog",{name:"Новый материал",exact:true});await creating.locator("#m-unit").click();assert.equal(await page.getByRole("button",{name:"литр",exact:true}).count(),1);
  });
 });
 test("catalog renders at desktop and mobile widths with real Tailwind styles",async()=>{

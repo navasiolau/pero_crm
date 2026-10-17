@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { hasAnyRole, OFFICE_ROLES, WAREHOUSE_UNIT_ADMIN_ROLES } from "@/lib/roles";
 import type { MaterialUnitOption, MaterialUnitView } from "./unit-contracts";
 
-export async function listMaterialUnitOptions(actor: { roles: Role[] }, db: Prisma.TransactionClient = prisma): Promise<MaterialUnitOption[]> {
+export async function listMaterialUnitOptions(actor: { roles: Role[] }, db: Pick<Prisma.TransactionClient, "materialUnit"> = prisma): Promise<MaterialUnitOption[]> {
   if (!hasAnyRole(actor.roles, OFFICE_ROLES)) throw Error("Недостаточно прав");
   return db.materialUnit.findMany({ select: { id: true, name: true }, orderBy: [{ createdAt: "asc" }, { name: "asc" }] });
 }
