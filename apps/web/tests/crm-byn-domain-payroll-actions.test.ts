@@ -28,7 +28,7 @@ function makeScope() {
   const overrides = {
     "../src/server/tasks/transaction": { withTaskTransaction: async (operation: (tx: Prisma.TransactionClient) => Promise<unknown>) => operation((globalThis as unknown as { prisma: PrismaClient }).prisma) },
     "next/cache": { revalidatePath: () => {} },
-    "../src/server/require-role": { requireAdmin: async () => ({ user: actor }), requireFinance: async () => ({ user: actor }) },
+    "../src/server/require-role": { requireAdmin: async () => ({ user: actor }), requireFinance: async () => ({ user: actor }), requirePayrollManagement: async () => ({ user: actor }) },
     "../src/server/plugins/changelog": { writeChangeLog: async () => {} },
     "../src/server/plugins/events": { emitDomainEvent: async () => {}, dispatchEvent: async () => {} },
     "../src/server/notifications/notify": { notifyOrg: async () => {}, notifyPerson: async () => {} },

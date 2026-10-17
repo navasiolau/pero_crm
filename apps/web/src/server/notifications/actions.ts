@@ -7,6 +7,7 @@ import {scopeNotificationContent} from '@/server/access/notification-visibility'
 import {currentReminderNamespace,reminderNotificationWhere} from '@/server/calendar/reminder-visibility';
 import {NOTIFICATION_TYPES,receivableTypesFor} from './notify';
 import {canReceiveNotificationContent} from '@/lib/notification-access';
+import {notificationPreferenceEnabled,notificationPreferenceTypes} from './preferences';
 const NOTIFICATIONS_PAGE_SIZE=20;
 async function notificationScope(actor:{id:string;roles:Role[]}):Promise<Prisma.NotificationWhereInput>{
  const types=NOTIFICATION_TYPES.filter(type=>type.id!=='plan.reminder'&&canReceiveNotificationContent(actor.roles,type.id)).map(type=>type.id);
@@ -36,8 +37,9 @@ export async function markRead(id:string):Promise<{ok:boolean}>{
 export async function getMyPreferences(){
  const session=await auth();if(!session?.user)throw new Error('Не авторизован');const namespace=await currentReminderNamespace(session.user.id,prisma);
  const types=receivableTypesFor(session.user.roles).filter(type=>type.id!=='plan.reminder'||namespace!==null);
- const rows=await prisma.notificationPreference.findMany({where:{userId:session.user.id,type:{in:types.map(type=>type.id)}}});const map=new Map(rows.map(row=>[row.type,row.enabled]));
- return {prefs:types.map(type=>({id:type.id,label:type.label,enabled:map.get(type.id)??true}))};
+ const preferenceTypes=[...new Set(types.flatMap(type=>notificationPreferenceTypes(type.id)))];
+ const rows=await prisma.notificationPreference.findMany({where:{userId:session.user.id,type:{in:preferenceTypes}}});const map=new Map(rows.map(row=>[row.type,row.enabled]));
+ return {prefs:types.map(type=>({id:type.id,label:type.label,enabled:notificationPreferenceEnabled(type.id,map)}))};
 }
 export async function setPreference(type:string,enabled:boolean):Promise<{ok:boolean;error?:string}>{
  const session=await auth();if(!session?.user)throw new Error('Не авторизован');

@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { FolderKanban, HandCoins, Landmark, ReceiptText, Wallet } from "lucide-react";
+import { PAYROLL_MANAGE_ROLES, hasAnyRole } from "@/lib/roles";
+import { requireFinance } from "@/server/require-role";
 
 import {
   Card,
@@ -8,8 +10,8 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 
-// Финансы (§11) — администратор, директор и бухгалтер (middleware + nav).
-export default function FinancePage() {
+export default async function FinancePage() {
+  const session = await requireFinance();
   return (
     <div className="flex flex-col gap-6">
       <div>
@@ -23,7 +25,7 @@ export default function FinancePage() {
         <Link href="/finance/expenses"><Card className="h-full transition-colors hover:bg-accent/50"><CardHeader><ReceiptText className="mb-2 size-6 text-muted-foreground"/><CardTitle>Расходы организации</CardTitle><CardDescription>Общие и проектные расходы по статьям с отчётными документами</CardDescription></CardHeader></Card></Link>
         <Link href="/finance/income"><Card className="h-full transition-colors hover:bg-accent/50"><CardHeader><Landmark className="mb-2 size-6 text-muted-foreground"/><CardTitle>Приходы организации</CardTitle><CardDescription>Общие и проектные приходы в кассы</CardDescription></CardHeader></Card></Link>
         <Link href="/finance/projects"><Card className="h-full transition-colors hover:bg-accent/50"><CardHeader><FolderKanban className="mb-2 size-6 text-muted-foreground"/><CardTitle>Финансы проектов</CardTitle><CardDescription>Выбор проекта, приходы, расходы и экономика без общих и технических правок</CardDescription></CardHeader></Card></Link>
-        <Link href="/finance/payroll">
+        {hasAnyRole(session.user.roles, PAYROLL_MANAGE_ROLES) && <Link href="/finance/payroll">
           <Card className="h-full transition-colors hover:bg-accent/50">
             <CardHeader>
               <Wallet className="mb-2 size-6 text-muted-foreground" />
@@ -33,7 +35,7 @@ export default function FinancePage() {
               </CardDescription>
             </CardHeader>
           </Card>
-        </Link>
+        </Link>}
         <Link href="/finance/advances">
           <Card className="h-full transition-colors hover:bg-accent/50">
             <CardHeader>

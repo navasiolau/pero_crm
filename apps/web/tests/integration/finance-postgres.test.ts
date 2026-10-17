@@ -5,6 +5,7 @@ import { createRequire } from "node:module";
 import { after, before, test } from "node:test";
 import { Prisma, type PrismaClient, type Role } from "@prisma/client";
 import { payrollMonth, payrollMonthRange } from "../../src/lib/payroll-month";
+import { ADVANCE_ROLES, PAYROLL_MANAGE_ROLES, hasAnyRole } from "../../src/lib/roles";
 import type { CashRates } from "../../src/lib/cash-ledger";
 import type { CashPayoutInput, PayoutActor } from "../../src/server/payroll/cash-core";
 import type { PaymentInput } from "../../src/server/payments/contracts";
@@ -70,7 +71,17 @@ before(async () => {
     overrides: {
       "../src/auth": { auth: async () => ({ user: session.getStore()!.actor }) },
       "next/cache": { revalidatePath: (path: string) => cachePaths.push(path) },
-      "../src/server/require-role": { requireFinance: async () => ({ user: session.getStore()!.actor }), requireAdmin: async () => ({ user: session.getStore()!.actor }), requireUser: async () => ({ user: session.getStore()!.actor }) },
+      "../src/server/require-role": { requireFinance: async () => ({ user: session.getStore()!.actor }), requireAdmin: async () => ({ user: session.getStore()!.actor }), requireUser: async () => ({ user: session.getStore()!.actor }),
+        requirePayrollManagement: async () => {
+          const actor = session.getStore()!.actor;
+          if (!hasAnyRole(actor.roles, PAYROLL_MANAGE_ROLES)) throw Error("Недостаточно прав");
+          return { user: actor };
+        },
+        requireRole: async (roles: Role[]) => {
+          const actor = session.getStore()!.actor;
+          if (!hasAnyRole(actor.roles, roles)) throw Error("Недостаточно прав");
+          return { user: actor };
+        } },
       "../src/server/finance/nbrb": { isCurrency: (value: string) => ["BYN", "USD", "EUR", "RUB"].includes(value),
         getNbrbRate: async (currency: string) => { rateReads++; return { rate: currency === "USD" ? 3 : currency === "RUB" ? 0.03 : 1, date: new Date().toISOString().slice(0, 10) }; } },
       "../src/server/plugins/events": { dispatchEvent: async (id: string) => { dispatches.push(id); } },
@@ -159,7 +170,7 @@ test("cash/role-union-active-none-current-currencies-and-refusals", async () => 
 for (const mode of ["usd", "byn-fallback"] as const) test(`cash/operator-full-cycle-delete-bulk-recipients/${mode}`, async () => fixture.rollback(async (tx, rows) => {
   const [office, preferences, previousNotifications, previousMoney] = await Promise.all([
     tx.user.findMany({ where: { active: true, roles: { hasSome: ["ADMIN", "DIRECTOR", "ACCOUNTANT", "PROCUREMENT"] } } }),
-    tx.notificationPreference.findMany({ where: { type: "payroll.orgPayout" } }),
+    tx.notificationPreference.findMany({ where: { type: { in: ["payroll.orgPayout", "payroll.orgAdvance"] } } }),
     tx.notification.findMany({ orderBy: { id: "asc" } }), money(tx),
   ]);
   const c = await cashContext(tx, rows), procurement = actorFor(await rows.user("procurement", ["PROCUREMENT"]));
@@ -171,14 +182,20 @@ for (const mode of ["usd", "byn-fallback"] as const) test(`cash/operator-full-cy
     { ...c.input, cashAmount: "10.00", requestId: randomUUID() }];
   if (mode === "usd") requests.push({ ...c.input, cashAccountId: usd.id, expectedCashCurrency: "USD", cashAmount: "50.00", requestId: randomUUID() });
   const actors = [procurement, c.actor, procurement, procurement];
-  const recipients = [...office, c.actor, procurement, recipient].filter(user => !preferences.some(pref => pref.userId === user.id && !pref.enabled));
   const outcomes: { payoutId: string; requestId: string }[] = [];
   for (const [index, request] of requests.entries()) {
     const actor = actors[index], result = await on(tx, actor, () => service.executeCashPayout(actor, request));
     assert.equal(result.ok, true); assert.equal(result.repeated, false); assert.ok(result.payoutId);
     outcomes.push({ payoutId: result.payoutId, requestId: request.requestId });
     if (request.userId === c.employee.id) pairs.push(`payroll.payout|${c.employee.id}`);
-    for (const user of recipients) if (user.id !== actor.id) pairs.push(`payroll.orgPayout|${user.id}`);
+    const notificationType = request.kind === "ADVANCE" ? "payroll.orgAdvance" : "payroll.orgPayout";
+    const notificationRoles = request.kind === "ADVANCE" ? ADVANCE_ROLES : PAYROLL_MANAGE_ROLES;
+    const recipients = [...office, c.actor, procurement, recipient].filter(user => {
+      const preference = preferences.find(pref => pref.userId === user.id && pref.type === notificationType) ??
+        (request.kind === "ADVANCE" ? preferences.find(pref => pref.userId === user.id && pref.type === "payroll.orgPayout") : undefined);
+      return hasAnyRole(user.roles, notificationRoles) && preference?.enabled !== false;
+    });
+    for (const user of recipients) if (user.id !== actor.id) pairs.push(`${notificationType}|${user.id}`);
     const entry = await tx.payout.findUniqueOrThrow({ where: { id: result.payoutId } });
     assert.equal(entry.cashAmount!.toFixed(2), request.cashAmount); assert.equal(entry.cashCurrency, request.expectedCashCurrency);
     assert.equal(entry.payrollCurrency, "BYN"); assert.equal(entry.bynAmount!.toFixed(2), index === 3 ? "150.00" : request.cashAmount);
@@ -198,7 +215,7 @@ for (const mode of ["usd", "byn-fallback"] as const) test(`cash/operator-full-cy
   assert.deepEqual(notifications.map(row => `${row.type}|${row.userId}`).sort(), pairs.sort());
   assert.equal(allNotifications.length, previousNotifications.length + pairs.length);
   assert.deepEqual(allNotifications.filter(row => previousNotifications.some(before => before.id === row.id)), previousNotifications);
-  assert.ok(notifications.every(row => ["/payroll", "/finance/payroll"].includes(row.link!)));
+  assert.ok(notifications.every(row => ["/payroll", "/finance/payroll", "/finance/advances"].includes(row.link!)));
   assert.equal(await tx.changeLog.count({ where: { entity: "payout", action: "delete", actorId: c.actor.id, entityId: outcomes[2].payoutId } }), 1);
   const allEvents = await tx.domainEvent.findMany({ orderBy: { id: "asc" } });
   const events = allEvents.filter(row => !previousMoney[4].some(before => before.id === row.id));

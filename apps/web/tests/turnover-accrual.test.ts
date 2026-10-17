@@ -9,7 +9,7 @@ test("turnover adapter preserves confirmed ACK when each optional effect fails",
     const effect = (name: string) => { effects.push(name); if (name === failed) { reached++; throw Error("CONTROLLED_OPTIONAL_EFFECT"); } };
     const overrides = {
       "next/cache": { revalidatePath: () => effect("cache") },
-      "../src/server/require-role": { requireFinance: async () => ({ user: { id: "accountant", name: "Accountant", roles: ["ACCOUNTANT"] } }) },
+      "../src/server/require-role": { requirePayrollManagement: async () => ({ user: { id: "accountant", name: "Accountant", roles: ["ACCOUNTANT"] } }) },
       "../src/server/payroll/turnover-core": { accrueTurnoverCore: async (actor: { id: string }, month: string, transaction: unknown) => {
         assert.equal(actor.id, "accountant"); assert.equal(month, "2026-01"); assert.equal(typeof transaction, "function");
         return { ok: true, accruedCount: coreCalls++ === 0 ? 1 : 0, currency: "BYN", total: 10000,

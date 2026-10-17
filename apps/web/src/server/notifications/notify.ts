@@ -2,6 +2,8 @@ import type { Role } from "@prisma/client";
 
 import { canReceiveNotificationContent } from "@/lib/notification-access";
 import { prisma } from "@/lib/prisma";
+import { ADVANCE_ROLES, PAYROLL_MANAGE_ROLES } from "@/lib/roles";
+import { notificationPreferenceEnabled, notificationPreferenceTypes } from "./preferences";
 
 // Типы уведомлений (§6.1). Org — ролевые рассылки (кому — см. ORG_TYPE_ROLES),
 // personal — адресные конкретному человеку. Настраивать типы могут все роли,
@@ -16,7 +18,8 @@ export const NOTIFICATION_TYPES = [
   { id: "payment.added", label: "Новый приход по проекту", kind: "org" },
   { id: "expense.added", label: "Новый расход по проекту", kind: "org" },
   { id: "stock.expense", label: "Списание материала на проект", kind: "org" },
-  { id: "payroll.orgPayout", label: "Выплаты и авансы сотрудникам", kind: "org" },
+  { id: "payroll.orgPayout", label: "Выплаты зарплаты сотрудникам", kind: "org" },
+  { id: "payroll.orgAdvance", label: "Авансы сотрудникам", kind: "org" },
   { id: "payroll.orgAccrued", label: "Начисления зарплаты сотрудникам", kind: "org" },
   { id: "task.assigned", label: "Вам назначена задача", kind: "personal" },
   { id: "task.statusChanged", label: "Изменение по вашей задаче", kind: "personal" },
@@ -32,13 +35,13 @@ export type NotificationKind = "org" | "personal";
 // директор/бухгалтер (менеджеру зарплата не рассылается); остальное — A/D/M.
 const OFFICE_ORG: Role[] = ["ADMIN", "DIRECTOR", "MANAGER", "PROCUREMENT"];
 const FINANCE_ORG: Role[] = ["ADMIN", "DIRECTOR", "ACCOUNTANT", "PROCUREMENT"];
-const PAYROLL_ORG: Role[] = ["ADMIN", "DIRECTOR", "ACCOUNTANT", "PROCUREMENT"];
 
 const ORG_TYPE_ROLES: Record<string, Role[]> = {
   "payment.added": FINANCE_ORG,
   "expense.added": FINANCE_ORG,
-  "payroll.orgPayout": PAYROLL_ORG,
-  "payroll.orgAccrued": PAYROLL_ORG,
+  "payroll.orgPayout": PAYROLL_MANAGE_ROLES,
+  "payroll.orgAccrued": PAYROLL_MANAGE_ROLES,
+  "payroll.orgAdvance": ADVANCE_ROLES,
 };
 
 function typeKind(type: string): NotificationKind {
@@ -68,10 +71,11 @@ export function receivableTypesFor(roles: Role[] | Role) {
 
 async function isEnabledFor(userId: string, type: string) {
   // По умолчанию всё включено (§6.1); отключить можно в /notifications
-  const pref = await prisma.notificationPreference.findUnique({
-    where: { userId_type: { userId, type } },
+  const preferences = await prisma.notificationPreference.findMany({
+    where: { userId, type: { in: notificationPreferenceTypes(type) } },
+    select: { type: true, enabled: true },
   });
-  return pref?.enabled ?? true;
+  return notificationPreferenceEnabled(type, new Map(preferences.map(pref => [pref.type, pref.enabled])));
 }
 
 // Отправка уведомления пользователю с учётом его настроек типов.

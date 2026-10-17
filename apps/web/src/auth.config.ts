@@ -1,6 +1,6 @@
 import type { NextAuthConfig } from "next-auth";
 
-import { ADVANCE_ROLES, FINANCE_ROLES, hasAnyRole } from "@/lib/roles";
+import { ADVANCE_ROLES, FINANCE_ROLES, PAYROLL_MANAGE_ROLES, hasAnyRole } from "@/lib/roles";
 import { homePathForRoles } from "@/lib/home-route";
 import { canAccessSettingsPath } from "@/lib/settings-access";
 import {canAccessOperationalPath} from '@/lib/operational-access';
@@ -30,6 +30,9 @@ export const authConfig = {
         return Response.redirect(new URL(homePath, request.nextUrl));
       }
       // Финансы и настройки сохраняют свои grants; глобальный журнал — ADMIN only.
+      if ((pathname === "/finance/payroll" || pathname.startsWith("/finance/payroll/")) && !hasAnyRole(roles, PAYROLL_MANAGE_ROLES)) {
+        return Response.redirect(new URL("/", request.nextUrl));
+      }
       if (pathname.startsWith("/finance") && !hasAnyRole(roles, FINANCE_ROLES)) {
         return Response.redirect(new URL("/", request.nextUrl));
       }

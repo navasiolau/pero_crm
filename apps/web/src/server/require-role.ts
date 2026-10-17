@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import type { Role } from "@prisma/client";
 
-import { ADMIN_ROLES, FINANCE_ROLES, hasAnyRole } from "@/lib/roles";
+import { ADMIN_ROLES, FINANCE_ROLES, PAYROLL_MANAGE_ROLES, hasAnyRole } from "@/lib/roles";
 
 // Проверка ролей для server actions и страниц (§4, комбинированные роли:
 // достаточно любой из перечисленных). Возвращает сессию или выбрасывает
@@ -23,8 +23,12 @@ export async function requireAdmin() {
   return requireRole(ADMIN_ROLES);
 }
 
-// Финансовый доступ (§10–§11): выплаты/авансы, приходы/расходы, кассы, статьи.
+// Общий финансовый доступ (§10–§11): авансы, приходы/расходы, кассы, статьи.
 // Бухгалтер — полный доступ к финансам, но без настроек и журнала.
 export async function requireFinance() {
   return requireRole(FINANCE_ROLES);
+}
+
+export async function requirePayrollManagement() {
+  return requireRole(PAYROLL_MANAGE_ROLES);
 }

@@ -5,7 +5,7 @@ import { dispatchEvent } from "@/server/plugins/events";
 import { notifyOrg, notifyPerson } from "@/server/notifications/notify";
 import { withTaskTransaction } from "@/server/tasks/transaction";
 import { isCashCurrency, parseCashRate, type CashCurrency, type CashRates } from "@/lib/cash-ledger";
-import { issuePayoutCore, type CashPayoutInput, type PayoutActor } from "./cash-core";
+import { assertPayoutRole, issuePayoutCore, type CashPayoutInput, type PayoutActor } from "./cash-core";
 import { deliverCashPayout } from "./cash-post-commit";
 
 export async function preparedRates(cashAccountId: string): Promise<CashRates> {
@@ -36,7 +36,8 @@ export async function executeCashPayout(actor: PayoutActor, input: CashPayoutInp
   payrollAmount?: string; payrollCurrency?: string; bynAmount?: string | null;
 }> {
   try {
-    // A committed receipt must be replayable even if NBRB is currently unavailable.
+    assertPayoutRole(actor, input.kind);
+    // Подтверждённая квитанция повторяется даже при недоступном НБ РБ, после проверки прав.
     const existing = /^[0-9a-f-]{36}$/i.test(input.requestId)
       ? await prisma.changeLog.findUnique({ where: { id: `payout-issue:${input.requestId}` }, select: { id: true } }) : null;
     const byn = { currency: "BYN" as const, rate: "1.000000", date: new Date().toISOString().slice(0, 10) };

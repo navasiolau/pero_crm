@@ -19,9 +19,9 @@ export async function deliverCashPayout(result: PayoutResult, input: PayoutConte
   await safe(() => effects.notifyPerson({ userId: result.userId, type: "payroll.payout",
     title: `${input.kind === "ADVANCE" ? "Аванс" : "Выплата зарплаты"}: ${formatAmount(Number(result.amount), result.payrollCurrency)}`,
     body, link: "/payroll" }));
-  await safe(() => effects.notifyOrg({ type: "payroll.orgPayout",
+  await safe(() => effects.notifyOrg({ type: input.kind === "ADVANCE" ? "payroll.orgAdvance" : "payroll.orgPayout",
     title: `${input.kind === "ADVANCE" ? "Аванс" : "Выплата"}: ${result.userName}, ${formatAmount(Number(result.amount), result.payrollCurrency)}`,
-    body, link: "/finance/payroll", exceptUserId: actorId }));
+    body, link: input.kind === "ADVANCE" ? "/finance/advances" : "/finance/payroll", exceptUserId: actorId }));
   for (const path of ["/payroll", "/finance/payroll", "/finance/accounts", "/advances"]) {
     await safe(() => effects.revalidatePath(path));
   }
