@@ -85,7 +85,8 @@ test("historical unknown affects dependent totals but not known period movement;
  const data=buildCashStatement([account],[fact("unknown","2026-10-01T00:00:00Z",null),
   fact("known","2026-10-07T00:00:00Z","50"),{...fact("unassigned","2026-10-07T00:00:00Z","5","EXPENSE","ADVANCE"),accountId:null}],query);
  assert.equal(data.rows[0].totals.opening,null);assert.equal(data.rows[0].totals.income,"50.00");assert.equal(data.rows[0].totals.closing,null);
- assert.equal(data.rows.find(row=>row.unassigned)?.totals.closing,"-5.00");
+ assert.equal(data.rows.find(row=>row.unassigned)?.totals.expense,"-5.00");
+ assert.equal(data.rows.find(row=>row.unassigned)?.totals.closing,null);
  const mismatch=buildCashStatement([account],[{...fact("foreign","2026-10-07T00:00:00Z","10"),nativeCurrency:"USD"}],{...query,mode:"NATIVE"});
  assert.equal(mismatch.rows[0].totals.closing,null);
  assert.ok(mismatch.rows[0].entries[0].issues.length>0);

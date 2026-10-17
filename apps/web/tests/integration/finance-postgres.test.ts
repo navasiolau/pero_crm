@@ -510,6 +510,10 @@ for (const currency of ["BYN", "USD"] as const) test(`warehouse/paid-receipt-cas
   assert.equal((await tx.projectMaterial.findUniqueOrThrow({ where: { id: line.id } })).issuedQty.toString(), "0");
   assert.equal((await cash.readCashBalance(tx, account.id)).toFixed(2), beforeCash.toFixed(2)); assert.equal((await cash.readOrgBalance(tx, "1")).toFixed(2), beforeOrg.toFixed(2));
   assert.ok(!(await ledger.loadOrganizationPayments(actor, "EXPENSE", tx)).rows.some(row => row.id === receipt.paymentId));
+  const cancelledStatement = await statements.loadCashStatement(actor, { from: "2000-01-01", to: "2099-12-31", mode: "NATIVE" }, tx);
+  const cancelledCash = cancelledStatement.rows.find(row => row.id === account.id)!;
+  assert.ok(!cancelledCash.entries.some(row => row.id === `payment:${receipt.paymentId}`));
+  assert.equal(cancelledCash.totals.closing, beforeCash.toFixed(2));
   await assert.rejects(purchase.createStockPurchaseInTransaction(actor, data, prepared, tx), /удалён/);
   await assert.rejects(stock.warehouseMove(tx, actor, { kind: "RETURN", productId: product.id, sourceMovementId: issued.movement.id, quantity: "1", clientMutationId: randomUUID() }), /Исходная выдача/);
   const finalMoney = await money(tx);
@@ -620,6 +624,10 @@ test("logistics/real-posting-correction-CAS-history-budget-and-SQL-rollback", as
   assert.equal(await tx.payment.count({ where: { AND: [activePaymentWhere, { id: { in: oldPayments.map(row => row.id) } }] } }), 0);
   assert.equal((await cash.readCashBalance(tx, c.account.id)).toFixed(2), beforeCash.minus(1200).toFixed(2));
   assert.equal((await cash.readOrgBalance(tx, "1")).toFixed(2), beforeOrg.minus(1200).toFixed(2));
+  const correctedStatement = await statements.loadCashStatement(actor, { from: "2000-01-01", to: "2099-12-31", mode: "NATIVE" }, tx);
+  const correctedCash = correctedStatement.rows.find(row => row.id === c.account.id)!;
+  assert.ok(!correctedCash.entries.some(row => oldPayments.some(old => row.id === `payment:${old.id}`)));
+  assert.equal(correctedCash.totals.closing, beforeCash.minus(1200).toFixed(2));
   const afterCorrection = await money(tx);
   assert.equal((await logistics.createLogisticsPostingCore(actor.id, correction, "correct", dependencies)).repeated, true); assert.deepEqual(await money(tx), afterCorrection);
   await assert.rejects(logistics.createLogisticsPostingCore(actor.id, { ...correction, clientMutationId: randomUUID() }, "correct", dependencies), /уже изменён/);
@@ -802,15 +810,17 @@ test("finance/cash-statement-real-Moscow-edges-saved-FX-no-cash-and-role-boundar
   ] });
   await tx.payrollEntry.create({ data: { userId: actor.id, amount: "999999", bynAmount: "999999", currency: "BYN", month: "2026-10" } });
   const query = { from: "2026-10-07", to: "2026-10-07", mode: "BYN" as const }, before = await money(tx), rateCount = rateReads;
-  const byn = await statements.loadCashStatement(actor, query, tx), native = await statements.loadCashStatement(actor, { ...query, mode: "NATIVE" }, tx);
-  assert.deepEqual(byn.rows.find(row => row.id === accounts[0].id)!.totals, { opening: "100.00", income: "50.00", expense: "-35.00", closing: "115.00" });
+  const valuationRates = [{ currency: "USD", date: "2026-10-06", rate: "3", issue: null }, { currency: "USD", date: "2026-10-07", rate: "3.3", issue: null }];
+  const byn = await statements.loadCashStatement(actor, query, tx, valuationRates), native = await statements.loadCashStatement(actor, { ...query, mode: "NATIVE" }, tx);
+  assert.deepEqual(byn.rows.find(row => row.id === accounts[0].id)!.totals, { opening: "100.00", income: "50.00", expense: "-35.00", revaluation: "0.00", closing: "115.00" });
   assert.equal(byn.rows.find(row => row.id === accounts[0].id)!.entries.length, 4);
-  assert.equal(byn.rows.find(row => row.id === accounts[1].id)!.totals.closing, "252.00");
+  assert.equal(byn.rows.find(row => row.id === accounts[1].id)!.totals.closing, "280.50");
+  assert.equal(byn.rows.find(row => row.id === accounts[1].id)!.totals.revaluation, "28.50");
   assert.equal(native.rows.find(row => row.id === accounts[1].id)!.totals.closing, "85.00"); assert.equal(native.rows.find(row => row.id === accounts[1].id)!.active, false);
   assert.equal(byn.rows.find(row => row.id === accounts[2].id)!.totals.closing, "0.00");
   for (const result of [byn, native]) assert.ok(result.rows.some(row => row.unassigned && row.totals.closing === null && row.entries.some(entry => entry.id === `payout:${rows.id("statement-unassigned")}` && entry.change === null)));
   const denied = observed(tx); await assert.rejects(statements.loadCashStatement({ ...actor, roles: ["MANAGER"] }, query, denied.tx), /прав/); assert.equal(denied.calls.length, 0);
-  assert.deepEqual(await statements.loadCashStatement({ ...actor, roles: ["MANAGER", "ACCOUNTANT"] }, query, tx), byn);
+  assert.deepEqual(await statements.loadCashStatement({ ...actor, roles: ["MANAGER", "ACCOUNTANT"] }, query, tx, valuationRates), byn);
   assert.equal(JSON.stringify(byn).includes("CI_NO_LOGIN"), false); assert.deepEqual(await money(tx), before); assert.equal(rateReads, rateCount);
 }));
 
