@@ -25,3 +25,7 @@
 Сценарий `tests/helpers/default-cash-native.ts` подключён в существующий CI finance-postgres.test.ts; новый CI fixture или база не создавались. Фактическая staging-приёмка остаётся отдельным невыполненным пунктом.
 
 17.10.2026: независимое source-review175 — замечаний нет. Root выполнил native helper в rollback-транзакции и гонки на двух настоящих соединениях под прежним общим lock: одно назначение выигрывает, второе получает CAS conflict; одновременное назначение/деактивация не оставляет неактивную default-кассу. Перед исполнением отдельное review усилило fail-closed cleanup точных QA-UUID/собственного audit/setting и ожидание allSettled; итоговый runner прошёл повторное ревью. Удалены только две собственные QA-кассы и собственные тестовые setting/audit после проверки отсутствия чужих FK и актуального аудированного снимка. Все64 таблицы после проверки совпали с baseline. Приватные proof: `.playwright-mcp/requests-171-179/local-native175.json` и `local-after175-native.json` в основном каталоге. Новый стенд/reset/seed/dump не использовался.
+
+## Размещение браузерных проверок в CI
+
+CI635dad выявил запуск двух новых browser-файлов в backend без Chromium. default-cash-account-component и default-cash-forms-component перенесены в components-0. Реальный Bash case workflow проверен на всех globs, каждый файл исполняется ровно один раз; gates, версии, permissions и список тестов сохранены. Независимое ревью — замечаний нет; требуется повторный CI.
