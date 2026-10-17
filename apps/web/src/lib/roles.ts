@@ -47,6 +47,8 @@ export const OFFICE_ROLES: Role[] = [
 ];
 // Менеджмент: создание/правка проектов, задач, изделий, работ.
 export const MANAGER_ROLES: Role[] = ["ADMIN", "DIRECTOR", "MANAGER"];
+// Справочник поставщиков и перевозчиков.
+export const COUNTERPARTY_ROLES: Role[] = [...MANAGER_ROLES, "PROCUREMENT"];
 // Финансы: приходы/расходы, кассы, статьи и авансы (§10–§11).
 export const FINANCE_ROLES: Role[] = ["ADMIN", "DIRECTOR", "ACCOUNTANT", "PROCUREMENT"];
 // Управление зарплатой других сотрудников не следует из общего финансового доступа.

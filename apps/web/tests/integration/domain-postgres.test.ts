@@ -10,6 +10,7 @@ import { guardedModuleCache } from "../helpers/guarded-module-cache";
 import { nativeOwnedIds, nativeSnapshot } from "../helpers/native-acceptance-snapshot";
 import { createPostgresFixture, rejectedSql, type PostgresRows } from "./postgres.fixture";
 import { summarizeCalendarEntries } from "../../src/lib/calendar-summary";
+import { verifyCounterpartyNative } from "../helpers/counterparty-native";
 
 type Db = PrismaClient | Prisma.TransactionClient;
 type MutationProbe = { taskId?: string; workerId?: string; workId?: string; projectId?: string; cashId?: string; paymentId?: string; receiptId?: string; payment: boolean;
@@ -262,6 +263,12 @@ before(async () => {
   payments = scope.load("../src/server/payments/service");
 });
 after(async () => { if (fixture) try { scope?.restore(); await fixture.verifyProtected(); } finally { await fixture.dispose(); } });
+
+test("counterparties/native-create-revision-CAS-audit-rollback", async () => fixture.rollback(async (tx, rows) => {
+  const manager = await rows.user("counterparty-manager", ["MANAGER"]);
+  const checks = await verifyCounterpartyNative(tx, actorOf(manager));
+  assert.equal(checks.realSqlRollback, true); assert.equal(checks.revisionCas, true);
+}));
 
 async function people(rows: PostgresRows, tag: string) {
   const [manager, engineer, worker, mounter, admin] = await Promise.all([

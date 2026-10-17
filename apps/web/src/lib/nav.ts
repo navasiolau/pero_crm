@@ -1,5 +1,6 @@
 import {
   Banknote,
+  Building2,
   CalendarDays,
   ClipboardCheck,
   FolderKanban,
@@ -18,6 +19,7 @@ import {
 
 import {
   ASSIGNEE_ROLES,
+  COUNTERPARTY_ROLES,
   FIELD_ROLES,
   FINANCE_ROLES,
   MANAGER_ROLES,
@@ -53,6 +55,7 @@ export const navItems: NavItem[] = [
   { href: "/projects", label: "Проекты", icon: FolderKanban, roles: OFFICE_ROLES, group: "manage" },
   { href: "/products", label: "Изделия", icon: Package, roles: [...OFFICE_ROLES,...FIELD_ROLES], group: "manage" },
   { href: "/clients", label: "Клиенты", icon: Users, roles: OFFICE_ROLES, group: "manage" },
+  { href: "/counterparties", label: "Контрагенты", icon: Building2, roles: COUNTERPARTY_ROLES, group: "manage" },
   { href: "/tasks", label: "Задачи", icon: ListChecks, roles: OFFICE_ROLES, group: "manage" },
   { href: "/prices", label: "Прайсы", icon: Receipt, roles: [...OFFICE_ROLES, "WORK_COORDINATOR"], group: "manage" },
   { href: "/warehouse", label: "Склад", icon: Warehouse, roles: OFFICE_ROLES, group: "manage" },
