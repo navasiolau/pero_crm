@@ -30,10 +30,28 @@
 - Предварительный расчёт, выдача/добавление аванса и собственная зарплата PROCUREMENT доступны; собственный расчётник выбирает ID из сессии.
 - Старые смешанные `payroll.orgPayout` и `payroll.orgAccrued` скрываются у снабженца при чтении, сохранённые строки не изменяются. Новые авансы используют `payroll.orgAdvance`, ADVANCE_ROLES и ссылку `/finance/advances`; ACCOUNTANT в комбинации сохраняет оба потока.
 
-## Оставшаяся приёмка
+## Native и фактическая staging-приёмка
 
-17.10.2026: повторное независимое ревью подтвердило исправление P2 наследования уведомлений и отсутствие новых замечаний. Приоритет явной новой настройки, старой смешанной настройки и default одинаков в send/display. Владелец явно разрешил сохранение отдельных веток и staging-тестирование; main и production-БД запрещены.
+17.10.2026: повторное независимое ревью подтвердило исправление P2 наследования уведомлений и отсутствие новых замечаний. Владелец разрешил сохранение отдельных веток и staging-тестирование; main и production-БД не изменялись.
 
-Native/runtime, визуальная приёмка в браузере и фактически развёрнутый staging не подтверждены. На старте локальная БД 5433 была недоступна; позднее оркестратор сообщил о разрешённом владельцем запуске и взял guards/сериализацию DB-проверок на себя. Этот исполнитель к БД не подключался.
+Оркестратор отревьюил и выполнил `.playwright-mcp/native-172.ts` через guarded local runner на существующей `localhost:5433/pero_crm/public`: **PASS**. Внутри actual DB identity guard, outer Serializable, advisory lock `(18435,55001)` и обязательный rollback marker. Использован существующий active user для recipient/createdBy без создания или изменения профилей; собственные cash/income/debt/payout/audit/event записи полностью отменены откатом транзакции.
 
-Обновлены ожидания native `finance-postgres.test.ts` для нового набора прав и разделённых адресатов SALARY/ADVANCE; сам native-прогон здесь не выполнялся. CI-only guards не обходились, новый стенд/БД не создавались, reset/seed/дампы/production/restic не использовались. Задача 2.2 остаётся открытой до фактических доказательств приёмки.
+- PROCUREMENT и PROCUREMENT + MANAGER: SALARY отклонён до первого SQL/delegate обращения.
+- PROCUREMENT: ADVANCE 4 BYN разрешён; точный повтор от PROCUREMENT и PROCUREMENT + MANAGER возвращает прежнюю выплату без новых payout/audit/event строк.
+- PROCUREMENT + ACCOUNTANT: SALARY 2 BYN разрешён. ADMIN, DIRECTOR и ACCOUNTANT: SALARY по 2 BYN разрешена.
+- Ещё 7 наборов других ролей отклонены до SQL для SALARY и ADVANCE.
+- Пять distinct payouts дают ровно 12 BYN расхода из единственного собственного прихода 1000 BYN; дополнительных Payment на выдачи нет. Исходные BYN-снимки прочитаны без подмены неизвестных значений.
+- После rollback собственных cash/income/debt/payout/audit/event строк нет; существующий пользователь не изменён. Оркестратор подтвердил **точное совпадение fingerprints всех 65 таблиц** с baseline после интеграции девяти задач.
+
+Receipts: [local-native172.json](D:/Projects/pero_crm_v2/.playwright-mcp/requests-171-179/local-native172.json), [local-after172-native.json](D:/Projects/pero_crm_v2/.playwright-mcp/requests-171-179/local-after172-native.json).
+
+На реально развёрнутом staging подтверждены ревизия `e742e2e18014191ac03551ff2730f112749b38bb` и web image `sha256:a884efc14c37ce948b022c9ac3952b0895c3ef7f12280ea096dd9e1f4e94232e`; outer guard подтвердил `crm-staging`, прежний DB container и `crm-staging_pgdata`. Проверены **четыре существующих профиля**: PROCUREMENT, ACCOUNTANT, ADMIN, DIRECTOR. Receipt: [staging172/receipt.json](D:/Projects/pero_crm_v2/.playwright-mcp/requests-171-179/staging172/run-9981b985-cd56-4a21-890d-37dcba262ca0/receipt.json).
+
+- PROCUREMENT: зарплатной карточки в финансах нет, прямой маршрут и CSV закрыты; собственный расчётник и авансы доступны.
+- ADMIN/DIRECTOR/ACCOUNTANT: зарплатная карточка, прямой маршрут и CSV доступны.
+- Оркестратор просмотрел фактические finance PNG, в том числе отсутствие зарплатной карточки у PROCUREMENT.
+- Существующий combined профиль PROCUREMENT + ACCOUNTANT на staging отсутствует. Объединение прав доказано локальным native/core и unit-тестами; **actual combined browser-приёмка не заявляется**.
+
+Staging-прогон ограничен authenticated SSR/GET страницами и CSV с отключённым JavaScript: денежных мутаций, загрузки документов и сохранения payroll не было. Изменяющие SALARY/ADVANCE и idempotency проверены реальным ядром на PostgreSQL только в локальной rollback-транзакции выше. Это границы доказательств, а не заявление о денежных операциях в staging.
+
+CI [38993731208](https://github.com/navasiolau/pero_crm/actions/runs/38993731208) на этой staging-ревизии: **все 6 jobs SUCCESS** (native, backend, components-0/1, web/bot publish); receipt [ci-e742.json](D:/Projects/pero_crm_v2/.playwright-mcp/requests-171-179/ci-e742.json). CI/build дополнены фактическими image/DB/browser receipts выше, не используются вместо deployment-приёмки. Пункт 2.2 закрыт с указанными границами.
