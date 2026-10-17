@@ -78,6 +78,7 @@ export async function GET(request: Request) {
     }),
     office
       ? prisma.client.findMany({
+          select: { id: true, name: true, lastName: true, middleName: true, phone: true },
           where: {
             AND: [clientVisibilityWhere(actor)],
             OR: [

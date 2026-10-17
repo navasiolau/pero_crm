@@ -551,12 +551,14 @@ test("files.crud: file113, документы, attachment ACL и inline-дейс
   });
 
   await t.test("inline/project-field-atomic-roles-history: поля, shared Client, Decimal total и история статуса", async () => {
-    const clientInput = { name: f.id("client-created"), phone: "111", email: "first@example.invalid", address: "Client original" };
+    const clientInput = { name: f.id("client-created"), phone: "111", email: "first@example.invalid", address: "Client original", passportNumber: "QA 000171", passportIssuedBy: "CI passport issuer" };
     const created = await f.action<BasicReply>("createClient", "/clients", manager, [clientInput]); assert.equal(created.ok, true); assert.ok(created.id);
     const createdClient = await f.db.client.findUniqueOrThrow({ where: { id: created.id } });
     assert.equal(createdClient.name, clientInput.name); assert.equal(createdClient.phone, "111");
+    assert.equal(createdClient.passportNumber, clientInput.passportNumber); assert.equal(createdClient.passportIssuedBy, clientInput.passportIssuedBy);
     const clientBase = { name: createdClient.name, phone: createdClient.phone ?? "", lastName: createdClient.lastName,
-      middleName: createdClient.middleName, email: createdClient.email, address: createdClient.address, comment: createdClient.comment };
+      middleName: createdClient.middleName, email: createdClient.email, address: createdClient.address, comment: createdClient.comment,
+      passportNumber: createdClient.passportNumber, passportIssuedBy: createdClient.passportIssuedBy };
     assert.equal((await f.action<BasicReply>("updateClient", "/clients", manager, [created.id, { ...clientInput, email: "new@example.invalid" }, clientBase])).ok, true);
     assert.equal((await f.action<BasicReply>("updateClient", "/clients", second, [created.id, { ...clientInput, phone: "222" }, clientBase])).ok, true);
     const independentlyChanged = await f.db.client.findUniqueOrThrow({ where: { id: created.id } });
@@ -573,10 +575,17 @@ test("files.crud: file113, документы, attachment ACL и inline-дейс
     const nextClientBase = { ...clientBase, phone: "222", email: "new@example.invalid" };
     await f.fault("DomainEvent", manager.id, async () => {
       const before = await nativeSnapshot(f.db);
-      assert.equal((await f.action<BasicReply>("updateClient", "/clients", manager, [created.id, { ...clientInput, phone: "444", email: "new@example.invalid" }, nextClientBase])).ok, false);
+      assert.equal((await f.action<BasicReply>("updateClient", "/clients", manager, [created.id, { ...clientInput, phone: "444", email: "new@example.invalid", passportNumber: "QA 000172" }, nextClientBase])).ok, false);
       assert.deepEqual(await nativeSnapshot(f.db), before);
     });
     assert.equal((await f.action<BasicReply>("updateClient", "/clients", manager, [created.id, { ...clientInput, phone: "444", email: "new@example.invalid" }, nextClientBase])).ok, true);
+    const passportBaseline = { ...nextClientBase, phone: "444" }, passportInput = { ...clientInput, phone: "444", email: "new@example.invalid" };
+    assert.equal((await f.action<BasicReply>("updateClient", "/clients", manager, [created.id, { ...passportInput, passportNumber: "QA 000172" }, passportBaseline])).ok, true);
+    assert.equal((await f.action<BasicReply>("updateClient", "/clients", second, [created.id, { ...passportInput, passportIssuedBy: "CI other issuer" }, passportBaseline])).ok, true);
+    const passportChanged = await f.db.client.findUniqueOrThrow({ where: { id: created.id } });
+    assert.equal(passportChanged.passportNumber, "QA 000172"); assert.equal(passportChanged.passportIssuedBy, "CI other issuer");
+    assert.equal((await f.action<BasicReply>("updateClient", "/clients", second, [created.id, { ...passportInput, passportNumber: "QA 000173" }, passportBaseline])).ok, false);
+    assert.deepEqual(await f.db.client.findUniqueOrThrow({ where: { id: created.id } }), passportChanged);
     const own = await f.project("inline-project", { stage: "LEAD", currency: "BYN", initialPrice: "123.45", managerId: manager.id });
     await f.db.project.update({ where: { id: own.id }, data: { title: "Original project" } });
     await f.db.client.update({ where: { id: own.clientId }, data: { phone: "100" } });

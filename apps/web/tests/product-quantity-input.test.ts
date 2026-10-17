@@ -49,12 +49,12 @@ test("retired Product phone/address requests fail closed while client selection 
  assert.equal(productPatchSchema.safeParse({...base,field:"client.phone",expectedClientId:"client"}).success,false);
  assert.equal(productPatchSchema.safeParse({...base,field:"project.clientId"}).success,true);
 });
-test("shared real CRUD adapter creates once and preserves exact rendered seven-field update baseline",async()=>{
+test("shared real CRUD adapter creates once and preserves exact rendered client update baseline",async()=>{
  let created=0,updated=0;const input={name:"New",phone:"100",address:"Address"};let captured:unknown;
  const actions={create:async()=>{created++;return{ok:true,id:"actual-client"}},update:async(_id:string,_input:unknown,baseline:unknown)=>{updated++;captured=baseline;return{ok:true}}};
  assert.equal((await submitClientEditor(input,null,actions)).id,"actual-client");assert.equal(created,1);assert.equal(updated,0);
- const initial={id:"old",name:"Old",phone:"200",lastName:null,middleName:null,email:null,address:"Old street",comment:null,projects:["do not send"]};
- await submitClientEditor(input,initial,actions);assert.deepEqual(captured,{name:"Old",phone:"200",lastName:null,middleName:null,email:null,address:"Old street",comment:null});assert.equal(updated,1);
+ const initial={id:"old",name:"Old",phone:"200",lastName:null,middleName:null,email:null,address:"Old street",comment:null,passportNumber:null,passportIssuedBy:null,projects:["do not send"]};
+ await submitClientEditor(input,initial,actions);assert.deepEqual(captured,{name:"Old",phone:"200",lastName:null,middleName:null,email:null,address:"Old street",comment:null,passportNumber:null,passportIssuedBy:null});assert.equal(updated,1);
 });
 
 // Источник: product-preparation-status.test.ts

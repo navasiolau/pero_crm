@@ -16,19 +16,11 @@ import {
 } from "@/components/ui/dialog";
 import {ClientDialog} from "@/components/client-dialog";
 import { displayClientName } from "@/lib/labels";
+import type { ClientBaseline } from "@/server/clients/core";
+import type { ClientDirectoryRow } from "@/server/clients/queries";
 
-interface ClientRow {
-  id: string;
-  name: string;
-  lastName: string | null;
-  middleName: string | null;
-  phone: string;
-  email: string | null;
-  address: string | null;
-  comment: string | null;
-  projects: { id: string; number: string; title: string }[];
-  projectsCount: number;
-}
+type ClientRow = ClientDirectoryRow;
+type Editing = ClientBaseline & { id: string };
 
 
 // Справочник клиентов: таблица с поиском/сортировкой/пагинацией,
@@ -44,7 +36,7 @@ export function ClientsView({
   canManage: boolean;
 }) {
   const [editOpen, setEditOpen] = useState(false);
-  const [editing, setEditing] = useState<ClientRow | null>(null);
+  const [editing, setEditing] = useState<Editing | null>(null);
   const [viewing, setViewing] = useState<ClientRow | null>(
     focusClientId ? (clients.find((c) => c.id === focusClientId) ?? null) : null,
   );
@@ -56,8 +48,8 @@ export function ClientsView({
   }
 
   function openEdit(client: ClientRow) {
-    if (!canManage) return;
-    setEditing(client);
+    if (!canManage || client.passportNumber === undefined || client.passportIssuedBy === undefined) return;
+    setEditing({ ...client, passportNumber: client.passportNumber, passportIssuedBy: client.passportIssuedBy });
     setEditOpen(true);
   }
 
@@ -165,6 +157,18 @@ export function ClientsView({
                   <div className="text-muted-foreground">Проектов</div>
                   <div>{viewing.projectsCount}</div>
                 </div>
+                {canManage && viewing.passportNumber !== undefined ? (
+                  <div className="min-w-0">
+                    <div className="text-muted-foreground">Номер паспорта</div>
+                    <div className="break-words">{viewing.passportNumber ?? "—"}</div>
+                  </div>
+                ) : null}
+                {canManage && viewing.passportIssuedBy !== undefined ? (
+                  <div className="col-span-2 min-w-0">
+                    <div className="text-muted-foreground">Кем выдан</div>
+                    <div className="whitespace-pre-wrap break-words">{viewing.passportIssuedBy ?? "—"}</div>
+                  </div>
+                ) : null}
               </div>
               {viewing.comment ? (
                 <div>

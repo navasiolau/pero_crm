@@ -159,6 +159,8 @@ model Client {
   email          String?
   address        String?
   comment        String?
+  passportNumber String?
+  passportIssuedBy String?
   legacyId       String?
   legacyTable    String?
   createdAt      DateTime        @default(now())
