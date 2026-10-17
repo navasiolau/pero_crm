@@ -119,6 +119,7 @@ async function runBoardPage(browser,origin,scope,variant,expect,checkDrag){
    await page.mouse.move(x,y);await page.mouse.down();await page.mouse.move(x+14,y+14,{steps:3});
    const preview=page.getByRole('button',{name:'Открыть изображение Карточка A на весь экран',exact:true});
    await expect(preview).toBeVisible();await expect(preview).toBeDisabled();await expect(targetCard(page)).toHaveCount(2);
+   const previewBox=await preview.evaluate(button=>({width:button.offsetWidth,height:button.offsetHeight}));assert.ok(previewBox.width>0&&Math.abs(previewBox.height-previewBox.width*3/4)<1,'DRAG_COVER_4X3_REQUIRED');
    // Реальный disabled preview проверяется внутри активного PointerSensor.
    // DOM click() не считается trusted-click доказательством; он должен оставаться без события.
    const clicks=await page.evaluate(()=>window.__qa.clicks.length);await preview.evaluate(button=>button.click());
@@ -147,12 +148,12 @@ async function closeOwned(browser,server){
  const promises=[];if(browser)promises.push(browser.close());if(server?.listening){server.closeAllConnections();promises.push(new Promise((resolve,reject)=>server.close(error=>error?reject(error):resolve())));}
  return(await Promise.allSettled(promises)).filter(result=>result.status==='rejected').map(result=>result.reason);
 }
-async function naturalImages(browser,origin,expect,release){
+async function naturalImages(browser,origin,expect,release,directory){
  const sizes={landscape:[1600,400],square:[800,800],portrait:[200,2000]},checks=[];
  for(const viewport of [{width:1440,height:900},{width:390,height:844},{width:360,height:800}]){
   const page=await browser.newPage({viewport}),errors=[];page.on('pageerror',error=>errors.push(error.message));
   const geometry=img=>img.evaluate(image=>{const r=image.getBoundingClientRect(),p=image.parentElement.getBoundingClientRect(),style=getComputedStyle(image);return{width:r.width,height:r.height,left:r.left-p.left,top:r.top-p.top,right:p.right-r.right,bottom:p.bottom-r.bottom,fit:style.objectFit,position:style.objectPosition,naturalWidth:image.naturalWidth,naturalHeight:image.naturalHeight};});
-  const frame=(box,label)=>{assert.ok(box.width>0&&Math.abs(box.height-box.width*4/3)<1,label);for(const edge of ['left','top','right','bottom'])assert.ok(Math.abs(box[edge])<1,label+' '+edge);};
+  const frame=(box,label)=>{assert.ok(box.width>0&&Math.abs(box.height-box.width*3/4)<1,label);for(const edge of ['left','top','right','bottom'])assert.ok(Math.abs(box[edge])<1,label+' '+edge);};
   try{
    release(false);await page.goto(origin+'/natural?variant=baseline',{waitUntil:'domcontentloaded'});
    for(const kind of ['product','project']){const img=page.locator(`[data-natural="${kind}-slow"] img`);await img.scrollIntoViewIfNeeded();frame(await geometry(img),kind+' loading');assert.equal(await img.evaluate(image=>image.complete),false);}
@@ -163,7 +164,7 @@ async function naturalImages(browser,origin,expect,release){
      const box=await geometry(img);frame(box,kind+' '+shape);assert.equal(box.fit,'cover');assert.equal(box.position,'50% 50%');assert.deepEqual([box.naturalWidth,box.naturalHeight],[width,height]);
     }
     const slow=page.locator(`[data-natural="${kind}-slow"] img`);await slow.scrollIntoViewIfNeeded();await expect.poll(()=>slow.evaluate(image=>image.complete&&image.naturalWidth>0)).toBe(true);frame(await geometry(slow),kind+' loaded');
-    const broken=page.locator(`[data-natural="${kind}-broken"]`);await broken.scrollIntoViewIfNeeded();const placeholder=broken.getByRole('img',{name:'Эскиз не загрузился'});await expect(placeholder).toBeVisible();const box=await placeholder.boundingBox();assert.ok(Math.abs(box.height-box.width*4/3)<1);
+    const broken=page.locator(`[data-natural="${kind}-broken"]`);await broken.scrollIntoViewIfNeeded();const placeholder=broken.getByRole('img',{name:'Эскиз не загрузился'});await expect(placeholder).toBeVisible();const box=await placeholder.boundingBox();assert.ok(Math.abs(box.height-box.width*3/4)<1);
     const empty=page.locator(`[data-natural="${kind}-empty"]`);assert.equal(await empty.locator('img,[role="img"]').count(),0);assert.ok((await empty.boundingBox()).height<200);
    }
    const detail=page.locator('[data-detail] img');await detail.scrollIntoViewIfNeeded();await expect.poll(()=>detail.evaluate(image=>image.complete&&image.naturalWidth>0)).toBe(true);assert.equal((await geometry(detail)).fit,'contain');assert.equal(await detail.getAttribute('src'),'/api/files/qa160-natural-portrait?preview=cover');
@@ -174,7 +175,12 @@ async function naturalImages(browser,origin,expect,release){
    await page.locator('#natural-dragging').click();await page.setViewportSize({width:viewport.width-20,height:viewport.height});for(const kind of ['product','project'])frame(await geometry(page.locator(`[data-natural="${kind}-portrait"] img`)),kind+' resized');
    await page.setViewportSize(viewport);await page.reload({waitUntil:'domcontentloaded'});
    for(const kind of ['product','project'])for(const shape of ['landscape','square','portrait','slow','fullscreen']){const img=page.locator(`[data-natural="${kind}-${shape}"] img`);await img.scrollIntoViewIfNeeded();await expect.poll(()=>img.evaluate(image=>image.complete&&image.naturalWidth>0)).toBe(true);frame(await geometry(img),kind+' cached '+shape);}
-   assert.deepEqual(errors,[]);checks.push({width:viewport.width,shapes:3,loading:true,broken:true,detail:true,fullscreen:true,resize:true,cached:true});
+   const screenshots=[];for(const theme of ['light','dark']){
+    await page.evaluate(dark=>document.documentElement.classList.toggle('dark',dark),theme==='dark');
+    for(const kind of ['product','project'])for(const shape of Object.keys(sizes))frame(await geometry(page.locator(`[data-natural="${kind}-${shape}"] img`)),kind+' '+theme+' '+shape);
+    const screenshot=path.join(directory,`covers-${viewport.width}-${theme}.png`);await page.screenshot({path:screenshot,fullPage:true});screenshots.push(screenshot);
+   }
+   assert.deepEqual(errors,[]);checks.push({width:viewport.width,aspectRatio:'4:3',shapes:3,loading:true,broken:true,detail:true,fullscreen:true,resize:true,cached:true,screenshots});
   }finally{release(true);await page.close();}
  }
  return checks;
@@ -219,7 +225,7 @@ export async function runProductCardNavigationGate(){
    assert.equal(error.evidence.ready,true);assert.equal(error.evidence.trusted,true);
    mutants.push({variant,scope,killed:true,code:error.code,phase:error.phase,provenanceAccepted:true,ready:true,trusted:true});
   }
-  const numbers=await mobileNumbers(browser,origin,expect),natural=await naturalImages(browser,origin,expect,release);assert.deepEqual(httpUnexpected,[]);
+  const numbers=await mobileNumbers(browser,origin,expect),natural=await naturalImages(browser,origin,expect,release,directory);assert.deepEqual(httpUnexpected,[]);
   for(const variant of VARIANTS)for(const[file,expected]of fixtures[variant].files)assert.equal(sha(await readFile(file)),expected,'INPUT_CHANGED_DURING_RUN');
   assert.equal(sha(await readFile(path.join(SOURCE,'app/globals.css'))),sha(cssSource),'CSS_CHANGED_DURING_RUN');
   for(const[file,expected]of configuration)assert.equal(sha(await readFile(file)),expected,'CONFIGURATION_CHANGED_DURING_RUN');assert.equal(sha(await readFile(fileURLToPath(import.meta.url))),producerBefore,'PRODUCER_CHANGED_DURING_RUN');

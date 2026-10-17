@@ -10,7 +10,9 @@ const { build } = createRequire(require.resolve("tsx/package.json"))("esbuild");
 const mode = process.argv[2] ?? "both";
 assert.ok(["both", "products"].includes(mode), "KANBAN_QA_SECTION_REQUIRED");
 const sections = mode === "products" ? ["products"] : ["projects", "products"];
-const directory = path.resolve(web, "../../.playwright-mcp", mode === "products" ? "search145/components" : "search117");
+const directory = process.env.KANBAN_FOCUS_ARTIFACT_DIR
+  ? path.resolve(web, process.env.KANBAN_FOCUS_ARTIFACT_DIR)
+  : path.resolve(web, "../../.playwright-mcp", mode === "products" ? "search145/components" : "search117");
 await mkdir(directory, { recursive: true });
 // Настоящие Views, карточки, DnD, фильтры, контроллер и Sheet. Только
 // Next-навигация и серверные actions заменены контролируемым транспортом.
@@ -29,9 +31,10 @@ const common={title:'Стеллаж',statusChangedAt:new Date().toISOString(),st
  projectId:'parent',projectStage:'IN_WORK',projectNumber:'199',projectTitle:'Заказ',engineerId:null,engineerName:null,
  isEngineeringParticipant:false,hasB3d:false,noModel:true,sketchFile:null,coverFile:null,hasMaterialShortage:false,
  tasksCount:0,filesCount:0,productsCount:1};
+const cover={id:'qa176-focus-cover',fileName:'focus.png',mimeType:'image/png',hasThumb:true};
 const all=[...Array.from({length:12},(_,i)=>({...common,id:'partial-'+i,number:number+String(99-i),
  title:'Совпадение '+i,status:'INSTALLATION',stage:'RECLAMATION'})),
- {...common,id:'target',number,status:'INSTALLATION',stage:'RECLAMATION',title:'Искомая карточка'},
+ {...common,id:'target',number,status:'INSTALLATION',stage:'RECLAMATION',title:'Искомая карточка',sketchFile:cover,coverFile:cover},
  {...common,id:'start',number:'100.1',status:'PREPARATION',stage:'LEAD',title:'Начало'},
  {...common,id:'end',number:'800.1',status:'DONE',stage:'REFUSED',title:'Конец'}];
 function rows(query){const p=new URLSearchParams(query),q=p.get('q')?.trim()||'',selected=parseListFilterValue(p.get(product?'status':'stage'));return all.filter(row=>(!window.__omitTarget||row.id!=='target')&&(!q||row.number.includes(q)||row.title.toLowerCase().includes(q.toLowerCase()))&&(!selected||selected.includes(product?row.status:row.stage))).map(row=>({...row}));}
@@ -75,7 +78,9 @@ await writeFile(path.join(directory,'bundle-metafile.json'),JSON.stringify(bundl
 const postcss=createRequire(require.resolve("@tailwindcss/postcss"))("postcss"),tailwind=require("@tailwindcss/postcss");
 const css=(await postcss([tailwind({base:web})]).process(await readFile(path.join(web,"src/app/globals.css"),"utf8"),{from:path.join(web,"src/app/globals.css")})).css;
 const server=createServer((request,response)=>{
- const url=new URL(request.url,"http://localhost");response.setHeader("content-type",url.pathname==="/app.js"?"text/javascript":url.pathname==="/app.css"?"text/css":"text/html");
+ const url=new URL(request.url,"http://localhost");
+ if(url.pathname==='/api/files/qa176-focus-cover'){response.setHeader('content-type','image/png');response.end(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNwb3/5HwAFhwK3tfHguAAAAABJRU5ErkJggg==','base64'));return;}
+ response.setHeader("content-type",url.pathname==="/app.js"?"text/javascript":url.pathname==="/app.css"?"text/css":"text/html");
  response.end(url.pathname==="/app.js"?bundle.outputFiles[0].text:url.pathname==="/app.css"?css:'<!doctype html><html lang="ru"><head><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/app.css"></head><body style="font-family:Arial,sans-serif"><div id="root"></div><script src="/app.js"></script></body></html>');
 });
 await new Promise(resolve=>server.listen(0,"127.0.0.1",resolve));
