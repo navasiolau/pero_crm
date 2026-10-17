@@ -16,6 +16,7 @@ import { nativeSnapshot } from "../helpers/native-acceptance-snapshot";
 import { createPostgresFixture, fixedBynTotal, moneyRows as money, rejectedSql, savedOrgBalance, type PostgresRows } from "./postgres.fixture";
 import { verifyDefaultCashAccountNative } from "../helpers/default-cash-native";
 import { verifyInlineExpenseArticleNative } from "../helpers/inline-expense-article-native";
+import { verifyInlineMaterialNative } from "../helpers/inline-material-native";
 
 let fixture: Awaited<ReturnType<typeof createPostgresFixture>>;
 let scope: ReturnType<typeof guardedModuleCache>;
@@ -141,6 +142,11 @@ test("cash/default-setting-roles-cas-audit-and-atomic-deactivation", async () =>
 test("article/inline-option-codes-audit-and-no-money", async () => fixture.rollback(async (tx, rows) => {
   const actor = actorFor(await rows.user("inline-article-owner", ["PROCUREMENT"]));
   assert.ok(await verifyInlineExpenseArticleNative(tx, actor));
+}));
+
+test("material/inline-option-existing-unit-warehouse-role-audit-and-no-money", async () => fixture.rollback(async (tx, rows) => {
+  const actor = actorFor(await rows.user("inline-material-owner", ["PROCUREMENT"]));
+  assert.ok(await verifyInlineMaterialNative(tx, actor));
 }));
 
 test("cash/role-union-active-none-current-currencies-and-refusals", async () => fixture.rollback(async (tx, rows) => {

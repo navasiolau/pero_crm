@@ -20,6 +20,8 @@ import { FinanceDocumentUpload } from "@/components/finance-document-upload";
 import { createRequestId } from "@/lib/request-id";
 import { initialCashAccount } from "@/lib/cash-account-default";
 import { ArticleDialog } from "@/components/article-dialog";
+import { MaterialDialog } from "@/components/material-dialog";
+import type { MaterialCreateOptions } from "@/server/warehouse/material-contracts";
 const CURRENCIES = ["BYN", "RUB", "USD", "EUR"];
 
 // Диалог внесения прихода/расхода (§11): валюта, касса в валюте операции,
@@ -35,6 +37,7 @@ export function PaymentDialog({
   cashAccounts,
   expenseArticles,
   stockMaterials,
+  materialCreateOptions,
 }: {
   direction: "INCOME" | "EXPENSE";
   open: boolean;
@@ -45,6 +48,7 @@ export function PaymentDialog({
   cashAccounts: CashAccountOption[];
   expenseArticles: ExpenseArticleOption[];
   stockMaterials?: StockMaterialOption[];
+  materialCreateOptions?: MaterialCreateOptions;
 }) {
   const isStockPurchase = stockMaterials !== undefined;
   const command = usePaymentCreateCommand(open, {kind: isStockPurchase ? "stock" : "payment", direction, projectId});
@@ -52,6 +56,16 @@ export function PaymentDialog({
   const blocked = command.intent && "blocked" in command.intent ? command.intent.error : "";
   const isIncome = !isStockPurchase && direction === "INCOME";
   const [materialId, setMaterialId] = useState("");
+  const [createdMaterials, setCreatedMaterials] = useState<StockMaterialOption[]>([]);
+  const [materialOpen, setMaterialOpen] = useState(false);
+  const materialCreateButton = useRef<HTMLButtonElement>(null);
+  const materialOptions = [...new Map([...createdMaterials, ...(stockMaterials ?? [])].map(material => [material.id, material])).values()];
+  useEffect(() => {
+    setCreatedMaterials(current => {
+      const remaining = current.filter(material => !stockMaterials?.some(server => server.id === material.id));
+      return remaining.length === current.length ? current : remaining;
+    });
+  }, [stockMaterials]);
   const [quantity, setQuantity] = useState("");
   const [unitPrice, setUnitPrice] = useState("");
   const [selectedProjectId,setSelectedProjectId]=useState(projectId??"");
@@ -109,6 +123,7 @@ export function PaymentDialog({
       setCashAccountId(initial.cashAccountId);
       setArticleId("");
       setArticleOpen(false);
+      setMaterialOpen(false);
       setAmount("");
       setMaterialId(""); setQuantity(""); setUnitPrice("");
       setRate("");
@@ -170,6 +185,7 @@ export function PaymentDialog({
   const canSubmit =
     !pending &&
     !articleOpen &&
+    !materialOpen &&
     !documentLoading &&
     (isIncome || isStockPurchase || reportDocument !== null) &&
     (!isStockPurchase || materialId !== "") &&
@@ -199,7 +215,7 @@ export function PaymentDialog({
   ) : null;
 
   return (
-    <Dialog open={open} onOpenChange={next => { if (!pending && !articleOpen) onOpenChange(next); }}>
+    <Dialog open={open} onOpenChange={next => { if (!pending && !articleOpen && !materialOpen) onOpenChange(next); }}>
       <DialogContent className="max-h-[90dvh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
@@ -269,7 +285,8 @@ export function PaymentDialog({
             </div>
           </div>
 
-          {isStockPurchase ? <StockMaterialFields materials={stockMaterials} materialId={materialId} onMaterialChange={setMaterialId} quantity={quantity} onQuantityChange={setQuantity} unitPrice={unitPrice} onPriceChange={setUnitPrice} currency={currency} prefix="purchase" disabled={pending} /> : null}
+          {isStockPurchase ? <StockMaterialFields materials={materialOptions} materialId={materialId} onMaterialChange={setMaterialId} quantity={quantity} onQuantityChange={setQuantity} unitPrice={unitPrice} onPriceChange={setUnitPrice} currency={currency} prefix="purchase" disabled={pending || command.loading || !!saved || !!blocked}
+            onCreateMaterial={materialCreateOptions ? () => setMaterialOpen(true) : undefined} createButtonRef={materialCreateButton} /> : null}
           {articleField}
           {!isIncome ? <div className="min-w-0 space-y-2">
             <Label htmlFor="pay-document">{isStockPurchase ? "Отчетный документ (необязательно)" : "Отчетный документ *"}</Label>
@@ -343,11 +360,11 @@ export function PaymentDialog({
         {saved?.data.reportDocumentId && !reportDocument ? <p className="text-sm text-muted-foreground">Отчётный документ закреплён в сохранённом запросе.</p> : null}
         {blocked || command.error ? <p role="alert" className="text-sm text-destructive">{blocked || command.error}</p> : null}
         <DialogFooter>
-          <Button variant="outline" disabled={pending || articleOpen} onClick={() => onOpenChange(false)}>
+          <Button variant="outline" disabled={pending || articleOpen || materialOpen} onClick={() => onOpenChange(false)}>
             Отмена
           </Button>
           <Button
-            disabled={pending || articleOpen || command.loading || !command.actorId || !!blocked || (!saved && !canSubmit)}
+            disabled={pending || articleOpen || materialOpen || command.loading || !command.actorId || !!blocked || (!saved && !canSubmit)}
             onClick={() =>
               startTransition(async () => {
                 try {
@@ -388,6 +405,11 @@ export function PaymentDialog({
             setCreatedArticles(current => [...current.filter(item => item.id !== article.id), article]);
             setArticleId(article.id);
           }} />
+        {materialCreateOptions && isStockPurchase ? <MaterialDialog open={materialOpen} onOpenChange={setMaterialOpen} {...materialCreateOptions} returnFocus={materialCreateButton}
+          onCreated={material => {
+            setCreatedMaterials(current => [...current.filter(item => item.id !== material.id), material]);
+            setMaterialId(material.id);
+          }} /> : null}
       </DialogContent>
     </Dialog>
   );

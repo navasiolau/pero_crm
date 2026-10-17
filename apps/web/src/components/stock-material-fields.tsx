@@ -4,13 +4,17 @@ import { Label } from "@/components/ui/label";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { formatQty } from "@/lib/format";
 import type { StockMaterialOption } from "@/server/warehouse/contracts";
-export function StockMaterialFields({ materials, materialId, onMaterialChange, quantity, onQuantityChange, unitPrice, onPriceChange, currency, prefix, disabled }: {
+import { Button } from "@/components/ui/button";
+import type { RefObject } from "react";
+export function StockMaterialFields({ materials, materialId, onMaterialChange, quantity, onQuantityChange, unitPrice, onPriceChange, currency, prefix, disabled, onCreateMaterial, createButtonRef }: {
   materials: StockMaterialOption[]; materialId: string; onMaterialChange: (value: string) => void;
   quantity: string; onQuantityChange: (value: string) => void; unitPrice: string; onPriceChange: (value: string) => void;
   currency: string; prefix: string; disabled?: boolean;
+  onCreateMaterial?: () => void; createButtonRef?: RefObject<HTMLButtonElement | null>;
 }) {
   return <>
     <StockMaterialPicker materials={materials} value={materialId} onChange={onMaterialChange} id={`${prefix}-material`} disabled={disabled} />
+    {onCreateMaterial ? <Button ref={createButtonRef} variant="outline" className="self-start" disabled={disabled} onClick={onCreateMaterial}>Создать материал</Button> : null}
     <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
       <div className="flex min-w-0 flex-col gap-1.5"><Label htmlFor={`${prefix}-qty`}>Количество *</Label>
         <Input id={`${prefix}-qty`} disabled={disabled} inputMode="decimal" value={quantity} onChange={event => onQuantityChange(event.target.value)} placeholder="0" /></div>

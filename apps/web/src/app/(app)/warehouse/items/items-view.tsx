@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { FolderPlus, Pencil, Plus, Power } from "lucide-react";
 import { toast } from "sonner";
 
@@ -15,32 +15,19 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { SearchableSelect } from "@/components/ui/searchable-select";
+import { MaterialDialog } from "@/components/material-dialog";
 import { formatAmount, formatQty } from "@/lib/format";
 import type { MaterialUnitOption } from "@/server/warehouse/unit-contracts";
 import { cn } from "@/lib/utils";
 import {
-  addMaterial,
   addMaterialCategory,
   toggleMaterial,
   toggleMaterialCategory,
-  updateMaterial,
 } from "@/server/warehouse/actions";
 import type {
   MaterialCategoryView,
   MaterialView,
 } from "@/server/warehouse/queries";
-
-const emptyForm = {
-  name: "",
-  sku: "",
-  categoryId: "",
-  unitId: "",
-  purchasePrice: "",
-  minStock: "",
-  comment: "",
-};
 
 // Номенклатура склада: материалы с остатками, категории, учётные цены.
 // Материал/категория с историей не удаляются — деактивируются (иконка Power).
@@ -63,49 +50,10 @@ export function ItemsView({
   const [viewing, setViewing] = useState<MaterialView | null>(null);
   const [categoriesOpen, setCategoriesOpen] = useState(false);
   const [categoryName, setCategoryName] = useState("");
-  const [form, setForm] = useState(emptyForm);
+  const createButton = useRef<HTMLButtonElement>(null);
 
-  // В выбор — только активные категории (сервер отклонит неактивную)
-  const categoryOptions = useMemo(
-    () =>
-      categories
-        .filter((category) => category.active)
-        .map((category) => ({ value: category.id, label: category.name })),
-    [categories],
-  );
-
-  function set(key: keyof typeof emptyForm) {
-    return (event: { target: { value: string } }) =>
-      setForm((prev) => ({ ...prev, [key]: event.target.value }));
-  }
-
-  function openCreate() {
-    setEditing(null);
-    setForm({ ...emptyForm, unitId: units.find(unit => unit.id === "warehouse-unit-piece")?.id ?? units[0]?.id ?? "" });
-    setEditOpen(true);
-  }
-
-  function openEdit(material: MaterialView) {
-    setEditing(material);
-    setForm({
-      name: material.name,
-      sku: material.sku ?? "",
-      categoryId: material.categoryId ?? "",
-      unitId: material.unitId,
-      purchasePrice:
-        material.purchasePrice === null ? "" : String(material.purchasePrice),
-      minStock: material.minStock === null ? "" : String(material.minStock),
-      comment: material.comment ?? "",
-    });
-    setEditOpen(true);
-  }
-
-  const minStock = Number(form.minStock);
-  const formValid =
-    form.name.trim() !== "" &&
-    units.some(unit => unit.id === form.unitId) &&
-    (form.minStock.trim() === "" ||
-      (Number.isFinite(minStock) && minStock >= 0));
+  function openCreate() { setEditing(null); setEditOpen(true); }
+  function openEdit(material: MaterialView) { setEditing(material); setEditOpen(true); }
 
   const columns: DataColumn<MaterialView>[] = [
     {
@@ -254,7 +202,7 @@ export function ItemsView({
               <FolderPlus className="size-4" />
               Категории
             </Button>
-            <Button onClick={openCreate}>
+            <Button ref={createButton} onClick={openCreate}>
               <Plus className="size-4" />
               Добавить материал
             </Button>
@@ -363,124 +311,7 @@ export function ItemsView({
         </DialogContent>
       </Dialog>
 
-      {/* Создание / редактирование материала */}
-      <Dialog open={editOpen} onOpenChange={setEditOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>
-              {editing ? "Редактировать материал" : "Новый материал"}
-            </DialogTitle>
-            <DialogDescription>
-              Учётная цена рассчитывается по остатку; минимальный остаток — необязателен
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex flex-col gap-3">
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="m-name">Название *</Label>
-              <Input
-                id="m-name"
-                value={form.name}
-                onChange={set("name")}
-                placeholder="ЛДСП 16 мм, Кромка ПВХ…"
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="m-sku">Артикул</Label>
-                <Input id="m-sku" value={form.sku} onChange={set("sku")} />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <Label>Категория</Label>
-                <SearchableSelect
-                  options={categoryOptions}
-                  value={form.categoryId}
-                  onChange={(value) =>
-                    setForm((prev) => ({ ...prev, categoryId: value }))
-                  }
-                  placeholder="Без категории"
-                  searchPlaceholder="Поиск категории…"
-                  emptyText="Категория не найдена"
-                  allowClear
-                />
-              </div>
-            </div>
-            <div className="grid grid-cols-3 gap-3">
-              <div className="flex flex-col gap-1.5">
-                <Label>Единица *</Label>
-                <SearchableSelect
-                  options={units.map(unit => ({ value: unit.id, label: unit.name }))}
-                  value={form.unitId}
-                  onChange={unitId => setForm(prev => ({ ...prev, unitId }))}
-                  placeholder="Выберите единицу"
-                  searchPlaceholder="Поиск единицы…"
-                  emptyText="Единиц нет — администратор может добавить их в настройках"
-                />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="m-price">Учётная цена, BYN</Label>
-                <Input
-                  id="m-price"
-                  inputMode="decimal"
-                  value={form.purchasePrice||'0'}
-                  readOnly
-                  placeholder="0"
-                />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="m-min">Мин. остаток</Label>
-                <Input
-                  id="m-min"
-                  inputMode="decimal"
-                  value={form.minStock}
-                  onChange={set("minStock")}
-                  placeholder="0"
-                />
-              </div>
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="m-comment">Комментарий</Label>
-              <Input
-                id="m-comment"
-                value={form.comment}
-                onChange={set("comment")}
-                placeholder="Необязательно"
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditOpen(false)}>
-              Отмена
-            </Button>
-            <Button
-              disabled={pending || !formValid}
-              onClick={() =>
-                startTransition(async () => {
-                  const payload = {
-                    name: form.name.trim(),
-                    sku: form.sku.trim() || undefined,
-                    unitId: form.unitId,
-                    categoryId: form.categoryId || undefined,
-                    minStock:
-                      form.minStock.trim() === "" ? undefined : minStock,
-                    comment: form.comment.trim() || undefined,
-                  };
-                  const result = editing
-                    ? await updateMaterial(editing.id, payload)
-                    : await addMaterial(payload);
-                  if (result.ok) {
-                    toast.success(editing ? "Сохранено" : "Материал создан");
-                    setEditOpen(false);
-                  } else {
-                    toast.error(result.error ?? "Ошибка");
-                  }
-                })
-              }
-            >
-              {pending ? "Сохранение…" : editing ? "Сохранить" : "Создать"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <MaterialDialog open={editOpen} onOpenChange={setEditOpen} units={units} categories={categories} editing={editing} showAccountingPrice returnFocus={createButton} />
 
       {/* Категории материалов */}
       <Dialog open={categoriesOpen} onOpenChange={setCategoriesOpen}>

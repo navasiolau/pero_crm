@@ -129,6 +129,7 @@ test("Chromium actual PaymentDialog preserves UUID/manual FX through UNKNOWN, re
   const modules: Record<string, string> = {
     "next/navigation": "export const useRouter=()=>({refresh:()=>{window.__refreshes++}});",
     "@/server/payments/actions": "export const getPaymentActorId=async()=>({ok:true,actorId:'actor'});export const addPayment=(data,actor)=>window.__pay(data,actor);",
+    "@/server/warehouse/actions": "export const addMaterial=async()=>{throw Error('UNEXPECTED_INLINE_MATERIAL')};export const updateMaterial=async()=>{throw Error('UNEXPECTED_INLINE_MATERIAL')};",
     "@/server/warehouse/stock-purchase-actions": "export const addPaidStockReceipt=()=>{throw Error('unexpected stock RPC')};",
     "@/server/finance/actions": "export const addExpenseArticle=async()=>({ok:true,article:{id:'fixture-article',name:'Статья'}});export const fetchNbrbRate=async()=>{window.__fxCalls++;sessionStorage.setItem('qa134:fx',String(window.__fxCalls));return{ok:true,rate:2.5,date:'2026-10-10'}};",
     "@/components/finance-document-upload": "export const FinanceDocumentUpload=()=>null;",

@@ -19,6 +19,8 @@ import { withWarehouseWrite } from "./accounting";
 import { createStockMovementCore } from "./movement-service";
 import {MANAGER_ROLES,WAREHOUSE_MANAGE_ROLES} from "@/lib/roles";
 import { requireRole } from "@/server/require-role";
+import { materialSchema, type MaterialInput, type MaterialCreateResult } from "./material-contracts";
+import { createMaterialInTransaction, requireMaterialUnit, materialCatalogError } from "./material-core";
 
 // Склад (§12, фаза 6). Правки — админ/директор/менеджер; просмотр — офисные
 // роли (разграничение на страницах). Цены — BYN; EXPENSE/RETURN несут
@@ -87,53 +89,13 @@ export async function toggleMaterialCategory(
 
 // ─── Номенклатура ─────────────────────────────────────────────────────────
 
-const materialSchema = z.object({
-  name: z.string().trim().min(1, "Укажите название"),
-  sku: z.string().optional(),
-  unitId: z.string().min(1, "Выберите единицу измерения"),
-  categoryId: z.string().optional(),
-  minStock: z.number().nonnegative("Мин. остаток не может быть отрицательным").optional(),
-  comment: z.string().optional(),
-}).strict();
-
-async function requireMaterialUnit(tx: import("@prisma/client").Prisma.TransactionClient, unitId: string) {
-  const unit = await tx.materialUnit.findUnique({ where: { id: unitId }, select: { id: true } });
-  if (!unit) throw Error("Единица измерения не найдена. Обновите список единиц.");
-}
-function materialCatalogError(error: unknown): string {
-  if (typeof error === "object" && error !== null && "code" in error && error.code === "P2003") {
-    return "Выбранная единица или категория больше недоступна. Обновите справочник.";
-  }
-  return error instanceof Error ? error.message : "Не удалось сохранить материал";
-}
-
-export async function addMaterial(input: z.input<typeof materialSchema>): Promise<{ ok: boolean; error?: string }> {
+export async function addMaterial(input: MaterialInput): Promise<MaterialCreateResult> {
   const session = await requireRole(WAREHOUSE_MANAGE_ROLES);
-  const parsed = materialSchema.safeParse(input);
-  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Ошибка данных" };
-  const data = parsed.data;
-  if (data.categoryId) {
-    const category = await prisma.materialCategory.findUnique({ where: { id: data.categoryId } });
-    if (!category || !category.active) return { ok: false, error: "Категория не найдена" };
-  }
-  let material;
   try {
-    material = await withWarehouseWrite(async tx => {
-      await requireMaterialUnit(tx, data.unitId);
-      return tx.material.create({ data: {
-        name: data.name, sku: data.sku?.trim() || null, unitId: data.unitId,
-        categoryId: data.categoryId || null, purchasePrice: 0,
-        minStock: data.minStock ?? null, comment: data.comment?.trim() || null,
-      }, include: { measurementUnit: { select: { name: true } } } });
-    });
+    const result = await withWarehouseWrite(tx => createMaterialInTransaction({ id: session.user.id, name: session.user.name ?? "", roles: session.user.roles, source: "web" }, input, tx));
+    if (result.ok) { await revalidateWarehouse(); revalidatePath("/settings/warehouse-units"); }
+    return result;
   } catch (error) { return { ok: false, error: materialCatalogError(error) }; }
-  await writeChangeLog({ actorType: "user", actorId: session.user.id, actorName: session.user.name ?? undefined,
-    entity: "material", entityId: material.id, action: "create",
-    newValue: { name: material.name, sku: material.sku, unitId: material.unitId, unit: material.measurementUnit.name, purchasePrice: 0 },
-  });
-  await revalidateWarehouse();
-  revalidatePath("/settings/warehouse-units");
-  return { ok: true };
 }
 
 export async function updateMaterial(id: string, input: z.input<typeof materialSchema>): Promise<{ ok: boolean; error?: string }> {

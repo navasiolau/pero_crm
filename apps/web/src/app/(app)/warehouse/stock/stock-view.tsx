@@ -19,6 +19,7 @@ import { Label } from "@/components/ui/label";
 import { StockMaterialFields } from "@/components/stock-material-fields";
 import { PaymentDialog } from "@/components/payment-dialog";
 import type { CashAccountOption, ExpenseArticleOption } from "@/server/finance/contracts";
+import type { MaterialCreateOptions } from "@/server/warehouse/material-contracts";
 import { formatAmount, formatQty } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { addInventoryReceipt } from "@/server/warehouse/actions";
@@ -38,7 +39,7 @@ export function StockView({
   materials: MaterialOption[];
   canManage: boolean;
   showMoney: boolean;
-  purchaseOptions?: { cashAccounts: CashAccountOption[]; expenseArticles: ExpenseArticleOption[] };
+  purchaseOptions?: { cashAccounts: CashAccountOption[]; expenseArticles: ExpenseArticleOption[]; materialCreateOptions?: MaterialCreateOptions };
 }) {
   const [pending, startTransition] = useTransition();
   const [incomeOpen, setIncomeOpen] = useState(false);
