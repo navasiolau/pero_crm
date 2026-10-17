@@ -20,7 +20,7 @@ createRoot(document.getElementById('root')).render(<App/>);`,resolveDir:web,load
 b.onResolve({filter:/^(next\/navigation|sonner|@\/server\/payments\/actions|@\/server\/finance\/actions|@\/server\/warehouse\/stock-purchase-actions)$/},a=>({path:a.path,namespace:'boundary'}));
 b.onLoad({filter:/.*/,namespace:'boundary'},a=>({loader:'js',contents:a.path==='next/navigation'?'export const useRouter=()=>({refresh(){}});':a.path==='sonner'?'export const toast={error(){},success(){}};':a.path.includes('stock-purchase')?'export const addPaidStockReceipt=async()=>({ok:false});':a.path.includes('payments')?
 `export const getPaymentActorId=async()=>({ok:true,actorId:'${actor}'});export const addPayment=async input=>{window.__sent??=[];window.__sent.push(input);return {ok:false,outcome:'UNKNOWN',retrySafe:true,clientMutationId:input.clientMutationId,error:'lost acknowledgement'}};`:
-`export const fetchNbrbRate=async()=>({ok:true,rate:0.035,date:'2026-10-17'});` }));}}],logLevel:'silent'});
+`export const addExpenseArticle=async()=>({ok:true,article:{id:"fixture-article",name:"Статья"}});export const fetchNbrbRate=async()=>({ok:true,rate:0.035,date:'2026-10-17'});` }));}}],logLevel:'silent'});
 
 async function withPayment(config,run){const context=await browser.newContext();try{const page=await context.newPage();page.setDefaultTimeout(5000);
 await page.route('http://default-cash.fixture/',r=>r.fulfill({contentType:'text/html',body:'<style>.z-50{z-index:50}[data-slot=dialog-content]{position:relative;z-index:50}</style><div id="root"></div>'}));

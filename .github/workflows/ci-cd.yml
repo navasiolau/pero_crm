@@ -81,6 +81,8 @@ jobs:
           files=()
           for file in apps/web/tests/*.test.ts apps/web/tests/*.test.mjs; do
             case "${file##*/}" in
+              inline-expense-article-component.test.mjs)
+                cohort=components-0 ;;
               default-cash-account-component.test.mjs|default-cash-forms-component.test.mjs|global-kanban-current-engineer-component.test.mjs|income-form-component.test.mjs|kanban-render-isolation.test.mjs|product-card-navigation-browser.test.mjs|product-kanban-search-readiness.test.mjs|project-filter-component.test.mjs|stock-movement-component.test.mjs|warehouse-units-component.test.mjs)
                 cohort=components-0 ;;
               client-passport-component.test.mjs|counterparty-component.test.mjs|file-list-printing.test.ts|inline-field-subscriptions.test.mjs|project-client-contact-component.test.mjs|project-product-create-dialog.test.mjs|warehouse-deletion-component.test.mjs|task-status-command.browser.test.ts)

@@ -35,7 +35,7 @@ const bundle=build({stdin:{contents:`
   '@/server/warehouse/actions':'export const requestMaterial=async input=>{window.__requests.push(input);return{ok:false,error:"retry"}};export const returnMaterial=async input=>{window.__returns.push(input);return{ok:false,error:"retry"}};export const addProjectMaterial=async()=>({ok:true});export const updateProjectMaterial=async()=>({ok:true});export const deleteProjectMaterial=async()=>({ok:true});',
   '@/server/payments/actions':'export const getPaymentActorId=async()=>({ok:true,actorId:"accountant"});export const addPayment=async()=>{throw Error("UNEXPECTED_PAYMENT_WRITE")};export const deletePayment=async()=>{throw Error("UNEXPECTED_PAYMENT_DELETE")};',
   '@/server/warehouse/stock-purchase-actions':'export const addPaidStockReceipt=async()=>{throw Error("UNEXPECTED_STOCK_WRITE")};',
-  '@/server/finance/actions':'export const fetchNbrbRate=async()=>{throw Error("UNEXPECTED_FX_FETCH")};'
+  '@/server/finance/actions':'export const addExpenseArticle=async()=>({ok:true,article:{id:"fixture-article",name:"Статья"}});export const fetchNbrbRate=async()=>{throw Error("UNEXPECTED_FX_FETCH")};'
  };
  b.onResolve({filter:/.*/},args=>modules[args.path]?{path:args.path,namespace:'qa'}:undefined);
  b.onLoad({filter:/.*/,namespace:'qa'},args=>({loader:'js',resolveDir:web,contents:modules[args.path]}));

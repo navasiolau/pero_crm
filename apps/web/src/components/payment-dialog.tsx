@@ -19,6 +19,7 @@ import type { FinanceDocumentView } from "@/server/finance-documents/contracts";
 import { FinanceDocumentUpload } from "@/components/finance-document-upload";
 import { createRequestId } from "@/lib/request-id";
 import { initialCashAccount } from "@/lib/cash-account-default";
+import { ArticleDialog } from "@/components/article-dialog";
 const CURRENCIES = ["BYN", "RUB", "USD", "EUR"];
 
 // Диалог внесения прихода/расхода (§11): валюта, касса в валюте операции,
@@ -61,6 +62,17 @@ export function PaymentDialog({
   const [currency, setCurrency] = useState(projectCurrency);
   const [cashAccountId, setCashAccountId] = useState("");
   const [articleId, setArticleId] = useState("");
+  const [createdArticles, setCreatedArticles] = useState<ExpenseArticleOption[]>([]);
+  const [articleOpen, setArticleOpen] = useState(false);
+  const articleCreateButton = useRef<HTMLButtonElement>(null);
+  const articleOptions = [...new Map([...createdArticles, ...expenseArticles].map(article => [article.id, article])).values()];
+  // Локальная опция нужна до появления в серверных props, в том числе при быстром новом открытии.
+  useEffect(() => {
+    setCreatedArticles(current => {
+      const remaining = current.filter(article => !expenseArticles.some(server => server.id === article.id));
+      return remaining.length === current.length ? current : remaining;
+    });
+  }, [expenseArticles]);
   const [amount, setAmount] = useState("");
   const [rate, setRate] = useState("");
   const [rateDate, setRateDate] = useState("");
@@ -96,6 +108,7 @@ export function PaymentDialog({
       setCurrency(initial.currency);
       setCashAccountId(initial.cashAccountId);
       setArticleId("");
+      setArticleOpen(false);
       setAmount("");
       setMaterialId(""); setQuantity(""); setUnitPrice("");
       setRate("");
@@ -139,9 +152,9 @@ export function PaymentDialog({
   const effectiveAccountId = accountOptions.some(account => account.id === cashAccountId) ? cashAccountId : "";
   const effectiveArticleId = isIncome
     ? ""
-    : expenseArticles.some((article) => article.id === articleId)
+    : articleOptions.some((article) => article.id === articleId)
       ? articleId
-      : (expenseArticles[0]?.id ?? "");
+      : (articleOptions[0]?.id ?? "");
 
   let purchaseAmount = "";
   if (isStockPurchase) { try { purchaseAmount = stockPurchaseAmount(quantity, unitPrice); } catch {} }
@@ -156,6 +169,7 @@ export function PaymentDialog({
 
   const canSubmit =
     !pending &&
+    !articleOpen &&
     !documentLoading &&
     (isIncome || isStockPurchase || reportDocument !== null) &&
     (!isStockPurchase || materialId !== "") &&
@@ -169,28 +183,15 @@ export function PaymentDialog({
   const articleField = !isIncome ? (
     <div className="flex min-w-0 max-w-full flex-col gap-1.5">
       <Label htmlFor="pay-article">Статья расхода *</Label>
-      <Select
-        value={effectiveArticleId}
-        onValueChange={(next) => setArticleId(next ?? "")}
-      >
-        <SelectTrigger id="pay-article" className="w-full min-w-0 max-w-full">
-          <SelectValue className="min-w-0 flex-1 truncate">
-            {expenseArticles.find(
-              (article) => article.id === effectiveArticleId,
-            )?.name ?? "—"}
-          </SelectValue>
-        </SelectTrigger>
-        <SelectContent>
-          {expenseArticles.map((article) => (
-            <SelectItem key={article.id} value={article.id}>
-              {article.name}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-      {expenseArticles.length === 0 ? (
+      <SearchableSelect id="pay-article" value={effectiveArticleId} onChange={setArticleId}
+        options={articleOptions.map(article => ({ value: article.id, label: article.name }))}
+        disabled={pending || command.loading || !!saved || !!blocked}
+        placeholder="Выберите статью…" searchPlaceholder="Поиск статьи…" />
+      <Button ref={articleCreateButton} variant="outline" className="self-start" disabled={pending || command.loading || !!saved || !!blocked}
+        onClick={() => setArticleOpen(true)}>Создать статью</Button>
+      {articleOptions.length === 0 ? (
         <p className="text-xs text-destructive">
-          Нет статей — создайте их в Финансы → Статьи расходов
+          Нет статей — создайте статью, чтобы продолжить
         </p>
       ) : null}
     </div>
@@ -198,7 +199,7 @@ export function PaymentDialog({
   ) : null;
 
   return (
-    <Dialog open={open} onOpenChange={next => { if (!pending) onOpenChange(next); }}>
+    <Dialog open={open} onOpenChange={next => { if (!pending && !articleOpen) onOpenChange(next); }}>
       <DialogContent className="max-h-[90dvh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
@@ -342,11 +343,11 @@ export function PaymentDialog({
         {saved?.data.reportDocumentId && !reportDocument ? <p className="text-sm text-muted-foreground">Отчётный документ закреплён в сохранённом запросе.</p> : null}
         {blocked || command.error ? <p role="alert" className="text-sm text-destructive">{blocked || command.error}</p> : null}
         <DialogFooter>
-          <Button variant="outline" disabled={pending} onClick={() => onOpenChange(false)}>
+          <Button variant="outline" disabled={pending || articleOpen} onClick={() => onOpenChange(false)}>
             Отмена
           </Button>
           <Button
-            disabled={pending || command.loading || !command.actorId || !!blocked || (!saved && !canSubmit)}
+            disabled={pending || articleOpen || command.loading || !command.actorId || !!blocked || (!saved && !canSubmit)}
             onClick={() =>
               startTransition(async () => {
                 try {
@@ -382,6 +383,11 @@ export function PaymentDialog({
                 : "Внести расход"}
           </Button>
         </DialogFooter>
+        <ArticleDialog open={articleOpen} onOpenChange={setArticleOpen} returnFocus={articleCreateButton}
+          onCreated={article => {
+            setCreatedArticles(current => [...current.filter(item => item.id !== article.id), article]);
+            setArticleId(article.id);
+          }} />
       </DialogContent>
     </Dialog>
   );

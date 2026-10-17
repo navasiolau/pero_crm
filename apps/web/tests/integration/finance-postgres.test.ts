@@ -15,6 +15,7 @@ import { guardedModuleCache } from "../helpers/guarded-module-cache";
 import { nativeSnapshot } from "../helpers/native-acceptance-snapshot";
 import { createPostgresFixture, fixedBynTotal, moneyRows as money, rejectedSql, savedOrgBalance, type PostgresRows } from "./postgres.fixture";
 import { verifyDefaultCashAccountNative } from "../helpers/default-cash-native";
+import { verifyInlineExpenseArticleNative } from "../helpers/inline-expense-article-native";
 
 let fixture: Awaited<ReturnType<typeof createPostgresFixture>>;
 let scope: ReturnType<typeof guardedModuleCache>;
@@ -135,6 +136,11 @@ test("cash/default-setting-roles-cas-audit-and-atomic-deactivation", async () =>
   const account = await tx.cashAccount.create({ data: { id: rows.id("default-cash-rub"), name: "QA175 RUB", currency: "RUB" } });
   const other = await tx.cashAccount.create({ data: { id: rows.id("default-cash-byn"), name: "QA175 BYN", currency: "BYN" } });
   assert.ok(await verifyDefaultCashAccountNative(tx, actor, account.id, other.id));
+}));
+
+test("article/inline-option-codes-audit-and-no-money", async () => fixture.rollback(async (tx, rows) => {
+  const actor = actorFor(await rows.user("inline-article-owner", ["PROCUREMENT"]));
+  assert.ok(await verifyInlineExpenseArticleNative(tx, actor));
 }));
 
 test("cash/role-union-active-none-current-currencies-and-refusals", async () => fixture.rollback(async (tx, rows) => {
