@@ -17,4 +17,4 @@
 
 - [x] 3.1 Выполнить целевые unit/DI/browser-регрессии №175 и статей, типизацию, lint и openspec validate --strict; записать фактические результаты.
 - [x] 3.2 Передать оркестратору guarded native-проверку создания/аудита/unique conflict на разрешённой существующей local БД 5433 с сохранностью финансовых фактов; приложить evidence после его прогона.
-- [ ] 3.3 После разрешённой интеграции подтвердить staging SHA/образ и сценарии вложенного создания на реально развёрнутой ревизии.
+- [x] 3.3 Подтвердить actual staging SHA/образ, канонический inline-create статьи, server-props refresh и сохранение draft по двум scoped runs; зафиксировать document LOCAL и прочие local/native/CI границы в staging-qa.md/json.
