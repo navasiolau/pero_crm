@@ -1,9 +1,8 @@
 import { redirect } from "next/navigation";
 
 import { auth } from "@/auth";
-import { prisma } from "@/lib/prisma";
 import { MANAGER_ROLES, OFFICE_ROLES, hasAnyRole } from "@/lib/roles";
-import { clientVisibilityWhere, projectVisibilityWhere, resolveVisibilityActor } from "@/server/access/visibility";
+import { listClientDirectory } from "@/server/clients/queries";
 
 import { ClientsView } from "./clients-view";
 
@@ -18,41 +17,18 @@ export default async function ClientsPage({
 }) {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  const actor = await resolveVisibilityActor(prisma, session.user);
   if (!hasAnyRole(session.user.roles, OFFICE_ROLES)) {
     redirect("/");
   }
 
   const { focus } = await searchParams;
-  const clients = await prisma.client.findMany({
-    where: clientVisibilityWhere(actor),
-    include: {
-      projects: {
-        where: projectVisibilityWhere(actor),
-        select: { id: true, number: true, title: true },
-        orderBy: { createdAt: "desc" },
-      },
-      _count: { select: { projects: { where: projectVisibilityWhere(actor) } } },
-    },
-    orderBy: { name: "asc" },
-  });
+  const clients = await listClientDirectory(session.user);
 
   return (
     <ClientsView
       canManage={hasAnyRole(session.user.roles, MANAGER_ROLES)}
       focusClientId={focus}
-      clients={clients.map((client) => ({
-        id: client.id,
-        name: client.name,
-        lastName: client.lastName,
-        middleName: client.middleName,
-        phone: client.phone,
-        email: client.email,
-        address: client.address,
-        comment: client.comment,
-        projects: client.projects,
-        projectsCount: client._count.projects,
-      }))}
+      clients={clients}
     />
   );
 }

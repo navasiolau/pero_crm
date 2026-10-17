@@ -7,6 +7,7 @@ import { projectTotal as calculateProjectTotal } from "@/lib/product-quantity";
 import type { Prisma, ProjectStage, Role } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
+import { publicClientSelect } from "@/server/clients/projection";
 import { reportDocumentSelect } from "@/server/finance-documents/view";
 import { logisticsAllocationSelect } from "@/server/logistics/payment-view";
 import {
@@ -277,7 +278,7 @@ export async function getProjectFor(
     where: { AND: [{ id: projectId }, projectVisibilityWhere(actor)] },
     include: {
       coverFile: projectCoverProjection(actor),
-      client: true,
+      client: { select: publicClientSelect },
       manager: { select: { id: true, name: true } },
       products: {
         where: productVisibilityWhere(actor),
@@ -334,7 +335,7 @@ export async function listClients(actor: VisibilityActor) {
   actor = await resolveVisibilityActor(prisma, actor);
   return prisma.client.findMany({
     where: clientVisibilityWhere(actor),
-    include: { _count: { select: { projects: { where: projectVisibilityWhere(actor) } } } },
+    select: { ...publicClientSelect, _count: { select: { projects: { where: projectVisibilityWhere(actor) } } } },
     orderBy: { name: "asc" },
   });
 }

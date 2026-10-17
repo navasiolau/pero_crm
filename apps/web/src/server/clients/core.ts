@@ -6,15 +6,16 @@ import type { DomainActor } from '@/server/projects/core';
 export const clientSchema = z.object({
  name: z.string().trim().min(1, 'Укажите имя'), lastName: z.string().optional(), middleName: z.string().optional(),
  phone: z.string().trim().min(1, 'Укажите телефон'), email: z.string().optional(), address: z.string().optional(), comment: z.string().optional(),
+ passportNumber: z.string().optional(), passportIssuedBy: z.string().optional(),
 }).strict();
 export type ClientInput = z.infer<typeof clientSchema>;
-export const clientFields = ['name','lastName','middleName','phone','email','address','comment'] as const;
+export const clientFields = ['name','lastName','middleName','phone','email','address','comment','passportNumber','passportIssuedBy'] as const;
 export type ClientBaseline = {name:string;phone:string} & Record<Exclude<typeof clientFields[number],'name'|'phone'>, string|null>;
-const baselineSchema = z.object({name:z.string(),phone:z.string(),lastName:z.string().nullable(),middleName:z.string().nullable(),email:z.string().nullable(),address:z.string().nullable(),comment:z.string().nullable()}).strict();
+const baselineSchema = z.object({name:z.string(),phone:z.string(),lastName:z.string().nullable(),middleName:z.string().nullable(),email:z.string().nullable(),address:z.string().nullable(),comment:z.string().nullable(),passportNumber:z.string().nullable(),passportIssuedBy:z.string().nullable()}).strict();
 export type ContactResult = {ok:true;value:string|null;changed:boolean;projectId?:string;clientId:string;clientLabel?:string;phone?:string;clientAddress?:string|null} | {ok:false;kind:'conflict'|'validation'|'forbidden'|'not-found';error:string;currentValue?:string|null;currentClientId?:string};
 export function mayManageContacts(actor:DomainActor) { return hasAnyRole(actor.roles,MANAGER_ROLES); }
 function normalized(input:ClientInput):ClientBaseline {
- return {name:input.name,phone:input.phone,lastName:input.lastName?.trim()||null,middleName:input.middleName?.trim()||null,email:input.email?.trim()||null,address:input.address?.trim()||null,comment:input.comment?.trim()||null};
+ return {name:input.name,phone:input.phone,lastName:input.lastName?.trim()||null,middleName:input.middleName?.trim()||null,email:input.email?.trim()||null,address:input.address?.trim()||null,comment:input.comment?.trim()||null,passportNumber:input.passportNumber?.trim()||null,passportIssuedBy:input.passportIssuedBy?.trim()||null};
 }
 async function auditClient(tx:Prisma.TransactionClient,actor:DomainActor,clientId:string,action:string,oldValue:Prisma.InputJsonValue,newValue:Prisma.InputJsonValue,field?:string) {
  await tx.changeLog.create({data:{actorType:'user',actorId:actor.id,actorName:actor.name,source:actor.source,entity:'client',entityId:clientId,action,field,oldValue,newValue}});
@@ -43,7 +44,7 @@ export async function createClientInTransaction(tx:Prisma.TransactionClient,acto
  if(!mayManageContacts(actor))return{ok:false as const,error:'Недостаточно прав'};
  const parsed=clientSchema.safeParse(input);if(!parsed.success)return{ok:false as const,error:parsed.error.issues[0]?.message??'Ошибка данных'};
  const client=await tx.client.create({data:normalized(parsed.data)});
- await auditClient(tx,actor,client.id,'create',{}, {name:client.name,phone:client.phone});
+ await auditClient(tx,actor,client.id,'create',{}, {name:client.name,phone:client.phone,passportNumber:client.passportNumber,passportIssuedBy:client.passportIssuedBy});
  return{ok:true as const,id:client.id};
 }
 export async function updateClientInTransaction(tx:Prisma.TransactionClient,actor:DomainActor,clientId:string,input:ClientInput,baseline:ClientBaseline) {
