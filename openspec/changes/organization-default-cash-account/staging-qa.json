@@ -1,0 +1,170 @@
+{
+  "version": 1,
+  "task": 175,
+  "status": "PASS_AVAILABLE_SCENARIOS_WITH_EXPLICIT_GAPS",
+  "runId": "70c7e823-b77c-4769-8368-8ba6ed8082f4",
+  "runtime": {
+    "revision": "0d399e96d56010b05cd8f4df077aef03a7064e05",
+    "image": "sha256:0f89f9de9c0e8a4ee0437a4e443a41784e0a173c3e429ce42a266974c8f2b189",
+    "identity": {
+      "file": "D:/Projects/pero_crm_v2/.playwright-mcp/application-improvements/staging-0d399e96-identity-0c6c79bb-7ede-4c12-88c5-8042bacc962e/identity.json",
+      "sha256": "7f8bd9c91f899f2688de9e0814b8e3f5bbb1a3ac666c0af63fffbc9f3389342c"
+    }
+  },
+  "qa": {
+    "bundleSha256": "e5ce94f3000887fec97ce7c9abb7d4bf92008ff543245ef468a142d40f8420a2",
+    "producerSha256": "6cdba7315493e227e2fd55f400dbe5fd5d61dd4c28d478ab5666c02d4ab7e006"
+  },
+  "nativeChecks": {
+    "settingAudit": true,
+    "roleBoundary": true,
+    "staleRevision": true,
+    "atomicDeactivate": true,
+    "realSqlRollback": true
+  },
+  "checks": [
+    {
+      "scope": "income",
+      "status": "PASS",
+      "defaultCurrency": "RUB",
+      "manualCurrency": "BYN",
+      "draftPreserved": true,
+      "cancelReopenRestoresDefault": true,
+      "financialSubmit": false,
+      "documentUpload": false
+    },
+    {
+      "scope": "org-expense",
+      "status": "PASS",
+      "defaultCurrency": "RUB",
+      "manualCurrency": "BYN",
+      "draftPreserved": true,
+      "cancelReopenRestoresDefault": true,
+      "financialSubmit": false,
+      "documentUpload": false
+    },
+    {
+      "scope": "project-expense",
+      "status": "PASS",
+      "defaultCurrency": "RUB",
+      "manualCurrency": "BYN",
+      "draftPreserved": true,
+      "cancelReopenRestoresDefault": true,
+      "financialSubmit": false,
+      "documentUpload": false
+    },
+    {
+      "scope": "org-stock",
+      "status": "PASS",
+      "defaultCurrency": "RUB",
+      "manualCurrency": "BYN",
+      "draftPreserved": true,
+      "cancelReopenRestoresDefault": true,
+      "financialSubmit": false,
+      "documentUpload": false
+    },
+    {
+      "scope": "warehouse-stock",
+      "status": "PASS",
+      "defaultCurrency": "RUB",
+      "manualCurrency": "BYN",
+      "draftPreserved": true,
+      "cancelReopenRestoresDefault": true,
+      "financialSubmit": false,
+      "documentUpload": false
+    },
+    {
+      "scope": "salary",
+      "status": "PASS",
+      "defaultCurrency": "RUB",
+      "manualCurrency": "BYN",
+      "amountClearedOnManualChange": true,
+      "cancelReopenRestoresDefault": true,
+      "preview": false,
+      "financialSubmit": false
+    },
+    {
+      "scope": "advance",
+      "status": "PASS",
+      "defaultCurrency": "RUB",
+      "manualCurrency": "BYN",
+      "amountClearedOnManualChange": true,
+      "cancelReopenRestoresDefault": true,
+      "preview": false,
+      "financialSubmit": false
+    },
+    {
+      "scope": "mass-settlement",
+      "status": "NOT_TESTED_DISABLED_BY_REAL_DEBT_OR_BALANCE_GUARD",
+      "financialSubmit": false
+    },
+    {
+      "scope": "logistics",
+      "status": "PASS",
+      "defaultCurrency": "RUB",
+      "manualAmountPreserved": true,
+      "cancelReopenRestoresDefault": true,
+      "saveOrPost": false
+    }
+  ],
+  "unavailable": [
+    {
+      "scope": "mass-settlement",
+      "status": "NOT_TESTED_DISABLED_BY_REAL_DEBT_OR_BALANCE_GUARD",
+      "financialSubmit": false
+    }
+  ],
+  "settingWrites": 1,
+  "ownAckConfirmed": true,
+  "exactSettingAndOwnAuditRestored": true,
+  "preservation": {
+    "stableUnchanged": true,
+    "fullUnchanged": true,
+    "tokenDrift": [],
+    "onlyVolatileField": "ApiToken.lastUsedAt"
+  },
+  "tables": 65,
+  "beforeFullDigest": "a6f9d563ddc7ec892f381a0946aaf1e9fbf8d437644c8e76e3b73e56d9f15228",
+  "afterFullDigest": "a6f9d563ddc7ec892f381a0946aaf1e9fbf8d437644c8e76e3b73e56d9f15228",
+  "beforeStableDigest": "bbe0ce10eddb2bb35d619df80c43e5898d977e72bde09c97ac20abf16cbedecb",
+  "afterStableDigest": "bbe0ce10eddb2bb35d619df80c43e5898d977e72bde09c97ac20abf16cbedecb",
+  "independentReadonlyInspect": {
+    "baselineAvailable": true,
+    "ownNativeCashRemaining": 0,
+    "stableMatchesBaseline": true,
+    "settingMatchesBaseline": true,
+    "entityAuditIdsMatchBaseline": true
+  },
+  "deniedCount": 0,
+  "clientErrorCount": 0,
+  "scope": {
+    "financialSubmits": 0,
+    "payoutPreviews": 0,
+    "stockReceiptsPosted": 0,
+    "logisticsSavedOrPosted": 0,
+    "newFinanceDocumentUpload": "STAGING_NOT_RUN_LOCAL_COMPONENT_COVERAGE_ONLY",
+    "mobileAndThemes": "NOT_CLAIMED_BY_THIS_STAGING_RUN"
+  },
+  "artifacts": [
+    {
+      "path": "D:/Projects/pero_crm_v2/.playwright-mcp/requests-171-179/staging175178/175/run-70c7e823-b77c-4769-8368-8ba6ed8082f4/receipt.json",
+      "sha256": "b22b8f2d8e7e7a21bd7fb43d0ba51774884c97c7cf4b43fc58b60795672d171e"
+    },
+    {
+      "path": "D:/Projects/pero_crm_v2/.playwright-mcp/requests-171-179/staging175178/175/run-70c7e823-b77c-4769-8368-8ba6ed8082f4/baseline.json",
+      "sha256": "6e29993147e2fdd83fa446fe4ebe3214a88a82fa7e7c40725d3478e1974cf377"
+    },
+    {
+      "path": "D:/Projects/pero_crm_v2/.playwright-mcp/requests-171-179/staging175178/175/run-70c7e823-b77c-4769-8368-8ba6ed8082f4/restore.receipt.json",
+      "sha256": "865039a460eda126e3b1653faf74314ea54cd14933f28de161bbce0715ad05d4"
+    },
+    {
+      "path": "D:/Projects/pero_crm_v2/.playwright-mcp/requests-171-179/staging175178/175/run-70c7e823-b77c-4769-8368-8ba6ed8082f4/final-readonly-inspect.json",
+      "sha256": "3dcb0cf89ec830f4f6841d2e5a213d2d96bc438c88ac1a2d53dcb0d560370929"
+    },
+    {
+      "path": "D:/Projects/pero_crm_v2/.playwright-mcp/requests-171-179/staging175178/175/run-70c7e823-b77c-4769-8368-8ba6ed8082f4/bundle-provenance.json",
+      "sha256": "2067613b3e680775febb9b7a155db92ffaf301729f3793a66ca5ee5b8b1dad77"
+    }
+  ]
+}

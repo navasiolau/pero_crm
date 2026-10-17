@@ -29,3 +29,9 @@
 ## Размещение браузерных проверок в CI
 
 CI635dad выявил запуск двух новых browser-файлов в backend без Chromium. default-cash-account-component и default-cash-forms-component перенесены в components-0. Реальный Bash case workflow проверен на всех globs, каждый файл исполняется ровно один раз; gates, версии, permissions и список тестов сохранены. Независимое ревью — замечаний нет; требуется повторный CI.
+
+## Фактическая staging-приёмка №175
+
+Root выполнил reviewed guarded QA на реальном `0d399e96d56010b05cd8f4df077aef03a7064e05`, image `sha256:0f89f9de9c0e8a4ee0437a4e443a41784e0a173c3e429ce42a266974c8f2b189`. Итог `PASS_AVAILABLE_SCENARIOS_WITH_EXPLICIT_GAPS`: 8 forms PASS, массовая выплата NOT_TESTED из-за настоящего debt/balance guard. Один UI CAS подтверждён сервером и БД, исходные setting/updatedAt и единственный own audit восстановлены точно, все65 full/stable таблиц и schema catalog совпали с baseline, отдельный финальный READ ONLY inspect подтвердил сохранность. Денежные submit/preview/save/post и новая загрузка FinanceDocument на staging не выполнялись. Документ/UNKNOWN и positive mass coverage относятся к уже пройденному локальному настоящему компонентному harness; staging positive mass не заявляется.
+
+Подробности, границы проверки, сохранённые HOLD и evidence hashes: [staging-qa.md](staging-qa.md), [staging-qa.json](staging-qa.json). Исторические записи выше описывают предыдущие этапы; текущая staged source приёмка относится только к явно закреплённому SHA/image и не является продвижением в main/production.
