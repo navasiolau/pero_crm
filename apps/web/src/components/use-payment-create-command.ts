@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createRequestId } from "@/lib/request-id";
 import { paymentSchema, type PaymentInput, type PaymentMutationResult } from "@/server/payments/contracts";
@@ -80,10 +80,12 @@ let browserCommands: ReturnType<typeof createPaymentCommands> | undefined;
 const send = (command: PaymentCommand, actorId: string) => command.kind === "payment" ? addPayment(command.data, actorId) : addPaidStockReceipt(command.data, actorId);
 const browserStorage: StoragePort = {getItem: key => window.sessionStorage.getItem(key), setItem: (key, value) => window.sessionStorage.setItem(key, value), removeItem: key => window.sessionStorage.removeItem(key)};
 export function usePaymentCreateCommand(open: boolean, scope: Scope) {
-  const router = useRouter(), [identity, setIdentity] = useState<{actorId: string; loading: boolean; error: string; restored?: PaymentCommand}>({actorId: "", loading: true, error: ""}), [, redraw] = useState(0);
+  const router = useRouter(), [identity, setIdentity] = useState<{actorId: string; loading: boolean; error: string; restored?: PaymentCommand; session?: object}>({actorId: "", loading: true, error: ""}), [, redraw] = useState(0);
   const commands = typeof window === "undefined" ? createPaymentCommands(send, {getItem: () => null, setItem: () => {}, removeItem: () => {}})
     : browserCommands ??= createPaymentCommands(send, browserStorage);
   const {kind, direction, projectId} = scope;
+  const session = useMemo(() => ({ open, kind, direction, projectId }), [open, kind, direction, projectId]);
+  const loading = identity.loading || identity.session !== session;
   useEffect(() => {
     if (!open) return;
     let cancelled = false; setIdentity(current => ({...current, loading: true, error: ""}));
@@ -91,17 +93,17 @@ export function usePaymentCreateCommand(open: boolean, scope: Scope) {
       if (cancelled) return;
       if (result.ok) {
         commands.observeActor(result.actorId); const saved = commands.peek(result.actorId, {kind, direction, projectId});
-        setIdentity({actorId: result.actorId, loading: false, error: "", restored: saved && !("blocked" in saved) ? saved.command : undefined});
+        setIdentity({actorId: result.actorId, loading: false, error: "", session, restored: saved && !("blocked" in saved) ? saved.command : undefined});
       }
-      else setIdentity({actorId: "", loading: false, error: result.error});
-    }).catch(() => {if (!cancelled) setIdentity({actorId: "", loading: false, error: "Не удалось подтвердить учётную запись"});});
+      else setIdentity({actorId: "", loading: false, error: result.error, session});
+    }).catch(() => {if (!cancelled) setIdentity({actorId: "", loading: false, error: "Не удалось подтвердить учётную запись", session});});
     return () => {cancelled = true;};
-  }, [open, kind, direction, projectId, commands]);
-  const intent = identity.actorId && !identity.loading ? commands.peek(identity.actorId, scope) : undefined;
+  }, [open, kind, direction, projectId, commands, session]);
+  const intent = identity.actorId && !loading ? commands.peek(identity.actorId, scope) : undefined;
   async function run(command: PaymentCommand) {
     const result = await commands.run(identity.actorId, scope, command); redraw(value => value + 1);
     if (result && !result.ok && "kind" in result && result.kind === "actor-changed") router.refresh();
     return result;
   }
-  return {...identity, intent, run};
+  return {...identity, loading, session, intent, run};
 }

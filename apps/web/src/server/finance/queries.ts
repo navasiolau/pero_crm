@@ -7,6 +7,7 @@ import { Prisma,type PrismaClient } from "@prisma/client";
 
 import { sumHistoricalByn, sumByn, subtractByn, BYN_UNAVAILABLE_REASON } from "@/lib/history-byn";
 import { summarizeProjectExpenses, type ProjectExpenseFacts, type ExpenseBreakdownRow } from "./project-expense-facts";
+import { markDefaultCashAccount, readDefaultCashAccount } from "./default-cash-core";
 
 // ─── Финансы (§11): кассы, статьи расходов, экономика проекта ───────────────
 // Раздел доступен администратору, директору и бухгалтеру (middleware + requireFinance).
@@ -17,20 +18,22 @@ export type CashAccountView = {
   currency: string;
   comment: string | null;
   active: boolean;
+  isDefault?: boolean;
   balance: number; // приходы − расходы по кассе, в валюте кассы
 };
 
 // Кассы с балансами. Операция по кассе всегда в валюте кассы (правило
 // внесения), поэтому баланс — просто сумма приходов минус расходы.
-export async function listCashAccounts(): Promise<CashAccountView[]> {
-  const [accounts, grouped, payouts] = await Promise.all([
-    prisma.cashAccount.findMany({ orderBy: { createdAt: "asc" } }),
-    prisma.payment.groupBy({
+export async function listCashAccounts(database: Pick<PrismaClient, "cashAccount" | "payment" | "payout" | "orgSetting"> = prisma): Promise<CashAccountView[]> {
+  const [accounts, grouped, payouts, setting] = await Promise.all([
+    database.cashAccount.findMany({ orderBy: { createdAt: "asc" } }),
+    database.payment.groupBy({
       where: activePaymentWhere,
       by: ["cashAccountId", "direction"],
       _sum: { amount: true },
     }),
-    prisma.payout.groupBy({ by: ["cashAccountId"], where: { cashAccountId: { not: null } }, _sum: { cashAmount: true } }),
+    database.payout.groupBy({ by: ["cashAccountId"], where: { cashAccountId: { not: null } }, _sum: { cashAmount: true } }),
+    readDefaultCashAccount(database),
   ]);
   const sums = new Map<string, Prisma.Decimal>();
   for (const row of grouped) {
@@ -45,12 +48,13 @@ export async function listCashAccounts(): Promise<CashAccountView[]> {
     if (!row.cashAccountId) continue;
     sums.set(row.cashAccountId, (sums.get(row.cashAccountId) ?? new Prisma.Decimal(0)).plus(cashMovementDelta("EXPENSE",row._sum.cashAmount ?? 0)));
   }
-  return accounts.map((account) => ({
+  return markDefaultCashAccount(accounts, setting.accountId).map((account) => ({
     id: account.id,
     name: account.name,
     currency: account.currency,
     comment: account.comment,
     active: account.active,
+    isDefault: account.isDefault,
     balance: (sums.get(account.id) ?? new Prisma.Decimal(0)).toDecimalPlaces(2,Prisma.Decimal.ROUND_HALF_UP).toNumber(),
   }));
 }

@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { formatExactMoney } from "@/lib/format";
 import { createRequestId } from "@/lib/request-id";
+import { initialCashAccount } from "@/lib/cash-account-default";
 import { createLogisticsTrip, updateLogisticsTrip } from "@/server/logistics/actions";
 import { postLogisticsTrip, correctLogisticsTripPosting } from "@/server/logistics/money-actions";
 import { logisticsTripCreateSchema, type LogisticsShipmentLineInput } from "@/server/logistics/contracts";
@@ -48,7 +49,7 @@ export function LogisticsTripForm({ trip, options, moneyOptions, projectId, onSa
   })) ?? []);
   const current = trip?.money.current;
   const [amount, setAmount] = useState(current?.amount ?? "");
-  const [cashAccountId, setCashAccountId] = useState(current?.cashAccountId ?? moneyOptions.cashAccounts[0]?.id ?? "");
+  const [cashAccountId, setCashAccountId] = useState(() => current?.cashAccountId ?? initialCashAccount(moneyOptions.cashAccounts, { fallback: "first" }).cashAccountId);
   const [documents, setDocuments] = useState(trip?.documents ?? []);
   const [loading, setLoading] = useState(false), [uploadBusy, setUploadBusy] = useState(false);
   const [error, setError] = useState(""), [conflict, setConflict] = useState(false), [uncertain, setUncertain] = useState(false);

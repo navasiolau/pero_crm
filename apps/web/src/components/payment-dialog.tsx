@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -18,6 +18,7 @@ import type { CashAccountOption, ExpenseArticleOption } from "@/server/finance/c
 import type { FinanceDocumentView } from "@/server/finance-documents/contracts";
 import { FinanceDocumentUpload } from "@/components/finance-document-upload";
 import { createRequestId } from "@/lib/request-id";
+import { initialCashAccount } from "@/lib/cash-account-default";
 const CURRENCIES = ["BYN", "RUB", "USD", "EUR"];
 
 // Диалог внесения прихода/расхода (§11): валюта, касса в валюте операции,
@@ -69,10 +70,14 @@ export function PaymentDialog({
   const [clientMutationId, setClientMutationId] = useState(createRequestId);
   const [reportDocument, setReportDocument] = useState<FinanceDocumentView | null>(null);
   const [documentLoading, setDocumentLoading] = useState(false);
+  const initialized = useRef<{ session: object; actorId: string } | null>(null);
 
   // Обычный open сбрасывает draft; неизвестное намерение восстанавливается после current actor check.
   useEffect(() => {
+    if (!open) { initialized.current = null; return; }
     if (open && !command.loading && command.actorId) {
+      if (initialized.current?.session === command.session && initialized.current.actorId === command.actorId) return;
+      initialized.current = { session: command.session, actorId: command.actorId };
       const restored = command.restored;
       if (restored) {
         const data = restored.data;
@@ -87,8 +92,9 @@ export function PaymentDialog({
       setReportDocument(null);
       setDocumentLoading(false);
       setSelectedProjectId(projectId??"");
-      setCurrency(projectCurrency);
-      setCashAccountId("");
+      const initial = initialCashAccount(cashAccounts, { currency: projectCurrency, fallback: "currency" });
+      setCurrency(initial.currency);
+      setCashAccountId(initial.cashAccountId);
       setArticleId("");
       setAmount("");
       setMaterialId(""); setQuantity(""); setUnitPrice("");
@@ -97,7 +103,7 @@ export function PaymentDialog({
       setPaidAt("");
       setComment("");
     }
-  }, [open, projectCurrency, projectId, direction, isStockPurchase, command.actorId, command.loading, command.restored]);
+  }, [open, projectCurrency, projectId, direction, isStockPurchase, cashAccounts, command.actorId, command.loading, command.restored, command.session]);
 
   // Курс НБ РБ — автоматически при смене валюты/даты (§11)
   useEffect(() => {
@@ -130,11 +136,7 @@ export function PaymentDialog({
   const accountOptions = cashAccounts.filter(
     (account) => account.currency === currency,
   );
-  const effectiveAccountId = accountOptions.some(
-    (account) => account.id === cashAccountId,
-  )
-    ? cashAccountId
-    : (accountOptions[0]?.id ?? "");
+  const effectiveAccountId = accountOptions.some(account => account.id === cashAccountId) ? cashAccountId : "";
   const effectiveArticleId = isIncome
     ? ""
     : expenseArticles.some((article) => article.id === articleId)
@@ -220,7 +222,11 @@ export function PaymentDialog({
           <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="flex min-w-0 max-w-full flex-col gap-1.5">
               <Label>Валюта *</Label>
-              <Select value={currency} onValueChange={(next) => setCurrency(next ?? currency)}>
+              <Select value={currency} onValueChange={(next) => {
+                if (!next || next === currency) return;
+                setCurrency(next);
+                setCashAccountId(cashAccounts.find(account => account.currency === next)?.id ?? "");
+              }}>
                 <SelectTrigger className="w-full min-w-0 max-w-full">
                   <SelectValue className="min-w-0 flex-1 truncate">{currency}</SelectValue>
                 </SelectTrigger>

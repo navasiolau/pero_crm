@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { FINANCE_ROLES } from "@/lib/roles";
 import { WAREHOUSE_MANAGE_ROLES, WAREHOUSE_MONEY_ROLES, OFFICE_ROLES, hasAnyRole } from "@/lib/roles";
 import { listMaterialOptions, listStock } from "@/server/warehouse/queries";
+import { listActiveCashAccountOptions } from "@/server/finance/default-cash-core";
 
 import { StockView } from "./stock-view";
 
@@ -27,7 +28,7 @@ export default async function WarehouseStockPage() {
   ]);
 
   const purchaseOptions = hasAnyRole(role, FINANCE_ROLES) ? {
-    cashAccounts: await prisma.cashAccount.findMany({ where: { active: true }, select: { id: true, name: true, currency: true }, orderBy: { name: "asc" } }),
+    cashAccounts: await listActiveCashAccountOptions(prisma, "name"),
     expenseArticles: await prisma.expenseArticle.findMany({ where: { active: true }, select: { id: true, name: true }, orderBy: { code: "asc" } }),
   } : undefined;
   return (

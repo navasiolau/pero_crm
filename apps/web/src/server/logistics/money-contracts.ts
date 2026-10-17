@@ -32,7 +32,7 @@ export type LogisticsPostingView = {
   allocations: LogisticsAllocationView[]; documentIds: string[];
 };
 export type LogisticsMoneyOptions = {
-  cashAccounts: { id: string; name: string; currency: string; balance: number }[];
+  cashAccounts: { id: string; name: string; currency: string; balance: number; isDefault?: boolean }[];
 };
 export type LogisticsProjectBudget = {
   currency: "BYN"; deliveryBudget: number | null; tripSpent: number | null;

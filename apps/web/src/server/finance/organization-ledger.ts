@@ -5,9 +5,10 @@ import { paymentView } from "./payment-view";
 import { reportDocumentSelect } from "@/server/finance-documents/view";
 import { stockPurchaseSelect } from "@/server/warehouse/stock-purchase-view";
 import { logisticsAllocationSelect } from "@/server/logistics/payment-view";
+import { listActiveCashAccountOptions } from "./default-cash-core";
 
 export async function loadOrganizationPayments(actor: FinanceWorkspaceActor, direction: PaymentDirection,
-  db: Pick<PrismaClient, "project" | "payment" | "cashAccount">) {
+  db: Pick<PrismaClient, "project" | "payment" | "cashAccount" | "orgSetting">) {
   requireFinanceWorkspaceActor(actor);
   const [records, cashAccounts, projects] = await Promise.all([
     db.payment.findMany({ where: { ...activePaymentWhere, direction }, select: { id: true, direction: true, amount: true, currency: true,
@@ -15,7 +16,7 @@ export async function loadOrganizationPayments(actor: FinanceWorkspaceActor, dir
       project: { select: { id: true, number: true, title: true, deletedAt: true } }, cashAccount: { select: { name: true } },
       expenseArticle: { select: { id: true, name: true } }, reportDocument: { select: reportDocumentSelect }, stockPurchase: { select: stockPurchaseSelect },
       logisticsAllocation: { select: logisticsAllocationSelect } }, orderBy: { paidAt: "desc" } }),
-    db.cashAccount.findMany({ where: { active: true }, select: { id: true, name: true, currency: true }, orderBy: { createdAt: "asc" } }),
+    listActiveCashAccountOptions(db),
     listFinanceWorkspaceProjects(actor, db),
   ]);
   return { rows: records.map(row => ({ ...paymentView(row, new Map()), rateDate: row.rateDate?.toISOString() ?? null,
