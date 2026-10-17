@@ -49,7 +49,8 @@ const database = {
 inject("../src/server/tasks/transaction", { withTaskTransaction: async (operation: (tx: Prisma.TransactionClient) => Promise<unknown>) => operation(database as unknown as Prisma.TransactionClient) });
 inject("../src/lib/prisma", { prisma: database });
 inject("next/cache", { revalidatePath() {} });
-inject("../src/server/require-role", { requireFinance: async () => ({ user: accountant }), requireAdmin: async () => ({ user: accountant }) });
+inject("../src/server/require-role", { requireFinance: async () => ({ user: accountant }), requireAdmin: async () => ({ user: accountant }),
+  requirePayrollManagement: async () => ({ user: accountant }), requireRole: async () => ({ user: accountant }) });
 inject("../src/server/plugins/changelog", { writeChangeLog: async () => { auditWrites += 1; } });
 inject("../src/server/plugins/events", { emitDomainEvent: async () => { eventWrites += 1; }, dispatchEvent: async () => {} });
 inject("../src/server/notifications/notify", { notifyPerson: async () => {}, notifyOrg: async () => {} });

@@ -10,14 +10,16 @@ import { INTERNAL_CURRENCY, INTERNAL_CURRENCY_ERROR } from "@/lib/internal-curre
 import { BYN_UNAVAILABLE_REASON } from "@/lib/history-byn";
 import { prisma } from "@/lib/prisma";
 import { formatAmount } from "@/lib/format";
+import { ADVANCE_ROLES, PAYROLL_MANAGE_ROLES } from "@/lib/roles";
 import { writeChangeLog } from "@/server/plugins/changelog";
 import { dispatchEvent } from "@/server/plugins/events";
 import { notifyOrg, notifyPerson } from "@/server/notifications/notify";
-import { requireAdmin, requireFinance } from "@/server/require-role";
+import { requireAdmin, requireFinance, requirePayrollManagement, requireRole } from "@/server/require-role";
 import { withTaskTransaction } from "@/server/tasks/transaction";
 import { assertPayrollCurrencyChange } from "@/server/product-stage-pay/core";
 import { assertPercentagePayrollCurrencyChange } from "@/server/product-percentage-pay/core";
 import { executeCashPayout } from "./cash-service";
+import { assertPayoutRole } from "./cash-core";
 import { accrueTurnoverCore } from "./turnover-core";
 import { calculateCashPayout, isCashCurrency, parseCashRate } from "@/lib/cash-ledger";
 import { listCashAccounts } from "@/server/finance/queries";
@@ -56,7 +58,7 @@ const payoutSchema = z.object({
 export async function addPayout(
   input: z.input<typeof payoutSchema>,
 ): Promise<Awaited<ReturnType<typeof executeCashPayout>>> {
-  const session = await requireFinance();
+  const session = await requireRole(input?.kind === "ADVANCE" ? ADVANCE_ROLES : PAYROLL_MANAGE_ROLES);
   const parsed = payoutSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Ошибка данных" };
@@ -78,9 +80,12 @@ export async function deletePayout(
 ): Promise<{ ok: boolean; error?: string }> {
   const session = await requireFinance();
   const result = await withTaskTransaction(async (tx) => {
-    const payout = await tx.payout.findUnique({ where: { id: payoutId }, include: { user: { select: { name: true } } } });
+    const target = await tx.payout.findUnique({ where: { id: payoutId }, select: { kind: true } });
+    if (!target) return { ok: false, error: "Выплата не найдена" };
+    assertPayoutRole({ id: session.user.id, name: session.user.name ?? "", roles: session.user.roles, source: "web" }, target.kind);
+    const payout = await tx.payout.findUnique({ where: { id: payoutId, kind: target.kind }, include: { user: { select: { name: true } } } });
     if (!payout) return { ok: false, error: "Выплата не найдена" };
-    await tx.payout.delete({ where: { id: payoutId } });
+    await tx.payout.delete({ where: { id: payoutId, kind: target.kind } });
     await tx.changeLog.create({ data: { actorType: "user", actorId: session.user.id, actorName: session.user.name ?? undefined,
       entity: "payout", entityId: payoutId, action: "delete", oldValue: { user: payout.user.name,
         amount: payout.amount.toFixed(2), cashAmount: payout.cashAmount?.toFixed(2) ?? null,
@@ -108,7 +113,7 @@ async function attemptPayrollEffect(effect: () => unknown): Promise<void> {
 export async function accrueTurnover(
   month: string,
 ): Promise<{ ok: boolean; error?: string; accruedCount?: number }> {
-  const session = await requireFinance();
+  const session = await requirePayrollManagement();
   const result = await accrueTurnoverCore({ id: session.user.id, name: session.user.name ?? "",
     roles: session.user.roles, source: "web" }, month, withTaskTransaction).catch((error: unknown) => ({
       ok: false as const, error: error instanceof Error ? error.message : "Не удалось начислить процент от оборота",
@@ -142,7 +147,7 @@ export async function settleAll(
   totalPaid?: number;
   shortPaid?: string[];
 }> {
-  const session = await requireFinance();
+  const session = await requirePayrollManagement();
   if (!isValidMonth(month)) return { ok: false, error: "Некорректный месяц" };
   if (!cashAccountId) return { ok: false, error: "Выберите кассу для расчёта" };
   const account = (await listCashAccounts()).find((row) => row.id === cashAccountId && row.active);

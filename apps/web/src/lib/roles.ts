@@ -47,8 +47,10 @@ export const OFFICE_ROLES: Role[] = [
 ];
 // Менеджмент: создание/правка проектов, задач, изделий, работ.
 export const MANAGER_ROLES: Role[] = ["ADMIN", "DIRECTOR", "MANAGER"];
-// Финансы: выплаты, приходы/расходы, кассы, статьи (§10–§11).
+// Финансы: приходы/расходы, кассы, статьи и авансы (§10–§11).
 export const FINANCE_ROLES: Role[] = ["ADMIN", "DIRECTOR", "ACCOUNTANT", "PROCUREMENT"];
+// Управление зарплатой других сотрудников не следует из общего финансового доступа.
+export const PAYROLL_MANAGE_ROLES: Role[] = ["ADMIN", "DIRECTOR", "ACCOUNTANT"];
 // Авансы — финансовая операция, отдельного права менеджера больше нет.
 export const ADVANCE_ROLES: Role[] = [...FINANCE_ROLES];
 export const WAREHOUSE_MANAGE_ROLES: Role[] = ["ADMIN", "DIRECTOR", "MANAGER", "PROCUREMENT"];

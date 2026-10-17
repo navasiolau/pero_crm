@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { auth } from "@/auth";
-import { FINANCE_ROLES, hasAnyRole } from "@/lib/roles";
+import { PAYROLL_MANAGE_ROLES, hasAnyRole } from "@/lib/roles";
 import {
   currentMonth,
   getCurrentMonthEstimates,
@@ -21,7 +21,7 @@ import { FinancePayrollView } from "./finance-payroll-view";
 
 export const dynamic = "force-dynamic";
 
-// «Финансы → Зарплата» (§10, админ/директор): сводка по сотрудникам
+// «Финансы → Зарплата» (§10, админ/директор/бухгалтер): сводка по сотрудникам
 // за месяц, начисление «% от оборота», выплаты, экспорт CSV.
 export default async function FinancePayrollPage({
   searchParams,
@@ -30,7 +30,7 @@ export default async function FinancePayrollPage({
 }) {
   const session = await auth();
   if (!session?.user) redirect("/login");
-  if (!hasAnyRole(session.user.roles, FINANCE_ROLES)) redirect("/");
+  if (!hasAnyRole(session.user.roles, PAYROLL_MANAGE_ROLES)) redirect("/");
 
   const { month: param } = await searchParams;
   if (param !== undefined && !isValidMonth(param)) redirect("/finance/payroll?month=" + currentMonth());

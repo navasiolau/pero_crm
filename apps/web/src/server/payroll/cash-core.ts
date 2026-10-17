@@ -4,7 +4,7 @@ import {activePaymentWhere} from '@/server/payments/active-records';
 import { Prisma } from "@prisma/client";
 import { calculateCashPayout, cashMovementDelta, isCashCurrency, parseCashAmount, type CashCurrency, type CashRates } from "@/lib/cash-ledger";
 import { requireHistoricalByn } from "@/lib/history-byn";
-import { ADVANCE_ROLES, FINANCE_ROLES, hasAnyRole, type Role } from "@/lib/roles";
+import { ADVANCE_ROLES, PAYROLL_MANAGE_ROLES, hasAnyRole, type Role } from "@/lib/roles";
 
 export type PayoutActor = { id: string; name: string; roles: Role[]; source: "web" | "telegram" | "api" };
 export type CashPayoutInput = {
@@ -21,9 +21,9 @@ export type CashPayoutInput = {
 
 function fail(message: string): never { throw new Error(message); }
 
-export function assertPayoutRole(actor: PayoutActor, kind: CashPayoutInput["kind"]): void {
+export function assertPayoutRole(actor: PayoutActor, kind: string): void {
   if (kind !== "ADVANCE" && kind !== "SALARY") fail("Неизвестный тип выплаты");
-  if (!hasAnyRole(actor.roles, kind === "ADVANCE" ? ADVANCE_ROLES : FINANCE_ROLES)) fail("Недостаточно прав");
+  if (!hasAnyRole(actor.roles, kind === "ADVANCE" ? ADVANCE_ROLES : PAYROLL_MANAGE_ROLES)) fail("Недостаточно прав");
 }
 
 function normalizedInput(actor: PayoutActor, input: CashPayoutInput, now: Date) {

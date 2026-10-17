@@ -2,7 +2,7 @@ import { Prisma } from "@prisma/client";
 import { canAccrueOrdinarySalary } from "@/lib/compensation-policy";
 import { historicalByn, BYN_UNAVAILABLE_REASON } from "@/lib/history-byn";
 import { formatAmount } from "@/lib/format";
-import { FINANCE_ROLES } from "@/lib/roles";
+import { PAYROLL_MANAGE_ROLES } from "@/lib/roles";
 import { isValidPayrollMonth, payrollMonth } from "@/lib/payroll-month";
 import { requireActorRoles, type DomainActor } from "@/server/actor";
 import type { TaskTransaction } from "@/server/tasks/transaction";
@@ -17,7 +17,7 @@ export type TurnoverAccrualResult = { ok: false; error: string } | {
 };
 
 export async function accrueTurnoverCore(actor: DomainActor, month: string, transaction: TaskTransaction): Promise<TurnoverAccrualResult> {
-  requireActorRoles(actor, FINANCE_ROLES);
+  requireActorRoles(actor, PAYROLL_MANAGE_ROLES);
   if (!isValidPayrollMonth(month)) return { ok: false, error: "Некорректный месяц" };
   if (month >= payrollMonth()) return { ok: false, error: "Начислять можно только за прошлый месяц — текущий ещё не закрыт" };
   return transaction(async (tx): Promise<TurnoverAccrualResult> => {
