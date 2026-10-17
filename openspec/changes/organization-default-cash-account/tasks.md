@@ -16,4 +16,4 @@
 
 - [x] 3.1 Выполнить целевые тесты, типизацию, lint и openspec validate --strict; записать фактические результаты и ограничения.
 - [x] 3.2 Выполнить проверку транзакционной гонки на разрешённой существующей local БД 5433 после её доступности без reset/seed/dump.
-- [ ] 3.3 После разрешённой интеграции подтвердить staging SHA/образ и денежные сценарии на реально развёрнутом staging.
+- [x] 3.3 Подтвердить actual staging SHA/образ и доступные сценарии initial/default/manual/cancel в восьми формах; зафиксировать scoped PASS, mass-disabled gap и LOCAL-only document coverage в staging-qa.md / staging-qa.json. Денежное проведение не выполнялось.
