@@ -19,7 +19,7 @@ function AttachmentBlock({ title, section, measurement, ...props }: ProductAttac
   return <section className="min-w-0" aria-label={title}>
     <Uploader projectId={props.projectId} productId={props.productId} canEdit={props.canEdit} section={section} compact onBusyChange={busy.upload}
       header={<h2 className="min-w-0 flex-1 break-words text-sm font-semibold">{title} <span className="text-muted-foreground">({props.files.length})</span></h2>}>
-      <FileGridView files={props.files} canEdit={props.canEdit} compact onBusyChange={busy.deletion} />
+      <FileGridView files={props.files} canEdit={props.canEdit} compact onBusyChange={busy.deletion} filenameTone="red" />
     </Uploader>
   </section>;
 }

@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import { createRequire } from "node:module";
-import { readFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer } from "node:http";
@@ -22,13 +23,31 @@ const files: FileListItem[] = [
   ...["success", "fail", "throw"].map(id => ({ id, fileName: `${id}.txt`, mimeType: "text/plain", canDelete: true })),
 ];
 type Metrics = { calls: { contentType: string; text: string; image: { width: number; height: number; fit: string } | null }[]; created: string[]; revoked: string[]; rowClicks: number };
-const entry = `import React from 'react';import{createRoot}from'react-dom/client';import{FileList,FileListRow}from'@/components/file-list';import{ReportDocumentButton}from'@/components/report-document-button';import*as printer from'@/lib/browser-file-print';
-const root=createRoot(document.getElementById('root'));window.fixture={...printer,unmount:()=>root.unmount(),render:file=>root.render(<div onClick={()=>window.printMetrics.rowClicks++}>{file.source==='finance'?<ReportDocumentButton document={file}/>:<FileListRow file={file} disabled={file.disabled}/>}</div>)};
+const entry = `import React from 'react';import{createRoot}from'react-dom/client';import{FileList,FileListRow}from'@/components/file-list';import{ReportDocumentButton}from'@/components/report-document-button';import{ProductMeasurement,ProductDocuments}from'@/components/product-attachments';import{FilesTab}from'@/app/(app)/projects/[id]/files-tab';import{useFileViewer}from'@/components/file-viewer';import*as printer from'@/lib/browser-file-print';
+const selected=${JSON.stringify(files.slice(0,4))},productRows=section=>selected.map(file=>({...file,section}));
+function ProductFiles(){const productViewer=useFileViewer('fullscreen','red'),defaultViewer=useFileViewer('fullscreen');return <main style={{padding:16,maxWidth:720}}>
+<span data-expected-red className="text-red-600 dark:text-red-400">Образец цвета</span><div data-qa-product-groups className="space-y-4"><ProductMeasurement projectId="fixture-project" productId="fixture-product" files={productRows('MEASUREMENT')} canEdit={false}/><ProductDocuments projectId="fixture-project" productId="fixture-product" production={productRows('PRODUCTION')} installation={productRows('INSTALLATION')} noModel canManage={false} canEdit={false}/></div>
+<div data-qa-product-files><FilesTab projectId="fixture-project" productId="fixture-product" files={productRows('PRODUCTION')} canEdit={false}/></div><div data-qa-default-files><FilesTab projectId="fixture-project" files={productRows('GENERAL')} canEdit={false}/></div>
+<button onClick={()=>productViewer.open(selected[1])}>Предпросмотр изделия</button><button onClick={()=>defaultViewer.open(selected[1])}>Обычный предпросмотр</button>{productViewer.viewer}{defaultViewer.viewer}</main>;}
+const root=createRoot(document.getElementById('root'));window.fixture={...printer,product:()=>root.render(<ProductFiles/>),unmount:()=>root.unmount(),render:file=>root.render(<div onClick={()=>window.printMetrics.rowClicks++}>{file.source==='finance'?<ReportDocumentButton document={file}/>:<FileListRow file={file} disabled={file.disabled}/>}</div>)};
 window.qa={deleteCalls:[],refreshes:0,busy:[],parentKeys:0};function App(){const[files,setFiles]=React.useState(${JSON.stringify(files)});return <main style={{padding:16,maxWidth:720}} onClick={()=>window.printMetrics.rowClicks++} onKeyDown={()=>window.qa.parentKeys++}><FileList files={files} onBusyChange={busy=>window.qa.busy.push(busy)} onDelete={async file=>{window.qa.deleteCalls.push(file.id);if(file.id==='fail')return{ok:false,error:'Сервер отказал в удалении'};if(file.id==='throw')throw Error('NETWORK');await new Promise(resolve=>window.qa.resolveDelete=resolve);return{ok:true};}} onDeleted={file=>{window.qa.refreshes++;setFiles(rows=>rows.filter(row=>row.id!==file.id));}}/></main>;}root.render(<App/>);`;
 let browser: Browser, javascript: string, css: string, pdf: Buffer;
 const assets = new Map<string, Buffer>();
 before(async () => {
-  const compiled = await build({ stdin: { contents: entry, resolveDir: web, loader: "tsx" }, bundle: true, write: false, platform: "browser", format: "iife", jsx: "automatic", tsconfig: path.join(web, "tsconfig.json"), define: { "process.env.NODE_ENV": '"production"' }, logLevel: "silent" });
+  const boundaries: Record<string,string> = {
+    "next/navigation": "export const useRouter=()=>({refresh:()=>window.qa.refreshes++});",
+    "@/server/files/actions": "export async function deleteFile(id){window.qa.deleteCalls.push(id);return{ok:true};}",
+    "@/components/product-inline-provider": "const registerGuard=()=>()=>{};export const useProductInline=()=>({registerGuard});",
+  };
+  const compiled = await build({ stdin: { contents: entry, resolveDir: web, loader: "tsx" }, bundle: true, write: false, platform: "browser", format: "iife", jsx: "automatic", tsconfig: path.join(web, "tsconfig.json"), define: { "process.env.NODE_ENV": '"production"' }, logLevel: "silent", plugins:[{
+    name:"product-file-transport",setup(builder: {
+      onResolve:(options:{filter:RegExp},callback:(args:{path:string})=>{path:string;namespace:string})=>void;
+      onLoad:(options:{filter:RegExp;namespace:string},callback:(args:{path:string})=>{contents:string;loader:"tsx";resolveDir:string})=>void;
+    }){
+      builder.onResolve({filter:/^(?:next\/navigation|@\/server\/files\/actions|@\/components\/product-inline-provider)$/},args=>({path:args.path,namespace:"fixture-boundary"}));
+      builder.onLoad({filter:/.*/,namespace:"fixture-boundary"},args=>({contents:boundaries[args.path],loader:"tsx",resolveDir:web}));
+    },
+  }] });
   javascript = compiled.outputFiles[0].text;
   const postcss = createRequire(require.resolve("@tailwindcss/postcss"))("postcss"), tailwind = require("@tailwindcss/postcss");
   css = (await postcss([tailwind({ base: web })]).process(await readFile(path.join(web, "src/app/globals.css"), "utf8"), { from: path.join(web, "src/app/globals.css") })).css;
@@ -119,6 +138,54 @@ test("real file rows preserve names, protected downloads, permissions and transa
     }
     assert.equal(await page.evaluate("window.printMetrics.rowClicks"), 0); assert.equal(await page.evaluate("window.qa.parentKeys"), 0);
   });
+});
+
+test("product filenames stay red through groups and viewer portal while default files and actions are preserved", async () => {
+  const directory=path.join(web,"test-results/product-file-name-color",randomUUID()),checks: {width:number;theme:string;screenshots:string[]}[]=[];
+  await mkdir(directory,{recursive:true});
+  for(const viewport of [{width:1440,height:900},{width:390,height:844},{width:360,height:800}])await withFiles(viewport,async page=>{
+    await page.evaluate("window.fixture.product()");
+    const groups=page.locator('[data-qa-product-groups]'),legacy=page.locator('[data-qa-product-files]'),defaults=page.locator('[data-qa-default-files]');
+    await expect(groups.locator('[data-file-list-row]')).toHaveCount(12);
+    for(const theme of ['light','dark']){
+      await page.evaluate(dark=>document.documentElement.classList.toggle('dark',dark),theme==='dark');
+      const red=await page.locator('[data-expected-red]').evaluate(node=>getComputedStyle(node).color);
+      for(const container of [groups,legacy])for(const name of await container.locator('[data-file-list-row] > :is(button,a):first-child').all()){
+        assert.equal(await name.evaluate(node=>getComputedStyle(node).color),red,'PRODUCT_FILENAME_RED_REQUIRED');
+        assert.equal(await name.evaluate(node=>node.scrollWidth<=node.clientWidth),true,'FILENAME_OVERFLOW');
+      }
+      const normalName=defaults.locator('[data-file-list-row="image"] > button:first-child');
+      assert.notEqual(await normalName.evaluate(node=>getComputedStyle(node).color),red,'DEFAULT_FILENAME_MUST_KEEP_STYLE');
+      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+      const screenshots=[path.join(directory,`groups-${viewport.width}-${theme}.png`)];await page.screenshot({path:screenshots[0],fullPage:true,animations:'disabled'});
+      await page.getByRole('button',{name:'Предпросмотр изделия',exact:true}).click();
+      const dialog=page.getByRole('dialog'),name=dialog.locator('span.truncate');
+      await expect(name).toHaveText(files[1].fileName);assert.equal(await name.evaluate(node=>getComputedStyle(node).color),red,'VIEWER_FILENAME_RED_REQUIRED');
+      assert.equal(await name.evaluate(node=>node.closest('[data-qa-product-groups]')===null),true,'VIEWER_MUST_USE_PORTAL');
+      screenshots.push(path.join(directory,`viewer-${viewport.width}-${theme}.png`));await page.screenshot({path:screenshots[1],animations:'disabled'});
+      const download=page.waitForEvent('download');await dialog.getByRole('link').click();assert.equal((await download).suggestedFilename(),files[1].fileName);
+      await page.keyboard.press('Escape');await expect(dialog).toHaveCount(0);
+      await page.getByRole('button',{name:'Обычный предпросмотр',exact:true}).click();
+      assert.notEqual(await page.getByRole('dialog').locator('span.truncate').evaluate(node=>getComputedStyle(node).color),red);
+      await page.getByRole('button',{name:'Закрыть',exact:true}).click();await expect(page.getByRole('dialog')).toHaveCount(0);
+      checks.push({width:viewport.width,theme,screenshots});
+    }
+    const measurement=groups.getByRole('region',{name:'Замер',exact:true}),imageName=measurement.getByRole('button',{name:files[0].fileName,exact:true});
+    await imageName.focus();await page.keyboard.press('Enter');const image=page.locator('[data-fullscreen-image] img');
+    await expect(image).toBeVisible();await expect.poll(()=>image.evaluate(node=>(node as HTMLImageElement).naturalWidth)).toBe(1200);
+    assert.equal(await image.getAttribute('src'),'/api/files/image');assert.equal(await image.evaluate(node=>getComputedStyle(node).objectFit),'contain');
+    const surface=page.getByRole('region',{name:'Изображение: масштаб и перемещение'});await surface.focus();await page.keyboard.press('+');await expect(page.getByText('150%',{exact:true})).toBeVisible();await page.keyboard.press('0');await expect(page.getByText('100%',{exact:true})).toBeVisible();
+    await page.keyboard.press('Escape');await expect(image).toHaveCount(0);await expect(imageName).toBeFocused();
+    const production=groups.getByRole('region',{name:'Производство',exact:true}),pdfRow=production.locator('[data-file-list-row="pdf"]');
+    const download=page.waitForEvent('download');await pdfRow.getByRole('link').click();const original=await download;assert.equal(original.suggestedFilename(),files[1].fileName);
+    const stream=await original.createReadStream();assert.ok(stream);const chunks:Buffer[]=[];for await(const chunk of stream)chunks.push(chunk);assert.deepEqual(Buffer.concat(chunks),pdf);
+    await pdfRow.getByRole('button',{name:/^Распечатать/}).click();await expect.poll(()=>page.evaluate<number>('window.printMetrics.calls.length')).toBe(1);await expect(page.locator('[data-file-print]')).toHaveCount(0);
+    const cadRow=groups.getByRole('region',{name:'Монтаж',exact:true}).locator('[data-file-list-row="cad"]'),popup=page.locator('[data-slot="popover-content"]');
+    await cadRow.getByRole('button',{name:/^Удалить файл/}).click();await popup.getByRole('button',{name:'Отмена',exact:true}).click();assert.deepEqual(await page.evaluate('window.qa.deleteCalls'),[]);
+    await cadRow.getByRole('button',{name:/^Удалить файл/}).click();await popup.getByRole('button',{name:'Удалить',exact:true}).click();await expect(popup).toHaveCount(0);assert.deepEqual(await page.evaluate('window.qa.deleteCalls'),['cad']);assert.equal(await page.evaluate('window.qa.refreshes'),1);
+  });
+  await writeFile(path.join(directory,'receipt.json'),JSON.stringify({status:'COMPONENT_RUNTIME_PASS',scope:'real ProductMeasurement/ProductDocuments/FilesTab/FileList/FileViewer with synthetic transport',staging:'NOT_RUN',checks},null,2));
+  console.log(JSON.stringify({status:'COMPONENT_RUNTIME_PASS',checks:checks.length,directory}));
 });
 
 test("actual print button loads original image/PDF, rejects errors and cleans retained resources", async () => {

@@ -15,6 +15,7 @@ import {MULTI_UPLOAD_MAX_FILES,createUploadAttempt,sendUploadBatch,localUploadFa
 import {PRODUCT_FILE_SECTIONS, FILE_SECTION_LABELS} from "@/lib/file-sections";
 
 import {FileList} from "@/components/file-list";
+import type { FileNameTone } from "@/components/file-viewer";
 import type { FileListItem } from "@/lib/viewable-file";
 
 export interface FileRow extends FileListItem {
@@ -130,16 +131,17 @@ export function Uploader({
 }
 
 // Единый список; публичные props контейнеров/разделов сохраняются для существующих экранов.
-export function FileGridView({files, onBusyChange}: {
+export function FileGridView({files, onBusyChange, filenameTone}: {
   flat?: boolean;
   files: FileRow[];
   canEdit: boolean;
   compact?: boolean;
   onBusyChange?: (busy: boolean) => void;
+  filenameTone?: FileNameTone;
 }) {
   const router = useRouter();
   return <FileList files={files} onDelete={(file, clientMutationId) => deleteFile(file.id, clientMutationId)}
-    onDeleted={() => {toast.success("Файл удалён");router.refresh();}} onBusyChange={onBusyChange} />;
+    onDeleted={() => {toast.success("Файл удалён");router.refresh();}} onBusyChange={onBusyChange} filenameTone={filenameTone} />;
 }
 
 // Общие файлы проекта остаются плоским списком; изделие использует разделы.
@@ -163,7 +165,7 @@ export function FilesTab({projectId, productId, files, canEdit}: {
       return <section key={section} className="min-w-0" aria-label={FILE_SECTION_LABELS[section]}>
         <Uploader projectId={projectId} productId={productId} canEdit={canEdit} section={section}
           header={<h3 className="min-w-0 flex-1 break-words text-sm font-semibold">{FILE_SECTION_LABELS[section]} <span className="text-muted-foreground">({sectionFiles.length})</span></h3>}>
-          <FileGridView files={sectionFiles} canEdit={canEdit} />
+          <FileGridView files={sectionFiles} canEdit={canEdit} filenameTone="red" />
         </Uploader>
       </section>;
     })}

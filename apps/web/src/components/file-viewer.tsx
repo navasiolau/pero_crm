@@ -7,9 +7,11 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { FullscreenImageViewport } from "@/components/fullscreen-image-viewport";
 import { getViewableFileSource, type ViewableFile } from "@/lib/viewable-file";
+import { cn } from "@/lib/utils";
 
 export { getViewableFileSource, type ViewableFile } from "@/lib/viewable-file";
 export type FileViewerVariant = "standard" | "cover-fullscreen" | "fullscreen";
+export type FileNameTone = "default" | "red";
 export function getFileViewerPresentation(variant: FileViewerVariant = "standard", file?: Pick<ViewableFile,"mimeType">) {
   const image=file ? file.mimeType.startsWith("image/") : variant === "cover-fullscreen";
   return image||variant==='fullscreen'
@@ -25,8 +27,8 @@ export function getFileViewerDispatch(file: ViewableFile) {
 }
 
 // Все фотографии — полноэкранные; защищённые оригиналы и прочие форматы сохраняют маршруты.
-export function FileViewer({file,open,onOpenChange,variant="standard"}: {
-  file: ViewableFile | null; open: boolean; onOpenChange: (open: boolean) => void; variant?: FileViewerVariant;
+export function FileViewer({file,open,onOpenChange,variant="standard",filenameTone="default"}: {
+  file: ViewableFile | null; open: boolean; onOpenChange: (open: boolean) => void; variant?: FileViewerVariant; filenameTone?: FileNameTone;
 }) {
   if (!file || !open) return null;
   const presentation=getFileViewerPresentation(variant,file);
@@ -42,7 +44,7 @@ export function FileViewer({file,open,onOpenChange,variant="standard"}: {
     <DialogContent data-file-viewer-variant={presentation.fullscreen?'document-fullscreen':'standard'} className={presentation.popupClassName} showCloseButton={false}>
       <DialogTitle className="sr-only">{file.fileName}</DialogTitle>
       <div className="flex shrink-0 items-center justify-between gap-2 px-3 py-2">
-        <span className="truncate text-sm text-muted-foreground">{file.fileName}</span>
+        <span className={cn("truncate text-sm",filenameTone==="red"?"text-red-600 dark:text-red-400":"text-muted-foreground")}>{file.fileName}</span>
         <div className="flex gap-1">
           <a href={src} download><Button size="icon-sm" variant="ghost" aria-label="Скачать оригинал"><Download className="size-4" /></Button></a>
           <Button size="icon-sm" variant="ghost" aria-label="Закрыть" onClick={()=>onOpenChange(false)}><X className="size-4" /></Button>
@@ -54,7 +56,7 @@ export function FileViewer({file,open,onOpenChange,variant="standard"}: {
     </DialogContent>
   </Dialog>;
 }
-export function useFileViewer(variant: FileViewerVariant="standard") {
+export function useFileViewer(variant: FileViewerVariant="standard", filenameTone: FileNameTone="default") {
   const [file,setFile]=useState<ViewableFile|null>(null);
   function open(file: ViewableFile) {
     const dispatch=getFileViewerDispatch(file);
@@ -62,6 +64,6 @@ export function useFileViewer(variant: FileViewerVariant="standard") {
     else if (dispatch==="pdf") window.open(`${getViewableFileSource(file)}?view=1`,"_blank","noopener");
     else { const anchor=document.createElement("a"); anchor.href=getViewableFileSource(file); anchor.download=file.fileName; anchor.click(); }
   }
-  const viewer=<FileViewer file={file} open={!!file} variant={variant} onOpenChange={open=>!open&&setFile(null)} />;
+  const viewer=<FileViewer file={file} open={!!file} variant={variant} filenameTone={filenameTone} onOpenChange={open=>!open&&setFile(null)} />;
   return {open,viewer};
 }
