@@ -1,0 +1,173 @@
+{
+  "task": 174,
+  "change": "counterparty-directory",
+  "date": "2026-10-17",
+  "stage": "https://staging-crm.peromebel.by",
+  "revision": "0d399e96d56010b05cd8f4df077aef03a7064e05",
+  "image": "sha256:0f89f9de9c0e8a4ee0437a4e443a41784e0a173c3e429ce42a266974c8f2b189",
+  "runId": "1c0b0ed5-b65a-4fe2-8ba4-9116e8fa4d89",
+  "combinedRun": {
+    "status": "STAGE171174_BROWSER_PASS",
+    "checks": 168,
+    "issuedBusinessPosts": 18,
+    "acknowledgedBusinessPosts": 18,
+    "deniedRequests": 0,
+    "clientErrors": 0
+  },
+  "identity": {
+    "outerAndInnerGuards": "PASS",
+    "database": "crm/public",
+    "databaseUrlHost": "db",
+    "existingDatabaseAndVolumePreserved": true,
+    "outerW07Preserved": true
+  },
+  "evidence": {
+    "receipt.json": {
+      "path": ".playwright-mcp/requests-171-179/staging171174/run-1c0b0ed5-b65a-4fe2-8ba4-9116e8fa4d89/receipt.json",
+      "sha256": "5e62d7bd1312cc314e2705a11eec7a52d8e0fab3d194affaa54e097422ab3447"
+    },
+    "native.json": {
+      "path": ".playwright-mcp/requests-171-179/staging171174/run-1c0b0ed5-b65a-4fe2-8ba4-9116e8fa4d89/native.json",
+      "sha256": "da68578a843d3c32475f3274579b81f1aef719a6141cc2c6a9956efb6a654e23"
+    },
+    "cleanup.json": {
+      "path": ".playwright-mcp/requests-171-179/staging171174/run-1c0b0ed5-b65a-4fe2-8ba4-9116e8fa4d89/cleanup.json",
+      "sha256": "0da4fa7564b1fe34fadd4a7354d2b8a6c2a7726d16db0152fb9bc4b20ab81492"
+    },
+    "independent-inspect.json": {
+      "path": ".playwright-mcp/requests-171-179/staging171174/run-1c0b0ed5-b65a-4fe2-8ba4-9116e8fa4d89/independent-inspect.json",
+      "sha256": "3462d4874ffc3c339f644df02b2def20881be0a6ddb5638c06ff8a9ab4a1643b"
+    },
+    "bundle-provenance.json": {
+      "path": ".playwright-mcp/requests-171-179/staging171174/run-1c0b0ed5-b65a-4fe2-8ba4-9116e8fa4d89/bundle-provenance.json",
+      "sha256": "72617031319a580ce50e2995266caa859b45151a235cf7387457ed8a17317a42"
+    }
+  },
+  "producer": {
+    "runSha256": "38740ba2277a53839bb1af2ca0abd58b85c6b9746c2276d598562e71861f4f45",
+    "reviewManifest": "heading-fix-review.json",
+    "reviewManifestSha256": "fdebf424b705b132dfd8d9c49925a5f1f4788670675b196817b729757cba4744",
+    "nativeBytes": 90281,
+    "sessionBytes": 168936,
+    "cap": 262144,
+    "pinnedCompilerSha256": "ee86040780f392af0ba31067df25a000e0d3c0b26b454d0c978a2a50982866b1",
+    "compilerSchemaDifferentialCases": 379,
+    "compilerSourcePinsMatch": true,
+    "sharedAstParserSha256": "219ea70d3fb67ed3a5489a6d47cf9eae16ce6202d770bad245310b75143be3fd"
+  },
+  "preservation": {
+    "tables": 65,
+    "stablePreserved": true,
+    "stableChangedTables": [],
+    "fullPreserved": false,
+    "fullChangedTables": [
+      "ApiToken"
+    ],
+    "onlyObservedRuntimeField": "ApiToken.lastUsedAt",
+    "runtimeDrift": "Оркестратор подтвердил движение timestamp вперёд; поле не восстанавливалось",
+    "nativeTransactionFullFingerprintsEqual": true,
+    "cleanup": {
+      "clients": 1,
+      "counterparties": 6,
+      "audit": 18
+    },
+    "independentOwnCounts": {
+      "client": 0,
+      "counterparties": 0
+    },
+    "retainedQaRecords": false,
+    "historicalAndFinancialRecords": "Сохранены по независимому сравнению всех65 stable fingerprints; raw строки не копируются"
+  },
+  "ci": {
+    "runId": 38996944460,
+    "url": "https://github.com/navasiolau/pero_crm/actions/runs/38996944460",
+    "sourceSha": "0d399e96d56010b05cd8f4df077aef03a7064e05",
+    "result": "SUCCESS-all6jobs",
+    "evidence": "Подтверждение оркестратора в execution-state.json; ci-all9.json — промежуточный снимок in_progress, не доказательство final success"
+  },
+  "localIntegration": {
+    "tests": "988/988 PASS",
+    "typecheck": "PASS",
+    "lint": "0 errors / 4 существующих предупреждения",
+    "strictOpenSpec": "9/9 PASS, сообщено оркестратором"
+  },
+  "retainedHistoricalHolds": [
+    "3265359f-6662-4616-b636-fa1570aeb801",
+    "6c23df5f-6314-4e45-81d4-1095dd8bb23f"
+  ],
+  "safety": "Только существующий staging; нет production/main/инфраструктурных изменений, новых пользователей/ролей/БД, reset/seed/dump. JWT900sec только в памяти. Команды staging выполнял оркестратор.",
+  "scope": {
+    "status": "STAGING_ACCEPTED_WITH_EXPLICIT_COVERAGE_LIMITS",
+    "native": {
+      "createBothTypes": true,
+      "optionalContacts": true,
+      "roleBoundary": true,
+      "revisionCas": true,
+      "noOpAudit": true,
+      "realSqlRollback": true
+    },
+    "actualHttp": [
+      {
+        "profile": "engineer",
+        "status": 302
+      },
+      {
+        "profile": "procurement",
+        "status": 200
+      },
+      {
+        "profile": "accountant",
+        "status": 302
+      }
+    ],
+    "browser": {
+      "actorRole": "ADMIN",
+      "scenarios": "Создание обоих типов, просмотр, изменение, очистка контактов, поиск, совместный фильтр, пустое состояние, сохранение поискового текста и проверка overflow",
+      "cases": [
+        {
+          "width": 1440,
+          "theme": "light",
+          "type": "Поставщик"
+        },
+        {
+          "width": 1440,
+          "theme": "dark",
+          "type": "Перевозчик"
+        },
+        {
+          "width": 390,
+          "theme": "light",
+          "type": "Поставщик"
+        },
+        {
+          "width": 390,
+          "theme": "dark",
+          "type": "Перевозчик"
+        },
+        {
+          "width": 360,
+          "theme": "light",
+          "type": "Поставщик"
+        },
+        {
+          "width": 360,
+          "theme": "dark",
+          "type": "Перевозчик"
+        }
+      ],
+      "issued": 18,
+      "acknowledged": 18,
+      "createdCounterparties": 6,
+      "updatedCounterparties": 12,
+      "visualReviewByRoot": [
+        "counterparty174-editor-1440-light.png",
+        "counterparty174-view-390-dark.png"
+      ]
+    },
+    "coverageLimits": [
+      "Actual HTTP подтверждает PROCUREMENT200, ENGINEER302, ACCOUNTANT302; создание/редактирование через реальные UI actions выполнено ADMIN.",
+      "Native staging проверяет оба типа, optional contacts, revision CAS, no-op audit, реальные SQL rollback и запреты ENGINEER/ACCOUNTANT. Остальные разрешённые/совмещённые роли и прямые action/query-пути проверены локальными core/access/action тестами.",
+      "Поиск по телефону/комментарию, восстановление ввода после конфликта и открытие существующей строки дополнительно покрыты локальным real-component Chromium harness; stage matrix использует поиск собственной компании и просмотр после actual ACK."
+    ]
+  }
+}
