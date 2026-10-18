@@ -5,6 +5,7 @@ apps/web/prisma/migrations/20260929120000_manager_cash_advances/migration.sql te
 apps/web/prisma/migrations/20261018000100_kp_document_storage/migration.sql text eol=lf
 apps/web/prisma/migrations/20261018000200_kp_project_synchronization/migration.sql text eol=lf
 apps/web/prisma/migrations/20261018000300_kp_pricing_services/migration.sql text eol=lf
+apps/web/prisma/migrations/20261018000400_kp_private_media/migration.sql text eol=lf
 
 # Исходные байты КП: SHA-манифесты одинаковы после checkout на обеих ОС.
 packages/kp-template/assets/** -text whitespace=cr-at-eol
