@@ -1,7 +1,7 @@
 // SAFETY: D:/Projects/pero_infra/infra-recovery/SAFETY-RULES.md; STOP при несовпадении CI target.
 import assert from "node:assert/strict";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { after, before, test } from "node:test";
 import type { Prisma, PrismaClient, ProductStatus, ProjectStage, Role } from "@prisma/client";
 import type { DomainActor } from "../../src/server/actor";
@@ -13,6 +13,10 @@ import { summarizeCalendarEntries } from "../../src/lib/calendar-summary";
 import { verifyCounterpartyNative } from "../helpers/counterparty-native";
 import { productDraftAccessRelations } from "../../src/server/access/product-draft-context";
 import { verifyProposalCompositionNative } from "../helpers/kp-proposal-native";
+import { requestProposalPdfInTransaction, recordPendingPdfArtifactInTransaction, publishSourcePdfInTransaction,
+  completeRenderJobInTransaction, type LifecycleSecurity } from "../../src/server/kp/lifecycle-store";
+import { createPrismaRenderQueue } from "../../src/server/kp/render-queue";
+import type { ActorBinding, LifecyclePorts } from "../../src/server/kp/lifecycle-contract";
 
 type Db = PrismaClient | Prisma.TransactionClient;
 type MutationProbe = { taskId?: string; workerId?: string; workId?: string; projectId?: string; cashId?: string; paymentId?: string; receiptId?: string; payment: boolean;
@@ -635,6 +639,134 @@ test("kp181/shared-project-quote-allocation-real-advisory-waiter-and-repeated-re
   assert.equal(await fixture.db.commercialProposal.count({ where: { projectId: quote.result.projectId } }), 1);
   assert.equal(await fixture.db.domainEvent.count({ where: { actor: actor.id, type: "kp.created" } }), 1);
 });
+
+for (const order of ["save-first", "stage-first"] as const) {
+  test(`kp185/proposal-save-vs-lead-exit-${order}-real-advisory-waiter`, async () => {
+    const user = await fixture.user(`kp185-${order}-manager`, ["MANAGER"]), actor = actorOf(user);
+    const temporary = await fixture.db.client.create({ data: { id: fixture.id(`kp185-${order}-temporary`), name: "Временный", phone: "CI185_SYNTHETIC" } });
+    const hooks = { environment: { PERO_KP_TEMP_CLIENT_ID: temporary.id }, applyPricing: async () => ({ changed: false }) };
+    const binding: ActorBinding = { id: actor.id, source: "web", sessionVersion: user.sessionVersion };
+    const ports: LifecyclePorts & LifecycleSecurity = {
+      enabled: true,
+      templateIdentity: () => ({ templateHash: "a".repeat(64), fontManifestHash: "b".repeat(64), sourceManifestHash: "c".repeat(64), chromium: "CI-SQL-only", puppeteer: "CI-SQL-only" }),
+      pricingSnapshot: () => ({ scope: "concurrency metadata only; no pricing acceptance" }), mediaIds: () => [],
+      authorizeSource: async (_tx, requested) => assert.deepEqual(requested, binding, "KP185_OWNED_ACTOR_BINDING_REQUIRED"),
+    };
+    const source = { order: { project: `КП185 ${order}` }, items: [
+      { id: randomUUID(), name: "Исходная первая", qty: 2 }, { id: randomUUID(), name: "Исходная вторая", qty: 1 },
+    ] };
+    // Только SQL-метаданные выпуска, через настоящие server wrappers и очередь.
+    // Stand-in не рендерится и не загружается: физический PDF/S3 этим сценарием не принимаются.
+    const prepared = await run(actor, fixture.db, () => realTransaction(fixture.db)(async tx => {
+      const created = await proposals.createProposalInTransaction(tx, actor, { operationId: randomUUID(), state: source }, hooks);
+      const proposalId = created.result.proposalId;
+      const requested = await requestProposalPdfInTransaction(tx, binding, { proposalId, expectedRevision: created.result.revision, operationId: randomUUID() }, ports);
+      assert.equal(requested.kind, "job"); if (requested.kind !== "job") assert.fail("KP185_NEW_RELEASE_JOB_REQUIRED");
+      const claim = await createPrismaRenderQueue(async operation => operation(tx)).claim(["PDF"], randomUUID(), 60_000, requested.jobId);
+      assert.ok(claim, "KP185_REAL_LEASE_REQUIRED");
+      const standIn = Buffer.from("%PDF-1.7\nCI SQL concurrency metadata only; not rendered or uploaded");
+      const artifact = await recordPendingPdfArtifactInTransaction(tx, { claim, proposalId, artifact: {
+        storageBinding: { endpoint: "http://127.0.0.1:9000", bucket: "native-sql-only" }, sha256: createHash("sha256").update(standIn).digest("hex"), size: standIn.length,
+      } }, ports);
+      const version = await publishSourcePdfInTransaction(tx, { claim, proposalId, artifactId: artifact.id, verified: artifact }, ports);
+      await completeRenderJobInTransaction(tx, claim, { proposalId, versionId: version.id, pdfArtifactId: artifact.id }, ports);
+      return { created: created.result, versionId: version.id, artifactId: artifact.id, jobId: claim.id };
+    }));
+    const { proposalId, projectId, revision } = prepared.created;
+    const snapshot = async () => ({
+      proposal: await fixture.db.commercialProposal.findUniqueOrThrow({ where: { id: proposalId } }),
+      project: await fixture.db.project.findUniqueOrThrow({ where: { id: projectId } }),
+      products: await fixture.db.product.findMany({ where: { projectId }, orderBy: { id: "asc" } }),
+      items: await fixture.db.proposalItem.findMany({ where: { proposalId }, orderBy: { id: "asc" } }),
+      statusHistory: await fixture.db.productStatusHistory.findMany({ where: { product: { projectId } }, orderBy: { id: "asc" } }),
+      stageHistory: await fixture.db.projectStageHistory.findMany({ where: { projectId }, orderBy: { id: "asc" } }),
+      receipts: await fixture.db.changeLog.findMany({ where: { entity: "commercialProposal", entityId: proposalId, action: "kp.write.receipt" }, orderBy: { id: "asc" } }),
+      version: await fixture.db.proposalVersion.findUniqueOrThrow({ where: { id: prepared.versionId } }),
+      artifact: await fixture.db.proposalArtifact.findUniqueOrThrow({ where: { id: prepared.artifactId } }),
+      job: await fixture.db.proposalJob.findUniqueOrThrow({ where: { id: prepared.jobId } }),
+    });
+    const before = await snapshot();
+    assert.equal(before.project.stage, "LEAD"); assert.equal(before.proposal.acceptedVersionId, null); assert.equal(before.proposal.acceptedAt, null);
+    assert.equal(before.proposal.retentionEpoch, 0); assert.equal(before.version.revision, revision); assert.equal(before.artifact.state, "READY"); assert.equal(before.job.state, "SUCCEEDED");
+    assert.deepEqual(before.version.state, before.proposal.state); assert.equal(before.receipts.length, 1); assert.equal(before.stageHistory.length, 1);
+    const newItemId = randomUUID();
+    const saveInput = { proposalId, expectedRevision: revision, operationId: randomUUID(), state: {
+      ...prepared.created.state, order: { ...(prepared.created.state.order as Prisma.JsonObject), project: "Редакция после сохранения КП185" },
+      items: [{ ...prepared.created.state.items[1], name: "Вторая стала первой" }, { id: newItemId, name: "Новая позиция КП185", qty: 3 }],
+    } };
+    const stageInput = { projectId, expectedStage: "LEAD", toStage: "ESTIMATE", clientMutationId: randomUUID() };
+    const save = (db: PrismaClient) => realTransaction(db)(tx => proposals.saveProposalInTransaction(tx, actor, saveInput, hooks));
+    const leaveLead = (db: PrismaClient) => realTransaction(db)(tx => stages.patchProjectStageTransaction(actor, stageInput, tx));
+    const isLocked = (error: unknown) => typeof error === "object" && error !== null && "kind" in error && error.kind === "locked";
+    const firstQuery = await run(actor, fixture.db, () => fence(`kp185-${order}-before-project-lock`));
+    const assertProjectRowLock = async () => {
+      // В каждом порядке producer работает на наблюдаемом db: проверяем настоящий FOR UPDATE,
+      // отделённый fence от setup/replay; ожидающий peer уже доказан через pg_locks в overlap.
+      await run(actor, fixture.db, () => fence(`kp185-${order}-project-lock`));
+      assert.ok(fixture.queryEvents.slice(firstQuery).some(event => event.query.includes('FROM "Project"') && event.query.includes("FOR UPDATE") &&
+        (JSON.parse(event.params) as unknown[]).includes(projectId)), "KP185_REAL_PROJECT_ROW_LOCK_REQUIRED");
+    };
+
+    if (order === "save-first") {
+      // overlap требует двух PID, pg_blocking_pids и точный granted/waiting advisory tuple.
+      const [saved, rejectedStage] = await overlap(actor, () => save(fixture.db), () => leaveLead(fixture.peer), true);
+      await assertProjectRowLock();
+      assert.equal(saved.result.revision, revision + 1); assert.equal(saved.result.noOp, false);
+      assert.equal(rejectedStage.result.ok, false); assert.equal(rejectedStage.result.kind, "validation");
+      assert.match(rejectedStage.result.error ?? "", /PDF актуальной редакции/); assert.deepEqual(rejectedStage.eventIds, []);
+      const after = await snapshot();
+      assert.equal(after.project.stage, "LEAD"); assert.equal(after.project.title, saveInput.state.order.project);
+      assert.deepEqual(after.project.stageChangedAt, before.project.stageChangedAt, "KP185_REJECTED_EXIT_CHANGED_STAGE_TIMESTAMP");
+      assert.equal(after.proposal.revision, revision + 1); assert.deepEqual(after.proposal.state, saved.result.state);
+      assert.equal(after.proposal.acceptedVersionId, null); assert.equal(after.proposal.acceptedAt, null); assert.equal(after.proposal.retentionEpoch, 0);
+      assert.deepEqual(after.stageHistory, before.stageHistory); assert.equal(after.receipts.length, 2);
+      const removedProduct = before.products.find(product => product.id === prepared.created.items[0].productId)!;
+      const removed = after.products.find(product => product.id === removedProduct.id)!;
+      assert.ok(removed.deletedAt); assert.equal(removed.createdAt.toISOString(), removedProduct.createdAt.toISOString());
+      const active = after.items.filter(item => !item.deletedAt).sort((a, b) => a.position - b.position);
+      assert.deepEqual(active.map(item => ({ id: item.id, productId: item.productId, position: item.position })), [
+        { id: source.items[1].id, productId: prepared.created.items[1].productId, position: 1 },
+        { id: newItemId, productId: saved.result.items[1].productId, position: 2 },
+      ]);
+      assert.equal(after.products.filter(product => !product.deletedAt).length, 2);
+      assert.ok(after.products.every(product => product.status === "DRAFT"));
+      assert.deepEqual(after.statusHistory.filter(history => before.products.some(product => product.id === history.productId)), before.statusHistory);
+      assert.equal(after.statusHistory.length, before.statusHistory.length + 1);
+      assert.equal(await fixture.db.changeLog.findUnique({ where: { id: `project-stage:${stageInput.clientMutationId}` } }), null);
+      assert.equal(await fixture.db.domainEvent.count({ where: { actor: actor.id, type: "project.stageChanged" } }), 0);
+      assert.equal(await fixture.db.domainEvent.count({ where: { actor: actor.id, type: "kp.updated" } }), 1);
+      const stable = await nativeSnapshot(fixture.db);
+      const replay = await run(actor, fixture.db, () => save(fixture.db)); assert.equal(replay.result.repeated, true);
+      assert.equal(replay.result.revision, revision + 1); assert.deepEqual(replay.result.items, saved.result.items);
+      const repeatedStage = await run(actor, fixture.db, () => leaveLead(fixture.db)); assert.equal(repeatedStage.result.ok, false);
+      assert.deepEqual(await nativeSnapshot(fixture.db), stable, "KP185_REJECTED_EXIT_OR_SAVE_REPLAY_WROTE_DATA");
+    } else {
+      const [changed] = await overlap(actor, () => leaveLead(fixture.db), () => assert.rejects(save(fixture.peer), isLocked), true);
+      await assertProjectRowLock();
+      assert.equal(changed.result.ok, true); assert.equal(changed.result.stage, "ESTIMATE"); assert.equal(changed.eventIds.length, 1);
+      const after = await snapshot();
+      assert.equal(after.project.stage, "ESTIMATE"); assert.equal(after.project.title, before.project.title);
+      assert.equal(after.proposal.revision, revision); assert.deepEqual(after.proposal.state, before.proposal.state);
+      assert.equal(after.proposal.acceptedVersionId, prepared.versionId); assert.ok(after.proposal.acceptedAt);
+      assert.equal(after.proposal.retentionEpoch, before.proposal.retentionEpoch + 1);
+      assert.deepEqual(after.products, before.products); assert.deepEqual(after.items, before.items); assert.deepEqual(after.statusHistory, before.statusHistory);
+      assert.deepEqual(after.receipts, before.receipts, "KP185_REJECTED_SAVE_MUST_NOT_CREATE_RECEIPT");
+      assert.equal(after.stageHistory.length, before.stageHistory.length + 1);
+      assert.equal(after.stageHistory.filter(row => row.fromStage === "LEAD" && row.toStage === "ESTIMATE" && row.changedById === actor.id).length, 1);
+      const receipt = await fixture.db.changeLog.findUniqueOrThrow({ where: { id: `project-stage:${stageInput.clientMutationId}` } });
+      assert.equal(receipt.actorId, actor.id); assert.equal(receipt.entityId, projectId); assert.equal(receipt.action, "stage"); assert.equal(receipt.field, "stage");
+      assert.equal(await fixture.db.domainEvent.count({ where: { actor: actor.id, type: "project.stageChanged" } }), 1);
+      assert.equal(await fixture.db.domainEvent.count({ where: { actor: actor.id, type: "kp.updated" } }), 0);
+      const stable = await nativeSnapshot(fixture.db);
+      await assert.rejects(run(actor, fixture.db, () => save(fixture.db)), isLocked);
+      const replay = await run(actor, fixture.db, () => leaveLead(fixture.db)); assert.equal(replay.result.replayed, true); assert.deepEqual(replay.eventIds, []);
+      assert.deepEqual(await nativeSnapshot(fixture.db), stable, "KP185_REJECTED_SAVE_OR_STAGE_REPLAY_WROTE_DATA");
+    }
+    const final = await snapshot();
+    assert.deepEqual(final.version, before.version); assert.deepEqual(final.artifact, before.artifact); assert.deepEqual(final.job, before.job);
+    assert.equal(await fixture.db.proposalVersion.count({ where: { proposalId } }), 1, "KP185_RACE_MUST_NOT_MANUFACTURE_RELEASE");
+  });
+}
 
 test("draft/create-contract-number-races-real-project-lock", async () => {
   const actors = await people(fixture, "draft-races");
