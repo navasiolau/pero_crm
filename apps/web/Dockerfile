@@ -44,6 +44,11 @@ COPY --from=build /app/apps/web/.next/standalone ./
 # Externalized пакет использует CJS entry/limits и динамические fs assets вне tracing.
 COPY --from=build /app/packages/kp-template/index.cjs /app/packages/kp-template/limits.cjs /app/packages/kp-template/package.json /app/packages/kp-template/source-manifest.json /app/packages/kp-template/fonts-manifest.json ./packages/kp-template/
 COPY --from=build /app/packages/kp-template/assets ./packages/kp-template/assets
+# Bare require из apps/web использует стандартный ancestor node_modules.
+RUN mkdir -p /app/node_modules/@pero \
+    && test ! -e /app/node_modules/@pero/kp-template \
+    && test ! -L /app/node_modules/@pero/kp-template \
+    && ln -s ../../packages/kp-template /app/node_modules/@pero/kp-template
 COPY --from=build /app/apps/web/.next/static ./apps/web/.next/static
 COPY --from=build /app/apps/web/public ./apps/web/public
 COPY apps/web/prisma apps/web/prisma
