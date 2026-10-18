@@ -36,6 +36,19 @@ const nextConfig: NextConfig = {
     : {}),
   // Нативный модуль argon2 не бандлим — нужен .node-бинарник в standalone-сборке
   serverExternalPackages: ["@node-rs/argon2", "zod", "@pero/kp-template"],
+  webpack(config, { isServer }) {
+    if (isServer) {
+      // Next15 проверяет opt-out по resolved /node_modules/; workspace realpath вне него.
+      // Node require сохраняет __dirname пакета для manifests, шрифтов и шаблонов.
+      const templateExternal = ({ request }: { request?: string }, done: (error?: Error | null, result?: string) => void) => {
+        if (request === "@pero/kp-template") done(null, "commonjs @pero/kp-template");
+        else done();
+      };
+      const inherited = config.externals === undefined ? [] : Array.isArray(config.externals) ? config.externals : [config.externals];
+      config.externals = [templateExternal, ...inherited];
+    }
+    return config;
+  },
   outputFileTracingIncludes: {
     "/kp": ["../../packages/kp-template/assets/**/*", "../../packages/kp-template/*.json"],
     "/kp/**": ["../../packages/kp-template/assets/**/*", "../../packages/kp-template/*.json"],
