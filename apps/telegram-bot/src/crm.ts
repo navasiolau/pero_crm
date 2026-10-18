@@ -20,7 +20,7 @@ export interface ProjectRef {
 
 export interface ProjectBaseline {
   title: string; clientId: string; managerId: string | null; address: string | null;
-  delivery: string | null; unloading: string | null; installation: string | null; currency: string;
+  servicesTotal?: string | null; delivery: string | null; unloading: string | null; installation: string | null; currency: string;
 }
 export interface ProjectCard {
   fullBaseline: ProjectBaseline;

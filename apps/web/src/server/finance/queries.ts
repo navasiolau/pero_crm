@@ -108,7 +108,9 @@ export async function getProjectEconomics(
       delivery: true,
       unloading: true,
       installation: true,
-      products: { select: { expectedPrice: true, quantity: true } },
+      servicesTotal: true,
+      proposalRoundingAdjustment: true,
+      products: { where: { deletedAt: null }, select: { expectedPrice: true, quantity: true } },
     },
   });
   if (!project) return null;
