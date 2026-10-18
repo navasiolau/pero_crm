@@ -23,11 +23,25 @@ import {ProductInlineProvider,useProductInline} from '@/components/product-inlin
 import {ProductInlineDetails} from '@/components/product-inline-fields';
 import {ProjectInlineProvider,useProjectInline} from '@/components/project-inline-provider';
 import {ProjectConfirmedTotal} from '@/components/project-inline-fields';import {InlineTextField} from '@/components/inline-fields';
+import {PROJECT_SERVICE_FIELDS,projectServicePatch} from '@/lib/project-services';import {projectTotalText} from '@/lib/product-quantity';
 window.__KANBAN_BODY_COUNTS__={};window.__requests=[];window.__mode='saved';window.__resolve=null;
-window.__save=async(scope,input)=>{window.__requests.push({scope,...input});if(window.__mode==='hold')return await new Promise(resolve=>window.__resolve=resolve);if(window.__mode==='lost')throw Error('Controlled lost ACK');return{kind:'saved',field:input.field,clientMutationId:input.clientMutationId,value:input.value};};
 const productInitial={title:'Изделие QA',kind:null,description:'Сохранённое описание',expectedPrice:'10.00',quantity:2,engineerId:null,'project.clientId':'qa144-client'};
-const projectInitial={title:'Проект QA',managerId:null,delivery:'20.00',unloading:'5.00',installation:null,clientId:'qa144-client','client.phone':'000','client.address':null};
-const pricing={productsSubtotalBYN:'100.00',expectedTotalBYN:'125.00',pricingVersion:'1',delivery:'20.00',unloading:'5.00',installation:null};
+const projectInitial={title:'Проект QA',managerId:null,servicesTotal:null,delivery:'20.00',unloading:'5.00',installation:null,clientId:'qa144-client','client.phone':'000','client.address':null};
+const pricing={productsSubtotalBYN:'100.00',expectedTotalBYN:'125.00',pricingVersion:'1',servicesTotal:null,proposalRoundingAdjustment:'0.00',delivery:'20.00',unloading:'5.00',installation:null};
+let serviceSnapshot={servicesTotal:null,delivery:'20.00',unloading:'5.00',installation:null},pricingVersion=1n;const receipts=new Map();
+function savedReply(scope,input){
+ const fingerprint=JSON.stringify({scope,...input}),previous=receipts.get(input.clientMutationId);
+ if(previous){if(previous.fingerprint!==fingerprint)throw Error('MUTATION_REQUEST_CHANGED');return structuredClone(previous.reply);}
+ const reply={kind:'saved',field:input.field,clientMutationId:input.clientMutationId,value:input.value};
+ if(scope==='project'&&PROJECT_SERVICE_FIELDS.includes(input.field)){
+  if(!input.expectedServices)throw Error('EXPECTED_SERVICE_SNAPSHOT_REQUIRED');
+  serviceSnapshot={...serviceSnapshot,...projectServicePatch(serviceSnapshot,input.field,input.value,input.expectedServices)};
+  reply.derived={...pricing,...serviceSnapshot,expectedTotalBYN:projectTotalText([{expectedPrice:'100.00',quantity:1}],serviceSnapshot),pricingVersion:String(++pricingVersion)};
+ }
+ receipts.set(input.clientMutationId,{fingerprint,reply});return structuredClone(reply);
+}
+// Услуга подтверждается полным versioned derived; lost ACK случается уже после записи receipt.
+window.__save=async(scope,input)=>{window.__requests.push({scope,...structuredClone(input)});const reply=savedReply(scope,input);if(window.__mode==='hold')return await new Promise(resolve=>window.__resolve=()=>resolve(reply));if(window.__mode==='lost')throw Error('Controlled lost ACK');return reply;};
 const readonly=new URLSearchParams(location.search).has('readonly');
 function ProductAccess(){const{controller}=useProductInline();window.__product=controller;return<ProductInlineDetails canManage={!readonly} canEditTech={!readonly} showAmount={!readonly} currency="BYN" measurement={null} engineer={null}/>;}
 function ProjectAccess(){const{controller}=useProjectInline();window.__project=controller;return<><InlineTextField id="qa-delivery" label="Доставка" controller={controller('delivery')} inputMode="decimal" readOnly={readonly}/>{!readonly?<section data-project-confirmed><ProjectConfirmedTotal/></section>:null}</>;}
@@ -88,8 +102,13 @@ test('inline total subscriptions preserve fields and avoid unrelated renders',{t
   try{
    await page.goto(origin+'/?v=after');const price=page.locator('#product-inline-price'),quantity=page.locator('#product-inline-quantity'),delivery=page.locator('#qa-delivery'),confirmed=page.locator('[data-project-confirmed]');
    await expect(confirmed).toContainText('125 BYN');await price.fill('');await expect(page.locator('[data-product-price-quantity]')).toContainText('—');await price.fill('0');await expect(page.locator('[data-product-price-quantity]')).toContainText('0 BYN');await price.fill('12,50');await expect(page.locator('[data-product-price-quantity]')).toContainText('25 BYN');await quantity.fill('3');await expect(page.locator('[data-product-price-quantity]')).toContainText('37,5 BYN');
-   await page.evaluate(()=>window.__mode='hold');await delivery.fill('30,50');await delivery.press('Enter');await expect(page.locator('#qa-delivery-state')).toContainText('Сохраняется');await delivery.fill('40,00');await page.evaluate(()=>{const req=window.__requests.at(-1);window.__mode='saved';window.__resolve({kind:'saved',field:req.field,clientMutationId:req.clientMutationId,value:req.value});});await expect(delivery).toHaveValue('40,00');await expect(confirmed).toContainText('135,5 BYN');await expect(confirmed).toContainText('после подтверждения');await delivery.press('Enter');await expect(confirmed).toContainText('145 BYN');await expect(confirmed).not.toContainText('после подтверждения');
-   await page.evaluate(()=>window.__mode='lost');await delivery.fill('50');await delivery.press('Enter');await expect(page.locator('#qa-delivery-state')).toContainText('Ответ не получен');await expect(delivery).toHaveValue('50');await expect(confirmed).toContainText('145 BYN');const uncertain=await page.evaluate(()=>window.__requests.at(-1));await page.evaluate(()=>window.__mode='saved');await page.locator('#qa-delivery-state').getByRole('button',{name:'Повторить сохранение',exact:true}).click();await expect(confirmed).toContainText('155 BYN');assert.equal(await page.evaluate(()=>window.__requests.at(-1).clientMutationId),uncertain.clientMutationId);
+   await page.evaluate(()=>window.__mode='hold');await delivery.fill('30,50');await delivery.press('Enter');await expect(page.locator('#qa-delivery-state')).toContainText('Сохраняется');
+   assert.deepEqual(await page.evaluate(()=>window.__requests.at(-1).expectedServices),{servicesTotal:null,delivery:'20.00',unloading:'5.00',installation:null});
+   await delivery.fill('40,00');await expect(confirmed).toContainText('125 BYN');await expect(confirmed).toContainText('после подтверждения');await page.evaluate(()=>{window.__mode='saved';window.__resolve();});await expect(delivery).toHaveValue('40,00');await expect(confirmed).toContainText('135,5 BYN');await expect(confirmed).toContainText('после подтверждения');
+   assert.equal(await page.evaluate(()=>window.__project('delivery').getSnapshot().baseline),'30.50');
+   await delivery.press('Enter');await expect(confirmed).toContainText('145 BYN');await expect(confirmed).not.toContainText('после подтверждения');
+   assert.deepEqual(await page.evaluate(()=>window.__requests.at(-1).expectedServices),{servicesTotal:null,delivery:'30.50',unloading:'5.00',installation:null});
+   await page.evaluate(()=>window.__mode='lost');await delivery.fill('50');await delivery.press('Enter');await expect(page.locator('#qa-delivery-state')).toContainText('Ответ не получен');await expect(delivery).toHaveValue('50');await expect(confirmed).toContainText('145 BYN');const uncertain=await page.evaluate(()=>window.__requests.at(-1));await page.evaluate(()=>window.__mode='saved');await page.locator('#qa-delivery-state').getByRole('button',{name:'Повторить сохранение',exact:true}).click();await expect(confirmed).toContainText('155 BYN');assert.equal(await page.evaluate(()=>window.__requests.at(-1).clientMutationId),uncertain.clientMutationId);assert.deepEqual(await page.evaluate(()=>window.__requests.at(-1)),uncertain);await expect(confirmed).not.toContainText('после подтверждения');
    await delivery.fill('60');await page.evaluate(()=>window.__rsc({delivery:'999.00'}));await expect(delivery).toHaveValue('60');await expect(confirmed).toContainText('155 BYN');
   }finally{await page.close();}
   const limited=await browser.newPage({viewport:{width:360,height:800}});try{
