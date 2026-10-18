@@ -377,6 +377,8 @@ test("warehouse/two-connection-issue-replay-return-real-lock-and-exact-facts", a
     return stock.warehouseMove(tx, c.admin, input);
   }, { maxWait: 10_000, timeout: 15_000 });
   await move(fixture.db, { kind: "INCOME", materialId: c.material.id, quantity: "5", unitPrice: "5", clientMutationId: randomUUID() });
+  // Пул может выдать подготовке другое соединение; считаем PID только конкурентной пары.
+  pids.clear();
   const issue = await Promise.allSettled([fixture.db, fixture.peer].map(db => move(db, { kind: "EXPENSE", projectMaterialId: line.id, quantity: "4", clientMutationId: randomUUID() })));
   assert.equal(issue.filter(row => row.status === "fulfilled").length, 1); assert.equal(pids.size, 2);
   const refused = issue.find(row => row.status === "rejected"); assert.ok(refused && refused.status === "rejected"); assert.match(String(refused.reason), /Недостаточно/);

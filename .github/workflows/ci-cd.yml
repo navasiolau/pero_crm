@@ -573,6 +573,14 @@ jobs:
         run: node apps/kp-renderer/ci/pipeline.mjs test
         env:
           KP_BUILD_METADATA: ${{ steps.images.outputs.metadata }}
+      - name: Диагностика неуспешного synthetic renderer
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: renderer-smoke-failure-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
+          path: ${{ steps.prepare.outputs.directory }}/smoke-failure.json
+          if-no-files-found: ignore
+          retention-days: 1
       - uses: actions/upload-artifact@v4
         with:
           name: renderer-oci-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
