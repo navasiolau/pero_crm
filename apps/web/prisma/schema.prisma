@@ -1280,8 +1280,17 @@ model File {
   createdAt    DateTime     @default(now())
   sketchForProduct Product?  @relation("ProductSketch")
   coverForProject Project? @relation("ProjectCover")
+  // Отдельные физические копии КП; ссылки и история живут независимо от медиа КП.
+  proposalSourceItemId String?
+  proposalSourceItem ProposalItem? @relation("ProposalItemFileSource", fields: [proposalSourceItemId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  proposalSourceMediaId String?
+  proposalSourceMedia ProposalMedia? @relation("ProposalMediaFileSource", fields: [proposalSourceMediaId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  proposalMediaCopyJobId String? @unique
+  proposalMediaCopyJob ProposalJob? @relation("ProposalMediaCopyJob", fields: [proposalMediaCopyJobId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  proposalMediaRetiredAt DateTime?
 
   @@index([projectId, section])
+  @@index([proposalSourceItemId, proposalSourceMediaId, proposalMediaRetiredAt], map: "File_proposal_media_source_idx")
 }
 
 model Communication {
@@ -1604,6 +1613,8 @@ enum ProposalJobKind {
   CONTRACT
   PRUNE_VERSIONS
   PURGE_MEDIA
+  UPLOAD_MEDIA
+  COPY_PRODUCT_MEDIA
 }
 
 enum ProposalJobState {
@@ -1661,6 +1672,7 @@ model ProposalItem {
   deletedAt   DateTime?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  sourceFiles File[] @relation("ProposalItemFileSource")
 
   @@index([proposalId, position])
 }
@@ -1698,6 +1710,10 @@ model ProposalMedia {
   originalSize  Int?
   optimizedSize Int?
   mimeType      String
+  optimizedMimeType String @default("image/jpeg")
+  uploadState   String @default("READY")
+  uploadJobId   String? @unique
+  uploadJob     ProposalJob? @relation("ProposalMediaUploadJob", fields: [uploadJobId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   fileName      String
   width         Int?
   height        Int?
@@ -1708,6 +1724,7 @@ model ProposalMedia {
   createdAt     DateTime @default(now())
   currentUses   ProposalCurrentMedia[]
   versionUses   ProposalVersionMedia[]
+  productFiles  File[] @relation("ProposalMediaFileSource")
 
   @@unique([proposalId, id])
   @@index([expiresAt])
@@ -1823,6 +1840,8 @@ model ProposalJob {
   createdById    String?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
+  uploadedMedia  ProposalMedia? @relation("ProposalMediaUploadJob")
+  productMediaFiles File[] @relation("ProposalMediaCopyJob")
 
   @@index([state, availableAt])
   @@index([proposalId])
