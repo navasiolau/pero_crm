@@ -11,5 +11,7 @@ export async function register() {
       try { const { startKpRenderRuntime } = await import("@/server/kp/api-render-runtime"); startKpRenderRuntime(); }
       catch { console.error("[kp-render] invalid environment; worker disabled"); }
     }
+    const { startKpRetentionWorker } = await import("@/server/kp/retention-worker");
+    try { await startKpRetentionWorker(); } catch { console.error("[kp-retention] invalid environment; worker disabled"); }
   }
 }
