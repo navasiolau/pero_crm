@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { artifactIdentity, assertCiPostgresTarget, assertCiRuntimeTarget, integrationFiles, receiveCiArtifact, typesDigest, verifyTypesArtifact } from './target.mjs';
+import { groupMembers } from './cleanup.mjs';
 
 const ci = {
   CI: 'true', GITHUB_ACTIONS: 'true', RUNNER_OS: 'Linux', RUNNER_ENVIRONMENT: 'github-hosted',
@@ -19,6 +20,70 @@ const ci = {
   GITHUB_JOB: 'native-tests',
 };
 const postgres = { ...ci, PERO_CI_CONTRACT_PHASE: 'postgres', PERO_CI_MINIO_ID: undefined, PERO_CI_WEB_IMAGE_ID: undefined };
+
+function procStat(pid, { state = 'S', pgid = 100, startedAt = '2000' } = {}) {
+  const fields = Array(20).fill('0'); fields[0] = state; fields[2] = String(pgid); fields[19] = startedAt;
+  return `${pid} (synthetic (node) child) ${fields.join(' ')}`;
+}
+function procRace(after, { childEnv, initial = procStat(200), environmentError = 'EACCES', leaderStart = '1000' } = {}) {
+  const calls = [], denied = Object.assign(new Error('synthetic environ read'), { code: environmentError });
+  let childStatReads = 0;
+  const ownEnv = 'PERO_CI_OWNER=169-1\0PERO_CI_PURPOSE=deps\0';
+  return { calls, denied, io: {
+    readdirSync(directory) { assert.equal(directory, '/proc'); return ['100', '200', 'self']; },
+    readFileSync(file, encoding) {
+      calls.push(file); assert.equal(encoding, 'utf8');
+      if (file === '/proc/100/stat') return procStat(100, { startedAt: leaderStart });
+      if (file === '/proc/100/environ') return ownEnv;
+      if (file === '/proc/200/stat') {
+        if (childStatReads++ === 0) return initial;
+        if (after instanceof Error) throw after;
+        return after;
+      }
+      assert.equal(file, '/proc/200/environ');
+      if (childEnv !== undefined) return childEnv;
+      throw denied;
+    },
+  } };
+}
+
+test('cleanup rechecks EACCES and skips only the same zombie or a confirmed vanished process', () => {
+  for (const after of [procStat(200, { state: 'Z' }), ...['ENOENT', 'ESRCH'].map(code => Object.assign(new Error('gone'), { code }))]) {
+    const fixture = procRace(after);
+    assert.deepEqual(groupMembers({ runId: '169', attempt: '1' }, 'deps', { pid: 100, startedAt: '1000' }, fixture.io), [100]);
+    assert.deepEqual(fixture.calls.slice(-2), ['/proc/200/environ', '/proc/200/stat']);
+  }
+});
+
+test('cleanup refuses live unreadable, reused, regrouped, malformed and unprovable process identity', () => {
+  const owner = { pid: 100, startedAt: '1000' }, target = { runId: '169', attempt: '1' };
+  const live = procRace(procStat(200));
+  assert.throws(() => groupMembers(target, 'deps', owner, live.io), error => error === live.denied);
+  for (const after of [procStat(200, { state: 'Z', startedAt: '3000' }), procStat(200, { state: 'Z', pgid: 999 }),
+    procStat(200, { state: 'Z', startedAt: '' }), 'malformed']) {
+    assert.throws(() => groupMembers(target, 'deps', owner, procRace(after).io), /CI_TARGET_REFUSED:process-recheck-identity/);
+  }
+  assert.throws(() => groupMembers(target, 'deps', owner, procRace(procStat(200, { state: 'Z', startedAt: 'invalid' }),
+    { initial: procStat(200, { startedAt: 'invalid' }) }).io), /CI_TARGET_REFUSED:process-recheck-identity/);
+  const unreadable = Object.assign(new Error('cannot prove stat'), { code: 'EACCES' });
+  assert.throws(() => groupMembers(target, 'deps', owner, procRace(unreadable).io), error => error === unreadable);
+  const failed = procRace(procStat(200, { state: 'Z' }), { environmentError: 'EIO' });
+  assert.throws(() => groupMembers(target, 'deps', owner, failed.io), error => error === failed.denied);
+  assert.equal(failed.calls.filter(file => file === '/proc/200/stat').length, 1);
+});
+
+test('cleanup keeps leader start, run nonce and purpose mandatory before returning live members', () => {
+  const target = { runId: '169', attempt: '1' }, owner = { pid: 100, startedAt: '1000' };
+  for (const childEnv of ['PERO_CI_OWNER=other-1\0PERO_CI_PURPOSE=deps\0', 'PERO_CI_OWNER=169-1\0PERO_CI_PURPOSE=web\0']) {
+    assert.throws(() => groupMembers(target, 'deps', owner, procRace(procStat(200, { state: 'Z' }), { childEnv }).io), /CI_TARGET_REFUSED:process-owner/);
+  }
+  const reusedLeader = procRace(procStat(200), { leaderStart: '1001' });
+  assert.throws(() => groupMembers(target, 'deps', owner, reusedLeader.io), /CI_TARGET_REFUSED:process-start-identity/);
+  assert.deepEqual(reusedLeader.calls, ['/proc/100/stat']);
+  const existingZombie = procRace(procStat(200), { initial: procStat(200, { state: 'Z' }) });
+  assert.deepEqual(groupMembers(target, 'deps', owner, existingZombie.io), [100]);
+  assert.ok(!existingZombie.calls.includes('/proc/200/environ'));
+});
 
 test('CI guard accepts only the explicit ephemeral run', () => {
   const target = assertCiRuntimeTarget(ci);
