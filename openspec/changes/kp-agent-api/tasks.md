@@ -2,7 +2,7 @@
 
 ## 1. Авторизация и HTTP
 - [x] 1.1 Добавить canonical scopes, свежий owner/session authorizer и повторные проверки с блокировками; проверить матрицу ключей/ролей/отзыва/Origin DI-тестами.
-- [x] 1.2 Добавить общий router и два тонких handler с закрытыми схемами и bounded body; проверить HTTP методы, off flag, отсутствие cookie fallback и лимиты потока.
+- [x] 1.2 Добавить общий router и два тонких handler с закрытыми схемами и bounded body; проверить HTTP методы, off flag, отсутствие cookie fallback и лимиты потока. Для неожиданных ошибок добавлен обезличенный server report; проверены отсутствие SQL/секретов и неизменность 503 при отказе диагностики.
 
 ## 2. Общий сервис
 - [x] 2.1 Собрать №181 + №182 с фиксированным курсом, ожидаемым номером и API receipt/audit в одной транзакции; проверить rollback, replay до I/O и lookup operations. Реальные зависимости интегрированы, local DI/typecheck выполнены; actual API SQL/runtime отдельно в 3.3.
@@ -13,4 +13,4 @@
 ## 3. Интеграция и приёмка
 - [x] 3.1 Добавить пресет ключа КП, OpenAPI и docs/API.md; сверить документацию с фактическими schema/route тестами.
 - [x] 3.2 Завершить local-приёмку после обычных merge: Prisma validate/generate, full typecheck, lint, 37 unit/HTTP-DI, OpenSpec strict и guarded inert Next build выполнены.
-- [ ] 3.3 Основному агенту провести guarded native/runtime и staging приёмку конкретного SHA/образа; до этого модуль выключен.
+- [ ] 3.3 Основному агенту провести guarded native/runtime и staging приёмку конкретного SHA/образа; до этого модуль выключен. По отчёту root часть API-проверок пройдена, но PDF вернул 503 до job/version; причина и сквозные PDF/договорные сценарии ещё не приняты (см. verification.md).
