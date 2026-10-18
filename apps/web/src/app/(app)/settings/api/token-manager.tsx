@@ -18,6 +18,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { createToken, revokeToken } from "@/server/plugins/actions";
+import { KP_AGENT_SCOPES, KP_SCOPE_LABELS } from "@/lib/kp-api-scopes";
 
 interface TokenRow {
   id: string;
@@ -33,7 +34,8 @@ const AVAILABLE_SCOPES = [
   {id:"calendar.reminders",label:"calendar.reminders — доставка личных напоминаний"},
   { id: "read", label: "read — чтение" },
   { id: "write", label: "write — команды и операции" },
-  { id: "admin", label: "admin — полный доступ" },
+  { id: "admin", label: "admin — остальные API" },
+  ...KP_AGENT_SCOPES.map(id => ({ id, label: KP_SCOPE_LABELS[id] })),
 ];
 
 export function TokenManager({ tokens }: { tokens: TokenRow[] }) {
@@ -66,6 +68,12 @@ export function TokenManager({ tokens }: { tokens: TokenRow[] }) {
           });
         }}
       >
+        <div className="flex flex-wrap items-center gap-2">
+          <Button type="button" variant="outline" size="sm" onClick={() => { setScopes([...KP_AGENT_SCOPES]); if (!name.trim()) setName("ИИ-агент КП"); }}>
+            ИИ-агент КП
+          </Button>
+          <span className="text-sm text-muted-foreground">Отдельные права КП и договоров; ключ действует от имени активного владельца.</span>
+        </div>
         <div className="flex flex-wrap items-end gap-3">
           <div className="flex min-w-56 flex-col gap-1.5">
             <Label htmlFor="token-name">Название</Label>
@@ -76,7 +84,7 @@ export function TokenManager({ tokens }: { tokens: TokenRow[] }) {
               onChange={(event) => setName(event.target.value)}
             />
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex flex-wrap items-center gap-4">
             {AVAILABLE_SCOPES.map((scope) => (
               <label
                 key={scope.id}

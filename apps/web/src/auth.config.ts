@@ -56,6 +56,8 @@ export const authConfig = {
       if (session.user) {
         session.user.id = token.id;
         session.user.roles = token.roles;
+        // Старая версия JWT не получает stamp действующей сессии.
+        session.user.sessionVersion = token.sessionVersion ?? -1;
       }
       return session;
     },

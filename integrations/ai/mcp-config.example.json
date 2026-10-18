@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "pero-crm-kp": {
+      "command": "node",
+      "args": ["C:/Users/USERNAME/.codex/skills/pero-kp-commercial-proposal/mcp/server.mjs"],
+      "env": {
+        "PERO_CRM_API_URL": "https://crm.example.invalid",
+        "PERO_CRM_API_KEY": "REPLACE_PRIVATELY_WITH_SCOPED_CRM_KEY",
+        "PERO_KP_WORKSPACE": "E:/KP"
+      }
+    }
+  }
+}
