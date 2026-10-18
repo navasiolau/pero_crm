@@ -1,11 +1,14 @@
 import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { artifactIdentity, readWebArtifact, requireCi } from '../../web/tests/integration/runtime/target.mjs';
 import { pairedRelease, readRendererArtifact, rendererLabels, verifyRendererOci, verifyRendererSmoke, verifyWebRendererBinding } from './artifact.mjs';
+import smokeDiagnostics from './smoke.cjs';
 
 const docker = args => execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 240_000 }).trim();
+let activePhase = 'command';
+function phase(value) { activePhase = value; console.error(JSON.stringify({ event: 'KP_CI_PIPELINE_PHASE', phase: value })); }
 function context(env = process.env) {
   const identity = artifactIdentity(env);
   requireCi(['kp-renderer-tests', 'build-push'].includes(env.GITHUB_JOB) && execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim() === identity.revision, 'kp-pipeline-job');
@@ -27,6 +30,51 @@ export function verifyOwnedSmokeContainer(container, identity, imageId) {
     !!host.Tmpfs?.['/tmp'] && !host.Binds?.length && !host.Mounts?.length &&
     container.Config.User === 'node', 'kp-smoke-container-bounds');
 }
+// Ports позволяют проверить порядок evidence → cleanup без Docker и без сети.
+export function runOwnedSmoke({ id, identity, imageId, command, readLogs = args => command(args), accept, saveFailure, report = value => console.error(JSON.stringify(value)) }) {
+  let phase = 'container-inspect', failed = false;
+  const inspect = () => {
+    const container = JSON.parse(command(['inspect', '--type', 'container', id]))[0];
+    verifyOwnedSmokeContainer(container, identity, imageId);
+    requireCi(container.Id === id, 'kp-smoke-exact-id');
+    return container;
+  };
+  try {
+    inspect(); phase = 'container-start';
+    const output = command(['start', '--attach', id]); phase = 'smoke-receipt';
+    const result = accept(JSON.parse(output)); phase = 'container-exit';
+    const finished = inspect();
+    requireCi(finished.State?.Running === false && finished.State.ExitCode === 0 && finished.State.OOMKilled === false, 'kp-smoke-exit');
+    return result;
+  } catch (error) {
+    failed = true;
+    const failure = { schema: 1, event: 'KP_CI_PIPELINE_FAILURE', phase, revision: identity.revision,
+      containerId: id, imageId, error: smokeDiagnostics.failureDetails(error),
+      stdout: smokeDiagnostics.logSummary(error?.stdout), stderr: smokeDiagnostics.logSummary(error?.stderr) };
+    try {
+      const container = inspect(), state = container.State;
+      // Никогда не сохраняем Config/Env или весь inspect.
+      failure.state = { status: ['created', 'running', 'paused', 'restarting', 'removing', 'exited', 'dead'].includes(state?.Status) ? state.Status : 'unknown',
+        running: state?.Running === true, oomKilled: state?.OOMKilled === true,
+        exitCode: Number.isInteger(state?.ExitCode) ? state.ExitCode : null,
+        error: smokeDiagnostics.failureDetails({ message: state?.Error }) };
+      try { failure.logs = smokeDiagnostics.logSummary(readLogs(['logs', '--tail', '80', id])); }
+      catch (logsError) { failure.logsError = smokeDiagnostics.failureDetails(logsError);
+        failure.logs = smokeDiagnostics.logSummary(Buffer.concat([Buffer.from(logsError?.stdout ?? ''), Buffer.from(logsError?.stderr ?? '')])); }
+    } catch (guardError) { failure.diagnosticsRefused = smokeDiagnostics.failureDetails(guardError); }
+    try { saveFailure(failure); } catch (saveError) { failure.artifactError = smokeDiagnostics.failureDetails(saveError); }
+    report(failure);
+    throw error;
+  } finally {
+    try {
+      // Повторный guard перед удалением, даже после диагностической ошибки.
+      inspect(); command(['rm', '-f', id]);
+    } catch (cleanupError) {
+      report({ event: 'KP_CI_CLEANUP_FAILURE', error: smokeDiagnostics.failureDetails(cleanupError) });
+      if (!failed) throw cleanupError;
+    }
+  }
+}
 async function prepare() {
   const { identity, directory, env } = context(); requireCi(env.GITHUB_JOB === 'kp-renderer-tests', 'kp-prepare-job');
   requireCi(!existsSync(directory), 'kp-build-directory-exists'); mkdirSync(directory);
@@ -44,13 +92,18 @@ async function prepare() {
   appendFileSync(env.GITHUB_ENV, `PERO_CI_RENDERER_ARTIFACT_DIR=${directory}\n`);
 }
 async function testImage() {
+  phase('test-context');
   const { identity, directory, env } = context(); requireCi(env.GITHUB_JOB === 'kp-renderer-tests' && env.PERO_CI_RENDERER_ARTIFACT_DIR === directory, 'kp-test-job');
+  phase('oci-extract');
   mkdirSync(path.join(directory, 'oci')); execFileSync('tar', ['-xf', path.join(directory, 'renderer.oci.tar'), '--directory', path.join(directory, 'oci'), '--no-same-owner']);
+  phase('oci-verify');
   const record = await verifyRendererOci(directory, identity), metadata = JSON.parse(env.KP_BUILD_METADATA);
   requireCi(metadata['renderer-oci']['containerimage.digest'] === record.indexDigest, 'kp-bake-digest');
+  phase('runtime-image-verify');
   const tag = `pero-ci-${identity.runId}-${identity.attempt}-kp-renderer:tested`;
   const image = JSON.parse(docker(['image', 'inspect', tag]))[0]; verifyRuntimeProjection(image, record);
   const name = `pero-kp-${identity.runId}-${identity.attempt}-smoke`;
+  phase('container-name-verify');
   requireCi(!docker(['ps', '-aq', '--filter', `name=^/${name}$`]), 'kp-smoke-already-exists');
   const args = ['create', '--name', name, '--network', 'none', '--read-only', '--tmpfs', '/tmp:rw,nosuid,size=512m,mode=1777',
     '--memory', '1536m', '--cpus', '1', '--pids-limit', '128', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges',
@@ -58,18 +111,16 @@ async function testImage() {
   for (const [key, value] of Object.entries({ 'pero.ci.repository': identity.repository, 'pero.ci.run': identity.runId,
     'pero.ci.attempt': identity.attempt, 'pero.ci.service': 'kp-renderer-smoke' })) args.push('--label', `${key}=${value}`);
   args.push(record.configDigest, '--max-old-space-size=384', 'ci/smoke.cjs');
+  phase('container-create');
   const id = docker(args); requireCi(/^[a-f0-9]{64}$/.test(id), 'kp-created-container-id');
-  const inspect = () => JSON.parse(docker(['inspect', '--type', 'container', id]))[0];
-  let smoke;
-  try {
-    verifyOwnedSmokeContainer(inspect(), identity, record.configDigest);
-    smoke = verifyRendererSmoke(JSON.parse(docker(['start', '--attach', id])), identity);
-    const finished = inspect(); verifyOwnedSmokeContainer(finished, identity, record.configDigest);
-    requireCi(finished.State?.Running === false && finished.State.ExitCode === 0 && finished.State.OOMKilled === false, 'kp-smoke-exit');
-  } finally {
-    // Удаляем только созданный этим job точный ID после повторной проверки владения.
-    verifyOwnedSmokeContainer(inspect(), identity, record.configDigest); docker(['rm', '-f', id]);
-  }
+  phase('owned-smoke');
+  const smoke = runOwnedSmoke({ id, identity, imageId: record.configDigest, command: docker,
+    readLogs: args => { const result = spawnSync('docker', args, { timeout: 15_000, maxBuffer: 128 * 1024, stdio: ['ignore', 'pipe', 'pipe'] });
+      if (result.error || result.status !== 0) throw Object.assign(result.error ?? new Error(), { status: result.status, stdout: result.stdout, stderr: result.stderr });
+      return Buffer.concat([result.stdout ?? Buffer.alloc(0), result.stderr ?? Buffer.alloc(0)]); },
+    accept: result => verifyRendererSmoke(result, identity),
+    saveFailure: failure => writeFileSync(path.join(directory, 'smoke-failure.json'), JSON.stringify(failure), { flag: 'wx' }) });
+  phase('success-artifacts');
   writeFileSync(path.join(directory, 'smoke.json'), JSON.stringify(smoke), { flag: 'wx' });
   const complete = await readRendererArtifact(false); writeFileSync(path.join(directory, 'image.json'), JSON.stringify(complete), { flag: 'wx' });
   appendFileSync(env.GITHUB_OUTPUT, `oci-sha256=${complete.ociSha256}\nindex-digest=${complete.indexDigest}\n`);
@@ -94,5 +145,5 @@ async function release() {
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try { const action = { prepare, test: testImage, release }[process.argv[2]]; requireCi(!!action, 'kp-pipeline-command'); await action(); }
-  catch (error) { console.error(/^CI_TARGET_REFUSED:[a-zA-Z0-9_.:-]+$/.test(error?.message) ? error.message : 'KP_PIPELINE_FAILED'); process.exitCode = 1; }
+  catch (error) { console.error(JSON.stringify({ event: 'KP_CI_PIPELINE_ERROR', phase: activePhase, error: smokeDiagnostics.failureDetails(error) })); process.exitCode = 1; }
 }
