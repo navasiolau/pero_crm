@@ -22,7 +22,7 @@ SQL `20261018000400_kp_private_media` аддитивен: состояния/в�
 
 `tests/helpers/kp-private-media-native.ts` выполнен guarded координатором: открытая Prisma transaction, собственный SAVEPOINT/ROLLBACK, настоящий SQL-журнал/replay/owner read, синхронизация CurrentMedia/File, сохранность ручных файлов, точный retired intent, SQL-guards, смена этапа во время имитированного I/O и текстовое сохранение после имитации годового удаления источника. Helper не открывает соединение и использует только MemoryS3-порт.
 
-Субагент не выполнял DB/S3 writes, физическую очистку, создание контейнеров, commit/push/merge или deploy. Реальный staging SHA/образ, приватный маршрут в браузере и настоящее S3-readback/versioned cleanup не проверены и не заявляются.
+Локальный этап не включал физическую очистку, создание контейнеров или deploy. Последующая приёмка реального staging SHA/образа и SQL-адаптера приведена ниже. Приватный пользовательский сценарий и настоящее S3-readback/versioned cleanup остаются открытыми.
 
 ## Постоянное применение local №181–183
 
@@ -46,4 +46,20 @@ SQL `20261018000400_kp_private_media` аддитивен: состояния/в�
 
 Runner удерживал общий advisory mutex, блокировал fetch/HTTP(S) и глобальный Prisma singleton вне переданной транзакции. Приватный sentinel гарантировал внешний ROLLBACK; все fixtures откатились. Полные снимки **76 таблиц и каталога совпали точно**: baseline SHA-256 `afd3a5a3feb4e6029c8ca298804d713f6b778b05da403194380adee268ee9bec`; полный public-каталог SHA-256 `805b1dddc7a974baf129f63ba4fca19245e5a411b5756850f8cddea54f1d5738`. Все 83 успешных receipt и четыре прежних checksum-исключения сохранены; постоянных записей native QA нет.
 
-Пункт 2.2 завершён фактической проверкой атомарных DB-связей, копий, ручных файлов и retirement intents. Native DB часть 3.2 выполнена. **Настоящий S3 не вызывался**: private Put/Get/readback, versioning и физическая очистка остаются незавершённой частью 3.2; staging/браузер остаются в 3.3.
+Пункт 2.2 завершён фактической проверкой атомарных DB-связей, копий, ручных файлов и retirement intents. Native DB часть 3.2 выполнена. **Настоящий S3 не вызывался**: private Put/Get/readback, versioning и физическая очистка остаются незавершённой частью 3.2; пользовательский API/browser-сценарий остаётся в 3.3.
+
+## Staging: SQL-адаптер и фактический image — PASS
+
+Оркестратор принял ревизию `2ff9e871baac6d2fcb0a974bc83883a0595bc631` на `crm-staging`, image `sha256:52b342cf8b8832f5b5757dfb8e661b9d26b94168b9bea0b4b01d1a50fdc4cf10`. По подтверждению оркестратора CI run `39142975226` завершил все шесть jobs с SUCCESS. Ignored `http.json` в каталоге прогона подтвердил HTTP 200 для `/api/health` и `/login` этой ревизии; это проверка доступности, пользовательский сценарий КП в браузере ещё предстоит.
+
+Guarded runner выполнен оркестратором после проверки CI и фактического image: runId `7209c1d1-d9d2-4302-83aa-e1af342a1a2e`, **7/7 PASS**, `preservation=EXACT`, длительность 2323 мс. Квитанция: `.playwright-mcp/kp-183/stage-27d86f6b-ddf4-4233-8394-cb7fe38668a2/capture-receipt-b01cd28c-faf5-4b83-9986-2ccf271d8215.json`, SHA-256 `0cf0c7bd54cf8df20e6dc03d895e0a327ed7e074a588a0f4bd9b0e2f6c9f70fd`.
+
+До SQL проверены точные DB container `27b8f7342b9d722ab8788e137b37b03a3037442da038c5b8b98dbb30245b8b6a`, volume `crm-staging_pgdata`, StartedAt `2026-09-23T11:42:14.649193151Z`, W07 outer SHA-256 `27e3bcd727d9e83170c76a254806fde42590da76cea30c9e1441d873df680139`, DB `db:5432/crm/public` и staging S3 binding. Четыре receipt миграций №180–183 совпали с закреплёнными checksum, незавершённых миграций нет; оба новых ProposalJobKind видны после commit. Все 11 таблиц КП пусты до и после проверки, флаг КП остаётся OFF.
+
+Выполнен тот же неизменённый `verifyKpPrivateMediaNative`: семь SQL-сценариев журнала/replay/владельца, optimized-only архива, CurrentMedia/File и независимых копий, нативных owner/hash guards, retirement intent, старого удалённого источника и отзыва этапа перед публикацией. Настоящие кодеки выполнены в целевом image: Linux x64, sharp `0.35.3`, libvips `8.18.3`; Prisma `6.19.3`, Zod `4.4.3`. Хранилище этого прогона — только MemoryS3.
+
+Одна внешняя транзакция с advisory mutex и обязательным ROLLBACK не оставила постоянных fixtures. Полные fingerprints **76 таблиц совпали точно**, baseline SHA-256 `8135309dddff9d172be4fde7a8061babbe8d28d29ebae10f3a78867bc3462c65`; полный public-каталог до/после также совпал, SHA-256 `f28160d116d333d1ba0251bbd90ed7719393e7cbd2281ba758eeeac05f5e2c74`. Каталог включает колонки, enum, права, sequences, политики и rules. Tripwires глобального Prisma вне переданной транзакции, fetch/HTTP(S)/HTTP2, S3 SDK, уведомлений и post-commit effects не сработали; данные не исключались из сравнения, baseline не заменялся.
+
+Сборка runner — 69 031 байт, bundle SHA-256 `9505fb6299222a86384e81a6ad1bbdb32fe128e629e2b8590cb395a1394867bc`. Все 34 production/helper/config/schema/SQL входа проверены против точных Git blobs принятой ревизии; source proof SHA-256 `28673ad68f8edb45cd5483f53cac170f262467b4331c00a4ebccedb1bfd0a577`. Ignored исходники runner заморожены; их общий proof SHA-256 `a1d3bfaee157b7dea23080d3e3709401e54c20e8a7baec85942572d18714b962`. Отдельно прошли 7/7 локальных guards/diagnostic tests и scoped strict типизация; локальный default инертен, target guard отклоняет запуск bundle вне staging-контейнера до загрузки Prisma.
+
+Эта квитанция принимает staging SQL-адаптер №183 и фактический image. **Пункты 3.2 и 3.3 остаются открытыми:** настоящее private S3 Put/Get/readback/versioning, физическая очистка и пользовательские API/browser-сценарии КП выполняются после подключения №187/188. Прогон с MemoryS3 не подтверждает эти части; orchestration №181, отдельная API idempotency и concurrency данным runner не проверялись.
