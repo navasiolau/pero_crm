@@ -94,7 +94,46 @@ AI bundle не переписывался и не переустанавлива
 Остались три прежних lint warnings в product-attachments и percentage core;
 новых предупреждений в модуле нет. Local-приёмка 3.2 закрыта.
 
-Native API/runtime, реальные PostgreSQL/S3/Chromium-сценарии, staging SHA/образ,
-интеграционный cutover и production-приёмка этим change пока не подтверждены.
-Нативные и эксплуатационные действия выполняет root только с guards цели и
-разрешением владельца; раздел до сквозной приёмки остаётся выключенным.
+## Частичная staging-проверка и диагностика 19.10.2026
+
+По переданному root результату на реальном staging прошли 22 случая API
+ролей/scopes, НБРБ, шесть денежных случаев и приватные изображения с независимыми
+копиями изделий. Первый `POST /api/v1/kp/documents/:id/pdf` вернул
+`503 KP_UNAVAILABLE` до появления job/version. Две последующие DB-диагностики
+с откатом — `requestProposalPdf`, затем `runApiCommand` + `writeApiReceipt` —
+прошли целиком. Это не объясняет исходный HTTP-сбой и не подтверждает выпуск PDF.
+
+Root сообщил о восстановлении трёх выключенных флагов (`000`), отзыве временных
+ключей, восстановлении уведомлений и исходного Plugin. В рамках этого локального
+исправления targets/SSH/Docker/БД/env не вызывались; эти результаты повторно
+не проверялись и не выдаются за evidence нового server report на staging.
+
+База исправления: чистая `feature/187`, совпадавшая с `origin/staging`
+`5d7eea8b79884f39e4cd7e787de6601fbb860085`. Только общий неожиданный catch router
+теперь пишет `KP_API_UNEXPECTED`: закрытый класс ошибки, разрешённые коды
+Prisma/Node и SQLSTATE, не более пяти статических кадров `.next/server`,
+`kp-template` или `node:`. Первая строка stack и имена функций отбрасываются;
+message, SQL, meta.message, параметры, headers/body, ключи, URL и ID не логируются.
+Пути upload/client data, query strings и traversal не разрешены. Ожидаемые
+`KpApiError`/Zod ошибки не логируются. Сбой console/accessor не меняет прежний
+503, тело ответа либо бизнес-операцию. Reporter не исправляет и не устанавливает
+причину PDF-сбоя; нужен его отчёт следующего воспроизводимого unexpected 503.
+
+Локальная проверка исправления:
+
+- RED до реализации: три новых сценария ожидаемо падали из-за отсутствия report;
+  проверки отсутствия логов ожидаемых ошибок и сохранения 503 уже проходили.
+- `pnpm --filter @pero/web exec tsx --test tests/kp-api-error-report.test.ts tests/kp-api-router.test.ts`:
+  **15/15 PASS**, включая пять новых privacy/error-report сценариев с синтетическими
+  секретами и настоящим `PrismaClientKnownRequestError` с чувствительным meta.
+- `pnpm --filter @pero/web exec tsc --noEmit --incremental false --pretty false`: PASS.
+- Focused ESLint reporter/router/нового test-файла: PASS.
+- `pnpm exec openspec validate kp-agent-api --strict` и `git diff --check`: PASS.
+- Независимое read-only review: NO FINDINGS; проверены закрытые поля диагностики,
+  неизменность HTTP-ответа и обе формы статического пути Next catch-all route.
+
+Открыты сквозной PDF/Chromium/версии/private artifact download, договоры,
+импорт/cutover №189 и физическая очистка №188. Задача 3.3 остаётся открытой;
+полная staging-приёмка конкретного нового SHA/образа и production-приёмка
+не заявляются. Targets и эксплуатационные действия выполняет root с guards цели
+в пределах разрешения владельца; раздел до сквозной приёмки остаётся выключенным.

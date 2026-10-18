@@ -4,6 +4,7 @@ import { apiCreateDocument, apiFailure, apiGenerateContract, apiId, apiOperation
   apiRestore, apiRevision, apiSaveContract, apiSaveDocument, KpApiError, parseApi,
   type ApiAction, type ApiBinary, type KpApiContext, type KpApiService } from "./api-contract";
 import { readKpJson, readKpUpload } from "./api-body";
+import { reportKpApiError } from "./api-error-report";
 
 type Match = { action: ApiAction; scope: KpApiScope | readonly KpApiScope[]; values: Record<string, unknown>; body?: "json" | "upload" };
 const id = (value: string) => parseApi(apiId, value);
@@ -108,9 +109,11 @@ export function createKpApiHandler(dependencies: {
   service: KpApiService;
 }) {
   return async (request: Request, path: readonly string[], surface: "session" | "bearer"): Promise<Response> => {
+    let action: ApiAction | undefined;
     try {
       if (!dependencies.enabled()) return apiFailure("KP_NOT_FOUND", 404, "Раздел КП недоступен");
       const route = match(request.method, path, new URL(request.url).searchParams);
+      action = route.action;
       const context = await dependencies.authorize(request, surface, route.scope);
       let input = route.values;
       if (route.body === "json") input = command(route.action, await readKpJson(request), route.values);
@@ -126,6 +129,7 @@ export function createKpApiHandler(dependencies: {
     } catch (error) {
       if (error instanceof KpApiError) return Response.json({ error: { code: error.code, message: error.message } }, { status: error.status, headers });
       if (error instanceof z.ZodError) return Response.json({ error: { code: "KP_REQUEST_INVALID", message: error.issues[0]?.message ?? "Проверьте запрос" } }, { status: 400, headers });
+      reportKpApiError(error, action, surface);
       // В ответе нет SQL, storage key/binding, секретов либо внутренних stack traces.
       return Response.json({ error: { code: "KP_UNAVAILABLE", message: "Операция КП не подтверждена. Проверьте результат по UUID" } }, { status: 503, headers });
     }
