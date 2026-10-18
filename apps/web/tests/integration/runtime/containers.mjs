@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { lstatSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { MINIO_COMMIT, MINIO_GO_IMAGE, MINIO_RELEASE, MINIO_SOURCE_SHA256, POSTGRES_IMAGE, REPOSITORY, requireCi } from './target.mjs';
+import { removeWebTemplateSmoke } from './kp-template-image.mjs';
 
 /** @typedef {import('./target.mjs').CiJob} CiJob */
 /** @param {string[]} args @param {number} [timeout] */
@@ -282,6 +283,7 @@ export function startWeb(target, fault = false) {
 
 /** @param {CiJob} target */
 export function removeWeb(target) {
+  if (docker(['ps', '-aq', '--filter', `name=^/${target.webName}-kp-template-smoke$`])) removeWebTemplateSmoke(target, inspectWebImage(target, 'cleanup').Id);
   removeImageMigration(target);
   removeMetadata(target);
   for (const fault of [true, false]) {
