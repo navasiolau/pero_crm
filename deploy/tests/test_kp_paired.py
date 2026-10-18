@@ -30,7 +30,8 @@ class PairedRuntime(FakeRuntime):
         secret = "SYNTHETIC_PAIRED_DEPLOY_TEST_SECRET_ONLY"
         self.configuration["services"]["web"].update(environment={"PERO_KP_ENABLED": "1", "PERO_KP_RENDERER_SECRET": secret}, networks={"kp_render": {}})
         self.configuration["services"]["kp-renderer"] = {"image": watcher.KP_REPOSITORY + ":staging", "profiles": ["kp"], "read_only": True,
-            "mem_limit": "1536m", "cpus": 1.0, "pids_limit": 128, "networks": {"kp_render": {}}, "environment": {"PERO_KP_RENDERER_SECRET": secret}}
+            "mem_limit": "1536m", "cpus": 1.0, "pids_limit": 128, "tmpfs": ["/tmp:rw,nosuid,exec,size=512m,mode=1777"],
+            "networks": {"kp_render": {}}, "environment": {"PERO_KP_RENDERER_SECRET": secret}}
         self.configuration["networks"] = {"kp_render": {"name": "crm-staging_kp_render", "internal": True}}
         self.renderer = self.make_renderer(OLD_RENDERER) if not first else None
         self.images = {
@@ -52,7 +53,7 @@ class PairedRuntime(FakeRuntime):
         result["Id"] = "9" * 64
         result["Config"]["User"] = "node"
         result["HostConfig"] = {"ReadonlyRootfs": True, "Memory": 1536 * 1024 * 1024, "NanoCpus": 1_000_000_000,
-            "PidsLimit": 128, "Tmpfs": {"/tmp": "rw,size=512m"}, "NetworkMode": "crm-staging_kp_render"}
+            "PidsLimit": 128, "Tmpfs": {"/tmp": "rw,nosuid,exec,size=512m,mode=1777"}, "NetworkMode": "crm-staging_kp_render"}
         result["NetworkSettings"] = {"Networks": {"crm-staging_kp_render": {}}}
         return result
 
@@ -111,6 +112,31 @@ class PairedRuntime(FakeRuntime):
 
 
 class PairedDeployTests(unittest.TestCase):
+    def test_non_executable_or_unbounded_tmpfs_refuses_before_pull_or_up(self):
+        for flags in ("rw,nosuid,size=512m,mode=1777", "rw,nosuid,noexec,size=512m,mode=1777",
+                      "rw,nosuid,exec,noexec,size=512m,mode=1777", "rw,nosuid,exec,size=1g,mode=1777",
+                      "rw,nosuid,exec,size=512m,mode=0777"):
+            with self.subTest(flags=flags):
+                runtime = PairedRuntime()
+                runtime.configuration["services"]["kp-renderer"]["tmpfs"] = ["/tmp:" + flags]
+                with self.assertRaisesRegex(watcher.WatchError, "kp-compose-tmpfs"):
+                    watcher.watch(runtime)
+                self.assertEqual(runtime.pairs, [])
+                self.assertNotIn("pull:renderer", runtime.calls)
+
+    def test_current_renderer_requires_executable_tmpfs_and_accepts_reordered_flags(self):
+        for flags in ("rw,nosuid,size=512m,mode=1777", "rw,nosuid,exec,noexec,size=512m,mode=1777"):
+            runtime = PairedRuntime()
+            runtime.renderer["HostConfig"]["Tmpfs"]["/tmp"] = flags
+            with self.assertRaisesRegex(watcher.WatchError, "kp-container-tmpfs"):
+                watcher.watch(runtime)
+            self.assertEqual(runtime.pairs, [])
+        runtime = PairedRuntime()
+        reordered = "mode=1777,exec,size=512m,rw,nosuid"
+        runtime.configuration["services"]["kp-renderer"]["tmpfs"] = ["/tmp:" + reordered]
+        runtime.renderer["HostConfig"]["Tmpfs"]["/tmp"] = reordered
+        self.assertEqual(watcher.watch(runtime)["status"], "deployed")
+
     def test_disabled_flag_preserves_legacy_web_only_behavior(self):
         runtime = PairedRuntime()
         runtime.configuration["services"]["web"]["environment"]["PERO_KP_ENABLED"] = "0"
