@@ -365,6 +365,7 @@ jobs:
           import { execFileSync } from 'node:child_process';
           import { artifactIdentity, assertCiJob, readWebArtifact, requireCi, typesDigest } from './apps/web/tests/integration/runtime/target.mjs';
           import { extractWebMetadata } from './apps/web/tests/integration/runtime/containers.mjs';
+          import { verifyWebTemplatePackage } from './apps/web/tests/integration/runtime/kp-template-image.mjs';
           const env = process.env, job = assertCiJob(), metadata = JSON.parse(env.BUILD_METADATA);
           const web = extractWebMetadata(job, metadata['web-runtime']['containerimage.config.digest']);
           const record = await readWebArtifact(false);
@@ -373,6 +374,7 @@ jobs:
           const minio = inspect(job.minioImage);
           requireCi(web.Id === record.configDigest && JSON.stringify(web.RootFS.Layers) === JSON.stringify(record.diffIds), 'docker-oci-projection');
           requireCi(web.Config.Labels['pero.kp.renderer-index'] === env.KP_RENDERER_INDEX_DIGEST && web.Config.Labels['pero.kp.protocol'] === '1', 'web-renderer-binding');
+          console.log(JSON.stringify(verifyWebTemplatePackage(job, record.configDigest)));
           writeFileSync(`${env.PERO_CI_WEB_ARTIFACT_DIR}/image.json`, JSON.stringify(record));
           cpSync(`${env.PERO_CI_WEB_ARTIFACT_DIR}/metadata`, 'apps/web/.next', { recursive: true });
           const payload = `${env.PERO_CI_WEB_ARTIFACT_DIR}/types-artifact`;
