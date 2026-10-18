@@ -45,6 +45,16 @@ Execution manifest SHA-256 `aefbb0b2df6a07b93008087dd32defb18067bbb1dfcd4a5e129e
 
 Отдельный readback через сгенерированный Prisma Client подтвердил: все 11 новых таблиц пустые; receipt №180 успешен и содержит SHA-256 `1dd319ff01ca341bac362a576f7ed298e2facff08c54791156a72bf7877560fe`; запрос КП с вложенными позициями, версиями/PDF, изображениями и договором компилируется и выполняется. Новые бизнес-сущности не создавались.
 
-## Pending
+## GitFlow
 
-Владелец явно разрешил «Коммит №180 и staging». Фактическая staging-приёмка пока не заявлена; выполняются фиксация №180 и обычный merge/push по GitFlow. SQL №180 закреплён в `.gitattributes` с LF для неизменной контрольной суммы на Windows/Linux. UI, синхронизация, рендер, API/MCP, workers, очистка и импорт относятся к следующим задачам. Production и исходные R2-данные не менялись.
+Владелец явно разрешил «Коммит №180 и staging». Фиксация №180, обычный merge/push и фактическая приёмка выполнены. SQL №180 закреплён в `.gitattributes` с LF для неизменной контрольной суммы на Windows/Linux. UI, синхронизация, рендер, API/MCP, workers, очистка и импорт относятся к следующим задачам. Production и исходные R2-данные не менялись.
+
+## Staging принят
+
+Коммит №180 `d058e45c19250896648ca59020bd0c4a509f5ea5` объединён обычным merge в `staging`: `aff6c105bbf17c39036ff2b3d123eb5fdbba6233`; remote refs подтверждены. [CI №283](https://github.com/navasiolau/pero_crm/actions/runs/39129352052): все шесть заданий SUCCESS. Main остался на `d918ab860ec5aab029c466a3b3c3b1ce06f0ec98`.
+
+Первая проверка ожидаемой ревизии остановлена `WEB_REVISION_MISMATCH` до SQL: работал прежний healthy образ. После штатного watcher в 13:05 UTC подтверждён новый image `sha256:82da8c6c72aae752c4ab5b10ddbb681d6396219250f20662d42af847594ebb26`, web `bd7fe23dd52ae5723e57ea4f8d40932e0754582eb144957d351dca3e61514d13`, healthy. Повторный неизменённый guard принят. БД `27b8f7342b9d722ab8788e137b37b03a3037442da038c5b8b98dbb30245b8b6a`, её start `2026-09-23T11:42:14.649193151Z`, volume `crm-staging_pgdata` и W07 SHA сохранены.
+
+На фактическом PostgreSQL 17.11 пройдены те же 71/71 native-сценарий, runId `42115378-c03f-4e24-8a24-a1fad300ca05`. Все fixtures полностью откатились: снимки строк 76 таблиц и каталога совпали, baseline digest `26ff9a7ec99b0296783cd5c869a80ca8dbbe78cd2a3d4542b316957bcf11a32b`. Миграция имеет ожидаемый SHA-256 `1dd319ff01ca341bac362a576f7ed298e2facff08c54791156a72bf7877560fe`; 11 новых таблиц пусты. Проверка не выполняла S3 I/O. HTTP `/api/health` и `/login` — 200. Раздел остаётся выключенным.
+
+Ignored receipts: `.playwright-mcp/kp-180/stage-storage-cd3dd1c6-2bbe-4d50-b48a-6f7faf0ded15/receipt.json` и `http.json`; отдельная identity — `D:/Projects/pero_crm_v2/.playwright-mcp/application-improvements/staging-aff6c105-identity-a0175c97-ba5c-4e4e-9397-ef37d5854d4e/identity.json`. До запуска два staging runner прошли независимый read-only safety review без замечаний. Дампы, seed/reset, production и исходный R2 не затрагивались.
