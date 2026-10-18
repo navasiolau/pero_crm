@@ -1,0 +1,30 @@
+export * from './transport';
+export const assetRoot: string;
+export const KP_RENDER_LIMITS: Readonly<{ requestBytes: number; docxRequestBytes: number; stateBytes: number; items: number; pages: number;
+  assetBytes: number; totalAssetBytes: number; pdfBytes: number; docxPages: number; docxSources: number; docxPngBytes: number;
+  docxTotalPngBytes: number; docxBytes: number; rasterPages: number; rasterPageBytes: number; deadlineMs: number; queue: number }>;
+export const sourceManifest: { files: Record<string, { sha256: string; bytes: number }> };
+export const fontManifest: { cssSha256: string; files: { path: string; sha256: string; bytes: number }[] };
+export function assetPath(name: string): string;
+export function browserAsset(name: string): Buffer;
+export function fontCss(mode?: 'data' | 'browser'): string;
+export function offlinePrintHTML(state: unknown): string;
+export function getKpTemplateIdentity(): { version: string; templateHash: string; sourceManifestHash: string; fontManifestHash: string; chromium: '141.0.0'; puppeteer: '24.43.1' };
+export const SheetRender: {
+  LOGO: string; sheetHTML(state: unknown): string; buildFullHTML(state: unknown): string;
+  normalizeState(state: unknown): unknown; pdfFileName(state: unknown): string;
+  totalsOf(state: unknown): { total: number; sub: number; discount: number };
+};
+export const ContractModel: {
+  normalizeSettings(value: unknown, state: unknown, documentId: string): unknown;
+  defaults(...args: unknown[]): unknown; splitPayments(...args: unknown[]): unknown;
+  summarize(...args: unknown[]): unknown; validate(...args: unknown[]): unknown;
+  termsFor(...args: unknown[]): unknown; subjectFor(...args: unknown[]): unknown;
+  currency(...args: unknown[]): unknown; minor(...args: unknown[]): unknown;
+  money(...args: unknown[]): unknown; moneyWords(...args: unknown[]): unknown;
+  integerWords(...args: unknown[]): unknown; plural(...args: unknown[]): unknown;
+  isoDate(...args: unknown[]): unknown; validDate(...args: unknown[]): unknown; clone(...args: unknown[]): unknown;
+};
+export const contractTemplateVersion: number;
+export function contractFileName(number: string): string;
+export function generateDocx(settings: unknown, summary: unknown, profile: unknown, rendered: unknown): Promise<Buffer>;

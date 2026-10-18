@@ -1,0 +1,9 @@
+{
+  "name": "@pero/kp-template",
+  "version": "1.0.0",
+  "private": true,
+  "main": "index.cjs",
+  "types": "index.d.ts",
+  "scripts": { "test": "node --test test/*.test.cjs" },
+  "dependencies": { "docx": "9.6.1" }
+}

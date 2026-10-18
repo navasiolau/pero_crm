@@ -24,8 +24,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        cohort: [backend, components-0, components-1]
-    steps:
+        cohort: [components-0, components-1]
+    steps: &unit_test_steps
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
@@ -75,6 +75,10 @@ jobs:
         if: matrix.cohort != 'backend'
         run: pnpm --filter @pero/web exec playwright install --with-deps chromium
 
+      - name: Poppler для проверки страниц КП и приложений договора
+        if: matrix.cohort == 'components-0'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends poppler-utils
+
       - name: Тесты приложений
         run: |
           # Каждый файл прежних web globs исполняется ровно в одной cohort.
@@ -85,7 +89,7 @@ jobs:
                 cohort=components-0 ;;
               inline-material-component.test.mjs)
                 cohort=components-1 ;;
-              default-cash-account-component.test.mjs|default-cash-forms-component.test.mjs|global-kanban-current-engineer-component.test.mjs|income-form-component.test.mjs|kanban-render-isolation.test.mjs|product-card-navigation-browser.test.mjs|product-kanban-search-readiness.test.mjs|project-filter-component.test.mjs|stock-movement-component.test.mjs|warehouse-units-component.test.mjs)
+              default-cash-account-component.test.mjs|default-cash-forms-component.test.mjs|global-kanban-current-engineer-component.test.mjs|kp-editor-component.test.mjs|income-form-component.test.mjs|kanban-render-isolation.test.mjs|product-card-navigation-browser.test.mjs|product-kanban-search-readiness.test.mjs|project-filter-component.test.mjs|stock-movement-component.test.mjs|warehouse-units-component.test.mjs)
                 cohort=components-0 ;;
               client-passport-component.test.mjs|counterparty-component.test.mjs|file-list-printing.test.ts|inline-field-subscriptions.test.mjs|project-client-contact-component.test.mjs|project-product-create-dialog.test.mjs|warehouse-deletion-component.test.mjs|task-status-command.browser.test.ts)
                 cohort=components-1 ;;
@@ -160,8 +164,25 @@ jobs:
           compression-level: 0
           retention-days: 1
 
+  # Backend ждёт renderer вместе с native: его types budget не включает чужую очередь.
+  # Имя producer сохранено для строгой проверки artifact; components идут параллельно.
+  unit-tests-backend:
+    name: unit-tests (${{ matrix.cohort }})
+    needs: [kp-renderer-tests]
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        cohort: [backend]
+    steps: *unit_test_steps
+
   # Build и native используют один свежий checkout/runtime без повторного install.
   native-tests:
+    needs: [kp-renderer-tests]
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:
@@ -234,6 +255,7 @@ jobs:
           import { execFileSync } from 'node:child_process';
           import path from 'node:path';
           import { assertCiJob, requireCi } from './apps/web/tests/integration/runtime/target.mjs';
+          import kpTemplate from './packages/kp-template/index.cjs';
           const job = assertCiJob(), env = process.env;
           requireCi(execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim() === env.GITHUB_SHA, 'checkout-revision');
           const base = execFileSync('docker', ['buildx', 'imagetools', 'inspect', 'node:22-alpine', '--format', '{{json .Manifest}}'], { encoding: 'utf8' });
@@ -248,8 +270,13 @@ jobs:
           const cacheId = `pero-next-musl-v2-${compat}`;
           const directory = path.join(env.RUNNER_TEMP, `pero-web-${job.runId}-${job.attempt}-${env.GITHUB_SHA}`);
           mkdirSync(directory); mkdirSync('apps/web/.next/cache', { recursive: true });
+          requireCi(/^sha256:[a-f0-9]{64}$/.test(env.KP_RENDERER_INDEX_DIGEST), 'web-renderer-digest');
+          const kpIdentity = kpTemplate.getKpTemplateIdentity();
           const labels = { 'org.opencontainers.image.revision': env.GITHUB_SHA, 'pero.ci.repository': env.GITHUB_REPOSITORY,
-            'pero.ci.run': job.runId, 'pero.ci.attempt': job.attempt, 'pero.ci.service': 'web' };
+            'pero.ci.run': job.runId, 'pero.ci.attempt': job.attempt, 'pero.ci.service': 'web',
+            'pero.kp.renderer-index': env.KP_RENDERER_INDEX_DIGEST, 'pero.kp.protocol': '1',
+            'pero.kp.template': kpIdentity.templateHash, 'pero.kp.source': kpIdentity.sourceManifestHash,
+            'pero.kp.fonts': kpIdentity.fontManifestHash, 'pero.kp.chromium': kpIdentity.chromium, 'pero.kp.puppeteer': kpIdentity.puppeteer };
           const common = { context: '.', dockerfile: 'apps/web/Dockerfile', target: 'runner', platforms: [platform], labels,
             args: { NODE_IMAGE: nodeImage, ...buildFlags, PERO_CI_CACHE_ID: cacheId },
             tags: [job.webImage], 'cache-from': ['type=gha,scope=pero-web'] };
@@ -276,6 +303,7 @@ jobs:
           NODE
         env:
           BUILD_CONFIG: ${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package.json', 'apps/web/package.json', 'apps/web/*config.*', 'packages/*/package.json', 'packages/plugins/*/package.json', 'packages/*/tsconfig.json', 'packages/plugins/*/tsconfig.json') }}
+          KP_RENDERER_INDEX_DIGEST: ${{ needs.kp-renderer-tests.outputs.index-digest }}
           PERO_CI_POSTGRES_ID: ${{ job.services.postgres.id }}
           PERO_CI_NETWORK: ${{ job.services.postgres.network }}
 
@@ -344,6 +372,7 @@ jobs:
           const inspect = tag => JSON.parse(execFileSync('docker', ['image', 'inspect', tag], { encoding: 'utf8' }))[0];
           const minio = inspect(job.minioImage);
           requireCi(web.Id === record.configDigest && JSON.stringify(web.RootFS.Layers) === JSON.stringify(record.diffIds), 'docker-oci-projection');
+          requireCi(web.Config.Labels['pero.kp.renderer-index'] === env.KP_RENDERER_INDEX_DIGEST && web.Config.Labels['pero.kp.protocol'] === '1', 'web-renderer-binding');
           writeFileSync(`${env.PERO_CI_WEB_ARTIFACT_DIR}/image.json`, JSON.stringify(record));
           cpSync(`${env.PERO_CI_WEB_ARTIFACT_DIR}/metadata`, 'apps/web/.next', { recursive: true });
           const payload = `${env.PERO_CI_WEB_ARTIFACT_DIR}/types-artifact`;
@@ -356,6 +385,7 @@ jobs:
           NODE
         env:
           BUILD_METADATA: ${{ steps.images.outputs.metadata }}
+          KP_RENDERER_INDEX_DIGEST: ${{ needs.kp-renderer-tests.outputs.index-digest }}
           PERO_CI_POSTGRES_ID: ${{ job.services.postgres.id }}
           PERO_CI_NETWORK: ${{ job.services.postgres.network }}
 
@@ -507,14 +537,65 @@ jobs:
           compression-level: 0
           retention-days: 1
 
+  # Renderer строится/испытывается отдельно: web не получает Chromium или новые шрифты.
+  kp-renderer-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    outputs:
+      oci-sha256: ${{ steps.test.outputs.oci-sha256 }}
+      index-digest: ${{ steps.test.outputs.index-digest }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: docker/setup-buildx-action@v3
+        id: builder
+      - name: Закрепить base digest, source/fonts и Chromium141
+        id: prepare
+        run: node apps/kp-renderer/ci/pipeline.mjs prepare
+      - name: Один renderer OCI и точная runtime projection без публикации
+        id: images
+        uses: docker/bake-action@5be5f02ff8819ecd3092ea6b2e6261c31774f2b4 # v6
+        env:
+          DOCKER_BUILD_SUMMARY: false
+          DOCKER_BUILD_RECORD_UPLOAD: false
+        with:
+          source: .
+          builder: ${{ steps.builder.outputs.name }}
+          files: ${{ steps.prepare.outputs.directory }}/bake.json
+          targets: renderer-oci,renderer-runtime
+          allow: fs.write=${{ steps.prepare.outputs.directory }}
+      - name: Реальный Linux141 HTTP/PDF/PNG/retained-PDF/multi-КП DOCX без сети и БД
+        id: test
+        run: node apps/kp-renderer/ci/pipeline.mjs test
+        env:
+          KP_BUILD_METADATA: ${{ steps.images.outputs.metadata }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: renderer-oci-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
+          path: |
+            ${{ steps.prepare.outputs.directory }}/renderer.oci.tar
+            ${{ steps.prepare.outputs.directory }}/image.json
+            ${{ steps.prepare.outputs.directory }}/smoke.json
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
   # Прямой gate блокирует публикацию при failure/cancelled/skipped любой проверки.
   build-push:
-    if: github.event_name == 'push' && needs.unit-tests.result == 'success' && needs.native-tests.result == 'success'
-    needs: [unit-tests, native-tests]
+    if: github.event_name == 'push' && needs.unit-tests.result == 'success' && needs.unit-tests-backend.result == 'success' && needs.native-tests.result == 'success' && needs.kp-renderer-tests.result == 'success'
+    needs: [unit-tests, unit-tests-backend, native-tests, kp-renderer-tests]
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+    env:
+      PERO_CI_EXPECTED_OCI_SHA256: ${{ needs.native-tests.outputs.oci-sha256 }}
+      PERO_CI_EXPECTED_RENDERER_OCI_SHA256: ${{ needs.kp-renderer-tests.outputs.oci-sha256 }}
+      PERO_CI_EXPECTED_RENDERER_INDEX_DIGEST: ${{ needs.kp-renderer-tests.outputs.index-digest }}
     steps:
       - uses: actions/checkout@v4
 
@@ -529,11 +610,17 @@ jobs:
           name: web-oci-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
           path: ${{ runner.temp }}/pero-web-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: renderer-oci-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
+          path: ${{ runner.temp }}/pero-renderer-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
+
       - name: Проверить и опубликовать испытанный OCI без пересборки
         run: &promote_original_oci |
           case "$PERO_CI_ARTIFACT_KIND" in
             web) directory="$PERO_CI_WEB_ARTIFACT_DIR"; expected="$PERO_CI_EXPECTED_OCI_SHA256" ;;
             bot) directory="$PERO_CI_BOT_ARTIFACT_DIR"; expected="$PERO_CI_EXPECTED_BOT_OCI_SHA256" ;;
+            renderer) directory="$PERO_CI_RENDERER_ARTIFACT_DIR"; expected="$PERO_CI_EXPECTED_RENDERER_OCI_SHA256" ;;
             *) exit 1 ;;
           esac
           printf '%s  %s\n' "${expected#sha256:}" "$directory/$PERO_CI_ARTIFACT_KIND.oci.tar" | sha256sum --check
@@ -544,23 +631,27 @@ jobs:
           chmod +x "$RUNNER_TEMP/regctl"
           node --input-type=module <<'NODE'
           import { execFileSync } from 'node:child_process';
+          import { writeFileSync } from 'node:fs';
           import { readWebArtifact, requireCi } from './apps/web/tests/integration/runtime/target.mjs';
-          const env = process.env, kind = env.PERO_CI_ARTIFACT_KIND, record = await readWebArtifact(true, env, kind);
+          import { readRendererArtifact } from './apps/kp-renderer/ci/artifact.mjs';
+          const env = process.env, kind = env.PERO_CI_ARTIFACT_KIND, record = kind === 'renderer' ? await readRendererArtifact(true, env) : await readWebArtifact(true, env, kind);
           requireCi(execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim() === record.revision &&
             record.indexDigest === env.PERO_CI_EXPECTED_INDEX_DIGEST, 'promotion-checkout');
           requireCi(env.GITHUB_EVENT_NAME === 'push' && ['staging', 'main'].includes(env.GITHUB_REF_NAME), 'promotion-branch');
           const cli = args => execFileSync(`${env.RUNNER_TEMP}/regctl`, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
-          const directory = kind === 'web' ? env.PERO_CI_WEB_ARTIFACT_DIR : env.PERO_CI_BOT_ARTIFACT_DIR;
+          const directory = kind === 'web' ? env.PERO_CI_WEB_ARTIFACT_DIR : kind === 'renderer' ? env.PERO_CI_RENDERER_ARTIFACT_DIR : env.PERO_CI_BOT_ARTIFACT_DIR;
           const source = `ocidir://${directory}/oci@${record.indexDigest}`;
-          const repository = kind === 'web' ? 'ghcr.io/navasiolau/pero_crm' : 'ghcr.io/navasiolau/pero_telegram_bot';
+          const repository = kind === 'web' ? 'ghcr.io/navasiolau/pero_crm' : kind === 'renderer' ? 'ghcr.io/navasiolau/pero_kp_renderer' : 'ghcr.io/navasiolau/pero_telegram_bot';
           cli(['image', 'copy', '--referrers', '--force-recursive', source, `${repository}:sha-${record.revision}`]);
           requireCi(cli(['image', 'digest', `${repository}:sha-${record.revision}`]) === record.indexDigest, 'promoted-index');
           // Равный digest сохраняет исходный OCI index вместе с attestation descriptors.
           cli(['image', 'copy', '--referrers', '--force-recursive', `${repository}@${record.indexDigest}`, `${repository}:${env.GITHUB_REF_NAME}`]);
           requireCi(cli(['image', 'digest', `${repository}:${env.GITHUB_REF_NAME}`]) === record.indexDigest, 'branch-index');
-          const identity = kind === 'web' ? { buildId: record.buildId } :
+          writeFileSync(`${directory}/promotion.json`, JSON.stringify({ repository, indexDigest: record.indexDigest,
+            revision: record.revision, runId: record.runId, attempt: record.attempt }), { flag: 'wx' });
+          const identity = kind === 'web' ? { buildId: record.buildId } : kind === 'renderer' ? { template: record.template, smokeSha256: record.smokeSha256 } :
             { testedDistManifestSha256: record.testedDistManifestSha256, producerJobId: record.producer.jobId };
-          console.log(JSON.stringify({ ciRuntime: kind === 'web' ? 'tested-oci-promoted' : 'bot-oci-promoted',
+          console.log(JSON.stringify({ ciRuntime: kind === 'web' ? 'tested-oci-promoted' : kind === 'renderer' ? 'renderer-oci-promoted' : 'bot-oci-promoted',
             revision: record.revision, runId: record.runId, attempt: record.attempt, ...identity,
             indexDigest: record.indexDigest, attestations: record.attestations }));
           NODE
@@ -570,11 +661,32 @@ jobs:
           PERO_CI_EXPECTED_OCI_SHA256: ${{ needs.native-tests.outputs.oci-sha256 }}
           PERO_CI_EXPECTED_INDEX_DIGEST: ${{ needs.native-tests.outputs.index-digest }}
 
+      - name: Опубликовать тот же проверенный renderer OCI без пересборки
+        run: *promote_original_oci
+        env:
+          PERO_CI_ARTIFACT_KIND: renderer
+          PERO_CI_RENDERER_ARTIFACT_DIR: ${{ runner.temp }}/pero-renderer-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
+          PERO_CI_EXPECTED_INDEX_DIGEST: ${{ needs.kp-renderer-tests.outputs.index-digest }}
+
+      - name: Связать web и renderer по immutable digest для выключенного compose profile
+        id: kp-release
+        run: node apps/kp-renderer/ci/pipeline.mjs release
+        env:
+          PERO_CI_WEB_ARTIFACT_DIR: ${{ runner.temp }}/pero-web-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
+          PERO_CI_RENDERER_ARTIFACT_DIR: ${{ runner.temp }}/pero-renderer-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kp-release-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
+          path: ${{ steps.kp-release.outputs.directory }}
+          if-no-files-found: error
+          retention-days: 30
+
   # Telegram-бот — изолированный сервис (LXC tgbot), свой образ,
   # та же pull-модель деплоя (watcher-крон на контейнере)
   build-push-bot:
-    if: github.event_name == 'push' && needs.unit-tests.result == 'success' && needs.native-tests.result == 'success'
-    needs: [unit-tests, native-tests]
+    if: github.event_name == 'push' && needs.unit-tests.result == 'success' && needs.unit-tests-backend.result == 'success' && needs.native-tests.result == 'success' && needs.kp-renderer-tests.result == 'success'
+    needs: [unit-tests, unit-tests-backend, native-tests, kp-renderer-tests]
     runs-on: ubuntu-latest
     permissions:
       contents: read

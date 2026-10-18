@@ -1,0 +1,9 @@
+/* Только окружение редактора; печатные стили КП и договора не меняются. */
+.crm-loading .editor,.crm-loading .stage{visibility:hidden}
+.crm-readonly{padding:9px 16px;background:#fff5e7;border-bottom:1px solid #e6c895;color:#754519;font:13px/1.45 Manrope,sans-serif;position:relative;z-index:11}
+.crm-readonly[hidden]{display:none}
+.del-row .crm-service-kind{width:116px;flex:none;border:1px solid var(--line);border-radius:7px;padding:6px;background:var(--panel);font:12px Manrope,sans-serif}
+.url-input[readonly]{color:var(--mut)}
+.contract-dialog>details.contract-section{margin:0;padding:0 22px 10px;flex:none;max-height:180px;overflow:auto}
+.contract-dialog>details.contract-section a{overflow-wrap:anywhere}
+@media(max-width:600px){.del-row{flex-wrap:wrap}.del-row .crm-service-kind{width:100%;order:4}}

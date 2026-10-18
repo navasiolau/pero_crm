@@ -1,0 +1,46 @@
+const assert = require('node:assert/strict');
+const { test } = require('node:test');
+const { readFileSync } = require('node:fs');
+const { createHash } = require('node:crypto');
+const path = require('node:path');
+const template = require('../index.cjs');
+
+const fixture = { header: { company: 'Перо Лайв' }, order: { number: '231', project: 'Шкаф', date: '18.10.2026' },
+  client: { name: 'Заказчик' }, currency: 'BYN', discount: 10, discountMode: 'percent',
+  items: [{ id: 'stable-1', name: 'Шкаф', price: 100.75, qty: 1, products: [] }],
+  delivery: { mode: 'items', visible: true, items: [{ name: 'Доставка', price: 10, crmKind: 'DELIVERY' }] } };
+
+test('source-compatible rounding and printing retain CRM-only row metadata', () => {
+  const normalized = template.SheetRender.normalizeState(fixture);
+  assert.equal(normalized.items[0].id, 'stable-1');
+  assert.equal(normalized.delivery.items[0].crmKind, 'DELIVERY');
+  const printed = template.SheetRender.buildFullHTML(fixture);
+  assert.equal(printed, template.SheetRender.buildFullHTML({ ...fixture, delivery: { ...fixture.delivery, items: [{ name: 'Доставка', price: 10 }] } }));
+  assert.equal(template.SheetRender.totalsOf({ ...fixture, delivery: { visible: false } }).total, 90.68);
+});
+
+test('immutable original print CSS, contract template and model match captured source hashes', () => {
+  const manifest = template.sourceManifest;
+  for (const name of ['public/css/app.css', 'public/css/contract.css', 'public/js/contract-model.js', 'lib/contract-docx.js', 'templates/contracts/furniture.docx']) {
+    const bytes = readFileSync(template.assetPath(name));
+    assert.equal(createHash('sha256').update(bytes).digest('hex'), manifest.files[name].sha256, name);
+  }
+});
+
+test('browser assets are a closed whitelist and offline fonts have pinned bytes', () => {
+  for (const name of ['../.env', 'lib/contract-docx.js', 'templates/contracts/contractors.json', 'public/js/../../lib/kp-browser.js'])
+    assert.throws(() => template.browserAsset(name), /KP_ASSET_NOT_FOUND/);
+  const css = template.fontCss('data');
+  assert.ok(css.includes('font-family: \'Manrope\'')); assert.ok(css.includes('data:font/woff2;base64,'));
+  assert.ok(!css.includes('http:') && !css.includes('https:'));
+  const fonts = template.fontManifest.files;
+  assert.ok(fonts.length > 0);
+  for (const font of fonts) assert.equal(createHash('sha256').update(readFileSync(path.join(template.assetRoot, font.path))).digest('hex'), font.sha256);
+  const declarations = readFileSync(path.join(template.assetRoot, 'public/fonts/fonts.css'), 'utf8');
+  assert.equal(createHash('sha256').update(declarations).digest('hex'), template.fontManifest.cssSha256);
+  for (const [family, weights] of [['Manrope', [200, 300, 400, 600, 700]], ['JetBrains Mono', [400, 500, 700]], ['Spectral', [500, 600]]]) {
+    const found = [...declarations.matchAll(/@font-face\s*\{([^}]+)\}/g)].filter(match => match[1].includes("font-family: '" + family + "'"))
+      .map(match => Number(/font-weight:\s*([^;]+)/.exec(match[1])[1]));
+    assert.deepEqual([...new Set(found)].sort((a, b) => a - b), weights, 'exact source font weights: ' + family);
+  }
+});
