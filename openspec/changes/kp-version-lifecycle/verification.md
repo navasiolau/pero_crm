@@ -80,3 +80,18 @@ DI проверяет фиксацию источника и строковых 
 - Первоначальный renderer CI test не стартовал из-за отсутствующей workspace-ссылки `@pero/kp-template`. Выполнен только `pnpm --filter @pero/kp-renderer... install --offline --frozen-lockfile --ignore-scripts`: 2 workspace, 62 cached packages, 0 downloads, lockfile неизменён. После этого mock tests прошли; версии и source не менялись.
 
 Предыдущий настоящий root-native PASS относится к исходному plan `0b928983…` и receipt SHA256 `50f2e4290196a2fd895483b551a0381f5437ad88e1fdf142737e687434c30530` выше; receipt сохранён без изменений. В этом обновлении native SQL и обе DB-гонки повторно **не запускались**. Новая actual runtime/renderer/S3/browser/staging-приёмка №185 остаётся pending; task3.3 не закрыт. После merge меняются source/HEAD guards прежнего private runner: старый plan не переисполняется без отдельного review. Reset/cherry-pick/squash, DB/Docker/S3/SSH/HTTP/production/push не выполнялись.
+
+## CI297: селектор блокировки старого draft/stage сценария
+
+По переданному root результату CI297 native domain suite на настоящем PostgreSQL 17 выполнил **76/77 PASS**: обе новые save-vs-stage гонки №185 прошли, а прежний `draft/create-contract-number-races-real-project-lock` остановился в порядке contract-first на `DISTINCT_BACKENDS_HELD_LOCK_AND_ACTUAL_WAITER`. Это не успешная приёмка всего suite или staging.
+
+Причина подтверждена исходниками: общий test proxy `commandTx` вызывал `onHeld` на первой подходящей блокировке. Stage-core №185 берёт advisory mutex перед строкой Project, а создание изделия использует только строку Project. Поэтому contract-first останавливался до получения общей для этих операций строки, и создание изделия не становилось ожидающей транзакцией.
+
+Исправление только теста: необязательный `lockProjectId` выбирает Project `FOR UPDATE` с точным ID из SQL-параметра; его задают только два overlap-вызова create-first/contract-first этого сценария. Без него прежний detector остаётся прежним. Production-блокировки, таймауты, `pg_blocking_pids`, требование разных PID, advisory tuple новых №185 гонок и проверки статусов/денег/начислений не изменены.
+
+- Полный `pnpm --filter @pero/web exec tsc --noEmit --incremental false --pretty false` — **PASS**.
+- `pnpm --filter @pero/web exec eslint tests/integration/domain-postgres.test.ts` — **PASS**.
+- `openspec validate kp-version-lifecycle --strict` и `git diff --check` — **PASS**.
+- SHA256 исправленного `domain-postgres.test.ts`: **`a2d06e820fcbbf72d3d4bf15177c6e8d65f16995aa24bd389e5cbd21ec38cb0f`**.
+
+После исправления native domain suite **не запускался**: существующий local5433 не использовался как scratch. Root отдельно выполнит review, commit и следующий CI. DB/Docker/SSH/S3/HTTP, commit и push этим субагентом не выполнялись; task3.3 остаётся открытым.
