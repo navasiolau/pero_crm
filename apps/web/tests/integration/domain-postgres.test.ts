@@ -23,7 +23,7 @@ type MutationProbe = { taskId?: string; workerId?: string; workId?: string; proj
   actor: DomainActor; mode?: "lost-ack" | "failed-proof"; fault?: "payroll" | "audit" | "event" | "receipt";
   calls: number; writes: number; partials: number; effects: string[]; connections: { proof: boolean; pid: number }[]; owned: Record<string, string[]>; creates: Set<string> };
 type Context = { actor: DomainActor; db: Db; unauthenticated?: boolean; onRequested?: (pid: number) => void;
-  onHeld?: (tx: Prisma.TransactionClient, pid: number) => Promise<void>; failAuditId?: string; failEventId?: string;
+  onHeld?: (tx: Prisma.TransactionClient, pid: number) => Promise<void>; lockProjectId?: string; failAuditId?: string; failEventId?: string;
   onTimerLookup?: (tx: Prisma.TransactionClient, rows: readonly { id: string }[]) => Promise<void>;
   createFault?: { kind: "event" | "receipt"; collisionId: string; title: string }; createAck?: { lost: boolean; transactions: number };
   beforeAudit?: (tx: Prisma.TransactionClient) => Promise<void>; mutation?: MutationProbe };
@@ -185,7 +185,9 @@ function commandTx(tx: Prisma.TransactionClient, context: Context): Prisma.Trans
     } });
     if (key === "$queryRaw") return async (...args: unknown[]) => {
       const sql = Array.isArray(args[0]) ? args[0].join("") : "";
-      const locked = /pg_advisory_xact_lock\(18435,\s*55001\)|FROM "(?:Project|Product|Work|User)".*FOR UPDATE/.test(sql);
+      const locked = context.lockProjectId
+        ? /FROM "Project".*FOR UPDATE/.test(sql) && args[1] === context.lockProjectId
+        : /pg_advisory_xact_lock\(18435,\s*55001\)|FROM "(?:Project|Product|Work|User)".*FOR UPDATE/.test(sql);
       const pid = locked && (context.onRequested || context.onHeld)
         ? (await tx.$queryRaw<{ pid: number }[]>`SELECT pg_backend_pid() AS pid`)[0].pid : 0;
       if (locked) context.onRequested?.(pid);
@@ -411,13 +413,13 @@ async function fence(label: string) {
 }
 const realTransaction = (db: PrismaClient) => async <T>(operation: (tx: Prisma.TransactionClient) => Promise<T>) =>
   db.$transaction(tx => operation(commandTx(tx, current())), { timeout: 15_000, maxWait: 5000 });
-async function overlap<A, B>(actor: DomainActor, firstOperation: () => Promise<A>, secondOperation: () => Promise<B>, timerLock = false) {
+async function overlap<A, B>(actor: DomainActor, firstOperation: () => Promise<A>, secondOperation: () => Promise<B>, timerLock = false, lockProjectId?: string) {
   const ready = gate(), requested = gate(), release = gate(); let holder: Prisma.TransactionClient | undefined, holderPid = 0, waiterPid = 0;
-  const first = run(actor, fixture.db, firstOperation, { onHeld: async (tx, pid) => { holder = tx; holderPid = pid; ready.resolve(); await release.promise; } });
+  const first = run(actor, fixture.db, firstOperation, { lockProjectId, onHeld: async (tx, pid) => { holder = tx; holderPid = pid; ready.resolve(); await release.promise; } });
   void first.catch(() => {}); let second: Promise<B> | undefined;
   try {
     await Promise.race([ready.promise, first.then(() => assert.fail("REAL_HELD_LOCK_REQUIRED"))]);
-    second = run(actor, fixture.peer, secondOperation, { onRequested: pid => { waiterPid = pid; requested.resolve(); } });
+    second = run(actor, fixture.peer, secondOperation, { lockProjectId, onRequested: pid => { waiterPid = pid; requested.resolve(); } });
     void second.catch(() => {});
     await Promise.race([requested.promise, second.then(() => assert.fail("REAL_WAITING_QUERY_REQUIRED"))]);
     assert.ok(holder && holderPid > 0 && waiterPid > 0 && holderPid !== waiterPid);
@@ -775,11 +777,12 @@ test("draft/create-contract-number-races-real-project-lock", async () => {
     const create = (db: PrismaClient) => products.createProductCore(actors.manager, { projectId: project.id, title: "Новый шкаф", quantity: 3, expectedPrice: 123.45 }, realTransaction(db));
     const contract = (db: PrismaClient) => realTransaction(db)(tx => stages.patchProjectStageTransaction(actors.manager,
       { projectId: project.id, expectedStage: "ESTIMATE", toStage: "CONTRACT", clientMutationId: randomUUID() }, tx));
+    // Оба порядка ждут строку этого проекта; advisory этапа не блокирует создание изделия.
     if (direction === "create-first") {
-      const [created, changed] = await overlap(actors.manager, () => create(fixture.db), () => contract(fixture.peer));
+      const [created, changed] = await overlap(actors.manager, () => create(fixture.db), () => contract(fixture.peer), false, project.id);
       assert.equal(created.ok, true); assert.equal(changed.result.ok, true); if (created.ok) assert.equal(created.product.status, "DRAFT");
     } else {
-      const [changed, created] = await overlap(actors.manager, () => contract(fixture.db), () => create(fixture.peer));
+      const [changed, created] = await overlap(actors.manager, () => contract(fixture.db), () => create(fixture.peer), false, project.id);
       assert.equal(changed.result.ok, true); assert.equal(created.ok, true); if (created.ok) assert.equal(created.product.status, "PREPARATION");
     }
     const product = await fixture.db.product.findFirstOrThrow({ where: { projectId: project.id } });
