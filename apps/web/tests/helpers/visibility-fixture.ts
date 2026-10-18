@@ -10,13 +10,14 @@ export function matches(row: FixtureRow | null, where: FixtureRow = {}): boolean
     if (key === "AND") return (Array.isArray(condition) ? condition : [condition]).every((part) => matches(row, part as FixtureRow));
     if (key === "OR") return (condition as FixtureRow[]).some((part) => matches(row, part));
     if (key === "NOT") return !matches(row, condition as FixtureRow);
-    const value = key === "deletedAt" && row[key] === undefined ? null : row[key];
+    const value = ["deletedAt", "proposalMediaRetiredAt"].includes(key) && row[key] === undefined ? null : row[key];
     if (condition instanceof Date) return value instanceof Date && value.getTime() === condition.getTime();
     if (!object(condition)) return value === condition;
     if ("in" in condition) return (condition.in as unknown[]).includes(value);
     if ("notIn" in condition) return !(condition.notIn as unknown[]).includes(value);
     if ("not" in condition) return value !== condition.not;
     if ("is" in condition) return condition.is === null ? value === null : matches(value as FixtureRow | null, condition.is as FixtureRow);
+    if ("isNot" in condition) return condition.isNot === null ? value != null : !matches(value as FixtureRow | null, condition.isNot as FixtureRow);
     if ("lt" in condition) return value != null && (value as string | number) < (condition.lt as string | number);
     if ("lte" in condition) return value != null && (value as string | number) <= (condition.lte as string | number);
     if ("contains" in condition) {
