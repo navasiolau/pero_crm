@@ -1,6 +1,6 @@
 # Verification
 
-Дата: 18.10.2026. Ветка `feature/185`, исходная база `d918ab860ec5aab029c466a3b3c3b1ce06f0ec98`. Собственные изменения №185 не закоммичены. Разрешённая локальная интеграция зависимостей описана отдельным срезом ниже; собственные commit/push не выполнялись.
+Дата: 18.10.2026. Ветка `feature/185`, исходная база `d918ab860ec5aab029c466a3b3c3b1ce06f0ec98`. Исторические срезы подготовки и root SQL-приёмки сохранены ниже. Текущий разрешённый local merge — `c9291d9dc04a34324fb62b3faaed60898b1cbc29`; новый результат staging-приёмки №185 не заявляется.
 
 ## Настоящая локальная SQL-приёмка root — PASS
 
@@ -67,3 +67,16 @@ DI проверяет фиксацию источника и строковых 
 Независимый review нашёл неверный discriminator в predicate отказа save: исправлено `error.code` → **`error.kind === "locked"`**, соответствующее `ProposalWriteError`. Это исправление только теста; production source не менялся. Сценарии **не запускались на БД** в этом срезе и не покрываются локальным native helper выше. Их TypeScript/ESLint проверяются отдельно; успешная статическая проверка не доказывает overlap/rollback PostgreSQL.
 
 Перед разрешённым commit №185 повторены focused lifecycle/worker/stage tests — **23/23 PASS**, полный web TypeScript, ESLint 12 файлов (включая concurrency integration test) и OpenSpec strict — **PASS**. SHA256 исправленного `domain-postgres.test.ts` на этом срезе: `f58e7e0f3e9bcb63ef7d2bc53d68ffedd43b961c371ded93e0a8e415e83d397e`. Это проверки до последующего dependency merge №184; нового native/post-merge результата они не заявляют.
+
+## Обновление от принятого upstream staging — local PASS
+
+На чистой `feature/185` выполнен обычный `git merge --no-edit origin/staging` без конфликтов. Merge **`c9291d9dc04a34324fb62b3faaed60898b1cbc29`**, parents **`44cbee18d7248bf22c92e80151fdd123019ea110`** и **`0f8d38d6d0bba091786fb8b483a064d0f4fa9a97`**. Локальный remote ref точно совпал с переданным root staging SHA; сеть/fetch/push не использовались. Root сообщил для исходного upstream CI294 all7 success и здоровый runtime с выключенным КП; это не приёмка нового №185.
+
+В последующей отдельной read-only проверке root остановился на `template_metadata` upstream web. Причина диагностируется владельцем №184; CI/приёмка №185 ожидают triage и возможного обычного merge исправления. Этот субагент не выполнял target actions, данные и конфигурация не менялись.
+
+- Focused `kp-version-lifecycle`, `kp-render-worker`, `project-stage-core` — **23/23 PASS**. Полный `tsc --noEmit --incremental false --pretty false` после merge и после подготовки зависимостей — **PASS**.
+- Семь собственных lifecycle/queue/worker/stage/helper файлов остались без изменений. Обе реальные save-first/stage-first гонки и `error.kind === "locked"` сохранены. В warehouse QA перед конкурентной парой сохранён `pids.clear()`; текущий working SHA256 `domain-postgres.test.ts` — `5e9456c5af0d7ef90e186657eca6aa49f0a2bb581fca848ca147533fb2caac6c`.
+- Узкий procfs/SIG guard №184 и его fixtures совпадают с upstream. Дополнительные проверки только с моками: CI renderer **8/8**, runtime target/procfs **5/5 PASS**. Реальные Docker/HTTP/process signals не вызывались.
+- Первоначальный renderer CI test не стартовал из-за отсутствующей workspace-ссылки `@pero/kp-template`. Выполнен только `pnpm --filter @pero/kp-renderer... install --offline --frozen-lockfile --ignore-scripts`: 2 workspace, 62 cached packages, 0 downloads, lockfile неизменён. После этого mock tests прошли; версии и source не менялись.
+
+Предыдущий настоящий root-native PASS относится к исходному plan `0b928983…` и receipt SHA256 `50f2e4290196a2fd895483b551a0381f5437ad88e1fdf142737e687434c30530` выше; receipt сохранён без изменений. В этом обновлении native SQL и обе DB-гонки повторно **не запускались**. Новая actual runtime/renderer/S3/browser/staging-приёмка №185 остаётся pending; task3.3 не закрыт. После merge меняются source/HEAD guards прежнего private runner: старый plan не переисполняется без отдельного review. Reset/cherry-pick/squash, DB/Docker/S3/SSH/HTTP/production/push не выполнялись.
