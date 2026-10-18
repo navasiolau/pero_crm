@@ -1,10 +1,14 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { compileFunction } from 'node:vm';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { artifactIdentity, assertCiPostgresTarget, assertCiRuntimeTarget, integrationFiles, receiveCiArtifact, typesDigest, verifyTypesArtifact } from './target.mjs';
 import { groupMembers } from './cleanup.mjs';
+import { removeWebTemplateSmoke, verifyTemplateContainer, verifyWebTemplatePackage } from './kp-template-image.mjs';
+import templateSmoke from './kp-template-smoke.mjs';
 
 const ci = {
   CI: 'true', GITHUB_ACTIONS: 'true', RUNNER_OS: 'Linux', RUNNER_ENVIRONMENT: 'github-hosted',
@@ -20,6 +24,89 @@ const ci = {
   GITHUB_JOB: 'native-tests',
 };
 const postgres = { ...ci, PERO_CI_CONTRACT_PHASE: 'postgres', PERO_CI_MINIO_ID: undefined, PERO_CI_WEB_IMAGE_ID: undefined };
+
+test('web package smoke actually reads every permitted source asset, limits and contract model', () => {
+  const expected = templateSmoke.expectedPackage(), load = createRequire(new URL('../../../package.json', import.meta.url));
+  const result = templateSmoke.verifyPackage(expected, load);
+  assert.equal(result.assetsChecked, expected.assets.length); assert.ok(result.assetsChecked > 10);
+  assert.equal(result.limitsChecked, true); assert.equal(result.contractModelChecked, true); assert.equal(result.privateAssetsDenied, true);
+  const logs = [], processState = {}, ownRequire = createRequire(import.meta.url);
+  const runtimeRequire = name => name === 'node:module' ? { createRequire(file) { assert.equal(file, '/app/apps/web/package.json'); return load; } } : ownRequire(name);
+  compileFunction(templateSmoke.program(expected).toString(), ['require', 'console', 'process', 'Buffer'])(runtimeRequire, { log(value) { logs.push(JSON.parse(value)); } }, processState, Buffer);
+  assert.equal(processState.exitCode, undefined); assert.deepEqual(logs, [result]);
+});
+
+test('missing package entry and missing limits fail through genuine Node package resolution', () => {
+  const directory = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'pero-kp-package-'))), load = createRequire(path.join(directory, 'caller.cjs'));
+  try {
+    const source = path.dirname(createRequire(import.meta.url).resolve('@pero/kp-template'));
+    const target = path.join(directory, 'node_modules/@pero/kp-template'); mkdirSync(path.join(target, 'assets/public/js'), { recursive: true });
+    copyFileSync(path.join(source, 'package.json'), path.join(target, 'package.json'));
+    assert.throws(() => templateSmoke.verifyPackage(templateSmoke.expectedPackage(), load), error => error.code === 'MODULE_NOT_FOUND' && error.kpPhase === 'require' && error.message.includes('index.cjs'));
+    for (const file of ['package.json', 'index.cjs', 'source-manifest.json', 'fonts-manifest.json', 'assets/public/js/sheet-render.js', 'assets/public/js/contract-model.js'])
+      copyFileSync(path.join(source, file), path.join(target, file));
+    assert.throws(() => templateSmoke.verifyPackage(templateSmoke.expectedPackage(), load), error => error.code === 'MODULE_NOT_FOUND' && error.kpPhase === 'require' && error.message.includes('limits.cjs'));
+  } finally {
+    assert.equal(path.dirname(directory), realpathSync(os.tmpdir())); assert.ok(path.basename(directory).startsWith('pero-kp-package-'));
+    assert.equal(lstatSync(directory).isSymbolicLink(), false); rmSync(directory, { recursive: true });
+  }
+});
+
+test('web image smoke rejects missing font, same-size asset drift and access to private package files', () => {
+  const expected = templateSmoke.expectedPackage(), original = createRequire(import.meta.url)('@pero/kp-template');
+  const font = expected.assets.find(row => row.name.endsWith('.woff2')).name;
+  for (const kind of ['missing', 'changed', 'private']) {
+    const modified = Object.create(original);
+    modified.browserAsset = name => {
+      if (name === font && kind === 'missing') throw Object.assign(new Error('synthetic missing font'), { code: 'ENOENT' });
+      if (name === font && kind === 'changed') { const bytes = Buffer.from(original.browserAsset(name)); bytes[0] ^= 1; return bytes; }
+      if (name === '../.env' && kind === 'private') return Buffer.from('synthetic forbidden file');
+      return original.browserAsset(name);
+    };
+    assert.throws(() => templateSmoke.verifyPackage(expected, () => modified), error =>
+      kind === 'private' ? error.kpPhase === 'private_asset' : error.kpPhase === 'browser_asset' && error.kpAsset === font);
+  }
+});
+
+function templateContainer(target, imageId) {
+  return { Id: 'f'.repeat(64), Name: '/' + target.webName + '-kp-template-smoke', Image: imageId, Mounts: [],
+    Config: { Image: imageId, User: 'node', WorkingDir: '/app/apps/web', OpenStdin: true, Entrypoint: ['timeout'],
+      Cmd: ['-s', 'KILL', '15', 'node', '--max-old-space-size=64', '--input-type=commonjs', '-'],
+      Labels: { 'pero.ci.repository': ci.GITHUB_REPOSITORY, 'pero.ci.run': target.runId, 'pero.ci.attempt': target.attempt, 'pero.ci.service': 'web-template-smoke' } },
+    HostConfig: { NetworkMode: 'none', ReadonlyRootfs: true, Memory: 256 * 1024 * 1024, NanoCpus: 1_000_000_000, PidsLimit: 32,
+      CapDrop: ['ALL'], SecurityOpt: ['no-new-privileges'], PortBindings: {} }, State: { Running: false, ExitCode: 0, OOMKilled: false } };
+}
+
+test('web package smoke uses the exact owned bounded image and cleans it after failure without replacing that failure', () => {
+  const target = { runId: '169', attempt: '1', webName: 'pero-ci-169-1-web' }, imageId = 'sha256:' + 'd'.repeat(64);
+  const container = templateContainer(target, imageId), calls = [], failed = Object.assign(new Error('synthetic child failure'), { status: 1 }); let present = false;
+  const command = (args, input) => {
+    calls.push(args);
+    if (args[0] === 'ps') return present ? container.Id : '';
+    if (args[0] === 'create') { present = true; return container.Id; }
+    if (args[0] === 'inspect') return JSON.stringify([container]);
+    if (args[0] === 'start') { assert.ok(Buffer.isBuffer(input)); throw failed; }
+    assert.deepEqual(args, ['rm', '--force', container.Id]); present = false; return '';
+  };
+  assert.throws(() => verifyWebTemplatePackage(target, imageId, command), error => error === failed);
+  assert.equal(present, false); assert.equal(calls.filter(args => args[0] === 'start').length, 1);
+  assert.ok(calls.findIndex(args => args[0] === 'inspect') < calls.findIndex(args => args[0] === 'start'));
+  for (const change of [value => { value.Config.Labels['pero.ci.run'] = 'other'; }, value => { value.HostConfig.NetworkMode = 'bridge'; },
+    value => { value.Config.Cmd = ['server.js']; }, value => { value.HostConfig.Memory *= 2; }]) {
+    const changed = templateContainer(target, imageId); change(changed);
+    assert.throws(() => verifyTemplateContainer(changed, target, imageId), /CI_TARGET_REFUSED:kp-template-container-/);
+  }
+});
+
+test('image-smoke cleanup never removes a container with changed ownership', () => {
+  const target = { runId: '169', attempt: '1', webName: 'pero-ci-169-1-web' }, imageId = 'sha256:' + 'd'.repeat(64);
+  const container = templateContainer(target, imageId), calls = []; container.Config.Labels['pero.ci.run'] = 'other';
+  assert.throws(() => removeWebTemplateSmoke(target, imageId, args => {
+    calls.push(args[0]); if (args[0] === 'ps') return container.Id;
+    assert.equal(args[0], 'inspect'); return JSON.stringify([container]);
+  }), /CI_TARGET_REFUSED:kp-template-container-owner/);
+  assert.deepEqual(calls, ['ps', 'inspect']);
+});
 
 function procStat(pid, { state = 'S', pgid = 100, startedAt = '2000' } = {}) {
   const fields = Array(20).fill('0'); fields[0] = state; fields[2] = String(pgid); fields[19] = startedAt;
