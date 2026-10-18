@@ -1,7 +1,8 @@
 import {liveProductWhere,liveProjectWhere} from "@/server/access/live-entities";
 import {lockProjectRow} from "@/server/projects/lock";
 import {lockProductRow} from "./quantity-core";
-import {isProductDraftLocked} from "@/lib/product-drafts";
+import {canAccessProductDraft,isProductDraftLocked} from "@/lib/product-drafts";
+import {productDraftAccessRelations} from "@/server/access/product-draft-context";
 import type { Prisma, ProductStatus } from "@prisma/client";
 import { hasAnyRole, MANAGER_ROLES } from "@/lib/roles";
 import { productStatusLabels } from "@/lib/product-statuses";
@@ -18,10 +19,10 @@ export async function changeProductStatusTransaction(tx: Prisma.TransactionClien
   if (!reference) return { ok: false as const, error: "Изделие не найдено" };
   await lockProjectRow(tx, reference.projectId);
   await lockProductRow(tx, productId);
-  const product = await tx.product.findUnique({ where: {...liveProductWhere, id: productId } });
+  const product = await tx.product.findUnique({ where: {...liveProductWhere, id: productId }, include: productDraftAccessRelations });
   if (!product) return { ok: false as const, error: "Изделие не найдено" };
   const decision = decideProductPercentageStatus(actor.roles, { from: product.status, to: toStatus,
-    assignedEngineer: product.engineerId === actor.id,
+    assignedEngineer: product.engineerId === actor.id, canAccessDraft: canAccessProductDraft(actor.roles, product),
     participant: false, hasB3d: false, noModel: false });
   if (!decision.allowed) return { ok: false as const, error: decision.error ?? "Недостаточно прав" };
   if (product.status === toStatus) return { ok: true as const, product, eventId: null,

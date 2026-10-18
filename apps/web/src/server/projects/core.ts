@@ -2,14 +2,14 @@ import { updateProjectFieldsCore, type LegacyProjectUpdateInput } from "./projec
 import { patchProjectStageCore } from "./stage-service";
 import type { StageExtras } from "./stage-contract";
 import { revalidatePath } from "next/cache";
-import type { ProjectStage } from "@prisma/client";
+import type { Prisma, ProjectStage } from "@prisma/client";
 import { z } from "zod";
 
 import { INTERNAL_CURRENCY, INTERNAL_CURRENCY_ERROR } from "@/lib/internal-currency";
-import { prisma } from "@/lib/prisma";
-import { writeChangeLog } from "@/server/plugins/changelog";
-import { emitDomainEvent } from "@/server/plugins/events";
+import { dispatchEvent } from "@/server/plugins/events";
 import { notifyOrg } from "@/server/notifications/notify";
+import { withMutationTransaction, type MutationTransaction } from "@/server/transactions/coordinator";
+import { allocateProjectNumberInTransaction } from "./numbering";
 
 import { MANAGER_ROLES } from "@/lib/roles";
 import { requireActorRoles, type DomainActor } from "@/server/actor";
@@ -20,52 +20,6 @@ import { requireActorRoles, type DomainActor } from "@/server/actor";
 // source попадает в журнал изменений (§5: веб / Telegram / плагин / api).
 
 export { requireActorRoles, type DomainActor } from "@/server/actor";
-
-// Номер проекта — сплошная нумерация: следующий = max(numberInt) + 1
-// (после миграции нормализации все номера каноничные числа, «205» —
-// последний). Создание — в той же транзакции, чтобы два параллельных
-// запроса не получили один номер.
-async function createProjectWithNumber(
-  data: {
-    title: string;
-    clientId: string;
-    currency: string;
-    address?: string;
-    managerId?: string;
-    delivery?: number;
-    unloading?: number;
-    installation?: number;
-  },
-  userId: string,
-) {
-  return prisma.$transaction(async (tx) => {
-    const max = await tx.project.aggregate({ _max: { numberInt: true } });
-    const numberInt = (max._max.numberInt ?? 0) + 1;
-    const number = String(numberInt);
-    const project = await tx.project.create({
-      data: {
-        // id = номер («205»): URL карточки — /projects/205
-        id: number,
-        number,
-        numberInt,
-        title: data.title,
-        clientId: data.clientId,
-        currency: data.currency,
-        address: data.address,
-        managerId: data.managerId,
-        initialPrice: null,
-        delivery: data.delivery ?? null,
-        unloading: data.unloading ?? null,
-        installation: data.installation ?? null,
-        createdById: userId,
-        stageHistory: {
-          create: { toStage: "LEAD", changedById: userId },
-        },
-      },
-    });
-    return project;
-  });
-}
 
 export const createProjectSchema = z.object({
   title: z.string().min(1, "Укажите название проекта"),
@@ -87,55 +41,69 @@ export const createProjectSchema = z.object({
     .optional(),
 }).strict();
 
+/** Вызывается в общей транзакции, в том числе при создании КП. */
+export async function createProjectInTransaction(
+  tx: Prisma.TransactionClient,
+  actor: DomainActor,
+  input: z.input<typeof createProjectSchema>,
+) {
+  requireActorRoles(actor, MANAGER_ROLES);
+  const data = createProjectSchema.parse(input);
+  const { number, numberInt } = await allocateProjectNumberInTransaction(tx);
+  if (!await tx.client.findUnique({ where: { id: data.clientId }, select: { id: true } }))
+    throw new Error("Клиент не найден");
+  const project = await tx.project.create({ data: {
+    id: number, number, numberInt, title: data.title, clientId: data.clientId,
+    currency: data.currency, address: data.address, managerId: data.managerId,
+    initialPrice: null, delivery: data.delivery ?? null,
+    unloading: data.unloading ?? null, installation: data.installation ?? null,
+    createdById: actor.id,
+    stageHistory: { create: { toStage: "LEAD", changedById: actor.id } },
+  } });
+  await tx.changeLog.create({ data: {
+    actorType: "user", actorId: actor.id, actorName: actor.name || undefined,
+    entity: "project", entityId: project.id, action: "create",
+    newValue: { number, title: data.title }, source: actor.source,
+  } });
+  const event = await tx.domainEvent.create({ data: {
+    type: "project.created", payload: { projectId: project.id, number }, actor: actor.id,
+  } });
+  return { project, eventIds: [event.id] };
+}
+
+/** Сохранённый результат не зависит от доставки уведомления или инвалидации. */
+export async function deliverProjectCreated(
+  actor: DomainActor,
+  mutation: Awaited<ReturnType<typeof createProjectInTransaction>>,
+) {
+  const { project, eventIds } = mutation;
+  const effects = [
+    ...eventIds.map(id => () => dispatchEvent(id)),
+    () => notifyOrg({ type: "project.created", title: `Новый проект ${project.number}`,
+      body: project.title, link: `/projects/${project.id}`, exceptUserId: actor.id }),
+    () => revalidatePath("/projects"),
+  ];
+  for (const effect of effects) {
+    try { await effect(); }
+    catch { console.error("[crm.post-commit] project-created effect failed", { projectId: project.id }); }
+  }
+}
+
 // Проект = заказ клиента (§6): название, клиент, менеджер, адрес, валюта
 // и первоначальная цена (первая цена КП клиенту, правится и через бота).
 export async function createProjectCore(
   actor: DomainActor,
   input: z.input<typeof createProjectSchema>,
+  transaction: MutationTransaction = withMutationTransaction,
 ): Promise<{ ok: boolean; id?: string; number?: string; error?: string }> {
   requireActorRoles(actor, MANAGER_ROLES);
   const parsed = createProjectSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Ошибка данных" };
   }
-  const data = parsed.data;
-
-  const project = await createProjectWithNumber(
-    {
-      title: data.title,
-      clientId: data.clientId,
-      currency: data.currency,
-      address: data.address,
-      managerId: data.managerId,
-      delivery: data.delivery,
-      unloading: data.unloading,
-      installation: data.installation,
-    },
-    actor.id,
-  );
-  const number = project.number;
-
-  await writeChangeLog({
-    actorType: "user",
-    actorId: actor.id,
-    actorName: actor.name || undefined,
-    entity: "project",
-    entityId: project.id,
-    action: "create",
-    newValue: { number, title: data.title },
-    source: actor.source,
-  });
-  await emitDomainEvent("project.created", { projectId: project.id, number }, actor.id);
-  await notifyOrg({
-    type: "project.created",
-    title: `Новый проект ${number}`,
-    body: data.title,
-    link: `/projects/${project.id}`,
-    exceptUserId: actor.id,
-  });
-
-  revalidatePath("/projects");
-  return { ok: true, id: project.id, number };
+  const mutation = await transaction(tx => createProjectInTransaction(tx, actor, parsed.data));
+  await deliverProjectCreated(actor, mutation);
+  return { ok: true, id: mutation.project.id, number: mutation.project.number };
 }
 
 export { legacyProjectUpdateSchema as updateProjectSchema } from "./project-field-core";

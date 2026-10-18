@@ -29,13 +29,13 @@ export async function productInitialStatus(tx: Prisma.TransactionClient, project
 export async function promoteProjectDrafts(tx: Prisma.TransactionClient, actor: DomainActor,
   projectId: string, changedAt: Date) {
   const drafts = await tx.product.findMany({
-    where: { projectId, status: "DRAFT" },
+    where: { projectId, status: "DRAFT", deletedAt: null },
     select: { id: true, number: true }, orderBy: { id: "asc" },
   });
   const eventIds: string[] = [];
   for (const product of drafts) {
     const changed = await tx.product.updateMany({
-      where: { id: product.id, status: "DRAFT" }, data: { status: "PREPARATION", statusChangedAt: changedAt },
+      where: { id: product.id, status: "DRAFT", deletedAt: null }, data: { status: "PREPARATION", statusChangedAt: changedAt },
     });
     if (changed.count !== 1) throw new Error("Статус черновика изменён другим пользователем");
     await tx.productStatusHistory.create({ data: {

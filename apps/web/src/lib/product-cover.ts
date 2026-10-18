@@ -1,4 +1,5 @@
 import type { ProductStatus, Role } from "@prisma/client";
+import type { ProductDraftAccessContext } from "./product-drafts";
 
 import { canEditProductTechnicalBlock } from "@/server/access/visibility";
 
@@ -8,7 +9,7 @@ export type CoverActor = {
   engineeringParticipantProductIds?: string[];
 };
 
-export type CoverProduct = {
+export type CoverProduct = ProductDraftAccessContext & {
   id: string;
   projectId: string;
   status: ProductStatus;

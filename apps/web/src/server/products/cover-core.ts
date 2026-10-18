@@ -3,6 +3,7 @@ import {Prisma} from '@prisma/client';
 import {canSetProductCover,isCoverImageMime,validateProductCoverFile,type CoverProduct} from '@/lib/product-cover';
 import {MANAGER_ROLES,hasAnyRole,hasRole} from '@/lib/roles';
 import {fileVisibilityWhere,productEditWhere,resolveVisibilityActor,type VisibilityActor} from '@/server/access/visibility';
+import {productDraftAccessSelect} from '@/server/access/product-draft-context';
 import {mayDeleteStoredFile} from '@/server/files/delete-permission';
 import {assertWritableFileStorageKey} from '@/server/files/storage-binding-fence';
 import {lockFileDeletionRequest,persistFileDeleteIntent} from '@/server/files/delete-intent';
@@ -19,7 +20,7 @@ const digest=(value:unknown)=>createHash('sha256').update(JSON.stringify(value))
 const json=(value:unknown):Prisma.InputJsonValue=>JSON.parse(JSON.stringify(value));
 async function permission(tx:Tx,actor:CoverMutationActor,productId:string,projectId?:string){
  if(!hasAnyRole(actor.roles,MANAGER_ROLES)&&!hasRole(actor.roles,'ENGINEER'))return null;
- const visibility=await resolveVisibilityActor(tx,actor);const product=await tx.product.findFirst({where:{AND:[{id:productId,...(projectId?{projectId}:{})},productEditWhere(visibility)]},select:{id:true,projectId:true,engineerId:true,status:true,sketchFileId:true}});
+ const visibility=await resolveVisibilityActor(tx,actor);const product=await tx.product.findFirst({where:{AND:[{id:productId,...(projectId?{projectId}:{})},productEditWhere(visibility)]},select:{...productDraftAccessSelect,id:true,engineerId:true,status:true,sketchFileId:true}});
  return product&&canSetProductCover(visibility,product)?{product,visibility}:null;
 }
 async function replay(tx:Tx,actor:CoverMutationActor,productId:string,mutationId:string,fingerprint:string,currentSketchFileId:string|null):Promise<SketchResult|null>{const row=await tx.changeLog.findUnique({where:{id:`product-sketch:${mutationId}`}});if(!row)return null;const saved=row.newValue;if(row.actorId!==actor.id||row.entity!=='product'||row.entityId!==productId||!saved||typeof saved!=='object'||Array.isArray(saved)||saved.fingerprint!==fingerprint||!saved.result||typeof saved.result!=='object')return fail('validation','Идентификатор операции уже использован');const result=saved.result as unknown as Extract<SketchResult,{ok:true}>;if(result.sketchFileId!==currentSketchFileId)return fail('conflict','Эскиз уже изменён другим пользователем',currentSketchFileId);return{...result,repeated:true};}

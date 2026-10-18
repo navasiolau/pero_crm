@@ -268,7 +268,7 @@ model Product {
   id               String       @id @default(cuid())
   projectId        String
   project          Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  number           String       @unique // «205.21» / «205-1» — <номер проекта><разделитель><суффикс>
+  number           String       // Активный номер уникален partial-индексом; скрытая история сохраняет прежний.
   // Числовой суффикс после префикса проекта («205.21» → 21, «205-3» → 3,
   // «108.» без суффикса → NULL) — для серверной сортировки внутри проекта
   suffixInt        Int?
@@ -317,6 +317,7 @@ model Product {
   proposalItem ProposalItem?
 
   @@index([projectId])
+  @@index([number])
   @@index([projectId, suffixInt])
   @@index([status, statusChangedAt])
   @@index([engineerId])

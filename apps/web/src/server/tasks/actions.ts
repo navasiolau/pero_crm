@@ -497,7 +497,7 @@ export async function changeTaskStatus(
       type: "task.statusChanged",
       title: `Задача «${result.task.title}»: ${toStatus === "DONE" ? "выполнена" : "в работе"}`,
       body: `Проект ${result.task.projectNumber} · ${session.user.name ?? ""}`,
-      link: result.task.productNumber ? `/products/${result.task.productNumber}` : `/projects/${result.task.projectId}`,
+      link: result.task.productId ? `/products/${encodeURIComponent(result.task.productId)}` : `/projects/${result.task.projectId}`,
       exceptUserId: session.user.id,
     }) });
   }

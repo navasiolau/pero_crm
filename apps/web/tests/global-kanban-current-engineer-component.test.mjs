@@ -21,7 +21,7 @@ const bundle = build({
       const [options,setOptions]=React.useState(window.__options);window.__setOptions=setOptions;
       React.useEffect(()=>{window.__applied=options},[options]);
       const roles=options.roles??['ENGINEER'];
-      const product={id:'p',number:'128.1',title:'Контрольное изделие',kind:null,status:options.status??'PRODUCTION',statusChangedAt:new Date(0).toISOString(),expectedPrice:null,quantity:1,currency:'BYN',projectId:'project',projectStage:options.projectStage??'CONTRACT',projectNumber:'128',projectTitle:'Контрольный проект',clientId:'client',clientName:'Контрольный клиент',engineerId:'current',engineerName:'Инженер',isEngineeringParticipant:options.participant??false,hasB3d:false,noModel:false,sketchFile:null};
+      const product={id:'p',number:'128.1',title:'Контрольное изделие',kind:null,status:options.status??'PRODUCTION',canAccessDraft:options.canAccessDraft===true,statusChangedAt:new Date(0).toISOString(),expectedPrice:null,quantity:1,currency:'BYN',projectId:'project',projectStage:options.projectStage??'CONTRACT',projectNumber:'128',projectTitle:'Контрольный проект',clientId:'client',clientName:'Контрольный клиент',engineerId:'current',engineerName:'Инженер',isEngineeringParticipant:options.participant??false,hasB3d:false,noModel:false,sketchFile:null};
       const props={initialProducts:[product],actorUserId:options.actor??'current',actorRoles:roles,canManage:roles.some(role=>['ADMIN','DIRECTOR','MANAGER'].includes(role)),showAmount:false,projectId:'project',projectStage:product.projectStage,currency:'BYN',engineerOptions:[]};
       const Component=window.__board==='global'?ProductsKanban:ProductsTab;return <><Component {...props}/><RecentProjects projects={[{id:'recent-project',number:'205',client:'Клиент',product:'Название заказа',status:'В работе',statusClass:'',sum:'10 BYN'}]}/></>;
     }
@@ -34,7 +34,7 @@ const bundle = build({
     builder.onLoad({ filter: /.*/, namespace: "boundary" }, args => ({ loader: "js", resolveDir: web, contents:
       args.path === "next/navigation" ? "export const useRouter=()=>({push:href=>window.__nav.push(href),refresh:()=>window.__refreshes++});" :
       args.path === "next/link" ? "import React from 'react';export default function Link({children,...props}){return React.createElement('a',props,children);}" :
-      args.path === "@/lib/list-params" ? "export const useListParams=()=>({query:'view=kanban',get:()=>'',set(){}});" :
+      args.path === "@/lib/list-params" ? "export const useListParams=()=>({query:'view=kanban',getQuery:()=>'view=kanban',get:()=>'',set(){}});" :
       args.path === "sonner" ? "export const toast={error:value=>window.__errors.push(value),success:value=>window.__success.push(value)};" :
       "export const createProduct=async()=>{throw Error('CREATE_FORBIDDEN')};export const changeProductStatus=async(id,status)=>{window.__writes.push({id,status});return window.__deny?{ok:false,error:'Контрольный отказ'}:{ok:true};};"
     }));
@@ -99,6 +99,20 @@ for (const board of ["global", "project"]) {
       await page.evaluate(()=>window.__setOptions({actor:'manager',roles:['MANAGER','ENGINEER'],status:'PRODUCTION'}));
       await page.waitForFunction(()=>document.querySelectorAll('button[aria-label^="Перетащить "]').length===1);
       const recent=page.getByRole('link',{name:'205',exact:true}),recentRow=page.getByRole('row').filter({has:recent});assert.equal(await recent.getAttribute('href'),'/projects/recent-project');assert.equal(await recentRow.getByText('Клиент',{exact:true}).count(),1);assert.equal(await recentRow.getByText('Название заказа',{exact:true}).count(),1);assert.equal(await recent.locator('[data-card-number]').count(),1);
+      assert.deepEqual(await page.evaluate(() => window.__writes), []);
+    });
+  });
+  test(`${board}: менеджер видит связанный черновик КП, но переход до договора закрыт`, async () => {
+    await withBoard(board, { roles: ['MANAGER'], status: 'DRAFT', projectStage: 'LEAD', canAccessDraft: true }, async page => {
+      assert.equal(await page.getByText('Черновики', {exact:true}).count(), 1);
+      assert.equal(await page.getByText('Контрольное изделие', {exact:true}).count(), 1);
+      assert.equal(await page.getByRole('button', {name:/^Перетащить /}).count(), 0);
+      await page.getByText('Контрольное изделие', {exact:true}).click();
+      assert.deepEqual(await page.evaluate(() => window.__nav), ['/products/p?returnTo='+encodeURIComponent(board === 'global' ? '/products?view=kanban' : '/projects/project?tab=products')]);
+      await page.evaluate(() => window.__setOptions({roles:['MANAGER','ENGINEER'],status:'DRAFT',projectStage:'CONTRACT',canAccessDraft:true}));
+      await page.waitForFunction(() => document.querySelectorAll('button[aria-label^="Перетащить "]').length === 1);
+      await page.evaluate(() => window.__setOptions({roles:['MANAGER'],status:'DRAFT',projectStage:'CONTRACT',canAccessDraft:false}));
+      await page.waitForFunction(() => !document.body.textContent.includes('Контрольное изделие'));
       assert.deepEqual(await page.evaluate(() => window.__writes), []);
     });
   });

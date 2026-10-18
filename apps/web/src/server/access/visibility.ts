@@ -1,7 +1,7 @@
 import {liveProjectWhere,liveProductWhere,liveChildWhere} from "./live-entities";
 import type { Prisma, ProductStatus, Role } from "@prisma/client";
 import { FIELD_ROLES, MANAGER_ROLES, hasAnyRole, hasRole, hasWorkCoordinator } from "@/lib/roles";
-import { canViewProductDrafts } from "@/lib/product-drafts";
+import { canAccessProductDraft, canViewProductDrafts, type ProductDraftAccessContext } from "@/lib/product-drafts";
 import { fieldProductStatuses } from "@/lib/field-product-visibility";
 
 export type VisibilityActor = { id: string; roles: Role[]; engineeringParticipantProductIds?: string[];
@@ -83,8 +83,8 @@ function productEditWhereGrants(actor: VisibilityActor): Prisma.ProductWhereInpu
   return engineeringProductWhere(actor);
 }
 
-export function canEditProductTechnicalBlock(actor: VisibilityActor, product: { id?: string; engineerId: string | null; status: ProductStatus }): boolean {
-  return (product.status !== "DRAFT" || canViewProductDrafts(actor.roles)) && (hasAnyRole(actor.roles, MANAGER_ROLES) || (
+export function canEditProductTechnicalBlock(actor: VisibilityActor, product: ProductDraftAccessContext & { id?: string; engineerId: string | null; status: ProductStatus }): boolean {
+  return (product.status !== "DRAFT" || canAccessProductDraft(actor.roles, product)) && (hasAnyRole(actor.roles, MANAGER_ROLES) || (
     product.status === "DESIGN" && (
       (hasRole(actor.roles, "ENGINEER") && product.engineerId === actor.id) ||
       (hasRole(actor.roles, "ENGINEER") && !!product.id && !!actor.engineeringParticipantProductIds?.includes(product.id))
@@ -200,7 +200,16 @@ export function clientVisibilityWhere(actor: VisibilityActor): Prisma.ClientWher
 
 /** Дополнительное ограничение, не заменяющее обычные grants или soft-delete. */
 export function productDraftVisibilityWhere(actor: VisibilityActor): Prisma.ProductWhereInput {
-  return canViewProductDrafts(actor.roles) ? {} : { status: { not: "DRAFT" } };
+  if (canViewProductDrafts(actor.roles)) return {};
+  if (!hasRole(actor.roles, "MANAGER")) return { status: { not: "DRAFT" } };
+  // Same-project связь защищена ограничениями ProposalItem в БД; grant даёт
+  // только сама действующая позиция КП, не остальные черновики её проекта.
+  return { OR: [{ status: { not: "DRAFT" } }, {
+    deletedAt: null, project: liveProjectWhere,
+    proposalItem: { is: { deletedAt: null, proposal: {
+      deletedAt: null, isArchive: false, projectId: { not: null }, project: liveProjectWhere,
+    } } },
+  }] };
 }
 
 function draftChildVisibilityWhere(actor: VisibilityActor) {

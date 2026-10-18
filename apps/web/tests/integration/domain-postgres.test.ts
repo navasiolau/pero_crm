@@ -11,6 +11,8 @@ import { nativeOwnedIds, nativeSnapshot } from "../helpers/native-acceptance-sna
 import { createPostgresFixture, rejectedSql, type PostgresRows } from "./postgres.fixture";
 import { summarizeCalendarEntries } from "../../src/lib/calendar-summary";
 import { verifyCounterpartyNative } from "../helpers/counterparty-native";
+import { productDraftAccessRelations } from "../../src/server/access/product-draft-context";
+import { verifyProposalCompositionNative } from "../helpers/kp-proposal-native";
 
 type Db = PrismaClient | Prisma.TransactionClient;
 type MutationProbe = { taskId?: string; workerId?: string; workId?: string; projectId?: string; cashId?: string; paymentId?: string; receiptId?: string; payment: boolean;
@@ -50,6 +52,8 @@ let coordinator: typeof import("../../src/server/transactions/coordinator");
 let frozenReference: typeof import("../helpers/project-materials-reference");
 let payments: typeof import("../../src/server/payments/service");
 let stock: typeof import("../../src/server/warehouse/accounting");
+let proposals: typeof import("../../src/server/kp/proposal-core");
+let projectCore: typeof import("../../src/server/projects/core");
 
 function mutationTx(tx: Prisma.TransactionClient, probe: MutationProbe, proof: boolean): Prisma.TransactionClient {
   const writeMethods = new Set(["create", "createMany", "createManyAndReturn", "update", "updateMany", "updateManyAndReturn", "upsert", "delete", "deleteMany"]);
@@ -235,7 +239,7 @@ before(async () => {
   // Child targets загружаются раньше родителей: guardedModuleCache сохраняет installed entry каждого target.
   const names = ["transactions/coordinator", "time/timers", "access/visibility", "access/notification-visibility", "tasks/workspace-contract", "prices/actions", "works/core", "works/update-core", "works/queries", "tasks/worker-allocation-core",
     "tasks/queries", "warehouse/unit-core", "warehouse/norm-core", "warehouse/queries", "products/delete-core", "products/core", "projects/stage-core", "projects/delete-core",
-    "products/status-core", "products/queries", "projects/queries", "product-percentage-pay/queries", "changelog/queries", "calendar/core", "calendar/analytics", "tasks/completion-core", "tasks/actions", "warehouse/accounting", "warehouse/actions", "time/actions", "payments/service"];
+    "products/status-core", "products/queries", "projects/queries", "product-percentage-pay/queries", "changelog/queries", "calendar/core", "calendar/analytics", "tasks/completion-core", "tasks/actions", "warehouse/accounting", "warehouse/actions", "time/actions", "payments/service", "projects/core", "kp/proposal-core"];
   const effect = (name: string) => () => { const probe = current().mutation; if (probe) { probe.effects.push(name); throw Error("CI133_INJECTED_OPTIONAL_EFFECT"); } };
   const overrides = { "../src/auth": { auth: async () => current().unauthenticated ? null : ({ user: current().actor }) },
     "next/cache": { revalidatePath: effect("cache"), revalidateTag: effect("cache") },
@@ -261,6 +265,7 @@ before(async () => {
   completion = scope.load("../src/server/tasks/completion-core"); tasks = scope.load("../src/server/tasks/actions"); warehouseActions = scope.load("../src/server/warehouse/actions"); time = scope.load("../src/server/time/actions");
   frozenReference = scope.load("./helpers/project-materials-reference");
   payments = scope.load("../src/server/payments/service");
+  projectCore = scope.load("../src/server/projects/core"); proposals = scope.load("../src/server/kp/proposal-core");
 });
 after(async () => { if (fixture) try { scope?.restore(); await fixture.verifyProtected(); } finally { await fixture.dispose(); } });
 
@@ -556,6 +561,78 @@ test("draft/privacy-real-readers-joins-notifications-and-operational-denials", a
   assert.equal((await tx.product.findUniqueOrThrow({ where: { id: c.product.id } })).expectedPrice!.toFixed(2), "200.00");
   assert.equal((await tx.product.findUniqueOrThrow({ where: { id: c.product.id } })).quantity, 5);
 }));
+
+test("kp181/draft-per-item-native-relations-readers-and-revocation", async () => fixture.rollback(async (tx, rows) => {
+  const c = await tree(tx, rows, "kp181-draft", "LEAD", "DRAFT");
+  const sibling = await rows.product("kp181-crm-only", c.project.id, { status: "DRAFT", expectedPrice: "50", quantity: 2 });
+  const otherProject = await rows.project("kp181-other-project");
+  const proposal = await tx.commercialProposal.create({ data: { id: rows.id("kp181-proposal"), projectId: c.project.id, state: {} } });
+  const item = await tx.proposalItem.create({ data: { id: rows.id("kp181-item"), proposalId: proposal.id, productId: c.product.id, position: 1, state: {} } });
+  const task = await tx.task.create({ data: { projectId: c.project.id, productId: c.product.id, workId: c.work.id,
+    assigneeId: c.engineer.id, title: "Черновая задача КП181", quantity: "1" } });
+  const files = await Promise.all([true, false].map(direct => tx.file.create({ data: { projectId: c.project.id, productId: direct ? c.product.id : null,
+    taskId: direct ? null : task.id, fileName: "kp181.pdf", storedName: randomUUID(), mimeType: "application/pdf", size: 1, uploadedById: c.engineer.id } })));
+  const selected = await tx.product.findUniqueOrThrow({ where: { id: c.product.id }, include: productDraftAccessRelations });
+  for (const roles of [["MANAGER"], ["MANAGER", "ENGINEER"], ["MANAGER", "WORKER"], ["MANAGER", "ACCOUNTANT"],
+    ["ENGINEER"], ["ACCOUNTANT"], ["PROCUREMENT"], ["WORKER"], ["MOUNTER"], ["ADMIN"], ["DIRECTOR"]] as Role[][]) {
+    const actor = { ...c.engineer, roles }, allowed = roles.some(role => ["ADMIN", "DIRECTOR", "MANAGER"].includes(role));
+    assert.equal(visibility.canEditProductTechnicalBlock(actor, selected), allowed);
+    assert.deepEqual(await Promise.all([
+      tx.product.count({ where: { id: c.product.id, AND: [visibility.productVisibilityWhere(actor)] } }),
+      tx.task.count({ where: { id: task.id, AND: [visibility.taskVisibilityWhere(actor)] } }),
+      tx.work.count({ where: { id: c.work.id, AND: [visibility.workVisibilityWhere(actor)] } }),
+      tx.file.count({ where: { id: { in: files.map(file => file.id) }, AND: [visibility.fileVisibilityWhere(actor)] } }),
+    ]), [allowed ? 1 : 0, allowed ? 1 : 0, allowed ? 1 : 0, allowed ? 2 : 0]);
+    if (!roles.includes("MANAGER")) continue;
+    await run(actor, tx, async () => {
+      assert.equal((await productQueries.getProductFor(actor.id, roles, c.product.id))?.canAccessDraft, true);
+      assert.equal(await productQueries.getProductFor(actor.id, roles, sibling.id), null);
+      const list = await productQueries.listProducts(actor.id, roles, { activeOnly: false, projectId: c.project.id, statuses: ["DRAFT"], q: "Проверка169" });
+      assert.deepEqual(list.rows.map(row => row.id), [c.product.id]); assert.equal(list.total, 1);
+      const project = await projectQueries.getProjectFor(actor.id, roles, c.project.id); assert.ok(project);
+      assert.deepEqual(project.products.map(row => row.id), [c.product.id]);
+      const summary = (await projectQueries.listProjects(actor.id, roles, { activeOnly: false })).rows.find(row => row.id === c.project.id)!;
+      assert.equal(summary._count.products, 1); assert.equal(summary.totalPrice, 1100, "project finance still includes the hidden sibling");
+    });
+  }
+  assert.equal((await statuses.changeProductStatusTransaction(tx, c.manager, c.product.id, "PREPARATION")).ok, false);
+  const managerCount = () => tx.product.count({ where: { id: c.product.id, AND: [visibility.productVisibilityWhere(c.manager)] } });
+  for (const [revoke, restore] of [
+    [() => tx.proposalItem.update({ where: { id: item.id }, data: { deletedAt: new Date(0) } }), () => tx.proposalItem.update({ where: { id: item.id }, data: { deletedAt: null } })],
+    [() => tx.commercialProposal.update({ where: { id: proposal.id }, data: { deletedAt: new Date(0) } }), () => tx.commercialProposal.update({ where: { id: proposal.id }, data: { deletedAt: null } })],
+    [() => tx.commercialProposal.update({ where: { id: proposal.id }, data: { isArchive: true } }), () => tx.commercialProposal.update({ where: { id: proposal.id }, data: { isArchive: false } })],
+    [() => tx.project.update({ where: { id: c.project.id }, data: { deletedAt: new Date(0) } }), () => tx.project.update({ where: { id: c.project.id }, data: { deletedAt: null } })],
+  ]) {
+    await revoke(); assert.equal(await managerCount(), 0); await restore(); assert.equal(await managerCount(), 1);
+  }
+  // Межтабличное равенство для реляционного grant обязана защищать сама БД.
+  await rejectedSql(tx, () => tx.product.update({ where: { id: c.product.id }, data: { projectId: otherProject.id } }));
+  await rejectedSql(tx, () => tx.commercialProposal.update({ where: { id: proposal.id }, data: { projectId: otherProject.id } }));
+  const foreignProduct = await rows.product("kp181-foreign", otherProject.id, { status: "DRAFT" });
+  await rejectedSql(tx, () => tx.proposalItem.update({ where: { id: item.id }, data: { productId: foreignProduct.id } }));
+}));
+
+test("kp181/native-composition-stable-ids-active-number-swap-client-mirror-replay-and-rollback", async () => fixture.rollback(async (tx, rows) => {
+  const actor = actorOf(await rows.user("kp181-domain-manager", ["MANAGER"]));
+  const result = await run(actor, tx, () => verifyProposalCompositionNative(tx, actor, proposals));
+  assert.equal(result.sameIdRestore, true); assert.equal(result.rollbackNoNumberSpent, true); assert.equal(result.atomicFailureRollback, true);
+}));
+
+test("kp181/shared-project-quote-allocation-real-advisory-waiter-and-repeated-request", async () => {
+  const actor = actorOf(await fixture.user("kp181-number-manager", ["MANAGER"]));
+  const temporary = await fixture.db.client.create({ data: { id: fixture.id("kp181-number-temporary"), name: "Временный", phone: "KP181_SYNTHETIC" } });
+  const hooks = { environment: { PERO_KP_TEMP_CLIENT_ID: temporary.id }, applyPricing: async () => ({ changed: false }) };
+  const input = { operationId: randomUUID(), state: { items: [] } };
+  const [normal, quote] = await overlap(actor,
+    () => realTransaction(fixture.db)(tx => projectCore.createProjectInTransaction(tx, actor, { title: "КП181 обычный проект", clientId: temporary.id })),
+    () => realTransaction(fixture.peer)(tx => proposals.createProposalInTransaction(tx, actor, input, hooks)), true);
+  assert.equal(quote.result.number, String(normal.project.numberInt + 1));
+  const results = await Promise.all(Array.from({ length: 5 }, () => run(actor, fixture.db,
+    () => realTransaction(fixture.db)(tx => proposals.createProposalInTransaction(tx, actor, input, hooks)))));
+  assert.ok(results.every(result => result.result.repeated && result.result.proposalId === quote.result.proposalId));
+  assert.equal(await fixture.db.commercialProposal.count({ where: { projectId: quote.result.projectId } }), 1);
+  assert.equal(await fixture.db.domainEvent.count({ where: { actor: actor.id, type: "kp.created" } }), 1);
+});
 
 test("draft/create-contract-number-races-real-project-lock", async () => {
   const actors = await people(fixture, "draft-races");

@@ -64,6 +64,7 @@ export default async function ProductsPage({
         currency: product.project.currency,
         projectId: product.project.id,
         projectStage: product.project.stage,
+        canAccessDraft: product.canAccessDraft,
         projectNumber: product.project.number,
         projectTitle: product.project.title,
         clientId: product.project.client.id,

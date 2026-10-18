@@ -15,3 +15,11 @@ const product={id:'p',number:'1.1',title:'Подготовленное изде�
 function check(html:string){const prep=html.indexOf('>Подготовка<'),design=html.indexOf('>Проектирование<');assert.ok(prep>=0&&design>prep);const card=html.indexOf('Подготовленное изделие');assert.ok(card>prep&&card<design,'PREPARATION product must be in its first column');}
 test('project mini kanban places preparation and its product before design',()=>{check(renderToStaticMarkup(React.createElement(ProductsTab,{projectId:'project',currency:'BYN',initialProducts:[product],canManage:true,actorRoles:['MANAGER'],actorUserId:'manager',showAmount:true,engineerOptions:[]})));});
 test('global kanban uses the same first preparation column and product',()=>{check(renderToStaticMarkup(React.createElement(ProductsKanban,{initialProducts:[product],canManage:true,actorRoles:['MANAGER'],showAmount:true})));});
+
+test('both boards show the server-granted proposal draft and filter an unrelated sibling',()=>{
+ const products=[{...product,id:'linked',title:'Черновик из КП',status:'DRAFT' as const,canAccessDraft:true},{...product,id:'sibling',title:'Чужой черновик',status:'DRAFT' as const}];
+ const props={projectId:'project',projectStage:'LEAD' as const,currency:'BYN',initialProducts:products,canManage:true,actorRoles:['MANAGER' as const],actorUserId:'manager',showAmount:true,engineerOptions:[]};
+ for(const html of [renderToStaticMarkup(React.createElement(ProductsTab,props)),renderToStaticMarkup(React.createElement(ProductsKanban,props))]){
+  assert.match(html,/Черновики/);assert.match(html,/Черновик из КП/);assert.doesNotMatch(html,/Чужой черновик/);assert.doesNotMatch(html,/aria-label="Перетащить /);
+ }
+});

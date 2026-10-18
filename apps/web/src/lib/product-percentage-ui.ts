@@ -43,11 +43,13 @@ export function productStatusTargets(roles: readonly Role[], context: {
   participant: boolean;
   hasB3d: boolean;
   noModel: boolean;
+  canAccessDraft?: boolean;
 }): ProductStatus[] {
-  if (!visibleProductStatuses(roles).some(status => status.id === context.from) || isProductDraftLocked(context.from, context.projectStage)) return [];
+  const visibleStatuses = visibleProductStatuses(roles, context.canAccessDraft);
+  if (!visibleStatuses.some(status => status.id === context.from) || isProductDraftLocked(context.from, context.projectStage)) return [];
   if (MANAGER_ROLES.some((role) => roles.includes(role)))
-    return visibleProductStatuses(roles).map((status) => status.id);
-  return visibleProductStatuses(roles).map((status) => status.id).filter((to) =>
+    return visibleStatuses.map((status) => status.id);
+  return visibleStatuses.map((status) => status.id).filter((to) =>
     to !== context.from && decideProductPercentageStatus([...roles], { ...context, to }).allowed,
   );
 }
@@ -57,10 +59,12 @@ export function currentProductStatusTargets(roles: readonly Role[], product: {
   status: ProductStatus;
   engineerId: string | null;
   projectStage?: ProjectStage;
+  canAccessDraft?: boolean;
 }, actorUserId?: string): ProductStatus[] {
   return productStatusTargets(roles, {
     from: product.status,
     projectStage: product.projectStage,
+    canAccessDraft: product.canAccessDraft,
     assignedEngineer: Boolean(actorUserId) && product.engineerId === actorUserId,
     participant: false,
     hasB3d: false,

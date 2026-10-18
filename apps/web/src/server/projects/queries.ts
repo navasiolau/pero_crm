@@ -1,6 +1,7 @@
 import {maskProductionRead,maskProductionWorkRead,maskTaskPaymentRead} from "@/server/access/production-read-projection";
 import {activePaymentWhere} from '@/server/payments/active-records';
-import { canViewProductDrafts } from "@/lib/product-drafts";
+import { canAccessProductDraft, canViewProductDrafts } from "@/lib/product-drafts";
+import { productDraftAccessRelations } from "@/server/access/product-draft-context";
 import { liveProductWhere } from "@/server/access/live-entities";
 import {canViewProductMoney} from "@/lib/product-financial-access";
 import { projectTotal as calculateProjectTotal } from "@/lib/product-quantity";
@@ -283,6 +284,7 @@ export async function getProjectFor(
       products: {
         where: productVisibilityWhere(actor),
         include: {
+          ...productDraftAccessRelations,
           engineer: { select: { id: true, name: true } },
           files: { where: { AND:[fileVisibilityWhere(actor),{ fileName: { endsWith: ".b3d", mode: "insensitive" } }] }, select: { id: true }, take: 1 },
           sketchFile: productSketchProjection(actor),
@@ -325,7 +327,7 @@ export async function getProjectFor(
   });
   if (!project) return null;
   return scopedProjectAmounts({ ...project,tasks:maskTaskPaymentRead(actor,project.tasks), works:await maskProductionWorkRead(prisma,actor,project.works),communications: project.communications ?? [], products: (await maskProductionRead(prisma,actor,project.products)).map((product) => ({
-    ...product, statusHistory: product.statusHistory ?? [], hasB3d: product.files.length > 0,
+    ...product, canAccessDraft: canAccessProductDraft(actor.roles, product), statusHistory: product.statusHistory ?? [], hasB3d: product.files.length > 0,
     isEngineeringParticipant: product.percentageConfigs.some((config) => config.participants.length > 0) ||
       actor.engineeringParticipantProductIds?.includes(product.id) === true,
   })) }, actor);

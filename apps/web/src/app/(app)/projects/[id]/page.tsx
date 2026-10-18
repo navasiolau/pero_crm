@@ -236,6 +236,7 @@ export default async function ProjectPage({
               number: product.number,
               title: product.title,
               status: product.status,
+              canAccessDraft: product.canAccessDraft,
               statusChangedAt: product.statusChangedAt.toISOString(),
               expectedPrice: product.expectedPrice?.toString() ?? null,
               quantity: product.quantity,

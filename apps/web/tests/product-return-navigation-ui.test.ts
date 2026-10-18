@@ -29,7 +29,7 @@ test('real Header global back retains filter/page and contextual accessible labe
 test('real Header rejects forged parent and uses Project Products fallback',()=>{const html=header('/projects/foreign?tab=products');assert.match(html,/href="\/projects\/parent\?tab=products"/);assert.match(html,/Назад к изделиям проекта/);});
 test('actual global table mobile link and row callback carry identical canonical context',()=>{
  const row={...product,statusChangedAt:new Date(0).toISOString(),currency:'BYN',projectNumber:'205',projectTitle:'Project',clientId:'c',clientName:'Client',engineerName:null,isEngineeringParticipant:false,hasB3d:false,noModel:false,sketchFile:null};
- const html=renderToStaticMarkup(React.createElement(ProductsTable,{products:[row],total:1,page:3,pageSize:10,showAmount:false}));const expected=productDetailHref(row.number,globalProductsHref('view=table&q=filter&page=3'));assert.ok(html.includes(expected));pushes.length=0;rowOpen!(row);assert.deepEqual(pushes,[expected]);
+ const html=renderToStaticMarkup(React.createElement(ProductsTable,{products:[row],total:1,page:3,pageSize:10,showAmount:false}));const expected=productDetailHref(row.id,globalProductsHref('view=table&q=filter&page=3'));assert.ok(html.includes(expected));pushes.length=0;rowOpen!(row);assert.deepEqual(pushes,[expected]);
 });
 
 // Hook cells изолируют React lifecycle, но исполняется реальный production DeleteButton.

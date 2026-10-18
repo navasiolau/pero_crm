@@ -95,7 +95,7 @@ async function assertClickNavigation(page,target,expectedReturnTo,expect,kind){
  if(result.pushes.length===0)fail('NAVIGATION_MISSING','click-navigation',{ready:true,trusted:true,kind});
  if(result.pushes.length!==1)fail('DUPLICATE_NAVIGATION','click-navigation',{ready:true,trusted:true,kind});
  const url=new URL(result.pushes[0],'http://qa160.invalid');
- if(url.pathname!=='/products/160.1'||url.searchParams.get('returnTo')!==expectedReturnTo)fail('TARGET_MISMATCH','click-navigation',{ready:true,trusted:true,kind});
+ if(url.pathname!=='/products/qa160-a'||url.searchParams.get('returnTo')!==expectedReturnTo)fail('TARGET_MISMATCH','click-navigation',{ready:true,trusted:true,kind});
  assert.deepEqual([...url.searchParams.keys()],['returnTo']);assert.deepEqual(result.unexpected,[],'UNEXPECTED_CALLBACK');
  await expect(page.getByRole('dialog')).toHaveCount(0);
 }
