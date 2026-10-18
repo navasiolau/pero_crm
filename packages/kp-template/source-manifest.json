@@ -1,0 +1,55 @@
+{
+  "sourceDirectory": "D:/Projects/pero_kp",
+  "sourceCommit": "6565345eeba2846981ac1ec4574659e58d7149ad",
+  "capturedAt": "2026-10-18",
+  "files": {
+    "app/index.html": {
+      "sha256": "15322c778e9534b0d43458cad21ec1f4ae84a4e0f2dedfc70d69e39c8dbc63f7",
+      "bytes": 17057
+    },
+    "public/css/app.css": {
+      "sha256": "152d7332fbfe23dfad4a98fb1e85bbf069c7825d66721bdeb125f5724f054616",
+      "bytes": 41300
+    },
+    "public/css/contract.css": {
+      "sha256": "3eb4e5d592b583c30482ca471bb49e39ab6421928a2ae23a019f591193584db3",
+      "bytes": 9316
+    },
+    "public/js/app.js": {
+      "sha256": "0b74235adf0b3dc91cc5c8308d91743db08f617550d9830ae487d733525e04d5",
+      "bytes": 43575
+    },
+    "public/js/sheet-render.js": {
+      "sha256": "35cd940213e6b76040c541bac9019fb7c667019add47a2e7c829d357664334c4",
+      "bytes": 49308
+    },
+    "public/js/contract-model.js": {
+      "sha256": "3bd734d65e5804cf0892f137c7305ae63db60df265ebe1110b354535aae2b7f7",
+      "bytes": 17622
+    },
+    "public/js/contract-editor.js": {
+      "sha256": "75aa2b6f1414c416492d21c3658908b0e9e7917151620ab484908c4d1ea0b628",
+      "bytes": 35003
+    },
+    "lib/kp-browser.js": {
+      "sha256": "a7f7aeb4a017ded57204ed89f216e84682d87bb990c5202689fb18c4ab165bb2",
+      "bytes": 2880
+    },
+    "lib/contract-docx.js": {
+      "sha256": "ff23382c87c0f79c78b728f8cc283aa5942518fdf371dd822a6b037c7f2cc469",
+      "bytes": 9703
+    },
+    "templates/contracts/furniture.docx": {
+      "sha256": "e442f86bbd558a0f8ddee9c06b4c31e624c33d68f161fc8ff7aed74eb387e448",
+      "bytes": 29189
+    },
+    "templates/contracts/contractors.json": {
+      "sha256": "8fd487c81710a4822b2777f881c6108b4a846dcd438eeb8ad1ba66c025e1a2ac",
+      "bytes": 1884
+    },
+    "public/icons/apple-touch-icon.png": {
+      "sha256": "11647d093d6af9581b2c06827fd2bee7b262dd2d284c215a0d24164d4cb5bd97",
+      "bytes": 5583
+    }
+  }
+}

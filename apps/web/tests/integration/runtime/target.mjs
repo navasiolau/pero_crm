@@ -9,6 +9,11 @@ export const MINIO_SOURCE_SHA256 = '8819e3e7817e46b7b3798f8f200ead208562e571563c
 export const MINIO_GO_IMAGE = 'golang:1.24.2-alpine@sha256:7772cb5322baa875edd74705556d08f0eeca7b9c4b5367754ce3f2f00041ccee';
 export const POSTGRES_IMAGE = 'postgres:17-alpine';
 export const REPOSITORY = 'navasiolau/pero_crm';
+// Бюджеты отсчитываются от начала consumer job, а не всего workflow.
+export const CI_ARTIFACT_BUDGETS = Object.freeze({
+  types: Object.freeze({ pollMs: 18 * 60_000, consumerMs: 20 * 60_000 }),
+  'bot-dist': Object.freeze({ pollMs: 3 * 60_000, consumerMs: 23 * 60_000 }),
+});
 
 /** @typedef {{runId:string,attempt:string,postgresId:string,network:string,minioName:string,minioImage:string,
  * databaseUrl:string,baseUrl:string,faultBaseUrl:string,faultRole:string,webName:string,faultName:string,webImage:string,authSecret:string,
@@ -234,7 +239,8 @@ export async function receiveCiArtifact(purpose, env = process.env) {
   requireCi(/^[a-f0-9]{40}$/.test(apiHead ?? ''), 'producer-api-head');
   requireCi(types || (env.GITHUB_EVENT_NAME === 'push' && ['main', 'staging'].includes(env.GITHUB_REF_NAME)), 'producer-event');
   const artifactName = `${purpose}-${identity.runId}-${identity.attempt}-${identity.revision}`;
-  let deadline = Date.now() + (types ? 1080000 : 180000), producer;
+  const budget = CI_ARTIFACT_BUDGETS[purpose];
+  let deadline = Date.now() + budget.pollMs, producer;
   async function api(resource, raw = false) {
     const remaining = deadline - Date.now(); requireCi(remaining > 0, 'producer-timeout');
     const response = await fetch(`https://api.github.com/repos/${REPOSITORY}/${resource}`, {
@@ -257,7 +263,7 @@ export async function receiveCiArtifact(purpose, env = process.env) {
     requireCi(consumer.length === 1 && Number.isFinite(Date.parse(consumer[0].started_at)) &&
       consumer[0].run_id === Number(identity.runId) && consumer[0].run_attempt === Number(identity.attempt) &&
       consumer[0].head_sha === apiHead, 'consumer-start');
-    deadline = Math.min(deadline, Date.parse(consumer[0].started_at) + (types ? 1200000 : 1380000));
+    deadline = Math.min(deadline, Date.parse(consumer[0].started_at) + budget.consumerMs);
     const matches = listed.jobs.filter(item => item.name === (types ? 'native-tests' : 'unit-tests (backend)'));
     requireCi(matches.length <= 1, 'producer-unique');
     const job = matches[0];

@@ -35,7 +35,13 @@ const nextConfig: NextConfig = {
       }
     : {}),
   // Нативный модуль argon2 не бандлим — нужен .node-бинарник в standalone-сборке
-  serverExternalPackages: ["@node-rs/argon2", "zod"],
+  serverExternalPackages: ["@node-rs/argon2", "zod", "@pero/kp-template"],
+  outputFileTracingIncludes: {
+    "/kp": ["../../packages/kp-template/assets/**/*", "../../packages/kp-template/*.json"],
+    "/kp/**": ["../../packages/kp-template/assets/**/*", "../../packages/kp-template/*.json"],
+    "/api/kp/**": ["../../packages/kp-template/assets/**/*", "../../packages/kp-template/*.json"],
+    "/api/v1/kp/**": ["../../packages/kp-template/assets/**/*", "../../packages/kp-template/*.json"],
+  },
   // Плагины и SDK — TS-пакеты монорепо без отдельной сборки (§14: общая сборка)
   transpilePackages: [
     "@pero/plugin-sdk",

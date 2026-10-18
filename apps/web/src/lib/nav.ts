@@ -4,6 +4,7 @@ import {
   CalendarDays,
   ClipboardCheck,
   FolderKanban,
+  FileText,
   History,
   LayoutDashboard,
   ListChecks,
@@ -68,16 +69,18 @@ export const navItems: NavItem[] = [
 // Видимые пункты = объединение по всем ролям пользователя
 // (комбинированные роли: менеджер+инженер видит оба набора разделов).
 const planItem: NavItem = {href: "/plan", label: "План", icon: CalendarDays, roles: ALL_ROLES, group: "main"};
-export function navItemsForRole(roles: Role[], calendarEnabled = false): NavItem[] {
+const kpItem: NavItem = {href: "/kp", label: "КП и договоры", icon: FileText, roles: MANAGER_ROLES, group: "manage"};
+export function navItemsForRole(roles: Role[], calendarEnabled = false, kpEnabled = false): NavItem[] {
   const visible = navItems.filter((item) =>
     item.href === "/prices" ? canReadPrices(roles) : item.roles.some((role) => roles.includes(role)),
   );
   if (calendarEnabled) visible.splice(visible.findIndex(item => item.href === "/") + 1, 0, planItem);
+  if (kpEnabled && kpItem.roles.some(role => roles.includes(role))) visible.splice(visible.findIndex(item => item.href === "/projects") + 1, 0, kpItem);
   return visible;
 }
 
 export function sectionTitle(pathname: string): string {
-  const match = [...navItems, planItem].find((item) =>
+  const match = [...navItems, planItem, kpItem].find((item) =>
     item.href === "/" ? pathname === "/" : pathname.startsWith(item.href),
   );
   return match?.label ?? "PERO CRM";
