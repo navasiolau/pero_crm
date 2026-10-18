@@ -36,7 +36,7 @@ test("media.sketch: настоящие upload, receipts, CAS, аудит и exac
     files: await f.db.file.findMany({ where: { projectId: project.id }, orderBy: { id: "asc" } }),
     logs: await f.db.changeLog.findMany({ where: { entityId: { in: [product.id, ...history] } }, orderBy: { id: "asc" } }),
     events: await f.db.domainEvent.findMany({ where: { type: "file.sketch-obsolete", payload: { path: ["productId"], equals: product.id } }, orderBy: { id: "asc" } }),
-    notifications: await f.db.notification.findMany({ where: { type: "file.added", link: `/products/${product.number}` }, orderBy: { id: "asc" } }),
+    notifications: await f.db.notification.findMany({ where: { type: "file.added", link: `/products/${product.id}` }, orderBy: { id: "asc" } }),
     versions: await f.versions(project.id),
   });
   const expectedRecipients = async (actorId: string) => {
@@ -45,7 +45,7 @@ test("media.sketch: настоящие upload, receipts, CAS, аудит и exac
     return office.map(row => row.id).filter(id => id !== actorId && !off.some(row => row.userId === id)).sort();
   };
   const assertNotifications = async (fileName: string, actorId: string) => {
-    const rows = await f.db.notification.findMany({ where: { type: "file.added", body: fileName, link: `/products/${product.number}` } });
+    const rows = await f.db.notification.findMany({ where: { type: "file.added", body: fileName, link: `/products/${product.id}` } });
     assert.ok(rows.length <= 200); assert.deepEqual(rows.map(row => row.userId).sort(), await expectedRecipients(actorId));
     assert.ok(rows.every(row => ![disabled.id, optedOut.id, foreign.id, participant.id].includes(row.userId)));
   };
