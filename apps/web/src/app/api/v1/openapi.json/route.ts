@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { kpApiPaths, kpApiSchemas } from "@/server/kp/api-openapi";
 
 // GET /api/v1/openapi.json — OpenAPI-описание публичного API (§14).
 const document = {
@@ -15,6 +16,7 @@ const document = {
       bearerAuth: { type: "http", scheme: "bearer" },
     },
     schemas: {
+      ...kpApiSchemas,
       Error: {
         type: "object",
         properties: { error: { type: "string" } },
@@ -48,6 +50,7 @@ const document = {
   },
   security: [{ bearerAuth: [] }],
   paths: {
+    ...kpApiPaths,
     "/": {
       get: {
         summary: "Информация о сервисе",
