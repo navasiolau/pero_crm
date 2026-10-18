@@ -58,10 +58,25 @@ test('CI cleanup requires the exact owned ID, image and private bounded containe
   const { verifyOwnedSmokeContainer } = await import('../ci/pipeline.mjs');
   const imageId = 'sha256:' + '3'.repeat(64), container = { Id: '4'.repeat(64), Name: '/pero-kp-184-1-smoke', Image: imageId,
     Config: { Image: imageId, User: 'node', Labels: { 'pero.ci.repository': identity.repository, 'pero.ci.run': '184', 'pero.ci.attempt': '1', 'pero.ci.service': 'kp-renderer-smoke' } },
-    HostConfig: { NetworkMode: 'none', ReadonlyRootfs: true, Memory: 1536 * 1024 * 1024, NanoCpus: 1_000_000_000, PidsLimit: 128, PortBindings: {}, Tmpfs: { '/tmp': 'rw,size=512m' } } };
+    HostConfig: { NetworkMode: 'none', ReadonlyRootfs: true, Memory: 1536 * 1024 * 1024, NanoCpus: 1_000_000_000, PidsLimit: 128, PortBindings: {}, Tmpfs: { '/tmp': 'rw,nosuid,exec,size=512m,mode=1777' } } };
   verifyOwnedSmokeContainer(container, identity, imageId);
   assert.throws(() => verifyOwnedSmokeContainer(container, { ...identity, runId: '185' }, imageId), /container-image|container-owner/);
   assert.throws(() => verifyOwnedSmokeContainer({ ...container, HostConfig: { ...container.HostConfig, NetworkMode: 'bridge' } }, identity, imageId), /bounds/);
+  for (const options of ['rw,nosuid,size=512m,mode=1777', 'rw,nosuid,noexec,size=512m,mode=1777',
+    'rw,nosuid,exec,noexec,size=512m,mode=1777', 'rw,nosuid,exec,size=1g,mode=1777', 'rw,nosuid,exec,size=512m,mode=0777']) {
+    assert.throws(() => verifyOwnedSmokeContainer({ ...container, HostConfig: { ...container.HostConfig, Tmpfs: { '/tmp': options } } }, identity, imageId), /kp-smoke-tmpfs/);
+  }
+  verifyOwnedSmokeContainer({ ...container, HostConfig: { ...container.HostConfig, Tmpfs: { '/tmp': 'mode=1777,exec,size=512m,rw,nosuid' } } }, identity, imageId);
+});
+
+test('Chromium preflight projects actual mount noexec and executable file mode without raw mount paths', () => {
+  const { chromiumMountFacts } = require('../ci/smoke.cjs');
+  const line = flags => `99 88 0:77 / /tmp ${flags} - tmpfs tmpfs rw,size=524288k\n`;
+  assert.deepEqual(chromiumMountFacts(line('rw,nosuid,nodev,noexec,relatime'), 0o100700),
+    { filesystem: 'tmpfs', flags: ['rw', 'nosuid', 'nodev', 'noexec'], fileMode: '0700' });
+  assert.deepEqual(chromiumMountFacts(line('rw,nosuid,nodev,relatime'), 0o100755),
+    { filesystem: 'tmpfs', flags: ['rw', 'nosuid', 'nodev', 'exec'], fileMode: '0755' });
+  assert.equal(chromiumMountFacts('99 88 0:77 / /var/tmp rw - tmpfs tmpfs rw', 0o100700).filesystem, 'missing');
 });
 
 test('smoke diagnostics retain phase and actionable codes while excluding assertion payloads and untrusted bodies', async () => {
@@ -88,7 +103,7 @@ function ownedContainer(imageId) {
   return { Id: '4'.repeat(64), Name: '/pero-kp-184-1-smoke', Image: imageId,
     Config: { Image: imageId, User: 'node', Env: ['AUTH_SECRET=PRIVATE_ENV'], Labels: { 'pero.ci.repository': identity.repository,
       'pero.ci.run': '184', 'pero.ci.attempt': '1', 'pero.ci.service': 'kp-renderer-smoke' } },
-    HostConfig: { NetworkMode: 'none', ReadonlyRootfs: true, Memory: 1536 * 1024 * 1024, NanoCpus: 1_000_000_000, PidsLimit: 128, PortBindings: {}, Tmpfs: { '/tmp': 'rw,size=512m' } },
+    HostConfig: { NetworkMode: 'none', ReadonlyRootfs: true, Memory: 1536 * 1024 * 1024, NanoCpus: 1_000_000_000, PidsLimit: 128, PortBindings: {}, Tmpfs: { '/tmp': 'rw,nosuid,exec,size=512m,mode=1777' } },
     State: { Status: 'exited', Running: false, OOMKilled: true, ExitCode: 137, Error: 'PRIVATE_STATE_ERROR' } };
 }
 

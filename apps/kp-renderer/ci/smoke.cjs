@@ -1,13 +1,21 @@
 'use strict';
 // Исполняется только внутри испытанного OCI: никаких DB/S3, внешней сети или override браузера.
 const assert = require('node:assert/strict');
-const { readFileSync } = require('node:fs');
+const { readFileSync, statSync, accessSync, constants } = require('node:fs');
 const { createHash } = require('node:crypto');
 const { createRequire } = require('node:module');
 const path = require('node:path');
 const { once } = require('node:events');
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAAEUlEQVQImWM4tKTxPwgzwBgAZ0ILmdrs+PUAAAAASUVORK5CYII=', 'base64');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
+
+function chromiumMountFacts(mountinfo, fileMode) {
+  const row = mountinfo.split('\n').map(line => line.split(' ')).find(fields => fields[4] === '/tmp');
+  const flags = new Set(row?.[5]?.split(',') ?? []), separator = row?.indexOf('-') ?? -1;
+  return { filesystem: !row ? 'missing' : separator >= 0 && row[separator + 1] === 'tmpfs' ? 'tmpfs' : 'other',
+    flags: [flags.has('rw') ? 'rw' : 'ro', flags.has('nosuid') ? 'nosuid' : 'suid', flags.has('nodev') ? 'nodev' : 'dev', flags.has('noexec') ? 'noexec' : 'exec'],
+    fileMode: '0' + (fileMode & 0o777).toString(8).padStart(3, '0') };
+}
 
 // Не сериализуем Error/message/stack: AssertionError может содержать весь PDF/PNG.
 function failureDetails(error) {
@@ -89,6 +97,10 @@ async function main(diagnostics) {
   const chromiumVersion = JSON.parse(readFileSync(path.resolve(path.dirname(require.resolve('@sparticuz/chromium')), '../../package.json'), 'utf8')).version;
   assert.equal(chromiumVersion, identity.chromium); assert.equal(require('puppeteer-core/package.json').version, identity.puppeteer);
   diagnostics.phase('chromium-executable'); const executablePath = await chromium.executablePath();
+  const executable = statSync(executablePath), mount = chromiumMountFacts(readFileSync('/proc/self/mountinfo', 'utf8'), executable.mode);
+  diagnostics.phase(['chromium', mount.filesystem, ...mount.flags, 'mode', mount.fileMode].join('-'));
+  assert.equal(mount.filesystem, 'tmpfs'); assert.ok(!mount.flags.includes('noexec')); assert.ok(executable.isFile());
+  diagnostics.phase('chromium-access'); accessSync(executablePath, constants.X_OK);
   diagnostics.phase('chromium-launch');
   const preflight = await puppeteer.launch({ executablePath, args: chromium.args, headless: true });
   let browserVersion;
@@ -163,7 +175,7 @@ async function main(diagnostics) {
       appendixSha256: actual.pagesBase64.map(page => hash(Buffer.from(page, 'base64'))) };
   } finally { await new Promise(resolve => server.close(resolve)); }
 }
-module.exports = { createDiagnostics, failureDetails, logSummary, rendererHttpError };
+module.exports = { chromiumMountFacts, createDiagnostics, failureDetails, logSummary, rendererHttpError };
 if (require.main === module) {
   const diagnostics = createDiagnostics();
   const timer = setTimeout(() => { diagnostics.failure(Object.assign(new Error(), { code: 'KP_CI_SMOKE_TIMEOUT' })); process.exit(1); }, 150_000);

@@ -25,6 +25,9 @@ export function verifyOwnedSmokeContainer(container, identity, imageId) {
   for (const [key, value] of Object.entries({ 'pero.ci.repository': identity.repository, 'pero.ci.run': identity.runId,
     'pero.ci.attempt': identity.attempt, 'pero.ci.service': 'kp-renderer-smoke' })) requireCi(container.Config.Labels?.[key] === value, 'kp-smoke-container-owner');
   const host = container.HostConfig;
+  const tmpfs = typeof host?.Tmpfs?.['/tmp'] === 'string' ? host.Tmpfs['/tmp'].split(',') : [];
+  requireCi(tmpfs.length === 5 && ['rw', 'nosuid', 'exec', 'size=512m', 'mode=1777'].every(flag => tmpfs.includes(flag)) &&
+    Object.keys(host.Tmpfs).length === 1, 'kp-smoke-tmpfs');
   requireCi(host?.NetworkMode === 'none' && host.ReadonlyRootfs === true && host.Memory === 1536 * 1024 * 1024 &&
     host.NanoCpus === 1_000_000_000 && host.PidsLimit === 128 && Object.keys(host.PortBindings ?? {}).length === 0 &&
     !!host.Tmpfs?.['/tmp'] && !host.Binds?.length && !host.Mounts?.length &&
@@ -105,7 +108,7 @@ async function testImage() {
   const name = `pero-kp-${identity.runId}-${identity.attempt}-smoke`;
   phase('container-name-verify');
   requireCi(!docker(['ps', '-aq', '--filter', `name=^/${name}$`]), 'kp-smoke-already-exists');
-  const args = ['create', '--name', name, '--network', 'none', '--read-only', '--tmpfs', '/tmp:rw,nosuid,size=512m,mode=1777',
+  const args = ['create', '--name', name, '--network', 'none', '--read-only', '--tmpfs', '/tmp:rw,nosuid,exec,size=512m,mode=1777',
     '--memory', '1536m', '--cpus', '1', '--pids-limit', '128', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges',
     '--env', `PERO_KP_CI_REVISION=${identity.revision}`, '--entrypoint', 'node'];
   for (const [key, value] of Object.entries({ 'pero.ci.repository': identity.repository, 'pero.ci.run': identity.runId,
