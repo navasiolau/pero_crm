@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="ru">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Перо Лайв — генератор коммерческих предложений.">
+    <title>Перо Лайв · Генератор КП</title>
+    <link rel="icon"
+        href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='5' fill='%230A0A0A'/%3E%3C/svg%3E">
+    <link rel="manifest" href="/manifest.webmanifest">
+    <meta name="theme-color" content="#0A0A0A">
+    <meta name="deploy-id" content="%DEPLOY_ID%">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="Перо КП">
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@200;300;400;600;700&family=JetBrains+Mono:wght@400;500;700&family=Spectral:wght@500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/app.css">
+    <link rel="stylesheet" href="/css/contract.css">
+
+</head>
+
+<body>
+
+    <div class="sf-wrap sfw1" data-depth="22"><svg class="skyfeather" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M20.24 12.24a6 6 0 0 0-8.49-8.49L5 10.5V19h8.5z" />
+            <line x1="16" y1="8" x2="2" y2="22" />
+            <line x1="17.5" y1="15" x2="9" y2="15" />
+        </svg></div>
+    <div class="sf-wrap sfw2" data-depth="-14"><svg class="skyfeather" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M20.24 12.24a6 6 0 0 0-8.49-8.49L5 10.5V19h8.5z" />
+            <line x1="16" y1="8" x2="2" y2="22" />
+            <line x1="17.5" y1="15" x2="9" y2="15" />
+        </svg></div>
+    <div class="sf-wrap sfw3" data-depth="16"><svg class="skyfeather" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M20.24 12.24a6 6 0 0 0-8.49-8.49L5 10.5V19h8.5z" />
+            <line x1="16" y1="8" x2="2" y2="22" />
+            <line x1="17.5" y1="15" x2="9" y2="15" />
+        </svg></div>
+    <div class="sf-wrap sfw4" data-depth="-20"><svg class="skyfeather" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M20.24 12.24a6 6 0 0 0-8.49-8.49L5 10.5V19h8.5z" />
+            <line x1="16" y1="8" x2="2" y2="22" />
+            <line x1="17.5" y1="15" x2="9" y2="15" />
+        </svg></div>
+    <div class="sf-wrap sfw5" data-depth="12"><svg class="skyfeather" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M20.24 12.24a6 6 0 0 0-8.49-8.49L5 10.5V19h8.5z" />
+            <line x1="16" y1="8" x2="2" y2="22" />
+            <line x1="17.5" y1="15" x2="9" y2="15" />
+        </svg></div>
+
+    <header class="topbar">
+        <div class="brand">
+            <span class="brand-logo" id="brandLogo"></span>
+            <div>
+                <div class="brand-name">Перо Лайв</div>
+                <div class="brand-sub">Генератор коммерческих предложений</div>
+            </div>
+        </div>
+        <div class="top-spacer"></div>
+        <span class="chip"><span class="dot"></span>live-предпросмотр</span>
+        <span class="chip" id="pagesChip">—</span>
+        <div class="zoom">
+            <button class="zbtn js-zout" title="Уменьшить на 5%">−</button>
+            <span class="zval" id="zval">100%</span>
+            <button class="zbtn js-zin" title="Увеличить на 5%">＋</button>
+        </div>
+        <div class="export-actions">
+            <button class="btn btn-primary js-pdf">Сгенерировать PDF</button>
+            <button class="btn btn-contract js-contract" type="button">Сгенерировать договор</button>
+        </div>
+    </header>
+
+    <nav class="view-tabs" id="viewTabs" aria-label="Переключение вида">
+        <button class="view-tab on" data-view="editor" type="button">Заполнение</button>
+        <button class="view-tab" data-view="sheet" type="button">Предпросмотр</button>
+    </nav>
+
+    <main class="app">
+        <aside class="editor">
+            <div class="editor-scroll">
+
+                <section class="sec">
+                    <div class="sec-head"><span class="sec-num">01</span><span class="sec-title">Шапка
+                            организации</span><span class="sec-line"></span></div>
+                    <p class="sec-note">переносится из КП в КП без изменений</p>
+                    <div class="f"><label class="f-label">Название</label><input data-path="header.company"
+                            value="Перо Лайв"></div>
+                    <div class="f"><label class="f-label">Слоган</label><input data-path="header.tagline"
+                            value="Мебель по индивидуальным заказам. Легкость во всём"></div>
+                    <div class="f-grid2">
+                        <div class="f"><label class="f-label">Телефон</label><input data-path="header.phone"
+                                value="+7 919 763-13-73"></div>
+                        <div class="f"><label class="f-label">Телефон 2 · WhatsApp/Telegram/Viber</label><input
+                                data-path="header.phone2" value="+375 (29) 798-51-09"></div>
+                    </div>
+                    <div class="f-grid2">
+                        <div class="f"><label class="f-label">E-mail</label><input data-path="header.email"
+                                value="livepero@gmail.com"></div>
+                        <div class="f"><label class="f-label">Сайт</label><input data-path="header.site"
+                                value="pero.by"></div>
+                    </div>
+                    <div class="f"><label class="f-label">Instagram</label><input data-path="header.instagram"
+                            value="@Pero_mebel"></div>
+                </section>
+
+                <section class="sec">
+                    <div class="sec-head"><span class="sec-num">02</span><span class="sec-title">Заказ, клиент,
+                            условия</span><span class="sec-line"></span></div>
+                    <div class="f-grid2">
+                        <div class="f"><label class="f-label">№ предложения</label><input data-path="order.number"
+                                value="196"></div>
+                        <div class="f"><label class="f-label">Дата</label><input data-path="order.date"
+                                value="28.07.2026"></div>
+                    </div>
+                    <div class="f-grid2">
+                        <div class="f"><label class="f-label">Действительно до</label><input
+                                data-path="order.validUntil" value="11.08.2026"></div>
+                        <div class="f"><label class="f-label">Проект</label><input data-path="order.project"
+                                value="Меблировка квартиры"></div>
+                    </div>
+                    <div class="f-grid2">
+                        <div class="f"><label class="f-label">Клиент</label><input data-path="client.name"
+                                value="Екатерина"></div>
+                        <div class="f"><label class="f-label">Контакт клиента</label><input data-path="client.contact"
+                                value=""></div>
+                    </div>
+                    <div class="f-grid2">
+                        <div class="f">
+                            <label class="f-label">Скидка</label>
+                            <div class="disc-wrap">
+                                <input type="number" min="0" step="1" data-path="discount" value="0">
+                                <button class="disc-toggle" id="discToggle" type="button"
+                                    title="Переключить: проценты / сумма">%</button>
+                            </div>
+                        </div>
+                        <div class="f"><label class="f-label">Валюта</label>
+                            <select data-path="currency">
+                                <option value="$">$ (USD)</option>
+                                <option value="BYN">BYN (белорусский рубль)</option>
+                                <option value="₽">₽ (RUB)</option>
+                                <option value="€">€ (EUR)</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="f"><label class="f-label">Вводный текст</label><textarea rows="3"
+                            data-path="intro">Благодарим за обращение. Ниже — расчёт по вашему проекту. Утверждённый вариант визуализации прикрепим после согласования.</textarea>
+                    </div>
+                    <div class="f"><label class="f-label">Пояснение в блоке «Итого»</label><input data-path="totalNote" value="включая доставку и монтаж" title="Пояснение в блоке «Итого»"></div>
+                    <div class="f"><label class="f-label">Условия оплаты (в блоке «Итого»)</label><input
+                            data-path="payment" value="Оплата: предоплата 70 %, остаток — после монтажа"></div>
+                </section>
+
+                <section class="sec">
+                    <div class="sec-head"><span class="sec-num">03</span><span class="sec-title">Позиции
+                            сметы</span><span class="sec-line"></span></div>
+                    <p class="sec-note">позиция = половина страницы · внутри — изделия и материалы · примечание
+                        выделяется · сдвоенный режим включается в карточке позиции</p>
+                    <div id="itemsList"></div>
+                    <button class="add-btn js-add">＋ Добавить позицию</button>
+                </section>
+
+                <section class="sec">
+                    <div class="sec-head">
+                        <span class="sec-num">04</span>
+                        <span class="sec-title">Доставка, выгрузка, монтаж</span>
+                        <span class="sec-line"></span>
+                        <label class="vis-toggle" id="deliveryVisWrap">
+                            <input type="checkbox" id="deliveryVisible" checked>
+                            <span class="vis-toggle-box"></span>
+                            <span class="vis-toggle-text">показать блок в КП</span>
+                        </label>
+                    </div>
+                    <p class="sec-note">пункты с ценами или общая сумма · включается в итог · на итог действует скидка
+                    </p>
+                    <div id="deliveryEditor"></div>
+                </section>
+
+                <section class="sec">
+                    <div class="sec-head"><span class="sec-num">05</span><span class="sec-title">Подпись и
+                            реквизиты</span><span class="sec-line"></span></div>
+                    <div class="f-grid2">
+                        <div class="f"><label class="f-label">Менеджер</label><input data-path="manager.name"
+                                value="Суботка Роман Петрович"></div>
+                        <div class="f"><label class="f-label">Должность</label><input data-path="manager.role"
+                                value="Директор"></div>
+                    </div>
+                    <div class="f"><label class="f-label">Телефон менеджера</label><input data-path="manager.phone"
+                            value="+375 33 308-63-08"></div>
+                    <div class="f"><label class="f-label">Гарантия, месяцев</label><input type="number" min="1" step="1" data-path="warrantyMonths" value="12"></div>
+                    <div class="f"><label class="f-label">Подвал / реквизиты</label><textarea rows="2"
+                            data-path="footer">ООО «ПеРо Лайв» · УНП 291231014 · 225305 Брестская обл., г.Кобрин, ул.Железнодорожная, д.50 · Гарантия — 12 месяцев.</textarea>
+                    </div>
+                </section>
+
+            </div>
+
+            <div class="editor-foot">
+                <div class="foot-total">
+                    <div class="lbl">Итого к оплате</div>
+                    <div class="amt" id="totalAmt">0 $</div>
+                </div>
+                <div class="foot-btns">
+                    <button class="btn btn-ghost btn-sm js-new" title="Новое КП: очистить все поля (форма станет новым документом)">Новое КП</button>
+                    <div class="docs-widget" id="docsWidget" data-docs-widget>
+                        <button class="docs-btn js-docs-toggle" type="button" aria-haspopup="true" aria-expanded="false">
+                            <span class="docs-btn-label">Сохранённые КП</span>
+                            <span class="docs-current" id="docsCurrent"></span>
+                            <svg class="docs-caret" width="10" height="6" viewBox="0 0 10 6" fill="none" aria-hidden="true">
+                                <path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+                <div class="docs-panel-anchor" aria-hidden="true">
+                    <div class="docs-panel" id="docsPanel" role="menu" hidden>
+                        <div class="docs-panel-head">
+                            <span class="docs-panel-title">Сохранённые КП</span>
+                            <button class="docs-save js-docs-save" type="button" title="Сохранить текущее КП"></button>
+                        </div>
+                        <div class="docs-list" id="docsList"></div>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <section class="stage">
+            <div class="sheet-viewport" id="viewport">
+                <div class="sheet-scale" id="scale">
+                    <article class="sheet" id="sheet"></article>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <div class="modal" id="confirmModal" hidden>
+        <div class="modal-card">
+            <div class="modal-title" id="confirmTitle">Удалить КП?</div>
+            <p class="modal-text" id="confirmText"></p>
+            <div class="modal-actions">
+                <button class="btn btn-ghost btn-sm" id="confirmCancel" type="button">Отмена</button>
+                <button class="btn btn-danger btn-sm" id="confirmOk" type="button">Удалить</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal" id="busyModal" hidden>
+        <div class="modal-card">
+            <div class="modal-title" id="busyTitle">Сохраняем…</div>
+            <div class="modal-busy"><span class="spinner"></span></div>
+        </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script src="/js/sheet-render.js"></script>
+    <script src="/js/contract-model.js"></script>
+    <script src="/js/contract-editor.js"></script>
+    <script src="/js/app.js"></script>
+
+</body>
+
+</html>

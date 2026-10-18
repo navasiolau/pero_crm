@@ -6,3 +6,14 @@ apps/web/prisma/migrations/20261018000100_kp_document_storage/migration.sql text
 apps/web/prisma/migrations/20261018000200_kp_project_synchronization/migration.sql text eol=lf
 apps/web/prisma/migrations/20261018000300_kp_pricing_services/migration.sql text eol=lf
 apps/web/prisma/migrations/20261018000400_kp_private_media/migration.sql text eol=lf
+
+# Исходные байты КП: SHA-манифесты одинаковы после checkout на обеих ОС.
+packages/kp-template/assets/** -text whitespace=cr-at-eol
+packages/kp-template/test/original/** -text whitespace=cr-at-eol
+packages/kp-template/source-manifest.json -text whitespace=cr-at-eol
+packages/kp-template/fonts-manifest.json -text whitespace=cr-at-eol
+
+# Неизменяемые vendor-лицензии OFL: сохраняем исходный пробел в строке21.
+# Исключение только blank-at-eol; остальные whitespace checks остаются включены.
+packages/kp-template/assets/public/fonts/manrope-OFL.txt whitespace=cr-at-eol,-blank-at-eol
+packages/kp-template/assets/public/fonts/spectral-OFL.txt whitespace=cr-at-eol,-blank-at-eol

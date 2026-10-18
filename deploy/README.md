@@ -1,7 +1,8 @@
 # Деплой PERO CRM
 
 GitHub Actions проверяет push в `staging` и `main`, затем публикует образ в GHCR.
-Watcher соответствующего сервера скачивает образ и обновляет только `web`.
+Watcher соответствующего сервера скачивает образ и по умолчанию обновляет только `web`.
+Opt-in раздел КП использует согласованную пару web/renderer, описанную ниже.
 Изменения попадают в `main` после локальной и реальной staging-приёмки.
 
 | Ветка | Hostname | Каталог / Compose project | Образ |
@@ -10,9 +11,19 @@ Watcher соответствующего сервера скачивает об�
 | `main` | `crm` (CT100) | `/opt/crm` / `crm` | `ghcr.io/navasiolau/pero_crm:main` |
 
 В CI обязательны тесты watcher, проверки приложений, lint, typecheck и сборка.
-Оба jobs публикации, CRM и Telegram-бот, требуют `success` полной unit matrix и native job:
+Оба jobs публикации, CRM и Telegram-бот, требуют `success` полной unit matrix, native job и Linux141 renderer job:
 failure, skipped или cancelled блокируют новый moving tag. Образы имеют дополнительный тег
 `sha-<полный Git SHA>` и OCI label `org.opencontainers.image.revision`.
+
+## Opt-in КП: автоматическая пара образов
+
+До сквозной приёмки `PERO_KP_ENABLED=0`, новый профиль выключен. Для согласованного включения устанавливаются принятый `watch-crm.py` и отдельный `docker-compose.kp.yml`, сохраняется существующий стандартный override и задаётся приватный renderer secret. W07 controller/entrypoint, locks и расписания остаются прежними. Recovery installer для старого однократного снятия pin не является обновлением действующего helper.
+
+CI сначала испытывает отдельный Linux141 renderer OCI без сети/БД, затем строит web с label `pero.kp.renderer-index` равным этому digest. Публикация обоих происходит только после всех gates, без rebuild; labels protocol1/revision/run/attempt/source/font/template связывают их с одним выпуском. Artifact `kp-release-*` содержит аудируемый packet с immutable refs и рецептом воспроизведения.
+
+В выключенном режиме watcher выполняет прежний путь. Во включённом он обнаруживает новый web по branch tag, получает renderer только по связанному digest, проверяет совместимость обоих и повторно проверяет конфигурацию, контейнеры, discovery tag и DB ID/mounts. Обновление двух сервисов выполняется через собственный временный compose override с `repository@sha256`, `--no-deps --no-build --pull never`. Стандартные файлы не переписываются, proxy/DB не перезапускаются. Частичная публикация не меняет running services.
+
+Ошибка запуска/здоровья приводит к image-only rollback обоих на сохранённые локальные IDs и проверке старой пары. При первой активации удаляется только новый private renderer без постоянных mounts. На rollback резервируется45 секунд сверх прежнего15-секундного postcheck внутри общего200-секундного deadline; внешний W07 timeout не меняется. Неизвестный drift останавливает работу, а не исправляется. Проверки SQL/данных и миграций не подменяются проверкой container/mounts. Постоянных image pins и ручного режима последующих обычных релизов этот путь не вводит.
 
 ## Файлы и запуск watcher
 
@@ -73,8 +84,9 @@ W07 timeout 240 секунд. При timeout на Linux уничтожается
 затем ограниченно ожидается её завершение; внешний W07 timeout не меняется.
 
 ID и весь список mounts БД сравниваются до/после обновления и при ошибке up/health.
-Watcher не выполняет SQL, `exec` в БД, seed/reset/restore/down, удаление контейнеров
-или томов. Нездоровый web не вызывает автоматического отката данных. Guard mismatch
+Watcher не выполняет SQL, `exec` в БД, seed/reset/restore/down или удаление томов.
+Web-only путь не удаляет контейнеры; opt-in KP удаляет лишь свой новый private renderer
+при откате неудачной первой активации. Нездоровый web не вызывает отката данных. Guard mismatch
 требует остановиться и изучить причину, а не автоматически «починить» конфигурацию.
 
 Пользователь отдельно запретил прямые действия с production DB. Staging DB

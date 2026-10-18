@@ -1,0 +1,33 @@
+# Опциональный overlay. Сам по себе не включает раздел и не меняет данные.
+# docker compose -f docker-compose.server.yml -f docker-compose.kp.yml --profile kp ...
+services:
+  web:
+    environment:
+      PERO_KP_RENDERER_URL: http://kp-renderer:3100
+      PERO_KP_RENDERER_SECRET: ${PERO_KP_RENDERER_SECRET}
+    networks:
+      - frontend
+      - backend
+      - kp_render
+  kp-renderer:
+    profiles: [kp]
+    # Только discovery; watcher всегда подставляет digest из проверенного web OCI.
+    image: ghcr.io/navasiolau/pero_kp_renderer:${CRM_IMAGE_TAG:-main}
+    restart: unless-stopped
+    init: true
+    environment:
+      PERO_KP_RENDERER_SECRET: ${PERO_KP_RENDERER_SECRET}
+    read_only: true
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 1536m
+    cpus: 1.0
+    pids_limit: 128
+    networks:
+      - kp_render
+networks:
+  kp_render:
+    internal: true
