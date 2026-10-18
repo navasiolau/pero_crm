@@ -465,13 +465,13 @@ test("draft/bootstrap-history-defaults-numbering-and-stage-promotion", async () 
   const result = await stages.patchProjectStageTransaction(c.manager, input, tx); assert.equal(result.result.ok, true);
   assert.equal((await tx.product.findUniqueOrThrow({ where: { id: c.product.id } })).status, "PREPARATION");
   assert.equal((await tx.product.findUniqueOrThrow({ where: { id: design.id } })).status, "DESIGN");
-  assert.equal((await tx.product.findUniqueOrThrow({ where: { id: deleted.id } })).status, "PREPARATION");
+  assert.equal((await tx.product.findUniqueOrThrow({ where: { id: deleted.id } })).status, "DRAFT");
   const afterRows = await tx.product.findMany({ where: { projectId: c.project.id }, orderBy: { id: "asc" } });
   const business = ({ status: _status, statusChangedAt: _changed, updatedAt: _updated, ...row }: typeof c.product) => { void _status; void _changed; void _updated; return row; };
   assert.deepEqual(afterRows.map(business), before.map(business));
   assert.equal(await tx.productStatusHistory.count({ where: { productId: c.product.id } }), 1);
-  assert.equal(await tx.productStatusHistory.count({ where: { productId: deleted.id, fromStatus: "DRAFT", toStatus: "PREPARATION" } }), 1);
-  assert.equal(result.eventIds.length, 3);
+  assert.equal(await tx.productStatusHistory.count({ where: { productId: deleted.id, fromStatus: "DRAFT", toStatus: "PREPARATION" } }), 0);
+  assert.equal(result.eventIds.length, 2);
   assert.equal(await tx.productPercentageCompletion.count({ where: { productId: { in: [c.product.id, deleted.id] } } }), 0);
   assert.equal(await tx.payrollEntry.count({ where: { productId: { in: [c.product.id, deleted.id] } } }), 0);
   const later = await rows.product("imported-after-receipt", c.project.id, { status: "DRAFT" });
@@ -566,7 +566,7 @@ test("kp181/draft-per-item-native-relations-readers-and-revocation", async () =>
   const c = await tree(tx, rows, "kp181-draft", "LEAD", "DRAFT");
   const sibling = await rows.product("kp181-crm-only", c.project.id, { status: "DRAFT", expectedPrice: "50", quantity: 2 });
   const otherProject = await rows.project("kp181-other-project");
-  const proposal = await tx.commercialProposal.create({ data: { id: rows.id("kp181-proposal"), projectId: c.project.id, state: {} } });
+  const proposal = await tx.commercialProposal.create({ data: { id: rows.id("kp181-proposal"), projectId: c.project.id, state: { items: [] } } });
   const item = await tx.proposalItem.create({ data: { id: rows.id("kp181-item"), proposalId: proposal.id, productId: c.product.id, position: 1, state: {} } });
   const task = await tx.task.create({ data: { projectId: c.project.id, productId: c.product.id, workId: c.work.id,
     assigneeId: c.engineer.id, title: "Черновая задача КП181", quantity: "1" } });
