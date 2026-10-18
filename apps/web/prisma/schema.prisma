@@ -183,6 +183,7 @@ model Client {
   updatedAt      DateTime        @updatedAt
   projects       Project[]
   communications Communication[]
+  commercialProposals CommercialProposal[]
 }
 
 // Проект = заказ клиента (может включать десятки изделий, напр. ремонт
@@ -237,6 +238,7 @@ model Project {
   logisticsAllocations   LogisticsPostingAllocation[]
   stageSettlements       ProductStageSettlement[]
   legacyProtectedStagePools ProductStagePayPool[] @relation("StagePayPoolLegacyProject")
+  commercialProposal CommercialProposal?
 
   @@index([stage, stageChangedAt])
   @@index([numberInt])
@@ -312,6 +314,7 @@ model Product {
   percentageCompletions ProductPercentageCompletion[]
 
   logisticsShipmentLines LogisticsShipmentLine[]
+  proposalItem ProposalItem?
 
   @@index([projectId])
   @@index([projectId, suffixInt])
@@ -1560,4 +1563,264 @@ model TelegramReminderOutbox {
  updatedAt DateTime @updatedAt
  @@unique([namespace,factId])
  @@index([namespace,state,retryAt])
+}
+
+enum ProposalCurrency {
+  BYN
+  RUB
+  USD
+  EUR
+}
+
+enum ProposalRateSource {
+  NBRB
+  MANUAL
+}
+
+enum ProposalVersionTrigger {
+  PDF
+  CONTRACT
+  IMPORT
+}
+
+enum ProposalArtifactKind {
+  PDF
+  DOCX
+}
+
+enum ProposalArtifactState {
+  PENDING
+  READY
+  RETIRING
+  DELETED
+}
+
+enum ProposalJobKind {
+  PDF
+  CONTRACT
+  PRUNE_VERSIONS
+  PURGE_MEDIA
+}
+
+enum ProposalJobState {
+  PENDING
+  PROCESSING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+}
+
+model CommercialProposal {
+  id                String @id @default(cuid())
+  projectId         String? @unique
+  project           Project? @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  clientId          String?
+  client            Client? @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  sourceId          String? @unique
+  sourceNumber      String?
+  isArchive         Boolean @default(false)
+  state             Json
+  revision          Int @default(0)
+  currency          ProposalCurrency @default(BYN)
+  rate              Decimal? @db.Decimal(20, 10)
+  rateDate          DateTime? @db.Date
+  rateSource        ProposalRateSource?
+  acceptedVersionId String?
+  acceptedVersion   ProposalVersion? @relation("AcceptedProposalVersion", fields: [id, acceptedVersionId], references: [proposalId, id], onDelete: NoAction, onUpdate: NoAction)
+  acceptedAt        DateTime?
+  retentionEpoch    Int @default(0)
+  deletedAt         DateTime?
+  createdById       String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  items             ProposalItem[]
+  versions          ProposalVersion[] @relation("ProposalVersions")
+  media             ProposalMedia[]
+  currentMedia      ProposalCurrentMedia[]
+  artifacts         ProposalArtifact[] @relation("ProposalArtifacts")
+  primaryContract   ProposalContract?
+  contractSources   ProposalContractSource[]
+  jobs              ProposalJob[]
+
+  @@index([createdAt])
+  @@index([clientId])
+}
+
+model ProposalItem {
+  id          String @id @default(cuid())
+  proposalId  String
+  proposal    CommercialProposal @relation(fields: [proposalId], references: [id], onDelete: Restrict)
+  productId   String? @unique
+  product     Product? @relation(fields: [productId], references: [id], onDelete: Restrict)
+  position    Int
+  state       Json
+  deletedAt   DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([proposalId, position])
+}
+
+model ProposalVersion {
+  id              String @id @default(cuid())
+  proposalId      String
+  proposal        CommercialProposal @relation("ProposalVersions", fields: [proposalId], references: [id], onDelete: Restrict)
+  revision        Int
+  trigger         ProposalVersionTrigger
+  state           Json
+  pricingSnapshot Json
+  renderSnapshot  Json @default("{}")
+  templateVersion String
+  pdfArtifactId   String?
+  pdfArtifact     ProposalArtifact? @relation("ProposalVersionPdf", fields: [proposalId, pdfArtifactId], references: [proposalId, id], onDelete: NoAction, onUpdate: NoAction)
+  createdById     String?
+  createdAt       DateTime @default(now())
+  acceptedBy      CommercialProposal[] @relation("AcceptedProposalVersion")
+  media           ProposalVersionMedia[]
+
+  @@unique([proposalId, id])
+  @@index([proposalId, createdAt])
+}
+
+model ProposalMedia {
+  id            String @id @default(cuid())
+  proposalId    String
+  proposal      CommercialProposal @relation(fields: [proposalId], references: [id], onDelete: Restrict)
+  storageBinding Json
+  originalKey   String? @unique
+  optimizedKey  String? @unique
+  originalHash  String?
+  optimizedHash String?
+  originalSize  Int?
+  optimizedSize Int?
+  mimeType      String
+  fileName      String
+  width         Int?
+  height        Int?
+  expiresAt     DateTime
+  originalPurgedAt DateTime?
+  optimizedPurgedAt DateTime?
+  retiringAt    DateTime?
+  createdAt     DateTime @default(now())
+  currentUses   ProposalCurrentMedia[]
+  versionUses   ProposalVersionMedia[]
+
+  @@unique([proposalId, id])
+  @@index([expiresAt])
+}
+
+model ProposalCurrentMedia {
+  proposalId String
+  mediaId    String
+  proposal   CommercialProposal @relation(fields: [proposalId], references: [id], onDelete: Restrict)
+  media      ProposalMedia @relation(fields: [proposalId, mediaId], references: [proposalId, id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@id([proposalId, mediaId])
+}
+
+model ProposalVersionMedia {
+  proposalId String
+  versionId  String
+  mediaId    String
+  version    ProposalVersion @relation(fields: [proposalId, versionId], references: [proposalId, id], onDelete: Cascade, onUpdate: NoAction)
+  media      ProposalMedia @relation(fields: [proposalId, mediaId], references: [proposalId, id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@id([versionId, mediaId])
+  @@index([proposalId, mediaId])
+}
+
+model ProposalArtifact {
+  id             String @id @default(cuid())
+  proposalId     String?
+  proposal       CommercialProposal? @relation("ProposalArtifacts", fields: [proposalId], references: [id], onDelete: Restrict)
+  contractId     String?
+  contract       ProposalContract? @relation("ContractArtifacts", fields: [contractId], references: [id], onDelete: Restrict)
+  kind           ProposalArtifactKind
+  state          ProposalArtifactState @default(PENDING)
+  storageBinding Json
+  key            String @unique
+  sha256         String
+  size           Int
+  fileName       String
+  mimeType       String
+  createdAt      DateTime @default(now())
+  deletedAt      DateTime?
+  proposalVersions ProposalVersion[] @relation("ProposalVersionPdf")
+  contractVersions ProposalContractVersion[] @relation("ContractVersionDocx")
+
+  @@unique([proposalId, id])
+  @@unique([contractId, id])
+  @@index([proposalId, state])
+  @@index([contractId, state])
+}
+
+model ProposalContract {
+  id                String @id @default(cuid())
+  primaryProposalId String @unique
+  primaryProposal   CommercialProposal @relation(fields: [primaryProposalId], references: [id], onDelete: Restrict)
+  settings          Json
+  revision          Int @default(0)
+  createdById       String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  sources           ProposalContractSource[]
+  versions          ProposalContractVersion[]
+  artifacts         ProposalArtifact[] @relation("ContractArtifacts")
+  jobs              ProposalJob[]
+}
+
+model ProposalContractSource {
+  contractId String
+  proposalId String
+  position   Int
+  contract   ProposalContract @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  proposal   CommercialProposal @relation(fields: [proposalId], references: [id], onDelete: Restrict)
+
+  @@id([contractId, proposalId])
+  @@unique([contractId, position])
+  @@index([proposalId])
+}
+
+model ProposalContractVersion {
+  id                String @id @default(cuid())
+  contractId        String
+  contract          ProposalContract @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  settingsSnapshot  Json
+  clientSnapshot    Json
+  sourcesSnapshot   Json
+  renderSnapshot    Json @default("{}")
+  templateVersion   String
+  docxArtifactId    String
+  docxArtifact      ProposalArtifact @relation("ContractVersionDocx", fields: [contractId, docxArtifactId], references: [contractId, id], onDelete: NoAction, onUpdate: NoAction)
+  createdById       String?
+  createdAt         DateTime @default(now())
+
+  @@index([contractId, createdAt])
+}
+
+model ProposalJob {
+  id             String @id @default(cuid())
+  proposalId     String?
+  proposal       CommercialProposal? @relation(fields: [proposalId], references: [id], onDelete: Restrict)
+  contractId     String?
+  contract       ProposalContract? @relation(fields: [contractId], references: [id], onDelete: Restrict)
+  kind           ProposalJobKind
+  state          ProposalJobState @default(PENDING)
+  dedupeKey      String @unique
+  payload        Json
+  result         Json?
+  attempts       Int @default(0)
+  maxAttempts    Int @default(5)
+  availableAt    DateTime @default(now())
+  leaseOwner     String?
+  leaseUntil     DateTime?
+  retentionEpoch Int?
+  lastErrorCode  String?
+  createdById    String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([state, availableAt])
+  @@index([proposalId])
+  @@index([contractId])
 }
