@@ -24,14 +24,14 @@ export async function deliverEngineeringCreated(result: {
 
 /** Replayed receipt emits no event and no duplicate notification. */
 export async function deliverEngineeringClosed(result: {
-  repeated: boolean; eventIds: string[]; product: { number: string; title: string } | null;
+  repeated: boolean; eventIds: string[]; product: { id: string; number: string; title: string } | null;
   earnings: { userId: string; name: string; amount: string; currency: string }[];
 }, actorId: string, effects: EngineeringEffects): Promise<void> {
   if (result.repeated || !result.product) return;
   for (const eventId of result.eventIds) await safe(() => effects.dispatchEvent(eventId));
   await safe(() => effects.notifyOrg({ type: "product.statusChanged",
     title: `${result.product!.number}: ${productStatusLabels.DESIGN} → ${productStatusLabels.PRODUCTION}`,
-    body: result.product!.title, link: `/products/${result.product!.number}`, exceptUserId: actorId }));
+    body: result.product!.title, link: `/products/${encodeURIComponent(result.product!.id)}`, exceptUserId: actorId }));
   for (const earning of result.earnings) {
     await safe(() => effects.notifyPerson({ userId: earning.userId, type: "payroll.accrued",
       title: `Начислена зарплата: ${formatAmount(earning.amount, earning.currency)}`,

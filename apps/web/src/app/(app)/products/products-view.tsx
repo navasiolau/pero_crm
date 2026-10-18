@@ -24,6 +24,7 @@ export interface ProductRow {
   currency: string;
   projectId: string;
   projectStage?: ProjectStage;
+  canAccessDraft?: boolean;
   projectNumber: string;
   projectTitle: string;
   clientId: string;

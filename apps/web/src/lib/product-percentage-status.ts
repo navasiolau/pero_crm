@@ -9,10 +9,12 @@ export interface ProductPercentageStatusContext {
   participant: boolean;
   hasB3d: boolean;
   noModel: boolean;
+  /** Сервер вычисляет по контексту конкретного изделия; UI получает только результат. */
+  canAccessDraft?: boolean;
 }
 
 export function decideProductPercentageStatus(roles: Role[], input: ProductPercentageStatusContext): { allowed: boolean; error?: string } {
-  if ((input.from === "DRAFT" || input.to === "DRAFT") && !canViewProductDrafts(roles))
+  if ((input.from === "DRAFT" || input.to === "DRAFT") && !canViewProductDrafts(roles) && !(roles.includes("MANAGER") && input.canAccessDraft === true))
     return { allowed: false, error: "Недостаточно прав для изменения статуса изделия" };
   if (hasAnyRole(roles, MANAGER_ROLES)) return { allowed: true };
   if (!hasRole(roles, "ENGINEER") || !input.assignedEngineer)

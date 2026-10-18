@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { canCreateOrdinaryWork, canEditOrdinaryWork } from "@/lib/ordinary-work-access";
 import { allocatedWorkQuantity, quantityAtoms, quantityFromAtoms } from "@/lib/work-shares";
 import { productVisibilityWhere, resolveVisibilityActor, workVisibilityWhere } from "@/server/access/visibility";
+import { productDraftAccessSelect } from "@/server/access/product-draft-context";
 import { canAddProductWork } from "./access";
 import { isOrdinaryWork, workPlanRevision } from "./plan";
 
@@ -15,8 +16,8 @@ export async function listWorkPriceOptions(actor: { id: string; roles: Role[] },
   const current = await db.user.findUnique({ where: { id: actor.id }, select: { id: true, roles: true, active: true } });
   if (!current?.active || !canCreateOrdinaryWork(current.roles)) return [];
   const visibility = await resolveVisibilityActor(db, current);
-  const product = await db.product.findFirst({ where: { id: productId, AND: [productVisibilityWhere(visibility)] }, select: { id: true, status: true } });
-  if (!product || !canAddProductWork(current.roles, product.status)) return [];
+  const product = await db.product.findFirst({ where: { id: productId, AND: [productVisibilityWhere(visibility)] }, select: { ...productDraftAccessSelect, id: true, status: true } });
+  if (!product || !canAddProductWork(current.roles, product.status, product)) return [];
   return db.priceItem.findMany({ where: { active: true }, select: { id: true, name: true, unit: true, price: true }, orderBy: { name: "asc" } });
 }
 
@@ -25,7 +26,7 @@ export async function listProductWorkOperations(actor: { id: string; roles: Role
   const current = await db.user.findUnique({ where: { id: actor.id }, select: { id: true, roles: true, active: true } });
   if (!current?.active) return {};
   const visibility = await resolveVisibilityActor(db, current);
-  const product = await db.product.findFirst({ where: { id: productId, AND: [productVisibilityWhere(visibility)] }, select: { id: true, status: true } });
+  const product = await db.product.findFirst({ where: { id: productId, AND: [productVisibilityWhere(visibility)] }, select: { ...productDraftAccessSelect, id: true, status: true } });
   if (!product) return {};
   const works = await db.work.findMany({ where: { productId, AND: [workVisibilityWhere(visibility)] }, include: {
     tasks: { select: { id: true, quantity: true, allocationGroupId: true } },
@@ -40,7 +41,7 @@ export async function listProductWorkOperations(actor: { id: string; roles: Role
     try {
       const allocated = allocatedWorkQuantity(work.tasks), remaining = quantityAtoms(work.quantity) - quantityAtoms(allocated);
       if (remaining < BigInt(0)) continue;
-      result[work.id] = { revision: workPlanRevision(work), canEdit: canEditOrdinaryWork(current.roles, product.status) && work.priceSnapshot !== null,
+      result[work.id] = { revision: workPlanRevision(work), canEdit: canEditOrdinaryWork(current.roles, product.status, product) && work.priceSnapshot !== null,
         canChangePrice: work.tasks.length === 0 && !accrued.has(work.id), priceItemId: work.priceItemId,
         allocated, remaining: quantityFromAtoms(remaining) };
     } catch { /* Не угадываем неизвестный исторический объём. */ }

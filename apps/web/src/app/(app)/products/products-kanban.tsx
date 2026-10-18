@@ -145,13 +145,14 @@ export function ProductsKanban({
 }) {
   const router = useRouter();
   const { getQuery } = useListParams();
-  const visibleStatuses = useMemo(() => visibleProductStatuses(actorRoles), [actorRoles]);
+  const canShowDrafts = initialProducts.some(product => product.canAccessDraft === true);
+  const visibleStatuses = useMemo(() => visibleProductStatuses(actorRoles, canShowDrafts), [actorRoles, canShowDrafts]);
   const [board, setBoard] = useState<{
     products: ProductRow[];
     source: ProductRow[] | null;
     roles: readonly Role[];
   }>(() => ({
-    products: initialProducts.filter(product => visibleStatuses.some(status => status.id === product.status)),
+    products: initialProducts.filter(product => visibleProductStatuses(actorRoles, product.canAccessDraft).some(status => status.id === product.status)),
     source: initialProducts,
     roles: actorRoles,
   }));
@@ -160,7 +161,7 @@ export function ProductsKanban({
 
   useEffect(() => {
     setBoard({
-      products: initialProducts.filter(product => visibleStatuses.some(status => status.id === product.status)),
+      products: initialProducts.filter(product => visibleProductStatuses(actorRoles, product.canAccessDraft).some(status => status.id === product.status)),
       source: initialProducts,
       roles: actorRoles,
     });
@@ -175,7 +176,7 @@ export function ProductsKanban({
   })), [products, visibleStatuses]);
   const canDrag = useCallback((product: ProductRow) => currentProductStatusTargets(actorRoles, product, actorUserId).some(target => target !== product.status), [actorRoles, actorUserId]);
   const onOpen = useCallback((product: ProductRow) => router.push(
-    productDetailHref(product.number, globalProductsHref(getQuery())),
+    productDetailHref(product.id, globalProductsHref(getQuery())),
   ), [router, getQuery]);
 
   function applyStatus(productId: string, toStatus: ProductStatus) {

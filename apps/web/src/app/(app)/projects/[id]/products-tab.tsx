@@ -42,6 +42,7 @@ export interface ProductCard {
   number: string;
   title: string;
   status: ProductStatus;
+  canAccessDraft?: boolean;
   statusChangedAt: string;
   expectedPrice: string | null;
     quantity: number;
@@ -165,14 +166,14 @@ export function ProductsTab({
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const visibleStatuses = visibleProductStatuses(actorRoles);
-  const visibleRows = initialProducts.filter(product => visibleStatuses.some(status => status.id === product.status));
+  const visibleStatuses = visibleProductStatuses(actorRoles, initialProducts.some(product => product.canAccessDraft === true));
+  const visibleRows = initialProducts.filter(product => visibleProductStatuses(actorRoles, product.canAccessDraft).some(status => status.id === product.status));
   const [products, setProducts] = useState(visibleRows);
 
   // Синхронизация с сервером после router.refresh() (создание изделия
   // и revalidatePath из server actions) — иначе канбан не видит новые данные.
   useEffect(() => {
-    setProducts(initialProducts.filter(product => visibleProductStatuses(actorRoles).some(status => status.id === product.status)));
+    setProducts(initialProducts.filter(product => visibleProductStatuses(actorRoles, product.canAccessDraft).some(status => status.id === product.status)));
   }, [initialProducts, actorRoles]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
@@ -263,7 +264,7 @@ export function ProductsTab({
               showAmount={showAmount}
               canDrag={(product) => currentProductStatusTargets(actorRoles, { ...product, projectStage }, actorUserId).some(target => target !== product.status)}
               canDrop={!!activeProduct && currentProductStatusTargets(actorRoles, { ...activeProduct, projectStage }, actorUserId).includes(status.id)}
-              onOpen={(product) => router.push(productDetailHref(product.number, projectProductsHref(projectId)))}
+              onOpen={(product) => router.push(productDetailHref(product.id, projectProductsHref(projectId)))}
             />
           ))}
         </KanbanScrollArea>

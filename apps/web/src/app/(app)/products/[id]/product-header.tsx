@@ -34,6 +34,7 @@ export function ProductHeader({
     description: string | null;
     projectId: string;
     projectStage?: ProjectStage;
+    canAccessDraft?: boolean;
     engineerId: string | null;
   };
   currency: string;

@@ -148,7 +148,7 @@ export function MovementsView({
       cell: (row) =>
         row.productId && row.productNumber ? (
           <Link
-            href={`/products/${row.productNumber}`}
+            href={`/products/${row.productId}`}
             className="text-primary hover:underline"
           >
             {row.productNumber}
@@ -227,7 +227,7 @@ export function MovementsView({
         searchPlaceholder="Поиск по движениям…"
         emptyText="Движений пока нет"
         defaultPageSize={20}
-        renderMobileCard={row=><div className="space-y-2"><div className="flex flex-wrap items-start justify-between gap-2"><b className="break-words">{row.materialName}</b><Badge variant="outline">{warehouseMovementLabel(row)}</Badge></div><p className="text-xs text-muted-foreground">{formatDateTime(row.createdAt)}</p><p>{row.type==='EXPENSE'?'−':row.type==='RETURN'?'+':''}{formatQty(row.quantity)} {row.materialUnit}{showMoney?` · ${formatAmount(row.totalByn,'BYN')}`:''}</p>{row.productId&&row.productNumber?<Link href={`/products/${row.productNumber}`} className="text-primary hover:underline">Изделие {row.productNumber}</Link>:null}{row.comment?<p className="break-words text-sm">{row.comment}</p>:null}{row.createdByName?<p className="text-xs text-muted-foreground">{row.createdByName}</p>:null}<ReportDocumentButton document={row.reportDocument}/>{deleteButton(row)}</div>}
+        renderMobileCard={row=><div className="space-y-2"><div className="flex flex-wrap items-start justify-between gap-2"><b className="break-words">{row.materialName}</b><Badge variant="outline">{warehouseMovementLabel(row)}</Badge></div><p className="text-xs text-muted-foreground">{formatDateTime(row.createdAt)}</p><p>{row.type==='EXPENSE'?'−':row.type==='RETURN'?'+':''}{formatQty(row.quantity)} {row.materialUnit}{showMoney?` · ${formatAmount(row.totalByn,'BYN')}`:''}</p>{row.productId&&row.productNumber?<Link href={`/products/${row.productId}`} className="text-primary hover:underline">Изделие {row.productNumber}</Link>:null}{row.comment?<p className="break-words text-sm">{row.comment}</p>:null}{row.createdByName?<p className="text-xs text-muted-foreground">{row.createdByName}</p>:null}<ReportDocumentButton document={row.reportDocument}/>{deleteButton(row)}</div>}
       />
       {deleting?<WarehouseMovementDeleteDialog key={deleting} movementId={deleting} onClose={()=>setDeleting(null)}/>:null}
     </div>

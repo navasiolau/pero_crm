@@ -7,6 +7,8 @@ import { parseListFilterValue } from "@/lib/list-filter-values";
 import { engineeringParticipantProductIds, fileVisibilityWhere, productVisibilityWhere, resolveVisibilityActor, taskVisibilityWhere, workVisibilityWhere, type VisibilityActor } from "@/server/access/visibility";
 import { taskDetailsIncludeFor,taskWorkspaceWhere } from "@/server/tasks/queries";
 import { productSketchProjection } from "./sketch-projection";
+import { canAccessProductDraft } from "@/lib/product-drafts";
+import { productDraftAccessRelations } from "@/server/access/product-draft-context";
 
 // ── Список изделий (/products): серверные фильтры/сортировка/пагинация ──
 // Состояние — в URL (?q=&status=&project=&client=&active=0&sort=&dir=&page=).
@@ -152,6 +154,7 @@ async function fetchProductRows(
   const rows = await prisma.product.findMany({
     where,
     include: {
+      proposalItem: productDraftAccessRelations.proposalItem,
       engineer: { select: { id: true, name: true } },
       mounter: { select: { id: true, name: true } },
       assembler: { select: { id: true, name: true } },
@@ -161,6 +164,7 @@ async function fetchProductRows(
       project: {
         select: {
           id: true,
+          deletedAt: true,
           number: true,
           title: true,
           stage: true,
@@ -173,7 +177,7 @@ async function fetchProductRows(
     skip,
     take,
   });
-  return (await maskProductionRead(prisma,actor,rows)).map((row) => ({ ...row, hasB3d: row.files.length > 0,
+  return (await maskProductionRead(prisma,actor,rows)).map((row) => ({ ...row, canAccessDraft: canAccessProductDraft(actor.roles, row), hasB3d: row.files.length > 0,
     isEngineeringParticipant: row.percentageConfigs.some((config) => config.participants.length > 0) ||
       actor.engineeringParticipantProductIds?.includes(row.id) === true }));
 }
@@ -258,15 +262,19 @@ export async function getProductFor(
   key: string,
 ) {
   const actor = await resolveVisibilityActor(prisma, { id: userId, roles });
-  // Адрес карточки — /products/<номер>; допускаем и внутренний id
+  // Новые ссылки используют стабильный id; прежние адреса по номеру поддерживаются.
+  // Найденный ID не превращаем в alias другого изделия при отказе в доступе.
+  const exact = await prisma.product.findFirst({ where: { id: key }, select: { id: true } });
   const product = await prisma.product.findFirst({
     where: {
-      AND: [productVisibilityWhere(actor), { OR: [{ number: key }, { id: key }] }],
+      AND: [productVisibilityWhere(actor), exact ? { id: exact.id } : { number: key }],
     },
     include: {
+      proposalItem: productDraftAccessRelations.proposalItem,
       project: {
         select: {
           id: true,
+          deletedAt: true,
           number: true,
           title: true,
           address: true,
@@ -305,5 +313,5 @@ export async function getProductFor(
     },
   });
   if(!product)return null;
-  return (await maskProductionRead(prisma,actor,[{...product,tasks:maskTaskPaymentRead(actor,product.tasks),works:await maskProductionWorkRead(prisma,actor,product.works)}]))[0];
+  return (await maskProductionRead(prisma,actor,[{...product,canAccessDraft:canAccessProductDraft(actor.roles,product),tasks:maskTaskPaymentRead(actor,product.tasks),works:await maskProductionWorkRead(prisma,actor,product.works)}]))[0];
 }

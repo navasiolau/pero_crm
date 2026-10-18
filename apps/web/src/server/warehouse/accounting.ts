@@ -3,7 +3,8 @@ import { randomUUID, createHash } from 'node:crypto';
 import { prisma } from '@/lib/prisma';
 import { WAREHOUSE_MANAGE_ROLES, FINANCE_ROLES, hasAnyRole } from '@/lib/roles';
 import { productVisibilityWhere } from "@/server/access/visibility";
-import { canViewProductDrafts } from "@/lib/product-drafts";
+import { canAccessProductDraft } from "@/lib/product-drafts";
+import { productDraftAccessSelect } from "@/server/access/product-draft-context";
 import { lockProductRow } from '@/server/products/quantity-core';
 import { decimalAtoms, decimalText } from '@/lib/product-quantity';
 import { addPosition, addPaidPosition, addValue, issuePosition, returnShare, averagePrice, unitCost, quantityInput, priceInput } from '@/lib/warehouse-cost';
@@ -55,8 +56,8 @@ export async function warehouseMove(tx:Tx,actor:WarehouseActor,input:WarehouseMo
  if(previous){
   if(previous.actorId!==actor.id||previous.requestFingerprint!==fingerprint)throw Error('Идентификатор запроса уже использован с другими данными');
   if(previous.movement.deletionId)throw Error('Движение удалено — повторное проведение запрещено');
-  const historicalProduct=previous.movement.productId?await tx.product.findUnique({where:{id:previous.movement.productId},select:{id:true,number:true,projectId:true,status:true}}):null;
-  if(historicalProduct?.status==='DRAFT'&&!canViewProductDrafts(actor.roles))throw Error('Изделие не найдено');
+  const historicalProduct=previous.movement.productId?await tx.product.findUnique({where:{id:previous.movement.productId},select:{...productDraftAccessSelect,id:true,number:true,status:true}}):null;
+  if(historicalProduct?.status==='DRAFT'&&!canAccessProductDraft(actor.roles,historicalProduct))throw Error('Изделие не найдено');
   const product=historicalProduct?{id:historicalProduct.id,number:historicalProduct.number,projectId:historicalProduct.projectId}:null;
   return {movement:previous.movement,repeated:true,line:null,material:null,product};
  }

@@ -6,9 +6,9 @@ export function projectProductsHref(projectId: string): string {
 export function globalProductsHref(query: string): string {
   return `/products?${normalizeListQuery("products", query)}`;
 }
-export function productDetailHref(number: string, returnTo: string): string {
+export function productDetailHref(productId: string, returnTo: string): string {
   const query = new URLSearchParams({ returnTo });
-  return `/products/${encodeURIComponent(number)}?${query}`;
+  return `/products/${encodeURIComponent(productId)}?${query}`;
 }
 // Принимаем только два точных внутренних пути. История браузера и referrer
 // не являются доказательством допустимого источника перехода.

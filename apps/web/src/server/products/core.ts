@@ -11,6 +11,7 @@ import { assertProjectMoneyCurrency } from "@/lib/internal-currency";
 import { normalizeProductDescription, isProductDescriptionUnchanged } from "@/lib/product-description";
 import { productLineTotal } from "@/lib/product-quantity";
 import { productEditWhere, resolveVisibilityActor } from "@/server/access/visibility";
+import { productDraftAccessRelations } from "@/server/access/product-draft-context";
 import { withTaskTransaction, type TaskTransaction } from "@/server/tasks/transaction";
 import { lockProductRow, recalculateQuantity } from "./quantity-core";
 import { lockProjectRow } from "@/server/projects/lock";
@@ -73,9 +74,19 @@ export async function createProductCore(actor: DomainActor, input: CreateProduct
   if (!hasAnyRole(actor.roles, MANAGER_ROLES)) throw new Error("Недостаточно прав");
   const parsed = createSchema.safeParse(input);
   if (!parsed.success) return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Ошибка данных" };
+  try { productLineTotal(parsed.data.expectedPrice ?? null, parsed.data.quantity); }
+  catch (error) { return { ok: false as const, error: error instanceof Error ? error.message : "Некорректная сумма партии" }; }
+  return transaction(tx => createProductInTransaction(tx, actor, parsed.data));
+}
+
+/** Одинаковые defaults/history для обычного создания и состава КП. */
+export async function createProductInTransaction(tx: Prisma.TransactionClient, actor: DomainActor, input: CreateProductInput) {
+  if (!hasAnyRole(actor.roles, MANAGER_ROLES)) throw new Error("Недостаточно прав");
+  const parsed = createSchema.safeParse(input);
+  if (!parsed.success) return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Ошибка данных" };
   const data = parsed.data;
   try { productLineTotal(data.expectedPrice ?? null, data.quantity); }
-  catch (error) { return { ok: false as const, error: error instanceof Error ? error.message : "Некорректная сумма партии" }; }  const mutation = await transaction(async (tx) => {
+  catch (error) { return { ok: false as const, error: error instanceof Error ? error.message : "Некорректная сумма партии" }; }
   await lockProjectRow(tx, data.projectId);
   const project = await tx.project.findUnique({
     where: {...liveProjectWhere, id: data.projectId },
@@ -126,6 +137,7 @@ export async function createProductCore(actor: DomainActor, input: CreateProduct
     actorType: "user",
     actorId: actor.id,
     actorName: actor.name ?? undefined,
+    source: actor.source,
     entity: "product",
     entityId: product.id,
     action: "create",
@@ -134,15 +146,13 @@ export async function createProductCore(actor: DomainActor, input: CreateProduct
       initialPrice: product.initialPrice?.toString() ?? null, initialPriceCaptureEligible: data.expectedPrice === undefined },
   } });
   return { ok: true as const, product };
-  });
-  return mutation;
 }
 
 async function updateProductValues(actor: DomainActor, productId: string, data: ProductValues, baseline: ProductUpdateBaseline, tx: Prisma.TransactionClient) {
     if(data.quantity!==undefined)await warehouseMetadataGate(tx);
     await lockProductRow(tx, productId);
     const visibilityActor = hasAnyRole(actor.roles, MANAGER_ROLES) ? actor : await resolveVisibilityActor(tx, actor);
-    const before = await tx.product.findFirst({ where: {...liveProductWhere, AND: [{ id: productId }, productEditWhere(visibilityActor)] } });
+    const before = await tx.product.findFirst({ where: {...liveProductWhere, AND: [{ id: productId }, productEditWhere(visibilityActor)] }, include: productDraftAccessRelations });
     if (!before) return { ok: false as const, error: "Изделие не найдено" };
     if (data.expectedPrice !== undefined || data.quantity !== undefined) {
       const project = await tx.project.findUnique({ where: {...liveProjectWhere, id: before.projectId }, select: { currency: true } });

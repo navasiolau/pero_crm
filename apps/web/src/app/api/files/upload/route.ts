@@ -112,7 +112,7 @@ async function upload(request:Request,state:{phase:UploadPhase;commitState:Commi
   const permission=await authorizeUploadTarget(prisma,actor,target);
   if(!permission.ok)return NextResponse.json(permission.body,{status:permission.status});
   const {projectId,requestedProductId,taskId,section,clientMutationId,coverTarget,projectCoverTarget}=target;
-  const {project,productId,productNumber}=permission.context;
+  const {project,productId}=permission.context;
   const {replayCover,replayProjectCover}=permission;
   const assignCover=target.mode==="sketch",assignProjectCover=target.mode==="project-cover";
   const transaction=<T>(work:(tx:UploadTransaction,actor:UploadActor)=>Promise<T>)=>withTaskTransaction(async tx=>work(tx,await currentUploadActor(actor.id,request.signal)));
@@ -231,7 +231,7 @@ async function upload(request:Request,state:{phase:UploadPhase;commitState:Commi
     state.phase="confirmation";
     if(!result.repeated)await afterUploadCommit(()=>notifyOrg({
       type: "file.added", title: `Файл к проекту ${project.number}`,
-      body: file.name, link: productNumber ? `/products/${productNumber}` : `/projects/${projectId}`,
+      body: file.name, link: productId ? `/products/${encodeURIComponent(productId)}` : `/projects/${projectId}`,
       exceptUserId: actor.id,
     }),requestId);
     return await committedSketchReply(result,requestedProductId,requestId);
@@ -266,7 +266,7 @@ async function upload(request:Request,state:{phase:UploadPhase;commitState:Commi
     type: "file.added",
     title: `Файл к проекту ${project.number}`,
     body: file.name,
-    link: productNumber ? `/products/${productNumber}` : `/projects/${projectId}`,
+    link: productId ? `/products/${encodeURIComponent(productId)}` : `/projects/${projectId}`,
     exceptUserId: actor.id,
   }),requestId);
 

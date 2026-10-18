@@ -22,7 +22,7 @@ export const PRODUCT_STATUSES: {
 ];
 
 /** Один порядок колонок, фильтров и селектов с учётом приватности черновиков. */
-export function visibleProductStatuses(roles: readonly Role[]) {
+export function visibleProductStatuses(roles: readonly Role[], canAccessDraft = false) {
   const full = MANAGER_ROLES.some(role => roles.includes(role)) || roles.includes("PROCUREMENT");
   const statuses = new Set(fieldProductStatuses(roles));
   if (roles.includes("ENGINEER")) {
@@ -30,7 +30,7 @@ export function visibleProductStatuses(roles: readonly Role[]) {
     statuses.add("PRODUCTION");
   }
   return PRODUCT_STATUSES.filter(status =>
-    (full || statuses.has(status.id)) && (status.id !== "DRAFT" || canViewProductDrafts(roles)),
+    (full || statuses.has(status.id)) && (status.id !== "DRAFT" || canViewProductDrafts(roles) || (roles.includes("MANAGER") && canAccessDraft)),
   );
 }
 

@@ -142,20 +142,20 @@ test("actual nested cache helpers retain all later paths and one lookup after ea
   const load = <T,>(name: string): T => { const file = require.resolve(name); if (!originals.has(file)) originals.set(file, require.cache[file]); delete require.cache[file]; return require(name) as T; };
   const product = load<typeof import("../src/server/products/revalidate")>("../src/server/products/revalidate");
   const warehouse = load<typeof import("../src/server/warehouse/revalidate")>("../src/server/warehouse/revalidate");
-  for (const failure of ["cache:/products", "cache:/products/P", "cache:/projects/project"]) {
+  for (const failure of ["cache:/products", "cache:/products/product", "cache:/products/old-number", "cache:/products/P", "cache:/projects/project"]) {
     reset(); lookups = 0; fault = failure;
-    await product.revalidateProductPaths("product");
-    assert.deepEqual(calls, ["cache:/products", "cache:/products/P", "cache:/projects/project"]); assert.equal(lookups, 1);
+    await product.revalidateProductPaths("product", ["old-number"]);
+    assert.deepEqual(calls, ["cache:/products", "cache:/products/product", "cache:/products/old-number", "cache:/products/P", "cache:/projects/project"]); assert.equal(lookups, 1);
   }
   for (const failure of ["cache:/warehouse", "cache:/warehouse/items", "cache:/finance/projects/project"]) {
     reset(); lookups = 0; fault = failure; await warehouse.revalidateWarehouse("product", "project");
-    assert.equal(calls.length, 11); assert.equal(calls.at(-1), "cache:/projects/project"); assert.equal(lookups, 1);
+    assert.equal(calls.length, 12); assert.equal(calls.at(-1), "cache:/projects/project"); assert.equal(lookups, 1);
   }
   reset(); lookups = 0; lookupFault = true;
-  await warehouse.revalidateWarehouse("product", "project"); assert.equal(calls.length, 9); assert.equal(lookups, 1);
+  await warehouse.revalidateWarehouse("product", "project"); assert.equal(calls.length, 10); assert.equal(lookups, 1);
   assert.ok(!calls.includes("cache:/products/P"));
   reset(); lookups = 0; lookupFault = false; missing = true;
-  await product.revalidateProductPaths("product"); assert.deepEqual(calls, ["cache:/products"]); assert.equal(lookups, 1);
+  await product.revalidateProductPaths("product"); assert.deepEqual(calls, ["cache:/products", "cache:/products/product"]); assert.equal(lookups, 1);
   reset(); lookups = 0; await product.revalidateProductPaths(null); await warehouse.revalidateWarehouse();
   assert.equal(lookups, 0); assert.equal(calls.length, 6);
 });

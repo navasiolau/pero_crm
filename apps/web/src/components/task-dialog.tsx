@@ -171,7 +171,7 @@ export function TaskDialog({
               <>
                 {" · изделие "}
                 <Link
-                  href={`/products/${task.productNumber}`}
+                  href={`/products/${task.productId}`}
                   className="underline-offset-2 hover:underline"
                 >
                   {task.productNumber}
@@ -396,7 +396,7 @@ export function TaskDialog({
                 <div>
                   {task.productId && task.productNumber ? (
                     <Link
-                      href={`/products/${task.productNumber}`}
+                      href={`/products/${task.productId}`}
                       className="underline-offset-2 hover:underline"
                     >
                       {task.productNumber}
