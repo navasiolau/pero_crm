@@ -4,3 +4,4 @@ apps/web/prisma/migrations/20260928220000_product_engineering_pay/migration.sql 
 apps/web/prisma/migrations/20260929120000_manager_cash_advances/migration.sql text eol=lf
 apps/web/prisma/migrations/20261018000100_kp_document_storage/migration.sql text eol=lf
 apps/web/prisma/migrations/20261018000200_kp_project_synchronization/migration.sql text eol=lf
+apps/web/prisma/migrations/20261018000300_kp_pricing_services/migration.sql text eol=lf

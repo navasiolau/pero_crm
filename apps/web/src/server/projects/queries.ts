@@ -3,7 +3,7 @@ import {activePaymentWhere} from '@/server/payments/active-records';
 import { canAccessProductDraft, canViewProductDrafts } from "@/lib/product-drafts";
 import { productDraftAccessRelations } from "@/server/access/product-draft-context";
 import { liveProductWhere } from "@/server/access/live-entities";
-import {canViewProductMoney} from "@/lib/product-financial-access";
+import {canViewProductMoney,projectMoneyForRoles} from "@/lib/product-financial-access";
 import { projectTotal as calculateProjectTotal } from "@/lib/product-quantity";
 import type { Prisma, ProjectStage, Role } from "@prisma/client";
 
@@ -24,12 +24,6 @@ import { listProjectShortages } from "@/server/warehouse/queries";
 import { productSketchProjection } from "@/server/products/sketch-projection";
 import { projectCoverProjection } from "./cover-projection";
 import { clientVisibilityWhere, engineeringParticipantProductIds, fileVisibilityWhere, hasFullProjectVisibility, productVisibilityWhere, projectVisibilityWhere, resolveVisibilityActor, taskVisibilityWhere, workVisibilityWhere, type VisibilityActor } from "@/server/access/visibility";
-
-function scopedProjectAmounts<T extends { initialPrice: unknown; delivery: unknown; unloading: unknown; installation: unknown }>(project: T, actor: VisibilityActor) {
-  return canViewProductMoney(actor.roles) ? project : {
-    ...project, initialPrice: null, delivery: null, unloading: null, installation: null,
-  };
-}
 
 // ── Список проектов: серверные фильтры/сортировка/пагинация ─────────────
 // Состояние живёт в URL (?q=&stage=&client=&…&active=0&sort=&dir=&page=),
@@ -260,7 +254,7 @@ async function fetchProjectRows(
   const shortages = await listProjectShortages(projects.map((project) => project.id), actor);
   // Стоимость проекта = Σ цен изделий + доставка/выгрузка/монтаж (в валюте проекта)
   return projects.map((project) => ({
-    ...scopedProjectAmounts(project, actor),
+    ...projectMoneyForRoles(project, actor.roles),
     products:canViewProductMoney(actor.roles)?project.products:project.products.map(product=>({...product,expectedPrice:null})),
     totalPrice:
       canViewProductMoney(actor.roles)?calculateProjectTotal(amountsByProject.get(project.id) ?? project.products, project):null,
@@ -326,11 +320,11 @@ export async function getProjectFor(
     },
   });
   if (!project) return null;
-  return scopedProjectAmounts({ ...project,tasks:maskTaskPaymentRead(actor,project.tasks), works:await maskProductionWorkRead(prisma,actor,project.works),communications: project.communications ?? [], products: (await maskProductionRead(prisma,actor,project.products)).map((product) => ({
+  return projectMoneyForRoles({ ...project,tasks:maskTaskPaymentRead(actor,project.tasks), works:await maskProductionWorkRead(prisma,actor,project.works),communications: project.communications ?? [], products: (await maskProductionRead(prisma,actor,project.products)).map((product) => ({
     ...product, canAccessDraft: canAccessProductDraft(actor.roles, product), statusHistory: product.statusHistory ?? [], hasB3d: product.files.length > 0,
     isEngineeringParticipant: product.percentageConfigs.some((config) => config.participants.length > 0) ||
       actor.engineeringParticipantProductIds?.includes(product.id) === true,
-  })) }, actor);
+  })) }, actor.roles);
 }
 
 export async function listClients(actor: VisibilityActor) {

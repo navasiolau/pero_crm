@@ -44,12 +44,33 @@ export function productsTotal(products: readonly { expectedPrice: DecimalInput |
     sum + decimalAtoms(productLineTotal(product.expectedPrice, product.quantity ?? 1) ?? "0", 2, 12), BigInt(0)), 2);
 }
 
-export function projectTotal(products: readonly { expectedPrice: DecimalInput | null; quantity?: number }[],
-  services: { delivery?: DecimalInput | null; unloading?: DecimalInput | null; installation?: DecimalInput | null } = {}): number {
-  const atoms = decimalAtoms(productsTotal(products), 2, 18) +
-    [services.delivery, services.unloading, services.installation].reduce<bigint>((sum, value) => sum + decimalAtoms(value ?? "0", 2, 12), BigInt(0));
+export type ProjectServices = { servicesTotal?: DecimalInput | null; delivery?: DecimalInput | null; unloading?: DecimalInput | null; installation?: DecimalInput | null; proposalRoundingAdjustment?: DecimalInput | null };
+
+export function signedMoneyAtoms(value: DecimalInput): bigint {
+  const text = String(value).trim();
+  return text.startsWith("-") ? -decimalAtoms(text.slice(1), 2, 12) : decimalAtoms(text, 2, 12);
+}
+
+export function projectServiceAtoms(services: ProjectServices): bigint {
+  const breakdown = [services.delivery, services.unloading, services.installation];
+  if (services.servicesTotal !== undefined && services.servicesTotal !== null) {
+    if (breakdown.some(value => value !== undefined && value !== null)) throw Error("Общая сумма услуг несовместима с разбивкой");
+    return decimalAtoms(services.servicesTotal, 2, 12);
+  }
+  return breakdown.reduce<bigint>((sum, value) => sum + decimalAtoms(value ?? "0", 2, 12), BigInt(0));
+}
+
+export function projectTotalText(products: readonly { expectedPrice: DecimalInput | null; quantity?: number }[], services: ProjectServices = {}): string {
+  const atoms = decimalAtoms(productsTotal(products), 2, 18) + projectServiceAtoms(services) + signedMoneyAtoms(services.proposalRoundingAdjustment ?? "0");
+  if (atoms < BigInt(0)) throw Error("Итог проекта не может быть отрицательным");
+  return decimalText(atoms, 2);
+}
+
+export function projectTotal(products: readonly { expectedPrice: DecimalInput | null; quantity?: number }[], services: ProjectServices = {}): number {
+  const total = projectTotalText(products, services);
+  const atoms = decimalAtoms(total, 2, 18);
   if (atoms > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error("Сумма превышает безопасный предел");
-  return Number(decimalText(atoms, 2));
+  return Number(total);
 }
 
 export function workBudget(price: DecimalInput, quantity: DecimalInput): string {

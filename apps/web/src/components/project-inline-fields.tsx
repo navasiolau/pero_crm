@@ -22,12 +22,12 @@ function useConfirmedService(controller: InlineSaveController) {
  return {baseline,pending};
 }
 export function ProjectConfirmedTotal() {
- const {controller,productsSubtotalBYN,pricingError}=useProjectInline();
- const delivery=controller("delivery"),unloading=controller("unloading"),installation=controller("installation");
- const d=useConfirmedService(delivery),u=useConfirmedService(unloading),i=useConfirmedService(installation);
- const total=confirmedProjectTotal(productsSubtotalBYN,[d.baseline===null?null:String(d.baseline),u.baseline===null?null:String(u.baseline),i.baseline===null?null:String(i.baseline)]);
- const pending=[d,u,i].some(state=>state.pending);
- return <div className="min-w-0 space-y-2 text-sm">{pricingError?<p role="alert" className="break-words text-destructive">{pricingError}</p>:null}<p className="break-words">Изделия: {formatMoneyTotal(productsSubtotalBYN===null?null:Number(productsSubtotalBYN),"BYN")}</p><p className="break-words font-medium">Подтверждённая сумма проекта: {total===null?formatMoneyTotal(null):formatAmount(total,"BYN")}</p>{pending?<p className="break-words text-xs text-muted-foreground">Новый итог появится после подтверждения сохранения услуг.</p>:null}</div>;
+ const {controller,productsSubtotalBYN,pricingError,services,roundingAdjustment}=useProjectInline();
+ const delivery=controller("delivery"),unloading=controller("unloading"),installation=controller("installation"),general=controller("servicesTotal");
+ const d=useConfirmedService(delivery),u=useConfirmedService(unloading),i=useConfirmedService(installation),g=useConfirmedService(general);
+ const total=confirmedProjectTotal(productsSubtotalBYN,[services.servicesTotal,services.delivery,services.unloading,services.installation],roundingAdjustment);
+ const pending=[d,u,i,g].some(state=>state.pending);
+ return <div className="min-w-0 space-y-2 text-sm">{pricingError?<p role="alert" className="break-words text-destructive">{pricingError}</p>:null}<p className="break-words">Изделия: {formatMoneyTotal(productsSubtotalBYN===null?null:Number(productsSubtotalBYN),"BYN")}</p>{roundingAdjustment!=="0.00"?<p className="break-words text-muted-foreground">Округление КП: {formatAmount(roundingAdjustment,"BYN")}</p>:null}<p className="break-words font-medium">Подтверждённая сумма проекта: {total===null?formatMoneyTotal(null):formatAmount(total,"BYN")}</p>{pending?<p className="break-words text-xs text-muted-foreground">Новый итог появится после подтверждения сохранения услуг.</p>:null}</div>;
 }
 
 export function ProjectInlineContacts({canManage,clients}:{canManage:boolean;clients:ProductClientContact[]}){
