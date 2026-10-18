@@ -10,9 +10,9 @@ import { removeMinio, removeWeb } from './containers.mjs';
 /** @typedef {{web?:OwnedProcess,tests?:OwnedProcess,deps?:OwnedProcess}} OwnedProcesses */
 const purposes = ['tests', 'web', 'deps'];
 
-/** @param {number} pid */
-function processStat(pid) {
-  try { return readFileSync(`/proc/${pid}/stat`, 'utf8').split(') ').at(-1).split(' '); }
+/** @param {number} pid @param {typeof readFileSync} [read] */
+function processStat(pid, read = readFileSync) {
+  try { return read(`/proc/${pid}/stat`, 'utf8').split(') ').at(-1).split(' '); }
   catch (error) { if (error.code === 'ENOENT' || error.code === 'ESRCH') return null; throw error; }
 }
 
@@ -51,20 +51,34 @@ function readProcesses(target) {
   return state.processes;
 }
 
-/** Каждая живая группа подтверждается до сигналов и перед использованием deps. */
-function groupMembers(target, purpose, owner) {
+/** Каждая живая группа подтверждается до сигналов и перед использованием deps.
+ * Последний аргумент подменяет только чтение /proc в локальных guard-тестах. */
+export function groupMembers(target, purpose, owner, io = {}) {
+  const read = io.readFileSync ?? readFileSync, list = io.readdirSync ?? readdirSync;
+  const statFor = pid => processStat(pid, read);
   requireCi(Number.isInteger(owner.pid) && owner.pid > 1 && /^\d+$/.test(owner.startedAt), 'recorded-process');
-  const leader = processStat(owner.pid);
+  const leader = statFor(owner.pid);
   requireCi(!leader || leader[19] === owner.startedAt, 'process-start-identity');
   const live = [];
-  for (const name of readdirSync('/proc').filter(name => /^\d+$/.test(name))) {
-    const pid = Number(name), stat = processStat(pid);
+  for (const name of list('/proc').filter(name => /^\d+$/.test(name))) {
+    const pid = Number(name), stat = statFor(pid);
     if (!stat || Number(stat[2]) !== owner.pid || stat[0] === 'Z') continue;
     try {
-      const env = readFileSync(`/proc/${pid}/environ`, 'utf8').split('\0');
+      const env = read(`/proc/${pid}/environ`, 'utf8').split('\0');
       requireCi(env.includes(`PERO_CI_OWNER=${target.runId}-${target.attempt}`) && env.includes(`PERO_CI_PURPOSE=${purpose}`), 'process-owner');
       live.push(pid);
-    } catch (error) { if (error.code !== 'ENOENT' && error.code !== 'ESRCH') throw error; }
+    } catch (error) {
+      if (error.code === 'ENOENT' || error.code === 'ESRCH') continue;
+      if (error.code === 'EACCES') {
+        // Exit между stat и environ допустим только при подтверждённом исчезновении/Z того же процесса.
+        const after = statFor(pid);
+        if (!after) continue;
+        requireCi(/^\d+$/.test(stat[19] ?? '') && after[19] === stat[19] &&
+          after[2] === stat[2] && Number(after[2]) === owner.pid, 'process-recheck-identity');
+        if (after[0] === 'Z') continue;
+      }
+      throw error;
+    }
   }
   return live;
 }

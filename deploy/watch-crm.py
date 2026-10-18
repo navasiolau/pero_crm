@@ -39,6 +39,12 @@ def require(condition: bool, code: str) -> None:
         raise WatchError(code)
 
 
+def executable_renderer_tmpfs(value: object) -> bool:
+    """Разрешён только ограниченный /tmp для извлечённого Chromium, без noexec."""
+    flags = value.split(",") if isinstance(value, str) else []
+    return len(flags) == 5 and set(flags) == {"rw", "nosuid", "exec", "size=512m", "mode=1777"}
+
+
 @dataclass(frozen=True)
 class Target:
     project: str
@@ -74,6 +80,9 @@ def check_config(config: dict, target: Target) -> None:
                 and not renderer.get("privileged")
                 and renderer.get("pids_limit") == 128 and float(renderer.get("cpus", 0)) == 1
                 and str(renderer.get("mem_limit")) in ("1536m", "1610612736"), "kp-compose-bounds")
+        mounts = renderer.get("tmpfs", [])
+        require(isinstance(mounts, list) and len(mounts) == 1 and isinstance(mounts[0], str)
+                and mounts[0].startswith("/tmp:") and executable_renderer_tmpfs(mounts[0][5:]), "kp-compose-tmpfs")
         require(set(renderer.get("networks", {})) == {"kp_render"}
                 and "kp_render" in web.get("networks", {})
                 and config.get("networks", {}).get("kp_render", {}).get("internal") is True, "kp-compose-network")
@@ -171,6 +180,9 @@ def check_renderer_container(value: dict, target: Target, config: dict, *, allow
     check_container(value, target, "kp-renderer", require_running=not allow_stopped)
     host = value.get("HostConfig", {})
     network = config["networks"]["kp_render"].get("name", f"{target.project}_kp_render")
+    tmpfs = host.get("Tmpfs", {})
+    require(isinstance(tmpfs, dict) and set(tmpfs) == {"/tmp"}
+            and executable_renderer_tmpfs(tmpfs["/tmp"]), "kp-container-tmpfs")
     require(host.get("ReadonlyRootfs") is True and host.get("Memory") == 1536 * 1024 * 1024
             and host.get("NanoCpus") == 1_000_000_000 and host.get("PidsLimit") == 128
             and not host.get("PortBindings") and not host.get("Binds")
