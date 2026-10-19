@@ -13,4 +13,4 @@
 ## 3. Интеграция и приёмка
 - [x] 3.1 Добавить пресет ключа КП, OpenAPI и docs/API.md; сверить документацию с фактическими schema/route тестами.
 - [x] 3.2 Завершить local-приёмку после обычных merge: Prisma validate/generate, full typecheck, lint, 37 unit/HTTP-DI, OpenSpec strict и guarded inert Next build выполнены.
-- [ ] 3.3 Основному агенту провести guarded native/runtime и staging приёмку конкретного SHA/образа; до этого модуль выключен. По отчёту root часть API-проверок пройдена, но PDF вернул 503 до job/version; причина и сквозные PDF/договорные сценарии ещё не приняты (см. verification.md).
+- [ ] 3.3 Основному агенту провести guarded native/runtime и staging приёмку конкретного SHA/образа; до этого модуль выключен. По отчёту root реальные PDF/версии/private download и договорные сценарии позднее прошли; UI-save получил 403 при проверке Origin за proxy. Первый SDK PUT вернул 200; read-only диагностика локализовала отказ native event predicate до ошибочного требования одинаковых времён события и receipt (разница 2 мс). Исправление проверки и сквозная UI/AI-приёмка остаются UNACCEPTED (см. verification.md).
