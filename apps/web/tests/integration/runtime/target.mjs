@@ -243,9 +243,12 @@ export async function receiveCiArtifact(purpose, env = process.env) {
   let deadline = Date.now() + budget.pollMs, producer;
   async function api(resource, raw = false) {
     const remaining = deadline - Date.now(); requireCi(remaining > 0, 'producer-timeout');
-    const response = await fetch(`https://api.github.com/repos/${REPOSITORY}/${resource}`, {
+    const requestUrl = new URL(`https://api.github.com/repos/${REPOSITORY}/${resource}`);
+    requestUrl.searchParams.set('_ci_request_nonce', globalThis.crypto.randomUUID());
+    const response = await fetch(requestUrl, {
+      cache: 'no-store',
       headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${env.CI_ARTIFACT_TOKEN}`,
-        'X-GitHub-Api-Version': '2022-11-28' }, redirect: 'manual', signal: AbortSignal.timeout(Math.min(10000, remaining)) });
+        'X-GitHub-Api-Version': '2022-11-28', 'Cache-Control': 'no-cache, no-store' }, redirect: 'manual', signal: AbortSignal.timeout(Math.min(10000, remaining)) });
     if (raw) { requireCi(response.status === 302, 'artifact-download-redirect'); return response.headers.get('location'); }
     requireCi(response.ok, `producer-http-${response.status}`);
     const body = await response.text(); requireCi(body.length <= 8 * 1024 * 1024, 'producer-response-size'); return JSON.parse(body);
