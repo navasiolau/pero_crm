@@ -1,6 +1,6 @@
 # Проверка №187
 
-Дата: 18.10.2026. Worktree: `kp-187`, ветка `feature/187`.
+Дата: 18.10.2026; обновлено 19.10.2026. Worktree: `kp-187`, ветка `feature/187`.
 Реализация находится за выключенным `PERO_KP_ENABLED=0`. Коммит, push, включение
 раздела, операции с рабочими БД/S3 и установка интеграций этим агентом не выполнялись.
 
@@ -101,7 +101,10 @@ AI bundle не переписывался и не переустанавлива
 копиями изделий. Первый `POST /api/v1/kp/documents/:id/pdf` вернул
 `503 KP_UNAVAILABLE` до появления job/version. Две последующие DB-диагностики
 с откатом — `requestProposalPdf`, затем `runApiCommand` + `writeApiReceipt` —
-прошли целиком. Это не объясняет исходный HTTP-сбой и не подтверждает выпуск PDF.
+прошли целиком. На том этапе это не объясняло исходный HTTP-сбой и не подтверждало
+выпуск PDF. Позднее root сообщил об успешных реальных PDF/job/version/private
+download и договорных сценариях. Исторический 503 сохранён как факт раннего
+прогона; он больше не описывает текущую незавершённую UI/AI-приёмку.
 
 Root сообщил о восстановлении трёх выключенных флагов (`000`), отзыве временных
 ключей, восстановлении уведомлений и исходного Plugin. В рамках этого локального
@@ -132,8 +135,65 @@ message, SQL, meta.message, параметры, headers/body, ключи, URL и
 - Независимое read-only review: NO FINDINGS; проверены закрытые поля диагностики,
   неизменность HTTP-ответа и обе формы статического пути Next catch-all route.
 
-Открыты сквозной PDF/Chromium/версии/private artifact download, договоры,
-импорт/cutover №189 и физическая очистка №188. Задача 3.3 остаётся открытой;
-полная staging-приёмка конкретного нового SHA/образа и production-приёмка
-не заявляются. Targets и эксплуатационные действия выполняет root с guards цели
-в пределах разрешения владельца; раздел до сквозной приёмки остаётся выключенным.
+## Исправление session Origin и текущий статус 19.10.2026
+
+База этого исправления — чистая `feature/187` на
+`d1497e1d077c6aeacb45b4b2fd23ee5e2425ffff`. Root подтвердил: реальные PDF,
+сохранённые версии, private download и договорные сценарии прошли в последующих
+изолированных прогонах. Это отдельные результаты; они не закрывают приёмку
+редактора и AI transports.
+
+Реальный UI-save не принят: session REST-запрос получил 403 при проверке Origin
+за reverse proxy. При отсутствии AUTH_URL/NEXTAUTH_URL прежний fallback сравнивал
+публичный Origin с внутренним standalone `request.url`. В проверенном исправлении
+настроенный canonical Origin сохраняет строгий приоритет; иначе используется
+одиночный проверенный X-Forwarded-Host/Host, согласованный с существующей границей
+Caddy и подходом Next Server Actions. Отсутствующий, чужой, cross-site,
+неоднозначный либо malformed Origin/authority отклоняется. Caller body, wildcard
+и новые настройки не добавлены. Проверки Bearer/scopes/owner/sessionVersion,
+команды сохранения и выпуска не изменены.
+
+В ignored UI harness применена отдельно reviewed диагностика: HTTP status и
+API error code собственного REST-ответа сохраняются до проверки ACK, полные
+pageerror/stack/cause — только в private-файлах. Ошибка collector немедленно
+отклоняет ожидаемый flow; browser/workflow/verification/diagnostic callbacks
+дожидаются cleanup. PASSED receipt публикуется после финальной проверки
+диагностики. POST/Bell allowances и строгая политика разрешённых изменений не
+расширялись. Frozen packets прежних прогонов сохранены.
+
+Локальные проверки после применения исправления:
+
+- `pnpm --filter @pero/web exec tsx --test tests/kp-api-auth.test.ts` — **10/10 PASS**;
+  новый proxy fallback и canonical priority проверены вместе с отказами для
+  отсутствующих, чужих, cross-site, duplicate и malformed headers.
+- `pnpm --filter @pero/web exec tsc --noEmit --incremental false --pretty false` — PASS.
+- Действующие `ui-acceptance-offline.test.ts` — **12/12 PASS** без target calls;
+  отдельный reviewed diagnostics v2 ранее прошёл **5/5 PASS**, включая late closing
+  write failure, clean control и RED на прежней frozen-копии. Применённые helpers
+  совпадают с reviewed v2 по raw SHA.
+- Focused ESLint `api-auth.ts`, `kp-api-auth.test.ts` и двух собственных ignored
+  UI helpers — **0 errors / 0 warnings**.
+- `pnpm exec openspec validate kp-agent-api --strict` — PASS.
+
+По последнему отчёту root первый SDK PUT в закрытом cohort `b458` вернул HTTP 200.
+Generic отказ последующего native post-verification локализован до
+`UI_PRESERVATION_ONE_NEW_EXACT_EVENT_REQUIRED`. Отдельный read-only postmortem
+подтвердил: полный BUSINESS-снимок 76 таблиц до/после совпадает, RAW-различие
+ограничено ранее одобренным `lastUsedAt` одного legacy ApiToken. Последующая
+read-only проекция показала ровно одно новое событие нужного типа, actor и payload
+с нужной ревизией. Не проходит только требование точного совпадения `createdAt`:
+событие имеет время `14:59:40.501`, core receipt — `.503`, API receipt — `.509`.
+Core/API receipts принадлежат одной транзакции; event и delivery plan уже обработаны
+dispatcher в последующих транзакциях. Совпадение времён не является допустимым
+доказательством их связи. До/после этой проекции полные RAW и BUSINESS снимки
+76 таблиц совпали точно. Результат проекции остаётся `DIAGNOSTIC_NOT_ACCEPTED`;
+исправленная проверка и будущий прогон ещё не приняты.
+HTTP 200 не выдаётся за принятую сквозную SDK/MCP/Python-проверку; повторная
+запись здесь не выполнялась.
+
+Задача 3.3 остаётся открытой, **UNACCEPTED**. Требуются приёмка реального UI на
+390×844 и 1366×900 и завершённый AI/native результат на новой закреплённой
+staging паре. Импорт/cutover №189 и физическая очистка №188 сохраняют отдельные
+критерии приёмки. Полная staging- и production-приёмка не заявляются. По отчёту
+root staging выключен (`000`); targets, env, SSH, Docker, БД и S3 этим локальным
+исправлением не вызывались. Commit/push не выполнялись.
