@@ -197,3 +197,36 @@ staging паре. Импорт/cutover №189 и физическая очист
 критерии приёмки. Полная staging- и production-приёмка не заявляются. По отчёту
 root staging выключен (`000`); targets, env, SSH, Docker, БД и S3 этим локальным
 исправлением не вызывались. Commit/push не выполнялись.
+
+
+## Приёмка №187: свежий опрос артефактов CI, 19.10.2026
+
+Обычный merge Origin-исправления опубликован в staging как
+`9b70a20898dd9af1110df65d407c5852c5f72cbc` (feature/187
+`c4d3b1c07d3dfc7d3aabff899c98133799acc404`). CI305 / run39279296589
+не выпустил новых образов: в первой попытке backend и native отклонили ожидание
+артефакта с `CI_TARGET_REFUSED:producer-timeout`; во второй backend, renderer
+и обе component-проверки завершились успешно, native завершился ошибкой на шаге
+ожидания проверенного backend artifact. Native PostgreSQL/HTTP/S3-проверки
+прошли до этого ожидания. Это не является новой staging-приёмкой.
+
+Узкое исправление в test runtime добавляет уникальный query nonce и запрет
+кеширования к каждому metadata GET GitHub API. Signed blob URL и его запрос
+сохранены; проверки repo/run/SHA/attempt, producer/consumer, шага загрузки, имени,
+владельца и digest артефакта, redirect/domain, размеров и прежние time budgets
+не менялись. Workflow и production-код приложения не менялись. Кеширование
+как причина реального таймаута не установлено; исправление устраняет
+воспроизводимое залипание повторяемого URL в локальном контролируемом сценарии.
+
+Локальные evidence: reviewed ignored patch `db670354…`, review `60278375…`.
+Регрессия вызывает настоящий `receiveCiArtifact`: старая реализация получает
+`producer-timeout`; новая проходит реальные metadata/redirect guards до
+отдельного sentinel скачивания blob. ZIP, Python, файловая система и сеть
+в этой синтетической проверке не вызываются. GREEN — **11/11 PASS**; синтаксис,
+focused ESLint и `git apply --check` — PASS. Независимое source-only review
+подтвердило точные manifest hashes и ограничение изменения вложенным `api()`:
+**NO FINDINGS**. Результат нового настоящего CI требуется отдельно.
+
+Задача 3.3 остаётся открытой. Актуальные UI/AI, физическая очистка №188
+и архивный import/replay №189 не считаются принятыми. Текущие выключенные флаги
+и закрытые QA-доступы сохранены; production/main не затрагивались.
