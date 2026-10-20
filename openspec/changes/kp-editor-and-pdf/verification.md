@@ -183,3 +183,48 @@ CI296/run39153945719 для staging `a34c0e52188a0735c4c4e0bfd4de97f947e25618`: 
 Фактический staging web `84b204248c00fc9fac543bdf2432fcdb524cb9dd5f5f699135e7243431f84c24`, started18:30:50.545747602Z, healthy. Его Docker image ID и immutable RepoDigest соответствуют CI OCI index `a72548a8…`; CI config digest записан отдельно, эти разные поля не смешиваются. Прежние DB ID/start/volume и W07 SHA27e3… сохранены. Read-only Node metadata прошли в настоящем web: Node22.23.3, Prisma6.19.3, Zod4.4.3, S3 SDK3.1123.0, source/generated schema CF59/735d, frozen template/source/fonts. Image labels совпали с exact CI296 и renderer index; HTTPS health/login200.
 
 Полные receipts: ignored `runtime-readonly-a34c0e52/runtime-receipt-a0bd30c4-208e-4d08-9694-eae764d9089e.json`, `image-receipt-c8964ba1-111d-4e11-8672-0618e277e529.json`, `http-runtime-bdd82843-6947-4f17-807f-333989bb69c3.json`. SQL/S3/render RPC не вызывались. КП OFF; renderer URL/secret в web отсутствуют, private host renderer не установлен. Это достаточная приёмка исправленной упаковки и выключенного состояния для дальнейшего обычного merge185; полный gate4.3 остаётся открыт до финального API/UI/private-S3 окна189.
+
+## Исправление bundled workspace `__dirname` — 19.10.2026
+
+Root воспроизвёл один настоящий PDF POST без notification quarantine на staging
+`f29695b0c6b28b88606ee52632a866f237756796`/web image `e0affa1e…`: HTTP503,
+PDF-job/версия не созданы. Новый безопасный error report показал ENOENT в
+скомпилированном `4756.js:1:18718`. Root read-only просмотр этого actual image
+подтвердил встроенную реализацию getKpTemplateIdentity с чтением
+`join(__dirname,'source-manifest.json')`, где dirname уже `.next/server/chunks`.
+Raw HTTP receipt SHA `6f6192195e3ae754793b8ac789b69d876c85f1dfa9427d060cab724499cd5ffe`,
+compiled-stack receipt SHA `b34a7d1dacdb0c672c95dbf60cc78be447a0f6e00b2e0a94b0176b892942828d`.
+Все действия с target выполнял root; после repro раздел выключен, fixture credentials
+отозваны. Ранее успешные три createRequire-контекста и DB rollback-пробы не
+исполняли этот встроенный модуль и не являлись доказательством его исправности.
+
+Причина подтверждена кодом установленного Next15.5.20: webpack-config строит
+optOutBundlingPackageRegex для resolved `/node_modules/<package>/`; handle-externals
+проверяет resolved path и оставляет app-layer модуль в bundle при отсутствии
+совпадения. Workspace realpath `/app/packages/kp-template/index.cjs` не совпадает,
+поэтому одного serverExternalPackages недостаточно.
+
+Минимальное исправление в next.config.ts: первый server external handler только
+для exact bare `@pero/kp-template` возвращает `commonjs @pero/kp-template`.
+Стандартный Node loader использует уже упакованный пакет с исходным dirname.
+Остальные externals сохраняются; client compiler и browser subpath не меняются.
+Новые loader/route/диагностические HTTP-поверхности не добавлены. Шаблоны,
+CSS, fonts, assets и форматы PDF/DOCX не изменялись.
+
+`kp-template-webpack.test.mjs` использует настоящий bundled Next Webpack и
+production next.config после Serwist wrapper: компилирует server entry и
+исполняет результат из собственного `.next/server/chunks` без manifests/assets.
+До исправления фактически получен ENOENT `chunks/source-manifest.json` (**RED**).
+С external handler проверяются identity и SHA browserAsset, а также сохранность
+client externals и отказ от externalization browser subpath (**GREEN**).
+Новый файл автоматически попадает в backend CI: существующий glob
+`apps/web/tests/*.test.mjs` и default `*) cohort=backend` в ci-cd.yml; отдельная
+CI selection/HTTP gateway или изменение runtime flags не потребовались.
+
+Локально: focused compiler + renderer-client **4/4 PASS**; полный
+`tsc --noEmit --incremental false --pretty false` **PASS**; scoped ESLint **PASS**.
+Независимое read-only review конфигурации, Serwist wrapper и compiler-регрессии:
+**NO FINDINGS**. OpenSpec strict и `git diff --check` — **PASS**.
+Это проверка реального compiler/output, но не новый production Next build,
+не physical PDF/S3 и не staging-приёмка. CI и повторный actual PDF выполняет
+root после review/commit; gate4.3 остаётся открытым.

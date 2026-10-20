@@ -30,15 +30,47 @@ export function createKpBindingAuthorizer(store: KpAuthStore) {
   };
 }
 
+function originHeader(request: Request, name: string): string | null {
+  const value = request.headers.get(name);
+  if (value !== null && (!value || /[\s,\\]/.test(value))) throw Error("origin");
+  return value;
+}
+function parsedOrigin(value: string, header: boolean): URL {
+  if (!value || /[\s,\\]/.test(value) || !/^https?:\/\/[^/?#]+/i.test(value) ||
+    header && !/^https?:\/\/[^/?#]+\/?$/i.test(value)) throw Error("origin");
+  const url = new URL(value);
+  if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash ||
+    header && url.pathname !== "/" || url.hostname.includes("*")) throw Error("origin");
+  originAuthority(value.slice(value.indexOf("://") + 3).split(/[/?#]/, 1)[0], url.protocol);
+  return url;
+}
+function originAuthority(value: string | null, protocol: string): string | null {
+  if (value === null) return null;
+  if (/[@%/?#\\\s,]/.test(value) || value.endsWith(":")) throw Error("origin");
+  const url = new URL(`${protocol}//${value}`), hostname = url.hostname;
+  const labels = hostname.replace(/\.$/, "").split(".");
+  if (url.username || url.password || url.pathname !== "/" || url.search || url.hash || !hostname || hostname.length > 254 || url.port === "0" ||
+    !hostname.startsWith("[") && !labels.every(label => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(label))) throw Error("origin");
+  return url.host;
+}
 export function assertKpOrigin(request: Request, configuredOrigin?: string) {
   if (["GET", "HEAD", "OPTIONS"].includes(request.method)) return;
-  const origin = request.headers.get("origin");
   try {
-    const expected = new URL(configuredOrigin ?? request.url);
-    const actual = origin ? new URL(origin) : null;
-    if (!actual || !["http:", "https:"].includes(expected.protocol) || actual.origin !== expected.origin ||
-      actual.username || actual.password || actual.pathname !== "/" || actual.search || actual.hash ||
-      request.headers.get("sec-fetch-site") === "cross-site") throw Error("origin");
+    const origin = originHeader(request, "origin");
+    if (!origin) throw Error("origin");
+    const actual = parsedOrigin(origin, true), site = originHeader(request, "sec-fetch-site");
+    if (site && (!["same-origin", "same-site", "none"].includes(site))) throw Error("origin");
+    const proto = originHeader(request, "x-forwarded-proto");
+    if (proto && proto !== "http" && proto !== "https") throw Error("origin");
+    const forwarded = originAuthority(originHeader(request, "x-forwarded-host"), actual.protocol);
+    const host = originAuthority(originHeader(request, "host"), actual.protocol);
+    if (configuredOrigin !== undefined) {
+      if (actual.origin !== parsedOrigin(configuredOrigin, false).origin) throw Error("origin");
+    } else if (forwarded || host) {
+      // Как у Next Server Actions: Caddy задаёт X-Forwarded-Host, Host — fallback.
+      // Последний HTTP hop не определяет публичную схему и request.url может быть внутренним.
+      if (actual.host !== (forwarded ?? host)) throw Error("origin");
+    } else if (actual.origin !== parsedOrigin(request.url, false).origin) throw Error("origin");
   } catch { apiFailure("KP_ORIGIN_REQUIRED", 403, "Изменения КП доступны только из этого сайта CRM"); }
 }
 

@@ -244,17 +244,71 @@ test('CI guard refuses working/local targets and incomplete identity before conn
       ['producer', /CI_TARGET_REFUSED:producer-success/], ['archive', /CI_TARGET_REFUSED:artifact-archive-digest/],
     ]) {
       globalThis.fetch = async url => {
-        const endpoint = String(url);
-        if (endpoint.endsWith('/attempts/1')) return Response.json({ ...run,
+        const endpoint = new URL(String(url));
+        if (endpoint.pathname.endsWith('/attempts/1')) return Response.json({ ...run,
           ...(change === 'revision' ? { head_sha: 'f'.repeat(40) } : change === 'attempt' ? { run_attempt: 2 } : {}) });
-        if (endpoint.includes('/jobs?')) return Response.json({ total_count: 2, jobs: [backend,
+        if (endpoint.pathname.endsWith('/jobs')) return Response.json({ total_count: 2, jobs: [backend,
           { ...native, ...(change === 'producer' ? { status: 'completed', conclusion: 'failure' } : {}) }] });
-        if (endpoint.includes('/artifacts?')) return Response.json({ total_count: 1, artifacts: [artifact] });
-        if (endpoint.endsWith('/artifacts/3/zip')) return new Response(null, { status: 302,
+        if (endpoint.pathname.endsWith('/artifacts')) return Response.json({ total_count: 1, artifacts: [artifact] });
+        if (endpoint.pathname.endsWith('/artifacts/3/zip')) return new Response(null, { status: 302,
           headers: { location: 'https://fixture.blob.core.windows.net/types.zip' } });
-        assert.equal(endpoint, 'https://fixture.blob.core.windows.net/types.zip'); return new Response('corrupt archive');
+        assert.equal(endpoint.href, 'https://fixture.blob.core.windows.net/types.zip'); return new Response('corrupt archive');
       };
       await assert.rejects(receiveCiArtifact('types', ci), error);
     }
   } finally { globalThis.fetch = originalFetch; }
+});
+
+
+test('artifact poller refreshes a sticky full-URL cache without changing producer guards or budgets', async () => {
+  const originalFetch = globalThis.fetch, originalNow = Date.now, originalTimeout = globalThis.setTimeout;
+  const started = Date.parse('2026-10-19T12:00:00Z'), revision = ci.GITHUB_SHA, requests = [], cachedJobs = new Map();
+  const archiveReached = new Error('synthetic archive download reached');
+  let clock = started, jobViews = 0, sleeps = 0;
+  const run = { id: 169, run_attempt: 1, head_sha: revision, head_branch: 'staging', event: 'push',
+    repository: { full_name: ci.GITHUB_REPOSITORY }, path: '.github/workflows/ci-cd.yml' };
+  const backend = { id: 1, name: 'unit-tests (backend)', run_id: 169, run_attempt: 1, head_sha: revision,
+    started_at: new Date(started).toISOString() };
+  const native = { id: 2, name: 'native-tests', run_id: 169, run_attempt: 1, head_sha: revision, status: 'in_progress' };
+  const artifact = { id: 3, name: 'types-169-1-' + revision, expired: false, digest: 'sha256:' + '0'.repeat(64),
+    workflow_run: { id: 169, head_sha: revision } };
+  try {
+    Date.now = () => clock;
+    globalThis.setTimeout = (callback, delay) => { assert.equal(delay, 5000); clock += delay; sleeps++; callback(); return 0; };
+    globalThis.fetch = async (input, options) => {
+      const url = new URL(String(input));
+      if (url.origin === 'https://fixture.blob.core.windows.net') {
+        assert.equal(url.href, 'https://fixture.blob.core.windows.net/types.zip');
+        assert.equal(options.redirect, 'error'); assert.equal(options.headers, undefined);
+        throw archiveReached;
+      }
+      assert.equal(url.origin, 'https://api.github.com'); requests.push({ url, options });
+      if (url.pathname.endsWith('/attempts/1')) return Response.json(run);
+      if (url.pathname.endsWith('/jobs')) {
+        if (!cachedJobs.has(url.href)) {
+          const ready = jobViews++ > 0;
+          cachedJobs.set(url.href, { total_count: 2, jobs: [backend, { ...native,
+            steps: [{ name: 'Свежие types из проверенного OCI', status: ready ? 'completed' : 'in_progress',
+              ...(ready ? { conclusion: 'success' } : {}) }] }] });
+        }
+        return Response.json(cachedJobs.get(url.href));
+      }
+      if (url.pathname.endsWith('/artifacts')) return Response.json({ total_count: 1, artifacts: [artifact] });
+      assert.ok(url.pathname.endsWith('/artifacts/3/zip'));
+      return new Response(null, { status: 302, headers: { location: 'https://fixture.blob.core.windows.net/types.zip' } });
+    };
+    await assert.rejects(receiveCiArtifact('types', { ...ci, CI_ARTIFACT_TOKEN: 'synthetic-only-token' }), error => error === archiveReached);
+    assert.equal(jobViews, 2); assert.equal(sleeps, 1); assert.equal(clock - started, 5000);
+    assert.equal(requests.length, 5);
+    const nonces = requests.map(({ url, options }) => {
+      assert.equal(options.cache, 'no-store'); assert.equal(options.headers['Cache-Control'], 'no-cache, no-store');
+      assert.equal(options.headers.Accept, 'application/vnd.github+json'); assert.equal(options.headers.Authorization, 'Bearer synthetic-only-token');
+      assert.equal(options.headers['X-GitHub-Api-Version'], '2022-11-28'); assert.equal(options.redirect, 'manual');
+      assert.ok(options.signal instanceof AbortSignal);
+      assert.equal(url.searchParams.get('per_page'), /\/(jobs|artifacts)$/.test(url.pathname) ? '100' : null);
+      const nonce = url.searchParams.get('_ci_request_nonce'); assert.match(nonce ?? '', /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/);
+      return nonce;
+    });
+    assert.equal(new Set(nonces).size, requests.length);
+  } finally { globalThis.fetch = originalFetch; Date.now = originalNow; globalThis.setTimeout = originalTimeout; }
 });
