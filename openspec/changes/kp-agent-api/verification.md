@@ -14,12 +14,18 @@ KP_EDITOR_ONLY Lead FULL23, Locked8 UI34 и MANAGER_BROWSER составными
 Пределы internal HTTP, KP_EDITOR_ONLY и отдельных browser scenarios сохраняются;
 приёмка всего приложения и public HTTPS Bearer через Basic perimeter не приписываются.
 
-Пункт 3.3 остаётся `[ ]` для оставшейся согласованной сквозной приёмки physical №188
-и полного cutover №189; switch/production ещё не объявляются выполненными.
+Пункт 3.3 остаётся `[ ]`: физическая цепочка №188 не принята, финальная deployed
+composition нового SHA/образов №187/189 ещё NOT_RUN. Actual archive APPLY32/REPLAY36
+принят отдельно с provenance operational CLI4ff64fc; его receipts не выдаются за
+проверку будущего final image. Обязательные оставшиеся проверки не отменены;
+полная staging-приёмка, switch/main/production не объявляются выполненными.
 Датированные разделы ниже описывают соответствующие исторические cohorts:
 их прежние HOLD/NOT_RUN/PENDING сохранены и не переоткрывают позднее принятые
 компоненты. Точные UI34/AUTH35 closure/classification refs приведены в разделе
 «Manager 5+1, UI34 Locked/Mixed и AUTH35».
+Ранние Origin403, первый SDK200 и ошибочная native createdAt-проверка относятся
+к историческим попыткам. Они сохранены ниже; текущий API/AI01/UI/auth статус
+определяется последующими принятыми evidence, а не прежним UNACCEPTED.
 
 ## Выполнено
 
@@ -99,7 +105,7 @@ AI bundle не переписывался и не переустанавлива
 проверенные 19 сценариев/review остаются в `integrations/ai/verification.md` и не
 выдаются за новые тесты этого прогона.
 
-## Не завершено
+## Исторический итог local-сборки до staging-приёмки
 
 Обычная интеграция №180–186, собственная Prisma generation и полный typecheck
 завершены. Root выполнил `pnpm --filter @pero/web build`: PASS, все 36 static
@@ -946,3 +952,22 @@ CLOSED35 context SHA `a4a6d049eb20f294e3a1164169e2b0b68c46ab55c1a2ceccbd2d44ce52
 Task 3.3 остаётся [ ] для оставшейся сквозной приёмки, включая physical №188 и
 полный cutover №189; switch/production этим evidence не принимаются. Лимиты
 405/890/900/135 и matrix guards не менялись; новых target calls/tests не выполнялось.
+
+## Остаток обязательной приёмки после CLOSED43, 20.10.2026
+
+FULL43 дал настоящий read-only warm capture, затем остановился на локальной
+привязке secondary и не был допущен к дальнейшим physical-командам. Version/delete,
+marker/prune/retry/annual и послепрунинговый retained/restore410 результат этим
+cohort не доказаны; physical №188 остаётся NOT_ACCEPTED. Это не отменяет ранее
+принятые CORE4, AI01, UI, AUTH и обычные версии/PDF/договоры.
+
+Окно закрыто штатно: flags000, owned renderer STOPPED, 11 пользователей inactive
+и 22 ключа revoked. CLOSED context
+`kp-180/.playwright-mcp/kp-integration/fresh-full43-run-context.json`
+(SHA `0aa61d40171d87c89c6d517ec74fde17f5e54d44a8629da6b7bce5d194747b74`);
+original finish SHA `88a09d3f3ec715261d03eceda3b0acc5e20eae81b3696afd578f16f79e62411b`,
+terminal SHA `790775854b4a012e58062d45de18340e74841084f837a22551429108a004963c`
+подтвердил ORIGINAL_FINISH_OBSERVED/alive=false. Старые HOLD и исходные receipts
+не изменены. Нового принятого SHA/образа и final deployed composition пока нет;
+task3.3 остаётся `[ ]`. Эти записи не разрешают production/main или отмену
+оставшихся обязательных проверок; новых тестов/target calls этим обновлением нет.
