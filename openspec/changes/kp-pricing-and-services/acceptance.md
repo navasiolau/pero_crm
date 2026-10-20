@@ -84,4 +84,46 @@ RED→GREEN: pnpm --filter @pero/web exec tsx --test tests/inline-field-subscrip
 
 Все семь денежных сценариев PASS, включая печатное округление и оба знака поправки; реальные Decimal и фиксированный курс считаны из PostgreSQL. Подтверждены повтор проекции, сохранность всех десяти финансовых таблиц и созданных внутри rollback-транзакции SETTLED/PayrollEntry/Payment фактов, реальный LEAD guard, возврат в LEAD, отказы по роли/количеству/чужой связи и savepoint-откат после фактических Product UPDATE и CHECK failure. Внешняя транзакция принудительно завершена rollback; ни одна её тестовая запись не фиксировалась. Все76 таблиц и четыре проверяемые группы public-каталога (constraints/functions/triggers/indexes) совпали: baseline SHA256 `9611d3fda844eaf11e046f7d8521e177d433e4d1b563ad9ee4038bb1ac668368`. Все11 новых таблиц пусты до/после, внешние tripwires0.
 
-Принят только staging pricing adapter №182 и точная runtime identity. Общая оркестрация сохранения №181, API operation idempotency, конкуренция со сменой этапа и настоящий staging browser desktop/mobile остаются NOT_TESTED этим запуском. Пункты3.3/3.4 сохраняются открытыми до выполнения всех своих условий. Production, дампы, S3 и инфраструктурная конфигурация не изменялись. По отдельному поручению основного агента субагент фиксирует только эту OpenSpec-приёмку локальным docs commit; ignored receipts и диагностический код в commit не включаются.
+Принят только staging pricing adapter №182 и точная runtime identity. Общая оркестрация сохранения №181, API operation idempotency, конкуренция со сменой этапа и настоящий staging browser desktop/mobile остаются NOT_TESTED этим запуском. На этом этапе пункты3.3/3.4 оставались открытыми; последующее закрытие только3.4 приведено ниже. Production, дампы, S3 и инфраструктурная конфигурация не изменялись. По отдельному поручению основного агента субагент фиксирует только эту OpenSpec-приёмку локальным docs commit; ignored receipts и диагностический код в commit не включаются.
+
+## 20.10.2026: общая оркестрация и интеграционная приёмка 3.4
+
+Root принял совокупное доказательство CORE23 + AI01 + CI306 на staging
+`acbd164cb6e79194b7fe87a0469d60d745dead1a`, web image
+`sha256:8ef120a68e378d47b71ea5913ec8bd85391cfa4f2f8cd1ec25169151a55bd77f`.
+Закрыт только 3.4; UI desktop/mobile 3.3 остаётся открытым. Далее `Q180` —
+`kp-180/.playwright-mcp/kp-integration`, `Q187` — `kp-187/.playwright-mcp/kp-187` в сохранённых worktrees.
+
+- CORE23 actual HTTP save + SQL readback: `M01-real-decimal-USD-discount-quantity-total-services`,
+  `M02-explicit-crmKind-split-services-absolute-discount`, `M03-signed-rounding-and-source-10075-boundary`,
+  `C04-reorder-remove-restore-stable-product-history`, `CAS-conflict-no-implicit-version`.
+  Проверены реальные цены/услуги/количества, фиксированный FX, история и stale revision без неявного выпуска версии.
+  Money ACK: `Q180/qa-window-e644c93c-42df-47b3-b1c1-e95cffb34974/ack-7a9362b1-0d8a-42a5-8582-2ac14411b440.private.json`,
+  SHA256 `3d3c4460869cc010a1213f2b9e1edb8ce1a56a3ec31b629de553bdeafadde3d6`.
+  Закрывающая классификация CORE23: `Q187/full23-closure-classification-be523ee8-ff2a-46ea-899d-ae01cdc27605.json`, SHA256 `2f53ae84561c8e8172e047695cac9818751b8ad2cc2a965cf352a84fb28555ec`.
+- API operation idempotency: `AI01-SDK-confirmed-identical-UUID-replay` — тот же UUID/body, HTTP200 и native REPLAY VERIFIED;
+  `AI01-SDK-real-stale-409-no-effect` — HTTP409 и native STALE VERIFIED.
+  `Q187/ai-acceptance-run-e85c0578-026c-4a56-af59-9d2c49cefff9/result.json`, SHA256 `4e79ee2a3e5a5ed01fbefed8032e2f78ce4c8c4ffeaf9a5a0505f7e553c0132f`;
+  Root acceptance `Q180/full4-acceptance-b784fa50-5efa-43ab-856e-7f6aa67e0baa.json`, SHA256 `dd7aad274eb93899f2a224c1bdc376f26aed956fbdad4fff416db0665baa31fa`.
+- Конкуренция общего save/lifecycle: CI306/run `39290284146`, все семь jobs SUCCESS,
+  `kp185/proposal-save-vs-lead-exit-save-first-real-advisory-waiter` и `kp185/proposal-save-vs-lead-exit-stage-first-real-advisory-waiter`.
+  Два реальных PostgreSQL PID, наблюдаемые advisory waiter и `Project FOR UPDATE`, оба порядка commit/reject, revisions и неизменность native snapshot после отклонённого save/повторов.
+  Receipt `Q180/ci306-green-d89592a4-086f-479a-9a6e-f08d285db47d.json`, SHA256 `42974641842e010620a4116ba4ac433f119740754576507cfc986c69c95c68a4`.
+
+API `api-documents.ts:130,152,195–196` передаёт настоящий pricing hook с `applyProjectionInTransaction` общему save; `proposal-core.ts:162,187` исполняет его в той же транзакции после общего mutex.
+Это составное доказательство сверх adapter-only3.2. CI race использует pricing-заглушку (`changed:false`), а SDK replay меняет описание; concurrent HTTP с реальным priced DML и повтор изменения цены этими receipts не заявляются. Root принял перечисленную совокупность для3.4 без дополнительного HTTP-concurrency gate. Исторические отказы и остальные незакрытые сценарии сохранены.
+
+
+## 20.10.2026: денежные сценарии и staging browser desktop/mobile — 3.3
+
+После принятия 3.4 Root принял отдельную композицию для 3.3 на той же развёрнутой
+ревизии `acbd164cb6e79194b7fe87a0469d60d745dead1a`, web image
+`sha256:8ef120a68e378d47b71ea5913ec8bd85391cfa4f2f8cd1ec25169151a55bd77f`
+(CI306, run `39290284146`, attempt 1). Пункт 3.3 закрыт следующими фактическими результатами.
+
+- Денежный HTTP/native: CORE23 Money ACK `3d3c4460869cc010a1213f2b9e1edb8ce1a56a3ec31b629de553bdeafadde3d6` по уже указанному пути подтвердил M01/M02/M03 — Decimal, USD/фиксированный курс, цену единицы и количество, процентную/абсолютную скидку, общую сумму/разбивку услуг и поправку округления. Реальные save/SQL readback и CAS409 сохранили историю; quarantine восстановлен. Границы и закрытие CORE23 — classification `2f53ae84…`, указанная в 3.4.
+- API: AI01 result `4e79ee2a…` и Root acceptance `dd7aad27…` по указанным выше путям подтвердили реальное SDK/MCP/Python сохранение и сохранность денег при replay/stale. Отдельный current-image receipt `Q187/file-access-denials-run-33bfe963-adb3-400f-8751-9d26bf9fcb2d/result.private.json`, SHA256 `375d4386caa075ff85fa202148a389a5e86f3f69bc3944408774b71fef2633d7`, содержит PASSED `NBRB-BYN-2026-10-01` и `NBRB-USD-2026-10-01` (HTTP200, source:NBRB, rate 1 / 3.0207). Это API-проверки валюты/курса; браузерный ввод валют этими результатами не заявляется.
+- Lead23: настоящий browser MANAGER сохранил КП перед private PDF export и выполнил `182-real-overview-pricing-and-quantity` на 390 и 1366 px. Проверены отображаемые суммы, услуги и количества против актуальной SQL-проекции. `Q187/ui-acceptance-run-0ddd28d0-a893-419d-8d9d-f098a8dec01f/receipt.json`, raw SHA256 `89ed32e384e8ae37366eff1095a6e2b7c9346de7ac7da459e7e06a074915e702`, semantic result `26a00b40e83cd3da9ef2bc13598f74c9d1ce364439bf26f8e049229979aad11f`; browserErrors:[] и сохранённые desktop/mobile screenshots.
+- UI34 Locked: четыре PASSED `182-real-overview-pricing-and-quantity` — проекты 255/256 на каждой ширине 390/1366; суммы/услуги/количество в браузере сопоставлены с SQL, browserErrors:[]. `Q187/ui-acceptance-run-34ade56d-bd1f-4c10-a6e6-d87e52c7608e/receipt.json`, raw SHA256 `a6c4b7884a91c2afa2bcc70bef483c321278e803d0ba2204b36daa5f239aa307`; host producer result `a6ac46db07c901157bab6f87d8cf9c3475e9a5f38e813b1c425b8a48626c659e`. Каждый pricing read имеет native preservation с совпадением BUSINESS и сохранённым RAW; допустима только approved legacy `ApiToken.lastUsedAt`. Root full76-границы и четыре каталога зафиксированы отдельно для прогона. Финальный `Q180/fresh-ui34-run-context.json` SHA256 `98f9442b300d8a1b0eb85e49719df2f466711dda0ccf33ed209043bc8938c86b`: original finish и terminal ORIGINAL_FINISH_OBSERVED, 11 inactive / 22 revoked, alive:false, flags000, owned renderer stopped.
+
+Денежные изменения доказаны HTTP/native сценариями, desktop/mobile — перечисленными browser pricing cases. Ранние NOT_CHECKED/REFUSED/HOLD и ограничения исходных receipts сохранены; принятый текст 3.4 не изменён. Новых запусков, миграций или изменений production это обновление документов не выполняло.
