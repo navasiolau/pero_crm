@@ -44,7 +44,7 @@
 
 ## Оставшиеся обязательные gates
 
-Session backend браузерного harness синтетический. Последующий CI294 подтвердил Linux OCI Chromium141, native CI и публикацию образов (точные receipts ниже); они не заменяют реальную API/UI/private-host приёмку после интеграции185–189. KP остаётся OFF, приватный renderer на staging host ещё не установлен. Покомпонентная точность DOCX подтверждена исходным generator/ZIP entries; визуальный рендер всех страниц DOCX в Word/LibreOffice и договор из нескольких реальных КП остаются сквозной приёмкой186/189.
+Session backend браузерного harness синтетический. Последующий CI294 подтвердил Linux OCI Chromium141, native CI и публикацию образов (точные receipts ниже); они не заменяют реальную API/UI/private-host приёмку после интеграции185–189. KP остаётся OFF, приватный renderer на staging host ещё не установлен. Покомпонентная точность DOCX подтверждена исходным generator/ZIP entries. На 20.10.2026 визуальный gate первого reference-case закрыт в portable LibreOffice для всех 8 страниц (см. дополнение ниже). Движок Word и визуальная матрица DOCX из нескольких КП этим результатом не покрыты; оставшаяся сквозная приёмка186/189 отдельна.
 
 №184 предоставляет закрытые страницы/адаптеры и приватные render ports, но не публикует выпуски и не делает переходы проектов. Эти действия выполняют185–187 после чтения сохранённой ревизии и серверной проверки прав/этапа. Раздел должен оставаться выключенным до завершения4.3.
 
@@ -228,3 +228,44 @@ CI selection/HTTP gateway или изменение runtime flags не потр�
 Это проверка реального compiler/output, но не новый production Next build,
 не physical PDF/S3 и не staging-приёмка. CI и повторный actual PDF выполняет
 root после review/commit; gate4.3 остаётся открытым.
+
+## Reference DOCX — все страницы исходника и worker — 20.10.2026
+
+Root выполнил точный первый сценарий `apps/kp-renderer/test/docx.test.cjs` на ревизии `acbd164cb6e79194b7fe87a0469d60d745dead1a`: исходный генератор и неизменённый `isolatedWorker`, один primary и одно намеренно крошечное бежевое PNG-приложение. Перед вычислением закреплены 15 RAW checkout pins отдельно от Git acbd: 5 файлов RAW-exact, у 10 текстовых только разрешённая CRLF→LF projection с точным Git LF SHA; других нормализаций нет. Закреплены также 4 dependency pins (`docx 9.6.1`, `jszip 3.10.2`). Вычисление выполнено bundled Node `24.19.0`, worker — через child с `env:{}` без наследования host environment; Chromium/HTTP/DB/Docker не вызывались. Все распакованные ZIP entries исходного и worker DOCX совпали побайтно.
+
+Локальный portable LibreOffice `26.8.1.1 bf6ef2662401c7d6dce671ab4deb26ee0af3a7c1` получен Root из проверенного MSI размером 374870016 байт, SHA `c6298b10cfa1748bcbedad94c62ce771e240e5021bfd6d7a967cd571b04b5312`, подпись Valid/The Document Foundation; administrative extraction выполнен без desktop registration. Использованы локальные `GARA.TTF`, `GARABD.TTF`, `GARAIT.TTF` с проверенными SHA, сохранёнными в visual-review receipt. В обоих PDF присутствуют Garamond BaseFont. Шрифты/шаблоны не менялись и не загружались в репозиторий или на сервер.
+
+Канонический `render_docx.py` сохранён без изменений, SHA `8b48b8f05f30cc6c7b5a7bd8e18e7ea93a61aec1ea601026a3358b2105f0903a`. Первый запуск создал все 8 PNG, затем завершился exit1 на Windows WinError145 при cleanup собственного profile; исходный transport receipt сохранён. Root применил только локальный adapter `ignore_cleanup_errors` с guard собственного TMP, SHA `fdab5effa1cb2e4b8b4e5d70b8886fc7349aafa0570c52ed595de0aa712d360f`; оба v2-render завершились exit0. Фактические PDF содержат 8/8 страниц; при 144 DPI у всех 8 страниц совпали размеры 1191×1684 и RGB SHA, differingPixels=0. После этого Root открыл все 8 worker PNG в исходном разрешении: текст, реквизиты, приложения, project placeholder и акт читаемы; регрессий обрезки/наложения/глифов относительно равных baseline-страниц не обнаружено. По завершающему Root readback процессов LibreOffice — 0.
+
+Полные ignored evidence находятся в `D:/Projects/pero_crm_worktrees/kp-184/.playwright-mcp/kp-184/docx-pair-local-a9c837e1/`:
+
+- `pair-receipt.json`, SHA `cdfafe2b9b76cf8536126f0d837c2aab35f9fe5ad9aac8aa82143c99b2ee0d90`: exact input/source/dependency pins, original/worker DOCX и все ZIP-entry hashes; исходный статус до визуального рендера сохранён.
+- `all-pages-comparison.json`, SHA `07e9a5fb04b44ae262a314d7e8792b9a51732dc531b1c2ba7531d15b68e33537`: реальные PDF counts, fonts и сравнение всех 8 PNG/RGB; технический статус VISUAL_REVIEW_PENDING дополнен отдельным Root review.
+- `root-visual-review.json`, SHA `d6899504d11c513ecc61816dd2008681980873a1438347f67f51d6282578e025`: `REFERENCE_DOCX_ALL_8_PAGES_VISUALLY_ACCEPTED`, перечень просмотренных страниц 1–8 и hashes локальных Garamond fonts. PNG сохранены в `original-render-v2/` и `worker-render-v2/`; первоначальный cleanup failure не удалён.
+
+Закрыт только local all-pages visual gate этого reference-case: тело договора, реквизиты, одно tiny PNG-приложение, неизменённый project placeholder и акт. Это не full-smoke/multi-КП visual, не Word-engine и не общая интеграционная приёмка. Ранее полученные OOXML и PDF proofs остаются отдельными; статусы UI/auth/retention/archive и общего gate4.3 этим дополнением не закрываются.
+
+## Multi-КП reference DOCX — все 11 страниц — 20.10.2026
+
+Root после review принял дополнительный локальный reference: два совместимых КП, по два одинаковых известных tiny PNG (95 байт) на КП. Это новый явно заданный сценарий на исходных ContractModel/`isolatedWorker` ревизии `acbd164cb6e79194b7fe87a0469d60d745dead1a`, а не точное воспроизведение full smoke. Исходный генератор и worker дали равные распакованные ZIP entries; прежние 15 RAW/Git LF и 4 dependency pins сохранены. Оба canonical LibreOffice-render с прежними Garamond и scoped cleanup adapter завершились exit0. PDFinfo и Pypdf независимо подтвердили 11/11 страниц; при 144 DPI у всех 11 страниц совпали RGB SHA, differingPixels=0, в обоих PDF присутствует Garamond BaseFont.
+
+Агент лично открыл все 11 worker PNG в исходном разрешении: тело/реквизиты, четыре страницы приложений с правильными номерами двух КП и страниц 1/2, 2/2, project placeholder и акт. Регрессий обрезки/наложения/глифов относительно равных baseline-страниц не обнаружено; исходные переносы и оформление не менялись. После работы owned portable LibreOffice процессов — 0. Прежние 8-page evidence сохранены без изменений. Полные новые ignored evidence: `D:/Projects/pero_crm_worktrees/kp-184/.playwright-mcp/kp-184/docx-multi-reference-local-e64a93b7/`:
+
+- `pair-receipt.json`, SHA `fa18db1242415dc85a5a4ded10efb8491477c6a79a8ac82d2497931ea88cbdcf`: входы двух КП, исходный/worker DOCX и ZIP-entry proof.
+- `all-pages-comparison.json`, SHA `277a7ec0f24a3384fe9919dafbe20b6f5d4efec3af5a6f59992814b9db0e7221`: реальные counts обоих PDF, fonts и все 11 PNG/RGB comparisons.
+- `visual-review.json`, SHA `3becb4cec1c53729a0fb52d7088c159ad03d48dfbd2cf45d4a279b847b3e15c4`: персональный просмотр страниц 1–11 с путями/SHA; последующий Root review подтвердил этот scope.
+- `final-local-qa.json`, SHA `d1d1e8ad6f0572d18e76e6f47ad46bd724d000ab20339b13db6e3c974ea3b649`: source/helper/render/cleanup bindings и сохранённая история локальных comparator failures; успешен v3 без изменения DOCX/PDF/PNG.
+
+Закрыт local all-pages visual gate этого multi-КП reference. Это не full-smoke, не Word-engine и не staging/API/UI/private-S3 приёмка; остальные pending gates и task checkboxes этим дополнением не закрываются.
+
+## Actual staging UI/runtime — 20.10.2026
+
+Root принял покомпонентные API/browser результаты на staging `acbd164cb6e79194b7fe87a0469d60d745dead1a`, web image `sha256:8ef120a68e378d47b71ea5913ec8bd85391cfa4f2f8cd1ec25169151a55bd77f`, renderer image `sha256:ec35d0956e41d55f7d21cac46c5ea07430bde99d920a9538791899cc75dac5a8`; CI306/run39290284146. Прежние CORE4, Lead23 Save/private PDF и API operations72/72 остаются отдельными принятыми evidence; повторный прогон ими не заявляется.
+
+UI34: Locked8/8 PASSED на390/1366 px — private images/layout, свежие client defaults и история договора, pricing/quantity двух КП; две фактические contract operations имеют native VERIFIED. Root readback22/25 и inspect26 ACK. Mixed-role revocation APPLIED; старые bearer/session получили401/401. Manager deactivation не отправлялся: local405 reserve отказал до dispatch. Bell сохраняет FAILED_UNRELATED_BELL/UNKNOWN/accepted=false; приёмка Bell не заявляется.
+
+Classification: `kp-188/.playwright-mcp/kp-188/ui34-locked-mixed-closure-classification-b3752198-55f8-4058-ac4f-12cc62bce04d.json`, SHA `33147ab14ee7c19b0344f799002224c42f1bee32b61b5f42581e37cd599b5ac0`. Проверены14 full76 и14 narrow snapshots: каталоги/history84/83 и OrgSetting exact; разрешённые own contract/audit/credential изменения отделены от foreign preservation, весь RAW сохранён. Единственная legacy telemetry projection — ApiToken.lastUsedAt по прежнему40bf/5289/ff7ac profile. Original finish подтвердил foreign RAW/BUSINESS exact,11inactive/22revoked; daemon ORIGINAL_FINISH_OBSERVED/alive=false, flags000/rendererSTOPPED. Пять собственных PURGE_MEDIA/PENDING сохранены; global pending0 и physical cleanup не заявляются.
+
+Manager принят только как composition5+1: прежние пять browser behaviors и отдельный actual download шестого, с закрытием UI34. Proof `kp-187/.playwright-mcp/kp-187/manager-draft-browser-download-only-4e244c2d-final-composition-dc70be54-8c60-4b80-86c2-b983841bc80c.json`, SHA `46d068629c5cbfd34c61ece90228d2f032c156c65fa929d1a2f6e905fac87f81`. Исходный full-program FAILED и все прежние HOLD сохранены; они не переименованы в PASS.
+
+Сохранённые выше local reference proofs всех8 и11 страниц DOCX, byte/pixel parity PDF/приложений и исходного генератора остаются без изменений; Word-engine и иной full-smoke ими не заявляются. Вместе с принятыми native/CORE4 runtime и реальным desktop/mobile UI это закрывает4.3 в scope редактора/renderer №184. Physical cleanup/retained-after-annual сценарии №188/185/186 и общий cutover/main/production остаются отдельными.
