@@ -56,7 +56,7 @@ function App(){const initial=normalizeListQuery(section,location.search.slice(1)
 }createRoot(document.getElementById('root')).render(<App/>);
 `;
 const boundaries = {
-  "@/components/kanban-scroll-area": `import React from 'react';import {KanbanScrollArea as Actual} from ${JSON.stringify(path.join(web, "src/components/kanban-scroll-area.tsx").split(path.sep).join("/"))};export function KanbanScrollArea(props){window.__focusStates?.push(props.searchFocus);return <Actual {...props}/>;}`,
+  "@/components/kanban-scroll-area": `import React from 'react';import {KanbanScrollArea as Actual} from ${JSON.stringify(path.join(web, "src/components/kanban-scroll-area.tsx").split(path.sep).join("/"))};export function KanbanScrollArea(props){window.__focusStates?.push(props.searchFocus);React.useEffect(()=>{window.__committedFocus=props.searchFocus;},[props.searchFocus]);return <Actual {...props}/>;}`,
   "next/navigation": `export const useRouter=()=>({replace:(href)=>{const q=href.split('?')[1]||'';window.__navigation.push(q);if(!window.__hold)window.__accept(q);},push:href=>window.__opened=href,refresh:()=>{if(!window.__holdRefresh)window.__refresh()}});export const usePathname=()=>location.pathname;`,
   "next/link": `import React from 'react';export default function Link({children,...props}){return <a {...props}>{children}</a>}`,
   "@/server/list-preferences-actions": `import {encodeListPreference} from '@/lib/list-state';export async function saveListPreference(section,query){window.__savedQuery=query;if(window.__holdSave)await new Promise(resolve=>window.__releaseSave=resolve);return {ok:true,value:encodeListPreference(section,query,'saved')}}`,
@@ -156,6 +156,8 @@ try{
   await stale.evaluate(()=>window.__accept(window.__navigation.at(-1)));await settledCenter(stale,section);checks.push(section+':pending_and_stale_RSC_wait_for_current_query_rows');await finish(stale);
 
   const missing=await makePage(section);await missing.evaluate(()=>window.__omitTarget=true);await apply(missing,q);assert.deepEqual(await position(missing),{left:0,top:0});
+  // Подтверждаем commit отсутствующего совпадения до имитации следующего SSE.
+  await expect.poll(()=>missing.evaluate(()=>{const focus=window.__committedFocus;return focus?.query===window.__number&&focus.ready===true&&focus.cardId===null;}),{timeout:5000}).toBe(true);
   await missing.evaluate(()=>{window.__omitTarget=false;window.__accept(window.__clientQuery)});await waitFrames(missing);assert.equal(await missing.locator('[data-kanban-card-id="target"]').count(),1);assert.deepEqual(await position(missing),{left:0,top:0});checks.push(section+':missing_exact_consumed_no_late_SSE_focus');await finish(missing);
 
   const axes=await makePage(section);await axes.evaluate(()=>window.__hold=true);await apply(axes,q);

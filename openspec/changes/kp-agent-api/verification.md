@@ -971,3 +971,30 @@ terminal SHA `790775854b4a012e58062d45de18340e74841084f837a22551429108a004963c`
 не изменены. Нового принятого SHA/образа и final deployed composition пока нет;
 task3.3 остаётся `[ ]`. Эти записи не разрешают production/main или отмену
 оставшихся обязательных проверок; новых тестов/target calls этим обновлением нет.
+
+## CI307: missing-ready barrier в существующем browser fixture, 20.10.2026
+
+В CI307 на staging c442 components0 прошли68/69 случаев; прежний products
+kanban test остановился на `missing_exact_consumed_no_late_SSE_focus`
+(`kanban-search-focus-browser.mjs`, прежняя строка159): вместо `{left:0,top:0}`
+получено `{left:884,top:1313}`. Это initial missing-response/SSE сценарий;
+отдельный post-manual-scroll guard на142 не падал. По проверке Root оба CI runner
+были Ubuntu24.04.5; смена ОС и Node не объявляются причиной отказа.
+
+Source допускает timing race: `apply()` ждёт clientQuery/pending и два RAF,
+но ProductsKanban применяет rows отдельным effect; hook потребляет отсутствие
+точного совпадения только при ready=true/cardId=null. Если SSE возвращает target
+раньше этого commit, поздний focus ещё допустим. Committed state исходного CI
+отказа не записан, поэтому это гипотеза причины, а не доказанный runtime trace.
+В существующем QA wrapper добавлен только committed-focus сигнал через useEffect;
+перед SSE тест ждёт ту же query с ready=true/cardId=null. Оба исходных scroll
+assert сохранены. Production ProductsKanban/hook, sleeps/retries и глобальные
+timeouts не менялись; новых тестов не добавлено.
+
+Локально ровно один запуск существующей проверки:
+`pnpm --filter @pero/web exec node --test tests/product-kanban-search-readiness.test.mjs`
+— **1/1 PASS**, skipped0, около31.4s. Предшествующий
+`pnpm --filter @pero/web exec node --check tests/kanban-search-focus-browser.mjs`
+— PASS. Это локальный browser fixture с контролируемым транспортом, без CRM DB/S3
+или live staging; прежний CI307 failure не переписан в PASS. Новая CI/staging
+приёмка этим запуском не заявляется, task3.3 остаётся открытой.
