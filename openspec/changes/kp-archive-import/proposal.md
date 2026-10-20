@@ -9,7 +9,7 @@
 - Read-only discovery исходных JSON, изображений и DOCX; фиксированный manifest с SHA-256, датами, связями, confidence и явными неизвестными.
 - Архивные КП без Project/Product/Client; исходные состояния и неизвестные поля сохраняются вместе с оригинальными JSON-байтами.
 - PENDING ledger и настоящие UPLOAD_MEDIA jobs до I/O, подтверждённый readback, leases и единая транзакция публикации всего архива.
-- Dry-run CLI по умолчанию; apply только по reviewed manifest и guards существующих local5433/staging и приватного target storage.
+- Dry-run CLI по умолчанию; apply только по reviewed manifest и guards существующих local5433/staging либо отдельному явно разрешённому production release proof с точной runtime/DB/storage binding.
 - Документ переключения после приёмки с сохранением старого R2; глобальный флаг не включается автоматически.
 - По явному решению владельца: восстановление отсутствующих изображений из проверенных локальных файлов/PDF через отдельный reviewed portable map. Источник сначала проверяется настоящим GET, исходный URL и provenance сохраняются; это не заявление об оригинальных отсутствующих R2-байтах.
 

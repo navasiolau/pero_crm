@@ -184,3 +184,29 @@ ORIGINAL_FINISH_OBSERVED/alive=false, 11 inactive/22 revoked; OFF000 сохра�
 при подтверждённой эквивалентности исходников они сохраняют собственный provenance.
 Task3.2 остаётся `[ ]`; полная staging-приёмка и production/main не заявляются
 и не разрешаются этой записью. Старые HOLD сохранены; новых code/тестов/target calls нет.
+
+## 20.10.2026 — отдельная production target binding
+
+Устранено ограничение CLI, которое направляло все apply через QA-only
+`nativeAcceptanceBinding`. Production теперь имеет отдельный typed target и
+fail-closed guard; сам QA helper, local/staging guards, store, writer lifecycle
+и offline dry-run сохранены. До DB I/O нужны reviewed release proof и явное
+разрешение UUID операции с точными manifest/target/operator/revision/CLI hash.
+Runtime проверяется по настоящему hostname и hashes установленных BUILD_ID/server.js;
+подключённая БД — по cluster/system identifier, server address/port, DB OID,
+current database/public schema/effective+session user и отсутствию recovery.
+Runtime/DB/storage/URL/срок proof перепроверяются через существующий lifecycle.
+
+Выполнены только прежние archive/recovery/performance тесты, одним запуском:
+**52/52 PASS**, skipped0. Новых тестов/cases/assertions в tests нет. Полный web
+strict TypeScript (`tsc --noEmit --incremental false`), scoped ESLint трёх
+изменённых TS-файлов и `openspec validate kp-archive-import --strict` — PASS.
+Эти прежние regression checks не являются runtime-проверкой нового production guard.
+
+Proof является доверенной декларацией привилегированного оператора с отдельным
+review release receipt, а не криптографической подписью. Реальные production
+identity/proof здесь не получались, DB/cloud/production операции не выполнялись;
+**production execution/rehearsal: NOT_RUN**. `pg_control_system()` без нужного
+доступа останавливает запуск, новых grants нет. Реальный production выпуск и
+операция требуют отдельного согласования после ручной staging-проверки владельцем.
+Task3.2 остаётся `[ ]`; старые APPLY32/REPLAY36 provenance и HOLD не изменены.

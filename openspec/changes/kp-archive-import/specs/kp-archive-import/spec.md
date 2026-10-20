@@ -44,7 +44,7 @@ Importer SHALL сохранять все обнаруженные DOCX в dry re
 
 ### Requirement: Применение ограничено проверенной целью
 
-CLI SHALL по умолчанию выполнять dry-run; apply MUST требовать reviewed manifest, точную привязку local5433/staging и приватного storage. Переключение UI/API SHALL оставаться отдельным действием после приёмки.
+CLI SHALL по умолчанию выполнять dry-run; apply MUST требовать reviewed manifest и точную привязку local5433/staging либо отдельно reviewed production release proof с явным разрешением конкретной операции и повторными runtime/DB/storage guards. Переключение UI/API SHALL оставаться отдельным действием после приёмки.
 
 #### Scenario: Не совпадает endpoint или цель БД
 - **WHEN** фактическая цель отличается от manifest
