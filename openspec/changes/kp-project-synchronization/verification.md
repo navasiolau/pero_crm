@@ -93,7 +93,7 @@ Receipt содержит **83 применённые миграции**, `pendin
 ### Оставшиеся сценарии и границы приёмки
 
 - Native joins и отзыв доступа приняты на реальном staging; это не замена браузерных сценариев чтения карточек, поиска, файлов и навигации через развёрнутый UI. Deployed browser-приёмка объединённой ветки остаётся pending.
-- Параллельный общий allocator и replay приняты в PostgreSQL CI. Сохранение КП одновременно со сменой этапа через общий lifecycle/API ещё pending и должно быть проверено после интеграции №185/187.
+- Параллельный общий allocator и replay приняты в PostgreSQL CI. На этом первоначальном этапе сохранение КП одновременно со сменой этапа через общий lifecycle/API оставалось pending после интеграции №185/187; последующее закрытие 4.5 зафиксировано ниже 20.10.2026.
 - Денежные формулы, media/render/version/contract/API/retention/import последующих changes этим №181 runner не принимаются. Публичный раздел остаётся выключен до сквозной приёмки; разрешение владельца на коммиты/staging №181–189 не заменяет результаты оставшихся сценариев. Main/production-выпуск и production-миграции не выполнялись в рамках этой приёмки.
 
 ## Исправления после независимого ревью
@@ -109,3 +109,28 @@ Native-набор того же CI получил 73 PASS / 2 FAIL: старый
 Product читается только после `FOR UPDATE`. Shared warehouse lock всегда берётся раньше Product lock; фазу FROZEN/VERIFYING проверяем после заблокированного чтения только при необходимости пересчёта количества. Общее `warehouseMetadataGate` использует те же выделенные примитивы. Текстовая no-op правка при заморозке допускается, а изменение фактического количества перед Product lock приводит к guarded пересчёту либо полному откату.
 
 Focused domain/client на этом этапе: 23/23, ESLint изменённых файлов — PASS. Native helper дополнен реальной перестановкой позиций 1↔2 и проверкой сохранённых значений; позднее этот helper успешно выполнен основным агентом в guarded rollback, как зафиксировано выше.
+
+## 20.10.2026: интеграционная приёмка 4.5
+
+Root принял совокупное доказательство CORE23 + AI01 + CI306 для staging
+`acbd164cb6e79194b7fe87a0469d60d745dead1a`, web image
+`sha256:8ef120a68e378d47b71ea5913ec8bd85391cfa4f2f8cd1ec25169151a55bd77f`.
+Пункт 4.5 закрыт; browser 4.4 и прочие незакрытые gates этим решением не принимаются.
+Далее `Q180` — `kp-180/.playwright-mcp/kp-integration`, `Q187` — `kp-187/.playwright-mcp/kp-187` в сохранённых worktrees.
+
+- CI306 / run `39290284146`, attempt 1, все семь jobs SUCCESS:
+  `Q180/ci306-green-d89592a4-086f-479a-9a6e-f08d285db47d.json`, SHA256 `42974641842e010620a4116ba4ac433f119740754576507cfc986c69c95c68a4`.
+  Cases `kp185/proposal-save-vs-lead-exit-save-first-real-advisory-waiter` и
+  `kp185/proposal-save-vs-lead-exit-stage-first-real-advisory-waiter` используют два настоящих PostgreSQL PID, advisory waiter и `Project FOR UPDATE`.
+  Save-first обновляет revision и отклоняет stage exit со старым PDF; stage-first принимает этап и отклоняет save без изменения КП/позиций/истории/receipts. Повторы оставляют полный native snapshot неизменным.
+- CORE23 actual API: `C01-empty-temporary-and-identical-replay`, `C04-reorder-remove-restore-stable-product-history`, `CAS-conflict-no-implicit-version`,
+  `V01-V02-real-issued-PDF-history-and-explicit-restore`, `D01-D03-multi-source-DOCX-consistent-publish-and-transition`,
+  `L02-locked-write-denial-raw-state-denial-contract-editable`. Принятие CORE4 и закрывающая классификация:
+  `Q187/full23-closure-classification-be523ee8-ff2a-46ea-899d-ae01cdc27605.json`, SHA256 `2f53ae84561c8e8172e047695cac9818751b8ad2cc2a965cf352a84fb28555ec`.
+- AI01 actual SDK PUT: `AI01-SDK-confirmed-identical-UUID-replay` и `AI01-SDK-real-stale-409-no-effect` — PASSED;
+  одинаковые operationId/body вернули HTTP200, stale — HTTP409, native REPLAY/STALE — VERIFIED.
+  `Q187/ai-acceptance-run-e85c0578-026c-4a56-af59-9d2c49cefff9/result.json`, SHA256 `4e79ee2a3e5a5ed01fbefed8032e2f78ce4c8c4ffeaf9a5a0505f7e553c0132f`;
+  Root acceptance `Q180/full4-acceptance-b784fa50-5efa-43ab-856e-7f6aa67e0baa.json`, SHA256 `dd7aad274eb93899f2a224c1bdc376f26aed956fbdad4fff416db0665baa31fa`.
+
+Связь доказательств: API `api-documents.ts:195–196` вызывает тот же `saveProposalInTransaction`, что и CI race; lifecycle использует общий `patchProjectStageTransaction`.
+Это составное доказательство, не concurrent HTTP test. В двух CI cases pricing hook заглушён (`changed:false`); одновременные HTTP save↔stage с реальным финансовым DML не наблюдались и не объявляются принятыми. Root не вводит такой дополнительный gate. Исторические HOLD и отдельные ограничения прежних receipts сохранены.
