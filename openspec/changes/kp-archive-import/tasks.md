@@ -10,7 +10,7 @@
 - [x] 2.1 Реализовать guarded reserve/upload/finalize coordinator и SQL archive store с genuine upload jobs/PENDING ledger; проверить partial-I/O resume, uncertain ACK, replay и отсутствие business calls.
 - [x] 2.2 Подключить реальные shared writer dependencies через CLI, dry-run default и reconciliation/cutover документацию; проверить аргументы и отсутствие автоматической активации.
 - [x] 2.3 Реализовать согласованное владельцем восстановление missing images через reviewed map/root, cloud-first object404, точные ссылки, bounded bytes и provenance; проверить ошибки источника, reappearance, подмену bytes/map/path, переносимость и replay без бизнес-изменений.
-- [ ] 2.4 Реализовать согласованное explicit ADMIN-only восстановление существующего unpublished reserve по exact reviewed SQL witness: новый оператор отдельно от исходных creators/payload/fingerprint, два audit receipts, GET-only ранее verified объектов и прежняя атомарная публикация; проверить foreign/live lease/cleanup/manifest/target/hash/operation fences и replay0, подготовить root-only native regression без самостоятельного запуска БД/S3.
+- [x] 2.4 Реализовать согласованное explicit ADMIN-only восстановление существующего unpublished reserve по exact reviewed SQL witness: новый оператор отдельно от исходных creators/payload/fingerprint, два audit receipts, GET-only ранее verified объектов и прежняя атомарная публикация; проверить foreign/live lease/cleanup/manifest/target/hash/operation fences и replay0, подготовить root-only native regression без самостоятельного запуска БД/S3.
 
 ## 3. Проверки
 

@@ -101,7 +101,7 @@ async function main() {
   const recoveryMap = values.has("recovery-map") ? await jsonFile(values.get("recovery-map")!) : undefined;
   const sourceFor = (profile: ArchiveManifest["source"]) => {
     const cloud = createReadonlyArchiveSource(profile, () => sourceConfigurationFromEnvironment(process.env));
-    return recoveryMap === undefined ? cloud : createRecoveryArchiveSource(cloud, recoveryMap, values.get("recovery-root")!);
+    return { ...(recoveryMap === undefined ? cloud : createRecoveryArchiveSource(cloud, recoveryMap, values.get("recovery-root")!)), close: () => cloud.close() };
   };
   if (apply) archiveAssert(/^[a-f0-9]{64}$/.test(values.get("reviewed") ?? "") && values.has("actor-id") && /^[a-f0-9]{40}$/.test(values.get("revision") ?? "") && /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(values.get("run-id") ?? ""), "ARCHIVE_APPLY_ARGUMENTS_REQUIRED");
   if (prepare) {
@@ -110,8 +110,10 @@ async function main() {
     const links = values.has("links") ? await jsonFile(values.get("links")!) : {}, originals = values.has("originals") ? await jsonFile(values.get("originals")!) : {};
     archiveAssert(isObject(links) && Object.values(links).every(value => isObject(value) && typeof value.primaryDocumentId === "string" && typeof value.reviewed === "boolean" && /^[a-f0-9]{64}$/.test(String(value.evidenceSha256))) && isObject(originals) && Object.values(originals).every(value => typeof value === "string"), "ARCHIVE_REVIEW_MAP_INVALID");
     const source = sourceFor(sourceProfile);
-    const manifest = await prepareArchiveManifest(source, target, sharedDependencies(), links as unknown as Record<string, DocxBinding>, originals as Record<string, string>);
-    await writePrivateOutput(values.get("output")!, manifest); process.stdout.write(JSON.stringify({ mode: "prepared", output: resolve(values.get("output")!), ...archiveReport(manifest) }) + "\n"); return;
+    try {
+      const manifest = await prepareArchiveManifest(source, target, sharedDependencies(), links as unknown as Record<string, DocxBinding>, originals as Record<string, string>);
+      await writePrivateOutput(values.get("output")!, manifest); process.stdout.write(JSON.stringify({ mode: "prepared", output: resolve(values.get("output")!), ...archiveReport(manifest) }) + "\n"); return;
+    } finally { await source.close(); }
   }
   archiveAssert(values.has("manifest") && !values.has("source-profile") && !values.has("target-profile") && !values.has("output") && !values.has("links") && !values.has("originals"), "ARCHIVE_MANIFEST_ARGUMENT_REQUIRED");
   const deps = sharedDependencies(), manifest = validateArchiveManifest(await jsonFile(values.get("manifest")!), deps);
@@ -135,7 +137,7 @@ async function main() {
     } });
     const result = await applyArchiveManifest(manifest, { apply: true, reviewedHash: values.get("reviewed"), deps, source, store, io, guardTarget });
     process.stdout.write(JSON.stringify(result) + "\n");
-  } finally { client?.release(); await pool.end(); }
+  } finally { try { client?.release(); await pool.end(); } finally { await source.close(); } }
 }
 if (require.main === module) void main().catch((error: unknown) => {
   const code = error && typeof error === "object" && "code" in error && typeof error.code === "string" && /^[A-Z][A-Z0-9_]{1,100}$/.test(error.code) ? error.code : "ARCHIVE_IMPORT_FAILED";
