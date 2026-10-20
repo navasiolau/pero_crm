@@ -15,5 +15,5 @@
 
 - [x] 3.1 Выполнить targeted tests, strict typing, lint, OpenSpec strict и diff check; записать фактические результаты и ограничения.
 - [x] 3.2 После обычных merge зависимостей выполнить root guarded native SQL/MemoryS3 на local 5433; подтвердить точную сохранность всех 76 таблиц, catalog, 83 receipt и 11 пустых таблиц КП.
-- [ ] 3.3 Проверить настоящее S3 versioning/readback на разрешённых тестовых объектах; MemoryS3 не считать физической приёмкой.
-- [ ] 3.4 Принять развёрнутый staging по точным SHA/образу и runtime-сценариям; push/build/local native не считать staging-приёмкой.
+- [ ] 3.3 Проверить настоящее S3 versioning/readback на разрешённых тестовых объектах; MemoryS3 не считать физической приёмкой. FULL43: readonly LIST/HEAD/GET подтверждены; подготовка версий и физические Delete/COPY/ретраи/отмена/годовая очистка не выполнялись, пункт открыт.
+- [ ] 3.4 Принять развёрнутый staging по точным SHA/образу и runtime-сценариям; push/build/local native не считать staging-приёмкой. SHA/образы и readonly capture FULL43 закреплены в evidence.md; обязательная физическая цепочка и after-annual retained contract не приняты, пункт открыт.
