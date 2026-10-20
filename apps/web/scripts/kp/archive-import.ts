@@ -31,9 +31,10 @@ function sharedDependencies(): ArchiveDependencies {
     const parsed = method(state, "parseProposalState")(value); archiveAssert(isObject(parsed) && Array.isArray(parsed.items) && parsed.items.every(isObject), "ARCHIVE_STATE_INVALID"); return parsed as JsonObject & { items: JsonObject[] };
   }, expiry(date) { const expiry = method(media, "proposalMediaExpiry")(date); archiveAssert(expiry instanceof Date && Number.isFinite(expiry.getTime()), "ARCHIVE_EXPIRY_INVALID"); return expiry; } };
 }
-function sharedTargetIO(): ArchiveTargetIO {
-  const media = sharedModule("media-storage"), images = method(media, "createProposalMediaS3Storage")();
-  const artifacts = method(sharedModule("artifact-storage"), "createProposalArtifactStorage")({ maxBytes: 128 * 1024 * 1024 });
+export function sharedTargetIO(load: (name: string) => unknown = sharedModule): ArchiveTargetIO {
+  const media = load("media-storage"), images = method(media, "createProposalMediaS3Storage")();
+  const mediaBinding = method(load("media-contract"), "parseMediaBinding");
+  const artifacts = method(load("artifact-storage"), "createProposalArtifactStorage")({ maxBytes: 128 * 1024 * 1024 });
   const artifactFor = (object: ArchiveObject) => ({ id: object.artifactId, proposalId: null, contractId: object.contractId, storageBinding: object.binding, key: object.key, sha256: object.sha256, size: object.size, mimeType: object.mimeType });
   return {
     binding: () => parseBinding(method(artifacts, "binding")()),
@@ -43,7 +44,7 @@ function sharedTargetIO(): ArchiveTargetIO {
         const verified = await method(artifacts, "uploadAndVerify")(artifactFor(object), bytes, authorize);
         archiveAssert(isObject(verified) && verified.key === object.key && verified.sha256 === object.sha256 && verified.size === object.size, "ARCHIVE_READBACK_MISMATCH");
       } else {
-        archiveAssert(canonical(parseBinding(method(images, "currentBinding")())) === canonical(object.binding), "ARCHIVE_TARGET_STORAGE_CHANGED");
+        archiveAssert(canonical(mediaBinding(method(images, "currentBinding")())) === canonical(mediaBinding(object.binding)), "ARCHIVE_TARGET_STORAGE_CHANGED");
         await method(media, "putVerifiedProposalMedia")(images, object.binding, { key: object.key, sha256: object.sha256, size: object.size, mimeType: object.mimeType }, Buffer.from(bytes), authorize);
       }
       await authorize(); return { key: object.key, sha256: object.sha256, size: object.size };

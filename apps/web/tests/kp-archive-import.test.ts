@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { Readable } from "node:stream";
+import { S3Client } from "@aws-sdk/client-s3";
+import { sharedTargetIO } from "../scripts/kp/archive-import";
+import * as mediaStorage from "../src/server/kp/media-storage";
+import * as mediaContract from "../src/server/kp/media-contract";
+import { createProposalArtifactStorage } from "../src/server/kp/artifact-storage";
 import { applyArchiveManifest } from "../src/server/kp/archive/apply";
 import { ArchiveImportError, assertArchiveDatabaseIdentity, byteHash, canonical, valueHash, type TargetProfile } from "../src/server/kp/archive/contract";
 import { allArchiveObjects, archiveReport, prepareArchiveManifest, validateArchiveManifest } from "../src/server/kp/archive/manifest";
@@ -8,6 +14,55 @@ import { archiveFixture } from "./helpers/kp-archive-fixture";
 
 const isCode = (...codes: string[]) => (error: unknown) => error instanceof ArchiveImportError && codes.includes(error.code);
 const sourceEnvironment = () => ({ R2_ACCOUNT_ID: "synthetic-account", R2_BUCKET_NAME: "synthetic-public", CONTRACTS_R2_BUCKET_NAME: "synthetic-contracts", R2_PUBLIC_URL: "https://source.example.invalid", R2_ACCESS_KEY_ID: "synthetic-public-key", R2_SECRET_ACCESS_KEY: "synthetic-public-secret" });
+
+function cliTargetStorage(binding: TargetProfile["storage"], bytes: Buffer) {
+  const configuration = { mode: "s3" as const, ...binding, endpoint: new URL(binding.endpoint).toString(),
+    region: binding.region ?? "us-east-1", accessKeyId: "SYNTHETIC_KEY", secretAccessKey: "SYNTHETIC_SECRET" };
+  const counters = { puts: 0, gets: 0 };
+  // Настоящий SDK сериализует команды, но весь HTTP остаётся в memory handler.
+  const client = new S3Client({ ...configuration, forcePathStyle: true, maxAttempts: 1,
+    credentials: { accessKeyId: configuration.accessKeyId, secretAccessKey: configuration.secretAccessKey },
+    requestHandler: { handle: async (request: { method: string }) => {
+      assert.ok(["PUT", "GET"].includes(request.method), "synthetic-unexpected-S3-command");
+      if (request.method === "PUT") counters.puts++; else counters.gets++;
+      return { response: { statusCode: 200, headers: request.method === "GET" ? { "content-length": String(bytes.length) } : {},
+        body: Readable.from(request.method === "GET" ? [bytes] : []) } };
+    } } });
+  const images = mediaStorage.createProposalMediaS3Storage({ configuration: () => configuration, client: () => client });
+  const artifacts = createProposalArtifactStorage({ configuration: () => configuration, client: () => client });
+  const io = sharedTargetIO(name => {
+    if (name === "media-storage") return { ...mediaStorage, createProposalMediaS3Storage: () => images };
+    if (name === "media-contract") return mediaContract;
+    assert.equal(name, "artifact-storage"); return { createProposalArtifactStorage: () => artifacts };
+  });
+  return { io, images, counters, close: () => client.destroy() };
+}
+
+test("CLI shared target normalizes the same media endpoint before immutable Put and readback", async () => {
+  const f = archiveFixture(), manifest = await prepareArchiveManifest(f.source, f.target, f.deps, f.links);
+  const object = allArchiveObjects(manifest).find(value => value.role === "optimized")!, bytes = f.cloud.get("public:" + object.source.key)!.bytes;
+  const target = cliTargetStorage(manifest.target.storage, bytes);
+  try {
+    assert.equal(target.images.currentBinding().endpoint, object.binding.endpoint + "/");
+    assert.equal(canonical(target.io.binding()), canonical(manifest.target.storage));
+    assert.deepEqual(await target.io.ensure(object, bytes, async () => {}), { key: object.key, sha256: object.sha256, size: object.size });
+    assert.deepEqual(target.counters, { puts: 1, gets: 1 });
+  } finally { target.close(); }
+});
+
+test("CLI shared target refuses changed endpoint, bucket, region or region presence before Put", async () => {
+  const f = archiveFixture(), manifest = await prepareArchiveManifest(f.source, f.target, f.deps, f.links);
+  const object = allArchiveObjects(manifest).find(value => value.role === "optimized")!, bytes = f.cloud.get("public:" + object.source.key)!.bytes;
+  const { region: _region, ...withoutRegion } = object.binding; void _region;
+  for (const binding of [{ ...object.binding, endpoint: "http://127.0.0.2:9000" }, { ...object.binding, bucket: "foreign-bucket" },
+    { ...object.binding, region: "us-east-2" }, withoutRegion]) {
+    const target = cliTargetStorage(manifest.target.storage, bytes);
+    try {
+      await assert.rejects(target.io.ensure({ ...object, binding }, bytes, async () => {}), isCode("ARCHIVE_TARGET_STORAGE_CHANGED"));
+      assert.deepEqual(target.counters, { puts: 0, gets: 0 });
+    } finally { target.close(); }
+  }
+});
 
 test("LIST full milliseconds and whole-second GET prepare without losing frozen LIST precision", async () => {
   const f = archiveFixture(), list = f.source.list;
