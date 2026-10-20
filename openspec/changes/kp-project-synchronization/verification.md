@@ -92,7 +92,7 @@ Receipt содержит **83 применённые миграции**, `pendin
 
 ### Оставшиеся сценарии и границы приёмки
 
-- Native joins и отзыв доступа приняты на реальном staging; это не замена браузерных сценариев чтения карточек, поиска, файлов и навигации через развёрнутый UI. Deployed browser-приёмка объединённой ветки остаётся pending.
+- Native joins и отзыв доступа приняты на реальном staging; первоначально браузерная приёмка карточек, поиска, файлов и навигации оставалась незавершённой. Последующее закрытие 4.4 по MANAGER-композиции FULL26 + UI34 зафиксировано ниже 20.10.2026.
 - Параллельный общий allocator и replay приняты в PostgreSQL CI. На этом первоначальном этапе сохранение КП одновременно со сменой этапа через общий lifecycle/API оставалось pending после интеграции №185/187; последующее закрытие 4.5 зафиксировано ниже 20.10.2026.
 - Денежные формулы, media/render/version/contract/API/retention/import последующих changes этим №181 runner не принимаются. Публичный раздел остаётся выключен до сквозной приёмки; разрешение владельца на коммиты/staging №181–189 не заменяет результаты оставшихся сценариев. Main/production-выпуск и production-миграции не выполнялись в рамках этой приёмки.
 
@@ -134,3 +134,20 @@ Root принял совокупное доказательство CORE23 + AI0
 
 Связь доказательств: API `api-documents.ts:195–196` вызывает тот же `saveProposalInTransaction`, что и CI race; lifecycle использует общий `patchProjectStageTransaction`.
 Это составное доказательство, не concurrent HTTP test. В двух CI cases pricing hook заглушён (`changed:false`); одновременные HTTP save↔stage с реальным финансовым DML не наблюдались и не объявляются принятыми. Root не вводит такой дополнительный gate. Исторические HOLD и отдельные ограничения прежних receipts сохранены.
+
+## 20.10.2026: браузерная приёмка 4.4 — MANAGER, композиция 5+1
+
+Root принял шесть фактических сценариев интерфейса на staging объединённой ветки
+`acbd164cb6e79194b7fe87a0469d60d745dead1a`, web image
+`sha256:8ef120a68e378d47b71ea5913ec8bd85391cfa4f2f8cd1ec25169151a55bd77f`.
+Это та же пара CI306 / run `39290284146`, attempt 1, с семью SUCCESS jobs, указанная выше; пункт 4.4 закрыт по фактическим браузерным результатам.
+
+- FULL26: пять сценариев своего MANAGER со статусом PASSED — деталь связанного DRAFT, карточка проекта с переходом в изделие и возвратом, глобальная карточка DRAFT в серверном HTML браузера (JavaScript выключен), реальный omnisearch с переходом, оригинал изображения в FileViewer. Receipt `Q187/manager-draft-browser-readonly-flow-finalcheck-run-51f57ef3-7913-4a62-bd4c-24c0da23ec4c/receipt.private.json`, SHA256 `d0de7622586d9278fa0cc9786a54af434fa688ae2a122d3e0145eca26b4f0d1e`; SHA256 пяти снимков экрана проверены. Полный прогон FULL26 сохраняет FAILED на следующем шаге скачивания.
+- UI34: отдельный узкий прогон выполнил только шестой сценарий `own-ProductFile-real-browser-download`, PASSED, cases:1. Получено настоящее событие Chromium Download, проверен собственный URL, `suggestedFilename: qa-original.jpg`, `failure:null`; сохранённый download совпал с оригинальным HTTP body той же сессии MANAGER: 3306 байт, SHA256 `158df8fc99300414ff26490c9966ea75878f463a4727cce60ee9a6685c661374`. Проверены ID/имя/MIME собственного файла из SSR, native guard `2b95…` до/после и DRAINED context/browser. Producer receipt SHA256 `e8ec78e6c419a11fd92ff007f96bc88bf2d9c75e8413df89dd39b920658c3bfa`; fixed Root step12 SHA256 `db95200e10e9b2d1d8260b710c25c5d8d31cb346c3477602ec6685e4cd63cc91`.
+- В обоих прогонах Root full76 before/finally-after и четыре каталога проверены независимо checker `5289…`. BUSINESS совпадает; RAW сохранён с единственным разрешённым изменением legacy `ApiToken.lastUsedAt`. Три строки OrgSetting и все остальные narrow fields неизменны. Внутри узкого UI34 Native before/after совпадает также RAW. Native guard не выдавал размер/SHA отдельного файла; байты проверены сравнением двух действительных сохранённых файлов.
+- UI34 закрыт original finish: `Q180/fresh-ui34-run-context.json` SHA256 `98f9442b300d8a1b0eb85e49719df2f466711dda0ccf33ed209043bc8938c86b`; `Q180/ui34-emergency-finish-3518a641-2510-4cb6-8c2d-f4b1d4681cba.private.json` SHA256 `56a510a8b74c7f569554118fb06bc8223b888e3d422cd67d42a37649d985d129`. Deadline terminal SHA256 `f213a9efb5387fb52cda8a3c68948b9886d78af2f0ae6e95d9d17552e87101a0`: alive:false, ORIGINAL_FINISH_OBSERVED, 11 inactive / 22 revoked. OFF receipt `3c533f6b…` подтвердил flags `000` и остановленный owned renderer; metadata/proof `816e5b34…/847b2e0a…` и нормальный W07 сохранены.
+
+[Итоговая private classification](D:/Projects/pero_crm_worktrees/kp-187/.playwright-mcp/kp-187/manager-draft-browser-download-only-4e244c2d-final-composition-dc70be54-8c60-4b80-86c2-b983841bc80c.json),
+SHA256 `46d068629c5cbfd34c61ece90228d2f032c156c65fa929d1a2f6e905fac87f81`,
+связывает исходные receipts, screenshots, byte artifacts, full76/narrow и closure refs.
+Принимается композиция пяти прежних сценариев и одного нового; исторические FAILED/HOLD и черновой receipt с closure:null сохранены.
