@@ -15,4 +15,4 @@
 
 - [x] 3.1 Выполнить focused tests, TS, lint, OpenSpec strict и diff; записать фактические результаты и composition-интерфейсы.
 - [x] 3.2 После обычных merge №180–185 подтвердить SQL composition настоящих №181/182/183/185/186 и чистой ContractModel №184: guarded local5433 native 8/8, общий rollback 76 таблиц/каталога, без частичных публикаций и изменения фактов. Пять физических IO портов заблокированы; их приёмка отдельно в 3.3.
-- [ ] 3.3 После согласованной интеграции принять физические renderer/S3 upload/readback, DOCX/PDF визуально, браузерные сценарии desktop/mobile и фактический staging SHA/образ.
+- [ ] 3.3 После согласованной интеграции принять физические renderer/S3 upload/readback, DOCX/PDF визуально, браузерные сценарии desktop/mobile и фактический staging SHA/образ. Текущие IO/UI и reference DOCX8/11 приняты; новый договор из retained PDF после actual годовой очистки №188 остаётся pending (verification.md).
