@@ -1,5 +1,5 @@
-import { GetObjectCommand, ListObjectsV2Command, S3Client } from "@aws-sdk/client-s3";
-import { ArchiveImportError, archiveAssert, parseSourceProfile, valueHash, type ArchiveSource, type Binding, type SourceArea, type SourceProfile } from "./contract";
+import { GetObjectCommand, ListObjectsV2Command, S3Client, type S3ClientConfig } from "@aws-sdk/client-s3";
+import { ArchiveImportError, archiveAssert, jsonClone, parseSourceProfile, valueHash, type ArchiveSource, type Binding, type SourceArea, type SourceProfile } from "./contract";
 
 type Credentials = { accessKeyId: string; secretAccessKey: string };
 export type SourceConfiguration = { profile: SourceProfile; credentials: { public: Credentials; contracts: Credentials } };
@@ -14,26 +14,44 @@ export function normalizeArchiveSourceReadError(error: unknown): unknown {
 }
 
 /** Только List/Get. Legacy handler/env.js не импортируются и write/delete команды отсутствуют. */
-export function createReadonlyArchiveSource(expected: SourceProfile, configuration: () => SourceConfiguration): ArchiveSource {
+export function createReadonlyArchiveSource(expected: SourceProfile, configuration: () => SourceConfiguration,
+  makeClient: (configuration: S3ClientConfig) => S3Client = configuration => new S3Client(configuration)): ArchiveSource & { close(): Promise<void> } {
   const pinned = parseSourceProfile(expected);
+  type Connection = { s3: S3Client; identity: string; area: SourceArea; active: number; retired: boolean; done: Promise<void>; finish(): void };
+  const clients = new Map<SourceArea, Connection>(), connections = new Set<Connection>(); let closed = false;
+  const destroy = (connection: Connection) => {
+    if (!connection.retired || connection.active || !connections.delete(connection)) return;
+    if (clients.get(connection.area) === connection) clients.delete(connection.area);
+    try { connection.s3.destroy(); } finally { connection.finish(); }
+  };
+  const retire = (connection: Connection) => { connection.retired = true; destroy(connection); };
   const client = (area: SourceArea) => {
+    archiveAssert(!closed, "ARCHIVE_SOURCE_CLOSED");
     const current = configuration();
     archiveAssert(valueHash(parseSourceProfile(current.profile)) === valueHash(pinned), "ARCHIVE_SOURCE_BINDING_CHANGED");
     const binding: Binding = current.profile[area], credentials = current.credentials[area];
     archiveAssert(credentials.accessKeyId && credentials.secretAccessKey, "ARCHIVE_SOURCE_CREDENTIALS_REQUIRED");
-    const s3 = new S3Client({ endpoint: binding.endpoint, region: binding.region ?? "auto", credentials, maxAttempts: 1,
-      requestChecksumCalculation: "WHEN_REQUIRED", responseChecksumValidation: "WHEN_REQUIRED" });
-    return { s3, bucket: binding.bucket };
+    const identity = valueHash({ binding, credentials }); let connection = clients.get(area);
+    if (!connection || connection.identity !== identity) {
+      if (connection) retire(connection);
+      let finish!: () => void; const done = new Promise<void>(resolve => { finish = resolve; });
+      connection = { s3: makeClient({ endpoint: binding.endpoint, region: binding.region ?? "auto", credentials: { ...credentials }, maxAttempts: 1,
+        requestChecksumCalculation: "WHEN_REQUIRED", responseChecksumValidation: "WHEN_REQUIRED" }), identity, area, active: 0, retired: false, done, finish };
+      clients.set(area, connection); connections.add(connection);
+    }
+    connection.active++; const held = connection;
+    return { s3: connection.s3, bucket: binding.bucket, release: () => { held.active--; destroy(held); } };
   };
   const allowed = (area: SourceArea, key: string, list: boolean) => {
     const prefixes = area === "public" ? ["documents/", "kp/"] : ["contracts/", "exports/"];
     archiveAssert(prefixes.some(prefix => key.startsWith(prefix)) && !key.includes("\\") && !key.split("/").some((part, index, parts) => part === "." || part === ".." || !part && index !== parts.length - 1) && (list || !key.endsWith("/")), "ARCHIVE_SOURCE_KEY_INVALID");
   };
   return {
-    profile: () => pinned,
+    profile: () => jsonClone(pinned),
+    async close() { closed = true; const pending = [...connections]; for (const connection of pending) retire(connection); await Promise.all(pending.map(connection => connection.done)); },
     async list(area, prefix) {
       allowed(area, prefix, true);
-      const { s3, bucket } = client(area), entries: Awaited<ReturnType<ArchiveSource["list"]>> = [];
+      const { s3, bucket, release } = client(area), entries: Awaited<ReturnType<ArchiveSource["list"]>> = [];
       let continuation: string | undefined;
       const seen = new Set<string>();
       try {
@@ -50,27 +68,29 @@ export function createReadonlyArchiveSource(expected: SourceProfile, configurati
           if (continuation) seen.add(continuation);
         } while (continuation);
         return entries;
-      } finally { s3.destroy(); }
+      } finally { release(); }
     },
     async read(area, key, maxBytes) {
       allowed(area, key, false);
       archiveAssert(Number.isSafeInteger(maxBytes) && maxBytes > 0 && maxBytes <= 128 * 1024 * 1024, "ARCHIVE_SOURCE_LIMIT_INVALID");
-      const { s3, bucket } = client(area);
+      const { s3, bucket, release } = client(area);
       try {
         const signal = AbortSignal.timeout(45_000), result = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }), { abortSignal: signal });
-        archiveAssert(result.Body && (result.ContentLength === undefined || result.ContentLength > 0 && result.ContentLength <= maxBytes), "ARCHIVE_SOURCE_SIZE_INVALID");
         const body = result.Body as unknown as AsyncIterable<Uint8Array> & { destroy?: () => void };
-        archiveAssert(Symbol.asyncIterator in body, "ARCHIVE_SOURCE_BODY_INVALID");
-        const chunks: Buffer[] = []; let size = 0;
-        const stop = () => body.destroy?.(); signal.addEventListener("abort", stop, { once: true });
         try {
-          for await (const chunk of body) { archiveAssert(chunk instanceof Uint8Array, "ARCHIVE_SOURCE_BODY_INVALID"); size += chunk.length; archiveAssert(size <= maxBytes && !signal.aborted, "ARCHIVE_SOURCE_SIZE_INVALID"); chunks.push(Buffer.from(chunk)); }
-          archiveAssert(!signal.aborted && size > 0 && (result.ContentLength === undefined || size === result.ContentLength), "ARCHIVE_SOURCE_SIZE_INVALID");
-        } finally { signal.removeEventListener("abort", stop); body.destroy?.(); }
-        return { bytes: Buffer.concat(chunks), mimeType: result.ContentType ?? "application/octet-stream", modifiedAt: result.LastModified?.toISOString() ?? null };
+          archiveAssert(body && (result.ContentLength === undefined || result.ContentLength > 0 && result.ContentLength <= maxBytes), "ARCHIVE_SOURCE_SIZE_INVALID");
+          archiveAssert(Symbol.asyncIterator in body, "ARCHIVE_SOURCE_BODY_INVALID");
+          const chunks: Buffer[] = []; let size = 0;
+          const stop = () => body.destroy?.(); signal.addEventListener("abort", stop, { once: true });
+          try {
+            for await (const chunk of body) { archiveAssert(chunk instanceof Uint8Array, "ARCHIVE_SOURCE_BODY_INVALID"); size += chunk.length; archiveAssert(size <= maxBytes && !signal.aborted, "ARCHIVE_SOURCE_SIZE_INVALID"); chunks.push(Buffer.from(chunk)); }
+            archiveAssert(!signal.aborted && size > 0 && (result.ContentLength === undefined || size === result.ContentLength), "ARCHIVE_SOURCE_SIZE_INVALID");
+          } finally { signal.removeEventListener("abort", stop); }
+          return { bytes: Buffer.concat(chunks), mimeType: result.ContentType ?? "application/octet-stream", modifiedAt: result.LastModified?.toISOString() ?? null };
+        } finally { body?.destroy?.(); }
       } catch (error) {
         throw normalizeArchiveSourceReadError(error);
-      } finally { s3.destroy(); }
+      } finally { release(); }
     },
   };
 }

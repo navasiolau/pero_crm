@@ -10,10 +10,11 @@
 - [x] 2.1 Реализовать guarded reserve/upload/finalize coordinator и SQL archive store с genuine upload jobs/PENDING ledger; проверить partial-I/O resume, uncertain ACK, replay и отсутствие business calls.
 - [x] 2.2 Подключить реальные shared writer dependencies через CLI, dry-run default и reconciliation/cutover документацию; проверить аргументы и отсутствие автоматической активации.
 - [x] 2.3 Реализовать согласованное владельцем восстановление missing images через reviewed map/root, cloud-first object404, точные ссылки, bounded bytes и provenance; проверить ошибки источника, reappearance, подмену bytes/map/path, переносимость и replay без бизнес-изменений.
+- [x] 2.4 Реализовать согласованное explicit ADMIN-only восстановление существующего unpublished reserve по exact reviewed SQL witness: новый оператор отдельно от исходных creators/payload/fingerprint, два audit receipts, GET-only ранее verified объектов и прежняя атомарная публикация; проверить foreign/live lease/cleanup/manifest/target/hash/operation fences и replay0, подготовить root-only native regression без самостоятельного запуска БД/S3.
 
 ## 3. Проверки
 
 - [x] 3.1 Выполнить доступные unit, strict TypeScript, ESLint, OpenSpec strict и diff проверки; записать фактический evidence и ограничения.
 - [ ] 3.2 После нормальных dependency merges выполнить guarded native/import/staging приёмку через root: реальные байты, business baseline, 0 дублей второго запуска и сохранный source R2; без самостоятельных cloud/DB/S3 операций.
 
-Локальная SQL часть3.2 принята root под обязательным полным rollback (23/189/6/7, replay0, exact76/catalog/83receipts/4exceptions/11empty). Source-only cloud prepare прошёл отдельно с30 reviewed recovery; его manifest остаётся PROVISIONAL, 323unknown facts сохранены. Реальный target import и staging/cutover ещё не приняты, поэтому3.2 остаётся открытым.
+Локальная SQL часть3.2 принята root под обязательным полным rollback (исторические23/189/6/7, replay0, exact76/catalog/83receipts/4exceptions/11empty). Позднее приняты actual APPLY32 и genuine inner REPLAY36 для frozen23/174/6/7 и265 объектов, с отдельным operational CLI provenance4ff64fc. Старый PROVISIONAL manifest, 30 reviewed recovery, 323unknown facts и исходные HOLD сохранены. 3.2 остаётся [ ] для обязательной финальной deployed composition нового SHA/образа и cutover; import/replay receipts не переименовываются в final-image proof. Production/main не приняты и этим evidence не разрешаются.

@@ -86,3 +86,101 @@ Root выполнил reviewed plan `6ac5504ab744cca3e4204c25273a99bdb7ee79af561
 Локально подготовлены и пройдены9/9 guard/port/fence тестов native tooling, expanded web+runner TypeScript, ESLint и inert dry. Настоящий target guard не подменяется: runtime facade только синхронно делегирует прежнему guard с точным declaration/private URL/container; module cache восстанавливается. Ignored runner/plan/receipt не входят в коммит.
 
 **Остаётся NOT RUN:** реальный target S3 import/apply/replay восстановленного архива, новый applicable manifest с окончательной staging proof, runtime-поставка CLI в standalone image, staging/browser/API/MCP/cutover и production. Task3.2 остаётся открытым. Никаких dumps/reset/seed/new containers, source R2 DELETE или привязки архива к действующим проектам не выполнялось. Авторизованный локальный коммит №189 фиксирует реализацию и эти пределы evidence; выпуск/активация не следуют из него автоматически.
+
+## 20.10.2026 — CLI binding и сохранённый Archive25 HOLD
+
+Root actual APPLY остановился с `ARCHIVE_TARGET_STORAGE_CHANGED`; ACK SHA256 `2a2167bec0b29fedf42ddd478169bbec619c5b0ce708d5c918513bb207e52880` сохранён в ignored delivery `archive-history-remedy-44749d57-124f-4e97-b860-e9ce403d7448/delivery-29f69760-48b7-4969-b8b2-216f3e2f2b2e/archive-apply-root-run-d8cc4603-156e-4f11-b96b-81c9779ef27c`. Старые delivery/head/AUX nonce остаются HOLD, повторный запуск не выполнялся этим исполнителем.
+
+Причина воспроизведена на настоящих shared factories: image binding нормализует endpoint через `URL.toString()` с конечным `/`, artifact binding удаляет конечный `/`, а manifest сохраняет вариант без `/`. CLI сравнивал эти строки напрямую. Теперь обе media binding проходят один существующий `parseMediaBinding`; canonical equality сохраняет точные bucket, region и наличие region. Ошибка при отличающейся цели остаётся `ARCHIVE_TARGET_STORAGE_CHANGED`. Shared server media/artifact writers, env, ledger bindings и БД не менялись. У CLI adapter добавлен только DI loader для прямой проверки этой композиции; обычный запуск использует прежний `sharedModule`.
+
+RED: новый положительный factory/SDK тест падает на прежнем сравнении с тем же кодом. GREEN: **37/37** archive/recovery tests, полный web strict TypeScript, ESLint двух изменённых файлов, OpenSpec strict и `git diff --check` PASS. Положительный тест использует настоящий AWS SDK с memory HTTP handler (1 Put + 1 Get/readback, без сети); изменённые endpoint/bucket/region и отсутствующий region дают отказ до Put/Get. Это не actual S3/import acceptance.
+
+Локально сверены Root full76 receipts BEFORE `9f09ce19…` / AFTER `80fb61e2…`: reserve уже сохранил +23 CommercialProposal, +6 ProposalContract, +258 ProposalMedia, +7 ProposalArtifact, +530 ProposalJob и +30 ChangeLog. Catalog и migration history 84/83 совпали; business snapshot не объявляется неизменным. Первые семь объектов в отсортированном ledger — DOCX, поэтому нулевые actual S3 writes не заявляются: их физические SHA/readback и точные состояния требуют отдельной Root read-only проверки. Публикация архива не принята; task3.2 остаётся открытым. Старый actor/ключи не активировались, ledger не очищался, новый namespace не создавался. Исполнитель не выполнял DB/S3/SSH/Docker/env/target вызовов; main/production и текущий runtime acbd не изменены.
+
+### Explicit ADMIN recovery — реализация, native ещё не запускался
+
+Добавлен отдельный APPLY режим `--resume-reservation` / `--reviewed-reservation`: exact reviewed witness связывает прежний reserve, manifest/target, нового оператора, operation UUID и SHA реально исполняемого CLI. Каждая транзакция заново проверяет active ADMIN; исходные creators, payload actors и fingerprints сохраняются. Допускаются только собственные unpublished PENDING объекты, FAILED либо expired PROCESSING uploads и будущие PENDING cleanup без progress/leases/retirement/references. Иные строки, живой lease или изменение witness дают отказ до reclaim. Два exact recovery audit IDs и publication audit принадлежат новому оператору. Ранее verified объекты проверяются GET/readback без повторного Put, остальные проходят прежний immutable writer и единственную атомарную публикацию; обычный replay возвращает ноль дублей. Старые actor/ключи и HOLD не переактивируются.
+
+**42/42 PASS**: прежние archive проверки и новые exact witness/manifest/target/operator/operation/program guards, foreign/tampered certificate, ровно два audit exclusions, семь GET-only synthetic DOCX, atomic publication/replay0 и stale verified bytes. Полный web strict TypeScript, scoped ESLint, OpenSpec strict и diff-check PASS. Тесты используют synthetic source/SQL port/MemoryS3; реальных DB/S3 операций исполнитель не выполнял.
+
+Подготовлен root-only `verifyArchiveReservationNative(client, declaration)` для уже открытой разрешённой local5433 транзакции с обязательным внешним rollback: настоящий reserve, неактивный исходный DIRECTOR, новый ADMIN, отказ при live lease/cleanup progress/foreign payload/non-ADMIN/stale witness/unexpected refs, проверка неизменных creators/payloads и replay0. Helper не открывает подключения и не обращается к настоящему S3. **PREPARED_NOT_RUN**: native recovery, actual recovery APPLY/REPLAY и новый operational package/source commit ещё требуют Root исполнения и независимого review. Tasks2.4/3.2 остаются открытыми; текущий web runtime acbd не выдаётся за provenance изменённых CLI/store/apply модулей.
+
+### Root: native recovery принят, Archive28 остаётся HOLD
+
+После предыдущей записи Root выполнил настоящий local5433 native recovery: run `58d9c659-b27a-438a-887f-4bf7c49e13fd`, reviewed plan SHA256 `80d561be60b0d9b39d39f8e83cf42f11bed87e045ffe9d32b725d6076181e300`. Все девять сценариев прошли; 4104 собственных SQL statements, запрещённых business writes0. Обязательный внешний rollback сохранил все76 таблиц и catalog: baseline `afd3a5a3feb4e6029c8ca298804d713f6b778b05da403194380adee268ee9bec`, catalog `805b1dddc7a974baf129f63ba4fca19245e5a411b5756850f8cddea54f1d5738`. Все83 migration receipts и четыре прежних checksum-исключения сохранены. Native использовал MemoryS3 и не является cloud-приёмкой. Реализация recovery зафиксирована локальным коммитом `cd0558902f208e35c853f5250f0f4129b0aba59e`; task2.4 закрыта, task3.2 открыта.
+
+Root actual recovery Archive28 выполнялся отдельным новым ADMIN по свежему SQL witness; исходный actor не активировался. Operational CJS SHA256 `98169e3a7ba12e96b12aa8ad21714b1261f39ea4eb94dce192b6fe76a134d15a` отличается от установленного web runtime `acbd164cb6e79194b7fe87a0469d60d745dead1a` и не выдаётся за его часть. Действие `48afdda4-0051-439c-a42a-f39ee00e9675` завершилось HOLD: controller `ARCHIVE_ROOT_WORKER_ACK_UNKNOWN_HOLD`, worker `ARCHIVE_ROOT_POST_PROOF_HOLD`. CLI stdout/stderr пусты, after-proof отсутствует; точное исключение и код завершения дочернего процесса не сохранены. Счётчики IO: sourceGet522, sourceList3, targetGet252, targetPut246, rejected1. Число Put-вызовов не подменяет число verified объектов или успешную публикацию.
+
+Окно истекло в `2026-10-20T03:37:05.049Z`; deadline наблюдал11 inactive users и22 revoked keys. Root затем успешно выполнил исходный CAS finish, receipt SHA256 `6e4bbe9b2c0bdc9a47ef17188aa10433dd15ffd6f046552e37026d866aff6f80`. Неизменяемый результат deadline остаётся `OWN_CREDENTIALS_EXPIRED`, а не `ORIGINAL_FINISH_OBSERVED`. Старые delivery/head/HOLD сохранены, повтор и продление не выполнялись.
+
+Runtime выключен штатным paired qa-off: web `0fe1f9ab4948023ff225a6b80538af4c5df271eeb0686d04b379ae8df57a808d`, все три feature flags0, собственный renderer остановлен; обычный W07 и metadata guards прошли. Полный финальный76-table snapshot сохранён с SHA256 `ddc5a3156928bddea907c5a1f418fd07410efaae4e4c3521716db06f1b65a8e3`. Это закрытие доступа и сохранение evidence, **не** приёмка импорта. Actual job/object reconciliation и успешные APPLY/REPLAY ещё обязательны; main/production не изменены.
+
+### Ограниченные параллельные чтения архива
+
+Для frozen174-position manifest прежний coordinator требовал803 source GET: два полных прохода по269 уникальным объектам и265 промежуточных чтений. Каждый R2 вызов создавал и уничтожал SDK client. Эти source-факты объясняют лишнюю работу, но не восстанавливают отсутствующее исключение Archive28.
+
+Теперь два полных прохода сохранены, чтения ограничены четырьмя и128MiB admitted payload, авторизация одного pg client последовательна. Не доверенный размер manifest проходит source limit/budget/safe-integer проверки и ограничивает фактический stream. Ошибка прекращает новые чтения и дожидается всех начатых; source drift, MIME/modifiedAt/recovery provenance и inventory проверяются по-прежнему. Verified объект всегда требует настоящего target GET/SHA; пропускается только его промежуточный source GET. Клиенты переиспользуются в пределах точной конфигурации и закрываются явным CLI finally, включая recovery wrapper.
+
+RED: из шести первоначальных новых проверок пять воспроизвели прежнее поведение. GREEN: **52/52** archive/recovery/performance checks, полный strict TypeScript, scoped ESLint и diff-check PASS. Тесты проверяют пределы concurrency/bytes, последовательную авторизацию, остановку и drain после ошибки, оба source прохода, stale source/target, конфигурацию/credentials и lifecycle. Дополнительный реальный AWS SDK с memory HTTP handler проверил сериализацию команд, тело ответа, переиспользование соединения и закрытие; сети, БД и actual S3 в этих тестах нет. Source freeze SHA256 `65e5f5da21e404e3a390c82292626b7b91d0127a213912f199b2e43ba661ce9e`. Root проверил полный implementation diff без замечаний. Время будущего actual APPLY не гарантируется локальными тестами, task3.2 остаётся открытой.
+
+## 20.10.2026 — принятая композиция APPLY32 / genuine REPLAY36
+
+Root принял actual product chain для frozen **23 КП /174 позиции /6 settings /7 DOCX**,
+265 target objects. Исторические189 позиций не подменены: current source CP224
+содержал7 вместо22, что было сверено до freeze; остальные unknown facts и30
+reviewed recovery сохраняют прежние ограничения. Raw JSON, original R2 и локальные
+исходники сохранены. Старый PROVISIONAL manifest по-прежнему не для APPLY.
+
+Actual runtime был `acbd164cb6e79194b7fe87a0469d60d745dead1a`, web image
+`sha256:8ef120a68e378d47b71ea5913ec8bd85391cfa4f2f8cd1ec25169151a55bd77f`,
+режим OFF000 / renderer STOPPED. Operational CLI происходил из отдельного commit
+`4ff64fc021105a3bb74bab208c3aa9ee0a5ed16b`; его изменённые модули не объявляются
+частью runtimeacbd или будущего final image. Frozen manifest RAW
+`211be131ec2434b5872a5336482d612d3dcc7d32705e957525f0d4204a8a674e`, canonical
+`b58143fdda99b828d68dc6899af6b34d47073336c4d5143913f6c7b0b5b20ef1`.
+
+APPLY32 получил настоящий ACK и публикацию23/174/6/7; 265 UPLOAD SUCCEEDED
+без leases, 265 будущих PURGE PENDING сохранены. Независимый published native
+RR READ ONLY capture подтвердил rows, verified objects и history; исходные
+reservation/creators и две точные recovery audit rows нового ADMIN сохранены.
+
+Точные accepted refs (в `kp-189/.playwright-mcp/kp-189/`):
+
+- APPLY32 `archive-off-codec-remedy-c7e9cd81-5518-4d42-a199-8bb3766fe519/delivery-bound-9f12fb03-3e68-4f71-b37a-a183f4f458d9/archive-apply-root-run-93eda4dc-e0a7-4a35-9f20-1d982a760ef4/ack.private.json`,
+  SHA `8cfe38dbe7d8abee9aebdc61437830c43a39bed774b4793c1ab80d6da79ad733`.
+- Published native `archive32-published-native-brotli-cd223bf6-236d-4e2a-ab6c-d6d66ab05048/run-0dc5bdf0-c416-41ee-8d34-9ff4ca9fcf3f/ack.private.json`,
+  SHA `235182096e365dd0c3e4161f783657b453a219d73f47d361d11a6406ff3ffc46`.
+- REPLAY36 `archive36-completion-239dc8ea-3e81-4b2a-b31f-5df4b117457a/receipts-65113992-d279-4117-af0b-40245dc559e0/producer-result.private.json`,
+  SHA `0b60e5008e058a57d90e84763f6abfbcce0ceb21a7e331c639d3d5ed97384ded`.
+- Complete retained manifest `archive36-completion-239dc8ea-3e81-4b2a-b31f-5df4b117457a/manifest.json`,
+  SHA `8d438c48dcf9e242453653ed612b6f29a5c4cfe5e7f699d2956cf6d6599de847`.
+
+REPLAY36 дал genuine inner applied/replayed=true и все created0: 269 source GET /
+3 LIST /265 target GET, PUT0/rejected0; 4174 SQL read/lock/transaction calls,
+DML forwarded0. Raw CLI entry SHA `9b703bfc28a7b9df7e2565762df31f5628fc19a2cc135ab5e904bba5395e3068`
+и effective compile SHA `fee192a5f758a61f977b04d8441cf90115c703b0da9562aee7f120f02cfd4e32`
+различаются: QA bridge инструментировал один initializer bundled pg Client/Pool,
+сохранив29-query fence. Это не byte-identical execution raw CJS.
+
+Внутри REPLAY36 before/after FULL_NO_EXCLUSIONS BUSINESS exact
+`b8a264231de008478ca6f06888fc67f78a12242767fcff5f5fc6df12377ef390`;
+published archive canonical `63fd456f1aa1750cd580be300131d253e79e2bf3f062e05f1dff4f4048d55835`.
+RAW сохранён: отличие ограничено прежним approved legacy ApiToken.lastUsedAt
+(idHash8bb4 / withoutLastUsedAtHashe454), не новой нормализацией или межкогортной
+whole-DB equality. History84/83 и pending0 migrations сохранены.
+
+Original outer REPLAY36 остаётся HOLD/AUX_ARCHIVE_RAW_CLI_RECEIPT_REQUIRED
+(SHA `f682a67c704710ac48b53479e7cc2de181ea4998141b73b1b9de343f94c97666`):
+старый validator ожидал иной label, genuine worker уже дал VERIFIED_NATIVE_IN_TRANSACTION.
+Композиционная приёмка опирается на inner ACK и сохранённые proofs; outer/nonce/ledger
+не переписаны, producer не повторялся. Original closure36: CLOSED context SHA
+`5aa77415a6de3655f9af58778f849dcdd3378f3432e12498f20ee419ee2262b0`,
+finish SHA `3afb9b568bf587dbc68ded599f2b79ccd6fcc0c2b9b148c36f163c7c8db9d36b`,
+terminal SHA `e3fb4cee33a5203a712bd622dcc99d09d47ce68b5232bfc7b8d5bbb0ae433f71`:
+ORIGINAL_FINISH_OBSERVED/alive=false, 11 inactive/22 revoked; OFF000 сохранён.
+
+**Остаток обязателен:** final deployed composition нового SHA/образов и cutover
+ещё NOT_RUN. Принятые operational receipts4ff не релабелятся под final image;
+при подтверждённой эквивалентности исходников они сохраняют собственный provenance.
+Task3.2 остаётся `[ ]`; полная staging-приёмка и production/main не заявляются
+и не разрешаются этой записью. Старые HOLD сохранены; новых code/тестов/target calls нет.
