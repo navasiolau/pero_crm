@@ -269,3 +269,11 @@ Classification: `kp-188/.playwright-mcp/kp-188/ui34-locked-mixed-closure-classif
 Manager принят только как composition5+1: прежние пять browser behaviors и отдельный actual download шестого, с закрытием UI34. Proof `kp-187/.playwright-mcp/kp-187/manager-draft-browser-download-only-4e244c2d-final-composition-dc70be54-8c60-4b80-86c2-b983841bc80c.json`, SHA `46d068629c5cbfd34c61ece90228d2f032c156c65fa929d1a2f6e905fac87f81`. Исходный full-program FAILED и все прежние HOLD сохранены; они не переименованы в PASS.
 
 Сохранённые выше local reference proofs всех8 и11 страниц DOCX, byte/pixel parity PDF/приложений и исходного генератора остаются без изменений; Word-engine и иной full-smoke ими не заявляются. Вместе с принятыми native/CORE4 runtime и реальным desktop/mobile UI это закрывает4.3 в scope редактора/renderer №184. Physical cleanup/retained-after-annual сценарии №188/185/186 и общий cutover/main/production остаются отдельными.
+
+## CI307: ограниченная диагностика сравнения страниц — 20.10.2026
+
+CI307 на ревизии c442 остановился в compare-all-pages: Docker подтвердил oomKilled=true и exit137. Возможная причина дополнительного пика памяти — создание подробного AssertionError/diff для целых raster base64 arrays или PNG Buffers поверх уже удерживаемых PDF/PNG. Это гипотеза: сам byte mismatch и конкретное выделение памяти этим receipt не установлены; миграция runner также не объявляется причиной.
+
+Изменён только CI smoke: сохранены длины, порядок и точное сравнение каждой raster-страницы/PNG, но assertion получает boolean с коротким кодом и индексом страницы. Несовпадение по-прежнему завершает проверку ошибкой без diff содержимого изображения. Renderer/API/template/dependencies, container1536MiB/tmpfs512MiB/Node384MiB и остальные лимиты не менялись.
+
+Выполнен только node --check apps/kp-renderer/ci/smoke.cjs (exit0). Linux OCI smoke и фактическая PDF/PNG parity после этой правки ещё не выполнялись; PASS CI307 или runtime-приёмка не заявляются.
