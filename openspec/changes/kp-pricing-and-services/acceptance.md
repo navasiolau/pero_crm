@@ -112,3 +112,18 @@ Root принял совокупное доказательство CORE23 + AI0
 
 API `api-documents.ts:130,152,195–196` передаёт настоящий pricing hook с `applyProjectionInTransaction` общему save; `proposal-core.ts:162,187` исполняет его в той же транзакции после общего mutex.
 Это составное доказательство сверх adapter-only3.2. CI race использует pricing-заглушку (`changed:false`), а SDK replay меняет описание; concurrent HTTP с реальным priced DML и повтор изменения цены этими receipts не заявляются. Root принял перечисленную совокупность для3.4 без дополнительного HTTP-concurrency gate. Исторические отказы и остальные незакрытые сценарии сохранены.
+
+
+## 20.10.2026: денежные сценарии и staging browser desktop/mobile — 3.3
+
+После принятия 3.4 Root принял отдельную композицию для 3.3 на той же развёрнутой
+ревизии `acbd164cb6e79194b7fe87a0469d60d745dead1a`, web image
+`sha256:8ef120a68e378d47b71ea5913ec8bd85391cfa4f2f8cd1ec25169151a55bd77f`
+(CI306, run `39290284146`, attempt 1). Пункт 3.3 закрыт следующими фактическими результатами.
+
+- Денежный HTTP/native: CORE23 Money ACK `3d3c4460869cc010a1213f2b9e1edb8ce1a56a3ec31b629de553bdeafadde3d6` по уже указанному пути подтвердил M01/M02/M03 — Decimal, USD/фиксированный курс, цену единицы и количество, процентную/абсолютную скидку, общую сумму/разбивку услуг и поправку округления. Реальные save/SQL readback и CAS409 сохранили историю; quarantine восстановлен. Границы и закрытие CORE23 — classification `2f53ae84…`, указанная в 3.4.
+- API: AI01 result `4e79ee2a…` и Root acceptance `dd7aad27…` по указанным выше путям подтвердили реальное SDK/MCP/Python сохранение и сохранность денег при replay/stale. Отдельный current-image receipt `Q187/file-access-denials-run-33bfe963-adb3-400f-8751-9d26bf9fcb2d/result.private.json`, SHA256 `375d4386caa075ff85fa202148a389a5e86f3f69bc3944408774b71fef2633d7`, содержит PASSED `NBRB-BYN-2026-10-01` и `NBRB-USD-2026-10-01` (HTTP200, source:NBRB, rate 1 / 3.0207). Это API-проверки валюты/курса; браузерный ввод валют этими результатами не заявляется.
+- Lead23: настоящий browser MANAGER сохранил КП перед private PDF export и выполнил `182-real-overview-pricing-and-quantity` на 390 и 1366 px. Проверены отображаемые суммы, услуги и количества против актуальной SQL-проекции. `Q187/ui-acceptance-run-0ddd28d0-a893-419d-8d9d-f098a8dec01f/receipt.json`, raw SHA256 `89ed32e384e8ae37366eff1095a6e2b7c9346de7ac7da459e7e06a074915e702`, semantic result `26a00b40e83cd3da9ef2bc13598f74c9d1ce364439bf26f8e049229979aad11f`; browserErrors:[] и сохранённые desktop/mobile screenshots.
+- UI34 Locked: четыре PASSED `182-real-overview-pricing-and-quantity` — проекты 255/256 на каждой ширине 390/1366; суммы/услуги/количество в браузере сопоставлены с SQL, browserErrors:[]. `Q187/ui-acceptance-run-34ade56d-bd1f-4c10-a6e6-d87e52c7608e/receipt.json`, raw SHA256 `a6c4b7884a91c2afa2bcc70bef483c321278e803d0ba2204b36daa5f239aa307`; host producer result `a6ac46db07c901157bab6f87d8cf9c3475e9a5f38e813b1c425b8a48626c659e`. Каждый pricing read имеет native preservation с совпадением BUSINESS и сохранённым RAW; допустима только approved legacy `ApiToken.lastUsedAt`. Root full76-границы и четыре каталога зафиксированы отдельно для прогона. Финальный `Q180/fresh-ui34-run-context.json` SHA256 `98f9442b300d8a1b0eb85e49719df2f466711dda0ccf33ed209043bc8938c86b`: original finish и terminal ORIGINAL_FINISH_OBSERVED, 11 inactive / 22 revoked, alive:false, flags000, owned renderer stopped.
+
+Денежные изменения доказаны HTTP/native сценариями, desktop/mobile — перечисленными browser pricing cases. Ранние NOT_CHECKED/REFUSED/HOLD и ограничения исходных receipts сохранены; принятый текст 3.4 не изменён. Новых запусков, миграций или изменений production это обновление документов не выполняло.
