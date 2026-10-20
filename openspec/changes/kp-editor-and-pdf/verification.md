@@ -244,3 +244,16 @@ Root выполнил точный первый сценарий `apps/kp-render
 - `root-visual-review.json`, SHA `d6899504d11c513ecc61816dd2008681980873a1438347f67f51d6282578e025`: `REFERENCE_DOCX_ALL_8_PAGES_VISUALLY_ACCEPTED`, перечень просмотренных страниц 1–8 и hashes локальных Garamond fonts. PNG сохранены в `original-render-v2/` и `worker-render-v2/`; первоначальный cleanup failure не удалён.
 
 Закрыт только local all-pages visual gate этого reference-case: тело договора, реквизиты, одно tiny PNG-приложение, неизменённый project placeholder и акт. Это не full-smoke/multi-КП visual, не Word-engine и не общая интеграционная приёмка. Ранее полученные OOXML и PDF proofs остаются отдельными; статусы UI/auth/retention/archive и общего gate4.3 этим дополнением не закрываются.
+
+## Multi-КП reference DOCX — все 11 страниц — 20.10.2026
+
+Root после review принял дополнительный локальный reference: два совместимых КП, по два одинаковых известных tiny PNG (95 байт) на КП. Это новый явно заданный сценарий на исходных ContractModel/`isolatedWorker` ревизии `acbd164cb6e79194b7fe87a0469d60d745dead1a`, а не точное воспроизведение full smoke. Исходный генератор и worker дали равные распакованные ZIP entries; прежние 15 RAW/Git LF и 4 dependency pins сохранены. Оба canonical LibreOffice-render с прежними Garamond и scoped cleanup adapter завершились exit0. PDFinfo и Pypdf независимо подтвердили 11/11 страниц; при 144 DPI у всех 11 страниц совпали RGB SHA, differingPixels=0, в обоих PDF присутствует Garamond BaseFont.
+
+Агент лично открыл все 11 worker PNG в исходном разрешении: тело/реквизиты, четыре страницы приложений с правильными номерами двух КП и страниц 1/2, 2/2, project placeholder и акт. Регрессий обрезки/наложения/глифов относительно равных baseline-страниц не обнаружено; исходные переносы и оформление не менялись. После работы owned portable LibreOffice процессов — 0. Прежние 8-page evidence сохранены без изменений. Полные новые ignored evidence: `D:/Projects/pero_crm_worktrees/kp-184/.playwright-mcp/kp-184/docx-multi-reference-local-e64a93b7/`:
+
+- `pair-receipt.json`, SHA `fa18db1242415dc85a5a4ded10efb8491477c6a79a8ac82d2497931ea88cbdcf`: входы двух КП, исходный/worker DOCX и ZIP-entry proof.
+- `all-pages-comparison.json`, SHA `277a7ec0f24a3384fe9919dafbe20b6f5d4efec3af5a6f59992814b9db0e7221`: реальные counts обоих PDF, fonts и все 11 PNG/RGB comparisons.
+- `visual-review.json`, SHA `3becb4cec1c53729a0fb52d7088c159ad03d48dfbd2cf45d4a279b847b3e15c4`: персональный просмотр страниц 1–11 с путями/SHA; последующий Root review подтвердил этот scope.
+- `final-local-qa.json`, SHA `d1d1e8ad6f0572d18e76e6f47ad46bd724d000ab20339b13db6e3c974ea3b649`: source/helper/render/cleanup bindings и сохранённая история локальных comparator failures; успешен v3 без изменения DOCX/PDF/PNG.
+
+Закрыт local all-pages visual gate этого multi-КП reference. Это не full-smoke, не Word-engine и не staging/API/UI/private-S3 приёмка; остальные pending gates и task checkboxes этим дополнением не закрываются.
