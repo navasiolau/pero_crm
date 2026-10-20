@@ -53,6 +53,28 @@ export function canonical(value: unknown): string {
   return JSON.stringify(value);
 }
 export const valueHash = (value: unknown) => byteHash(canonical(value));
+const recoveryWitnessSchema = z.object({
+  schema: z.literal(1), kind: z.literal("ARCHIVE_RESERVATION_RECOVERY"),
+  manifestHash: z.string().regex(/^[a-f0-9]{64}$/), targetHash: z.string().regex(/^[a-f0-9]{64}$/),
+  reserveRowHash: z.string().regex(/^[a-f0-9]{64}$/), reservationActorId: z.string().min(1).max(160),
+  operatorId: z.string().min(1).max(160), operationId: z.uuid(),
+  program: z.object({ sourceRevision: z.string().regex(/^[a-f0-9]{40}$/), entrySha256: z.string().regex(/^[a-f0-9]{64}$/) }).strict(),
+  families: z.record(z.string(), z.object({ count: z.number().int().min(0), hash: z.string().regex(/^[a-f0-9]{32}$/), stableHash: z.string().regex(/^[a-f0-9]{32}$/) }).strict()),
+  verifiedObjects: z.record(z.string(), z.string().regex(/^[a-f0-9]{64}$/)),
+}).strict();
+export type ArchiveReservationWitness = z.infer<typeof recoveryWitnessSchema>;
+export type ArchiveReservationRecovery = { witness: ArchiveReservationWitness; reviewedHash: string; operationId: string; programSha256: string };
+export function parseArchiveReservationWitness(value: unknown): ArchiveReservationWitness {
+  const result = recoveryWitnessSchema.safeParse(value); archiveAssert(result.success, "ARCHIVE_RECOVERY_WITNESS_INVALID"); return result.data;
+}
+export function assertArchiveReservationRecovery(input: ArchiveReservationRecovery, manifest: ArchiveManifest, operatorId: string): ArchiveReservationWitness {
+  const witness = parseArchiveReservationWitness(input.witness);
+  archiveAssert(input.reviewedHash === valueHash(witness) && witness.manifestHash === manifest.sha256 && witness.targetHash === valueHash(manifest.target), "ARCHIVE_RECOVERY_REVIEW_REQUIRED");
+  archiveAssert(witness.operatorId === operatorId && witness.operatorId !== witness.reservationActorId && witness.operationId === input.operationId && witness.program.entrySha256 === input.programSha256, "ARCHIVE_RECOVERY_OPERATION_CHANGED");
+  const objects = new Map(manifest.proposals.flatMap(p => p.media.flatMap(m => [...(m.original ? [m.original] : []), m.optimized])).concat(manifest.docx.flatMap(d => d.artifact ? [d.artifact] : [])).map(o => [o.id, o.sha256]));
+  archiveAssert(Object.entries(witness.verifiedObjects).every(([id, hash]) => objects.get(id) === hash), "ARCHIVE_RECOVERY_VERIFIED_OBJECT_CHANGED");
+  return witness;
+}
 export const sameStorageResource = (a: Binding, b: Binding) => new URL(a.endpoint).toString().replace(/\/$/, "") === new URL(b.endpoint).toString().replace(/\/$/, "") && a.bucket === b.bucket;
 export const archiveId = (kind: string, namespace: string, identity: string) => `kp_a_${kind}_${byteHash(namespace + "\n" + identity)}`;
 export const isObject = (value: unknown): value is JsonObject => value !== null && typeof value === "object" && !Array.isArray(value);

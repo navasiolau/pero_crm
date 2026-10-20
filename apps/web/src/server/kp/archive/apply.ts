@@ -5,7 +5,7 @@ import { assertRecoverySourceBinding } from "./recovery-contract";
 
 export type ArchiveReconciliation = { published: boolean; proposals: number; items: number; settings: number; docx: number; verifiedObjects: number; businessBaselinePreserved: boolean; policyPurgedObjectIds?: string[] };
 export interface ArchiveStore {
-  reserve(manifest: ArchiveManifest, owner: string): Promise<{ published: boolean }>;
+  reserve(manifest: ArchiveManifest, owner: string): Promise<{ published: boolean; verifiedObjectIds?: string[] }>;
   active(manifest: ArchiveManifest, owner: string): Promise<void>;
   verified(manifest: ArchiveManifest, owner: string, object: ArchiveObject): Promise<void>;
   publish(manifest: ArchiveManifest, owner: string): Promise<void>;
@@ -56,12 +56,16 @@ export async function applyArchiveManifest(input: unknown, options: {
       for (const object of allArchiveObjects(manifest)) if (!purged.has(object.id)) await options.io.verify(object, authorize);
       return { mode: "applied" as const, manifestHash: manifest.sha256, replayed: true, created: { proposals: 0, items: 0, settings: 0, docx: 0 }, reconciliation };
     }
+    const previouslyVerified = new Set(reserved.verifiedObjectIds ?? []);
+    archiveAssert(previouslyVerified.size === (reserved.verifiedObjectIds ?? []).length && [...previouslyVerified].every(id => allArchiveObjects(manifest).some(object => object.id === id)), "ARCHIVE_RECOVERY_VERIFIED_OBJECT_CHANGED");
     for (const object of allArchiveObjects(manifest)) {
       await authorize();
       const source = await options.source.read(object.source.area, object.source.key, sourceLimit(object.source.area, object.source.key));
       archiveAssert(source.bytes.length === object.size && byteHash(source.bytes) === object.sha256 && source.mimeType.split(";")[0].trim() === object.source.mimeType && source.modifiedAt === object.source.modifiedAt && canonical(source.recovery ?? null) === canonical(object.source.recovery ?? null), "ARCHIVE_SOURCE_CHANGED");
       await authorize();
-      const verified = await options.io.ensure(object, source.bytes, authorize);
+      const verified = previouslyVerified.has(object.id)
+        ? (await options.io.verify(object, authorize), { key: object.key, sha256: object.sha256, size: object.size })
+        : await options.io.ensure(object, source.bytes, authorize);
       archiveAssert(verified.key === object.key && verified.sha256 === object.sha256 && verified.size === object.size, "ARCHIVE_READBACK_MISMATCH");
       await authorize(); await options.store.verified(manifest, owner, object);
     }

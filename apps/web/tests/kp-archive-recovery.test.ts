@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test, { type TestContext } from "node:test";
 import { applyArchiveManifest } from "../src/server/kp/archive/apply";
-import { ArchiveImportError, byteHash, canonical, jsonClone, valueHash } from "../src/server/kp/archive/contract";
+import { ArchiveImportError, assertArchiveReservationRecovery, byteHash, canonical, jsonClone, valueHash, type ArchiveReservationWitness } from "../src/server/kp/archive/contract";
+import { archiveOwnedRows, archiveRecoveryReceiptIds } from "../src/server/kp/archive/prisma-store";
 import { allArchiveObjects, archiveReport, prepareArchiveManifest, validateArchiveManifest } from "../src/server/kp/archive/manifest";
 import { archiveProposalProvenance, archiveProposalVersionSnapshot } from "../src/server/kp/archive/provenance";
 import { parseArchiveRecoveryMap, type ArchiveRecoveryMap } from "../src/server/kp/archive/recovery-contract";
@@ -194,4 +195,63 @@ test("recovery source still enforces frozen LIST, raw document hashes and normal
     await assert.rejects(applyArchiveManifest(manifest, { ...f.options(manifest), source: f.source }), isCode("ARCHIVE_SOURCE_INVENTORY_CHANGED", "ARCHIVE_SOURCE_CHANGED"));
     assert.equal(f.counters.reserves, 0); assert.equal(f.counters.puts, 0);
   }
+});
+
+async function reservationFixture() {
+  const f = archiveFixture(), manifest = await prepareArchiveManifest(f.source, f.target, f.deps, f.links);
+  const witness: ArchiveReservationWitness = { schema: 1, kind: "ARCHIVE_RESERVATION_RECOVERY", manifestHash: manifest.sha256, targetHash: valueHash(manifest.target),
+    reserveRowHash: "a".repeat(64), reservationActorId: "original-inactive", operatorId: "new-admin", operationId: "bf74bf20-d2b2-42be-8dcc-ec838e421b9d", program: { sourceRevision: "b".repeat(40), entrySha256: "c".repeat(64) },
+    families: Object.fromEntries(Object.keys(archiveOwnedRows(manifest)).map(name => [name, { count: 0, hash: "d".repeat(32), stableHash: "d".repeat(32) }])), verifiedObjects: {} };
+  const recovery = { witness, reviewedHash: valueHash(witness), operationId: witness.operationId, programSha256: witness.program.entrySha256 };
+  return { f, manifest, witness, recovery };
+}
+
+test("reservation review binds exact manifest, target, operator, operation and actual program bytes", async () => {
+  const { manifest, witness, recovery } = await reservationFixture();
+  assert.equal(assertArchiveReservationRecovery(recovery, manifest, "new-admin").reservationActorId, "original-inactive");
+  for (const changed of [{ ...recovery, reviewedHash: "0".repeat(64) }, { ...recovery, operationId: "edae4870-4280-419a-bf9c-20aec5360680" }, { ...recovery, programSha256: "0".repeat(64) }])
+    assert.throws(() => assertArchiveReservationRecovery(changed, manifest, "new-admin"), isCode("ARCHIVE_RECOVERY_REVIEW_REQUIRED", "ARCHIVE_RECOVERY_OPERATION_CHANGED"));
+  assert.throws(() => assertArchiveReservationRecovery(recovery, manifest, "foreign-admin"), isCode("ARCHIVE_RECOVERY_OPERATION_CHANGED"));
+  for (const changed of [{ ...witness, manifestHash: "0".repeat(64) }, { ...witness, targetHash: "0".repeat(64) }])
+    assert.throws(() => assertArchiveReservationRecovery({ ...recovery, witness: changed, reviewedHash: valueHash(changed) }, manifest, "new-admin"), isCode("ARCHIVE_RECOVERY_REVIEW_REQUIRED"));
+  const rearm = { ...witness, operatorId: witness.reservationActorId };
+  assert.throws(() => assertArchiveReservationRecovery({ ...recovery, witness: rearm, reviewedHash: valueHash(rearm) }, manifest, rearm.operatorId), isCode("ARCHIVE_RECOVERY_OPERATION_CHANGED"));
+});
+
+test("reservation witness rejects foreign certificates, wrong SHA and unknown fields", async () => {
+  const { manifest, witness, recovery } = await reservationFixture(), object = allArchiveObjects(manifest)[0];
+  for (const verifiedObjects of [{ foreign: object.sha256 }, { [object.id]: "0".repeat(64) }]) {
+    const changed = { ...witness, verifiedObjects };
+    assert.throws(() => assertArchiveReservationRecovery({ ...recovery, witness: changed, reviewedHash: valueHash(changed) }, manifest, witness.operatorId), isCode("ARCHIVE_RECOVERY_VERIFIED_OBJECT_CHANGED"));
+  }
+  const unknown = { ...witness, allowForeign: true };
+  assert.throws(() => assertArchiveReservationRecovery({ ...recovery, witness: unknown, reviewedHash: valueHash(unknown) }, manifest, witness.operatorId), isCode("ARCHIVE_RECOVERY_WITNESS_INVALID"));
+});
+
+test("recovery exclusions add only two fixed operation audit IDs and preserve all other scopes", async () => {
+  const { manifest, witness } = await reservationFixture(), before = archiveOwnedRows(manifest), after = archiveOwnedRows(manifest, witness.operationId), ids = archiveRecoveryReceiptIds(manifest, witness.operationId);
+  assert.deepEqual(Object.keys(after), Object.keys(before));
+  for (const name of Object.keys(before)) if (name !== "ChangeLog") assert.deepEqual(after[name], before[name]);
+  assert.deepEqual(after.ChangeLog.ids, [...before.ChangeLog.ids, ids.reserve, ids.publish]);
+  assert.throws(() => archiveOwnedRows(manifest, "caller-audit-id"), isCode("ARCHIVE_RECOVERY_OPERATION_CHANGED"));
+});
+
+test("reserved verified DOCX are GET-only, then remaining objects publish atomically and replay0", async () => {
+  const { f, manifest } = await reservationFixture(), objects = allArchiveObjects(manifest), known = objects.filter(o => o.role === "docx"), ids = new Set(known.map(o => o.id)), reserve = f.store.reserve, ensure = f.io.ensure, verify = f.io.verify;
+  for (const object of known) { f.blobs.set(object.key, Buffer.from(f.cloud.get(object.source.area + ":" + object.source.key)!.bytes)); f.state.verified.set(object.id, object.sha256); }
+  f.store.reserve = async (m, owner) => ({ ...await reserve(m, owner), verifiedObjectIds: known.map(o => o.id) });
+  f.io.ensure = async (object, ...args) => { assert.equal(ids.has(object.id), false, "previously-verified-object-must-not-Put"); return ensure(object, ...args); };
+  const reads: string[] = []; f.io.verify = async (object, authorize) => { reads.push(object.id); return verify(object, authorize); };
+  await applyArchiveManifest(manifest, f.options(manifest));
+  assert.deepEqual(reads, known.map(o => o.id)); assert.equal(f.counters.puts, objects.length - known.length); assert.equal(f.state.visible.size, 23); assert.equal(f.state.contractHistory.length, 7);
+  const puts = f.counters.puts, replay = await applyArchiveManifest(manifest, f.options(manifest));
+  assert.equal(replay.mode, "applied"); if (replay.mode !== "applied") throw Error("test-replay");
+  assert.equal(replay.replayed, true); assert.deepEqual(replay.created, { proposals: 0, items: 0, settings: 0, docx: 0 }); assert.equal(f.counters.puts, puts);
+});
+
+test("a stale verified certificate cannot overwrite changed bytes or reach publication", async () => {
+  const { f, manifest } = await reservationFixture(), object = allArchiveObjects(manifest)[0], reserve = f.store.reserve;
+  f.blobs.set(object.key, Buffer.from("foreign bytes")); f.store.reserve = async (m, owner) => ({ ...await reserve(m, owner), verifiedObjectIds: [object.id] });
+  await assert.rejects(applyArchiveManifest(manifest, f.options(manifest)), isCode("ARCHIVE_READBACK_MISMATCH"));
+  assert.equal(f.counters.puts, 0); assert.equal(f.counters.publishes, 0); assert.equal(f.state.visible.size, 0); assert.equal(f.blobs.get(object.key)?.toString(), "foreign bytes");
 });
