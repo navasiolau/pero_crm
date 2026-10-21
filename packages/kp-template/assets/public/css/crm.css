@@ -1,4 +1,5 @@
 /* Только окружение редактора; печатные стили КП и договора не меняются. */
+body{--topbar:0px}
 .crm-loading .editor,.crm-loading .stage{visibility:hidden}
 .crm-readonly{padding:9px 16px;background:#fff5e7;border-bottom:1px solid #e6c895;color:#754519;font:13px/1.45 Manrope,sans-serif;position:relative;z-index:11}
 .crm-readonly[hidden]{display:none}

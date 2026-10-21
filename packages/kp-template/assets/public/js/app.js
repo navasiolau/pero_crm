@@ -133,14 +133,15 @@ var currentDocId = null;
         if (link) link.href = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(fav);
     } catch (e) { }
 })();
-document.getElementById('brandLogo').innerHTML = LOGO;
+var brandLogo = document.getElementById('brandLogo');
+if (brandLogo) brandLogo.innerHTML = LOGO;
 
 var generating = false;
 function setPdfBtns(label, disabled) {
     document.querySelectorAll('.js-pdf').forEach(function (b) { b.textContent = label; b.disabled = !!disabled; });
 }
-async function genPdf() {
-    if (generating) return;
+async function genPdf(reportFailure) {
+    if (generating) { if (reportFailure === true) throw new Error('PDF уже формируется'); return; }
     generating = true;
     setPdfBtns('Готовим PDF…', true);
     try {
@@ -149,7 +150,7 @@ async function genPdf() {
         anchor.href = file.downloadUrl; anchor.download = file.fileName;
         document.body.appendChild(anchor); anchor.click(); anchor.remove();
         toast('PDF сформирован и скачан');
-    } catch (error) { toast(error.message || 'Не удалось сформировать PDF', 5000); }
+    } catch (error) { toast(error.message || 'Не удалось сформировать PDF', 5000); if (reportFailure === true) throw error; }
     finally { generating = false; setPdfBtns('Сгенерировать PDF', false); }
 }
 
@@ -286,7 +287,7 @@ function renderSheet() {
 
 function updatePageCount() {
     var pages = sheet.querySelectorAll('.page').length;
-    pagesChip.textContent = pages + ' ' + plural(pages, 'страница', 'страницы', 'страниц') + ' A4';
+    if (pagesChip) pagesChip.textContent = pages + ' ' + plural(pages, 'страница', 'страницы', 'страниц') + ' A4';
 }
 
 function updateTotal() {
@@ -751,7 +752,7 @@ document.querySelectorAll('.js-new').forEach(function (button) {
 });
 
 var zoom = 1, userZoomed = false;
-function applyZoom() { scaleEl.style.transform = 'scale(' + zoom + ')'; zval.textContent = Math.round(zoom * 100) + '%'; }
+function applyZoom() { scaleEl.style.transform = 'scale(' + zoom + ')'; if (zval) zval.textContent = Math.round(zoom * 100) + '%'; }
 function fit() {
     var avail = viewport.clientWidth - 16;
     zoom = Math.max(0.35, Math.min(1.0, avail / 794));
@@ -802,6 +803,8 @@ CRM.attachEditor({
     applyDocument: applyDocumentState,
     applyState: function (next) { state = clone(next); syncStaticInputs(); refreshAll(); },
     ensureSaved: ensureCurrentSaved,
+    generatePdf: function () { return genPdf(true); },
+    openContract: function () { return window.ContractEditor.open(); },
     notify: toast
 });
 (async function () {
@@ -819,6 +822,7 @@ if (window.ContractEditor) {
         getState: function () { return clone(state); },
         getDocumentId: function () { return currentDocId; },
         ensureSaved: ensureCurrentSaved,
+        onOpenChange: CRM.setContractOpen,
         notify: toast
     });
 }

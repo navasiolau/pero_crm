@@ -174,6 +174,7 @@
         documents = [];
         returnFocus = document.activeElement;
         modal.hidden = false;
+        if (editor.onOpenChange) editor.onOpenChange(true);
         document.body.classList.add('contract-open');
         content.innerHTML = '<div class="contract-loading"><span class="spinner"></span><p>Подставляем данные КП и последние настройки…</p></div>';
         saveStatus.textContent = '';
@@ -225,6 +226,7 @@
         remember();
         if (settings && !opening) await flushSave().catch(function () {});
         modal.hidden = true;
+        if (editor.onOpenChange) editor.onOpenChange(false);
         document.body.classList.remove('contract-open');
         if (returnFocus && returnFocus.focus) returnFocus.focus();
     }
@@ -392,5 +394,5 @@
         });
     }
 
-    window.ContractEditor = { init: function (bridge) { editor = bridge; initialize(); } };
+    window.ContractEditor = { init: function (bridge) { editor = bridge; initialize(); }, open: open };
 }());
