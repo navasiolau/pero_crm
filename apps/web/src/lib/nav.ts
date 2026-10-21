@@ -75,7 +75,7 @@ export function navItemsForRole(roles: Role[], calendarEnabled = false, kpEnable
     item.href === "/prices" ? canReadPrices(roles) : item.roles.some((role) => roles.includes(role)),
   );
   if (calendarEnabled) visible.splice(visible.findIndex(item => item.href === "/") + 1, 0, planItem);
-  if (kpEnabled && kpItem.roles.some(role => roles.includes(role))) visible.splice(visible.findIndex(item => item.href === "/projects") + 1, 0, kpItem);
+  if (kpEnabled && kpItem.roles.some(role => roles.includes(role))) visible.splice(visible.findIndex(item => item.href === "/products") + 1, 0, kpItem);
   return visible;
 }
 

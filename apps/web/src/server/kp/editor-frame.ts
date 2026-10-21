@@ -4,7 +4,8 @@ import { assetPath, type ProposalEditorBootstrap } from '@pero/kp-template';
 export async function buildKpEditorFrame(bootstrap: ProposalEditorBootstrap): Promise<string> {
   if (!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/.test(bootstrap.documentId) || !bootstrap.actorId || bootstrap.apiBase !== '/api/kp') throw Error('KP_EDITOR_BOOTSTRAP_INVALID');
   let html = await readFile(assetPath('app/index.html'), 'utf8');
-  html = html.replace(/<link[^>]+href="https:\/\/fonts\.(?:googleapis|gstatic)\.com[^>]*>/g, '')
+  html = html.replace(/<header class="topbar">[\s\S]*?<\/header>/, '')
+    .replace(/<link[^>]+href="https:\/\/fonts\.(?:googleapis|gstatic)\.com[^>]*>/g, '')
     .replace(/<link[^>]+rel="manifest"[^>]*>/g, '')
     .replace(/href="\/css\//g, 'href="/kp/assets/css/').replace(/src="\/js\//g, 'src="/kp/assets/js/')
     .replace('href="/icons/apple-touch-icon.png"', 'href="/kp/assets/icons/apple-touch-icon.png"')

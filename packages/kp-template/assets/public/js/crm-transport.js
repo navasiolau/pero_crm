@@ -21,7 +21,7 @@
     if (!bootstrap || bootstrap.apiBase !== '/api/kp' || !bootstrap.documentId || !bootstrap.actorId) throw new Error('KP_BOOTSTRAP_INVALID');
     var fetcher = dependencies.fetch, storage = dependencies.storage, emit = dependencies.emit || function () {};
     var currentId = bootstrap.documentId, documents = {}, current = null, viewingVersion = null, uploaded = new Set();
-    var editor, paused = false, saveQueue = Promise.resolve(), contractForms = {}, retainedOperations = {};
+    var editor, paused = false, contractOpen = false, saveQueue = Promise.resolve(), contractForms = {}, retainedOperations = {};
     var confirmedState = null, confirmedFx = null;
     var prefix = 'pero-crm-kp:' + encodeURIComponent(bootstrap.actorId) + ':';
     var uuid = dependencies.uuid || function () { return crypto.randomUUID(); };
@@ -226,6 +226,7 @@
       getDocumentId: function () { return currentId; },
       initialState: function (defaults) { var value = copy(defaults); value.items = []; value.order = { number: '', date: '', validUntil: '', project: '' }; value.client = { name: '', contact: '' }; return value; },
       attachEditor: function (adapter) { editor = adapter; },
+      setContractOpen: function (open) { contractOpen = open === true; emit({ type: 'contract-open', open: contractOpen }); },
       reportError: function (error) { emit({ type: 'error', message: error.message || 'Не удалось открыть КП' }); },
       applyPermissions: function () {
         if (typeof document === 'undefined') return;
@@ -238,7 +239,15 @@
         if (banner) { banner.hidden = editable; banner.textContent = !current ? 'КП ещё не загружено. Обновите страницу или вернитесь к списку.' : viewingVersion ? 'Просмотр сохранённой версии. Для изменений восстановите её как текущую.' : paused ? 'Завершите изменение клиента.' : current.isArchive || !current.project ? 'Архивное КП доступно только для просмотра.' : 'КП доступно только для просмотра: проект находится вне статуса «Лид».'; }
       },
       handleCommand: async function (command) {
-        if (!editor) return;
+        if (!editor || !current) throw new Error('Редактор ещё загружается');
+        if (contractOpen && command.type !== 'contract') throw new Error('Закройте форму договора перед изменением КП');
+        if (command.type === 'pdf' || command.type === 'contract') {
+          if (viewingVersion) throw new Error('Для генерации выберите текущую редакцию КП');
+          if (paused) throw new Error('Завершите изменение клиента');
+          if (command.type === 'pdf') await editor.generatePdf();
+          else await editor.openContract();
+          return;
+        }
         if (command.type === 'flush') { await ensureSaved(); return; }
         if (command.type === 'pause') { paused = command.value === true; api.applyPermissions(); if (!paused && current?.canEdit && api.hasUnsavedChanges(editor.getState())) await editor.ensureSaved(); return; }
         if (command.type === 'client') {

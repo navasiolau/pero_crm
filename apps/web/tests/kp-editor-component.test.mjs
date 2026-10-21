@@ -36,6 +36,7 @@ const baseDoc = () => ({ id: 'primary', revision: 2, state: copy(state), created
   fx: { currency: 'BYN', rate: '1', date: '2026-10-18', source: 'NBRB' } });
 let browser, server, origin, image, doc, writes, pdfRequests, refuseSave, requests, contractSettings, contractRevision, clientDetails;
 const originalClient = () => ({ id: 'client', label: state.client.name, isTemporary: false, snapshot: { id: 'client', name: 'заказчик', lastName: 'Контрольный', middleName: null, phone: '+000', email: 'fixture@example.invalid', address: 'Контрольный адрес', comment: null, passportNumber: 'номер', passportIssuedBy: 'выдан' } });
+const selectedClient = () => ({ id: 'selected-client', label: 'Новый заказчик', isTemporary: false, snapshot: { id: 'selected-client', name: 'Новый заказчик', lastName: null, middleName: null, phone: '+001', email: 'selected@example.invalid', address: 'Другой адрес', comment: null, passportNumber: 'обновлённый номер', passportIssuedBy: 'другой орган' } });
 function reset() { doc = baseDoc(); writes = []; pdfRequests = []; refuseSave = false; requests = []; contractSettings = null; contractRevision = 0; clientDetails = originalClient(); }
 const types = { js: 'text/javascript', css: 'text/css', woff2: 'font/woff2', png: 'image/png' };
 function json(response, value, status = 200) { response.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' }); response.end(JSON.stringify(value)); }
@@ -46,22 +47,24 @@ before(async () => {
   image = await sharp(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600"><rect width="800" height="600" fill="#edf0f0"/><rect x="180" y="70" width="440" height="470" fill="#c2a481" stroke="#342b25" stroke-width="6"/><path d="M400 70V540M180 300H620" stroke="#342b25" stroke-width="4"/><circle cx="380" cy="280" r="5" fill="#342b25"/><circle cx="420" cy="280" r="5" fill="#342b25"/></svg>')).png().toBuffer();
   reset();
   const web = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+  const postcss = createRequire(require.resolve('@tailwindcss/postcss'))('postcss'), tailwind = require('@tailwindcss/postcss');
+  const css = (await postcss([tailwind({ base: web })]).process(await readFile(path.join(web, 'src/app/globals.css'), 'utf8'), { from: path.join(web, 'src/app/globals.css') })).css;
   const parentBundle = (await build({ stdin: { contents: "import React from 'react';import {createRoot} from 'react-dom/client';import {KpEditor} from '@/app/(app)/kp/[id]/editor';createRoot(document.getElementById('root')).render(<KpEditor documentId='primary'/>);", loader: 'tsx', resolveDir: web },
     bundle: true, write: false, format: 'iife', platform: 'browser', jsx: 'automatic', tsconfig: path.join(web, 'tsconfig.json'), define: { 'process.env.NODE_ENV': '"production"' }, logLevel: 'silent',
     plugins: [{ name: 'explicit-boundaries', setup(builder) {
-      builder.onResolve({ filter: /^(next\/navigation|next\/link|@\/server\/clients\/actions)$/ }, args => ({ path: args.path, namespace: 'boundary' }));
+      builder.onResolve({ filter: /^(next\/navigation|next\/link)$/ }, args => ({ path: args.path, namespace: 'boundary' }));
       builder.onLoad({ filter: /.*/, namespace: 'boundary' }, args => ({ loader: 'js', resolveDir: web, contents: args.path === 'next/navigation' ? 'const router=Object.freeze({push:href=>window.__navigation=href});export const useRouter=()=>router;' :
-        args.path === 'next/link' ? "import React from 'react';export default function Link({children,...props}){return React.createElement('a',props,children)}" :
-        "export async function updateClient(id,input){const response=await fetch('/fixture/client-edit',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id,input})});return response.json()}export async function createClient(){throw Error('CREATE_OUTSIDE_SCENARIO')}" }));
+        "import React from 'react';export default function Link({children,...props}){return React.createElement('a',props,children)}" }));
     } }] })).outputFiles[0].text;
   server = createServer((request, response) => { void (async () => {
     const url = new URL(request.url, 'http://fixture.invalid'); requests.push({ method: request.method, path: url.pathname });
     if (url.pathname === '/port' || url.pathname === '/kp/frame') { response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); response.end(await buildKpEditorFrame({ actorId: 'qa-actor', documentId: 'primary', apiBase: '/api/kp' })); return; }
-    if (url.pathname === '/host') { response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); response.end('<!doctype html><html><head><style>body{font-family:Arial;margin:8px}iframe{height:720px;width:100%;border:1px solid #ddd}button,input{padding:8px;margin:3px}input{display:block}[data-slot=dialog-overlay]{position:fixed;inset:0;background:#0006}[data-slot=dialog-content]{position:fixed;top:40px;left:25%;width:50%;background:white;padding:16px;z-index:100}[data-slot=popover-content]{background:white;border:1px solid #ddd;z-index:200}</style></head><body><div id="root"></div><script src="/host-bundle.js"></script></body></html>'); return; }
+    if (url.pathname === '/host') { response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); response.end('<!doctype html><html lang="ru"><head><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="/host.css"></head><body style="padding:16px"><div id="root"></div><script src="/host-bundle.js"></script></body></html>'); return; }
+    if (url.pathname === '/host.css') { response.writeHead(200, { 'content-type': 'text/css' }); response.end(css); return; }
     if (url.pathname === '/host-bundle.js') { response.writeHead(200, { 'content-type': 'text/javascript' }); response.end(parentBundle); return; }
-    if (url.pathname === '/api/kp/clients') { json(response, { clients: [clientDetails] }); return; }
+    if (url.pathname === '/api/kp/clients') { json(response, { clients: [clientDetails, selectedClient()] }); return; }
     if (url.pathname === '/api/kp/clients/client') { json(response, clientDetails); return; }
-    if (url.pathname === '/fixture/client-edit') { const input = await body(request); clientDetails.snapshot = { ...clientDetails.snapshot, ...input.input }; clientDetails.label = [clientDetails.snapshot.lastName, clientDetails.snapshot.name, clientDetails.snapshot.middleName].filter(Boolean).join(' '); json(response, { ok: true }); return; }
+    if (url.pathname === '/api/kp/clients/selected-client') { json(response, selectedClient()); return; }
     if (url.pathname === '/api/kp/documents/primary/versions') { json(response, { versions: [{ id: 'old-version', revision: 1, createdAt: '2026-10-18T09:00:00Z', trigger: 'PDF', isAccepted: false, pdfArtifactId: 'old-pdf' }] }); return; }
     if (url.pathname === '/api/kp/documents/primary/versions/old-version') { json(response, { version: { id: 'old-version' }, document: { ...doc, fx: baseDoc().fx, revision: 1, canEdit: false, state: { ...copy(state), order: { ...state.order, project: 'Старая версия' } } } }); return; }
     if (url.pathname === '/api/kp/documents/primary/versions/old-version/restore') { const input = await body(request); assert.equal(input.expectedRevision, doc.revision); doc = { ...doc, fx: baseDoc().fx, revision: doc.revision + 1, state: { ...copy(state), order: { ...state.order, project: 'Старая версия' } } }; json(response, doc); return; }
@@ -79,13 +82,15 @@ before(async () => {
     if (url.pathname === '/api/kp/documents/primary' && request.method === 'PUT') {
       const input = await body(request); writes.push(input);
       if (refuseSave || input.expectedRevision !== doc.revision) { json(response, { error: { code: 'conflict', message: 'Контрольный конфликт ревизии' } }, 409); return; }
-      doc = { ...doc, revision: doc.revision + 1, state: input.state, fx: input.fx ?? doc.fx, client: { id: input.clientId ?? doc.client.id, label: clientDetails.label } }; json(response, doc); return;
+      doc = { ...doc, revision: doc.revision + 1, state: input.state, fx: input.fx ?? doc.fx, client: { id: input.clientId ?? doc.client.id, label: input.clientId === 'selected-client' ? selectedClient().label : clientDetails.label } }; json(response, doc); return;
     }
     if (url.pathname === '/api/kp/documents/primary/pdf') { pdfRequests.push(await body(request)); json(response, { id: 'job', state: 'SUCCEEDED', result: { artifactId: 'pdf', versionId: 'version', fileName: 'КП.pdf', mimeType: 'application/pdf', downloadUrl: '/api/kp/artifacts/pdf/download' } }); return; }
     if (url.pathname === '/api/kp/artifacts/pdf/download') { response.writeHead(200, { 'content-type': 'application/pdf', 'content-disposition': 'attachment; filename="fixture.pdf"' }); response.end(Buffer.from('%PDF-1.7\n%%EOF')); return; }
     if (url.pathname === '/api/kp/documents') { json(response, { documents: [{ id: doc.id, name: 'КП №231', updatedAt: doc.updatedAt, project: doc.project }] }); return; }
     if (url.pathname === '/api/kp/contracts' && request.method === 'GET') {
-      contractSettings ??= Object.assign(template.ContractModel.defaults(doc.state, doc.id), { deliveryAddress: 'Контрольный адрес', customer: { type: 'individual', name: 'Клиент CRM', phone: '+000', passport: 'Контрольный документ' } });
+      contractSettings ??= Object.assign(template.ContractModel.defaults(doc.state, doc.id), doc.client.id === 'selected-client'
+        ? { deliveryAddress: 'Другой адрес', customer: { type: 'individual', name: 'Новый заказчик', phone: '+001', email: 'selected@example.invalid', passport: 'обновлённый номер, другой орган' } }
+        : { deliveryAddress: 'Контрольный адрес', customer: { type: 'individual', name: 'Клиент CRM', phone: '+000', passport: 'Контрольный документ' } });
       json(response, { contractId: 'contract', revision: contractRevision, canEdit: !doc.isArchive, settings: contractSettings, profiles: require(template.assetPath('templates/contracts/contractors.json')),
         sourceRefs: [{ proposalId: doc.id, expectedRevision: doc.revision }], clientDefaults: {}, clientBaseline: 'baseline' }); return;
     }
@@ -106,8 +111,16 @@ async function portPage(viewport = { width: 1440, height: 1000 }) {
   if (viewport.width < 900) await page.locator('[data-view="sheet"]').click();
   return { context, page };
 }
+async function hostPage(viewport = { width: 1440, height: 1000 }) {
+  const context = await browser.newContext({ viewport, serviceWorkers: 'block', acceptDownloads: true });
+  const page = await context.newPage(); page.setDefaultTimeout(10000);
+  await page.goto(origin + '/host');
+  const child = page.frameLocator('iframe');
+  await child.locator('[data-path="items.0.name"]').waitFor();
+  return { context, page, child };
+}
 
-test('actual editor preserves source print DOM and desktop/mobile axes, with private canonical images', async () => {
+test('actual editor preserves source print DOM and page sizes on desktop/mobile, with private canonical images', async () => {
   for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }]) {
     reset(); const { context, page } = await portPage(viewport);
     try {
@@ -122,8 +135,9 @@ test('actual editor preserves source print DOM and desktop/mobile axes, with pri
       });
       assert.equal(await page.locator('#sheet .page').count(), await baseline.locator('#sheet .page').count());
       const printedText = value => value.locator('#sheet').innerText(); assert.equal(await printedText(page), await printedText(baseline));
-      const axes = value => value.evaluate(() => Object.fromEntries(['.topbar', '.editor', '.stage', '#sheet .page'].map(selector => { const rect = document.querySelector(selector).getBoundingClientRect(); return [selector, { x: rect.x, y: rect.y, width: rect.width, height: rect.height }]; })));
-      assert.deepEqual(await axes(page), await axes(baseline));
+      const pageSizes = value => value.locator('#sheet .page').evaluateAll(pages => pages.map(page => ({ width: page.offsetWidth, height: page.offsetHeight })));
+      assert.deepEqual(await pageSizes(page), await pageSizes(baseline));
+      assert.equal(await page.locator('.topbar').count(), 0);
       assert.equal(await page.locator('[data-path="order.number"]').getAttribute('readonly'), '');
       assert.equal(await page.locator('[data-path="client.name"]').getAttribute('readonly'), '');
       assert.equal(await page.locator('.doc-del').count(), 0);
@@ -136,66 +150,67 @@ test('actual editor preserves source print DOM and desktop/mobile axes, with pri
 });
 
 test('actual save-before-export retains IDs and crmKind; duplication gets a fresh ID and conflict prevents PDF', async () => {
-  reset(); const { context, page } = await portPage();
+  reset(); const { context, page, child } = await hostPage();
   try {
-    await page.locator('[data-path="items.0.name"]').fill('Обновлённый шкаф');
-    await page.locator('[data-dup="0"]').click();
+    await child.locator('[data-path="items.0.name"]').fill('Обновлённый шкаф');
+    await child.locator('[data-dup="0"]').click();
     const download = page.waitForEvent('download'); await page.getByRole('button', { name: 'Сгенерировать PDF', exact: true }).click(); await download;
     assert.ok(writes.length >= 1); const saved = writes.at(-1);
     assert.equal(saved.state.items[0].id, 'item-0'); assert.notEqual(saved.state.items[1].id, 'item-0');
     assert.equal(saved.state.delivery.items[0].crmKind, 'DELIVERY'); assert.equal(saved.state.items[0].image, 'kp-media:photo');
     assert.equal(pdfRequests.length, 1); assert.equal(pdfRequests[0].expectedRevision, doc.revision); assert.equal(pdfRequests[0].state, undefined);
-    refuseSave = true; await page.locator('[data-path="items.0.name"]').fill('Конфликт');
+    refuseSave = true; await child.locator('[data-path="items.0.name"]').fill('Конфликт');
     await page.getByRole('button', { name: 'Сгенерировать PDF', exact: true }).click();
-    await page.waitForFunction(() => document.getElementById('toast').textContent.includes('Конфликт') || document.getElementById('toast').textContent.includes('конфликт'));
+    await expect(page.getByRole('alert')).toContainText(/Конфликт|конфликт/);
     assert.equal(pdfRequests.length, 1);
   } finally { await context.close(); }
 });
 
 test('locked editor disables writes while original contract form loads current structured CRM defaults', async () => {
-  reset(); doc.canEdit = false; doc.project.stage = 'CONTRACT'; const { context, page } = await portPage();
+  reset(); doc.canEdit = false; doc.project.stage = 'CONTRACT'; const { context, page, child } = await hostPage();
   try {
-    assert.equal(await page.locator('[data-path="items.0.name"]').isDisabled(), true);
-    assert.match(await page.locator('#crmReadOnly').innerText(), /просмотра/);
+    assert.equal(await child.locator('[data-path="items.0.name"]').isDisabled(), true);
+    assert.match(await child.locator('#crmReadOnly').innerText(), /просмотра/);
     await page.getByRole('button', { name: 'Сгенерировать договор', exact: true }).click();
-    await page.locator('#contract-customer-name').waitFor(); assert.equal(await page.locator('#contract-customer-name').inputValue(), 'Клиент CRM');
-    assert.equal(await page.locator('#contract-customer-name').isDisabled(), false, 'contract remains editable after proposal lock');
-    assert.equal(await page.locator('[data-contract-path="customer.passport"]').inputValue(), 'Контрольный документ');
+    await child.locator('#contract-customer-name').waitFor(); assert.equal(await child.locator('#contract-customer-name').inputValue(), 'Клиент CRM');
+    assert.equal(await child.locator('#contract-customer-name').isDisabled(), false, 'contract remains editable after proposal lock');
+    assert.equal(await child.locator('[data-contract-path="customer.passport"]').inputValue(), 'Контрольный документ');
     assert.equal(writes.length, 0);
     await page.screenshot({ path: path.join(output, 'contract-form.png'), fullPage: true });
   } finally { await context.close(); }
 });
 
 test('archived contract form keeps immutable history reachable while draft editing is disabled', async () => {
-  reset(); doc.canEdit = false; doc.isArchive = true; const { context, page } = await portPage();
+  reset(); doc.canEdit = false; doc.isArchive = true; const { context, page, child } = await hostPage();
   try {
     await page.getByRole('button', { name: 'Сгенерировать договор', exact: true }).click();
-    await page.locator('#contract-customer-name').waitFor(); assert.equal(await page.locator('#contract-customer-name').isDisabled(), true);
-    await page.getByText('Ранее выпущенные договоры · Москва', { exact: true }).click();
-    const history = page.getByRole('link', { name: /contract_231_Pero\.docx/ }); await history.waitFor();
+    await child.locator('#contract-customer-name').waitFor(); assert.equal(await child.locator('#contract-customer-name').isDisabled(), true);
+    await child.getByText('Ранее выпущенные договоры · Москва', { exact: true }).click();
+    const history = child.getByRole('link', { name: /contract_231_Pero\.docx/ }); await history.waitFor();
     assert.equal(await history.getAttribute('href'), '/api/kp/artifacts/docx/download');
     assert.equal(writes.length, 0);
   } finally { await context.close(); }
 });
 
-test('actual React client dialog refreshes the complete sidecar and version bridge restores by live revision', async () => {
+test('actual React toolbar selects CRM client immediately and version bridge restores by live revision', async () => {
   reset(); const context = await browser.newContext({ viewport: { width: 1440, height: 1200 }, serviceWorkers: 'block' });
   try {
     const page = await context.newPage(); page.setDefaultTimeout(10000); await page.goto(origin + '/host');
     const child = page.frameLocator('iframe'); await child.locator('[data-path="items.0.name"]').waitFor();
-    await page.getByRole('button', { name: 'Изменить клиента', exact: true }).click();
-    const dialog = page.getByRole('dialog'); await dialog.waitFor();
-    assert.equal(await child.locator('[data-path="items.0.name"]').isDisabled(), true);
-    await dialog.getByLabel('Имя *', { exact: true }).fill('Новый заказчик');
-    await dialog.getByLabel('Номер паспорта', { exact: true }).fill('обновлённый номер');
-    await dialog.getByRole('button', { name: 'Сохранить', exact: true }).click();
-    try { await dialog.waitFor({ state: 'hidden' }); }
-    catch { throw Error(JSON.stringify({ alerts: await page.getByRole('alert').allTextContents(), writes: writes.length, counts: Object.fromEntries([...new Set(requests.map(request => request.path))].map(path => [path, requests.filter(request => request.path === path).length])) })); }
+    assert.equal(await page.getByRole('button', { name: 'Изменить клиента', exact: true }).count(), 0);
+    assert.equal(await page.getByRole('button', { name: 'Новый клиент', exact: true }).count(), 0);
+    assert.equal(await child.locator('.topbar').count(), 0);
+    assert.equal(await child.getByRole('button', { name: /^Сгенерировать/ }).count(), 0);
+    await page.locator('#kp-client').click();
+    await page.getByRole('button', { name: 'Новый заказчик', exact: true }).click();
+    await expect(child.locator('[data-path="client.name"]')).toHaveValue('Новый заказчик');
+    await expect(page.locator('#kp-client')).toBeEnabled();
     assert.equal(writes.at(-1).state.client.crmSnapshot.name, 'Новый заказчик');
     assert.equal(writes.at(-1).state.client.crmSnapshot.passportNumber, 'обновлённый номер');
-    assert.equal(writes.at(-1).state.client.crmSnapshot.id, 'client');
-    assert.equal(await child.locator('[data-path="client.name"]').inputValue(), 'Контрольный Новый заказчик');
-    assert.match(await page.locator('#kp-client').innerText(), /Контрольный Новый заказчик/);
+    assert.deepEqual(writes.at(-1).state.client.crmSnapshot, selectedClient().snapshot);
+    assert.equal(writes.at(-1).clientId, 'selected-client');
+    assert.equal(await child.locator('[data-path="client.contact"]').inputValue(), '+001');
+    assert.match(await page.locator('#kp-client').innerText(), /Новый заказчик/);
     assert.equal(await child.locator('[data-path="items.0.name"]').isDisabled(), false);
     await child.locator('select[data-path="currency"]').selectOption('$');
     await page.getByRole('button', { name: /^Курс/ }).click();
@@ -205,8 +220,11 @@ test('actual React client dialog refreshes the complete sidecar and version brid
     assert.deepEqual(writes.at(-1).fx, { currency: 'USD', rate: '3.2', date: '2026-10-18', source: 'MANUAL' });
     assert.equal(requests.filter(request => request.path === '/api/kp/rates').length, 1, 'ordinary saves keep the fixed manual rate');
     const priorWrites = writes.length;
-    await child.getByRole('button', { name: 'Сгенерировать договор', exact: true }).click();
+    await page.getByRole('button', { name: 'Сгенерировать договор', exact: true }).click();
     await child.locator('#contract-customer-name').waitFor();
+    assert.equal(await child.locator('#contract-customer-name').inputValue(), 'Новый заказчик');
+    assert.equal(await child.locator('[data-contract-path="customer.passport"]').inputValue(), 'обновлённый номер, другой орган');
+    assert.equal(await page.locator('#kp-client').isDisabled(), true);
     assert.equal(writes.length, priorWrites, 'opening a contract never re-applies a clean old proposal over fresh CRM client fields');
     await child.getByRole('button', { name: 'Отмена', exact: true }).click();
     await child.locator('#contractModal').waitFor({ state: 'hidden' });
@@ -214,12 +232,23 @@ test('actual React client dialog refreshes the complete sidecar and version brid
     await child.locator('[data-path="order.project"]').waitFor();
     await expect(child.locator('[data-path="order.project"]')).toHaveValue('Старая версия');
     assert.equal(await child.locator('[data-path="items.0.name"]').isDisabled(), true);
-    assert.equal(await child.getByRole('button', { name: 'Сгенерировать договор', exact: true }).isDisabled(), true);
+    assert.equal(await page.getByRole('button', { name: 'Сгенерировать договор', exact: true }).isDisabled(), true);
+    assert.equal(await page.getByRole('button', { name: 'Сгенерировать PDF', exact: true }).isDisabled(), true);
     await page.getByRole('button', { name: 'Восстановить', exact: true }).click();
     await page.getByRole('button', { name: 'Восстановить', exact: true }).waitFor({ state: 'hidden' });
     assert.equal(await child.locator('[data-path="items.0.name"]').isDisabled(), false);
-    assert.equal(await child.getByRole('button', { name: 'Сгенерировать договор', exact: true }).isDisabled(), false);
+    assert.equal(await page.getByRole('button', { name: 'Сгенерировать договор', exact: true }).isDisabled(), false);
     assert.equal(doc.state.order.project, 'Старая версия');
+    await expect(page.locator('#kp-client')).toBeEnabled();
+    await page.screenshot({ path: path.join(output, 'crm-toolbar-desktop.png'), fullPage: true, animations: 'disabled' });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await child.locator('[data-view="sheet"]').click();
+    await child.locator('#scale').evaluate(async element => {
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      await Promise.all(element.getAnimations({ subtree: true }).map(animation => animation.finished.catch(() => {})));
+    });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
+    await page.screenshot({ path: path.join(output, 'crm-toolbar-mobile.png'), fullPage: true, animations: 'disabled' });
   } finally { await context.close(); }
 });
 

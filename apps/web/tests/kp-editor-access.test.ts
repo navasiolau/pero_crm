@@ -12,7 +12,9 @@ test('KP editor and navigation require enabled feature plus current active manag
     assert.equal(canUseKpEditor({ active: true, roles: [role] }, true), allowed);
     assert.equal(canUseKpEditor({ active: false, roles: [role] }, true), false);
     assert.equal(canUseKpEditor({ active: true, roles: [role] }, false), false);
-    assert.equal(navItemsForRole([role], false, true).some(item => item.href === '/kp'), allowed);
+    const items = navItemsForRole([role], false, true);
+    assert.equal(items.some(item => item.href === '/kp'), allowed);
+    if (allowed) assert.equal(items[items.findIndex(item => item.href === '/products') + 1]?.href, '/kp');
     assert.equal(navItemsForRole([role]).some(item => item.href === '/kp'), false);
   }
   assert.equal(canUseKpEditor({ active: true, roles: ['ENGINEER', 'MANAGER'] }, true), true);
