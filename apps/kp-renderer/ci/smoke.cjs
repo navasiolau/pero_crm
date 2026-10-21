@@ -148,14 +148,21 @@ async function main(diagnostics) {
     diagnostics.phase('http-raster-original');
     const baselineRaster = await post({ kind: 'rasterize', pdfBase64: baselinePdf.toString('base64') });
     diagnostics.phase('compare-all-pages');
+    diagnostics.phase('compare-raster-count');
     assert.equal(actualRaster.pageCount, actual.pageCount);
+    diagnostics.phase('compare-raster-length');
     assert.equal(actualRaster.pagesBase64.length, baselineRaster.pagesBase64.length);
     // Не передаём PNG/base64 в AssertionError: подробный diff сам требует много памяти.
-    for (let index = 0; index < actualRaster.pagesBase64.length; index++)
+    for (let index = 0; index < actualRaster.pagesBase64.length; index++) {
+      diagnostics.phase('compare-raster-page-' + index);
       assert.equal(actualRaster.pagesBase64[index] === baselineRaster.pagesBase64[index], true, 'KP_CI_RASTER_PAGE_' + index);
+    }
+    diagnostics.phase('compare-png-count');
     assert.equal(baselinePngs.length, actual.pageCount);
-    for (let index = 0; index < baselinePngs.length; index++)
+    for (let index = 0; index < baselinePngs.length; index++) {
+      diagnostics.phase('compare-png-page-' + index);
       assert.equal(Buffer.from(actual.pagesBase64[index], 'base64').equals(baselinePngs[index]), true, 'KP_CI_PNG_PAGE_' + index);
+    }
     const settings = template.ContractModel.defaults(state, 'primary', new Date('2026-10-18T09:00:00Z')); settings.deliveryAddress = 'Контрольный адрес'; settings.proposalIds.push('secondary');
     const sources = [{ id: 'primary', state }, { id: 'secondary', state: { ...state, order: { ...state.order, number: '232' } } }];
     const profile = { id: 'pero-by', name: 'Контрольный исполнитель', positionGenitive: 'директора', directorGenitive: 'Проверки', authority: 'Устава', country: 'BY',
