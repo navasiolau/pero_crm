@@ -89,11 +89,16 @@ test("canonical multipart documentId is accepted and conflicting proposalId alia
   assert.equal(f.calls.length, 1);
 });
 test("jobs and operation recovery receive fixed private download URLs while canonical state stays raw", async () => {
-  const job = { id: "job", state: "SUCCEEDED", result: { artifactId: "artifact", versionId: "version", fileName: "КП.pdf", mimeType: "application/pdf" } };
-  const handler = createKpApiHandler({ enabled: () => true, authorize: async () => context, service: { execute: async () => ({ operationId: randomUUID(), kind: "pdf", result: job }) } });
+  const job = { id: "job", state: "SUCCEEDED", result: { artifactId: "artifact", versionId: "version", fileName: "КП_222.pdf", mimeType: "application/pdf" } };
+  const handler = createKpApiHandler({ enabled: () => true, authorize: async () => context, service: { execute: async action => action === "readArtifact"
+    ? { bytes: Buffer.from("%PDF-1.7"), fileName: job.result.fileName, mimeType: "application/pdf" }
+    : { operationId: randomUUID(), kind: "pdf", result: job } } });
   const response = await handler(request(`operations/${randomUUID()}`), ["operations", randomUUID()], "bearer");
   assert.equal((await response.json()).result.result.downloadUrl, "/api/v1/kp/artifacts/artifact/download");
   assert.match(response.headers.get("cache-control")!, /no-store/); assert.equal(response.headers.get("x-content-type-options"), "nosniff");
+  const download = await handler(request("artifacts/artifact/download"), ["artifacts", "artifact", "download"], "bearer");
+  assert.equal(download.status, 200);
+  assert.equal(decodeURIComponent(download.headers.get("content-disposition")!.split("filename*=UTF-8''")[1]), "КП_222.pdf");
 });
 
 test("HTTP job/artifact/operation readers derive contract grants from persisted kind, never caller query", async () => {

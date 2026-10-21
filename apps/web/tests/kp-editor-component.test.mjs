@@ -84,8 +84,8 @@ before(async () => {
       if (refuseSave || input.expectedRevision !== doc.revision) { json(response, { error: { code: 'conflict', message: 'Контрольный конфликт ревизии' } }, 409); return; }
       doc = { ...doc, revision: doc.revision + 1, state: input.state, fx: input.fx ?? doc.fx, client: { id: input.clientId ?? doc.client.id, label: input.clientId === 'selected-client' ? selectedClient().label : clientDetails.label } }; json(response, doc); return;
     }
-    if (url.pathname === '/api/kp/documents/primary/pdf') { pdfRequests.push(await body(request)); json(response, { id: 'job', state: 'SUCCEEDED', result: { artifactId: 'pdf', versionId: 'version', fileName: 'КП.pdf', mimeType: 'application/pdf', downloadUrl: '/api/kp/artifacts/pdf/download' } }); return; }
-    if (url.pathname === '/api/kp/artifacts/pdf/download') { response.writeHead(200, { 'content-type': 'application/pdf', 'content-disposition': 'attachment; filename="fixture.pdf"' }); response.end(Buffer.from('%PDF-1.7\n%%EOF')); return; }
+    if (url.pathname === '/api/kp/documents/primary/pdf') { pdfRequests.push(await body(request)); json(response, { id: 'job', state: 'SUCCEEDED', result: { artifactId: 'pdf', versionId: 'version', fileName: 'КП_231.pdf', mimeType: 'application/pdf', downloadUrl: '/api/kp/artifacts/pdf/download' } }); return; }
+    if (url.pathname === '/api/kp/artifacts/pdf/download') { response.writeHead(200, { 'content-type': 'application/pdf', 'content-disposition': "attachment; filename=KP_231.pdf; filename*=UTF-8''" + encodeURIComponent('КП_231.pdf') }); response.end(Buffer.from('%PDF-1.7\n%%EOF')); return; }
     if (url.pathname === '/api/kp/documents') { json(response, { documents: [{ id: doc.id, name: 'КП №231', updatedAt: doc.updatedAt, project: doc.project }] }); return; }
     if (url.pathname === '/api/kp/contracts' && request.method === 'GET') {
       contractSettings ??= Object.assign(template.ContractModel.defaults(doc.state, doc.id), doc.client.id === 'selected-client'
@@ -154,7 +154,8 @@ test('actual save-before-export retains IDs and crmKind; duplication gets a fres
   try {
     await child.locator('[data-path="items.0.name"]').fill('Обновлённый шкаф');
     await child.locator('[data-dup="0"]').click();
-    const download = page.waitForEvent('download'); await page.getByRole('button', { name: 'Сгенерировать PDF', exact: true }).click(); await download;
+    const download = page.waitForEvent('download'); await page.getByRole('button', { name: 'Сгенерировать PDF', exact: true }).click();
+    assert.equal((await download).suggestedFilename(), 'КП_231.pdf');
     assert.ok(writes.length >= 1); const saved = writes.at(-1);
     assert.equal(saved.state.items[0].id, 'item-0'); assert.notEqual(saved.state.items[1].id, 'item-0');
     assert.equal(saved.state.delivery.items[0].crmKind, 'DELIVERY'); assert.equal(saved.state.items[0].image, 'kp-media:photo');

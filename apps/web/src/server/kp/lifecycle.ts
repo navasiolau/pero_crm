@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { proposalPdfFileName } from "./pdf-filename";
 import { MANAGER_ROLES, hasAnyRole } from "../../lib/roles";
 import type { ProjectStage } from "@prisma/client";
 import type { DomainActor } from "../actor";
@@ -150,7 +151,7 @@ export async function recordPendingPdfArtifact(store: ProposalLifecycleStore, cl
   if (!/^[a-f0-9]{64}$/.test(bytes.sha256) || !Number.isSafeInteger(bytes.size) || bytes.size <= 0 || !/^[A-Za-z0-9_-]+$/.test(proposalId) || !/^[A-Za-z0-9_-]+$/.test(claim.id)) lifecycleFailure("KP_ARTIFACT_INVALID", 400);
   const id = randomUUID();
   const artifact: ArtifactRecord = { id, proposalId, contractId: null, kind: "PDF", state: "PENDING", storageBinding: lifecycleClone(bytes.storageBinding),
-    key: pendingArtifactKey(claim, { kind: "PDF", id: proposalId }, id), sha256: bytes.sha256, size: bytes.size, fileName: "КП.pdf", mimeType: "application/pdf" };
+    key: pendingArtifactKey(claim, { kind: "PDF", id: proposalId }, id), sha256: bytes.sha256, size: bytes.size, fileName: proposalPdfFileName(source.state), mimeType: "application/pdf" };
   await store.createPendingArtifact(artifact);
   await registerPendingArtifactCleanup(store, claim, artifact.id, proposalId);
   return artifact;
