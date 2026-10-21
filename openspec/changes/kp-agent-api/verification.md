@@ -998,3 +998,29 @@ timeouts не менялись; новых тестов не добавлено.
 — PASS. Это локальный browser fixture с контролируемым транспортом, без CRM DB/S3
 или live staging; прежний CI307 failure не переписан в PASS. Новая CI/staging
 приёмка этим запуском не заявляется, task3.3 остаётся открытой.
+
+## 21.10.2026 — функциональная сквозная приёмка завершена
+
+Прежние API/auth/UI/AI proofs сохранены с собственными SHA/образами и принятой
+эквивалентностью acbd→ab5. На staging `ab5b243f1e3cddd5c915ebdb70b6bff7be3a815e` /
+CI308/run39462920003 завершены physical55 10/10, original quarantine RESTORED,
+настоящий retained SDK и последний ordinary LEAD/version/data/PDF/restore410.
+App/SDK client467e и реальные HTTP routes/body не менялись из-за исправлений QA-обвязки.
+
+Итоговый [index](D:/Projects/pero_crm_worktrees/kp-187/.playwright-mcp/kp-187/closed55-final-existing-cases-acceptance-20261021.private.json),
+SHA `05257a9bf7a00ee0bc9302d3ea4bb4acd06d28850d464d84ee90d48aae2b8e11`,
+связывает physical515739, RESTOREd04, SDK22cc/01aa и последний resulta426.
+Подтверждены настоящий переход в LEAD, GETversion200, один POSTrestore410
+`KP_MEDIA_UNAVAILABLE`, неизменный current document и PDF200/314719bytes/SHA54424254.
+Для отказа полные76 RAW/BUSINESS, catalog и22 key digests exact. Уведомления восстановлены.
+Последний actor1991 безопасно закрыт: OFF000/owned rendererSTOP, original FINISH2083
+и keeper6a3a подтвердили11inactive/22revoked/alivefalse. SETUP foreign76RAW/BUSINESS
+exact; FINISH foreign BUSINESS76/catalog exact, RAW содержит только отдельно
+сохранённое согласованное8bb4/e454 lastUsedAt. Исторические HOLD не переписаны.
+
+Пункт3.3 функционально завершён; новых тестов и повторов успешных компонентов нет.
+Финальная публикация общего staging после одного штатного CI, проверка новых SHA/
+образов, постоянный OWNER110 и подключение установленного skill/MCP к рабочему
+ключу выполняются Root отдельным операционным шагом и receipt. Пока рабочий ключ
+отсутствует, установленное подключение не объявляется готовым. Business retention0
+по AGENTS.md сохраняется; owner UAT, main и production остаются отдельными этапами.
