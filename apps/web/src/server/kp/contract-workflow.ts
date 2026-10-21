@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { proposalPdfFileName } from "./pdf-filename";
 import { z } from "zod";
 import { applyContractDefaults, captureContractSettings, contractClientBaseline, contractClientDefaults, contractFingerprint, settingsDocument } from "./contract-client";
 import { contractDraftRequestSchema, contractExportRequestSchema, contractSourceRefSchema } from "./contract-request";
@@ -232,7 +233,7 @@ export function createContractWorkflow(ports: ContractWorkflowPorts) {
         let artifact: ContractArtifact = { id, proposalId: kind === "PDF" ? ownerId : null, contractId: kind === "DOCX" ? ownerId : null,
           kind, state: "PENDING", storageBinding: contractClone(ports.storageBinding), key: claimArtifactKey(claim, kind, ownerId, id),
           sha256: createHash("sha256").update(bytes).digest("hex"), size: bytes.byteLength,
-          fileName: kind === "PDF" ? `kp_${ownerId}_Pero.pdf` : ports.fileNameForContract(String(extra.settingsSnapshot.number)),
+          fileName: kind === "PDF" ? proposalPdfFileName(source!.state) : ports.fileNameForContract(String(extra.settingsSnapshot.number)),
           mimeType: kind === "PDF" ? "application/pdf" : "application/vnd.openxmlformats-officedocument.wordprocessingml.document" };
         await ports.store.transaction(async tx => {
           const current = await loadClaim(tx, claim);

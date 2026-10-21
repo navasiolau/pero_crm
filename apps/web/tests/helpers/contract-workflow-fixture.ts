@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { proposalPdfFileName } from "../../src/server/kp/pdf-filename";
 import type { Prisma } from "@prisma/client";
 import type { ContractObject, ContractSettings, ContractClient, ContractSource, ContractRecord } from "../../src/server/kp/contract-types";
 import { ContractWorkflowError } from "../../src/server/kp/contract-types";
@@ -87,7 +88,7 @@ export function contractWorkflowFixture(initialSources = [source("cp_a")]) {
       registerPendingPdf: async (_tx, claim, source, descriptor) => {
         const id = "new_pdf_" + source.proposalId;
         const artifact: ContractArtifact = { ...descriptor, id, proposalId: source.proposalId, contractId: null, kind: "PDF", state: "PENDING",
-          key: `kp/proposals/${source.proposalId}/exports/${claim.id}-${claim.attempt}-${id}.pdf`, fileName: "КП.pdf", mimeType: "application/pdf" };
+          key: `kp/proposals/${source.proposalId}/exports/${claim.id}-${claim.attempt}-${id}.pdf`, fileName: proposalPdfFileName(source.state), mimeType: "application/pdf" };
         await tx.createPendingArtifact(artifact); return artifact;
       },
       registerPendingDocxCleanup: async (_tx, _claim, artifactId) => { calls.push("docx-cleanup:" + artifactId); },

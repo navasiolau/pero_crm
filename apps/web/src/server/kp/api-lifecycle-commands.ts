@@ -9,6 +9,7 @@ import { prepareProposalProductMedia } from "./media-core";
 import { normalizeProposalState, type ProposalState } from "./proposal-contract";
 import { saveProposalInTransaction, type ProposalWriteMutation } from "./proposal-core";
 import { fixedProposalRate, proposalCurrency } from "./pricing-contract";
+import { proposalArtifactFileName } from "./pdf-filename";
 
 export async function requestApiPdf(context: KpApiContext, input: Record<string, unknown>) {
   const operationId = String(input.operationId), proposalId = String(input.proposalId);
@@ -16,7 +17,7 @@ export async function requestApiPdf(context: KpApiContext, input: Record<string,
     mutate: async tx => {
       const result = await requestProposalPdfInTransaction(tx, context.binding, input, kpLifecyclePorts("kp:export"));
       if (result.kind === "retained") return { entityId: proposalId, result: { id: `retained_${result.versionId}`, state: "SUCCEEDED", error: null,
-        result: { artifactId: result.artifact.id, versionId: result.versionId, fileName: result.artifact.fileName, mimeType: result.artifact.mimeType } } };
+        result: { artifactId: result.artifact.id, versionId: result.versionId, fileName: await proposalArtifactFileName(tx, result.artifact), mimeType: result.artifact.mimeType } } };
       return { entityId: proposalId, result: { id: result.jobId, state: result.state, result: null, error: null }, afterCommit: async () => { startKpRenderRuntime(); } };
     },
   });

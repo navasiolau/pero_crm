@@ -136,6 +136,7 @@ test("успех выпускает всё одной транзакцией и 
   assert.deepEqual(f.state.financialFacts, facts); assert.equal(f.calls.filter(call => call === "dispatch").length, 1);
   assert.ok(f.calls.findIndex(call => call.startsWith("docx-cleanup:")) < f.calls.indexOf("upload:DOCX"));
   assert.equal(f.calls.filter(call => call.startsWith("render:")).length, 1);
+  assert.equal([...f.state.artifacts.values()].find(artifact => artifact.kind === "PDF" && artifact.proposalId === "cp_a")?.fileName, "КП_231.pdf");
   const before = f.calls.length; assert.deepEqual(await workflow.runClaim(claim), result); assert.equal(f.calls.length, before + 2);
   const snapshot = structuredClone(f.state.versions[0]); f.state.clients[0].name = "Позднее изменение"; assert.deepEqual(f.state.versions[0], snapshot);
   assert.equal((await workflow.history(contractActor, "cp_a"))[0].docxArtifactId, result.artifactId);

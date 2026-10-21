@@ -5,6 +5,7 @@ import { applyProposalStageGate, publishSourcePdf, readVersionPdf, recordPending
 import { ProposalLifecycleError, parseRenderJobPayload } from "../src/server/kp/lifecycle-contract";
 import { createPdfRenderHandler, createRenderWorker } from "../src/server/kp/render-worker";
 import { lifecycleFixture } from "./helpers/kp-lifecycle-fixture";
+import { proposalArtifactFileName } from "../src/server/kp/pdf-filename";
 
 const enabled = () => ({ PERO_KP_ENABLED: "1", PERO_KP_WORKER_ENABLED: "1" });
 const isCode = (code: string) => (error: unknown) => error instanceof ProposalLifecycleError && error.code === code;
@@ -46,9 +47,18 @@ test("caller raw state, disabled module and current role revocation reject befor
 
 test("PDF worker persists PENDING before upload then publishes one immutable linked release atomically", async () => {
   const f = lifecycleFixture(), upload = f.io.upload;
+  f.state.proposal.state.order = { number: "222" };
   f.io.upload = async (artifact, bytes, signal) => { assert.equal(f.state.artifacts.get(artifact.id)?.state, "PENDING"); assert.equal(f.state.versions.size, 0); assert.ok(f.state.orphans.some(intent => intent.artifactId === artifact.id && intent.attempt === 1)); return upload(artifact, bytes, signal); };
   const version = await release(f);
   assert.equal(f.state.versions.size, 1); assert.equal(f.state.artifacts.get(version.pdfArtifactId!)?.state, "READY");
+  const artifact = f.state.artifacts.get(version.pdfArtifactId!)!;
+  assert.equal(artifact.fileName, "КП_222.pdf");
+  f.state.proposal.state.order = { number: "999" };
+  const reader = { proposalVersion: { findFirst: async (query: unknown) => {
+    assert.deepEqual(query, { where: { proposalId: artifact.proposalId, pdfArtifactId: artifact.id }, orderBy: { createdAt: "desc" }, select: { state: true } });
+    return { state: version.state };
+  } } } as unknown as Parameters<typeof proposalArtifactFileName>[0];
+  assert.equal(await proposalArtifactFileName(reader, { ...artifact, fileName: "old-internal-id.pdf" }), "КП_222.pdf");
   assert.deepEqual(f.state.versionMedia.get(version.id), ["media1"]);
   assert.equal([...f.state.jobs.values()][0].state, "SUCCEEDED");
   assert.ok(f.state.authorizations >= 7);

@@ -10,6 +10,7 @@ import { storedKpRate, rateDto, proposalSourceDate } from "./api-rates";
 import { proposalObject } from "./proposal-contract";
 import { createProposalArtifactStorage } from "./artifact-storage";
 import type { Prisma } from "@prisma/client";
+import { proposalArtifactFileName } from "./pdf-filename";
 
 export async function getApiOperation(context: KpApiContext, operationId: string) {
   const own = await readApiReceipt(prisma, context, operationId); if (own) return own;
@@ -65,7 +66,7 @@ async function authorizeArtifact(context: KpApiContext, artifactId: string, tx?:
     if (!contract) return apiFailure("KP_ARTIFACT_NOT_FOUND", 404, "История договора недоступна");
     await loadApiDocument(db, contract.primaryProposalId);
   } else return apiFailure("KP_ARTIFACT_NOT_FOUND", 404, "Не совпал источник документа");
-  return artifact;
+  return { ...artifact, fileName: await proposalArtifactFileName(db, artifact) };
 }
 export async function readApiArtifact(context: KpApiContext, artifactId: string) {
   const artifact = await authorizeArtifact(context, artifactId), storage = createProposalArtifactStorage();
@@ -98,6 +99,6 @@ export async function getApiJob(context: KpApiContext, jobId: string) {
     if (!artifact || metadata.kind === "PDF" && (artifact.kind !== "PDF" || artifact.proposalId !== metadata.proposalId) ||
       metadata.kind === "CONTRACT" && (artifact.kind !== "DOCX" || artifact.contractId !== metadata.contractId))
       return apiFailure("KP_JOB_RESULT_UNAVAILABLE", 410, "Результат задания недоступен");
-    return { ...output, result: { artifactId: artifact.id, ...(typeof result.versionId === "string" ? { versionId: result.versionId } : {}), fileName: artifact.fileName, mimeType: artifact.mimeType } };
+    return { ...output, result: { artifactId: artifact.id, ...(typeof result.versionId === "string" ? { versionId: result.versionId } : {}), fileName: await proposalArtifactFileName(tx, artifact), mimeType: artifact.mimeType } };
   });
 }
