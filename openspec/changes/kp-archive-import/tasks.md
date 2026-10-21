@@ -11,6 +11,7 @@
 - [x] 2.2 Подключить реальные shared writer dependencies через CLI, dry-run default и reconciliation/cutover документацию; проверить аргументы и отсутствие автоматической активации.
 - [x] 2.3 Реализовать согласованное владельцем восстановление missing images через reviewed map/root, cloud-first object404, точные ссылки, bounded bytes и provenance; проверить ошибки источника, reappearance, подмену bytes/map/path, переносимость и replay без бизнес-изменений.
 - [x] 2.4 Реализовать согласованное explicit ADMIN-only восстановление существующего unpublished reserve по exact reviewed SQL witness: новый оператор отдельно от исходных creators/payload/fingerprint, два audit receipts, GET-only ранее verified объектов и прежняя атомарная публикация; проверить foreign/live lease/cleanup/manifest/target/hash/operation fences и replay0, подготовить root-only native regression без самостоятельного запуска БД/S3.
+- [x] 2.5 Добавить отдельную fail-closed production target binding с reviewed release proof, явным разрешением операции и повторными runtime/DB/storage guards; сохранить QA helper, local/staging и offline dry-run. Реальный production proof/запуск/rehearsal остаются NOT_RUN и требуют отдельного согласованного выпуска после ручной staging-проверки владельцем.
 
 ## 3. Проверки
 

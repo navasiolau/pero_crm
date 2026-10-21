@@ -10,6 +10,7 @@ import { archiveReport, prepareArchiveManifest, validateArchiveManifest } from "
 import { applyArchiveManifest, type ArchiveTargetIO } from "../../src/server/kp/archive/apply";
 import { archiveOwnedRows, createArchiveSqlStore } from "../../src/server/kp/archive/prisma-store";
 import { createReadonlyArchiveSource, sourceConfigurationFromEnvironment } from "../../src/server/kp/archive/source";
+import { productionArchiveBinding } from "../../src/server/kp/archive/production-target";
 import { nativeAcceptanceBinding, type NativeDeclaration } from "../../tests/helpers/native-acceptance-target";
 import { nativeSnapshot } from "../../tests/helpers/native-acceptance-snapshot";
 export { archiveOwnedRows, archiveRecoveryReceiptIds, captureArchiveReservationWitness } from "../../src/server/kp/archive/prisma-store";
@@ -84,17 +85,18 @@ function bindingFor(declaration: NativeDeclaration): TargetProfile["database"] {
 async function main() {
   const args = process.argv.slice(2);
   if (args.length === 1 && args[0] === "--help") {
-    process.stdout.write("Dry-run: archive-import.ts --manifest=<private.json>\nPrepare (source GET/LIST only): --prepare --source-profile=<json> --target-profile=<json> --output=<private.json> [--links=<json>] [--originals=<json>]\nApply reviewed: --apply --manifest=<private.json> --reviewed=<SHA256> --actor-id=<ADMIN_ID> --revision=<SHA40> --run-id=<UUID>\nExplicit new ADMIN reservation recovery: --resume-reservation=<private-witness.json> --reviewed-reservation=<canonical-witness-SHA256> (both required with apply; witness pins operator/run/program)\nReviewed missing-object recovery for prepare/apply: --recovery-map=<json> --recovery-root=<hash-named-assets-dir> (both required; real source GET remains mandatory)\nOnly existing guarded local5433/staging; credentials via environment; no flags/source/storage deletion.\n"); return;
+    process.stdout.write("Dry-run: archive-import.ts --manifest=<private.json>\nPrepare (source GET/LIST only): --prepare --source-profile=<json> --target-profile=<json> --output=<private.json> [--links=<json>] [--originals=<json>]\nApply reviewed: --apply --manifest=<private.json> --reviewed=<SHA256> --actor-id=<ADMIN_ID> --revision=<SHA40> --run-id=<UUID>\nProduction additionally requires: --production-proof=<private-release-proof.json> --reviewed-production-proof=<canonical-proof-SHA256> --authorize-production=<same-run-UUID>\nExplicit new ADMIN reservation recovery: --resume-reservation=<private-witness.json> --reviewed-reservation=<canonical-witness-SHA256> (both required with apply; witness pins operator/run/program)\nReviewed missing-object recovery for prepare/apply: --recovery-map=<json> --recovery-root=<hash-named-assets-dir> (both required; real source GET remains mandatory)\nExisting local5433/staging guards unchanged; production requires separate reviewed release identity; credentials via environment; no flags/source/storage deletion.\n"); return;
   }
   const flags = new Set<string>(), values = new Map<string, string>();
   for (const arg of args) {
     if (arg === "--prepare" || arg === "--apply") { archiveAssert(!flags.has(arg), "ARCHIVE_ARGUMENTS_INVALID"); flags.add(arg); continue; }
-    const match = /^--(manifest|source-profile|target-profile|output|links|originals|reviewed|actor-id|revision|run-id|recovery-map|recovery-root|resume-reservation|reviewed-reservation)=(.+)$/.exec(arg);
+    const match = /^--(manifest|source-profile|target-profile|output|links|originals|reviewed|actor-id|revision|run-id|recovery-map|recovery-root|resume-reservation|reviewed-reservation|production-proof|reviewed-production-proof|authorize-production)=(.+)$/.exec(arg);
     archiveAssert(match && !values.has(match[1]), "ARCHIVE_ARGUMENTS_INVALID"); values.set(match[1], match[2]);
   }
   archiveAssert(!(flags.has("--prepare") && flags.has("--apply")), "ARCHIVE_ARGUMENTS_INVALID");
   const prepare = flags.has("--prepare"), apply = flags.has("--apply");
-  const allowed = new Set(prepare ? ["source-profile", "target-profile", "output", "links", "originals", "recovery-map", "recovery-root"] : apply ? ["manifest", "reviewed", "actor-id", "revision", "run-id", "recovery-map", "recovery-root", "resume-reservation", "reviewed-reservation"] : ["manifest"]);
+  const productionArguments = ["production-proof", "reviewed-production-proof", "authorize-production"];
+  const allowed = new Set(prepare ? ["source-profile", "target-profile", "output", "links", "originals", "recovery-map", "recovery-root"] : apply ? ["manifest", "reviewed", "actor-id", "revision", "run-id", "recovery-map", "recovery-root", "resume-reservation", "reviewed-reservation", ...productionArguments] : ["manifest"]);
   archiveAssert([...values.keys()].every(key => allowed.has(key)), "ARCHIVE_ARGUMENTS_INVALID");
   archiveAssert(values.has("recovery-map") === values.has("recovery-root"), "ARCHIVE_RECOVERY_ARGUMENTS_REQUIRED");
   archiveAssert(values.has("resume-reservation") === values.has("reviewed-reservation"), "ARCHIVE_RESERVATION_ARGUMENTS_REQUIRED");
@@ -119,16 +121,25 @@ async function main() {
   const deps = sharedDependencies(), manifest = validateArchiveManifest(await jsonFile(values.get("manifest")!), deps);
   if (!apply) { archiveAssert(!values.has("reviewed") && !values.has("actor-id"), "ARCHIVE_ARGUMENTS_INVALID"); process.stdout.write(JSON.stringify({ mode: "dry-run", ...archiveReport(manifest) }) + "\n"); return; }
   archiveAssert(values.get("reviewed") === manifest.sha256 && archiveReport(manifest).applicable, "ARCHIVE_REVIEW_REQUIRED");
+  const production = manifest.target.database.kind === "production";
+  archiveAssert(production ? productionArguments.every(key => values.has(key)) : productionArguments.every(key => !values.has(key)), "ARCHIVE_PRODUCTION_ARGUMENTS_REQUIRED");
   const recovery: ArchiveReservationRecovery | undefined = values.has("resume-reservation") ? { witness: parseArchiveReservationWitness(await jsonFile(values.get("resume-reservation")!)),
     reviewedHash: values.get("reviewed-reservation")!, operationId: values.get("run-id")!, programSha256: byteHash(await readFile(resolve(process.argv[1]))) } : undefined;
   if (recovery) assertArchiveReservationRecovery(recovery, manifest, values.get("actor-id")!);
-  const source = sourceFor(manifest.source); assertRecoverySourceBinding(manifest, source.recoveryMap?.());
-  const declaration: NativeDeclaration = { target: manifest.target.database.kind, scenarioId: "kp-archive-import", revision: values.get("revision")!, runId: values.get("run-id")! };
+  const productionBinding = production ? productionArchiveBinding({ proof: await jsonFile(values.get("production-proof")!), reviewedHash: values.get("reviewed-production-proof")!,
+    authorization: values.get("authorize-production")!, manifest, revision: values.get("revision")!, actorId: values.get("actor-id")!, operationId: values.get("run-id")!,
+    programSha256: byteHash(await readFile(resolve(process.argv[1]))) }) : undefined;
+  const declaration: NativeDeclaration | undefined = manifest.target.database.kind === "production" ? undefined : { target: manifest.target.database.kind, scenarioId: "kp-archive-import", revision: values.get("revision")!, runId: values.get("run-id")! };
   const io = sharedTargetIO();
-  const guardTarget = async (target: TargetProfile) => { archiveAssert(canonical(bindingFor(declaration)) === canonical(target.database) && canonical(io.binding()) === canonical(target.storage), "ARCHIVE_TARGET_GUARD_MISMATCH"); };
-  await guardTarget(manifest.target);
-  const binding = nativeAcceptanceBinding(declaration), pool = new Pool({ connectionString: binding.url, max: 1, application_name: "pero-kp-archive-import", connectionTimeoutMillis: 10000 });
   let client: PoolClient | undefined;
+  const guardTarget = async (target: TargetProfile) => {
+    if (productionBinding) return productionBinding.guard(target, io.binding(), client);
+    archiveAssert(declaration && canonical(bindingFor(declaration)) === canonical(target.database) && canonical(io.binding()) === canonical(target.storage), "ARCHIVE_TARGET_GUARD_MISMATCH");
+  };
+  await guardTarget(manifest.target);
+  const source = sourceFor(manifest.source); assertRecoverySourceBinding(manifest, source.recoveryMap?.());
+  archiveAssert(productionBinding || declaration, "ARCHIVE_TARGET_GUARD_MISMATCH");
+  const binding = productionBinding ?? nativeAcceptanceBinding(declaration!), pool = new Pool({ connectionString: binding.url, max: 1, application_name: "pero-kp-archive-import", connectionTimeoutMillis: 10000 });
   try {
     client = await pool.connect();
     const store = createArchiveSqlStore(client, { actorId: values.get("actor-id")!, recovery, guardTarget: current => guardTarget(current.target), baseline: async (db, current) => {

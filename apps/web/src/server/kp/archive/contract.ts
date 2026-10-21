@@ -6,8 +6,14 @@ export type Json = null | string | number | boolean | Json[] | JsonObject;
 export type JsonObject = { [key: string]: Json };
 export type Binding = { endpoint: string; bucket: string; region?: string };
 export type SourceProfile = { public: Binding; contracts: Binding; publicBaseUrl: string };
+const productionDatabaseSchema = z.object({
+  kind: z.literal("production"), containerId: z.string().regex(/^[a-f0-9]{64}$/),
+  name: z.string().regex(/^[A-Za-z_][A-Za-z0-9_$-]{0,62}$/), user: z.string().regex(/^[A-Za-z_][A-Za-z0-9_$-]{0,62}$/), schema: z.literal("public"),
+  host: z.string().min(1).max(253).regex(/^[A-Za-z0-9][A-Za-z0-9.-]*$/), port: z.number().int().min(1).max(65535),
+  revision: z.string().regex(/^[a-f0-9]{40}$/), volume: z.string().min(1).max(255).regex(/^[A-Za-z0-9][A-Za-z0-9_.-]*$/).refine(value => value !== "crm-staging_pgdata"),
+}).strict();
 export type TargetProfile = {
-  database: { kind: "local" | "staging"; containerId: string; name: "pero_crm" | "crm"; schema: "public"; host: "127.0.0.1" | "db"; port: 5433 | 5432; revision?: string; volume?: string };
+  database: { kind: "local" | "staging"; containerId: string; name: "pero_crm" | "crm"; schema: "public"; host: "127.0.0.1" | "db"; port: 5433 | 5432; revision?: string; volume?: string } | z.infer<typeof productionDatabaseSchema>;
   storage: Binding;
 };
 export type SourceArea = "public" | "contracts";
@@ -97,14 +103,14 @@ export function parseSourceProfile(value: unknown): SourceProfile {
 export function parseTargetProfile(value: unknown): TargetProfile {
   archiveAssert(isObject(value) && isObject(value.database) && Object.keys(value).every(key => ["database", "storage"].includes(key)), "ARCHIVE_TARGET_PROFILE_INVALID");
   const db = value.database;
-  archiveAssert(Object.keys(db).every(key => ["kind", "containerId", "name", "schema", "host", "port", "revision", "volume"].includes(key)), "ARCHIVE_TARGET_PROFILE_INVALID");
+  archiveAssert(Object.keys(db).every(key => ["kind", "containerId", "name", "schema", "host", "port", "revision", "volume", ...(db.kind === "production" ? ["user"] : [])].includes(key)), "ARCHIVE_TARGET_PROFILE_INVALID");
   archiveAssert(/^[a-f0-9]{64}$/.test(String(db.containerId)) && db.schema === "public", "ARCHIVE_TARGET_PROFILE_INVALID");
-  archiveAssert(db.kind === "local" && db.name === "pero_crm" && db.host === "127.0.0.1" && db.port === 5433 || db.kind === "staging" && db.name === "crm" && db.host === "db" && db.port === 5432 && db.volume === "crm-staging_pgdata" && /^[a-f0-9]{40}$/.test(String(db.revision)), "ARCHIVE_TARGET_PROFILE_INVALID");
+  archiveAssert(db.kind === "local" && db.name === "pero_crm" && db.host === "127.0.0.1" && db.port === 5433 || db.kind === "staging" && db.name === "crm" && db.host === "db" && db.port === 5432 && db.volume === "crm-staging_pgdata" && /^[a-f0-9]{40}$/.test(String(db.revision)) || db.kind === "production" && productionDatabaseSchema.safeParse(db).success, "ARCHIVE_TARGET_PROFILE_INVALID");
   return { database: jsonClone(db) as TargetProfile["database"], storage: parseBinding(value.storage) };
 }
 export function assertArchiveDatabaseIdentity(target: TargetProfile, identity: { database: string; schema: string; user: string } | undefined): void {
   const database = parseTargetProfile(target).database;
-  archiveAssert(identity?.database === database.name && identity.schema === database.schema && identity.user === (database.kind === "local" ? "pero" : "crm"), "ARCHIVE_DATABASE_GUARD_MISMATCH");
+  archiveAssert(identity?.database === database.name && identity.schema === database.schema && identity.user === (database.kind === "production" ? database.user : database.kind === "local" ? "pero" : "crm"), "ARCHIVE_DATABASE_GUARD_MISMATCH");
 }
 export function sourceImageKey(profile: SourceProfile, raw: string): string {
   const base = new URL(profile.publicBaseUrl + "/"), image = new URL(raw);

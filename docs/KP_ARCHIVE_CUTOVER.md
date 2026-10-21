@@ -6,7 +6,7 @@
 
 До реального запуска нужны обычные merges зависимостей №180, 183, 185, 186, 187 и 188, их миграции и согласованная приёмка. CLI загружает их настоящие модули; при отсутствии возвращает `ARCHIVE_DEPENDENCIES_NOT_INTEGRATED`. Копирование feature-файлов в ветку импорта не применяется.
 
-Самостоятельно не создавать БД, контейнеры, дампы, seed или reset. Apply разрешён только на существующем local `pero_crm_pg` через `127.0.0.1:5433/pero_crm` либо внутри проверенного staging `crm-staging` с `db:5432/crm`. Production здесь не поддерживается. Guards проверяют контейнер, БД, схему, пользователя (`pero` для local, `crm` для staging), staging SHA/образ/volume и точную приватную storage binding. Любое несовпадение останавливает запуск.
+Самостоятельно не создавать БД, контейнеры, дампы, seed или reset. Для существующего local `pero_crm_pg` через `127.0.0.1:5433/pero_crm` и проверенного staging `crm-staging` с `db:5432/crm` сохраняются прежние QA guards. Production имеет отдельный закрытый по умолчанию guard и требует согласованного выпуска, reviewed release proof и явного разрешения конкретной операции, описанных ниже. Guards проверяют контейнер, БД, схему, пользователя (`pero` для local, `crm` для staging), SHA/образ/volume и точную приватную storage binding. Любое несовпадение останавливает запуск.
 
 Ключи источника и CRM передаются уже подготовленным приватным окружением. Не выводить env или URL подключения. Source adapter выполняет только List/Get; он не импортирует legacy handlers и не изменяет `D:/Projects/pero_kp`, исходные объекты, настройки либо R2. Target использует общие приватные writers №183/187 с conditional put и фактическим readback.
 
@@ -25,6 +25,7 @@ Source profile содержит `public`, `contracts` — `{endpoint,bucket,regi
 
 - Local: `{kind:"local",containerId:<SHA64>,name:"pero_crm",schema:"public",host:"127.0.0.1",port:5433}`. ID должен совпадать с `CRM_LOCAL_CONTAINER_ID` и существующим контейнером.
 - Staging: `{kind:"staging",containerId:<DB_CONTAINER_SHA64>,name:"crm",schema:"public",host:"db",port:5432,revision:<SHA40>,volume:"crm-staging_pgdata"}`. Нужны действительные `CRM_MODERNIZATION_TARGET=staging` и `CRM_MODERNIZATION_STAGE_PROOF` от разрешённого wrapper. Произвольный файл proof не является приёмкой.
+- Production: `{kind:"production",containerId:<VERIFIED_DB_CONTAINER_SHA64>,name:<VERIFIED_DB_NAME>,user:<VERIFIED_DB_USER>,schema:"public",host:<VERIFIED_DB_HOST>,port:<VERIFIED_DB_PORT>,revision:<ACCEPTED_RELEASE_SHA40>,volume:<VERIFIED_PRODUCTION_VOLUME>}`. Значения берутся из отдельно проверенного выпуска; production volume не может быть `crm-staging_pgdata`. Profile и все его поля входят в frozen manifest hash; переименование staging в production не сохраняет reviewed manifest.
 
 Source credentials берутся из `R2_*` и `CONTRACTS_R2_*`; target writers используют конфигурацию CRM. В profile и manifest нет паролей и access keys. Источник и назначение не могут совпадать по endpoint/bucket, даже если отличаются region.
 
@@ -74,6 +75,24 @@ Portable map имеет `schema:1`, точные `sourceProfile`, `sourceNamespa
 pnpm --filter @pero/web exec tsx scripts/kp/archive-import.ts --apply --manifest=<REVIEWED_PRIVATE_MANIFEST.json> --reviewed=<EXACT_MANIFEST_SHA256> --actor-id=<ACTIVE_ADMIN_OR_DIRECTOR_ID> --revision=<VERIFIED_SHA40> --run-id=<UUID>
 ```
 
+Для production к этой команде обязательны все три аргумента: `--production-proof=<PRIVATE_RELEASE_PROOF.json> --reviewed-production-proof=<CANONICAL_PROOF_SHA256> --authorize-production=<SAME_RUN_UUID>`. Local/staging эти аргументы отклоняют. Dry-run остаётся полностью offline; `--prepare` только читает источник и не открывает production БД.
+
+Production proof подготавливает оператор отдельно, после ручной staging-проверки владельцем и разрешённого production-выпуска. Источником служат реальные read-only release receipts точной ревизии, установленного image, DB container/volume и приватного storage. Импортер не создаёт proof, не угадывает identity и не объявляет staging receipts production-приёмкой. Формат JSON строгий:
+
+- `schema:1`, `kind:"KP_ARCHIVE_PRODUCTION_RELEASE"`, `releaseReceiptSha256` — SHA256 отдельно проверенного release receipt;
+- `revision`, `programSha256`, `manifestHash`, `targetHash` — точный release SHA40, SHA256 исполняемого CLI entry/bundle, canonical manifest SHA и `valueHash(manifest.target)`;
+- `operatorId`, `operationId` — точный actor и UUID операции; `capturedAt`, `expiresAt` — UTC ISO timestamps с окном не более часа;
+- `runtime:{containerId,image,buildIdSha256,serverSha256}` — полный web container SHA64, `sha256:<IMAGE_SHA64>` и SHA256 реальных `/app/apps/web/.next/BUILD_ID`, `/app/apps/web/server.js` этого установленного image;
+- `database:{systemIdentifier,databaseOid,serverAddress,serverPort}` — строки PostgreSQL `system_identifier`, OID текущей БД, реальный IP и порт сервера, снятые с согласованной production цели.
+
+`--reviewed-production-proof` — `valueHash` всего JSON, включая ссылку на release receipt. Это доверенная декларация привилегированного оператора, как существующий staging root proof, а не криптографическая подпись внешнего authority. Review исходного receipt обязателен отдельно: SHA сам по себе не доказывает выпуск или restore. Для bundled CLI SHA должен покрывать проверенный operational пакет и его provenance; исходный TS entry hash не доказывает неизменность импортируемых модулей. Ключи и URL с паролями в proof не включаются.
+
+До создания Pool guard требует совпадения manifest/target/operator/operation/program/revision, действующего окна и явного `--authorize-production`. Проверяются Linux Docker runtime, настоящий `hostname()` как префикс полного reviewed web container ID, `NODE_ENV=production`, hashes установленных BUILD_ID/server.js, точные DB URL host/port/name/user/public schema и текущая shared storage binding. QA wrapper markers `CRM_MODERNIZATION_TARGET`/`CRM_MODERNIZATION_STAGE_PROOF` отсутствуют. DB container/volume/image связываются отдельно проверенным release receipt; CLI не получает Docker socket и не инспектирует соседние контейнеры.
+
+После подключения и в существующем writer lifecycle повторяется настоящий SELECT: current database/schema, effective/session user, server address/port, `pg_control_system().system_identifier`, DB OID и отсутствие recovery. Если права не позволяют прочитать cluster identity, guard останавливает операцию; автоматических grants/fallback нет. Проверки срока, runtime, URL, storage и SQL identity повторяются около I/O и перед транзакциями; прежние actor/lease/readback/publication guards сохранены.
+
+**Production execution/rehearsal: NOT_RUN.** Новый production proof здесь не получался, production подключения и импорт не выполнялись. Реальный выпуск, разрешение операции и приёмка production остаются отдельными действиями владельца после ручной проверки staging.
+
 Действительный actor и target проверяются в коротких транзакциях и около I/O. Сначала создаются скрытые архивные КП с `projectId=null`, `clientId=null`, PENDING media/artifacts, настоящие `UPLOAD_MEDIA` jobs и точные cleanup intents. Network I/O выполняется вне SQL. Все собственные leases и 24-часовой quarantine обновляются перед I/O. Опубликованный архив появляется только в одной финальной транзакции после всех SHA/readback и связей. Jobs остаются PROCESSING до её завершения, чтобы годовая очистка не пересекалась с незавершённым переносом.
 
 Сбой не удаляет исходник и не открывает частичный архив. Сохранить manifest и receipts; повторить ту же команду с тем же manifest после выяснения причины. Не менять SHA вручную и не удалять ledger. Неопределённый ACK проверяется readback существующего объекта; чужие байты никогда не перезаписываются. Если cleanup уже начал/завершил удаление, importer останавливается вместо возобновления поверх удаляемых объектов.
@@ -88,4 +107,4 @@ Store сравнивает fingerprint всех прежних строк и cat
 
 Привязка архива к существующим проектам выполняется отдельной явной командой/согласованной задачей только после этой сверки. Автоматическое сопоставление по номеру или клиенту отсутствует. Непроверенный архив не создаёт лиды.
 
-Оставить старый R2 доступным на весь период приёмки; importer не содержит DELETE. Переключение editor/API, bundle skill/MCP №187 и `PERO_KP_ENABLED` — отдельное согласованное действие после сквозной приёмки. Production-выпуск и миграция требуют отдельного согласования по AGENTS.md; этот CLI production не открывает.
+Оставить старый R2 доступным на весь период приёмки; importer не содержит DELETE. Переключение editor/API, bundle skill/MCP №187 и `PERO_KP_ENABLED` — отдельное согласованное действие после сквозной приёмки. Production-выпуск, миграция и конкретная archive-операция требуют соответствующего согласования по AGENTS.md; добавленная возможность отдельного production guard таким разрешением не является.
