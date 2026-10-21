@@ -14,6 +14,6 @@
 
 - [x] 3.1 Подготовить native helper для реальной PostgreSQL-приёмки после нормального merge зависимостей; зафиксировать, что локальная DI-проверка не является DB-приёмкой.
 - [x] 3.2 Выполнить доступные TypeScript/lint/unit/OpenSpec strict/diff проверки и согласовать интерфейс атомарного финала №186; записать результаты и ограничения.
-- [ ] 3.3 После интеграции зависимостей выполнить настоящие DB/runtime/staging проверки через основного агента, подтвердить SHA/образ и сценарии; без самостоятельного запуска live БД/S3. DB/runtime/UI часть принята на acbd/8ef120; после physical cleanup №188 остаются retained-PDF/restore410 сценарии (verification.md).
+- [x] 3.3 После интеграции зависимостей выполнить настоящие DB/runtime/staging проверки через основного агента, подтвердить SHA/образ и сценарии; без самостоятельного запуска live БД/S3. DB/runtime/UI часть принята на acbd/8ef120; retained-PDF и единственный restore410 после physical cleanup №188 фактически приняты на ab5b/CI308, новые акторы закрыты (verification.md, 21.10.2026).
 - [x] 3.4 Зафиксировать отдельную настоящую local SQL-приёмку root с полным rollback/baseline/catalog и actual №181/182/183 empty-media adapters; явно отделить её от concurrency, renderer/S3 и staging приёмки пункта 3.3.
 - [x] 3.5 Обычным local merge принять upstream staging `0f8d38d6…`, сохранить обе save/stage гонки, warehouse PID и узкий CI guard; повторить focused185 23 tests и полный TypeScript, не объявляя новую native/staging-приёмку.
