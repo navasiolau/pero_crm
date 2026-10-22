@@ -34,6 +34,7 @@ import { cn } from "@/lib/utils";
 import { saveViewPreference } from "@/server/preferences-actions";
 import { useTaskStatusCommand } from "@/components/use-task-status-command";
 import type { TaskDetails } from "@/lib/task-details";
+import { PieceworkButton } from "@/components/piecework-allocation-dialog";
 
 const KANBAN_COLUMNS: { id: TaskStatus; label: string }[] = [
   { id: "NEW", label: "Новая" },
@@ -144,6 +145,8 @@ export function MyTasksView({
 
           {task.status !== "DONE" ? (
             <div className="flex flex-wrap items-center gap-2">
+              {task.canTransferPiecework && task.productId ? <PieceworkButton label="Передать часть доли" disabled={pending}
+                context={{ mode: "transfer", productId: task.productId, taskId: task.id, title: task.title }}/> : null}
               {task.status === "NEW" ? (
                 <Button
                   variant="outline"

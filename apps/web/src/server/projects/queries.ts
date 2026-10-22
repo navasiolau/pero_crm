@@ -20,6 +20,7 @@ import {
 import { STAGES } from "@/lib/stages";
 import { parseListFilterValue } from "@/lib/list-filter-values";
 import { taskDetailsIncludeFor,taskWorkspaceWhere } from "@/server/tasks/queries";
+import { canManagePiecework, ordinaryPieceworkBinding } from "@/lib/piecework-policy";
 import { listProjectShortages } from "@/server/warehouse/queries";
 import { productSketchProjection } from "@/server/products/sketch-projection";
 import { projectCoverProjection } from "./cover-projection";
@@ -300,6 +301,7 @@ export async function getProjectFor(
       works: {
         where: workVisibilityWhere(actor),
         include: {
+          _count: { select: { paymentConversions: true, settlementShares: true } },
           tasks: { where: taskVisibilityWhere(actor), select: { id: true, title: true, status: true, quantity: true, allocationGroupId: true } },
         },
         orderBy: { createdAt: "asc" },
@@ -320,7 +322,7 @@ export async function getProjectFor(
     },
   });
   if (!project) return null;
-  return projectMoneyForRoles({ ...project,tasks:maskTaskPaymentRead(actor,project.tasks), works:await maskProductionWorkRead(prisma,actor,project.works),communications: project.communications ?? [], products: (await maskProductionRead(prisma,actor,project.products)).map((product) => ({
+  return projectMoneyForRoles({ ...project,tasks:maskTaskPaymentRead(actor,project.tasks), works:await maskProductionWorkRead(prisma,actor,project.works.map(work => ({...work,canDistributePiecework:canManagePiecework(actor.roles)&&ordinaryPieceworkBinding(work)&&work.priceSnapshot!==null}))),communications: project.communications ?? [], products: (await maskProductionRead(prisma,actor,project.products)).map((product) => ({
     ...product, canAccessDraft: canAccessProductDraft(actor.roles, product), statusHistory: product.statusHistory ?? [], hasB3d: product.files.length > 0,
     isEngineeringParticipant: product.percentageConfigs.some((config) => config.participants.length > 0) ||
       actor.engineeringParticipantProductIds?.includes(product.id) === true,

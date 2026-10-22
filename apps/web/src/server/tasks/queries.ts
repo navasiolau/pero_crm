@@ -14,6 +14,7 @@ import { fileVisibilityWhere, taskVisibilityWhere, workVisibilityWhere, type Vis
 import { FULL_SHARE_UNITS, personalQuantity, taskPieceAmount } from "@/lib/work-shares";
 import { INTERNAL_CURRENCY } from "@/lib/internal-currency";
 import { canSplitTask } from "./share-policy";
+import { canTransferPiecework, ordinaryPieceworkBinding } from "@/lib/piecework-policy";
 import { getEngineeringTaskPreview } from "@/server/product-stage-pay/preview";
 
 // Общий select задачи для карточек/списков (§9: работа, зависимости, файлы).
@@ -21,9 +22,10 @@ export const taskDetailsInclude = {
   project: { select: { id: true, number: true, title: true } },
   product: { select: { id: true, number: true, title: true, engineerId: true, status: true } },
   assignee: { select: { id: true, name: true } },
-  work: { select: { id: true, projectId:true,productId:true,title: true, total: true, priceSnapshot: true, paymentKind: true } },
+  work: { select: { id: true, projectId:true,productId:true,title: true, total: true, priceSnapshot: true, paymentKind: true,
+    stagePayPoolId: true, poolWeightUnits: true, _count: { select: { paymentConversions: true, settlementShares: true } } } },
   allocationGroup: { select: { currency: true, budgetSource: true } },
-  _count: { select: { payrollEntries: true } },
+  _count: { select: { payrollEntries: true, stageSettlementShares: true } },
   files: { select: { id: true, fileName: true, mimeType: true, section: true, uploadedById: true, projectId: true, productId: true, taskId: true } },
   dependencies: {
     include: {
@@ -60,9 +62,10 @@ type TaskWithIncludes = {
   shareUnits?: number | null;
   shareAmount?: unknown;
   stageShareUnits?: number | null;
+  physicalOnlyShare?: boolean;
   splitRevision?: number;
   allocationGroup?: { currency: string | null; budgetSource: string } | null;
-  _count?: { payrollEntries: number };
+  _count?: { payrollEntries: number; stageSettlementShares?: number };
   createdAt: Date;
   doneAt: Date | null;
   doneById: string | null;
@@ -70,7 +73,8 @@ type TaskWithIncludes = {
   project: { id: string; number: string; title: string };
   product: { id: string; number: string; title: string; engineerId: string | null; status: ProductStatus } | null;
   assignee: { id: string; name: string } | null;
-  work: { id: string; projectId?:string;productId?:string|null;title: string; total: unknown; priceSnapshot: unknown; paymentKind?: "LEGACY" | "ENGINEERING" | "INSTALLATION" } | null;
+  work: { id: string; projectId?:string;productId?:string|null;title: string; total: unknown; priceSnapshot: unknown; paymentKind?: "LEGACY" | "ENGINEERING" | "INSTALLATION";
+    stagePayPoolId?: string | null; poolWeightUnits?: number | null; _count?: { paymentConversions: number; settlementShares: number } } | null;
   files: OrdinaryFileForList[];
   dependencies: {
     dependsOn: { id: string; title: string; status: "DRAFT" | "NEW" | "IN_PROGRESS" | "DONE" };
@@ -150,6 +154,9 @@ export async function mapTaskDetails(
     personalQuantity: personalQuantity(allocation),
     splitRevision: task.splitRevision ?? 0,
     canSplit: actor ? canSplitTask(actor, { ...task, paidCount: task._count?.payrollEntries ?? 0 }) : false,
+    canTransferPiecework: !!actor && !!task.work && ordinaryPieceworkBinding(task.work) && canTransferPiecework(actor, task) &&
+      task._count?.payrollEntries === 0 && task._count.stageSettlementShares === 0 && !task.physicalOnlyShare && task.stageShareUnits == null &&
+      (!task.allocationGroupId || task.allocationGroup?.budgetSource === "TASK_FIXED"),
     dependencies: task.dependencies.map((edge) => ({
       id: edge.dependsOn.id,
       title: edge.dependsOn.title,

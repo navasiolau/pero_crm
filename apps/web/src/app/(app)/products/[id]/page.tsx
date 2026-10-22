@@ -119,6 +119,8 @@ export default async function ProductPage({
             works={product.works.map((work) => ({
               id: work.id,
               title: work.title,
+              productId: work.productId,
+              canDistributePiecework: work.canDistributePiecework,
               quantity: work.quantity.toString(),
               quantityPerUnit: work.quantityPerUnit?.toString() ?? null,
               unitSnapshot:work.unitSnapshot,
