@@ -528,7 +528,9 @@ test("draft/privacy-real-readers-joins-notifications-and-operational-denials", a
   await run(c.engineer, tx, async () => {
     assert.equal((await productQueries.listProducts(assigned, c.engineer.roles, { activeOnly: false, projectId: c.project.id, statuses: ["PRODUCTION"] })).total, 1);
     assert.equal((await productQueries.listProducts(assigned, c.engineer.roles, { activeOnly: false, projectId: c.project.id, engineerId: c.worker.id })).total, 1);
-    assert.deepEqual((await productQueries.listProductFilterOptions(assigned, c.engineer.roles)).projects.map(row => row.id), [c.project.id]);
+    const options = await productQueries.listProductFilterOptions(assigned, c.engineer.roles);
+    assert.ok(options.projects.some(row => row.id === c.project.id));
+    assert.equal(await tx.project.count({ where: { id: { in: options.projects.map(row => row.id) }, stage: { notIn: ["CONTRACT", "IN_WORK", "DONE"] } } }), 0);
     const detail = await projectQueries.getProjectFor(assigned, c.engineer.roles, c.project.id); assert.ok(detail);
     assert.deepEqual(detail.products.map(row => row.id).sort(), [visible.id, foreign.id, currentProduction.id].sort());
     assert.ok(detail.products.every(row => row.expectedPrice === null));
@@ -542,7 +544,8 @@ test("draft/privacy-real-readers-joins-notifications-and-operational-denials", a
     await tx.project.update({ where: { id: c.project.id }, data: { stage: "LEAD" } });
     assert.equal(await productQueries.getProductFor(assigned, c.engineer.roles, foreign.id), null);
     assert.equal(await projectQueries.getProjectFor(assigned, c.engineer.roles, c.project.id), null);
-    await tx.project.update({ where: { id: c.project.id }, data: { stage: "CONTRACT" } });
+    assert.equal((await productQueries.listProductFilterOptions(assigned, c.engineer.roles)).projects.some(row => row.id === c.project.id), false);
+    await tx.project.update({ where: { id: c.project.id }, data: { stage: c.project.stage } });
   });
   await run(c.manager, tx, async () => {
     const message = { type: "product.statusChanged", title: "Черновой шкаф", body: "Secret", link: `/products/${c.product.id}` };

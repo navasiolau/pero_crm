@@ -5,7 +5,7 @@ import { canSetProductCover, validateProductCoverFile } from "../src/lib/product
 import { authorizeProductCoverUpload, setProductCoverCore } from "../src/server/products/cover-core";
 
 import type {Prisma,Role} from "@prisma/client";
-import {resolveVisibilityActor,fileVisibilityWhere,productVisibilityWhere,projectVisibilityWhere} from "../src/server/access/visibility";
+import {resolveVisibilityActor,fileVisibilityWhere,productVisibilityWhere,projectVisibilityWhere,productEditWhere} from "../src/server/access/visibility";
 import {fixtureModel,matches,type FixtureRow} from "./helpers/visibility-fixture";
 
 const product = { id: "product-1", projectId: "project-1", status: "DESIGN" as const,
@@ -46,7 +46,7 @@ function participantCoverFixture(){
  const own:FixtureRow={id:'qa-product',projectId:parent.id,project:parent,status:'DESIGN',engineerId:null,sketchFileId:'manager-sketch'};
  const foreign:FixtureRow={id:'foreign-product',projectId:parent.id,project:parent,status:'DESIGN',engineerId:'other',sketchFileId:'foreign-sketch'};
  parent.products=[own,foreign];
- const current:FixtureRow={id:'manager-sketch',projectId:parent.id,project:parent,productId:own.id,product:own,taskId:null,mimeType:'image/png',uploadedById:'manager',fileName:'manager-sketch.png',storedName:'01234567-89ab-4def-8123-456789abcdef-manager-sketch.png',sketchForProduct:own,coverForProject:null};
+ const current:FixtureRow={id:'manager-sketch',projectId:parent.id,project:parent,productId:own.id,product:own,taskId:null,section:'PRODUCTION',mimeType:'image/png',uploadedById:'manager',fileName:'manager-sketch.png',storedName:'01234567-89ab-4def-8123-456789abcdef-manager-sketch.png',sketchForProduct:own,coverForProject:null};
  const foreignFile:FixtureRow={...current,id:'foreign-sketch',productId:foreign.id,product:foreign,fileName:'foreign-sketch.png',storedName:'21234567-89ab-4def-8123-456789abcdef-foreign-sketch.png',sketchForProduct:foreign};
  const config:FixtureRow={id:'config',productId:own.id,product:own,kind:'ENGINEERING'};
  const membership:FixtureRow={id:'member',userId:'participant',configId:config.id,config,shareUnits:1};
@@ -62,14 +62,18 @@ test('112 direct DESIGN engineering participant reads project/product/manager sk
  assert.equal(matches(f.own,productVisibilityWhere(resolved)),true);
  assert.equal(matches(f.parent,projectVisibilityWhere(resolved)),true);
  assert.equal(matches(f.current,fileVisibilityWhere(resolved)),true);
- assert.equal(matches(f.foreign,productVisibilityWhere(resolved)),false);
- assert.equal(matches(f.foreignFile,fileVisibilityWhere(resolved)),false);
+ assert.equal(matches(f.foreign,productVisibilityWhere(resolved)),true);
+ assert.equal(matches(f.foreignFile,fileVisibilityWhere(resolved)),true);
+ assert.equal(matches(f.own,productEditWhere(resolved)),true);
+ assert.equal(matches(f.foreign,productEditWhere(resolved)),false);
 });
-test('112 participant cover grant never leaks to post-DESIGN/deleted/foreign products or non-engineering roles',async()=>{
+test('112 global engineering read preserves DESIGN participant replacement and denies foreign/deleted targets',async()=>{
  for(const status of ['PREPARATION','PRODUCTION','STORAGE','INSTALLATION','DONE','RECLAMATION']){
   const f=participantCoverFixture();f.own.status=status;const resolved=await resolveVisibilityActor(f.tx,f.actor),result=await authorizeProductCoverUpload(f.tx,f.actor,f.input);
   assert.equal(result.ok,false);if(!result.ok)assert.equal(result.kind,'forbidden');
-  assert.equal(matches(f.own,productVisibilityWhere(resolved)),false);assert.equal(matches(f.current,fileVisibilityWhere(resolved)),false);
+  const readable=['DESIGN','PRODUCTION','STORAGE','INSTALLATION','DONE'].includes(status);
+  assert.equal(matches(f.own,productVisibilityWhere(resolved)),readable);assert.equal(matches(f.current,fileVisibilityWhere(resolved)),readable);
+  assert.equal(matches(f.own,productEditWhere(resolved)),false);
  }
  for(const scope of ['foreign','deleted-product','deleted-parent','non-engineer']){
   const f=participantCoverFixture();if(scope==='foreign')f.input.productId=f.foreign.id as string;if(scope==='deleted-product')f.own.deletedAt=new Date();if(scope==='deleted-parent')f.parent.deletedAt=new Date();if(scope==='non-engineer')f.actor.roles=['ACCOUNTANT'];
