@@ -16,7 +16,7 @@ const participant = z.object({ userId: id, percent: z.string().trim().min(1).max
 export const createPieceworkSchema = z.object({
   projectId: id, productId: id, workId: id, title: z.string().trim().min(1).max(200),
   type: z.string().trim().min(1).max(80), quantity: z.string().trim().min(1).max(32),
-  dueAt: z.string().min(1).max(64), requiresPhoto: z.boolean().default(false),
+  dueAt: z.string().min(1).max(64).nullish().default(null), requiresPhoto: z.boolean().default(false),
   dependencyIds: z.array(id).max(100).default([]), participants: z.array(participant).min(1), expectedRevision: z.string().regex(/^[a-f0-9]{64}$/), clientMutationId: z.uuid().transform(value => value.toLowerCase()),
 }).strict();
 export const transferPieceworkSchema = z.object({
@@ -112,7 +112,7 @@ async function run(operation: () => Promise<PieceworkResult>): Promise<Piecework
 export async function createPieceworkAllocationCore(actor: DomainActor, input: unknown, transaction: TaskTransaction = withTaskTransaction): Promise<PieceworkResult> {
   const parsed = createPieceworkSchema.safeParse(input);
   if (!parsed.success) return { ok: false, kind: "validation", error: "Проверьте данные работы, исполнителей и проценты" };
-  const data = parsed.data, dueAt = new Date(data.dueAt);
+  const data = parsed.data, dueAt = data.dueAt == null ? null : new Date(data.dueAt);
   let quantity: string, participants: typeof data.participants;
   try {
     quantity = quantityFromAtoms(quantityAtoms(data.quantity));
@@ -120,10 +120,10 @@ export async function createPieceworkAllocationCore(actor: DomainActor, input: u
     const allocation = allocatePiecework("0", data.participants.map(row => row.percent));
     participants = data.participants.map((row, index) => ({ userId: row.userId, percent: allocation[index].percent }));
   } catch (error) { return { ok: false, kind: "validation", error: error instanceof Error ? error.message : "Некорректное распределение" }; }
-  if (!Number.isFinite(dueAt.getTime())) return { ok: false, kind: "validation", error: "Укажите корректный срок" };
+  if (dueAt && !Number.isFinite(dueAt.getTime())) return { ok: false, kind: "validation", error: "Укажите корректный срок" };
   if (new Set(participants.map(row => row.userId)).size !== participants.length) return { ok: false, kind: "validation", error: "Каждый исполнитель должен встречаться один раз" };
   const dependencyIds = [...new Set(data.dependencyIds)].sort();
-  const hash = fingerprint("create", { ...data, quantity, participants, dependencyIds, dueAt: dueAt.toISOString() });
+  const hash = fingerprint("create", { ...data, quantity, participants, dependencyIds, dueAt: dueAt?.toISOString() ?? null });
   return run(() => transaction(async tx => {
     const current = await activeActor(tx, actor);
     if (!canManagePiecework(current.roles)) deny("Недостаточно прав для распределения работы", "forbidden");
