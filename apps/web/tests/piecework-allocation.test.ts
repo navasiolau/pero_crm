@@ -21,6 +21,7 @@ test("N allocations atomically fix money and volume once without time estimates 
   const tasks = f.state().tasks.filter(row => row.allocationGroupId === result.groupId);
   assert.equal(tasks.length, 3); assert.deepEqual(tasks.map(row => row.shareAmount), ["500.00", "300.00", "200.00"]);
   assert.equal(allocatedWorkQuantity(tasks as never), "10.00"); assert.ok(tasks.every(row => row.estimateMinutes === null));
+  assert.ok(tasks.every(row => (row.dueAt as Date).toISOString() === "2026-11-01T00:00:00.000Z"));
   assert.equal(f.state().entries.length, 0); assert.equal(f.state().groups[0].budget, "1000.00");
   f.state().works[0].priceSnapshot = "999";
   assert.deepEqual(tasks.map(row => taskPieceAmount(row as never, "999")), ["500.00", "300.00", "200.00"]);
@@ -30,6 +31,22 @@ test("N allocations atomically fix money and volume once without time estimates 
   assert.equal((await createPieceworkAllocationCore(manager, { ...input, title: "Другой запрос" }, f.transaction)).ok, false);
   assert.equal((await createPieceworkAllocationCore({ ...manager, id: "admin", roles: ["ADMIN"] }, input, f.transaction)).ok, false);
   assert.deepEqual(f.state(), before);
+});
+
+test("initial allocation without a deadline stores null, replays, and preserves explicit-date receipt fingerprints", async () => {
+  const f = available(), input = initial(f); delete input.dueAt;
+  const result = await createPieceworkAllocationCore(manager, input, f.transaction);
+  assert.equal(result.ok, true); if (!result.ok) return;
+  assert.ok(f.state().tasks.filter(row => row.allocationGroupId === result.groupId).every(row => row.dueAt === null));
+  const before = structuredClone(f.state());
+  const replay = await createPieceworkAllocationCore(manager, { ...input, dueAt: null }, f.transaction);
+  assert.equal(replay.ok, true); if (replay.ok) assert.equal(replay.repeated, true);
+  assert.deepEqual(f.state(), before);
+  const explicit = available(), dated = initial(explicit);
+  const created = await createPieceworkAllocationCore(manager, dated, explicit.transaction);
+  assert.equal(created.ok, true);
+  const normalizedReplay = await createPieceworkAllocationCore(manager, { ...dated, dueAt: "2026-11-01T00:00:00.000Z" }, explicit.transaction);
+  assert.equal(normalizedReplay.ok, true); if (normalizedReplay.ok) assert.equal(normalizedReplay.repeated, true);
 });
 
 test("initial allocation cannot consume another group's remaining volume", async () => {
