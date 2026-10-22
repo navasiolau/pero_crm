@@ -5,20 +5,19 @@ import type { MultiSelectFilterOption } from "@/components/ui/multi-select-filte
 import type { Role } from "@prisma/client";
 import { visibleProductStatuses } from "@/lib/product-statuses";
 
-export function ProductsFilterBar({ actorRoles, projectOptions, clientOptions, engineerOptions, hideEngineer, identitySearch, onSearchDraftChange, onModalActiveChange }: {
+export function ProductsFilterBar({ actorRoles, projectOptions, clientOptions, engineerOptions, hideEngineer, onSearchDraftChange, onModalActiveChange }: {
   actorRoles?: readonly Role[];
   projectOptions: MultiSelectFilterOption[];
   clientOptions: MultiSelectFilterOption[];
   engineerOptions: MultiSelectFilterOption[];
   hideEngineer?: boolean;
-  identitySearch?: boolean;
   onSearchDraftChange?: (query: string) => void;
   onModalActiveChange?: (active: boolean) => void;
 }) {
   return (
     <EntityListFilterBar
       section="products"
-      searchPlaceholder={identitySearch ? "Номер, название…" : "Номер, название, проект, клиент…"}
+      searchPlaceholder="Введите номер"
       onSearchDraftChange={onSearchDraftChange}
       onModalActiveChange={onModalActiveChange}
       fields={[

@@ -40,7 +40,7 @@ export default async function ProductsPage({
     listProducts(
       session.user.id,
       role,
-      view === "kanban" ? { ...filters, searchScope: "identity" } : filters,
+      { ...filters, searchScope: "number" },
       view === "table" ? { page, pageSize } : undefined,
     ),
     listProductFilterOptions(session.user.id, role),

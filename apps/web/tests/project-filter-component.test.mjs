@@ -161,7 +161,7 @@ test(`${section} filters default to all and Незавершённые writes ex
     assert.equal(await popup.getByRole("checkbox", { checked: true }).count(), 0);
     await page.keyboard.press("Escape");
     await popup.waitFor({ state: "hidden" });
-    const searchPlaceholder = section === "projects" ? "Номер, название, клиент…" : "Номер, название, проект, клиент…";
+    const searchPlaceholder = "Введите номер";
     await page.getByPlaceholder(searchPlaceholder, { exact: true }).fill("новый поиск");
     assert.equal(await queryValue(page, "q"), "новый поиск");
     assert.equal(await queryValue(page, "sort"), "title");

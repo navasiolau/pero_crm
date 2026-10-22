@@ -31,14 +31,14 @@ const pages=Promise.all(['projects','products'].map(async(section)=>{
  const loaded=new Module(path.join(web,`tests/page-${section}-117.cjs`));loaded.filename=path.join(web,`tests/page-${section}-117.cjs`);loaded.paths=Module._nodeModulePaths(web);loaded._compile(bundle.outputFiles[0].text,loaded.filename);return loaded.exports.default;
 }));
 for(const [index,section] of ['projects','products'].entries()){
- test(`${section} server page chooses identity only for kanban and pairs resolved query with rows`,async()=>{
-  const page=(await pages)[index];const tree=await page({searchParams:Promise.resolve({view:'kanban',q:'199.5',client:'client',active:'1',searchScope:'all'})});
+ test(`${section} server page chooses number search for kanban and pairs resolved query with rows`,async()=>{
+  const page=(await pages)[index],q=section==='projects'?'199':'199.5';const tree=await page({searchParams:Promise.resolve({view:'kanban',q,client:'client',active:'1',searchScope:'all'})});
   const capture=globalThis.__page117;assert.equal(capture.id,'actor117');assert.deepEqual(capture.roles,['ADMIN']);
-  assert.equal(capture.filters.searchScope,'identity');assert.equal(capture.filters.q,'199.5');assert.deepEqual(capture.filters.clientIds,['client']);assert.equal(capture.filters.activeOnly,true);assert.equal(capture.paging,undefined);
-  const view=tree.props.children;assert.equal(view.props.resolvedQuery,tree.props.initialQuery);assert.equal(new URLSearchParams(view.props.resolvedQuery).get('q'),'199.5');assert.equal(new URLSearchParams(view.props.resolvedQuery).has('searchScope'),false);assert.equal(view.props[section].length,1);
+  assert.equal(capture.filters.searchScope,'number');assert.equal(capture.filters.q,q);assert.deepEqual(capture.filters.clientIds,['client']);assert.equal(capture.filters.activeOnly,true);assert.equal(capture.paging,undefined);
+  const view=tree.props.children;assert.equal(view.props.resolvedQuery,tree.props.initialQuery);assert.equal(new URLSearchParams(view.props.resolvedQuery).get('q'),q);assert.equal(new URLSearchParams(view.props.resolvedQuery).has('searchScope'),false);assert.equal(view.props[section].length,1);
  });
- test(`${section} table remains a paged caller without an identity scope`,async()=>{
+ test(`${section} table applies the same number scope while retaining pagination`,async()=>{
   const page=(await pages)[index];const tree=await page({searchParams:Promise.resolve({view:'table',q:'CustomerToken',searchScope:'identity'})});
-  assert.equal(globalThis.__page117.filters.searchScope,undefined);assert.equal(globalThis.__page117.filters.q,'CustomerToken');assert.deepEqual(globalThis.__page117.paging,{page:2,pageSize:20});assert.equal(tree.props.children.props.view,'table');
+  assert.equal(globalThis.__page117.filters.searchScope,'number');assert.equal(globalThis.__page117.filters.q,'CustomerToken');assert.deepEqual(globalThis.__page117.paging,{page:2,pageSize:20});assert.equal(tree.props.children.props.view,'table');
  });
 }

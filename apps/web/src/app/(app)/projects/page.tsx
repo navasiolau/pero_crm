@@ -41,7 +41,7 @@ export default async function ProjectsPage({
     listProjects(
       session.user.id,
       role,
-      view === "kanban" ? { ...filters, searchScope: "identity" } : filters,
+      { ...filters, searchScope: "number" },
       // Канбану нужна вся отфильтрованная доска, таблице — страница
       view === "table" ? { page, pageSize } : undefined,
     ),

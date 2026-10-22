@@ -112,7 +112,6 @@ export function ProjectsView({
 
       <ProjectsFilterBar
         actorRoles={actorRoles}
-        identitySearch={view === "kanban"}
         onSearchDraftChange={setSearchText}
         onModalActiveChange={setFilterOverlayActive}
         clients={clients}

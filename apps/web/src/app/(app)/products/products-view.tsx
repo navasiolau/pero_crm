@@ -108,7 +108,6 @@ export function ProductsView({
 
       <ProductsFilterBar
         actorRoles={actorRoles}
-        identitySearch={view === "kanban"}
         onSearchDraftChange={setSearchText}
         onModalActiveChange={setFilterOverlayActive}
         projectOptions={projectOptions}

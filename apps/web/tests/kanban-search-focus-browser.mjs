@@ -127,7 +127,7 @@ async function makePage(section,viewport={width:1440,height:900},query=''){
 }
 async function finish(page){assert.deepEqual(page.__errors,[]);await page.close();}
 const expectedQ=section=>section==='products'?'199.5':'199';
-const search=page=>page.getByPlaceholder('Номер, название…');
+const search=page=>page.getByPlaceholder('Введите номер');
 async function apply(page,q){await search(page).fill(q);await expect.poll(()=>page.evaluate(()=>new URLSearchParams(window.__clientQuery).get('q'))).toBe(q||null);await expect.poll(()=>page.evaluate(()=>window.__pending)).toBe(false);await waitFrames(page);}
 try{
  for(const section of sections){
@@ -167,8 +167,8 @@ try{
   await resetPosition(page);await search(page).fill('');await search(page).fill(q);await settledCenter(page,section);checks.push(section+':rapid_draft_clear_reenter_before_debounce');
   for(const term of ['Искомая',q+'9','NoMatch117']){await resetPosition(page);await apply(page,term);assert.deepEqual(await position(page),{left:0,top:0});}
   assert.equal(await page.locator('[data-kanban-card-id]').count(),0);checks.push(section+':title_partial_number_no_match_no_autoscroll');
-  await page.getByLabel('Таблица',{exact:true}).click();await expect(page.getByPlaceholder(section==='projects'?'Номер, название, клиент…':'Номер, название, проект, клиент…')).toBeVisible();assert.equal(await page.locator('[data-slot="kanban-scroll"]').count(),0);
-  checks.push(section+':table_keeps_old_placeholder_and_no_board_focus');await finish(page);
+  await page.getByLabel('Таблица',{exact:true}).click();await expect(page.getByPlaceholder('Введите номер')).toBeVisible();assert.equal(await page.locator('[data-slot="kanban-scroll"]').count(),0);
+  checks.push(section+':table_number_placeholder_and_no_board_focus');await finish(page);
 
   const stale=await makePage(section);await stale.evaluate(()=>{window.__hold=true;window.__holdSave=true;});
   await search(stale).fill(q+'9');await expect.poll(()=>stale.evaluate(()=>window.__pending)).toBe(true);assert.deepEqual(await position(stale),{left:0,top:0});
