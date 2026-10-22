@@ -73,10 +73,10 @@ test("empty arrays do not restrict any axis or discard other filters and include
 test("multi-engineer participants cannot bypass project/product visibility or live filters", async () => {
   const filters = { activeOnly: false, engineerIds: ["e1", "e2", "e3"] };
   const engineer = await queries.listProjects("e1", ["ENGINEER"], filters);
-  assert.deepEqual(new Set(engineer.rows.map((row) => row.id)), new Set(["p0", "p2", "p4"]));
-  assert.ok(engineer.rows.every((row) => row.products.every((product) => ["product-0", "product-2", "product-4"].includes(product.id))));
-  assert.equal((await queries.listProjects("e1", ["ENGINEER"], { activeOnly: false, engineerIds: ["e2"] })).total, 0);
-  assert.equal((await queries.listProjects("e1", ["ENGINEER"], { activeOnly: false, engineerIds: [], clientIds: [], stages: [], managerIds: [] })).total, 3);
+  assert.deepEqual(new Set(engineer.rows.map((row) => row.id)), new Set(["p0", "p1", "p3", "p4", "p5"]));
+  assert.ok(engineer.rows.every((row) => row.products.every((product) => ["product-0", "product-1", "product-3", "product-4", "product-5"].includes(product.id))));
+  assert.equal((await queries.listProjects("e1", ["ENGINEER"], { activeOnly: false, engineerIds: ["e2"] })).total, 3);
+  assert.equal((await queries.listProjects("e1", ["ENGINEER"], { activeOnly: false, engineerIds: [], clientIds: [], stages: [], managerIds: [] })).total, 6);
   const manager = await queries.listProjects("manager", ["MANAGER"], filters);
   assert.deepEqual(new Set(manager.rows.map((row) => row.id)), new Set(["p0", "p1", "p2", "p3", "p4", "p5"]));
 });

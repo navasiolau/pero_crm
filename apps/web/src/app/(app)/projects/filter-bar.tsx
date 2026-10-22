@@ -2,10 +2,13 @@
 
 import { EntityListFilterBar } from "@/components/entity-list-filter-bar";
 import { STAGES } from "@/lib/stages";
+import { visibleProjectStages } from "@/lib/project-stage-visibility";
+import type { Role } from "@prisma/client";
 
 import type { SelectOption } from "./projects-view";
 
-export function ProjectsFilterBar({ clients, managers, engineers, hideEngineer, identitySearch, onSearchDraftChange, onModalActiveChange }: {
+export function ProjectsFilterBar({ actorRoles, clients, managers, engineers, hideEngineer, identitySearch, onSearchDraftChange, onModalActiveChange }: {
+  actorRoles?: readonly Role[];
   clients: SelectOption[];
   managers: SelectOption[];
   engineers: SelectOption[];
@@ -24,7 +27,7 @@ export function ProjectsFilterBar({ clients, managers, engineers, hideEngineer, 
         {
           queryKey: "stage", label: "Статус", allLabel: "Все статусы",
           searchPlaceholder: "Поиск статуса…", width: "w-40",
-          options: STAGES.map((item) => ({ value: item.id, label: item.label })),
+          options: (actorRoles ? visibleProjectStages(actorRoles) : STAGES).map((item) => ({ value: item.id, label: item.label })),
         },
         {
           queryKey: "client", label: "Клиент", allLabel: "Все клиенты",

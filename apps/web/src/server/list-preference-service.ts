@@ -20,11 +20,11 @@ export function createListPreferenceService(deps: {
   }
 
   return {
-    async load(section: ListSection, params: ListSearchParams) {
+    async load(section: ListSection, params: ListSearchParams, options: { defaultEngineer?: boolean } = {}) {
       const userId = await owner(section);
       const value = await deps.store.get(userId, `${section}.list`);
       const legacy = value === null ? await deps.store.get(userId, `${section}.view`) : null;
-      return { query: resolveListState(section, params, value, legacy), value };
+      return { query: resolveListState(section, params, value, legacy, options.defaultEngineer ? userId : null), value };
     },
     async save(section: ListSection, query: string, expected: string | null): Promise<SaveListPreferenceResult> {
       const userId = await owner(section);

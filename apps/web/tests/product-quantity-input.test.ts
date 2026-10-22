@@ -129,12 +129,13 @@ test("current engineer card/kanban allows both directions without a model; snaps
  for(const to of ["STORAGE","INSTALLATION","DONE","RECLAMATION"] as ProductStatus[])assert.equal(decideProductPercentageStatus(["ENGINEER"],{...context,to}).allowed,false);
  for(const roles of [["MANAGER"],["ADMIN"],["DIRECTOR"],["ENGINEER","MANAGER"]] as Role[][]){for(const to of ["DESIGN","PRODUCTION","STORAGE","INSTALLATION","DONE"] as ProductStatus[])assert.equal(decideProductPercentageStatus(roles,{...context,assignedEngineer:false,to}).allowed,true);assert.equal(decideProductPercentageStatus(roles,{...context,to:"RECLAMATION"}).allowed,false);}
 });
-test("assigned production read does not expand technical edit or legacy participant visibility",()=>{
+test("global engineering read does not expand technical edit or replace the visible parent check",()=>{
  const actor={id:"e",roles:["ENGINEER" as Role],engineeringParticipantProductIds:["old"]};
- const row={id:"p",deletedAt:null,project:{deletedAt:null},engineerId:"e",status:"PRODUCTION"};
+ const row={id:"p",deletedAt:null,project:{deletedAt:null,stage:"CONTRACT"},engineerId:"e",status:"PRODUCTION"};
  assert.equal(matches(row,productVisibilityWhere(actor) as FixtureRow),true);
  assert.equal(matches(row,productEditWhere(actor) as FixtureRow),false);
- assert.equal(matches({id:"old",engineerId:"foreign",status:"DESIGN"},productVisibilityWhere(actor) as FixtureRow),false);
+ assert.equal(matches({...row,id:"old",engineerId:"foreign",status:"DESIGN"},productVisibilityWhere(actor) as FixtureRow),true);
+ assert.equal(matches({...row,project:{deletedAt:null,stage:"LEAD"}},productVisibilityWhere(actor) as FixtureRow),false);
 });
 test("server return/production repeat preserves paid completion without files or tasks",async()=>{
  const product={id:"p",projectId:"project",title:"Изделие",engineerId:"e",status:"PRODUCTION" as ProductStatus,files:[],percentageConfigs:[]};let payroll=0,history=0;

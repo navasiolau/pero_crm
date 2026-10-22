@@ -2,7 +2,7 @@ import type { Prisma, Role } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { canCreateOrdinaryWork, canEditOrdinaryWork } from "@/lib/ordinary-work-access";
 import { allocatedWorkQuantity, quantityAtoms, quantityFromAtoms } from "@/lib/work-shares";
-import { productVisibilityWhere, resolveVisibilityActor, workVisibilityWhere } from "@/server/access/visibility";
+import { productAssignmentWriteWhere, productVisibilityWhere, resolveVisibilityActor, workVisibilityWhere } from "@/server/access/visibility";
 import { productDraftAccessSelect } from "@/server/access/product-draft-context";
 import { canAddProductWork } from "./access";
 import { isOrdinaryWork, workPlanRevision } from "./plan";
@@ -16,7 +16,7 @@ export async function listWorkPriceOptions(actor: { id: string; roles: Role[] },
   const current = await db.user.findUnique({ where: { id: actor.id }, select: { id: true, roles: true, active: true } });
   if (!current?.active || !canCreateOrdinaryWork(current.roles)) return [];
   const visibility = await resolveVisibilityActor(db, current);
-  const product = await db.product.findFirst({ where: { id: productId, AND: [productVisibilityWhere(visibility)] }, select: { ...productDraftAccessSelect, id: true, status: true } });
+  const product = await db.product.findFirst({ where: { id: productId, AND: [productAssignmentWriteWhere(visibility)] }, select: { ...productDraftAccessSelect, id: true, status: true } });
   if (!product || !canAddProductWork(current.roles, product.status, product)) return [];
   return db.priceItem.findMany({ where: { active: true }, select: { id: true, name: true, unit: true, price: true }, orderBy: { name: "asc" } });
 }

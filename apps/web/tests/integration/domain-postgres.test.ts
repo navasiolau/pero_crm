@@ -515,27 +515,34 @@ test("draft/privacy-real-readers-joins-notifications-and-operational-denials", a
     });
   }
   const currentProduction = await rows.product("engineer-current-production", c.project.id, { status: "PRODUCTION", engineerId: assigned });
-  const hidden = await rows.product("engineer-foreign-design", c.project.id, { status: "DESIGN", engineerId: c.worker.id });
+  const foreign = await rows.product("engineer-foreign-design", c.project.id, { status: "DESIGN", engineerId: c.worker.id });
   const ownPool = await tx.productStagePayPool.create({ data: { id: rows.id("engineer-visibility-pool"), productId: visible.id, kind: "ENGINEERING", state: "DRAFT", createdById: assigned } });
   const ownWork = await tx.work.create({ data: { projectId: c.project.id, productId: visible.id, title: "Инженерная", paymentKind: "ENGINEERING",
     stagePayPoolId: ownPool.id, poolWeightUnits: 1_000_000, quantity: "1", priceSnapshot: "30", total: "30" } });
   const ownTask = await tx.task.create({ data: { projectId: c.project.id, productId: visible.id, workId: ownWork.id, assigneeId: assigned, title: "Инженерная задача", quantity: "1" } });
   const visibleFiles = await Promise.all([visible.id, null].map(productId => tx.file.create({ data: { projectId: c.project.id, productId,
     fileName: "visible.pdf", storedName: randomUUID(), mimeType: "application/pdf", size: 1, uploadedById: assigned } })));
-  await tx.file.create({ data: { projectId: c.project.id, productId: hidden.id, fileName: "hidden.pdf", storedName: randomUUID(), mimeType: "application/pdf", size: 1, uploadedById: assigned } });
-  await tx.project.update({ where: { id: c.project.id }, data: { initialPrice: "900", delivery: "10", unloading: "20", installation: "30" } });
+  const foreignTask = await tx.task.create({ data: { projectId: c.project.id, productId: foreign.id, assigneeId: c.worker.id, title: "Чужая задача с файлом" } });
+  const foreignFile = await tx.file.create({ data: { projectId: c.project.id, productId: foreign.id, taskId: foreignTask.id, fileName: "foreign.pdf", storedName: randomUUID(), mimeType: "application/pdf", size: 1, uploadedById: c.worker.id } });
+  await tx.project.update({ where: { id: c.project.id }, data: { stage: "CONTRACT", initialPrice: "900", delivery: "10", unloading: "20", installation: "30" } });
   await run(c.engineer, tx, async () => {
     assert.equal((await productQueries.listProducts(assigned, c.engineer.roles, { activeOnly: false, projectId: c.project.id, statuses: ["PRODUCTION"] })).total, 1);
-    assert.equal((await productQueries.listProducts(assigned, c.engineer.roles, { activeOnly: false, projectId: c.project.id, engineerId: c.worker.id })).total, 0);
+    assert.equal((await productQueries.listProducts(assigned, c.engineer.roles, { activeOnly: false, projectId: c.project.id, engineerId: c.worker.id })).total, 1);
     assert.deepEqual((await productQueries.listProductFilterOptions(assigned, c.engineer.roles)).projects.map(row => row.id), [c.project.id]);
     const detail = await projectQueries.getProjectFor(assigned, c.engineer.roles, c.project.id); assert.ok(detail);
-    assert.deepEqual(detail.products.map(row => row.id).sort(), [visible.id, currentProduction.id].sort());
+    assert.deepEqual(detail.products.map(row => row.id).sort(), [visible.id, foreign.id, currentProduction.id].sort());
     assert.ok(detail.products.every(row => row.expectedPrice === null));
-    assert.deepEqual(detail.tasks.map(row => row.id), [ownTask.id]); assert.deepEqual(detail.files.map(row => row.id).sort(), visibleFiles.map(row => row.id).sort());
+    assert.deepEqual(detail.tasks.map(row => row.id), [ownTask.id]); assert.deepEqual(detail.files.map(row => row.id).sort(), [...visibleFiles.map(row => row.id), foreignFile.id].sort());
+    assert.equal(await tx.task.count({ where: { id: foreignTask.id, AND: [visibility.taskExecutionWhere(c.engineer)] } }), 0);
+    assert.equal(await tx.product.count({ where: { id: foreign.id, AND: [visibility.productEditWhere(c.engineer)] } }), 0);
     for (const key of ["initialPrice", "delivery", "unloading", "installation"] as const) assert.equal(detail[key], null);
     const summary = (await projectQueries.listProjects(assigned, c.engineer.roles, { activeOnly: false })).rows.find(row => row.id === c.project.id)!;
-    assert.equal(summary._count.products, 2); assert.equal(summary.totalPrice, null);
-    assert.equal(await productQueries.getProductFor(assigned, c.engineer.roles, hidden.id), null);
+    assert.equal(summary._count.products, 3); assert.equal(summary.totalPrice, null);
+    assert.ok(await productQueries.getProductFor(assigned, c.engineer.roles, foreign.id));
+    await tx.project.update({ where: { id: c.project.id }, data: { stage: "LEAD" } });
+    assert.equal(await productQueries.getProductFor(assigned, c.engineer.roles, foreign.id), null);
+    assert.equal(await projectQueries.getProjectFor(assigned, c.engineer.roles, c.project.id), null);
+    await tx.project.update({ where: { id: c.project.id }, data: { stage: "CONTRACT" } });
   });
   await run(c.manager, tx, async () => {
     const message = { type: "product.statusChanged", title: "Черновой шкаф", body: "Secret", link: `/products/${c.product.id}` };

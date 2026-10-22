@@ -86,21 +86,19 @@ test("participant resolver accepts zero-share assignment and rejects every misma
 
 test("participant predicates remain DESIGN scoped; independent manager and field grants survive", () => {
   const participant = { id: "u", roles: ["ENGINEER"] as Role[], engineeringParticipantProductIds: ["p"], engineeringParticipantTaskIds: ["task"] };
-  const row={id:"p",engineerId:null,status:"DESIGN",deletedAt:null,project:{deletedAt:null}};
+  const row={id:"p",engineerId:null,status:"DESIGN",deletedAt:null,project:{deletedAt:null,stage:"CONTRACT"}};
   assert.equal(matches(row,productEditWhere(participant)),true);
   for(const patch of [{status:"DRAFT"},{status:"PRODUCTION"},{id:"foreign"}])assert.equal(matches({...row,...patch},productEditWhere(participant)),false);
-  const read = JSON.stringify(productVisibilityWhere(participant));
-  assert.match(read, /DESIGN/);
-  assert.match(read, /engineerId/);
-  assert.match(read, /"p"/);
-  const execution = JSON.stringify(taskExecutionWhere(participant));
-  assert.match(execution, /"task"/);
-  assert.match(execution, /DESIGN/);
+  assert.equal(matches({...row,id:"foreign",status:"DONE"},productVisibilityWhere(participant)),true);
+  assert.equal(matches({...row,project:{deletedAt:null,stage:"LEAD"}},productVisibilityWhere(participant)),false);
+  const task={id:"task",productId:"p",assigneeId:"u",project:row.project,product:row};
+  assert.equal(matches(task,taskExecutionWhere(participant)),true);
+  assert.equal(matches({...task,id:"foreign-task",assigneeId:"other"},taskExecutionWhere(participant)),false);
   assert.equal(matches(row,productEditWhere({id:"u",roles:["MANAGER"]})),true);
   assert.equal(matches({...row,status:"DRAFT"},productEditWhere({id:"u",roles:["MANAGER"]})),false);
-  const field = JSON.stringify(productVisibilityWhere({ id: "u", roles: ["WORKER"] }));
-  assert.match(field, /assigneeId/);
-  assert.match(field, /"in":\["PRODUCTION","STORAGE"\]/);
+  const field = { id: "u", roles: ["WORKER"] as Role[] };
+  assert.equal(matches({...row,status:"PRODUCTION"},productVisibilityWhere(field)),true);
+  assert.equal(matches(row,productVisibilityWhere(field)),false);
   for(const status of ["DRAFT","PREPARATION","DESIGN","PRODUCTION"])assert.equal(matches({...row,status},productVisibilityWhere({id:"u",roles:[]})),false,status);
 });
 
@@ -122,16 +120,16 @@ test("direct participant grants are stage-scoped; pure field cannot see DESIGN s
   } } as unknown as Pick<PrismaClient, "task" | "productPercentageParticipant">;
   const engineer = await resolveVisibilityActor(db, { id: "e", roles: ["ENGINEER"] });
   assert.deepEqual(engineer.engineeringParticipantProductIds, ["design-own"]);
-  assert.match(JSON.stringify(productVisibilityWhere(engineer)), /design-own/);
-  assert.match(JSON.stringify(productVisibilityWhere(engineer)), /engineerId/);
+  const row={id:"foreign",engineerId:null,status:"DESIGN",deletedAt:null,project:{deletedAt:null,stage:"CONTRACT"}};
+  assert.equal(matches(row,productVisibilityWhere(engineer)),true);
+  assert.equal(matches(row,productEditWhere(engineer)),false);
+  assert.equal(matches({...row,id:"design-own"},productEditWhere(engineer)),true);
   const mounter = await resolveVisibilityActor(db, { id: "m", roles: ["MOUNTER"] });
   assert.deepEqual(mounter.fieldParticipantProductIds, ["install-own"]);
-  const product = JSON.stringify(productVisibilityWhere(mounter));
-  assert.match(product, /install-own/);
-  assert.match(product, /"in":\["INSTALLATION"\]/);
-  const project = JSON.stringify(projectVisibilityWhere(mounter));
-  assert.match(project, /"products"/);
-  assert.match(project, /"none":\{\}/);
+  assert.equal(matches({...row,status:"INSTALLATION"},productVisibilityWhere(mounter)),true);
+  assert.equal(matches(row,productVisibilityWhere(mounter)),false);
+  assert.equal(matches({deletedAt:null,products:[{...row,status:"INSTALLATION"}]},projectVisibilityWhere(mounter)),true);
+  assert.equal(matches({deletedAt:null,products:[],tasks:[{assigneeId:"m",productId:null}]},projectVisibilityWhere(mounter)),true);
 });
 
 { // Источник: combined-engineering-compensation.test.ts

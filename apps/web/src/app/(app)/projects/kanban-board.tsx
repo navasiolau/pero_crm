@@ -17,13 +17,14 @@ import {
 } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
 import { toast } from "sonner";
-import type { ProjectStage } from "@prisma/client";
+import type { ProjectStage, Role } from "@prisma/client";
 
 import { DragHandle } from "@/components/drag-handle";
 import { Badge } from "@/components/ui/badge";
 import { ProjectKanbanCard as ProjectCardView } from "@/components/project-kanban-card";
 import { formatAmount } from "@/lib/format";
 import { STAGES, stageLabels, stageStyles } from "@/lib/stages";
+import { visibleProjectStages } from "@/lib/project-stage-visibility";
 import { cn } from "@/lib/utils";
 import { patchProjectStage } from "@/server/projects/stage-actions";
 import type {ProjectStagePatch,StageExtras} from "@/server/projects/stage-contract";
@@ -120,6 +121,7 @@ export function KanbanBoard({
   searchReady = false,
   canManage,
   showAmount,
+  actorRoles,
 }: {
   initialProjects: ProjectCard[];
   // Без подтверждённой пары query/rows обычный caller не запускает поиск.
@@ -127,6 +129,7 @@ export function KanbanBoard({
   searchReady?: boolean;
   canManage: boolean;
   showAmount: boolean;
+  actorRoles?: readonly Role[];
 }) {
   const router = useRouter();
   const [projects, setProjects] = useState(initialProjects);
@@ -147,9 +150,9 @@ export function KanbanBoard({
     useSensor(PointerSensor, POINTER_SENSOR_OPTIONS),
   );
 
-  const columns = useMemo(() => STAGES.map(stage => ({
+  const columns = useMemo(() => (actorRoles ? visibleProjectStages(actorRoles) : STAGES).map(stage => ({
     stage, projects: projects.filter(project => project.stage === stage.id),
-  })), [projects]);
+  })), [projects, actorRoles]);
   const onOpen = useCallback((id: string) => router.push(`/projects/${id}`), [router]);
 
   function applyStage(projectId: string, toStage: ProjectStage) {

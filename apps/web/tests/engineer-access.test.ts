@@ -26,31 +26,33 @@ before(async () => {
   projects = await import("../src/server/projects/queries");
 });
 
-test("queries return current own DESIGN and PRODUCTION and filters cannot overwrite access", async () => {
+test("queries read all accepted products and engineer filters narrow the global grant", async () => {
   const result = await products.listProducts(engineer.id, engineer.roles, { activeOnly: false }, { page: 1, pageSize: 10 });
-  assert.deepEqual(result.rows.map((p) => p.id), ["own", "production"]);
-  assert.equal(result.total, 2);
-  for (const filter of [{ engineerId: "other" }, { projectId: "hidden" }]) {
-    assert.equal((await products.listProducts(engineer.id, engineer.roles, { activeOnly: false, ...filter })).total, 0);
-  }
-  for (const key of ["foreign", "hidden-product"]) assert.equal(await products.getProductFor(engineer.id, engineer.roles, key), null);
+  assert.deepEqual(new Set(result.rows.map((p) => p.id)), new Set(["own", "foreign", "production", "field-product"]));
+  assert.equal(result.total, 4);
+  assert.equal((await products.listProducts(engineer.id, engineer.roles, { activeOnly: false, engineerId: "other" })).total, 2);
+  assert.equal((await products.listProducts(engineer.id, engineer.roles, { activeOnly: false, engineerId: engineer.id })).total, 2);
+  assert.equal((await products.listProducts(engineer.id, engineer.roles, { activeOnly: false, projectId: "hidden" })).total, 0);
+  assert.ok(await products.getProductFor(engineer.id, engineer.roles, "foreign"));
+  assert.equal(await products.getProductFor(engineer.id, engineer.roles, "hidden-product"), null);
 });
 
 test("project query scopes children, files, dependencies and financial aggregates", async () => {
   const project = await projects.getProjectFor(engineer.id, engineer.roles, "mixed");
   assert.ok(project);
-  assert.deepEqual(project.products.map((p) => p.id), ["own", "production"]);
+  assert.deepEqual(new Set(project.products.map((p) => p.id)), new Set(["own", "foreign", "production"]));
   assert.deepEqual(project.tasks.map((t) => t.id), ["task-own"]);
-  assert.deepEqual(new Set(project.files.map((f) => f.id)), new Set(["file-own", "file-general", "file-production"]));
+  assert.deepEqual(new Set(project.files.map((f) => f.id)), new Set(["file-own", "file-foreign", "file-general", "file-production", "file-cross-task"]));
   assert.equal(project.tasks[0].dependencies.length, 0);
   for (const field of ["initialPrice", "delivery", "unloading", "installation"] as const) assert.equal(project[field], null);
   assert.equal(await projects.getProjectFor(engineer.id, engineer.roles, "hidden"), null);
   const result = await projects.listProjects(engineer.id, engineer.roles, { activeOnly: false });
-  assert.equal(result.total, 1);
-  assert.equal(result.rows[0].totalPrice, null);
-  assert.ok(result.rows[0].products.every(product=>product.expectedPrice===null));
-  assert.deepEqual(result.rows[0]._count, { tasks: 1, products: 2, files: 3 });
-  assert.equal((await projects.listProjects(engineer.id, engineer.roles, { activeOnly: false, engineerId: "other" })).total, 0);
+  assert.equal(result.total, 2);
+  const row = result.rows.find(item => item.id === "mixed")!;
+  assert.equal(row.totalPrice, null);
+  assert.ok(row.products.every(product=>product.expectedPrice===null));
+  assert.deepEqual(row._count, { tasks: 1, products: 3, files: 5 });
+  assert.equal((await projects.listProjects(engineer.id, engineer.roles, { activeOnly: false, engineerId: "other" })).total, 2);
 });
 
 test("workspace omits a visible orphan without deleting its original row or financial facts",async()=>{
@@ -59,6 +61,19 @@ test("workspace omits a visible orphan without deleting its original row or fina
   const project=await projects.getProjectFor(engineer.id,engineer.roles,"mixed");
   assert.ok(project);assert.deepEqual(project.tasks.map(task=>task.id),["task-own"]);
   assert(fixture.tasks.includes(orphan));
+});
+
+test("assigned engineering workspace task cannot expose an early parent through task lists or search", async () => {
+  const { taskWorkspaceWhere } = await import("../src/server/tasks/queries");
+  const parent = fixture.projects[0], previous = parent.stage;
+  try {
+    const current = async () => db.task.findMany({ where: await taskWorkspaceWhere(engineer, { tasks: { id: ownTask.id as string } }) });
+    assert.equal((await current()).length, 1);
+    parent.stage = "LEAD";
+    assert.deepEqual(await current(), []);
+    parent.stage = "ESTIMATE";
+    assert.deepEqual(await current(), []);
+  } finally { parent.stage = previous; }
 });
 test("frozen reward cannot expose a Task whose Work is unbound or belongs to another Product/Project",async()=>{
   const work=ownTask.work as Record<string,unknown>;
@@ -72,10 +87,10 @@ test("frozen reward cannot expose a Task whose Work is unbound or belongs to ano
 
 test("filter options and client counts use the same visible project set", async () => {
   const options = await products.listProductFilterOptions(engineer.id, engineer.roles);
-  assert.deepEqual(options.projects.map((p) => p.id), ["mixed"]);
+  assert.deepEqual(new Set(options.projects.map((p) => p.id)), new Set(["mixed", "field"]));
   const clients = await projects.listClients(engineer);
-  assert.equal(clients[0]._count.projects, 1);
-  assert.deepEqual((await products.listProductOptions("mixed", engineer)).map((p) => p.id), ["own", "production"]);
+  assert.equal(clients[0]._count.projects, 2);
+  assert.deepEqual(new Set((await products.listProductOptions("mixed", engineer)).map((p) => p.id)), new Set(["own", "foreign", "production"]));
   assert.deepEqual(await products.listProductOptions("hidden", engineer), []);
 });
 
@@ -84,6 +99,7 @@ test("filter options and client counts use the same visible project set", async 
 test("upload rejects hidden task and mismatched product before any write", async () => {
   for (const actor of [engineer, { ...engineer, roles: ["ACCOUNTANT", "ENGINEER"] as Role[] }]) {
     for (const context of [
+      { projectId: "mixed", productId: "foreign", taskId: null },
       { projectId: "mixed", productId: "own", taskId: "task-foreign" },
       { projectId: "mixed", productId: null, taskId: "task-production" },
       { projectId: "hidden", productId: null, taskId: null },
@@ -92,6 +108,7 @@ test("upload rejects hidden task and mismatched product before any write", async
   const inferred = await resolveUploadContext(db, engineer, { projectId: "mixed", productId: null, taskId: "task-own" });
   assert.equal(inferred?.productId, "own");
   assert.ok(await resolveUploadContext(db, engineer, { projectId: "mixed", productId: null, taskId: null }));
+  assert.equal(await resolveUploadContext(db, engineer, { projectId: "field", productId: null, taskId: null }), null, "reading a foreign CONTRACT project does not grant a general project upload");
   assert.equal(await resolveUploadContext(db, { ...engineer, roles: ["ACCOUNTANT"] }, { projectId: "hidden", productId: null, taskId: null }), null);
 });
 
@@ -100,6 +117,12 @@ test("field upload grant retains project access from own tasks without widening 
   assert.ok(await resolveUploadContext(db, actor, { projectId: "field", productId: "field-product", taskId: "task-field-product" }));
   assert.ok(await resolveUploadContext(db, actor, { projectId: "field", productId: "field-product", taskId: null }));
   assert.equal(await resolveUploadContext(db, actor, { projectId: "hidden", productId: null, taskId: null }), null);
+  const foreign = fixture.products[1], previous = foreign.status;
+  try {
+    foreign.status = "DONE";
+    assert.ok(await products.getProductFor(actor.id, actor.roles, String(foreign.id)));
+    assert.equal(await resolveUploadContext(db, actor, { projectId: "mixed", productId: String(foreign.id), taskId: null }), null, "new engineering read does not widen the field upload grant");
+  } finally { foreign.status = previous; }
 });
 
 test("a common task cannot inherit the grant for an unbound shared project file", async () => {
@@ -125,7 +148,7 @@ test("nested work, sketch and task file cannot smuggle a hidden product into a v
   const task = fixture.tasks[0];
   const original = { sketchFile: own.sketchFile, work: task.work, workId: task.workId, files: task.files };
   try {
-    own.sketchFile = fixture.files[1];
+    own.sketchFile = { ...fixture.files[1], product: fixture.products[3], project: fixture.projects[1] };
     task.work = { id: "secret-work", title: "Secret work", productId:"foreign",projectId:"mixed",priceSnapshot:"10",product: fixture.products[1], project: fixture.projects[0] };
     task.workId = "secret-work";
     task.files = [fixture.files[1]];
@@ -144,13 +167,16 @@ test("nested work, sketch and task file cannot smuggle a hidden product into a v
   }
 });
 
-test("hidden material shortages do not affect the project badge", async () => {
+test("material shortages follow the same global product read and hidden parent boundary", async () => {
   const original = fixture.db.projectMaterial;
   try {
+    fixture.db.projectMaterial = fixtureModel([{ product: fixture.products[3], materialId: "material", quantity: 5, issuedQty: 0 }]);
+    const mixed = async () => (await projects.listProjects(engineer.id, engineer.roles, { activeOnly: false })).rows.find(row => row.id === "mixed")!;
+    assert.equal((await mixed()).hasMaterialShortage, false);
     fixture.db.projectMaterial = fixtureModel([{ product: fixture.products[1], materialId: "material", quantity: 5, issuedQty: 0 }]);
-    assert.equal((await projects.listProjects(engineer.id, engineer.roles, { activeOnly: false })).rows[0].hasMaterialShortage, false);
+    assert.equal((await mixed()).hasMaterialShortage, true);
     fixture.db.projectMaterial = fixtureModel([{ product: fixture.products[0], materialId: "material", quantity: 5, issuedQty: 0 }]);
-    assert.equal((await projects.listProjects(engineer.id, engineer.roles, { activeOnly: false })).rows[0].hasMaterialShortage, true);
+    assert.equal((await mixed()).hasMaterialShortage, true);
   } finally {
     fixture.db.projectMaterial = original;
   }
@@ -164,7 +190,7 @@ test("sorting and pagination by product count use only accessible products", asy
     const result = await projects.listProjects(engineer.id, engineer.roles, { activeOnly: false, sort: "products", dir: "desc" }, { page: 1, pageSize: 1 });
     assert.equal(result.total, 2);
     assert.deepEqual(result.rows.map((p) => p.id), ["mixed"]);
-    assert.equal(result.rows[0]._count.products, 2);
+    assert.equal(result.rows[0]._count.products, 3);
   } finally {
     hidden.engineerId = oldEngineer;
   }

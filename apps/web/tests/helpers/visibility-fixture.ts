@@ -28,6 +28,7 @@ export function matches(row: FixtureRow | null, where: FixtureRow = {}): boolean
     }
     if ("hasSome" in condition) return (condition.hasSome as unknown[]).some((part) => (value as unknown[]).includes(part));
     if ("some" in condition) return (value as FixtureRow[]).some((part) => matches(part, condition.some as FixtureRow));
+    if ("none" in condition) return !(value as FixtureRow[]).some((part) => matches(part, condition.none as FixtureRow));
     return matches(value as FixtureRow | null, condition);
   });
 }
@@ -109,6 +110,7 @@ export function engineerFixture() {
   const client: FixtureRow = { id: "client", name: "Fixture", lastName: null, middleName: null, projects: [] };
   const projects: FixtureRow[] = ["mixed", "hidden", "field"].map((id, index) => ({
     id, number: id, numberInt: index, title: id, clientId: "client", client, manager: null,
+    stage: id === "hidden" ? "LEAD" : id === "mixed" ? "IN_WORK" : "CONTRACT",
     initialPrice: 999999, delivery: 111111, unloading: 222222, installation: 333333,
     products: [], tasks: [], works: [], files: [], payments: [], communications: [], stageHistory: [],
   }));
@@ -132,7 +134,7 @@ export function engineerFixture() {
   }));
   tasks[0].dependencies = [{ dependsOn: tasks[1], dependsOnId: tasks[1].id }];
   const files: FixtureRow[] = ["own", "foreign", "production", "general", "cross-task"].map((name) => ({
-    id: `file-${name}`, fileName: name, projectId: "mixed", project: projects[0],
+    id: `file-${name}`, fileName: name, section: "GENERAL", projectId: "mixed", project: projects[0],
     productId: products.find((p) => p.id === name)?.id ?? null,
     product: products.find((p) => p.id === name) ?? null,
     taskId: name === "cross-task" ? tasks[1].id : null,

@@ -1,4 +1,4 @@
-import { productVisibilityWhere, resolveVisibilityActor } from "@/server/access/visibility";
+import { productAssignmentWriteWhere, resolveVisibilityActor } from "@/server/access/visibility";
 import { productDraftAccessSelect } from "@/server/access/product-draft-context";
 import {z} from 'zod';
 import {createHash} from 'node:crypto';
@@ -26,7 +26,7 @@ export async function addWorkCore(actor:DomainActor,input:unknown,transaction:Ta
   const visibility=await resolveVisibilityActor(tx,current);
   const project=await tx.project.findUnique({where:{...liveProjectWhere,id:data.projectId},select:{id:true,number:true,currency:true}});
   if(!project)throw Error('Проект не найден');
-  const product=data.productId?await tx.product.findFirst({where:{...liveProductWhere,id:data.productId,projectId:data.projectId,AND:[productVisibilityWhere(visibility)]},select:{...productDraftAccessSelect,id:true,status:true,quantity:true}}):null;
+  const product=data.productId?await tx.product.findFirst({where:{...liveProductWhere,id:data.productId,projectId:data.projectId,AND:[productAssignmentWriteWhere(visibility)]},select:{...productDraftAccessSelect,id:true,status:true,quantity:true}}):null;
   if(data.productId&&!product)throw Error('Изделие не найдено в этом проекте');
    if(product&&!canAddProductWork(current.roles,product.status,product))throw Error('Недостаточно прав для создания работы этого изделия');
   assertProjectMoneyCurrency(project.currency);assertInternalCurrency((await tx.orgSetting.findUnique({where:{key:'payrollCurrency'}}))?.value??'BYN');
