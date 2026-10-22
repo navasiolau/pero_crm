@@ -121,11 +121,8 @@ export function MultiSelectFilter({ label, options, value, onChange, allLabel, s
   const toggle = useCallback((optionValue: string, checked: boolean) => {
     const next = new Set(value ?? []);
     if (checked) next.add(optionValue); else next.delete(optionValue);
-    const known = new Set(options.map(option => option.value));
-    const allKnown = options.length > 0 && options.every(option => next.has(option.value));
-    const hasUnknown = [...next].some(item => !known.has(item));
-    onChange(next.size === 0 || (checked && allKnown && !hasUnknown) ? undefined : [...next]);
-  }, [value, options, onChange]);
+    onChange(next.size === 0 ? undefined : [...next]);
+  }, [value, onChange]);
   const reset = useCallback(() => onChange(undefined), [onChange]);
   return <Popover open={open} onOpenChange={next => { setOpen(next); if (!next) setQuery(""); }}>
     <PopoverTrigger render={<Button variant="outline" aria-label={label} className={cn("w-full justify-between font-normal", className)} />}>

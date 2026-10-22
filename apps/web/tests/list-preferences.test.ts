@@ -156,7 +156,15 @@ test("engineer first visit upgrades an old hidden empty filter, while explicit U
   assert.equal(new URLSearchParams((await f.service.load("projects", { engineer: "other" }, options)).query).get("engineer"), '["other"]');
   const all = await f.service.save("projects", "view=table&client=c1", old);
   assert.equal(all.ok, true);
+  const checkedAllQuery = new URLSearchParams({ view: "table", client: "c1", engineer: '{"all":true}' }).toString();
+  const checkedAll = await f.service.save("projects", checkedAllQuery, all.value);
+  assert.equal(checkedAll.ok, true);
   f.login(null); f.login("alice");
+  assert.equal(new URLSearchParams((await f.service.load("projects", {}, options)).query).get("engineer"), '{"all":true}');
+  assert.equal(new URLSearchParams((await f.service.load("projects", { engineer: '{"all":true}' }, options)).query).get("engineer"), '{"all":true}');
+  const cleared = await f.service.save("projects", "view=table&client=c1", checkedAll.value);
+  assert.equal(cleared.ok, true);
+  assert.equal((await f.service.save("projects", checkedAllQuery, checkedAll.value)).ok, false, "late CAS cannot restore checked All after reset");
   assert.equal(new URLSearchParams((await f.service.load("projects", {}, options)).query).get("engineer"), null);
   assert.equal(new URLSearchParams((await f.service.load("products", {}, options)).query).get("engineer"), '["alice"]', "sections remain independent");
   f.rows.set("alice/products.list", JSON.stringify({ version: 2, query: "engineer=former" }));

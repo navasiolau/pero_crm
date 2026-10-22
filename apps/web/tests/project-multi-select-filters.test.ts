@@ -38,6 +38,7 @@ test("project parser accepts arrays and legacy scalars while empty and invalid a
   assert.equal(queries.parseProjectListParams({}).filters.activeOnly, false);
   assert.equal(queries.parseProjectListParams({ active: "0" }).filters.activeOnly, false);
   assert.equal(queries.parseProjectListParams({}).filters.clientIds, undefined);
+  assert.equal(queries.parseProjectListParams({ engineer: '{"all":true}' }).filters.engineerIds, undefined);
   const ignored = queries.parseProjectListParams({ client: "[]", stage: '["bad"]', engineer: '[1]', manager: "m1" });
   assert.equal(ignored.filters.clientIds, undefined);
   assert.equal(ignored.filters.stages, undefined);
@@ -64,6 +65,10 @@ test("empty arrays do not restrict any axis or discard other filters and include
   const unassigned = { ...rows[0], id: "unassigned", numberInt: 99, clientId: null, managerId: null, products: [] };
   rows.push(unassigned);
   try {
+    const all = await queries.listProjects("manager", ["MANAGER"], queries.parseProjectListParams({ engineer: '{"all":true}' }).filters);
+    const unrestricted = await queries.listProjects("manager", ["MANAGER"], { activeOnly: false });
+    assert.deepEqual(all.rows.map(row => row.id), unrestricted.rows.map(row => row.id));
+    assert.ok(all.rows.some(row => row.id === "unassigned"));
     for (const key of ["stages", "clientIds", "managerIds", "engineerIds"] as const) {
       assert.ok((await queries.listProjects("manager", ["MANAGER"], { activeOnly: false, [key]: [] })).rows.some((row) => row.id === "unassigned"), key);
     }

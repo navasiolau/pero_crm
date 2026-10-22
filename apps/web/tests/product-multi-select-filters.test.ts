@@ -30,6 +30,7 @@ test("product parser reads arrays/scalars, ignores empty/invalid axes and defaul
   assert.equal(result.filters.activeOnly, true);
   assert.equal(queries.parseProductListParams({}).filters.activeOnly, false);
   assert.equal(queries.parseProductListParams({ active: "0" }).filters.activeOnly, false);
+  assert.equal(queries.parseProductListParams({ engineer: '{"all":true}' }).filters.engineerIds, undefined);
   const ignored = queries.parseProductListParams({ status: '["bad"]', project: "[]", engineer: '[1]', client: "c1" });
   assert.equal(ignored.filters.statuses, undefined);
   assert.equal(ignored.filters.projectIds, undefined);
@@ -52,6 +53,10 @@ test("empty product axes preserve other restrictions and allow unassigned visibl
   const unassigned = { ...rows[0], id: "unassigned", engineerId: null };
   rows.push(unassigned);
   try {
+    const all = await queries.listProducts("manager", ["MANAGER"], queries.parseProductListParams({ engineer: '{"all":true}' }).filters);
+    const unrestricted = await queries.listProducts("manager", ["MANAGER"], { activeOnly: false });
+    assert.deepEqual(all.rows.map(row => row.id), unrestricted.rows.map(row => row.id));
+    assert.ok(all.rows.some(row => row.id === "unassigned"));
     for (const key of ["statuses", "projectIds", "clientIds", "engineerIds"] as const) {
       assert.equal((await queries.listProducts("manager", ["MANAGER"], { activeOnly: false, [key]: [] })).total, 7, key);
       const partial = await queries.listProducts("manager", ["MANAGER"], { activeOnly: false, ...(key === "projectIds" ? { clientIds: ["c1"] } : { projectIds: ["p1"] }), [key]: [] });

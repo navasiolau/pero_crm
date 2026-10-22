@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { decodeListPreference, encodeListPreference, normalizeListQuery, resolveListState, updateListQuery } from "../src/lib/list-state";
-import { encodeListFilterValue, parseListFilterValue } from "../src/lib/list-filter-values";
+import { encodeListFilterUiValue, encodeListFilterValue, parseListFilterUiValue, parseListFilterValue } from "../src/lib/list-filter-values";
 
 const fields = (query: string) => Object.fromEntries(new URLSearchParams(query));
 
@@ -27,8 +27,19 @@ test("shared codec treats empty as unrestricted and retains a selected ID absent
   assert.equal(encodeListFilterValue(undefined), null);
   assert.equal(encodeListFilterValue([]), null);
   assert.equal(parseListFilterValue("[]"), undefined);
+  assert.equal(parseListFilterValue('{"all":true}'), undefined, "explicit All keeps the unrestricted server axis");
   assert.deepEqual(parseListFilterValue(" old-selected-id "), ["old-selected-id"]);
   assert.equal(encodeListFilterValue(["z", "a", "z"]), '["a","z"]');
+  const checkedAll = new URLSearchParams({ engineer: '{"all":true}', stage: '{"all":true}' }).toString();
+  assert.deepEqual(fields(normalizeListQuery("projects", checkedAll)), { view: "kanban", engineer: '{"all":true}', stage: '{"all":true}' });
+  assert.deepEqual(fields(normalizeListQuery("products", new URLSearchParams({ engineer: '{"all":true,"extra":1}' }).toString())), { view: "kanban" });
+  const options = [{ value: "e1" }, { value: "e2" }];
+  assert.equal(encodeListFilterUiValue(["e2", "e1"], options), '{"all":true}');
+  assert.deepEqual(parseListFilterUiValue('{"all":true}', options), ["e1", "e2"]);
+  assert.equal(parseListFilterUiValue(undefined, options), undefined);
+  assert.equal(encodeListFilterUiValue([], options), null);
+  assert.equal(encodeListFilterUiValue(["e1"], options), '["e1"]');
+  assert.equal(encodeListFilterUiValue(["e1", "e2", "unknown"], options), '["e1","e2","unknown"]');
 });
 
 test("project multi-value normalization preserves five clients and two engineers while empty axes disappear", () => {

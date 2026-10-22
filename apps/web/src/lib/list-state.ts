@@ -1,6 +1,6 @@
 import { PRODUCT_STATUSES } from "./product-statuses";
 import { STAGES } from "./stages";
-import { activeListStatusValues, encodeListFilterValue, parseListFilterValue } from "./list-filter-values";
+import { activeListStatusValues, ALL_LIST_FILTER_VALUE, encodeListFilterValue, isAllListFilterValue, parseListFilterValue } from "./list-filter-values";
 
 export type ListSection = "projects" | "products";
 export type ListSearchParams = Record<string, string | string[] | undefined>;
@@ -59,6 +59,10 @@ export function normalizeListQuery(section: ListSection, query: string) {
   if (q) result.set("q", q);
   const config = filterConfig[section];
   for (const key of config.keys) {
+    if (isAllListFilterValue(source.get(key) ?? undefined)) {
+      result.set(key, ALL_LIST_FILTER_VALUE);
+      continue;
+    }
     let values = parseListFilterValue(source.get(key) ?? undefined);
     if (key === config.statusKey) values = activeListStatusValues(values, config.statuses, section === "projects" ? ["PAUSED", "RECLAMATION"] : ["RECLAMATION"]);
     const encoded = encodeListFilterValue(values);
