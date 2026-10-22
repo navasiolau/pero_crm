@@ -1,5 +1,7 @@
 # Проверки №193
 
+Root native local5433 — PASS в совместной пробе №193–194 на SHA `e15d110cc8c9889bc958ec3356fc26fe2cb7ed97`. Настоящий plan/apply проверил PAUSED→последний LEAD, PAUSED без истории→IN_WORK, RECLAMATION проекта→IN_WORK и изделия→PRODUCTION. Для КП сброшено принятие, повышен retentionEpoch, ожидающий PRUNE отменён; версии и PDF metadata сохранены, новых начислений, событий, выпусков и заданий не появилось. Повтор не записал данные. Только собственные синтетические строки в одной принудительно откатываемой транзакции; полные снимки 77 таблиц и каталога совпали. Квитанция `C:/Users/admin/.codex/tmp/pero-crm-190-196/acceptance/local193-194.json`, digest `a5be1d2c9d2587ef46bcb438a8ed8d76fc2f950575574dc682b33f54ae1da3e5`.
+
 Ветка feature/193, база3def4f0c76e4a1756aa4dabfbb3871b2112dd927. БД/инфраструктура не читались и не изменялись.
 
 - Существующие server/list/percentage suites:40 уникальных cases PASS. Первый прогон39/40: добавленный historical receipt fixture считал fingerprint до Zod; fixture исправлен на исходный server contract, повтор только project-stage-core8/8 PASS. В том числе новый retired target отвергается, exact старый receipt читается, перенос через DI сохраняет скрытые строки/историю/денежный fixture, отменяет prune при LEAD, replay не пишет повторно.
