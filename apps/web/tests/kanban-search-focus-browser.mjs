@@ -131,6 +131,28 @@ const search=page=>page.getByPlaceholder('Номер, название…');
 async function apply(page,q){await search(page).fill(q);await expect.poll(()=>page.evaluate(()=>new URLSearchParams(window.__clientQuery).get('q'))).toBe(q||null);await expect.poll(()=>page.evaluate(()=>window.__pending)).toBe(false);await waitFrames(page);}
 try{
  for(const section of sections){
+  for(const viewport of [{width:1440,height:900},{width:390,height:844}]){
+   const delayed=await makePage(section,viewport),q=expectedQ(section);
+   await delayed.evaluate(()=>{const style=document.createElement('style');style.id='late-card';style.textContent='[data-kanban-card-id="target"]{display:none!important}';document.head.append(style);});
+   if(viewport.width<768)await delayed.getByRole('button',{name:'Фильтры',exact:true}).click();
+   await apply(delayed,q);
+   if(viewport.width<768){await delayed.getByRole('button',{name:'Показать результаты',exact:true}).click();await expect(delayed.getByRole('dialog')).toHaveCount(0);}
+   await expect.poll(()=>delayed.evaluate(()=>window.__committedFocus?.ready)).toBe(true);
+   await waitFrames(delayed);assert.deepEqual(await delayed.evaluate(()=>window.__focusMoves),{board:0,page:0});
+   await delayed.evaluate(()=>window.__focusBeforeCard=document.activeElement);
+   await delayed.evaluate(()=>document.getElementById('late-card').remove());await settledCenter(delayed,section);
+   assert.deepEqual(await delayed.evaluate(()=>window.__focusMoves),{board:1,page:1});
+   assert.equal(await delayed.evaluate(()=>document.activeElement===window.__focusBeforeCard),true);
+   if(viewport.width>=768)assert.deepEqual(await search(delayed).evaluate(input=>({active:document.activeElement===input,start:input.selectionStart,end:input.selectionEnd})),{active:true,start:q.length,end:q.length});
+   checks.push(section+':'+viewport.width+':zero_size_target_waits_until_measurable_once');await finish(delayed);
+  }
+
+  const inserted=await makePage(section);
+  await inserted.evaluate(()=>{const card=document.querySelector('[data-kanban-card-id="target"]');window.__lateCard=card;window.__lateParent=card.parentElement;card.remove();});
+  await apply(inserted,expectedQ(section));await waitFrames(inserted);assert.deepEqual(await inserted.evaluate(()=>window.__focusMoves),{board:0,page:0});
+  await inserted.evaluate(()=>window.__lateParent.append(window.__lateCard));await settledCenter(inserted,section);
+  assert.deepEqual(await inserted.evaluate(()=>window.__focusMoves),{board:1,page:1});checks.push(section+':late_DOM_target_waits_until_inserted_once');await finish(inserted);
+
   const q=expectedQ(section),page=await makePage(section),before=await layout(page);
   await apply(page,q);await settledCenter(page,section);await waitFrames(page);
   const g=await geometry(page,section);assert.ok(g.left>0&&g.top>0);assert.deepEqual(await page.evaluate(()=>window.__focusMoves),{board:1,page:1},'one exact query must cause one board/page transition');assert.ok(Math.abs(g.bottom-g.left)<2);
