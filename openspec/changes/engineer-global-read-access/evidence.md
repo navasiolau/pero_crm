@@ -1,5 +1,7 @@
 # Проверки №194
 
+Root native local5433 — PASS на SHA `e15d110cc8c9889bc958ec3356fc26fe2cb7ed97`: реальные Prisma predicates подтвердили три этапа проектов, пять статусов чужих изделий, вложенные списки/поиск/прямые lookup, общие и прикреплённые к чужой задаче техфайлы, эскизы/обложки. LEAD/ESTIMATE, DRAFT/PREPARATION и задачи скрытого родителя исключены. Чужие edit/execution/upload и общий проектный upload запрещены; собственные прежние права сохранены. Проба №193–194 полностью откатилась, все 77 таблиц и каталог совпали. Квитанция `C:/Users/admin/.codex/tmp/pero-crm-190-196/acceptance/local193-194.json`, digest `a5be1d2c9d2587ef46bcb438a8ed8d76fc2f950575574dc682b33f54ae1da3e5`.
+
 Основание: согласованный план владельца и бриф `engineer-global-read-access`. Ветка `feature/194`, worktree `D:/Projects/pero_crm_worktrees/requests-194`. №193 `d6f38b3f` введена обычным merge `cb7852cc`; собственные изменения №194 не закоммичены и не опубликованы.
 
 ## Поведение
