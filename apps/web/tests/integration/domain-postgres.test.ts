@@ -44,6 +44,7 @@ let changelog: typeof import("../../src/server/changelog/queries");
 let calendar: typeof import("../../src/server/calendar/core"), calendarAnalytics: typeof import("../../src/server/calendar/analytics");
 let visibility: typeof import("../../src/server/access/visibility"), notifications: typeof import("../../src/server/access/notification-visibility");
 let tasks: typeof import("../../src/server/tasks/actions"), completion: typeof import("../../src/server/tasks/completion-core");
+let taskReassignment: typeof import("../../src/server/tasks/task-reassignment-core");
 let worksCore: typeof import("../../src/server/works/core");
 let workUpdate: typeof import("../../src/server/works/update-core"), workQueries: typeof import("../../src/server/works/queries");
 let priceActions: typeof import("../../src/server/prices/actions");
@@ -186,7 +187,7 @@ function commandTx(tx: Prisma.TransactionClient, context: Context): Prisma.Trans
     };
     if (key === "changeLog" && context.failAuditId) return new Proxy(db.changeLog, { get(model, method) {
       if (method === "create") return async (...args: unknown[]) => {
-        if ((args[0] as Prisma.ChangeLogCreateArgs).data.action === "update") await context.beforeAudit?.(tx);
+        if (["update", "reassign"].includes(String((args[0] as Prisma.ChangeLogCreateArgs).data.action))) await context.beforeAudit?.(tx);
         const value = await Reflect.apply(model.create, model, args);
         // Настоящая SQL unique-ошибка после записи audit; enclosing transaction обязан откатить всё.
         await tx.changeLog.create({ data: { id: context.failAuditId, actorType: "user", actorId: context.actor.id, entity: "test", entityId: "ci169", action: "collision" } });
@@ -225,7 +226,7 @@ before(async () => {
     return typeof value === "function" ? value.bind(context.db) : value;
   } });
   // Child targets загружаются раньше родителей: guardedModuleCache сохраняет installed entry каждого target.
-  const names = ["transactions/coordinator", "time/timers", "access/visibility", "access/notification-visibility", "tasks/workspace-contract", "prices/actions", "works/core", "works/update-core", "works/queries", "tasks/worker-allocation-core", "tasks/piecework-core",
+  const names = ["transactions/coordinator", "time/timers", "access/visibility", "access/notification-visibility", "tasks/workspace-contract", "prices/actions", "works/core", "works/update-core", "works/queries", "tasks/worker-allocation-core", "tasks/piecework-core", "tasks/task-reassignment-core",
     "tasks/queries", "warehouse/unit-core", "warehouse/norm-core", "warehouse/queries", "products/delete-core", "products/core", "projects/stage-core", "projects/delete-core",
     "products/status-core", "products/queries", "projects/queries", "product-percentage-pay/queries", "changelog/queries", "calendar/core", "calendar/analytics", "tasks/completion-core", "tasks/actions", "warehouse/accounting", "warehouse/actions", "time/actions", "payments/service", "projects/core", "kp/proposal-core"];
   const effect = (name: string) => () => { const probe = current().mutation; if (probe) { probe.effects.push(name); throw Error("CI133_INJECTED_OPTIONAL_EFFECT"); } };
@@ -244,6 +245,7 @@ before(async () => {
   workUpdate = scope.load("../src/server/works/update-core"); workQueries = scope.load("../src/server/works/queries");
   workerAllocation = scope.load("../src/server/tasks/worker-allocation-core");
   pieceworkAllocation = scope.load("../src/server/tasks/piecework-core");
+  taskReassignment = scope.load("../src/server/tasks/task-reassignment-core");
   workspace = scope.load("../src/server/tasks/workspace-contract"); taskQueries = scope.load("../src/server/tasks/queries");
   units = scope.load("../src/server/warehouse/unit-core"); norms = scope.load("../src/server/warehouse/norm-core"); warehouse = scope.load("../src/server/warehouse/queries");
   productDeletion = scope.load("../src/server/products/delete-core"); products = scope.load("../src/server/products/core"); stages = scope.load("../src/server/projects/stage-core"); deletion = scope.load("../src/server/projects/delete-core");
@@ -1340,9 +1342,13 @@ test("task/status-real-receipts-start-after-DONE-and-changed-context-refusal", a
   assert.equal((await run(c.manager, fixture.db, () => tasks.changeTaskStatus(other.id, "DONE", 20, done))).ok, false);
   const ownReceipt = { clientMutationId: randomUUID(), expectedActorId: c.worker.id };
   assert.equal((await run(c.worker, fixture.db, () => tasks.changeTaskStatus(other.id, "IN_PROGRESS", undefined, ownReceipt))).ok, true);
-  const recipient = actorOf(await fixture.user("receipt-next-worker", ["WORKER"]));
-  assert.equal((await run(c.manager, fixture.db, () => tasks.updateTask(other.id, { assigneeId: recipient.id }))).ok, true);
+  const recipient = actorOf(await fixture.user("receipt-next-worker", ["WORKER"], { payScheme: "PIECE" }));
+  const reassignInput = { taskId: other.id, assigneeId: recipient.id, expectedRevision: (await fixture.db.task.findUniqueOrThrow({ where: { id: other.id } })).splitRevision, clientMutationId: randomUUID() };
+  const reassigned = await run(c.manager, fixture.db, () => taskReassignment.reassignOrdinaryTaskCore(c.manager, reassignInput));
+  assert.ok(reassigned.ok); assert.equal(reassigned.status, "NEW");
   const before = await nativeSnapshot(fixture.db);
+  const assignmentReplay = await run(c.manager, fixture.db, () => taskReassignment.reassignOrdinaryTaskCore(c.manager, reassignInput));
+  assert.ok(assignmentReplay.ok && assignmentReplay.repeated); assert.deepEqual(await nativeSnapshot(fixture.db), before);
   assert.equal((await run(c.worker, fixture.db, () => tasks.changeTaskStatus(other.id, "IN_PROGRESS"))).ok, false);
   const repeated = await run(c.worker, fixture.db, () => tasks.changeTaskStatus(other.id, "IN_PROGRESS", undefined, ownReceipt));
   assert.ok(repeated.ok && repeated.replayed);
@@ -1368,7 +1374,10 @@ test("task/time-retired-actions-read-start-complete-reassign-preserve-open-and-c
   assert.equal((await run(c.manager, fixture.db, () => time.addManualTime({ taskId: task.id, minutes: 20 }))).ok, false);
   assert.equal((await run(c.manager, fixture.db, () => tasks.deleteTask(task.id))).ok, false);
   assert.equal((await run(c.worker, fixture.db, () => tasks.changeTaskStatus(task.id, "IN_PROGRESS"))).ok, true);
-  assert.equal((await run(c.manager, fixture.db, () => tasks.updateTask(task.id, { assigneeId: recipient.id, title: "Уточнено" }))).ok, true);
+  assert.equal((await run(c.manager, fixture.db, () => tasks.updateTask(task.id, { title: "Уточнено" }))).ok, true);
+  const revision = (await fixture.db.task.findUniqueOrThrow({ where: { id: task.id } })).splitRevision;
+  const reassigned = await run(c.manager, fixture.db, () => taskReassignment.reassignOrdinaryTaskCore(c.manager, { taskId: task.id, assigneeId: recipient.id, expectedRevision: revision, clientMutationId: randomUUID() }));
+  assert.ok(reassigned.ok); assert.equal(reassigned.status, "NEW");
   const preserved = await fixture.db.task.findUniqueOrThrow({ where: { id: task.id } });
   assert.equal(preserved.estimateMinutes, 45); assert.equal(preserved.assigneeId, recipient.id);
   assert.equal((await run(c.manager, fixture.db, () => tasks.updateTask(task.id, { estimateMinutes: null }))).ok, false);
@@ -1397,12 +1406,13 @@ test("task/parallel-DONE-and-reassignment-audit-rollback-leave-historical-timer-
   const collision = await fixture.db.changeLog.create({ data: { id: fixture.id("retired-audit-collision"), actorType: "user", actorId: c.manager.id, entity: "test", entityId: "ci190", action: "fixture" } });
   const recipient = await fixture.user("retired-fault-recipient", ["WORKER"], { payScheme: "PIECE" });
   const before = await nativeSnapshot(fixture.db); let partial = 0;
-  await assert.rejects(run(c.manager, fixture.db, () => tasks.updateTask(fault.id, { assigneeId: recipient.id }), {
+  const failed = await run(c.manager, fixture.db, () => taskReassignment.reassignOrdinaryTaskCore(c.manager, { taskId: fault.id, assigneeId: recipient.id, expectedRevision: fault.splitRevision, clientMutationId: randomUUID() }), {
     failAuditId: collision.id, beforeAudit: async tx => {
       assert.equal(await tx.task.count({ where: { id: fault.id, assigneeId: recipient.id } }), 1);
       assert.deepEqual(await tx.timeEntry.findUnique({ where: { id: oldTimer.id } }), oldTimer); partial++;
     },
-  }));
+  });
+  assert.ok(!failed.ok && failed.kind === "failure");
   assert.equal(partial, 1); assert.deepEqual(await nativeSnapshot(fixture.db), before);
 });
 
