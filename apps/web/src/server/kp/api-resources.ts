@@ -11,6 +11,7 @@ import { proposalObject } from "./proposal-contract";
 import { createProposalArtifactStorage } from "./artifact-storage";
 import type { Prisma } from "@prisma/client";
 import { proposalArtifactFileName } from "./pdf-filename";
+import { revalidatePublishedProjectPdfs } from "./project-pdf-cache";
 
 export async function getApiOperation(context: KpApiContext, operationId: string) {
   const own = await readApiReceipt(prisma, context, operationId); if (own) return own;
@@ -84,9 +85,11 @@ export async function getApiJob(context: KpApiContext, jobId: string) {
     if (!version?.pdfArtifactId) return apiFailure("KP_JOB_NOT_FOUND", 404, "Выпуск недоступен");
     const artifact = await authorizeArtifact(context, version.pdfArtifactId);
     if (artifact.proposalId !== version.proposalId || artifact.kind !== "PDF") return apiFailure("KP_JOB_NOT_FOUND", 404, "Не совпал источник выпуска");
+    await revalidatePublishedProjectPdfs(prisma, [version.proposalId]);
     return { id: jobId, state: "SUCCEEDED", error: null, result: { artifactId: artifact.id, versionId, fileName: artifact.fileName, mimeType: artifact.mimeType } };
   }
-  return withMutationTransaction(async tx => {
+  let publishedProposalIds: string[] = [];
+  const response = await withMutationTransaction(async tx => {
     const metadata = await tx.proposalJob.findUnique({ where: { id: jobId }, select: { kind: true, proposalId: true, contractId: true } });
     if (!metadata) return apiFailure("KP_JOB_NOT_FOUND", 404, "Задание недоступно");
     const scope = await authorizeKpResource(context, metadata.kind, tx);
@@ -99,6 +102,13 @@ export async function getApiJob(context: KpApiContext, jobId: string) {
     if (!artifact || metadata.kind === "PDF" && (artifact.kind !== "PDF" || artifact.proposalId !== metadata.proposalId) ||
       metadata.kind === "CONTRACT" && (artifact.kind !== "DOCX" || artifact.contractId !== metadata.contractId))
       return apiFailure("KP_JOB_RESULT_UNAVAILABLE", 410, "Результат задания недоступен");
+    publishedProposalIds = metadata.kind === "PDF" && metadata.proposalId ? [metadata.proposalId] :
+      metadata.kind === "CONTRACT" && Array.isArray(result.releases) ? result.releases.flatMap(release => {
+        const proposalId = proposalObject(release).proposalId;
+        return typeof proposalId === "string" ? [proposalId] : [];
+      }) : [];
     return { ...output, result: { artifactId: artifact.id, ...(typeof result.versionId === "string" ? { versionId: result.versionId } : {}), fileName: await proposalArtifactFileName(tx, artifact), mimeType: artifact.mimeType } };
   });
+  await revalidatePublishedProjectPdfs(prisma, publishedProposalIds);
+  return response;
 }

@@ -53,7 +53,7 @@ before(async () => {
     bundle: true, write: false, format: 'iife', platform: 'browser', jsx: 'automatic', tsconfig: path.join(web, 'tsconfig.json'), define: { 'process.env.NODE_ENV': '"production"' }, logLevel: 'silent',
     plugins: [{ name: 'explicit-boundaries', setup(builder) {
       builder.onResolve({ filter: /^(next\/navigation|next\/link)$/ }, args => ({ path: args.path, namespace: 'boundary' }));
-      builder.onLoad({ filter: /.*/, namespace: 'boundary' }, args => ({ loader: 'js', resolveDir: web, contents: args.path === 'next/navigation' ? 'const router=Object.freeze({push:href=>window.__navigation=href});export const useRouter=()=>router;' :
+      builder.onLoad({ filter: /.*/, namespace: 'boundary' }, args => ({ loader: 'js', resolveDir: web, contents: args.path === 'next/navigation' ? 'const router=Object.freeze({push:href=>window.__navigation=href,refresh:()=>{window.__refreshes=(window.__refreshes??0)+1}});export const useRouter=()=>router;' :
         "import React from 'react';export default function Link({children,...props}){return React.createElement('a',props,children)}" }));
     } }] })).outputFiles[0].text;
   server = createServer((request, response) => { void (async () => {
@@ -156,6 +156,8 @@ test('actual save-before-export retains IDs and crmKind; duplication gets a fres
     await child.locator('[data-dup="0"]').click();
     const download = page.waitForEvent('download'); await page.getByRole('button', { name: 'Сгенерировать PDF', exact: true }).click();
     assert.equal((await download).suggestedFilename(), 'КП_231.pdf');
+    await expect.poll(() => page.evaluate(() => window.__refreshes ?? 0)).toBeGreaterThan(0);
+    const refreshes = await page.evaluate(() => window.__refreshes);
     assert.ok(writes.length >= 1); const saved = writes.at(-1);
     assert.equal(saved.state.items[0].id, 'item-0'); assert.notEqual(saved.state.items[1].id, 'item-0');
     assert.equal(saved.state.delivery.items[0].crmKind, 'DELIVERY'); assert.equal(saved.state.items[0].image, 'kp-media:photo');
@@ -164,6 +166,7 @@ test('actual save-before-export retains IDs and crmKind; duplication gets a fres
     await page.getByRole('button', { name: 'Сгенерировать PDF', exact: true }).click();
     await expect(page.getByRole('alert')).toContainText(/Конфликт|конфликт/);
     assert.equal(pdfRequests.length, 1);
+    assert.equal(await page.evaluate(() => window.__refreshes), refreshes);
   } finally { await context.close(); }
 });
 
