@@ -6,7 +6,7 @@ import { localBase, localStatePath, type MobileLocalState } from "./mobile-local
 import { captureFixture, fixturePng, fixtureTaskState, guardFixtureAction, readManifest } from "./mobile-owned-fixtures";
 
 for (const role of ["worker", "mounter"] as const) {
-  test(`owned ${role}: touch scroll, photo, automatic timer and completion`, async ({ page }, testInfo) => {
+  test(`owned ${role}: touch scroll, photo and status-only completion`, async ({ page }, testInfo) => {
     test.skip(process.env.CRM_E2E_OWNED !== "1", "Только явно разрешённые project/task из локального UUID manifest");
     test.skip(testInfo.project.name !== (role === "worker" ? "mobile-360" : "mobile-390"), "Роль проверяется на назначенном мобильном viewport");
     expect(process.env.CRM_E2E_BASE_URL ?? localBase).toBe(localBase);
@@ -63,22 +63,20 @@ for (const role of ["worker", "mounter"] as const) {
     await expect(card.getByRole("button", { name: "Фото (1)", exact: true })).toBeVisible();
     await captureFixture();
     await guardFixtureAction(role);
-    await card.getByRole("button", { name: "В работу", exact: true }).click();
+    await card.getByRole("button", { name: "Взять в работу", exact: true }).click();
     await expect.poll(async () => (await fixtureTaskState(role)).task.status).toBe("IN_PROGRESS");
-    await expect(card.getByRole("button", { name: /^Стоп/ })).toBeVisible();
+    await expect(card.getByRole("button", { name: /^Стоп/ })).toHaveCount(0);
     const started = await fixtureTaskState(role);
-    expect(started.time).toHaveLength(1);
-    expect(started.time[0].stoppedAt).toBeNull();
+    expect(started.time).toHaveLength(0);
     await card.scrollIntoViewIfNeeded();
-    await page.screenshot({ path: testInfo.outputPath(`${role}-timer.png`), animations: "disabled" });
+    await page.screenshot({ path: testInfo.outputPath(`${role}-in-progress.png`), animations: "disabled" });
     await captureFixture();
     await guardFixtureAction(role);
-    await card.getByRole("button", { name: "Выполнено", exact: true }).click();
+    await card.getByRole("button", { name: "Завершить", exact: true }).click();
     await expect.poll(async () => (await fixtureTaskState(role)).task.status).toBe("DONE");
     const done = await fixtureTaskState(role);
     expect(done.task.doneAt).not.toBeNull();
-    expect(done.time[0].stoppedAt).not.toBeNull();
-    expect(done.time[0].minutes).toBeGreaterThanOrEqual(1);
+    expect(done.time).toHaveLength(0);
     expect(done.payroll).toBe(0);
     await captureFixture();
     await expect(card.getByText("Выполнена", { exact: true })).toBeVisible();

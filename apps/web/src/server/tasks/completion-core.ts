@@ -1,4 +1,3 @@
-import { startTaskTimer, stopTimers } from "@/server/time/timers";
 import { isDeepStrictEqual } from "node:util";
 import { confirmMutation } from "@/server/operations/confirmation";
 import { normalizeTaskStatusRequest, readTaskStatusReceipt, recordTaskStatusReceipt, TaskStatusRequestError, type TaskStatusContext, type TaskStatusEffect } from "./status-receipts";
@@ -8,32 +7,29 @@ import { assertInternalCurrency, assertProjectMoneyCurrency } from "@/lib/intern
 import { fileVisibilityWhere, hasFullProjectVisibility, resolveVisibilityActor, taskExecutionWhere } from "@/server/access/visibility";
 import { bumpEngineeringPoolRevision } from "@/server/product-stage-pay/core";
 import { moneyAtoms, taskPieceAmount } from "@/lib/work-shares";
-import { OFFICE_WRITE_ROLES, hasAnyRole } from "@/lib/roles";
 import type { DomainActor } from "@/server/projects/core";
 import type { TaskTransaction } from "./transaction";
 
 type TaskEffect = TaskStatusEffect;
-export type CompletionResult = { ok: false; error: string; timeRequired?: boolean; outcome?: "ROLLED_BACK" | "UNKNOWN"; kind?: "actor-changed"; retrySafe?: boolean } | {
+export type CompletionResult = { ok: false; error: string; outcome?: "ROLLED_BACK" | "UNKNOWN"; kind?: "actor-changed"; retrySafe?: boolean } | {
   ok: true; repeated: boolean; task: TaskEffect; eventId: string | null; outcome?: "COMMITTED"; resultId?: string; recovered?: boolean;
   payroll: { name: string; amount: string; currency: string } | null;
 };
 
-class CompletionError extends Error {
-  constructor(message: string, readonly timeRequired = false) { super(message); }
-}
+class CompletionError extends Error {}
 
 export async function changeTaskStatusCore(actor: DomainActor, taskId: string, toStatus: "IN_PROGRESS" | "DONE", actualMinutes: number | undefined, transaction: TaskTransaction, context?: TaskStatusContext): Promise<CompletionResult> {
   if (toStatus !== "IN_PROGRESS" && toStatus !== "DONE") return { ok: false, error: "Недопустимый переход статуса" };
   try {
     const request = normalizeTaskStatusRequest(actor.id, context);
-    if (request && actualMinutes !== undefined && (!Number.isInteger(actualMinutes) || actualMinutes < 1 || actualMinutes > 1440))
-      throw new CompletionError("Укажите фактическое время от 1 до 1440 минут", true);
     const intent = { taskId, toStatus, actualMinutes, request };
     let expectedEvent: { taskId: string; projectId: string; from: string; to: string } | undefined;
     const outcome = await confirmMutation<CompletionResult>(transaction, async (tx) => {
       const instant = new Date();
       const previous = await readTaskStatusReceipt(actor, intent, tx);
       if (previous) return { ok: true, repeated: true, task: previous.context, payroll: null, eventId: null };
+      // Минуты остаются в прежнем fingerprint только для подтверждения старой квитанции.
+      if (actualMinutes !== undefined) throw new CompletionError("Учёт времени задач отключён. Обновите страницу и повторите действие без минут");
       const visibilityActor = await resolveVisibilityActor(tx, actor);
       const task = await tx.task.findFirst({
         where: { AND: [{ id: taskId }, taskExecutionWhere(visibilityActor)] },
@@ -67,18 +63,7 @@ export async function changeTaskStatusCore(actor: DomainActor, taskId: string, t
         ? `Задача заблокирована — сначала выполните: ${blockers.map((edge) => `«${edge.dependsOn.title}»`).join(", ")}`
         : "Задача заблокирована — сначала должны быть выполнены предыдущие задачи");
       if (toStatus === "DONE" && task.requiresPhoto && !task.files.length) throw new CompletionError("Приложите файлы (фото/замерный лист) перед выполнением");
-      if (toStatus === "IN_PROGRESS" && task.assigneeId) await startTaskTimer(tx, task.id, task.assigneeId, instant);
       const doneAt = toStatus === "DONE" ? instant : null;
-      if (doneAt) {
-        await stopTimers(tx, { taskId: task.id }, instant);
-        const spent = await tx.timeEntry.aggregate({ where: { taskId, stoppedAt: { not: null } }, _sum: { minutes: true } });
-        if ((spent._sum.minutes ?? 0) === 0) {
-          if (!hasAnyRole(actor.roles, OFFICE_WRITE_ROLES)) throw new CompletionError("Нет записей времени. Возьмите задачу «В работу» — время посчитается таймером автоматически");
-          if (!Number.isInteger(actualMinutes) || !actualMinutes || actualMinutes < 1 || actualMinutes > 1440) throw new CompletionError("Укажите фактическое время от 1 до 1440 минут", true);
-          await tx.timeEntry.create({ data: { taskId, userId: task.assigneeId ?? actor.id, source: "manual", stoppedAt: doneAt, minutes: actualMinutes } });
-          await tx.changeLog.create({ data: { actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source, entity: "task", entityId: task.id, action: "time", newValue: { actual: actualMinutes } } });
-        }
-      }
       await tx.task.update({ where: { id: task.id }, data: { status: toStatus, splitRevision: { increment: 1 }, ...(doneAt ? { doneAt, doneById: actor.id } : {}) } });
       let payroll: { name: string; amount: string; currency: string } | null = null;
       // Инженерный фонд начисляется целиком при передаче изделия в производство.
@@ -123,7 +108,7 @@ export async function changeTaskStatusCore(actor: DomainActor, taskId: string, t
     return outcome.value.ok ? { ...outcome.value, outcome: "COMMITTED", resultId: taskId, recovered: outcome.recovered } : outcome.value;
   } catch (error) {
     if (error instanceof TaskStatusRequestError) return { ok: false, error: error.message, ...(error.kind ? { kind: error.kind } : { outcome: "ROLLED_BACK" as const }) };
-    if (error instanceof CompletionError) return { ok: false, outcome: "ROLLED_BACK", error: error.message, ...(error.timeRequired ? { timeRequired: true } : {}) };
+    if (error instanceof CompletionError) return { ok: false, outcome: "ROLLED_BACK", error: error.message };
     throw error;
   }
 }

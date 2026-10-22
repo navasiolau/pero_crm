@@ -63,7 +63,7 @@ export const WAREHOUSE_UNIT_ADMIN_ROLES: Role[] = ["ADMIN"];
 export const OFFICE_WRITE_ROLES: Role[] = [...MANAGER_ROLES,"ENGINEER"];
 // Настройки и журнал изменений.
 export const ADMIN_ROLES: Role[] = ["ADMIN", "DIRECTOR"];
-// Производственный персонал: без дашборда, время — только таймером.
+// Производственный персонал: без дашборда, с доступом к своим задачам.
 export const FIELD_ROLES: Role[] = ["WORKER", "MOUNTER"];
 // Кому можно назначать задачи/работы (исполнители).
 export const ASSIGNEE_ROLES: Role[] = [...MANAGER_ROLES, "ENGINEER", ...FIELD_ROLES];

@@ -10,8 +10,6 @@ export interface TaskDetails {
   assigneeId: string | null;
   assigneeName: string | null;
   requiresPhoto: boolean;
-  estimateMinutes: number | null;
-  spentMinutes: number;
   rewardAmount?: string | null;
   rewardCurrency?: string | null;
   rewardSource?: "WORK_SNAPSHOT" | "FROZEN_TASK_SNAPSHOT" | "UNAVAILABLE";
@@ -34,6 +32,7 @@ export interface TaskDetails {
   personalQuantity?: string | null;
   splitRevision?: number;
   canSplit?: boolean;
+  canTransferPiecework?: boolean;
   dependencies: { id: string; title: string; status: TaskStatus }[];
   projectId: string;
   projectNumber: string;

@@ -39,6 +39,7 @@ import { cn } from "@/lib/utils";
 
 import { isPositiveQuantity, quantityInputError, remainingWorkQuantity } from "@/lib/work-quantity";
 import { deleteTask, updateTask } from "@/server/tasks/actions";
+import { PieceworkButton } from "@/components/piecework-allocation-dialog";
 
 
 
@@ -103,7 +104,6 @@ export function TaskDialog({
     workId: "",
     quantity: "",
     dueAt: "",
-    estimateMinutes: "",
     dependencyIds: [] as string[],
   });
 
@@ -127,7 +127,6 @@ export function TaskDialog({
       workId: task.workId ?? "",
       quantity: task.quantity ?? "",
       dueAt: task.dueAt ? task.dueAt.slice(0, 10) : "",
-      estimateMinutes: task.estimateMinutes?.toString() ?? "",
       dependencyIds: task.dependencies.map((dep) => dep.id),
     });
     setEditing(true);
@@ -263,7 +262,7 @@ export function TaskDialog({
 
               />
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col gap-3">
               <div className="flex flex-col gap-1.5">
                 <Label>Работа (оплата)</Label>
                 <SearchableSelect
@@ -276,22 +275,6 @@ export function TaskDialog({
                   placeholder="Работа изделия"
                   searchPlaceholder="Поиск работы…"
 
-                />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="td-est">Оценка, мин</Label>
-                <Input
-                  id="td-est"
-                  type="number"
-                  min="0"
-                  value={form.estimateMinutes}
-                  onChange={(event) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      estimateMinutes: event.target.value,
-                    }))
-                  }
-                  placeholder="—"
                 />
               </div>
             </div>
@@ -411,12 +394,6 @@ export function TaskDialog({
                 <div className="text-xs text-muted-foreground">Создана</div>
                 <div>{formatDate(task.createdAt)}</div>
               </div>
-              <div>
-                <div className="text-xs text-muted-foreground">Время (оценка / факт)</div>
-                <div>
-                  {task.estimateMinutes ?? "—"} / {task.spentMinutes} мин
-                </div>
-              </div>
               {task.workTitle ? (
                 <div>
                   <div className="text-xs text-muted-foreground">Работа (оплата)</div>
@@ -504,10 +481,6 @@ export function TaskDialog({
                             : null,
                       } : {}),
                       dueAt: form.dueAt,
-                      estimateMinutes:
-                        form.estimateMinutes.trim() === ""
-                          ? null
-                          : Number(form.estimateMinutes),
                       dependencyIds: form.dependencyIds,
                     });
                     if (result.ok) {
@@ -525,7 +498,7 @@ export function TaskDialog({
               </Button>
             </>
           ) : (
-            !readOnly && (
+            (!readOnly || task.canTransferPiecework) && (
               <div className="flex w-full flex-wrap items-center justify-end gap-2">
                 {!readOnly && !isAllocatedShare ? (
                   <Button
@@ -537,6 +510,8 @@ export function TaskDialog({
                     <Trash2 className="size-4" /> Удалить
                   </Button>
                 ) : null}
+                {task.canTransferPiecework && task.productId ? <PieceworkButton label="Передать часть доли" disabled={filePending}
+                  context={{ mode: "transfer", productId: task.productId, taskId: task.id, title: task.title }} onDone={() => onOpenChange(false)}/> : null}
                 {!readOnly ? (
                   <Button variant="outline" disabled={filePending} onClick={startEdit}>
                     <Pencil className="size-4" /> Редактировать

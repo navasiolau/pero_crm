@@ -18,7 +18,6 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ConfirmDeleteDialog } from "@/components/confirm-delete-dialog";
-import { ActualTimeDialog } from "@/components/actual-time-dialog";
 import { PhotoUploadButton } from "@/components/photo-upload-button";
 import { QuantityStepper } from "@/components/quantity-stepper";
 import { SearchableSelect } from "@/components/ui/searchable-select";
@@ -46,6 +45,7 @@ import { isPositiveQuantity, quantityInputError, remainingWorkQuantity } from "@
 import { useTaskCreateCommand } from "@/components/use-task-create-command";
 import { useTaskStatusCommand } from "@/components/use-task-status-command";
 import { removeWork } from "@/server/works/actions";
+import { PieceworkButton } from "@/components/piecework-allocation-dialog";
 
 import type { SelectOption } from "../projects-view";
 
@@ -58,6 +58,8 @@ export interface WorkRow {
   allocated: string;
   stagePayPoolId?:string|null;
   canAllocateWorker?:boolean;
+  productId?: string | null;
+  canDistributePiecework?: boolean;
   operation?:WorkOperation;
   priceSnapshot: string | null;
   total: string | null;
@@ -128,7 +130,6 @@ export function TasksTab({
   const [assigneeId, setAssigneeId] = useState("");
   const [taskProductId, setTaskProductId] = useState(productId ?? "");
   const [workId, setWorkId] = useState("");
-  const [estimate, setEstimate] = useState("");
   const [dueAt, setDueAt] = useState(tomorrow);
   const [workOpen, setWorkOpen] = useState(false);
   const [editWork,setEditWork]=useState<WorkRow|null>(null);
@@ -136,7 +137,6 @@ export function TasksTab({
   const [ownAllocation,setOwnAllocation]=useState(false);
   const [allocationWork,setAllocationWork]=useState<WorkRow|null>(null);
   const [deleteWorkFor, setDeleteWorkFor] = useState<WorkRow | null>(null);
-  const [actualFor, setActualFor] = useState<TaskDetails | null>(null);
   const [quantity, setQuantity] = useState("1");
   const pinnedCreate = createCommand.peek({ projectId, productId, workId });
   function openTaskCreation(work: WorkRow, remaining: string) {
@@ -145,7 +145,7 @@ export function TasksTab({
     setTitle(saved?.title ?? work.title); setQuantity(saved?.quantity === undefined ? remaining : String(saved.quantity));
     setAssigneeId(saved?.assigneeId ?? "");
     if (saved) {
-      setType(saved.type); setEstimate(saved.estimateMinutes === undefined ? "" : String(saved.estimateMinutes));
+      setType(saved.type);
       setDueAt(saved.dueAt);
     }
     setOpen(true);
@@ -199,6 +199,8 @@ export function TasksTab({
             {work.operation?.canEdit&&productId?<Button size="icon-xs" variant="ghost" aria-label="Редактировать работу" onClick={()=>setEditWork(work)}><Pencil className="size-3.5"/></Button>:null}
             {canAllocateWork&&!canManage&&productId&&allocationData&&work.canAllocateWorker&&isPositiveQuantity(remaining)?<><Button size="sm" variant="outline" onClick={()=>{setOwnAllocation(true);setAllocationWork(work);}}>Взять себе</Button><Button size="sm" variant="outline" onClick={()=>{setOwnAllocation(false);setAllocationWork(work);}}>Назначить задачу</Button></>:null}
             {canManage && productId && work.paymentKind !== "ENGINEERING" && work.paymentKind !== "INSTALLATION" && work.priceSnapshot !== null && (isPositiveQuantity(remaining) || createCommand.peek({projectId,productId,workId:work.id})) ? <Button size="sm" variant="outline" onClick={() => openTaskCreation(work, remaining)}>Назначить задачу</Button> : null}
+            {work.canDistributePiecework && (work.productId || productId) && isPositiveQuantity(remaining) ? <PieceworkButton label="Распределить в процентах"
+              context={{ mode: "create", projectId, productId: (work.productId || productId)!, work: { id: work.id, title: work.title, unit: work.unitSnapshot ?? "ед." } }}/> : null}
             {canManage && work.paymentKind !== "ENGINEERING" && work.paymentKind !== "INSTALLATION" ? (
               <Button
                 size="icon-xs"
@@ -276,7 +278,7 @@ export function TasksTab({
                     })
                   }
                 >
-                  <Play className="size-4" /> В работу
+                  <Play className="size-4" /> Взять в работу
                 </Button>
               ) : null}
               {task.status === "NEW" || task.status === "IN_PROGRESS" ? (
@@ -294,10 +296,6 @@ export function TasksTab({
                     disabled={pending}
                     onClick={(event) => {
                       event.stopPropagation();
-                      if (task.spentMinutes === 0) {
-                        setActualFor(task);
-                        return;
-                      }
                       startTransition(async () => {
                         const result = await changeTaskStatus(task.id, "DONE");
                         if (!result || result.ok && result.replayed) return;
@@ -309,7 +307,7 @@ export function TasksTab({
                       });
                     }}
                   >
-                    <Check className="size-4" /> Выполнена
+                    <Check className="size-4" /> Завершить
                   </Button>
                 </>
               ) : null}
@@ -382,17 +380,6 @@ export function TasksTab({
                 required
                 value={dueAt}
                 onChange={(event) => setDueAt(event.target.value)}
-              />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="est">Оценка времени, мин</Label>
-              <Input
-                id="est"
-                type="number"
-                min="0"
-                value={estimate}
-                onChange={(event) => setEstimate(event.target.value)}
-                placeholder="пусто — среднее из истории"
               />
             </div>
             <div className="flex flex-col gap-1.5">
@@ -476,8 +463,6 @@ export function TasksTab({
                         ? Number(quantity)
                         : undefined,
                     dueAt,
-                    estimateMinutes:
-                      estimate.trim() === "" ? undefined : Number(estimate),
                     requiresPhoto: type === "Замер",
                   });
                   if (!result) return;
@@ -489,7 +474,6 @@ export function TasksTab({
                     setAssigneeId("");
                     setTaskProductId(productId ?? "");
                     setWorkId("");
-                    setEstimate("");
                     setDueAt(tomorrow());
                     router.refresh();
                   } else {
@@ -544,13 +528,6 @@ export function TasksTab({
         }}
       />
 
-      <ActualTimeDialog
-        actorUserId={actorUserId}
-        task={actualFor}
-        open={!!actualFor}
-        onOpenChange={(open) => !open && setActualFor(null)}
-        onDone={() => router.refresh()}
-      />
     </div>
   );
 }

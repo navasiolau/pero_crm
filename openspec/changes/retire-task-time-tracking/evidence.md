@@ -1,0 +1,16 @@
+# Проверки №190 — 22.10.2026
+
+Worktree `D:/Projects/pero_crm_worktrees/requests-190`, ветка `feature/190`, исходная база `3def4f0c76e4a1756aa4dabfbb3871b2112dd927`. Коммиты/push/merge/deploy и операции БД не выполнялись.
+
+- `openspec list --json` подтвердил nearest root этого worktree; change создан `openspec new change retire-task-time-tracking`. Применён skill openspec-apply-change после статуса `ready`.
+- `pnpm install --frozen-lockfile` и `pnpm db:generate` — PASS; lockfile без изменений, к БД generate не подключался.
+- RED: `pnpm --filter @pero/web exec tsx --test tests/task-status-receipts.test.ts` — 2 ожидаемых отказа: прежний start/DONE менял открытый исторический таймер. После удаления runtime tracking — GREEN.
+- Затронутый набор `task-status-receipts`, `task-work-required`, `work-shares-settlement`, `product-engineering-task-edit`, `work-quantity`, `production-worker-allocation-dialog`, `production-worker-allocation-ui`, `task-work-reward-ui`, `task-creation`, `task-file-list` через `pnpm --filter @pero/web exec tsx --test ...` — **52/52 PASS**. Затем добавлены проверки старого create UUID, retired actions и cutoff; повтор status/settlement/cutoff — **20/20 PASS**.
+- `pnpm --filter @pero/web exec tsx --test --test-name-pattern='unit controller|Chromium task buttons' tests/task-status-command.browser.test.ts` — **6/6 PASS**. Настоящие компоненты, bundled CSS, системный шрифт; external network запрещён, RPC объявлены локальными fixtures. Проверены mobile 390 и desktop 1440: одно действие начала/завершения, UNKNOWN replay с тем же UUID, отсутствие формы времени, отсутствие оценки в назначении и редактировании. Снимки просмотрены: `apps/web/test-results/task190-ui/{my-mobile,my-desktop,allocation-desktop,edit-desktop}.png` (ignored).
+- Scope ESLint всех изменённых TS/TSX и нового cutoff core/entry — PASS.
+- `pnpm --filter @pero/web exec tsc --noEmit --incremental false` — PASS после исправления типа roles в тестовом actor.
+- `openspec validate retire-task-time-tracking --strict` и `git diff --check` — PASS.
+
+Cutoff unit использует только объект DI, без PrismaClient/сети/БД: закрывает только два открытых timer, сохраняет manual/closed историю, min1/max720, один server timestamp, exact audit IDs, guard/hash refusal и прежнюю receipt при повторе. Реальный cutoff **не выполнялся**. Native PostgreSQL tests обновлены в существующем `domain-postgres.test.ts`; их запуск и local/staging приёмку с реальными данными выполняет root. Полный unit/CI повторно не запускался по указанию root; общий CI — на интегрированном результате.
+
+Runtime поиск `timeEntry.create/update/delete/aggregate/groupBy` оставляет только отдельный `time/cutoff.ts` update. Исторические Prisma поля, Calendar.plannedMinutes и финансовые снимки сохранены. Старые actualMinutes/estimateMinutes остаются только для fingerprint/replay и отказа нового retired payload. Hard-delete задачи с TimeEntry запрещён; soft-delete изделия/проекта сохраняет историю без требования остановить таймер.

@@ -272,6 +272,9 @@ export default async function ProjectPage({
             works={project.works.map((work) => ({
               id: work.id,
               title: work.title,
+              productId: work.productId,
+              unitSnapshot: work.unitSnapshot,
+              canDistributePiecework: work.canDistributePiecework,
               quantity: work.quantity.toString(),
               quantityPerUnit: work.quantityPerUnit?.toString() ?? null,
               allocated: allocatedWorkQuantity(work.tasks),
