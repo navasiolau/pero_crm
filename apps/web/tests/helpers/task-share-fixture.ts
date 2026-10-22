@@ -42,7 +42,7 @@ export function taskShareFixture(productStatus: "DESIGN" | "PRODUCTION" = "PRODU
       assignee: state.users.find((user) => user.id === row.assigneeId) ?? null,
       work: (() => { const work = state.works.find((item) => item.id === row.workId); const pool = state.pools.find((item) => item.id === work?.stagePayPoolId); return work ? { ...work, stagePayPool: work.stagePayPool ?? (pool ? { ...pool, product: state.products.find((item) => item.id === pool.productId) } : null) } : null; })(),
       allocationGroup: state.groups.find((group) => group.id === row.allocationGroupId) ?? null,
-      _count: { payrollEntries: state.entries.filter((entry) => entry.taskId === row.id).length },
+      _count: { payrollEntries: state.entries.filter((entry) => entry.taskId === row.id).length, timeEntries: state.times.filter((entry) => entry.taskId === row.id).length },
       dependencies: state.dependencies.filter((edge) => edge.taskId === row.id).map((edge) => ({ ...edge, dependsOn: state.tasks.find((task) => task.id === edge.dependsOnId) })),
       dependents: state.dependencies.filter((edge) => edge.dependsOnId === row.id),
       files: state.files.filter((file) => file.taskId === row.id),

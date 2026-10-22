@@ -31,7 +31,7 @@ test("manager can edit legacy engineering title/deadline without moving pay vect
   fixture.state().works.push({...fixture.state().works[0],id:"another-work",paymentKind:"LEGACY",priceSnapshot:"700",quantity:"1",total:"700",stagePayPoolId:null});
   fixture.state().entries.push({id:"original-700",userId:"worker",projectId:"project",workId:"another-work",scheme:"PIECE",month:"2026-09",amount:"700",bynAmount:"700",currency:"BYN"});
   const originalEntries=structuredClone(fixture.state().entries);
-  const result = await actions.updateTask("source", { title: "Уточнённое название", dueAt:"2026-10-10", estimateMinutes: 45 });
+  const result = await actions.updateTask("source", { title: "Уточнённое название", dueAt:"2026-10-10" });
   assert.ok(result.ok);
   assert.equal(fixture.state().tasks[0].assigneeId, "worker");
   assert.equal(fixture.state().tasks[0].stageShareUnits, 1_000_000);

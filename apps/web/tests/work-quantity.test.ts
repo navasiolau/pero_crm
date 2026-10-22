@@ -4,10 +4,6 @@ import { test } from "node:test";
 import { remainingWorkQuantity, stepWorkQuantity } from "../src/lib/work-quantity";
 import { quantityAtoms, allocatedWorkQuantity, taskPieceAmount } from "../src/lib/work-shares";
 import { taskPaymentLabel } from "../src/lib/task-payment-display";
-import { requiresManualCompletionTime } from "../src/lib/task-completion-prompt";
-import { createElement } from "react";
-import { renderToString } from "react-dom/server";
-import { elapsedTextFor, formatElapsed, useElapsed } from "../src/lib/use-elapsed";
 
 // Источник: work-quantity.test.ts
 test("fractional remaining 10.30 minus 10.00 is an exact 0.30 for the All button", () => {
@@ -61,56 +57,4 @@ test("task rewards use canonical zero and frozen DTO amounts without old-share o
  assert.match(taskPaymentLabel({workId:"work",rewardAmount:"0.00",rewardCurrency:"BYN",rewardSource:"WORK_SNAPSHOT",shareAmount:"999",shareCurrency:"USD"}),/0.*BYN/);
  assert.match(taskPaymentLabel({workId:"work",rewardAmount:"17.89",rewardCurrency:"BYN",rewardSource:"FROZEN_TASK_SNAPSHOT",previewAmount:"999",previewCurrency:"USD"}),/17,89.*BYN/);
  assert.equal(taskPaymentLabel({workId:"work",rewardAmount:null,rewardCurrency:null,rewardSource:"UNAVAILABLE",paymentKind:"ENGINEERING",previewAmount:"999",previewCurrency:"BYN",shareAmount:"888",shareCurrency:"BYN"}),"—");
-});
-
-// Источник: task-completion-prompt.test.ts
-test("an engineer's active timer completes without requesting fabricated manual time", () => {
-  assert.equal(requiresManualCompletionTime({ id: "own", spentMinutes: 0 }, true, "own"), false);
-});
-test("missing time still prompts office roles, including when a different task has the timer", () => {
-  assert.equal(requiresManualCompletionTime({ id: "own", spentMinutes: 0 }, true, null), true);
-  assert.equal(requiresManualCompletionTime({ id: "own", spentMinutes: 0 }, true, "different"), true);
-  assert.equal(requiresManualCompletionTime({ id: "own", spentMinutes: 5 }, true, null), false);
-});
-test("field roles never receive the manual-time dialog", () => {
-  assert.equal(requiresManualCompletionTime({ id: "own", spentMinutes: 0 }, false, null), false);
-});
-
-// Источник: use-elapsed.test.ts
-function Timer({ startedAt }: { startedAt: string | null }) {
-  return createElement("span", null, useElapsed(startedAt));
-}
-
-test("active timer server markup is stable across different render times", () => {
-  const originalNow = Date.now;
-  try {
-    Date.now = () => Date.parse("2026-09-29T12:00:00.000Z");
-    const first = renderToString(createElement(Timer, { startedAt: "2026-09-29T11:59:00.000Z" }));
-    Date.now = () => Date.parse("2026-09-29T12:00:01.000Z");
-    const second = renderToString(createElement(Timer, { startedAt: "2026-09-29T11:59:00.000Z" }));
-
-    assert.equal(second, first);
-    assert.equal(first, "<span>—</span>");
-  } finally {
-    Date.now = originalNow;
-  }
-});
-
-test("elapsed formatting keeps minute and hour boundaries", () => {
-  const startedAt = "2026-09-29T11:00:00.000Z";
-  const start = Date.parse(startedAt);
-  assert.equal(formatElapsed(startedAt, start + 59_000), "00:59");
-  assert.equal(formatElapsed(startedAt, start + 60_000), "01:00");
-  assert.equal(formatElapsed(startedAt, start + 3_661_000), "1:01:01");
-  assert.equal(formatElapsed(startedAt, start - 1), "00:00");
-});
-
-test("changing active timer never displays the previous timer snapshot", () => {
-  const oldStartedAt = "2026-09-29T10:00:00.000Z";
-  const newStartedAt = "2026-09-29T11:00:00.000Z";
-  assert.equal(elapsedTextFor(newStartedAt, {
-    startedAt: oldStartedAt,
-    now: Date.parse("2026-09-29T12:00:00.000Z"),
-  }), "—");
-  assert.equal(elapsedTextFor(null, { startedAt: oldStartedAt, now: Date.now() }), "");
 });

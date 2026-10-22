@@ -24,7 +24,6 @@ import { MANAGER_ROLES, hasAnyRole } from "@/lib/roles";
 import { revalidateProductPaths } from "@/server/products/revalidate";
 import { withTaskTransaction } from "./transaction";
 import { changeTaskStatusCore } from "./completion-core";
-import { stopTimers } from "@/server/time/timers";
 import { engineeringRecipientError, taskRecipientError } from "./share-policy";
 import { bumpEngineeringPoolRevision } from "@/server/product-stage-pay/core";
 
@@ -40,7 +39,7 @@ const createSchema = z.object({
   workId: z.string().optional(),
   quantity: z.number().positive().optional(), // часть работы; пусто — весь остаток
   dueAt: z.string().min(1, "Укажите срок"),
-  // Оценка: можно задать сразу; без неё — среднее из истории идентичных
+  // Только для fingerprint старой квитанции; новая оценка отклоняется после replay.
   estimateMinutes: z.number().int().min(0).optional(),
   requiresPhoto: z.boolean().default(false),
   dependencyIds: z.array(z.string()).default([]),
@@ -89,21 +88,6 @@ async function checkWorkQuantity(
   return { remaining: quantityFromAtoms(qty) };
 }
 
-// Оценка времени (§9): среднее фактическое время идентичных задач
-// (тот же тип) из истории организации; пока истории нет — null.
-async function estimateFromHistory(tx: Prisma.TransactionClient, type: string): Promise<number | null> {
-  const rows = await tx.$queryRaw<{ avg: number | null }[]>`
-    SELECT AVG(s.m)::float AS avg FROM (
-      SELECT SUM(te."minutes") AS m
-      FROM "TimeEntry" te
-      JOIN "Task" t ON t.id = te."taskId"
-      WHERE t.type = ${type} AND t.status = 'DONE' AND te."stoppedAt" IS NOT NULL
-      GROUP BY t.id
-    ) s`;
-  const avg = rows[0]?.avg;
-  return avg && avg > 0 ? Math.round(avg) : null;
-}
-
 // Создание задачи — админ/директор/менеджер (§4).
 export async function createTask(
   input: z.input<typeof createSchema>,
@@ -123,7 +107,7 @@ export async function createTask(
   if (data.expectedActorId !== session.user.id) return refuse("Учётная запись изменилась — обновите страницу", "actor-changed");
   if (!hasAnyRole(session.user.roles, MANAGER_ROLES)) return refuse("Недостаточно прав", "forbidden");
   const actor: DomainActor = { id: session.user.id, name: session.user.name ?? "", roles: session.user.roles, source: "web" };
-  // Fingerprint закрепляет исходный запрос, а не вычисленный остаток или оценку из истории.
+  // Fingerprint закрепляет исходный запрос, включая оценку старой квитанции.
   taskCreateFingerprint(actor.id, data);
   let absenceVerified = false;
   async function currentActor(tx: Prisma.TransactionClient) {
@@ -136,6 +120,7 @@ export async function createTask(
   const replay = await readTaskCreateReceipt(actor, data, tx);
   if (replay) return { ok: true as const, ack: replay, eventId: null, notification: null };
   absenceVerified = true;
+  if (data.estimateMinutes !== undefined) return { ok: false as const, error: "Оценка времени задач отключена. Обновите страницу и повторите без оценки" };
   const project = await tx.project.findUnique({
     where: {...liveProjectWhere, id: data.projectId },
     select: { id: true, number: true, currency: true },
@@ -152,16 +137,6 @@ export async function createTask(
     const assignee = await tx.user.findUnique({ where: { id: data.assigneeId }, select: { id: true, roles: true, active: true } });
     const error = assignee ? taskRecipientError(assignee, product) : "Сотрудник не найден";
     if (error) return { ok: false as const, error };
-  }
-
-  const estimateMinutes =
-    data.estimateMinutes ?? (await estimateFromHistory(tx, data.type)) ?? null;
-  // Оценка времени обязательна для любой задачи (§9)
-  if (!estimateMinutes) {
-    return {
-      ok: false as const,
-      error: "Укажите оценку времени (мин) — истории по таким задачам нет",
-    };
   }
 
   let workQuantity: string | null = null;
@@ -190,7 +165,7 @@ export async function createTask(
       status: "NEW",
       dueAt: data.dueAt ? new Date(data.dueAt) : null,
       requiresPhoto: data.requiresPhoto,
-      estimateMinutes,
+      estimateMinutes: null,
       createdById: session.user.id,
       dependencies: {
         create: dependencies.ids.map((dependsOnId) => ({ dependsOnId })),
@@ -256,7 +231,6 @@ const updateSchema = z.object({
 // Редактирование задачи — админ/директор/менеджер (§4).
 // Закрытая (выполненная) задача — только просмотр, правок не принимаем.
 // Назначение исполнителя черновику переводит его в «Новая» и шлёт уведомление.
-// Оценку времени менеджер правит в любой момент, пока задача не закрыта (§9).
 export async function updateTask(
   taskId: string,
   input: z.infer<typeof updateSchema>,
@@ -270,9 +244,9 @@ export async function updateTask(
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Ошибка данных" };
   }
   const data = parsed.data;
+  if (data.estimateMinutes !== undefined) return { ok: false, error: "Оценка времени задач отключена. Обновите страницу" };
 
   const mutation = await withTaskTransaction(async (tx) => {
-  const instant = new Date();
   const task = await tx.task.findUnique({
     where: {...liveChildWhere, id: taskId, AND: [taskVisibilityWhere(session.user)] },
     include: { project: { select: { id: true, number: true, currency: true } }, product: { select: { engineerId: true, status: true, projectId: true } },
@@ -368,8 +342,6 @@ export async function updateTask(
 
   const dependencies = data.dependencyIds === undefined ? null : await expandDependencies(tx, data.dependencyIds, taskId);
   if (dependencies?.error) return { ok: false as const, error: dependencies.error };
-  if (data.assigneeId !== undefined && data.assigneeId !== task.assigneeId)
-    await stopTimers(tx, { taskId }, instant);
   await tx.task.update({
     where: { id: taskId },
     data: {
@@ -380,8 +352,6 @@ export async function updateTask(
       workId: data.workId === undefined ? undefined : data.workId,
       quantity: quantityValue,
       dueAt: data.dueAt ? new Date(data.dueAt) : undefined,
-      estimateMinutes:
-        data.estimateMinutes === undefined ? undefined : data.estimateMinutes,
       status: newStatus,
       splitRevision: { increment: 1 },
     },
@@ -464,11 +434,7 @@ async function expandDependencies(tx: Prisma.TransactionClient, selectedIds: str
 // Для requiresPhoto-задачи (замер, §6.2) при «Выполнена» нужен хотя бы один файл.
 // Задача блокируется, пока предшественники не выполнены (§9).
 // Начисление денег — при «Выполнена» (сдельная схема: работа × доля исполнителя).
-// ТАЙМЕР АВТОМАТИЧЕСКИ (требование владельца, защита от обмана): переход
-// «В работе» запускает таймер исполнителя, «Выполнена» — останавливает.
-// ФАКТИЧЕСКОЕ ВРЕМЯ при «Выполнена» обязательно: таймер (все роли) или
-// ручной ввод — но работнику/монтажнику ручной ввод закрыт: нет записей →
-// ошибка с подсказкой взять задачу в работу; правку вносит менеджер (§19).
+// actualMinutes сохраняется только для fingerprint ранее подтверждённых UUID.
 
 export async function changeTaskStatus(
   taskId: string,
@@ -509,7 +475,7 @@ export async function changeTaskStatus(
 }
 // Удаление задачи — админ/директор/менеджер (§4).
 // Выполненную удалять нельзя: там начисления, время и история.
-// Файлы остаются в проекте (отвязываются), время и зависимости удаляются с ней.
+// Файлы остаются в проекте; исторические записи времени защищены от каскадного удаления.
 export async function deleteTask(
   taskId: string,
 ): Promise<{ ok: boolean; error?: string }> {
@@ -520,7 +486,7 @@ export async function deleteTask(
   const mutation = await withTaskTransaction(async (tx) => {
   const task = await tx.task.findUnique({
     where: {...liveChildWhere, id: taskId, AND: [taskVisibilityWhere(session.user)] },
-    include: { project: { select: { id: true, number: true, currency: true } }, work: { select: { paymentKind: true } }, _count: { select: { payrollEntries: true } } },
+    include: { project: { select: { id: true, number: true, currency: true } }, work: { select: { paymentKind: true } }, _count: { select: { payrollEntries: true, timeEntries: true } } },
   });
   if (!task) return { ok: false as const, error: "Задача не найдена" };
   if (task.work?.paymentKind === "ENGINEERING") return { ok: false as const, error: "Задача входит в распределение инженерного фонда — её долю можно передать или перераспределить" };
@@ -531,11 +497,11 @@ export async function deleteTask(
       error: "Выполненную задачу удалить нельзя — там начисления и история",
     };
   }
+  if (task._count.timeEntries > 0) return { ok: false as const, error: "Задачу с историческими записями времени удалить нельзя" };
 
   await tx.taskDependency.deleteMany({
       where: { OR: [{ taskId }, { dependsOnId: taskId }] },
     });
-  await tx.timeEntry.deleteMany({ where: { taskId } });
   await tx.file.updateMany({ where: { taskId }, data: { taskId: null } });
   await tx.task.delete({ where: { id: taskId } });
   return { ok: true as const, task };
