@@ -88,6 +88,8 @@ test("Chromium task buttons complete without time forms and preserve UNKNOWN UUI
     "@/server/tasks/actions": "export const changeTaskStatus=(...args)=>window.__respond(...args);export const deleteTask=async()=>{throw Error('UNEXPECTED_DELETE')};export const updateTask=async()=>{throw Error('UNEXPECTED_EDIT')};",
     "@/server/preferences-actions": "export const saveViewPreference=async()=>{};",
     "@/server/tasks/worker-allocation-actions": "export const createWorkerWorkTask=async()=>{throw Error('UNEXPECTED_ALLOCATION')};export const takeOwnWorkTask=createWorkerWorkTask;",
+    "@/server/tasks/piecework-actions": "export const getPieceworkOptions=async()=>{throw Error('UNEXPECTED_PIECEWORK_RPC')};export const createPieceworkAllocation=getPieceworkOptions;export const transferPieceworkShare=getPieceworkOptions;",
+    "@/server/tasks/task-reassignment-actions": "export const getTaskReassignmentOptions=async()=>{throw Error('UNEXPECTED_REASSIGNMENT_RPC')};export const reassignOrdinaryTask=getTaskReassignmentOptions;",
     "@/server/files/actions": "export const deleteFile=async()=>{throw Error('UNEXPECTED_DELETE')};",
     "@/components/photo-upload-button": "export const PhotoUploadButton=()=>null;",
     "@/components/file-list": "export const FileList=()=>null;",
@@ -249,6 +251,8 @@ type Engine = { onResolve(options: {filter: RegExp}, handler: (args: {path: stri
 const modules: Record<string, string> = {
   "next/navigation": "export const useRouter=()=>({refresh:()=>window.__refreshes++});",
   "@/server/tasks/actions": "export const createTask=data=>window.__send(data); export const changeTaskStatus=()=>{throw Error('UNEXPECTED_STATUS_RPC')};",
+  "@/server/tasks/piecework-actions": "export const getPieceworkOptions=async()=>{throw Error('UNEXPECTED_PIECEWORK_RPC')};export const createPieceworkAllocation=getPieceworkOptions;export const transferPieceworkShare=getPieceworkOptions;",
+  "@/server/tasks/task-reassignment-actions": "export const getTaskReassignmentOptions=async()=>{throw Error('UNEXPECTED_REASSIGNMENT_RPC')};export const reassignOrdinaryTask=getTaskReassignmentOptions;",
   "@/server/works/actions": "export const removeWork=()=>{throw Error('UNEXPECTED_WORK_RPC')};",
   "@/components/task-dialog": "export const TaskDialog=()=>null,TASK_TYPES=['Производство','Прочее'],taskStatusBadge={},taskStatusLabels={};",
   "@/components/work-dialog": "export const WorkDialog=()=>null;",
@@ -282,6 +286,7 @@ test("Chromium actual TasksTab keeps UUID/payload through loss, reopen/remount/a
     const comparisons: object[] = [];
     for (const viewport of [{width:1440,height:900},{width:390,height:844},{width:360,height:800}]) {
       const images: Buffer[]=[];
+      const preservedControls: { title: string; type: string; assignee: string }[]=[];
       for (const [index, script] of [old,current].entries()) {
         if (script === null) continue;
         const context=await browser.newContext({viewport}),page=await context.newPage();
@@ -290,31 +295,41 @@ test("Chromium actual TasksTab keeps UUID/payload through loss, reopen/remount/a
           await page.setContent('<!doctype html><html lang="ru"><meta name="viewport" content="width=device-width,initial-scale=1"><style>'+css+'*{animation:none!important;transition:none!important;caret-color:transparent}</style><body style="font-family:Arial,sans-serif"><main id="root" class="p-5"></main></body></html>');
           await page.addScriptTag({content:script}); await page.getByRole("button",{name:"Назначить задачу",exact:true}).click();
           await page.getByRole("button",{name:"Выберите исполнителя",exact:true}).click(); await page.getByRole("button",{name:"Получатель",exact:true}).click();
-          await page.locator("#est").fill("10"); await page.getByRole("dialog").locator('input[type="number"]').last().fill("1"); await page.locator("#task-title").focus();
+          if (index===0) await page.locator("#est").fill("10"); else assert.equal(await page.locator("#est").count(),0);
+          await page.getByRole("dialog").locator('input[type="number"]').last().fill("1"); await page.locator("#task-title").focus();
           await page.getByRole("combobox").click(); await page.getByRole("option",{name:"Прочее",exact:true}).click(); await page.locator("#due").fill("2026-11-01");
           await page.getByRole("button",{name:"Отмена",exact:true}).click(); await page.getByRole("button",{name:"Назначить задачу",exact:true}).click();
-          assert.equal(await page.locator("#est").inputValue(),"10"); assert.equal(await page.locator("#due").inputValue(),"2026-11-01"); assert.equal(await page.getByRole("combobox").innerText(),"Прочее");
+          if (index===0) assert.equal(await page.locator("#est").inputValue(),"10"); else assert.equal(await page.locator("#est").count(),0);
+          assert.equal(await page.locator("#due").inputValue(),"2026-11-01"); assert.equal(await page.getByRole("combobox").innerText(),"Прочее");
           await page.getByRole("button",{name:"Выберите исполнителя",exact:true}).click(); await page.getByRole("button",{name:"Получатель",exact:true}).click();
           await page.getByRole("dialog").locator('input[type="number"]').last().fill("1"); await page.locator("#task-title").focus();
           images.push(await page.screenshot({path:path.join(output,`${viewport.width}-${index?'after':'before'}.png`)}));
+          // Удаление оценки изменило высоту и центр формы. Только для crop-сравнения
+          // закрепляем одинаковую верхнюю координату; полный исходный PNG уже сохранён.
+          const popup=page.locator('[data-slot="dialog-content"]'),originalStyle=await popup.getAttribute("style");
+          await popup.evaluate(node=>{node.style.top="16px";node.style.translate="-50% 0";});
+          const cropHash=(bytes:Buffer)=>createHash("sha256").update(bytes).digest("hex");
+          preservedControls.push({title:cropHash(await page.locator("#task-title").screenshot()),type:cropHash(await page.getByRole("combobox").screenshot()),assignee:cropHash(await page.getByRole("button",{name:"Получатель",exact:true}).screenshot())});
+          await popup.evaluate((node,value)=>{if(value===null)node.removeAttribute("style");else node.setAttribute("style",value);},originalStyle);
           if (index===0) continue;
-          await page.getByRole("button",{name:"Создать",exact:true}).click(); await page.getByRole("button",{name:"Проверить",exact:true}).waitFor(); assert.equal(await page.locator("#est").isDisabled(),true);
+          await page.getByRole("button",{name:"Создать",exact:true}).click(); await page.getByRole("button",{name:"Проверить",exact:true}).waitFor(); assert.equal(await page.locator("#due").isDisabled(),true); assert.equal(await page.locator("#est").count(),0);
           await page.screenshot({path:path.join(output,`${viewport.width}-unknown.png`)});
-          await page.getByRole("button",{name:"Отмена",exact:true}).click(); await page.getByRole("button",{name:"Назначить задачу",exact:true}).click(); assert.equal(await page.locator("#est").inputValue(),"10");
-          for(const mode of ["ATTEMPT","ABSENT"]){await page.evaluate(value=>{(window as unknown as {__mode:string}).__mode=value},mode);await page.getByRole("button",{name:"Проверить",exact:true}).click();await page.waitForFunction(()=>!document.querySelector<HTMLButtonElement>('[data-slot="dialog-footer"] button:last-child')?.disabled);assert.equal(await page.locator("#est").isDisabled(),true);}
-          await page.getByRole("button",{name:"Отмена",exact:true}).click(); await page.evaluate(()=>{(window as unknown as {__remount:()=>void}).__remount()});
-          await page.getByRole("button",{name:"Назначить задачу",exact:true}).click(); assert.equal(await page.locator("#est").inputValue(),"10");
+          await page.getByRole("button",{name:"Отмена",exact:true}).focus(); await page.keyboard.press("Enter"); await page.getByRole("button",{name:"Назначить задачу",exact:true}).click(); assert.equal(await page.locator("#est").count(),0); assert.equal(await page.locator("#due").inputValue(),"2026-11-01");
+          for(const mode of ["ATTEMPT","ABSENT"]){await page.evaluate(value=>{(window as unknown as {__mode:string}).__mode=value},mode);await page.getByRole("button",{name:"Проверить",exact:true}).click();await page.waitForFunction(()=>!document.querySelector<HTMLButtonElement>('[data-slot="dialog-footer"] button:last-child')?.disabled);assert.equal(await page.locator("#due").isDisabled(),true);assert.equal(await page.locator("#est").count(),0);}
+          await page.getByRole("button",{name:"Отмена",exact:true}).focus(); await page.keyboard.press("Enter"); await page.evaluate(()=>{(window as unknown as {__remount:()=>void}).__remount()});
+          await page.getByRole("button",{name:"Назначить задачу",exact:true}).click(); assert.equal(await page.locator("#est").count(),0); assert.equal(await page.locator("#due").inputValue(),"2026-11-01");
           await page.evaluate(()=>{(window as unknown as {__mode:string}).__mode="ACK"}); await page.getByRole("button",{name:"Проверить",exact:true}).click(); await page.getByRole("dialog").waitFor({state:"hidden"});
-          const requests=await page.evaluate(()=>(window as unknown as {__requests:object[]}).__requests); assert.equal(requests.length,4); for(const request of requests)assert.deepEqual(request,requests[0]);
-          await page.getByRole("button",{name:"Назначить задачу",exact:true}).click(); await page.getByRole("button",{name:"Выберите исполнителя",exact:true}).click(); await page.getByRole("button",{name:"Получатель",exact:true}).click(); await page.locator("#est").fill("10");
+          const requests=await page.evaluate(()=>(window as unknown as {__requests:object[]}).__requests); assert.equal(requests.length,4); for(const request of requests){assert.deepEqual(request,requests[0]);assert.equal("estimateMinutes" in request,false);}
+          await page.getByRole("button",{name:"Назначить задачу",exact:true}).click(); await page.getByRole("button",{name:"Выберите исполнителя",exact:true}).click(); await page.getByRole("button",{name:"Получатель",exact:true}).click(); assert.equal(await page.locator("#est").count(),0);
           await page.evaluate(()=>{(window as unknown as {__mode:string}).__mode="LOST"}); await page.getByRole("button",{name:"Создать",exact:true}).click(); await page.getByRole("button",{name:"Проверить",exact:true}).waitFor();
-          await page.evaluate(()=>{(window as unknown as {__actor:(id:string)=>void}).__actor("admin")}); await page.getByRole("button",{name:"Создать",exact:true}).waitFor(); await page.waitForFunction(()=>document.querySelector<HTMLInputElement>("#est")?.matches(":disabled") === false); assert.equal(await page.locator("#est").isDisabled(),false);
+          await page.evaluate(()=>{(window as unknown as {__actor:(id:string)=>void}).__actor("admin")}); await page.getByRole("button",{name:"Создать",exact:true}).waitFor(); await page.waitForFunction(()=>document.querySelector<HTMLInputElement>("#due")?.matches(":disabled") === false); assert.equal(await page.locator("#due").isDisabled(),false); assert.equal(await page.locator("#est").count(),0);
           await page.evaluate(()=>{const w=window as unknown as {__actor:(id:string)=>void;__mode:string};w.__actor("manager");w.__mode="ACK"}); await page.getByRole("button",{name:"Проверить",exact:true}).click(); await page.getByRole("dialog").waitFor({state:"hidden"});
           const final=await page.evaluate(()=>{const w=window as unknown as {__requests:{clientMutationId:string}[];__tasks:Map<string,string>};return{requests:w.__requests,tasks:w.__tasks.size}}); assert.equal(final.tasks,2); assert.notEqual(final.requests[4].clientMutationId,final.requests[0].clientMutationId); assert.deepEqual(final.requests[4],final.requests[5]);
         } finally {await context.close();}
       }
-      if(compareBaseline)assert.deepEqual(images[1],images[0],"NORMAL_DIALOG_VISUAL_CHANGED");
-      comparisons.push({viewport,pngSha256:createHash("sha256").update(images.at(-1)!).digest("hex"),visualComparison:compareBaseline?"BASELINE_EQUAL":"NOT_RUN_SHALLOW_CI"});
+      // Форма намеренно потеряла оценку времени; неизменённые контролы сравниваются отдельно.
+      if(compareBaseline)assert.deepEqual(preservedControls[1],preservedControls[0],"UNCHANGED_DIALOG_CONTROLS_VISUAL_CHANGED");
+      comparisons.push({viewport,pngSha256:createHash("sha256").update(images.at(-1)!).digest("hex"),visualComparison:compareBaseline?"UNCHANGED_CONTROLS_BASELINE_EQUAL":"NOT_RUN_SHALLOW_CI"});
     }
     await writeFile(path.join(output,"receipt.json"),JSON.stringify({status:"COMPONENT_RUNTIME_PASS",comparisons,ioSeams:["auth props","server RPC","unrelated closed sibling dialogs"],native:"NOT_RUN",staging:"NOT_RUN"})+"\n");
     console.log(JSON.stringify({status:"COMPONENT_RUNTIME_PASS",comparisons:comparisons.length,output}));
