@@ -15,7 +15,7 @@ const active = [
   { label: "html", mime: "text/html", bytes: Buffer.from("<!doctype html><title>inert fixture</title><p>fixture</p>") },
   { label: "svg", mime: "image/svg+xml", bytes: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><rect width="8" height="8"/></svg>') },
 ] as const;
-const deniedUrls = ["", "?view=1", "?thumb=1", "?view=1&thumb=1", "?preview=cover", "?preview=thumbnail&thumb=1"];
+const accessUrls = ["", "?view=1", "?thumb=1", "?view=1&thumb=1", "?preview=cover", "?preview=thumbnail&thumb=1"];
 
 test("media.responses: настоящий Next.js, Auth.js и versioned MinIO", { timeout: 180_000 }, async t => {
   const f = await createHttpS3Fixture("media-responses"); t.after(() => f.dispose());
@@ -103,7 +103,7 @@ test("media.responses: настоящий Next.js, Auth.js и versioned MinIO", 
     assert.deepEqual(await f.db.file.findMany({ where: { projectId: project.id }, orderBy: { id: "asc" } }), rowsBefore);
     assert.deepEqual(await f.versions(project.id), originals);
   });
-  await t.test("media.access: current production ENGINEER200, foreign404, anonymous middleware307", async () => {
+  await t.test("media.access: foreign DESIGN/PRODUCTION ENGINEER200, hidden parent404, anonymous middleware307", async () => {
     const hiddenProject = await f.project("hidden-engineering"), hidden = await f.product("hidden-engineering", hiddenProject.id, { status: "DESIGN", engineerId: foreign.id });
     assert.equal((await f.request("/products/" + product.number, engineer)).status, 200);
     assert.equal((await f.request("/products/" + hidden.number, engineer)).status, 404);
@@ -133,16 +133,15 @@ test("media.responses: настоящий Next.js, Auth.js и versioned MinIO", 
     const searchedTasks = (await taskSearch.json() as { tasks: { id: string }[] }).tasks;
     assert.deepEqual(searchedTasks.map(row => row.id), expectedTaskIds.slice(0, 6)); assert.ok(!searchedTasks.some(row => [orphanId, foreignTaskId].includes(row.id)));
     const image = files.find(item => item.source.label === "png")!.row;
-    for (const suffix of deniedUrls) {
-      const allowed = await read(productionFile.id, suffix); assert.equal(allowed.status, 200); await allowed.arrayBuffer();
-      const denied = await read(image.id, suffix, foreign); assert.equal(denied.status, 404); assert.equal(denied.headers.get("etag"), null);
-      assert.deepEqual(await denied.json(), { error: "Файл не найден" });
+    for (const suffix of accessUrls) {
+      const allowed = await read(productionFile.id, suffix, foreign); assert.equal(allowed.status, 200); await allowed.arrayBuffer();
+      const shared = await read(image.id, suffix, foreign); assert.equal(shared.status, 200); await shared.arrayBuffer();
       const anonymous = await f.request(`/api/files/${image.id}${suffix}`); assert.equal(anonymous.status, 307);
       assert.equal(new URL(anonymous.headers.get("location")!, f.target.baseUrl).pathname, "/login");
       assert.notEqual(hash(new Uint8Array(await anonymous.arrayBuffer())), hash(png));
     }
   });
-  await t.test("media.cache: 304 без body, preview priority400 и отзыв ACL до warm ETag", async () => {
+  await t.test("media.cache: переназначение сохраняет304, скрытый родитель отзывает ACL до warm ETag", async () => {
     const image = files.find(item => item.source.label === "png")!.row;
     const first = await read(image.id, "?thumb=1"); const etag = first.headers.get("etag"); assert.ok(etag); await first.arrayBuffer();
     const unchanged = await read(image.id, "?thumb=1", engineer, { "if-none-match": etag });
@@ -150,9 +149,20 @@ test("media.responses: настоящий Next.js, Auth.js и versioned MinIO", 
     assert.equal(unchanged.headers.get("cache-control"), "private, max-age=0, must-revalidate");
     assert.ok(unchanged.headers.get("vary")?.split(/,\s*/).includes("Cookie"));
     assert.equal((await read(image.id, "?preview=unknown&thumb=1")).status, 400);
-    await f.db.product.update({ where: { id: product.id }, data: { engineerId: foreign.id } });
-    const revoked = await read(image.id, "?thumb=1", engineer, { "if-none-match": etag });
-    assert.equal(revoked.status, 404); assert.equal(revoked.headers.get("etag"), null);
+    const productBefore = await f.db.product.findUniqueOrThrow({ where: { id: product.id }, select: { engineerId: true, updatedAt: true } });
+    const projectBefore = await f.db.project.findUniqueOrThrow({ where: { id: project.id }, select: { stage: true, updatedAt: true } });
+    try {
+      await f.db.product.update({ where: { id: product.id }, data: { engineerId: foreign.id } });
+      const reassigned = await read(image.id, "?thumb=1", engineer, { "if-none-match": etag });
+      assert.equal(reassigned.status, 304); assert.equal(reassigned.body, null);
+      await f.db.project.update({ where: { id: project.id }, data: { stage: "LEAD" } });
+      const revoked = await read(image.id, "?thumb=1", engineer, { "if-none-match": etag });
+      assert.equal(revoked.status, 404); assert.equal(revoked.headers.get("etag"), null);
+      assert.deepEqual(await revoked.json(), { error: "Файл не найден" });
+    } finally {
+      await f.db.product.update({ where: { id: product.id }, data: productBefore });
+      await f.db.project.update({ where: { id: project.id }, data: projectBefore });
+    }
   });
   assert.deepEqual(await f.versions(project.id), originals, "GET и previews не изменяют ни одну S3-версию");
   for (const { source, row } of files) assert.equal(hash(await f.get(`${project.id}/${row.storedName}`)), hash(source.bytes));
