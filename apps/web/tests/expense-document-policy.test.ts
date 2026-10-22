@@ -5,6 +5,7 @@ import { randomUUID, createHash } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { paymentFingerprint, readPaymentReceipt } from "../src/server/payments/receipts";
 import { paymentSchema } from "../src/server/payments/contracts";
+import { assertExpenseReportDocument } from "../src/server/payments/document-policy";
 const require = createRequire(import.meta.url);
 function inject(name: string, exports: Record<string, unknown>) {
   const file = require.resolve(name), stub = new Module(file); stub.filename = file; stub.loaded = true; stub.exports = exports; require.cache[file] = stub;
@@ -39,6 +40,12 @@ test("legacy payment fingerprint stays byte-compatible and arrays have a distinc
   assert.notEqual(paymentFingerprint(actor.id, { ...input, reportDocumentIds: ids }), paymentFingerprint(actor.id, { ...input, reportDocumentIds: [...ids].reverse() }));
   assert.equal(paymentSchema.safeParse({ ...input, reportDocumentIds: [ids[0], ids[0]] }).success, false);
   assert.equal(paymentSchema.safeParse({ ...legacy, reportDocumentIds: ids }).success, false);
+  const legacyIncome = { ...legacy, direction: "INCOME" as const, expenseArticleId: undefined };
+  assert.equal(paymentSchema.safeParse(legacyIncome).success, true);
+  assert.doesNotThrow(() => assertExpenseReportDocument(legacyIncome));
+  for (const reportDocumentIds of [[], ids]) assert.throws(() => assertExpenseReportDocument({
+    ...legacyIncome, reportDocumentId: undefined, reportDocumentIds,
+  }), /только для расхода/);
 });
 
 test("multi-document receipt proves every position before acknowledging COMMITTED", async () => {

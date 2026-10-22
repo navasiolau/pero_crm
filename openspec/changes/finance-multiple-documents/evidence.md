@@ -1,5 +1,13 @@
 # Проверки задачи №195
 
+## Followup legacy INCOME — кандидат после 90310927
+
+CI `119607404128` выявил реальную потерю совместимости в `files-crud.test.ts:230`: до №195 schema/policy/writer принимали INCOME + single reportDocumentId с READY/uploader/unused guards. Новый запрет направления ошибочно сузил старый контракт; замена fixture INCOME на EXPENSE скрыла бы regression. Исправлены только policy для нового массива и отдельная additive validate-function migration `20261022110000_finance_document_legacy_income_compatibility`. Старый applied SQL не изменён: локальный SHA256 до/после `1aca068ff13399a6cdc056c97d0b7faf3445b8a873e107afda0fd575573c0b54`.
+
+Сохранён исходный income fixture; существующий legacy native case расширен single income + точный receipt replay и отказом дополнительной income-связи. Старые SQL relink/unlink expectations переведены на отказ, включая принудительный SET CONSTRAINTS ALL IMMEDIATE, с сохранением привязок, денег и версий объектов. UI/бот прихода не расширены. Один разрешённый targeted policy run — 5/5 PASS. Новые native/HTTP cases и additive migration локально не запускались; обязательны новый CI и операторский review/apply. DB/S3/infra-записей агент не выполнял. Коммит — после отдельного review/разрешения Root; push и дальнейшая интеграция остаются Root.
+
+Предыдущая локальная проверка ниже относится к исходному кандидату; её нельзя считать прохождением нового followup в native/HTTP CI.
+
 Root local5433, 22.10.2026: штатный Prisma migrate deploy применил только `20261022090000_finance_multiple_documents` из зафиксированного комплекта исходников на C:. Прежние 75 бизнес-таблиц, старые записи `_prisma_migrations`, четыре согласованных checksum-исключения и весь прежний каталог сохранены. Новый каталог имеет 16 записей, включая две `pg_constraint` типа `t` для constraint triggers; исходный postflight ошибочно ожидал 14, это проверено отдельной read-only сверкой без повторного применения. Квитанция `C:/Users/admin/.codex/tmp/pero-crm-190-196/acceptance/migration195-result.json`.
 
 Единственный native195 probe — PASS, `moneyApi: ACTUAL_WRITER`: настоящий `createPaymentInTransaction` провёл три файла одной операцией, повтор UUID не изменил данные, повторная привязка документа отклонена SQL, legacy single-field/старый fingerprint и receipt сохранены. Все отложенные ограничения проверены IMMEDIATE. Одна внешняя транзакция откатила все синтетические записи; полные снимки 77 таблиц и каталога совпали до/после. Байты файлов и S3 не использовались. Квитанция `C:/Users/admin/.codex/tmp/pero-crm-190-196/acceptance/local195.json`.
