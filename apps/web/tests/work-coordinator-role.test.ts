@@ -8,7 +8,8 @@ import { navItemsForRole } from "../src/lib/nav";
 import { visibleProductStatuses } from "../src/lib/product-statuses";
 import { canAccrueOrdinarySalary } from "../src/lib/compensation-policy";
 import { authConfig } from "../src/auth.config";
-import { workVisibilityWhere, productVisibilityWhere, hasFullProjectVisibility } from "../src/server/access/visibility";
+import { workVisibilityWhere, productVisibilityWhere, hasFullProjectVisibility, taskVisibilityWhere, taskExecutionWhere } from "../src/server/access/visibility";
+import { canReassignOrdinaryTask } from "../src/server/tasks/task-reassignment-policy";
 import { matches } from "./helpers/visibility-fixture";
 
 const coordinator = "WORK_COORDINATOR" as Role;
@@ -75,4 +76,16 @@ test("coordinator manages a price, keeps base access/pay, and loses catalog writ
   const writesBeforeRemoval = writes;
   await assert.rejects(prices.updatePriceItem(stored.id, { name: "Запрещено", unit: "шт.", price: 999 }), /Недостаточно прав/);
   assert.equal(writes, writesBeforeRemoval);
+});
+
+test("coordinator reads foreign ordinary tasks only inside visible products, with no execution or money grant",()=>{
+ const actor={id:'coordinator',roles:['WORKER',coordinator] as Role[]};
+ const project={id:'j',deletedAt:null,tasks:[]},product={id:'p',projectId:'j',status:'PRODUCTION',deletedAt:null,project,tasks:[]};
+ const work={id:'w',projectId:'j',productId:'p',paymentKind:'LEGACY',stagePayPoolId:null,poolWeightUnits:null,priceSnapshot:null,_count:{paymentConversions:0,settlementShares:0}};
+ const task={id:'t',status:'NEW',projectId:'j',productId:'p',workId:'w',assigneeId:'other',product,project,work,_count:{payrollEntries:0,stageSettlementShares:0}};
+ assert.equal(matches(task,taskVisibilityWhere(actor)),true);assert.equal(matches(task,taskExecutionWhere(actor)),false);
+ assert.equal(matches({...task,work:{...work,paymentKind:'ENGINEERING'}},taskVisibilityWhere(actor)),false);
+ assert.equal(matches({...task,product:{...product,status:'PREPARATION'}},taskVisibilityWhere(actor)),false);
+ assert.equal(canReassignOrdinaryTask(actor.roles,task),true,'Readonly masked price does not hide the scoped command');
+ assert.equal(canReassignOrdinaryTask(['WORKER'],task),false);assert.equal(hasFullProjectVisibility(actor),false);
 });

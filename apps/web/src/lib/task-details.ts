@@ -33,6 +33,7 @@ export interface TaskDetails {
   splitRevision?: number;
   canSplit?: boolean;
   canTransferPiecework?: boolean;
+  canReassignOrdinaryTask?: boolean;
   dependencies: { id: string; title: string; status: TaskStatus }[];
   projectId: string;
   projectNumber: string;

@@ -21,11 +21,12 @@ const bundleOptions = {
       import {SearchableSelect} from '@/components/ui/searchable-select';
       import {MultiSelectFilter} from '@/components/ui/multi-select-filter';
       function PickerHarness(){
-        const size=Number(new URLSearchParams(window.__initialQuery).get('size')||100);
+        const pickerParams=new URLSearchParams(window.__initialQuery),size=Number(pickerParams.get('size')||100),wide=pickerParams.get('wide')==='1';
         window.__reads??={map:0,filter:0,find:0};
         const [options]=useState(()=>{const wrap=rows=>new Proxy(rows,{get(target,key,receiver){if(['map','filter','find'].includes(key))return(...args)=>{window.__reads[key]++;const result=Array.prototype[key].apply(receiver,args);return key==='filter'?wrap(result):result;};return Reflect.get(target,key,receiver);}});return wrap(Array.from({length:size},(_,i)=>({value:'o'+i,label:'alpha_'+String(i).padStart(5,'0'),hint:'Телефон '+i,disabled:i===3})));});
         const [neighbor,setNeighbor]=useState(''),[single,setSingle]=useState(''),[multi,setMulti]=useState(['unknown']);window.__picker={single,multi};window.__setPicker={single:setSingle,multi:setMulti};
-        return <div style={{padding:16,width:320}}><input id='picker-neighbor' value={neighbor} onChange={e=>setNeighbor(e.target.value)}/><SearchableSelect id='picker-single' options={options} value={single} onChange={setSingle} allowClear placeholder='Один' searchPlaceholder='Поиск одного'/><MultiSelectFilter label='Несколько' options={options} value={multi} onChange={setMulti} allLabel='Все' searchPlaceholder='Поиск нескольких'/></div>;
+        const visible=wide?options.map(option=>option.value==='o2'?{...option,label:option.label+' Очень длинное название производственной работы с подробным описанием материала и обработки '.repeat(3)}:option):options;
+        return <div style={{padding:16,width:320}}><input id='picker-neighbor' value={neighbor} onChange={e=>setNeighbor(e.target.value)}/><SearchableSelect id='picker-single' options={visible} value={single} onChange={setSingle} allowClear popupMinWidth={wide?560:undefined} wrapOptions={wide} placeholder='Один' searchPlaceholder='Поиск одного'/><MultiSelectFilter label='Несколько' options={options} value={multi} onChange={setMulti} allLabel='Все' searchPlaceholder='Поиск нескольких'/></div>;
       }
       import {createRoot} from 'react-dom/client';
       import {ProjectsFilterBar} from '@/app/(app)/projects/filter-bar';
@@ -107,6 +108,7 @@ async function withPage(initialQuery, run, section = "projects") {
       [data-slot=checkbox]{display:inline-flex;width:16px;height:16px;flex-shrink:0}
       [data-filter-options]{max-height:224px;overflow-y:auto}
       button,[role=checkbox]{cursor:pointer}
+      [data-slot=popover-content]{box-sizing:border-box}.whitespace-normal{white-space:normal}.break-words{overflow-wrap:break-word}.truncate{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     </style><div style="height:900px"></div><div id="root"></div><div style="height:1200px"></div>`);
     await page.evaluate(({ query, section }) => { window.__initialQuery = query; window.__section = section; }, { query: initialQuery, section });
     await page.addScriptTag({ content: bundle.outputFiles[0].text });
@@ -289,6 +291,13 @@ test('actual pickers preserve hint/disabled/clear and closed neighbor does no op
   await page.evaluate(()=>{window.__reads={map:0,filter:0,find:0};});await page.locator('#picker-neighbor').pressSequentially('neighbor',{delay:5});assert.deepEqual(await page.evaluate(()=>window.__reads),{map:0,filter:0,find:0});
   await page.locator('#picker-single').click();const popup=page.locator('[data-slot=popover-content]'),search=popup.getByPlaceholder('Поиск одного');await search.fill('телефон 3');assert.ok(await popup.getByRole('button',{name:/alpha_00003/}).isDisabled());await search.fill('Телефон 2');await popup.getByRole('button',{name:/^alpha_00002/}).click();assert.equal(await page.evaluate(()=>window.__picker.single),'o2');
   await page.locator('#picker-single').click();await search.fill('missing');assert.ok(await page.locator('#picker-single').innerText().then(text=>text.includes('alpha_00002')));await popup.getByRole('button',{name:'— сбросить',exact:true}).click();assert.equal(await page.evaluate(()=>window.__picker.single),'');
+ },'picker');
+ await withPage('size=100&wide=1',async page=>{
+  await page.locator('#picker-single').click();const popup=page.locator('[data-slot=popover-content]');
+  assert.ok((await popup.boundingBox()).width>=559);const long=popup.getByText(/alpha_00002 Очень длинное/);
+  assert.equal(await long.evaluate(node=>getComputedStyle(node).whiteSpace),'normal');assert.ok((await long.boundingBox()).height>30);
+  await page.setViewportSize({width:390,height:844});await page.waitForTimeout(50);const box=await popup.boundingBox();assert.ok(box.x>=0&&box.x+box.width<=391);
+  await popup.getByPlaceholder('Поиск одного').fill('Телефон 2');await popup.getByRole('button',{name:/^alpha_00002 /}).click();assert.equal(await page.evaluate(()=>window.__picker.single),'o2');
  },'picker');
 });
 

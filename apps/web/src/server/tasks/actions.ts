@@ -254,6 +254,8 @@ export async function updateTask(
       _count: { select: { payrollEntries: true } } },
   });
   if (!task) return { ok: false as const, error: "Задача не найдена" };
+  if (task.work?.paymentKind === "LEGACY" && data.assigneeId !== undefined && data.assigneeId !== task.assigneeId)
+    return { ok: false as const, error: "Для смены исполнителя используйте действие «Переназначить»" };
   if (data.workId !== undefined || data.quantity !== undefined) {
     try { assertProjectMoneyCurrency(task.project.currency); }
     catch (error) { return { ok: false as const, error: error instanceof Error ? error.message : "Валюта проекта не подготовлена" }; }

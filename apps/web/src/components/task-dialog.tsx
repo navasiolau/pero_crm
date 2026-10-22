@@ -20,6 +20,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SearchableSelect } from "@/components/ui/searchable-select";
+import { TaskReassignmentButton } from "@/components/task-reassignment-dialog";
 import {
   Select,
   SelectContent,
@@ -111,6 +112,7 @@ export function TaskDialog({
   const visibleFiles = task.files.filter(file => deletedFiles.taskId !== task.id || !deletedFiles.ids.includes(file.id));
   const readOnly = task.status === "DONE" || !canEdit;
   const isAllocatedShare = !!task.allocationGroupId;
+  const ordinaryTask = (task.paymentKind ?? "LEGACY") === "LEGACY";
 
   const ownQuantity = task.personalQuantity === undefined
     ? (isAllocatedShare ? null : task.quantity)
@@ -232,8 +234,9 @@ export function TaskDialog({
                   }
                   placeholder="Выберите исполнителя"
                   searchPlaceholder="Поиск сотрудника…"
-
+                  disabled={ordinaryTask}
                 />
+                {ordinaryTask ? <p className="text-xs text-muted-foreground">Исполнитель меняется отдельным действием «Переназначить» в карточке задачи.</p> : null}
               </div>
             </div>
             <div className="flex flex-col gap-1.5">
@@ -274,7 +277,7 @@ export function TaskDialog({
                   }
                   placeholder="Работа изделия"
                   searchPlaceholder="Поиск работы…"
-
+                  popupMinWidth={560} wrapOptions
                 />
               </div>
             </div>
@@ -471,7 +474,7 @@ export function TaskDialog({
                     const result = await updateTask(task.id, {
                       title: form.title.trim(),
                       type: form.type,
-                      assigneeId: form.assigneeId,
+                      ...(ordinaryTask ? {} : { assigneeId: form.assigneeId }),
                       ...(!isAllocatedShare ? {
                         productId: task.productId,
                         workId: task.workId,
@@ -498,7 +501,7 @@ export function TaskDialog({
               </Button>
             </>
           ) : (
-            (!readOnly || task.canTransferPiecework) && (
+            (!readOnly || task.canTransferPiecework || task.canReassignOrdinaryTask) && (
               <div className="flex w-full flex-wrap items-center justify-end gap-2">
                 {!readOnly && !isAllocatedShare ? (
                   <Button
@@ -512,6 +515,7 @@ export function TaskDialog({
                 ) : null}
                 {task.canTransferPiecework && task.productId ? <PieceworkButton label="Передать часть доли" disabled={filePending}
                   context={{ mode: "transfer", productId: task.productId, taskId: task.id, title: task.title }} onDone={() => onOpenChange(false)}/> : null}
+                {task.canReassignOrdinaryTask ? <TaskReassignmentButton taskId={task.id} disabled={filePending} onDone={() => onOpenChange(false)} /> : null}
                 {!readOnly ? (
                   <Button variant="outline" disabled={filePending} onClick={startEdit}>
                     <Pencil className="size-4" /> Редактировать
