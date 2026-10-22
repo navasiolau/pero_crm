@@ -1,4 +1,5 @@
 import {ordinaryFileListView} from "@/server/files/list-view";
+import { projectProposalPdfFile } from "@/server/kp/project-pdf";
 import { paymentView } from "@/server/finance/payment-view";
 import { loadProjectStockExpenses, projectExpenseRows } from "@/server/finance/project-expenses";
 import nextDynamic from "next/dynamic";
@@ -134,6 +135,8 @@ export default async function ProjectPage({
   });
   const uploaderNames = new Map(authors.map((user) => [user.id, user.name]));
   const fileRows = await ordinaryFileListView(prisma, session.user, project.files.filter(file => file.id !== project.coverFileId));
+  const proposalPdf = await projectProposalPdfFile(prisma, session.user, project.id);
+  if (proposalPdf) fileRows.unshift(proposalPdf);
 
   const showOverviewAmount = canViewProductMoney(role);
   const pricingProjection = showOverviewAmount ? await getProjectPricingProjection({id:session.user.id,name:session.user.name??"",roles:role,source:"web"},project.id) : null;
@@ -176,7 +179,7 @@ export default async function ProjectPage({
           <TabsTrigger className="shrink-0" value="products">
             Изделия ({project.products.length})
           </TabsTrigger>
-          <TabsTrigger className="shrink-0" value="files">Файлы ({project.files.length})</TabsTrigger>
+          <TabsTrigger className="shrink-0" value="files">Файлы ({fileRows.length})</TabsTrigger>
           <TabsTrigger className="shrink-0" value="tasks">Задачи ({project.tasks.length})</TabsTrigger>
           {showMaterials ? <TabsTrigger className="shrink-0" value="materials">Материалы</TabsTrigger> : null}
           {showFinance ? <TabsTrigger className="shrink-0" value="finance">Финансы</TabsTrigger> : null}

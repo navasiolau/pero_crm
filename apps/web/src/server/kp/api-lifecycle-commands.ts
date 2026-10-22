@@ -1,3 +1,4 @@
+import { prisma } from "@/lib/prisma";
 import { withMutationTransaction } from "@/server/transactions/coordinator";
 import { apiFailure, type KpApiContext } from "./api-contract";
 import { runApiCommand } from "./api-operation";
@@ -10,10 +11,11 @@ import { normalizeProposalState, type ProposalState } from "./proposal-contract"
 import { saveProposalInTransaction, type ProposalWriteMutation } from "./proposal-core";
 import { fixedProposalRate, proposalCurrency } from "./pricing-contract";
 import { proposalArtifactFileName } from "./pdf-filename";
+import { revalidatePublishedProjectPdfs } from "./project-pdf-cache";
 
 export async function requestApiPdf(context: KpApiContext, input: Record<string, unknown>) {
   const operationId = String(input.operationId), proposalId = String(input.proposalId);
-  return runApiCommand({ transaction: withMutationTransaction, context, scope: "kp:export", kind: "pdf", operationId, input,
+  const response = await runApiCommand({ transaction: withMutationTransaction, context, scope: "kp:export", kind: "pdf", operationId, input,
     mutate: async tx => {
       const result = await requestProposalPdfInTransaction(tx, context.binding, input, kpLifecyclePorts("kp:export"));
       if (result.kind === "retained") return { entityId: proposalId, result: { id: `retained_${result.versionId}`, state: "SUCCEEDED", error: null,
@@ -21,6 +23,9 @@ export async function requestApiPdf(context: KpApiContext, input: Record<string,
       return { entityId: proposalId, result: { id: result.jobId, state: result.state, result: null, error: null }, afterCommit: async () => { startKpRenderRuntime(); } };
     },
   });
+  if (response !== null && typeof response === "object" && !Array.isArray(response) && "state" in response && response.state === "SUCCEEDED")
+    await revalidatePublishedProjectPdfs(prisma, [proposalId]);
+  return response;
 }
 export async function restoreApiVersion(context: KpApiContext, input: Record<string, unknown>) {
   const proposalId = String(input.proposalId), versionId = String(input.versionId), operationId = String(input.operationId);

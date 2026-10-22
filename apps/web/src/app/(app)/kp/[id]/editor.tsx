@@ -42,7 +42,7 @@ export function KpEditor({ documentId }: { documentId: string }) {
         setDocument(message.document); setVersionId(message.versionId ?? ''); if (!message.versionId) setLiveDocument(message.document);
       } else if (message.type === 'error') setError(message.message);
       else if (message.type === 'contract-open') setContractOpen(message.open === true);
-      else if (message.type === 'versions-changed') { setError(null); void refreshVersions().catch(error => setError(error.message)); }
+      else if (message.type === 'versions-changed') { setError(null); router.refresh(); void refreshVersions().catch(error => setError(error.message)); }
       else if (message.type === 'navigate') router.push('/kp/' + encodeURIComponent(message.documentId));
       else if (message.type === 'command-result') {
         const pending = commands.current.get(message.requestId); if (!pending) return;

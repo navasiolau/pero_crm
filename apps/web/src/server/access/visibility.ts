@@ -216,6 +216,17 @@ function fieldFileWhere(actor: VisibilityActor): Prisma.FileWhereInput {
   };
 }
 
+/** Общий файл проекта: инженерный этап либо самостоятельное назначение FIELD. */
+export function generalProjectFileVisibilityWhere(actor: VisibilityActor): Prisma.ProjectWhereInput {
+  if (hasFullProjectVisibility(actor)) return liveProjectWhere;
+  const grants: Prisma.ProjectWhereInput[] = [];
+  if (hasRole(actor.roles, "ENGINEER")) grants.push(engineeringProjectReadWhere(actor));
+  if (hasAnyRole(actor.roles, FIELD_ROLES)) grants.push(assignedProjectVisibilityWhere({
+    ...actor, roles: actor.roles.filter(role => role !== "ENGINEER"),
+  }));
+  return { AND: [liveProjectWhere, { OR: grants }] };
+}
+
 function fileVisibilityWhereGrants(actor: VisibilityActor): Prisma.FileWhereInput {
   if (hasFullProjectVisibility(actor)) return {};
   const grants: Prisma.FileWhereInput[] = [];
@@ -226,7 +237,7 @@ function fileVisibilityWhereGrants(actor: VisibilityActor): Prisma.FileWhereInpu
       OR: [{ productId: null }, { product }],
     }] };
     grants.push({ AND: [
-      { project: engineeringProjectReadWhere(actor) },
+      { project: generalProjectFileVisibilityWhere({ ...actor, roles: ["ENGINEER"] }) },
       { section: { in: ["GENERAL", "MEASUREMENT", "PRODUCTION", "INSTALLATION"] } },
       { OR: [{ productId: null }, { product }] },
       { OR: [{ taskId: null }, { task }] },
@@ -238,7 +249,7 @@ function fileVisibilityWhereGrants(actor: VisibilityActor): Prisma.FileWhereInpu
   const fieldActor = { ...actor, roles: actor.roles.filter(role => role !== "ENGINEER") };
   const base: Prisma.FileWhereInput = {
     AND: [
-      { project: assignedProjectVisibilityWhere(fieldActor) },
+      { project: generalProjectFileVisibilityWhere(fieldActor) },
       { OR: [{ productId: null }, { product: assignedProductVisibilityWhere(fieldActor) }] },
       { OR: [{ taskId: null }, { task: taskVisibilityWhere(fieldActor) }] },
     ],
