@@ -251,10 +251,12 @@ try{
    // Ручную позицию фиксируем после настоящего scrollend, включая инерцию и CSS snap.
    await mobile.locator('[data-slot="kanban-scroll"]').evaluate(board=>{
     window.__manualTouchSettled=false;
-    window.addEventListener('touchend',()=>board.addEventListener('scrollend',()=>{window.__manualTouchSettled=true;},{once:true}),{once:true});
+    // У крайней колонки scrollend может прийти уже во время touchmove.
+    // Подписка до жеста не теряет это событие; ниже отдельно ждём стабильные координаты.
+    board.addEventListener('scrollend',()=>{window.__manualTouchSettled=true;},{once:true});
    });
    const cdp=await mobile.context().newCDPSession(mobile);await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:viewport.width-30,y:viewport.height/2}]});
-   for(const x of [viewport.width-80,viewport.width-150,70])await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x,y:viewport.height/2}]});
+   for(const x of [viewport.width-80,viewport.width-150,70]){await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x,y:viewport.height/2}]});await waitFrames(mobile);}
    await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
    await expect.poll(()=>mobile.evaluate(()=>window.__manualTouchSettled),{timeout:5000}).toBe(true);
    // scrollend не доказывает доставку зеркальных scroll-событий: снимок берём после точной стабилизации.
