@@ -111,7 +111,7 @@ const StageColumn = memo(function StageColumn({
 });
 
 // Канбан проектов (§7): колонки = этапы §6, свободные переходы,
-// оптимистичное обновление с откатом; мини-формы для Отказа/Рекламации (§6).
+// Оптимистичное обновление с откатом; мини-форма для Отказа.
 // Порядок карточек и фильтрация — с сервера (listProjects, новые сверху);
 // после смены этапа revalidate приносит новый список — синхронизируемся.
 export function KanbanBoard({
@@ -198,7 +198,7 @@ export function KanbanBoard({
     if (!project || project.stage === toStage) return;
 
     // Переходы, требующие добора данных прямо при перетаскивании (§6)
-    if (toStage === "REFUSED" || toStage === "RECLAMATION") {
+    if (toStage === "REFUSED") {
       setFormRequest({
         projectId: project.id,
         fromStage: project.stage,

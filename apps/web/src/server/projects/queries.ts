@@ -18,7 +18,7 @@ import {
   hasAnyRole,
 } from "@/lib/roles";
 import { STAGES } from "@/lib/stages";
-import { parseListFilterValue } from "@/lib/list-filter-values";
+import { activeListStatusValues, parseListFilterValue } from "@/lib/list-filter-values";
 import { taskDetailsIncludeFor,taskWorkspaceWhere } from "@/server/tasks/queries";
 import { listProjectShortages } from "@/server/warehouse/queries";
 import { productSketchProjection } from "@/server/products/sketch-projection";
@@ -142,8 +142,7 @@ export function parseProjectListParams(sp: Record<string, string | string[] | un
   };
   const stageValues = parseListFilterValue(get("stage"));
   // Невалидный этап игнорируется; область доступа ниже остаётся обязательной.
-  const stages = stageValues === undefined ? undefined : stageValues.every((value) => STAGES.some((item) => item.id === value))
-    ? stageValues as ProjectStage[] : undefined;
+  const stages = activeListStatusValues(stageValues, STAGES, ["PAUSED", "RECLAMATION"]) as ProjectStage[] | undefined;
   const sortRaw = get("sort");
   const sort = (Object.keys(PROJECT_SORT_MAP) as string[]).includes(sortRaw)
     ? (sortRaw as ProjectSortField)

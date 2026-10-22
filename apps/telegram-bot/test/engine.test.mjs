@@ -146,11 +146,13 @@ test("stage menu captures baseline once, stale callback rejected, refusal option
  assert.equal(calls.slice(before).filter(c=>c.path==='/api/v1/bot/projects/205'&&c.method==='GET').length,1);
  await handleUpdate(callback(5306,901,'stage:205'));await handleUpdate(callback(5307,901,chosen));assert.equal(calls.slice(before).filter(c=>c.path.endsWith('/stage')).length,2);
 });
-test("reclamation dialog retains extras after conflict and requires all details",async()=>{
- const before=calls.length;await handleUpdate(callback(5401,902,'stage:205'));await handleUpdate(callback(5402,902,stageButton('RECLAMATION')));
- await handleUpdate(message(5403,902,'скол'));await handleUpdate(message(5404,902,'фасад'));stageFailure=true;
- await handleUpdate(message(5405,902,'цех'));stageFailure=false;await handleUpdate(message(5406,902,'цех'));
- const writes=calls.slice(before).filter(c=>c.path.endsWith('/stage'));assert.equal(writes.length,2);assert.deepEqual(writes[0].body,writes[1].body);assert.deepEqual(writes[0].body.extras,{reclamationReason:'скол',reclamationDescription:'фасад',reclamationFault:'цех'});
+test("retired stages are absent and an old callback cannot open a new transition",async()=>{
+ const before=calls.length;await handleUpdate(callback(5401,902,'stage:205'));
+ const chosen=stageButton('IN_WORK');const markup=JSON.stringify(sent.at(-1).reply_markup);
+ assert.equal(markup.includes('RECLAMATION'),false);assert.equal(markup.includes('PAUSED'),false);
+ await handleUpdate(callback(5402,902,chosen.replace(':IN_WORK:',':RECLAMATION:')));
+ await handleUpdate(callback(5403,902,chosen.replace(':IN_WORK:',':PAUSED:')));
+ assert.equal(calls.slice(before).filter(c=>c.path.endsWith('/stage')).length,0);
 });
 
 

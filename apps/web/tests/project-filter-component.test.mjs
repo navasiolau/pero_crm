@@ -163,15 +163,16 @@ test("partial stages, last unchecked, full selection and dimension reset retain 
     await trigger.scrollIntoViewIfNeeded();
     await trigger.click();
     const popup = page.locator('[data-slot="popover-content"]');
-    assert.equal(await popup.getByRole("checkbox").count(), 8);
+    assert.equal(await popup.getByRole("checkbox").count(), 6);
+    assert.equal(await popup.getByRole("checkbox", { name: /Рекламация|Пауза/ }).count(), 0);
     assert.equal(await popup.getByRole("checkbox", { checked: true }).count(), 0);
     const scroll = await page.evaluate(() => window.scrollY);
-    for (const name of ["Просчёт", "Договор", "В работе", "Завершён", "Рекламация", "Пауза", "Отказ"]) {
+    for (const name of ["Просчёт", "Договор", "В работе", "Завершён", "Отказ"]) {
       await popup.getByRole("checkbox", { name, exact: true }).click();
     }
     assert.equal(await popup.isVisible(), true);
     assert.equal(await page.evaluate(() => window.scrollY), scroll);
-    assert.deepEqual(JSON.parse(await queryValue(page, "stage")).sort(), ["ESTIMATE", "CONTRACT", "IN_WORK", "DONE", "RECLAMATION", "PAUSED", "REFUSED"].sort());
+    assert.deepEqual(JSON.parse(await queryValue(page, "stage")).sort(), ["ESTIMATE", "CONTRACT", "IN_WORK", "DONE", "REFUSED"].sort());
     await popup.getByRole("button", { name: "Сброс", exact: true }).click();
     assert.equal(await queryValue(page, "stage"), null);
     assert.equal(await popup.getByRole("checkbox", { checked: true }).count(), 0);
@@ -179,7 +180,7 @@ test("partial stages, last unchecked, full selection and dimension reset retain 
     assert.deepEqual(JSON.parse(await queryValue(page, "stage")), ["LEAD"]);
     await popup.getByRole("checkbox", { name: "Лид", exact: true }).click();
     assert.equal(await queryValue(page, "stage"), null);
-    for (const name of ["Лид", "Просчёт", "Договор", "В работе", "Завершён", "Рекламация", "Пауза", "Отказ"]) {
+    for (const name of ["Лид", "Просчёт", "Договор", "В работе", "Завершён", "Отказ"]) {
       await popup.getByRole("checkbox", { name, exact: true }).click();
     }
     assert.equal(await queryValue(page, "stage"), null);

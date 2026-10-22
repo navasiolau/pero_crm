@@ -3,7 +3,7 @@ import type { Prisma, ProductStatus, Role } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
 import { PRODUCT_STATUSES } from "@/lib/product-statuses";
-import { parseListFilterValue } from "@/lib/list-filter-values";
+import { activeListStatusValues, parseListFilterValue } from "@/lib/list-filter-values";
 import { engineeringParticipantProductIds, fileVisibilityWhere, productVisibilityWhere, resolveVisibilityActor, taskVisibilityWhere, workVisibilityWhere, type VisibilityActor } from "@/server/access/visibility";
 import { taskDetailsIncludeFor,taskWorkspaceWhere } from "@/server/tasks/queries";
 import { productSketchProjection } from "./sketch-projection";
@@ -222,8 +222,7 @@ export function parseProductListParams(sp: Record<string, string | string[] | un
     return (Array.isArray(value) ? value[0] : value)?.trim() ?? "";
   };
   const statusValues = parseListFilterValue(get("status"));
-  const statuses = statusValues === undefined ? undefined : statusValues.every((value) => PRODUCT_STATUSES.some((item) => item.id === value))
-    ? statusValues as ProductStatus[] : undefined;
+  const statuses = activeListStatusValues(statusValues, PRODUCT_STATUSES, ["RECLAMATION"]) as ProductStatus[] | undefined;
   const sortRaw = get("sort");
   const sort = (Object.keys(PRODUCT_SORT_MAP) as string[]).includes(sortRaw)
     ? (sortRaw as ProductSortField)

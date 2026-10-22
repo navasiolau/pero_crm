@@ -1,5 +1,10 @@
 import type { ProjectStage } from "@prisma/client";
 
+export const ACTIVE_PROJECT_STAGE_IDS = ["LEAD", "ESTIMATE", "CONTRACT", "IN_WORK", "DONE", "REFUSED"] as const satisfies readonly ProjectStage[];
+export function isActiveProjectStage(value: unknown): value is (typeof ACTIVE_PROJECT_STAGE_IDS)[number] {
+  return ACTIVE_PROJECT_STAGE_IDS.some(stage => stage === value);
+}
+
 // Этапы проекта (§6): 5 основных + служебные состояния.
 // Общий модуль для сервера и клиента.
 export const STAGES: {
@@ -12,13 +17,11 @@ export const STAGES: {
   { id: "CONTRACT", label: "Договор" },
   { id: "IN_WORK", label: "В работе" },
   { id: "DONE", label: "Завершён" },
-  { id: "RECLAMATION", label: "Рекламация", service: true },
-  { id: "PAUSED", label: "Пауза", service: true },
   { id: "REFUSED", label: "Отказ", service: true },
 ];
 
 export const stageLabels = Object.fromEntries(
-  STAGES.map((stage) => [stage.id, stage.label]),
+  [...STAGES.map((stage) => [stage.id, stage.label]), ["PAUSED", "Пауза"], ["RECLAMATION", "Рекламация"]],
 ) as Record<ProjectStage, string>;
 
 // Визуальная дифференциация (§6): у каждого этапа свой цвет — заголовки

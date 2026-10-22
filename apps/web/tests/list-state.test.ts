@@ -38,6 +38,8 @@ test("project multi-value normalization preserves five clients and two engineers
   });
   assert.deepEqual(fields(normalizeListQuery("projects", "client=c1&stage=IN_WORK")), { view: "kanban", client: '["c1"]', stage: '["IN_WORK"]' });
   assert.equal(normalizeListQuery("projects", ""), "view=kanban");
+  assert.deepEqual(fields(normalizeListQuery("projects",new URLSearchParams({stage:'["PAUSED","IN_WORK","RECLAMATION"]',engineer:'e1'}).toString())),{view:'kanban',engineer:'["e1"]',stage:'["IN_WORK"]'});
+  assert.deepEqual(fields(normalizeListQuery("products",new URLSearchParams({status:'["RECLAMATION","DESIGN"]',project:'p1'}).toString())),{view:'kanban',project:'["p1"]',status:'["DESIGN"]'});
 });
 
 test("both sections upgrade V1 effective activity and write V2", () => {

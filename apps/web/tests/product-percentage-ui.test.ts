@@ -4,7 +4,7 @@ import { previewProductPercentageShare, productStatusTargets, shouldRollbackProd
 
 test("product status UI gives managers all statuses and engineers assigned DESIGN to PRODUCTION without model", () => {
   const context = { from: "DESIGN" as const, assignedEngineer: true, participant: false, hasB3d: false, noModel: false };
-  assert.deepEqual(productStatusTargets(["MANAGER", "ENGINEER"] as const, context), ["PREPARATION", "DESIGN", "PRODUCTION", "STORAGE", "INSTALLATION", "DONE", "RECLAMATION"]);
+  assert.deepEqual(productStatusTargets(["MANAGER", "ENGINEER"] as const, context), ["PREPARATION", "DESIGN", "PRODUCTION", "STORAGE", "INSTALLATION", "DONE"]);
   assert.deepEqual(productStatusTargets(["ENGINEER"] as const, context), ["PRODUCTION"]);
   assert.deepEqual(productStatusTargets(["ENGINEER"] as const, { ...context, hasB3d: true }), ["PRODUCTION"]);
   assert.deepEqual(productStatusTargets(["WORKER"] as const, { ...context, hasB3d: true }), []);
