@@ -9,7 +9,7 @@ import type { Prisma, ProjectStage, Role } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
 import { publicClientSelect } from "@/server/clients/projection";
-import { reportDocumentSelect } from "@/server/finance-documents/view";
+import { reportDocumentSelect, paymentReportDocumentsSelect } from "@/server/finance-documents/view";
 import { logisticsAllocationSelect } from "@/server/logistics/payment-view";
 import {
   ASSIGNEE_ROLES,
@@ -313,7 +313,7 @@ export async function getProjectFor(
         include: {
           cashAccount: { select: { name: true } },
           expenseArticle: { select: { id: true, name: true } },
-          reportDocument: { select: reportDocumentSelect },
+          reportDocument: { select: reportDocumentSelect }, reportDocuments: paymentReportDocumentsSelect,
           logisticsAllocation: { select: logisticsAllocationSelect },
         },
         orderBy: { paidAt: "desc" },

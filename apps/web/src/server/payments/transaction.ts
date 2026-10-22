@@ -10,6 +10,7 @@ import { paymentSchema, paymentDetailsSchema, type PaymentInput, type InternalPa
 import { readPaymentReceipt, recordPaymentReceipt } from "./receipts";
 import { assertExpenseReportDocument } from "./document-policy";
 import { assertLogisticsPaymentContext } from "@/server/logistics/payment-context";
+import { inputReportDocumentIds, reportDocumentSetMatches } from "@/server/finance-documents/input";
 
 export type PreparedPayment = {
   project: { id: string; number: string; currency: string } | null;
@@ -51,12 +52,15 @@ export async function createPaymentInTransaction(actor: DomainActor, input: Paym
       throw Error("Нет соответствующего оплаченного прихода для расхода");
   } else if (!logisticsAllocationId) assertExpenseReportDocument(data);
 
-  if (data.reportDocumentId) {
+  const documentIds = inputReportDocumentIds(data);
+  if (documentIds.length) {
     await requireFinanceDocumentActor(actor.id, tx);
-    const document = await tx.financeDocument.findUnique({ where: { id: data.reportDocumentId },
-      include: { payment: { select: { id: true } } } });
-    if (!document || document.state !== "READY" || document.uploadedById !== actor.id || document.payment)
-      throw Error("Отчётный документ недоступен или уже прикреплён к другой операции");
+    for (const id of documentIds) {
+      const document = await tx.financeDocument.findUnique({ where: { id },
+        include: { payment: { select: { id: true } }, paymentReport: { select: { paymentId: true } } } });
+      if (!document || document.state !== "READY" || document.uploadedById !== actor.id || document.payment || document.paymentReport)
+        throw Error("Отчётный документ недоступен или уже прикреплён к другой операции");
+    }
   }
 
   if (!isCurrency(data.currency) || data.cashAccountId !== prepared.account.id) throw Error("Реквизиты кассы изменились");
@@ -92,9 +96,18 @@ export async function createPaymentInTransaction(actor: DomainActor, input: Paym
     bynAmount: prepared.bynAmount, projectAmount: prepared.project ? prepared.bynAmount : null,
     cashAccountId: prepared.account.id, expenseArticleId: prepared.articleId,
     paidAt: prepared.paidAt, comment: data.comment?.trim() || null, createdById: actor.id,
-    ...(data.reportDocumentId ? { reportDocumentId: data.reportDocumentId } : {}),
+    ...(documentIds[0] ? { reportDocumentId: documentIds[0] } : {}),
     ...(logisticsAllocationId ? { logisticsAllocationId } : {}),
   } });
+  if (documentIds.length) {
+    // Первый файл также добавляет legacy-trigger; точный комплект проверяется ниже.
+    await tx.paymentReportDocument.createMany({ data: documentIds.map((documentId, position) => ({
+      paymentId: payment.id, documentId, position,
+    })), skipDuplicates: true });
+    const linked = await tx.paymentReportDocument.findMany({ where: { paymentId: payment.id }, orderBy: { position: "asc" } });
+    if (!reportDocumentSetMatches({ ...payment, reportDocuments: linked }, documentIds))
+      throw Error("Не удалось подтвердить полный комплект документов платежа");
+  }
   await tx.changeLog.create({ data: {
     actorType: "user", actorId: actor.id, actorName: actor.name || undefined, entity: "payment", entityId: payment.id,
     action: "create", source: actor.source, newValue: {

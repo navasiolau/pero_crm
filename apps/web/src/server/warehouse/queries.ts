@@ -6,7 +6,7 @@ export type { StockMovementView, ProjectMaterialLineStatus, ProjectMaterialLine,
 import {FIELD_ROLES,OFFICE_ROLES,WAREHOUSE_MONEY_ROLES,hasAnyRole} from "@/lib/roles";
 import { prisma } from "@/lib/prisma";
 import { warehouseReadPositions, averagePrice } from './accounting';
-import {loadMovementReportDocuments} from './report-documents';
+import {loadMovementReportDocumentSets} from './report-documents';
 import { materialDebt,decimalAtoms,decimalText } from "@/lib/product-quantity";
 import { canViewProductDrafts } from "@/lib/product-drafts";
 import { hasFullProjectVisibility, productVisibilityWhere, resolveVisibilityActor, type VisibilityActor } from "@/server/access/visibility";
@@ -137,7 +137,7 @@ async function movementViews(movements:MovementRow[],actor:VisibilityActor,datab
  const userIds=[...new Set(movements.map(row=>row.createdById).filter((id):id is string=>id!==null))];
  const [users,documents]=await Promise.all([
   database.user.findMany({where:{id:{in:userIds}},select:{id:true,name:true}}),
-  loadMovementReportDocuments(actor,movements.map(row=>row.id),database),
+  loadMovementReportDocumentSets(actor,movements.map(row=>row.id),database),
  ]);
  const userName=new Map(users.map(user=>[user.id,user.name]));
  return movements.map(movement=>({
@@ -148,7 +148,8 @@ async function movementViews(movements:MovementRow[],actor:VisibilityActor,datab
   totalByn:!hasAnyRole(actor.roles,WAREHOUSE_MONEY_ROLES)||movement.totalByn===null?null:Number(movement.totalByn),
   productId:movement.productId,productNumber:movement.product?.number??null,comment:movement.comment,
   createdByName:movement.createdById?(userName.get(movement.createdById)??null):null,
-  createdAt:movement.createdAt.toISOString(),reportDocument:documents.get(movement.id)??null,
+  createdAt:movement.createdAt.toISOString(),reportDocument:documents.get(movement.id)?.[0]??null,
+  ...(documents.has(movement.id)?{reportDocuments:documents.get(movement.id)}:{}),
  }));
 }
 async function loadMovements(actor:VisibilityActor,filter:{materialId?:string;productId?:string;type?:"INCOME"|"EXPENSE"|"RETURN"}|undefined,database:Prisma.TransactionClient){

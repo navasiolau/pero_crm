@@ -44,7 +44,7 @@ await page.evaluate(()=>{window.__cashUpdate();window.__articlesUpdate([{id:'for
 await assertParentKept(page,before);await expect(page.locator('#pay-article')).toContainText('Каноническая статья сервера');assert.equal(await page.locator('#pay-article').evaluate(el=>el===document.activeElement),false);
 await expect(page.getByRole('button',{name:'Создать статью',exact:true})).toBeFocused();const call=await page.evaluate(()=>window.__articleCalls[0]);assert.equal(call.code,scope==='project'?'73':undefined);
 await page.evaluate(()=>window.__articlesUpdate([{id:'new-article',name:'Каноническая статья сервера'}]));await page.locator('#pay-article').click();assert.equal(await page.getByRole('button',{name:'Каноническая статья сервера',exact:true}).count(),1);await page.keyboard.press('Escape');
-await page.getByRole('button',{name:scope==='stock'?'Оплатить и принять на склад':'Внести расход',exact:true}).click();await page.waitForFunction(()=>window.__moneyCalls?.length===1);const money=await page.evaluate(()=>window.__moneyCalls[0]);assert.equal(money.expenseArticleId,'new-article');assert.equal(money.cashAccountId,'rub');assert.equal(money.currency,'RUB');assert.equal(money.rate,0.034567);assert.equal(money.reportDocumentId,documentId);
+await page.getByRole('button',{name:scope==='stock'?'Оплатить и принять на склад':'Внести расход',exact:true}).click();await page.waitForFunction(()=>window.__moneyCalls?.length===1);const money=await page.evaluate(()=>window.__moneyCalls[0]);assert.equal(money.expenseArticleId,'new-article');assert.equal(money.cashAccountId,'rub');assert.equal(money.currency,'RUB');assert.equal(money.rate,0.034567);assert.deepEqual(money.reportDocumentIds,[documentId]);
 await expect(page.getByRole('button',{name:'Создать статью',exact:true})).toBeDisabled();await page.evaluate(()=>window.__open(false));await parent(page).waitFor({state:'hidden'});await page.evaluate(()=>window.__open(true));await page.getByRole('button',{name:'Проверить',exact:true}).click();await page.waitForFunction(()=>window.__moneyCalls.length===2);assert.deepEqual(await page.evaluate(()=>window.__moneyCalls[1]),money);
 }));
 
@@ -74,3 +74,16 @@ await withPage('project',{__delay:true},async page=>{await openChild(page);await
 await withPage('project',{__blocked:true},async page=>{await expect(page.getByRole('button',{name:'Создать статью',exact:true})).toBeDisabled();assert.equal(await page.evaluate(()=>window.__articleCalls?.length??0),0);});
 await withPage('project',{__income:true},async page=>{assert.equal(await page.getByRole('button',{name:'Создать статью',exact:true}).count(),0);});
 });
+
+for(const width of [1440,390])test(`three-document expense form fits and keeps every upload visible at ${width}`,async()=>withPage('project',{},async page=>{
+ let serial=20;await page.route('**/api/finance/documents/upload',route=>{
+  const name=/filename="([^"]+)"/.exec(route.request().postDataBuffer().toString('utf8'))?.[1];
+  return route.fulfill({status:201,contentType:'application/json',body:JSON.stringify({ok:true,document:{id:`00000195-0000-4000-8000-${String(++serial).padStart(12,'0')}`,source:'finance',fileName:name,mimeType:'application/pdf',size:4,createdAt:'2026-10-22T00:00:00Z',paymentId:null}})});
+ });
+ await page.locator('#pay-amount').fill('45');await page.locator('#pay-document').setInputFiles([1,2,3].map(index=>({name:`Подтверждение-${index}.pdf`,mimeType:'application/pdf',buffer:Buffer.from('%PDF')})));
+ await page.getByRole('link',{name:'Подтверждение-3.pdf',exact:true}).waitFor();
+ assert.equal(await page.getByRole('status').filter({hasText:'Готово'}).count(),3);
+ assert.equal(await parent(page).evaluate(el=>el.scrollWidth>el.clientWidth),false);
+ assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+ await page.locator('#pay-document').locator('..').screenshot({path:path.join(shots,`multiple-documents-${width}.png`)});
+}, {width}));

@@ -11,6 +11,7 @@ import { paymentSchema, type PaymentInput, type PaymentData, type PaymentMutatio
 import { readPaymentReceipt, PaymentReceiptError } from "./receipts";
 import { createPaymentInTransaction, type PreparedPayment } from "./transaction";
 import { assertExpenseReportDocument } from "./document-policy";
+import { inputReportDocumentIds, reportDocumentSetMatches } from "@/server/finance-documents/input";
 export { createPaymentInTransaction, type PreparedPayment } from "./transaction";
 
 export { paymentSchema } from "./contracts";
@@ -62,13 +63,16 @@ export async function createPaymentScenario(
       if (candidate === undefined) return null; // Fresh locked read завершил abort новой попытки до COMMIT.
       if (!candidate.eventId) return null;
       const [payment, event] = await Promise.all([
-        tx.payment.findUnique({ where: { id: candidate.payment.id } }),
+        tx.payment.findUnique({ where: { id: candidate.payment.id }, include: {
+          reportDocuments: { select: { documentId: true, position: true }, orderBy: { position: "asc" } },
+        } }),
         tx.domainEvent.findUnique({ where: { id: candidate.eventId } }),
       ]);
       if (!payment || payment.deletionId || payment.createdById !== actor.id ||
         !event || event.actor !== actor.id || event.type !== (data.direction === "INCOME" ? "payment.created" : "expense.created")) return null;
       const fields = ["direction", "projectId", "cashAccountId", "expenseArticleId", "currency", "reportDocumentId"] as const;
       if (fields.some(field => (payment[field] ?? null) !== (candidate.payment[field] ?? null))) return null;
+      if (!reportDocumentSetMatches(payment, inputReportDocumentIds(data))) return null;
       const money = ["amount", "rate", "bynAmount", "projectAmount"] as const;
       if (money.some(field => payment[field] === null || candidate.payment[field] === null
         ? payment[field] !== candidate.payment[field] : !new Prisma.Decimal(payment[field]!).eq(candidate.payment[field]!))) return null;

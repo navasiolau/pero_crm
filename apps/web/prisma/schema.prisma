@@ -840,6 +840,7 @@ model Payment {
   expenseArticle   ExpenseArticle?  @relation(fields: [expenseArticleId], references: [id], onDelete: SetNull)
   reportDocumentId String?          @unique
   reportDocument   FinanceDocument? @relation(fields: [reportDocumentId], references: [id], onDelete: Restrict)
+  reportDocuments  PaymentReportDocument[]
   stockPurchase    StockPurchase?
   logisticsAllocationId String? @unique
   logisticsAllocation LogisticsPostingAllocation? @relation(fields: [logisticsAllocationId], references: [id], onDelete: Restrict)
@@ -877,9 +878,22 @@ model FinanceDocument {
   createdAt          DateTime             @default(now())
   readyAt            DateTime?
   payment            Payment?
+  paymentReport      PaymentReportDocument?
 
   @@index([uploadedById, state, createdAt])
   @@index([state, createdAt])
+}
+
+// Упорядоченный комплект одного платежа; оригинал документа остаётся неизменным.
+model PaymentReportDocument {
+  paymentId String
+  payment Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  documentId String @unique
+  document FinanceDocument @relation(fields: [documentId], references: [id], onDelete: Restrict)
+  position Int
+
+  @@id([paymentId, documentId])
+  @@unique([paymentId, position])
 }
 
 // Настройки организации (§10): key-value, сейчас — payrollCurrency

@@ -16,6 +16,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { formatAmount, formatQty, formatDateTime } from "@/lib/format";
+import {reportDocumentNames} from "@/lib/report-document-names";
 import {ReportDocumentButton} from '@/components/report-document-button';
 import { warehouseMovementKindLabels, warehouseMovementLabel, matchesWarehouseMovementKind } from "@/lib/warehouse-movement-labels";
 import type {
@@ -139,7 +140,7 @@ export function MovementsView({
   }
 
   columns.push(
-    {id:'document',header:'Отчетный документ',searchValue:row=>row.reportDocument?.fileName??'',cell:row=><ReportDocumentButton document={row.reportDocument}/>},
+    {id:'document',header:'Отчетный документ',searchValue:row=>reportDocumentNames(row),cell:row=><ReportDocumentButton document={row.reportDocument} documents={row.reportDocuments}/>},
     {
       id: "product",
       header: "Изделие",
@@ -227,7 +228,7 @@ export function MovementsView({
         searchPlaceholder="Поиск по движениям…"
         emptyText="Движений пока нет"
         defaultPageSize={20}
-        renderMobileCard={row=><div className="space-y-2"><div className="flex flex-wrap items-start justify-between gap-2"><b className="break-words">{row.materialName}</b><Badge variant="outline">{warehouseMovementLabel(row)}</Badge></div><p className="text-xs text-muted-foreground">{formatDateTime(row.createdAt)}</p><p>{row.type==='EXPENSE'?'−':row.type==='RETURN'?'+':''}{formatQty(row.quantity)} {row.materialUnit}{showMoney?` · ${formatAmount(row.totalByn,'BYN')}`:''}</p>{row.productId&&row.productNumber?<Link href={`/products/${row.productId}`} className="text-primary hover:underline">Изделие {row.productNumber}</Link>:null}{row.comment?<p className="break-words text-sm">{row.comment}</p>:null}{row.createdByName?<p className="text-xs text-muted-foreground">{row.createdByName}</p>:null}<ReportDocumentButton document={row.reportDocument}/>{deleteButton(row)}</div>}
+        renderMobileCard={row=><div className="space-y-2"><div className="flex flex-wrap items-start justify-between gap-2"><b className="break-words">{row.materialName}</b><Badge variant="outline">{warehouseMovementLabel(row)}</Badge></div><p className="text-xs text-muted-foreground">{formatDateTime(row.createdAt)}</p><p>{row.type==='EXPENSE'?'−':row.type==='RETURN'?'+':''}{formatQty(row.quantity)} {row.materialUnit}{showMoney?` · ${formatAmount(row.totalByn,'BYN')}`:''}</p>{row.productId&&row.productNumber?<Link href={`/products/${row.productId}`} className="text-primary hover:underline">Изделие {row.productNumber}</Link>:null}{row.comment?<p className="break-words text-sm">{row.comment}</p>:null}{row.createdByName?<p className="text-xs text-muted-foreground">{row.createdByName}</p>:null}<ReportDocumentButton document={row.reportDocument} documents={row.reportDocuments}/>{deleteButton(row)}</div>}
       />
       {deleting?<WarehouseMovementDeleteDialog key={deleting} movementId={deleting} onClose={()=>setDeleting(null)}/>:null}
     </div>
