@@ -8,7 +8,7 @@ import { navItemsForRole } from "../src/lib/nav";
 import { visibleProductStatuses } from "../src/lib/product-statuses";
 import { canAccrueOrdinarySalary } from "../src/lib/compensation-policy";
 import { authConfig } from "../src/auth.config";
-import { workVisibilityWhere, productVisibilityWhere, hasFullProjectVisibility } from "../src/server/access/visibility";
+import { workVisibilityWhere, productVisibilityWhere, productAssignmentWriteWhere, hasFullProjectVisibility } from "../src/server/access/visibility";
 import { matches } from "./helpers/visibility-fixture";
 
 const coordinator = "WORK_COORDINATOR" as Role;
@@ -66,11 +66,12 @@ test("coordinator manages a price, keeps base access/pay, and loses catalog writ
   assert.ok(await authorize(roles, "/finance") instanceof Response);
   assert.ok(await authorize(roles, "/settings/users") instanceof Response);
   const actor = { id: "engineer", roles: ["ENGINEER", coordinator] as Role[] };
-  const product = { id: "p", engineerId: actor.id, status: "PRODUCTION", deletedAt: null, project: { deletedAt: null }, tasks: [] };
+  const product = { id: "p", engineerId: actor.id, status: "PRODUCTION", deletedAt: null, project: { deletedAt: null, stage: "CONTRACT" }, tasks: [] };
   assert.equal(hasFullProjectVisibility(actor), false);
   assert.equal(matches(product, productVisibilityWhere(actor)), true);
   assert.equal(matches({ project: product.project, productId: "p", product, paymentKind: "LEGACY", stagePayPoolId: null, poolWeightUnits: null, tasks: [] }, workVisibilityWhere(actor)), true, "A created ordinary work remains readable on the already visible product");
-  assert.equal(matches({ ...product, engineerId: "other" }, productVisibilityWhere(actor)), false);
+  assert.equal(matches({ ...product, engineerId: "other" }, productVisibilityWhere(actor)), true);
+  assert.equal(matches({ ...product, engineerId: "other" }, productAssignmentWriteWhere(actor)), false);
   roles = ["WORKER"];
   const writesBeforeRemoval = writes;
   await assert.rejects(prices.updatePriceItem(stored.id, { name: "Запрещено", unit: "шт.", price: 999 }), /Недостаточно прав/);

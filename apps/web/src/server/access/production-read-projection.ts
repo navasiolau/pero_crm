@@ -1,13 +1,13 @@
 import type {PrismaClient} from '@prisma/client';
 import {hasAnyRole,FIELD_ROLES} from '@/lib/roles';
 import {canViewProductMoney} from '@/lib/product-financial-access';
-import {assignedProductVisibilityWhere,hasFullProjectVisibility,type VisibilityActor} from './visibility';
+import {assignedProductVisibilityWhere,engineeringGlobalReadWhere,hasFullProjectVisibility,type VisibilityActor} from './visibility';
 /** Стоимость закрыта всем исполнителям; неназначенному полю закрыт и техблок. */
 export async function maskProductionRead<T extends {id:string}>(db:Pick<PrismaClient,'product'>,actor:VisibilityActor,rows:T[]):Promise<T[]> {
  if(!rows.length)return rows;
  const money=canViewProductMoney(actor.roles);
  const restrictTechnical=hasAnyRole(actor.roles,FIELD_ROLES)&&!hasFullProjectVisibility(actor);
- const assigned=restrictTechnical?await db.product.findMany({where:{AND:[{id:{in:rows.map(row=>row.id)}},assignedProductVisibilityWhere(actor)]},select:{id:true}}):[];
+ const assigned=restrictTechnical?await db.product.findMany({where:{AND:[{id:{in:rows.map(row=>row.id)}},{OR:[assignedProductVisibilityWhere(actor),engineeringGlobalReadWhere(actor)]}]},select:{id:true}}):[];
  const ids=new Set(assigned.map(row=>row.id));
  return rows.map(row=>({...row,...(!money?{expectedPrice:null,initialPrice:null}:{}),...(restrictTechnical&&!ids.has(row.id)?{description:null}:{} )}));
 }

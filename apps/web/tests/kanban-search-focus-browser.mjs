@@ -183,7 +183,7 @@ try{
    await excluded.evaluate(()=>{window.__omitTarget=false;window.__accept(window.__clientQuery);});await waitFrames(excluded);assert.deepEqual(await excluded.evaluate(()=>window.__focusMoves),{board:0,page:0});assert.equal(await excluded.locator('[data-kanban-card-id="target"]').count(),1);
    checks.push('products:current_response_old_rows_unready_empty_exact_consumed_no_late_focus');await finish(excluded);
 
-   const roles=await makePage(section);await roles.evaluate(()=>window.__hold=true);await apply(roles,q);
+   const roles=await makePage(section);await roles.evaluate(()=>{window.__hold=true;window.__all.find(row=>row.id==='target').status='PREPARATION';});await apply(roles,q);
    await roles.evaluate(()=>{window.__focusStates=[];window.__setRoles(['ENGINEER']);window.__accept(window.__clientQuery);});await waitFrames(roles);
    const roleStates=await roles.evaluate(()=>window.__focusStates.filter(state=>state?.query===window.__number));
    assert.ok(roleStates.some(state=>state.cardId==='target'&&!state.ready),'new role props cannot confirm rows from the previous role');

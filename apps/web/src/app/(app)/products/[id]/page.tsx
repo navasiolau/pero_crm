@@ -133,7 +133,7 @@ export default async function ProductPage({
                 ? { id: work.tasks[0].id, title: work.tasks[0].title, status: work.tasks[0].status }
                 : null,
             }))}
-            canAddWork={canAddWork}
+            canAddWork={canAddWork && (canManage || priceItems.length > 0)}
             canAllocateWork={canAllocateWork}
             actorUserId={session.user.id}
             allocationData={allocationData}

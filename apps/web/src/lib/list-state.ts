@@ -35,13 +35,20 @@ export function resolveListState(
   params: ListSearchParams,
   saved: string | null,
   legacyView: string | null = null,
+  defaultEngineerId: string | null = null,
 ) {
   // Наличие любого явного query исключает подмешивание скрытых предпочтений.
   if (Object.keys(params).length > 0) {
     return normalizeListQuery(section, searchParamsQuery(params));
   }
-  if (saved !== null) return decodeListPreference(section, saved) ?? DEFAULT_LIST_QUERY;
-  return legacyView === "table" ? "view=table" : DEFAULT_LIST_QUERY;
+  const query = saved !== null ? decodeListPreference(section, saved) ?? DEFAULT_LIST_QUERY
+    : legacyView === "table" ? "view=table" : DEFAULT_LIST_QUERY;
+  const state = new URLSearchParams(query);
+  // Старый пустой скрытый фильтр не является осознанным выбором «Все инженеры».
+  if (defaultEngineerId && !state.has("engineer") && !isEngineerFilterInitialized(saved)) {
+    state.set("engineer", encodeListFilterValue([defaultEngineerId])!);
+  }
+  return normalizeListQuery(section, state.toString());
 }
 
 export function normalizeListQuery(section: ListSection, query: string) {
@@ -79,7 +86,17 @@ export function updateListQuery(section: ListSection, query: string, updates: Re
 }
 
 export function encodeListPreference(section: ListSection, query: string, revision: string) {
-  return JSON.stringify({ version: 2, revision, query: normalizeListQuery(section, query) });
+  return JSON.stringify({ version: 2, revision, engineerFilterInitialized: true, query: normalizeListQuery(section, query) });
+}
+
+export function isEngineerFilterInitialized(value: string | null): boolean {
+  if (!value) return false;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return !!parsed && typeof parsed === "object" && "version" in parsed && parsed.version === 2 &&
+      "query" in parsed && typeof parsed.query === "string" &&
+      "engineerFilterInitialized" in parsed && parsed.engineerFilterInitialized === true;
+  } catch { return false; }
 }
 
 export function decodeListPreference(section: ListSection, value: string | null): string | null {

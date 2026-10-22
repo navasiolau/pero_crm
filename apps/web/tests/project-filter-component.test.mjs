@@ -36,11 +36,11 @@ const bundleOptions = {
         window.__hideEngineer = setHideEngineer;
         window.__replaceClients = setClients;
         if(window.__section==='picker')return <PickerHarness/>;
-        if (window.__section === 'products') return <ProductsFilterBar actorRoles={['MANAGER']} hideEngineer={hideEngineer}
+        if (window.__section === 'products') return <ProductsFilterBar actorRoles={window.__roles} hideEngineer={hideEngineer}
           projectOptions={[{value:'p1',label:'Проект 1'},{value:'p2',label:'Проект 2'},{value:'p3',label:'Проект 3'}]}
           clientOptions={clients.map(item=>({value:item.id,label:item.name}))}
           engineerOptions={[{value:'e1',label:'Инженер 1'},{value:'e2',label:'Инженер 2'},{value:'e3',label:'Инженер 3'}]}/>;
-        return <ProjectsFilterBar hideEngineer={hideEngineer} clients={clients} managers={[{id:'m1',name:'Менеджер 1'},{id:'m2',name:'Менеджер 2'}]} engineers={[{id:'e1',name:'Инженер 1'},{id:'e2',name:'Инженер 2'},{id:'e3',name:'Инженер 3'}]}/>;
+        return <ProjectsFilterBar actorRoles={window.__roles} hideEngineer={hideEngineer} clients={clients} managers={[{id:'m1',name:'Менеджер 1'},{id:'m2',name:'Менеджер 2'}]} engineers={[{id:'e1',name:'Инженер 1'},{id:'e2',name:'Инженер 2'},{id:'e3',name:'Инженер 3'}]}/>;
       }
       createRoot(document.getElementById('root')).render(<Harness/>);
     `,
@@ -94,7 +94,7 @@ const bundleOptions = {
   logLevel: "silent",
 };
 const bundlePromise = build(bundleOptions);
-async function withPage(initialQuery, run, section = "projects") {
+async function withPage(initialQuery, run, section = "projects", roles = ["MANAGER"]) {
   const bundle = await bundlePromise;
   const context = await browser.newContext({ viewport:{width:1440,height:900}, reducedMotion:"reduce" });
   try {
@@ -108,7 +108,7 @@ async function withPage(initialQuery, run, section = "projects") {
       [data-filter-options]{max-height:224px;overflow-y:auto}
       button,[role=checkbox]{cursor:pointer}
     </style><div style="height:900px"></div><div id="root"></div><div style="height:1200px"></div>`);
-    await page.evaluate(({ query, section }) => { window.__initialQuery = query; window.__section = section; }, { query: initialQuery, section });
+    await page.evaluate(({ query, section, roles }) => { window.__initialQuery = query; window.__section = section; window.__roles = roles; }, { query: initialQuery, section, roles });
     await page.addScriptTag({ content: bundle.outputFiles[0].text });
     await page.locator(section==='picker'?'#picker-neighbor':`#${section}-active-only`).waitFor();
     await run(page);
@@ -118,6 +118,24 @@ async function withPage(initialQuery, run, section = "projects") {
 }
 
 const queryValue = (page, key) => page.evaluate((name) => new URLSearchParams(window.__query).get(name), key);
+
+for (const section of ["projects", "products"]) test(`${section} engineer sees the allowed statuses and may choose All or another engineer`, async () => {
+  await withPage("engineer=e1", async page => {
+    await page.getByRole("button", { name: "Статус", exact: true }).click();
+    let popup = page.locator('[data-slot="popover-content"]');
+    assert.deepEqual(await popup.getByRole("checkbox").evaluateAll(nodes => nodes.map(node => node.getAttribute("aria-label"))), section === "projects"
+      ? ["Договор", "В работе", "Завершён"]
+      : ["Проектирование", "В производстве", "На складе ГП", "Установка", "Готово"]);
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: /Инженер/, exact: false }).click();
+    popup = page.locator('[data-slot="popover-content"]');
+    assert.equal(await popup.getByRole("checkbox", { name: "Инженер 1", exact: true }).getAttribute("aria-checked"), "true");
+    await popup.getByRole("button", { name: "Сброс", exact: true }).click();
+    assert.equal(await queryValue(page, "engineer"), null);
+    await popup.getByRole("checkbox", { name: "Инженер 2", exact: true }).click();
+    assert.deepEqual(JSON.parse(await queryValue(page, "engineer")), ["e2"]);
+  }, section, ["ENGINEER"]);
+});
 
 for (const section of ["projects", "products"]) {
 test(`${section} filters default to all and Незавершённые writes explicit 1/0 preserving other state`, async () => {
@@ -255,7 +273,7 @@ test("products multi status/project/engineer and dimension reset preserve other 
     await page.keyboard.press("Escape");
     await page.getByRole("button", { name: "Статус", exact: true }).click();
     popup = page.locator('[data-slot="popover-content"]');
-    assert.equal(await popup.getByRole("checkbox").count(), 8);
+    assert.equal(await popup.getByRole("checkbox").count(), 7);
     assert.equal(await popup.getByRole("checkbox", { name: "Черновик", exact: true }).count(), 1);
     assert.equal(await popup.getByRole("checkbox", { name: "Проектирование", exact: true }).getAttribute("aria-checked"), "true");
     const scroll = await page.evaluate(() => window.scrollY);
@@ -263,7 +281,7 @@ test("products multi status/project/engineer and dimension reset preserve other 
     assert.deepEqual(JSON.parse(await queryValue(page, "status")), ["DESIGN", "PRODUCTION"]);
     assert.equal(await page.evaluate(() => window.scrollY), scroll);
     await popup.getByRole("button", { name: "Сброс", exact: true }).click();
-    for (const name of ["Черновик", "Подготовка", "Проектирование", "В производстве", "На складе ГП", "Установка", "Готово", "Рекламация"]) await popup.getByRole("checkbox", { name, exact: true }).click();
+    for (const name of ["Черновик", "Подготовка", "Проектирование", "В производстве", "На складе ГП", "Установка", "Готово"]) await popup.getByRole("checkbox", { name, exact: true }).click();
     assert.equal(await queryValue(page, "status"), null);
     assert.equal(await popup.getByRole("checkbox", { checked: true }).count(), 0);
     await popup.getByRole("checkbox", { name: "Проектирование", exact: true }).click();

@@ -31,7 +31,7 @@ export default async function ProjectsPage({
 
   const role = session.user.roles;
   const rawParams = await searchParams;
-  const state = await listPreferences.load("projects", rawParams);
+  const state = await listPreferences.load("projects", rawParams, { defaultEngineer: role.includes("ENGINEER") });
   if (Object.keys(rawParams).length === 0) redirect(`/projects?${state.query}`);
   const params = Object.fromEntries(new URLSearchParams(state.query));
   const { filters, page, pageSize } = parseProjectListParams(params);
@@ -77,8 +77,8 @@ export default async function ProjectsPage({
       page={page}
       pageSize={pageSize}
       canManage={canManage}
+      actorRoles={role}
       showAmount={canViewProductMoney(session.user.roles)}
-      hideEngineerFilter={role.includes("ENGINEER") && !hasAnyRole(role, MANAGER_ROLES)}
       clients={clients.map((client) => ({ id: client.id, name: displayClientName(client) }))}
       managers={managers.map((manager) => ({ id: manager.id, name: manager.name }))}
       engineers={engineers.map((engineer) => ({ id: engineer.id, name: engineer.name }))}

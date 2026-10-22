@@ -69,21 +69,22 @@ test("selected engineer participants union across users but cannot bypass roles 
     const manager = await queries.listProducts("manager", ["MANAGER"], filters);
     assert.deepEqual(new Set(manager.rows.map((row) => row.id)), new Set(["product-0", "product-1", "product-2", "product-3", "product-4", "product-5"]));
     const engineer = await queries.listProducts("e1", ["ENGINEER"], filters);
-    assert.deepEqual(new Set(engineer.rows.map((row) => row.id)), new Set(["product-0", "product-2", "product-4", "product-5"]));
+    assert.deepEqual(new Set(engineer.rows.map((row) => row.id)), new Set(["product-0", "product-1", "product-2", "product-3", "product-4", "product-5"]));
     const selected = async (ids:string[],statuses?:ProductStatus[]) => new Set((await queries.listProducts("e1",["ENGINEER"],{activeOnly:false,engineerIds:ids,...(statuses?{statuses}:{})})).rows.map(row=>row.id));
     assert.deepEqual(await selected(["e1"]),new Set(["product-0","product-2","product-4","product-5"]));
-    assert.deepEqual(await selected(["e2"]),new Set());
-    assert.deepEqual(await selected(["e3"]),new Set(["product-5"]),"selected primary e3 never exposes foreign product-3 to e1");
+    assert.deepEqual(await selected(["e2"]),new Set(["product-1","product-3"]));
+    assert.deepEqual(await selected(["e3"]),new Set(["product-3","product-5"]),"global read keeps primary and participant filter semantics");
     assert.deepEqual(await selected(["e1"],["DESIGN"]),new Set(["product-0","product-4","product-5"]));
     assert.deepEqual(await selected(["e1"],["PRODUCTION"]),new Set(["product-2"]));
     assert.deepEqual(await selected(["e1"],["DONE"]),new Set());
+    assert.deepEqual(await selected(["e2"],["DONE"]),new Set(["product-1"]));
     const deleted = rows[5].deletedAt;
     rows[5].deletedAt = new Date(0);
     try { assert.deepEqual(await selected(["e1"]),new Set(["product-0","product-2","product-4"])); }
     finally { rows[5].deletedAt = deleted; }
     const parent=rows[5].project as FixtureRow,parentDeleted=parent.deletedAt;
     parent.deletedAt = new Date(0);
-    try { assert.deepEqual(await selected(["e3"]),new Set()); }
+    try { assert.deepEqual(await selected(["e3"]),new Set(["product-3"])); }
     finally { parent.deletedAt=parentDeleted; }
     assert.equal((await queries.listProducts("e1",["ACCOUNTANT"],{activeOnly:false,engineerIds:["e1"]})).total,0);
     const worker = await queries.listProducts("field", ["WORKER"], filters);
