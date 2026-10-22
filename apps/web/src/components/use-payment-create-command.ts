@@ -21,6 +21,10 @@ const parseCommand = (value: unknown): PaymentCommand => {
   throw Error("INVALID_SAVED_PAYMENT");
 };
 const content = (command: PaymentCommand) => JSON.stringify({...command, data: {...command.data, clientMutationId: undefined}});
+function freezeCommand(command: PaymentCommand) {
+  if (command.data.reportDocumentIds) Object.freeze(command.data.reportDocumentIds);
+  Object.freeze(command.data); Object.freeze(command);
+}
 
 /** Один actor-scoped UUID живёт до подтверждения; browser reload только читает sessionStorage. */
 export function createPaymentCommands(send: (command: PaymentCommand, actorId: string) => Promise<Ack>, storage: StoragePort,
@@ -40,7 +44,7 @@ export function createPaymentCommands(send: (command: PaymentCommand, actorId: s
       const command = parseCommand(saved.command);
       if (command.kind !== scope.kind || command.kind === "payment" && command.data.direction !== scope.direction) throw Error("INVALID_SAVED_PAYMENT");
       if (command.kind === "payment" && scope.projectId != null && command.data.projectId !== scope.projectId) throw Error("INVALID_SAVED_PAYMENT");
-      Object.freeze(command.data); Object.freeze(command);
+      freezeCommand(command);
       const intent = {command, uncertain: true}; intents.set(id, intent); return intent;
     } catch {const blocked: Blocked = {blocked: true, error: "Не удалось прочитать прежнее намерение. Проверьте историю платежей."}; intents.set(id, blocked); return blocked;}
   }
@@ -57,7 +61,7 @@ export function createPaymentCommands(send: (command: PaymentCommand, actorId: s
     let intent: Intent;
     try {intent = saved ?? {command: parseCommand({...input, data: {...input.data, clientMutationId: requestId().toLowerCase()}}), uncertain: false};}
     catch {return {ok: false, outcome: "ROLLED_BACK", kind: "invalid-request", error: "Проверьте данные платежа"};}
-    Object.freeze(intent.command.data); Object.freeze(intent.command); intents.set(id, intent);
+    freezeCommand(intent.command); intents.set(id, intent);
     try {storage.setItem(id, JSON.stringify({version: 1, actorId: actor, scope: scopeKey(scope), command: intent.command}));}
     catch {if (!saved) intents.delete(id); return unknown(intent, "Не удалось сохранить идентификатор. Платёж не отправлен.");}
     const epoch = generation;

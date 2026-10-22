@@ -32,6 +32,7 @@ export type PaymentRow = {
   expenseArticleName: string | null;
   createdByName: string | null;
   reportDocument: ViewableFile | null;
+  reportDocuments?: ViewableFile[];
   stockPurchase: StockPurchaseView | null;
   logisticsTripId?: string | null;
 };

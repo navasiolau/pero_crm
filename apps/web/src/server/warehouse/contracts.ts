@@ -1,6 +1,7 @@
 import { union, string, number, object, uuid, literal, NEVER, type input, type output } from 'zod';
 import {priceInput,quantityInput} from '@/lib/warehouse-cost';
 import type {ViewableFile} from '@/lib/viewable-file';
+import {reportDocumentIdsSchema,exclusiveReportDocumentInput,exclusiveReportDocumentError} from '@/server/finance-documents/input';
 function decimal(read:(value:unknown)=>string){return union([string(),number()],{error:'Укажите корректное число'}).transform((value,ctx)=>{try{return read(value);}catch(error){ctx.addIssue({code:'custom',message:error instanceof Error?error.message:'Некорректное число'});return NEVER;}});}
 const base={quantity:decimal(quantityInput),clientMutationId:uuid({error:'Некорректный идентификатор запроса'}).transform(value=>value.toLowerCase()),comment:string().optional()};
 export const stockInventoryReceiptSchema=object({...base,receiptKind:literal('INVENTORY').default('INVENTORY'),materialId:string().min(1,'Выберите материал'),unitPrice:decimal(priceInput)}).strict();
@@ -10,8 +11,8 @@ export const stockIncomeSchema=stockInventoryReceiptSchema;
 export const stockPurchaseSchema=object({...base,
  materialId:string().min(1,'Выберите материал'),unitPrice:decimal(priceInput),
  currency:string(),cashAccountId:string().min(1,'Выберите кассу'),expenseArticleId:string().min(1,'Выберите статью расхода'),
- rate:number().positive().optional(),rateDate:string().optional(),paidAt:string().optional(),reportDocumentId:string().min(1).optional(),
-}).strict();
+ rate:number().positive().optional(),rateDate:string().optional(),paidAt:string().optional(),reportDocumentId:string().min(1).optional(),reportDocumentIds:reportDocumentIdsSchema.optional(),
+}).strict().refine(exclusiveReportDocumentInput,exclusiveReportDocumentError);
 export type StockPurchaseInput=input<typeof stockPurchaseSchema>;
 export type StockPurchaseData=output<typeof stockPurchaseSchema>;
 export type StockMaterialOption={id:string;name:string;unit:string;sku:string|null;stock?:number};
@@ -25,6 +26,7 @@ export type StockMovementView = {
  productId:string|null;productNumber:string|null;comment:string|null;createdByName:string|null;createdAt:string;
  returnableQuantity?:number|null;
  reportDocument?:ViewableFile|null;
+ reportDocuments?:ViewableFile[];
 };
 export type ProjectMaterialLineStatus="FULFILLED"|"AVAILABLE"|"SHORTAGE";
 export type ProjectMaterialLine = {

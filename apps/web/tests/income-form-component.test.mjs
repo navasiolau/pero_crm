@@ -109,7 +109,7 @@ test('expense keeps its required article and submits the selected article',async
   await page.getByRole('button',{name:'Внести расход',exact:true}).click();
   await page.waitForFunction(()=>window.__paymentInput);
   const submitted=await page.evaluate(()=>window.__paymentInput);
-  assert.equal(submitted.expenseArticleId,'article-1');assert.ok(submitted.reportDocumentId);assert.match(submitted.clientMutationId,/^[a-f0-9-]{36}$/);
+  assert.equal(submitted.expenseArticleId,'article-1');assert.equal(submitted.reportDocumentIds.length,1);assert.match(submitted.clientMutationId,/^[a-f0-9-]{36}$/);
   await page.evaluate(()=>{window.__paymentInput=null});
   await page.locator('#pay-article').click();
   await page.getByRole('button',{name:'Логистика',exact:true}).click();
@@ -135,7 +135,7 @@ test('general expense has explicit organization context and submits document wit
   assert.equal(await page.getByText('Расход уменьшит маржу проекта',{exact:true}).count(),0);
   await page.locator('#pay-amount').fill('25');await uploadDocument(page);
   await page.getByRole('button',{name:'Внести расход',exact:true}).click();await page.waitForFunction(()=>window.__paymentInput);
-  const input=await page.evaluate(()=>window.__paymentInput);assert.equal(input.projectId,null);assert.equal(input.direction,'EXPENSE');assert.ok(input.reportDocumentId);
+  const input=await page.evaluate(()=>window.__paymentInput);assert.equal(input.projectId,null);assert.equal(input.direction,'EXPENSE');assert.equal(input.reportDocumentIds.length,1);
  });
 });
 
@@ -176,7 +176,7 @@ test('paid warehouse receipt submits optional uploaded document and preserves it
   await page.locator('#purchase-material').click();await page.getByText('Петля',{exact:true}).click();
   await page.locator('#purchase-qty').fill('3');await page.locator('#purchase-price').fill('20');await uploadDocument(page);
   await page.getByRole('button',{name:'Оплатить и принять на склад',exact:true}).click();await page.waitForFunction(()=>window.__stockInput);
-  const first=await page.evaluate(()=>window.__stockInput);assert.ok(first.reportDocumentId);
+  const first=await page.evaluate(()=>window.__stockInput);assert.equal(first.reportDocumentIds.length,1);
   await page.evaluate(()=>{window.__stockInput=null});
   await page.getByRole('button',{name:'Проверить',exact:true}).click();await page.waitForFunction(()=>window.__stockInput);
   assert.deepEqual(await page.evaluate(()=>window.__stockInput),first);
@@ -207,5 +207,45 @@ test('late upload acknowledgement cannot attach a document to a newly opened for
    assert.equal(await page.getByRole('button',{name:'Внести расход',exact:true}).isDisabled(),true);
    assert.equal(await page.getByRole('link',{name:'Late.pdf',exact:true}).count(),0);
   }finally{release?.()}
+ });
+});
+
+test('three expense files use single-file requests; partial UNKNOWN retries the exact UUID and preserves ready files',async()=>{
+ await withDialog({__testDirection:'EXPENSE',__testProjectId:'project-1'},async page=>{
+  const calls=[],ids=new Map();let failed=false;
+  await page.route('**/api/finance/documents/upload',async route=>{
+   const data=route.request().postDataBuffer().toString('utf8');
+   const name=/filename="([^"]+)"/.exec(data)?.[1],uuid=/name="clientMutationId"\r\n\r\n([^\r\n]+)/.exec(data)?.[1];
+   assert.ok(uuid);assert.ok(name);calls.push({name,uuid});if(!ids.has(uuid))ids.set(uuid,randomUUID());
+   if(name==='2.pdf'&&!failed){failed=true;await route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({ok:false,commitState:'unknown',error:'Ответ потерян'})});return;}
+   await route.fulfill({status:201,contentType:'application/json',body:JSON.stringify({ok:true,document:{id:ids.get(uuid),source:'finance',fileName:name,mimeType:'application/pdf',size:4,createdAt:new Date().toISOString(),paymentId:null}})});
+  });
+  await page.locator('#pay-amount').fill('30');
+  await page.locator('#pay-document').setInputFiles([1,2,3].map(index=>({name:`${index}.pdf`,mimeType:'application/pdf',buffer:Buffer.from('%PDF')})));
+  await page.getByRole('link',{name:'3.pdf',exact:true}).waitFor();
+  assert.equal(await page.getByRole('button',{name:'Внести расход',exact:true}).isDisabled(),true);
+  await page.getByRole('button',{name:'Повторить этот файл',exact:true}).click();await page.getByRole('link',{name:'2.pdf',exact:true}).waitFor();
+  assert.equal(calls.length,4);assert.deepEqual(calls[1],calls[3]);assert.notEqual(calls[0].uuid,calls[1].uuid);
+  await page.getByRole('button',{name:'Внести расход',exact:true}).click();await page.waitForFunction(()=>window.__paymentInput);
+  const input=await page.evaluate(()=>window.__paymentInput);assert.deepEqual(input.reportDocumentIds,[ids.get(calls[0].uuid),ids.get(calls[1].uuid),ids.get(calls[2].uuid)]);assert.equal(input.amount,30);
+ });
+});
+
+test('drop and paste enqueue every file and an error row can be excluded without an automatic storage delete',async()=>{
+ await withDialog({__testDirection:'EXPENSE',__testProjectId:'project-1'},async page=>{
+  const uploads=[];await page.route('**/api/finance/documents/upload',async route=>{
+   const name=/filename="([^"]+)"/.exec(route.request().postDataBuffer().toString('utf8'))?.[1];uploads.push(name);
+   await route.fulfill({status:name==='bad.pdf'?422:201,contentType:'application/json',body:JSON.stringify(name==='bad.pdf'?{ok:false,commitState:'notCommitted',error:'Файл отклонён'}:{ok:true,document:{id:randomUUID(),source:'finance',fileName:name,mimeType:'application/pdf',size:4,createdAt:new Date().toISOString(),paymentId:null}})});
+  });
+  await page.locator('#pay-amount').fill('10');
+  for(const [event,names] of [['drop',['drop1.pdf','drop2.pdf']],['paste',['paste1.pdf','bad.pdf']]])await page.locator('label[for="pay-document"]').last().evaluate((label,{event,names})=>{
+   const transfer=new DataTransfer();for(const name of names)transfer.items.add(new File(['%PDF'],name,{type:'application/pdf'}));
+   label.dispatchEvent(event==='drop'?new DragEvent('drop',{bubbles:true,dataTransfer:transfer}):new ClipboardEvent('paste',{bubbles:true,clipboardData:transfer}));
+  },{event,names});
+  await page.getByText('Файл отклонён',{exact:true}).waitFor();assert.equal(uploads.length,4);
+  assert.equal(await page.getByRole('button',{name:'Внести расход',exact:true}).isDisabled(),true);
+  await page.getByRole('button',{name:'Исключить bad.pdf из операции',exact:true}).click();
+  await page.getByRole('button',{name:'Внести расход',exact:true}).click();await page.waitForFunction(()=>window.__paymentInput);
+  assert.equal((await page.evaluate(()=>window.__paymentInput)).reportDocumentIds.length,3);assert.equal(uploads.length,4);
  });
 });

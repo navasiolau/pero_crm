@@ -5,6 +5,16 @@ import { documentFromMessage, TelegramDocumentError, type TelegramDocument } fro
 
 export type ReportDocument = { id: string; fileName: string; mimeType: string };
 export type DocumentAttempt = { key: string; clientMutationId: string; attachment: TelegramDocument };
+type ReportDraft = { reportDocument?: ReportDocument; reportDocuments?: ReportDocument[]; documentAttempt?: DocumentAttempt };
+
+/** Старый диалог сохранял attempt даже после READY; это не незавершённая загрузка. */
+export function hasUnresolvedDocumentAttempt(draft: ReportDraft) {
+  return !!draft.documentAttempt && (draft.reportDocuments !== undefined || !draft.reportDocument);
+}
+export function paymentReportDocumentInput(draft: ReportDraft) {
+  return draft.reportDocuments !== undefined ? {reportDocumentIds: draft.reportDocuments.map(file => file.id)}
+    : draft.reportDocument ? {reportDocumentId: draft.reportDocument.id} : {};
+}
 
 /** Повтор той же отправки сохраняет UUID, в том числе после потери ответа CRM. */
 export function documentAttempt(message: TgMessage, previous?: DocumentAttempt): DocumentAttempt | undefined {

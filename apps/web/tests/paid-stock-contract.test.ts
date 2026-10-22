@@ -31,6 +31,10 @@ test("paid receipt accepts an optional document but refuses empty identifiers",(
  assert.equal(paymentDetailsSchema.parse(nested).clientMutationId,input.clientMutationId);
  assert.equal(paymentDetailsSchema.safeParse({...nested,clientMutationId:undefined}).success,true);
  assert.equal(paymentSchema.safeParse({...nested,clientMutationId:undefined}).success,false);
+ const ids=["00000195-0000-4000-8000-000000000001","00000195-0000-4000-8000-000000000002","00000195-0000-4000-8000-000000000003"];
+ assert.deepEqual(stockPurchaseSchema.parse({...input,reportDocumentIds:ids}).reportDocumentIds,ids);
+ assert.equal(stockPurchaseSchema.safeParse({...input,reportDocumentIds:[ids[0],ids[0]]}).success,false);
+ assert.equal(stockPurchaseSchema.safeParse({...input,reportDocumentId:ids[0],reportDocumentIds:ids}).success,false);
 });
 
 test("actual paid-stock service distinguishes prewrite/rollback from uncertain receipt or commit",async()=>{

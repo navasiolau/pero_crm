@@ -6,16 +6,17 @@ import type { TgMessage } from "./tg";
 import { documentAttempt, uploadFinanceDocument, documentUploadError, type DocumentAttempt, type ReportDocument } from "./finance-document-upload";
 
 type StockInput = { clientMutationId: string; materialId: string; quantity: string; unitPrice: string; currency: string; cashAccountId: string; expenseArticleId: string;
-  rate?: number; rateDate?: string; comment?: string; reportDocumentId?: string };
+  rate?: number; rateDate?: string; comment?: string; reportDocumentId?: string; reportDocumentIds?: string[] };
 export type StockPurchaseDialog = {
   kind: "stockPurchase"; step: "material" | "quantity" | "cash" | "price" | "article" | "rate" | "comment" | "document" | "quote" | "confirm";
   input: StockInput; materialLabel?: string; unit?: string; cashLabel?: string; articleLabel?: string;
   choices?: DirectoryItem[]; choiceToken?: string; quote?: StockReceiptQuote; busy?: boolean;
   documentAttempt?: DocumentAttempt; reportDocument?: ReportDocument; retryRate?: boolean;
+  reportDocuments?: ReportDocument[];
 };
 type FlowContext = DialogContext<StockPurchaseDialog>;
 export async function startStockPurchase(ctx: FlowContext, chatId: number) {
-  const dialog: StockPurchaseDialog = { kind: "stockPurchase", step: "material", input: {
+  const dialog: StockPurchaseDialog = { kind: "stockPurchase", step: "material", reportDocuments: [], input: {
     clientMutationId: randomUUID(), materialId: "", quantity: "", unitPrice: "", currency: "", cashAccountId: "", expenseArticleId: "",
   } };
   ctx.setDialog(chatId, dialog);
@@ -50,11 +51,22 @@ async function confirm(ctx: FlowContext, chatId: number, actorId: string, dialog
     `Из кассы «${dialog.cashLabel}»: ${formatMoney(response.quote.amount, response.quote.currency)}`,
     `Стоимость запаса: ${formatMoney(response.quote.bynAmount,"BYN")}`,
     `Статья: ${dialog.articleLabel}`, `Комментарий: ${dialog.input.comment ?? "—"}`,
-    `Отчетный документ: ${dialog.reportDocument?.fileName ?? "Без документа"}`,
+    `Отчетные документы: ${stockDocuments(dialog).map(file => file.fileName).join(", ") || "Без документа"}`,
   ].join("\n"), [[{ text: "✅ Оплатить и принять", callback_data: `sp:${dialog.input.clientMutationId}:ok` }], cancel]);
 }
 function skipDocument(dialog: StockPurchaseDialog) {
   return [{ text: "Без документа", callback_data: `sp:${dialog.input.clientMutationId}:nodoc` }];
+}
+function stockDocuments(dialog: StockPurchaseDialog) {
+  return dialog.reportDocuments ?? (dialog.reportDocument ? [dialog.reportDocument] : []);
+}
+async function documentList(ctx: FlowContext, chatId: number, dialog: StockPurchaseDialog) {
+  dialog.step = "document";
+  const documents = stockDocuments(dialog);
+  await ctx.reply(chatId, `Отчётные документы (${documents.length}):\n${documents.map((file, index) => `${index + 1}. ${file.fileName}`).join("\n")}\nОтправьте ещё файл или продолжите.`, [
+    ...(documents.length && !dialog.documentAttempt ? [[{ text: "Продолжить", callback_data: `sp:${dialog.input.clientMutationId}:continue` }]] : []),
+    ...(!documents.length ? [skipDocument(dialog)] : []), cancel,
+  ]);
 }
 function attemptToken(attempt: DocumentAttempt) { return attempt.clientMutationId.replaceAll("-", "").slice(0, 12); }
 async function uploadDocument(ctx: FlowContext, chatId: number, actorId: string, dialog: StockPurchaseDialog) {
@@ -63,13 +75,20 @@ async function uploadDocument(ctx: FlowContext, chatId: number, actorId: string,
   try {
     const document = await uploadFinanceDocument(actorId, attempt);
     if (ctx.getDialog(chatId) !== dialog) return;
-    dialog.reportDocument = document; dialog.input.reportDocumentId = document.id;
-    await confirm(ctx, chatId, actorId, dialog);
+    if (dialog.reportDocuments !== undefined) {
+      if (!dialog.reportDocuments.some(row => row.id === document.id)) dialog.reportDocuments.push(document);
+      dialog.documentAttempt = undefined;
+      await documentList(ctx, chatId, dialog);
+    } else {
+      dialog.reportDocument = document; dialog.input.reportDocumentId = document.id;
+      await confirm(ctx, chatId, actorId, dialog);
+    }
   } catch (error) {
     if (ctx.getDialog(chatId) !== dialog) return;
     await ctx.reply(chatId, `❌ ${documentUploadError(error)}. Данные прихода сохранены.`, [
       [{ text: "Повторить загрузку", callback_data: `sp:${dialog.input.clientMutationId}:docretry:${attemptToken(attempt)}` }],
-      skipDocument(dialog), cancel,
+      [{ text: "Исключить этот файл", callback_data: `sp:${dialog.input.clientMutationId}:exclude:${attemptToken(attempt)}` }],
+      ...(!stockDocuments(dialog).length ? [skipDocument(dialog)] : []), cancel,
     ]);
   }
 }
@@ -80,7 +99,11 @@ export async function stockPurchaseDocument(ctx: FlowContext, chatId: number, ac
   }
   if (dialog.step === "comment") dialog.input.comment = message.caption?.trim() || undefined;
   dialog.step = "document";
-  dialog.documentAttempt = documentAttempt(message, dialog.documentAttempt);
+  const attempt = documentAttempt(message, dialog.documentAttempt);
+  if (dialog.documentAttempt && attempt?.clientMutationId !== dialog.documentAttempt.clientMutationId) {
+    await ctx.reply(chatId, "Сначала повторите или исключите неподтверждённый файл."); return;
+  }
+  dialog.documentAttempt = attempt;
   dialog.busy = true;
   try { await uploadDocument(ctx, chatId, actorId, dialog); }
   finally { dialog.busy = false; }
@@ -111,7 +134,7 @@ export async function stockPurchaseText(ctx: FlowContext, chatId: number, actorI
       case "comment":
         dialog.input.comment = ["—","-"].includes(text) ? undefined : text;
         dialog.step = "document";
-        await ctx.reply(chatId,"Отчетный документ (необязательно): отправьте файл или фото либо выберите «Без документа».",[skipDocument(dialog),cancel]); break;
+        await ctx.reply(chatId,"Отчетные документы (необязательно): отправляйте файлы или фото либо выберите «Без документа».",[skipDocument(dialog),cancel]); break;
       default: await ctx.reply(chatId,"Выберите вариант кнопкой или отмените операцию.",[cancel]);
     }
   } finally { dialog.busy = false; }
@@ -139,7 +162,14 @@ export async function stockPurchaseCallback(ctx: FlowContext, chatId: number, ac
       }
       return;
     }
-    if (args[1] === "nodoc" && dialog.step === "document") { dialog.documentAttempt = undefined; await confirm(ctx,chatId,actorId,dialog); return; }
+    if (args[1] === "nodoc" && dialog.step === "document" && !stockDocuments(dialog).length) { dialog.documentAttempt = undefined; await confirm(ctx,chatId,actorId,dialog); return; }
+    if (args[1] === "continue" && dialog.step === "document" && !dialog.documentAttempt && stockDocuments(dialog).length) {
+      if (dialog.reportDocuments !== undefined) dialog.input.reportDocumentIds = dialog.reportDocuments.map(file => file.id);
+      await confirm(ctx,chatId,actorId,dialog); return;
+    }
+    if (args[1] === "exclude" && dialog.step === "document" && dialog.documentAttempt && args[2] === attemptToken(dialog.documentAttempt)) {
+      dialog.documentAttempt = undefined; await documentList(ctx,chatId,dialog); return;
+    }
     if (args[1] === "docretry" && dialog.step === "document" && dialog.documentAttempt && args[2] === attemptToken(dialog.documentAttempt)) {
       await uploadDocument(ctx,chatId,actorId,dialog); return;
     }

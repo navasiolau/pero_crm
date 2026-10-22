@@ -73,3 +73,18 @@ test("matching removed-ID proof resolves historical intent while mismatched ACK 
   controller.observeActor("actor");assert.equal((await controller.run("actor",scope,input))?.outcome,"UNKNOWN");assert.equal(f.map.size,1);mode="removed";assert.equal((await controller.run("actor",scope,input))?.ok,false);assert.equal(f.map.size,0);
  }finally{f.moduleScope.restore();}
 });
+
+test("UNKNOWN multi-document payload freezes its full set across reload and exact retry",async()=>{
+ const f=fixture();try{
+  const ids=[1,2,3].map(index=>`00000195-0000-4000-8000-${String(index).padStart(12,"0")}`);
+  const command:PaymentCommand={kind:"payment",data:{...input.data,direction:"EXPENSE",expenseArticleId:"article",reportDocumentIds:ids}};
+  const expenseScope={...scope,direction:"EXPENSE"as const};const sent:PaymentCommand[]=[];
+  const send=async(data:PaymentCommand):Promise<PaymentMutationResult>=>{sent.push(data);return{ok:false,outcome:"UNKNOWN",retrySafe:true,clientMutationId:data.data.clientMutationId,error:"ACK lost"}};
+  let controller=f.createPaymentCommands(send,f.storage,()=>id);controller.observeActor("actor");await controller.run("actor",expenseScope,command);
+  assert.equal(Object.isFrozen(sent[0].data.reportDocumentIds),true);
+  controller=f.createPaymentCommands(send,f.storage,()=>id);controller.observeActor("actor");
+  const restored=controller.peek("actor",expenseScope);assert.ok(restored&&!("blocked"in restored));
+  if(restored&&!("blocked"in restored)){assert.deepEqual(restored.command,sent[0]);await controller.run("actor",expenseScope,restored.command);}
+  assert.deepEqual(sent[0],sent[1]);assert.deepEqual(sent[0].data.reportDocumentIds,ids);
+ }finally{f.moduleScope.restore();}
+});
