@@ -35,6 +35,7 @@ test("product parser reads arrays/scalars, ignores empty/invalid axes and defaul
   assert.equal(ignored.filters.projectIds, undefined);
   assert.equal(ignored.filters.engineerIds, undefined);
   assert.deepEqual(ignored.filters.clientIds, ["c1"]);
+  assert.deepEqual(queries.parseProductListParams({status:'["RECLAMATION","DESIGN"]'}).filters.statuses,["DESIGN"]);
 });
 
 test("product status/project/client/engineer arrays OR within each axis and AND across search/activity", async () => {

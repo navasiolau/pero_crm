@@ -43,6 +43,7 @@ test("project parser accepts arrays and legacy scalars while empty and invalid a
   assert.equal(ignored.filters.stages, undefined);
   assert.equal(ignored.filters.engineerIds, undefined);
   assert.deepEqual(ignored.filters.managerIds, ["m1"]);
+  assert.deepEqual(queries.parseProjectListParams({stage:'["PAUSED","CONTRACT","RECLAMATION"]'}).filters.stages,["CONTRACT"]);
 });
 
 test("two engineers and five clients union within each axis and intersect manager/stage axes", async () => {

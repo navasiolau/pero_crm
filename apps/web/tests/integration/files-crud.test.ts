@@ -663,7 +663,7 @@ test("files.crud: file113, документы, attachment ACL и inline-дейс
       }]));
       assert.equal(projection.derived?.productsSubtotalBYN, vector.subtotal); assert.equal(projection.derived?.expectedTotalBYN, vector.total);
     }
-    const stageInput = (toStage: "REFUSED" | "RECLAMATION", expectedStage: "LEAD" | "REFUSED" | "RECLAMATION", extras?: object) =>
+    const stageInput = (toStage: "REFUSED" | "RECLAMATION" | "IN_WORK", expectedStage: "LEAD" | "REFUSED" | "IN_WORK", extras?: object) =>
       ({ projectId: own.id, toStage, expectedStage, clientMutationId: randomUUID(), ...(extras ? { extras } : {}) });
     const stage = (actor: HttpActor, input: object) => f.action<ProjectStageResult>("patchProjectStage", page, actor, [input]);
     const stageBefore = await nativeSnapshot(f.db);
@@ -675,9 +675,9 @@ test("files.crud: file113, документы, attachment ACL и inline-дейс
     assert.equal((await f.db.project.findUniqueOrThrow({ where: { id: own.id } })).refusalComment, null);
     const count = await f.db.projectStageHistory.count({ where: { projectId: own.id } }); assert.equal((await stage(manager, refusal)).replayed, true);
     assert.equal(await f.db.projectStageHistory.count({ where: { projectId: own.id } }), count);
-    const stale = await stage(second, stageInput("RECLAMATION", "LEAD", { reclamationReason: "Other", reclamationDescription: "Desc", reclamationFault: "CI" }));
+    const stale = await stage(second, stageInput("IN_WORK", "LEAD"));
     assert.equal(stale.kind, "conflict"); assert.equal(stale.stage, "REFUSED");
-    assert.equal((await stage(manager, stageInput("RECLAMATION", "REFUSED", { reclamationReason: "Reason", reclamationDescription: "Desc", reclamationFault: "CI" }))).kind, "saved");
+    assert.equal((await stage(manager, stageInput("IN_WORK", "REFUSED"))).kind, "saved");
     for (const row of products) assert.equal((await f.db.product.findUniqueOrThrow({ where: { id: row.id } })).status, "DESIGN");
     assert.equal(await f.db.productPercentageCompletion.count({ where: { productId: { in: products.map(row => row.id) } } }), 0);
     assert.equal(await f.db.productStageSettlement.count({ where: { productId: { in: products.map(row => row.id) } } }), 0);
@@ -685,7 +685,7 @@ test("files.crud: file113, документы, attachment ACL и inline-дейс
     await f.fault("DomainEvent", manager.id, async () => {
       const snapshot = await nativeSnapshot(f.db), reply = await call(manager, "address", "Atomic overwrite", "Shared address");
       assert.equal(reply.kind, "failure"); if (reply.kind === "failure") assert.match(reply.error, /CI169_EXPECTED_FAULT/); assert.deepEqual(await nativeSnapshot(f.db), snapshot);
-      assert.equal((await stage(manager, stageInput("REFUSED", "RECLAMATION", { refusalReason: "Atomic stage" }))).kind, "failure");
+      assert.equal((await stage(manager, stageInput("REFUSED", "IN_WORK", { refusalReason: "Atomic stage" }))).kind, "failure");
       assert.deepEqual(await nativeSnapshot(f.db), snapshot);
     });
   });

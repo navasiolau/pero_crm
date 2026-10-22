@@ -127,7 +127,7 @@ test("current engineer card/kanban allows both directions without a model; snaps
  assert.deepEqual(productStatusTargets(["ENGINEER"],{...context,from:"PRODUCTION"}),["DESIGN"]);
  assert.equal(decideProductPercentageStatus(["ENGINEER"],{...context,assignedEngineer:false,participant:true}).allowed,false);
  for(const to of ["STORAGE","INSTALLATION","DONE","RECLAMATION"] as ProductStatus[])assert.equal(decideProductPercentageStatus(["ENGINEER"],{...context,to}).allowed,false);
- for(const roles of [["MANAGER"],["ADMIN"],["DIRECTOR"],["ENGINEER","MANAGER"]] as Role[][])for(const to of ["DESIGN","PRODUCTION","STORAGE","INSTALLATION","DONE","RECLAMATION"] as ProductStatus[])assert.equal(decideProductPercentageStatus(roles,{...context,assignedEngineer:false,to}).allowed,true);
+ for(const roles of [["MANAGER"],["ADMIN"],["DIRECTOR"],["ENGINEER","MANAGER"]] as Role[][]){for(const to of ["DESIGN","PRODUCTION","STORAGE","INSTALLATION","DONE"] as ProductStatus[])assert.equal(decideProductPercentageStatus(roles,{...context,assignedEngineer:false,to}).allowed,true);assert.equal(decideProductPercentageStatus(roles,{...context,to:"RECLAMATION"}).allowed,false);}
 });
 test("assigned production read does not expand technical edit or legacy participant visibility",()=>{
  const actor={id:"e",roles:["ENGINEER" as Role],engineeringParticipantProductIds:["old"]};

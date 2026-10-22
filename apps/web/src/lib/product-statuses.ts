@@ -3,8 +3,13 @@ import { canViewProductDrafts } from "./product-drafts";
 import { fieldProductStatuses } from "./field-product-visibility";
 import { MANAGER_ROLES } from "./roles";
 
+export const ACTIVE_PRODUCT_STATUS_IDS = ["DRAFT", "PREPARATION", "DESIGN", "PRODUCTION", "STORAGE", "INSTALLATION", "DONE"] as const satisfies readonly ProductStatus[];
+export function isActiveProductStatus(value: unknown): value is (typeof ACTIVE_PRODUCT_STATUS_IDS)[number] {
+  return ACTIVE_PRODUCT_STATUS_IDS.some(status => status === value);
+}
+
 // Статусы изделия (§6): производственная цепочка от подготовки
-// до готовности + служебная «Рекламация». Общий модуль для сервера и клиента.
+// до готовности. Старые подписи сохраняются только для истории.
 export const PRODUCT_STATUSES: {
   id: ProductStatus;
   label: string;
@@ -18,7 +23,6 @@ export const PRODUCT_STATUSES: {
   { id: "STORAGE", label: "На складе ГП" },
   { id: "INSTALLATION", label: "Установка" },
   { id: "DONE", label: "Готово" },
-  { id: "RECLAMATION", label: "Рекламация", service: true },
 ];
 
 /** Один порядок колонок, фильтров и селектов с учётом приватности черновиков. */
@@ -35,7 +39,7 @@ export function visibleProductStatuses(roles: readonly Role[], canAccessDraft = 
 }
 
 export const productStatusLabels = Object.fromEntries(
-  PRODUCT_STATUSES.map((status) => [status.id, status.label]),
+  [...PRODUCT_STATUSES.map((status) => [status.id, status.label]), ["RECLAMATION", "Рекламация"]],
 ) as Record<ProductStatus, string>;
 
 // Визуальная дифференциация — по образцу stageStyles: заголовки колонок

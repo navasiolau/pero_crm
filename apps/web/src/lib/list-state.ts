@@ -1,6 +1,6 @@
 import { PRODUCT_STATUSES } from "./product-statuses";
 import { STAGES } from "./stages";
-import { encodeListFilterValue, parseListFilterValue } from "./list-filter-values";
+import { activeListStatusValues, encodeListFilterValue, parseListFilterValue } from "./list-filter-values";
 
 export type ListSection = "projects" | "products";
 export type ListSearchParams = Record<string, string | string[] | undefined>;
@@ -53,7 +53,7 @@ export function normalizeListQuery(section: ListSection, query: string) {
   const config = filterConfig[section];
   for (const key of config.keys) {
     let values = parseListFilterValue(source.get(key) ?? undefined);
-    if (key === config.statusKey && values?.some((value) => !config.statuses.some((item) => item.id === value))) values = undefined;
+    if (key === config.statusKey) values = activeListStatusValues(values, config.statuses, section === "projects" ? ["PAUSED", "RECLAMATION"] : ["RECLAMATION"]);
     const encoded = encodeListFilterValue(values);
     if (encoded !== null) result.set(key, encoded);
   }
