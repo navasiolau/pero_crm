@@ -53,7 +53,6 @@ type TaskWithIncludes = {
   dueAt: Date | null;
   assigneeId: string | null;
   requiresPhoto: boolean;
-  estimateMinutes: number | null;
   workId: string | null;
   quantity: unknown;
   executorShare?: unknown;
@@ -78,24 +77,13 @@ type TaskWithIncludes = {
   }[];
 };
 
-// Маппинг в TaskDetails: подтягивает фактическое время (сумма TimeEntry)
-// пачкой и имена автора/исполнителя закрытия.
+// Маппинг в TaskDetails с именами автора и исполнителя закрытия.
 export async function mapTaskDetails(
   tasks: TaskWithIncludes[],
   actor?: VisibilityActor,
 ): Promise<TaskDetails[]> {
   if(actor)tasks=maskTaskPaymentRead(actor,tasks);
   tasks=tasks.filter(task=>!!task.work&&!!task.product&&task.work.projectId===task.project.id&&task.work.productId===task.product.id);
-  const taskIds = tasks.map((task) => task.id);
-  const spent = taskIds.length
-    ? await prisma.timeEntry.groupBy({
-        by: ["taskId"],
-        where: { taskId: { in: taskIds }, stoppedAt: { not: null } },
-        _sum: { minutes: true },
-      })
-    : [];
-  const spentMap = new Map(spent.map((row) => [row.taskId, row._sum.minutes ?? 0]));
-
   const userIds = [
     ...new Set(
       tasks
@@ -142,8 +130,6 @@ export async function mapTaskDetails(
     assigneeId: task.assigneeId,
     assigneeName: task.assignee?.name ?? null,
     requiresPhoto: task.requiresPhoto,
-    estimateMinutes: task.estimateMinutes,
-    spentMinutes: spentMap.get(task.id) ?? 0,
     workId: task.work?.id ?? null,
     workTitle: task.work?.title ?? null,
     workTotal: percentageWork || task.work?.total === null || task.work?.total === undefined ? null : String(task.work.total),

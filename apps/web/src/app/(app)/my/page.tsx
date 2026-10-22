@@ -3,7 +3,6 @@ import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { getUserPreference } from "@/server/preferences";
-import { getActiveTimer } from "@/server/time/actions";
 import { mapTaskDetails, taskDetailsIncludeFor, taskWorkspaceWhere } from "@/server/tasks/queries";
 import { resolveVisibilityActor } from "@/server/access/visibility";
 
@@ -12,13 +11,13 @@ import { MyTasksView } from "./my-tasks-view";
 export const dynamic = "force-dynamic";
 
 // «Мои задачи» — главный экран работника/монтажника (§4, §15):
-// увидел → «В работу» (таймер сам стартует) → выполнил (таймер сам стоп) → фото.
+// увидел → «Взять в работу» → приложил фото → «Завершить».
 export default async function MyTasksPage() {
   const session = await auth();
   if (!session?.user) redirect("/login");
   const actor = await resolveVisibilityActor(prisma, session.user);
 
-  const [tasks, activeTimer, view] = await Promise.all([
+  const [tasks, view] = await Promise.all([
     prisma.task.findMany({
       where: await taskWorkspaceWhere(actor,{tasks:{assigneeId:session.user.id}}),
       include: taskDetailsIncludeFor(actor),
@@ -29,7 +28,6 @@ export default async function MyTasksPage() {
       ],
       take: 100,
     }),
-    getActiveTimer(),
     getUserPreference(session.user.id, "my.view"),
   ]);
 
@@ -43,18 +41,7 @@ export default async function MyTasksPage() {
       active={active}
       done={done}
       userName={session.user.name ?? ""}
-      role={session.user.roles}
       initialView={view === "kanban" ? "kanban" : "list"}
-      timer={
-        activeTimer
-          ? {
-              taskId: activeTimer.taskId,
-              taskTitle: activeTimer.task.title,
-              projectNumber: activeTimer.task.project.number,
-              startedAt: activeTimer.startedAt.toISOString(),
-            }
-          : null
-      }
     />
   );
 }

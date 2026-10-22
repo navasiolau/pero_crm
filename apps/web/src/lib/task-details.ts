@@ -10,8 +10,6 @@ export interface TaskDetails {
   assigneeId: string | null;
   assigneeName: string | null;
   requiresPhoto: boolean;
-  estimateMinutes: number | null;
-  spentMinutes: number;
   rewardAmount?: string | null;
   rewardCurrency?: string | null;
   rewardSource?: "WORK_SNAPSHOT" | "FROZEN_TASK_SNAPSHOT" | "UNAVAILABLE";

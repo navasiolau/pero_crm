@@ -5,7 +5,7 @@ import type { DomainActor } from "@/server/actor";
 
 export type TaskStatusContext = { clientMutationId: string; expectedActorId: string };
 export type TaskStatusAck = { ok: true; outcome: "COMMITTED"; resultId: string; replayed?: boolean; clientMutationId?: string } | {
-  ok: false; error: string; timeRequired?: boolean; outcome?: "ROLLED_BACK" | "UNKNOWN";
+  ok: false; error: string; outcome?: "ROLLED_BACK" | "UNKNOWN";
   kind?: "actor-changed"; retrySafe?: boolean; clientMutationId?: string;
 };
 export type TaskStatusEffect = { id: string; title: string; assigneeId: string | null; projectId: string; projectNumber: string; productId: string | null; productNumber: string | null };

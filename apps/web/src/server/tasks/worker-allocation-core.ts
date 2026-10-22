@@ -50,15 +50,13 @@ export async function createWorkerTaskAllocationCore(actor:DomainActor,input:unk
    if(!task||task.projectId!==data.projectId||task.productId!==data.productId||task.workId!==data.workId||task.createdById!==current.id||task.assigneeId!==result.assigneeId||quantityFromAtoms(quantityAtoms(task.quantity??0))!==result.quantity)deny('Назначение уже изменено; обновите карточку','conflict');
    return{ok:true as const,id:task.id,quantity:result.quantity,assigneeId:result.assigneeId,clientMutationId:data.clientMutationId,repeated:true};
   }
+  if(data.estimateMinutes!==undefined)deny('Оценка времени задач отключена. Обновите страницу и повторите без оценки');
   await tx.$queryRaw`SELECT id FROM "User" WHERE id=${data.assigneeId} FOR UPDATE`;
   const recipient=await tx.user.findUnique({where:{id:data.assigneeId},select:{id:true,active:true,roles:true}});
    if(!recipient?.active||!hasAnyRole(recipient.roles,FIELD_ROLES)||!fieldProductStatuses(recipient.roles).includes(product.status))deny('Выберите активного исполнителя с доступом к статусу этого изделия');
   if(work.tasks.some(task=>task.quantity===null))deny('В старой задаче не определён объём; распределение недоступно');
   let remaining:bigint;try{remaining=quantityAtoms(work.quantity)-quantityAtoms(allocatedWorkQuantity(work.tasks));}catch{deny('Объём ранее распределённой работы не согласован');}
   if(amount>remaining)deny(`В работе осталось ${quantityFromAtoms(remaining>BigInt(0)?remaining:BigInt(0))}; больше распределить нельзя`,'conflict');
-  let estimate=data.estimateMinutes;
-  if(estimate===undefined){const rows=await tx.$queryRaw<{avg:number|null}[]>`SELECT AVG(s.m)::float AS avg FROM (SELECT SUM(te."minutes") AS m FROM "TimeEntry" te JOIN "Task" t ON t.id=te."taskId" WHERE t.type=${data.type} AND t.status='DONE' AND te."stoppedAt" IS NOT NULL GROUP BY t.id) s`;if(rows[0]?.avg&&rows[0].avg>0)estimate=Math.round(rows[0].avg);}
-  if(!estimate)deny('Укажите оценку времени (мин) — истории по таким задачам нет');
   let dependencies:string[]=[];
   if(dependencyIds.length){
    const selected=await tx.task.findMany({where:{id:{in:dependencyIds},projectId:data.projectId,productId:data.productId},select:{id:true,projectId:true,productId:true,allocationGroupId:true}});
@@ -68,7 +66,7 @@ export async function createWorkerTaskAllocationCore(actor:DomainActor,input:unk
    if([...selected,...parts].some(task=>task.projectId!==data.projectId||task.productId!==data.productId))deny('Зависимость принадлежит другому изделию');
    dependencies=[...new Set([...selected,...parts].map(task=>task.id))];
   }
-  const task=await tx.task.create({data:{id:randomUUID(),projectId:data.projectId,productId:data.productId,workId:work.id,title:data.title,type:data.type,quantity,status:'NEW',assigneeId:recipient.id,createdById:current.id,dueAt,estimateMinutes:estimate,requiresPhoto:data.requiresPhoto||data.type==='Замер',dependencies:{create:dependencies.map(dependsOnId=>({dependsOnId}))}}});
+  const task=await tx.task.create({data:{id:randomUUID(),projectId:data.projectId,productId:data.productId,workId:work.id,title:data.title,type:data.type,quantity,status:'NEW',assigneeId:recipient.id,createdById:current.id,dueAt,estimateMinutes:null,requiresPhoto:data.requiresPhoto||data.type==='Замер',dependencies:{create:dependencies.map(dependsOnId=>({dependsOnId}))}}});
   await tx.changeLog.create({data:{actorType:'user',actorId:current.id,actorName:current.name,source:actor.source,entity:'task',entityId:task.id,action:'create',newValue:{title:task.title,workId:work.id,productId:data.productId,quantity,assigneeId:recipient.id}}});
   const event=await tx.domainEvent.create({data:{type:'task.assigned',actor:current.id,payload:{taskId:task.id,projectId:data.projectId,productId:data.productId,assigneeId:recipient.id}}});
   const result={ok:true as const,id:task.id,quantity,assigneeId:recipient.id,clientMutationId:data.clientMutationId,eventId:event.id};
