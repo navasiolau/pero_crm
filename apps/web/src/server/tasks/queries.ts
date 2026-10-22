@@ -15,6 +15,7 @@ import { FULL_SHARE_UNITS, personalQuantity, taskPieceAmount } from "@/lib/work-
 import { INTERNAL_CURRENCY } from "@/lib/internal-currency";
 import { canSplitTask } from "./share-policy";
 import { canTransferPiecework, ordinaryPieceworkBinding } from "@/lib/piecework-policy";
+import { canReassignOrdinaryTask } from "./task-reassignment-policy";
 import { getEngineeringTaskPreview } from "@/server/product-stage-pay/preview";
 
 // Общий select задачи для карточек/списков (§9: работа, зависимости, файлы).
@@ -24,7 +25,7 @@ export const taskDetailsInclude = {
   assignee: { select: { id: true, name: true } },
   work: { select: { id: true, projectId:true,productId:true,title: true, total: true, priceSnapshot: true, paymentKind: true,
     stagePayPoolId: true, poolWeightUnits: true, _count: { select: { paymentConversions: true, settlementShares: true } } } },
-  allocationGroup: { select: { currency: true, budgetSource: true } },
+  allocationGroup: { select: { currency: true, budgetSource: true, workId: true } },
   _count: { select: { payrollEntries: true, stageSettlementShares: true } },
   files: { select: { id: true, fileName: true, mimeType: true, section: true, uploadedById: true, projectId: true, productId: true, taskId: true } },
   dependencies: {
@@ -64,7 +65,7 @@ type TaskWithIncludes = {
   stageShareUnits?: number | null;
   physicalOnlyShare?: boolean;
   splitRevision?: number;
-  allocationGroup?: { currency: string | null; budgetSource: string } | null;
+  allocationGroup?: { currency: string | null; budgetSource: string; workId?: string | null } | null;
   _count?: { payrollEntries: number; stageSettlementShares?: number };
   createdAt: Date;
   doneAt: Date | null;
@@ -157,6 +158,8 @@ export async function mapTaskDetails(
     canTransferPiecework: !!actor && !!task.work && ordinaryPieceworkBinding(task.work) && canTransferPiecework(actor, task) &&
       task._count?.payrollEntries === 0 && task._count.stageSettlementShares === 0 && !task.physicalOnlyShare && task.stageShareUnits == null &&
       (!task.allocationGroupId || task.allocationGroup?.budgetSource === "TASK_FIXED"),
+    canReassignOrdinaryTask: !!actor && canReassignOrdinaryTask(actor.roles, { ...task, productId: task.product?.id ?? null, projectId: task.project.id }) &&
+      task._count?.payrollEntries === 0 && task._count.stageSettlementShares === 0,
     dependencies: task.dependencies.map((edge) => ({
       id: edge.dependsOn.id,
       title: edge.dependsOn.title,

@@ -126,6 +126,11 @@ function taskVisibilityWhereGrants(actor: VisibilityActor): Prisma.TaskWhereInpu
   if (hasFullProjectVisibility(actor)) return {};
   const grants: Prisma.TaskWhereInput[] = [];
   grants.push({ product: engineeringProductWhere(actor) });
+  // Ответственный читает обычные задачи только уже доступных ему изделий; execution grant отдельный.
+  if (hasWorkCoordinator(actor.roles)) grants.push({
+    work: { paymentKind: "LEGACY", stagePayPoolId: null, poolWeightUnits: null },
+    product: productVisibilityWhere(actor),
+  });
   if (hasAnyRole(actor.roles, FIELD_ROLES)) grants.push({
     assigneeId: actor.id, OR: [
       { product: { status: { in: fieldProductStatuses(actor.roles) } } },

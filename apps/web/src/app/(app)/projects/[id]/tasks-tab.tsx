@@ -413,7 +413,7 @@ export function TasksTab({
                 }}
                 placeholder="Работа изделия"
                 searchPlaceholder="Поиск работы…"
-
+                popupMinWidth={560} wrapOptions
               />
             </div>
             {workId ? (

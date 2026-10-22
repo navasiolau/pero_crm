@@ -76,7 +76,7 @@ export function WorkDialog({ open, onClose, projectId, productId, productQuantit
     <fieldset disabled={locked} className="flex min-w-0 flex-col gap-3">
       <div className="flex flex-col gap-1.5"><Label>Расценка из прайса *</Label>
         {mayChoosePrice ? <SearchableSelect options={options} value={priceItemId} onChange={setPriceItemId} disabled={locked}
-          placeholder="Выберите расценку…" searchPlaceholder="Поиск расценки…" /> : <p className="text-sm">{work?.title} · расценка сохранена</p>}
+          placeholder="Выберите расценку…" searchPlaceholder="Поиск расценки…" popupMinWidth={560} wrapOptions /> : <p className="text-sm">{work?.title} · расценка сохранена</p>}
         {priceItems.length === 0 && !work ? <p className="text-sm text-muted-foreground">Прайс пуст — обратитесь к менеджеру.</p> : null}
       </div>
       <div className="flex flex-col gap-1.5"><Label htmlFor="work-qty">{productId ? "Количество на 1 изделие *" : "Количество *"}</Label>
