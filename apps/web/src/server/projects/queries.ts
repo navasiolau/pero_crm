@@ -32,8 +32,8 @@ import { clientVisibilityWhere, engineeringParticipantProductIds, fileVisibility
 
 export interface ProjectListFilters {
   q?: string;
-  // Только канбан задаёт область; URL и другие callers её не меняют.
-  searchScope?: "identity";
+  // Страницы списков задают область; URL и другие callers её не меняют.
+  searchScope?: "number";
   stage?: ProjectStage;
   clientId?: string;
   managerId?: string;
@@ -106,11 +106,14 @@ function projectWhere(
       { id: { in: filterParticipantIds } },
     ] }] } };
   const q = filters.q?.trim();
-  if (q) {
+  if (q && filters.searchScope === "number") {
+    if (/^[0-9]+$/.test(q)) where.number = { contains: q };
+    else where.id = { in: [] };
+  } else if (q) {
     where.OR = [
       { number: { contains: q } },
       { title: { contains: q, mode: "insensitive" } },
-      ...(filters.searchScope === "identity" ? [] : [{
+      {
         client: {
           OR: [
             { name: { contains: q, mode: "insensitive" as const } },
@@ -118,7 +121,7 @@ function projectWhere(
             { middleName: { contains: q, mode: "insensitive" as const } },
           ],
         },
-      }]),
+      },
     ];
   }
   return { AND: [projectVisibilityWhere(actor), where] };

@@ -16,8 +16,8 @@ import { productDraftAccessRelations } from "@/server/access/product-draft-conte
 
 export interface ProductListFilters {
   q?: string;
-  // Только канбан задаёт область; URL и другие callers её не меняют.
-  searchScope?: "identity";
+  // Страницы списков задают область; URL и другие callers её не меняют.
+  searchScope?: "number";
   status?: ProductStatus;
   projectId?: string;
   clientId?: string;
@@ -89,24 +89,25 @@ function productWhere(
   if (statusConditions.length > 0) where.AND = statusConditions;
   if (projectIds?.length) where.projectId = { in: projectIds };
   const q = filters.q?.trim();
-  if (q) {
+  if (q && filters.searchScope === "number") {
+    if (/^[0-9][0-9A-Za-z.-]*$/.test(q)) where.number = { contains: q };
+    else where.id = { in: [] };
+  } else if (q) {
     where.AND = [...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []), { OR: [
       { number: { contains: q } },
       { title: { contains: q, mode: "insensitive" } },
-      ...(filters.searchScope === "identity" ? [] : [
-        { project: { number: { contains: q } } },
-        { project: { title: { contains: q, mode: "insensitive" as const } } },
-        {
-          project: {
-            client: {
-              OR: [
-                { name: { contains: q, mode: "insensitive" as const } },
-                { lastName: { contains: q, mode: "insensitive" as const } },
-              ],
-            },
+      { project: { number: { contains: q } } },
+      { project: { title: { contains: q, mode: "insensitive" as const } } },
+      {
+        project: {
+          client: {
+            OR: [
+              { name: { contains: q, mode: "insensitive" as const } },
+              { lastName: { contains: q, mode: "insensitive" as const } },
+            ],
           },
         },
-      ]),
+      },
     ] }];
   }
   return { AND: [productVisibilityWhere(actor), where] };

@@ -7,20 +7,19 @@ import type { Role } from "@prisma/client";
 
 import type { SelectOption } from "./projects-view";
 
-export function ProjectsFilterBar({ actorRoles, clients, managers, engineers, hideEngineer, identitySearch, onSearchDraftChange, onModalActiveChange }: {
+export function ProjectsFilterBar({ actorRoles, clients, managers, engineers, hideEngineer, onSearchDraftChange, onModalActiveChange }: {
   actorRoles?: readonly Role[];
   clients: SelectOption[];
   managers: SelectOption[];
   engineers: SelectOption[];
   hideEngineer?: boolean;
-  identitySearch?: boolean;
   onSearchDraftChange?: (query: string) => void;
   onModalActiveChange?: (active: boolean) => void;
 }) {
   return (
     <EntityListFilterBar
       section="projects"
-      searchPlaceholder={identitySearch ? "Номер, название…" : "Номер, название, клиент…"}
+      searchPlaceholder="Введите номер"
       onSearchDraftChange={onSearchDraftChange}
       onModalActiveChange={onModalActiveChange}
       fields={[
