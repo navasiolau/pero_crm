@@ -5,7 +5,7 @@ import type { ProjectEconomics } from "./queries";
 import type { ProjectExpenseFacts } from "./project-expense-facts";
 import { loadProjectStockExpenses, projectExpenseRows } from "./project-expenses";
 import { paymentView } from "./payment-view";
-import { reportDocumentSelect } from "@/server/finance-documents/view";
+import { reportDocumentSelect, paymentReportDocumentsSelect } from "@/server/finance-documents/view";
 import { logisticsAllocationSelect } from "@/server/logistics/payment-view";
 import { listActiveCashAccountOptions } from "./default-cash-core";
 
@@ -20,7 +20,7 @@ export async function loadFinanceProjectWorkspace(
   const [records, movements, cashAccounts, expenseArticles] = await Promise.all([
     db.payment.findMany({ where: { ...activePaymentWhere, projectId: project.id }, select: {
       id: true, direction: true, amount: true, currency: true, rate: true, bynAmount: true, projectAmount: true, paidAt: true, comment: true, createdById: true,
-      cashAccount: { select: { name: true } }, expenseArticle: { select: { id: true, name: true } }, reportDocument: { select: reportDocumentSelect },
+      cashAccount: { select: { name: true } }, expenseArticle: { select: { id: true, name: true } }, reportDocument: { select: reportDocumentSelect }, reportDocuments: paymentReportDocumentsSelect,
       logisticsAllocation: { select: logisticsAllocationSelect },
       logisticsAllocationId: true,
     }, orderBy: { paidAt: "desc" } }),

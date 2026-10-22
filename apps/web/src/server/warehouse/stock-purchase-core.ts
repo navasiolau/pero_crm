@@ -8,10 +8,18 @@ import { createPaymentInTransaction, type PreparedPayment } from "@/server/payme
 import type { PaymentDetails } from "@/server/payments/contracts";
 import { warehouseMove } from "./accounting";
 import { stockPurchaseSchema, type StockPurchaseData } from "./contracts";
+import { reportDocumentSetMatches } from "@/server/finance-documents/input";
 
-const receiptInclude = { movement: true, payment: true } as const;
+const receiptInclude = { movement: true, payment: { include: {
+  reportDocuments: { select: { documentId: true, position: true }, orderBy: { position: "asc" } },
+} } } as const;
 export class StockPurchaseReceiptError extends Error {}
-export function stockPurchaseFingerprint(actorId: string, data: StockPurchaseData) {
+export function stockPurchaseFingerprint(actorId: string, data: StockPurchaseData): string {
+  if (data.reportDocumentIds !== undefined) {
+    const { reportDocumentIds, ...legacy } = data;
+    return createHash("sha256").update(JSON.stringify({ version: 2, legacy: stockPurchaseFingerprint(actorId, legacy),
+      reportDocumentIds })).digest("hex");
+  }
   return createHash("sha256").update(JSON.stringify({ actorId, materialId: data.materialId, quantity: data.quantity,
     unitPrice: data.unitPrice, currency: data.currency, cashAccountId: data.cashAccountId, expenseArticleId: data.expenseArticleId,
     rate: data.rate ?? null, rateDate: data.rateDate ?? null, paidAt: data.paidAt ?? null, comment: data.comment?.trim() || null,
@@ -24,12 +32,15 @@ export async function readStockPurchaseReceipt(actor: DomainActor, data: StockPu
   if (receipt.actorId !== actor.id || receipt.requestFingerprint !== stockPurchaseFingerprint(actor.id, data))
     throw new StockPurchaseReceiptError("Идентификатор закупки уже использован с другими данными");
   if (receipt.movement.deletionId || receipt.payment.deletionId) throw new StockPurchaseReceiptError("Приход удалён — повторное проведение запрещено");
+  if (data.reportDocumentIds !== undefined && !reportDocumentSetMatches(receipt.payment, data.reportDocumentIds))
+    throw Error("Не удалось подтвердить полный комплект документов закупки");
   return receipt;
 }
 function paymentData(data: StockPurchaseData): PaymentDetails {
   return { direction: "EXPENSE", projectId: null, amount: Number(stockPurchaseAmount(data.quantity, data.unitPrice)), currency: data.currency,
     cashAccountId: data.cashAccountId, expenseArticleId: data.expenseArticleId, rate: data.rate, rateDate: data.rateDate,
-    paidAt: data.paidAt, comment: data.comment, ...(data.reportDocumentId ? { reportDocumentId: data.reportDocumentId } : {}) };
+    paidAt: data.paidAt, comment: data.comment, ...(data.reportDocumentIds !== undefined ? { reportDocumentIds: data.reportDocumentIds }
+      : data.reportDocumentId ? { reportDocumentId: data.reportDocumentId } : {}) };
 }
 export async function prepareStockPurchase(actor: DomainActor, input: StockPurchaseData,
   db: Pick<PrismaClient, "project" | "cashAccount" | "expenseArticle" | "material">,

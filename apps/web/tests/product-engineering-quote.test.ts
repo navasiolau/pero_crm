@@ -86,21 +86,19 @@ test("participant resolver accepts zero-share assignment and rejects every misma
 
 test("participant predicates remain DESIGN scoped; independent manager and field grants survive", () => {
   const participant = { id: "u", roles: ["ENGINEER"] as Role[], engineeringParticipantProductIds: ["p"], engineeringParticipantTaskIds: ["task"] };
-  const row={id:"p",engineerId:null,status:"DESIGN",deletedAt:null,project:{deletedAt:null}};
+  const row={id:"p",engineerId:null,status:"DESIGN",deletedAt:null,project:{deletedAt:null,stage:"CONTRACT"}};
   assert.equal(matches(row,productEditWhere(participant)),true);
   for(const patch of [{status:"DRAFT"},{status:"PRODUCTION"},{id:"foreign"}])assert.equal(matches({...row,...patch},productEditWhere(participant)),false);
-  const read = JSON.stringify(productVisibilityWhere(participant));
-  assert.match(read, /DESIGN/);
-  assert.match(read, /engineerId/);
-  assert.match(read, /"p"/);
-  const execution = JSON.stringify(taskExecutionWhere(participant));
-  assert.match(execution, /"task"/);
-  assert.match(execution, /DESIGN/);
+  assert.equal(matches({...row,id:"foreign",status:"DONE"},productVisibilityWhere(participant)),true);
+  assert.equal(matches({...row,project:{deletedAt:null,stage:"LEAD"}},productVisibilityWhere(participant)),false);
+  const task={id:"task",productId:"p",assigneeId:"u",project:row.project,product:row};
+  assert.equal(matches(task,taskExecutionWhere(participant)),true);
+  assert.equal(matches({...task,id:"foreign-task",assigneeId:"other"},taskExecutionWhere(participant)),false);
   assert.equal(matches(row,productEditWhere({id:"u",roles:["MANAGER"]})),true);
   assert.equal(matches({...row,status:"DRAFT"},productEditWhere({id:"u",roles:["MANAGER"]})),false);
-  const field = JSON.stringify(productVisibilityWhere({ id: "u", roles: ["WORKER"] }));
-  assert.match(field, /assigneeId/);
-  assert.match(field, /"in":\["PRODUCTION","STORAGE"\]/);
+  const field = { id: "u", roles: ["WORKER"] as Role[] };
+  assert.equal(matches({...row,status:"PRODUCTION"},productVisibilityWhere(field)),true);
+  assert.equal(matches(row,productVisibilityWhere(field)),false);
   for(const status of ["DRAFT","PREPARATION","DESIGN","PRODUCTION"])assert.equal(matches({...row,status},productVisibilityWhere({id:"u",roles:[]})),false,status);
 });
 
@@ -122,16 +120,16 @@ test("direct participant grants are stage-scoped; pure field cannot see DESIGN s
   } } as unknown as Pick<PrismaClient, "task" | "productPercentageParticipant">;
   const engineer = await resolveVisibilityActor(db, { id: "e", roles: ["ENGINEER"] });
   assert.deepEqual(engineer.engineeringParticipantProductIds, ["design-own"]);
-  assert.match(JSON.stringify(productVisibilityWhere(engineer)), /design-own/);
-  assert.match(JSON.stringify(productVisibilityWhere(engineer)), /engineerId/);
+  const row={id:"foreign",engineerId:null,status:"DESIGN",deletedAt:null,project:{deletedAt:null,stage:"CONTRACT"}};
+  assert.equal(matches(row,productVisibilityWhere(engineer)),true);
+  assert.equal(matches(row,productEditWhere(engineer)),false);
+  assert.equal(matches({...row,id:"design-own"},productEditWhere(engineer)),true);
   const mounter = await resolveVisibilityActor(db, { id: "m", roles: ["MOUNTER"] });
   assert.deepEqual(mounter.fieldParticipantProductIds, ["install-own"]);
-  const product = JSON.stringify(productVisibilityWhere(mounter));
-  assert.match(product, /install-own/);
-  assert.match(product, /"in":\["INSTALLATION"\]/);
-  const project = JSON.stringify(projectVisibilityWhere(mounter));
-  assert.match(project, /"products"/);
-  assert.match(project, /"none":\{\}/);
+  assert.equal(matches({...row,status:"INSTALLATION"},productVisibilityWhere(mounter)),true);
+  assert.equal(matches(row,productVisibilityWhere(mounter)),false);
+  assert.equal(matches({deletedAt:null,products:[{...row,status:"INSTALLATION"}]},projectVisibilityWhere(mounter)),true);
+  assert.equal(matches({deletedAt:null,products:[],tasks:[{assigneeId:"m",productId:null}]},projectVisibilityWhere(mounter)),true);
 });
 
 { // Источник: combined-engineering-compensation.test.ts
@@ -156,7 +154,7 @@ function combinedFixture(roles:Role[],payScheme:string){
 test('ENGINEER+MANAGER chosen PIECE plus independent engineering percentage in either role order, with exact snapshots/replay',async()=>{
  for(const roles of [['ENGINEER','MANAGER'],['MANAGER','ENGINEER']] as Role[][]){
  const f=combinedFixture(roles,'PIECE');
- const result=await changeTaskStatusCore(manager,'source','DONE',20,f.fixture.transaction);
+ const result=await changeTaskStatusCore(manager,'source','DONE',undefined,f.fixture.transaction);
  assert.ok(result.ok);assert.equal(result.payroll?.amount,'1000.00');
  assert.equal(await f.capture(),'SETTLED');
  const entries=f.fixture.state().entries;
@@ -165,7 +163,7 @@ test('ENGINEER+MANAGER chosen PIECE plus independent engineering percentage in e
  assert.equal(String(f.snapshots[0].totalSnapshot),'3000.03');assert.equal(String(f.snapshots[0].ratePercentSnapshot),'5');
  const immutable=JSON.stringify({entries,snapshots:f.snapshots,shares:f.shares});
  f.changePriceAndRate();assert.equal(await f.capture(),'SETTLED');
- const again=await changeTaskStatusCore(manager,'source','DONE',20,f.fixture.transaction);assert.ok(again.ok&&again.repeated);
+ const again=await changeTaskStatusCore(manager,'source','DONE',undefined,f.fixture.transaction);assert.ok(again.ok&&again.repeated);
  assert.equal(JSON.stringify({entries:f.fixture.state().entries,snapshots:f.snapshots,shares:f.shares}),immutable);
  assert.equal(entries.filter(row=>row.scheme==='PERCENT_PROJECT').length,0);
  assert.equal(f.fixture.state().users.find(row=>row.id==='worker')!.payScheme,'PIECE');
@@ -174,14 +172,14 @@ test('ENGINEER+MANAGER chosen PIECE plus independent engineering percentage in e
 test('engineering percentage remains independent of chosen NONE or TURNOVER scheme, without synthetic task PIECE',async()=>{
  for(const payScheme of ['NONE','PERCENT_TURNOVER']){
  const f=combinedFixture(['ENGINEER','MANAGER'],payScheme);
- const result=await changeTaskStatusCore(manager,'source','DONE',20,f.fixture.transaction);assert.ok(result.ok);assert.equal(result.payroll,null);
+ const result=await changeTaskStatusCore(manager,'source','DONE',undefined,f.fixture.transaction);assert.ok(result.ok);assert.equal(result.payroll,null);
  assert.equal(await f.capture(),'SETTLED');assert.deepEqual(f.fixture.state().entries.map(row=>row.scheme),['PRODUCT_PERCENT_ENGINEERING']);
  assert.equal(f.fixture.state().entries[0].amount,'51.00');assert.equal(f.fixture.state().users.find(row=>row.id==='worker')!.payScheme,payScheme);
  }
 });
 test('combined role does not weaken photo/dependency/currency or produce engineering payment on malformed source',async()=>{
  const missingPhoto=combinedFixture(['ENGINEER','MANAGER'],'PIECE');missingPhoto.fixture.state().files.length=0;
- const before=structuredClone(missingPhoto.fixture.state());assert.equal((await changeTaskStatusCore(manager,'source','DONE',20,missingPhoto.fixture.transaction)).ok,false);assert.deepEqual(missingPhoto.fixture.state(),before);
+ const before=structuredClone(missingPhoto.fixture.state());assert.equal((await changeTaskStatusCore(manager,'source','DONE',undefined,missingPhoto.fixture.transaction)).ok,false);assert.deepEqual(missingPhoto.fixture.state(),before);
  const foreign=combinedFixture(['ENGINEER','MANAGER'],'PIECE');foreign.fixture.state().projectCurrency='USD';await assert.rejects(foreign.capture(),/BYN/);assert.equal(foreign.fixture.state().entries.length,0);assert.equal(foreign.snapshots.length,0);
 });
 
@@ -189,7 +187,7 @@ test('pure ENGINEER does not accrue a new ordinary PIECE but keeps product engin
  const f=combinedFixture(['ENGINEER'],'PIECE');
  f.fixture.state().entries.push({id:'old-pay',userId:'worker',scheme:'PIECE',amount:'12.34',bynAmount:'12.34',currency:'BYN',month:'2000-01'});
  const history=JSON.stringify(f.fixture.state().entries);
- const result=await changeTaskStatusCore(manager,'source','DONE',20,f.fixture.transaction);assert.ok(result.ok);assert.equal(result.payroll,null);
+ const result=await changeTaskStatusCore(manager,'source','DONE',undefined,f.fixture.transaction);assert.ok(result.ok);assert.equal(result.payroll,null);
  assert.equal(JSON.stringify(f.fixture.state().entries),history);
  assert.equal(await f.capture(),'SETTLED');assert.equal(f.fixture.state().entries.at(-1)?.scheme,'PRODUCT_PERCENT_ENGINEERING');
  assert.equal(f.fixture.state().entries.at(-1)?.amount,'51.00');
@@ -200,10 +198,10 @@ test('pure ENGINEER keeps valid old TASK_FIXED monetary obligation unchanged des
  const f=combinedFixture(['ENGINEER'],'PIECE');historicalTaskAllocation(f.fixture);
  f.fixture.state().works[0].priceSnapshot=priceSnapshot;
  const frozen=JSON.stringify({group:f.fixture.state().groups[0],shareAmount:f.fixture.state().tasks[0].shareAmount,shareUnits:f.fixture.state().tasks[0].shareUnits});
- const result=await changeTaskStatusCore(manager,'source','DONE',20,f.fixture.transaction);assert.ok(result.ok);assert.equal(result.payroll?.amount,'700.00');
+ const result=await changeTaskStatusCore(manager,'source','DONE',undefined,f.fixture.transaction);assert.ok(result.ok);assert.equal(result.payroll?.amount,'700.00');
  assert.deepEqual(f.fixture.state().entries.map(row=>[row.scheme,row.amount]),[['PIECE','700.00']]);
  assert.equal(JSON.stringify({group:f.fixture.state().groups[0],shareAmount:f.fixture.state().tasks[0].shareAmount,shareUnits:f.fixture.state().tasks[0].shareUnits}),frozen);
- assert.ok((await changeTaskStatusCore(manager,'source','DONE',20,f.fixture.transaction)).ok);assert.equal(f.fixture.state().entries.length,1);
+ assert.ok((await changeTaskStatusCore(manager,'source','DONE',undefined,f.fixture.transaction)).ok);assert.equal(f.fixture.state().entries.length,1);
  }
 });
 test('pure ENGINEER is not granted ordinary salary by physical/stage/corrupted/nonmonetary legacy markers',async()=>{
@@ -214,13 +212,13 @@ test('pure ENGINEER is not granted ordinary salary by physical/stage/corrupted/n
  if(mode==='invalid-money')task.shareAmount='NaN';if(mode==='over-budget')task.shareAmount='1000.01';if(mode==='bad-units')task.shareUnits=0;
  if(mode==='wrong-work')group.workId='foreign';if(mode==='group-only')task.shareAmount=null;
  if(mode==='coefficient-only'){task.allocationGroupId=null;task.shareAmount=null;task.shareUnits=null;task.executorShare='0.5';}
- const result=await changeTaskStatusCore(manager,'source','DONE',20,f.fixture.transaction);assert.ok(result.ok,mode);assert.equal(result.payroll,null,mode);assert.equal(f.fixture.state().entries.length,0,mode);
+ const result=await changeTaskStatusCore(manager,'source','DONE',undefined,f.fixture.transaction);assert.ok(result.ok,mode);assert.equal(result.payroll,null,mode);assert.equal(f.fixture.state().entries.length,0,mode);
  }
 });
 test('existing historical PIECE entry is neither recalculated nor duplicated when old obligation finishes',async()=>{
  const f=combinedFixture(['ENGINEER'],'PIECE');historicalTaskAllocation(f.fixture);
  f.fixture.state().entries.push({id:'paid-before',userId:'worker',taskId:'source',scheme:'PIECE',amount:'700.00',bynAmount:'700.00',currency:'BYN',month:'2000-01'});
- const original=JSON.stringify(f.fixture.state().entries);const result=await changeTaskStatusCore(manager,'source','DONE',20,f.fixture.transaction);
+ const original=JSON.stringify(f.fixture.state().entries);const result=await changeTaskStatusCore(manager,'source','DONE',undefined,f.fixture.transaction);
  assert.ok(result.ok);assert.equal(result.payroll,null);assert.equal(JSON.stringify(f.fixture.state().entries),original);
 });
 }
@@ -234,12 +232,13 @@ test("ENGINEERING completion never pays PIECE, regardless of recipient role or o
     Object.assign(fixture.state().works[0], { paymentKind: "ENGINEERING", stagePayPoolId: "pool", poolWeightUnits: 1_000_000 });
     fixture.state().tasks[0].stageShareUnits = 1_000_000;
     fixture.state().users.find((user) => user.id === "worker")!.roles = [role];
-    const result = await changeTaskStatusCore(manager, "source", "DONE", 20, fixture.transaction);
+    const originalTime = structuredClone(fixture.state().times);
+    const result = await changeTaskStatusCore(manager, "source", "DONE", undefined, fixture.transaction);
     assert.ok(result.ok, role);
     assert.equal(result.payroll, null, role);
     assert.equal(fixture.state().entries.length, 0, role);
     assert.equal(fixture.state().tasks[0].status, "DONE", role);
-    assert.ok(fixture.state().times.every((entry) => entry.stoppedAt !== null), role);
+    assert.deepEqual(fixture.state().times, originalTime, role);
   }
 });
 
@@ -247,19 +246,19 @@ test("a new ENGINEERING Work with no legacy monetary snapshot can finish", async
   const fixture = taskShareFixture("DESIGN");
   Object.assign(fixture.state().works[0], { paymentKind: "ENGINEERING", stagePayPoolId: "pool", priceSnapshot: null, total: null });
   fixture.state().tasks[0].stageShareUnits = 1_000_000;
-  const result = await changeTaskStatusCore(manager, "source", "DONE", 20, fixture.transaction);
+  const result = await changeTaskStatusCore(manager, "source", "DONE", undefined, fixture.transaction);
   assert.ok(result.ok);
   assert.equal(result.payroll, null);
   assert.equal(fixture.state().entries.length, 0);
 });
 
-test("zero-funded engineering work retains photo and time requirements", async () => {
+test("zero-funded engineering work retains photo requirements", async () => {
   const fixture = taskShareFixture("DESIGN");
   Object.assign(fixture.state().works[0], { paymentKind: "ENGINEERING", stagePayPoolId: "pool", poolWeightUnits: 0 });
   fixture.state().tasks[0].stageShareUnits = 0;
   fixture.state().files.length = 0;
   const before = structuredClone(fixture.state());
-  const result = await changeTaskStatusCore(manager, "source", "DONE", 20, fixture.transaction);
+  const result = await changeTaskStatusCore(manager, "source", "DONE", undefined, fixture.transaction);
   assert.equal(result.ok, false);
   assert.deepEqual(fixture.state(), before);
 });
@@ -267,7 +266,7 @@ test("zero-funded engineering work retains photo and time requirements", async (
 test("a LEGACY Work named engineering keeps its ordinary piece payment", async () => {
   const fixture = taskShareFixture("DESIGN");
   Object.assign(fixture.state().works[0], { paymentKind: "LEGACY", title: "Проектирование" });
-  const result = await changeTaskStatusCore(manager, "source", "DONE", 20, fixture.transaction);
+  const result = await changeTaskStatusCore(manager, "source", "DONE", undefined, fixture.transaction);
   assert.ok(result.ok);
   assert.equal(result.payroll?.amount, "1000.00");
   assert.equal(fixture.state().entries.length, 1);
@@ -276,7 +275,7 @@ test("a LEGACY Work named engineering keeps its ordinary piece payment", async (
 test("duplicate engineering completion leaves one status event and no PIECE", async () => {
   const fixture = taskShareFixture("DESIGN");
   Object.assign(fixture.state().works[0], { paymentKind: "ENGINEERING", stagePayPoolId: "pool" });
-  const complete = () => changeTaskStatusCore(manager, "source", "DONE", 20, fixture.transaction);
+  const complete = () => changeTaskStatusCore(manager, "source", "DONE", undefined, fixture.transaction);
   const results = await Promise.all([complete(), complete()]);
   assert.ok(results.every((result) => result.ok));
   assert.equal(fixture.state().entries.length, 0);
@@ -293,7 +292,7 @@ test("ENGINEERING completion rejects settled pool and inconsistent task/work con
     if (mismatch === "work-project") fixture.state().works[0].projectId = "other";
     if (mismatch === "pool-product") fixture.state().pools[0].productId = "other";
     const before = structuredClone(fixture.state());
-    const result = await changeTaskStatusCore(manager, "source", "DONE", 20, fixture.transaction);
+    const result = await changeTaskStatusCore(manager, "source", "DONE", undefined, fixture.transaction);
     assert.equal(result.ok, false, mismatch);
     assert.deepEqual(fixture.state(), before, mismatch);
   }

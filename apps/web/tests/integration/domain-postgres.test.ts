@@ -17,6 +17,8 @@ import { requestProposalPdfInTransaction, recordPendingPdfArtifactInTransaction,
   completeRenderJobInTransaction, type LifecycleSecurity } from "../../src/server/kp/lifecycle-store";
 import { createPrismaRenderQueue } from "../../src/server/kp/render-queue";
 import type { ActorBinding, LifecyclePorts } from "../../src/server/kp/lifecycle-contract";
+import { pieceworkPlanRevision } from "../../src/server/tasks/piecework-revision";
+import { allocatedWorkQuantity, moneyAtoms } from "../../src/lib/work-shares";
 
 type Db = PrismaClient | Prisma.TransactionClient;
 type MutationProbe = { taskId?: string; workerId?: string; workId?: string; projectId?: string; cashId?: string; paymentId?: string; receiptId?: string; payment: boolean;
@@ -47,6 +49,7 @@ let workUpdate: typeof import("../../src/server/works/update-core"), workQueries
 let priceActions: typeof import("../../src/server/prices/actions");
 let percentageQueries: typeof import("../../src/server/product-percentage-pay/queries");
 let workerAllocation: typeof import("../../src/server/tasks/worker-allocation-core"), warehouseActions: typeof import("../../src/server/warehouse/actions");
+let pieceworkAllocation: typeof import("../../src/server/tasks/piecework-core");
 let taskQueries: typeof import("../../src/server/tasks/queries"), workspace: typeof import("../../src/server/tasks/workspace-contract");
 let time: typeof import("../../src/server/time/actions");
 let units: typeof import("../../src/server/warehouse/unit-core");
@@ -222,7 +225,7 @@ before(async () => {
     return typeof value === "function" ? value.bind(context.db) : value;
   } });
   // Child targets загружаются раньше родителей: guardedModuleCache сохраняет installed entry каждого target.
-  const names = ["transactions/coordinator", "time/timers", "access/visibility", "access/notification-visibility", "tasks/workspace-contract", "prices/actions", "works/core", "works/update-core", "works/queries", "tasks/worker-allocation-core",
+  const names = ["transactions/coordinator", "time/timers", "access/visibility", "access/notification-visibility", "tasks/workspace-contract", "prices/actions", "works/core", "works/update-core", "works/queries", "tasks/worker-allocation-core", "tasks/piecework-core",
     "tasks/queries", "warehouse/unit-core", "warehouse/norm-core", "warehouse/queries", "products/delete-core", "products/core", "projects/stage-core", "projects/delete-core",
     "products/status-core", "products/queries", "projects/queries", "product-percentage-pay/queries", "changelog/queries", "calendar/core", "calendar/analytics", "tasks/completion-core", "tasks/actions", "warehouse/accounting", "warehouse/actions", "time/actions", "payments/service", "projects/core", "kp/proposal-core"];
   const effect = (name: string) => () => { const probe = current().mutation; if (probe) { probe.effects.push(name); throw Error("CI133_INJECTED_OPTIONAL_EFFECT"); } };
@@ -240,6 +243,7 @@ before(async () => {
   worksCore = scope.load("../src/server/works/core");
   workUpdate = scope.load("../src/server/works/update-core"); workQueries = scope.load("../src/server/works/queries");
   workerAllocation = scope.load("../src/server/tasks/worker-allocation-core");
+  pieceworkAllocation = scope.load("../src/server/tasks/piecework-core");
   workspace = scope.load("../src/server/tasks/workspace-contract"); taskQueries = scope.load("../src/server/tasks/queries");
   units = scope.load("../src/server/warehouse/unit-core"); norms = scope.load("../src/server/warehouse/norm-core"); warehouse = scope.load("../src/server/warehouse/queries");
   productDeletion = scope.load("../src/server/products/delete-core"); products = scope.load("../src/server/products/core"); stages = scope.load("../src/server/projects/stage-core"); deletion = scope.load("../src/server/projects/delete-core");
@@ -511,27 +515,34 @@ test("draft/privacy-real-readers-joins-notifications-and-operational-denials", a
     });
   }
   const currentProduction = await rows.product("engineer-current-production", c.project.id, { status: "PRODUCTION", engineerId: assigned });
-  const hidden = await rows.product("engineer-foreign-design", c.project.id, { status: "DESIGN", engineerId: c.worker.id });
+  const foreign = await rows.product("engineer-foreign-design", c.project.id, { status: "DESIGN", engineerId: c.worker.id });
   const ownPool = await tx.productStagePayPool.create({ data: { id: rows.id("engineer-visibility-pool"), productId: visible.id, kind: "ENGINEERING", state: "DRAFT", createdById: assigned } });
   const ownWork = await tx.work.create({ data: { projectId: c.project.id, productId: visible.id, title: "Инженерная", paymentKind: "ENGINEERING",
     stagePayPoolId: ownPool.id, poolWeightUnits: 1_000_000, quantity: "1", priceSnapshot: "30", total: "30" } });
   const ownTask = await tx.task.create({ data: { projectId: c.project.id, productId: visible.id, workId: ownWork.id, assigneeId: assigned, title: "Инженерная задача", quantity: "1" } });
   const visibleFiles = await Promise.all([visible.id, null].map(productId => tx.file.create({ data: { projectId: c.project.id, productId,
     fileName: "visible.pdf", storedName: randomUUID(), mimeType: "application/pdf", size: 1, uploadedById: assigned } })));
-  await tx.file.create({ data: { projectId: c.project.id, productId: hidden.id, fileName: "hidden.pdf", storedName: randomUUID(), mimeType: "application/pdf", size: 1, uploadedById: assigned } });
-  await tx.project.update({ where: { id: c.project.id }, data: { initialPrice: "900", delivery: "10", unloading: "20", installation: "30" } });
+  const foreignTask = await tx.task.create({ data: { projectId: c.project.id, productId: foreign.id, assigneeId: c.worker.id, title: "Чужая задача с файлом" } });
+  const foreignFile = await tx.file.create({ data: { projectId: c.project.id, productId: foreign.id, taskId: foreignTask.id, fileName: "foreign.pdf", storedName: randomUUID(), mimeType: "application/pdf", size: 1, uploadedById: c.worker.id } });
+  await tx.project.update({ where: { id: c.project.id }, data: { stage: "CONTRACT", initialPrice: "900", delivery: "10", unloading: "20", installation: "30" } });
   await run(c.engineer, tx, async () => {
     assert.equal((await productQueries.listProducts(assigned, c.engineer.roles, { activeOnly: false, projectId: c.project.id, statuses: ["PRODUCTION"] })).total, 1);
-    assert.equal((await productQueries.listProducts(assigned, c.engineer.roles, { activeOnly: false, projectId: c.project.id, engineerId: c.worker.id })).total, 0);
+    assert.equal((await productQueries.listProducts(assigned, c.engineer.roles, { activeOnly: false, projectId: c.project.id, engineerId: c.worker.id })).total, 1);
     assert.deepEqual((await productQueries.listProductFilterOptions(assigned, c.engineer.roles)).projects.map(row => row.id), [c.project.id]);
     const detail = await projectQueries.getProjectFor(assigned, c.engineer.roles, c.project.id); assert.ok(detail);
-    assert.deepEqual(detail.products.map(row => row.id).sort(), [visible.id, currentProduction.id].sort());
+    assert.deepEqual(detail.products.map(row => row.id).sort(), [visible.id, foreign.id, currentProduction.id].sort());
     assert.ok(detail.products.every(row => row.expectedPrice === null));
-    assert.deepEqual(detail.tasks.map(row => row.id), [ownTask.id]); assert.deepEqual(detail.files.map(row => row.id).sort(), visibleFiles.map(row => row.id).sort());
+    assert.deepEqual(detail.tasks.map(row => row.id), [ownTask.id]); assert.deepEqual(detail.files.map(row => row.id).sort(), [...visibleFiles.map(row => row.id), foreignFile.id].sort());
+    assert.equal(await tx.task.count({ where: { id: foreignTask.id, AND: [visibility.taskExecutionWhere(c.engineer)] } }), 0);
+    assert.equal(await tx.product.count({ where: { id: foreign.id, AND: [visibility.productEditWhere(c.engineer)] } }), 0);
     for (const key of ["initialPrice", "delivery", "unloading", "installation"] as const) assert.equal(detail[key], null);
     const summary = (await projectQueries.listProjects(assigned, c.engineer.roles, { activeOnly: false })).rows.find(row => row.id === c.project.id)!;
-    assert.equal(summary._count.products, 2); assert.equal(summary.totalPrice, null);
-    assert.equal(await productQueries.getProductFor(assigned, c.engineer.roles, hidden.id), null);
+    assert.equal(summary._count.products, 3); assert.equal(summary.totalPrice, null);
+    assert.ok(await productQueries.getProductFor(assigned, c.engineer.roles, foreign.id));
+    await tx.project.update({ where: { id: c.project.id }, data: { stage: "LEAD" } });
+    assert.equal(await productQueries.getProductFor(assigned, c.engineer.roles, foreign.id), null);
+    assert.equal(await projectQueries.getProjectFor(assigned, c.engineer.roles, c.project.id), null);
+    await tx.project.update({ where: { id: c.project.id }, data: { stage: "CONTRACT" } });
   });
   await run(c.manager, tx, async () => {
     const message = { type: "product.statusChanged", title: "Черновой шкаф", body: "Secret", link: `/products/${c.product.id}` };
@@ -1152,6 +1163,41 @@ test("mutation/real-COMMIT-lost-ACK-UNKNOWN-readonly-peer-replay-and-five-partia
   assert.ok(!refused.ok && refused.outcome === "ROLLED_BACK"); assert.equal(paymentFault.partials, 1); assert.equal(paymentFault.calls, 2); assert.deepEqual(await nativeSnapshot(fixture.db), faultBefore);
   assert.deepEqual(await nativeSnapshot(fixture.db, nativeOwnedIds(owned)), original, "MUTATION_ORIGINAL_DATA_SCHEMA_CHANGED");
   t.diagnostic(JSON.stringify({ independentCommitProofConnections: 2, lostAckRecovery: true, unknownInspectedBeforeReplay: true, rollbackFaults: 5, optionalEffects: paymentProbe.effects.length }));
+});
+
+test("task/piecework-real-two-connection-share-CAS-keeps-frozen-budget", async () => {
+  const c = await tree(fixture.db, fixture, "piecework-race");
+  const second = await fixture.user("piecework-race-second", ["WORKER"], { payScheme: "PIECE" });
+  const third = await fixture.user("piecework-race-third", ["WORKER"], { payScheme: "PIECE" });
+  const work = await fixture.db.work.update({ where: { id: c.work.id }, data: { quantity: "10", quantityPerUnit: "2", priceSnapshot: "100", total: "1000" },
+    include: { tasks: { select: { id: true, quantity: true, allocationGroupId: true } } } });
+  const created = await run(c.manager, fixture.db, () => pieceworkAllocation.createPieceworkAllocationCore(c.manager, {
+    projectId: c.project.id, productId: c.product.id, workId: work.id, title: work.title, type: "Производство", quantity: "10", dueAt: "2026-11-01",
+    expectedRevision: pieceworkPlanRevision(work), clientMutationId: randomUUID(),
+    participants: [{ userId: c.worker.id, percent: "50" }, { userId: second.id, percent: "30" }, { userId: third.id, percent: "20" }],
+  }));
+  assert.ok(created.ok, "PIECEWORK191_INITIAL_GROUP_REQUIRED");
+  const source = await fixture.db.task.findUniqueOrThrow({ where: { id: created.taskIds[0] } });
+  const neighbours = await fixture.db.task.findMany({ where: { id: { in: created.taskIds.slice(1) } }, orderBy: { id: "asc" } });
+  const input = { taskId: source.id, recipientId: second.id, percent: "50", expectedRevision: source.splitRevision, clientMutationId: randomUUID() };
+  // Default adapter команды — withTaskTransaction; facade выбирает fixture.db/peer из каждого run.
+  // overlap(..., true) доказывает разные backend PID, pg_blocking_pids и held/waiting advisory 18435/55001.
+  const results = await overlap(c.worker,
+    () => pieceworkAllocation.transferPieceworkShareCore(c.worker, input),
+    () => pieceworkAllocation.transferPieceworkShareCore(c.worker, { ...input, clientMutationId: randomUUID() }), true);
+  assert.equal(results.filter(result => result.ok).length, 1);
+  const refused = results.find(result => !result.ok); assert.ok(refused && !refused.ok && refused.kind === "conflict");
+  assert.deepEqual(await fixture.db.task.findMany({ where: { id: { in: created.taskIds.slice(1) } }, orderBy: { id: "asc" } }), neighbours);
+  const parts = await fixture.db.task.findMany({ where: { allocationGroupId: created.groupId } });
+  assert.equal(parts.length, 4); assert.equal(allocatedWorkQuantity(parts), "10.00");
+  assert.equal(parts.reduce((sum, task) => sum + (task.shareUnits ?? 0), 0), 1000000);
+  assert.equal(parts.reduce((sum, task) => sum + moneyAtoms(task.shareAmount!), BigInt(0)), BigInt(100000));
+  assert.equal((await fixture.db.task.findUniqueOrThrow({ where: { id: source.id } })).shareAmount!.toFixed(2), "250.00");
+  assert.equal(await fixture.db.payrollEntry.count({ where: { workId: work.id } }), 0);
+  assert.equal(await fixture.db.changeLog.count({ where: { entityId: created.groupId, action: "piecework.v1" } }), 2);
+  const committed = await nativeSnapshot(fixture.db);
+  const replay = await run(c.worker, fixture.peer, () => pieceworkAllocation.transferPieceworkShareCore(c.worker, input));
+  assert.ok(replay.ok && replay.repeated); assert.deepEqual(await nativeSnapshot(fixture.db), committed);
 });
 
 test("task/create-ten-identical-receipts-collisions-revocation-deleted-ACK-and-SQL-rollback", async () => {

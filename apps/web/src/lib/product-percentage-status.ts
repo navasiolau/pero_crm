@@ -1,6 +1,7 @@
 import type { ProductStatus, Role } from "@prisma/client";
 import { canViewProductDrafts } from "./product-drafts";
 import { MANAGER_ROLES, hasAnyRole, hasRole } from "./roles";
+import { isActiveProductStatus } from "./product-statuses";
 
 export interface ProductPercentageStatusContext {
   from: ProductStatus;
@@ -14,6 +15,7 @@ export interface ProductPercentageStatusContext {
 }
 
 export function decideProductPercentageStatus(roles: Role[], input: ProductPercentageStatusContext): { allowed: boolean; error?: string } {
+  if (!isActiveProductStatus(input.to)) return { allowed: false, error: "Этот статус изделия больше не используется" };
   if ((input.from === "DRAFT" || input.to === "DRAFT") && !canViewProductDrafts(roles) && !(roles.includes("MANAGER") && input.canAccessDraft === true))
     return { allowed: false, error: "Недостаточно прав для изменения статуса изделия" };
   if (hasAnyRole(roles, MANAGER_ROLES)) return { allowed: true };

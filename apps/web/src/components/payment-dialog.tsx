@@ -94,7 +94,7 @@ export function PaymentDialog({
   const [paidAt, setPaidAt] = useState("");
   const [comment, setComment] = useState("");
   const [clientMutationId, setClientMutationId] = useState(createRequestId);
-  const [reportDocument, setReportDocument] = useState<FinanceDocumentView | null>(null);
+  const [reportDocuments, setReportDocuments] = useState<FinanceDocumentView[]>([]);
   const [documentLoading, setDocumentLoading] = useState(false);
   const initialized = useRef<{ session: object; actorId: string } | null>(null);
 
@@ -115,7 +115,7 @@ export function PaymentDialog({
         return;
       }
       setClientMutationId(createRequestId());
-      setReportDocument(null);
+      setReportDocuments([]);
       setDocumentLoading(false);
       setSelectedProjectId(projectId??"");
       const initial = initialCashAccount(cashAccounts, { currency: projectCurrency, fallback: "currency" });
@@ -187,7 +187,7 @@ export function PaymentDialog({
     !articleOpen &&
     !materialOpen &&
     !documentLoading &&
-    (isIncome || isStockPurchase || reportDocument !== null) &&
+    (isIncome || isStockPurchase || reportDocuments.length > 0) &&
     (!isStockPurchase || materialId !== "") &&
     (!needsRate || !rateLoading) &&
     Number.isFinite(parsedAmount) &&
@@ -290,8 +290,8 @@ export function PaymentDialog({
           {articleField}
           {!isIncome ? <div className="min-w-0 space-y-2">
             <Label htmlFor="pay-document">{isStockPurchase ? "Отчетный документ (необязательно)" : "Отчетный документ *"}</Label>
-            <FinanceDocumentUpload key={clientMutationId} id="pay-document" disabled={pending}
-              onBusyChange={setDocumentLoading} onUploaded={setReportDocument} />
+            <FinanceDocumentUpload key={clientMutationId} id="pay-document" disabled={pending || command.loading || !!saved || !!blocked}
+              onBusyChange={setDocumentLoading} onUploaded={setReportDocuments} />
           </div> : null}
 
           <div className="flex min-w-0 max-w-full flex-col gap-1.5">
@@ -357,7 +357,7 @@ export function PaymentDialog({
           </div>
         </fieldset>
         {saved ? <p role="status" className="text-sm text-destructive">Результат операции требует подтверждения. Проверьте прежний запрос.</p> : null}
-        {saved?.data.reportDocumentId && !reportDocument ? <p className="text-sm text-muted-foreground">Отчётный документ закреплён в сохранённом запросе.</p> : null}
+        {(saved?.data.reportDocumentId || saved?.data.reportDocumentIds?.length) && !reportDocuments.length ? <p className="text-sm text-muted-foreground">Отчётные документы закреплены в сохранённом запросе.</p> : null}
         {blocked || command.error ? <p role="alert" className="text-sm text-destructive">{blocked || command.error}</p> : null}
         <DialogFooter>
           <Button variant="outline" disabled={pending || articleOpen || materialOpen} onClick={() => onOpenChange(false)}>
@@ -372,9 +372,9 @@ export function PaymentDialog({
                   rate: needsRate ? parsedRate : undefined, rateDate: rateDate || undefined, paidAt: paidAt || undefined, comment: comment.trim() || undefined };
                 const result = await command.run(saved ?? (isStockPurchase
                   ? {kind: "stock", data: { ...common, materialId, quantity, unitPrice, expenseArticleId: effectiveArticleId,
-                    ...(reportDocument ? { reportDocumentId: reportDocument.id } : {}) }}
+                    reportDocumentIds: reportDocuments.map(document => document.id) }}
                   : {kind: "payment", data: { ...common,
-                    ...(!isIncome && reportDocument ? { reportDocumentId: reportDocument.id } : {}),
+                    ...(!isIncome ? { reportDocumentIds: reportDocuments.map(document => document.id) } : {}),
                     projectId: projectOptions ? selectedProjectId || null : projectId ?? null, direction, amount: parsedAmount,
                     ...(!isIncome ? { expenseArticleId: effectiveArticleId } : {}),
                   }}));

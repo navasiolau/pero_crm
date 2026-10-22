@@ -62,7 +62,7 @@ for (const vector of [
     if (paid.length) assert.equal(paid[0].amount.toFixed(2), vector.amounts[index]);
   }
   assert.equal(await tx.domainEvent.count({ where: { actor: c.actor.id, type: "payroll.accrued" } }), vector.amounts.filter(amount => amount !== "0.00").length);
-  for (const status of ["DESIGN", "DONE", "RECLAMATION", "DONE"] as const)
+  for (const status of ["DESIGN", "DONE", "DESIGN", "DONE"] as const)
     assert.equal((await statuses.changeProductStatusTransaction(tx, c.actor, product.id, status)).ok, true);
   assert.deepEqual(await snapshots(tx, product.id), frozen); assert.deepEqual(await tx.payrollEntry.findMany({ where: { productId: product.id }, orderBy: { id: "asc" } }), payroll);
 }));

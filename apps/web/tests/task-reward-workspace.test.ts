@@ -112,7 +112,7 @@ test("priced zero and frozen share keep their bindings while orphan, cross relat
 test("coordinator engineer creates on own visible PRODUCTION, without edit/execution, and stale removal denies", async () => {
   let currentRoles: Role[] = ["ENGINEER", "WORK_COORDINATOR"];
   const actor = { id: "engineer", name: "Инженер", roles: [...currentRoles], source: "web" as const };
-  const project = { id: "project", number: "121", currency: "BYN", deletedAt: null, products: [], tasks: [] };
+  const project = { id: "project", number: "121", stage: "CONTRACT", currency: "BYN", deletedAt: null, products: [], tasks: [] };
   const product = { id: "product", projectId: project.id, project, quantity: 2, engineerId: actor.id,
     status: "PRODUCTION", deletedAt: null, tasks: [] };
   const price = { id: "tariff", name: "Сборка", unit: "шт.", price: new Prisma.Decimal("50"), active: true };
@@ -142,6 +142,7 @@ test("coordinator engineer creates on own visible PRODUCTION, without edit/execu
   assert.equal(matches({ id: "ordinary-task", assigneeId: actor.id, productId: product.id, product, project }, taskExecutionWhere(actor)), false);
   product.engineerId = "other";
   assert.equal((await addWorkCore(actor, input, callback => callback(db))).ok, false, "Knowing a foreign product ID never grants creation");
+  assert.deepEqual(await listWorkPriceOptions(actor, product.id, db), [], "the create dialog uses the same write boundary");
   product.engineerId = actor.id;
   currentRoles = ["ENGINEER"];
   assert.equal((await addWorkCore(actor, input, callback => callback(db))).ok, false, "The transaction uses current roles after addon removal");
@@ -163,7 +164,7 @@ test('financial and warehouse/office grants remain independent of manager privil
  assert.equal(role.roleLabels[procurement],'Снабженец');assert.equal(role.isValidRolesCombination(['ADMIN',procurement]),false);assert.equal(role.isValidRolesCombination(['DIRECTOR',procurement]),false);assert.equal(role.isValidRolesCombination(['ACCOUNTANT',procurement]),true);
 });
 test('pure accountant has no operational read/task execution; role union preserves independent engineering/field grants',()=>{
- const acc={id:'a',roles:['ACCOUNTANT'] as Role[]};assert.equal(hasFullProjectVisibility(acc),false);assert.match(JSON.stringify(productVisibilityWhere(acc)),/"in":\[\]/);assert.match(JSON.stringify(fileVisibilityWhere(acc)),/"in":\[\]/);assert.doesNotMatch(JSON.stringify(taskExecutionWhere(acc)),/"assigneeId":"a"/);assert.notEqual(taskRecipientError({...acc,active:true},null),null);
+ const acc={id:'a',roles:['ACCOUNTANT'] as Role[]},project={id:'project',deletedAt:null,stage:'CONTRACT'},product={id:'product',deletedAt:null,engineerId:'a',status:'DESIGN',project};assert.equal(hasFullProjectVisibility(acc),false);assert.equal(matches(product,productVisibilityWhere(acc)),false);assert.equal(matches({project,product,productId:'product',taskId:null,section:'GENERAL'},fileVisibilityWhere(acc)),false);assert.equal(matches({id:'task',assigneeId:'a',project,product,productId:'product'},taskExecutionWhere(acc)),false);assert.notEqual(taskRecipientError({...acc,active:true},null),null);
  assert.equal(hasFullProjectVisibility({id:'a',roles:['ACCOUNTANT','ENGINEER']}),false);assert.match(JSON.stringify(taskExecutionWhere({id:'a',roles:['ACCOUNTANT','WORKER']})),/"assigneeId":"a"/);
  assert.equal(hasFullProjectVisibility({id:'p',roles:[procurement]}),true);for(const status of ['DRAFT','PREPARATION','DESIGN','PRODUCTION'])assert.equal(matches({id:'p',status,engineerId:'p',deletedAt:null,project:{deletedAt:null}},productEditWhere({id:'p',roles:[procurement]})),false,status);
 });

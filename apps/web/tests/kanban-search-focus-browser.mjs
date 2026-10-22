@@ -33,8 +33,8 @@ const common={title:'Стеллаж',statusChangedAt:new Date().toISOString(),st
  tasksCount:0,filesCount:0,productsCount:1};
 const cover={id:'qa176-focus-cover',fileName:'focus.png',mimeType:'image/png',hasThumb:true};
 const all=[...Array.from({length:12},(_,i)=>({...common,id:'partial-'+i,number:number+String(99-i),
- title:'Совпадение '+i,status:'INSTALLATION',stage:'RECLAMATION'})),
- {...common,id:'target',number,status:'INSTALLATION',stage:'RECLAMATION',title:'Искомая карточка',sketchFile:cover,coverFile:cover},
+ title:'Совпадение '+i,status:'INSTALLATION',stage:'IN_WORK'})),
+ {...common,id:'target',number,status:'INSTALLATION',stage:'IN_WORK',title:'Искомая карточка',sketchFile:cover,coverFile:cover},
  {...common,id:'start',number:'100.1',status:'PREPARATION',stage:'LEAD',title:'Начало'},
  {...common,id:'end',number:'800.1',status:'DONE',stage:'REFUSED',title:'Конец'}];
 function rows(query){const p=new URLSearchParams(query),q=p.get('q')?.trim()||'',selected=parseListFilterValue(p.get(product?'status':'stage'));return all.filter(row=>(!window.__omitTarget||row.id!=='target')&&(!q||row.number.includes(q)||row.title.toLowerCase().includes(q.toLowerCase()))&&(!selected||selected.includes(product?row.status:row.stage))).map(row=>({...row}));}
@@ -131,6 +131,28 @@ const search=page=>page.getByPlaceholder('Номер, название…');
 async function apply(page,q){await search(page).fill(q);await expect.poll(()=>page.evaluate(()=>new URLSearchParams(window.__clientQuery).get('q'))).toBe(q||null);await expect.poll(()=>page.evaluate(()=>window.__pending)).toBe(false);await waitFrames(page);}
 try{
  for(const section of sections){
+  for(const viewport of [{width:1440,height:900},{width:390,height:844}]){
+   const delayed=await makePage(section,viewport),q=expectedQ(section);
+   await delayed.evaluate(()=>{const style=document.createElement('style');style.id='late-card';style.textContent='[data-kanban-card-id="target"]{display:none!important}';document.head.append(style);});
+   if(viewport.width<768)await delayed.getByRole('button',{name:'Фильтры',exact:true}).click();
+   await apply(delayed,q);
+   if(viewport.width<768){await delayed.getByRole('button',{name:'Показать результаты',exact:true}).click();await expect(delayed.getByRole('dialog')).toHaveCount(0);}
+   await expect.poll(()=>delayed.evaluate(()=>window.__committedFocus?.ready)).toBe(true);
+   await waitFrames(delayed);assert.deepEqual(await delayed.evaluate(()=>window.__focusMoves),{board:0,page:0});
+   await delayed.evaluate(()=>window.__focusBeforeCard=document.activeElement);
+   await delayed.evaluate(()=>document.getElementById('late-card').remove());await settledCenter(delayed,section);
+   assert.deepEqual(await delayed.evaluate(()=>window.__focusMoves),{board:1,page:1});
+   assert.equal(await delayed.evaluate(()=>document.activeElement===window.__focusBeforeCard),true);
+   if(viewport.width>=768)assert.deepEqual(await search(delayed).evaluate(input=>({active:document.activeElement===input,start:input.selectionStart,end:input.selectionEnd})),{active:true,start:q.length,end:q.length});
+   checks.push(section+':'+viewport.width+':zero_size_target_waits_until_measurable_once');await finish(delayed);
+  }
+
+  const inserted=await makePage(section);
+  await inserted.evaluate(()=>{const card=document.querySelector('[data-kanban-card-id="target"]');window.__lateCard=card;window.__lateParent=card.parentElement;card.remove();});
+  await apply(inserted,expectedQ(section));await waitFrames(inserted);assert.deepEqual(await inserted.evaluate(()=>window.__focusMoves),{board:0,page:0});
+  await inserted.evaluate(()=>window.__lateParent.append(window.__lateCard));await settledCenter(inserted,section);
+  assert.deepEqual(await inserted.evaluate(()=>window.__focusMoves),{board:1,page:1});checks.push(section+':late_DOM_target_waits_until_inserted_once');await finish(inserted);
+
   const q=expectedQ(section),page=await makePage(section),before=await layout(page);
   await apply(page,q);await settledCenter(page,section);await waitFrames(page);
   const g=await geometry(page,section);assert.ok(g.left>0&&g.top>0);assert.deepEqual(await page.evaluate(()=>window.__focusMoves),{board:1,page:1},'one exact query must cause one board/page transition');assert.ok(Math.abs(g.bottom-g.left)<2);
@@ -183,7 +205,7 @@ try{
    await excluded.evaluate(()=>{window.__omitTarget=false;window.__accept(window.__clientQuery);});await waitFrames(excluded);assert.deepEqual(await excluded.evaluate(()=>window.__focusMoves),{board:0,page:0});assert.equal(await excluded.locator('[data-kanban-card-id="target"]').count(),1);
    checks.push('products:current_response_old_rows_unready_empty_exact_consumed_no_late_focus');await finish(excluded);
 
-   const roles=await makePage(section);await roles.evaluate(()=>window.__hold=true);await apply(roles,q);
+   const roles=await makePage(section);await roles.evaluate(()=>{window.__hold=true;window.__all.find(row=>row.id==='target').status='PREPARATION';});await apply(roles,q);
    await roles.evaluate(()=>{window.__focusStates=[];window.__setRoles(['ENGINEER']);window.__accept(window.__clientQuery);});await waitFrames(roles);
    const roleStates=await roles.evaluate(()=>window.__focusStates.filter(state=>state?.query===window.__number));
    assert.ok(roleStates.some(state=>state.cardId==='target'&&!state.ready),'new role props cannot confirm rows from the previous role');
@@ -229,10 +251,12 @@ try{
    // Ручную позицию фиксируем после настоящего scrollend, включая инерцию и CSS snap.
    await mobile.locator('[data-slot="kanban-scroll"]').evaluate(board=>{
     window.__manualTouchSettled=false;
-    window.addEventListener('touchend',()=>board.addEventListener('scrollend',()=>{window.__manualTouchSettled=true;},{once:true}),{once:true});
+    // У крайней колонки scrollend может прийти уже во время touchmove.
+    // Подписка до жеста не теряет это событие; ниже отдельно ждём стабильные координаты.
+    board.addEventListener('scrollend',()=>{window.__manualTouchSettled=true;},{once:true});
    });
    const cdp=await mobile.context().newCDPSession(mobile);await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:viewport.width-30,y:viewport.height/2}]});
-   for(const x of [viewport.width-80,viewport.width-150,70])await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x,y:viewport.height/2}]});
+   for(const x of [viewport.width-80,viewport.width-150,70]){await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x,y:viewport.height/2}]});await waitFrames(mobile);}
    await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
    await expect.poll(()=>mobile.evaluate(()=>window.__manualTouchSettled),{timeout:5000}).toBe(true);
    // scrollend не доказывает доставку зеркальных scroll-событий: снимок берём после точной стабилизации.

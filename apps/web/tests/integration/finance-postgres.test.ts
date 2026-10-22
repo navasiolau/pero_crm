@@ -327,6 +327,37 @@ for (const linked of [false, true]) test(`payment/report-owner-ready-context-rep
     assert.deepEqual(finalMoney[index].filter(row => beforeRows.some(before => before.id === row.id)), beforeRows, "FOREIGN_PAYMENT_ROWS_UNCHANGED");
 }));
 
+test("payment/multiple-report-documents-atomic-binding-replay-and-one-money-fact", async () => fixture.rollback(async (tx, rows) => {
+  const c = await paymentContext(tx, rows, true), documents = [c.document];
+  for (const index of [2, 3]) documents.push(await tx.financeDocument.create({ data: {
+    uploadedById: c.actor.id, clientMutationId: randomUUID(), requestFingerprint: rows.id(`multi-doc-${index}`),
+    fileName: `Чек-${index}.pdf`, mimeType: "application/pdf", size: 4, contentHash: `sha-${index}`,
+    storageKey: rows.id(`multi-key-${index}`), storageMode: "s3", state: "READY", readyAt: new Date(),
+  } }));
+  const ids = documents.map(document => document.id), input = { ...c.input, reportDocumentId: undefined, reportDocumentIds: ids };
+  const beforeCash = await cash.readCashBalance(tx, c.account.id);
+  const first = await payments.createPaymentInTransaction(c.actor, input, c.prepared, tx);
+  const links = await tx.paymentReportDocument.findMany({ where: { paymentId: first.payment.id }, orderBy: { position: "asc" } });
+  assert.deepEqual(links.map(row => row.documentId), ids); assert.deepEqual(links.map(row => row.position), [0, 1, 2]);
+  assert.equal(first.payment.reportDocumentId, ids[0]);
+  assert.equal((await cash.readCashBalance(tx, c.account.id)).toFixed(2), beforeCash.minus("100").toFixed(2));
+  assert.equal(await tx.payment.count({ where: { createdById: c.actor.id, direction: "EXPENSE" } }), 1);
+  const saved = await nativeSnapshot(tx);
+  assert.equal((await payments.createPaymentInTransaction(c.actor, input, c.prepared, tx)).payment.id, first.payment.id);
+  assert.deepEqual(await nativeSnapshot(tx), saved, "THREE_DOCUMENT_REPLAY_CANNOT_REPEAT_MONEY_OR_BINDINGS");
+  await assert.rejects(payments.createPaymentInTransaction(c.actor, { ...input, clientMutationId: randomUUID(), reportDocumentIds: [ids[1]] }, c.prepared, tx), /документ/i);
+  await assert.rejects(payments.createPaymentInTransaction(c.actor, { ...input, clientMutationId: randomUUID(), reportDocumentIds: [ids[0], ids[0]] }, c.prepared, tx), /несколько раз/);
+  await assert.rejects(payments.createPaymentInTransaction(c.actor, { ...input, reportDocumentIds: [...ids].reverse() }, c.prepared, tx), /другими данными/);
+  assert.deepEqual(await nativeSnapshot(tx), saved);
+  await rejectedSql(tx, async () => {
+    await tx.paymentReportDocument.delete({ where: { paymentId_documentId: { paymentId: first.payment.id, documentId: ids[1] } } });
+    await receipts.readPaymentReceipt(c.actor, input, tx);
+  }, /полный комплект/);
+  const visible = (await ledger.loadOrganizationPayments(c.actor, "EXPENSE", tx)).rows.find(row => row.id === first.payment.id)!;
+  assert.deepEqual(visible.reportDocuments?.map(file => file.id), ids); assert.equal(visible.bynAmount, 100);
+  assert.ok(!JSON.stringify(visible).includes(documents[1].storageKey));
+}));
+
 test("payment/foreign-preflight-decimal-snapshots-article-fences-and-delete-caps", async () => fixture.rollback(async (tx, rows) => {
   const c = await paymentContext(tx, rows, true), usd = await tx.cashAccount.create({ data: { name: "USD169", currency: "USD" } });
   await tx.payment.create({ data: { cashAccountId: usd.id, amount: "1000", currency: "USD", bynAmount: "3000", rate: "3" } });
@@ -411,6 +442,42 @@ test("payment/scenario-minimal-effects-replay-skips-fx", async () => fixture.rol
     actorId: c.actor.id, project: null, direction: "INCOME", amount: 100, currency: "BYN", comment: "own" });
   assert.deepEqual(await paymentCore.createPaymentScenario(c.actor, input, deps), { ack: { ...first.ack, replayed: true } });
   assert.equal(prepared, 1); assert.equal(await tx.changeLog.count({ where: { actorId: c.actor.id } }), 2);
+}));
+
+test("warehouse/paid-receipt-three-files-one-stock-one-payment-and-legacy-fingerprints", async () => fixture.rollback(async (tx, rows) => {
+  const c = await paymentContext(tx, rows, false), documents = [c.document];
+  await tx.warehouseAccountingState.upsert({ where: { id: "main" },
+    create: { id: "main", phase: "ACTIVE", runId: rows.id("multi-stock-run"), beforePrices: [], beforeBalances: [] }, update: {} });
+  const unit = await tx.materialUnit.create({ data: { name: rows.id("multi-stock-unit") } });
+  const material = await tx.material.create({ data: { name: rows.id("multi-stock-material"), unitId: unit.id } });
+  for (const index of [2, 3]) documents.push(await tx.financeDocument.create({ data: {
+    uploadedById: c.actor.id, clientMutationId: randomUUID(), requestFingerprint: rows.id(`stock-doc-${index}`),
+    fileName: `Закупка-${index}.pdf`, mimeType: "application/pdf", size: 4, contentHash: `sha-${index}`,
+    storageKey: rows.id(`stock-doc-key-${index}`), storageMode: "s3", state: "READY", readyAt: new Date(),
+  } }));
+  const ids = documents.map(document => document.id), data = stockPurchaseSchema.parse({
+    clientMutationId: randomUUID(), materialId: material.id, quantity: "3", unitPrice: "10", currency: "BYN",
+    cashAccountId: c.account.id, expenseArticleId: c.article.id, reportDocumentIds: ids,
+  });
+  const prepared = (await purchase.prepareStockPurchase(c.actor, data, tx)).prepared;
+  const first = await purchase.createStockPurchaseInTransaction(c.actor, data, prepared, tx), receipt = first.receipt;
+  assert.deepEqual(receipt.payment.reportDocuments.map(row => row.documentId), ids);
+  assert.equal(receipt.payment.amount.toFixed(2), "30.00"); assert.equal(receipt.movement.quantity.toFixed(3), "3.000");
+  assert.equal(await tx.payment.count({ where: { createdById: c.actor.id, direction: "EXPENSE" } }), 1);
+  assert.equal(await tx.stockMovement.count({ where: { createdById: c.actor.id } }), 1);
+  const saved = await nativeSnapshot(tx);
+  assert.equal((await purchase.createStockPurchaseInTransaction(c.actor, data, prepared, tx)).receipt.id, receipt.id);
+  assert.deepEqual(await nativeSnapshot(tx), saved);
+  await rejectedSql(tx, async () => {
+    await tx.paymentReportDocument.delete({ where: { paymentId_documentId: { paymentId: receipt.paymentId, documentId: ids[2] } } });
+    await purchase.readStockPurchaseReceipt(c.actor, data, tx);
+  }, /полный комплект/);
+  const legacy = stockPurchaseSchema.parse({ ...data, reportDocumentIds: undefined });
+  const oldHash = createHash("sha256").update(JSON.stringify({actorId:c.actor.id,materialId:legacy.materialId,quantity:legacy.quantity,
+    unitPrice:legacy.unitPrice,currency:legacy.currency,cashAccountId:legacy.cashAccountId,expenseArticleId:legacy.expenseArticleId,
+    rate:null,rateDate:null,paidAt:null,comment:null})).digest("hex");
+  assert.equal(purchase.stockPurchaseFingerprint(c.actor.id, legacy), oldHash);
+  assert.notEqual(purchase.stockPurchaseFingerprint(c.actor.id, data), oldHash);
 }));
 
 for (const currency of ["BYN", "USD"] as const) test(`warehouse/paid-receipt-cascade-delete-history-and-rollback/${currency}`, async () => fixture.rollback(async (tx, rows) => {
@@ -614,13 +681,21 @@ test("logistics/real-posting-correction-CAS-history-budget-and-SQL-rollback", as
   const deniedActor = await rows.user("logistics-denied", ["MANAGER"]);
   assert.equal((await logisticsHttp.readLogisticsDocumentResponse(new Request(`${fixture.target.baseUrl}/api/logistics/documents/${pending.id}`), pending.id,
     { authorize: async () => deniedActor.id, service: documents })).status, 403);
+  const secondTtn = await documents.upload(actor.id, { ...upload, clientMutationId: randomUUID(),
+    ttnNumber: "CI195-2", fileName: "ТТН-2.pdf", bytes: Buffer.from("%PDF-1.4\nCI195-2") });
   const input = { tripId: trip.tripId, expectedRevision: trip.revision, clientMutationId: randomUUID(), amount: "1000.00", currency: "BYN" as const,
-    cashAccountId: c.account.id, documentIds: [document.id] }, dependencies = { db: tx, transaction };
+    cashAccountId: c.account.id, documentIds: [document.id, secondTtn.document.id] }, dependencies = { db: tx, transaction };
   await assert.rejects(logistics.createLogisticsPostingCore(actor.id, { ...input, documentIds: [randomUUID()] }, "post", dependencies), /сохранённая ТТН/);
   const beforeCash = await cash.readCashBalance(tx, c.account.id), beforeOrg = await cash.readOrgBalance(tx, "1");
   const posted = await logistics.createLogisticsPostingCore(actor.id, input, "post", dependencies);
   const original = await tx.logisticsPosting.findUniqueOrThrow({ where: { id: posted.postingId }, include: { allocations: { orderBy: { projectId: "asc" } } } });
   const oldPayments = await tx.payment.findMany({ where: { logisticsAllocation: { postingId: posted.postingId } }, orderBy: { id: "asc" } });
+  const shown = (await ledger.loadOrganizationPayments(actor, "EXPENSE", tx)).rows.find(row => row.id === oldPayments[0].id)!;
+  assert.deepEqual(shown.reportDocuments?.map(file => file.id), [document.id, secondTtn.document.id].sort());
+  assert.ok(shown.reportDocuments?.every(file => file.source === "logistics"));
+  const freeReport = await tx.financeDocument.create({ data: { clientMutationId: randomUUID(), requestFingerprint: rows.id("free-report"), uploadedById: actor.id,
+    fileName: "Обычный.pdf", mimeType: "application/pdf", size: 3, contentHash: "f".repeat(64), storageKey: rows.id("free-report"), storageMode: "s3", state: "READY", readyAt: new Date() } });
+  await rejectedSql(tx, () => tx.paymentReportDocument.create({ data: {paymentId:oldPayments[0].id,documentId:freeReport.id,position:0} }), /PAYMENT_REPORT_DOCUMENT_UNAVAILABLE/);
   assert.deepEqual(new Map(original.allocations.map(row => [row.projectId, row.amount.toFixed(2)])), new Map([[a.id, "400.00"], [b.id, "600.00"]]));
   assert.equal(original.expenseArticleId, null); assert.equal(oldPayments.length, 2); assert.ok(oldPayments.every(row => row.expenseArticleId === null));
   assert.equal((await cash.readCashBalance(tx, c.account.id)).toFixed(2), beforeCash.minus(1000).toFixed(2));
@@ -649,7 +724,7 @@ test("logistics/real-posting-correction-CAS-history-budget-and-SQL-rollback", as
   await tx.$executeRawUnsafe('DROP TRIGGER ci169_logistics_failure ON "ChangeLog"'); await tx.$executeRawUnsafe("DROP FUNCTION ci169_logistics_failure()");
   const corrected = await logistics.createLogisticsPostingCore(actor.id, correction, "correct", dependencies);
   const signed = await documents.upload(actor.id, { ...upload, clientMutationId: randomUUID(), stage: "SIGNED", bytes: Buffer.from("%PDF-1.4\nSIGNED") });
-  assert.notEqual(signed.document.id, document.id); assert.equal((await documents.list(c.actor.id, trip.tripId)).length, 2);
+  assert.notEqual(signed.document.id, document.id); assert.equal((await documents.list(c.actor.id, trip.tripId)).length, 3);
   assert.equal((await logisticsQueries.getLogisticsTripMoneyCore(actor.id, trip.tripId, tx)).current!.id, corrected.postingId);
   const accountantView = await logisticsViews.getLogisticsTripCore(c.actor.id, trip.tripId, transaction);
   assert.equal(accountantView?.mode, "documents"); assert.equal("lines" in accountantView!, false); assert.equal("comment" in accountantView!, false);

@@ -97,6 +97,7 @@ test('fulfilled need still offers issue above plan; legacy return requires its e
 // Перенесены действующие UI условия из закрытых операторов97/99/100/101/103.
 const documentView={id:'report',fileName:'Receipt103.pdf',mimeType:'application/pdf',source:'finance'};
 const paidRow={id:'paid',direction:'EXPENSE',amount:60,currency:'BYN',rate:1,rateDate:null,bynAmount:60,projectAmount:null,paidAt:'2026-10-07T09:00:00Z',comment:'Оплаченная закупка',cashAccountName:'Основная касса',expenseArticleName:'Материалы',createdByName:'Бухгалтер',project:null,reportDocument:documentView,
+ reportDocuments:[documentView,{id:'report2',fileName:'Receipt195.png',mimeType:'image/png',source:'finance'},{id:'report3',fileName:'Invoice195.pdf',mimeType:'application/pdf',source:'finance'}],
  stockPurchase:{movementId:'movement',materialName:'Петля',unit:'шт',quantity:3,unitPrice:20,stockValueByn:60}};
 async function withLedger(mode,run){
  const context=await browser.newContext({viewport:{width:1440,height:1000}});
@@ -134,7 +135,7 @@ test('paid stock keeps optional document, computed amount and mobile footer; ord
   await expense.getByRole('link',{name:'Receipt103.pdf',exact:true}).waitFor();assert.equal(await pay.isEnabled(),true);
   await pay.scrollIntoViewIfNeeded();const expenseBox=await pay.boundingBox();assert.ok(expenseBox&&expenseBox.y>=0&&expenseBox.y+expenseBox.height<=844,'EXPENSE_FOOTER_UNREACHABLE');
   await expense.getByRole('button',{name:'Отмена',exact:true}).click();
-  await page.getByRole('article').filter({hasText:'Приход на склад'}).click();
+  await page.getByRole('article').filter({hasText:'Приход на склад'}).getByText('Приход на склад · Петля',{exact:true}).click();
   const detail=page.getByRole('dialog',{name:'Расход',exact:true});await detail.getByRole('heading',{name:'Расход',exact:true}).waitFor();
   assert.ok((await detail.innerText()).includes('Стоимость запаса'));assert.match(await detail.innerText(),/60.*BYN/s);assert.equal(await detail.getByRole('button',{name:'Удалить',exact:true}).isDisabled(),true);
   const document=detail.getByRole('link',{name:'Receipt103.pdf',exact:true});assert.equal(await document.getAttribute('href'),'/api/finance/documents/report');assert.equal(await document.getAttribute('download'),'Receipt103.pdf');
@@ -168,4 +169,22 @@ test('project expense UI filters precise frozen stock costs, follows return sour
   await filter.selectOption('article:a');assert.equal(await page.getByRole('article').count(),1);await page.getByRole('article').click();
   await page.getByRole('dialog').getByRole('button',{name:'Удалить расход',exact:true}).click();assert.equal(await page.evaluate(()=>window.__deletedPayment),'cash-source');
  }finally{await context.close();}
+});
+
+test('expense search, desktop/mobile detail and image viewer expose all three receipts without post-payment upload',async()=>{
+ await withLedger('organization',async page=>{
+  await page.getByPlaceholder('Поиск по расходам…').fill('Invoice195.pdf');
+  assert.equal(await page.getByRole('row').filter({hasText:'Invoice195.pdf'}).count(),1);
+  await page.setViewportSize({width:390,height:844});
+  const card=page.getByRole('article').filter({hasText:'Invoice195.pdf'});assert.equal(await card.count(),1);
+  for(const name of ['Receipt103.pdf','Receipt195.png','Invoice195.pdf'])assert.ok((await card.innerText()).includes(name));
+  await card.getByText('Приход на склад · Петля',{exact:true}).click();const detail=page.getByRole('dialog',{name:'Расход',exact:true});await detail.waitFor();
+  assert.equal(await detail.locator('input[type=file]').count(),0);assert.equal(await detail.getByRole('button',{name:'Удалить',exact:true}).isDisabled(),true);
+  for(const name of ['Receipt103.pdf','Receipt195.png','Invoice195.pdf'])assert.ok((await detail.innerText()).includes(name));
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+  await page.route('**/api/finance/documents/report2*',route=>route.fulfill({contentType:'image/png',body:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j7ZkAAAAASUVORK5CYII=','base64')}));
+  await detail.getByRole('button',{name:'Receipt195.png',exact:true}).click();
+  const viewer=page.getByRole('dialog',{name:'Полноэкранный просмотр изображения',exact:true});await viewer.waitFor();
+  assert.equal(await viewer.getByRole('img',{name:'Receipt195.png',exact:true}).getAttribute('src'),'/api/finance/documents/report2');
+ });
 });

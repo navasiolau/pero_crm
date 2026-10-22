@@ -9,7 +9,7 @@ import type { Prisma, ProjectStage, Role } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
 import { publicClientSelect } from "@/server/clients/projection";
-import { reportDocumentSelect } from "@/server/finance-documents/view";
+import { reportDocumentSelect, paymentReportDocumentsSelect } from "@/server/finance-documents/view";
 import { logisticsAllocationSelect } from "@/server/logistics/payment-view";
 import {
   ASSIGNEE_ROLES,
@@ -18,7 +18,7 @@ import {
   hasAnyRole,
 } from "@/lib/roles";
 import { STAGES } from "@/lib/stages";
-import { parseListFilterValue } from "@/lib/list-filter-values";
+import { activeListStatusValues, parseListFilterValue } from "@/lib/list-filter-values";
 import { taskDetailsIncludeFor,taskWorkspaceWhere } from "@/server/tasks/queries";
 import { canManagePiecework, ordinaryPieceworkBinding } from "@/lib/piecework-policy";
 import { listProjectShortages } from "@/server/warehouse/queries";
@@ -143,8 +143,7 @@ export function parseProjectListParams(sp: Record<string, string | string[] | un
   };
   const stageValues = parseListFilterValue(get("stage"));
   // Невалидный этап игнорируется; область доступа ниже остаётся обязательной.
-  const stages = stageValues === undefined ? undefined : stageValues.every((value) => STAGES.some((item) => item.id === value))
-    ? stageValues as ProjectStage[] : undefined;
+  const stages = activeListStatusValues(stageValues, STAGES, ["PAUSED", "RECLAMATION"]) as ProjectStage[] | undefined;
   const sortRaw = get("sort");
   const sort = (Object.keys(PROJECT_SORT_MAP) as string[]).includes(sortRaw)
     ? (sortRaw as ProjectSortField)
@@ -313,7 +312,7 @@ export async function getProjectFor(
         include: {
           cashAccount: { select: { name: true } },
           expenseArticle: { select: { id: true, name: true } },
-          reportDocument: { select: reportDocumentSelect },
+          reportDocument: { select: reportDocumentSelect }, reportDocuments: paymentReportDocumentsSelect,
           logisticsAllocation: { select: logisticsAllocationSelect },
         },
         orderBy: { paidAt: "desc" },

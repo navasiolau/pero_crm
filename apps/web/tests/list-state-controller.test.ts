@@ -7,6 +7,18 @@ import type { SaveListPreferenceResult } from "../src/server/list-preference-ser
 
 const tick = () => new Promise<void>((resolve) => setImmediate(resolve));
 
+test("an explicit All URL marks an equal legacy preference as initialized", async () => {
+  const raw = JSON.stringify({ version: 2, query: "view=kanban" });
+  const calls: { query: string; expected: string | null }[] = [];
+  const controller = new ListStateController({ section: "projects", query: "view=kanban", preference: raw,
+    save: async (query, expected) => { calls.push({ query, expected }); return { ok: true, value: encodeListPreference("projects", query, "new") }; },
+    navigate: () => assert.fail("initializing the preference does not navigate") });
+  controller.start();
+  await tick();
+  assert.deepEqual(calls, [{ query: "view=kanban", expected: raw }]);
+  controller.stop();
+});
+
 for (const section of ["projects", "products"] as const) test(`${section} rapid checkbox changes keep latest arrays and raw V1 CAS through a late conflict`, async () => {
   const calls: { query: string; expected: string | null; resolve: (result: SaveListPreferenceResult) => void }[] = [];
   const navigations: string[] = [];

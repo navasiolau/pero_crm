@@ -34,8 +34,6 @@ export const STAGE_ORDER = [
   "CONTRACT",
   "IN_WORK",
   "DONE",
-  "RECLAMATION",
-  "PAUSED",
   "REFUSED",
 ];
 

@@ -64,10 +64,11 @@ test("kanban ignores descriptions, all client names and parent project names", a
 });
 
 test("identity scope preserves role visibility, soft deletion and every filter axis", async () => {
-  assert.deepEqual(new Set((await projectQueries.listProjects("engineer", ["ENGINEER"], { ...identity, q: "IdentityToken" })).rows.map(row => row.id)), new Set(["own"]));
-  assert.deepEqual(new Set((await productQueries.listProducts("engineer", ["ENGINEER"], { ...identity, q: "IdentityToken" })).rows.map(row => row.id)), new Set(["product-own", "product-partial"]));
-  assert.equal((await productQueries.listProducts("engineer", ["ENGINEER"], { ...identity, q: "999.5" })).total, 0);
-  assert.equal((await projectQueries.listProjects("engineer", ["ENGINEER"], { ...identity, q: "999" })).total, 0);
+  assert.deepEqual(new Set((await projectQueries.listProjects("engineer", ["ENGINEER"], { ...identity, q: "IdentityToken" })).rows.map(row => row.id)), new Set(["own", "hidden"]));
+  assert.deepEqual(new Set((await productQueries.listProducts("engineer", ["ENGINEER"], { ...identity, q: "IdentityToken" })).rows.map(row => row.id)), new Set(["product-own", "product-partial", "product-hidden"]));
+  assert.equal((await productQueries.listProducts("engineer", ["ENGINEER"], { ...identity, q: "999.5" })).total, 1);
+  assert.equal((await projectQueries.listProjects("engineer", ["ENGINEER"], { ...identity, q: "999" })).total, 1);
+  assert.equal((await productQueries.listProducts("engineer", ["ENGINEER"], { ...identity, q: "998.5" })).total, 0);
   const projectFilter = { ...identity, q: "IdentityToken", clientIds: ["client-own"], managerIds: ["manager-1"], engineerIds: ["engineer"], stages: ["IN_WORK" as const], activeOnly: true };
   assert.deepEqual((await projectQueries.listProjects("manager", ["MANAGER"], projectFilter)).rows.map(row => row.id), ["own"]);
   for (const changed of [{ clientIds: ["client-hidden"] }, { managerIds: ["manager-2"] }, { engineerIds: ["missing"] }, { stages: ["DONE" as const] }])

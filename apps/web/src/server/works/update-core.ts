@@ -5,7 +5,7 @@ import { canEditOrdinaryWork } from "@/lib/ordinary-work-access";
 import { assertInternalCurrency, assertProjectMoneyCurrency } from "@/lib/internal-currency";
 import { inputNorm, scaleNorm, workBudget } from "@/lib/product-quantity";
 import { allocatedWorkQuantity, quantityAtoms } from "@/lib/work-shares";
-import { productVisibilityWhere, resolveVisibilityActor } from "@/server/access/visibility";
+import { productAssignmentWriteWhere, resolveVisibilityActor } from "@/server/access/visibility";
 import { productDraftAccessSelect } from "@/server/access/product-draft-context";
 import { liveChildWhere, liveProductWhere, liveProjectWhere } from "@/server/access/live-entities";
 import { lockProductRow } from "@/server/products/quantity-core";
@@ -43,7 +43,7 @@ export async function updateWorkCore(actor: DomainActor, input: unknown, transac
       await lockProductRow(tx, data.productId);
       const visibility = await resolveVisibilityActor(tx, current);
       const product = await tx.product.findFirst({ where: { ...liveProductWhere, id: data.productId, projectId: data.projectId,
-        AND: [productVisibilityWhere(visibility)] }, select: { ...productDraftAccessSelect, id: true, status: true, quantity: true } });
+        AND: [productAssignmentWriteWhere(visibility)] }, select: { ...productDraftAccessSelect, id: true, status: true, quantity: true } });
       if (!product || !canEditOrdinaryWork(current.roles, product.status, product)) deny("Изделие недоступно для редактирования работы", "forbidden");
       const project = await tx.project.findUnique({ where: { ...liveProjectWhere, id: data.projectId }, select: { currency: true } });
       if (!project) deny("Проект недоступен", "forbidden");

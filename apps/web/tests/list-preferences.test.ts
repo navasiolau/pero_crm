@@ -142,6 +142,29 @@ test("load never writes, including explicit URLs and framework prefetches", asyn
   assert.deepEqual([...f.rows], before);
 });
 
+test("engineer first visit upgrades an old hidden empty filter, while explicit URL and later All persist", async () => {
+  const f = fixture();
+  const old = JSON.stringify({ version: 2, revision: "old", query: "view=table&client=c1" });
+  f.rows.set("alice/projects.list", old);
+  const options = { defaultEngineer: true };
+  const first = await f.service.load("projects", {}, options);
+  assert.equal(new URLSearchParams(first.query).get("engineer"), '["alice"]');
+  assert.equal(new URLSearchParams(first.query).get("client"), '["c1"]');
+  assert.equal(first.value, old, "load retains the original CAS token");
+  assert.equal(new URLSearchParams((await f.service.load("products", {}, options)).query).get("engineer"), '["alice"]');
+  assert.equal(new URLSearchParams((await f.service.load("projects", { view: "kanban" }, options)).query).get("engineer"), null);
+  assert.equal(new URLSearchParams((await f.service.load("projects", { engineer: "other" }, options)).query).get("engineer"), '["other"]');
+  const all = await f.service.save("projects", "view=table&client=c1", old);
+  assert.equal(all.ok, true);
+  f.login(null); f.login("alice");
+  assert.equal(new URLSearchParams((await f.service.load("projects", {}, options)).query).get("engineer"), null);
+  assert.equal(new URLSearchParams((await f.service.load("products", {}, options)).query).get("engineer"), '["alice"]', "sections remain independent");
+  f.rows.set("alice/products.list", JSON.stringify({ version: 2, query: "engineer=former" }));
+  assert.equal(new URLSearchParams((await f.service.load("products", {}, options)).query).get("engineer"), '["former"]');
+  f.login("bob");
+  assert.equal(new URLSearchParams((await f.service.load("projects", {}, options)).query).get("engineer"), '["bob"]');
+});
+
 test("new reset overrides the previous view preference and persists after sign in", async () => {
   const f = fixture();
   f.rows.set("alice/projects.view", "table");

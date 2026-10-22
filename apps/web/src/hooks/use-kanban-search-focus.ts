@@ -27,13 +27,35 @@ export function useKanbanSearchFocus(boardRef: RefObject<HTMLDivElement | null>,
     // не должен неожиданно отбирать ручную позицию прокрутки.
     if (!focus.cardId) { request.current.done = true; return; }
     const cardId = focus.cardId;
-    const frame = requestAnimationFrame(() => {
+    let frame = 0;
+    let observedCard: HTMLElement | undefined;
+    const resize = new ResizeObserver(schedule);
+    const mutations = new MutationObserver(schedule);
+    function disconnect() {
+      cancelAnimationFrame(frame);
+      resize.disconnect();
+      mutations.disconnect();
+    }
+    function schedule() {
+      if (!frame) frame = requestAnimationFrame(center);
+    }
+    function center() {
+      frame = 0;
       const board = boardRef.current;
       if (!board || request.current.query !== query || request.current.done) return;
       const card = Array.from(board.querySelectorAll<HTMLElement>("[data-kanban-card-id]"))
         .find(item => item.dataset.kanbanCardId === cardId);
+      if (card !== observedCard) {
+        if (observedCard) resize.unobserve(observedCard);
+        observedCard = card;
+        if (card) resize.observe(card);
+      }
+      const bounds = board.getBoundingClientRect(), target = card?.getBoundingClientRect();
+      // Подтверждённые данные могут опередить вставку или измеримый layout.
+      // DOM/resize-событие продолжит тот же запрос без постоянного RAF polling.
+      if (!target || target.width <= 0 || target.height <= 0 || bounds.width <= 0 || bounds.height <= 0) return;
       request.current.done = true;
-      if (!card || card.getBoundingClientRect().width === 0) return;
+      disconnect();
 
       restoreSnap.current?.();
       if (getComputedStyle(board).scrollSnapType !== "none") {
@@ -63,7 +85,6 @@ export function useKanbanSearchFocus(boardRef: RefObject<HTMLDivElement | null>,
         window.addEventListener("keydown", keyboard);
       }
 
-      const bounds = board.getBoundingClientRect(), target = card.getBoundingClientRect();
       const visibleCenter = (Math.max(0, bounds.left) + Math.min(window.innerWidth, bounds.right)) / 2;
       const left = clamp(board.scrollLeft + target.left + target.width / 2 - visibleCenter,
         board.scrollWidth - board.clientWidth);
@@ -72,7 +93,13 @@ export function useKanbanSearchFocus(boardRef: RefObject<HTMLDivElement | null>,
       // Мгновенный переход сохраняет caret и также соблюдает reduced motion.
       board.scrollTo({ left, behavior: "instant" });
       window.scrollTo({ left: window.scrollX, top, behavior: "instant" });
-    });
-    return () => cancelAnimationFrame(frame);
+    }
+    const board = boardRef.current;
+    if (board) {
+      resize.observe(board);
+      mutations.observe(board, { childList: true, subtree: true });
+    }
+    schedule();
+    return disconnect;
   }, [boardRef, query, focus?.cardId, focus?.ready]);
 }

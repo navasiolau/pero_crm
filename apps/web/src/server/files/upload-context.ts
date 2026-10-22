@@ -1,6 +1,6 @@
 import type { PrismaClient } from "@prisma/client";
 import { FIELD_ROLES, MANAGER_ROLES, hasAnyRole, hasRole } from "@/lib/roles";
-import { engineeringProductWhere, productVisibilityWhere, projectVisibilityWhere, resolveVisibilityActor, taskVisibilityWhere, type VisibilityActor } from "@/server/access/visibility";
+import { assignedProjectVisibilityWhere, engineeringProductWhere, productAssignmentWriteWhere, resolveVisibilityActor, taskVisibilityWhere, type VisibilityActor } from "@/server/access/visibility";
 
 /** Validate every foreign key before any storage write; task-only uploads inherit its product. */
 export async function resolveUploadContext(
@@ -12,7 +12,7 @@ export async function resolveUploadContext(
   const project = await db.project.findFirst({
     where: { AND: [
       { id: input.projectId },
-      projectVisibilityWhere(actor),
+      assignedProjectVisibilityWhere(actor),
     ] },
     select: {
       id: true, number: true,
@@ -36,7 +36,7 @@ export async function resolveUploadContext(
     ownsTask = task.assigneeId === actor.id;
   }
   const product = productId ? await db.product.findFirst({
-    where: { AND: [{ id: productId, projectId: input.projectId }, productVisibilityWhere(actor)] },
+    where: { AND: [{ id: productId, projectId: input.projectId }, productAssignmentWriteWhere(actor)] },
     select: { id: true, number: true, engineerId: true, status: true },
   }) : null;
   if (productId && !product) return null;

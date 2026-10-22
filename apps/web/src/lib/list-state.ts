@@ -1,6 +1,6 @@
 import { PRODUCT_STATUSES } from "./product-statuses";
 import { STAGES } from "./stages";
-import { encodeListFilterValue, parseListFilterValue } from "./list-filter-values";
+import { activeListStatusValues, encodeListFilterValue, parseListFilterValue } from "./list-filter-values";
 
 export type ListSection = "projects" | "products";
 export type ListSearchParams = Record<string, string | string[] | undefined>;
@@ -35,13 +35,20 @@ export function resolveListState(
   params: ListSearchParams,
   saved: string | null,
   legacyView: string | null = null,
+  defaultEngineerId: string | null = null,
 ) {
   // Наличие любого явного query исключает подмешивание скрытых предпочтений.
   if (Object.keys(params).length > 0) {
     return normalizeListQuery(section, searchParamsQuery(params));
   }
-  if (saved !== null) return decodeListPreference(section, saved) ?? DEFAULT_LIST_QUERY;
-  return legacyView === "table" ? "view=table" : DEFAULT_LIST_QUERY;
+  const query = saved !== null ? decodeListPreference(section, saved) ?? DEFAULT_LIST_QUERY
+    : legacyView === "table" ? "view=table" : DEFAULT_LIST_QUERY;
+  const state = new URLSearchParams(query);
+  // Старый пустой скрытый фильтр не является осознанным выбором «Все инженеры».
+  if (defaultEngineerId && !state.has("engineer") && !isEngineerFilterInitialized(saved)) {
+    state.set("engineer", encodeListFilterValue([defaultEngineerId])!);
+  }
+  return normalizeListQuery(section, state.toString());
 }
 
 export function normalizeListQuery(section: ListSection, query: string) {
@@ -53,7 +60,7 @@ export function normalizeListQuery(section: ListSection, query: string) {
   const config = filterConfig[section];
   for (const key of config.keys) {
     let values = parseListFilterValue(source.get(key) ?? undefined);
-    if (key === config.statusKey && values?.some((value) => !config.statuses.some((item) => item.id === value))) values = undefined;
+    if (key === config.statusKey) values = activeListStatusValues(values, config.statuses, section === "projects" ? ["PAUSED", "RECLAMATION"] : ["RECLAMATION"]);
     const encoded = encodeListFilterValue(values);
     if (encoded !== null) result.set(key, encoded);
   }
@@ -79,7 +86,17 @@ export function updateListQuery(section: ListSection, query: string, updates: Re
 }
 
 export function encodeListPreference(section: ListSection, query: string, revision: string) {
-  return JSON.stringify({ version: 2, revision, query: normalizeListQuery(section, query) });
+  return JSON.stringify({ version: 2, revision, engineerFilterInitialized: true, query: normalizeListQuery(section, query) });
+}
+
+export function isEngineerFilterInitialized(value: string | null): boolean {
+  if (!value) return false;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return !!parsed && typeof parsed === "object" && "version" in parsed && parsed.version === 2 &&
+      "query" in parsed && typeof parsed.query === "string" &&
+      "engineerFilterInitialized" in parsed && parsed.engineerFilterInitialized === true;
+  } catch { return false; }
 }
 
 export function decodeListPreference(section: ListSection, value: string | null): string | null {

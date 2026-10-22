@@ -1,7 +1,7 @@
 import {randomUUID} from "node:crypto";
 import { crm, CrmError, type ProjectRef,type ProjectBaseline } from "./crm";
 import { tg, TgError, type InlineButton, type TgCallbackQuery, type TgMessage, type TgUpdate } from "./tg";
-import { documentAttempt, uploadFinanceDocument, documentUploadError, type DocumentAttempt, type ReportDocument } from "./finance-document-upload";
+import { documentAttempt, uploadFinanceDocument, documentUploadError, hasUnresolvedDocumentAttempt, paymentReportDocumentInput, type DocumentAttempt, type ReportDocument } from "./finance-document-upload";
 import { startStockMovement, stockMovementText, stockMovementCallback, type StockMovementDialog } from "./stock-movement-dialog";
 import { startStockPurchase, stockPurchaseText, stockPurchaseCallback, stockPurchaseDocument, type StockPurchaseDialog } from "./stock-purchase-dialog";
 import {
@@ -46,6 +46,7 @@ type Dialog =
       clientMutationId: string;
       projectSelected: boolean;
       reportDocument?: ReportDocument;
+      reportDocuments?: ReportDocument[];
       documentAttempt?: DocumentAttempt;
       busy?: boolean;
       projectId?: string | null;
@@ -66,13 +67,8 @@ type Dialog =
       expectedStage: string; clientMutationId: string;
       step:
         | "refusalReason"
-        | "refusalComment"
-        | "reclamationReason"
-        | "reclamationDescription"
-        | "reclamationFault";
+        | "refusalComment";
       refusalReason?: string;
-      reclamationReason?: string;
-      reclamationDescription?: string;
     }
   | {
       kind: "edit";
@@ -89,7 +85,7 @@ const dialogs = new Map<string, Dialog>();
 const sessionCache = new Map<string, Session & { at: number }>();
 const noticeAt = new Map<string, number>();
 const SESSION_TTL_MS = 60_000;
-const FINANCE_CALLBACK_ACTIONS = new Set(["payin", "payout", "payproj", "paygeneral", "cur", "cash", "art", "nocomment", "payok", "docretry", "sp"]);
+const FINANCE_CALLBACK_ACTIONS = new Set(["payin", "payout", "payproj", "paygeneral", "cur", "cash", "art", "nocomment", "payok", "docretry", "doccontinue", "docexclude", "sp"]);
 
 function getDialog(chatId: number): Dialog | undefined {
   return dialogs.get(String(chatId));
@@ -486,6 +482,7 @@ async function startPayment(
     step: "project",
     clientMutationId: randomUUID(),
     projectSelected: false,
+    ...(direction === "EXPENSE" ? { reportDocuments: [] } : {}),
   };
   const label = direction === "INCOME" ? "Приход" : "Расход";
   // /расход 205 4000 — номер и сумму можно указать сразу
@@ -582,7 +579,11 @@ async function paymentDocumentMessage(chatId: number, message: TgMessage) {
   }
   if (dialog.busy) return;
   if (dialog.step === "comment") { dialog.comment = message.caption?.trim() || undefined; dialog.step = "document"; }
-  dialog.documentAttempt = documentAttempt(message, dialog.documentAttempt);
+  const attempt = documentAttempt(message, dialog.documentAttempt);
+  if (dialog.documentAttempt && attempt?.clientMutationId !== dialog.documentAttempt.clientMutationId) {
+    await reply(chatId, "Сначала повторите или исключите неподтверждённый файл."); return;
+  }
+  dialog.documentAttempt = attempt;
   await uploadPaymentDocument(chatId, session, dialog);
 }
 
@@ -593,13 +594,35 @@ async function uploadPaymentDocument(chatId: number, session: Session, dialog: E
   try {
     const document = await uploadFinanceDocument(session.userId, attempt);
     if (getDialog(chatId) !== dialog) return;
-    dialog.reportDocument = document;
-    await confirmPayment(chatId, session, dialog);
+    if (dialog.reportDocuments !== undefined) {
+      if (!dialog.reportDocuments.some(row => row.id === document.id)) dialog.reportDocuments.push(document);
+      dialog.documentAttempt = undefined;
+      await paymentDocumentList(chatId, dialog);
+    } else {
+      // Старый уже начатый диалог сохраняет одиночный денежный payload.
+      dialog.reportDocument = document;
+      dialog.documentAttempt = undefined;
+      await confirmPayment(chatId, session, dialog);
+    }
   } catch (error) {
     if (getDialog(chatId) !== dialog) return;
     const message = documentUploadError(error);
-    await reply(chatId, `❌ ${message}. Данные расхода сохранены.`, [[{ text: "Повторить загрузку", callback_data: `docretry:${attempt.clientMutationId}` }], [CANCEL_BUTTON]]);
+    await reply(chatId, `❌ ${message}. Данные расхода сохранены.`, [
+      [{ text: "Повторить загрузку", callback_data: `docretry:${attempt.clientMutationId}` }],
+      [{ text: "Исключить этот файл", callback_data: `docexclude:${attempt.clientMutationId}` }], [CANCEL_BUTTON]]);
   } finally { dialog.busy = false; }
+}
+
+function paymentDocuments(dialog: Extract<Dialog, { kind: "payment" }>) {
+  return dialog.reportDocuments ?? (dialog.reportDocument ? [dialog.reportDocument] : []);
+}
+async function paymentDocumentList(chatId: number, dialog: Extract<Dialog, { kind: "payment" }>) {
+  dialog.step = "document";
+  const documents = paymentDocuments(dialog);
+  await reply(chatId, `Отчётные документы (${documents.length}):\n${documents.map((file, index) => `${index + 1}. ${file.fileName}`).join("\n")}\nОтправьте ещё файл или продолжите.`, [
+    ...(documents.length && !dialog.documentAttempt ? [[{ text: "Продолжить", callback_data: `doccontinue:${dialog.clientMutationId}` }]] : []),
+    [CANCEL_BUTTON],
+  ]);
 }
 
 // Продвижение диалога платежа к следующему шагу ввода; amountIsSet —
@@ -643,7 +666,7 @@ async function confirmPayment(
   session: Session,
   dialog: Extract<Dialog, { kind: "payment" }>,
 ): Promise<void> {
-  if (dialog.direction === "EXPENSE" && !dialog.reportDocument) {
+  if (dialog.direction === "EXPENSE" && (!paymentDocuments(dialog).length || hasUnresolvedDocumentAttempt(dialog))) {
     dialog.step = "document"; setDialog(chatId, dialog);
     await reply(chatId, "Отчетный документ: отправьте файл или фотографию (до 20 МБ).", [[CANCEL_BUTTON]]); return;
   }
@@ -657,7 +680,7 @@ async function confirmPayment(
   ];
   if (dialog.direction === "EXPENSE") {
     lines.push(`Статья: ${dialog.articleLabel ?? "—"}`);
-    lines.push(`Отчетный документ: ${dialog.reportDocument?.fileName ?? "—"}`);
+    lines.push(`Отчетные документы: ${paymentDocuments(dialog).map(file => file.fileName).join(", ") || "—"}`);
   }
   lines.push(`Комментарий: ${dialog.comment ?? "—"}`);
   setDialog(chatId, dialog);
@@ -695,41 +718,6 @@ async function stageText(
         chatId,
         result.ok
           ? `✅ Статус: ${STAGE_LABELS.REFUSED} · П-${dialog.projectNumber}`
-          : `❌ ${result.error}`,
-      );
-      return;
-    }
-    case "reclamationReason":
-      if(!text.trim()){await reply(chatId,"Укажите причину рекламации:");return;}
-      dialog.reclamationReason = text;
-      dialog.step = "reclamationDescription";
-      setDialog(chatId, dialog);
-      await reply(chatId, "Описание рекламации:");
-      return;
-    case "reclamationDescription":
-      if(!text.trim()){await reply(chatId,"Опишите рекламацию:");return;}
-      dialog.reclamationDescription = text;
-      dialog.step = "reclamationFault";
-      setDialog(chatId, dialog);
-      await reply(chatId, "Виновная сторона:");
-      return;
-    case "reclamationFault": {
-      if(!text.trim()){await reply(chatId,"Укажите виновную сторону:");return;}
-      const result = await crm.changeStage(
-        session.userId,
-        dialog.projectId,
-        "RECLAMATION",
-        {
-          reclamationReason: dialog.reclamationReason ?? "",
-          reclamationDescription: dialog.reclamationDescription ?? "",
-          reclamationFault: text,
-        },dialog.expectedStage,dialog.clientMutationId,
-      );
-      if(result.ok)setDialog(chatId, null);
-      await reply(
-        chatId,
-        result.ok
-          ? `✅ Статус: ${STAGE_LABELS.RECLAMATION} · П-${dialog.projectNumber}`
           : `❌ ${result.error}`,
       );
       return;
@@ -867,6 +855,7 @@ async function dispatchCallback(
     const [projectId, toStage,token] = rest;
     const menu=stageMenus.get(String(chatId));
     if(!menu||menu.projectId!==projectId||menu.token!==token){await reply(chatId,"Откройте выбор статуса заново: исходный статус отсутствует");return;}
+    if (!STAGE_ORDER.includes(toStage)) { await reply(chatId, "Этот статус больше не используется. Откройте выбор статуса заново."); return; }
     const clientMutationId=menu.mutations[toStage]??(menu.mutations[toStage]=randomUUID());
     if (toStage === "REFUSED") {
       setDialog(chatId, {
@@ -876,16 +865,6 @@ async function dispatchCallback(
         step: "refusalReason",
       });
       await reply(chatId, "Причина отказа:");
-      return;
-    }
-    if (toStage === "RECLAMATION") {
-      setDialog(chatId, {
-        kind: "stage",
-        projectId,
-        projectNumber: menu.projectNumber, expectedStage:menu.expectedStage,clientMutationId,
-        step: "reclamationReason",
-      });
-      await reply(chatId, "Причина рекламации:");
       return;
     }
     const result = await crm.changeStage(session.userId, projectId, toStage,undefined,menu.expectedStage,clientMutationId);
@@ -1022,6 +1001,7 @@ async function dispatchCallback(
       step: "amount",
       clientMutationId: randomUUID(),
       projectSelected: true,
+      ...(action === "payout" ? { reportDocuments: [] } : {}),
       projectId: card.project.id,
       projectNumber: card.project.number,
       projectCurrency: card.project.currency,
@@ -1150,7 +1130,7 @@ async function dispatchCallback(
     const dialog = getDialog(chatId);
     if (dialog?.kind !== "payment" || dialog.step !== "confirm" || rest[0] !== dialog.clientMutationId ||
         !dialog.projectSelected || !dialog.amount || !dialog.currency || !dialog.cashAccountId ||
-        (dialog.direction === "EXPENSE" && !dialog.reportDocument)) {
+        (dialog.direction === "EXPENSE" && (!paymentDocuments(dialog).length || hasUnresolvedDocumentAttempt(dialog)))) {
       await reply(chatId, "Сессия устарела — начните заново");
       return;
     }
@@ -1165,7 +1145,7 @@ async function dispatchCallback(
       currency: dialog.currency,
       cashAccountId: dialog.cashAccountId,
       ...(dialog.direction === "EXPENSE" ? { expenseArticleId: dialog.articleId } : {}),
-      ...(dialog.reportDocument ? { reportDocumentId: dialog.reportDocument.id } : {}),
+      ...paymentReportDocumentInput(dialog),
       ...(dialog.comment ? { comment: dialog.comment } : {}),
     });
     if (result.ok && getDialog(chatId) === dialog) setDialog(chatId, null);
@@ -1180,6 +1160,18 @@ async function dispatchCallback(
       await reply(chatId, error instanceof CrmError ? `❌ ${error.message}. Повторите подтверждение: идентификатор операции сохранён.` : "Не удалось подтвердить операцию. Повторите подтверждение.");
     } finally { dialog.busy = false; }
     return;
+  }
+  if (action === "doccontinue") {
+    const dialog = getDialog(chatId);
+    if (dialog?.kind !== "payment" || dialog.step !== "document" || dialog.busy ||
+        rest[0] !== dialog.clientMutationId || dialog.documentAttempt || !paymentDocuments(dialog).length) return;
+    await confirmPayment(chatId, session, dialog); return;
+  }
+  if (action === "docexclude") {
+    const dialog = getDialog(chatId);
+    if (dialog?.kind !== "payment" || dialog.step !== "document" || dialog.busy ||
+        rest[0] !== dialog.documentAttempt?.clientMutationId) return;
+    dialog.documentAttempt = undefined; await paymentDocumentList(chatId, dialog); return;
   }
   if (action === "docretry") {
     const dialog = getDialog(chatId), current = await getSession(String(chatId), true);

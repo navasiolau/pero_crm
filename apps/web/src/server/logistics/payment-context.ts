@@ -14,7 +14,7 @@ export async function assertLogisticsPaymentContext(actor: DomainActor, data: Pa
   } });
   const posting = allocation?.posting;
   if (!allocation || !posting || posting.status !== "ACTIVE" || posting.actorId !== actor.id || allocation.payment ||
-      data.direction !== "EXPENSE" || data.reportDocumentId || data.clientMutationId || !prepared.project ||
+      data.direction !== "EXPENSE" || data.reportDocumentId || data.reportDocumentIds !== undefined || data.clientMutationId || !prepared.project ||
       allocation.projectId !== prepared.project.id || allocation.amount.lte(0) ||
       !allocation.amount.eq(prepared.amount) || !allocation.bynAmount.eq(prepared.bynAmount) ||
       posting.currency !== data.currency || posting.cashAccountId !== prepared.account.id ||

@@ -2,7 +2,7 @@ import type { PaymentDirection, PrismaClient } from "@prisma/client";
 import {activePaymentWhere} from '@/server/payments/active-records';
 import { requireFinanceWorkspaceActor, listFinanceWorkspaceProjects, type FinanceWorkspaceActor } from "./project-refs";
 import { paymentView } from "./payment-view";
-import { reportDocumentSelect } from "@/server/finance-documents/view";
+import { reportDocumentSelect, paymentReportDocumentsSelect } from "@/server/finance-documents/view";
 import { stockPurchaseSelect } from "@/server/warehouse/stock-purchase-view";
 import { logisticsAllocationSelect } from "@/server/logistics/payment-view";
 import { listActiveCashAccountOptions } from "./default-cash-core";
@@ -14,7 +14,7 @@ export async function loadOrganizationPayments(actor: FinanceWorkspaceActor, dir
     db.payment.findMany({ where: { ...activePaymentWhere, direction }, select: { id: true, direction: true, amount: true, currency: true,
       rate: true, rateDate: true, bynAmount: true, projectAmount: true, paidAt: true, comment: true, createdById: true,
       project: { select: { id: true, number: true, title: true, deletedAt: true } }, cashAccount: { select: { name: true } },
-      expenseArticle: { select: { id: true, name: true } }, reportDocument: { select: reportDocumentSelect }, stockPurchase: { select: stockPurchaseSelect },
+      expenseArticle: { select: { id: true, name: true } }, reportDocument: { select: reportDocumentSelect }, reportDocuments: paymentReportDocumentsSelect, stockPurchase: { select: stockPurchaseSelect },
       logisticsAllocation: { select: logisticsAllocationSelect } }, orderBy: { paidAt: "desc" } }),
     listActiveCashAccountOptions(db),
     listFinanceWorkspaceProjects(actor, db),

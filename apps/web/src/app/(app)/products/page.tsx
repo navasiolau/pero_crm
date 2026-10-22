@@ -30,7 +30,7 @@ export default async function ProductsPage({
   const role = session.user.roles;
 
   const rawParams = await searchParams;
-  const state = await listPreferences.load("products", rawParams);
+  const state = await listPreferences.load("products", rawParams, { defaultEngineer: role.includes("ENGINEER") });
   if (Object.keys(rawParams).length === 0) redirect(`/products?${state.query}`);
   const params = Object.fromEntries(new URLSearchParams(state.query));
   const { filters, page, pageSize } = parseProductListParams(params);
@@ -83,7 +83,6 @@ export default async function ProductsPage({
       actorRoles={role}
       actorUserId={session.user.id}
       showAmount={canViewProductMoney(role)}
-      hideEngineerFilter={role.includes("ENGINEER") && !hasAnyRole(role, MANAGER_ROLES)}
       engineerOptions={engineers.map((engineer) => ({
         value: engineer.id,
         label: engineer.name,

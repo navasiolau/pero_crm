@@ -27,6 +27,7 @@ test("прямые доли распределяют сумму один раз 
 test("менеджер свободен; текущий инженер DESIGN↔PRODUCTION без модели", () => {
   const context = { from: "DESIGN" as const, to: "PRODUCTION" as const, assignedEngineer: true, participant: false, hasB3d: false, noModel: false };
   assert.equal(decideProductPercentageStatus(["MANAGER", "ENGINEER"], context).allowed, true);
+  assert.equal(decideProductPercentageStatus(["MANAGER"],{...context,to:"RECLAMATION"}).allowed,false);
   assert.equal(decideProductPercentageStatus(["ENGINEER"], context).allowed, true);
   assert.equal(decideProductPercentageStatus(["ENGINEER"], { ...context, hasB3d: true }).allowed, true);
   assert.equal(decideProductPercentageStatus(["ENGINEER"], { ...context, noModel: true }).allowed, true);

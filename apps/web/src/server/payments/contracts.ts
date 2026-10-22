@@ -1,4 +1,5 @@
 import { object, string, number, uuid, enum as enumSchema, type input, type output } from "zod";
+import { reportDocumentIdsSchema, exclusiveReportDocumentInput, exclusiveReportDocumentError } from "@/server/finance-documents/input";
 
 /** Общий контракт web/Telegram; деньги и доступ проверяет доменное ядро. */
 const paymentFields = {
@@ -13,16 +14,17 @@ const paymentFields = {
   paidAt: string().optional(),
   comment: string().optional(),
   reportDocumentId: uuid({ error: "Некорректный идентификатор документа" }).optional(),
+  reportDocumentIds: reportDocumentIdsSchema.optional(),
 };
 const validDirection = (data: {direction: string; expenseArticleId?: string}) => data.direction !== "INCOME" || !data.expenseArticleId;
 const directionError = {message: "У прихода не может быть статьи расхода", path: ["expenseArticleId"]};
 // Только server-only nested context использует fields без ordinary UUID.
 export const paymentDetailsSchema = object({...paymentFields,
   clientMutationId: uuid({error: "Некорректный идентификатор операции"}).transform(value => value.toLowerCase()).optional(),
-}).strict().refine(validDirection, directionError);
+}).strict().refine(validDirection, directionError).refine(exclusiveReportDocumentInput, exclusiveReportDocumentError);
 export const paymentSchema = object({...paymentFields,
   clientMutationId: uuid({error: "Укажите идентификатор операции — обновите клиент CRM"}).transform(value => value.toLowerCase()),
-}).refine(validDirection, directionError);
+}).refine(validDirection, directionError).refine(exclusiveReportDocumentInput, exclusiveReportDocumentError);
 export type PaymentDetails = output<typeof paymentDetailsSchema>;
 export type InternalPaymentInput = input<typeof paymentDetailsSchema>;
 

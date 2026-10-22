@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { DataTable, type DataColumn } from "@/components/ui/data-table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import {reportDocumentNames} from "@/lib/report-document-names";
 import {ReportDocumentButton} from "@/components/report-document-button";
 import { formatAmount, formatDate, formatMoneyTotal } from "@/lib/format";
 import type { PaymentRow, ProjectExpenseRow } from "@/server/finance/contracts";
@@ -20,7 +21,7 @@ export function ProjectExpenseLedger({ rows, breakdown, onDelete }: {
   const groups = breakdown.filter(row => row.key !== "payroll");
   const selected = article === "all" ? rows : rows.filter(row => row.article.key === article);
   const documentButton = (row: ProjectExpenseRow) => row.payment?.reportDocument
-    ? <ReportDocumentButton document={row.payment.reportDocument} /> : "—";
+    ? <ReportDocumentButton document={row.payment.reportDocument} documents={row.payment.reportDocuments} /> : "—";
   const columns: DataColumn<ProjectExpenseRow>[] = [
     { id: "date", header: "Дата", sortable: true, sortValue: row => row.date, cell: row => formatDate(row.date) },
     { id: "source", header: "Операция", searchValue: row => sourceLabel[row.source], cell: row => sourceLabel[row.source] },
@@ -31,7 +32,7 @@ export function ProjectExpenseLedger({ rows, breakdown, onDelete }: {
       cell: row => <div>{formatMoneyTotal(row.bynAmount, "BYN")}{row.payment && row.payment.currency !== "BYN" ? <p className="text-xs text-muted-foreground">{formatAmount(row.payment.amount, row.payment.currency)}</p> : null}</div> },
     { id: "author", header: "Кто внёс", searchValue: row => row.createdByName ?? "", cell: row => row.createdByName ?? "—" },
     { id: "comment", header: "Комментарий", searchValue: row => row.comment ?? "", cell: row => row.comment ?? "—" },
-    { id: "document", header: "Отчетный документ", searchValue: row => row.payment?.reportDocument?.fileName ?? "", cell: documentButton },
+    { id: "document", header: "Отчетный документ", searchValue: row => reportDocumentNames(row.payment), cell: documentButton },
     { id: "actions", header: "", cell: row => <Button variant="ghost" onClick={event => { event.stopPropagation(); setViewing(row); }}>Открыть</Button> },
   ];
   return <div className="flex min-w-0 flex-col gap-3">

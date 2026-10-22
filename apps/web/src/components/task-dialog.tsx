@@ -530,7 +530,7 @@ export function TaskDialog({
         entityLabel="задачу"
         open={deleteOpen}
         onOpenChange={setDeleteOpen}
-        warning="Время по ней будет удалено, файлы останутся в проекте."
+        warning="Связи зависимостей будут удалены, файлы останутся в проекте."
         onConfirm={async () => {
           if (fileDeleteBusy.current) return false;
           const result = await deleteTask(task.id);

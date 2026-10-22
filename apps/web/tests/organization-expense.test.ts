@@ -15,6 +15,7 @@ import { formatExactMoney } from "../src/lib/format";
 import { buildCashStatement, type CashStatementFact } from "../src/server/finance/cash-statement";
 import { nextExpenseArticleCode, parseExpenseArticleCode, MAX_EXPENSE_ARTICLE_CODE } from "../src/lib/expense-article-code";
 import { paymentView } from "../src/server/finance/payment-view";
+import { reportDocumentNames } from "../src/lib/report-document-names";
 
 // Источник: organization-expense.test.ts
 test("ordinary expense can have no project, while document remains required", () => {
@@ -116,4 +117,21 @@ test("shared financial projection retains unknown amounts and exposes only safe 
   assert.ok(!JSON.stringify(view).includes("SECRET"));
   assert.equal(paymentView({ ...row, reportDocument: { ...document, state: "PENDING" } }, new Map()).reportDocument, null);
   assert.equal(paymentView(row, new Map()).reportDocument, null);
+});
+
+test("three financial reports remain one project/cash expense and every name is searchable", () => {
+  const documents = [1,2,3].map(index => ({id:`doc-${index}`,fileName:`Документ-${index}.pdf`,mimeType:"application/pdf",state:"READY" as const}));
+  const view = paymentView({...row,reportDocument:documents[0],reportDocuments:documents.map((document,position)=>({document,position}))},new Map());
+  assert.deepEqual(view.reportDocuments?.map(file=>file.id),documents.map(file=>file.id));
+  assert.ok(reportDocumentNames(view).includes("Документ-3.pdf"));assert.equal(view.amount,10);
+  const data = buildCashStatement([account],[{...fact("one-payment","2026-10-07T10:00:00Z","10","EXPENSE"),document:view.reportDocument,documents:view.reportDocuments}],query);
+  assert.equal(data.rows[0].entries.length,1);assert.equal(data.rows[0].totals.expense,"-10.00");assert.equal(data.rows[0].entries[0].documents?.length,3);
+  assert.equal(summarizeProjectExpenses({payments:[row],stockMovements:[]}).expensesTotal,10);
+});
+
+test("logistics financial projection exposes every TTN and uses no ordinary report fallback", () => {
+  const documents = [1,2,3].map(index=>({document:{id:`ttn-${index}`,fileName:`ТТН-${index}.pdf`,mimeType:"application/pdf"}}));
+  const view = paymentView({...row,logisticsAllocation:{posting:{tripId:"trip",documents}}},new Map());
+  assert.deepEqual(view.reportDocuments?.map(file=>file.id),["ttn-1","ttn-2","ttn-3"]);
+  assert.ok(view.reportDocuments?.every(file=>file.source==="logistics"));assert.equal(view.amount,10);
 });

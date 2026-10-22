@@ -5,8 +5,8 @@ import {calendarDateRange} from "@/lib/calendar-dates";
 import {cashMovementDelta,isCashCurrency} from "@/lib/cash-ledger";
 import {historicalByn} from "@/lib/history-byn";
 import type {ViewableFile} from "@/lib/viewable-file";
-import {reportDocumentSelect,reportDocumentFile} from "@/server/finance-documents/view";
-import {logisticsAllocationSelect,logisticsPaymentDocument} from "@/server/logistics/payment-view";
+import {reportDocumentSelect,reportDocumentFiles,paymentReportDocumentsSelect} from "@/server/finance-documents/view";
+import {logisticsAllocationSelect,logisticsPaymentDocuments} from "@/server/logistics/payment-view";
 import {requireFinanceWorkspaceActor,type FinanceWorkspaceActor} from "./project-refs";
 import {cashStatementRateDates,fetchCashStatementRates,type CashStatementRate,type CashStatementRateRequest} from "./cash-statement-rates";
 
@@ -15,7 +15,7 @@ export type CashStatementAccount={id:string;name:string;currency:string;active:b
 export type CashStatementFact={
  id:string;source:"PAYMENT"|"SALARY"|"ADVANCE";accountId:string|null;at:string;direction:"INCOME"|"EXPENSE";
  nativeAmount:string|null;nativeCurrency:string|null;bynAmount:string|null;label:string;comment:string|null;
- project:{id:string;number:string}|null;document:ViewableFile|null;
+ project:{id:string;number:string}|null;document:ViewableFile|null;documents?:ViewableFile[];
 };
 export type CashStatementTotals={opening:string|null;income:string|null;expense:string|null;revaluation:string|null;closing:string|null};
 export type CashBalanceValuation={nativeAmount:string|null;nativeCurrency:string;date:string;rate:string|null;rateDate:string|null;issue:string|null};
@@ -118,16 +118,16 @@ async function readCashStatementFacts(actor:FinanceWorkspaceActor,query:CashStat
  const [accounts,payments,payouts]=await Promise.all([
   db.cashAccount.findMany({select:{id:true,name:true,currency:true,active:true},orderBy:{createdAt:"asc"}}),
   db.payment.findMany({where:{...activePaymentWhere,paidAt:{lt:range.end}},select:{id:true,cashAccountId:true,paidAt:true,direction:true,amount:true,currency:true,bynAmount:true,comment:true,
-   project:{select:{id:true,number:true}},expenseArticle:{select:{name:true}},reportDocument:{select:reportDocumentSelect},logisticsAllocation:{select:logisticsAllocationSelect},
+   project:{select:{id:true,number:true}},expenseArticle:{select:{name:true}},reportDocument:{select:reportDocumentSelect},reportDocuments:paymentReportDocumentsSelect,logisticsAllocation:{select:logisticsAllocationSelect},
    stockPurchase:{select:{movement:{select:{material:{select:{name:true}}}}}}
   }}),
   db.payout.findMany({where:{createdAt:{lt:range.end}},select:{id:true,cashAccountId:true,createdAt:true,kind:true,amount:true,payrollCurrency:true,
    cashAmount:true,cashCurrency:true,bynAmount:true,comment:true,user:{select:{name:true}}}}),
  ]);
- const facts:CashStatementFact[]=payments.map(row=>({id:"payment:"+row.id,source:"PAYMENT",accountId:row.cashAccountId,at:row.paidAt.toISOString(),
+ const facts:CashStatementFact[]=payments.map(row=>{const documents=row.logisticsAllocation?logisticsPaymentDocuments(row.logisticsAllocation):reportDocumentFiles(row);return {id:"payment:"+row.id,source:"PAYMENT",accountId:row.cashAccountId,at:row.paidAt.toISOString(),
   direction:row.direction,nativeAmount:exact(row.amount),nativeCurrency:row.currency,bynAmount:exact(row.bynAmount),
   label:row.logisticsAllocation?"Логистика":row.stockPurchase?"Закупка · "+row.stockPurchase.movement.material.name:row.direction==="INCOME"?"Приход":row.expenseArticle?.name??"Расход",
-  comment:row.comment,project:row.project?{id:row.project.id,number:row.project.number}:null,document:reportDocumentFile(row.reportDocument)??logisticsPaymentDocument(row.logisticsAllocation)}));
+  comment:row.comment,project:row.project?{id:row.project.id,number:row.project.number}:null,document:documents[0]??null,documents};});
  for(const row of payouts)facts.push({id:"payout:"+row.id,source:row.kind==="ADVANCE"?"ADVANCE":"SALARY",accountId:row.cashAccountId,at:row.createdAt.toISOString(),
   direction:"EXPENSE",nativeAmount:exact(row.cashAmount),nativeCurrency:row.cashCurrency,bynAmount:exact(historicalByn(row)),
   label:(row.kind==="ADVANCE"?"Аванс":"Зарплата")+" · "+row.user.name,comment:row.comment,project:null,document:null});

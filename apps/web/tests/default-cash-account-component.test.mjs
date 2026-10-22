@@ -56,5 +56,5 @@ await page.locator('#pay-amount').fill('20');await page.locator('#pay-document')
 await page.getByRole('button',{name:'Внести расход',exact:true}).click();await page.waitForFunction(()=>window.__sent?.length===1);const first=await page.evaluate(()=>window.__sent[0]);
 await page.evaluate(()=>{window.__accountsUpdate(window.__accounts.map(a=>({...a,isDefault:a.id==='byn'})));window.__open(false);});await page.locator('#pay-amount').waitFor({state:'hidden'});
 await page.evaluate(()=>window.__open(true));await page.getByRole('button',{name:'Проверить',exact:true}).click();await page.waitForFunction(()=>window.__sent.length===2);
-assert.deepEqual(await page.evaluate(()=>window.__sent[1]),first);assert.equal(first.cashAccountId,'rub');assert.equal(first.currency,'RUB');assert.ok(first.reportDocumentId);
+assert.deepEqual(await page.evaluate(()=>window.__sent[1]),first);assert.equal(first.cashAccountId,'rub');assert.equal(first.currency,'RUB');assert.equal(first.reportDocumentIds.length,1);
 }));

@@ -4,7 +4,7 @@ import type { SketchFilePreview } from "@/lib/product-hero";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { LayoutGrid, Plus, Table2 } from "lucide-react";
-import type { ProjectStage } from "@prisma/client";
+import type { ProjectStage, Role } from "@prisma/client";
 
 import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -50,6 +50,7 @@ export function ProjectsView({
   page,
   pageSize,
   canManage,
+  actorRoles,
   showAmount,
   clients,
   managers,
@@ -64,6 +65,7 @@ export function ProjectsView({
   page: number;
   pageSize: number;
   canManage: boolean;
+  actorRoles?: readonly Role[];
   showAmount: boolean;
   clients: SelectOption[];
   managers: SelectOption[];
@@ -109,6 +111,7 @@ export function ProjectsView({
       </div>
 
       <ProjectsFilterBar
+        actorRoles={actorRoles}
         identitySearch={view === "kanban"}
         onSearchDraftChange={setSearchText}
         onModalActiveChange={setFilterOverlayActive}
@@ -125,6 +128,7 @@ export function ProjectsView({
             && searchText.trim() === (new URLSearchParams(query).get("q") ?? "")}
           initialProjects={projects}
           canManage={canManage}
+          actorRoles={actorRoles}
           showAmount={showAmount}
         />
       ) : (
