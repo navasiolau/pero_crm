@@ -35,27 +35,27 @@ test("unit controller retries lost response with the exact frozen UUID/actor/pay
     return { ok: true, outcome: "COMMITTED", resultId: taskId, clientMutationId: context.clientMutationId };
   }, () => id);
   controller.observeActor("actor");
-  const first = await controller.run("actor", "task", "DONE", 20); assert.equal(first?.ok, false);
+  const first = await controller.run("actor", "task", "DONE"); assert.equal(first?.ok, false);
   assert.equal(first && !first.ok ? first.outcome : undefined, "UNKNOWN");
-  assert.equal((await controller.run("actor", "task", "DONE", 20))?.ok, true);
+  assert.equal((await controller.run("actor", "task", "DONE"))?.ok, true);
   assert.deepEqual(requests[0], requests[1]); assert.equal(controller.peek("task"), undefined);
 });
 
 test("unit controller refuses changed payload while original intent remains unknown", async () => {
   let calls = 0;
   const controller = createTaskStatusCommands(async () => { calls++; return { ok: false, outcome: "UNKNOWN", error: "unknown" }; }, () => id);
-  controller.observeActor("actor"); await controller.run("actor", "task", "DONE", 20);
-  assert.equal((await controller.run("actor", "task", "DONE", 30))?.ok, false);
-  assert.equal(calls, 1); assert.equal(controller.peek("task")?.actualMinutes, 20);
+  controller.observeActor("actor"); await controller.run("actor", "task", "DONE");
+  assert.equal((await controller.run("actor", "task", "IN_PROGRESS"))?.ok, false);
+  assert.equal(calls, 1); assert.equal(controller.peek("task")?.toStatus, "DONE");
 });
 
 test("unit controller drops stale ACK after actor swap and never reuses old actor intent", async () => {
   let resolve!: (ack: TaskStatusAck) => void; const requests: TaskStatusContext[] = [];
   const controller = createTaskStatusCommands(async (_task, _status, _minutes, context) => { requests.push(context); return new Promise<TaskStatusAck>(done => { resolve = done; }); }, () => id);
-  controller.observeActor("old"); const pending = controller.run("old", "task", "DONE", 20);
+  controller.observeActor("old"); const pending = controller.run("old", "task", "DONE");
   controller.observeActor("new"); resolve({ ok: true, outcome: "COMMITTED", resultId: "task", clientMutationId: id });
   assert.equal(await pending, null); assert.equal(controller.peek("task"), undefined);
-  assert.equal(await controller.run("old", "task", "DONE", 20), null); assert.equal(requests.length, 1);
+  assert.equal(await controller.run("old", "task", "DONE"), null); assert.equal(requests.length, 1);
 });
 
 test("unit controller checks result identity and preserves historical replay as metadata only", async () => {
@@ -71,29 +71,38 @@ test("unit controller checks result identity and preserves historical replay as 
 test("unit controller coalesces an in-flight click and actor-changed clears unresolved intent", async () => {
   let calls = 0, resolve!: (ack: TaskStatusAck) => void;
   const controller = createTaskStatusCommands(async () => { calls++; return new Promise<TaskStatusAck>(done => { resolve = done; }); }, () => id);
-  controller.observeActor("actor"); const a = controller.run("actor", "task", "DONE", 20), b = controller.run("actor", "task", "DONE", 20);
+  controller.observeActor("actor"); const a = controller.run("actor", "task", "DONE"), b = controller.run("actor", "task", "DONE");
   resolve({ ok: false, kind: "actor-changed", error: "changed" });
   assert.equal((await a)?.ok, false); assert.equal((await b)?.ok, false); assert.equal(calls, 1);
-  assert.equal(controller.peek("task"), undefined); assert.equal(await controller.run("actor", "task", "DONE", 20), null);
+  assert.equal(controller.peek("task"), undefined); assert.equal(await controller.run("actor", "task", "DONE"), null);
 });
 
 
 type QaBuild = { onResolve(options: { filter: RegExp }, handler: (args: { path: string }) => { path: string; namespace: string } | undefined): void;
   onLoad(options: { filter: RegExp; namespace: string }, handler: (args: { path: string }) => { contents: string; loader: "js" }): void };
 
-test("Chromium actual dialog repeats UNKNOWN UUID and closes on historical confirmation without applying old state", async () => {
+test("Chromium task buttons complete without time forms and preserve UNKNOWN UUID through historical confirmation", async () => {
   const sourceRoot = path.resolve(process.cwd(), "src").replaceAll("\\", "/");
   const modules: Record<string, string> = {
     "next/navigation": "export const useRouter=()=>({refresh:()=>{window.__refreshes++}});",
-    "@/server/tasks/actions": "export const changeTaskStatus=(...args)=>window.__respond(...args);",
+    "@/server/tasks/actions": "export const changeTaskStatus=(...args)=>window.__respond(...args);export const deleteTask=async()=>{throw Error('UNEXPECTED_DELETE')};export const updateTask=async()=>{throw Error('UNEXPECTED_EDIT')};",
+    "@/server/preferences-actions": "export const saveViewPreference=async()=>{};",
+    "@/server/tasks/worker-allocation-actions": "export const createWorkerWorkTask=async()=>{throw Error('UNEXPECTED_ALLOCATION')};export const takeOwnWorkTask=createWorkerWorkTask;",
+    "@/server/files/actions": "export const deleteFile=async()=>{throw Error('UNEXPECTED_DELETE')};",
+    "@/components/photo-upload-button": "export const PhotoUploadButton=()=>null;",
+    "@/components/file-list": "export const FileList=()=>null;",
+    "next/link": "export default function Link({children}){return children};",
   };
   const entry = `
 import React,{useState} from 'react';import{createRoot}from'react-dom/client';import{Toaster}from'sonner';
-import{ActualTimeDialog}from${JSON.stringify(sourceRoot + "/components/actual-time-dialog.tsx")};
-window.__requests=[];window.__mode='UNKNOWN';window.__refreshes=0;window.__applied=0;
-window.__respond=async(taskId,toStatus,minutes,context)=>{window.__requests.push({taskId,toStatus,minutes,context});return window.__mode==='UNKNOWN'?{ok:false,outcome:'UNKNOWN',retrySafe:true,error:'Ответ неизвестен'}:{ok:true,outcome:'COMMITTED',resultId:taskId,clientMutationId:context.clientMutationId,replayed:true};};
-function App(){const[open,setOpen]=useState(true);const[key,setKey]=useState(0);window.__remount=()=>setKey(value=>value+1);return <><ActualTimeDialog key={key} task={{id:'task',title:'QA task'}} actorUserId='actor' open={open} onOpenChange={setOpen} onDone={()=>window.__applied++}/><Toaster/></>};createRoot(document.getElementById('root')).render(<App/>);`;
-  const bundled = await compiler.build({ stdin: { contents: entry, loader: "jsx", resolveDir: process.cwd(), sourcefile: "qa133-dialog-entry.jsx" },
+import{MyTasksView}from${JSON.stringify(sourceRoot + "/app/(app)/my/my-tasks-view.tsx")};
+import{WorkerTaskAllocationDialog}from${JSON.stringify(sourceRoot + "/components/worker-task-allocation-dialog.tsx")};
+import{TaskDialog}from${JSON.stringify(sourceRoot + "/components/task-dialog.tsx")};
+window.__requests=[];window.__mode='UNKNOWN';window.__refreshes=0;
+window.__respond=async(taskId,toStatus,minutes,context)=>{window.__requests.push({taskId,toStatus,minutes,context});return window.__mode==='UNKNOWN'?{ok:false,outcome:'UNKNOWN',retrySafe:true,error:'Ответ неизвестен'}:{ok:true,outcome:'COMMITTED',resultId:taskId,clientMutationId:context.clientMutationId,replayed:window.__mode==='REPLAY'};};
+const task={id:'task',title:'Раскрой деталей',type:'Производство',status:'NEW',dueAt:'2026-10-23',assigneeId:'actor',assigneeName:'Исполнитель',requiresPhoto:false,workId:'work',workTitle:'Раскрой деталей',workTotal:'100',workPriceSnapshot:'100',quantity:'1',rewardAmount:'100.00',rewardCurrency:'BYN',rewardSource:'WORK_SNAPSHOT',dependencies:[],projectId:'project',projectNumber:'П-190',projectTitle:'Тестовая кухня',productId:'product',productNumber:'П-190.1',productTitle:'Шкаф',files:[],createdAt:'2026-10-22',doneAt:null,doneByName:null,createdByName:'Менеджер'};
+function App(){const[view,setView]=useState('my');return <><nav><button onClick={()=>setView('my')}>Список задач</button><button onClick={()=>setView('allocation')}>Назначение</button><button onClick={()=>setView('details')}>Карточка задачи</button></nav>{view==='my'?<MyTasksView active={[task]} done={[]} actorUserId='actor' userName='Исполнитель' initialView='list'/>:view==='allocation'?<WorkerTaskAllocationDialog projectId='project' productId='product' actorUserId='actor' work={{id:'work',title:task.title,remaining:'1',unit:'шт'}} data={{workerOptions:[{id:'actor',name:'Исполнитель'}],dependencyOptions:[],createdAssignments:[],eligibleWorkIds:['work']}} onClose={()=>setView('my')}/>:<TaskDialog task={task} workers={[{id:'actor',name:'Исполнитель'}]} canEdit open onOpenChange={()=>setView('my')}/>}<Toaster/></>};createRoot(document.getElementById('root')).render(<App/>);`;
+  const bundled = await compiler.build({ stdin: { contents: entry, loader: "jsx", resolveDir: process.cwd(), sourcefile: "qa190-task-entry.jsx" },
     bundle: true, write: false, platform: "browser", format: "iife", jsx: "automatic", target: "es2022", logLevel: "silent",
     tsconfig: path.resolve("tsconfig.json"), define: { "process.env.NODE_ENV": '"production"' },
     plugins: [{ name: "declared-qa-io", setup(engine: QaBuild) {
@@ -103,24 +112,41 @@ function App(){const[open,setOpen]=useState(true);const[key,setKey]=useState(0);
   const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
   try {
     const page = await context.newPage();
-    await page.route("**/*", route => route.abort()); // Физический network запрещён; RPC только declared QA IO.
-    await page.setContent('<div id="root"></div>');
+    await page.route("**/*", route => route.abort());
+    await page.setContent('<html lang="ru"><body><div id="root"></div></body></html>');
+    await page.addStyleTag({ content: (await cssPromise) + "\nbody{--font-roboto:Arial;font-family:Arial,sans-serif}" });
     await page.addScriptTag({ content: Buffer.from(bundled.outputFiles[0].contents).toString("utf8") });
-    await page.locator("#actual-min").fill("20");
-    await page.getByRole("button", { name: "Выполнено", exact: true }).focus();
-    await page.getByRole("button", { name: "Выполнено", exact: true }).press("Enter");
+    const artifactDir = path.resolve("test-results/task190-ui"); await mkdir(artifactDir, { recursive: true });
+    await page.getByRole("button", { name: "Взять в работу", exact: true }).waitFor();
+    assert.doesNotMatch(await page.locator("body").innerText(), /Таймер|таймер|Оценка|оценка \/ факт|Внести время|Старт|Стоп/);
+    assert.equal(await page.locator('input[type="number"]').count(), 0);
+    await page.screenshot({ path: path.join(artifactDir, "my-mobile.png"), fullPage: true, animations: "disabled" });
+    await page.getByRole("button", { name: "Взять в работу", exact: true }).click();
     await page.waitForFunction(() => (window as unknown as { __requests: unknown[] }).__requests.length === 1);
-    assert.equal(await page.locator("#actual-min").isDisabled(), true);
-    await page.evaluate(() => { (window as unknown as { __remount: () => void }).__remount(); });
-    assert.equal(await page.locator("#actual-min").inputValue(), "20");
-    assert.equal(await page.locator("#actual-min").isDisabled(), true);
     await page.evaluate(() => { (window as unknown as { __mode: string }).__mode = "REPLAY"; });
-    await page.getByRole("button", { name: "Выполнено", exact: true }).focus();
-    await page.getByRole("button", { name: "Выполнено", exact: true }).press("Enter");
+    await page.getByRole("button", { name: "Проверить", exact: true }).click();
     await page.waitForFunction(() => (window as unknown as { __requests: unknown[] }).__requests.length === 2);
-    const observed = await page.evaluate(() => { const state = window as unknown as { __requests: object[]; __refreshes: number; __applied: number }; return { requests: state.__requests, refreshes: state.__refreshes, applied: state.__applied }; });
-    assert.deepEqual(observed.requests[0], observed.requests[1]); assert.ok(observed.refreshes >= 2); assert.equal(observed.applied, 0);
-    await page.getByRole("dialog").waitFor({ state: "hidden", timeout: 3000 });
+    const observed = await page.evaluate(() => (window as unknown as { __requests: { minutes?: number }[] }).__requests);
+    assert.deepEqual(observed[0], observed[1]); assert.equal(observed[0].minutes, undefined);
+    await page.evaluate(() => { (window as unknown as { __mode: string }).__mode = "COMMITTED"; });
+    await page.getByRole("button", { name: "Завершить", exact: true }).click();
+    await page.waitForFunction(() => (window as unknown as { __requests: unknown[] }).__requests.length === 3);
+    assert.equal(await page.getByRole("dialog").count(), 0);
+    const completion = await page.evaluate(() => (window as unknown as { __requests: { toStatus: string; minutes?: number }[] }).__requests[2]);
+    assert.equal(completion.toStatus, "DONE"); assert.equal(completion.minutes, undefined);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.screenshot({ path: path.join(artifactDir, "my-desktop.png"), fullPage: true, animations: "disabled" });
+    await page.getByRole("button", { name: "Назначение", exact: true }).click();
+    await page.getByRole("dialog").waitFor();
+    assert.doesNotMatch(await page.getByRole("dialog").innerText(), /Оценка|истори[ия].*врем|минут/);
+    assert.equal(await page.locator('#worker-task-estimate').count(), 0);
+    await page.screenshot({ path: path.join(artifactDir, "allocation-desktop.png"), fullPage: true, animations: "disabled" });
+    await page.getByRole("button", { name: "Отмена", exact: true }).click();
+    await page.getByRole("button", { name: "Карточка задачи", exact: true }).click();
+    assert.doesNotMatch(await page.getByRole("dialog").innerText(), /Время|Оценка|факт/);
+    await page.getByRole("button", { name: "Редактировать", exact: true }).click();
+    assert.equal(await page.locator('#td-est').count(), 0);
+    await page.screenshot({ path: path.join(artifactDir, "edit-desktop.png"), fullPage: true, animations: "disabled" });
   } finally { await context.close(); }
 });
 
@@ -206,11 +232,11 @@ test("confirmed rejection finishes one intent and a valid new command gets a fre
       : { ok: true, outcome: "COMMITTED", resultId: taskId, clientMutationId: context.clientMutationId };
   }, () => `00000133-0000-4000-8000-${String(++serial).padStart(12, "0")}`);
   controller.observeActor("actor");
-  const rejected = await controller.run("actor", "task", "DONE", 20);
+  const rejected = await controller.run("actor", "task", "DONE");
   assert.equal(rejected && !rejected.ok ? rejected.outcome : undefined, "ROLLED_BACK");
   assert.equal(controller.peek("task"), undefined);
   assert.equal((await controller.run("actor", "task", "IN_PROGRESS"))?.ok, true);
-  assert.equal((await controller.run("actor", "task", "DONE", 20))?.ok, true);
+  assert.equal((await controller.run("actor", "task", "DONE"))?.ok, true);
   assert.equal(new Set(requests.map(request => request.context.clientMutationId)).size, 3);
   assert.deepEqual(requests.map(request => request.status), ["DONE", "IN_PROGRESS", "DONE"]);
 });

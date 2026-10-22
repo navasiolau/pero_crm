@@ -21,7 +21,6 @@ export async function softDeleteProductCore(tx:Prisma.TransactionClient,actor:Do
  if(receipt){const saved=receipt.newValue;if(receipt.actorId!==actor.id||receipt.entity!=='product'||receipt.entityId!==product.id||receipt.action!=='soft-delete'||!saved||typeof saved!=='object'||Array.isArray(saved)||saved.fingerprint!==fingerprint||!saved.result||typeof saved.result!=='object')return failure('conflict','Идентификатор удаления уже использован');return{...saved.result as unknown as Extract<ProductDeleteResult,{ok:true}>,repeated:true};}
  if(product.deletedAt!==null)return failure('conflict','Изделие уже удалено');
  if(product.updatedAt.toISOString()!==data.expectedUpdatedAt)return failure('conflict','Изделие изменилось. Обновите карточку и подтвердите удаление заново');
- if(await tx.timeEntry.count({where:{source:'timer',stoppedAt:null,task:{productId:product.id}}}))return failure('active-timer','Сначала остановите активный таймер задачи изделия');
  const deletedAt=new Date();
  const changed=await tx.product.updateMany({where:{id:product.id,projectId:parent.id,deletedAt:null,updatedAt:new Date(data.expectedUpdatedAt)},data:{deletedAt,deletedById:actor.id}});
  if(changed.count!==1)throw Error('PRODUCT_SOFT_DELETE_CAS_RACE');

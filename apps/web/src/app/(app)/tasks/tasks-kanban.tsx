@@ -20,7 +20,6 @@ import type { TaskStatus } from "@prisma/client";
 import { DragHandle } from "@/components/drag-handle";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
-import { ActualTimeDialog } from "@/components/actual-time-dialog";
 import {
   taskStatusBadge,
   taskStatusLabels,
@@ -113,7 +112,6 @@ export function TasksKanban({
   const changeTaskStatus = useTaskStatusCommand(actorUserId);
   const [tasks, setTasks] = useState(initialTasks);
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [actualFor, setActualFor] = useState<TaskDetails | null>(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -128,11 +126,6 @@ export function TasksKanban({
   async function moveTo(task: TaskDetails, toStatus: TaskStatus) {
     if (toStatus === "DONE" && task.requiresPhoto && task.files.length === 0) {
       toast.error("Приложите файлы (фото/замерный лист) перед выполнением");
-      return;
-    }
-    // Обязательное фактическое время при «Выполнена» (§9)
-    if (toStatus === "DONE" && task.spentMinutes === 0) {
-      setActualFor(task);
       return;
     }
     const fromStatus = task.status;
@@ -193,13 +186,6 @@ export function TasksKanban({
       <DragOverlay>
         {activeTask ? <TaskCardView task={activeTask} dragging /> : null}
       </DragOverlay>
-      <ActualTimeDialog
-        actorUserId={actorUserId}
-        task={actualFor}
-        open={!!actualFor}
-        onOpenChange={(open) => !open && setActualFor(null)}
-        onDone={() => router.refresh()}
-      />
     </DndContext>
   );
 }

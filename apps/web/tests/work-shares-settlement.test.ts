@@ -5,6 +5,7 @@ import type { PrismaClient } from "@prisma/client";
 import { taskShareFixture, historicalTaskAllocation } from "./helpers/task-share-fixture";
 import { remainingWorkQuantity } from "../src/lib/work-quantity";
 import { guardedModuleCache } from "./helpers/guarded-module-cache";
+import { recordTaskCreateReceipt } from "../src/server/tasks/creation-receipts";
 
 let fixture = taskShareFixture();
 let sessionActor = { id: "manager", name: "Manager", roles: ["MANAGER"] };
@@ -40,7 +41,7 @@ test("completion pays only the fixed remaining split budget", async () => {
   fixture = taskShareFixture();
   const split = historicalTaskAllocation(fixture);
   assert.ok(split.ok);
-  assert.equal((await actions.changeTaskStatus("source", "DONE", 20)).ok, true);
+  assert.equal((await actions.changeTaskStatus("source", "DONE")).ok, true);
   assert.equal(fixture.state().entries.length, 1);
   assert.equal(Number(fixture.state().entries[0].amount), 700);
 });
@@ -56,20 +57,20 @@ test("classified installation splits only physical quantity and never pays task 
   const parts = fixture.state().tasks.filter((task) => task.allocationGroupId);
   assert.deepEqual(parts.map((task) => task.shareUnits).sort(), [300000, 700000]);
   assert.ok(parts.every((task) => task.physicalOnlyShare === true && task.shareAmount === null && task.stageShareUnits == null));
-  assert.equal((await actions.changeTaskStatus("source", "DONE", 20)).ok, true);
+  assert.equal((await actions.changeTaskStatus("source", "DONE")).ok, true);
   assert.equal(fixture.state().entries.length, 0);
 });
 
 test("simultaneous completion requests cannot create duplicate earnings", async () => {
   fixture = taskShareFixture();
-  await Promise.all([actions.changeTaskStatus("source", "DONE", 20), actions.changeTaskStatus("source", "DONE", 20)]);
+  await Promise.all([actions.changeTaskStatus("source", "DONE"), actions.changeTaskStatus("source", "DONE")]);
   assert.equal(fixture.state().entries.length, 1);
 });
 
 test("payroll write failure rolls back status and time with the allocation unchanged", async () => {
   fixture = taskShareFixture(); fixture.failOn("payroll.create");
   const before = structuredClone(fixture.state());
-  await assert.rejects(actions.changeTaskStatus("source", "DONE", 20), /Injected/);
+  await assert.rejects(actions.changeTaskStatus("source", "DONE"), /Injected/);
   assert.deepEqual(fixture.state(), before);
 });
 
@@ -77,11 +78,11 @@ test("dependent cannot finish after original part alone; both parts earn their e
   fixture = taskShareFixture();
   const result = historicalTaskAllocation(fixture);
   assert.ok(result.ok);
-  assert.equal((await actions.changeTaskStatus("source", "DONE", 20)).ok, true);
+  assert.equal((await actions.changeTaskStatus("source", "DONE")).ok, true);
   assert.equal((await actions.changeTaskStatus("dependent", "IN_PROGRESS")).ok, false);
   fixture.state().files.push({ id: "new-photo", taskId: result.childTaskId, projectId: "project", productId: "product" });
   fixture.state().currency = "USD";
-  assert.equal((await actions.changeTaskStatus(result.childTaskId, "DONE", 30)).ok, true);
+  assert.equal((await actions.changeTaskStatus(result.childTaskId, "DONE")).ok, true);
   assert.equal((await actions.changeTaskStatus("dependent", "IN_PROGRESS")).ok, true);
   assert.deepEqual(fixture.state().entries.map((entry) => Number(entry.amount)).sort(), [300, 700]);
   assert.ok(fixture.state().entries.every((entry) => entry.currency === "BYN"));
@@ -93,9 +94,9 @@ test("work allocation counts split group once and existing parts cannot be moved
   for (const update of [{ quantity: 1 }, { workId: null }, { productId: null }]) assert.equal((await actions.updateTask("source", update)).ok, false);
   assert.equal((await actions.deleteTask("source")).ok, false);
   fixture.state().works[0].quantity = "15";
-  const create = await actions.createTask({ clientMutationId: randomUUID(), expectedActorId: sessionActor.id, projectId: "project", productId: "product", workId: "work", title: "remaining", type: "Прочее", dueAt: "2026-10-01", assigneeId: "recipient", quantity: 5, estimateMinutes: 30 });
+  const create = await actions.createTask({ clientMutationId: randomUUID(), expectedActorId: sessionActor.id, projectId: "project", productId: "product", workId: "work", title: "remaining", type: "Прочее", dueAt: "2026-10-01", assigneeId: "recipient", quantity: 5 });
   assert.equal(create.ok, true);
-  assert.equal((await actions.createTask({ clientMutationId: randomUUID(), expectedActorId: sessionActor.id, projectId: "project", productId: "product", workId: "work", title: "overflow", type: "Прочее", dueAt: "2026-10-01", assigneeId: "director", quantity: 1, estimateMinutes: 10 })).ok, false);
+  assert.equal((await actions.createTask({ clientMutationId: randomUUID(), expectedActorId: sessionActor.id, projectId: "project", productId: "product", workId: "work", title: "overflow", type: "Прочее", dueAt: "2026-10-01", assigneeId: "director", quantity: 1 })).ok, false);
 });
 
 test("selecting one part as dependency expands to the whole group; cycles roll back edits", async () => {
@@ -120,13 +121,28 @@ test("historical split DTO remains read-only", async () => {
   const [mapped]=await mapTaskDetails([row as never],{id:"worker",roles:["WORKER"]});
   assert.equal(mapped.personalQuantity,"7"); assert.equal(mapped.shareAmount,"700.00");
   assert.equal(mapped.shareCurrency,"BYN"); assert.equal(mapped.canSplit,false);
+  assert.equal("spentMinutes" in mapped, false); assert.equal("estimateMinutes" in mapped, false);
+});
+
+test("new estimates refuse without writes; old create UUID confirms before retired validation and history cannot cascade-delete", async () => {
+  const request = { projectId: "project", productId: "product", workId: "work", assigneeId: "recipient", title: "old task", type: "Производство", dueAt: "2026-10-01", estimateMinutes: 30, clientMutationId: randomUUID(), expectedActorId: "manager" };
+  const before = structuredClone(fixture.state());
+  assert.equal((await actions.createTask(request)).ok, false);
+  assert.equal((await actions.updateTask("source", { estimateMinutes: null })).ok, false);
+  assert.equal((await actions.deleteTask("source")).ok, false);
+  assert.deepEqual(fixture.state(), before);
+  await fixture.transaction(tx => recordTaskCreateReceipt({ ...sessionActor, roles: ["MANAGER"], source: "web" }, request, "old-confirmed-task", tx));
+  const saved = structuredClone(fixture.state());
+  const result = await actions.createTask(request);
+  assert.ok(result.ok && result.replayed); if (result.ok) assert.equal(result.resultId, "old-confirmed-task");
+  assert.deepEqual(fixture.state(), saved);
 });
 
 test("UI fractional remainder reaches strict create and edit actions without binary tails", async () => {
   fixture = taskShareFixture();
   fixture.state().works[0].quantity = "10.30";
   const remaining = remainingWorkQuantity("10.30", "10.00");
-  const created = await actions.createTask({ clientMutationId: randomUUID(), expectedActorId: sessionActor.id, projectId: "project", productId: "product", workId: "work", title: "fractional remainder", type: "Прочее", dueAt: "2026-10-01", assigneeId: "recipient", quantity: Number(remaining), estimateMinutes: 10 });
+  const created = await actions.createTask({ clientMutationId: randomUUID(), expectedActorId: sessionActor.id, projectId: "project", productId: "product", workId: "work", title: "fractional remainder", type: "Прочее", dueAt: "2026-10-01", assigneeId: "recipient", quantity: Number(remaining) });
   assert.equal(created.ok, true);
   assert.equal(fixture.state().tasks.find((task) => task.title === "fractional remainder")?.quantity, "0.30");
   fixture = taskShareFixture();
@@ -152,7 +168,7 @@ test("engineering DTO never presents retained legacy money as the current work p
 });
 test('ordinary quantity4+6 consumes10 once, full executor pay, and rejects excess',async()=>{
  fixture=taskShareFixture(); fixture.state().tasks[0].workId=null; fixture.state().tasks[0].quantity=null;
- const ordinary={projectId:'project',productId:'product',workId:'work',title:'portion',type:'Прочее',dueAt:'2026-10-01',assigneeId:'recipient',estimateMinutes:10};
+ const ordinary={projectId:'project',productId:'product',workId:'work',title:'portion',type:'Прочее',dueAt:'2026-10-01',assigneeId:'recipient'};
  assert.equal((await actions.createTask({...ordinary,clientMutationId:randomUUID(),expectedActorId:sessionActor.id,quantity:4})).ok,true);
  assert.equal((await actions.createTask({...ordinary,clientMutationId:randomUUID(),expectedActorId:sessionActor.id,title:'second',quantity:6})).ok,true);
  assert.equal((await actions.createTask({...ordinary,clientMutationId:randomUUID(),expectedActorId:sessionActor.id,quantity:1})).ok,false);
@@ -161,7 +177,7 @@ test('ordinary quantity4+6 consumes10 once, full executor pay, and rejects exces
  assert.ok(rows.every(row=>row.allocationGroupId===null&&row.shareUnits===null&&row.shareAmount===null));
 });
 test('stale create and update share payloads fail before writes, including fullshare1',async()=>{
- const ordinary={projectId:'project',title:'portion',type:'Прочее',dueAt:'2026-10-01',estimateMinutes:10};
+ const ordinary={projectId:'project',title:'portion',type:'Прочее',dueAt:'2026-10-01'};
  for(const extra of [{executorShare:0.4},{executorShare:1},{shareUnits:1000000},{shareAmount:'10.00'},{allocationGroupId:'old'},{stageShareUnits:1000000},{physicalOnlyShare:true},{splitRevision:2}]) {
  fixture=taskShareFixture();const before=structuredClone(fixture.state());
  assert.equal((await actions.createTask({...ordinary,...extra} as never)).ok,false);
@@ -182,9 +198,9 @@ test('two unfinished legacy allocations finish with fixed40+60 and no new groups
  fixture.state().groups[0].budget='100.00';
  fixture.state().files.push({id:'legacy-child-photo',taskId:'historic-child',projectId:'project',productId:'product'});
  fixture.state().currency='USD';
- assert.equal((await actions.changeTaskStatus('source','DONE',20)).ok,true);
- assert.equal((await actions.changeTaskStatus('historic-child','DONE',20)).ok,true);
- assert.equal((await actions.changeTaskStatus('source','DONE',20)).ok,true);
+ assert.equal((await actions.changeTaskStatus('source','DONE')).ok,true);
+ assert.equal((await actions.changeTaskStatus('historic-child','DONE')).ok,true);
+ assert.equal((await actions.changeTaskStatus('source','DONE')).ok,true);
  assert.deepEqual(fixture.state().entries.map(row=>Number(row.amount)).sort((a,b)=>a-b),[40,60]);
  assert.ok(fixture.state().entries.every(row=>row.currency==='BYN'));
  assert.equal(fixture.state().groups.length,1);

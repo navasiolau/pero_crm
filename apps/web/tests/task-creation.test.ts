@@ -7,7 +7,7 @@ import type { TaskCreateAck, TaskCreateRequest } from "../src/server/tasks/creat
 type Commands = typeof import("../src/components/use-task-create-command");
 const input = (): TaskCreateRequest => ({ clientMutationId: randomUUID(), expectedActorId: "manager", projectId: "project",
   productId: "product", workId: "work", assigneeId: "recipient", title: "Создание", type: "Производство", quantity: 1,
-  dueAt: "2026-10-12", estimateMinutes: 10, dependencyIds: ["b", "a", "a"] });
+  dueAt: "2026-10-12", dependencyIds: ["b", "a", "a"] });
 function setup() {
   const scope = guardedModuleCache(import.meta.url, {
     prisma: {}, targets: ["../src/components/use-task-create-command"], allowedOverrides: ["../src/server/tasks/actions"],

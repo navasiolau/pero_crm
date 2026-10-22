@@ -19,7 +19,6 @@ export async function softDeleteProjectCore(tx:Prisma.TransactionClient,actor:Do
  await tx.$queryRaw`SELECT id FROM "Product" WHERE "projectId"=${project.id} ORDER BY id FOR UPDATE`;
  const children=await tx.product.findMany({where:{projectId:project.id},select:{id:true,updatedAt:true,deletedAt:true,deletedById:true},orderBy:{id:'asc'}});
  if(projectProductsVersion(children)!==data.expectedProductsVersion)return failure('conflict','Изделия проекта изменились. Обновите подтверждение удаления');
- if(await tx.timeEntry.count({where:{source:'timer',stoppedAt:null,task:{projectId:project.id}}}))return failure('active-timer','Сначала остановите активные таймеры задач проекта');
  const deletedAt=new Date(),liveIds=children.filter(row=>row.deletedAt===null).map(row=>row.id);
  if((await tx.project.updateMany({where:{id:project.id,deletedAt:null,updatedAt:new Date(data.expectedUpdatedAt)},data:{deletedAt,deletedById:actor.id}})).count!==1)throw Error('PROJECT_SOFT_DELETE_CAS_RACE');
  if((await tx.product.updateMany({where:{projectId:project.id,deletedAt:null,id:{in:liveIds}},data:{deletedAt,deletedById:actor.id}})).count!==liveIds.length)throw Error('PROJECT_CHILD_DELETE_CAS_RACE');
