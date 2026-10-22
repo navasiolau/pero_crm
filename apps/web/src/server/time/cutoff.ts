@@ -7,9 +7,9 @@ const digest = (value: unknown) => createHash("sha256").update(JSON.stringify(va
 function guard(condition: unknown, code: string): asserts condition { if (!condition) throw Error(code); }
 const revision = z.string().regex(/^[a-f0-9]{40}$/);
 const databaseSchema = z.object({ name: z.string().min(1), schema: z.literal("public"), systemIdentifier: z.string().regex(/^\d+$/) }).strict();
-const targetSchema = z.object({ kind: z.enum(["local5433", "staging"]), revision,
+const targetSchema = z.object({ kind: z.enum(["local5433", "staging", "production"]), revision,
   imageDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/).nullable(), database: databaseSchema }).strict()
-  .refine(value => value.kind === "local5433" || value.imageDigest !== null, "Для staging требуется digest фактического образа");
+  .refine(value => value.kind === "local5433" || value.imageDigest !== null, "Для staging и production требуется digest фактического образа");
 export type TaskTimeCutoffTarget = z.infer<typeof targetSchema>;
 const requestSchema = z.object({ operationId: z.uuid().transform(value => value.toLowerCase()), actorId: z.string().min(1),
   retiredRevision: revision, target: targetSchema }).strict().refine(value => value.retiredRevision !== value.target.revision, "Нужен новый SHA без writers времени");
