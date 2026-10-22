@@ -39,3 +39,9 @@ Root native local5433 — PASS на SHA `e15d110cc8c9889bc958ec3356fc26fe2cb7ed9
 Миграции, БД, инфраструктура, seed/reset/dump, restic/S3 cleanup не выполнялись. Из-за малого места D: зависимости установлены с frozen lock в отдельный C: virtual-store по поручению Root; версии/lock не менялись, следующие pnpm exec не запускали auto-install. Секреты не выводились.
 
 Перед dependency merge сохранён stash `ae1b31b8acb14b4e59c28c2d53566c5b61b24591`, apply успешен, файлы исходного diff проверены на наличие. Stash сохранён для Root до окончательного review/commit; чужие stash не менялись. Staging/production приёмка и выпуск не заявлены.
+
+## Уточнение существующих HTTP-проверок после CI
+
+В `file-responses.test.ts` и `files-crud.test.ts` исправлены устаревшие ожидания: ENGINEER читает чужие DESIGN/PRODUCTION при разрешённом родителе, а снятие назначения сохраняет чтение и cached 304. Отрицательные проверки используют временные LEAD/PREPARATION с восстановлением исходных полей и `updatedAt`; запреты загрузки и проверки сохранности файлов/S3 сохранены.
+
+ESLint двух изменённых файлов и `git diff --check` — PASS. HTTP-тесты и БД для этой правки не запускались; HTTP PASS ожидает CI.

@@ -431,11 +431,15 @@ test("files.crud: file113, документы, attachment ACL и inline-дейс
       files.push(await upload(`group-${section}`, engineer, { section, bytes: section === "MEASUREMENT" ? png : cad, mimeType: section === "MEASUREMENT" ? "image/png" : cadMime }));
     const taskFile = await upload("task-production", engineer, { taskId: task.id, productId: null }); assert.equal(taskFile.productId, product.id); assert.equal(taskFile.taskId, task.id);
     const projectFile = await upload("project-general", manager, { productId: null, section: "GENERAL", bytes: pdf, mimeType: "application/pdf" }); assert.equal(projectFile.productId, null);
-    const hidden = await f.file("hidden-child", { projectId: project.id, productId: sibling.id }, cad, cadMime, { uploadedById: foreign.id, fileName: "hidden-child.b3d" });
+    const hidden = await f.file("hidden-child", { projectId: project.id, productId: sibling.id }, cad, cadMime, { taskId: foreignTask.id, uploadedById: foreign.id, fileName: "hidden-child.b3d" });
     const invalid = await f.file("invalid-parent-child", { projectId: project.id, productId: product.id }, cad, cadMime, { taskId: foreignTask.id, uploadedById: engineer.id });
     const rows = await f.db.file.findMany({ where: { projectId: project.id }, orderBy: { id: "asc" } }), before = await f.versions(project.id);
-    for (const file of [...files, taskFile, projectFile]) { const response = await f.request(`/api/files/${file.id}`, engineer); assert.equal(response.status, 200); await response.arrayBuffer(); }
-    for (const file of [hidden, invalid]) assert.equal((await f.request(`/api/files/${file.id}`, engineer)).status, 404);
+    for (const file of [...files, taskFile, projectFile, hidden]) { const response = await f.request(`/api/files/${file.id}`, engineer); assert.equal(response.status, 200); await response.arrayBuffer(); }
+    const siblingBefore = await f.db.product.findUniqueOrThrow({ where: { id: sibling.id }, select: { status: true, updatedAt: true } });
+    try {
+      await f.db.product.update({ where: { id: sibling.id }, data: { status: "PREPARATION" } });
+      for (const file of [hidden, invalid]) assert.equal((await f.request(`/api/files/${file.id}`, engineer)).status, 404);
+    } finally { await f.db.product.update({ where: { id: sibling.id }, data: siblingBefore }); }
     const page = await f.request(productPage, engineer); assert.equal(page.status, 200); const html = await page.text();
     for (const file of files) assert.ok(html.includes(file.fileName)); assert.ok(!html.includes(hidden.fileName));
     for (const [actor, extra, status] of [[engineer, { productId: sibling.id }, 404], [engineer, { taskId: foreignTask.id }, 404],
