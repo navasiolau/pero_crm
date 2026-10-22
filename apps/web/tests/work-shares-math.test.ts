@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFileSync } from "node:fs";
-import { allocatedWorkQuantity, personalQuantity, taskPieceAmount, type TaskAllocationValues } from "../src/lib/work-shares";
+import { allocatePiecework, allocatedWorkQuantity, personalQuantity, taskPieceAmount, type TaskAllocationValues } from "../src/lib/work-shares";
 
 const part = (shareUnits: number, shareAmount: string, quantity = "10"): TaskAllocationValues => ({
   quantity, executorShare: "1", allocationGroupId: "group", shareUnits, shareAmount,
@@ -10,6 +10,15 @@ const part = (shareUnits: number, shareAmount: string, quantity = "10"): TaskAll
 test("legacy task amounts retain the previous formula before any split", () => {
   assert.equal(taskPieceAmount({ quantity: "10", executorShare: "0.5" }, "100"), "500.00");
   assert.equal(allocatedWorkQuantity([{ quantity: "3" }, { quantity: "7" }]), "10.00");
+});
+
+test("initial percentages conserve the budget with the last participant receiving residual cents", () => {
+  assert.deepEqual(allocatePiecework("1000", ["50", "30", "20"]).map(row => [row.shareUnits, row.shareAmount]),
+    [[500000, "500.00"], [300000, "300.00"], [200000, "200.00"]]);
+  assert.deepEqual(allocatePiecework("0.05", ["33.33", "33.33", "33.34"]).map(row => row.shareAmount), ["0.01", "0.01", "0.03"]);
+  assert.throws(() => allocatePiecework("100", ["50", "49.99"]), /100%/);
+  assert.throws(() => allocatePiecework("100", ["0", "100"]), /100%/);
+  assert.throws(() => allocatePiecework("100", ["0.001", "99.999"]), /число/);
 });
 
 test("30/70 portions consume ten work units only once", () => {

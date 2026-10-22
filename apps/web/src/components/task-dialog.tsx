@@ -39,6 +39,7 @@ import { cn } from "@/lib/utils";
 
 import { isPositiveQuantity, quantityInputError, remainingWorkQuantity } from "@/lib/work-quantity";
 import { deleteTask, updateTask } from "@/server/tasks/actions";
+import { PieceworkButton } from "@/components/piecework-allocation-dialog";
 
 
 
@@ -497,7 +498,7 @@ export function TaskDialog({
               </Button>
             </>
           ) : (
-            !readOnly && (
+            (!readOnly || task.canTransferPiecework) && (
               <div className="flex w-full flex-wrap items-center justify-end gap-2">
                 {!readOnly && !isAllocatedShare ? (
                   <Button
@@ -509,6 +510,8 @@ export function TaskDialog({
                     <Trash2 className="size-4" /> Удалить
                   </Button>
                 ) : null}
+                {task.canTransferPiecework && task.productId ? <PieceworkButton label="Передать часть доли" disabled={filePending}
+                  context={{ mode: "transfer", productId: task.productId, taskId: task.id, title: task.title }} onDone={() => onOpenChange(false)}/> : null}
                 {!readOnly ? (
                   <Button variant="outline" disabled={filePending} onClick={startEdit}>
                     <Pencil className="size-4" /> Редактировать

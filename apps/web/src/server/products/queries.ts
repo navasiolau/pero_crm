@@ -6,6 +6,7 @@ import { PRODUCT_STATUSES } from "@/lib/product-statuses";
 import { parseListFilterValue } from "@/lib/list-filter-values";
 import { engineeringParticipantProductIds, fileVisibilityWhere, productVisibilityWhere, resolveVisibilityActor, taskVisibilityWhere, workVisibilityWhere, type VisibilityActor } from "@/server/access/visibility";
 import { taskDetailsIncludeFor,taskWorkspaceWhere } from "@/server/tasks/queries";
+import { canManagePiecework, ordinaryPieceworkBinding } from "@/lib/piecework-policy";
 import { productSketchProjection } from "./sketch-projection";
 import { canAccessProductDraft } from "@/lib/product-drafts";
 import { productDraftAccessRelations } from "@/server/access/product-draft-context";
@@ -305,6 +306,7 @@ export async function getProductFor(
       works: {
         where: workVisibilityWhere(actor),
         include: {
+          _count: { select: { paymentConversions: true, settlementShares: true } },
           tasks: { where: taskVisibilityWhere(actor), select: { id: true, title: true, status: true, quantity: true, allocationGroupId: true } },
         },
         orderBy: { createdAt: "asc" },
@@ -313,5 +315,5 @@ export async function getProductFor(
     },
   });
   if(!product)return null;
-  return (await maskProductionRead(prisma,actor,[{...product,canAccessDraft:canAccessProductDraft(actor.roles,product),tasks:maskTaskPaymentRead(actor,product.tasks),works:await maskProductionWorkRead(prisma,actor,product.works)}]))[0];
+  return (await maskProductionRead(prisma,actor,[{...product,canAccessDraft:canAccessProductDraft(actor.roles,product),tasks:maskTaskPaymentRead(actor,product.tasks),works:await maskProductionWorkRead(prisma,actor,product.works.map(work => ({...work,canDistributePiecework:canManagePiecework(actor.roles)&&ordinaryPieceworkBinding(work)&&work.priceSnapshot!==null})))}]))[0];
 }

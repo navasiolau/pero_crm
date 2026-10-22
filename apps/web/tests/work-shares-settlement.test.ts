@@ -121,6 +121,7 @@ test("historical split DTO remains read-only", async () => {
   const [mapped]=await mapTaskDetails([row as never],{id:"worker",roles:["WORKER"]});
   assert.equal(mapped.personalQuantity,"7"); assert.equal(mapped.shareAmount,"700.00");
   assert.equal(mapped.shareCurrency,"BYN"); assert.equal(mapped.canSplit,false);
+  assert.equal(mapped.canTransferPiecework,true);
   assert.equal("spentMinutes" in mapped, false); assert.equal("estimateMinutes" in mapped, false);
 });
 

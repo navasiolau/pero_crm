@@ -32,6 +32,7 @@ export interface TaskDetails {
   personalQuantity?: string | null;
   splitRevision?: number;
   canSplit?: boolean;
+  canTransferPiecework?: boolean;
   dependencies: { id: string; title: string; status: TaskStatus }[];
   projectId: string;
   projectNumber: string;

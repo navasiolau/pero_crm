@@ -45,6 +45,7 @@ import { isPositiveQuantity, quantityInputError, remainingWorkQuantity } from "@
 import { useTaskCreateCommand } from "@/components/use-task-create-command";
 import { useTaskStatusCommand } from "@/components/use-task-status-command";
 import { removeWork } from "@/server/works/actions";
+import { PieceworkButton } from "@/components/piecework-allocation-dialog";
 
 import type { SelectOption } from "../projects-view";
 
@@ -57,6 +58,8 @@ export interface WorkRow {
   allocated: string;
   stagePayPoolId?:string|null;
   canAllocateWorker?:boolean;
+  productId?: string | null;
+  canDistributePiecework?: boolean;
   operation?:WorkOperation;
   priceSnapshot: string | null;
   total: string | null;
@@ -196,6 +199,8 @@ export function TasksTab({
             {work.operation?.canEdit&&productId?<Button size="icon-xs" variant="ghost" aria-label="Редактировать работу" onClick={()=>setEditWork(work)}><Pencil className="size-3.5"/></Button>:null}
             {canAllocateWork&&!canManage&&productId&&allocationData&&work.canAllocateWorker&&isPositiveQuantity(remaining)?<><Button size="sm" variant="outline" onClick={()=>{setOwnAllocation(true);setAllocationWork(work);}}>Взять себе</Button><Button size="sm" variant="outline" onClick={()=>{setOwnAllocation(false);setAllocationWork(work);}}>Назначить задачу</Button></>:null}
             {canManage && productId && work.paymentKind !== "ENGINEERING" && work.paymentKind !== "INSTALLATION" && work.priceSnapshot !== null && (isPositiveQuantity(remaining) || createCommand.peek({projectId,productId,workId:work.id})) ? <Button size="sm" variant="outline" onClick={() => openTaskCreation(work, remaining)}>Назначить задачу</Button> : null}
+            {work.canDistributePiecework && (work.productId || productId) && isPositiveQuantity(remaining) ? <PieceworkButton label="Распределить в процентах"
+              context={{ mode: "create", projectId, productId: (work.productId || productId)!, work: { id: work.id, title: work.title, unit: work.unitSnapshot ?? "ед." } }}/> : null}
             {canManage && work.paymentKind !== "ENGINEERING" && work.paymentKind !== "INSTALLATION" ? (
               <Button
                 size="icon-xs"

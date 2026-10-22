@@ -12,12 +12,13 @@ export function taskShareFixture(productStatus: "DESIGN" | "PRODUCTION" = "PRODU
       assigneeId: "worker", quantity: id === "source" ? "10" : null, executorShare: "1",
       estimateMinutes: 100, dueAt: now, requiresPhoto: true, createdById: "manager",
       allocationGroupId: null, shareUnits: null, shareAmount: null, splitRevision: 0,
+      physicalOnlyShare: false, stageShareUnits: null,
       createdAt: now, updatedAt: now, doneAt: null, doneById: null,
     })),
     users: [["worker", "WORKER"], ["recipient", "WORKER"], ["manager", "MANAGER"], ["engineer", "ENGINEER"], ["accountant", "ACCOUNTANT"], ["admin", "ADMIN"], ["director", "DIRECTOR"], ["mounter", "MOUNTER"]].map(([id, role]): Row => ({ id, name: id, roles: [role], active: true, payScheme: "PIECE" })),
     products: [{ id: "product", projectId: "project", number: "1.1", engineerId: "engineer", status: productStatus }] as Row[],
     pools: [{ id: "pool", productId: "product", kind: "ENGINEERING", state: "DRAFT", revision: 0 }] as Row[],
-    works: [{ id: "work", projectId: "project", productId: "product", title: "work", quantity: "10", priceSnapshot: "100", total: "1000", paymentKind: "LEGACY" }] as Row[],
+    works: [{ id: "work", projectId: "project", productId: "product", title: "work", quantity: "10", quantityPerUnit: null, priceItemId: null, unitSnapshot: "м²", priceSnapshot: "100", total: "1000", paymentKind: "LEGACY", stagePayPoolId: null, poolWeightUnits: null, _count: { paymentConversions: 0, settlementShares: 0 } }] as Row[],
     groups: [] as Row[], entries: [] as Row[], logs: [] as Row[], events: [] as Row[], history: [] as Row[],
     dependencies: [{ taskId: "source", dependsOnId: "predecessor" }, { taskId: "dependent", dependsOnId: "source" }] as Row[],
     times: [{ id: "timer", taskId: "source", userId: "worker", source: "timer", minutes: 20, stoppedAt: null, startedAt: now, autoStopped: false }] as Row[],
@@ -28,8 +29,8 @@ export function taskShareFixture(productStatus: "DESIGN" | "PRODUCTION" = "PRODU
   const transactionContext = new AsyncLocalStorage<boolean>();
   const writes: string[] = [];
   const write = (name: string) => { writes.push(name); if (failAt === name) throw new Error("Injected transactional failure"); };
-  const projectRow = () => ({id:"project",number:"1",currency:state.projectCurrency,deletedAt:null});
-  const productRow = (id:unknown) => {const row=state.products.find(product=>product.id===id);return row?{...row,project:projectRow()}:null;};
+  const projectRow = () => ({id:"project",number:"1",currency:state.projectCurrency,deletedAt:null,tasks:state.tasks});
+  const productRow = (id:unknown) => {const row=state.products.find(product=>product.id===id);return row?{...row,project:projectRow(),tasks:state.tasks.filter(task=>task.productId===id)}:null;};
   const filtered = (rows: Row[], where?: Row) => rows.filter((row) => matches({ ...row,
     ...(row.projectId ? {project:projectRow()} : {}),
     ...(row.productId !== undefined ? {product:productRow(row.productId)} : {}),
@@ -42,7 +43,7 @@ export function taskShareFixture(productStatus: "DESIGN" | "PRODUCTION" = "PRODU
       assignee: state.users.find((user) => user.id === row.assigneeId) ?? null,
       work: (() => { const work = state.works.find((item) => item.id === row.workId); const pool = state.pools.find((item) => item.id === work?.stagePayPoolId); return work ? { ...work, stagePayPool: work.stagePayPool ?? (pool ? { ...pool, product: state.products.find((item) => item.id === pool.productId) } : null) } : null; })(),
       allocationGroup: state.groups.find((group) => group.id === row.allocationGroupId) ?? null,
-      _count: { payrollEntries: state.entries.filter((entry) => entry.taskId === row.id).length, timeEntries: state.times.filter((entry) => entry.taskId === row.id).length },
+      _count: { payrollEntries: state.entries.filter((entry) => entry.taskId === row.id).length, timeEntries: state.times.filter((entry) => entry.taskId === row.id).length, stageSettlementShares: 0 },
       dependencies: state.dependencies.filter((edge) => edge.taskId === row.id).map((edge) => ({ ...edge, dependsOn: state.tasks.find((task) => task.id === edge.dependsOnId) })),
       dependents: state.dependencies.filter((edge) => edge.dependsOnId === row.id),
       files: state.files.filter((file) => file.taskId === row.id),
@@ -68,7 +69,7 @@ export function taskShareFixture(productStatus: "DESIGN" | "PRODUCTION" = "PRODU
         write("task.update"); const row = filtered(state.tasks, where)[0]; if (!row) throw new Error("Task not found"); return updateRow(row, data);
       },
       create: async ({ data }: { data: Row }) => {
-        write("task.create"); const row: Row = { id: `child-${++state.sequence}`, createdAt: now, updatedAt: now, doneAt: null, doneById: null, executorShare: "1", allocationGroupId: null, shareUnits: null, shareAmount: null, splitRevision: 0, ...data };
+        write("task.create"); const row: Row = { id: `child-${++state.sequence}`, createdAt: now, updatedAt: now, doneAt: null, doneById: null, executorShare: "1", allocationGroupId: null, shareUnits: null, shareAmount: null, splitRevision: 0, physicalOnlyShare: false, stageShareUnits: null, ...data };
         state.tasks.push(row);
         const dependencies = data.dependencies as { create?: Row[] } | undefined;
         for (const edge of dependencies?.create ?? []) state.dependencies.push({ taskId: row.id, dependsOnId: edge.dependsOnId });
@@ -94,7 +95,7 @@ export function taskShareFixture(productStatus: "DESIGN" | "PRODUCTION" = "PRODU
       delete: async ({ where }: { where: Row }) => { write("work.delete"); const row = filtered(state.works, where)[0]; state.works = state.works.filter((work) => work !== row); return row; },
     },
     project: { findUnique: async () => ({ id: "project", number: "1", currency: state.projectCurrency }) },
-    product: { findFirst: async ({ where }: { where: Row }) => filtered(state.products, where)[0] ?? null,
+    product: { findFirst: async ({ where }: { where: Row }) => filtered(state.products.map(row=>productRow(row.id)!), where)[0] ?? null,
       findUnique: async ({ where }: { where: Row }) => filtered(state.products, where)[0] ?? null },
     productStagePayPool: {
       findUnique: async ({ where }: { where: Row }) => filtered(state.pools, where)[0] ?? null,

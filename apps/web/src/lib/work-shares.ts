@@ -70,6 +70,22 @@ export function splitAllocation(shareUnits: number, amount: DecimalInput, transf
   };
 }
 
+/** Порядок участников фиксирован: последнему достаётся остаток целых копеек. */
+export function allocatePiecework(amount: DecimalInput, percentages: DecimalInput[]) {
+  if (!percentages.length) throw new Error("Добавьте исполнителя");
+  const values = percentages.map(value => scaled(value, 2));
+  if (values.some(value => value <= BigInt(0) || value > BigInt(10_000)) ||
+    values.reduce((sum, value) => sum + value, BigInt(0)) !== BigInt(10_000))
+    throw new Error("Положительные проценты должны составлять ровно 100%");
+  const budget = moneyAtoms(amount);
+  let remaining = budget;
+  return values.map((value, index) => {
+    const cents = index === values.length - 1 ? remaining : budget * value / BigInt(10_000);
+    remaining -= cents;
+    return { percent: fixed(value, 2), shareUnits: Number(value * BigInt(100)), shareAmount: fixed(cents, 2) };
+  });
+}
+
 export function personalQuantity(task: TaskAllocationValues): string | null {
   if (task.quantity === null) return null;
   const units = task.allocationGroupId ? task.shareUnits : FULL_SHARE_UNITS;
