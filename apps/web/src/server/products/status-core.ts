@@ -5,7 +5,7 @@ import {canAccessProductDraft,isProductDraftLocked} from "@/lib/product-drafts";
 import {productDraftAccessRelations} from "@/server/access/product-draft-context";
 import type { Prisma, ProductStatus } from "@prisma/client";
 import { hasAnyRole, MANAGER_ROLES } from "@/lib/roles";
-import { productStatusLabels } from "@/lib/product-statuses";
+import { isActiveProductStatus } from "@/lib/product-statuses";
 import { decideProductPercentageStatus, percentageCompletionKinds } from "@/lib/product-percentage-status";
 import { captureProductPercentageCompletion } from "@/server/product-percentage-pay/core";
 import type { PercentageAccrualEffects } from "@/server/product-percentage-pay/direct-completion";
@@ -14,7 +14,7 @@ import type { DomainActor } from "@/server/projects/core";
 /** Все способы изменения статуса проходят эту транзакцию и один ролевой policy. */
 export async function changeProductStatusTransaction(tx: Prisma.TransactionClient, actor: DomainActor,
   productId: string, toStatus: ProductStatus, comment?: string) {
-  if (!Object.hasOwn(productStatusLabels, toStatus)) return { ok: false as const, error: "Неизвестный статус изделия" };
+  if (!isActiveProductStatus(toStatus)) return { ok: false as const, error: "Неизвестный или выведенный из использования статус изделия" };
   const reference = await tx.product.findUnique({ where: {...liveProductWhere, id: productId }, select: {projectId:true} });
   if (!reference) return { ok: false as const, error: "Изделие не найдено" };
   await lockProjectRow(tx, reference.projectId);

@@ -33,8 +33,8 @@ const common={title:'Стеллаж',statusChangedAt:new Date().toISOString(),st
  tasksCount:0,filesCount:0,productsCount:1};
 const cover={id:'qa176-focus-cover',fileName:'focus.png',mimeType:'image/png',hasThumb:true};
 const all=[...Array.from({length:12},(_,i)=>({...common,id:'partial-'+i,number:number+String(99-i),
- title:'Совпадение '+i,status:'INSTALLATION',stage:'RECLAMATION'})),
- {...common,id:'target',number,status:'INSTALLATION',stage:'RECLAMATION',title:'Искомая карточка',sketchFile:cover,coverFile:cover},
+ title:'Совпадение '+i,status:'INSTALLATION',stage:'IN_WORK'})),
+ {...common,id:'target',number,status:'INSTALLATION',stage:'IN_WORK',title:'Искомая карточка',sketchFile:cover,coverFile:cover},
  {...common,id:'start',number:'100.1',status:'PREPARATION',stage:'LEAD',title:'Начало'},
  {...common,id:'end',number:'800.1',status:'DONE',stage:'REFUSED',title:'Конец'}];
 function rows(query){const p=new URLSearchParams(query),q=p.get('q')?.trim()||'',selected=parseListFilterValue(p.get(product?'status':'stage'));return all.filter(row=>(!window.__omitTarget||row.id!=='target')&&(!q||row.number.includes(q)||row.title.toLowerCase().includes(q.toLowerCase()))&&(!selected||selected.includes(product?row.status:row.stage))).map(row=>({...row}));}

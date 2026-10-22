@@ -67,13 +67,8 @@ type Dialog =
       expectedStage: string; clientMutationId: string;
       step:
         | "refusalReason"
-        | "refusalComment"
-        | "reclamationReason"
-        | "reclamationDescription"
-        | "reclamationFault";
+        | "refusalComment";
       refusalReason?: string;
-      reclamationReason?: string;
-      reclamationDescription?: string;
     }
   | {
       kind: "edit";
@@ -727,41 +722,6 @@ async function stageText(
       );
       return;
     }
-    case "reclamationReason":
-      if(!text.trim()){await reply(chatId,"Укажите причину рекламации:");return;}
-      dialog.reclamationReason = text;
-      dialog.step = "reclamationDescription";
-      setDialog(chatId, dialog);
-      await reply(chatId, "Описание рекламации:");
-      return;
-    case "reclamationDescription":
-      if(!text.trim()){await reply(chatId,"Опишите рекламацию:");return;}
-      dialog.reclamationDescription = text;
-      dialog.step = "reclamationFault";
-      setDialog(chatId, dialog);
-      await reply(chatId, "Виновная сторона:");
-      return;
-    case "reclamationFault": {
-      if(!text.trim()){await reply(chatId,"Укажите виновную сторону:");return;}
-      const result = await crm.changeStage(
-        session.userId,
-        dialog.projectId,
-        "RECLAMATION",
-        {
-          reclamationReason: dialog.reclamationReason ?? "",
-          reclamationDescription: dialog.reclamationDescription ?? "",
-          reclamationFault: text,
-        },dialog.expectedStage,dialog.clientMutationId,
-      );
-      if(result.ok)setDialog(chatId, null);
-      await reply(
-        chatId,
-        result.ok
-          ? `✅ Статус: ${STAGE_LABELS.RECLAMATION} · П-${dialog.projectNumber}`
-          : `❌ ${result.error}`,
-      );
-      return;
-    }
   }
 }
 
@@ -895,6 +855,7 @@ async function dispatchCallback(
     const [projectId, toStage,token] = rest;
     const menu=stageMenus.get(String(chatId));
     if(!menu||menu.projectId!==projectId||menu.token!==token){await reply(chatId,"Откройте выбор статуса заново: исходный статус отсутствует");return;}
+    if (!STAGE_ORDER.includes(toStage)) { await reply(chatId, "Этот статус больше не используется. Откройте выбор статуса заново."); return; }
     const clientMutationId=menu.mutations[toStage]??(menu.mutations[toStage]=randomUUID());
     if (toStage === "REFUSED") {
       setDialog(chatId, {
@@ -904,16 +865,6 @@ async function dispatchCallback(
         step: "refusalReason",
       });
       await reply(chatId, "Причина отказа:");
-      return;
-    }
-    if (toStage === "RECLAMATION") {
-      setDialog(chatId, {
-        kind: "stage",
-        projectId,
-        projectNumber: menu.projectNumber, expectedStage:menu.expectedStage,clientMutationId,
-        step: "reclamationReason",
-      });
-      await reply(chatId, "Причина рекламации:");
       return;
     }
     const result = await crm.changeStage(session.userId, projectId, toStage,undefined,menu.expectedStage,clientMutationId);
