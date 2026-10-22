@@ -109,9 +109,9 @@ function coveredFixture(state:string|null,rate='5',kind:'ASSEMBLY'|'INSTALLATION
  return f;
 }
 test('retired direct coverage leaves ordinary PIECE accrual independent',async()=>{
- for(const kind of ['ASSEMBLY','INSTALLATION'] as const)for(const state of [null,'SETTLED']){const f=coveredFixture(state,'5',kind);assert.equal((await changeTaskStatusCore(actor,'source','DONE',20,f.transaction)).ok,true);assert.equal(f.state().entries.length,1);assert.equal(f.state().tasks[0].status,'DONE');}
+ for(const kind of ['ASSEMBLY','INSTALLATION'] as const)for(const state of [null,'SETTLED']){const f=coveredFixture(state,'5',kind);assert.equal((await changeTaskStatusCore(actor,'source','DONE',undefined,f.transaction)).ok,true);assert.equal(f.state().entries.length,1);assert.equal(f.state().tasks[0].status,'DONE');}
 });
 test('SKIPPED/protected/zero configurations preserve legacyPIECE, including historicalgroups',async()=>{
- for(const [state,rate] of [['SKIPPED_ONCE','5'],['LEGACY_PROTECTED','5'],[null,'0']] as const){const f=coveredFixture(state,rate);assert.equal((await changeTaskStatusCore(actor,'source','DONE',20,f.transaction)).ok,true);assert.equal(Number(f.state().entries[0].amount),1000);}
- const f=coveredFixture('SETTLED');Object.assign(f.state().tasks[0],{allocationGroupId:'historic',shareUnits:700000,shareAmount:'700.00'});f.state().groups.push({id:'historic',workId:'work',quantity:'10',budget:'1000.00',currency:'BYN',budgetSource:'TASK_FIXED'});assert.equal((await changeTaskStatusCore(actor,'source','DONE',20,f.transaction)).ok,true);assert.equal(Number(f.state().entries[0].amount),700);
+ for(const [state,rate] of [['SKIPPED_ONCE','5'],['LEGACY_PROTECTED','5'],[null,'0']] as const){const f=coveredFixture(state,rate);assert.equal((await changeTaskStatusCore(actor,'source','DONE',undefined,f.transaction)).ok,true);assert.equal(Number(f.state().entries[0].amount),1000);}
+ const f=coveredFixture('SETTLED');Object.assign(f.state().tasks[0],{allocationGroupId:'historic',shareUnits:700000,shareAmount:'700.00'});f.state().groups.push({id:'historic',workId:'work',quantity:'10',budget:'1000.00',currency:'BYN',budgetSource:'TASK_FIXED'});assert.equal((await changeTaskStatusCore(actor,'source','DONE',undefined,f.transaction)).ok,true);assert.equal(Number(f.state().entries[0].amount),700);
 });
