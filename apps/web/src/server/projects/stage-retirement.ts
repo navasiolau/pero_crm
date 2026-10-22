@@ -18,9 +18,9 @@ export function retiredProjectTarget(stage: "PAUSED" | "RECLAMATION", history: r
 }
 
 const databaseSchema = z.object({ name: z.string().min(1), schema: z.literal("public"), systemIdentifier: z.string().regex(/^\d+$/) }).strict();
-const targetSchema = z.object({ kind: z.enum(["local5433", "staging"]), revision: z.string().regex(/^[a-f0-9]{40}$/),
+const targetSchema = z.object({ kind: z.enum(["local5433", "staging", "production"]), revision: z.string().regex(/^[a-f0-9]{40}$/),
   imageDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/).nullable(), database: databaseSchema }).strict()
-  .refine(value => value.kind === "local5433" || value.imageDigest !== null, "Для staging требуется digest фактического образа");
+  .refine(value => value.kind === "local5433" || value.imageDigest !== null, "Для staging и production требуется digest фактического образа");
 export type StageRetirementTarget = z.infer<typeof targetSchema>;
 const requestSchema = z.object({ operationId: z.uuid(), actorId: z.string().min(1), target: targetSchema }).strict();
 export type StageRetirementRequest = z.infer<typeof requestSchema>;

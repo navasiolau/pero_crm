@@ -1,13 +1,13 @@
 # Операторский перенос №193
 
-По умолчанию `pnpm --filter @pero/web exec tsx scripts/retire-stages.ts` только выводит `INERT` и не создаёт PrismaClient. Нет web/API/cron-входа и нет обхода через флаг подтверждения. Не запускать против production.
+По умолчанию `pnpm --filter @pero/web exec tsx scripts/retire-stages.ts` только выводит `INERT` и не создаёт PrismaClient. Нет web/API/cron-входа и нет обхода через флаг подтверждения. Production запускается только после отдельного согласования владельца, через проверенный production transport; staging proof для него недопустим.
 
 Root импортирует `planStageRetirement`, затем `applyStageRetirement` из `apps/web/scripts/retire-stages.ts` через существующий reviewed transport7a84. Экспорты не подключаются к БД самостоятельно. Требуемые ports:
 
 - `transaction(run)`: одна настоящая Prisma mutation-транзакция на существующей разрешённой БД; rollback при любой ошибке. Использовать один connection, достаточный transaction timeout, без reset/seed/дампа.
 - `verifyTargetAndNoOldWriters(expected)`: реальная повторная проверка нового SHA, образа, идентичности target и отсутствия старых web/source writers, Telegram и workers в reviewed Root-контуре. Вернуть фактически проверенную identity. Нельзя возвращать аргумент как подтверждение либо подменять проверку флагом. Штатные соединения нового web/бота допустимы; их наличие не доказывает работу старых writers.
 
-Target: `{kind:'local5433'|'staging', revision:SHA40, imageDigest:'sha256:…'|null, database:{name,schema:'public',systemIdentifier}}`. Только local5433/pero_crm допускает `imageDigest:null` при проверенном исходном SHA и отсутствии старых source writers; staging/crm требует фактический image digest. Root дополнительно связывает local endpoint строго с127.0.0.1:5433 либо разрешённую staging DB/volume и новый образ. `systemIdentifier` сверяется самой утилитой через `pg_control_system()`, старый5432/legacy и production не являются допустимыми targets. У роли соединения должно быть право читать system identifier.
+Target: `{kind:'local5433'|'staging'|'production', revision:SHA40, imageDigest:'sha256:…'|null, database:{name,schema:'public',systemIdentifier}}`. Только local5433/pero_crm допускает `imageDigest:null` при проверенном исходном SHA и отсутствии старых source writers; staging/production с БД crm требуют фактический image digest. Root дополнительно связывает local endpoint строго с127.0.0.1:5433 либо разрешённую deployment DB/container/volume и новый образ. `systemIdentifier` сверяется самой утилитой через `pg_control_system()`. Production proof должен происходить из отдельно согласованного production выпуска, включая проверенное восстановление временного дампа при миграции №195; расширение типа не является разрешением на исполнение. Старый5432/legacy не является допустимой целью. У роли соединения должно быть право читать system identifier.
 
 Порядок:
 
