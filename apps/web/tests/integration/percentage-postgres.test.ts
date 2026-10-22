@@ -26,7 +26,7 @@ async function context(rows: PostgresRows) {
   const [manager, engineer, assembler, mounter] = await Promise.all([
     rows.user("manager", ["MANAGER"]), rows.user("engineer", ["ENGINEER"]), rows.user("assembler", ["WORKER"]), rows.user("mounter", ["MOUNTER"]),
   ]);
-  const project = await rows.project("money", { managerId: manager.id, currency: "BYN" });
+  const project = await rows.project("money", { stage: "CONTRACT", managerId: manager.id, currency: "BYN" });
   return { actor: { id: manager.id, name: manager.name, roles: manager.roles, source: "web" as const }, project,
     recipients: [engineer, assembler, mounter], assigned: { engineerId: engineer.id, assemblerId: assembler.id, mounterId: mounter.id } };
 }
