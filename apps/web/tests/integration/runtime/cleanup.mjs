@@ -9,6 +9,7 @@ import { removeMinio, removeWeb } from './containers.mjs';
 /** @typedef {{pid:number,startedAt:string,launchedAt?:number}} OwnedProcess */
 /** @typedef {{web?:OwnedProcess,tests?:OwnedProcess,deps?:OwnedProcess}} OwnedProcesses */
 const purposes = ['tests', 'web', 'deps'];
+const environRetryProof = Symbol('verified-environ-read');
 
 /** @param {number} pid @param {typeof readFileSync} [read] */
 function processStat(pid, read = readFileSync) {
@@ -76,11 +77,35 @@ export function groupMembers(target, purpose, owner, io = {}) {
         requireCi(/^\d+$/.test(stat[19] ?? '') && after[19] === stat[19] &&
           after[2] === stat[2] && Number(after[2]) === owner.pid, 'process-recheck-identity');
         if (after[0] === 'Z') continue;
+        Object.defineProperty(error, environRetryProof, { value: { pid, startedAt: stat[19], pgid: stat[2] }, configurable: true });
       }
       throw error;
     }
   }
   return live;
+}
+
+/** До 500 мс ждём исчезновение exit-race; persistent EACCES и смена идентичности остаются отказом. */
+export async function groupMembersWithRetry(target, purpose, owner, io = {}) {
+  const read = io.readFileSync ?? readFileSync, deadline = performance.now() + 500, pending = new Map();
+  function recheck() {
+    for (const proof of pending.values()) {
+      const stat = processStat(proof.pid, read);
+      requireCi(!stat || stat[19] === proof.startedAt && stat[2] === proof.pgid, 'process-recheck-identity');
+    }
+  }
+  for (;;) {
+    recheck();
+    try { const members = groupMembers(target, purpose, owner, io); recheck(); return members; }
+    catch (error) {
+      const proof = error[environRetryProof];
+      if (error.code !== 'EACCES' || !proof || error.path !== `/proc/${proof.pid}/environ` || performance.now() >= deadline) throw error;
+      const previous = pending.get(proof.pid);
+      requireCi(!previous || previous.startedAt === proof.startedAt && previous.pgid === proof.pgid, 'process-recheck-identity');
+      pending.set(proof.pid, proof);
+      await new Promise(resolve => setTimeout(resolve, Math.min(25, Math.max(1, deadline - performance.now()))));
+    }
+  }
 }
 
 export function startDependencies(target) {
@@ -106,7 +131,7 @@ export async function waitDependencies(target) {
   const deadline = owner.launchedAt + 300000, status = `${statePath(target)}.deps-status`;
   try {
     while (true) {
-      const live = groupMembers(target, 'deps', owner);
+      const live = await groupMembersWithRetry(target, 'deps', owner);
       if (!live.length) {
         requireCi(existsSync(status), 'deps-died-without-status');
         const result = JSON.parse(readFileSync(status, 'utf8'));
@@ -119,7 +144,11 @@ export async function waitDependencies(target) {
       requireCi(Date.now() < deadline, 'deps-timeout');
       await new Promise(resolve => setTimeout(resolve, 100));
     }
-  } catch (error) { await stopGroup(target, 'deps', owner); throw error; }
+  } catch (error) {
+    try { await stopGroup(target, 'deps', owner); }
+    catch (cleanupError) { throw new AggregateError([error, cleanupError], 'CI_DEPENDENCIES_AND_CLEANUP_FAILED'); }
+    throw error;
+  }
   finally { console.log(readFileSync(`${statePath(target)}.deps-log`, 'utf8')); }
 }
 
@@ -146,16 +175,16 @@ async function dependenciesChild(target) {
 /** Все живые члены принадлежащей запуску группы проверяются до сигнала.
  * @param {CiJob} target @param {'web'|'tests'|'deps'} purpose @param {OwnedProcess} owner */
 async function stopGroup(target, purpose, owner) {
-  const members = () => groupMembers(target, purpose, owner);
+  const members = () => groupMembersWithRetry(target, purpose, owner);
   for (const signal of ['SIGTERM', 'SIGKILL']) {
-    if (!members().length) break;
+    if (!(await members()).length) break;
     try { process.kill(-owner.pid, signal); }
     catch (error) { if (error.code !== 'ESRCH') throw error; }
-    for (let attempt = 0; attempt < 50 && members().length; attempt++) {
+    for (let attempt = 0; attempt < 50 && (await members()).length; attempt++) {
       await new Promise(resolve => setTimeout(resolve, 100));
     }
   }
-  requireCi(!members().length, 'owned-processes-remain');
+  requireCi(!(await members()).length, 'owned-processes-remain');
   console.log(JSON.stringify({ ciRuntime: 'process-group-stopped', runId: target.runId, purpose, liveMembers: 0 }));
 }
 

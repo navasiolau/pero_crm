@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { artifactIdentity, assertCiPostgresTarget, assertCiRuntimeTarget, integrationFiles, receiveCiArtifact, typesDigest, verifyTypesArtifact } from './target.mjs';
-import { groupMembers } from './cleanup.mjs';
+import { groupMembers, groupMembersWithRetry } from './cleanup.mjs';
 import { removeWebTemplateSmoke, verifyTemplateContainer, verifyWebTemplatePackage } from './kp-template-image.mjs';
 import templateSmoke from './kp-template-smoke.mjs';
 
@@ -113,7 +113,7 @@ function procStat(pid, { state = 'S', pgid = 100, startedAt = '2000' } = {}) {
   return `${pid} (synthetic (node) child) ${fields.join(' ')}`;
 }
 function procRace(after, { childEnv, initial = procStat(200), environmentError = 'EACCES', leaderStart = '1000' } = {}) {
-  const calls = [], denied = Object.assign(new Error('synthetic environ read'), { code: environmentError });
+  const calls = [], denied = Object.assign(new Error('synthetic environ read'), { code: environmentError, path: '/proc/200/environ' });
   let childStatReads = 0;
   const ownEnv = 'PERO_CI_OWNER=169-1\0PERO_CI_PURPOSE=deps\0';
   return { calls, denied, io: {
@@ -125,6 +125,7 @@ function procRace(after, { childEnv, initial = procStat(200), environmentError =
       if (file === '/proc/200/stat') {
         if (childStatReads++ === 0) return initial;
         if (after instanceof Error) throw after;
+        if (typeof after === 'function') return after(childStatReads);
         return after;
       }
       assert.equal(file, '/proc/200/environ');
@@ -134,12 +135,24 @@ function procRace(after, { childEnv, initial = procStat(200), environmentError =
   } };
 }
 
-test('cleanup rechecks EACCES and skips only the same zombie or a confirmed vanished process', () => {
+test('cleanup rechecks EACCES and skips only the same zombie or a confirmed vanished process', async () => {
   for (const after of [procStat(200, { state: 'Z' }), ...['ENOENT', 'ESRCH'].map(code => Object.assign(new Error('gone'), { code }))]) {
     const fixture = procRace(after);
     assert.deepEqual(groupMembers({ runId: '169', attempt: '1' }, 'deps', { pid: 100, startedAt: '1000' }, fixture.io), [100]);
     assert.deepEqual(fixture.calls.slice(-2), ['/proc/200/environ', '/proc/200/stat']);
   }
+  const target = { runId: '169', attempt: '1' }, owner = { pid: 100, startedAt: '1000' };
+  const delayed = procRace(reads => procStat(200, { state: reads < 4 ? 'S' : 'Z' }));
+  assert.deepEqual(await groupMembersWithRetry(target, 'deps', owner, delayed.io), [100]);
+  const recovered = procRace(procStat(200)), originalRead = recovered.io.readFileSync;
+  let environmentReads = 0;
+  recovered.io.readFileSync = (file, encoding) => file === '/proc/200/environ' && ++environmentReads > 1
+    ? 'PERO_CI_OWNER=169-1\0PERO_CI_PURPOSE=deps\0' : originalRead(file, encoding);
+  assert.deepEqual(await groupMembersWithRetry(target, 'deps', owner, recovered.io), [100, 200]);
+  const live = procRace(procStat(200));
+  await assert.rejects(groupMembersWithRetry(target, 'deps', owner, live.io), error => error === live.denied);
+  const regrouped = procRace(reads => procStat(200, { pgid: reads < 3 ? 100 : 999 }));
+  await assert.rejects(groupMembersWithRetry(target, 'deps', owner, regrouped.io), /CI_TARGET_REFUSED:process-recheck-identity/);
 });
 
 test('cleanup refuses live unreadable, reused, regrouped, malformed and unprovable process identity', () => {
