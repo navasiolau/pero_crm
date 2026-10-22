@@ -1,5 +1,9 @@
 # Проверки задачи №195
 
+Root local5433, 22.10.2026: штатный Prisma migrate deploy применил только `20261022090000_finance_multiple_documents` из зафиксированного комплекта исходников на C:. Прежние 75 бизнес-таблиц, старые записи `_prisma_migrations`, четыре согласованных checksum-исключения и весь прежний каталог сохранены. Новый каталог имеет 16 записей, включая две `pg_constraint` типа `t` для constraint triggers; исходный postflight ошибочно ожидал 14, это проверено отдельной read-only сверкой без повторного применения. Квитанция `C:/Users/admin/.codex/tmp/pero-crm-190-196/acceptance/migration195-result.json`.
+
+Единственный native195 probe — PASS, `moneyApi: ACTUAL_WRITER`: настоящий `createPaymentInTransaction` провёл три файла одной операцией, повтор UUID не изменил данные, повторная привязка документа отклонена SQL, legacy single-field/старый fingerprint и receipt сохранены. Все отложенные ограничения проверены IMMEDIATE. Одна внешняя транзакция откатила все синтетические записи; полные снимки 77 таблиц и каталога совпали до/после. Байты файлов и S3 не использовались. Квитанция `C:/Users/admin/.codex/tmp/pero-crm-190-196/acceptance/local195.json`.
+
 Worktree: `D:/Projects/pero_crm_worktrees/requests-195`, ветка `feature/195`, база `3def4f0c76e4a1756aa4dabfbb3871b2112dd927`. Коммит, push, merge, миграция, DB/runtime-записи и обращения к рабочему S3 не выполнялись.
 
 ## Выполнено локально
