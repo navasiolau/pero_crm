@@ -167,7 +167,7 @@ try{
   await resetPosition(page);await search(page).fill('');await search(page).fill(q);await settledCenter(page,section);checks.push(section+':rapid_draft_clear_reenter_before_debounce');
   for(const term of ['Искомая',q+'9','NoMatch117']){await resetPosition(page);await apply(page,term);assert.deepEqual(await position(page),{left:0,top:0});}
   assert.equal(await page.locator('[data-kanban-card-id]').count(),0);checks.push(section+':title_partial_number_no_match_no_autoscroll');
-  await page.getByLabel('Таблица',{exact:true}).click();await expect(page.getByPlaceholder('Введите номер')).toBeVisible();assert.equal(await page.locator('[data-slot="kanban-scroll"]').count(),0);
+  await page.getByLabel('Таблица',{exact:true}).click();await expect(page.locator('[data-slot="kanban-scroll"]')).toHaveCount(0);await expect(page.getByPlaceholder('Введите номер')).toBeVisible();
   checks.push(section+':table_number_placeholder_and_no_board_focus');await finish(page);
 
   const stale=await makePage(section);await stale.evaluate(()=>{window.__hold=true;window.__holdSave=true;});
@@ -185,7 +185,10 @@ try{
   const axes=await makePage(section);await axes.evaluate(()=>window.__hold=true);await apply(axes,q);
   await axes.evaluate(section=>window.__setFilters({[section==='products'?'status':'stage']:'DONE'}),section);await expect.poll(()=>axes.evaluate(()=>window.__navigation.length)).toBe(2);
   await axes.evaluate(()=>window.__accept(window.__navigation[0]));await waitFrames(axes);assert.deepEqual(await position(axes),{left:0,top:0});
-  await axes.evaluate(()=>window.__accept(window.__navigation[1]));await waitFrames(axes);assert.equal(await axes.locator('[data-kanban-card-id]').count(),0);assert.deepEqual(await position(axes),{left:0,top:0});
+  await axes.evaluate(()=>window.__accept(window.__navigation[1]));
+  // Два RAF не подтверждают применение новых строк отдельным effect канбана.
+  await expect.poll(()=>axes.evaluate(()=>{const focus=window.__committedFocus;return !window.__pending&&window.__clientQuery===window.__navigation[1]&&focus?.query===window.__number&&focus.ready===true&&focus.cardId===null;}),{timeout:5000}).toBe(true);
+  assert.equal(await axes.locator('[data-kanban-card-id]').count(),0);assert.deepEqual(await position(axes),{left:0,top:0});assert.deepEqual(await axes.evaluate(()=>window.__focusMoves),{board:0,page:0});
   checks.push(section+':same_search_stale_filter_axes_cannot_center_excluded_card');await finish(axes);
 
   const drag=await makePage(section);await drag.evaluate(()=>window.__hold=true);await apply(drag,q);
