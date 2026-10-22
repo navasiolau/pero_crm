@@ -9,7 +9,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { MultiSelectFilter, type MultiSelectFilterOption } from "@/components/ui/multi-select-filter";
-import { encodeListFilterValue, parseListFilterValue } from "@/lib/list-filter-values";
+import { encodeListFilterUiValue, parseListFilterUiValue } from "@/lib/list-filter-values";
 import { useListParams, useListSearch } from "@/lib/list-params";
 import type { ListSection } from "@/lib/list-state";
 
@@ -47,8 +47,8 @@ export function EntityListFilterBar({ section, searchPlaceholder, fields, onSear
           <MultiSelectFilter
             label={field.label}
             options={field.options}
-            value={parseListFilterValue(get(field.queryKey))}
-            onChange={(value) => set({ [field.queryKey]: encodeListFilterValue(value), page: null })}
+            value={parseListFilterUiValue(get(field.queryKey), field.options)}
+            onChange={(value) => set({ [field.queryKey]: encodeListFilterUiValue(value, field.options), page: null })}
             allLabel={field.allLabel}
             searchPlaceholder={field.searchPlaceholder}
           />

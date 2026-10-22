@@ -45,3 +45,17 @@ Root native local5433 — PASS на SHA `e15d110cc8c9889bc958ec3356fc26fe2cb7ed9
 В `file-responses.test.ts` и `files-crud.test.ts` исправлены устаревшие ожидания: ENGINEER читает чужие DESIGN/PRODUCTION при разрешённом родителе, а снятие назначения сохраняет чтение и cached 304. Отрицательные проверки используют временные LEAD/PREPARATION с восстановлением исходных полей и `updatedAt`; запреты загрузки и проверки сохранности файлов/S3 сохранены.
 
 ESLint двух изменённых файлов и `git diff --check` — PASS. HTTP-тесты и БД для этой правки не запускались; HTTP PASS ожидает CI.
+
+## Уточнение владельца: полный выбор сохраняет галочки
+
+До реализации уточнены существующие proposal/design/spec/tasks; CLI list подтвердил repo-root C-worktree, status — spec-driven, apply — ready (7/9). Полный явный выбор теперь переносится маркером `{"all":true}` через UI codec, URL и V2 preference/CAS. UI разворачивает его во все текущие option IDs; существующий серверный parser возвращает undefined, поэтому результаты «Все» по-прежнему включают неназначенные строки. Сброс снимает галочки; частичные наборы и неизвестные выбранные ID сохраняются. Изменены только четыре frontend/lib файла, серверные queries/visibility не менялись.
+
+Содержательный RED: 2 state/preference и 2 существующих component-сценария падали на удалении полного выбора (null вместо маркера). GREEN через `pnpm --config.verifyDepsBeforeRun=false --filter @pero/web exec`:
+
+- `tsx --test --test-reporter=spec tests/list-state.test.ts tests/list-preferences.test.ts` — 26/26 PASS, включая default self, явный URL, восстановление All и поздний CAS после сброса.
+- `tsx --test --test-reporter=spec --test-name-pattern 'parser|empty .*axes|empty arrays' tests/project-multi-select-filters.test.ts tests/product-multi-select-filters.test.ts` — 4/4 PASS. Проверено точное равенство ID неограниченной выборке вместе с неназначенными проектом/изделием.
+- `tsx --test --test-reporter=spec --test-name-pattern 'engineer sees|partial stages|products multi status|two engineers and five' tests/project-filter-component.test.mjs` — 5/5 PASS. После добавления Back и совмещённого MANAGER+ENGINEER адресный поднабор `engineer sees|products multi status` — 3/3 PASS. Реальные React/Base UI в Chromium сохраняют 2 из 2 галочек после reload и Back; проверены сброс, частичный выбор, прежние status grants и неизвестные IDs. Это существующий component harness с подменой транспорта состояния списка, не Next/DB/staging-приёмка.
+- `tsc --noEmit --incremental false`, ESLint четырёх source и пяти затронутых test файлов, `git diff --check` — PASS.
+- `openspec validate engineer-global-read-access --strict` — PASS. Требование уже присутствует в основной spec, поэтому уточняющий delta помечен MODIFIED.
+
+Работа выполнена в `C:/Users/admin/.codex/worktrees/requests-194-filter-checks`, feature/194 от 544b259d. Install/generate, БД, SSH, S3, инфраструктура, commit/push/deploy не выполнялись; старый D-worktree не менялся. Общую CI и фактическую staging-приёмку после интеграции исправлений выполняет Root.
