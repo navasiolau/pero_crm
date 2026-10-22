@@ -6,6 +6,7 @@
 
 1. Подтвердить ожидаемую среду и DB identity read-only: host/port, database/schema/user, PostgreSQL major, точный Git SHA и список `_prisma_migrations`. Local — только существующий разрешённый PostgreSQL 5433, legacy 5432 исключён. Секретные URL не выводить. Не создавать reset/seed/новый стенд.
 2. Сверить checksum всех уже применённых миграций с имеющимися принятыми исключениями; новая pending должна соответствовать именно `20261022090000_finance_multiple_documents`. Новые расхождения — СТОП.
+   После выявленного legacy INCOME regression добавлена `20261022110000_finance_document_legacy_income_compatibility`: только CREATE OR REPLACE прежней validate-функции, без backfill/перепривязок. Если исходная 195 уже APPLIED, её checksum не редактировать; оператор проверяет и применяет отдельный followup с новым receipt. Приход допускает только одну строку position=0, совпадающую с legacy FK; остальные guards и запрет relink/unlink сохраняются.
 3. Сохранить read-only counts/хэши существующих FinanceDocument (включая IDs, key, hash, authorship), Payment и request receipts. Это небольшое доказательство метаданных, не dump и не копия объектов. У legacy payment с `reportDocumentId` проверить FK/уникальность и отсутствие логистической привязки к обычному отчёту. Backfill не меняет эти строки.
 4. На production с миграцией применять только отдельно утверждённый порядок: один временный дамп затронутой БД перед выпуском, реальный совместимый изолированный restore, сохранённый rollback образ/config. Local/staging dump не создавать.
 

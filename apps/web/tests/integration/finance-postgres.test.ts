@@ -322,6 +322,21 @@ for (const linked of [false, true]) test(`payment/report-owner-ready-context-rep
   } });
   await rejectedSql(tx, () => payments.createPaymentInTransaction(c.actor, { ...c.input, clientMutationId: randomUUID() }, c.prepared, collision), /Unique constraint/);
   assert.deepEqual(await money(tx), snapshot, "PAYMENT_RECEIPT_SQL_FAILURE_ROLLS_BACK_ALL_MONEY_AUDIT_OUTBOX");
+  // Legacy INCOME принимал single reportDocumentId; новый массив не расширяет этот сценарий.
+  const incomeInput = { ...c.input, direction: "INCOME" as const, expenseArticleId: undefined, clientMutationId: randomUUID() };
+  const incomePrepared = { ...c.prepared, articleId: null };
+  const legacyIncome = await payments.createPaymentInTransaction(c.actor, incomeInput, incomePrepared, tx);
+  assert.equal(legacyIncome.payment.reportDocumentId, c.document.id);
+  assert.deepEqual(await tx.paymentReportDocument.findMany({ where: { paymentId: legacyIncome.payment.id }, select: { documentId: true, position: true } }), [{ documentId: c.document.id, position: 0 }]);
+  assert.deepEqual((await tx.changeLog.findUniqueOrThrow({ where: { id: receipts.paymentReceiptId(incomeInput.clientMutationId) } })).newValue,
+    { fingerprint: receipts.paymentFingerprint(c.actor.id, incomeInput) });
+  const incomeSnapshot = await nativeSnapshot(tx);
+  assert.equal((await payments.createPaymentInTransaction(c.actor, incomeInput, incomePrepared, tx)).payment.id, legacyIncome.payment.id);
+  assert.deepEqual(await nativeSnapshot(tx), incomeSnapshot, "LEGACY_INCOME_REPLAY_ZERO_WRITES");
+  await assert.rejects(payments.createPaymentInTransaction(c.actor, { ...incomeInput, clientMutationId: randomUUID(), reportDocumentId: undefined,
+    reportDocumentIds: [c.document.id] }, incomePrepared, tx), /только для расхода/);
+  const extra = await tx.financeDocument.create({ data: { ...c.document, id: randomUUID(), clientMutationId: randomUUID(), storageKey: rows.id("legacy-income-extra") } });
+  await rejectedSql(tx, () => tx.paymentReportDocument.create({ data: { paymentId: legacyIncome.payment.id, documentId: extra.id, position: 1 } }), /PAYMENT_REPORT_DOCUMENT_UNAVAILABLE/);
   const finalMoney = await money(tx);
   for (const [index, beforeRows] of originalMoney.entries())
     assert.deepEqual(finalMoney[index].filter(row => beforeRows.some(before => before.id === row.id)), beforeRows, "FOREIGN_PAYMENT_ROWS_UNCHANGED");

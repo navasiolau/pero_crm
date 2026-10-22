@@ -238,13 +238,18 @@ test("files.crud: file113, документы, attachment ACL и inline-дейс
       await rejectedSql(tx, () => tx.financeDocument.delete({ where: { id: docs[1].id } }));
       await rejectedSql(tx, () => tx.user.delete({ where: { id: accountant.id } }));
       await rejectedSql(tx, () => tx.payment.create({ data: { ...income, id: f.id("duplicate-doc"), reportDocumentId: docs[1].id } }));
-      assert.equal((await tx.payment.updateMany({ where: { id: income.id, reportDocumentId: docs[1].id }, data: { reportDocumentId: docs[2].id } })).count, 1);
-      assert.equal((await tx.payment.updateMany({ where: { id: expense.id, reportDocumentId: docs[0].id }, data: { reportDocumentId: docs[1].id } })).count, 1);
-      for (const original of [income, expense]) {
-        const now = await tx.payment.findUniqueOrThrow({ where: { id: original.id } });
-        const { reportDocumentId: _a, ...before } = original, { reportDocumentId: _b, ...after } = now; void _a; void _b; assert.deepEqual(after, before);
+      const bindingsBefore = await tx.paymentReportDocument.findMany({ where: { paymentId: { in: [income.id, expense.id] } }, orderBy: { paymentId: "asc" } });
+      for (const [original, nextDocument] of [[income, docs[2].id], [expense, docs[1].id]] as const) {
+        await rejectedSql(tx, async () => {
+          await tx.payment.updateMany({ where: { id: original.id, reportDocumentId: original.reportDocumentId }, data: { reportDocumentId: nextDocument } });
+          await tx.$executeRawUnsafe("SET CONSTRAINTS ALL IMMEDIATE");
+        });
       }
-      assert.equal((await tx.payment.updateMany({ where: { id: income.id, reportDocumentId: docs[1].id }, data: { reportDocumentId: docs[0].id } })).count, 0);
+      for (const original of [income, expense]) {
+        assert.deepEqual(await tx.payment.findUniqueOrThrow({ where: { id: original.id } }), original);
+      }
+      assert.deepEqual(await tx.paymentReportDocument.findMany({ where: { paymentId: { in: [income.id, expense.id] } }, orderBy: { paymentId: "asc" } }), bindingsBefore);
+      assert.equal((await tx.payment.updateMany({ where: { id: income.id, reportDocumentId: docs[2].id }, data: { reportDocumentId: docs[0].id } })).count, 0);
     });
     assert.deepEqual(await f.db.payment.findUnique({ where: { id: income.id } }), income); assert.deepEqual(await f.db.payment.findUnique({ where: { id: expense.id } }), expense);
     try {
@@ -416,10 +421,15 @@ test("files.crud: file113, документы, attachment ACL и inline-дейс
     assert.equal((await loadOrganizationPayments(reader, "EXPENSE", f.db)).rows.find(row => row.id === expense.id)?.reportDocument, null);
     await f.db.financeDocument.update({ where: { id: docs[0].id }, data: { state: "READY", readyAt: new Date() } });
     const keptVersions = await f.versions(docs[0].key);
-    await f.db.payment.update({ where: { id: expense.id }, data: { reportDocumentId: null } });
-    await f.db.financeDocument.delete({ where: { id: docs[0].id } });
-    assert.equal((await loadMovementReportDocuments(reader, movementIds, f.db)).size, 0);
-    assert.equal((await loadOrganizationPayments(reader, "EXPENSE", f.db)).rows.find(row => row.id === expense.id)?.reportDocument, null);
+    await f.rollback(async tx => {
+      await rejectedSql(tx, async () => {
+        await tx.payment.update({ where: { id: expense.id }, data: { reportDocumentId: null } });
+        await tx.$executeRawUnsafe("SET CONSTRAINTS ALL IMMEDIATE");
+      });
+      await rejectedSql(tx, () => tx.financeDocument.delete({ where: { id: docs[0].id } }));
+    });
+    assert.equal((await loadMovementReportDocuments(reader, movementIds, f.db)).get(movement.id)?.id, docs[0].id);
+    assert.equal((await loadOrganizationPayments(reader, "EXPENSE", f.db)).rows.find(row => row.id === expense.id)?.reportDocument?.id, docs[0].id);
     assert.deepEqual(await f.versions(docs[0].key), keptVersions);
   });
 
