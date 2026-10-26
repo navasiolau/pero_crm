@@ -253,7 +253,7 @@ export function createContractWorkflow(ports: ContractWorkflowPorts) {
         verifiedMatches(artifact, verified);
         return verified;
       }
-      let appendixBytes = 0, appendixPages = 0;
+      let appendixBytes = 0;
       for (const source of payload.frozenSources) {
         const retained = source.mode === "retained" ? await ports.store.transaction(async tx => {
           const current = await loadClaim(tx, claim);
@@ -269,9 +269,8 @@ export function createContractWorkflow(ports: ContractWorkflowPorts) {
         // Свежие страницы — исходные DPR2 screenshots того же Chromium-render, без смены сглаживания.
         const images = fresh ? fresh.pages : await ports.io.rasterizePdf(bytes);
         if (!images.length) contractFailure("CONTRACT_APPENDIX_EMPTY", "Не получены страницы приложения КП", 502);
-        appendixPages += images.length;
         appendixBytes += images.reduce((sum, image) => sum + image.byteLength, 0);
-        if (appendixPages > 1000 || appendixBytes > 128 * 1024 * 1024 || images.some(image => image.byteLength < 8 || image.byteLength > 16 * 1024 * 1024))
+        if (appendixBytes > 128 * 1024 * 1024 || images.some(image => image.byteLength < 8 || image.byteLength > 16 * 1024 * 1024))
           contractFailure("CONTRACT_APPENDIX_TOO_LARGE", "Приложения договора превышают допустимый объём", 413);
         rendered.push({ id: source.proposalId, images }); pageCounts.push({ proposalId: source.proposalId, pages: images.length });
       }

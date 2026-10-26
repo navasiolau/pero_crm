@@ -176,9 +176,9 @@ async function main(diagnostics) {
     const [zip, originalZip] = await Promise.all([JSZip.loadAsync(Buffer.from(docx.bytesBase64, 'base64')), JSZip.loadAsync(originalDocx)]);
     assert.deepEqual(Object.keys(zip.files).sort(), Object.keys(originalZip.files).sort());
     for (const name of Object.keys(originalZip.files)) if (!originalZip.files[name].dir) assert.deepEqual(await zip.files[name].async('nodebuffer'), await originalZip.files[name].async('nodebuffer'));
-    diagnostics.phase('limits'); const generous = { ...docxInput, rendered: [{ id: 'primary', imagesBase64: Array(999).fill(png.toString('base64')) }, { id: 'secondary', imagesBase64: [png.toString('base64')] }] };
-    assert.doesNotThrow(() => validateRenderInput(generous)); generous.rendered[0].imagesBase64.push(png.toString('base64'));
-    assert.throws(() => validateRenderInput(generous), /PAGE_LIMIT/);
+    diagnostics.phase('limits'); const generous = { ...docxInput, rendered: [{ id: 'primary', imagesBase64: Array(65).fill(png.toString('base64')) }, { id: 'secondary', imagesBase64: [png.toString('base64')] }] };
+    assert.doesNotThrow(() => validateRenderInput(generous)); generous.rendered[0].imagesBase64 = [];
+    assert.throws(() => validateRenderInput(generous), /DOCX_SOURCES/);
     assert.throws(() => validateRenderInput({ ...request, state: { ...state, items: [{ image: 'https://example.invalid/blocked.png' }] } }), /REFERENCE_INVALID/);
     return { revision: process.env.PERO_KP_CI_REVISION, template: identity,
       runtime: { node: process.versions.node, browser: browserVersion, chromium: chromiumVersion, puppeteer: require('puppeteer-core/package.json').version },

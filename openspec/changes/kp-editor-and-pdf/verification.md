@@ -1,5 +1,15 @@
 # Проверка №184
 
+## Снятие пределов страниц по поручению владельца 26.10.2026
+
+Удалены свойства `pages/docxPages/rasterPages` и соответствующие верхние границы PDF/bundle, растеризации, DOCX, web-ответа/budget и workflow приложений договора. Другой предел либо Infinity не вводятся. Проверки положительного safe-integer pageCount, соответствия массивов, bytes/source/item/auth/queue/deadline/CPU/memory сохранены. Печатные шаблоны и стили не изменены.
+
+Минимальные local-проверки: 5web + 4renderer mock/pure + 1DOCX validation-only + 1затронутый workflow guard — PASS; реальные большие PDF/DOCX не создавались. Независимое review выявило две оставшиеся CI-проверки старого потолка; они исправлены, existing CI unit RED→GREEN1/1, оба CI-файла syntax PASS, повторное review P1/P2 нет. Scoped ESLint/diff PASS, обращений к удалённым свойствам в активном коде не осталось. Проверка200 страниц локально и на production не выполнялась.
+
+Для единственной staging-проверки подготовлен отдельный guarded helper `C:/Users/admin/.codex/tmp/pero-kp-normalize-20261026/staging-kp-200-accept.cjs`: установленный template editor/transport, сохранение в памяти и настоящий уже работающий staging renderer; реальная БД/S3 не изменяются. Это проверяет большой редактор/PDF, но не заявляет прохождение authenticated Next toolbar либо настоящей транзакции сохранения198 изделий. Проверка и точные runtime/CI evidence фиксируются после развёртывания в `C:/Users/admin/.codex/tmp/pero-kp-normalize-20261026/page-limit-fix-execution-state.json`. Production200 запрещён явно владельцем.
+
+## Историческая исходная проверка
+
 Дата: 18.10.2026. Ветка `feature/184`, исходный staging `d918ab860ec5aab029c466a3b3c3b1ce06f0ec98`. Код не коммитился, не отправлялся и не разворачивался. Раздел по умолчанию выключен. Рабочие БД, S3 и инфраструктура в этой задаче не изменялись; контейнеры и новые стенды не запускались.
 
 ## Исходник и совместимость

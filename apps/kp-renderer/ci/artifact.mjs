@@ -24,7 +24,7 @@ export function verifyRendererSmoke(smoke, identity, expected = template.getKpTe
   requireCi(smoke.revision === identity.revision && JSON.stringify(smoke.template) === JSON.stringify(expected), 'kp-smoke-source');
   requireCi(/^22\.\d+\.\d+$/.test(smoke.runtime?.node ?? '') && /^(?:HeadlessChrome|Chrome|Chromium)\/141\./.test(smoke.runtime?.browser ?? '') &&
     smoke.runtime?.chromium === expected.chromium && smoke.runtime?.puppeteer === expected.puppeteer, 'kp-smoke-runtime');
-  requireCi(Number.isSafeInteger(smoke.pages) && smoke.pages >= 4 && smoke.pages <= template.KP_RENDER_LIMITS.pages &&
+  requireCi(Number.isSafeInteger(smoke.pages) && smoke.pages >= 4 &&
     smoke.allPagesIdentical === true && smoke.originalDpr2AppendicesIdentical === true && smoke.docxEntriesIdentical === true &&
     smoke.privateHttp === true && smoke.limitsVerified === true, 'kp-smoke-results');
   return smoke;
