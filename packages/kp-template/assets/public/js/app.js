@@ -82,7 +82,15 @@ var DEFAULT = {
 var state = CRM.initialState(DEFAULT);
 
 function clone(o) { return JSON.parse(JSON.stringify(o)); }
-function setPath(o, path, val) { var p = path.split('.'), cur = o; for (var i = 0; i < p.length - 1; i++) { cur = cur[p[i]]; } cur[p[p.length - 1]] = val; }
+function setPath(o, path, val) {
+    var p = path.split('.'), cur = o;
+    for (var i = 0; i < p.length - 1; i++) {
+        var indexed = /^\d+$/.test(p[i + 1]), next = cur[p[i]];
+        if (!next || typeof next !== 'object' || Array.isArray(next) && !indexed) next = cur[p[i]] = indexed ? [] : {};
+        cur = next;
+    }
+    cur[p[p.length - 1]] = val;
+}
 function getPath(o, path) { return path.split('.').reduce(function (a, k) { return a == null ? a : a[k]; }, o); }
 function plural(n, a, b, c) { n = Math.abs(n) % 100; var d = n % 10; if (n > 10 && n < 20) return c; if (d > 1 && d < 5) return b; if (d === 1) return a; return c; }
 function deepMerge(base, extra) {
@@ -299,6 +307,7 @@ function syncStaticInputs() {
     document.querySelectorAll('[data-path]').forEach(function (el) {
         if (el.closest('#itemsList') || el.closest('#deliveryEditor')) return;
         var v = getPath(state, el.dataset.path);
+        if (el.dataset.path === 'currency') v = v === 'USD' ? '$' : v === 'EUR' ? '€' : v === 'RUB' ? '₽' : v;
         if (el.dataset.path === 'warrantyMonths' && v == null) v = 24;
         el.value = (v == null ? '' : v);
     });
@@ -314,7 +323,7 @@ function refreshAll() { renderItemsEditor(); renderDeliveryEditor(); renderDiscT
 
 var saveT;
 var remoteSaveT;
-function scheduleSave() { clearTimeout(saveT); saveT = setTimeout(saveNow, 500); clearTimeout(remoteSaveT); if (CRM.isEditable()) remoteSaveT = setTimeout(function () { if (CRM.hasUnsavedChanges(state)) saveCurrentDoc(currentDocId, { silent: true }); }, 1200); }
+function scheduleSave() { pruneMediaUploads(); clearTimeout(saveT); saveT = setTimeout(saveNow, 500); clearTimeout(remoteSaveT); if (CRM.isEditable()) remoteSaveT = setTimeout(function () { if (CRM.hasUnsavedChanges(state)) saveCurrentDoc(currentDocId, { silent: true }); }, 1200); }
 function saveNow() {
     try {
         var snapshot = clone(state);
@@ -346,10 +355,54 @@ function loadSaved() {
     } catch (e) { return false; }
 }
 
-function compressImage(file, maxSide, quality) {
+var mediaUploads = new Map(), mediaContext = 0;
+function mediaItem(task) {
+    if (task.context !== mediaContext || task.documentId !== currentDocId || task.documentId !== CRM.getDocumentId()) return null;
+    return state.items.find(function (item) { return item.id === task.itemId; });
+}
+function pruneMediaUploads() {
+    mediaUploads.forEach(function (task, key) {
+        if (!mediaItem(task)) { task.controller.abort(); mediaUploads.delete(key); }
+    });
+}
+function cancelMediaUploads() {
+    mediaContext++;
+    mediaUploads.forEach(function (task) { task.controller.abort(); });
+    mediaUploads.clear();
+}
+async function awaitMediaUploads(documentId) {
+    for (;;) {
+        if (documentId !== currentDocId || documentId !== CRM.getDocumentId()) throw new Error('Открыто другое КП. Повторите сохранение');
+        pruneMediaUploads();
+        var pending = [];
+        mediaUploads.forEach(function (task) {
+            if (task.error) throw task.error;
+            pending.push(new Promise(function (resolve) {
+                function done() { task.controller.signal.removeEventListener('abort', done); resolve(); }
+                if (task.controller.signal.aborted) { resolve(); return; }
+                task.controller.signal.addEventListener('abort', done, { once: true });
+                task.promise.then(done, done);
+            }));
+        });
+        if (!pending.length) return;
+        await Promise.all(pending);
+    }
+}
+function cancelledPhoto() { var error = new Error('Загрузка фото отменена'); error.name = 'AbortError'; return error; }
+function compressImage(file, maxSide, quality, signal) {
     return new Promise(function (resolve, reject) {
         var img = new Image();
         var url = URL.createObjectURL(file);
+        var settled = false;
+        function finish(error, value) {
+            if (settled) return;
+            settled = true; signal.removeEventListener('abort', abort);
+            img.onload = null; img.onerror = null; URL.revokeObjectURL(url);
+            if (error) reject(error); else resolve(value);
+        }
+        function abort() { finish(cancelledPhoto()); img.src = ''; }
+        if (signal.aborted) { abort(); return; }
+        signal.addEventListener('abort', abort, { once: true });
         img.onload = function () {
             var w = img.width, h = img.height;
             var k = Math.min(1, maxSide / Math.max(w, h));
@@ -357,47 +410,51 @@ function compressImage(file, maxSide, quality) {
             var c = document.createElement('canvas');
             c.width = w; c.height = h;
             c.getContext('2d').drawImage(img, 0, 0, w, h);
-            URL.revokeObjectURL(url);
             c.toBlob(function (b) {
-                if (b) resolve(new File([b], (file.name.replace(/\.\w+$/, '') || 'photo') + '.jpg', { type: 'image/jpeg' }));
-                else reject(new Error('Не удалось сжать изображение'));
+                if (b) finish(null, new File([b], (file.name.replace(/\.\w+$/, '') || 'photo') + '.jpg', { type: 'image/jpeg' }));
+                else finish(new Error('Не удалось сжать изображение'));
             }, 'image/jpeg', quality);
         };
-        img.onerror = function () { URL.revokeObjectURL(url); reject(new Error('Не удалось прочитать файл')); };
+        img.onerror = function () { finish(new Error('Не удалось прочитать файл')); };
         img.src = url;
     });
 }
 
-async function uploadToR2(file) {
-    var optimized = await compressImage(file, 1600, 0.82);
-    return CRM.upload(file, optimized);
+async function uploadToR2(file, task) {
+    var optimized = await compressImage(file, 1600, 0.82, task.controller.signal);
+    if (!mediaItem(task) || task.controller.signal.aborted) throw cancelledPhoto();
+    return CRM.upload(file, optimized, { documentId: task.documentId, signal: task.controller.signal });
 }
 
 function handlePhotoInput(input, i, slot) {
     var f = input.files && input.files[0];
-    if (!f) return;
+    if (!f || !state.items[i] || !CRM.isEditable()) return;
+    var key = JSON.stringify([currentDocId, state.items[i].id, slot]), previous = mediaUploads.get(key);
+    if (previous) previous.controller.abort();
+    var task = { documentId: currentDocId, itemId: state.items[i].id, context: mediaContext, controller: new AbortController() };
+    mediaUploads.set(key, task);
     var card = input.closest('.item-card');
-    var urlInputs = card.querySelectorAll('.url-input');
-    var urlInput = slot === 'image2' ? urlInputs[urlInputs.length - 1] : urlInputs[0];
 
     var previewUrl = URL.createObjectURL(f);
     if (slot === 'image') refreshThumb(card, previewUrl);
     toast('Загружаем фото в хранилище…');
-    uploadToR2(f).then(function (publicUrl) {
-        URL.revokeObjectURL(previewUrl);
-        state.items[i][slot] = publicUrl;
-        if (slot === 'image') refreshThumb(card, CRM.mediaUrl(publicUrl));
-        if (urlInput) urlInput.value = 'Фото загружено';
-        renderSheet(); scheduleSave();
+    task.promise = uploadToR2(f, task).then(function (publicUrl) {
+        var item = mediaItem(task);
+        if (!item || mediaUploads.get(key) !== task || task.controller.signal.aborted) return;
+        item[slot] = publicUrl;
+        mediaUploads.delete(key);
+        renderItemsEditor(); renderSheet(); scheduleSave();
         toast('Фото загружено ✓');
     }).catch(function (err) {
-        console.error('[R2 upload]', err);
-        URL.revokeObjectURL(previewUrl);
-        if (slot === 'image') refreshThumb(card, CRM.mediaUrl(state.items[i][slot]));
-        toast('Не удалось загрузить фото в R2 (' + (err.message || 'ошибка') + ') — позиция осталась без этого фото', 6000);
+        if (!mediaItem(task) || mediaUploads.get(key) !== task || task.controller.signal.aborted) return;
+        task.error = new Error('Не удалось загрузить фото (' + (err.message || 'ошибка') + '). Повторите загрузку или удалите позицию');
+        renderItemsEditor();
+        toast(task.error.message, 6000);
     }).finally(function () {
-        input.value = '';
+        URL.revokeObjectURL(previewUrl);
+        if (input.files && input.files[0] === f) input.value = '';
     });
+    return task.promise;
 }
 
 document.addEventListener('input', function (e) {
@@ -670,6 +727,7 @@ confirmCancel.addEventListener('click', function () {
 
 function applyDocumentState(doc, preview) {
     clearTimeout(remoteSaveT);
+    cancelMediaUploads();
     if (!preview) CRM.focusDocument(doc);
     state = deepMerge(clone(DEFAULT), doc.state);
     state.warrantyMonths = doc.state.warrantyMonths == null ? null : doc.state.warrantyMonths;
@@ -710,6 +768,8 @@ async function saveCurrentDoc(id, opts) {
     clearTimeout(remoteSaveT);
     if (!CRM.isEditable()) return CRM.getDocument();
     try {
+        await awaitMediaUploads(currentDocId);
+        if (!CRM.isEditable()) throw new Error('КП доступно только для просмотра');
         var snapshot = clone(state), serialized = JSON.stringify(snapshot);
         var doc = await CRM.save(snapshot);
         currentDocId = doc.id;
@@ -723,6 +783,7 @@ async function saveCurrentDoc(id, opts) {
 
 async function ensureCurrentSaved() {
     if (CRM.isPaused()) throw new Error('Завершите изменение клиента');
+    await awaitMediaUploads(currentDocId);
     if (!CRM.isEditable() || !CRM.hasUnsavedChanges(state)) return CRM.getDocument();
     var saved = await saveCurrentDoc(currentDocId || undefined);
     if (!saved) throw lastSaveError || new Error('Не удалось сохранить КП');

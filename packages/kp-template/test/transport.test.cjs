@@ -2,6 +2,10 @@ const assert = require('node:assert/strict');
 const { test } = require('node:test');
 const createTransport = require('../assets/public/js/crm-transport.js');
 const { collectProposalPages } = require('../browser.js');
+const { readFileSync } = require('node:fs');
+const { runInNewContext } = require('node:vm');
+const { join } = require('node:path');
+const SheetRender = require('../assets/public/js/sheet-render.js');
 const copy = value => JSON.parse(JSON.stringify(value));
 function fixture(handler, actorId = 'actor', values = new Map()) {
   const calls = [], emitted = [];
@@ -13,6 +17,162 @@ function fixture(handler, actorId = 'actor', values = new Map()) {
 const doc = () => ({ id: 'primary', revision: 2, state: { currency: 'BYN', items: [{ id: 'position', qty: 2, name: 'Шкаф' }], client: {} },
   canEdit: true, client: { id: 'client', label: 'Клиент' }, project: { id: 'project', number: '231', stage: 'LEAD' }, fx: { currency: 'BYN', rate: '1', date: '2026-10-18', source: 'NBRB' } });
 const response = value => new Response(JSON.stringify(value), { headers: { 'content-type': 'application/json' } });
+
+test('actual editor field matrix repairs legacy records and preserves preview, save, reload and boundaries', async () => {
+  const rows = [
+    ['header.company', 'ORG_TEST'], ['header.tagline', '<tag> & text'], ['header.phone', '+000 1112223'], ['header.phone2', '+000 4445556'],
+    ['header.email', 'editor@example.invalid'], ['header.site', 'example.invalid/editor'], ['header.instagram', '@editor_test'],
+    ['order.date', '27.10.2026'], ['order.validUntil', '30.11.2026'], ['order.project', 'PROJECT_TEST'], ['discount', '10'], ['currency', '€'],
+    ['intro', 'INTRO_TEST\nSecondintro'], ['totalNote', '<em>literal</em> Second'], ['payment', 'PAYMENT_TEST'],
+    ['manager.name', 'SIGN_NAME'], ['manager.role', 'SIGN_ROLE'], ['manager.phone', '+000 7778889'], ['warrantyMonths', '18'], ['footer', 'FOOTER_TEST\nSecondfooter'],
+    ['items.0.name', 'ITEM_TEST'], ['items.0.size', 'SIZE_TEST'], ['items.0.price', '205.5'], ['items.0.qty', '3'],
+    ['items.0.description', 'DESCRIPTION_TEST\nSeconddesc'], ['items.0.note', 'NOTE_TEST\nSecondnote'],
+    ['items.0.products.0.title', 'BLOCK_TEST'], ['items.0.products.0.outer', 'OUTER_TEST'], ['items.0.products.0.inner', 'INNER_TEST'],
+    ['items.0.products.0.hinges', 'HINGES_TEST'], ['items.0.products.0.drawers', 'DRAWERS_TEST'], ['items.0.products.0.lighting', 'LIGHT_TEST'],
+    ['delivery.total', '75'], ['delivery.items.0.name', 'SERVICE_TEST'], ['delivery.items.0.price', '37.25']
+  ];
+  const readonly = ['order.number', 'client.name', 'client.contact'];
+  const normalize = path => path.replace(/\.\d+(?=\.|$)/g, '[]');
+  const observed = new Set(), read = (value, path) => path.split('.').reduce((current, key) => current?.[key], value);
+  let stored = { ...doc(), state: { ...doc().state, manager: 'LEGACY_MANAGER', header: 'LEGACY_ORGANIZATION',
+    client: { name: 'SOURCE_CLIENT', contact: '+000 000000' }, order: { number: '231', date: '18.10.2026', project: 'Исходный проект' },
+    delivery: { visible: true, mode: 'total', total: 10, items: [{ name: 'INITIAL_SERVICE', price: 10, crmKind: 'DELIVERY' }] },
+    items: [{ id: 'position', qty: 2, name: 'Шкаф', price: 100, products: [{ title: 'Блок', inner: 'Белый', preservedMetadata: true }] }] } };
+  const values = new Map(), writes = [];
+  const source = readFileSync(join(__dirname, '../assets/public/js/app.js'), 'utf8');
+  const staticHTML = readFileSync(join(__dirname, '../assets/app/index.html'), 'utf8');
+  async function open() {
+    const nodes = new Map(), fields = new Map(); let adapter, preview;
+    const node = key => {
+      if (!nodes.has(key)) {
+        const events = new Map();
+        nodes.set(key, { dataset: {}, style: {}, classList: { add() {}, remove() {}, toggle() {} }, value: '', innerHTML: '',
+          addEventListener(type, handler) { events.set(type, [...(events.get(type) || []), handler]); },
+          dispatch(type, target = this) { return Promise.all((events.get(type) || []).map(handler => handler({ target, preventDefault() {}, stopPropagation() {} }))); },
+          querySelectorAll() { return []; }, querySelector() { return null; }, setAttribute() {}, matches() { return false; },
+          closest(selector) {
+            if (selector === '#itemsList' && this.dataset.path?.startsWith('items.')) return node('itemsList');
+            if (selector === '#deliveryEditor' && this.dataset.path?.startsWith('delivery.')) return node('deliveryEditor');
+            const key = /^\[data-([a-z-]+)\]$/.exec(selector)?.[1]?.replace(/-([a-z])/g, (_all, letter) => letter.toUpperCase());
+            return key && Object.hasOwn(this.dataset, key) ? this : null;
+          } });
+      }
+      return nodes.get(key);
+    };
+    const markup = () => staticHTML + node('itemsList').innerHTML + node('deliveryEditor').innerHTML;
+    const controls = () => {
+      const found = new Map();
+      for (const match of markup().matchAll(/<(input|textarea|select)\b([^>]*)>/g)) {
+        const path = /data-path="([^"]+)"/.exec(match[2])?.[1];
+        if (path) { found.set(path, { tag: match[1], attributes: match[2] }); observed.add(normalize(path)); }
+      }
+      return found;
+    };
+    const field = path => {
+      if (!fields.has(path)) { const input = node('field:' + path); input.dataset.path = path; fields.set(path, input); }
+      const control = controls().get(path);
+      if (control) {
+        fields.get(path).type = control.tag === 'select' ? 'select' : /type="([^"]+)"/.exec(control.attributes)?.[1] || 'text';
+        fields.get(path).matches = selector => control.tag === 'select' && selector === 'select[data-path]';
+      }
+      return fields.get(path);
+    };
+    for (const path of [...rows.map(row => row[0]), ...readonly, 'items.0.dbl', 'items.0.image', 'items.0.image2']) {
+      field(path);
+    }
+    const document = node('document'); document.body = node('body'); document.fonts = { ready: Promise.resolve() };
+    document.getElementById = id => node(id);
+    document.querySelector = selector => fields.get(/^\[data-path="([^"]+)"\]$/.exec(selector)?.[1]) || node(selector);
+    document.querySelectorAll = selector => selector === '[data-path]' ? [...fields.values()] : selector === '.js-add' ? [node('.js-add')] : [];
+    const storage = { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value), removeItem: key => values.delete(key) };
+    const api = createTransport({ actorId: 'editor', documentId: 'primary', apiBase: '/api/kp' }, { storage,
+      fetch: async (url, options) => {
+        if (url === '/api/kp/documents/primary' && options.method === 'PUT') {
+          const input = JSON.parse(options.body); writes.push(copy(input)); stored = { ...stored, revision: stored.revision + 1, state: input.state, fx: input.fx }; return response(stored);
+        }
+        if (url === '/api/kp/documents/primary') return response(stored);
+        if (url === '/api/kp/documents') return response({ documents: [] });
+        if (url.startsWith('/api/kp/rates?')) return response({ fx: { currency: 'EUR', rate: '1', date: '2026-10-27', source: 'NBRB' } });
+        throw Error('UNEXPECTED_NETWORK');
+      } });
+    const attach = api.attachEditor; api.attachEditor = value => { adapter = value; attach(value); };
+    const window = node('window'); window.PeroCrmKp = api;
+    window.SheetRender = { ...SheetRender, sheetHTML(value) { preview = copy(value); return SheetRender.sheetHTML(value); } };
+    runInNewContext(source, { window, document, localStorage: storage, crypto: globalThis.crypto, console, AbortController,
+      requestAnimationFrame() {}, setTimeout() { return 0; }, clearTimeout() {} }, { filename: 'actual-kp-app.js' });
+    await new Promise(resolve => setImmediate(resolve));
+    return { api, adapter, fields, nodes, controls, get preview() { return preview; }, get html() { return node('sheet').innerHTML; },
+      async type(path, value) {
+        const control = controls().get(path); assert.ok(control, 'actual rendered control: ' + path);
+        const target = field(path); target.value = control.tag === 'input' ? String(value).replace(/[\r\n]/g, '') : value;
+        await (path.startsWith('items.') ? node('itemsList') : document).dispatch('input', target);
+        await document.dispatch('change', target);
+      },
+      async click(owner, dataset) { const target = node('action:' + JSON.stringify(dataset)); target.dataset = dataset; await node(owner).dispatch('click', target); controls(); },
+      async check(path, checked) {
+        const target = path === 'delivery.visible' ? node('deliveryVisible') : field(path); target.checked = checked;
+        await (path === 'delivery.visible' ? target : node('itemsList')).dispatch(path === 'delivery.visible' ? 'change' : 'input', target); controls();
+      },
+      save: () => node('.js-docs-save').dispatch('click') };
+  }
+  const editor = await open();
+  assert.equal(writes.length, 0); assert.equal(stored.state.manager, 'LEGACY_MANAGER');
+  for (const [currency, option] of [['USD', '$'], ['EUR', '€'], ['RUB', '₽'], ['$', '$'], ['€', '€'], ['₽', '₽'], ['BYN', 'BYN']]) {
+    editor.adapter.applyDocument({ ...editor.api.getDocument(), state: { ...stored.state, currency } }, false);
+    assert.equal(editor.fields.get('currency').value, option);
+    assert.equal(editor.adapter.getState().currency, currency); assert.equal(writes.length, 0);
+  }
+  for (const [path, value] of rows) {
+    if (path.startsWith('delivery.items.')) await editor.click('deliveryEditor', { delmode: 'items' });
+    const before = editor.html; await editor.type(path, value);
+    assert.notEqual(editor.html, before, 'actual SheetRender effect: ' + path);
+    if (!['discount', 'items.0.price', 'items.0.qty', 'delivery.total', 'delivery.items.0.price'].includes(path))
+      assert.ok(editor.html.includes(SheetRender.esc(value).replace(/\r?\n/g, '<br>')), 'rendered value: ' + path);
+  }
+  await editor.check('items.0.dbl', true); assert.ok(editor.html.includes('class="sh-cardDbl"'));
+  await editor.nodes.get('discToggle').dispatch('click'); assert.ok(editor.html.includes('class="sh-totalSum">643,75'));
+  await editor.check('delivery.visible', false); assert.ok(!editor.html.includes('SERVICE_TEST')); assert.ok(editor.html.includes('class="sh-totalSum">606,5'));
+  await editor.check('delivery.visible', true); assert.ok(editor.html.includes('SERVICE_TEST'));
+  await editor.click('deliveryEditor', { delmode: 'total' }); assert.ok(editor.html.includes('class="sh-totalSum">681,5'));
+  await editor.click('deliveryEditor', { delmode: 'items' }); assert.ok(editor.html.includes('class="sh-totalSum">643,75'));
+  await editor.nodes.get('.js-add').dispatch('click'); await editor.type('items.1.name', 'ADDED_ITEM');
+  await editor.click('itemsList', { dup: '0' }); assert.notEqual(editor.adapter.getState().items[1].id, 'position');
+  await editor.click('itemsList', { del: '1' });
+  await editor.click('itemsList', { mv: '1', dir: '-1' }); assert.ok(editor.html.indexOf('ADDED_ITEM') < editor.html.indexOf('ITEM_TEST'));
+  await editor.click('itemsList', { mv: '0', dir: '1' }); assert.equal(editor.adapter.getState().items[0].id, 'position');
+  await editor.click('itemsList', { aprod: '0' }); await editor.type('items.0.products.1.title', 'TEMP_BLOCK'); assert.ok(editor.html.includes('TEMP_BLOCK'));
+  await editor.click('itemsList', { dprod: '0.1' }); assert.ok(!editor.html.includes('TEMP_BLOCK'));
+  await editor.click('deliveryEditor', { dadd: '' }); await editor.type('delivery.items.1.name', 'TEMP_SERVICE'); assert.ok(editor.html.includes('TEMP_SERVICE'));
+  await editor.click('deliveryEditor', { ddel: '1' }); assert.ok(!editor.html.includes('TEMP_SERVICE'));
+  await editor.click('itemsList', { del: '1' }); assert.ok(!editor.html.includes('ADDED_ITEM'));
+  await editor.save(); assert.equal(writes.length, 1);
+  assert.equal(stored.state.items[0].products[0].preservedMetadata, true); assert.equal(stored.state.delivery.items[0].crmKind, 'DELIVERY');
+  const reloaded = await open();
+  for (const [path, value] of rows) assert.equal(String(read(reloaded.adapter.getState(), path)), value, 'saved/reloaded: ' + path);
+  assert.equal(reloaded.html, editor.html); assert.equal(reloaded.adapter.getState().discountMode, 'amount');
+  for (const path of readonly) assert.equal(read(reloaded.adapter.getState(), path), read(stored.state, path));
+  const clear = rows.filter(([path]) => !['discount', 'currency', 'warrantyMonths', 'items.0.price', 'items.0.qty', 'delivery.total', 'delivery.items.0.price'].includes(path));
+  for (const [path, previous] of clear) {
+    await reloaded.type(path, '');
+    assert.ok(!reloaded.html.includes(SheetRender.esc(previous).replace(/\r?\n/g, '<br>')), 'cleared preview: ' + path);
+  }
+  await reloaded.type('discount', '0'); await reloaded.type('items.0.price', '0'); await reloaded.type('items.0.qty', '0');
+  await reloaded.type('delivery.items.0.price', '0'); await reloaded.click('deliveryEditor', { delmode: 'total' }); await reloaded.type('delivery.total', '0');
+  await reloaded.type('warrantyMonths', ''); assert.equal(String(reloaded.fields.get('warrantyMonths').value), '18');
+  await reloaded.nodes.get('discToggle').dispatch('click'); await reloaded.check('items.0.dbl', false); await reloaded.check('delivery.visible', false);
+  assert.ok(reloaded.html.includes('class="sh-totalSum">0')); assert.ok(!reloaded.html.includes('class="sh-cardDbl"'));
+  await reloaded.save(); const zero = await open();
+  for (const [path] of clear) assert.equal(read(zero.adapter.getState(), path), '', 'cleared/reloaded: ' + path);
+  for (const path of ['discount', 'items.0.price', 'delivery.total', 'delivery.items.0.price']) assert.equal(Number(read(zero.adapter.getState(), path)), 0);
+  assert.equal(zero.adapter.getState().items[0].qty, 1); assert.equal(zero.adapter.getState().delivery.visible, false);
+  assert.equal(zero.adapter.getState().delivery.mode, 'total'); assert.equal(zero.adapter.getState().discountMode, 'percent');
+  const zeroItemInput = zero.controls().get('items.0.price').attributes;
+  assert.equal(/value="([^"]*)"/.exec(zeroItemInput)?.[1], '0');
+  await zero.click('deliveryEditor', { delmode: 'items' });
+  assert.equal(/value="([^"]*)"/.exec(zero.controls().get('delivery.items.0.price').attributes)?.[1], '0');
+  const expectedPaths = [...rows.map(([path]) => path), ...readonly, 'items.0.dbl', 'items.0.image', 'items.0.image2'].map(normalize);
+  assert.deepEqual([...observed].sort(), [...new Set(expectedPaths)].sort(), 'every actual data-path family is classified');
+});
 
 test('save and PDF export use session, wait for ACK and send only saved revision to jobs', async () => {
   let saved = doc();

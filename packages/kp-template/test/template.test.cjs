@@ -19,6 +19,45 @@ test('source-compatible rounding and printing retain CRM-only row metadata', () 
   assert.equal(template.SheetRender.totalsOf({ ...fixture, delivery: { visible: false } }).total, 90.68);
 });
 
+test('editable tagline is literal in preview and export; only missing legacy value uses the original fallback', () => {
+  const state = { ...fixture, header: { ...fixture.header, tagline: '<Точный слоган> & текст' } }, before = structuredClone(state);
+  for (const html of [template.SheetRender.sheetHTML(state), template.SheetRender.buildFullHTML(state)]) {
+    assert.ok(html.includes('<div class="sh-tagline">&lt;Точный слоган&gt; &amp; текст</div>'));
+    assert.ok(!html.includes('<Точный слоган>'));
+  }
+  for (const header of [fixture.header, { ...fixture.header, tagline: null }])
+    assert.ok(template.SheetRender.sheetHTML({ ...fixture, header }).includes('<div class="sh-tagline">Ваше желание — наша реализация</div>'));
+  const cleared = template.SheetRender.sheetHTML({ ...fixture, header: { ...fixture.header, tagline: '' } });
+  assert.ok(cleared.includes('<div class="sh-tagline"></div>'));
+  assert.ok(!cleared.includes('Ваше желание — наша реализация'));
+  assert.deepEqual(state, before);
+});
+
+test('totalNote renders safe literal text and preserves explicit line breaks in preview and export', () => {
+  const state = { ...fixture, totalNote: '<em>Буквальный & текст</em>\r\nВторая строка\nТретья' }, before = structuredClone(state);
+  const expected = '<div class="sh-totalNote">&lt;em&gt;Буквальный &amp; текст&lt;/em&gt;<br>Вторая строка<br>Третья</div>';
+  for (const html of [template.SheetRender.sheetHTML(state), template.SheetRender.buildFullHTML(state)]) {
+    assert.ok(html.includes(expected)); assert.ok(!html.includes('<em>'));
+  }
+  assert.deepEqual(state, before);
+});
+
+test('all textarea consumers preserve literal text and line breaks in both item layouts', () => {
+  const text = '<b>Буквальный & текст</b>\r\nВторая строка', escaped = '&lt;b&gt;Буквальный &amp; текст&lt;/b&gt;<br>Вторая строка';
+  for (const dbl of [false, true]) {
+    const state = { ...fixture, intro: text, footer: text + '\nhttps://example.invalid',
+      items: fixture.items.map(item => ({ ...item, dbl, description: text, note: text })) }, before = structuredClone(state);
+    for (const html of [template.SheetRender.sheetHTML(state), template.SheetRender.buildFullHTML(state)]) {
+      assert.ok(html.includes('<div class="sh-intro">' + escaped + '</div>'));
+      assert.ok(html.includes('<div class="sh-cardDesc">' + escaped + '</div>'));
+      assert.ok(html.includes('<span class="sh-noteText">' + escaped + '</span>'));
+      assert.ok(html.includes('<div class="sh-footer">' + escaped + '<br><a href="https://example.invalid"'));
+      assert.ok(!html.includes('<b>'));
+    }
+    assert.deepEqual(state, before);
+  }
+});
+
 test('immutable original print CSS, contract template and model match captured source hashes', () => {
   const manifest = template.sourceManifest;
   for (const name of ['public/css/app.css', 'public/css/contract.css', 'public/js/contract-model.js', 'lib/contract-docx.js', 'templates/contracts/furniture.docx']) {
