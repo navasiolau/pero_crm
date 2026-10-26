@@ -67,8 +67,21 @@
       if (current) remove(key(current.id, 'uploads:' + current.revision));
       write(key(doc.id, 'uploads:' + doc.revision), Array.from(uploaded));
     }
-    async function replay(id, method, path, pending) {
-      var data = await request(path, json(method, pending.body));
+    function isRejectedSave(error) {
+      return error?.status === 400 && ['KP_REQUEST_INVALID', 'KP_PRICING_INVALID', 'KP_RATE_REQUIRED', 'KP_DATE_REQUIRED'].includes(error.data?.error?.code);
+    }
+    async function requestSave(id, path, body) {
+      try { return await request(path, json('PUT', body)); }
+      catch (error) {
+        if (isRejectedSave(error)) {
+          var storageKey = key(id, 'operation:save');
+          remove(storageKey); delete retainedOperations[storageKey];
+        }
+        throw error;
+      }
+    }
+    async function replay(id, path, pending) {
+      var data = await requestSave(id, path, pending.body);
       remove(key(id, 'operation:save')); delete retainedOperations[key(id, 'operation:save')];
       return data;
     }
@@ -86,26 +99,34 @@
       var quote = await request('/rates?currency=' + preview.currency + '&date=' + encodeURIComponent(preview.date));
       return quote.fx;
     }
-    async function saveNow(state) {
+    async function saveNow(state, fxIntent) {
       if (!current || !current.canEdit || viewingVersion || paused) throw new Error('КП доступно только для просмотра');
+      if (fxIntent !== undefined) current.fx = copy(fxIntent);
       var snapshot = copy(state), id = currentId, path = '/documents/' + encodeURIComponent(id);
       // Предыдущая не подтверждённая операция сначала получает свой прежний ответ.
       var stored = retainedOperations[key(id, 'operation:save')] || read(key(id, 'operation:save'));
       if (stored) {
-        var confirmed = await replay(id, 'PUT', path, stored); acknowledgeUploads(confirmed); remember(confirmed);
-        if (JSON.stringify(snapshot) === JSON.stringify(confirmed.state)) return confirmed;
+        try {
+          var confirmed = await replay(id, path, stored); acknowledgeUploads(confirmed); remember(confirmed);
+          if (fxIntent !== undefined) current.fx = copy(fxIntent);
+          if (JSON.stringify(snapshot) === JSON.stringify(confirmed.state) && canonical(current.fx) === confirmedFx) return confirmed;
+        } catch (error) {
+          // После однозначного отказа можно отправить уже исправленное состояние новым запросом.
+          if (!isRejectedSave(error) || canonical(snapshot) === canonical(stored.body.state) &&
+            canonical(current.fx) === canonical(stored.body.fx) && current.client?.id === stored.body.clientId) throw error;
+        }
       }
       var body = { proposalId: id, expectedRevision: current.revision, state: snapshot };
       if (current.client) body.clientId = current.client.id;
       body.fx = await rateForState(snapshot);
       var pending = operation(id, 'save', body);
-      var result = await request(path, json('PUT', pending.entry.body));
+      var result = await requestSave(id, path, pending.entry.body);
       remove(pending.storageKey); delete retainedOperations[pending.storageKey];
       acknowledgeUploads(result); return remember(result);
     }
     function save(state) {
-      var snapshot = copy(state);
-      var next = saveQueue.catch(function () {}).then(function () { return saveNow(snapshot); });
+      var snapshot = copy(state), fxIntent = current && canonical(current.fx) !== confirmedFx ? copy(current.fx) : undefined;
+      var next = saveQueue.catch(function () {}).then(function () { return saveNow(snapshot, fxIntent); });
       saveQueue = next; return next.catch(function (error) { emit({ type: 'error', message: error.message }); throw error; });
     }
     async function ensureSaved() {

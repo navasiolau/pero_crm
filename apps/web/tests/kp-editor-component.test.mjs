@@ -9,6 +9,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildKpEditorFrame } from '../src/server/kp/editor-frame.ts';
+import { projectProposalPricing } from '../src/server/kp/pricing.ts';
 
 const require = createRequire(import.meta.url), { chromium, expect } = require('@playwright/test'), sharp = require('sharp');
 const { build } = createRequire(require.resolve('tsx/package.json'))('esbuild');
@@ -34,10 +35,14 @@ const state = {
 const baseDoc = () => ({ id: 'primary', revision: 2, state: copy(state), createdAt: '2026-10-18T09:00:00.000Z', updatedAt: '2026-10-18T10:00:00.000Z',
   project: { id: 'project', number: '231', stage: 'LEAD' }, client: { id: 'client', label: state.client.name }, canEdit: true,
   fx: { currency: 'BYN', rate: '1', date: '2026-10-18', source: 'NBRB' } });
-let browser, server, origin, image, doc, writes, pdfRequests, refuseSave, refuseRate, requests, contractSettings, contractRevision, clientDetails;
+let browser, server, origin, image, doc, writes, pdfRequests, pricingProjections, renderSavedPdf, pdfBytes, refuseSave, refuseRate, requests, contractSettings, contractRevision, clientDetails;
 const originalClient = () => ({ id: 'client', label: state.client.name, isTemporary: false, snapshot: { id: 'client', name: 'заказчик', lastName: 'Контрольный', middleName: null, phone: '+000', email: 'fixture@example.invalid', address: 'Контрольный адрес', comment: null, passportNumber: 'номер', passportIssuedBy: 'выдан' } });
 const selectedClient = () => ({ id: 'selected-client', label: 'Новый заказчик', isTemporary: false, snapshot: { id: 'selected-client', name: 'Новый заказчик', lastName: null, middleName: null, phone: '+001', email: 'selected@example.invalid', address: 'Другой адрес', comment: null, passportNumber: 'обновлённый номер', passportIssuedBy: 'другой орган' } });
-function reset() { doc = baseDoc(); writes = []; pdfRequests = []; refuseSave = false; refuseRate = false; requests = []; contractSettings = null; contractRevision = 0; clientDetails = originalClient(); }
+function reset() { doc = baseDoc(); writes = []; pdfRequests = []; pricingProjections = []; renderSavedPdf = false; pdfBytes = Buffer.from('%PDF-1.7\n%%EOF'); refuseSave = false; refuseRate = false; requests = []; contractSettings = null; contractRevision = 0; clientDetails = originalClient(); }
+function confirmedPricing(state, fx) {
+  if (!fx) throw Error('Укажите фиксированный курс КП');
+  return projectProposalPricing(state, { currency: fx.currency, value: fx.rate, date: fx.date, source: fx.source });
+}
 const types = { js: 'text/javascript', css: 'text/css', woff2: 'font/woff2', png: 'image/png' };
 function json(response, value, status = 200) { response.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' }); response.end(JSON.stringify(value)); }
 async function body(request) { const chunks = []; for await (const chunk of request) chunks.push(chunk); return JSON.parse(Buffer.concat(chunks).toString()); }
@@ -82,10 +87,28 @@ before(async () => {
     if (url.pathname === '/api/kp/documents/primary' && request.method === 'PUT') {
       const input = await body(request); writes.push(input);
       if (refuseSave || input.expectedRevision !== doc.revision) { json(response, { error: { code: 'conflict', message: 'Контрольный конфликт ревизии' } }, 409); return; }
+      try { pricingProjections.push(confirmedPricing(input.state, input.fx ?? doc.fx)); }
+      catch (error) { json(response, { error: { code: 'KP_PRICING_INVALID', message: error.message } }, 400); return; }
       doc = { ...doc, revision: doc.revision + 1, state: input.state, fx: input.fx ?? doc.fx, client: { id: input.clientId ?? doc.client.id, label: input.clientId === 'selected-client' ? selectedClient().label : clientDetails.label } }; json(response, doc); return;
     }
-    if (url.pathname === '/api/kp/documents/primary/pdf') { pdfRequests.push(await body(request)); json(response, { id: 'job', state: 'SUCCEEDED', result: { artifactId: 'pdf', versionId: 'version', fileName: 'КП_231.pdf', mimeType: 'application/pdf', downloadUrl: '/api/kp/artifacts/pdf/download' } }); return; }
-    if (url.pathname === '/api/kp/artifacts/pdf/download') { response.writeHead(200, { 'content-type': 'application/pdf', 'content-disposition': "attachment; filename=KP_231.pdf; filename*=UTF-8''" + encodeURIComponent('КП_231.pdf') }); response.end(Buffer.from('%PDF-1.7\n%%EOF')); return; }
+    if (url.pathname === '/api/kp/documents/primary/pdf') {
+      const input = await body(request);
+      if (input.expectedRevision !== doc.revision) { json(response, { error: { code: 'KP_REVISION_CONFLICT', message: 'Конфликт ревизии PDF' } }, 409); return; }
+      try { confirmedPricing(doc.state, doc.fx); }
+      catch (error) { json(response, { error: { code: 'KP_PRICING_INVALID', message: error.message } }, 400); return; }
+      pdfRequests.push(input);
+      if (renderSavedPdf) {
+        const prior = process.env.PERO_KP_CHROMIUM_PATH;
+        try {
+          process.env.PERO_KP_CHROMIUM_PATH = chromium.executablePath();
+          const rendered = await isolatedWorker({ kind: 'bundle', proposalId: doc.id, revision: doc.revision, templateHash: template.getKpTemplateIdentity().templateHash,
+            state: copy(doc.state), assets: [{ mediaId: 'photo', mimeType: 'image/png', bytesBase64: image.toString('base64') }] });
+          pdfBytes = Buffer.from(rendered.bytesBase64, 'base64');
+        } finally { if (prior === undefined) delete process.env.PERO_KP_CHROMIUM_PATH; else process.env.PERO_KP_CHROMIUM_PATH = prior; }
+      }
+      json(response, { id: 'job', state: 'SUCCEEDED', result: { artifactId: 'pdf', versionId: 'version', fileName: 'КП_231.pdf', mimeType: 'application/pdf', downloadUrl: '/api/kp/artifacts/pdf/download' } }); return;
+    }
+    if (url.pathname === '/api/kp/artifacts/pdf/download') { response.writeHead(200, { 'content-type': 'application/pdf', 'content-disposition': "attachment; filename=KP_231.pdf; filename*=UTF-8''" + encodeURIComponent('КП_231.pdf') }); response.end(pdfBytes); return; }
     if (url.pathname === '/api/kp/documents') { json(response, { documents: [{ id: doc.id, name: 'КП №231', updatedAt: doc.updatedAt, project: doc.project }] }); return; }
     if (url.pathname === '/api/kp/contracts' && request.method === 'GET') {
       contractSettings ??= Object.assign(template.ContractModel.defaults(doc.state, doc.id), doc.client.id === 'selected-client'
@@ -144,6 +167,17 @@ test('actual editor preserves source print DOM and page sizes on desktop/mobile,
       assert.equal(await page.locator('[data-path="order.number"]').getAttribute('readonly'), '');
       assert.equal(await page.locator('[data-path="client.name"]').getAttribute('readonly'), '');
       assert.equal(await page.locator('.doc-del').count(), 0);
+      assert.equal(await page.locator('#deliveryEditor select').count(), 0);
+      assert.equal(await page.evaluate(() => window.PeroCrmKp.getDocument().state.delivery.items[0].crmKind), 'DELIVERY', 'stored metadata stays silent');
+      if (viewport.width < 900) await page.locator('[data-view="editor"]').click();
+      await page.locator('#deliveryEditor').evaluate(async element => Promise.all(element.closest('.sec').getAnimations().map(animation => animation.finished.catch(() => {}))));
+      const serviceLayout = await page.locator('#deliveryEditor .del-row').first().evaluate(row => {
+        const bounds = row.getBoundingClientRect(), fields = [...row.children].map(field => field.getBoundingClientRect());
+        return { display: getComputedStyle(row).display, fields: fields.length, nameWidth: fields[0].width, rightGap: bounds.right - fields.at(-1).right, inViewport: bounds.left >= 0 && bounds.right <= innerWidth };
+      });
+      assert.equal(serviceLayout.display, 'flex'); assert.equal(serviceLayout.fields, 3); assert.ok(serviceLayout.nameWidth > 0); assert.ok(Math.abs(serviceLayout.rightGap) < 2); assert.equal(serviceLayout.inViewport, true);
+      await page.locator('#deliveryEditor').screenshot({ path: path.join(output, 'service-controls-' + viewport.width + '.png'), animations: 'disabled' });
+      if (viewport.width < 900) await page.locator('[data-view="sheet"]').click();
       assert.equal(await page.locator('#sheet img').first().getAttribute('src'), '/api/kp/documents/primary/media/photo?variant=optimized&scope=current');
       await page.screenshot({ path: path.join(output, 'editor-' + viewport.width + '.png'), fullPage: true });
       await baseline.screenshot({ path: path.join(output, 'original-editor-' + viewport.width + '.png'), fullPage: true });
@@ -152,18 +186,34 @@ test('actual editor preserves source print DOM and page sizes on desktop/mobile,
   }
 });
 
-test('actual save-before-export retains IDs and crmKind; duplication gets a fresh ID and conflict prevents PDF', async () => {
-  reset(); const { context, page, child } = await hostPage();
+test('actual save/rate-before-export keeps unmarked services without category controls and conflict prevents PDF', async () => {
+  reset(); doc.fx = null; doc.state.currency = '$'; renderSavedPdf = true;
+  doc.state.items = [{ ...doc.state.items[0], price: 100, qty: 1 }];
+  doc.state.delivery.items = [{ name: 'Доставка, выгрузка', price: 135, legacyDetail: { keep: 'source' } }, { name: 'Монтаж', price: 1230 }];
+  const services = copy(doc.state.delivery.items), { context, page, child } = await hostPage();
   try {
+    assert.equal(await child.locator('#deliveryEditor select').count(), 0);
+    const printedRows = await child.locator('.sh-deliveryRows .sh-delRow').allTextContents();
+    await page.getByRole('button', { name: 'Курс', exact: true }).click();
+    const dialog = page.getByRole('dialog'); await dialog.getByLabel('BYN за единицу валюты').fill('3.25');
+    await dialog.getByRole('button', { name: 'Сохранить курс', exact: true }).click(); await dialog.waitFor({ state: 'hidden' });
+    assert.deepEqual(doc.fx, { currency: 'USD', rate: '3.25', date: '2026-10-18', source: 'MANUAL' });
+    await child.locator('[data-dadd]').click();
+    await child.locator('[data-path="delivery.items.2.name"]').fill('Временный пункт'); await child.locator('[data-path="delivery.items.2.price"]').fill('1');
+    await child.locator('[data-ddel="2"]').click();
+    assert.deepEqual(await child.locator('.sh-deliveryRows .sh-delRow').allTextContents(), printedRows);
     await child.locator('[data-path="items.0.name"]').fill('Обновлённый шкаф');
     await child.locator('[data-dup="0"]').click();
     const download = page.waitForEvent('download'); await page.getByRole('button', { name: 'Сгенерировать PDF', exact: true }).click();
-    assert.equal((await download).suggestedFilename(), 'КП_231.pdf');
+    const generated = await download; assert.equal(generated.suggestedFilename(), 'КП_231.pdf');
+    await generated.saveAs(path.join(output, 'unmarked-services.pdf')); assert.ok(pdfBytes.length > 1000); assert.equal(pdfBytes.subarray(0, 5).toString(), '%PDF-');
     await expect.poll(() => page.evaluate(() => window.__refreshes ?? 0)).toBeGreaterThan(0);
     const refreshes = await page.evaluate(() => window.__refreshes);
     assert.ok(writes.length >= 1); const saved = writes.at(-1);
     assert.equal(saved.state.items[0].id, 'item-0'); assert.notEqual(saved.state.items[1].id, 'item-0');
-    assert.equal(saved.state.delivery.items[0].crmKind, 'DELIVERY'); assert.equal(saved.state.items[0].image, 'kp-media:photo');
+    assert.equal(saved.state.items[0].name, 'Обновлённый шкаф'); assert.deepEqual(saved.state.delivery.items, services); assert.equal(saved.state.items[0].image, 'kp-media:photo');
+    const projection = pricingProjections.at(-1).project; assert.equal(projection.servicesTotal.toFixed(2), '3992.63');
+    assert.equal(projection.delivery, null); assert.equal(projection.unloading, null); assert.equal(projection.installation, null);
     assert.equal(pdfRequests.length, 1); assert.equal(pdfRequests[0].expectedRevision, doc.revision); assert.equal(pdfRequests[0].state, undefined);
     refuseSave = true; await child.locator('[data-path="items.0.name"]').fill('Конфликт');
     await page.getByRole('button', { name: 'Сгенерировать PDF', exact: true }).click();
@@ -267,6 +317,7 @@ test('actual React toolbar selects CRM client immediately and version bridge res
     assert.equal(writes.at(-1).state.client.crmSnapshot.name, 'Новый заказчик');
     assert.equal(writes.at(-1).state.client.crmSnapshot.passportNumber, 'обновлённый номер');
     assert.deepEqual(writes.at(-1).state.client.crmSnapshot, selectedClient().snapshot);
+    assert.deepEqual(writes.at(-1).state.delivery.items, state.delivery.items, 'saving preserves existing crmKind metadata without controls');
     assert.equal(writes.at(-1).clientId, 'selected-client');
     assert.equal(await child.locator('[data-path="client.contact"]').inputValue(), '+001');
     assert.match(await page.locator('#kp-client').innerText(), /Новый заказчик/);

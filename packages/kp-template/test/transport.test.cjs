@@ -3,8 +3,8 @@ const { test } = require('node:test');
 const createTransport = require('../assets/public/js/crm-transport.js');
 const { collectProposalPages } = require('../browser.js');
 const copy = value => JSON.parse(JSON.stringify(value));
-function fixture(handler, actorId = 'actor') {
-  const values = new Map(), calls = [], emitted = [];
+function fixture(handler, actorId = 'actor', values = new Map()) {
+  const calls = [], emitted = [];
   const storage = { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value), removeItem: key => values.delete(key) };
   const api = createTransport({ actorId, documentId: 'primary', apiBase: '/api/kp' }, { storage, emit: message => emitted.push(message), uuid: () => crypto.randomUUID(),
     fetch: async (url, options) => { const call = { url, options, body: typeof options.body === 'string' ? JSON.parse(options.body) : options.body }; calls.push(call); return handler(call, calls); } });
@@ -41,6 +41,94 @@ test('lost save ACK replays exact UUID and body before another state may be save
   const original = copy(testbed.calls[0].body);
   assert.equal((await testbed.api.save(doc().state)).revision, 3);
   assert.deepEqual(testbed.calls[1].body, original); assert.equal(testbed.calls.length, 2);
+});
+
+test('pending save preserves exact replay and latest corrected state or explicit FX intent', async () => {
+  let attempts = 0;
+  const handler = async call => {
+    if (++attempts === 1) throw new TypeError('SYNTHETIC_ACK_LOSS');
+    if (call.body.state.items[0].price >= 10_000_000_000) return new Response(JSON.stringify({
+      error: { code: 'KP_PRICING_INVALID', message: 'Сумма КП превышает допустимый предел CRM' }
+    }), { status: 400, headers: { 'content-type': 'application/json' } });
+    return response({ ...doc(), revision: 3, state: call.body.state });
+  };
+  const testbed = fixture(handler);
+  const invalid = { ...doc().state, delivery: { visible: true, mode: 'items', items: [{ name: 'Доставка', price: 30 }] } };
+  invalid.items[0].price = 10_000_000_000;
+  testbed.api.focusDocument(doc());
+  await assert.rejects(testbed.api.save(invalid), /ACK_LOSS/);
+  const original = copy(testbed.calls[0].body);
+  const storageKey = 'pero-crm-kp:actor:primary:operation:save';
+  assert.deepEqual(JSON.parse(testbed.values.get(storageKey)).body, original);
+  const reloaded = fixture(handler, 'actor', testbed.values);
+  reloaded.api.focusDocument(doc());
+  const corrected = copy(invalid);
+  corrected.delivery.items[0].crmKind = 'DELIVERY'; corrected.items[0].price = 150.75;
+  corrected.items[0].name = 'Исправленное изделие'; corrected.discount = 7;
+  const saved = await reloaded.api.save(corrected);
+  assert.deepEqual(reloaded.calls[0].body, original);
+  assert.equal(attempts, 3); assert.equal(reloaded.calls.length, 2);
+  assert.notEqual(reloaded.calls[1].body.operationId, original.operationId);
+  assert.deepEqual(reloaded.calls[1].body.state, corrected);
+  assert.deepEqual(saved.state, corrected);
+  assert.equal(testbed.values.has(storageKey), false);
+
+  let fxAttempts = 0;
+  const fxHandler = async call => {
+    if (++fxAttempts === 1) throw new TypeError('SYNTHETIC_ACK_LOSS');
+    if (call.body.fx.rate !== '1') return new Response(JSON.stringify({
+      error: { code: 'KP_PRICING_INVALID', message: 'Курс КП не соответствует валюте' }
+    }), { status: 400, headers: { 'content-type': 'application/json' } });
+    return response({ ...doc(), revision: 3, state: call.body.state, fx: call.body.fx });
+  };
+  const fxState = doc().state, invalidFx = { ...doc().fx, rate: '2', source: 'MANUAL' };
+  const fxFirst = fixture(fxHandler); fxFirst.api.focusDocument(doc());
+  fxFirst.api.attachEditor({ ensureSaved: () => fxFirst.api.save(fxState) });
+  await assert.rejects(fxFirst.api.handleCommand({ type: 'fx', fx: invalidFx }), /ACK_LOSS/);
+  const originalFxBody = copy(fxFirst.calls[0].body);
+  const fxReloaded = fixture(fxHandler, 'actor', fxFirst.values); fxReloaded.api.focusDocument(doc());
+  fxReloaded.api.attachEditor({ ensureSaved: () => fxReloaded.api.save(fxState) });
+  const correctedFx = { ...invalidFx, rate: '1' };
+  await fxReloaded.api.handleCommand({ type: 'fx', fx: correctedFx });
+  assert.deepEqual(fxReloaded.calls[0].body, originalFxBody);
+  assert.equal(fxAttempts, 3); assert.equal(fxReloaded.calls.length, 2);
+  assert.notEqual(fxReloaded.calls[1].body.operationId, originalFxBody.operationId);
+  assert.deepEqual(fxReloaded.calls[1].body.state, originalFxBody.state);
+  assert.deepEqual(fxReloaded.api.getDocument().fx, correctedFx);
+  assert.equal(fxFirst.values.has(storageKey), false);
+
+  const successState = { ...doc().state, currency: '$' };
+  const initialDoc = { ...doc(), state: successState, fx: { ...doc().fx, currency: 'USD', rate: '3.125' } };
+  const oldManualFx = { ...initialDoc.fx, rate: '3.2', source: 'MANUAL' }, latestManualFx = { ...oldManualFx, rate: '3.3' };
+  let committed, receipt, oldBody;
+  const successful = fixture(async call => {
+    if (call.url.endsWith('/pdf')) {
+      assert.equal(call.body.expectedRevision, committed.revision);
+      assert.deepEqual(committed.fx, latestManualFx);
+      return response({ id: 'job', state: 'SUCCEEDED', result: { artifactId: 'latest-pdf', fileName: 'КП.pdf', downloadUrl: '/api/kp/artifacts/latest-pdf/download' } });
+    }
+    if (!oldBody) {
+      oldBody = copy(call.body); committed = { ...initialDoc, revision: 3, state: call.body.state, fx: call.body.fx };
+      receipt = copy(committed); throw new TypeError('SYNTHETIC_ACK_LOSS_AFTER_COMMIT');
+    }
+    if (call.body.operationId === oldBody.operationId) return response(receipt);
+    assert.equal(call.body.expectedRevision, receipt.revision);
+    committed = { ...committed, revision: 4, state: call.body.state, fx: call.body.fx };
+    return response(committed);
+  });
+  successful.api.focusDocument(initialDoc);
+  successful.api.attachEditor({ ensureSaved: () => successful.api.hasUnsavedChanges(successState)
+    ? successful.api.save(successState) : Promise.resolve(successful.api.getDocument()) });
+  await assert.rejects(successful.api.handleCommand({ type: 'fx', fx: oldManualFx }), /ACK_LOSS_AFTER_COMMIT/);
+  await successful.api.handleCommand({ type: 'fx', fx: latestManualFx });
+  assert.deepEqual(successful.calls[1].body, oldBody);
+  assert.equal(successful.calls.length, 3);
+  assert.notEqual(successful.calls[2].body.operationId, oldBody.operationId);
+  assert.deepEqual(successful.calls[2].body.state, oldBody.state);
+  assert.deepEqual(successful.calls[2].body.fx, latestManualFx);
+  assert.deepEqual(successful.api.getDocument().fx, latestManualFx);
+  assert.equal((await successful.api.generatePdf()).artifactId, 'latest-pdf');
+  assert.equal(successful.calls.length, 4);
 });
 
 test('additional contract source never replaces focused proposal and contracts omit browser states', async () => {
