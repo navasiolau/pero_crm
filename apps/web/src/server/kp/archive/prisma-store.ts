@@ -52,6 +52,34 @@ async function reservationRow(client: ArchiveReservationReader, manifest: Archiv
   archiveAssert(row && row.id === reserveReceiptId(manifest.sha256) && row.entity === "kpArchiveImport" && row.entityId === manifest.sha256 && row.action === "archive.reserve" && row.source === "cli" && row.actorType === "user" && typeof row.actorId === "string" && canonical(row.newValue) === canonical(archiveReserveValue(manifest)), "ARCHIVE_RECOVERY_RESERVE_CHANGED");
   return { row, actorId: row.actorId, hash: valueHash(row) };
 }
+/** После explicit ADMIN recovery публикацию подписывает оператор, а исходные creators/payload остаются прежними. */
+async function verifyRecoveryPublication(client: ArchiveReservationReader, manifest: ArchiveManifest, original: { actorId: string; hash: string }, actorId: string) {
+  const { rows } = await client.query<{ row: JsonObject }>('SELECT to_jsonb(t) AS row FROM "ChangeLog" t WHERE entity=\'kpArchiveRecovery\' AND "entityId"=$1 AND action=\'archive.recovery.publish\' AND "actorType"=\'user\' AND "actorId"=$2 AND source=\'cli\' ORDER BY id LIMIT 2', [manifest.sha256, actorId]);
+  archiveAssert(rows.length === 1 && isObject(rows[0].row.newValue), "ARCHIVE_RECOVERY_AUDIT_CHANGED");
+  const published = rows[0].row, value = published.newValue as JsonObject;
+  archiveAssert(typeof value.operationId === "string" && typeof value.witnessHash === "string" && /^[a-f0-9]{64}$/.test(value.witnessHash) &&
+    isObject(value.program) && canonical(Object.keys(value.program).sort()) === canonical(["entrySha256", "sourceRevision"]) &&
+    typeof value.program.sourceRevision === "string" && /^[a-f0-9]{40}$/.test(value.program.sourceRevision) && typeof value.program.entrySha256 === "string" && /^[a-f0-9]{64}$/.test(value.program.entrySha256), "ARCHIVE_RECOVERY_AUDIT_CHANGED");
+  const ids = archiveRecoveryReceiptIds(manifest, value.operationId), objects = allArchiveObjects(manifest);
+  const common = { schema: 1, manifestHash: manifest.sha256, reservationReceiptId: reserveReceiptId(manifest.sha256), reservationRowHash: original.hash,
+    reservationActorId: original.actorId, operatorId: actorId, operationId: value.operationId, targetHash: valueHash(manifest.target), witnessHash: value.witnessHash, program: value.program };
+  const reserved = (await client.query<{ row: JsonObject }>('SELECT to_jsonb(t) AS row FROM "ChangeLog" t WHERE id=$1', [ids.reserve])).rows[0]?.row;
+  for (const [row, id, completed] of [[reserved, ids.reserve, false], [published, ids.publish, true]] as const) {
+    archiveAssert(row?.id === id && row.entity === "kpArchiveRecovery" && row.entityId === manifest.sha256 && row.action === (completed ? "archive.recovery.publish" : "archive.recovery.reserve") &&
+      row.actorType === "user" && row.actorId === actorId && row.source === "cli" && isObject(row.newValue) && isObject(row.newValue.verifiedObjects) &&
+      canonical(row.newValue) === canonical({ ...common, verifiedObjects: row.newValue.verifiedObjects }), "ARCHIVE_RECOVERY_AUDIT_CHANGED");
+    verifiedResult(manifest, objects, { archiveManifestHash: manifest.sha256, verified: row.newValue.verifiedObjects });
+    if (completed) archiveAssert(canonical(row.newValue.verifiedObjects) === canonical(Object.fromEntries(objects.map(object => [object.id, object.sha256]))), "ARCHIVE_RECOVERY_AUDIT_CHANGED");
+  }
+  const jobs = [...new Set(objects.map(object => object.jobId))], ledger = await client.query<{ row: JsonObject }>('SELECT to_jsonb(t) AS row FROM "ProposalJob" t WHERE id=ANY($1::text[]) ORDER BY id', [jobs]);
+  archiveAssert(ledger.rows.length === jobs.length, "ARCHIVE_RECOVERY_OPERATION_CHANGED");
+  for (const id of jobs) {
+    const row = ledger.rows.find(entry => entry.row.id === id)?.row, group = objects.filter(object => object.jobId === id);
+    archiveAssert(row?.kind === "UPLOAD_MEDIA" && row.proposalId === group[0].proposalId && row.contractId === null && row.createdById === original.actorId &&
+      row.dedupeKey === `kp:archive:upload:${id}` && row.state === "SUCCEEDED" && row.leaseOwner === null && row.leaseUntil === null &&
+      canonical(row.payload) === canonical(uploadPayload(manifest, group, original.actorId)) && canonical(row.result) === canonical({ archiveManifestHash: manifest.sha256, verified: Object.fromEntries(group.map(object => [object.id, object.sha256])) }), "ARCHIVE_RECOVERY_OPERATION_CHANGED");
+  }
+}
 /** Неизменяемые receipts подтверждают импорт независимо от последующих обычных сохранений КП. */
 export async function verifyPublishedArchiveOrigin(client: ArchiveReservationReader, manifest: ArchiveManifest) {
   const original = await reservationRow(client, manifest);
@@ -63,7 +91,11 @@ export async function verifyPublishedArchiveOrigin(client: ArchiveReservationRea
   for (const [id, entity, entityId, action, value] of expected) {
     const { rows } = await client.query<{ row: JsonObject }>('SELECT to_jsonb(t) AS row FROM "ChangeLog" t WHERE id=$1', [id]);
     const row = rows[0]?.row;
-    archiveAssert(row?.entity === entity && row.entityId === entityId && row.action === action && row.actorType === "user" && row.actorId === original.actorId && row.source === "cli" && canonical(row.newValue) === canonical(value), "ARCHIVE_RECONCILIATION_MISMATCH");
+    archiveAssert(row?.entity === entity && row.entityId === entityId && row.action === action && row.actorType === "user" && typeof row.actorId === "string" && row.source === "cli" && canonical(row.newValue) === canonical(value), "ARCHIVE_RECONCILIATION_MISMATCH");
+    if (row.actorId !== original.actorId) {
+      archiveAssert(action === "archive.publish", "ARCHIVE_RECONCILIATION_MISMATCH");
+      await verifyRecoveryPublication(client, manifest, original, row.actorId);
+    }
   }
   return original.actorId;
 }
