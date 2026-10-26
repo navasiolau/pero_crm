@@ -242,4 +242,3 @@ receipt, а не переименованием старых import receipts. Д
 - Нативная local5433: существующий `pero_crm_pg` / `bf45c761b5687e54bff1aafea82e8647925b5b425d6743ebdc7d33f4824b0ed5`. Run `15a692a4-e90c-4c6d-9fc2-293220c64c34`: 23 КП и 23 точных связи изделий, metadataOnly=true, replayZeroWrites=true, повтор исходного импорта принят; после обязательного полного rollback все 77 таблиц/каталог/история совпали с исходным snapshot. Source/target S3 I/O нет, fixtures существовали только внутри rollback. Первая попытка остановилась на обязательном phone синтетического Client, транзакция была откачена; исправлена только fixture, бизнес-данные не корректировались.
 
 Текущие операционные доказательства и reviewed mapping: `C:/Users/admin/.codex/tmp/pero-kp-normalize-20261026`. На этой точке новые CI/staging/production ещё не выполнены; local/native проверки не выдаются за их приёмку.
-
