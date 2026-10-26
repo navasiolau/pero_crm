@@ -10,7 +10,7 @@ import { SearchableSelect } from '@/components/ui/searchable-select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { kpSessionRequest } from '@/lib/kp-session-client';
 
-type PendingCommand = { resolve: () => void; reject: (error: Error) => void; timeout: ReturnType<typeof setTimeout> };
+type PendingCommand = { resolve: () => void; reject: (error: Error) => void };
 const versionLabel = (version: ProposalVersion) => new Intl.DateTimeFormat('ru-RU', { timeZone: 'Europe/Moscow', dateStyle: 'short', timeStyle: 'medium' }).format(new Date(version.createdAt)) +
   (version.trigger === 'CONTRACT' ? ' · Договор' : version.trigger === 'IMPORT' ? ' · Импорт' : ' · PDF') + (version.isAccepted ? ' · Принято' : '');
 
@@ -23,8 +23,7 @@ export function KpEditor({ documentId }: { documentId: string }) {
   const send = useCallback((command: Record<string, unknown>): Promise<void> => new Promise((resolve, reject) => {
     if (!frame.current?.contentWindow) { reject(Error('Редактор ещё загружается')); return; }
     const requestId = crypto.randomUUID();
-    const timeout = setTimeout(() => { commands.current.delete(requestId); reject(Error('Редактор не подтвердил операцию. Обновите страницу')); }, command.type === 'pdf' ? 180_000 : 45_000);
-    commands.current.set(requestId, { resolve, reject, timeout });
+    commands.current.set(requestId, { resolve, reject });
     frame.current.contentWindow.postMessage({ ...command, channel: 'pero-kp', requestId }, window.location.origin);
   }), []);
   const refreshVersions = useCallback(async () => { const data = await kpSessionRequest<{ versions: ProposalVersion[] }>('/documents/' + encodeURIComponent(documentId) + '/versions'); setVersions(data.versions); }, [documentId]);
@@ -45,13 +44,15 @@ export function KpEditor({ documentId }: { documentId: string }) {
       else if (message.type === 'navigate') router.push('/kp/' + encodeURIComponent(message.documentId));
       else if (message.type === 'command-result') {
         const pending = commands.current.get(message.requestId); if (!pending) return;
-        clearTimeout(pending.timeout); commands.current.delete(message.requestId);
+        commands.current.delete(message.requestId);
         if (message.ok) pending.resolve(); else pending.reject(Error(message.message || 'Не удалось выполнить операцию'));
       }
     };
     window.addEventListener('message', listener);
     const commandMap = commands.current;
-    return () => { active = false; window.removeEventListener('message', listener); for (const item of commandMap.values()) { clearTimeout(item.timeout); item.reject(Error('Редактор закрыт')); } commandMap.clear(); };
+    const rejectPending = () => { for (const item of commandMap.values()) item.reject(Error('Редактор закрыт')); commandMap.clear(); };
+    window.addEventListener('pagehide', rejectPending);
+    return () => { active = false; window.removeEventListener('message', listener); window.removeEventListener('pagehide', rejectPending); rejectPending(); };
   }, [documentId, refreshVersions, router]);
   async function execute(command: Record<string, unknown>) { setPending(true); setError(null); try { await send(command); return true; } catch (error) { setError(error instanceof Error ? error.message : 'Не удалось выполнить операцию'); return false; } finally { setPending(false); } }
   async function selectClient(id: string) {

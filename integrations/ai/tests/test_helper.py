@@ -41,6 +41,19 @@ class HelperTests(unittest.TestCase):
             self.assertEqual(calls[0][1]['operationId'], calls[1][1]['id'])
             with self.assertRaises(helper.ApiError): helper.command(client, 'save', {'state': {'items': [{'name': 'Другое'}]}}, receipt)
             self.assertEqual(len(calls), 2)
+        limits = []
+        class Result:
+            stdout = '{"ok":true,"result":{"id":"same-job"}}'
+        def runner(*_args, **kwargs):
+            limits.append(kwargs['timeout'])
+            return Result()
+        bridge = helper.ApiClient.__new__(helper.ApiClient)
+        bridge.env = {'PERO_CRM_API_KEY': 'synthetic-not-real'}
+        bridge.runner = runner
+        bridge.call('job', id='same-job', wait=True)
+        bridge.call('job', id='same-job', wait=False)
+        bridge.call('pdf', id='same-job', wait=True)
+        self.assertEqual(limits, [None, 110, 110])
 
     def test_concurrent_revision_is_not_overwritten(self):
         with tempfile.TemporaryDirectory() as directory:

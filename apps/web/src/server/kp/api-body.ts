@@ -1,11 +1,12 @@
 import { apiFailure } from "./api-contract";
 export const KP_JSON_LIMIT = 2 * 1024 * 1024;
+export const KP_DOCUMENT_JSON_LIMIT = 2_147_483_647;
 export const KP_UPLOAD_FILE_LIMIT = 15 * 1024 * 1024;
 export const KP_MULTIPART_LIMIT = KP_UPLOAD_FILE_LIMIT * 2 + 256 * 1024;
 
-export async function readKpBody(request: Request, limit: number): Promise<Uint8Array> {
+export async function readKpBody(request: Request, limit?: number): Promise<Uint8Array> {
   const announced = request.headers.get("content-length");
-  if (announced && (!/^\d+$/.test(announced) || Number(announced) > limit))
+  if (announced && (!/^\d+$/.test(announced) || !Number.isSafeInteger(Number(announced)) || limit !== undefined && Number(announced) > limit))
     return apiFailure("KP_BODY_TOO_LARGE", 413, "Запрос превышает допустимый размер");
   const reader = request.body?.getReader();
   if (!reader) return apiFailure("KP_BODY_REQUIRED", 400, "Нужно тело запроса");
@@ -14,7 +15,7 @@ export async function readKpBody(request: Request, limit: number): Promise<Uint8
     while (true) {
       const chunk = await reader.read(); if (chunk.done) break;
       size += chunk.value.byteLength;
-      if (size > limit) { await reader.cancel(); return apiFailure("KP_BODY_TOO_LARGE", 413, "Запрос превышает допустимый размер"); }
+      if (!Number.isSafeInteger(size) || limit !== undefined && size > limit) { await reader.cancel(); return apiFailure("KP_BODY_TOO_LARGE", 413, "Запрос превышает допустимый размер"); }
       chunks.push(chunk.value);
     }
   } finally { reader.releaseLock(); }
@@ -23,10 +24,10 @@ export async function readKpBody(request: Request, limit: number): Promise<Uint8
   return bytes;
 }
 
-export async function readKpJson(request: Request): Promise<unknown> {
+export async function readKpJson(request: Request, options: { documentState?: boolean } = {}): Promise<unknown> {
   if (!/^application\/json(?:\s*;|$)/i.test(request.headers.get("content-type") ?? ""))
     return apiFailure("KP_CONTENT_TYPE", 415, "Нужен Content-Type application/json");
-  const bytes = await readKpBody(request, KP_JSON_LIMIT);
+  const bytes = await readKpBody(request, options.documentState === true ? KP_DOCUMENT_JSON_LIMIT : KP_JSON_LIMIT);
   try { return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)); }
   catch { return apiFailure("KP_JSON_INVALID", 400, "Некорректный JSON"); }
 }

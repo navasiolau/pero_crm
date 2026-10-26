@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { test } from 'node:test';
 import { lstat, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -78,13 +78,21 @@ test('new documents cannot inherit another proposal media owner or client from t
   assert.equal(result.state.header, 'Образец'); assert.equal(result.state.client, undefined); assert.deepEqual(result.state.items, []);
   await assert.rejects(c.save({ state: { items: [{ image: 'kp-media:other' }] }, operationId: op }), /нового КП/);
 });
-test('contracts address primary proposal ID and bind client baseline plus all source revisions', async () => {
+test('contracts address primary proposal ID and bind client baseline plus all source revisions', async t => {
   const calls = [];
   const c = client(async (url, options) => { calls.push([url.pathname, JSON.parse(options.body)]); return reply({ id: 'job' }); });
   const refs = [{ proposalId: 'first', expectedRevision: 4 }, { proposalId: 'second', expectedRevision: 2 }];
   await c.generateContract('first', 3, refs, 'a'.repeat(64), op);
   assert.equal(calls[0][0], '/api/v1/kp/contracts/first/generate');
   assert.deepEqual(calls[0][1], { documentId: 'first', expectedRevision: 3, sourceRefs: refs, clientBaseline: 'a'.repeat(64), operationId: op });
+  let now = 0, reads = 0;
+  t.mock.method(Date, 'now', () => now);
+  t.mock.method(globalThis, 'setTimeout', callback => { now += 121_000; queueMicrotask(callback); return 0; });
+  const waiting = client(async url => { assert.ok(url.pathname.endsWith('/jobs/same-job')); reads++; return reply({ id: 'same-job', state: reads < 3 ? 'PROCESSING' : 'SUCCEEDED' }); });
+  assert.equal((await waiting.waitJob('same-job')).state, 'SUCCEEDED'); assert.equal(reads, 3); assert.ok(now > 90_000);
+  const bounded = client(async url => { assert.ok(url.pathname.endsWith('/jobs/same-job')); return reply({ id: 'same-job', state: 'PENDING' }); });
+  await assert.rejects(bounded.waitJob('same-job', { timeoutMs: 1000 }), error => error.code === 'KP_JOB_PENDING');
+  await assert.rejects(waiting.waitJob('same-job', { timeoutMs: Infinity }), error => error.code === 'KP_JOB_WAIT_INVALID');
 });
 test('private downloads never request public S3 URLs', async () => {
   const urls = [];
@@ -111,6 +119,23 @@ test('actual stdio MCP returns only JSON-RPC and does not print configured crede
   const replies = output.trim().split('\n').map(line => JSON.parse(line));
   assert.equal(replies.length, 2); assert.equal(replies[0].result.serverInfo.name, 'pero-crm-kp');
   assert.ok(replies[1].result.tools.some(tool => tool.name === 'kp_restore_version'));
+  const bridge = new URL('../mcp/bridge.mjs', import.meta.url).href;
+  const script = `let now=0,reads=0;Date.now=()=>now;globalThis.setTimeout=fn=>{now+=121000;queueMicrotask(fn);return 0};
+    globalThis.fetch=async(url,options)=>{if(url.pathname.endsWith('/jobs/job'))return new Response(JSON.stringify({id:'job',state:++reads<3?'PENDING':'SUCCEEDED'}));
+    if(options.method==='PUT'&&url.pathname.endsWith('/documents/doc'))return new Response(JSON.stringify({id:'doc',revision:8}));
+    if(options.method==='POST'&&url.pathname.endsWith('/documents'))return new Response(JSON.stringify({id:'created',revision:0}));throw Error('UNEXPECTED_NETWORK')};await import(${JSON.stringify(bridge)});`;
+  const run = input => {
+    const child = spawnSync(process.execPath, ['--input-type=module', '-e', script], { input: JSON.stringify(input), encoding: 'utf8', timeout: 5000,
+      env: { ...process.env, PERO_CRM_API_URL: 'https://crm.example.test', PERO_CRM_API_KEY: key } });
+    assert.equal(child.stdout.includes(key), false); assert.equal(child.stderr.includes(key), false);
+    return JSON.parse(child.stdout);
+  };
+  assert.equal(run({ action: 'job', args: { id: 'job', wait: true } }).result?.state, 'SUCCEEDED');
+  assert.equal(run({ action: 'job', args: { id: 'job' } }).result?.state, 'PENDING');
+  const description = 'x'.repeat(2 * 1024 * 1024);
+  assert.equal(run({ action: 'save', args: { id: 'doc', expectedRevision: 7, operationId: op, state: { items: [], description } } }).result?.id, 'doc');
+  assert.equal(run({ action: 'save', args: { operationId: op, state: { items: [], description } } }).result?.id, 'created');
+  assert.equal(run({ action: 'get', args: { id: 'doc', description } }).error?.code, 'KP_REQUEST_TOO_LARGE');
 });
 test('MCP downloads create new files only and reject paths outside configured workspace', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'pero-kp-agent-'));

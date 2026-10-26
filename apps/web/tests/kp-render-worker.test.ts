@@ -31,7 +31,7 @@ test("worker is inert by construction, requires both flags and only claims regis
   assert.equal(f.state.timers + f.state.claims, 0);
   worker.start(); assert.equal(await worker.runOne(), "disabled"); assert.equal(f.state.timers + f.state.claims, 0);
   const enabled = createRenderWorker({ queue: f.queue, handlers: { PDF: async () => { f.state.completed = true; } }, environment: on, timers: f.timers });
-  assert.equal(await enabled.runOne(), "succeeded"); assert.deepEqual(f.state.claimedKinds, ["PDF"]); assert.equal(f.state.cancelled, 2);
+  assert.equal(await enabled.runOne(), "succeeded"); assert.deepEqual(f.state.claimedKinds, ["PDF"]); assert.equal(f.state.cancelled, 1, "default0 keeps heartbeat but creates no absolute deadline");
 });
 
 test("lost heartbeat interrupts hung I/O without failing another owner's claim", async () => {
@@ -47,7 +47,7 @@ test("lost heartbeat interrupts hung I/O without failing another owner's claim",
 test("timeout releases only own claim and late continuation remains inactive", async () => {
   const f = fixture(), started = deferred<void>(), pending = deferred<void>();
   let context: RenderContext | undefined;
-  const worker = createRenderWorker({ queue: f.queue, environment: on, timers: f.timers, handlers: { PDF: async (_claim, value) => { context = value; started.resolve(); await pending.promise; } } });
+  const worker = createRenderWorker({ queue: f.queue, environment: on, timers: f.timers, timeoutMs: 1000, handlers: { PDF: async (_claim, value) => { context = value; started.resolve(); await pending.promise; } } });
   const running = worker.runOne(); await started.promise; f.deadline();
   assert.equal(await running, "failed"); assert.equal(f.state.failures, 1); assert.equal(context!.active(), false); assert.equal(context!.signal.aborted, true);
   pending.resolve(); assert.equal(await context!.ensureOwned(), false);

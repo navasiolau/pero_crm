@@ -3,6 +3,8 @@ import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, ListObjectVer
 import { storageConfiguration } from "@/lib/s3";
 import { RetentionError, normalizeRetentionBinding, sameRetentionBinding, type RetentionBinding } from "./retention-contract";
 import type { RetentionStorage } from "./retention-executor";
+import { Readable } from "node:stream";
+import { finished } from "node:stream/promises";
 
 const missing = (error: unknown) => !!error && typeof error === "object" && "name" in error && ["NoSuchKey", "NoSuchVersion", "NotFound"].includes(String(error.name));
 export function createRetentionS3Storage(options: { configuration?: typeof storageConfiguration; client?: (configuration: Extract<ReturnType<typeof storageConfiguration>, { mode: "s3" }>) => Pick<S3Client, "send"> } = {}): RetentionStorage {
@@ -35,25 +37,26 @@ export function createRetentionS3Storage(options: { configuration?: typeof stora
       catch (error) { if (missing(error)) return null; throw new RetentionError("KP_RETENTION_STORAGE_FAILED", true); }
       finally { remote.close(); }
     },
-    async digest(binding, key, versionId, maxBytes) {
-      const remote = target(binding), signal = AbortSignal.timeout(45_000);
+    async digest(binding, key, versionId, maxBytes, callerSignal) {
+      const remote = target(binding), signal = callerSignal ?? new AbortController().signal;
+      let body: (AsyncIterable<Uint8Array> & { destroy?: () => void }) | undefined, closed: Promise<void> | undefined;
+      const abort = () => body?.destroy?.(); signal.addEventListener("abort", abort, { once: true });
       try {
+        signal.throwIfAborted();
         const result = await remote.client.send(new GetObjectCommand({ Bucket: remote.bucket, Key: key, ...(versionId === null ? {} : { VersionId: versionId }) }), { abortSignal: signal });
-        if (!result.Body || !Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > 512 * 1024 * 1024 || result.ContentLength !== undefined && result.ContentLength !== maxBytes)
+        body = result.Body as unknown as AsyncIterable<Uint8Array> & { destroy?: () => void } | undefined;
+        if (body instanceof Readable) closed = finished(body, { cleanup: true }).catch(() => {});
+        if (!body || !Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > 2_147_483_647 || result.ContentLength !== undefined && result.ContentLength !== maxBytes)
           throw new RetentionError("KP_RETENTION_CHECKSUM_CHANGED");
-        const body = result.Body as unknown as AsyncIterable<Uint8Array> & { destroy?: () => void }, abort = () => body.destroy?.();
-        const hash = createHash("sha256"); let size = 0; signal.addEventListener("abort", abort, { once: true });
-        try {
-          if (signal.aborted || !(Symbol.asyncIterator in body)) throw new RetentionError("KP_RETENTION_STORAGE_FAILED", true);
-          for await (const chunk of body) {
-            if (!(chunk instanceof Uint8Array) || (size += chunk.byteLength) > maxBytes) throw new RetentionError("KP_RETENTION_CHECKSUM_CHANGED");
-            hash.update(chunk);
-          }
-          if (signal.aborted) throw new RetentionError("KP_RETENTION_STORAGE_FAILED", true);
-          return { size, sha256: hash.digest("hex") };
-        } finally { signal.removeEventListener("abort", abort); body.destroy?.(); }
-      } catch (error) { if (missing(error)) return null; if (error instanceof RetentionError) throw error; throw new RetentionError("KP_RETENTION_STORAGE_FAILED", true); }
-      finally { remote.close(); }
+        const hash = createHash("sha256"); let size = 0; signal.throwIfAborted();
+        if (!(Symbol.asyncIterator in body)) throw new RetentionError("KP_RETENTION_STORAGE_FAILED", true);
+        for await (const chunk of body) {
+          signal.throwIfAborted(); if (!(chunk instanceof Uint8Array) || (size += chunk.byteLength) > maxBytes) throw new RetentionError("KP_RETENTION_CHECKSUM_CHANGED");
+          hash.update(chunk);
+        }
+        signal.throwIfAborted(); return { size, sha256: hash.digest("hex") };
+      } catch (error) { if (signal.aborted) signal.throwIfAborted(); if (missing(error)) return null; if (error instanceof RetentionError) throw error; throw new RetentionError("KP_RETENTION_STORAGE_FAILED", true); }
+      finally { signal.removeEventListener("abort", abort); body?.destroy?.(); await closed; remote.close(); }
     },
     async deleteVersion(binding, key, versionId) {
       const remote = target(binding);

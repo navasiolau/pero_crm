@@ -16,7 +16,8 @@ test('unmatched template, duplicate or unused media and over-limit inputs fail b
   assert.throws(() => validateRenderInput({ ...base(), templateHash: 'old' }), /KP_RENDER_TEMPLATE_MISMATCH/);
   assert.throws(() => validateRenderInput({ ...base(), assets: [...base().assets, ...base().assets] }), /KP_RENDER_ASSET_DUPLICATE/);
   assert.throws(() => validateRenderInput({ ...base(), state: { items: [] } }), /KP_RENDER_ASSET_UNUSED/);
-  assert.throws(() => validateRenderInput({ ...base(), state: { items: new Array(LIMITS.items + 1).fill({}) } }), /KP_RENDER_STATE/);
+  assert.doesNotThrow(() => validateRenderInput({ ...base(), state: { items: Array(201).fill({ image: 'kp-media:photo' }) } }));
+  assert.throws(() => validateRenderInput({ ...base(), state: { items: {} } }), /KP_RENDER_STATE/);
   assert.throws(() => boundedBase64('not-base64', 100), /KP_RENDER_BASE64/);
   assert.throws(() => boundedBase64('aGVsbG8=', 4), /KP_RENDER_BYTES/);
 });

@@ -126,6 +126,19 @@ async function main(diagnostics) {
     diagnostics.phase('http-auth'); assert.equal((await fetch(url, { method: 'POST' })).status, 401);
     diagnostics.phase('http-bundle');
     const actual = await post(request); assert.ok(actual.pageCount >= 4); assert.equal(actual.templateHash, identity.templateHash);
+    diagnostics.phase('http-pdf-stream');
+    const manifest = { protocol: 1, kind: 'pdf', proposalId: request.proposalId, revision: request.revision,
+      templateHash: request.templateHash, state: request.state,
+      assets: [{ mediaId: 'photo', mimeType: 'image/png', size: png.length, sha256: hash(png) }] };
+    const json = Buffer.from(JSON.stringify(manifest)), header = Buffer.alloc(4); header.writeUInt32BE(json.length);
+    const streamed = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/vnd.pero.kp-pdf.v1', 'x-pero-renderer-key': secret }, body: Buffer.concat([header, json, png]) });
+    if (streamed.status !== 200) throw await rendererHttpError(streamed);
+    const streamedPdf = Buffer.from(await streamed.arrayBuffer());
+    assert.equal(streamed.headers.get('content-type'), 'application/pdf');
+    assert.equal(streamed.headers.get('content-length'), String(streamedPdf.length));
+    assert.equal(streamed.headers.get('x-pero-template-hash'), identity.templateHash);
+    assert.equal(streamed.headers.get('x-pero-content-sha256'), hash(streamedPdf));
+    assert.equal(streamed.headers.get('x-pero-render-page-count'), String(actual.pageCount));
     diagnostics.phase('baseline-launch');
     const browser = await puppeteer.launch({ executablePath, args: chromium.args, headless: true });
     let baselinePdf; const baselinePngs = [];
@@ -147,15 +160,19 @@ async function main(diagnostics) {
     diagnostics.phase('http-raster-actual'); const actualRaster = await post({ kind: 'rasterize', pdfBase64: actual.bytesBase64 });
     diagnostics.phase('http-raster-original');
     const baselineRaster = await post({ kind: 'rasterize', pdfBase64: baselinePdf.toString('base64') });
+    diagnostics.phase('http-raster-streamed');
+    const streamedRaster = await post({ kind: 'rasterize', pdfBase64: streamedPdf.toString('base64') });
     diagnostics.phase('compare-all-pages');
     diagnostics.phase('compare-raster-count');
     assert.equal(actualRaster.pageCount, actual.pageCount);
     diagnostics.phase('compare-raster-length');
     assert.equal(actualRaster.pagesBase64.length, baselineRaster.pagesBase64.length);
+    assert.equal(streamedRaster.pagesBase64.length, baselineRaster.pagesBase64.length);
     // Не передаём PNG/base64 в AssertionError: подробный diff сам требует много памяти.
     for (let index = 0; index < actualRaster.pagesBase64.length; index++) {
       diagnostics.phase('compare-raster-page-' + index);
       assert.equal(actualRaster.pagesBase64[index] === baselineRaster.pagesBase64[index], true, 'KP_CI_RASTER_PAGE_' + index);
+      assert.equal(streamedRaster.pagesBase64[index] === baselineRaster.pagesBase64[index], true, 'KP_CI_STREAMED_RASTER_PAGE_' + index);
     }
     diagnostics.phase('compare-png-count');
     assert.equal(baselinePngs.length, actual.pageCount);
@@ -183,9 +200,9 @@ async function main(diagnostics) {
     return { revision: process.env.PERO_KP_CI_REVISION, template: identity,
       runtime: { node: process.versions.node, browser: browserVersion, chromium: chromiumVersion, puppeteer: require('puppeteer-core/package.json').version },
       pages: actual.pageCount, allPagesIdentical: true, originalDpr2AppendicesIdentical: true, docxEntriesIdentical: true,
-      privateHttp: true, limitsVerified: true, pdfPagesSha256: actualRaster.pagesBase64.map(page => hash(Buffer.from(page, 'base64'))),
+      privateHttp: true, limitsVerified: true, streamedPdf: true, pdfPagesSha256: actualRaster.pagesBase64.map(page => hash(Buffer.from(page, 'base64'))),
       appendixSha256: actual.pagesBase64.map(page => hash(Buffer.from(page, 'base64'))) };
-  } finally { await new Promise(resolve => server.close(resolve)); }
+  } finally { await server.shutdown(); }
 }
 module.exports = { chromiumMountFacts, createDiagnostics, failureDetails, logSummary, rendererHttpError };
 if (require.main === module) {

@@ -113,6 +113,46 @@ test("pagination cursor loops fail safely instead of expanding scope", async () 
   assert.equal(f.events.filter(event => event.startsWith("delete:")).length, 0);
 });
 
+test("stalled digest renews the existing120s lease serially beyond120s of virtual time", async () => {
+  const f = retentionFixture(), plan = planProposalRetention(f.snapshot, acceptedPayload, retentionTime); plan.targets.forEach(target => f.seed(target));
+  const guard = f.repository.guard, digest = f.storage.digest; let now = 0, leaseUntil = 120_000, heartbeat: (() => void) | undefined;
+  let active = 0, maximum = 0, ticks = 0, cancellations = 0, first = true;
+  f.repository.guard = async (claim, target) => {
+    active++; maximum = Math.max(maximum, active);
+    try { assert.ok(now < leaseUntil, "existing lease must remain valid"); await Promise.resolve(); await guard(claim, target); leaseUntil = now + 120_000; }
+    finally { active--; }
+  };
+  f.storage.digest = async (...args) => {
+    if (first) {
+      first = false; assert.ok(heartbeat, "digest must install a heartbeat before stalled network I/O");
+      for (let index = 0; index < 8; index++) { now += 20_000; ticks++; heartbeat(); heartbeat(); await new Promise<void>(resolve => setImmediate(resolve)); }
+      assert.ok(now > 120_000); assert.ok(now < leaseUntil); assert.equal(args[4]?.aborted, false);
+    }
+    return digest(...args);
+  };
+  await executeProposalRetention({ ...f.dependencies, heartbeat(callback, milliseconds) { assert.equal(milliseconds, 20_000); heartbeat = callback; return () => { cancellations++; heartbeat = undefined; }; } }, await f.acquire());
+  assert.equal(f.state, "SUCCEEDED"); assert.equal(maximum, 1, "renewals never overlap"); assert.equal(ticks, 8); assert.ok(cancellations > 0); assert.equal(heartbeat, undefined);
+});
+
+test("digest guard loss aborts stalled read, awaits teardown and stops before any delete intent", async () => {
+  const f = retentionFixture(), plan = planProposalRetention(f.snapshot, acceptedPayload, retentionTime); plan.targets.forEach(target => f.seed(target));
+  let heartbeat: (() => void) | undefined, aborted = false, closed = false, settled = false, release!: () => void;
+  const closing = new Promise<void>(resolve => { release = resolve; }), started = new Promise<void>(resolve => {
+    f.storage.digest = async (_binding, _key, _version, _size, signal) => {
+      assert.ok(signal); resolve();
+      await new Promise<void>((_done, reject) => signal.addEventListener("abort", () => { aborted = true; void closing.then(() => { closed = true; reject(signal.reason); }); }, { once: true }));
+      throw Error("STALLED_DIGEST_MUST_ABORT");
+    };
+  });
+  const running = executeProposalRetention({ ...f.dependencies, heartbeat(callback) { heartbeat = callback; return () => { heartbeat = undefined; }; } }, await f.acquire());
+  void running.then(() => { settled = true; }, () => { settled = true; });
+  await started; f.cancel(); assert.ok(heartbeat); heartbeat(); await new Promise<void>(resolve => setImmediate(resolve));
+  assert.equal(aborted, true); assert.equal(settled, false, "caller must await the interrupted read teardown");
+  assert.equal(f.events.some(event => event.startsWith("intent:") || event.startsWith("delete:")), false);
+  release(); await assert.rejects(running, /CANCELLED/); assert.equal(closed, true); assert.equal(heartbeat, undefined);
+  assert.equal(f.events.some(event => event.startsWith("intent:") || event.startsWith("delete:")), false);
+});
+
 test("retired Product copy completes only after physical absence and preserves manual production file",async()=>{
   const snapshot=retentionSnapshot(),storedName='kp-11111111-1111-4111-8111-111111111111.jpg',key='project/'+storedName;
   const source=snapshot.media[0].optimized!,copy=fact(key,source.key);

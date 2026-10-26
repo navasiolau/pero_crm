@@ -1,5 +1,17 @@
 # Проверка №184
 
+## Потоковый PDF без абсолютного срока и с согласованным размером до2ГБ
+
+Первичная readonly-диагностика КП231:71 позиция,142 изображения, редакция5; задания завершались generic `KP_RENDER_FAILED` после повторов, браузер прекращал ожидание через120с. Зафиксированы независимые прежние сроки15/30/60/90/120/180с и пороги32/64/128МиБ. По уточнению владельца файлы свыше2ГБ не требуются; миграция/смена типов БД не выполняется.
+
+Реализованы framed binary assets → приватный disk spool → createPDFStream/file → binary HTTP → WEB private spool/hash → точный PENDING/orphan → conditional S3 Readable PUT/полный streaming readback → прежняя атомарная публикация. Скачивание API/проекта предварительно проверяется целиком в spool и отдаётся файловым потоком. Heartbeat60/20 и fencing сохранены; рендер не имеет общего execution deadline, HTTP disconnect/потеря ownership завершают принадлежащие процессы перед освобождением слота. Браузер/CLI продолжают ждать тот же job; parent React/Python timers длинных команд сняты. Runtime использует отдельный named `/spool` и OOM priority, сохраняя readonly root/cap-drop/no-new-privileges/private network; CPU/RAM/PID/custom-heap ceilings сняты.
+
+Необходимые local-проверки без реального большого рендера: engine22/22, затем узкий legacy-spool RED→GREEN7/7; web streaming/ACL/lifecycle/storage43/43 и TypeScript/ESLint PASS; retention18/18 с виртуальными160с и отменой digest; frontend transport13/API10/virtualtimebrowser1; AI Node2/Python1; deployment profile2. Независимое review нашло и закрыло P1 direct isolatedWorker без spool и P2 lease долгого digest. Больших local/production тестов нет.
+
+Readonly export текущей редакции6 КП231 получен без записи production: `kp231-source-export-53e99e45-b8f3-4bf9-b954-332dd9ea1504`, state MD5`f3eeaeed5436b86f76b436218e17c292`, SHA`81c45840812cf0178ac753ba7106324349762ad923553263adc33be503054b26`,142 проверенных images/77015506 байт. Предыдущая попытка экспорта корректно остановилась на изменении исходной редакции,0assets; она сохранена. Настоящая большая проверка выполняется только на существующем staging после нового CI/образа. Render/client/RPC/spool scope не подменяет Next auth/DB save; отдельно необходима primitive wire-проверка нового S3 Readable/ContentLength/IfNoneMatch на одном owned staging key с private intent и без business publication/удаления.
+
+Runtime/CI/приёмка и остаточные артефакты отслеживаются в `C:/Users/admin/.codex/tmp/pero-kp-normalize-20261026/large-render-fix-execution-state.json`. Миграций, дампов, reset/seed и изменений Restic нет.
+
 ## Снятие пределов страниц по поручению владельца 26.10.2026
 
 Удалены свойства `pages/docxPages/rasterPages` и соответствующие верхние границы PDF/bundle, растеризации, DOCX, web-ответа/budget и workflow приложений договора. Другой предел либо Infinity не вводятся. Проверки положительного safe-integer pageCount, соответствия массивов, bytes/source/item/auth/queue/deadline/CPU/memory сохранены. Печатные шаблоны и стили не изменены.

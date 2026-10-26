@@ -138,15 +138,16 @@ export class KpApiClient {
     return this.command('POST', `/contracts/${checkedId(id)}/generate`, { documentId: id, expectedRevision: revision(expectedRevision), sourceRefs, clientBaseline, operationId: requestId });
   }
 
-  async waitJob(id, { timeoutMs = 90_000, intervalMs = 1000 } = {}) {
-    const deadline = Date.now() + timeoutMs;
+  async waitJob(id, { timeoutMs = 0, intervalMs = 1000 } = {}) {
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 0 || !Number.isSafeInteger(intervalMs) || intervalMs < 1) fail('KP_JOB_WAIT_INVALID', 'Некорректные параметры ожидания задания.');
+    const deadline = timeoutMs === 0 ? null : Date.now() + timeoutMs;
     while (true) {
       const job = await this.getJob(id);
       const state = job.state ?? job.status;
       if (state === 'SUCCEEDED') return job;
       if (state === 'FAILED' || state === 'CANCELLED') throw new KpApiError(job.error?.code || 'KP_JOB_FAILED', job.error?.message || 'Выпуск документа не завершён.');
-      if (Date.now() >= deadline) throw new KpApiError('KP_JOB_PENDING', 'Выпуск ещё выполняется; продолжите чтение того же jobId.');
-      await new Promise(resolve => setTimeout(resolve, Math.min(intervalMs, Math.max(1, deadline - Date.now()))));
+      if (deadline !== null && Date.now() >= deadline) throw new KpApiError('KP_JOB_PENDING', 'Выпуск ещё выполняется; продолжите чтение того же jobId.');
+      await new Promise(resolve => setTimeout(resolve, deadline === null ? intervalMs : Math.min(intervalMs, Math.max(1, deadline - Date.now()))));
     }
   }
 

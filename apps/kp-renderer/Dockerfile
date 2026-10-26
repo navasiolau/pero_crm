@@ -19,9 +19,10 @@ RUN --mount=type=cache,id=pero-kp-pnpm11-glibc,target=/pnpm-store,sharing=locked
     pnpm install --frozen-lockfile --prod --filter @pero/kp-renderer... --store-dir /pnpm-store --package-import-method=copy
 COPY apps/kp-renderer apps/kp-renderer
 COPY packages/kp-template packages/kp-template
-ENV NODE_ENV=production PORT=3100
+RUN mkdir /spool && chown node:node /spool && chmod 700 /spool
+ENV NODE_ENV=production PORT=3100 PERO_KP_SPOOL_DIR=/spool
 USER node
 WORKDIR /app/apps/kp-renderer
 EXPOSE 3100
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s CMD node -e "fetch('http://127.0.0.1:3100/health',{headers:{'x-pero-renderer-key':process.env.PERO_KP_RENDERER_SECRET},signal:AbortSignal.timeout(4000)}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
-CMD ["node", "--max-old-space-size=384", "server.cjs"]
+CMD ["node", "server.cjs"]

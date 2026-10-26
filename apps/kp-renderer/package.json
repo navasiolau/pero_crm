@@ -3,6 +3,6 @@
   "version": "1.0.0",
   "private": true,
   "engines": { "node": ">=22" },
-  "scripts": { "start": "node --max-old-space-size=384 server.cjs", "test": "node --test test/*.test.cjs" },
+  "scripts": { "start": "node server.cjs", "test": "node --test test/*.test.cjs" },
   "dependencies": { "@pero/kp-template": "workspace:*", "@sparticuz/chromium": "141.0.0", "puppeteer-core": "24.43.1" }
 }

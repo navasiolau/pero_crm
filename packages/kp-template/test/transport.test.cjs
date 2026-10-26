@@ -247,6 +247,27 @@ test('known failed job permits a fresh Generate, while a lost export ACK retains
   assert.equal(releases.size, 2);
 });
 
+test('long PDF polling reconnects to the same job after transient failures without a new operation', async t => {
+  let now = 0, reads = 0; const delays = [];
+  t.mock.method(Date, 'now', () => now);
+  t.mock.method(global, 'setTimeout', (callback, delay) => { delays.push(delay); queueMicrotask(callback); return 0; });
+  const testbed = fixture(async call => {
+    if (call.options.method === 'POST') return response({ id: 'long-job', state: 'PROCESSING' });
+    assert.equal(call.url, '/api/kp/jobs/long-job'); now += 121_000; reads++;
+    if (reads === 1) throw new TypeError('SYNTHETIC_NETWORK_LOSS');
+    if (reads < 4) return new Response(JSON.stringify({ error: { message: 'Повторите чтение задания' } }), { status: reads === 2 ? 429 : 503 });
+    assert.equal(testbed.values.has('pero-crm-kp:actor:primary:operation:pdf'), true);
+    return response(reads === 4 ? { id: 'long-job', state: 'PENDING' } : { id: 'long-job', state: 'SUCCEEDED',
+      result: { artifactId: 'long-pdf', fileName: 'КП.pdf', downloadUrl: '/api/kp/artifacts/long-pdf/download' } });
+  });
+  testbed.api.focusDocument(doc()); testbed.api.attachEditor({ ensureSaved: async () => doc() });
+  assert.equal((await testbed.api.generatePdf()).artifactId, 'long-pdf');
+  assert.equal(reads, 5); assert.ok(now > 180_000);
+  assert.equal(testbed.calls.filter(call => call.options.method === 'POST').length, 1);
+  assert.equal(testbed.values.has('pero-crm-kp:actor:primary:operation:pdf'), false);
+  assert.deepEqual(delays, [750, 1500, 3000, 5000, 750]);
+});
+
 test('private upload scope survives reload and becomes current only after the saved snapshot ACK', async () => {
   const values = new Map(), storage = { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value), removeItem: key => values.delete(key) };
   const make = () => createTransport({ actorId: 'actor', documentId: 'primary', apiBase: '/api/kp' }, { storage,

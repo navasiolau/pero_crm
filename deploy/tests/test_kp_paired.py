@@ -112,6 +112,34 @@ class PairedRuntime(FakeRuntime):
 
 
 class PairedDeployTests(unittest.TestCase):
+    def test_disk_spool_profile_keeps_readonly_private_volume_and_refuses_host_mounts(self):
+        runtime = PairedRuntime()
+        cfg = runtime.configuration
+        cfg["services"]["web"]["environment"]["PERO_KP_PDF_SPOOL_ROOT"] = "/tmp"
+        renderer = cfg["services"]["kp-renderer"]
+        for field in ("mem_limit", "cpus", "pids_limit"):
+            renderer.pop(field)
+        renderer.update(oom_score_adj=1000, cap_drop=["ALL"], security_opt=["no-new-privileges:true"],
+                        volumes=[{"type": "volume", "source": "kp_render_spool", "target": "/spool"}])
+        renderer["environment"]["PERO_KP_SPOOL_DIR"] = "/spool"
+        cfg["volumes"]["kp_render_spool"] = {"name": "crm-staging_kp_render_spool"}
+        watcher.check_config(cfg, watcher.target_for("crm-staging", "/opt/crm-staging"))
+        actual = runtime.make_renderer(NEW_RENDERER)
+        actual["Config"]["Env"] = ["PERO_KP_SPOOL_DIR=/spool"]
+        actual["HostConfig"].update(Memory=0, NanoCpus=0, PidsLimit=None, OomScoreAdj=1000,
+                                    CapDrop=["ALL"], SecurityOpt=["no-new-privileges"])
+        actual["Mounts"] = [{"Type": "volume", "Driver": "local", "Name": "crm-staging_kp_render_spool",
+                             "Source": "/var/lib/docker/volumes/crm-staging_kp_render_spool/_data",
+                             "Destination": "/spool", "RW": True}]
+        watcher.check_renderer_container(actual, watcher.target_for("crm-staging", "/opt/crm-staging"), cfg)
+        unsafe = copy.deepcopy(cfg)
+        unsafe["volumes"]["kp_render_spool"]["driver_opts"] = {"device": "/var/run"}
+        with self.assertRaisesRegex(watcher.WatchError, "kp-compose-bounds"):
+            watcher.check_config(unsafe, watcher.target_for("crm-staging", "/opt/crm-staging"))
+        actual["Mounts"][0].update(Type="bind", Source="/var/run")
+        with self.assertRaisesRegex(watcher.WatchError, "kp-container-bounds"):
+            watcher.check_renderer_container(actual, watcher.target_for("crm-staging", "/opt/crm-staging"), cfg)
+
     def test_non_executable_or_unbounded_tmpfs_refuses_before_pull_or_up(self):
         for flags in ("rw,nosuid,size=512m,mode=1777", "rw,nosuid,noexec,size=512m,mode=1777",
                       "rw,nosuid,exec,noexec,size=512m,mode=1777", "rw,nosuid,exec,size=1g,mode=1777",

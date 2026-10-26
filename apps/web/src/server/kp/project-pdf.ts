@@ -5,9 +5,10 @@ import { liveProjectWhere } from "@/server/access/live-entities";
 import { createProposalArtifactStorage } from "./artifact-storage";
 import { apiFailure } from "./api-contract";
 import { proposalPdfFileName } from "./pdf-filename";
+import { pdfDownloadStream } from "./pdf-io";
 
 type ProjectPdfDb = Pick<Prisma.TransactionClient, "commercialProposal" | "proposalVersion" | "task" | "productPercentageParticipant">;
-type ArtifactReader = Pick<ReturnType<typeof createProposalArtifactStorage>, "read">;
+type ArtifactReader = Pick<ReturnType<typeof createProposalArtifactStorage>, "read"> & Partial<Pick<ReturnType<typeof createProposalArtifactStorage>, "downloadFile">>;
 
 async function currentProjectPdf(db: ProjectPdfDb, actor: VisibilityActor, projectId: string) {
   const currentActor = await resolveVisibilityActor(db, actor);
@@ -40,14 +41,19 @@ export async function readProjectProposalPdf(db: ProjectPdfDb, authorizeActor: (
   const actor = await authorizeActor();
   const current = actor ? await currentProjectPdf(db, actor, projectId) : null;
   if (!current) return null;
-  const bytes = await storage.read(current.artifact, async () => {
+  const authorize = async () => {
     const actor = await authorizeActor();
     const fresh = actor ? await currentProjectPdf(db, actor, projectId) : null;
     if (!fresh || fresh.versionId !== current.versionId || fresh.artifact.id !== current.artifact.id ||
       fresh.artifact.key !== current.artifact.key || fresh.artifact.sha256 !== current.artifact.sha256 || fresh.artifact.size !== current.artifact.size ||
       JSON.stringify(fresh.artifact.storageBinding) !== JSON.stringify(current.artifact.storageBinding))
       apiFailure("KP_PROJECT_PDF_NOT_FOUND", 404, "Файл не найден");
-  }, signal);
+  };
+  if (storage.downloadFile) {
+    const file = await storage.downloadFile(current.artifact, authorize, signal);
+    return { body: pdfDownloadStream(async function* (readSignal) { yield* await file.openRead(readSignal); }, signal, file.dispose), size: file.size, fileName: current.fileName, mimeType: "application/pdf" };
+  }
+  const bytes = await storage.read(current.artifact, authorize, signal);
   return { bytes, fileName: current.fileName, mimeType: "application/pdf" };
 }
 

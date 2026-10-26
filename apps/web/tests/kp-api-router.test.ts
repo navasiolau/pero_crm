@@ -3,7 +3,7 @@ import test from "node:test";
 import { randomUUID } from "node:crypto";
 import { createKpApiHandler } from "../src/server/kp/api-router";
 import { KpApiError, type ApiAction, type KpApiContext } from "../src/server/kp/api-contract";
-import { KP_JSON_LIMIT } from "../src/server/kp/api-body";
+import { KP_DOCUMENT_JSON_LIMIT, KP_JSON_LIMIT } from "../src/server/kp/api-body";
 import { authorizeKpResource, apiOperationScope } from "../src/server/kp/api-resource-policy";
 import type { KpApiScope } from "../src/lib/kp-api-scopes";
 
@@ -42,13 +42,21 @@ test("canonical save and operation lookup normalize UUID without mutating state"
   await f.handler(request(`operations/${operationId.toUpperCase()}`), ["operations", operationId.toUpperCase()], "bearer");
   assert.equal(f.calls.at(-1)?.input.operationId, operationId);
 });
-test("actual stream limit is enforced with absent and dishonest Content-Length", async () => {
+test("full document JSON exceeds the former limit while unrelated commands remain bounded", async () => {
+  const f = fixture(), state = { items: Array.from({ length: 201 }, (_, index) => ({ id: `item-${index}`, qty: 1 })), text: "x".repeat(KP_JSON_LIMIT) };
+  for (const [path, method, extra] of [["documents", "POST", {}], ["documents/qp", "PUT", { expectedRevision: 0 }]] as const) {
+    assert.equal((await f.handler(request(path, method, { operationId: randomUUID(), state, ...extra }), path.split("/"), "bearer")).status, 200);
+    assert.deepEqual(f.calls.at(-1)?.input.state, state);
+  }
+  const oversized = request("documents", "POST", { operationId: randomUUID(), state: { items: [] } });
+  oversized.headers.set("content-length", String(KP_DOCUMENT_JSON_LIMIT + 1));
+  assert.equal((await f.handler(oversized, ["documents"], "bearer")).status, 413); assert.equal(f.calls.length, 2);
   for (const length of [null, "1"]) {
     let cancelled = false;
     const body = new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(new Uint8Array(KP_JSON_LIMIT + 1)); }, cancel() { cancelled = true; } });
-    const f = fixture(); const req = new Request("https://crm.example.invalid/api/v1/kp/documents", { method: "POST", duplex: "half", body,
+    const bounded = fixture(); const req = new Request("https://crm.example.invalid/api/v1/kp/clients", { method: "POST", duplex: "half", body,
       headers: { "content-type": "application/json", ...(length ? { "content-length": length } : {}) } } as RequestInit & { duplex: "half" });
-    assert.equal((await f.handler(req, ["documents"], "bearer")).status, 413); assert.equal(cancelled, true); assert.equal(f.calls.length, 0);
+    assert.equal((await bounded.handler(req, ["clients"], "bearer")).status, 413); assert.equal(cancelled, true); assert.equal(bounded.calls.length, 0);
   }
 });
 test("authorization happens before body consumption and safe errors disclose no internals", async () => {

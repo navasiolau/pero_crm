@@ -28,6 +28,12 @@ export type ProposalMediaScope = { kind: 'uploaded' | 'current' } | { kind: 'ver
 export type ProposalMediaAsset = { mediaId: string; mimeType: 'image/jpeg' | 'image/png' | 'image/webp' | 'image/avif' | 'image/gif'; bytesBase64: string };
 /** Только вызывающий сервер читает сохранённую ревизию и проверяет принадлежность assets. */
 export type SavedProposalRenderInput = { kind: 'pdf'; proposalId: string; revision: number; state: ProposalState; assets: ProposalMediaAsset[]; templateHash: string };
+/** Приватный framing: u32BE длины JSON, manifest, затем бинарные assets в заданном порядке. */
+export type ProposalPdfStreamManifest = {
+  protocol: 1; kind: 'pdf'; proposalId: string; revision: number; state: ProposalState; templateHash: string;
+  assets: { mediaId: string; mimeType: ProposalMediaAsset['mimeType']; size: number; sha256: string }[];
+};
+export type ProposalPdfStreamMetadata = { size: number; sha256: string; pageCount: number; templateHash: string };
 export type SavedProposalBundleRenderInput = Omit<SavedProposalRenderInput, 'kind'> & { kind: 'bundle' };
 export type RetainedPdfRenderInput = { kind: 'rasterize'; pdfBase64: string };
 export type SavedContractRenderInput = { kind: 'docx'; settings: { [key: string]: Json }; summary: { [key: string]: Json }; profile: { [key: string]: Json };

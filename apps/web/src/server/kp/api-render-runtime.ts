@@ -12,7 +12,7 @@ import { storedKpRate } from "./api-rates";
 import { projectProposalPricing } from "./pricing";
 import { proposalTemporaryClientId } from "./proposal-client";
 import { parseMediaBinding, type MediaMime } from "./media-contract";
-import { contractArtifact, isProposalMediaMime, lifecycleMediaIds, proposalRenderAssets } from "./api-render-adapters";
+import { contractArtifact, isProposalMediaMime, lifecycleMediaIds } from "./api-render-adapters";
 import { createProposalMediaS3Storage } from "./media-storage";
 import { createProposalArtifactStorage } from "./artifact-storage";
 import { createPrismaLifecycleStore, assertRenderJobClaimInTransaction, freezeSourcesInTransaction,
@@ -20,7 +20,9 @@ import { createPrismaLifecycleStore, assertRenderJobClaimInTransaction, freezeSo
 import { parseRenderJobPayload, ProposalLifecycleError, type LifecyclePorts, type LifecycleObject, type FrozenProposalSource, type RenderJobClaim } from "./lifecycle-contract";
 import { createPrismaRenderQueue } from "./render-queue";
 import { createPdfRenderHandler, createRenderWorker, type RenderContext } from "./render-worker";
-import { renderProposalPdf, renderProposalBundle, rasterizeRetainedPdf, renderContractDocx } from "./renderer-client";
+import { renderProposalBundle, rasterizeRetainedPdf, renderContractDocx } from "./renderer-client";
+import { renderProposalPdfStream } from "./renderer-client";
+import type { PdfStreamAsset } from "./pdf-io";
 import { createContractWorkflow } from "./contract-workflow";
 import { createPostgresContractStore } from "./contract-store";
 import { createContractModelPort } from "./contract-model";
@@ -44,28 +46,41 @@ export function kpLifecyclePorts(scope: Parameters<typeof lifecycleSecurity>[0])
   } satisfies LifecyclePorts & ReturnType<typeof lifecycleSecurity>;
 }
 
-async function frozenAssets(source: Pick<FrozenProposalSource, "media">, authorize: () => Promise<unknown>) {
+async function frozenAssets(source: Pick<FrozenProposalSource, "media">, authorize: () => Promise<unknown>, signal?: AbortSignal) {
   const total = source.media.reduce((sum, media) => sum + media.size, 0);
-  if (!Number.isSafeInteger(total) || total > 64 * 1024 * 1024) return apiFailure("KP_RENDER_ASSET_LIMIT", 413, "Слишком большой объём изображений КП");
+  if (!Number.isSafeInteger(total) || total > KP_RENDER_LIMITS.totalAssetBytes) return apiFailure("KP_RENDER_ASSET_LIMIT", 413, "Слишком большой объём изображений КП");
   const storage = createProposalMediaS3Storage(), assets: { mediaId: string; mimeType: MediaMime; bytesBase64: string }[] = [];
   for (const media of source.media) {
     await authorize();
     if (!isProposalMediaMime(media.mimeType)) return apiFailure("KP_RENDER_ASSET_INVALID", 410, "Формат сохранённого изображения недоступен");
-    const bytes = await storage.read(parseMediaBinding(media.binding), { key: media.key, sha256: media.sha256, size: media.size, mimeType: media.mimeType });
+    const bytes = await storage.read(parseMediaBinding(media.binding), { key: media.key, sha256: media.sha256, size: media.size, mimeType: media.mimeType }, signal);
     if (!bytes) return apiFailure("KP_MEDIA_UNAVAILABLE", 410, "Изображение версии недоступно");
     await authorize(); assets.push({ mediaId: media.id, mimeType: media.mimeType, bytesBase64: bytes.toString("base64") });
   }
   return assets;
 }
 function rendererOptions(signal?: AbortSignal) {
-  return signal ? { fetcher: ((url, options) => fetch(url, { ...options,
-    signal: options?.signal ? AbortSignal.any([signal, options.signal]) : signal })) as typeof fetch } : {};
+  return { signal };
 }
-const renderInput = async (source: { proposalId: string; revision: number; state: unknown; media: FrozenProposalSource["media"]; template: { templateHash: string } }, authorize: () => Promise<unknown>): Promise<SavedProposalRenderInput> => {
+function frozenAssetStreams(source: Pick<FrozenProposalSource, "media">, authorize: () => Promise<unknown>): PdfStreamAsset[] {
+  const storage = createProposalMediaS3Storage();
+  return source.media.map(media => {
+    if (!isProposalMediaMime(media.mimeType)) return apiFailure("KP_RENDER_ASSET_INVALID", 410, "Формат сохранённого изображения недоступен");
+    const mimeType = media.mimeType;
+    return { mediaId: media.id, mimeType, size: media.size, sha256: media.sha256,
+      async openRead(signal) {
+        await authorize(); signal?.throwIfAborted();
+        if (!storage.openRead) return apiFailure("KP_RENDER_ASSET_INVALID", 503, "Поток изображений недоступен");
+        const stream = storage.openRead(parseMediaBinding(media.binding), { key: media.key, sha256: media.sha256, size: media.size, mimeType }, signal);
+        return (async function* () { try { for await (const chunk of stream) yield chunk; } catch (error) { if (error && typeof error === "object" && "name" in error && ["NoSuchKey", "NotFound"].includes(String(error.name))) return apiFailure("KP_MEDIA_UNAVAILABLE", 410, "Изображение версии недоступно"); throw error; } await authorize(); signal?.throwIfAborted(); })();
+      } };
+  });
+}
+const renderInput = async (source: { proposalId: string; revision: number; state: unknown; media: FrozenProposalSource["media"]; template: { templateHash: string } }, authorize: () => Promise<unknown>, signal?: AbortSignal): Promise<SavedProposalRenderInput> => {
   if (!source.state || typeof source.state !== "object" || !("items" in source.state) || !Array.isArray(source.state.items))
     return apiFailure("KP_RENDER_SOURCE_INVALID", 410, "Снимок КП недоступен");
   return { kind: "pdf", proposalId: source.proposalId, revision: source.revision, state: source.state as SavedProposalRenderInput["state"],
-    assets: await frozenAssets(source, authorize), templateHash: source.template.templateHash };
+    assets: await frozenAssets(source, authorize, signal), templateHash: source.template.templateHash };
 };
 
 export async function kpContractWorkflow(scope: ContractScope, context?: KpApiContext, claim?: ContractClaim, ownership?: RenderContext) {
@@ -109,7 +124,7 @@ export async function kpContractWorkflow(scope: ContractScope, context?: KpApiCo
     },
     io: {
       async renderPdf(source) {
-        await guard(); const input = await renderInput(source, guard);
+        await guard(); const input = await renderInput(source, guard, ownership?.signal);
         const result = await renderProposalBundle(input, rendererOptions(ownership?.signal)); await guard();
         return { bytes: result.bytes, pages: result.pages };
       },
@@ -146,10 +161,10 @@ function pdfHandler(claim: RenderJobClaim, ownership: RenderContext) {
   };
   return createPdfRenderHandler({ transaction, ports, io: {
     storageBinding: () => lifecycleJson(storage.binding()),
-    loadAssets: source => frozenAssets(source, guard),
-    render: (input, signal) => renderProposalPdf({ ...input, assets: proposalRenderAssets(input.assets) }, rendererOptions(signal)),
-    upload: async (artifact, bytes, signal) => { await storage.uploadAndVerify(artifact, bytes, guard, signal); },
-    verify: async (artifact, signal) => { await storage.read(artifact, guard, signal); return { id: artifact.id, storageBinding: artifact.storageBinding, key: artifact.key, sha256: artifact.sha256, size: artifact.size }; },
+    loadAssets: async source => frozenAssetStreams(source, guard),
+    render: (input, signal) => renderProposalPdfStream({ ...input, assets: input.assets.map(asset => "openRead" in asset ? asset : apiFailure("KP_RENDER_ASSET_INVALID", 503, "Поток изображений недоступен")) }, rendererOptions(signal)),
+    upload: async (artifact, bytes, signal) => ({ ...await storage.uploadAndVerify(artifact, bytes, guard, signal), id: artifact.id, storageBinding: artifact.storageBinding }),
+    verify: async (artifact, signal) => ({ ...await storage.verify(artifact, guard, signal), id: artifact.id, storageBinding: artifact.storageBinding }),
   } })(claim, ownership).catch(error => {
     if (error instanceof KpApiError) throw new ProposalLifecycleError(error.code, error.status, error.message);
     throw error;
