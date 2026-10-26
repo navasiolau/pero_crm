@@ -13,7 +13,7 @@ export function lifecycleFixture() {
   let state = {
     now: new Date("2026-10-18T10:00:00.000Z"), revoked: false, authorizations: 0, failLink: false,
     proposal: { id: "proposal1", projectId: "project1", clientId: "client1", state: { client: { crmId: "client1", crmSnapshot: { id: "client1", name: "Клиент А", phone: "" } }, items: [{ id: "item1", image: "kp-media:media1", title: "До изменения" }] }, revision: 1,
-      currency: "USD", rate: "3.2500000000", rateDate: "2026-10-18", rateSource: "MANUAL", isArchive: false, deletedAt: null, acceptedVersionId: null, retentionEpoch: 0 } as ProposalRecord,
+      currency: "USD", rate: "3.2500000000", rateDate: "2026-10-18", rateSource: "MANUAL", deletedAt: null, acceptedVersionId: null, retentionEpoch: 0 } as ProposalRecord,
     project: { id: "project1", stage: "LEAD" as const as "LEAD" | "ESTIMATE" | "CONTRACT" | "IN_WORK", deletedAt: null as Date | null },
     clients: new Map<string, LifecycleObject>([["client1", { name: "Клиент А", phone: "" }], ["client2", { name: "Клиент Б", phone: "" }]]),
     users: new Map<string, DomainActor>([["manager1", { id: "manager1", name: "Менеджер", roles: ["MANAGER"], source: "api" }], ["manager2", { id: "manager2", name: "Другой менеджер", roles: ["MANAGER"], source: "api" }]]),

@@ -8,11 +8,11 @@ import { engineerFixture, fixtureModel, type FixtureRow } from "./helpers/visibi
 const fixture = engineerFixture(), project = fixture.projects[0];
 project.deletedAt = null;
 const source = fixture.products[0];
-const proposal = { id: "kp", projectId: project.id, project, deletedAt: null, isArchive: false };
+const proposal = { id: "kp", projectId: project.id, project, deletedAt: null, isArchive: true };
 const candidates: FixtureRow[] = [
   { id: "kp-linked", proposalItem: { deletedAt: null, proposal } },
   { id: "crm-only", proposalItem: null },
-  { id: "kp-archived", proposalItem: { deletedAt: null, proposal: { ...proposal, isArchive: true } } },
+  { id: "kp-unbound", proposalItem: { deletedAt: null, proposal: { ...proposal, projectId: null, project: null } } },
   { id: "kp-deleted", proposalItem: { deletedAt: new Date(0), proposal } },
 ].map(candidate => ({ ...source, ...candidate, number: candidate.id, title: candidate.id, status: "DRAFT", deletedAt: null,
   project, projectId: project.id, tasks: [], files: [], works: [], percentageConfigs: [] }));

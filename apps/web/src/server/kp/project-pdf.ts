@@ -12,7 +12,7 @@ type ArtifactReader = Pick<ReturnType<typeof createProposalArtifactStorage>, "re
 async function currentProjectPdf(db: ProjectPdfDb, actor: VisibilityActor, projectId: string) {
   const currentActor = await resolveVisibilityActor(db, actor);
   const proposal = await db.commercialProposal.findFirst({
-    where: { projectId, deletedAt: null, isArchive: false, project: generalProjectFileVisibilityWhere(currentActor) },
+    where: { projectId, deletedAt: null, project: generalProjectFileVisibilityWhere(currentActor) },
     select: { id: true, acceptedVersionId: true, project: { select: { stage: true } } },
   });
   if (!proposal?.project || proposal.project.stage !== "LEAD" && !proposal.acceptedVersionId) return null;
@@ -55,7 +55,7 @@ export async function readProjectProposalPdf(db: ProjectPdfDb, authorizeActor: (
 export async function publishedProjectPdfPaths(db: Pick<Prisma.TransactionClient, "commercialProposal">, proposalIds: readonly string[]) {
   if (!proposalIds.length) return [];
   const proposals = await db.commercialProposal.findMany({ where: {
-    id: { in: [...new Set(proposalIds)] }, projectId: { not: null }, deletedAt: null, isArchive: false, project: liveProjectWhere,
+    id: { in: [...new Set(proposalIds)] }, projectId: { not: null }, deletedAt: null, project: liveProjectWhere,
   }, select: { projectId: true } });
   return proposals.length ? ["/projects", ...new Set(proposals.map(proposal => `/projects/${proposal.projectId}`))] : [];
 }

@@ -9,7 +9,7 @@ import { createMediaUploadPlan, createProductMediaCopyPlan,
   type ProposalMediaRepository } from "./media-core";
 
 type Tx = Prisma.TransactionClient;
-type OwnerRow = MediaOwner & { deletedAt: Date | null; isArchive: boolean; stage: string | null; projectDeletedAt: Date | null };
+type OwnerRow = MediaOwner & { deletedAt: Date | null; stage: string | null; projectDeletedAt: Date | null };
 type JobRow = { id: string; proposalId: string | null; kind: string; state: string; payload: unknown; result: unknown;
   createdById: string | null; attempts: number; maxAttempts: number; leaseOwner: string | null; leaseUntil: Date | null };
 export type OwnedMediaRow = { id: string; proposalId: string; storageBinding: unknown; originalKey: string | null;
@@ -27,7 +27,7 @@ export async function lockProposalMediaOwner(tx: Tx, input: { actorId: string; p
   if (write && reference.projectId) await lockProjectRow(tx, reference.projectId);
   if (write) await tx.$queryRaw`SELECT id FROM "CommercialProposal" WHERE id = ${input.proposalId} FOR UPDATE`;
   const [owner] = await tx.$queryRaw<OwnerRow[]>`
-    SELECT cp.id AS "proposalId", cp."projectId", cp.revision, cp."createdAt", cp."deletedAt", cp."isArchive",
+    SELECT cp.id AS "proposalId", cp."projectId", cp.revision, cp."createdAt", cp."deletedAt",
       p.stage::text AS stage, p."deletedAt" AS "projectDeletedAt"
     FROM "CommercialProposal" cp LEFT JOIN "Project" p ON p.id = cp."projectId" WHERE cp.id = ${input.proposalId}`;
   const [user] = await tx.$queryRaw<{ active: boolean; roles: Role[] }[]>(Prisma.sql`
@@ -199,7 +199,7 @@ export function createPrismaProposalMediaRepository(db: Pick<PrismaClient, "$tra
       const owner = await lockProposalMediaOwner(tx, input, false);
       const media = await ownedProposalMedia(tx, input.proposalId, input.mediaId, time());
       if (input.scope.kind === "uploaded") {
-        if (owner.isArchive || owner.stage !== "LEAD") throw new ProposalMediaError("KP_MEDIA_NOT_FOUND");
+        if (!owner.projectId || owner.stage !== "LEAD") throw new ProposalMediaError("KP_MEDIA_NOT_FOUND");
         const [upload] = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM "ProposalJob" WHERE id = ${media.uploadJobId}
           AND "createdById" = ${input.actorId} AND "proposalId" = ${input.proposalId} AND kind = 'UPLOAD_MEDIA' AND state = 'SUCCEEDED'`;
         if (!upload) throw new ProposalMediaError("KP_MEDIA_NOT_FOUND");

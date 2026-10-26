@@ -13,7 +13,7 @@ export type ContractSettings = ContractObject & { number: string; date: string; 
 export type ContractClient = { id: string; name: string; lastName: string | null; middleName: string | null; phone: string;
   email: string | null; address: string | null; passportNumber: string | null; passportIssuedBy: string | null; updatedAt: string };
 export type ContractSource = { proposalId: string; revision: number; state: ContractObject; clientId: string | null; currency: string;
-  isArchive: boolean; deletedAt: string | null; updatedAt: string; acceptedVersionId: string | null; acceptedPdfArtifactId: string | null;
+  deletedAt: string | null; updatedAt: string; acceptedVersionId: string | null; acceptedPdfArtifactId: string | null;
   project: { id: string; stage: string; clientId: string; address: string | null; deletedAt: string | null } | null };
 export type ContractRecord = { id: string; primaryProposalId: string; revision: number; settings: ContractObject };
 export type ContractModelProposal = { id: string; updatedAt: number; state: ContractObject };

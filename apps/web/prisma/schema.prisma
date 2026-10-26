@@ -1647,6 +1647,7 @@ model CommercialProposal {
   client            Client? @relation(fields: [clientId], references: [id], onDelete: Restrict)
   sourceId          String? @unique
   sourceNumber      String?
+  /// Неиспользуемый исторический столбец для совместимости применённых миграций и отката образа; на поведение КП не влияет.
   isArchive         Boolean @default(false)
   state             Json
   revision          Int @default(0)

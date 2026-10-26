@@ -31,7 +31,7 @@ export function createPostgresContractTransaction(tx: Prisma.TransactionClient):
       if (!ids.length) return [];
       const rows = await tx.$queryRaw<(Omit<ContractSource, "updatedAt" | "deletedAt"> & { updatedAt: Date; deletedAt: Date | null })[]>(Prisma.sql`
         SELECT cp.id AS "proposalId", cp.revision, cp.state, cp."clientId", cp.currency::text AS currency,
-          cp."isArchive", cp."deletedAt", cp."updatedAt", cp."acceptedVersionId", accepted."pdfArtifactId" AS "acceptedPdfArtifactId",
+          cp."deletedAt", cp."updatedAt", cp."acceptedVersionId", accepted."pdfArtifactId" AS "acceptedPdfArtifactId",
           CASE WHEN p.id IS NULL THEN NULL ELSE jsonb_build_object('id',p.id,'stage',p.stage::text,'clientId',p."clientId",'address',p.address,'deletedAt',p."deletedAt") END AS project
         FROM "CommercialProposal" cp LEFT JOIN "Project" p ON p.id=cp."projectId"
         LEFT JOIN "ProposalVersion" accepted ON accepted.id=cp."acceptedVersionId" AND accepted."proposalId"=cp.id

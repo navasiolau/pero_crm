@@ -23,7 +23,7 @@ export async function verifyKpVersionNative(tx: Prisma.TransactionClient, input:
     SELECT c."sourceId",c."createdById",u."name" AS "actorName" FROM "CommercialProposal" c JOIN "User" u ON u."id"=${input.actor.id} WHERE c."id"=${input.proposalId}`;
   assert.deepEqual(owned, [{ sourceId: marker, createdById: input.actor.id, actorName: marker }], "KP185_EXACT_OWNED_FIXTURES_REQUIRED");
   const store = createPrismaLifecycleStore(tx, input.ports), source = await store.source(input.proposalId);
-  assert.ok(source?.project && source.project.stage === "LEAD" && !source.proposal.isArchive && !source.proposal.deletedAt, "KP185_OWNED_LEAD_REQUIRED");
+  assert.ok(source?.project && source.project.stage === "LEAD" && !source.proposal.deletedAt, "KP185_OWNED_LEAD_REQUIRED");
   const projectId = source.project.id, revision = source.proposal.revision, operationId = randomUUID();
   const command = { proposalId: input.proposalId, expectedRevision: revision, operationId };
   const requested = await requestProposalPdf(store, input.actor, command, input.ports);

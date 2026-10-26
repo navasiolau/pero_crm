@@ -32,12 +32,12 @@ const state = {
   manager: { name: 'Контрольный менеджер', role: 'Менеджер', phone: '+000' }, footer: 'Контрольная организация · Гарантия — 12 месяцев.'
 };
 const baseDoc = () => ({ id: 'primary', revision: 2, state: copy(state), createdAt: '2026-10-18T09:00:00.000Z', updatedAt: '2026-10-18T10:00:00.000Z',
-  project: { id: 'project', number: '231', stage: 'LEAD' }, client: { id: 'client', label: state.client.name }, canEdit: true, isArchive: false,
+  project: { id: 'project', number: '231', stage: 'LEAD' }, client: { id: 'client', label: state.client.name }, canEdit: true,
   fx: { currency: 'BYN', rate: '1', date: '2026-10-18', source: 'NBRB' } });
-let browser, server, origin, image, doc, writes, pdfRequests, refuseSave, requests, contractSettings, contractRevision, clientDetails;
+let browser, server, origin, image, doc, writes, pdfRequests, refuseSave, refuseRate, requests, contractSettings, contractRevision, clientDetails;
 const originalClient = () => ({ id: 'client', label: state.client.name, isTemporary: false, snapshot: { id: 'client', name: 'заказчик', lastName: 'Контрольный', middleName: null, phone: '+000', email: 'fixture@example.invalid', address: 'Контрольный адрес', comment: null, passportNumber: 'номер', passportIssuedBy: 'выдан' } });
 const selectedClient = () => ({ id: 'selected-client', label: 'Новый заказчик', isTemporary: false, snapshot: { id: 'selected-client', name: 'Новый заказчик', lastName: null, middleName: null, phone: '+001', email: 'selected@example.invalid', address: 'Другой адрес', comment: null, passportNumber: 'обновлённый номер', passportIssuedBy: 'другой орган' } });
-function reset() { doc = baseDoc(); writes = []; pdfRequests = []; refuseSave = false; requests = []; contractSettings = null; contractRevision = 0; clientDetails = originalClient(); }
+function reset() { doc = baseDoc(); writes = []; pdfRequests = []; refuseSave = false; refuseRate = false; requests = []; contractSettings = null; contractRevision = 0; clientDetails = originalClient(); }
 const types = { js: 'text/javascript', css: 'text/css', woff2: 'font/woff2', png: 'image/png' };
 function json(response, value, status = 200) { response.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' }); response.end(JSON.stringify(value)); }
 async function body(request) { const chunks = []; for await (const chunk of request) chunks.push(chunk); return JSON.parse(Buffer.concat(chunks).toString()); }
@@ -91,12 +91,15 @@ before(async () => {
       contractSettings ??= Object.assign(template.ContractModel.defaults(doc.state, doc.id), doc.client.id === 'selected-client'
         ? { deliveryAddress: 'Другой адрес', customer: { type: 'individual', name: 'Новый заказчик', phone: '+001', email: 'selected@example.invalid', passport: 'обновлённый номер, другой орган' } }
         : { deliveryAddress: 'Контрольный адрес', customer: { type: 'individual', name: 'Клиент CRM', phone: '+000', passport: 'Контрольный документ' } });
-      json(response, { contractId: 'contract', revision: contractRevision, canEdit: !doc.isArchive, settings: contractSettings, profiles: require(template.assetPath('templates/contracts/contractors.json')),
+      json(response, { contractId: 'contract', revision: contractRevision, canEdit: !!doc.project, settings: contractSettings, profiles: require(template.assetPath('templates/contracts/contractors.json')),
         sourceRefs: [{ proposalId: doc.id, expectedRevision: doc.revision }], clientDefaults: {}, clientBaseline: 'baseline' }); return;
     }
     if (url.pathname === '/api/kp/contracts/history') { json(response, { versions: [{ id: 'contract-version', createdAt: '2026-10-18T09:00:00Z', docxArtifactId: 'docx', fileName: 'contract_231_Pero.docx' }] }); return; }
     if (url.pathname === '/api/kp/contracts' && request.method === 'PUT') { const input = await body(request); assert.equal(input.primaryState, undefined); contractSettings = input.settings; contractRevision++; json(response, { revision: contractRevision, clientBaseline: 'baseline' }); return; }
-    if (url.pathname === '/api/kp/rates') { const currency = url.searchParams.get('currency'); json(response, { fx: { currency, rate: currency === 'USD' ? '3.125' : '1', date: url.searchParams.get('date'), source: 'NBRB' } }); return; }
+    if (url.pathname === '/api/kp/rates') {
+      if (refuseRate) { json(response, { error: { code: 'KP_RATE_UNAVAILABLE', message: 'Курс НБРБ недоступен. Задайте ручной курс' } }, 503); return; }
+      const currency = url.searchParams.get('currency'); json(response, { fx: { currency, rate: currency === 'USD' ? '3.125' : '1', date: url.searchParams.get('date'), source: 'NBRB' } }); return;
+    }
     response.writeHead(404); response.end();
   })().catch(error => { response.writeHead(500); response.end(JSON.stringify({ error: error.message })); }); });
   server.listen(0, '127.0.0.1'); await once(server, 'listening'); origin = 'http://127.0.0.1:' + server.address().port;
@@ -184,8 +187,8 @@ test('locked editor disables writes while original contract form loads current s
   } finally { await context.close(); }
 });
 
-test('archived contract form keeps immutable history reachable while draft editing is disabled', async () => {
-  reset(); doc.canEdit = false; doc.isArchive = true; const { context, page, child } = await hostPage();
+test('unlinked contract form keeps immutable history reachable while draft editing is disabled', async () => {
+  reset(); doc.canEdit = false; doc.project = null; const { context, page, child } = await hostPage();
   try {
     await page.getByRole('button', { name: 'Сгенерировать договор', exact: true }).click();
     await child.locator('#contract-customer-name').waitFor(); assert.equal(await child.locator('#contract-customer-name').isDisabled(), true);
@@ -193,6 +196,58 @@ test('archived contract form keeps immutable history reachable while draft editi
     const history = child.getByRole('link', { name: /contract_231_Pero\.docx/ }); await history.waitFor();
     assert.equal(await history.getAttribute('href'), '/api/kp/artifacts/docx/download');
     assert.equal(writes.length, 0);
+  } finally { await context.close(); }
+});
+
+test('editable imported proposal opens without writes and missing FX is only previewed on an explicit rate action', async () => {
+  reset(); doc.fx = null; doc.state.currency = '₽'; doc.client.label = 'Вручную изменённый клиент CRM';
+  delete doc.state.warrantyMonths; delete doc.state.items[0].note;
+  const { context, page, child } = await hostPage();
+  try {
+    await expect(child.locator('[data-path="items.0.name"]')).toBeEnabled();
+    await expect(child.locator('[data-path="client.name"]')).toHaveValue(state.client.name);
+    await page.waitForTimeout(1400);
+    assert.equal(writes.length, 0); assert.equal(requests.filter(request => request.path === '/api/kp/rates').length, 0);
+    await page.getByRole('button', { name: 'Сгенерировать договор', exact: true }).click();
+    await child.locator('#contract-customer-name').waitFor();
+    assert.equal(writes.length, 0, 'inspecting contract defaults must not save editor hydration');
+    await child.getByRole('button', { name: 'Отмена', exact: true }).click();
+    await child.locator('#contractModal').waitFor({ state: 'hidden' });
+    await page.getByRole('button', { name: 'Курс', exact: true }).click();
+    const dialog = page.getByRole('dialog'); await expect(dialog.getByRole('heading')).toHaveText('Курс КП · RUB');
+    await expect(dialog.getByLabel('BYN за единицу валюты')).toHaveValue('');
+    assert.equal(writes.length, 0, 'previewing the first rate must not synchronize CRM');
+    assert.equal(requests.filter(request => request.path === '/api/kp/rates').length, 0);
+    await dialog.getByRole('button', { name: 'Получить НБРБ', exact: true }).click();
+    await expect(dialog.getByLabel('BYN за единицу валюты')).toHaveValue('1');
+    assert.equal(doc.fx, null); assert.equal(requests.filter(request => request.path === '/api/kp/rates').length, 1);
+    await dialog.getByRole('button', { name: 'Сохранить курс', exact: true }).click(); await dialog.waitFor({ state: 'hidden' });
+    assert.equal(writes.length, 1); assert.deepEqual(writes[0].fx, { currency: 'RUB', rate: '1', date: '2026-10-18', source: 'NBRB' });
+    assert.equal(writes[0].state.client.name, state.client.name);
+    await child.locator('[data-path="items.0.name"]').fill('Явная правка после фиксации курса');
+    await expect.poll(() => writes.length).toBe(2);
+    assert.equal(requests.filter(request => request.path === '/api/kp/rates').length, 1, 'ordinary saves retain the fixed rate');
+  } finally { await context.close(); }
+});
+
+test('missing FX remains manually editable after an NBRB failure and subsequent saves keep the manual rate', async () => {
+  reset(); doc.fx = null; doc.state.currency = '$'; refuseRate = true;
+  const { context, page, child } = await hostPage();
+  try {
+    await page.getByRole('button', { name: 'Курс', exact: true }).click();
+    const dialog = page.getByRole('dialog'); await expect(dialog.getByRole('heading')).toHaveText('Курс КП · USD');
+    await expect(dialog.getByLabel('BYN за единицу валюты')).toHaveValue('');
+    assert.equal(writes.length, 0); assert.equal(requests.filter(request => request.path === '/api/kp/rates').length, 0);
+    await dialog.getByRole('button', { name: 'Получить НБРБ', exact: true }).click();
+    await expect(dialog.getByRole('alert')).toContainText('Курс НБРБ недоступен');
+    assert.equal(writes.length, 0); assert.equal(doc.fx, null);
+    await dialog.getByLabel('BYN за единицу валюты').fill('3.21');
+    await dialog.getByRole('button', { name: 'Сохранить курс', exact: true }).click(); await dialog.waitFor({ state: 'hidden' });
+    assert.equal(writes.length, 1); assert.deepEqual(writes[0].fx, { currency: 'USD', rate: '3.21', date: '2026-10-18', source: 'MANUAL' });
+    await child.locator('[data-path="items.0.name"]').fill('Явная правка с ручным курсом');
+    await expect.poll(() => writes.length).toBe(2);
+    assert.equal(requests.filter(request => request.path === '/api/kp/rates').length, 1);
+    assert.deepEqual(writes[1].fx, writes[0].fx);
   } finally { await context.close(); }
 });
 
@@ -222,7 +277,7 @@ test('actual React toolbar selects CRM client immediately and version bridge res
     await rateDialog.getByLabel('BYN за единицу валюты').fill('3.2');
     await rateDialog.getByRole('button', { name: 'Сохранить курс', exact: true }).click(); await rateDialog.waitFor({ state: 'hidden' });
     assert.deepEqual(writes.at(-1).fx, { currency: 'USD', rate: '3.2', date: '2026-10-18', source: 'MANUAL' });
-    assert.equal(requests.filter(request => request.path === '/api/kp/rates').length, 1, 'ordinary saves keep the fixed manual rate');
+    assert.equal(requests.filter(request => request.path === '/api/kp/rates').length, 0, 'manual selection and ordinary saves do not require NBRB');
     const priorWrites = writes.length;
     await page.getByRole('button', { name: 'Сгенерировать договор', exact: true }).click();
     await child.locator('#contract-customer-name').waitFor();

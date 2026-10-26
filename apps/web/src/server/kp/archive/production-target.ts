@@ -18,7 +18,7 @@ const databaseOptions = new Set(["schema", "connection_limit", "pool_timeout", "
 
 /** Только операторский release proof; QA helper и его TEST_TARGET_ONLY не расширяются. */
 export function productionArchiveBinding(input: {
-  proof: unknown; reviewedHash: string; authorization: string; manifest: ArchiveManifest;
+  proof: unknown; reviewedHash: string; authorization: string; manifest: Pick<ArchiveManifest, "target" | "sha256">;
   revision: string; actorId: string; operationId: string; programSha256: string;
 }) {
   const parsed = proofSchema.safeParse(input.proof);

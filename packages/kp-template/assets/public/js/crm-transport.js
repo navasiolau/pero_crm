@@ -72,6 +72,20 @@
       remove(key(id, 'operation:save')); delete retainedOperations[key(id, 'operation:save')];
       return data;
     }
+    function ratePreview(snapshot) {
+      var currency = ({ '$': 'USD', '€': 'EUR', '₽': 'RUB', 'BYN': 'BYN', 'USD': 'USD', 'EUR': 'EUR', 'RUB': 'RUB' })[snapshot.currency];
+      if (!currency) throw new Error('Выберите валюту КП');
+      if (current.fx?.currency === currency) return current.fx;
+      var date = String(snapshot.order?.date || ''), parts = /^(\d{2})\.(\d{2})\.(\d{4})$/.exec(date);
+      var isoDate = parts ? parts[3] + '-' + parts[2] + '-' + parts[1] : date;
+      return { currency: currency, date: isoDate, rate: currency === 'BYN' ? '1' : '', source: 'MANUAL' };
+    }
+    async function rateForState(snapshot) {
+      var preview = ratePreview(snapshot);
+      if (current.fx?.currency === preview.currency) return current.fx;
+      var quote = await request('/rates?currency=' + preview.currency + '&date=' + encodeURIComponent(preview.date));
+      return quote.fx;
+    }
     async function saveNow(state) {
       if (!current || !current.canEdit || viewingVersion || paused) throw new Error('КП доступно только для просмотра');
       var snapshot = copy(state), id = currentId, path = '/documents/' + encodeURIComponent(id);
@@ -83,14 +97,7 @@
       }
       var body = { proposalId: id, expectedRevision: current.revision, state: snapshot };
       if (current.client) body.clientId = current.client.id;
-      var currency = ({ '$': 'USD', '€': 'EUR', '₽': 'RUB', 'BYN': 'BYN', 'USD': 'USD', 'EUR': 'EUR', 'RUB': 'RUB' })[snapshot.currency];
-      if (currency && current.fx?.currency !== currency) {
-        var date = String(snapshot.order?.date || ''), parts = /^(\d{2})\.(\d{2})\.(\d{4})$/.exec(date);
-        var isoDate = parts ? parts[3] + '-' + parts[2] + '-' + parts[1] : date;
-        var quote = await request('/rates?currency=' + currency + '&date=' + encodeURIComponent(isoDate));
-        current.fx = quote.fx;
-      }
-      if (current.fx) body.fx = current.fx;
+      body.fx = await rateForState(snapshot);
       var pending = operation(id, 'save', body);
       var result = await request(path, json('PUT', pending.entry.body));
       remove(pending.storageKey); delete retainedOperations[pending.storageKey];
@@ -223,6 +230,9 @@
       hasUnsavedChanges: function (state) { return !!current && (canonical(state) !== confirmedState || canonical(current.fx) !== confirmedFx); },
       getDocument: function () { return current; },
       focusDocument: remember,
+      acknowledgeHydration: function (doc, state) {
+        if (current?.id === doc.id && current.revision === doc.revision && !viewingVersion) confirmedState = canonical(state);
+      },
       getDocumentId: function () { return currentId; },
       initialState: function (defaults) { var value = copy(defaults); value.items = []; value.order = { number: '', date: '', validUntil: '', project: '' }; value.client = { name: '', contact: '' }; return value; },
       attachEditor: function (adapter) { editor = adapter; },
@@ -236,7 +246,7 @@
         document.querySelectorAll('[data-path="order.number"],[data-path="client.name"],[data-path="client.contact"],.url-input').forEach(function (element) { element.readOnly = true; });
         document.querySelectorAll('.js-contract').forEach(function (button) { button.disabled = !current || !!viewingVersion || paused; button.title = viewingVersion ? 'Для договора выберите текущую редакцию КП' : ''; });
         var banner = document.getElementById('crmReadOnly');
-        if (banner) { banner.hidden = editable; banner.textContent = !current ? 'КП ещё не загружено. Обновите страницу или вернитесь к списку.' : viewingVersion ? 'Просмотр сохранённой версии. Для изменений восстановите её как текущую.' : paused ? 'Завершите изменение клиента.' : current.isArchive || !current.project ? 'Архивное КП доступно только для просмотра.' : 'КП доступно только для просмотра: проект находится вне статуса «Лид».'; }
+        if (banner) { banner.hidden = editable; banner.textContent = !current ? 'КП ещё не загружено. Обновите страницу или вернитесь к списку.' : viewingVersion ? 'Просмотр сохранённой версии. Для изменений восстановите её как текущую.' : paused ? 'Завершите изменение клиента.' : !current.project ? 'КП не связано с проектом. Для редактирования требуется привязка к проекту.' : 'КП доступно только для просмотра: проект находится вне статуса «Лид».'; }
       },
       handleCommand: async function (command) {
         if (!editor || !current) throw new Error('Редактор ещё загружается');
@@ -261,6 +271,10 @@
         if (command.type === 'fx') {
           if (!api.isEditable()) throw new Error('КП доступно только для просмотра');
           current.fx = command.fx; await editor.ensureSaved(); return;
+        }
+        if (command.type === 'rate-preview') {
+          if (!api.isEditable()) throw new Error('КП доступно только для просмотра');
+          emit({ type: 'rate-preview', fx: ratePreview(editor.getState()) }); return;
         }
         if (command.type === 'version') {
           if (!command.versionId) { var doc = remember(await request('/documents/' + encodeURIComponent(currentId))); publish(doc); return; }

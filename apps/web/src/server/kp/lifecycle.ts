@@ -18,7 +18,7 @@ async function actorFor(store: ProposalLifecycleStore, binding: ActorBinding) {
 }
 type LiveSource = SourceRecord & { project: NonNullable<SourceRecord["project"]> };
 function liveSource(source: SourceRecord | null): LiveSource {
-  if (!source || !source.project || source.proposal.deletedAt || source.project.deletedAt || source.proposal.isArchive) lifecycleFailure("KP_NOT_FOUND", 404, "КП не найдено");
+  if (!source || !source.project || source.proposal.deletedAt || source.project.deletedAt) lifecycleFailure("KP_NOT_FOUND", 404, "КП не найдено");
   return source as LiveSource;
 }
 function mutable(source: LiveSource) {
@@ -39,7 +39,7 @@ async function mediaSnapshot(store: ProposalLifecycleStore, proposal: ProposalRe
 }
 function versionSource(version: VersionRecord, source: LiveSource): FrozenProposalSource {
   const snapshot = version.renderSnapshot;
-  // Старый архив без полного binding доступен для скачивания, но не для восстановления/нового рендера.
+  // Историческая версия без полного снимка привязок доступна для скачивания, но не для восстановления/нового рендера.
   const candidate = {
     ...snapshot, proposalId: source.proposal.id, projectId: source.project.id, projectStage: source.project.stage,
     revision: version.revision, state: version.state, pricingSnapshot: version.pricingSnapshot, mode: "retained",
@@ -197,7 +197,7 @@ export async function completeRenderJob(store: ProposalLifecycleStore, claim: Re
 /** Вызывать под Project lock; бизнес-инвариант работает и при выключенном UI/worker. */
 export async function applyProposalStageGate(store: ProposalLifecycleStore, input: { projectId: string; fromStage: ProjectStage; toStage: ProjectStage; at: Date }) {
   const proposal = await store.proposalByProject(input.projectId);
-  if (!proposal || proposal.isArchive || proposal.deletedAt || input.fromStage === input.toStage) return;
+  if (!proposal || proposal.deletedAt || input.fromStage === input.toStage) return;
   let acceptedVersionId = proposal.acceptedVersionId, epoch = proposal.retentionEpoch;
   if (input.toStage === "LEAD") {
     await store.accept(proposal.id, null, null, epoch + 1);

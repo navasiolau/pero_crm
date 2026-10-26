@@ -4,6 +4,7 @@ import { archiveAssert, assertArchiveDatabaseIdentity, assertArchiveReservationR
 import { allArchiveObjects } from "./manifest";
 import type { ArchiveReconciliation, ArchiveStore } from "./apply";
 import { archiveProposalProvenance, archiveProposalVersionSnapshot } from "./provenance";
+import { parseRetentionProgress, retentionPayload } from "../retention-contract";
 
 type JobRow = { id: string; proposalId: string | null; contractId: string | null; kind: string; createdById: string | null; dedupeKey: string;
   state: string; attempts: number; maxAttempts: number; leaseOwner: string | null; leaseUntil: unknown; liveLease: boolean; lastErrorCode: string | null; payload: JsonObject; result: JsonObject | null };
@@ -20,9 +21,13 @@ export function archiveOwnedRows(manifest: ArchiveManifest, recoveryOperationId?
     ["ChangeLog", "id", [reserveReceiptId(manifest.sha256), publishReceiptId(manifest.sha256), ...proposals.map(docReceiptId), ...contracts.map(id => `kp.archive.settings:${id}`), ...(recoveryOperationId ? Object.values(archiveRecoveryReceiptIds(manifest, recoveryOperationId)) : [])]]];
   return Object.fromEntries(entries.filter(([, , ids]) => ids.length).map(([table, column, ids]) => [table, { column, ids: [...new Set(ids)] }]));
 }
-function reserveValue(manifest: ArchiveManifest) {
+export function archiveReserveValue(manifest: ArchiveManifest) {
   return { schema: 1, manifestHash: manifest.sha256, sourceNamespace: manifest.sourceNamespace, proposalIds: manifest.proposals.map(row => row.id), targetBindingHash: valueHash(manifest.target),
     documents: manifest.proposals.map(row => ({ proposalId: row.id, sourceId: row.sourceId, sourceHash: row.sourceHash })), objects: allArchiveObjects(manifest).map(row => ({ id: row.id, proposalId: row.proposalId, ...(row.mediaId ? { mediaId: row.mediaId } : { artifactId: row.artifactId }), operationJobId: row.jobId, binding: row.binding, key: row.key, sha256: row.sha256, size: row.size, mimeType: row.mimeType })) };
+}
+export function archivePublishValue(manifest: ArchiveManifest) {
+  return { schema: 1, manifestHash: manifest.sha256, proposalIds: manifest.proposals.map(row => row.id), counts: manifest.counts,
+    verifiedObjectHashes: Object.fromEntries(allArchiveObjects(manifest).map(row => [row.id, row.sha256])) };
 }
 const objectJson = (row: ArchiveObject) => ({ key: row.key, sha256: row.sha256, size: row.size, mimeType: row.mimeType });
 function uploadPayload(manifest: ArchiveManifest, group: ArchiveObject[], actorId: string) {
@@ -44,8 +49,23 @@ function verifiedResult(manifest: ArchiveManifest, group: ArchiveObject[], resul
 async function reservationRow(client: ArchiveReservationReader, manifest: ArchiveManifest) {
   const { rows } = await client.query<{ row: JsonObject }>('SELECT to_jsonb(t) AS row FROM "ChangeLog" t WHERE id=$1', [reserveReceiptId(manifest.sha256)]);
   const row = rows[0]?.row;
-  archiveAssert(row && row.id === reserveReceiptId(manifest.sha256) && row.entity === "kpArchiveImport" && row.entityId === manifest.sha256 && row.action === "archive.reserve" && row.source === "cli" && row.actorType === "user" && typeof row.actorId === "string" && canonical(row.newValue) === canonical(reserveValue(manifest)), "ARCHIVE_RECOVERY_RESERVE_CHANGED");
+  archiveAssert(row && row.id === reserveReceiptId(manifest.sha256) && row.entity === "kpArchiveImport" && row.entityId === manifest.sha256 && row.action === "archive.reserve" && row.source === "cli" && row.actorType === "user" && typeof row.actorId === "string" && canonical(row.newValue) === canonical(archiveReserveValue(manifest)), "ARCHIVE_RECOVERY_RESERVE_CHANGED");
   return { row, actorId: row.actorId, hash: valueHash(row) };
+}
+/** Неизменяемые receipts подтверждают импорт независимо от последующих обычных сохранений КП. */
+export async function verifyPublishedArchiveOrigin(client: ArchiveReservationReader, manifest: ArchiveManifest) {
+  const original = await reservationRow(client, manifest);
+  const expected: [string, string, string, string, JsonObject][] = [
+    [publishReceiptId(manifest.sha256), "kpArchiveImport", manifest.sha256, "archive.publish", archivePublishValue(manifest)],
+    ...manifest.proposals.map(proposal => [docReceiptId(proposal.id), "kpArchiveDocument", proposal.id, "archive.document", archiveProposalProvenance(manifest, proposal)] as [string, string, string, string, JsonObject]),
+    ...manifest.settings.map(settings => [`kp.archive.settings:${settings.id}`, "kpArchiveContract", settings.id, "archive.settings", { schema: 1, sourceHash: settings.sourceHash, rawBase64: settings.rawBase64 }] as [string, string, string, string, JsonObject]),
+  ];
+  for (const [id, entity, entityId, action, value] of expected) {
+    const { rows } = await client.query<{ row: JsonObject }>('SELECT to_jsonb(t) AS row FROM "ChangeLog" t WHERE id=$1', [id]);
+    const row = rows[0]?.row;
+    archiveAssert(row?.entity === entity && row.entityId === entityId && row.action === action && row.actorType === "user" && row.actorId === original.actorId && row.source === "cli" && canonical(row.newValue) === canonical(value), "ARCHIVE_RECONCILIATION_MISMATCH");
+  }
+  return original.actorId;
 }
 async function reservationFamilies(client: ArchiveReservationReader, manifest: ArchiveManifest) {
   const families: ArchiveReservationWitness["families"] = {};
@@ -117,7 +137,7 @@ export function createArchiveSqlStore(client: PoolClient, options: {
   const published = async (manifest: ArchiveManifest) => {
     const row = await receipt(publishReceiptId(manifest.sha256));
     if (!row) return false;
-    archiveAssert(row.entity === "kpArchiveImport" && row.entityId === manifest.sha256 && row.action === "archive.publish" && row.newValue.manifestHash === manifest.sha256, "ARCHIVE_RECEIPT_CONFLICT");
+    archiveAssert(row.entity === "kpArchiveImport" && row.entityId === manifest.sha256 && row.action === "archive.publish" && row.actorType === "user" && row.source === "cli" && canonical(row.newValue) === canonical(archivePublishValue(manifest)), "ARCHIVE_RECEIPT_CONFLICT");
     return true;
   };
   const ownedJob = async (id: string) => (await query<JobRow>('SELECT id,"proposalId","contractId",kind::text AS kind,"createdById","dedupeKey",state::text AS state,attempts,"maxAttempts","leaseOwner","leaseUntil","lastErrorCode",("leaseUntil">clock_timestamp() AT TIME ZONE \'UTC\') AS "liveLease",payload,result FROM "ProposalJob" WHERE id=$1 FOR UPDATE', [id]))[0];
@@ -146,8 +166,8 @@ export function createArchiveSqlStore(client: PoolClient, options: {
     archiveAssert(await options.baseline(client, manifest) === before, "ARCHIVE_BUSINESS_BASELINE_CHANGED"); return result;
   };
   const verifyProposal = async (proposal: ArchiveProposal, visible: boolean) => {
-    const row = (await query<{ sourceId: string; isArchive: boolean; projectId: string | null; clientId: string | null; state: JsonObject; deleted: boolean; createdAt: string; updatedAt: string; sourceNumber: string | null; currency: string; revision: number; rate: string | null; acceptedVersionId: string | null }>('SELECT "sourceId","isArchive","projectId","clientId",state,("deletedAt" IS NOT NULL) AS deleted,to_char("createdAt",\'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"\') AS "createdAt",to_char("updatedAt",\'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"\') AS "updatedAt","sourceNumber",currency::text AS currency,revision,rate::text AS rate,"acceptedVersionId" FROM "CommercialProposal" WHERE id=$1 FOR UPDATE', [proposal.id]))[0];
-    archiveAssert(row && row.sourceId === proposal.sourceId && row.isArchive && row.projectId === null && row.clientId === null && row.deleted === !visible && row.createdAt === proposal.createdAt && row.updatedAt === proposal.updatedAt && row.sourceNumber === proposal.sourceNumber && row.currency === proposal.currency && row.revision === 0 && row.rate === null && row.acceptedVersionId === null, "ARCHIVE_TARGET_RECORD_CONFLICT");
+    const row = (await query<{ sourceId: string; projectId: string | null; clientId: string | null; state: JsonObject; deleted: boolean; createdAt: string; updatedAt: string; sourceNumber: string | null; currency: string; revision: number; rate: string | null; acceptedVersionId: string | null }>('SELECT "sourceId","projectId","clientId",state,("deletedAt" IS NOT NULL) AS deleted,to_char("createdAt",\'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"\') AS "createdAt",to_char("updatedAt",\'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"\') AS "updatedAt","sourceNumber",currency::text AS currency,revision,rate::text AS rate,"acceptedVersionId" FROM "CommercialProposal" WHERE id=$1 FOR UPDATE', [proposal.id]))[0];
+    archiveAssert(row && row.sourceId === proposal.sourceId && row.projectId === null && row.clientId === null && row.deleted === !visible && row.createdAt === proposal.createdAt && row.updatedAt === proposal.updatedAt && row.sourceNumber === proposal.sourceNumber && row.currency === proposal.currency && row.revision === 0 && row.rate === null && row.acceptedVersionId === null, "ARCHIVE_TARGET_RECORD_CONFLICT");
     if (visible) archiveAssert(canonical(row.state) === canonical(proposal.state), "ARCHIVE_TARGET_STATE_DIVERGED");
   };
   const verifyTargetObject = async (object: ArchiveObject, pending: boolean) => {
@@ -210,7 +230,7 @@ export function createArchiveSqlStore(client: PoolClient, options: {
             archiveAssert(canonical(prior.newValue) === canonical(provenance), "ARCHIVE_SOURCE_CHANGED"); await verifyProposal(proposal, false);
           } else {
             archiveAssert(!(await query('SELECT id FROM "CommercialProposal" WHERE id=$1 OR "sourceId"=$2', [proposal.id, proposal.sourceId])).length, "ARCHIVE_TARGET_RECORD_CONFLICT");
-            await client.query('INSERT INTO "CommercialProposal"(id,"sourceId","sourceNumber","isArchive",state,currency,"deletedAt","createdById","createdAt","updatedAt") VALUES($1,$2,$3,true,\'{"items":[]}\'::jsonb,$4::"ProposalCurrency",clock_timestamp() AT TIME ZONE \'UTC\',$5,$6::timestamptz AT TIME ZONE \'UTC\',$7::timestamptz AT TIME ZONE \'UTC\')', [proposal.id, proposal.sourceId, proposal.sourceNumber, proposal.currency, options.actorId, proposal.createdAt, proposal.updatedAt]);
+            await client.query('INSERT INTO "CommercialProposal"(id,"sourceId","sourceNumber",state,currency,"deletedAt","createdById","createdAt","updatedAt") VALUES($1,$2,$3,\'{"items":[]}\'::jsonb,$4::"ProposalCurrency",clock_timestamp() AT TIME ZONE \'UTC\',$5,$6::timestamptz AT TIME ZONE \'UTC\',$7::timestamptz AT TIME ZONE \'UTC\')', [proposal.id, proposal.sourceId, proposal.sourceNumber, proposal.currency, options.actorId, proposal.createdAt, proposal.updatedAt]);
             await insertReceipt(docReceiptId(proposal.id), "kpArchiveDocument", proposal.id, "archive.document", provenance);
           }
         }
@@ -224,7 +244,7 @@ export function createArchiveSqlStore(client: PoolClient, options: {
           }
         }
         const objects = allArchiveObjects(manifest);
-        await insertReceipt(reserveReceiptId(manifest.sha256), "kpArchiveImport", manifest.sha256, "archive.reserve", reserveValue(manifest));
+        await insertReceipt(reserveReceiptId(manifest.sha256), "kpArchiveImport", manifest.sha256, "archive.reserve", archiveReserveValue(manifest));
         for (const jobId of jobsFor(manifest)) {
           const group = objects.filter(row => row.jobId === jobId), first = group[0], original = group.find(row => row.role === "original"), optimized = group.find(row => row.role === "optimized");
           const payload = uploadPayload(manifest, group, reservationActorId);
@@ -279,7 +299,7 @@ export function createArchiveSqlStore(client: PoolClient, options: {
             await client.query('INSERT INTO "ProposalCurrentMedia"("proposalId","mediaId") VALUES($1,$2)', [proposal.id, media.id]);
             await client.query('INSERT INTO "ProposalVersionMedia"("proposalId","versionId","mediaId") VALUES($1,$2,$3)', [proposal.id, proposal.versionId, media.id]);
           }
-          const changed = await client.query('UPDATE "CommercialProposal" SET state=$2::jsonb,"deletedAt"=NULL WHERE id=$1 AND "sourceId"=$3 AND "isArchive"=true AND "projectId" IS NULL AND "clientId" IS NULL AND "deletedAt" IS NOT NULL', [proposal.id, JSON.stringify(proposal.state), proposal.sourceId]);
+          const changed = await client.query('UPDATE "CommercialProposal" SET state=$2::jsonb,"deletedAt"=NULL WHERE id=$1 AND "sourceId"=$3 AND "projectId" IS NULL AND "clientId" IS NULL AND "deletedAt" IS NOT NULL', [proposal.id, JSON.stringify(proposal.state), proposal.sourceId]);
           archiveAssert(changed.rowCount === 1, "ARCHIVE_TARGET_RECORD_CONFLICT");
         }
         for (const settings of manifest.settings) {
@@ -297,30 +317,33 @@ export function createArchiveSqlStore(client: PoolClient, options: {
         for (const id of jobsFor(manifest)) {
           const changed = await client.query('UPDATE "ProposalJob" SET state=\'SUCCEEDED\',"leaseOwner"=NULL,"leaseUntil"=NULL,"updatedAt"=clock_timestamp() AT TIME ZONE \'UTC\' WHERE id=$1 AND state=\'PROCESSING\' AND "leaseOwner"=$2 AND "leaseUntil">clock_timestamp() AT TIME ZONE \'UTC\'', [id, owner]); archiveAssert(changed.rowCount === 1, "ARCHIVE_LEASE_LOST");
         }
-        await insertReceipt(publishReceiptId(manifest.sha256), "kpArchiveImport", manifest.sha256, "archive.publish", { schema: 1, manifestHash: manifest.sha256, proposalIds: manifest.proposals.map(row => row.id), counts: manifest.counts, verifiedObjectHashes: Object.fromEntries(allArchiveObjects(manifest).map(row => [row.id, row.sha256])) });
+        await insertReceipt(publishReceiptId(manifest.sha256), "kpArchiveImport", manifest.sha256, "archive.publish", archivePublishValue(manifest));
         if (options.recovery) await insertReceipt(archiveRecoveryReceiptIds(manifest, options.recovery.operationId).publish, "kpArchiveRecovery", manifest.sha256, "archive.recovery.publish", recoveryAudit(manifest, true));
       });
     }),
     reconcile: manifest => tx(manifest, async () => {
       archiveAssert(await published(manifest), "ARCHIVE_NOT_PUBLISHED");
-      let items = 0; const policyPurgedObjectIds: string[] = [];
+      const importActorId = await verifyPublishedArchiveOrigin(client, manifest), policyPurgedObjectIds: string[] = [];
       for (const proposal of manifest.proposals) {
-        await verifyProposal(proposal, true);
-        const rows = await query<{ id: string; position: number; state: JsonObject; productId: string | null }>('SELECT id,position,state,"productId" FROM "ProposalItem" WHERE "proposalId"=$1 AND "deletedAt" IS NULL ORDER BY position', [proposal.id]);
-        archiveAssert(rows.length === proposal.state.items.length && rows.every((row, index) => row.id === proposal.state.items[index].id && row.position === index + 1 && row.productId === null && canonical(row.state) === canonical(proposal.state.items[index])), "ARCHIVE_RECONCILIATION_MISMATCH"); items += rows.length;
-        const version = (await query<{ state: JsonObject; provenance: JsonObject }>('SELECT state,"renderSnapshot"->\'archiveImport\' AS provenance FROM "ProposalVersion" WHERE id=$1 AND "proposalId"=$2', [proposal.versionId, proposal.id]))[0]; archiveAssert(version && canonical(version.provenance) === canonical(archiveProposalVersionSnapshot(manifest, proposal)) && canonical(version.state) === canonical(proposal.state), "ARCHIVE_RECONCILIATION_MISMATCH");
-        const original = await receipt(docReceiptId(proposal.id)); archiveAssert(original && canonical(original.newValue) === canonical(archiveProposalProvenance(manifest, proposal)), "ARCHIVE_RECONCILIATION_MISMATCH");
+        const current = (await query<{ sourceId: string; createdById: string; createdAt: string }>('SELECT "sourceId","createdById",to_char("createdAt",\'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"\') AS "createdAt" FROM "CommercialProposal" WHERE id=$1', [proposal.id]))[0];
+        archiveAssert(current?.sourceId === proposal.sourceId && current.createdById === importActorId && current.createdAt === proposal.createdAt, "ARCHIVE_RECONCILIATION_MISMATCH");
+        const version = (await query<{ state: JsonObject; provenance: JsonObject; trigger: string; revision: number }>('SELECT state,"renderSnapshot"->\'archiveImport\' AS provenance,trigger::text AS trigger,revision FROM "ProposalVersion" WHERE id=$1 AND "proposalId"=$2', [proposal.versionId, proposal.id]))[0];
+        if (version) {
+          archiveAssert(version.trigger === "IMPORT" && version.revision === 0 && canonical(version.provenance) === canonical(archiveProposalVersionSnapshot(manifest, proposal)) && canonical(version.state) === canonical(proposal.state), "ARCHIVE_RECONCILIATION_MISMATCH");
+          const refs = await query<{ mediaId: string }>('SELECT "mediaId" FROM "ProposalVersionMedia" WHERE "proposalId"=$1 AND "versionId"=$2 ORDER BY "mediaId"', [proposal.id, proposal.versionId]);
+          archiveAssert(canonical(refs.map(row => row.mediaId)) === canonical(proposal.media.map(row => row.id).sort()), "ARCHIVE_RECONCILIATION_MISMATCH");
+        } else {
+          const jobs = await query<{ payload: unknown; result: unknown }>('SELECT payload,result FROM "ProposalJob" WHERE "proposalId"=$1 AND kind=\'PRUNE_VERSIONS\' AND state=\'SUCCEEDED\'', [proposal.id]);
+          archiveAssert(jobs.some(job => { const payload = retentionPayload(job.payload), progress = parseRetentionProgress(proposal.id, job.result); return payload.kind === "ACCEPTED_RETENTION" && payload.proposalId === proposal.id && payload.acceptedVersionId !== proposal.versionId && progress?.manifest.pruneVersionIds.includes(proposal.versionId); }), "ARCHIVE_IMPORT_VERSION_MISSING");
+        }
         for (const media of proposal.media) {
           const record = (await query<{ uploadState: string; optimizedPurged: boolean; originalPurged: boolean; optimizedHash: string; optimizedKey: string; originalHash: string | null; originalKey: string | null; expiresAt: string }>('SELECT "uploadState",("optimizedPurgedAt" IS NOT NULL) AS "optimizedPurged",("originalPurgedAt" IS NOT NULL) AS "originalPurged","optimizedHash","optimizedKey","originalHash","originalKey",to_char("expiresAt",\'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"\') AS "expiresAt" FROM "ProposalMedia" WHERE id=$1 AND "proposalId"=$2', [media.id, proposal.id]))[0];
           archiveAssert(record?.uploadState === "READY" && record.optimizedHash === media.optimized.sha256 && record.optimizedKey === media.optimized.key && record.originalHash === (media.original?.sha256 ?? null) && record.originalKey === (media.original?.key ?? null) && record.expiresAt === media.expiresAt, "ARCHIVE_RECONCILIATION_MISMATCH");
-          const refs = await query('SELECT 1 FROM "ProposalCurrentMedia" c JOIN "ProposalVersionMedia" v ON v."proposalId"=c."proposalId" AND v."mediaId"=c."mediaId" WHERE c."proposalId"=$1 AND c."mediaId"=$2 AND v."versionId"=$3', [proposal.id, media.id, proposal.versionId]); archiveAssert(refs.length === 1, "ARCHIVE_RECONCILIATION_MISMATCH");
           if (record.optimizedPurged) policyPurgedObjectIds.push(media.optimized.id); if (media.original && record.originalPurged) policyPurgedObjectIds.push(media.original.id);
         }
       }
       for (const settings of manifest.settings) {
-        const row = (await query<{ settings: JsonObject }>('SELECT settings FROM "ProposalContract" WHERE id=$1 AND "primaryProposalId"=$2', [settings.id, settings.proposalId]))[0]; archiveAssert(row && canonical(row.settings) === canonical(settings.settings), "ARCHIVE_RECONCILIATION_MISMATCH");
-        const original = await receipt(`kp.archive.settings:${settings.id}`); archiveAssert(original?.newValue.sourceHash === settings.sourceHash && original.newValue.rawBase64 === settings.rawBase64, "ARCHIVE_RECONCILIATION_MISMATCH");
-        const sources = await query<{ proposalId: string; position: number }>('SELECT "proposalId",position FROM "ProposalContractSource" WHERE "contractId"=$1 ORDER BY position', [settings.id]); archiveAssert(canonical(sources) === canonical(settings.sourceProposalIds.map((proposalId, index) => ({ proposalId, position: index + 1 }))), "ARCHIVE_RECONCILIATION_MISMATCH");
+        archiveAssert((await query('SELECT id FROM "ProposalContract" WHERE id=$1 AND "primaryProposalId"=$2', [settings.id, settings.proposalId])).length === 1, "ARCHIVE_RECONCILIATION_MISMATCH");
       }
       for (const docx of manifest.docx) {
         const artifact = docx.artifact!;
@@ -328,7 +351,7 @@ export function createArchiveSqlStore(client: PoolClient, options: {
         archiveAssert(rows.length === 1 && rows[0].key === artifact.key && rows[0].sha256 === artifact.sha256 && rows[0].size === artifact.size && rows[0].state === "READY" && rows[0].createdAt === docx.sourceObject.modifiedAt, "ARCHIVE_RECONCILIATION_MISMATCH");
       }
       for (const object of allArchiveObjects(manifest)) await verifyTargetObject(object, false);
-      return { published: true, proposals: manifest.proposals.length, items, settings: manifest.settings.length, docx: manifest.docx.length, verifiedObjects: allArchiveObjects(manifest).length - policyPurgedObjectIds.length, businessBaselinePreserved: true, policyPurgedObjectIds } satisfies ArchiveReconciliation;
+      return { published: true, ...manifest.counts, verifiedObjects: allArchiveObjects(manifest).length - policyPurgedObjectIds.length, businessBaselinePreserved: true, policyPurgedObjectIds } satisfies ArchiveReconciliation;
     }),
     release: (manifest, owner) => tx(manifest, async () => {
       for (const id of jobsFor(manifest)) await client.query('UPDATE "ProposalJob" SET state=\'FAILED\',"leaseOwner"=NULL,"leaseUntil"=NULL,"lastErrorCode"=\'ARCHIVE_INTERRUPTED\',"updatedAt"=clock_timestamp() AT TIME ZONE \'UTC\' WHERE id=$1 AND state=\'PROCESSING\' AND "leaseOwner"=$2', [id, owner]);

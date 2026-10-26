@@ -20,7 +20,7 @@ export function contractClient(): ContractClient {
 }
 export function source(id: string, stage = "LEAD"): ContractSource {
   return { proposalId: id, revision: 1, state: { items: [{ id: "item_" + id, price: 100, qty: 1 }], currency: "BYN", client: { name: "Исходный заказчик" }, order: { number: "231" } },
-    clientId: "client_a", currency: "BYN", isArchive: false, deletedAt: null, updatedAt: "2026-10-18T10:00:00Z",
+    clientId: "client_a", currency: "BYN", deletedAt: null, updatedAt: "2026-10-18T10:00:00Z",
     acceptedVersionId: stage === "LEAD" ? null : "version_" + id, acceptedPdfArtifactId: stage === "LEAD" ? null : "pdf_" + id,
     project: { id: "project_" + id, stage, clientId: "independently_changed_project_client", address: "Адрес объекта", deletedAt: null } };
 }

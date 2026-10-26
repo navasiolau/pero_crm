@@ -97,12 +97,12 @@ test("изменившиеся реквизиты или привязка пос
   }
 });
 
-test("публичный запрос выпуска закрыт от произвольного state/settings и от архивного КП", async () => {
+test("публичный запрос выпуска закрыт от произвольного state/settings и от КП без проекта", async () => {
   const base = { documentId: "cp_a", expectedRevision: 0, sourceRefs: [{ proposalId: "cp_a", expectedRevision: 1 }], clientBaseline: "0".repeat(64), operationId: randomUUID() };
   assert.equal(contractExportRequestSchema.safeParse({ ...base, primaryState: {} }).success, false);
   assert.equal(contractExportRequestSchema.safeParse({ ...base, settings: {} }).success, false);
   assert.equal(contractDraftRequestSchema.safeParse({ ...base, settings: {} }).success, true);
-  const f = contractWorkflowFixture(); f.state.sources[0].isArchive = true; f.state.sources[0].project = null;
+  const f = contractWorkflowFixture(); f.state.sources[0].project = null;
   const workflow = createContractWorkflow(f.ports), form = await workflow.form(contractActor, "cp_a");
   assert.equal(form.canEdit, false);
   await assert.rejects(workflow.saveDraft(contractActor, { ...base, settings: form.settings, clientBaseline: form.clientBaseline }), error => error instanceof ContractWorkflowError && error.status === 403);
@@ -143,10 +143,10 @@ test("успех выпускает всё одной транзакцией и 
   assert.equal((await workflow.form(contractActor, "cp_a")).versions[0].id, result.versionId);
 });
 
-test("история архивного договора доступна независимо от неполных текущих настроек", async () => {
-  const f = contractWorkflowFixture(); f.state.sources[0].isArchive = true; f.state.sources[0].project = null;
-  f.state.contract = { id: "archived", primaryProposalId: "cp_a", revision: 0, settings: {} };
-  f.state.versions.push({ id: "old_contract", contractId: "archived", docxArtifactId: "old_docx" });
+test("история договора без привязки к проекту доступна независимо от неполных текущих настроек", async () => {
+  const f = contractWorkflowFixture(); f.state.sources[0].project = null;
+  f.state.contract = { id: "historical", primaryProposalId: "cp_a", revision: 0, settings: {} };
+  f.state.versions.push({ id: "old_contract", contractId: "historical", docxArtifactId: "old_docx" });
   f.ports.model.normalizeSettings = () => { throw Error("Неполный старый черновик"); };
   const entries = await createContractWorkflow(f.ports).history(contractActor, "cp_a");
   assert.equal(entries.length, 1); assert.equal(entries[0].docxArtifactId, "old_docx");

@@ -52,7 +52,7 @@ async function snapshot(tx: Prisma.TransactionClient) {
     select: { id: true, projectId: true, status: true, statusChangedAt: true, deletedAt: true } });
   const rows = projects.map(project => ({ ...project, toStage: retiredProjectTarget(project.stage as "PAUSED" | "RECLAMATION", project.stageHistory) }));
   const leadIds = rows.filter(project => project.toStage === "LEAD").map(project => project.id);
-  const proposals = leadIds.length ? await tx.commercialProposal.findMany({ where: { projectId: { in: leadIds }, isArchive: false }, orderBy: { id: "asc" },
+  const proposals = leadIds.length ? await tx.commercialProposal.findMany({ where: { projectId: { in: leadIds } }, orderBy: { id: "asc" },
     select: { id: true, projectId: true, revision: true, acceptedVersionId: true, acceptedAt: true, retentionEpoch: true, deletedAt: true } }) : [];
   const jobs = proposals.length ? await tx.proposalJob.findMany({ where: { proposalId: { in: proposals.map(row => row.id) }, kind: "PRUNE_VERSIONS", state: { in: ["PENDING", "PROCESSING", "FAILED"] } }, orderBy: { id: "asc" },
     select: { id: true, proposalId: true, state: true, attempts: true, leaseOwner: true, leaseUntil: true } }) : [];

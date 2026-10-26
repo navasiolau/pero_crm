@@ -27,7 +27,7 @@ export type LifecycleJob = {
 export type ProposalRecord = {
   id: string; projectId: string | null; clientId: string | null; state: LifecycleState; revision: number;
   currency: string; rate: string | null; rateDate: string | null; rateSource: string | null;
-  isArchive: boolean; deletedAt: Date | null; acceptedVersionId: string | null; retentionEpoch: number;
+  deletedAt: Date | null; acceptedVersionId: string | null; retentionEpoch: number;
 };
 export type SourceRecord = { proposal: ProposalRecord; project: { id: string; stage: ProjectStage; deletedAt: Date | null } | null; clientSnapshot: LifecycleObject };
 export type MediaRecord = {

@@ -12,11 +12,10 @@ import { kpSessionRequest } from '@/lib/kp-session-client';
 
 type PendingCommand = { resolve: () => void; reject: (error: Error) => void; timeout: ReturnType<typeof setTimeout> };
 const versionLabel = (version: ProposalVersion) => new Intl.DateTimeFormat('ru-RU', { timeZone: 'Europe/Moscow', dateStyle: 'short', timeStyle: 'medium' }).format(new Date(version.createdAt)) +
-  (version.trigger === 'CONTRACT' ? ' · Договор' : version.trigger === 'IMPORT' ? ' · Архив' : ' · PDF') + (version.isAccepted ? ' · Принято' : '');
+  (version.trigger === 'CONTRACT' ? ' · Договор' : version.trigger === 'IMPORT' ? ' · Импорт' : ' · PDF') + (version.isAccepted ? ' · Принято' : '');
 
 export function KpEditor({ documentId }: { documentId: string }) {
   const router = useRouter(), frame = useRef<HTMLIFrameElement>(null), commands = useRef(new Map<string, PendingCommand>());
-  const documentRef = useRef<ProposalDocument | null>(null);
   const [document, setDocument] = useState<ProposalDocument | null>(null), [liveDocument, setLiveDocument] = useState<ProposalDocument | null>(null);
   const [clients, setClients] = useState<ProposalClientOption[]>([]), [versions, setVersions] = useState<ProposalVersion[]>([]), [versionId, setVersionId] = useState('');
   const [error, setError] = useState<string | null>(null), [pending, setPending] = useState(false), [contractOpen, setContractOpen] = useState(false);
@@ -37,10 +36,10 @@ export function KpEditor({ documentId }: { documentId: string }) {
       if (event.origin !== window.location.origin || event.source !== frame.current?.contentWindow || event.data?.channel !== 'pero-kp') return;
       const message = event.data;
       if (message.type === 'document') {
-        documentRef.current = message.document;
         setError(null);
         setDocument(message.document); setVersionId(message.versionId ?? ''); if (!message.versionId) setLiveDocument(message.document);
-      } else if (message.type === 'error') setError(message.message);
+      } else if (message.type === 'rate-preview') setRate(message.fx);
+      else if (message.type === 'error') setError(message.message);
       else if (message.type === 'contract-open') setContractOpen(message.open === true);
       else if (message.type === 'versions-changed') { setError(null); router.refresh(); void refreshVersions().catch(error => setError(error.message)); }
       else if (message.type === 'navigate') router.push('/kp/' + encodeURIComponent(message.documentId));
@@ -68,8 +67,8 @@ export function KpEditor({ documentId }: { documentId: string }) {
   }
   async function openRate() {
     setPending(true); setError(null);
-    try { await send({ type: 'flush' }); setRate(documentRef.current?.fx ?? null); setRateOpen(true); }
-    catch (error) { setError(error instanceof Error ? error.message : 'Не удалось сохранить КП перед изменением курса'); }
+    try { await send({ type: 'rate-preview' }); setRateOpen(true); }
+    catch (error) { setError(error instanceof Error ? error.message : 'Не удалось открыть курс КП'); }
     finally { setPending(false); }
   }
   const canEdit = document?.canEdit === true && !versionId;
@@ -80,7 +79,7 @@ export function KpEditor({ documentId }: { documentId: string }) {
   return <div className="flex min-w-0 flex-1 flex-col gap-3">
     <div className="flex flex-wrap items-end gap-2"><Link href="/kp" className="mr-2 self-center text-sm underline underline-offset-4">КП и договоры</Link>
       <div className="min-w-44 flex-1 space-y-1"><Label htmlFor="kp-client">Клиент CRM</Label><SearchableSelect id="kp-client" options={clientOptions} value={document?.client?.id ?? ''} disabled={!canEdit || busy} onChange={id => { setPending(true); setError(null); void selectClient(id).catch(error => setError(error.message)).finally(() => setPending(false)); }} /></div>
-      <Button variant="outline" disabled={!canEdit || !document?.fx || busy} onClick={() => void openRate()}>Курс{document?.fx ? ' · ' + document.fx.rate : ''}</Button>
+      <Button variant="outline" disabled={!canEdit || busy} onClick={() => void openRate()}>Курс{document?.fx ? ' · ' + document.fx.rate : ''}</Button>
       <div className="min-w-52 flex-1 space-y-1"><Label htmlFor="kp-version">Версия КП · Москва</Label><SearchableSelect id="kp-version" options={[{ value: '', label: 'Текущая редакция' }, ...versions.map(version => ({ value: version.id, label: versionLabel(version) }))]} value={versionId} disabled={busy || !document} onChange={versionId => void execute({ type: 'version', versionId })} /></div>
       {versionId && liveDocument?.canEdit ? <Button variant="outline" disabled={busy} onClick={() => void execute({ type: 'restore' }).then(ok => { if (ok) void refreshVersions().catch(error => setError(error.message)); })}>Восстановить</Button> : null}
       {activeVersion?.pdfArtifactId ? <Button variant="outline" render={<a href={'/api/kp/artifacts/' + encodeURIComponent(activeVersion.pdfArtifactId) + '/download'} download />}>Скачать версию</Button> : null}
@@ -92,9 +91,10 @@ export function KpEditor({ documentId }: { documentId: string }) {
     <iframe key={documentId} ref={frame} src={'/kp/frame?documentId=' + encodeURIComponent(documentId)} title="Редактор коммерческого предложения" className="h-[calc(100dvh-13rem)] min-h-[680px] w-full rounded-lg border bg-white md:h-[calc(100dvh-10rem)]" sandbox="allow-scripts allow-same-origin allow-downloads allow-popups allow-top-navigation-by-user-activation" />
     <Dialog open={rateOpen} onOpenChange={setRateOpen}><DialogContent><DialogHeader><DialogTitle>Курс КП · {rate?.currency}</DialogTitle></DialogHeader>
       <p className="text-sm text-muted-foreground">Курс фиксируется в КП и используется для цен CRM в BYN.</p>
+      {error ? <p role="alert" className="break-words text-sm text-destructive">{error}</p> : null}
       <div className="space-y-1"><Label htmlFor="kp-rate">BYN за единицу валюты</Label><Input id="kp-rate" inputMode="decimal" value={rate?.rate ?? ''} onChange={event => setRate(previous => previous ? { ...previous, rate: event.target.value.replace(',', '.'), source: 'MANUAL' } : previous)} /></div>
       <div className="space-y-1"><Label htmlFor="kp-rate-date">Дата курса</Label><Input id="kp-rate-date" type="date" value={rate?.date ?? ''} onChange={event => setRate(previous => previous ? { ...previous, date: event.target.value } : previous)} /></div>
-      <DialogFooter><Button variant="outline" disabled={pending} onClick={() => void nbrbRate()}>Получить НБРБ</Button><Button disabled={pending || !rate} onClick={() => { if (rate) void execute({ type: 'fx', fx: rate }).then(ok => { if (ok) setRateOpen(false); }); }}>Сохранить курс</Button></DialogFooter>
+      <DialogFooter><Button variant="outline" disabled={pending} onClick={() => void nbrbRate()}>Получить НБРБ</Button><Button disabled={pending || !rate?.rate.trim()} onClick={() => { if (rate) void execute({ type: 'fx', fx: rate }).then(ok => { if (ok) setRateOpen(false); }); }}>Сохранить курс</Button></DialogFooter>
     </DialogContent></Dialog>
   </div>;
 }

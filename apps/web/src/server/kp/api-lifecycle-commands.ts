@@ -34,7 +34,7 @@ export async function restoreApiVersion(context: KpApiContext, input: Record<str
       const version = await withMutationTransaction(async tx => {
         await context.authorize("kp:write", tx);
         const current = await loadApiDocument(tx, proposalId);
-        if (current.revision !== input.expectedRevision || current.project?.stage !== "LEAD" || current.isArchive) return apiFailure("KP_REVISION_CHANGED", 409, "КП изменено или доступно только для чтения");
+        if (current.revision !== input.expectedRevision || current.project?.stage !== "LEAD") return apiFailure("KP_REVISION_CHANGED", 409, "КП изменено или доступно только для чтения");
         return readProposalVersionInTransaction(tx, context.binding, proposalId, versionId, lifecycleSecurity("kp:write"));
       });
       const state = normalizeProposalState(version.state);

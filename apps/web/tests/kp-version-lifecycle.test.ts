@@ -115,6 +115,7 @@ test("a pending artifact from an older attempt cannot be attached to the new cla
 
 test("stage gate requires current release even with module off; acceptance, prune and Lead return preserve history", async () => {
   const f = lifecycleFixture(), gate = { projectId: "project1", fromStage: "LEAD" as const, toStage: "IN_WORK" as const, at: f.state.now };
+  Object.assign(f.state.proposal, { isArchive: true });
   f.ports.enabled = false;
   await assert.rejects(f.transaction(store => applyProposalStageGate(store, gate)), isCode("KP_RELEASE_REQUIRED"));
   assert.equal(f.state.proposal.acceptedVersionId, null); assert.equal(f.state.cleanup.length, 0);
@@ -138,7 +139,9 @@ test("frozen download UUID remains bound to its accepted PDF after return to Lea
 });
 
 test("restore delegates historical binding, full state and fixed FX; expired images give410 while frozen PDF still downloads", async () => {
-  const f = lifecycleFixture(), version = await release(f), historicState = structuredClone(version.state);
+  const f = lifecycleFixture();
+  Object.assign(f.state.proposal, { isArchive: true });
+  const version = await release(f), historicState = structuredClone(version.state);
   f.state.proposal.clientId = "client2"; f.state.proposal.revision = 2; f.state.proposal.state.items[0].title = "Текущая версия";
   let calls = 0;
   const command = { proposalId: "proposal1", versionId: version.id, expectedRevision: 2, operationId: randomUUID() };
@@ -150,6 +153,7 @@ test("restore delegates historical binding, full state and fixed FX; expired ima
   const restored = await f.transaction(store => restoreProposalVersion(store, f.binding, command, f.ports, save));
   assert.equal(restored.revision, 3); assert.equal(calls, 1); assert.deepEqual(f.state.versions.get(version.id)?.state, historicState);
   f.state.project.stage = "CONTRACT";
+  await assert.rejects(f.transaction(store => restoreProposalVersion(store, f.binding, { ...command, expectedRevision: 3, operationId: randomUUID() }, f.ports, save)), isCode("KP_PROPOSAL_LOCKED"));
   assert.equal((await f.transaction(store => restoreProposalVersion(store, f.binding, command, f.ports, save))).replayed, true); assert.equal(calls, 1);
   f.state.proposal.acceptedVersionId = version.id;
   f.state.now = new Date("2028-01-01T00:00:00Z");

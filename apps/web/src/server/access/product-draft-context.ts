@@ -4,7 +4,7 @@ import type { Prisma } from "@prisma/client";
 export const productDraftAccessRelations = {
   project: { select: { id: true, deletedAt: true } },
   proposalItem: { select: { deletedAt: true, proposal: { select: {
-    projectId: true, deletedAt: true, isArchive: true,
+    projectId: true, deletedAt: true,
     project: { select: { id: true, deletedAt: true } },
   } } } },
 } satisfies Prisma.ProductInclude;

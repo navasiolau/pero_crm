@@ -272,7 +272,7 @@ export function productDraftVisibilityWhere(actor: VisibilityActor): Prisma.Prod
   return { OR: [{ status: { not: "DRAFT" } }, {
     deletedAt: null, project: liveProjectWhere,
     proposalItem: { is: { deletedAt: null, proposal: {
-      deletedAt: null, isArchive: false, projectId: { not: null }, project: liveProjectWhere,
+      deletedAt: null, projectId: { not: null }, project: liveProjectWhere,
     } } },
   }] };
 }

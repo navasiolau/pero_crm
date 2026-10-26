@@ -142,7 +142,10 @@ test("role, live binding, current LEAD and revision guards reject without a part
   const project = f.state.projects.find(row => row.id === first.result.projectId)!;
   project.stage = "ESTIMATE"; const before = f.cloneState(); await assert.rejects(save(f, first.result), /только в проекте/); assert.deepEqual(f.cloneState(), before);
   f.state.projects.find(row => row.id === first.result.projectId)!.stage = "LEAD"; assert.equal((await save(f, first.result)).result.ok, true);
-  f.state.proposals[0].isArchive = true; await assert.rejects(save(f, first.result), /недоступны/);
+  f.state.proposals[0].isArchive = true;
+  assert.equal((await save(f, first.result, { ...first.result.state, items: [{ ...first.result.state.items[0], name: "Изменено" }] })).result.revision, 1);
+  f.state.projects.find(row => row.id === first.result.projectId)!.deletedAt = new Date(0);
+  await assert.rejects(save(f, first.result), /недоступны/);
 });
 
 test("no-op records a replay receipt, executes composed pricing and leaves item/product timestamps untouched", async () => {
