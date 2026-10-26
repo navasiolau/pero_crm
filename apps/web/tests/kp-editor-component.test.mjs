@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { before, after, test } from 'node:test';
 import { createRequire } from 'node:module';
 import { once } from 'node:events';
+import { isDeepStrictEqual } from 'node:util';
 import { createServer } from 'node:http';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
@@ -35,10 +36,10 @@ const state = {
 const baseDoc = () => ({ id: 'primary', revision: 2, state: copy(state), createdAt: '2026-10-18T09:00:00.000Z', updatedAt: '2026-10-18T10:00:00.000Z',
   project: { id: 'project', number: '231', stage: 'LEAD' }, client: { id: 'client', label: state.client.name }, canEdit: true,
   fx: { currency: 'BYN', rate: '1', date: '2026-10-18', source: 'NBRB' } });
-let browser, server, origin, image, doc, writes, pdfRequests, pricingProjections, renderSavedPdf, pdfBytes, refuseSave, refuseRate, requests, contractSettings, contractRevision, clientDetails;
+let browser, server, origin, image, doc, writes, pdfRequests, pdfAttempts, pdfOperations, renderedPdfSnapshots, concurrentPdfChange, pricingProjections, renderSavedPdf, pdfBytes, refuseSave, refuseRate, requests, contractSettings, contractRevision, clientDetails;
 const originalClient = () => ({ id: 'client', label: state.client.name, isTemporary: false, snapshot: { id: 'client', name: 'заказчик', lastName: 'Контрольный', middleName: null, phone: '+000', email: 'fixture@example.invalid', address: 'Контрольный адрес', comment: null, passportNumber: 'номер', passportIssuedBy: 'выдан' } });
 const selectedClient = () => ({ id: 'selected-client', label: 'Новый заказчик', isTemporary: false, snapshot: { id: 'selected-client', name: 'Новый заказчик', lastName: null, middleName: null, phone: '+001', email: 'selected@example.invalid', address: 'Другой адрес', comment: null, passportNumber: 'обновлённый номер', passportIssuedBy: 'другой орган' } });
-function reset() { doc = baseDoc(); writes = []; pdfRequests = []; pricingProjections = []; renderSavedPdf = false; pdfBytes = Buffer.from('%PDF-1.7\n%%EOF'); refuseSave = false; refuseRate = false; requests = []; contractSettings = null; contractRevision = 0; clientDetails = originalClient(); }
+function reset() { doc = baseDoc(); writes = []; pdfRequests = []; pdfAttempts = []; pdfOperations = new Map(); renderedPdfSnapshots = []; concurrentPdfChange = false; pricingProjections = []; renderSavedPdf = false; pdfBytes = Buffer.from('%PDF-1.7\n%%EOF'); refuseSave = false; refuseRate = false; requests = []; contractSettings = null; contractRevision = 0; clientDetails = originalClient(); }
 function confirmedPricing(state, fx) {
   if (!fx) throw Error('Укажите фиксированный курс КП');
   return projectProposalPricing(state, { currency: fx.currency, value: fx.rate, date: fx.date, source: fx.source });
@@ -83,6 +84,11 @@ before(async () => {
     if (url.pathname.startsWith('/kp/assets/')) { const name = url.pathname.slice('/kp/assets/'.length); const bytes = template.browserAsset('public/' + name); response.writeHead(200, { 'content-type': types[name.split('.').pop()] }); response.end(bytes); return; }
     if (url.pathname.startsWith('/baseline/js/')) { const name = url.pathname.split('/').pop(); const bytes = name === 'contract-model.js' ? await readFile(template.assetPath('public/js/contract-model.js')) : await readFile(path.join(originalRoot, name)); response.writeHead(200, { 'content-type': 'text/javascript' }); response.end(bytes); return; }
     if (url.pathname === '/fixture-image.png' || /^\/api\/kp\/documents\/primary\/media\/photo$/.test(url.pathname)) { response.writeHead(200, { 'content-type': 'image/png' }); response.end(image); return; }
+    if (url.pathname.startsWith('/api/kp/operations/') && request.method === 'GET') {
+      const operationId = decodeURIComponent(url.pathname.split('/').at(-1)), retained = pdfOperations.get(operationId);
+      if (!retained) { json(response, { error: { code: 'KP_OPERATION_NOT_FOUND', message: 'Подтверждённый результат операции не найден' } }, 404); return; }
+      json(response, { operationId, kind: 'pdf', result: retained.job }); return;
+    }
     if (url.pathname === '/api/kp/documents/primary' && request.method === 'GET') { json(response, doc); return; }
     if (url.pathname === '/api/kp/documents/primary' && request.method === 'PUT') {
       const input = await body(request); writes.push(input);
@@ -92,8 +98,14 @@ before(async () => {
       doc = { ...doc, revision: doc.revision + 1, state: input.state, fx: input.fx ?? doc.fx, client: { id: input.clientId ?? doc.client.id, label: input.clientId === 'selected-client' ? selectedClient().label : clientDetails.label } }; json(response, doc); return;
     }
     if (url.pathname === '/api/kp/documents/primary/pdf') {
-      const input = await body(request);
-      if (input.expectedRevision !== doc.revision) { json(response, { error: { code: 'KP_REVISION_CONFLICT', message: 'Конфликт ревизии PDF' } }, 409); return; }
+      const input = await body(request); pdfAttempts.push(copy(input));
+      const retained = pdfOperations.get(input.operationId);
+      if (retained) {
+        if (!isDeepStrictEqual(retained.input, input)) { json(response, { error: { code: 'KP_OPERATION_CONFLICT', message: 'Операция уже использована для другого запроса' } }, 409); return; }
+        json(response, retained.job); return;
+      }
+      if (concurrentPdfChange) { concurrentPdfChange = false; doc = { ...doc, revision: doc.revision + 1 }; }
+      if (input.expectedRevision !== doc.revision) { json(response, { error: { code: 'KP_REVISION_CHANGED', message: 'КП изменено: конфликт ревизии PDF' } }, 409); return; }
       try { confirmedPricing(doc.state, doc.fx); }
       catch (error) { json(response, { error: { code: 'KP_PRICING_INVALID', message: error.message } }, 400); return; }
       pdfRequests.push(input);
@@ -101,12 +113,14 @@ before(async () => {
         const prior = process.env.PERO_KP_CHROMIUM_PATH;
         try {
           process.env.PERO_KP_CHROMIUM_PATH = chromium.executablePath();
+          renderedPdfSnapshots.push({ revision: doc.revision, state: copy(doc.state), fx: copy(doc.fx) });
           const rendered = await isolatedWorker({ kind: 'bundle', proposalId: doc.id, revision: doc.revision, templateHash: template.getKpTemplateIdentity().templateHash,
             state: copy(doc.state), assets: [{ mediaId: 'photo', mimeType: 'image/png', bytesBase64: image.toString('base64') }] });
           pdfBytes = Buffer.from(rendered.bytesBase64, 'base64');
         } finally { if (prior === undefined) delete process.env.PERO_KP_CHROMIUM_PATH; else process.env.PERO_KP_CHROMIUM_PATH = prior; }
       }
-      json(response, { id: 'job', state: 'SUCCEEDED', result: { artifactId: 'pdf', versionId: 'version', fileName: 'КП_231.pdf', mimeType: 'application/pdf', downloadUrl: '/api/kp/artifacts/pdf/download' } }); return;
+      const job = { id: 'job', state: 'SUCCEEDED', result: { artifactId: 'pdf', versionId: 'version', fileName: 'КП_231.pdf', mimeType: 'application/pdf', downloadUrl: '/api/kp/artifacts/pdf/download' } };
+      pdfOperations.set(input.operationId, { input: copy(input), job }); json(response, job); return;
     }
     if (url.pathname === '/api/kp/artifacts/pdf/download') { response.writeHead(200, { 'content-type': 'application/pdf', 'content-disposition': "attachment; filename=KP_231.pdf; filename*=UTF-8''" + encodeURIComponent('КП_231.pdf') }); response.end(pdfBytes); return; }
     if (url.pathname === '/api/kp/documents') { json(response, { documents: [{ id: doc.id, name: 'КП №231', updatedAt: doc.updatedAt, project: doc.project }] }); return; }
@@ -137,8 +151,9 @@ async function portPage(viewport = { width: 1440, height: 1000 }) {
   if (viewport.width < 900) await page.locator('[data-view="sheet"]').click();
   return { context, page };
 }
-async function hostPage(viewport = { width: 1440, height: 1000 }) {
+async function hostPage(viewport = { width: 1440, height: 1000 }, pendingPdf) {
   const context = await browser.newContext({ viewport, serviceWorkers: 'block', acceptDownloads: true });
+  if (pendingPdf) await context.addInitScript(entry => localStorage.setItem('pero-crm-kp:qa-actor:primary:operation:pdf', JSON.stringify(entry)), pendingPdf);
   const page = await context.newPage(); page.setDefaultTimeout(10000);
   await page.goto(origin + '/host');
   const child = page.frameLocator('iframe');
@@ -187,10 +202,12 @@ test('actual editor preserves source print DOM and page sizes on desktop/mobile,
 });
 
 test('actual save/rate-before-export keeps unmarked services without category controls and conflict prevents PDF', async () => {
-  reset(); doc.fx = null; doc.state.currency = '$'; renderSavedPdf = true;
+  reset(); doc.revision = 1; doc.fx = null; doc.state.currency = '$'; renderSavedPdf = true;
   doc.state.items = [{ ...doc.state.items[0], price: 100, qty: 1 }];
   doc.state.delivery.items = [{ name: 'Доставка, выгрузка', price: 135, legacyDetail: { keep: 'source' } }, { name: 'Монтаж', price: 1230 }];
-  const services = copy(doc.state.delivery.items), { context, page, child } = await hostPage();
+  const oldBody = { operationId: '00000000-0000-4000-8000-000000000189', proposalId: 'primary', expectedRevision: 1 };
+  const pendingPdf = { fingerprint: JSON.stringify({ proposalId: 'primary', expectedRevision: 1 }), body: oldBody };
+  const services = copy(doc.state.delivery.items), { context, page, child } = await hostPage(undefined, pendingPdf);
   try {
     assert.equal(await child.locator('#deliveryEditor select').count(), 0);
     const printedRows = await child.locator('.sh-deliveryRows .sh-delRow').allTextContents();
@@ -204,6 +221,7 @@ test('actual save/rate-before-export keeps unmarked services without category co
     assert.deepEqual(await child.locator('.sh-deliveryRows .sh-delRow').allTextContents(), printedRows);
     await child.locator('[data-path="items.0.name"]').fill('Обновлённый шкаф');
     await child.locator('[data-dup="0"]').click();
+    const beforePdf = requests.length;
     const download = page.waitForEvent('download'); await page.getByRole('button', { name: 'Сгенерировать PDF', exact: true }).click();
     const generated = await download; assert.equal(generated.suggestedFilename(), 'КП_231.pdf');
     await generated.saveAs(path.join(output, 'unmarked-services.pdf')); assert.ok(pdfBytes.length > 1000); assert.equal(pdfBytes.subarray(0, 5).toString(), '%PDF-');
@@ -214,11 +232,21 @@ test('actual save/rate-before-export keeps unmarked services without category co
     assert.equal(saved.state.items[0].name, 'Обновлённый шкаф'); assert.deepEqual(saved.state.delivery.items, services); assert.equal(saved.state.items[0].image, 'kp-media:photo');
     const projection = pricingProjections.at(-1).project; assert.equal(projection.servicesTotal.toFixed(2), '3992.63');
     assert.equal(projection.delivery, null); assert.equal(projection.unloading, null); assert.equal(projection.installation, null);
+    assert.equal(doc.revision, 3); assert.deepEqual(pdfAttempts[0], oldBody); assert.equal(pdfAttempts.length, 2);
+    assert.notEqual(pdfAttempts[1].operationId, oldBody.operationId); assert.equal(pdfAttempts[1].expectedRevision, 3);
+    assert.deepEqual(requests.slice(beforePdf).filter(request => request.path.includes('/operations/') || request.path.endsWith('/pdf') || request.path === '/api/kp/documents/primary' && request.method === 'GET').map(request => request.method + ' ' + request.path),
+      ['POST /api/kp/documents/primary/pdf', 'GET /api/kp/operations/' + oldBody.operationId, 'GET /api/kp/documents/primary', 'POST /api/kp/documents/primary/pdf']);
+    assert.equal(renderedPdfSnapshots.length, 1); assert.equal(renderedPdfSnapshots[0].revision, 3); assert.deepEqual(renderedPdfSnapshots[0].state, saved.state);
+    assert.deepEqual(renderedPdfSnapshots[0].fx, { currency: 'USD', rate: '3.25', date: '2026-10-18', source: 'MANUAL' });
+    assert.equal(await child.locator('body').evaluate(() => localStorage.getItem('pero-crm-kp:qa-actor:primary:operation:pdf')), null);
     assert.equal(pdfRequests.length, 1); assert.equal(pdfRequests[0].expectedRevision, doc.revision); assert.equal(pdfRequests[0].state, undefined);
-    refuseSave = true; await child.locator('[data-path="items.0.name"]').fill('Конфликт');
+    concurrentPdfChange = true; await child.locator('[data-path="items.0.name"]').fill('Конфликт');
     await page.getByRole('button', { name: 'Сгенерировать PDF', exact: true }).click();
     await expect(page.getByRole('alert')).toContainText(/Конфликт|конфликт/);
-    assert.equal(pdfRequests.length, 1);
+    assert.equal(pdfRequests.length, 1); assert.equal(pdfAttempts.length, 3); assert.equal(pdfAttempts[2].expectedRevision, 4); assert.equal(doc.revision, 5);
+    assert.equal(doc.state.items[0].name, 'Конфликт'); assert.equal(doc.fx.rate, '3.25'); assert.equal(renderedPdfSnapshots.length, 1);
+    const blocked = await child.locator('body').evaluate(() => JSON.parse(localStorage.getItem('pero-crm-kp:qa-actor:primary:operation:pdf')));
+    assert.deepEqual(blocked.body, pdfAttempts[2]); assert.equal(requests.filter(request => request.path === '/api/kp/artifacts/pdf/download').length, 1);
     assert.equal(await page.evaluate(() => window.__refreshes), refreshes);
   } finally { await context.close(); }
 });

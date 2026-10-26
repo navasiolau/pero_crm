@@ -191,6 +191,60 @@ test('known failed job permits a fresh Generate, while a lost export ACK retains
     if (mode === 'terminal') assert.notEqual(testbed.calls[0].body.operationId, testbed.calls[1].body.operationId);
     else assert.deepEqual(testbed.calls[0].body, testbed.calls[1].body);
   }
+
+  const failure = (code, status) => new Response(JSON.stringify({ error: { code, message: 'Обновите данные КП и повторите действие' } }),
+    { status, headers: { 'content-type': 'application/json' } });
+  const ready = id => ({ id: 'job-' + id, state: 'SUCCEEDED', result: { artifactId: id, fileName: 'КП.pdf', downloadUrl: '/api/kp/artifacts/' + id + '/download' } });
+  const storageKey = 'pero-crm-kp:actor:primary:operation:pdf';
+  let authoritative = doc(), freshPosts = 0;
+  const stale = fixture(async call => {
+    if (call.options.method === 'PUT') { authoritative = { ...authoritative, revision: 3, state: call.body.state }; return response(authoritative); }
+    if (call.url.startsWith('/api/kp/operations/')) return failure('KP_OPERATION_NOT_FOUND', 404);
+    if (call.url === '/api/kp/documents/primary') return response(authoritative);
+    if (call.body.expectedRevision !== authoritative.revision) return failure('KP_REVISION_CHANGED', 409);
+    freshPosts++; return response(ready('current'));
+  });
+  const oldBody = { operationId: crypto.randomUUID(), proposalId: 'primary', expectedRevision: 1 };
+  stale.values.set(storageKey, JSON.stringify({ fingerprint: JSON.stringify({ proposalId: 'primary', expectedRevision: 1 }), body: oldBody }));
+  stale.api.focusDocument(doc());
+  const edited = copy(doc().state); edited.items[0].name = 'После ручного сохранения';
+  await stale.api.save(edited);
+  stale.api.attachEditor({ ensureSaved: async () => stale.api.getDocument() });
+  assert.equal((await stale.api.generatePdf()).artifactId, 'current');
+  assert.deepEqual(stale.calls[1].body, oldBody);
+  assert.deepEqual(stale.calls.slice(1).map(call => call.url), ['/api/kp/documents/primary/pdf', '/api/kp/operations/' + oldBody.operationId,
+    '/api/kp/documents/primary', '/api/kp/documents/primary/pdf']);
+  assert.equal(stale.calls.at(-1).body.expectedRevision, 3);
+  assert.notEqual(stale.calls.at(-1).body.operationId, oldBody.operationId);
+  assert.equal(freshPosts, 1);
+  authoritative = { ...authoritative, revision: 4 };
+  await assert.rejects(stale.api.generatePdf(), error => error.status === 409);
+  assert.equal(freshPosts, 1);
+  assert.equal(stale.api.getDocument().revision, 3);
+  assert.deepEqual(stale.api.getDocument().state, edited);
+  assert.equal(JSON.parse(stale.values.get(storageKey)).body.expectedRevision, 3);
+  assert.equal(stale.calls.filter(call => call.options.method === 'POST').some(call => call.body.expectedRevision === 4), false);
+
+  const releases = new Map(); let committed = doc(), oldRequest;
+  const unknown = fixture(async call => {
+    if (call.options.method === 'PUT') { committed = { ...committed, revision: 3, state: call.body.state }; return response(committed); }
+    if (call.url === '/api/kp/documents/primary') return response(committed);
+    if (call.url === '/api/kp/jobs/job-old') return response(ready('old'));
+    if (releases.has(call.body.operationId)) return response({ id: 'job-old', state: 'PENDING' });
+    const id = releases.size ? 'latest' : 'old'; releases.set(call.body.operationId, ready(id));
+    if (id === 'old') { oldRequest = copy(call.body); throw new TypeError('SYNTHETIC_EXPORT_ACK_LOSS'); }
+    assert.equal(call.body.expectedRevision, committed.revision); return response(ready(id));
+  });
+  unknown.api.focusDocument(doc()); unknown.api.attachEditor({ ensureSaved: async () => unknown.api.getDocument() });
+  await assert.rejects(unknown.api.generatePdf(), /ACK_LOSS/);
+  await unknown.api.save(edited);
+  assert.equal((await unknown.api.generatePdf()).artifactId, 'latest');
+  const posts = unknown.calls.filter(call => call.options.method === 'POST');
+  assert.deepEqual(posts[1].body, oldRequest);
+  assert.notEqual(posts[2].body.operationId, oldRequest.operationId);
+  assert.equal(posts[2].body.expectedRevision, 3);
+  assert.ok(unknown.calls.findIndex(call => call.url === '/api/kp/jobs/job-old') < unknown.calls.indexOf(posts[2]));
+  assert.equal(releases.size, 2);
 });
 
 test('private upload scope survives reload and becomes current only after the saved snapshot ACK', async () => {
