@@ -18,7 +18,7 @@ test('OCI verification binds every blob, provenance subject, source/font pins an
   };
   const layer = blob(Buffer.from('synthetic immutable layer'), 'application/vnd.oci.image.layer.v1.tar');
   const config = blob({ os: 'linux', architecture: 'amd64', rootfs: { type: 'layers', diff_ids: [layer.digest] },
-    config: { User: 'node', WorkingDir: '/app/apps/kp-renderer', Cmd: ['node', '--max-old-space-size=384', 'server.cjs'], Env: ['NODE_VERSION=22.20.0'], Labels: ci.rendererLabels(identity, base) } }, 'application/vnd.oci.image.config.v1+json');
+    config: { User: 'node', WorkingDir: '/app/apps/kp-renderer', Cmd: ['node', 'server.cjs'], Env: ['NODE_VERSION=22.20.0'], Labels: ci.rendererLabels(identity, base) } }, 'application/vnd.oci.image.config.v1+json');
   const manifest = blob({ schemaVersion: 2, config, layers: [layer] }, 'application/vnd.oci.image.manifest.v1+json');
   const attestation = blob({ config: blob({}, 'application/vnd.oci.image.config.v1+json'), layers: [blob({ test: true }, 'application/vnd.in-toto+json')] },
     'application/vnd.oci.image.manifest.v1+json', { 'vnd.docker.reference.type': 'attestation-manifest', 'vnd.docker.reference.digest': manifest.digest });
@@ -38,7 +38,7 @@ test('OCI verification binds every blob, provenance subject, source/font pins an
 test('CI smoke and paired release reject a different browser, revision or unpromoted digest', async () => {
   const ci = await import('../ci/artifact.mjs');
   const smoke = { revision: identity.revision, template: template.getKpTemplateIdentity(), runtime: { node: '22.20.0', browser: 'HeadlessChrome/141.0.7390.0', chromium: '141.0.0', puppeteer: '24.43.1' },
-    pages: 4, allPagesIdentical: true, originalDpr2AppendicesIdentical: true, docxEntriesIdentical: true, privateHttp: true, limitsVerified: true };
+    pages: 4, allPagesIdentical: true, originalDpr2AppendicesIdentical: true, docxEntriesIdentical: true, privateHttp: true, limitsVerified: true, streamedPdf: true };
   ci.verifyRendererSmoke(smoke, identity);
   assert.throws(() => ci.verifyRendererSmoke({ ...smoke, runtime: { ...smoke.runtime, browser: 'Chrome/153.0.0.0' } }, identity), /smoke-runtime/);
   assert.throws(() => ci.verifyRendererSmoke({ ...smoke, docxEntriesIdentical: false }, identity), /smoke-results/);
@@ -58,15 +58,15 @@ test('CI cleanup requires the exact owned ID, image and private bounded containe
   const { verifyOwnedSmokeContainer } = await import('../ci/pipeline.mjs');
   const imageId = 'sha256:' + '3'.repeat(64), container = { Id: '4'.repeat(64), Name: '/pero-kp-184-1-smoke', Image: imageId,
     Config: { Image: imageId, User: 'node', Labels: { 'pero.ci.repository': identity.repository, 'pero.ci.run': '184', 'pero.ci.attempt': '1', 'pero.ci.service': 'kp-renderer-smoke' } },
-    HostConfig: { NetworkMode: 'none', ReadonlyRootfs: true, Memory: 1536 * 1024 * 1024, NanoCpus: 1_000_000_000, PidsLimit: 128, PortBindings: {}, Tmpfs: { '/tmp': 'rw,nosuid,exec,size=512m,mode=1777' } } };
+    HostConfig: { NetworkMode: 'none', Init: true, ReadonlyRootfs: true, Memory: 1536 * 1024 * 1024, NanoCpus: 1_000_000_000, PidsLimit: 128, PortBindings: {}, Tmpfs: { '/tmp': 'rw,nosuid,exec,size=512m,mode=1777', '/spool': 'rw,nosuid,nodev,noexec,size=64m,uid=1000,gid=1000,mode=0700' } } };
   verifyOwnedSmokeContainer(container, identity, imageId);
   assert.throws(() => verifyOwnedSmokeContainer(container, { ...identity, runId: '185' }, imageId), /container-image|container-owner/);
   assert.throws(() => verifyOwnedSmokeContainer({ ...container, HostConfig: { ...container.HostConfig, NetworkMode: 'bridge' } }, identity, imageId), /bounds/);
   for (const options of ['rw,nosuid,size=512m,mode=1777', 'rw,nosuid,noexec,size=512m,mode=1777',
     'rw,nosuid,exec,noexec,size=512m,mode=1777', 'rw,nosuid,exec,size=1g,mode=1777', 'rw,nosuid,exec,size=512m,mode=0777']) {
-    assert.throws(() => verifyOwnedSmokeContainer({ ...container, HostConfig: { ...container.HostConfig, Tmpfs: { '/tmp': options } } }, identity, imageId), /kp-smoke-tmpfs/);
+    assert.throws(() => verifyOwnedSmokeContainer({ ...container, HostConfig: { ...container.HostConfig, Tmpfs: { ...container.HostConfig.Tmpfs, '/tmp': options } } }, identity, imageId), /kp-smoke-tmpfs/);
   }
-  verifyOwnedSmokeContainer({ ...container, HostConfig: { ...container.HostConfig, Tmpfs: { '/tmp': 'mode=1777,exec,size=512m,rw,nosuid' } } }, identity, imageId);
+  verifyOwnedSmokeContainer({ ...container, HostConfig: { ...container.HostConfig, Tmpfs: { ...container.HostConfig.Tmpfs, '/tmp': 'mode=1777,exec,size=512m,rw,nosuid' } } }, identity, imageId);
 });
 
 test('Chromium preflight projects actual mount noexec and executable file mode without raw mount paths', () => {
@@ -103,7 +103,7 @@ function ownedContainer(imageId) {
   return { Id: '4'.repeat(64), Name: '/pero-kp-184-1-smoke', Image: imageId,
     Config: { Image: imageId, User: 'node', Env: ['AUTH_SECRET=PRIVATE_ENV'], Labels: { 'pero.ci.repository': identity.repository,
       'pero.ci.run': '184', 'pero.ci.attempt': '1', 'pero.ci.service': 'kp-renderer-smoke' } },
-    HostConfig: { NetworkMode: 'none', ReadonlyRootfs: true, Memory: 1536 * 1024 * 1024, NanoCpus: 1_000_000_000, PidsLimit: 128, PortBindings: {}, Tmpfs: { '/tmp': 'rw,nosuid,exec,size=512m,mode=1777' } },
+    HostConfig: { NetworkMode: 'none', Init: true, ReadonlyRootfs: true, Memory: 1536 * 1024 * 1024, NanoCpus: 1_000_000_000, PidsLimit: 128, PortBindings: {}, Tmpfs: { '/tmp': 'rw,nosuid,exec,size=512m,mode=1777', '/spool': 'rw,nosuid,nodev,noexec,size=64m,uid=1000,gid=1000,mode=0700' } },
     State: { Status: 'exited', Running: false, OOMKilled: true, ExitCode: 137, Error: 'PRIVATE_STATE_ERROR' } };
 }
 
@@ -147,7 +147,7 @@ test('successful smoke still requires the real receipt and clean exit without cr
   const imageId = 'sha256:' + '3'.repeat(64), container = ownedContainer(imageId), calls = [];
   container.State.OOMKilled = false; container.State.ExitCode = 0;
   const receipt = { revision: identity.revision, template: template.getKpTemplateIdentity(), runtime: { node: '22.20.0', browser: 'HeadlessChrome/141.0.7390.0', chromium: '141.0.0', puppeteer: '24.43.1' },
-    pages: 4, allPagesIdentical: true, originalDpr2AppendicesIdentical: true, docxEntriesIdentical: true, privateHttp: true, limitsVerified: true };
+    pages: 4, allPagesIdentical: true, originalDpr2AppendicesIdentical: true, docxEntriesIdentical: true, privateHttp: true, limitsVerified: true, streamedPdf: true };
   const result = runOwnedSmoke({ id: container.Id, identity, imageId,
     command(args) { calls.push(args); if (args[0] === 'inspect') return JSON.stringify([container]); if (args[0] === 'start') return JSON.stringify(receipt); return ''; },
     accept: value => verifyRendererSmoke(value, identity), readLogs() { assert.fail('success does not need diagnostics'); },

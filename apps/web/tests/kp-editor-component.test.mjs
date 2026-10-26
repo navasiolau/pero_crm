@@ -329,6 +329,40 @@ test('missing FX remains manually editable after an NBRB failure and subsequent 
   } finally { await context.close(); }
 });
 
+test('React command bridge waits beyond former PDF and save deadlines and rejects pending commands on pagehide', async () => {
+  reset(); const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, serviceWorkers: 'block' });
+  try {
+    const page = await context.newPage(); page.setDefaultTimeout(10000);
+    await page.clock.install({ time: new Date('2026-10-26T12:00:00Z') }); await page.goto(origin + '/host');
+    await page.frameLocator('iframe').locator('[data-path="items.0.name"]').waitFor();
+    await page.evaluate(() => { document.querySelector('iframe').contentWindow.postMessage = command => { window.__heldCommand = command; }; });
+    const acknowledge = fx => page.evaluate(fx => {
+      const frame = document.querySelector('iframe').contentWindow, command = window.__heldCommand;
+      const emit = data => window.dispatchEvent(new MessageEvent('message', { origin: location.origin, source: frame, data: { channel: 'pero-kp', ...data } }));
+      if (fx) emit({ type: 'rate-preview', fx });
+      emit({ type: 'command-result', requestId: command.requestId, ok: true }); window.__heldCommand = null;
+    }, fx);
+    const pdf = page.getByRole('button', { name: 'Сгенерировать PDF', exact: true });
+    await pdf.click(); await page.clock.fastForward(181_000);
+    await expect(pdf).toBeDisabled(); await expect(page.getByRole('alert')).toHaveCount(0);
+    await acknowledge(); await expect(pdf).toBeEnabled();
+    const contract = page.getByRole('button', { name: 'Сгенерировать договор', exact: true });
+    await contract.click(); await page.clock.fastForward(46_000);
+    await expect(contract).toBeDisabled(); await expect(page.getByRole('alert')).toHaveCount(0);
+    await acknowledge(); await expect(contract).toBeEnabled();
+    await page.getByRole('button', { name: /^Курс/ }).click(); await acknowledge(baseDoc().fx);
+    const dialog = page.getByRole('dialog'); await expect(dialog).toBeVisible();
+    await dialog.getByLabel('BYN за единицу валюты').fill('1');
+    const save = dialog.getByRole('button', { name: 'Сохранить курс', exact: true });
+    await save.click(); await page.clock.fastForward(46_000);
+    await expect(save).toBeDisabled(); await expect(dialog.getByRole('alert')).toHaveCount(0);
+    await acknowledge(); await expect(dialog).toBeHidden();
+    await pdf.click(); await page.evaluate(() => window.dispatchEvent(new Event('pagehide')));
+    await expect(page.getByRole('alert')).toContainText('Редактор закрыт'); await expect(pdf).toBeEnabled();
+    assert.equal(pdfRequests.length, 0); assert.equal(writes.length, 0);
+  } finally { await context.close(); }
+});
+
 test('actual React toolbar selects CRM client immediately and version bridge restores by live revision', async () => {
   reset(); const context = await browser.newContext({ viewport: { width: 1440, height: 1200 }, serviceWorkers: 'block' });
   try {

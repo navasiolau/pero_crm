@@ -6,6 +6,10 @@ import type { S3Client } from "@aws-sdk/client-s3";
 import { GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import { createProposalArtifactStorage, type ArtifactStorageObject } from "../src/server/kp/artifact-storage";
 import { KpApiError } from "../src/server/kp/api-contract";
+import { spoolPdf, pdfDownloadStream } from "../src/server/kp/pdf-io";
+import { mkdtemp, readdir, rmdir, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 const bytes = Buffer.from("%PDF-test");
 const configuration = { mode: "s3" as const, endpoint: "https://storage.example.invalid", bucket: "private-kp", region: "us-east-1", accessKeyId: "TEST_KEY", secretAccessKey: "TEST_SECRET" };
@@ -74,4 +78,35 @@ test("temporary network failure remains retryable, while missing or corrupt arti
   }
   const storage = createProposalArtifactStorage({ configuration: () => configuration, client: () => ({ send: async () => ({ Body: Readable.from([Buffer.alloc(bytes.length)]) }) } as unknown as S3Client) });
   await assert.rejects(storage.read(artifact, async () => {}), error => error instanceof KpApiError && error.status === 410);
+});
+
+test("file PUT uses known length/immutable key; full streaming readback and preverified download avoid aggregate buffers", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "pero-artifact-test-")), previous = process.env.PERO_KP_PDF_SPOOL_ROOT;
+  process.env.PERO_KP_PDF_SPOOL_ROOT = root; const controller = new AbortController(); let puts = 0, gets = 0;
+  const storage = createProposalArtifactStorage({ configuration: () => configuration, client: () => ({
+    async send(command: unknown, options: { abortSignal: AbortSignal }) {
+      assert.equal(options.abortSignal, controller.signal, "default0 must preserve caller signal without an absolute timeout");
+      if (command instanceof PutObjectCommand) {
+        puts++; assert.equal(command.input.ContentLength, bytes.length); assert.equal(command.input.IfNoneMatch, "*");
+        assert.equal(command.input.ChecksumSHA256, Buffer.from(artifact.sha256, "hex").toString("base64"));
+        assert.ok(command.input.Body instanceof Readable); const chunks: Buffer[] = [];
+        for await (const chunk of command.input.Body) chunks.push(chunk); assert.deepEqual(Buffer.concat(chunks), bytes);
+        throw Error("UNCERTAIN_ACK");
+      }
+      assert.ok(command instanceof GetObjectCommand); gets++; return { Body: Readable.from([bytes.subarray(0, 3), bytes.subarray(3)]), ContentLength: bytes.length };
+    },
+  } as unknown as S3Client) });
+  try {
+    const source = await spoolPdf(Readable.from([bytes]), artifact, controller.signal, root);
+    try { assert.equal((await storage.uploadAndVerify(artifact, source, async () => {}, controller.signal)).sha256, artifact.sha256); }
+    finally { await source.dispose(); }
+    const downloaded = await storage.downloadFile(artifact, async () => {}, controller.signal);
+    const stream = pdfDownloadStream(async function* (signal) { yield* await downloaded.openRead(signal); }, controller.signal, downloaded.dispose);
+    assert.deepEqual(Buffer.from(await new Response(stream).arrayBuffer()), bytes);
+    await assert.rejects(stat(downloaded.path), { code: "ENOENT" }); assert.equal(puts, 1); assert.equal(gets, 2);
+    assert.deepEqual(await readdir(root), []);
+    const corrupt = createProposalArtifactStorage({ configuration: () => configuration, client: () => ({ send: async () => ({ Body: Readable.from([Buffer.alloc(bytes.length)]), ContentLength: bytes.length }) } as unknown as S3Client) });
+    await assert.rejects(corrupt.downloadFile(artifact, async () => {}), error => error instanceof KpApiError && error.code === "KP_ARTIFACT_CHECKSUM");
+    assert.deepEqual(await readdir(root), [], "corrupt S3 bytes never produce a downloadable spool");
+  } finally { if (previous === undefined) delete process.env.PERO_KP_PDF_SPOOL_ROOT; else process.env.PERO_KP_PDF_SPOOL_ROOT = previous; await rmdir(root); }
 });

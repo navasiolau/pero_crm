@@ -45,7 +45,7 @@ test("project PDF appears from existing successful versions and one stable row f
   const result = await readProjectProposalPdf(f.db, async () => actor(), "project", {
     read: async (artifact, authorize) => { downloads.push(artifact.key); await authorize(); return Buffer.from("new"); },
   });
-  assert.equal(result?.bytes.toString(), "new");
+  assert.equal(result?.bytes?.toString(), "new");
   assert.deepEqual(downloads, ["kp/proposals/proposal/exports/second.pdf"]);
 });
 

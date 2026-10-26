@@ -5,6 +5,7 @@ import { apiCreateDocument, apiFailure, apiGenerateContract, apiId, apiOperation
   type ApiAction, type ApiBinary, type KpApiContext, type KpApiService } from "./api-contract";
 import { readKpJson, readKpUpload } from "./api-body";
 import { reportKpApiError } from "./api-error-report";
+import type { PdfStreamReply } from "./pdf-io";
 
 type Match = { action: ApiAction; scope: KpApiScope | readonly KpApiScope[]; values: Record<string, unknown>; body?: "json" | "upload" };
 const id = (value: string) => parseApi(apiId, value);
@@ -76,15 +77,16 @@ function command(action: ApiAction, body: unknown, values: Record<string, unknow
   return body && typeof body === "object" && !Array.isArray(body) ? body as Record<string, unknown> : apiFailure("KP_REQUEST_INVALID", 400, "Нужен объект запроса");
 }
 const headers = { "cache-control": "private, no-store, max-age=0", vary: "Cookie, Authorization", "x-content-type-options": "nosniff" };
-function binary(value: unknown): value is ApiBinary {
-  return value !== null && typeof value === "object" && "bytes" in value && value.bytes instanceof Uint8Array && "fileName" in value && "mimeType" in value;
+function binary(value: unknown): value is ApiBinary | PdfStreamReply {
+  return value !== null && typeof value === "object" && "fileName" in value && "mimeType" in value &&
+    ("bytes" in value && value.bytes instanceof Uint8Array || "body" in value && value.body instanceof ReadableStream && "size" in value && Number.isSafeInteger(value.size));
 }
 function reply(value: unknown, base: string): Response {
   if (binary(value)) {
     const safeName = value.fileName.replace(/[\r\n\u0000-\u001f\u007f]/g, "").slice(0, 200);
     const ascii = safeName.replace(/[^\x20-\x7e]|["\\]/g, "_") || "document";
-    return new Response(new Uint8Array(value.bytes), { headers: { ...headers, "content-type": value.mimeType,
-      "content-length": String(value.bytes.byteLength), "content-disposition": `${value.disposition ?? "attachment"}; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(safeName).replace(/['()*]/g, char => `%${char.charCodeAt(0).toString(16).toUpperCase()}`)}` } });
+    return new Response("body" in value ? value.body : new Uint8Array(value.bytes), { headers: { ...headers, "content-type": value.mimeType,
+      "content-length": String("body" in value ? value.size : value.bytes.byteLength), "content-disposition": `${value.disposition ?? "attachment"}; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(safeName).replace(/['()*]/g, char => `%${char.charCodeAt(0).toString(16).toUpperCase()}`)}` } });
   }
   // URL строится на границе HTTP, а в receipts остаётся только private artifact ID.
   const json = JSON.parse(JSON.stringify(value)) as unknown;
@@ -114,9 +116,9 @@ export function createKpApiHandler(dependencies: {
       if (!dependencies.enabled()) return apiFailure("KP_NOT_FOUND", 404, "Раздел КП недоступен");
       const route = match(request.method, path, new URL(request.url).searchParams);
       action = route.action;
-      const context = await dependencies.authorize(request, surface, route.scope);
+      const context = Object.assign(await dependencies.authorize(request, surface, route.scope), { signal: request.signal });
       let input = route.values;
-      if (route.body === "json") input = command(route.action, await readKpJson(request), route.values);
+      if (route.body === "json") input = command(route.action, await readKpJson(request, { documentState: route.action === "createDocument" || route.action === "saveDocument" }), route.values);
       if (route.body === "upload") {
         const body = await readKpUpload(request);
         const proposalId = route.values.proposalId ?? body.proposalId;

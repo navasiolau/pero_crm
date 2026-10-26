@@ -60,8 +60,9 @@ class ApiClient:
 
     def call(self, action, **args):
         try:
+            timeout = None if action == 'job' and args.get('wait') is True else 110
             child = self.runner(['node', str(BRIDGE)], input=json.dumps({'action': action, 'args': args}, ensure_ascii=False, allow_nan=False),
-                                text=True, encoding='utf-8', capture_output=True, env=self.env, timeout=110, check=False)
+                                text=True, encoding='utf-8', capture_output=True, env=self.env, timeout=timeout, check=False)
         except (OSError, subprocess.TimeoutExpired):
             raise ApiError('Помощник Node не завершён. Для записи проверьте сохранённый operationId; новое создание не повторялось.') from None
         try:

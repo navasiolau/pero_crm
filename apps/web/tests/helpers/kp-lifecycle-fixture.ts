@@ -83,7 +83,7 @@ export function lifecycleFixture() {
     storageBinding: () => ({ endpoint: "http://127.0.0.1:9000", bucket: "test" }),
     loadAssets: async source => source.media.map(media => ({ mediaId: media.id, mimeType: media.mimeType, bytesBase64: image.toString("base64") })),
     render: async input => ({ bytes: Buffer.from("%PDF-1.7\nsynthetic only"), templateHash: input.templateHash }),
-    async upload(artifact, bytes) { uploaded.set(artifact.id, copy(bytes)); },
+    async upload(artifact, bytes) { if (!(bytes instanceof Uint8Array)) throw Error("BUFFER_FIXTURE_ONLY"); uploaded.set(artifact.id, copy(bytes)); },
     async verify(artifact) { const bytes = uploaded.get(artifact.id); if (!bytes) throw Error("fixture-upload-missing"); return { id: artifact.id, storageBinding: artifact.storageBinding, key: artifact.key, size: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex") }; },
   };
   return { get state() { return state; }, store, transaction, ports, binding, queue, io, uploaded };

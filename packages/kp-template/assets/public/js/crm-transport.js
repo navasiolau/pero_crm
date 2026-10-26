@@ -151,12 +151,21 @@
       return view;
     }
     async function poll(job) {
-      var deadline = Date.now() + 120000;
+      var jobId = job?.id, delay = 750;
+      if (typeof jobId !== 'string' || !jobId) throw new Error('Некорректный ответ задания');
       while (job.state !== 'SUCCEEDED') {
         if (job.state === 'FAILED' || job.state === 'CANCELLED') { var error = new Error(job.error || 'Не удалось сформировать документ'); error.knownTerminalJob = true; throw error; }
-        if (Date.now() > deadline) throw new Error('Документ ещё формируется. Повторите проверку позже');
-        await new Promise(function (resolve) { setTimeout(resolve, 750); });
-        job = await request('/jobs/' + encodeURIComponent(job.id));
+        if (job.state !== 'PENDING' && job.state !== 'PROCESSING') throw new Error('Некорректный ответ задания');
+        await new Promise(function (resolve) { setTimeout(resolve, delay); });
+        try {
+          var refreshed = await request('/jobs/' + encodeURIComponent(jobId));
+          if (refreshed?.id !== jobId) throw new Error('Не совпало задание документа');
+          job = refreshed; delay = 750;
+        } catch (error) {
+          if (!(error instanceof TypeError) && !['AbortError', 'TimeoutError'].includes(error?.name) &&
+            error?.status !== 429 && !(error?.status >= 500 && error.status <= 599)) throw error;
+          delay = Math.min(delay * 2, 5000);
+        }
       }
       var result = job.result;
       if (!result || typeof result.downloadUrl !== 'string' || !result.downloadUrl.startsWith('/api/kp/') || result.downloadUrl.startsWith('//')) throw new Error('Некорректная ссылка документа');

@@ -3,12 +3,14 @@
 import { KpApiClient, KpApiError } from './client.mjs';
 
 async function main() {
-  let text = '';
+  const chunks = []; let size = 0;
   for await (const part of process.stdin) {
-    text += part;
-    if (Buffer.byteLength(text) > 2 * 1024 * 1024) throw new KpApiError('KP_REQUEST_TOO_LARGE', 'Запрос слишком большой.');
+    const chunk = Buffer.isBuffer(part) ? part : Buffer.from(part); size += chunk.byteLength;
+    if (size > 2_147_483_647) throw new KpApiError('KP_REQUEST_TOO_LARGE', 'Запрос слишком большой.');
+    chunks.push(chunk);
   }
-  const input = JSON.parse(text);
+  const input = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks, size)));
+  if (input.action !== 'save' && size > 2 * 1024 * 1024) throw new KpApiError('KP_REQUEST_TOO_LARGE', 'Запрос слишком большой.');
   const client = new KpApiClient({ baseUrl: process.env.PERO_CRM_API_URL, key: process.env.PERO_CRM_API_KEY });
   const args = input.args || {};
   let result;
@@ -26,7 +28,7 @@ async function main() {
     case 'contract': result = await client.getContract(args.id); break;
     case 'save-contract': result = await client.saveContract(args.id, args.settings, args.expectedRevision, args.clientBaseline, args.sourceRefs, args.operationId); break;
     case 'generate-contract': result = await client.generateContract(args.id, args.expectedRevision, args.sourceRefs, args.clientBaseline, args.operationId); break;
-    case 'job': result = args.wait ? await client.waitJob(args.id, { timeoutMs: 45_000 }) : await client.getJob(args.id); break;
+    case 'job': result = args.wait ? await client.waitJob(args.id, { timeoutMs: args.timeoutMs }) : await client.getJob(args.id); break;
     case 'operation': result = await client.getOperation(args.id); break;
     case 'artifact': case 'media': {
       const data = input.action === 'artifact' ? await client.downloadArtifact(args.id) : await client.downloadMedia(args.documentId, args.id, args);

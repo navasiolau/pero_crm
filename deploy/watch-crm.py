@@ -76,10 +76,25 @@ def check_config(config: dict, target: Target) -> None:
         tag = target.image.rsplit(":", 1)[1]
         require(renderer.get("image") == f"{KP_REPOSITORY}:{tag}" and "build" not in renderer
                 and "kp" in renderer.get("profiles", []), "kp-compose-image")
-        require(not renderer.get("ports") and not renderer.get("volumes") and renderer.get("read_only") is True
-                and not renderer.get("privileged")
-                and renderer.get("pids_limit") == 128 and float(renderer.get("cpus", 0)) == 1
-                and str(renderer.get("mem_limit")) in ("1536m", "1610612736"), "kp-compose-bounds")
+        require(not renderer.get("ports") and renderer.get("read_only") is True
+                and not renderer.get("privileged"), "kp-compose-bounds")
+        if renderer.get("environment", {}).get("PERO_KP_SPOOL_DIR") == "/spool":
+            volumes = renderer.get("volumes", [])
+            require(len(volumes) == 1 and volumes[0].get("type") == "volume"
+                    and volumes[0].get("source") == "kp_render_spool" and volumes[0].get("target") == "/spool"
+                    and not volumes[0].get("read_only")
+                    and config.get("volumes", {}).get("kp_render_spool", {}).get("name") == f"{target.project}_kp_render_spool"
+                    and not config["volumes"]["kp_render_spool"].get("external")
+                    and not config["volumes"]["kp_render_spool"].get("driver_opts")
+                    and config["volumes"]["kp_render_spool"].get("driver", "local") == "local"
+                    and renderer.get("mem_limit") in (None, 0, "0") and float(renderer.get("cpus") or 0) == 0
+                    and renderer.get("pids_limit") in (None, 0, -1) and renderer.get("oom_score_adj") == 1000
+                    and set(renderer.get("cap_drop", [])) == {"ALL"}
+                    and any(value in ("no-new-privileges", "no-new-privileges:true") for value in renderer.get("security_opt", [])), "kp-compose-bounds")
+        else:
+            require(not renderer.get("volumes") and renderer.get("pids_limit") == 128
+                    and float(renderer.get("cpus", 0)) == 1
+                    and str(renderer.get("mem_limit")) in ("1536m", "1610612736"), "kp-compose-bounds")
         mounts = renderer.get("tmpfs", [])
         require(isinstance(mounts, list) and len(mounts) == 1 and isinstance(mounts[0], str)
                 and mounts[0].startswith("/tmp:") and executable_renderer_tmpfs(mounts[0][5:]), "kp-compose-tmpfs")
@@ -183,14 +198,25 @@ def check_renderer_container(value: dict, target: Target, config: dict, *, allow
     tmpfs = host.get("Tmpfs", {})
     require(isinstance(tmpfs, dict) and set(tmpfs) == {"/tmp"}
             and executable_renderer_tmpfs(tmpfs["/tmp"]), "kp-container-tmpfs")
-    require(host.get("ReadonlyRootfs") is True and host.get("Memory") == 1536 * 1024 * 1024
-            and host.get("NanoCpus") == 1_000_000_000 and host.get("PidsLimit") == 128
-            and not host.get("PortBindings") and not host.get("Binds")
+    mounts = value.get("Mounts", [])
+    disk = [mount for mount in mounts if mount.get("Type") != "tmpfs"]
+    environment = dict(entry.split("=", 1) for entry in value.get("Config", {}).get("Env", []) if "=" in entry)
+    legacy = (not environment.get("PERO_KP_SPOOL_DIR") and host.get("Memory") == 1536 * 1024 * 1024 and host.get("NanoCpus") == 1_000_000_000
+              and host.get("PidsLimit") == 128 and not host.get("Binds") and not disk)
+    spooled = (environment.get("PERO_KP_SPOOL_DIR") == "/spool" and host.get("Memory") == 0
+               and host.get("NanoCpus") == 0 and host.get("PidsLimit") in (None, 0, -1)
+               and host.get("OomScoreAdj") == 1000 and len(disk) == 1
+               and disk[0].get("Type") == "volume" and disk[0].get("Driver") == "local"
+               and disk[0].get("Name") == f"{target.project}_kp_render_spool"
+               and disk[0].get("Destination") == "/spool" and disk[0].get("RW") is True
+               and set(host.get("CapDrop", [])) == {"ALL"}
+               and any(value in ("no-new-privileges", "no-new-privileges:true") for value in host.get("SecurityOpt", [])))
+    require(host.get("ReadonlyRootfs") is True and (legacy or spooled)
+            and not host.get("PortBindings")
             and bool(host.get("Tmpfs", {}).get("/tmp")) and not host.get("Privileged")
             and value.get("Config", {}).get("User") == "node", "kp-container-bounds")
     require(set(value.get("NetworkSettings", {}).get("Networks", {})) == {network}
-            and host.get("NetworkMode") == network
-            and all(mount.get("Type") == "tmpfs" for mount in value.get("Mounts", [])), "kp-container-network")
+            and host.get("NetworkMode") == network, "kp-container-network")
 
 
 def watch_pair(runtime, target: Target, config: dict, db_before: tuple, web: dict,

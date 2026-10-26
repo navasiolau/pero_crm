@@ -1,4 +1,5 @@
 import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { createHash } from "node:crypto";
 import { storageConfiguration } from "@/lib/s3";
 import { KP_IMAGE_MAX_BYTES, ProposalMediaError, mediaSha256, parseMediaBinding, sameMediaBinding,
   type MediaBinding, type MediaObject } from "./media-contract";
@@ -7,7 +8,8 @@ import { KP_IMAGE_MAX_BYTES, ProposalMediaError, mediaSha256, parseMediaBinding,
 export interface ProposalMediaStorage {
   currentBinding(): MediaBinding;
   putIfAbsent(binding: MediaBinding, object: MediaObject, bytes: Buffer): Promise<void>;
-  read(binding: MediaBinding, object: MediaObject): Promise<Buffer | null>;
+  read(binding: MediaBinding, object: MediaObject, signal?: AbortSignal): Promise<Buffer | null>;
+  openRead?(binding: MediaBinding, object: MediaObject, signal?: AbortSignal): AsyncIterable<Uint8Array>;
 }
 
 export function assertMediaStorageBinding(storage: Pick<ProposalMediaStorage, "currentBinding">, binding: MediaBinding): void {
@@ -59,8 +61,25 @@ export function createProposalMediaS3Storage(options: {
     const client = options.client?.(current) ?? ownedClient!;
     return { client, bucket: current.bucket, release: () => ownedClient?.destroy() };
   };
+  async function* openRead(binding: MediaBinding, object: MediaObject, callerSignal?: AbortSignal): AsyncGenerator<Uint8Array> {
+    if (!Number.isSafeInteger(object.size) || object.size < 1 || object.size > KP_IMAGE_MAX_BYTES) throw new ProposalMediaError("KP_MEDIA_CHECKSUM_MISMATCH");
+    const { client, bucket, release } = target(binding), signal = callerSignal ?? AbortSignal.timeout(45_000);
+    let body: (AsyncIterable<Uint8Array> & { destroy?: () => void }) | undefined; const abort = () => body?.destroy?.();
+    try {
+      signal.throwIfAborted(); const result = await client.send(new GetObjectCommand({ Bucket: bucket, Key: object.key }), { abortSignal: signal });
+      if (!result.Body || result.ContentLength !== undefined && result.ContentLength !== object.size) throw new ProposalMediaError("KP_MEDIA_CHECKSUM_MISMATCH");
+      body = result.Body as unknown as AsyncIterable<Uint8Array> & { destroy?: () => void };
+      if (!(Symbol.asyncIterator in body)) throw new ProposalMediaError("KP_MEDIA_STORAGE_FAILED");
+      signal.addEventListener("abort", abort, { once: true }); signal.throwIfAborted();
+      const hash = createHash("sha256"); let size = 0;
+      for await (const chunk of body) { signal.throwIfAborted(); if (!(chunk instanceof Uint8Array) || (size += chunk.byteLength) > object.size) throw new ProposalMediaError("KP_MEDIA_CHECKSUM_MISMATCH"); hash.update(chunk); yield chunk; }
+      signal.throwIfAborted(); assertMediaStorageBinding({ currentBinding: () => bindingFor(config()) }, binding);
+      if (size !== object.size || hash.digest("hex") !== object.sha256) throw new ProposalMediaError("KP_MEDIA_CHECKSUM_MISMATCH");
+    } catch (error) { if (signal.aborted) signal.throwIfAborted(); throw error; }
+    finally { signal.removeEventListener("abort", abort); body?.destroy?.(); release(); }
+  }
   return {
-    currentBinding: () => bindingFor(config()),
+    currentBinding: () => bindingFor(config()), openRead,
     async putIfAbsent(binding, object, bytes) {
       verifyMediaBytes(bytes, object);
       const { client, bucket, release } = target(binding);
@@ -72,35 +91,14 @@ export function createProposalMediaS3Storage(options: {
       } catch { throw new ProposalMediaError("KP_MEDIA_STORAGE_FAILED"); }
       finally { release(); }
     },
-    async read(binding, object) {
-      const { client, bucket, release } = target(binding);
+    async read(binding, object, signal) {
       try {
-        const signal = AbortSignal.timeout(45_000);
-        const result = await client.send(new GetObjectCommand({ Bucket: bucket, Key: object.key }), { abortSignal: signal });
-        if (!result.Body || result.ContentLength !== undefined && result.ContentLength !== object.size)
-          throw new ProposalMediaError("KP_MEDIA_CHECKSUM_MISMATCH");
-        // Ограничение применяется к потоку, а не только к недоверенному Content-Length.
-        const body = result.Body as unknown as AsyncIterable<Uint8Array> & { destroy?: () => void };
-        if (!(Symbol.asyncIterator in body)) throw new ProposalMediaError("KP_MEDIA_STORAGE_FAILED");
-        const abort = () => body.destroy?.();
-        signal.addEventListener("abort", abort, { once: true });
-        const chunks: Buffer[] = []; let bytes = 0;
-        try {
-          if (signal.aborted) throw new ProposalMediaError("KP_MEDIA_STORAGE_FAILED");
-          for await (const chunk of body) {
-            if (!(chunk instanceof Uint8Array)) throw new ProposalMediaError("KP_MEDIA_STORAGE_FAILED");
-            bytes += chunk.byteLength;
-            if (bytes > object.size || bytes > KP_IMAGE_MAX_BYTES) throw new ProposalMediaError("KP_MEDIA_CHECKSUM_MISMATCH");
-            chunks.push(Buffer.from(chunk));
-          }
-          if (signal.aborted) throw new ProposalMediaError("KP_MEDIA_STORAGE_FAILED");
-        } finally { signal.removeEventListener("abort", abort); body.destroy?.(); }
-        const data = Buffer.concat(chunks); verifyMediaBytes(data, object); return data;
+        const chunks: Buffer[] = []; for await (const chunk of openRead(binding, object, signal)) chunks.push(Buffer.from(chunk)); return Buffer.concat(chunks);
       } catch (error) {
         if (error && typeof error === "object" && "name" in error && ["NoSuchKey", "NotFound"].includes(String(error.name))) return null;
         if (error instanceof ProposalMediaError) throw error;
         throw new ProposalMediaError("KP_MEDIA_STORAGE_FAILED");
-      } finally { release(); }
+      }
     },
   };
 }

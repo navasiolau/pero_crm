@@ -12,6 +12,7 @@ import { createProposalArtifactStorage } from "./artifact-storage";
 import type { Prisma } from "@prisma/client";
 import { proposalArtifactFileName } from "./pdf-filename";
 import { revalidatePublishedProjectPdfs } from "./project-pdf-cache";
+import { pdfDownloadStream } from "./pdf-io";
 
 export async function getApiOperation(context: KpApiContext, operationId: string) {
   const own = await readApiReceipt(prisma, context, operationId); if (own) return own;
@@ -69,13 +70,19 @@ async function authorizeArtifact(context: KpApiContext, artifactId: string, tx?:
   } else return apiFailure("KP_ARTIFACT_NOT_FOUND", 404, "Не совпал источник документа");
   return { ...artifact, fileName: await proposalArtifactFileName(db, artifact) };
 }
-export async function readApiArtifact(context: KpApiContext, artifactId: string) {
+export async function readApiArtifact(context: KpApiContext & { signal?: AbortSignal }, artifactId: string) {
   const artifact = await authorizeArtifact(context, artifactId), storage = createProposalArtifactStorage();
-  const bytes = await storage.read(artifact, async () => {
+  const authorize = async () => {
     const current = await authorizeArtifact(context, artifactId);
-    if (current.key !== artifact.key || current.sha256 !== artifact.sha256 || current.size !== artifact.size) return apiFailure("KP_ARTIFACT_CHANGED", 410, "Документ изменился");
-  });
-  return { bytes, fileName: artifact.fileName, mimeType: artifact.kind === "PDF" ? "application/pdf" : "application/vnd.openxmlformats-officedocument.wordprocessingml.document", disposition: "attachment" as const };
+    if (current.key !== artifact.key || current.sha256 !== artifact.sha256 || current.size !== artifact.size || JSON.stringify(current.storageBinding) !== JSON.stringify(artifact.storageBinding)) return apiFailure("KP_ARTIFACT_CHANGED", 410, "Документ изменился");
+  };
+  if (artifact.kind === "PDF") {
+    const file = await storage.downloadFile(artifact, authorize, context.signal);
+    return { body: pdfDownloadStream(async function* (signal) { yield* await file.openRead(signal); }, context.signal, file.dispose), size: file.size,
+      fileName: artifact.fileName, mimeType: "application/pdf", disposition: "attachment" as const };
+  }
+  const bytes = await storage.read(artifact, authorize, context.signal);
+  return { bytes, fileName: artifact.fileName, mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", disposition: "attachment" as const };
 }
 
 export async function getApiJob(context: KpApiContext, jobId: string) {

@@ -5,6 +5,7 @@ services:
     environment:
       PERO_KP_RENDERER_URL: http://kp-renderer:3100
       PERO_KP_RENDERER_SECRET: ${PERO_KP_RENDERER_SECRET}
+      PERO_KP_PDF_SPOOL_ROOT: /tmp
     networks:
       - frontend
       - backend
@@ -17,6 +18,7 @@ services:
     init: true
     environment:
       PERO_KP_RENDERER_SECRET: ${PERO_KP_RENDERER_SECRET}
+      PERO_KP_SPOOL_DIR: /spool
     read_only: true
     tmpfs:
       # Sparticuz извлекает исполняемый Chromium в этот ограниченный tmpfs.
@@ -24,11 +26,15 @@ services:
     cap_drop: [ALL]
     security_opt:
       - no-new-privileges:true
-    mem_limit: 1536m
-    cpus: 1.0
-    pids_limit: 128
+    # PDF и изображения хранятся во временном дисковом томе, а не в памяти.
+    volumes:
+      - kp_render_spool:/spool
+    # При исчерпании физических ресурсов первым завершается renderer, а не БД CRM.
+    oom_score_adj: 1000
     networks:
       - kp_render
 networks:
   kp_render:
     internal: true
+volumes:
+  kp_render_spool:

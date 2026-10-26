@@ -15,7 +15,7 @@ export type RetentionProgress = { manifest: RetentionManifest; objects: Record<s
 const id = z.string().min(1).max(256).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/);
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
 const binding = z.object({ endpoint: z.string().url(), bucket: z.string().regex(/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/), region: z.string().min(1).max(255).optional() }).strict();
-const object = z.object({ key: z.string().min(1).max(1024), sha256: hash, size: z.number().int().positive().max(512 * 1024 * 1024), mimeType: z.string().min(1).max(120) }).strict();
+const object = z.object({ key: z.string().min(1).max(1024), sha256: hash, size: z.number().int().positive().max(2_147_483_647), mimeType: z.string().min(1).max(120) }).strict();
 const exact = { schema: z.literal(1), proposalId: id, operationJobId: id, binding, objects: z.array(object).min(1).max(2) };
 export const retentionPayloadSchema = z.discriminatedUnion("kind", [
   z.object({ schema: z.literal(1), kind: z.literal("ACCEPTED_RETENTION"), proposalId: id, acceptedVersionId: id, retentionEpoch: z.number().int().min(0) }).strict(),

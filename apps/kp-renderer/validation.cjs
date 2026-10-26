@@ -3,6 +3,39 @@ const { getKpTemplateIdentity, KP_RENDER_LIMITS: LIMITS } = require('@pero/kp-te
 const id = value => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/.test(value);
 const record = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const imageTypes = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/avif', 'image/gif']);
+function validateAssetReferences(state, assets) {
+  const used = new Set();
+  for (const item of state.items) {
+    if (!record(item)) throw Error('KP_RENDER_STATE_INVALID');
+    for (const key of ['image', 'image2']) {
+      const token = item[key]; if (token === '' || token === undefined || token === null) continue;
+      if (typeof token !== 'string' || !token.startsWith('kp-media:') || !id(token.slice(9))) throw Error('KP_RENDER_IMAGE_REFERENCE_INVALID');
+      const mediaId = token.slice(9);
+      if (!assets.has(mediaId)) throw Error('KP_RENDER_ASSET_MISSING');
+      used.add(mediaId);
+    }
+  }
+  if (used.size !== assets.size) throw Error('KP_RENDER_ASSET_UNUSED');
+}
+function validatePdfManifest(input) {
+  const fields = ['protocol', 'kind', 'proposalId', 'revision', 'templateHash', 'state', 'assets'];
+  if (!record(input) || Object.keys(input).length !== fields.length || Object.keys(input).some(key => !fields.includes(key)) ||
+    input.protocol !== 1 || input.kind !== 'pdf' || !id(input.proposalId) || !Number.isSafeInteger(input.revision) || input.revision < 0) throw Error('KP_RENDER_INPUT_INVALID');
+  if (input.templateHash !== getKpTemplateIdentity().templateHash) throw Error('KP_RENDER_TEMPLATE_MISMATCH');
+  if (!record(input.state) || !Array.isArray(input.state.items) || !Number.isSafeInteger(input.state.items.length) ||
+    Buffer.byteLength(JSON.stringify(input.state)) > LIMITS.stateBytes) throw Error('KP_RENDER_STATE_LIMIT');
+  if (!Array.isArray(input.assets)) throw Error('KP_RENDER_ASSET_LIMIT');
+  const assets = new Map(); let total = 0;
+  for (const asset of input.assets) {
+    if (!record(asset) || Object.keys(asset).length !== 4 || Object.keys(asset).some(key => !['mediaId', 'mimeType', 'size', 'sha256'].includes(key)) ||
+      !id(asset.mediaId) || !imageTypes.has(asset.mimeType) || !Number.isSafeInteger(asset.size) || asset.size < 1 || asset.size > LIMITS.assetBytes ||
+      typeof asset.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(asset.sha256)) throw Error('KP_RENDER_ASSET_INVALID');
+    if (assets.has(asset.mediaId)) throw Error('KP_RENDER_ASSET_DUPLICATE');
+    total += asset.size; if (!Number.isSafeInteger(total) || total > LIMITS.totalAssetBytes) throw Error('KP_RENDER_ASSET_LIMIT');
+    assets.set(asset.mediaId, asset);
+  }
+  validateAssetReferences(input.state, assets); return input;
+}
 function boundedBase64(text, max) {
   if (typeof text !== 'string' || !text.length || text.length > Math.ceil(max / 3) * 4 || text.length % 4 || !/^[A-Za-z0-9+/]+={0,2}$/.test(text)) {
     if (typeof text === 'string' && text.length > Math.ceil(max / 3) * 4) throw Error('KP_RENDER_BYTES_LIMIT');
@@ -41,8 +74,8 @@ function validateRenderInput(input) {
   }
   if (!['pdf', 'bundle'].includes(input.kind) || !id(input.proposalId) || !Number.isSafeInteger(input.revision) || input.revision < 0) throw Error('KP_RENDER_INPUT_INVALID');
   if (input.templateHash !== getKpTemplateIdentity().templateHash) throw Error('KP_RENDER_TEMPLATE_MISMATCH');
-  if (!record(input.state) || !Array.isArray(input.state.items) || input.state.items.length > LIMITS.items || Buffer.byteLength(JSON.stringify(input.state)) > LIMITS.stateBytes) throw Error('KP_RENDER_STATE_LIMIT');
-  if (!Array.isArray(input.assets) || input.assets.length > LIMITS.items * 2) throw Error('KP_RENDER_ASSET_LIMIT');
+  if (!record(input.state) || !Array.isArray(input.state.items) || !Number.isSafeInteger(input.state.items.length) || Buffer.byteLength(JSON.stringify(input.state)) > LIMITS.stateBytes) throw Error('KP_RENDER_STATE_LIMIT');
+  if (!Array.isArray(input.assets)) throw Error('KP_RENDER_ASSET_LIMIT');
   const assets = new Map(); let total = 0;
   for (const asset of input.assets) {
     if (!record(asset) || !id(asset.mediaId) || !imageTypes.has(asset.mimeType)) throw Error('KP_RENDER_ASSET_INVALID');
@@ -51,18 +84,7 @@ function validateRenderInput(input) {
     if (total > LIMITS.totalAssetBytes) throw Error('KP_RENDER_ASSET_LIMIT');
     assets.set(asset.mediaId, asset);
   }
-  const used = new Set();
-  for (const item of input.state.items) {
-    if (!record(item)) throw Error('KP_RENDER_STATE_INVALID');
-    for (const key of ['image', 'image2']) {
-      const token = item[key]; if (token === '' || token === undefined || token === null) continue;
-      if (typeof token !== 'string' || !token.startsWith('kp-media:') || !id(token.slice(9))) throw Error('KP_RENDER_IMAGE_REFERENCE_INVALID');
-      const mediaId = token.slice(9);
-      if (!assets.has(mediaId)) throw Error('KP_RENDER_ASSET_MISSING');
-      used.add(mediaId);
-    }
-  }
-  if (used.size !== assets.size) throw Error('KP_RENDER_ASSET_UNUSED');
+  validateAssetReferences(input.state, assets);
   return input;
 }
 function prepareRenderState(input) {
@@ -74,4 +96,4 @@ function prepareRenderState(input) {
   }
   return state;
 }
-module.exports = { LIMITS, boundedBase64, validateRenderInput, prepareRenderState };
+module.exports = { LIMITS, boundedBase64, validateRenderInput, validatePdfManifest, prepareRenderState };

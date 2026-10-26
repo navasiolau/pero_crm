@@ -26,7 +26,7 @@ export function verifyRendererSmoke(smoke, identity, expected = template.getKpTe
     smoke.runtime?.chromium === expected.chromium && smoke.runtime?.puppeteer === expected.puppeteer, 'kp-smoke-runtime');
   requireCi(Number.isSafeInteger(smoke.pages) && smoke.pages >= 4 &&
     smoke.allPagesIdentical === true && smoke.originalDpr2AppendicesIdentical === true && smoke.docxEntriesIdentical === true &&
-    smoke.privateHttp === true && smoke.limitsVerified === true, 'kp-smoke-results');
+    smoke.privateHttp === true && smoke.limitsVerified === true && smoke.streamedPdf === true, 'kp-smoke-results');
   return smoke;
 }
 /** Полный OCI-граф и runtime projection; функция сама Docker не запускает. */
@@ -64,7 +64,7 @@ export async function verifyRendererOci(directory, identity, expected = template
   const expectedLabels = rendererLabels(identity, labels?.['pero.kp.node-image'], expected);
   for (const [key, value] of Object.entries(expectedLabels)) requireCi(labels?.[key] === value, `kp-oci-label:${key}`);
   requireCi(image.config.config.User === 'node' && image.config.config.WorkingDir === '/app/apps/kp-renderer' &&
-    image.config.config.Cmd?.join(' ') === 'node --max-old-space-size=384 server.cjs', 'kp-oci-entrypoint');
+    image.config.config.Cmd?.join(' ') === 'node server.cjs', 'kp-oci-entrypoint');
   const node = image.config.config.Env.find(value => value.startsWith('NODE_VERSION='))?.slice(13);
   requireCi(/^22\.\d+\.\d+$/.test(node ?? '') && !image.config.config.Env.some(value => /^PERO_KP_(?:CHROMIUM_PATH|RENDERER_SECRET)=/.test(value)), 'kp-oci-environment');
   return { ...identity, runtimeNode: node, nodeImage: labels['pero.kp.node-image'], template: expected,
