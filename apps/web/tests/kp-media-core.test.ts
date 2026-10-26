@@ -11,9 +11,10 @@ import { proposalMediaPreviewUrl, resolveProposalMediaAssets } from "../src/serv
 
 const binding: MediaBinding = { endpoint: "https://private.invalid/", bucket: "crm-unit", region: "us-east-1" };
 const owner = { proposalId: "proposal-a", projectId: "project-a", revision: 4, createdAt: new Date("2026-10-18T12:00:00Z") };
+type PublishedMedia = Pick<MediaPlan, "mediaId" | "proposalId" | "original" | "optimized" | "fileName" | "width" | "height">;
 function fixture() {
   const objects = new Map<string, Buffer>(), jobs = new Map<string, MediaReservation>(), cleanup = new Map<string, string[]>();
-  const published = new Map<string, MediaPlan>(); const log: string[] = [];
+  const published = new Map<string, PublishedMedia>(); const log: string[] = [];
   let writable = true, live = true, revision = owner.revision, existingFileId: string | null = null;
   const authorize = (request: { proposalId: string; expectedRevision?: number }) => {
     if (!live) throw new ProposalMediaError("KP_MEDIA_FORBIDDEN");
@@ -124,6 +125,41 @@ test("Product copies have independent keys and ready receipt before File attachm
   f.setExistingFile(copy.fileId!);
   const reused = await prepareProposalProductMedia(f.dependencies, { ...f.operation, operationId: randomUUID(), items: [{ id: "item-a", image: uploaded.reference }] });
   assert.deepEqual(reused.jobs, []);
+});
+
+test("imported optimized media prepares an independent copy while source namespace, hash and MIME stay exact", async () => {
+  const f = fixture(), bytes = await image(), hash = mediaSha256(bytes), mediaId = "kp_a_m_" + "a".repeat(64);
+  const prefix = `kp/proposals/${owner.proposalId}/optimized/`;
+  const source = { key: `${prefix}${mediaId}_${hash}.png`, sha256: hash, size: bytes.length, mimeType: "image/png" as const };
+  const media: PublishedMedia = { proposalId: owner.proposalId, mediaId, optimized: source, fileName: "import.png", width: 1, height: 1 };
+  f.published.set(mediaId, media); f.objects.set(source.key, bytes);
+  const preview = await readProposalMedia(f.dependencies, { actorId: f.operation.actorId, proposalId: owner.proposalId,
+    mediaId, variant: "optimized", scope: { kind: "current" } });
+  assert.deepEqual(preview.bytes, bytes);
+  const prepare = () => prepareProposalProductMedia(f.dependencies, { ...f.operation, operationId: randomUUID(),
+    items: [{ id: "item-a", image: "kp-media:" + mediaId }] });
+  const prepared = await prepare();
+  assert.equal(prepared.jobs.length, 1);
+  const reservation = f.jobs.get(prepared.jobs[0])!;
+  assert.equal(reservation.ready, true);
+  assert.deepEqual(reservation.plan.source, source);
+  assert.notEqual(reservation.plan.optimized.key, source.key);
+  assert.deepEqual(f.objects.get(reservation.plan.optimized.key), bytes);
+  assert.deepEqual(f.objects.get(source.key), bytes);
+  for (const invalid of [
+    { ...source, key: `kp/proposals/other/optimized/${mediaId}_${hash}.png` },
+    { ...source, key: `${prefix}other_${hash}.png` },
+    { ...source, key: `${prefix}${mediaId}_${"b".repeat(64)}.png` },
+    { ...source, key: `${prefix}${mediaId}_${hash}.jpg` },
+    { ...source, sha256: "b".repeat(64) },
+    { ...source, mimeType: "image/jpeg" as const },
+    { ...source, key: "https://foreign.invalid/image.png" },
+  ]) {
+    media.optimized = invalid;
+    const before = f.log.length;
+    await assert.rejects(prepare(), error => error instanceof ProposalMediaError && error.code === "KP_MEDIA_INVALID");
+    assert.deepEqual(f.log.slice(before), [], "invalid source is rejected before copy reservation or storage I/O");
+  }
 });
 
 test("private read rejects other owner and rechecks access after network; renderer gets unique bounded assets", async () => {

@@ -137,9 +137,12 @@ export function validateMediaPlan(input: unknown): MediaPlan {
     const keys = mediaObjectKeys(plan.proposalId, plan.mediaId, plan.original.mimeType, plan.optimized.mimeType);
     if (plan.original.key !== keys.original || plan.optimized.key !== keys.optimized) throw new ProposalMediaError("KP_MEDIA_INVALID");
   } else {
+    const source = plan.source;
+    // Сохранённые при импорте байты имеют hash в имени; namespace, ID, hash и MIME проверяются буквально.
+    const sourceKeyMatches = source && (source.key === mediaObjectKeys(plan.proposalId, plan.mediaId, source.mimeType, source.mimeType).optimized ||
+      source.key === `kp/proposals/${plan.proposalId}/optimized/${plan.mediaId}_${source.sha256}.${extension(source.mimeType)}`);
     if (plan.original || !plan.source || !plan.itemId || !plan.fileId || plan.storedName !== productMediaStoredName(plan.jobId, plan.optimized.mimeType) ||
-      plan.optimized.key !== `${plan.projectId}/${plan.storedName}` || plan.source.key !==
-      mediaObjectKeys(plan.proposalId, plan.mediaId, plan.source.mimeType, plan.source.mimeType).optimized ||
+      plan.optimized.key !== `${plan.projectId}/${plan.storedName}` || !sourceKeyMatches ||
       plan.source.sha256 !== plan.optimized.sha256 || plan.source.size !== plan.optimized.size || plan.source.mimeType !== plan.optimized.mimeType)
       throw new ProposalMediaError("KP_MEDIA_INVALID");
   }
