@@ -22,7 +22,7 @@
     var fetcher = dependencies.fetch, storage = dependencies.storage, emit = dependencies.emit || function () {};
     var currentId = bootstrap.documentId, documents = {}, current = null, viewingVersion = null, uploaded = new Set();
     var editor, paused = false, contractOpen = false, saveQueue = Promise.resolve(), contractForms = {}, retainedOperations = {};
-    var confirmedState = null, confirmedFx = null;
+    var confirmedState = null, confirmedFx = null, clientIntent = null, focusGeneration = 0, activeUploads = new Set();
     var prefix = 'pero-crm-kp:' + encodeURIComponent(bootstrap.actorId) + ':';
     var uuid = dependencies.uuid || function () { return crypto.randomUUID(); };
     function copy(value) { return JSON.parse(JSON.stringify(value)); }
@@ -51,14 +51,21 @@
       return data;
     }
     function json(method, body) { return { method: method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }; }
-    function remember(doc) {
+    function remember(doc, acceptedClientIntent) {
       if (!doc || !doc.id || !Number.isSafeInteger(doc.revision) || !doc.state || !Array.isArray(doc.state.items)) throw new Error('Некорректный ответ сохранения КП');
+      if (arguments.length < 2 || currentId !== doc.id) {
+        focusGeneration++;
+        activeUploads.forEach(function (controller) { controller.abort(); });
+        clientIntent = null;
+      } else if (clientIntent === acceptedClientIntent) clientIntent = null;
       documents[doc.id] = doc; currentId = doc.id; current = doc; viewingVersion = null;
       confirmedState = canonical(doc.state); confirmedFx = canonical(doc.fx);
+      // Ответ старого сохранения не отменяет более поздний явный выбор клиента.
+      if (clientIntent) current = documents[doc.id] = Object.assign({}, doc, { client: copy(clientIntent.client) });
       var staged = read(key(doc.id, 'uploads:' + doc.revision));
       uploaded = new Set(Array.isArray(staged) ? staged.filter(function (id) { return typeof id === 'string' && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/.test(id); }).slice(0, 400) : []);
-      emit({ type: 'document', document: doc, versionId: null });
-      return doc;
+      emit({ type: 'document', document: current, versionId: null });
+      return current;
     }
     function acknowledgeUploads(doc) {
       var referenced = new Set();
@@ -99,34 +106,38 @@
       var quote = await request('/rates?currency=' + preview.currency + '&date=' + encodeURIComponent(preview.date));
       return quote.fx;
     }
-    async function saveNow(state, fxIntent) {
+    async function saveNow(state, fxIntent, context) {
       if (!current || !current.canEdit || viewingVersion || paused) throw new Error('КП доступно только для просмотра');
+      if (currentId !== context.id) throw new Error('Открыто другое КП. Повторите сохранение');
       if (fxIntent !== undefined) current.fx = copy(fxIntent);
       var snapshot = copy(state), id = currentId, path = '/documents/' + encodeURIComponent(id);
       // Предыдущая не подтверждённая операция сначала получает свой прежний ответ.
       var stored = retainedOperations[key(id, 'operation:save')] || read(key(id, 'operation:save'));
       if (stored) {
         try {
-          var confirmed = await replay(id, path, stored); acknowledgeUploads(confirmed); remember(confirmed);
+          var confirmed = await replay(id, path, stored); acknowledgeUploads(confirmed);
+          remember(confirmed, stored.body.clientId === context.client?.id ? context.clientIntent : undefined);
           if (fxIntent !== undefined) current.fx = copy(fxIntent);
-          if (JSON.stringify(snapshot) === JSON.stringify(confirmed.state) && canonical(current.fx) === confirmedFx) return confirmed;
+          if (JSON.stringify(snapshot) === JSON.stringify(confirmed.state) && canonical(current.fx) === confirmedFx &&
+            stored.body.clientId === context.client?.id) return current;
         } catch (error) {
           // После однозначного отказа можно отправить уже исправленное состояние новым запросом.
           if (!isRejectedSave(error) || canonical(snapshot) === canonical(stored.body.state) &&
-            canonical(current.fx) === canonical(stored.body.fx) && current.client?.id === stored.body.clientId) throw error;
+            canonical(current.fx) === canonical(stored.body.fx) && context.client?.id === stored.body.clientId) throw error;
         }
       }
       var body = { proposalId: id, expectedRevision: current.revision, state: snapshot };
-      if (current.client) body.clientId = current.client.id;
+      if (context.client) body.clientId = context.client.id;
       body.fx = await rateForState(snapshot);
       var pending = operation(id, 'save', body);
       var result = await requestSave(id, path, pending.entry.body);
       remove(pending.storageKey); delete retainedOperations[pending.storageKey];
-      acknowledgeUploads(result); return remember(result);
+      acknowledgeUploads(result); return remember(result, context.clientIntent);
     }
     function save(state) {
       var snapshot = copy(state), fxIntent = current && canonical(current.fx) !== confirmedFx ? copy(current.fx) : undefined;
-      var next = saveQueue.catch(function () {}).then(function () { return saveNow(snapshot, fxIntent); });
+      var context = { id: currentId, client: copy(current?.client || null), clientIntent: clientIntent };
+      var next = saveQueue.catch(function () {}).then(function () { return saveNow(snapshot, fxIntent, context); });
       saveQueue = next; return next.catch(function (error) { emit({ type: 'error', message: error.message }); throw error; });
     }
     async function ensureSaved() {
@@ -220,13 +231,43 @@
       var doc = await request('/documents', json('POST', (pending.entry || pending.previous).body));
       remove(pending.storageKey); delete retainedOperations[pending.storageKey]; remember(doc); emit({ type: 'navigate', documentId: doc.id }); return doc;
     }
-    async function upload(original, optimized) {
+    async function upload(original, optimized, options) {
+      options = options || {};
       if (!current?.canEdit || viewingVersion || paused) throw new Error('КП доступно только для просмотра');
-      var body = new FormData(); body.set('file', original); body.set('optimized', optimized);
-      body.set('expectedRevision', String(current.revision)); body.set('operationId', uuid());
-      var result = await request('/documents/' + encodeURIComponent(currentId) + '/media', { method: 'POST', body: body });
-      if (!result.reference || result.reference !== 'kp-media:' + result.mediaId || !/^kp-media:[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/.test(result.reference)) throw new Error('Некорректный ответ загрузки');
-      uploaded.add(result.mediaId); write(key(currentId, 'uploads:' + current.revision), Array.from(uploaded)); return result.reference;
+      var id = currentId, generation = focusGeneration, controller = new AbortController();
+      if (options.documentId && options.documentId !== id) throw new Error('Загрузка относится к другому КП');
+      function abort() { controller.abort(); }
+      if (options.signal?.aborted) abort();
+      else options.signal?.addEventListener('abort', abort, { once: true });
+      function checkContext() {
+        if (controller.signal.aborted || currentId !== id || focusGeneration !== generation || !api.isEditable()) {
+          var error = new Error('Загрузка фото отменена: редакция КП изменилась'); error.name = 'AbortError'; throw error;
+        }
+      }
+      activeUploads.add(controller);
+      try {
+        checkContext();
+        // Уже начатое сохранение сначала подтверждает ревизию для загрузки.
+        await saveQueue.catch(function () {});
+        checkContext();
+        var pendingSave = retainedOperations[key(id, 'operation:save')] || read(key(id, 'operation:save'));
+        if (pendingSave) {
+          try {
+            var confirmed = await replay(id, '/documents/' + encodeURIComponent(id), pendingSave);
+            checkContext();
+            var latestFx = canonical(current.fx) !== confirmedFx ? copy(current.fx) : undefined;
+            acknowledgeUploads(confirmed); remember(confirmed, undefined);
+            if (latestFx !== undefined) current.fx = latestFx;
+          } catch (error) { if (!isRejectedSave(error)) throw error; }
+          checkContext();
+        }
+        var body = new FormData(); body.set('file', original); body.set('optimized', optimized);
+        body.set('expectedRevision', String(current.revision)); body.set('operationId', uuid());
+        var result = await request('/documents/' + encodeURIComponent(id) + '/media', { method: 'POST', body: body, signal: controller.signal });
+        checkContext();
+        if (!result.reference || result.reference !== 'kp-media:' + result.mediaId || !/^kp-media:[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/.test(result.reference)) throw new Error('Некорректный ответ загрузки');
+        uploaded.add(result.mediaId); write(key(id, 'uploads:' + current.revision), Array.from(uploaded)); return result.reference;
+      } finally { activeUploads.delete(controller); options.signal?.removeEventListener('abort', abort); }
     }
     async function legacyRequest(url, options) {
       options = options || {}; var parsed = new URL(url, 'http://crm.invalid');
@@ -284,7 +325,7 @@
       documentsCacheKey: prefix + 'document-labels',
       isEditable: function () { return current?.canEdit === true && !viewingVersion && !paused; },
       isPaused: function () { return paused; },
-      hasUnsavedChanges: function (state) { return !!current && (canonical(state) !== confirmedState || canonical(current.fx) !== confirmedFx); },
+      hasUnsavedChanges: function (state) { return !!current && (!!clientIntent || canonical(state) !== confirmedState || canonical(current.fx) !== confirmedFx); },
       getDocument: function () { return current; },
       focusDocument: remember,
       acknowledgeHydration: function (doc, state) {
@@ -323,6 +364,7 @@
           state.client = Object.assign({}, state.client, { crmId: client.id, crmSnapshot: Object.assign({}, client.snapshot, { id: client.id }),
             name: client.isTemporary ? '' : client.label, contact: client.isTemporary ? '' : client.snapshot.phone });
           current = Object.assign({}, current, { client: { id: client.id, label: client.label } }); documents[currentId] = current;
+          clientIntent = { client: copy(current.client) };
           paused = false; editor.applyState(state); await editor.ensureSaved(); api.applyPermissions(); return;
         }
         if (command.type === 'fx') {

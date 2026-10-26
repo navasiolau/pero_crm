@@ -21,8 +21,9 @@ const originalSheet = require(path.join(originalRoot, 'sheet-render.js'));
 const puppeteer = require('../../kp-renderer/node_modules/puppeteer-core');
 const output = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../test-results/kp-editor/' + randomUUID());
 const copy = value => JSON.parse(JSON.stringify(value));
+// Старый generator печатал этот литерал вместо header.tagline; сравнение использует тот же видимый текст.
 const state = {
-  header: { company: 'Перо Лайв', tagline: 'Мебель по индивидуальным заказам. Легкость во всём', phone: '+000', phone2: '', email: 'fixture@example.invalid', site: 'example.invalid', instagram: '' },
+  header: { company: 'Перо Лайв', tagline: 'Ваше желание — наша реализация', phone: '+000', phone2: '', email: 'fixture@example.invalid', site: 'example.invalid', instagram: '' },
   order: { number: '231', date: '18.10.2026', validUntil: '01.11.2026', project: 'Контрольная меблировка' }, client: { name: 'Контрольный заказчик', contact: '+000' },
   currency: 'BYN', discountMode: 'percent', discount: 10, warrantyMonths: 12, intro: 'Контрольный снимок без рабочих данных',
   payment: 'Оплата: предоплата 70 %, остаток — после монтажа', totalNote: 'включая доставку и монтаж',

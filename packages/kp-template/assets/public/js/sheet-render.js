@@ -9,6 +9,8 @@
       });
     }
 
+    function lineBreaks(s) { return s.replace(/\r\n?|\n/g, '<br>'); }
+
     function fmt(n) {
       return new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 }).format(n || 0);
     }
@@ -188,6 +190,7 @@
 
     function headerHTML(s) {
       var h = s.header || {}, o = s.order || {}, c = s.client || {};
+      var tagline = h.tagline == null ? 'Ваше желание — наша реализация' : h.tagline;
       var logo = '<div class="sh-logo">' + LOGO + '</div>';
       var kicker = 'КП № ' + esc(o.number) + ' · от ' + esc(o.date) + (o.validUntil ? ' · действительно до ' + esc(o.validUntil) : '');
       var p1 = digits(h.phone), p2 = digits(h.phone2);
@@ -204,7 +207,7 @@
         '<div class="sh-covTop">' +
         '<div class="sh-brandCol">' + logo +
         '<div><div class="sh-company">' + esc(h.company) + '</div>' +
-        '<div class="sh-tagline">Ваше желание — наша реализация</div></div>' +
+        '<div class="sh-tagline">' + esc(tagline) + '</div></div>' +
         '</div>' +
         '<div class="sh-covRight">' +
         '<div class="sh-coverReq">ООО «ПеРо Лайв»<br>Беларусь, Брестская обл., г. Кобрин,<br>ул. Железнодорожная, 50<br>УНП 291231014<br>Р/С BY08BAPB30122198800100000000<br>ОАО «Белагропромбанк», г. Минск, BAPBBY2X</div>' +
@@ -225,7 +228,7 @@
         '<span class="sh-clientName">' + esc(c.name) + '</span>' +
         (c.contact ? '<span class="sh-clientContact">' + esc(c.contact) + '</span>' : '') +
         '</div>' +
-        (s.intro ? '<div class="sh-intro">' + esc(s.intro) + '</div>' : '')
+        (s.intro ? '<div class="sh-intro">' + lineBreaks(esc(s.intro)) + '</div>' : '')
       );
     }
 
@@ -261,9 +264,9 @@
         '<div class="sh-cardBody">' +
         '<div class="sh-cardIdx">' + String(i + 1).padStart(2, '0') + '</div>' +
         '<div class="sh-cardName">' + esc(it.name) + '</div>' +
-        (it.description ? '<div class="sh-cardDesc">' + esc(it.description) + '</div>' : '') +
+        (it.description ? '<div class="sh-cardDesc">' + lineBreaks(esc(it.description)) + '</div>' : '') +
         matsHTML(it) +
-        (it.note ? '<div class="sh-note"><span class="sh-noteLabel">Примечание</span><span class="sh-noteText">' + esc(it.note) + '</span></div>' : '') +
+        (it.note ? '<div class="sh-note"><span class="sh-noteLabel">Примечание</span><span class="sh-noteText">' + lineBreaks(esc(it.note)) + '</span></div>' : '') +
         '<div class="sh-cardFoot">' +
         (it.size ? '<div class="sh-cardSize"><span class="lbl">Длина × Высота × Глубина</span><span class="val">' + esc(it.size) + '</span></div>' : '') +
         (qty > 1 ? '<div class="sh-cardQty"><span class="lbl">Количество</span><span class="val">' + qty + ' шт × ' + fmt(it.price) + ' ' + cur + '</span></div>' : '') +
@@ -291,9 +294,9 @@
         '<div class="sh-cardBody">' +
         '<div class="sh-cardIdx">' + String(i + 1).padStart(2, '0') + '</div>' +
         '<div class="sh-cardName">' + esc(it.name) + '</div>' +
-        (it.description ? '<div class="sh-cardDesc">' + esc(it.description) + '</div>' : '') +
+        (it.description ? '<div class="sh-cardDesc">' + lineBreaks(esc(it.description)) + '</div>' : '') +
         matsHTML(it) +
-        (it.note ? '<div class="sh-note"><span class="sh-noteLabel">Примечание</span><span class="sh-noteText">' + esc(it.note) + '</span></div>' : '') +
+        (it.note ? '<div class="sh-note"><span class="sh-noteLabel">Примечание</span><span class="sh-noteText">' + lineBreaks(esc(it.note)) + '</span></div>' : '') +
         '<div class="sh-cardFoot">' +
         (it.size ? '<div class="sh-cardSize"><span class="lbl">Длина × Высота × Глубина</span><span class="val">' + esc(it.size) + '</span></div>' : '') +
         (qty > 1 ? '<div class="sh-cardQty"><span class="lbl">Количество</span><span class="val">' + qty + ' шт × ' + fmt(it.price) + ' ' + cur + '</span></div>' : '') +
@@ -342,7 +345,7 @@
         '<div class="sh-totalFeather">' + LOGO + '</div>' +
         '<div class="sh-totalLeft">' +
         '<div class="sh-totalLabel">Итого к оплате</div>' +
-        '<div class="sh-totalNote">' + note + '</div>' +
+        '<div class="sh-totalNote">' + lineBreaks(esc(note)) + '</div>' +
         (s.payment ? '<div class="sh-totalPay">' + esc(s.payment) + '</div>' : '') +
         '</div>' +
         '<div class="sh-totalRight">' +
@@ -358,7 +361,7 @@
         (o.validUntil ? '<div>Предложение действительно до ' + esc(o.validUntil) + '</div>' : '') +
         '</div>' +
         '</div>' +
-        (s.footer ? '<div class="sh-footer">' + linkify(s.footer) + '</div>' : '') +
+        (s.footer ? '<div class="sh-footer">' + lineBreaks(linkify(s.footer)) + '</div>' : '') +
         '</div>'
       );
     }
