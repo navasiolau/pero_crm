@@ -28,10 +28,9 @@ function validateRenderInput(input) {
       !Array.isArray(input.rendered) || input.rendered.length !== input.summary.sources.length) throw Error('KP_RENDER_DOCX_SOURCES');
     const sources = new Set(input.summary.sources.map(source => source?.id));
     if (sources.size !== input.summary.sources.length || [...sources].some(value => !id(value))) throw Error('KP_RENDER_DOCX_SOURCES');
-    let count = 0, total = 0;
+    let total = 0;
     for (const source of input.rendered) {
       if (!record(source) || !sources.delete(source.id) || !Array.isArray(source.imagesBase64) || !source.imagesBase64.length) throw Error('KP_RENDER_DOCX_SOURCES');
-      count += source.imagesBase64.length; if (count > LIMITS.docxPages) throw Error('KP_RENDER_PAGE_LIMIT');
       for (const encoded of source.imagesBase64) {
         const bytes = boundedBase64(encoded, LIMITS.docxPngBytes); total += bytes.length;
         if (total > LIMITS.docxTotalPngBytes) throw Error('KP_RENDER_BYTES_LIMIT');

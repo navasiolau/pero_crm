@@ -1,8 +1,8 @@
 export * from './transport';
 export const assetRoot: string;
-export const KP_RENDER_LIMITS: Readonly<{ requestBytes: number; docxRequestBytes: number; stateBytes: number; items: number; pages: number;
-  assetBytes: number; totalAssetBytes: number; pdfBytes: number; docxPages: number; docxSources: number; docxPngBytes: number;
-  docxTotalPngBytes: number; docxBytes: number; rasterPages: number; rasterPageBytes: number; deadlineMs: number; queue: number }>;
+export const KP_RENDER_LIMITS: Readonly<{ requestBytes: number; docxRequestBytes: number; stateBytes: number; items: number;
+  assetBytes: number; totalAssetBytes: number; pdfBytes: number; docxSources: number; docxPngBytes: number;
+  docxTotalPngBytes: number; docxBytes: number; rasterPageBytes: number; deadlineMs: number; queue: number }>;
 export const sourceManifest: { files: Record<string, { sha256: string; bytes: number }> };
 export const fontManifest: { cssSha256: string; files: { path: string; sha256: string; bytes: number }[] };
 export function assetPath(name: string): string;

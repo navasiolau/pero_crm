@@ -205,9 +205,9 @@ test("свежий договор использует исходные screensh
   assert.equal(prepared.f.state.versions.length, 1);
 });
 
-test("слишком большой комплект приложений не публикует договор и переходы", async () => {
+test("некорректная страница приложения не публикует договор и переходы", async () => {
   const prepared = await prepare(), original = prepared.f.ports.io.renderPdf;
-  prepared.f.ports.io.renderPdf = async source => ({ ...(await original(source)), pages: Array(1001).fill(new Uint8Array(8)) });
+  prepared.f.ports.io.renderPdf = async source => ({ ...(await original(source)), pages: [new Uint8Array(7)] });
   await assert.rejects(prepared.workflow.runClaim(prepared.claim), error => error instanceof ContractWorkflowError && error.code === "CONTRACT_APPENDIX_TOO_LARGE");
   assert.equal(prepared.f.state.versions.length, 0); assert.equal(prepared.f.state.sourceVersions.length, 0);
   assert.deepEqual(prepared.f.state.stages, []);

@@ -31,7 +31,7 @@ async function renderPdf(input, launch) {
     if (blocked) throw Error('KP_RENDER_NETWORK_BLOCKED');
     if (failed) throw Error('KP_RENDER_IMAGE_DECODE_FAILED');
     const pageCount = await page.$$eval('.page', pages => pages.length);
-    if (!pageCount || pageCount > LIMITS.pages) throw Error('KP_RENDER_PAGE_LIMIT');
+    if (!Number.isSafeInteger(pageCount) || pageCount < 1) throw Error('KP_RENDER_PAGE_LIMIT');
     const bytes = Buffer.from(await page.pdf({ format: 'A4', printBackground: true, preferCSSPageSize: true,
       margin: { top: 0, bottom: 0, left: 0, right: 0 }, waitForFonts: true, timeout: 30_000 }));
     if (bytes.length > LIMITS.pdfBytes) throw Error('KP_RENDER_BYTES_LIMIT');
@@ -63,7 +63,7 @@ async function rasterizePdf(input, executables = {}) {
     await fs.writeFile(file, boundedBase64(request.pdfBase64, LIMITS.pdfBytes), { flag: 'wx' });
     const { stdout } = await execute(executables.pdfinfo ?? process.env.PERO_KP_PDFINFO_PATH ?? 'pdfinfo', [file], { timeout: 10_000, maxBuffer: 64 * 1024, windowsHide: true });
     const count = Number(/^Pages:\s+(\d+)\s*$/m.exec(stdout)?.[1]);
-    if (!Number.isSafeInteger(count) || count < 1 || count > LIMITS.rasterPages) throw Error('KP_RENDER_PAGE_LIMIT');
+    if (!Number.isSafeInteger(count) || count < 1) throw Error('KP_RENDER_PAGE_LIMIT');
     await execute(executables.pdftoppm ?? process.env.PERO_KP_PDFTOPPM_PATH ?? 'pdftoppm', ['-r', '192', '-scale-to-x', '1588', '-scale-to-y', '2246', '-png', file, path.join(absolute, 'page')],
       { timeout: 40_000, maxBuffer: 64 * 1024, windowsHide: true });
     const names = (await fs.readdir(absolute)).filter(name => /^page-\d+\.png$/.test(name)).sort((a, b) => Number(a.match(/\d+/)[0]) - Number(b.match(/\d+/)[0]));

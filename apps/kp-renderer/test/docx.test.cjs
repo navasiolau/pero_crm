@@ -30,8 +30,7 @@ test('DOCX rejects unmatched sources, invalid images and template changes before
   assert.throws(() => validateRenderInput({ ...input(), rendered: [{ id: 'primary', imagesBase64: [Buffer.from('url-not-png').toString('base64')] }] }), /PNG_REQUIRED/);
 });
 
-test('shared DOCX budget preserves multi-proposal jobs above 64 pages and rejects the 1001st page', () => {
-  const request = input(); request.rendered[0].imagesBase64 = Array(1000).fill(image.toString('base64'));
+test('shared DOCX budget accepts synthetic appendices above 64 pages', () => {
+  const request = input(); request.rendered[0].imagesBase64 = Array(65).fill(image.toString('base64'));
   assert.doesNotThrow(() => validateRenderInput(request));
-  request.rendered[0].imagesBase64.push(image.toString('base64')); assert.throws(() => validateRenderInput(request), /PAGE_LIMIT/);
 });

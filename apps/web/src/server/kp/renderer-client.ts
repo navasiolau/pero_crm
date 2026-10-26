@@ -24,7 +24,7 @@ async function requestRenderer(input: unknown, options: RendererOptions): Promis
   } finally { reader.releaseLock(); }
   const value: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'));
   if (!value || typeof value !== 'object' || !('kind' in value) || !('pageCount' in value) || !('templateHash' in value) ||
-    !Number.isSafeInteger(value.pageCount) || Number(value.pageCount) < 1 || Number(value.pageCount) > (value.kind === 'docx' ? KP_RENDER_LIMITS.docxPages : value.kind === 'rasterize' ? KP_RENDER_LIMITS.rasterPages : KP_RENDER_LIMITS.pages) || value.templateHash !== getKpTemplateIdentity().templateHash) throw Error('KP_RENDERER_RESPONSE_INVALID');
+    !Number.isSafeInteger(value.pageCount) || Number(value.pageCount) < 1 || value.templateHash !== getKpTemplateIdentity().templateHash) throw Error('KP_RENDERER_RESPONSE_INVALID');
   return value as InternalRenderOutput;
 }
 function decode(value: unknown, max: number): Buffer {
