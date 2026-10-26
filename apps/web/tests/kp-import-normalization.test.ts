@@ -4,7 +4,7 @@ import type { PoolClient } from "pg";
 import { normalizationEntry, parseImportedProposalNormalization } from "../src/server/kp/archive/normalize";
 import { ArchiveImportError, docReceiptId, publishReceiptId, reserveReceiptId, valueHash, type ArchiveProposal, type JsonObject } from "../src/server/kp/archive/contract";
 import { allArchiveObjects, prepareArchiveManifest } from "../src/server/kp/archive/manifest";
-import { archivePublishValue, archiveReserveValue, createArchiveSqlStore } from "../src/server/kp/archive/prisma-store";
+import { archivePublishValue, archiveReserveValue, archiveRecoveryReceiptIds, createArchiveSqlStore } from "../src/server/kp/archive/prisma-store";
 import { archiveProposalProvenance, archiveProposalVersionSnapshot } from "../src/server/kp/archive/provenance";
 import { applyArchiveManifest } from "../src/server/kp/archive/apply";
 import { makeRetentionManifest } from "../src/server/kp/retention-contract";
@@ -86,13 +86,16 @@ async function publishedSqlFixture() {
   for (const proposal of manifest.proposals) receipt(docReceiptId(proposal.id), "kpArchiveDocument", proposal.id, "archive.document", archiveProposalProvenance(manifest, proposal));
   for (const settings of manifest.settings) receipt(`kp.archive.settings:${settings.id}`, "kpArchiveContract", settings.id, "archive.settings", { schema: 1, sourceHash: settings.sourceHash, rawBase64: settings.rawBase64 });
   for (const object of allArchiveObjects(manifest)) f.blobs.set(object.key, f.cloud.get(object.source.area + ":" + object.source.key)!.bytes);
-  const pruneJobs: { payload: unknown; result: unknown }[] = [];
+  const pruneJobs: { payload: unknown; result: unknown }[] = [], uploadJobs = new Map<string, JsonObject>();
   const client = { async query(sql: string, values: unknown[] = []) {
     queries.push(sql); const key = String(values[0]); let result: unknown[] = [];
     if (/^(INSERT|UPDATE|DELETE)\b/.test(sql)) throw Error("PUBLISHED_REPLAY_MUST_NOT_WRITE");
     if (sql.includes("current_database()")) result = [{ database: "pero_crm", schema: "public", user: "pero" }];
     else if (sql.includes('FROM "User"')) result = [{ active: true, roles: ["ADMIN"] }];
-    else if (sql.includes('FROM "ChangeLog"')) { const row = receipts.get(key); result = row ? [sql.includes("to_jsonb") ? { row } : row] : []; }
+    else if (sql.includes('FROM "ChangeLog"')) {
+      if (sql.includes("action='archive.recovery.publish'")) result = [...receipts.values()].filter(row => row.entity === "kpArchiveRecovery" && row.entityId === key && row.action === "archive.recovery.publish" && row.actorId === values[1]).map(row => ({ row }));
+      else { const row = receipts.get(key); result = row ? [sql.includes("to_jsonb") ? { row } : row] : []; }
+    }
     else if (sql.includes('FROM "CommercialProposal"')) {
       const proposal = manifest.proposals.find(row => row.id === key)!;
       result = [{ sourceId: proposal.sourceId, createdById: "importer", createdAt: proposal.createdAt,
@@ -102,7 +105,7 @@ async function publishedSqlFixture() {
     else if (sql.includes('FROM "ProposalVersion"')) {
       const proposal = manifest.proposals.find(row => row.versionId === key)!;
       result = missingVersions.has(key) ? [] : [{ state: proposal.state, provenance: archiveProposalVersionSnapshot(manifest, proposal), trigger: "IMPORT", revision: 0 }];
-    } else if (sql.includes('FROM "ProposalJob"')) result = pruneJobs;
+    } else if (sql.includes('FROM "ProposalJob"')) result = sql.includes('to_jsonb(t)') ? (values[0] as string[]).flatMap(id => uploadJobs.has(id) ? [{ row: uploadJobs.get(id) }] : []) : pruneJobs;
     else if (sql.includes('FROM "ProposalMedia"')) {
       const media = manifest.proposals.flatMap(row => row.media).find(row => row.id === key)!;
       if (sql.includes('AS "optimizedPurged"')) result = [{ uploadState: "READY", optimizedPurged: purged.has(media.optimized.id), originalPurged: false,
@@ -119,7 +122,36 @@ async function publishedSqlFixture() {
     return { rows: result, rowCount: result.length };
   } } as unknown as PoolClient;
   const store = createArchiveSqlStore(client, { actorId: "operator", guardTarget: async () => {}, baseline: async () => "unchanged" });
-  return { ...f, manifest, store, receipts, missingVersions, purged, changedObjects, pruneJobs, queries };
+  return { ...f, manifest, store, receipts, missingVersions, purged, changedObjects, pruneJobs, uploadJobs, queries };
+}
+
+async function publishedRecoverySqlFixture() {
+  const f = await publishedSqlFixture(), objects = allArchiveObjects(f.manifest), operatorId = "recovery-operator";
+  const ids = archiveRecoveryReceiptIds(f.manifest, "00000000-0000-4000-8000-000000000189");
+  f.receipts.get(publishReceiptId(f.manifest.sha256))!.actorId = operatorId;
+  const common = { schema: 1, manifestHash: f.manifest.sha256, reservationReceiptId: reserveReceiptId(f.manifest.sha256),
+    reservationRowHash: valueHash(f.receipts.get(reserveReceiptId(f.manifest.sha256))), reservationActorId: "importer", operatorId,
+    operationId: "00000000-0000-4000-8000-000000000189", targetHash: valueHash(f.manifest.target), witnessHash: "a".repeat(64),
+    program: { sourceRevision: "b".repeat(40), entrySha256: "c".repeat(64) } };
+  for (const [id, completed] of [[ids.reserve, false], [ids.publish, true]] as const) f.receipts.set(id, {
+    id, actorId: operatorId, actorType: "user", source: "cli", entity: "kpArchiveRecovery", entityId: f.manifest.sha256,
+    action: completed ? "archive.recovery.publish" : "archive.recovery.reserve", newValue: { ...structuredClone(common),
+      verifiedObjects: Object.fromEntries((completed ? objects : objects.slice(0, 1)).map(row => [row.id, row.sha256])) },
+  });
+  const abandoned = archiveRecoveryReceiptIds(f.manifest, "00000000-0000-4000-8000-000000000188");
+  f.receipts.set(abandoned.reserve, { ...structuredClone(f.receipts.get(ids.reserve)!), id: abandoned.reserve,
+    newValue: { ...structuredClone(common), operationId: "00000000-0000-4000-8000-000000000188", verifiedObjects: {} } });
+  for (const jobId of new Set(objects.map(row => row.jobId))) {
+    const group = objects.filter(row => row.jobId === jobId), first = group[0], original = group.find(row => row.role === "original"), optimized = group.find(row => row.role === "optimized");
+    const object = (row: typeof first) => ({ key: row.key, sha256: row.sha256, size: row.size, mimeType: row.mimeType });
+    const payload = { schema: 1, kind: "UPLOAD_MEDIA", proposalId: first.proposalId, mediaId: first.mediaId, artifactId: first.artifactId, contractId: first.contractId,
+      binding: first.binding, original: original ? object(original) : null, optimized: optimized ? object(optimized) : null,
+      archiveImport: { manifestHash: f.manifest.sha256, sourceNamespace: f.manifest.sourceNamespace, archiveRole: first.role === "docx" ? "DOCX" : "IMAGE", actorId: "importer" },
+      fingerprint: valueHash({ actorId: "importer", manifestHash: f.manifest.sha256, objects: group }) };
+    f.uploadJobs.set(jobId, { id: jobId, proposalId: first.proposalId, contractId: null, kind: "UPLOAD_MEDIA", state: "SUCCEEDED", createdById: "importer",
+      dedupeKey: `kp:archive:upload:${jobId}`, payload, result: { archiveManifestHash: f.manifest.sha256, verified: Object.fromEntries(group.map(row => [row.id, row.sha256])) }, leaseOwner: null, leaseUntil: null });
+  }
+  return { ...f, recoveryIds: ids };
 }
 
 test("published SQL replay accepts changed current KP/settings/bindings and only verifies owned immutable history", async () => {
@@ -149,4 +181,33 @@ test("published SQL replay rejects changed publish ownership or source object fa
   publish.newValue = archivePublishValue(f.manifest);
   f.changedObjects.add(f.manifest.proposals[0].media[0].optimized.id);
   await assert.rejects(f.store.reconcile(f.manifest), code("ARCHIVE_TARGET_OBJECT_CHANGED"));
+});
+
+test("published SQL replay accepts only the exact completed ADMIN recovery pair and preserves original creators", async () => {
+  const f = await publishedRecoverySqlFixture(), before = valueHash([...f.receipts]);
+  const result = await applyArchiveManifest(f.manifest, { ...f.options(f.manifest), store: f.store });
+  assert.equal(result.mode, "applied"); if (result.mode === "applied") assert.equal(result.replayed, true);
+  assert.equal(valueHash([...f.receipts]), before); assert.equal(f.counters.puts, 0);
+  assert.ok([...f.uploadJobs.values()].every(row => row.createdById === "importer"));
+});
+
+test("published recovery actor exception rejects missing, ambiguous or tampered audit/ledger evidence", async () => {
+  const mutations: [string, (f: Awaited<ReturnType<typeof publishedRecoverySqlFixture>>) => void][] = [
+    ["missing matching reserve", f => { f.receipts.delete(f.recoveryIds.reserve); }],
+    ["different original reserve hash", f => { for (const id of Object.values(f.recoveryIds)) (f.receipts.get(id)!.newValue as JsonObject).reservationRowHash = "f".repeat(64); }],
+    ["different original actor", f => { for (const id of Object.values(f.recoveryIds)) (f.receipts.get(id)!.newValue as JsonObject).reservationActorId = "foreign"; }],
+    ["different recovery operator", f => { (f.receipts.get(f.recoveryIds.publish)!.newValue as JsonObject).operatorId = "foreign"; }],
+    ["different operation", f => { (f.receipts.get(f.recoveryIds.publish)!.newValue as JsonObject).operationId = "00000000-0000-4000-8000-000000000187"; }],
+    ["changed program", f => { (f.receipts.get(f.recoveryIds.publish)!.newValue as JsonObject).program = { sourceRevision: "b".repeat(40), entrySha256: "d".repeat(64) }; }],
+    ["incomplete final verification", f => { (f.receipts.get(f.recoveryIds.publish)!.newValue as JsonObject).verifiedObjects = {}; }],
+    ["foreign reserved verification", f => { (f.receipts.get(f.recoveryIds.reserve)!.newValue as JsonObject).verifiedObjects = { foreign: "a".repeat(64) }; }],
+    ["changed job creator", f => { [...f.uploadJobs.values()][0].createdById = "foreign"; }],
+    ["changed job payload", f => { [...f.uploadJobs.values()][0].payload = {}; }],
+    ["changed readback", f => { [...f.uploadJobs.values()][0].result = { archiveManifestHash: f.manifest.sha256, verified: {} }; }],
+    ["ambiguous successful audits", f => { const row = structuredClone(f.receipts.get(f.recoveryIds.publish)!); f.receipts.set("duplicate-success", { ...row, id: "duplicate-success" }); }],
+  ];
+  for (const [label, mutate] of mutations) {
+    const f = await publishedRecoverySqlFixture(); mutate(f);
+    await assert.rejects(f.store.reconcile(f.manifest), error => error instanceof ArchiveImportError && ["ARCHIVE_RECOVERY_AUDIT_CHANGED", "ARCHIVE_RECOVERY_OPERATION_CHANGED", "ARCHIVE_RECOVERY_VERIFIED_OBJECT_CHANGED"].includes(error.code), label);
+  }
 });
