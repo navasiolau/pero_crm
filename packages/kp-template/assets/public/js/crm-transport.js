@@ -172,9 +172,36 @@
     async function generatePdf() {
       var saved = await ensureSaved();
       if (viewingVersion) throw new Error('Скачайте PDF выбранной версии из списка версий');
-      var body = { proposalId: saved.id, expectedRevision: saved.revision };
-      var pending = operation(saved.id, 'pdf', body);
-      return publishJob('/documents/' + encodeURIComponent(saved.id) + '/pdf', pending);
+      var body = { proposalId: saved.id, expectedRevision: saved.revision }, storageKey = key(saved.id, 'operation:pdf');
+      var previous = retainedOperations[storageKey] || read(storageKey), pending = operation(saved.id, 'pdf', body);
+      var prior = (pending.entry || pending.previous).body, path = '/documents/' + encodeURIComponent(saved.id) + '/pdf';
+      var changed = prior.proposalId !== body.proposalId || prior.expectedRevision !== body.expectedRevision, result, unaccepted;
+      function retire() { remove(pending.storageKey); delete retainedOperations[pending.storageKey]; }
+      try { result = await publishJob(path, pending); }
+      catch (error) {
+        if (error.knownTerminalJob === true) { if (!previous) throw error; }
+        else if (error.status === 409 && error.data?.error?.code === 'KP_REVISION_CHANGED') {
+          try {
+            var recorded = await request('/operations/' + encodeURIComponent(prior.operationId));
+            if (recorded.operationId !== prior.operationId || recorded.kind !== 'pdf' || !recorded.result?.id) throw error;
+            result = await poll(recorded.result); retire(); emit({ type: 'versions-changed' });
+          } catch (lookupError) {
+            if (lookupError.knownTerminalJob === true && previous) retire();
+            else if (lookupError.status === 404 && lookupError.data?.error?.code === 'KP_OPERATION_NOT_FOUND') unaccepted = error;
+            else throw lookupError;
+          }
+        } else throw error;
+      }
+      if (result && !changed) return result;
+      // Новая версия допустима только для явно запрошенной и всё ещё актуальной ревизии.
+      var latest = await request('/documents/' + encodeURIComponent(saved.id));
+      if (latest?.id !== body.proposalId || latest.revision !== body.expectedRevision || unaccepted &&
+        (!previous || prior.proposalId !== body.proposalId || !Number.isSafeInteger(prior.expectedRevision) || prior.expectedRevision >= body.expectedRevision)) {
+        var conflict = unaccepted || new Error('КП изменилось. Обновите данные КП и повторите действие');
+        conflict.status = 409; throw conflict;
+      }
+      retire();
+      return publishJob(path, operation(saved.id, 'pdf', body));
     }
     async function create() {
       var date = new Intl.DateTimeFormat('ru-RU', { timeZone: 'Europe/Moscow' }).format(new Date());
