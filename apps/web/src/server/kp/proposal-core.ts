@@ -49,7 +49,7 @@ async function liveBinding(tx: Prisma.TransactionClient, proposalId: string) {
   await tx.$queryRaw`SELECT id FROM "CommercialProposal" WHERE id = ${proposalId} FOR UPDATE`;
   const proposal = await tx.commercialProposal.findUnique({ where: { id: proposalId } });
   const project = await tx.project.findUnique({ where: { id: reference.projectId } });
-  if (!proposal || proposal.deletedAt || proposal.isArchive || !project || project.deletedAt || proposal.projectId !== project.id)
+  if (!proposal || proposal.deletedAt || !project || project.deletedAt || proposal.projectId !== project.id)
     throw new ProposalWriteError("not-found", "КП или проект недоступны");
   return { proposal, project };
 }
@@ -191,7 +191,7 @@ export async function saveProposalInTransaction(tx: Prisma.TransactionClient, ac
   const revision = proposal.revision + (changed ? 1 : 0);
   if (changed) {
     const saved = await tx.commercialProposal.updateMany({ where: {
-      id: proposal.id, revision: data.expectedRevision, projectId: project.id, deletedAt: null, isArchive: false,
+      id: proposal.id, revision: data.expectedRevision, projectId: project.id, deletedAt: null,
     }, data: { state, clientId: selection.client.id, revision } });
     if (saved.count !== 1) throw new ProposalWriteError("conflict", "КП изменено другим пользователем");
   }

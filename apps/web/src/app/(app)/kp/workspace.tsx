@@ -33,7 +33,7 @@ export function ProposalsWorkspace({ actorId }: { actorId: string }) {
   const columns: DataColumn<ProposalListRow>[] = [
     { id: 'number', header: 'КП', sortable: true, sortValue: row => row.number ?? row.project?.number ?? row.name, searchValue: row => row.name + ' ' + (row.number ?? row.project?.number ?? ''), cell: row => row.number ?? row.project?.number ?? row.name },
     { id: 'client', header: 'Клиент', sortValue: row => row.client?.label ?? row.printedClientName ?? '', cell: row => row.client?.label ?? row.printedClientName ?? '—' },
-    { id: 'stage', header: 'Проект', cell: row => row.project ? <Link onClick={event => event.stopPropagation()} className="underline underline-offset-4" href={'/projects/' + row.project.id}>Открыть проект</Link> : 'Архив' },
+    { id: 'stage', header: 'Проект', cell: row => row.project ? <Link onClick={event => event.stopPropagation()} className="underline underline-offset-4" href={'/projects/' + row.project.id}>Открыть проект</Link> : '—' },
     { id: 'updated', header: 'Обновлено', sortable: true, sortValue: row => row.updatedAt, cell: row => stamp(row.updatedAt) },
   ];
   return <div className="flex min-w-0 flex-col gap-4"><div className="flex flex-wrap items-center justify-between gap-3"><h1 className="text-xl font-semibold">КП и договоры</h1><Button disabled={busy} onClick={() => void create()}><Plus className="size-4" />{busy ? 'Создание…' : 'Новое КП'}</Button></div>

@@ -27,6 +27,7 @@ function fixture() {
 
 test("project PDF appears from existing successful versions and one stable row follows the latest publication", async () => {
   const f = fixture();
+  f.proposal.isArchive = true;
   assert.equal(await projectProposalPdfFile(f.db, actor(), "project"), null);
   f.publish("first", 1);
   const first = await projectProposalPdfFile(f.db, actor(), "project");
@@ -64,11 +65,10 @@ test("outside LEAD only the accepted own READY PDF is exposed, including after r
   assert.equal(await projectProposalPdfFile(f.db, actor(), "project"), null);
 });
 
-test("deleted, archived, foreign and unpublished PDF owners are hidden", async () => {
+test("deleted, foreign and unpublished PDF owners are hidden", async () => {
   for (const mutate of [
     (f: ReturnType<typeof fixture>) => { f.project.deletedAt = new Date(); },
     (f: ReturnType<typeof fixture>) => { f.proposal.deletedAt = new Date(); },
-    (f: ReturnType<typeof fixture>) => { f.proposal.isArchive = true; },
     (f: ReturnType<typeof fixture>) => { (f.versions[0].pdfArtifact as FixtureRow).proposalId = "foreign"; },
     (f: ReturnType<typeof fixture>) => { (f.versions[0].pdfArtifact as FixtureRow).contractId = "contract"; },
     (f: ReturnType<typeof fixture>) => { (f.versions[0].pdfArtifact as FixtureRow).deletedAt = new Date(); },
@@ -121,6 +121,7 @@ test("download rechecks live access and artifact ownership after I/O and never r
 
 test("successful polling targets live source projects only and deduplicates retained or contract releases", async () => {
   const f = fixture();
+  f.proposal.isArchive = true;
   assert.deepEqual(await publishedProjectPdfPaths(f.db, []), []);
   assert.deepEqual(await publishedProjectPdfPaths(f.db, ["proposal", "proposal", "foreign"]), ["/projects", "/projects/project"]);
   f.project.deletedAt = new Date();

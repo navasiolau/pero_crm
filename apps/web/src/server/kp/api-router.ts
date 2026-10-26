@@ -13,7 +13,7 @@ function match(method: string, path: readonly string[], query: URLSearchParams):
   const read: readonly KpApiScope[] = ["kp:read", "kp:contracts:read"];
   if (path.length > 6) return apiFailure("KP_NOT_FOUND", 404, "Маршрут КП не найден");
   if (head === "documents") {
-    if (path.length === 1 && method === "GET") return { action: "listDocuments", scope: "kp:read", values: queryValues(query, ["q", "cursor", "limit", "archive"]) };
+    if (path.length === 1 && method === "GET") return { action: "listDocuments", scope: "kp:read", values: queryValues(query, ["q", "cursor", "limit"]) };
     if (path.length === 1 && method === "POST") return { action: "createDocument", scope: "kp:write", values: {}, body: "json" };
     if (key) id(key);
     if (path.length === 2 && method === "GET") return { action: "getDocument", scope: "kp:read", values: { proposalId: key } };

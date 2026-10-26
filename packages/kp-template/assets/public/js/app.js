@@ -681,6 +681,7 @@ function applyDocumentState(doc, preview) {
     currentDocId = doc.id;
     docsNamesCache[doc.id] = docNumber(doc); saveDocsNamesCache();
     syncStaticInputs(); refreshAll(); renderDocsCurrent(); renderDocsSaveBtn(); CRM.applyPermissions();
+    if (!preview) CRM.acknowledgeHydration(doc, state);
 }
 async function applySavedDoc(id, skipSaveCurrent) {
     if (!skipSaveCurrent && currentDocId && currentDocId !== id && CRM.isEditable()) {

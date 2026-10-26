@@ -19,7 +19,7 @@ export type ContractForm = { contractId: string | null; revision: number; settin
   sourceRefs: ContractSourceRef[]; clientDefaults: ContractObject; clientBaseline: string; canEdit: boolean; versions: ContractHistoryEntry[] };
 
 function active(source: ContractSource | undefined): ContractSource & { project: NonNullable<ContractSource["project"]> } {
-  if (!source || source.deletedAt || source.isArchive || !source.project || source.project.deletedAt) contractFailure("CONTRACT_SOURCE_READ_ONLY", "Архивное или удалённое КП доступно только для чтения", 403);
+  if (!source || source.deletedAt || !source.project || source.project.deletedAt) contractFailure("CONTRACT_SOURCE_READ_ONLY", "Удалённое или не связанное с проектом КП доступно только для чтения", 403);
   return source as ContractSource & { project: NonNullable<ContractSource["project"]> };
 }
 function orderedSources(rows: readonly ContractSource[], ids: readonly string[]): ContractSource[] {
@@ -82,7 +82,7 @@ export function createContractWorkflow(ports: ContractWorkflowPorts) {
         sourceRefs: loaded.sources.map(source => ({ proposalId: source.proposalId, expectedRevision: source.revision })),
         clientDefaults: json(loaded.defaults), clientBaseline: contractClientBaseline(loaded.sources, loaded.clients),
         versions: loaded.contract ? await tx.history(loaded.contract.id) : [],
-        canEdit: !loaded.primary.isArchive && !loaded.primary.deletedAt && !!loaded.primary.project && !loaded.primary.project.deletedAt };
+        canEdit: !loaded.primary.deletedAt && !!loaded.primary.project && !loaded.primary.project.deletedAt };
     });
   }
   async function history(actor: ContractActor, primaryId: string): Promise<ContractHistoryEntry[]> {

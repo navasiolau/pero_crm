@@ -36,8 +36,8 @@ export function documentDto(row: DocumentRow): ProposalDocument & { sourceDate: 
   return { id: row.id, revision: row.revision, state: row.state as ProposalDocument["state"], createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString(),
     project: row.project ? { id: row.project.id, number: row.project.number, stage: row.project.stage } : null,
     client: row.client ? { id: row.client.id, label: proposalClientLabel(row.client) } : null,
-    canEdit: !row.isArchive && row.project?.stage === "LEAD" && row.project.deletedAt === null,
-    isArchive: row.isArchive, fx: rate ? rateDto(rate) : null, sourceDate: proposalSourceDate(row.state) };
+    canEdit: row.project?.stage === "LEAD" && row.project.deletedAt === null,
+    fx: rate ? rateDto(rate) : null, sourceDate: proposalSourceDate(row.state) };
 }
 export async function loadApiDocument(db: DocumentDb, proposalId: string) {
   const row = await db.commercialProposal.findFirst({ where: { AND: [liveApiProposalWhere, { id: proposalId }] }, include: documentInclude });
@@ -46,10 +46,8 @@ export async function loadApiDocument(db: DocumentDb, proposalId: string) {
 }
 export async function listApiDocuments(context: KpApiContext, input: Record<string, unknown>) {
   await context.authorize("kp:read");
-  const query = parseApi(z.object({ q: z.string().trim().max(200).optional(), cursor: apiId.optional(), limit: z.coerce.number().int().min(1).max(100).default(50),
-    archive: z.enum(["include", "only", "exclude"]).default("include") }).strict(), input);
+  const query = parseApi(z.object({ q: z.string().trim().max(200).optional(), cursor: apiId.optional(), limit: z.coerce.number().int().min(1).max(100).default(50) }).strict(), input);
   const rows = await prisma.commercialProposal.findMany({ where: { AND: [liveApiProposalWhere,
-    ...(query.archive === "include" ? [] : [{ isArchive: query.archive === "only" }]),
     ...(query.q ? [{ OR: [{ sourceNumber: { contains: query.q, mode: "insensitive" as const } }, { project: { OR: [
       { title: { contains: query.q, mode: "insensitive" as const } }, { number: { contains: query.q } }] } },
       { state: { path: ["order", "project"], string_contains: query.q, mode: "insensitive" as const } },
@@ -61,7 +59,7 @@ export async function listApiDocuments(context: KpApiContext, input: Record<stri
     const dto = documentDto(row), order = proposalObject(proposalObject(row.state).order);
     const sourceClient = proposalObject(proposalObject(row.state).client);
     return { id: dto.id, revision: dto.revision, project: dto.project, client: dto.client, createdAt: dto.createdAt, updatedAt: dto.updatedAt,
-      isArchive: dto.isArchive, currency: row.currency,
+      currency: row.currency,
       number: row.project?.number ?? row.sourceNumber ?? (typeof order.number === "string" || typeof order.number === "number" ? String(order.number) : null),
       printedClientName: typeof sourceClient.name === "string" && sourceClient.name.trim() ? sourceClient.name : null,
       name: typeof order.project === "string" && order.project.trim() ? order.project : `КП №${row.project?.number ?? row.sourceNumber ?? row.id}` };
@@ -114,10 +112,11 @@ async function chooseRate(context: KpApiContext, state: ProposalState, input: Re
     }
     return selected;
   }
-  if (existing) {
-    if (!old || old.currency !== currency) return apiFailure("KP_RATE_REQUIRED", 400, "Укажите фиксированный курс выбранной валюты");
+  if (old) {
+    if (old.currency !== currency) return apiFailure("KP_RATE_REQUIRED", 400, "Укажите фиксированный курс выбранной валюты");
     return old;
   }
+  if (existing && existing.rate !== null) return apiFailure("KP_RATE_REQUIRED", 400, "Укажите фиксированный курс выбранной валюты");
   const date = proposalSourceDate(state);
   if (!date) return apiFailure("KP_DATE_REQUIRED", 400, "Укажите дату КП");
   return fetchKpNbrbRate(context, { currency, date });
@@ -180,7 +179,7 @@ export async function saveApiDocument(context: KpApiContext, input: Record<strin
       const order = proposalObject(state.order);
       if (create && !order.date) { const date = moscowDate(); state = { ...state, order: { ...order, date: `${date.slice(8)}.${date.slice(5, 7)}.${date.slice(0, 4)}` } }; }
       const existing = create ? undefined : await loadApiDocument(prisma, String(input.proposalId));
-      if (existing && (existing.revision !== input.expectedRevision || existing.project?.stage !== "LEAD" || existing.isArchive))
+      if (existing && (existing.revision !== input.expectedRevision || existing.project?.stage !== "LEAD"))
         return apiFailure("KP_REVISION_CHANGED", 409, "КП изменено или уже недоступно для редактирования");
       if (create && state.items.some(item => item.image || item.image2)) return apiFailure("KP_CREATE_MEDIA_SEQUENCE", 400, "Сначала создайте КП, затем загрузите изображения и сохраните их ссылки");
       const rate = await chooseRate(context, state, input, existing);

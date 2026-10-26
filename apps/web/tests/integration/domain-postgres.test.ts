@@ -569,7 +569,7 @@ test("kp181/draft-per-item-native-relations-readers-and-revocation", async () =>
   const c = await tree(tx, rows, "kp181-draft", "LEAD", "DRAFT");
   const sibling = await rows.product("kp181-crm-only", c.project.id, { status: "DRAFT", expectedPrice: "50", quantity: 2 });
   const otherProject = await rows.project("kp181-other-project");
-  const proposal = await tx.commercialProposal.create({ data: { id: rows.id("kp181-proposal"), projectId: c.project.id, state: { items: [] } } });
+  const proposal = await tx.commercialProposal.create({ data: { id: rows.id("kp181-proposal"), projectId: c.project.id, isArchive: true, state: { items: [] } } });
   const item = await tx.proposalItem.create({ data: { id: rows.id("kp181-item"), proposalId: proposal.id, productId: c.product.id, position: 1, state: {} } });
   const task = await tx.task.create({ data: { projectId: c.project.id, productId: c.product.id, workId: c.work.id,
     assigneeId: c.engineer.id, title: "Черновая задача КП181", quantity: "1" } });
@@ -603,7 +603,6 @@ test("kp181/draft-per-item-native-relations-readers-and-revocation", async () =>
   for (const [revoke, restore] of [
     [() => tx.proposalItem.update({ where: { id: item.id }, data: { deletedAt: new Date(0) } }), () => tx.proposalItem.update({ where: { id: item.id }, data: { deletedAt: null } })],
     [() => tx.commercialProposal.update({ where: { id: proposal.id }, data: { deletedAt: new Date(0) } }), () => tx.commercialProposal.update({ where: { id: proposal.id }, data: { deletedAt: null } })],
-    [() => tx.commercialProposal.update({ where: { id: proposal.id }, data: { isArchive: true } }), () => tx.commercialProposal.update({ where: { id: proposal.id }, data: { isArchive: false } })],
     [() => tx.project.update({ where: { id: c.project.id }, data: { deletedAt: new Date(0) } }), () => tx.project.update({ where: { id: c.project.id }, data: { deletedAt: null } })],
   ]) {
     await revoke(); assert.equal(await managerCount(), 0); await restore(); assert.equal(await managerCount(), 1);

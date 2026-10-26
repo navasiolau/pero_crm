@@ -8,7 +8,7 @@ import { assertRenderJobClaim, completeRenderJob, freezeSources, publishSourcePd
 
 export type LifecycleSecurity = { authorizeSource(tx: Prisma.TransactionClient, binding: ActorBinding): Promise<void> };
 const proposalColumns = Prisma.sql`c."id",c."projectId",c."clientId",c."state",c."revision",c."currency"::text AS "currency",
-  c."rate"::text AS "rate",c."rateDate"::text AS "rateDate",c."rateSource"::text AS "rateSource",c."isArchive",c."deletedAt",c."acceptedVersionId",c."retentionEpoch"`;
+  c."rate"::text AS "rate",c."rateDate"::text AS "rateDate",c."rateSource"::text AS "rateSource",c."deletedAt",c."acceptedVersionId",c."retentionEpoch"`;
 const versionColumns = Prisma.sql`v."id",v."proposalId",v."revision",v."state",v."pricingSnapshot",v."renderSnapshot",v."pdfArtifactId",v."createdAt" AT TIME ZONE 'UTC' AS "createdAt"`;
 const jobColumns = Prisma.sql`j."id",j."proposalId",j."contractId",j."createdById",j."kind"::text AS "kind",j."state"::text AS "state",j."dedupeKey",j."payload",j."result",j."attempts",j."maxAttempts",j."leaseOwner",j."lastErrorCode",j."leaseUntil" AT TIME ZONE 'UTC' AS "leaseUntil"`;
 

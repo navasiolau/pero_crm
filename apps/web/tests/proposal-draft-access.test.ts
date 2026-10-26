@@ -12,7 +12,7 @@ import { matches, type FixtureRow } from "./helpers/visibility-fixture";
 
 function linked(): ProductDraftAccessContext {
   return { projectId: "project", deletedAt: null, project: { id: "project", deletedAt: null },
-    proposalItem: { deletedAt: null, proposal: { projectId: "project", deletedAt: null, isArchive: false,
+    proposalItem: { deletedAt: null, proposal: { projectId: "project", deletedAt: null,
       project: { id: "project", deletedAt: null } } } };
 }
 const manager = { id: "manager", roles: ["MANAGER"] as Role[] };
@@ -32,13 +32,14 @@ test("MANAGER grant is one live linked proposal item, never its draft siblings",
     assert.equal(canAccessProductDraft([role], linked()), false);
 });
 
-test("incomplete, archived, deleted and cross-project bindings fail closed", () => {
+test("incomplete, deleted and cross-project bindings fail closed while the legacy flag has no grant", () => {
   const product = linked(), item = product.proposalItem!, proposal = item.proposal;
+  Object.assign(proposal, { isArchive: true });
+  assert.equal(canAccessProductDraft(manager.roles, product), true);
   const invalid: ProductDraftAccessContext[] = [
     { ...product, deletedAt: new Date(0) }, { ...product, project: { id: "project", deletedAt: new Date(0) } },
     { ...product, proposalItem: { ...item, deletedAt: new Date(0) } },
     { ...product, proposalItem: { ...item, proposal: { ...proposal, deletedAt: new Date(0) } } },
-    { ...product, proposalItem: { ...item, proposal: { ...proposal, isArchive: true } } },
     { ...product, proposalItem: { ...item, proposal: { ...proposal, projectId: null } } },
     { ...product, proposalItem: { ...item, proposal: { ...proposal, projectId: "other" } } },
     { ...product, proposalItem: { ...item, proposal: { ...proposal, project: { id: "other", deletedAt: null } } } },
@@ -51,7 +52,6 @@ test("same relational predicate protects products, search, children and direct f
   const good = { ...linked(), id: "linked", status: "DRAFT" }, sibling = { ...linked(), id: "crm-only", status: "DRAFT", proposalItem: null };
   const invalid = [sibling,
     { ...good, proposalItem: { ...good.proposalItem!, deletedAt: new Date(0) } },
-    { ...good, proposalItem: { ...good.proposalItem!, proposal: { ...good.proposalItem!.proposal, isArchive: true } } },
     { ...good, proposalItem: { ...good.proposalItem!, proposal: { ...good.proposalItem!.proposal, deletedAt: new Date(0) } } },
   ];
   for (const product of [good, ...invalid]) {
@@ -63,6 +63,8 @@ test("same relational predicate protects products, search, children and direct f
     assert.equal(matches(child, workVisibilityWhere(manager) as FixtureRow), allowed);
     assert.equal(matches({ ...child, taskId: null, task: null }, fileVisibilityWhere(manager) as FixtureRow), allowed);
   }
+  Object.assign(good.proposalItem!.proposal, { isArchive: true });
+  assert.equal(matches(good, productVisibilityWhere(manager) as FixtureRow), true);
   const validChild = { id: "child", project: good.project, productId: good.id, product: good };
   assert.equal(matches({ ...validChild, taskId: "foreign-task", task: { ...validChild, productId: sibling.id, product: sibling } }, fileVisibilityWhere(manager) as FixtureRow), false);
   assert.equal(matches({ ...validChild, productId: null, product: null, taskId: "linked-task", task: validChild }, fileVisibilityWhere(manager) as FixtureRow), true);

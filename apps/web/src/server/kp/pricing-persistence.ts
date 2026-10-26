@@ -17,7 +17,7 @@ export async function applyProjectionInTransaction(tx: PricingTransaction, conte
       p.installation, p."proposalRoundingAdjustment"
     FROM "Project" p JOIN "CommercialProposal" cp ON cp."projectId" = p.id
     WHERE p.id = ${context.project.id} AND cp.id = ${context.proposalId}
-      AND p."deletedAt" IS NULL AND cp."deletedAt" IS NULL AND cp."isArchive" = false
+      AND p."deletedAt" IS NULL AND cp."deletedAt" IS NULL
     FOR UPDATE OF p`;
   const project = rows[0];
   if (rows.length !== 1 || !project || project.stage !== "LEAD" || context.project.stage !== "LEAD") throw Error("Цены КП можно сохранить только в связанном проекте «Лид»");

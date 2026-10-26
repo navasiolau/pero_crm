@@ -25,7 +25,6 @@ export type ProductDraftAccessContext = {
     proposal: {
       projectId: string | null;
       deletedAt?: Date | string | null;
-      isArchive: boolean;
       project?: DraftLiveProject | null;
     };
   } | null;
@@ -36,6 +35,6 @@ export function canAccessProductDraft(roles: readonly Role[], context?: ProductD
   if (!roles.includes("MANAGER") || !context?.projectId || context.deletedAt !== null ||
     context.project?.id !== context.projectId || context.project.deletedAt !== null) return false;
   const item = context.proposalItem, proposal = item?.proposal;
-  return item?.deletedAt === null && proposal?.deletedAt === null && proposal.isArchive === false &&
+  return item?.deletedAt === null && proposal?.deletedAt === null &&
     proposal.projectId === context.projectId && proposal.project?.id === context.projectId && proposal.project.deletedAt === null;
 }

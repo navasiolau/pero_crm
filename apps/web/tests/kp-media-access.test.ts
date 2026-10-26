@@ -4,7 +4,7 @@ import type { Role } from "@prisma/client";
 import { assertProposalMediaAccess } from "../src/server/kp/media-access";
 import { ProposalMediaError } from "../src/server/kp/media-contract";
 
-const owner = { proposalId: "proposal", projectId: "project", revision: 3, deletedAt: null, isArchive: false,
+const owner = { proposalId: "proposal", projectId: "project", revision: 3, deletedAt: null,
   stage: "LEAD", projectDeletedAt: null };
 const user = (roles: Role[], active = true) => ({ roles, active });
 test("media ACL uses current live management roles, including manager-engineer union", () => {
@@ -16,7 +16,7 @@ test("media ACL uses current live management roles, including manager-engineer u
   assert.throws(() => assertProposalMediaAccess(user(["ADMIN"], false), owner, false), /прав/);
   assert.throws(() => assertProposalMediaAccess(null, owner, false), /прав/);
 });
-test("media writes require live Lead and matching revision; readonly archive remains available", () => {
+test("media writes require live Lead and matching revision; unlinked historical media remains readable", () => {
   const manager = user(["MANAGER"]);
   for (const stage of ["ESTIMATE", "CONTRACT", "IN_WORK", "DONE", "PAUSED", "REFUSED"])
     assert.throws(() => assertProposalMediaAccess(manager, { ...owner, stage }, true, 3), /Лид/);
@@ -24,8 +24,7 @@ test("media writes require live Lead and matching revision; readonly archive rem
   assert.throws(() => assertProposalMediaAccess(manager, owner, true, 2), /изменилось/);
   assert.throws(() => assertProposalMediaAccess(manager, { ...owner, projectDeletedAt: new Date() }, false), /недоступно/);
   assert.throws(() => assertProposalMediaAccess(manager, { ...owner, deletedAt: new Date() }, false), /недоступно/);
-  assert.throws(() => assertProposalMediaAccess(manager, { ...owner, projectId: null }, false), /недоступно/);
-  const archive = { ...owner, projectId: null, stage: null, isArchive: true };
-  assert.doesNotThrow(() => assertProposalMediaAccess(manager, archive, false));
-  assert.throws(() => assertProposalMediaAccess(manager, archive, true), /Лид/);
+  const unlinked = { ...owner, projectId: null, stage: null };
+  assert.doesNotThrow(() => assertProposalMediaAccess(manager, unlinked, false));
+  assert.throws(() => assertProposalMediaAccess(manager, unlinked, true), /Лид/);
 });

@@ -38,9 +38,9 @@ export const kpApiSchemas = {
   KpFx: fx,
   KpCreateDocument: { type: "object", additionalProperties: false, required: ["operationId", "state"], properties: { ...writeProperties, expectedNumber: { type: "integer", minimum: 1 } } },
   KpSaveDocument: { type: "object", additionalProperties: false, required: ["operationId", "expectedRevision", "state"], properties: { ...writeProperties, expectedRevision: revision, proposalId: id } },
-  KpDocument: { type: "object", required: ["id", "revision", "state", "project", "client", "canEdit", "isArchive", "fx", "createdAt", "updatedAt"],
+  KpDocument: { type: "object", required: ["id", "revision", "state", "project", "client", "canEdit", "fx", "createdAt", "updatedAt"],
     properties: { id, revision, state, project: { type: ["object", "null"], properties: { id, number: { type: "string" }, stage: { type: "string" } } },
-      client: { type: ["object", "null"], properties: { id, label: { type: "string" } } }, canEdit: { type: "boolean" }, isArchive: { type: "boolean" },
+      client: { type: ["object", "null"], properties: { id, label: { type: "string" } } }, canEdit: { type: "boolean" },
       fx: { anyOf: [ref("KpFx"), { type: "null" }] }, sourceDate: { type: ["string", "null"], format: "date" },
       createdAt: { type: "string", format: "date-time" }, updatedAt: { type: "string", format: "date-time" } } },
   KpVersion: { type: "object", required: ["id", "revision", "createdAt", "trigger", "isAccepted", "pdfArtifactId"], properties: {
@@ -62,7 +62,7 @@ export const kpApiPaths = {
   "/kp/documents": {
     get: read("Список КП с курсорной пагинацией", "kp:read", { type: "object", required: ["documents", "nextCursor"], properties: {
       documents: { type: "array", items: { type: "object", properties: { id, revision, number: nullableString, printedClientName: nullableString } } }, nextCursor: nullableString } }, [],
-    [query("q", { type: "string" }), query("cursor", id), query("limit", { type: "integer", minimum: 1, maximum: 100, default: 50 }), query("archive", { enum: ["include", "only", "exclude"], default: "include" })]),
+    [query("q", { type: "string" }), query("cursor", id), query("limit", { type: "integer", minimum: 1, maximum: 100, default: 50 })]),
     post: command("Создать КП, проект Лид и состав одной транзакцией", "kp:write", ref("KpCreateDocument"), ref("KpDocument")),
   },
   "/kp/documents/{documentId}": { get: read("Прочитать текущее КП", "kp:read", ref("KpDocument"), ["documentId"]),
@@ -85,6 +85,6 @@ export const kpApiPaths = {
   "/kp/rates": { get: read("Получить НБРБ на точную дату без изменения КП", "kp:read", { type: "object", properties: { fx: ref("KpFx") } }, [], [query("currency", { enum: ["BYN", "RUB", "USD", "EUR"] }, true), query("date", { type: "string", format: "date" }, true)]) },
   "/kp/contracts/{documentId}": { get: read("Открыть форму договора основного КП", "kp:contracts:read", contractForm, ["documentId"]),
     put: command("Сохранить настройки договора", "kp:contracts:write", ref("KpContractSave"), { type: "object", properties: { contractId: id, revision, sourceRefs: sources, clientBaseline: { type: "string" } } }, ["documentId"]) },
-  "/kp/contracts/{documentId}/versions": { get: read("История DOCX, включая архив", "kp:contracts:read", { type: "object", properties: { versions: { type: "array", items: { type: "object", properties: { id, createdAt: { type: "string", format: "date-time" }, docxArtifactId: id, fileName: { type: "string" } } } } } }, ["documentId"]) },
+  "/kp/contracts/{documentId}/versions": { get: read("История выпущенных DOCX", "kp:contracts:read", { type: "object", properties: { versions: { type: "array", items: { type: "object", properties: { id, createdAt: { type: "string", format: "date-time" }, docxArtifactId: id, fileName: { type: "string" } } } } } }, ["documentId"]) },
   "/kp/contracts/{documentId}/generate": { post: command("Выпустить договор; ранние проекты переходят в Договор, черновики в Подготовку", "kp:contracts:generate", ref("KpContractGenerate"), ref("KpJob"), ["documentId"]) },
 } as const;

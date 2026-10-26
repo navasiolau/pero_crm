@@ -5,10 +5,10 @@ export type ProposalFx = { currency: 'BYN' | 'RUB' | 'USD' | 'EUR'; rate: string
 export type ProposalDocument = {
   id: string; revision: number; state: ProposalState; createdAt: string; updatedAt: string;
   project: { id: string; number: string; stage: string } | null;
-  client: { id: string; label: string } | null; canEdit: boolean; isArchive: boolean;
+  client: { id: string; label: string } | null; canEdit: boolean;
   fx: ProposalFx | null;
 };
-export type ProposalListRow = Pick<ProposalDocument, 'id' | 'revision' | 'project' | 'client' | 'createdAt' | 'updatedAt' | 'isArchive'> & { name: string; currency: string; number: string | null; printedClientName: string | null };
+export type ProposalListRow = Pick<ProposalDocument, 'id' | 'revision' | 'project' | 'client' | 'createdAt' | 'updatedAt'> & { name: string; currency: string; number: string | null; printedClientName: string | null };
 export type ProposalVersion = { id: string; revision: number; createdAt: string; trigger: 'PDF' | 'CONTRACT' | 'IMPORT'; isAccepted: boolean; pdfArtifactId: string | null };
 export type ProposalJob = { id: string; state: 'PENDING' | 'PROCESSING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED'; error?: string | null;
   result?: { artifactId: string; versionId?: string; fileName: string; mimeType: string; downloadUrl: string } | null };
