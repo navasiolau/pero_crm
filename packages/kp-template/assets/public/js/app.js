@@ -240,7 +240,6 @@ function renderDeliveryEditor() {
             html += '<div class="del-row">' +
                 '<input class="del-name" data-path="delivery.items.' + i + '.name" value="' + esc(it.name) + '" placeholder="Название пункта">' +
                 '<input class="del-price" type="number" min="0" data-path="delivery.items.' + i + '.price" value="' + esc(it.price) + '">' +
-                '<select class="crm-service-kind" aria-label="Услуга CRM" data-path="delivery.items.' + i + '.crmKind">' + [['', 'Выберите услугу'], ['DELIVERY', 'Доставка'], ['UNLOADING', 'Выгрузка'], ['INSTALLATION', 'Монтаж']].map(function (option) { return '<option value="' + option[0] + '"' + (it.crmKind === option[0] ? ' selected' : '') + '>' + option[1] + '</option>'; }).join('') + '</select>' +
                 '<button class="ictrl ictrl-del" data-ddel="' + i + '" title="Удалить пункт">✕</button>' +
                 '</div>';
         });

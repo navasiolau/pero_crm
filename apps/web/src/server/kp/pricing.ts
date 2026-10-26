@@ -33,13 +33,16 @@ export function projectProposalPricing(input: unknown, rateInput: ProposalFixedR
   const groups = { DELIVERY: zero(), UNLOADING: zero(), INSTALLATION: zero() };
   const services = fromMinor(printed.serviceMinor);
   const { visible, itemMode } = printed;
-  if (visible) {
-    if (itemMode) {
-      for (const { source: row, priceMinor } of printed.rows) {
-        const kind = row.crmKind;
-        if (kind !== "DELIVERY" && kind !== "UNLOADING" && kind !== "INSTALLATION") throw Error("Укажите явную категорию CRM для каждой услуги КП");
-        groups[kind] = groups[kind].plus(fromMinor(priceMinor));
+  let splitServices = visible && itemMode;
+  if (splitServices) {
+    for (const { source: row, priceMinor } of printed.rows) {
+      const kind = row.crmKind;
+      if (kind !== "DELIVERY" && kind !== "UNLOADING" && kind !== "INSTALLATION") {
+        // Неполная разметка сохраняет всю сумму услуг в общем поле без угадывания по названию.
+        splitServices = false;
+        break;
       }
+      groups[kind] = groups[kind].plus(fromMinor(priceMinor));
     }
   }
   const subtotal = fromMinor(printed.subtotalMinor);
@@ -51,10 +54,10 @@ export function projectProposalPricing(input: unknown, rateInput: ProposalFixedR
     initialPrice: money(item.price.times(fx)), expectedPrice: money(item.price.times(factor).times(fx)) }));
   const project = {
     currency: "BYN" as const, initialPrice: money(base.times(fx)),
-    servicesTotal: visible && !itemMode ? money(services.times(factor).times(fx)) : null,
-    delivery: visible && itemMode ? money(groups.DELIVERY.times(factor).times(fx)) : null,
-    unloading: visible && itemMode ? money(groups.UNLOADING.times(factor).times(fx)) : null,
-    installation: visible && itemMode ? money(groups.INSTALLATION.times(factor).times(fx)) : null,
+    servicesTotal: visible && !splitServices ? money(services.times(factor).times(fx)) : null,
+    delivery: splitServices ? money(groups.DELIVERY.times(factor).times(fx)) : null,
+    unloading: splitServices ? money(groups.UNLOADING.times(factor).times(fx)) : null,
+    installation: splitServices ? money(groups.INSTALLATION.times(factor).times(fx)) : null,
     proposalRoundingAdjustment: new Prisma.Decimal(0),
   };
   const parts = projectedItems.reduce((sum, item) => sum.plus(new Decimal(item.expectedPrice.toString()).times(item.quantity)), zero())

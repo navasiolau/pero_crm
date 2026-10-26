@@ -79,7 +79,28 @@ test("разбивка использует явные категории, су�
   assert.equal(result.project.unloading?.toFixed(2), "0.00");
   assert.equal(projectTotalText(result.items, result.project), "144.00");
   assert.deepEqual(state, before);
-  assert.throws(() => projectProposalPricing({ currency: "BYN", items: [], delivery: { mode: "items", items: [{ name: "Доставка", price: 10 }] } }, byn), /категори/);
+  for (const row of [{ name: "Никакого угадывания", price: 20 }, { name: "Никакого угадывания", price: 20, crmKind: "OTHER" }]) {
+    const partial = projectProposalPricing({ ...state, delivery: { ...state.delivery,
+      items: [state.delivery.items[0], row, state.delivery.items[2]] } }, byn);
+    assert.equal(partial.project.servicesTotal?.toFixed(2), "64.00");
+    assert.deepEqual([partial.project.delivery, partial.project.unloading, partial.project.installation], [null, null, null]);
+    assert.equal(projectTotalText(partial.items, partial.project), "144.00");
+  }
+});
+
+test("импортированные услуги без категорий сохраняются общей суммой со скидкой и валютным курсом", () => {
+  const state = { currency: "$", items: [{ id: "a", price: 100, qty: 2 }], discount: 10, discountMode: "percent",
+    delivery: { mode: "items", items: [{ name: "Доставка", price: 135 }, { name: "Монтаж", price: 1230 }] } };
+  const before = structuredClone(state), result = projectProposalPricing(state, usd);
+  assert.equal(result.project.initialPrice.toFixed(2), "5086.25");
+  assert.equal(result.project.servicesTotal?.toFixed(2), "3992.63");
+  assert.deepEqual([result.project.delivery, result.project.unloading, result.project.installation], [null, null, null]);
+  assert.equal(result.source.services.toFixed(2), "1365.00");
+  assert.equal(result.source.discount.toFixed(2), "156.50");
+  assert.equal(result.source.total.toFixed(2), "1408.50");
+  assert.equal(projectTotalText(result.items, result.project), "4577.63");
+  assert.equal(result.project.proposalRoundingAdjustment.toFixed(2), "0.00");
+  assert.deepEqual(state, before);
 });
 
 test("нормализация сохраняет правила генератора для копеек, десятичной запятой и количества", () => {
