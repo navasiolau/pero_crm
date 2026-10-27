@@ -323,35 +323,86 @@ function refreshAll() { renderItemsEditor(); renderDeliveryEditor(); renderDiscT
 
 var saveT;
 var remoteSaveT;
-function scheduleSave() { pruneMediaUploads(); clearTimeout(saveT); saveT = setTimeout(saveNow, 500); clearTimeout(remoteSaveT); if (CRM.isEditable()) remoteSaveT = setTimeout(function () { if (CRM.hasUnsavedChanges(state)) saveCurrentDoc(currentDocId, { silent: true }); }, 1200); }
+var pendingDraftReview = null, draftReviewPromise = null;
+function scheduleSave() { pruneMediaUploads(); clearTimeout(saveT); saveT = setTimeout(saveNow, 500); clearTimeout(remoteSaveT); if (CRM.isEditable() && !pendingDraftReview) remoteSaveT = setTimeout(function () { if (CRM.hasUnsavedChanges(state)) saveCurrentDoc(currentDocId, { silent: true }); }, 1200); }
+function draftContext() { return typeof CRM.draftContext === 'function' ? CRM.draftContext() : null; }
+function preserveDraft(reason, detail) {
+    var context = draftContext();
+    if (!context) return;
+    localStorage.setItem(context.prefix + 'backup:' + Date.now() + ':' + crypto.randomUUID(), JSON.stringify({ schema: 1, reason: reason,
+        documentId: currentDocId, updatedAt: new Date().toISOString(), context: context, state: clone(state), detail: detail }));
+}
 function saveNow() {
     try {
-        var snapshot = clone(state);
-        snapshot.__docId = currentDocId;
-        localStorage.setItem(CRM.localDraftKey(), JSON.stringify(snapshot));
+        if (!currentDocId || pendingDraftReview && !CRM.hasUnsavedChanges(state)) return;
+        var context = draftContext(), key = CRM.localDraftKey(), snapshot = clone(state);
+        if (context) {
+            if (key !== context.prefix + context.revision) return;
+            var previous = localStorage.getItem(key), previousValue = null, legacyKey = context.prefix + 'legacy-backup:' + context.revision;
+            try { previousValue = JSON.parse(previous); } catch (e) { }
+            if (previous && !previousValue?.schema && !localStorage.getItem(legacyKey)) localStorage.setItem(legacyKey, previous);
+            localStorage.setItem(key, JSON.stringify({ schema: 1, documentId: currentDocId, revision: context.revision, updatedAt: new Date().toISOString(),
+                base: { state: context.baseState, fx: context.fx, client: context.client },
+                local: { state: snapshot, fx: context.localFx, client: context.localClient } }));
+        } else {
+            snapshot.__docId = currentDocId;
+            localStorage.setItem(key, JSON.stringify(snapshot));
+        }
     } catch (e) { }
+}
+function applyLocalDraft(data) {
+    cancelMediaUploads();
+    state = deepMerge(clone(DEFAULT), data);
+    state.warrantyMonths = data.warrantyMonths == null ? null : data.warrantyMonths;
+    state.items.forEach(normItem);
+    state.items.forEach(function (it) { ['image', 'image2'].forEach(function (key) { if (typeof it[key] === 'string' && it[key].indexOf('data:') === 0) it[key] = ''; }); });
+    if (!state.delivery) state.delivery = clone(DEFAULT.delivery);
+    if (state.delivery.visible === undefined) state.delivery.visible = true;
+    if (state.discountMode !== 'amount') state.discountMode = 'percent';
+    if (state.doubleMode) state.items.forEach(function (it) { it.dbl = true; });
+}
+function readDraft(key, revision) {
+    try {
+        var value = JSON.parse(localStorage.getItem(key));
+        if (!value) return null;
+        if (value.schema === 1 && value.documentId === currentDocId && value.revision === revision && Array.isArray(value.local?.state?.items) && value.local.state.items.every(function (item) { return item && typeof item === 'object' && !Array.isArray(item); }))
+            return { key: key, revision: revision, updatedAt: value.updatedAt, state: value.local.state, local: value.local, base: value.base };
+        if (!value.schema && Array.isArray(value.items) && value.items.every(function (item) { return item && typeof item === 'object' && !Array.isArray(item); }) && (!value.__docId || value.__docId === currentDocId)) {
+            var legacy = clone(value); delete legacy.__docId;
+            return { key: key, revision: revision, state: legacy, legacy: true };
+        }
+    } catch (e) { }
+    return null;
 }
 function loadSaved() {
     try {
-        var raw = localStorage.getItem(CRM.localDraftKey());
-        if (!raw) return false;
-        var data = JSON.parse(raw);
-        if (!data || !Array.isArray(data.items)) return false;
-        if (typeof data.__docId === 'string') currentDocId = data.__docId;
-        delete data.__docId;
-        state = deepMerge(clone(DEFAULT), data);
-        state.warrantyMonths = data.warrantyMonths == null ? null : data.warrantyMonths;
-        state.items.forEach(normItem);
-        state.items.forEach(function (it) {
-            ['image', 'image2'].forEach(function (k) {
-                if (typeof it[k] === 'string' && it[k].indexOf('data:') === 0) it[k] = '';
-            });
-        });
-        if (!state.delivery) state.delivery = clone(DEFAULT.delivery);
-        if (state.delivery.visible === undefined) state.delivery.visible = true;
-        if (state.discountMode !== 'amount') state.discountMode = 'percent';
-        if (state.doubleMode) { state.items.forEach(function (it) { it.dbl = true; }); }
-        return true;
+        var context = draftContext(), key = CRM.localDraftKey();
+        if (!context) {
+            var old = JSON.parse(localStorage.getItem(key));
+            if (!old || !Array.isArray(old.items) || old.__docId && old.__docId !== currentDocId) return false;
+            old = clone(old); delete old.__docId; applyLocalDraft(old); return true;
+        }
+        if (key !== context.prefix + context.revision) return false;
+        var current = readDraft(key, context.revision);
+        if (current) {
+            applyLocalDraft(current.state);
+            if (current.local && typeof CRM.restoreDraftContext === 'function') CRM.restoreDraftContext(current.local);
+            return true;
+        }
+        var candidates = [];
+        if (typeof localStorage.key === 'function') for (var i = 0; i < localStorage.length; i++) {
+            var candidateKey = localStorage.key(i);
+            if (typeof candidateKey !== 'string' || !candidateKey.startsWith(context.prefix)) continue;
+            var suffix = candidateKey.slice(context.prefix.length);
+            if (!/^\d+$/.test(suffix) || !Number.isSafeInteger(Number(suffix))) continue;
+            var candidate = readDraft(candidateKey, Number(suffix)); if (candidate) candidates.push(candidate);
+        }
+        candidates.sort(function (a, b) { return (Date.parse(b.updatedAt) || 0) - (Date.parse(a.updatedAt) || 0) || b.revision - a.revision; });
+        if (candidates.length) {
+            pendingDraftReview = { draft: candidates[0], remote: clone(CRM.getDocument()) };
+            void reviewDraft().catch(function (error) { toast(error.message, 5000); });
+        }
+        return false;
     } catch (e) { return false; }
 }
 
@@ -699,6 +750,122 @@ function toggleDocsConfirm(show, id, name) {
     }
 }
 
+var reviewDecision = null, reviewRemoteButton = null;
+function finishReview(choice) {
+    if (!reviewDecision) return;
+    var resolve = reviewDecision; reviewDecision = null;
+    confirmModal.hidden = true; confirmOk.textContent = 'Удалить'; confirmOk.style.display = ''; confirmCancel.textContent = 'Отмена'; confirmText.style.whiteSpace = '';
+    if (reviewRemoteButton) reviewRemoteButton.hidden = true;
+    resolve(choice);
+}
+function showReview(title, text, localLabel) {
+    if (reviewDecision) return Promise.resolve(null);
+    if (!reviewRemoteButton) {
+        reviewRemoteButton = document.createElement('button'); reviewRemoteButton.type = 'button'; reviewRemoteButton.className = 'btn btn-ghost btn-sm';
+        reviewRemoteButton.textContent = 'Загрузить серверную';
+        confirmCancel.parentNode.insertBefore(reviewRemoteButton, confirmCancel);
+        reviewRemoteButton.addEventListener('click', function () { finishReview('remote'); });
+    }
+    docsBusy(false); confirmTitle.textContent = title; confirmText.textContent = text; confirmText.style.whiteSpace = 'pre-line';
+    confirmOk.textContent = localLabel; confirmOk.style.display = ''; confirmCancel.textContent = 'Отмена'; reviewRemoteButton.hidden = false; confirmModal.hidden = false;
+    return new Promise(function (resolve) { reviewDecision = resolve; });
+}
+function reviewLabel(path) {
+    path = path.replace(/^state\./, '');
+    var labels = { state: 'Данные КП', header: 'Шапка организации', 'header.company': 'Организация', 'header.tagline': 'Слоган',
+        'order.project': 'Проект', 'order.date': 'Дата КП', 'order.validUntil': 'Действительно до',
+        'manager.name': 'Имя менеджера', 'manager.role': 'Должность менеджера', 'manager.phone': 'Телефон менеджера',
+        'client.name': 'Имя клиента', 'client.contact': 'Контакт клиента', clientId: 'Клиент CRM',
+        'fx.rate': 'Курс КП', 'fx.date': 'Дата курса', 'fx.currency': 'Валюта курса', fx: 'Курс КП',
+        items: 'Позиции и материалы', delivery: 'Доставка, выгрузка и монтаж', discount: 'Скидка', discountMode: 'Режим скидки',
+        currency: 'Валюта', intro: 'Вводный текст', totalNote: 'Пояснение к итогу', payment: 'Условия оплаты', warrantyMonths: 'Гарантия', footer: 'Подвал и реквизиты' };
+    var item = /^items\.(\d+)\.(.+)$/.exec(path);
+    if (item) return 'Позиция ' + (Number(item[1]) + 1) + ': ' + ({ name: 'название', price: 'цена', qty: 'количество', description: 'описание', size: 'размеры', note: 'примечание', products: 'материалы' }[item[2]] || 'данные изделия');
+    return labels[path] || 'Дополнительные данные КП';
+}
+function reviewValue(bundle, path) { return path.split('.').reduce(function (value, key) { return value == null ? undefined : value[key]; }, bundle); }
+function reviewSummary(value) {
+    if (value == null || value === '') return '—';
+    if (Array.isArray(value)) return value.length + ' поз.: ' + value.slice(0, 5).map(function (item) { return item.name || item.title || 'без названия'; }).join(', ');
+    return (typeof value === 'object' ? JSON.stringify(value) : String(value)).slice(0, 500);
+}
+function reviewText(paths, base, local, remote) {
+    return paths.slice(0, 12).map(function (path) { return reviewLabel(path) + '\nОснова: ' + reviewSummary(reviewValue(base, path)) +
+        '\nМои изменения: ' + reviewSummary(reviewValue(local, path)) + '\nНа сервере: ' + reviewSummary(reviewValue(remote, path)); }).join('\n\n');
+}
+function draftDifference(local, remote) {
+    var paths = [];
+    function visit(left, right, path) {
+        if (JSON.stringify(left) === JSON.stringify(right) || paths.length >= 12) return;
+        if (left && right && typeof left === 'object' && typeof right === 'object' && !Array.isArray(left) && !Array.isArray(right))
+            Array.from(new Set(Object.keys(left).concat(Object.keys(right)))).forEach(function (key) { visit(left[key], right[key], path + '.' + key); });
+        else paths.push(path);
+    }
+    visit(local, remote, 'state'); return paths.length ? paths : ['state'];
+}
+function restoreDraftValue(base, local, remote) {
+    if (JSON.stringify(local) === JSON.stringify(base)) return remote;
+    if (local && remote && typeof local === 'object' && typeof remote === 'object' && !Array.isArray(local) && !Array.isArray(remote)) {
+        var result = {};
+        Array.from(new Set(Object.keys(base || {}).concat(Object.keys(local), Object.keys(remote)))).forEach(function (key) {
+            var value = restoreDraftValue(base?.[key], local[key], remote[key]); if (value !== undefined) result[key] = value;
+        });
+        return result;
+    }
+    return local;
+}
+function reviewDraft() {
+    if (!pendingDraftReview) return Promise.resolve(null);
+    if (draftReviewPromise) return draftReviewPromise;
+    var candidate = pendingDraftReview, reviewId = candidate.remote.id;
+    draftReviewPromise = (async function () {
+        var local = { state: candidate.draft.state, fx: candidate.draft.local?.fx, clientId: candidate.draft.local?.client?.label },
+            remote = { state: candidate.remote.state, fx: candidate.remote.fx, clientId: candidate.remote.client?.label },
+            base = { state: candidate.draft.base?.state, fx: candidate.draft.base?.fx, clientId: candidate.draft.base?.client?.label };
+        var paths = draftDifference(local.state, remote.state);
+        if (candidate.draft.local && JSON.stringify(local.fx) !== JSON.stringify(remote.fx)) paths.unshift('fx');
+        if (candidate.draft.local && candidate.draft.local.client?.id !== candidate.remote.client?.id) paths.unshift('clientId');
+        var text = 'Черновик редакции ' + candidate.draft.revision + '; на сервере редакция ' + candidate.remote.revision + '. Сохранённые копии не удаляются.\n\n' +
+            reviewText(paths, base, local, remote);
+        if (candidate.draft.legacy) text += '\n\nВ старом формате нет основы для объединения: будет восстановлен весь снимок полей черновика. Добавленные на сервере поля могут быть заменены при последующем сохранении. Курс и клиент автоматически не заменяются.';
+        else text += '\n\nСерверные изменения других полей сохранятся. В совпавших полях будут выбраны значения черновика.';
+        text += '\nПосле восстановления проверьте поля и отдельно сохраните КП. Все исходные копии остаются в браузере.';
+        var choice = await showReview('Найден черновик другой редакции', text, 'Восстановить черновик');
+        if (!choice) return null;
+        if (currentDocId !== reviewId || pendingDraftReview !== candidate) throw new Error('Открыто другое КП. Черновик не применён');
+        preserveDraft('draft-review', candidate);
+        var latest = await CRM.request('/api/documents?id=' + encodeURIComponent(reviewId));
+        if (currentDocId !== reviewId || pendingDraftReview !== candidate) throw new Error('Открыто другое КП. Черновик не применён');
+        if (choice === 'local' && (latest.revision !== candidate.remote.revision || JSON.stringify(latest.state) !== JSON.stringify(candidate.remote.state))) {
+            candidate.remote = clone(latest); throw new Error('КП на сервере изменилось. Проверьте черновик ещё раз');
+        }
+        applyDocumentState(latest, false);
+        if (choice === 'local') {
+            var restored = candidate.draft.local ? clone(candidate.draft.local) : null;
+            if (restored && candidate.draft.base) {
+                restored.state = restoreDraftValue(candidate.draft.base.state, restored.state, latest.state);
+                restored.fx = restoreDraftValue(candidate.draft.base.fx, restored.fx, latest.fx);
+                if (restored.client?.id === candidate.draft.base.client?.id) restored.client = latest.client;
+            }
+            applyLocalDraft(restored ? restored.state : candidate.draft.state);
+            if (restored && typeof CRM.restoreDraftContext === 'function') CRM.restoreDraftContext(restored);
+            syncStaticInputs(); refreshAll();
+        }
+        pendingDraftReview = null; saveNow(); return choice;
+    })().finally(function () { draftReviewPromise = null; });
+    return draftReviewPromise;
+}
+async function reviewSaveConflict() {
+    var conflict = typeof CRM.getSaveConflict === 'function' ? CRM.getSaveConflict() : null;
+    if (!conflict) return null;
+    preserveDraft('save-conflict-review', conflict);
+    var choice = await showReview('КП изменилось на сервере', 'Совпали изменения в следующих полях. Выберите, какие значения оставить. Отмена сохраняет мой черновик.\n\n' +
+        reviewText(conflict.paths, conflict.base, conflict.local, conflict.remote), 'Сохранить мои изменения');
+    if (!choice) { lastSaveError = new Error('Сохранение отменено. Мой черновик сохранён'); return null; }
+    if (currentDocId !== conflict.proposalId) throw new Error('Открыто другое КП. Изменения не применены');
+    var doc = await CRM.resolveSaveConflict(choice); applyDocumentState(doc, false); saveNow(); return doc;
+}
+
 docsList.addEventListener('click', function (e) {
     var op = e.target.closest('.doc-open');
     if (op) {
@@ -714,19 +881,21 @@ docsList.addEventListener('click', function (e) {
     }
 });
 
-confirmCancel.addEventListener('click', function () { toggleDocsConfirm(false, '', ''); });
+confirmCancel.addEventListener('click', function () { if (reviewDecision) finishReview(null); else toggleDocsConfirm(false, '', ''); });
+confirmOk.addEventListener('click', function () { if (reviewDecision) finishReview('local'); });
 
 confirmModal.addEventListener('click', function (e) {
-    if (e.target === confirmModal) { toggleDocsConfirm(false, '', ''); }
+    if (e.target === confirmModal) { if (reviewDecision) finishReview(null); else toggleDocsConfirm(false, '', ''); }
 });
+document.addEventListener('keydown', function (event) { if (event.key === 'Escape' && reviewDecision) finishReview(null); });
 
 confirmCancel.addEventListener('click', function () {
-    toggleDocsConfirm(false, '', '');
-    confirmOk.style.display = '';
+    if (!reviewDecision) { toggleDocsConfirm(false, '', ''); confirmOk.style.display = ''; }
 });
 
 function applyDocumentState(doc, preview) {
     clearTimeout(remoteSaveT);
+    if (pendingDraftReview && (preview || pendingDraftReview.remote.id !== doc.id)) { finishReview(null); pendingDraftReview = null; }
     cancelMediaUploads();
     if (!preview) CRM.focusDocument(doc);
     state = deepMerge(clone(DEFAULT), doc.state);
@@ -769,7 +938,16 @@ async function saveCurrentDoc(id, opts) {
     if (!CRM.isEditable()) return CRM.getDocument();
     try {
         await awaitMediaUploads(currentDocId);
+        if (pendingDraftReview) {
+            saveNow(); if (opts.silent) return null;
+            var draftChoice = await reviewDraft();
+            if (draftChoice === 'remote') return CRM.getDocument();
+            lastSaveError = new Error(draftChoice ? 'Черновик восстановлен. Проверьте поля и сохраните КП' : 'Восстановление отменено. Черновик сохранён');
+            if (draftChoice) toast(lastSaveError.message, 5000); return null;
+        }
         if (!CRM.isEditable()) throw new Error('КП доступно только для просмотра');
+        saveNow();
+        if (typeof CRM.getSaveConflict === 'function' && CRM.getSaveConflict()) return opts.silent ? null : await reviewSaveConflict();
         var snapshot = clone(state), serialized = JSON.stringify(snapshot);
         var doc = await CRM.save(snapshot);
         currentDocId = doc.id;
@@ -778,13 +956,19 @@ async function saveCurrentDoc(id, opts) {
         docsNamesCache[doc.id] = docNumber(doc); saveDocsNamesCache();
         renderDocsCurrent(); renderDocsSaveBtn(); syncStaticInputs(); renderSheet(); updateTotal(); saveNow();
         return doc;
-    } catch (error) { lastSaveError = error; if (!opts.silent) toast(error.message || 'Не удалось сохранить КП', 5000); return null; }
+    } catch (error) {
+        lastSaveError = error; saveNow();
+        if (!opts.silent && typeof CRM.getSaveConflict === 'function' && CRM.getSaveConflict()) {
+            try { return await reviewSaveConflict(); } catch (reviewError) { lastSaveError = reviewError; }
+        }
+        if (!opts.silent) toast(lastSaveError.message || 'Не удалось сохранить КП', 5000); return null;
+    }
 }
 
 async function ensureCurrentSaved() {
     if (CRM.isPaused()) throw new Error('Завершите изменение клиента');
     await awaitMediaUploads(currentDocId);
-    if (!CRM.isEditable() || !CRM.hasUnsavedChanges(state)) return CRM.getDocument();
+    if (!CRM.isEditable() || !pendingDraftReview && !(typeof CRM.getSaveConflict === 'function' && CRM.getSaveConflict()) && !CRM.hasUnsavedChanges(state)) return CRM.getDocument();
     var saved = await saveCurrentDoc(currentDocId || undefined);
     if (!saved) throw lastSaveError || new Error('Не удалось сохранить КП');
     return saved;
@@ -876,6 +1060,7 @@ CRM.attachEditor({
     CRM.applyPermissions();
 })();
 window.addEventListener('load', function () { if (!userZoomed) fit(); updatePageCount(); });
+window.addEventListener('pagehide', saveNow);
 if (document.fonts && document.fonts.ready) document.fonts.ready.then(updatePageCount);
 
 if (window.ContractEditor) {
