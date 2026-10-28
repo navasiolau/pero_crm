@@ -2,7 +2,7 @@ import { Prisma } from "@prisma/client";
 import { BYN_UNAVAILABLE_REASON, sumByn, subtractByn } from "@/lib/history-byn";
 import { activePaymentWhere } from "@/server/payments/active-records";
 import { readCashBalance } from "@/server/payroll/cash-core";
-import { requireLogisticsActor } from "./core";
+import { requireLiveLogisticsTrip, requireLogisticsActor } from "./core";
 import { listActiveCashAccountOptions } from "@/server/finance/default-cash-core";
 import { type LogisticsMoneyOptions, type LogisticsPostingView, type LogisticsProjectBudget } from "./money-contracts";
 
@@ -23,6 +23,7 @@ function postingView(row: PostingRecord): LogisticsPostingView {
 export async function getLogisticsTripMoneyCore(actorId: string | null | undefined, tripId: string, tx: Prisma.TransactionClient):
   Promise<{ current: LogisticsPostingView | null; history: LogisticsPostingView[] }> {
   await requireLogisticsActor(actorId, tx);
+  await requireLiveLogisticsTrip(tx, tripId);
   const records = await tx.logisticsPosting.findMany({ where: { tripId }, include: postingReadInclude, orderBy: { tripRevision: "desc" } });
   return { current: records.find(row => row.status === "ACTIVE") ? postingView(records.find(row => row.status === "ACTIVE")!) : null,
     history: records.filter(row => row.status === "SUPERSEDED").map(postingView) };

@@ -21,8 +21,13 @@ export async function requireLogisticsActor(actorId: string | null | undefined,
 export async function lockLogisticsTrip(tx: Prisma.TransactionClient, tripId: string) {
   await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(18441, hashtext(${tripId}))`;
 }
-async function lockMutation(tx: Prisma.TransactionClient, clientMutationId: string) {
+export async function lockLogisticsMutation(tx: Prisma.TransactionClient, clientMutationId: string) {
   await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(18442, hashtext(${clientMutationId}))`;
+}
+export async function requireLiveLogisticsTrip(tx: Prisma.TransactionClient, tripId: string) {
+  const trip = await tx.logisticsTrip.findUnique({ where: { id: tripId }, select: { id: true, deletedAt: true } });
+  if (!trip || trip.deletedAt) throw new UploadError("LOGISTICS_TRIP_NOT_FOUND", 404, "context", "Рейс не найден");
+  return trip;
 }
 function invalid(message: string): never {
   throw new UploadError("LOGISTICS_INPUT_INVALID", 422, "validation", message, "validation");
@@ -118,7 +123,7 @@ export async function createLogisticsTripCore(actorId: string | null | undefined
   const fingerprint = createHash("sha256").update(JSON.stringify({ actorId, operation: "create", ...data })).digest("hex");
   return transaction(async tx => {
     const actor = await requireLogisticsActor(actorId, tx);
-    await lockMutation(tx, data.clientMutationId);
+    await lockLogisticsMutation(tx, data.clientMutationId);
     const receipt = await mutationReceipt(tx, actor.id, data.clientMutationId, fingerprint);
     if (receipt) return receipt;
     const prepared = await validateTripManifest(tx, data, undefined, actor);
@@ -140,16 +145,16 @@ export async function updateLogisticsTripCore(actorId: string | null | undefined
   const fingerprint = createHash("sha256").update(JSON.stringify({ actorId, operation: "update", ...data })).digest("hex");
   return transaction(async tx => {
     const actor = await requireLogisticsActor(actorId, tx);
-    await lockMutation(tx, data.clientMutationId);
+    await lockLogisticsMutation(tx, data.clientMutationId);
     const receipt = await mutationReceipt(tx, actor.id, data.clientMutationId, fingerprint);
     if (receipt) return receipt;
     await lockLogisticsTrip(tx, data.tripId);
     const previous = await tx.logisticsTrip.findUnique({ where: { id: data.tripId }, include: logisticsManifestInclude });
-    if (!previous) throw new UploadError("LOGISTICS_TRIP_NOT_FOUND", 404, "context", "Рейс не найден");
+    if (!previous || previous.deletedAt) throw new UploadError("LOGISTICS_TRIP_NOT_FOUND", 404, "context", "Рейс не найден");
     if (previous.revision !== data.expectedRevision) conflict();
     await logisticsTripWritePolicy.beforeManifestUpdate(tx, data.tripId);
     const prepared = await validateTripManifest(tx, data, previous, actor);
-    const changed = await tx.logisticsTrip.updateMany({ where: { id: data.tripId, revision: data.expectedRevision },
+    const changed = await tx.logisticsTrip.updateMany({ where: { id: data.tripId, revision: data.expectedRevision, deletedAt: null },
       data: { date: new Date(`${data.date}T00:00:00.000Z`), comment: data.comment, ttnNotRequired: prepared.ttnNotRequired,
         updatedById: actor.id, revision: { increment: 1 } } });
     if (changed.count !== 1) conflict();

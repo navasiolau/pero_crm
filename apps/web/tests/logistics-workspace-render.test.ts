@@ -66,7 +66,7 @@ const { canManageLogistics } = require("../src/lib/logistics-access") as typeof 
 const list = async () => {
   listReads += 1;
   return canManageLogistics(actorRoles)
-    ? { mode: "manage" as const, rows: [tripBase], total: 1, query }
+    ? { mode: "manage" as const, canDelete: actorRoles.includes("ADMIN"), rows: [tripBase], total: 1, query }
     : { mode: "documents" as const, rows: [documentTrip], total: 1, query };
 };
 stubModule("../src/server/logistics/queries", {
@@ -78,6 +78,7 @@ stubModule("../src/server/logistics/money-actions", {
   postLogisticsTrip: async () => { throw Error("UI render must not spend"); },
   correctLogisticsTripPosting: async () => { throw Error("UI render must not spend"); },
 });
+stubModule("../src/server/logistics/delete-actions", { deleteLogisticsTrip: async () => { throw Error("UI render must not delete"); } });
 stubModule("../src/server/logistics/money-queries", {
   getLogisticsTripMoney: async () => { moneyReads += 1; return managed.money; },
   getLogisticsMoneyOptions: async () => { moneyReads += 1; return moneyOptions; },
@@ -159,7 +160,7 @@ test("article-free logistics UI enables a valid trip without setup", () => {
   assert.ok(correction, "A valid trip with cash, amount, shares and TTN must offer the cash action");
   assert.doesNotMatch(correction[1], /\bdisabled=/);
   assert.doesNotMatch(formHtml, /Статья:|статью логистики|настроить активную|администратор или директор/);
-  const data = { mode: "manage" as const, rows: [managed], options, moneyOptions, query, total: 1,
+  const data = { mode: "manage" as const, canDelete: false, rows: [managed], options, moneyOptions, query, total: 1,
     projectId: "project-a", budget, initialTrip: null };
   const workspaceHtml = renderToStaticMarkup(React.createElement(LogisticsWorkspace, { data }));
   assert.doesNotMatch(workspaceHtml, /Статья расходов логистики|Сохранить статью|расходы вне рейсов/);
@@ -175,6 +176,15 @@ test("article-free logistics UI enables a valid trip without setup", () => {
   assert.deepEqual(Object.keys(moneyOptions), ["cashAccounts"]);
 });
 
+test("кнопка удаления отображается только при серверном разрешении ADMIN", () => {
+  const data = { mode: "manage" as const, canDelete: false, rows: [managed], options, moneyOptions, query, total: 1,
+    budget: null, initialTrip: null };
+  const ordinary = renderToStaticMarkup(React.createElement(LogisticsWorkspace, { data }));
+  assert.doesNotMatch(ordinary, /Удалить рейс/);
+  const admin = renderToStaticMarkup(React.createElement(LogisticsWorkspace, { data: { ...data, canDelete: true } }));
+  assert.match(admin, /Удалить рейс a1000000/);
+});
+
 test("галочка разрешает списание и исправление без ТТН и объясняет состояние рейса", () => {
   const callbacks = { onSaved: () => {}, onReload: () => {}, onBusyChange: () => {} };
   const waived = { ...managed, ttnNotRequired: true, documents: [] };
@@ -183,7 +193,7 @@ test("галочка разрешает списание и исправлени
   assert.ok(correction);
   assert.doesNotMatch(correction[1], /\bdisabled=/);
   assert.match(html, /Рейс можно провести без ТТН/);
-  const data = { mode: "manage" as const, rows: [{ ...waived, money: { current: null, history: [] } }], options, moneyOptions,
+  const data = { mode: "manage" as const, canDelete: false, rows: [{ ...waived, money: { current: null, history: [] } }], options, moneyOptions,
     query, total: 1, budget: null, initialTrip: null };
   const workspace = renderToStaticMarkup(React.createElement(LogisticsWorkspace, { data }));
   assert.match(workspace, /ТТН не требуется/);

@@ -926,6 +926,8 @@ model LogisticsTrip {
   comment String @default("")
   ttnNotRequired Boolean @default(false)
   revision Int @default(1)
+  deletedAt DateTime?
+  deletedById String? // снимок автора удаления без каскада и переназначения
   createdById String
   createdBy User @relation("LogisticsTripCreator", fields: [createdById], references: [id], onDelete: Restrict)
   updatedById String
@@ -939,6 +941,7 @@ model LogisticsTrip {
   postings LogisticsPosting[]
 
   @@index([date, id])
+  @@index([deletedAt, date, id])
 }
 
 model LogisticsProjectShare {

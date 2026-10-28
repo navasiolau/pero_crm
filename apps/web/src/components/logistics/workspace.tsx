@@ -13,6 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { formatDate, formatExactMoney, formatMoneyTotal, formatQty } from "@/lib/format";
 import { LogisticsDocuments } from "./documents";
 import { LogisticsTripDialog } from "./trip-editor";
+import { LogisticsDeleteButton } from "./delete-button";
 import { logisticsQueryUrl, percentLabel } from "./model";
 import type { LogisticsWorkspaceData, ManagedTrip, ProjectBudget, TripRow } from "./types";
 
@@ -55,6 +56,10 @@ export function LogisticsWorkspace({ data }: { data: LogisticsWorkspaceData }) {
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState("");
   const manage = data.mode === "manage", projectId = data.projectId;
+  function deleted(tripId: string) {
+    setSelected(previous => previous?.id === tripId ? null : previous);
+    router.refresh();
+  }
   function change(values: Record<string, string | number | undefined>) {
     router.replace(logisticsQueryUrl(pathname, searchParams.toString(), data.query, { page: 1, ...(projectId ? { tab: "logistics" } : {}), ...values }));
   }
@@ -83,6 +88,8 @@ export function LogisticsWorkspace({ data }: { data: LogisticsWorkspaceData }) {
     columns.push({ id: "state", header: "Оформление", cell: row => row.mode === "manage" ? <Badge variant="outline">{tripState(row)}</Badge> : null });
   }
   columns.push({ id: "documents", header: "ТТН", className: "whitespace-normal", cell: row => <div>{row.documents.length ? row.documents.length + " файл(ов)" : row.ttnNotRequired ? "ТТН не требуется" : "Нет ТТН"}{row.ttnNotRequired && row.documents.length > 0 && <p className="text-xs text-muted-foreground">ТТН не требуется</p>}{row.documents[0]?.ttnNumber && <p className="text-xs text-muted-foreground">№ {row.documents[0].ttnNumber}</p>}</div> });
+  if (data.mode === "manage" && data.canDelete) columns.push({ id: "actions", header: "Действия",
+    cell: row => row.mode === "manage" ? <LogisticsDeleteButton trip={row} onDeleted={() => deleted(row.id)} /> : null });
 
   return (
     <div className="flex min-w-0 flex-col gap-5">
@@ -121,6 +128,7 @@ export function LogisticsWorkspace({ data }: { data: LogisticsWorkspaceData }) {
             </>}
             <p className="text-sm">{row.ttnNotRequired ? "ТТН не требуется · " : "ТТН: "}{row.documents.length} файл(ов)</p>
             <Button type="button" variant="outline" size="sm" onClick={() => { setCreating(false); setSelected(row); }}>{manage ? "Открыть рейс" : "Открыть ТТН"}</Button>
+            {data.mode === "manage" && data.canDelete && row.mode === "manage" && <LogisticsDeleteButton trip={row} onDeleted={() => deleted(row.id)} />}
           </div>
         )} />
 

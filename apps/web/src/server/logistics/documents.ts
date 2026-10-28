@@ -4,7 +4,7 @@ import { uploadSizeLimitError, uploadSizeLimitFor } from "@/server/files/upload-
 import { UploadError, type UploadPhase } from "@/server/files/upload-result";
 import type { FileContentSource } from "@/server/files/document-storage";
 import { logisticsDocumentUploadSchema, type LogisticsDocumentView } from "./contracts";
-import { requireLogisticsActor, type LogisticsTransaction } from "./core";
+import { lockLogisticsTrip, requireLiveLogisticsTrip, requireLogisticsActor, type LogisticsTransaction } from "./core";
 
 export type LogisticsDocumentStorage = {
   mode(): "local" | "s3";
@@ -23,8 +23,7 @@ async function lockUpload(tx: Prisma.TransactionClient, clientMutationId: string
   await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(18443, hashtext(${clientMutationId}))`;
 }
 async function requireTrip(tx: Prisma.TransactionClient, tripId: string) {
-  if (!await tx.logisticsTrip.findUnique({ where: { id: tripId }, select: { id: true } }))
-    throw new UploadError("LOGISTICS_TRIP_NOT_FOUND", 404, "context", "Рейс не найден");
+  return requireLiveLogisticsTrip(tx, tripId);
 }
 
 /** Документы добавляются неизменяемыми: ни удаление, ни перезапись оригинала не опубликованы. */
@@ -51,13 +50,14 @@ export function createLogisticsDocumentService({ transaction, storage }: {
       const reserved = await transaction(async tx => {
         await requireLogisticsActor(actorId, tx);
         await lockUpload(tx, data.clientMutationId);
+        await lockLogisticsTrip(tx, data.tripId);
+        await requireTrip(tx, data.tripId);
         const previous = await tx.logisticsDocument.findUnique({ where: { clientMutationId: data.clientMutationId } });
         if (previous) {
           if (previous.uploadedById !== actorId || previous.requestFingerprint !== requestFingerprint)
             throw new UploadError("LOGISTICS_DOCUMENT_CONFLICT", 409, "persist", "Идентификатор загрузки уже использован с другими данными", "conflict");
           return previous;
         }
-        await requireTrip(tx, data.tripId);
         const id = randomUUID();
         return tx.logisticsDocument.create({ data: { id, ...data, size, contentHash, requestFingerprint,
           uploadedById: actorId, state: "PENDING", storageMode: storage.mode(), storageKey: `logistics-documents/${id}/${contentHash}` } });
@@ -69,6 +69,8 @@ export function createLogisticsDocumentService({ transaction, storage }: {
       return transaction(async tx => {
         const actor = await requireLogisticsActor(actorId, tx);
         await lockUpload(tx, data.clientMutationId);
+        await lockLogisticsTrip(tx, data.tripId);
+        await requireTrip(tx, data.tripId);
         const row = await tx.logisticsDocument.findUnique({ where: { id: reserved.id } });
         if (!row || row.requestFingerprint !== requestFingerprint)
           throw new UploadError("LOGISTICS_DOCUMENT_CONFLICT", 409, "persist", "Документ изменился — повторите загрузку", "conflict");
@@ -86,7 +88,7 @@ export function createLogisticsDocumentService({ transaction, storage }: {
     async read(actorId: string, id: string) {
       const document = await transaction(async tx => {
         await requireLogisticsActor(actorId, tx, "documents");
-        return tx.logisticsDocument.findFirst({ where: { id, state: "READY" } });
+        return tx.logisticsDocument.findFirst({ where: { id, state: "READY", trip: { deletedAt: null } } });
       });
       if (!document) return null;
       const body = await storage.open(document);

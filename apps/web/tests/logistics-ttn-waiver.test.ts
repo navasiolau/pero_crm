@@ -26,7 +26,7 @@ test("внутренний Payment разрешает пустой компле�
   const { Prisma } = await import("@prisma/client");
   const actor = { id: "actor", name: "Снабженец", roles: ["PROCUREMENT"] as const, source: "web" as const };
   const amount = new Prisma.Decimal(10), rate = new Prisma.Decimal(1), paidAt = new Date("2026-10-29T00:00:00Z");
-  const posting = { status: "ACTIVE", actorId: actor.id, tripId: "trip", ttnNotRequired: true, currency: "BYN",
+  const posting = { status: "ACTIVE", actorId: actor.id, tripId: "trip", trip: { deletedAt: null }, ttnNotRequired: true, currency: "BYN",
     cashAccountId: "cash", expenseArticleId: null, rate, rateDate: null, paidAt,
     documents: [] as { document: { tripId: string; state: string; stage: string } }[] };
   const allocation = { id: "allocation", projectId: "p", payment: null, amount, bynAmount: amount, posting };

@@ -10,5 +10,5 @@ export type ManagedTrip = LogisticsTripView & { money: TripMoney };
 export type TripRow = ManagedTrip | LogisticsTripDocumentsView;
 type ListData = { query: LogisticsTripListInput; total: number; projectId?: string };
 export type LogisticsWorkspaceData =
-  | (ListData & { mode: "manage"; rows: ManagedTrip[]; options: TripOptions; moneyOptions: MoneyOptions; budget: ProjectBudget | null; initialTrip: ManagedTrip | null })
+  | (ListData & { mode: "manage"; canDelete: boolean; rows: ManagedTrip[]; options: TripOptions; moneyOptions: MoneyOptions; budget: ProjectBudget | null; initialTrip: ManagedTrip | null })
   | (ListData & { mode: "documents"; rows: LogisticsTripDocumentsView[]; initialTrip: LogisticsTripDocumentsView | null });

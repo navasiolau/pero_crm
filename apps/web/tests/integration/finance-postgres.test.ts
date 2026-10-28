@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { verifyLogisticsTripDeletionNative } from "../helpers/logistics-delete-native";
 import { verifyLogisticsTtnWaiverNative } from "../helpers/logistics-ttn-native";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomUUID } from "node:crypto";
@@ -640,6 +641,17 @@ for (const currency of ["BYN", "USD"] as const) test(`warehouse/paid-receipt-cas
   for (const [index, before] of originalMoney.entries()) assert.deepEqual(finalMoney[index].filter(row => before.some(old => old.id === row.id)), before, "FOREIGN_STOCK_MONEY_UNCHANGED");
 }));
 
+test("logistics/soft-delete-real-cash-economics-history-roles-and-rollback", async () => fixture.rollback(async (tx, rows) => {
+  const actor = await rows.user("deletion-admin", ["ADMIN"]);
+  const a = await rows.project("deletion-a", { currency: "BYN", delivery: "1000" }), b = await rows.project("deletion-b", { currency: "BYN", delivery: "1000" });
+  const products = [await rows.product("deletion-a", a.id, { status: "PRODUCTION" }), await rows.product("deletion-b", b.id, { status: "PRODUCTION" })];
+  for (const { currency, ttnNotRequired } of [{ currency: "BYN", ttnNotRequired: false }, { currency: "USD", ttnNotRequired: false }, { currency: "BYN", ttnNotRequired: true }] as const) {
+    const account = await tx.cashAccount.create({ data: { name: rows.id(`deletion-${currency.toLowerCase()}${ttnNotRequired ? "-no-ttn" : ""}`), currency } });
+    await tx.payment.create({ data: { cashAccountId: account.id, direction: "INCOME", currency, amount: "1000", bynAmount: currency === "BYN" ? "1000" : "3000", rate: currency === "BYN" ? 1 : 3 } });
+    assert.ok(await verifyLogisticsTripDeletionNative(tx, { adminId: actor.id, projectIds: [a.id, b.id], productIds: [products[0].id, products[1].id], cashAccountId: account.id, currency, ttnNotRequired }));
+  }
+}));
+
 test("logistics/ttn-waiver-real-constraints-history-and-rollback", async () => fixture.rollback(async (tx, rows) => {
   const c = await cashContext(tx, rows, "1000"), actor = await rows.user("waiver-procurement", ["PROCUREMENT"]);
   const project = await rows.project("waiver", { currency: "BYN" });
@@ -1258,6 +1270,51 @@ async function waitForMoneyLock(holder: Prisma.TransactionClient, pid: number) {
   }
   assert.fail("REAL_DISTINCT_BACKEND_LOCK_WAIT_NOT_OBSERVED");
 }
+
+test("logistics/delete-versus-post-real-money-lock-both-orders", async () => {
+  const coordinator = await import("../../src/server/transactions/coordinator");
+  const { deleteLogisticsTripCore } = await import("../../src/server/logistics/delete-core");
+  for (const postFirst of [false, true]) {
+    const label = postFirst ? "delete-race-post-first" : "delete-race-delete-first";
+    const actor = await fixture.user(`${label}-admin`, ["ADMIN"]);
+    const project = await fixture.project(label, { currency: "BYN" }), product = await fixture.product(label, project.id, { status: "PRODUCTION" });
+    const account = await fixture.db.cashAccount.create({ data: { name: fixture.id(label), currency: "BYN" } });
+    await fixture.db.payment.create({ data: { cashAccountId: account.id, direction: "INCOME", amount: "1000", bynAmount: "1000", currency: "BYN" } });
+    const trip = await trips.createLogisticsTripCore(actor.id, { date: "2026-10-29", clientMutationId: randomUUID(), shares: [{ projectId: project.id, percentBps: 10000 }],
+      lines: [{ projectId: project.id, kind: "PRODUCT", productId: product.id, quantity: 1 }] }, coordinator.createMutationTransaction(fixture.db));
+    const document = await fixture.db.logisticsDocument.create({ data: { tripId: trip.tripId, clientMutationId: randomUUID(), requestFingerprint: fixture.id(label),
+      uploadedById: actor.id, fileName: "QA198.pdf", mimeType: "application/pdf", size: 4, contentHash: "a".repeat(64), storageKey: fixture.id(label),
+      storageMode: "s3", state: "READY", stage: "ISSUED", readyAt: new Date() } });
+    const post = { tripId: trip.tripId, expectedRevision: trip.revision, clientMutationId: randomUUID(), amount: "10.00", currency: "BYN" as const,
+      cashAccountId: account.id, documentIds: [document.id] };
+    const remove = { tripId: trip.tripId, expectedRevision: trip.revision, clientMutationId: randomUUID() };
+    const ready = gate(), release = gate(), peerStarted = gate();
+    let holder: Prisma.TransactionClient | undefined, firstPid = 0, peerPid = 0, completed = false;
+    const first = coordinator.createMutationTransaction(fixture.db)(async tx => {
+      holder = tx; firstPid = (await tx.$queryRaw<{ pid: number }[]>`SELECT pg_backend_pid() AS pid`)[0].pid;
+      const result = postFirst ? await logistics.createLogisticsPostingCore(actor.id, post, "post", { db: tx, transaction: operation => operation(tx) })
+        : await deleteLogisticsTripCore(actor.id, remove, operation => operation(tx));
+      ready.resolve(); await release.promise; return result;
+    });
+    void first.catch(() => ready.resolve());
+    let second: Promise<{ ok: boolean; error?: string }> | undefined;
+    try {
+      await ready.promise; assert.ok(holder);
+      const peer = observedClient(fixture.peer, async tx => { peerPid = (await tx.$queryRaw<{ pid: number }[]>`SELECT pg_backend_pid() AS pid`)[0].pid; peerStarted.resolve(); });
+      const operation = postFirst ? deleteLogisticsTripCore(actor.id, remove, coordinator.createMutationTransaction(peer))
+        : logistics.createLogisticsPostingCore(actor.id, post, "post", { db: peer, transaction: coordinator.createMutationTransaction(peer) });
+      second = operation.then(() => ({ ok: true }), error => ({ ok: false, error: error instanceof Error ? error.message : String(error) }));
+      void second.then(() => { completed = true; peerStarted.resolve(); });
+      await peerStarted.promise; assert.notEqual(firstPid, peerPid); await waitForMoneyLock(holder, peerPid); assert.equal(completed, false);
+      release.resolve(); await first;
+      const loser = await second; assert.equal(loser.ok, false); assert.match(loser.error ?? "", postFirst ? /изменён/ : /Рейс не найден/);
+      const saved = await fixture.db.logisticsTrip.findUniqueOrThrow({ where: { id: trip.tripId } });
+      assert.equal(Boolean(saved.deletedAt), !postFirst);
+      assert.equal(await fixture.db.payment.count({ where: { ...activePaymentWhere, cashAccountId: account.id, direction: "EXPENSE" } }), postFirst ? 1 : 0);
+      assert.equal((await cash.readCashBalance(fixture.db, account.id)).toFixed(2), postFirst ? "990.00" : "1000.00");
+    } finally { release.resolve(); await Promise.allSettled([first, ...(second ? [second] : [])]); }
+  }
+});
 
 test("cash/payment-stock-logistics-versus-advance-real-lock-both-orders", async () => {
   const coordinator = await import("../../src/server/transactions/coordinator");
