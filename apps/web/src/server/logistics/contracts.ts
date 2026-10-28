@@ -14,13 +14,14 @@ export const logisticsShipmentLineSchema = z.discriminatedUnion("kind", [
 ]);
 export type LogisticsShipmentLineInput = z.output<typeof logisticsShipmentLineSchema>;
 
-const tripShape = {
-  clientMutationId: mutationId,
+const manifestShape = {
   date: shipmentDate,
   comment: z.string().trim().max(5000).default(""),
+  ttnNotRequired: z.boolean().optional(),
   shares: z.array(z.object({ projectId: entityId, percentBps: z.number().int().min(1).max(10000).optional() }).strict()).min(1),
   lines: z.array(logisticsShipmentLineSchema).min(1, "Добавьте состав отгрузки"),
 };
+const tripShape = { ...manifestShape, clientMutationId: mutationId };
 
 function validateManifest(data: { shares: { projectId: string; percentBps?: number }[]; lines: LogisticsShipmentLineInput[] }, ctx: z.RefinementCtx) {
   const projects = new Set(data.shares.map(share => share.projectId));
@@ -42,12 +43,14 @@ function withDefaultShare<T extends { shares: { projectId: string; percentBps?: 
   return { ...values, shares: shares.map(share => ({ projectId: share.projectId, percentBps: share.percentBps ?? 10000 })) };
 }
 
-export const logisticsTripCreateSchema = z.object(tripShape).strict().superRefine(validateManifest).transform(withDefaultShare);
+export const logisticsTripCreateSchema = z.object({ ...tripShape, ttnNotRequired: z.boolean().default(false) })
+  .strict().superRefine(validateManifest).transform(withDefaultShare);
 export const logisticsTripUpdateSchema = z.object({ ...tripShape, tripId: z.uuid(), expectedRevision: z.number().int().min(1).max(2_147_483_646) })
   .strict().superRefine(validateManifest).transform(withDefaultShare);
+export const logisticsTripManifestSchema = z.object(manifestShape).strict().superRefine(validateManifest).transform(withDefaultShare);
 export type LogisticsTripCreateInput = z.output<typeof logisticsTripCreateSchema>;
 export type LogisticsTripUpdateInput = z.output<typeof logisticsTripUpdateSchema>;
-export type LogisticsTripManifestInput = Pick<LogisticsTripCreateInput, "date" | "comment" | "shares" | "lines">;
+export type LogisticsTripManifestInput = z.output<typeof logisticsTripManifestSchema>;
 export type LogisticsTripMutationResult = { tripId: string; revision: number; repeated: boolean };
 
 export function shipmentLineKey(line: { projectId: string; kind: string; productId?: string | null; materialId?: string | null }) {
@@ -68,14 +71,14 @@ export type LogisticsDocumentView = {
   stage: "ISSUED" | "SIGNED"; ttnNumber: string | null; createdAt: string;
 };
 export type LogisticsTripView = {
-  mode: "manage"; id: string; date: string; comment: string; revision: number;
+  mode: "manage"; id: string; date: string; comment: string; revision: number; ttnNotRequired: boolean;
   shares: { id: string; projectId: string; projectNumber: string; projectTitle: string; percentBps: number }[];
   lines: { id: string; projectId: string; kind: "PRODUCT" | "MATERIAL"; productId: string | null; materialId: string | null;
     nameSnapshot: string; numberSnapshot: string | null; unitSnapshot: string; quantity: number }[];
   documents: LogisticsDocumentView[];
 };
 export type LogisticsTripDocumentsView = {
-  mode: "documents"; id: string; date: string; projects: { id: string; number: string }[]; documents: LogisticsDocumentView[];
+  mode: "documents"; id: string; date: string; ttnNotRequired: boolean; projects: { id: string; number: string }[]; documents: LogisticsDocumentView[];
 };
 
 export const logisticsTripListSchema = z.object({

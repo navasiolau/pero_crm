@@ -41,7 +41,7 @@ async function readReceipt(actorId: string, fingerprint: string, data: Logistics
     projectIds: row.allocations.map(allocation => allocation.projectId) };
 }
 function manifestOf(row: LogisticsManifestRecord): LogisticsTripManifestInput {
-  return { date: row.date.toISOString().slice(0, 10), comment: row.comment,
+  return { date: row.date.toISOString().slice(0, 10), comment: row.comment, ttnNotRequired: row.ttnNotRequired,
     shares: row.shares.map(({ projectId, percentBps }) => ({ projectId, percentBps })),
     lines: row.lines.map(line => line.kind === "PRODUCT"
       ? { projectId: line.projectId, kind: "PRODUCT" as const, productId: line.productId!, quantity: line.quantity.toNumber() }
@@ -80,7 +80,7 @@ export async function postLogisticsInTransaction(actorId: string, input: Logisti
     include: { allocations: { select: { projectId: true } } } });
   if (mode === "post" && current) failure("Рейс уже оплачен. Используйте исправление расхода", true);
   if (mode === "correct" && !current) failure("Рейс ещё не оплачен — сначала проведите расход", true);
-  const manifest = data.manifest ?? manifestOf(previous);
+  const manifest = { ...(data.manifest ?? manifestOf(previous)), ttnNotRequired: data.manifest?.ttnNotRequired ?? previous.ttnNotRequired };
   const replacement = data.manifest ? await validateTripManifest(tx, manifest, previous, actor) : null;
   const [projects, account, documents] = await Promise.all([
     tx.project.findMany({ where: { id: { in: manifest.shares.map(share => share.projectId) }, deletedAt: null },
@@ -96,7 +96,8 @@ export async function postLogisticsInTransaction(actorId: string, input: Logisti
       !new Prisma.Decimal(data.amount).eq(prepared.amount) || (data.currency === "BYN" && prepared.rate !== 1) ||
       prepared.paidAt.toISOString().slice(0, 10) !== manifest.date)
     failure("Касса или дата изменились — обновите рейс");
-  if (documents.length !== data.documentIds.length) failure("Для списания нужна сохранённая ТТН этого рейса с одной печатью");
+  if (documents.length !== data.documentIds.length || (!manifest.ttnNotRequired && !documents.length))
+    failure("Для списания нужна сохранённая ТТН этого рейса с одной печатью либо отметка «ТТН не требуется»");
   const split = allocateLogisticsMoney(data.amount, manifest.shares, new Prisma.Decimal(prepared.rate).toFixed(6));
 
   // Внешний writer всегда откатывает всю tx при любом последующем отказе.
@@ -110,7 +111,7 @@ export async function postLogisticsInTransaction(actorId: string, input: Logisti
     failure("Исправление оставит отрицательный остаток прежней кассы");
   const changed = await tx.logisticsTrip.updateMany({ where: { id: previous.id, revision: data.expectedRevision },
     data: { revision: { increment: 1 }, updatedById: actor.id,
-      ...(replacement ? { date: new Date(`${manifest.date}T00:00:00.000Z`), comment: manifest.comment } : {}) } });
+      ...(replacement ? { date: new Date(`${manifest.date}T00:00:00.000Z`), comment: manifest.comment, ttnNotRequired: manifest.ttnNotRequired } : {}) } });
   if (changed.count !== 1) failure("Рейс уже изменён. Откройте актуальную запись", true);
   if (replacement) await replaceTripManifestInTransaction(tx, previous.id, replacement, previous);
   const revision = previous.revision + 1, postingId = randomUUID();
@@ -121,7 +122,7 @@ export async function postLogisticsInTransaction(actorId: string, input: Logisti
     clientMutationId: data.clientMutationId, requestFingerprint: fingerprint, actorId: actor.id, actorNameSnapshot: actor.name,
     amount: split.amount, bynAmount: split.bynAmount, currency: data.currency, cashAccountId: account.id,
     cashAccountNameSnapshot: account.name, expenseArticleId: null,
-    rate: split.rate, rateDate: prepared.rateDate, paidAt: prepared.paidAt, manifestSnapshot: snapshot,
+    rate: split.rate, rateDate: prepared.rateDate, paidAt: prepared.paidAt, manifestSnapshot: snapshot, ttnNotRequired: manifest.ttnNotRequired,
   } });
   await tx.logisticsPostingDocument.createMany({ data: documents.map(document => ({ postingId, tripId: previous.id, documentId: document.id })) });
   for (const allocation of split.allocations) {

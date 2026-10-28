@@ -5,6 +5,7 @@ import { Plus, Trash2 } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { formatExactMoney } from "@/lib/format";
 import { createRequestId } from "@/lib/request-id";
@@ -32,7 +33,7 @@ export function LogisticsTripDialog(props: EditorProps & { onClose: () => void }
       <DialogContent className="sm:max-w-4xl" showCloseButton={!busy}>
         <DialogHeader>
           <DialogTitle>{props.trip ? "Рейс " + props.trip.id.slice(0, 8) : "Новая отгрузка"}</DialogTitle>
-          <DialogDescription>Один рейс для всех выбранных проектов. ТТН с одной печатью нужна для списания.</DialogDescription>
+          <DialogDescription>Один рейс для всех выбранных проектов. Для списания нужна ТТН или отметка «ТТН не требуется».</DialogDescription>
         </DialogHeader>
         <LogisticsTripForm {...props} onBusyChange={setBusy} />
       </DialogContent>
@@ -43,6 +44,7 @@ export function LogisticsTripDialog(props: EditorProps & { onClose: () => void }
 export function LogisticsTripForm({ trip, options, moneyOptions, projectId, onSaved, onReload, onBusyChange }: EditorProps & { onBusyChange: (busy: boolean) => void }) {
   const [tripId, setTripId] = useState(trip?.id ?? ""), [revision, setRevision] = useState(trip?.revision ?? 1);
   const [date, setDate] = useState(trip?.date ?? shipmentToday()), [comment, setComment] = useState(trip?.comment ?? "");
+  const [ttnNotRequired, setTtnNotRequired] = useState(trip?.ttnNotRequired ?? false);
   const [shares, setShares] = useState(trip?.shares.map(share => ({ projectId: share.projectId, percent: String(share.percentBps / 100) })) ?? (projectId ? [{ projectId, percent: "100" }] : []));
   const [lines, setLines] = useState<DraftLine[]>(trip?.lines.map(line => ({
     key: line.id, projectId: line.projectId, kind: line.kind, entityId: (line.kind === "PRODUCT" ? line.productId : line.materialId) ?? "", quantity: String(line.quantity),
@@ -67,13 +69,13 @@ export function LogisticsTripForm({ trip, options, moneyOptions, projectId, onSa
     return option ? option.number + " · " + option.title : old ? old.projectNumber + " · " + old.projectTitle : id;
   };
   const manifest = {
-    date, comment, shares: bpsShares,
+    date, comment, ttnNotRequired, shares: bpsShares,
     lines: lines.map((line): LogisticsShipmentLineInput => line.kind === "PRODUCT"
       ? { projectId: line.projectId, kind: "PRODUCT", productId: line.entityId, quantity: Number(line.quantity.replace(",", ".")) }
       : { projectId: line.projectId, kind: "MATERIAL", materialId: line.entityId, quantity: Number(line.quantity.replace(",", ".")) }),
   };
   const validation = logisticsTripCreateSchema.safeParse({ ...manifest, clientMutationId: "00000000-0000-4000-8000-000000000001" });
-  const canPost = validation.success && !!tripId && !!cash && !!normalizedMoney(amount) && documents.length > 0;
+  const canPost = validation.success && !!tripId && !!cash && !!normalizedMoney(amount) && (ttnNotRequired || documents.length > 0);
   const affectedIds = [...new Set([...shares.map(share => share.projectId), ...(current?.allocations.map(allocation => allocation.projectId) ?? [])])];
 
   function addProject(id: string) {
@@ -111,7 +113,7 @@ export function LogisticsTripForm({ trip, options, moneyOptions, projectId, onSa
       const clientMutationId = createRequestId();
       if (operation === "post" || operation === "correct") {
         const normalized = normalizedMoney(amount);
-        if (!cash || !normalized || !canPost) { setError("Укажите кассу, сумму, доли 100% и загрузите ТТН с печатью"); return; }
+        if (!cash || !normalized || !canPost) { setError("Укажите кассу, сумму, доли 100% и ТТН либо отметку «ТТН не требуется»"); return; }
         pending.current = { operation, input: { tripId, expectedRevision: revision, clientMutationId,
           amount: normalized, currency: cash.currency, cashAccountId: cash.id, documentIds: documents.map(document => document.id), manifest } };
       } else {
@@ -179,18 +181,23 @@ export function LogisticsTripForm({ trip, options, moneyOptions, projectId, onSa
           Сумма долей: {percentLabel(totalBps)}. {totalBps === 10000 ? "Распределено 100%." : "Нужно распределить ровно 100%."}
         </p>
         {!current && <Button type="button" variant="outline" disabled={disabled || !validation.success} onClick={() => void save(tripId ? "update" : "create")}>
-          {tripId ? "Сохранить состав рейса" : "Сохранить рейс и перейти к ТТН"}
+          {tripId ? "Сохранить состав рейса" : ttnNotRequired ? "Сохранить рейс" : "Сохранить рейс и перейти к ТТН"}
         </Button>}
       </div>
 
       <div className="space-y-3">
         <h3 className="font-semibold">ТТН</h3>
+        <label className="flex cursor-pointer items-center gap-3 text-sm">
+          <Checkbox checked={ttnNotRequired} disabled={disabled} onCheckedChange={setTtnNotRequired} />
+          ТТН не требуется
+        </label>
+        {ttnNotRequired && <p className="text-sm text-muted-foreground">Рейс можно провести без ТТН. При необходимости документ можно добавить позже.</p>}
         <LogisticsDocuments documents={documents} />
         {tripId ? <LogisticsDocumentUpload tripId={tripId} disabled={loading || uncertain}
           defaultStage={documents.length ? "SIGNED" : "ISSUED"} onBusyChange={value => { setUploadBusy(value); if (!value) onSaved(false); }}
           onUploaded={document => {
             setDocuments(previous => previous.some(item => item.id === document.id) ? previous : [...previous, document]);
-          }} /> : <p className="text-sm text-muted-foreground">Сначала сохраните рейс, затем добавьте ТТН с одной печатью.</p>}
+          }} /> : <p className="text-sm text-muted-foreground">{ttnNotRequired ? "Сначала сохраните рейс, затем укажите затраты. Загрузка ТТН необязательна." : "Сначала сохраните рейс, затем добавьте ТТН с одной печатью."}</p>}
         {current && <p className="text-sm text-muted-foreground">ТТН со второй печатью добавляется к этому рейсу без повторного списания.</p>}
       </div>
 
@@ -220,13 +227,13 @@ export function LogisticsTripForm({ trip, options, moneyOptions, projectId, onSa
         <Button type="button" disabled={disabled || !canPost} onClick={() => void save(current ? "correct" : "post")}>
           {loading ? "Сохранение…" : current ? "Исправить списание и состав рейса" : "Списать из кассы"}
         </Button>
-        {!documents.length && <p className="text-xs text-muted-foreground">Для списания нужна сохранённая ТТН с одной или двумя печатями.</p>}
+        {!documents.length && !ttnNotRequired && <p className="text-xs text-muted-foreground">Для списания нужна сохранённая ТТН с одной или двумя печатями либо отметка «ТТН не требуется».</p>}
       </div>
 
       {trip && trip.money.history.length > 0 && (
         <details className="space-y-2 text-sm">
           <summary className="cursor-pointer font-medium">История исправлений списания</summary>
-          {trip.money.history.map(posting => <p key={posting.id}>{posting.paidAt} · {formatExactMoney(posting.amount, posting.currency)} · {posting.cashAccountName} · {posting.createdByName}</p>)}
+          {trip.money.history.map(posting => <p key={posting.id}>{posting.paidAt} · {formatExactMoney(posting.amount, posting.currency)} · {posting.cashAccountName} · {posting.createdByName}{posting.ttnNotRequired ? " · ТТН не требуется" : ""}</p>)}
         </details>
       )}
       {error && <p role="alert" className="break-words text-sm text-destructive">{error}</p>}

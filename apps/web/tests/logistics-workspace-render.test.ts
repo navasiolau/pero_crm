@@ -18,7 +18,7 @@ const document = { id: "a1000000-0000-4000-8000-000000000002", tripId, source: "
   fileName: "ТТН-123.pdf", mimeType: "application/pdf", size: 50, stage: "ISSUED" as const,
   ttnNumber: "123", createdAt: "2026-10-10T09:00:00Z" };
 const tripBase = {
-  mode: "manage" as const, id: tripId, date: "2026-10-10", comment: "PRIVATE_COMMENT", revision: 2,
+  mode: "manage" as const, id: tripId, date: "2026-10-10", comment: "PRIVATE_COMMENT", revision: 2, ttnNotRequired: false,
   shares: [
     { id: "share-a", projectId: "project-a", projectNumber: "П-001", projectTitle: "PRIVATE_TITLE_A", percentBps: 4000 },
     { id: "share-b", projectId: "project-b", projectNumber: "П-002", projectTitle: "PRIVATE_TITLE_B", percentBps: 6000 },
@@ -32,7 +32,7 @@ const tripBase = {
 const managed: ManagedTrip = {
   ...tripBase,
   money: { current: {
-    id: "posting-1", tripId, tripRevision: 2, status: "ACTIVE", amount: "1000.00", currency: "BYN",
+    id: "posting-1", tripId, tripRevision: 2, status: "ACTIVE", amount: "1000.00", currency: "BYN", ttnNotRequired: false,
     cashAccountId: "cash-1", cashAccountName: "PRIVATE_CASH", rate: "1.000000", rateDate: null,
     bynAmount: "1000.00", paidAt: "2026-10-10", createdAt: "2026-10-10T09:00:00Z", createdByName: "PRIVATE_OPERATOR",
     documentIds: [document.id],
@@ -53,7 +53,7 @@ const moneyOptions: MoneyOptions = {
   cashAccounts: [{ id: "cash-1", name: "PRIVATE_CASH", currency: "BYN", balance: 5000 }],
 };
 const budget: ProjectBudget = { currency: "BYN", deliveryBudget: 500, tripSpent: 400, spent: 400, remaining: 100, unavailableReason: null };
-const documentTrip = { mode: "documents" as const, id: tripId, date: tripBase.date,
+const documentTrip = { mode: "documents" as const, id: tripId, date: tripBase.date, ttnNotRequired: false,
   projects: [{ id: "project-a", number: "П-001" }, { id: "project-b", number: "П-002" }], documents: [document] };
 const query = { query: "", page: 1, pageSize: 20, direction: "desc" as const };
 let actorRoles: Role[] = ["PROCUREMENT"], listReads = 0, moneyReads = 0, optionsReads = 0;
@@ -173,4 +173,20 @@ test("article-free logistics UI enables a valid trip without setup", () => {
   assert.ok(blocked);
   assert.match(blocked[1], /\bdisabled=/);
   assert.deepEqual(Object.keys(moneyOptions), ["cashAccounts"]);
+});
+
+test("галочка разрешает списание и исправление без ТТН и объясняет состояние рейса", () => {
+  const callbacks = { onSaved: () => {}, onReload: () => {}, onBusyChange: () => {} };
+  const waived = { ...managed, ttnNotRequired: true, documents: [] };
+  const html = renderToStaticMarkup(React.createElement(LogisticsTripForm, { trip: waived, options, moneyOptions, ...callbacks }));
+  const correction = /<button\b([^>]*)>Исправить списание и состав рейса<\/button>/.exec(html)!;
+  assert.ok(correction);
+  assert.doesNotMatch(correction[1], /\bdisabled=/);
+  assert.match(html, /Рейс можно провести без ТТН/);
+  const data = { mode: "manage" as const, rows: [{ ...waived, money: { current: null, history: [] } }], options, moneyOptions,
+    query, total: 1, budget: null, initialTrip: null };
+  const workspace = renderToStaticMarkup(React.createElement(LogisticsWorkspace, { data }));
+  assert.match(workspace, /ТТН не требуется/);
+  assert.match(workspace, /Ожидает списания/);
+  assert.doesNotMatch(workspace, /Нужна ТТН/);
 });

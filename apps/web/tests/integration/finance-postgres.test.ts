@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { verifyLogisticsTtnWaiverNative } from "../helpers/logistics-ttn-native";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
@@ -637,6 +638,13 @@ for (const currency of ["BYN", "USD"] as const) test(`warehouse/paid-receipt-cas
   await assert.rejects(stock.warehouseMove(tx, actor, { kind: "RETURN", productId: product.id, sourceMovementId: issued.movement.id, quantity: "1", clientMutationId: randomUUID() }), /Исходная выдача/);
   const finalMoney = await money(tx);
   for (const [index, before] of originalMoney.entries()) assert.deepEqual(finalMoney[index].filter(row => before.some(old => old.id === row.id)), before, "FOREIGN_STOCK_MONEY_UNCHANGED");
+}));
+
+test("logistics/ttn-waiver-real-constraints-history-and-rollback", async () => fixture.rollback(async (tx, rows) => {
+  const c = await cashContext(tx, rows, "1000"), actor = await rows.user("waiver-procurement", ["PROCUREMENT"]);
+  const project = await rows.project("waiver", { currency: "BYN" });
+  const product = await rows.product("waiver", project.id, { status: "PRODUCTION" });
+  assert.ok(await verifyLogisticsTtnWaiverNative(tx, { actorId: actor.id, projectId: project.id, productId: product.id, cashAccountId: c.account.id }));
 }));
 
 test("logistics/real-posting-correction-CAS-history-budget-and-SQL-rollback", async () => fixture.rollback(async (tx, rows) => {
