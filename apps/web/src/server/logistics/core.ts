@@ -38,6 +38,7 @@ function conflict(message = "Рейс уже изменён. Откройте а
 export const logisticsManifestInclude = { shares: true, lines: true } satisfies Prisma.LogisticsTripInclude;
 export type LogisticsManifestRecord = Prisma.LogisticsTripGetPayload<{ include: typeof logisticsManifestInclude }>;
 export type PreparedLogisticsManifest = LogisticsTripManifestInput & {
+  ttnNotRequired: boolean;
   snapshots: { projectId: string; kind: "PRODUCT" | "MATERIAL"; productId: string | null; materialId: string | null;
     nameSnapshot: string; numberSnapshot: string | null; unitSnapshot: string; quantity: number }[];
 };
@@ -70,7 +71,7 @@ export async function validateTripManifest(tx: Prisma.TransactionClient, data: L
       nameSnapshot: old?.nameSnapshot ?? material.name, numberSnapshot: old ? old.numberSnapshot : material.sku,
       unitSnapshot: old?.unitSnapshot ?? material.measurementUnit.name, quantity: line.quantity };
   });
-  return { ...data, snapshots };
+  return { ...data, ttnNotRequired: data.ttnNotRequired ?? previous?.ttnNotRequired ?? false, snapshots };
 }
 
 /** Вызывается №124 только внутри его серверной денежной транзакции и блокировки. */
@@ -88,7 +89,7 @@ export async function replaceTripManifestInTransaction(tx: Prisma.TransactionCli
 }
 
 function snapshot(row: LogisticsManifestRecord) {
-  return { date: row.date.toISOString().slice(0, 10), comment: row.comment, revision: row.revision,
+  return { date: row.date.toISOString().slice(0, 10), comment: row.comment, revision: row.revision, ttnNotRequired: row.ttnNotRequired,
     shares: row.shares.map(share => ({ projectId: share.projectId, percentBps: share.percentBps })),
     lines: row.lines.map(line => ({ projectId: line.projectId, kind: line.kind, productId: line.productId,
       materialId: line.materialId, nameSnapshot: line.nameSnapshot, numberSnapshot: line.numberSnapshot,
@@ -128,7 +129,7 @@ export async function createLogisticsTripCore(actorId: string | null | undefined
     const prepared = await validateTripManifest(tx, data, undefined, actor);
     const tripId = randomUUID();
     await tx.logisticsTrip.create({ data: { id: tripId, date: new Date(`${data.date}T00:00:00.000Z`),
-      comment: data.comment, createdById: actor.id, updatedById: actor.id } });
+      comment: data.comment, ttnNotRequired: prepared.ttnNotRequired, createdById: actor.id, updatedById: actor.id } });
     await replaceTripManifestInTransaction(tx, tripId, prepared);
     const row = await tx.logisticsTrip.findUniqueOrThrow({ where: { id: tripId }, include: logisticsManifestInclude });
     await auditMutation(tx, actor, data.clientMutationId, "create", fingerprint, row);
@@ -154,7 +155,8 @@ export async function updateLogisticsTripCore(actorId: string | null | undefined
     await logisticsTripWritePolicy.beforeManifestUpdate(tx, data.tripId);
     const prepared = await validateTripManifest(tx, data, previous, actor);
     const changed = await tx.logisticsTrip.updateMany({ where: { id: data.tripId, revision: data.expectedRevision, deletedAt: null },
-      data: { date: new Date(`${data.date}T00:00:00.000Z`), comment: data.comment, updatedById: actor.id, revision: { increment: 1 } } });
+      data: { date: new Date(`${data.date}T00:00:00.000Z`), comment: data.comment, ttnNotRequired: prepared.ttnNotRequired,
+        updatedById: actor.id, revision: { increment: 1 } } });
     if (changed.count !== 1) conflict();
     await replaceTripManifestInTransaction(tx, data.tripId, prepared, previous);
     const row = await tx.logisticsTrip.findUniqueOrThrow({ where: { id: data.tripId }, include: logisticsManifestInclude });

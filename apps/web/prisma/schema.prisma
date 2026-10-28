@@ -924,6 +924,7 @@ model LogisticsTrip {
   id String @id @default(uuid())
   date DateTime @db.Date
   comment String @default("")
+  ttnNotRequired Boolean @default(false)
   revision Int @default(1)
   deletedAt DateTime?
   deletedById String? // снимок автора удаления без каскада и переназначения
@@ -1047,6 +1048,7 @@ model LogisticsPosting {
   rateDate DateTime?
   paidAt DateTime
   manifestSnapshot Json
+  ttnNotRequired Boolean @default(false)
   createdAt DateTime @default(now())
   allocations LogisticsPostingAllocation[]
   documents LogisticsPostingDocument[]

@@ -20,7 +20,7 @@ export async function assertLogisticsPaymentContext(actor: DomainActor, data: Pa
       posting.currency !== data.currency || posting.cashAccountId !== prepared.account.id ||
       posting.expenseArticleId !== prepared.articleId || !posting.rate.eq(prepared.rate) ||
       posting.rateDate?.getTime() !== prepared.rateDate?.getTime() || posting.paidAt.getTime() !== prepared.paidAt.getTime() ||
-      !posting.documents.length || posting.documents.some(row => row.document.tripId !== posting.tripId ||
+      (!posting.ttnNotRequired && !posting.documents.length) || posting.documents.some(row => row.document.tripId !== posting.tripId ||
         row.document.state !== "READY" || !["ISSUED", "SIGNED"].includes(row.document.stage)))
     throw Error("Нет подтверждённой доли рейса с сохранённой ТТН для расхода");
   return allocation.id;

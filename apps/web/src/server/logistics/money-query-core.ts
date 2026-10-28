@@ -10,7 +10,7 @@ const postingReadInclude = { allocations: { include: { payment: { select: { id: 
   documents: { orderBy: { documentId: "asc" } } } satisfies Prisma.LogisticsPostingInclude;
 type PostingRecord = Prisma.LogisticsPostingGetPayload<{ include: typeof postingReadInclude }>;
 function postingView(row: PostingRecord): LogisticsPostingView {
-  return { id: row.id, tripId: row.tripId, tripRevision: row.tripRevision, status: row.status,
+  return { id: row.id, tripId: row.tripId, tripRevision: row.tripRevision, status: row.status, ttnNotRequired: row.ttnNotRequired,
     amount: row.amount.toFixed(2), currency: row.currency, cashAccountId: row.cashAccountId,
     cashAccountName: row.cashAccountNameSnapshot,
     rate: row.rate.toFixed(6), rateDate: row.rateDate?.toISOString().slice(0, 10) ?? null, bynAmount: row.bynAmount.toFixed(2),

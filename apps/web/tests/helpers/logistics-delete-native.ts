@@ -13,7 +13,7 @@ import { loadCashStatement } from "../../src/server/finance/cash-statement";
 import { activePaymentWhere } from "../../src/server/payments/active-records";
 import { nativeSnapshot } from "./native-acceptance-snapshot";
 
-type Context = { adminId: string; projectIds: [string, string]; productIds: [string, string]; cashAccountId: string; currency: "BYN" | "USD" };
+type Context = { adminId: string; projectIds: [string, string]; productIds: [string, string]; cashAccountId: string; currency: "BYN" | "USD"; ttnNotRequired?: boolean };
 
 /** Собственные сущности; caller обязан обеспечить guarded rollback и общий денежный lock. Storage здесь injected. */
 export async function verifyLogisticsTripDeletionNative(tx: Prisma.TransactionClient, context: Context) {
@@ -33,17 +33,18 @@ export async function verifyLogisticsTripDeletionNative(tx: Prisma.TransactionCl
     await assert.rejects(operation, pattern);
     assert.deepEqual(await nativeSnapshot(tx), before, "DELETION_FAILURE_CHANGED_DATA");
   };
-  const manifest = { date: "2026-10-29", comment: `QA198 ${context.currency}`, shares: context.projectIds.map((projectId, i) => ({ projectId, percentBps: i ? 6000 : 4000 })),
+  const manifest = { date: "2026-10-29", comment: `QA198 ${context.currency}`, ttnNotRequired: context.ttnNotRequired ?? false,
+    shares: context.projectIds.map((projectId, i) => ({ projectId, percentBps: i ? 6000 : 4000 })),
     lines: context.projectIds.map((projectId, i) => ({ projectId, kind: "PRODUCT" as const, productId: context.productIds[i], quantity: 1 })) };
   const trip = await createLogisticsTripCore(context.adminId, { ...manifest, clientMutationId: randomUUID() }, transaction);
   const other = await createLogisticsTripCore(context.adminId, { ...manifest, clientMutationId: randomUUID() }, transaction);
   const otherBefore = await tx.logisticsTrip.findUniqueOrThrow({ where: { id: other.tripId } });
   const documents = createLogisticsDocumentService({ transaction, storage: { mode: () => "local", put: async () => {}, open: async () => { throw Error("DELETED_STORAGE_READ"); } } });
-  const document = await documents.upload(context.adminId, { tripId: trip.tripId, clientMutationId: randomUUID(), stage: "ISSUED",
+  const document = context.ttnNotRequired ? null : await documents.upload(context.adminId, { tripId: trip.tripId, clientMutationId: randomUUID(), stage: "ISSUED",
     fileName: "QA198.pdf", mimeType: "application/pdf", ttnNumber: "QA198", bytes: Buffer.from("%PDF QA198") });
   const cashBefore = await readCashBalance(tx, context.cashAccountId), orgBefore = await readOrgBalance(tx, "1");
   const input = { tripId: trip.tripId, expectedRevision: trip.revision, clientMutationId: randomUUID(), amount: "10.00", currency: context.currency,
-    cashAccountId: context.cashAccountId, documentIds: [document.document.id], ...(context.currency === "USD" ? { rate: 3, rateDate: "2026-10-29" } : {}) };
+    cashAccountId: context.cashAccountId, documentIds: document ? [document.document.id] : [], ...(context.currency === "USD" ? { rate: 3, rateDate: "2026-10-29" } : {}) };
   const dependencies = { db: tx, transaction };
   const posted = await createLogisticsPostingCore(context.adminId, input, "post", dependencies);
   const corrected = await createLogisticsPostingCore(context.adminId, { ...input, amount: "12.00", expectedRevision: posted.revision, clientMutationId: randomUUID() }, "correct", dependencies);
@@ -90,7 +91,8 @@ export async function verifyLogisticsTripDeletionNative(tx: Prisma.TransactionCl
   assert.equal(retained.deletedAt?.toISOString(), deleted.deletedAt);
   assert.equal(await getLogisticsTripCore(context.adminId, trip.tripId, transaction), null);
   assert.equal((await listLogisticsTripsCore(context.adminId, { query: trip.tripId }, transaction)).total, 0);
-  assert.equal(await documents.read(context.adminId, document.document.id), null);
+  if (document) assert.equal(await documents.read(context.adminId, document.document.id), null);
+  await assert.rejects(documents.list(context.adminId, trip.tripId), /Рейс не найден/);
   for (const id of context.projectIds) {
     assert.equal((await getLogisticsProjectBudgetCore(context.adminId, id, tx)).spent, 0);
     assert.equal((await getProjectEconomics(id, tx))?.expensesTotal, 0);
@@ -120,7 +122,7 @@ export async function verifyLogisticsTripDeletionNative(tx: Prisma.TransactionCl
   assert.equal((await tx.logisticsDocument.findUniqueOrThrow({ where: { clientMutationId: racingId } })).state, "PENDING");
   await tx.$executeRawUnsafe("SET CONSTRAINTS ALL IMMEDIATE");
   await tx.$executeRawUnsafe("SET CONSTRAINTS ALL DEFERRED");
-  return { currency: context.currency, adminOnly: true, revokedDuringLock: true, correctedHistoryRetained: true, cashAndOrgRestored: true,
+  return { currency: context.currency, ttnNotRequired: context.ttnNotRequired ?? false, adminOnly: true, revokedDuringLock: true, correctedHistoryRetained: true, cashAndOrgRestored: true,
     economicsAndStatement: true, originalRowsRetained: true, otherTripPreserved: true, replay: true, auditFailureRollback: true,
     deletedReadsAndWritesDenied: true, uploadPhaseRace: true, unpostedNoMoneyChange: true };
 }

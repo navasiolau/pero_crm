@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { logisticsTripCreateSchema } from "./contracts";
+import { logisticsTripManifestSchema } from "./contracts";
 
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(value => {
   const parsed = new Date(`${value}T00:00:00.000Z`);
@@ -13,11 +13,9 @@ export const logisticsPostingSchema = z.object({
   clientMutationId: z.uuid().transform(value => value.toLowerCase()),
   amount, currency: z.enum(["BYN", "USD", "EUR", "RUB"]),
   cashAccountId: z.string().trim().min(1).max(128),
-  documentIds: z.array(z.uuid()).min(1, "Прикрепите ТТН с одной печатью").refine(ids => new Set(ids).size === ids.length, "ТТН не должна повторяться"),
+  documentIds: z.array(z.uuid()).refine(ids => new Set(ids).size === ids.length, "ТТН не должна повторяться"),
   rate: z.number().finite().positive().optional(), rateDate: date.optional(),
-  // Тот же валидатор состава, без второго идентификатора изменения в публичном контракте.
-  manifest: z.preprocess(value => value && typeof value === "object" ? { ...value, clientMutationId: "00000000-0000-4000-8000-000000000000" } : value,
-    logisticsTripCreateSchema).transform(manifest => ({ date: manifest.date, comment: manifest.comment, shares: manifest.shares, lines: manifest.lines })).optional(),
+  manifest: logisticsTripManifestSchema.optional(),
 }).strict();
 export type LogisticsPostingInput = z.input<typeof logisticsPostingSchema>;
 export type LogisticsPostingData = z.output<typeof logisticsPostingSchema>;
@@ -27,6 +25,7 @@ export type LogisticsAllocationView = {
 };
 export type LogisticsPostingView = {
   id: string; tripId: string; tripRevision: number; status: "ACTIVE" | "SUPERSEDED";
+  ttnNotRequired: boolean;
   amount: string; currency: string; cashAccountId: string; cashAccountName: string;
   rate: string; rateDate: string | null; bynAmount: string; paidAt: string; createdAt: string; createdByName: string;
   allocations: LogisticsAllocationView[]; documentIds: string[];

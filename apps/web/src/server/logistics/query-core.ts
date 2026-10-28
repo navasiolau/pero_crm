@@ -12,7 +12,7 @@ export const logisticsTripReadInclude = {
 } satisfies Prisma.LogisticsTripInclude;
 type TripReadRecord = Prisma.LogisticsTripGetPayload<{ include: typeof logisticsTripReadInclude }>;
 export function logisticsTripView(row: TripReadRecord): LogisticsTripView {
-  return { mode: "manage", id: row.id, date: row.date.toISOString().slice(0, 10), comment: row.comment, revision: row.revision,
+  return { mode: "manage", id: row.id, date: row.date.toISOString().slice(0, 10), comment: row.comment, revision: row.revision, ttnNotRequired: row.ttnNotRequired,
     shares: row.shares.map(share => ({ id: share.id, projectId: share.projectId, projectNumber: share.project.number,
       projectTitle: share.project.title, percentBps: share.percentBps })),
     lines: row.lines.map(line => ({ id: line.id, projectId: line.projectId, kind: line.kind, productId: line.productId,
@@ -20,13 +20,13 @@ export function logisticsTripView(row: TripReadRecord): LogisticsTripView {
       unitSnapshot: line.unitSnapshot, quantity: line.quantity.toNumber() })),
     documents: row.documents.map(logisticsDocumentView) };
 }
-const documentsSelect = { id: true, date: true, deletedAt: true,
+const documentsSelect = { id: true, date: true, deletedAt: true, ttnNotRequired: true,
   shares: { select: { project: { select: { id: true, number: true } } }, orderBy: { projectId: "asc" } },
   documents: { where: { state: "READY" }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
 } satisfies Prisma.LogisticsTripSelect;
 type DocumentsReadRecord = Prisma.LogisticsTripGetPayload<{ select: typeof documentsSelect }>;
 function documentsView(row: DocumentsReadRecord): LogisticsTripDocumentsView {
-  return { mode: "documents", id: row.id, date: row.date.toISOString().slice(0, 10),
+  return { mode: "documents", id: row.id, date: row.date.toISOString().slice(0, 10), ttnNotRequired: row.ttnNotRequired,
     projects: row.shares.map(share => share.project), documents: row.documents.map(logisticsDocumentView) };
 }
 

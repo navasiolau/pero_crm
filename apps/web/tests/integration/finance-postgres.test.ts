@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { verifyLogisticsTripDeletionNative } from "../helpers/logistics-delete-native";
+import { verifyLogisticsTtnWaiverNative } from "../helpers/logistics-ttn-native";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
@@ -644,11 +645,18 @@ test("logistics/soft-delete-real-cash-economics-history-roles-and-rollback", asy
   const actor = await rows.user("deletion-admin", ["ADMIN"]);
   const a = await rows.project("deletion-a", { currency: "BYN", delivery: "1000" }), b = await rows.project("deletion-b", { currency: "BYN", delivery: "1000" });
   const products = [await rows.product("deletion-a", a.id, { status: "PRODUCTION" }), await rows.product("deletion-b", b.id, { status: "PRODUCTION" })];
-  for (const currency of ["BYN", "USD"] as const) {
-    const account = await tx.cashAccount.create({ data: { name: rows.id(`deletion-${currency.toLowerCase()}`), currency } });
+  for (const { currency, ttnNotRequired } of [{ currency: "BYN", ttnNotRequired: false }, { currency: "USD", ttnNotRequired: false }, { currency: "BYN", ttnNotRequired: true }] as const) {
+    const account = await tx.cashAccount.create({ data: { name: rows.id(`deletion-${currency.toLowerCase()}${ttnNotRequired ? "-no-ttn" : ""}`), currency } });
     await tx.payment.create({ data: { cashAccountId: account.id, direction: "INCOME", currency, amount: "1000", bynAmount: currency === "BYN" ? "1000" : "3000", rate: currency === "BYN" ? 1 : 3 } });
-    assert.ok(await verifyLogisticsTripDeletionNative(tx, { adminId: actor.id, projectIds: [a.id, b.id], productIds: [products[0].id, products[1].id], cashAccountId: account.id, currency }));
+    assert.ok(await verifyLogisticsTripDeletionNative(tx, { adminId: actor.id, projectIds: [a.id, b.id], productIds: [products[0].id, products[1].id], cashAccountId: account.id, currency, ttnNotRequired }));
   }
+}));
+
+test("logistics/ttn-waiver-real-constraints-history-and-rollback", async () => fixture.rollback(async (tx, rows) => {
+  const c = await cashContext(tx, rows, "1000"), actor = await rows.user("waiver-procurement", ["PROCUREMENT"]);
+  const project = await rows.project("waiver", { currency: "BYN" });
+  const product = await rows.product("waiver", project.id, { status: "PRODUCTION" });
+  assert.ok(await verifyLogisticsTtnWaiverNative(tx, { actorId: actor.id, projectId: project.id, productId: product.id, cashAccountId: c.account.id }));
 }));
 
 test("logistics/real-posting-correction-CAS-history-budget-and-SQL-rollback", async () => fixture.rollback(async (tx, rows) => {
