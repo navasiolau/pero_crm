@@ -924,6 +924,7 @@ model LogisticsTrip {
   id String @id @default(uuid())
   date DateTime @db.Date
   comment String @default("")
+  ttnNotRequired Boolean @default(false)
   revision Int @default(1)
   createdById String
   createdBy User @relation("LogisticsTripCreator", fields: [createdById], references: [id], onDelete: Restrict)
@@ -1044,6 +1045,7 @@ model LogisticsPosting {
   rateDate DateTime?
   paidAt DateTime
   manifestSnapshot Json
+  ttnNotRequired Boolean @default(false)
   createdAt DateTime @default(now())
   allocations LogisticsPostingAllocation[]
   documents LogisticsPostingDocument[]
