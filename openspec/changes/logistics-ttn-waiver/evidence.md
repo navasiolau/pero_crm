@@ -1,6 +1,6 @@
 # Приёмка №197 — 29.10.2026
 
-База ветки: origin/staging 0045d3698cee2074e805abe56f817d2d6238d180. Коммит, CI и staging-приёмка пока не выполнены.
+База ветки: origin/staging 0045d3698cee2074e805abe56f817d2d6238d180. Функциональный коммит c9fb8d52; обычный merge afb4c7bc. После согласованного исправления CI №199 принят staging e9b8eb09cef6e1c81272a9dce0e07781dad8e7bf.
 
 ## Local
 
@@ -13,6 +13,15 @@
 - Реальный Next development, ephemeral local secret и signed existing ADMIN; DB-соединение приложения принудительно READ ONLY. Chromium1440×900,390×844,360×800: галочка включается/выключается, подсказка видна, диалог без горизонтального переполнения, page errors0. Все PNG лично просмотрены. Браузер не отправлял writes; полные хэши всех public tables совпали до/после. Это не парольный вход и не browser E2E списания.
 - Приватные browser receipt и PNG: `.playwright-mcp/logistics/browser.json`, `.playwright-mcp/logistics/screenshots/` в worktree logistics-197.
 
-## Staging / production
+## Staging — принят e9b8eb09
 
-NOT_RUN. Требуется явное разрешение коммита по AGENTS.md, обычная интеграция и фактическая приёмка staging. Production, миграция и конкретное удаление будут приняты отдельно после №198.
+- [CI339](https://github.com/navasiolau/pero_crm/actions/runs/40786733614): все7jobs SUCCESS, включая renderer, обе component groups, backend, PostgreSQL/HTTP и публикацию обоих образов. CI338 отказал до публикации на Docker29 runtime identity; причина и исправление — отдельный согласованный change ci-containerd-image-identity.
+- Actual staging: web/renderer revision e9b8eb09, healthy. Web OCI index sha256:4345ed68aa6123dd71614c71f8766a2d5d3c8b6277b829232a90517642580514, renderer index sha256:be9ea85e32e41d05a10f7fb72728bf1f790f0bcfcb8f98f966d069e2a19516a1 совпали с проверенными OCI CI. DB27b8f734.../started2026-09-23T11:42:14.649193151Z/том crm-staging_pgdata и W07 SHA27e3bcd727d9e83170c76a254806fde42590da76cea30c9e1441d873df680139 сохранены.
+- Реальный native на существующей staging БД: все сценарии helper №197 PASS с outer rollback и неизменными snapshots. Original storage injected. Wrapper держит прежний workflow.lock и проверяет точные образы/сеть/renderer/DB/W07. Первые попытки не приняты из-за штатного ApiToken.lastUsedAt; в окончательной проверке исключён только этот внешний счётчик, все остальные поля и число токенов входят в fingerprint. Остальные таблицы/каталог схемы совпали.
+- Реальный HTTPS browser с существующими активными ADMIN/DIRECTOR/PROCUREMENT/ACCOUNTANT, Basic auth и signed sessions:6сценариев PASS. ADMIN1440×900,390×844,360×800; остальные роли390×844. Галочка доступна только управляющим ролям; бухгалтер не получает создание. PNG лично просмотрены, page errors0, горизонтального overflow нет.
+- Browser harness пропускает только GET/HEAD и блокирует1POST /logistics на каждый context; записи через UI этим прогоном не подтверждаются. Денежные writes проверены native. До/после browser совпали fingerprints всех77таблиц с явно указанной проекцией только ApiToken.lastUsedAt.
+- Приватные receipts и PNG находятся в `.playwright-mcp/logistics/stage-native.receipt.private.json`, `staging-browser197.json`, `stage-pre197-browser.json`, `stage-post197-browser.json`, `staging-screenshots/` worktree logistics-197. Cookies и credentials в Git не включены.
+
+## Production
+
+NOT_RUN. Выпуск/миграция и конкретное удаление будут приняты отдельно после №198.
