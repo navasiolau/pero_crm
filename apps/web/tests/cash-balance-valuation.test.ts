@@ -149,7 +149,7 @@ test("public report fetches rates only after the consistent read-only snapshot a
     cashAccount:{findMany:async()=>{assert.ok(readOnly&&inTransaction);return accounts;}},
     payment:{findMany:async({where}:Prisma.PaymentFindManyArgs)=>{
      paymentReads++;assert.ok(readOnly&&inTransaction);assert.equal(where?.deletionId,null);
-     assert.deepEqual(where?.OR,[{logisticsAllocationId:null},{logisticsAllocation:{posting:{status:"ACTIVE"}}}]);
+     assert.deepEqual(where?.OR,[{logisticsAllocationId:null},{logisticsAllocation:{posting:{status:"ACTIVE",trip:{deletedAt:null}}}}]);
      return paymentsPresent?payments:[];
     }},
     payout:{findMany:async()=>{payoutReads++;assert.ok(readOnly&&inTransaction);return [];}},

@@ -21,3 +21,5 @@
 ## Интеграция с принятым staging e9b8eb09
 
 После успешной фактической приёмки №197/199 выполнен обычный merge принятого staging в feature/198. Конфликты в общих form/query/core/tests разрешены сохранением обеих функций: ttnNotRequired и deletedAt/canDelete. Объединённые целевые тесты17/17, typecheck/lint, native №197 и BYN/USD удаления, browser component PASS. Дополнительно включён native сценарий удаления оплаченного рейса с ttnNotRequired=true и без документов. Перед staging выполняется его отдельная проверка. Production не менялся.
+
+CI340/848b3b45 выявил одно прежнее DI-ожидание cash-balance-valuation: оно проверяло точную форму activePaymentWhere без нового trip.deletedAt=null. Ожидание обновлено с сохранением требования read-only consistent snapshot и ACTIVE; само денежное чтение не ослаблялось. Публикация при этом отказе не выполнялась.
