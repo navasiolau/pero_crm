@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { artifactIdentity, readWebArtifact, requireCi } from '../../web/tests/integration/runtime/target.mjs';
 import { pairedRelease, readRendererArtifact, rendererLabels, verifyRendererOci, verifyRendererSmoke, verifyWebRendererBinding } from './artifact.mjs';
 import smokeDiagnostics from './smoke.cjs';
+import { verifyRuntimeImageProjection } from '../../web/tests/integration/runtime/image-projection.mjs';
 
 const docker = args => execFileSync('docker', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 240_000 }).trim();
 let activePhase = 'command';
@@ -16,8 +17,7 @@ function context(env = process.env) {
   return { identity, directory, env };
 }
 export function verifyRuntimeProjection(image, record) {
-  requireCi(image.Id === record.configDigest && JSON.stringify(image.RootFS?.Layers) === JSON.stringify(record.diffIds) &&
-    image.Os === 'linux' && image.Architecture === 'amd64', 'kp-runtime-projection');
+  return verifyRuntimeImageProjection(image, record, 'kp-runtime-projection');
 }
 export function verifyOwnedSmokeContainer(container, identity, imageId) {
   requireCi(/^[a-f0-9]{64}$/.test(container.Id ?? '') && container.Name === `/pero-kp-${identity.runId}-${identity.attempt}-smoke` &&
@@ -116,11 +116,11 @@ async function testImage() {
     '--env', `PERO_KP_CI_REVISION=${identity.revision}`, '--entrypoint', 'node'];
   for (const [key, value] of Object.entries({ 'pero.ci.repository': identity.repository, 'pero.ci.run': identity.runId,
     'pero.ci.attempt': identity.attempt, 'pero.ci.service': 'kp-renderer-smoke' })) args.push('--label', `${key}=${value}`);
-  args.push(record.configDigest, 'ci/smoke.cjs');
+  args.push(image.Id, 'ci/smoke.cjs');
   phase('container-create');
   const id = docker(args); requireCi(/^[a-f0-9]{64}$/.test(id), 'kp-created-container-id');
   phase('owned-smoke');
-  const smoke = runOwnedSmoke({ id, identity, imageId: record.configDigest, command: docker,
+  const smoke = runOwnedSmoke({ id, identity, imageId: image.Id, command: docker,
     readLogs: args => { const result = spawnSync('docker', args, { timeout: 15_000, maxBuffer: 128 * 1024, stdio: ['ignore', 'pipe', 'pipe'] });
       if (result.error || result.status !== 0) throw Object.assign(result.error ?? new Error(), { status: result.status, stdout: result.stdout, stderr: result.stderr });
       return Buffer.concat([result.stdout ?? Buffer.alloc(0), result.stderr ?? Buffer.alloc(0)]); },
@@ -130,7 +130,7 @@ async function testImage() {
   writeFileSync(path.join(directory, 'smoke.json'), JSON.stringify(smoke), { flag: 'wx' });
   const complete = await readRendererArtifact(false); writeFileSync(path.join(directory, 'image.json'), JSON.stringify(complete), { flag: 'wx' });
   appendFileSync(env.GITHUB_OUTPUT, `oci-sha256=${complete.ociSha256}\nindex-digest=${complete.indexDigest}\n`);
-  console.log(JSON.stringify({ ciRuntime: 'kp-renderer-oci-tested', revision: identity.revision, imageId: complete.configDigest,
+  console.log(JSON.stringify({ ciRuntime: 'kp-renderer-oci-tested', revision: identity.revision, imageId: image.Id,
     indexDigest: complete.indexDigest, pages: smoke.pages, browser: smoke.runtime.browser, smokeSha256: complete.smokeSha256 }));
 }
 async function release() {

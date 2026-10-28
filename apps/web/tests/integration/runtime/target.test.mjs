@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { copyFileSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { compileFunction } from 'node:vm';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { artifactIdentity, assertCiPostgresTarget, assertCiRuntimeTarget, integrationFiles, receiveCiArtifact, typesDigest, verifyTypesArtifact } from './target.mjs';
+import { artifactIdentity, assertCiPostgresTarget, assertCiRuntimeTarget, integrationFiles, readWebArtifact, receiveCiArtifact, typesDigest, verifyTypesArtifact } from './target.mjs';
+import { verifyRuntimeImageProjection } from './image-projection.mjs';
 import { groupMembers, groupMembersWithRetry } from './cleanup.mjs';
 import { removeWebTemplateSmoke, verifyTemplateContainer, verifyWebTemplatePackage } from './kp-template-image.mjs';
 import templateSmoke from './kp-template-smoke.mjs';
@@ -183,6 +185,53 @@ test('cleanup keeps leader start, run nonce and purpose mandatory before returni
   const existingZombie = procRace(procStat(200), { initial: procStat(200, { state: 'Z' }) });
   assert.deepEqual(groupMembers(target, 'deps', owner, existingZombie.io), [100]);
   assert.ok(!existingZombie.calls.includes('/proc/200/environ'));
+});
+
+test('runtime projection requires exact config or manifest and ordered OCI layers', () => {
+  const record = { configDigest: 'sha256:' + '1'.repeat(64), manifestDigest: 'sha256:' + '2'.repeat(64),
+    diffIds: ['sha256:' + '3'.repeat(64), 'sha256:' + '4'.repeat(64)] };
+  const loaded = { Id: record.manifestDigest, Descriptor: { digest: record.manifestDigest, mediaType: 'application/vnd.oci.image.manifest.v1+json' },
+    RootFS: { Layers: record.diffIds }, Os: 'linux', Architecture: 'amd64' };
+  assert.equal(verifyRuntimeImageProjection(loaded, record), loaded.Id);
+  assert.equal(verifyRuntimeImageProjection({ ...loaded, Id: record.configDigest, Descriptor: undefined }, record), record.configDigest);
+  for (const changed of [
+    { RootFS: { Layers: [...record.diffIds].reverse() } },
+    { Descriptor: { ...loaded.Descriptor, platform: { os: 'linux', architecture: 'arm64' } } },
+    { Id: record.manifestDigest, Descriptor: undefined }, { Id: 'sha256:' + '5'.repeat(64) },
+  ]) assert.throws(() => verifyRuntimeImageProjection({ ...loaded, ...changed }, record), /runtime-image-projection/);
+});
+
+test('graph-only web proof verifies all OCI blobs before metadata and cannot skip final receipts', async () => {
+  const root = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'pero-ci-graph-'))), revision = 'a'.repeat(40);
+  const directory = path.join(root, `pero-web-169-1-${revision}`), layout = path.join(directory, 'oci');
+  mkdirSync(path.join(layout, 'blobs', 'sha256'), { recursive: true });
+  const env = { ...ci, GITHUB_SHA: revision, RUNNER_TEMP: root, PERO_CI_WEB_ARTIFACT_DIR: directory };
+  const blob = (value, mediaType, annotations) => {
+    const bytes = Buffer.isBuffer(value) ? value : Buffer.from(JSON.stringify(value));
+    const digest = 'sha256:' + createHash('sha256').update(bytes).digest('hex');
+    writeFileSync(path.join(layout, 'blobs', 'sha256', digest.slice(7)), bytes);
+    return { digest, size: bytes.length, mediaType, ...(annotations ? { annotations } : {}) };
+  };
+  const layer = blob(Buffer.from('owned synthetic layer'), 'application/vnd.oci.image.layer.v1.tar');
+  const config = blob({ os: 'linux', architecture: 'amd64', rootfs: { type: 'layers', diff_ids: [layer.digest] }, config: { Env: ['NODE_VERSION=22.20.0'],
+    Labels: { 'org.opencontainers.image.revision': revision, 'pero.ci.repository': 'navasiolau/pero_crm', 'pero.ci.run': '169', 'pero.ci.attempt': '1', 'pero.ci.service': 'web' } } }, 'application/vnd.oci.image.config.v1+json');
+  const manifest = blob({ config, layers: [layer] }, 'application/vnd.oci.image.manifest.v1+json');
+  const attestation = blob({ config: blob({}, 'application/vnd.oci.image.config.v1+json'), layers: [blob({}, 'application/vnd.in-toto+json')] },
+    'application/vnd.oci.image.manifest.v1+json', { 'vnd.docker.reference.type': 'attestation-manifest', 'vnd.docker.reference.digest': manifest.digest });
+  const index = blob({ manifests: [manifest, attestation] }, 'application/vnd.oci.image.index.v1+json');
+  writeFileSync(path.join(layout, 'index.json'), JSON.stringify({ manifests: [index] }));
+  writeFileSync(path.join(layout, 'oci-layout'), '{"imageLayoutVersion":"1.0.0"}'); writeFileSync(path.join(directory, 'web.oci.tar'), 'synthetic archive');
+  try {
+    const graph = await readWebArtifact(false, env, 'web', true);
+    assert.equal(graph.configDigest, config.digest); assert.equal(graph.manifestDigest, manifest.digest); assert.equal(graph.buildId, undefined);
+    await assert.rejects(readWebArtifact(false, env), /ENOENT/);
+    for (const [receipt, kind] of [[true, 'web'], [false, 'bot']]) await assert.rejects(readWebArtifact(receipt, env, kind, true), /artifact-graph-only/);
+    mkdirSync(path.join(directory, 'metadata', 'server'), { recursive: true });
+    writeFileSync(path.join(directory, 'metadata', 'BUILD_ID'), 'verified-build'); writeFileSync(path.join(directory, 'metadata', 'server', 'server-reference-manifest.json'), '{}');
+    const full = await readWebArtifact(false, env); assert.equal(full.buildId, 'verified-build'); assert.equal(full.configDigest, graph.configDigest);
+    writeFileSync(path.join(layout, 'blobs', 'sha256', layer.digest.slice(7)), Buffer.alloc(layer.size));
+    await assert.rejects(readWebArtifact(false, env, 'web', true), /oci-blob/);
+  } finally { assert.equal(path.dirname(root), realpathSync(os.tmpdir())); rmSync(root, { recursive: true }); }
 });
 
 test('CI guard accepts only the explicit ephemeral run', () => {

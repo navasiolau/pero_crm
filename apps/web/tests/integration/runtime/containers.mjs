@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { lstatSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { MINIO_COMMIT, MINIO_GO_IMAGE, MINIO_RELEASE, MINIO_SOURCE_SHA256, POSTGRES_IMAGE, REPOSITORY, requireCi } from './target.mjs';
 import { removeWebTemplateSmoke } from './kp-template-image.mjs';
+import { verifyRuntimeImageProjection } from './image-projection.mjs';
 
 /** @typedef {import('./target.mjs').CiJob} CiJob */
 /** @param {string[]} args @param {number} [timeout] */
@@ -126,11 +127,11 @@ export function removeMetadata(target) {
 }
 
 /** Никакие процессы образа не запускаются до полного OCI proof. */
-export function extractWebMetadata(target, configDigest) {
-  requireCi(/^sha256:[a-f0-9]{64}$/.test(configDigest ?? ''), 'runtime-bake-config');
-  process.env.PERO_CI_WEB_IMAGE_ID = configDigest;
+export function extractWebMetadata(target, record) {
+  const loaded = JSON.parse(docker(['image', 'inspect', target.webImage]))[0];
+  process.env.PERO_CI_WEB_IMAGE_ID = verifyRuntimeImageProjection(loaded, record, 'metadata-oci-projection');
   const image = inspectWebImage(target), name = `${target.webName}-metadata`;
-  requireCi(image.Id === configDigest && !docker(['ps', '-aq', '--filter', `name=^/${name}$`]), 'metadata-fresh-image');
+  requireCi(image.Id === loaded.Id && !docker(['ps', '-aq', '--filter', `name=^/${name}$`]), 'metadata-fresh-image');
   const directory = `${process.env.PERO_CI_WEB_ARTIFACT_DIR}/metadata`;
   mkdirSync(directory); mkdirSync(`${directory}/server`);
   const args = ['create', '--name', name, '--network', 'none', '--read-only', '--entrypoint', 'node'];
@@ -184,7 +185,7 @@ export function proveImageMigrations(target) {
   const fresh = query(migrationDatabase, "SELECT json_build_object('database',current_database(),'role',current_user,'tables',(SELECT count(*) FROM pg_tables WHERE schemaname='public'))");
   requireCi(fresh.database === migrationDatabase && fresh.role === 'ci_runner' && fresh.tables === 0, 'image-migration-empty');
   const record = JSON.parse(readFileSync(`${process.env.PERO_CI_WEB_ARTIFACT_DIR}/image.json`, 'utf8')), image = inspectWebImage(target);
-  requireCi(image.Id === record.configDigest && JSON.stringify(image.RootFS.Layers) === JSON.stringify(record.diffIds), 'migration-oci-projection');
+  verifyRuntimeImageProjection(image, record, 'migration-oci-projection');
   const args = ['create', '--name', `${target.webName}-migration`, '--network', target.network, '--env', `DATABASE_URL=${imageMigrationUrl(target)}`];
   for (const [key, value] of Object.entries(labels(target, 'web-migration'))) args.push('--label', `${key}=${value}`);
   args.push(image.Id, ...migrationCommand);
@@ -224,7 +225,7 @@ export function inspectWeb(target, id, fault = false) {
   requireCi(/^[a-f0-9]{64}$/.test(id), 'web-container-id');
   const container = JSON.parse(docker(['inspect', '--type', 'container', id]))[0];
   requireCi(container.Id === id && container.Image === inspectWebImage(target).Id &&
-    container.Config.Image === target.webImage && container.Name === `/${fault ? target.faultName : target.webName}`, 'web-container-image');
+    container.Config.Image === container.Image && container.Name === `/${fault ? target.faultName : target.webName}`, 'web-container-image');
   for (const [key, value] of Object.entries(labels(target, fault ? 'web-fault' : 'web'))) {
     requireCi(container.Config.Labels?.[key] === value, `web-container-${key}`);
   }
@@ -264,12 +265,12 @@ export function startWeb(target, fault = false) {
   }
   const receipt = JSON.parse(readFileSync(`${process.env.PERO_CI_WEB_ARTIFACT_DIR}/image.json`, 'utf8'));
   const image = inspectWebImage(target);
-  requireCi(image.Id === receipt.configDigest && JSON.stringify(image.RootFS.Layers) === JSON.stringify(receipt.diffIds), 'web-oci-projection');
+  verifyRuntimeImageProjection(image, receipt, 'web-oci-projection');
   const args = ['run', '-d', '--rm', '--name', name, '--network', target.network,
     '--publish', `127.0.0.1:${fault ? '3101' : '3100'}:3000`, '--tmpfs', '/tmp:rw,nosuid,size=128m'];
   for (const [key, value] of Object.entries(labels(target, fault ? 'web-fault' : 'web'))) args.push('--label', `${key}=${value}`);
   for (const [key, value] of Object.entries(webEnvironment(target, fault))) args.push('--env', `${key}=${value}`);
-  args.push(target.webImage);
+  args.push(image.Id);
   if (fault) args.push('node', 'apps/web/server.js');
   const id = docker(args); inspectWeb(target, id, fault);
   requireCi(docker(['exec', id, 'node', '--version']) === `v${receipt.runtimeNode}`, 'web-node-version');

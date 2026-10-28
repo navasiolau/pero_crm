@@ -85,9 +85,10 @@ async function fileDigest(file) {
 }
 
 /** Полный OCI-граф проверяется до запуска/публикации; web остаётся прежним default.
- * @param {boolean} [receipt] @param {NodeJS.ProcessEnv} [env] @param {'web'|'bot'} [kind] */
-export async function readWebArtifact(receipt = true, env = process.env, kind = 'web') {
+ * @param {boolean} [receipt] @param {NodeJS.ProcessEnv} [env] @param {'web'|'bot'} [kind] @param {boolean} [graphOnly] */
+export async function readWebArtifact(receipt = true, env = process.env, kind = 'web', graphOnly = false) {
   requireCi(kind === 'web' || kind === 'bot', 'artifact-kind');
+  requireCi(!graphOnly || (kind === 'web' && !receipt), 'artifact-graph-only');
   requireCi(env.CI === 'true' && env.GITHUB_ACTIONS === 'true' && env.RUNNER_OS === 'Linux' &&
     env.RUNNER_ENVIRONMENT === 'github-hosted' && env.GITHUB_REPOSITORY === REPOSITORY, 'artifact-owner');
   requireCi(/^[a-f0-9]{40}$/.test(env.GITHUB_SHA ?? '') && /^[1-9]\d*$/.test(env.GITHUB_RUN_ID ?? '') &&
@@ -137,6 +138,7 @@ export async function readWebArtifact(receipt = true, env = process.env, kind = 
     manifestDigest: image.descriptor.digest, configDigest: image.manifest.config.digest,
     diffIds: image.config.rootfs.diff_ids, layerDigests: image.manifest.layers.map(layer => layer.digest),
     attestations, ociSha256: await fileDigest(path.join(directory, `${kind}.oci.tar`)) };
+  if (graphOnly) return { runId, attempt, revision, ...imageRecord };
   let record;
   if (kind === 'web') {
     const buildId = readFileSync(path.join(directory, 'metadata', 'BUILD_ID'), 'utf8').trim();
