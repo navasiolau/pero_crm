@@ -28,6 +28,13 @@ test('OCI verification binds every blob, provenance subject, source/font pins an
   try {
     const record = await ci.verifyRendererOci(directory, identity);
     verifyRuntimeProjection({ Id: config.digest, RootFS: { Layers: [layer.digest] }, Os: 'linux', Architecture: 'amd64' }, record);
+    verifyRuntimeProjection({ Id: manifest.digest, Descriptor: manifest, RootFS: { Layers: [layer.digest] }, Os: 'linux', Architecture: 'amd64' }, record);
+    const loaded = { Id: manifest.digest, Descriptor: manifest, RootFS: { Layers: [layer.digest] }, Os: 'linux', Architecture: 'amd64' };
+    for (const changed of [
+      { Id: index.digest }, { Id: config.digest, Descriptor: { ...manifest, digest: index.digest } },
+      { Descriptor: { ...manifest, digest: index.digest } }, { Descriptor: { ...manifest, mediaType: 'application/vnd.oci.image.index.v1+json' } },
+      { RootFS: { Layers: [] } }, { RootFS: { Layers: [config.digest] } }, { Architecture: 'arm64' }, { Os: 'windows' },
+    ]) assert.throws(() => verifyRuntimeProjection({ ...loaded, ...changed }, record), /runtime-projection/);
     assert.throws(() => verifyRuntimeProjection({ Id: 'sha256:' + '0'.repeat(64) }, record), /runtime-projection/);
     await assert.rejects(ci.verifyRendererOci(directory, { ...identity, revision: 'c'.repeat(40) }), /label/);
     const file = path.join(layout, 'blobs/sha256', layer.digest.slice(7)), original = readFileSync(file); writeFileSync(file, Buffer.alloc(original.length));
