@@ -14,6 +14,9 @@
 - Общая проверка применяется к renderer smoke, metadata extraction, image migrations, web/fault и template smoke; запуск идёт по проверенному actual image.Id. В image.json configDigest остаётся digest OCI-конфигурации. Labels/provenance/bounds/owner/cleanup guards сохраняются.
 - Docker daemon/рабочие сервисы/БД не менялись. Реальный Linux Docker runtime нового кандидата подтверждается только следующим CI; локальные synthetic tests не выдаются за него.
 
-## Pending
+## Staging — принят e9b8eb09
 
-Явное разрешение коммита, ordinary merge в staging, новый CI и фактическая staging-приёмка197/199 — NOT_RUN.
+- После явного разрешения владельца: функциональный3550a28c, обычный merge e9b8eb09cef6e1c81272a9dce0e07781dad8e7bf.
+- [CI339](https://github.com/navasiolau/pero_crm/actions/runs/40786733614) —7/7 jobs SUCCESS. Linux Docker29 подтвердил renderer projection и smoke; web metadata, package smoke,86/86 image migrations, обычный/fault HTTP runtime и полный cleanup прошли. PostgreSQL81 и HTTP32 PASS; отдельные runtime guards13 PASS.
+- Реальный staging автоматически развернул ту же ревизию: web OCI index4345ed68aa6123dd71614c71f8766a2d5d3c8b6277b829232a90517642580514, renderer indexbe9ea85e32e41d05a10f7fb72728bf1f790f0bcfcb8f98f966d069e2a19516a1. Оба healthy, DB ID/startedAt/том и внешний W07 сохранены. Actual native и browser приёмка №197 на этом SHA пройдены; её подробности в logistics-ttn-waiver/evidence.md.
+- Main и production не изменялись. Приёмка относится к указанному SHA; последующие code changes требуют проверки затронутого поведения.
