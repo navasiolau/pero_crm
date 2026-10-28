@@ -58,8 +58,8 @@ export async function createLogisticsPostingCore(actorId: string | null | undefi
   const fingerprint = logisticsPostingFingerprint(actor.id, mode, data);
   const receipt = await readReceipt(actor.id, fingerprint, data, dependencies.db);
   if (receipt) return receipt;
-  const trip = await dependencies.db.logisticsTrip.findUnique({ where: { id: data.tripId }, select: { date: true } });
-  if (!trip) failure("Рейс не найден");
+  const trip = await dependencies.db.logisticsTrip.findUnique({ where: { id: data.tripId }, select: { date: true, deletedAt: true } });
+  if (!trip || trip.deletedAt) failure("Рейс не найден");
   const date = data.manifest?.date ?? trip.date.toISOString().slice(0, 10);
   const prepared = await prepareLogisticsPayment(data, date, dependencies.db, dependencies.getRate);
   return dependencies.transaction(tx => postLogisticsInTransaction(actor.id, data, mode, prepared, tx));
@@ -74,7 +74,7 @@ export async function postLogisticsInTransaction(actorId: string, input: Logisti
   const receipt = await readReceipt(actor.id, fingerprint, data, tx);
   if (receipt) return receipt;
   const previous = await tx.logisticsTrip.findUnique({ where: { id: data.tripId }, include: logisticsManifestInclude });
-  if (!previous) failure("Рейс не найден");
+  if (!previous || previous.deletedAt) failure("Рейс не найден");
   if (previous.revision !== data.expectedRevision) failure("Рейс уже изменён. Откройте актуальную запись", true);
   const current = await tx.logisticsPosting.findFirst({ where: { tripId: data.tripId, status: "ACTIVE" },
     include: { allocations: { select: { projectId: true } } } });
@@ -108,7 +108,7 @@ export async function postLogisticsInTransaction(actorId: string, input: Logisti
   if (org.lt(0)) failure("Недостаточно средств на балансе организации");
   if (current && current.cashAccountId !== account.id && (await readCashBalance(tx, current.cashAccountId)).lt(0))
     failure("Исправление оставит отрицательный остаток прежней кассы");
-  const changed = await tx.logisticsTrip.updateMany({ where: { id: previous.id, revision: data.expectedRevision },
+  const changed = await tx.logisticsTrip.updateMany({ where: { id: previous.id, revision: data.expectedRevision, deletedAt: null },
     data: { revision: { increment: 1 }, updatedById: actor.id,
       ...(replacement ? { date: new Date(`${manifest.date}T00:00:00.000Z`), comment: manifest.comment } : {}) } });
   if (changed.count !== 1) failure("Рейс уже изменён. Откройте актуальную запись", true);

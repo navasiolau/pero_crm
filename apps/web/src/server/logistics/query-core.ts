@@ -1,5 +1,5 @@
 import type { Prisma } from "@prisma/client";
-import { canManageLogistics } from "@/lib/logistics-access";
+import { canDeleteLogisticsTrip, canManageLogistics } from "@/lib/logistics-access";
 import { productDraftVisibilityWhere } from "@/server/access/visibility";
 import { logisticsTripListSchema, type LogisticsTripDocumentsView, type LogisticsTripView } from "./contracts";
 import { requireLogisticsActor, type LogisticsTransaction } from "./core";
@@ -20,7 +20,7 @@ export function logisticsTripView(row: TripReadRecord): LogisticsTripView {
       unitSnapshot: line.unitSnapshot, quantity: line.quantity.toNumber() })),
     documents: row.documents.map(logisticsDocumentView) };
 }
-const documentsSelect = { id: true, date: true,
+const documentsSelect = { id: true, date: true, deletedAt: true,
   shares: { select: { project: { select: { id: true, number: true } } }, orderBy: { projectId: "asc" } },
   documents: { where: { state: "READY" }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
 } satisfies Prisma.LogisticsTripSelect;
@@ -35,10 +35,10 @@ export async function getLogisticsTripCore(actorId: string | null | undefined, i
     const actor = await requireLogisticsActor(actorId, tx, "documents");
     if (canManageLogistics(actor.roles)) {
       const row = await tx.logisticsTrip.findUnique({ where: { id }, include: logisticsTripReadInclude });
-      return row ? logisticsTripView(row) : null;
+      return row && !row.deletedAt ? logisticsTripView(row) : null;
     }
     const row = await tx.logisticsTrip.findUnique({ where: { id }, select: documentsSelect });
-    return row ? documentsView(row) : null;
+    return row && !row.deletedAt ? documentsView(row) : null;
   });
 }
 
@@ -58,6 +58,7 @@ export async function listLogisticsTripsCore(actorId: string | null | undefined,
       { lines: { some: { nameSnapshot: { contains: query.query, mode: "insensitive" } } } },
       { shares: { some: { project: { title: { contains: query.query, mode: "insensitive" } } } } });
     const where: Prisma.LogisticsTripWhereInput = {
+      deletedAt: null,
       ...(query.query ? { OR: search } : {}),
       ...(query.projectId ? { shares: { some: { projectId: query.projectId } } } : {}),
       ...((query.dateFrom || query.dateTo) ? { date: {
@@ -68,7 +69,7 @@ export async function listLogisticsTripsCore(actorId: string | null | undefined,
     const total = await tx.logisticsTrip.count({ where });
     const page = Math.min(query.page, Math.max(1, Math.ceil(total / query.pageSize)));
     const paging = { where, orderBy: [{ date: query.direction }, { id: "asc" as const }], take: query.pageSize, skip: (page - 1) * query.pageSize };
-    if (manage) return { mode: "manage" as const,
+    if (manage) return { mode: "manage" as const, canDelete: canDeleteLogisticsTrip(actor.roles),
       rows: (await tx.logisticsTrip.findMany({ ...paging, include: logisticsTripReadInclude })).map(logisticsTripView), total, query: { ...query, page } };
     return { mode: "documents" as const,
       rows: (await tx.logisticsTrip.findMany({ ...paging, select: documentsSelect })).map(documentsView), total, query: { ...query, page } };

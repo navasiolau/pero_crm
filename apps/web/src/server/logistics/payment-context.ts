@@ -10,10 +10,10 @@ export async function assertLogisticsPaymentContext(actor: DomainActor, data: Pa
   await requireLogisticsActor(actor.id, tx);
   const allocation = await tx.logisticsPostingAllocation.findUnique({ where: { id: allocationId }, include: {
     payment: { select: { id: true } },
-    posting: { include: { documents: { include: { document: { select: { tripId: true, state: true, stage: true } } } } } },
+    posting: { include: { trip: { select: { deletedAt: true } }, documents: { include: { document: { select: { tripId: true, state: true, stage: true } } } } } },
   } });
   const posting = allocation?.posting;
-  if (!allocation || !posting || posting.status !== "ACTIVE" || posting.actorId !== actor.id || allocation.payment ||
+  if (!allocation || !posting || posting.trip.deletedAt || posting.status !== "ACTIVE" || posting.actorId !== actor.id || allocation.payment ||
       data.direction !== "EXPENSE" || data.reportDocumentId || data.reportDocumentIds !== undefined || data.clientMutationId || !prepared.project ||
       allocation.projectId !== prepared.project.id || allocation.amount.lte(0) ||
       !allocation.amount.eq(prepared.amount) || !allocation.bynAmount.eq(prepared.bynAmount) ||
