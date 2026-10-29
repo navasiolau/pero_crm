@@ -15,6 +15,7 @@
 2. Create нормализует отсутствие поля в false; update и optional manifest коррекции сохраняют отсутствие до разрешения по текущему рейсу под lock. Включить значение в snapshots и fingerprint.
 3. documentIds допускает пустой массив; решение о допустимости принимает сервер по сохранённому/атомарно обновляемому manifest. Каждый переданный ID всё равно проверяется. Внутренний Payment проверяет снимок Posting, PostgreSQL проверяет тот же снимок.
 4. Сохранить общий денежный lock, CAS ревизии и текущие receipts. Загрузка документа не меняет денежную ревизию.
+5. Отпечатки сохраняют прежний порядок нормализованных полей: clientMutationId первым, shares последним для create/update; date/comment/shares/lines для денежного manifest. Create false эквивалентен прежнему отсутствию флага, optional update/correct различает пропуск и явный false. Старые receipt rows не переписываются.
 
 ## Risks / Trade-offs
 

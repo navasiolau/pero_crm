@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { createLogisticsTripCore, updateLogisticsTripCore, type LogisticsTransaction } from "../../src/server/logistics/core";
 import { createLogisticsPostingCore } from "../../src/server/logistics/posting-core";
@@ -21,7 +21,11 @@ export async function verifyLogisticsTtnWaiverNative(tx: Prisma.TransactionClien
   const dependencies = { db: tx, transaction };
   const manifest = { date: "2026-10-29", comment: "QA197", shares: [{ projectId: context.projectId, percentBps: 10000 }],
     lines: [{ projectId: context.projectId, kind: "PRODUCT" as const, productId: context.productId, quantity: 1 }] };
-  let trip = await createLogisticsTripCore(context.actorId, { ...manifest, clientMutationId: randomUUID() }, transaction);
+  const creation = { ...manifest, clientMutationId: randomUUID() };
+  let trip = await createLogisticsTripCore(context.actorId, creation, transaction);
+  const legacyCreation = { clientMutationId: creation.clientMutationId, date: manifest.date, comment: manifest.comment, lines: manifest.lines, shares: manifest.shares };
+  assert.equal((await tx.logisticsMutation.findUniqueOrThrow({ where: { clientMutationId: creation.clientMutationId } })).requestFingerprint,
+    createHash("sha256").update(JSON.stringify({ actorId: context.actorId, operation: "create", ...legacyCreation })).digest("hex"), "LEGACY_CREATE_FINGERPRINT_PRESERVED");
   const input = () => ({ tripId: trip.tripId, expectedRevision: trip.revision, clientMutationId: randomUUID(),
     amount: "10.00", currency: "BYN", cashAccountId: context.cashAccountId, documentIds: [] as string[] });
   const rejected = async (operation: () => Promise<unknown>, pattern: RegExp) => {
@@ -32,8 +36,12 @@ export async function verifyLogisticsTtnWaiverNative(tx: Prisma.TransactionClien
   await rejected(() => createLogisticsPostingCore(context.actorId, input(), "post", dependencies), /ТТН/);
   trip = await updateLogisticsTripCore(context.actorId, { ...manifest, tripId: trip.tripId, expectedRevision: trip.revision,
     clientMutationId: randomUUID(), ttnNotRequired: true }, transaction);
-  trip = await updateLogisticsTripCore(context.actorId, { ...manifest, tripId: trip.tripId, expectedRevision: trip.revision,
-    clientMutationId: randomUUID() }, transaction);
+  const omittedUpdate = { ...manifest, tripId: trip.tripId, expectedRevision: trip.revision, clientMutationId: randomUUID() };
+  trip = await updateLogisticsTripCore(context.actorId, omittedUpdate, transaction);
+  const legacyUpdate = { clientMutationId: omittedUpdate.clientMutationId, date: manifest.date, comment: manifest.comment,
+    lines: manifest.lines, tripId: omittedUpdate.tripId, expectedRevision: omittedUpdate.expectedRevision, shares: manifest.shares };
+  assert.equal((await tx.logisticsMutation.findUniqueOrThrow({ where: { clientMutationId: omittedUpdate.clientMutationId } })).requestFingerprint,
+    createHash("sha256").update(JSON.stringify({ actorId: context.actorId, operation: "update", ...legacyUpdate })).digest("hex"), "LEGACY_UPDATE_FINGERPRINT_PRESERVED");
   const view = await getLogisticsTripCore(context.actorId, trip.tripId, transaction);
   assert.equal(view?.ttnNotRequired, true);
   const cashBefore = await readCashBalance(tx, context.cashAccountId), orgBefore = await readOrgBalance(tx, "1");
@@ -75,5 +83,5 @@ export async function verifyLogisticsTtnWaiverNative(tx: Prisma.TransactionClien
     fileName: "QA197.pdf", mimeType: "application/pdf", bytes: Buffer.from("%PDF QA197") });
   assert.equal((await readCashBalance(tx, context.cashAccountId)).toFixed(2), beforeLate, "LATE_TTN_NO_SECOND_EXPENSE");
   return { missingTtnDenied: true, savedWaiver: true, postingAndCorrection: true, replay: true, badDocumentDenied: true,
-    immutableHistory: true, postgresTtnConstraint: true, lateDocumentNoExpense: true, storage: "injected" };
+    immutableHistory: true, postgresTtnConstraint: true, lateDocumentNoExpense: true, legacyMutationFingerprints: true, storage: "injected" };
 }

@@ -21,7 +21,7 @@ const manifestShape = {
   shares: z.array(z.object({ projectId: entityId, percentBps: z.number().int().min(1).max(10000).optional() }).strict()).min(1),
   lines: z.array(logisticsShipmentLineSchema).min(1, "Добавьте состав отгрузки"),
 };
-const tripShape = { ...manifestShape, clientMutationId: mutationId };
+const tripShape = { clientMutationId: mutationId, ...manifestShape };
 
 function validateManifest(data: { shares: { projectId: string; percentBps?: number }[]; lines: LogisticsShipmentLineInput[] }, ctx: z.RefinementCtx) {
   const projects = new Set(data.shares.map(share => share.projectId));

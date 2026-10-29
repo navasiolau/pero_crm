@@ -23,9 +23,10 @@ function failure(message: string, conflict = false): never {
     conflict ? "persist" : "validation", message, conflict ? "conflict" : "validation");
 }
 export function logisticsPostingFingerprint(actorId: string, mode: PostingMode, data: LogisticsPostingData) {
-  const manifest = data.manifest ? { ...data.manifest,
+  const manifest = data.manifest ? { date: data.manifest.date, comment: data.manifest.comment,
     shares: [...data.manifest.shares].sort((a, b) => a.projectId.localeCompare(b.projectId)),
-    lines: [...data.manifest.lines].sort((a, b) => shipmentLineKey(a).localeCompare(shipmentLineKey(b))) } : null;
+    lines: [...data.manifest.lines].sort((a, b) => shipmentLineKey(a).localeCompare(shipmentLineKey(b))),
+    ...(data.manifest.ttnNotRequired !== undefined ? { ttnNotRequired: data.manifest.ttnNotRequired } : {}) } : null;
   return createHash("sha256").update(JSON.stringify({ actorId, mode, tripId: data.tripId, expectedRevision: data.expectedRevision,
     amount: new Prisma.Decimal(data.amount).toFixed(2), currency: data.currency, cashAccountId: data.cashAccountId,
     documentIds: [...data.documentIds].sort(), rate: data.rate ?? null, rateDate: data.rateDate ?? null, manifest })).digest("hex");
