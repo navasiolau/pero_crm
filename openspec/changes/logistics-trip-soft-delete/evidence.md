@@ -14,10 +14,14 @@
 
 ## Pending
 
-- Добавлен реальный CI-тест двух PostgreSQL backend: delete/post обоих порядков, наблюдение ожидания общего advisory lock и отказ устаревшего проигравшего. Его запуск пока NOT_RUN; пункт1.3 не закрыт заранее.
+- Реальный CI-тест двух PostgreSQL backend: delete/post обоих порядков, наблюдение ожидания общего advisory lock и отказ устаревшего проигравшего — PASS в PostgreSQL-фазе CI340. Пункт1.3 закрыт по фактическому результату.
 - Интеграция, CI и фактический staging после приёмки №197/№199 — NOT_RUN.
 - Production release/миграции/soft delete указанного UUID — NOT_RUN. Разрешение удалить эту запись уже дано; перед действием требуется повторный exact allowlist guard.
 
 ## Интеграция с принятым staging e9b8eb09
 
 После успешной фактической приёмки №197/199 выполнен обычный merge принятого staging в feature/198. Конфликты в общих form/query/core/tests разрешены сохранением обеих функций: ttnNotRequired и deletedAt/canDelete. Объединённые целевые тесты17/17, typecheck/lint, native №197 и BYN/USD удаления, browser component PASS. Дополнительно включён native сценарий удаления оплаченного рейса с ttnNotRequired=true и без документов. Перед staging выполняется его отдельная проверка. Production не менялся.
+
+CI340/848b3b45 выявил одно прежнее DI-ожидание cash-balance-valuation: оно проверяло точную форму activePaymentWhere без нового trip.deletedAt=null. Ожидание обновлено с сохранением требования read-only consistent snapshot и ACTIVE; само денежное чтение не ослаблялось. Публикация при этом отказе не выполнялась.
+
+После исправления ожидания58/58 целевых финансовых tests PASS. В CI340 PostgreSQL83/83 и HTTP32/32 PASS, guards13/13; soft-delete native (BYN/USD/безТТН) и delete-versus-post real lock PASS. Native job отказал позже только на обязательной проверке успешного backend producer; общий CI340 остаётся FAILED и не считается успешной доставкой. Следующий CI должен целиком пройти до публикации.
