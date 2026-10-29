@@ -1,13 +1,50 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import test from "node:test";
 import type { Prisma } from "@prisma/client";
 import { logisticsTripCreateSchema, logisticsTripUpdateSchema } from "../src/server/logistics/contracts";
 import { logisticsPostingSchema } from "../src/server/logistics/money-contracts";
 import { assertLogisticsPaymentContext } from "../src/server/logistics/payment-context";
+import { createLogisticsTripCore, updateLogisticsTripCore } from "../src/server/logistics/core";
+import { createLogisticsPostingCore, type LogisticsMoneyDependencies } from "../src/server/logistics/posting-core";
 
 const manifest = { date: "2026-10-29", shares: [{ projectId: "p", percentBps: 10000 }],
   lines: [{ kind: "PRODUCT" as const, projectId: "p", productId: "product", quantity: 1 }] };
+
+test("повтор create/update до появления галочки находит прежний receipt без записей", async () => {
+  const actorId = "supplier", tripId = randomUUID();
+  for (const operation of ["create", "update"] as const) {
+    // Порядок полей нормализован прежней Zod-схемой и входит в сохранённый SHA256.
+    const oldData = { clientMutationId: randomUUID(), date: manifest.date, comment: "",
+      lines: manifest.lines.map(({ projectId, kind, productId, quantity }) => ({ projectId, kind, productId, quantity })),
+      ...(operation === "update" ? { tripId, expectedRevision: 1 } : {}), shares: manifest.shares };
+    const fingerprint = createHash("sha256").update(JSON.stringify({ actorId, operation, ...oldData })).digest("hex");
+    const tx = { $queryRaw: async () => [], user: { findUnique: async () => ({ id: actorId, name: "Снабженец", active: true, roles: ["PROCUREMENT"] }) },
+      logisticsMutation: { findUnique: async () => ({ actorId, tripId, revision: 1, requestFingerprint: fingerprint }) },
+      logisticsTrip: { create: async () => { throw Error("LEGACY_REPLAY_MUST_NOT_CREATE"); }, updateMany: async () => { throw Error("LEGACY_REPLAY_MUST_NOT_UPDATE"); } },
+    } as unknown as Prisma.TransactionClient;
+    const replay = await (operation === "create" ? createLogisticsTripCore : updateLogisticsTripCore)(actorId, oldData, async action => action(tx));
+    assert.deepEqual(replay, { tripId, revision: 1, repeated: true });
+  }
+});
+
+test("повтор денежного запроса прежней версии сохраняет прежний порядок manifest и не запрашивает курс", async () => {
+  const actorId = "supplier", tripId = randomUUID(), postingId = randomUUID();
+  const oldManifest = { date: manifest.date, comment: "", shares: manifest.shares,
+    lines: manifest.lines.map(({ projectId, kind, productId, quantity }) => ({ projectId, kind, productId, quantity })) };
+  for (const mode of ["post", "correct"] as const) {
+    const input = { tripId, expectedRevision: 1, clientMutationId: randomUUID(), amount: "10.00", currency: "BYN", cashAccountId: "cash",
+      documentIds: [randomUUID()], manifest: oldManifest };
+    const fingerprint = createHash("sha256").update(JSON.stringify({ actorId, mode, tripId, expectedRevision: 1, amount: "10.00", currency: "BYN",
+      cashAccountId: "cash", documentIds: input.documentIds, rate: null, rateDate: null, manifest: oldManifest })).digest("hex");
+    const dependencies = { db: { user: { findUnique: async () => ({ id: actorId, name: "Снабженец", active: true, roles: ["PROCUREMENT"] }) },
+      logisticsPosting: { findUnique: async () => ({ id: postingId, tripId, tripRevision: 2, actorId, requestFingerprint: fingerprint, allocations: [{ projectId: "p" }] }) } },
+      transaction: async () => { throw Error("LEGACY_PAYMENT_REPLAY_MUST_NOT_WRITE"); }, getRate: async () => { throw Error("LEGACY_PAYMENT_REPLAY_MUST_NOT_FETCH_RATE"); },
+    } as unknown as LogisticsMoneyDependencies;
+    const replay = await createLogisticsPostingCore(actorId, input, mode, dependencies);
+    assert.equal(replay.repeated, true); assert.equal(replay.postingId, postingId);
+  }
+});
 
 test("галочка по умолчанию выключена, а пропуск при редактировании сохраняется для разрешения сервером", () => {
   const create = { ...manifest, clientMutationId: randomUUID() };

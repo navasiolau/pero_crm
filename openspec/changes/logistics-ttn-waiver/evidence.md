@@ -25,3 +25,9 @@
 ## Production
 
 NOT_RUN. Выпуск/миграция и конкретное удаление будут приняты отдельно после №198.
+
+## Исправление совместимости повторов перед production
+
+Проверка совместимости выявила, что рефакторинг схемы менял порядок полей нормализованного payload, а default false добавлял поле в SHA. Получены два RED: старые create/update и денежные post/correct receipts не совпадали. Исправлено сохранением прежнего порядка и исключением только default false при create; explicit false update/correct остаётся значимым. Старые fingerprints/receipts в БД не меняются. Новые unit-тесты проверяют найденный старый receipt без writes/FX, native helper сравнивает фактически сохранённые SHA с прежним форматом. Требуется повторная local/CI/staging-проверка этого изменения.
+
+Local после исправления:15/15 целевых тестов, typecheck/lint и real PostgreSQL native PASS; native подтверждает оба прежних mutation SHA и полный rollback. CI/staging исправления принимаются по следующему точному кандидату.

@@ -91,6 +91,15 @@ function snapshot(row: LogisticsManifestRecord) {
       unitSnapshot: line.unitSnapshot, quantity: line.quantity.toNumber() })) };
 }
 
+function tripMutationFingerprint(actorId: string | null | undefined, operation: "create" | "update",
+  data: LogisticsTripManifestInput & { clientMutationId: string }) {
+  const { ttnNotRequired, ...legacy } = data;
+  // false при создании равнозначен прежнему отсутствию поля; optional update сохраняет различие.
+  const includeFlag = operation === "create" ? ttnNotRequired === true : ttnNotRequired !== undefined;
+  return createHash("sha256").update(JSON.stringify({ actorId, operation, ...legacy,
+    ...(includeFlag ? { ttnNotRequired } : {}) })).digest("hex");
+}
+
 async function mutationReceipt(tx: Prisma.TransactionClient, actorId: string, clientMutationId: string, fingerprint: string) {
   const receipt = await tx.logisticsMutation.findUnique({ where: { clientMutationId } });
   if (!receipt) return null;
@@ -115,7 +124,7 @@ export async function createLogisticsTripCore(actorId: string | null | undefined
   const parsed = logisticsTripCreateSchema.safeParse(input);
   if (!parsed.success) invalid(parsed.error.issues[0]?.message ?? "Проверьте состав отгрузки");
   const data = parsed.data;
-  const fingerprint = createHash("sha256").update(JSON.stringify({ actorId, operation: "create", ...data })).digest("hex");
+  const fingerprint = tripMutationFingerprint(actorId, "create", data);
   return transaction(async tx => {
     const actor = await requireLogisticsActor(actorId, tx);
     await lockMutation(tx, data.clientMutationId);
@@ -137,7 +146,7 @@ export async function updateLogisticsTripCore(actorId: string | null | undefined
   const parsed = logisticsTripUpdateSchema.safeParse(input);
   if (!parsed.success) invalid(parsed.error.issues[0]?.message ?? "Проверьте состав отгрузки");
   const data = parsed.data;
-  const fingerprint = createHash("sha256").update(JSON.stringify({ actorId, operation: "update", ...data })).digest("hex");
+  const fingerprint = tripMutationFingerprint(actorId, "update", data);
   return transaction(async tx => {
     const actor = await requireLogisticsActor(actorId, tx);
     await lockMutation(tx, data.clientMutationId);
