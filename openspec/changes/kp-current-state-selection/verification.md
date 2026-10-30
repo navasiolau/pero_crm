@@ -14,6 +14,14 @@
 
 Логи находятся в ignored `apps/web/test-results/kp-current-state-200/`. Полный browser/PDF receipt и снимки: `apps/web/test-results/kp-editor/8382b5dd-422b-4f76-b9c8-3f4530de2a9a/`; последний storage/memory сценарий — в пути из `browser-storage.log`.
 
-## Не выполнено
+## Фактическая staging-приёмка
 
-Штатный полный CI и фактическая staging-приёмка ещё не выполнены; пункт 3.2 оставлен открытым. Статус local/Chromium не объявляется приёмкой staging. Main и production не менялись. Изменений БД, дампов, restic, S3 cleanup и CI workflow нет.
+Код `af5debfcebbdcce277416ab1a7d1bd94a3a50099` обычным merge включён в staging `d8a6af0e21603dc3f8f61538ad5cf4a4d5e5652d`. Штатный [CI41024660588](https://github.com/navasiolau/pero_crm/actions/runs/41024660588) завершён **7/7 SUCCESS**, включая native PostgreSQL/HTTP/S3, Linux renderer и обе публикации. Workflow не менялся.
+
+Работающий CT101 проверен по hostname, compose ownership, фактическим web/renderer revision/run/image, healthy и четырём SHA редактора. Через приватный SSH-туннель и настоящий HTTP session API проверены существующий ADMIN и UI без подмены авторизации или бизнес-сервисов. Публичная Basic Auth оболочка отдельно не проверялась.
+
+Сохранён отдельный QA-КП **№296** (`cmvupo6e90003mi0100s2jfdu`, только staging): редакция0 → локальные правки и reload без PUT → сохранение агента в редакцию1 → автоматический показ сервера без диалога → новые локальные правки → штатное сохранение редакции2 и настоящий PDF. Переполнение localStorage воспроизведено. Итоговый PDF на2 страницах скачан настоящим Chromium; проверены SHA, актуальный маркер FINAL, сумма123,45 BYN и лично просмотрены обе страницы. Desktop1440×900 и mobile390×844/360×800 просмотрены. QA сохранён для проверки, рабочие КП не редактировались.
+
+Первая попытка скачивания через перехват сетевых запросов приёмочного инструмента отменялась браузером; серверный выпуск уже был успешен. Перевод проверки на прямой HTTP по SSH-туннелю со штатным Service Worker подтвердил обычное скачивание. Приложение и CI ради обхода ошибки инструмента не менялись.
+
+Web/renderer PID/image/env не изменялись во время сценария; DB container/PID/start/mount остались прежними. Машиночитаемое подтверждение — `staging-acceptance.json`; подробные private receipts и PDF — в ignored `apps/web/test-results/kp-current-state-200/`. Main/production, миграции, дампы, restic и S3 cleanup не затрагивались. Заключительная запись приёмки меняет только документацию; финальный интеграционный SHA проверяется отдельно без повторной записи QA.
