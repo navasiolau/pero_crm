@@ -5,5 +5,8 @@ body{--topbar:0px}
 .crm-readonly[hidden]{display:none}
 .del-row .del-name{min-width:0}
 .url-input[readonly]{color:var(--mut)}
+/* Поля размера, цены и количества помещаются в узкую карточку редактора. */
+.row2{grid-template-columns:minmax(0,1fr) 110px 76px}
+.row2>.f{min-width:0}
 .contract-dialog>details.contract-section{margin:0;padding:0 22px 10px;flex:none;max-height:180px;overflow:auto}
 .contract-dialog>details.contract-section a{overflow-wrap:anywhere}

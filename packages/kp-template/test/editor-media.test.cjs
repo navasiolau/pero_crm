@@ -52,6 +52,7 @@ async function fixture(manualCompression = false) {
         return response(saved);
       }
       if (url === '/api/kp/documents/primary') return response(saved);
+      if (url === '/api/kp/documents/other') return response(doc('other'));
       if (url === '/api/kp/documents') return response({ documents: [] });
       throw Error('UNEXPECTED_NETWORK');
     } });

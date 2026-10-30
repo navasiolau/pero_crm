@@ -1,9 +1,12 @@
 (function (root, factory) {
   'use strict';
-  if (typeof module === 'object' && module.exports) module.exports = factory(require('./kp-list.js'));
+  if (typeof module === 'object' && module.exports) module.exports = factory(require('./kp-list.js'), require('./kp-local-state.js'));
   else {
     var bootstrap = JSON.parse(document.getElementById('peroCrmBootstrap').textContent);
-    root.PeroCrmKp = factory(root.PeroKpList)(bootstrap, { fetch: root.fetch.bind(root), storage: root.localStorage,
+    root.PeroCrmKp = factory(root.PeroKpList, root.PeroKpLocalState)(bootstrap, { fetch: root.fetch.bind(root),
+      storage: root.PeroKpLocalState.create({ actorId: bootstrap.actorId, indexedDB: root.indexedDB,
+        legacyStorage: (function () { try { return root.localStorage; } catch (_) { return null; } })(),
+        onError: function (message) { var banner = document.getElementById('crmStorageStatus'); if (banner) { banner.hidden = false; banner.textContent = message; } } }),
       emit: function (message) { root.parent.postMessage(Object.assign({ channel: 'pero-kp' }, message), root.location.origin); } });
     root.addEventListener('message', function (event) {
       if (event.origin !== root.location.origin || event.source !== root.parent || event.data?.channel !== 'pero-kp') return;
@@ -15,14 +18,15 @@
       });
     });
   }
-}(typeof self !== 'undefined' ? self : this, function (list) {
+}(typeof self !== 'undefined' ? self : this, function (list, localState) {
   'use strict';
   return function createCrmTransport(bootstrap, dependencies) {
     if (!bootstrap || bootstrap.apiBase !== '/api/kp' || !bootstrap.documentId || !bootstrap.actorId) throw new Error('KP_BOOTSTRAP_INVALID');
     var fetcher = dependencies.fetch, storage = dependencies.storage, emit = dependencies.emit || function () {};
     var currentId = bootstrap.documentId, documents = {}, current = null, viewingVersion = null, uploaded = new Set();
     var editor, paused = false, contractOpen = false, saveQueue = Promise.resolve(), contractForms = {}, retainedOperations = {};
-    var confirmedState = null, confirmedFx = null, confirmedDocument = null, saveConflict = null, recoveryEpoch = 0, lastRecovery = null;
+    var confirmedState = null, confirmedFx = null, confirmedDocument = null, activeDraft = null;
+    var clock = dependencies.clock || localState.createClock(dependencies.monotonic);
     var clientIntent = null, focusGeneration = 0, activeUploads = new Set();
     var prefix = 'pero-crm-kp:' + encodeURIComponent(bootstrap.actorId) + ':';
     var uuid = dependencies.uuid || function () { return crypto.randomUUID(); };
@@ -36,17 +40,23 @@
     function read(keyName) { try { return JSON.parse(storage.getItem(keyName)); } catch (_) { return null; } }
     function write(keyName, value) { try { storage.setItem(keyName, JSON.stringify(value)); } catch (_) {} }
     function remove(keyName) { try { storage.removeItem(keyName); } catch (_) {} }
-    function operation(id, kind, body) {
+    async function operation(id, kind, body) {
       var storageKey = key(id, 'operation:' + kind), previous = retainedOperations[storageKey] || read(storageKey);
       var fingerprint = JSON.stringify(body);
       if (previous && previous.fingerprint !== fingerprint) return { previous: previous, storageKey: storageKey };
-      var entry = previous || { fingerprint: fingerprint, body: Object.assign({ operationId: uuid() }, body) };
-      retainedOperations[storageKey] = entry; write(storageKey, entry);
+      var entry = previous || { fingerprint: fingerprint, body: Object.assign({ operationId: uuid() }, body), editId: activeDraft?.editId };
+      if (storage.prepare) await storage.prepare(id);
+      if (storage.claimOperation) entry = JSON.parse(await storage.claimOperation(storageKey, JSON.stringify(entry)));
+      if (entry.fingerprint !== fingerprint) return { previous: entry, storageKey: storageKey };
+      retainedOperations[storageKey] = entry; if (!storage.claimOperation) write(storageKey, entry);
+      if (storage.flush) await storage.flush();
       return { entry: entry, storageKey: storageKey };
     }
     async function request(path, options) {
       if (typeof path !== 'string' || !path.startsWith('/') || path.startsWith('//') || path.includes('..')) throw new Error('KP_API_PATH_INVALID');
+      var started = clock.read();
       var response = await fetcher(bootstrap.apiBase + path, Object.assign({ credentials: 'same-origin', cache: 'no-store', redirect: 'error' }, options));
+      clock.sample(response.headers?.get('X-KP-Server-Time'), started);
       var data = await response.json().catch(function () { return {}; });
       if (!response.ok) { var error = new Error(typeof data.error === 'string' ? data.error : data.error?.message || 'Не удалось выполнить запрос'); error.status = response.status; error.data = data; throw error; }
       return data;
@@ -54,11 +64,11 @@
     function json(method, body) { return { method: method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }; }
     function remember(doc, acceptedClientIntent) {
       if (!doc || !doc.id || !Number.isSafeInteger(doc.revision) || !doc.state || !Array.isArray(doc.state.items)) throw new Error('Некорректный ответ сохранения КП');
+      if (currentId !== doc.id) activeDraft = null;
       if (arguments.length < 2 || currentId !== doc.id) {
         focusGeneration++;
         activeUploads.forEach(function (controller) { controller.abort(); });
         clientIntent = null;
-        saveConflict = null;
       } else if (clientIntent === acceptedClientIntent) clientIntent = null;
       confirmedDocument = copy(doc);
       documents[doc.id] = doc; currentId = doc.id; current = doc; viewingVersion = null;
@@ -102,119 +112,72 @@
     function saveRevisionConflict(error) {
       return error?.status === 409 && ['KP_REVISION_CHANGED', 'KP_CONFLICT'].includes(error.data?.error?.code);
     }
-    function bundle(doc) { return { state: copy(doc.state), fx: copy(doc.fx ?? null), clientId: doc.client?.id ?? null }; }
-    function durableBackup(id, pending, base, local, remote) {
-      var name = key(id, 'save-recovery:' + encodeURIComponent(pending.body.operationId) + ':' + uuid());
-      var value = JSON.stringify({ schema: 1, proposalId: id, pending: pending, base: base, local: local, remote: remote });
-      try { storage.setItem(name, value); if (storage.getItem(name) !== value) throw new Error('BACKUP_READBACK'); }
-      catch (_) { throw new Error('Не удалось сохранить резервную копию правок. Освободите место в браузере и повторите'); }
-      return name;
-    }
-    function retireSave(id, pending) {
-      var name = key(id, 'operation:save'), persisted = read(name), stored = retainedOperations[name] || persisted;
-      if (stored?.body.operationId !== pending.body.operationId || persisted && persisted.body?.operationId !== pending.body.operationId)
-        throw new Error('Изменилась ожидающая операция сохранения в другом окне');
-      try { storage.removeItem(name); if (storage.getItem(name) !== null) throw new Error('REMOVE_READBACK'); }
-      catch (_) { throw new Error('Не удалось завершить прежнюю операцию. Резервная копия правок сохранена'); }
-      delete retainedOperations[name];
-    }
-    var absent = {};
-    function mergeValue(base, local, remote, path, paths) {
-      function equal(a, b) { return a === absent || b === absent ? a === b : canonical(a) === canonical(b); }
-      function clone(a) { return a === absent ? absent : copy(a); }
-      function object(a) { return a !== absent && a !== null && typeof a === 'object' && !Array.isArray(a); }
-      if (equal(local, remote) || equal(remote, base)) return clone(local);
-      if (equal(local, base)) return clone(remote);
-      if (object(local) && object(remote) && (object(base) || base === absent)) {
-        var result = Object.create(null), names = new Set(Object.keys(local).concat(Object.keys(remote), base === absent ? [] : Object.keys(base)));
-        function member(value, name) { return value !== absent && Object.prototype.hasOwnProperty.call(value, name) ? value[name] : absent; }
-        names.forEach(function (name) {
-          var value = mergeValue(member(base, name), member(local, name), member(remote, name), path ? path + '.' + name : name, paths);
-          if (value !== absent) result[name] = value;
-        });
-        return result;
-      }
-      paths.push(path); return clone(local);
-    }
-    function desiredState(snapshot, fxIntent, context) {
-      var local = { state: copy(snapshot), fx: copy(fxIntent !== undefined ? fxIntent : context.fx ?? null), clientId: context.client?.id ?? null };
-      if (editor?.getState && canonical(editor.getState()) !== context.editorState) local.state = copy(editor.getState());
-      if (canonical(current.fx) !== canonical(context.fx) && canonical(current.fx) !== confirmedFx) local.fx = copy(current.fx);
-      if (clientIntent && clientIntent !== context.clientIntent) local.clientId = current.client?.id ?? null;
-      return local;
-    }
-    function conflictError() {
-      var error = new Error('КП изменилось в другом окне. Выберите, какие правки сохранить');
-      error.code = 'KP_SAVE_CONFLICT'; error.status = 409; return error;
-    }
-    function conflictView() {
-      if (!saveConflict) return null;
-      var value = saveConflict;
-      return copy({ proposalId: value.proposalId, paths: value.paths, base: value.base, local: desiredState(value.local.state, value.local.fx, value.context),
-        remote: value.remote, remoteRevision: value.remoteRevision, backupKey: value.backupKey });
-    }
+    function bundle(doc) { return { state: copy(doc.state), fx: copy(doc.fx ?? null), client: copy(doc.client ?? null) }; }
     async function latestDocument(id) {
       var latest = await request('/documents/' + encodeURIComponent(id));
-      if (latest?.id !== id || !Number.isSafeInteger(latest.revision) || !Array.isArray(latest.state?.items) ||
-        currentId !== id || latest.revision < current.revision) throw new Error('Не удалось подтвердить текущую редакцию КП');
+      if (latest?.id !== id || !Number.isSafeInteger(latest.revision) || !Array.isArray(latest.state?.items) || currentId !== id || latest.revision < (current?.revision ?? 0))
+        throw new Error('Не удалось подтвердить текущую редакцию КП');
       return latest;
     }
-    function editableDocument(doc) { return doc.canEdit === true && doc.project?.stage === 'LEAD'; }
-    function applyMerged(local) {
-      current.fx = copy(local.fx);
-      current.client = local.clientId ? Object.assign({}, current.client?.id === local.clientId ? current.client : {}, { id: local.clientId }) : null;
-      if (editor?.applyState) editor.applyState(copy(local.state));
+    function persistDraft() {
+      if (activeDraft) write(key(currentId, 'draft'), activeDraft);
     }
-    async function recoverSave(pending, snapshot, fxIntent, context, retries) {
-      var id = context.id, proof;
-      if (pending.body.proposalId !== id || !Number.isSafeInteger(pending.body.expectedRevision)) throw new Error('Некорректная прежняя операция КП');
-      try {
-        proof = await request('/operations/' + encodeURIComponent(pending.body.operationId));
-        if (proof.operationId !== pending.body.operationId || proof.kind !== 'document.save' || proof.result?.id !== id ||
-          !Number.isSafeInteger(proof.result.revision) || !Array.isArray(proof.result.state?.items)) throw new Error('Не совпал подтверждённый результат сохранения');
-      } catch (error) {
-        if (error.status !== 404 || error.data?.error?.code !== 'KP_OPERATION_NOT_FOUND') throw error;
-      }
-      var latest = await latestDocument(id);
-      if (context.generation !== focusGeneration || latest.revision < pending.body.expectedRevision) throw new Error('Редакция КП изменилась во время проверки');
-      var base = copy(context.base), local = desiredState(snapshot, fxIntent, context), remote = bundle(latest), paths = [];
-      var merged = mergeValue(base, local, remote, '', paths);
-      var backupKey = durableBackup(id, pending, base, local, remote);
-      retireSave(id, pending);
-      lastRecovery = { pending: pending, backupKey: backupKey };
-      if (!editableDocument(latest)) paths = ['project.stage'];
-      if (paths.length || retries >= 1) {
-        saveConflict = { proposalId: id, paths: paths.length ? paths : ['revision'], base: base, local: local, remote: remote,
-          remoteRevision: latest.revision, backupKey: backupKey, pending: pending, context: context };
-        throw conflictError();
-      }
-      recoveryEpoch++; acknowledgeUploads(latest); remember(latest, undefined); applyMerged(merged);
-      if (canonical(merged) === canonical(remote)) return current;
-      var next = Object.assign({}, context, { base: remote, recoveryEpoch: recoveryEpoch, fx: copy(merged.fx), client: merged.clientId ? { id: merged.clientId } : null,
-        editorState: editor?.getState ? canonical(editor.getState()) : undefined });
-      return saveNow(merged.state, merged.fx, next, retries + 1);
+    function noteEdit(state) {
+      if (!api.isEditable() || !confirmedDocument) return;
+      var local = { state: copy(state), fx: copy(current.fx ?? null), client: copy(current.client ?? null) };
+      if (activeDraft && canonical(activeDraft.local) === canonical(local)) return;
+      if (!api.hasUnsavedChanges(state)) { activeDraft = null; remove(key(currentId, 'draft')); return; }
+      var time = clock.now();
+      activeDraft = { schema: 2, editId: uuid(), baseRevision: confirmedDocument.revision,
+        editedAt: Math.max(time ?? (Date.parse(confirmedDocument.updatedAt) || 0) + 1, (activeDraft?.editedAt || 0) + 0.001), local: local };
+      persistDraft();
     }
-    async function resolveSaveConflictNow(choice) {
-      if (!['local', 'remote'].includes(choice) || !saveConflict || saveConflict.proposalId !== currentId) throw new Error('Нет конфликта для разрешения');
-      var conflict = saveConflict, latest = await latestDocument(currentId), remote = bundle(latest);
-      var local = desiredState(conflict.local.state, conflict.local.fx, conflict.context);
-      conflict.backupKey = durableBackup(currentId, conflict.pending, conflict.base, local, remote);
-      if (choice === 'remote') {
-        saveConflict = null; var accepted = remember(latest); publish(accepted); return accepted;
-      }
-      if (!editableDocument(latest) || latest.revision !== conflict.remoteRevision || canonical(remote) !== canonical(conflict.remote)) {
-        conflict.local = local; conflict.remote = remote; conflict.remoteRevision = latest.revision;
-        conflict.paths = editableDocument(latest) ? ['revision'] : ['project.stage']; throw conflictError();
-      }
-      local = mergeValue(conflict.base, local, remote, '', []);
-      saveConflict = null; recoveryEpoch++; acknowledgeUploads(latest); remember(latest, undefined); applyMerged(local);
-      var context = Object.assign({}, conflict.context, { base: remote, recoveryEpoch: recoveryEpoch, fx: copy(local.fx), client: local.clientId ? { id: local.clientId } : null,
-        editorState: editor?.getState ? canonical(editor.getState()) : undefined });
-      return saveNow(local.state, local.fx, context, 1);
+    function acknowledgeDraft(doc, editId) {
+      if (activeDraft?.editId === editId) { activeDraft = null; remove(key(doc.id, 'draft')); }
+      else if (activeDraft) { activeDraft.baseRevision = doc.revision; activeDraft.followsRevision = doc.revision; persistDraft(); }
     }
-    function resolveSaveConflict(choice) {
-      var next = saveQueue.catch(function () {}).then(function () { return resolveSaveConflictNow(choice); });
+    async function refreshCurrent(provided) {
+      if (viewingVersion || paused || contractOpen || !current) return current;
+      var id = currentId, latest = provided || await latestDocument(id);
+      if (storage.prepare) await storage.prepare(id, latest);
+      if (storage.refresh) await storage.refresh(id);
+      if (currentId !== id) throw new Error('Открыто другое КП');
+      var stored = read(key(id, 'draft')), candidate = activeDraft;
+      if (stored && (!candidate || stored.editedAt > candidate.editedAt)) candidate = stored;
+      var pending = retainedOperations[key(id, 'operation:save')] || read(key(id, 'operation:save'));
+      if (pending?.editId && candidate && candidate.editId !== pending.editId && latest.revision > pending.body.expectedRevision) {
+        try {
+          var proof = await request('/operations/' + encodeURIComponent(pending.body.operationId));
+          if (proof.operationId === pending.body.operationId && proof.result?.revision === latest.revision && proof.result?.id === id) candidate.followsRevision = latest.revision;
+        } catch (error) { if (error.status !== 404) throw error; }
+      }
+      var winner = localState.localWins(candidate, latest);
+      var unchanged = current.revision === latest.revision && canonical(bundle(confirmedDocument)) === canonical(bundle(latest));
+      if (!unchanged || !winner && activeDraft || winner && candidate?.editId !== activeDraft?.editId) publish(remember(latest));
+      if (winner) {
+        activeDraft = candidate; restoreDraftContext(candidate.local);
+        if (editor?.getState && editor.applyState && canonical(editor.getState()) !== canonical(candidate.local.state)) {
+          var applied = editor.applyState(copy(candidate.local.state));
+          if (applied) { activeDraft.local.state = copy(applied); persistDraft(); }
+        }
+      } else { activeDraft = null; remove(key(id, 'draft')); }
+      return current;
+    }
+    function reconcile() {
+      var next = saveQueue.catch(function () {}).then(function () { return refreshCurrent(); });
       saveQueue = next; return next;
+    }
+    async function recoverSave(pending, retries) {
+      var id = currentId;
+      try {
+        var proof = await request('/operations/' + encodeURIComponent(pending.body.operationId));
+        if (proof.operationId !== pending.body.operationId || proof.kind !== 'document.save' || proof.result?.id !== id) throw new Error('Не совпал результат сохранения');
+      } catch (error) { if (error.status !== 404 || error.data?.error?.code !== 'KP_OPERATION_NOT_FOUND') throw error; }
+      remove(key(id, 'operation:save')); delete retainedOperations[key(id, 'operation:save')];
+      await refreshCurrent();
+      if (!api.hasUnsavedChanges(editor?.getState ? editor.getState() : current.state)) return current;
+      if (retries >= 1) throw new Error('КП снова изменилось на сервере. Актуальные данные загружены');
+      return saveNow(editor?.getState ? editor.getState() : activeDraft.local.state, null, saveContext(), retries + 1);
     }
     function restoreDraftContext(local) {
       if (!api.isEditable() || !local || typeof local !== 'object') throw new Error('Черновик нельзя восстановить в этой редакции');
@@ -240,62 +203,42 @@
     }
     async function saveNow(state, fxIntent, context, retries) {
       retries = retries || 0;
-      if (saveConflict?.proposalId === context.id) throw conflictError();
-      if (!current || !current.canEdit || viewingVersion || paused) throw new Error('КП доступно только для просмотра');
-      if (currentId !== context.id || context.generation !== focusGeneration) throw new Error('Открыто другое КП. Повторите сохранение');
-      if (context.recoveryEpoch !== recoveryEpoch) {
-        var remote = bundle(confirmedDocument), local = desiredState(state, fxIntent, context), paths = [];
-        var merged = mergeValue(context.base, local, remote, '', paths);
-        if (paths.length) {
-          var backupKey = durableBackup(context.id, lastRecovery.pending, context.base, local, remote);
-          saveConflict = { proposalId: context.id, paths: paths, base: context.base, local: local, remote: remote,
-            remoteRevision: confirmedDocument.revision, backupKey: backupKey, pending: lastRecovery.pending, context: context };
-          throw conflictError();
-        }
-        state = merged.state; fxIntent = merged.fx; applyMerged(merged);
-        context = Object.assign({}, context, { base: remote, recoveryEpoch: recoveryEpoch, fx: merged.fx,
-          client: merged.clientId ? { id: merged.clientId } : null, editorState: editor?.getState ? canonical(editor.getState()) : undefined });
-      }
-      if (fxIntent !== undefined) current.fx = copy(fxIntent);
-      var snapshot = copy(state), id = currentId, path = '/documents/' + encodeURIComponent(id);
-      // Предыдущая не подтверждённая операция сначала получает свой прежний ответ.
+      if (!current?.canEdit || viewingVersion || paused) throw new Error('КП доступно только для просмотра');
+      if (currentId !== context.id) throw new Error('Открыто другое КП. Повторите сохранение');
+      var id = currentId, path = '/documents/' + encodeURIComponent(id);
       var stored = retainedOperations[key(id, 'operation:save')] || read(key(id, 'operation:save'));
       if (stored) {
         try {
-          var confirmed = await replay(id, path, stored); acknowledgeUploads(confirmed);
-          remember(confirmed, stored.body.clientId === context.client?.id ? context.clientIntent : undefined);
-          if (fxIntent !== undefined) current.fx = copy(fxIntent);
-          if (JSON.stringify(snapshot) === JSON.stringify(confirmed.state) && canonical(current.fx) === confirmedFx &&
-            stored.body.clientId === context.client?.id) return current;
+          var confirmed = await replay(id, path, stored);
+          acknowledgeDraft(confirmed, stored.editId); acknowledgeUploads(confirmed); remember(confirmed, context.clientIntent);
+          if (activeDraft) restoreDraftContext(activeDraft.local);
+          else if (canonical(state) === canonical(confirmed.state) && !clientIntent) return current;
         } catch (error) {
-          if (saveRevisionConflict(error)) return recoverSave(stored, snapshot, fxIntent, context, retries);
-          // После однозначного отказа можно отправить уже исправленное состояние новым запросом.
-          if (!isRejectedSave(error) || canonical(snapshot) === canonical(stored.body.state) &&
-            canonical(current.fx) === canonical(stored.body.fx) && context.client?.id === stored.body.clientId) throw error;
+          if (saveRevisionConflict(error)) return recoverSave(stored, retries);
+          if (!isRejectedSave(error)) throw error;
         }
       }
-      var body = { proposalId: id, expectedRevision: current.revision, state: snapshot };
-      if (context.client) body.clientId = context.client.id;
-      body.fx = await rateForState(snapshot);
-      var pending = operation(id, 'save', body);
+      await refreshCurrent();
+      state = activeDraft?.local.state || current.state;
+      if (!api.hasUnsavedChanges(state) && !context.force) return current;
+      var snapshot = copy(state), editId = activeDraft?.editId, intent = clientIntent;
+      var body = { proposalId: id, expectedRevision: current.revision, state: snapshot, fx: await rateForState(snapshot) };
+      if (current.client) body.clientId = current.client.id;
+      var pending = await operation(id, 'save', body);
+      if (pending.previous) return saveNow(state, null, saveContext(), retries);
       var result;
       try { result = await requestSave(id, path, pending.entry.body); }
-      catch (error) {
-        if (saveRevisionConflict(error)) return recoverSave(pending.entry, snapshot, pending.entry.body.fx, context, retries);
-        throw error;
-      }
+      catch (error) { if (saveRevisionConflict(error)) return recoverSave(pending.entry, retries); throw error; }
       remove(pending.storageKey); delete retainedOperations[pending.storageKey];
-      acknowledgeUploads(result); return remember(result, context.clientIntent);
+      acknowledgeDraft(result, editId); acknowledgeUploads(result); remember(result, intent);
+      if (activeDraft) restoreDraftContext(activeDraft.local);
+      return current;
     }
-    function saveContext() {
-      return { id: currentId, generation: focusGeneration, recoveryEpoch: recoveryEpoch, client: copy(current?.client || null), clientIntent: clientIntent,
-        base: confirmedDocument ? bundle(confirmedDocument) : null, fx: copy(current?.fx ?? null),
-        editorState: editor?.getState ? canonical(editor.getState()) : undefined };
-    }
+    function saveContext() { return { id: currentId, clientIntent: clientIntent }; }
     function save(state) {
-      var snapshot = copy(state), fxIntent = current && canonical(current.fx) !== confirmedFx ? copy(current.fx) : undefined;
-      var context = saveContext();
-      var next = saveQueue.catch(function () {}).then(function () { return saveNow(snapshot, fxIntent, context); });
+      noteEdit(state);
+      var context = Object.assign(saveContext(), { force: !api.hasUnsavedChanges(state) });
+      var next = saveQueue.catch(function () {}).then(function () { return saveNow(state, null, context); });
       saveQueue = next; return next.catch(function (error) { emit({ type: 'error', message: error.message }); throw error; });
     }
     async function ensureSaved() {
@@ -304,9 +247,10 @@
       if (paused) throw new Error('Завершите изменение клиента');
       var saved = await editor.ensureSaved();
       if (!saved || !saved.id || !Number.isSafeInteger(saved.revision)) throw new Error('КП не сохранено. Проверьте данные и повторите');
+      if (retainedOperations[key(currentId, 'operation:save')] || read(key(currentId, 'operation:save'))) saved = await save(editor.getState ? editor.getState() : saved.state);
       return saved;
     }
-    function publish(doc) { if (editor) editor.applyDocument(doc, !!viewingVersion); api.applyPermissions(); }
+    function publish(doc) { if (editor?.applyDocument) editor.applyDocument(doc, !!viewingVersion); api.applyPermissions(); }
     function mediaUrl(token) {
       if (!token) return '';
       if (!/^kp-media:[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/.test(token)) return '';
@@ -351,7 +295,7 @@
       var saved = await ensureSaved();
       if (viewingVersion) throw new Error('Скачайте PDF выбранной версии из списка версий');
       var body = { proposalId: saved.id, expectedRevision: saved.revision }, storageKey = key(saved.id, 'operation:pdf');
-      var previous = retainedOperations[storageKey] || read(storageKey), pending = operation(saved.id, 'pdf', body);
+      var previous = retainedOperations[storageKey] || read(storageKey), pending = await operation(saved.id, 'pdf', body);
       var prior = (pending.entry || pending.previous).body, path = '/documents/' + encodeURIComponent(saved.id) + '/pdf';
       var changed = prior.proposalId !== body.proposalId || prior.expectedRevision !== body.expectedRevision, result, unaccepted;
       function retire() { remove(pending.storageKey); delete retainedOperations[pending.storageKey]; }
@@ -379,19 +323,18 @@
         conflict.status = 409; throw conflict;
       }
       retire();
-      return publishJob(path, operation(saved.id, 'pdf', body));
+      return publishJob(path, await operation(saved.id, 'pdf', body));
     }
     async function create() {
       var date = new Intl.DateTimeFormat('ru-RU', { timeZone: 'Europe/Moscow' }).format(new Date());
       var state = { items: [], order: { number: '', date: date, validUntil: '', project: '' }, client: { name: '', contact: '' },
         currency: 'BYN', discount: 0, discountMode: 'percent', delivery: { mode: 'total', total: 0, visible: false, items: [] } };
-      var pending = operation('new', 'create', { state: state });
+      var pending = await operation('new', 'create', { state: state });
       var doc = await request('/documents', json('POST', (pending.entry || pending.previous).body));
       remove(pending.storageKey); delete retainedOperations[pending.storageKey]; remember(doc); emit({ type: 'navigate', documentId: doc.id }); return doc;
     }
     async function upload(original, optimized, options) {
       options = options || {};
-      if (saveConflict) throw conflictError();
       if (!current?.canEdit || viewingVersion || paused) throw new Error('КП доступно только для просмотра');
       var id = currentId, generation = focusGeneration, controller = new AbortController();
       if (options.documentId && options.documentId !== id) throw new Error('Загрузка относится к другому КП');
@@ -420,7 +363,7 @@
           } catch (error) {
             if (saveRevisionConflict(error)) {
               var context = saveContext(), snapshot = editor?.getState ? editor.getState() : current.state;
-              await recoverSave(pendingSave, snapshot, context.fx, context, 0);
+              await recoverSave(pendingSave, 0);
             } else if (!isRejectedSave(error)) throw error;
           }
           checkContext();
@@ -443,7 +386,7 @@
             name: 'КП №' + number + ' — ' + (row.client?.label || row.printedClientName || row.name || ''),
           }); }) };
         }
-        if (!options.method || options.method === 'GET') { var doc = await request('/documents/' + encodeURIComponent(id)); documents[id] = doc; return doc; }
+        if (!options.method || options.method === 'GET') { var doc = await request('/documents/' + encodeURIComponent(id)); if (storage.prepare) await storage.prepare(id, doc); documents[id] = doc; return doc; }
         if (options.method === 'DELETE') {
           throw new Error('Откройте проект для управления его состоянием');
         }
@@ -467,7 +410,7 @@
         }
         var body = { documentId: input.documentId, expectedRevision: form.revision, settings: input.settings, clientBaseline: form.clientBaseline,
           sourceRefs: refs };
-        var pending = operation(input.documentId, 'contract-settings', body);
+        var pending = await operation(input.documentId, 'contract-settings', body);
         var saved = await request('/contracts', json('PUT', pending.entry.body));
         contractForms[input.documentId] = Object.assign({}, form, saved, { sourceRefs: saved.sourceRefs || body.sourceRefs });
         remove(pending.storageKey); delete retainedOperations[pending.storageKey]; return saved;
@@ -477,7 +420,7 @@
         if (!form) throw new Error('Откройте настройки договора заново');
         var body = { documentId: input.documentId, expectedRevision: form.revision, clientBaseline: form.clientBaseline,
           sourceRefs: form.sourceRefs };
-        var pending = operation(input.documentId, 'contract', body);
+        var pending = await operation(input.documentId, 'contract', body);
         var file = await publishJob('/contract', pending);
         return { downloadUrl: file.downloadUrl, filename: file.fileName };
       }
@@ -485,12 +428,10 @@
     }
     var api = {
       request: legacyRequest, apiRequest: request, save: save, create: create, upload: upload, generatePdf: generatePdf, previewState: previewState, mediaUrl: mediaUrl,
-      localDraftKey: function () { return key(currentId, 'draft:' + (current?.revision ?? 'loading') + (viewingVersion ? ':version:' + viewingVersion : '')); },
+      reconcile: reconcile, noteEdit: noteEdit, persistDraft: persistDraft,
+      localDraftKey: function () { return key(currentId, 'draft'); },
       documentsCacheKey: prefix + 'document-labels',
-      getSaveConflict: conflictView, resolveSaveConflict: resolveSaveConflict, restoreDraftContext: restoreDraftContext,
-      draftContext: function () { return confirmedDocument ? copy({ prefix: key(currentId, 'draft:'), revision: confirmedDocument.revision,
-        baseState: confirmedDocument.state, fx: confirmedDocument.fx, client: confirmedDocument.client,
-        localFx: current.fx, localClient: current.client }) : null; },
+      restoreDraftContext: restoreDraftContext,
       isEditable: function () { return current?.canEdit === true && !viewingVersion && !paused; },
       isPaused: function () { return paused; },
       hasUnsavedChanges: function (state) { return !!current && (!!clientIntent || canonical(state) !== confirmedState || canonical(current.fx) !== confirmedFx); },
@@ -533,18 +474,18 @@
             name: client.isTemporary ? '' : client.label, contact: client.isTemporary ? '' : client.snapshot.phone });
           current = Object.assign({}, current, { client: { id: client.id, label: client.label } }); documents[currentId] = current;
           clientIntent = { client: copy(current.client) };
-          paused = false; editor.applyState(state); await editor.ensureSaved(); api.applyPermissions(); return;
+          paused = false; editor.applyState(state); noteEdit(state); await editor.ensureSaved(); api.applyPermissions(); return;
         }
         if (command.type === 'fx') {
           if (!api.isEditable()) throw new Error('КП доступно только для просмотра');
-          current.fx = command.fx; await editor.ensureSaved(); return;
+          current.fx = command.fx; noteEdit(editor.getState ? editor.getState() : current.state); await editor.ensureSaved(); return;
         }
         if (command.type === 'rate-preview') {
           if (!api.isEditable()) throw new Error('КП доступно только для просмотра');
           emit({ type: 'rate-preview', fx: ratePreview(editor.getState()) }); return;
         }
         if (command.type === 'version') {
-          if (!command.versionId) { var doc = remember(await request('/documents/' + encodeURIComponent(currentId))); publish(doc); return; }
+          if (!command.versionId) { viewingVersion = null; await refreshCurrent(); return; }
           await ensureSaved();
           var result = await request('/documents/' + encodeURIComponent(currentId) + '/versions/' + encodeURIComponent(command.versionId));
           viewingVersion = command.versionId; current = result.document;
@@ -553,7 +494,7 @@
         if (command.type === 'restore') {
           var live = documents[currentId];
           if (!live?.canEdit || !viewingVersion) throw new Error('Версию можно восстановить только в «Лиде»');
-          var pending = operation(currentId, 'restore:' + viewingVersion, { expectedRevision: live.revision });
+          var pending = await operation(currentId, 'restore:' + viewingVersion, { expectedRevision: live.revision });
           var doc = await request('/documents/' + encodeURIComponent(currentId) + '/versions/' + encodeURIComponent(viewingVersion) + '/restore', json('POST', (pending.entry || pending.previous).body));
           remove(pending.storageKey); delete retainedOperations[pending.storageKey];
           viewingVersion = null; remember(doc); publish(doc); return;

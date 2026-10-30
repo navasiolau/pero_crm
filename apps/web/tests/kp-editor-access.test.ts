@@ -25,10 +25,26 @@ test('frame escapes bootstrap, keeps private same-origin assets and removes lega
   const html = await buildKpEditorFrame({ actorId: 'actor</script><script>bad()', documentId: 'proposal', apiBase: '/api/kp' });
   assert.ok(html.includes('actor\\u003c/script>'));
   assert.ok(html.includes('/kp/assets/js/crm-transport.js'));
+  assert.ok(html.indexOf('/kp/assets/js/kp-local-state.js') < html.indexOf('/kp/assets/js/crm-transport.js'));
   assert.ok(html.includes('/kp/assets/css/app.css'));
   assert.ok(!html.includes('fonts.googleapis.com') && !html.includes('fonts.gstatic.com'));
   assert.ok(!html.includes('rel="manifest"'));
   await assert.rejects(buildKpEditorFrame({ actorId: 'actor', documentId: '../.env', apiBase: '/api/kp' }), /BOOTSTRAP/);
+});
+
+test('session KP responses expose server milliseconds without changing the document body', async () => {
+  const calls: unknown[] = [];
+  const target = '../src/app/api/kp/[[...path]]/route';
+  const scope = guardedModuleCache(import.meta.url, { targets: [target], allowedOverrides: ['../src/server/kp/api-runtime'],
+    overrides: { '../src/server/kp/api-runtime': { handleKpApi: async (...args: unknown[]) => { calls.push(args.slice(1)); return Response.json({ revision: 31 }); } } }, prisma: {} });
+  try {
+    const route = scope.load(target) as typeof import('../src/app/api/kp/[[...path]]/route');
+    const started = Date.now();
+    const response = await route.GET(new Request('http://crm.invalid/api/kp/documents/primary'), { params: Promise.resolve({ path: ['documents', 'primary'] }) });
+    assert.ok(Number(response.headers.get('X-KP-Server-Time')) >= started);
+    assert.deepEqual(await response.json(), { revision: 31 });
+    assert.deepEqual(calls, [[['documents', 'primary'], 'session']]);
+  } finally { scope.restore(); }
 });
 
 test('actual frame and asset routes recheck revoked role, inactive actor and feature flag before bytes', async () => {

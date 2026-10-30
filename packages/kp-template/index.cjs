@@ -11,7 +11,7 @@ const publicNames = new Set([
   'public/css/app.css', 'public/css/contract.css',
   'public/js/app.js', 'public/js/sheet-render.js', 'public/js/contract-model.js', 'public/js/contract-editor.js',
   'public/js/crm-transport.js', 'public/css/crm.css', 'public/fonts/fonts.css', 'public/icons/apple-touch-icon.png',
-  'public/js/kp-list.js',
+  'public/js/kp-list.js', 'public/js/kp-local-state.js',
   ...fontManifest.files.map(font => font.path),
 ]);
 function assetPath(name) {

@@ -46,8 +46,15 @@ function confirmedPricing(state, fx) {
   return projectProposalPricing(state, { currency: fx.currency, value: fx.rate, date: fx.date, source: fx.source });
 }
 const types = { js: 'text/javascript', css: 'text/css', woff2: 'font/woff2', png: 'image/png' };
-function json(response, value, status = 200) { response.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' }); response.end(JSON.stringify(value)); }
+function json(response, value, status = 200) { response.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store', 'X-KP-Server-Time': String(Date.now()) }); response.end(JSON.stringify(value)); }
 async function body(request) { const chunks = []; for await (const chunk of request) chunks.push(chunk); return JSON.parse(Buffer.concat(chunks).toString()); }
+async function storedEditorEntry(frame, kind) {
+  return frame.locator('body').evaluate(async (body, kind) => {
+    const db = await new Promise((resolve, reject) => { const request = body.ownerDocument.defaultView.indexedDB.open('pero-kp-local', 1); request.onsuccess = () => resolve(request.result); request.onerror = reject; });
+    const row = await new Promise(resolve => { const request = db.transaction('documents').objectStore('documents').get('pero-crm-kp:qa-actor:primary'); request.onsuccess = () => resolve(request.result); }); db.close();
+    return row?.values?.[kind] ? JSON.parse(row.values[kind]) : null;
+  }, kind);
+}
 before(async () => {
   await mkdir(output, { recursive: true });
   for (const name of ['app.js', 'sheet-render.js', 'contract-editor.js']) assert.equal(createHash('sha256').update(await readFile(path.join(originalRoot, name))).digest('hex'), template.sourceManifest.files['public/js/' + name].sha256);
@@ -236,17 +243,17 @@ test('actual save/rate-before-export keeps unmarked services without category co
     assert.equal(doc.revision, 3); assert.deepEqual(pdfAttempts[0], oldBody); assert.equal(pdfAttempts.length, 2);
     assert.notEqual(pdfAttempts[1].operationId, oldBody.operationId); assert.equal(pdfAttempts[1].expectedRevision, 3);
     assert.deepEqual(requests.slice(beforePdf).filter(request => request.path.includes('/operations/') || request.path.endsWith('/pdf') || request.path === '/api/kp/documents/primary' && request.method === 'GET').map(request => request.method + ' ' + request.path),
-      ['POST /api/kp/documents/primary/pdf', 'GET /api/kp/operations/' + oldBody.operationId, 'GET /api/kp/documents/primary', 'POST /api/kp/documents/primary/pdf']);
+      ['GET /api/kp/documents/primary', 'POST /api/kp/documents/primary/pdf', 'GET /api/kp/operations/' + oldBody.operationId, 'GET /api/kp/documents/primary', 'POST /api/kp/documents/primary/pdf']);
     assert.equal(renderedPdfSnapshots.length, 1); assert.equal(renderedPdfSnapshots[0].revision, 3); assert.deepEqual(renderedPdfSnapshots[0].state, saved.state);
     assert.deepEqual(renderedPdfSnapshots[0].fx, { currency: 'USD', rate: '3.25', date: '2026-10-18', source: 'MANUAL' });
-    assert.equal(await child.locator('body').evaluate(() => localStorage.getItem('pero-crm-kp:qa-actor:primary:operation:pdf')), null);
+    assert.equal(await storedEditorEntry(child, 'operation:pdf'), null);
     assert.equal(pdfRequests.length, 1); assert.equal(pdfRequests[0].expectedRevision, doc.revision); assert.equal(pdfRequests[0].state, undefined);
     concurrentPdfChange = true; await child.locator('[data-path="items.0.name"]').fill('Конфликт');
     await page.getByRole('button', { name: 'Сгенерировать PDF', exact: true }).click();
     await expect(page.getByRole('alert')).toContainText(/Конфликт|конфликт/);
     assert.equal(pdfRequests.length, 1); assert.equal(pdfAttempts.length, 3); assert.equal(pdfAttempts[2].expectedRevision, 4); assert.equal(doc.revision, 5);
     assert.equal(doc.state.items[0].name, 'Конфликт'); assert.equal(doc.fx.rate, '3.25'); assert.equal(renderedPdfSnapshots.length, 1);
-    const blocked = await child.locator('body').evaluate(() => JSON.parse(localStorage.getItem('pero-crm-kp:qa-actor:primary:operation:pdf')));
+    const blocked = await storedEditorEntry(child, 'operation:pdf');
     assert.deepEqual(blocked.body, pdfAttempts[2]); assert.equal(requests.filter(request => request.path === '/api/kp/artifacts/pdf/download').length, 1);
     assert.equal(await page.evaluate(() => window.__refreshes), refreshes);
   } finally { await context.close(); }
@@ -465,4 +472,104 @@ test('all PDF pages match the frozen original template and retained-PDF rasteriz
   await writeFile(path.join(output, 'receipt.json'), JSON.stringify({ browser: browser.version(), template: template.getKpTemplateIdentity(), allPagesIdentical: true, originalDpr2AppendicesIdentical: true, pages: ported.pageCount,
     sourceManifestHash: template.getKpTemplateIdentity().sourceManifestHash, staging: 'NOT_RUN', container: 'NOT_RUN' }, null, 2));
   console.log(JSON.stringify({ status: 'KP_EDITOR_COMPONENT_AND_PDF', pages: ported.pageCount, output, staging: 'NOT_RUN' }));
+});
+
+
+test('IndexedDB migrates only the owning document and fences newer drafts and operation claims across tabs', async () => {
+  const context = await browser.newContext(); const page = await context.newPage();
+  try {
+    await page.goto(origin + '/fixture-image.png');
+    await page.addScriptTag({ content: await readFile(template.assetPath('public/js/kp-local-state.js'), 'utf8') });
+    const result = await page.evaluate(async () => {
+      const prefix = 'pero-crm-kp:local-owner:primary:', remote = { revision: 15, canEdit: true, state: { items: [], footer: 'SERVER' }, fx: null, client: null };
+      const raw = JSON.stringify({ items: [], footer: 'LEGACY', __docId: 'primary' });
+      localStorage.setItem(prefix + 'draft:15', raw);
+      localStorage.setItem('pero-crm-kp:foreign:primary:draft:15', raw);
+      localStorage.setItem('pero-crm-kp:local-owner:other:draft:15', raw);
+      localStorage.setItem(prefix + 'draft:backup:unknown', JSON.stringify({ unrelated: 'preserve' }));
+      const options = { actorId: 'local-owner', indexedDB, legacyStorage: localStorage };
+      const first = PeroKpLocalState.create(options), second = PeroKpLocalState.create(options);
+      await first.prepare('primary', remote); await second.prepare('primary', remote);
+      const migrated = JSON.parse(first.getItem(prefix + 'draft'));
+      const draft = (time, id) => JSON.stringify({ schema: 2, editId: id, editedAt: time, baseRevision: 15, local: { state: { items: [], footer: id }, fx: null, client: null } });
+      first.setItem(prefix + 'draft', draft(2000, 'older')); await first.flush();
+      second.setItem(prefix + 'draft', draft(3000, 'newer')); await second.flush();
+      first.removeItem(prefix + 'draft'); await first.flush(); await second.refresh('primary');
+      const afterOldDelete = JSON.parse(second.getItem(prefix + 'draft'));
+      first.setItem(prefix + 'draft', draft(1000, 'stale')); await first.flush(); await first.refresh('primary');
+      const afterOldWrite = JSON.parse(first.getItem(prefix + 'draft'));
+      const original = JSON.stringify({ fingerprint: 'one', body: { operationId: 'original' } });
+      const other = JSON.stringify({ fingerprint: 'two', body: { operationId: 'other' } });
+      const claims = await Promise.all([first.claimOperation(prefix + 'operation:save', original), second.claimOperation(prefix + 'operation:save', other)]);
+      for (let i = 0; i < 100; i++) second.setItem(prefix + 'draft', draft(3000, 'newer'));
+      await second.flush();
+      const db = await new Promise((resolve, reject) => { const request = indexedDB.open('pero-kp-local', 1); request.onsuccess = () => resolve(request.result); request.onerror = reject; });
+      const rows = await new Promise(resolve => { const request = db.transaction('documents').objectStore('documents').getAll(); request.onsuccess = () => resolve(request.result); }); db.close();
+      const row = rows.find(row => row.id === 'pero-crm-kp:local-owner:primary');
+      return { legacy: migrated.local.state.footer, removed: localStorage.getItem(prefix + 'draft:15') === null,
+        foreign: localStorage.getItem('pero-crm-kp:foreign:primary:draft:15') === raw,
+        other: localStorage.getItem('pero-crm-kp:local-owner:other:draft:15') === raw,
+        unknown: localStorage.getItem(prefix + 'draft:backup:unknown') !== null,
+        afterOldDelete: afterOldDelete.editId, afterOldWrite: afterOldWrite.editId,
+        sameClaim: claims[0] === claims[1], keys: Object.keys(row.values).sort() };
+    });
+    assert.deepEqual(result, { legacy: 'LEGACY', removed: true, foreign: true, other: true, unknown: true, afterOldDelete: 'newer', afterOldWrite: 'newer', sameClaim: true, keys: ['draft', 'operation:save'] });
+  } finally { await context.close(); }
+});
+
+test('automatic current snapshot survives full localStorage and reload, then a newer agent save replaces it without a dialog', async () => {
+  reset(); doc.updatedAt = new Date(Date.now() - 5000).toISOString();
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  await context.addInitScript(() => {
+    const old = { items: [], order: { project: 'OLD_LOCAL' }, __docId: 'primary' };
+    localStorage.setItem('pero-crm-kp:qa-actor:primary:draft:1', JSON.stringify(old));
+    for (let i = 0; ; i++) { try { localStorage.setItem('quota-fixture-' + i, 'x'.repeat(64 * 1024)); } catch { break; } }
+  });
+  const page = await context.newPage();
+  try {
+    await page.goto(origin + '/port');
+    const project = page.locator('[data-path="order.project"]'); await expect(project).toHaveValue(state.order.project);
+    assert.equal(writes.length, 0); await expect(page.locator('#confirmModal')).toBeHidden();
+    refuseSave = true; await project.fill('UNSAVED_NEWER');
+    await expect.poll(() => page.evaluate(async () => {
+      const db = await new Promise(resolve => { const request = indexedDB.open('pero-kp-local', 1); request.onsuccess = () => resolve(request.result); });
+      const row = await new Promise(resolve => { const request = db.transaction('documents').objectStore('documents').get('pero-crm-kp:qa-actor:primary'); request.onsuccess = () => resolve(request.result); }); db.close();
+      return row?.values?.draft ? JSON.parse(row.values.draft).local.state.order.project : null;
+    })).toBe('UNSAVED_NEWER');
+    const priorWrites = writes.length; await page.reload(); await expect(project).toHaveValue('UNSAVED_NEWER'); assert.equal(writes.length, priorWrites);
+    doc = { ...doc, revision: doc.revision + 1, updatedAt: new Date(Date.now() + 100).toISOString(), state: { ...doc.state, order: { ...doc.state.order, project: 'AGENT_SAVED_LATER' } } };
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await expect(project).toHaveValue('AGENT_SAVED_LATER'); await expect(page.locator('#confirmModal')).toBeHidden();
+    await expect(page.locator('#crmStorageStatus')).toBeHidden();
+    await page.screenshot({ path: path.join(output, 'current-state-desktop.png'), fullPage: true, animations: 'disabled' });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.screenshot({ path: path.join(output, 'current-state-mobile.png'), fullPage: false, animations: 'disabled' });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    await page.setViewportSize({ width: 360, height: 800 });
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.screenshot({ path: path.join(output, 'current-state-mobile-360.png'), fullPage: false, animations: 'disabled' });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    console.log(JSON.stringify({ status: 'KP_CURRENT_STATE_BROWSER', output, writesDuringOpen: priorWrites, dialogs: 0 }));
+  } finally { await context.close(); }
+});
+
+
+test('unavailable IndexedDB leaves the editor readable and exports a real saved-server PDF without a PUT', async () => {
+  reset(); renderSavedPdf = true;
+  const context = await browser.newContext();
+  await context.addInitScript(() => { IDBFactory.prototype.open = function () { throw new DOMException('Storage denied', 'SecurityError'); }; });
+  const page = await context.newPage();
+  try {
+    await page.goto(origin + '/port');
+    await expect(page.locator('[data-path="order.project"]')).toHaveValue(state.order.project);
+    await expect(page.locator('#crmStorageStatus')).toContainText('Локальное сохранение недоступно');
+    const file = await page.evaluate(() => window.PeroCrmKp.generatePdf());
+    assert.equal(file.artifactId, 'pdf'); assert.equal(writes.length, 0); assert.equal(pdfRequests.length, 1);
+    assert.ok(pdfBytes.length > 1000); assert.equal(pdfBytes.subarray(0, 5).toString(), '%PDF-');
+    await writeFile(path.join(output, 'server-without-local-storage.pdf'), pdfBytes);
+    await page.locator('[data-path="order.project"]').fill('IN_MEMORY_UNSAVED');
+    await page.evaluate(() => window.PeroCrmKp.reconcile());
+    await expect(page.locator('[data-path="order.project"]')).toHaveValue('IN_MEMORY_UNSAVED');
+  } finally { await context.close(); }
 });
