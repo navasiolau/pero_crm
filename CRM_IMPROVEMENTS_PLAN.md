@@ -169,4 +169,4 @@ OpenSpec размещаем в `D:\Projects\pero_crm_v2\openspec`, схема `s
 
 | № | Ветка | OpenSpec | Статус |
 |---|---|---|---|
-| 200 | bugfix/200 | kp-current-state-selection | Реализован автоматический выбор целого актуального снимка и единое локальное хранилище; локальная приёмка выполнена. Владелец разрешил коммит и staging; CI и фактическая staging-приёмка выполняются. Main/production не разрешены. |
+| 200 | bugfix/200 | kp-current-state-selection | Автоматический выбор целого актуального снимка, IndexedDB без накопления копий. Код принят на staging d8a6af0e: полный CI41024660588 — 7/7, настоящий UI/session/PDF и mobile; см. staging-acceptance.json. Main/production не разрешены. |

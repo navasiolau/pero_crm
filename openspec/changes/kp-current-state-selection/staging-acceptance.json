@@ -1,0 +1,67 @@
+{
+  "schema": 1,
+  "status": "CODE_STAGING_ACCEPTED",
+  "codeCommit": "af5debfcebbdcce277416ab1a7d1bd94a3a50099",
+  "testedStagingSha": "d8a6af0e21603dc3f8f61538ad5cf4a4d5e5652d",
+  "ci": {
+    "runId": "41024660588",
+    "url": "https://github.com/navasiolau/pero_crm/actions/runs/41024660588",
+    "successfulJobs": 7,
+    "workflowChanged": false
+  },
+  "runtime": {
+    "web": {
+      "image": "sha256:26771a9d9f52ac31822af06c52bfd8a971548d73dc6f7e27b3396999d274bf56",
+      "revision": "d8a6af0e21603dc3f8f61538ad5cf4a4d5e5652d",
+      "ciRun": "41024660588",
+      "health": "healthy"
+    },
+    "kp-renderer": {
+      "image": "sha256:6b673c85561647d82a27adb9d4693cded419ce46215cd87f3fbbbe5c9bb74c2d",
+      "revision": "d8a6af0e21603dc3f8f61538ad5cf4a4d5e5652d",
+      "ciRun": "41024660588",
+      "health": "healthy"
+    }
+  },
+  "database": {
+    "identityPreserved": true,
+    "pidStartedAtAndMountPreserved": true,
+    "migrations": 0,
+    "dumps": 0
+  },
+  "checks": {
+    "localSurvivesReload": true,
+    "laterAgentWins": true,
+    "quotaReproduced": true,
+    "actualSaveAndPdf": true,
+    "browserDownloadVerified": true,
+    "dialogs": 0,
+    "privateSshHttpSession": true,
+    "publicBasicAuthTested": false
+  },
+  "qa": {
+    "proposalId": "cmvupo6e90003mi0100s2jfdu",
+    "projectId": "296",
+    "number": "296",
+    "initialRevision": 0,
+    "agentRevision": 1,
+    "finalRevision": 2,
+    "retainedQa": true
+  },
+  "pdf": {
+    "pages": 2,
+    "bytes": 270487,
+    "sha256": "fe268a0f8617078f27427bab9630be70af20c46884606d6bc541f357e48c6b50",
+    "actualFinalSnapshot": true,
+    "amountPreserved": true
+  },
+  "visualQa": {
+    "desktop": "1440x900",
+    "mobile": [
+      "390x844",
+      "360x800"
+    ],
+    "allPdfPagesInspected": true
+  },
+  "productionRequests": 0
+}
