@@ -8,11 +8,15 @@ const initial = () => ({ id: 'primary', revision: 2, canEdit: true, project: { i
   client: { id: 'A', label: 'Клиент A' }, fx: { currency: 'BYN', rate: '1', date: '2026-10-27', source: 'MANUAL' },
   state: { currency: 'BYN', items: [], client: { crmId: 'A', name: 'Клиент A', contact: '' } } });
 function fixture(handler) {
-  let state = initial().state;
+  let state = initial().state, remote = initial();
   const calls = [], values = new Map();
   const api = createTransport({ actorId: 'actor', documentId: 'primary', apiBase: '/api/kp' }, {
     storage: { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value), removeItem: key => values.delete(key) },
-    fetch: async (url, options) => { const call = { url, body: JSON.parse(options.body) }; calls.push(call); return handler(call, calls); }
+    fetch: async (url, options) => {
+      if (!options.method) return response(remote);
+      const call = { url, body: JSON.parse(options.body) }; calls.push(call);
+      const result = await handler(call, calls); if (result.ok) remote = await result.clone().json(); return result;
+    }
   });
   api.focusDocument(initial());
   api.attachEditor({ getState: () => copy(state), applyState: value => { state = value; }, ensureSaved: () => api.save(state) });

@@ -10,9 +10,9 @@ export async function buildKpEditorFrame(bootstrap: ProposalEditorBootstrap): Pr
     .replace(/href="\/css\//g, 'href="/kp/assets/css/').replace(/src="\/js\//g, 'src="/kp/assets/js/')
     .replace('href="/icons/apple-touch-icon.png"', 'href="/kp/assets/icons/apple-touch-icon.png"')
     .replace('</head>', '<link rel="stylesheet" href="/kp/assets/fonts/fonts.css"><link rel="stylesheet" href="/kp/assets/css/crm.css"></head>')
-    .replace('<body>', '<body class="crm-loading"><div id="crmReadOnly" class="crm-readonly" role="status" hidden></div>');
+    .replace('<body>', '<body class="crm-loading"><div id="crmStorageStatus" class="crm-readonly" role="status" hidden></div><div id="crmReadOnly" class="crm-readonly" role="status" hidden></div>');
   const json = JSON.stringify(bootstrap).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
-  return html.replace('<script src="/kp/assets/js/sheet-render.js">', '<script id="peroCrmBootstrap" type="application/json">' + json + '</script><script src="/kp/assets/js/kp-list.js"></script><script src="/kp/assets/js/crm-transport.js"></script><script src="/kp/assets/js/sheet-render.js">');
+  return html.replace('<script src="/kp/assets/js/sheet-render.js">', '<script id="peroCrmBootstrap" type="application/json">' + json + '</script><script src="/kp/assets/js/kp-list.js"></script><script src="/kp/assets/js/kp-local-state.js"></script><script src="/kp/assets/js/crm-transport.js"></script><script src="/kp/assets/js/sheet-render.js">');
 }
 
 export const kpPrivateHeaders = {

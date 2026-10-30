@@ -8,11 +8,17 @@ const { join } = require('node:path');
 const SheetRender = require('../assets/public/js/sheet-render.js');
 const copy = value => JSON.parse(JSON.stringify(value));
 function fixture(handler, actorId = 'actor', values = new Map()) {
-  const calls = [], emitted = [];
+  const calls = [], emitted = [], reads = []; let remote = doc();
   const storage = { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value), removeItem: key => values.delete(key) };
   const api = createTransport({ actorId, documentId: 'primary', apiBase: '/api/kp' }, { storage, emit: message => emitted.push(message), uuid: () => crypto.randomUUID(),
-    fetch: async (url, options) => { const call = { url, options, body: typeof options.body === 'string' ? JSON.parse(options.body) : options.body }; calls.push(call); return handler(call, calls); } });
-  return { api, calls, emitted, values };
+    fetch: async (url, options) => {
+      if (url === '/api/kp/documents/primary' && !options.method) { reads.push(url); return response(remote || api.getDocument() || doc()); }
+      const call = { url, options, body: typeof options.body === 'string' ? JSON.parse(options.body) : options.body };
+      calls.push(call); const result = await handler(call, calls);
+      if (options.method === 'PUT' && result.ok) { const row = await result.clone().json(); if (row.id === 'primary') remote = row; }
+      return result;
+    } });
+  return { api, calls, emitted, values, reads, set remote(value) { remote = value; } };
 }
 const doc = () => ({ id: 'primary', revision: 2, state: { currency: 'BYN', items: [{ id: 'position', qty: 2, name: 'Шкаф' }], client: {} },
   canEdit: true, client: { id: 'client', label: 'Клиент' }, project: { id: 'project', number: '231', stage: 'LEAD' }, fx: { currency: 'BYN', rate: '1', date: '2026-10-18', source: 'NBRB' } });
@@ -332,7 +338,7 @@ test('read-only and omitted DELETE fail without transport; private media and dra
   assert.equal(testbed.calls.length, 0);
   assert.equal(testbed.api.mediaUrl('https://example.invalid/private'), '');
   assert.equal(testbed.api.mediaUrl('kp-media:photo'), '/api/kp/documents/primary/media/photo?variant=optimized&scope=current');
-  const original = testbed.api.localDraftKey(); testbed.api.focusDocument({ ...doc(), revision: 3 }); assert.notEqual(testbed.api.localDraftKey(), original);
+  const original = testbed.api.localDraftKey(); testbed.api.focusDocument({ ...doc(), revision: 3 }); assert.equal(testbed.api.localDraftKey(), original);
   const other = fixture(() => {}, 'other-actor'); other.api.focusDocument(doc()); assert.notEqual(other.api.localDraftKey(), original);
 });
 
@@ -373,11 +379,11 @@ test('known failed job permits a fresh Generate, while a lost export ACK retains
   assert.equal((await stale.api.generatePdf()).artifactId, 'current');
   assert.deepEqual(stale.calls[1].body, oldBody);
   assert.deepEqual(stale.calls.slice(1).map(call => call.url), ['/api/kp/documents/primary/pdf', '/api/kp/operations/' + oldBody.operationId,
-    '/api/kp/documents/primary', '/api/kp/documents/primary/pdf']);
+    '/api/kp/documents/primary/pdf']);
   assert.equal(stale.calls.at(-1).body.expectedRevision, 3);
   assert.notEqual(stale.calls.at(-1).body.operationId, oldBody.operationId);
   assert.equal(freshPosts, 1);
-  authoritative = { ...authoritative, revision: 4 };
+  authoritative = { ...authoritative, revision: 4 }; stale.remote = authoritative;
   await assert.rejects(stale.api.generatePdf(), error => error.status === 409);
   assert.equal(freshPosts, 1);
   assert.equal(stale.api.getDocument().revision, 3);
@@ -431,7 +437,7 @@ test('long PDF polling reconnects to the same job after transient failures witho
 test('private upload scope survives reload and becomes current only after the saved snapshot ACK', async () => {
   const values = new Map(), storage = { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value), removeItem: key => values.delete(key) };
   const make = () => createTransport({ actorId: 'actor', documentId: 'primary', apiBase: '/api/kp' }, { storage,
-    fetch: async (_url, options) => options.method === 'POST' ? response({ mediaId: 'photo', reference: 'kp-media:photo' }) : response({ ...doc(), revision: 3, state: JSON.parse(options.body).state }) });
+    fetch: async (_url, options) => !options.method ? response(doc()) : options.method === 'POST' ? response({ mediaId: 'photo', reference: 'kp-media:photo' }) : response({ ...doc(), revision: 3, state: JSON.parse(options.body).state }) });
   const first = make(); first.focusDocument(doc());
   await first.upload(new File(['fixture'], 'source.png', { type: 'image/png' }), new File(['optimized'], 'source.jpg', { type: 'image/jpeg' }));
   assert.ok(first.mediaUrl('kp-media:photo').endsWith('scope=uploaded'));

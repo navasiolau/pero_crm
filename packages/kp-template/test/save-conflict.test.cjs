@@ -50,15 +50,13 @@ function stale(f) {
   f.values.set(pendingKey, JSON.stringify({ fingerprint: 'historical', body })); return body;
 }
 
-test('stale persisted save after fresh GET backs up exact old UUID and retries current edits once', async () => {
+test('stale persisted save retries exact UUID then saves newer edits without backup copies', async () => {
   const f = fixture(), old = stale(f); f.local.footer = 'Новая подпись';
   const result = await f.api.save(f.local);
   assert.equal(result.revision, 3); assert.equal(result.state.footer, 'Новая подпись');
   assert.deepEqual(f.puts[0].body, old); assert.equal(f.puts.length, 2);
   assert.notEqual(f.puts[1].body.operationId, old.operationId); assert.equal(f.puts[1].body.expectedRevision, 2);
-  assert.equal(f.values.has(pendingKey), false); assert.equal(f.backups.length, 1);
-  const backup = JSON.parse(f.backups[0][1]); assert.deepEqual(backup.pending.body, old); assert.equal(backup.local.state.footer, 'Новая подпись');
-  assert.equal(f.api.draftContext().prefix, 'pero-crm-kp:actor:primary:draft:');
+  assert.equal(f.values.has(pendingKey), false); assert.equal(f.backups.length, 0);
 });
 
 test('unknown ACK and unknown operation lookup retain exact UUID/body', async () => {
@@ -78,46 +76,26 @@ test('old confirmed receipt cannot regress a newer loaded revision', async () =>
   assert.equal(f.puts[1].body.expectedRevision, 2); assert.equal(f.api.getDocument().revision, 3);
 });
 
-test('disjoint properties merge, preserving newest edits during reconciliation', async () => {
-  const f = fixture(); f.local.footer = 'Локальная подпись';
-  f.local.currency = 'USD'; const fx = { ...initial().fx, currency: 'USD', rate: '3.25' };
-  f.api.restoreDraftContext({ fx, client: { id: 'selected', label: 'Выбранный клиент' } });
-  f.remote = { ...f.remote, revision: 3, state: { ...f.remote.state, order: { project: 'Серверный проект' } } };
-  let release; f.beforeRead = () => new Promise(resolve => { release = resolve; });
-  const first = f.api.save(f.local); await tick();
-  f.local.footer = 'Последняя правка'; const second = f.api.save(f.local);
-  release(); f.beforeRead = null; await first; const result = await second;
-  assert.equal(result.state.footer, 'Последняя правка'); assert.equal(result.state.order.project, 'Серверный проект');
-  assert.deepEqual(f.local, result.state); assert.equal(f.puts.length, 3);
-  assert.deepEqual(f.puts.at(-1).body.fx, fx); assert.equal(f.puts.at(-1).body.clientId, 'selected');
+test('newer server snapshot wins as a whole without a PUT or conflict dialog', async () => {
+  const f = fixture(); f.local.footer = 'Локальная'; f.api.noteEdit(f.local);
+  f.remote = { ...f.remote, revision: 3, updatedAt: '2099-01-01T00:00:00.000Z', state: { ...f.remote.state, footer: 'Серверная', order: { project: 'Агент' } } };
+  const result = await f.api.save(f.local);
+  assert.equal(result.state.footer, 'Серверная'); assert.equal(f.local.order.project, 'Агент'); assert.equal(f.puts.length, 0);
+  assert.equal(f.backups.length, 0); assert.equal(f.values.has(f.api.localDraftKey()), false);
 });
 
-test('array overlap blocks autosave until explicit choice and rechecks remote before local overwrite', async () => {
-  const f = fixture(); f.local.items[0].name = 'Локальный шкаф';
-  f.remote = { ...f.remote, revision: 3, state: { ...f.remote.state, items: [{ id: 'item', name: 'Серверный шкаф' }] } };
-  await assert.rejects(f.api.save(f.local), error => error.code === 'KP_SAVE_CONFLICT');
-  assert.deepEqual(f.api.getSaveConflict().paths, ['state.items']); assert.equal(f.puts.length, 1);
-  await assert.rejects(f.api.save(f.local)); assert.equal(f.puts.length, 1);
-  f.remote = { ...f.remote, revision: 4, state: { ...f.remote.state, footer: 'Ещё одна правка' } };
-  await assert.rejects(f.api.resolveSaveConflict('local')); assert.equal(f.puts.length, 1);
-  const result = await f.api.resolveSaveConflict('local');
-  assert.equal(result.state.items[0].name, 'Локальный шкаф'); assert.equal(f.api.getSaveConflict(), null);
-  assert.equal(result.state.footer, 'Ещё одна правка');
-  assert.ok(f.backups.length >= 1);
+test('newer local snapshot replaces the whole older server snapshot', async () => {
+  const f = fixture(); f.local.footer = 'Локальная'; f.api.noteEdit(f.local);
+  f.remote = { ...f.remote, revision: 3, state: { ...f.remote.state, order: { project: 'Более старый сервер' } } };
+  const result = await f.api.save(f.local);
+  assert.equal(result.state.footer, 'Локальная'); assert.equal(result.state.order.project, 'Исходный');
+  assert.equal(f.puts.length, 1); assert.equal(f.puts[0].body.expectedRevision, 3);
 });
 
-test('remote conflict choice publishes latest without PUT and retains backup', async () => {
-  const f = fixture(); f.local.footer = 'Локальная'; f.remote = { ...f.remote, revision: 3, state: { ...f.remote.state, footer: 'Серверная' } };
-  await assert.rejects(f.api.save(f.local)); await f.api.resolveSaveConflict('remote');
-  assert.equal(f.local.footer, 'Серверная'); assert.equal(f.puts.length, 1); assert.ok(f.backups.length);
-});
-
-test('locked stage and durable storage failure never force a retry', async () => {
-  const f = fixture(); f.remote = { ...f.remote, revision: 3, canEdit: false, project: { id: 'project', stage: 'DONE' } };
-  await assert.rejects(f.api.save(f.local)); assert.equal(f.puts.length, 1);
-  const quota = fixture(); stale(quota); quota.failBackup = true;
-  await assert.rejects(quota.api.save(quota.local), /сохранить.*копию/i);
-  assert.equal(JSON.parse(quota.values.get(pendingKey)).body.operationId, 'old-operation'); assert.equal(quota.puts.length, 1);
+test('locked server stage is refreshed without a force write', async () => {
+  const f = fixture(); f.local.footer = 'Локальная';
+  f.remote = { ...f.remote, revision: 3, canEdit: false, project: { id: 'project', stage: 'DONE' } };
+  const result = await f.api.save(f.local); assert.equal(result.canEdit, false); assert.equal(f.puts.length, 0);
 });
 
 test('only one automatic retry is allowed and PDF receives the final saved revision', async () => {
