@@ -17,6 +17,28 @@ async function prepare(f = contractWorkflowFixture()) {
   return { f, workflow, form, request, saved, exportRequest, queued, claim: f.claim(String(queued.id)) };
 }
 
+test('все этапы проекта: успешный договор продвигает только Лид и Просчёт, повтор не меняет результат', async () => {
+  for (const stage of ['LEAD', 'ESTIMATE', 'CONTRACT', 'IN_WORK', 'DONE', 'RECLAMATION', 'PAUSED', 'REFUSED']) {
+    const prepared = await prepare(contractWorkflowFixture([source('cp_a', stage)]));
+    assert.deepEqual(prepared.f.state.stages, [], 'сохранение и очередь не меняют этап');
+    await prepared.workflow.runClaim(prepared.claim);
+    assert.deepEqual(prepared.f.state.stages, ['LEAD', 'ESTIMATE'].includes(stage) ? ['cp_a'] : [], stage);
+    assert.equal(prepared.f.state.versions.length, 1);
+    await prepared.workflow.finalize(prepared.claim, { pdfs: [], docx: { id: 'unused', storageBinding: {}, key: '', sha256: '', size: 0 }, pageCounts: [] });
+    assert.equal(prepared.f.state.versions.length, 1, 'повтор успешной операции не создаёт версию');
+    assert.deepEqual(prepared.f.state.stages, ['LEAD', 'ESTIMATE'].includes(stage) ? ['cp_a'] : [], stage);
+  }
+});
+
+test('ошибка перехода откатывает готовый договор и версии приложений одной транзакцией', async () => {
+  const prepared = await prepare();
+  prepared.f.ports.lifecycle.advanceToContract = async () => { throw Error('STAGE_FAILURE'); };
+  await assert.rejects(prepared.workflow.runClaim(prepared.claim), /STAGE_FAILURE/);
+  assert.equal(prepared.f.state.versions.length, 0); assert.equal(prepared.f.state.sourceVersions.length, 0);
+  assert.deepEqual(prepared.f.state.stages, []);
+  assert.notEqual(prepared.f.state.jobs.get(prepared.claim.id)?.state, 'SUCCEEDED');
+});
+
 test("форма берёт единого клиента КП и проекта, не записывает CRM и не угадывает юрлицо", async () => {
   const f = contractWorkflowFixture(), before = structuredClone(f.state.clients);
   const form = await createContractWorkflow(f.ports).form(contractActor, "cp_a");
