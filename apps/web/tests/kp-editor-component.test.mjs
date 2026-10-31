@@ -84,6 +84,8 @@ before(async () => {
     if (url.pathname === '/api/kp/documents/primary/versions/old-version/restore') { const input = await body(request); assert.equal(input.expectedRevision, doc.revision); doc = { ...doc, fx: baseDoc().fx, revision: doc.revision + 1, state: { ...copy(state), order: { ...state.order, project: 'Старая версия' } } }; json(response, doc); return; }
     if (url.pathname === '/original') {
       let html = await readFile(template.assetPath('app/index.html'), 'utf8');
+      // Старый JS эталона требует прежние DOM-узлы; они не участвуют в печатном листе.
+      if (!html.includes('id="docsPanel"')) html = html.replace('</aside>', '<div hidden><button class="js-docs-toggle"></button><button class="js-docs-save"></button><span id="docsCurrent"></span><div id="docsPanel"><div id="docsList"></div></div></div></aside>');
       html = html.replace(/<link[^>]+href="https:\/\/fonts\.(?:googleapis|gstatic)\.com[^>]*>/g, '').replace(/<link[^>]+rel="manifest"[^>]*>/g, '')
         .replace(/href="\/css\//g, 'href="/kp/assets/css/').replace(/src="\/js\//g, 'src="/baseline/js/')
         .replace('</head>', '<link rel="stylesheet" href="/kp/assets/fonts/fonts.css"></head>');
@@ -190,6 +192,7 @@ test('actual editor preserves source print DOM and page sizes on desktop/mobile,
       assert.equal(await page.locator('[data-path="order.number"]').getAttribute('readonly'), '');
       assert.equal(await page.locator('[data-path="client.name"]').getAttribute('readonly'), '');
       assert.equal(await page.locator('.doc-del').count(), 0);
+      assert.equal(await page.locator('.js-new,.js-docs-toggle,.js-docs-save,#docsPanel').count(), 0);
       assert.equal(await page.locator('#deliveryEditor select').count(), 0);
       assert.equal(await page.evaluate(() => window.PeroCrmKp.getDocument().state.delivery.items[0].crmKind), 'DELIVERY', 'stored metadata stays silent');
       if (viewport.width < 900) await page.locator('[data-view="editor"]').click();
@@ -202,8 +205,8 @@ test('actual editor preserves source print DOM and page sizes on desktop/mobile,
       await page.locator('#deliveryEditor').screenshot({ path: path.join(output, 'service-controls-' + viewport.width + '.png'), animations: 'disabled' });
       if (viewport.width < 900) await page.locator('[data-view="sheet"]').click();
       assert.equal(await page.locator('#sheet img').first().getAttribute('src'), '/api/kp/documents/primary/media/photo?variant=optimized&scope=current');
-      await page.screenshot({ path: path.join(output, 'editor-' + viewport.width + '.png'), fullPage: true });
-      await baseline.screenshot({ path: path.join(output, 'original-editor-' + viewport.width + '.png'), fullPage: true });
+      await page.screenshot({ path: path.join(output, 'editor-' + viewport.width + '.png'), fullPage: true, animations: 'disabled' });
+      await baseline.screenshot({ path: path.join(output, 'original-editor-' + viewport.width + '.png'), fullPage: true, animations: 'disabled' });
       await baseline.close();
     } finally { await context.close(); }
   }

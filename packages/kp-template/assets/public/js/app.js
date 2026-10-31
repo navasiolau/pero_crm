@@ -2,7 +2,6 @@
 'use strict';
 var CRM = window.PeroCrmKp;
 if (!CRM) throw new Error('KP_TRANSPORT_REQUIRED');
-var DOCS_LS_KEY = CRM.documentsCacheKey;
 
 var R = window.SheetRender;
 var LOGO = R.LOGO;
@@ -119,11 +118,6 @@ var zval = document.getElementById('zval');
 var pagesChip = document.getElementById('pagesChip');
 var deliveryEditor = document.getElementById('deliveryEditor');
 var discToggle = document.getElementById('discToggle');
-var docsCurrent = document.getElementById('docsCurrent');
-var docsBtn = document.querySelector('.js-docs-toggle');
-var docsSaveBtn = document.querySelector('.js-docs-save');
-var docsPanel = document.getElementById('docsPanel');
-var docsList = document.getElementById('docsList');
 var confirmModal = document.getElementById('confirmModal');
 var confirmTitle = document.getElementById('confirmTitle');
 var confirmText = document.getElementById('confirmText');
@@ -553,154 +547,18 @@ document.querySelectorAll('.js-add').forEach(function (b) {
 
 document.querySelectorAll('.js-pdf').forEach(function (b) { b.addEventListener('click', genPdf); });
 
-var docsLoading = false;
-var docsNamesCache = {};
-try {
-    var dn = localStorage.getItem(DOCS_LS_KEY);
-    if (dn) docsNamesCache = JSON.parse(dn) || {};
-} catch (e) { docsNamesCache = {}; }
-
-function saveDocsNamesCache() {
-    try { localStorage.setItem(DOCS_LS_KEY, JSON.stringify(docsNamesCache)); } catch (e) { }
-}
-
-function pad2(n) { return (n < 10 ? '0' : '') + n; }
-
-function fmtDocStamp(updatedAt) {
-    if (!updatedAt) return '';
-    return new Intl.DateTimeFormat('ru-RU', { timeZone: 'Europe/Moscow', dateStyle: 'short', timeStyle: 'medium' }).format(new Date(updatedAt));
-}
-
-function docNumber(doc) {
-    var number = '';
-    if (doc.number) { number = String(doc.number); }
-    else if (doc.name) {
-        var m = doc.name.match(/КП №([^\s—]+)/);
-        if (m) number = m[1].trim();
-    } else if (doc.state && doc.state.order && String(doc.state.order.number || '').trim()) {
-        number = String(doc.state.order.number).trim();
-    }
-    return number ? '№' + number : '';
-}
-
-function docLabel(doc) {
-    var num = docNumber(doc);
-    var stamp = fmtDocStamp(doc.updatedAt);
-    return (num ? 'КП ' + num : 'КП №—') + (stamp ? ' · ' + stamp : '');
-}
-
-function renderDocsCurrent() {
-    if (!docsCurrent) return;
-    var label = currentDocId ? docsNamesCache[currentDocId] : '';
-    if (currentDocId && label) {
-        var m = label.match(/(№[^\s·—]+)/);
-        docsCurrent.textContent = '- ' + (m ? m[1] : 'сохранено');
-        docsCurrent.style.display = 'inline';
-    } else if (currentDocId) {
-        docsCurrent.textContent = '- сохранено';
-        docsCurrent.style.display = 'inline';
-    } else {
-        docsCurrent.textContent = '';
-        docsCurrent.style.display = 'none';
-    }
-}
-
-function setDocsPanel(open) {
-    docsPanel.hidden = !open;
-    docsBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
-}
-
 function docsBusy(show, title) {
     busyModal.hidden = !show;
     if (show) busyTitle.textContent = title || 'Выполняем…';
 }
 
-async function loadDocsList(force) {
-    if (docsLoading) return;
-    docsLoading = true;
-    docsList.innerHTML = '<div class="docs-loading"><span class="spinner"></span> загружаем…</div>';
-    try {
-        var r = await CRM.request('/api/documents');
-        var data = r;
-        var docs = (data && data.documents) || [];
-        if (force) {
-            saveDocsNamesCache();
-        }
-        if (!docs.length) {
-            docsList.innerHTML = '<div class="docs-empty">Пока ничего не сохранено</div>';
-        } else {
-            docsList.innerHTML = docs.map(function (doc) {
-                var active = doc.id === currentDocId;
-                return '<div class="doc-row' + (active ? ' on' : '') + '" data-docid="' + esc(doc.id) + '">' +
-                    '<button class="doc-open" type="button" title="' + esc(docLabel(doc)) + '">' + esc(docLabel(doc)) + '</button>' +
-                    (active ? '<span class="doc-current-tag">текущее</span>' : '') +
-                    (doc.project && doc.project.id ? '<a class="doc-project" href="/projects/' + encodeURIComponent(doc.project.id) + '" target="_top" title="Открыть проект">↗</a>' : '') +
-                    '</div>';
-            }).join('');
-        }
-        renderDocsSaveBtn();
-    } catch (e) {
-        console.error('[docs list]', e);
-        docsList.innerHTML = '<div class="docs-empty">Не удалось загрузить</div>';
-        toast('Не удалось загрузить список сохранённых КП', 4000);
-    }
-    docsLoading = false;
+function closeConfirm() {
+    confirmModal.hidden = true;
+    confirmOk.style.display = '';
 }
-
-function renderDocsSaveBtn() {
-    if (!docsSaveBtn) return;
-    docsSaveBtn.textContent = currentDocId ? 'Сохранить текущее' : 'Сохранить как новое';
-}
-
-docsBtn.addEventListener('click', function () {
-    var opening = docsPanel.hidden;
-    setDocsPanel(opening);
-    if (opening) loadDocsList();
-});
-
-document.addEventListener('click', function (e) {
-    var widget = e.target.closest('[data-docs-widget]');
-    if (!widget) setDocsPanel(false);
-});
-
-function toggleDocsConfirm(show, id, name) {
-    if (show) {
-        confirmModal.dataset.docid = id;
-        confirmTitle.textContent = 'Удалить сохранённое КП?';
-        confirmText.textContent = name;
-        confirmModal.hidden = false;
-    } else {
-        confirmModal.dataset.docid = '';
-        confirmModal.hidden = true;
-    }
-}
-
-docsList.addEventListener('click', function (e) {
-    var op = e.target.closest('.doc-open');
-    if (op) {
-        var row = op.closest('.doc-row');
-        applySavedDoc(row.dataset.docid);
-        setDocsPanel(false);
-        return;
-    }
-    var del = e.target.closest('.doc-del');
-    if (del) {
-        var drow = del.closest('.doc-row');
-        toggleDocsConfirm(true, drow.dataset.docid, drow.querySelector('.doc-open').textContent);
-    }
-});
-
-confirmCancel.addEventListener('click', function () { toggleDocsConfirm(false, '', ''); });
-
-
-confirmModal.addEventListener('click', function (e) {
-    if (e.target === confirmModal) { toggleDocsConfirm(false, '', ''); }
-});
-document.addEventListener('keydown', function (event) { if (event.key === 'Escape') toggleDocsConfirm(false, '', ''); });
-
-confirmCancel.addEventListener('click', function () {
-    toggleDocsConfirm(false, '', ''); confirmOk.style.display = '';
-});
+confirmCancel.addEventListener('click', closeConfirm);
+confirmModal.addEventListener('click', function (event) { if (event.target === confirmModal) closeConfirm(); });
+document.addEventListener('keydown', function (event) { if (event.key === 'Escape') closeConfirm(); });
 
 function applyDocumentState(doc, preview) {
     clearTimeout(remoteSaveT);
@@ -713,8 +571,7 @@ function applyDocumentState(doc, preview) {
     if (state.delivery.visible === undefined) state.delivery.visible = true;
     if (state.discountMode !== 'amount') state.discountMode = 'percent';
     currentDocId = doc.id;
-    docsNamesCache[doc.id] = docNumber(doc); saveDocsNamesCache();
-    syncStaticInputs(); refreshAll(); renderDocsCurrent(); renderDocsSaveBtn(); CRM.applyPermissions();
+    syncStaticInputs(); refreshAll(); CRM.applyPermissions();
     if (!preview) CRM.acknowledgeHydration(doc, state);
 }
 async function applySavedDoc(id, skipSaveCurrent) {
@@ -752,8 +609,7 @@ async function saveCurrentDoc(id, opts) {
         currentDocId = doc.id;
         if (JSON.stringify(state) === serialized) state = clone(doc.state);
         if (doc.state.order) state.order.number = doc.state.order.number;
-        docsNamesCache[doc.id] = docNumber(doc); saveDocsNamesCache();
-        renderDocsCurrent(); renderDocsSaveBtn(); syncStaticInputs(); renderSheet(); updateTotal(); saveNow();
+            syncStaticInputs(); renderSheet(); updateTotal(); saveNow();
         return doc;
     } catch (error) {
         lastSaveError = error; saveNow();
@@ -770,28 +626,6 @@ async function ensureCurrentSaved() {
     if (!saved) throw lastSaveError || new Error('Не удалось сохранить КП');
     return saved;
 }
-
-docsSaveBtn.addEventListener('click', async function () {
-    docsBusy(true, 'Сохраняем КП…');
-    var doc = await saveCurrentDoc(currentDocId || undefined);
-    docsBusy(false);
-    if (doc) {
-        setDocsPanel(false);
-        toast('КП сохранено: ' + (doc.name || 'документ'));
-        loadDocsList(true);
-    }
-});
-
-document.querySelectorAll('.js-new').forEach(function (button) {
-    button.addEventListener('click', async function () {
-        if (!confirm('Создать новое КП и проект «Лид»?')) return;
-        if (CRM.isEditable() && !await saveCurrentDoc(currentDocId)) return;
-        docsBusy(true, 'Создаём КП…');
-        try { var doc = await CRM.create(); applyDocumentState(doc, false); toast('Новое КП создано'); }
-        catch (error) { toast(error.message, 5000); }
-        finally { docsBusy(false); }
-    });
-});
 
 var zoom = 1, userZoomed = false;
 function applyZoom() { scaleEl.style.transform = 'scale(' + zoom + ')'; if (zval) zval.textContent = Math.round(zoom * 100) + '%'; }

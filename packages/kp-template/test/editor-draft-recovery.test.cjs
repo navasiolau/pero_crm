@@ -55,7 +55,7 @@ async function fixture(initial = [], overlap = false, server = documentRow()) {
   return { values, nodes, api, window, reads, removed, writes, resolutions, get adapter() { return adapter; },
     async type(value) { field.value = value; await document.dispatch('input', field); },
     async timer(milliseconds) { const selected = [...timers].find(([, value]) => value.milliseconds === milliseconds); if (selected) { timers.delete(selected[0]); selected[1].callback(); await tick(); } },
-    save: () => node('.js-docs-save').dispatch('click'), set remote(value) { remote = copy(value); }, set now(value) { now = value; },
+    save: () => api.handleCommand({ type: 'flush' }), set remote(value) { remote = copy(value); }, set now(value) { now = value; },
     holdWrite() { let release; heldWrite = new Promise(resolve => { release = resolve; }); return release; } };
 }
 
