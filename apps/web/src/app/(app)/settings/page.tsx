@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/card";
 
 const sections = [
+  { href: "/settings/kp", icon: Wallet, title: "КП · Подпись и реквизиты", description: "Общие значения подписи, гарантии и реквизитов новых КП" },
   { href: "/settings/warehouse-units", icon: Ruler, title: "Единицы склада", description: "Обозначения единиц измерения номенклатуры — только для администратора" },
   { href: "/settings/product-percentages", icon: Wallet, title: "Проценты изделий", description: "Стандартные ставки новых изделий: инженер, сборщик и монтажник" },
   {

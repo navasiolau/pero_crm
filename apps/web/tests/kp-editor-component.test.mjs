@@ -1,5 +1,6 @@
 // Синтетический session/backend transport; реальные перенесённые HTML/CSS/JS и Chromium.
 import assert from 'node:assert/strict';
+import './kp-signature-settings-component.case.mjs';
 import { before, after, test } from 'node:test';
 import { createRequire } from 'node:module';
 import { once } from 'node:events';
