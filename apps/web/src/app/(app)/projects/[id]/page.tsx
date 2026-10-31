@@ -26,6 +26,7 @@ import { prisma } from "@/lib/prisma";
 import { getPluginSettings } from "@/server/plugins/run-log";
 import { getSlotContributions } from "@/server/plugins/slots";
 import { getProjectPricingProjection } from "@/server/projects/project-field-core";
+import { getProjectContactProjection } from '@/server/projects/contact-projection';
 import { getProjectEconomics } from "@/server/finance/queries";
 import { listActiveCashAccountOptions } from "@/server/finance/default-cash-core";
 import { getProjectFor, listClients, listEngineers, listManagers, listWorkers } from "@/server/projects/queries";
@@ -140,6 +141,7 @@ export default async function ProjectPage({
 
   const showOverviewAmount = canViewProductMoney(role);
   const pricingProjection = showOverviewAmount ? await getProjectPricingProjection({id:session.user.id,name:session.user.name??"",roles:role,source:"web"},project.id) : null;
+  const contactProjection = canManage ? await getProjectContactProjection({id:session.user.id,name:session.user.name??'',roles:role,source:'web'},project.id) : null;
   const hasShortage = materialsGroups.some(group => group.hasShortage);
 
   // Закрытые роли не вызывают логистические queries и не получают их RSC-проекции.
@@ -149,8 +151,8 @@ export default async function ProjectPage({
 
   return (
     <ProjectInlineProvider key={project.id} projectId={project.id} stage={project.stage} pricingProjection={pricingProjection} initial={{
-      title: project.title, clientId: project.clientId, managerId: project.managerId,
-      'client.phone':project.client.phone,'client.address':project.client.address,
+      title: project.title, clientId: contactProjection?.clientId??project.clientId, managerId: project.managerId,
+      'client.phone':contactProjection?.['client.phone']??project.client.phone,'client.address':contactProjection?contactProjection['client.address']:project.client.address,clientVersion:contactProjection?.clientVersion,
       servicesTotal: showOverviewAmount ? pricingProjection ? pricingProjection.servicesTotal ?? null : project.servicesTotal?.toString() ?? null : null,
       delivery: showOverviewAmount ? pricingProjection ? pricingProjection.delivery : project.delivery?.toString() ?? null : null, unloading: showOverviewAmount ? pricingProjection ? pricingProjection.unloading : project.unloading?.toString() ?? null : null, installation: showOverviewAmount ? pricingProjection ? pricingProjection.installation : project.installation?.toString() ?? null : null,
     }}>

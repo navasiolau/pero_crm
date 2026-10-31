@@ -10,6 +10,7 @@ export function createInlineSaveController<V extends InlineValue>(options: Inlin
   // Клиентские edits/ACK/receive обновляют только live state, не этот объект.
   const serverSnapshot = Object.freeze({ ...state });
   const listeners = new Set<() => void>();
+  const settledListeners = new Set<() => void>();
   let generation = 0;
   let inflight: Promise<boolean> | null = null;
   let uncertain: { request: InlineRequest<V>; generation: number } | null = null;
@@ -65,13 +66,14 @@ export function createInlineSaveController<V extends InlineValue>(options: Inlin
     if (inflight) return inflight;
     const promise = drain(retry);
     inflight = promise;
-    void promise.finally(() => { if (inflight === promise) { inflight = null; flushRequested = false; queued = null; } });
+    void promise.finally(() => { if (inflight === promise) { inflight = null; flushRequested = false; queued = null; if (!disposed) settledListeners.forEach(listener => listener()); } });
     return promise;
   }
   return {
     getSnapshot: () => state,
     getServerSnapshot: () => serverSnapshot,
     subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
+    subscribeSettled: (listener: () => void) => { settledListeners.add(listener); return () => { settledListeners.delete(listener); }; },
     setDraft,
     commit: () => start(),
     flush: () => start(false, true),
@@ -88,10 +90,11 @@ export function createInlineSaveController<V extends InlineValue>(options: Inlin
       return start(true);
     },
     receive: (value: V) => {
-      if (inflight || uncertain || !["idle", "saved"].includes(state.status)) return;
+      if (inflight || uncertain || !["idle", "saved"].includes(state.status)) return false;
       if (!Object.is(value, state.baseline)) publish({ draft: options.format(value), baseline: value, status: "idle", error: null });
+      return true;
     },
-    dispose: () => { disposed = true; listeners.clear(); },
+    dispose: () => { disposed = true; listeners.clear(); settledListeners.clear(); },
   };
 }
 export type InlineSaveController<V extends InlineValue = InlineValue> = ReturnType<typeof createInlineSaveController<V>>;

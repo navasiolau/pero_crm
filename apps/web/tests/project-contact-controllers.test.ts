@@ -12,6 +12,25 @@ import { createProjectPricingCache } from "../src/lib/project-pricing-cache";
 // Источник: project-contact-controllers.test.ts
 const initial={clientId:'a','client.phone':'100','client.address':'Client A'};
 function saved(input:ProjectPatch):ProjectPatchResult{return{kind:'saved',field:input.field,value:input.value,clientMutationId:input.clientMutationId,...(input.field==='clientId'?{derived:{clientId:String(input.value),phone:'200',clientAddress:'Client B'}}:{})};}
+
+test('поздний RSC старого клиента не отменяет подтверждённую смену, новый внешний выбор принимается',async()=>{
+ const group=createProjectContactControllers('project',{...initial,clientVersion:'10'},async input=>({...saved(input),derived:{clientId:'b',phone:'200',clientAddress:'Client B',clientVersion:'20'}}));
+ const client=group.controller('clientId');client.setDraft('b');assert.equal(await client.commit(),true);
+ assert.equal(group.receive({...initial,clientVersion:'11'}),false);assert.equal(client.getSnapshot().draft,'b');assert.equal(group.getSnapshot().clientId,'b');
+ assert.equal(group.receive({clientId:'c','client.phone':'300','client.address':'Client C',clientVersion:'30'}),true);
+ assert.equal(client.getSnapshot().draft,'c');assert.equal(group.getSnapshot().clientId,'c');
+});
+
+test('актуальный RSC во время смены применяется после ACK, старый RSC отбрасывается',async()=>{
+ for(const clientVersion of ['11','30']){
+  let release!:()=>void;const waiting=new Promise<void>(resolve=>{release=resolve;});
+  const group=createProjectContactControllers('project',{...initial,clientVersion:'10'},async input=>{await waiting;return{...saved(input),derived:{clientId:'b',phone:'200',clientAddress:'Client B',clientVersion:'20'}};});
+  const client=group.controller('clientId');client.setDraft('b');const changing=client.commit();
+  group.receive({clientId:clientVersion==='30'?'c':'a','client.phone':'300','client.address':'Server',clientVersion});
+  release();assert.equal(await changing,true);
+  assert.equal(group.getSnapshot().clientId,clientVersion==='30'?'c':'b');assert.equal(client.getSnapshot().draft,clientVersion==='30'?'c':'b');
+ }
+});
 test('client switch waits for delayed contact ACK and binds only canonical new contacts',async()=>{
  const calls:ProjectPatch[]=[];let release!:()=>void;const wait=new Promise<void>(resolve=>{release=resolve;});
  const group=createProjectContactControllers('project',initial,async input=>{calls.push(input);if(input.field==='client.phone')await wait;return saved(input);});
