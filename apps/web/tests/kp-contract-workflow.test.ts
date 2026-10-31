@@ -17,7 +17,7 @@ async function prepare(f = contractWorkflowFixture()) {
   return { f, workflow, form, request, saved, exportRequest, queued, claim: f.claim(String(queued.id)) };
 }
 
-test("форма берёт текущего клиента КП и адрес проекта, не записывает CRM и не угадывает юрлицо", async () => {
+test("форма берёт единого клиента КП и проекта, не записывает CRM и не угадывает юрлицо", async () => {
   const f = contractWorkflowFixture(), before = structuredClone(f.state.clients);
   const form = await createContractWorkflow(f.ports).form(contractActor, "cp_a");
   assert.equal(form.settings.customer.name, "Иванов Иван Иванович");
@@ -27,15 +27,22 @@ test("форма берёт текущего клиента КП и адрес �
   assert.equal(form.settings.customer.passport, "TEST-123\nТестовый орган");
   assert.equal(form.settings.deliveryAddress, "Адрес объекта");
   assert.equal(form.settings.customer.type, "individual");
-  assert.notEqual(f.state.sources[0].project!.clientId, f.state.sources[0].clientId);
+  assert.equal(f.state.sources[0].project!.clientId, f.state.sources[0].clientId);
   assert.deepEqual(f.state.clients, before); assert.equal(f.state.contract, null); assert.equal(f.state.jobs.size, 0); assert.deepEqual(f.state.stages, []);
+});
+
+test('договор не использует другую карточку при старом расхождении связей клиента', async () => {
+  const f = contractWorkflowFixture(); f.state.sources[0].project!.clientId = 'new-project-client';
+  const before = structuredClone(f.state);
+  await assert.rejects(createContractWorkflow(f.ports).form(contractActor, 'cp_a'), error => error instanceof ContractWorkflowError && error.code === 'CONTRACT_CLIENT_BINDING_CHANGED');
+  assert.deepEqual(f.state, before);
 });
 
 test("служебный клиент и отсутствующие сведения не становятся реквизитами заказчика", async () => {
   const defaults = contractClientDefaults({ ...contractClient(), id: "temporary", name: "Временный" }, "temporary", null);
   assert.deepEqual(defaults.customer, { name: "", phone: "", email: "", registrationAddress: "", passport: "" });
   assert.equal(contractClientDefaults({ ...contractClient(), passportNumber: null, passportIssuedBy: null, address: null, email: null }, "temporary", null).customer.passport, "");
-  const f = contractWorkflowFixture(); f.state.sources[0].clientId = "temporary"; f.state.clients[0].id = "temporary";
+  const f = contractWorkflowFixture(); f.state.sources[0].clientId = "temporary"; f.state.sources[0].project!.clientId = "temporary"; f.state.clients[0].id = "temporary";
   const workflow = createContractWorkflow(f.ports), form = await workflow.form(contractActor, "cp_a");
   assert.equal(form.settings.customer.name, "");
   form.settings.customer.name = "Заказчик введён вручную";

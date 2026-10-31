@@ -4,6 +4,7 @@ import { ProposalMediaError } from "./media-contract";
 import { ProposalLifecycleError } from "./lifecycle-contract";
 import { ContractWorkflowError } from "./contract-types";
 import { prisma } from "@/lib/prisma";
+import { changeApiClient } from "./api-client-binding";
 import { listApiDocuments, loadApiDocument, documentDto, saveApiDocument, uploadApiMedia, readApiMedia, listApiClients, clientApiDetails, createApiClient } from "./api-documents";
 import { getApiOperation, listApiVersions, getApiVersion, getApiJob, readApiArtifact } from "./api-resources";
 import { requestApiPdf, restoreApiVersion, contractApi } from "./api-lifecycle-commands";
@@ -17,6 +18,7 @@ export const kpApiService: KpApiService = {
         case "getDocument": await context.authorize("kp:read"); return documentDto(await loadApiDocument(prisma, String(input.proposalId)));
         case "createDocument": return await saveApiDocument(context, input, true);
         case "saveDocument": return await saveApiDocument(context, input, false);
+        case "changeClient": return await changeApiClient(context, input);
         case "readOperation": return await getApiOperation(context, String(input.operationId));
         case "upload": return await uploadApiMedia(context, input);
         case "readMedia": return await readApiMedia(context, input);

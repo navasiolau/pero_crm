@@ -65,6 +65,8 @@ export function createContractWorkflow(ports: ContractWorkflowPorts) {
     const currentContract = await tx.contract(primaryId);
     if ((currentContract?.revision ?? 0) !== (initialContract?.revision ?? 0)) contractFailure("CONTRACT_REVISION_CHANGED", "Договор изменён — обновите форму");
     sources = await tx.sources(allIds);
+    if (sources.some(source => source.project && source.project.clientId !== source.clientId))
+      contractFailure('CONTRACT_CLIENT_BINDING_CHANGED', 'Клиент проекта и КП различается. Выберите клиента проекта в КП для обновления связи');
     const clients = await tx.clients(sources.flatMap(source => source.clientId ? [source.clientId] : []).sort());
     const currentPrimary = sources.find(source => source.proposalId === primaryId)!;
     if (sources.some(source => source.clientId && !clients.some(client => client.id === source.clientId))) contractFailure("CONTRACT_CLIENT_MISSING", "Выбранный клиент КП недоступен");

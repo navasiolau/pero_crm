@@ -23,7 +23,7 @@ export function ProductInlineContacts({canManage,clients}:{canManage:boolean;cli
  const options=clients.map(row=>({value:row.id,label:row.label,hint:row.phone}));
  if(derived.clientId&&derived.clientLabel&&!options.some(row=>row.value===derived.clientId))options.push({value:derived.clientId,label:derived.clientLabel,hint:derived.phone??""});
  return<Card className="min-w-0"><CardContent className="flex min-w-0 flex-col gap-3 p-4 text-sm" data-product-contacts>
-  <div className="flex min-w-0 items-start gap-3"><div className="min-w-0 flex-1"><InlineSelectField id="product-inline-client" label="Клиент" controller={client} readOnly={!canManage} options={options}/></div>{canManage?<Button type="button" variant="outline" className="mt-6 shrink-0" onClick={()=>setCreateOpen(true)}>Новый клиент</Button>:null}</div>
+  <div className="flex min-w-0 items-start gap-3"><div className="min-w-0 flex-1"><InlineSelectField id="product-inline-client" label="Клиент" clientDirectory controller={client} readOnly={!canManage} options={options}/></div>{canManage?<Button type="button" variant="outline" className="mt-6 shrink-0" onClick={()=>setCreateOpen(true)}>Новый клиент</Button>:null}</div>
   <p id="product-client-phone" className="break-words"><span className="text-muted-foreground">Телефон: </span>{contact.known?contact.phone:"Не определён"}</p>
   <p id="product-client-address" className="break-words"><span className="text-muted-foreground">Адрес: </span>{contact.known?contact.address??"Не указан":"Не определён"}</p>
   <ClientDialog open={createOpen} onOpenChange={setCreateOpen} onCreated={async id=>{client.setDraft(id);await client.commit();}}/>

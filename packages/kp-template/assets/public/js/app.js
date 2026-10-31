@@ -863,7 +863,7 @@ window.addEventListener('load', function () { if (!userZoomed) fit(); updatePage
 window.addEventListener('pagehide', saveNow);
 var visibleRefresh = null;
 function refreshVisibleDocument() {
-    if (!CRM.isEditable() || mediaUploads.size || visibleRefresh) return;
+    if (!CRM.getDocument() || mediaUploads.size || visibleRefresh) return;
     visibleRefresh = CRM.reconcile().catch(function (error) { toast(error.message, 5000); }).finally(function () { visibleRefresh = null; });
 }
 window.addEventListener('focus', refreshVisibleDocument);

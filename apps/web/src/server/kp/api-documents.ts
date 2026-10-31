@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { ProposalDocument } from "@pero/kp-template";
 import { prisma } from "@/lib/prisma";
+import { listClientSelection } from '@/server/clients/options';
 import { clientSchema, createClientInTransaction } from "@/server/clients/core";
 import { withMutationTransaction } from "@/server/transactions/coordinator";
 import { deliverProjectCreated } from "@/server/projects/core";
@@ -11,7 +12,7 @@ import { deliverPostCommit } from "@/server/operations/post-commit";
 import { revalidateProductPaths } from "@/server/products/revalidate";
 import { revalidatePath } from "next/cache";
 import { apiFailure, apiId, apiOperationId, parseApi, type KpApiContext } from "./api-contract";
-import { proposalClientLabel, proposalClientSnapshot, proposalTemporaryClientId } from "./proposal-client";
+import { bindProposalClient, proposalClientLabel, proposalClientSnapshot, proposalTemporaryClientId } from "./proposal-client";
 import { createProposalInTransaction, saveProposalInTransaction, type ProposalSaveHooks, type ProposalWriteMutation } from "./proposal-core";
 import { normalizeProposalState, proposalObject, type ProposalState } from "./proposal-contract";
 import { projectProposalPricing } from "./pricing";
@@ -27,15 +28,18 @@ import { fetchKpNbrbRate, moscowDate, proposalSourceDate, rateDto, storedKpRate 
 import type { KpApiScope } from "@/lib/kp-api-scopes";
 
 export const liveApiProposalWhere = { deletedAt: null, OR: [{ projectId: null }, { project: { deletedAt: null } }] } satisfies Prisma.CommercialProposalWhereInput;
-const documentInclude = { project: { select: { id: true, number: true, stage: true, deletedAt: true } },
+const documentInclude = { project: { select: { id: true, number: true, stage: true, deletedAt: true, client: true } },
   client: { select: { id: true, name: true, lastName: true, middleName: true } } } satisfies Prisma.CommercialProposalInclude;
 type DocumentRow = Prisma.CommercialProposalGetPayload<{ include: typeof documentInclude }>;
 type DocumentDb = Pick<PrismaClient, "commercialProposal">;
 export function documentDto(row: DocumentRow): ProposalDocument & { sourceDate: string | null } {
   const rate = storedKpRate(row);
-  return { id: row.id, revision: row.revision, state: row.state as ProposalDocument["state"], createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString(),
+  const client = row.project?.client ?? row.client;
+  const state = (row.project?.client ? bindProposalClient(row.state as ProposalState, row.project.client, row.project.client.id === process.env.PERO_KP_TEMP_CLIENT_ID) : row.state) as unknown as ProposalDocument['state'];
+  return { id: row.id, revision: row.revision, state, createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString(),
     project: row.project ? { id: row.project.id, number: row.project.number, stage: row.project.stage } : null,
-    client: row.client ? { id: row.client.id, label: proposalClientLabel(row.client) } : null,
+    client: client ? { id: client.id, label: proposalClientLabel(client) } : null,
+    canChangeClient: !!row.project && row.project.deletedAt === null,
     canEdit: row.project?.stage === "LEAD" && row.project.deletedAt === null,
     fx: rate ? rateDto(rate) : null, sourceDate: proposalSourceDate(row.state) };
 }
@@ -232,9 +236,8 @@ export async function clientApiDetails(context: KpApiContext, clientId: string) 
 }
 export async function listApiClients(context: KpApiContext, input: Record<string, unknown>) {
   await context.authorize("kp:read");
-  const query = parseApi(z.object({ q: z.string().trim().max(200).default(""), limit: z.coerce.number().int().min(1).max(100).default(30) }).strict(), input);
-  const clients = await prisma.client.findMany({ where: query.q ? { OR: ["name", "lastName", "middleName", "phone"].map(field => ({ [field]: { contains: query.q, mode: "insensitive" } })) } : {},
-    select: { id: true, name: true, lastName: true, middleName: true, phone: true, address: true }, orderBy: [{ lastName: "asc" }, { name: "asc" }, { id: "asc" }], take: query.limit });
+  const query = parseApi(z.object({ q: z.string().trim().max(200).default(""), limit: z.coerce.number().int().min(1).max(100).optional() }).strict(), input);
+  const clients = await listClientSelection(context.actor, query.q, query.limit);
   return { clients: clients.map(client => ({ id: client.id, label: proposalClientLabel(client), phone: client.phone, address: client.address })) };
 }
 export async function createApiClient(context: KpApiContext, input: Record<string, unknown>) {

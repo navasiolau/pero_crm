@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
+import { listClientSelection } from './options';
 import { MANAGER_ROLES, hasAnyRole } from "@/lib/roles";
 import { withTaskTransaction } from "@/server/tasks/transaction";
 import {
@@ -32,6 +33,13 @@ export async function createClient(input: ClientInput): Promise<{ ok: boolean; i
   } catch {
     return { ok: false, error: "Не удалось создать клиента" };
   }
+}
+
+export async function clientSelectionOptions() {
+  const session = await auth();
+  if (!session?.user) throw Error('Не авторизован');
+  const clients = await listClientSelection(session.user);
+  return clients.map(client => ({ value: client.id, label: [client.lastName, client.name, client.middleName].filter(Boolean).join(' '), hint: client.phone }));
 }
 
 export async function updateClient(
