@@ -474,26 +474,36 @@
         if (command.type === 'flush') { await ensureSaved(); return; }
         if (command.type === 'pause') { paused = command.value === true; api.applyPermissions(); if (!paused && current?.canEdit && api.hasUnsavedChanges(editor.getState())) await editor.ensureSaved(); return; }
         if (command.type === 'client') {
-          if (!(current?.canChangeClient ?? current?.canEdit) || viewingVersion) throw new Error('Клиент недоступен для изменения');
+          if (!(current?.canChangeClient ?? current?.canEdit) || viewingVersion || paused) throw new Error('Клиент недоступен для изменения');
+          var selectionId = currentId;
           if (current.canEdit) {
             await saveQueue.catch(function () {});
             if (api.hasUnsavedChanges(editor.getState()) || retainedOperations[key(currentId, 'operation:save')] || read(key(currentId, 'operation:save'))) await editor.ensureSaved();
           }
+          if (currentId !== selectionId || viewingVersion || paused) throw new Error('Открыта другая редакция КП');
           var selectionBody = { expectedRevision: current.revision, expectedClientId: current.client.id, clientId: command.client.id };
-          var pendingSelection = await operation(currentId, 'client', selectionBody);
-          var selection = pendingSelection.entry || pendingSelection.previous;
+          var pendingSelection, selection;
+          paused = true;
           try {
-            var selectedDocument = await request('/documents/' + encodeURIComponent(currentId) + '/client', json('PATCH', selection.body));
+            api.applyPermissions();
+            pendingSelection = await operation(selectionId, 'client', selectionBody);
+            selection = pendingSelection.entry || pendingSelection.previous;
+            var acknowledgedSelection = await request('/documents/' + encodeURIComponent(selectionId) + '/client', json('PATCH', selection.body));
+            if (acknowledgedSelection?.id !== selectionId || !Number.isInteger(acknowledgedSelection.revision)) throw new Error('Не удалось подтвердить смену клиента');
+            if (currentId !== selectionId) throw new Error('Открыто другое КП');
+            var selectedDocument = await latestDocument(selectionId);
             remove(pendingSelection.storageKey); delete retainedOperations[pendingSelection.storageKey];
-            clientIntent = null; activeDraft = null; remove(key(currentId, 'draft'));
-            remember(selectedDocument); editor.applyState(copy(selectedDocument.state)); api.applyPermissions();
-            if (selectedDocument.client?.id !== command.client.id) throw new Error('Предыдущая смена клиента подтверждена. Повторите новый выбор');
+            clientIntent = null; activeDraft = null; remove(key(selectionId, 'draft'));
+            remember(selectedDocument); editor.applyState(copy(selectedDocument.state));
+            if (selectedDocument.client?.id !== command.client.id) throw new Error('Клиент уже изменён. Проверьте актуальный выбор перед повторным действием');
           } catch (selectionError) {
-            if (selectionError.status >= 400 && selectionError.status < 500) {
+            if (selection && selectionError.status >= 400 && selectionError.status < 500) {
               try { await request('/operations/' + encodeURIComponent(selection.body.operationId)); }
               catch (proofError) { if (proofError.status === 404) { remove(pendingSelection.storageKey); delete retainedOperations[pendingSelection.storageKey]; } }
             }
             throw selectionError;
+          } finally {
+            paused = false; api.applyPermissions();
           }
           return;
         }

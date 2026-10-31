@@ -16,12 +16,12 @@ function fixture(handler, document = initial()) {
     fetch: async (url, options) => {
       if (!options.method) return response(remote);
       const call = { url, method: options.method, body: JSON.parse(options.body) }; calls.push(call);
-      const result = await handler(call, calls); if (result.ok) remote = await result.clone().json(); return result;
+      const result = await handler(call, calls); if (result.ok) { const value = await result.clone().json(); if (value.revision >= remote.revision) remote = value; } return result;
     }
   });
   api.focusDocument(document);
   api.attachEditor({ getState: () => copy(state), applyState: value => { state = value; }, ensureSaved: () => api.save(state) });
-  return { api, calls, values };
+  return { api, calls, values, set remote(value) { remote = copy(value); }, get state() { return state; } };
 }
 const select = (api, id = 'B') => api.handleCommand({ type: 'client', client: { id, label: id, snapshot: { id, phone: '' } } });
 
@@ -60,4 +60,14 @@ test('неизвестный результат смены клиента пов
   const f = fixture(async (_call, calls) => { if (calls.length === 1) throw new TypeError('ACK_LOST'); return response(selected('B')); });
   await assert.rejects(select(f.api), /ACK_LOST/); await select(f.api);
   assert.deepEqual(f.calls[1].body, f.calls[0].body); assert.equal(f.api.getDocument().client.id, 'B');
+});
+
+test('поздний ACK не отменяет более новый выбор проекта; поля заблокированы до свежего чтения', async () => {
+  let release;
+  const f = fixture(async () => { await new Promise(resolve => { release = resolve; }); return response(selected('B', 3)); });
+  const changing = select(f.api); await tick();
+  assert.equal(f.api.isEditable(), false);
+  f.remote = selected('C', 4); release();
+  await assert.rejects(changing, /Клиент уже изменён/);
+  assert.equal(f.api.getDocument().client.id, 'C'); assert.equal(f.state.client.crmId, 'C'); assert.equal(f.api.isEditable(), true);
 });
