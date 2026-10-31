@@ -31,7 +31,7 @@ const boundaries={
  '@/server/projects/stage-actions':`export async function patchProjectStage(input){window.__moves.push(input);if(window.__holdAction)await new Promise(resolve=>window.__releaseAction=resolve);return {...window.__actionReply,stage:input.toStage};}`,
  '@/server/products/actions':`export async function changeProductStatus(id,status){window.__moves.push({id,status});if(window.__holdAction)await new Promise(resolve=>window.__releaseAction=resolve);return window.__actionReply;}`,
  '@/server/projects/actions':`export async function createProject(){throw Error('CREATE_PROJECT_OUTSIDE_TEST')}`,
- '@/server/clients/actions':`export async function createClient(){throw Error('CREATE_CLIENT_OUTSIDE_TEST')}`,
+ '@/server/clients/actions':`export async function clientSelectionOptions(){return [];}export async function createClient(){throw Error('CREATE_CLIENT_OUTSIDE_TEST')}`,
 };
 export async function compileKanbanFixture(){
  const ts=require('typescript'),{build}=createRequire(require.resolve('tsx/package.json'))('esbuild'),observations=[],bindings=new Map(KANBAN_RENDER_BINDINGS.map(binding=>[path.resolve(web,binding.relative),binding]));
