@@ -1,5 +1,6 @@
 import {liveProductWhere,liveProjectWhere} from "@/server/access/live-entities";
-import type {Prisma} from '@prisma/client';
+import type {Client,Prisma} from '@prisma/client';
+import {synchronizeProposalClient} from '@/server/kp/client-binding';
 import type {DomainActor} from './core';
 import {mayManageContacts,patchClientPhoneInTransaction,patchClientAddressInTransaction,type ContactResult} from '@/server/clients/core';
 export type ProductContactResult = ContactResult & {currentClientLabel?:string;clientAddress?:string|null};
@@ -41,16 +42,20 @@ export async function patchProjectContactInTransaction(actor:DomainActor,patch:P
  const value=field==='address'?(patch.value?.trim()||null):patch.value;
  if(field==='clientId'&&(!value||typeof value!=='string'))return{ok:false,kind:'validation',error:'Выберите клиента'};
  if(project[field]!==patch.expectedValue)return{ok:false,kind:'conflict',error:'Реквизит проекта изменён другим пользователем',currentValue:project[field],currentClientId:project.clientId};
- if(project[field]===value)return{ok:true,value,changed:false,projectId,clientId:project.clientId};
- let selectedClient: {id:string;name:string;lastName:string|null;middleName:string|null;phone:string;address:string|null}|null=null;
+ if(project[field]===value){
+  if(field==='clientId'){const client=await tx.client.findUnique({where:{id:value!}});if(client)await synchronizeProposalClient(tx,actor,projectId,client);}
+  return{ok:true,value,changed:false,projectId,clientId:project.clientId};
+ }
+ let selectedClient: Client|null=null;
  if(field==='clientId'){
   await tx.$queryRaw`SELECT id FROM "Client" WHERE id = ${value} FOR UPDATE`;
-  const client=await tx.client.findUnique({where:{id:value!},select:{id:true,name:true,lastName:true,middleName:true,phone:true,address:true}});
+  const client=await tx.client.findUnique({where:{id:value!}});
   selectedClient=client;
   if(!client)return{ok:false,kind:'not-found',error:'Клиент не найден'};
  }
  const update=await tx.project.updateMany({where:{id:projectId,[field]:patch.expectedValue},data:{[field]:value}});
  if(update.count!==1)throw new Error('PROJECT_CONTACT_CAS_RACE');
+ if(selectedClient)await synchronizeProposalClient(tx,actor,projectId,selectedClient);
  await tx.changeLog.create({data:{actorType:'user',actorId:actor.id,actorName:actor.name,source:actor.source,entity:'project',entityId:projectId,action:'update',field,oldValue:{[field]:project[field]},newValue:{[field]:value}}});
  await tx.domainEvent.create({data:{type:'project.updated',actor:actor.id,payload:{projectId,field}}});
  return{ok:true,value,changed:true,projectId,clientId:field==='clientId'?value!:project.clientId,...(selectedClient?{clientLabel:[selectedClient.lastName,selectedClient.name,selectedClient.middleName].filter(Boolean).join(' '),phone:selectedClient.phone,clientAddress:selectedClient.address}:{})};

@@ -51,7 +51,7 @@ export async function getApiVersion(context: KpApiContext, proposalId: string, v
     const clientId = proposalObject(render.binding).clientId;
     const label = [historicalClient.lastName, historicalClient.name, historicalClient.middleName].filter(value => typeof value === "string" && value).join(" ");
     const document = { ...documentDto(current), revision: snapshot.revision, state: snapshot.state, updatedAt: header.createdAt.toISOString(),
-      canEdit: false, fx: rate ? rateDto(rate) : null, sourceDate: proposalSourceDate(snapshot.state),
+      canEdit: false, canChangeClient: false, fx: rate ? rateDto(rate) : null, sourceDate: proposalSourceDate(snapshot.state),
       ...(typeof clientId === "string" ? { client: { id: clientId, label } } : {}) };
     return { version: { ...header, createdAt: header.createdAt.toISOString(), isAccepted: current.acceptedVersionId === header.id }, document };
   });

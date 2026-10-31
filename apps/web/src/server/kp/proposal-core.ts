@@ -167,7 +167,7 @@ export async function saveProposalInTransaction(tx: Prisma.TransactionClient, ac
   if (proposal.revision !== data.expectedRevision)
     throw new ProposalWriteError("conflict", "КП изменено другим пользователем — обновите редактор");
   const source = normalizeProposalState(data.state);
-  const selection = await resolveProposalClientInTransaction(tx, actor, data, source, proposal.clientId ?? project.clientId, hooks.environment, proposal.state);
+  const selection = await resolveProposalClientInTransaction(tx, actor, data, source, project.clientId, hooks.environment, proposal.state);
   const values = projectValues(source, data.address);
   const state = canonicalState(bindProposalClient(source, selection.client, selection.isTemporary), { ...project, ...values });
   const projectChanged = project.title !== values.title || project.address !== values.address || project.clientId !== selection.client.id;

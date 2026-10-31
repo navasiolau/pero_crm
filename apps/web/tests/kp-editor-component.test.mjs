@@ -35,7 +35,7 @@ const state = {
   manager: { name: 'Контрольный менеджер', role: 'Менеджер', phone: '+000' }, footer: 'Контрольная организация · Гарантия — 12 месяцев.'
 };
 const baseDoc = () => ({ id: 'primary', revision: 2, state: copy(state), createdAt: '2026-10-18T09:00:00.000Z', updatedAt: '2026-10-18T10:00:00.000Z',
-  project: { id: 'project', number: '231', stage: 'LEAD' }, client: { id: 'client', label: state.client.name }, canEdit: true,
+  project: { id: 'project', number: '231', stage: 'LEAD' }, client: { id: 'client', label: state.client.name }, canEdit: true, canChangeClient: true,
   fx: { currency: 'BYN', rate: '1', date: '2026-10-18', source: 'NBRB' } });
 let browser, server, origin, image, doc, writes, pdfRequests, pdfAttempts, pdfOperations, renderedPdfSnapshots, concurrentPdfChange, pricingProjections, renderSavedPdf, pdfBytes, refuseSave, refuseRate, requests, contractSettings, contractRevision, clientDetails;
 const originalClient = () => ({ id: 'client', label: state.client.name, isTemporary: false, snapshot: { id: 'client', name: 'заказчик', lastName: 'Контрольный', middleName: null, phone: '+000', email: 'fixture@example.invalid', address: 'Контрольный адрес', comment: null, passportNumber: 'номер', passportIssuedBy: 'выдан' } });
@@ -66,8 +66,8 @@ before(async () => {
   const parentBundle = (await build({ stdin: { contents: "import React from 'react';import {createRoot} from 'react-dom/client';import {KpEditor} from '@/app/(app)/kp/[id]/editor';createRoot(document.getElementById('root')).render(<KpEditor documentId='primary'/>);", loader: 'tsx', resolveDir: web },
     bundle: true, write: false, format: 'iife', platform: 'browser', jsx: 'automatic', tsconfig: path.join(web, 'tsconfig.json'), define: { 'process.env.NODE_ENV': '"production"' }, logLevel: 'silent',
     plugins: [{ name: 'explicit-boundaries', setup(builder) {
-      builder.onResolve({ filter: /^(next\/navigation|next\/link)$/ }, args => ({ path: args.path, namespace: 'boundary' }));
-      builder.onLoad({ filter: /.*/, namespace: 'boundary' }, args => ({ loader: 'js', resolveDir: web, contents: args.path === 'next/navigation' ? 'const router=Object.freeze({push:href=>window.__navigation=href,refresh:()=>{window.__refreshes=(window.__refreshes??0)+1}});export const useRouter=()=>router;' :
+      builder.onResolve({ filter: /^(next\/navigation|next\/link|@\/server\/clients\/actions)$/ }, args => ({ path: args.path, namespace: 'boundary' }));
+      builder.onLoad({ filter: /.*/, namespace: 'boundary' }, args => ({ loader: 'js', resolveDir: web, contents: args.path === '@/server/clients/actions' ? 'export const clientSelectionOptions=async()=>{const r=await fetch("/api/kp/clients");const d=await r.json();return d.clients.map(c=>({value:c.id,label:c.label,hint:c.phone??c.snapshot?.phone}));};' : args.path === 'next/navigation' ? 'const router=Object.freeze({push:href=>window.__navigation=href,refresh:()=>{window.__refreshes=(window.__refreshes??0)+1}});export const useRouter=()=>router;' :
         "import React from 'react';export default function Link({children,...props}){return React.createElement('a',props,children)}" }));
     } }] })).outputFiles[0].text;
   server = createServer((request, response) => { void (async () => {
@@ -98,6 +98,12 @@ before(async () => {
       json(response, { operationId, kind: 'pdf', result: retained.job }); return;
     }
     if (url.pathname === '/api/kp/documents/primary' && request.method === 'GET') { json(response, doc); return; }
+    if (url.pathname === '/api/kp/documents/primary/client' && request.method === 'PATCH') {
+      const input = await body(request); assert.equal(input.expectedRevision, doc.revision); assert.equal(input.expectedClientId, doc.client.id); assert.equal(input.state, undefined);
+      const selected = selectedClient();
+      doc = { ...doc, revision: doc.revision + 1, client: { id: selected.id, label: selected.label }, state: { ...doc.state, client: { crmId: selected.id, crmSnapshot: selected.snapshot, name: selected.label, contact: selected.snapshot.phone } } };
+      writes.push({ ...input, state: copy(doc.state) }); json(response, doc); return;
+    }
     if (url.pathname === '/api/kp/documents/primary' && request.method === 'PUT') {
       const input = await body(request); writes.push(input);
       if (refuseSave || input.expectedRevision !== doc.revision) { json(response, { error: { code: 'conflict', message: 'Контрольный конфликт ревизии' } }, 409); return; }
@@ -371,6 +377,23 @@ test('React command bridge waits beyond former PDF and save deadlines and reject
   } finally { await context.close(); }
 });
 
+test('клиент меняется после Лида при заблокированном составе КП', async () => {
+  reset(); doc.canEdit = false; doc.project.stage = 'IN_WORK'; const before = copy(doc.state.items);
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, serviceWorkers: 'block' });
+  try {
+    const page = await context.newPage(); page.setDefaultTimeout(10000); await page.goto(origin + '/host');
+    const child = page.frameLocator('iframe');
+    await expect(child.locator('[data-path="items.0.name"]')).toBeDisabled();
+    await expect(page.locator('#kp-client')).toBeEnabled();
+    await page.locator('#kp-client').click(); await page.getByRole('button', { name: /^Новый заказчик/ }).click();
+    await expect(child.locator('[data-path="client.name"]')).toHaveValue('Новый заказчик');
+    await expect(child.locator('[data-path="items.0.name"]')).toBeDisabled();
+    assert.equal(doc.project.stage, 'IN_WORK'); assert.deepEqual(doc.state.items, before);
+    assert.equal(requests.filter(request => request.method === 'PATCH' && request.path.endsWith('/client')).length, 1);
+    assert.equal(requests.filter(request => request.method === 'PUT' && request.path === '/api/kp/documents/primary').length, 0);
+  } finally { await context.close(); }
+});
+
 test('actual React toolbar selects CRM client immediately and version bridge restores by live revision', async () => {
   reset(); const context = await browser.newContext({ viewport: { width: 1440, height: 1200 }, serviceWorkers: 'block' });
   try {
@@ -381,7 +404,7 @@ test('actual React toolbar selects CRM client immediately and version bridge res
     assert.equal(await child.locator('.topbar').count(), 0);
     assert.equal(await child.getByRole('button', { name: /^Сгенерировать/ }).count(), 0);
     await page.locator('#kp-client').click();
-    await page.getByRole('button', { name: 'Новый заказчик', exact: true }).click();
+    await page.getByRole('button', { name: /^Новый заказчик/ }).click();
     await expect(child.locator('[data-path="client.name"]')).toHaveValue('Новый заказчик');
     await expect(page.locator('#kp-client')).toBeEnabled();
     assert.equal(writes.at(-1).state.client.crmSnapshot.name, 'Новый заказчик');

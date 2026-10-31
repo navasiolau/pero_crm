@@ -15,6 +15,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SearchableSelect } from "@/components/ui/searchable-select";
+import { ClientSelect } from "@/components/client-select";
 import { createClient } from "@/server/clients/actions";
 import { createProject } from "@/server/projects/actions";
 
@@ -140,7 +141,7 @@ export function CreateProjectDialog({
             ) : (
               <div className="flex gap-2">
                 <div className="flex-1">
-                  <SearchableSelect
+                  <ClientSelect
                     options={localClients.map((client) => ({
                       value: client.id,
                       label: client.name,

@@ -320,14 +320,15 @@ test('additional contract source never replaces focused proposal and contracts o
 
 test('structured client selection refreshes full sidecar without interpreting printed name as fields', async () => {
   let state = doc().state;
-  const testbed = fixture(async call => response({ ...doc(), revision: 3, state: call.body.state, client: { id: call.body.clientId, label: 'Юридический клиент' } }));
+  const testbed = fixture(async call => response({ ...doc(), revision: 3, state: { ...doc().state, client: { crmId: 'real-client', crmSnapshot: client.snapshot, name: client.label, contact: client.snapshot.phone } }, client: { id: call.body.clientId, label: 'Юридический клиент' } }));
   testbed.api.focusDocument(doc()); testbed.api.attachEditor({ getState: () => copy(state), applyState: next => { state = next; }, ensureSaved: () => testbed.api.save(state) });
   const client = { id: 'real-client', label: 'ООО Клиент', isTemporary: false, snapshot: { id: 'real-client', name: 'ООО Клиент', lastName: null, middleName: null,
     phone: '+000', email: 'fixture@example.invalid', address: 'Адрес', comment: null, passportNumber: 'fixture', passportIssuedBy: 'fixture' } };
   await testbed.api.handleCommand({ type: 'client', client });
-  assert.deepEqual(testbed.calls[0].body.state.client.crmSnapshot, client.snapshot);
-  assert.equal(testbed.calls[0].body.state.client.crmId, 'real-client'); assert.equal(testbed.calls[0].body.clientId, 'real-client');
-  assert.equal(testbed.calls[0].body.state.client.name, 'ООО Клиент'); assert.equal(testbed.calls[0].body.state.client.contact, '+000');
+  assert.equal(testbed.calls[0].body.state, undefined);
+  assert.equal(testbed.calls[0].body.clientId, 'real-client');
+  assert.equal(state.client.crmId, 'real-client'); assert.deepEqual(state.client.crmSnapshot, client.snapshot);
+  assert.equal(state.client.name, 'ООО Клиент'); assert.equal(state.client.contact, '+000');
 });
 
 test('read-only and omitted DELETE fail without transport; private media and draft keys stay scoped', async () => {
