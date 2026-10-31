@@ -29,6 +29,7 @@ return <main style={{padding:16}}><ProductsTab projectId="qa143" projectStage="I
 createRoot(document.getElementById('root')).render(<App/>);
 `;
 const boundaries={
+ '@/server/clients/actions':'export async function clientSelectionOptions(){return [];}export async function createClient(){throw Error("CREATE_CLIENT_OUTSIDE_TEST")}export async function updateClient(){throw Error("UPDATE_CLIENT_OUTSIDE_TEST")}',
  'next/navigation':'export const useRouter=()=>({push:p=>window.__nav.push(p),refresh:()=>{window.__refreshes++;window.__confirmed();}});',
  'next/link':"import React from 'react';export default function Link({children,...props}){return <a {...props}>{children}</a>}",
  '@/server/products/actions':'export async function createProduct(data){window.__creates.push(data);if(window.__hold)return await new Promise(resolve=>window.__resolve=resolve);return window.__reply;}export async function changeProductStatus(id,status){window.__moves.push({id,status});return {ok:false,error:"Контролируемый отказ"};}',

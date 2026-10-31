@@ -63,7 +63,7 @@ const boundaries = {
   "@/server/projects/stage-actions": `export async function patchProjectStage(value){window.__mutations.push(value);return {ok:true,stage:value.toStage}}`,
   "@/server/products/actions": `export async function changeProductStatus(id,status){window.__mutations.push({id,status});if(window.__holdStatus)await new Promise(resolve=>window.__releaseStatus=resolve);if(window.__statusFail)return {ok:false,error:'QA confirmed rollback'};const row=window.__all.find(item=>item.id===id);if(row)row.status=status;return {ok:true}}`,
   "@/server/projects/actions": `export async function createProject(){throw Error('not in QA scope')}`,
-  "@/server/clients/actions": `export async function createClient(){throw Error('not in QA scope')}`,
+  "@/server/clients/actions": `export async function clientSelectionOptions(){return [];}export async function createClient(){throw Error('not in QA scope')}`,
 };
 const bundle = await build({metafile:true,stdin:{contents:entry,loader:"tsx",resolveDir:web},bundle:true,write:false,platform:"browser",format:"iife",jsx:"automatic",tsconfig:path.join(web,"tsconfig.json"),define:{"process.env.NODE_ENV":'"development"'},plugins:[{
  name:"http-boundaries",setup(builder){builder.onResolve({filter:/^(?:next\/(?:navigation|link)|@\/server\/|@\/components\/kanban-scroll-area$)/},args=>boundaries[args.path]?{path:args.path,namespace:"qa-boundary"}:undefined);

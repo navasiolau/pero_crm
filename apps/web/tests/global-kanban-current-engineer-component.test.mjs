@@ -30,12 +30,13 @@ const bundle = build({
   bundle: true, write: false, platform: "browser", format: "iife", jsx: "automatic", tsconfig: path.join(web, "tsconfig.json"),
   define: { "process.env.NODE_ENV": '"production"' }, logLevel: "silent",
   plugins: [{ name: "controlled-boundaries", setup(builder) {
-    builder.onResolve({ filter: /^(next\/navigation|next\/link|@\/lib\/list-params|@\/server\/products\/actions|sonner)$/ }, args => ({ path: args.path, namespace: "boundary" }));
+    builder.onResolve({ filter: /^(next\/navigation|next\/link|@\/lib\/list-params|@\/server\/(?:products|clients)\/actions|sonner)$/ }, args => ({ path: args.path, namespace: "boundary" }));
     builder.onLoad({ filter: /.*/, namespace: "boundary" }, args => ({ loader: "js", resolveDir: web, contents:
       args.path === "next/navigation" ? "export const useRouter=()=>({push:href=>window.__nav.push(href),refresh:()=>window.__refreshes++});" :
       args.path === "next/link" ? "import React from 'react';export default function Link({children,...props}){return React.createElement('a',props,children);}" :
       args.path === "@/lib/list-params" ? "export const useListParams=()=>({query:'view=kanban',getQuery:()=>'view=kanban',get:()=>'',set(){}});" :
       args.path === "sonner" ? "export const toast={error:value=>window.__errors.push(value),success:value=>window.__success.push(value)};" :
+      args.path === "@/server/clients/actions" ? "export async function clientSelectionOptions(){return [];}export async function createClient(){throw Error('CREATE_CLIENT_OUTSIDE_TEST')}export async function updateClient(){throw Error('UPDATE_CLIENT_OUTSIDE_TEST')}" :
       "export const createProduct=async()=>{throw Error('CREATE_FORBIDDEN')};export const changeProductStatus=async(id,status)=>{window.__writes.push({id,status});return window.__deny?{ok:false,error:'Контрольный отказ'}:{ok:true};};"
     }));
   } }],
