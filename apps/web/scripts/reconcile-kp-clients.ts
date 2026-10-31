@@ -1,15 +1,12 @@
 import { PrismaClient } from '@prisma/client';
 import { synchronizeProposalClient } from '../src/server/kp/client-binding';
+import { assertClientReconciliationTarget } from '../src/server/kp/client-reconciliation-target';
 
 /** По умолчанию только сверка. Применение — явное, с количеством и действующим ADMIN. */
 async function main() {
   const args = process.argv.slice(2), target = args.find(value => value.startsWith('--target='))?.slice(9), apply = args.includes('--apply');
   const url = new URL(process.env.DATABASE_URL ?? '');
-  const origin = process.env.AUTH_URL ?? process.env.NEXTAUTH_URL;
-  const local = target === 'local' && ['localhost','127.0.0.1','[::1]'].includes(url.hostname) && url.port === '5433' && url.pathname === '/pero_crm';
-  const staging = target === 'staging' && origin === 'https://staging-crm.peromebel.by' && process.env.S3_BUCKET === 'pero-crm-staging' && url.hostname === 'db' && url.pathname === '/crm';
-  const production = target === 'production' && origin === 'https://crm.peromebel.by' && process.env.S3_BUCKET === 'pero-crm' && url.hostname === 'db' && url.pathname === '/crm';
-  if (!local && !staging && !production || production && apply && process.env.CRM_KP_CLIENT_RECONCILIATION_APPROVED !== '1') throw Error('TARGET_GUARD_MISMATCH');
+  assertClientReconciliationTarget(target, url, apply);
   const db = new PrismaClient();
   try {
     const result = await db.$transaction(async tx => {
