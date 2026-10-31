@@ -4,7 +4,7 @@ import { hostname } from 'node:os';
 type Runtime = { platform: string; hostname: string; docker: boolean };
 /** Staging без AUTH_URL подтверждается тем же внешним proof, что native QA, и hostname самого web. */
 export function assertClientReconciliationTarget(target: string | undefined, url: URL, apply: boolean,
-  env: NodeJS.ProcessEnv = process.env, runtime: Runtime = { platform: process.platform, hostname: hostname(), docker: existsSync('/.dockerenv') }) {
+  env: Readonly<Record<string, string | undefined>> = process.env, runtime: Runtime = { platform: process.platform, hostname: hostname(), docker: existsSync('/.dockerenv') }) {
   const fail = (): never => { throw Error('TARGET_GUARD_MISMATCH'); };
   if (!['postgres:', 'postgresql:'].includes(url.protocol) || url.hash) fail();
   if (target === 'local') {
