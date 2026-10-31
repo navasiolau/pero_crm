@@ -15,7 +15,7 @@ function fixture(handler, actorId = 'actor', values = new Map()) {
       if (url === '/api/kp/documents/primary' && !options.method) { reads.push(url); return response(remote || api.getDocument() || doc()); }
       const call = { url, options, body: typeof options.body === 'string' ? JSON.parse(options.body) : options.body };
       calls.push(call); const result = await handler(call, calls);
-      if (options.method === 'PUT' && result.ok) { const row = await result.clone().json(); if (row.id === 'primary') remote = row; }
+        if (['PUT', 'PATCH'].includes(options.method) && result.ok) { const row = await result.clone().json(); if (row.id === 'primary') remote = row; }
       return result;
     } });
   return { api, calls, emitted, values, reads, set remote(value) { remote = value; } };
