@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { reportKpApiError } from './api-error-report';
 import { proposalPdfFileName } from "./pdf-filename";
 import { z } from "zod";
 import { applyContractDefaults, captureContractSettings, contractClientBaseline, contractClientDefaults, contractFingerprint, settingsDocument } from "./contract-client";
@@ -219,6 +220,7 @@ export function createContractWorkflow(ports: ContractWorkflowPorts) {
   }
 
   async function runClaim(claim: ContractClaim): Promise<ContractObject> {
+    let failureCode = "CONTRACT_RENDER_FAILED";
     enabled();
     try {
       const loaded = await ports.store.transaction(tx => loadClaim(tx, claim));
@@ -262,11 +264,14 @@ export function createContractWorkflow(ports: ContractWorkflowPorts) {
           if (!artifact || artifact.state !== "READY" || artifact.kind !== "PDF" || artifact.proposalId !== source.proposalId) contractFailure("CONTRACT_RETAINED_PDF_MISSING", "Принятый PDF КП недоступен", 410);
           return artifact;
         }) : null;
+        failureCode = "CONTRACT_PDF_FAILED";
         const fresh = source.mode === "render" ? await ports.io.renderPdf(structuredClone(source)) : null;
         const bytes = fresh ? fresh.bytes : await ports.io.retainedPdf(structuredClone(source));
         if (retained && (retained.size !== bytes.byteLength || retained.sha256 !== createHash("sha256").update(bytes).digest("hex"))) contractFailure("CONTRACT_ARTIFACT_MISMATCH", "Принятый PDF не прошёл проверку контрольной суммы");
+        failureCode = "CONTRACT_UPLOAD_FAILED";
         if (source.mode === "render") pdfs.push({ proposalId: source.proposalId, artifact: await upload("PDF", source.proposalId, bytes, source) });
         // Свежие страницы — исходные DPR2 screenshots того же Chromium-render, без смены сглаживания.
+        failureCode = "CONTRACT_RASTER_FAILED";
         const images = fresh ? fresh.pages : await ports.io.rasterizePdf(bytes);
         if (!images.length) contractFailure("CONTRACT_APPENDIX_EMPTY", "Не получены страницы приложения КП", 502);
         appendixBytes += images.reduce((sum, image) => sum + image.byteLength, 0);
@@ -274,13 +279,20 @@ export function createContractWorkflow(ports: ContractWorkflowPorts) {
           contractFailure("CONTRACT_APPENDIX_TOO_LARGE", "Приложения договора превышают допустимый объём", 413);
         rendered.push({ id: source.proposalId, images }); pageCounts.push({ proposalId: source.proposalId, pages: images.length });
       }
+      failureCode = "CONTRACT_DOCX_FAILED";
       const bytes = await ports.io.generateDocx(structuredClone(extra.settingsSnapshot) as ContractSettings, structuredClone(extra.summary) as ContractObject, structuredClone(extra.profile) as ContractObject, rendered);
+      failureCode = "CONTRACT_UPLOAD_FAILED";
       const docx = await upload("DOCX", extra.contractId, bytes);
-      return finalize(claim, { pdfs, docx, pageCounts });
+      failureCode = "CONTRACT_PUBLISH_FAILED";
+      return await finalize(claim, { pdfs, docx, pageCounts });
     } catch (error) {
       const known = error instanceof Error && "code" in error && typeof error.code === "string" && /^[A-Z0-9_]{1,128}$/.test(error.code) &&
         "status" in error && typeof error.status === "number" ? { code: error.code, status: error.status } : null;
-      await ports.store.transaction(async tx => { await tx.globalLock(); await tx.failJob(claim, known?.code ?? "CONTRACT_RENDER_FAILED", known !== null && known.status >= 400 && known.status < 500); }).catch(() => undefined);
+      if (!known) {
+        console.error('KP_CONTRACT_JOB_FAILED', { jobId: claim.id, attempt: claim.attempt, phase: failureCode });
+        reportKpApiError(error, 'generateContract', 'worker');
+      }
+      await ports.store.transaction(async tx => { await tx.globalLock(); await tx.failJob(claim, known?.code ?? failureCode, known !== null && known.status >= 400 && known.status < 500); }).catch(() => undefined);
       throw error;
     }
   }

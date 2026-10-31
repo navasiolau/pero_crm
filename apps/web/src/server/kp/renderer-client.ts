@@ -24,7 +24,14 @@ async function requestRenderer(input: unknown, options: RendererOptions): Promis
       });
       request.setTimeout(0); request.on('socket', socket => socket.setTimeout(0)); request.once('error', reject); request.end(body);
     });
-  if (!response.ok) { await response.body?.cancel(); throw Error(response.status === 429 ? 'Рендер занят. Повторите генерацию позже' : 'Не удалось сформировать документ'); }
+  if (!response.ok) {
+    const failure: unknown = await response.json().catch(() => null);
+    const code = failure && typeof failure === 'object' && 'error' in failure &&
+      typeof failure.error === 'string' && ['KP_RENDER_BUSY', 'KP_RENDER_TIMEOUT', 'KP_RENDER_BYTES_LIMIT', 'KP_RENDER_INPUT_INVALID', 'KP_RENDER_WORKER_FAILED', 'KP_RENDER_BROWSER_FAILED', 'KP_RENDER_FONT_MISSING'].includes(failure.error)
+      ? failure.error : 'KP_RENDER_FAILED';
+    const status = code === 'KP_RENDER_BUSY' ? 503 : code === 'KP_RENDER_TIMEOUT' ? 504 : ['KP_RENDER_WORKER_FAILED', 'KP_RENDER_BROWSER_FAILED', 'KP_RENDER_FAILED'].includes(code) ? 502 : response.status;
+    throw Object.assign(Error(response.status === 429 ? 'Рендер занят. Повторите генерацию позже' : 'Не удалось сформировать документ'), { code, status });
+  }
   const reader = response.body?.getReader(); if (!reader) throw Error('KP_RENDERER_RESPONSE_EMPTY');
   let size = 0; const chunks: Buffer[] = [];
   try {

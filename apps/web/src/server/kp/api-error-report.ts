@@ -26,7 +26,7 @@ function frames(stack: unknown): string[] {
   }).slice(0, 5);
 }
 
-export function reportKpApiError(error: unknown, action: ApiAction | undefined, surface: "session" | "bearer"): void {
+export function reportKpApiError(error: unknown, action: ApiAction | undefined, surface: "session" | "bearer" | "worker"): void {
   try {
     const fields = error && typeof error === "object" ? error as Record<string, unknown> : {};
     const meta = fields.meta && typeof fields.meta === "object" ? fields.meta as Record<string, unknown> : {};

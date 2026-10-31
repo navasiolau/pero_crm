@@ -267,7 +267,7 @@
       var jobId = job?.id, delay = 750;
       if (typeof jobId !== 'string' || !jobId) throw new Error('Некорректный ответ задания');
       while (job.state !== 'SUCCEEDED') {
-        if (job.state === 'FAILED' || job.state === 'CANCELLED') { var error = new Error(job.error || 'Не удалось сформировать документ'); error.knownTerminalJob = true; throw error; }
+        if (job.state === 'FAILED' || job.state === 'CANCELLED') { var error = new Error((job.error || 'Не удалось сформировать документ') + ' Код обращения: ' + jobId); error.knownTerminalJob = true; throw error; }
         if (job.state !== 'PENDING' && job.state !== 'PROCESSING') throw new Error('Некорректный ответ задания');
         await new Promise(function (resolve) { setTimeout(resolve, delay); });
         try {
@@ -289,7 +289,15 @@
       try {
         var job = await request(path, json('POST', (pending.entry || pending.previous).body));
         var result = await poll(job); clear(); emit({ type: 'versions-changed' }); return result;
-      } catch (error) { if (error.knownTerminalJob === true) clear(); throw error; }
+      } catch (error) {
+        if (error.knownTerminalJob === true) clear();
+        else if (path === '/contract' && (error.status === 400 || error.status === 409)) {
+          // Подтверждённый отказ до создания задания не блокирует следующий исправленный запрос.
+          try { await request('/operations/' + encodeURIComponent((pending.entry || pending.previous).body.operationId)); }
+          catch (proofError) { if (proofError.status === 404) clear(); }
+        }
+        throw error;
+      }
     }
     async function generatePdf() {
       var saved = await ensureSaved();

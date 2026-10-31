@@ -6,6 +6,13 @@ import { renderProposalPdf, renderProposalBundle, renderContractDocx, rasterizeR
 const identity = getKpTemplateIdentity();
 const input: SavedProposalRenderInput = { kind: 'pdf', proposalId: 'proposal', revision: 4, state: { items: [] }, assets: [], templateHash: identity.templateHash };
 const secret = 'SYNTHETIC_INTERNAL_RENDERER_SECRET_184';
+
+test('renderer failures preserve safe codes and keep busy/worker failures retryable', async () => {
+  for (const [code, status, expectedStatus] of [['KP_RENDER_BUSY', 429, 503], ['KP_RENDER_WORKER_FAILED', 400, 502], ['KP_RENDER_INPUT_INVALID', 400, 400]] as const) {
+    await assert.rejects(renderProposalBundle(input, { secret, fetcher: async () => new Response(JSON.stringify({ error: code }), { status }) }),
+      error => error instanceof Error && 'code' in error && error.code === code && 'status' in error && error.status === expectedStatus);
+  }
+});
 test('web client calls only internal fixed endpoint and checks PDF identity before publication', async () => {
   let calls = 0;
   const result = await renderProposalPdf(input, { baseUrl: 'http://renderer.invalid:3100', secret, fetcher: async (url, options) => {

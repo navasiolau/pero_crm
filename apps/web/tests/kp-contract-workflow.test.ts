@@ -17,6 +17,17 @@ async function prepare(f = contractWorkflowFixture()) {
   return { f, workflow, form, request, saved, exportRequest, queued, claim: f.claim(String(queued.id)) };
 }
 
+test('асинхронный отказ публикации записывает безопасную причину и не оставляет успешного выпуска', async () => {
+  const prepared = await prepare(), original = prepared.f.ports.store.transaction;
+  let recorded = '';
+  prepared.f.ports.store.transaction = run => original(tx => run({ ...tx, failJob: async (claim, code, terminal) => { recorded = code; return tx.failJob(claim, code, terminal); } }));
+  prepared.f.ports.lifecycle.advanceToContract = async () => { throw Error('PRIVATE_DATABASE_DETAIL'); };
+  await assert.rejects(prepared.workflow.runClaim(prepared.claim), /PRIVATE_DATABASE_DETAIL/);
+  assert.equal(recorded, 'CONTRACT_PUBLISH_FAILED');
+  assert.equal(prepared.f.state.versions.length, 0); assert.equal(prepared.f.state.sourceVersions.length, 0);
+  assert.deepEqual(prepared.f.state.stages, []);
+});
+
 test("форма берёт текущего клиента КП и адрес проекта, не записывает CRM и не угадывает юрлицо", async () => {
   const f = contractWorkflowFixture(), before = structuredClone(f.state.clients);
   const form = await createContractWorkflow(f.ports).form(contractActor, "cp_a");

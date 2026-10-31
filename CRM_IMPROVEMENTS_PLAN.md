@@ -170,3 +170,16 @@ OpenSpec размещаем в `D:\Projects\pero_crm_v2\openspec`, схема `s
 | № | Ветка | OpenSpec | Статус |
 |---|---|---|---|
 | 200 | bugfix/200 | kp-current-state-selection | Автоматический выбор целого актуального снимка, IndexedDB без накопления копий. Код принят на staging d8a6af0e: полный CI41024660588 — 7/7, настоящий UI/session/PDF и mobile; см. staging-acceptance.json. Main/production не разрешены. |
+
+### Исправления КП от 31.10.2026
+
+Согласованный владельцем план: единая сущность Client во всей CRM. Коммиты и выпуск — по AGENTS.md.
+
+| № | Ветка | OpenSpec | Состояние |
+|---|---|---|---|
+| 201 | bugfix/201 | kp-contract-generation-recovery | Частичная реализация; причина сбоя 227 не подтверждена |
+| 202 | bugfix/202 | kp-unified-client-binding | Локальная реализация и проверки; CI/staging ещё не приняты |
+| 203 | bugfix/203 | kp-contract-stage-transition | Локальная реализация и проверки; CI/staging ещё не приняты |
+| 204 | bugfix/204 | kp-editor-navigation-cleanup | Локальная реализация и проверки; CI/staging ещё не приняты |
+| 205 | bugfix/205 | kp-signature-defaults | Локальная реализация и проверки; CI/staging ещё не приняты |
+| 206 | feature/206 | kp-signature-defaults-settings | Локальная реализация и проверки; CI/staging ещё не приняты |

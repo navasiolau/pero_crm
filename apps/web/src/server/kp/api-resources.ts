@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { jobFailureMessage } from "./job-failure";
 import { withMutationTransaction } from "@/server/transactions/coordinator";
 import { documentDto, loadApiDocument } from "./api-documents";
 import { apiFailure, type KpApiContext } from "./api-contract";
@@ -101,7 +102,8 @@ export async function getApiJob(context: KpApiContext, jobId: string) {
     if (!metadata) return apiFailure("KP_JOB_NOT_FOUND", 404, "Задание недоступно");
     const scope = await authorizeKpResource(context, metadata.kind, tx);
     const job = await readRenderJobInTransaction(tx, context.binding, jobId, lifecycleSecurity(scope));
-    const output = { id: job.id, state: job.state, error: job.state === "FAILED" || job.state === "CANCELLED" ? "Документ не выпущен. Проверьте актуальность данных и доступ" : null };
+    const failed = job.state === "FAILED" || job.state === "CANCELLED";
+    const output = { id: job.id, state: job.state, errorCode: failed ? job.errorCode : null, error: failed ? jobFailureMessage(job.errorCode) : null };
     if (job.state !== "SUCCEEDED") return { ...output, result: null };
     const result = proposalObject(job.result);
     const artifactId = typeof result.artifactId === "string" ? result.artifactId : typeof result.pdfArtifactId === "string" ? result.pdfArtifactId : null;
