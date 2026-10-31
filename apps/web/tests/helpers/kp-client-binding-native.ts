@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import type { PrismaClient, ProjectStage } from '@prisma/client';
 import { patchProjectContactInTransaction } from '../../src/server/projects/contact-core';
 import { saveProposalInTransaction } from '../../src/server/kp/proposal-core';
+import { getProjectContactProjection } from '../../src/server/projects/contact-projection';
 
 /** Только существующая local5433. Все тестовые записи и события откатываются одной транзакцией. */
 export async function runClientBindingNativeCases(database: PrismaClient, targetUrl: string) {
@@ -31,6 +32,8 @@ export async function runClientBindingNativeCases(database: PrismaClient, target
         assert.equal(changed.ok, true, stage);
         const saved = await tx.commercialProposal.findUniqueOrThrow({ where: { id: proposal.id } });
         assert.equal(saved.clientId, b.id); assert.equal(saved.revision, 1);
+        const projection = await getProjectContactProjection(actor, project.id, run => run(tx));
+        assert.equal(projection?.clientId,b.id);assert.match(projection?.clientVersion??'',/^\d+$/);
         assert.deepEqual((saved.state as Record<string, unknown>).items, state.items);
         assert.equal((await tx.project.findUniqueOrThrow({ where: { id: project.id } })).stage, stage);
         assert.deepEqual((await tx.proposalVersion.findUniqueOrThrow({ where: { id: version.id } })).state, state);

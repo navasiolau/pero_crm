@@ -42,6 +42,6 @@ export function ProjectInlineContacts({canManage,clients}:{canManage:boolean;cli
  <div className="flex min-w-0 items-start gap-3"><div className="min-w-0 flex-1"><InlineSelectField id="project-inline-client" label="Клиент" clientDirectory controller={client} readOnly={!canManage} options={options}/></div>{canManage?<Button type="button" variant="outline" className="mt-6 shrink-0" onClick={()=>setCreateOpen(true)}>Новый клиент</Button>:null}</div>
  <InlineTextField id="project-client-phone" label="Телефон клиента" inputMode="tel" controller={controller('client.phone')} readOnly={!canManage||switchingClient}/>
  <InlineTextField id="project-client-address" label="Адрес клиента" controller={controller('client.address')} readOnly={!canManage||switchingClient}/>
- <ClientDialog open={createOpen} onOpenChange={setCreateOpen} onCreated={async id=>{client.setDraft(id);await client.commit();}}/>
+ <ClientDialog open={createOpen} onOpenChange={setCreateOpen} onCreated={async id=>{client.setDraft(id);if(await client.commit())router.refresh();}}/>
  </div>;
 }
