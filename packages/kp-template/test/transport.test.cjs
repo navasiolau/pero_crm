@@ -119,7 +119,7 @@ test('actual editor field matrix repairs legacy records and preserves preview, s
         const target = path === 'delivery.visible' ? node('deliveryVisible') : field(path); target.checked = checked;
         await (path === 'delivery.visible' ? target : node('itemsList')).dispatch(path === 'delivery.visible' ? 'change' : 'input', target); controls();
       },
-      save: () => node('.js-docs-save').dispatch('click') };
+      save: () => api.handleCommand({ type: 'flush' }) };
   }
   const editor = await open();
   assert.equal(writes.length, 0); assert.equal(stored.state.manager, 'LEGACY_MANAGER');

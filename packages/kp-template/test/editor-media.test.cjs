@@ -88,7 +88,8 @@ async function fixture(manualCompression = false) {
 test('Save waits for the selected photo and binds it to the item ID after moving the row', async () => {
   for (const loseAck of [false, true]) {
   const f = await fixture(), release = f.holdSave(loseAck), previousWrites = loseAck ? 2 : 1;
-  const previousSave = f.nodes.get('.js-docs-save').dispatch('click'); await tick();
+  f.adapter.applyState({ ...f.adapter.getState(), footer: 'BEFORE_UPLOAD' });
+  const previousSave = f.adapter.ensureSaved().catch(error => { if (!loseAck) throw error; }); await tick();
   await f.photo();
   assert.equal(f.uploads.length, 0);
   release(); await previousSave; await tick();
@@ -133,7 +134,7 @@ test('failed current photo visibly blocks Save/export until a replacement succee
   const f = await fixture(); await f.photo();
   f.uploads[0].resolve(response({ error: { message: 'Не удалось загрузить фото' } }, 500)); await tick();
   await assert.rejects(f.adapter.ensureSaved(), /загрузить фото/);
-  await f.nodes.get('.js-docs-save').dispatch('click');
+  await assert.rejects(f.adapter.ensureSaved(), /загрузить фото/);
   assert.equal(f.writes.length, 0);
   assert.match(f.nodes.get('toast').textContent, /фото/);
   await f.photo(); f.complete(1, 'retry'); await tick();
