@@ -51,7 +51,7 @@ createRoot(document.getElementById('root')).render(<App/>);
 const boundaries={
  '@/lib/independent-product-action':'export const invokeProductPatch=input=>window.__save("product",input);',
  '@/lib/independent-project-action':'export const invokeProjectPatch=input=>window.__save("project",input);',
- '@/server/clients/actions':'const denied=()=>{throw Error("UNEXPECTED_CLIENT_WRITE")};export const createClient=denied;export const updateClient=denied;',
+ '@/server/clients/actions':'const denied=()=>{throw Error("UNEXPECTED_CLIENT_WRITE")};export const clientSelectionOptions=async()=>window.__clientOptions??[{value:"a",label:"Client A",hint:"100"},{value:"b",label:"Client B",hint:"200"}];export const createClient=denied;export const updateClient=denied;',
 };
 async function compile(variant){
  const{build}=createRequire(require.resolve('tsx/package.json'))('esbuild'),ts=require('typescript'),pins=new Map(),observed=[];

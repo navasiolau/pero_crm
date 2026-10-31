@@ -5,7 +5,7 @@ export type ProposalFx = { currency: 'BYN' | 'RUB' | 'USD' | 'EUR'; rate: string
 export type ProposalDocument = {
   id: string; revision: number; state: ProposalState; createdAt: string; updatedAt: string;
   project: { id: string; number: string; stage: string } | null;
-  client: { id: string; label: string } | null; canEdit: boolean;
+  client: { id: string; label: string } | null; canEdit: boolean; canChangeClient?: boolean;
   fx: ProposalFx | null;
 };
 export type ProposalListRow = Pick<ProposalDocument, 'id' | 'revision' | 'project' | 'client' | 'createdAt' | 'updatedAt'> & { name: string; currency: string; number: string | null; printedClientName: string | null };

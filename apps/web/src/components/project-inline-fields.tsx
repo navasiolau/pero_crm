@@ -1,5 +1,6 @@
 "use client";
-import { useState, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
+import { useRouter } from 'next/navigation';
 import { InlineSelectField, InlineTextField } from "@/components/inline-fields";
 import { ClientDialog } from "@/components/client-dialog";
 import { Button } from "@/components/ui/button";
@@ -31,12 +32,14 @@ export function ProjectConfirmedTotal() {
 }
 
 export function ProjectInlineContacts({canManage,clients}:{canManage:boolean;clients:ProductClientContact[]}){
+ const router=useRouter();
+ useEffect(()=>{const refresh=()=>{if(document.visibilityState==='visible')router.refresh();};window.addEventListener('focus',refresh);document.addEventListener('visibilitychange',refresh);return()=>{window.removeEventListener('focus',refresh);document.removeEventListener('visibilitychange',refresh);};},[router]);
  const{controller,derived,switchingClient}=useProjectInline();const client=controller("clientId");
  const[createOpen,setCreateOpen]=useState(false);
  const options=clients.map(row=>({value:row.id,label:row.label,hint:row.phone}));
  if(derived.clientId&&derived.clientLabel&&!options.some(row=>row.value===derived.clientId))options.push({value:derived.clientId,label:derived.clientLabel,hint:derived.phone??""});
  return <div className="flex min-w-0 flex-col gap-3 text-sm" data-project-contacts>
- <div className="flex min-w-0 items-start gap-3"><div className="min-w-0 flex-1"><InlineSelectField id="project-inline-client" label="Клиент" controller={client} readOnly={!canManage} options={options}/></div>{canManage?<Button type="button" variant="outline" className="mt-6 shrink-0" onClick={()=>setCreateOpen(true)}>Новый клиент</Button>:null}</div>
+ <div className="flex min-w-0 items-start gap-3"><div className="min-w-0 flex-1"><InlineSelectField id="project-inline-client" label="Клиент" clientDirectory controller={client} readOnly={!canManage} options={options}/></div>{canManage?<Button type="button" variant="outline" className="mt-6 shrink-0" onClick={()=>setCreateOpen(true)}>Новый клиент</Button>:null}</div>
  <InlineTextField id="project-client-phone" label="Телефон клиента" inputMode="tel" controller={controller('client.phone')} readOnly={!canManage||switchingClient}/>
  <InlineTextField id="project-client-address" label="Адрес клиента" controller={controller('client.address')} readOnly={!canManage||switchingClient}/>
  <ClientDialog open={createOpen} onOpenChange={setCreateOpen} onCreated={async id=>{client.setDraft(id);await client.commit();}}/>

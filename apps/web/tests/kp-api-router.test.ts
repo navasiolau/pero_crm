@@ -24,6 +24,17 @@ test("feature flag returns 404 before auth, body and service", async () => {
   const response = await f.handler(request("documents", "POST", null), ["documents"], "bearer");
   assert.equal(response.status, 404); assert.equal(f.authorizations(), 0); assert.equal(f.calls.length, 0);
 });
+
+test('отдельная смена клиента требует CAS и UUID, не принимает состав КП', async () => {
+  const f = fixture(), operationId = randomUUID(), body = { operationId: operationId.toUpperCase(), expectedRevision: 3, expectedClientId: 'old', clientId: 'new' };
+  const changed = await f.handler(request('documents/qp/client', 'PATCH', body), ['documents','qp','client'], 'bearer');
+  assert.equal(changed.status, 200);
+  assert.deepEqual(f.calls[0], { action: 'changeClient', input: { ...body, operationId, proposalId: 'qp' } });
+  for (const invalid of [{ ...body, state: { items: [] } }, { ...body, expectedClientId: undefined }, { ...body, expectedRevision: -1 }]) {
+    assert.equal((await f.handler(request('documents/qp/client', 'PATCH', invalid), ['documents','qp','client'], 'bearer')).status, 400);
+  }
+  assert.equal(f.calls.length, 1);
+});
 test("strict stored-PDF command refuses raw state and path mismatches", async () => {
   const f = fixture(); const input = { operationId: randomUUID(), expectedRevision: 2 };
   for (const body of [{ ...input, state: { items: [] } }, { ...input, proposalId: "other" }, { ...input, actorId: "admin" }]) {

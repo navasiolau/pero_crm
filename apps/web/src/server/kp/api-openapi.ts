@@ -40,7 +40,7 @@ export const kpApiSchemas = {
   KpSaveDocument: { type: "object", additionalProperties: false, required: ["operationId", "expectedRevision", "state"], properties: { ...writeProperties, expectedRevision: revision, proposalId: id } },
   KpDocument: { type: "object", required: ["id", "revision", "state", "project", "client", "canEdit", "fx", "createdAt", "updatedAt"],
     properties: { id, revision, state, project: { type: ["object", "null"], properties: { id, number: { type: "string" }, stage: { type: "string" } } },
-      client: { type: ["object", "null"], properties: { id, label: { type: "string" } } }, canEdit: { type: "boolean" },
+      client: { type: ["object", "null"], properties: { id, label: { type: "string" } } }, canEdit: { type: "boolean" }, canChangeClient: { type: "boolean" },
       fx: { anyOf: [ref("KpFx"), { type: "null" }] }, sourceDate: { type: ["string", "null"], format: "date" },
       createdAt: { type: "string", format: "date-time" }, updatedAt: { type: "string", format: "date-time" } } },
   KpVersion: { type: "object", required: ["id", "revision", "createdAt", "trigger", "isAccepted", "pdfArtifactId"], properties: {
@@ -67,6 +67,7 @@ export const kpApiPaths = {
   },
   "/kp/documents/{documentId}": { get: read("Прочитать текущее КП", "kp:read", ref("KpDocument"), ["documentId"]),
     put: command("Полностью сохранить КП и синхронизировать CRM в Лиде", "kp:write", ref("KpSaveDocument"), ref("KpDocument"), ["documentId"]) },
+  "/kp/documents/{documentId}/client": { patch: command("Сменить единого клиента проекта и КП на любом этапе", "kp:write", { type: "object", required: ["operationId", "expectedRevision", "expectedClientId", "clientId"], properties: { operationId, expectedRevision: revision, expectedClientId: id, clientId: id }, additionalProperties: false }, ref("KpDocument"), ["documentId"]) },
   "/kp/documents/{documentId}/pdf": { post: command("Выпустить PDF сохранённой ревизии", "kp:export", release, ref("KpJob"), ["documentId"]) },
   "/kp/documents/{documentId}/versions": { get: read("Список успешных выпусков КП", "kp:read", versionList, ["documentId"]) },
   "/kp/documents/{documentId}/versions/{versionId}": { get: read("Прочитать снимок выпуска", "kp:read", { type: "object", properties: { version: ref("KpVersion"), document: ref("KpDocument") } }, ["documentId", "versionId"]) },

@@ -151,6 +151,12 @@
           if (proof.operationId === pending.body.operationId && proof.result?.revision === latest.revision && proof.result?.id === id) candidate.followsRevision = latest.revision;
         } catch (error) { if (error.status !== 404) throw error; }
       }
+      // Прежний черновик сохраняет текст, но не отменяет отдельную серверную смену клиента.
+      if (candidate?.local && latest.revision > current.revision && current?.client?.id !== latest.client?.id) {
+        candidate.local.client = copy(latest.client);
+        candidate.local.state.client = copy(latest.state.client);
+        clientIntent = null;
+      }
       var winner = localState.localWins(candidate, latest);
       var unchanged = current.revision === latest.revision && canonical(bundle(confirmedDocument)) === canonical(bundle(latest));
       if (!unchanged || !winner && activeDraft || winner && candidate?.editId !== activeDraft?.editId) publish(remember(latest));
@@ -468,13 +474,28 @@
         if (command.type === 'flush') { await ensureSaved(); return; }
         if (command.type === 'pause') { paused = command.value === true; api.applyPermissions(); if (!paused && current?.canEdit && api.hasUnsavedChanges(editor.getState())) await editor.ensureSaved(); return; }
         if (command.type === 'client') {
-          if (!current?.canEdit || viewingVersion) throw new Error('КП доступно только для просмотра');
-          var client = command.client, state = editor.getState();
-          state.client = Object.assign({}, state.client, { crmId: client.id, crmSnapshot: Object.assign({}, client.snapshot, { id: client.id }),
-            name: client.isTemporary ? '' : client.label, contact: client.isTemporary ? '' : client.snapshot.phone });
-          current = Object.assign({}, current, { client: { id: client.id, label: client.label } }); documents[currentId] = current;
-          clientIntent = { client: copy(current.client) };
-          paused = false; editor.applyState(state); noteEdit(state); await editor.ensureSaved(); api.applyPermissions(); return;
+          if (!(current?.canChangeClient ?? current?.canEdit) || viewingVersion) throw new Error('Клиент недоступен для изменения');
+          if (current.canEdit) {
+            await saveQueue.catch(function () {});
+            if (api.hasUnsavedChanges(editor.getState()) || retainedOperations[key(currentId, 'operation:save')] || read(key(currentId, 'operation:save'))) await editor.ensureSaved();
+          }
+          var selectionBody = { expectedRevision: current.revision, expectedClientId: current.client.id, clientId: command.client.id };
+          var pendingSelection = await operation(currentId, 'client', selectionBody);
+          var selection = pendingSelection.entry || pendingSelection.previous;
+          try {
+            var selectedDocument = await request('/documents/' + encodeURIComponent(currentId) + '/client', json('PATCH', selection.body));
+            remove(pendingSelection.storageKey); delete retainedOperations[pendingSelection.storageKey];
+            clientIntent = null; activeDraft = null; remove(key(currentId, 'draft'));
+            remember(selectedDocument); editor.applyState(copy(selectedDocument.state)); api.applyPermissions();
+            if (selectedDocument.client?.id !== command.client.id) throw new Error('Предыдущая смена клиента подтверждена. Повторите новый выбор');
+          } catch (selectionError) {
+            if (selectionError.status >= 400 && selectionError.status < 500) {
+              try { await request('/operations/' + encodeURIComponent(selection.body.operationId)); }
+              catch (proofError) { if (proofError.status === 404) { remove(pendingSelection.storageKey); delete retainedOperations[pendingSelection.storageKey]; } }
+            }
+            throw selectionError;
+          }
+          return;
         }
         if (command.type === 'fx') {
           if (!api.isEditable()) throw new Error('КП доступно только для просмотра');

@@ -5,6 +5,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { SearchableSelect, type SearchableOption } from "@/components/ui/searchable-select";
+import { ClientSelect } from '@/components/client-select';
 import { useInlineSave } from "@/hooks/use-inline-save";
 import type { InlineSaveController, InlineValue } from "@/lib/inline-save-controller";
 
@@ -27,7 +28,8 @@ export function InlineTextField({ id, label, controller, readOnly, hint, multili
   } };
   return <div className="flex min-w-0 flex-col gap-1.5"><Label htmlFor={id}>{label}</Label>{multiline ? <Textarea {...shared} rows={largeDescription ? 12 : undefined} className={largeDescription ? "h-80 min-h-80 w-full max-w-full min-w-0 resize-y field-sizing-fixed" : "min-h-24 min-w-0 field-sizing-content"} /> : <Input {...shared} inputMode={inputMode} className={`min-w-0 ${inputClassName ?? ""}`} />}{hint ? <p className="break-words text-xs text-muted-foreground">{hint}</p> : null}{!readOnly || field.error || field.status === "dirty" ? <div id={`${id}-state`}><SaveState field={field} readOnly={readOnly} /></div> : null}</div>;
 }
-export function InlineSelectField({ id, label, controller, readOnly, hint, options, allowClear }: Props & { options: SearchableOption[]; allowClear?: boolean }) {
+export function InlineSelectField({ id, label, controller, readOnly, hint, options, allowClear, clientDirectory }: Props & { options: SearchableOption[]; allowClear?: boolean; clientDirectory?: boolean }) {
   const field = useInlineSave(controller);
-  return <div className="flex min-w-0 flex-col gap-1.5"><Label htmlFor={id}>{label}</Label><SearchableSelect id={id} options={options} value={field.draft} disabled={readOnly} allowClear={allowClear} className="min-w-0 max-w-full" onChange={value => { field.setDraft(value); void field.commit(); }} searchPlaceholder={`Поиск: ${label.toLowerCase()}…`} />{hint ? <p className="break-words text-xs text-muted-foreground">{hint}</p> : null}{!readOnly || field.error || field.status === "dirty" ? <div id={`${id}-state`}><SaveState field={field} readOnly={readOnly} /></div> : null}</div>;
+  const Select = clientDirectory ? ClientSelect : SearchableSelect;
+  return <div className="flex min-w-0 flex-col gap-1.5"><Label htmlFor={id}>{label}</Label><Select id={id} options={options} value={field.draft} disabled={readOnly} allowClear={allowClear} className="min-w-0 max-w-full" onChange={value => { field.setDraft(value); void field.commit(); }} searchPlaceholder={`Поиск: ${label.toLowerCase()}…`} />{hint ? <p className="break-words text-xs text-muted-foreground">{hint}</p> : null}{!readOnly || field.error || field.status === "dirty" ? <div id={`${id}-state`}><SaveState field={field} readOnly={readOnly} /></div> : null}</div>;
 }

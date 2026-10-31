@@ -2,11 +2,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import type { ProposalClientDetails, ProposalClientOption, ProposalDocument, ProposalFx, ProposalVersion } from '@pero/kp-template';
+import type { ProposalClientDetails, ProposalDocument, ProposalFx, ProposalVersion } from '@pero/kp-template';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { SearchableSelect } from '@/components/ui/searchable-select';
+import { ClientSelect } from '@/components/client-select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { kpSessionRequest } from '@/lib/kp-session-client';
 
@@ -17,7 +18,7 @@ const versionLabel = (version: ProposalVersion) => new Intl.DateTimeFormat('ru-R
 export function KpEditor({ documentId }: { documentId: string }) {
   const router = useRouter(), frame = useRef<HTMLIFrameElement>(null), commands = useRef(new Map<string, PendingCommand>());
   const [document, setDocument] = useState<ProposalDocument | null>(null), [liveDocument, setLiveDocument] = useState<ProposalDocument | null>(null);
-  const [clients, setClients] = useState<ProposalClientOption[]>([]), [versions, setVersions] = useState<ProposalVersion[]>([]), [versionId, setVersionId] = useState('');
+  const [versions, setVersions] = useState<ProposalVersion[]>([]), [versionId, setVersionId] = useState('');
   const [error, setError] = useState<string | null>(null), [pending, setPending] = useState(false), [contractOpen, setContractOpen] = useState(false);
   const [rateOpen, setRateOpen] = useState(false), [rate, setRate] = useState<ProposalFx | null>(null);
   const send = useCallback((command: Record<string, unknown>): Promise<void> => new Promise((resolve, reject) => {
@@ -29,8 +30,8 @@ export function KpEditor({ documentId }: { documentId: string }) {
   const refreshVersions = useCallback(async () => { const data = await kpSessionRequest<{ versions: ProposalVersion[] }>('/documents/' + encodeURIComponent(documentId) + '/versions'); setVersions(data.versions); }, [documentId]);
   useEffect(() => {
     let active = true;
-    void Promise.all([kpSessionRequest<{ clients: ProposalClientOption[] }>('/clients'), kpSessionRequest<{ versions: ProposalVersion[] }>('/documents/' + encodeURIComponent(documentId) + '/versions')])
-      .then(([clients, versions]) => { if (active) { setClients(clients.clients); setVersions(versions.versions); } }).catch(error => { if (active) setError(error.message); });
+    void kpSessionRequest<{ versions: ProposalVersion[] }>('/documents/' + encodeURIComponent(documentId) + '/versions')
+      .then(result => { if (active) setVersions(result.versions); }).catch(error => { if (active) setError(error.message); });
     const listener = (event: MessageEvent) => {
       if (event.origin !== window.location.origin || event.source !== frame.current?.contentWindow || event.data?.channel !== 'pero-kp') return;
       const message = event.data;
@@ -58,7 +59,6 @@ export function KpEditor({ documentId }: { documentId: string }) {
   async function selectClient(id: string) {
     const details = await kpSessionRequest<ProposalClientDetails>('/clients/' + encodeURIComponent(id));
     await send({ type: 'client', client: details });
-    setClients(previous => previous.some(client => client.id === details.id) ? previous.map(client => client.id === details.id ? details : client) : [...previous, details]);
   }
   async function nbrbRate() {
     if (!rate) return;
@@ -73,13 +73,13 @@ export function KpEditor({ documentId }: { documentId: string }) {
     finally { setPending(false); }
   }
   const canEdit = document?.canEdit === true && !versionId;
-  const clientOptions = clients.filter(client => client.id !== document?.client?.id).map(client => ({ value: client.id, label: client.label, hint: client.phone ?? undefined }));
-  if (document?.client) clientOptions.unshift({ value: document.client.id, label: document.client.label, hint: undefined });
+  const canChangeClient = document?.canChangeClient === true && !versionId;
+  const clientOptions = document?.client ? [{ value: document.client.id, label: document.client.label }] : [];
   const activeVersion = versions.find(version => version.id === versionId);
   const busy = pending || contractOpen;
   return <div className="flex min-w-0 flex-1 flex-col gap-3">
     <div className="flex flex-wrap items-end gap-2"><Link href="/kp" className="mr-2 self-center text-sm underline underline-offset-4">КП и договоры</Link>
-      <div className="min-w-44 flex-1 space-y-1"><Label htmlFor="kp-client">Клиент CRM</Label><SearchableSelect id="kp-client" options={clientOptions} value={document?.client?.id ?? ''} disabled={!canEdit || busy} onChange={id => { setPending(true); setError(null); void selectClient(id).catch(error => setError(error.message)).finally(() => setPending(false)); }} /></div>
+      <div className="min-w-44 flex-1 space-y-1"><Label htmlFor="kp-client">Клиент CRM</Label><ClientSelect id="kp-client" options={clientOptions} value={document?.client?.id ?? ''} disabled={!canChangeClient || busy} onChange={id => { setPending(true); setError(null); void selectClient(id).catch(error => setError(error.message)).finally(() => setPending(false)); }} /></div>
       <Button variant="outline" disabled={!canEdit || busy} onClick={() => void openRate()}>Курс{document?.fx ? ' · ' + document.fx.rate : ''}</Button>
       <div className="min-w-52 flex-1 space-y-1"><Label htmlFor="kp-version">Версия КП · Москва</Label><SearchableSelect id="kp-version" options={[{ value: '', label: 'Текущая редакция' }, ...versions.map(version => ({ value: version.id, label: versionLabel(version) }))]} value={versionId} disabled={busy || !document} onChange={versionId => void execute({ type: 'version', versionId })} /></div>
       {versionId && liveDocument?.canEdit ? <Button variant="outline" disabled={busy} onClick={() => void execute({ type: 'restore' }).then(ok => { if (ok) void refreshVersions().catch(error => setError(error.message)); })}>Восстановить</Button> : null}

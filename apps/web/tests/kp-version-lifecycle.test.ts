@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
-import { applyProposalStageGate, publishSourcePdf, readVersionPdf, recordPendingPdfArtifact, requestProposalPdf, restoreProposalVersion } from "../src/server/kp/lifecycle";
+import { applyProposalStageGate, freezeSources, publishSourcePdf, readVersionPdf, recordPendingPdfArtifact, requestProposalPdf, restoreProposalVersion } from "../src/server/kp/lifecycle";
 import { ProposalLifecycleError, parseRenderJobPayload } from "../src/server/kp/lifecycle-contract";
 import { createPdfRenderHandler, createRenderWorker } from "../src/server/kp/render-worker";
 import { lifecycleFixture } from "./helpers/kp-lifecycle-fixture";
@@ -18,6 +18,19 @@ async function release(f: ReturnType<typeof lifecycleFixture>) {
   assert.equal(await worker.runOne(), "succeeded");
   return [...f.state.versions.values()][0];
 }
+
+test('новый текущий клиент после договора не требует переписывать принятый PDF', async () => {
+  const f = lifecycleFixture(), version = await release(f), before = structuredClone(version);
+  f.state.project.stage = 'CONTRACT'; f.state.proposal.acceptedVersionId = version.id;
+  f.state.proposal.clientId = 'client2'; f.state.proposal.revision++;
+  f.state.proposal.state.client = { crmId: 'client2', crmSnapshot: { id: 'client2', name: 'Клиент Б', phone: '' } };
+  const frozen = await f.transaction(store => freezeSources(store, f.binding, [{ proposalId: 'proposal1', expectedRevision: 2 }], f.ports));
+  assert.equal(frozen[0].binding.clientId, 'client2'); assert.equal(frozen[0].revision, 2);
+  assert.equal(frozen[0].mode, 'retained'); assert.equal(frozen[0].retainedVersionId, version.id);
+  assert.deepEqual(f.state.versions.get(version.id), before);
+  f.state.proposal.state.items[0].title = 'Несогласованное изменение состава';
+  await assert.rejects(f.transaction(store => freezeSources(store, f.binding, [{ proposalId: 'proposal1', expectedRevision: 2 }], f.ports)), isCode('KP_REVISION_CHANGED'));
+});
 
 test("request freezes DB source and Decimal strings; exact receipt replay survives stage change", async () => {
   const f = lifecycleFixture(), operationId = randomUUID();

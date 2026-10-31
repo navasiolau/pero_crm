@@ -73,8 +73,12 @@ export async function freezeSources(store: ProposalLifecycleStore, binding: Acto
     if (proposal.revision !== input.expectedRevision) lifecycleFailure("KP_REVISION_CHANGED");
     if (source.project.stage !== "LEAD") {
       const retained = await readyPdf(store, proposal.id, proposal.acceptedVersionId ? await store.version(proposal.id, proposal.acceptedVersionId) : null);
-      if (retained.version.revision !== proposal.revision) lifecycleFailure("KP_REVISION_CHANGED");
-      result.push(versionSource(retained.version, source));
+      // После смены только клиента принятый PDF остаётся прежним приложением договора.
+      const withoutClient = (state: LifecycleState) => Object.fromEntries(Object.entries(state).filter(([key]) => key !== 'client'));
+      if (retained.version.revision !== proposal.revision && lifecycleFingerprint(withoutClient(retained.version.state)) !== lifecycleFingerprint(withoutClient(proposal.state))) lifecycleFailure("KP_REVISION_CHANGED");
+      const saved = versionSource(retained.version, source);
+      if (saved.currency !== proposal.currency || saved.rate !== proposal.rate || saved.rateDate !== proposal.rateDate || saved.rateSource !== proposal.rateSource) lifecycleFailure('KP_REVISION_CHANGED');
+      result.push({ ...saved, revision: proposal.revision, binding: { ...saved.binding, clientId: proposal.clientId, clientSnapshot: savedProposalClientSnapshot(proposal) } });
       continue;
     }
     result.push({

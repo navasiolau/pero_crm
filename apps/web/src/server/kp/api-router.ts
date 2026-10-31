@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { apiChangeClient } from "./api-contract";
 import { KP_API_SCOPES, type KpApiScope } from "@/lib/kp-api-scopes";
 import { apiCreateDocument, apiFailure, apiGenerateContract, apiId, apiOperationId, apiRateQuery, apiRelease,
   apiRestore, apiRevision, apiSaveContract, apiSaveDocument, KpApiError, parseApi,
@@ -19,6 +20,7 @@ function match(method: string, path: readonly string[], query: URLSearchParams):
     if (key) id(key);
     if (path.length === 2 && method === "GET") return { action: "getDocument", scope: "kp:read", values: { proposalId: key } };
     if (path.length === 2 && method === "PUT") return { action: "saveDocument", scope: "kp:write", values: { proposalId: key }, body: "json" };
+    if (path.length === 3 && child === "client" && method === "PATCH") return { action: "changeClient", scope: "kp:write", values: { proposalId: key }, body: "json" };
     if (path.length === 3 && child === "pdf" && method === "POST") return { action: "pdf", scope: "kp:export", values: { proposalId: key }, body: "json" };
     if (child === "media") {
       if (path.length === 3 && method === "POST") return { action: "upload", scope: "kp:media:write", values: { proposalId: key }, body: "upload" };
@@ -60,6 +62,7 @@ function queryValues(query: URLSearchParams, allowed: readonly string[]): Record
   return output;
 }
 function command(action: ApiAction, body: unknown, values: Record<string, unknown>) {
+  if (action === "changeClient") return { ...parseApi(apiChangeClient, body), ...values };
   if (action === "createDocument") return parseApi(apiCreateDocument, body);
   if (action === "saveDocument" || action === "pdf") {
     const parsed = action === "saveDocument" ? parseApi(apiSaveDocument, body) : parseApi(apiRelease, body);

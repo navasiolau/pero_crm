@@ -20,7 +20,7 @@ function Percentages(){const people={ENGINEERING:{id:'e',name:'Инженер',r
 createRoot(document.getElementById('root')).render(window.__mode==='percentage'?<Percentages/>:<ProjectInlineProvider projectId="project" stage="LEAD" pricingProjection={null} initial={{title:"Order",clientId:"a",managerId:null,address:"HISTORIC PROJECT ADDRESS",delivery:null,unloading:null,installation:null,"client.phone":"100","client.address":"Client A"}}><OverviewTab project={{id:"project",number:"1",stage:"LEAD",stageChangedAt:new Date(0),createdAt:new Date(0),currency:"BYN",refusalReason:null,refusalComment:null,reclamationReason:null,reclamationDescription:null,reclamationFault:null}} createdByName={null} canManage={window.__canManage} showAmount={false} clients={[{id:"a",label:"Client A",phone:"100",address:"Client A"},{id:"b",label:"Client B",phone:"200",address:"Client B"}]} managers={[]} productEngineers={[]} doneAt={null}/></ProjectInlineProvider>);
 `,resolveDir:web,loader:'tsx'},bundle:true,write:false,platform:'browser',format:'iife',jsx:'automatic',tsconfig:path.join(web,'tsconfig.json'),define:{'process.env.NODE_ENV':'"production"'},plugins:[{name:'boundaries',setup(b){
 b.onResolve({filter:/^(next\/navigation|sonner|@\/components\/(project-cover|project-stage-control|product-inline-provider)|@\/lib\/independent-(project|product-percentage)-action|@\/server\/(clients|product-percentage-pay)\/actions)$/},args=>({path:args.path,namespace:'boundary'}));
-b.onLoad({filter:/.*/,namespace:'boundary'},args=>({contents:args.path==='@/components/project-cover'?'export const ProjectCover=()=>null;':args.path==='@/components/project-stage-control'?'export const ProjectStageControl=()=>null;':args.path==='@/components/product-inline-provider'?'export const useOptionalProductInline=()=>null;':args.path.includes('independent-product-percentage')?'export const invokeProductPercentagePatch=input=>window.__percentageSave(input);':args.path.includes('product-percentage-pay')?'export const retryProductPercentageAction=async()=>({ok:true});':args.path==='next/navigation'?'export const useRouter=()=>({refresh(){}});':args.path==='sonner'?'export const toast={error(){},success(){}};':args.path.includes('independent-project')?'export const invokeProjectPatch=input=>window.__save(input);':'export const createClient=async()=>({ok:false});export const updateClient=async()=>({ok:false});',loader:'js'}));
+b.onLoad({filter:/.*/,namespace:'boundary'},args=>({contents:args.path==='@/components/project-cover'?'export const ProjectCover=()=>null;':args.path==='@/components/project-stage-control'?'export const ProjectStageControl=()=>null;':args.path==='@/components/product-inline-provider'?'export const useOptionalProductInline=()=>null;':args.path.includes('independent-product-percentage')?'export const invokeProductPercentagePatch=input=>window.__percentageSave(input);':args.path.includes('product-percentage-pay')?'export const retryProductPercentageAction=async()=>({ok:true});':args.path==='next/navigation'?'export const useRouter=()=>({refresh(){}});':args.path==='sonner'?'export const toast={error(){},success(){}};':args.path.includes('independent-project')?'export const invokeProjectPatch=input=>window.__save(input);':'export const clientSelectionOptions=async()=>window.__clientOptions??[{value:"a",label:"Client A",hint:"100"},{value:"b",label:"Client B",hint:"200"}];export const createClient=async()=>({ok:false});export const updateClient=async()=>({ok:false});',loader:'js'}));
 }}],logLevel:'silent'});
 const css=(async()=>{const postcss=createRequire(require.resolve('@tailwindcss/postcss'))('postcss'),tailwind=require('@tailwindcss/postcss');return(await postcss([tailwind({base:web})]).process(await readFile(path.join(web,'src/app/globals.css'),'utf8'),{from:path.join(web,'src/app/globals.css')})).css;})();
 async function withContacts(canManage,run,profile=null,viewport={width:1440,height:900}){
@@ -31,6 +31,20 @@ async function withContacts(canManage,run,profile=null,viewport={width:1440,heig
  await page.addStyleTag({content:await css});await page.addScriptTag({content:(await bundle).outputFiles[0].text});await page.locator(profile?'[data-single-percentage-kind]':'#project-client-phone').first().waitFor();await run(page);
  }finally{await context.close();}
 }
+test('общий селектор видит весь справочник и нового клиента после открытия',async()=>{
+ await withContacts(true,async page=>{
+  await page.evaluate(()=>{window.__clientOptions=Array.from({length:125},(_,index)=>({value:'client-'+index,label:'Клиент '+index,hint:'000'+index}));});
+  await page.locator('#project-inline-client').click();
+  await page.getByPlaceholder('Поиск: клиент…').fill('Клиент 124');
+  await page.getByRole('button',{name:'Клиент 124 000124',exact:true}).click();
+  await page.waitForFunction(()=>window.__calls.some(call=>call.field==='clientId'&&call.value==='client-124'));
+  await page.evaluate(()=>{window.__clientOptions.push({value:'created-client',label:'Новый клиент QA202',hint:'999'});});
+  await page.locator('#project-inline-client').click();
+  await page.getByPlaceholder('Поиск: клиент…').fill('Новый клиент QA202');
+  await page.getByRole('button',{name:'Новый клиент QA202 999',exact:true}).waitFor();
+ });
+});
+
 test('real project contact inputs save Client fields with binding and support null address',async()=>{
  await withContacts(true,async page=>{
   assert.equal(await page.getByRole('button',{name:'Новый клиент',exact:true}).count(),1);

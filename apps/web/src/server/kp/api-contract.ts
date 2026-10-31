@@ -12,7 +12,7 @@ export type KpApiContext = {
   actor: DomainActor; binding: KpActorBinding;
   authorize(scope?: KpApiScope, tx?: Prisma.TransactionClient): Promise<DomainActor>;
 };
-export type ApiAction = "listDocuments" | "createDocument" | "getDocument" | "saveDocument" | "readOperation" |
+export type ApiAction = "listDocuments" | "createDocument" | "getDocument" | "saveDocument" | "changeClient" | "readOperation" |
   "upload" | "readMedia" | "listVersions" | "getVersion" | "restoreVersion" | "pdf" | "getContract" |
   "saveContract" | "generateContract" | "contractHistory" | "getJob" | "readArtifact" | "listClients" | "getClient" | "createClient" | "rates";
 export type KpApiService = { execute(action: ApiAction, context: KpApiContext, input: Record<string, unknown>): Promise<unknown> };
@@ -20,6 +20,7 @@ export type ApiBinary = { bytes: Uint8Array; mimeType: string; fileName: string;
 export const apiId = z.string().min(1).max(160).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/);
 export const apiRevision = z.number().int().min(0).max(2_147_483_647);
 export const apiOperationId = z.uuid().transform(value => value.toLowerCase());
+export const apiChangeClient = z.object({ operationId: apiOperationId, expectedRevision: apiRevision, expectedClientId: apiId, clientId: apiId }).strict();
 const calendarDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(value => {
   const date = new Date(`${value}T00:00:00Z`); return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
 }, "Укажите календарную дату");

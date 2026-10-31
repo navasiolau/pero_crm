@@ -19,6 +19,7 @@ type Props = {
   id?: string; options: SearchableOption[]; value: string; onChange: (value: string) => void;
   placeholder?: string; searchPlaceholder?: string; emptyText?: string; disabled?: boolean;
   allowClear?: boolean; className?: string;
+  onOpenChange?: (open: boolean) => void;
   popupMinWidth?: number; wrapOptions?: boolean;
 };
 
@@ -53,13 +54,13 @@ function OptionsContent({ options, value, searchPlaceholder, emptyText, allowCle
 }
 
 // Выпадающий список с поиском: закрытый Portal не исполняет OptionsContent.
-export function SearchableSelect({ id, options, value, onChange, placeholder = "Выберите…", searchPlaceholder = "Поиск…", emptyText = "Ничего не найдено", disabled, allowClear, className, popupMinWidth, wrapOptions }: Props) {
+export function SearchableSelect({ id, options, value, onChange, placeholder = "Выберите…", searchPlaceholder = "Поиск…", emptyText = "Ничего не найдено", disabled, allowClear, className, popupMinWidth, wrapOptions, onOpenChange }: Props) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const searchInput = useRef<HTMLInputElement>(null);
   const selected = useMemo(() => options.find(option => option.value === value), [options, value]);
   const onSelect = useCallback((next: string) => { onChange(next); setOpen(false); }, [onChange]);
-  return <Popover open={open} onOpenChange={next => { setOpen(next); if (!next) setQuery(""); }}>
+  return <Popover open={open} onOpenChange={next => { setOpen(next); onOpenChange?.(next); if (!next) setQuery(""); }}>
     <PopoverTrigger render={<Button id={id} variant="outline" disabled={disabled} className={cn("w-full justify-between font-normal", className)} />}>
       <span className="truncate">{selected ? selected.label : placeholder}</span><ChevronDown className="size-4 shrink-0 opacity-50" />
     </PopoverTrigger>
