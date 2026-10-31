@@ -1,4 +1,5 @@
 import type { CommercialProposal, Prisma, Project } from "@prisma/client";
+import { initializeSignature, readSignatureDefaults } from './signature-defaults';
 import { MANAGER_ROLES, hasAnyRole, hasRole } from "@/lib/roles";
 import type { DomainActor } from "@/server/actor";
 import { createProjectInTransaction } from "@/server/projects/core";
@@ -122,7 +123,7 @@ export async function createProposalInTransaction(tx: Prisma.TransactionClient, 
   await lockProposalWrites(tx);
   const replay = await readReceipt(tx, actor, identity);
   if (replay) return replay;
-  const source = normalizeProposalState(data.state);
+  const source = initializeSignature(normalizeProposalState(data.state), (await readSignatureDefaults(tx)).values);
   const { client, isTemporary } = await resolveProposalClientInTransaction(tx, actor, data, source, undefined, hooks.environment);
   const initial = projectValues(source, data.address);
   const projectCreated = await createProjectInTransaction(tx, actor, {
