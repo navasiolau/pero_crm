@@ -16,4 +16,16 @@ CI №351 (41357673444) на ab57a442: три финансовых native-сце
 
 ## CI и выпуск
 
-Существующий полный CI, фактическая staging-приёмка и production-выпуск ожидаются. Журналы и read-only baseline production/staging находятся в ignored .playwright-mcp/production-202206-20261102 worktree 201. Production остаётся на b77ab80a до успешной публикации; задача 201 в выпуск не включается.
+Коммит 845f8388 слит обычным merge в staging 33911889. CI №352 (41360061368) прошёл 7/7: https://github.com/navasiolau/pero_crm/actions/runs/41360061368. Лог native job 125008586082 подтверждает PASS всех трёх исходно упавших cash-сценариев с неизменёнными assertions. Полная типизация со свежим Prisma в backend также PASS.
+
+Фактический staging 33911889 принят: web/renderer имеют этот SHA и healthy, /api/health и /login возвращают 200. Контейнер/образ/PID/start time/mounts БД, proxy и конфигурация, включая W07, совпадают с baseline перед выпуском. Runtime-исходники приложения не изменились относительно ab57a442.
+
+## Production
+
+02.11.2026 принят 33911889f4ad70609db45fce38fdcd769d665a0d. Main получил весь принятый staging через merge --ff-only, remote main/staging имеют одинаковые SHA. CI №353 (41361010527) прошёл 7/7: https://github.com/navasiolau/pero_crm/actions/runs/41361010527.
+
+Фактические production web/renderer имеют 33911889 и healthy. Их image IDs: web 6a39a59ee3ac53027f790e980eba85ed4203c01e26a1be00db2bfff2256108fa; renderer d43ec5dab12b65930b2379050de71211bdcfae032330afba1018f8332acad599. Контейнер/образ/PID/start time/mounts БД, proxy и конфигурационные файлы не изменились. Startup подтверждает No pending migrations to apply. Публичные HTTPS /api/health и /login — 200, database=ok.
+
+Read-only API: полный справочник 180 клиентов вместо прежних 30; у КП №227 canChangeClient=true при canEdit=false и CONTRACT. Его ревизия 25, все 19 позиций и подпись сохранились. Договор остался на ревизии 1, settings и 11 ручных полей заказчика неизменны. Бизнес-записи для приёмки не создавались и не редактировались; прямых production DB-команд, миграций, дампов и действий с restic не было.
+
+Журналы, native-regression proof, before/after metadata и итоговый release-result.json сохранены в ignored .playwright-mcp/production-202206-20261102 worktree 201. Задача 201 остаётся открытой и не является предком выпуска. Финальные отметки приёмки фиксируются отдельным документационным коммитом bugfix/207 после принятого выпуска; код 845f8388 уже включён в 33911889. Документационная фиксация не меняет принятый main/staging SHA.
