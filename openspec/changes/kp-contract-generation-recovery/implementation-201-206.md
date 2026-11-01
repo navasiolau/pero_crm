@@ -15,7 +15,7 @@
 
 Результаты, ограничения и пути артефактов записаны в verification.md каждого change в соответствующем D:/Projects/pero_crm_worktrees/kp-fix-N. Native-проверки использовали существующую local5433 и откатили все изменения. Новых БД/стендов, seed/reset, дампов и изменений CI не было.
 
-В исходном D:/Projects/pero_crm_v2 сохранены пользовательские CRM_APPLICATION_IMPROVEMENT_PLAN.md и CRM_APPLICATION_IMPROVEMENT_EXECUTION.md. Main сохраняет b77ab80a. Использовались обычные merge с историей; cherry-pick, squash, force-push и переписывание истории не применялись. Задача 201 не является предком staging.
+В исходном D:/Projects/pero_crm_v2 сохранены пользовательские CRM_APPLICATION_IMPROVEMENT_PLAN.md и CRM_APPLICATION_IMPROVEMENT_EXECUTION.md. На этапе 31.10 main сохранял b77ab80a. Использовались обычные merge с историей; cherry-pick, squash, force-push и переписывание истории не применялись. Задача 201 не является предком staging.
 
 ## CI и фактическая приёмка
 
@@ -36,4 +36,11 @@
 ## Осталось
 
 - Установить исходную причину 201 по воспроизведению или дополнительной диагностике; одного CONTRACT_RENDER_FAILED для вывода недостаточно.
-- Main/production не выпущены; production-изменения и миграции в этот этап не входят.
+
+## Production-выпуск 02.11.2026
+
+По прямому указанию владельца 202–206 выпущены на production вместе с согласованным исправлением CI №207. Принятый main/staging/production SHA: `33911889f4ad70609db45fce38fdcd769d665a0d`. Stage CI №352 и main CI №353 прошли 7/7; production web/renderer healthy, публичные HTTPS health/login — 200. БД, proxy, env/compose/watcher не менялись; startup подтверждает отсутствие pending migrations. Дампов, прямых DB-команд и действий с restic не было.
+
+Первоначальный main CI №351 выявил календарную зависимость real-COMMIT теста: октябрьская синтетическая выплата стала прошлым долгом в ноябре. В отдельной bugfix/207 дата только этого fixture перенесена на следующий UTC-месяц, без изменений приложения, workflows и assertions. Native CI №352 подтвердил PASS всех трёх исходно упавших cash-сценариев. Код 207 — 845f8388, обычный merge в staging — 33911889, main получил его fast-forward.
+
+Read-only production API подтвердил 180 клиентов вместо лимита 30. КП №227 сохранило ревизию 25, 19 позиций и подпись; canChangeClient=true в CONTRACT, состав заблокирован. Договор сохранил ревизию 1, settings и 11 ручных полей. Задача 201 остаётся открытой и вне выпуска. Итоговые proofs — ignored `.playwright-mcp/production-202206-20261102/release-result.json`; подробности 207 — в её verification.md.
