@@ -1088,7 +1088,11 @@ test("warehouse/unit-catalog-CRUD-current-admin-inactive-usage-and-unchanged-num
 });
 
 test("mutation/real-COMMIT-lost-ACK-UNKNOWN-readonly-peer-replay-and-five-partial-rollbacks", async t => {
-  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-10-11T12:00:00Z").getTime() });
+  // Начисление COMMIT-сценария не становится долгом для соседних финансовых тестов.
+  const commitClock = new Date();
+  commitClock.setUTCMonth(commitClock.getUTCMonth() + 1, 11);
+  commitClock.setUTCHours(12, 0, 0, 0);
+  t.mock.timers.enable({ apis: ["Date"], now: commitClock.getTime() });
   const original = await nativeSnapshot(fixture.db);
   const c = await tree(fixture.db, fixture, "mutation133");
   await fixture.db.work.update({ where: { id: c.work.id }, data: { quantity: "10", quantityPerUnit: "2", priceSnapshot: "100", total: "1000" } });
