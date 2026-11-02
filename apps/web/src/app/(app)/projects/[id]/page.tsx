@@ -20,7 +20,6 @@ import {
   MANAGER_ROLES,
   OFFICE_ROLES,
   hasAnyRole,
-  hasRole,
 } from "@/lib/roles";
 import { prisma } from "@/lib/prisma";
 import { getPluginSettings } from "@/server/plugins/run-log";
@@ -41,6 +40,7 @@ import { logisticsQueryFromParams } from "@/components/logistics/model";
 import { loadLogisticsWorkspace } from "../../logistics/workspace-data";
 
 import { FilesTab } from "./files-tab";
+import { projectFilePermissions } from "@/server/files/upload-context";
 import { FinanceTab } from "./finance-tab";
 import { MaterialsSummaryTab } from "./materials-summary-tab";
 import { ProjectInlineProvider } from "@/components/project-inline-provider";
@@ -72,7 +72,7 @@ export default async function ProjectPage({
   if (!project) notFound();
 
   const canManage = hasAnyRole(role, MANAGER_ROLES);
-  const canEditTech = canManage || hasRole(role, "ENGINEER");
+  const { canUpload: canManageFiles, canManageCover } = await projectFilePermissions(prisma, session.user, project);
   const showFinance = hasAnyRole(role, FINANCE_ROLES);
   const showAmount = canViewProductMoney(role);
   // Склад (§12): вкладка «Материалы» — офисные роли (+ бухгалтер на просмотр)
@@ -219,6 +219,7 @@ export default async function ProjectPage({
             }
             canManage={canManage}
             showAmount={showOverviewAmount}
+            canManageFiles={canManageCover}
             clients={[...clients, ...(clients.some(client=>client.id===project.client.id)?[]:[project.client])].map((client) => ({ id: client.id, label: displayClientName(client), phone:client.phone, address:client.address }))}
             managers={managers.map((manager) => ({ id: manager.id, name: manager.name }))}
             productEngineers={project.products
@@ -309,7 +310,7 @@ export default async function ProjectPage({
           <FilesTab
             projectId={project.id}
             files={fileRows}
-            canEdit={canEditTech}
+            canEdit={canManageFiles}
             flatProject
           />
         </TabsContent>

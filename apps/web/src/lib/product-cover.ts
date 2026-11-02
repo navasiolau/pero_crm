@@ -1,7 +1,7 @@
 import type { ProductStatus, Role } from "@prisma/client";
 import type { ProductDraftAccessContext } from "./product-drafts";
 
-import { canEditProductTechnicalBlock } from "@/server/access/visibility";
+import { canManageProductFiles } from "./file-management";
 
 export type CoverActor = {
   id: string;
@@ -29,9 +29,9 @@ const COVER_IMAGE_MIME = new Set([
   "image/gif", "image/heic", "image/heif", "image/bmp", "image/x-ms-bmp",
 ]);
 
-/** Keep the technical-edit grant: management wins, engineering is DESIGN-only. */
+/** Эскиз использует самостоятельное файловое право, а не право техправки. */
 export function canSetProductCover(actor: CoverActor, product: CoverProduct): boolean {
-  return canEditProductTechnicalBlock({ ...actor, roles: [...actor.roles] }, product);
+  return canManageProductFiles(actor.roles, product);
 }
 
 export function isCoverImageMime(mimeType: string): boolean {

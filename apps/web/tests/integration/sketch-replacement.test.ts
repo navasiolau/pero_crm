@@ -12,9 +12,10 @@ test("media.sketch: настоящие upload, receipts, CAS, аудит и exac
   const f = await createHttpS3Fixture("sketch-replacement"); t.after(() => f.dispose());
   const manager = await f.user("manager", ["MANAGER"]), engineer = await f.user("engineer", ["ENGINEER"]);
   const participant = await f.user("participant", ["ENGINEER"]), foreign = await f.user("foreign", ["ENGINEER"]);
+  const reader = await f.user("reader", ["PROCUREMENT"]);
   const disabled = await f.user("disabled", ["MANAGER"], { active: false }), optedOut = await f.user("opted-out", ["ADMIN"]);
   await f.user("office", ["DIRECTOR"]); await f.user("worker", ["WORKER"]);
-  for (const actor of [manager, engineer, participant, foreign]) await f.session(actor);
+  for (const actor of [manager, engineer, participant, foreign, reader]) await f.session(actor);
   await f.db.notificationPreference.create({ data: { userId: optedOut.id, type: "file.added", enabled: false } });
   const preference = await f.db.userPreference.create({ data: { userId: engineer.id, key: "product.tab", value: "files" } });
   const project = await f.project("sketch", { managerId: manager.id, stage: "CONTRACT", currency: "BYN", initialPrice: "543.21",
@@ -105,7 +106,7 @@ test("media.sketch: настоящие upload, receipts, CAS, аудит и exac
     const before = await snapshot(); const replay = await f.upload(engineer, assigned.upload);
     assert.equal(accept(replay, assigned.upload), assigned.id); assert.equal(replay.body.repeated, true); assert.deepEqual(await snapshot(), before);
     const stale = await f.upload(engineer, input("stale", old.id)); assert.equal(stale.response.status, 409); assert.equal(stale.body.kind, "conflict");
-    const denied = await f.upload(foreign, input("foreign", pointer)); assert.equal(denied.response.status, 404);
+    const denied = await f.upload(reader, input("readonly", pointer)); assert.equal(denied.response.status, 403);
     const anonymous = await f.upload(undefined, input("anonymous", pointer)); assert.equal(anonymous.response.status, 401);
     assert.deepEqual(await snapshot(), before);
     const foreignProject = await f.project("wrong-context");
@@ -114,13 +115,15 @@ test("media.sketch: настоящие upload, receipts, CAS, аудит и exac
   });
   await t.test("media.current-grants: ENGINEERING participant, legacy author и PRODUCTION read/write границы", async () => {
     await f.db.product.update({ where: { id: product.id }, data: { engineerId: null } });
-    const before = await snapshot(); assert.equal((await f.upload(engineer, input("unassigned", pointer))).response.status, 404); assert.deepEqual(await snapshot(), before);
+    await replace(engineer, "unassigned");
     await replace(participant, "participant"); await f.db.product.update({ where: { id: product.id }, data: { engineerId: engineer.id } });
     const legacy = pointer; await f.db.file.update({ where: { id: legacy }, data: { uploadedById: null } });
     await replace(engineer, "legacy"); assert.equal(await f.db.file.findUnique({ where: { id: legacy } }), null);
     await f.db.product.update({ where: { id: product.id }, data: { status: "PRODUCTION" } });
     const production = await snapshot(), read = await f.request(`/api/files/${pointer}`, engineer); assert.equal(read.status, 200); assert.deepEqual(Buffer.from(await read.arrayBuffer()), png);
-    assert.equal((await f.upload(engineer, input("production", pointer))).response.status, 404); assert.deepEqual(await snapshot(), production);
+    assert.deepEqual(await snapshot(), production); await replace(foreign, "production");
+    await f.db.product.update({ where: { id: product.id }, data: { status: "PREPARATION" } });
+    const preparation = await snapshot(); assert.equal((await f.upload(engineer, input("preparation", pointer))).response.status, 404); assert.deepEqual(await snapshot(), preparation);
     await f.db.product.update({ where: { id: product.id }, data: { status: "DESIGN" } });
   });
   await t.test("media.concurrent: два разных CAS дают одного winner; один nonce даёт один receipt", async () => {

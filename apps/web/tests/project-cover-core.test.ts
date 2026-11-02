@@ -6,15 +6,24 @@ import {authorizeProjectCoverUpload,persistProjectCoverUpload,deleteProjectCover
 const deleteProjectCoverCore=(...args:Parameters<typeof actualDelete>)=>actualDelete(args[0],args[1],args[2],{mode:'s3',endpoint:'https://qa138.invalid/',bucket:'qa138-fixture'});
 const input={projectId:'j',expectedCoverFileId:null,clientMutationId:'12222222-2222-4222-8222-222222222222'} as const;
 test('only manager union may upload own project cover; engineer is readonly',async()=>{
- const tx={project:{findFirst:async()=>({id:'j',number:'1',coverFileId:null})},changeLog:{findUnique:async()=>null}} as unknown as Prisma.TransactionClient;
+ const tx={project:{findFirst:async()=>({id:'j',number:'1',stage:'CONTRACT' as const,coverFileId:null})},changeLog:{findUnique:async()=>null}} as unknown as Prisma.TransactionClient;
  assert.equal((await authorizeProjectCoverUpload(tx,{id:'m',roles:['MANAGER']},input)).ok,true);
  assert.equal((await authorizeProjectCoverUpload(tx,{id:'e',roles:['ENGINEER']},input)).ok,false);
  assert.equal((await authorizeProjectCoverUpload(tx,{id:'me',roles:['MANAGER','ENGINEER']},input)).ok,true);
 });
+test('project cover engineering permission follows current stage in preflight and persistence',async()=>{
+ for(const stage of ['LEAD','ESTIMATE','CONTRACT','IN_WORK','DONE','REFUSED'] as const){
+  const f=fixture(),engineer={id:'e',roles:['ENGINEER'] as ['ENGINEER']};Object.assign(f.project,{stage});
+  const allowed=['IN_WORK','DONE','REFUSED'].includes(stage);
+  assert.equal((await authorizeProjectCoverUpload(f.tx,engineer,input)).ok,allowed);
+  assert.equal((await persistProjectCoverUpload(f.tx,engineer,input,upload)).ok,allowed);
+  assert.equal(f.files.size,allowed?1:0);
+ }
+});
 const actor={id:'m',roles:['MANAGER'] as ['MANAGER']};
 const upload={fileName:'original.png',storedName:'owned.png',mimeType:'image/png',size:5,hasThumb:true,contentHash:'exact-original-hash'};
 function fixture(failIntent=false){
- const project={id:'j',number:'1',coverFileId:null as string|null},files=new Map<string,Record<string,unknown>>(),logs=new Map<string,Record<string,unknown>>(),events=new Map<string,Record<string,unknown>>();let failAudit=false,fileSequence=0;
+ const project={id:'j',number:'1',stage:'CONTRACT' as const,coverFileId:null as string|null},files=new Map<string,Record<string,unknown>>(),logs=new Map<string,Record<string,unknown>>(),events=new Map<string,Record<string,unknown>>();let failAudit=false,fileSequence=0;
  const tx={
   $queryRaw:async(query:{strings?:readonly string[];values?:unknown[]})=>(query.strings??[]).join('').includes('FROM "DomainEvent"')?[...events.values()].filter(row=>{const payload=row.payload as {projectId:string;storedName:string};return row.type===query.values?.[0]&&payload.projectId.toLowerCase()===query.values?.[1]&&payload.storedName.toLowerCase()===query.values?.[2];}):[],project:{findFirst:async()=>project,updateMany:async({where,data}:{where:{coverFileId:string|null};data:{coverFileId:string|null}})=>{if(project.coverFileId!==where.coverFileId)return{count:0};project.coverFileId=data.coverFileId;return{count:1}}},
   file:{create:async({data}:{data:Record<string,unknown>})=>{const row={...data,id:'file-'+fileSequence++};files.set(row.id,row);return row},findUnique:async({where}:{where:{id:string}})=>files.get(where.id)??null,delete:async({where}:{where:{id:string}})=>files.delete(where.id)},

@@ -14,11 +14,11 @@ import { isConfirmedSketchDelete } from "@/lib/product-sketch-ui";
 
 import type { SketchDeleteInput as DeleteSketchInput, SketchResult as DeleteSketchResult } from "@/server/products/sketch-contract";
 type ProductCoverLayoutProps = {
-  productId:string;projectId:string;cover:SketchFilePreview|null;actorRoles:readonly Role[];canEditTechnicalBlock:boolean;canDeleteCover?:boolean;
+  productId:string;projectId:string;cover:SketchFilePreview|null;actorRoles:readonly Role[];canManageFiles:boolean;canDeleteCover?:boolean;
   deleteCoverAction:(input:DeleteSketchInput)=>Promise<DeleteSketchResult>;
   header:ReactNode;details:ReactNode;onRefresh?:()=>void;beforeMutation?:()=>Promise<boolean>;registerGuard?:(key:string,guard:()=>Promise<boolean>)=>()=>void;
 };
-export function ProductCoverLayout({productId,projectId,cover:initialCover,actorRoles,canEditTechnicalBlock,canDeleteCover,deleteCoverAction,header,details,onRefresh,beforeMutation,registerGuard}:ProductCoverLayoutProps) {
+export function ProductCoverLayout({productId,projectId,cover:initialCover,actorRoles,canManageFiles,canDeleteCover,deleteCoverAction,header,details,onRefresh,beforeMutation,registerGuard}:ProductCoverLayoutProps) {
   const [cover,setCover]=useState(initialCover);
   const [deleteFor,setDeleteFor]=useState<SketchFilePreview|null>(null);
   const [busy,setBusy]=useState(false);
@@ -29,7 +29,7 @@ export function ProductCoverLayout({productId,projectId,cover:initialCover,actor
   const awaiting=useRef<{id:string|null}|null>(null);
   const deleteAttempt=useRef<DeleteSketchInput|null>(null);
   const viewer=useFileViewer("cover-fullscreen");
-  const canUpload=canReplaceProductCover(actorRoles,canEditTechnicalBlock);
+  const canUpload=canReplaceProductCover(actorRoles,canManageFiles);
   const canDelete=canDeleteCover??canUpload;
   useEffect(()=>{
     if(pending.current)return;
