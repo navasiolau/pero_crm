@@ -81,10 +81,10 @@ async function regressKanban(){
   for(const section of ['projects','products'])for(const viewport of [{width:1440,height:900},{width:390,height:844},{width:360,height:800}]){
    const page=await pageFor(section,viewport);
    await page.evaluate(()=>{window.__setRoles(['ENGINEER']);window.__setManage(false);window.__setAmount(false);});
-   await expect(page.locator('[data-slot="kanban-column"]')).toHaveCount(section==='projects'?3:5);
-   await expect(page.locator('[data-kanban-card-id]')).toHaveCount(section==='projects'?3:5);
+   await expect(page.locator('[data-slot="kanban-column"]')).toHaveCount(section==='projects'?4:5);
+   await expect(page.locator('[data-kanban-card-id]')).toHaveCount(section==='projects'?4:5);
    const labels=await page.locator('[data-slot="kanban-column"]').evaluateAll(nodes=>nodes.map(node=>node.firstElementChild.querySelector('span').textContent));
-   assert.deepEqual(labels,section==='projects'?['Договор','В работе','Завершён']:['Проектирование','В производстве','На складе ГП','Установка','Готово']);
+   assert.deepEqual(labels,section==='projects'?['Договор','В работе','Завершён','Отказ']:['Проектирование','В производстве','На складе ГП','Установка','Готово']);
    if(viewport.width<768)await page.getByRole('button',{name:'Фильтры',exact:true}).click();
    await expect(page.getByRole('button',{name:'Инженер',exact:true})).toBeVisible();
    if(viewport.width<768){const filterFile=section+'-engineer-filters-'+viewport.width+'.png';await page.screenshot({path:path.join(directory,filterFile),fullPage:false});screenshots.push(filterFile);await page.getByRole('button',{name:'Показать результаты',exact:true}).click();await expect(page.getByRole('dialog')).toHaveCount(0);}

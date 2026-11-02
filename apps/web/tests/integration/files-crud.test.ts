@@ -66,7 +66,7 @@ test("files.crud: file113, документы, attachment ACL и inline-дейс
     // Отмена не отправляет deleteFile; реальный dialog/cancel остаётся в Chromium consumer.
     const kept = await f.request(`/api/files/${file.id}`, engineer); assert.equal(kept.status, 200); assert.deepEqual(Buffer.from(await kept.arrayBuffer()), png);
     assert.deepEqual(await nativeSnapshot(f.db), before); assert.deepEqual(await f.versions(project.id), versions);
-    assert.equal((await f.action<FileDeleteResult>("deleteFile", productPage, foreign, [file.id, nonce])).ok, false);
+    assert.equal((await f.action<FileDeleteResult>("deleteFile", productPage, procurement, [file.id, nonce])).ok, false);
     assert.equal((await f.action<FileDeleteResult>("deleteFile", productPage, engineer, [file.id, "bad"])).ok, false);
     assert.deepEqual(await nativeSnapshot(f.db), before); assert.deepEqual(await f.versions(project.id), versions);
     const deleted = await f.action<FileDeleteResult>("deleteFile", productPage, engineer, [file.id, nonce]); assert.equal(deleted.ok, true);
@@ -92,8 +92,10 @@ test("files.crud: file113, документы, attachment ACL и inline-дейс
     assert.equal((await f.action<FileDeleteResult>("deleteFile", productPage, manager, [file.id, nonce])).ok, false);
     const other = await upload("other"); assert.equal((await f.action<FileDeleteResult>("deleteFile", productPage, engineer, [other.id, nonce])).ok, false);
     await f.db.product.update({ where: { id: product.id }, data: { status: "PRODUCTION" } });
-    assert.equal((await f.action<FileDeleteResult>("deleteFile", productPage, engineer, [file.id, nonce])).ok, false);
+    assert.equal((await f.action<FileDeleteResult>("deleteFile", productPage, engineer, [file.id, nonce])).ok, true);
     const original = await f.request(`/api/files/${other.id}`, engineer); assert.equal(original.status, 200); await original.arrayBuffer();
+    await f.db.product.update({ where: { id: product.id }, data: { status: "PREPARATION" } });
+    assert.equal((await f.action<FileDeleteResult>("deleteFile", productPage, engineer, [file.id, nonce])).ok, false);
     assert.equal((await f.action<FileDeleteResult>("deleteFile", productPage, engineer, [other.id, randomUUID()])).ok, false);
     await f.db.product.update({ where: { id: product.id }, data: { status: "DESIGN" } });
   });
@@ -452,7 +454,8 @@ test("files.crud: file113, документы, attachment ACL и inline-дейс
     } finally { await f.db.product.update({ where: { id: sibling.id }, data: siblingBefore }); }
     const page = await f.request(productPage, engineer); assert.equal(page.status, 200); const html = await page.text();
     for (const file of files) assert.ok(html.includes(file.fileName)); assert.ok(!html.includes(hidden.fileName));
-    for (const [actor, extra, status] of [[engineer, { productId: sibling.id }, 404], [engineer, { taskId: foreignTask.id }, 404],
+    for (const [actor, extra, status] of [[engineer, { productId: sibling.id }, 200], [engineer, { taskId: foreignTask.id }, 404],
+      [engineer, { productId: sibling.id, taskId: foreignTask.id }, 200],
       [accountant, { productId: product.id }, 403], [combined, { productId: sibling.id }, 200]] as const) {
       const reply = await f.upload(actor, { projectId: project.id, productId: "productId" in extra ? extra.productId : product.id,
         taskId: "taskId" in extra ? extra.taskId : undefined, fileName: "acl.b3d", mimeType: cadMime, bytes: cad, clientMutationId: randomUUID() });

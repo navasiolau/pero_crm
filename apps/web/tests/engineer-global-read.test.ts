@@ -9,10 +9,10 @@ const project = { id: "contract", stage: "CONTRACT", deletedAt: null, products: 
 const product = { id: "foreign", projectId: project.id, project, status: "DESIGN" as const, engineerId: "other", deletedAt: null };
 
 test("engineer global read includes empty accepted projects and later products only under an accepted parent", () => {
-  for (const stage of ["CONTRACT", "IN_WORK", "DONE"]) {
+  for (const stage of ["CONTRACT", "IN_WORK", "DONE", "REFUSED"]) {
     assert.equal(matches({ ...project, stage, products: [] }, projectVisibilityWhere(engineer)), true, stage);
   }
-  for (const stage of ["LEAD", "ESTIMATE", "REFUSED"]) {
+  for (const stage of ["LEAD", "ESTIMATE"]) {
     assert.equal(matches({ ...project, stage, products: [product] }, projectVisibilityWhere(engineer)), false, stage);
     assert.equal(matches({ ...product, project: { ...project, stage }, engineerId: engineer.id }, productVisibilityWhere(engineer)), false, stage);
   }

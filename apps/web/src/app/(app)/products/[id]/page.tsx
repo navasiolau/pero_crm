@@ -11,6 +11,7 @@ import { prisma } from "@/lib/prisma";
 import { FIELD_ROLES, MANAGER_ROLES, OFFICE_ROLES, WAREHOUSE_MANAGE_ROLES, WAREHOUSE_MONEY_ROLES, hasAnyRole } from "@/lib/roles";
 import {canViewProductMoney} from "@/lib/product-financial-access";
 import { canEditProductTechnicalBlock, resolveVisibilityActor } from "@/server/access/visibility";
+import { canManageProductFiles } from "@/lib/file-management";
 import { allocatedWorkQuantity } from "@/lib/work-shares";
 import { getProductFor } from "@/server/products/queries";
 import { deleteProductSketchAction } from "@/server/products/cover-actions";
@@ -55,6 +56,7 @@ export default async function ProductPage({
   const canManage = hasAnyRole(role, MANAGER_ROLES);
   const canViewAllPercentage = canViewProductMoney(role);
   const canEditTech = canEditProductTechnicalBlock(actor, product);
+  const canManageFiles = canManageProductFiles(role, product);
   const canAllocateWork=hasAnyRole(role,FIELD_ROLES)&&fieldProductStatuses(role).includes(product.status)&&!canManage;
   const allocationData=canAllocateWork?await listWorkerAllocationData(session.user.id,product.id):undefined;
   const canAddWork=canAddProductWork(role,product.status,product);
@@ -89,8 +91,8 @@ export default async function ProductPage({
         overview={<ProductCoverClient
           productId={product.id} projectId={product.project.id}
           cover={product.sketchFile ? { id: product.sketchFile.id, fileName: product.sketchFile.fileName, mimeType: product.sketchFile.mimeType, hasThumb: product.sketchFile.hasThumb } : null}
-          actorRoles={role} canEditTechnicalBlock={canEditTech}
-          canDeleteCover={canEditTech && (canManage || product.files.some(file => file.id === product.sketchFile?.id && file.uploadedById === session.user.id))}
+          actorRoles={role} canManageFiles={canManageFiles}
+          canDeleteCover={canManageFiles}
           deleteCoverAction={deleteProductSketchAction}
           header={<div className="flex min-w-0 flex-col gap-4" data-product-header="stacked">
             <ProductHeader product={{id:product.id,number:product.number,title:product.title,kind:product.kind,status:product.status,expectedPrice:showAmount?product.expectedPrice?.toString()??null:null,quantity:product.quantity,description:product.description,projectId:product.project.id,projectStage:product.project.stage,canAccessDraft:product.canAccessDraft,engineerId:product.engineerId}}
@@ -100,11 +102,11 @@ export default async function ProductPage({
           </div>}
           details={<ProductInlineDetails canManage={canManage} canEditTech={canEditTech} showAmount={showAmount} currency={product.project.currency}
             notice={showMaterials&&materialsData?.hasShortage?<Badge variant="destructive"><TriangleAlert/>Нехватка материалов</Badge>:null}
-            measurement={<ProductMeasurement projectId={product.project.id} productId={product.id} files={attachments.measurement} canEdit={canEditTech} />}
+            measurement={<ProductMeasurement projectId={product.project.id} productId={product.id} files={attachments.measurement} canEdit={canManageFiles} />}
             engineer={<SinglePercentageRow {...percentageProps} kind="ENGINEERING" section={percentageView.sections.ENGINEERING} assignedEngineerId={product.engineerId} editEngineer candidates={engineers.map(user => ({ id: user.id, name: user.name, active: true, roles: user.roles }))} />}
           />}
         />}
-        documents={<ProductDocuments projectId={product.project.id} productId={product.id} production={attachments.production} installation={attachments.installation} canEdit={canEditTech} canManage={canManage} noModel={percentageView.noModel} />}
+        documents={<ProductDocuments projectId={product.project.id} productId={product.id} production={attachments.production} installation={attachments.installation} canEdit={canManageFiles} canManage={canManage} noModel={percentageView.noModel} />}
         assembly={<SinglePercentageRow {...percentageProps} kind="ASSEMBLY" section={percentageView.sections.ASSEMBLY} candidates={percentagePeople.filter(user => user.roles.includes("WORKER"))} />}
         installation={<SinglePercentageRow {...percentageProps} kind="INSTALLATION" section={percentageView.sections.INSTALLATION} candidates={percentagePeople.filter(user => user.roles.includes("MOUNTER"))} />}
         works={<TasksTab

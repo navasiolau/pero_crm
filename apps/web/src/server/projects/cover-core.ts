@@ -1,6 +1,6 @@
 import {createHash} from 'node:crypto';
 import {Prisma} from '@prisma/client';
-import {MANAGER_ROLES,hasAnyRole} from '@/lib/roles';
+import {canManageProjectFiles} from '@/lib/file-management';
 import {isCoverImageMime} from '@/lib/product-cover';
 import {assertWritableFileStorageKey} from '@/server/files/storage-binding-fence';
 import {lockFileDeletionRequest,persistFileDeleteIntent} from '@/server/files/delete-intent';
@@ -15,8 +15,8 @@ const fail=(kind:Extract<ProjectCoverResult,{ok:false}>['kind'],error:string,cur
 const digest=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const json=(value:unknown):Prisma.InputJsonValue=>JSON.parse(JSON.stringify(value));
 async function permission(tx:Tx,actor:Actor,projectId:string){
- if(!hasAnyRole(actor.roles,MANAGER_ROLES))return null;
- return tx.project.findFirst({where:{AND:[{id:projectId},projectVisibilityWhere(actor)]},select:{id:true,number:true,coverFileId:true}});
+ const project=await tx.project.findFirst({where:{AND:[{id:projectId},projectVisibilityWhere(actor)]},select:{id:true,number:true,stage:true,coverFileId:true}});
+ return project&&canManageProjectFiles(actor.roles,project.stage)?project:null;
 }
 async function replay(tx:Tx,actor:Actor,projectId:string,mutationId:string,fingerprint:string,currentCoverFileId:string|null){
  const row=await tx.changeLog.findUnique({where:{id:`project-cover:${mutationId}`}});if(!row)return null;

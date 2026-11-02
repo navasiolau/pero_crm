@@ -141,7 +141,7 @@ for (const section of ["projects", "products"]) test(`${section} engineer sees t
     await page.getByRole("button", { name: "Статус", exact: true }).click();
     let popup = page.locator('[data-slot="popover-content"]');
     assert.deepEqual(await popup.getByRole("checkbox").evaluateAll(nodes => nodes.map(node => node.getAttribute("aria-label"))), section === "projects"
-      ? ["Договор", "В работе", "Завершён"]
+      ? ["Договор", "В работе", "Завершён", "Отказ"]
       : ["Проектирование", "В производстве", "На складе ГП", "Установка", "Готово"]);
     await page.keyboard.press("Escape");
     await page.getByRole("button", { name: /Инженер/, exact: false }).click();

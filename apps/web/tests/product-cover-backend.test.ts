@@ -13,14 +13,14 @@ const product = { id: "product-1", projectId: "project-1", status: "DESIGN" as c
 const image = { id: "image-1", projectId: "project-1", productId: "product-1",
   mimeType: "image/jpeg", category: "PHOTO" as const };
 
-test("cover permission follows management precedence and own or participating DESIGN engineering", () => {
+test("cover permission follows management precedence and independent engineering file status rights", () => {
   for (const role of ["ADMIN", "DIRECTOR", "MANAGER"] as const)
     assert.equal(canSetProductCover({ id: "other", roles: [role] }, product), true);
   assert.equal(canSetProductCover({ id: "engineer-1", roles: ["ENGINEER"] }, product), true);
   assert.equal(canSetProductCover({ id: "participant", roles: ["ENGINEER"],
     engineeringParticipantProductIds: [product.id] }, product), true);
   assert.equal(canSetProductCover({ id: "engineer-1", roles: ["ENGINEER"] },
-    { ...product, status: "PRODUCTION" }), false);
+    { ...product, status: "PRODUCTION" }), true);
   assert.equal(canSetProductCover({ id: "other", roles: ["MANAGER", "ENGINEER"] },
     { ...product, status: "DONE" }), true);
   assert.equal(canSetProductCover({ id: "engineer-1", roles: ["ENGINEER", "ACCOUNTANT"] }, product), true,
@@ -70,15 +70,20 @@ test('112 direct DESIGN engineering participant reads project/product/manager sk
 test('112 global engineering read preserves DESIGN participant replacement and denies foreign/deleted targets',async()=>{
  for(const status of ['PREPARATION','PRODUCTION','STORAGE','INSTALLATION','DONE','RECLAMATION']){
   const f=participantCoverFixture();f.own.status=status;const resolved=await resolveVisibilityActor(f.tx,f.actor),result=await authorizeProductCoverUpload(f.tx,f.actor,f.input);
-  assert.equal(result.ok,false);if(!result.ok)assert.equal(result.kind,'forbidden');
+  const allowed=['PRODUCTION','STORAGE','INSTALLATION','DONE'].includes(status);assert.equal(result.ok,allowed);if(!result.ok)assert.equal(result.kind,'forbidden');
   const readable=['DESIGN','PRODUCTION','STORAGE','INSTALLATION','DONE'].includes(status);
   assert.equal(matches(f.own,productVisibilityWhere(resolved)),readable);assert.equal(matches(f.current,fileVisibilityWhere(resolved)),readable);
   assert.equal(matches(f.own,productEditWhere(resolved)),false);
  }
- for(const scope of ['foreign','deleted-product','deleted-parent','non-engineer']){
-  const f=participantCoverFixture();if(scope==='foreign')f.input.productId=f.foreign.id as string;if(scope==='deleted-product')f.own.deletedAt=new Date();if(scope==='deleted-parent')f.parent.deletedAt=new Date();if(scope==='non-engineer')f.actor.roles=['ACCOUNTANT'];
+ for(const scope of ['deleted-product','deleted-parent','non-engineer']){
+  const f=participantCoverFixture();if(scope==='deleted-product')f.own.deletedAt=new Date();if(scope==='deleted-parent')f.parent.deletedAt=new Date();if(scope==='non-engineer')f.actor.roles=['ACCOUNTANT'];
   const result=await authorizeProductCoverUpload(f.tx,f.actor,f.input);assert.equal(result.ok,false);if(!result.ok)assert.equal(result.kind,'forbidden');
  }
+});
+
+test('unassigned engineer can replace foreign sketch with its exact baseline',async()=>{
+ const f=participantCoverFixture();f.actor.id='unassigned';f.input.productId=String(f.foreign.id);f.input.expectedSketchFileId=String(f.foreignFile.id);
+ assert.equal((await authorizeProductCoverUpload(f.tx,f.actor,f.input)).ok,true);
 });
 
 test('112 real File context keeps shared-cover and exact storage-alias preflight guards',async()=>{

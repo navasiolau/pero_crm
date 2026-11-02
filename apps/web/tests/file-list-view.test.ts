@@ -5,14 +5,14 @@ import { ordinaryFileListView, type OrdinaryFileForList } from "../src/server/fi
 import { fetchPrintableFile, getPrintableFileKind, getImagePrintPage } from "../src/lib/browser-file-print";
 import { type ViewableFile } from "../src/lib/viewable-file";
 import { productAttachmentGroups } from "../src/lib/product-attachment-groups";
-import { resolveUploadContext } from "../src/server/files/upload-context";
+import { resolveUploadContext, projectFilePermissions } from "../src/server/files/upload-context";
 import { fixtureModel, type FixtureRow } from "./helpers/visibility-fixture";
 
 { // Источник: file-list-view.test.ts
 function fixture({status="DESIGN",engineerId="engineer",participant=false,taskOwner="worker"}: {status?: string;engineerId?: string;participant?: boolean;taskOwner?: string}={}) {
   let contextReads=0;
   const db={
-    project:{findFirst:async()=>{contextReads++;return{id:"project",number:"QA115",products:[{id:"product"}],tasks:[{id:"task"}]};}},
+    project:{findFirst:async()=>{contextReads++;return{id:"project",number:"QA115",stage:"IN_WORK",products:[{id:"product"}],tasks:[{id:"task"}]};}},
     product:{findFirst:async()=>({id:"product",number:"QA115.1",engineerId,status})},
     task:{findMany:async()=>participant?[{id:"task",productId:"product",projectId:"project",product:{projectId:"project"},work:{productId:"product",projectId:"project"}}]:[],findFirst:async()=>({productId:"product",assigneeId:taskOwner})},
     file:{delete:async()=>{throw Error("PROJECTION_WRITE_FORBIDDEN")}},
@@ -29,13 +29,13 @@ test("ordinary projection strips audit/context metadata and preserves the exact 
  assert.equal(view.fileName,original.fileName);assert.equal(view.section,"MEASUREMENT");assert.equal(view.canDelete,true);assert.deepEqual(original,before);assert.equal(f.contextReads,0);
 });
 
-test("own assigned engineer can delete in DESIGN while a foreign uploader remains unavailable",async()=>{
+test("engineer can delete DESIGN files regardless of uploader",async()=>{
  const f=fixture();const views=await ordinaryFileListView(f.db,actor("engineer",["ENGINEER"]),[f.file,{...f.file,id:"foreign",uploadedById:"someone"}]);
- assert.deepEqual(views.map(view=>view.canDelete),[true,false]);
+ assert.deepEqual(views.map(view=>view.canDelete),[true,true]);
 });
 
 test("live stale status and current participant assignment follow the existing exact permission policy",async()=>{
- const stale=fixture({status:"PRODUCTION"});assert.equal((await ordinaryFileListView(stale.db,actor("engineer",["ENGINEER"]),[stale.file]))[0].canDelete,false);
+ const stale=fixture({status:"PREPARATION"});assert.equal((await ordinaryFileListView(stale.db,actor("engineer",["ENGINEER"]),[stale.file]))[0].canDelete,false);
  const member=fixture({engineerId:"someone",participant:true});assert.equal((await ordinaryFileListView(member.db,actor("engineer",["ENGINEER"]),[member.file]))[0].canDelete,true);
 });
 
@@ -133,11 +133,35 @@ test('previous sketch becomes its ordinary section attachment after replacement'
 });
 
 { // Источник: product-attachments-upload-acl.test.ts
-function fixture(assigneeId:string){const project:FixtureRow={id:'j',number:'1',products:[],tasks:[]};const product:FixtureRow={id:'p',number:'1.1',projectId:'j',project,engineerId:'e',status:'DESIGN',tasks:[]};const task:FixtureRow={id:'t',projectId:'j',project,productId:'p',product,assigneeId,status:'NEW',work:null};project.products=[product];project.tasks=[task];product.tasks=[task];return{project,product,task,db:{project:fixtureModel([project]),product:fixtureModel([product]),task:fixtureModel([task]),productPercentageParticipant:fixtureModel([])} as unknown as PrismaClient};}
+function fixture(assigneeId:string){const project:FixtureRow={id:'j',number:'1',stage:'CONTRACT',products:[],tasks:[]};const product:FixtureRow={id:'p',number:'1.1',projectId:'j',project,engineerId:'e',status:'DESIGN',tasks:[]};const task:FixtureRow={id:'t',projectId:'j',project,productId:'p',product,assigneeId,status:'NEW',work:null};project.products=[product];project.tasks=[task];product.tasks=[task];return{project,product,task,db:{project:fixtureModel([project]),product:fixtureModel([product]),task:fixtureModel([task]),productPercentageParticipant:fixtureModel([])} as unknown as PrismaClient};}
 const context={projectId:'j',productId:'p',taskId:null};
 test('read-only accountant without an execution assignment has no upload capability',async()=>{const f=fixture('worker');assert.equal(await resolveUploadContext(f.db,{id:'accountant',roles:['ACCOUNTANT']},context),null)});
 test('actual assigned field roles retain upload access on their visible status and manager union retains full grant',async()=>{for(const roles of [['WORKER'],['MOUNTER'],['ENGINEER','WORKER'],['MANAGER','ENGINEER']] as Role[][]){const f=fixture('worker');f.product.status=roles.length===1&&roles.includes('MOUNTER')?'INSTALLATION':'PRODUCTION';assert.ok(await resolveUploadContext(f.db,{id:'worker',roles},context));}});
-test('pure engineer only uploads own DESIGN product and task/product mismatch is rejected',async()=>{const f=fixture('worker');assert.ok(await resolveUploadContext(f.db,{id:'e',roles:['ENGINEER']},context));f.product.status='PRODUCTION';assert.equal(await resolveUploadContext(f.db,{id:'e',roles:['ENGINEER']},context),null);assert.equal(await resolveUploadContext(f.db,{id:'m',roles:['MANAGER']},{...context,productId:'foreign',taskId:'t'}),null)});
+test('engineer file status matrix is independent of assignment and checks product/task identity',async()=>{
+ const f=fixture('worker'),engineer={id:'unassigned',roles:['ENGINEER'] as Role[]};
+ for(const status of ['DESIGN','PRODUCTION','STORAGE','INSTALLATION','DONE']){f.product.status=status;assert.ok(await resolveUploadContext(f.db,engineer,context));assert.ok(await resolveUploadContext(f.db,engineer,{...context,productId:null,taskId:'t'}));}
+ for(const status of ['DRAFT','PREPARATION']){f.product.status=status;assert.equal(await resolveUploadContext(f.db,engineer,context),null);}
+ f.product.status='DESIGN';assert.equal(await resolveUploadContext(f.db,{id:'m',roles:['MANAGER']},{...context,productId:'foreign',taskId:'t'}),null);
+ f.project.stage='LEAD';assert.equal(await resolveUploadContext(f.db,engineer,context),null);
+});
+test('general file stage matrix includes empty and refused projects and does not inherit product permissions',async()=>{
+ const f=fixture('worker'),engineer={id:'unassigned',roles:['ENGINEER'] as Role[]};f.project.products=[];f.project.tasks=[];
+ for(const stage of ['IN_WORK','DONE','REFUSED']){f.project.stage=stage;assert.ok(await resolveUploadContext(f.db,engineer,{...context,productId:null}));}
+ for(const stage of ['LEAD','ESTIMATE','CONTRACT']){f.project.stage=stage;assert.equal(await resolveUploadContext(f.db,engineer,{...context,productId:null}),null);}
+});
+test('project controls preserve independent field uploads in CONTRACT without granting cover or foreign deletion',async()=>{
+ const f=fixture('worker'),project={id:'j',stage:'CONTRACT' as const};f.product.status='PRODUCTION';
+ assert.deepEqual(await projectFilePermissions(f.db,{id:'worker',roles:['ENGINEER']},project),{canUpload:false,canManageCover:false});
+ assert.deepEqual(await projectFilePermissions(f.db,{id:'worker',roles:['ENGINEER','WORKER']},project),{canUpload:true,canManageCover:false});
+ f.product.status='INSTALLATION';
+ assert.deepEqual(await projectFilePermissions(f.db,{id:'worker',roles:['ENGINEER','MOUNTER']},project),{canUpload:true,canManageCover:false});
+ const shared:OrdinaryFileForList={id:'shared',fileName:'shared.txt',mimeType:'text/plain',section:'GENERAL',projectId:'j',productId:null,taskId:null,uploadedById:'other'};
+ const views=await ordinaryFileListView(f.db as unknown as Prisma.TransactionClient,{id:'worker',roles:['ENGINEER','MOUNTER']},[shared,{...shared,id:'own',uploadedById:'worker'}]);
+ assert.deepEqual(views.map(row=>row.canDelete),[false,true]);
+ f.task.assigneeId='other';
+ assert.deepEqual(await projectFilePermissions(f.db,{id:'worker',roles:['ENGINEER','MOUNTER']},project),{canUpload:false,canManageCover:false});
+ assert.deepEqual(await projectFilePermissions(f.db,{id:'worker',roles:['ENGINEER','MANAGER']},project),{canUpload:true,canManageCover:true});
+});
 
 test('historical accountant assignment cannot grant upload; independent field union still can',async()=>{const f=fixture('accountant');assert.equal(await resolveUploadContext(f.db,{id:'accountant',roles:['ACCOUNTANT']},context),null);f.product.status='PRODUCTION';assert.ok(await resolveUploadContext(f.db,{id:'accountant',roles:['ACCOUNTANT','WORKER']},context));});
 }

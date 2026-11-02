@@ -99,14 +99,14 @@ test("filter options and client counts use the same visible project set", async 
 test("upload rejects hidden task and mismatched product before any write", async () => {
   for (const actor of [engineer, { ...engineer, roles: ["ACCOUNTANT", "ENGINEER"] as Role[] }]) {
     for (const context of [
-      { projectId: "mixed", productId: "foreign", taskId: null },
       { projectId: "mixed", productId: "own", taskId: "task-foreign" },
-      { projectId: "mixed", productId: null, taskId: "task-production" },
       { projectId: "hidden", productId: null, taskId: null },
     ]) assert.equal(await resolveUploadContext(db, actor, context), null);
   }
   const inferred = await resolveUploadContext(db, engineer, { projectId: "mixed", productId: null, taskId: "task-own" });
   assert.equal(inferred?.productId, "own");
+  assert.ok(await resolveUploadContext(db, engineer, { projectId: "mixed", productId: "foreign", taskId: null }));
+  assert.equal((await resolveUploadContext(db, engineer, { projectId: "mixed", productId: null, taskId: "task-production" }))?.productId, "production");
   assert.ok(await resolveUploadContext(db, engineer, { projectId: "mixed", productId: null, taskId: null }));
   assert.equal(await resolveUploadContext(db, engineer, { projectId: "field", productId: null, taskId: null }), null, "reading a foreign CONTRACT project does not grant a general project upload");
   assert.equal(await resolveUploadContext(db, { ...engineer, roles: ["ACCOUNTANT"] }, { projectId: "hidden", productId: null, taskId: null }), null);
@@ -121,11 +121,11 @@ test("field upload grant retains project access from own tasks without widening 
   try {
     foreign.status = "DONE";
     assert.ok(await products.getProductFor(actor.id, actor.roles, String(foreign.id)));
-    assert.equal(await resolveUploadContext(db, actor, { projectId: "mixed", productId: String(foreign.id), taskId: null }), null, "new engineering read does not widen the field upload grant");
+    assert.ok(await resolveUploadContext(db, actor, { projectId: "mixed", productId: String(foreign.id), taskId: null }), "Independent engineering file grant permits foreign DONE");
   } finally { foreign.status = previous; }
 });
 
-test("a common task cannot inherit the grant for an unbound shared project file", async () => {
+test("common task files use project stage independently of the task assignee", async () => {
   const sample = engineerFixture();
   sample.tasks.push(
     { id: "common-foreign", projectId: "mixed", project: sample.projects[0], productId: null, product: null, assigneeId: "other" },
@@ -134,10 +134,10 @@ test("a common task cannot inherit the grant for an unbound shared project file"
   const sampleDb = sample.db as unknown as PrismaClient;
   for (const roles of [["ENGINEER"], ["ENGINEER", "ACCOUNTANT"], ["ENGINEER", "WORKER"], ["ENGINEER", "MOUNTER"]] as Role[][]) {
     const actor = { id: engineer.id, roles };
-    assert.equal(await resolveUploadContext(sampleDb, actor, { projectId: "mixed", productId: null, taskId: "common-foreign" }), null);
+    assert.ok(await resolveUploadContext(sampleDb, actor, { projectId: "mixed", productId: null, taskId: "common-foreign" }));
     assert.ok(await resolveUploadContext(sampleDb, actor, { projectId: "mixed", productId: null, taskId: null }), "Shared project files remain allowed");
   }
-  assert.equal(await resolveUploadContext(sampleDb, { ...engineer, roles: ["ENGINEER", "ACCOUNTANT"] }, { projectId: "mixed", productId: null, taskId: "common-own" }), null, "Read-only accounting does not grant task uploads");
+  assert.ok(await resolveUploadContext(sampleDb, { ...engineer, roles: ["ENGINEER", "ACCOUNTANT"] }, { projectId: "mixed", productId: null, taskId: "common-own" }), "Engineering gives an independent file grant");
   assert.ok(await resolveUploadContext(sampleDb, { ...engineer, roles: ["ENGINEER", "WORKER"] }, { projectId: "mixed", productId: null, taskId: "common-own" }), "Own field tasks retain their independent grant");
   assert.ok(await resolveUploadContext(sampleDb, { ...engineer, roles: ["MANAGER", "ENGINEER"] }, { projectId: "mixed", productId: null, taskId: "common-foreign" }), "Managers retain their independent grant");
 });

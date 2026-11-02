@@ -12,7 +12,7 @@ import { cleanupDeletedFile } from "./delete-cleanup";
 
 
 
-// Удаление файла: загрузивший (в т.ч. инженер, §4) или админ/директор/менеджер.
+// Удаление: самостоятельная файловая политика инженера/менеджмента либо собственный файл FIELD.
 export async function deleteFile(
   fileId: string,
   clientMutationId: string,

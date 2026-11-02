@@ -41,8 +41,8 @@ export function getProductCoverActions(hasCover: boolean, canReplace: boolean): 
   ];
 }
 
-export function canReplaceProductCover(roles: readonly Role[], canEditTechnicalBlock: boolean): boolean {
-  if (!canEditTechnicalBlock) return false;
+export function canReplaceProductCover(roles: readonly Role[], canManageFiles: boolean): boolean {
+  if (!canManageFiles) return false;
   return hasAnyRole([...roles], MANAGER_ROLES) || hasRole([...roles], "ENGINEER");
 }
 

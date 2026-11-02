@@ -54,15 +54,15 @@ test("mobile dialog sizing excludes all fullscreen viewers and gives them the fu
 
 test("21 empty sketch keeps permanent slot and exact upload prompt; readonly has no mutation control", () => {
  const base={productId:"p1",projectId:"order1",cover:null,deleteCoverAction:deleteSketchAction,header:createElement("h1",null,"Изделие"),details:null};
- const writable=renderToStaticMarkup(createElement(ProductCoverLayout,{...base,actorRoles:["MANAGER"],canEditTechnicalBlock:true}));
- const readonly=renderToStaticMarkup(createElement(ProductCoverLayout,{...base,actorRoles:["ACCOUNTANT"],canEditTechnicalBlock:false}));
+ const writable=renderToStaticMarkup(createElement(ProductCoverLayout,{...base,actorRoles:["MANAGER"],canManageFiles:true}));
+ const readonly=renderToStaticMarkup(createElement(ProductCoverLayout,{...base,actorRoles:["ACCOUNTANT"],canManageFiles:false}));
  assert.match(writable,/data-slot="product-cover-image"/);assert.match(writable,/Добавьте эскиз/);assert.match(writable,/Добавить изображение/);
  assert.match(readonly,/data-slot="product-cover-image"/);assert.match(readonly,/Добавьте эскиз/);assert.doesNotMatch(readonly,/Добавить изображение/);
 });
 
 test("21 filled sketch is itself fullscreen trigger with exact delete, no gallery pencil or expand", () => {
  const cover=image("cover-1","p1","order1");
- const markup=renderToStaticMarkup(createElement(ProductCoverLayout,{productId:"p1",projectId:"order1",cover,actorRoles:["MANAGER"],canEditTechnicalBlock:true,deleteCoverAction:deleteSketchAction,header:null,details:null}));
+ const markup=renderToStaticMarkup(createElement(ProductCoverLayout,{productId:"p1",projectId:"order1",cover,actorRoles:["MANAGER"],canManageFiles:true,deleteCoverAction:deleteSketchAction,header:null,details:null}));
  assert.match(markup,/aria-label="Открыть эскиз на весь экран"/);assert.match(markup,/aria-label="Удалить эскиз"/);
  assert.doesNotMatch(markup,/Заменить обложку|Добавить обложку|Назначить изображение|Выберите обложку|Открыть оригинал|cover-1\.jpg/);
 });
@@ -70,7 +70,7 @@ test("21 filled sketch is itself fullscreen trigger with exact delete, no galler
 test("readonly and engineer without existing file-delete right still view sketch but cannot delete",()=>{
  const cover=image("legacy-cover","p1","order1");
  for(const actorRoles of [["ACCOUNTANT"],["ENGINEER"]] as const){
-  const markup=renderToStaticMarkup(createElement(ProductCoverLayout,{productId:"p1",projectId:"order1",cover,actorRoles,canEditTechnicalBlock:actorRoles[0]==="ENGINEER",canDeleteCover:false,deleteCoverAction:deleteSketchAction,header:null,details:null}));
+  const markup=renderToStaticMarkup(createElement(ProductCoverLayout,{productId:"p1",projectId:"order1",cover,actorRoles,canManageFiles:actorRoles[0]==="ENGINEER",canDeleteCover:false,deleteCoverAction:deleteSketchAction,header:null,details:null}));
   assert.match(markup,/Открыть эскиз на весь экран/);assert.doesNotMatch(markup,/Удалить эскиз|Добавить изображение/);
  }
 });
