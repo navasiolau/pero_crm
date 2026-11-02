@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import {projectStagePatchSchema} from "@/server/projects/stage-contract";
+import {archivedProjectStagePatchSchema} from "@/server/projects/stage-contract";
 
 import { authenticate, isErrorResponse } from "@/server/api/auth";
 import {patchProjectStageCore} from "@/server/projects/stage-service";
@@ -11,8 +11,9 @@ import {
 } from "@/server/telegram/bot-api";
 
 // POST /api/v1/bot/projects/:id/stage — смена этапа проекта (§6, свободные
-// переходы; Отказ/Рекламация — с extras). Логика — в ядре. Scope: write.
-const schema = projectStagePatchSchema.omit({projectId:true});
+// переходы; Отказ — с extras). Архивный разбор позволяет точный replay;
+// ядро принимает новый переход только в действующий статус. Scope: write.
+const schema = archivedProjectStagePatchSchema.omit({projectId:true});
 
 export async function POST(
   request: Request,

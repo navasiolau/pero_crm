@@ -39,13 +39,10 @@ export function visibleProductStatuses(roles: readonly Role[], canAccessDraft = 
 }
 
 export const productStatusLabels = Object.fromEntries(
-  [...PRODUCT_STATUSES.map((status) => [status.id, status.label]), ["RECLAMATION", "Рекламация"]],
+  PRODUCT_STATUSES.map((status) => [status.id, status.label]),
 ) as Record<ProductStatus, string>;
 
-// Визуальная дифференциация — по образцу stageStyles: заголовки колонок
-// мини-канбана и «таблетки» статусов. Колонки тонированы в цвет статуса;
-// «Рекламация» — служебное состояние вне нормального воркфлоу, выделяется
-// всегда (плюс border-2 на колонке).
+// Цвета заголовков колонок и статусов действующей производственной цепочки.
 export const productStatusStyles: Record<
   ProductStatus,
   { column: string; header: string; badge: string }
@@ -85,11 +82,6 @@ export const productStatusStyles: Record<
     column: "border-emerald-500/25 bg-emerald-500/5",
     header: "text-emerald-800/70 dark:text-emerald-300/70",
     badge: "bg-muted text-muted-foreground",
-  },
-  RECLAMATION: {
-    column: "border-amber-500/60 bg-amber-500/10",
-    header: "text-amber-700 dark:text-amber-400",
-    badge: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
   },
 };
 

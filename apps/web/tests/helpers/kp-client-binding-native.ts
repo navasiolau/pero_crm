@@ -20,7 +20,7 @@ export async function runClientBindingNativeCases(database: PrismaClient, target
       const a = await tx.client.create({ data: { name: 'Клиент A QA202', phone: '+000202001' } });
       const b = await tx.client.create({ data: { name: 'Клиент B QA202', phone: '+000202002' } });
       const max = await tx.project.aggregate({ _max: { numberInt: true } }); let number = max._max.numberInt ?? 0;
-      const stages: ProjectStage[] = ['LEAD','ESTIMATE','CONTRACT','IN_WORK','DONE','RECLAMATION','PAUSED','REFUSED'];
+      const stages: ProjectStage[] = ['LEAD','ESTIMATE','CONTRACT','IN_WORK','DONE','REFUSED'];
       for (const stage of stages) {
         number++;
         const project = await tx.project.create({ data: { id: 'qa202_' + token + stage, number: String(number), numberInt: number, title: 'QA202', clientId: a.id, stage } });

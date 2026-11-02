@@ -21,13 +21,11 @@ export const STAGES: {
 ];
 
 export const stageLabels = Object.fromEntries(
-  [...STAGES.map((stage) => [stage.id, stage.label]), ["PAUSED", "Пауза"], ["RECLAMATION", "Рекламация"]],
+  STAGES.map((stage) => [stage.id, stage.label]),
 ) as Record<ProjectStage, string>;
 
 // Визуальная дифференциация (§6): у каждого этапа свой цвет — заголовки
-// колонок канбана и «таблетки» этапов. Колонки канбана тонированы в цвет
-// этапа; служебные состояния (Рекламация, Пауза, Отказ) — вне нормального
-// воркфлоу, сигнализируют сильнее (плюс border-2 на колонке).
+// колонок канбана и «таблетки» этапов. «Отказ» выделяется как служебное состояние.
 export const stageStyles: Record<
   ProjectStage,
   { column: string; header: string; badge: string }
@@ -57,16 +55,6 @@ export const stageStyles: Record<
     column: "border-emerald-500/25 bg-emerald-500/5",
     header: "text-emerald-800/70 dark:text-emerald-300/70",
     badge: "bg-muted text-muted-foreground",
-  },
-  RECLAMATION: {
-    column: "border-amber-500/60 bg-amber-500/10",
-    header: "text-amber-700 dark:text-amber-400",
-    badge: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
-  },
-  PAUSED: {
-    column: "border-slate-400/60 bg-slate-500/10",
-    header: "text-slate-600 dark:text-slate-400",
-    badge: "bg-slate-500/15 text-slate-600 dark:text-slate-400",
   },
   REFUSED: {
     column: "border-destructive/60 bg-destructive/10",
