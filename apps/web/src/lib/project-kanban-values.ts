@@ -1,5 +1,5 @@
 import type { ProjectStage } from "@prisma/client";
-type StageAgeSource = { stage: ProjectStage; createdAt: string | Date; stageChangedAt: string | Date; latestTransition?: { toStage: ProjectStage; createdAt: string | Date } | null };
+type StageAgeSource = { stage: ProjectStage; createdAt: string | Date; stageChangedAt: string | Date; latestTransition?: { toStage: string; createdAt: string | Date } | null };
 function validDate(value: string | Date): boolean { return Number.isFinite(new Date(value).getTime()); }
 export function projectStageAgeStart(project: StageAgeSource): string | Date {
   if (project.latestTransition?.toStage === project.stage && validDate(project.latestTransition.createdAt)) return project.latestTransition.createdAt;

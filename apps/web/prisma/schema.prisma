@@ -123,8 +123,6 @@ enum ProjectStage {
   IN_WORK // В работе
   DONE // Завершён
   REFUSED // Отказ
-  PAUSED // Пауза
-  RECLAMATION // Рекламация
 }
 
 enum TaskStatus {
@@ -248,7 +246,7 @@ model Project {
 }
 
 // Статусы изделия — проще этапов проекта: производственная цепочка
-// от проектирования до готовности + служебная «Рекламация».
+// от черновика и подготовки до готовности.
 enum ProductStatus {
   DRAFT // Черновик до договора
   PREPARATION // Подготовка
@@ -257,7 +255,6 @@ enum ProductStatus {
   STORAGE // На складе ГП
   INSTALLATION // Установка
   DONE // Готово
-  RECLAMATION // Рекламация
 }
 
 // Изделие — единица производства внутри проекта (бывшая сущность
@@ -333,8 +330,8 @@ model ProductStatusHistory {
   id          String        @id @default(cuid())
   productId   String
   product     Product       @relation(fields: [productId], references: [id], onDelete: Cascade)
-  fromStatus  ProductStatus?
-  toStatus    ProductStatus
+  fromStatus  String? // Архивный факт, независимый от рабочего enum
+  toStatus    String
   comment     String?
   changedById String?
   createdAt   DateTime      @default(now())
@@ -346,8 +343,8 @@ model ProjectStageHistory {
   id          String       @id @default(cuid())
   projectId   String
   project     Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  fromStage   ProjectStage?
-  toStage     ProjectStage
+  fromStage   String? // Архивный факт, независимый от рабочего enum
+  toStage     String
   comment     String?
   changedById String?
   createdAt   DateTime     @default(now())
@@ -578,7 +575,7 @@ model ProductPercentageCompletion {
   state          ProductPercentageCompletionState
   completedAt    DateTime                         @default(now())
   completedById  String?
-  statusAtCompletion ProductStatus
+  statusAtCompletion String // Неизменяемый архивный снимок
   reason         String?
   calculationVersion Int                         @default(1)
   quantitySnapshot Int?

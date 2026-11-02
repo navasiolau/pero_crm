@@ -429,9 +429,25 @@ async function overlap<A, B>(actor: DomainActor, firstOperation: () => Promise<A
   } finally { release.resolve(); await Promise.allSettled([first, ...(second ? [second] : [])]); }
 }
 
+test("status/current-enums-reject-retired-values-and-archive-text-preserves-facts", async () => fixture.rollback(async (tx, rows) => {
+  const project = await rows.project("archive-status", { stage: "REFUSED" });
+  const product = await rows.product("archive-status-product", project.id, { status: "PRODUCTION" });
+  const projectHistory = await tx.projectStageHistory.create({ data: { projectId: project.id, fromStage: "PAUSED", toStage: "RECLAMATION" } });
+  const productHistory = await tx.productStatusHistory.create({ data: { productId: product.id, fromStatus: "RECLAMATION", toStatus: "PRODUCTION" } });
+  const completion = await tx.productPercentageCompletion.create({ data: { productId: product.id, kind: "ENGINEERING", state: "SKIPPED_ONCE", statusAtCompletion: "RECLAMATION", productCurrency: "BYN", reason: "Архивный факт209" } });
+  const enums = await tx.$queryRaw<{ typname: string; enumlabel: string }[]>`SELECT t.typname,e.enumlabel FROM pg_type t JOIN pg_enum e ON e.enumtypid=t.oid WHERE t.typname IN ('ProjectStage','ProductStatus') ORDER BY t.typname,e.enumsortorder`;
+  assert.deepEqual(enums.filter(row => row.typname === "ProjectStage").map(row => row.enumlabel), ["LEAD", "ESTIMATE", "CONTRACT", "IN_WORK", "DONE", "REFUSED"]);
+  assert.deepEqual(enums.filter(row => row.typname === "ProductStatus").map(row => row.enumlabel), ["DRAFT", "PREPARATION", "DESIGN", "PRODUCTION", "STORAGE", "INSTALLATION", "DONE"]);
+  await rejectedSql(tx, () => tx.$queryRawUnsafe(`SELECT 'PAUSED'::"ProjectStage"`));
+  await rejectedSql(tx, () => tx.$queryRawUnsafe(`SELECT 'RECLAMATION'::"ProductStatus"`));
+  assert.deepEqual(await tx.projectStageHistory.findUniqueOrThrow({ where: { id: projectHistory.id } }), projectHistory);
+  assert.deepEqual(await tx.productStatusHistory.findUniqueOrThrow({ where: { id: productHistory.id } }), productHistory);
+  assert.deepEqual(await tx.productPercentageCompletion.findUniqueOrThrow({ where: { id: completion.id } }), completion);
+}));
+
 test("draft/bootstrap-history-defaults-numbering-and-stage-promotion", async () => fixture.rollback(async (tx, rows) => {
   const actors = await people(rows, "bootstrap");
-  for (const stage of ["LEAD", "ESTIMATE", "CONTRACT", "IN_WORK", "DONE", "RECLAMATION"] as const) {
+  for (const stage of ["LEAD", "ESTIMATE", "CONTRACT", "IN_WORK", "DONE"] as const) {
     const project = await rows.project(`stage-${stage.toLowerCase().replaceAll("_", "-")}`, { stage }), result = await products.createProductCore(actors.manager,
       { projectId: project.id, title: "Новое", quantity: 3, expectedPrice: 123.45 }, transactionIn(tx));
     assert.equal(result.ok, true); if (!result.ok) assert.fail("PRODUCT_CREATE_REQUIRED");
@@ -441,11 +457,12 @@ test("draft/bootstrap-history-defaults-numbering-and-stage-promotion", async () 
     assert.equal(await tx.productPercentageConfig.count({ where: { productId: result.product.id } }), 3);
     assert.equal(await tx.payrollEntry.count({ where: { productId: result.product.id } }), 0);
   }
-  for (const stage of ["PAUSED", "REFUSED"] as const) for (const prior of ["ESTIMATE", "CONTRACT", null] as const) {
+  for (const stage of ["REFUSED"] as const) for (const prior of ["ESTIMATE", "CONTRACT", null] as const) {
     const project = await rows.project(`held-${stage.toLowerCase()}-${prior?.toLowerCase() ?? "none"}`, { stage });
     if (prior) await tx.projectStageHistory.createMany({ data: [
       { projectId: project.id, fromStage: "LEAD", toStage: "ESTIMATE", createdAt: new Date(0) },
       { projectId: project.id, fromStage: prior, toStage: stage, createdAt: new Date(1) },
+      { projectId: project.id, fromStage: "RECLAMATION", toStage: "PAUSED", createdAt: new Date(2) },
     ] });
     const result = await products.createProductCore(actors.manager, { projectId: project.id, title: "Импорт" }, transactionIn(tx));
     assert.equal(result.ok && result.product.status, prior === "CONTRACT" ? "PREPARATION" : "DRAFT");

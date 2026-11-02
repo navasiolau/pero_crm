@@ -23,7 +23,7 @@ import { DragHandle } from "@/components/drag-handle";
 import { Badge } from "@/components/ui/badge";
 import { ProjectKanbanCard as ProjectCardView } from "@/components/project-kanban-card";
 import { formatAmount } from "@/lib/format";
-import { STAGES, stageLabels, stageStyles } from "@/lib/stages";
+import { STAGES, stageLabels, stageStyles, isActiveProjectStage } from "@/lib/stages";
 import { visibleProjectStages } from "@/lib/project-stage-visibility";
 import { cn } from "@/lib/utils";
 import { patchProjectStage } from "@/server/projects/stage-actions";
@@ -182,7 +182,7 @@ export function KanbanBoard({
     try {
       const result=await patchProjectStage(retries.current[projectId]);
       if(!result.ok){delete retries.current[projectId];setErrors(result.errors??{});toast.error(result.error??"Не удалось сменить статус");return false;}
-      delete retries.current[projectId];applyStage(projectId,result.stage??toStage);
+      delete retries.current[projectId];applyStage(projectId,result.stage&&isActiveProjectStage(result.stage)?result.stage:toStage);
       toast.success(`Статус: ${stageLabels[toStage]}`);return true;
     } catch {toast.error("Ответ не получен. Повторите сохранение");return false;}
     finally {inflight.current.delete(projectId);}

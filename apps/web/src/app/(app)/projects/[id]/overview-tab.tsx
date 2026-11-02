@@ -31,6 +31,5 @@ export function OverviewTab({project,createdByName,canManage,canManageFiles=canM
  {doneAt?<p className="break-words text-muted-foreground">Завершён: {formatDateTime(doneAt)}</p>:null}
  <p className="break-words text-muted-foreground">В статусе с: {formatDateTime(project.stageChangedAt)}</p>
  {project.stage==="REFUSED"?<div className="space-y-1 rounded-md border border-destructive/30 p-3"><p className="font-medium">Отказ</p><p className="break-words">{project.refusalReason}</p>{project.refusalComment?<p className="break-words">{project.refusalComment}</p>:null}</div>:null}
- {project.stage==="RECLAMATION"?<div className="space-y-1 rounded-md border border-amber-500/30 p-3"><p className="font-medium">Рекламация</p><p className="break-words">{project.reclamationReason}</p><p className="break-words">{project.reclamationDescription}</p><p className="break-words">Ответственность: {project.reclamationFault}</p></div>:null}
  </CardContent></Card></div>;
 }

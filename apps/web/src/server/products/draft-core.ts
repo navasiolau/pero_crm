@@ -1,10 +1,12 @@
 import type { Prisma, ProductStatus, ProjectStage } from "@prisma/client";
+import { isActiveProjectStage } from "@/lib/stages";
 import { isPreContractProjectStage } from "@/lib/product-drafts";
 import type { DomainActor } from "@/server/projects/core";
 
-const SERVICE_STAGES: ProjectStage[] = ["PAUSED", "REFUSED"];
+const SERVICE_STAGES = ["REFUSED"];
+const ORDINARY_STAGES = ["LEAD", "ESTIMATE", "CONTRACT", "IN_WORK", "DONE"];
 
-/** Вызывается после lockProjectRow: пауза/отказ не теряют подтверждённый этап. */
+/** Вызывается после lockProjectRow: отказ не теряет подтверждённый этап. */
 export async function productInitialStatus(tx: Prisma.TransactionClient, project: {
   id: string; stage: ProjectStage;
 }): Promise<ProductStatus> {
@@ -12,15 +14,16 @@ export async function productInitialStatus(tx: Prisma.TransactionClient, project
   if (SERVICE_STAGES.includes(stage)) {
     const previous = await tx.projectStageHistory.findFirst({
       where: { projectId: project.id, OR: [
-        { toStage: { notIn: SERVICE_STAGES } },
-        { fromStage: { notIn: SERVICE_STAGES } },
+        { toStage: { in: ORDINARY_STAGES } },
+        { fromStage: { in: ORDINARY_STAGES } },
       ] },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }], select: { toStage: true, fromStage: true },
     });
     // fromStage — подтверждённый этап самого свежего перехода, в том числе импорта.
-    stage = previous
-      ? (SERVICE_STAGES.includes(previous.toStage) ? previous.fromStage ?? "LEAD" : previous.toStage)
-      : "LEAD";
+    const candidate = previous
+      ? (ORDINARY_STAGES.includes(previous.toStage) ? previous.toStage : previous.fromStage)
+      : null;
+    stage = candidate && isActiveProjectStage(candidate) ? candidate : "LEAD";
   }
   return isPreContractProjectStage(stage) ? "DRAFT" : "PREPARATION";
 }

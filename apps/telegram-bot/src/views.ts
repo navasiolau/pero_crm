@@ -22,8 +22,6 @@ export const STAGE_LABELS: Record<string, string> = {
   CONTRACT: "Договор",
   IN_WORK: "В работе",
   DONE: "Завершён",
-  RECLAMATION: "Рекламация",
-  PAUSED: "Пауза",
   REFUSED: "Отказ",
 };
 

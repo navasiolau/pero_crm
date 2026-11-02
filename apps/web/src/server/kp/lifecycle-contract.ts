@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { ProjectStage } from "@prisma/client";
+import { archivedProjectStageSchema, type ArchivedProjectStage } from "@/lib/archived-statuses";
 import type { DomainActor } from "../actor";
 
 export type LifecycleJson = null | string | number | boolean | LifecycleJson[] | LifecycleObject;
@@ -11,7 +12,7 @@ export type ActorBinding = { id: string; source: DomainActor["source"]; tokenId?
 export type TemplateIdentity = { templateHash: string; fontManifestHash: string; sourceManifestHash: string; chromium: string; puppeteer: string };
 export type FrozenMedia = { id: string; binding: LifecycleObject; key: string; sha256: string; size: number; mimeType: string; fileName: string };
 export type FrozenProposalSource = {
-  proposalId: string; projectId: string; projectStage: ProjectStage; revision: number; state: LifecycleState;
+  proposalId: string; projectId: string; projectStage: ArchivedProjectStage; revision: number; state: LifecycleState;
   pricingSnapshot: LifecycleObject; binding: { clientId: string | null; clientSnapshot: LifecycleObject; projectId: string };
   currency: string; rate: string | null; rateDate: string | null; rateSource: string | null;
   media: FrozenMedia[]; template: TemplateIdentity; mode: "render" | "retained";
@@ -73,7 +74,7 @@ const hash = z.string().regex(/^[a-f0-9]{64}$/);
 const actorSchema = z.object({ id: z.string().min(1), source: z.enum(["web", "api", "telegram"]), tokenId: z.string().min(1).optional(), sessionVersion: z.number().int().nonnegative().optional() }).strict();
 const templateSchema = z.object({ templateHash: hash, fontManifestHash: hash, sourceManifestHash: hash, chromium: z.string().min(1), puppeteer: z.string().min(1) }).strict();
 const sourceSchema = z.object({
-  proposalId: z.string().min(1), projectId: z.string().min(1), projectStage: z.enum(["LEAD", "ESTIMATE", "CONTRACT", "IN_WORK", "DONE", "REFUSED", "PAUSED", "RECLAMATION"]),
+  proposalId: z.string().min(1), projectId: z.string().min(1), projectStage: archivedProjectStageSchema,
   revision: z.number().int().nonnegative(), state: object.refine(value => Array.isArray(value.items) && value.items.every(item => item !== null && typeof item === "object" && !Array.isArray(item))),
   pricingSnapshot: object, binding: z.object({ clientId: z.string().nullable(), clientSnapshot: object, projectId: z.string().min(1) }).strict(),
   currency: z.string().min(1), rate: z.string().nullable(), rateDate: z.string().nullable(), rateSource: z.string().nullable(),
