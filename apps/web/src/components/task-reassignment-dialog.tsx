@@ -42,7 +42,9 @@ export function TaskReassignmentDialog({ options, onClose, onDone }: { options: 
   return <Dialog open onOpenChange={open => { if (!open && !locked) onClose(); }}><DialogContent>
     <DialogHeader><DialogTitle>Переназначить задачу</DialogTitle></DialogHeader>
     <p className="break-words text-sm">{options.title}</p>
-    <p className="text-sm text-muted-foreground">Весь объём задачи перейдёт новому исполнителю, статус станет «Новая». Чтобы оставить часть прежнему исполнителю, сначала разделите задачу.</p>
+    <p className="text-sm text-muted-foreground">{options.status === "DONE"
+      ? "Выполненная задача и её начисленная сумма перейдут новому исполнителю. Статус «Выполнена» и дата выполнения сохранятся."
+      : "Весь объём задачи перейдёт новому исполнителю, статус станет «Новая»."} Чтобы оставить часть прежнему исполнителю, используйте передачу части доли.</p>
     <fieldset disabled={locked} className="space-y-2"><Label>Новый исполнитель</Label>
       <SearchableSelect options={options.recipients.filter(user => user.value !== options.assigneeId)} value={assigneeId} onChange={setAssigneeId} disabled={locked} placeholder="Выберите исполнителя…" searchPlaceholder="Поиск сотрудника…" />
     </fieldset>

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
+import { hasWorkCoordinator } from "@/lib/roles";
 import { assertInternalCurrency, assertProjectMoneyCurrency } from "@/lib/internal-currency";
 import { canManagePiecework, canTransferPiecework } from "@/lib/piecework-policy";
 import { allocatePiecework, allocatedWorkQuantity, FULL_SHARE_UNITS, moneyAtoms, quantityAtoms, quantityFromAtoms, splitAllocation, taskPieceAmount } from "@/lib/work-shares";
@@ -10,6 +11,7 @@ import type { DomainActor } from "@/server/projects/core";
 import { withTaskTransaction, type TaskTransaction } from "./transaction";
 import { pieceworkRecipientError } from "./piecework-policy";
 import { pieceworkPlanRevision } from "./piecework-revision";
+import { readTaskPayroll, splitTaskPayroll, TaskPayrollTransferError } from "./task-payroll-transfer";
 
 const id = z.string().min(1).max(128);
 const participant = z.object({ userId: id, percent: z.string().trim().min(1).max(8) }).strict();
@@ -106,6 +108,7 @@ async function dependenciesFor(tx: Prisma.TransactionClient, ids: string[], proj
 async function run(operation: () => Promise<PieceworkResult>): Promise<PieceworkResult> {
   try { return await operation(); }
   catch (error) { return error instanceof PieceworkRule ? { ok: false, kind: error.kind, error: error.message }
+    : error instanceof TaskPayrollTransferError ? { ok: false, kind: "validation", error: error.message }
     : { ok: false, kind: "failure", error: "Результат не подтверждён. Повторите прежний запрос с тем же идентификатором." }; }
 }
 
@@ -182,8 +185,8 @@ export async function transferPieceworkShareCore(actor: DomainActor, input: unkn
     if (!canManagePiecework(current.roles) && task.assigneeId !== current.id) deny("Можно передать только свою задачу", "forbidden");
     const previous = await readReceipt(tx, current.id, data.clientMutationId, hash);
     if (previous) return previous;
-    if (!canTransferPiecework(current, task)) deny("Можно передать только незавершённую назначенную задачу", "forbidden");
-    if (task._count.payrollEntries || task._count.stageSettlementShares) deny("По задаче уже есть начисление или расчёт — передача запрещена");
+    if (!canTransferPiecework(current, task)) deny("Передача этой задачи недоступна", "forbidden");
+    if (task._count.stageSettlementShares || task._count.payrollEntries && !hasWorkCoordinator(current.roles)) deny("По задаче уже есть начисление или расчёт — передача запрещена");
     if (task.splitRevision !== data.expectedRevision) deny("Задача изменилась. Обновите карточку", "conflict");
     if (task.assigneeId === data.recipientId) deny("Выберите другого сотрудника");
     const work = await ordinaryWork(tx, task.workId, task.projectId, task.productId);
@@ -213,6 +216,7 @@ export async function transferPieceworkShareCore(actor: DomainActor, input: unkn
     let allocation: ReturnType<typeof splitAllocation>;
     try { allocation = splitAllocation(group ? task.shareUnits! : FULL_SHARE_UNITS, budget, percent); }
     catch (error) { deny(error instanceof Error ? error.message : "Некорректная доля"); }
+    const payroll = hasWorkCoordinator(current.roles) && task._count.payrollEntries > 0 ? await readTaskPayroll(tx, task) : [];
     const allocationGroup = group ?? await tx.taskAllocationGroup.create({ data: { workId: task.workId, quantity: task.quantity, budget, currency, budgetSource: "TASK_FIXED", createdById: current.id } });
     const [predecessors, dependents] = await Promise.all([
       tx.taskDependency.findMany({ where: { taskId: task.id }, select: { dependsOnId: true } }),
@@ -224,9 +228,11 @@ export async function transferPieceworkShareCore(actor: DomainActor, input: unkn
     const child = await tx.task.create({ data: {
       projectId: task.projectId, productId: task.productId, workId: task.workId, title: task.title, type: task.type,
       assigneeId: data.recipientId, quantity: task.quantity, executorShare: task.executorShare, dueAt: task.dueAt,
-      requiresPhoto: task.requiresPhoto, status: "NEW", createdById: current.id, estimateMinutes: null,
+      requiresPhoto: task.requiresPhoto, status: task.status === "DONE" ? "DONE" : "NEW", createdById: current.id, estimateMinutes: null,
+      ...(task.status === "DONE" ? { doneAt: task.doneAt, doneById: task.doneById } : {}),
       allocationGroupId: allocationGroup.id, shareUnits: allocation.transferredUnits, shareAmount: allocation.transferredAmount,
     } });
+    await splitTaskPayroll(tx, { ...actor, name: current.name }, payroll, data.recipientId, child.id, percent, data.clientMutationId);
     const edges = [...predecessors.map(edge => ({ taskId: child.id, dependsOnId: edge.dependsOnId })), ...dependents.map(edge => ({ taskId: edge.taskId, dependsOnId: child.id }))];
     if (edges.length) await tx.taskDependency.createMany({ data: edges, skipDuplicates: true });
     const event = await tx.domainEvent.create({ data: { type: "task.split", actor: current.id, payload: { taskId: task.id, childTaskId: child.id, groupId: allocationGroup.id, recipientId: data.recipientId } } });

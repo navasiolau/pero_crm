@@ -102,7 +102,9 @@ export function PieceworkAllocationDialog({ context, options, onClose, onDone }:
       finally { submitting.current = false; }
     });
   }
-  return <Dialog open onOpenChange={open => { if (!open && !locked) onClose(); }}><DialogContent className="sm:max-w-3xl"><DialogHeader><DialogTitle>{context.mode === "create" ? "Распределить работу в процентах" : "Передать часть доли"}</DialogTitle><DialogDescription>{context.mode === "create" ? context.work.title : context.title}. Начисление происходит после выполнения задачи каждого исполнителя.</DialogDescription></DialogHeader>
+  return <Dialog open onOpenChange={open => { if (!open && !locked) onClose(); }}><DialogContent className="sm:max-w-3xl"><DialogHeader><DialogTitle>{context.mode === "create" ? "Распределить работу в процентах" : "Передать часть доли"}</DialogTitle><DialogDescription>{context.mode === "create" ? context.work.title : context.title}. {context.mode === "transfer" && options.source?.completed
+    ? "Переданная часть останется выполненной. Её начисленная сумма перейдёт выбранному исполнителю, дата выполнения сохранится."
+    : "Начисление происходит после выполнения задачи каждого исполнителя."}</DialogDescription></DialogHeader>
     <fieldset disabled={locked} className="flex min-w-0 flex-col gap-4">
       {context.mode === "create" ? <>
         <div className="flex flex-col gap-1.5"><Label>Общий объём работы</Label><QuantityStepper value={quantity} onChange={setQuantity} remaining={remaining} unit={context.work.unit}/><p className="text-xs text-muted-foreground">Объём учитывается один раз для всех участников.</p></div>

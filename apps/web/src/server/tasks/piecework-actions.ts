@@ -17,6 +17,9 @@ async function deliver(result: PieceworkResult) {
     { kind: "cache", run: () => revalidateProductPaths(result.productId) },
     { kind: "cache", run: () => revalidatePath(`/projects/${result.projectId}`) },
     { kind: "cache", run: () => revalidatePath("/my") },
+    { kind: "cache", run: () => revalidatePath("/payroll") },
+    { kind: "cache", run: () => revalidatePath("/finance/payroll") },
+    { kind: "cache", run: () => revalidatePath("/finance") },
   ]);
   return result;
 }

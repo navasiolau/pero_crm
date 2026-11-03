@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
+import { hasWorkCoordinator } from "@/lib/roles";
 import { productVisibilityWhere, resolveVisibilityActor } from "@/server/access/visibility";
 import { liveChildWhere, liveProductWhere } from "@/server/access/live-entities";
 import { lockProjectRow } from "@/server/projects/lock";
@@ -9,12 +10,13 @@ import type { DomainActor } from "@/server/actor";
 import { pieceworkRecipientError } from "./piecework-policy";
 import { canManageTaskReassignment, ordinaryTaskReassignmentError } from "./task-reassignment-policy";
 import { withTaskTransaction, type TaskTransaction } from "./transaction";
+import { moveTaskPayroll, readTaskPayroll, TaskPayrollTransferError } from "./task-payroll-transfer";
 
 export const taskReassignmentSchema = z.object({ taskId: z.string().min(1).max(160), assigneeId: z.string().min(1).max(160),
   expectedRevision: z.number().int().nonnegative(), clientMutationId: z.uuid() }).strict();
 export type TaskReassignmentInput = z.infer<typeof taskReassignmentSchema>;
 const receiptSchema = z.object({ version: z.literal(1), fingerprint: z.string().regex(/^[a-f0-9]{64}$/), result: z.object({
-  ok: z.literal(true), taskId: z.string(), assigneeId: z.string(), revision: z.number().int(), status: z.literal("NEW"),
+  ok: z.literal(true), taskId: z.string(), assigneeId: z.string(), revision: z.number().int(), status: z.enum(["NEW", "DONE"]),
   projectId: z.string(), productId: z.string(), title: z.string(), projectNumber: z.string(), eventId: z.string().nullable(), clientMutationId: z.uuid(),
 }).strict() }).strict();
 export type TaskReassignmentSuccess = z.infer<typeof receiptSchema>["result"] & { repeated?: boolean };
@@ -44,14 +46,14 @@ async function context(tx: Prisma.TransactionClient, actorId: string, taskId: st
   return { actor, task, product };
 }
 
-export type TaskReassignmentOptions = { ok: true; taskId: string; title: string; assigneeId: string | null; expectedRevision: number; recipients: { value: string; label: string }[] } |
+export type TaskReassignmentOptions = { ok: true; taskId: string; title: string; status: string; assigneeId: string | null; expectedRevision: number; recipients: { value: string; label: string }[] } |
   { ok: false; error: string };
 export async function listTaskReassignmentOptions(actor: DomainActor, taskId: string, transaction: TaskTransaction = withTaskTransaction): Promise<TaskReassignmentOptions> {
   try { return await transaction(async tx => {
     const current = await context(tx, actor.id, taskId);
-    const error = ordinaryTaskReassignmentError(current.task); if (error) fail(error);
+    const error = ordinaryTaskReassignmentError(current.task, current.actor.roles); if (error) fail(error);
     const recipients = await tx.user.findMany({ where: { active: true, payScheme: "PIECE" }, select: { id: true, name: true, active: true, roles: true, payScheme: true }, orderBy: { name: "asc" } });
-    return { ok: true as const, taskId: current.task.id, title: current.task.title, assigneeId: current.task.assigneeId, expectedRevision: current.task.splitRevision,
+    return { ok: true as const, taskId: current.task.id, title: current.task.title, status: current.task.status, assigneeId: current.task.assigneeId, expectedRevision: current.task.splitRevision,
       recipients: recipients.filter(user => !pieceworkRecipientError(user, current.product)).map(user => ({ value: user.id, label: user.name })) };
   }); } catch (error) { return { ok: false, error: error instanceof ReassignmentError ? error.message : "Не удалось открыть переназначение" }; }
 }
@@ -72,29 +74,34 @@ export async function reassignOrdinaryTaskCore(actor: DomainActor, input: unknow
         fail("Идентификатор операции уже использован");
       return { ...saved.data.result, repeated: true };
     }
-    const error = ordinaryTaskReassignmentError(task); if (error) fail(error);
+    const error = ordinaryTaskReassignmentError(task, current.actor.roles); if (error) fail(error);
     if (task.splitRevision !== data.expectedRevision) fail("Задача изменена. Закройте окно и откройте переназначение заново", "conflict");
     if (task.assigneeId === data.assigneeId) fail("Выберите другого исполнителя");
     await tx.$queryRaw`SELECT id FROM "User" WHERE id=${data.assigneeId} FOR SHARE`;
     const recipient = await tx.user.findUnique({ where: { id: data.assigneeId }, select: { id: true, name: true, active: true, roles: true, payScheme: true } });
     const recipientError = recipient ? pieceworkRecipientError(recipient, product) : "Сотрудник недоступен";
     if (recipientError) fail(recipientError);
+    const payroll = hasWorkCoordinator(current.actor.roles) && task._count.payrollEntries > 0 ? await readTaskPayroll(tx, task) : [];
+    const status = task.status === "DONE" ? "DONE" : "NEW";
     const changed = task.assigneeId !== data.assigneeId;
     let eventId: string | null = null, revision = task.splitRevision;
     if (changed) {
-      const updated = await tx.task.updateMany({ where: { id: task.id, splitRevision: data.expectedRevision, status: { not: "DONE" } },
-        data: { assigneeId: data.assigneeId, status: "NEW", splitRevision: { increment: 1 } } });
+      const updated = await tx.task.updateMany({ where: { id: task.id, splitRevision: data.expectedRevision, status: task.status },
+        data: { assigneeId: data.assigneeId, status, splitRevision: { increment: 1 } } });
       if (updated.count !== 1) fail("Задача изменена другим пользователем", "conflict");
       revision++;
+      await moveTaskPayroll(tx, { ...actor, name: current.actor.name }, payroll, data.assigneeId, data.clientMutationId);
       await tx.changeLog.create({ data: { actorType: "user", actorId: current.actor.id, actorName: current.actor.name, source: actor.source, entity: "task", entityId: task.id, action: "reassign",
-        oldValue: { assigneeId: task.assigneeId, status: task.status, splitRevision: task.splitRevision }, newValue: { assigneeId: data.assigneeId, status: "NEW", splitRevision: revision } } });
+        oldValue: { assigneeId: task.assigneeId, status: task.status, splitRevision: task.splitRevision }, newValue: { assigneeId: data.assigneeId, status, splitRevision: revision } } });
       const event = await tx.domainEvent.create({ data: { type: "task.assigned", actor: current.actor.id, payload: { taskId: task.id, projectId: task.projectId, productId: product.id,
         assigneeId: data.assigneeId, previousAssigneeId: task.assigneeId, operationId: data.clientMutationId } } }); eventId = event.id;
     }
-    const result: z.infer<typeof receiptSchema>["result"] = { ok: true, taskId: task.id, assigneeId: data.assigneeId, revision, status: "NEW", projectId: task.projectId,
+    const result: z.infer<typeof receiptSchema>["result"] = { ok: true, taskId: task.id, assigneeId: data.assigneeId, revision, status, projectId: task.projectId,
       productId: product.id, title: task.title, projectNumber: task.project.number, eventId, clientMutationId: data.clientMutationId };
     await tx.changeLog.create({ data: { id: receiptId, actorType: "user", actorId: current.actor.id, actorName: current.actor.name, source: actor.source, entity: "task", entityId: task.id,
       action: "task.reassignment.receipt.v1", newValue: { version: 1, fingerprint, result } } });
     return result;
-  }); } catch (error) { return error instanceof ReassignmentError ? { ok: false, kind: error.kind, error: error.message } : { ok: false, kind: "failure", error: "Ответ не подтверждён. Повторите тот же запрос для проверки результата" }; }
+  }); } catch (error) { return error instanceof ReassignmentError ? { ok: false, kind: error.kind, error: error.message }
+    : error instanceof TaskPayrollTransferError ? { ok: false, kind: "validation", error: error.message }
+    : { ok: false, kind: "failure", error: "Ответ не подтверждён. Повторите тот же запрос для проверки результата" }; }
 }

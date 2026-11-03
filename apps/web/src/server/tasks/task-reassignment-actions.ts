@@ -17,10 +17,11 @@ export async function reassignOrdinaryTask(input: TaskReassignmentInput): Promis
   if (!result.ok) return result;
   if (!result.repeated && result.eventId) {
     try { await dispatchEvent(result.eventId); } catch { console.warn(JSON.stringify({ event: "task-reassignment.event-delivery-failed", requestId: input.clientMutationId })); }
-    try { await notifyPerson({ userId: result.assigneeId, type: "task.assigned", title: `Вам назначена задача: ${result.title}`, body: `Проект ${result.projectNumber}`, link: "/my" }); }
+    try { await notifyPerson({ userId: result.assigneeId, type: "task.assigned", title: `${result.status === "DONE" ? "Вам передана выполненная задача" : "Вам назначена задача"}: ${result.title}`, body: `Проект ${result.projectNumber}`, link: result.status === "DONE" ? "/payroll" : "/my" }); }
     catch { console.warn(JSON.stringify({ event: "task-reassignment.notification-failed", requestId: input.clientMutationId })); }
   }
-  try { await revalidateProductPaths(result.productId); revalidatePath(`/projects/${result.projectId}`); revalidatePath("/my"); }
+  try { await revalidateProductPaths(result.productId); revalidatePath(`/projects/${result.projectId}`); revalidatePath("/my");
+    revalidatePath("/payroll"); revalidatePath("/finance/payroll"); revalidatePath("/finance"); }
   catch { /* Подтверждённый receipt сохраняется независимо от обновления cache. */ }
   return result;
 }

@@ -12,6 +12,6 @@ export function ordinaryPieceworkBinding(work: { paymentKind?: string; stagePayP
 }
 
 export function canTransferPiecework(actor: { id: string; roles: Role[] }, task: { assigneeId: string | null; status: string }): boolean {
-  return task.assigneeId !== null && (task.status === "NEW" || task.status === "IN_PROGRESS") &&
+  return task.assigneeId !== null && (hasWorkCoordinator(actor.roles) || task.status === "NEW" || task.status === "IN_PROGRESS") &&
     (canManagePiecework(actor.roles) || task.assigneeId === actor.id && hasAnyRole(actor.roles, FIELD_ROLES));
 }
