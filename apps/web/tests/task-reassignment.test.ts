@@ -73,10 +73,8 @@ test("revision conflict and wrong recipient fail before task writes", async () =
   assert.equal(f.state.writes.length + f.state.events.length + f.state.audits.length, 0);
 });
 
-test("completion, payroll, stage settlement and percentage work cannot be reassigned", async () => {
+test("stage settlement and percentage work cannot be reassigned", async () => {
   const variations = [
-    (f: ReturnType<typeof fixture>) => { f.state.task.status = "DONE"; },
-    (f: ReturnType<typeof fixture>) => { f.state.task._count.payrollEntries = 1; },
     (f: ReturnType<typeof fixture>) => { f.state.task._count.stageSettlementShares = 1; },
     (f: ReturnType<typeof fixture>) => { f.state.task.work._count.paymentConversions = 1; },
     (f: ReturnType<typeof fixture>) => { f.state.task.work._count.settlementShares = 1; },

@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { hasWorkCoordinator } from "@/lib/roles";
 import { canManagePiecework, canTransferPiecework } from "@/lib/piecework-policy";
 import { allocatedWorkQuantity, FULL_SHARE_UNITS, quantityAtoms, quantityFromAtoms, taskPieceAmount } from "@/lib/work-shares";
 import { productVisibilityWhere, resolveVisibilityActor } from "@/server/access/visibility";
@@ -7,7 +8,7 @@ import { pieceworkRecipientError } from "./piecework-policy";
 import { pieceworkPlanRevision } from "./piecework-revision";
 
 export type PieceworkOptions = { recipients: { id: string; name: string }[]; canCreate: boolean; transferable: boolean; works: { id: string; remaining: string; priceSnapshot: string; revision: string }[];
-  source: { revision: number; shareUnits: number; amount: string; currency: string } | null };
+  source: { revision: number; shareUnits: number; amount: string; currency: string; completed?: boolean } | null };
 
 export async function listPieceworkOptions(actorId: string, productId: string, taskId?: string): Promise<PieceworkOptions | null> {
   const actor = await prisma.user.findUnique({ where: { id: actorId }, select: { id: true, active: true, roles: true } });
@@ -17,7 +18,7 @@ export async function listPieceworkOptions(actorId: string, productId: string, t
   if (!product) return null;
   const task = taskId ? await prisma.task.findFirst({ where: { ...liveChildWhere, id: taskId, productId: product.id, projectId: product.projectId,
     work: { is: { productId: product.id, projectId: product.projectId, paymentKind: "LEGACY", stagePayPoolId: null, poolWeightUnits: null, paymentConversions: { none: {} }, settlementShares: { none: {} } } },
-    physicalOnlyShare: false, stageShareUnits: null, payrollEntries: { none: {} }, stageSettlementShares: { none: {} },
+    physicalOnlyShare: false, stageShareUnits: null, ...(!hasWorkCoordinator(actor.roles) ? { payrollEntries: { none: {} } } : {}), stageSettlementShares: { none: {} },
   }, select: { assigneeId: true, status: true, allocationGroupId: true, quantity: true, executorShare: true, shareUnits: true, shareAmount: true, splitRevision: true,
     work: { select: { priceSnapshot: true } }, allocationGroup: { select: { budgetSource: true, currency: true } } } }) : null;
   const canCreate = canManagePiecework(actor.roles);
@@ -25,7 +26,7 @@ export async function listPieceworkOptions(actorId: string, productId: string, t
   if (task && canTransferPiecework(actor, task) && (!task.allocationGroupId || task.allocationGroup?.budgetSource === "TASK_FIXED")) {
     const currency = task.allocationGroup ? task.allocationGroup.currency : (await prisma.orgSetting.findUnique({ where: { key: "payrollCurrency" } }))?.value ?? "BYN";
     try { if (currency === "BYN" && (task.allocationGroupId || task.work?.priceSnapshot !== null)) source = { revision: task.splitRevision,
-      shareUnits: task.allocationGroupId ? task.shareUnits! : FULL_SHARE_UNITS, amount: taskPieceAmount(task, task.work?.priceSnapshot ?? "0"), currency }; }
+      shareUnits: task.allocationGroupId ? task.shareUnits! : FULL_SHARE_UNITS, amount: taskPieceAmount(task, task.work?.priceSnapshot ?? "0"), currency, completed: task.status === "DONE" }; }
     catch { /* Некорректная группа не предлагается к передаче. */ }
   }
   const transferable = source !== null;

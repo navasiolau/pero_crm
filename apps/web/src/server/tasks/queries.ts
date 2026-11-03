@@ -13,6 +13,7 @@ import type { ProductStatus } from "@prisma/client";
 import { fileVisibilityWhere, taskVisibilityWhere, workVisibilityWhere, type VisibilityActor } from "@/server/access/visibility";
 import { FULL_SHARE_UNITS, personalQuantity, taskPieceAmount } from "@/lib/work-shares";
 import { INTERNAL_CURRENCY } from "@/lib/internal-currency";
+import { hasWorkCoordinator } from "@/lib/roles";
 import { canSplitTask } from "./share-policy";
 import { canTransferPiecework, ordinaryPieceworkBinding } from "@/lib/piecework-policy";
 import { canReassignOrdinaryTask } from "./task-reassignment-policy";
@@ -156,10 +157,10 @@ export async function mapTaskDetails(
     splitRevision: task.splitRevision ?? 0,
     canSplit: actor ? canSplitTask(actor, { ...task, paidCount: task._count?.payrollEntries ?? 0 }) : false,
     canTransferPiecework: !!actor && !!task.work && ordinaryPieceworkBinding(task.work) && canTransferPiecework(actor, task) &&
-      task._count?.payrollEntries === 0 && task._count.stageSettlementShares === 0 && !task.physicalOnlyShare && task.stageShareUnits == null &&
+      (hasWorkCoordinator(actor.roles) || task._count?.payrollEntries === 0) && task._count?.stageSettlementShares === 0 && !task.physicalOnlyShare && task.stageShareUnits == null &&
       (!task.allocationGroupId || task.allocationGroup?.budgetSource === "TASK_FIXED"),
     canReassignOrdinaryTask: !!actor && canReassignOrdinaryTask(actor.roles, { ...task, productId: task.product?.id ?? null, projectId: task.project.id }) &&
-      task._count?.payrollEntries === 0 && task._count.stageSettlementShares === 0,
+      task._count?.stageSettlementShares === 0,
     dependencies: task.dependencies.map((edge) => ({
       id: edge.dependsOn.id,
       title: edge.dependsOn.title,

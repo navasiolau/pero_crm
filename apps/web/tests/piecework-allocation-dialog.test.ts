@@ -111,3 +111,11 @@ test("transfer UI previews a percentage of the current share and submits its loa
   (button(tree, "Передать").onClick as () => void)(); await finish;
   assert.equal(calls.length, 1); assert.equal((calls[0] as { expectedRevision: number }).expectedRevision, 7); assert.equal((calls[0] as { percent: string }).percent, "20");
 });
+
+test("completed share dialog explains that completion and date are preserved", () => {
+  const tree = render({ mode: "transfer", productId: "product", taskId: "source", title: "Закрытая работа" },
+    { ...options, transferable: true, source: { revision: 1, shareUnits: 1000000, amount: "1000.00", currency: "BYN", completed: true } });
+  assert.match(text(tree), /Переданная часть останется выполненной/);
+  assert.match(text(tree), /начисленная сумма перейдёт/);
+  assert.doesNotMatch(text(tree), /Начисление происходит после выполнения/);
+});
