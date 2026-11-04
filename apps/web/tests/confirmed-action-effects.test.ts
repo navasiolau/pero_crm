@@ -103,7 +103,8 @@ test("DI actual product/work/movement wrappers preserve confirmed ACK for every 
   const fresh = <T,>(name: string): T => { const file = require.resolve(name); if (!originals.has(file)) originals.set(file, require.cache[file]); delete require.cache[file]; return require(name) as T; };
   inject("../src/auth", { auth: async () => ({ user: { id: "manager", name: "QA", roles: ["MANAGER"] } }) });
   const product = { id: "product", projectId: "project", number: "P", title: "QA", status: "DESIGN" };
-  inject("../src/server/products/core", { createProductCore: async () => ({ ok: true, product }), updateProductCore: async () => ({ ok: true, before: product }), deleteProductCore: async () => ({ ok: false }), patchProductCore: async () => ({}) });
+  const numberChanges: {id:string;previousNumber:string;number:string}[] = [];
+  inject("../src/server/products/core", { createProductCore: async () => ({ ok: true, product, numberChanges }), updateProductCore: async () => ({ ok: true, before: product }), deleteProductCore: async () => ({ ok: false }), patchProductCore: async () => ({}) });
   inject("../src/server/products/status-core", { changeProductStatusTransaction: async () => ({ ok: true, product, eventId: "event", captured: [], percentageEffects: { earnings: [] } }) });
   inject("../src/server/product-percentage-pay/core", { settlePendingProductPercentage: async () => null, deliverProductPercentageEffects: async () => effect("percentage") });
   inject("../src/server/products/revalidate", { revalidateProductPaths: async () => effect("cache:product") });
@@ -111,6 +112,11 @@ test("DI actual product/work/movement wrappers preserve confirmed ACK for every 
   for (const op of [() => products.createProduct({ projectId: "project", title: "QA" }), () => products.updateProduct("product", { title: "changed" })]) {
     for (const failure of ["cache:product", "cache:/projects"]) { reset(); fault = failure; assert.equal((await op()).ok, true); assert.deepEqual(calls, ["cache:product", "cache:/projects"]); }
   }
+  numberChanges.push({id:"shifted",previousNumber:"1.64",number:"1.15"});
+  reset(); fault="cache:product";
+  assert.equal((await products.createProduct({projectId:"project",title:"QA shifted"})).ok,true);
+  assert.deepEqual(calls,["cache:product","cache:product","cache:/projects"]);
+  numberChanges.length=0;
   for (const failure of ["percentage", "dispatch", "org", "cache:product", "cache:/projects"]) {
     reset(); fault = failure; const result = await products.changeProductStatus("product", "PRODUCTION");
     assert.equal(result.ok, true); assert.equal(result.financeState, null); assert.deepEqual(calls, ["percentage", "dispatch", "org", "cache:product", "cache:/projects"]);

@@ -4,7 +4,7 @@
 ## Goals / Non-Goals
 Общая additive основа и guards. Команды/кнопки удаления №55/56, восстановление и очистка файлов вне №54.
 ## Decisions
-Project/Product получают deletedAt и deletedById nullable. Автор хранится scalar snapshot без FK/cascade, аудит сохраняет имя отдельно. Shared live predicates оборачивают role grants через AND и parent relation; empty-role deny остаётся deny. Прямые operational lookup получают те же predicates. Финансовые lookup, исторические начисления и max-number queries исключены из фильтра, вместо global Prisma middleware. Guard находится перед receipt replay; изменения financial records не вводятся.
+Project/Product получают deletedAt и deletedById nullable. Автор хранится scalar snapshot без FK/cascade, аудит сохраняет имя отдельно. Shared live predicates оборачивают role grants через AND и parent relation; empty-role deny остаётся deny. Прямые operational lookup получают те же predicates. Финансовые lookup, исторические начисления и MAX номера проекта исключены из фильтра, вместо global Prisma middleware. Уточнение владельца 04.11.2026: MAX по удалённым изделиям был ошибочен; №211 нумерует только действующий состав 1…N. Guard находится перед receipt replay; изменения financial records не вводятся.
 ## Risks / Trade-offs
 Прямой lookup может обойти общий фильтр → inventory и реальные query/guard tests. Тестовые fixtures с отсутствующим nullable полем → adapters должны интерпретировать его как SQL NULL. Миграция additive без массового backfill; root применяет только существующий local/staging, не агент.
 ## Migration Plan

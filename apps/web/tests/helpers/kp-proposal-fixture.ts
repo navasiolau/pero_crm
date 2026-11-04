@@ -8,6 +8,7 @@ const clone = <T>(value: T): T => structuredClone(value);
 const defined = (value: Record<string, unknown>) => Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined));
 function matches(row: FixtureRow, where: Filter = {}): boolean {
   return Object.entries(where).every(([key, value]) => {
+    if (value instanceof Date) return row[key] instanceof Date && (row[key] as Date).getTime() === value.getTime();
     if (value !== null && typeof value === "object" && !Array.isArray(value)) {
       const condition = value as { in?: unknown[]; notIn?: unknown[] };
       if (condition.in) return condition.in.includes(row[key]);
@@ -54,6 +55,7 @@ export function proposalFixture() {
     return clone(row);
   };
   const tx = {
+    $executeRaw: async (query: TemplateStringsArray) => { state.sql.push(query.join("?")); return 0; },
     $queryRaw: async (query: TemplateStringsArray) => {
       const sql = query.join("?"); state.sql.push(sql);
       if (sql.includes('FROM "Product" WHERE "projectId"') && sql.includes("FOR UPDATE")) {

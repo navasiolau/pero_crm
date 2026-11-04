@@ -3,7 +3,7 @@
 Foundation54 уже добавил tombstone/operational filters/guards, financial history59 сохраняет доступ. Старый deleteProductCore делает физический delete и удаляет draft configs/pools, отказывает при истории. Это заменяется без schema55.
 ## Goals / Non-Goals
 **Goals:** manager CAS/replay, сохранённые зависимости, активный timer отказ, явный UI.
-**Non-Goals:** Project delete56, financial recalculation, restore UI, number reuse, file deletion, runtime агента.
+**Non-Goals:** Project delete56, financial recalculation, restore UI, file deletion, runtime агента. Уточнение владельца 04.11.2026: прежнее исключение переиспользования номера изделия отменено задачей №211; действующий состав перенумеровывается 1…N.
 ## Decisions
 - Typed productId/expectedUpdatedAtISO/clientMutationId. Старый string-only action не выполняет удаление без baseline.
 - Существующий global task transaction, Parent→Product row locks, compare exactupdatedAt. Parent deleted проверяется до replay/ACK. Receipt product-delete:UUID содержит actor/fingerprint/ack в одной tx с tombstone.

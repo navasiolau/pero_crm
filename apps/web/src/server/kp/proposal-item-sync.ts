@@ -3,6 +3,7 @@ import type { Prisma, Product } from "@prisma/client";
 import type { DomainActor } from "@/server/actor";
 import { createProductInTransaction } from "@/server/products/core";
 import { recalculateQuantity } from "@/server/products/quantity-core";
+import { stabilizeProductNumberLinks } from "@/server/products/numbering";
 import { lockWarehouseMetadata, assertWarehouseMetadataWritable } from "@/server/warehouse/gate";
 import { ProposalWriteError, canonicalProposalJson, proposalItemDescription, proposalText,
   type ProposalItemState } from "./proposal-contract";
@@ -41,6 +42,7 @@ export async function synchronizeProposalItemsInTransaction(
   await lockWarehouseMetadata(tx);
   await tx.$queryRaw`SELECT id FROM "Product" WHERE "projectId" = ${proposal.projectId} ORDER BY id FOR UPDATE`;
   const products = await tx.product.findMany({ where: { projectId: proposal.projectId }, orderBy: { id: "asc" } });
+  await stabilizeProductNumberLinks(tx, products.filter(product => !product.deletedAt));
   const productsById = new Map(products.map(product => [product.id, product]));
   if (items.some(item => {
     const productId = existingById.get(item.id)?.productId;
@@ -93,7 +95,7 @@ export async function synchronizeProposalItemsInTransaction(
   const needsRenumber = items.some((item, position) => {
     const productId = existingById.get(item.id)?.productId;
     const product = productId ? productsById.get(productId) : undefined;
-    return product && (product.number !== `${project.number}.${position + 1}` || product.deletedAt !== null);
+    return product && (product.number !== `${project.number}.${position + 1}` || product.suffixInt !== position + 1 || product.deletedAt !== null);
   });
   if (needsRenumber) {
     const temporaryPrefix = `__kp_sync_${randomUUID()}_`;
@@ -119,7 +121,7 @@ export async function synchronizeProposalItemsInTransaction(
       const result = await createProductInTransaction(tx, actor, {
         projectId: proposal.projectId, title: data.title, quantity: data.quantity,
         kind: data.kind ?? undefined, description: data.description ?? undefined,
-      });
+      }, "proposal");
       if (!result.ok) throw new ProposalWriteError("validation", result.error);
       before = result.product;
       created = true;
