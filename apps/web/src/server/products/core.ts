@@ -1,7 +1,8 @@
 import {parseProductPercentageRate} from "@/lib/product-percentage-rate-limit";
 import {liveProductWhere,liveProjectWhere} from "@/server/access/live-entities";
 import {softDeleteProductCore} from './delete-core';
-import type {ProductDeleteInput,ProductDeleteResult} from './delete-contract';
+import type {ProductDeleteInput,ProductDeleteMutationResult} from './delete-contract';
+import { renumberActiveProductsInTransaction } from "./numbering";
 import { patchProductContactInTransaction } from "../projects/contact-core";
 import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
@@ -38,7 +39,7 @@ async function nextProductSuffixInt(
   tx: Prisma.TransactionClient,
 ): Promise<number> {
   const siblings = await tx.product.findMany({
-    where: { projectId },
+    where: { projectId, deletedAt: null },
     select: { suffixInt: true },
   });
   let max = 0;
@@ -80,7 +81,7 @@ export async function createProductCore(actor: DomainActor, input: CreateProduct
 }
 
 /** Одинаковые defaults/history для обычного создания и состава КП. */
-export async function createProductInTransaction(tx: Prisma.TransactionClient, actor: DomainActor, input: CreateProductInput) {
+export async function createProductInTransaction(tx: Prisma.TransactionClient, actor: DomainActor, input: CreateProductInput, numbering: "project" | "proposal" = "project") {
   if (!hasAnyRole(actor.roles, MANAGER_ROLES)) throw new Error("Недостаточно прав");
   const parsed = createSchema.safeParse(input);
   if (!parsed.success) return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Ошибка данных" };
@@ -101,8 +102,6 @@ export async function createProductInTransaction(tx: Prisma.TransactionClient, a
     return { ok: false as const, error: "Выберите активного сотрудника с ролью инженера" };
 
   const status = await productInitialStatus(tx, project);
-  const suffixInt = await nextProductSuffixInt(project.id, tx);
-  const number = `${project.number}.${suffixInt}`;
   const defaults = await readProductPercentageDefaults(tx);
   try { for (const kind of DEFAULT_PERCENTAGE_KINDS) parseProductPercentageRate(defaults.rates[kind]); }
   catch (error) { return { ok: false as const, error: error instanceof Error ? error.message : "Проверьте стандартные проценты" }; }
@@ -110,6 +109,9 @@ export async function createProductInTransaction(tx: Prisma.TransactionClient, a
     try { assertProjectMoneyCurrency(project.currency); }
     catch (error) { return { ok: false as const, error: error instanceof Error ? error.message : "Валюта проекта не подготовлена" }; }
   }
+  const numberChanges = numbering === "project" ? await renumberActiveProductsInTransaction(tx, actor, project) : [];
+  const suffixInt = await nextProductSuffixInt(project.id, tx);
+  const number = `${project.number}.${suffixInt}`;
   const product = await tx.product.create({
     data: {
       projectId: project.id,
@@ -145,7 +147,7 @@ export async function createProductInTransaction(tx: Prisma.TransactionClient, a
       percentageDefaultsRevision: defaults.revision, percentageRates: defaults.rates,
       initialPrice: product.initialPrice?.toString() ?? null, initialPriceCaptureEligible: data.expectedPrice === undefined },
   } });
-  return { ok: true as const, product };
+  return { ok: true as const, product, numberChanges };
 }
 
 async function updateProductValues(actor: DomainActor, productId: string, data: ProductValues, baseline: ProductUpdateBaseline, tx: Prisma.TransactionClient) {
@@ -204,7 +206,7 @@ export async function updateProductCore(actor: DomainActor, productId: string, i
   }); } catch(error) { return {ok:false as const,error:error instanceof Error?error.message:"Не удалось изменить изделие"}; }
 }
 
-export async function deleteProductCore(actor: DomainActor, productId:string, transaction: TaskTransaction = withTaskTransaction,baseline?:Omit<ProductDeleteInput,'productId'>):Promise<ProductDeleteResult> {
+export async function deleteProductCore(actor: DomainActor, productId:string, transaction: TaskTransaction = withTaskTransaction,baseline?:Omit<ProductDeleteInput,'productId'>):Promise<ProductDeleteMutationResult> {
   if(!baseline)return{ok:false,kind:'validation',error:'Обновите подтверждение удаления изделия'};
   try{return await transaction(tx=>softDeleteProductCore(tx,actor,{productId,expectedUpdatedAt:baseline.expectedUpdatedAt,clientMutationId:baseline.clientMutationId}));}
   catch{return{ok:false,kind:'failure',error:'Не получено подтверждение удаления. Повторите тот же запрос'};}

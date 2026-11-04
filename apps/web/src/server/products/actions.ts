@@ -36,6 +36,8 @@ export async function createProduct(input:CreateProductInput):Promise<{ok:boolea
   const session=await requireUser();
   const result=await createProductCore(domainActor(session),input);
   if(!result.ok)return result;
+  await deliverPostCommit("product-cache", result.product.id, (result.numberChanges ?? [])
+    .map(change => ({ kind: "cache" as const, run: () => revalidateProductPaths(change.id, [change.previousNumber]) })));
   await revalidateProduct(result.product);
   return{ok:true,id:result.product.id};
 }
@@ -69,7 +71,12 @@ export async function deleteProduct(input:string|ProductDeleteInput):Promise<Pro
   const session=await auth();if(!session?.user)return{ok:false,kind:'forbidden',error:'Не авторизован'};
   const parsed=productDeleteSchema.safeParse(input);if(!parsed.success)return{ok:false,kind:'validation',error:'Обновите подтверждение удаления изделия'};
   const data=parsed.data,result=await deleteProductCore(domainActor(session),data.productId,withTaskTransaction,data);
-  if(result.ok)await revalidateProductPaths(result.productId).catch(()=>{});
+  if(result.ok) {
+    const {numberChanges, ...ack}=result;
+    await revalidateProductPaths(result.productId,[result.number]).catch(()=>{});
+    for(const change of numberChanges)await revalidateProductPaths(change.id,[change.previousNumber]).catch(()=>{});
+    return ack;
+  }
   return result;
 }
 export async function deleteProductAction(input:ProductDeleteInput):Promise<ProductDeleteResult>{return deleteProduct(input);}

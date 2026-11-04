@@ -13,6 +13,7 @@ import { summarizeCalendarEntries } from "../../src/lib/calendar-summary";
 import { verifyCounterpartyNative } from "../helpers/counterparty-native";
 import { productDraftAccessRelations } from "../../src/server/access/product-draft-context";
 import { verifyProposalCompositionNative } from "../helpers/kp-proposal-native";
+import { verifyProductNumberingNative } from "../helpers/product-numbering-native";
 import { requestProposalPdfInTransaction, recordPendingPdfArtifactInTransaction, publishSourcePdfInTransaction,
   completeRenderJobInTransaction, type LifecycleSecurity } from "../../src/server/kp/lifecycle-store";
 import { createPrismaRenderQueue } from "../../src/server/kp/render-queue";
@@ -445,6 +446,29 @@ test("status/current-enums-reject-retired-values-and-archive-text-preserves-fact
   assert.deepEqual(await tx.productPercentageCompletion.findUniqueOrThrow({ where: { id: completion.id } }), completion);
 }));
 
+test("numbering211/sequential-delete-seven-repair-and-history", async () => fixture.rollback(async (tx, rows) => {
+  const actors = await people(rows, "numbering211");
+  await verifyProductNumberingNative(tx, actors.admin, products);
+}));
+
+test("numbering211/two-connection-create-delete-keeps-contiguous-live-numbers", async () => {
+  const actors = await people(fixture, "numbering211-race");
+  const project = await fixture.project("numbering211-race", { stage: "CONTRACT" });
+  const created = [];
+  for (let index = 0; index < 3; index++) {
+    const row = await run(actors.admin, fixture.db, () => products.createProductCore(actors.admin,
+      { projectId: project.id, title: `Проверка211 ${index}` }, realTransaction(fixture.db)));
+    assert.ok(row.ok); created.push(row.product);
+  }
+  const target = created[1];
+  const results = await overlap(actors.admin,
+    () => products.createProductCore(actors.admin, { projectId: project.id, title: "Одновременно211" }, realTransaction(fixture.db)),
+    () => products.deleteProductCore(actors.admin, target.id, realTransaction(fixture.peer), { expectedUpdatedAt: target.updatedAt.toISOString(), clientMutationId: randomUUID() }));
+  assert.ok(results.every(result => result.ok));
+  const rows = await fixture.db.product.findMany({ where: { projectId: project.id, deletedAt: null }, orderBy: { suffixInt: "asc" } });
+  assert.deepEqual(rows.map(row => row.number), [1, 2, 3].map(suffix => `${project.number}.${suffix}`));
+});
+
 test("draft/bootstrap-history-defaults-numbering-and-stage-promotion", async () => fixture.rollback(async (tx, rows) => {
   const actors = await people(rows, "bootstrap");
   for (const stage of ["LEAD", "ESTIMATE", "CONTRACT", "IN_WORK", "DONE"] as const) {
@@ -495,7 +519,7 @@ test("draft/bootstrap-history-defaults-numbering-and-stage-promotion", async () 
     assert.equal((await tx.product.findUniqueOrThrow({ where: { id: later.id } })).status, "DRAFT");
   }
   const next = await products.createProductCore(c.manager, { projectId: c.project.id, title: "Номер после удалённого" }, transactionIn(tx));
-  assert.equal(next.ok, true); if (next.ok) assert.ok(next.product.suffixInt! > deleted.suffixInt!);
+  assert.equal(next.ok, true); if (next.ok) assert.equal(next.product.suffixInt, 4);
   const failing = await tree(tx, rows, "promotion-fault", "ESTIMATE", "DRAFT");
   const event = await tx.domainEvent.create({ data: { type: "ci.promotion-collision", actor: c.manager.id, payload: {} } });
   const snapshot = await nativeSnapshot(tx);
