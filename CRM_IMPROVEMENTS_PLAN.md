@@ -181,4 +181,4 @@ OpenSpec размещаем в `D:\Projects\pero_crm_v2\openspec`, схема `s
 
 | № | Ветка | OpenSpec | Статус |
 |---|---|---|---|
-| 212 | bugfix/212 | kanban-scroll-restoration | Восстановление положения обеих досок реализовано и принято локально: 56 связанных тестов, 46 component-browser сценариев и 40 реальных local UI проверок прошли; отклонение при возврате 0 px. Владелец принял сохранение вида «Канбан» в двух служебных QA-настройках; бизнес-данные сохранены, локальный запуск остановлен — см. verification.md / qa-cleanup.md. Коммит и выпуск не выполнялись. |
+| 212 | bugfix/212 | kanban-scroll-restoration | Выпущено на production `efe1607f` по поручению владельца. Staging UI 40/40 и оба CI 7/7 PASS; стандартный CI/мигратор сохранён, новых миграций нет, production-БД/том/StartedAt неизменны по metadata. См. production-release.md и staging-acceptance.md. |
