@@ -4,6 +4,8 @@ import { KanbanScrollArea } from "@/components/kanban-scroll-area";
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useListParams } from "@/lib/list-params";
+import { projectDetailHref } from "@/lib/project-return-navigation";
 import {
   DndContext,
   DragOverlay,
@@ -119,19 +121,24 @@ export function KanbanBoard({
   initialProjects,
   searchText = "",
   searchReady = false,
+  scrollReady = searchReady,
   canManage,
   showAmount,
   actorRoles,
+  actorUserId,
 }: {
   initialProjects: ProjectCard[];
   // Без подтверждённой пары query/rows обычный caller не запускает поиск.
   searchText?: string;
   searchReady?: boolean;
+  scrollReady?: boolean;
   canManage: boolean;
   showAmount: boolean;
   actorRoles?: readonly Role[];
+  actorUserId?: string;
 }) {
   const router = useRouter();
+  const { getQuery, query, searchRevision } = useListParams();
   const [projects, setProjects] = useState(initialProjects);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [formRequest, setFormRequest] = useState<StageFormRequest | null>(null);
@@ -153,7 +160,7 @@ export function KanbanBoard({
   const columns = useMemo(() => (actorRoles ? visibleProjectStages(actorRoles) : STAGES).map(stage => ({
     stage, projects: projects.filter(project => project.stage === stage.id),
   })), [projects, actorRoles]);
-  const onOpen = useCallback((id: string) => router.push(`/projects/${id}`), [router]);
+  const onOpen = useCallback((id: string) => router.push(projectDetailHref(id, getQuery())), [router, getQuery]);
 
   function applyStage(projectId: string, toStage: ProjectStage) {
     setProjects((prev) =>
@@ -213,6 +220,8 @@ export function KanbanBoard({
   }
 
   const activeProject = projects.find((project) => project.id === activeId);
+  const rowsReady = projects === initialProjects && !activeId;
+  const ready = searchReady && rowsReady;
 
   return (
     <>
@@ -222,10 +231,13 @@ export function KanbanBoard({
         onDragEnd={onDragEnd}
         onDragCancel={() => setActiveId(null)}
       >
-        <KanbanScrollArea label="Канбан проектов" searchFocus={{
+        <KanbanScrollArea label="Канбан проектов" restoration={actorUserId ? {
+          userId: actorUserId, section: "projects", query, searchText, searchRevision, ready: scrollReady && rowsReady,
+          cardIds: projects.map(project => project.id),
+        } : undefined} searchFocus={{
           query: searchText,
           cardId: projects.find(item => item.number === searchText.trim())?.id ?? null,
-          ready: searchReady && projects === initialProjects && !activeId,
+          ready,
         }}>
           {columns.map(({ stage, projects }) => (
             <StageColumn

@@ -3,12 +3,14 @@
 import { useEffect, useRef, useState, type ReactNode, type KeyboardEvent } from "react";
 
 import { useKanbanSearchFocus, type KanbanSearchFocus } from "@/hooks/use-kanban-search-focus";
+import { useKanbanScrollRestoration, type KanbanScrollContext } from "@/hooks/use-kanban-scroll-restoration";
 
 type ScrollMetrics = { width: number; maximum: number; step: number };
-export function KanbanScrollArea({ children, label, searchFocus }: { children: ReactNode; label: string; searchFocus?: KanbanSearchFocus }) {
+export function KanbanScrollArea({ children, label, searchFocus, restoration }: { children: ReactNode; label: string; searchFocus?: KanbanSearchFocus; restoration?: KanbanScrollContext }) {
   const boardRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
-  useKanbanSearchFocus(boardRef, searchFocus);
+  const { handledSearch, onClickCapture } = useKanbanScrollRestoration(boardRef, restoration);
+  useKanbanSearchFocus(boardRef, searchFocus, handledSearch);
   const scrollbarRef = useRef<HTMLDivElement>(null);
   const [metrics, setMetrics] = useState<ScrollMetrics>({ width: 0, maximum: 0, step: 256 });
   useEffect(() => {
@@ -49,7 +51,7 @@ export function KanbanScrollArea({ children, label, searchFocus }: { children: R
     if (event.key === "ArrowLeft" || event.key === "ArrowRight") { event.preventDefault(); scrollByColumn(event.key === "ArrowLeft" ? -1 : 1); }
     else if (event.key === "Home" || event.key === "End") { event.preventDefault(); boardRef.current?.scrollTo({ left: event.key === "Home" ? 0 : metrics.maximum, behavior: "instant" }); }
   }
-  return <div className="min-w-0 max-w-full" data-kanban-scroll-area>
+  return <div className="min-w-0 max-w-full" data-kanban-scroll-area onClickCapture={onClickCapture}>
     <div ref={boardRef} data-slot="kanban-scroll" role="region" aria-label={label} tabIndex={0} className="min-w-0 max-w-full overflow-x-auto pb-4"
       style={{ scrollbarWidth: "none" }} onScroll={event => synchronize(event.currentTarget, scrollbarRef.current)} onKeyDown={navigate}>
       <div ref={contentRef} data-kanban-columns className="flex w-max min-w-full gap-3">{children}</div>

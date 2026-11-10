@@ -51,6 +51,7 @@ export function ProjectsView({
   pageSize,
   canManage,
   actorRoles,
+  actorUserId,
   showAmount,
   clients,
   managers,
@@ -66,6 +67,7 @@ export function ProjectsView({
   pageSize: number;
   canManage: boolean;
   actorRoles?: readonly Role[];
+  actorUserId?: string;
   showAmount: boolean;
   clients: SelectOption[];
   managers: SelectOption[];
@@ -123,11 +125,14 @@ export function ProjectsView({
       {view === "kanban" ? (
         <KanbanBoard
           searchText={searchText}
+          scrollReady={query === resolvedQuery && !filterOverlayActive
+            && searchText.trim() === (new URLSearchParams(query).get("q") ?? "")}
           searchReady={!pending && query === resolvedQuery && !filterOverlayActive
             && searchText.trim() === (new URLSearchParams(query).get("q") ?? "")}
           initialProjects={projects}
           canManage={canManage}
           actorRoles={actorRoles}
+          actorUserId={actorUserId}
           showAmount={showAmount}
         />
       ) : (

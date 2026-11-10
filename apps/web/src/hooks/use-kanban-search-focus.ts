@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, type RefObject } from "react";
+import { suspendKanbanSnap } from "@/lib/kanban-scroll-snap";
 
 export interface KanbanSearchFocus {
   query: string;
@@ -11,7 +12,7 @@ export interface KanbanSearchFocus {
 const clamp = (value: number, maximum: number) => Math.max(0, Math.min(maximum, value));
 
 /** Один переход для нового поискового текста; новые массивы/SSE его не повторяют. */
-export function useKanbanSearchFocus(boardRef: RefObject<HTMLDivElement | null>, focus?: KanbanSearchFocus) {
+export function useKanbanSearchFocus(boardRef: RefObject<HTMLDivElement | null>, focus?: KanbanSearchFocus, handledSearch?: RefObject<string | null>) {
   const query = focus?.query.trim() ?? "";
   const request = useRef({ query: "", done: false });
   const restoreSnap = useRef<(() => void) | null>(null);
@@ -23,6 +24,7 @@ export function useKanbanSearchFocus(boardRef: RefObject<HTMLDivElement | null>,
 
   useEffect(() => {
     if (!query || !focus?.ready || request.current.done) return;
+    if (handledSearch?.current === query) { request.current.done = true; return; }
     // Отсутствие точного совпадения также потребляет запрос: последующий SSE
     // не должен неожиданно отбирать ручную позицию прокрутки.
     if (!focus.cardId) { request.current.done = true; return; }
@@ -43,6 +45,7 @@ export function useKanbanSearchFocus(boardRef: RefObject<HTMLDivElement | null>,
       frame = 0;
       const board = boardRef.current;
       if (!board || request.current.query !== query || request.current.done) return;
+      if (handledSearch?.current === query) { request.current.done = true; disconnect(); return; }
       const card = Array.from(board.querySelectorAll<HTMLElement>("[data-kanban-card-id]"))
         .find(item => item.dataset.kanbanCardId === cardId);
       if (card !== observedCard) {
@@ -58,32 +61,7 @@ export function useKanbanSearchFocus(boardRef: RefObject<HTMLDivElement | null>,
       disconnect();
 
       restoreSnap.current?.();
-      if (getComputedStyle(board).scrollSnapType !== "none") {
-        const previous = board.style.getPropertyValue("scroll-snap-type");
-        const priority = board.style.getPropertyPriority("scroll-snap-type");
-        board.style.setProperty("scroll-snap-type", "none");
-        // Включение snap сразу после перехода заставляет Chrome перескочить
-        // обратно к началу колонки. Вернём исходный snap перед следующим
-        // ручным жестом, новым запросом или размонтированием, не меняя layout.
-        const restore = () => {
-          if (previous) board.style.setProperty("scroll-snap-type", previous, priority);
-          else board.style.removeProperty("scroll-snap-type");
-          window.removeEventListener("wheel", restore);
-          window.removeEventListener("touchstart", restore);
-          window.removeEventListener("pointerdown", restore);
-          window.removeEventListener("keydown", keyboard);
-          restoreSnap.current = null;
-        };
-        const keyboard = (event: KeyboardEvent) => {
-          if (event.target instanceof Element && event.target.closest("[data-kanban-scroll-area]")
-            && ["ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown", " "].includes(event.key)) restore();
-        };
-        restoreSnap.current = restore;
-        window.addEventListener("wheel", restore, { passive: true, once: true });
-        window.addEventListener("touchstart", restore, { passive: true, once: true });
-        window.addEventListener("pointerdown", restore, { once: true });
-        window.addEventListener("keydown", keyboard);
-      }
+      restoreSnap.current = suspendKanbanSnap(board);
 
       const visibleCenter = (Math.max(0, bounds.left) + Math.min(window.innerWidth, bounds.right)) / 2;
       const left = clamp(board.scrollLeft + target.left + target.width / 2 - visibleCenter,
@@ -101,5 +79,5 @@ export function useKanbanSearchFocus(boardRef: RefObject<HTMLDivElement | null>,
     }
     schedule();
     return disconnect;
-  }, [boardRef, query, focus?.cardId, focus?.ready]);
+  }, [boardRef, query, focus?.cardId, focus?.ready, handledSearch]);
 }
