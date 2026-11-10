@@ -13,6 +13,7 @@ import signal
 import socket
 import stat
 import subprocess
+import sys
 import tempfile
 import time
 
@@ -23,6 +24,8 @@ REVISION_RE = re.compile(r"[0-9a-f]{40}\Z")
 DOCKER = ["docker", "--host", "unix:///var/run/docker.sock"]
 KP_REPOSITORY = "ghcr.io/navasiolau/pero_kp_renderer"
 WEB_REPOSITORY = "ghcr.io/navasiolau/pero_crm"
+MIN_IMAGE_FREE_BYTES = 3 * 1024 ** 3
+MAX_IMAGE_REMOVALS = 20
 
 
 class WatchError(RuntimeError):
@@ -219,6 +222,159 @@ def check_renderer_container(value: dict, target: Target, config: dict, *, allow
             and host.get("NetworkMode") == network, "kp-container-network")
 
 
+def read_image_history(lines, project: str) -> dict:
+    """Компактный индекс успешных версий; исходный журнал не изменяется."""
+    recent: dict = {}
+    owned: set[str] = set()
+    for line in lines:
+        if not line.strip():
+            continue
+        require(len(line) <= 65536, "image-history-line-too-large")
+        try:
+            row = json.loads(line)
+        except (ValueError, TypeError):
+            raise WatchError("invalid-image-history") from None
+        require(isinstance(row, dict), "invalid-image-history")
+        if row.get("project") != project or row.get("status") not in ("deployed", "unchanged") or row.get("health") != "healthy":
+            continue
+        images = [row.get("image"), row.get("renderer")]
+        owned.update(value for value in images if isinstance(value, str) and IMAGE_RE.fullmatch(value))
+        revision = row.get("revision")
+        if (not isinstance(revision, str) or not REVISION_RE.fullmatch(revision)
+                or not isinstance(row.get("image"), str) or not IMAGE_RE.fullmatch(row["image"])
+                or (row.get("renderer") is not None and (not isinstance(row["renderer"], str) or not IMAGE_RE.fullmatch(row["renderer"])))):
+            # Не выдаём неполный участок истории за две проверенные версии.
+            # Более поздние успешные версии заново заполнят окно хранения.
+            recent.clear()
+            continue
+        release = {"revision": revision, "images": [value for value in images if isinstance(value, str) and IMAGE_RE.fullmatch(value)]}
+        recent.pop(revision, None)
+        recent[revision] = release
+        if len(recent) > 3:
+            del recent[next(iter(recent))]
+    return {"releases": list(recent.values())[::-1], "owned": owned}
+
+
+def image_cache_fingerprint(image: dict) -> dict:
+    labels = image.get("Config", {}).get("Labels") or {}
+    return {"id": image.get("Id"), "created": image.get("Created"),
+            "tags": sorted(image.get("RepoTags") or []), "digests": sorted(image.get("RepoDigests") or []),
+            "revision": labels.get("org.opencontainers.image.revision"),
+            "repository": labels.get("pero.ci.repository"), "service": labels.get("pero.ci.service")}
+
+
+def image_created(value):
+    try:
+        parsed = datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return parsed.timestamp() if parsed.tzinfo is not None else None
+    except (AttributeError, TypeError, ValueError, OverflowError):
+        return None
+
+
+def image_retention_plan(snapshot: dict, current_images: dict) -> dict:
+    images = {image["Id"]: image for image in snapshot["images"] if IMAGE_RE.fullmatch(image.get("Id") or "")}
+    current = {value for value in current_images.values() if value is not None}
+    require(current and current <= images.keys(), "current-cache-images-missing")
+    current_web = images[current_images["web"]]
+    revision = (current_web.get("Config", {}).get("Labels") or {}).get("org.opencontainers.image.revision")
+    require(isinstance(revision, str) and REVISION_RE.fullmatch(revision), "current-cache-revision-missing")
+    cutoff = image_created(current_web.get("Created"))
+    require(cutoff is not None, "current-cache-created-missing")
+    protected = set(snapshot["used"]) | current | {key for key, value in images.items() if value.get("RepoTags")}
+    protected.update(image["Parent"] for image in images.values() if isinstance(image.get("Parent"), str) and IMAGE_RE.fullmatch(image["Parent"]))
+    previous = [row for row in snapshot["history"]["releases"] if row["revision"] != revision][:2]
+    for row in previous:
+        protected.update(row["images"])
+    # Защищённый web может ссылаться на ещё не запущенный renderer кандидата.
+    for key, image in images.items():
+        if key in protected:
+            digest = (image.get("Config", {}).get("Labels") or {}).get("pero.kp.renderer-index")
+            if isinstance(digest, str) and IMAGE_RE.fullmatch(digest):
+                protected.update(other_id for other_id, other in images.items()
+                                 if KP_REPOSITORY + "@" + digest in (other.get("RepoDigests") or []))
+    plan = {"protected": sorted(protected), "versions": [revision] + [row["revision"] for row in previous], "candidates": [], "reason": None}
+    if len(previous) < 2:
+        plan["reason"] = "history-not-ready"
+        return plan
+    for key, image in images.items():
+        fingerprint = image_cache_fingerprint(image)
+        if key in protected or fingerprint["tags"]:
+            continue
+        refs = fingerprint["digests"]
+        known_ref = lambda ref: any(re.fullmatch(re.escape(repo) + r"@sha256:[a-f0-9]{64}", ref) for repo in (WEB_REPOSITORY, KP_REPOSITORY))
+        if any(not known_ref(ref) for ref in refs):
+            continue
+        labelled = (fingerprint["repository"] == "navasiolau/pero_crm" and fingerprint["service"] in ("web", "kp-renderer")
+                    and isinstance(fingerprint["revision"], str) and REVISION_RE.fullmatch(fingerprint["revision"]))
+        owned = key in snapshot["history"]["owned"] or labelled or bool(refs)
+        created = image_created(fingerprint["created"])
+        if owned and created is not None and created < cutoff:
+            plan["candidates"].append(fingerprint)
+    plan["candidates"].sort(key=lambda item: (item["created"], item["id"]))
+    return plan
+
+
+class ImageRetention:
+    """Только image API. SQL, контейнеры, volumes, CI и команда web не меняются."""
+
+    def __init__(self, runtime, target, context, current_images):
+        self.runtime, self.target, self.current_images = runtime, target, current_images
+        self.report = {"minimumFreeBytes": MIN_IMAGE_FREE_BYTES}
+        context["image_cleanup"] = self.report
+
+    def cleanup(self, phase: str, *, until_space: bool) -> dict:
+        entry = {"freeBefore": self.runtime.image_free_bytes(), "removed": [], "skipped": [], "status": "complete"}
+        self.report[phase] = entry
+        if self.runtime.image_retention_budget() <= 15:
+            entry.update(status="partial", reason="deadline", freeAfter=entry["freeBefore"])
+            return entry
+        plan = image_retention_plan(self.runtime.image_cache_snapshot(self.target), self.current_images)
+        entry.update(protectedVersions=plan["versions"], protectedCount=len(plan["protected"]), candidateCount=len(plan["candidates"]))
+        if plan["reason"]:
+            entry.update(status="blocked", reason=plan["reason"])
+        for index, candidate in enumerate(plan["candidates"]):
+            if until_space and self.runtime.image_free_bytes() >= MIN_IMAGE_FREE_BYTES:
+                break
+            if index >= MAX_IMAGE_REMOVALS or self.runtime.image_retention_budget() <= 15:
+                entry.update(status="partial", reason="bounded-pass")
+                break
+            if self.runtime.remove_cache_image(self.target, candidate):
+                entry["removed"].append(candidate["id"])
+            else:
+                entry["skipped"].append(candidate["id"])
+        entry["freeAfter"] = self.runtime.image_free_bytes()
+        # ZFS/containerd могут освобождать блоки после ответа image rm.
+        for _ in range(3):
+            if not until_space or not entry["removed"] or entry["freeAfter"] >= MIN_IMAGE_FREE_BYTES or self.runtime.image_retention_budget() <= 15:
+                break
+            self.runtime.sleep(1)
+            entry["freeAfter"] = self.runtime.image_free_bytes()
+        return entry
+
+    def preflight(self):
+        free = self.runtime.image_free_bytes()
+        if free >= MIN_IMAGE_FREE_BYTES:
+            self.report["preflight"] = {"status": "ready", "freeBefore": free, "freeAfter": free, "removed": []}
+            return
+        entry = self.cleanup("preflight", until_space=True)
+        require(entry["freeAfter"] >= MIN_IMAGE_FREE_BYTES, "insufficient-image-space")
+
+    def finish(self, result):
+        self.current_images = {"web": result["image"], "kp-renderer": result.get("renderer")}
+        try:
+            self.cleanup("after", until_space=False)
+        except Exception as error:
+            entry = self.report.setdefault("after", {})
+            entry.update(status="error", error=error.code if isinstance(error, WatchError) else "image-cleanup-failed")
+        return {**result, "image_cleanup": self.report}
+
+
+def retention_for(runtime, target, context, current_images):
+    # Старые fake adapters проверяют прежний контур; production adapter всегда
+    # включает ретеншн, его полный путь отдельно покрыт cache-adapter тестами.
+    return ImageRetention(runtime, target, context, current_images) if getattr(runtime, "supports_image_retention", False) else None
+
+
 def watch_pair(runtime, target: Target, config: dict, db_before: tuple, web: dict,
                context: dict, health_timeout: float, poll_interval: float) -> dict:
     """Один lock, immutable images и image-only rollback; БД только перечитывается."""
@@ -261,7 +417,10 @@ def watch_pair(runtime, target: Target, config: dict, db_before: tuple, web: dic
             runtime.sleep(min(poll_interval, max(0, deadline - runtime.monotonic())))
 
     changed = False
+    retention = retention_for(runtime, target, context, old_ids)
     try:
+        if retention:
+            retention.preflight()
         runtime.pull(target)  # Branch tag нужен только для обнаружения нового web.
         desired_web = runtime.inspect_image(target)
         binding = kp_binding(desired_web)
@@ -280,7 +439,8 @@ def watch_pair(runtime, target: Target, config: dict, db_before: tuple, web: dic
                   "revision": binding["revision"], "web_ref": binding["web"], "renderer_ref": binding["kp-renderer"], "database": db_before[0]}
         if old_ids == desired_ids:
             wait_healthy(desired_ids, health_timeout)
-            return {**result, "status": "unchanged", "web": web["Id"], "health": "healthy"}
+            unchanged = {**result, "status": "unchanged", "web": web["Id"], "health": "healthy"}
+            return retention.finish(unchanged) if retention else unchanged
         # Повторно проверяем discovery tag и оба уже загруженных immutable image IDs.
         require(image_identity(runtime.inspect_image(target))[0] == binding["web_id"], "image-tag-drift")
         require(image_identity(runtime.inspect_image_ref(binding["kp-renderer"]))[0] == binding["renderer_id"], "kp-renderer-drift")
@@ -289,8 +449,8 @@ def watch_pair(runtime, target: Target, config: dict, db_before: tuple, web: dic
         runtime.up_pair(target, {"web": binding["web"], "kp-renderer": binding["kp-renderer"]})
         deployed = wait_healthy(desired_ids, health_timeout)
         require(runtime.compose_config(target) == config, "compose-drift")
-        return {**result, "status": "deployed", "health": "healthy",
-                "web": deployed["web"]["Id"]}
+        completed = {**result, "status": "deployed", "health": "healthy", "web": deployed["web"]["Id"]}
+        return retention.finish(completed) if retention else completed
     except Exception:
         if changed:
             runtime.enter_pair_rollback()
@@ -355,6 +515,14 @@ def _watch(runtime, context: dict, health_timeout: float, poll_interval: float) 
             current = database_snapshot(runtime.inspect_container(target, "db"), target, config)
             require(current == db_before, "database-drift")
 
+        retention = retention_for(runtime, target, context, {"web": web["Image"]})
+        if retention:
+            try:
+                retention.preflight()
+            except Exception:
+                runtime.enter_postcheck()
+                check_database()
+                raise
         # Никакого up при ошибке pull, даже если новый образ уже есть в кеше.
         runtime.pull(target)
         desired, revision = image_identity(runtime.inspect_image(target))
@@ -368,7 +536,14 @@ def _watch(runtime, context: dict, health_timeout: float, poll_interval: float) 
                   "database": db_before[0]}
         if web["Image"] == desired:
             require(health_status(web) == "healthy", "web-unhealthy")
-            return {**result, "status": "unchanged", "web": web["Id"], "health": "healthy"}
+            unchanged = {**result, "status": "unchanged", "web": web["Id"], "health": "healthy"}
+            if not retention:
+                return unchanged
+            try:
+                return retention.finish(unchanged)
+            finally:
+                runtime.enter_postcheck()
+                check_database()
 
         require(image_identity(runtime.inspect_image(target))[0] == desired, "image-tag-drift")
         # Повторный pull и запуск зависимостей запрещены. При любой ошибке up/health
@@ -388,17 +563,79 @@ def _watch(runtime, context: dict, health_timeout: float, poll_interval: float) 
                 remaining = deadline - runtime.monotonic()
                 require(remaining > 0, "web-health-timeout")
                 runtime.sleep(min(poll_interval, remaining))
+            result.update(status="deployed", web=web["Id"], health="healthy")
+            if retention:
+                result = retention.finish(result)
         finally:
             runtime.enter_postcheck()
             check_database()
-        return {**result, "status": "deployed", "web": web["Id"], "health": "healthy"}
+        return result
 
 
 class DockerRuntime:
+    supports_image_retention = True
+
     def __init__(self):
         self.deadline: float | None = None
         self.postcheck_reserve = 15
         self.kp_mode = False
+        self._image_space_paths: list[Path] | None = None
+
+    def image_retention_budget(self) -> float:
+        return float("inf") if self.deadline is None else self.deadline - self.monotonic() - self.postcheck_reserve - 5
+
+    def image_free_bytes(self) -> int:
+        if self._image_space_paths is None:
+            directory = Path(self.command(DOCKER + ["info", "--format", "{{.DockerRootDir}}"], "image-data-root", timeout=10).strip())
+            require(directory.is_absolute() and directory.is_dir(), "invalid-image-data-root")
+            paths = [Path("/"), directory]
+            # В Docker с containerd image store metadata лежит отдельно от root.
+            if Path("/var/lib/containerd").is_dir():
+                paths.append(Path("/var/lib/containerd"))
+            self._image_space_paths = paths
+        return min(os.statvfs(path).f_bavail * os.statvfs(path).f_frsize for path in self._image_space_paths)
+
+    def all_container_image_ids(self) -> set[str]:
+        ids = self.command(DOCKER + ["container", "ls", "--all", "--quiet", "--no-trunc"], "cache-container-list", timeout=15).split()
+        require(all(CONTAINER_RE.fullmatch(value) for value in ids), "invalid-cache-container-id")
+        if not ids:
+            return set()
+        values = json.loads(self.command(DOCKER + ["inspect", "--type", "container", *ids], "cache-container-inspect", timeout=15))
+        require(len(values) == len(ids) and all(IMAGE_RE.fullmatch(row.get("Image") or "") for row in values), "invalid-cache-container-images")
+        return {row["Image"] for row in values}
+
+    def image_cache_snapshot(self, target: Target) -> dict:
+        ids = list(dict.fromkeys(self.command(DOCKER + ["image", "ls", "--all", "--quiet", "--no-trunc"], "image-cache-list", timeout=15).split()))
+        require(len(ids) <= 10000 and all(IMAGE_RE.fullmatch(value) for value in ids), "invalid-cache-image-list")
+        images = json.loads(self.command(DOCKER + ["image", "inspect", *ids], "image-cache-inspect", timeout=20)) if ids else []
+        journal = ResultJournal()
+        try:
+            fd = os.open(journal.log, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        except FileNotFoundError:
+            history = {"releases": [], "owned": set()}
+        else:
+            with os.fdopen(fd, "r", encoding="utf8") as stream:
+                journal.check_file(os.fstat(stream.fileno()))
+                def lines():
+                    while True:
+                        require(self.image_retention_budget() > 10, "image-history-deadline")
+                        line = stream.readline(65537)
+                        if not line:
+                            break
+                        yield line
+                history = read_image_history(lines(), target.project)
+        return {"images": images, "used": self.all_container_image_ids(), "history": history}
+
+    def remove_cache_image(self, target: Target, candidate: dict) -> bool:
+        image_id = candidate["id"]
+        require(bool(IMAGE_RE.fullmatch(image_id)), "invalid-image-cleanup-id")
+        if image_id in self.all_container_image_ids():
+            return False
+        actual = image_cache_fingerprint(self.inspect_image_ref(image_id))
+        if actual != candidate or actual["tags"] or image_id in self.all_container_image_ids():
+            return False
+        self.command(DOCKER + ["image", "rm", "--no-prune", image_id], "image-remove", timeout=10)
+        return True
 
     def start_deadline(self, seconds: float) -> None:
         self.deadline = self.monotonic() + seconds
@@ -666,11 +903,47 @@ def run(runtime, emit=print) -> int:
     return 1 if result["status"] == "error" else 0
 
 
+def preview_image_retention(runtime, emit=print) -> int:
+    """Только metadata и измерение места; никакого pull/up/rm и записи журнала."""
+    runtime.start_deadline(60)
+    target = target_for(runtime.hostname(), runtime.cwd())
+    with runtime.lock(target) as acquired:
+        if not acquired:
+            emit({"status": "busy", "project": target.project})
+            return 0
+        config = runtime.compose_config(target)
+        check_config(config, target)
+        before = database_snapshot(runtime.inspect_container(target, "db"), target, config)
+        web = runtime.inspect_container(target, "web")
+        check_container(web, target, "web")
+        current = {"web": web["Image"]}
+        if kp_enabled(config):
+            renderer = runtime.inspect_optional_container(target, "kp-renderer")
+            if renderer is not None:
+                check_renderer_container(renderer, target, config)
+                current["kp-renderer"] = renderer["Image"]
+        plan = image_retention_plan(runtime.image_cache_snapshot(target), current)
+        free = runtime.image_free_bytes()
+        runtime.enter_postcheck()
+        require(database_snapshot(runtime.inspect_container(target, "db"), target, config) == before, "database-drift")
+        emit({"status": "dry-run", "project": target.project, "freeBytes": free, "minimumFreeBytes": MIN_IMAGE_FREE_BYTES,
+              "protectedVersions": plan["versions"], "protectedImages": plan["protected"],
+              "candidateImages": [row["id"] for row in plan["candidates"]], "reason": plan["reason"]})
+        return 0
+
+
 def main() -> int:
     def emit(result):
         print(json.dumps({"at": datetime.datetime.now(datetime.timezone.utc).isoformat(), **result},
                          ensure_ascii=False), flush=True)
 
+    if sys.argv[1:]:
+        try:
+            require(sys.argv[1:] == ["--image-retention-dry-run"], "unknown-watcher-option")
+            return preview_image_retention(DockerRuntime(), emit)
+        except WatchError as error:
+            emit({"status": "error", "error": error.code})
+            return 1
     return run(DockerRuntime(), emit)
 
 
