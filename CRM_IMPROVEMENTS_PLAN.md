@@ -182,3 +182,9 @@ OpenSpec размещаем в `D:\Projects\pero_crm_v2\openspec`, схема `s
 | № | Ветка | OpenSpec | Статус |
 |---|---|---|---|
 | 212 | bugfix/212 | kanban-scroll-restoration | Выпущено на production `efe1607f` по поручению владельца. Staging UI 40/40 и оба CI 7/7 PASS; стандартный CI/мигратор сохранён, новых миграций нет, production-БД/том/StartedAt неизменны по metadata. См. production-release.md и staging-acceptance.md. |
+
+### Автоматическая очистка образов CRM от 10.11.2026
+
+| № | Ветка | OpenSpec | Статус |
+|---|---|---|---|
+| 213 | feature/213 | crm-image-retention | Подготовлен план по вопросу владельца: текущая + две предыдущие успешные версии, защита всех образов со ссылками контейнеров, запас 3 GiB до pull, ограниченная очистка собственных image IDs. Реализация и установка автоматического механизма ещё не выполнялись; proposal/design/specs/tasks готовы к рассмотрению. |
