@@ -271,6 +271,21 @@ def image_created(value):
         return None
 
 
+def managed_digest_reference(value) -> bool:
+    return isinstance(value, str) and any(re.fullmatch(re.escape(repo) + r"@sha256:[a-f0-9]{64}", value)
+                                         for repo in (WEB_REPOSITORY, KP_REPOSITORY))
+
+
+def image_digest_references(image: dict) -> set[str]:
+    # Containerd может показывать immutable repo@digest и в RepoTags.
+    # Это ссылка обычного парного deploy, а не пользовательский именованный pin.
+    return set(image.get("RepoDigests") or []) | {value for value in (image.get("RepoTags") or []) if managed_digest_reference(value)}
+
+
+def named_image_tags(image: dict) -> list[str]:
+    return [value for value in (image.get("RepoTags") or []) if not managed_digest_reference(value)]
+
+
 def image_retention_plan(snapshot: dict, current_images: dict) -> dict:
     images = {image["Id"]: image for image in snapshot["images"] if IMAGE_RE.fullmatch(image.get("Id") or "")}
     current = {value for value in current_images.values() if value is not None}
@@ -280,7 +295,7 @@ def image_retention_plan(snapshot: dict, current_images: dict) -> dict:
     require(isinstance(revision, str) and REVISION_RE.fullmatch(revision), "current-cache-revision-missing")
     cutoff = image_created(current_web.get("Created"))
     require(cutoff is not None, "current-cache-created-missing")
-    protected = set(snapshot["used"]) | current | {key for key, value in images.items() if value.get("RepoTags")}
+    protected = set(snapshot["used"]) | current | {key for key, value in images.items() if named_image_tags(value)}
     protected.update(image["Parent"] for image in images.values() if isinstance(image.get("Parent"), str) and IMAGE_RE.fullmatch(image["Parent"]))
     previous = [row for row in snapshot["history"]["releases"] if row["revision"] != revision][:2]
     for row in previous:
@@ -291,18 +306,17 @@ def image_retention_plan(snapshot: dict, current_images: dict) -> dict:
             digest = (image.get("Config", {}).get("Labels") or {}).get("pero.kp.renderer-index")
             if isinstance(digest, str) and IMAGE_RE.fullmatch(digest):
                 protected.update(other_id for other_id, other in images.items()
-                                 if KP_REPOSITORY + "@" + digest in (other.get("RepoDigests") or []))
+                                 if KP_REPOSITORY + "@" + digest in image_digest_references(other))
     plan = {"protected": sorted(protected), "versions": [revision] + [row["revision"] for row in previous], "candidates": [], "reason": None}
     if len(previous) < 2:
         plan["reason"] = "history-not-ready"
         return plan
     for key, image in images.items():
         fingerprint = image_cache_fingerprint(image)
-        if key in protected or fingerprint["tags"]:
+        if key in protected or named_image_tags(image):
             continue
-        refs = fingerprint["digests"]
-        known_ref = lambda ref: any(re.fullmatch(re.escape(repo) + r"@sha256:[a-f0-9]{64}", ref) for repo in (WEB_REPOSITORY, KP_REPOSITORY))
-        if any(not known_ref(ref) for ref in refs):
+        refs = image_digest_references(image)
+        if any(not managed_digest_reference(ref) for ref in refs):
             continue
         labelled = (fingerprint["repository"] == "navasiolau/pero_crm" and fingerprint["service"] in ("web", "kp-renderer")
                     and isinstance(fingerprint["revision"], str) and REVISION_RE.fullmatch(fingerprint["revision"]))
@@ -632,7 +646,7 @@ class DockerRuntime:
         if image_id in self.all_container_image_ids():
             return False
         actual = image_cache_fingerprint(self.inspect_image_ref(image_id))
-        if actual != candidate or actual["tags"] or image_id in self.all_container_image_ids():
+        if actual != candidate or any(not managed_digest_reference(tag) for tag in actual["tags"]) or image_id in self.all_container_image_ids():
             return False
         self.command(DOCKER + ["image", "rm", "--no-prune", image_id], "image-remove", timeout=10)
         return True

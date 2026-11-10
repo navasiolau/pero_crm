@@ -185,6 +185,13 @@ class RetentionWorkflowTests(unittest.TestCase):
 
 
 class RetentionPolicyTests(unittest.TestCase):
+    def test_managed_digest_in_repotags_is_not_an_eternal_pin(self):
+        runtime = CacheRuntime()
+        old_renderer = runtime.images[runtime.old_pairs[0]["kp-renderer"]]
+        old_renderer["RepoTags"] = old_renderer["RepoDigests"][:]
+        plan = watcher.image_retention_plan(runtime.image_cache_snapshot(None), {"web": OLD_IMAGE, "kp-renderer": OLD_RENDERER})
+        self.assertIn(old_renderer["Id"], {row["id"] for row in plan["candidates"]})
+
     def test_stopped_container_unknown_images_and_tagged_candidate_are_protected(self):
         runtime = CacheRuntime()
         runtime.extra_used.add(runtime.old_pairs[0]["web"])
