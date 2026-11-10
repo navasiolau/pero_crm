@@ -181,4 +181,4 @@ OpenSpec размещаем в `D:\Projects\pero_crm_v2\openspec`, схема `s
 
 | № | Ветка | OpenSpec | Статус |
 |---|---|---|---|
-| 212 | bugfix/212 | kanban-scroll-restoration | Технически принято на staging `efe1607f`: CI 7/7, browser 40/40, возврат с отклонением 0 px. Контрольные 14 таблиц сохранены; устранено переполнение кеша старых образов staging. См. staging-acceptance.md. Ожидается проверка владельца на staging; main/production не выпускались. |
+| 212 | bugfix/212 | kanban-scroll-restoration | Выпущено на production `efe1607f` по поручению владельца. Staging UI 40/40 и оба CI 7/7 PASS; стандартный CI/мигратор сохранён, новых миграций нет, production-БД/том/StartedAt неизменны по metadata. См. production-release.md и staging-acceptance.md. |

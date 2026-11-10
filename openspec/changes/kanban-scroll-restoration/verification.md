@@ -36,4 +36,4 @@
 
 ## Выпуск
 
-Код реализован, локальная и техническая staging-приёмка завершены. На staging работает `efe1607ffa14384d07ea8638222c6eee3d66dfda`, CI 7/7 и реальный browser 40/40 PASS. Полные SHA/образы, сверка данных, устранение переполнения диска и evidence — в [staging-acceptance.md](staging-acceptance.md). Ожидается личная проверка владельца на staging. Main/production не разрешены и не выполнялись.
+№212 выпущен на production по прямому поручению владельца: main/staging `efe1607ffa14384d07ea8638222c6eee3d66dfda`, оба CI 7/7 PASS. Штатные CI и мигратор сохранены, новых миграций нет; production-БД не перезапускалась и не проверялась SQL. См. [production-release.md](production-release.md). Предшествующая staging-приёмка: [staging-acceptance.md](staging-acceptance.md), browser 40/40 PASS.
