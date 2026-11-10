@@ -11,6 +11,7 @@ import { ArrowLeft, TriangleAlert } from "lucide-react";
 import { auth } from "@/auth";
 import { Badge } from "@/components/ui/badge";
 import { resolveProjectTab } from "@/lib/product-return-navigation";
+import { resolveProjectReturn } from "@/lib/project-return-navigation";
 import { ProjectTabs } from "@/components/project-tabs";
 import { TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SlotErrorBoundary } from "@/components/plugins/slot-error-boundary";
@@ -159,7 +160,7 @@ export default async function ProjectPage({
     <div className="flex min-w-0 flex-col gap-4">
       <div className="flex flex-wrap items-center gap-3">
         <Link
-          href="/projects"
+          href={resolveProjectReturn(queryParams.returnTo)}
           className="text-muted-foreground hover:text-foreground"
           aria-label="К списку проектов"
         >

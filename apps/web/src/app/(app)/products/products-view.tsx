@@ -119,6 +119,8 @@ export function ProductsView({
       {view === "kanban" ? (
         <ProductsKanban
           searchText={searchText}
+          scrollReady={query === resolvedQuery && !filterOverlayActive
+            && searchText.trim() === (new URLSearchParams(query).get("q") ?? "")}
           searchReady={!pending && query === resolvedQuery && !filterOverlayActive
             && searchText.trim() === (new URLSearchParams(query).get("q") ?? "")}
           initialProducts={products}

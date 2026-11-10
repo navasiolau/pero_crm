@@ -130,6 +130,7 @@ export function ProductsKanban({
   initialProducts,
   searchText = "",
   searchReady = false,
+  scrollReady = searchReady,
   actorRoles,
   actorUserId,
   showAmount,
@@ -138,13 +139,14 @@ export function ProductsKanban({
   // Без подтверждённой пары query/rows обычный caller не запускает поиск.
   searchText?: string;
   searchReady?: boolean;
+  scrollReady?: boolean;
   canManage: boolean;
   actorRoles: readonly Role[];
   actorUserId?: string;
   showAmount: boolean;
 }) {
   const router = useRouter();
-  const { getQuery } = useListParams();
+  const { getQuery, query, searchRevision } = useListParams();
   const canShowDrafts = initialProducts.some(product => product.canAccessDraft === true);
   const visibleStatuses = useMemo(() => visibleProductStatuses(actorRoles, canShowDrafts), [actorRoles, canShowDrafts]);
   const [board, setBoard] = useState<{
@@ -227,6 +229,8 @@ export function ProductsKanban({
   }
 
   const activeProduct = products.find((product) => product.id === activeId);
+  const rowsReady = board.source === initialProducts && board.roles === actorRoles && !activeId;
+  const ready = searchReady && rowsReady;
 
   return (
     <DndContext
@@ -237,10 +241,13 @@ export function ProductsKanban({
       }}
       onDragCancel={() => setActiveId(null)}
     >
-      <KanbanScrollArea label="Канбан изделий" searchFocus={{
+      <KanbanScrollArea label="Канбан изделий" restoration={actorUserId ? {
+          userId: actorUserId, section: "products", query, searchText, searchRevision, ready: scrollReady && rowsReady,
+          cardIds: products.map(product => product.id),
+        } : undefined} searchFocus={{
           query: searchText,
           cardId: products.find(item => item.number === searchText.trim())?.id ?? null,
-          ready: searchReady && board.source === initialProducts && board.roles === actorRoles && !activeId,
+          ready,
         }}>
         {columns.map(({ status, products }) => (
           <StatusColumn

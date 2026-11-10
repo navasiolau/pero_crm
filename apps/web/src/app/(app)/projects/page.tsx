@@ -78,6 +78,7 @@ export default async function ProjectsPage({
       pageSize={pageSize}
       canManage={canManage}
       actorRoles={role}
+      actorUserId={session.user.id}
       showAmount={canViewProductMoney(session.user.roles)}
       clients={clients.map((client) => ({ id: client.id, name: displayClientName(client) }))}
       managers={managers.map((manager) => ({ id: manager.id, name: manager.name }))}
