@@ -187,4 +187,4 @@ OpenSpec размещаем в `D:\Projects\pero_crm_v2\openspec`, схема `s
 
 | № | Ветка | OpenSpec | Статус |
 |---|---|---|---|
-| 213 | feature/213 | crm-image-retention | Реализовано и установлено на staging: 30473e7f, CI 7/7, helper 4b69eebb. Штатный цикл сам удалил 32 старых образа, сохранив текущую/две предыдущие версии и metadata БД; стандартный CI/мигратор/W07 сохранены. Production preview выполнен только чтением; установка №213 на production ожидает отдельного решения владельца. См. staging-acceptance.md. |
+| 213 | feature/213 | crm-image-retention | Выпущено на production 30473e7f по отдельному поручению: CI 7/7, helper 4b69eebb. До изменений полный дамп сохранён на E: и восстановлен изолированно: 77 таблиц / 66 378 строк совпали. Два автоматических production-прохода удалили 36 старых образов; текущая/две предыдущие версии, metadata БД, стандартный CI/мигратор/cron сохранены. Staging принят ранее; см. production-release.md и staging-acceptance.md. |

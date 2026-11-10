@@ -31,10 +31,10 @@ DB container ID `27b8f7342b9d722ab8788e137b37b03a3037442da038c5b8b98dbb30245b8b6
 
 ## Production
 
-№212 выпущен на production `efe1607f`; стандартный CI/мигратор сохранён. №213 на production пока **не установлен**.
+На момент этой staging-приёмки №212 был выпущен на production `efe1607f`, №213 ещё не устанавливался. Последующее отдельное поручение владельца, полный сохранённый backup с проверкой восстановления и production-выпуск №213 зафиксированы в [production-release.md](production-release.md).
 
-Read-only preview №213 на production показал 34 старых кандидата и 25 защищённых IDs, версии `efe1607f` / `f5c0cdb1` / `38899d64`, свободно 12 605 063 168 bytes. Проверка не выполняла pull/up/rm, не записывала журнал и не меняла контейнеры; candidate исполнялся в памяти, установленный helper оставался прежним. Для установки запрошено отдельное решение владельца.
+Read-only preview №213 на production показал 34 старых кандидата и 25 защищённых IDs, версии `efe1607f` / `f5c0cdb1` / `38899d64`, свободно 12 605 063 168 bytes. Проверка не выполняла pull/up/rm, не записывала журнал и не меняла контейнеры; candidate исполнялся в памяти, установленный helper оставался прежним. После preview было запрошено отдельное решение владельца.
 
 ## Evidence
 
-Локальный ignored каталог `.playwright-mcp/retention213/`: `ci.json`, `candidate.json`, `preview.json`, `bootstrap.json`, `digest-probe.json`, `install-receipt.json`, `host-before.json`, `host-after.json`, `scheduled-run.json`, `production-preview.json`, reviewed scripts. Приватные входные данные не включены в Git. Коммиты приложения в production в этой фазе не выполнялись; main остаётся `efe1607f`.
+Локальный ignored каталог `.playwright-mcp/retention213/`: `ci.json`, `candidate.json`, `preview.json`, `bootstrap.json`, `digest-probe.json`, `install-receipt.json`, `host-before.json`, `host-after.json`, `scheduled-run.json`, `production-preview.json`, reviewed scripts. Приватные входные данные не включены в Git. Коммиты приложения в production в этой фазе не выполнялись; тогда main оставался `efe1607f`.
