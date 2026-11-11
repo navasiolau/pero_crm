@@ -11,4 +11,4 @@
 
 ## 3. Приёмка
 - [x] 3.1 После интеграции #214 пройти local DB/runtime/UI/PDF, lint/typecheck/build и соответствующие тесты; сохранить evidence.
-- [ ] 3.2 Пройти независимое ревью и openspec validate; обычный merge/push staging, проверить CI, точный SHA/образ, API/UI/PDF на staging.
+- [x] 3.2 Пройти независимое ревью и openspec validate; обычный merge/push staging, проверить CI, точный SHA/образ, API/UI/PDF на staging.

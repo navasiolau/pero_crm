@@ -195,5 +195,5 @@ OpenSpec размещаем в `D:\Projects\pero_crm_v2\openspec`, схема `s
 
 | № | Ветка | OpenSpec | Статус |
 |---|---|---|---|
-| 214 | feature/214 | product-technical-specifications | JSONB без backfill, каталог разделов и структурированный редактор изделия, совместимая проекция прежних КП. Локальная реализация и проверки; фактический результат — verification.md. |
-| 215 | feature/215 | kp-structured-specifications | Структурированный источник в КП, общий preview/PDF, API/MCP и навык агента. Зависит от принятого #214; фактический результат — verification.md. |
+| 214 | feature/214 | product-technical-specifications | Принято на staging `82514755`: JSONB без backfill, каталог/редактор, совместимая проекция КП, CAS/ACL/replay и защита поколения. CI 7/7, реальные DB/UI проверки; см. verification.md. |
+| 215 | feature/215 | kp-structured-specifications | Принято на staging `517eb563`: canonical КП, editor/PDF/continuations, API/MCP/навык. CI 7/7, actual UI/OpenAPI/restore и шестистраничный PDF проверены root; см. verification.md. Production не выпускался. |

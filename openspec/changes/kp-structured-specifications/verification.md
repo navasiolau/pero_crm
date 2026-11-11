@@ -21,4 +21,14 @@ Code candidate `43a9ec138777ddbb664927670fa958330bb352bb`, обычные merges
 
 ## Staging
 
-Ожидает CI, фактического deployment и root-проверки нового редактора, JSON переноса и настоящего PDF. Выпуск в production не выполняется.
+**Принят staging `517eb5632cd91ac243245f700bcf26453a103c4b`.** [CI 42939664271](https://github.com/navasiolau/pero_crm/actions/runs/42939664271): **7/7 success**, включая обе browser cohorts, backend, native/PostgreSQL, Linux renderer и публикацию испытанных OCI без пересборки.
+
+- Фактический web image `sha256:9a818ecde4b95dc0c6990d196ccc60e7d1d5b712c04608430d68ec216e7a5075`, renderer `sha256:c07795bdd080bd73e55dc785df734e07b454ccf27f67b24547c7d66bbd422ce5` совпадают с promoted CI digests. Guard до/после приёмки подтвердил эту revision, healthy и прежние DB ID/volume/StartedAt, неизменный W07.
+- Первая загрузка образа завершилась `pull-failed`, оставив здоровую #214. Штатный повтор watcher успешно развернул #215; конфигурации и защитные проверки не менялись, ручной обход CI не применялся.
+- Root выполнил full browser сценарий через настоящий HTTPS: actual OpenAPI, открытие legacy без записи, canonical autosave, стандартный/custom раздел и его группа, пустые пункты, новая позиция и обе раскладки, повторное открытие, desktop/mobile, явная очистка [] без возврата старых products — PASS.
+- Через штатную кнопку выпущен и скачан настоящий PDF: **6 A4, 441359 bytes**. Все **80 строк** присутствуют ровно один раз и по порядку, custom раздел один раз, пустой фасад скрыт. Root просмотрел все шесть растровых страниц и реальные editor/preview снимки. Проверка геометрии подтвердила запас 44,37 pt под ценой; обрезки нет.
+- Actual readback подтверждает исходный description побайтово с CRLF, пустой JSON первой позиции после очистки и все длинные строки второй позиции в Product. Выпущенная версия 5 неизменна; фактическое восстановление этой версии повысило live revision до 7 и восстановило структуру, повтор того же operationId не дал второй записи. Устаревший legacy PUT получил `409 KP_EDITOR_OUTDATED` без повышения revision.
+- Оба QA проекта и КП UUID `6bfdcadd-2781-40b3-9a21-f927eb33d224` скрыты по exact receipts, история и PDF сохранены. Final health — HTTP 200/database ok. Local own service fixture удалена только по её ID после проверки отсутствия ссылок; local PostgreSQL возвращён в исходное stopped при отсутствии чужих соединений.
+- Main/production не выпускались: remote main `30473e7f8bca76e843f1ec34580bcb5ca7133f5b`. Отчёт приёмки записан после deployment в feature/215; код staging остаётся на указанном проверенном SHA.
+
+Приватные evidence: `.playwright-mcp/specifications-root/ci215.json`, `stage215-prepare/inspect/final-inspect/hide.*.private.json`, `stage215-6bfdcadd-2781-40b3-9a21-f927eb33d224/browser-215-1794361658211-8191166b/` (PDF, text verification, 6 PNG, screenshots), `version-verification.json`, `staging-final-health.json`, `local-cleanup.json`. Секреты/cookies не коммитятся.
