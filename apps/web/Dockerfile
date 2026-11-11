@@ -42,7 +42,7 @@ ENV NODE_ENV=production \
 RUN npm i -g prisma@6.19.3
 COPY --from=build /app/apps/web/.next/standalone ./
 # Externalized пакет использует CJS entry/limits и динамические fs assets вне tracing.
-COPY --from=build /app/packages/kp-template/index.cjs /app/packages/kp-template/limits.cjs /app/packages/kp-template/package.json /app/packages/kp-template/source-manifest.json /app/packages/kp-template/fonts-manifest.json ./packages/kp-template/
+COPY --from=build /app/packages/kp-template/index.cjs /app/packages/kp-template/furniture-specifications.js /app/packages/kp-template/limits.cjs /app/packages/kp-template/package.json /app/packages/kp-template/source-manifest.json /app/packages/kp-template/fonts-manifest.json ./packages/kp-template/
 COPY --from=build /app/packages/kp-template/assets ./packages/kp-template/assets
 # Bare require из apps/web использует стандартный ancestor node_modules.
 RUN mkdir -p /app/node_modules/@pero \

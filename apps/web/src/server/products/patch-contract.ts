@@ -1,4 +1,6 @@
 import { z } from "zod";
+import FurnitureSpecifications from "@pero/kp-template/furniture-specifications";
+import type { TechnicalSpecifications } from "@pero/kp-template";
 
 const base = { productId: z.string().min(1), clientMutationId: z.uuid() };
 const text = z.string().nullable();
@@ -7,8 +9,24 @@ const money = z.string().regex(/^\d{1,10}(?:\.\d{1,2})?$/, "Введите не�
 const variant = <F extends string, T extends z.ZodType>(field: F, value: T) =>
   z.object({ ...base, field: z.literal(field), value, expectedValue: value }).strict();
 
+export const technicalSpecificationsSchema = z.custom<TechnicalSpecifications>(
+  input => FurnitureSpecifications.normalize(input) !== null, "Некорректные технические характеристики",
+);
+const expectedSourceGeneration = z.number().int().nonnegative();
+const sectionSchema = z.unknown().transform((input, ctx) => {
+  const section = FurnitureSpecifications.normalizeSection(input);
+  if (section) return section;
+  ctx.addIssue({ code: "custom", message: "Некорректный раздел" });
+  return z.NEVER;
+});
+
 export const productPatchSchema = z.discriminatedUnion("field", [
   variant("title", required), variant("kind", text), variant("description", text),
+  variant("technicalSpecificationValue", z.string()).extend({ sectionId: required, expectedSourceGeneration }),
+  variant("technicalSpecificationSource", text).extend({ source: z.enum(["description", "size", "note"]), expectedSourceGeneration }),
+  z.object({ ...base, field: z.literal("technicalSpecificationAdd"), section: sectionSchema, expectedSourceGeneration }).strict()
+    .refine(patch => patch.section.id === patch.clientMutationId, "Добавьте раздел с новым идентификатором"),
+  z.object({ ...base, field: z.literal("technicalSpecificationRemove"), section: sectionSchema, expectedSourceGeneration }).strict(),
   variant("engineerId", text), variant("expectedPrice", money),
   variant("quantity", z.number().int().min(1).max(2_147_483_647)),
   variant("project.clientId", required),

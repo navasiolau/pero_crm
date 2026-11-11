@@ -42,5 +42,6 @@ test("real global Journal query and page reject non-admin before reading audit r
   assert.deepEqual(lastInput, { where: { NOT: { OR: [
     { entity: "task", action: "task.status.request", id: { startsWith: "task-status:" } },
     { entity: "task", action: "task.create.request", id: { startsWith: "task-create:" } },
+    { entity: "product", action: "inline.receipt", id: { startsWith: "product-inline:" } },
   ] }, OR: [{ actorName: { contains: "Ivan", mode: "insensitive" } }, { actorId: { contains: "Ivan", mode: "insensitive" } }], entity: { contains: "task", mode: "insensitive" }, createdAt: { gte: new Date("2026-10-01"), lte: new Date("2026-10-03T23:59:59") } }, orderBy: { createdAt: "desc" }, take: 200 });
 });
