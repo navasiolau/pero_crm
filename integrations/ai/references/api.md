@@ -8,6 +8,7 @@
 
 | Операция | API относительно `/api/v1/kp` |
 |---|---|
+| Формат характеристик | GET `/api/v1/openapi.json` на том же origin, публичный маршрут без Bearer |
 | Список, создание | GET/POST `/documents` |
 | Чтение, полное обновление | GET/PUT `/documents/:id` |
 | Клиенты | GET `/clients?q=...`, GET `/clients/:id` |
@@ -24,7 +25,11 @@
 
 Все приватные чтения требуют Bearer. Ссылки скачивания указывают на API CRM, не на публичный S3. Не переходить с Bearer на другой origin и не исполнять перенаправления.
 
+Перед записью вызвать `kp_get_capabilities` либо `capabilities` на том же `PERO_CRM_API_URL`, который используется для сохранения. Если работаешь напрямую с OpenAPI, проверить `state.items.items.properties.specifications` в компонентах `KpCreateDocument` и `KpSaveDocument` для POST и PUT. Объявленный в обоих массив секций означает `specifications: true`. Если в обоих контрактах поле отсутствует, заполнить `products` по [правилам совместимости](fields-and-pricing.md#формат-для-старой-crm). Ошибка запроса или расхождение контрактов требуют успешной проверки перед сохранением.
+
 Текущий документ содержит `id`, `revision`, `state`, `project`, `client`, `canEdit`, `fx`, `sourceDate`. Создание: `{state,operationId,clientId?,fx?,expectedNumber?}`. Обновление добавляет `expectedRevision`; `state` всегда полный. Вложенные поля редактора сохраняются, прежние `items[].id` остаются стабильными. Выбранный клиент хранится в `state.client.crmId` и структурированном `crmSnapshot` с ID; предпочтительнее передать `clientId` и использовать снимок из ответа сервера. Не разбирать ФИО/телефон из общего текстового поля.
+
+`state.items[].specifications` содержит строки `{id,type,group,label,value}`. Сохранять ID существующих строк из GET. Каждой добавляемой строке присваивать новый UUID, в том числе при повторном добавлении удалённого раздела. `[]` явно очищает характеристики; отсутствие поля в старой позиции позволяет серверу перенести `products` при сохранении. Сохранённый `specifications` передавать в полном снимке, исходный `products` оставить как в свежем GET. При конфликте формата заново прочитать КП и внести правки в актуальный массив. Прочитать [каталог разделов](fields-and-pricing.md#разделы-спецификации) перед заполнением.
 
 Курс `fx` имеет `{currency,rate,date,source}`; rate — десятичная строка, source — NBRB или MANUAL. Сервер фиксирует курс при создании. Обычное сохранение не запрашивает новый курс. Смена валюты требует соответствующего нового курса; нельзя переиспользовать число старой валюты.
 
@@ -42,6 +47,7 @@
 
 ```text
 python scripts/pero_kp_api.py --workspace E:\KP list
+python scripts/pero_kp_api.py --workspace E:\KP capabilities
 python scripts/pero_kp_api.py get DOCUMENT_ID --out before.json
 python scripts/pero_kp_api.py backup DOCUMENT_ID --directory backup-new-folder
 python scripts/pero_kp_api.py save --state state.json --receipt create-operation.json

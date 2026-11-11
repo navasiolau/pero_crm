@@ -32,6 +32,7 @@ async function renderPdf(input, launch) {
     });
     if (blocked) throw Error('KP_RENDER_NETWORK_BLOCKED');
     if (failed) throw Error('KP_RENDER_IMAGE_DECODE_FAILED');
+    await page.evaluate(SheetRender.paginateSpecifications);
     const pageCount = await page.$$eval('.page', pages => pages.length);
     if (!Number.isSafeInteger(pageCount) || pageCount < 1) throw Error('KP_RENDER_PAGE_LIMIT');
     const bytes = Buffer.from(await page.pdf({ format: 'A4', printBackground: true, preferCSSPageSize: true,
@@ -80,6 +81,7 @@ async function renderPdfFile(input, launch, { spoolRoot } = {}) {
     });
     if (blocked) throw Error('KP_RENDER_NETWORK_BLOCKED');
     if (failed) throw Error('KP_RENDER_IMAGE_DECODE_FAILED');
+    await page.evaluate(SheetRender.paginateSpecifications);
     const pageCount = await page.$$eval('.page', pages => pages.length);
     if (!Number.isSafeInteger(pageCount) || pageCount < 1) throw Error('KP_RENDER_PAGE_LIMIT');
     const stream = await page.createPDFStream({ format: 'A4', printBackground: true, preferCSSPageSize: true,

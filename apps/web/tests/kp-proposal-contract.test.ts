@@ -58,6 +58,19 @@ test("closed envelopes reject duplicates, noninteger quantities and malformed st
   assert.equal(saveProposalSchema.safeParse({ ...input, proposalId: "kp" }).success, false);
 });
 
+test("structured sections require unique IDs and standard types with exact catalog metadata", () => {
+  const standard = { id: "row-1", type: "body", group: "construction", label: "Корпус", value: "ЛДСП" };
+  const custom = { id: "row-2", type: "custom", group: "filling", label: "Органайзер", value: "" };
+  const parse = (specifications: unknown) => createProposalSchema.safeParse({ operationId: randomUUID(), state: { items: [{ specifications }] } });
+  assert.equal(parse([standard, custom]).success, true);
+  assert.equal(parse([]).success, true);
+  for (const invalid of [null, [{ ...standard, label: "Неизвестный корпус" }], [{ ...standard, group: "filling" }],
+    [{ ...custom, label: "  " }], [{ ...custom, id: "body" }], [{ ...custom, extra: true }],
+    [standard, { ...standard, id: "row-3" }], [standard, { ...custom, id: "row-1" }]]) {
+    assert.equal(parse(invalid).success, false);
+  }
+});
+
 test("rendered full name and opaque contact never become structured name or guessed phone", () => {
   const source = normalizeProposalState({ client: { name: "Старое отображение", contact: "@telegram · написать вечером", extra: 7 }, items: [] });
   const state = bindProposalClient(source, client(), false);

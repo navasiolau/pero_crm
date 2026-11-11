@@ -11,7 +11,7 @@ const prefix = 'pero-crm-kp:actor:primary:';
 const documentRow = () => ({ id: 'primary', revision: 15, canEdit: true, client: { id: 'client', label: 'Клиент' },
   fx: { currency: 'BYN', rate: '1', date: '2026-10-27', source: 'MANUAL' },
   updatedAt: new Date(1000).toISOString(), state: { currency: 'BYN', order: { number: '231', project: 'SERVER' }, manager: { name: 'SERVER', role: 'Менеджер', phone: '+000' }, items: [] } });
-async function fixture(initial = [], overlap = false, server = documentRow()) {
+async function fixture(initial = [], overlap = false, server = documentRow(), confirmState = copy, rejectWrite) {
   const values = new Map(initial), nodes = new Map(), timers = new Map(), writes = [], resolutions = [], reads = [], removed = [];
   let adapter, current = copy(server), remote = copy(server), timerId = 0, elementId = 0, now = 2000, heldWrite;
   const node = key => {
@@ -39,8 +39,10 @@ async function fixture(initial = [], overlap = false, server = documentRow()) {
       if (url === '/api/kp/documents') return new Response(JSON.stringify({ documents: [] }));
       if (options.method === 'PUT') {
         const body = JSON.parse(options.body); writes.push(copy(body.state));
+        const error = rejectWrite?.(body);
+        if (error) return new Response(JSON.stringify({ error }), { status: 409 });
         if (heldWrite) { const pending = heldWrite; heldWrite = null; await pending; }
-        remote = { ...remote, revision: remote.revision + 1, updatedAt: new Date(now + 1).toISOString(), state: copy(body.state), fx: body.fx };
+        remote = { ...remote, revision: remote.revision + 1, updatedAt: new Date(now + 1).toISOString(), state: confirmState(body.state), fx: body.fx };
       }
       return new Response(JSON.stringify(remote));
     }
@@ -54,6 +56,14 @@ async function fixture(initial = [], overlap = false, server = documentRow()) {
   await tick();
   return { values, nodes, api, window, reads, removed, writes, resolutions, get adapter() { return adapter; },
     async type(value) { field.value = value; await document.dispatch('input', field); },
+    async typeSpecification(id, value) {
+      const markup = node('itemsList').innerHTML;
+      const row = markup.split('data-spec-id="' + id + '"')[1];
+      const path = /<textarea[^>]+data-path="([^"]+)"/.exec(row)?.[1];
+      assert.ok(path, 'раздел есть в форме');
+      const target = node('spec:' + id); target.dataset.path = path; target.value = value;
+      await node('itemsList').dispatch('input', target);
+    },
     async timer(milliseconds) { const selected = [...timers].find(([, value]) => value.milliseconds === milliseconds); if (selected) { timers.delete(selected[0]); selected[1].callback(); await tick(); } },
     save: () => api.handleCommand({ type: 'flush' }), set remote(value) { remote = copy(value); }, set now(value) { now = value; },
     holdWrite() { let release; heldWrite = new Promise(resolve => { release = resolve; }); return release; } };
@@ -99,4 +109,131 @@ test('a late ACK preserves later typing and its actual edit time through refresh
   assert.equal(JSON.parse(f.values.get(prefix + 'draft')).editedAt, editedAt);
   await f.api.reconcile(); assert.equal(f.adapter.getState().manager.name, 'TYPED_DURING_SAVE');
   await f.save(); assert.equal(f.writes.at(-1).manager.name, 'TYPED_DURING_SAVE'); assert.equal(f.values.has(prefix + 'draft'), false);
+});
+
+test('canonical ACK rebinds section paths, and a late ACK retains the newer values by section ID', async () => {
+  const body = { id: 'body', type: 'body', group: 'construction', label: 'Корпус', value: 'Корпус 1' };
+  const custom = { id: 'extra', type: 'custom', group: 'filling', label: 'Вентиляция', value: 'Решётка 1' };
+  const server = documentRow();
+  server.state.items = [{ id: 'item', name: 'Шкаф', specifications: [custom, body] }];
+  const f = await fixture([], false, server, state => ({
+    ...copy(state), items: state.items.map(item => ({ ...item, specifications: SheetRender.FurnitureSpecifications.orderedSections(item.specifications) }))
+  }));
+  await f.typeSpecification('extra', 'Решётка 2');
+  const release = f.holdWrite(), saving = f.save();
+  await tick();
+  f.now = 2100;
+  await f.typeSpecification('body', 'Корпус 2');
+  const rows = () => copy(f.adapter.getState().items[0].specifications);
+  assert.deepEqual(rows().map(row => row.id), ['extra', 'body']);
+  f.now = 5000; release(); await saving;
+  assert.deepEqual(rows().map(row => [row.id, row.value]), [['extra', 'Решётка 2'], ['body', 'Корпус 2']]);
+  await f.save();
+  assert.deepEqual(rows().map(row => row.id), ['body', 'extra']);
+  await f.typeSpecification('extra', 'Решётка 3');
+  assert.deepEqual(rows().map(row => [row.id, row.value]), [['body', 'Корпус 2'], ['extra', 'Решётка 3']]);
+});
+
+test('reverting a section to its previous value during a save remains a newer draft', async () => {
+  const server = documentRow();
+  server.state.items = [{ id: 'item', name: 'Шкаф', specifications: [
+    { id: 'body', type: 'body', group: 'construction', label: 'Корпус', value: 'Старый материал' }
+  ] }];
+  const f = await fixture([], false, server);
+  await f.typeSpecification('body', 'Новый материал');
+  const release = f.holdWrite(), saving = f.save();
+  await tick();
+  f.now = 2100;
+  await f.typeSpecification('body', 'Старый материал');
+  release(); await saving;
+  assert.equal(f.api.getDocument().state.items[0].specifications[0].value, 'Новый материал');
+  assert.equal(f.adapter.getState().items[0].specifications[0].value, 'Старый материал');
+  assert.equal(JSON.parse(f.values.get(prefix + 'draft')).local.state.items[0].specifications[0].value, 'Старый материал');
+  await f.save();
+  assert.equal(f.writes.at(-1).items[0].specifications[0].value, 'Старый материал');
+  assert.equal(f.values.has(prefix + 'draft'), false);
+});
+
+test('reload converts a newer old-editor draft for review and save with archived products and stable section IDs', async () => {
+  const archivedProducts = [{ title: 'Корпус', outer: 'Старый материал' }];
+  const body = { id: 'existing-row', type: 'body', group: 'construction', label: 'Корпус', value: 'Старый материал' };
+  const worktop = { id: 'agent-row', type: 'worktop', group: 'construction', label: 'Столешница', value: 'Кварц' };
+  for (const carriesCanonicalArray of [false, true]) {
+    const server = documentRow();
+    server.state.items = [{ id: 'item', name: 'Шкаф', products: archivedProducts, specifications: [body, worktop] }];
+    const old = draft(2000, 'LOCAL MANAGER');
+    old.local.state.items = [{ id: 'item', name: 'Шкаф с правкой', products: [{ title: 'Корпус', outer: 'Ручная правка из старой вкладки' }],
+      ...(carriesCanonicalArray ? { specifications: [body] } : {}) }];
+    const initial = [[prefix + 'draft', JSON.stringify(old)]];
+    const operationId = 'old-operation';
+    if (carriesCanonicalArray) {
+      const body = { operationId, proposalId: 'primary', expectedRevision: 15, state: old.local.state, fx: old.local.fx };
+      initial.push([prefix + 'operation:save', JSON.stringify({ body, editId: old.editId })]);
+    }
+    const f = await fixture(initial, false, server, copy, body => body.operationId === operationId
+      ? { code: 'KP_EDITOR_OUTDATED', message: 'Обновите редактор' } : null);
+    const shown = copy(f.adapter.getState());
+    assert.equal(shown.manager.name, 'LOCAL MANAGER');
+    assert.equal(shown.items[0].name, 'Шкаф с правкой');
+    assert.deepEqual(shown.items[0].products, archivedProducts);
+    assert.deepEqual(shown.items[0].specifications, [{ ...body, value: 'Ручная правка из старой вкладки' }, worktop]);
+    assert.equal(f.writes.length, 0);
+    assert.match(f.nodes.get('toast').textContent, /Проверьте разделы/);
+    assert.equal(JSON.parse(f.values.get(prefix + 'draft')).editId, old.editId);
+    await f.save();
+    assert.equal(f.writes.length, carriesCanonicalArray ? 2 : 1);
+    assert.deepEqual(f.writes.at(-1).items[0], shown.items[0]);
+    assert.deepEqual(copy(f.adapter.getState()).items[0], f.api.getDocument().state.items[0]);
+    assert.equal(f.values.has(prefix + 'draft'), false);
+  }
+});
+
+test('deleting a leading legacy block does not rename or duplicate the independently edited next section', async () => {
+  for (const sameLabel of [false, true]) {
+    const archivedProducts = [{ title: sameLabel ? 'Блок' : 'A', outer: 'Первый' }, { title: sameLabel ? 'Блок' : 'B', outer: 'Второй' }];
+    const legacyRows = SheetRender.FurnitureSpecifications.fromLegacy({ products: archivedProducts }).sections;
+    const editedB = { ...legacyRows[1], value: 'Поздняя каноническая правка B' };
+    const server = documentRow();
+    server.state.items = [{ id: 'item', name: 'Шкаф', products: archivedProducts, specifications: [legacyRows[0], editedB] }];
+    const old = draft(2000);
+    old.local.state.items = [{ id: 'item', name: 'Шкаф', products: [archivedProducts[1]] }];
+    const f = await fixture([[prefix + 'draft', JSON.stringify(old)]], false, server);
+    assert.equal(f.nodes.get('legacySpecificationsDraft').hidden, true);
+    assert.deepEqual(copy(f.adapter.getState()).items[0].specifications, [editedB]);
+    await f.save();
+    assert.deepEqual(f.writes[0].items[0].specifications, [editedB]);
+    assert.deepEqual(f.writes[0].items[0].products, archivedProducts);
+  }
+});
+
+test('identical duplicate legacy blocks retain the original draft until the explicit format transfer', async () => {
+  const duplicate = { title: 'Полка', outer: 'ЛДСП' };
+  const archivedProducts = [duplicate, copy(duplicate)];
+  const legacyRows = SheetRender.FurnitureSpecifications.fromLegacy({ products: archivedProducts }).sections;
+  const server = documentRow();
+  server.state.items = [{ id: 'item', name: 'Шкаф', products: archivedProducts, specifications: legacyRows }];
+  const old = draft(2000);
+  old.local.state.items = [{ id: 'item', name: 'Шкаф', products: [duplicate] },
+    { id: 'new-item', name: 'Новая позиция из старого черновика', products: [{ title: 'Фасад', outer: 'МДФ' }] }];
+  const f = await fixture([[prefix + 'draft', JSON.stringify(old)]], false, server);
+  assert.equal(f.nodes.get('legacySpecificationsDraft').hidden, false);
+  assert.deepEqual(JSON.parse(f.values.get(prefix + 'draft')), old);
+  await assert.rejects(f.save(), /Подтвердите перенос черновика/);
+  assert.equal(f.writes.length, 0);
+  assert.deepEqual(JSON.parse(f.values.get(prefix + 'draft')), old);
+  await f.nodes.get('transferLegacySpecifications').dispatch('click');
+  assert.equal(f.nodes.get('legacySpecificationsDraft').hidden, true);
+  assert.equal(f.writes.length, 0);
+  const transferred = JSON.parse(f.values.get(prefix + 'draft')).local.state.items[0];
+  assert.equal(transferred.specifications.length, 1);
+  assert.equal(transferred.specifications[0].value, legacyRows[0].value);
+  assert.ok(legacyRows.every(row => row.id !== transferred.specifications[0].id));
+  assert.deepEqual(transferred.products, archivedProducts);
+  const reloaded = await fixture([...f.values], false, server);
+  assert.equal(reloaded.nodes.get('legacySpecificationsDraft').hidden, true);
+  assert.deepEqual(copy(reloaded.adapter.getState()).items[0], transferred);
+  assert.equal(reloaded.adapter.getState().items[1].specifications[0].value, 'МДФ');
+  await f.save();
+  assert.deepEqual(f.writes[0].items[0], transferred);
+  assert.equal(f.values.has(prefix + 'draft'), false);
 });

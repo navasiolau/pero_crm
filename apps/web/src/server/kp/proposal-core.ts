@@ -6,7 +6,7 @@ import { createProjectInTransaction } from "@/server/projects/core";
 import { lockProjectRow } from "@/server/projects/lock";
 import { bindProposalClient, resolveProposalClientInTransaction, type ProposalEnvironment } from "./proposal-client";
 import { synchronizeProposalItemsInTransaction, type SynchronizedProposalItem } from "./proposal-item-sync";
-import { ProposalWriteError, canonicalProposalJson, createProposalSchema, normalizeProposalState,
+import { ProposalWriteError, assertCurrentProposalEditor, canonicalProposalJson, canonicalizeProposalSpecifications, createProposalSchema, normalizeProposalState,
   proposalObject, proposalOperationIdentity, proposalText, saveProposalSchema,
   type ProposalState, type ProposalWriteResult } from "./proposal-contract";
 
@@ -26,6 +26,7 @@ export type ProposalSaveHooks = {
   pricingFingerprint?: string;
   environment?: ProposalEnvironment;
   now?: () => Date;
+  restoreVersion?: true;
 };
 export type ProposalWriteMutation = {
   result: ProposalWriteResult;
@@ -123,7 +124,7 @@ export async function createProposalInTransaction(tx: Prisma.TransactionClient, 
   await lockProposalWrites(tx);
   const replay = await readReceipt(tx, actor, identity);
   if (replay) return replay;
-  const source = initializeSignature(normalizeProposalState(data.state), (await readSignatureDefaults(tx)).values);
+  const source = initializeSignature(canonicalizeProposalSpecifications(normalizeProposalState(data.state)), (await readSignatureDefaults(tx)).values);
   const { client, isTemporary } = await resolveProposalClientInTransaction(tx, actor, data, source, undefined, hooks.environment);
   const initial = projectValues(source, data.address);
   const projectCreated = await createProjectInTransaction(tx, actor, {
@@ -167,7 +168,9 @@ export async function saveProposalInTransaction(tx: Prisma.TransactionClient, ac
   if (project.stage !== "LEAD") throw new ProposalWriteError("locked", "КП можно сохранять только в проекте «Лид»");
   if (proposal.revision !== data.expectedRevision)
     throw new ProposalWriteError("conflict", "КП изменено другим пользователем — обновите редактор");
-  const source = normalizeProposalState(data.state);
+  const submitted = normalizeProposalState(data.state);
+  if (!hooks.restoreVersion) assertCurrentProposalEditor(proposal.state, submitted);
+  const source = canonicalizeProposalSpecifications(submitted);
   const selection = await resolveProposalClientInTransaction(tx, actor, data, source, project.clientId, hooks.environment, proposal.state);
   const values = projectValues(source, data.address);
   const state = canonicalState(bindProposalClient(source, selection.client, selection.isTemporary), { ...project, ...values });

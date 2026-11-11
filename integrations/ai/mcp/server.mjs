@@ -10,6 +10,65 @@ const integer = { type: 'integer', minimum: 0 };
 const sourceRefs = { type: 'array', minItems: 1, maxItems: 30, items: {
   type: 'object', properties: { proposalId: string, expectedRevision: integer }, required: ['proposalId', 'expectedRevision'], additionalProperties: false,
 } };
+const standardSpecificationSections = [
+  ['body', 'construction', 'Корпус'],
+  ['facade', 'construction', 'Фасад'],
+  ['worktop', 'construction', 'Столешница'],
+  ['upholstery', 'construction', 'Обивка'],
+  ['insertsAndHandles', 'construction', 'Вставки и ручки'],
+  ['hardware', 'hardware', 'Фурнитура'],
+  ['lighting', 'lighting', 'Подсветка'],
+  ['interiorFilling', 'filling', 'Внутреннее наполнение'],
+  ['softFilling', 'filling', 'Мягкое наполнение'],
+];
+const specificationSection = properties => ({
+  type: 'object',
+  properties: {
+    id: { ...string, description: 'Уникальный ID строки. Назначьте новый UUID при добавлении, в том числе после удаления. При правке сохраняйте ID из GET.' },
+    ...properties,
+    value: { type: 'string', description: 'Краткие подтверждённые сведения. Пустое значение не печатается.' },
+  },
+  required: ['id', 'type', 'group', 'label', 'value'],
+  additionalProperties: false,
+});
+const specifications = {
+  type: 'array',
+  description: 'При поддержке в kp_get_capabilities используйте разделы в порядке каталога. Каждый стандартный type встречается один раз. Дополнения custom идут после стандартных разделов своей группы. [] очищает список. Отсутствие разрешает перенос старых products при сохранении legacy-позиции. Сохраните products из GET без изменений.',
+  items: {
+    oneOf: [
+      ...standardSpecificationSections.map(([type, group, label]) => specificationSection({
+        type: { const: type }, group: { const: group }, label: { const: label },
+      })),
+      specificationSection({
+        type: { const: 'custom' },
+        group: { enum: ['construction', 'hardware', 'lighting', 'filling'] },
+        label: { ...string, description: 'Краткое название характеристики, для которой нет подходящего стандартного раздела.' },
+      }),
+    ],
+  },
+};
+const proposalState = {
+  type: 'object',
+  description: 'Полное state из свежего GET с внесёнными правками. Сохраняйте ID позиций и разделов. Описание, размеры и примечания хранятся отдельно.',
+  properties: {
+    items: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          specifications,
+          products: {
+            type: 'array',
+            description: 'На сервере без specifications передавайте подтверждённые характеристики в этих блоках. На новом сервере сохраняйте исходные блоки из GET.',
+            items: { type: 'object', additionalProperties: true },
+          },
+        },
+        additionalProperties: true,
+      },
+    },
+  },
+  additionalProperties: true,
+};
 const tools = [];
 const handlers = new Map();
 function tool(name, description, properties, required, handler, readOnly = true) {
@@ -21,11 +80,12 @@ const op = { operationId: { ...string, format: 'uuid', description: 'Один UU
 const document = { documentId: string };
 const version = { ...document, versionId: string };
 tool('kp_list_documents', 'Список доступных КП CRM. Номер нового КП выдаёт сервер вместе с проектом «Лид».', { query: { type: 'string' } }, [], (c, a) => c.listDocuments(a.query));
+tool('kp_get_capabilities', 'Перед подготовкой сохранения проверьте формат характеристик по OpenAPI текущего сервера. При specifications=true заполняйте items[].specifications. При false используйте items[].products.', {}, [], c => c.getCapabilities());
 tool('kp_get_document', 'Читать полное текущее КП, ревизию, клиента, проект и canEdit. Перед изменением всегда читать заново.', document, ['documentId'], (c, a) => c.getDocument(a.documentId));
 tool('kp_find_clients', 'Искать выбранного клиента в CRM; служебную карточку «Временный» заполнять нельзя.', { query: { type: 'string' } }, [], (c, a) => c.findClients(a.query));
 tool('kp_get_client', 'Читать реквизиты выбранного клиента CRM.', { clientId: string }, ['clientId'], (c, a) => c.getClient(a.clientId));
-tool('kp_save_document', 'Создать КП и проект либо полностью сохранить существующее КП в «Лиде». Полный снимок перезаписывает коммерческие поля CRM и скрывает отсутствующие изделия. При правке сохранить ID всех прежних позиций. Не передавать старые ID и медиа в новое КП.', {
-  documentId: string, state: { type: 'object', description: 'Полное state из свежего GET с внесёнными правками; items[].id стабильны.' }, expectedRevision: integer,
+tool('kp_save_document', 'Создать КП и проект либо полностью сохранить существующее КП в «Лиде». Сначала проверьте формат через kp_get_capabilities. Полный снимок перезаписывает коммерческие поля CRM и скрывает отсутствующие изделия. При правке сохранить ID всех прежних позиций. Не передавать старые ID и медиа в новое КП.', {
+  documentId: string, state: proposalState, expectedRevision: integer,
   clientId: string, fx: { type: 'object', properties: { currency: { enum: ['BYN', 'RUB', 'USD', 'EUR'] }, rate: string, date: string, source: { enum: ['NBRB', 'MANUAL'] } }, required: ['currency', 'rate', 'date', 'source'], additionalProperties: false },
   expectedNumber: { type: 'integer', minimum: 1, description: 'Необязательное ожидание; конфликт откатывает создание. Сам номер назначает CRM.' },
   basedOn: { ...string, description: 'ID образца только оформления для нового КП. Изделия, клиент и изображения не копируются.' }, ...op,

@@ -1,16 +1,29 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
+import type { FurnitureSection } from "@pero/kp-template";
 import { z } from "zod";
+import FurnitureSpecifications from "@pero/kp-template/furniture-specifications";
 
 export type ProposalJsonObject = { [key: string]: Prisma.JsonValue };
-export type ProposalItemState = ProposalJsonObject & { id: string; qty: number };
+export type ProposalItemState = ProposalJsonObject & { id: string; qty: number; specifications?: FurnitureSection[] };
 export type ProposalState = ProposalJsonObject & { items: ProposalItemState[] };
 
 const itemId = z.string().min(1).max(160).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/, "Некорректный ID позиции");
+const sectionSchema = z.object({
+  id: z.string(),
+  type: z.enum([...FurnitureSpecifications.CATALOG.map(section => section.type), "custom"] as const),
+  group: z.enum(FurnitureSpecifications.GROUPS.map(group => group.id)),
+  label: z.string(),
+  value: z.string(),
+}).strict();
+const specificationSnapshot = (sections: unknown) => FurnitureSpecifications.normalize({ ...FurnitureSpecifications.empty(), sections });
+const specificationsSchema = z.array(sectionSchema).refine(sections => specificationSnapshot(sections) !== null,
+  "Проверьте названия, группы и уникальные ID разделов характеристик");
 export const proposalStateSchema = z.object({
   items: z.array(z.object({
     id: itemId.optional(),
     qty: z.number().int("Количество должно быть целым").min(1).max(2_147_483_647).default(1),
+    specifications: specificationsSchema.optional(),
   }).catchall(z.json())),
 }).catchall(z.json()).superRefine((state, context) => {
   const ids = new Set<string>();
@@ -43,7 +56,7 @@ export const saveProposalSchema = z.object({
 export type CreateProposalInput = z.input<typeof createProposalSchema>;
 export type SaveProposalInput = z.input<typeof saveProposalSchema>;
 
-export type ProposalFailureKind = "validation" | "forbidden" | "not-found" | "conflict" | "locked" | "failure";
+export type ProposalFailureKind = "validation" | "forbidden" | "not-found" | "conflict" | "editor-outdated" | "locked" | "failure";
 export class ProposalWriteError extends Error {
   constructor(readonly kind: ProposalFailureKind, message: string) { super(message); }
 }
@@ -75,6 +88,38 @@ export function normalizeProposalState(input: unknown, makeId: () => string = ra
     return { ...item, id };
   });
   return { ...parsed.data, items } as ProposalState;
+}
+
+/** Переход выполняется только при записи. Отсутствующий список и явная очистка различаются. */
+export function canonicalizeProposalSpecifications(state: ProposalState): ProposalState {
+  return { ...state, items: state.items.map(item => {
+    const sections = item.specifications ?? FurnitureSpecifications.fromLegacy(item).sections;
+    return { ...item, specifications: FurnitureSpecifications.orderedSections(sections) };
+  }) };
+}
+
+/** Разделы КП и самостоятельные поля позиции образуют технический снимок изделия. */
+export function proposalItemTechnicalSpecifications(item: ProposalItemState) {
+  if (item.specifications === undefined) return FurnitureSpecifications.fromLegacy(item);
+  const { description, size, note } = item;
+  return { ...FurnitureSpecifications.fromLegacy({ description, size, note }), sections: item.specifications };
+}
+
+/** Полная запись может удалить позицию, но не переключить оставшуюся позицию на устаревшие поля. */
+export function assertCurrentProposalEditor(current: Prisma.JsonValue, next: ProposalState): void {
+  const previous = proposalObject(current);
+  if (!Array.isArray(previous.items)) return;
+  const byId = new Map(previous.items.map(raw => {
+    const item = proposalObject(raw);
+    return [item.id, item] as const;
+  }));
+  for (const item of next.items) {
+    const saved = byId.get(item.id);
+    if (!saved || !Array.isArray(saved.specifications)) continue;
+    if (!Array.isArray(item.specifications) ||
+      canonicalProposalJson({ products: saved.products }) !== canonicalProposalJson({ products: item.products }))
+      throw new ProposalWriteError("editor-outdated", "Формат характеристик КП изменился — обновите редактор и повторите изменения");
+  }
 }
 
 /** Порядок JSON-ключей не меняет содержание повторяемой операции. */

@@ -109,6 +109,125 @@ test('MCP rejects arbitrary state injection to export and advertises contract tr
   const result = await handleMessage({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'kp_generate_pdf', arguments: { documentId: 'doc', expectedRevision: 3, operationId: op, state: { items: [] } } } }, { generatePdf: () => { invoked = true; } });
   assert.equal(result.result.isError, true); assert.equal(invoked, false);
 });
+test('MCP advertises canonical sections and preserves complete proposal state on save', async () => {
+  const list = await handleMessage({ jsonrpc: '2.0', id: 1, method: 'tools/list' }, {});
+  const save = list.result.tools.find(tool => tool.name === 'kp_save_document');
+  const item = save.inputSchema.properties.state.properties.items.items;
+  const sectionSchema = item.properties.specifications.items.oneOf;
+  const customSchema = sectionSchema.at(-1);
+
+  assert.deepEqual(sectionSchema.slice(0, -1).map(({ properties }) => properties.type.const), [
+    'body', 'facade', 'worktop', 'upholstery', 'insertsAndHandles', 'hardware', 'lighting', 'interiorFilling', 'softFilling',
+  ]);
+  assert.deepEqual(sectionSchema[0].properties.label, { const: 'Корпус' });
+  for (const { properties } of sectionSchema) {
+    assert.equal(properties.id.type, 'string');
+    assert.equal(properties.id.minLength, 1);
+    assert.equal(properties.id.const, undefined);
+  }
+  assert.deepEqual(customSchema.properties.group.enum, ['construction', 'hardware', 'lighting', 'filling']);
+  assert.deepEqual(customSchema.required, ['id', 'type', 'group', 'label', 'value']);
+
+  const state = {
+    items: [
+      {
+        id: 'cabinet', name: 'Тумба', qty: 2, size: '800 × 500 × 420', price: 1200, note: 'Два одинаковых изделия',
+        products: [{ title: 'Каркас', inner: 'ЛДСП W980' }],
+        specifications: [
+          { id: 'body', type: 'body', group: 'construction', label: 'Корпус', value: 'ЛДСП W980' },
+          { id: '03a9aa83-32c0-4886-9dbe-e654bc01560a', type: 'lighting', group: 'lighting', label: 'Подсветка', value: 'LED 3000 К' },
+          { id: '2e57d81d-31a7-4d79-9788-5530253115ae', type: 'interiorFilling', group: 'filling', label: 'Внутреннее наполнение', value: '1 ящик на изделие, 2 всего' },
+        ],
+      },
+      {
+        id: 'sofa', name: 'Диван', qty: 1, price: 2400,
+        specifications: [
+          { id: '4335bd5c-282a-4ab1-af5c-a699ec0a32aa', type: 'upholstery', group: 'construction', label: 'Обивка', value: 'Ткань A12' },
+          { id: 'cb7bfeb6-a9f7-4a7f-87b9-9380786efe06', type: 'custom', group: 'construction', label: 'Декоративный кант', value: 'Контрастный, из ткани A04' },
+        ],
+      },
+      { id: 'pouf', name: 'Пуф', specifications: [] },
+      { id: 'legacy', name: 'Шкаф', products: [{ title: 'Материалы', outer: 'Шпон', inner: 'МДФ' }] },
+    ],
+  };
+  const result = await handleMessage({
+    jsonrpc: '2.0', id: 2, method: 'tools/call', params: {
+      name: 'kp_save_document', arguments: { documentId: 'doc', state, expectedRevision: 3, operationId: op },
+    },
+  }, {
+    save: async args => {
+      assert.equal(args.id, 'doc');
+      assert.equal(args.expectedRevision, 3);
+      assert.equal(args.operationId, op);
+      assert.deepEqual(args.state, state);
+      return { revision: 4, state: args.state };
+    },
+  });
+  assert.equal(result.result.isError, false);
+  assert.deepEqual(JSON.parse(result.result.content[0].text), { revision: 4, state });
+});
+test('OpenAPI capability preflight gates structured writes while legacy writes keep their request flow', async () => {
+  const schema = name => ({
+    requestBody: { content: { 'application/json': { schema: { $ref: '#/components/schemas/' + name } } } },
+  });
+  const write = supported => ({
+    properties: { state: { properties: { items: { type: 'array', items: {
+      type: 'object', additionalProperties: true,
+      ...(supported ? { properties: { specifications: { type: 'array', items: { $ref: '#/components/schemas/KpFurnitureSection' } } } } : {}),
+    } } } } },
+  });
+  const openapi = (create, save) => ({
+    paths: {
+      '/kp/documents': { post: schema('KpCreateDocument') },
+      '/kp/documents/{documentId}': { put: schema('KpSaveDocument') },
+    },
+    components: { schemas: {
+      KpCreateDocument: write(create),
+      KpSaveDocument: write(save),
+      KpFurnitureSection: { oneOf: [{
+        type: 'object', required: ['id', 'type', 'group', 'label', 'value'],
+        properties: { id: { type: 'string' }, type: { const: 'body' }, group: { const: 'construction' },
+          label: { const: 'Корпус' }, value: { type: 'string' } },
+      }] },
+    } },
+  });
+  const request = { state: { items: [{ name: 'Тумба', specifications: [] }] }, operationId: op };
+  for (const [create, save, expected] of [[false, false, false], [true, false, null], [true, true, true]]) {
+    const methods = [];
+    const c = client(async (url, options) => {
+      methods.push(options.method);
+      if (options.method === 'GET') {
+        assert.equal(url.pathname, '/api/v1/openapi.json');
+        assert.equal(options.headers?.Authorization, undefined);
+        assert.equal(options.redirect, 'error');
+        return Response.json(openapi(create, save));
+      }
+      assert.equal(url.pathname, '/api/v1/kp/documents');
+      assert.deepEqual(JSON.parse(options.body).state, request.state);
+      return Response.json({ id: 'created' });
+    });
+    if (expected === null) {
+      await assert.rejects(c.save(request), { code: 'KP_CAPABILITIES_UNAVAILABLE' });
+    } else {
+      const reply = await handleMessage({
+        jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'kp_get_capabilities' },
+      }, c);
+      assert.equal(reply.result.isError, false);
+      assert.deepEqual(JSON.parse(reply.result.content[0].text), { specifications: expected });
+      assert.deepEqual(methods.splice(0), ['GET']);
+      if (expected) assert.equal((await c.save(request)).id, 'created');
+      else await assert.rejects(c.save(request), { code: 'KP_SPECIFICATIONS_UNSUPPORTED' });
+    }
+    assert.deepEqual(methods, expected ? ['GET', 'POST'] : ['GET']);
+  }
+  const legacyState = { items: [{ name: 'Тумба', products: [{ title: 'Подсветка', lighting: 'LED 3000 К' }] }] };
+  const c = client(async (url, options) => {
+    assert.equal(options.method, 'POST');
+    assert.deepEqual(JSON.parse(options.body).state, legacyState);
+    return Response.json({ id: 'legacy' });
+  });
+  assert.equal((await c.save({ ...request, state: legacyState })).id, 'legacy');
+});
 test('actual stdio MCP returns only JSON-RPC and does not print configured credentials', () => {
   const key = 'stdio-example-not-real-secret';
   const messages = [{ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2024-11-05' } },

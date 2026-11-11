@@ -3,6 +3,7 @@ body{--topbar:0px}
 .crm-loading .editor,.crm-loading .stage{visibility:hidden}
 .crm-readonly{padding:9px 16px;background:#fff5e7;border-bottom:1px solid #e6c895;color:#754519;font:13px/1.45 Manrope,sans-serif;position:relative;z-index:11}
 .crm-readonly[hidden]{display:none}
+.crm-legacy-draft button{margin:4px 0;padding:4px 8px;border:1px solid currentColor;border-radius:6px;background:#fff;color:inherit;cursor:pointer}
 .del-row .del-name{min-width:0}
 .url-input[readonly]{color:var(--mut)}
 /* Поля размера, цены и количества помещаются в узкую карточку редактора. */
@@ -10,3 +11,58 @@ body{--topbar:0px}
 .row2>.f{min-width:0}
 .contract-dialog>details.contract-section{margin:0;padding:0 22px 10px;flex:none;max-height:180px;overflow:auto}
 .contract-dialog>details.contract-section a{overflow-wrap:anywhere}
+
+.spec-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.spec-controls select, .prod-head select {
+    flex: 1;
+    min-width: 0;
+}
+
+.prod-head input {
+    flex: 2;
+    min-width: 0;
+}
+
+.prod-head strong {
+    flex: 1;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.prod-head .ictrl {
+    flex: none;
+}
+
+.spec-controls .add-prod {
+    width: auto;
+    margin-top: 0;
+}
+
+.sh-specs {
+    margin: 2.2mm 0 0;
+    padding: 0 0 0 5mm;
+    list-style: decimal;
+    font-size: 7.3pt;
+    line-height: 1.4;
+    color: #3A3A38;
+    overflow-wrap: anywhere;
+}
+
+.sh-specs li + li {
+    margin-top: 1mm;
+}
+
+.sh-specLabel {
+    font-weight: 700;
+}
+
+.sh-specLabel::after {
+    content: ":";
+}

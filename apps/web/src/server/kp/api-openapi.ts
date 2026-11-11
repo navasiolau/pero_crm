@@ -1,4 +1,5 @@
 // Контракт публичного транспорта; импорт не подключает БД, S3 или очередь.
+import FurnitureSpecifications from "@pero/kp-template/furniture-specifications";
 const id = { type: "string", minLength: 1, maxLength: 160 } as const;
 const revision = { type: "integer", minimum: 0 } as const;
 const operationId = { type: "string", format: "uuid" } as const;
@@ -20,7 +21,14 @@ function command(summary: string, scope: string, schema: unknown, result: unknow
 const query = (name: string, schema: unknown, required = false) => ({ name, in: "query", required, schema });
 const record = { type: "object", additionalProperties: true };
 const nullableString = { type: ["string", "null"] };
-const state = { ...record, required: ["items"], properties: { items: { type: "array", items: record } } };
+const state = { ...record, required: ["items"], properties: { items: { type: "array", items: {
+  ...record, properties: { specifications: { type: "array", items: ref("KpFurnitureSection"),
+    description: "Отсутствие означает legacy-формат, пустой массив очищает характеристики. При сохранении действующих канонических позиций передавайте массив и сохраняйте исходные products без изменений." } },
+} } } };
+const sectionObject = { type: "object", additionalProperties: false, required: ["id", "type", "group", "label", "value"] };
+const standardTypes = FurnitureSpecifications.CATALOG.map(section => section.type);
+const nonblank = { type: "string", pattern: "\\S" };
+const sectionValue = { type: "string" };
 const clientProperties = { name: { type: "string", minLength: 1 }, phone: { type: "string", minLength: 1 },
   lastName: nullableString, middleName: nullableString, email: nullableString, address: nullableString,
   comment: nullableString, passportNumber: nullableString, passportIssuedBy: nullableString };
@@ -34,6 +42,17 @@ const fx = { type: "object", additionalProperties: false, required: ["currency",
   date: { type: "string", format: "date" }, source: { enum: ["NBRB", "MANUAL"] } } };
 const writeProperties = { operationId, state, clientId: id, clientSnapshot: { type: "object", additionalProperties: false, properties: clientProperties }, address: nullableString, fx: ref("KpFx") };
 export const kpApiSchemas = {
+  KpFurnitureSection: {
+    description: "При добавлении назначьте разделу новый уникальный ID, при правке сохраняйте его. Каждый стандартный тип встречается не более одного раза, его группа и название берутся из каталога. Для custom укажите группу и собственное название.",
+    oneOf: [
+      ...FurnitureSpecifications.CATALOG.map(section => ({ ...sectionObject, properties: {
+        id: nonblank, type: { const: section.type }, group: { const: section.group }, label: { const: section.label }, value: sectionValue,
+      } })),
+      { ...sectionObject, properties: {
+        id: { ...nonblank, not: { enum: standardTypes } }, type: { const: "custom" },
+        group: { enum: FurnitureSpecifications.GROUPS.map(group => group.id) }, label: nonblank, value: sectionValue,
+      } },
+    ] },
   KpError: { type: "object", required: ["error"], properties: { error: { type: "object", required: ["code", "message"], properties: { code: id, message: { type: "string" } } } } },
   KpFx: fx,
   KpCreateDocument: { type: "object", additionalProperties: false, required: ["operationId", "state"], properties: { ...writeProperties, expectedNumber: { type: "integer", minimum: 1 } } },

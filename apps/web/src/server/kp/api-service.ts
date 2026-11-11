@@ -39,7 +39,7 @@ export const kpApiService: KpApiService = {
     } catch (error) {
       if (error instanceof KpApiError) throw error;
       if (error instanceof ProposalWriteError) {
-        const status = { validation: 400, forbidden: 403, "not-found": 404, conflict: 409, locked: 409, failure: 503 }[error.kind];
+        const status = { validation: 400, forbidden: 403, "not-found": 404, conflict: 409, "editor-outdated": 409, locked: 409, failure: 503 }[error.kind];
         throw new KpApiError(`KP_${error.kind.toUpperCase().replace(/-/g, "_")}`, status, error.message);
       }
       if (error instanceof ProposalMediaError) {

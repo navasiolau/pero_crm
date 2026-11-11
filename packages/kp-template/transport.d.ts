@@ -1,6 +1,7 @@
 /** Общие wire-типы UI/session API. Публичный v1 использует Bearer и собственную авторизацию. */
+import type { FurnitureSection } from './index';
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
-export type ProposalState = { [key: string]: Json; items: ({ [key: string]: Json; id?: string; qty?: number })[] };
+export type ProposalState = { [key: string]: Json; items: ({ [key: string]: Json; id?: string; qty?: number; specifications?: FurnitureSection[] })[] };
 export type ProposalFx = { currency: 'BYN' | 'RUB' | 'USD' | 'EUR'; rate: string; date: string; source: 'NBRB' | 'MANUAL' };
 export type ProposalDocument = {
   id: string; revision: number; state: ProposalState; createdAt: string; updatedAt: string;
