@@ -11,4 +11,4 @@
 
 ## 3. Приёмка
 - [x] 3.1 Пройти lint/typecheck/build, соответствующие тесты, независимое ревью и openspec validate.
-- [ ] 3.2 Выполнить обычный commit/merge/push staging, проверить CI и фактические SHA/образ/health/UI, зафиксировать evidence.
+- [x] 3.2 Выполнить обычный commit/merge/push staging, проверить CI и фактические SHA/образ/health/UI, зафиксировать evidence.
