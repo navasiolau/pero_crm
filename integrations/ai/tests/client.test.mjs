@@ -7,6 +7,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { apiRoot, KpApiClient } from '../mcp/client.mjs';
 import { handleMessage } from '../mcp/server.mjs';
+import FurnitureSpecifications from '../../../packages/kp-template/furniture-specifications.js';
 
 const op = '8fca0759-fced-4823-9231-ce59ab7bd35a';
 const reply = (value, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json' } });
@@ -165,6 +166,32 @@ test('MCP advertises canonical sections and preserves complete proposal state on
   });
   assert.equal(result.result.isError, false);
   assert.deepEqual(JSON.parse(result.result.content[0].text), { revision: 4, state });
+});
+test('MCP catalog and skill examples agree with the shared furniture specifications module', async () => {
+  const { result } = await handleMessage({ jsonrpc: '2.0', id: 1, method: 'tools/list' }, {});
+  const definition = result.tools.find(tool => tool.name === 'kp_save_document');
+  const sections = definition.inputSchema.properties.state.properties.items.items.properties.specifications.items.oneOf;
+  assert.deepEqual(sections.slice(0, -1).map(({ properties }) => ({
+    type: properties.type.const, group: properties.group.const, label: properties.label.const,
+  })), FurnitureSpecifications.CATALOG);
+  assert.deepEqual(sections.at(-1).properties.group.enum, FurnitureSpecifications.GROUPS.map(group => group.id));
+
+  const guidance = await readFile(new URL('../references/fields-and-pricing.md', import.meta.url), 'utf8');
+  const examples = [...guidance.matchAll(/```json\s*([\s\S]*?)```/g)].map(match => JSON.parse(match[1]));
+  assert.equal(examples.length, 2);
+  const [canonical, legacy] = examples;
+  assert.deepEqual(canonical.map(section => FurnitureSpecifications.normalizeSection(section)), canonical);
+  assert.deepEqual(FurnitureSpecifications.orderedSections(canonical), canonical);
+  assert.equal(new Set(canonical.map(section => section.id)).size, canonical.length);
+  for (const section of canonical) assert.match(section.id, /^[a-f0-9-]{36}$/);
+
+  const projected = FurnitureSpecifications.fromLegacy({ products: legacy });
+  const values = FurnitureSpecifications.orderedSections(projected.sections).map(section => section.value).join('\n');
+  for (const block of legacy) {
+    for (const field of ['outer', 'inner', 'hinges', 'drawers', 'lighting']) {
+      if (block[field]) assert.ok(values.includes(block[field]), field + ' должен сохраняться при legacy-переходе');
+    }
+  }
 });
 test('OpenAPI capability preflight gates structured writes while legacy writes keep their request flow', async () => {
   const schema = name => ({
