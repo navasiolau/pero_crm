@@ -56,6 +56,53 @@ test("single creation preserves defaults/history and idempotent replay returns o
   await assert.rejects(f.transaction(tx => createProposalInTransaction(tx, actor, { ...input, state: state([]) }, f.hooks)), /уже использован/);
 });
 
+test("existing legacy state converts once, then clear, stale writer, replay and historical restore preserve the source", async () => {
+  const f = proposalFixture();
+  const blocks = [{ title: "Секция А", outer: "Наружное покрытие", inner: "Внутренняя плита" }];
+  const first = await create(f, [{ id: "one", name: "Изделие", products: blocks }]);
+  const legacyItem = { ...first.result.state.items[0] };
+  delete legacyItem.specifications;
+  const historic = { ...first.result.state, items: [legacyItem] };
+  const historicBefore = structuredClone(historic);
+  // Имитируем текущий снимок, сохранённый до введения структурированных характеристик.
+  f.state.proposals[0].state = structuredClone(historic);
+  const command = { proposalId: first.result.proposalId, operationId: randomUUID(), expectedRevision: first.result.revision, state: historic };
+  const converted = await f.transaction(tx => saveProposalInTransaction(tx, actor, command, f.hooks));
+  const item = converted.result.state.items[0];
+  assert.deepEqual(item.products, blocks);
+  assert.ok(Array.isArray(item.specifications) && item.specifications.length);
+  assert.match(JSON.stringify(item.specifications), /Наружное покрытие/);
+  assert.match(JSON.stringify(item.specifications), /Внутренняя плита/);
+  assert.ok(item.specifications.every(section => (section as { type: string }).type === "custom"));
+  assert.deepEqual(f.state.proposals[0].state, converted.result.state, "ACK совпадает с сохранённым снимком");
+  const productId = converted.result.items[0].productId;
+  assert.deepEqual((product(f, productId).technicalSpecifications as { sections: unknown[] }).sections, item.specifications);
+  const beforeReplay = f.cloneState();
+  assert.deepEqual((await f.transaction(tx => saveProposalInTransaction(tx, actor, command, f.hooks))).result,
+    { ...converted.result, repeated: true });
+  assert.deepEqual({ ...f.cloneState(), sql: [] }, { ...beforeReplay, sql: [] });
+
+  for (const outdated of [legacyItem, { ...item, products: [{ outer: "Устаревшее изменение" }] }]) {
+    const before = f.cloneState();
+    await assert.rejects(save(f, converted.result, { ...converted.result.state, items: [outdated] }), {
+      kind: "editor-outdated", message: /обновите редактор/,
+    });
+    assert.deepEqual(f.cloneState(), before);
+  }
+  const cleared = await save(f, converted.result, { ...converted.result.state, items: [{ ...item, specifications: [] }] });
+  assert.deepEqual(cleared.result.state.items[0].specifications, []);
+  assert.deepEqual(cleared.result.state.items[0].products, blocks);
+  assert.deepEqual((product(f, productId).technicalSpecifications as { sections: unknown[] }).sections, []);
+  assert.equal((await save(f, cleared.result)).result.noOp, true);
+
+  const restored = await f.transaction(tx => saveProposalInTransaction(tx, actor, {
+    ...command, operationId: randomUUID(), expectedRevision: cleared.result.revision,
+  }, { ...f.hooks, restoreVersion: true }));
+  assert.deepEqual(restored.result.state.items[0].specifications, item.specifications, "исторический снимок даёт те же ID");
+  assert.deepEqual((product(f, productId).technicalSpecifications as { sections: unknown[] }).sections, item.specifications);
+  assert.deepEqual(historic, historicBefore);
+});
+
 test("save mirrors active composition, reorders human numbers, and restores original IDs/status/facts", async () => {
   const f = proposalFixture(); const first = await create(f, [{ id: "one", name: "Первое" }, { id: "two", name: "Второе" }]);
   const one = first.result.items[0].productId, two = first.result.items[1].productId;
@@ -200,7 +247,8 @@ test("legacy projection preserves the raw Product text, clears absent fields, an
   assert.deepEqual((audit?.newValue as Record<string, unknown>).technicalSpecifications, { ...projected, sourceGeneration: 2 });
   assert.equal((await save(f, restored.result)).result.noOp, true);
 
-  const cleared = await save(f, restored.result, { ...restored.result.state, items: [{ id: "one", name: "Изделие", qty: 1 }] });
+  const cleared = await save(f, restored.result, { ...restored.result.state,
+    items: [{ id: "one", name: "Изделие", qty: 1, specifications: [], products: restored.result.state.items[0].products }] });
   assert.equal(cleared.result.noOp, false);
   assert.equal(product(f, id).description, raw);
   assert.deepEqual(product(f, id).technicalSpecifications, { description: null, size: null, note: null, sections: [], sourceGeneration: 3 });

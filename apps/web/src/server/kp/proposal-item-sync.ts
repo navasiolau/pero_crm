@@ -6,7 +6,7 @@ import { createProductInTransaction } from "@/server/products/core";
 import { recalculateQuantity } from "@/server/products/quantity-core";
 import { stabilizeProductNumberLinks } from "@/server/products/numbering";
 import { lockWarehouseMetadata, assertWarehouseMetadataWritable } from "@/server/warehouse/gate";
-import { ProposalWriteError, canonicalProposalJson, proposalText,
+import { ProposalWriteError, canonicalProposalJson, proposalItemTechnicalSpecifications, proposalText,
   type ProposalItemState } from "./proposal-contract";
 
 export type SynchronizedProposalItem = { id: string; productId: string; number: string; position: number; state: ProposalItemState; previousQuantity: number };
@@ -112,7 +112,7 @@ export async function synchronizeProposalItemsInTransaction(
     const existing = existingById.get(state.id);
     let before = existing?.productId ? productsById.get(existing.productId) : undefined;
     const number = `${project.number}.${position}`;
-    const incoming = FurnitureSpecifications.fromLegacy(state);
+    const incoming = proposalItemTechnicalSpecifications(state);
     const current = FurnitureSpecifications.normalize(before?.technicalSpecifications);
     const previousGeneration = current?.sourceGeneration ?? 0;
     const sameSource = current !== null &&

@@ -33,8 +33,7 @@ test('actual editor field matrix repairs legacy records and preserves preview, s
     ['manager.name', 'SIGN_NAME'], ['manager.role', 'SIGN_ROLE'], ['manager.phone', '+000 7778889'], ['warrantyMonths', '18'], ['footer', 'FOOTER_TEST\nSecondfooter'],
     ['items.0.name', 'ITEM_TEST'], ['items.0.size', 'SIZE_TEST'], ['items.0.price', '205.5'], ['items.0.qty', '3'],
     ['items.0.description', 'DESCRIPTION_TEST\nSeconddesc'], ['items.0.note', 'NOTE_TEST\nSecondnote'],
-    ['items.0.products.0.title', 'BLOCK_TEST'], ['items.0.products.0.outer', 'OUTER_TEST'], ['items.0.products.0.inner', 'INNER_TEST'],
-    ['items.0.products.0.hinges', 'HINGES_TEST'], ['items.0.products.0.drawers', 'DRAWERS_TEST'], ['items.0.products.0.lighting', 'LIGHT_TEST'],
+    ['items.0.specifications.0.value', 'INNER_TEST'],
     ['delivery.total', '75'], ['delivery.items.0.name', 'SERVICE_TEST'], ['delivery.items.0.price', '37.25']
   ];
   const readonly = ['order.number', 'client.name', 'client.contact'];
@@ -59,6 +58,7 @@ test('actual editor field matrix repairs legacy records and preserves preview, s
           closest(selector) {
             if (selector === '#itemsList' && this.dataset.path?.startsWith('items.')) return node('itemsList');
             if (selector === '#deliveryEditor' && this.dataset.path?.startsWith('delivery.')) return node('deliveryEditor');
+            if (selector === '.spec-controls' && this.dataset.addSpec != null) return { querySelector: () => ({ value: this.dataset.sectionType }) };
             const key = /^\[data-([a-z-]+)\]$/.exec(selector)?.[1]?.replace(/-([a-z])/g, (_all, letter) => letter.toUpperCase());
             return key && Object.hasOwn(this.dataset, key) ? this : null;
           } });
@@ -146,14 +146,29 @@ test('actual editor field matrix repairs legacy records and preserves preview, s
   await editor.click('itemsList', { del: '1' });
   await editor.click('itemsList', { mv: '1', dir: '-1' }); assert.ok(editor.html.indexOf('ADDED_ITEM') < editor.html.indexOf('ITEM_TEST'));
   await editor.click('itemsList', { mv: '0', dir: '1' }); assert.equal(editor.adapter.getState().items[0].id, 'position');
-  await editor.click('itemsList', { aprod: '0' }); await editor.type('items.0.products.1.title', 'TEMP_BLOCK'); assert.ok(editor.html.includes('TEMP_BLOCK'));
-  await editor.click('itemsList', { dprod: '0.1' }); assert.ok(!editor.html.includes('TEMP_BLOCK'));
+  await editor.click('itemsList', { addSpec: '0', sectionType: 'body' });
+  await editor.type('items.0.specifications.1.value', 'STANDARD_SECTION');
+  const standard = copy(editor.adapter.getState().items[0].specifications[1]);
+  assert.deepEqual(standard, { id: standard.id, type: 'body', group: 'construction', label: 'Корпус', value: 'STANDARD_SECTION' });
+  assert.ok(editor.html.includes('STANDARD_SECTION'));
+  await editor.click('itemsList', { deleteSpec: '0.1' }); assert.ok(!editor.html.includes('STANDARD_SECTION'));
+  await editor.click('itemsList', { addSpec: '0', sectionType: 'body' });
+  assert.notEqual(editor.adapter.getState().items[0].specifications[1].id, standard.id);
+  await editor.click('itemsList', { deleteSpec: '0.1' });
+  await editor.click('itemsList', { addSpec: '0', sectionType: 'custom' });
+  await editor.type('items.0.specifications.1.label', 'Акустика');
+  await editor.type('items.0.specifications.1.group', 'filling');
+  await editor.type('items.0.specifications.1.value', 'CUSTOM_SECTION');
+  const custom = copy(editor.adapter.getState().items[0].specifications[1]);
+  assert.deepEqual(custom, { id: custom.id, type: 'custom', group: 'filling', label: 'Акустика', value: 'CUSTOM_SECTION' });
+  assert.ok(editor.html.includes('CUSTOM_SECTION'));
   await editor.click('deliveryEditor', { dadd: '' }); await editor.type('delivery.items.1.name', 'TEMP_SERVICE'); assert.ok(editor.html.includes('TEMP_SERVICE'));
   await editor.click('deliveryEditor', { ddel: '1' }); assert.ok(!editor.html.includes('TEMP_SERVICE'));
   await editor.click('itemsList', { del: '1' }); assert.ok(!editor.html.includes('ADDED_ITEM'));
   await editor.save(); assert.equal(writes.length, 1);
   assert.equal(stored.state.items[0].products[0].preservedMetadata, true); assert.equal(stored.state.delivery.items[0].crmKind, 'DELIVERY');
   const reloaded = await open();
+  assert.deepEqual(copy(reloaded.adapter.getState().items[0].specifications[1]), custom);
   for (const [path, value] of rows) assert.equal(String(read(reloaded.adapter.getState(), path)), value, 'saved/reloaded: ' + path);
   assert.equal(reloaded.html, editor.html); assert.equal(reloaded.adapter.getState().discountMode, 'amount');
   for (const path of readonly) assert.equal(read(reloaded.adapter.getState(), path), read(stored.state, path));
@@ -176,7 +191,8 @@ test('actual editor field matrix repairs legacy records and preserves preview, s
   assert.equal(/value="([^"]*)"/.exec(zeroItemInput)?.[1], '0');
   await zero.click('deliveryEditor', { delmode: 'items' });
   assert.equal(/value="([^"]*)"/.exec(zero.controls().get('delivery.items.0.price').attributes)?.[1], '0');
-  const expectedPaths = [...rows.map(([path]) => path), ...readonly, 'items.0.dbl', 'items.0.image', 'items.0.image2'].map(normalize);
+  const expectedPaths = [...rows.map(([path]) => path), ...readonly, 'items.0.dbl', 'items.0.image', 'items.0.image2',
+    'items.0.specifications.0.label', 'items.0.specifications.0.group'].map(normalize);
   assert.deepEqual([...observed].sort(), [...new Set(expectedPaths)].sort(), 'every actual data-path family is classified');
 });
 
@@ -295,6 +311,26 @@ test('pending save preserves exact replay and latest corrected state or explicit
   assert.deepEqual(successful.api.getDocument().fx, latestManualFx);
   assert.equal((await successful.api.generatePdf()).artifactId, 'latest-pdf');
   assert.equal(successful.calls.length, 4);
+});
+
+test('stale specifications writer receives the refresh error without replaying a rejected PUT', async () => {
+  const reason = 'Формат характеристик КП изменился — обновите редактор и повторите изменения';
+  const testbed = fixture(async (call, calls) => {
+    if (calls.length === 1) return new Response(JSON.stringify({ error: { code: 'KP_EDITOR_OUTDATED', message: reason } }), { status: 409 });
+    return response({ ...doc(), revision: 3, state: call.body.state });
+  });
+  testbed.api.focusDocument(doc());
+  const legacy = doc().state;
+  legacy.items[0].products = [{ outer: 'Старые характеристики' }];
+  await assert.rejects(testbed.api.save(legacy), { message: reason });
+  assert.equal(testbed.calls.length, 1);
+  assert.equal(testbed.values.has('pero-crm-kp:actor:primary:operation:save'), false);
+
+  const current = doc().state;
+  current.items[0].specifications = [{ id: 'body-row', type: 'body', group: 'construction', label: 'Корпус', value: 'Новые характеристики' }];
+  assert.deepEqual((await testbed.api.save(current)).state, current);
+  assert.equal(testbed.calls.length, 2);
+  assert.notEqual(testbed.calls[0].body.operationId, testbed.calls[1].body.operationId);
 });
 
 test('additional contract source never replaces focused proposal and contracts omit browser states', async () => {

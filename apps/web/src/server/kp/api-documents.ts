@@ -14,7 +14,7 @@ import { revalidatePath } from "next/cache";
 import { apiFailure, apiId, apiOperationId, parseApi, type KpApiContext } from "./api-contract";
 import { bindProposalClient, proposalClientLabel, proposalClientSnapshot, proposalTemporaryClientId } from "./proposal-client";
 import { createProposalInTransaction, saveProposalInTransaction, type ProposalSaveHooks, type ProposalWriteMutation } from "./proposal-core";
-import { normalizeProposalState, proposalObject, type ProposalState } from "./proposal-contract";
+import { assertCurrentProposalEditor, normalizeProposalState, proposalObject, type ProposalState } from "./proposal-contract";
 import { projectProposalPricing } from "./pricing";
 import { applyProjectionInTransaction } from "./pricing-persistence";
 import { fixedProposalRate, proposalCurrency, type ProposalFixedRate } from "./pricing-contract";
@@ -184,7 +184,8 @@ export async function saveApiDocument(context: KpApiContext, input: Record<strin
       if (create && !order.date) { const date = moscowDate(); state = { ...state, order: { ...order, date: `${date.slice(8)}.${date.slice(5, 7)}.${date.slice(0, 4)}` } }; }
       const existing = create ? undefined : await loadApiDocument(prisma, String(input.proposalId));
       if (existing && (existing.revision !== input.expectedRevision || existing.project?.stage !== "LEAD"))
-        return apiFailure("KP_REVISION_CHANGED", 409, "КП изменено или уже недоступно для редактирования");
+        return apiFailure("KP_REVISION_CHANGED", 409, "КП изменено или уже недоступно для редактирования — обновите редактор");
+      if (existing) assertCurrentProposalEditor(existing.state, state);
       if (create && state.items.some(item => item.image || item.image2)) return apiFailure("KP_CREATE_MEDIA_SEQUENCE", 400, "Сначала создайте КП, затем загрузите изображения и сохраните их ссылки");
       const rate = await chooseRate(context, state, input, existing);
       const prepared = create ? undefined : await prepareProposalProductMedia(mediaDependencies(context, "kp:write", { operationId, proposalId: existing!.id }),

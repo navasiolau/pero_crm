@@ -88,6 +88,7 @@ before(async () => {
       // Старый JS эталона требует прежние DOM-узлы; они не участвуют в печатном листе.
       if (!html.includes('id="docsPanel"')) html = html.replace('</aside>', '<div hidden><button class="js-docs-toggle"></button><button class="js-docs-save"></button><span id="docsCurrent"></span><div id="docsPanel"><div id="docsList"></div></div></div></aside>');
       html = html.replace(/<link[^>]+href="https:\/\/fonts\.(?:googleapis|gstatic)\.com[^>]*>/g, '').replace(/<link[^>]+rel="manifest"[^>]*>/g, '')
+        .replace('<script src="/js/furniture-specifications.js"></script>', '')
         .replace(/href="\/css\//g, 'href="/kp/assets/css/').replace(/src="\/js\//g, 'src="/baseline/js/')
         .replace('</head>', '<link rel="stylesheet" href="/kp/assets/fonts/fonts.css"></head>');
       response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); response.end(html); return;
@@ -216,6 +217,140 @@ test('actual editor preserves source print DOM and page sizes on desktop/mobile,
       await baseline.screenshot({ path: path.join(output, 'original-editor-' + viewport.width + '.png'), fullPage: true, animations: 'disabled' });
       await baseline.close();
     } finally { await context.close(); }
+  }
+});
+
+test('structured sections print in the same numbered order in preview and both layouts, wrapping long material codes', async () => {
+  reset();
+  const code = 'EURO-DECOR-' + 'X0123456789'.repeat(18);
+  const specifications = [
+    { id: 'softFilling', type: 'softFilling', group: 'filling', label: 'Мягкое наполнение', value: 'ППУ 35' },
+    { id: 'extra', type: 'custom', group: 'construction', label: 'Вентиляция', value: 'Решётка' },
+    { id: 'facade', type: 'facade', group: 'construction', label: 'Фасад', value: '   ' },
+    { id: 'hardware', type: 'hardware', group: 'hardware', label: 'Фурнитура', value: 'Петли Blum' },
+    { id: 'body', type: 'body', group: 'construction', label: 'Корпус', value: code },
+  ];
+  for (const index of [0, 2]) doc.state.items[index].specifications = specifications;
+  doc.state.items[1].specifications = [];
+  const expected = ['Корпус ' + code, 'Вентиляция Решётка', 'Фурнитура Петли Blum', 'Мягкое наполнение ППУ 35'];
+  const { context, page } = await portPage();
+  async function inspect(target, sheet) {
+    for (const card of ['.sh-card', '.sh-cardDbl']) {
+      const list = target.locator(sheet + ' ' + card + ' ol.sh-specs').first();
+      assert.deepEqual(await list.locator('li').allTextContents(), expected);
+      assert.equal(await list.evaluate(element => getComputedStyle(element).listStyleType), 'decimal');
+      assert.ok(await list.evaluate(element => {
+        const body = element.closest('.sh-cardBody'), bounds = body.getBoundingClientRect();
+        const foot = body.querySelector('.sh-cardFoot').getBoundingClientRect();
+        return element.scrollWidth <= element.clientWidth + 1 && foot.bottom <= bounds.bottom + 1;
+      }));
+    }
+    const cleared = target.locator(sheet + ' .sh-card').nth(1);
+    assert.equal(await cleared.locator('.sh-specs,.sh-matList').count(), 0);
+    assert.equal(await target.locator(sheet + ' .sh-matList').count(), 1, 'legacy-only item keeps its original blocks');
+  }
+  try {
+    await inspect(page, '#sheet');
+    const print = await context.newPage();
+    await print.emulateMedia({ media: 'print' });
+    const forPrint = copy(doc.state);
+    for (const item of forPrint.items) { item.image = ''; item.image2 = ''; }
+    await print.setContent(template.offlinePrintHTML(forPrint));
+    await print.evaluate(() => document.fonts.ready);
+    assert.equal(await print.evaluate(template.SheetRender.paginateSpecifications), 0);
+    await inspect(print, 'article.sheet');
+    const pdf = await print.pdf({ format: 'A4', preferCSSPageSize: true, printBackground: true });
+    assert.match(pdf.subarray(0, 8).toString(), /^%PDF-1\./);
+    assert.equal(writes.length, 0);
+  } finally { await context.close(); }
+});
+
+test('structured sections print across A4 continuations without clipping in preview, PDF and appendices', async () => {
+  reset();
+  const lines = Array.from({ length: 80 }, (_, index) => 'Строка ' + String(index + 1).padStart(2, '0') + ' · дуб');
+  const code = 'DECOR-' + 'X0123456789'.repeat(38);
+  const single = { id: 'body', type: 'body', group: 'construction', label: 'Корпус', value: lines.join('\n') + '\n' + code };
+  const double = Array.from({ length: 12 }, (_, index) => ({
+    id: 'custom-' + index, type: 'custom', group: 'construction', label: 'Секция ' + (index + 1),
+    value: [code, 'Берёза', 'Фурнитура', 'Проверено ' + (index + 1)].join('\n'),
+  }));
+  doc.state.items[0].specifications = [single];
+  doc.state.items[2].specifications = double;
+  doc.state.items[0].qty = 2;
+  const readContinuations = () => {
+    const sheets = [...document.querySelectorAll('.page')];
+    return sheets.filter(sheet => sheet.classList.contains('sh-specContinuation')).map(sheet => {
+      const body = sheet.querySelector('.page-body'), list = body.querySelector('.sh-specs');
+      const bounds = body.getBoundingClientRect(), scale = bounds.height / body.offsetHeight;
+      const padding = parseFloat(getComputedStyle(body).paddingBottom) * scale;
+      return {
+        position: sheet.dataset.specPosition,
+        pageNumber: sheets.indexOf(sheet) + 1,
+        fits: list.getBoundingClientRect().bottom <= bounds.bottom - padding && list.scrollWidth <= list.clientWidth,
+        rows: [...list.children].map(row => ({
+          number: row.value, marker: getComputedStyle(row).listStyleType,
+          value: [...row.querySelector('.sh-specValue').childNodes].map(node => node.nodeName === 'BR' ? '\n' : node.textContent).join(''),
+        })),
+      };
+    });
+  };
+  function assertContinuations(pages) {
+    assert.ok(pages.every(page => page.fits));
+    const one = pages.filter(page => page.position === '01').flatMap(page => page.rows);
+    assert.ok(one.length > 1, 'a single section crosses an A4 boundary');
+    assert.ok(one.every(row => row.number === 1));
+    assert.deepEqual(one.map(row => row.marker), ['decimal', ...one.slice(1).map(() => 'none')]);
+    assert.equal(one.map(row => row.value).join(''), single.value);
+    const two = pages.filter(page => page.position === '03').flatMap(page => page.rows);
+    assert.deepEqual(two.map(row => row.number), double.map((_, index) => index + 1));
+    assert.deepEqual(two.map(row => row.value), double.map(section => section.value));
+    assert.ok(two.every(row => row.marker === 'decimal'));
+  }
+  for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }]) {
+    const { context, page } = await portPage(viewport);
+    try {
+      await expect(page.locator('#sheet [data-spec-position="01"]')).not.toHaveCount(0);
+      assertContinuations(await page.evaluate(readContinuations));
+      assert.equal(await page.evaluate(() => SheetRender.paginateSpecifications(document.getElementById('sheet'))), 0);
+      for (const [index, selector] of [[0, '.sh-card'], [2, '.sh-cardDbl']]) {
+        const card = page.locator('#sheet ' + selector).filter({ has: page.locator('.sh-cardName', { hasText: doc.state.items[index].name }) }).first();
+        await expect(card.locator('a.sh-cardDesc')).toHaveAttribute('href', '#sh-spec-position-0' + (index + 1));
+        await expect(card.locator('.sh-cardQty')).toContainText(doc.state.items[index].qty + ' шт');
+        assert.ok(await card.locator('.sh-cardTotal').evaluate(total => total.getBoundingClientRect().bottom <= total.closest('.sh-cardBody').getBoundingClientRect().bottom));
+        await expect(card.locator('img')).toHaveCount(index === 0 ? 1 : 2);
+      }
+      assert.equal(writes.length, 0);
+    } finally { await context.close(); }
+  }
+
+  let printPages;
+  const launch = async () => {
+    const instance = await puppeteer.launch({ executablePath: chromium.executablePath(), headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu'] });
+    return {
+      close: () => instance.close(),
+      newPage: async () => {
+        const print = await instance.newPage(), pdf = print.pdf.bind(print);
+        print.pdf = async options => { printPages = await print.evaluate(readContinuations); return pdf(options); };
+        return print;
+      },
+    };
+  };
+  const rendered = await renderer.renderPdf({
+    kind: 'bundle', proposalId: 'primary', revision: 2, templateHash: template.getKpTemplateIdentity().templateHash,
+    state: copy(doc.state), assets: [{ mediaId: 'photo', mimeType: 'image/png', bytesBase64: image.toString('base64') }],
+  }, launch);
+  assertContinuations(printPages);
+  assert.equal(rendered.pagesBase64.length, rendered.pageCount);
+  await writeFile(path.join(output, 'structured-continuations.pdf'), Buffer.from(rendered.bytesBase64, 'base64'));
+  const raster = await renderer.rasterizePdf({ kind: 'rasterize', pdfBase64: rendered.bytesBase64 });
+  assert.equal(raster.pageCount, rendered.pageCount);
+  assert.ok(raster.pageCount > template.SheetRender.sheetHTML(doc.state).split('<section class="page">').length - 1);
+  for (const printPage of printPages) {
+    const index = printPage.pageNumber - 1;
+    const png = Buffer.from(raster.pagesBase64[index], 'base64');
+    const { entropy } = await sharp(png).stats();
+    assert.ok(entropy > 0.1, 'continuation ' + printPage.pageNumber + ' has printable content');
+    await writeFile(path.join(output, 'structured-continuation-' + printPage.pageNumber + '.png'), png);
   }
 });
 

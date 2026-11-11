@@ -1,7 +1,7 @@
 (function (root, factory) {
-    if (typeof module === 'object' && module.exports) { module.exports = factory(); }
-    else { root.SheetRender = factory(); }
-}(typeof self !== 'undefined' ? self : this, function () {
+    if (typeof module === 'object' && module.exports) { module.exports = factory(require('./furniture-specifications.js')); }
+    else { root.SheetRender = factory(root.FurnitureSpecifications); }
+}(typeof self !== 'undefined' ? self : this, function (FurnitureSpecifications) {
     'use strict';
     function esc(s) {
       return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
@@ -246,6 +246,14 @@
     }
 
     function matsHTML(it) {
+      if (Array.isArray(it.specifications)) {
+        var sections = FurnitureSpecifications.orderedSections(it.specifications).filter(function (section) { return section.value.trim(); });
+        if (!sections.length) return '';
+        return '<div class="sh-matHead">Материалы и исполнение</div><ol class="sh-specs">' +
+          sections.map(function (section) {
+            return '<li><span class="sh-specLabel">' + esc(section.label) + '</span> <span class="sh-specValue">' + lineBreaks(esc(section.value)) + '</span></li>';
+          }).join('') + '</ol>';
+      }
       var prods = (it.products || []).filter(function (p) {
         return p.title || p.outer || p.inner || p.hinges || p.drawers || p.lighting;
       });
@@ -388,6 +396,154 @@
       return buildPages(s).map(function (pg) { return pageHTML(pg, s, cur, T); }).join('');
     }
 
+    // Одинаковая разбивка в предпросмотре, PDF и приложениях договора.
+    // Функция выполняется также из Puppeteer после загрузки шрифтов.
+    function paginateSpecifications(sheet) {
+      sheet = sheet || document.querySelector('.sheet');
+      if (!sheet) return 0;
+      var doc = sheet.ownerDocument;
+      var added = 0;
+
+      function newPage(after) {
+        var page = doc.createElement('section');
+        page.className = 'page';
+        var bar = doc.createElement('div');
+        bar.className = 'sh-bar';
+        var body = doc.createElement('div');
+        body.className = 'page-body';
+        page.append(bar, body);
+        after.after(page);
+        added++;
+        return { page: page, body: body };
+      }
+
+      function nextSheet(after, card, list) {
+        var next = newPage(after);
+        next.page.classList.add('sh-specContinuation');
+        var index = card.querySelector('.sh-cardIdx').cloneNode(true);
+        next.page.dataset.specPosition = index.textContent;
+        index.textContent = 'Позиция ' + index.textContent + ' · продолжение';
+        var name = card.querySelector('.sh-cardName').cloneNode(true);
+        name.style.overflowWrap = 'anywhere';
+        name.style.maxHeight = '2.4em';
+        name.style.overflow = 'hidden';
+        var heading = card.querySelector('.sh-matHead').cloneNode(true);
+        var ordered = list.cloneNode(false);
+        ordered.style.flex = 'none';
+        next.body.append(index, name, heading, ordered);
+        return { page: next.page, body: next.body, list: ordered };
+      }
+
+      function fits(next) {
+        var body = next.body.getBoundingClientRect();
+        var scale = body.height / next.body.offsetHeight;
+        var bottomPadding = parseFloat(doc.defaultView.getComputedStyle(next.body).paddingBottom) * scale;
+        return next.list.getBoundingClientRect().bottom <= body.bottom - bottomPadding - scale;
+      }
+
+      function valueOf(element) {
+        return Array.from(element.childNodes).map(function (node) {
+          return node.nodeName === 'BR' ? '\n' : node.textContent;
+        }).join('');
+      }
+
+      function writeLines(element, text) {
+        text.split('\n').forEach(function (line, index) {
+          if (index) element.append(doc.createElement('br'));
+          element.append(doc.createTextNode(line));
+        });
+      }
+
+      function splitRow(row, number, next, card, list) {
+        var label = Array.from(row.querySelector('.sh-specLabel').textContent);
+        var value = Array.from(valueOf(row.querySelector('.sh-specValue')));
+        var length = label.length + value.length;
+        var start = 0;
+        while (start < length) {
+          var fragment = doc.createElement('li');
+          fragment.value = number;
+          if (start) fragment.style.listStyleType = 'none';
+          next.list.append(fragment);
+
+          function write(end) {
+            fragment.replaceChildren();
+            if (start < label.length) {
+              var labelPart = doc.createElement('span');
+              labelPart.className = end >= label.length ? 'sh-specLabel' : '';
+              labelPart.style.fontWeight = '700';
+              labelPart.textContent = label.slice(start, end).join('');
+              fragment.append(labelPart);
+              if (end > label.length) fragment.append(' ');
+            }
+            var valuePart = doc.createElement('span');
+            valuePart.className = 'sh-specValue';
+            writeLines(valuePart, value.slice(Math.max(0, start - label.length), Math.max(0, end - label.length)).join(''));
+            fragment.append(valuePart);
+          }
+
+          // Сначала удваиваем пробный диапазон, затем ищем границу по высоте листа.
+          var low = start;
+          var high = Math.min(length, start + 1);
+          write(high);
+          while (fits(next)) {
+            low = high;
+            if (high === length) break;
+            high = Math.min(length, start + 2 * (high - start));
+            write(high);
+          }
+          while (low + 1 < high) {
+            var mid = Math.floor((low + high) / 2);
+            write(mid);
+            if (fits(next)) low = mid;
+            else high = mid;
+          }
+          // На новом A4 всегда есть место для строки текста.
+          if (low === start) throw Error('Не удалось разместить строку характеристик на листе А4');
+          write(low);
+          start = low;
+          if (start < length) next = nextSheet(next.page, card, list);
+        }
+        return next;
+      }
+
+      Array.from(sheet.querySelectorAll('.page')).forEach(function (page) {
+        var after = page;
+        Array.from(page.querySelectorAll('.sh-cardBody > .sh-specs')).forEach(function (list) {
+          var card = list.parentElement;
+          if (list.scrollHeight <= list.clientHeight && card.scrollHeight <= card.clientHeight) return;
+
+          var next = nextSheet(after, card, list);
+          var anchor = 'sh-spec-position-' + next.page.dataset.specPosition;
+          next.page.id = anchor;
+          var rows = Array.from(list.children);
+          rows.forEach(function (row, index) {
+            var number = index + 1;
+            row.value = number;
+            var hasPrevious = next.list.childElementCount > 0;
+            next.list.append(row);
+            if (fits(next)) return;
+            if (hasPrevious) {
+              next = nextSheet(next.page, card, list);
+              next.list.append(row);
+              if (fits(next)) return;
+            }
+            row.remove();
+            next = splitRow(row, number, next, card, list);
+          });
+
+          var marker = doc.createElement('a');
+          marker.className = 'sh-cardDesc';
+          marker.href = '#' + anchor;
+          marker.textContent = 'Характеристики на листах продолжения';
+          list.replaceWith(marker);
+          after = next.page;
+        });
+        var footer = page.querySelector('.sh-foot-block');
+        if (after !== page && footer) newPage(after).body.append(footer);
+      });
+      return added;
+    }
+
     function buildFullHTML(state) {
       return '<!DOCTYPE html>' +
       '<html lang="ru"><head><meta charset="UTF-8">' +
@@ -468,6 +624,8 @@
       '.sh-matRow{display:flex;gap:2.5mm;align-items:baseline;border-left:.7mm solid #9C9C98;padding-left:2.2mm;margin-top:1.1mm}' +
       '.sh-matK{font-family:"JetBrains Mono",monospace;font-size:5.8pt;letter-spacing:.06em;text-transform:uppercase;color:#9C9C98;flex:none;min-width:26mm}' +
       '.sh-matV{font-size:7.3pt;color:#3A3A38;line-height:1.45}' +
+      '.sh-specs{margin:2.2mm 0 0;padding:0 0 0 5mm;list-style:decimal;font-size:7.3pt;line-height:1.4;color:#3A3A38;overflow-wrap:anywhere}' +
+      '.sh-specs li+li{margin-top:1mm}.sh-specLabel{font-weight:700}.sh-specLabel:after{content:":"}' +
       '.mk-outer{border-color:#0A0A0A}' +
       '.mk-inner{border-color:#8A8A86}' +
       '.mk-hinges{border-color:#D9822B}' +
@@ -526,6 +684,7 @@
 
     return {
         buildFullHTML: buildFullHTML,
+        paginateSpecifications: paginateSpecifications,
         sheetHTML: sheetHTML,
         totalsOf: totalsOf,
         qtyOf: qtyOf,
@@ -540,6 +699,7 @@
         toLatin: toLatin,
         pdfFileName: pdfFileName,
         normalizeState: normalizeState,
+        FurnitureSpecifications: FurnitureSpecifications,
         LOGO: LOGO,
         PRODUCT_FIELDS: PRODUCT_FIELDS
     };

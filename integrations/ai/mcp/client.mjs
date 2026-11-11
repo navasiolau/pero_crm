@@ -101,9 +101,52 @@ export class KpApiClient {
   getJob(id) { return this.request('GET', `/jobs/${checkedId(id)}`); }
   getContract(id) { return this.request('GET', `/contracts/${checkedId(id)}`); }
 
+  async getCapabilities() {
+    const url = new URL(this.root);
+    url.pathname = url.pathname.replace(/\/kp$/, '/openapi.json');
+    let document;
+    try {
+      const response = await this.fetch(url, {
+        method: 'GET', redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(this.timeoutMs),
+      });
+      if (!response.ok) throw new Error('OpenAPI недоступен');
+      document = await response.json();
+    } catch {
+      fail('KP_CAPABILITIES_UNAVAILABLE', 'Не удалось проверить формат КП по OpenAPI текущей CRM.');
+    }
+
+    const itemSchema = (path, method, name) => {
+      const request = document?.paths?.[path]?.[method]?.requestBody?.content?.['application/json']?.schema;
+      if (request?.$ref !== `#/components/schemas/${name}`) return null;
+      const items = document?.components?.schemas?.[name]?.properties?.state?.properties?.items;
+      return items?.type === 'array' && items.items?.type === 'object' ? items.items : null;
+    };
+    const createItem = itemSchema('/kp/documents', 'post', 'KpCreateDocument');
+    const saveItem = itemSchema('/kp/documents/{documentId}', 'put', 'KpSaveDocument');
+    const advertised = [createItem, saveItem].map(item => item?.properties?.specifications);
+    if (createItem && saveItem && advertised.every(field => field === undefined)) {
+      return { specifications: false };
+    }
+    const sections = document?.components?.schemas?.KpFurnitureSection?.oneOf;
+    const typedSections = Array.isArray(sections) && sections.length > 0 && sections.every(section =>
+      section?.type === 'object' && Array.isArray(section.required) && ['id', 'type', 'group', 'label', 'value'].every(field =>
+        section.required.includes(field) && Object.hasOwn(section.properties ?? {}, field),
+      ),
+    );
+    if (advertised.every(field => field?.type === 'array' && field.items?.$ref === '#/components/schemas/KpFurnitureSection')
+      && typedSections) {
+      return { specifications: true };
+    }
+    fail('KP_CAPABILITIES_UNAVAILABLE', 'OpenAPI текущей CRM не подтвердил согласованный формат создания и сохранения КП.');
+  }
+
   async save({ id, state, expectedRevision, operationId: requestId, clientId, fx, expectedNumber, basedOn }) {
     if (!state || typeof state !== 'object' || Array.isArray(state) || !Array.isArray(state.items)) fail('KP_STATE_INVALID', 'Нужно полное состояние КП с массивом items. Для правки сначала прочитайте текущий документ.');
     if (id && basedOn) fail('KP_TEMPLATE_INVALID', 'Шаблон применяется только к новому КП.');
+    if (state.items.some(item => item && Object.hasOwn(item, 'specifications'))) {
+      const capabilities = await this.getCapabilities();
+      if (!capabilities.specifications) fail('KP_SPECIFICATIONS_UNSUPPORTED', 'Текущая CRM ещё использует products. Для сохранения уже записанного канонического состояния требуется обновление CRM. Новые характеристики готовьте в совместимых блоках products.');
+    }
     let next = structuredClone(state);
     if (basedOn) {
       const template = await this.getDocument(basedOn);

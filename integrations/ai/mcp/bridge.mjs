@@ -16,6 +16,7 @@ async function main() {
   let result;
   switch (input.action) {
     case 'list': result = await client.listDocuments(args.query); break;
+    case 'capabilities': result = await client.getCapabilities(); break;
     case 'get': result = await client.getDocument(args.id); break;
     case 'clients': result = await client.findClients(args.query); break;
     case 'client': result = await client.getClient(args.id); break;

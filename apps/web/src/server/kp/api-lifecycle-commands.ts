@@ -50,7 +50,7 @@ export async function restoreApiVersion(context: KpApiContext, input: Record<str
         const rate = fixedProposalRate({ currency: historic.fx.currency, value: historic.fx.rate, date: historic.fx.rateDate, source: historic.fx.rateSource }, proposalCurrency(historic.fx.currency));
         mutation = await saveProposalInTransaction(tx, actor, { proposalId, expectedRevision: historic.expectedRevision, operationId: historic.operationId,
           clientId: historic.clientId, state: historic.state as ProposalState },
-        createApiSaveHooks(rate, ready.prepared));
+        { ...createApiSaveHooks(rate, ready.prepared), restoreVersion: true });
         return { revision: mutation.result.revision };
       });
       if (!mutation) return apiFailure("KP_OPERATION_REUSED", 409, "Эта операция восстановления уже выполнена в другом канале");

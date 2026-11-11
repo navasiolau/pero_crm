@@ -4,8 +4,8 @@ var CRM = window.PeroCrmKp;
 if (!CRM) throw new Error('KP_TRANSPORT_REQUIRED');
 
 var R = window.SheetRender;
+var Specifications = R.FurnitureSpecifications;
 var LOGO = R.LOGO;
-var PRODUCT_FIELDS = R.PRODUCT_FIELDS;
 var esc = R.esc;
 var fmt = R.fmt;
 var totalsOf = R.totalsOf;
@@ -101,15 +101,113 @@ function deepMerge(base, extra) {
 }
 function normItem(it) {
     if (!it.id) it.id = crypto.randomUUID();
-    it.products = Array.isArray(it.products) ? it.products : [];
     if (typeof it.note !== 'string') it.note = '';
     it.qty = R.qtyOf(it);
     if (typeof it.dbl !== 'boolean') it.dbl = false;
     return it;
 }
 
+function editableSpecifications(item) {
+    if (!Array.isArray(item.specifications)) item.specifications = Specifications.fromLegacy(item).sections;
+    return item.specifications;
+}
+
+function sectionKey(section) {
+    return section.type === 'custom' ? section.id : section.type;
+}
+
+function sameSectionContent(left, right) {
+    return left && right && left.group === right.group && left.label === right.label && left.value === right.value;
+}
+
+function groupSections(sections, keyOf) {
+    var groups = new Map();
+    for (var section of sections) {
+        var name = keyOf(section);
+        if (!groups.has(name)) groups.set(name, []);
+        groups.get(name).push(section);
+    }
+    return groups;
+}
+
+function matchLegacyDraftSections(before, after) {
+    var custom = function (row) { return row.type === 'custom'; };
+    var nameOf = function (row) { return JSON.stringify([row.group, row.label]); };
+    var valueOf = function (row) { return row.value; };
+    var previousGroups = groupSections(before.filter(custom), nameOf);
+    var ambiguous = new Set();
+    var matched = after.filter(function (row) { return row.type !== 'custom'; });
+    for (var [name, draftRows] of groupSections(after.filter(custom), nameOf)) {
+        var previous = previousGroups.get(name) || [];
+        var previousByValue = groupSections(previous, valueOf);
+        var keptBefore = new Set(), keptDraft = new Set();
+        for (var [value, draftMatches] of groupSections(draftRows, valueOf)) {
+            var previousMatches = previousByValue.get(value) || [];
+            if (previousMatches.length !== draftMatches.length) continue;
+            draftMatches.forEach(function (row, index) {
+                var same = previousMatches[index];
+                keptBefore.add(same.id); keptDraft.add(row.id);
+                matched.push(Object.assign({}, row, { id: same.id }));
+            });
+        }
+        var remainingBefore = previous.filter(function (row) { return !keptBefore.has(row.id); });
+        var remainingDraft = draftRows.filter(function (row) { return !keptDraft.has(row.id); });
+        if (remainingBefore.length === 1 && remainingDraft.length === 1) {
+            matched.push(Object.assign({}, remainingDraft[0], { id: remainingBefore[0].id }));
+        } else {
+            if (remainingDraft.length) remainingBefore.forEach(function (row) { ambiguous.add(row.id); });
+            remainingDraft.forEach(function (row) { matched.push(Object.assign({}, row, { id: crypto.randomUUID() })); });
+        }
+    }
+    return { matched: matched, ambiguous: ambiguous };
+}
+
+function migrateLegacyDraft(items, savedItems) {
+    var savedById = new Map(savedItems.map(function (item) { return [item.id, item]; }));
+    var migrated = false, needsTransfer = false;
+    for (var item of items) {
+        var saved = savedById.get(item.id);
+        if (!Array.isArray(saved?.specifications)) continue;
+        var hadSpecifications = Array.isArray(item.specifications);
+        var before = Specifications.fromLegacy(saved).sections;
+        var incoming = matchLegacyDraftSections(before, Specifications.fromLegacy(item).sections);
+        var legacyBefore = new Map(before.map(function (row) { return [sectionKey(row), row]; }));
+        var legacyDraft = new Map(incoming.matched.map(function (row) { return [sectionKey(row), row]; }));
+        var rows = new Map(saved.specifications.map(function (row) { return [sectionKey(row), row]; }));
+        if (!hadSpecifications) migrated = true;
+        if (incoming.ambiguous.size) needsTransfer = true;
+        // Переносим только явные правки старых полей, сохраняя отдельные канонические разделы и их ID.
+        for (var [key, original] of legacyBefore) {
+            if (!legacyDraft.has(key) && rows.has(key)) {
+                if (!sameSectionContent(rows.get(key), original)) needsTransfer = true;
+                rows.delete(key);
+                migrated = true;
+            }
+        }
+        var usedIds = new Set(Array.from(rows.values(), function (row) { return row.id; }));
+        for (var [key, changed] of legacyDraft) {
+            var original = legacyBefore.get(key);
+            if (sameSectionContent(original, changed)) continue;
+            var existing = rows.get(key);
+            if (existing && original && !sameSectionContent(existing, original) && !sameSectionContent(existing, changed)) needsTransfer = true;
+            var id = existing?.id ?? changed.id;
+            if (!existing && usedIds.has(id)) id = crypto.randomUUID();
+            rows.set(key, Object.assign({}, changed, { id: id }));
+            usedIds.add(id);
+            migrated = true;
+        }
+        item.specifications = Array.from(rows.values());
+        if (Object.hasOwn(saved, 'products')) item.products = clone(saved.products);
+        else delete item.products;
+    }
+    if (migrated) items.forEach(editableSpecifications);
+    return { migrated: migrated, needsTransfer: needsTransfer };
+}
+
 var sheet = document.getElementById('sheet');
 var itemsList = document.getElementById('itemsList');
+var legacyDraftNotice = document.getElementById('legacySpecificationsDraft');
+var legacyDraftNeedsTransfer = false;
 var totalAmt = document.getElementById('totalAmt');
 var toastEl = document.getElementById('toast');
 var viewport = document.getElementById('viewport');
@@ -156,17 +254,40 @@ async function genPdf(reportFailure) {
     finally { generating = false; setPdfBtns('Сгенерировать PDF', false); }
 }
 
-function productEditor(i, j, p) {
-    return '<div class="prod">' +
+function specificationOptions(entries, value) {
+    return entries.map(function (entry) {
+        return '<option value="' + esc(entry.id) + '"' + (entry.id === value ? ' selected' : '') + '>' + esc(entry.label) + '</option>';
+    }).join('');
+}
+
+function specificationEditor(i, j, section) {
+    var path = 'items.' + i + '.specifications.' + j;
+    var custom = section.type === 'custom';
+    return '<div class="prod" data-spec-id="' + esc(section.id) + '">' +
         '<div class="prod-head">' +
-        '<input data-path="items.' + i + '.products.' + j + '.title" value="' + esc(p.title) + '" placeholder="Название изделия">' +
-        '<button class="ictrl ictrl-del" data-dprod="' + i + '.' + j + '" title="Удалить изделие">✕</button>' +
+        (custom ? '<input data-path="' + path + '.label" value="' + esc(section.label) + '" aria-label="Название раздела" required>' : '<strong>' + esc(section.label) + '</strong>') +
+        (custom ? '<select data-path="' + path + '.group" aria-label="Группа раздела">' + specificationOptions(Specifications.GROUPS, section.group) + '</select>' : '') +
+        '<button type="button" class="ictrl ictrl-del" data-delete-spec="' + i + '.' + j + '" title="Удалить раздел" aria-label="Удалить раздел">✕</button>' +
         '</div>' +
-        PRODUCT_FIELDS.map(function (f) {
-            return '<div class="f prod-f"><label class="f-label">' + f.label + '</label>' +
-                '<input data-path="items.' + i + '.products.' + j + '.' + f.key + '" value="' + esc(p[f.key] || '') + '"></div>';
-        }).join('') +
+        '<div class="f prod-f"><textarea rows="2" data-path="' + path + '.value" aria-label="' + esc(section.label) + '">' + esc(section.value) + '</textarea></div>' +
         '</div>';
+}
+
+function specificationsEditor(it, i) {
+    var sections = Array.isArray(it.specifications) ? it.specifications : Specifications.fromLegacy(it).sections;
+    var indexes = new Map(sections.map(function (section, index) { return [section.id, index]; }));
+    var available = Specifications.CATALOG.filter(function (entry) {
+        return !sections.some(function (section) { return section.type === entry.type; });
+    }).map(function (entry) {
+        return { id: entry.type, label: entry.label };
+    });
+    available.push({ id: 'custom', label: 'Свой раздел' });
+    return '<div class="mat-block"><span class="mat-block-title">Материалы и исполнение</span>' +
+        Specifications.orderedSections(sections).map(function (section) {
+            return specificationEditor(i, indexes.get(section.id), section);
+        }).join('') +
+        '<div class="spec-controls"><select data-spec-type aria-label="Тип нового раздела">' + specificationOptions(available) + '</select>' +
+        '<button type="button" class="add-prod" data-add-spec="' + i + '">＋ Добавить раздел</button></div></div>';
 }
 
 function itemCard(it, i) {
@@ -201,11 +322,7 @@ function itemCard(it, i) {
         '</div>' +
         '</div>' +
         '<div class="f"><label class="f-label">Описание</label><textarea rows="3" data-path="items.' + i + '.description">' + esc(it.description || '') + '</textarea></div>' +
-        '<div class="mat-block">' +
-        '<span class="mat-block-title">Материалы и исполнение</span>' +
-        (it.products || []).map(function (p, j) { return productEditor(i, j, p); }).join('') +
-        '<button class="add-prod" data-aprod="' + i + '">＋ Добавить изделие</button>' +
-        '</div>' +
+        specificationsEditor(it, i) +
         '<div class="f"><label class="f-label">Примечание</label><textarea rows="2" data-path="items.' + i + '.note" placeholder="Выделяется оранжевым на листе">' + esc(it.note || '') + '</textarea></div>' +
         '<div class="f"><label class="f-label">Фото позиции</label>' +
         '<div class="photo-row">' +
@@ -283,7 +400,17 @@ function renderSheet() {
     sheet.innerHTML = sheetHTML(CRM.previewState(state));
     CRM.applyPermissions();
     document.title = 'КП ' + (state.order.number || '—') + ' · Перо Лайв';
-    requestAnimationFrame(updatePageCount);
+    requestAnimationFrame(paginatePreview);
+}
+
+function paginatePreview() {
+    var firstPage = sheet.firstElementChild;
+    if (!firstPage) return;
+    Promise.resolve(document.fonts?.ready).then(function () {
+        if (sheet.firstElementChild !== firstPage || !sheet.offsetWidth) return;
+        R.paginateSpecifications(sheet);
+        updatePageCount();
+    });
 }
 
 function updatePageCount() {
@@ -318,12 +445,30 @@ function refreshAll() { renderItemsEditor(); renderDeliveryEditor(); renderDiscT
 var saveT;
 var remoteSaveT;
 function scheduleSave() {
+    var legacyItems = state.items.filter(function (item) { return !Array.isArray(item.specifications); });
+    legacyItems.forEach(editableSpecifications);
+    if (legacyItems.length) renderSheet();
     pruneMediaUploads(); CRM.noteEdit(state);
     clearTimeout(saveT); saveT = setTimeout(saveNow, 500);
     clearTimeout(remoteSaveT);
     if (CRM.isEditable()) remoteSaveT = setTimeout(function () { if (CRM.hasUnsavedChanges(state)) saveCurrentDoc(currentDocId, { silent: true }); }, 1200);
 }
 function saveNow() { CRM.persistDraft(); }
+
+function setLegacyDraftTransfer(required) {
+    legacyDraftNeedsTransfer = required;
+    if (legacyDraftNotice) legacyDraftNotice.hidden = !required;
+    var editorScroll = document.querySelector('.editor-scroll');
+    if (editorScroll) editorScroll.inert = required;
+}
+
+document.getElementById('transferLegacySpecifications')?.addEventListener('click', function () {
+    if (!legacyDraftNeedsTransfer) return;
+    setLegacyDraftTransfer(false);
+    CRM.noteEdit(state);
+    saveNow();
+    toast('Черновик перенесён. Проверьте разделы и сохраните КП.', 6500);
+});
 
 var mediaUploads = new Map(), mediaContext = 0;
 function mediaItem(task) {
@@ -460,9 +605,13 @@ itemsList.addEventListener('input', function (e) {
     else if (t.type === 'checkbox') { val = t.checked; }
     else { val = t.value; }
     if (p.slice(-4) === '.qty') { val = R.qtyOf({ qty: val }); t.value = val; }
+    if (p.includes('.specifications.')) {
+        editableSpecifications(state.items[+p.split('.')[1]]);
+    }
     setPath(state, p, val);
     if (p.slice(-6) === '.image') { refreshThumb(t.closest('.item-card'), val); }
     if (p.slice(-4) === '.dbl') { renderItemsEditor(); }
+    if (p.includes('.specifications.') && p.endsWith('.group')) { renderItemsEditor(); }
     renderSheet(); updateTotal(); scheduleSave();
 });
 
@@ -479,7 +628,7 @@ itemsList.addEventListener('click', function (e) {
     var dup = e.target.closest('[data-dup]');
     if (dup) {
         var i = +dup.dataset.dup;
-        var copy = clone(normItem(state.items[i])); copy.id = crypto.randomUUID(); copy.name += ' (копия)';
+        var copy = clone(state.items[i]); copy.id = crypto.randomUUID(); copy.name += ' (копия)';
         state.items.splice(i + 1, 0, copy);
         refreshAll(); scheduleSave(); return;
     }
@@ -492,17 +641,22 @@ itemsList.addEventListener('click', function (e) {
         }
         return;
     }
-    var ap = e.target.closest('[data-aprod]');
+    var ap = e.target.closest('[data-add-spec]');
     if (ap) {
-        var ia = +ap.dataset.aprod;
-        normItem(state.items[ia]).products.push(P('', '', '', '', '', ''));
+        var ia = +ap.dataset.addSpec;
+        var type = ap.closest('.spec-controls').querySelector('[data-spec-type]').value;
+        var standard = Specifications.CATALOG.find(function (entry) { return entry.type === type; });
+        var section = standard ? { id: crypto.randomUUID(), type: type, group: standard.group, label: standard.label, value: '' }
+            : { id: crypto.randomUUID(), type: 'custom', group: Specifications.GROUPS[0].id, label: 'Дополнительный раздел', value: '' };
+        editableSpecifications(state.items[ia]).push(section);
         renderItemsEditor(); renderSheet(); scheduleSave();
+        itemsList.querySelector('[data-spec-id="' + section.id + '"] ' + (standard ? 'textarea' : 'input'))?.focus();
         return;
     }
-    var dp = e.target.closest('[data-dprod]');
+    var dp = e.target.closest('[data-delete-spec]');
     if (dp) {
-        var parts = dp.dataset.dprod.split('.');
-        state.items[+parts[0]].products.splice(+parts[1], 1);
+        var parts = dp.dataset.deleteSpec.split('.');
+        editableSpecifications(state.items[+parts[0]]).splice(+parts[1], 1);
         renderItemsEditor(); renderSheet(); scheduleSave();
     }
 });
@@ -538,7 +692,7 @@ deliveryEditor.addEventListener('click', function (e) {
 
 document.querySelectorAll('.js-add').forEach(function (b) {
     b.addEventListener('click', function () {
-        state.items.push(normItem({ name: 'Новая позиция', description: '', size: '', image: '', price: 0, note: '', products: [] }));
+        state.items.push(normItem({ name: 'Новая позиция', description: '', size: '', image: '', price: 0, note: '', specifications: [] }));
         refreshAll(); scheduleSave();
         var cards = itemsList.querySelectorAll('.item-card'), last = cards[cards.length - 1];
         if (last) { var nm = last.querySelector('[data-path$=".name"]'); if (nm) { nm.focus(); nm.select(); } }
@@ -563,6 +717,7 @@ document.addEventListener('keydown', function (event) { if (event.key === 'Escap
 function applyDocumentState(doc, preview) {
     clearTimeout(remoteSaveT);
     cancelMediaUploads();
+    setLegacyDraftTransfer(false);
     if (!preview) CRM.focusDocument(doc);
     state = deepMerge(clone(DEFAULT), doc.state);
     state.warrantyMonths = doc.state.warrantyMonths == null ? null : doc.state.warrantyMonths;
@@ -601,13 +756,25 @@ async function saveCurrentDoc(id, opts) {
     opts = opts || {};
     clearTimeout(remoteSaveT);
     if (!CRM.isEditable()) return CRM.getDocument();
+    if (legacyDraftNeedsTransfer) {
+        lastSaveError = new Error('Подтвердите перенос черновика в новый формат перед сохранением');
+        if (!opts.silent) toast(lastSaveError.message, 6500);
+        return null;
+    }
     try {
         await awaitMediaUploads(currentDocId);
         saveNow();
         var snapshot = clone(state), serialized = JSON.stringify(snapshot);
         var doc = await CRM.save(snapshot);
         currentDocId = doc.id;
-        if (JSON.stringify(state) === serialized) state = clone(doc.state);
+        if (JSON.stringify(state) === serialized) {
+            var previousItems = JSON.stringify(state.items);
+            state = clone(doc.state);
+            if (JSON.stringify(state.items) !== previousItems) {
+                renderItemsEditor();
+                CRM.applyPermissions();
+            }
+        }
         if (doc.state.order) state.order.number = doc.state.order.number;
             syncStaticInputs(); renderSheet(); updateTotal(); saveNow();
         return doc;
@@ -619,6 +786,7 @@ async function saveCurrentDoc(id, opts) {
 
 async function ensureCurrentSaved() {
     if (CRM.isPaused()) throw new Error('Завершите изменение клиента');
+    if (legacyDraftNeedsTransfer) throw new Error('Подтвердите перенос черновика в новый формат перед сохранением');
     await awaitMediaUploads(currentDocId);
     if (!CRM.hasUnsavedChanges(state)) await CRM.reconcile();
     if (!CRM.isEditable() || !CRM.hasUnsavedChanges(state)) return CRM.getDocument();
@@ -636,7 +804,13 @@ function fit() {
 }
 document.querySelectorAll('.js-zin').forEach(function (b) { b.addEventListener('click', function () { zoom = Math.min(2, +(zoom + 0.05).toFixed(2)); userZoomed = true; applyZoom(); }); });
 document.querySelectorAll('.js-zout').forEach(function (b) { b.addEventListener('click', function () { zoom = Math.max(0.3, +(zoom - 0.05).toFixed(2)); userZoomed = true; applyZoom(); }); });
-var rT; window.addEventListener('resize', function () { clearTimeout(rT); rT = setTimeout(function () { if (!userZoomed) fit(); }, 120); });
+var rT; window.addEventListener('resize', function () {
+    clearTimeout(rT);
+    rT = setTimeout(function () {
+        if (!userZoomed) fit();
+        paginatePreview();
+    }, 120);
+});
 
 var viewTabs = document.getElementById('viewTabs');
 if (viewTabs) {
@@ -649,6 +823,7 @@ if (viewTabs) {
         if (sheetView) {
             window.scrollTo(0, 0);
             if (!userZoomed) requestAnimationFrame(fit);
+            requestAnimationFrame(paginatePreview);
         }
     });
 }
@@ -676,10 +851,16 @@ function toast(msg, ms) {
 
 CRM.attachEditor({
     getState: function () { return clone(state); },
+    hasPendingLegacyTransfer: function () { return legacyDraftNeedsTransfer; },
     applyDocument: applyDocumentState,
-    applyState: function (next) {
+    applyState: function (next, legacyDraftBaseline) {
         state = deepMerge(clone(DEFAULT), next); state.warrantyMonths = next.warrantyMonths == null ? null : next.warrantyMonths;
-        state.items.forEach(normItem); syncStaticInputs(); refreshAll(); return clone(state);
+        state.items.forEach(normItem);
+        var legacy = legacyDraftBaseline && migrateLegacyDraft(state.items, legacyDraftBaseline.items);
+        setLegacyDraftTransfer(legacy?.needsTransfer === true);
+        if (legacy?.migrated && !legacyDraftNeedsTransfer)
+            toast('Правки старого черновика перенесены в характеристики. Проверьте разделы и сохраните КП.', 6500);
+        syncStaticInputs(); refreshAll(); CRM.applyPermissions(); return clone(state);
     },
     ensureSaved: ensureCurrentSaved,
     generatePdf: function () { return genPdf(true); },

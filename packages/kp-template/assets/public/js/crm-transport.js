@@ -25,7 +25,7 @@
     var fetcher = dependencies.fetch, storage = dependencies.storage, emit = dependencies.emit || function () {};
     var currentId = bootstrap.documentId, documents = {}, current = null, viewingVersion = null, uploaded = new Set();
     var editor, paused = false, contractOpen = false, saveQueue = Promise.resolve(), contractForms = {}, retainedOperations = {};
-    var confirmedState = null, confirmedFx = null, confirmedDocument = null, activeDraft = null;
+    var confirmedState = null, confirmedFx = null, confirmedDocument = null, activeDraft = null, writing = false;
     var clock = dependencies.clock || localState.createClock(dependencies.monotonic);
     var clientIntent = null, focusGeneration = 0, activeUploads = new Set();
     var prefix = 'pero-crm-kp:' + encodeURIComponent(bootstrap.actorId) + ':';
@@ -40,11 +40,11 @@
     function read(keyName) { try { return JSON.parse(storage.getItem(keyName)); } catch (_) { return null; } }
     function write(keyName, value) { try { storage.setItem(keyName, JSON.stringify(value)); } catch (_) {} }
     function remove(keyName) { try { storage.removeItem(keyName); } catch (_) {} }
-    async function operation(id, kind, body) {
+    async function operation(id, kind, body, editId) {
       var storageKey = key(id, 'operation:' + kind), previous = retainedOperations[storageKey] || read(storageKey);
       var fingerprint = JSON.stringify(body);
       if (previous && previous.fingerprint !== fingerprint) return { previous: previous, storageKey: storageKey };
-      var entry = previous || { fingerprint: fingerprint, body: Object.assign({ operationId: uuid() }, body), editId: activeDraft?.editId };
+      var entry = previous || { fingerprint: fingerprint, body: Object.assign({ operationId: uuid() }, body), editId: editId };
       if (storage.prepare) await storage.prepare(id);
       if (storage.claimOperation) entry = JSON.parse(await storage.claimOperation(storageKey, JSON.stringify(entry)));
       if (entry.fingerprint !== fingerprint) return { previous: entry, storageKey: storageKey };
@@ -88,7 +88,9 @@
       write(key(doc.id, 'uploads:' + doc.revision), Array.from(uploaded));
     }
     function isRejectedSave(error) {
-      return error?.status === 400 && ['KP_REQUEST_INVALID', 'KP_PRICING_INVALID', 'KP_RATE_REQUIRED', 'KP_DATE_REQUIRED'].includes(error.data?.error?.code);
+      var code = error?.data?.error?.code;
+      return (error?.status === 409 && code === 'KP_EDITOR_OUTDATED') ||
+        (error?.status === 400 && ['KP_REQUEST_INVALID', 'KP_VALIDATION', 'KP_PRICING_INVALID', 'KP_RATE_REQUIRED', 'KP_DATE_REQUIRED'].includes(code));
     }
     async function requestSave(id, path, body) {
       try { return await request(path, json('PUT', body)); }
@@ -123,12 +125,13 @@
       if (activeDraft) write(key(currentId, 'draft'), activeDraft);
     }
     function noteEdit(state) {
-      if (!api.isEditable() || !confirmedDocument) return;
+      if (!api.isEditable() || !confirmedDocument || editor?.hasPendingLegacyTransfer?.()) return;
       var local = { state: copy(state), fx: copy(current.fx ?? null), client: copy(current.client ?? null) };
       if (activeDraft && canonical(activeDraft.local) === canonical(local)) return;
-      if (!api.hasUnsavedChanges(state)) { activeDraft = null; remove(key(currentId, 'draft')); return; }
+      if (!writing && !api.hasUnsavedChanges(state)) { activeDraft = null; remove(key(currentId, 'draft')); return; }
       var time = clock.now();
       activeDraft = { schema: 2, editId: uuid(), baseRevision: confirmedDocument.revision,
+        specificationsFormat: state.items.every(function (item) { return Array.isArray(item.specifications); }) ? 1 : undefined,
         editedAt: Math.max(time ?? (Date.parse(confirmedDocument.updatedAt) || 0) + 1, (activeDraft?.editedAt || 0) + 0.001), local: local };
       persistDraft();
     }
@@ -163,8 +166,12 @@
       if (winner) {
         activeDraft = candidate; restoreDraftContext(candidate.local);
         if (editor?.getState && editor.applyState && canonical(editor.getState()) !== canonical(candidate.local.state)) {
-          var applied = editor.applyState(copy(candidate.local.state));
-          if (applied) { activeDraft.local.state = copy(applied); persistDraft(); }
+          var applied = editor.applyState(copy(candidate.local.state), candidate.specificationsFormat === 1 ? undefined : latest.state);
+          if (applied && !editor.hasPendingLegacyTransfer?.()) {
+            activeDraft.local.state = copy(applied);
+            if (applied.items.every(function (item) { return Array.isArray(item.specifications); })) activeDraft.specificationsFormat = 1;
+            persistDraft();
+          }
         }
       } else { activeDraft = null; remove(key(id, 'draft')); }
       return current;
@@ -214,6 +221,7 @@
       var id = currentId, path = '/documents/' + encodeURIComponent(id);
       var stored = retainedOperations[key(id, 'operation:save')] || read(key(id, 'operation:save'));
       if (stored) {
+        writing = true;
         try {
           var confirmed = await replay(id, path, stored);
           acknowledgeDraft(confirmed, stored.editId); acknowledgeUploads(confirmed); remember(confirmed, context.clientIntent);
@@ -221,24 +229,28 @@
           else if (canonical(state) === canonical(confirmed.state) && !clientIntent) return current;
         } catch (error) {
           if (saveRevisionConflict(error)) return recoverSave(stored, retries);
-          if (!isRejectedSave(error)) throw error;
-        }
+          var correctedFormat = activeDraft?.specificationsFormat === 1 && canonical(activeDraft.local.state) !== canonical(stored.body.state);
+          if (!isRejectedSave(error) || (error.data?.error?.code === 'KP_EDITOR_OUTDATED' && !correctedFormat)) throw error;
+        } finally { writing = false; }
       }
       await refreshCurrent();
       state = activeDraft?.local.state || current.state;
       if (!api.hasUnsavedChanges(state) && !context.force) return current;
       var snapshot = copy(state), editId = activeDraft?.editId, intent = clientIntent;
-      var body = { proposalId: id, expectedRevision: current.revision, state: snapshot, fx: await rateForState(snapshot) };
-      if (current.client) body.clientId = current.client.id;
-      var pending = await operation(id, 'save', body);
-      if (pending.previous) return saveNow(state, null, saveContext(), retries);
-      var result;
-      try { result = await requestSave(id, path, pending.entry.body); }
-      catch (error) { if (saveRevisionConflict(error)) return recoverSave(pending.entry, retries); throw error; }
-      remove(pending.storageKey); delete retainedOperations[pending.storageKey];
-      acknowledgeDraft(result, editId); acknowledgeUploads(result); remember(result, intent);
-      if (activeDraft) restoreDraftContext(activeDraft.local);
-      return current;
+      writing = true;
+      try {
+        var body = { proposalId: id, expectedRevision: current.revision, state: snapshot, fx: await rateForState(snapshot) };
+        if (current.client) body.clientId = current.client.id;
+        var pending = await operation(id, 'save', body, editId);
+        if (pending.previous) return saveNow(state, null, saveContext(), retries);
+        var result;
+        try { result = await requestSave(id, path, pending.entry.body); }
+        catch (error) { if (saveRevisionConflict(error)) return recoverSave(pending.entry, retries); throw error; }
+        remove(pending.storageKey); delete retainedOperations[pending.storageKey];
+        acknowledgeDraft(result, pending.entry.editId); acknowledgeUploads(result); remember(result, intent);
+        if (activeDraft) restoreDraftContext(activeDraft.local);
+        return current;
+      } finally { writing = false; }
     }
     function saveContext() { return { id: currentId, clientIntent: clientIntent }; }
     function save(state) {

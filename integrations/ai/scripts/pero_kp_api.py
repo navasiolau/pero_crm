@@ -173,6 +173,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description='КП и договоры через приватный API PERO CRM (Node 22+, Python 3.10+).')
     parser.add_argument('--workspace', default=r'E:\KP')
     commands = parser.add_subparsers(dest='action', required=True)
+    commands.add_parser('capabilities')
     for name in ('list', 'clients'):
         sub = commands.add_parser(name); sub.add_argument('--query', default='')
     for name in ('get', 'client', 'versions', 'contract', 'operation', 'job'):
@@ -194,7 +195,9 @@ def main(argv=None):
     args = parser.parse_args(argv)
     client = ApiClient(args.workspace)
     action = args.action
-    if action in ('list', 'clients'):
+    if action == 'capabilities':
+        result = client.call(action)
+    elif action in ('list', 'clients'):
         result = client.call(action, query=args.query)
     elif action in ('get', 'client', 'versions', 'contract', 'operation', 'job'):
         result = client.call(action, id=args.id, **({'wait': args.wait} if action == 'job' else {}))

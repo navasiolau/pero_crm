@@ -13,6 +13,7 @@ export function getKpTemplateIdentity(): { version: string; templateHash: string
 export const SheetRender: {
   LOGO: string; sheetHTML(state: unknown): string; buildFullHTML(state: unknown): string;
   normalizeState(state: unknown): unknown; pdfFileName(state: unknown): string;
+  paginateSpecifications(sheet?: Element): number;
   totalsOf(state: unknown): { total: number; sub: number; discount: number };
 };
 export const ContractModel: {
