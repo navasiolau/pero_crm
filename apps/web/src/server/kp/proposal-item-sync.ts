@@ -1,3 +1,4 @@
+import { FurnitureSpecifications } from "@pero/kp-template";
 import { randomUUID } from "node:crypto";
 import type { Prisma, Product } from "@prisma/client";
 import type { DomainActor } from "@/server/actor";
@@ -5,7 +6,7 @@ import { createProductInTransaction } from "@/server/products/core";
 import { recalculateQuantity } from "@/server/products/quantity-core";
 import { stabilizeProductNumberLinks } from "@/server/products/numbering";
 import { lockWarehouseMetadata, assertWarehouseMetadataWritable } from "@/server/warehouse/gate";
-import { ProposalWriteError, canonicalProposalJson, proposalItemDescription, proposalText,
+import { ProposalWriteError, canonicalProposalJson, proposalText,
   type ProposalItemState } from "./proposal-contract";
 
 export type SynchronizedProposalItem = { id: string; productId: string; number: string; position: number; state: ProposalItemState; previousQuantity: number };
@@ -13,6 +14,7 @@ export type SynchronizedProposalItem = { id: string; productId: string; number: 
 const commercialSnapshot = (product: Product) => ({
   number: product.number, suffixInt: product.suffixInt, title: product.title,
   quantity: product.quantity, kind: product.kind, description: product.description,
+  technicalSpecifications: product.technicalSpecifications ?? null,
   deletedAt: product.deletedAt?.toISOString() ?? null,
 });
 
@@ -110,17 +112,25 @@ export async function synchronizeProposalItemsInTransaction(
     const existing = existingById.get(state.id);
     let before = existing?.productId ? productsById.get(existing.productId) : undefined;
     const number = `${project.number}.${position}`;
+    const incoming = FurnitureSpecifications.fromLegacy(state);
+    const current = FurnitureSpecifications.normalize(before?.technicalSpecifications);
+    const previousGeneration = current?.sourceGeneration ?? 0;
+    const sameSource = current !== null &&
+      canonicalProposalJson({ ...current, sourceGeneration: 0 }) === canonicalProposalJson(incoming);
+    if (!sameSource && previousGeneration >= Number.MAX_SAFE_INTEGER)
+      throw new ProposalWriteError("conflict", "Исчерпан номер поколения технических характеристик");
+    const technicalSpecifications = { ...incoming, sourceGeneration: sameSource ? previousGeneration : previousGeneration + 1 };
     const data = {
       number, suffixInt: position,
       title: proposalText(state.name).trim() || `Позиция ${position}`,
       quantity: state.qty, kind: proposalText(state.kind).trim() || null,
-      description: proposalItemDescription(state), deletedAt: null, deletedById: null,
+      technicalSpecifications, deletedAt: null, deletedById: null,
     };
     let created = false;
     if (!before) {
       const result = await createProductInTransaction(tx, actor, {
         projectId: proposal.projectId, title: data.title, quantity: data.quantity,
-        kind: data.kind ?? undefined, description: data.description ?? undefined,
+        kind: data.kind ?? undefined, technicalSpecifications: data.technicalSpecifications,
       }, "proposal");
       if (!result.ok) throw new ProposalWriteError("validation", result.error);
       before = result.product;
@@ -131,7 +141,8 @@ export async function synchronizeProposalItemsInTransaction(
     const desiredSnapshot = { ...data, deletedAt: null };
     const commercialChanged = canonicalProposalJson(commercialSnapshot(before)) !== canonicalProposalJson({
       number: desiredSnapshot.number, suffixInt: desiredSnapshot.suffixInt, title: desiredSnapshot.title,
-      quantity: desiredSnapshot.quantity, kind: desiredSnapshot.kind, description: desiredSnapshot.description,
+      quantity: desiredSnapshot.quantity, kind: desiredSnapshot.kind, description: before.description,
+      technicalSpecifications: desiredSnapshot.technicalSpecifications,
       deletedAt: desiredSnapshot.deletedAt,
     });
     const after = commercialChanged || (needsRenumber && retained.has(before.id))

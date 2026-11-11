@@ -84,7 +84,7 @@ export default async function ProductPage({
   const percentagePeople = workers.map(user => ({ id: user.id, name: user.name, active: true, roles: user.roles }));
   const percentageProps = { productId: product.id, canManage, canViewAll: canViewAllPercentage };
   return (
-    <ProductInlineProvider key={product.id} productId={product.id} initial={{
+    <ProductInlineProvider key={`${product.id}:${product.canReadTechnicalSpecifications}`} productId={product.id} technicalSpecifications={product.technicalSpecifications} initial={{
       title: product.title, kind: product.kind, quantity: product.quantity, expectedPrice: showAmount ? product.expectedPrice?.toString() ?? null : null, engineerId: product.engineerId, description: product.description, "project.clientId": product.project.client.id,
     }}>
       <ProductSinglePage
@@ -100,7 +100,9 @@ export default async function ProductPage({
             <ProductInlineTitle number={product.number} canManage={canManage}/>
             <ProductInlineContacts canManage={canManage} clients={(canManage?clients:[product.project.client]).map(client=>({id:client.id,label:displayClientName(client),phone:client.phone,address:client.address}))}/>
           </div>}
-          details={<ProductInlineDetails canManage={canManage} canEditTech={canEditTech} showAmount={showAmount} currency={product.project.currency}
+          details={<ProductInlineDetails canManage={canManage} canEditTech={canEditTech}
+            canReadTechnical={product.canReadTechnicalSpecifications}
+            canEditStructured={canEditTech && (canManage || product.engineerId === actor.id)} showAmount={showAmount} currency={product.project.currency}
             notice={showMaterials&&materialsData?.hasShortage?<Badge variant="destructive"><TriangleAlert/>Нехватка материалов</Badge>:null}
             measurement={<ProductMeasurement projectId={product.project.id} productId={product.id} files={attachments.measurement} canEdit={canManageFiles} />}
             engineer={<SinglePercentageRow {...percentageProps} kind="ENGINEERING" section={percentageView.sections.ENGINEERING} assignedEngineerId={product.engineerId} editEngineer candidates={engineers.map(user => ({ id: user.id, name: user.name, active: true, roles: user.roles }))} />}

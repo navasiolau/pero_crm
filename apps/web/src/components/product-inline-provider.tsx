@@ -1,14 +1,17 @@
 "use client";
-import {createContext,useContext,useMemo,useRef,useState,type ReactNode} from "react";
+import {createContext,useContext,useEffect,useMemo,useRef,useState,type ReactNode} from "react";
+import type {TechnicalSpecifications} from "@pero/kp-template";
 import {createInlineSaveController,type InlineSaveController,type InlineValue} from "@/lib/inline-save-controller";
 import {productPatchSchema,type ProductPatchField,type ProductPatchDerived} from "@/server/products/patch-contract";
 import {invokeProductPatch} from "@/lib/independent-product-action";
 import {normalizeProductDescription} from "@/lib/product-description";
 import {isUnchangedProductDescriptionDraft} from "@/lib/product-description-draft";
 import {flushProductStatusBarrier} from "@/lib/product-status-barrier";
-type ActiveField=Exclude<ProductPatchField,"client.phone"|"project.address">;
+import {flushSketchCriticalFields} from "@/lib/product-sketch-ui";
+import {createProductTechnicalEditor} from "@/lib/product-technical-editor";
+type ActiveField=Exclude<ProductPatchField,"client.phone"|"project.address"|"technicalSpecificationValue"|"technicalSpecificationSource"|"technicalSpecificationAdd"|"technicalSpecificationRemove">;
 export type ProductInlineInitial=Record<ActiveField,InlineValue>;
-type Context={controller:(field:ActiveField)=>InlineSaveController;flush:()=>Promise<boolean>;registerGuard:(key:string,guard:()=>Promise<boolean>)=>()=>void;derived:ProductPatchDerived;clientId:string;sourceClientId:string};
+type Context={controller:(field:ActiveField)=>InlineSaveController;technical:ReturnType<typeof createProductTechnicalEditor>;flush:()=>Promise<boolean>;registerGuard:(key:string,guard:()=>Promise<boolean>)=>()=>void;derived:ProductPatchDerived;clientId:string;sourceClientId:string};
 const InlineContext=createContext<Context|null>(null);
 function parse(field:ActiveField,raw:string):InlineValue{
  if(field==="description")return normalizeProductDescription(raw);const value=raw.trim();
@@ -16,7 +19,7 @@ function parse(field:ActiveField,raw:string):InlineValue{
  if(field==="expectedPrice"){if(!value)return null;const decimal=value.replace(",",".");if(!/^\d{1,10}(?:\.\d{1,2})?$/.test(decimal))throw Error("Введите неотрицательную цену с точностью до копеек");const[whole,fraction=""]=decimal.split(".");return`${BigInt(whole)}.${fraction.padEnd(2,"0")}`;}
  if(field==="title"||field==="project.clientId"){if(!value)throw Error("Заполните обязательное поле");return value;}return value||null;
 }
-export function ProductInlineProvider({productId,initial,children}:{productId:string;initial:ProductInlineInitial;children:ReactNode}){
+export function ProductInlineProvider({productId,initial,technicalSpecifications=null,children}:{productId:string;initial:ProductInlineInitial;technicalSpecifications?:TechnicalSpecifications|null;children:ReactNode}){
  const guards=useRef(new Map<string,()=>Promise<boolean>>());const[derived,setDerived]=useState<ProductPatchDerived>({clientId:String(initial["project.clientId"])});
  const controllers=useMemo(()=>{
   const result=new Map<ActiveField,InlineSaveController>();for(const field of Object.keys(initial) as ActiveField[]){
@@ -27,7 +30,26 @@ export function ProductInlineProvider({productId,initial,children}:{productId:st
   // Независимые RSC не заменяют черновики и исходные CAS baselines изделия.
   // eslint-disable-next-line react-hooks/exhaustive-deps
  },[productId]);
- const value=useMemo<Context>(()=>({controller:field=>{const controller=controllers.get(field);if(!controller)throw Error("Неизвестное поле изделия");return controller;},flush:()=>flushProductStatusBarrier([...controllers.values()],[...guards.current.values()]),registerGuard:(key,guard)=>{guards.current.set(key,guard);return()=>{if(guards.current.get(key)===guard)guards.current.delete(key);};},derived,clientId:derived.clientId??String(initial["project.clientId"]),sourceClientId:String(initial["project.clientId"])}),[controllers,derived,initial]);
+ const legacy=controllers.get("description")!;
+ const technical=useMemo(()=>createProductTechnicalEditor({
+  productId,initial:technicalSpecifications,send:invokeProductPatch,flushLegacy:()=>flushSketchCriticalFields([legacy]),
+  // Серверные обновления передаются контроллерам через receive.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+ }),[productId,legacy]);
+ useEffect(()=>{
+  const legacyClean=legacy.receive(initial.description);
+  if(technical.getSnapshot().structured||legacyClean)technical.receive(technicalSpecifications);
+ },[legacy,initial.description,technical,technicalSpecifications]);
+ const value=useMemo<Context>(()=>({
+  controller:field=>{const controller=controllers.get(field);if(!controller)throw Error("Неизвестное поле изделия");return controller;},
+  technical,
+  flush:()=>flushProductStatusBarrier(
+   [...controllers].filter(([field])=>field!=="description"||!technical.getSnapshot().structured).map(([,controller])=>controller),
+   [technical.flush,...guards.current.values()],
+  ),
+  registerGuard:(key,guard)=>{guards.current.set(key,guard);return()=>{if(guards.current.get(key)===guard)guards.current.delete(key);};},
+  derived,clientId:derived.clientId??String(initial["project.clientId"]),sourceClientId:String(initial["project.clientId"]),
+ }),[controllers,derived,initial,technical]);
  return<InlineContext.Provider value={value}>{children}</InlineContext.Provider>;
 }
 export function useProductInline(){const value=useContext(InlineContext);if(!value)throw Error("ProductInlineProvider required");return value;}

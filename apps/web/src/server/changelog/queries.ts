@@ -11,6 +11,7 @@ export async function listGlobalChangeLog({ actor, entity, from, to }: GlobalCha
     NOT: { OR: [
       { entity: "task", action: "task.status.request", id: { startsWith: "task-status:" } },
       { entity: "task", action: "task.create.request", id: { startsWith: "task-create:" } },
+      { entity: "product", action: "inline.receipt", id: { startsWith: "product-inline:" } },
     ] },
     ...(actor ? { OR: [
       { actorName: { contains: actor, mode: "insensitive" as const } },

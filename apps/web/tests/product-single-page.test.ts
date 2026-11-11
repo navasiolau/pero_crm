@@ -4,6 +4,7 @@ import * as React from "react";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import test from "node:test";
+import type { TechnicalSpecifications } from "@pero/kp-template";
 import { ProductSinglePage } from "../src/app/(app)/products/[id]/product-overview";
 // Rendering must not resolve or invoke Next's browser-only action transport.
 const require = createRequire(import.meta.url);
@@ -18,13 +19,31 @@ const { ProductInlineProvider } = require("../src/components/product-inline-prov
 const { ProductInlineContacts, ProductInlineDetails } = require("../src/components/product-inline-fields") as typeof import("../src/components/product-inline-fields");
 
 const initial = { title: "Шкаф", kind: null, quantity: 3, expectedPrice: "12.50", engineerId: "engineer", description: "Описание", "project.clientId": "client", "project.address": "Адрес", "client.phone": "+375290000000" };
-function details(canManage: boolean, canEditTech: boolean, showAmount: boolean, expectedPrice: string | null = initial.expectedPrice) {
+function details(canManage: boolean, canEditTech: boolean, showAmount: boolean, expectedPrice: string | null = initial.expectedPrice, technicalSpecifications?: TechnicalSpecifications, canReadTechnical = true) {
   // eslint-disable-next-line react/no-children-prop -- provider requires children in its typed props
-  return renderToStaticMarkup(createElement(ProductInlineProvider, { productId: "product", initial: { ...initial, expectedPrice }, children: createElement(ProductInlineDetails, {
-    canManage, canEditTech, showAmount, currency: "BYN", notice: createElement("p", null, "Нехватка материалов"),
+  return renderToStaticMarkup(createElement(ProductInlineProvider, { productId: "product", initial: { ...initial, expectedPrice }, technicalSpecifications, children: createElement(ProductInlineDetails, {
+    canManage, canEditTech, canReadTechnical, showAmount, currency: "BYN", notice: createElement("p", null, "Нехватка материалов"),
     measurement: createElement("p", null, "Замер"), engineer: createElement("p", null, "Инженер и процент"),
   }) }));
 }
+test("структурированное описание показывает упорядоченные заполненные разделы и сворачиваемый исходник", () => {
+  const specs: TechnicalSpecifications = {
+    sections: [
+      { id: "lighting", type: "lighting", group: "lighting", label: "Подсветка", value: "LED" },
+      { id: "hardware", type: "hardware", group: "hardware", label: "Фурнитура", value: "" },
+      { id: "body", type: "body", group: "construction", label: "Корпус", value: "<script>Дуб</script>" },
+    ],
+    description: "Модель", size: "1800 мм", note: null, sourceGeneration: 1,
+  };
+  const html = details(false, false, false, null, specs);
+  assert.match(html, /<ol[^>]*>.*Корпус.*Подсветка.*<\/ol>/);
+  assert.match(html, /&lt;script&gt;Дуб&lt;\/script&gt;/);
+  assert.match(html, /1800 мм/);
+  assert.match(html, /<details[^>]*>.*Исходное описание.*Описание.*<\/details>/);
+  assert.doesNotMatch(html, /Фурнитура|Добавить раздел|Удалить раздел|<script>/);
+  assert.match(details(false, true, false, null, specs), /Фурнитура.*Добавить раздел/);
+  assert.doesNotMatch(details(false, false, false, null, specs, false), /Корпус|Исходное описание|Техническое описание/);
+});
 test("цена, количество и сумма в общей группе перед описанием → замером → инженером", () => {
   const html = details(true, true, true);
   const markers = ["product-inline-price", "product-inline-quantity", "Сумма:", "product-inline-description", "Замер", "Инженер и процент"];

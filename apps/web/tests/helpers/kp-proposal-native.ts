@@ -29,14 +29,21 @@ export async function verifyProposalCompositionNative(tx: Prisma.TransactionClie
   assert.equal(original.status, "DRAFT"); assert.equal(original.quantity, 2); assert.equal(original.expectedPrice, null);
   assert.equal(original.initialPrice, null); assert.equal(original.initialPriceCaptureEligible, true);
   assert.equal(await tx.productPercentageConfig.count({ where: { productId: firstId } }), 3);
-  assert.match(original.description!, /Размеры: 100\/200/); assert.match(original.description!, /Каркас: ЛДСП/);
-  assert.match(original.description!, /Фасад: МДФ/);
+  assert.equal(original.description, null);
+  const projected = { description: null, size: "100/200", note: null, sourceGeneration: 1, sections: [
+    { id: "legacy-0-title", type: "custom", group: "construction", label: "Секция", value: "Материал наружный: ЛДСП\nМатериал внутренний: МДФ" },
+  ] };
+  assert.deepEqual(original.technicalSpecifications, projected);
   const beforeReplay = await nativeSnapshot(tx);
   const replayed = await core.createProposalInTransaction(tx, actor, request, hooks);
   assert.deepEqual(replayed.result, { ...created.result, repeated: true }); assert.deepEqual(await nativeSnapshot(tx), beforeReplay);
   assert.equal(pricingCalls, 1);
 
-  await tx.product.update({ where: { id: firstId }, data: { status: "DESIGN", engineerId: engineer.id } });
+  const legacyRaw = "  Старое описание\r\n<img src=x>  ";
+  await tx.product.update({ where: { id: firstId }, data: {
+    status: "DESIGN", engineerId: engineer.id, description: legacyRaw,
+    technicalSpecifications: { ...projected, note: "Исправлено в CRM" },
+  } });
   const manual = await tx.product.create({ data: { projectId: created.result.projectId, number: `${created.result.number}.99`, suffixInt: 99,
     title: "Добавлено только в CRM", status: "DRAFT" } });
   const historyCount = await tx.productStatusHistory.count({ where: { productId: firstId } });
@@ -55,6 +62,8 @@ export async function verifyProposalCompositionNative(tx: Prisma.TransactionClie
   const live = await tx.product.findUniqueOrThrow({ where: { id: firstId } });
   assert.equal(live.deletedAt, null); assert.equal(live.status, "DESIGN"); assert.equal(live.engineerId, engineer.id);
   assert.equal(live.createdAt.toISOString(), original.createdAt.toISOString());
+  assert.equal(live.description, legacyRaw);
+  assert.deepEqual(live.technicalSpecifications, { ...projected, sourceGeneration: 2 });
   assert.equal(await tx.productStatusHistory.count({ where: { productId: firstId } }), historyCount);
   assert.equal((await tx.client.findUniqueOrThrow({ where: { id: customer.id } })).phone, "KP181_SAVED");
   const swapped = await core.saveProposalInTransaction(tx, actor, { proposalId: restored.result.proposalId, expectedRevision: restored.result.revision,

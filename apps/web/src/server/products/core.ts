@@ -17,12 +17,14 @@ import { withTaskTransaction, type TaskTransaction } from "@/server/tasks/transa
 import { lockProductRow, recalculateQuantity } from "./quantity-core";
 import { lockProjectRow } from "@/server/projects/lock";
 import { productInitialStatus } from "./draft-core";
-import {warehouseMetadataGate} from '@/server/warehouse/gate';
+import {lockWarehouseMetadata,warehouseMetadataGate} from '@/server/warehouse/gate';
 import { initialPriceCapture, newProductInitialPrice } from "./initial-price";
 import { readProductPercentageDefaults } from "@/server/product-percentage-defaults/core";
 import { DEFAULT_PERCENTAGE_KINDS } from "@/server/product-percentage-defaults/contracts";
 import type { DomainActor } from "../projects/core";
-import { malformedProductPatch, productPatchSchema, type ProductPatch, type ProductPatchResult, type ProductPatchValue, type ProductPatchDerived } from "./patch-contract";
+import FurnitureSpecifications from "@pero/kp-template/furniture-specifications";
+import { applySpecificationPatch, isSpecificationPatch } from "./specification-patch";
+import { malformedProductPatch, productPatchSchema, technicalSpecificationsSchema, type ProductPatch, type ProductPatchResult, type ProductPatchValue, type ProductPatchDerived } from "./patch-contract";
 export const createSchema = z.object({
   projectId: z.string().min(1),
   title: z.string().min(1, "Укажите название изделия"),
@@ -30,6 +32,7 @@ export const createSchema = z.object({
   kind: z.string().optional(),
   expectedPrice: z.number().nonnegative("Цена не может быть отрицательной").optional(),
   description: z.string().optional(),
+  technicalSpecifications: technicalSpecificationsSchema.optional(),
   // Инженер изделия — ответственен за конкретное изделие (§10)
   engineerId: z.string().optional(),
 }).strict();
@@ -75,6 +78,8 @@ export async function createProductCore(actor: DomainActor, input: CreateProduct
   if (!hasAnyRole(actor.roles, MANAGER_ROLES)) throw new Error("Недостаточно прав");
   const parsed = createSchema.safeParse(input);
   if (!parsed.success) return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Ошибка данных" };
+  if ((parsed.data.technicalSpecifications?.sourceGeneration ?? 0) !== 0)
+    return { ok: false as const, error: "Некорректная версия технических характеристик нового изделия" };
   try { productLineTotal(parsed.data.expectedPrice ?? null, parsed.data.quantity); }
   catch (error) { return { ok: false as const, error: error instanceof Error ? error.message : "Некорректная сумма партии" }; }
   return transaction(tx => createProductInTransaction(tx, actor, parsed.data));
@@ -123,7 +128,8 @@ export async function createProductInTransaction(tx: Prisma.TransactionClient, a
       kind: data.kind?.trim() || null,
       expectedPrice: data.expectedPrice,
       ...newProductInitialPrice(data.expectedPrice),
-      description: normalizeProductDescription(data.description),
+      description: data.technicalSpecifications ? null : normalizeProductDescription(data.description),
+      technicalSpecifications: data.technicalSpecifications,
       engineerId: data.engineerId || null,
   // Ставка обязательна из настроек: новые изделия получают снимок дефолтов.
   // Пустых ставок не бывает (решение 06.10.2026: пустое = 0); отсутствующий дефолт тоже 0.
@@ -145,7 +151,8 @@ export async function createProductInTransaction(tx: Prisma.TransactionClient, a
     action: "create",
     newValue: { number, title: data.title, quantity: data.quantity, project: project.number,
       percentageDefaultsRevision: defaults.revision, percentageRates: defaults.rates,
-      initialPrice: product.initialPrice?.toString() ?? null, initialPriceCaptureEligible: data.expectedPrice === undefined },
+      initialPrice: product.initialPrice?.toString() ?? null, initialPriceCaptureEligible: data.expectedPrice === undefined,
+      ...(data.technicalSpecifications ? { technicalSpecifications: data.technicalSpecifications } : {}) },
   } });
   return { ok: true as const, product, numberChanges };
 }
@@ -156,6 +163,8 @@ async function updateProductValues(actor: DomainActor, productId: string, data: 
     const visibilityActor = hasAnyRole(actor.roles, MANAGER_ROLES) ? actor : await resolveVisibilityActor(tx, actor);
     const before = await tx.product.findFirst({ where: {...liveProductWhere, AND: [{ id: productId }, productEditWhere(visibilityActor)] }, include: productDraftAccessRelations });
     if (!before) return { ok: false as const, error: "Изделие не найдено" };
+    if (data.description !== undefined && before.technicalSpecifications != null)
+      return { ok: false as const, error: "Технические характеристики уже обновлены. Откройте карточку заново" };
     if (data.expectedPrice !== undefined || data.quantity !== undefined) {
       const project = await tx.project.findUnique({ where: {...liveProjectWhere, id: before.projectId }, select: { currency: true } });
       if (!project) return { ok: false as const, error: "Проект не найден" };
@@ -219,15 +228,35 @@ export async function patchProductCore(actor: DomainActor, input: ProductPatch, 
   const patch=parsed.data;
   const identity = { field: patch.field, clientMutationId: patch.clientMutationId };
   const manager=hasAnyRole(actor.roles,MANAGER_ROLES);
-  if (!manager && (patch.field!=="description" || !hasRole(actor.roles,"ENGINEER"))) return {...identity,kind:"forbidden",error:"Недостаточно прав"};
+  const technical = isSpecificationPatch(patch);
+  const legacy = patch.field === "description";
+  const contact = patch.field === "client.phone" || patch.field === "project.address" || patch.field === "project.clientId";
+  if (!manager && (!(legacy || technical) || !hasRole(actor.roles,"ENGINEER"))) return {...identity,kind:"forbidden",error:"Недостаточно прав"};
   const receiptId=`product-inline:${patch.clientMutationId}`;
   const fingerprint=createHash("sha256").update(JSON.stringify(patch)).digest("hex");
   try { return await transaction(async(tx):Promise<ProductPatchResult>=> {
     // Права проверяются до replay/conflict; после выхода из DESIGN старый ответ не раскрывается.
     const visibilityActor=manager?actor:await resolveVisibilityActor(tx,actor);
-    const permitted=await tx.product.findFirst({where:{...liveProductWhere,AND:[{id:patch.productId},productEditWhere(visibilityActor)]},select:{id:true,projectId:true,engineerId:true,status:true}});
+    const where = { ...liveProductWhere, AND: [{ id: patch.productId }, productEditWhere(visibilityActor)] };
+    const permitted = await tx.product.findFirst({ where, select: { id: true, projectId: true, engineerId: true, status: true } });
     if (!permitted) return {...identity,kind:"not-found",error:"Изделие не найдено или недоступно"};
-    if (!manager && (permitted.status!=="DESIGN" || permitted.engineerId!==actor.id)) return {...identity,kind:"forbidden",error:"Доступ к техническому блоку изменён"};
+    if (!manager && (permitted.status !== "DESIGN" || permitted.engineerId !== actor.id))
+      return {...identity,kind:"forbidden",error:"Доступ к техническому блоку изменён"};
+    // Контактные правки сами соблюдают порядок блокировок Project/Client.
+    // Для остальных полей receipt читается после блокировки Product.
+    const current = contact ? null : await (async () => {
+      if (patch.field === "quantity") await lockWarehouseMetadata(tx);
+      await lockProductRow(tx, patch.productId);
+      return tx.product.findFirst({ where, select: {
+        id: true, title: true, kind: true, description: legacy, technicalSpecifications: legacy || technical,
+        quantity: true, expectedPrice: true, engineerId: true, status: true,
+      } });
+    })();
+    if (!contact && !current) return {...identity,kind:"not-found",error:"Изделие не найдено или недоступно"};
+    if (current && !manager && (current.status !== "DESIGN" || current.engineerId !== actor.id))
+      return {...identity,kind:"forbidden",error:"Доступ к техническому блоку изменён"};
+    if (legacy && current?.technicalSpecifications != null)
+      return {...identity,kind:"conflict",error:"Технические характеристики уже обновлены. Откройте карточку заново"};
     const receipt=await tx.changeLog.findUnique({where:{id:receiptId}});
     if(receipt) {
       const saved=receipt.newValue;
@@ -243,11 +272,26 @@ export async function patchProductCore(actor: DomainActor, input: ProductPatch, 
         value:patch.value,expectedValue:patch.expectedValue,...(patch.field==="client.phone"?{expectedClientId:patch.expectedClientId}:{})},tx);
       if(!shared.ok)return {...identity,...shared};
       result={...identity,kind:"saved",value:shared.value,noOp:!shared.changed,derived:{clientId:shared.clientId,clientLabel:shared.clientLabel,phone:shared.phone,clientAddress:shared.clientAddress}};
-    } else {
-      await lockProductRow(tx,patch.productId);
-      const current=await tx.product.findFirst({where:{...liveProductWhere,AND:[{id:patch.productId},productEditWhere(visibilityActor)]},select:{id:true,projectId:true,title:true,kind:true,description:patch.field==="description",quantity:true,expectedPrice:true,initialPrice:true,engineerId:true,status:true}});
-      if(!current) return {...identity,kind:"not-found",error:"Изделие не найдено или недоступно"};
-      if(!manager && (current.engineerId!==actor.id||current.status!=="DESIGN")) return {...identity,kind:"forbidden",error:"Доступ к техническому блоку изменён"};
+    } else if (current && technical) {
+      const before = FurnitureSpecifications.normalize(current.technicalSpecifications);
+      if (before === null && current.technicalSpecifications != null)
+        return {...identity,kind:"failure",error:"Технические характеристики имеют неподдерживаемый формат"};
+      if ((before?.sourceGeneration ?? 0) !== patch.expectedSourceGeneration)
+        return {...identity,kind:"conflict",error:"Характеристики обновлены из КП. Откройте карточку заново"};
+      const change = applySpecificationPatch(before, patch);
+      if (!change.ok) return {...identity,kind:"conflict",error:change.error,currentValue:change.currentValue};
+      if (!change.noOp) await tx.product.update({ where: { id: patch.productId }, data: { technicalSpecifications: change.next } });
+      result = {...identity,kind:"saved",value:change.value,noOp:change.noOp};
+      await tx.changeLog.create({ data: {
+        id: receiptId, actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
+        entity: "product", entityId: patch.productId, action: change.noOp ? "inline.receipt" : "inline.update", field: patch.field,
+        ...(change.noOp ? { newValue: json({ fingerprint, result }) } : {
+          oldValue: json({ technicalSpecifications: before }),
+          newValue: json({ fingerprint, result, technicalSpecifications: change.next }),
+        }),
+      } });
+      return result;
+    } else if (current && !technical) {
       const previous=canonical(patch.field,current[patch.field]);
       if(previous!==canonical(patch.field,patch.expectedValue)) return {...identity,kind:"conflict",error:"Поле изменено другим пользователем",currentValue:previous};
       if (patch.field === "description" && isProductDescriptionUnchanged(patch.value, previous as string | null))
@@ -269,8 +313,10 @@ export async function patchProductCore(actor: DomainActor, input: ProductPatch, 
       }
       if(patch.field==="engineerId")derived.engineerLabel=value?(await tx.user.findFirst({where:{id:String(value)},select:{name:true}}))?.name??null:null;
       result={...identity,kind:"saved",value,derived};
+    } else {
+      throw new Error("Не удалось прочитать изделие");
     }
-    if(!result.noOp)await tx.changeLog.create({data:{id:receiptId,actorType:"user",actorId:actor.id,actorName:actor.name,source:actor.source,
+    if(!result.noOp && "expectedValue" in patch)await tx.changeLog.create({data:{id:receiptId,actorType:"user",actorId:actor.id,actorName:actor.name,source:actor.source,
       entity:"product",entityId:patch.productId,action:"inline.update",field:patch.field,oldValue:json({value:patch.expectedValue}),newValue:json({fingerprint,result})}});
     return result;
   }); }catch(error){return {...identity,kind:"failure",error:error instanceof Error?error.message:"Не удалось сохранить поле"};}

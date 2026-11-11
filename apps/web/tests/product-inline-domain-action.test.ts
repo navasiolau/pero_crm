@@ -14,7 +14,7 @@ before(()=>{
  inject("next/cache",{revalidatePath:()=>calls.push("path"),revalidateTag:()=>calls.push("tag")});
  inject("../src/server/products/revalidate",{revalidateProductPaths:async()=>{calls.push("product-revalidate");await invalidationGate;}});
  inject("../src/server/products/core",{
-  patchProductCore:async(actor:{id:string},input:ProductPatch)=>{assert.equal(actor.id,"m");calls.push("patch-core");return{kind:"saved",field:input.field,value:input.value,clientMutationId:input.clientMutationId};},
+  patchProductCore:async(actor:{id:string},input:ProductPatch)=>{assert.equal(actor.id,"m");calls.push("patch-core");return{kind:"saved",field:input.field,value:"value" in input?input.value:null,clientMutationId:input.clientMutationId};},
   createProductCore:async()=>({ok:true,product:{id:"product",projectId:"project"}}),
  });
  action=require("../src/server/products/actions");
