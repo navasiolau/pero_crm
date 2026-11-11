@@ -38,7 +38,7 @@ test('web package smoke actually reads every permitted source asset, limits and 
   assert.equal(processState.exitCode, undefined); assert.deepEqual(logs, [result]);
 });
 
-test('missing package entry and missing limits fail through genuine Node package resolution', () => {
+test('missing package entry, specifications and limits fail through genuine Node package resolution', () => {
   const directory = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'pero-kp-package-'))), load = createRequire(path.join(directory, 'caller.cjs'));
   try {
     const source = path.dirname(createRequire(import.meta.url).resolve('@pero/kp-template'));
@@ -47,6 +47,10 @@ test('missing package entry and missing limits fail through genuine Node package
     assert.throws(() => templateSmoke.verifyPackage(templateSmoke.expectedPackage(), load), error => error.code === 'MODULE_NOT_FOUND' && error.kpPhase === 'require' && error.message.includes('index.cjs'));
     for (const file of ['package.json', 'index.cjs', 'source-manifest.json', 'fonts-manifest.json', 'assets/public/js/sheet-render.js', 'assets/public/js/contract-model.js'])
       copyFileSync(path.join(source, file), path.join(target, file));
+    assert.throws(() => templateSmoke.verifyPackage(templateSmoke.expectedPackage(), load), error => error.code === 'MODULE_NOT_FOUND' && error.kpPhase === 'require' && error.message.includes('furniture-specifications.js'));
+    copyFileSync(path.join(source, 'furniture-specifications.js'), path.join(target, 'furniture-specifications.js'));
+    assert.throws(() => templateSmoke.verifyPackage(templateSmoke.expectedPackage(), load), error => error.code === 'MODULE_NOT_FOUND' && error.kpPhase === 'require' && error.message.includes('assets/public/js/furniture-specifications.js'));
+    copyFileSync(path.join(source, 'assets/public/js/furniture-specifications.js'), path.join(target, 'assets/public/js/furniture-specifications.js'));
     assert.throws(() => templateSmoke.verifyPackage(templateSmoke.expectedPackage(), load), error => error.code === 'MODULE_NOT_FOUND' && error.kpPhase === 'require' && error.message.includes('limits.cjs'));
   } finally {
     assert.equal(path.dirname(directory), realpathSync(os.tmpdir())); assert.ok(path.basename(directory).startsWith('pero-kp-package-'));
