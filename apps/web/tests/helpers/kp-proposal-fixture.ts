@@ -86,11 +86,16 @@ export function proposalFixture() {
       update: async ({ where, data }: Write) => update(state.projects, where!, data),
     },
     product: {
+      // Для технической правки менеджера Prisma передаёт ID в верхнем AND.
+      findFirst: async ({ where }: { where: Filter & { AND: [{ id: string }, unknown] } }) => {
+        const product = find(state.products, { id: where.AND[0].id, deletedAt: null });
+        return product && find(state.projects, { id: product.projectId, deletedAt: null }) ? product : null;
+      },
       findMany: async ({ where }: { where: Filter }) => clone(state.products.filter(row => matches(row, where))),
       findUnique: async ({ where }: { where: Filter }) => find(state.products, where),
       create: async ({ data }: Write) => {
         const row = { id: sequence("product"), deletedAt: null, deletedById: null, engineerId: null,
-          expectedPrice: null, initialPrice: null, kind: null, description: null, createdAt: new Date(0), updatedAt: new Date(0), ...defined(data) };
+          expectedPrice: null, initialPrice: null, kind: null, description: null, technicalSpecifications: null, createdAt: new Date(0), updatedAt: new Date(0), ...defined(data) };
         uniqueNumber(row); state.products.push(row); state.writes.push(`product:${row.id}`);
         const history = data.statusHistory as { create: Record<string, unknown> };
         state.statusHistory.push({ id: sequence("status"), productId: row.id, ...history.create });

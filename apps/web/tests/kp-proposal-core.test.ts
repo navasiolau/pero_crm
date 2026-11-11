@@ -3,7 +3,7 @@ import test from "node:test";
 import { randomUUID } from "node:crypto";
 import { createProposalInTransaction, saveProposalInTransaction } from "../src/server/kp/proposal-core";
 import { createProjectInTransaction } from "../src/server/projects/core";
-import { createProductInTransaction } from "../src/server/products/core";
+import { createProductInTransaction, patchProductCore } from "../src/server/products/core";
 import { promoteProjectDrafts } from "../src/server/products/draft-core";
 import type { ProposalWriteResult } from "../src/server/kp/proposal-contract";
 import { proposalFixture, type FixtureRow } from "./helpers/kp-proposal-fixture";
@@ -174,6 +174,61 @@ test("unchanged source still restores manual CRM edits and pricing changes parti
     proposalId: updated.result.proposalId, expectedRevision: updated.result.revision, state: updated.result.state },
   { ...f.hooks, pricingFingerprint: "new-fixed-rate", applyPricing: async () => ({ changed: true }) }));
   assert.equal(priced.result.revision, 2);
+});
+
+test("legacy projection preserves the raw Product text, clears absent fields, and participates in revision and audit", async () => {
+  const f = proposalFixture();
+  const initial = await create(f, [{ id: "one", name: "Изделие", description: "<b>Описание</b>", size: "100/200", note: "Исходное",
+    products: [{ title: "Каркас", outer: "Дуб", unknown: { retained: true } }] }]);
+  const id = initial.result.items[0].productId;
+  const raw = "  старый\r\n<b>текст</b>  ";
+  const row = product(f, id);
+  assert.equal(row.description, null);
+  const projected = { description: "<b>Описание</b>", size: "100/200", note: "Исходное", sourceGeneration: 1,
+    sections: [{ id: "body", type: "body", group: "construction", label: "Корпус", value: "Дуб" }] };
+  assert.deepEqual(row.technicalSpecifications, projected);
+  assert.deepEqual(initial.result.state.items[0].products, [{ title: "Каркас", outer: "Дуб", unknown: { retained: true } }]);
+  row.description = raw;
+  const manual = { ...projected, note: "Ручная правка" };
+  row.technicalSpecifications = manual;
+  const restored = await save(f, initial.result);
+  assert.equal(restored.result.revision, initial.result.revision + 1);
+  assert.equal(product(f, id).description, raw);
+  assert.deepEqual(product(f, id).technicalSpecifications, { ...projected, sourceGeneration: 2 });
+  const audit = f.state.logs.filter(log => log.entityId === id && log.action === "kp.synchronize").at(-1);
+  assert.deepEqual((audit?.oldValue as Record<string, unknown>).technicalSpecifications, manual);
+  assert.deepEqual((audit?.newValue as Record<string, unknown>).technicalSpecifications, { ...projected, sourceGeneration: 2 });
+  assert.equal((await save(f, restored.result)).result.noOp, true);
+
+  const cleared = await save(f, restored.result, { ...restored.result.state, items: [{ id: "one", name: "Изделие", qty: 1 }] });
+  assert.equal(cleared.result.noOp, false);
+  assert.equal(product(f, id).description, raw);
+  assert.deepEqual(product(f, id).technicalSpecifications, { description: null, size: null, note: null, sections: [], sourceGeneration: 3 });
+});
+
+test("proposal sync blocks a stale value patch even when a deleted legacy row returns with identical ID and value", async () => {
+  const f = proposalFixture();
+  const initial = await create(f, [{ id: "one", name: "Изделие", products: [{ title: "Каркас" }] }]);
+  const productId = initial.result.items[0].productId;
+  const body = { id: "body", type: "body", group: "construction", label: "Корпус", value: "" } as const;
+  const stale = { productId, clientMutationId: randomUUID(), field: "technicalSpecificationValue",
+    sectionId: "body", expectedValue: "", value: "Запоздавшая запись", expectedSourceGeneration: 1 } as const;
+  const remove = { productId, clientMutationId: randomUUID(), field: "technicalSpecificationRemove",
+    section: body, expectedSourceGeneration: 1 } as const;
+  const removed = await patchProductCore(actor, remove, f.transaction);
+  assert.equal(removed.kind, "saved");
+  assert.deepEqual(product(f, productId).technicalSpecifications, {
+    description: null, size: null, note: null, sections: [], sourceGeneration: 1,
+  });
+  const restored = await save(f, initial.result);
+  assert.equal(restored.result.noOp, false);
+  const synced = { description: null, size: null, note: null, sections: [body], sourceGeneration: 2 };
+  assert.deepEqual(product(f, productId).technicalSpecifications, synced);
+  assert.equal((await patchProductCore(actor, stale, f.transaction)).kind, "conflict");
+  assert.deepEqual(await patchProductCore(actor, remove, f.transaction), { ...removed, repeated: true });
+  assert.deepEqual(product(f, productId).technicalSpecifications, synced);
+  assert.equal((await save(f, restored.result)).result.noOp, true);
+  assert.deepEqual(product(f, productId).technicalSpecifications, synced);
 });
 
 test("hook, CAS and outbox failures roll back project/client/composition and receipts together", async () => {

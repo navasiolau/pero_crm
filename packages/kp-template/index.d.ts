@@ -28,3 +28,20 @@ export const ContractModel: {
 export const contractTemplateVersion: number;
 export function contractFileName(number: string): string;
 export function generateDocx(settings: unknown, summary: unknown, profile: unknown, rendered: unknown): Promise<Buffer>;
+
+export type FurnitureSectionGroup = 'construction' | 'hardware' | 'lighting' | 'filling';
+export type FurnitureSectionType = 'body' | 'facade' | 'worktop' | 'upholstery' | 'insertsAndHandles' |
+  'hardware' | 'lighting' | 'interiorFilling' | 'softFilling' | 'custom';
+export type FurnitureSection = { id: string; type: FurnitureSectionType; group: FurnitureSectionGroup; label: string; value: string };
+export type FurnitureSourceField = 'description' | 'size' | 'note';
+export type TechnicalSpecifications = Record<FurnitureSourceField, string | null> & { sections: FurnitureSection[]; sourceGeneration: number };
+export const FurnitureSpecifications: {
+  GROUPS: readonly Readonly<{ id: FurnitureSectionGroup; label: string }>[];
+  CATALOG: readonly Readonly<{ type: Exclude<FurnitureSectionType, 'custom'>; group: FurnitureSectionGroup; label: string }>[];
+  SOURCE_FIELDS: readonly FurnitureSourceField[];
+  empty(): TechnicalSpecifications;
+  orderedSections(sections: readonly FurnitureSection[]): FurnitureSection[];
+  fromLegacy(input: unknown): TechnicalSpecifications;
+  normalize(input: unknown): TechnicalSpecifications | null;
+  normalizeSection(input: unknown): FurnitureSection | null;
+};

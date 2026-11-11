@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
+import FurnitureSpecifications from "@pero/kp-template/furniture-specifications";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -14,8 +15,8 @@ import {
 import { ProductQuantityInput } from "@/components/product-quantity-input";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { SearchableSelect } from "@/components/ui/searchable-select";
+import { NewProductTechnicalSpecifications } from "@/components/product-technical-editor-fields";
 import { createProduct } from "@/server/products/actions";
 
 export function CreateProductDialog({
@@ -43,7 +44,7 @@ export function CreateProductDialog({
   const [kind, setKind] = useState("");
   const [quantity, setQuantity] = useState("1");
   const [price, setPrice] = useState("");
-  const [description, setDescription] = useState("");
+  const [technicalSpecifications, setTechnicalSpecifications] = useState(FurnitureSpecifications.empty);
   const [engineerId, setEngineerId] = useState("");
 
   const parsedPrice = price.trim() === "" ? undefined : Number(price);
@@ -63,7 +64,7 @@ export function CreateProductDialog({
           setKind("");
           setPrice("");
           setQuantity("1");
-          setDescription("");
+          setTechnicalSpecifications(FurnitureSpecifications.empty());
           setEngineerId("");
         }
       }}
@@ -106,15 +107,7 @@ export function CreateProductDialog({
               placeholder="не обязательно"
             />
           </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="product-description">Технический блок</Label>
-            <Textarea
-              id="product-description"
-              value={description}
-              onChange={(event) => setDescription(event.target.value)}
-              placeholder="Материалы, размеры, особенности…"
-            />
-          </div>
+          <NewProductTechnicalSpecifications value={technicalSpecifications} onChange={setTechnicalSpecifications} disabled={busy} />
           <div className="flex flex-col gap-1.5">
             <Label>Инженер</Label>
             <SearchableSelect
@@ -141,7 +134,7 @@ export function CreateProductDialog({
                   kind: kind.trim() || undefined,
                   expectedPrice: parsedPrice,
                   quantity: parsedQuantity,
-                  description,
+                  technicalSpecifications,
                   engineerId: engineerId || undefined,
                 });
                 if (result.ok) {
@@ -151,7 +144,7 @@ export function CreateProductDialog({
                   setKind("");
                   setPrice("");
                   setQuantity("1");
-                  setDescription("");
+                  setTechnicalSpecifications(FurnitureSpecifications.empty());
                   onCreated();
                 } else {
                   toast.error(result.error ?? "Ошибка");

@@ -1,3 +1,4 @@
+import FurnitureSpecifications from "@pero/kp-template/furniture-specifications";
 import {maskProductionRead,maskProductionWorkRead,maskTaskPaymentRead} from "@/server/access/production-read-projection";
 import type { Prisma, ProductStatus, Role } from "@prisma/client";
 
@@ -315,5 +316,6 @@ export async function getProductFor(
     },
   });
   if(!product)return null;
-  return (await maskProductionRead(prisma,actor,[{...product,canAccessDraft:canAccessProductDraft(actor.roles,product),tasks:maskTaskPaymentRead(actor,product.tasks),works:await maskProductionWorkRead(prisma,actor,product.works.map(work => ({...work,canDistributePiecework:canManagePiecework(actor.roles)&&ordinaryPieceworkBinding(work)&&work.priceSnapshot!==null})))}]))[0];
+  const [masked] = await maskProductionRead(prisma,actor,[{...product,canAccessDraft:canAccessProductDraft(actor.roles,product),tasks:maskTaskPaymentRead(actor,product.tasks),works:await maskProductionWorkRead(prisma,actor,product.works.map(work => ({...work,canDistributePiecework:canManagePiecework(actor.roles)&&ordinaryPieceworkBinding(work)&&work.priceSnapshot!==null})))}]);
+  return { ...masked, technicalSpecifications: FurnitureSpecifications.normalize(masked.technicalSpecifications) };
 }

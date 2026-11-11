@@ -5,13 +5,14 @@ const { createHash } = require('node:crypto');
 const sourceManifest = require('./source-manifest.json');
 const fontManifest = require('./fonts-manifest.json');
 const assetRoot = path.join(__dirname, 'assets');
+const FurnitureSpecifications = require('./furniture-specifications.js');
 const SheetRender = require('./assets/public/js/sheet-render.js');
 const ContractModel = require('./assets/public/js/contract-model.js');
 const publicNames = new Set([
   'public/css/app.css', 'public/css/contract.css',
   'public/js/app.js', 'public/js/sheet-render.js', 'public/js/contract-model.js', 'public/js/contract-editor.js',
   'public/js/crm-transport.js', 'public/css/crm.css', 'public/fonts/fonts.css', 'public/icons/apple-touch-icon.png',
-  'public/js/kp-list.js', 'public/js/kp-local-state.js',
+  'public/js/kp-list.js', 'public/js/kp-local-state.js', 'public/js/furniture-specifications.js',
   ...fontManifest.files.map(font => font.path),
 ]);
 function assetPath(name) {
@@ -45,7 +46,7 @@ function getKpTemplateIdentity() {
   return { version: 'kp-2026-10-18-1', templateHash: digest(JSON.stringify({ hashes, sourceManifestHash, fontManifestHash })), sourceManifestHash,
     fontManifestHash, chromium: '141.0.0', puppeteer: '24.43.1' };
 }
-module.exports = { SheetRender, ContractModel, sourceManifest, fontManifest, assetRoot, assetPath, browserAsset, fontCss, offlinePrintHTML,
+module.exports = { FurnitureSpecifications, SheetRender, ContractModel, sourceManifest, fontManifest, assetRoot, assetPath, browserAsset, fontCss, offlinePrintHTML,
   KP_RENDER_LIMITS: require('./limits.cjs'),
   getKpTemplateIdentity,
   contractFileName: number => 'contract_' + SheetRender.toLatin(number).replace(/[^a-zA-Z0-9_.-]/g, '_') + '_Pero.docx',

@@ -9,6 +9,7 @@ import {confirmedProductClientContacts,type ProductClientContact} from "@/lib/pr
 import {InlineQuantityField} from "@/components/product-quantity-input";
 import {productDraftTotal} from "@/lib/product-quantity-input";
 import { formatAmount } from "@/lib/format";
+import { ProductTechnicalSpecifications } from "@/components/product-technical-specifications";
 import type { InlineSaveController } from "@/lib/inline-save-controller";
 export function ProductInlineTitle({ number, canManage }: { number: string; canManage: boolean }) {
   const { controller } = useProductInline();
@@ -37,8 +38,8 @@ function ProductLiveTotal({ price, quantity, currency }: {
   const total = productDraftTotal(p, q);
   return <div className="min-w-0 break-words pt-6" aria-live="polite">Сумма: {formatAmount(total,currency)}</div>;
 }
-export function ProductInlineDetails({ canManage, canEditTech, showAmount, currency, measurement, engineer, notice }: {
-  canManage: boolean; canEditTech: boolean; showAmount: boolean; currency: string;
+export function ProductInlineDetails({ canManage, canEditTech, canEditStructured = canEditTech, canReadTechnical = true, showAmount, currency, measurement, engineer, notice }: {
+  canManage: boolean; canEditTech: boolean; canEditStructured?: boolean; canReadTechnical?: boolean; showAmount: boolean; currency: string;
   notice?: ReactNode; measurement: ReactNode; engineer: ReactNode;
 }) {
   const { controller } = useProductInline();
@@ -51,7 +52,7 @@ export function ProductInlineDetails({ canManage, canEditTech, showAmount, curre
       <InlineQuantityField controller={quantity} readOnly={!canManage}/>
       {showAmount?<ProductLiveTotal price={price} quantity={quantity} currency={currency}/>:null}
     </CardContent></Card>
-    <Card className="min-w-0"><CardContent className="min-w-0 p-4"><InlineTextField id="product-inline-description" label="Техническое описание" controller={controller("description")} readOnly={!canEditTech} multiline largeDescription /></CardContent></Card>
+    {canReadTechnical && <Card className="min-w-0"><CardContent className="min-w-0 p-4"><ProductTechnicalSpecifications canEditLegacy={canEditTech} canEdit={canEditStructured} /></CardContent></Card>}
     {measurement}
     {engineer}
   </div>;
