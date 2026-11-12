@@ -6,4 +6,4 @@
 
 ## 2. Проверка и staging
 - [x] 2.1 Пройти typecheck/lint/build, затронутые тесты и независимый review; проверить простое поле и перенос на существующей local DB, сохранить screenshots/evidence.
-- [ ] 2.2 Normal commit/merge/push staging, штатный CI/deployment; root проверяет actual SHA/образ, ввод и reload без дополнительных нажатий, ограниченный перенос из КП, фиксирует приёмку.
+- [x] 2.2 Normal commit/merge/push staging, штатный CI/deployment; root проверяет actual SHA/образ, ввод и reload без дополнительных нажатий, ограниченный перенос из КП, фиксирует приёмку.
