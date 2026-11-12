@@ -32,6 +32,17 @@ test('плоский список: autosave без blur, IME, replay, очере
  await page.evaluate(()=>window.__mode='hold');await row.fill('Очередь 1');await expect.poll(()=>page.evaluate(()=>window.__requests.length)).toBe(3);await row.fill('Очередь 2');await page.waitForTimeout(450);await page.evaluate(()=>{window.__mode='saved';window.__release();});await expect.poll(()=>page.evaluate(()=>window.__requests.length)).toBe(4);assert.equal(await page.evaluate(()=>window.__requests[3].expectedValue),'Очередь 1');
  await page.evaluate(()=>window.__mode='lost');await row.fill('Потерянный ответ');await expect(row).toHaveAttribute('aria-invalid','true');await page.evaluate(()=>window.__mode='saved');await row.press('Control+Enter');await expect(row).toHaveAttribute('aria-invalid','false');assert.deepEqual(await page.evaluate(()=>window.__requests.at(-1)),await page.evaluate(()=>window.__requests.at(-2)));
  await list.getByLabel('Фурнитура',{exact:true}).fill('Петли');assert.equal(await page.evaluate(()=>window.__flush()),true);await page.waitForTimeout(250);await page.screenshot({path:path.join(directory,`list-${width}.png`),fullPage:true});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);assert.deepEqual(errors,[]);await page.close();}
+ const resized=await browser.newPage({viewport:{width:1440,height:1000}});
+ await resized.goto(origin);const resizedBody=resized.getByLabel('Корпус',{exact:true}),resizedHardware=resized.getByLabel('Фурнитура',{exact:true});
+ await resizedBody.fill('ЛДСП EGGER Серый Кашемир — материал корпуса и внутренних перегородок');
+ await resizedHardware.fill('Петли Blum с доводчиком\nНаправляющие полного выдвижения, скрытого монтажа');
+ for(const width of [1440,390,1440,390]){
+  await resized.setViewportSize({width,height:1000});await resized.evaluate(()=>document.fonts.ready);
+  await expect.poll(()=>resized.locator('textarea').evaluateAll(nodes=>nodes.every(node=>node.scrollHeight<=node.clientHeight))).toBe(true);
+  assert.equal(await resizedBody.inputValue(),'ЛДСП EGGER Серый Кашемир — материал корпуса и внутренних перегородок');
+  assert.equal(await resizedHardware.inputValue(),'Петли Blum с доводчиком\nНаправляющие полного выдвижения, скрытого монтажа');
+ }
+ await resized.screenshot({path:path.join(directory,'resize-1440-390.png'),fullPage:true});await resized.close();
  const page=await browser.newPage();await page.goto(origin+'/?readonly');await expect(page.locator('ol > li')).toHaveCount(9);await expect(page.locator('textarea,button')).toHaveCount(0);await page.goto(origin+'/?create');await expect(page.locator('[data-product-technical-specifications]')).toHaveCount(2);await expect(page.locator('ol > li')).toHaveCount(18);await page.close();
  }finally{await browser.close();await new Promise(resolve=>server.close(resolve));}
 });

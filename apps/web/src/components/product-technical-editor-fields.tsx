@@ -13,6 +13,12 @@ export function TechnicalList({ children }: { children: ReactNode }) {
   </section>;
 }
 
+function fitTextarea(element: HTMLTextAreaElement) {
+  element.style.height = "auto";
+  const borders = element.offsetHeight - element.clientHeight;
+  element.style.height = `${element.scrollHeight + borders}px`;
+}
+
 export function TechnicalText({ label, value, onChange, onCommit, issue, disabled, autosave = false }: {
   label: string; value: string; onChange?: (value: string) => void; onCommit?: () => void;
   issue?: string | null; disabled?: boolean; autosave?: boolean;
@@ -24,11 +30,25 @@ export function TechnicalText({ label, value, onChange, onCommit, issue, disable
   function cancel() { if (timer.current) clearTimeout(timer.current); timer.current = null; }
   function schedule() { cancel(); if (autosave && !composing.current) timer.current = setTimeout(() => onCommit?.(), 400); }
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
+  const editable = Boolean(onChange);
   useLayoutEffect(() => {
-    if (!textarea.current) return;
-    textarea.current.style.height = "auto";
-    textarea.current.style.height = `${textarea.current.scrollHeight}px`;
+    if (textarea.current) fitTextarea(textarea.current);
   }, [value]);
+  useLayoutEffect(() => {
+    const element = textarea.current;
+    if (!element) return;
+    let active = true;
+    let width = -1;
+    const observer = new ResizeObserver(entries => {
+      const nextWidth = entries[0]?.contentRect.width;
+      if (nextWidth === undefined || nextWidth === width) return;
+      width = nextWidth;
+      fitTextarea(element);
+    });
+    observer.observe(element);
+    void document.fonts.ready.then(() => { if (active) fitTextarea(element); });
+    return () => { active = false; observer.disconnect(); };
+  }, [editable]);
   return <li className="min-w-0 ps-1">
     <Label htmlFor={onChange ? id : undefined} className="mb-1 block text-sm font-medium">{label}</Label>
     {onChange ? <Textarea ref={textarea} id={id} rows={1} value={value} readOnly={disabled}
