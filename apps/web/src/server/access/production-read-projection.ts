@@ -1,3 +1,4 @@
+import FurnitureSpecifications from "@pero/kp-template/furniture-specifications";
 import type {PrismaClient} from '@prisma/client';
 import {hasAnyRole,FIELD_ROLES} from '@/lib/roles';
 import {canViewProductMoney} from '@/lib/product-financial-access';
@@ -11,7 +12,9 @@ export async function maskProductionRead<T extends {id:string}>(db:Pick<PrismaCl
  const ids=new Set(assigned.map(row=>row.id));
  return rows.map(row=>{
   const canReadTechnicalSpecifications=!restrictTechnical||ids.has(row.id);
-  return {...row,canReadTechnicalSpecifications,...(!money?{expectedPrice:null,initialPrice:null}:{}),
+  const technical = "technicalSpecifications" in row && row.technicalSpecifications != null
+   ? {technicalSpecifications:FurnitureSpecifications.forProduct(row.technicalSpecifications)} : {};
+  return {...row,...technical,canReadTechnicalSpecifications,...(!money?{expectedPrice:null,initialPrice:null}:{}),
    ...(!canReadTechnicalSpecifications?{description:null,technicalSpecifications:null}:{})};
  });
 }

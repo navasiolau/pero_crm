@@ -26,7 +26,7 @@ function details(canManage: boolean, canEditTech: boolean, showAmount: boolean, 
     measurement: createElement("p", null, "Замер"), engineer: createElement("p", null, "Инженер и процент"),
   }) }));
 }
-test("структурированное описание показывает упорядоченные заполненные разделы и сворачиваемый исходник", () => {
+test("техническое описание показывает девять фиксированных строк без исходного текста", () => {
   const specs: TechnicalSpecifications = {
     sections: [
       { id: "lighting", type: "lighting", group: "lighting", label: "Подсветка", value: "LED" },
@@ -38,15 +38,27 @@ test("структурированное описание показывает �
   const html = details(false, false, false, null, specs);
   assert.match(html, /<ol[^>]*>.*Корпус.*Подсветка.*<\/ol>/);
   assert.match(html, /&lt;script&gt;Дуб&lt;\/script&gt;/);
-  assert.match(html, /1800 мм/);
-  assert.match(html, /<details[^>]*>.*Исходное описание.*Описание.*<\/details>/);
-  assert.doesNotMatch(html, /Фурнитура|Добавить раздел|Удалить раздел|<script>/);
-  assert.match(details(false, true, false, null, specs), /Фурнитура.*Добавить раздел/);
+  assert.equal((html.match(/<li\b/g) ?? []).length, 9);
+  assert.match(html, /Фурнитура/);
+  assert.doesNotMatch(html, /1800 мм|Модель|Исходное описание|<details|Добавить раздел|Удалить раздел|<script>|<textarea/);
+  assert.equal((details(false, true, false, null, specs).match(/<textarea\b/g) ?? []).length, 9);
   assert.doesNotMatch(details(false, false, false, null, specs, false), /Корпус|Исходное описание|Техническое описание/);
+});
+test("длинный многострочный материал сохранён целиком и защищён от HTML в редакторе и чтении", () => {
+  const value = "Дуб натуральный\n".repeat(500) + "<script>текст</script>";
+  const specs: TechnicalSpecifications = { sections: [{ id: "body", type: "body", group: "construction", label: "Корпус", value }], description: null, size: null, note: null, sourceGeneration: 0 };
+  for (const editable of [false, true]) {
+    const html = details(false, editable, false, null, specs);
+    assert.equal((html.match(/Дуб натуральный/g) ?? []).length, 500);
+    assert.match(html, /&lt;script&gt;текст&lt;\/script&gt;/);
+    assert.doesNotMatch(html, /<script>/);
+    assert.match(html, editable ? /overflow-hidden/ : /whitespace-pre-wrap/);
+    assert.match(html, /overflow-wrap:anywhere/);
+  }
 });
 test("цена, количество и сумма в общей группе перед описанием → замером → инженером", () => {
   const html = details(true, true, true);
-  const markers = ["product-inline-price", "product-inline-quantity", "Сумма:", "product-inline-description", "Замер", "Инженер и процент"];
+  const markers = ["product-inline-price", "product-inline-quantity", "Сумма:", "data-product-technical-specifications", "Замер", "Инженер и процент"];
   const positions = markers.map(marker => html.indexOf(marker));
   assert.ok(positions.every(position => position >= 0));
   assert.deepEqual([...positions].sort((a, b) => a - b), positions);
@@ -58,10 +70,12 @@ test("цена, количество и сумма в общей группе п
   const reader = details(false, false, false);
   assert.doesNotMatch(reader, /product-inline-price/);
   assert.match(reader, /id="product-inline-quantity"[^>]*readOnly=""/);
-  assert.match(reader, /id="product-inline-description"[^>]*readOnly=""/);
+  assert.doesNotMatch(reader, /<textarea/);
+  assert.match(reader, /data-product-technical-specifications/);
   const engineer = details(false, true, true);
   assert.match(engineer, /id="product-inline-quantity"[^>]*readOnly=""/);
-  assert.doesNotMatch(engineer, /id="product-inline-description"[^>]*readOnly=""/);
+  assert.equal((engineer.match(/<textarea\b/g) ?? []).length, 9);
+  assert.doesNotMatch(engineer, /<textarea[^>]*readOnly/);
   // eslint-disable-next-line react/no-children-prop -- provider requires children in its typed props
   const contacts = renderToStaticMarkup(createElement(ProductInlineProvider, { productId: "product", initial,
     children: createElement(ProductInlineContacts, { canManage: false, clients: [{id: "client", label: "Клиент", phone: "+375290000000", address: "Адрес клиента"}] }) }));

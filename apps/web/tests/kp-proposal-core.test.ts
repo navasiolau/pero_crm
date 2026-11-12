@@ -76,7 +76,7 @@ test("existing legacy state converts once, then clear, stale writer, replay and 
   assert.ok(item.specifications.every(section => (section as { type: string }).type === "custom"));
   assert.deepEqual(f.state.proposals[0].state, converted.result.state, "ACK совпадает с сохранённым снимком");
   const productId = converted.result.items[0].productId;
-  assert.deepEqual((product(f, productId).technicalSpecifications as { sections: unknown[] }).sections, item.specifications);
+  assert.deepEqual((product(f, productId).technicalSpecifications as { sections: unknown[] }).sections, []);
   const beforeReplay = f.cloneState();
   assert.deepEqual((await f.transaction(tx => saveProposalInTransaction(tx, actor, command, f.hooks))).result,
     { ...converted.result, repeated: true });
@@ -99,7 +99,7 @@ test("existing legacy state converts once, then clear, stale writer, replay and 
     ...command, operationId: randomUUID(), expectedRevision: cleared.result.revision,
   }, { ...f.hooks, restoreVersion: true }));
   assert.deepEqual(restored.result.state.items[0].specifications, item.specifications, "исторический снимок даёт те же ID");
-  assert.deepEqual((product(f, productId).technicalSpecifications as { sections: unknown[] }).sections, item.specifications);
+  assert.deepEqual((product(f, productId).technicalSpecifications as { sections: unknown[] }).sections, []);
   assert.deepEqual(historic, historicBefore);
 });
 
@@ -231,7 +231,7 @@ test("legacy projection preserves the raw Product text, clears absent fields, an
   const raw = "  старый\r\n<b>текст</b>  ";
   const row = product(f, id);
   assert.equal(row.description, null);
-  const projected = { description: "<b>Описание</b>", size: "100/200", note: "Исходное", sourceGeneration: 1,
+  const projected = { description: null, size: null, note: null, sourceGeneration: 1,
     sections: [{ id: "body", type: "body", group: "construction", label: "Корпус", value: "Дуб" }] };
   assert.deepEqual(row.technicalSpecifications, projected);
   assert.deepEqual(initial.result.state.items[0].products, [{ title: "Каркас", outer: "Дуб", unknown: { retained: true } }]);
@@ -259,12 +259,11 @@ test("proposal sync blocks a stale value patch even when a deleted legacy row re
   const initial = await create(f, [{ id: "one", name: "Изделие", products: [{ title: "Каркас" }] }]);
   const productId = initial.result.items[0].productId;
   const body = { id: "body", type: "body", group: "construction", label: "Корпус", value: "" } as const;
-  const stale = { productId, clientMutationId: randomUUID(), field: "technicalSpecificationValue",
-    sectionId: "body", expectedValue: "", value: "Запоздавшая запись", expectedSourceGeneration: 1 } as const;
-  const remove = { productId, clientMutationId: randomUUID(), field: "technicalSpecificationRemove",
-    section: body, expectedSourceGeneration: 1 } as const;
-  const removed = await patchProductCore(actor, remove, f.transaction);
-  assert.equal(removed.kind, "saved");
+  const stale = { productId, clientMutationId: randomUUID(), field: "technicalSpecificationEntry",
+    type: "body", expectedSectionId: "body", expectedValue: "", value: "Запоздавшая запись", expectedSourceGeneration: 1 } as const;
+  product(f, productId).technicalSpecifications = {
+    description: null, size: null, note: null, sections: [], sourceGeneration: 1,
+  };
   assert.deepEqual(product(f, productId).technicalSpecifications, {
     description: null, size: null, note: null, sections: [], sourceGeneration: 1,
   });
@@ -273,7 +272,6 @@ test("proposal sync blocks a stale value patch even when a deleted legacy row re
   const synced = { description: null, size: null, note: null, sections: [body], sourceGeneration: 2 };
   assert.deepEqual(product(f, productId).technicalSpecifications, synced);
   assert.equal((await patchProductCore(actor, stale, f.transaction)).kind, "conflict");
-  assert.deepEqual(await patchProductCore(actor, remove, f.transaction), { ...removed, repeated: true });
   assert.deepEqual(product(f, productId).technicalSpecifications, synced);
   assert.equal((await save(f, restored.result)).result.noOp, true);
   assert.deepEqual(product(f, productId).technicalSpecifications, synced);

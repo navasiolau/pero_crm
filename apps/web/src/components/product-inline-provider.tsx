@@ -7,9 +7,8 @@ import {invokeProductPatch} from "@/lib/independent-product-action";
 import {normalizeProductDescription} from "@/lib/product-description";
 import {isUnchangedProductDescriptionDraft} from "@/lib/product-description-draft";
 import {flushProductStatusBarrier} from "@/lib/product-status-barrier";
-import {flushSketchCriticalFields} from "@/lib/product-sketch-ui";
 import {createProductTechnicalEditor} from "@/lib/product-technical-editor";
-type ActiveField=Exclude<ProductPatchField,"client.phone"|"project.address"|"technicalSpecificationValue"|"technicalSpecificationSource"|"technicalSpecificationAdd"|"technicalSpecificationRemove">;
+type ActiveField=Exclude<ProductPatchField,"client.phone"|"project.address"|"technicalSpecificationValue"|"technicalSpecificationSource"|"technicalSpecificationAdd"|"technicalSpecificationRemove"|"technicalSpecificationEntry">;
 export type ProductInlineInitial=Record<ActiveField,InlineValue>;
 type Context={controller:(field:ActiveField)=>InlineSaveController;technical:ReturnType<typeof createProductTechnicalEditor>;flush:()=>Promise<boolean>;registerGuard:(key:string,guard:()=>Promise<boolean>)=>()=>void;derived:ProductPatchDerived;clientId:string;sourceClientId:string};
 const InlineContext=createContext<Context|null>(null);
@@ -30,21 +29,19 @@ export function ProductInlineProvider({productId,initial,technicalSpecifications
   // Независимые RSC не заменяют черновики и исходные CAS baselines изделия.
   // eslint-disable-next-line react-hooks/exhaustive-deps
  },[productId]);
- const legacy=controllers.get("description")!;
  const technical=useMemo(()=>createProductTechnicalEditor({
-  productId,initial:technicalSpecifications,send:invokeProductPatch,flushLegacy:()=>flushSketchCriticalFields([legacy]),
+  productId,initial:technicalSpecifications,send:invokeProductPatch,
   // Серверные обновления передаются контроллерам через receive.
   // eslint-disable-next-line react-hooks/exhaustive-deps
- }),[productId,legacy]);
+ }),[productId]);
  useEffect(()=>{
-  const legacyClean=legacy.receive(initial.description);
-  if(technical.getSnapshot().structured||legacyClean)technical.receive(technicalSpecifications);
- },[legacy,initial.description,technical,technicalSpecifications]);
+  technical.receive(technicalSpecifications);
+ },[technical,technicalSpecifications]);
  const value=useMemo<Context>(()=>({
   controller:field=>{const controller=controllers.get(field);if(!controller)throw Error("Неизвестное поле изделия");return controller;},
   technical,
   flush:()=>flushProductStatusBarrier(
-   [...controllers].filter(([field])=>field!=="description"||!technical.getSnapshot().structured).map(([,controller])=>controller),
+   [...controllers].filter(([field])=>field!=="description").map(([,controller])=>controller),
    [technical.flush,...guards.current.values()],
   ),
   registerGuard:(key,guard)=>{guards.current.set(key,guard);return()=>{if(guards.current.get(key)===guard)guards.current.delete(key);};},

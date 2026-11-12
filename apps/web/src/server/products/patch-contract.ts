@@ -10,23 +10,20 @@ const variant = <F extends string, T extends z.ZodType>(field: F, value: T) =>
   z.object({ ...base, field: z.literal(field), value, expectedValue: value }).strict();
 
 export const technicalSpecificationsSchema = z.custom<TechnicalSpecifications>(
-  input => FurnitureSpecifications.normalize(input) !== null, "Некорректные технические характеристики",
+  input => {
+    const normalized = FurnitureSpecifications.normalize(input);
+    return normalized !== null && normalized.description === null && normalized.size === null && normalized.note === null &&
+      normalized.sections.every(section => section.type !== "custom");
+  }, "Некорректные технические характеристики",
 );
 const expectedSourceGeneration = z.number().int().nonnegative();
-const sectionSchema = z.unknown().transform((input, ctx) => {
-  const section = FurnitureSpecifications.normalizeSection(input);
-  if (section) return section;
-  ctx.addIssue({ code: "custom", message: "Некорректный раздел" });
-  return z.NEVER;
-});
 
 export const productPatchSchema = z.discriminatedUnion("field", [
   variant("title", required), variant("kind", text), variant("description", text),
-  variant("technicalSpecificationValue", z.string()).extend({ sectionId: required, expectedSourceGeneration }),
-  variant("technicalSpecificationSource", text).extend({ source: z.enum(["description", "size", "note"]), expectedSourceGeneration }),
-  z.object({ ...base, field: z.literal("technicalSpecificationAdd"), section: sectionSchema, expectedSourceGeneration }).strict()
-    .refine(patch => patch.section.id === patch.clientMutationId, "Добавьте раздел с новым идентификатором"),
-  z.object({ ...base, field: z.literal("technicalSpecificationRemove"), section: sectionSchema, expectedSourceGeneration }).strict(),
+  variant("technicalSpecificationEntry", z.string()).extend({
+    type: z.enum(["body", "facade", "worktop", "upholstery", "insertsAndHandles", "hardware", "lighting", "interiorFilling", "softFilling"]),
+    expectedSectionId: z.string().min(1).nullable(), expectedSourceGeneration,
+  }),
   variant("engineerId", text), variant("expectedPrice", money),
   variant("quantity", z.number().int().min(1).max(2_147_483_647)),
   variant("project.clientId", required),
@@ -38,6 +35,7 @@ export type ProductPatch = z.infer<typeof productPatchSchema>;
 export type ProductPatchField = ProductPatch["field"];
 export type ProductPatchValue = string | number | null;
 export type ProductPatchDerived = {
+  technicalSpecificationSectionId?: string | null;
   lineTotalBYN?: string | null; quantity?: number; currentUnitPrice?: string | null;
   engineerLabel?: string | null; clientLabel?: string | null; clientId?: string; phone?: string;clientAddress?:string|null;
 };

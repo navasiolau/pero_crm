@@ -43,6 +43,8 @@ export const FurnitureSpecifications: {
   empty(): TechnicalSpecifications;
   orderedSections(sections: readonly FurnitureSection[]): FurnitureSection[];
   fromLegacy(input: unknown): TechnicalSpecifications;
+  forProduct(input: unknown): TechnicalSpecifications;
+  fromProposalForProduct(input: unknown): TechnicalSpecifications;
   normalize(input: unknown): TechnicalSpecifications | null;
   normalizeSection(input: unknown): FurnitureSection | null;
 };

@@ -117,5 +117,80 @@
         return result;
     }
 
-    return Object.freeze({ GROUPS, CATALOG, SOURCE_FIELDS, empty, orderedSections, fromLegacy, normalize, normalizeSection });
+    const productAliases = new Map(CATALOG.map(section => [section.label.toLowerCase(), section.type]));
+    for (const [label, type] of [
+        ['каркас', 'body'], ['фасадная часть', 'facade'],
+        ['вставки/ручки', 'insertsAndHandles'], ['вставки / ручки', 'insertsAndHandles'],
+        ['вставки', 'insertsAndHandles'], ['ручки', 'insertsAndHandles'], ['вставка в ручки', 'insertsAndHandles'],
+        ['наполнение внутреннее', 'interiorFilling'], ['наполнение мягкое', 'softFilling'],
+    ]) productAliases.set(label, type);
+
+    function productType(label) {
+        return typeof label === 'string' ? productAliases.get(label.trim().replace(/\s+/g, ' ').toLowerCase()) : undefined;
+    }
+
+    /** Проекция только постоянных полей изделия. Источник КП остаётся полным. */
+    function forProduct(input) {
+        const result = empty();
+        if (!isObject(input)) return result;
+        if (Number.isSafeInteger(input.sourceGeneration) && input.sourceGeneration >= 0)
+            result.sourceGeneration = input.sourceGeneration;
+        const rows = new Map();
+        if (Array.isArray(input.sections)) for (const section of input.sections) {
+            if (!isObject(section) || typeof section.value !== 'string') continue;
+            const type = byType.has(section.type) ? section.type : section.type === 'custom' ? productType(section.label) : undefined;
+            if (!type) continue;
+            const previous = rows.get(type);
+            const value = section.value;
+            if (previous) {
+                if (value.trim() && !previous.values.some(item => item.trim() === value.trim())) {
+                    previous.values = previous.values.filter(item => item.trim());
+                    previous.values.push(value);
+                }
+            } else {
+                rows.set(type, { id: isNonblank(section.id) ? section.id : type, values: [value] });
+            }
+        }
+        result.sections = CATALOG.filter(section => rows.has(section.type)).map(section => {
+            const row = rows.get(section.type);
+            return { id: row.id, ...section, value: row.values.join('; ') };
+        });
+        return result;
+    }
+
+    function fromProposalForProduct(input) {
+        if (!isObject(input)) return empty();
+        if (Array.isArray(input.specifications)) {
+            const legacy = fromLegacy(input).sections;
+            const productLegacy = fromProposalForProduct({ products: input.products }).sections;
+            const sections = input.specifications.map(section => {
+                if (!isObject(section)) return section;
+                const unchangedLegacy = legacy.some(row =>
+                    ['id', 'type', 'group', 'label', 'value'].every(key => row[key] === section[key]));
+                const type = byType.has(section.type) ? section.type : productType(section.label);
+                const projected = unchangedLegacy && productLegacy.find(row => row.type === type);
+                return projected ? { ...section, value: projected.value } : section;
+            });
+            return forProduct({ sections });
+        }
+        const sections = [];
+        if (Array.isArray(input.products)) for (const block of input.products) {
+            if (!isObject(block)) continue;
+            const type = productType(block.title);
+            if (type) {
+                for (const field of ['outer', 'inner']) {
+                    if (typeof block[field] === 'string')
+                        sections.push({ id: type, type, value: block[field] });
+                }
+                if (!sections.some(section => section.type === type))
+                    sections.push({ id: type, type, value: '' });
+            }
+            for (const [field, kind] of [['hinges', 'hardware'], ['lighting', 'lighting'], ['drawers', 'interiorFilling']]) {
+                if (isNonblank(block[field])) sections.push({ id: kind, type: kind, value: block[field] });
+            }
+        }
+        return forProduct({ sections });
+    }
+
+    return Object.freeze({ GROUPS, CATALOG, SOURCE_FIELDS, empty, orderedSections, fromLegacy, normalize, normalizeSection, forProduct, fromProposalForProduct });
 });

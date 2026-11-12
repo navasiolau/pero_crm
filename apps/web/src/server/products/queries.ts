@@ -317,5 +317,5 @@ export async function getProductFor(
   });
   if(!product)return null;
   const [masked] = await maskProductionRead(prisma,actor,[{...product,canAccessDraft:canAccessProductDraft(actor.roles,product),tasks:maskTaskPaymentRead(actor,product.tasks),works:await maskProductionWorkRead(prisma,actor,product.works.map(work => ({...work,canDistributePiecework:canManagePiecework(actor.roles)&&ordinaryPieceworkBinding(work)&&work.priceSnapshot!==null})))}]);
-  return { ...masked, technicalSpecifications: FurnitureSpecifications.normalize(masked.technicalSpecifications) };
+  return { ...masked, technicalSpecifications: masked.technicalSpecifications === null ? null : FurnitureSpecifications.forProduct(masked.technicalSpecifications) };
 }
