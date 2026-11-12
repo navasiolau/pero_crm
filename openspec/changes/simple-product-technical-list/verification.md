@@ -17,4 +17,6 @@
 
 ## Staging
 
-Ожидает normal merge/CI/deployment и фактической root-проверки. Production не включён.
+Первый CI `43233012350` для merge `4b7461f9` выявил преждевременный runtime-import ProductCore в native test helper: он загружал transaction adapter до scoped-подмен остальных тестов. Исправление только в трёх harness/caller файлах: type-only import и явная передача уже изолированного модуля. Проверки реального commit/rollback/locks/replay не ослаблены, код финансов/задач не менялся. TypeScript и isolated import proof — PASS.
+
+Ожидает повторного normal merge/CI/deployment и фактической root-проверки. Production не включён.

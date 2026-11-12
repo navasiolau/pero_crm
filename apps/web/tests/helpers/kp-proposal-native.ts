@@ -3,12 +3,13 @@ import { randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import type { DomainActor } from "../../src/server/actor";
 import type * as ProposalCore from "../../src/server/kp/proposal-core";
-import { patchProductCore } from "../../src/server/products/core";
+import type * as ProductCore from "../../src/server/products/core";
 import { nativeSnapshot } from "./native-acceptance-snapshot";
 
 /** Вызывается только внутри guarded rollback-транзакции; своих подключений не открывает. */
 export async function verifyProposalCompositionNative(tx: Prisma.TransactionClient, actor: DomainActor,
-  core: Pick<typeof ProposalCore, "createProposalInTransaction" | "saveProposalInTransaction">) {
+  core: Pick<typeof ProposalCore, "createProposalInTransaction" | "saveProposalInTransaction">,
+  products: Pick<typeof ProductCore, "patchProductCore">) {
   const prefix = `kp181-${randomUUID()}`;
   const temporary = await tx.client.create({ data: { id: `${prefix}-temporary`, name: "Временный", phone: "KP181_SYNTHETIC" } });
   const customer = await tx.client.create({ data: { id: `${prefix}-customer`, name: "Имя", lastName: "Фамилия", middleName: "Отчество", phone: "KP181_SAVED" } });
@@ -45,14 +46,14 @@ export async function verifyProposalCompositionNative(tx: Prisma.TransactionClie
   const emptyEntry = { productId: firstId, clientMutationId: randomUUID(), field: "technicalSpecificationEntry",
     type: "body", expectedSectionId: null, expectedValue: "", value: "", expectedSourceGeneration: 1 } as const;
   const beforeEmpty = await tx.product.findUniqueOrThrow({ where: { id: firstId } });
-  const emptySaved = await patchProductCore(actor, emptyEntry, operation => operation(tx));
+  const emptySaved = await products.patchProductCore(actor, emptyEntry, operation => operation(tx));
   assert.equal(emptySaved.kind === "saved" && emptySaved.noOp, true);
   assert.deepEqual(await tx.product.findUniqueOrThrow({ where: { id: firstId } }), beforeEmpty);
   const manualEntry = { ...emptyEntry, clientMutationId: randomUUID(), value: "Ручной корпус" };
-  const manualSaved = await patchProductCore(actor, manualEntry, operation => operation(tx));
+  const manualSaved = await products.patchProductCore(actor, manualEntry, operation => operation(tx));
   assert.equal(manualSaved.kind, "saved");
   assert.equal(manualSaved.kind === "saved" && manualSaved.derived?.technicalSpecificationSectionId, manualEntry.clientMutationId);
-  assert.deepEqual(await patchProductCore(actor, manualEntry, operation => operation(tx)), { ...manualSaved, repeated: true });
+  assert.deepEqual(await products.patchProductCore(actor, manualEntry, operation => operation(tx)), { ...manualSaved, repeated: true });
   const manual = await tx.product.create({ data: { projectId: created.result.projectId, number: `${created.result.number}.99`, suffixInt: 99,
     title: "Добавлено только в CRM", status: "DRAFT" } });
   const historyCount = await tx.productStatusHistory.count({ where: { productId: firstId } });
