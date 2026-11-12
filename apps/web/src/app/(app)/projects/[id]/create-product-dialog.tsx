@@ -69,7 +69,7 @@ export function CreateProductDialog({
         }
       }}
     >
-      <DialogContent>
+      <DialogContent className="max-h-[90dvh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Новое изделие</DialogTitle>
           <DialogDescription>

@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import type { DomainActor } from "../../src/server/actor";
 import type * as ProposalCore from "../../src/server/kp/proposal-core";
+import { patchProductCore } from "../../src/server/products/core";
 import { nativeSnapshot } from "./native-acceptance-snapshot";
 
 /** Вызывается только внутри guarded rollback-транзакции; своих подключений не открывает. */
@@ -30,9 +31,7 @@ export async function verifyProposalCompositionNative(tx: Prisma.TransactionClie
   assert.equal(original.initialPrice, null); assert.equal(original.initialPriceCaptureEligible, true);
   assert.equal(await tx.productPercentageConfig.count({ where: { productId: firstId } }), 3);
   assert.equal(original.description, null);
-  const projected = { description: null, size: "100/200", note: null, sourceGeneration: 1, sections: [
-    { id: "legacy-0-title", type: "custom", group: "construction", label: "Секция", value: "Материал наружный: ЛДСП\nМатериал внутренний: МДФ" },
-  ] };
+  const projected = { description: null, size: null, note: null, sourceGeneration: 1, sections: [] };
   assert.deepEqual(original.technicalSpecifications, projected);
   const beforeReplay = await nativeSnapshot(tx);
   const replayed = await core.createProposalInTransaction(tx, actor, request, hooks);
@@ -42,8 +41,18 @@ export async function verifyProposalCompositionNative(tx: Prisma.TransactionClie
   const legacyRaw = "  Старое описание\r\n<img src=x>  ";
   await tx.product.update({ where: { id: firstId }, data: {
     status: "DESIGN", engineerId: engineer.id, description: legacyRaw,
-    technicalSpecifications: { ...projected, note: "Исправлено в CRM" },
   } });
+  const emptyEntry = { productId: firstId, clientMutationId: randomUUID(), field: "technicalSpecificationEntry",
+    type: "body", expectedSectionId: null, expectedValue: "", value: "", expectedSourceGeneration: 1 } as const;
+  const beforeEmpty = await tx.product.findUniqueOrThrow({ where: { id: firstId } });
+  const emptySaved = await patchProductCore(actor, emptyEntry, operation => operation(tx));
+  assert.equal(emptySaved.kind === "saved" && emptySaved.noOp, true);
+  assert.deepEqual(await tx.product.findUniqueOrThrow({ where: { id: firstId } }), beforeEmpty);
+  const manualEntry = { ...emptyEntry, clientMutationId: randomUUID(), value: "Ручной корпус" };
+  const manualSaved = await patchProductCore(actor, manualEntry, operation => operation(tx));
+  assert.equal(manualSaved.kind, "saved");
+  assert.equal(manualSaved.kind === "saved" && manualSaved.derived?.technicalSpecificationSectionId, manualEntry.clientMutationId);
+  assert.deepEqual(await patchProductCore(actor, manualEntry, operation => operation(tx)), { ...manualSaved, repeated: true });
   const manual = await tx.product.create({ data: { projectId: created.result.projectId, number: `${created.result.number}.99`, suffixInt: 99,
     title: "Добавлено только в CRM", status: "DRAFT" } });
   const historyCount = await tx.productStatusHistory.count({ where: { productId: firstId } });

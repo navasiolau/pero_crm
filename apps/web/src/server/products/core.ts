@@ -281,7 +281,7 @@ export async function patchProductCore(actor: DomainActor, input: ProductPatch, 
       const change = applySpecificationPatch(before, patch);
       if (!change.ok) return {...identity,kind:"conflict",error:change.error,currentValue:change.currentValue};
       if (!change.noOp) await tx.product.update({ where: { id: patch.productId }, data: { technicalSpecifications: change.next } });
-      result = {...identity,kind:"saved",value:change.value,noOp:change.noOp};
+      result = {...identity,kind:"saved",value:change.value,noOp:change.noOp,derived:{technicalSpecificationSectionId:change.sectionId}};
       await tx.changeLog.create({ data: {
         id: receiptId, actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
         entity: "product", entityId: patch.productId, action: change.noOp ? "inline.receipt" : "inline.update", field: patch.field,

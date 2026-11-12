@@ -51,3 +51,39 @@ test('empty recognized legacy titles survive and repeated sections aggregate wit
     ]);
     assert.deepEqual(furniture.normalize({ ...projected, sections: [{ ...projected.sections[0], id: 'new-lifetime' }] })?.sections[0].id, 'new-lifetime');
 });
+
+test('Product projection keeps nine known meanings, strips unrelated source data and leaves KP intact', () => {
+    const source = { description: 'Описание', size: 'Размер', note: 'Примечание', price: 120, delivery: 20, specifications: [
+        { id: 'b', type: 'body', group: 'construction', label: 'Корпус', value: 'Дуб' },
+        { id: 'alias', type: 'custom', group: 'construction', label: 'Фасадная часть', value: 'МДФ' },
+        { id: 'junk', type: 'custom', group: 'construction', label: 'Специальный раздел', value: 'Мусор' },
+    ] };
+    const before = structuredClone(source);
+    assert.deepEqual(furniture.fromProposalForProduct(source), {
+        ...furniture.empty(), sections: [
+            { id: 'b', type: 'body', group: 'construction', label: 'Корпус', value: 'Дуб' },
+            { id: 'alias', type: 'facade', group: 'construction', label: 'Фасад', value: 'МДФ' },
+        ],
+    });
+    assert.deepEqual(source, before);
+});
+
+test('legacy Product projection maps exact titles and raw mechanisms without generic headings or duplicates', () => {
+    const source = { description: 'Описание', size: '100/200', note: 'Примечание', products: [
+        { title: 'Каркас', outer: 'Дуб', inner: 'Дуб', hinges: 'Blum', lighting: 'LED', drawers: 'Ящики' },
+        { title: 'Фасадная  часть', outer: 'МДФ', inner: 'Шпон' },
+        { title: 'Вставки/ручки', outer: 'Латунь' },
+        { title: 'Вставка в ручки', outer: 'Латунь' },
+        { title: 'Посторонний модуль', outer: 'Игнорировать', inner: 'Игнорировать', hinges: 'Blum' },
+    ] };
+    const projected = furniture.fromProposalForProduct(source);
+    assert.deepEqual(projected.sections.map(row => [row.type, row.value]), [
+        ['body', 'Дуб'], ['facade', 'МДФ; Шпон'], ['insertsAndHandles', 'Латунь'],
+        ['hardware', 'Blum'], ['lighting', 'LED'], ['interiorFilling', 'Ящики'],
+    ]);
+    const canonicalized = { ...source, specifications: furniture.orderedSections(furniture.fromLegacy(source).sections) };
+    assert.deepEqual(furniture.fromProposalForProduct(canonicalized).sections.map(row => [row.type, row.value]), projected.sections.map(row => [row.type, row.value]));
+    canonicalized.specifications.find(row => row.type === 'hardware').value = 'Hettich';
+    assert.equal(furniture.fromProposalForProduct(canonicalized).sections.find(row => row.type === 'hardware').value, 'Hettich');
+    assert.ok(!JSON.stringify(projected).includes('Игнорировать'));
+});

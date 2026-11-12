@@ -43,9 +43,9 @@ function savedReply(scope,input){
 // Услуга подтверждается полным versioned derived; lost ACK случается уже после записи receipt.
 window.__save=async(scope,input)=>{window.__requests.push({scope,...structuredClone(input)});const reply=savedReply(scope,input);if(window.__mode==='hold')return await new Promise(resolve=>window.__resolve=()=>resolve(reply));if(window.__mode==='lost')throw Error('Controlled lost ACK');return reply;};
 const readonly=new URLSearchParams(location.search).has('readonly');
-function ProductAccess(){const{controller}=useProductInline();window.__product=controller;return<ProductInlineDetails canManage={!readonly} canEditTech={!readonly} showAmount={!readonly} currency="BYN" measurement={null} engineer={null}/>;}
+function ProductAccess(){const{controller,technical}=useProductInline();window.__product=controller;window.__technical=technical;return<ProductInlineDetails canManage={!readonly} canEditTech={!readonly} showAmount={!readonly} currency="BYN" measurement={null} engineer={null}/>;}
 function ProjectAccess(){const{controller}=useProjectInline();window.__project=controller;return<><InlineTextField id="qa-delivery" label="Доставка" controller={controller('delivery')} inputMode="decimal" readOnly={readonly}/>{!readonly?<section data-project-confirmed><ProjectConfirmedTotal/></section>:null}</>;}
-function App(){const[initial,setInitial]=useState(projectInitial);window.__rsc=values=>setInitial(previous=>({...previous,...values}));return<main className="mx-auto flex max-w-4xl flex-col gap-6 p-4"><ProductInlineProvider productId="qa144-product" initial={productInitial}><ProductAccess/></ProductInlineProvider><ProjectInlineProvider projectId="qa144-project" initial={initial} stage="IN_WORK" pricingProjection={pricing}><ProjectAccess/></ProjectInlineProvider></main>;}
+function App(){const[initial,setInitial]=useState(projectInitial);window.__rsc=values=>setInitial(previous=>({...previous,...values}));return<main className="mx-auto flex max-w-4xl flex-col gap-6 p-4"><ProductInlineProvider productId="qa144-product" initial={productInitial} technicalSpecifications={{sections:[{id:"body-id",type:"body",group:"construction",label:"Корпус",value:"Сохранённое описание"}],description:null,size:null,note:null,sourceGeneration:0}}><ProductAccess/></ProductInlineProvider><ProjectInlineProvider projectId="qa144-project" initial={initial} stage="IN_WORK" pricingProjection={pricing}><ProjectAccess/></ProjectInlineProvider></main>;}
 createRoot(document.getElementById('root')).render(<App/>);
 `;
 const boundaries={
@@ -61,6 +61,7 @@ async function compile(variant){
   b.onLoad({filter:/.*/,namespace:'memory144'},args=>({contents:boundaries[args.path],loader:'ts',resolveDir:web}));
   b.onLoad({filter:/\.(?:tsx?|jsx?|mjs|cjs|json)$/,namespace:'file'},async args=>{
    const bytes=await readFile(args.path),relative=path.relative(web,args.path).split(path.sep).join('/');pins.set(args.path,hash(bytes));let source=old.get(relative)??bytes.toString('utf8');
+   if(relative==='src/components/product-technical-specifications.tsx'){const ast=ts.createSourceFile(relative,source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);const entry=ast.statements.find(node=>ts.isFunctionDeclaration(node)&&node.name?.text==='TechnicalEntry');assert.ok(entry?.body,'TECHNICAL_ENTRY_BODY_REQUIRED');const at=entry.body.getStart(ast)+1;source=source.slice(0,at)+'\nglobalThis.__KANBAN_BODY_COUNTS__["technical-entry:"+label]=(globalThis.__KANBAN_BODY_COUNTS__["technical-entry:"+label]??0)+1;\n'+source.slice(at);}
    if(subjects.includes(relative)){const binding=KANBAN_RENDER_BINDINGS.find(x=>x.relative===relative);assert.ok(binding,'INLINE_COUNTER_BINDING_REQUIRED');const transformed=observeKanbanRenders(ts,source,binding);source=transformed.contents;observed.push(transformed);
     if(relative==='src/components/inline-fields.tsx'){const token=JSON.stringify(relative+'#InlineTextField');assert.equal(source.split(token).length-1,2);source=source.replaceAll(token,'('+token+'+":"+id)');}
    }
@@ -73,7 +74,7 @@ async function compile(variant){
 }
 async function settle(page){await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));}
 async function counts(page){return page.evaluate(()=>({...window.__KANBAN_BODY_COUNTS__}));}
-const detailKey='src/components/product-inline-fields.tsx#ProductInlineDetails',descriptionKey='src/components/inline-fields.tsx#InlineTextField:product-inline-description',totalKey='src/components/project-inline-fields.tsx#ProjectConfirmedTotal';
+const detailKey='src/components/product-inline-fields.tsx#ProductInlineDetails',descriptionKey='technical-entry:Корпус',totalKey='src/components/project-inline-fields.tsx#ProjectConfirmedTotal';
 
 test('inline total subscriptions preserve fields and avoid unrelated renders',{timeout:120000},async()=>{
  let browser,server,failure,receipt;const directory=path.join(web,'test-results/inline-field-subscriptions',randomUUID());await mkdir(directory,{recursive:true});
@@ -88,7 +89,7 @@ test('inline total subscriptions preserve fields and avoid unrelated renders',{t
     try{await page.goto(origin+'/?v='+variant);await expect(page.locator('#product-inline-price')).toHaveValue('10.00');await page.evaluate(()=>document.fonts.ready);await settle(page);
      const bytes=await page.screenshot({animations:'disabled',path:path.join(directory,variant+'-'+viewport.width+'.png')});const shape=await page.evaluate(()=>[...document.querySelectorAll('main input,main textarea,main label,[data-project-confirmed],[data-product-price-quantity]')].map(n=>{const box=n.getBoundingClientRect(),style=getComputedStyle(n);return{tag:n.tagName,id:n.id,text:n.innerText??'',value:n.value??null,className:n.className,rect:{x:box.x,y:box.y,width:box.width,height:box.height},font:style.font,color:style.color,background:style.backgroundColor};}));captures[variant]={png:hash(bytes),pixels:pixels(bytes),shape};
      if(viewport.width===1440){
-      const start=await counts(page),price=page.locator('#product-inline-price');await price.fill('');await price.pressSequentially('12,50',{delay:5});await expect(page.locator('[data-product-price-quantity]')).toContainText('25 BYN');await settle(page);const end=await counts(page);
+      const start=await counts(page);if(variant==='after')assert.ok(start[descriptionKey]>0,'TECHNICAL_ENTRY_COUNTER_REQUIRED');const price=page.locator('#product-inline-price');await price.fill('');await price.pressSequentially('12,50',{delay:5});await expect(page.locator('[data-product-price-quantity]')).toContainText('25 BYN');await settle(page);const end=await counts(page);
       if(variant==='after'){assert.equal(end[detailKey],start[detailKey]);assert.equal(end[descriptionKey],start[descriptionKey]);}else{assert.ok(end[detailKey]>start[detailKey]);assert.ok(end[descriptionKey]>start[descriptionKey]);}renders.push({variant,scope:'product-price',start,end});
       const quantity=page.locator('#product-inline-quantity');await quantity.fill('');const qStart=await counts(page);await quantity.pressSequentially('3',{delay:5});await expect(page.locator('[data-product-price-quantity]')).toContainText('37,5 BYN');await settle(page);const qEnd=await counts(page);if(variant==='after'){assert.equal(qEnd[descriptionKey],qStart[descriptionKey]);assert.equal(qEnd[detailKey],qStart[detailKey]);}renders.push({variant,scope:'product-quantity',start:qStart,end:qEnd});
       const delivery=page.locator('#qa-delivery');await delivery.fill('');await settle(page);const dStart=await counts(page);await delivery.pressSequentially('30,50',{delay:5});await expect(page.locator('[data-project-confirmed]')).toContainText('125 BYN');await expect(page.locator('[data-project-confirmed]')).toContainText('после подтверждения');await settle(page);const dEnd=await counts(page);if(variant==='after')assert.equal(dEnd[totalKey],dStart[totalKey]);else assert.ok(dEnd[totalKey]>dStart[totalKey]);renders.push({variant,scope:'project-dirty-service',start:dStart,end:dEnd});
@@ -113,11 +114,12 @@ test('inline total subscriptions preserve fields and avoid unrelated renders',{t
   }finally{await page.close();}
   const limited=await browser.newPage({viewport:{width:360,height:800}});try{
    await limited.goto(origin+'/?v=after&readonly=1');await expect(limited.locator('#product-inline-quantity')).toHaveAttribute('readonly','');await expect(limited.locator('#product-inline-price')).toHaveCount(0);await expect(limited.locator('[data-project-confirmed]')).toHaveCount(0);
-   const beforeReadonly=await limited.evaluate(()=>[window.__product('quantity').getSnapshot(),window.__product('description').getSnapshot(),window.__project('delivery').getSnapshot()]);
-   for(const [id,value]of [['product-inline-quantity','2'],['product-inline-description','Сохранённое описание'],['qa-delivery','20.00']]){
+   const beforeReadonly=await limited.evaluate(()=>[window.__product('quantity').getSnapshot(),window.__technical.section('body').getSnapshot(),window.__project('delivery').getSnapshot()]);
+   for(const [id,value]of [['product-inline-quantity','2'],['qa-delivery','20.00']]){
     const input=limited.locator('#'+id);await expect(input).toHaveAttribute('readonly','');await input.focus();await input.pressSequentially('999');await input.press('Enter');await input.press('Tab');await expect(input).toHaveValue(value);
    }
-   assert.deepEqual(await limited.evaluate(()=>[window.__product('quantity').getSnapshot(),window.__product('description').getSnapshot(),window.__project('delivery').getSnapshot()]),beforeReadonly);
+   await expect(limited.locator('[data-product-technical-specifications] textarea')).toHaveCount(0);await expect(limited.locator('[data-product-technical-specifications] ol > li')).toHaveCount(9);await expect(limited.locator('[data-product-technical-specifications]')).toContainText('Сохранённое описание');
+   assert.deepEqual(await limited.evaluate(()=>[window.__product('quantity').getSnapshot(),window.__technical.section('body').getSnapshot(),window.__project('delivery').getSnapshot()]),beforeReadonly);
    assert.equal(await limited.evaluate(()=>window.__requests.length),0);
   }finally{await limited.close();}
   for(const compiled of [before,after].filter(Boolean))for(const[file,digest]of compiled.pins)assert.equal(hash(await readFile(file)),digest);
