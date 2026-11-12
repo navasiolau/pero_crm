@@ -24,7 +24,7 @@ async function main() {
           const user = await tx.user.create({ data: { id: `qa211-${token}`, name: "Проверка211", email: `${token}@example.invalid`, passwordHash: "QA211_NO_LOGIN", roles: ["ADMIN"] } });
           const actor = { id: user.id, name: user.name, roles: user.roles, source: "web" as const };
           result = await verifyProductNumberingNative(tx, actor, products);
-          await verifyProposalCompositionNative(tx, actor, proposals);
+          await verifyProposalCompositionNative(tx, actor, proposals, products);
           throw rollback;
         }, { timeout: 90_000, maxWait: 5_000 });
       } catch (error) { if (error !== rollback) throw error; }

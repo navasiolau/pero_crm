@@ -657,7 +657,7 @@ test("kp181/draft-per-item-native-relations-readers-and-revocation", async () =>
 
 test("kp181/native-composition-stable-ids-active-number-swap-client-mirror-replay-and-rollback", async () => fixture.rollback(async (tx, rows) => {
   const actor = actorOf(await rows.user("kp181-domain-manager", ["MANAGER"]));
-  const result = await run(actor, tx, () => verifyProposalCompositionNative(tx, actor, proposals));
+  const result = await run(actor, tx, () => verifyProposalCompositionNative(tx, actor, proposals, products));
   assert.equal(result.sameIdRestore, true); assert.equal(result.rollbackNoNumberSpent, true); assert.equal(result.atomicFailureRollback, true);
 }));
 
