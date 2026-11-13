@@ -26,7 +26,7 @@ function details(canManage: boolean, canEditTech: boolean, showAmount: boolean, 
     measurement: createElement("p", null, "Замер"), engineer: createElement("p", null, "Инженер и процент"),
   }) }));
 }
-test("техническое описание показывает девять фиксированных строк без исходного текста", () => {
+test("техническое описание показывает исходный порядок строк в едином поле без исходного текста", () => {
   const specs: TechnicalSpecifications = {
     sections: [
       { id: "lighting", type: "lighting", group: "lighting", label: "Подсветка", value: "LED" },
@@ -36,12 +36,12 @@ test("техническое описание показывает девять 
     description: "Модель", size: "1800 мм", note: null, sourceGeneration: 1,
   };
   const html = details(false, false, false, null, specs);
-  assert.match(html, /<ol[^>]*>.*Корпус.*Подсветка.*<\/ol>/);
+  assert.match(html, /<ol[^>]*>.*Подсветка.*Фурнитура.*Корпус.*<\/ol>/);
   assert.match(html, /&lt;script&gt;Дуб&lt;\/script&gt;/);
-  assert.equal((html.match(/<li\b/g) ?? []).length, 9);
+  assert.equal((html.match(/<li\b/g) ?? []).length, 3);
   assert.match(html, /Фурнитура/);
   assert.doesNotMatch(html, /1800 мм|Модель|Исходное описание|<details|Добавить раздел|Удалить раздел|<script>|<textarea/);
-  assert.equal((details(false, true, false, null, specs).match(/<textarea\b/g) ?? []).length, 9);
+  assert.equal((details(false, true, false, null, specs).match(/<textarea\b/g) ?? []).length, 8);
   assert.doesNotMatch(details(false, false, false, null, specs, false), /Корпус|Исходное описание|Техническое описание/);
 });
 test("длинный многострочный материал сохранён целиком и защищён от HTML в редакторе и чтении", () => {
@@ -74,7 +74,7 @@ test("цена, количество и сумма в общей группе п
   assert.match(reader, /data-product-technical-specifications/);
   const engineer = details(false, true, true);
   assert.match(engineer, /id="product-inline-quantity"[^>]*readOnly=""/);
-  assert.equal((engineer.match(/<textarea\b/g) ?? []).length, 9);
+  assert.equal((engineer.match(/<textarea\b/g) ?? []).length, 2);
   assert.doesNotMatch(engineer, /<textarea[^>]*readOnly/);
   // eslint-disable-next-line react/no-children-prop -- provider requires children in its typed props
   const contacts = renderToStaticMarkup(createElement(ProductInlineProvider, { productId: "product", initial,

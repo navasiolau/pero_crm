@@ -1,4 +1,4 @@
-import { FurnitureSpecifications } from "@pero/kp-template";
+import { FurnitureSpecifications, type TechnicalSpecifications } from "@pero/kp-template";
 import { randomUUID } from "node:crypto";
 import type { Prisma, Product } from "@prisma/client";
 import type { DomainActor } from "@/server/actor";
@@ -113,13 +113,17 @@ export async function synchronizeProposalItemsInTransaction(
     let before = existing?.productId ? productsById.get(existing.productId) : undefined;
     const number = `${project.number}.${position}`;
     const incoming = FurnitureSpecifications.fromProposalForProduct(state);
-    const current = FurnitureSpecifications.normalize(before?.technicalSpecifications);
+    const current = FurnitureSpecifications.normalizeProduct(before?.technicalSpecifications);
     const previousGeneration = current?.sourceGeneration ?? 0;
+    const currentSource: Record<string, unknown> = { ...before?.technicalSpecifications as Record<string, unknown>, sourceGeneration: 0 };
+    delete currentSource.editRevision;
     const sameSource = current !== null &&
-      canonicalProposalJson({ ...current, sourceGeneration: 0 }) === canonicalProposalJson(incoming);
+      canonicalProposalJson(currentSource) === canonicalProposalJson(incoming);
     if (!sameSource && previousGeneration >= Number.MAX_SAFE_INTEGER)
       throw new ProposalWriteError("conflict", "Исчерпан номер поколения технических характеристик");
-    const technicalSpecifications = { ...incoming, sourceGeneration: sameSource ? previousGeneration : previousGeneration + 1 };
+    const technicalSpecifications = sameSource
+      ? before!.technicalSpecifications as unknown as TechnicalSpecifications
+      : { ...incoming, sourceGeneration: previousGeneration + 1, editRevision: 0 };
     const data = {
       number, suffixInt: position,
       title: proposalText(state.name).trim() || `Позиция ${position}`,

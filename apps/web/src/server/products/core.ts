@@ -24,7 +24,7 @@ import { DEFAULT_PERCENTAGE_KINDS } from "@/server/product-percentage-defaults/c
 import type { DomainActor } from "../projects/core";
 import FurnitureSpecifications from "@pero/kp-template/furniture-specifications";
 import { applySpecificationPatch, isSpecificationPatch } from "./specification-patch";
-import { malformedProductPatch, productPatchSchema, technicalSpecificationsSchema, type ProductPatch, type ProductPatchResult, type ProductPatchValue, type ProductPatchDerived } from "./patch-contract";
+import { malformedProductPatch, productPatchSchema, technicalSpecificationsSchema, type ProductPatch, type ProductPatchResult, type ProductScalarValue, type ProductPatchDerived } from "./patch-contract";
 export const createSchema = z.object({
   projectId: z.string().min(1),
   title: z.string().min(1, "Укажите название изделия"),
@@ -65,8 +65,8 @@ export const updateSchema = z.object({
 export type CreateProductInput = z.input<typeof createSchema>;
 export type UpdateProductInput = z.infer<typeof updateSchema>;
 type ProductValues = Omit<UpdateProductInput, "expectedPrice"> & {expectedPrice?: string | number | null};
-export type ProductUpdateBaseline = Partial<Record<keyof UpdateProductInput, ProductPatchValue>>;
-const canonical = (field: string, value: unknown): ProductPatchValue => {
+export type ProductUpdateBaseline = Partial<Record<keyof UpdateProductInput, ProductScalarValue>>;
+const canonical = (field: string, value: unknown): ProductScalarValue => {
   if (value === null || value === undefined) return null;
   if (field === "expectedPrice") return new Prisma.Decimal(String(value)).toFixed(2);
   if (field === "quantity") return Number(value);
@@ -78,7 +78,7 @@ export async function createProductCore(actor: DomainActor, input: CreateProduct
   if (!hasAnyRole(actor.roles, MANAGER_ROLES)) throw new Error("Недостаточно прав");
   const parsed = createSchema.safeParse(input);
   if (!parsed.success) return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Ошибка данных" };
-  if ((parsed.data.technicalSpecifications?.sourceGeneration ?? 0) !== 0)
+  if ((parsed.data.technicalSpecifications?.sourceGeneration ?? 0) !== 0 || (parsed.data.technicalSpecifications?.editRevision ?? 0) !== 0)
     return { ok: false as const, error: "Некорректная версия технических характеристик нового изделия" };
   try { productLineTotal(parsed.data.expectedPrice ?? null, parsed.data.quantity); }
   catch (error) { return { ok: false as const, error: error instanceof Error ? error.message : "Некорректная сумма партии" }; }
@@ -129,7 +129,7 @@ export async function createProductInTransaction(tx: Prisma.TransactionClient, a
       expectedPrice: data.expectedPrice,
       ...newProductInitialPrice(data.expectedPrice),
       description: data.technicalSpecifications ? null : normalizeProductDescription(data.description),
-      technicalSpecifications: data.technicalSpecifications,
+      technicalSpecifications: data.technicalSpecifications ? FurnitureSpecifications.normalizeProduct(data.technicalSpecifications)! : undefined,
       engineerId: data.engineerId || null,
   // Ставка обязательна из настроек: новые изделия получают снимок дефолтов.
   // Пустых ставок не бывает (решение 06.10.2026: пустое = 0); отсутствующий дефолт тоже 0.
@@ -227,6 +227,8 @@ export async function patchProductCore(actor: DomainActor, input: ProductPatch, 
   if (!parsed.success) return malformedProductPatch(input, parsed.error.issues[0]?.message ?? "Ошибка поля");
   const patch=parsed.data;
   const identity = { field: patch.field, clientMutationId: patch.clientMutationId };
+  if (patch.field === "technicalSpecificationEntry")
+    return {...identity,kind:"validation",error:"Формат технического описания изменён. Обновите карточку изделия"};
   const manager=hasAnyRole(actor.roles,MANAGER_ROLES);
   const technical = isSpecificationPatch(patch);
   const legacy = patch.field === "description";
@@ -273,7 +275,7 @@ export async function patchProductCore(actor: DomainActor, input: ProductPatch, 
       if(!shared.ok)return {...identity,...shared};
       result={...identity,kind:"saved",value:shared.value,noOp:!shared.changed,derived:{clientId:shared.clientId,clientLabel:shared.clientLabel,phone:shared.phone,clientAddress:shared.clientAddress}};
     } else if (current && technical) {
-      const before = FurnitureSpecifications.normalize(current.technicalSpecifications);
+      const before = FurnitureSpecifications.normalizeProduct(current.technicalSpecifications);
       if (before === null && current.technicalSpecifications != null)
         return {...identity,kind:"failure",error:"Технические характеристики имеют неподдерживаемый формат"};
       if ((before?.sourceGeneration ?? 0) !== patch.expectedSourceGeneration)
@@ -281,12 +283,12 @@ export async function patchProductCore(actor: DomainActor, input: ProductPatch, 
       const change = applySpecificationPatch(before, patch);
       if (!change.ok) return {...identity,kind:"conflict",error:change.error,currentValue:change.currentValue};
       if (!change.noOp) await tx.product.update({ where: { id: patch.productId }, data: { technicalSpecifications: change.next } });
-      result = {...identity,kind:"saved",value:change.value,noOp:change.noOp,derived:{technicalSpecificationSectionId:change.sectionId}};
+      result = {...identity,kind:"saved",value:change.value,noOp:change.noOp,derived:{technicalSpecificationSectionId:change.sectionId,technicalSpecificationsEditRevision:change.next.editRevision ?? 0}};
       await tx.changeLog.create({ data: {
         id: receiptId, actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
         entity: "product", entityId: patch.productId, action: change.noOp ? "inline.receipt" : "inline.update", field: patch.field,
         ...(change.noOp ? { newValue: json({ fingerprint, result }) } : {
-          oldValue: json({ technicalSpecifications: before }),
+          oldValue: json({ technicalSpecifications: current.technicalSpecifications ?? null }),
           newValue: json({ fingerprint, result, technicalSpecifications: change.next }),
         }),
       } });
@@ -296,7 +298,7 @@ export async function patchProductCore(actor: DomainActor, input: ProductPatch, 
       if(previous!==canonical(patch.field,patch.expectedValue)) return {...identity,kind:"conflict",error:"Поле изменено другим пользователем",currentValue:previous};
       if (patch.field === "description" && isProductDescriptionUnchanged(patch.value, previous as string | null))
         return {...identity,kind:"saved",value:previous,noOp:true};
-      let value:ProductPatchValue=patch.value;
+      let value:ProductScalarValue=patch.value;
       if(patch.field==="description")value=normalizeProductDescription(patch.value);
       else if(patch.field==="expectedPrice")value=canonical(patch.field,value);
       else if(typeof value==="string") value=value.trim()||(patch.field==="title"?value:null);

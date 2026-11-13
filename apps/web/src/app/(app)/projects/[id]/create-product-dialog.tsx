@@ -134,7 +134,7 @@ export function CreateProductDialog({
                   kind: kind.trim() || undefined,
                   expectedPrice: parsedPrice,
                   quantity: parsedQuantity,
-                  technicalSpecifications,
+                  technicalSpecifications: { ...technicalSpecifications, sections: technicalSpecifications.sections.filter(row => row.label !== "" || row.value !== "") },
                   engineerId: engineerId || undefined,
                 });
                 if (result.ok) {

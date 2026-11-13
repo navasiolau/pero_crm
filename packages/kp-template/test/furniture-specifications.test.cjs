@@ -87,3 +87,17 @@ test('legacy Product projection maps exact titles and raw mechanisms without gen
     assert.equal(furniture.fromProposalForProduct(canonicalized).sections.find(row => row.type === 'hardware').value, 'Hettich');
     assert.ok(!JSON.stringify(projected).includes('Игнорировать'));
 });
+
+test('Product rows preserve arbitrary labels, metadata, duplicate meanings and array order', () => {
+    const source = { ...furniture.empty(), sections: [
+        { id: 'body', type: 'body', group: 'construction', label: 'Мой корпус', value: 'Дуб' },
+        { id: 'own', type: 'custom', group: 'filling', label: '', value: 'Набивка' },
+        { id: 'another', type: 'body', group: 'construction', label: 'Второй корпус', value: '' },
+    ] };
+    assert.deepEqual(furniture.normalizeProduct(source), { ...source, editRevision: 0 });
+    assert.equal(furniture.normalize(source), null, 'strict KP validation remains unchanged');
+    assert.deepEqual(furniture.normalizeProduct({ ...source, editRevision: 5 }), { ...source, editRevision: 5 });
+    assert.equal(furniture.normalizeProduct({ ...source, editRevision: -1 }), null);
+    assert.equal(furniture.normalizeProduct({ ...source, editRevision: Number.MAX_SAFE_INTEGER + 1 }), null);
+    assert.equal(furniture.normalizeProduct({ ...source, sections: [source.sections[0], source.sections[0]] }), null);
+});

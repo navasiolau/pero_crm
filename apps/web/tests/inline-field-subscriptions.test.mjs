@@ -61,7 +61,7 @@ async function compile(variant){
   b.onLoad({filter:/.*/,namespace:'memory144'},args=>({contents:boundaries[args.path],loader:'ts',resolveDir:web}));
   b.onLoad({filter:/\.(?:tsx?|jsx?|mjs|cjs|json)$/,namespace:'file'},async args=>{
    const bytes=await readFile(args.path),relative=path.relative(web,args.path).split(path.sep).join('/');pins.set(args.path,hash(bytes));let source=old.get(relative)??bytes.toString('utf8');
-   if(relative==='src/components/product-technical-specifications.tsx'){const ast=ts.createSourceFile(relative,source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);const entry=ast.statements.find(node=>ts.isFunctionDeclaration(node)&&node.name?.text==='TechnicalEntry');assert.ok(entry?.body,'TECHNICAL_ENTRY_BODY_REQUIRED');const at=entry.body.getStart(ast)+1;source=source.slice(0,at)+'\nglobalThis.__KANBAN_BODY_COUNTS__["technical-entry:"+label]=(globalThis.__KANBAN_BODY_COUNTS__["technical-entry:"+label]??0)+1;\n'+source.slice(at);}
+   if(relative==='src/components/product-technical-specifications.tsx'){const ast=ts.createSourceFile(relative,source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);const entry=ast.statements.find(node=>ts.isFunctionDeclaration(node)&&node.name?.text==='TechnicalEntry');assert.ok(entry?.body,'TECHNICAL_ENTRY_BODY_REQUIRED');const at=entry.body.getStart(ast)+1;source=source.slice(0,at)+'\nglobalThis.__KANBAN_BODY_COUNTS__["technical-entry:"+rowId]=(globalThis.__KANBAN_BODY_COUNTS__["technical-entry:"+rowId]??0)+1;\n'+source.slice(at);}
    if(subjects.includes(relative)){const binding=KANBAN_RENDER_BINDINGS.find(x=>x.relative===relative);assert.ok(binding,'INLINE_COUNTER_BINDING_REQUIRED');const transformed=observeKanbanRenders(ts,source,binding);source=transformed.contents;observed.push(transformed);
     if(relative==='src/components/inline-fields.tsx'){const token=JSON.stringify(relative+'#InlineTextField');assert.equal(source.split(token).length-1,2);source=source.replaceAll(token,'('+token+'+":"+id)');}
    }
@@ -74,7 +74,7 @@ async function compile(variant){
 }
 async function settle(page){await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));}
 async function counts(page){return page.evaluate(()=>({...window.__KANBAN_BODY_COUNTS__}));}
-const detailKey='src/components/product-inline-fields.tsx#ProductInlineDetails',descriptionKey='technical-entry:Корпус',totalKey='src/components/project-inline-fields.tsx#ProjectConfirmedTotal';
+const detailKey='src/components/product-inline-fields.tsx#ProductInlineDetails',descriptionKey='technical-entry:body-id',totalKey='src/components/project-inline-fields.tsx#ProjectConfirmedTotal';
 
 test('inline total subscriptions preserve fields and avoid unrelated renders',{timeout:120000},async()=>{
  let browser,server,failure,receipt;const directory=path.join(web,'test-results/inline-field-subscriptions',randomUUID());await mkdir(directory,{recursive:true});
@@ -114,12 +114,12 @@ test('inline total subscriptions preserve fields and avoid unrelated renders',{t
   }finally{await page.close();}
   const limited=await browser.newPage({viewport:{width:360,height:800}});try{
    await limited.goto(origin+'/?v=after&readonly=1');await expect(limited.locator('#product-inline-quantity')).toHaveAttribute('readonly','');await expect(limited.locator('#product-inline-price')).toHaveCount(0);await expect(limited.locator('[data-project-confirmed]')).toHaveCount(0);
-   const beforeReadonly=await limited.evaluate(()=>[window.__product('quantity').getSnapshot(),window.__technical.section('body').getSnapshot(),window.__project('delivery').getSnapshot()]);
+   const beforeReadonly=await limited.evaluate(()=>[window.__product('quantity').getSnapshot(),window.__technical.section('body-id').getSnapshot(),window.__project('delivery').getSnapshot()]);
    for(const [id,value]of [['product-inline-quantity','2'],['qa-delivery','20.00']]){
     const input=limited.locator('#'+id);await expect(input).toHaveAttribute('readonly','');await input.focus();await input.pressSequentially('999');await input.press('Enter');await input.press('Tab');await expect(input).toHaveValue(value);
    }
-   await expect(limited.locator('[data-product-technical-specifications] textarea')).toHaveCount(0);await expect(limited.locator('[data-product-technical-specifications] ol > li')).toHaveCount(9);await expect(limited.locator('[data-product-technical-specifications]')).toContainText('Сохранённое описание');
-   assert.deepEqual(await limited.evaluate(()=>[window.__product('quantity').getSnapshot(),window.__technical.section('body').getSnapshot(),window.__project('delivery').getSnapshot()]),beforeReadonly);
+   await expect(limited.locator('[data-product-technical-specifications] textarea')).toHaveCount(0);await expect(limited.locator('[data-product-technical-specifications] ol > li')).toHaveCount(1);await expect(limited.locator('[data-product-technical-specifications]')).toContainText('Сохранённое описание');
+   assert.deepEqual(await limited.evaluate(()=>[window.__product('quantity').getSnapshot(),window.__technical.section('body-id').getSnapshot(),window.__project('delivery').getSnapshot()]),beforeReadonly);
    assert.equal(await limited.evaluate(()=>window.__requests.length),0);
   }finally{await limited.close();}
   for(const compiled of [before,after].filter(Boolean))for(const[file,digest]of compiled.pins)assert.equal(hash(await readFile(file)),digest);
