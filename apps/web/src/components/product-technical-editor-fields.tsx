@@ -20,10 +20,11 @@ export function TechnicalList({ children }: { children: ReactNode }) {
   </div>;
 }
 
-export function TechnicalText({ rowId, number, row, onChange, onCommit, issue, disabled, autosave = false, trailing = false, onActive }: {
+export function TechnicalText({ number, row, onChange, onCommit, issue, disabled, autosave = false, trailing = false, onActive }: {
   rowId: string; number: number; row: TechnicalRow; onChange?: (row: TechnicalRow) => void;
   onCommit?: () => void; issue?: string | null; disabled?: boolean; autosave?: boolean; trailing?: boolean; onActive?: (active: boolean) => void;
 }) {
+  const domRowId = useId();
   const heading = useRef<HTMLTextAreaElement>(null);
   const textarea = useRef<HTMLTextAreaElement>(null);
   const composing = useRef(false);
@@ -58,7 +59,7 @@ export function TechnicalText({ rowId, number, row, onChange, onCommit, issue, d
       }
     },
   };
-  return <li className="min-w-0" data-technical-row={rowId} data-technical-trailing={trailing || undefined}
+  return <li className="min-w-0" data-technical-row={domRowId} data-technical-trailing={trailing || undefined}
     onFocusCapture={() => onActive?.(true)}
     onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) onActive?.(false); }}>
     {onChange ? <div className="flex min-w-0 flex-wrap items-start gap-x-1">
