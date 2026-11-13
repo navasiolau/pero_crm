@@ -64,6 +64,27 @@
         return result;
     }
 
+    /** Ручной список изделия сохраняет имена и порядок без правил каталога КП. */
+    function normalizeProduct(input) {
+        if (!hasShape(input, ['sections', ...SOURCE_FIELDS, 'sourceGeneration', ...(isObject(input) && Object.hasOwn(input, 'editRevision') ? ['editRevision'] : [])]) || !Array.isArray(input.sections) ||
+            !Number.isSafeInteger(input.sourceGeneration) || input.sourceGeneration < 0 ||
+            (input.editRevision !== undefined && (!Number.isSafeInteger(input.editRevision) || input.editRevision < 0)) ||
+            SOURCE_FIELDS.some(field => input[field] !== null && typeof input[field] !== 'string')) return null;
+        const result = empty();
+        result.sourceGeneration = input.sourceGeneration;
+        result.editRevision = input.editRevision ?? 0;
+        const ids = new Set();
+        for (const row of input.sections) {
+            if (!hasShape(row, ['id', 'type', 'group', 'label', 'value']) || !isNonblank(row.id) ||
+                typeof row.label !== 'string' || typeof row.value !== 'string' ||
+                (!byType.has(row.type) && row.type !== 'custom') || !GROUPS.some(group => group.id === row.group) ||
+                ids.has(row.id)) return null;
+            ids.add(row.id);
+            result.sections.push({ id: row.id, type: row.type, group: row.group, label: row.label, value: row.value });
+        }
+        return result;
+    }
+
     function orderedSections(sections) {
         return GROUPS.flatMap(({ id }) => [
             ...CATALOG.filter(section => section.group === id)
@@ -192,5 +213,5 @@
         return forProduct({ sections });
     }
 
-    return Object.freeze({ GROUPS, CATALOG, SOURCE_FIELDS, empty, orderedSections, fromLegacy, normalize, normalizeSection, forProduct, fromProposalForProduct });
+    return Object.freeze({ GROUPS, CATALOG, SOURCE_FIELDS, empty, orderedSections, fromLegacy, normalize, normalizeProduct, normalizeSection, forProduct, fromProposalForProduct });
 });

@@ -35,7 +35,7 @@ export type FurnitureSectionType = 'body' | 'facade' | 'worktop' | 'upholstery' 
   'hardware' | 'lighting' | 'interiorFilling' | 'softFilling' | 'custom';
 export type FurnitureSection = { id: string; type: FurnitureSectionType; group: FurnitureSectionGroup; label: string; value: string };
 export type FurnitureSourceField = 'description' | 'size' | 'note';
-export type TechnicalSpecifications = Record<FurnitureSourceField, string | null> & { sections: FurnitureSection[]; sourceGeneration: number };
+export type TechnicalSpecifications = Record<FurnitureSourceField, string | null> & { sections: FurnitureSection[]; sourceGeneration: number; editRevision?: number };
 export const FurnitureSpecifications: {
   GROUPS: readonly Readonly<{ id: FurnitureSectionGroup; label: string }>[];
   CATALOG: readonly Readonly<{ type: Exclude<FurnitureSectionType, 'custom'>; group: FurnitureSectionGroup; label: string }>[];
@@ -46,5 +46,6 @@ export const FurnitureSpecifications: {
   forProduct(input: unknown): TechnicalSpecifications;
   fromProposalForProduct(input: unknown): TechnicalSpecifications;
   normalize(input: unknown): TechnicalSpecifications | null;
+  normalizeProduct(input: unknown): TechnicalSpecifications | null;
   normalizeSection(input: unknown): FurnitureSection | null;
 };

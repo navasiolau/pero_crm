@@ -32,7 +32,7 @@ export async function verifyProposalCompositionNative(tx: Prisma.TransactionClie
   assert.equal(original.initialPrice, null); assert.equal(original.initialPriceCaptureEligible, true);
   assert.equal(await tx.productPercentageConfig.count({ where: { productId: firstId } }), 3);
   assert.equal(original.description, null);
-  const projected = { description: null, size: null, note: null, sourceGeneration: 1, sections: [] };
+  const projected = { description: null, size: null, note: null, sourceGeneration: 1, editRevision: 0, sections: [] };
   assert.deepEqual(original.technicalSpecifications, projected);
   const beforeReplay = await nativeSnapshot(tx);
   const replayed = await core.createProposalInTransaction(tx, actor, request, hooks);
@@ -43,17 +43,35 @@ export async function verifyProposalCompositionNative(tx: Prisma.TransactionClie
   await tx.product.update({ where: { id: firstId }, data: {
     status: "DESIGN", engineerId: engineer.id, description: legacyRaw,
   } });
-  const emptyEntry = { productId: firstId, clientMutationId: randomUUID(), field: "technicalSpecificationEntry",
-    type: "body", expectedSectionId: null, expectedValue: "", value: "", expectedSourceGeneration: 1 } as const;
+  const sectionId = randomUUID();
+  const emptyEntry = { productId: firstId, clientMutationId: sectionId, field: "technicalSpecificationRow",
+    sectionId, expectedRow: null, row: null, expectedSourceGeneration: 1 } as const;
   const beforeEmpty = await tx.product.findUniqueOrThrow({ where: { id: firstId } });
-  const emptySaved = await products.patchProductCore(actor, emptyEntry, operation => operation(tx));
+  const emptySaved = await products.patchProductCore(actor, { ...emptyEntry, clientMutationId: randomUUID() }, operation => operation(tx));
   assert.equal(emptySaved.kind === "saved" && emptySaved.noOp, true);
   assert.deepEqual(await tx.product.findUniqueOrThrow({ where: { id: firstId } }), beforeEmpty);
-  const manualEntry = { ...emptyEntry, clientMutationId: randomUUID(), value: "Ручной корпус" };
+  const manualEntry = { ...emptyEntry, row: { label: "Собственная строка", value: "Ручной корпус" } };
   const manualSaved = await products.patchProductCore(actor, manualEntry, operation => operation(tx));
   assert.equal(manualSaved.kind, "saved");
   assert.equal(manualSaved.kind === "saved" && manualSaved.derived?.technicalSpecificationSectionId, manualEntry.clientMutationId);
   assert.deepEqual(await products.patchProductCore(actor, manualEntry, operation => operation(tx)), { ...manualSaved, repeated: true });
+  const renamedPair = { label: "Переименованный заголовок", value: "Ручной корпус\r\n<b>буквально</b>" };
+  const rename = { ...manualEntry, clientMutationId: randomUUID(), expectedRow: manualEntry.row, row: renamedPair };
+  assert.equal((await products.patchProductCore(actor, rename, operation => operation(tx))).kind, "saved");
+  const reloaded = await tx.product.findUniqueOrThrow({ where: { id: firstId } });
+  assert.deepEqual(reloaded.technicalSpecifications, { ...projected, editRevision: 2, sections: [
+    { id: sectionId, type: "custom", group: "construction", ...renamedPair },
+  ] });
+  const removal = { ...rename, clientMutationId: randomUUID(), expectedRow: renamedPair, row: null };
+  const removed = await products.patchProductCore(actor, removal, operation => operation(tx));
+  assert.equal(removed.kind, "saved");
+  assert.deepEqual(await products.patchProductCore(actor, removal, operation => operation(tx)), { ...removed, repeated: true });
+  assert.equal((await products.patchProductCore(actor, { ...rename, clientMutationId: randomUUID(), expectedRow: renamedPair },
+    operation => operation(tx))).kind, "conflict");
+  const freshSection = randomUUID();
+  assert.equal((await products.patchProductCore(actor, {
+    ...manualEntry, sectionId: freshSection, clientMutationId: freshSection,
+  }, operation => operation(tx))).kind, "saved");
   const manual = await tx.product.create({ data: { projectId: created.result.projectId, number: `${created.result.number}.99`, suffixInt: 99,
     title: "Добавлено только в CRM", status: "DRAFT" } });
   const historyCount = await tx.productStatusHistory.count({ where: { productId: firstId } });

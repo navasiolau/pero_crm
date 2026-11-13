@@ -13,7 +13,7 @@ export async function maskProductionRead<T extends {id:string}>(db:Pick<PrismaCl
  return rows.map(row=>{
   const canReadTechnicalSpecifications=!restrictTechnical||ids.has(row.id);
   const technical = "technicalSpecifications" in row && row.technicalSpecifications != null
-   ? {technicalSpecifications:FurnitureSpecifications.forProduct(row.technicalSpecifications)} : {};
+   ? {technicalSpecifications:FurnitureSpecifications.normalizeProduct(row.technicalSpecifications)} : {};
   return {...row,...technical,canReadTechnicalSpecifications,...(!money?{expectedPrice:null,initialPrice:null}:{}),
    ...(!canReadTechnicalSpecifications?{description:null,technicalSpecifications:null}:{})};
  });

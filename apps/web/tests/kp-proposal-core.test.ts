@@ -231,12 +231,15 @@ test("legacy projection preserves the raw Product text, clears absent fields, an
   const raw = "  старый\r\n<b>текст</b>  ";
   const row = product(f, id);
   assert.equal(row.description, null);
-  const projected = { description: null, size: null, note: null, sourceGeneration: 1,
+  const projected = { description: null, size: null, note: null, sourceGeneration: 1, editRevision: 0,
     sections: [{ id: "body", type: "body", group: "construction", label: "Корпус", value: "Дуб" }] };
   assert.deepEqual(row.technicalSpecifications, projected);
   assert.deepEqual(initial.result.state.items[0].products, [{ title: "Каркас", outer: "Дуб", unknown: { retained: true } }]);
   row.description = raw;
-  const manual = { ...projected, note: "Ручная правка" };
+  const manual = { ...projected, note: "Ручная правка", sections: [
+    { ...projected.sections[0], label: "Моё название корпуса" },
+    { id: randomUUID(), type: "custom", group: "construction", label: "Собственная строка", value: "Ручная правка" },
+  ] };
   row.technicalSpecifications = manual;
   const restored = await save(f, initial.result);
   assert.equal(restored.result.revision, initial.result.revision + 1);
@@ -251,7 +254,7 @@ test("legacy projection preserves the raw Product text, clears absent fields, an
     items: [{ id: "one", name: "Изделие", qty: 1, specifications: [], products: restored.result.state.items[0].products }] });
   assert.equal(cleared.result.noOp, false);
   assert.equal(product(f, id).description, raw);
-  assert.deepEqual(product(f, id).technicalSpecifications, { description: null, size: null, note: null, sections: [], sourceGeneration: 3 });
+  assert.deepEqual(product(f, id).technicalSpecifications, { description: null, size: null, note: null, sections: [], sourceGeneration: 3, editRevision: 0 });
 });
 
 test("proposal sync blocks a stale value patch even when a deleted legacy row returns with identical ID and value", async () => {
@@ -259,8 +262,8 @@ test("proposal sync blocks a stale value patch even when a deleted legacy row re
   const initial = await create(f, [{ id: "one", name: "Изделие", products: [{ title: "Каркас" }] }]);
   const productId = initial.result.items[0].productId;
   const body = { id: "body", type: "body", group: "construction", label: "Корпус", value: "" } as const;
-  const stale = { productId, clientMutationId: randomUUID(), field: "technicalSpecificationEntry",
-    type: "body", expectedSectionId: "body", expectedValue: "", value: "Запоздавшая запись", expectedSourceGeneration: 1 } as const;
+  const stale = { productId, clientMutationId: randomUUID(), field: "technicalSpecificationRow",
+    sectionId: "body", expectedRow: { label: "Корпус", value: "" }, row: { label: "Корпус", value: "Запоздавшая запись" }, expectedSourceGeneration: 1 } as const;
   product(f, productId).technicalSpecifications = {
     description: null, size: null, note: null, sections: [], sourceGeneration: 1,
   };
@@ -269,12 +272,38 @@ test("proposal sync blocks a stale value patch even when a deleted legacy row re
   });
   const restored = await save(f, initial.result);
   assert.equal(restored.result.noOp, false);
-  const synced = { description: null, size: null, note: null, sections: [body], sourceGeneration: 2 };
+  const synced = { description: null, size: null, note: null, sections: [body], sourceGeneration: 2, editRevision: 0 };
   assert.deepEqual(product(f, productId).technicalSpecifications, synced);
   assert.equal((await patchProductCore(actor, stale, f.transaction)).kind, "conflict");
   assert.deepEqual(product(f, productId).technicalSpecifications, synced);
   assert.equal((await save(f, restored.result)).result.noOp, true);
   assert.deepEqual(product(f, productId).technicalSpecifications, synced);
+});
+
+test("manual editRevision is ignored for unchanged KP source and reset by actual source replacement", async () => {
+  const f = proposalFixture();
+  const initial = await create(f, [{ id: "one", name: "Изделие", products: [{ title: "Корпус", outer: "Дуб" }] }]);
+  const productId = initial.result.items[0].productId;
+  const body = { label: "Корпус", value: "Дуб" };
+  const update = { productId, clientMutationId: randomUUID(), field: "technicalSpecificationRow",
+    sectionId: "body", expectedRow: body, row: { ...body, value: "Ясень" }, expectedSourceGeneration: 1 } as const;
+  assert.equal((await patchProductCore(actor, update, f.transaction)).kind, "saved");
+  const revert = { ...update, clientMutationId: randomUUID(), expectedRow: update.row, row: body };
+  assert.equal((await patchProductCore(actor, revert, f.transaction)).kind, "saved");
+  const before = structuredClone(product(f, productId));
+  assert.equal((before.technicalSpecifications as {editRevision:number}).editRevision, 2);
+  assert.equal((await save(f, initial.result)).result.noOp, true);
+  assert.deepEqual(product(f, productId), before);
+  const updated = await save(f, initial.result, { ...initial.result.state, items: [{
+    ...initial.result.state.items[0], specifications: [{
+      id: "body", type: "body", group: "construction", label: "Корпус", value: "Берёза",
+    }],
+  }] });
+  assert.equal(updated.result.noOp, false);
+  assert.deepEqual(product(f, productId).technicalSpecifications, {
+    description: null, size: null, note: null, sourceGeneration: 2, editRevision: 0,
+    sections: [{ id: "body", type: "body", group: "construction", label: "Корпус", value: "Берёза" }],
+  });
 });
 
 test("hook, CAS and outbox failures roll back project/client/composition and receipts together", async () => {

@@ -13,10 +13,11 @@ const engineer = { ...manager, id: "e", roles: ["ENGINEER" as const] };
 const body: FurnitureSection = { id: randomUUID(), type: "body", group: "construction", label: "Корпус", value: "" };
 const custom: FurnitureSection = { id: randomUUID(), type: "custom", group: "filling", label: "  Ручная строка  ", value: "" };
 const identity = () => ({ productId: "p", clientMutationId: randomUUID(), expectedSourceGeneration: 0 });
-const entry = (type: Exclude<FurnitureSection["type"], "custom">, expectedSectionId: string | null,
-  expectedValue: string, value: string): ProductPatch => ({
-    ...identity(), field: "technicalSpecificationEntry", type, expectedSectionId, expectedValue, value,
-  });
+type Pair = { label: string; value: string };
+const rowPatch = (sectionId: string, expectedRow: Pair | null, row: Pair | null): ProductPatch => ({
+  ...identity(), clientMutationId: expectedRow === null && row !== null ? sectionId : randomUUID(),
+  field: "technicalSpecificationRow", sectionId, expectedRow, row,
+});
 
 function fixture() {
   const description = "  Старый <b>текст</b>\r\n  ";
@@ -68,54 +69,72 @@ function fixture() {
   };
 }
 
-test("virtual fields create one standard row on actual input and merge fresh unrelated values", async () => {
+test("custom rows append, renamed labels and order persist, independent CAS merges and replay preserves the result", async () => {
   const f = fixture();
-  const empty = entry("body", null, "", "");
+  const empty = rowPatch(randomUUID(), null, null);
   assert.equal((await f.mutate(empty)).kind, "saved");
   assert.equal(f.row.technicalSpecifications === null, true);
-  const first = entry("body", null, "", "Дуб\r\n<b>вставка</b>");
+  const firstId = randomUUID();
+  const firstPair = { label: "Мой корпус", value: "Дуб\r\n<b>вставка</b>" };
+  const first = rowPatch(firstId, null, firstPair);
   const saved = await f.mutate(first);
   assert.equal(saved.kind, "saved");
-  assert.equal(saved.kind === "saved" && saved.derived?.technicalSpecificationSectionId, first.clientMutationId);
-  assert.equal(f.row.description, f.description);
+  assert.deepEqual(saved.kind === "saved" && saved.value, firstPair);
+  assert.equal(saved.kind === "saved" && saved.derived?.technicalSpecificationsEditRevision, 1);
   assert.deepEqual(await f.mutate(first), { ...saved, repeated: true });
-  const next = entry("facade", null, "", "МДФ");
-  assert.equal((await f.mutate(next)).kind, "saved");
-  const bodyEdit = entry("body", first.clientMutationId, "Дуб\r\n<b>вставка</b>", "Ясень");
+  const secondId = randomUUID();
+  const secondPair = { label: "", value: "МДФ" };
+  assert.equal((await f.mutate(rowPatch(secondId, null, secondPair))).kind, "saved");
   f.beforeLock(() => { f.row.technicalSpecifications!.sections[1].value = "Берёза"; });
-  assert.equal((await f.mutate(bodyEdit)).kind, "saved");
-  assert.deepEqual(f.row.technicalSpecifications?.sections.map(row => row.value), ["Ясень", "Берёза"]);
-  assert.equal((await f.mutate(entry("body", null, "", "Поздно"))).kind, "conflict");
-  assert.equal((await f.mutate(entry("body", first.clientMutationId, "Ясень", ""))).kind, "saved");
-  assert.equal(f.row.technicalSpecifications?.sections[0].id, first.clientMutationId);
-  assert.equal(f.row.technicalSpecifications?.sections[0].value, "");
+  const renamed = { label: "Переименовано", value: "Ясень" };
+  assert.equal((await f.mutate(rowPatch(firstId, firstPair, renamed))).kind, "saved");
+  assert.deepEqual(f.row.technicalSpecifications?.sections.map(row => [row.id, row.label, row.value]), [
+    [firstId, renamed.label, renamed.value], [secondId, "", "Берёза"],
+  ]);
+  assert.equal(f.row.description, f.description);
+  assert.equal(f.row.technicalSpecifications?.editRevision, 3);
+  const noop = await f.mutate(rowPatch(firstId, renamed, renamed));
+  assert.equal(noop.kind === "saved" && noop.derived?.technicalSpecificationsEditRevision, 3);
+  assert.equal(f.row.technicalSpecifications?.editRevision, 3);
+  const db = { product: { findMany: async () => [] } } as unknown as Parameters<typeof maskProductionRead>[0];
+  const [reloaded] = await maskProductionRead(db, manager, [f.row]);
+  assert.deepEqual(reloaded.technicalSpecifications, f.row.technicalSpecifications);
+  assert.deepEqual((f.logs.findLast(log => log.action === "inline.update")?.newValue as Record<string, unknown>).technicalSpecifications, f.row.technicalSpecifications);
 });
 
-test("manual writes filter old custom/source data, retain raw description and roll back with audit", async () => {
+test("pair CAS rejects stale labels, deletion cannot resurrect by stale update or new creation and audit failure rolls back", async () => {
   const f = fixture();
   f.row.technicalSpecifications = {
-    sections: [body, custom], description: "Запрет", size: "100×120", note: "Запрет", sourceGeneration: 0,
+    sections: [body, custom], description: "Старое", size: "100×120", note: "Старое", sourceGeneration: 0,
   };
-  assert.equal((await f.mutate(entry("body", body.id, "", "Дуб"))).kind, "saved");
-  assert.deepEqual(f.row.technicalSpecifications, {
-    sections: [{ ...body, value: "Дуб" }], description: null, size: null, note: null, sourceGeneration: 0,
-  });
-  assert.equal((await f.mutate({ productId: f.row.id, clientMutationId: randomUUID(), field: "description", expectedValue: f.description, value: "Поздно" })).kind, "conflict");
-  assert.equal((await updateProductCore(manager, f.row.id, { description: "Поздно" }, { description: f.description }, f.transaction)).ok, false);
-  const unchanged = entry("body", body.id, "Дуб", "Дуб");
-  const noop = await f.mutate(unchanged);
-  assert.equal(noop.kind === "saved" && noop.noOp, true);
-  assert.deepEqual(await f.mutate(unchanged), { ...noop, repeated: true });
-  assert.equal(f.logs.at(-1)?.action, "inline.receipt");
-  f.failAudit();
+  const renamed = { label: "Переименованный корпус", value: "Дуб" };
+  assert.equal((await f.mutate(rowPatch(body.id, { label: body.label, value: body.value }, renamed))).kind, "saved");
+  assert.equal((await f.mutate(rowPatch(body.id, { label: body.label, value: body.value }, renamed))).kind, "conflict");
+  assert.deepEqual(f.row.technicalSpecifications?.sections[0], { ...body, ...renamed });
+  assert.deepEqual(f.row.technicalSpecifications?.sections[1], custom);
+  assert.equal(f.row.technicalSpecifications?.note, null);
+  const remove = rowPatch(body.id, renamed, null);
+  const removed = await f.mutate(remove);
+  assert.equal(removed.kind, "saved");
+  assert.deepEqual(await f.mutate(remove), { ...removed, repeated: true });
+  assert.equal((await f.mutate(rowPatch(body.id, renamed, { label: "Поздно", value: "Поздно" }))).kind, "conflict");
+  const introducedId = randomUUID();
+  const introduced = rowPatch(introducedId, null, renamed);
+  const introducedSaved = await f.mutate(introduced);
+  assert.equal(introducedSaved.kind, "saved");
+  assert.equal((await f.mutate(rowPatch(introducedId, renamed, null))).kind, "saved");
+  assert.equal((await f.mutate({ ...introduced, clientMutationId: randomUUID() })).kind, "validation");
+  assert.deepEqual(await f.mutate(introduced), { ...introducedSaved, repeated: true });
+  assert.equal(f.row.technicalSpecifications?.sections.some(row => row.id === introducedId), false);
   const baseline = structuredClone(f.row);
-  assert.equal((await f.mutate(entry("body", body.id, "Дуб", "Ясень"))).kind, "failure");
+  f.failAudit();
+  assert.equal((await f.mutate(rowPatch(randomUUID(), null, renamed))).kind, "failure");
   assert.deepEqual(f.row, baseline);
 });
 
-test("engineer rights are checked again under lock before replay; field redaction masks both formats", async () => {
+test("engineer rights are checked under lock before replay and field redaction masks both formats", async () => {
   const f = fixture();
-  const request = entry("body", null, "", "Дуб");
+  const request = rowPatch(randomUUID(), null, { label: "Личная строка", value: "Дуб" });
   assert.equal((await patchProductCore(engineer, request, f.transaction)).kind, "saved");
   f.beforeLock(() => { f.row.engineerId = "replacement"; });
   const revoked = await patchProductCore(engineer, request, f.transaction);
@@ -128,30 +147,27 @@ test("engineer rights are checked again under lock before replay; field redactio
   assert.equal(masked.canReadTechnicalSpecifications, false);
 });
 
-test("identity and source generation prevent ABA without silently rebasing old drafts", async () => {
+test("source generation blocks stale pair edits while successful receipt replay returns original ACK", async () => {
   const f = fixture();
-  const first = entry("body", null, "", "Дуб");
-  assert.equal((await f.mutate(first)).kind, "saved");
-  const stale = entry("body", first.clientMutationId, "Дуб", "Поздно");
-  f.row.technicalSpecifications!.sections[0].id = randomUUID();
-  const changedIdentity = await f.mutate(stale);
-  assert.equal(changedIdentity.kind, "conflict");
-  assert.equal("currentValue" in changedIdentity && changedIdentity.currentValue !== undefined, false);
-  f.row.technicalSpecifications!.sections[0].id = first.clientMutationId;
+  const id = randomUUID(), pair = { label: "Первое", value: "Дуб" };
+  const create = rowPatch(id, null, pair);
+  const saved = await f.mutate(create);
+  assert.equal(saved.kind, "saved");
   f.row.technicalSpecifications!.sourceGeneration = 1;
-  assert.equal((await f.mutate(stale)).kind, "conflict");
-  const replay = await f.mutate(first);
-  assert.equal(replay.kind === "saved" && replay.repeated, true);
+  assert.equal((await f.mutate(rowPatch(id, pair, { ...pair, value: "Поздно" }))).kind, "conflict");
+  assert.deepEqual(await f.mutate(create), { ...saved, repeated: true });
   assert.equal(f.row.technicalSpecifications!.sections[0].value, "Дуб");
+  assert.equal((await f.mutate({ productId: f.row.id, clientMutationId: randomUUID(), field: "description",
+    expectedValue: f.description, value: "Поздно" })).kind, "conflict");
+  assert.equal((await updateProductCore(manager, f.row.id, { description: "Поздно" }, { description: f.description }, f.transaction)).ok, false);
 });
 
-test("obsolete arbitrary/source writers and new-product source payloads are rejected before the transaction", async () => {
-  for (const field of ["technicalSpecificationAdd", "technicalSpecificationRemove", "technicalSpecificationValue", "technicalSpecificationSource"]) {
-    assert.equal(productPatchSchema.safeParse({ ...identity(), field, value: "Лишнее", expectedValue: null }).success, false);
-  }
+test("obsolete Entry clients get explicit refresh validation and creation accepts custom labels without source fields", () => {
+  assert.equal(productPatchSchema.safeParse({ ...identity(), field: "technicalSpecificationEntry", type: "body",
+    expectedSectionId: null, expectedValue: "", value: "Лишнее" }).success, false);
   const base = { projectId: "project", title: "Изделие" };
   const empty = { sections: [], description: null, size: null, note: null, sourceGeneration: 0 };
   assert.equal(createSchema.safeParse({ ...base, technicalSpecifications: empty }).success, true);
   assert.equal(createSchema.safeParse({ ...base, technicalSpecifications: { ...empty, note: "Лишнее" } }).success, false);
-  assert.equal(createSchema.safeParse({ ...base, technicalSpecifications: { ...empty, sections: [custom] } }).success, false);
+  assert.equal(createSchema.safeParse({ ...base, technicalSpecifications: { ...empty, sections: [custom, { ...body, label: "Своё имя" }] } }).success, true);
 });

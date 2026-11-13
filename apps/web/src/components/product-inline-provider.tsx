@@ -8,7 +8,7 @@ import {normalizeProductDescription} from "@/lib/product-description";
 import {isUnchangedProductDescriptionDraft} from "@/lib/product-description-draft";
 import {flushProductStatusBarrier} from "@/lib/product-status-barrier";
 import {createProductTechnicalEditor} from "@/lib/product-technical-editor";
-type ActiveField=Exclude<ProductPatchField,"client.phone"|"project.address"|"technicalSpecificationValue"|"technicalSpecificationSource"|"technicalSpecificationAdd"|"technicalSpecificationRemove"|"technicalSpecificationEntry">;
+type ActiveField=Exclude<ProductPatchField,"client.phone"|"project.address"|"technicalSpecificationValue"|"technicalSpecificationSource"|"technicalSpecificationAdd"|"technicalSpecificationRemove"|"technicalSpecificationEntry"|"technicalSpecificationRow">;
 export type ProductInlineInitial=Record<ActiveField,InlineValue>;
 type Context={controller:(field:ActiveField)=>InlineSaveController;technical:ReturnType<typeof createProductTechnicalEditor>;flush:()=>Promise<boolean>;registerGuard:(key:string,guard:()=>Promise<boolean>)=>()=>void;derived:ProductPatchDerived;clientId:string;sourceClientId:string};
 const InlineContext=createContext<Context|null>(null);
@@ -23,7 +23,7 @@ export function ProductInlineProvider({productId,initial,technicalSpecifications
  const controllers=useMemo(()=>{
   const result=new Map<ActiveField,InlineSaveController>();for(const field of Object.keys(initial) as ActiveField[]){
    result.set(field,createInlineSaveController<InlineValue>({initialValue:field==="expectedPrice"&&initial[field]!==null?parse(field,String(initial[field])):initial[field],format:value=>value===null?"":String(value),parse:raw=>parse(field,raw),isUnchangedDraft:field==="description"?(draft,baseline)=>isUnchangedProductDescriptionDraft(draft,baseline===null?null:String(baseline)):undefined,
-    save:async request=>{const reply=await invokeProductPatch(productPatchSchema.parse({productId,field,...request}));if(reply.kind==="saved"&&reply.derived)setDerived(previous=>({...previous,...reply.derived}));return reply;},
+    save:async request=>{const reply=await invokeProductPatch(productPatchSchema.parse({productId,field,...request}));if(reply.kind==="saved"&&reply.derived)setDerived(previous=>({...previous,...reply.derived}));if(reply.kind==="saved"){if(reply.value!==null&&typeof reply.value==="object")throw Error("Неверный ответ поля изделия");return{...reply,value:reply.value};}const currentValue="currentValue" in reply?reply.currentValue:undefined;return{...reply,currentValue:currentValue!==null&&typeof currentValue==="object"?undefined:currentValue};},
    }));
   }return result;
   // Независимые RSC не заменяют черновики и исходные CAS baselines изделия.

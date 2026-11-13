@@ -10,20 +10,24 @@ const variant = <F extends string, T extends z.ZodType>(field: F, value: T) =>
   z.object({ ...base, field: z.literal(field), value, expectedValue: value }).strict();
 
 export const technicalSpecificationsSchema = z.custom<TechnicalSpecifications>(
-  input => {
-    const normalized = FurnitureSpecifications.normalize(input);
-    return normalized !== null && normalized.description === null && normalized.size === null && normalized.note === null &&
-      normalized.sections.every(section => section.type !== "custom");
-  }, "Некорректные технические характеристики",
+  input => FurnitureSpecifications.normalizeProduct(input) !== null &&
+    (input as TechnicalSpecifications).description === null && (input as TechnicalSpecifications).size === null &&
+    (input as TechnicalSpecifications).note === null, "Некорректные технические характеристики",
 );
+export type ProductSpecificationRowValue = { label: string; value: string };
+const rowValue = z.object({ label: z.string(), value: z.string() }).strict().nullable();
 const expectedSourceGeneration = z.number().int().nonnegative();
 
 export const productPatchSchema = z.discriminatedUnion("field", [
   variant("title", required), variant("kind", text), variant("description", text),
+  z.object({ ...base, field: z.literal("technicalSpecificationRow"), sectionId: required,
+    expectedSourceGeneration, expectedRow: rowValue, row: rowValue }).strict()
+    .refine(patch => patch.expectedRow !== null || patch.row === null || patch.sectionId === patch.clientMutationId,
+      "Создайте строку с новым идентификатором"),
   variant("technicalSpecificationEntry", z.string()).extend({
     type: z.enum(["body", "facade", "worktop", "upholstery", "insertsAndHandles", "hardware", "lighting", "interiorFilling", "softFilling"]),
     expectedSectionId: z.string().min(1).nullable(), expectedSourceGeneration,
-  }),
+  }).refine(() => false, "Формат технического описания изменён. Обновите карточку изделия"),
   variant("engineerId", text), variant("expectedPrice", money),
   variant("quantity", z.number().int().min(1).max(2_147_483_647)),
   variant("project.clientId", required),
@@ -33,9 +37,11 @@ export const productPatchSchema = z.discriminatedUnion("field", [
 ]);
 export type ProductPatch = z.infer<typeof productPatchSchema>;
 export type ProductPatchField = ProductPatch["field"];
-export type ProductPatchValue = string | number | null;
+export type ProductScalarValue = string | number | null;
+export type ProductPatchValue = ProductScalarValue | ProductSpecificationRowValue;
 export type ProductPatchDerived = {
   technicalSpecificationSectionId?: string | null;
+  technicalSpecificationsEditRevision?: number;
   lineTotalBYN?: string | null; quantity?: number; currentUnitPrice?: string | null;
   engineerLabel?: string | null; clientLabel?: string | null; clientId?: string; phone?: string;clientAddress?:string|null;
 };
