@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import type {JournalPresentation} from '../src/server/changelog/contract';
 import {normalizeJournalQuery} from '../src/server/changelog/query-contract';
-import {readJournalPage,readJournalDetail,readJournalOptions,type JournalReadStore,type JournalResolvedEntry} from '../src/server/changelog/reader-core';
+import {readJournalPage,readJournalDetail,readJournalOptions,compareJournalRows,type JournalReadStore,type JournalResolvedEntry} from '../src/server/changelog/reader-core';
 
 function event(id:number,patch:Partial<JournalPresentation>={}):JournalResolvedEntry{
  const presentation:JournalPresentation={version:1,kind:'event',actor:{type:'user',id:'u1',name:'Историческое имя'},
@@ -40,6 +40,10 @@ test('fully backfilled history reads only the requested SQL page',async()=>{
  const read=db.preparedRows;db.preparedRows=async(...args)=>{requested=args.slice(1);return read(...args);};
  const page=await readJournalPage(db,normalizeJournalQuery({page:2}));
  assert.deepEqual(requested,[20,20]);assert.equal(page.entries[0].id,'00025');assert.equal(page.total,45);
+});
+test('mixed-case event IDs use the same case-sensitive tie-break as PostgreSQL C collation',()=>{
+ const rows=['event-a','event-Z','event-A','event-z'].map(id=>({id,createdAt:'2026-11-16T00:00:00.000Z',actorName:'Один автор',entityLabel:'Изделие',actionLabel:'Изменение',changeCount:0,hasChanges:false}));
+ assert.deepEqual(rows.sort(compareJournalRows({sort:'time',dir:'desc'})).map(row=>row.id),['event-z','event-a','event-Z','event-A']);
 });
 test('project scope excludes product ownership and detail cannot bypass scope or hidden events',async()=>{
  const product=event(1,{contexts:[{kind:'product',id:'p1',label:'Изделие 203.1'}],links:[{type:'project',id:'pr',label:'Проект 203'}]});

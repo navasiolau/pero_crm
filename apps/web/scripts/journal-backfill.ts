@@ -3,7 +3,7 @@ import {z} from 'zod';
 import {journalBackfillTarget} from '../src/server/changelog/backfill-target';
 import {backfillJournalBatch} from '../src/server/changelog/backfill';
 
-const inputSchema=z.object({mode:z.enum(['check','apply']),batchSize:z.number().int().min(1).max(500).default(100),maxBatches:z.number().int().min(1).max(1000).default(100),afterId:z.string().max(200).nullable().default(null)}).strict();
+const inputSchema=z.object({mode:z.enum(['check','apply']),batchSize:z.number().int().min(1).max(500).default(100),maxBatches:z.number().int().min(1).max(1000).default(100),afterId:z.string().max(200).nullable().default(null),refreshAll:z.boolean().default(false)}).strict();
 
 async function main(){
  const target=journalBackfillTarget(process.env);
@@ -14,7 +14,7 @@ async function main(){
   for(let batch=0;batch<input.maxBatches;batch++){
    const result=await db.$transaction(async tx=>{
     if(input.mode==='check')await tx.$executeRaw`SET TRANSACTION READ ONLY`;
-    return backfillJournalBatch(tx,{target,mode:input.mode,batchSize:input.batchSize,afterId});
+    return backfillJournalBatch(tx,{target,mode:input.mode,batchSize:input.batchSize,afterId,refreshAll:input.refreshAll});
    },{isolationLevel:Prisma.TransactionIsolationLevel.RepeatableRead,maxWait:10_000,timeout:60_000});
    scanned+=result.scanned;updated+=result.updated;rawVerified+=result.rawVerified;remaining=result.remaining;afterId=result.nextAfterId;
    console.log(JSON.stringify({status:'PASS',target:target.kind,revision:target.revision,mode:input.mode,batch:batch+1,...result}));
