@@ -21,4 +21,10 @@ Root native **8 assertions PASS**: full values, system/raw receipt, references/n
 
 ## Staging
 
-PENDING: обычный merge/CI, проверка фактического SHA/образа/здоровья и runtime оркестратором. Коммит/push/merge worker не выполнял. Production, restic и инфраструктура не изменялись.
+Принято root на `26f1d12ab131e673930475f30203e35797a062ce` после обычного merge `0193e95a`. [Штатный CI](https://github.com/navasiolau/pero_crm/actions/runs/43769709750): все 7 jobs SUCCESS. Watcher развернул web `sha256:43dd12130f2c62ebd2a30d16b29f29d657149b79b4d3049ae06449552badf217` и соответствующий renderer `sha256:2b01efb658993e99976cd7676c1a64b4c6ba959b610e6ee0390fbd3a9be61dd2`; обе OCI revisions совпали, health 200.
+
+Штатный entrypoint применил `20261116120000_journal_event_presentation`; `pg_trgm` 1.6 установлен. Root выполнил тот же native probe внутри действующего staging web под W07: полные значения, System/инициатор при неизменном raw actor, ссылки, известный null, скрытие секретов, JSONB scope, raw receipt и rollback — PASS. 75 из 76 таблиц совпали с исходными hash/count; 5529 прежних ChangeLog сохранены. DB container/startedAt/volume и proxy сохранены. Итоговый receipt: `D:/Projects/pero_crm_v2/.playwright-mcp/journal-221-228/accepted-221.json`.
+
+ApiToken сохраняет 1346 строк, но полный hash меняется при работающем API: существующий `plugins/tokens.ts:42` обновляет lastUsedAt при чтении. Две дополнительные read-only проверки зафиксировали сдвиг последнего использования 22:49:41→22:50:11 UTC и один неизменный hash всех остальных колонок `8df20f8c69448a22ba367a68c15962dc`. Первоначальный снимок не выделял lastUsedAt отдельно; поэтому побайтовое совпадение ApiToken с самым первым снимком не утверждается. Остальные 75 таблиц, включая полный исходный ChangeLog, проверены непосредственно против первого снимка.
+
+Собственный metadata observer сначала сравнивал порядок Docker Mounts и остановился на перестановке списка. Read-only сравнение всех полей доказало одинаковый состав; исправлена только нормализация порядка observer, W07/target guards не изменялись. Production и restic не затрагивались.
