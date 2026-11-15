@@ -31,7 +31,7 @@ export function createProductTechnicalEditor({ productId, initial, legacyDescrip
     const controller = createInlineSaveController<string | null>({
       initialValue: serialize(row), format: value => value ?? JSON.stringify(emptyRow),
       isUnchangedDraft: (draft, baseline) => draft === (baseline ?? JSON.stringify(emptyRow)),
-      parse: draft => { const pair = technicalRowDraft(draft); return pair.label === "" && pair.value === "" ? null : serialize(pair); },
+      parse: draft => { const pair = technicalRowDraft(draft); return pair.label.trim() === "" && pair.value.trim() === "" ? null : serialize(pair); },
       id: () => { if (firstMutation) { firstMutation = false; return key; } return id(); },
       onSaved: () => prune(key),
       save: async request => {
@@ -58,7 +58,7 @@ export function createProductTechnicalEditor({ productId, initial, legacyDescrip
             acknowledge(requestGeneration, reply.derived.technicalSpecificationsEditRevision);
           }
           if (reply.derived?.technicalSpecifications) receive(reply.derived.technicalSpecifications);
-          baselineLegacyDescription = undefined;
+          if (!reply.noOp || reply.derived?.technicalSpecifications) baselineLegacyDescription = undefined;
           return { kind: "saved" as const, value: serialize(reply.value as TechnicalRow | null) };
         }
         return { kind: reply.kind, error: reply.error };
