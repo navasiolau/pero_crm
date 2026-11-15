@@ -221,4 +221,4 @@ OpenSpec размещаем в `D:\Projects\pero_crm_v2\openspec`, схема `s
 
 | № | Ветка | OpenSpec | Результат |
 |---|---|---|---|
-| 220 | bugfix/220 | technical-specifications-quarter-columns | Названия 25%, значения 75% на всех ширинах. Изменение только общей CSS-переменной и существующей browser-проверки. Local PASS/review GO, фактический staging — verification.md. |
+| 220 | bugfix/220 | technical-specifications-quarter-columns | Принято на staging `a391e5f1`, CI 7/7: названия 25%, значения 75% на всех ширинах. Local browser/review PASS, actual390/1440×light/dark read-only PASS, выбранная запись неизменна. Только CSS-переменная и существующая проверка, подробности verification.md. Main/production не менялись. |
