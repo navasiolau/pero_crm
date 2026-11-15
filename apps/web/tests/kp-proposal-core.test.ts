@@ -306,6 +306,38 @@ test("manual editRevision is ignored for unchanged KP source and reset by actual
   });
 });
 
+test("KP synchronization replaces a legacy null snapshot, preserves raw description and blocks the old editor", async () => {
+  const f = proposalFixture();
+  const initial = await create(f, [{ id: "one", name: "Изделие", products: [{ title: "Корпус", outer: "Дуб" }] }]);
+  const productId = initial.result.items[0].productId, row = product(f, productId);
+  const raw = "Свободный текст\r\nКаркас: Старое\r\nФасад: Старый";
+  row.description = raw;
+  row.technicalSpecifications = null;
+  const updated = await save(f, initial.result, { ...initial.result.state, items: [{
+    ...initial.result.state.items[0], description: "Постороннее описание", size: "123×456", note: "Примечание",
+    specifications: [
+      { id: "body", type: "body", group: "construction", label: "Корпус", value: "Ясень" },
+      { id: "other", type: "custom", group: "construction", label: "Посторонний блок", value: "Сохранён в КП" },
+    ],
+  }] });
+  const expected = { description: null, size: null, note: null, sourceGeneration: 1, editRevision: 0,
+    sections: [{ id: "body", type: "body", group: "construction", label: "Корпус", value: "Ясень" }] };
+  assert.deepEqual(product(f, productId).technicalSpecifications, expected);
+  assert.equal(product(f, productId).description, raw);
+  assert.equal(updated.result.state.items[0].specifications?.length, 2);
+  const stale = { productId, clientMutationId: randomUUID(), field: "technicalSpecificationRow",
+    sectionId: "legacy-1", expectedRow: { label: "Каркас", value: "Старое\r\n" },
+    row: { label: "Каркас", value: "Поздняя правка" }, expectedSourceGeneration: 0, expectedLegacyDescription: raw } as const;
+  assert.equal((await patchProductCore(actor, stale, f.transaction)).kind, "conflict");
+  assert.deepEqual(product(f, productId).technicalSpecifications, expected);
+  const cleared = await save(f, updated.result, { ...updated.result.state, items: [{
+    ...updated.result.state.items[0], specifications: [],
+  }] });
+  assert.equal(cleared.result.noOp, false);
+  assert.deepEqual(product(f, productId).technicalSpecifications, { ...expected, sourceGeneration: 2, sections: [] });
+  assert.equal(product(f, productId).description, raw);
+});
+
 test("hook, CAS and outbox failures roll back project/client/composition and receipts together", async () => {
   const f = proposalFixture(); const first = await create(f, [{ id: "one", name: "Изделие" }], { clientId: "customer" });
   const next = { ...first.result.state, items: [{ ...first.result.state.items[0], name: "Другое" }] };

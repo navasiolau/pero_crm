@@ -10,6 +10,7 @@ import { z } from "zod";
 import { MANAGER_ROLES, hasAnyRole, hasRole } from "@/lib/roles";
 import { assertProjectMoneyCurrency } from "@/lib/internal-currency";
 import { normalizeProductDescription, isProductDescriptionUnchanged } from "@/lib/product-description";
+import { effectiveProductSpecifications } from "@/lib/product-legacy-specifications";
 import { productLineTotal } from "@/lib/product-quantity";
 import { productEditWhere, resolveVisibilityActor } from "@/server/access/visibility";
 import { productDraftAccessRelations } from "@/server/access/product-draft-context";
@@ -250,15 +251,13 @@ export async function patchProductCore(actor: DomainActor, input: ProductPatch, 
       if (patch.field === "quantity") await lockWarehouseMetadata(tx);
       await lockProductRow(tx, patch.productId);
       return tx.product.findFirst({ where, select: {
-        id: true, title: true, kind: true, description: legacy, technicalSpecifications: legacy || technical,
+        id: true, title: true, kind: true, description: legacy || technical, technicalSpecifications: legacy || technical,
         quantity: true, expectedPrice: true, engineerId: true, status: true,
       } });
     })();
     if (!contact && !current) return {...identity,kind:"not-found",error:"Изделие не найдено или недоступно"};
     if (current && !manager && (current.status !== "DESIGN" || current.engineerId !== actor.id))
       return {...identity,kind:"forbidden",error:"Доступ к техническому блоку изменён"};
-    if (legacy && current?.technicalSpecifications != null)
-      return {...identity,kind:"conflict",error:"Технические характеристики уже обновлены. Откройте карточку заново"};
     const receipt=await tx.changeLog.findUnique({where:{id:receiptId}});
     if(receipt) {
       const saved=receipt.newValue;
@@ -267,6 +266,8 @@ export async function patchProductCore(actor: DomainActor, input: ProductPatch, 
       if(!saved.result||typeof saved.result!=="object"||Array.isArray(saved.result)) throw new Error("Повреждён результат сохранения");
       return {...saved.result as unknown as Extract<ProductPatchResult,{kind:"saved"}>,repeated:true};
     }
+    if (legacy && current?.technicalSpecifications != null)
+      return {...identity,kind:"conflict",error:"Технические характеристики уже обновлены. Откройте карточку заново"};
     let result: Extract<ProductPatchResult,{kind:"saved"}>;
     if(patch.field==="client.phone"||patch.field==="project.address"||patch.field==="project.clientId") {
       const shared=await patchProductContactInTransaction(actor,{productId:patch.productId,
@@ -275,7 +276,11 @@ export async function patchProductCore(actor: DomainActor, input: ProductPatch, 
       if(!shared.ok)return {...identity,...shared};
       result={...identity,kind:"saved",value:shared.value,noOp:!shared.changed,derived:{clientId:shared.clientId,clientLabel:shared.clientLabel,phone:shared.phone,clientAddress:shared.clientAddress}};
     } else if (current && technical) {
-      const before = FurnitureSpecifications.normalizeProduct(current.technicalSpecifications);
+      const materializing = current.technicalSpecifications == null;
+      if ((materializing && patch.expectedLegacyDescription === undefined) ||
+        (patch.expectedLegacyDescription !== undefined && current.description !== patch.expectedLegacyDescription))
+        return {...identity,kind:"conflict",error:"Прежнее техническое описание изменено. Откройте карточку заново"};
+      const before = effectiveProductSpecifications(current.technicalSpecifications, current.description);
       if (before === null && current.technicalSpecifications != null)
         return {...identity,kind:"failure",error:"Технические характеристики имеют неподдерживаемый формат"};
       if ((before?.sourceGeneration ?? 0) !== patch.expectedSourceGeneration)
@@ -283,7 +288,8 @@ export async function patchProductCore(actor: DomainActor, input: ProductPatch, 
       const change = applySpecificationPatch(before, patch);
       if (!change.ok) return {...identity,kind:"conflict",error:change.error,currentValue:change.currentValue};
       if (!change.noOp) await tx.product.update({ where: { id: patch.productId }, data: { technicalSpecifications: change.next } });
-      result = {...identity,kind:"saved",value:change.value,noOp:change.noOp,derived:{technicalSpecificationSectionId:change.sectionId,technicalSpecificationsEditRevision:change.next.editRevision ?? 0}};
+      result = {...identity,kind:"saved",value:change.value,noOp:change.noOp,derived:{technicalSpecificationSectionId:change.sectionId,technicalSpecificationsEditRevision:change.next.editRevision ?? 0,
+        ...(materializing && !change.noOp ? { technicalSpecifications: structuredClone(change.next) } : {})}};
       await tx.changeLog.create({ data: {
         id: receiptId, actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
         entity: "product", entityId: patch.productId, action: change.noOp ? "inline.receipt" : "inline.update", field: patch.field,

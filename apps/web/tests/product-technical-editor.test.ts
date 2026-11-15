@@ -3,6 +3,7 @@ import test from "node:test";
 import {createProductTechnicalEditor,technicalRowDraft} from "../src/lib/product-technical-editor";
 import type {ProductPatch,ProductPatchResult} from "../src/server/products/patch-contract";
 import type {TechnicalSpecifications} from "@pero/kp-template";
+import {parseLegacyProductDescription} from "../src/lib/product-legacy-specifications";
 const initial:TechnicalSpecifications={sections:[{id:"first",type:"custom",group:"construction",label:"Мой заголовок",value:"Дуб"},{id:"second",type:"hardware",group:"hardware",label:"Петли",value:"Blum"}],description:null,size:null,note:null,sourceGeneration:1};
 function setup(send?:(patch:ProductPatch)=>Promise<ProductPatchResult>,source:TechnicalSpecifications|null=initial){let n=0;const patches:ProductPatch[]=[];const editor=createProductTechnicalEditor({productId:"p",initial:source,id:()=>`id-${++n}`,send:async patch=>{patches.push(patch);if(send)return send(patch);assert.equal(patch.field,"technicalSpecificationRow");return{kind:"saved",field:patch.field,value:patch.field==="technicalSpecificationRow"?patch.row:null,clientMutationId:patch.clientMutationId};}});return{editor,patches};}
 test("исходный порядок/custom/названия и одна нетронутая завершающая строка без записи",async()=>{const{editor,patches}=setup();assert.deepEqual(editor.getSnapshot().rows,["first","second","id-1"]);assert.equal(technicalRowDraft(editor.section("first").getSnapshot().draft).label,"Мой заголовок");assert.equal(await editor.flush(),true);assert.equal(patches.length,0);});
@@ -34,4 +35,35 @@ test("поздний ACK gen2/rev7 не поднимает revision свежег
  editor.setRow("first",{label:"Черновик",value:"2"});const pending=editor.section("first").commit();
  const fresh={...initial,sourceGeneration:3,editRevision:0,sections:[{...initial.sections[0],label:"КП gen3",value:"Актуальное"}]};editor.receive(fresh);release();await pending;
  editor.receive(fresh);assert.deepEqual(technicalRowDraft(editor.section("first").getSnapshot().draft),{label:"КП gen3",value:"Актуальное"});
+});
+
+test("legacy строки отображаются без записи, первая правка сохраняет raw baseline и принимает полный ACK",async()=>{
+ const legacyDescription="Каркас: ЛДСП\nФасад: МДФ\nСвободный текст",initialLegacy=parseLegacyProductDescription(legacyDescription),patches:ProductPatch[]=[];
+ const editor=createProductTechnicalEditor({productId:"p",initial:null,legacyDescription,id:()=>"trailing",send:async patch=>{patches.push(patch);assert.ok(patch.field==="technicalSpecificationRow");return{kind:"saved",field:patch.field,value:patch.row,clientMutationId:patch.clientMutationId,derived:{technicalSpecificationsEditRevision:1,technicalSpecifications:{...initialLegacy,editRevision:1,sections:initialLegacy.sections.map(row=>row.id===patch.sectionId?{...row,...patch.row}:row)}}};}});
+ assert.deepEqual(editor.getSnapshot().rows,[...initialLegacy.sections.map(row=>row.id),"trailing"]);assert.equal(await editor.flush(),true);assert.equal(patches.length,0);
+ const first=initialLegacy.sections[0];editor.setRow(first.id,{label:first.label,value:"Дуб"});await editor.flush();assert.ok(patches[0].field==="technicalSpecificationRow");assert.equal(patches[0].expectedLegacyDescription,legacyDescription);assert.deepEqual(patches[0].expectedRow,{label:first.label,value:first.value});
+ assert.equal(technicalRowDraft(editor.section(initialLegacy.sections[1].id).getSnapshot().draft).value,initialLegacy.sections[1].value);
+ editor.receive(null,legacyDescription);assert.equal(technicalRowDraft(editor.section(first.id).getSnapshot().draft).value,"Дуб");
+ editor.setRow(first.id,{label:first.label,value:"Ясень"});await editor.flush();assert.ok(patches[1].field==="technicalSpecificationRow");assert.equal(Object.hasOwn(patches[1],"expectedLegacyDescription"),false);
+});
+
+test("грязная legacy строка держит свой raw CAS после получения нового исходного текста",async()=>{
+ const original="Каркас: ЛДСП\nФасад: МДФ",fresh="Каркас: ЛДСП\nФасад: Шпон",parsed=parseLegacyProductDescription(original),patches:ProductPatch[]=[];
+ const editor=createProductTechnicalEditor({productId:"p",initial:null,legacyDescription:original,id:()=>"trailing",send:async patch=>{patches.push(patch);return{kind:"conflict",field:patch.field,error:"Исходное описание изменилось",clientMutationId:patch.clientMutationId};}});
+ editor.setRow(parsed.sections[0].id,{label:"Каркас",value:"Черновик"});editor.receive(null,fresh);editor.setRow(parsed.sections[1].id,{label:"Фасад",value:"Новый фасад"});assert.equal(await editor.flush(),false);
+ const [first,second]=patches;assert.ok(first.field==="technicalSpecificationRow"&&second.field==="technicalSpecificationRow");assert.equal(first.expectedLegacyDescription,original);assert.equal(second.expectedLegacyDescription,fresh);assert.equal(technicalRowDraft(editor.section(parsed.sections[0].id).getSnapshot().draft).value,"Черновик");
+});
+
+test("явный пустой JSON и JSON receive не возвращают старое описание",async()=>{
+ const empty={sections:[],description:null,size:null,note:null,sourceGeneration:0,editRevision:1};
+ const editor=createProductTechnicalEditor({productId:"p",initial:empty,legacyDescription:"Каркас: ЛДСП",id:()=>"trailing",send:async()=>{throw Error("Чтение не сохраняет");}});
+ assert.deepEqual(editor.getSnapshot().rows,["trailing"]);editor.receive(empty,"Фасад: МДФ");assert.deepEqual(editor.getSnapshot().rows,["trailing"]);assert.equal(await editor.flush(),true);
+});
+
+test("полный ACK материализации сохраняет свежий ввод, соседний черновик и новые локальные строки",async()=>{
+ const raw="Каркас: ЛДСП\nФасад: МДФ",legacy=parseLegacyProductDescription(raw),[first,second]=legacy.sections;let release!:(reply:ProductPatchResult)=>void,n=0;
+ const editor=createProductTechnicalEditor({productId:"p",initial:null,legacyDescription:raw,id:()=>`local-${++n}`,send:()=>new Promise(resolve=>{release=resolve;})});
+ editor.setRow(first.id,{label:"Каркас",value:"Первая правка"});const pending=editor.section(first.id).commit();editor.setRow(first.id,{label:"Каркас",value:"Более свежая правка"});editor.setRow(second.id,{label:"Фасад",value:"Локальный фасад"});const added=editor.getSnapshot().trailing;editor.setRow(added,{label:"Своя строка",value:"Новая"});const keys=editor.getSnapshot().rows;
+ release({kind:"saved",field:"technicalSpecificationRow",value:{label:"Каркас",value:"Первая правка"},clientMutationId:"ack",derived:{technicalSpecificationsEditRevision:1,technicalSpecifications:{...legacy,editRevision:1,sections:legacy.sections.map(row=>row.id===first.id?{...row,value:"Первая правка"}:row)}}});assert.equal(await pending,true);
+ assert.deepEqual(editor.getSnapshot().rows,keys);assert.equal(technicalRowDraft(editor.section(first.id).getSnapshot().draft).value,"Более свежая правка");assert.equal(technicalRowDraft(editor.section(second.id).getSnapshot().draft).value,"Локальный фасад");assert.equal(technicalRowDraft(editor.section(added).getSnapshot().draft).value,"Новая");
 });
