@@ -67,3 +67,29 @@ test("полный ACK материализации сохраняет свеж�
  release({kind:"saved",field:"technicalSpecificationRow",value:{label:"Каркас",value:"Первая правка"},clientMutationId:"ack",derived:{technicalSpecificationsEditRevision:1,technicalSpecifications:{...legacy,editRevision:1,sections:legacy.sections.map(row=>row.id===first.id?{...row,value:"Первая правка"}:row)}}});assert.equal(await pending,true);
  assert.deepEqual(editor.getSnapshot().rows,keys);assert.equal(technicalRowDraft(editor.section(first.id).getSnapshot().draft).value,"Более свежая правка");assert.equal(technicalRowDraft(editor.section(second.id).getSnapshot().draft).value,"Локальный фасад");assert.equal(technicalRowDraft(editor.section(added).getSnapshot().draft).value,"Новая");
 });
+
+test("пробел в активной новой legacy строке не лишает следующий текст raw CAS",async()=>{
+ const patches:ProductPatch[]=[];let n=0;
+ const editor=createProductTechnicalEditor({productId:"p",initial:null,legacyDescription:null,id:()=>`space-${++n}`,send:async patch=>{
+  patches.push(patch);assert.ok(patch.field==="technicalSpecificationRow");
+  if(!patch.row?.label.trim()&&!patch.row?.value.trim())return{kind:"saved",field:patch.field,value:null,noOp:true,clientMutationId:patch.clientMutationId};
+  if(!Object.hasOwn(patch,"expectedLegacyDescription"))return{kind:"conflict",field:patch.field,error:"Нет исходного legacy baseline",clientMutationId:patch.clientMutationId};
+  return{kind:"saved",field:patch.field,value:patch.row,clientMutationId:patch.clientMutationId};
+ }});
+ const key=editor.getSnapshot().trailing;editor.setActive(key,true);editor.setRow(key,{label:" ",value:""});assert.equal(await editor.section(key).commit(),true);
+ editor.setRow(key,{label:"Каркас",value:"  Дуб  "});assert.equal(await editor.section(key).commit(),true);const saved=patches.at(-1);assert.ok(saved?.field==="technicalSpecificationRow");assert.equal(saved.expectedLegacyDescription,null);assert.deepEqual(saved.row,{label:"Каркас",value:"  Дуб  "});assert.ok(editor.getSnapshot().rows.includes(key));
+});
+
+test("backend noOp без materialized snapshot сохраняет legacy baseline для следующего ввода",async()=>{
+ const patches:ProductPatch[]=[];let n=0;
+ const editor=createProductTechnicalEditor({productId:"p",initial:null,legacyDescription:null,id:()=>`noop-${++n}`,send:async patch=>{
+  patches.push(patch);assert.ok(patch.field==="technicalSpecificationRow");
+  return{kind:"saved",field:patch.field,value:patches.length===1?null:patch.row,noOp:patches.length===1,clientMutationId:patch.clientMutationId};
+ }});
+ const key=editor.getSnapshot().trailing;editor.setActive(key,true);editor.setRow(key,{label:"До noOp",value:""});assert.equal(await editor.section(key).commit(),true);
+ editor.setRow(key,{label:"После noOp",value:"Дуб"});assert.equal(await editor.section(key).commit(),true);assert.equal(patches.length,2);assert.ok(patches[1].field==="technicalSpecificationRow");assert.equal(Object.hasOwn(patches[1],"expectedLegacyDescription"),true);assert.equal(patches[1].expectedLegacyDescription,null);
+});
+
+test("нетронутый whitespace-only ввод не отправляется в backend",async()=>{
+ const{editor,patches}=setup(undefined,null);const key=editor.getSnapshot().trailing;editor.setActive(key,true);editor.setRow(key,{label:" \t",value:" \n"});assert.equal(await editor.section(key).commit(),true);assert.equal(patches.length,0);
+});
