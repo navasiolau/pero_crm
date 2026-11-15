@@ -1480,6 +1480,8 @@ model ChangeLog {
   newValue  Json?
   source    String   @default("web") // web | telegram | plugin | api
   createdAt DateTime @default(now())
+  presentation Json? // Версионированное безопасное представление, исходные факты выше неизменны.
+  searchText String? // Полный безопасный текст события; pg_trgm index в SQL migration.
 
   @@index([entity, entityId, createdAt])
   @@index([createdAt])
