@@ -15,7 +15,7 @@ export function TechnicalList({ children }: { children: ReactNode }) {
         event.currentTarget.querySelector<HTMLTextAreaElement>('[data-technical-trailing="true"] [data-technical-label]')?.focus();
       }}
       className="h-80 min-h-80 w-full max-w-full min-w-0 resize-y overflow-auto rounded-lg border border-input bg-transparent px-2.5 py-2 text-base outline-none focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50 md:text-sm dark:bg-input/30">
-      <ol className="list-decimal ps-6">{children}</ol>
+      <ol className="relative ml-6 min-h-full list-decimal p-0 [--technical-label-width:48%] before:pointer-events-none before:absolute before:inset-y-0 before:left-[var(--technical-label-width)] before:border-l before:border-input before:content-[''] md:[--technical-label-width:42%]">{children}</ol>
     </div>
   </div>;
 }
@@ -59,21 +59,19 @@ export function TechnicalText({ number, row, onChange, onCommit, issue, disabled
       }
     },
   };
-  return <li className="min-w-0" data-technical-row={domRowId} data-technical-trailing={trailing || undefined}
+  return <li className={`min-w-0${row.label === "" && row.value === "" ? " marker:text-muted-foreground" : ""}`} data-technical-row={domRowId} data-technical-trailing={trailing || undefined}
     onFocusCapture={() => onActive?.(true)}
     onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) onActive?.(false); }}>
-    {onChange ? <div className="flex min-w-0 flex-wrap items-start gap-x-1">
-      <div className="flex max-w-full items-start" style={{ width: `${Math.max(11, row.label.length + 2)}ch` }}>
+    {onChange ? <div className="grid min-w-0 grid-cols-[var(--technical-label-width)_minmax(0,1fr)] items-start">
       <textarea ref={heading} data-technical-label rows={1} aria-label={`Название характеристики ${number}`} placeholder="Название" value={row.label} readOnly={disabled}
         aria-invalid={Boolean(issue)} title={issue || undefined} {...events}
-        className="m-0 w-full min-w-0 flex-1 resize-none overflow-hidden border-0 bg-transparent p-0 font-semibold outline-none"
+        className="m-0 w-full min-w-0 resize-none overflow-hidden border-0 bg-transparent p-0 pr-2 font-semibold outline-none [overflow-wrap:anywhere]"
         onChange={event => { onChange({ ...row, label: event.target.value }); schedule(); }} />
-      <span aria-hidden="true">:</span></div>
       <textarea ref={textarea} aria-label={`Значение характеристики ${number}`} rows={1} placeholder="Значение" value={row.value} readOnly={disabled}
         aria-invalid={Boolean(issue)} title={issue || undefined} {...events}
-        className="m-0 min-h-0 min-w-0 flex-1 basis-24 resize-none overflow-hidden border-0 bg-transparent p-0 outline-none [overflow-wrap:anywhere]"
+        className="m-0 min-h-0 w-full min-w-0 resize-none overflow-hidden border-0 bg-transparent p-0 pl-2 outline-none [overflow-wrap:anywhere]"
         onChange={event => { onChange({ ...row, value: event.target.value }); schedule(); }} />
-    </div> : <div className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]"><strong>{row.label}</strong>: {row.value}</div>}
+    </div> : <div className="grid min-w-0 grid-cols-[var(--technical-label-width)_minmax(0,1fr)] whitespace-pre-wrap [overflow-wrap:anywhere]"><strong className="min-w-0 pr-2">{row.label}</strong><span className="min-w-0 pl-2">{row.value}</span></div>}
   </li>;
 }
 

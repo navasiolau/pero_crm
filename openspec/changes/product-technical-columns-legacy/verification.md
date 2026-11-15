@@ -1,0 +1,23 @@
+# Проверка №218
+
+Ветка bugfix/218 от свежего staging `00e75fcce871f0669bfc3bca00a870ca6542a202`. Владелец 15.11.2026 уточнил оформление поля, сохранность прежних значений и обязательное автоматическое обновление JSON из генератора КП. Новых миграций нет; production не входит в поручение.
+
+## Local
+
+- Общая рамка/высота 320 px/resize сохранены. Двоеточие-разделитель заменено единой тонкой вертикальной линией; две колонки используют одну CSS-переменную, 48/52 mobile и 42/58 desktop. Плейсхолдеры прежние, номер полностью пустой строки серый. Значения с собственными двоеточиями не изменяются. Общий компонент применяется в просмотре, редактировании и ручном создании.
+- Старый raw description при null JSON разбирается общей чистой функцией по явным/нумерованным заголовкам, свободные/HTML-фрагменты выводятся буквально, CRLF сохраняются. Чтение и неизменённый blur не пишут БД. Первая реальная правка под Product lock записывает весь legacy snapshot вместе с изменением; исходный description сохраняется дословно. Ненулевой JSON и явный sections:[] приоритетны.
+- Сохранены ACL, raw baseline, row CAS, receipt, sourceGeneration/editRevision, порядок первых create и защита от поздних ACK. Guard старого scalar-description после перехода в JSON расположен после replay receipt; подтверждённое старое сохранение повторяется без записи, новые устаревшие записи отклоняются.
+- Meaningful RED→GREEN: отсутствующий legacy resolver; отсутствующая линия; несерый placeholder marker; legacy CAS/полный ACK; replay после materialization. Финальные профильные tests **42/42**, component browser 390/1440, полная TypeScript, ESLint 0 ошибок (четыре прежних предупреждения), production Next build — PASS. Измерение стандартных слов «Внутреннее»/«наполнение» подтверждает отсутствие разрыва по последней букве на 390 px. Скриншоты просмотрены root.
+- Независимое SOL code review полного diff и финальной CSS-дельты — GO, P1/P2 не найдено.
+- Фактический compiled local 32218 на существующей guarded БД 5433 проверяет legacy read/no-write, полную материализацию, соседние значения/длинные коды/CRLF/HTML, JSON-приоритет, очистку до [], custom и reload. Обычный редактор КП `/kp/{id}` в iframe получает только изменение «Корпус»: без flush/save команды ждём настоящий autosave PUT с operationId/expectedRevision, ACK и независимый GET. Product JSON автоматически заменяется на canonical «Корпус»/«Фурнитура» с новым значением, generation растёт, revision сбрасывается; старый raw сохраняется.
+- Защищённые существовавшие свойства КП сравниваются рекурсивно; canonical DOM/стабильные ID и остальные разделы сравниваются с hydration snapshot. Штатная нормализация legacy/defaults фиксируется отдельно; разрешено только ожидаемое добавление order.address:null из bound CRM snapshot при отсутствии прежнего адреса. Цены, количество, изображения, исключения, услуги и исходные блоки не меняются.
+- QA helper-копии только ignored: original target/container/DB/port/mount/ownership/W07 guards сохранены и проверены static-checks. Изменён лишь тестовый raw sample и добавлена точная проверка local origin 32218. Ожидание геометрии модального поля учитывает штатную zoom-анимацию; только отменённые browser GET same-origin с `_rsc` и точным `net::ERR_ABORTED` сохраняются отдельным журналом как отмена prefetch. Все остальные request/page/console errors остаются блокирующими.
+
+- Финальный полный actual compiled local browser 1440 — **PASS**, ноль неожиданных browser errors и запрещённых writes; подтверждены также manual create/JSON/reload и настоящий generator autosave. Приёмка записывает все браузерные события; отмены двух известных read-only действий getBellData/clientSelectionOptions при уходе со страницы, как и отменённый RSC prefetch, отделяются от ошибок строго по method/origin/action-ID/errorText. Отмены мутаций и прочие сбои блокируют проверку.
+- Все local owned комплекты скрыты по точным receipts, исходные данные сохранены. Свой web остановлен, единственный созданный служебный клиент удалён по ID/метке при отсутствии ссылок; существующая local БД возвращена в исходное stopped. Docker Desktop был запущен скрыто для доступа к существующей БД; инфраструктура/staging БД не перезапускались.
+
+Приватные evidence: `.playwright-mcp/task218/`, `apps/web/test-results/technical-columns-218/`; финальный runtime — `local-final-pass-browser-1440/` и соответствующий UUID в `local-final-pass-run.txt`. Secrets/cookies не коммитятся.
+
+## Staging
+
+Приёмка ожидает обычного merge и штатного CI; SHA/образы/health и фактические browser/readback результаты будут зафиксированы после развёртывания. Main не меняется.

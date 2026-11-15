@@ -7,6 +7,7 @@ import { patchProductCore, updateProductCore, createSchema } from "../src/server
 import { productPatchSchema, type ProductPatch } from "../src/server/products/patch-contract";
 import type { TaskTransaction } from "../src/server/tasks/transaction";
 import { maskProductionRead } from "../src/server/access/production-read-projection";
+import { parseLegacyProductDescription } from "../src/lib/product-legacy-specifications";
 
 const manager = { id: "m", name: "Менеджер", roles: ["MANAGER" as const], source: "web" as const };
 const engineer = { ...manager, id: "e", roles: ["ENGINEER" as const] };
@@ -14,13 +15,14 @@ const body: FurnitureSection = { id: randomUUID(), type: "body", group: "constru
 const custom: FurnitureSection = { id: randomUUID(), type: "custom", group: "filling", label: "  Ручная строка  ", value: "" };
 const identity = () => ({ productId: "p", clientMutationId: randomUUID(), expectedSourceGeneration: 0 });
 type Pair = { label: string; value: string };
-const rowPatch = (sectionId: string, expectedRow: Pair | null, row: Pair | null): ProductPatch => ({
+const rowPatch = (sectionId: string, expectedRow: Pair | null, row: Pair | null, expectedLegacyDescription: string | null = null): ProductPatch => ({
   ...identity(), clientMutationId: expectedRow === null && row !== null ? sectionId : randomUUID(),
-  field: "technicalSpecificationRow", sectionId, expectedRow, row,
+  field: "technicalSpecificationRow", sectionId,
+  expectedRow: expectedRow && { label: expectedRow.label, value: expectedRow.value },
+  row: row && { label: row.label, value: row.value }, expectedLegacyDescription,
 });
 
-function fixture() {
-  const description = "  Старый <b>текст</b>\r\n  ";
+function fixture(description: string | null = null) {
   const row = { id: "p", description, technicalSpecifications: null as TechnicalSpecifications | null, engineerId: "e", status: "DESIGN" as ProductStatus };
   type Audit = { id: string; action: string; oldValue: unknown; newValue: unknown };
   const logs: Audit[] = [];
@@ -170,4 +172,81 @@ test("obsolete Entry clients get explicit refresh validation and creation accept
   assert.equal(createSchema.safeParse({ ...base, technicalSpecifications: empty }).success, true);
   assert.equal(createSchema.safeParse({ ...base, technicalSpecifications: { ...empty, note: "Лишнее" } }).success, false);
   assert.equal(createSchema.safeParse({ ...base, technicalSpecifications: { ...empty, sections: [custom, { ...body, label: "Своё имя" }] } }).success, true);
+});
+
+test("first legacy edit materializes the entire snapshot, neighboring editors merge and lost ACK replays", async () => {
+  const raw = "  Старый <b>текст</b>\r\n\r\n1.Корпус ЛДСП H1180 ST37\r\nФасад: МДФ\r\n";
+  const f = fixture(raw), snapshot = parseLegacyProductDescription(raw);
+  const first = snapshot.sections[1], second = snapshot.sections[2];
+  const noop = rowPatch(first.id, first, first, raw);
+  const noChange = await f.mutate(noop);
+  assert.equal(noChange.kind === "saved" && noChange.noOp, true);
+  assert.equal(f.row.technicalSpecifications === null, true);
+  const edited = { label: first.label, value: "Шпон" };
+  const request = rowPatch(first.id, first, edited, raw);
+  const saved = await f.mutate(request);
+  assert.equal(saved.kind, "saved");
+  assert.equal(saved.kind === "saved" && saved.derived?.technicalSpecificationsEditRevision, 1);
+  assert.deepEqual(saved.kind === "saved" && saved.derived?.technicalSpecifications, f.row.technicalSpecifications);
+  assert.deepEqual(f.row.technicalSpecifications?.sections, snapshot.sections.map(row => row.id === first.id ? { ...row, ...edited } : row));
+  assert.equal(f.row.description, raw);
+  const neighbor = rowPatch(second.id, second, { label: second.label, value: "Эмаль" }, raw);
+  assert.equal((await f.mutate(neighbor)).kind, "saved");
+  assert.equal(f.row.technicalSpecifications?.sections[1].value, "Шпон");
+  assert.equal(f.row.technicalSpecifications?.sections[2].value, "Эмаль");
+  assert.equal(f.row.technicalSpecifications?.editRevision, 2);
+  assert.deepEqual(await f.mutate(request), { ...saved, repeated: true });
+  assert.equal(f.row.technicalSpecifications?.editRevision, 2);
+  assert.equal(f.row.description, raw);
+});
+
+test("legacy baseline is mandatory including null and compared under lock before materialization", async () => {
+  const raw = "Корпус: Дуб", f = fixture(raw), row = parseLegacyProductDescription(raw).sections[0];
+  const missing = rowPatch(row.id, row, { label: row.label, value: "Шпон" }, raw);
+  assert.ok(missing.field === "technicalSpecificationRow");
+  delete missing.expectedLegacyDescription;
+  assert.equal((await f.mutate(missing)).kind, "conflict");
+  const baseline = rowPatch(row.id, row, { label: row.label, value: "Шпон" }, raw);
+  f.beforeLock(() => { f.row.description = "Корпус: Берёза"; });
+  assert.equal((await f.mutate(baseline)).kind, "conflict");
+  assert.equal(f.row.technicalSpecifications, null);
+  assert.equal(f.logs.length, 0);
+  assert.equal(f.row.description, "Корпус: Берёза");
+  const empty = fixture();
+  const openedEmpty = rowPatch(randomUUID(), null, { label: "Новая", value: "Строка" });
+  empty.beforeLock(() => { empty.row.description = raw; });
+  assert.equal((await empty.mutate(openedEmpty)).kind, "conflict");
+  assert.equal(empty.row.technicalSpecifications, null);
+});
+
+test("legacy deletion stays empty, stale update cannot restore it and audit failure rolls back all rows", async () => {
+  const raw = "Корпус: Дуб", f = fixture(raw), first = parseLegacyProductDescription(raw).sections[0];
+  const remove = rowPatch(first.id, first, null, raw);
+  assert.equal((await f.mutate(remove)).kind, "saved");
+  assert.deepEqual(f.row.technicalSpecifications?.sections, []);
+  assert.equal((await f.mutate(rowPatch(first.id, first, { label: first.label, value: "Поздно" }, raw))).kind, "conflict");
+  assert.deepEqual(f.row.technicalSpecifications?.sections, []);
+  assert.equal(f.row.description, raw);
+  const rollback = fixture("Корпус: Дуб\r\nФасад: МДФ"), snapshot = structuredClone(rollback.row);
+  const before = parseLegacyProductDescription(rollback.description).sections[0];
+  rollback.failAudit();
+  assert.equal((await rollback.mutate(rowPatch(before.id, before, { label: "Корпус", value: "Ясень" }, rollback.description))).kind, "failure");
+  assert.deepEqual(rollback.row, snapshot);
+  assert.equal(rollback.logs.length, 0);
+});
+
+test("a saved legacy scalar receipt replays after materialization but rejects a reused fingerprint", async () => {
+  const f = fixture("Каркас: Дуб");
+  const legacy: ProductPatch = { productId: f.row.id, field: "description", clientMutationId: randomUUID(),
+    expectedValue: f.description, value: "Каркас: Ясень" };
+  const saved = await f.mutate(legacy);
+  assert.equal(saved.kind, "saved");
+  const before = parseLegacyProductDescription(f.row.description).sections[0];
+  assert.equal((await f.mutate(rowPatch(before.id, before, { label: "Каркас", value: "Берёза" }, f.row.description))).kind, "saved");
+  const materialized = structuredClone(f.row), count = f.logs.length;
+  assert.deepEqual(await f.mutate(legacy), { ...saved, repeated: true });
+  assert.equal((await f.mutate({ ...legacy, value: "Подменённое значение" })).kind, "validation");
+  assert.equal((await f.mutate({ ...legacy, clientMutationId: randomUUID(), expectedValue: f.row.description, value: "Новая правка" })).kind, "conflict");
+  assert.deepEqual(f.row, materialized);
+  assert.equal(f.logs.length, count);
 });

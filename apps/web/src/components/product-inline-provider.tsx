@@ -30,13 +30,13 @@ export function ProductInlineProvider({productId,initial,technicalSpecifications
   // eslint-disable-next-line react-hooks/exhaustive-deps
  },[productId]);
  const technical=useMemo(()=>createProductTechnicalEditor({
-  productId,initial:technicalSpecifications,send:invokeProductPatch,
+  productId,initial:technicalSpecifications,legacyDescription:initial.description===null?null:String(initial.description),send:invokeProductPatch,
   // Серверные обновления передаются контроллерам через receive.
   // eslint-disable-next-line react-hooks/exhaustive-deps
  }),[productId]);
  useEffect(()=>{
-  technical.receive(technicalSpecifications);
- },[technical,technicalSpecifications]);
+  technical.receive(technicalSpecifications,initial.description===null?null:String(initial.description));
+ },[technical,technicalSpecifications,initial.description]);
  const value=useMemo<Context>(()=>({
   controller:field=>{const controller=controllers.get(field);if(!controller)throw Error("Неизвестное поле изделия");return controller;},
   technical,

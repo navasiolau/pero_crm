@@ -21,7 +21,8 @@ const expectedSourceGeneration = z.number().int().nonnegative();
 export const productPatchSchema = z.discriminatedUnion("field", [
   variant("title", required), variant("kind", text), variant("description", text),
   z.object({ ...base, field: z.literal("technicalSpecificationRow"), sectionId: required,
-    expectedSourceGeneration, expectedRow: rowValue, row: rowValue }).strict()
+    expectedSourceGeneration, expectedRow: rowValue, row: rowValue,
+    expectedLegacyDescription: z.string().nullable().optional() }).strict()
     .refine(patch => patch.expectedRow !== null || patch.row === null || patch.sectionId === patch.clientMutationId,
       "Создайте строку с новым идентификатором"),
   variant("technicalSpecificationEntry", z.string()).extend({
@@ -42,6 +43,7 @@ export type ProductPatchValue = ProductScalarValue | ProductSpecificationRowValu
 export type ProductPatchDerived = {
   technicalSpecificationSectionId?: string | null;
   technicalSpecificationsEditRevision?: number;
+  technicalSpecifications?: TechnicalSpecifications;
   lineTotalBYN?: string | null; quantity?: number; currentUnitPrice?: string | null;
   engineerLabel?: string | null; clientLabel?: string | null; clientId?: string; phone?: string;clientAddress?:string|null;
 };
