@@ -72,9 +72,13 @@ test("цена, количество и сумма в общей группе п
   assert.match(reader, /id="product-inline-quantity"[^>]*readOnly=""/);
   assert.doesNotMatch(reader, /<textarea/);
   assert.match(reader, /data-product-technical-specifications/);
+  assert.match(reader, />Описание<\/span>/);
   const engineer = details(false, true, true);
   assert.match(engineer, /id="product-inline-quantity"[^>]*readOnly=""/);
-  assert.equal((engineer.match(/<textarea\b/g) ?? []).length, 2);
+  // Сохранённый прежний текст и пустой новый пункт доступны инженеру как две пары.
+  assert.equal((engineer.match(/<textarea\b/g) ?? []).length, 4);
+  assert.match(engineer, /<textarea[^>]*aria-label="Значение характеристики 1"[^>]*>Описание<\/textarea>/);
+  assert.match(engineer, /data-technical-trailing="true"/);
   assert.doesNotMatch(engineer, /<textarea[^>]*readOnly/);
   // eslint-disable-next-line react/no-children-prop -- provider requires children in its typed props
   const contacts = renderToStaticMarkup(createElement(ProductInlineProvider, { productId: "product", initial,
