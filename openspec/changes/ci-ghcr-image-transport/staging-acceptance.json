@@ -1,0 +1,88 @@
+{
+  "change": "ci-ghcr-image-transport",
+  "task": 219,
+  "revision": "5276d9e86295fa84139b06b188b93388153f8e91",
+  "run": 43734342304,
+  "url": "https://github.com/navasiolau/pero_crm/actions/runs/43734342304",
+  "ci_pass": true,
+  "jobs_passed": 7,
+  "baseline_run": 43721029793,
+  "baseline_elapsed_seconds": 548,
+  "elapsed_seconds": 377,
+  "baseline_artifact_bytes": 572373730,
+  "artifact_bytes": 893467,
+  "reduction_percent": 99.8439,
+  "storage_factor": 640.62,
+  "runtime_ready": true,
+  "internal_health_http": 200,
+  "external_health": {
+    "url": "https://staging-crm.peromebel.by/api/health",
+    "status": 401,
+    "tls_verified": true
+  },
+  "db_container_preserved": true,
+  "db_mounts_preserved": true,
+  "proxy_preserved": true,
+  "image_configs_match": true,
+  "image_layers_match": true,
+  "uploads_mount_preserved": true,
+  "renderer_spool_mount_preserved": true,
+  "images": {
+    "bot": {
+      "indexDigest": "sha256:9b9f543a281419a20f4bb9fa6496dcadec3a54f93922f2dfe919103a6b268f5b",
+      "manifestDigest": "sha256:36732d026946d49ea3a126246263a8a67d3f4e0f59dd1c6d78f1404de21c841e",
+      "configDigest": "sha256:b8d657d390760e51f84e05e1122b14056c366c6956eb81a51c066b63b733bf15"
+    },
+    "renderer": {
+      "indexDigest": "sha256:9c5b86c6dd540295668a09dc7e2837c867f5bf21bb5879f1bef0b09fbc746517",
+      "manifestDigest": "sha256:2cecc34a801470f7fe8cd2f380ce1f9b85f3b1b33aedfc48639b74b7feb33850",
+      "configDigest": "sha256:66fe98ad9423cf047806593044f425a40759c74a6efbaecec16100b47eab930a"
+    },
+    "web": {
+      "indexDigest": "sha256:c412b88d662251edf222c323841de099e02fbcc17f8705915857bab47470b45b",
+      "manifestDigest": "sha256:086bcbb4fe30e256a6990f25301478116f14df3e526b07336ebb6f9a6c200abc",
+      "configDigest": "sha256:18fa35b0735d39a862cc9607678ad1b0749a4799767c119d11faab9a13fc801c"
+    }
+  },
+  "artifact_sizes": [
+    {
+      "name": "bot-handoff-43734342304-1-5276d9e86295fa84139b06b188b93388153f8e91",
+      "size_in_bytes": 17903,
+      "digest": "sha256:357d3d160c9443e24494889a03f51ab9ca00155cb03a5fdda4dc88b09f83737b"
+    },
+    {
+      "name": "kp-release-43734342304-1-5276d9e86295fa84139b06b188b93388153f8e91",
+      "size_in_bytes": 2352,
+      "digest": "sha256:809a28fcca5d56976ac900dc284b30511eb9c0c8924fd408232bf4c31cb2d00d"
+    },
+    {
+      "name": "types-43734342304-1-5276d9e86295fa84139b06b188b93388153f8e91",
+      "size_in_bytes": 701946,
+      "digest": "sha256:ff5938b5aa7096e3b519d26ff806d76a2c820162bb45ce93f3106a0dc484ce97"
+    },
+    {
+      "name": "renderer-handoff-43734342304-1-5276d9e86295fa84139b06b188b93388153f8e91",
+      "size_in_bytes": 27901,
+      "digest": "sha256:7cd6db9fd522b07480ad28ef59f2e4173cedbdb9c1eee28f05212fe00c73ec9b"
+    },
+    {
+      "name": "web-handoff-43734342304-1-5276d9e86295fa84139b06b188b93388153f8e91",
+      "size_in_bytes": 27686,
+      "digest": "sha256:b0df17c3945f345630cd63ec8008949ed430df6be19a3b5eb7f54ef6655992df"
+    },
+    {
+      "name": "bot-dist-43734342304-1-5276d9e86295fa84139b06b188b93388153f8e91",
+      "size_in_bytes": 115679,
+      "digest": "sha256:7da0308027b2d1ba964e2e261dca455db98dfa7940faf6bbb378f64d37c22ed9"
+    }
+  ],
+  "package_visibility": {
+    "pero_crm": "private",
+    "pero_kp_renderer": "public",
+    "pero_kp_renderer_ci": "private",
+    "pero_telegram_bot": "private"
+  },
+  "accepted_web_container": "c6767cab1b456d6b09efbf3792ffa3aab80f862639865ed69c5539cc47485853",
+  "accepted_renderer_container": "ea4531333a751e9b2046f6eba330758947ddf8eda5c5c478a6b8f2631cf3d0f2",
+  "db_container_id": "27b8f7342b9d722ab8788e137b37b03a3037442da038c5b8b98dbb30245b8b6a"
+}
