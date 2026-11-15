@@ -209,4 +209,4 @@ OpenSpec размещаем в `D:\Projects\pero_crm_v2\openspec`, схема `s
 
 | № | Ветка | OpenSpec | Результат |
 |---|---|---|---|
-| 218 | bugfix/218 | product-technical-columns-legacy | Тонкая линия вместо двоеточия, серый номер пустой строки, прежние данные в новом поле и атомарный переход в JSON при правке. Автосохранение генератора КП продолжает обновлять JSON изделия. Проверки и фактический staging — verification.md. Production в поручение не входит. |
+| 218 | bugfix/218 | product-technical-columns-legacy | Проверено на actual staging `6b5742d8`, CI 7/7: тонкая линия/две колонки, серый пустой номер, legacy → JSON без потери исходного текста, настоящий autosave генератора → Product JSON. Desktop/mobile, обе темы, readback/cleanup PASS. Наблюдение прежнего React 418 при навигации отдельно сохранено в verification.md, причина не объявлена исправленной. Production не выпускался. |
