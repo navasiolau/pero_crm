@@ -3,12 +3,14 @@ import { execFileSync } from 'node:child_process';
 import { appendFileSync, lstatSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { setTimeout as delay } from 'node:timers/promises';
 import { artifactIdentity, readWebArtifact, requireCi } from './target.mjs';
 import { readRendererArtifact, rendererLabels, verifyRendererSmoke } from '../../../../kp-renderer/ci/artifact.mjs';
 
 export const HANDOFF_LIMIT = 2 * 1024 * 1024;
 export const IMAGE_REPOSITORIES = Object.freeze({ web: 'ghcr.io/navasiolau/pero_crm',
-  bot: 'ghcr.io/navasiolau/pero_telegram_bot', renderer: 'ghcr.io/navasiolau/pero_kp_renderer' });
+  bot: 'ghcr.io/navasiolau/pero_telegram_bot', renderer: 'ghcr.io/navasiolau/pero_kp_renderer_ci' });
+export const RELEASE_REPOSITORIES = Object.freeze({ ...IMAGE_REPOSITORIES, renderer: 'ghcr.io/navasiolau/pero_kp_renderer' });
 const digestPattern = /^sha256:[a-f0-9]{64}$/;
 const indexTypes = ['application/vnd.oci.image.index.v1+json', 'application/vnd.docker.distribution.manifest.list.v2+json'];
 const manifestTypes = ['application/vnd.oci.image.manifest.v1+json', 'application/vnd.docker.distribution.manifest.v2+json'];
@@ -75,7 +77,7 @@ export function verifyHandoff(bytes, kind, env = process.env) {
     digestPattern.test(record.ociSha256 ?? ''), 'registry-record-binding');
   const graph = packet.graph; requireCi(graph?.root?.digest === record.indexDigest && graph.blobs &&
     typeof graph.blobs === 'object' && !Array.isArray(graph.blobs) && Object.keys(graph.blobs).length <= 128, 'registry-root');
-  const used = new Set(), visited = new Set(), runtime = [], attestations = [];
+  const used = new Set(), visited = new Set(), runtime = [], attestations = [], manifests = [], blobs = new Set();
   function blob(ref) {
     descriptor(ref); requireCi(ref.size <= HANDOFF_LIMIT && typeof graph.blobs[ref.digest] === 'string', 'registry-metadata-missing');
     const bytes = Buffer.from(graph.blobs[ref.digest], 'base64');
@@ -91,13 +93,15 @@ export function verifyHandoff(bytes, kind, env = process.env) {
     } else {
       requireCi(manifestTypes.includes(ref.mediaType) && Array.isArray(value.layers), 'registry-manifest');
       const config = blob(value.config);
-      for (const layer of value.layers) descriptor(layer);
+      blobs.add(value.config.digest);
+      for (const layer of value.layers) { descriptor(layer); blobs.add(layer.digest); }
       if (ref.annotations?.['vnd.docker.reference.type'] === 'attestation-manifest') {
         requireCi(value.layers.length > 0, 'registry-attestation');
         for (const layer of value.layers) { requireCi(layer.mediaType === 'application/vnd.in-toto+json', 'registry-attestation-type'); blob(layer); }
         attestations.push(ref);
       } else runtime.push({ ref, manifest: value, config });
     }
+    manifests.push({ descriptor: ref, bytes: Buffer.from(graph.blobs[ref.digest], 'base64') });
   }
   visit(graph.root);
   requireCi(Object.keys(graph.blobs).every(key => used.has(key)), 'registry-extra-blob');
@@ -133,7 +137,8 @@ export function verifyHandoff(bytes, kind, env = process.env) {
       /^[1-9]\d*$/.test(producer.jobId ?? ''), 'registry-bot-producer');
   }
   return { record, config, rootBytes: Buffer.from(graph.blobs[graph.root.digest], 'base64'), rootType: graph.root.mediaType,
-    repository: context.registry, tag: context.tag, source: `${context.registry}@${record.indexDigest}` };
+    repository: RELEASE_REPOSITORIES[kind], candidateRepository: context.registry, manifests, blobs: [...blobs],
+    tag: context.tag, source: `${context.registry}@${record.indexDigest}` };
 }
 
 export function readHandoff(kind, env = process.env) {
@@ -151,17 +156,21 @@ export function regctl(env = process.env) {
     catch { throw new Error('CI registry command failed'); }
   };
 }
-export async function verifyPrivatePackage(kind, env = process.env, request = fetch) {
+export async function verifyPrivatePackage(kind, env = process.env, request = fetch, allowMissing = false) {
   const context = registryContext(kind, env, true), packageName = context.registry.split('/').at(-1);
   requireCi(typeof env.CI_REGISTRY_TOKEN === 'string' && env.CI_REGISTRY_TOKEN.length > 0, 'registry-token');
   const response = await request(`https://api.github.com/users/navasiolau/packages/container/${packageName}`, {
     redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(15_000), headers: {
       Authorization: `Bearer ${env.CI_REGISTRY_TOKEN}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' } });
+  // GHCR создаёт новый package приватным. Разрешено только точное собственное имя renderer CI;
+  // после первого upload видимость обязательно проверяется до выдачи handoff.
+  if (response.status === 404 && allowMissing && kind === 'renderer') return false;
   requireCi(response.status === 200, 'registry-package-http');
   const text = await response.text(); requireCi(text.length < 64 * 1024, 'registry-package-size');
   const value = JSON.parse(text);
   requireCi(value.name === packageName && value.package_type === 'container' && value.owner?.login === 'navasiolau' &&
     value.visibility === 'private', 'registry-private-package');
+  return true;
 }
 export async function stageImage(kind, env = process.env, cli = regctl(env), request = fetch) {
   const context = registryContext(kind, env, true), directory = imageDirectory(kind, env);
@@ -173,21 +182,68 @@ export async function stageImage(kind, env = process.env, cli = regctl(env), req
   // Тот же consumer proof выполняется до записи в registry, с собственным SHA пакета.
   const consumer = kind === 'bot' ? 'build-push-bot' : 'build-push';
   verifyHandoff(bytes, kind, { ...env, GITHUB_JOB: consumer, PERO_CI_EXPECTED_HANDOFF_SHA256: sha256(bytes) });
-  await verifyPrivatePackage(kind, env, request);
+  const existed = await verifyPrivatePackage(kind, env, request, true);
   cli(['image', 'copy', '--referrers', '--force-recursive', `ocidir://${directory}/oci@${record.indexDigest}`, `${context.registry}:${context.tag}`]);
   requireCi(cli(['image', 'digest', `${context.registry}:${context.tag}`]) === record.indexDigest, 'registry-staged-digest');
+  if (existed) await verifyPrivatePackage(kind, env, request);
+  else {
+    let visible = false;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      if (await verifyPrivatePackage(kind, env, request, true)) { visible = true; break; }
+      await delay(300);
+    }
+    requireCi(visible, 'registry-created-private-package');
+  }
   writeFileSync(path.join(directory, 'handoff.json'), bytes, { flag: 'wx' });
   appendFileSync(env.GITHUB_OUTPUT, `handoff-sha256=${sha256(bytes)}\n`);
   console.log(JSON.stringify({ ciRuntime: 'oci-staged', kind, indexDigest: record.indexDigest, handoffBytes: bytes.length }));
   return { bytes: bytes.length, digest: sha256(bytes) };
 }
-export function promoteImage(kind, env = process.env, cli = regctl(env)) {
+/** GHCR mount только внутри registry. При отказе нет fallback GET/PUT filesystem layers. */
+export async function prepareReleaseRepository(proof, env = process.env, cli = regctl(env), request = fetch) {
+  if (proof.candidateRepository === proof.repository) return;
+  requireCi(proof.candidateRepository === IMAGE_REPOSITORIES.renderer && proof.repository === RELEASE_REPOSITORIES.renderer, 'registry-mount-repositories');
+  requireCi(typeof env.CI_REGISTRY_TOKEN === 'string' && env.CI_REGISTRY_TOKEN.length > 0 &&
+    /^[A-Za-z0-9-]+(?:\[bot\])?$/.test(env.GITHUB_ACTOR ?? ''), 'registry-mount-credentials');
+  const from = proof.candidateRepository.slice('ghcr.io/'.length), to = proof.repository.slice('ghcr.io/'.length);
+  const authUrl = new URL('https://ghcr.io/token'); authUrl.searchParams.set('service', 'ghcr.io');
+  authUrl.searchParams.append('scope', `repository:${from}:pull`); authUrl.searchParams.append('scope', `repository:${to}:pull,push`);
+  const auth = await request(authUrl.href, { redirect: 'error', signal: AbortSignal.timeout(15_000), headers: {
+    Authorization: `Basic ${Buffer.from(`${env.GITHUB_ACTOR}:${env.CI_REGISTRY_TOKEN}`).toString('base64')}` } });
+  requireCi(auth.status === 200, 'registry-mount-auth');
+  const authText = await auth.text(); requireCi(authText.length < 64 * 1024, 'registry-mount-auth-size');
+  const credentials = JSON.parse(authText), token = credentials.token ?? credentials.access_token;
+  requireCi(typeof token === 'string' && token.length > 0, 'registry-mount-token');
+  const headers = { Authorization: `Bearer ${token}` };
+  for (const digest of proof.blobs) {
+    requireCi(digestPattern.test(digest), 'registry-mount-digest');
+    const head = await request(`https://ghcr.io/v2/${to}/blobs/${digest}`, { method: 'HEAD', headers, redirect: 'manual', signal: AbortSignal.timeout(15_000) });
+    if (head.status === 200) continue;
+    requireCi(head.status === 404, 'registry-mount-head');
+    const mount = new URL(`https://ghcr.io/v2/${to}/blobs/uploads/`);
+    mount.searchParams.set('mount', digest); mount.searchParams.set('from', from);
+    const response = await request(mount.href, { method: 'POST', headers, redirect: 'manual', signal: AbortSignal.timeout(15_000) });
+    if (response.status === 202) {
+      const location = new URL(response.headers.get('location'), mount);
+      requireCi(location.origin === 'https://ghcr.io' && location.pathname.startsWith(`/v2/${to}/blobs/uploads/`), 'registry-mount-upload-location');
+      // Отменяем только собственную пустую upload session; образ не пересылается через runner.
+      await request(location.href, { method: 'DELETE', headers, redirect: 'manual', signal: AbortSignal.timeout(15_000) });
+    }
+    requireCi(response.status === 201 && (!response.headers.get('docker-content-digest') || response.headers.get('docker-content-digest') === digest), 'registry-mount-unsupported');
+  }
+  for (const manifest of proof.manifests) {
+    cli(['manifest', 'put', '--by-digest', '--content-type', manifest.descriptor.mediaType, proof.repository], manifest.bytes);
+  }
+  requireCi(cli(['image', 'digest', `${proof.repository}@${proof.record.indexDigest}`]) === proof.record.indexDigest, 'registry-release-repository-digest');
+}
+export async function promoteImage(kind, env = process.env, cli = regctl(env), request = fetch) {
   const proof = readHandoff(kind, env), { record } = proof;
   const results = JSON.parse(env.PERO_CI_REQUIRED_RESULTS ?? '{}');
   const required = ['unit-tests', 'unit-tests-backend', 'native-tests', 'kp-renderer-tests'];
   requireCi(required.every(job => results[job]?.result === 'success'), 'registry-required-gates');
   requireCi(execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim() === record.revision, 'registry-checkout');
   requireCi(cli(['image', 'digest', proof.source]) === record.indexDigest, 'registry-source-digest');
+  await prepareReleaseRepository(proof, env, cli, request);
   for (const tag of [`sha-${record.revision}`, env.GITHUB_REF_NAME]) {
     // В том же package все blobs уже существуют: PUT только исходного index, без GET layers.
     cli(['manifest', 'put', '--content-type', proof.rootType, `${proof.repository}:${tag}`], proof.rootBytes);
@@ -203,6 +259,6 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const [operation, kind] = process.argv.slice(2);
   try {
     requireCi(operation === 'stage' || operation === 'promote', 'registry-operation');
-    if (operation === 'stage') await stageImage(kind); else promoteImage(kind);
+    if (operation === 'stage') await stageImage(kind); else await promoteImage(kind);
   } catch (error) { console.error(error.message); process.exitCode = 1; }
 }

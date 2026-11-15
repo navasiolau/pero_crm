@@ -105,4 +105,6 @@ test('candidate cleanup uses an independent schedule and preserves the publicati
     assert.ok(steps.filter(step => step.uses?.startsWith('actions/download-artifact')).every(step => /-handoff-/.test(step.with.name)));
     assert.ok(steps.every(step => !step.run?.includes('tar -xf')));
   }
+  const publication = jobs['build-push'].steps.filter(step => step.run?.includes('registry-transport.mjs promote'));
+  assert.deepEqual(publication.map(step => step.env.PERO_CI_ARTIFACT_KIND), ['renderer', 'web'], 'renderer digest доступен до нового web discovery tag');
 });

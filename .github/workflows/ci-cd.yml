@@ -662,21 +662,22 @@ jobs:
 
       - name: Закреплённый regctl для продвижения исходного index
         run: *setup_regctl
-      - name: Проверить и выпустить исходный web OCI без скачивания layers
+      - name: Подготовить и выпустить renderer до изменения web discovery tag
         run: &promote_original_oci node apps/web/tests/integration/runtime/registry-transport.mjs promote "$PERO_CI_ARTIFACT_KIND"
+        env:
+          CI_REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PERO_CI_ARTIFACT_KIND: renderer
+          PERO_CI_RENDERER_ARTIFACT_DIR: ${{ runner.temp }}/pero-renderer-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
+          PERO_CI_EXPECTED_INDEX_DIGEST: ${{ needs.kp-renderer-tests.outputs.index-digest }}
+          PERO_CI_EXPECTED_HANDOFF_SHA256: ${{ needs.kp-renderer-tests.outputs.handoff-sha256 }}
+
+      - name: Проверить и выпустить исходный web OCI без скачивания layers
+        run: *promote_original_oci
         env:
           PERO_CI_ARTIFACT_KIND: web
           PERO_CI_WEB_ARTIFACT_DIR: ${{ runner.temp }}/pero-web-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
           PERO_CI_EXPECTED_INDEX_DIGEST: ${{ needs.native-tests.outputs.index-digest }}
           PERO_CI_EXPECTED_HANDOFF_SHA256: ${{ needs.native-tests.outputs.web-handoff-sha256 }}
-
-      - name: Опубликовать тот же проверенный renderer OCI без пересборки
-        run: *promote_original_oci
-        env:
-          PERO_CI_ARTIFACT_KIND: renderer
-          PERO_CI_RENDERER_ARTIFACT_DIR: ${{ runner.temp }}/pero-renderer-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
-          PERO_CI_EXPECTED_INDEX_DIGEST: ${{ needs.kp-renderer-tests.outputs.index-digest }}
-          PERO_CI_EXPECTED_HANDOFF_SHA256: ${{ needs.kp-renderer-tests.outputs.handoff-sha256 }}
 
       - name: Связать web и renderer по immutable digest для выключенного compose profile
         id: kp-release
