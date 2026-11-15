@@ -215,4 +215,4 @@ OpenSpec размещаем в `D:\Projects\pero_crm_v2\openspec`, схема `s
 
 | № | Ветка | OpenSpec | Результат |
 |---|---|---|---|
-| 219 | bugfix/219 | ci-ghcr-image-transport | По согласованному владельцем подходу: передача исходных OCI через GHCR, ограниченные metadata artifacts, прежние release gates и автоматическая очистка только старых служебных кандидатов. Реализация и локальные проверки — verification.md; commit/staging и main требуют прямого указания. |
+| 219 | bugfix/219 | ci-ghcr-image-transport | Принято на staging `5276d9e8`: CI377 7/7 PASS, artifacts572373730→893467B (−99,8439%), полный CI548→377с. Private renderer CI package и server-side mount сохраняют прежний public release; реальные image configs/layers/health и DB/mounts проверены. Evidence — staging-acceptance.json, verification.md. Main/production отдельно не разрешены. |
