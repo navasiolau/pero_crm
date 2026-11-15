@@ -31,6 +31,16 @@
 - В соседнем `D:\Projects\pero` read-only проверены workflows: обычный release-report JSON хранится30дней; release archive выгружается лишь при failure и opt-in `UPLOAD_ARCHIVE_ON_FAILURE`, срок3дня. Этот репозиторий и публичные сайты не изменялись; фактическое состояние artifacts аккаунта по-прежнему требует отдельной инвентаризации.
 - Исторические Actions artifacts и контейнерные versions не удалялись, budgets/платный лимит не менялись. Уже накопленный ноябрьский учёт этим кодом не обнуляется.
 
+## Первый staging CI и исправление
+
+Владелец прямо разрешил commit/push/обычный merge/staging-приёмку. Коммит `d27830e1b59bedf93529e7a75b396a294e48a990` опубликован в `bugfix/219`, merge staging `40a1cce731cd25f1a1b586a37041489ba00e0d72` запустил [CI376](https://github.com/navasiolau/pero_crm/actions/runs/43732602543). Renderer job остановился на `CI_TARGET_REFUSED:registry-private-package`; оба component jobs PASS, native/backend/release jobs SKIPPED, выпускные теги не менялись.
+
+Read-only package API подтвердил: `pero_crm`/`pero_telegram_bot` private, прежний `pero_kp_renderer` public. Коррекция сохраняет public release package и создаёт отдельный private `pero_kp_renderer_ci`. До handoff проверяется private/owner, а publisher выполняет только GHCR cross-repository mounts и PUT исходных manifests; при отказе mount GET/PUT filesystem layers запрещены. Renderer готовится до web discovery tag. Очистка исключает public release package.
+
+Мониторинг CI переведён на существующий `GITHUB_ACTIONS_READ_TOKEN` из ignored root.env, без чтения/печати значения в чате/отчётах. Доступ к status/jobs/logs/artifacts через API подтверждён. Прежний заход в браузер был лишним; дальнейшая приёмка использует API.
+
+Коррекция прошла **41/41** профильных tests (включая отказ mount без layer GET, private bootstrap с повторным чтением и порядок renderer→web), ESLint/actionlint/OpenSpec/diff checks. Служебный `pero_kp_renderer_ci` входит в cleanup allowlist вместо публичного renderer package.
+
 ## Следующий этап
 
 После разрешения владельца: commit №219 → обычный merge/push staging → штатный CI и metadata/digest/time evidence → фактический staging revision/health. Перенос всего принятого staging в main — отдельное прямое указание. Обновить этот файл фактическими SHA/run/размерами/временем; до этого пункт3.2 остаётся открытым.
