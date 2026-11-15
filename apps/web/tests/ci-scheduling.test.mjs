@@ -67,3 +67,42 @@ test('full DAG has no cycles, publication waits both unit groups and types prece
   const consumed = nativeSteps.findIndex(step => step.name === 'Дождаться проверенного backend artifact текущего запуска');
   assert.ok(produced >= 0 && consumed > produced, 'types готовы до ожидания bot-dist; нет скрытого взаимного ожидания');
 });
+
+test('image handoffs contain only one bounded metadata file and PR cannot stage registry candidates', () => {
+  const found = [];
+  for (const [id, job] of Object.entries(jobs)) {
+    for (const step of job.steps ?? []) {
+      if (step.uses?.startsWith('actions/upload-artifact@')) {
+        assert.doesNotMatch(step.with.path, /\.oci\.tar|\/oci(?:\/|$)/, 'образ не возвращается в Actions');
+        assert.doesNotMatch(step.with.name, /^(?:web|bot|renderer)-oci-/);
+        if (/^(?:web|bot|renderer)-handoff-/.test(step.with.name)) {
+          found.push(step.with.name.split('-')[0]);
+          assert.match(step.with.path, /\/handoff\.json$/);
+          assert.equal(step.with['retention-days'], 1);
+          assert.equal(step.if, "github.event_name == 'push'");
+        }
+      }
+      if (step.run?.includes('registry-transport.mjs stage ')) {
+        assert.ok(['native-tests', 'kp-renderer-tests'].includes(id));
+        assert.equal(step.if, "github.event_name == 'push'");
+      }
+    }
+  }
+  assert.deepEqual(found.sort(), ['bot', 'renderer', 'web']);
+});
+
+test('candidate cleanup uses an independent schedule and preserves the publication DAG', () => {
+  const cleanup = yaml.load(readFileSync(new URL('../../../.github/workflows/ci-image-candidates.yml', import.meta.url), 'utf8'));
+  assert.ok(cleanup.on.schedule.length > 0);
+  assert.equal(cleanup.on.workflow_dispatch.inputs.dry_run.default, true);
+  assert.equal(cleanup.jobs.cleanup.if, "github.repository == 'navasiolau/pero_crm' && github.ref == 'refs/heads/main'");
+  assert.ok(cleanup.jobs.cleanup.steps.some(step => step.run === 'node .github/scripts/cleanup-ci-images.mjs'));
+  for (const job of Object.values(jobs)) assert.ok(!dependencies(job).includes('cleanup'));
+  for (const id of ['build-push', 'build-push-bot']) {
+    assert.match(jobs[id].env.PERO_CI_REQUIRED_RESULTS, /toJSON\(needs\)/);
+    const steps = jobs[id].steps;
+    assert.ok(steps.some(step => step.run?.includes('registry-transport.mjs promote')));
+    assert.ok(steps.filter(step => step.uses?.startsWith('actions/download-artifact')).every(step => /-handoff-/.test(step.with.name)));
+    assert.ok(steps.every(step => !step.run?.includes('tar -xf')));
+  }
+});

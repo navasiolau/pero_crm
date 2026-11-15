@@ -3,7 +3,7 @@ name: CI/CD
 # Модель деплоя (решение 09.2026): сборка образа в облаке, публикация в GHCR,
 # серверы сами забирают образ watcher-кроном (исходящий трафик, NAT не мешает).
 # Тег образа = имя ветки (main, staging) + sha-тег для отката.
-# Публикация разрешена только после успеха всех unit и native проверок.
+# Выпускные теги разрешены только после всех проверок; ci-* — приватное служебное хранение.
 
 on:
   push:
@@ -188,11 +188,14 @@ jobs:
     permissions:
       contents: read
       actions: read
+      packages: write
     outputs:
       oci-sha256: ${{ steps.next-build.outputs.oci-sha256 }}
       index-digest: ${{ steps.next-build.outputs.index-digest }}
       bot-oci-sha256: ${{ steps.bot-record.outputs.oci-sha256 }}
       bot-index-digest: ${{ steps.bot-record.outputs.index-digest }}
+      web-handoff-sha256: ${{ steps.stage-web.outputs.handoff-sha256 }}
+      bot-handoff-sha256: ${{ steps.stage-bot.outputs.handoff-sha256 }}
     services:
       postgres:
         image: postgres:17-alpine
@@ -516,29 +519,44 @@ jobs:
         env:
           BOT_BUILD_METADATA: ${{ steps.bot-image.outputs.metadata }}
 
+      - uses: docker/login-action@v3
+        if: github.event_name == 'push'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Закреплённый regctl для передачи исходного OCI
+        if: github.event_name == 'push'
+        run: &setup_regctl bash .github/scripts/setup-regctl.sh
+      - name: Передать проверенный web OCI в служебный GHCR
+        if: github.event_name == 'push'
+        id: stage-web
+        run: node apps/web/tests/integration/runtime/registry-transport.mjs stage web
+        env:
+          CI_REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PERO_CI_EXPECTED_OCI_SHA256: ${{ steps.next-build.outputs.oci-sha256 }}
+          PERO_CI_EXPECTED_INDEX_DIGEST: ${{ steps.next-build.outputs.index-digest }}
+      - name: Передать проверенный bot OCI в служебный GHCR
+        if: github.event_name == 'push'
+        id: stage-bot
+        run: node apps/web/tests/integration/runtime/registry-transport.mjs stage bot
+        env:
+          CI_REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PERO_CI_EXPECTED_BOT_OCI_SHA256: ${{ steps.bot-record.outputs.oci-sha256 }}
+          PERO_CI_EXPECTED_INDEX_DIGEST: ${{ steps.bot-record.outputs.index-digest }}
       - uses: actions/upload-artifact@v4
         if: github.event_name == 'push'
         with:
-          name: bot-oci-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
-          path: |
-            ${{ env.PERO_CI_BOT_ARTIFACT_DIR }}/bot.oci.tar
-            ${{ env.PERO_CI_BOT_ARTIFACT_DIR }}/image.json
-            ${{ env.PERO_CI_BOT_ARTIFACT_DIR }}/metadata/tested.json
-            ${{ env.PERO_CI_BOT_ARTIFACT_DIR }}/metadata/producer.json
+          name: web-handoff-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
+          path: ${{ env.PERO_CI_WEB_ARTIFACT_DIR }}/handoff.json
           if-no-files-found: error
-          compression-level: 0
           retention-days: 1
-
       - uses: actions/upload-artifact@v4
+        if: github.event_name == 'push'
         with:
-          name: web-oci-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
-          path: |
-            ${{ steps.prepare.outputs.directory }}/web.oci.tar
-            ${{ steps.prepare.outputs.directory }}/image.json
-            ${{ steps.prepare.outputs.directory }}/metadata/BUILD_ID
-            ${{ steps.prepare.outputs.directory }}/metadata/server/server-reference-manifest.json
+          name: bot-handoff-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
+          path: ${{ env.PERO_CI_BOT_ARTIFACT_DIR }}/handoff.json
           if-no-files-found: error
-          compression-level: 0
           retention-days: 1
 
   # Renderer строится/испытывается отдельно: web не получает Chromium или новые шрифты.
@@ -547,9 +565,11 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: read
+      packages: write
     outputs:
       oci-sha256: ${{ steps.test.outputs.oci-sha256 }}
       index-digest: ${{ steps.test.outputs.index-digest }}
+      handoff-sha256: ${{ steps.stage-renderer.outputs.handoff-sha256 }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -585,15 +605,30 @@ jobs:
           path: ${{ steps.prepare.outputs.directory }}/smoke-failure.json
           if-no-files-found: ignore
           retention-days: 1
-      - uses: actions/upload-artifact@v4
+      - uses: docker/login-action@v3
+        if: github.event_name == 'push'
         with:
-          name: renderer-oci-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
-          path: |
-            ${{ steps.prepare.outputs.directory }}/renderer.oci.tar
-            ${{ steps.prepare.outputs.directory }}/image.json
-            ${{ steps.prepare.outputs.directory }}/smoke.json
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Закреплённый regctl для передачи исходного OCI
+        if: github.event_name == 'push'
+        run: *setup_regctl
+      - name: Передать проверенный renderer OCI в служебный GHCR
+        if: github.event_name == 'push'
+        id: stage-renderer
+        run: node apps/web/tests/integration/runtime/registry-transport.mjs stage renderer
+        env:
+          CI_REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PERO_CI_EXPECTED_RENDERER_OCI_SHA256: ${{ steps.test.outputs.oci-sha256 }}
+          PERO_CI_EXPECTED_RENDERER_INDEX_DIGEST: ${{ steps.test.outputs.index-digest }}
+          PERO_CI_EXPECTED_INDEX_DIGEST: ${{ steps.test.outputs.index-digest }}
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'push'
+        with:
+          name: renderer-handoff-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
+          path: ${{ env.PERO_CI_RENDERER_ARTIFACT_DIR }}/handoff.json
           if-no-files-found: error
-          compression-level: 0
           retention-days: 1
 
   # Прямой gate блокирует публикацию при failure/cancelled/skipped любой проверки.
@@ -605,9 +640,7 @@ jobs:
       contents: read
       packages: write
     env:
-      PERO_CI_EXPECTED_OCI_SHA256: ${{ needs.native-tests.outputs.oci-sha256 }}
-      PERO_CI_EXPECTED_RENDERER_OCI_SHA256: ${{ needs.kp-renderer-tests.outputs.oci-sha256 }}
-      PERO_CI_EXPECTED_RENDERER_INDEX_DIGEST: ${{ needs.kp-renderer-tests.outputs.index-digest }}
+      PERO_CI_REQUIRED_RESULTS: ${{ toJSON(needs) }}
     steps:
       - uses: actions/checkout@v4
 
@@ -619,59 +652,23 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          name: web-oci-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
+          name: web-handoff-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
           path: ${{ runner.temp }}/pero-web-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
 
       - uses: actions/download-artifact@v4
         with:
-          name: renderer-oci-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
+          name: renderer-handoff-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
           path: ${{ runner.temp }}/pero-renderer-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
 
-      - name: Проверить и опубликовать испытанный OCI без пересборки
-        run: &promote_original_oci |
-          case "$PERO_CI_ARTIFACT_KIND" in
-            web) directory="$PERO_CI_WEB_ARTIFACT_DIR"; expected="$PERO_CI_EXPECTED_OCI_SHA256" ;;
-            bot) directory="$PERO_CI_BOT_ARTIFACT_DIR"; expected="$PERO_CI_EXPECTED_BOT_OCI_SHA256" ;;
-            renderer) directory="$PERO_CI_RENDERER_ARTIFACT_DIR"; expected="$PERO_CI_EXPECTED_RENDERER_OCI_SHA256" ;;
-            *) exit 1 ;;
-          esac
-          printf '%s  %s\n' "${expected#sha256:}" "$directory/$PERO_CI_ARTIFACT_KIND.oci.tar" | sha256sum --check
-          mkdir "$directory/oci"
-          tar -xf "$directory/$PERO_CI_ARTIFACT_KIND.oci.tar" --directory "$directory/oci" --no-same-owner
-          curl --fail --silent --show-error --location https://github.com/regclient/regclient/releases/download/v0.11.6/regctl-linux-amd64 --output "$RUNNER_TEMP/regctl"
-          printf '8e0e62a497fcdb8048d18aa927a139613176ba0531f412bc541044e28f9856bd  %s\n' "$RUNNER_TEMP/regctl" | sha256sum --check
-          chmod +x "$RUNNER_TEMP/regctl"
-          node --input-type=module <<'NODE'
-          import { execFileSync } from 'node:child_process';
-          import { writeFileSync } from 'node:fs';
-          import { readWebArtifact, requireCi } from './apps/web/tests/integration/runtime/target.mjs';
-          import { readRendererArtifact } from './apps/kp-renderer/ci/artifact.mjs';
-          const env = process.env, kind = env.PERO_CI_ARTIFACT_KIND, record = kind === 'renderer' ? await readRendererArtifact(true, env) : await readWebArtifact(true, env, kind);
-          requireCi(execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim() === record.revision &&
-            record.indexDigest === env.PERO_CI_EXPECTED_INDEX_DIGEST, 'promotion-checkout');
-          requireCi(env.GITHUB_EVENT_NAME === 'push' && ['staging', 'main'].includes(env.GITHUB_REF_NAME), 'promotion-branch');
-          const cli = args => execFileSync(`${env.RUNNER_TEMP}/regctl`, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
-          const directory = kind === 'web' ? env.PERO_CI_WEB_ARTIFACT_DIR : kind === 'renderer' ? env.PERO_CI_RENDERER_ARTIFACT_DIR : env.PERO_CI_BOT_ARTIFACT_DIR;
-          const source = `ocidir://${directory}/oci@${record.indexDigest}`;
-          const repository = kind === 'web' ? 'ghcr.io/navasiolau/pero_crm' : kind === 'renderer' ? 'ghcr.io/navasiolau/pero_kp_renderer' : 'ghcr.io/navasiolau/pero_telegram_bot';
-          cli(['image', 'copy', '--referrers', '--force-recursive', source, `${repository}:sha-${record.revision}`]);
-          requireCi(cli(['image', 'digest', `${repository}:sha-${record.revision}`]) === record.indexDigest, 'promoted-index');
-          // Равный digest сохраняет исходный OCI index вместе с attestation descriptors.
-          cli(['image', 'copy', '--referrers', '--force-recursive', `${repository}@${record.indexDigest}`, `${repository}:${env.GITHUB_REF_NAME}`]);
-          requireCi(cli(['image', 'digest', `${repository}:${env.GITHUB_REF_NAME}`]) === record.indexDigest, 'branch-index');
-          writeFileSync(`${directory}/promotion.json`, JSON.stringify({ repository, indexDigest: record.indexDigest,
-            revision: record.revision, runId: record.runId, attempt: record.attempt }), { flag: 'wx' });
-          const identity = kind === 'web' ? { buildId: record.buildId } : kind === 'renderer' ? { template: record.template, smokeSha256: record.smokeSha256 } :
-            { testedDistManifestSha256: record.testedDistManifestSha256, producerJobId: record.producer.jobId };
-          console.log(JSON.stringify({ ciRuntime: kind === 'web' ? 'tested-oci-promoted' : kind === 'renderer' ? 'renderer-oci-promoted' : 'bot-oci-promoted',
-            revision: record.revision, runId: record.runId, attempt: record.attempt, ...identity,
-            indexDigest: record.indexDigest, attestations: record.attestations }));
-          NODE
+      - name: Закреплённый regctl для продвижения исходного index
+        run: *setup_regctl
+      - name: Проверить и выпустить исходный web OCI без скачивания layers
+        run: &promote_original_oci node apps/web/tests/integration/runtime/registry-transport.mjs promote "$PERO_CI_ARTIFACT_KIND"
         env:
           PERO_CI_ARTIFACT_KIND: web
           PERO_CI_WEB_ARTIFACT_DIR: ${{ runner.temp }}/pero-web-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
-          PERO_CI_EXPECTED_OCI_SHA256: ${{ needs.native-tests.outputs.oci-sha256 }}
           PERO_CI_EXPECTED_INDEX_DIGEST: ${{ needs.native-tests.outputs.index-digest }}
+          PERO_CI_EXPECTED_HANDOFF_SHA256: ${{ needs.native-tests.outputs.web-handoff-sha256 }}
 
       - name: Опубликовать тот же проверенный renderer OCI без пересборки
         run: *promote_original_oci
@@ -679,6 +676,7 @@ jobs:
           PERO_CI_ARTIFACT_KIND: renderer
           PERO_CI_RENDERER_ARTIFACT_DIR: ${{ runner.temp }}/pero-renderer-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
           PERO_CI_EXPECTED_INDEX_DIGEST: ${{ needs.kp-renderer-tests.outputs.index-digest }}
+          PERO_CI_EXPECTED_HANDOFF_SHA256: ${{ needs.kp-renderer-tests.outputs.handoff-sha256 }}
 
       - name: Связать web и renderer по immutable digest для выключенного compose profile
         id: kp-release
@@ -686,6 +684,10 @@ jobs:
         env:
           PERO_CI_WEB_ARTIFACT_DIR: ${{ runner.temp }}/pero-web-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
           PERO_CI_RENDERER_ARTIFACT_DIR: ${{ runner.temp }}/pero-renderer-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
+          PERO_CI_EXPECTED_WEB_HANDOFF_SHA256: ${{ needs.native-tests.outputs.web-handoff-sha256 }}
+          PERO_CI_EXPECTED_WEB_INDEX_DIGEST: ${{ needs.native-tests.outputs.index-digest }}
+          PERO_CI_EXPECTED_RENDERER_HANDOFF_SHA256: ${{ needs.kp-renderer-tests.outputs.handoff-sha256 }}
+          PERO_CI_EXPECTED_RENDERER_INDEX_DIGEST: ${{ needs.kp-renderer-tests.outputs.index-digest }}
 
       - uses: actions/upload-artifact@v4
         with:
@@ -703,12 +705,14 @@ jobs:
     permissions:
       contents: read
       packages: write
+    env:
+      PERO_CI_REQUIRED_RESULTS: ${{ toJSON(needs) }}
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/download-artifact@v4
         with:
-          name: bot-oci-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
+          name: bot-handoff-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
           path: ${{ runner.temp }}/pero-bot-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
 
       - uses: docker/login-action@v3
@@ -717,10 +721,14 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Закреплённый regctl для продвижения исходного index
+        run: *setup_regctl
+
       - name: Проверить и опубликовать исходный bot OCI без пересборки
+        # Повторная сборка и загрузка layers на publisher отсутствуют.
         run: *promote_original_oci
         env:
           PERO_CI_ARTIFACT_KIND: bot
           PERO_CI_BOT_ARTIFACT_DIR: ${{ runner.temp }}/pero-bot-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
-          PERO_CI_EXPECTED_BOT_OCI_SHA256: ${{ needs.native-tests.outputs.bot-oci-sha256 }}
           PERO_CI_EXPECTED_INDEX_DIGEST: ${{ needs.native-tests.outputs.bot-index-digest }}
+          PERO_CI_EXPECTED_HANDOFF_SHA256: ${{ needs.native-tests.outputs.bot-handoff-sha256 }}

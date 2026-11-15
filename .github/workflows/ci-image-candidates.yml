@@ -1,0 +1,44 @@
+name: Cleanup CI image candidates
+
+on:
+  schedule:
+    - cron: '37 3 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Только показать точный список, без удаления'
+        type: boolean
+        default: true
+
+# Отдельный поток не задерживает сборку, тесты или выпускные теги.
+concurrency:
+  group: ci-image-candidate-cleanup
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read
+  packages: write
+
+jobs:
+  cleanup:
+    if: github.repository == 'navasiolau/pero_crm' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Закреплённый regctl только для чтения OCI graph
+        run: bash .github/scripts/setup-regctl.sh
+      - name: Проверить весь план и удалить только старые служебные версии
+        run: node .github/scripts/cleanup-ci-images.mjs
+        env:
+          CI_REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_CANDIDATE_DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && 'true' || 'false' }}

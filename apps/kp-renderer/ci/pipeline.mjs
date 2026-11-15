@@ -2,7 +2,8 @@ import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, writ
 import { execFileSync, spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { artifactIdentity, readWebArtifact, requireCi } from '../../web/tests/integration/runtime/target.mjs';
+import { readHandoff } from '../../web/tests/integration/runtime/registry-transport.mjs';
+import { artifactIdentity, requireCi } from '../../web/tests/integration/runtime/target.mjs';
 import { pairedRelease, readRendererArtifact, rendererLabels, verifyRendererOci, verifyRendererSmoke, verifyWebRendererBinding } from './artifact.mjs';
 import smokeDiagnostics from './smoke.cjs';
 import { verifyRuntimeImageProjection } from '../../web/tests/integration/runtime/image-projection.mjs';
@@ -136,8 +137,11 @@ async function testImage() {
 async function release() {
   const { identity, env } = context();
   requireCi(env.GITHUB_JOB === 'build-push' && env.GITHUB_EVENT_NAME === 'push' && ['main', 'staging'].includes(env.GITHUB_REF_NAME), 'kp-release-job');
-  const web = await readWebArtifact(true), renderer = await readRendererArtifact(true);
-  const config = JSON.parse(readFileSync(path.join(env.PERO_CI_WEB_ARTIFACT_DIR, 'oci', 'blobs', 'sha256', web.configDigest.slice(7)), 'utf8'));
+  const webProof = readHandoff('web', { ...env, PERO_CI_EXPECTED_HANDOFF_SHA256: env.PERO_CI_EXPECTED_WEB_HANDOFF_SHA256,
+    PERO_CI_EXPECTED_INDEX_DIGEST: env.PERO_CI_EXPECTED_WEB_INDEX_DIGEST });
+  const rendererProof = readHandoff('renderer', { ...env, PERO_CI_EXPECTED_HANDOFF_SHA256: env.PERO_CI_EXPECTED_RENDERER_HANDOFF_SHA256,
+    PERO_CI_EXPECTED_INDEX_DIGEST: env.PERO_CI_EXPECTED_RENDERER_INDEX_DIGEST });
+  const web = webProof.record, renderer = rendererProof.record, config = webProof.config;
   verifyWebRendererBinding(config.config.Labels, renderer);
   const promotions = Object.fromEntries([['web', env.PERO_CI_WEB_ARTIFACT_DIR], ['renderer', env.PERO_CI_RENDERER_ARTIFACT_DIR]].map(([kind, directory]) => [kind, JSON.parse(readFileSync(path.join(directory, 'promotion.json'), 'utf8'))]));
   const packet = pairedRelease(web, renderer, promotions), directory = path.join(env.RUNNER_TEMP, `pero-kp-release-${identity.runId}-${identity.attempt}-${identity.revision}`);
