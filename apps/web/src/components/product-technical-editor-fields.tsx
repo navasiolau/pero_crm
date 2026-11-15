@@ -15,7 +15,7 @@ export function TechnicalList({ children }: { children: ReactNode }) {
         event.currentTarget.querySelector<HTMLTextAreaElement>('[data-technical-trailing="true"] [data-technical-label]')?.focus();
       }}
       className="h-80 min-h-80 w-full max-w-full min-w-0 resize-y overflow-auto rounded-lg border border-input bg-transparent px-2.5 py-2 text-base outline-none focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50 md:text-sm dark:bg-input/30">
-      <ol className="relative ml-6 min-h-full list-decimal p-0 [--technical-label-width:48%] before:pointer-events-none before:absolute before:inset-y-0 before:left-[var(--technical-label-width)] before:border-l before:border-input before:content-[''] md:[--technical-label-width:42%]">{children}</ol>
+      <ol className="relative ml-6 min-h-full list-decimal p-0 [--technical-label-width:25%] before:pointer-events-none before:absolute before:inset-y-0 before:left-[var(--technical-label-width)] before:border-l before:border-input before:content-['']">{children}</ol>
     </div>
   </div>;
 }

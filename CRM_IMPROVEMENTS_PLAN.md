@@ -216,3 +216,9 @@ OpenSpec размещаем в `D:\Projects\pero_crm_v2\openspec`, схема `s
 | № | Ветка | OpenSpec | Результат |
 |---|---|---|---|
 | 219 | bugfix/219 | ci-ghcr-image-transport | Принято на staging `5276d9e8`: CI377 7/7 PASS, artifacts572373730→893467B (−99,8439%), полный CI548→377с. Private renderer CI package и server-side mount сохраняют прежний public release; реальные image configs/layers/health и DB/mounts проверены. Evidence — staging-acceptance.json, verification.md. Main/production отдельно не разрешены. |
+
+### Пропорции поля характеристик от 15.11.2026
+
+| № | Ветка | OpenSpec | Результат |
+|---|---|---|---|
+| 220 | bugfix/220 | technical-specifications-quarter-columns | Названия 25%, значения 75% на всех ширинах. Изменение только общей CSS-переменной и существующей browser-проверки. Local PASS/review GO, фактический staging — verification.md. |
