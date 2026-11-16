@@ -22,6 +22,7 @@
 - Существующий DB trigger автоматически повышает sessionVersion и отзывает персональные API credentials. Правила trigger не меняются: before читается под User→ApiToken locks, фактические after получают отдельные события Системы с инициатором. Token create использует тот же owner lock, чтобы новый token не выпал из снимка; raw user snapshot остаётся полным.
 - Только зарегистрированная demo.ping версии0.1.0/API1 имеет проверенный DB-only contract. В tx подставляются db/audit/outbox adapters, наружные dispatcher и run log выполняются после commit. Будущие неподтверждённые callbacks не исполняются в долгой DB tx. API сохраняет write/admin scope grant, web — прежние ADMIN/DIRECTOR grants; источник действия и автор определяются отдельно от авторизации.
 - Необязательные notify/cache/dispatch эффекты используют существующий deliverPostCommit и не превращают подтверждённое бизнес-сохранение в ошибку.
+- Явные producer labels из `hints.changes` отмечаются списком `technical.explicitFieldLabels`; принудительное обновление производных подписей сохраняет эти labels, продолжая обновлять обычные словари и форматирование values. Имя владельца нового API-токена фиксируется через hints.links: имя actor только для собственного token, другой owner читается внутри той же tx.
 
 ## Risks / Trade-offs
 

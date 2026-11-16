@@ -157,14 +157,14 @@ function equal(left: unknown, right: unknown): boolean {
   return false;
 }
 
-function displayValue(value: JournalValue, path: string, entity: string, links: JournalEntityReference[]): JournalValue {
+export function formatJournalDisplayValue(value: JournalValue, path: string, entity: string, links: JournalEntityReference[] = []): JournalValue {
   if (typeof value === "string") {
     const key = path.split(".").at(-1) ?? "";
     if (/(?:Id|Ids)$/.test(key)) { const link = links.find(item => item.id === value); if (link) return link.label; }
     return journalEnumLabel(path, value, entity);
   }
-  if (Array.isArray(value)) return value.map(item => displayValue(item, path, entity, links));
-  if (object(value)) return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, displayValue(item as JournalValue, path ? `${path}.${key}` : key, entity, links)]));
+  if (Array.isArray(value)) return value.map(item => formatJournalDisplayValue(item, path, entity, links));
+  if (object(value)) return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, formatJournalDisplayValue(item as JournalValue, path ? `${path}.${key}` : key, entity, links)]));
   return value;
 }
 
@@ -191,7 +191,7 @@ function diff(entry: JournalEntryInput, hints: JournalPresentationHints, links: 
       }
     }
     result.push({ path: path || "value", label: journalFieldLabel(path || "value"),
-      before: displayValue(before, path, entry.entity, links), after: displayValue(after, path, entry.entity, links),
+      before: formatJournalDisplayValue(before, path, entry.entity, links), after: formatJournalDisplayValue(after, path, entry.entity, links),
       beforeKnown, afterKnown });
   }
   compare(values.before, values.after, values.rawBefore, values.rawAfter, values.field, values.beforeKnown, values.afterKnown);
@@ -224,6 +224,7 @@ export function buildJournalPresentation(entry: JournalEntryInput, hints: Journa
   technicalMetadata(safeEntryValue(entry, entry.oldValue), "oldValue", technical);
   technicalMetadata(safeEntryValue(entry, entry.newValue), "newValue", technical);
   const changes = hints.changes?.map(change => ({ ...change, label: safeText(change.label), before: sanitizeJournalValue(change.before, change.path), after: sanitizeJournalValue(change.after, change.path) })) ?? diff(entry, hints, links);
+  if (hints.changes) technical.explicitFieldLabels = [...new Set(changes.map(change => change.path))];
   return { version: 1, kind, actor: { type: actor.type, id: safeText(actor.id), name: safeText(actor.name) },
     ...(hints.initiator ? { initiator: { id: safeText(hints.initiator.id), name: safeText(hints.initiator.name) } } : {}),
     ...(hints.reason ? { reason: safeText(hints.reason) } : {}), entity, contexts: safeContexts(contexts),

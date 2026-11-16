@@ -28,4 +28,8 @@ Root подтвердил на существующей local БД оба сце
 
 ## Staging / интеграция
 
+Own implementation зафиксирован commit `7796c46da6fd9db42726c57ab705a9f30ec02430`. Принятый staging `a632e1e36326c61f157d3de5d506e533fe0b3ff2` объединён обычным merge без конфликтов. Сохранены публичный formatter/refresh №222 и apiToken root-context fix №228.
+
+По точечному root GO добавлены две integration поправки: marker `technical.explicitFieldLabels` сохраняет manifest labels через полную цепочку stored enrichment→refresh, остальные производные подписи и форматирование values обновляются; reference создателя API-токена показывает имя actor только при совпадении ID, другого владельца читает внутри tx. Исходные raw payloads не меняются. На сочетании: **90/90 targeted PASS**, включая reader/UI/refresh/resolver и228; после расширения pipeline regression повторно **14/14 related PASS**, scoped lint/full tsc PASS. Push/staging merge worker не выполняет.
+
 PENDING: интеграция со свежим принятым staging, штатный CI и фактическая staging-приёмка, включая HTTP login/logout. Новые UI не входят в228. Limited repair старых apiToken presentations согласован с №222/root, выполняется только после доставки исправленного formatter. Root разрешил commit own228 и обычный merge принятого staging; push и staging merge выполняет только оркестратор. Production/restic/infra не изменялись.

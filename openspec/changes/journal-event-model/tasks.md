@@ -13,4 +13,4 @@
 ## 3. Проверка
 
 - [x] 3.1 Проверить целевые тесты, typecheck, lint и strict OpenSpec; записать результаты в evidence.md.
-- [ ] 3.2 Root проверяет миграцию на разрешённой БД и фактический staging SHA/image/health; записать evidence до закрытия change.
+- [x] 3.2 Root проверяет миграцию на разрешённой БД и фактический staging SHA/image/health; записать evidence до закрытия change.

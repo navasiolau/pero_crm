@@ -70,9 +70,12 @@ export async function createApiTokenInTransaction(tx: Prisma.TransactionClient, 
   if (input.createdById) await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${input.createdById} FOR UPDATE`;
   const row = await tx.apiToken.create({ data: { ...input, prefix: token.slice(0, TOKEN_PREFIX.length + 6), tokenHash: hashToken(token) } });
   const after = apiTokenAuditSnapshot(row);
+  const creator = row.createdById ? row.createdById === actor.id ? { id: actor.id, name: actor.name }
+    : await tx.user.findUnique({ where: { id: row.createdById }, select: { id: true, name: true } }) : null;
   await writeChangeLogInTransaction(tx, { actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
     entity: "apiToken", entityId: row.id, action: "create", newValue: after }, {
     before: null, after, entity: { label: `Доступ API «${row.name}»`, href: "/settings/api" },
+    ...(creator ? { links: [{ type: "user", id: creator.id, label: creator.name, href: "/settings/users" }] } : {}),
   });
   return { token, id: row.id };
 }

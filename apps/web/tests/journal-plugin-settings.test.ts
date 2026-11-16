@@ -5,6 +5,8 @@ import type { PluginManifest } from "@pero/plugin-sdk";
 import { togglePluginInTransaction, savePluginSettingsInTransaction, createApiTokenInTransaction, revokeApiTokenInTransaction } from "../src/server/plugins/mutation-core";
 import { setNotificationPreferenceInTransaction } from "../src/server/notifications/preference-core";
 import { parseJournalPresentation } from "../src/server/changelog/presentation";
+import { refreshJournalPresentation } from "../src/server/changelog/refresh";
+import { resolveJournalEntries } from "../src/server/changelog/resolver";
 
 const actor = { id: "admin", name: "Администратор", roles: ["ADMIN"] as const, source: "web" as const };
 const manifest: PluginManifest = { id: "demo", name: "Демо", version: "1", apiVersion: 1, permissions: [], settingsSchema: [
@@ -15,6 +17,7 @@ function fixture() {
   const settings = new Map<string, unknown>([["greeting", "Привет"], ["accessToken", "old-secret"]]);
   const preferences = new Map<string, boolean>(), audits: Prisma.ChangeLogCreateInput[] = [], events: unknown[] = [];
   const tx = { $queryRaw: async () => [], plugin: { findUnique: async () => plugin, update: async ({ data }: { data: { enabled: boolean } }) => plugin = { ...plugin, ...data } },
+    user: { findUnique: async ({ where }: { where: { id: string } }) => ({ id: where.id, name: "Владелец интеграции" }) },
     pluginSetting: { findMany: async () => [...settings].map(([key, value]) => ({ key, value })), upsert: async ({ where, update }: { where: { pluginId_key: { key: string } }; update: { value: unknown } }) => { settings.set(where.pluginId_key.key, update.value); return update; } },
     apiToken: { create: async ({ data }: { data: Record<string, unknown> }) => token = { id: "token-id", createdAt: new Date(), revokedAt: null, ...data }, findUnique: async () => token,
       update: async ({ data }: { data: Record<string, unknown> }) => token = { ...token, ...data } },
@@ -41,6 +44,14 @@ test("settings save only allowed keys, use manifest labels and keep secrets outs
   assert.equal(f.settings.get("greeting"), "Здравствуйте"); assert.equal(f.settings.has("forbidden"), false);
   const view = parseJournalPresentation(f.audits[0]?.presentation)!;
   assert.ok(view.changes.some(change => change.label === "Приветствие"));
+  const audit = f.audits[0]!;
+  const raw = { id: "settings-event", createdAt: new Date(audit.createdAt ?? Date.now()), actorType: audit.actorType, actorId: audit.actorId, actorName: audit.actorName,
+    entity: audit.entity, entityId: audit.entityId, action: audit.action, field: audit.field, oldValue: audit.oldValue, newValue: audit.newValue, source: audit.source,
+    presentation: view, searchText: audit.searchText ?? null };
+  // Та же цепочка, что refreshAll: обогащение сохранённого события, затем обновление производных подписей.
+  const [resolved] = await resolveJournalEntries({ $queryRaw: async () => [] } as unknown as Parameters<typeof resolveJournalEntries>[0], [raw], true);
+  const refreshed = refreshJournalPresentation(raw, resolved!.presentation);
+  assert.deepEqual(refreshed.changes, view.changes, "force refresh сохраняет manifest labels, secret flags и фактические values");
   assert.ok(!JSON.stringify(f.audits).includes("old-secret")); assert.ok(!JSON.stringify(f.audits).includes("new-secret"));
   await savePluginSettingsInTransaction(f.tx, { ...actor, roles: [...actor.roles] }, manifest, { greeting: "Здравствуйте", accessToken: "new-secret" });
   assert.equal(f.audits.length, 1);
@@ -53,6 +64,16 @@ test("API token logs stable record ID and complete safe metadata, repeated revok
   assert.ok(!JSON.stringify(f.audits).includes("full-secret-token-value")); assert.ok(!JSON.stringify(f.audits).includes("tokenHash"));
   await revokeApiTokenInTransaction(f.tx, user, "token-id"); await revokeApiTokenInTransaction(f.tx, user, "token-id");
   assert.equal(f.audits.length, 2);
+  const created = parseJournalPresentation(f.audits[0]!.presentation)!;
+  assert.equal(created.changes.find(change => change.path === "createdById")?.after, actor.name);
+});
+
+test("token creator reference uses the other owner's real name instead of the administrator", async () => {
+  const f = fixture();
+  await createApiTokenInTransaction(f.tx, { ...actor, roles: [...actor.roles] }, { name: "Сотрудник", scopes: ["read"], createdById: "employee" }, "pero_employee_fixture");
+  const view = parseJournalPresentation(f.audits[0]!.presentation)!;
+  assert.equal(view.changes.find(change => change.path === "createdById")?.after, "Владелец интеграции");
+  assert.equal(view.links.find(link => link.id === "employee")?.label, "Владелец интеграции");
 });
 
 test("preferences audit explicit changes but never private plan settings", async () => {
