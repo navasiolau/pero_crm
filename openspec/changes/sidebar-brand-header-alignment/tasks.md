@@ -8,4 +8,4 @@
 ## 2. Приёмка
 
 - [x] 2.1 Выполнить TypeScript, scoped ESLint, strict OpenSpec и diff-check; записать локальные результаты и границы приватной browser-обвязки в evidence.
-- [ ] 2.2 Root принимает штатный CI и фактически развёрнутый staging SHA/образ/health с повторной desktop/mobile проверкой; записать отдельную приёмку.
+- [x] 2.2 Root принимает штатный CI и фактически развёрнутый staging SHA/образ/health с повторной desktop/mobile проверкой; записать отдельную приёмку.

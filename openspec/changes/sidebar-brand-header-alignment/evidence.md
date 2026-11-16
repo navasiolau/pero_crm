@@ -35,4 +35,16 @@ Actual AppShell/AppSidebar/SiteHeader с текущим Tailwind CSS в лока
 
 ## Staging
 
-PENDING: root принимает штатный CI и фактически развёрнутый SHA/образ/health, повторяет выравнивание и мобильное меню. Локальные проверки выше не заменяют эту приёмку. Push, операции с БД и инфраструктурой worker не выполняет.
+При первоначальной передаче staging оставался PENDING. После локального GREEN и review root код с OpenSpec зафиксирован в `8cb6c67c03f038ec09ad8921e3ca18ecb78b35c7`; push и интеграцию выполнял root. Локальная обвязка выше сохраняется отдельно от фактической приёмки ниже.
+
+### Фактическая приёмка — ACCEPTED
+
+Root подтвердил развёрнутый staging **`ca75430782ce4755691e83829bec5dc414621ad0`** после [штатного CI 43973192470](https://github.com/navasiolau/pero_crm/actions/runs/43973192470), **7/7 SUCCESS**. Web image — `sha256:e0046fa0299131963eeed2dab121446de9ebfa388550bbefbc94ff430d53fd57`; renderer — `sha256:f548aed87017ae3a5237289a1c0d2c5baf5c9f494e7eb85922a3f9451268dbf5`. Оба healthy, HTTP health=200. Root сверил metadata: DB ID, время старта, volume и W07 сохранены.
+
+Приватный receipt `D:/Projects/pero_crm_v2/.playwright-mcp/sidebar-234/functional-browser/receipt.json` лично прочитан worker: **PASS**, revision совпадает, `errors=[]`. Шесть реальных desktop-измерений охватывают 1440/1024 px и expanded/collapsed/reopened после Ctrl+B: центр пера во всех случаях **32 px**, центр кнопки SiteHeader — **31,5 px**, разница **0,5 px**, скачок пера между состояниями — **0 px**. В collapsed rail имеет ширину **48 px**. Root лично просмотрел актуальные PNG 1440 px expanded и collapsed: перо выровнено и сохраняет уровень.
+
+На том же staging в responsive-браузере при 390/360 px брендовая кнопка сохранила высоту **48 px**. Проверены фактическое открытие меню и закрытие Escape, document width=390/360 px, без ошибок браузера и неподтверждённых RPC. Это проверка адаптивного браузерного интерфейса, не физического телефона. Overlay и закрытие при переходе проверены локально; эти сценарии не приписываются данному staging receipt.
+
+Первый запрос root на подготовку readonly-сессии получил обычный W07 `REFRESH_OR_DEPLOY_BUSY`: тело не выполнялось, identity mismatch не было. Поздний разрешённый повтор завершился штатно, guards не обходились.
+
+Статус №234: **ACCEPTED на `ca75430782ce4755691e83829bec5dc414621ad0`**. Закрытие пункта 2.2 и эта запись — только документационные изменения по фактическим доказательствам root; последующий docs-only SHA не подменяет принятый runtime SHA. Записи БД, миграции, инфраструктура и main в рамках задачи не менялись. Push worker не выполнял.
