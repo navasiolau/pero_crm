@@ -1,3 +1,4 @@
+import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 import {parseProductPercentageRate} from "@/lib/product-percentage-rate-limit";
 import {liveProductWhere,liveProjectWhere} from "@/server/access/live-entities";
 import {softDeleteProductCore} from './delete-core';
@@ -23,6 +24,7 @@ import { initialPriceCapture, newProductInitialPrice } from "./initial-price";
 import { readProductPercentageDefaults } from "@/server/product-percentage-defaults/core";
 import { DEFAULT_PERCENTAGE_KINDS } from "@/server/product-percentage-defaults/contracts";
 import type { DomainActor } from "../projects/core";
+import { automationJournalContext, businessSnapshot, journalPersonLinks, productJournalContext, PRODUCT_JOURNAL_FIELDS } from "../projects/journal";
 import FurnitureSpecifications from "@pero/kp-template/furniture-specifications";
 import { applySpecificationPatch, isSpecificationPatch } from "./specification-patch";
 import { malformedProductPatch, productPatchSchema, technicalSpecificationsSchema, type ProductPatch, type ProductPatchResult, type ProductScalarValue, type ProductPatchDerived } from "./patch-contract";
@@ -142,7 +144,7 @@ export async function createProductInTransaction(tx: Prisma.TransactionClient, a
     },
   });
 
-  await tx.changeLog.create({ data: {
+  await writeChangeLogInTransaction(tx, {
     actorType: "user",
     actorId: actor.id,
     actorName: actor.name ?? undefined,
@@ -154,7 +156,9 @@ export async function createProductInTransaction(tx: Prisma.TransactionClient, a
       percentageDefaultsRevision: defaults.revision, percentageRates: defaults.rates,
       initialPrice: product.initialPrice?.toString() ?? null, initialPriceCaptureEligible: data.expectedPrice === undefined,
       ...(data.technicalSpecifications ? { technicalSpecifications: data.technicalSpecifications } : {}) },
-  } });
+  }, { ...productJournalContext(product), ...(numbering === "proposal" ? automationJournalContext(actor, "Создание изделия из КП") : {}),
+    before: null, after: {...businessSnapshot(product,PRODUCT_JOURNAL_FIELDS),percentageRates:defaults.rates},
+    links:await journalPersonLinks(tx,[product.engineerId],actor) });
   return { ok: true as const, product, numberChanges };
 }
 
@@ -185,15 +189,15 @@ async function updateProductValues(actor: DomainActor, productId: string, data: 
     productLineTotal(data.expectedPrice === undefined ? before.expectedPrice ?? null : data.expectedPrice, count);
     if (data.engineerId && data.engineerId !== before.engineerId && !await tx.user.findFirst({ where: { id: data.engineerId, active: true, roles: { hasSome: ["ENGINEER"] } }, select: { id: true } }))
       return { ok: false as const, error: "Выберите активного сотрудника с ролью инженера" };
-    if (count !== oldCount) await recalculateQuantity(tx, { ...before, quantity: oldCount }, count);
+    if (count !== oldCount) await recalculateQuantity(tx, { ...before, quantity: oldCount }, count, actor);
     const capture = initialPriceCapture(before, data.expectedPrice);
     await tx.product.update({ where: { id: productId }, data: { ...data, ...capture } });
-    if ("initialPrice" in capture) await tx.changeLog.create({ data: {
+    if ("initialPrice" in capture) await writeChangeLogInTransaction(tx, {
       actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
       entity: "product", entityId: productId, action: "initialPrice.capture",
       oldValue: { initialPrice: null, initialPriceCaptureEligible: true },
       newValue: { initialPrice: capture.initialPrice.toString(), initialPriceCaptureEligible: false },
-    } });
+    },{...productJournalContext(before),...automationJournalContext(actor,"Фиксация первоначальной цены изделия")});
     if ((data.expectedPrice !== undefined && String(data.expectedPrice) !== String(before.expectedPrice)) ||
         (data.engineerId !== undefined && data.engineerId !== before.engineerId)) await tx.productStagePayPool.updateMany({
       where: { productId, kind: "ENGINEERING", state: "DRAFT" }, data: { revision: { increment: 1 } },
@@ -211,7 +215,9 @@ export async function updateProductCore(actor: DomainActor, productId: string, i
   try { return await transaction(async tx=> {
     const result=await updateProductValues(actor,productId,data,baseline,tx);
     if (!result.ok) return result;
-    if (!result.noOp) await tx.changeLog.create({data:{actorType:"user",actorId:actor.id,actorName:actor.name,source:actor.source,entity:"product",entityId:productId,action:"update",oldValue:json(baseline),newValue:json(data)}});
+    if (!result.noOp) await writeChangeLogInTransaction(tx, {actorType:"user",actorId:actor.id,actorName:actor.name,source:actor.source,entity:"product",entityId:productId,action:"update",oldValue:json(baseline),newValue:json(data)},
+      {...productJournalContext(result.before),before:businessSnapshot(result.before,Object.keys(data)),after:json(data),
+        links:'engineerId'in data?await journalPersonLinks(tx,[result.before.engineerId,data.engineerId],actor):[]});
     return result;
   }); } catch(error) { return {ok:false as const,error:error instanceof Error?error.message:"Не удалось изменить изделие"}; }
 }
@@ -241,7 +247,7 @@ export async function patchProductCore(actor: DomainActor, input: ProductPatch, 
     // Права проверяются до replay/conflict; после выхода из DESIGN старый ответ не раскрывается.
     const visibilityActor=manager?actor:await resolveVisibilityActor(tx,actor);
     const where = { ...liveProductWhere, AND: [{ id: patch.productId }, productEditWhere(visibilityActor)] };
-    const permitted = await tx.product.findFirst({ where, select: { id: true, projectId: true, engineerId: true, status: true } });
+    const permitted = await tx.product.findFirst({ where, select: { id: true, number: true, projectId: true, engineerId: true, status: true } });
     if (!permitted) return {...identity,kind:"not-found",error:"Изделие не найдено или недоступно"};
     if (!manager && (permitted.status !== "DESIGN" || permitted.engineerId !== actor.id))
       return {...identity,kind:"forbidden",error:"Доступ к техническому блоку изменён"};
@@ -251,7 +257,7 @@ export async function patchProductCore(actor: DomainActor, input: ProductPatch, 
       if (patch.field === "quantity") await lockWarehouseMetadata(tx);
       await lockProductRow(tx, patch.productId);
       return tx.product.findFirst({ where, select: {
-        id: true, title: true, kind: true, description: legacy || technical, technicalSpecifications: legacy || technical,
+        id: true, number: true, title: true, kind: true, description: legacy || technical, technicalSpecifications: legacy || technical,
         quantity: true, expectedPrice: true, engineerId: true, status: true,
       } });
     })();
@@ -290,14 +296,15 @@ export async function patchProductCore(actor: DomainActor, input: ProductPatch, 
       if (!change.noOp) await tx.product.update({ where: { id: patch.productId }, data: { technicalSpecifications: change.next } });
       result = {...identity,kind:"saved",value:change.value,noOp:change.noOp,derived:{technicalSpecificationSectionId:change.sectionId,technicalSpecificationsEditRevision:change.next.editRevision ?? 0,
         ...(materializing && !change.noOp ? { technicalSpecifications: structuredClone(change.next) } : {})}};
-      await tx.changeLog.create({ data: {
+      await writeChangeLogInTransaction(tx, {
         id: receiptId, actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
         entity: "product", entityId: patch.productId, action: change.noOp ? "inline.receipt" : "inline.update", field: patch.field,
         ...(change.noOp ? { newValue: json({ fingerprint, result }) } : {
           oldValue: json({ technicalSpecifications: current.technicalSpecifications ?? null }),
           newValue: json({ fingerprint, result, technicalSpecifications: change.next }),
         }),
-      } });
+      },{...productJournalContext(current),kind:change.noOp?'receipt':'event',
+        before:{technicalSpecifications:before},after:{technicalSpecifications:change.next}});
       return result;
     } else if (current && !technical) {
       const previous=canonical(patch.field,current[patch.field]);
@@ -324,8 +331,10 @@ export async function patchProductCore(actor: DomainActor, input: ProductPatch, 
     } else {
       throw new Error("Не удалось прочитать изделие");
     }
-    if(!result.noOp && "expectedValue" in patch)await tx.changeLog.create({data:{id:receiptId,actorType:"user",actorId:actor.id,actorName:actor.name,source:actor.source,
-      entity:"product",entityId:patch.productId,action:"inline.update",field:patch.field,oldValue:json({value:patch.expectedValue}),newValue:json({fingerprint,result})}});
+    if(!result.noOp && "expectedValue" in patch)await writeChangeLogInTransaction(tx, {id:receiptId,actorType:"user",actorId:actor.id,actorName:actor.name,source:actor.source,
+      entity:"product",entityId:patch.productId,action:"inline.update",field:patch.field,oldValue:json({value:patch.expectedValue}),newValue:json({fingerprint,result})},
+      {...productJournalContext(current??permitted),kind:contact?'receipt':'event',before:{[patch.field]:patch.expectedValue},after:{[patch.field]:result.value},
+        links:patch.field==='engineerId'?await journalPersonLinks(tx,[current?.engineerId,result.value===null?null:String(result.value)],actor):[]});
     return result;
   }); }catch(error){return {...identity,kind:"failure",error:error instanceof Error?error.message:"Не удалось сохранить поле"};}
 }

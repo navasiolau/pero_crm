@@ -3,6 +3,7 @@ import { getKpTemplateIdentity, assetPath, ContractModel, contractFileName, cont
 import { withMutationTransaction } from "@/server/transactions/coordinator";
 import { dispatchEvent } from "@/server/plugins/events";
 import { patchProjectStageTransaction } from "@/server/projects/stage-core";
+import { automationJournalContext } from "@/server/projects/journal";
 import type { ProjectStage } from "@prisma/client";
 import { isKpEnabled } from "./config";
 import { lifecycleSecurity } from "./api-auth-db";
@@ -117,7 +118,7 @@ export async function kpContractWorkflow(scope: ContractScope, context?: KpApiCo
       },
       async advanceToContract(tx, actor, source, operationId) {
         const mutation = await patchProjectStageTransaction(actor, { projectId: source.projectId, expectedStage: source.projectStage as ProjectStage,
-          toStage: "CONTRACT", clientMutationId: operationId }, tx.native);
+          toStage: "CONTRACT", clientMutationId: operationId }, tx.native,automationJournalContext(actor,"Выпуск договора"));
         if (!mutation.result.ok) return apiFailure("KP_STAGE_CHANGED", 409, "Этап проекта изменился во время генерации договора");
         return mutation.eventIds;
       },

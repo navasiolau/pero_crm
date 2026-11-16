@@ -1,3 +1,4 @@
+import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 import {liveProjectWhere,liveProductWhere} from "@/server/access/live-entities";
 import {assertProjectCurrencyChange} from "@/server/product-stage-pay/core";
 import {assertPercentageProjectCurrencyChange} from "@/server/product-percentage-pay/core";
@@ -11,6 +12,7 @@ import {PROJECT_SERVICE_FIELDS, isProjectServiceField, projectServicePatch, proj
 import {withTaskTransaction,type TaskTransaction} from "@/server/tasks/transaction";
 import type {DomainActor} from "./core";
 import {patchProjectContactInTransaction} from "./contact-core";
+import {journalPersonLinks,projectJournalContext} from "./journal";
 import {projectPricingProjectionSchema,projectPatchSchema,malformedProjectPatch,projectMoneySchema,type ProjectPatch,type ProjectPatchResult,type ProjectPatchValue,type ProjectPatchDerived,type ProjectFullBaseline} from "./patch-contract";
 
 const services=PROJECT_SERVICE_FIELDS;
@@ -64,7 +66,7 @@ export async function patchProjectCore(actor:DomainActor,input:ProjectPatch,tran
  const receiptId=`project-inline:${patch.clientMutationId}`,fingerprint=createHash("sha256").update(JSON.stringify(patch)).digest("hex");
  try{return await transaction(async tx=>{
   await tx.$queryRaw`SELECT id FROM "Project" WHERE id = ${patch.projectId} FOR UPDATE`;
-  const project=await tx.project.findUnique({where:{...liveProjectWhere,id:patch.projectId},select:{id:true,title:true,clientId:true,managerId:true,address:true,currency:true,servicesTotal:true,proposalRoundingAdjustment:true,delivery:true,unloading:true,installation:true}});
+  const project=await tx.project.findUnique({where:{...liveProjectWhere,id:patch.projectId},select:{id:true,number:true,title:true,clientId:true,managerId:true,address:true,currency:true,servicesTotal:true,proposalRoundingAdjustment:true,delivery:true,unloading:true,installation:true}});
   if(!project)return{...identity,kind:"not-found",error:"Проект не найден"};
   const receipt=await tx.changeLog.findUnique({where:{id:receiptId}});
   if(receipt){const saved=receipt.newValue;
@@ -92,7 +94,11 @@ export async function patchProjectCore(actor:DomainActor,input:ProjectPatch,tran
    result={...identity,kind:"saved",value,derived};
    await tx.domainEvent.create({data:{type:"project.updated",actor:actor.id,payload:{projectId:patch.projectId,field:patch.field}}});
   }
-  if(!result.noOp)await tx.changeLog.create({data:{id:receiptId,actorType:"user",actorId:actor.id,actorName:actor.name,source:actor.source,entity:"project",entityId:patch.projectId,action:"inline.update",field:patch.field,oldValue:json({value:patch.expectedValue,...(isProjectServiceField(patch.field)?{services:projectServiceSnapshot(project)}:{})}),newValue:json({fingerprint,result})}});
+  if(!result.noOp)await writeChangeLogInTransaction(tx, {id:receiptId,actorType:"user",actorId:actor.id,actorName:actor.name,source:actor.source,entity:"project",entityId:patch.projectId,action:"inline.update",field:patch.field,oldValue:json({value:patch.expectedValue,...(isProjectServiceField(patch.field)?{services:projectServiceSnapshot(project)}:{})}),newValue:json({fingerprint,result})},
+   {...projectJournalContext(project),kind:['clientId','address','client.phone','client.address'].includes(patch.field)?'receipt':'event',
+    before:isProjectServiceField(patch.field)?projectServiceSnapshot(project):{[patch.field]:patch.expectedValue},
+    after:isProjectServiceField(patch.field)?projectServiceSnapshot({...project,...result.derived}):{[patch.field]:result.value},
+    links:patch.field==='managerId'?await journalPersonLinks(tx,[project.managerId,result.value===null?null:String(result.value)],actor):[]});
   return result;
  });}catch(error){return{...identity,kind:error instanceof ProjectServicesConflict?"conflict":"failure",error:error instanceof Error?error.message:"Не удалось сохранить поле"};}
 }
@@ -132,7 +138,8 @@ export async function updateProjectFieldsCore(actor:DomainActor,projectId:string
   }
   if(Object.keys(data).length){
    await tx.project.update({where:{id:projectId},data});
-   await tx.changeLog.create({data:{actorType:"user",actorId:actor.id,actorName:actor.name,source:actor.source,entity:"project",entityId:projectId,action:"update",oldValue:json(Object.fromEntries(Object.keys(data).map(field=>[field,canonical(field,current[field as LegacyField])]))),newValue:json(data)}});
+   await writeChangeLogInTransaction(tx, {actorType:"user",actorId:actor.id,actorName:actor.name,source:actor.source,entity:"project",entityId:projectId,action:"update",oldValue:json(Object.fromEntries(Object.keys(data).map(field=>[field,canonical(field,current[field as LegacyField])]))),newValue:json(data)},
+    {...projectJournalContext(current),links:'managerId'in data?await journalPersonLinks(tx,[current.managerId,data.managerId],actor):[]});
    await tx.domainEvent.create({data:{type:"project.updated",actor:actor.id,payload:{projectId,fields:Object.keys(data)}}});
   }
   return{ok:true,noOp:false};

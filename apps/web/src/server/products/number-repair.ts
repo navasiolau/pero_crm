@@ -1,3 +1,5 @@
+import { writeChangeLogInTransaction } from "@/server/changelog/writer";
+import {productJournalContext} from '../projects/journal';
 import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
@@ -105,10 +107,11 @@ export async function applyProductNumberRepairInTransaction(tx: Prisma.Transacti
   requireRepair(canonical(after.filter(row => row.id !== baseline.productId)) === canonical(baseline.composition.filter(row => row.id !== baseline.productId)), "OTHER_PRODUCTS_CHANGED");
   requireRepair(await protectedHash(tx, baseline.productId) === baseline.protectedHash, "PROTECTED_DATA_CHANGED");
   const result: ProductNumberRepairResult = { productId: baseline.productId, projectId: baseline.projectId, from, to, updatedAt: product.updatedAt, repeated: false };
-  await tx.changeLog.create({ data: { id: receiptId, actorType: "system", actorId: "maintenance:product-numbering-211", actorName: "Исправление нумерации №211", source: "maintenance",
+  await writeChangeLogInTransaction(tx, { id: receiptId, actorType: "system", actorId: "maintenance:product-numbering-211", actorName: "Исправление нумерации №211", source: "maintenance",
     entity: "product", entityId: baseline.productId, action: "number.repair", field: "number",
     oldValue: { number: from, suffixInt: 64, updatedAt: baseline.expectedUpdatedAt },
-    newValue: json({ fingerprint, baseline, result, after, protectedHash: baseline.protectedHash }) } });
+    newValue: json({ fingerprint, baseline, result, after, protectedHash: baseline.protectedHash }) },
+    {...productJournalContext({id:baseline.productId,number:to}),before:{number:from,suffixInt:64},after:{number:to,suffixInt:15},reason:'Исправление нумерации №211'});
   return result;
 }
 
@@ -134,9 +137,10 @@ export async function rollbackProductNumberRepairInTransaction(tx: Prisma.Transa
   requireRepair(await protectedHash(tx, baseline.productId) === baseline.protectedHash, "PROTECTED_DATA_CHANGED");
   const result: ProductNumberRepairResult = { productId: baseline.productId, projectId: baseline.projectId, from: saved.result.to,
     to: saved.result.from, updatedAt: product.updatedAt, repeated: false };
-  await tx.changeLog.create({ data: { id: receiptId, actorType: "system", actorId: "maintenance:product-numbering-211", actorName: "Обратная коррекция №211", source: "maintenance",
+  await writeChangeLogInTransaction(tx, { id: receiptId, actorType: "system", actorId: "maintenance:product-numbering-211", actorName: "Обратная коррекция №211", source: "maintenance",
     entity: "product", entityId: baseline.productId, action: "number.repair.rollback", field: "number",
     oldValue: { number: saved.result.to, suffixInt: 15, updatedAt: saved.result.updatedAt },
-    newValue: json({ fingerprint, baseline, result, after, protectedHash: baseline.protectedHash }) } });
+    newValue: json({ fingerprint, baseline, result, after, protectedHash: baseline.protectedHash }) },
+    {...productJournalContext({id:baseline.productId,number:result.to}),before:{number:result.from,suffixInt:15},after:{number:result.to,suffixInt:64},reason:'Обратная коррекция нумерации №211'});
   return result;
 }

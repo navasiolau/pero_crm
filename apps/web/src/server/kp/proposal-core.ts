@@ -1,9 +1,11 @@
+import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 import type { CommercialProposal, Prisma, Project } from "@prisma/client";
 import { initializeSignature, readSignatureDefaults } from './signature-defaults';
 import { MANAGER_ROLES, hasAnyRole, hasRole } from "@/lib/roles";
 import type { DomainActor } from "@/server/actor";
 import { createProjectInTransaction } from "@/server/projects/core";
 import { lockProjectRow } from "@/server/projects/lock";
+import { automationJournalContext, businessSnapshot, projectJournalContext, proposalJournalContext } from "@/server/projects/journal";
 import { bindProposalClient, resolveProposalClientInTransaction, type ProposalEnvironment } from "./proposal-client";
 import { synchronizeProposalItemsInTransaction, type SynchronizedProposalItem } from "./proposal-item-sync";
 import { ProposalWriteError, assertCurrentProposalEditor, canonicalProposalJson, canonicalizeProposalSpecifications, createProposalSchema, normalizeProposalState,
@@ -89,15 +91,18 @@ function canonicalState(state: ProposalState, project: { number: string; address
 
 async function recordProposalMutation(tx: Prisma.TransactionClient, actor: DomainActor,
   identity: { receiptId: string; fingerprint: string }, result: ProposalWriteResult,
-  action: "create" | "update", oldRevision: number | null) {
+  action: "create" | "update", oldRevision: number | null, beforeSnapshot: unknown, restored = false) {
   const eventIds: string[] = [];
   if (!result.noOp) {
-    await tx.changeLog.create({ data: {
+    const current=await tx.commercialProposal.findUnique({where:{id:result.proposalId}});
+    if(!current)throw new ProposalWriteError('failure','Не удалось сохранить снимок КП для журнала');
+    await writeChangeLogInTransaction(tx, {
       actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
       entity: "commercialProposal", entityId: result.proposalId, action,
       oldValue: { revision: oldRevision },
       newValue: { revision: result.revision, projectId: result.projectId, itemIds: result.items.map(item => item.id) },
-    } });
+    },{...proposalJournalContext(result.proposalId,{id:result.projectId,number:result.number}),...(restored?automationJournalContext(actor,'Восстановление сохранённой версии КП'):{}),
+      before:beforeSnapshot,after:businessSnapshot(current,['revision','state','clientId','currency','rate','rateDate','rateSource'])});
     const event = await tx.domainEvent.create({ data: {
       type: action === "create" ? "kp.created" : "kp.updated", actor: actor.id,
       payload: { proposalId: result.proposalId, projectId: result.projectId, revision: result.revision },
@@ -105,11 +110,11 @@ async function recordProposalMutation(tx: Prisma.TransactionClient, actor: Domai
     eventIds.push(event.id);
   }
   // No-op тоже фиксирует исходный ответ: последующий replay не станет новой записью.
-  await tx.changeLog.create({ data: {
+  await writeChangeLogInTransaction(tx, {
     id: identity.receiptId, actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
     entity: "commercialProposal", entityId: result.proposalId, action: "kp.write.receipt",
     newValue: { fingerprint: identity.fingerprint, result } as unknown as Prisma.InputJsonValue,
-  } });
+  },{...proposalJournalContext(result.proposalId,{id:result.projectId,number:result.number}),kind:'receipt'});
   return eventIds;
 }
 
@@ -130,7 +135,7 @@ export async function createProposalInTransaction(tx: Prisma.TransactionClient, 
   const projectCreated = await createProjectInTransaction(tx, actor, {
     title: initial.title, clientId: client.id, address: initial.address ?? undefined,
     ...(hasRole(actor.roles, "MANAGER") ? { managerId: actor.id } : {}),
-  });
+  },"Создание проекта из КП");
   const { project } = projectCreated;
   const values = projectValues(source, data.address);
   if (project.title !== values.title)
@@ -149,7 +154,7 @@ export async function createProposalInTransaction(tx: Prisma.TransactionClient, 
     revision: proposal.revision, state,
     items: sync.items.map(({ id, productId, number }) => ({ id, productId, number })), noOp: false,
   };
-  const eventIds = await recordProposalMutation(tx, actor, identity, result, "create", null);
+  const eventIds = await recordProposalMutation(tx, actor, identity, result, "create", null, null);
   return { result, projectCreated, eventIds, changedProducts: [...sync.previousNumbers].map(([id, number]) => ({ id, previousNumbers: [number] })) };
 }
 
@@ -171,18 +176,20 @@ export async function saveProposalInTransaction(tx: Prisma.TransactionClient, ac
   const submitted = normalizeProposalState(data.state);
   if (!hooks.restoreVersion) assertCurrentProposalEditor(proposal.state, submitted);
   const source = canonicalizeProposalSpecifications(submitted);
-  const selection = await resolveProposalClientInTransaction(tx, actor, data, source, project.clientId, hooks.environment, proposal.state);
+  const selection = await resolveProposalClientInTransaction(tx, actor, data, source, project.clientId, hooks.environment, proposal.state,projectJournalContext(project));
   const values = projectValues(source, data.address);
   const state = canonicalState(bindProposalClient(source, selection.client, selection.isTemporary), { ...project, ...values });
   const projectChanged = project.title !== values.title || project.address !== values.address || project.clientId !== selection.client.id;
   if (projectChanged) {
     await tx.project.update({ where: { id: project.id }, data: { ...values, clientId: selection.client.id } });
-    await tx.changeLog.create({ data: {
+    await writeChangeLogInTransaction(tx, {
       actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
       entity: "project", entityId: project.id, action: "kp.synchronize",
       oldValue: { title: project.title, address: project.address, clientId: project.clientId },
       newValue: { ...values, clientId: selection.client.id, proposalId: proposal.id },
-    } });
+    },{...projectJournalContext(project),...automationJournalContext(actor,"Обновление проекта из КП"),
+      before:{title:project.title,address:project.address,clientId:project.clientId},after:{...values,clientId:selection.client.id},
+      links:[{type:'commercialProposal',id:proposal.id,label:`КП ${project.number}`} ]});
   }
   const sync = await synchronizeProposalItemsInTransaction(tx, actor, { id: proposal.id, projectId: project.id }, project,
     state.items, hooks.now?.() ?? new Date());
@@ -203,6 +210,7 @@ export async function saveProposalInTransaction(tx: Prisma.TransactionClient, ac
     ok: true, proposalId: proposal.id, projectId: project.id, number: project.number, revision, state,
     items: sync.items.map(({ id, productId, number }) => ({ id, productId, number })), noOp: !changed,
   };
-  const eventIds = await recordProposalMutation(tx, actor, identity, result, "update", proposal.revision);
+  const eventIds = await recordProposalMutation(tx, actor, identity, result, "update", proposal.revision,
+    businessSnapshot(proposal,['revision','state','clientId','currency','rate','rateDate','rateSource']),hooks.restoreVersion===true);
   return { result, eventIds, changedProducts: [...sync.previousNumbers].map(([id, number]) => ({ id, previousNumbers: [number] })) };
 }

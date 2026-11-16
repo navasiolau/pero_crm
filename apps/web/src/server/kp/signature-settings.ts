@@ -1,3 +1,4 @@
+import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 import { createHash } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
 import { z } from 'zod';
@@ -26,8 +27,8 @@ export async function saveSignatureSettings(tx: Prisma.TransactionClient, actor:
   const snapshot = { revision: current.revision + Number(changed), values };
   if (changed) await tx.orgSetting.upsert({ where: { key: SIGNATURE_DEFAULTS_KEY }, create: { key: SIGNATURE_DEFAULTS_KEY, value: JSON.stringify(snapshot) }, update: { value: JSON.stringify(snapshot) } });
   const result: SignatureSaveResult = { ok: true, snapshot };
-  await tx.changeLog.create({ data: { id: receiptId, actorType: 'user', actorId: actor.id, actorName: actor.name, source: actor.source,
+  await writeChangeLogInTransaction(tx, { id: receiptId, actorType: 'user', actorId: actor.id, actorName: actor.name, source: actor.source,
     entity: 'orgSetting', entityId: SIGNATURE_DEFAULTS_KEY, action: 'kp.signature-defaults.update', oldValue: current,
-    newValue: { fingerprint, result } } });
+    newValue: { fingerprint, result } },{kind:changed?'event':'receipt',entity:{type:'orgSetting',id:SIGNATURE_DEFAULTS_KEY,label:'Подпись и условия КП'},before:current.values,after:values});
   return result;
 }

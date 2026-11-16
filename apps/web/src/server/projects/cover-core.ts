@@ -1,3 +1,4 @@
+import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 import {createHash} from 'node:crypto';
 import {Prisma} from '@prisma/client';
 import {canManageProjectFiles} from '@/lib/file-management';
@@ -8,6 +9,7 @@ import {currentFileDeleteStorageIdentity} from '@/server/files/delete-storage';
 import type {FileDeleteStorageIdentity} from '@/server/files/delete-contract';
 import {projectVisibilityWhere,type VisibilityActor} from '../access/visibility';
 import {projectCoverUploadSchema,projectCoverDeleteSchema,type ProjectCoverUpload,type ProjectCoverDelete,type ProjectCoverResult} from './cover-contract';
+import {projectJournalContext} from './journal';
 type Tx=Prisma.TransactionClient;
 type Actor=VisibilityActor&{name?:string|null};
 type UploadFile={fileName:string;storedName:string;mimeType:string;size:number;hasThumb:boolean;contentHash:string};
@@ -28,7 +30,7 @@ async function replay(tx:Tx,actor:Actor,projectId:string,mutationId:string,finge
  return{...result,repeated:true};
 }
 async function receipt(tx:Tx,actor:Actor,projectId:string,mutationId:string,fingerprint:string,result:ProjectCoverResult){
- await tx.changeLog.create({data:{id:`project-cover:${mutationId}`,actorType:'user',actorId:actor.id,actorName:actor.name??undefined,entity:'project',entityId:projectId,action:'cover.receipt',field:'coverFileId',newValue:json({fingerprint,result})}});
+ await writeChangeLogInTransaction(tx, {id:`project-cover:${mutationId}`,actorType:'user',actorId:actor.id,actorName:actor.name??undefined,entity:'project',entityId:projectId,action:'cover.receipt',field:'coverFileId',newValue:json({fingerprint,result})},{kind:'receipt'});
 }
 export async function authorizeProjectCoverUpload(tx:Tx,actor:Actor,input:ProjectCoverUpload){
  if(!projectCoverUploadSchema.safeParse(input).success)return{ok:false as const,kind:'validation' as const,error:'Обновите форму обложки проекта'};
@@ -54,8 +56,10 @@ export async function persistProjectCoverUpload(tx:Tx,actor:Actor,input:ProjectC
  await assertWritableFileStorageKey(tx,input.projectId,file.storedName);
  const row=await tx.file.create({data:{projectId:input.projectId,productId:null,taskId:null,section:'GENERAL',fileName:file.fileName,storedName:file.storedName,mimeType:file.mimeType,size:file.size,hasThumb:file.hasThumb,uploadedById:actor.id}});
  if((await tx.project.updateMany({where:{id:input.projectId,coverFileId:null},data:{coverFileId:row.id}})).count!==1)throw Error('PROJECT_COVER_CAS_RACE');
- await tx.changeLog.create({data:{actorType:'user',actorId:actor.id,actorName:actor.name??undefined,entity:'file',entityId:row.id,action:'create',newValue:{project:project.number,fileName:file.fileName,section:'GENERAL'}}});
- await tx.changeLog.create({data:{actorType:'user',actorId:actor.id,actorName:actor.name??undefined,entity:'project',entityId:project.id,action:'cover.upload',field:'coverFileId',oldValue:{coverFileId:null},newValue:{coverFileId:row.id}}});
+ await writeChangeLogInTransaction(tx, {actorType:'user',actorId:actor.id,actorName:actor.name??undefined,entity:'file',entityId:row.id,action:'create',newValue:{project:project.number,fileName:file.fileName,section:'GENERAL'}},
+  {...projectJournalContext(project),entity:{type:'file',id:row.id,label:file.fileName},before:null,after:{fileName:file.fileName,section:'GENERAL',mimeType:file.mimeType,size:file.size}});
+ await writeChangeLogInTransaction(tx, {actorType:'user',actorId:actor.id,actorName:actor.name??undefined,entity:'project',entityId:project.id,action:'cover.upload',field:'coverFileId',oldValue:{coverFileId:null},newValue:{coverFileId:row.id}},
+  {...projectJournalContext(project),links:[{type:'file',id:row.id,label:file.fileName}]});
  const result:ProjectCoverResult={ok:true,id:row.id,coverFileId:row.id,clientMutationId:input.clientMutationId};
  await receipt(tx,actor,project.id,input.clientMutationId,fingerprint,result);return result;
 }
@@ -74,7 +78,8 @@ export async function deleteProjectCoverCore(tx:Tx,actor:Actor,input:ProjectCove
  const cleanup=await persistFileDeleteIntent(tx,actor,file,input.clientMutationId,identity);
  if((await tx.project.updateMany({where:{id:project.id,coverFileId:file.id},data:{coverFileId:null}})).count!==1)throw Error('PROJECT_COVER_DELETE_CAS_RACE');
  await tx.file.delete({where:{id:file.id}});
- await tx.changeLog.create({data:{actorType:'user',actorId:actor.id,actorName:actor.name??undefined,entity:'project',entityId:project.id,action:'cover.delete',field:'coverFileId',oldValue:{coverFileId:file.id},newValue:{coverFileId:null}}});
+ await writeChangeLogInTransaction(tx, {actorType:'user',actorId:actor.id,actorName:actor.name??undefined,entity:'project',entityId:project.id,action:'cover.delete',field:'coverFileId',oldValue:{coverFileId:file.id},newValue:{coverFileId:null}},
+  {...projectJournalContext(project),links:[{type:'file',id:file.id,label:file.fileName}]});
  const result:ProjectCoverResult={ok:true,coverFileId:null,clientMutationId:input.clientMutationId,cleanupEventId:cleanup.eventId};
  await receipt(tx,actor,project.id,input.clientMutationId,fingerprint,result);return result;
 }

@@ -1,7 +1,9 @@
+import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 import {liveProductWhere,liveProjectWhere} from "@/server/access/live-entities";
 import type {Client,Prisma} from '@prisma/client';
 import {synchronizeProposalClient} from '@/server/kp/client-binding';
 import type {DomainActor} from './core';
+import {projectJournalContext} from './journal';
 import {mayManageContacts,patchClientPhoneInTransaction,patchClientAddressInTransaction,type ContactResult} from '@/server/clients/core';
 export type ProductContactResult = ContactResult & {currentClientLabel?:string;clientAddress?:string|null;clientVersion?:string};
 async function contactVersion(tx:Prisma.TransactionClient){const rows=await tx.$queryRaw<{clientVersion:string}[]>`SELECT txid_current()::text AS "clientVersion"`;return rows[0]?.clientVersion;}
@@ -21,7 +23,7 @@ export async function patchProjectContactInTransaction(actor:DomainActor,patch:P
  if(!mayManageContacts(actor))return{ok:false,kind:'forbidden',error:'Недостаточно прав'};
  const projectId=patch.projectId;
  await tx.$queryRaw`SELECT id FROM "Project" WHERE id = ${projectId} FOR UPDATE`;
- const project=await tx.project.findUnique({where:{...liveProjectWhere,id:projectId},select:{id:true,clientId:true,address:true}});
+ const project=await tx.project.findUnique({where:{...liveProjectWhere,id:projectId},select:{id:true,number:true,clientId:true,address:true}});
  if(!project)return{ok:false,kind:'not-found',error:'Проект не найден'};
  if(patch.field==='phone'||patch.field==='clientAddress'){
   if(!patch.expectedClientId||(patch.field==='phone'&&(typeof patch.value!=='string'||typeof patch.expectedValue!=='string'))||(patch.value!==null&&typeof patch.value!=='string')||(patch.expectedValue!==null&&typeof patch.expectedValue!=='string'))return{ok:false,kind:'validation',error:'Укажите контакт и исходного клиента'};
@@ -35,8 +37,8 @@ export async function patchProjectContactInTransaction(actor:DomainActor,patch:P
     currentValue:patch.field==='phone'?currentClient.phone:currentClient.address,currentClientLabel:[currentClient.lastName,currentClient.name,currentClient.middleName].filter(Boolean).join(' ')};
   }
   const result=patch.field==='phone'
-   ?await patchClientPhoneInTransaction(tx,actor,project.clientId,patch.value!,patch.expectedValue!)
-   :await patchClientAddressInTransaction(tx,actor,project.clientId,patch.value,patch.expectedValue);
+   ?await patchClientPhoneInTransaction(tx,actor,project.clientId,patch.value!,patch.expectedValue!,projectJournalContext(project))
+   :await patchClientAddressInTransaction(tx,actor,project.clientId,patch.value,patch.expectedValue,projectJournalContext(project));
   return result.ok?{...result,projectId,clientVersion:await contactVersion(tx)}:result;
  }
  const field=patch.field;
@@ -57,7 +59,9 @@ export async function patchProjectContactInTransaction(actor:DomainActor,patch:P
  const update=await tx.project.updateMany({where:{id:projectId,[field]:patch.expectedValue},data:{[field]:value}});
  if(update.count!==1)throw new Error('PROJECT_CONTACT_CAS_RACE');
  if(selectedClient)await synchronizeProposalClient(tx,actor,projectId,selectedClient);
- await tx.changeLog.create({data:{actorType:'user',actorId:actor.id,actorName:actor.name,source:actor.source,entity:'project',entityId:projectId,action:'update',field,oldValue:{[field]:project[field]},newValue:{[field]:value}}});
+ const clients=field==='clientId'?[await tx.client.findUnique({where:{id:project.clientId}}),selectedClient].filter((client):client is Client=>!!client):[];
+ await writeChangeLogInTransaction(tx, {actorType:'user',actorId:actor.id,actorName:actor.name,source:actor.source,entity:'project',entityId:projectId,action:'update',field,oldValue:{[field]:project[field]},newValue:{[field]:value}},
+  {...projectJournalContext(project),links:clients.map(client=>({type:'client',id:client.id,label:[client.lastName,client.name,client.middleName].filter(Boolean).join(' ')}))});
  await tx.domainEvent.create({data:{type:'project.updated',actor:actor.id,payload:{projectId,field}}});
  return{ok:true,value,changed:true,projectId,clientId:field==='clientId'?value!:project.clientId,clientVersion:await contactVersion(tx),...(selectedClient?{clientLabel:[selectedClient.lastName,selectedClient.name,selectedClient.middleName].filter(Boolean).join(' '),phone:selectedClient.phone,clientAddress:selectedClient.address}:{})};
 }

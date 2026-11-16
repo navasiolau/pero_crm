@@ -1,3 +1,4 @@
+import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 import { updateProjectFieldsCore, type LegacyProjectUpdateInput } from "./project-field-core";
 import { patchProjectStageCore } from "./stage-service";
 import type { StageExtras } from "./stage-contract";
@@ -10,6 +11,7 @@ import { dispatchEvent } from "@/server/plugins/events";
 import { notifyOrg } from "@/server/notifications/notify";
 import { withMutationTransaction, type MutationTransaction } from "@/server/transactions/coordinator";
 import { allocateProjectNumberInTransaction } from "./numbering";
+import { automationJournalContext, businessSnapshot, journalPersonLinks, projectJournalContext, PROJECT_JOURNAL_FIELDS } from "./journal";
 
 import { MANAGER_ROLES } from "@/lib/roles";
 import { requireActorRoles, type DomainActor } from "@/server/actor";
@@ -46,11 +48,13 @@ export async function createProjectInTransaction(
   tx: Prisma.TransactionClient,
   actor: DomainActor,
   input: z.input<typeof createProjectSchema>,
+  automationReason?: string,
 ) {
   requireActorRoles(actor, MANAGER_ROLES);
   const data = createProjectSchema.parse(input);
   const { number, numberInt } = await allocateProjectNumberInTransaction(tx);
-  if (!await tx.client.findUnique({ where: { id: data.clientId }, select: { id: true } }))
+  const client = await tx.client.findUnique({ where: { id: data.clientId }, select: { id: true, name: true, lastName: true, middleName: true } });
+  if (!client)
     throw new Error("Клиент не найден");
   const project = await tx.project.create({ data: {
     id: number, number, numberInt, title: data.title, clientId: data.clientId,
@@ -60,11 +64,14 @@ export async function createProjectInTransaction(
     createdById: actor.id,
     stageHistory: { create: { toStage: "LEAD", changedById: actor.id } },
   } });
-  await tx.changeLog.create({ data: {
+  await writeChangeLogInTransaction(tx, {
     actorType: "user", actorId: actor.id, actorName: actor.name || undefined,
     entity: "project", entityId: project.id, action: "create",
     newValue: { number, title: data.title }, source: actor.source,
-  } });
+  }, { ...projectJournalContext(project), ...(automationReason ? automationJournalContext(actor, automationReason) : {}),
+    before: null, after: businessSnapshot(project, PROJECT_JOURNAL_FIELDS),
+    links: [{type:"client",id:client.id,label:[client.lastName,client.name,client.middleName].filter(Boolean).join(" ")},
+      ...await journalPersonLinks(tx,[data.managerId],actor)] });
   const event = await tx.domainEvent.create({ data: {
     type: "project.created", payload: { projectId: project.id, number }, actor: actor.id,
   } });

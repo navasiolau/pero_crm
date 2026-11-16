@@ -1,6 +1,8 @@
+import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 import { randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import type { DomainActor } from "@/server/actor";
+import { automationJournalContext, productJournalContext } from "@/server/projects/journal";
 
 export type ProductNumberChange = { id: string; previousNumber: string; number: string };
 type NumberedProduct = { id: string; number: string; suffixInt: number | null; createdAt: Date };
@@ -36,11 +38,11 @@ export async function renumberActiveProductsInTransaction(
   for (const { product } of changed) await tx.product.update({ where: { id: product.id }, data: { number: `${prefix}${product.id}` } });
   for (const { product, suffixInt, number } of changed) {
     await tx.product.update({ where: { id: product.id }, data: { number, suffixInt } });
-    await tx.changeLog.create({ data: {
+    await writeChangeLogInTransaction(tx, {
       actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
       entity: "product", entityId: product.id, action: "number.change", field: "number",
       oldValue: { number: product.number, suffixInt: product.suffixInt }, newValue: { number, suffixInt },
-    } });
+    },{...productJournalContext({...product,number}),...automationJournalContext(actor,"Последовательная нумерация изделий проекта")});
   }
   return changed.map(({ product, number }) => ({ id: product.id, previousNumber: product.number, number }));
 }

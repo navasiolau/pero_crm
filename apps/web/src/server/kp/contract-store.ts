@@ -1,3 +1,4 @@
+import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 import { Prisma } from "@prisma/client";
 import { hasAnyRole, MANAGER_ROLES } from "../../lib/roles";
 import { withTaskTransaction, type TaskTransaction } from "../tasks/transaction";
@@ -63,9 +64,13 @@ export function createPostgresContractTransaction(tx: Prisma.TransactionClient):
       const row = await tx.changeLog.findUnique({ where: { id: "kp-contract-operation:" + operationId }, select: { newValue: true } });
       return row?.newValue ? row.newValue as unknown as ContractReceipt : null;
     },
-    async writeReceipt(operationId, primaryId, action, actor, receipt) {
-      await tx.changeLog.create({ data: { id: "kp-contract-operation:" + operationId, actorType: "user", actorId: actor.id, source: actor.source,
-        entity: "proposalContract", entityId: primaryId, action, newValue: receipt as unknown as Prisma.InputJsonValue } });
+    async writeReceipt(operationId, primaryId, action, actor, receipt, journal) {
+      await writeChangeLogInTransaction(tx, { id: "kp-contract-operation:" + operationId, actorType: "user", actorId: actor.id, source: actor.source,
+        entity: "proposalContract", entityId: primaryId, action, newValue: receipt as unknown as Prisma.InputJsonValue },journal);
+    },
+    async writeEvent(actor,contractId,action,value,journal) {
+      await writeChangeLogInTransaction(tx,{actorType:'user',actorId:actor.id,actorName:actor.name,source:actor.source,
+        entity:'proposalContract',entityId:contractId,action,newValue:value},journal);
     },
     async saveDraft(input) {
       let rows: ContractRecord[];
