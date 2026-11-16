@@ -1,7 +1,9 @@
+import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 import {createHash} from 'node:crypto';
 import type {Prisma, FileSection} from '@prisma/client';
 import {UploadError} from './upload-result';
 import {assertWritableFileStorageKey} from './storage-binding-fence';
+import {operationJournalContext,journalSnapshot,journalUserReferences,FILE_JOURNAL_FIELDS} from '../tasks/journal';
 
 export const uploadMutationPattern=/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 export function uploadFingerprint(input:{actorId:string;projectId:string;productId:string|null;taskId:string|null;section:FileSection;fileName:string;mimeType:string;size:number;contentHash:string}){
@@ -23,8 +25,10 @@ export async function persistOrdinaryUpload(tx:Prisma.TransactionClient,actor:{i
   if(prior)return prior;
   await assertWritableFileStorageKey(tx,input.data.projectId,input.data.storedName);
   const file=await tx.file.create({data:input.data});
-  await tx.changeLog.create({data:{id:`file-upload:${input.clientMutationId}`,actorType:'user',actorId:actor.id,actorName:actor.name??undefined,
+  await writeChangeLogInTransaction(tx, {id:`file-upload:${input.clientMutationId}`,actorType:'user',actorId:actor.id,actorName:actor.name??undefined,
     source:'web',entity:'file',entityId:file.id,action:'create',newValue:{project:input.projectNumber,fileName:file.fileName,section:file.section,
-      uploadFingerprint:input.fingerprint,clientMutationId:input.clientMutationId}}});
+      uploadFingerprint:input.fingerprint,clientMutationId:input.clientMutationId}},
+      {...await operationJournalContext(tx,{type:'file',id:file.id,label:file.fileName},[{...file,projectNumber:input.projectNumber}],await journalUserReferences(tx,[file.uploadedById])),
+        before:null,after:journalSnapshot(file,FILE_JOURNAL_FIELDS)});
   return{id:file.id,repeated:false,clientMutationId:input.clientMutationId};
 }

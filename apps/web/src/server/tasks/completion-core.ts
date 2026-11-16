@@ -1,3 +1,4 @@
+import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 import { isDeepStrictEqual } from "node:util";
 import { confirmMutation } from "@/server/operations/confirmation";
 import { normalizeTaskStatusRequest, readTaskStatusReceipt, recordTaskStatusReceipt, TaskStatusRequestError, type TaskStatusContext, type TaskStatusEffect } from "./status-receipts";
@@ -9,6 +10,7 @@ import { bumpEngineeringPoolRevision } from "@/server/product-stage-pay/core";
 import { moneyAtoms, taskPieceAmount } from "@/lib/work-shares";
 import type { DomainActor } from "@/server/projects/core";
 import type { TaskTransaction } from "./transaction";
+import {operationJournalContext,journalSnapshot,journalUserReferences,systemJournalActor,PAYROLL_JOURNAL_FIELDS} from './journal';
 
 type TaskEffect = TaskStatusEffect;
 export type CompletionResult = { ok: false; error: string; outcome?: "ROLLED_BACK" | "UNKNOWN"; kind?: "actor-changed"; retrySafe?: boolean } | {
@@ -79,12 +81,18 @@ export async function changeTaskStatusCore(actor: DomainActor, taskId: string, t
             const currency = task.allocationGroup?.currency ?? (await tx.orgSetting.findUnique({ where: { key: "payrollCurrency" } }))?.value ?? "BYN";
             try { assertProjectMoneyCurrency(task.project.currency); assertInternalCurrency(currency); }
             catch (error) { throw new CompletionError(error instanceof Error ? error.message : "Не определена валюта работы"); }
-            await tx.payrollEntry.create({ data: { userId: task.assigneeId, taskId: task.id, workId: task.work.id, projectId: task.projectId, amount, bynAmount: amount, currency, scheme: "PIECE", month: payrollMonth(doneAt), comment: `${task.title} · ${task.project.number}` } });
+            const entry=await tx.payrollEntry.create({ data: { userId: task.assigneeId, taskId: task.id, workId: task.work.id, projectId: task.projectId, amount, bynAmount: amount, currency, scheme: "PIECE", month: payrollMonth(doneAt), comment: `${task.title} · ${task.project.number}` } });
+            await writeChangeLogInTransaction(tx,{actorType:'user',actorId:actor.id,actorName:actor.name,source:actor.source,entity:'payrollEntry',entityId:entry.id,action:'accrue',
+              newValue:journalSnapshot(entry,PAYROLL_JOURNAL_FIELDS)},
+              {...await operationJournalContext(tx,{type:'payrollEntry',id:entry.id,label:`Начисление: ${task.title}`},[task],[{type:'user',id:task.assigneeId,label:assignee.name}]),
+                ...systemJournalActor(actor,'Выполнение задачи'),before:null,after:journalSnapshot(entry,PAYROLL_JOURNAL_FIELDS)});
             payroll = { name: assignee.name, amount, currency };
           }
         }
       }
-      await tx.changeLog.create({ data: { actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source, entity: "task", entityId: task.id, action: "status", field: "status", oldValue: task.status, newValue: toStatus } });
+      await writeChangeLogInTransaction(tx, { actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source, entity: "task", entityId: task.id, action: "status", field: "status", oldValue: task.status, newValue: toStatus },
+        {...await operationJournalContext(tx,{type:'task',id:task.id,label:task.title},[task],await journalUserReferences(tx,[task.doneById,doneAt?actor.id:null])),
+          before:{status:task.status,doneAt:task.doneAt,doneById:task.doneById},after:{status:toStatus,doneAt:doneAt??task.doneAt,doneById:doneAt?actor.id:task.doneById}});
       expectedEvent = { taskId, projectId: task.projectId, from: task.status, to: toStatus };
       const event = await tx.domainEvent.create({ data: { type: "task.statusChanged", actor: actor.id, payload: expectedEvent } });
       await recordTaskStatusReceipt(actor, intent, effect, event.id, tx);

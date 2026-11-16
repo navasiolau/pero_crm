@@ -74,6 +74,8 @@ const fields: Record<string, string> = {
   fileId: "Файл", fileIds: "Файлы", fileName: "Название файла", fileSize: "Размер файла", size: "Размер", mimeType: "Тип файла",
   sketchFileId: "Эскиз", coverFileId: "Обложка", previousFileId: "Прежний файл", replacedById: "Новый файл", files: "Файлы",
   workId: "Работа", taskId: "Задача", tasks: "Задачи", works: "Работы", dependencies: "Зависимости", dependsOnId: "Предыдущая задача",
+  taskIds: "Задачи", dependencyIds: "Предшествующие задачи", dependentIds: "Зависимые задачи", entries: "Начисления",
+  doneAt: "Выполнено", executorShare: "Доля исполнителя", stoppedAt: "Остановлено", autoStopped: "Остановлено автоматически", cutoffAt: "Время завершения", closed: "Завершённые записи",
   assignees: "Исполнители", members: "Участники", shares: "Доли", share: "Доля", shareUnits: "Доля", sharePercent: "Доля, %",
   poolWeightUnits: "Доля работы", stageShareUnits: "Доля этапа", allocationGroupId: "Группа распределения", budgetSource: "Источник оплаты",
   requiresPhoto: "Нужна фотография", estimateMinutes: "Плановое время, мин", durationMinutes: "Время, мин", duration: "Длительность",

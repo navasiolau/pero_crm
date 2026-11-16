@@ -1,5 +1,7 @@
+import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 import { Prisma, type PayrollEntry } from "@prisma/client";
 import type { DomainActor } from "@/server/actor";
+import {operationJournalContext,journalSnapshot,journalUserReferences,systemJournalActor,PAYROLL_JOURNAL_FIELDS} from './journal';
 
 export class TaskPayrollTransferError extends Error {}
 
@@ -22,10 +24,14 @@ function snapshot(entry: PayrollEntry) {
     projectAmount: entry.projectAmount?.toString() ?? null, currency: entry.currency, month: entry.month };
 }
 
-async function audit(tx: Prisma.TransactionClient, actor: DomainActor, operationId: string, before: PayrollEntry, after: PayrollEntry, childEntryId?: string) {
-  await tx.changeLog.create({ data: { actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
+async function audit(tx: Prisma.TransactionClient, actor: DomainActor, operationId: string, before: PayrollEntry, after: PayrollEntry, child?: PayrollEntry) {
+  await writeChangeLogInTransaction(tx, { actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
     entity: "payrollEntry", entityId: before.id, action: "taskTransfer", oldValue: snapshot(before),
-    newValue: { ...snapshot(after), operationId, ...(childEntryId ? { childEntryId } : {}) } } });
+    newValue: { ...snapshot(after), operationId, ...(child ? { childEntryId:child.id } : {}) } },
+    {...await operationJournalContext(tx,{type:'payrollEntry',id:before.id,label:'Начисление по задаче'},[before],await journalUserReferences(tx,[before.userId,after.userId,child?.userId])),
+      ...systemJournalActor(actor,child?'Разделение задачи и её начисления':'Переназначение задачи'),
+      before:child?{entries:[{id:before.id,...journalSnapshot(before,PAYROLL_JOURNAL_FIELDS)}]}:journalSnapshot(before,PAYROLL_JOURNAL_FIELDS),
+      after:child?{entries:[{id:after.id,...journalSnapshot(after,PAYROLL_JOURNAL_FIELDS)},{id:child.id,...journalSnapshot(child,PAYROLL_JOURNAL_FIELDS)}]}:journalSnapshot(after,PAYROLL_JOURNAL_FIELDS)});
 }
 
 export async function moveTaskPayroll(tx: Prisma.TransactionClient, actor: DomainActor, entries: PayrollEntry[], recipientId: string, operationId: string) {
@@ -54,6 +60,6 @@ export async function splitTaskPayroll(tx: Prisma.TransactionClient, actor: Doma
       productId: entry.productId, projectId: entry.projectId, amount: amount.transferred, bynAmount: byn.transferred,
       projectAmount: project.transferred, projectCurrency: entry.projectCurrency, currency: entry.currency,
       scheme: entry.scheme, month: entry.month, comment: entry.comment } });
-    await audit(tx, actor, operationId, entry, updated, child.id);
+    await audit(tx, actor, operationId, entry, updated, child);
   }
 }

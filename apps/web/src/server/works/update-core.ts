@@ -1,3 +1,4 @@
+import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
@@ -12,6 +13,7 @@ import { lockProductRow } from "@/server/products/quantity-core";
 import type { DomainActor } from "@/server/projects/core";
 import { withTaskTransaction, type TaskTransaction } from "@/server/tasks/transaction";
 import { isOrdinaryWork, workPlanRevision } from "./plan";
+import {operationJournalContext,journalSnapshot,WORK_JOURNAL_FIELDS} from '../tasks/journal';
 
 export const updateWorkSchema = z.object({
   projectId: z.string().min(1), productId: z.string().min(1), workId: z.string().min(1),
@@ -91,15 +93,18 @@ export async function updateWorkCore(actor: DomainActor, input: unknown, transac
         quantity, quantityPerUnit: norm, title, unitSnapshot: unit, priceItemId, priceSnapshot: price, total,
       } });
       const result = { ok: true as const, workId: work.id, quantity, revision: workPlanRevision({ ...updated, tasks: work.tasks }), clientMutationId: data.clientMutationId };
-      await tx.changeLog.create({ data: { actorType: "user", actorId: current.id, actorName: current.name, source: actor.source,
+      await writeChangeLogInTransaction(tx, { actorType: "user", actorId: current.id, actorName: current.name, source: actor.source,
         entity: "work", entityId: work.id, action: "update", oldValue: { quantity: work.quantity.toString(), quantityPerUnit: work.quantityPerUnit?.toString() ?? null,
           priceItemId: work.priceItemId, priceSnapshot: work.priceSnapshot.toString(), unitSnapshot: work.unitSnapshot },
         newValue: { quantity, quantityPerUnit: norm, priceItemId, priceSnapshot: price.toString(), unitSnapshot: unit },
-      } });
-      await tx.changeLog.create({ data: { id: `work-update:${data.clientMutationId}`, actorType: "user", actorId: current.id,
+      },{...await operationJournalContext(tx,{type:'work',id:work.id,label:updated.title},[{...work,product}],
+        [...(work.priceItemId?[{type:'priceItem',id:work.priceItemId,label:work.title}]:[]),...(priceItemId?[{type:'priceItem',id:priceItemId,label:title}]:[])]),
+        before:journalSnapshot(work,WORK_JOURNAL_FIELDS),after:journalSnapshot(updated,WORK_JOURNAL_FIELDS),
+        kind:JSON.stringify(journalSnapshot(work,WORK_JOURNAL_FIELDS))===JSON.stringify(journalSnapshot(updated,WORK_JOURNAL_FIELDS))?'receipt':'event'});
+      await writeChangeLogInTransaction(tx, { id: `work-update:${data.clientMutationId}`, actorType: "user", actorId: current.id,
         actorName: current.name, source: actor.source, entity: "work", entityId: work.id, action: "work-update.receipt",
         newValue: JSON.parse(JSON.stringify({ fingerprint, result })) as Prisma.InputJsonValue,
-      } });
+      },{kind:'receipt'});
       return result;
     });
   } catch (error) {

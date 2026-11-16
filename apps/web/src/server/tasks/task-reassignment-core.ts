@@ -1,3 +1,5 @@
+import { writeChangeLogInTransaction } from "@/server/changelog/writer";
+import {operationJournalContext,journalUserReferences,systemJournalActor} from './journal';
 import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
@@ -91,15 +93,20 @@ export async function reassignOrdinaryTaskCore(actor: DomainActor, input: unknow
       if (updated.count !== 1) fail("Задача изменена другим пользователем", "conflict");
       revision++;
       await moveTaskPayroll(tx, { ...actor, name: current.actor.name }, payroll, data.assigneeId, data.clientMutationId);
-      await tx.changeLog.create({ data: { actorType: "user", actorId: current.actor.id, actorName: current.actor.name, source: actor.source, entity: "task", entityId: task.id, action: "reassign",
-        oldValue: { assigneeId: task.assigneeId, status: task.status, splitRevision: task.splitRevision }, newValue: { assigneeId: data.assigneeId, status, splitRevision: revision } } });
+      const journal=await operationJournalContext(tx,{type:'task',id:task.id,label:task.title},[task],await journalUserReferences(tx,[task.assigneeId,data.assigneeId]));
+      await writeChangeLogInTransaction(tx, { actorType: "user", actorId: current.actor.id, actorName: current.actor.name, source: actor.source, entity: "task", entityId: task.id, action: "reassign",
+        oldValue: { assigneeId: task.assigneeId, status: task.status, splitRevision: task.splitRevision }, newValue: { assigneeId: data.assigneeId, status, splitRevision: revision } },
+        {...journal,before:{assigneeId:task.assigneeId},after:{assigneeId:data.assigneeId}});
+      if(status!==task.status)await writeChangeLogInTransaction(tx,{actorType:'user',actorId:current.actor.id,actorName:current.actor.name,source:actor.source,entity:'task',entityId:task.id,
+        action:'status',field:'status',oldValue:task.status,newValue:status},
+        {...journal,...systemJournalActor(current.actor,'Переназначение задачи')});
       const event = await tx.domainEvent.create({ data: { type: "task.assigned", actor: current.actor.id, payload: { taskId: task.id, projectId: task.projectId, productId: product.id,
         assigneeId: data.assigneeId, previousAssigneeId: task.assigneeId, operationId: data.clientMutationId } } }); eventId = event.id;
     }
     const result: z.infer<typeof receiptSchema>["result"] = { ok: true, taskId: task.id, assigneeId: data.assigneeId, revision, status, projectId: task.projectId,
       productId: product.id, title: task.title, projectNumber: task.project.number, eventId, clientMutationId: data.clientMutationId };
-    await tx.changeLog.create({ data: { id: receiptId, actorType: "user", actorId: current.actor.id, actorName: current.actor.name, source: actor.source, entity: "task", entityId: task.id,
-      action: "task.reassignment.receipt.v1", newValue: { version: 1, fingerprint, result } } });
+    await writeChangeLogInTransaction(tx, { id: receiptId, actorType: "user", actorId: current.actor.id, actorName: current.actor.name, source: actor.source, entity: "task", entityId: task.id,
+      action: "task.reassignment.receipt.v1", newValue: { version: 1, fingerprint, result } },{kind:'receipt'});
     return result;
   }); } catch (error) { return error instanceof ReassignmentError ? { ok: false, kind: error.kind, error: error.message }
     : error instanceof TaskPayrollTransferError ? { ok: false, kind: "validation", error: error.message }

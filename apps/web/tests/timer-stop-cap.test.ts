@@ -30,6 +30,7 @@ test("reviewed cutoff closes only open timers once at one server instant and ref
       const sql=strings.join("");
       if(sql.includes("pg_control_system"))return[request.target.database];
       if(sql.includes("pg_advisory_xact_lock")){locks.push(sql);return[{locked:1}];}
+      if(sql.includes('FROM "Task" WHERE id='))return[];
       assert.match(sql,/clock_timestamp/);clockReads++;return[{at:instant}];
     },
     $executeRaw:async(strings:TemplateStringsArray)=>{assert.match(strings.join(""),/LOCK TABLE "TimeEntry"/);return 0;},
