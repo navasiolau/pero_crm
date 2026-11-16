@@ -1,5 +1,29 @@
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/server/require-role";
+import {Prisma} from '@prisma/client';
+import {normalizeJournalQuery,normalizeJournalScope,type JournalQueryInput} from './query-contract';
+import type {JournalScope} from './contract';
+import {createJournalReadStore,type JournalReadDb} from './sql-store';
+import {readJournalPage,readJournalDetail,readJournalOptions} from './reader-core';
+
+/** Count, legacy fallback и indexed rows видят один snapshot даже во время backfill. */
+async function snapshot<T>(read:(db:JournalReadDb)=>Promise<T>):Promise<T>{
+ return prisma.$transaction(async tx=>{await tx.$executeRaw`SET TRANSACTION READ ONLY`;return read(tx);},
+  {isolationLevel:Prisma.TransactionIsolationLevel.RepeatableRead,maxWait:10_000,timeout:60_000});
+}
+
+export async function queryJournal(input:JournalQueryInput={}){
+ await requireRole(['ADMIN']);const query=normalizeJournalQuery(input);
+ return snapshot(db=>readJournalPage(createJournalReadStore(db),query));
+}
+export async function queryJournalEntry(id:string,scope:JournalScope={kind:'global'}){
+ await requireRole(['ADMIN']);const normalized=normalizeJournalScope(scope);
+ return snapshot(db=>readJournalDetail(createJournalReadStore(db),id,normalized));
+}
+export async function queryJournalFilterOptions(scope:JournalScope={kind:'global'}){
+ await requireRole(['ADMIN']);const normalized=normalizeJournalScope(scope);
+ return snapshot(db=>readJournalOptions(createJournalReadStore(db),normalized));
+}
 
 export type GlobalChangeLogFilters = { actor?: string; entity?: string; from?: string; to?: string };
 
