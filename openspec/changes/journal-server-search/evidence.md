@@ -69,3 +69,15 @@ Legacy CP create/update обогащается только единственн
 API wrapper скрывается только при exact operation hash и доказанном counterpart; noOp подтверждается внутренней квитанцией. Единственный старый PDF request сохраняется с понятным названием и безопасным результатом, без ложного diff envelope. Media/upload требует точной job/media/file связи; недоказанные записи остаются видимыми. Файл, источник, исходные actor/oldValue/newValue и деньги не менялись.
 
 Focused RED: 4 FAIL / 1 PASS до подключения resolver. GREEN после реализации: 6/6 legacy cases; весь журнал **54/54 PASS**, scoped ESLint и diff-check PASS. Проверены длинное полное состояние, ambiguous previous/current snapshots, no-op, sole PDF, чужой actor/project, malformed receipt ID, сохранность rich hints и raw данных, точный media companion и видимость QA. Субагент не выполнял изменения БД. Финальный общий CI и runtime refresh/приёмка остаются за root.
+
+## Стабильность поискового индекса после JSONB roundtrip
+
+На фактически развёрнутом `e3f99ff0` (CI 43796217344, 7/7 SUCCESS, healthy) root завершил первый final refresh: scanned/updated/rawVerified=5529, remaining=0. Повтор показал **RED: 1679 updated / 5529 scanned**, при сохранности исходных фактов.
+
+Root READ ONLY diagnostic на 300 реальных строках подтвердил причину: presentation semantic diff=0, состав поисковых значений diff=0, но fresh presentation → PostgreSQL JSONB roundtrip менял порядок searchText у **300/300** строк. JSONB переставляет ключи вложенных объектов, а прежний Set выдавал значения в порядке обхода. Evidence: `stage-projection-drift.response.private.json` у root.
+
+Минимальное исправление — сортировать готовый набор поисковых строк перед join. Оно не меняет UI values, snapshots, raw payload, resolver и набор поисковых значений. Regression `journal-search-order.test.ts`: RED 1 FAIL до исправления; GREEN после исправления проверяет вложенные ключи, байтовую стабильность повторов, полное многострочное значение и неизменность входных данных. Весь journal suite **55/55 PASS**, полный web TypeScript, scoped ESLint и diff-check — PASS.
+
+Root повторил кандидат на реальном PostgreSQL JSONB roundtrip: **300/300 PASS, presentation/searchText/token-set diff=0**. Evidence: `candidate222-search-order.response.private.json`. Это проверка кандидата; ветка задачи не содержит поздние изменения №228, поэтому окончательное сравнение состава значений выполняется на обычном интеграционном merge, без копирования чужих файлов.
+
+**Финальная приёмка №222 остаётся PENDING** до развёрнутого исправленного SHA, нового refreshAll с повтором updated=0, сохранности baseline5529 и финальных browser/performance checks. Исторические PASS выше не подменяют эту проверку.

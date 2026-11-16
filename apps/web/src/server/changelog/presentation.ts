@@ -265,5 +265,6 @@ export function buildJournalSearchText(entry: JournalEntryInput, presentation: J
   collect(sanitizeJournalValue(entry.newValue, entry.field || entry.entity));
   const createdAt = entry.createdAt ? new Date(entry.createdAt) : null;
   if (createdAt && !Number.isNaN(createdAt.getTime())) { values.add(createdAt.toISOString()); values.add(createdAt.toLocaleString("ru-RU", { timeZone: "Europe/Moscow" })); }
-  return [...values].join("\n");
+  // JSONB меняет порядок ключей, но не набор значений: индекс должен быть стабильным после сохранения.
+  return [...values].sort().join("\n");
 }
