@@ -2,14 +2,14 @@
 
 import { revalidatePath } from "next/cache";
 
-import { Prisma } from "@prisma/client";
-
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/server/require-role";
 
-import { writeChangeLog } from "./changelog";
+import { togglePluginInTransaction, savePluginSettingsInTransaction, revokeApiTokenInTransaction } from "./mutation-core";
+import { runPluginCommandInTransaction } from "./command-core";
+import { deliverPostCommit } from "@/server/operations/post-commit";
 import { buildPluginContext } from "./context";
-import { emitDomainEvent } from "./events";
+import { emitDomainEvent, dispatchEvent } from "./events";
 import { getManifest } from "./registry";
 import { logPluginRun } from "./run-log";
 import { createApiToken } from "./tokens";
@@ -23,28 +23,17 @@ export async function togglePlugin(
   const manifest = getManifest(pluginId);
   if (!manifest) return { ok: false, error: "Модуль не найден в реестре" };
 
-  await prisma.plugin.update({
-    where: { id: pluginId },
-    data: { enabled },
-  });
-  await writeChangeLog({
-    actorType: "user",
-    actorId: session.user.id,
-    actorName: session.user.name ?? session.user.email ?? undefined,
-    entity: "plugin",
-    entityId: pluginId,
-    action: "toggle",
-    field: "enabled",
-    oldValue: !enabled,
-    newValue: enabled,
-  });
+  const actor = { id: session.user.id, name: session.user.name ?? "", roles: session.user.roles, source: "web" as const };
+  const saved = await prisma.$transaction(tx => togglePluginInTransaction(tx, actor, manifest, enabled));
+  if (!saved.ok) return saved;
+  if (saved.noOp) return { ok: true };
 
   // Хук жизненного цикла — best effort
   const hook = enabled ? manifest.hooks?.onEnable : manifest.hooks?.onDisable;
   if (hook) {
     const started = Date.now();
     try {
-      const ctx = await buildPluginContext(pluginId, emitDomainEvent);
+      const ctx = await buildPluginContext(pluginId, emitDomainEvent, { id: actor.id, name: actor.name });
       await hook(ctx);
       await logPluginRun({
         pluginId,
@@ -65,13 +54,10 @@ export async function togglePlugin(
     }
   }
 
-  await emitDomainEvent(
-    "plugin.toggled",
-    { pluginId, enabled },
-    session.user.id,
-  );
-  revalidatePath("/settings/modules");
-  revalidatePath("/");
+  await deliverPostCommit("plugin-toggle", pluginId, [
+    ...(saved.eventId ? [{ kind: "dispatch" as const, run: () => dispatchEvent(saved.eventId!) }] : []),
+    { kind: "cache", run: () => { revalidatePath("/settings/modules"); revalidatePath("/"); } },
+  ]);
   return { ok: true };
 }
 
@@ -84,37 +70,10 @@ export async function savePluginSettings(
   const manifest = getManifest(pluginId);
   if (!manifest) return { ok: false, error: "Модуль не найден в реестре" };
 
-  const allowed = new Set((manifest.settingsSchema ?? []).map((f) => f.key));
-  const oldRows = await prisma.pluginSetting.findMany({
-    where: { pluginId },
-  });
-  const oldValues = Object.fromEntries(oldRows.map((r) => [r.key, r.value]));
-
-  for (const [key, value] of Object.entries(values)) {
-    if (!allowed.has(key)) continue;
-    const json = value === null || value === undefined
-      ? Prisma.JsonNull
-      : JSON.parse(JSON.stringify(value));
-    await prisma.pluginSetting.upsert({
-      where: { pluginId_key: { pluginId, key } },
-      create: { pluginId, key, value: json },
-      update: { value: json },
-    });
-  }
-
-  await writeChangeLog({
-    actorType: "user",
-    actorId: session.user.id,
-    actorName: session.user.name ?? session.user.email ?? undefined,
-    entity: "plugin",
-    entityId: pluginId,
-    action: "update",
-    field: "settings",
-    oldValue: oldValues,
-    newValue: values,
-  });
-  revalidatePath(`/settings/modules/${pluginId}`);
-  revalidatePath("/");
+  await prisma.$transaction(tx => savePluginSettingsInTransaction(tx, {
+    id: session.user.id, name: session.user.name ?? "", roles: session.user.roles, source: "web",
+  }, manifest, values));
+  await deliverPostCommit("plugin-settings", pluginId, [{ kind: "cache", run: () => { revalidatePath(`/settings/modules/${pluginId}`); revalidatePath("/"); } }]);
   return { ok: true };
 }
 
@@ -123,7 +82,7 @@ export async function runPluginCommand(
   pluginId: string,
   commandId: string,
 ): Promise<{ ok: boolean; result?: string; error?: string }> {
-  await requireAdmin();
+  const session = await requireAdmin();
   const manifest = getManifest(pluginId);
   const command = manifest?.commands?.find((c) => c.id === commandId);
   if (!manifest || !command) return { ok: false, error: "Команда не найдена" };
@@ -133,21 +92,21 @@ export async function runPluginCommand(
 
   const started = Date.now();
   try {
-    const ctx = await buildPluginContext(pluginId, emitDomainEvent);
-    const result = await command.run(ctx);
-    await logPluginRun({
-      pluginId,
-      kind: "command",
-      ref: commandId,
-      status: "ok",
-      message: result ?? undefined,
-      durationMs: Date.now() - started,
-    });
-    revalidatePath(`/settings/modules/${pluginId}`);
-    revalidatePath("/changelog");
-    return { ok: true, result: result ?? "Выполнено" };
+    const committed = await prisma.$transaction(tx => runPluginCommandInTransaction(tx, {
+      id: session.user.id, name: session.user.name ?? "", roles: session.user.roles, source: "web",
+    }, manifest, commandId));
+    await deliverPostCommit("plugin-command", pluginId, [
+      ...committed.eventIds.map(eventId => ({ kind: "dispatch" as const, run: () => dispatchEvent(eventId) })),
+      { kind: "dispatch", run: async () => {
+        for (const log of committed.logs) await logPluginRun({ pluginId, kind: "command", ref: commandId, ...log });
+        await logPluginRun({ pluginId, kind: "command", ref: commandId, status: "ok", message: committed.result ?? undefined, durationMs: Date.now() - started });
+      } },
+      { kind: "cache", run: () => { revalidatePath(`/settings/modules/${pluginId}`); revalidatePath("/changelog"); } },
+    ]);
+    return { ok: true, result: committed.result ?? "Выполнено" };
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = error instanceof Error && error.message === "PLUGIN_COMMAND_TRANSACTION_UNSUPPORTED"
+      ? "Для команды не настроено безопасное выполнение" : "Не удалось выполнить команду";
     await logPluginRun({
       pluginId,
       kind: "command",
@@ -168,21 +127,12 @@ export async function createToken(
 ): Promise<{ ok: boolean; token?: string; error?: string }> {
   const session = await requireAdmin();
   if (!name.trim()) return { ok: false, error: "Укажите название токена" };
-  const { token } = await createApiToken({
+  const { token, id } = await createApiToken({
     name: name.trim(),
     scopes,
     createdById: session.user.id,
-  });
-  await writeChangeLog({
-    actorType: "user",
-    actorId: session.user.id,
-    actorName: session.user.name ?? session.user.email ?? undefined,
-    entity: "apiToken",
-    entityId: name.trim(),
-    action: "create",
-    newValue: { scopes },
-  });
-  revalidatePath("/settings/api");
+  }, { id: session.user.id, name: session.user.name ?? "", roles: session.user.roles, source: "web" });
+  await deliverPostCommit("api-token-create", id, [{ kind: "cache", run: () => revalidatePath("/settings/api") }]);
   return { ok: true, token };
 }
 
@@ -190,18 +140,10 @@ export async function revokeToken(
   tokenId: string,
 ): Promise<{ ok: boolean; error?: string }> {
   const session = await requireAdmin();
-  const row = await prisma.apiToken.update({
-    where: { id: tokenId },
-    data: { revokedAt: new Date() },
-  });
-  await writeChangeLog({
-    actorType: "user",
-    actorId: session.user.id,
-    actorName: session.user.name ?? session.user.email ?? undefined,
-    entity: "apiToken",
-    entityId: row.name,
-    action: "revoke",
-  });
-  revalidatePath("/settings/api");
+  const result = await prisma.$transaction(tx => revokeApiTokenInTransaction(tx, {
+    id: session.user.id, name: session.user.name ?? "", roles: session.user.roles, source: "web",
+  }, tokenId));
+  if (!result.ok) return result;
+  await deliverPostCommit("api-token-revoke", tokenId, [{ kind: "cache", run: () => revalidatePath("/settings/api") }]);
   return { ok: true };
 }

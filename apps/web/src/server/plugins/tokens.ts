@@ -1,10 +1,11 @@
 import { randomBytes } from "node:crypto";
 
 import { prisma } from "@/lib/prisma";
+import type { DomainActor } from "@/server/actor";
+import { createApiTokenInTransaction, type ApiTokenCreationInput } from "./mutation-core";
 
 import {
   createTokenVerifier,
-  hashToken,
   TOKEN_PREFIX,
   type VerifiedToken,
 } from "./token-verification";
@@ -13,24 +14,9 @@ export type { VerifiedToken } from "./token-verification";
 
 // Токены публичного REST API (/api/v1). Храним только sha256-хэш;
 // сам токен показывается один раз при создании.
-export async function createApiToken(input: {
-  name: string;
-  scopes: string[];
-  pluginId?: string;
-  createdById?: string;
-}): Promise<{ token: string; id: string }> {
+export async function createApiToken(input: ApiTokenCreationInput, actor: DomainActor): Promise<{ token: string; id: string }> {
   const token = `${TOKEN_PREFIX}${randomBytes(24).toString("base64url")}`;
-  const row = await prisma.apiToken.create({
-    data: {
-      name: input.name,
-      prefix: token.slice(0, TOKEN_PREFIX.length + 6),
-      tokenHash: hashToken(token),
-      scopes: input.scopes,
-      pluginId: input.pluginId,
-      createdById: input.createdById,
-    },
-  });
-  return { token, id: row.id };
+  return prisma.$transaction(tx => createApiTokenInTransaction(tx, actor, input, token));
 }
 
 export const verifyApiToken = createTokenVerifier({

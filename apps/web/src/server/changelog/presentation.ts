@@ -42,6 +42,8 @@ function safeText(text: string): string {
     catch { /* Обычный текст не обязан быть JSON. */ }
   }
   return text
+    // Формат выданного CRM API-токена: pero_ и 24 случайных байта в base64url.
+    .replace(/\bpero_[A-Za-z0-9_-]{32}(?![A-Za-z0-9_-])/g, HIDDEN)
     .replace(/-----BEGIN (?:[A-Z]+ )*PRIVATE KEY-----[\s\S]*?-----END (?:[A-Z]+ )*PRIVATE KEY-----/g, HIDDEN)
     .replace(/\b(Bearer|Basic)(\s+)[^\s"'<>]+/gi, `$1$2${HIDDEN}`)
     .replace(/(https?:\/\/)[^\s/@]+:[^\s/@]+@/gi, `$1${HIDDEN}@`)
@@ -102,6 +104,12 @@ function safeContexts(contexts: JournalContext[]): JournalContext[] {
 
 function recordValue(value: unknown, key: string): unknown { return object(value) && own(value, key) ? value[key] : undefined; }
 
+/** Имя сущности задаёт контекст вложенных полей, но само по себе не является секретным полем снимка. */
+function safeEntryValue(entry: JournalEntryInput, value: unknown, field = entry.field ?? ""): JournalValue {
+  if (!field && value == null) return null;
+  return sanitizeJournalValue(value, field || (object(value) ? `${entry.entity}.$value` : entry.entity));
+}
+
 function defaultEntity(entry: JournalEntryInput, hints: JournalPresentationHints): JournalEntityReference {
   const label = journalEntityLabel(entry.entity);
   const savedNumber = recordValue(entry.newValue, "number") ?? recordValue(entry.oldValue, "number");
@@ -131,7 +139,7 @@ function snapshots(entry: JournalEntryInput, hints: JournalPresentationHints) {
   }
   const creating = entry.action === "create";
   const deleting = ["delete", "soft-delete"].includes(entry.action);
-  return { before: sanitizeJournalValue(before, field || entry.entity), after: sanitizeJournalValue(after, field || entry.entity), rawBefore: before, rawAfter: after, field,
+  return { before: safeEntryValue(entry, before, field), after: safeEntryValue(entry, after, field), rawBefore: before, rawAfter: after, field,
     beforeKnown: hints.beforeKnown ?? (own(hints, "before") || (before !== undefined && before !== null) || creating),
     afterKnown: hints.afterKnown ?? (own(hints, "after") || (after !== undefined && after !== null) || deleting),
     completeBefore: own(hints, "before") || creating, completeAfter: own(hints, "after") || deleting,
@@ -229,9 +237,10 @@ export function buildJournalPresentation(entry: JournalEntryInput, hints: Journa
   const technical: Record<string, JournalValue> = { id: entry.id ?? null, actorType: entry.actorType, actorId: entry.actorId,
     entity: entry.entity, entityId: entry.entityId, action: entry.action, field: entry.field ?? null, source: entry.source ?? "web",
     createdAt: sanitizeJournalValue(entry.createdAt) };
-  technicalMetadata(sanitizeJournalValue(entry.oldValue, entry.field || entry.entity), "oldValue", technical);
-  technicalMetadata(sanitizeJournalValue(entry.newValue, entry.field || entry.entity), "newValue", technical);
+  technicalMetadata(safeEntryValue(entry, entry.oldValue), "oldValue", technical);
+  technicalMetadata(safeEntryValue(entry, entry.newValue), "newValue", technical);
   const changes = hints.changes?.map(change => ({ ...change, label: safeText(change.label), before: sanitizeJournalValue(change.before, change.path), after: sanitizeJournalValue(change.after, change.path) })) ?? diff(entry, hints, links);
+  if (hints.changes) technical.explicitFieldLabels = [...new Set(changes.map(change => change.path))];
   return { version: 1, kind, actor: { type: actor.type, id: safeText(actor.id), name: safeText(actor.name) },
     ...(hints.initiator ? { initiator: { id: safeText(hints.initiator.id), name: safeText(hints.initiator.name) } } : {}),
     ...(hints.reason ? { reason: safeText(hints.reason) } : {}), entity, contexts: safeContexts(contexts),
@@ -277,8 +286,8 @@ export function buildJournalSearchText(entry: JournalEntryInput, presentation: J
     }
   }
   collect(sanitizeJournalValue(safe));
-  collect(sanitizeJournalValue(entry.oldValue, entry.field || entry.entity));
-  collect(sanitizeJournalValue(entry.newValue, entry.field || entry.entity));
+  collect(safeEntryValue(entry, entry.oldValue));
+  collect(safeEntryValue(entry, entry.newValue));
   const createdAt = entry.createdAt ? new Date(entry.createdAt) : null;
   if (createdAt && !Number.isNaN(createdAt.getTime())) { values.add(createdAt.toISOString()); values.add(createdAt.toLocaleString("ru-RU", { timeZone: "Europe/Moscow" })); }
   return [...values].join("\n");

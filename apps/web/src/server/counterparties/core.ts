@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { COUNTERPARTY_ROLES, hasAnyRole } from "@/lib/roles";
 import type { DomainActor } from "@/server/actor";
+import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 import { counterpartySchema, counterpartyUpdateSchema, counterpartySelect, type CounterpartyInput, type CounterpartyResult, type CounterpartyView } from "./contracts";
 
 const fields = ["type", "company", "phone", "comment"] as const;
@@ -13,9 +14,11 @@ function snapshot(item: CounterpartyView) {
   return { type: item.type, company: item.company, phone: item.phone, comment: item.comment };
 }
 async function audit(tx: Prisma.TransactionClient, actor: DomainActor, item: CounterpartyView, previous?: CounterpartyView) {
-  await tx.changeLog.create({ data: { actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
+  await writeChangeLogInTransaction(tx, { actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
     entity: "counterparty", entityId: item.id, action: previous ? "update" : "create",
-    oldValue: previous ? snapshot(previous) : {}, newValue: snapshot(item) } });
+    oldValue: previous ? snapshot(previous) : {}, newValue: snapshot(item) }, {
+    before: previous ? snapshot(previous) : null, after: snapshot(item), entity: { label: `Контрагент ${item.company}`, href: "/counterparties" },
+  });
 }
 
 export async function createCounterpartyInTransaction(tx: Prisma.TransactionClient, actor: DomainActor, input: unknown): Promise<CounterpartyResult> {

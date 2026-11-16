@@ -2,7 +2,8 @@ import type { PluginContext } from "@pero/plugin-sdk";
 
 import { prisma } from "@/lib/prisma";
 
-import { writeChangeLog } from "./changelog";
+import { writeChangeLogInTransaction } from "@/server/changelog/writer";
+import type { JournalPerson } from "@/server/changelog/contract";
 import { getManifest } from "./registry";
 import { getPluginSettings, logPluginRun } from "./run-log";
 
@@ -14,6 +15,7 @@ type DomainEventEmitter = (type: string, payload: unknown, actor: string) => Pro
 export async function buildPluginContext(
   pluginId: string,
   emitter: DomainEventEmitter,
+  initiator?: JournalPerson,
 ): Promise<PluginContext> {
   const manifest = getManifest(pluginId);
   if (!manifest) {
@@ -34,7 +36,7 @@ export async function buildPluginContext(
         logPluginRun({ pluginId, kind: "hook", status: "error", message }),
     },
     audit: async (entry) => {
-      await writeChangeLog({
+      await writeChangeLogInTransaction(prisma, {
         actorType: "plugin",
         actorId: actor,
         actorName: manifest.name,
@@ -45,6 +47,9 @@ export async function buildPluginContext(
         oldValue: entry.oldValue,
         newValue: entry.newValue,
         source: "plugin",
+      }, { actor: { type: "system", id: "system", name: "Система" }, ...(initiator ? { initiator } : {}),
+        reason: `Действие модуля «${manifest.name}»`,
+        ...(entry.entity === "plugin" && entry.entityId === pluginId ? { entity: { label: `Модуль ${manifest.name}`, href: `/settings/modules/${encodeURIComponent(pluginId)}` } } : {}),
       });
     },
     emit: (type, payload) => emitter(type, payload, actor),

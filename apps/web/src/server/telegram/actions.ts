@@ -4,8 +4,8 @@ import { randomBytes } from "crypto";
 
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { writeChangeLog } from "@/server/plugins/changelog";
 import { requireAdmin } from "@/server/require-role";
+import { requestTelegramLinkInTransaction, unlinkTelegramInTransaction } from "./mutation-core";
 
 // Привязка Telegram-аккаунта (сервис telegram-bot): одноразовый код из
 // профиля → пользователь открывает t.me/<bot>?start=<код> → бот подтверждает
@@ -61,40 +61,21 @@ export async function requestTelegramLink(): Promise<{
   error?: string;
 }> {
   const user = await getSessionUser();
-  const setting = await prisma.orgSetting.findUnique({
-    where: { key: "telegram.botUsername" },
-  });
-  if (!setting?.value) {
-    return {
-      ok: false,
-      error: "Бот не подключён — обратитесь к администратору",
-    };
-  }
-
   const code = generateCode();
-  await prisma.telegramLink.upsert({
-    where: { userId: user.id },
-    create: {
-      userId: user.id,
-      linkCode: code,
-      linkCodeExpiresAt: new Date(Date.now() + CODE_TTL_MS),
-    },
-    update: {
-      linkCode: code,
-      linkCodeExpiresAt: new Date(Date.now() + CODE_TTL_MS),
-    },
-  });
+  const result = await prisma.$transaction(tx => requestTelegramLinkInTransaction(tx,
+    { id: user.id, name: user.name ?? "", roles: user.roles, source: "web" }, code, new Date(Date.now() + CODE_TTL_MS)));
+  if (!result.ok) return { ok: false, error: result.error };
 
   return {
     ok: true,
-    url: `https://t.me/${setting.value}?start=${code}`,
+    url: `https://t.me/${result.botUsername}?start=${code}`,
     code,
   };
 }
 
 export async function unlinkTelegram(): Promise<{ ok: boolean }> {
   const user = await getSessionUser();
-  await prisma.telegramLink.deleteMany({ where: { userId: user.id } });
+  await prisma.$transaction(tx => unlinkTelegramInTransaction(tx, { id: user.id, name: user.name ?? "", roles: user.roles, source: "web" }, user.id));
   return { ok: true };
 }
 
@@ -109,14 +90,8 @@ export async function getTelegramLinkStatusFor(
 }
 
 export async function unlinkTelegramFor(userId: string): Promise<{ ok: boolean }> {
-  await requireAdmin();
-  await prisma.telegramLink.deleteMany({ where: { userId } });
-  await writeChangeLog({
-    actorType: "user",
-    actorId: (await getSessionUser()).id,
-    entity: "telegramLink",
-    entityId: userId,
-    action: "unlink",
-  });
+  const session = await requireAdmin();
+  await prisma.$transaction(tx => unlinkTelegramInTransaction(tx,
+    { id: session.user.id, name: session.user.name ?? "", roles: session.user.roles, source: "web" }, userId));
   return { ok: true };
 }

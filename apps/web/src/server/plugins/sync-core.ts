@@ -7,7 +7,7 @@ export type PluginSyncManifest = {
   permissions: string[];
 };
 
-type StoredPluginMetadata = Pick<PluginSyncManifest, "name" | "version" | "apiVersion" | "permissions"> & {
+export type StoredPluginMetadata = Pick<PluginSyncManifest, "name" | "version" | "apiVersion" | "permissions"> & {
   description: string | null;
 };
 
@@ -36,6 +36,7 @@ function matches(current: StoredPluginMetadata, manifest: PluginSyncManifest): b
 export async function syncPluginMetadata(
   store: PluginSyncStore,
   manifest: PluginSyncManifest,
+  onChange?: (before: StoredPluginMetadata | null, after: StoredPluginMetadata) => Promise<void>,
 ): Promise<"unchanged" | "created" | "updated"> {
   const where = { id: manifest.id };
   const current = await store.findUnique({ where, select: {
@@ -51,5 +52,6 @@ export async function syncPluginMetadata(
     permissions: manifest.permissions,
   };
   await store.upsert({ where, create: { id: manifest.id, ...metadata }, update: metadata });
+  await onChange?.(current, metadata);
   return current ? "updated" : "created";
 }

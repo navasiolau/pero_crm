@@ -3,8 +3,10 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
 import { authenticate, isErrorResponse } from "@/server/api/auth";
-import { buildPluginContext } from "@/server/plugins/context";
-import { emitDomainEvent } from "@/server/plugins/events";
+import { runApiPluginCommandInTransaction } from "@/server/plugins/command-core";
+import { dispatchEvent } from "@/server/plugins/events";
+import { deliverPostCommit } from "@/server/operations/post-commit";
+import { sanitizeJournalValue } from "@/server/changelog/presentation";
 import { getManifest } from "@/server/plugins/registry";
 import { logPluginRun } from "@/server/plugins/run-log";
 
@@ -29,19 +31,18 @@ export async function POST(
 
   const started = Date.now();
   try {
-    const ctx = await buildPluginContext(id, emitDomainEvent);
-    const result = await command.run(ctx);
-    await logPluginRun({
-      pluginId: id,
-      kind: "api",
-      ref: `command:${commandId}`,
-      status: "ok",
-      message: result ?? undefined,
-      durationMs: Date.now() - started,
-    });
-    return NextResponse.json({ ok: true, result: result ?? null });
+    const committed = await prisma.$transaction(tx => runApiPluginCommandInTransaction(tx, auth, manifest, commandId));
+    await deliverPostCommit("plugin-command", id, [
+      ...committed.eventIds.map(eventId => ({ kind: "dispatch" as const, run: () => dispatchEvent(eventId) })),
+      { kind: "dispatch", run: async () => {
+        for (const log of committed.logs) await logPluginRun({ pluginId: id, kind: "api", ref: `command:${commandId}`, ...log });
+        await logPluginRun({ pluginId: id, kind: "api", ref: `command:${commandId}`, status: "ok", message: committed.result ?? undefined, durationMs: Date.now() - started });
+      } },
+    ]);
+    return NextResponse.json({ ok: true, result: committed.result });
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const code = error instanceof Error ? error.message : "PLUGIN_COMMAND_FAILED";
+    const message = String(sanitizeJournalValue(error instanceof Error ? error.message : "Не удалось выполнить команду"));
     await logPluginRun({
       pluginId: id,
       kind: "api",
@@ -50,6 +51,6 @@ export async function POST(
       message,
       durationMs: Date.now() - started,
     });
-    return NextResponse.json({ ok: false, error: message }, { status: 500 });
+    return NextResponse.json({ ok: false, error: message }, { status: code === "PLUGIN_API_FORBIDDEN" ? 403 : code === "PLUGIN_API_UNAUTHORIZED" ? 401 : code === "PLUGIN_DISABLED" ? 409 : 500 });
   }
 }
