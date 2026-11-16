@@ -24,4 +24,14 @@ Production diff — только композиция списка в стран
 
 ## Staging
 
-PENDING: root выполняет normal merge, штатный CI и проверяет фактические SHA/image/health и интерфейс. Локальные результаты не являются приёмкой deployment. Коммиты и push worker пока не выполнял; БД, infra и restic не затронуты.
+На первоначальном local этапе staging оставался PENDING. Код и CI follow-up были зафиксированы в ветке задачи по поручению root; merge/push/deploy выполняет оркестратор. Исторические результаты выше не подменяют фактическую приёмку ниже.
+
+### Фактическая приёмка — ACCEPTED
+
+Root принял развёрнутый staging `ad2cd677d94bf866159d5081a44840be5a661dc3` после [штатного CI43934361664](https://github.com/navasiolau/pero_crm/actions/runs/43934361664): **7/7 SUCCESS**. Web image `sha256:bbae648a85d256a152998920002c6f8bf7e1100e7df53464a31ec47537ec1c69`, renderer image `sha256:fc32f41cbd7d34599a37625661574b0605b6931780d16bd18787a92befead352`; оба healthy, HTTP health200. Существующие DB identity и W07 сохранены. Ранние ограничения CI по квоте остаются историческим контекстом; они не являются текущим блокером и не заменяют результат этого run.
+
+На реальной странице проекта обычные восемь вкладок доступны; «Журнал» последний. Панель имеет clientWidth=1128 и scrollWidth=1128, overflowX=`visible`: горизонтальной прокрутки и её стрелок нет. Root лично просмотрел актуальный screenshot проекта. На390 px панель имеет width=358 и contentWidth=358; на360 px также подтверждены перенос без overflow и отсутствие горизонтальной прокрутки документа. Проверка длинной вкладки модуля остаётся локальной browser-проверкой, реальный модуль с таким синтетическим названием на staging не создавался.
+
+Receipts в `D:/Projects/pero_crm_v2/.playwright-mcp/ui-229-232/`: `functional-desktop-retry/receipt.json` — PASS, errors=[] (SHA-256 `63aaf65c9b8d28d316980a0afe4640929c1c38485d5d8e0ad581bf508e9c2329`); `functional-mobile390/receipt.json` — PASS (SHA-256 `dd45969897d9f5bedea4c533c943984d2265934bb93827f6a5c288045afc8e04`); `functional-mobile360-body/receipt.json` — PASS. Первый desktop-прогон сохранил React418 на странице изделия; повтор с новой сессией на неизменённом приложении прошёл без page errors. Причина первого сбоя этой записью не объявляется доказанной или исправленной.
+
+`functional-preservation.json` подтверждает сравнение76 таблиц: изменялся только штатный polling `ApiToken.lastUsedAt`, фиксированные поля токенов неизменны. Сохранены5529 исходных ChangeLog с raw hash `64bcf0448dabe8e594a5ffa37da4aa1a`. Приёмка относится к точному staging SHA; main/production, БД и инфраструктура worker не менялись. Последующая docs-only публикация требует финальной проверки root и не подменяет этот runtime receipt.
