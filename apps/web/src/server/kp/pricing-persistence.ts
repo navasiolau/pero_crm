@@ -1,10 +1,12 @@
+import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 import { Prisma } from "@prisma/client";
 import { hasAnyRole, MANAGER_ROLES } from "../../lib/roles";
 import type { DomainActor } from "../actor";
 import type { ProposalPricingProjection } from "./pricing-contract";
+import {automationJournalContext,businessSnapshot,productJournalContext,projectJournalContext} from '../projects/journal';
 
 type PricingTransaction = Pick<Prisma.TransactionClient, "$queryRaw" | "product" | "project" | "changeLog">;
-export type ProposalPricingContext = { proposalId: string; project: { id: string; stage: string; currency: string };
+export type ProposalPricingContext = { proposalId: string; project: { id: string; number?: string; stage: string; currency: string };
   items: readonly { id: string; productId: string }[]; actor: DomainActor };
 
 /** Вызывается pricing hook общего сохранения №181, в той же транзакции после синхронизации состава. */
@@ -23,7 +25,7 @@ export async function applyProjectionInTransaction(tx: PricingTransaction, conte
   if (rows.length !== 1 || !project || project.stage !== "LEAD" || context.project.stage !== "LEAD") throw Error("Цены КП можно сохранить только в связанном проекте «Лид»");
   if (project.currency !== "BYN" || projection.project.currency !== "BYN") throw Error("Коммерческие цены CRM должны быть в BYN");
   const products = await tx.product.findMany({ where: { projectId: project.id, deletedAt: null },
-    select: { id: true, quantity: true, initialPrice: true, expectedPrice: true, initialPriceCaptureEligible: true } });
+    select: { id: true, number: true, quantity: true, initialPrice: true, expectedPrice: true, initialPriceCaptureEligible: true } });
   const links = new Map(context.items.map(item => [item.id, item.productId]));
   if (links.size !== context.items.length || projection.items.length !== links.size || products.length !== links.size ||
     new Set(context.items.map(item => item.productId)).size !== links.size || new Set(projection.items.map(item => item.id)).size !== links.size) throw Error("Состав КП изменился — повторите сохранение");
@@ -37,12 +39,22 @@ export async function applyProjectionInTransaction(tx: PricingTransaction, conte
     const updated = await tx.product.updateMany({ where: { id: productId, projectId: project.id, deletedAt: null, quantity: item.quantity },
       data: { initialPrice: item.initialPrice, expectedPrice: item.expectedPrice, initialPriceCaptureEligible: false } });
     if (updated.count !== 1) throw Error("Изделие изменилось во время сохранения КП");
+    const product=byId.get(productId)!;
+    const before=businessSnapshot(product,['initialPrice','expectedPrice','initialPriceCaptureEligible']);
+    const after={initialPrice:item.initialPrice.toString(),expectedPrice:item.expectedPrice.toString(),initialPriceCaptureEligible:false};
+    if(JSON.stringify(before)!==JSON.stringify(after))await writeChangeLogInTransaction(tx,
+      {actorType:'user',actorId:context.actor.id,actorName:context.actor.name,source:context.actor.source,entity:'product',entityId:productId,action:'proposal.pricing.sync',
+        oldValue:before,newValue:{...after,proposalId:context.proposalId}},
+      {...productJournalContext(product),...automationJournalContext(context.actor,'Обновление цены изделия из КП'),before,after});
   }
   const updated = await tx.project.updateMany({ where: { id: project.id, stage: "LEAD", deletedAt: null }, data: projection.project });
   if (updated.count !== 1) throw Error("Этап проекта изменился во время сохранения КП");
   const json = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringify(value));
-  await tx.changeLog.create({ data: { actorType: "user", actorId: context.actor.id, actorName: context.actor.name,
+  await writeChangeLogInTransaction(tx, { actorType: "user", actorId: context.actor.id, actorName: context.actor.name,
     source: context.actor.source, entity: "project", entityId: project.id, action: "proposal.pricing.sync",
-    oldValue: json({ project, products }), newValue: json({ proposalId: context.proposalId, project: projection.project, items: projection.items,
-      rate: { ...projection.rate, value: projection.rate.value.toString() } }) } });
+    oldValue: json({ project, products:products.map(product=>businessSnapshot(product,['id','quantity','initialPrice','expectedPrice','initialPriceCaptureEligible'])) }), newValue: json({ proposalId: context.proposalId, project: projection.project, items: projection.items,
+      rate: { ...projection.rate, value: projection.rate.value.toString() } }) },
+    {...projectJournalContext(context.project),...automationJournalContext(context.actor,'Обновление стоимости проекта из КП'),
+      before:businessSnapshot(project,Object.keys(projection.project)),after:json(projection.project),
+      kind:JSON.stringify(businessSnapshot(project,Object.keys(projection.project)))===JSON.stringify(json(projection.project))?'receipt':'event'});
 }

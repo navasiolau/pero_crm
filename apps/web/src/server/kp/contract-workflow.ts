@@ -5,11 +5,24 @@ import { applyContractDefaults, captureContractSettings, contractClientBaseline,
 import { contractDraftRequestSchema, contractExportRequestSchema, contractSourceRefSchema } from "./contract-request";
 import { contractClone, contractFailure, type ContractActor, type ContractObject, type ContractSettings, type ContractSource, type ContractSourceRef } from "./contract-types";
 import type { ContractArtifact, ContractClaim, ContractFrozenSource, ContractHistoryEntry, ContractPayload, ContractReceipt, ContractTransaction, ContractVerifiedArtifact, ContractWorkflowPorts } from "./contract-ports";
+import type {JournalPresentationHints} from '@/server/changelog/contract';
+import {automationJournalContext} from '@/server/projects/journal';
 
 const json = (value: unknown): ContractObject => JSON.parse(JSON.stringify(value)) as ContractObject;
 const idList = (refs: readonly ContractSourceRef[]) => refs.map(ref => ref.proposalId);
 const sameIds = (first: readonly string[], second: readonly string[]) => first.length === second.length && first.every((value, index) => value === second[index]);
 const record = z.record(z.string(), z.json());
+function contractJournalHints(contractId:string,number:unknown,sources:readonly {state:ContractObject;projectId?:string;project?:{id:string}|null}[]):JournalPresentationHints {
+  const contexts=new Map<string,{kind:'project';id:string;label:string;href:string}>();
+  for(const source of sources){
+    const id=source.projectId??source.project?.id;if(!id)continue;
+    const order=source.state.order;
+    const projectNumber=order&&typeof order==='object'&&!Array.isArray(order)&&typeof order.number==='string'?order.number:null;
+    contexts.set(id,{kind:'project',id,label:projectNumber?`Проект ${projectNumber}`:'Проект',href:`/projects/${encodeURIComponent(id)}`});
+  }
+  return {entity:{type:'proposalContract',id:contractId,label:typeof number==='string'&&number?`Договор ${number}`:'Договор'},
+    contexts:[...contexts.values()],links:[...contexts.values()].map(({kind,...value})=>({type:kind,...value}))};
+}
 const extraSchema = z.object({ contractId: z.string().min(1), primaryId: z.string().min(1), contractRevision: z.number().int().positive(),
   settingsSnapshot: record, clientSnapshot: record, sourceRefs: z.array(contractSourceRefSchema).min(1), sourceBindings: z.array(record).min(1),
   clientBaseline: z.string().regex(/^[a-f0-9]{64}$/), summary: record, profile: record, templateVersion: z.string().min(1), templateSnapshot: record }).strict();
@@ -102,7 +115,7 @@ export function createContractWorkflow(ports: ContractWorkflowPorts) {
     if (!parsed.success) contractFailure("CONTRACT_REQUEST_INVALID", "Некорректный запрос сохранения договора", 400);
     const request = parsed.data, fingerprint = contractFingerprint({ kind: "draft", request });
     return ports.store.transaction(async tx => {
-      await tx.globalLock(); await tx.authorize(actor, "kp:contracts:write");
+      await tx.globalLock(); const principal=await tx.authorize(actor, "kp:contracts:write");
       const repeated = replay(await tx.receipt(request.operationId), actor, fingerprint); if (repeated) return repeated;
       const loaded = await context(tx, request.documentId, idList(request.sourceRefs));
       active(loaded.primary); validateRefs(request.documentId, request.sourceRefs, loaded.sources);
@@ -114,7 +127,9 @@ export function createContractWorkflow(ports: ContractWorkflowPorts) {
       const saved = await tx.saveDraft({ id: loaded.contract?.id ?? randomUUID(), primaryId: request.documentId, expectedRevision: request.expectedRevision,
         create: !loaded.contract, settings: json(stored), sourceIds: settings.proposalIds, actorId: actor.id });
       const result = json({ contractId: saved.id, revision: saved.revision, sourceRefs: request.sourceRefs, clientBaseline: contractClientBaseline(loaded.sources, loaded.clients) });
-      await tx.writeReceipt(request.operationId, request.documentId, "contract.draft.save", actor, { actorId: actor.id, tokenId: actor.tokenId ?? null, fingerprint, result });
+      await tx.writeReceipt(request.operationId, request.documentId, "contract.draft.save", actor, { actorId: actor.id, tokenId: actor.tokenId ?? null, fingerprint, result },
+        {...contractJournalHints(saved.id,settings.number,[...loaded.oldSources,...loaded.sources]),actor:{type:'user',id:principal.id,name:principal.name},
+          before:loaded.contract?applyContractDefaults(loaded.previousSettings,loaded.defaults,loaded.primary.clientId,loaded.stored,true):null,after:settings});
       return result;
     });
   }
@@ -124,7 +139,7 @@ export function createContractWorkflow(ports: ContractWorkflowPorts) {
     if (!parsed.success) contractFailure("CONTRACT_REQUEST_INVALID", "Генерация принимает только сохранённый договор и ревизии КП", 400);
     const request = parsed.data, fingerprint = contractFingerprint({ kind: "export", request });
     return ports.store.transaction(async tx => {
-      await tx.globalLock(); await tx.authorize(actor, "kp:contracts:generate");
+      await tx.globalLock(); const principal=await tx.authorize(actor, "kp:contracts:generate");
       const repeated = replay(await tx.receipt(request.operationId), actor, fingerprint); if (repeated) return repeated;
       const loaded = await context(tx, request.documentId, idList(request.sourceRefs));
       active(loaded.primary); validateRefs(request.documentId, request.sourceRefs, loaded.sources);
@@ -150,7 +165,9 @@ export function createContractWorkflow(ports: ContractWorkflowPorts) {
       const jobId = randomUUID();
       await tx.createJob({ id: jobId, contractId: loaded.contract.id, dedupeKey: "kp-contract:" + request.operationId, payload, actorId: actor.id });
       const result = json({ id: jobId, state: "PENDING" });
-      await tx.writeReceipt(request.operationId, request.documentId, "contract.export.request", actor, { actorId: actor.id, tokenId: actor.tokenId ?? null, fingerprint, result });
+      await tx.writeReceipt(request.operationId, request.documentId, "contract.export.request", actor, { actorId: actor.id, tokenId: actor.tokenId ?? null, fingerprint, result },
+        {...contractJournalHints(loaded.contract.id,settings.number,loaded.sources),actor:{type:'user',id:principal.id,name:principal.name},
+          before:null,after:{state:'PENDING',settings,sourceRefs:request.sourceRefs}});
       return result;
     });
   }
@@ -212,6 +229,9 @@ export function createContractWorkflow(ports: ContractWorkflowPorts) {
       const eventIds: string[] = [];
       for (const source of payload.frozenSources) if (source.projectStage === "LEAD" || source.projectStage === "ESTIMATE") eventIds.push(...await ports.lifecycle.advanceToContract(tx, actor, source, randomUUID()));
       const result = json({ artifactId: docx.id, versionId, contractId: extra.contractId, fileName: docx.fileName, mimeType: docx.mimeType, releases, pageCounts: output.pageCounts });
+      await tx.writeEvent(actor,extra.contractId,'contract.generated',result,
+        {...contractJournalHints(extra.contractId,extra.settingsSnapshot.number,payload.frozenSources),...automationJournalContext(actor,'Фоновый выпуск договора'),
+          before:null,after:{...result,settings:extra.settingsSnapshot,sourceRefs:extra.sourceRefs}});
       eventIds.push(await tx.event(actor.id, "contract.generated", json({ contractId: extra.contractId, versionId, jobId: claim.id, artifactId: docx.id, tokenId: payload.actor.tokenId ?? null })));
       await tx.completeJob(claim, result);
       return { result, eventIds };

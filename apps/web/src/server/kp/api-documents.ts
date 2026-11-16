@@ -1,3 +1,4 @@
+import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { createHash } from "node:crypto";
 import { z } from "zod";
@@ -85,10 +86,10 @@ export function mediaDependencies(context: KpApiContext, scope: KpApiScope, comm
         if (candidate && typeof candidate === "object" && "jobId" in candidate && typeof candidate.jobId === "string") {
           if (command.upload && "kind" in candidate && candidate.kind === "UPLOAD_MEDIA") uploadJobId = candidate.jobId;
           const auditId = `kp.api.media:${apiDigest({ principal: apiReceiptId(context, command.operationId), jobId: candidate.jobId })}`;
-          if (!await tx.changeLog.findUnique({ where: { id: auditId } })) await tx.changeLog.create({ data: {
+          if (!await tx.changeLog.findUnique({ where: { id: auditId } })) await writeChangeLogInTransaction(tx, {
             id: auditId, actorType: "user", actorId: context.actor.id, actorName: context.actor.name, source: context.binding.source,
             entity: "commercialProposal", entityId: command.proposalId, action: "kp.api.media",
-            newValue: kpJson({ operationId: command.operationId, tokenId: context.binding.tokenId ?? null, jobId: candidate.jobId }) } });
+            newValue: kpJson({ operationId: command.operationId, tokenId: context.binding.tokenId ?? null, jobId: candidate.jobId }) },{kind:'receipt'});
         }
         if (command.upload && command.fingerprint && uploadJobId) {
           const uploaded = await tx.proposalJob.findFirst({ where: { id: uploadJobId, proposalId: command.proposalId, createdById: context.actor.id, kind: "UPLOAD_MEDIA", state: "SUCCEEDED" },

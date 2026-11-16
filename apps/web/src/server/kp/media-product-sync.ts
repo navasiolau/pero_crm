@@ -1,3 +1,4 @@
+import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 import { randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { assertWritableFileStorageKey } from "@/server/files/storage-binding-fence";
@@ -5,6 +6,8 @@ import { ProposalMediaError, itemMediaReferences, sameMediaBinding, validateMedi
   type MediaPlan, type PreparedProductMedia } from "./media-contract";
 import { lockProposalMediaOwner, ownedProposalMedia, readableMedia, type OwnedMediaRow } from "./media-repository";
 import { assertMediaStorageBinding, type ProposalMediaStorage } from "./media-storage";
+import type {JournalPresentationHints} from '@/server/changelog/contract';
+import {automationJournalContext,productJournalContext,projectJournalContext} from '../projects/journal';
 
 type Tx = Prisma.TransactionClient;
 export type ProposalMediaSaveContext = {
@@ -21,9 +24,10 @@ type ManagedFile = { id: string; projectId: string; productId: string | null; st
 type PreparedJob = { id: string; kind: string; state: string; proposalId: string | null;
   createdById: string | null; payload: unknown; result: unknown };
 
-async function audit(tx: Tx, context: ProposalMediaSaveContext, entity: string, entityId: string, action: string, newValue: Prisma.InputJsonObject) {
-  await tx.changeLog.create({ data: { actorType: "user", actorId: context.actor.id, actorName: context.actor.name,
-    source: context.actor.source, entity, entityId, action, newValue } });
+async function audit(tx: Tx, context: ProposalMediaSaveContext, entity: string, entityId: string, action: string, newValue: Prisma.InputJsonObject,hints:JournalPresentationHints) {
+  await writeChangeLogInTransaction(tx, { actorType: "user", actorId: context.actor.id, actorName: context.actor.name,
+    source: context.actor.source, entity, entityId, action, newValue },
+    {...hints,...automationJournalContext(context.actor,'Синхронизация изображений из КП')});
 }
 async function cancelUnattachedCleanup(tx: Tx, plan: MediaPlan, now: Date) {
   const [cleanup] = await tx.$queryRaw<{ state: string }[]>`SELECT state FROM "ProposalJob" WHERE id = ${plan.cleanupJobId} FOR UPDATE`;
@@ -68,11 +72,12 @@ export async function linkProposalProductMediaInTransaction(tx: Tx, context: Pro
     WHERE f."projectId" = ${context.project.id} AND j."proposalId" = ${context.proposalId} FOR UPDATE OF f`;
   const previous = await tx.$queryRaw<{ mediaId: string }[]>`SELECT "mediaId" FROM "ProposalCurrentMedia" WHERE "proposalId" = ${context.proposalId}`;
   const previousMediaIds = new Set(previous.map(row => row.mediaId));
+  const fileNames=new Map(managed.map(file=>[file.id,file.fileName]));
   const retained = new Set<string>(), mediaIds = new Set<string>(); let changed = false;
   for (const item of references) {
     const productId = products.get(item.itemId)!;
-    const [product] = await tx.$queryRaw<{ id: string; sketchFileId: string | null }[]>`
-      SELECT id, "sketchFileId" FROM "Product" WHERE id = ${productId} AND "projectId" = ${context.project.id} AND "deletedAt" IS NULL FOR UPDATE`;
+    const [product] = await tx.$queryRaw<{ id: string; number:string; sketchFileId: string | null }[]>`
+      SELECT id, number, "sketchFileId" FROM "Product" WHERE id = ${productId} AND "projectId" = ${context.project.id} AND "deletedAt" IS NULL FOR UPDATE`;
     if (!product) throw new ProposalMediaError("KP_MEDIA_REFERENCE_INVALID");
     let cover: string | null = null;
     for (const mediaId of item.mediaIds) {
@@ -112,9 +117,12 @@ export async function linkProposalProductMediaInTransaction(tx: Tx, context: Pro
           proposalSourceItemId: item.itemId, proposalSourceMediaId: mediaId, proposalMediaCopyJobId: plan.jobId,
           proposalMediaRetiredAt: null, payload: plan };
         await audit(tx, context, "file", file.id, "create", { proposalId: context.proposalId, sourceMediaId: mediaId,
-          sourceItemId: item.itemId, fileName, section: "PRODUCTION", contentHash: plan.optimized.sha256 });
+          sourceItemId: item.itemId, fileName, section: "PRODUCTION", contentHash: plan.optimized.sha256 },
+          {...productJournalContext(product),entity:{type:'file',id:file.id,label:fileName},before:null,
+            after:{fileName,section:'PRODUCTION',mimeType:plan.optimized.mimeType,size:plan.optimized.size}});
         changed = true;
       }
+      fileNames.set(file.id,file.fileName);
       retained.add(file.id); cover ??= file.id;
       if (!previousMediaIds.has(mediaId) && media.uploadJobId) {
         const [upload] = await tx.$queryRaw<{ payload: unknown }[]>`SELECT payload FROM "ProposalJob" WHERE id = ${media.uploadJobId} FOR UPDATE`;
@@ -126,7 +134,9 @@ export async function linkProposalProductMediaInTransaction(tx: Tx, context: Pro
     if ((product.sketchFileId === null || managedCover) && product.sketchFileId !== cover) {
       await tx.product.update({ where: { id: product.id }, data: { sketchFileId: cover } });
       await audit(tx, context, "product", product.id, "kp.cover", { proposalId: context.proposalId,
-        previousFileId: product.sketchFileId, sketchFileId: cover }); changed = true;
+        previousFileId: product.sketchFileId, sketchFileId: cover },
+        {...productJournalContext(product),before:{sketchFileId:product.sketchFileId},after:{sketchFileId:cover},
+          links:[product.sketchFileId,cover].flatMap(id=>id&&fileNames.has(id)?[{type:'file',id,label:fileNames.get(id)!}]:[])}); changed = true;
     }
   }
   for (const file of managed) {
@@ -136,7 +146,12 @@ export async function linkProposalProductMediaInTransaction(tx: Tx, context: Pro
       plan.proposalId !== context.proposalId || plan.projectId !== context.project.id) throw new ProposalMediaError("KP_MEDIA_INVALID");
     assertMediaStorageBinding(options.storage, plan.binding);
     // Чужие/manual обложки не трогаем. Удалённая позиция больше не держит собственную старую управляемую обложку.
-    if (file.productId) await tx.product.updateMany({ where: { id: file.productId, sketchFileId: file.id }, data: { sketchFileId: null } });
+    const product=file.productId?await tx.product.findUnique({where:{id:file.productId},select:{id:true,number:true}}):null;
+    if (file.productId) {
+      const cleared=await tx.product.updateMany({ where: { id: file.productId, sketchFileId: file.id }, data: { sketchFileId: null } });
+      if(cleared.count)await audit(tx,context,'product',file.productId,'kp.cover',{proposalId:context.proposalId,previousFileId:file.id,sketchFileId:null},
+        {...productJournalContext(product??{id:file.productId}),before:{sketchFileId:file.id},after:{sketchFileId:null},links:[{type:'file',id:file.id,label:file.fileName}]});
+    }
     await tx.$executeRaw`UPDATE "File" SET "proposalMediaRetiredAt" = ${now} WHERE id = ${file.id} AND "proposalMediaRetiredAt" IS NULL`;
     const cleanupId = randomUUID();
     await tx.$executeRaw`INSERT INTO "ProposalJob" (id, "proposalId", kind, "dedupeKey", payload, "createdById", "createdAt", "updatedAt")
@@ -145,7 +160,9 @@ export async function linkProposalProductMediaInTransaction(tx: Tx, context: Pro
         fileId: file.id, storedName: file.storedName, sourceMediaId: file.proposalSourceMediaId, operationJobId: plan.jobId,
         binding: plan.binding, objects: [plan.optimized] })}::jsonb, ${context.actor.id}, ${now}, ${now}) ON CONFLICT ("dedupeKey") DO NOTHING`;
     await audit(tx, context, "file", file.id, "kp.retire", { proposalId: context.proposalId, sourceItemId: file.proposalSourceItemId,
-      sourceMediaId: file.proposalSourceMediaId, retiredAt: now.toISOString() }); changed = true;
+      sourceMediaId: file.proposalSourceMediaId, retiredAt: now.toISOString() },
+      {...(file.productId?productJournalContext(product??{id:file.productId}):projectJournalContext(context.project)),entity:{type:'file',id:file.id,label:file.fileName},
+        before:{fileName:file.fileName,retiredAt:null},after:{fileName:file.fileName,retiredAt:now.toISOString()}}); changed = true;
   }
   if (previous.length !== mediaIds.size || previous.some(row => !mediaIds.has(row.mediaId))) {
     await tx.$executeRaw`DELETE FROM "ProposalCurrentMedia" WHERE "proposalId" = ${context.proposalId}`;

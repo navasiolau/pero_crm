@@ -1,3 +1,4 @@
+import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 import {liveProductWhere,liveProjectWhere} from "@/server/access/live-entities";
 import {lockProjectRow} from "@/server/projects/lock";
 import {lockProductRow} from "./quantity-core";
@@ -10,6 +11,7 @@ import { decideProductPercentageStatus, percentageCompletionKinds } from "@/lib/
 import { captureProductPercentageCompletion } from "@/server/product-percentage-pay/core";
 import type { PercentageAccrualEffects } from "@/server/product-percentage-pay/direct-completion";
 import type { DomainActor } from "@/server/projects/core";
+import { productJournalContext } from "@/server/projects/journal";
 
 /** Все способы изменения статуса проходят эту транзакцию и один ролевой policy. */
 export async function changeProductStatusTransaction(tx: Prisma.TransactionClient, actor: DomainActor,
@@ -43,8 +45,9 @@ export async function changeProductStatusTransaction(tx: Prisma.TransactionClien
   }
   await tx.productStatusHistory.create({ data: { productId, fromStatus, toStatus,
     comment: comment?.trim() || null, changedById: actor.id } });
-  await tx.changeLog.create({ data: { actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
-    entity: "product", entityId: productId, action: "status", field: "status", oldValue: fromStatus, newValue: toStatus } });
+  await writeChangeLogInTransaction(tx, { actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
+    entity: "product", entityId: productId, action: "status", field: "status", oldValue: fromStatus, newValue: toStatus },
+    {...productJournalContext(product),...(comment?.trim()?{reason:comment.trim()}:{})});
   const event = await tx.domainEvent.create({ data: { type: "product.statusChanged", actor: actor.id,
     payload: { productId, number: product.number, from: fromStatus, to: toStatus } } });
   return { ok: true as const, product: { ...product, status: fromStatus }, eventId: event.id, captured, percentageEffects };

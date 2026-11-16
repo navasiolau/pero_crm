@@ -1,11 +1,13 @@
+import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { canAccessProductDraft } from "@/lib/product-drafts";
-import { productDraftAccessSelect } from "@/server/access/product-draft-context";
+import { productDraftAccessRelations } from "@/server/access/product-draft-context";
 import { MANAGER_ROLES, hasAnyRole } from "@/lib/roles";
 import type { DomainActor } from "../projects/core";
 import { productDeleteSchema, type ProductDeleteInput, type ProductDeleteResult, type ProductDeleteMutationResult } from "./delete-contract";
 import { renumberActiveProductsInTransaction, stabilizeProductNumberLinks, type ProductNumberChange } from "./numbering";
+import { businessSnapshot, productJournalContext, PRODUCT_JOURNAL_FIELDS } from "../projects/journal";
 
 const failure = (kind: Extract<ProductDeleteResult, { ok: false }>["kind"], error: string): ProductDeleteMutationResult => ({ ok: false, kind, error });
 export async function softDeleteProductCore(tx: Prisma.TransactionClient, actor: DomainActor, input: ProductDeleteInput): Promise<ProductDeleteMutationResult> {
@@ -19,7 +21,7 @@ export async function softDeleteProductCore(tx: Prisma.TransactionClient, actor:
   await tx.$queryRaw`SELECT id FROM "Product" WHERE id=${data.productId} FOR UPDATE`;
   const parent = await tx.project.findUnique({ where: { id: initial.projectId }, select: { id: true, number: true, deletedAt: true } });
   if (!parent || parent.deletedAt !== null) return failure("not-found", "Проект удалён или недоступен");
-  const product = await tx.product.findUnique({ where: { id: data.productId }, select: { ...productDraftAccessSelect, id: true, number: true, title: true, updatedAt: true, status: true } });
+  const product = await tx.product.findUnique({ where: { id: data.productId }, include: productDraftAccessRelations });
   if (!product || product.projectId !== parent.id || product.status === "DRAFT" && !canAccessProductDraft(actor.roles, product)) return failure("not-found", "Изделие не найдено");
   const fingerprint = createHash("sha256").update(JSON.stringify(data)).digest("hex"), receiptId = `product-delete:${data.clientMutationId}`;
   const receipt = await tx.changeLog.findUnique({ where: { id: receiptId } });
@@ -38,9 +40,10 @@ export async function softDeleteProductCore(tx: Prisma.TransactionClient, actor:
   await stabilizeProductNumberLinks(tx, [product]);
   const numberChanges = await renumberActiveProductsInTransaction(tx, actor, parent);
   const result: Extract<ProductDeleteResult, { ok: true }> = { ok: true, productId: product.id, projectId: parent.id, number: product.number, title: product.title, deletedAt: deletedAt.toISOString(), clientMutationId: data.clientMutationId };
-  await tx.changeLog.create({ data: { id: receiptId, actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
+  await writeChangeLogInTransaction(tx, { id: receiptId, actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
     entity: "product", entityId: product.id, action: "soft-delete", field: "deletedAt",
     oldValue: { number: product.number, title: product.title, updatedAt: data.expectedUpdatedAt },
-    newValue: JSON.parse(JSON.stringify({ fingerprint, result, numberChanges })) as Prisma.InputJsonValue } });
+    newValue: JSON.parse(JSON.stringify({ fingerprint, result, numberChanges })) as Prisma.InputJsonValue },
+    {...productJournalContext(product),before:businessSnapshot(product,PRODUCT_JOURNAL_FIELDS),after:null});
   return { ...result, numberChanges };
 }

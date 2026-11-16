@@ -1,6 +1,8 @@
 import type { Client, Prisma } from "@prisma/client";
 import { clientFields, updateClientInTransaction, type ClientBaseline, type ClientInput } from "@/server/clients/core";
 import type { DomainActor } from "@/server/actor";
+import type {JournalPresentationHints} from '@/server/changelog/contract';
+import {automationJournalContext} from '@/server/projects/journal';
 import { ProposalWriteError, proposalClientSnapshotSchema, proposalObject, type ProposalState, type ProposalClientSnapshotInput } from "./proposal-contract";
 
 export type ProposalClientSelection = {
@@ -30,7 +32,7 @@ export function proposalClientLabel(client: Pick<Client, "name" | "lastName" | "
 export async function resolveProposalClientInTransaction(
   tx: Prisma.TransactionClient, actor: DomainActor, selection: ProposalClientSelection,
   state: ProposalState, fallbackClientId?: string, environment: ProposalEnvironment = process.env,
-  previousState?: Prisma.JsonValue,
+  previousState?: Prisma.JsonValue, journal?: JournalPresentationHints,
 ) {
   const temporaryId = proposalTemporaryClientId(environment);
   const temporary = await tx.client.findUnique({ where: { id: temporaryId } });
@@ -65,7 +67,8 @@ export async function resolveProposalClientInTransaction(
       address: desired.address ?? undefined, comment: desired.comment ?? undefined,
       passportNumber: desired.passportNumber ?? undefined, passportIssuedBy: desired.passportIssuedBy ?? undefined,
     };
-    const updated = await updateClientInTransaction(tx, actor, clientId, input, baseline);
+    const updated = await updateClientInTransaction(tx, actor, clientId, input, baseline,
+      {...journal,...automationJournalContext(actor,'Обновление клиента из КП')});
     if (!updated.ok) throw new ProposalWriteError("conflict", updated.error);
     changed = !updated.noOp;
     client = await tx.client.findUnique({ where: { id: clientId } });

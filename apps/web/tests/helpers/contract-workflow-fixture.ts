@@ -29,7 +29,7 @@ const pdfBytes = () => new Uint8Array(Buffer.from("%PDF-1.7 fixture"));
 export function contractWorkflowFixture(initialSources = [source("cp_a")]) {
   const state = { sources: structuredClone(initialSources), clients: [contractClient()], contract: null as ContractRecord | null,
     receipts: new Map<string, ContractReceipt>(), jobs: new Map<string, ContractJob>(), artifacts: new Map<string, ContractArtifact>(),
-    versions: [] as ContractObject[], sourceVersions: [] as ContractObject[], events: [] as string[], stages: [] as string[], financialFacts: [{ amount: "77.00", frozen: true }] };
+    versions: [] as ContractObject[], sourceVersions: [] as ContractObject[], events: [] as string[], stages: [] as string[], journal: [] as unknown[], financialFacts: [{ amount: "77.00", frozen: true }] };
   const calls: string[] = [], modelCalls: ContractObject[] = [];
   let inTransaction = false, authorized = true, failStage = false;
   const tx: ContractTransaction = {
@@ -42,6 +42,7 @@ export function contractWorkflowFixture(initialSources = [source("cp_a")]) {
     history: async contractId => state.versions.filter(version => version.contractId === contractId).map(version => ({ id: String(version.id), createdAt: "2026-10-18T12:00:00Z",
       docxArtifactId: String(version.docxArtifactId), fileName: state.artifacts.get(String(version.docxArtifactId))?.fileName ?? "Договор.docx" })),
     receipt: async id => structuredClone(state.receipts.get(id) ?? null), writeReceipt: async (id, _primary, _action, _actor, receipt) => { state.receipts.set(id, structuredClone(receipt)); },
+    writeEvent: async (actor,contractId,action,value,journal) => {state.journal.push(structuredClone({actor,contractId,action,value,journal}));},
     saveDraft: async input => {
       if ((state.contract?.revision ?? 0) !== input.expectedRevision || input.create !== !state.contract) throw new ContractWorkflowError("CONTRACT_REVISION_CHANGED", 409, "Конфликт");
       state.contract = { id: input.id, primaryProposalId: input.primaryId, revision: input.expectedRevision + 1, settings: structuredClone(input.settings) };

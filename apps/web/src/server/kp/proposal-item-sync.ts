@@ -1,8 +1,10 @@
+import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 import { FurnitureSpecifications, type TechnicalSpecifications } from "@pero/kp-template";
 import { randomUUID } from "node:crypto";
 import type { Prisma, Product } from "@prisma/client";
 import type { DomainActor } from "@/server/actor";
 import { createProductInTransaction } from "@/server/products/core";
+import { automationJournalContext, productJournalContext } from "@/server/projects/journal";
 import { recalculateQuantity } from "@/server/products/quantity-core";
 import { stabilizeProductNumberLinks } from "@/server/products/numbering";
 import { lockWarehouseMetadata, assertWarehouseMetadataWritable } from "@/server/warehouse/gate";
@@ -20,11 +22,14 @@ const commercialSnapshot = (product: Product) => ({
 
 async function auditProductSync(tx: Prisma.TransactionClient, actor: DomainActor,
   proposalId: string, before: Product, after: Product) {
-  await tx.changeLog.create({ data: {
+  await writeChangeLogInTransaction(tx, {
     actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
     entity: "product", entityId: after.id, action: "kp.synchronize",
     oldValue: commercialSnapshot(before), newValue: { ...commercialSnapshot(after), proposalId },
-  } });
+  },{...productJournalContext(after),...automationJournalContext(actor,"Обновление изделия из КП"),
+    before:commercialSnapshot(before),after:commercialSnapshot(after),
+    kind:canonicalProposalJson(commercialSnapshot(before))===canonicalProposalJson(commercialSnapshot(after))?'receipt':'event',
+    links:[{type:'commercialProposal',id:proposalId,label:'Коммерческое предложение'}]});
 }
 
 /** Проект уже заблокирован; денежные поля применяет следующий hook в этой же tx. */
@@ -141,7 +146,7 @@ export async function synchronizeProposalItemsInTransaction(
       created = true;
     }
     const previousQuantity = before.quantity;
-    if (before.quantity !== data.quantity) await recalculateQuantity(tx, before, data.quantity);
+    if (before.quantity !== data.quantity) await recalculateQuantity(tx, {...before,number}, data.quantity, actor);
     const desiredSnapshot = { ...data, deletedAt: null };
     const commercialChanged = canonicalProposalJson(commercialSnapshot(before)) !== canonicalProposalJson({
       number: desiredSnapshot.number, suffixInt: desiredSnapshot.suffixInt, title: desiredSnapshot.title,

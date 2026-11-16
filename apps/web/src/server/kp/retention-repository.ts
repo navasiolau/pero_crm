@@ -1,3 +1,4 @@
+import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 import { randomUUID } from "node:crypto";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { lockProjectRow } from "@/server/projects/lock";
@@ -8,6 +9,8 @@ import { RetentionError, parseRetentionProgress, retentionAnniversary, retention
 import { planProposalRetention,shouldScheduleAcceptanceCleanup } from "./retention-policy";
 import { proposalRetentionSnapshot } from "./retention-snapshot";
 import type { RetentionRepository } from "./retention-executor";
+import type {JournalPresentationHints} from '../changelog/contract';
+import {productJournalContext,projectJournalContext} from '../projects/journal';
 
 type Tx = Prisma.TransactionClient;
 type Row = { id: string; proposalId: string; kind: string; state: string; payload: unknown; result: unknown;
@@ -15,6 +18,24 @@ type Row = { id: string; proposalId: string; kind: string; state: string; payloa
 const serialize = (value: unknown) => JSON.stringify(value);
 const active = (row: Row, claim: RetentionClaim, now: Date) => row.state === "PROCESSING" && row.leaseOwner === claim.owner &&
   row.attempts === claim.attempt && !!row.leaseUntil && row.leaseUntil > now;
+
+async function retainedObjectJournal(tx:Tx,proposalId:string,target:RetentionTarget):Promise<JournalPresentationHints>{
+  const reason='Очистка файлов по сроку хранения';
+  if(target.entity==='PRODUCT_COPY'){
+    const file=await tx.file.findUnique({where:{id:target.entityId},select:{id:true,fileName:true,mimeType:true,size:true,productId:true,
+      product:{select:{id:true,number:true}},project:{select:{id:true,number:true}}}});
+    if(!file)return{reason,contexts:[],beforeKnown:false,after:null};
+    return{...(file.productId?productJournalContext(file.product??{id:file.productId}):projectJournalContext(file.project)),
+      entity:{type:'file',id:file.id,label:file.fileName},reason,before:{fileName:file.fileName,mimeType:file.mimeType,size:file.size},after:null};
+  }
+  const proposal=await tx.commercialProposal.findUnique({where:{id:proposalId},select:{project:{select:{id:true,number:true}}}});
+  const media=target.entity==='MEDIA'?await tx.proposalMedia.findUnique({where:{id:target.entityId},select:{fileName:true,mimeType:true}}):null;
+  const artifact=target.entity==='ARTIFACT'?await tx.proposalArtifact.findUnique({where:{id:target.entityId},select:{fileName:true,mimeType:true}}):null;
+  const object=media??artifact;
+  return{...(proposal?.project?projectJournalContext(proposal.project):{contexts:[]}),
+    entity:{type:target.entity==='MEDIA'?'proposalMedia':'proposalArtifact',id:target.entityId,label:object?.fileName??'Файл КП'},reason,
+    before:object?{fileName:object.fileName,mimeType:object.mimeType,size:target.size}:undefined,beforeKnown:!!object,after:null};
+}
 
 async function lockOwner(tx: Tx, proposalId: string) {
   await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(18435,55001)`;
@@ -147,6 +168,7 @@ export function createPrismaRetentionRepository(db: Pick<PrismaClient, "$transac
     absent: (claim, target, proof) => run(async tx => {
       const now = time(), context = await locked(tx, claim, now, false), progress = targetIn(context.progress, target);
       if (!proof.listedEmpty || !proof.headMissing || !Number.isFinite(new Date(proof.at).getTime())) throw new RetentionError("KP_RETENTION_ABSENCE_PROOF_INVALID");
+      const journal=await retainedObjectJournal(tx,claim.proposalId,target);
       progress.objects[target.id] ??= { versions: [] }; progress.objects[target.id].absentAt = proof.at;
       if (target.entity === "MEDIA") {
         const column = target.variant === "original" ? Prisma.sql`"originalPurgedAt"` : Prisma.sql`"optimizedPurgedAt"`;
@@ -176,8 +198,8 @@ export function createPrismaRetentionRepository(db: Pick<PrismaClient, "$transac
         await tx.$executeRaw`UPDATE "ProposalJob" SET state='CANCELLED',"leaseOwner"=NULL,"leaseUntil"=NULL,"updatedAt"=${now}
           WHERE id=${target.operationJobId} AND kind::text='COPY_PRODUCT_MEDIA'`;
       }
-      await tx.changeLog.create({ data: { actorType: "system", actorId: "kp-retention", entity: target.entity === "MEDIA" ? "proposalMedia" : target.entity === "ARTIFACT" ? "proposalArtifact" : "file",
-        entityId: target.entityId, action: "physical-purge", newValue: { retentionJobId: claim.id, key: target.key, sha256: target.sha256, absenceProof: proof } } });
+      await writeChangeLogInTransaction(tx, { actorType: "system", actorId: "kp-retention", entity: target.entity === "MEDIA" ? "proposalMedia" : target.entity === "ARTIFACT" ? "proposalArtifact" : "file",
+        entityId: target.entityId, action: "physical-purge", newValue: { retentionJobId: claim.id, key: target.key, sha256: target.sha256, absenceProof: proof } },journal);
       await saveProgress(tx, claim.id, progress, now);
     }),
     release: (claim, target, available) => run(async tx => {

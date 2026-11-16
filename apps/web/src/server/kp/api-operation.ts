@@ -1,3 +1,4 @@
+import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 import { createHash } from "node:crypto";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import type { KpApiScope } from "@/lib/kp-api-scopes";
@@ -39,9 +40,9 @@ export async function readApiReceipt(db: ReceiptDb, context: KpApiContext, opera
 }
 export async function writeApiReceipt(tx: Prisma.TransactionClient, context: KpApiContext,
   command: { operationId: string; kind: string; scope: KpApiScope; fingerprint: string; entityId: string }, result: unknown) {
-  await tx.changeLog.create({ data: { id: apiReceiptId(context, command.operationId), actorType: "user", actorId: context.actor.id,
+  await writeChangeLogInTransaction(tx, { id: apiReceiptId(context, command.operationId), actorType: "user", actorId: context.actor.id,
     actorName: context.actor.name, source: context.binding.source, entity: "commercialProposal", entityId: command.entityId,
-    action: "kp.api.command", newValue: kpJson({ ...command, tokenId: context.binding.tokenId ?? null, source: context.binding.source, result }) } });
+    action: "kp.api.command", newValue: kpJson({ ...command, tokenId: context.binding.tokenId ?? null, source: context.binding.source, result }) },{kind:'receipt'});
 }
 /** Реплей проверяется до сети и ещё раз в final tx; результат хранится неизменяемым. */
 export async function runApiCommand<T>(dependencies: {

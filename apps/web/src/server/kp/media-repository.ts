@@ -1,3 +1,4 @@
+import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 import { randomUUID } from "node:crypto";
 import { Prisma, type PrismaClient, type Role } from "@prisma/client";
 import { lockProjectRow } from "@/server/projects/lock";
@@ -7,9 +8,10 @@ import { KP_MEDIA_LEASE_MS, KP_MEDIA_ORPHAN_DELAY_MS, ProposalMediaError, parseM
   type MediaReservation, type ReadableMedia } from "./media-contract";
 import { createMediaUploadPlan, createProductMediaCopyPlan,
   type ProposalMediaRepository } from "./media-core";
+import {projectJournalContext} from '../projects/journal';
 
 type Tx = Prisma.TransactionClient;
-type OwnerRow = MediaOwner & { deletedAt: Date | null; stage: string | null; projectDeletedAt: Date | null };
+type OwnerRow = MediaOwner & { deletedAt: Date | null; stage: string | null; projectDeletedAt: Date | null;projectNumber?:string;actorName?:string };
 type JobRow = { id: string; proposalId: string | null; kind: string; state: string; payload: unknown; result: unknown;
   createdById: string | null; attempts: number; maxAttempts: number; leaseOwner: string | null; leaseUntil: Date | null };
 export type OwnedMediaRow = { id: string; proposalId: string; storageBinding: unknown; originalKey: string | null;
@@ -28,12 +30,12 @@ export async function lockProposalMediaOwner(tx: Tx, input: { actorId: string; p
   if (write) await tx.$queryRaw`SELECT id FROM "CommercialProposal" WHERE id = ${input.proposalId} FOR UPDATE`;
   const [owner] = await tx.$queryRaw<OwnerRow[]>`
     SELECT cp.id AS "proposalId", cp."projectId", cp.revision, cp."createdAt", cp."deletedAt",
-      p.stage::text AS stage, p."deletedAt" AS "projectDeletedAt"
+      p.stage::text AS stage, p.number AS "projectNumber", p."deletedAt" AS "projectDeletedAt"
     FROM "CommercialProposal" cp LEFT JOIN "Project" p ON p.id = cp."projectId" WHERE cp.id = ${input.proposalId}`;
-  const [user] = await tx.$queryRaw<{ active: boolean; roles: Role[] }[]>(Prisma.sql`
-    SELECT active, roles FROM "User" WHERE id = ${input.actorId} ${write ? Prisma.sql`FOR SHARE` : Prisma.empty}`);
+  const [user] = await tx.$queryRaw<{ active: boolean; roles: Role[];name?:string }[]>(Prisma.sql`
+    SELECT active, roles, name FROM "User" WHERE id = ${input.actorId} ${write ? Prisma.sql`FOR SHARE` : Prisma.empty}`);
   assertProposalMediaAccess(user, owner, write, input.expectedRevision);
-  return owner;
+  return {...owner,actorName:user.name};
 }
 
 export async function ownedProposalMedia(tx: Tx, proposalId: string, mediaId: string, now: Date): Promise<OwnedMediaRow> {
@@ -168,7 +170,7 @@ export function createPrismaProposalMediaRepository(db: Pick<PrismaClient, "$tra
       if (plan.kind === "COPY_PRODUCT_MEDIA") await ownedProposalMedia(tx, plan.proposalId, plan.mediaId, now);
     }),
     publishUpload: reservation => db.$transaction(async tx => {
-      const now = time(); await lockProposalMediaOwner(tx, reservation.plan, true);
+      const now = time(); const owner=await lockProposalMediaOwner(tx, reservation.plan, true);
       const plan = await ownedMediaJob(tx, reservation, now);
       if (plan.kind !== "UPLOAD_MEDIA" || !plan.original) throw new ProposalMediaError("KP_MEDIA_INVALID");
       const changed = await tx.$executeRaw`UPDATE "ProposalMedia" SET "uploadState" = 'READY' WHERE id = ${plan.mediaId}
@@ -179,8 +181,11 @@ export function createPrismaProposalMediaRepository(db: Pick<PrismaClient, "$tra
       if (changed !== 1) throw new ProposalMediaError("KP_MEDIA_OPERATION_CONFLICT");
       await tx.$executeRaw`UPDATE "ProposalJob" SET state = 'SUCCEEDED', "leaseOwner" = NULL, "leaseUntil" = NULL,
         result = ${JSON.stringify({ mediaId: plan.mediaId, ready: true })}::jsonb, "updatedAt" = ${now} WHERE id = ${plan.jobId}`;
-      await tx.changeLog.create({ data: { actorType: "user", actorId: plan.actorId, entity: "proposalMedia", entityId: plan.mediaId,
-        action: "create", newValue: { proposalId: plan.proposalId, originalHash: plan.original.sha256, optimizedHash: plan.optimized.sha256 } } });
+      await writeChangeLogInTransaction(tx, { actorType: "user", actorId: plan.actorId, entity: "proposalMedia", entityId: plan.mediaId,
+        action: "create", newValue: { proposalId: plan.proposalId, originalHash: plan.original.sha256, optimizedHash: plan.optimized.sha256 } },
+        {...(owner.projectId?projectJournalContext({id:owner.projectId,number:owner.projectNumber}):{}),
+          entity:{type:'proposalMedia',id:plan.mediaId,label:plan.fileName},actor:{type:'user',id:plan.actorId,name:owner.actorName??'Имя пользователя не сохранено'},
+          before:null,after:{fileName:plan.fileName,mimeType:plan.original.mimeType,size:plan.original.size}});
     }),
     completeCopy: reservation => db.$transaction(async tx => {
       const now = time(); await lockProposalMediaOwner(tx, reservation.plan, true);

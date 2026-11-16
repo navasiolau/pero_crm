@@ -1,7 +1,9 @@
+import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 import type { Prisma, ProductStatus, ProjectStage } from "@prisma/client";
 import { isActiveProjectStage } from "@/lib/stages";
 import { isPreContractProjectStage } from "@/lib/product-drafts";
 import type { DomainActor } from "@/server/projects/core";
+import { automationJournalContext, productJournalContext } from "@/server/projects/journal";
 
 const SERVICE_STAGES = ["REFUSED"];
 const ORDINARY_STAGES = ["LEAD", "ESTIMATE", "CONTRACT", "IN_WORK", "DONE"];
@@ -45,11 +47,11 @@ export async function promoteProjectDrafts(tx: Prisma.TransactionClient, actor: 
       productId: product.id, fromStatus: "DRAFT", toStatus: "PREPARATION",
       changedById: actor.id, comment: "Подтверждение договора проекта", createdAt: changedAt,
     } });
-    await tx.changeLog.create({ data: {
+    await writeChangeLogInTransaction(tx, {
       actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
       entity: "product", entityId: product.id, action: "status", field: "status",
       oldValue: "DRAFT", newValue: "PREPARATION", createdAt: changedAt,
-    } });
+    },{...productJournalContext(product),...automationJournalContext(actor,"Подтверждение договора проекта")});
     const event = await tx.domainEvent.create({ data: {
       type: "product.statusChanged", actor: actor.id,
       payload: { productId: product.id, number: product.number, from: "DRAFT", to: "PREPARATION", projectId, reason: "project.contract" },
