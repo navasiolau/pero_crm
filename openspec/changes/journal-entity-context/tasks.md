@@ -13,4 +13,4 @@
 ## 3. Приёмка
 
 - [x] 3.1 После штатного merge №223 выполнить целевые tests, lint, tsc и strict OpenSpec; записать evidence.
-- [ ] 3.2 Передать root diff для ревью и подтвердить реальный staging после штатного CI: ADMIN и DIRECTOR, last-tab/bottom-section, lazy чтение, контекст и доступность.
+- [x] 3.2 Передать root diff для ревью и подтвердить реальный staging после штатного CI: ADMIN и DIRECTOR, last-tab/bottom-section, lazy чтение, контекст и доступность.
