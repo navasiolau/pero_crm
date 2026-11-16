@@ -1520,10 +1520,32 @@ test("work/field-edit-self-assignment-CAS-current-roles-and-preserved-facts", as
   assert.equal((await workerAllocation.createOwnWorkTaskCore(actors[0], { ...last, workId: special.id, clientMutationId: randomUUID() }, transaction)).ok, false);
   const coordinator = await rows.user("field-coordinator", ["WORKER", "WORK_COORDINATOR"], { payScheme: "PIECE" }), coordinatorActor = actorOf(coordinator);
   const priceInput = { name: rows.id("coordinator-price"), unit: "шт.", price: 100 };
-  const createdPrice = await run(coordinatorActor, tx, () => priceActions.createPriceItem(priceInput)); assert.ok(createdPrice.ok && createdPrice.id);
+  let priceTransactions = 0;
+  // Две команды расценок используют существующую транзакцию с откатом, без новых соединений и COMMIT.
+  const priceDatabase = new Proxy(tx, { get(db, key) {
+    if (key === "$transaction") return async <T>(operation: (transaction: Prisma.TransactionClient) => Promise<T>, options: unknown) => {
+      assert.equal(current().db, priceDatabase, "PRICE_ROLLBACK_CONTEXT_REQUIRED");
+      assert.equal(current().actor.id, coordinator.id, "PRICE_ACTOR_CONTEXT_REQUIRED");
+      assert.equal(typeof operation, "function", "PRICE_TRANSACTION_CALLBACK_REQUIRED");
+      assert.deepEqual(options, { maxWait: 5000, timeout: 15000, isolationLevel: "ReadCommitted" });
+      assert.ok(priceTransactions < 2, "UNEXPECTED_PRICE_TRANSACTION");
+      let lockCalls = 0;
+      const priceTx = new Proxy(tx, { get(target, member) {
+        if (member === "$queryRaw") return async (strings: TemplateStringsArray, ...values: unknown[]) => {
+          assert.equal(strings.join("?").trim(), "SELECT 1 AS locked FROM pg_advisory_xact_lock(18435, 55001)");
+          assert.equal(values.length, 0); assert.equal(lockCalls++, 0, "PRICE_LOCK_ONCE_REQUIRED");
+          return target.$queryRaw(strings, ...values);
+        };
+        const value = Reflect.get(target, member); return typeof value === "function" ? value.bind(target) : value;
+      } });
+      const result = await operation(priceTx); assert.equal(lockCalls, 1, "PRICE_LOCK_REQUIRED"); priceTransactions++; return result;
+    };
+    const value = Reflect.get(db, key); return typeof value === "function" ? value.bind(db) : value;
+  } });
+  const createdPrice = await run(coordinatorActor, priceDatabase, () => priceActions.createPriceItem(priceInput)); assert.ok(createdPrice.ok && createdPrice.id);
   const assigned = { projectId: project.id, productId: production.id, priceItemId: createdPrice.id, quantityPerUnit: 1 };
   const priorWork = await worksCore.addWorkCore(coordinatorActor, assigned, transaction); assert.ok(priorWork.ok);
-  assert.equal((await run(coordinatorActor, tx, () => priceActions.updatePriceItem(createdPrice.id!, { ...priceInput, price: 125 }))).ok, true);
+  assert.equal((await run(coordinatorActor, priceDatabase, () => priceActions.updatePriceItem(createdPrice.id!, { ...priceInput, price: 125 }))).ok, true);
   const nextWork = await worksCore.addWorkCore(coordinatorActor, assigned, transaction); assert.ok(nextWork.ok);
   assert.equal((await tx.work.findUniqueOrThrow({ where: { id: priorWork.workId } })).priceSnapshot!.toString(), "100");
   const changedWork = await tx.work.findUniqueOrThrow({ where: { id: nextWork.workId } });
@@ -1531,7 +1553,8 @@ test("work/field-edit-self-assignment-CAS-current-roles-and-preserved-facts", as
   assert.equal(await tx.changeLog.count({ where: { entity: "priceItem", entityId: createdPrice.id, actorId: coordinator.id } }), 2);
   assert.equal(await tx.product.count({ where: { AND: [{ id: production.id }, visibility.productVisibilityWhere({ id: coordinator.id, roles: ["MOUNTER", "WORK_COORDINATOR"] })] } }), 0);
   const revoked = await tx.user.update({ where: { id: coordinator.id }, data: { roles: ["WORKER"] } });
-  await assert.rejects(run(actorOf(revoked), tx, () => priceActions.updatePriceItem(createdPrice.id!, { ...priceInput, price: 999 })), /Недостаточно прав/);
+  await assert.rejects(run(actorOf(revoked), priceDatabase, () => priceActions.updatePriceItem(createdPrice.id!, { ...priceInput, price: 999 })), /Недостаточно прав/);
+  assert.equal(priceTransactions, 2, "REVOKED_PRICE_ACTION_MUST_NOT_START_TRANSACTION");
   assert.equal((await tx.priceItem.findUniqueOrThrow({ where: { id: createdPrice.id } })).price.toString(), "125");
   for (const [actor, statuses] of [[actors[0], ["PRODUCTION", "STORAGE"]], [actors[1], ["INSTALLATION"]], [actors[2], ["PRODUCTION", "STORAGE", "INSTALLATION"]]] as [DomainActor, ProductStatus[]][]) {
     for (const product of [production, storage, installation]) {
