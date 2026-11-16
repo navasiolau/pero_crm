@@ -73,8 +73,8 @@ export function NotificationsBell() {
         <span className="relative">
           <Bell className="size-5" />
           {unread > 0 ? (
-            <span className="absolute -top-2 -right-2 flex min-h-6 min-w-6 items-center justify-center rounded-full bg-destructive px-0.5 text-xs font-medium text-white md:-top-1.5 md:-right-1.5 md:size-4 md:min-h-0 md:min-w-0 md:px-0 md:text-[10px]">
-              {unread > 9 ? "9+" : unread}
+            <span className="absolute -top-2 -right-2 flex min-h-6 min-w-6 items-center justify-center rounded-full bg-destructive px-1 text-xs font-medium whitespace-nowrap tabular-nums text-white md:-top-1.5 md:-right-1.5 md:h-4 md:min-h-4 md:min-w-4 md:text-[10px]">
+              {unread > 99 ? "99+" : unread}
             </span>
           ) : null}
         </span>
