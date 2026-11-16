@@ -34,6 +34,7 @@ const actions: Record<string, string> = {
   issue: "Выплата", request: "Запрос выплаты", revoke: "Отзыв доступа", revokeSessions: "Завершение сеансов",
   login: "Вход", logout: "Выход", "auth.login": "Вход", "auth.logout": "Выход", "session.login": "Вход", "session.logout": "Выход",
   signIn: "Вход", signOut: "Выход", link: "Привязка", unlink: "Отвязка", "telegram.link": "Привязка Telegram", "telegram.unlink": "Отвязка Telegram",
+  "link.request": "Запрос привязки Telegram", enable: "Включение модуля", disable: "Выключение модуля", "command.ping": "Выполнение команды",
   "contract.draft.save": "Изменение", "contract.export.request": "Запрос выпуска договора", "contract.generated": "Выпуск договора",
   "contract.export.complete": "Выпуск договора", "pdf.request": "Запрос выпуска PDF", "pdf.publish": "Выпуск PDF",
   "pdf.generated": "Выпуск PDF", "version.restore": "Восстановление версии", restore: "Восстановление", command: "Выполнение команды",
@@ -58,6 +59,9 @@ const fields: Record<string, string> = {
   telegram: "Telegram", username: "Имя Telegram", chatId: "Чат Telegram", roles: "Роли", role: "Роль", calendarEnabled: "Личный план включён",
   passwordChanged: "Пароль изменён", sessionVersion: "Версия сеансов", linkedAt: "Время привязки", permissions: "Разрешения", scopes: "Права API",
   password: "Пароль", passwordHash: "Пароль", accessToken: "Токен доступа", token: "Токен доступа", apiKey: "Ключ API", secret: "Секретный ключ", linkCode: "Код привязки",
+  linkRequested: "Привязка запрошена", linkCodeExpiresAt: "Срок действия запроса привязки", botUsername: "Имя Telegram-бота", configured: "Настройка задана явно",
+  company: "Компания", prefix: "Начало токена", revokedAt: "Время отзыва", pluginId: "Модуль", apiVersion: "Версия API модуля", version: "Версия",
+  commandId: "Команда", commandName: "Команда",
   amount: "Сумма", total: "Итого", quantity: "Количество", qty: "Количество", quantityPerUnit: "Количество на изделие", unit: "Единица измерения",
   unitId: "Единица измерения", unitSnapshot: "Единица измерения", price: "Цена", initialPrice: "Первоначальная цена", expectedPrice: "Цена изделия",
   priceSnapshot: "Цена", lineTotalBYN: "Сумма изделий, BYN", bynAmount: "Сумма, BYN", projectAmount: "Сумма проекта", cashAmount: "Сумма выплаты",
@@ -122,11 +126,15 @@ export function journalEnumLabel(path: string, value: string, entity: string): s
     ? { DRAFT: "Черновик", NEW: "Новая", IN_PROGRESS: "В работе", DONE: "Выполнена" }
     : { ...productStatusLabels, ...projectMaterialStatusLabels, RECLAMATION: "Рекламация" };
   else if (field === "roles" || field === "role") labels = roleLabels;
+  else if (field === "scopes" || field === "permissions") labels = { read: "Чтение", write: "Изменение", admin: "Администрирование", "plugins:manage": "Управление модулями",
+    "projects:read": "Просмотр проектов", "projects:write": "Изменение проектов", "tasks:write": "Изменение задач", "files:read": "Просмотр файлов",
+    "kp:read": "Просмотр КП", "kp:write": "Изменение КП", "kp:media:write": "Загрузка изображений КП", "kp:generate": "Выпуск КП",
+    "kp:contracts:read": "Просмотр договоров", "kp:contracts:write": "Изменение договоров", "kp:contracts:generate": "Выпуск договоров" };
   else if (field === "section") labels = { GENERAL: "Общие файлы", MEASUREMENT: "Замеры", PRODUCTION: "Файлы производства", INSTALLATION: "Файлы монтажа" };
   else if (field === "payScheme") labels = paySchemeLabels;
   else if (field === "scheme") labels = entrySchemeLabels;
   else if (field === "direction") labels = { INCOME: "Приход", EXPENSE: "Расход" };
-  else if (field === "type") labels = { ...stockMovementTypeLabels, ...communicationTypeLabels };
+  else if (field === "type") labels = { ...stockMovementTypeLabels, ...communicationTypeLabels, SUPPLIER: "Поставщик", CARRIER: "Перевозчик" };
   else if (field === "paymentKind" || field === "kind") labels = { ...payoutKindLabels, ENGINEERING: "Проектирование", ASSEMBLY: "Сборка", INSTALLATION: "Монтаж", ORDINARY: "Обычная работа", PIECE: "Сдельная оплата", PERCENTAGE: "Процентная оплата" };
   else if (field === "state") labels = { NEW: "Новый", DRAFT: "Черновик", PENDING: "Ожидает выполнения", PROCESSING: "Выполняется", READY: "Готово", SUCCEEDED: "Выполнено", FAILED: "Ошибка", CANCELLED: "Отменено", PENDING_FX: "Ожидает курса", SETTLED: "Начислено", ACTIVE: "Активно", FROZEN: "Заблокировано", VERIFYING: "Проверяется", UNINITIALIZED: "Не настроено" };
   return labels?.[value] ?? value;

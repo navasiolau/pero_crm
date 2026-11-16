@@ -130,6 +130,19 @@ test("a changed secret remains a visible changed field with both values hidden",
   assert.ok(JSON.stringify(protectedText).includes("Стол"));
 });
 
+test("API token entity metadata remains readable while credential fields and scalar token values stay hidden", () => {
+  const input = event({ entity: "apiToken", oldValue: { name: "Интеграция", scopes: ["read"], revokedAt: null, tokenHash: "old-secret-hash" },
+    newValue: { name: "Интеграция", scopes: ["write"], revokedAt: "2026-11-16T10:00:00Z", tokenHash: "new-secret-hash" } });
+  const view = buildJournalPresentation(input), text = buildJournalSearchText(input, view);
+  assert.ok(view.changes.some(change => change.path === "revokedAt" && change.before === null));
+  assert.ok(view.changes.some(change => change.path === "scopes")); assert.ok(text.includes("Интеграция"));
+  for (const secret of ["old-secret-hash", "new-secret-hash"]) { assert.ok(!JSON.stringify(view).includes(secret)); assert.ok(!text.includes(secret)); }
+  const scalar = event({ entity: "apiToken", newValue: "full-scalar-secret" });
+  assert.ok(!JSON.stringify(buildJournalPresentation(scalar)).includes("full-scalar-secret"));
+  const issuedToken = `pero_${"a".repeat(32)}`;
+  assert.equal(sanitizeJournalValue(`Ошибка интеграции: ${issuedToken}`), "Ошибка интеграции: [скрыто]");
+});
+
 test("only exact known duplicate receipts are hidden and personal plan is excluded", () => {
   assert.equal(classifyJournalEntry(event({ entity: "task", action: "task.status.request", id: "task-status:x" })), "receipt");
   assert.equal(classifyJournalEntry(event({ entity: "task", action: "task.status.request", id: "unrelated:x" })), "event");

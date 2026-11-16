@@ -4,10 +4,10 @@ import {createRequire,Module} from 'node:module';
 const require=createRequire(import.meta.url);
 function inject(name:string,exports:Record<string,unknown>){const id=require.resolve(name),stub=new Module(id);stub.filename=id;stub.loaded=true;stub.exports=exports;require.cache[id]=stub;}
 let allowed=true;const updates:Record<string,unknown>[]=[];
-const before={id:'actor',email:'test@example.invalid',name:'Actor',roles:['WORKER'],active:true,calendarEnabled:true,payScheme:'NONE',payPercent:null};
-inject('../src/server/require-role',{requireAdmin:async()=>{if(!allowed)throw new Error('ADMIN_REQUIRED');return {user:{id:'admin',name:'Admin'}};}});
-inject('../src/lib/prisma',{prisma:{user:{findUnique:async()=>before,findFirst:async()=>null,update:async({data}:{data:Record<string,unknown>})=>{updates.push(data);return {...before,...data};}}}});
-inject('../src/server/plugins/changelog',{writeChangeLog:async()=>{}});
+const before={id:'actor',email:'test@example.invalid',name:'Actor',roles:['WORKER'],active:true,calendarEnabled:true,payScheme:'NONE',payPercent:null,position:null,phone:null,telegram:null,sessionVersion:0};
+inject('../src/server/require-role',{requireAdmin:async()=>{if(!allowed)throw new Error('ADMIN_REQUIRED');return {user:{id:'admin',name:'Admin',roles:['ADMIN']}};}});
+const tx={$queryRaw:async()=>[],user:{findUnique:async()=>before,findFirst:async()=>null,update:async({data}:{data:Record<string,unknown>})=>{updates.push(data);return {...before,...data};}},apiToken:{findMany:async()=>[]},changeLog:{create:async()=>({})}};
+inject('../src/lib/prisma',{prisma:{...tx,$transaction:async(fn:(db:typeof tx)=>Promise<unknown>)=>fn(tx)}});
 inject('../src/server/notifications/notify',{notifyPerson:async()=>{}});
 inject('next/cache',{revalidatePath:()=>{}});
 const {updateUser}=require('../src/server/users/actions') as typeof import('../src/server/users/actions');

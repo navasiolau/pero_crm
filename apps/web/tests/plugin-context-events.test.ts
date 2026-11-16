@@ -23,6 +23,7 @@ test("actual plugin context keeps explicit emitter, trusted actor/audit and nest
   let hook: (event: DomainEventPayload, ctx: PluginContext) => Promise<void> = async () => {};
   let internalCalls = 0;
   inject("../src/lib/prisma", { prisma: {
+    changeLog: { create: async ({ data }: { data: Record<string, unknown> }) => { audit.push(data); return data; } },
     domainEvent: { create: async ({ data }: { data: { type: string; payload: unknown; actor: string } }) => {
       writes.push(data);
       const row = { ...memoryEvent(writes.length), ...data, id: `qa152-event-${writes.length}`,
@@ -41,7 +42,6 @@ test("actual plugin context keeps explicit emitter, trusted actor/audit and nest
   inject("../src/server/plugins/run-log", {
     getPluginSettings: async () => ({ configured: true }), logPluginRun: async (entry: Record<string, unknown>) => { logs.push(entry); },
   });
-  inject("../src/server/plugins/changelog", { writeChangeLog: async (entry: Record<string, unknown>) => { audit.push(entry); } });
   inject("../src/server/plugins/event-queue-store", { createPostgresEventQueueStore: () => fixture.store });
   inject("../src/server/plugins/event-subscriber-store", { createPostgresSubscriberStore: () => memorySubscriberFixture(fixture).store });
   inject("../src/server/products/sketch-cleanup-core", { executeObsoleteSketchCleanup: async () => { internalCalls++; } });

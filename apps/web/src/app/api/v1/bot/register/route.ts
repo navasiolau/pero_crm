@@ -4,6 +4,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 
 import { authenticate, isErrorResponse } from "@/server/api/auth";
+import { registerTelegramBotInTransaction } from "@/server/telegram/mutation-core";
 
 // POST /api/v1/bot/register — бот при старте сообщает свой @username.
 // Нужен CRM профилю, чтобы собрать ссылку привязки t.me/<bot>?start=<код>.
@@ -19,10 +20,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: "Укажите username" }, { status: 400 });
   }
 
-  await prisma.orgSetting.upsert({
-    where: { key: "telegram.botUsername" },
-    create: { key: "telegram.botUsername", value: parsed.data.username },
-    update: { value: parsed.data.username },
-  });
+  await prisma.$transaction(tx => registerTelegramBotInTransaction(tx, parsed.data.username));
   return NextResponse.json({ ok: true });
 }

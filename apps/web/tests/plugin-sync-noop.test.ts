@@ -21,3 +21,14 @@ test("plugin metadata no-op avoids writes; changed and missing metadata write th
     assert.deepEqual(calls, current === metadata ? [] : [{ where: { id }, create: manifest, update: metadata }]);
   }
 });
+
+test("metadata audit callback sees exact before/after and is omitted on unchanged startup", async () => {
+  const before = { ...metadata, version: "1.2.2" };
+  let current: typeof metadata | null = before, audits = 0;
+  const store: PluginSyncStore = { findUnique: async () => current, upsert: async () => { current = metadata; } };
+  const change = async (old: unknown, next: unknown) => { audits++; assert.deepEqual(old, before); assert.deepEqual(next, metadata); };
+  await syncPluginMetadata(store, manifest, change); await syncPluginMetadata(store, manifest, change);
+  assert.equal(audits, 1);
+  current = before;
+  await assert.rejects(() => syncPluginMetadata(store, manifest, async () => { throw new Error("AUDIT_FAILED"); }), /AUDIT_FAILED/);
+});

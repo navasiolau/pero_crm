@@ -6,7 +6,8 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { hashPassword } from "@/lib/password";
 import { requireAdmin } from "@/server/require-role";
-import { writeChangeLog } from "@/server/plugins/changelog";
+import { createUserInTransaction, updateUserInTransaction, revokeUserSessionsInTransaction } from "./mutation-core";
+import { deliverPostCommit } from "@/server/operations/post-commit";
 import { notifyPerson } from "@/server/notifications/notify";
 import { paySchemeLabels } from "@/lib/labels";
 import { ROLE_VALUES, roleComboLabel, roleCombinationError, normalizeRoles } from "@/lib/roles";
@@ -33,21 +34,11 @@ export async function revokeUserSessions(
   userId: string,
 ): Promise<{ ok: boolean; error?: string }> {
   const session = await requireAdmin();
-  const changed = await prisma.user.updateMany({
-    where: { id: userId },
-    data: { sessionVersion: { increment: 1 } },
-  });
-  if (changed.count !== 1) return { ok: false, error: "Сотрудник не найден" };
-  await writeChangeLog({
-    actorType: "user",
-    actorId: session.user.id,
-    actorName: session.user.name ?? undefined,
-    entity: "user",
-    entityId: userId,
-    action: "revokeSessions",
-  });
-  revalidatePath("/", "layout");
-  revalidatePath("/settings/users");
+  const result = await prisma.$transaction(tx => revokeUserSessionsInTransaction(tx, {
+    id: session.user.id, name: session.user.name ?? "", roles: session.user.roles, source: "web",
+  }, userId));
+  if (!result.ok) return result;
+  await deliverPostCommit("user-update", userId, [{ kind: "cache", run: () => { revalidatePath("/", "layout"); revalidatePath("/settings/users"); } }]);
   return { ok: true };
 }
 
@@ -73,42 +64,19 @@ export async function createUser(
       error: roleError,
     };
   }
-  const exists = await prisma.user.findUnique({ where: { email: data.email } });
-  if (exists) return { ok: false, error: "Email уже занят" };
-
-  const user = await prisma.user.create({
-    data: {
-      email: data.email,
-      name: data.name,
-      position: data.position || null,
-      phone: data.phone || null,
-      telegram: data.telegram || null,
-      roles,
-      payScheme: data.payScheme,
-      payPercent: data.payPercent ?? null,
-      active: data.active,
-      ...(data.calendarEnabled !== undefined ? {calendarEnabled: data.calendarEnabled} : {}),
-      passwordHash: await hashPassword(data.password),
-    },
-  });
-  await writeChangeLog({
-    actorType: "user",
-    actorId: session.user.id,
-    actorName: session.user.name ?? undefined,
-    entity: "user",
-    entityId: user.id,
-    action: "create",
-    newValue: { email: user.email, name: user.name, roles: user.roles },
-  });
+  const passwordHash = await hashPassword(data.password);
+  const created = await prisma.$transaction(tx => createUserInTransaction(tx, {
+    id: session.user.id, name: session.user.name ?? "", roles: session.user.roles, source: "web",
+  }, { ...data, roles, passwordHash }));
+  if (!created.ok) return created;
+  const user = created.user;
   // Уведомление человеку о создании его учётной записи (§6.1)
-  await notifyPerson({
+  await deliverPostCommit("user-create", user.id, [{ kind: "person", run: () => notifyPerson({
     userId: user.id,
     type: "user.accountChanged",
     title: "Для вас создана учётная запись",
     body: `Роли: ${roleComboLabel(user.roles)} · схема оплаты: ${paySchemeLabels[user.payScheme] ?? user.payScheme}`,
-  });
-  revalidatePath("/", "layout");
-  revalidatePath("/settings/users");
+  }) }, { kind: "cache", run: () => { revalidatePath("/", "layout"); revalidatePath("/settings/users"); } }]);
   return { ok: true };
 }
 
@@ -123,15 +91,9 @@ export async function updateUser(
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Ошибка данных" };
   }
   const data = parsed.data;
-  const before = await prisma.user.findUnique({ where: { id: userId } });
-  if (!before) return { ok: false, error: "Сотрудник не найден" };
   if (data.password && data.password.length > 0 && data.password.length < 8) {
     return { ok: false, error: "Пароль — минимум 8 символов" };
   }
-  const emailTaken = await prisma.user.findFirst({
-    where: { email: data.email, id: { not: userId } },
-  });
-  if (emailTaken) return { ok: false, error: "Email уже занят" };
 
   // Комбинированные роли (§4): нормализация + ADMIN/DIRECTOR не сочетаются
   const roles = normalizeRoles(data.roles);
@@ -143,47 +105,13 @@ export async function updateUser(
     };
   }
 
-  await prisma.user.update({
-    where: { id: userId },
-    data: {
-      email: data.email,
-      name: data.name,
-      position: data.position || null,
-      phone: data.phone || null,
-      telegram: data.telegram || null,
-      roles,
-      payScheme: data.payScheme,
-      payPercent: data.payPercent ?? null,
-      active: data.active,
-      ...(data.calendarEnabled !== undefined ? {calendarEnabled: data.calendarEnabled} : {}),
-      ...(data.password
-        ? { passwordHash: await hashPassword(data.password) }
-        : {}),
-    },
-  });
-  await writeChangeLog({
-    actorType: "user",
-    actorId: session.user.id,
-    actorName: session.user.name ?? undefined,
-    entity: "user",
-    entityId: userId,
-    action: "update",
-    oldValue: {
-      email: before.email,
-      name: before.name,
-      roles: before.roles,
-      active: before.active,
-      calendarEnabled: before.calendarEnabled,
-    },
-    newValue: {
-      email: data.email,
-      name: data.name,
-      roles: data.roles,
-      active: data.active,
-      calendarEnabled: data.calendarEnabled === undefined ? before.calendarEnabled : data.calendarEnabled,
-      passwordChanged: !!data.password,
-    },
-  });
+  const passwordHash = data.password ? await hashPassword(data.password) : undefined;
+  const saved = await prisma.$transaction(tx => updateUserInTransaction(tx, {
+    id: session.user.id, name: session.user.name ?? "", roles: session.user.roles, source: "web",
+  }, userId, { ...data, roles, passwordHash }));
+  if (!saved.ok) return saved;
+  if (saved.noOp) return { ok: true };
+  const before = saved.before;
 
   // Уведомление человеку об изменениях его учётной записи (§6.1) —
   // всё, КРОМЕ пароля (и его собственных настроек, которые меняет он сам).
@@ -205,15 +133,14 @@ export async function updateUser(
   if (before.active !== data.active)
     changes.push(data.active ? "Учётная запись активирована" : "Учётная запись деактивирована");
   if (changes.length > 0) {
-    await notifyPerson({
+    await deliverPostCommit("user-update", userId, [{ kind: "person", run: () => notifyPerson({
       userId,
       type: "user.accountChanged",
       title: "Изменена ваша учётная запись",
       body: changes.join(" · "),
-    });
+    }) }]);
   }
 
-  revalidatePath("/", "layout");
-  revalidatePath("/settings/users");
+  await deliverPostCommit("user-update", userId, [{ kind: "cache", run: () => { revalidatePath("/", "layout"); revalidatePath("/settings/users"); } }]);
   return { ok: true };
 }
