@@ -32,3 +32,14 @@
 ## Оставшаяся приёмка
 
 Публикация №223 разрешена root только после actual staging-приёмки №222. Реальная staging-приёмка №223 остаётся задачей root и не подменяется local fixtures; checklist 3.2 не отмечен выполненным.
+
+## Повторная проверка с исправленным №222
+
+По явному Git GO root выполнен обычный merge `origin/staging` `6addc0c8de142da3fae92589ab91af951d01ba7c` в `feature/223`, сохранён исходный UI commit `01fae437`. Итоговый merge commit `c7f82ccc688981758e80953fc178c1f5fbe0d953`; история не переписывалась.
+
+- Полный web `tsc --noEmit --incremental false`: exit0.
+- Целевые journal TypeScript tests и page-access: PASS 49/49, 0 skipped, 2,179 s.
+- `journal-interface.test.mjs`: PASS 1/1, 5,465 s. Screenshots: `apps/web/test-results/journal-interface/41fa69a6-f1d0-4d5d-80ce-e287921a8601/`.
+- Scoped ESLint: exit0, 0 warnings; strict OpenSpec и diff-check: PASS.
+
+READY для root-review и штатной публикации после его окончательного runtime №222 GO. Actual staging №223 ещё не объявляется принятым.
