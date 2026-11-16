@@ -18,6 +18,10 @@
 
 Production diff — только композиция списка в странице проекта и проектная обёртка в `project-tabs.tsx`. `overflow-visible!` нужен для локального переопределения существующего unlayered мобильного `overflow-x:auto`; общий `ui/tabs.tsx` и `globals.css` не меняются. Поисковые фильтры, колокольчик и sidebar принадлежат соседним задачам.
 
+После root review новый `project-tabs-layout.test.mjs` явно включён в существующую CI-группу `components-1`, где устанавливается Chromium. Без этой строки новый файл попадал бы в backend по умолчанию; исполнение браузерного сценария не пропускается. Изменена только принадлежность одного файла, порядок jobs, guards и критерии публикации сохранены.
+
+Повтор `tests/ci-scheduling.test.mjs` + `tests/project-tabs-layout.test.mjs` — **6/6 PASS**, diff-check — PASS. Изменение CI опубликовано отдельным обычным follow-up коммитом после собственного review root; прежний коммит не переписывался.
+
 ## Staging
 
 PENDING: root выполняет normal merge, штатный CI и проверяет фактические SHA/image/health и интерфейс. Локальные результаты не являются приёмкой deployment. Коммиты и push worker пока не выполнял; БД, infra и restic не затронуты.
