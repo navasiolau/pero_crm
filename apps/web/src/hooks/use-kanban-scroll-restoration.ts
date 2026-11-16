@@ -3,6 +3,7 @@
 import { useCallback, useLayoutEffect, useRef, type MouseEvent, type RefObject } from "react";
 import { readKanbanPosition, writeKanbanPosition, type KanbanPosition } from "@/lib/kanban-position";
 import { suspendKanbanSnap } from "@/lib/kanban-scroll-snap";
+import { reflectKanbanScroll } from "@/lib/kanban-scroll-sync";
 import type { ListSection } from "@/lib/list-state";
 
 export interface KanbanScrollContext {
@@ -86,7 +87,7 @@ export function useKanbanScrollRestoration(boardRef: RefObject<HTMLDivElement | 
       board.scrollTo({ left: clamp(wantedX, board.scrollWidth - board.clientWidth), behavior: "instant" });
       window.scrollTo({ left: window.scrollX, top: clamp(wantedY, (document.scrollingElement?.scrollHeight ?? 0) - window.innerHeight), behavior: "instant" });
       const scrollbar = board.closest("[data-kanban-scroll-area]")?.querySelector<HTMLElement>("[data-kanban-scrollbar]");
-      if (scrollbar) scrollbar.scrollLeft = board.scrollLeft;
+      reflectKanbanScroll(scrollbar, board.scrollLeft);
       stopWaiting(); capture();
     }
     function schedule() { if (pending && !frame) frame = requestAnimationFrame(restore); }
