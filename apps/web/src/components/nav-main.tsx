@@ -48,7 +48,7 @@ export function NavMain({
                   render={<Link href={item.href} />}
                 >
                   <item.icon />
-                  <span>{item.label}</span>
+                  <span className="group-data-[collapsible=icon]:sr-only">{item.label}</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
             )

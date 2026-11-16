@@ -34,9 +34,9 @@ export function AppSidebar({
       <SidebarHeader>
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton size="lg" render={<Link href={homePathForRoles(roles)} />} onClick={() => setOpenMobile(false)}>
+            <SidebarMenuButton size="lg" className="group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:gap-0" aria-label="PERO CRM" render={<Link href={homePathForRoles(roles)} />} onClick={() => setOpenMobile(false)}>
               <Logo className="size-8" />
-              <span className="truncate text-base font-semibold">PERO CRM</span>
+              <span className="truncate text-base font-semibold group-data-[collapsible=icon]:sr-only">PERO CRM</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
