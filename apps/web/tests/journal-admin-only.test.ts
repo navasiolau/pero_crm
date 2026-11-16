@@ -6,7 +6,7 @@ import { NextRequest } from "next/server";
 import { navItemsForRole } from "../src/lib/nav";
 import { authConfig } from "../src/auth.config";
 
-const denied: Role[][] = [["DIRECTOR"], ["PROCUREMENT"], ["ACCOUNTANT"], ["MANAGER"], ["ENGINEER"], ["WORKER"], ["MOUNTER"], ["MANAGER", "ENGINEER"], ["ACCOUNTANT", "PROCUREMENT"], []];
+const denied: Role[][] = [["DIRECTOR"], ["PROCUREMENT"], ["ACCOUNTANT"], ["MANAGER"], ["ENGINEER"], ["WORKER"], ["MOUNTER"], ["WORK_COORDINATOR"], ["WORK_COORDINATOR", "WORKER"], ["MANAGER", "ENGINEER"], ["ACCOUNTANT", "PROCUREMENT"], []];
 test("global Journal navigation and actual route callback grant ADMIN only", () => {
   for (const roles of [["ADMIN"] as Role[], ...denied]) {
     const allowed = roles.includes("ADMIN");

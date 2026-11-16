@@ -1,9 +1,9 @@
 import type { ReactNode } from "react";
 
 /** Composition only: permissions and mutations stay in the existing sections. */
-export function ProductSinglePage({ overview, documents, assembly, installation, works, materials }: {
+export function ProductSinglePage({ overview, documents, assembly, installation, works, materials, journal }: {
   overview: ReactNode; documents: ReactNode; assembly: ReactNode; installation: ReactNode;
-  works: ReactNode; materials: ReactNode;
+  works: ReactNode; materials: ReactNode; journal?: ReactNode;
 }) {
   return <div className="flex min-w-0 max-w-full flex-col gap-4" data-product-single-page>
     {overview}
@@ -18,5 +18,9 @@ export function ProductSinglePage({ overview, documents, assembly, installation,
       <h2 id="product-materials-heading" className="text-lg font-semibold">Материалы</h2>
       <div className="min-w-0 max-w-full overflow-x-auto">{materials}</div>
     </section>}
+    {journal ? <section className="min-w-0 space-y-3" aria-labelledby="product-journal-heading" data-product-section="journal">
+      <h2 id="product-journal-heading" className="text-lg font-semibold">Журнал</h2>
+      {journal}
+    </section> : null}
   </div>;
 }
