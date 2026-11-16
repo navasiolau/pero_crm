@@ -31,10 +31,10 @@ export function AppSidebar({
 
   return (
     <Sidebar collapsible="icon" {...props}>
-      <SidebarHeader>
+      <SidebarHeader className="group-data-[collapsible=icon]:pt-4">
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton size="lg" className="group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:gap-0" aria-label="PERO CRM" render={<Link href={homePathForRoles(roles)} />} onClick={() => setOpenMobile(false)}>
+            <SidebarMenuButton size="lg" className="md:h-8 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:gap-0" aria-label="PERO CRM" render={<Link href={homePathForRoles(roles)} />} onClick={() => setOpenMobile(false)}>
               <Logo className="size-8" />
               <span className="truncate text-base font-semibold group-data-[collapsible=icon]:sr-only">PERO CRM</span>
             </SidebarMenuButton>
