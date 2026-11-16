@@ -1,3 +1,4 @@
+import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { Prisma } from "@prisma/client";
@@ -43,7 +44,7 @@ export async function readTaskStatusReceipt(actor: DomainActor, intent: Intent, 
 export async function recordTaskStatusReceipt(actor: DomainActor, intent: Intent, task: TaskStatusEffect,
   eventId: string | null, tx: Prisma.TransactionClient): Promise<void> {
   if (!intent.request) return;
-  await tx.changeLog.create({ data: { id: receiptId(intent.request.clientMutationId), actorType: "user", actorId: actor.id,
+  await writeChangeLogInTransaction(tx, { id: receiptId(intent.request.clientMutationId), actorType: "user", actorId: actor.id,
     actorName: actor.name, source: actor.source, entity: "task", entityId: task.id, action: "task.status.request",
-    newValue: { fingerprint: fingerprint(actor.id, intent), context: task, toStatus: intent.toStatus, eventId } } });
+    newValue: { fingerprint: fingerprint(actor.id, intent), context: task, toStatus: intent.toStatus, eventId } },{kind:'receipt'});
 }

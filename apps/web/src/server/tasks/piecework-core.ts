@@ -1,3 +1,4 @@
+import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
@@ -12,6 +13,8 @@ import { withTaskTransaction, type TaskTransaction } from "./transaction";
 import { pieceworkRecipientError } from "./piecework-policy";
 import { pieceworkPlanRevision } from "./piecework-revision";
 import { readTaskPayroll, splitTaskPayroll, TaskPayrollTransferError } from "./task-payroll-transfer";
+import type {JournalPresentationHints,JournalValue} from '@/server/changelog/contract';
+import {operationJournalContext,journalSnapshot,journalUserReferences,systemJournalActor,TASK_JOURNAL_FIELDS} from './journal';
 
 const id = z.string().min(1).max(128);
 const participant = z.object({ userId: id, percent: z.string().trim().min(1).max(8) }).strict();
@@ -80,12 +83,12 @@ async function readReceipt(tx: Prisma.TransactionClient, actorId: string, uuid: 
     taskIds: result.taskIds as string[], recipientIds: result.recipientIds as string[], eventIds: [], repeated: true };
 }
 
-async function saveReceipt(tx: Prisma.TransactionClient, actor: DomainActor, uuid: string, hash: string, result: PieceworkSuccess, snapshot: unknown) {
-  await tx.changeLog.create({ data: {
+async function saveReceipt(tx: Prisma.TransactionClient, actor: DomainActor, uuid: string, hash: string, result: PieceworkSuccess, snapshot: unknown,journal:JournalPresentationHints) {
+  await writeChangeLogInTransaction(tx, {
     id: receiptId(uuid), actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
     entity: "taskAllocationGroup", entityId: result.groupId, action: "piecework.v1",
     newValue: JSON.parse(JSON.stringify({ fingerprint: hash, result, snapshot })) as Prisma.InputJsonValue,
-  } });
+  },{...journal,kind:'event'});
 }
 
 async function validateRecipients(tx: Prisma.TransactionClient, ids: string[], product: Parameters<typeof pieceworkRecipientError>[1]) {
@@ -151,6 +154,7 @@ export async function createPieceworkAllocationCore(actor: DomainActor, input: u
     const group = await tx.taskAllocationGroup.create({ data: { workId: work.id, quantity, budget, currency, budgetSource: "TASK_FIXED", createdById: current.id } });
     const allocation = allocatePiecework(budget, participants.map(row => row.percent));
     const taskIds: string[] = [], eventIds: string[] = [];
+    const taskSnapshots:Record<string,JournalValue>[]=[];
     for (const [index, row] of participants.entries()) {
       const task = await tx.task.create({ data: {
         projectId: product.projectId, productId: product.id, workId: work.id, title: data.title, type: data.type,
@@ -159,11 +163,15 @@ export async function createPieceworkAllocationCore(actor: DomainActor, input: u
         requiresPhoto: data.requiresPhoto || data.type === "Замер", dependencies: { create: dependencies.map(dependsOnId => ({ dependsOnId })) },
       } });
       taskIds.push(task.id);
+      taskSnapshots.push({taskId:task.id,...journalSnapshot(task,TASK_JOURNAL_FIELDS),dependencyIds:dependencies});
       const event = await tx.domainEvent.create({ data: { type: "task.assigned", actor: current.id, payload: { taskId: task.id, projectId: product.projectId, productId: product.id, assigneeId: row.userId } } });
       eventIds.push(event.id);
     }
     const result: PieceworkSuccess = { ok: true, groupId: group.id, taskIds, recipientIds: participants.map(row => row.userId), projectId: product.projectId, productId: product.id, eventIds, repeated: false };
-    await saveReceipt(tx, { ...actor, name: current.name }, data.clientMutationId, hash, result, { quantity, budget, currency, rate: work.priceSnapshot!.toString(), participants });
+    await saveReceipt(tx, { ...actor, name: current.name }, data.clientMutationId, hash, result, { quantity, budget, currency, rate: work.priceSnapshot!.toString(), participants },
+      {...await operationJournalContext(tx,{type:'taskAllocationGroup',id:group.id,label:`Распределение: ${data.title}`},[{productId:product.id,projectId:product.projectId,product}],
+        [...await journalUserReferences(tx,participants.map(row=>row.userId)),...taskIds.map(id=>({type:'task',id,label:data.title}))]),
+        before:null,after:{quantity,budget,currency,tasks:taskSnapshots}});
     return result;
   }));
 }
@@ -222,7 +230,13 @@ export async function transferPieceworkShareCore(actor: DomainActor, input: unkn
       tx.taskDependency.findMany({ where: { taskId: task.id }, select: { dependsOnId: true } }),
       tx.taskDependency.findMany({ where: { dependsOnId: task.id }, select: { taskId: true } }),
     ]);
-    await tx.task.update({ where: { id: task.id, splitRevision: data.expectedRevision }, data: {
+    // Общий task mutex уже удерживается; снимки не добавляют иной порядок row locks.
+    const dependentIds=[...new Set(dependents.map(edge=>edge.taskId))];
+    const dependentSnapshots=dependentIds.length?await tx.task.findMany({where:{id:{in:dependentIds}},orderBy:{id:'asc'},select:{
+      id:true,title:true,projectId:true,productId:true,project:{select:{id:true,number:true}},product:{select:{id:true,number:true}},
+      dependencies:{select:{dependsOnId:true,dependsOn:{select:{title:true}}}},
+    }}):[];
+    const updated=await tx.task.update({ where: { id: task.id, splitRevision: data.expectedRevision }, data: {
       allocationGroupId: allocationGroup.id, shareUnits: allocation.remainingUnits, shareAmount: allocation.remainingAmount, splitRevision: { increment: 1 },
     } });
     const child = await tx.task.create({ data: {
@@ -235,9 +249,24 @@ export async function transferPieceworkShareCore(actor: DomainActor, input: unkn
     await splitTaskPayroll(tx, { ...actor, name: current.name }, payroll, data.recipientId, child.id, percent, data.clientMutationId);
     const edges = [...predecessors.map(edge => ({ taskId: child.id, dependsOnId: edge.dependsOnId })), ...dependents.map(edge => ({ taskId: edge.taskId, dependsOnId: child.id }))];
     if (edges.length) await tx.taskDependency.createMany({ data: edges, skipDuplicates: true });
+    const currentDependencies=dependentSnapshots.length?await tx.taskDependency.findMany({where:{taskId:{in:dependentSnapshots.map(row=>row.id)}},select:{taskId:true,dependsOnId:true}}):[];
+    for(const dependent of dependentSnapshots){
+      const beforeIds=[...new Set(dependent.dependencies.map(edge=>edge.dependsOnId))].sort();
+      const afterIds=[...new Set(currentDependencies.filter(edge=>edge.taskId===dependent.id).map(edge=>edge.dependsOnId))].sort();
+      if(JSON.stringify(beforeIds)===JSON.stringify(afterIds))continue;
+      const references=[...dependent.dependencies.map(edge=>({type:'task',id:edge.dependsOnId,label:edge.dependsOn.title})),{type:'task',id:child.id,label:child.title}];
+      await writeChangeLogInTransaction(tx,{actorType:'user',actorId:current.id,actorName:current.name,source:actor.source,
+        entity:'task',entityId:dependent.id,action:'update',field:'dependencyIds',oldValue:{dependencyIds:beforeIds},newValue:{dependencyIds:afterIds}},
+        {...await operationJournalContext(tx,{type:'task',id:dependent.id,label:dependent.title},[dependent],references),
+          ...systemJournalActor(current,'Разделение предшествующей задачи')});
+    }
     const event = await tx.domainEvent.create({ data: { type: "task.split", actor: current.id, payload: { taskId: task.id, childTaskId: child.id, groupId: allocationGroup.id, recipientId: data.recipientId } } });
     const result: PieceworkSuccess = { ok: true, groupId: allocationGroup.id, taskIds: [task.id, child.id], recipientIds: [data.recipientId], projectId: task.projectId, productId: task.productId, eventIds: [event.id], repeated: false };
-    await saveReceipt(tx, { ...actor, name: current.name }, data.clientMutationId, hash, result, { sourceTaskId: task.id, expectedRevision: data.expectedRevision, previousUnits: group ? task.shareUnits : FULL_SHARE_UNITS, previousAmount: budget, ...allocation, rate: group ? null : work.priceSnapshot?.toString() });
+    await saveReceipt(tx, { ...actor, name: current.name }, data.clientMutationId, hash, result, { sourceTaskId: task.id, expectedRevision: data.expectedRevision, previousUnits: group ? task.shareUnits : FULL_SHARE_UNITS, previousAmount: budget, ...allocation, rate: group ? null : work.priceSnapshot?.toString() },
+      {...await operationJournalContext(tx,{type:'taskAllocationGroup',id:allocationGroup.id,label:`Разделение: ${task.title}`},[{...task,product}],
+        [...await journalUserReferences(tx,[task.assigneeId,data.recipientId]),{type:'task',id:task.id,label:task.title},{type:'task',id:child.id,label:child.title}]),
+        before:{tasks:[{taskId:task.id,...journalSnapshot(task,TASK_JOURNAL_FIELDS)}]},
+        after:{tasks:[{taskId:task.id,...journalSnapshot(updated,TASK_JOURNAL_FIELDS)},{taskId:child.id,...journalSnapshot(child,TASK_JOURNAL_FIELDS),dependencyIds:predecessors.map(row=>row.dependsOnId)}],dependentIds:dependents.map(row=>row.taskId)}});
     return result;
   }));
 }

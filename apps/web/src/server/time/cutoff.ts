@@ -1,3 +1,5 @@
+import { writeChangeLogInTransaction } from "@/server/changelog/writer";
+import {operationJournalContext,systemJournalActor} from '../tasks/journal';
 import { createHash } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { z } from "zod";
@@ -85,13 +87,16 @@ export async function applyTaskTimeCutoff(ports: TaskTimeCutoffPorts, plan: Task
       guard(changed.count === 1, "TASK_TIME_CUTOFF_TIMER_CONFLICT");
       const result = { id: timer.id, taskId: timer.taskId, userId: timer.userId, ...data, stoppedAt: data.stoppedAt.toISOString() };
       closed.push(result);
-      await tx.changeLog.create({ data: { id: `${receiptId}:${timer.id}`, actorType: "user", actorId: actor.id, actorName: actor.name, source: "api",
+      await writeChangeLogInTransaction(tx, { id: `${receiptId}:${timer.id}`, actorType: "user", actorId: actor.id, actorName: actor.name, source: "api",
         entity: "timeEntry", entityId: timer.id, action: "timer.retire", oldValue: JSON.parse(JSON.stringify(timer)) as Prisma.InputJsonValue,
-        newValue: { ...result, cutoffAt: cutoffAt.toISOString(), operationId: request.operationId }, createdAt: cutoffAt } });
+        newValue: { ...result, cutoffAt: cutoffAt.toISOString(), operationId: request.operationId }, createdAt: cutoffAt },
+        {...await operationJournalContext(tx,{type:'timeEntry',id:timer.id,label:'Историческая запись времени'},[{taskId:timer.taskId}]),
+          ...systemJournalActor(actor,'Завершение выведенных из использования таймеров'),before:timer,after:result});
     }
-    await tx.changeLog.create({ data: { id: receiptId, actorType: "user", actorId: actor.id, actorName: actor.name, source: "api",
+    await writeChangeLogInTransaction(tx, { id: receiptId, actorType: "user", actorId: actor.id, actorName: actor.name, source: "api",
       entity: "taskTimeCutoff", entityId: request.operationId, action: "retire",
-      newValue: { fingerprint: reviewedFingerprint, target: request.target, retiredRevision: request.retiredRevision, cutoffAt: cutoffAt.toISOString(), closed }, createdAt: cutoffAt } });
+      newValue: { fingerprint: reviewedFingerprint, target: request.target, retiredRevision: request.retiredRevision, cutoffAt: cutoffAt.toISOString(), closed }, createdAt: cutoffAt },
+      {entity:{type:'taskTimeCutoff',id:request.operationId,label:'Завершение исторических таймеров'},before:null,after:{cutoffAt:cutoffAt.toISOString(),closed}});
     await assertTarget(tx, ports, request);
     return { operationId: request.operationId, replayed: false, closedIds: closed.map(row => row.id), cutoffAt: cutoffAt.toISOString() };
   });

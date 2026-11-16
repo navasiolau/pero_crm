@@ -1,4 +1,5 @@
 "use server";
+import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 import { workVisibilityWhere } from "@/server/access/visibility";
 
 import { revalidatePath } from "next/cache";
@@ -11,6 +12,7 @@ import { revalidateProductPaths } from "@/server/products/revalidate";
 import { withTaskTransaction } from "@/server/tasks/transaction";
 
 import { MANAGER_ROLES, hasAnyRole } from "@/lib/roles";
+import {operationJournalContext,journalSnapshot,WORK_JOURNAL_FIELDS} from '../tasks/journal';
 
 // Server-owned tariff/unit snapshot and audit live in the atomic domain core.
 export async function addWork(input:AddWorkInput):Promise<{ok:boolean;error?:string}> {
@@ -45,7 +47,7 @@ export async function removeWork(
   }
 
   await tx.work.delete({ where: { id: workId } });
-  await tx.changeLog.create({ data: {
+  await writeChangeLogInTransaction(tx, {
     actorType: "user", source: "web",
     actorId: session.user.id,
     actorName: session.user.name ?? undefined,
@@ -53,7 +55,7 @@ export async function removeWork(
     entityId: workId,
     action: "delete",
     oldValue: { title: work.title, total: work.total?.toString() ?? null },
-  } });
+  },{...await operationJournalContext(tx,{type:'work',id:work.id,label:work.title},[work]),before:journalSnapshot(work,WORK_JOURNAL_FIELDS),after:null});
   return { ok: true as const, work };
   });
   if (!mutation.ok) return mutation;

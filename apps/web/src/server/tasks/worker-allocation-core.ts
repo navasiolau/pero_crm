@@ -1,3 +1,4 @@
+import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 import {createHash,randomUUID} from 'node:crypto';
 import {Prisma} from '@prisma/client';
 import {z} from 'zod';
@@ -9,6 +10,7 @@ import {allocatedWorkQuantity,quantityAtoms,quantityFromAtoms} from '@/lib/work-
 import {liveProductWhere,liveProjectWhere,liveChildWhere} from '@/server/access/live-entities';
 import type {DomainActor} from '@/server/projects/core';
 import {withTaskTransaction,type TaskTransaction} from './transaction';
+import {operationJournalContext,journalSnapshot,journalUserReferences,journalTaskReferences,TASK_JOURNAL_FIELDS} from './journal';
 
 const id=z.string().min(1).max(128);
 export const workerTaskAllocationSchema=z.object({projectId:id,productId:id,workId:id,assigneeId:id,title:z.string().trim().min(1).max(200),type:z.string().trim().min(1).max(80),quantity:z.string().trim().min(1).max(32),dueAt:z.string().min(1).max(64),estimateMinutes:z.number().int().min(1).max(525600).optional(),requiresPhoto:z.boolean().default(false),dependencyIds:z.array(id).max(100).default([]),clientMutationId:z.uuid()}).strict();
@@ -67,10 +69,13 @@ export async function createWorkerTaskAllocationCore(actor:DomainActor,input:unk
    dependencies=[...new Set([...selected,...parts].map(task=>task.id))];
   }
   const task=await tx.task.create({data:{id:randomUUID(),projectId:data.projectId,productId:data.productId,workId:work.id,title:data.title,type:data.type,quantity,status:'NEW',assigneeId:recipient.id,createdById:current.id,dueAt,estimateMinutes:null,requiresPhoto:data.requiresPhoto||data.type==='Замер',dependencies:{create:dependencies.map(dependsOnId=>({dependsOnId}))}}});
-  await tx.changeLog.create({data:{actorType:'user',actorId:current.id,actorName:current.name,source:actor.source,entity:'task',entityId:task.id,action:'create',newValue:{title:task.title,workId:work.id,productId:data.productId,quantity,assigneeId:recipient.id}}});
+  await writeChangeLogInTransaction(tx, {actorType:'user',actorId:current.id,actorName:current.name,source:actor.source,entity:'task',entityId:task.id,action:'create',newValue:{title:task.title,workId:work.id,productId:data.productId,quantity,assigneeId:recipient.id}},
+    {...await operationJournalContext(tx,{type:'task',id:task.id,label:task.title},[{...task,product,project}],
+      [...await journalUserReferences(tx,[recipient.id]),...await journalTaskReferences(tx,dependencies)]),
+      before:null,after:{...journalSnapshot(task,TASK_JOURNAL_FIELDS),dependencyIds:dependencies}});
   const event=await tx.domainEvent.create({data:{type:'task.assigned',actor:current.id,payload:{taskId:task.id,projectId:data.projectId,productId:data.productId,assigneeId:recipient.id}}});
   const result={ok:true as const,id:task.id,quantity,assigneeId:recipient.id,clientMutationId:data.clientMutationId,eventId:event.id};
-  await tx.changeLog.create({data:{id:`worker-task:${data.clientMutationId}`,actorType:'user',actorId:current.id,actorName:current.name,source:actor.source,entity:'task',entityId:task.id,action:'worker-allocation.receipt',newValue:JSON.parse(JSON.stringify({fingerprint,result})) as Prisma.InputJsonValue}});
+  await writeChangeLogInTransaction(tx, {id:`worker-task:${data.clientMutationId}`,actorType:'user',actorId:current.id,actorName:current.name,source:actor.source,entity:'task',entityId:task.id,action:'worker-allocation.receipt',newValue:JSON.parse(JSON.stringify({fingerprint,result})) as Prisma.InputJsonValue},{kind:'receipt'});
   return result;
  });}catch(error){return error instanceof AllocationRule?{ok:false,kind:error.kind,error:error.message}:{ok:false,kind:'failure',error:'Не удалось подтвердить назначение. Повторите прежний запрос.'};}
 }

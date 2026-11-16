@@ -1,4 +1,5 @@
 "use server";
+import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 import { productVisibilityWhere, taskVisibilityWhere } from "@/server/access/visibility";
 import {liveChildWhere} from "@/server/access/live-entities";
 import {liveProductWhere,liveProjectWhere} from "@/server/access/live-entities";
@@ -16,7 +17,6 @@ import { assertProjectMoneyCurrency } from "@/lib/internal-currency";
 import { auth } from "@/auth";
 import { formatAmount } from "@/lib/format";
 import { allocatedWorkQuantity, quantityAtoms, quantityFromAtoms } from "@/lib/work-shares";
-import { writeChangeLog } from "@/server/plugins/changelog";
 import { dispatchEvent, emitDomainEvent } from "@/server/plugins/events";
 import { notifyOrg, notifyPerson } from "@/server/notifications/notify";
 
@@ -26,6 +26,8 @@ import { withTaskTransaction } from "./transaction";
 import { changeTaskStatusCore } from "./completion-core";
 import { engineeringRecipientError, taskRecipientError } from "./share-policy";
 import { bumpEngineeringPoolRevision } from "@/server/product-stage-pay/core";
+import {deleteTaskInTransaction} from './delete-core';
+import {operationJournalContext,journalSnapshot,journalUserReferences,journalTaskReferences,systemJournalActor,TASK_JOURNAL_FIELDS} from './journal';
 
 const createSchema = z.object({
   clientMutationId: z.uuid().transform(value => value.toLowerCase()),
@@ -172,7 +174,7 @@ export async function createTask(
       },
     },
   });
-  await tx.changeLog.create({ data: {
+  await writeChangeLogInTransaction(tx, {
     actorType: "user",
     actorId: actor.id,
     actorName: actor.name,
@@ -181,7 +183,9 @@ export async function createTask(
     entityId: task.id,
     action: "create",
     newValue: { title: task.title, project: project.number },
-  } });
+  },{...await operationJournalContext(tx,{type:'task',id:task.id,label:task.title},[{...task,project}],
+    [...await journalUserReferences(tx,[task.assigneeId]),...await journalTaskReferences(tx,dependencies.ids)]),
+    before:null,after:{...journalSnapshot(task,TASK_JOURNAL_FIELDS),dependencyIds:dependencies.ids}});
   const event = await tx.domainEvent.create({ data: { type: "task.assigned", actor: actor.id,
     payload: { taskId: task.id, projectId: project.id, assigneeId: task.assigneeId } } });
   await recordTaskCreateReceipt(actor, data, task.id, tx);
@@ -249,9 +253,9 @@ export async function updateTask(
   const mutation = await withTaskTransaction(async (tx) => {
   const task = await tx.task.findUnique({
     where: {...liveChildWhere, id: taskId, AND: [taskVisibilityWhere(session.user)] },
-    include: { project: { select: { id: true, number: true, currency: true } }, product: { select: { engineerId: true, status: true, projectId: true } },
+    include: { project: { select: { id: true, number: true, currency: true } }, product: { select: { id:true,number:true,engineerId: true, status: true, projectId: true } },
       work: { select: { paymentKind: true, projectId: true, productId: true, stagePayPoolId: true, stagePayPool: { select: { id: true, kind: true, state: true, productId: true } } } },
-      _count: { select: { payrollEntries: true } } },
+      dependencies:{select:{dependsOnId:true}},_count: { select: { payrollEntries: true } } },
   });
   if (!task) return { ok: false as const, error: "Задача не найдена" };
   if (task.work?.paymentKind === "LEGACY" && data.assigneeId !== undefined && data.assigneeId !== task.assigneeId)
@@ -295,7 +299,7 @@ export async function updateTask(
   if (data.productId) {
     product = await tx.product.findFirst({
       where: {...liveProductWhere, id: data.productId, projectId: task.project.id, AND: [productVisibilityWhere(session.user)] },
-      select: { engineerId: true, status: true, projectId: true },
+      select: { id:true,number:true,engineerId: true, status: true, projectId: true },
     });
     if (!product) return { ok: false as const, error: "Изделие не найдено в этом проекте" };
   }
@@ -344,7 +348,7 @@ export async function updateTask(
 
   const dependencies = data.dependencyIds === undefined ? null : await expandDependencies(tx, data.dependencyIds, taskId);
   if (dependencies?.error) return { ok: false as const, error: dependencies.error };
-  await tx.task.update({
+  const updated=await tx.task.update({
     where: { id: taskId },
     data: {
       title: data.title,
@@ -365,13 +369,20 @@ export async function updateTask(
     await tx.taskDependency.createMany({ data: dependencies.ids.map((dependsOnId) => ({ taskId, dependsOnId })) });
   }
   if (engineeringPoolId) await bumpEngineeringPoolRevision(tx, engineeringPoolId);
-  await tx.changeLog.create({ data: {
+  const journal=await operationJournalContext(tx,{type:'task',id:task.id,label:updated.title},[task,{...updated,project:task.project}],
+    [...await journalUserReferences(tx,[task.assigneeId,updated.assigneeId]),...await journalTaskReferences(tx,[...(task.dependencies??[]).map(edge=>edge.dependsOnId),...(dependencies?.ids??[])])]);
+  const beforeSnapshot={...journalSnapshot(task,TASK_JOURNAL_FIELDS),dependencyIds:(task.dependencies??[]).map(edge=>edge.dependsOnId).sort()};
+  const afterSnapshot={...journalSnapshot(updated,TASK_JOURNAL_FIELDS),status:task.status,dependencyIds:[...(dependencies?.ids??(task.dependencies??[]).map(edge=>edge.dependsOnId))].sort()};
+  await writeChangeLogInTransaction(tx, {
     actorType: "user", actorId: session.user.id, actorName: session.user.name ?? undefined,
     entity: "task", entityId: taskId, action: "update", source: "web",
     oldValue: JSON.parse(JSON.stringify({ title: task.title, type: task.type, assigneeId: task.assigneeId,
       dueAt: task.dueAt, status: task.status })) as Prisma.InputJsonValue,
     newValue: JSON.parse(JSON.stringify({ ...data, status: newStatus })) as Prisma.InputJsonValue,
-  } });
+  },{...journal,before:beforeSnapshot,after:afterSnapshot,kind:JSON.stringify(beforeSnapshot)===JSON.stringify(afterSnapshot)?'receipt':'event'});
+  if(newStatus!==task.status)await writeChangeLogInTransaction(tx,{actorType:'user',actorId:session.user.id,actorName:session.user.name,source:'web',entity:'task',entityId:task.id,
+    action:'status',field:'status',oldValue:task.status,newValue:newStatus},
+    {...journal,...systemJournalActor({id:session.user.id,name:session.user.name},'Назначение исполнителя задачи')});
   return { ok: true as const, task, becameAssigned };
   });
   if (!mutation.ok) return mutation;
@@ -485,41 +496,10 @@ export async function deleteTask(
   if (!hasAnyRole(session.user.roles, MANAGER_ROLES)) {
     throw new Error("Недостаточно прав");
   }
-  const mutation = await withTaskTransaction(async (tx) => {
-  const task = await tx.task.findUnique({
-    where: {...liveChildWhere, id: taskId, AND: [taskVisibilityWhere(session.user)] },
-    include: { project: { select: { id: true, number: true, currency: true } }, work: { select: { paymentKind: true } }, _count: { select: { payrollEntries: true, timeEntries: true } } },
-  });
-  if (!task) return { ok: false as const, error: "Задача не найдена" };
-  if (task.work?.paymentKind === "ENGINEERING") return { ok: false as const, error: "Задача входит в распределение инженерного фонда — её долю можно передать или перераспределить" };
-  if (task.allocationGroupId) return { ok: false as const, error: "Отдельную долю общей работы удалить нельзя — её объём и бюджет должны сохраниться" };
-  if (task.status === "DONE" || task._count.payrollEntries > 0) {
-    return {
-      ok: false as const,
-      error: "Выполненную задачу удалить нельзя — там начисления и история",
-    };
-  }
-  if (task._count.timeEntries > 0) return { ok: false as const, error: "Задачу с историческими записями времени удалить нельзя" };
-
-  await tx.taskDependency.deleteMany({
-      where: { OR: [{ taskId }, { dependsOnId: taskId }] },
-    });
-  await tx.file.updateMany({ where: { taskId }, data: { taskId: null } });
-  await tx.task.delete({ where: { id: taskId } });
-  return { ok: true as const, task };
-  });
+  const mutation = await withTaskTransaction(tx => deleteTaskInTransaction(tx, {id:session.user.id,name:session.user.name??'',roles:session.user.roles,source:'web'}, taskId));
   if (!mutation.ok) return mutation;
   const { task } = mutation;
 
-  await writeChangeLog({
-    actorType: "user",
-    actorId: session.user.id,
-    actorName: session.user.name ?? undefined,
-    entity: "task",
-    entityId: taskId,
-    action: "delete",
-    oldValue: { title: task.title, project: task.project.number },
-  });
   revalidatePath(`/projects/${task.project.id}`);
   await revalidateProductPaths(task.productId);
   revalidatePath("/tasks");
