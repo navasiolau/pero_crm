@@ -9,4 +9,4 @@
 ## 2. Приёмка
 
 - [x] 2.1 Выполнить локальную браузерную проверку actual-компонентов, TypeScript, scoped ESLint и strict OpenSpec; записать измерения и просмотренные скриншоты в evidence.
-- [ ] 2.2 Root подтверждает фактически развёрнутый staging SHA/образ/health и desktop/mobile сценарии после штатного CI; записать отдельный receipt.
+- [x] 2.2 Root подтверждает фактически развёрнутый staging SHA/образ/health и desktop/mobile сценарии после штатного CI; записать отдельный receipt.
