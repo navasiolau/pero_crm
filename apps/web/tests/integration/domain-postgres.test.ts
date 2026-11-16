@@ -22,7 +22,7 @@ import { pieceworkPlanRevision } from "../../src/server/tasks/piecework-revision
 import { allocatedWorkQuantity, moneyAtoms } from "../../src/lib/work-shares";
 
 type Db = PrismaClient | Prisma.TransactionClient;
-type MutationProbe = { taskId?: string; workerId?: string; workId?: string; projectId?: string; cashId?: string; paymentId?: string; receiptId?: string; payment: boolean;
+type MutationProbe = { taskId?: string; workerId?: string; workId?: string; projectId?: string; cashId?: string; paymentId?: string; payrollId?: string; receiptId?: string; payment: boolean;
   actor: DomainActor; mode?: "lost-ack" | "failed-proof"; fault?: "payroll" | "audit" | "event" | "receipt";
   calls: number; writes: number; partials: number; effects: string[]; connections: { proof: boolean; pid: number }[]; owned: Record<string, string[]>; creates: Set<string> };
 type Context = { actor: DomainActor; db: Db; unauthenticated?: boolean; onRequested?: (pid: number) => void;
@@ -71,9 +71,25 @@ function mutationTx(tx: Prisma.TransactionClient, probe: MutationProbe, proof: b
     return "AND" in where && (Array.isArray(where.AND) ? where.AND : [where.AND]).some(hasTaskId);
   };
   return new Proxy(tx, { get(db, table) {
-    if (table === "$queryRaw") return (strings: TemplateStringsArray, ...values: unknown[]) => {
-      assert.equal(strings.join("?").trim(), "SELECT 1 AS locked FROM pg_advisory_xact_lock(18435, 55001)", "CI133_WRITE_STOP");
-      assert.equal(values.length, 0, "CI133_WRITE_STOP"); return db.$queryRaw(strings, ...values);
+    if (table === "$queryRaw") return (query: TemplateStringsArray | Prisma.Sql, ...values: unknown[]) => {
+      const tagged = Array.isArray(query), strings = tagged ? query : (query as Prisma.Sql).strings;
+      const parameters = tagged ? values : (query as Prisma.Sql).values;
+      assert.ok(Array.isArray(strings) && strings.every(part => typeof part === "string"), "CI133_WRITE_STOP");
+      assert.ok(Array.isArray(parameters) && strings.length === parameters.length + 1, "CI133_WRITE_STOP");
+      if (!tagged) assert.equal(values.length, 0, "CI133_WRITE_STOP");
+      const sql = strings.join("?").trim();
+      if (sql === "SELECT 1 AS locked FROM pg_advisory_xact_lock(18435, 55001)") {
+        assert.equal(parameters.length, 0, "CI133_WRITE_STOP");
+      } else if (sql === 'SELECT id,title FROM "Work" WHERE id=?') {
+        assert.equal(probe.payment, false, "CI133_WRITE_STOP");
+        assert.ok(typeof probe.workId === "string" && probe.owned.Work?.includes(probe.workId), "CI133_WRITE_STOP");
+        assert.deepEqual(parameters, [probe.workId], "CI133_WRITE_STOP");
+      } else if (sql === 'SELECT id,name FROM "User" WHERE id IN (?)') {
+        assert.equal(probe.payment, false, "CI133_WRITE_STOP");
+        assert.ok(probe.owned.User?.includes(probe.actor.id), "CI133_WRITE_STOP");
+        assert.deepEqual(parameters, [probe.actor.id], "CI133_WRITE_STOP");
+      } else assert.fail("CI133_WRITE_STOP");
+      return tagged ? db.$queryRaw(query as TemplateStringsArray, ...values) : db.$queryRaw(query as Prisma.Sql);
     };
     if (table === "$executeRaw" || table === "timeEntry") throw Error("CI190_RETIRED_TIME_ACCESS");
     assert.ok(!["$executeRawUnsafe", "$queryRawUnsafe"].includes(String(table)), "CI133_WRITE_STOP");
@@ -105,12 +121,30 @@ function mutationTx(tx: Prisma.TransactionClient, probe: MutationProbe, proof: b
           assert.equal(data?.currency, "BYN"); assert.equal(data?.projectId, null); assert.equal(data?.direction, "INCOME");
           assert.equal(String(data?.amount), "100.25"); assert.equal(String(data?.bynAmount), "100.25");
         } else if (table === "changeLog" && method === "create") {
-          assert.equal(data?.actorId, probe.actor.id); assert.equal(data?.entity, probe.payment ? "payment" : "task");
-          assert.equal(data?.entityId, probe.payment ? probe.paymentId : probe.taskId);
-          if (data.action === "task.status.request" || data.action === "request") {
-            assert.equal(data.action, probe.payment ? "request" : "task.status.request", "CI133_WRITE_STOP");
-            assert.equal(typeof probe.receiptId, "string", "CI133_WRITE_STOP"); assert.equal(data.id, probe.receiptId, "CI133_WRITE_STOP");
-          } else assert.ok(["status", "create"].includes(String(data.action)), "CI133_WRITE_STOP");
+          assert.equal(data?.actorId, probe.actor.id);
+          if (!probe.payment && data.entity === "payrollEntry") {
+            assert.equal(data.action, "accrue", "CI133_WRITE_STOP");
+            assert.ok(typeof probe.payrollId === "string" && probe.owned.PayrollEntry?.includes(probe.payrollId), "CI133_WRITE_STOP");
+            assert.equal(data.entityId, probe.payrollId, "CI133_WRITE_STOP");
+            assert.equal(data.actorType, "user", "CI133_WRITE_STOP"); assert.equal(data.source, probe.actor.source, "CI133_WRITE_STOP");
+            assert.ok(data.newValue && typeof data.newValue === "object" && !Array.isArray(data.newValue), "CI133_WRITE_STOP");
+            const raw = data.newValue as Record<string, unknown>;
+            assert.equal(raw.userId, probe.workerId, "CI133_WRITE_STOP"); assert.equal(raw.taskId, probe.taskId, "CI133_WRITE_STOP");
+            assert.equal(raw.workId, probe.workId, "CI133_WRITE_STOP"); assert.equal(raw.projectId, probe.projectId, "CI133_WRITE_STOP");
+            assert.equal(raw.scheme, "PIECE", "CI133_WRITE_STOP"); assert.equal(raw.currency, "BYN", "CI133_WRITE_STOP");
+            assert.equal(raw.amount, "100", "CI133_WRITE_STOP"); assert.equal(raw.bynAmount, "100", "CI133_WRITE_STOP");
+            const presentation = data.presentation as { actor?: { type?: string }; initiator?: { id?: string }; contexts?: { kind: string; id: string }[] } | undefined;
+            assert.equal(presentation?.actor?.type, "system", "CI133_WRITE_STOP"); assert.equal(presentation?.initiator?.id, probe.actor.id, "CI133_WRITE_STOP");
+            assert.equal(probe.owned.Product?.length, 1, "CI133_WRITE_STOP");
+            assert.deepEqual(presentation?.contexts?.map(({ kind, id }) => ({ kind, id })), [{ kind: "product", id: probe.owned.Product[0] }], "CI133_WRITE_STOP");
+          } else {
+            assert.equal(data.entity, probe.payment ? "payment" : "task");
+            assert.equal(data.entityId, probe.payment ? probe.paymentId : probe.taskId);
+            if (data.action === "task.status.request" || data.action === "request") {
+              assert.equal(data.action, probe.payment ? "request" : "task.status.request", "CI133_WRITE_STOP");
+              assert.equal(typeof probe.receiptId, "string", "CI133_WRITE_STOP"); assert.equal(data.id, probe.receiptId, "CI133_WRITE_STOP");
+            } else assert.ok(["status", "create"].includes(String(data.action)), "CI133_WRITE_STOP");
+          }
         } else if (table === "domainEvent" && method === "create") {
           assert.equal(data?.actor, probe.actor.id); assert.equal(data?.type, probe.payment ? "payment.created" : "task.statusChanged");
         } else assert.fail("CI133_WRITE_STOP");
@@ -132,6 +166,7 @@ function mutationTx(tx: Prisma.TransactionClient, probe: MutationProbe, proof: b
             assert.equal(await tx.task.count({ where: { id: probe.taskId, status: "DONE" } }), 1);
             assert.equal(await tx.timeEntry.count({ where: { taskId: probe.taskId } }), 0);
             if (probe.fault !== "payroll") assert.equal(await tx.payrollEntry.count({ where: { taskId: probe.taskId } }), 1);
+            if (probe.fault !== "payroll") assert.equal(await tx.changeLog.count({ where: { entity: "payrollEntry", entityId: probe.payrollId, action: "accrue" } }), 1);
             if (probe.fault === "event" || probe.fault === "receipt") assert.equal(await tx.changeLog.count({ where: { entityId: probe.taskId, action: "status" } }), 1);
             if (probe.fault === "receipt") assert.equal(await tx.domainEvent.count({ where: { payload: { path: ["taskId"], equals: probe.taskId } } }), 1);
           }
@@ -145,6 +180,9 @@ function mutationTx(tx: Prisma.TransactionClient, probe: MutationProbe, proof: b
         }
         if (table === "payment" && method === "create") {
           assert.ok(result && typeof result === "object" && "id" in result && typeof result.id === "string"); probe.paymentId = result.id;
+        }
+        if (table === "payrollEntry" && method === "create") {
+          assert.ok(result && typeof result === "object" && "id" in result && typeof result.id === "string"); probe.payrollId = result.id;
         }
         return result;
       };
@@ -1188,6 +1226,7 @@ test("mutation/real-COMMIT-lost-ACK-UNKNOWN-readonly-peer-replay-and-five-partia
     const failedTask = await task(`fault-${fault}`), before = await nativeSnapshot(fixture.db), probe = makeProbe(c.manager, failedTask.id, { fault });
     await assert.rejects(status(probe, "DONE", { clientMutationId: randomUUID(), expectedActorId: c.manager.id }), /CI133_INJECTED_MANDATORY_WRITE/);
     assert.equal(probe.partials, 1); assert.equal(probe.calls, 2); assert.deepEqual(await nativeSnapshot(fixture.db), before);
+    if (probe.payrollId) assert.equal(await fixture.db.changeLog.count({ where: { entity: "payrollEntry", entityId: probe.payrollId, action: "accrue" } }), 0, "PAYROLL_AUDIT_MUST_ROLL_BACK");
   }
   const payment = (clientMutationId: string) => ({ direction: "INCOME" as const, amount: 100.25, currency: "BYN", cashAccountId: cash.id,
     // Отдельный fixture месяц сохраняет receipts и real COMMIT, не попадая в turnover vectors за 2000-01.
