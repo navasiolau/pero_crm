@@ -57,6 +57,7 @@ export function DataTable<TRow extends { id: string }>({
   searchPlaceholder = "Поиск…",
   emptyText = "Ничего не найдено",
   onRowClick,
+  rowAriaLabel,
   rowClassName,
   defaultPageSize = 10,
   server,
@@ -67,6 +68,8 @@ export function DataTable<TRow extends { id: string }>({
   searchPlaceholder?: string;
   emptyText?: string;
   onRowClick?: (row: TRow) => void;
+  /** Опциональная клавиатурная активация строки с понятным доступным названием. */
+  rowAriaLabel?: (row: TRow) => string;
   /** Доп. класс строки по условию (напр. подсветка нехватки материалов) */
   rowClassName?: (row: TRow) => string | undefined;
   defaultPageSize?: number;
@@ -187,11 +190,13 @@ export function DataTable<TRow extends { id: string }>({
             </select>
           </label>
           {pageRows.map((row) => <article key={row.id} data-slot="mobile-list-card"
+            aria-label={rowAriaLabel?.(row)}
             tabIndex={onRowClick ? 0 : undefined}
             className={cn("rounded-xl border p-4", onRowClick && "cursor-pointer focus-visible:outline-ring", rowClassName?.(row))}
             onClick={event => {
               // Ссылки и кнопки внутри карточки сохраняют собственное действие.
               if (event.target instanceof Element && event.target.closest("a,button,input,select,textarea,[role='button']")) return;
+              if (rowAriaLabel) event.currentTarget.focus({ preventScroll: true });
               onRowClick?.(row);
             }}
             onKeyDown={event => {
@@ -241,8 +246,19 @@ export function DataTable<TRow extends { id: string }>({
             {pageRows.map((row) => (
               <TableRow
                 key={row.id}
-                className={cn(onRowClick && "cursor-pointer", rowClassName?.(row))}
-                onClick={() => onRowClick?.(row)}
+                aria-label={rowAriaLabel?.(row)}
+                tabIndex={rowAriaLabel && onRowClick ? 0 : undefined}
+                className={cn(onRowClick && "cursor-pointer", rowAriaLabel && "focus-visible:outline-ring", rowClassName?.(row))}
+                onClick={event => {
+                  if (rowAriaLabel && event.target instanceof Element && event.target.closest("a,button,input,select,textarea,[role='button']")) return;
+                  if (rowAriaLabel) event.currentTarget.focus({ preventScroll: true });
+                  onRowClick?.(row);
+                }}
+                onKeyDown={event => {
+                  if (rowAriaLabel && onRowClick && event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) {
+                    event.preventDefault(); onRowClick(row);
+                  }
+                }}
               >
                 {columns.map((column) => (
                   <TableCell key={column.id} className={column.className}>

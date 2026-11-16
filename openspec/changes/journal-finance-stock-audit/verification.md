@@ -48,3 +48,7 @@ Root подтвердил `local227-complete`: PASS, сохранность сч
 На local склад UNINITIALIZED: подтверждён отказ без движений, фаза не менялась. Положительные material/article/payment/raw-replay/logistics сценарии и оба immutable guard отказа прошли. Read-only проверка root обнаружила ACTIVE на staging; положительные stock/каскадная отмена проверяются там после штатного выпуска №227. Actual staging-приёмка остаётся открытой в3.2.
 
 Root разрешил отдельный commit227 и обычное слияние принятого `origin/staging` `a632e1e36326c61f157d3de5d506e533fe0b3ff2` в ветку задачи. Публикацию и интеграцию в staging выполняет root; агент их не запускает.
+
+## Совместимость с принятым staging
+
+Собственный commit №227: `7855a099e22c5647cc4a3787516a470eb1bd5c8e`. В обычном merge `a632e1e3` единственный конфликт presentation.ts разрешён точечно: общий public formatter export/recursion №222, процентные шкалы №227 и принятый rawBefore/rawAfter diff сохранены вместе. Combined targeted: **140/140 PASS**, полный TypeScript PASS, formatter ESLint и strict OpenSpec PASS. Actual staging №227 и положительная stock-ветка ещё ожидают root-публикации и runtime-проверки.
