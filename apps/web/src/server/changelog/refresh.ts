@@ -1,6 +1,7 @@
 import type {JournalEntryInput,JournalPresentation} from './contract';
 import {buildJournalPresentation,classifyJournalEntry,formatJournalDisplayValue,parseJournalPresentation} from './presentation';
-import {journalActionLabel,journalFieldLabel,journalSourceLabel} from './labels';
+import {journalFieldLabel,journalSourceLabel} from './labels';
+import {legacyJournalActionLabel} from './legacy-kp';
 
 const object=(value:unknown)=>value!==null&&typeof value==='object'&&!Array.isArray(value);
 function collapsedApiToken(entry:JournalEntryInput,presentation:JournalPresentation):boolean{
@@ -20,7 +21,7 @@ export function refreshJournalPresentation(entry:JournalEntryInput,input:Journal
  }
  const classification=classifyJournalEntry(entry);
  const result:JournalPresentation={...presentation,kind:classification==='event'?presentation.kind:classification,
-  action:{...presentation.action,label:journalActionLabel(presentation.action.code)},source:{...presentation.source,label:journalSourceLabel(presentation.source.code)},
+  action:{...presentation.action,label:legacyJournalActionLabel(entry)},source:{...presentation.source,label:journalSourceLabel(presentation.source.code)},
   changes:presentation.changes.map(change=>({...change,label:journalFieldLabel(change.path),
    before:formatJournalDisplayValue(change.before,change.path,presentation.entity.type),after:formatJournalDisplayValue(change.after,change.path,presentation.entity.type)})),
  };

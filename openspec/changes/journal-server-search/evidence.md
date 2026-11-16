@@ -59,3 +59,13 @@ Root принял исправление на фактически развёр�
 Native214 в действующем web под W07: run `f1af6fb0-bc5d-41d4-bbf1-f5060179cf66`, rawVerified214, readinessParity52, refreshWrites107/повтор0, rollback=true/fixtures0 — PASS. Полный source audit5529 сохранён при backfill. Runtime измерения сохранили total2370/page20: первый прогон 1145–1364 мс, повтор 1003/996/870/859 мс; options534мс. Задержка зависит от текущей нагрузки; прежние 8573 мс устранены, результаты не ограничены200 строками. Receipt `D:/Projects/pero_crm_v2/.playwright-mcp/journal-221-228/accepted-222.json`.
 
 HTTP-интеграция новых actions с интерфейсом принимается в №223; финальный refreshAll после №228 обновит поздние словари без изменения raw истории.
+
+## Ограниченная legacy поправка после UI-проверки №224
+
+Baseline safe census показал основные generic actions: kp.api.command=869 и kp.api.media=176. Их транспортный envelope ошибочно давал десятки business changes. Добавлены подтверждённые action/entity aliases, а для API label выбирается по сохранённому kind. Неизвестные QA записи не скрываются; явные qa namespace обозначены служебной проверкой, неизвестные business codes остаются явно неизвестными.
+
+Legacy CP create/update обогащается только единственным inner receipt `kp:mutation:<64hex>` с совпадающими actor/proposal/revision и projectId, когда он сохранён в primary. Перед снимком previous revision должны однозначно согласоваться все сохранённые состояния; иначе beforeKnown=false. Современные явные domain snapshots не заменяются. Полный after-state сохраняется в primary technical.legacyKp, а raw события остаются без изменений.
+
+API wrapper скрывается только при exact operation hash и доказанном counterpart; noOp подтверждается внутренней квитанцией. Единственный старый PDF request сохраняется с понятным названием и безопасным результатом, без ложного diff envelope. Media/upload требует точной job/media/file связи; недоказанные записи остаются видимыми. Файл, источник, исходные actor/oldValue/newValue и деньги не менялись.
+
+Focused RED: 4 FAIL / 1 PASS до подключения resolver. GREEN после реализации: 6/6 legacy cases; весь журнал **54/54 PASS**, scoped ESLint и diff-check PASS. Проверены длинное полное состояние, ambiguous previous/current snapshots, no-op, sole PDF, чужой actor/project, malformed receipt ID, сохранность rich hints и raw данных, точный media companion и видимость QA. Субагент не выполнял изменения БД. Финальный общий CI и runtime refresh/приёмка остаются за root.

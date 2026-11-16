@@ -6,6 +6,7 @@ import {legacyBusinessEntry,journalBusinessChanges} from './legacy-values';
 import {deriveLegacyJournalHints,legacyReferenceOrigins,journalReferenceFieldType,referenceKey} from './reference-context';
 import {loadJournalReferences,type JournalReferenceDb} from './reference-db';
 import type {JournalResolvedEntry} from './reader-core';
+import {applyLegacyKpPresentation,loadLegacyKpEvidence} from './legacy-kp';
 
 export type JournalStoredEntry=JournalEntryInput&{id:string;createdAt:Date;presentation:unknown;searchText:string|null};
 
@@ -16,6 +17,7 @@ function withIdentity(presentation:JournalPresentation,entry:JournalStoredEntry)
 export async function resolveJournalEntries(db:JournalReferenceDb,rows:JournalStoredEntry[],enrichStored=false):Promise<JournalResolvedEntry[]>{
  const legacy=rows.filter(row=>enrichStored||!parseJournalPresentation(row.presentation));
  const references=legacy.length?await loadJournalReferences(db,legacy):new Map();
+ const kpEvidence=await loadLegacyKpEvidence(db,rows);
  return rows.map(entry=>{
   let presentation=parseJournalPresentation(entry.presentation);
   const generated=buildJournalPresentation(entry);
@@ -67,6 +69,7 @@ export async function resolveJournalEntries(db:JournalReferenceDb,rows:JournalSt
    const saved=prior!==null&&typeof prior==='object'&&!Array.isArray(prior)?prior:{};
    presentation={...presentation,technical:{...presentation.technical,referenceResolution:{...saved,...appliedOrigins}}};
   }
+  presentation=applyLegacyKpPresentation(entry,presentation,kpEvidence);
   presentation=withIdentity(presentation,entry);
   const safe=parseJournalPresentation(presentation);if(!safe)throw Error('JOURNAL_RESOLUTION_INVALID');presentation=safe;
   return {id:entry.id,createdAt:entry.createdAt,presentation,searchText:buildJournalSearchText(entry,presentation)};
