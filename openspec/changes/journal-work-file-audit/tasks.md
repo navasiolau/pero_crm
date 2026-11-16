@@ -14,4 +14,4 @@
 ## 3. Приёмка
 
 - [x] 3.1 Выполнить targeted/full web tests, tsc/lint/OpenSpec; подготовить bounded rollback-only native helper и evidence.
-- [ ] 3.2 Получить независимое root review и приёмку фактического staging SHA/образа/сценариев; записать receipt.
+- [x] 3.2 Получить независимое root review и приёмку фактического staging SHA/образа/сценариев; записать receipt.

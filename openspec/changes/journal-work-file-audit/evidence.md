@@ -26,4 +26,19 @@
 
 Root подтвердил финальный local native226 PASS на PostgreSQL с `SET CONSTRAINTS ALL IMMEDIATE` перед rollback: работа, создание/завершение задач, System начисление, replay, файлы/отвязка, входящие зависимости, имя удалённого исполнителя, split между контекстами, деньги и audit rollback. Все собственные строки откатились, общий audit count сохранился. Evidence root: `local226-complete.stdout.private.log`.
 
-Root разрешил локальный commit №226 и обычный merge принятого `origin/staging` `a632e1e36326c61f157d3de5d506e533fe0b3ff2` для подготовки. Push и merge в staging выполняет root после предшествующей приёмки; staging-пункт остаётся pending.
+Root разрешил локальный commit №226 и обычный merge принятого `origin/staging` `a632e1e36326c61f157d3de5d506e533fe0b3ff2` для подготовки. На этом этапе staging-пункт оставался pending; публикацией и интеграцией управлял root.
+
+## CI fixture и финальная staging-приёмка
+
+На предыдущем CI cut `fa614229` native mutation-сценарий остановился на `CI133_WRITE_STOP`: прежний fixture разрешал только advisory lock и не учитывал новые точные metadata reads. В `9607a8f1` разрешены исключительно Work lookup с собственным `workId` и User lookup текущего собственного actor. Новый payroll audit разрешён только для ID фактически созданной fenced PayrollEntry, с проверкой raw привязок/суммы и System/инициатора. Readonly proof, точные receipt guards и пять partial rollback сценариев сохранены; добавлена явная проверка отката payroll audit. Guard/regression **9/9 PASS**, TSC/lint PASS; история первоначального отказа не заменяет успешную проверку.
+
+- Фактически развёрнутый SHA: `e3f99ff05b97f3999fc8fbf74472e9077d769a3b`. Штатный [CI 43796217344](https://github.com/navasiolau/pero_crm/actions/runs/43796217344): **7/7 SUCCESS**.
+- Web image: `sha256:7a08b609684a03aad93249ca9f190ef688571fbe5de2b3bd163a6443dba0cc2a`; renderer: `sha256:8fb1087afd508f9506952c4b16279adeccc7a27df353472eff485edf7770a19f`. Root подтвердил оба healthy и HTTP 200.
+- Сохранены DB container `27b8f7342b9d722ab8788e137b37b03a3037442da038c5b8b98dbb30245b8b6a`, start `2026-11-10T18:42:15.758341834Z`, volume `crm-staging_pgdata`, W07 SHA `27e3bcd727d9e83170c76a254806fde42590da76cea30c9e1441d873df680139`.
+- Прочитан root receipt [stage-final226b.response.private.json](D:/Projects/pero_crm_v2/.playwright-mcp/journal-221-228/stage-final226b.response.private.json): `exitCode=0`, `status=PASS`, `kind=staging`, `rollback=true`, `auditCountPreserved=true`. SHA-256 receipt: `f015b115c391055a136cf72c2eafad8a26fb618ca030fe0fb99d46d6144838b6`; bundle SHA-256: `5b2eb0240fb660bf1c0271178d434efd60eeabf78d6351e00da49c2dbc398a86`.
+- Подтверждены все проверки receipt: `work-full-diff`, `task-create`, `system-payroll`, `payroll-replay`, `file-metadata`, `file-detach`, `dependent-task-audit`, `file-delete-replay`, `deleted-assignee-label`, `split-cross-owner-dependencies`, `split-replay-money`, `delete-audit-rollback`.
+- Перед rollback выполнен `SET CONSTRAINTS ALL IMMEDIATE`; собственные тестовые строки откатились. Перед финальными native-проверками: raw audit count **5529**, hash `64bcf0448dabe8e594a5ffa37da4aa1a`. [final-refresh-state.json](D:/Projects/pero_crm_v2/.playwright-mcp/journal-221-228/final-refresh-state.json) на том же SHA подтверждает `scanned=5529`, `updated=5529`, `rawVerified=5529`, `remaining=0`; исходные события сохранены.
+
+Ранний standalone QA bundle отказал до выполнения: отсутствовал `next/cache.js`, хотя приложение использует скомпилированные Next chunks. QA-only import alias бросает ошибку при вызове `revalidatePath`; `beforeExit` дополнительно завершает процесс с ошибкой при ненулевом счётчике. В успешной приёмке вызовов **0**, production-код не изменялся. Это DB/core proof, а не проверка Next cache invalidation.
+
+Принята DB/core часть №226. Финальные браузерные сценарии и авторизация №228 остаются отдельной приёмкой root; настоящая запись их не объявляет завершёнными. Закрытые legacy time/share interfaces и внешние cleanup-процессы не запускались.
