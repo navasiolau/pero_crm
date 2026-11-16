@@ -58,4 +58,3 @@ Root проверил реальные страницы в Chromium: пять к
 Существующие ADMIN/DIRECTOR/MANAGER/ENGINEER/ACCOUNTANT/PROCUREMENT/WORKER/MOUNTER подтверждены через фактический `/api/auth/session`. ADMIN получил данные list/detail/options, в том числе через другой существующий route `/notifications`. Остальные7 ролей не получили данных при21 прямом вызове: forwarding Next.js возвращал пустой `{}` HTTP200, это не обозначается как403. Общий route перенаправляет запрещённые роли. Необработанных JS ошибок0, непредусмотренных мутаций0.
 
 Приватный receipt: `D:/Projects/pero_crm_v2/.playwright-mcp/journal-221-228/browser223-accepted/receipt.json`. Это проверка подписанных read-only сессий существующих пользователей; парольный вход/выход и отдельный HTTP-coordinator относятся к №228. Первая и вторая попытки harness уточнили транспортный ожидаемый результат (Flight/empty forwarding), не скрывают ошибки приложения.
-
