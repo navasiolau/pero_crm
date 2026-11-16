@@ -36,8 +36,18 @@ Production fix меняет только эти две проекции; namespa
 
 На исправленном cut: **30/30 targeted PASS**, scoped ESLint, полный `tsc --noEmit --incremental false`, strict OpenSpec и diff-check — PASS. Worker native/DB не запускал. Точная команда нового native regression в уже разрешённом CI postgres environment: `pnpm --filter @pero/web exec tsx --test --test-name-pattern="journal/startup-register-locks-native-types" tests/integration/domain-postgres.test.ts`; существующие CI target guards обязательны, локальные/staging значения под них не подставлять. Root отдельно выполняет полный production build/start/health GREEN и штатный CI.
 
+### Подтверждённый локальный production GREEN
+
+Root проверил integration `ded366431ca09322568e45a0afb84a2ca3309a7c`: `pnpm build` PASS, реальный `Next start` на собственном локальном процессе с guarded существующей БД вернул `/api/health`200. Метаданные Plugin и счётчик аудита до/после совпали. Собственный сервер остановлен; проверка процессов подтвердила отсутствие оставшегося server process. Прежний startup RED500 на `ca61155e` выше сохраняется как доказательство воспроизведения исправленного дефекта.
+
+Receipt: `D:/Projects/pero_crm_v2/.playwright-mcp/journal-221-228/startup-green.json`, SHA-256 `007e6243038fe7411f0a3be1c4eaadcdcf315f8e24ee0eccb5081fd3a404a6e8`. Это подтверждение локального запуска production-сборки, не deployment proof и не финальная приёмка staging.
+
+### Прерванный CI 43795423314
+
+Штатный [CI run 43795423314](https://github.com/navasiolau/pero_crm/actions/runs/43795423314) до native-проверок не дошёл: smoke renderer завершился `KP_CI_SMOKE_TIMEOUT` после Chromium version/close. Исходники renderer в изменениях журнала не менялись. Этот результат не подтверждает прохождение нового native startup/register case в CI и не помечается staging PASS; root повторяет полный штатный CI без обхода проверок.
+
 Own implementation зафиксирован commit `7796c46da6fd9db42726c57ab705a9f30ec02430`. Принятый staging `a632e1e36326c61f157d3de5d506e533fe0b3ff2` объединён обычным merge без конфликтов. Сохранены публичный formatter/refresh №222 и apiToken root-context fix №228.
 
 По точечному root GO добавлены две integration поправки: marker `technical.explicitFieldLabels` сохраняет manifest labels через полную цепочку stored enrichment→refresh, остальные производные подписи и форматирование values обновляются; reference создателя API-токена показывает имя actor только при совпадении ID, другого владельца читает внутри tx. Исходные raw payloads не меняются. На сочетании: **90/90 targeted PASS**, включая reader/UI/refresh/resolver и228; после расширения pipeline regression повторно **14/14 related PASS**, scoped lint/full tsc PASS. Push/staging merge worker не выполняет.
 
-PENDING: интеграция со свежим принятым staging, штатный CI и фактическая staging-приёмка, включая HTTP login/logout. Новые UI не входят в228. Limited repair старых apiToken presentations согласован с №222/root, выполняется только после доставки исправленного formatter. Root разрешил commit own228 и обычный merge принятого staging; push и staging merge выполняет только оркестратор. Production/restic/infra не изменялись.
+PENDING: повтор полного штатного CI и фактическая приёмка развёрнутого staging, включая HTTP login/logout. Новые UI не входят в228. Limited repair старых apiToken presentations согласован с №222/root, выполняется только после доставки исправленного formatter. Root разрешил commit own228 и обычный merge принятого staging; push и staging merge выполняет только оркестратор. Production/restic/infra не изменялись.
