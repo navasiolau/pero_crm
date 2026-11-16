@@ -67,3 +67,7 @@ Web image: `sha256:bbae648a85d256a152998920002c6f8bf7e1100e7df53464a31ec47537ec1
 `D:/Projects/pero_crm_v2/.playwright-mcp/ui-229-232/functional-preservation.json`: сравнены76 таблиц, отличие только в штатном polling `ApiToken.lastUsedAt`, остальные фиксированные поля токенов сохранены. Исходный ChangeLog:5529 записей, raw hash `64bcf0448dabe8e594a5ffa37da4aa1a` сохранён.
 
 Статус №233: **STAGING_ACCEPTED на `ad2cd677d94bf866159d5081a44840be5a661dc3`**. Эта запись и закрытие3.1 — docs-only по фактическим доказательствам root. Последующий docs-only SHA не подменяет принятый functional runtime SHA и требует подтверждения доставки root. Production/main в рамках задачи не выпускались.
+
+## Повтор доставки итоговых документов
+
+Документальный staging SHA `1dc7836dc59e8894b70e06c3a1b3c702a1839c66` запустил [CI43938324040](https://github.com/navasiolau/pero_crm/actions/runs/43938324040). Обе component cohorts прошли. Renderer smoke остановился на `chromium-close` с `KP_CI_SMOKE_TIMEOUT` в job `133548743423`; upload quota в этом прогоне не воспроизвелась. Рабочий код относительно принятого `ad2cd677` не менялся; фактическая функциональная staging-приёмка выше остаётся за этой ревизией. Root повторяет полный штатный CI без изменения проверок, renderer или приложения; финальная доставка документов подтверждается отдельно по actual runtime.
