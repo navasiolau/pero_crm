@@ -34,15 +34,15 @@ export function journalSummary(entry:JournalResolvedEntry):JournalListRow{
 }
 
 /** Сопоставимо с PostgreSQL lower(text) COLLATE "C", в том числе для символов вне BMP. */
-function compareText(left:string,right:string):number{
- const a=Array.from(left.toLowerCase()),b=Array.from(right.toLowerCase());
+function compareText(left:string,right:string,foldCase=true):number{
+ const a=Array.from(foldCase?left.toLowerCase():left),b=Array.from(foldCase?right.toLowerCase():right);
  for(let i=0;i<Math.min(a.length,b.length);i++){const difference=a[i].codePointAt(0)!-b[i].codePointAt(0)!;if(difference)return difference;}
  return a.length-b.length;
 }
 export function compareJournalRows(query:Pick<JournalQuery,'sort'|'dir'>):(a:JournalListRow,b:JournalListRow)=>number{
  return (a,b)=>{
   const primary=query.sort==='time'?compareText(a.createdAt,b.createdAt):query.sort==='actor'?compareText(a.actorName,b.actorName):query.sort==='entity'?compareText(a.entityLabel,b.entityLabel):compareText(a.actionLabel,b.actionLabel);
-  return (query.dir==='asc'?primary:-primary)||compareText(b.createdAt,a.createdAt)||compareText(b.id,a.id);
+  return (query.dir==='asc'?primary:-primary)||compareText(b.createdAt,a.createdAt)||compareText(b.id,a.id,false);
  };
 }
 

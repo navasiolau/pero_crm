@@ -149,14 +149,14 @@ function equal(left: unknown, right: unknown): boolean {
   return false;
 }
 
-function displayValue(value: JournalValue, path: string, entity: string, links: JournalEntityReference[]): JournalValue {
+export function formatJournalDisplayValue(value: JournalValue, path: string, entity: string, links: JournalEntityReference[] = []): JournalValue {
   if (typeof value === "string") {
     const key = path.split(".").at(-1) ?? "";
     if (/(?:Id|Ids)$/.test(key)) { const link = links.find(item => item.id === value); if (link) return link.label; }
     return journalEnumLabel(path, value, entity);
   }
-  if (Array.isArray(value)) return value.map(item => displayValue(item, path, entity, links));
-  if (object(value)) return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, displayValue(item as JournalValue, path ? `${path}.${key}` : key, entity, links)]));
+  if (Array.isArray(value)) return value.map(item => formatJournalDisplayValue(item, path, entity, links));
+  if (object(value)) return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, formatJournalDisplayValue(item as JournalValue, path ? `${path}.${key}` : key, entity, links)]));
   return value;
 }
 
@@ -183,7 +183,7 @@ function diff(entry: JournalEntryInput, hints: JournalPresentationHints, links: 
       }
     }
     result.push({ path: path || "value", label: journalFieldLabel(path || "value"),
-      before: displayValue(before, path, entry.entity, links), after: displayValue(after, path, entry.entity, links),
+      before: formatJournalDisplayValue(before, path, entry.entity, links), after: formatJournalDisplayValue(after, path, entry.entity, links),
       beforeKnown, afterKnown });
   }
   compare(values.before, values.after, values.rawBefore, values.rawAfter, values.field, values.beforeKnown, values.afterKnown);

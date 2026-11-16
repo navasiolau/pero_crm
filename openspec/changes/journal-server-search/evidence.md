@@ -30,4 +30,28 @@ Current имена/названия выводятся без визуальны
 
 ## Staging
 
-№222 ещё не опубликована и не принята на staging. Persistent backfill не выполнялся субагентом. Root выполняет read-only preflight, reviewed backfill pass и actual runtime acceptance после штатного CI. Локальные результаты не заменяют эту приёмку.
+Первый cut №222 `1e5f5628` опубликован штатным merge на staging `096b258d`, CI 7/7 и native 214 приняты root. Root выполнил persistent backfill 5529 записей, rawVerified=5529, исходная история сохранилась. Субагент БД не изменял. **Приёмка №222 оставлена открытой из-за измеренной производительности:** после backfill запрос «Изменение» занимал 8573 мс, отдельный SELECT — 2849 мс, с повторной распаковкой больших presentation и тремя correlated array subplans. Evidence: `.playwright-mcp/journal-221-228/stage222-backfill-apply.response.private.json` у root.
+
+## Исправление производительности и финальный refresh
+
+Изменения остаются в исходной feature/222. Схема БД, глобальные настройки PostgreSQL, инфраструктура и сервисы не менялись.
+
+- Один C-level JSONPath проверяет обязательные поля и элементы массивов и возвращает kind. Неполные/malformed v1 по-прежнему идут в legacy fallback.
+- MATERIALIZED classification содержит только id/createdAt/kind. Count, SQL-страница и pending IDs вычисляются одним запросом; весь канонический префикс в приложение не загружается.
+- SearchText и inline ID/date ветви разделены через UNION/INTERSECT, без квадратичного nested loop при устаревшей статистике. Большие page payload извлекаются только после LIMIT через jsonb_to_record.
+- Options аналогично получают actor/entity metadata и pending IDs в одном snapshot. Raw ID tie-break case-sensitive, как PostgreSQL COLLATE C.
+- Явный refreshAll обновляет производные переводы/формат уже обработанных строк, сохраняет snapshot names/values/known-flags и не перезаписывает будущие версии. Public formatter export согласован с №227. Limited apiToken collapsed-object repair выполняется из raw только после исправленного formatter №228; новые явные snapshots не пересобираются.
+
+### Измерения READ ONLY на существующем local
+
+Проверены URL loopback:5433, БД pero_crm, роль pero, system_identifier `7663912963695341602`. Все измерения выполнялись в RepeatableRead с `SET TRANSACTION READ ONLY`.
+
+На **289 исходных строках**, запрос «Изменение»: count=205, page=20 неизменны. Baseline целого readJournalPage: 559/489/506 мс. Финальный кандидат: **30–52 мс warm**, options **25–29 мс** против прежних 66 мс. EXPLAIN действующего `journalPageSql`: **29,631 мс**, shared hits=2392, temp writes=0. Это local measurement, не staging proof.
+
+SELECT-only parity SQL readiness с TypeScript parser — **52/52** valid/malformed форматов. Семантическое сравнение SQL list с полной нормализованной JS reference всех 289 строк — **10/10** сценариев поиска, сортировки, страниц и контекста. Новые целевые journal tests — **48/48 PASS**, полный web TypeScript, scoped ESLint, diff-check и OpenSpec strict — PASS.
+
+Root повторил native 214 на local: run `a9639462-1765-44cc-a70f-fb38985a0ffd`, readinessParity=52, refreshWrites=107, refreshRepeatWrites=0, rawVerified=214, rollback=true, remainingFixtures=0 — PASS.
+
+Root исполнил SQL кандидата в READ ONLY на существующем staging с 5529 строками, пока там развёрнут предыдущий image `096b258d`: первый запрос 1054 мс, следующие **589/489/602 мс**; total=2370/page=20 совпали с прежними. Options 437 мс. Это проверка кандидата на реальной БД, а не доказательство доставки исправления. Evidence: `candidate222-benchmark.response.private.json` у root.
+
+Окончательная приёмка остаётся открытой до штатного CI исправления, фактического нового SHA/образа и повторной runtime-проверки.
