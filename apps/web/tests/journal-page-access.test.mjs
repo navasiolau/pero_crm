@@ -29,7 +29,7 @@ test("actual journal page checks ADMIN before rendering and passes only initial 
   loaded._compile(built.outputFiles[0].text, filename);
   const { page, state } = loaded.exports;
   await assert.rejects(() => page({ searchParams: Promise.resolve({}) }), /LOGIN_REQUIRED/);
-  for (const roles of [["DIRECTOR"], ["MANAGER"], ["ENGINEER"], ["ACCOUNTANT"], ["PROCUREMENT"], ["WORKER"], ["MOUNTER"], ["MANAGER", "ENGINEER"], ["ACCOUNTANT", "PROCUREMENT"], []]) {
+  for (const roles of [["DIRECTOR"], ["MANAGER"], ["ENGINEER"], ["ACCOUNTANT"], ["PROCUREMENT"], ["WORKER"], ["MOUNTER"], ["WORK_COORDINATOR"], ["WORK_COORDINATOR", "WORKER"], ["MANAGER", "ENGINEER"], ["ACCOUNTANT", "PROCUREMENT"], []]) {
     state.session = { user: { id: "actor", roles } };
     await assert.rejects(() => page({ searchParams: Promise.resolve({ q: "secret" }) }), /Недостаточно прав/);
   }

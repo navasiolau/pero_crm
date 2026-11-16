@@ -32,6 +32,7 @@ import { ProductCoverClient } from "./product-sketch";
 import { SinglePercentageRow } from "./product-percentage-panel";
 import { getProductPercentageView } from "@/server/product-percentage-pay/queries";
 import { ProductSinglePage } from "./product-overview";
+import { EntityJournal } from "@/components/journal/entity-journal";
 
 import { resolveProductReturn } from "@/lib/product-return-navigation";
 
@@ -65,6 +66,7 @@ export default async function ProductPage({
   const showMaterials = hasAnyRole(role, OFFICE_ROLES);
   const showMoney = hasAnyRole(role, WAREHOUSE_MONEY_ROLES);
   const canIssueReturn=hasAnyRole(role,WAREHOUSE_MANAGE_ROLES);
+  const showJournal = hasAnyRole(role, ["ADMIN"]);
 
 
   const [clients, workers, engineers, priceItems, materialsData, materialOptions, percentageView] =
@@ -88,6 +90,7 @@ export default async function ProductPage({
       title: product.title, kind: product.kind, quantity: product.quantity, expectedPrice: showAmount ? product.expectedPrice?.toString() ?? null : null, engineerId: product.engineerId, description: product.description, "project.clientId": product.project.client.id,
     }}>
       <ProductSinglePage
+        journal={showJournal ? <EntityJournal scope={{ kind: "product", id: product.id }} whenVisible/> : null}
         overview={<ProductCoverClient
           productId={product.id} projectId={product.project.id}
           cover={product.sketchFile ? { id: product.sketchFile.id, fileName: product.sketchFile.fileName, mimeType: product.sketchFile.mimeType, hasThumb: product.sketchFile.hasThumb } : null}

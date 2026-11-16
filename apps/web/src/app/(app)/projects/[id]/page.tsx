@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { resolveProjectTab } from "@/lib/product-return-navigation";
 import { resolveProjectReturn } from "@/lib/project-return-navigation";
 import { ProjectTabs } from "@/components/project-tabs";
+import { EntityJournal } from "@/components/journal/entity-journal";
 import { TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SlotErrorBoundary } from "@/components/plugins/slot-error-boundary";
 import { displayClientName } from "@/lib/labels";
@@ -79,6 +80,7 @@ export default async function ProjectPage({
   // Склад (§12): вкладка «Материалы» — офисные роли (+ бухгалтер на просмотр)
   const showMaterials = hasAnyRole(role, OFFICE_ROLES);
   const showLogistics = canManageLogistics(role);
+  const showJournal = hasAnyRole(role, ["ADMIN"]);
 
   const stockExpenses = showFinance ? await loadProjectStockExpenses(session.user, project.id, prisma) : [];
 
@@ -148,7 +150,7 @@ export default async function ProjectPage({
   // Закрытые роли не вызывают логистические queries и не получают их RSC-проекции.
   const logisticsData = showLogistics ? await loadLogisticsWorkspace(logisticsQueryFromParams(queryParams), project.id,
     typeof queryParams.trip === "string" ? queryParams.trip : undefined) : null;
-  const initialTab = resolveProjectTab(queryParams.tab, ["overview", "products", "files", "tasks", ...(showMaterials ? ["materials"] : []), ...(showFinance ? ["finance"] : []), ...(showLogistics ? ["logistics"] : []), ...pluginTabs.map(tab => tab.pluginId)]);
+  const initialTab = resolveProjectTab(queryParams.tab, ["overview", "products", "files", "tasks", ...(showMaterials ? ["materials"] : []), ...(showFinance ? ["finance"] : []), ...(showLogistics ? ["logistics"] : []), ...pluginTabs.map(tab => tab.pluginId), ...(showJournal ? ["journal"] : [])]);
 
   return (
     <ProjectInlineProvider key={project.id} projectId={project.id} stage={project.stage} pricingProjection={pricingProjection} initial={{
@@ -192,6 +194,7 @@ export default async function ProjectPage({
               {tab.pluginName}
             </TabsTrigger>
           ))}
+          {showJournal ? <TabsTrigger className="shrink-0" value="journal">Журнал</TabsTrigger> : null}
         </TabsList>
 
         <TabsContent value="overview" className="mt-4">
@@ -372,6 +375,9 @@ export default async function ProjectPage({
             </SlotErrorBoundary>
           </TabsContent>
         ))}
+        {showJournal ? <TabsContent value="journal" keepMounted={false} className="mt-4">
+          <EntityJournal scope={{ kind: "project", id: project.id }}/>
+        </TabsContent> : null}
       </ProjectTabs>
     </div>
     </ProjectInlineProvider>
