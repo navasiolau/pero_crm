@@ -12,9 +12,9 @@ import { auth } from "@/auth";
 import { Badge } from "@/components/ui/badge";
 import { resolveProjectTab } from "@/lib/product-return-navigation";
 import { resolveProjectReturn } from "@/lib/project-return-navigation";
-import { ProjectTabs } from "@/components/project-tabs";
+import { ProjectTabs, ProjectTabsList } from "@/components/project-tabs";
 import { EntityJournal } from "@/components/journal/entity-journal";
-import { TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { TabsContent, TabsTrigger } from "@/components/ui/tabs";
 import { SlotErrorBoundary } from "@/components/plugins/slot-error-boundary";
 import { displayClientName } from "@/lib/labels";
 import {
@@ -179,7 +179,7 @@ export default async function ProjectPage({
       </div>
 
       <ProjectTabs initialTab={initialTab}>
-        <TabsList className="w-full max-w-full justify-start overflow-x-auto">
+        <ProjectTabsList>
           <TabsTrigger className="shrink-0" value="overview">Общее</TabsTrigger>
           <TabsTrigger className="shrink-0" value="products">
             Изделия ({project.products.length})
@@ -195,7 +195,7 @@ export default async function ProjectPage({
             </TabsTrigger>
           ))}
           {showJournal ? <TabsTrigger className="shrink-0" value="journal">Журнал</TabsTrigger> : null}
-        </TabsList>
+        </ProjectTabsList>
 
         <TabsContent value="overview" className="mt-4">
           <OverviewTab
