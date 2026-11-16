@@ -86,6 +86,30 @@ test("journal opens one complete event, preserves focus, filters on server and r
       console.log({ errors, initialFixture: await page.evaluate(() => ({ body: document.body.innerText.slice(0, 2000), lists: window.__qa?.lists })) });
       throw error;
     }
+    for (const { width, sidebar } of [
+      { width: 1440, sidebar: 256 }, { width: 1440, sidebar: 48 },
+      { width: 1280, sidebar: 256 }, { width: 1280, sidebar: 48 },
+    ]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.locator("main").evaluate((node, sidebar) => {
+        node.style.marginLeft = `${sidebar}px`; node.style.width = `calc(100% - ${sidebar}px)`; node.style.padding = "24px";
+      }, sidebar);
+      const controls = await Promise.all([
+        page.getByLabel("Поиск по журналу", { exact: true }), page.getByLabel("Пользователь", { exact: true }),
+        page.getByLabel("Сущность", { exact: true }), page.getByLabel("С", { exact: true }), page.getByLabel("По", { exact: true }),
+        page.getByRole("button", { name: "Применить", exact: true }), page.getByRole("button", { name: "Сбросить", exact: true }),
+      ].map(control => control.boundingBox()));
+      assert.ok(controls.every(Boolean), "all journal filter controls must be visible");
+      assert.ok(controls.every(rect => Math.abs(rect.y + rect.height - controls[0].y - controls[0].height) <= 1),
+        `all journal filters and actions must share one row at ${width}px with ${sidebar}px sidebar: ${JSON.stringify(controls)}`);
+      assert.ok(controls[0].width <= Math.max(controls[1].width, controls[2].width) + 1,
+        "search must have a comparable width to the adjacent selectors");
+      assert.ok(controls[3].width >= 140 && controls[4].width >= 140, "desktop date controls must stay readable");
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), "filter bar must not overflow the viewport");
+      await page.screenshot({ path: path.join(screenshots, `filters-${width}-${sidebar}.png`) });
+    }
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.locator("main").evaluate(node => { node.style.marginLeft = "0"; node.style.width = "100%"; node.style.padding = "16px"; });
     assert.deepEqual(await page.locator("thead th").allTextContents(), ["Время", "Пользователь", "Сущность", "Действие", "Было → стало"]);
     assert.equal(await page.evaluate(() => window.__qa.details.length), 0);
     await expect(page.getByText("Источник", { exact: true })).toHaveCount(0);
@@ -189,6 +213,15 @@ test("journal opens one complete event, preserves focus, filters on server and r
     await page.screenshot({ path: path.join(screenshots, "mobile-event.png") });
     await page.keyboard.press("Escape");
     await expect(page.locator('[data-slot="dialog-content"]')).toHaveCount(0);
+    for (const width of [390, 360]) {
+      await page.setViewportSize({ width, height: 844 });
+      await page.getByLabel("С", { exact: true }).fill("2026-11-01");
+      await page.getByLabel("По", { exact: true }).fill("2026-11-16");
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `journal filters must fit ${width}px without page overflow`);
+      const dateWidths = await page.locator('input[type="date"]').evaluateAll(inputs => inputs.map(input => input.getBoundingClientRect().width));
+      assert.ok(dateWidths.every(value => value >= 140), `mobile dates must remain readable: ${dateWidths}`);
+      await page.screenshot({ path: path.join(screenshots, `filters-mobile-${width}.png`) });
+    }
     await page.setViewportSize({ width: 1024, height: 768 });
     await page.locator("main").evaluate(node => { node.style.marginLeft = "256px"; node.style.width = "calc(100% - 256px)"; });
     await page.getByLabel("С", { exact: true }).fill("2026-11-01");
