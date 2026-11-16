@@ -15,4 +15,4 @@
 ## 3. Приёмка
 
 - [x] 3.1 Выполнить целевые поведенческие тесты, TypeScript, ESLint и strict OpenSpec validation; сохранить результаты и проверить diff.
-- [ ] 3.2 Передать root конкретные native/staging сценарии и дождаться фактической приёмки после штатного CI; локальные проверки отдельно от runtime evidence.
+- [x] 3.2 Передать root конкретные native/staging сценарии и дождаться фактической приёмки после штатного CI; локальные проверки отдельно от runtime evidence. Принято root на staging `e3f99ff05b97f3999fc8fbf74472e9077d769a3b`: CI43796217344 7/7 SUCCESS, native227 PASS с ACTIVE/stockContext=verified, deferred constraints, rollback и сохранностью аудита.
