@@ -16,6 +16,7 @@ export const JOURNAL_ENTITY_LABELS: Record<string, string> = {
   productPercentageCompletion: "Процентное начисление", productPercentageAdjustment: "Корректировка процента",
   productPercentageMember: "Участник работы", authentication: "Учётная запись", session: "Сеанс пользователя",
   kpArchiveImport: "Импорт архива КП", kpArchiveRecovery: "Восстановление архива КП", kpImportedProposalNormalization: "Импортированное КП",
+  kpArchiveDocument: "Архивное КП", kpArchiveContract: "Архивный договор",
 };
 
 export const JOURNAL_SOURCE_LABELS: Record<string, string> = {
@@ -42,6 +43,10 @@ const actions: Record<string, string> = {
   post: "Проведение", correct: "Изменение", reverse: "Сторнирование", cancel: "Отмена", upload: "Загрузка файла", generate: "Выпуск документа",
   "archive.reserve": "Подготовка импорта", "archive.publish": "Импорт данных", "archive.recovery.reserve": "Подготовка восстановления",
   "archive.recovery.publish": "Восстановление данных", "kp.import.normalize": "Изменение",
+  noModel: "Изменение", "percentage.configure": "Изменение", "archive.document": "Импорт КП", "archive.settings": "Импорт настроек договора",
+  "kp.api.media": "Подготовка изображения", "kp.api.command": "Запрос API", "kp.write.receipt": "Подтверждение сохранения КП",
+  "cover.receipt": "Подтверждение изменения", "cover.delete.receipt": "Подтверждение удаления", "inline.receipt": "Подтверждение сохранения",
+  "worker-allocation.receipt": "Подтверждение распределения",
 };
 
 const fields: Record<string, string> = {
@@ -110,7 +115,7 @@ export function journalSourceLabel(source: string): string { return JOURNAL_SOUR
 export function journalActionLabel(action: string): string {
   return actions[action] ?? (/\.(?:update|save|synchronize|sync|change|patch|adjust)$/.test(action) ? "Изменение"
     : /\.(?:create|created)$/.test(action) ? "Создание" : /\.(?:delete|deleted|remove)$/.test(action) ? "Удаление"
-      : /\.(?:generated|publish|published)$/.test(action) ? "Выпуск документа" : "Операция");
+      : /\.(?:generated|publish|published)$/.test(action) ? "Выпуск документа" : "Неизвестная операция");
 }
 
 export function journalFieldLabel(path: string): string {
