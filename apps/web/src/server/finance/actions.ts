@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
-import { writeChangeLog } from "@/server/plugins/changelog";
+import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 import { requireFinance, requireRole } from "@/server/require-role";
 import { withTaskTransaction } from "@/server/tasks/transaction";
 import { DEFAULT_CASH_ACCOUNT_MANAGE_ROLES } from "@/lib/cash-account-default";
@@ -55,14 +55,15 @@ export async function addCashAccount(
   if (!isCurrency(parsed.data.currency)) {
     return { ok: false, error: "Неизвестная валюта" };
   }
-  const account = await withTaskTransaction((tx) => tx.cashAccount.create({
+  await withTaskTransaction(async (tx) => {
+  const account = await tx.cashAccount.create({
     data: {
       name: parsed.data.name,
       currency: parsed.data.currency,
       comment: parsed.data.comment?.trim() || null,
     },
-  }));
-  await writeChangeLog({
+  });
+  await writeChangeLogInTransaction(tx, {
     actorType: "user",
     actorId: session.user.id,
     actorName: session.user.name ?? undefined,
@@ -70,6 +71,8 @@ export async function addCashAccount(
     entityId: account.id,
     action: "create",
     newValue: { name: account.name, currency: account.currency },
+  }, { entity: { label: `Касса ${account.name}`, href: "/finance/accounts" }, contexts: [], before: null,
+    after: { name: account.name, currency: account.currency, comment: account.comment, active: account.active } });
   });
   revalidatePath("/finance/accounts");
   return { ok: true };

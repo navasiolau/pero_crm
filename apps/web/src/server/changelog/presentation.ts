@@ -149,7 +149,23 @@ function equal(left: unknown, right: unknown): boolean {
   return false;
 }
 
+function percentageValue(value: JournalValue, path: string, entity: string): string | undefined {
+  const field = path.split(".").at(-1);
+  const digits = field === "percentBps" && ["logisticsTrip", "logisticsPosting", "logisticsDocument"].includes(entity) ? 2
+    : field === "shareUnits" && ["product", "payrollEntry", "task", "taskAllocationGroup", "work"].includes(entity) ? 4 : null;
+  if (digits === null) return undefined;
+  // В обоих доменах 100% — целая шкала; строковое деление сохраняет все сотые/десятитысячные процента.
+  const maximum = digits === 2 ? 10_000 : 1_000_000;
+  const integer = typeof value === "number" && Number.isSafeInteger(value) ? value
+    : typeof value === "string" && /^\d{1,7}$/.test(value) ? Number(value) : null;
+  if (integer === null || integer < 0 || integer > maximum) return undefined;
+  const text = String(integer).padStart(digits + 1, "0"), fraction = text.slice(-digits).replace(/0+$/, "");
+  return `${text.slice(0, -digits)}${fraction ? `,${fraction}` : ""} %`;
+}
+
 export function formatJournalDisplayValue(value: JournalValue, path: string, entity: string, links: JournalEntityReference[] = []): JournalValue {
+  const percentage = percentageValue(value, path, entity);
+  if (percentage !== undefined) return percentage;
   if (typeof value === "string") {
     const key = path.split(".").at(-1) ?? "";
     if (/(?:Id|Ids)$/.test(key)) { const link = links.find(item => item.id === value); if (link) return link.label; }

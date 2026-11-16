@@ -35,13 +35,13 @@ export async function addMaterialNorm(tx: Prisma.TransactionClient,
       comment: data.comment?.trim() || null, createdById: actor.id },
     update: { quantity, quantityPerUnit },
   });
-  return { line, product, material };
+  return { line, product, material, previous };
 }
 
 export async function updateMaterialNorm(tx: Prisma.TransactionClient,
   data: { id: string; quantity?: number; quantityPerUnit?: number; comment?: string }, actor: VisibilityActor) {
   await lockMaterialProduct(tx, data.id, actor);
-  const line = await tx.projectMaterial.findUnique({ where: {product:productVisibilityWhere(actor), id: data.id }, include: { product: { select: { projectId: true, quantity: true } } } });
+  const line = await tx.projectMaterial.findUnique({ where: {product:productVisibilityWhere(actor), id: data.id }, include: { product: { select: { id: true, number: true, projectId: true, quantity: true } }, material: { select: { name: true } } } });
   if (!line) throw new Error("Строка не найдена");
   const quantityPerUnit = inputNorm(data, line.product.quantity, 3, 12);
   const quantity = scaleNorm(quantityPerUnit, line.product.quantity, 3, 12);

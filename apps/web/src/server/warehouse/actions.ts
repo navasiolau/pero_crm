@@ -1,4 +1,6 @@
 "use server";
+
+import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 import { productVisibilityWhere } from "@/server/access/visibility";
 
 
@@ -6,9 +8,8 @@ import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { deliverPostCommit } from "@/server/operations/post-commit";
 
-import { prisma } from "@/lib/prisma";
 
-import { writeChangeLog } from "@/server/plugins/changelog";
+import { journalProductContext, materialJournalSnapshot } from "@/server/finance/journal";
 
 
 import { revalidateWarehouse } from "./revalidate";
@@ -43,13 +44,14 @@ export async function addMaterialCategory(
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Ошибка данных" };
   }
-  const category = await withWarehouseWrite((tx)=>tx.materialCategory.create({
+  await withWarehouseWrite(async tx => {
+  const category = await tx.materialCategory.create({
     data: {
       name: parsed.data.name,
       comment: parsed.data.comment?.trim() || null,
     },
-  }));
-  await writeChangeLog({
+  });
+  await writeChangeLogInTransaction(tx, {
     actorType: "user",
     actorId: session.user.id,
     actorName: session.user.name ?? undefined,
@@ -57,6 +59,8 @@ export async function addMaterialCategory(
     entityId: category.id,
     action: "create",
     newValue: { name: category.name },
+  }, { entity: { label: `Категория материалов ${category.name}` }, contexts: [], before: null,
+    after: { name: category.name, comment: category.comment, active: category.active } });
   });
   await revalidateWarehouse();
   return { ok: true };
@@ -66,13 +70,15 @@ export async function toggleMaterialCategory(
   id: string,
 ): Promise<{ ok: boolean; error?: string }> {
   const session = await requireRole(WAREHOUSE_MANAGE_ROLES);
-  const category = await prisma.materialCategory.findUnique({ where: { id } });
-  if (!category) return { ok: false, error: "Категория не найдена" };
-  await withWarehouseWrite((tx)=>tx.materialCategory.update({
+  const result = await withWarehouseWrite(async tx => {
+  await tx.$queryRaw`SELECT id FROM "MaterialCategory" WHERE id=${id} FOR UPDATE`;
+  const category = await tx.materialCategory.findUnique({ where: { id } });
+  if (!category) return { ok: false as const, error: "Категория не найдена" };
+  await tx.materialCategory.update({
     where: { id },
     data: { active: !category.active },
-  }));
-  await writeChangeLog({
+  });
+  await writeChangeLogInTransaction(tx, {
     actorType: "user",
     actorId: session.user.id,
     actorName: session.user.name ?? undefined,
@@ -82,7 +88,10 @@ export async function toggleMaterialCategory(
     field: "active",
     oldValue: category.active,
     newValue: !category.active,
+  }, { entity: { label: `Категория материалов ${category.name}` }, contexts: [] });
+  return { ok: true as const };
   });
+  if (!result.ok) return result;
   await revalidateWarehouse();
   return { ok: true };
 }
@@ -102,24 +111,30 @@ export async function updateMaterial(id: string, input: z.input<typeof materialS
   const session = await requireRole(WAREHOUSE_MANAGE_ROLES);
   const parsed = materialSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Ошибка данных" };
-  const material = await prisma.material.findUnique({ where: { id }, include: { measurementUnit: { select: { name: true } } } });
-  if (!material) return { ok: false, error: "Материал не найден" };
   const data = parsed.data;
-  let updated;
   try {
-    updated = await withWarehouseWrite(async tx => {
+    const result = await withWarehouseWrite(async tx => {
+      await tx.$queryRaw`SELECT id FROM "Material" WHERE id=${id} FOR UPDATE`;
+      const material = await tx.material.findUnique({ where: { id }, include: { measurementUnit: { select: { name: true } }, category: { select: { name: true } } } });
+      if (!material) return { ok: false as const, error: "Материал не найден" };
       await requireMaterialUnit(tx, data.unitId);
-      return tx.material.update({ where: { id }, data: {
+      const updated = await tx.material.update({ where: { id }, data: {
         name: data.name, sku: data.sku?.trim() || null, unitId: data.unitId,
         categoryId: data.categoryId || null, minStock: data.minStock ?? null, comment: data.comment?.trim() || null,
-      }, include: { measurementUnit: { select: { name: true } } } });
+      }, include: { measurementUnit: { select: { name: true } }, category: { select: { name: true } } } });
+      await writeChangeLogInTransaction(tx, { actorType: "user", actorId: session.user.id, actorName: session.user.name ?? undefined,
+        entity: "material", entityId: id, action: "update",
+        oldValue: { name: material.name, sku: material.sku, unitId: material.unitId, unit: material.measurementUnit.name },
+        newValue: { name: updated.name, sku: updated.sku, unitId: updated.unitId, unit: updated.measurementUnit.name },
+      }, { entity: { label: `Материал ${updated.name}`, href: "/warehouse/materials" }, contexts: [],
+        links: [{type:"materialUnit",id:material.unitId,label:material.measurementUnit.name},{type:"materialUnit",id:updated.unitId,label:updated.measurementUnit.name},
+          ...(material.categoryId&&material.category?[{type:"materialCategory",id:material.categoryId,label:material.category.name}]:[]),
+          ...(updated.categoryId&&updated.category?[{type:"materialCategory",id:updated.categoryId,label:updated.category.name}]:[])],
+        before: materialJournalSnapshot(material), after: materialJournalSnapshot(updated) });
+      return { ok: true as const };
     });
+    if (!result.ok) return result;
   } catch (error) { return { ok: false, error: materialCatalogError(error) }; }
-  await writeChangeLog({ actorType: "user", actorId: session.user.id, actorName: session.user.name ?? undefined,
-    entity: "material", entityId: id, action: "update",
-    oldValue: { name: material.name, sku: material.sku, unitId: material.unitId, unit: material.measurementUnit.name },
-    newValue: { name: updated.name, sku: updated.sku, unitId: updated.unitId, unit: updated.measurementUnit.name },
-  });
   await revalidateWarehouse();
   revalidatePath("/settings/warehouse-units");
   return { ok: true };
@@ -129,13 +144,15 @@ export async function toggleMaterial(
   id: string,
 ): Promise<{ ok: boolean; error?: string }> {
   const session = await requireRole(WAREHOUSE_MANAGE_ROLES);
-  const material = await prisma.material.findUnique({ where: { id } });
-  if (!material) return { ok: false, error: "Материал не найден" };
-  await withWarehouseWrite((tx) => tx.material.update({
+  const result = await withWarehouseWrite(async tx => {
+  await tx.$queryRaw`SELECT id FROM "Material" WHERE id=${id} FOR UPDATE`;
+  const material = await tx.material.findUnique({ where: { id } });
+  if (!material) return { ok: false as const, error: "Материал не найден" };
+  await tx.material.update({
     where: { id },
     data: { active: !material.active },
-  }));
-  await writeChangeLog({
+  });
+  await writeChangeLogInTransaction(tx, {
     actorType: "user",
     actorId: session.user.id,
     actorName: session.user.name ?? undefined,
@@ -145,7 +162,10 @@ export async function toggleMaterial(
     field: "active",
     oldValue: material.active,
     newValue: !material.active,
+  }, { entity: { label: `Материал ${material.name}`, href: "/warehouse/materials" }, contexts: [] });
+  return { ok: true as const };
   });
+  if (!result.ok) return result;
   await revalidateWarehouse();
   return { ok: true };
 }
@@ -181,21 +201,23 @@ export async function addProjectMaterial(
   let mutation;
   try { mutation = await withTaskTransaction(async tx => {
     const result = await addMaterialNorm(tx, data, session.user);
-    const { line, product, material } = result;
-  await tx.changeLog.create({ data: {
+    const { line, product, material, previous } = result;
+  await writeChangeLogInTransaction(tx, {
     actorType: "user", source: "web",
     actorId: session.user.id,
     actorName: session.user.name ?? undefined,
     entity: "projectMaterial",
     entityId: line.id,
-    action: "create",
+    action: previous ? "update" : "create",
     newValue: {
       product: product.number,
       material: material.name,
       quantity: line.quantity.toString(),
       quantityPerUnit: line.quantityPerUnit?.toString() ?? null,
     },
-  } });
+  }, {entity:{label:`Потребность ${product.number}: ${material.name}`},contexts:[journalProductContext(product)],
+    before:previous?{material:material.name,quantity:previous.quantity.toString(),quantityPerUnit:previous.quantityPerUnit?.toString()??null,issuedQty:previous.issuedQty.toString(),comment:previous.comment}:null,
+    after:{material:material.name,quantity:line.quantity.toString(),quantityPerUnit:line.quantityPerUnit?.toString()??null,issuedQty:line.issuedQty.toString(),comment:line.comment}});
     return result;
   }); }
   catch (error) { return { ok: false, error: error instanceof Error ? error.message : "Не удалось добавить материал" }; }
@@ -224,7 +246,7 @@ export async function updateProjectMaterial(
   try { mutation = await withTaskTransaction(async tx => {
     const result = await updateMaterialNorm(tx, parsed.data, session.user);
     const { line, quantity, quantityPerUnit } = result;
-  await tx.changeLog.create({ data: {
+  await writeChangeLogInTransaction(tx, {
     actorType: "user", source: "web",
     actorId: session.user.id,
     actorName: session.user.name ?? undefined,
@@ -234,7 +256,9 @@ export async function updateProjectMaterial(
     field: "quantity",
     oldValue: Number(line.quantity),
     newValue: { quantity, quantityPerUnit },
-  } });
+  }, {entity:{label:`Потребность ${line.product.number}: ${line.material.name}`},contexts:[journalProductContext({id:line.productId,number:line.product.number})],
+    before:{quantity:line.quantity.toString(),quantityPerUnit:line.quantityPerUnit?.toString()??null,comment:line.comment},
+    after:{quantity,quantityPerUnit,comment:parsed.data.comment?.trim()||null}});
     return result;
   }); }
   catch (error) { return { ok: false, error: error instanceof Error ? error.message : "Не удалось изменить материал" }; }
@@ -253,12 +277,12 @@ export async function deleteProjectMaterial(
     line = await withTaskTransaction(async (tx) => {
       await lockMaterialProduct(tx, id, session.user);
       const line = await tx.projectMaterial.findUnique({ where: {product:productVisibilityWhere(session.user), id }, include: {
-        material: { select: { name: true } }, product: { select: { projectId: true } },
+        material: { select: { name: true } }, product: { select: { projectId: true, number: true } },
       } });
       if (!line) throw new Error("Строка не найдена");
       if (Number(line.issuedQty) > 0) throw new Error("По строке уже есть выдача со склада — сначала верните материал");
       await tx.projectMaterial.delete({ where: { id } });
-  await tx.changeLog.create({ data: {
+  await writeChangeLogInTransaction(tx, {
     actorType: "user", source: "web",
     actorId: session.user.id,
     actorName: session.user.name ?? undefined,
@@ -269,7 +293,8 @@ export async function deleteProjectMaterial(
       material: line.material.name,
       quantity: Number(line.quantity),
     },
-  } });
+  }, {entity:{label:`Потребность ${line.product.number}: ${line.material.name}`},contexts:[journalProductContext({id:line.productId,number:line.product.number})],
+    before:{materialId:line.materialId,material:line.material.name,quantity:line.quantity.toString(),quantityPerUnit:line.quantityPerUnit?.toString()??null,issuedQty:line.issuedQty.toString(),comment:line.comment},after:null});
       return line;
     });
   } catch (error) { return { ok: false, error: error instanceof Error ? error.message : "Не удалось удалить потребность" }; }

@@ -1,3 +1,4 @@
+import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 import { createHash } from "node:crypto";
 import { isValidPayrollMonth, payrollMonth } from "@/lib/payroll-month";
 import {activePaymentWhere} from '@/server/payments/active-records';
@@ -5,6 +6,7 @@ import { Prisma } from "@prisma/client";
 import { calculateCashPayout, cashMovementDelta, isCashCurrency, parseCashAmount, type CashCurrency, type CashRates } from "@/lib/cash-ledger";
 import { requireHistoricalByn } from "@/lib/history-byn";
 import { ADVANCE_ROLES, PAYROLL_MANAGE_ROLES, hasAnyRole, type Role } from "@/lib/roles";
+import { payoutJournalSnapshot } from "@/server/finance/journal";
 
 export type PayoutActor = { id: string; name: string; roles: Role[]; source: "web" | "telegram" | "api" };
 export type CashPayoutInput = {
@@ -109,10 +111,13 @@ export async function issuePayoutCore(actor: PayoutActor, input: CashPayoutInput
     cashRate: quote.cashRate, payrollRate: quote.payrollRate, cashRateDate: new Date(`${quote.cashRateDate}T00:00:00.000Z`),
     payrollRateDate: new Date(`${quote.payrollRateDate}T00:00:00.000Z`), payrollCurrency: quote.payrollCurrency,
   } });
-  await tx.changeLog.create({ data: { id: receiptId, actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
+  await writeChangeLogInTransaction(tx, { id: receiptId, actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
     entity: "payout", entityId: payout.id, action: "issue", newValue: { payoutId: payout.id, fingerprint: normalized.fingerprint,
       userId: user.id, userName: user.name, kind: input.kind, cashAccountId: account.id, cashAmount: quote.cashAmount,
-      cashCurrency: quote.cashCurrency, amount: quote.amount, payrollCurrency: quote.payrollCurrency, month: normalized.month } } });
+      cashCurrency: quote.cashCurrency, amount: quote.amount, payrollCurrency: quote.payrollCurrency, month: normalized.month } },
+    { entity: { label: `${input.kind === "ADVANCE" ? "Аванс" : "Выплата зарплаты"}: ${user.name}` }, contexts: [], before: null,
+      links: [{ type: "user", id: user.id, label: user.name }, { type: "cashAccount", id: account.id, label: account.name }],
+      after: payoutJournalSnapshot(payout, { user: user.name, cashAccount: account.name }) });
   const event = await tx.domainEvent.create({ data: { type: "payroll.payout", actor: actor.id,
     payload: { payoutId: payout.id, userId: user.id, amount: Number(quote.amount), currency: quote.payrollCurrency,
       cashAmount: quote.cashAmount, cashCurrency: quote.cashCurrency, month: normalized.month, kind: input.kind } } });

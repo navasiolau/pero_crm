@@ -1,3 +1,4 @@
+import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 import type { Prisma } from "@prisma/client";
 import { hasAnyRole, WAREHOUSE_UNIT_ADMIN_ROLES } from "@/lib/roles";
 import type { DomainActor } from "@/server/actor";
@@ -11,11 +12,11 @@ async function requireUnitAdministrator(tx: Tx, actor: DomainActor) {
   if (!current?.active || !hasAnyRole(current.roles, WAREHOUSE_UNIT_ADMIN_ROLES)) throw forbidden();
 }
 async function audit(tx: Tx, actor: DomainActor, id: string, action: string, oldName?: string, newName?: string) {
-  await tx.changeLog.create({ data: {
+  await writeChangeLogInTransaction(tx, {
     actorType: "user", actorId: actor.id, actorName: actor.name, entity: "materialUnit", entityId: id, action,
     oldValue: oldName === undefined ? undefined : { name: oldName },
     newValue: newName === undefined ? undefined : { name: newName }, source: actor.source,
-  } });
+  }, { entity: { label: `Единица измерения ${newName ?? oldName ?? ""}`.trim(), href: "/settings/warehouse-units" }, contexts: [] });
 }
 export async function createMaterialUnitInTransaction(tx: Tx, actor: DomainActor, input: MaterialUnitInput) {
   await requireUnitAdministrator(tx, actor);

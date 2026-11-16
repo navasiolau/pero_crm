@@ -15,6 +15,8 @@ import { formatAmount } from "@/lib/format";
 import { PERCENTAGE_STAGE_POLICY } from "./stage-policy";
 import { captureDirectPercentage, settleSkippedPercentage, type PercentageAccrualEffects } from "./direct-completion";
 import { isPermanentUnassignedCompletion } from "./skip-reason";
+import { writeChangeLogInTransaction } from "@/server/changelog/writer";
+import { journalProductContext } from "@/server/finance/journal";
 
 type Tx = Prisma.TransactionClient;
 type ConfigureInput = { productId: string; kind: ProductPercentageKind; ratePercent: string | null;
@@ -78,6 +80,7 @@ export async function captureProductPercentageCompletion(tx: Tx, actor: DomainAc
 type SettlementState = "SETTLED" | "PENDING_FX" | "SKIPPED_ONCE" | "LEGACY_PROTECTED";
 type Earning = { userId: string; userName: string; amount: string; currency: string };
 type SettlementDependencies = {
+  initiator?: { id: string; name: string };
   db?: Pick<PrismaClient, "productPercentageCompletion">;
   transaction?: TaskTransaction;
   resolveRates?: typeof resolveStageRates;
@@ -146,6 +149,25 @@ export async function settlePendingProductPercentage(productId: string, kind: Pr
       productRateDate: new Date(`${rates.product.date}T00:00:00.000Z`), payrollRateDate: new Date(`${rates.payroll.date}T00:00:00.000Z`),
       sourceFundExact: fund.sourceFundExact, amount: fund.amount, bynAmount: fund.bynAmount, projectAmount: fund.projectAmount, settledAt: now,
     } });
+    const initiator = dependencies.initiator ?? (current.completedById ? await tx.user.findUnique({ where: { id: current.completedById }, select: { id: true, name: true } }) : null);
+    await writeChangeLogInTransaction(tx, { id: `percentage-fx-settlement:${current.id}`, actorType: "system", actorId: "system",
+      actorName: "Система", source: "system", entity: "product", entityId: productId, action: "percentage.fxSettlement",
+      oldValue: { completionId: current.id, kind, state: current.state }, newValue: { completionId: current.id, kind, state: "SETTLED", amount: fund.amount,
+        bynAmount: fund.bynAmount, projectAmount: fund.projectAmount, earnings } },
+      { entity: { label: `Изделие ${pending.product.number}`, href: `/products/${encodeURIComponent(productId)}` },
+        contexts: [journalProductContext({ id: productId, number: pending.product.number })],
+        ...(initiator ? { initiator } : current.completedById ? { initiator: { id: current.completedById, name: "Имя не сохранено" } } : {}),
+        reason: "Завершение отложенного начисления после получения курсов валют",
+        before: { kind, state: current.state, amount: current.amount?.toString() ?? null, bynAmount: current.bynAmount?.toString() ?? null,
+          projectAmount: current.projectAmount?.toString() ?? null, productRateByn: current.productRateByn?.toString() ?? null,
+          payrollRateByn: current.payrollRateByn?.toString() ?? null, shares: current.shares.map(row => ({ recipient: row.userNameSnapshot,
+            amount: row.amount?.toString() ?? null, bynAmount: row.bynAmount?.toString() ?? null, projectAmount: row.projectAmount?.toString() ?? null })) },
+        after: { kind, state: "SETTLED", amount: fund.amount, bynAmount: fund.bynAmount, projectAmount: fund.projectAmount,
+          productRateByn: rates.product.rate, payrollRateByn: rates.payroll.rate, productRateDate: rates.product.date, payrollRateDate: rates.payroll.date,
+          currency: current.payrollCurrency, productCurrency: current.productCurrency, priceSnapshot: current.priceSnapshot?.toString() ?? null,
+          ratePercentSnapshot: current.ratePercentSnapshot?.toString() ?? null, sourceFundExact: fund.sourceFundExact,
+          shares: current.shares.map(row => ({ recipient: row.userNameSnapshot, amount: amounts.find(item => item.userId === row.userId)!.amount,
+            bynAmount: byn.find(item => item.userId === row.userId)!.amount, projectAmount: project.find(item => item.userId === row.userId)!.amount })) } });
     return { state: "SETTLED" as const, newlySettled: true, eventIds, earnings, completedById: current.completedById };
   });
   if (result.newlySettled && result.earnings.length) await (dependencies.deliver ?? deliverAccrual)(

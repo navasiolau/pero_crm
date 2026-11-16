@@ -1,3 +1,5 @@
+import { writeChangeLogInTransaction } from "@/server/changelog/writer";
+import { journalAutomatic, journalProductContext } from "@/server/finance/journal";
 import { payrollMonth } from "@/lib/payroll-month";
 import { Prisma, type ProductPercentageKind, type ProductStatus } from '@prisma/client';
 import { assertProjectMoneyCurrency } from "@/lib/internal-currency";
@@ -215,8 +217,7 @@ export async function captureDirectPercentage(tx: Prisma.TransactionClient, acto
             });
         }
     }
-    await tx.changeLog.create({
-        data: {
+    await writeChangeLogInTransaction(tx, {
             actorType: 'user',
             actorId: actor.id,
             actorName: actor.name,
@@ -231,8 +232,12 @@ export async function captureDirectPercentage(tx: Prisma.TransactionClient, acto
                 statusAtCompletion,
                 calculationVersion: 4
             }
-        }
-    });
+        }, { ...journalAutomatic(actor, 'Расчёт процентной оплаты при завершении этапа изделия'),
+            entity: { label: `Изделие ${product.number}`, href: `/products/${encodeURIComponent(productId)}` }, contexts: [journalProductContext(product)],
+            before: null, after: { kind, state, statusAtCompletion, quantity: product.quantity, unitPrice: price?.toString() ?? null,
+                ratePercent: completion.ratePercentSnapshot?.toString() ?? null, total: total?.toString() ?? null,
+                amount, bynAmount: amount, currency: 'BYN', recipientId: recipientSnapshot?.id ?? null, recipient: recipientSnapshot?.name ?? null,
+                reason: completion.reason, completedAt: now.toISOString(), calculationVersion: 4 } });
     return state;
 }
 /** Добирание пропущенного начисления: ставка задана позже, следующий переход этапа доначисляет.
@@ -462,8 +467,7 @@ export async function settleSkippedPercentage(tx: Prisma.TransactionClient, acto
             });
         }
     }
-    await tx.changeLog.create({
-        data: {
+    await writeChangeLogInTransaction(tx, {
             actorType: 'user',
             actorId: actor.id,
             actorName: actor.name,
@@ -477,8 +481,16 @@ export async function settleSkippedPercentage(tx: Prisma.TransactionClient, acto
                 statusAtCompletion,
                 calculationVersion: 4
             }
-        }
-    });
+        }, { ...journalAutomatic(actor, 'Доначисление процентной оплаты после заполнения ставки'),
+            entity: { label: `Изделие ${product.number}`, href: `/products/${encodeURIComponent(productId)}` }, contexts: [journalProductContext(product)],
+            before: { kind, state: completion.state, statusAtCompletion: completion.statusAtCompletion,
+                quantity: completion.quantitySnapshot, unitPrice: completion.priceSnapshot?.toString() ?? null,
+                ratePercent: completion.ratePercentSnapshot?.toString() ?? null, amount: completion.amount?.toString() ?? null,
+                bynAmount: completion.bynAmount?.toString() ?? null, currency: completion.payrollCurrency,
+                recipientId: completion.recipientId, reason: completion.reason },
+            after: { kind, state: 'SETTLED', statusAtCompletion, quantity: product.quantity, unitPrice: price.toString(),
+                ratePercent: rate.toString(), amount, bynAmount: amount, currency: 'BYN', recipientId: recipientSnapshot?.id ?? null,
+                recipient: recipientSnapshot?.name ?? null, reason: null } });
     return 'SETTLED';
 }
 /** Новая ставка добавляет корректировку текущим месяцем; исходный снимок неизменен. */
@@ -637,8 +649,7 @@ export async function adjustSettledPercentage(tx: Prisma.TransactionClient, acto
             }
         });
     }
-    await tx.changeLog.create({
-        data: {
+    await writeChangeLogInTransaction(tx, {
             actorType: 'user',
             actorId: actor.id,
             actorName: actor.name,
@@ -654,8 +665,11 @@ export async function adjustSettledPercentage(tx: Prisma.TransactionClient, acto
                 newAmount,
                 delta
             }
-        }
-    });
+        }, { ...journalAutomatic(actor, 'Перерасчёт начисления после изменения процентной ставки'),
+            entity: { label: `Изделие ${product.number}`, href: `/products/${encodeURIComponent(productId)}` }, contexts: [journalProductContext(product)],
+            before: { kind, recipientId: share.userId, recipient: share.userNameSnapshot, ratePercent: latest?.ratePercent.toString() ?? completion.ratePercentSnapshot?.toString() ?? null, amount: oldAmount },
+            after: { kind, recipientId: share.userId, recipient: share.userNameSnapshot, ratePercent: rate, amount: newAmount,
+                delta, currency: 'BYN', unitPrice: product.expectedPrice.toString(), quantity: product.quantity, month: payrollMonth(now) } });
     return {
         adjusted: true,
         delta,

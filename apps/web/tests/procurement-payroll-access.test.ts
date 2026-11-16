@@ -151,7 +151,8 @@ test("payout deletion reads only kind before rejecting salary and still deletes 
       const tx = { payout: {
         findUnique: async (args: { select?: { kind: boolean } }) => {
           if (args.select) { assert.deepEqual(args.select, { kind: true }); calls.push("kind"); return { kind }; }
-          calls.push("details"); return { kind, user: { name: "Сотрудник" }, amount: new Prisma.Decimal(5), cashAmount: new Prisma.Decimal(5), cashCurrency: "BYN", month: "2000-01" };
+          calls.push("details"); return { id: "payout", userId: "recipient", kind, user: { name: "Сотрудник" }, cashAccountId: null, cashAccount: null,
+            amount: new Prisma.Decimal(5), cashAmount: new Prisma.Decimal(5), cashCurrency: "BYN", month: "2000-01" };
         },
         delete: async () => { calls.push("delete"); },
       }, changeLog: { create: async () => { calls.push("audit"); } } };

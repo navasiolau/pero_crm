@@ -1,3 +1,4 @@
+import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 import { createHash, randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { canManageLogistics, canReadLogisticsDocuments } from "@/lib/logistics-access";
@@ -6,6 +7,7 @@ import { productDraftVisibilityWhere, type VisibilityActor } from "@/server/acce
 import { logisticsTripCreateSchema, logisticsTripUpdateSchema, shipmentLineKey,
   type LogisticsTripManifestInput, type LogisticsTripMutationResult } from "./contracts";
 import { logisticsTripWritePolicy } from "./policy";
+import { logisticsJournalHints } from "./journal";
 
 export type LogisticsTransaction = <T>(operation: (tx: Prisma.TransactionClient) => Promise<T>) => Promise<T>;
 
@@ -25,7 +27,9 @@ export async function lockLogisticsMutation(tx: Prisma.TransactionClient, client
   await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(18442, hashtext(${clientMutationId}))`;
 }
 export async function requireLiveLogisticsTrip(tx: Prisma.TransactionClient, tripId: string) {
-  const trip = await tx.logisticsTrip.findUnique({ where: { id: tripId }, select: { id: true, deletedAt: true } });
+  const trip = await tx.logisticsTrip.findUnique({ where: { id: tripId }, select: { id: true, deletedAt: true, date: true,
+    shares: { select: { projectId: true, project: { select: { number: true } } } },
+    lines: { select: { productId: true, materialId: true, numberSnapshot: true, nameSnapshot: true } } } });
   if (!trip || trip.deletedAt) throw new UploadError("LOGISTICS_TRIP_NOT_FOUND", 404, "context", "Рейс не найден");
   return trip;
 }
@@ -35,7 +39,7 @@ function invalid(message: string): never {
 function conflict(message = "Рейс уже изменён. Откройте актуальную запись"): never {
   throw new UploadError("LOGISTICS_REVISION_CONFLICT", 409, "persist", message, "conflict");
 }
-export const logisticsManifestInclude = { shares: true, lines: true } satisfies Prisma.LogisticsTripInclude;
+export const logisticsManifestInclude = { shares: { include: { project: { select: { number: true } } } }, lines: true } satisfies Prisma.LogisticsTripInclude;
 export type LogisticsManifestRecord = Prisma.LogisticsTripGetPayload<{ include: typeof logisticsManifestInclude }>;
 export type PreparedLogisticsManifest = LogisticsTripManifestInput & {
   ttnNotRequired: boolean;
@@ -117,9 +121,9 @@ async function auditMutation(tx: Prisma.TransactionClient, actor: { id: string; 
   operation: "create" | "update", fingerprint: string, row: LogisticsManifestRecord, previous?: LogisticsManifestRecord) {
   await tx.logisticsMutation.create({ data: { clientMutationId, actorId: actor.id, tripId: row.id,
     requestFingerprint: fingerprint, operation, revision: row.revision } });
-  await tx.changeLog.create({ data: { id: `logistics-mutation:${clientMutationId}`, actorType: "user", actorId: actor.id,
+  await writeChangeLogInTransaction(tx, { id: `logistics-mutation:${clientMutationId}`, actorType: "user", actorId: actor.id,
     actorName: actor.name, entity: "logisticsTrip", entityId: row.id, action: operation,
-    ...(previous ? { oldValue: snapshot(previous) } : {}), newValue: snapshot(row) } });
+    ...(previous ? { oldValue: snapshot(previous) } : {}), newValue: snapshot(row) }, logisticsJournalHints(row, previous));
   await tx.domainEvent.create({ data: { type: `logistics.trip.${operation === "create" ? "created" : "updated"}`, actor: actor.id,
     payload: { tripId: row.id, revision: row.revision, projectIds: row.shares.map(share => share.projectId) } } });
 }

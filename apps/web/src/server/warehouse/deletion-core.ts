@@ -9,6 +9,8 @@ import {activeStockMovementWhere} from './active-records';
 import {activePaymentWhere} from '@/server/payments/active-records';
 import {planWarehouseDeletion,type DeletionFact} from './deletion-plan';
 import {movementDeletionSchema,type MovementDeletionInput,type MovementDeletionPreview} from './deletion-contracts';
+import {writeChangeLogInTransaction} from '@/server/changelog/writer';
+import {journalAutomatic,journalProductContext,paymentJournalSnapshot} from '@/server/finance/journal';
 
 type Tx=Prisma.TransactionClient;
 const incomplete=()=>Error('Недостаточно данных для безопасной отмены: движение не входит в проверяемый текущий учёт');
@@ -30,7 +32,7 @@ async function loadPlan(tx:Tx,actor:DomainActor,movementId:string){
     tx.material.findUniqueOrThrow({where:{id:root.materialId},include:{measurementUnit:{select:{name:true}}}}),
     tx.warehouseBalance.findUnique({where:{materialId:root.materialId}}),
     tx.warehouseMovementValuation.findMany({where:{runId:state.runId,movement:{...activeStockMovementWhere,materialId:root.materialId}},
-      include:{movement:{include:{product:{select:{id:true,number:true,project:{select:{id:true,number:true}}}},stockPurchase:{include:{payment:{include:{cashAccount:true}}}}}}},
+      include:{movement:{include:{product:{select:{id:true,number:true,project:{select:{id:true,number:true}}}},stockPurchase:{include:{payment:{include:{cashAccount:true,reportDocuments:{select:{documentId:true},orderBy:{position:'asc'}}}}}}}}},
       take:10001,orderBy:[{createdAt:'asc'},{id:'asc'}]}),
   ]);
   if(rows.length>10000)throw Error('Слишком много связанных движений для одной безопасной отмены');
@@ -117,9 +119,27 @@ export async function deleteMovementInTransaction(tx:Tx,actor:DomainActor,input:
     if(!row.returnedQuantity.eq(counter.quantity)||!row.returnedValueByn.eq(counter.value)||!row.returnedMoneyByn.eq(counter.money))
       await tx.warehouseMovementValuation.update({where:{id:row.id},data:{returnedQuantity:counter.quantity,returnedValueByn:counter.value,returnedMoneyByn:counter.money}});
   }
-  await tx.changeLog.createMany({data:[...ids.map(id=>({entity:'stockMovement',entityId:id})),...loaded.paymentIds.map(id=>({entity:'payment',entityId:id}))].map(row=>({
-    ...row,actorType:'user',actorId:actor.id,actorName:actor.name,source:actor.source,action:'softDelete',newValue:{deletionId:deletion.id,rootMovementId:data.movementId},
-  }))});
+  for(const row of loaded.affected){
+    const movement=row.movement;
+    await writeChangeLogInTransaction(tx,{entity:'stockMovement',entityId:movement.id,actorType:'user',actorId:actor.id,actorName:actor.name,source:actor.source,
+      action:'softDelete',newValue:{deletionId:deletion.id,rootMovementId:data.movementId}},
+      {entity:{label:`Движение материала ${loaded.preview.materialName}`},contexts:movement.product?[journalProductContext(movement.product)]:[],
+       ...(movement.id!==data.movementId?journalAutomatic(actor,'Отмена связанного движения при удалении исходной складской операции'):{}),
+       before:{type:movement.type,receiptKind:movement.receiptKind,material:loaded.preview.materialName,materialId:movement.materialId,
+        product:movement.product?.number??null,quantity:movement.quantity.toString(),unitPrice:movement.unitPrice?.toString()??null,
+        totalByn:movement.totalByn?.toString()??null,comment:movement.comment,sourceMovementId:row.sourceMovementId,
+        unitCost:row.unitCost.toString(),valueByn:row.valueByn.toString(),moneyByn:row.moneyByn.toString(),
+        ...(movement.id===data.movementId?{warehouseBalance:loaded.preview.before}: {})},
+       after:movement.id===data.movementId?{warehouseBalance:loaded.preview.after,refunds:loaded.preview.refunds,issuedQuantityChanges:loaded.lineChanges}:null});
+  }
+  for(const paymentId of loaded.paymentIds){
+    const payment=loaded.affected.find(row=>row.movement.stockPurchase?.paymentId===paymentId)?.movement.stockPurchase?.payment;
+    if(!payment)throw Error('Не найден снимок отменяемого платежа склада');
+    await writeChangeLogInTransaction(tx,{entity:'payment',entityId:paymentId,actorType:'user',actorId:actor.id,actorName:actor.name,source:actor.source,
+      action:'softDelete',newValue:{deletionId:deletion.id,rootMovementId:data.movementId}},
+      {...journalAutomatic(actor,'Отмена оплаты при удалении прихода на склад'),entity:{label:`Расход ${payment.amount.toString()} ${payment.currency}`},contexts:[],
+       before:paymentJournalSnapshot(payment,{cashAccount:payment.cashAccount?.name,documentIds:payment.reportDocuments.map(document=>document.documentId)}),after:null});
+  }
   const event=await tx.domainEvent.create({data:{type:'stock.movement.deleted',actor:actor.id,payload:{deletionId:deletion.id,movementIds:ids,paymentIds:loaded.paymentIds}}});
   return {id:deletion.id,repeated:false,eventId:event.id,productRefs:loaded.productRefs};
 }
