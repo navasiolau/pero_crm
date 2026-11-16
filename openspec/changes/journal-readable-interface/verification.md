@@ -43,3 +43,9 @@
 - Scoped ESLint: exit0, 0 warnings; strict OpenSpec и diff-check: PASS.
 
 READY для root-review и штатной публикации после его окончательного runtime №222 GO. Actual staging №223 ещё не объявляется принятым.
+
+## Исправление узкого desktop перед окончательной приёмкой
+
+При 1024×768 и боковой панели 256 px пятиколоночная сетка с `lg` сжимала оба поля даты до 88 px: год не помещался. Браузерная регрессия с требованием ширины даты ≥140 px сначала дала RED (`88,88`). По разрешению root breakpoint пяти колонок изменён на `xl`; ниже используется имеющаяся сетка из двух колонок.
+
+После исправления `journal-interface.test.mjs` PASS 1/1, 4,844 s, включая узкий рабочий экран, полные даты и отсутствие горизонтального переполнения. Screenshot `apps/web/test-results/journal-interface/d3a85ce1-8cee-44f8-ad46-381d1e7af4ec/narrow-workspace.png` просмотрен: даты и фильтры читаются полностью. Целевой ESLint — exit0, 0 warnings; diff-check — PASS. Изменены только четыре responsive class и целевой браузерный сценарий; commit и публикацию выполняет root.

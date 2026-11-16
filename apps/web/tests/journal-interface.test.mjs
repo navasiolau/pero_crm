@@ -188,6 +188,15 @@ test("journal opens one complete event, preserves focus, filters on server and r
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
     await page.screenshot({ path: path.join(screenshots, "mobile-event.png") });
     await page.keyboard.press("Escape");
+    await expect(page.locator('[data-slot="dialog-content"]')).toHaveCount(0);
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await page.locator("main").evaluate(node => { node.style.marginLeft = "256px"; node.style.width = "calc(100% - 256px)"; });
+    await page.getByLabel("С", { exact: true }).fill("2026-11-01");
+    await page.getByLabel("По", { exact: true }).fill("2026-11-16");
+    const dateWidths = await page.locator('input[type="date"]').evaluateAll(inputs => inputs.map(input => input.getBoundingClientRect().width));
+    assert.ok(dateWidths.every(width => width >= 140), `date controls must remain readable beside the sidebar: ${dateWidths}`);
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), "journal must fit a narrow desktop workspace beside its sidebar");
+    await page.screenshot({ path: path.join(screenshots, "narrow-workspace.png") });
     assert.deepEqual(errors, []);
     console.log(`Journal UI screenshots: ${screenshots}`);
   } finally {

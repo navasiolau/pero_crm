@@ -90,8 +90,8 @@ function JournalWorkspace({ scope, initialQuery }: { scope: JournalScope; initia
   }
 
   return <div ref={container} tabIndex={-1} className="min-w-0 space-y-4 outline-none" data-journal>
-    <form onSubmit={apply} className="grid min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(12rem,2fr)_minmax(10rem,1fr)_minmax(10rem,1fr)_auto_auto]" aria-label="Фильтры журнала">
-      <div className="min-w-0 space-y-1 sm:col-span-2 lg:col-span-1">
+    <form onSubmit={apply} className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(12rem,2fr)_minmax(10rem,1fr)_minmax(10rem,1fr)_auto_auto]" aria-label="Фильтры журнала">
+      <div className="min-w-0 space-y-1 sm:col-span-2 xl:col-span-1">
         <label htmlFor={`${controlId}-search`} className="text-xs text-muted-foreground">Поиск по журналу</label>
         <Input id={`${controlId}-search`} value={draft.q} placeholder="Поиск по всей истории…" onChange={event => setDraft(value => ({ ...value, q: event.target.value }))}/>
       </div>
@@ -115,11 +115,11 @@ function JournalWorkspace({ scope, initialQuery }: { scope: JournalScope; initia
         <label htmlFor={`${controlId}-to`} className="text-xs text-muted-foreground">По</label>
         <Input id={`${controlId}-to`} type="date" value={draft.to} onChange={event => setDraft(value => ({ ...value, to: event.target.value }))}/>
       </div>
-      <div className="flex flex-wrap gap-2 sm:col-span-2 lg:col-span-5">
+      <div className="flex flex-wrap gap-2 sm:col-span-2 xl:col-span-5">
         <Button type="submit" variant="outline">Применить</Button>
         <Button type="button" variant="ghost" onClick={reset}>Сбросить</Button>
       </div>
-      {formError ? <p role="alert" className="text-sm text-destructive sm:col-span-2 lg:col-span-5">{formError}</p> : null}
+      {formError ? <p role="alert" className="text-sm text-destructive sm:col-span-2 xl:col-span-5">{formError}</p> : null}
     </form>
     {optionsError ? <div role="alert" className="flex flex-wrap items-center gap-3 text-sm">
       <span>Не удалось загрузить варианты фильтров</span><Button type="button" size="sm" variant="outline" onClick={() => setOptionsRetry(value => value + 1)}>Повторить загрузку фильтров</Button>
