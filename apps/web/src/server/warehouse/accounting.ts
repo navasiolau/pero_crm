@@ -1,3 +1,4 @@
+import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 import type { Prisma, PrismaClient, Role } from '@prisma/client';
 import { randomUUID, createHash } from 'node:crypto';
 import { prisma } from '@/lib/prisma';
@@ -10,6 +11,7 @@ import { decimalAtoms, decimalText } from '@/lib/product-quantity';
 import { addPosition, addPaidPosition, addValue, issuePosition, returnShare, averagePrice, unitCost, quantityInput, priceInput } from '@/lib/warehouse-cost';
 import {warehouseMetadataGate} from './gate';
 import {activeStockMovementWhere} from './active-records';
+import {journalProductContext} from '@/server/finance/journal';
 
 type Tx=Prisma.TransactionClient;
 type Reader=Pick<PrismaClient,'warehouseAccountingState'|'warehouseBalance'|'stockMovement'>;
@@ -38,7 +40,10 @@ export async function withWarehouseWrite<T>(operation:(tx:Tx)=>Promise<T>,databa
 }
 export type WarehouseActor={id:string;name?:string|null;roles:Role[];source?:"web"|"telegram"|"api"};
 export type WarehouseMovementInput={kind:'INCOME'|'EXPENSE'|'RETURN';clientMutationId:string;materialId?:string;projectMaterialId?:string;productId?:string;quantity:string|number;unitPrice?:string|number;sourceMovementId?:string;comment?:string};
-export async function warehouseMove(tx:Tx,actor:WarehouseActor,input:WarehouseMovementInput,paidReceipt?:{bynAmount:string}){
+export async function warehouseMove(tx:Tx,actor:WarehouseActor,input:WarehouseMovementInput,paidReceipt?:{bynAmount:string;purchase?:{
+ currency:string;unitPrice:string;amount:string;cashAccountId:string;cashAccount:string;expenseArticleId:string|null;
+ rate:string;rateDate:string|null;paidAt:string;reportDocumentIds:readonly string[];
+}}){
  if(paidReceipt&&input.kind!=='INCOME')throw Error('Оплата допустима только для прихода');
  if(!hasAnyRole(actor.roles,paidReceipt?FINANCE_ROLES:WAREHOUSE_MANAGE_ROLES))throw Error('Недостаточно прав');
  if(!/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(input.clientMutationId))throw Error('Некорректный идентификатор запроса');
@@ -104,7 +109,16 @@ export async function warehouseMove(tx:Tx,actor:WarehouseActor,input:WarehouseMo
  await tx.$executeRaw`UPDATE "Material" SET "purchasePrice"=CAST(${averagePrice(result.position)} AS numeric) WHERE id=${materialId}`;
  if(line)await tx.projectMaterial.update({where:{id:line.id},data:{issuedQty:input.kind==='EXPENSE'?{increment:quantity}:{decrement:quantity}}});
  const eventId='warehouse94-'+clientMutationId;
- await tx.changeLog.create({data:{id:eventId,actorType:'user',actorId:actor.id,actorName:actor.name??undefined,source:actor.source,entity:'stockMovement',entityId:movement.id,action:'create',newValue:{type:input.kind,receiptKind:movement.receiptKind,material:material.name,quantity,unitPrice:movement.unitPrice?.toString()??null}}});
+ await writeChangeLogInTransaction(tx, {id:eventId,actorType:'user',actorId:actor.id,actorName:actor.name??undefined,source:actor.source,entity:'stockMovement',entityId:movement.id,action:'create',newValue:{type:input.kind,receiptKind:movement.receiptKind,material:material.name,quantity,unitPrice:movement.unitPrice?.toString()??null}},
+  {entity:{label:`${input.kind==='INCOME'?'Приход':input.kind==='EXPENSE'?'Выдача':'Возврат'} материала ${material.name}`},contexts:product?[journalProductContext(product)]:[],
+   links:[{type:'material',id:material.id,label:material.name},...(product?[{type:'product',...journalProductContext(product)}]:[]),
+    ...(paidReceipt?.purchase?[{type:'cashAccount',id:paidReceipt.purchase.cashAccountId,label:paidReceipt.purchase.cashAccount}]:[])],
+   before:{balance:position,purchasePrice:material.purchasePrice?.toString()??null,...(line?{issuedQty:line.issuedQty.toString()}:{})},
+   after:{type:movement.type,receiptKind:movement.receiptKind,materialId,material:material.name,productId:product?.id??null,product:product?.number??null,
+    quantity,unitPrice:movement.unitPrice?.toString()??null,totalByn:movement.totalByn?.toString()??null,unitCost:result.cost,valueByn:result.value,
+    sourceMovementId:input.sourceMovementId??null,projectMaterialId:line?.id??null,comment:movement.comment, balance:result.position,purchasePrice:averagePrice(result.position),
+    ...(line?{issuedQty:decimalText(decimalAtoms(line.issuedQty,3,12)+BigInt(input.kind==='EXPENSE'?1:-1)*decimalAtoms(quantity,3,12),3)}:{}),
+    ...(paidReceipt?.purchase?{purchase:paidReceipt.purchase}:{})}});
  await tx.domainEvent.create({data:{id:eventId,type:'stock.movement.created',actor:actor.id,payload:{movementId:movement.id,type:input.kind,receiptKind:movement.receiptKind,materialId,productId:product?.id??null,quantity:Number(quantity),totalByn:Number(result.money)}}});
  return {movement,repeated:false,line,material,product,eventId};
 }

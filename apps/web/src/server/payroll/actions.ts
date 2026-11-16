@@ -1,5 +1,7 @@
 "use server";
 
+import { writeChangeLogInTransaction } from "@/server/changelog/writer";
+
 import { revalidatePath } from "next/cache";
 import { randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
@@ -11,7 +13,7 @@ import { BYN_UNAVAILABLE_REASON } from "@/lib/history-byn";
 import { prisma } from "@/lib/prisma";
 import { formatAmount } from "@/lib/format";
 import { ADVANCE_ROLES, PAYROLL_MANAGE_ROLES } from "@/lib/roles";
-import { writeChangeLog } from "@/server/plugins/changelog";
+import { payoutJournalSnapshot } from "@/server/finance/journal";
 import { dispatchEvent } from "@/server/plugins/events";
 import { notifyOrg, notifyPerson } from "@/server/notifications/notify";
 import { requireAdmin, requireFinance, requirePayrollManagement, requireRole } from "@/server/require-role";
@@ -83,13 +85,16 @@ export async function deletePayout(
     const target = await tx.payout.findUnique({ where: { id: payoutId }, select: { kind: true } });
     if (!target) return { ok: false, error: "Выплата не найдена" };
     assertPayoutRole({ id: session.user.id, name: session.user.name ?? "", roles: session.user.roles, source: "web" }, target.kind);
-    const payout = await tx.payout.findUnique({ where: { id: payoutId, kind: target.kind }, include: { user: { select: { name: true } } } });
+    const payout = await tx.payout.findUnique({ where: { id: payoutId, kind: target.kind }, include: { user: { select: { name: true } }, cashAccount: { select: { name: true } } } });
     if (!payout) return { ok: false, error: "Выплата не найдена" };
     await tx.payout.delete({ where: { id: payoutId, kind: target.kind } });
-    await tx.changeLog.create({ data: { actorType: "user", actorId: session.user.id, actorName: session.user.name ?? undefined,
+    await writeChangeLogInTransaction(tx, { actorType: "user", actorId: session.user.id, actorName: session.user.name ?? undefined,
       entity: "payout", entityId: payoutId, action: "delete", oldValue: { user: payout.user.name,
         amount: payout.amount.toFixed(2), cashAmount: payout.cashAmount?.toFixed(2) ?? null,
-        cashCurrency: payout.cashCurrency, month: payout.month } } });
+        cashCurrency: payout.cashCurrency, month: payout.month } }, { entity: { label: `${payout.kind === "ADVANCE" ? "Аванс" : "Выплата зарплаты"}: ${payout.user.name}` },
+      contexts: [], links: [{type:"user",id:payout.userId,label:payout.user.name},
+        ...(payout.cashAccountId&&payout.cashAccount?[{type:"cashAccount",id:payout.cashAccountId,label:payout.cashAccount.name}]:[])],
+      before: payoutJournalSnapshot(payout, { user: payout.user.name, cashAccount: payout.cashAccount?.name }), after: null });
     return { ok: true };
   });
   if (!result.ok) return result;
@@ -231,24 +236,17 @@ export async function setPayrollCurrency(
         throw new Error("Валюта зарплаты зафиксирована выплатами из кассы");
       }
       await tx.orgSetting.upsert({ where: { key: "payrollCurrency" }, update: { value: currency }, create: { key: "payrollCurrency", value: currency } });
+      await writeChangeLogInTransaction(tx, {
+        actorType: "user", actorId: session.user.id, actorName: session.user.name ?? undefined,
+        entity: "orgSetting", entityId: "payrollCurrency", action: "update", field: "value",
+        oldValue: current, newValue: currency,
+      }, { entity: { label: "Валюта зарплаты", href: "/settings/payroll" }, contexts: [], before: { currency: current }, after: { currency } });
       return current;
     });
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "Не удалось изменить валюту зарплаты" };
   }
   if (before === currency) return { ok: true };
-  await writeChangeLog({
-    actorType: "user",
-    actorId: session.user.id,
-    actorName: session.user.name ?? undefined,
-    entity: "orgSetting",
-    entityId: "payrollCurrency",
-    action: "update",
-    field: "value",
-    oldValue: before,
-    newValue: currency,
-  });
-
   revalidatePath("/settings/payroll");
   revalidatePayroll();
   return { ok: true };

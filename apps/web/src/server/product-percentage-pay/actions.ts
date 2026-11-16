@@ -51,6 +51,7 @@ export async function retryProductPercentageAction(input: { productId: string; k
   if (!await prisma.product.findFirst({ where: { id: input.productId, AND: [productVisibilityWhere(user)] }, select: { id: true } }))
     return { ok: false as const, error: "Изделие не найдено" };
   return answer(input.productId, () => settlePendingProductPercentage(input.productId, input.kind, {
+    initiator: { id: user.id, name: user.name },
     transaction: operation => withTaskTransaction(async tx => {
       await tx.$queryRaw`SELECT id FROM "Product" WHERE id=${input.productId} FOR UPDATE`;
       if (!await tx.product.findFirst({ where: { id: input.productId, AND: [productVisibilityWhere(user)] }, select: { id: true } }))

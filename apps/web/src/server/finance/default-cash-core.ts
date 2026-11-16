@@ -1,7 +1,9 @@
+import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 import type { Prisma } from "@prisma/client";
 import { DEFAULT_CASH_ACCOUNT_MANAGE_ROLES } from "@/lib/cash-account-default";
 import { hasAnyRole, FINANCE_ROLES } from "@/lib/roles";
 import type { DomainActor } from "@/server/actor";
+import { journalAutomatic } from "./journal";
 import {
   DEFAULT_CASH_ACCOUNT_KEY, EMPTY_DEFAULT_CASH_ACCOUNT, defaultCashAccountSnapshotSchema,
   defaultCashAccountPatchSchema, type DefaultCashAccountResult, type DefaultCashAccountSnapshot,
@@ -27,12 +29,21 @@ export async function listActiveCashAccountOptions(db: SettingsReader & Pick<Pri
   return markDefaultCashAccount(accounts, setting.accountId);
 }
 
-async function writeDefaultCashAccount(actor: DomainActor, current: DefaultCashAccountSnapshot, accountId: string | null, tx: Prisma.TransactionClient) {
+async function writeDefaultCashAccount(actor: DomainActor, current: DefaultCashAccountSnapshot, accountId: string | null, tx: Prisma.TransactionClient, automatic = false) {
   const snapshot = { revision: current.revision + 1, accountId };
   const value = JSON.stringify(snapshot);
   await tx.orgSetting.upsert({ where: { key: DEFAULT_CASH_ACCOUNT_KEY }, create: { key: DEFAULT_CASH_ACCOUNT_KEY, value }, update: { value } });
-  await tx.changeLog.create({ data: { actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
-    entity: "orgSetting", entityId: DEFAULT_CASH_ACCOUNT_KEY, action: "default-cash.update", oldValue: current, newValue: snapshot } });
+  const [previousAccount, nextAccount] = await Promise.all([
+    current.accountId ? tx.cashAccount.findUnique({ where: { id: current.accountId }, select: { name: true } }) : null,
+    accountId ? tx.cashAccount.findUnique({ where: { id: accountId }, select: { name: true } }) : null,
+  ]);
+  await writeChangeLogInTransaction(tx, { actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
+    entity: "orgSetting", entityId: DEFAULT_CASH_ACCOUNT_KEY, action: "default-cash.update", oldValue: current, newValue: snapshot },
+    { entity: { label: "Касса по умолчанию", href: "/finance/accounts" }, contexts: [],
+      links: [...(current.accountId && previousAccount ? [{ type: "cashAccount", id: current.accountId, label: previousAccount.name }] : []),
+        ...(accountId && nextAccount ? [{ type: "cashAccount", id: accountId, label: nextAccount.name }] : [])],
+      before: { ...current, account: previousAccount?.name ?? null }, after: { ...snapshot, account: nextAccount?.name ?? null },
+      ...(automatic ? journalAutomatic(actor, "Снятие кассы по умолчанию после её отключения") : {}) });
   return snapshot;
 }
 
@@ -54,12 +65,13 @@ export async function saveDefaultCashAccount(actor: DomainActor, input: unknown,
 /** Деактивация и снятие назначения, включая оба audit, атомарны под тем же общим lock. */
 export async function toggleCashAccountCore(actor: DomainActor, accountId: string, tx: Prisma.TransactionClient) {
   if (!hasAnyRole(actor.roles, FINANCE_ROLES)) return { ok: false as const, error: "Недостаточно прав" };
-  const account = await tx.cashAccount.findUnique({ where: { id: accountId }, select: { active: true } });
+  const account = await tx.cashAccount.findUnique({ where: { id: accountId }, select: { name: true, active: true } });
   if (!account) return { ok: false as const, error: "Касса не найдена" };
   const current = await readDefaultCashAccount(tx);
   await tx.cashAccount.update({ where: { id: accountId }, data: { active: !account.active } });
-  if (account.active && current.accountId === accountId) await writeDefaultCashAccount(actor, current, null, tx);
-  await tx.changeLog.create({ data: { actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
-    entity: "cashAccount", entityId: accountId, action: "update", field: "active", oldValue: account.active, newValue: !account.active } });
+  if (account.active && current.accountId === accountId) await writeDefaultCashAccount(actor, current, null, tx, true);
+  await writeChangeLogInTransaction(tx, { actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
+    entity: "cashAccount", entityId: accountId, action: "update", field: "active", oldValue: account.active, newValue: !account.active },
+    { entity: { label: `Касса ${account.name}`, href: "/finance/accounts" }, contexts: [] });
   return { ok: true as const };
 }

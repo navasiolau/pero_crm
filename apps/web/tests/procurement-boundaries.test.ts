@@ -3,12 +3,14 @@ import {before,beforeEach,test} from 'node:test';
 import {createRequire,Module} from 'node:module';
 import type {PrismaClient,Role} from '@prisma/client';
 const require=createRequire(import.meta.url);let roles:Role[]=['PROCUREMENT'],calls=0;
+const audits:Record<string,unknown>[]=[];
 const db={
  task:{findMany:async()=>[]},
  warehouseAccountingState:{findUnique:async()=>({phase:'ACTIVE',runId:'qa'})},
  warehouseBalance:{findMany:async()=>[{materialId:'material',quantity:'3',valueByn:'37.02'}]},
  $queryRaw:async()=>{calls++;return[];}, $transaction:async(fn:(tx:unknown)=>Promise<unknown>)=>fn(db),
  materialCategory:{create:async({data}:{data:object})=>{calls++;return{id:'category',...data};}},
+ changeLog:{create:async({data}:{data:Record<string,unknown>})=>{audits.push(data);return data;}},
  material:{findMany:async()=>{calls++;return[{id:'material',name:'M',sku:null,unitId:'pieces',measurementUnit:{name:'шт.'},categoryId:null,category:null,purchasePrice:12.34,minStock:null,active:true,comment:null}];}},
  stockMovement:{groupBy:async()=>[],findMany:async()=>{calls++;return[];}},
  projectMaterial:{findMany:async()=>[],findUnique:async()=>{calls++;return null;},findFirst:async()=>{calls++;return null;}},
@@ -22,9 +24,10 @@ before(()=>{
  inject('next/cache',{revalidatePath(){}});inject('../src/server/plugins/changelog',{writeChangeLog:async()=>({})});inject('../src/server/plugins/events',{emitDomainEvent:async()=>{},dispatchEvent:async()=>{}});inject('../src/server/notifications/notify',{notifyOrg:async()=>{},notifyPerson:async()=>{}});
  actions=require('../src/server/warehouse/actions');queries=require('../src/server/warehouse/queries');refs=require('../src/server/finance/project-refs');api=require('../src/app/api/finance/projects/route');filePermission=require('../src/server/files/delete-permission');
 });
-beforeEach(()=>{calls=0;roles=['PROCUREMENT'];});
+beforeEach(()=>{calls=0;audits.length=0;roles=['PROCUREMENT'];});
 test('actual warehouse actions let procurement manage catalog and reach issue/return but never change requirements',async()=>{
  assert.equal((await actions.addMaterialCategory({name:'Category'})).ok,true);assert.equal(calls,3);
+ assert.equal(audits.length,1);assert.equal(audits[0].entity,'materialCategory');assert.ok(audits[0].presentation);
  for(const fn of [()=>actions.addProjectMaterial({productId:'p',materialId:'m',quantity:1}),()=>actions.updateProjectMaterial({id:'line',quantity:1}),()=>actions.deleteProjectMaterial('line')]){const before:number=calls;await assert.rejects(fn,/Недостаточно прав/);assert.equal(calls,before);}
  for(const fn of [()=>actions.requestMaterial({projectMaterialId:'line',quantity:1,clientMutationId:'00000000-0000-4000-8000-000000000094'}),()=>actions.returnMaterial({projectMaterialId:'line',quantity:1,unitPrice:1,clientMutationId:'00000000-0000-4000-8000-000000000094'})]){const before:number=calls;const result=await fn();assert.equal(result.ok,false);assert.notEqual(result.error,'Недостаточно прав');assert.ok(calls>before,'authorized operation must reach scoped line lookup');}
  roles=['ACCOUNTANT'];await assert.rejects(()=>actions.addMaterialCategory({name:'No'}),/Недостаточно прав/);

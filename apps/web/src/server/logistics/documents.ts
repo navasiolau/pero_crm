@@ -1,3 +1,4 @@
+import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 import { createHash, randomUUID } from "node:crypto";
 import type { LogisticsDocument, Prisma } from "@prisma/client";
 import { uploadSizeLimitError, uploadSizeLimitFor } from "@/server/files/upload-limits";
@@ -5,6 +6,7 @@ import { UploadError, type UploadPhase } from "@/server/files/upload-result";
 import type { FileContentSource } from "@/server/files/document-storage";
 import { logisticsDocumentUploadSchema, type LogisticsDocumentView } from "./contracts";
 import { lockLogisticsTrip, requireLiveLogisticsTrip, requireLogisticsActor, type LogisticsTransaction } from "./core";
+import { logisticsJournalHints } from "./journal";
 
 export type LogisticsDocumentStorage = {
   mode(): "local" | "s3";
@@ -70,16 +72,19 @@ export function createLogisticsDocumentService({ transaction, storage }: {
         const actor = await requireLogisticsActor(actorId, tx);
         await lockUpload(tx, data.clientMutationId);
         await lockLogisticsTrip(tx, data.tripId);
-        await requireTrip(tx, data.tripId);
+        const trip = await requireTrip(tx, data.tripId);
         const row = await tx.logisticsDocument.findUnique({ where: { id: reserved.id } });
         if (!row || row.requestFingerprint !== requestFingerprint)
           throw new UploadError("LOGISTICS_DOCUMENT_CONFLICT", 409, "persist", "Документ изменился — повторите загрузку", "conflict");
         if (row.state === "READY") return { document: logisticsDocumentView(row), repeated: true };
         const ready = await tx.logisticsDocument.update({ where: { id: row.id }, data: { state: "READY", readyAt: new Date() } });
-        await tx.changeLog.create({ data: { id: `logistics-document:${row.id}`, actorType: "user", actorId,
+        await writeChangeLogInTransaction(tx, { id: `logistics-document:${row.id}`, actorType: "user", actorId,
           actorName: actor.name, entity: "logisticsDocument", entityId: row.id, action: "create",
           newValue: { tripId: row.tripId, stage: row.stage, ttnNumber: row.ttnNumber, fileName: row.fileName,
-            mimeType: row.mimeType, size: row.size, contentHash } } });
+            mimeType: row.mimeType, size: row.size, contentHash } }, { ...logisticsJournalHints(trip),
+            entity: { label: `ТТН ${row.ttnNumber ?? row.fileName}` }, before: null,
+            after: { tripId: row.tripId, stage: row.stage, ttnNumber: row.ttnNumber, fileName: row.fileName,
+              mimeType: row.mimeType, size: row.size, contentHash, state: ready.state, readyAt: ready.readyAt?.toISOString() ?? null } });
         // Загрузка второй печати не изменяет ни состав, ни revision, ни деньги.
         return { document: logisticsDocumentView(ready), repeated: false };
       });

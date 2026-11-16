@@ -1,3 +1,4 @@
+import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 import {z} from 'zod';
 import type {Prisma,Role} from '@prisma/client';
 import {FINANCE_ROLES,hasAnyRole} from '@/lib/roles';
@@ -11,14 +12,16 @@ export async function createExpenseArticleCore(actor:Actor,input:unknown,tx:Pris
  let code:number;try{code=parsed.data.code===undefined?nextExpenseArticleCode((await tx.expenseArticle.aggregate({_max:{code:true}}))._max.code):parseExpenseArticleCode(parsed.data.code);}catch(error){return{ok:false as const,error:error instanceof Error?error.message:'Проверьте код статьи'};}
  if(await tx.expenseArticle.findUnique({where:{code},select:{id:true}}))return{ok:false as const,error:`Код статьи ${code} уже используется`};
  const article=await tx.expenseArticle.create({data:{code,name:parsed.data.name,comment:parsed.data.comment?.trim()||null}});
- await tx.changeLog.create({data:{actorType:'user',actorId:actor.id,actorName:actor.name??undefined,entity:'expenseArticle',entityId:article.id,action:'create',newValue:{code:article.code,name:article.name,comment:article.comment}}});
+ await writeChangeLogInTransaction(tx, {actorType:'user',actorId:actor.id,actorName:actor.name??undefined,entity:'expenseArticle',entityId:article.id,action:'create',newValue:{code:article.code,name:article.name,comment:article.comment}},
+  {entity:{label:`Статья ${article.code}: ${article.name}`,href:'/finance/articles'},contexts:[],before:null,after:{code:article.code,name:article.name,comment:article.comment,active:article.active}});
  return{ok:true as const,article};
 }
 export async function toggleExpenseArticleCore(actor:Actor,articleId:string,tx:Prisma.TransactionClient){
  if(!hasAnyRole([...actor.roles],FINANCE_ROLES))return{ok:false as const,error:'Недостаточно прав'};
  const article=await tx.expenseArticle.findUnique({where:{id:articleId}});if(!article)return{ok:false as const,error:'Статья не найдена'};
  await tx.expenseArticle.update({where:{id:articleId},data:{active:!article.active}});
- await tx.changeLog.create({data:{actorType:'user',actorId:actor.id,actorName:actor.name??undefined,entity:'expenseArticle',entityId:articleId,action:'update',field:'active',oldValue:article.active,newValue:!article.active}});return{ok:true as const};
+ await writeChangeLogInTransaction(tx, {actorType:'user',actorId:actor.id,actorName:actor.name??undefined,entity:'expenseArticle',entityId:articleId,action:'update',field:'active',oldValue:article.active,newValue:!article.active},
+  {entity:{label:`Статья ${article.code}: ${article.name}`,href:'/finance/articles'},contexts:[]});return{ok:true as const};
 }
 export function expenseArticleCreateError(error:unknown):string{
  if(error&&typeof error==='object'&&'code'in error&&error.code==='P2002'&&'meta'in error){const target=(error.meta as {target?:unknown})?.target;if((Array.isArray(target)&&target.some(item=>String(item).includes('code')))||typeof target==='string'&&target.includes('code'))return'Этот код статьи уже используется';}

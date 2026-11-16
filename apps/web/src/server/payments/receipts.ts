@@ -1,3 +1,4 @@
+import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import type { DomainActor } from "@/server/actor";
@@ -41,7 +42,7 @@ export async function readPaymentReceipt(actor: DomainActor, data: ReceiptInput,
 
 export async function recordPaymentReceipt(actor: DomainActor, data: ReceiptInput, paymentId: string, tx: Prisma.TransactionClient) {
   if (!data.clientMutationId) return;
-  await tx.changeLog.create({ data: { id: paymentReceiptId(data.clientMutationId), actorType: "user", actorId: actor.id,
+  await writeChangeLogInTransaction(tx, { id: paymentReceiptId(data.clientMutationId), actorType: "user", actorId: actor.id,
     actorName: actor.name || undefined, source: actor.source, entity: "payment", entityId: paymentId, action: "request",
-    newValue: { ...(data.reportDocumentIds !== undefined ? { version: 2 } : {}), fingerprint: paymentFingerprint(actor.id, data) } } });
+    newValue: { ...(data.reportDocumentIds !== undefined ? { version: 2 } : {}), fingerprint: paymentFingerprint(actor.id, data) } }, { kind: "receipt" });
 }

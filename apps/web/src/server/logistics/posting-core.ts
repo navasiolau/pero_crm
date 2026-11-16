@@ -1,3 +1,5 @@
+import { writeChangeLogInTransaction } from "@/server/changelog/writer";
+import { logisticsJournalHints } from "./journal";
 import { createHash, randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { assertProjectMoneyCurrency } from "@/lib/internal-currency";
@@ -78,7 +80,7 @@ export async function postLogisticsInTransaction(actorId: string, input: Logisti
   if (!previous || previous.deletedAt) failure("Рейс не найден");
   if (previous.revision !== data.expectedRevision) failure("Рейс уже изменён. Откройте актуальную запись", true);
   const current = await tx.logisticsPosting.findFirst({ where: { tripId: data.tripId, status: "ACTIVE" },
-    include: { allocations: { select: { projectId: true } } } });
+    include: { allocations: true, documents: { include: { document: { select: { id: true, fileName: true, stage: true, ttnNumber: true, contentHash: true } } } } } });
   if (mode === "post" && current) failure("Рейс уже оплачен. Используйте исправление расхода", true);
   if (mode === "correct" && !current) failure("Рейс ещё не оплачен — сначала проведите расход", true);
   const manifest = { ...(data.manifest ?? manifestOf(previous)), ttnNotRequired: data.manifest?.ttnNotRequired ?? previous.ttnNotRequired };
@@ -88,7 +90,7 @@ export async function postLogisticsInTransaction(actorId: string, input: Logisti
       select: { id: true, number: true, currency: true } }),
     tx.cashAccount.findUnique({ where: { id: data.cashAccountId }, select: { id: true, name: true, currency: true, active: true } }),
     tx.logisticsDocument.findMany({ where: { id: { in: data.documentIds }, tripId: data.tripId, state: "READY", stage: { in: ["ISSUED", "SIGNED"] } },
-      select: { id: true, contentHash: true, stage: true, ttnNumber: true } }),
+      select: { id: true, contentHash: true, stage: true, ttnNumber: true, fileName: true } }),
   ]);
   if (projects.length !== manifest.shares.length) failure("Один из проектов не найден или находится в корзине");
   for (const project of projects) assertProjectMoneyCurrency(project.currency);
@@ -138,12 +140,27 @@ export async function postLogisticsInTransaction(actorId: string, input: Logisti
   const event = await tx.domainEvent.create({ data: { type: current ? "logistics.trip.corrected" : "logistics.trip.posted", actor: actor.id,
     payload: { tripId: previous.id, postingId, previousPostingId: current?.id ?? null, revision, amount: split.amount,
       currency: data.currency, bynAmount: split.bynAmount, projectIds: projects.map(project => project.id) } } });
-  await tx.changeLog.create({ data: { id: `logistics-posting:${data.clientMutationId}`, actorType: "user", actorId: actor.id,
+  await writeChangeLogInTransaction(tx, { id: `logistics-posting:${data.clientMutationId}`, actorType: "user", actorId: actor.id,
     actorName: actor.name, entity: "logisticsPosting", entityId: postingId, action: mode,
     ...(current ? { oldValue: { postingId: current.id, amount: current.amount.toFixed(2), currency: current.currency,
       cashAccountId: current.cashAccountId, bynAmount: current.bynAmount.toFixed(2) } } : {}),
     newValue: { tripId: previous.id, revision, amount: split.amount, currency: data.currency, bynAmount: split.bynAmount,
-      cashAccountId: account.id, allocations: split.allocations, documents, eventId: event.id } } });
+      cashAccountId: account.id, allocations: split.allocations,
+      documents: documents.map(({id,contentHash,stage,ttnNumber})=>({id,contentHash,stage,ttnNumber})), eventId: event.id } }, {
+      ...logisticsJournalHints({ id: previous.id, date: new Date(`${manifest.date}T00:00:00.000Z`),
+        shares: manifest.shares.map(share => ({ ...share, project: projects.find(project => project.id === share.projectId) })),
+        lines: snapshot.lines }, previous),
+      entity: { label: `Расход по рейсу от ${manifest.date.split("-").reverse().join(".")}`, href: `/logistics?trip=${encodeURIComponent(previous.id)}` },
+      before: current ? { amount: current.amount.toString(), currency: current.currency, bynAmount: current.bynAmount.toString(),
+        cashAccountId: current.cashAccountId, cashAccount: current.cashAccountNameSnapshot, rate: current.rate.toString(),
+        rateDate: current.rateDate?.toISOString() ?? null, paidAt: current.paidAt.toISOString(), manifest: current.manifestSnapshot,
+        allocations: current.allocations.map(part => ({ projectId: part.projectId, project: part.projectNumberSnapshot,
+          percentBps: part.percentBps, amount: part.amount.toString(), bynAmount: part.bynAmount.toString() })),
+        documents: current.documents.map(link => link.document) } : null,
+      after: { amount: split.amount, currency: data.currency, bynAmount: split.bynAmount, cashAccountId: account.id, cashAccount: account.name,
+        rate: split.rate, rateDate: prepared.rateDate?.toISOString() ?? null, paidAt: prepared.paidAt.toISOString(), manifest: snapshot,
+        allocations: split.allocations.map(part => ({ ...part, project: projects.find(project => project.id === part.projectId)?.number ?? null })), documents },
+    });
   return { tripId: previous.id, revision, postingId, repeated: false, eventId: event.id,
     projectIds: [...new Set([...projects.map(project => project.id), ...(current?.allocations.map(row => row.projectId) ?? [])])] };
 }

@@ -8,7 +8,7 @@ import { createPaymentInTransaction, type PreparedPayment } from "@/server/payme
 import type { PaymentDetails } from "@/server/payments/contracts";
 import { warehouseMove } from "./accounting";
 import { stockPurchaseSchema, type StockPurchaseData } from "./contracts";
-import { reportDocumentSetMatches } from "@/server/finance-documents/input";
+import { inputReportDocumentIds, reportDocumentSetMatches } from "@/server/finance-documents/input";
 
 const receiptInclude = { movement: true, payment: { include: {
   reportDocuments: { select: { documentId: true, position: true }, orderBy: { position: "asc" } },
@@ -65,7 +65,12 @@ export async function createStockPurchaseInTransaction(actor: DomainActor, input
     throw Error("Денежный снимок закупки изменился");
   const stock = await warehouseMove(tx, actor, { kind: "INCOME", clientMutationId: randomUUID(),
     materialId: data.materialId, quantity: data.quantity, comment: data.comment },
-    { bynAmount: new Prisma.Decimal(prepared.bynAmount).toFixed(2) });
+    { bynAmount: new Prisma.Decimal(prepared.bynAmount).toFixed(2), purchase: {
+      currency: data.currency, unitPrice: data.unitPrice, amount: new Prisma.Decimal(prepared.amount).toFixed(2),
+      cashAccountId: prepared.account.id, cashAccount: prepared.account.name, expenseArticleId: prepared.articleId,
+      rate: new Prisma.Decimal(prepared.rate).toString(), rateDate: prepared.rateDate?.toISOString() ?? null,
+      paidAt: prepared.paidAt.toISOString(), reportDocumentIds: inputReportDocumentIds(data),
+    } });
   const money = await createPaymentInTransaction(actor, monetaryInput, prepared, tx, { movementId: stock.movement.id });
   const receipt = await tx.stockPurchase.create({ data: { clientMutationId: data.clientMutationId,
     requestFingerprint: stockPurchaseFingerprint(actor.id, data), actorId: actor.id, unitPrice: data.unitPrice,

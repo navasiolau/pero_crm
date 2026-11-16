@@ -622,6 +622,8 @@ for (const currency of ["BYN", "USD"] as const) test(`warehouse/paid-receipt-cas
   assert.deepEqual(await nativeSnapshot(tx), deleteBaseline, "SOFT_DELETE_LAST_WRITE_SQL_ROLLBACK");
   await tx.$executeRawUnsafe('DROP TRIGGER ci169_delete_failure ON "DomainEvent"'); await tx.$executeRawUnsafe("DROP FUNCTION ci169_delete_failure()");
   const deleted = await stockDeletion.deleteMovementInTransaction(tx, actor, input);
+  const deletionAudit = await tx.changeLog.findFirstOrThrow({ where: { entity: "stockMovement", entityId: receipt.movementId, action: "softDelete" } });
+  assert.equal((await import("../../src/server/changelog/presentation")).parseJournalPresentation(deletionAudit.presentation)?.action.label, "Удаление");
   assert.equal((await stockDeletion.deleteMovementInTransaction(tx, actor, input)).repeated, true);
   await assert.rejects(stockDeletion.deleteMovementInTransaction(tx, actor, { ...input, planFingerprint: "f".repeat(64) }), /другими данными/);
   assert.equal((await tx.payment.findUniqueOrThrow({ where: { id: receipt.paymentId } })).deletionId, deleted.id);
@@ -758,6 +760,8 @@ test("logistics/real-posting-correction-CAS-history-budget-and-SQL-rollback", as
   assert.deepEqual(await nativeSnapshot(tx), faultBefore, "CORRECTION_FINAL_AUDIT_FAILURE_ROLLS_BACK_POSTING_PAYMENT_TRIP");
   await tx.$executeRawUnsafe('DROP TRIGGER ci169_logistics_failure ON "ChangeLog"'); await tx.$executeRawUnsafe("DROP FUNCTION ci169_logistics_failure()");
   const corrected = await logistics.createLogisticsPostingCore(actor.id, correction, "correct", dependencies);
+  const correctionAudit = await tx.changeLog.findFirstOrThrow({ where: { entity: "logisticsPosting", entityId: corrected.postingId, action: "correct" } });
+  assert.equal((await import("../../src/server/changelog/presentation")).parseJournalPresentation(correctionAudit.presentation)?.action.label, "Изменение");
   const signed = await documents.upload(actor.id, { ...upload, clientMutationId: randomUUID(), stage: "SIGNED", bytes: Buffer.from("%PDF-1.4\nSIGNED") });
   assert.notEqual(signed.document.id, document.id); assert.equal((await documents.list(c.actor.id, trip.tripId)).length, 3);
   assert.equal((await logisticsQueries.getLogisticsTripMoneyCore(actor.id, trip.tripId, tx)).current!.id, corrected.postingId);

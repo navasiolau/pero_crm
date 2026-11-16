@@ -1,3 +1,4 @@
+import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 import {createHash} from 'node:crypto';
 import type {Prisma} from '@prisma/client';
 import {hasAnyRole,MANAGER_ROLES} from '@/lib/roles';
@@ -20,6 +21,7 @@ export async function saveProductPercentageDefaults(actor:DomainActor,input:unkn
  const snapshot={revision:current.revision+1,rates:data.rates},value=JSON.stringify(snapshot);
  await tx.orgSetting.upsert({where:{key:DEFAULT_PERCENTAGE_KEY},create:{key:DEFAULT_PERCENTAGE_KEY,value},update:{value}});
  const result:DefaultsResult={ok:true,kind:'saved',snapshot,noOp:false,repeated:false};
- await tx.changeLog.create({data:{id,actorType:'user',actorId:actor.id,actorName:actor.name,source:actor.source,entity:'orgSetting',entityId:DEFAULT_PERCENTAGE_KEY,action:'percentage-defaults.update',oldValue:current,newValue:{fingerprint,result}}});
+ await writeChangeLogInTransaction(tx, {id,actorType:'user',actorId:actor.id,actorName:actor.name,source:actor.source,entity:'orgSetting',entityId:DEFAULT_PERCENTAGE_KEY,action:'percentage-defaults.update',oldValue:current,newValue:{fingerprint,result}},
+  {entity:{label:'Стандартные проценты оплаты',href:'/settings/product-percentages'},contexts:[],before:current,after:snapshot});
  return result;
 }

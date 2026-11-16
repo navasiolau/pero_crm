@@ -81,7 +81,7 @@ test("DI actual project-material wrappers keep mandatory audits atomic and isola
   inject("../src/server/warehouse/norm-core", {
     lockMaterialProduct: async () => {},
     addMaterialNorm: async () => { line = { id: "line", productId: "product", quantity: "2.000", quantityPerUnit: "2.000", issuedQty: "0" }; return { line, product, material: { name: "QA material" } }; },
-    updateMaterialNorm: async () => { const previous = { ...line, product }; line = { ...line, quantity: "3.000", quantityPerUnit: "3.000" }; return { line: previous, quantity: "3.000", quantityPerUnit: "3.000" }; },
+    updateMaterialNorm: async () => { const previous = { ...line, product, material: { name: "QA material" } }; line = { ...line, quantity: "3.000", quantityPerUnit: "3.000" }; return { line: previous, quantity: "3.000", quantityPerUnit: "3.000" }; },
   });
   const { addProjectMaterial, updateProjectMaterial, deleteProjectMaterial } = require("../src/server/warehouse/actions") as typeof import("../src/server/warehouse/actions");
   const operations = [() => addProjectMaterial({ productId: "product", materialId: "material", quantity: 2 }),

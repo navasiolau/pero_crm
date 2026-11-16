@@ -1,3 +1,4 @@
+import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 import { createHash, randomUUID } from "node:crypto";
 import type { FinanceDocument, Prisma } from "@prisma/client";
 import { FINANCE_ROLES, hasAnyRole } from "@/lib/roles";
@@ -85,9 +86,12 @@ export function createFinanceDocumentService({ transaction, storage }: {
           throw new UploadError("FINANCE_DOCUMENT_CONFLICT", 409, "persist", "Документ изменился — повторите загрузку", "conflict");
         if (row.state === "READY") return { document: financeDocumentView(row, row.paymentReport?.paymentId ?? row.payment?.id ?? null), repeated: true };
         const ready = await tx.financeDocument.update({ where: { id: row.id }, data: { state: "READY", readyAt: new Date() } });
-        await tx.changeLog.create({ data: { id: `finance-document:${row.id}`, actorType: "user", actorId,
+        await writeChangeLogInTransaction(tx, { id: `finance-document:${row.id}`, actorType: "user", actorId,
           actorName: actor.name, source: options.source ?? "web", entity: "financeDocument", entityId: row.id,
-          action: "create", newValue: { fileName: row.fileName, mimeType: row.mimeType, size: row.size, contentHash } } });
+          action: "create", newValue: { fileName: row.fileName, mimeType: row.mimeType, size: row.size, contentHash } },
+          { entity: { label: `Финансовый документ ${row.fileName}` }, contexts: [], before: null,
+            after: { fileName: ready.fileName, mimeType: ready.mimeType, size: ready.size, state: ready.state,
+              contentHash, uploadedById: actorId, readyAt: ready.readyAt?.toISOString() ?? null } });
         return { document: financeDocumentView(ready), repeated: false };
       });
     },

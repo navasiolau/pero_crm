@@ -23,7 +23,7 @@ export const JOURNAL_SOURCE_LABELS: Record<string, string> = {
 };
 
 const actions: Record<string, string> = {
-  create: "Создание", update: "Изменение", delete: "Удаление", "soft-delete": "Удаление", "physical-purge": "Удаление файла из хранилища",
+  create: "Создание", update: "Изменение", delete: "Удаление", softDelete: "Удаление", "soft-delete": "Удаление", "physical-purge": "Удаление файла из хранилища",
   status: "Изменение", stage: "Изменение", toggle: "Изменение", reassign: "Изменение", "inline.update": "Изменение",
   "kp.synchronize": "Изменение", "client.synchronize": "Изменение", "proposal.pricing.sync": "Изменение", "kp.cover": "Изменение",
   "number.change": "Изменение", "number.repair": "Изменение", "number.repair.rollback": "Изменение",
@@ -38,7 +38,7 @@ const actions: Record<string, string> = {
   "contract.export.complete": "Выпуск договора", "pdf.request": "Запрос выпуска PDF", "pdf.publish": "Выпуск PDF",
   "pdf.generated": "Выпуск PDF", "version.restore": "Восстановление версии", restore: "Восстановление", command: "Выполнение команды",
   "timer.retire": "Завершение учёта времени", retire: "Завершение учёта времени", taskTransfer: "Перенос начисления", "piecework.v1": "Распределение работы",
-  post: "Проведение", reverse: "Сторнирование", cancel: "Отмена", upload: "Загрузка файла", generate: "Выпуск документа",
+  post: "Проведение", correct: "Изменение", reverse: "Сторнирование", cancel: "Отмена", upload: "Загрузка файла", generate: "Выпуск документа",
   "archive.reserve": "Подготовка импорта", "archive.publish": "Импорт данных", "archive.recovery.reserve": "Подготовка восстановления",
   "archive.recovery.publish": "Восстановление данных", "kp.import.normalize": "Изменение",
 };
@@ -93,7 +93,7 @@ const fields: Record<string, string> = {
   tripId: "Рейс", trip: "Рейс", vehicle: "Автомобиль", vehicleId: "Автомобиль", driverId: "Водитель", driver: "Водитель", route: "Маршрут",
   lines: "Строки", lineIds: "Строки", documentId: "Документ", documentIds: "Документы", documents: "Документы", allocations: "Распределение",
   postingId: "Проведение", paymentId: "Платёж", stockMovementId: "Движение материала", operationId: "Операция", clientMutationId: "Запрос",
-  manifest: "Состав рейса", percentBps: "Доля, сотые процента", nameSnapshot: "Название", numberSnapshot: "Номер", ttnNotRequired: "ТТН не требуется",
+  manifest: "Состав рейса", percentBps: "Доля", nameSnapshot: "Название", numberSnapshot: "Номер", ttnNotRequired: "ТТН не требуется",
   refunds: "Возвраты", issuedQuantityChanges: "Изменение выданного количества",
   fingerprint: "Отпечаток запроса", requestFingerprint: "Отпечаток запроса", tokenId: "Доступ API", eventId: "Событие", jobId: "Задание",
   ok: "Успех", error: "Ошибка", errorCode: "Код ошибки", lastErrorCode: "Код ошибки", repeated: "Повтор запроса", noOp: "Без изменений",
@@ -128,6 +128,6 @@ export function journalEnumLabel(path: string, value: string, entity: string): s
   else if (field === "direction") labels = { INCOME: "Приход", EXPENSE: "Расход" };
   else if (field === "type") labels = { ...stockMovementTypeLabels, ...communicationTypeLabels };
   else if (field === "paymentKind" || field === "kind") labels = { ...payoutKindLabels, ENGINEERING: "Проектирование", ASSEMBLY: "Сборка", INSTALLATION: "Монтаж", ORDINARY: "Обычная работа", PIECE: "Сдельная оплата", PERCENTAGE: "Процентная оплата" };
-  else if (field === "state") labels = { NEW: "Новый", DRAFT: "Черновик", PENDING: "Ожидает выполнения", PROCESSING: "Выполняется", READY: "Готово", SUCCEEDED: "Выполнено", FAILED: "Ошибка", CANCELLED: "Отменено", PENDING_FX: "Ожидает курса", SETTLED: "Начислено", ACTIVE: "Активно", FROZEN: "Заблокировано", VERIFYING: "Проверяется", UNINITIALIZED: "Не настроено" };
+  else if (field === "state") labels = { NEW: "Новый", DRAFT: "Черновик", PENDING: "Ожидает выполнения", PROCESSING: "Выполняется", READY: "Готово", SUCCEEDED: "Выполнено", FAILED: "Ошибка", CANCELLED: "Отменено", PENDING_FX: "Ожидает курса", SETTLED: "Начислено", SKIPPED_ONCE: "Начисление пропущено", LEGACY_PROTECTED: "Защищено историческим начислением", ACTIVE: "Активно", FROZEN: "Заблокировано", VERIFYING: "Проверяется", UNINITIALIZED: "Не настроено" };
   return labels?.[value] ?? value;
 }

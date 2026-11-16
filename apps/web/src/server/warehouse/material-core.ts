@@ -1,7 +1,9 @@
+import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 import type { Prisma } from "@prisma/client";
 import { hasAnyRole, WAREHOUSE_MANAGE_ROLES } from "@/lib/roles";
 import type { DomainActor } from "@/server/actor";
 import { materialSchema, type MaterialCreateResult } from "./material-contracts";
+import { materialJournalSnapshot } from "@/server/finance/journal";
 
 export async function requireMaterialUnit(tx: Prisma.TransactionClient, unitId: string) {
   const unit = await tx.materialUnit.findUnique({ where: { id: unitId }, select: { id: true, name: true } });
@@ -22,19 +24,23 @@ export async function createMaterialInTransaction(actor: DomainActor, input: unk
   const parsed = materialSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Ошибка данных" };
   const data = parsed.data;
-  await requireMaterialUnit(tx, data.unitId);
+  const unit = await requireMaterialUnit(tx, data.unitId);
+  let categoryName: string | null = null;
   if (data.categoryId) {
-    const category = await tx.materialCategory.findUnique({ where: { id: data.categoryId }, select: { active: true } });
+    const category = await tx.materialCategory.findUnique({ where: { id: data.categoryId }, select: { active: true, name: true } });
     if (!category?.active) return { ok: false, error: "Категория не найдена" };
+    categoryName = category.name;
   }
   const material = await tx.material.create({ data: {
     name: data.name, sku: data.sku?.trim() || null, unitId: data.unitId,
     categoryId: data.categoryId || null, purchasePrice: 0, minStock: data.minStock ?? null,
     comment: data.comment?.trim() || null,
   }, include: { measurementUnit: { select: { name: true } } } });
-  await tx.changeLog.create({ data: { actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
+  await writeChangeLogInTransaction(tx, { actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
     entity: "material", entityId: material.id, action: "create",
     newValue: { name: material.name, sku: material.sku, unitId: material.unitId, unit: material.measurementUnit.name, purchasePrice: 0 },
-  } });
+  }, { entity: { label: `Материал ${material.name}`, href: "/warehouse/materials" }, contexts: [],
+    links: [{ type: "materialUnit", id: unit.id, label: unit.name }, ...(data.categoryId && categoryName ? [{ type: "materialCategory", id: data.categoryId, label: categoryName }] : [])],
+    before: null, after: materialJournalSnapshot(material) });
   return { ok: true, material: { id: material.id, name: material.name, unit: material.measurementUnit.name, sku: material.sku, stock: 0 } };
 }

@@ -1,3 +1,5 @@
+import { writeChangeLogInTransaction } from "@/server/changelog/writer";
+import { journalAutomatic } from "@/server/finance/journal";
 import { Prisma } from "@prisma/client";
 import { canAccrueOrdinarySalary } from "@/lib/compensation-policy";
 import { historicalByn, BYN_UNAVAILABLE_REASON } from "@/lib/history-byn";
@@ -56,14 +58,19 @@ export async function accrueTurnoverCore(actor: DomainActor, month: string, tran
           ? `${percent}% от оборота за ${month} · доначисление (оборот ${formatAmount(turnover.total.toFixed(2), turnover.currency)})`
           : `${percent}% от оборота за ${month} · оборот ${formatAmount(turnover.total.toFixed(2), turnover.currency)}`,
       } });
-      await tx.changeLog.create({ data: {
+      await writeChangeLogInTransaction(tx, {
         actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
         entity: "payrollEntry", entityId: payroll.id, action: isTopUp ? "accrue-topup" : "accrue",
         newValue: { user: user.name, scheme: "PERCENT_TURNOVER", amount: delta.toNumber(), month,
           basis: { start: turnover.start.toISOString(), end: turnover.end.toISOString(), currency: turnover.currency,
             totalByn: turnover.total.toFixed(2), paymentsCount: turnover.paymentsCount, percent: percent.toString(),
             priorByn: already.toFixed(2), expectedByn: expected.toFixed(2), deltaByn: amount } },
-      } });
+      }, { ...journalAutomatic(actor, "Расчёт процента от оборота за закрываемый месяц"),
+        entity: { label: `Начисление ${user.name} за ${month}` }, contexts: [], before: null,
+        after: { user: user.name, userId: user.id, scheme: payroll.scheme, amount, currency: turnover.currency,
+          month, comment: payroll.comment, percent: percent.toString(), turnoverByn: turnover.total.toFixed(2),
+          priorByn: already.toFixed(2), expectedByn: expected.toFixed(2), periodFrom: turnover.start.toISOString(),
+          periodTo: turnover.end.toISOString(), paymentsCount: turnover.paymentsCount } });
       const event = await tx.domainEvent.create({ data: {
         type: "payroll.accrued", actor: actor.id,
         payload: { userId: user.id, scheme: "PERCENT_TURNOVER", amount: delta.toNumber(), month, payrollEntryId: payroll.id },

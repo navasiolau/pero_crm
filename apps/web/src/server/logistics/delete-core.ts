@@ -1,11 +1,13 @@
+import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 import { createHash } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { canDeleteLogisticsTrip } from "@/lib/logistics-access";
 import { UploadError } from "@/server/files/upload-result";
 import { lockLogisticsMutation, lockLogisticsTrip, requireLogisticsActor, type LogisticsTransaction } from "./core";
 import { logisticsTripDeleteSchema, type LogisticsTripDeleteResult } from "./delete-contracts";
+import { logisticsJournalHints } from "./journal";
 
-const deletionInclude = { shares: true, lines: true, documents: { select: { id: true } }, postings: { include: { allocations: true } } } satisfies Prisma.LogisticsTripInclude;
+const deletionInclude = { shares: { include: { project: { select: { number: true } } } }, lines: true, documents: { select: { id: true, fileName: true, stage: true, ttnNumber: true } }, postings: { include: { allocations: true } } } satisfies Prisma.LogisticsTripInclude;
 type DeletionTrip = Prisma.LogisticsTripGetPayload<{ include: typeof deletionInclude }>;
 const projectIds = (trip: DeletionTrip) => [...new Set([...trip.shares.map(row => row.projectId),
   ...trip.postings.flatMap(posting => posting.allocations.map(row => row.projectId))])];
@@ -51,13 +53,21 @@ export async function deleteLogisticsTripCore(actorId: string | null | undefined
     await tx.logisticsMutation.create({ data: { clientMutationId: data.clientMutationId, actorId: actor.id, tripId: trip.id,
       operation: "delete", requestFingerprint: fingerprint, revision } });
     const affected = projectIds(trip), current = trip.postings.find(row => row.status === "ACTIVE");
-    await tx.changeLog.create({ data: { id: `logistics-delete:${data.clientMutationId}`, actorType: "user", actorId: actor.id,
+    await writeChangeLogInTransaction(tx, { id: `logistics-delete:${data.clientMutationId}`, actorType: "user", actorId: actor.id,
       actorName: actor.name, source: "web", entity: "logisticsTrip", entityId: trip.id, action: "soft-delete",
       oldValue: { date: trip.date.toISOString().slice(0, 10), revision: trip.revision, projectIds: affected,
         lineIds: trip.lines.map(row => row.id), documentIds: trip.documents.map(row => row.id),
         postingId: current?.id ?? null, amount: current?.amount.toFixed(2) ?? null, currency: current?.currency ?? null,
         bynAmount: current?.bynAmount.toFixed(2) ?? null, cashAccountId: current?.cashAccountId ?? null },
-      newValue: { deletedAt: deletedAt.toISOString(), deletedById: actor.id, revision } } });
+      newValue: { deletedAt: deletedAt.toISOString(), deletedById: actor.id, revision } }, { ...logisticsJournalHints(trip),
+        before: { date: trip.date.toISOString().slice(0, 10), comment: trip.comment, revision: trip.revision, ttnNotRequired: trip.ttnNotRequired,
+          shares: trip.shares.map(share => ({ projectId: share.projectId, percentBps: share.percentBps })),
+          lines: trip.lines.map(line => ({ projectId: line.projectId, productId: line.productId, materialId: line.materialId,
+            name: line.nameSnapshot, number: line.numberSnapshot, unit: line.unitSnapshot, quantity: line.quantity.toString() })),
+          documents: trip.documents, posting: current ? { amount: current.amount.toString(), currency: current.currency,
+            bynAmount: current.bynAmount.toString(), cashAccount: current.cashAccountNameSnapshot,
+            allocations: current.allocations.map(part => ({ project: part.projectNumberSnapshot, amount: part.amount.toString(), bynAmount: part.bynAmount.toString() })) } : null },
+        after: null });
     const event = await tx.domainEvent.create({ data: { type: "logistics.trip.deleted", actor: actor.id,
       payload: { tripId: trip.id, revision, projectIds: affected, postingId: current?.id ?? null } } });
     return { tripId: trip.id, revision, deletedAt: deletedAt.toISOString(), repeated: false, projectIds: affected, eventId: event.id };

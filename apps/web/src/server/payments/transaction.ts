@@ -1,3 +1,4 @@
+import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 import { Prisma, type Payment } from "@prisma/client";
 import { liveProjectWhere } from "@/server/access/live-entities";
 import { requireActorRoles, type DomainActor } from "@/server/actor";
@@ -11,6 +12,7 @@ import { readPaymentReceipt, recordPaymentReceipt } from "./receipts";
 import { assertExpenseReportDocument } from "./document-policy";
 import { assertLogisticsPaymentContext } from "@/server/logistics/payment-context";
 import { inputReportDocumentIds, reportDocumentSetMatches } from "@/server/finance-documents/input";
+import { journalAutomatic, journalProjectContext, paymentJournalSnapshot } from "@/server/finance/journal";
 
 export type PreparedPayment = {
   project: { id: string; number: string; currency: string } | null;
@@ -53,6 +55,7 @@ export async function createPaymentInTransaction(actor: DomainActor, input: Paym
   } else if (!logisticsAllocationId) assertExpenseReportDocument(data);
 
   const documentIds = inputReportDocumentIds(data);
+  const documentReferences: { type: string; id: string; label: string }[] = [];
   if (documentIds.length) {
     await requireFinanceDocumentActor(actor.id, tx);
     for (const id of documentIds) {
@@ -60,6 +63,7 @@ export async function createPaymentInTransaction(actor: DomainActor, input: Paym
         include: { payment: { select: { id: true } }, paymentReport: { select: { paymentId: true } } } });
       if (!document || document.state !== "READY" || document.uploadedById !== actor.id || document.payment || document.paymentReport)
         throw Error("Отчётный документ недоступен или уже прикреплён к другой операции");
+      documentReferences.push({ type: "financeDocument", id: document.id, label: document.fileName });
     }
   }
 
@@ -74,7 +78,7 @@ export async function createPaymentInTransaction(actor: DomainActor, input: Paym
   const [project, account, article] = await Promise.all([
     prepared.project ? tx.project.findUnique({ where: { ...liveProjectWhere, id: prepared.project.id }, select: { currency: true } }) : null,
     tx.cashAccount.findUnique({ where: { id: prepared.account.id }, select: { active: true, currency: true } }),
-    prepared.articleId ? tx.expenseArticle.findUnique({ where: { id: prepared.articleId }, select: { active: true } }) : null,
+    prepared.articleId ? tx.expenseArticle.findUnique({ where: { id: prepared.articleId }, select: { active: true, name: true } }) : null,
   ]);
   if ((prepared.project && project?.currency !== prepared.project.currency) || !account?.active || account.currency !== data.currency ||
       (prepared.articleId && !article?.active)) throw Error("Реквизиты платежа изменились — обновите форму");
@@ -108,14 +112,21 @@ export async function createPaymentInTransaction(actor: DomainActor, input: Paym
     if (!reportDocumentSetMatches({ ...payment, reportDocuments: linked }, documentIds))
       throw Error("Не удалось подтвердить полный комплект документов платежа");
   }
-  await tx.changeLog.create({ data: {
+  await writeChangeLogInTransaction(tx, {
     actorType: "user", actorId: actor.id, actorName: actor.name || undefined, entity: "payment", entityId: payment.id,
     action: "create", source: actor.source, newValue: {
       project: prepared.project?.number ?? null, direction: data.direction, amount: prepared.amount,
       currency: data.currency, rate: prepared.rate, bynAmount: prepared.bynAmount,
       projectAmount: prepared.project ? prepared.bynAmount : null, cashAccount: prepared.account.name,
     },
-  } });
+  }, { entity: { label: `${data.direction === "INCOME" ? "Приход" : "Расход"} ${payment.amount.toString()} ${payment.currency}` },
+    contexts: prepared.project ? [journalProjectContext(prepared.project)] : [], before: null,
+    links: [{ type: "cashAccount", id: prepared.account.id, label: prepared.account.name }, ...documentReferences,
+      ...(prepared.project ? [{ type: "project", ...journalProjectContext(prepared.project) }] : []),
+      ...(prepared.articleId && article?.name ? [{ type: "expenseArticle", id: prepared.articleId, label: article.name }] : [])],
+    after: paymentJournalSnapshot(payment, { project: prepared.project?.number, cashAccount: prepared.account.name,
+      expenseArticle: article?.name, documentIds }),
+    ...(context ? journalAutomatic(actor, logisticsAllocationId ? "Распределение стоимости рейса по проектам" : "Оплата прихода на склад") : {}) });
   // Составной логистический writer создаёт одно событие на целый рейс после всех долей.
   const event = logisticsAllocationId ? null : await tx.domainEvent.create({ data: {
     type: data.direction === "INCOME" ? "payment.created" : "expense.created", actor: actor.id,

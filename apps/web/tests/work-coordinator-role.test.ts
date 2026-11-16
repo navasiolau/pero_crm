@@ -18,6 +18,12 @@ const stored = { id: "price", name: "Расценка", unit: "шт.", price: 10
 const audits: unknown[] = [];
 let writes = 0;
 const db = {
+  $queryRaw: async () => [],
+  $transaction: async <T>(operation: (tx: unknown) => Promise<T>) => {
+    const before = { ...stored }, oldWrites = writes, oldAudits = audits.length;
+    try { return await operation(db); }
+    catch (error) { Object.assign(stored, before); writes = oldWrites; audits.length = oldAudits; throw error; }
+  },
   priceItem: {
     create: async ({ data }: { data: Partial<typeof stored> }) => { writes++; Object.assign(stored, data); return { ...stored }; },
     findUnique: async () => ({ ...stored }),
