@@ -14,4 +14,4 @@
 ## 3. Приёмка
 
 - [x] 3.1 Добавить bounded rollback-only native helper для root, пройти целевые тесты/typecheck/lint/OpenSpec; evidence содержит точные результаты.
-- [ ] 3.2 Root принимает actual staging SHA/image/health и сценарии после обычного merge/CI; evidence фиксирует native/browser proof.
+- [x] 3.2 Root принимает actual staging SHA/image/health и сценарии после обычного merge/CI; evidence фиксирует native/browser proof.
