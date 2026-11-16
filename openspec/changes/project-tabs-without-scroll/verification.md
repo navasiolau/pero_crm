@@ -20,7 +20,7 @@ Production diff — только композиция списка в стран
 
 После root review новый `project-tabs-layout.test.mjs` явно включён в существующую CI-группу `components-1`, где устанавливается Chromium. Без этой строки новый файл попадал бы в backend по умолчанию; исполнение браузерного сценария не пропускается. Изменена только принадлежность одного файла, порядок jobs, guards и критерии публикации сохранены.
 
-Повтор `tests/ci-scheduling.test.mjs` + `tests/project-tabs-layout.test.mjs` — **6/6 PASS**, diff-check — PASS. Изменение CI опубликовано отдельным обычным follow-up коммитом после собственного review root; прежний коммит не переписывался.
+Повтор `tests/ci-scheduling.test.mjs` + `tests/project-tabs-layout.test.mjs` — **6/6 PASS**, diff-check — PASS. Изменение CI зафиксировано отдельным обычным follow-up коммитом по поручению root; прежний коммит не переписывался. Push и публикация остаются у root.
 
 ## Staging
 
