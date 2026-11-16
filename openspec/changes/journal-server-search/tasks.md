@@ -14,4 +14,4 @@
 
 - [x] 3.1 Реализовать guarded dry-run/apply пакетного backfill; проверить повтор, rollback и неизменность raw события, запрет неверной цели.
 - [x] 3.2 Выполнить целевые тесты, typecheck, lint и OpenSpec validate; записать фактические результаты в evidence.md.
-- [ ] 3.3 Принять под root контролем actual staging после штатного CI: SHA/образ/health, SQL и роли, полный поиск, backfill integrity; зафиксировать evidence без объявления локальных проверок staging-приёмкой.
+- [x] 3.3 Принять под root контролем actual staging после штатного CI: SHA/образ/health, SQL и роли, полный поиск, backfill integrity; зафиксировать evidence без объявления локальных проверок staging-приёмкой.

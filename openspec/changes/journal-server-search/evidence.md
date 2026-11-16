@@ -54,4 +54,8 @@ Root повторил native 214 на local: run `a9639462-1765-44cc-a70f-fb3898
 
 Root исполнил SQL кандидата в READ ONLY на существующем staging с 5529 строками, пока там развёрнут предыдущий image `096b258d`: первый запрос 1054 мс, следующие **589/489/602 мс**; total=2370/page=20 совпали с прежними. Options 437 мс. Это проверка кандидата на реальной БД, а не доказательство доставки исправления. Evidence: `candidate222-benchmark.response.private.json` у root.
 
-Окончательная приёмка остаётся открытой до штатного CI исправления, фактического нового SHA/образа и повторной runtime-проверки.
+Root принял исправление на фактически развёрнутом `6addc0c8de142da3fae92589ab91af951d01ba7c`. [Штатный CI](https://github.com/navasiolau/pero_crm/actions/runs/43777114541): 7/7 SUCCESS; web/renderer имеют эту revision, health200, DB/volume/W07 сохранены. Web image `sha256:7b44c5fa510f1c61e7ed06a1fa29e215d676f721d54e30ec2c8406cb07e20415`.
+
+Native214 в действующем web под W07: run `f1af6fb0-bc5d-41d4-bbf1-f5060179cf66`, rawVerified214, readinessParity52, refreshWrites107/повтор0, rollback=true/fixtures0 — PASS. Полный source audit5529 сохранён при backfill. Runtime измерения сохранили total2370/page20: первый прогон 1145–1364 мс, повтор 1003/996/870/859 мс; options534мс. Задержка зависит от текущей нагрузки; прежние 8573 мс устранены, результаты не ограничены200 строками. Receipt `D:/Projects/pero_crm_v2/.playwright-mcp/journal-221-228/accepted-222.json`.
+
+HTTP-интеграция новых actions с интерфейсом принимается в №223; финальный refreshAll после №228 обновит поздние словари без изменения raw истории.
