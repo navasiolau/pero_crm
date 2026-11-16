@@ -9,7 +9,7 @@
 - Подготовлен `tests/helpers/journal-225-native.ts`: caller-supplied transaction, обязательные rollbackOnly/runId/database guards; реальные cores КП, цен, draft promotion, удаления проекта, contract store, replay и audit fault SAVEPOINT. Сеть, renderer, dispatch и отдельное подключение не вызываются.
 - Native/helper и staging самим агентом не запускались; runtime-приёмку выполняет root. Публикация и merge в staging остаются за root. Production и restic не затрагивались.
 
-Независимое review и root staging receipt будут добавлены по завершении.
+Ниже сохранены этапы локальной проверки, исправления по review и фактическая staging-приёмка.
 
 ## Исправление по review
 
@@ -31,4 +31,17 @@
 
 Root подтвердил финальный local native225 PASS на PostgreSQL с `SET CONSTRAINTS ALL IMMEDIATE` перед rollback, включая нормы количества, сохранность сумм, точные снимки, replay и audit fault. Все собственные строки откатились, общий audit count сохранился. Evidence root: `local225-complete.stdout.private.log`.
 
-Root разрешил локальный commit №225 и обычный merge принятого `origin/staging` `a632e1e36326c61f157d3de5d506e533fe0b3ff2` для подготовки. Push и merge в staging выполняет root после предшествующей приёмки; staging-пункт остаётся pending.
+Root разрешил локальный commit №225 и обычный merge принятого `origin/staging` `a632e1e36326c61f157d3de5d506e533fe0b3ff2` для подготовки. На этом этапе staging-пункт оставался pending; публикацией и интеграцией управлял root.
+
+## Staging-приёмка DB/core — 16.11.2026
+
+- Фактически развёрнутый SHA: `e3f99ff05b97f3999fc8fbf74472e9077d769a3b`. Штатный [CI 43796217344](https://github.com/navasiolau/pero_crm/actions/runs/43796217344): **7/7 SUCCESS**.
+- Web image: `sha256:7a08b609684a03aad93249ca9f190ef688571fbe5de2b3bd163a6443dba0cc2a`; renderer: `sha256:8fb1087afd508f9506952c4b16279adeccc7a27df353472eff485edf7770a19f`. Root подтвердил оба healthy и HTTP 200.
+- Сохранены DB container `27b8f7342b9d722ab8788e137b37b03a3037442da038c5b8b98dbb30245b8b6a`, start `2026-11-10T18:42:15.758341834Z`, volume `crm-staging_pgdata`, W07 SHA `27e3bcd727d9e83170c76a254806fde42590da76cea30c9e1441d873df680139`.
+- Прочитан root receipt [stage-final225b.response.private.json](D:/Projects/pero_crm_v2/.playwright-mcp/journal-221-228/stage-final225b.response.private.json): `exitCode=0`, `status=PASS`, `kind=staging`, `rollback=true`, `auditCountPreserved=true`. SHA-256 receipt: `31eaacd2fa52db47af49eb7b304078a1678196ab2a5241d25cb6fe1ff43941e7`; bundle SHA-256: `08fd77b27549f1668560f867658d4a5df162cf61f250e896cb8ae3f66b310e31`.
+- Подтверждены все проверки receipt: `full-proposal-diff`, `full-contract-diff`, `system-actor`, `exact-product-context`, `unchanged-raw-receipts`, `no-replay-events`, `quantity-work-material-audit`, `quantity-stable-number`, `quantity-plan-facts-preserved`, `quantity-audit-rollback`, `cascade-delete-events`, `audit-fault-rollback`.
+- Перед rollback выполнен `SET CONSTRAINTS ALL IMMEDIATE`; собственные тестовые строки откатились. Перед финальными native-проверками: raw audit count **5529**, hash `64bcf0448dabe8e594a5ffa37da4aa1a`. [final-refresh-state.json](D:/Projects/pero_crm_v2/.playwright-mcp/journal-221-228/final-refresh-state.json) на том же SHA подтверждает `scanned=5529`, `updated=5529`, `rawVerified=5529`, `remaining=0`; исходные события сохранены.
+
+Ранний запуск отдельного QA bundle остановился до выполнения сценария: standalone image не содержит `next/cache.js`, тогда как приложение использует скомпилированные Next chunks. Для QA bundle root применил только import alias: `revalidatePath` бросает ошибку при вызове, а `beforeExit` завершает процесс с ошибкой при ненулевом счётчике. В успешной приёмке вызовов **0**, production-код не изменялся. Это адаптация QA-границы импорта; она не является проверкой реальной Next cache invalidation.
+
+Принята именно DB/core часть №225. Retention, operator repair и offline import/recovery не запускались. Итоговые браузерные сценарии и авторизацию №228 root проверяет отдельно; данный receipt их не подменяет.
