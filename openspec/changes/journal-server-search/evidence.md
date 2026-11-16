@@ -80,4 +80,31 @@ Root READ ONLY diagnostic на 300 реальных строках подтве�
 
 Root повторил кандидат на реальном PostgreSQL JSONB roundtrip: **300/300 PASS, presentation/searchText/token-set diff=0**. Evidence: `candidate222-search-order.response.private.json`. Это проверка кандидата; ветка задачи не содержит поздние изменения №228, поэтому окончательное сравнение состава значений выполняется на обычном интеграционном merge, без копирования чужих файлов.
 
-**Финальная приёмка №222 остаётся PENDING** до развёрнутого исправленного SHA, нового refreshAll с повтором updated=0, сохранности baseline5529 и финальных browser/performance checks. Исторические PASS выше не подменяют эту проверку.
+На этапе выявления JSONB drift финальная приёмка №222 оставалась PENDING. Исторические PASS выше её не подменяли; окончательный результат зафиксирован ниже после проверки развёрнутого исправления.
+
+## Финальная интегрированная приёмка — ACCEPTED
+
+Root подтвердил фактическое развёртывание `7a670715ce84cd05fc6f534057a1bf4e0d2ea768` через [штатный CI 43800387489](https://github.com/navasiolau/pero_crm/actions/runs/43800387489), **7/7 SUCCESS**. Web image: `sha256:9091e5fdae04789f60e2e274cb89ba0091c106e380d64eea094a981493b63702`; renderer: `sha256:64d40f083414a3408b0b7490878bb0b9c1c979e0c81ffa929acf46bc0d9ffb44`. Оба healthy, HTTP health=200, существующие DB и W07 сохранены. Итоговая приёмка этого runtime завершена root по результатам ниже.
+
+Подтверждено root на этой ревизии:
+
+- `sorted-projection.response.private.json`: реальный PostgreSQL JSONB roundtrip на 300 строках, searchText drift=0.
+- `sorted-query.response.private.json`: native 214 и readiness parity 52 — PASS. Результаты относятся к действующему runtime, не к локальному исходнику.
+
+Исторические результаты сохраняются отдельно:
+
+- На `e3f99ff0` root проверил пять PNG `browser-final-e3`; этот визуальный результат не приписывается новому SHA.
+- `stage-final222-legacy` подтвердил полные состояния, доказанные дубли, сохранение sole PDF и raw фактов.
+- `stage-api-token-repair2.response.private.json`: ровно четыре исходные исторические записи API-токенов; raw name snapshots=0, scopes snapshots=3, collapsed root=0. Три отображаемых scopes сравнивались с raw через действующий русский `journalEnumLabel`, а не напрямую JSONB-equality. Старые raw события не содержали секретных значений, поэтому этот результат подтверждает восстановление структуры, не отдельный тест маскирования. Маскирование новых секретов проверялось native сценариями №228.
+
+Финальные фактические результаты root на том же развёрнутом SHA:
+
+- `sorted-refresh-state.json`: scanned=5529, updated=5529, rawVerified=5529, remaining=0.
+- `sorted-repeat-state.json`: scanned=5529, **updated=0**, rawVerified=5529, remaining=0; root выполнил явный assertion идемпотентности — PASS.
+- `sorted-benchmark.response.private.json`: запросы **850/753/669/602 мс**, каждый возвращает total=2453 и page=20. Options=451 мс, users=696, entities=30. Это фактические измерения после финального refresh; прежний total2370 относился к старому представлению до legacy aliases/dedup.
+- `browser-sorted-settled/receipt.json`: **11 checks PASS, 21 direct denials, errors=0**. Root лично просмотрел актуальные PNG журнала изделия (26 событий), проекта (15 событий) и мобильного полного окна. Доступ к журналу проверен только для ADMIN; DIRECTOR/MANAGER не рендерят журнал.
+- `stage-sorted-preservation.json`: исходные **75 из 76 таблиц совпали точно**. Отличие только в `ApiToken.lastUsedAt` от polling; остальные фиксированные поля ApiToken сохранены. Исходный ChangeLog cohort=5529, контрольный raw hash `64bcf0448dabe8e594a5ffa37da4aa1a` сохранён; presentation/searchText проверяются отдельно как разрешённые производные колонки.
+
+Две первые browser-попытки с быстрыми переходами зафиксировали по одной React418 на странице изделия у неадминистративной роли; неуспешные результаты сохранены. Итоговый harness ожидал networkidle после каждой страницы перед следующей навигацией — для ADMIN такое ожидание уже применялось. Между этими browser-попытками код приложения не изменялся, ошибки не игнорировались. Component stack не получен, поэтому причина React418 **не доказана**; итоговый PASS относится именно к указанному методу проверки и не объявляется исправлением отдельного product bug.
+
+Статус итоговой приёмки №222: **ACCEPTED на `7a670715ce84cd05fc6f534057a1bf4e0d2ea768`**. Этот итог записан docs-only по фактическим доказательствам root; код, БД, инфраструктура и прежние RED/CI/evidence не менялись. Последующий docs-only SHA не подменяет принятый runtime SHA.

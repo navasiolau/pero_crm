@@ -30,3 +30,9 @@ Runner: `pnpm --filter @pero/web exec tsx scripts/journal-backfill.ts`.
 `afterId` — курсор явно начатого refresh-прохода; remaining в этом режиме означает ещё не просмотренные поддерживаемые строки после курсора. Режим не зацикливается на уже обработанных строках. Повтор полного refresh не пишет равные presentation/searchText. Неизвестные будущие версии presentation остаются нетронутыми.
 
 После №228 известный ошибочный legacy формат `apiToken` с целым объектом, превращённым в единственный `[скрыто]`, восстанавливается только из исходного raw JSON с прежними actor/entity/links. Новые явные снимки API-токенов не пересобираются; секретные значения остаются скрытыми. До исправленного formatter такой repair не заявляется выполненным.
+
+При проверке API scopes сравнивать отображаемые значения с raw через действующий русский formatter; прямое равенство raw кодов и русских подписей не является критерием. В исходном историческом cohort записано три snapshots scopes и ни одного snapshot имени. Текущее справочное имя нельзя выдавать за исторический snapshot; отсутствие старых raw секретов не доказывает отдельный redaction-сценарий.
+
+После исправления порядка поисковых значений repeat должен выполняться тем же развёрнутым SHA с `afterId:null` и `refreshAll:true`. Критерии завершения: remaining=0, при повторе updated=0, исходные поля защищённого cohort сохранены. Один успешный локальный или JSONB sample probe не заменяет этот полный проход на staging.
+
+Фактическая финальная приёмка root на `7a670715ce84cd05fc6f534057a1bf4e0d2ea768`: `sorted-refresh-state.json` — scanned/updated/rawVerified=5529, remaining=0; `sorted-repeat-state.json` — scanned/rawVerified=5529, **updated=0**, remaining=0. Исходный raw hash ChangeLog `64bcf0448dabe8e594a5ffa37da4aa1a` сохранён. Подробные CI/runtime/browser/performance доказательства и сохранённые ограничения ранних browser-попыток приведены в evidence.md; эти результаты не являются разрешением запуска в production.
