@@ -1,112 +1,28 @@
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { listGlobalChangeLog } from "@/server/changelog/queries";
-
-import { ChangelogTable } from "./changelog-table";
+import { Journal } from "@/components/journal/journal";
+import { requireRole } from "@/server/require-role";
+import type { JournalQueryInput } from "@/server/changelog/query-contract";
 
 export const dynamic = "force-dynamic";
 
-// Журнал изменений (§5): фильтры по сотруднику, сущности, периоду.
-// ADMIN-only guard выполняется и в middleware, и перед серверным чтением.
-export default async function ChangelogPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ actor?: string; entity?: string; from?: string; to?: string }>;
+export default async function ChangelogPage({ searchParams }: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const { actor, entity, from, to } = await searchParams;
-
-  const entries = await listGlobalChangeLog({ actor, entity, from, to });
-
-  return (
-    <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-semibold">Журнал изменений</h1>
-        <p className="text-sm text-muted-foreground">
-          Каждое действие в системе: кто, что, когда, было → стало, источник.
-        </p>
-      </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-lg">Записи ({entries.length})</CardTitle>
-          <CardDescription>До 200 последних по фильтру</CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4">
-          <form className="flex flex-wrap items-end gap-3" action="/changelog">
-            <div className="flex flex-col gap-1">
-              <label htmlFor="actor" className="text-xs text-muted-foreground">
-                Сотрудник / автор
-              </label>
-              <Input
-                id="actor"
-                name="actor"
-                defaultValue={actor ?? ""}
-                placeholder="Имя или id"
-                className="w-44"
-              />
-            </div>
-            <div className="flex flex-col gap-1">
-              <label htmlFor="entity" className="text-xs text-muted-foreground">
-                Сущность
-              </label>
-              <Input
-                id="entity"
-                name="entity"
-                defaultValue={entity ?? ""}
-                placeholder="project, task, plugin…"
-                className="w-40"
-              />
-            </div>
-            <div className="flex flex-col gap-1">
-              <label htmlFor="from" className="text-xs text-muted-foreground">
-                С
-              </label>
-              <Input id="from" name="from" type="date" defaultValue={from ?? ""} />
-            </div>
-            <div className="flex flex-col gap-1">
-              <label htmlFor="to" className="text-xs text-muted-foreground">
-                По
-              </label>
-              <Input id="to" name="to" type="date" defaultValue={to ?? ""} />
-            </div>
-            <Button type="submit" variant="outline">
-              Применить
-            </Button>
-            <Button
-              type="submit"
-              variant="ghost"
-              formAction="/changelog"
-              name="reset"
-              value="1"
-            >
-              Сбросить
-            </Button>
-          </form>
-
-          <ChangelogTable
-            entries={entries.map((entry) => ({
-              id: entry.id,
-              createdAt: entry.createdAt.toISOString(),
-              actorName: entry.actorName ?? entry.actorId,
-              actorType: entry.actorType,
-              entity: entry.entity,
-              entityId: entry.entityId,
-              action: entry.action,
-              field: entry.field,
-              oldValue: entry.oldValue,
-              newValue: entry.newValue,
-              source: entry.source,
-            }))}
-          />
-        </CardContent>
-      </Card>
+  await requireRole(["ADMIN"]);
+  const params = await searchParams;
+  const text = (key: string) => typeof params[key] === "string" ? params[key] : undefined;
+  const sort = text("sort"), direction = text("dir");
+  const initialQuery: JournalQueryInput = {
+    q: text("q") ?? text("actor"), actorId: text("actorId"), entity: text("entity"), from: text("from"), to: text("to"),
+    page: text("page") ? Number(text("page")) : undefined,
+    pageSize: text("pageSize") ? Number(text("pageSize")) : undefined,
+    sort: sort === "actor" || sort === "entity" || sort === "action" ? sort : "time",
+    dir: direction === "asc" ? "asc" : "desc",
+  };
+  return <div className="flex min-w-0 flex-col gap-6">
+    <div>
+      <h1 className="text-2xl font-semibold">Журнал изменений</h1>
+      <p className="text-sm text-muted-foreground">История изменений и важных операций в CRM. Нажмите строку, чтобы открыть событие целиком.</p>
     </div>
-  );
+    <Journal initialQuery={initialQuery}/>
+  </div>;
 }
