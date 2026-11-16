@@ -62,6 +62,8 @@ let payments: typeof import("../../src/server/payments/service");
 let stock: typeof import("../../src/server/warehouse/accounting");
 let proposals: typeof import("../../src/server/kp/proposal-core");
 let projectCore: typeof import("../../src/server/projects/core");
+let startupPlugins: typeof import("../../src/server/plugins/sync");
+let telegramRegistration: typeof import("../../src/server/telegram/mutation-core");
 
 function mutationTx(tx: Prisma.TransactionClient, probe: MutationProbe, proof: boolean): Prisma.TransactionClient {
   const writeMethods = new Set(["create", "createMany", "createManyAndReturn", "update", "updateMany", "updateManyAndReturn", "upsert", "delete", "deleteMany"]);
@@ -267,7 +269,7 @@ before(async () => {
   // Child targets загружаются раньше родителей: guardedModuleCache сохраняет installed entry каждого target.
   const names = ["transactions/coordinator", "time/timers", "access/visibility", "access/notification-visibility", "tasks/workspace-contract", "prices/actions", "works/core", "works/update-core", "works/queries", "tasks/worker-allocation-core", "tasks/piecework-core", "tasks/task-reassignment-core",
     "tasks/queries", "warehouse/unit-core", "warehouse/norm-core", "warehouse/queries", "products/delete-core", "products/core", "projects/stage-core", "projects/delete-core",
-    "products/status-core", "products/queries", "projects/queries", "product-percentage-pay/queries", "changelog/queries", "calendar/core", "calendar/analytics", "tasks/completion-core", "tasks/actions", "warehouse/accounting", "warehouse/actions", "time/actions", "payments/service", "projects/core", "kp/proposal-core"];
+    "products/status-core", "products/queries", "projects/queries", "product-percentage-pay/queries", "changelog/queries", "calendar/core", "calendar/analytics", "tasks/completion-core", "tasks/actions", "warehouse/accounting", "warehouse/actions", "time/actions", "payments/service", "projects/core", "kp/proposal-core", "plugins/sync", "telegram/mutation-core"];
   const effect = (name: string) => () => { const probe = current().mutation; if (probe) { probe.effects.push(name); throw Error("CI133_INJECTED_OPTIONAL_EFFECT"); } };
   const overrides = { "../src/auth": { auth: async () => current().unauthenticated ? null : ({ user: current().actor }) },
     "next/cache": { revalidatePath: effect("cache"), revalidateTag: effect("cache") },
@@ -296,6 +298,7 @@ before(async () => {
   frozenReference = scope.load("./helpers/project-materials-reference");
   payments = scope.load("../src/server/payments/service");
   projectCore = scope.load("../src/server/projects/core"); proposals = scope.load("../src/server/kp/proposal-core");
+  startupPlugins = scope.load("../src/server/plugins/sync"); telegramRegistration = scope.load("../src/server/telegram/mutation-core");
 });
 after(async () => { if (fixture) try { scope?.restore(); await fixture.verifyProtected(); } finally { await fixture.dispose(); } });
 
@@ -303,6 +306,27 @@ test("counterparties/native-create-revision-CAS-audit-rollback", async () => fix
   const manager = await rows.user("counterparty-manager", ["MANAGER"]);
   const checks = await verifyCounterpartyNative(tx, actorOf(manager));
   assert.equal(checks.realSqlRollback, true); assert.equal(checks.revisionCas, true);
+}));
+
+test("journal/startup-register-locks-native-types", async () => fixture.rollback(async (tx, rows) => {
+  const actor = actorOf(await rows.user("journal-startup-admin", ["ADMIN"]));
+  // Singleton использует уже открытый rollback-only tx; новая связь, сеть и worker loops не запускаются.
+  const transactionAdapter = new Proxy(tx, { get(target, property) {
+    if (property === "$transaction") return (operation: (inside: Prisma.TransactionClient) => Promise<unknown>) => operation(tx);
+    const value = Reflect.get(target, property); return typeof value === "function" ? value.bind(target) : value;
+  } });
+  await run(actor, transactionAdapter, async () => {
+    // Вызывается настоящий production sync, поэтому прежний SELECT void здесь падает Prisma P2010.
+    await startupPlugins.syncPlugins();
+    assert.equal(await tx.plugin.count({ where: { id: "demo" } }), 1);
+    const startupEvents = await tx.changeLog.count({ where: { actorId: "system:plugins" } });
+    await startupPlugins.syncPlugins();
+    assert.equal(await tx.changeLog.count({ where: { actorId: "system:plugins" } }), startupEvents);
+    assert.ok((await telegramRegistration.registerTelegramBotInTransaction(tx, "ci_journal_228_bot")).ok);
+    const registrationEvents = await tx.changeLog.count({ where: { entity: "orgSetting", entityId: "telegram.botUsername" } });
+    assert.equal((await telegramRegistration.registerTelegramBotInTransaction(tx, "ci_journal_228_bot")).noOp, true);
+    assert.equal(await tx.changeLog.count({ where: { entity: "orgSetting", entityId: "telegram.botUsername" } }), registrationEvents);
+  });
 }));
 
 async function people(rows: PostgresRows, tag: string) {

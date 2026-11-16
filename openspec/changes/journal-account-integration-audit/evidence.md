@@ -28,6 +28,14 @@ Root подтвердил на существующей local БД оба сце
 
 ## Staging / интеграция
 
+### Исправление bootstrap P2010
+
+На combined `ca61155e` root воспроизвёл startup RED: успешная production-сборка, но `/api/health`500; stderr указывает `loading instrumentation hook`, Prisma `P2010`, невозможность десериализовать PostgreSQL `void`. Точная причина — две новые lock-проекции `SELECT pg_advisory_xact_lock(...)`: в plugin startup и bot registration. Root подтвердил на guarded local PostgreSQL в READ ONLY tx, что прежний запрос падает, а `SELECT 1 AS locked FROM ...` возвращает `[{locked:1}]`.
+
+Production fix меняет только эти две проекции; namespace228, ключи блокировок, транзакции, guards и мигратор остаются прежними. Existing native suite расширен сценарием `journal/startup-register-locks-native-types`: actual syncPlugins и actual bot registration выполняются в существующем `fixture.rollback` через тот же guarded module scope; Prisma реально декодирует результаты SQL. Проверяются повторный startup/registration без дублирования аудита, новые connections/network/workers не запускаются. Новых runtime inventory или target guard обходов нет.
+
+На исправленном cut: **30/30 targeted PASS**, scoped ESLint, полный `tsc --noEmit --incremental false`, strict OpenSpec и diff-check — PASS. Worker native/DB не запускал. Точная команда нового native regression в уже разрешённом CI postgres environment: `pnpm --filter @pero/web exec tsx --test --test-name-pattern="journal/startup-register-locks-native-types" tests/integration/domain-postgres.test.ts`; существующие CI target guards обязательны, локальные/staging значения под них не подставлять. Root отдельно выполняет полный production build/start/health GREEN и штатный CI.
+
 Own implementation зафиксирован commit `7796c46da6fd9db42726c57ab705a9f30ec02430`. Принятый staging `a632e1e36326c61f157d3de5d506e533fe0b3ff2` объединён обычным merge без конфликтов. Сохранены публичный formatter/refresh №222 и apiToken root-context fix №228.
 
 По точечному root GO добавлены две integration поправки: marker `technical.explicitFieldLabels` сохраняет manifest labels через полную цепочку stored enrichment→refresh, остальные производные подписи и форматирование values обновляются; reference создателя API-токена показывает имя actor только при совпадении ID, другого владельца читает внутри tx. Исходные raw payloads не меняются. На сочетании: **90/90 targeted PASS**, включая reader/UI/refresh/resolver и228; после расширения pipeline regression повторно **14/14 related PASS**, scoped lint/full tsc PASS. Push/staging merge worker не выполняет.

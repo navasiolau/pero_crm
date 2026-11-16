@@ -65,7 +65,7 @@ export async function unlinkTelegramChatInTransaction(tx: Prisma.TransactionClie
 
 export async function registerTelegramBotInTransaction(tx: Prisma.TransactionClient, username: string) {
   // Сериализует также первое создание ключа: row lock ещё несуществующей строки недостаточен.
-  await tx.$queryRaw`SELECT pg_advisory_xact_lock(228, 1)`;
+  await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(228, 1)`;
   const before = await tx.orgSetting.findUnique({ where: { key: "telegram.botUsername" } });
   if (before?.value === username) return { ok: true as const, noOp: true };
   await tx.orgSetting.upsert({ where: { key: "telegram.botUsername" }, create: { key: "telegram.botUsername", value: username }, update: { value: username } });

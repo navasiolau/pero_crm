@@ -16,7 +16,7 @@ export async function syncPlugins(): Promise<void> {
       continue;
     }
     await prisma.$transaction(async tx => {
-      await tx.$queryRaw`SELECT pg_advisory_xact_lock(228, hashtext(${`plugin-metadata:${manifest.id}`}))`;
+      await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(228, hashtext(${`plugin-metadata:${manifest.id}`}))`;
       await syncPluginMetadata(tx.plugin, manifest, async (before, after) => {
         await writeChangeLogInTransaction(tx, { actorType: "system", actorId: "system:plugins", actorName: "Система", source: "system",
           entity: "plugin", entityId: manifest.id, action: before ? "update" : "create", oldValue: before, newValue: after }, {
