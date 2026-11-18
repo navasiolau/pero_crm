@@ -12,7 +12,7 @@ import { isProjectServiceField, projectServiceSnapshot, type ProjectServiceSnaps
 
 
 type ActiveProjectField = Exclude<ProjectPatchField, "address">;
-type IndependentProjectField = Exclude<ActiveProjectField,'clientId'|'client.phone'|'client.address'>;
+type IndependentProjectField = Exclude<ActiveProjectField,'clientId'|'client.phone'|'client.address'|'contactPerson'>;
 const activeProjectFields = ["title", "managerId"] as const;
 export type ProjectInlineInitial = Record<IndependentProjectField, string | null>&ProjectContactInitial;
 type Context = { controller: (field: ActiveProjectField) => InlineSaveController; flush: () => Promise<boolean>; registerGuard: (key: string, guard: () => Promise<boolean>) => () => void; derived: ProjectPatchDerived; clientId: string; sourceClientId: string; productsSubtotalBYN: string | null; services:ProjectServiceSnapshot; roundingAdjustment:string; stage: ProjectStage; confirmStage: (stage: ProjectStage) => void; pricingError:string|null; switchingClient:boolean };
@@ -66,7 +66,7 @@ export function ProjectInlineProvider({ projectId, initial, stage, pricingProjec
     confirmStage(stage);
   }, [controllers, initial, pricingProjection, stage]);
   const value = useMemo<Context>(() => ({
-    controller: field => {if(field==='clientId'||field==='client.phone'||field==='client.address')return controllers.contacts.controller(field);if(isProjectServiceField(field))return controllers.services.controller(field);const controller = controllers.fields.get(field); if (!controller) throw Error("Неизвестное поле проекта"); return controller; },
+    controller: field => {if(field==='clientId'||field==='client.phone'||field==='client.address'||field==='contactPerson')return controllers.contacts.controller(field);if(isProjectServiceField(field))return controllers.services.controller(field);const controller = controllers.fields.get(field); if (!controller) throw Error("Неизвестное поле проекта"); return controller; },
     flush: async () => {
       const saved = await Promise.all([controllers.contacts.flush(),controllers.services.flush(),...activeProjectFields.map(field=>controllers.fields.get(field)!.flush())]);
       if (!saved.every(Boolean)) return false;

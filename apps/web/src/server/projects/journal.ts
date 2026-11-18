@@ -36,7 +36,7 @@ export function businessSnapshot(value: object, fields: readonly string[]): Reco
   return JSON.parse(JSON.stringify(Object.fromEntries(fields.filter(field => source[field] !== undefined).map(field => [field, source[field]])))) as Record<string, unknown>;
 }
 
-export const PROJECT_JOURNAL_FIELDS = ["number", "title", "clientId", "managerId", "address", "currency", "stage", "initialPrice", "servicesTotal", "delivery", "unloading", "installation", "proposalRoundingAdjustment", "refusalReason", "refusalComment", "deletedAt"] as const;
+export const PROJECT_JOURNAL_FIELDS = ["number", "title", "clientId", "contactPerson", "managerId", "address", "currency", "stage", "initialPrice", "servicesTotal", "delivery", "unloading", "installation", "proposalRoundingAdjustment", "refusalReason", "refusalComment", "deletedAt"] as const;
 export const PRODUCT_JOURNAL_FIELDS = ["number", "title", "kind", "quantity", "status", "expectedPrice", "initialPrice", "engineerId", "description", "technicalSpecifications", "sketchFileId", "deletedAt"] as const;
 
 /** Имена ссылок фиксируются внутри той же транзакции, а не при просмотре истории. */

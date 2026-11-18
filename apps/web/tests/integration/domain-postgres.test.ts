@@ -11,6 +11,7 @@ import { nativeOwnedIds, nativeSnapshot } from "../helpers/native-acceptance-sna
 import { createPostgresFixture, rejectedSql, type PostgresRows } from "./postgres.fixture";
 import { summarizeCalendarEntries } from "../../src/lib/calendar-summary";
 import { verifyCounterpartyNative } from "../helpers/counterparty-native";
+import { verifyProjectContactPersonNative } from "../helpers/project-contact-person-native";
 import { productDraftAccessRelations } from "../../src/server/access/product-draft-context";
 import { verifyProposalCompositionNative } from "../helpers/kp-proposal-native";
 import { verifyProductNumberingNative } from "../helpers/product-numbering-native";
@@ -301,6 +302,12 @@ before(async () => {
   startupPlugins = scope.load("../src/server/plugins/sync"); telegramRegistration = scope.load("../src/server/telegram/mutation-core");
 });
 after(async () => { if (fixture) try { scope?.restore(); await fixture.verifyProtected(); } finally { await fixture.dispose(); } });
+
+test("project-contact-person/native-autofill-switch-CAS-audit-rollback", async () => fixture.rollback(async (tx, rows) => {
+  const manager = await rows.user("contact-person-manager", ["MANAGER"]);
+  const checks = await verifyProjectContactPersonNative(tx, actorOf(manager));
+  assert.equal(checks.realAuditRollback, true); assert.equal(checks.proposalCreation, true);
+}));
 
 test("counterparties/native-create-revision-CAS-audit-rollback", async () => fixture.rollback(async (tx, rows) => {
   const manager = await rows.user("counterparty-manager", ["MANAGER"]);

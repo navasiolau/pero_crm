@@ -8,7 +8,7 @@ import { canonicalProposalJson, normalizeProposalState, proposalItemDescription,
 
 const actor = { id: "manager", name: "Менеджер", roles: ["MANAGER" as const], source: "web" as const };
 const client = (extra: Partial<Client> = {}): Client => ({
-  id: "customer", name: "Имя", lastName: "Фамилия", middleName: "Отчество", phone: "+375000000001",
+  id: "customer", name: "Имя", lastName: "Фамилия", middleName: "Отчество", phone: "+375000000001", isContactPerson: false,
   email: "customer@example.invalid", address: "Адрес", comment: "Сохранить", passportNumber: "TEST0001",
   passportIssuedBy: "Тестовый орган", legacyId: null, legacyTable: null, createdAt: new Date(0), updatedAt: new Date(0), ...extra,
 });

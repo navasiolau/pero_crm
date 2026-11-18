@@ -1,0 +1,48 @@
+{
+  "target": "existing-local",
+  "port": 5433,
+  "containerId": "bf45c761b5687e54bff1aafea82e8647925b5b425d6743ebdc7d33f4824b0ed5",
+  "base": "81ec6e8589a057afd00e8bf076fdd332ee7cc5e1",
+  "checks": {
+    "creation": true,
+    "proposalCreation": true,
+    "fillEmptyOnly": true,
+    "preserveDeleted": true,
+    "manualClear": true,
+    "snapshotName": true,
+    "switchClient": true,
+    "noOpSelection": true,
+    "casAndReplay": true,
+    "roleBoundary": true,
+    "oldInputCompatibility": true,
+    "realAuditRollback": true
+  },
+  "coordinatorAcrossConnections": true,
+  "rollbackVerified": true,
+  "digest": "45c96420c8f84f7d2e06627c2dc8c354b8ed59f6bab1387d8e5e0dd8000da61f",
+  "date": "2026-11-18",
+  "branch": "feature/235",
+  "state": "LOCAL_VERIFIED_UNCOMMITTED",
+  "codeManifestSha256": "a78365644688ad6fa14a4cd0dc8f674017c100919faae923630674ad37ffea9d",
+  "webTests": {
+    "total": 1565,
+    "pass": 1565,
+    "fail": 0,
+    "skipped": 0
+  },
+  "componentAndControllers": {
+    "pass": 37,
+    "fail": 0
+  },
+  "typecheck": true,
+  "lint": {
+    "errors": 0,
+    "existingWarnings": 4
+  },
+  "build": true,
+  "prismaValidateAndGenerate": true,
+  "localDatabaseFinalState": "exited",
+  "committed": false,
+  "stagingDeployment": false,
+  "productionDeployment": false
+}

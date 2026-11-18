@@ -40,7 +40,10 @@ export function ProjectInlineContacts({canManage,clients}:{canManage:boolean;cli
  if(derived.clientId&&derived.clientLabel&&!options.some(row=>row.value===derived.clientId))options.push({value:derived.clientId,label:derived.clientLabel,hint:derived.phone??""});
  return <div className="flex min-w-0 flex-col gap-3 text-sm" data-project-contacts>
  <div className="flex min-w-0 items-start gap-3"><div className="min-w-0 flex-1"><InlineSelectField id="project-inline-client" label="Клиент" clientDirectory controller={client} readOnly={!canManage} options={options}/></div>{canManage?<Button type="button" variant="outline" className="mt-6 shrink-0" onClick={()=>setCreateOpen(true)}>Новый клиент</Button>:null}</div>
+ <div className="grid min-w-0 gap-3 sm:grid-cols-2" data-project-phone-contact>
  <InlineTextField id="project-client-phone" label="Телефон клиента" inputMode="tel" controller={controller('client.phone')} readOnly={!canManage||switchingClient}/>
+ <InlineTextField id="project-contact-person" label="Контактное лицо" controller={controller('contactPerson')} readOnly={!canManage||switchingClient}/>
+ </div>
  <InlineTextField id="project-client-address" label="Адрес клиента" controller={controller('client.address')} readOnly={!canManage||switchingClient}/>
  <ClientDialog open={createOpen} onOpenChange={setCreateOpen} onCreated={async id=>{client.setDraft(id);if(await client.commit())router.refresh();}}/>
  </div>;

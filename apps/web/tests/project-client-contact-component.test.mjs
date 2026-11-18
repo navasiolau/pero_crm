@@ -3,7 +3,7 @@ import test, {before, after} from 'node:test';
 import {createRequire} from 'node:module';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {readFile} from 'node:fs/promises';
+import {readFile,mkdir} from 'node:fs/promises';
 const require=createRequire(import.meta.url);
 const {build}=createRequire(require.resolve('tsx/package.json'))('esbuild');
 const {chromium}=require('@playwright/test');
@@ -31,6 +31,26 @@ async function withContacts(canManage,run,profile=null,viewport={width:1440,heig
  await page.addStyleTag({content:await css});await page.addScriptTag({content:(await bundle).outputFiles[0].text});await page.locator(profile?'[data-single-percentage-kind]':'#project-client-phone').first().waitFor();await run(page);
  }finally{await context.close();}
 }
+test('контактное лицо сохраняет текст и очистку; телефон рядом на desktop и сверху на mobile',async()=>{
+ for(const viewport of [{width:1440,height:1000},{width:390,height:844}]){
+  await withContacts(true,async page=>{
+   const person=page.getByLabel('Контактное лицо',{exact:true}),phone=page.getByLabel('Телефон клиента',{exact:true});
+   await person.fill('  Ответственный за заказ  ');await person.press('Enter');
+   await page.waitForFunction(()=>window.__calls.some(call=>call.field==='contactPerson'));
+   const call=await page.evaluate(()=>window.__calls.find(call=>call.field==='contactPerson'));
+   assert.equal(call.value,'Ответственный за заказ');assert.equal(call.expectedValue,null);assert.equal(call.expectedClientId,'a');
+   const p=await person.boundingBox(),t=await phone.boundingBox();assert.ok(p&&t);
+   if(viewport.width>=640){assert.ok(Math.abs(p.y-t.y)<2);assert.ok(p.x>t.x);}else{assert.ok(p.y>t.y);}
+   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+   const destination=path.join(web,'test-results','project-contact-person');await mkdir(destination,{recursive:true});
+   await page.screenshot({path:path.join(destination,`${viewport.width}.png`),fullPage:true});
+   await person.fill('');await person.press('Tab');
+   await page.waitForFunction(()=>window.__calls.some(call=>call.field==='contactPerson'&&call.value===null));
+  },null,viewport);
+ }
+ await withContacts(false,async page=>{assert.equal(await page.getByLabel('Контактное лицо',{exact:true}).getAttribute('readonly'),'');});
+});
+
 test('общий селектор видит весь справочник и нового клиента после открытия',async()=>{
  await withContacts(true,async page=>{
   await page.evaluate(()=>{window.__clientOptions=Array.from({length:125},(_,index)=>({value:'client-'+index,label:'Клиент '+index,hint:'000'+index}));});

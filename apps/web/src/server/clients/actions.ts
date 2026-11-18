@@ -49,7 +49,10 @@ export async function updateClient(
   if (!baseline) return { ok: false, error: "Форма устарела — обновите карточку клиента" };
   try {
     const result = await withTaskTransaction((tx) => updateClientInTransaction(tx, user, clientId, input, baseline));
-    if (result.ok && !result.noOp) revalidatePath("/clients");
+    if (result.ok && !result.noOp) {
+      revalidatePath("/clients");
+      for (const projectId of result.affectedProjectIds??[]) revalidatePath(`/projects/${projectId}`);
+    }
     return result;
   } catch {
     return { ok: false, error: "Не удалось сохранить клиента" };

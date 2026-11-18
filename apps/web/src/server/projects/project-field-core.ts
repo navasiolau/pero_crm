@@ -75,10 +75,10 @@ export async function patchProjectCore(actor:DomainActor,input:ProjectPatch,tran
    return{...saved.result as unknown as Extract<ProjectPatchResult,{kind:"saved"}>,repeated:true};
   }
   let result:Extract<ProjectPatchResult,{kind:"saved"}>;
-  if(patch.field==="clientId"||patch.field==="address"||patch.field==="client.phone"||patch.field==="client.address"){
-   const shared=await patchProjectContactInTransaction(actor,{projectId:patch.projectId,field:patch.field==="client.phone"?"phone":patch.field==="client.address"?"clientAddress":patch.field,value:patch.value,expectedValue:patch.expectedValue,...(patch.field==="client.phone"||patch.field==="client.address"?{expectedClientId:patch.expectedClientId}:{})},tx);
+  if(patch.field==="clientId"||patch.field==="address"||patch.field==="client.phone"||patch.field==="client.address"||patch.field==="contactPerson"){
+   const shared=await patchProjectContactInTransaction(actor,{projectId:patch.projectId,field:patch.field==="client.phone"?"phone":patch.field==="client.address"?"clientAddress":patch.field,value:patch.value,expectedValue:patch.expectedValue,...(patch.field==="client.phone"||patch.field==="client.address"||patch.field==="contactPerson"?{expectedClientId:patch.expectedClientId}:{})},tx);
    if(!shared.ok)return{...identity,...shared};
-   result={...identity,kind:"saved",value:shared.value,noOp:!shared.changed,derived:{clientId:shared.clientId,clientLabel:shared.clientLabel,phone:shared.phone,clientAddress:shared.clientAddress,clientVersion:shared.clientVersion,...(patch.field==="client.phone"?{phone:String(shared.value)}:{})}};
+   result={...identity,kind:"saved",value:shared.value,noOp:!shared.changed,derived:{clientId:shared.clientId,clientLabel:shared.clientLabel,phone:shared.phone,clientAddress:shared.clientAddress,contactPerson:shared.contactPerson,clientVersion:shared.clientVersion,...(patch.field==="client.phone"?{phone:String(shared.value)}:{})}};
   }else{
    const current=canonical(patch.field,project[patch.field]);if(current!==canonical(patch.field,patch.expectedValue))return{...identity,kind:"conflict",error:"Поле изменено другим пользователем",currentValue:current};
    const value=normalize(patch.field,patch.value);if(current===value)return{...identity,kind:"saved",value,noOp:true};
@@ -95,7 +95,7 @@ export async function patchProjectCore(actor:DomainActor,input:ProjectPatch,tran
    await tx.domainEvent.create({data:{type:"project.updated",actor:actor.id,payload:{projectId:patch.projectId,field:patch.field}}});
   }
   if(!result.noOp)await writeChangeLogInTransaction(tx, {id:receiptId,actorType:"user",actorId:actor.id,actorName:actor.name,source:actor.source,entity:"project",entityId:patch.projectId,action:"inline.update",field:patch.field,oldValue:json({value:patch.expectedValue,...(isProjectServiceField(patch.field)?{services:projectServiceSnapshot(project)}:{})}),newValue:json({fingerprint,result})},
-   {...projectJournalContext(project),kind:['clientId','address','client.phone','client.address'].includes(patch.field)?'receipt':'event',
+   {...projectJournalContext(project),kind:['clientId','address','client.phone','client.address','contactPerson'].includes(patch.field)?'receipt':'event',
     before:isProjectServiceField(patch.field)?projectServiceSnapshot(project):{[patch.field]:patch.expectedValue},
     after:isProjectServiceField(patch.field)?projectServiceSnapshot({...project,...result.derived}):{[patch.field]:result.value},
     links:patch.field==='managerId'?await journalPersonLinks(tx,[project.managerId,result.value===null?null:String(result.value)],actor):[]});

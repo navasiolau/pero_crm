@@ -4,6 +4,7 @@ import { Prisma } from '@prisma/client';
 import { MANAGER_ROLES, hasAnyRole } from '@/lib/roles';
 import type { DomainActor } from '@/server/projects/core';
 import type { JournalPresentationHints } from '@/server/changelog/contract';
+import { fillEmptyProjectContactPersons } from '@/server/projects/contact-person';
 
 function clientLabel(client:{name:string;lastName?:string|null;middleName?:string|null}){return [client.lastName,client.name,client.middleName].filter(Boolean).join(' ');}
 
@@ -11,15 +12,16 @@ export const clientSchema = z.object({
  name: z.string().trim().min(1, 'Укажите имя'), lastName: z.string().optional(), middleName: z.string().optional(),
  phone: z.string().trim().min(1, 'Укажите телефон'), email: z.string().optional(), address: z.string().optional(), comment: z.string().optional(),
  passportNumber: z.string().optional(), passportIssuedBy: z.string().optional(),
+ isContactPerson: z.boolean().optional(),
 }).strict();
 export type ClientInput = z.infer<typeof clientSchema>;
-export const clientFields = ['name','lastName','middleName','phone','email','address','comment','passportNumber','passportIssuedBy'] as const;
-export type ClientBaseline = {name:string;phone:string} & Record<Exclude<typeof clientFields[number],'name'|'phone'>, string|null>;
-const baselineSchema = z.object({name:z.string(),phone:z.string(),lastName:z.string().nullable(),middleName:z.string().nullable(),email:z.string().nullable(),address:z.string().nullable(),comment:z.string().nullable(),passportNumber:z.string().nullable(),passportIssuedBy:z.string().nullable()}).strict();
+export const clientFields = ['name','lastName','middleName','phone','email','address','comment','passportNumber','passportIssuedBy','isContactPerson'] as const;
+export type ClientBaseline = {name:string;phone:string;isContactPerson?:boolean} & Record<Exclude<typeof clientFields[number],'name'|'phone'|'isContactPerson'>, string|null>;
+const baselineSchema = z.object({name:z.string(),phone:z.string(),lastName:z.string().nullable(),middleName:z.string().nullable(),email:z.string().nullable(),address:z.string().nullable(),comment:z.string().nullable(),passportNumber:z.string().nullable(),passportIssuedBy:z.string().nullable(),isContactPerson:z.boolean().optional()}).strict();
 export type ContactResult = {ok:true;value:string|null;changed:boolean;projectId?:string;clientId:string;clientLabel?:string;phone?:string;clientAddress?:string|null} | {ok:false;kind:'conflict'|'validation'|'forbidden'|'not-found';error:string;currentValue?:string|null;currentClientId?:string};
 export function mayManageContacts(actor:DomainActor) { return hasAnyRole(actor.roles,MANAGER_ROLES); }
 function normalized(input:ClientInput):ClientBaseline {
- return {name:input.name,phone:input.phone,lastName:input.lastName?.trim()||null,middleName:input.middleName?.trim()||null,email:input.email?.trim()||null,address:input.address?.trim()||null,comment:input.comment?.trim()||null,passportNumber:input.passportNumber?.trim()||null,passportIssuedBy:input.passportIssuedBy?.trim()||null};
+ return {name:input.name,phone:input.phone,lastName:input.lastName?.trim()||null,middleName:input.middleName?.trim()||null,email:input.email?.trim()||null,address:input.address?.trim()||null,comment:input.comment?.trim()||null,passportNumber:input.passportNumber?.trim()||null,passportIssuedBy:input.passportIssuedBy?.trim()||null,...(input.isContactPerson===undefined?{}:{isContactPerson:input.isContactPerson})};
 }
 async function auditClient(tx:Prisma.TransactionClient,actor:DomainActor,clientId:string,action:string,oldValue:Prisma.InputJsonValue,newValue:Prisma.InputJsonValue,field?:string,hints?:JournalPresentationHints) {
  await writeChangeLogInTransaction(tx, {actorType:'user',actorId:actor.id,actorName:actor.name,source:actor.source,entity:'client',entityId:clientId,action,field,oldValue,newValue},hints);
@@ -47,8 +49,8 @@ async function patchClientContactInTransaction(tx:Prisma.TransactionClient,actor
 export async function createClientInTransaction(tx:Prisma.TransactionClient,actor:DomainActor,input:ClientInput) {
  if(!mayManageContacts(actor))return{ok:false as const,error:'Недостаточно прав'};
  const parsed=clientSchema.safeParse(input);if(!parsed.success)return{ok:false as const,error:parsed.error.issues[0]?.message??'Ошибка данных'};
- const client=await tx.client.create({data:normalized(parsed.data)});
- await auditClient(tx,actor,client.id,'create',{}, {name:client.name,phone:client.phone,passportNumber:client.passportNumber,passportIssuedBy:client.passportIssuedBy},undefined,
+ const client=await tx.client.create({data:{...normalized(parsed.data),isContactPerson:parsed.data.isContactPerson??false}});
+ await auditClient(tx,actor,client.id,'create',{}, {name:client.name,phone:client.phone,passportNumber:client.passportNumber,passportIssuedBy:client.passportIssuedBy,isContactPerson:client.isContactPerson},undefined,
   {entity:{type:'client',id:client.id,label:clientLabel(client)},before:null,after:Object.fromEntries(clientFields.map(field=>[field,client[field]]))});
  return{ok:true as const,id:client.id};
 }
@@ -57,8 +59,9 @@ export async function updateClientInTransaction(tx:Prisma.TransactionClient,acto
  const parsed=clientSchema.safeParse(input);const expected=baselineSchema.safeParse(baseline);
  if(!parsed.success)return{ok:false as const,error:parsed.error.issues[0]?.message??'Ошибка данных'};
  if(!expected.success)return{ok:false as const,error:'Форма устарела — обновите карточку клиента'};
+ if(parsed.data.isContactPerson!==undefined&&expected.data.isContactPerson===undefined)return{ok:false as const,error:'Форма устарела — обновите карточку клиента'};
  const desired=normalized(parsed.data);
- const changed=clientFields.filter(field=>desired[field]!==expected.data[field]);
+ const changed=clientFields.filter(field=>(field!=='isContactPerson'||parsed.data.isContactPerson!==undefined)&&desired[field]!==expected.data[field]);
  await tx.$queryRaw`SELECT id FROM "Client" WHERE id = ${clientId} FOR UPDATE`;
  const current=await tx.client.findUnique({where:{id:clientId}});if(!current)return{ok:false as const,error:'Клиент не найден'};
  if(changed.some(field=>current[field]!==expected.data[field]))return{ok:false as const,error:'Клиент изменён другим пользователем — обновите форму'};
@@ -68,5 +71,7 @@ export async function updateClientInTransaction(tx:Prisma.TransactionClient,acto
  const result=await tx.client.updateMany({where,data});if(result.count!==1)throw new Error('CLIENT_CONTACT_CAS_RACE');
  await auditClient(tx,actor,clientId,'update',Object.fromEntries(changed.map(field=>[field,current[field]])),data,undefined,
   {...hints,entity:{type:'client',id:clientId,label:clientLabel({...current,...data})}});
- return{ok:true as const,noOp:false};
+ const affectedProjectIds=changed.includes('isContactPerson')&&desired.isContactPerson===true
+  ?await fillEmptyProjectContactPersons(tx,actor,{...current,...data}):[];
+ return{ok:true as const,noOp:false,affectedProjectIds};
 }

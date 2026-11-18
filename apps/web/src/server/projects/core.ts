@@ -11,6 +11,7 @@ import { dispatchEvent } from "@/server/plugins/events";
 import { notifyOrg } from "@/server/notifications/notify";
 import { withMutationTransaction, type MutationTransaction } from "@/server/transactions/coordinator";
 import { allocateProjectNumberInTransaction } from "./numbering";
+import { projectContactPersonForClient } from "./contact-person";
 import { automationJournalContext, businessSnapshot, journalPersonLinks, projectJournalContext, PROJECT_JOURNAL_FIELDS } from "./journal";
 
 import { MANAGER_ROLES } from "@/lib/roles";
@@ -53,12 +54,13 @@ export async function createProjectInTransaction(
   requireActorRoles(actor, MANAGER_ROLES);
   const data = createProjectSchema.parse(input);
   const { number, numberInt } = await allocateProjectNumberInTransaction(tx);
-  const client = await tx.client.findUnique({ where: { id: data.clientId }, select: { id: true, name: true, lastName: true, middleName: true } });
+  const client = await tx.client.findUnique({ where: { id: data.clientId }, select: { id: true, name: true, lastName: true, middleName: true, isContactPerson: true } });
   if (!client)
     throw new Error("Клиент не найден");
   const project = await tx.project.create({ data: {
     id: number, number, numberInt, title: data.title, clientId: data.clientId,
     currency: data.currency, address: data.address, managerId: data.managerId,
+    contactPerson: projectContactPersonForClient(client),
     initialPrice: null, delivery: data.delivery ?? null,
     unloading: data.unloading ?? null, installation: data.installation ?? null,
     createdById: actor.id,

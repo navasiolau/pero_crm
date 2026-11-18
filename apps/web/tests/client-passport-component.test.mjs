@@ -31,7 +31,7 @@ const css = (async () => {
   const postcss = createRequire(require.resolve('@tailwindcss/postcss'))('postcss'), tailwind = require('@tailwindcss/postcss');
   return (await postcss([tailwind({ base: web })]).process(await readFile(path.join(web, 'src/app/globals.css'), 'utf8'), { from: path.join(web, 'src/app/globals.css') })).css;
 })();
-const client = { id: 'client', name: 'Иван', lastName: 'Тестовый', middleName: null, phone: '100', email: 'qa@example.invalid', address: 'Адрес клиента', comment: 'Комментарий', passportNumber: 'QA 000171', passportIssuedBy: 'Тестовый орган выдачи', projects: [], projectsCount: 0 };
+const client = { isContactPerson: false, id: 'client', name: 'Иван', lastName: 'Тестовый', middleName: null, phone: '100', email: 'qa@example.invalid', address: 'Адрес клиента', comment: 'Комментарий', passportNumber: 'QA 000171', passportIssuedBy: 'Тестовый орган выдачи', projects: [], projectsCount: 0 };
 async function withClient(options, run) {
   const context = await browser.newContext({ viewport: options.viewport ?? { width: 1440, height: 1000 }, colorScheme: options.dark ? 'dark' : 'light' });
   try {
@@ -58,6 +58,26 @@ test('real shared client dialog creates optional passport fields and reports cre
     assert.equal(call.kind, 'create'); assert.equal(call.input.passportNumber, 'QA 000172'); assert.equal(call.input.passportIssuedBy, 'Тестовая выдача');
     await page.getByRole('dialog').waitFor({ state: 'hidden' });
     assert.equal(await page.getByRole('dialog').count(), 0);
+  });
+});
+
+test('галочка контактного лица выключена по умолчанию и сохраняется вместе с baseline клиента', async () => {
+  await withClient({}, async page => {
+    const checkbox=page.getByRole('checkbox',{name:'Контактное лицо',exact:true});
+    assert.equal(await checkbox.isChecked(),false);
+    await checkbox.check();
+    await page.getByLabel('Имя *',{exact:true}).fill('Контактный клиент');
+    await page.getByLabel('Телефон *',{exact:true}).fill('QA235');
+    await page.getByRole('button',{name:'Создать',exact:true}).click();
+    await page.waitForFunction(()=>window.__calls.length===1);
+    assert.equal((await page.evaluate(()=>window.__calls[0])).input.isContactPerson,true);
+  });
+  await withClient({editing:true},async page=>{
+    const checkbox=page.getByRole('checkbox',{name:'Контактное лицо',exact:true});
+    await checkbox.check();await page.getByRole('button',{name:'Сохранить',exact:true}).click();
+    await page.waitForFunction(()=>window.__calls.length===1);
+    const call=await page.evaluate(()=>window.__calls[0]);
+    assert.equal(call.input.isContactPerson,true);assert.equal(call.baseline.isContactPerson,false);
   });
 });
 

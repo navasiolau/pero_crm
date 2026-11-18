@@ -155,6 +155,7 @@ export default async function ProjectPage({
   return (
     <ProjectInlineProvider key={project.id} projectId={project.id} stage={project.stage} pricingProjection={pricingProjection} initial={{
       title: project.title, clientId: contactProjection?.clientId??project.clientId, managerId: project.managerId,
+      contactPerson: contactProjection?contactProjection.contactPerson:project.contactPerson,
       'client.phone':contactProjection?.['client.phone']??project.client.phone,'client.address':contactProjection?contactProjection['client.address']:project.client.address,clientVersion:contactProjection?.clientVersion,
       servicesTotal: showOverviewAmount ? pricingProjection ? pricingProjection.servicesTotal ?? null : project.servicesTotal?.toString() ?? null : null,
       delivery: showOverviewAmount ? pricingProjection ? pricingProjection.delivery : project.delivery?.toString() ?? null : null, unloading: showOverviewAmount ? pricingProjection ? pricingProjection.unloading : project.unloading?.toString() ?? null : null, installation: showOverviewAmount ? pricingProjection ? pricingProjection.installation : project.installation?.toString() ?? null : null,
