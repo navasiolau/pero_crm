@@ -11,7 +11,6 @@ import { nativeOwnedIds, nativeSnapshot } from "../helpers/native-acceptance-sna
 import { createPostgresFixture, rejectedSql, type PostgresRows } from "./postgres.fixture";
 import { summarizeCalendarEntries } from "../../src/lib/calendar-summary";
 import { verifyCounterpartyNative } from "../helpers/counterparty-native";
-import { verifyProjectContactPersonNative } from "../helpers/project-contact-person-native";
 import { productDraftAccessRelations } from "../../src/server/access/product-draft-context";
 import { verifyProposalCompositionNative } from "../helpers/kp-proposal-native";
 import { verifyProductNumberingNative } from "../helpers/product-numbering-native";
@@ -278,7 +277,7 @@ before(async () => {
       deliverPaymentEffects(effects, current().mutation ? { ...dependencies, dispatchEvent: async () => effect("dispatch")() } : dependencies) },
     "../src/server/notifications/notify": { notifyOrg: effect("org"), notifyPerson: effect("person") } };
   scope = guardedModuleCache(new URL("../ci169-domain-scope.ts", import.meta.url).href,
-    { targets: [...names.map(name => `../src/server/${name}`), "./helpers/project-materials-reference"], allowedOverrides: Object.keys(overrides), overrides, prisma: facade });
+    { targets: [...names.map(name => `../src/server/${name}`), "./helpers/project-materials-reference", "./helpers/project-contact-person-native"], allowedOverrides: Object.keys(overrides), overrides, prisma: facade });
   coordinator = scope.load("../src/server/transactions/coordinator"); scope.load("../src/server/time/timers");
   visibility = scope.load("../src/server/access/visibility"); notifications = scope.load("../src/server/access/notification-visibility");
   stock = scope.load("../src/server/warehouse/accounting");
@@ -304,6 +303,7 @@ before(async () => {
 after(async () => { if (fixture) try { scope?.restore(); await fixture.verifyProtected(); } finally { await fixture.dispose(); } });
 
 test("project-contact-person/native-autofill-switch-CAS-audit-rollback", async () => fixture.rollback(async (tx, rows) => {
+  const { verifyProjectContactPersonNative } = scope.load<typeof import("../helpers/project-contact-person-native")>("./helpers/project-contact-person-native");
   const manager = await rows.user("contact-person-manager", ["MANAGER"]);
   const checks = await verifyProjectContactPersonNative(tx, actorOf(manager));
   assert.equal(checks.realAuditRollback, true); assert.equal(checks.proposalCreation, true);
