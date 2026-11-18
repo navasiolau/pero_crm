@@ -57,6 +57,7 @@ const fields: Record<string, string> = {
   project: "Проект", projectId: "Проект", projectIds: "Проекты", product: "Изделие", productId: "Изделие", productIds: "Изделия",
   products: "Изделия", productNumber: "Номер изделия", projectNumber: "Номер проекта", client: "Клиент", clientId: "Клиент",
   clientLabel: "Клиент", clientVersion: "Версия клиента", clientAddress: "Адрес клиента", customer: "Заказчик", counterpartyId: "Контрагент",
+  contactPerson: "Контактное лицо", isContactPerson: "Контактное лицо",
   managerId: "Менеджер", managerLabel: "Менеджер", engineerId: "Инженер", engineerLabel: "Инженер", assigneeId: "Исполнитель",
   userId: "Пользователь", user: "Пользователь", actorId: "Автор", actorName: "Имя автора", actorType: "Тип автора", ownerId: "Владелец",
   createdById: "Создал", changedById: "Изменил", doneById: "Завершил", deletedById: "Удалил", uploadedById: "Загрузил",

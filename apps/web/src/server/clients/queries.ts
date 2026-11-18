@@ -9,6 +9,7 @@ export interface ClientDirectoryRow {
   name: string;
   lastName: string | null;
   middleName: string | null;
+  isContactPerson: boolean;
   phone: string;
   email: string | null;
   address: string | null;
@@ -39,6 +40,7 @@ export async function listClientDirectory(actor: VisibilityActor, db: PrismaClie
   // DTO заново собирается на сервере; даже лишние поля адаптера не уходят в UI.
   return clients.map(client => ({
     id: client.id, name: client.name, lastName: client.lastName, middleName: client.middleName,
+    isContactPerson: client.isContactPerson,
     phone: client.phone, email: client.email, address: client.address, comment: client.comment,
     ...(canViewPassport ? { passportNumber: client.passportNumber, passportIssuedBy: client.passportIssuedBy } : {}),
     projects: client.projects, projectsCount: client._count.projects,

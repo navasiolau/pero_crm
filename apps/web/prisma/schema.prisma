@@ -169,6 +169,7 @@ model Client {
   name           String // Имя (или название для юрлица, напр. «ООО Альфа»)
   lastName       String? // Фамилия
   middleName     String? // Отчество
+  isContactPerson Boolean @default(false)
   phone          String
   email          String?
   address        String?
@@ -212,6 +213,7 @@ model Project {
   servicesTotal          Decimal?     @db.Decimal(12, 2)
   proposalRoundingAdjustment Decimal @default(0) @db.Decimal(12, 2)
   address                String?
+  contactPerson          String?
   refusalReason          String?
   refusalComment         String?
   reclamationReason      String?

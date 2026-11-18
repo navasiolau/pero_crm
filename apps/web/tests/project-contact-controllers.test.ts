@@ -11,10 +11,46 @@ import { createProjectPricingCache } from "../src/lib/project-pricing-cache";
 
 // Источник: project-contact-controllers.test.ts
 const initial={clientId:'a','client.phone':'100','client.address':'Client A'};
-function saved(input:ProjectPatch):ProjectPatchResult{return{kind:'saved',field:input.field,value:input.value,clientMutationId:input.clientMutationId,...(input.field==='clientId'?{derived:{clientId:String(input.value),phone:'200',clientAddress:'Client B'}}:{})};}
+function saved(input:ProjectPatch):ProjectPatchResult{return{kind:'saved',field:input.field,value:input.value,clientMutationId:input.clientMutationId,...(input.field==='clientId'?{derived:{clientId:String(input.value),phone:'200',clientAddress:'Client B',contactPerson:'Контакт B'}}:{})};}
+
+test('контактное лицо сохраняется перед сменой клиента и заменяется подтверждённым ответом',async()=>{
+ const calls:ProjectPatch[]=[];let release!:()=>void;const pending=new Promise<void>(resolve=>{release=resolve;});
+ const group=createProjectContactControllers('project',{...initial,contactPerson:'Контакт A',clientVersion:'10'},async input=>{
+  calls.push(input);if(input.field==='contactPerson')await pending;
+  return {...saved(input),derived:input.field==='clientId'?{clientId:'b',phone:'200',clientAddress:'Client B',contactPerson:'Контакт B',clientVersion:'30'}:{clientVersion:'20'}};
+ });
+ const person=group.controller('contactPerson');person.setDraft('Мой представитель');const saving=person.commit();
+ group.controller('clientId').setDraft('b');const switching=group.controller('clientId').commit();
+ assert.deepEqual(calls.map(row=>row.field),['contactPerson']);assert.equal('expectedClientId' in calls[0]&&calls[0].expectedClientId,'a');
+ release();assert.equal(await saving,true);assert.equal(await switching,true);
+ assert.deepEqual(calls.map(row=>row.field),['contactPerson','clientId']);
+ assert.equal(group.controller('contactPerson').getSnapshot().baseline,'Контакт B');
+ assert.equal(group.receive({...initial,contactPerson:'Устаревший представитель',clientVersion:'15'}),false);
+ assert.equal(group.controller('contactPerson').getSnapshot().draft,'Контакт B');
+});
+
+test('ошибка контактного лица блокирует выбор, чужая смена клиента не переносит черновик',async()=>{
+ const calls:ProjectPatch[]=[];
+ const group=createProjectContactControllers('project',{...initial,contactPerson:null},async input=>{
+  calls.push(input);return{kind:'conflict',field:input.field,clientMutationId:input.clientMutationId,error:'Другой клиент',currentClientId:'b',currentValue:null};
+ });
+ const person=group.controller('contactPerson');person.setDraft('Черновик');
+ group.controller('clientId').setDraft('b');assert.equal(await group.controller('clientId').commit(),false);
+ assert.deepEqual(calls.map(row=>row.field),['contactPerson']);assert.equal(person.getSnapshot().draft,'Черновик');
+ assert.equal(person.getSnapshot().currentValue,undefined);assert.equal(await person.rebaseAndRetry(),false);
+ assert.equal(group.receive({clientId:'b','client.phone':'200','client.address':null,contactPerson:null}),false);
+ assert.equal(group.getSnapshot().clientId,'a');
+});
+
+test('очистка контактного лица отправляет null и не заполняется повторно при refresh',async()=>{
+ const calls:ProjectPatch[]=[];const group=createProjectContactControllers('project',{...initial,contactPerson:'Контакт A'},async input=>{calls.push(input);return saved(input);});
+ const person=group.controller('contactPerson');person.setDraft('  ');assert.equal(await person.commit(),true);
+ assert.equal(calls[0].value,null);assert.equal(calls[0].expectedValue,'Контакт A');
+ assert.equal(group.receive({...initial,contactPerson:null}),true);assert.equal(person.getSnapshot().draft,'');
+});
 
 test('поздний RSC старого клиента не отменяет подтверждённую смену, новый внешний выбор принимается',async()=>{
- const group=createProjectContactControllers('project',{...initial,clientVersion:'10'},async input=>({...saved(input),derived:{clientId:'b',phone:'200',clientAddress:'Client B',clientVersion:'20'}}));
+ const group=createProjectContactControllers('project',{...initial,clientVersion:'10'},async input=>({...saved(input),derived:{clientId:'b',phone:'200',clientAddress:'Client B',contactPerson:'Контакт B',clientVersion:'20'}}));
  const client=group.controller('clientId');client.setDraft('b');assert.equal(await client.commit(),true);
  assert.equal(group.receive({...initial,clientVersion:'11'}),false);assert.equal(client.getSnapshot().draft,'b');assert.equal(group.getSnapshot().clientId,'b');
  assert.equal(group.receive({clientId:'c','client.phone':'300','client.address':'Client C',clientVersion:'30'}),true);
@@ -24,7 +60,7 @@ test('поздний RSC старого клиента не отменяет п�
 test('актуальный RSC во время смены применяется после ACK, старый RSC отбрасывается',async()=>{
  for(const clientVersion of ['11','30']){
   let release!:()=>void;const waiting=new Promise<void>(resolve=>{release=resolve;});
-  const group=createProjectContactControllers('project',{...initial,clientVersion:'10'},async input=>{await waiting;return{...saved(input),derived:{clientId:'b',phone:'200',clientAddress:'Client B',clientVersion:'20'}};});
+  const group=createProjectContactControllers('project',{...initial,clientVersion:'10'},async input=>{await waiting;return{...saved(input),derived:{clientId:'b',phone:'200',clientAddress:'Client B',contactPerson:'Контакт B',clientVersion:'20'}};});
   const client=group.controller('clientId');client.setDraft('b');const changing=client.commit();
   group.receive({clientId:clientVersion==='30'?'c':'a','client.phone':'300','client.address':'Server',clientVersion});
   release();assert.equal(await changing,true);

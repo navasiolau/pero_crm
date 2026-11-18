@@ -222,3 +222,9 @@ OpenSpec размещаем в `D:\Projects\pero_crm_v2\openspec`, схема `s
 | № | Ветка | OpenSpec | Результат |
 |---|---|---|---|
 | 220 | bugfix/220 | technical-specifications-quarter-columns | Названия 25%, значения 75% на всех ширинах. Изменение только общей CSS-переменной и существующей browser-проверки. Local PASS/review GO, фактический staging — verification.md. |
+
+### Контактное лицо проекта от 18.11.2026
+
+| № | Ветка | OpenSpec | Результат |
+|---|---|---|---|
+| 235 | feature/235 | project-contact-person | Поле рядом с телефоном, галочка клиента и разовое заполнение пустых проектов. Смена клиента заменяет контактное лицо; последующие ФИО/снятие галочки сохраняют текст. Local PASS: 1565/1565 тестов, PostgreSQL/runtime с rollback, desktop/mobile, typecheck/lint/build. По поручению 19.11.2026 доводится до staging с реальной приёмкой; evidence — verification.md. Production отдельно. |

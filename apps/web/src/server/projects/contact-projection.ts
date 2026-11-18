@@ -8,9 +8,9 @@ export async function getProjectContactProjection(actor: DomainActor, projectId:
   if (!hasAnyRole(actor.roles, MANAGER_ROLES)) return null;
   return transaction(async tx => {
     await tx.$queryRaw`SELECT id FROM "Project" WHERE id = ${projectId} FOR UPDATE`;
-    const project = await tx.project.findUnique({ where: { ...liveProjectWhere, id: projectId }, select: { clientId: true, client: { select: { phone: true, address: true } } } });
+    const project = await tx.project.findUnique({ where: { ...liveProjectWhere, id: projectId }, select: { clientId: true, contactPerson: true, client: { select: { phone: true, address: true } } } });
     if (!project) return null;
     const [version] = await tx.$queryRaw<{ clientVersion: string }[]>`SELECT txid_current()::text AS "clientVersion"`;
-    return { clientId: project.clientId, 'client.phone': project.client.phone, 'client.address': project.client.address, clientVersion: version.clientVersion };
+    return { clientId: project.clientId, contactPerson: project.contactPerson, 'client.phone': project.client.phone, 'client.address': project.client.address, clientVersion: version.clientVersion };
   });
 }

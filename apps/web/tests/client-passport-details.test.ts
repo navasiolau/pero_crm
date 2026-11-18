@@ -42,7 +42,7 @@ test("client create normalizes optional passport fields and audits without putti
   assert.equal(f.current().passportNumber, "QA 000002");
   assert.equal(f.current().passportIssuedBy, "Тестовая выдача");
   assert.equal(f.current().name, "Иван");
-  assert.deepEqual(f.logs[0].newValue, { name: "Иван", phone: "100", passportNumber: "QA 000002", passportIssuedBy: "Тестовая выдача" });
+  assert.deepEqual(f.logs[0].newValue, { name: "Иван", phone: "100", passportNumber: "QA 000002", passportIssuedBy: "Тестовая выдача", isContactPerson: false });
   assert.deepEqual(f.events[0].payload, { clientId: "client" });
   assert.equal((await createClientInTransaction(f.tx, actor(), { name: "Без паспорта", phone: "200" })).ok, true);
   assert.equal(f.current().passportNumber, null);

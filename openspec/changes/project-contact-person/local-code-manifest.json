@@ -1,0 +1,119 @@
+{
+  "base": "81ec6e8589a057afd00e8bf076fdd332ee7cc5e1",
+  "branch": "feature/235",
+  "files": [
+    {
+      "path": "apps/web/prisma/migrations/20261118090000_project_contact_person/migration.sql",
+      "sha256": "4f0de79342d8e1affb51b9cbce502d3ad85328cc2604e78fbe5ba512628e810e"
+    },
+    {
+      "path": "apps/web/prisma/schema.prisma",
+      "sha256": "11ef5d4f3691908e668a83d8d5648aaff9286b54ffac7f18cf663d08ea994a49"
+    },
+    {
+      "path": "apps/web/src/app/(app)/projects/[id]/page.tsx",
+      "sha256": "792d7f6151f337c3d7b993c0c8e4b8f1943a91d6e707715487bb306cc29a5287"
+    },
+    {
+      "path": "apps/web/src/components/client-dialog.tsx",
+      "sha256": "8d6a12300d20ea705da0270db1c0cc62a79f0e64daca6e336047b9311cd40eeb"
+    },
+    {
+      "path": "apps/web/src/components/inline-fields.tsx",
+      "sha256": "9fac438b55c6391f5092e3f69630b5250d426eb5b1650cf3c4b1f5c9f0123d98"
+    },
+    {
+      "path": "apps/web/src/components/project-inline-fields.tsx",
+      "sha256": "ea273019a6d804f73cb65acf06b5f990c683ff9076f8610948b55f6658a27bcf"
+    },
+    {
+      "path": "apps/web/src/components/project-inline-provider.tsx",
+      "sha256": "fbf4341cbae10c9438986785c45a96813ca1795c99dcb5ceed73d949060a0dc9"
+    },
+    {
+      "path": "apps/web/src/lib/client-editor-submit.ts",
+      "sha256": "3d6e85b57cc6fb09b8cff68396c0e3262693a73413dff5b1f2cc149356b317f1"
+    },
+    {
+      "path": "apps/web/src/lib/project-contact-controllers.ts",
+      "sha256": "d20f1591d1684f5971bc3f035c035cae43e77ebaec418aec147d9419ecd25a5c"
+    },
+    {
+      "path": "apps/web/src/server/changelog/labels.ts",
+      "sha256": "db26f291aae049024748d0eb20096f0bf996eb4f73099d3efef9dcb3c87a4a10"
+    },
+    {
+      "path": "apps/web/src/server/clients/actions.ts",
+      "sha256": "935aca9e21c4ef839f87ad061a72bf61ef30faf508d4ab96a691fde9bca04b19"
+    },
+    {
+      "path": "apps/web/src/server/clients/core.ts",
+      "sha256": "c46d8eb95d2ea743576fc9897b7b4926a1a367e726fafd848ee57f164e904055"
+    },
+    {
+      "path": "apps/web/src/server/clients/projection.ts",
+      "sha256": "b8aa5617a7ca5d2153e26c8ca74642043619b398d3b73da870d4236258c05a5b"
+    },
+    {
+      "path": "apps/web/src/server/clients/queries.ts",
+      "sha256": "3d4de4fda2e08db3c59cd8ddaba2adbff765092700f3b537128a2207f50283e5"
+    },
+    {
+      "path": "apps/web/src/server/projects/contact-core.ts",
+      "sha256": "a311db5b57107292293e8bb8d743928e86fa555b7381cb64e33f81f7c6eb16bd"
+    },
+    {
+      "path": "apps/web/src/server/projects/contact-person.ts",
+      "sha256": "4d5823b1997b6f550d9e67d74d6dbf1c0606388687d5318ac0a926f9bef20f2a"
+    },
+    {
+      "path": "apps/web/src/server/projects/contact-projection.ts",
+      "sha256": "8ea13df0cdd14fe20e969f3afb91c89ad47f789ebcb9ccca5c2cebf867aeb5f0"
+    },
+    {
+      "path": "apps/web/src/server/projects/core.ts",
+      "sha256": "8444122c6bf0ff34aecd5dd2ebfd0e9cfa93fb0b0c8bd01c7c4817df48f5d4de"
+    },
+    {
+      "path": "apps/web/src/server/projects/journal.ts",
+      "sha256": "883d82ce257b491fe0ef108d351311ed18e040804298ee78116e80e41c0b6d01"
+    },
+    {
+      "path": "apps/web/src/server/projects/patch-contract.ts",
+      "sha256": "d0de014e9ad011110c3941884ca74419a2f7221fa393d7cd3ee69446c5afb4de"
+    },
+    {
+      "path": "apps/web/src/server/projects/project-field-core.ts",
+      "sha256": "57cc00c6a1f65670cd2d0cdaf9c01e6e4944edcc43573d9bbcfd105596004bf0"
+    },
+    {
+      "path": "apps/web/tests/client-passport-component.test.mjs",
+      "sha256": "1074ab454f6ba24aab36206420d1162f6b2928227897c22c4c8c2ca6a25dad8a"
+    },
+    {
+      "path": "apps/web/tests/client-passport-details.test.ts",
+      "sha256": "54812af4df505b04b715a69e012e392cc9a594cef2f53578ddb1acf0e0efbfda"
+    },
+    {
+      "path": "apps/web/tests/helpers/project-contact-person-native.ts",
+      "sha256": "02533c13b222d535ffadcc8069f3e844cf4f9af2db21206921a397980c9a042d"
+    },
+    {
+      "path": "apps/web/tests/integration/domain-postgres.test.ts",
+      "sha256": "92f07ad940ad99250c9f64292f4757db35e24b144b905f0d3a34ff9048111f5a"
+    },
+    {
+      "path": "apps/web/tests/kp-proposal-contract.test.ts",
+      "sha256": "d9da25fff689780ad43ca81581628ebadaeccb9277e7d5c10163cb54c55dc238"
+    },
+    {
+      "path": "apps/web/tests/project-client-contact-component.test.mjs",
+      "sha256": "9f672b1aaffd44a6cbc983f9adc0e8c5e9402d2ead6d3dc8431b63068995e2b1"
+    },
+    {
+      "path": "apps/web/tests/project-contact-controllers.test.ts",
+      "sha256": "752448d2ee893217d7f6256f22ed99fa311471b5d80ff21d3300dd51aeec41ad"
+    }
+  ],
+  "lockfileSha256": "a77db82d99cb7287e360b00efb5d31cd9bcc9e9e276b9777264a2a681fa5ed17"
+}
