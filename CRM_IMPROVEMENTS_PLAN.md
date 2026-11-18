@@ -227,4 +227,4 @@ OpenSpec размещаем в `D:\Projects\pero_crm_v2\openspec`, схема `s
 
 | № | Ветка | OpenSpec | Результат |
 |---|---|---|---|
-| 235 | feature/235 | project-contact-person | Поле рядом с телефоном, галочка клиента и разовое заполнение пустых проектов. Смена клиента заменяет контактное лицо; последующие ФИО/снятие галочки сохраняют текст. Local PASS: 1565/1565 тестов, PostgreSQL/runtime с rollback, desktop/mobile, typecheck/lint/build. По поручению 19.11.2026 доводится до staging с реальной приёмкой; evidence — verification.md. Production отдельно. |
+| 235 | feature/235 | project-contact-person | ACCEPTED на staging `cbf498ec`: CI №401 7/7 SUCCESS, миграция применена, native 12/12 с rollback, настоящий HTTPS browser 1440/390 px и no-op Server Actions/forbidden проверены. 307 клиентов, 302 проекта и 5529 записей журнала сохранены. Local 1565/1565 PASS. Evidence — staging-acceptance.md/json и verification.md; production отдельно. |

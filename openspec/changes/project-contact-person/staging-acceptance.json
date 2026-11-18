@@ -1,0 +1,153 @@
+{
+  "status": "ACCEPTED",
+  "date": "2026-11-19",
+  "revision": "cbf498ec5586b847563a6fffd125e95b295a432a",
+  "functionalCommit": "0b233df043a83c3c6e168dc72441ce49a4ab7419",
+  "ciRun": 44422704220,
+  "ciUrl": "https://github.com/navasiolau/pero_crm/actions/runs/44422704220",
+  "ciJobsPassed": 7,
+  "runtime": {
+    "web": {
+      "name": "/crm-staging-web-1",
+      "id": "c71d6aa2bbb60341b3ab896c8e2dbb0a8c6a085237b35de40e7b6d83d3240269",
+      "startedAt": "2026-11-18T23:47:09.182161949Z",
+      "image": "sha256:660bdcc1bb19c4b52f22007e27fa90ec6eef947e8cdb34184867279b4fa81f37",
+      "running": true,
+      "health": "healthy",
+      "revision": "cbf498ec5586b847563a6fffd125e95b295a432a",
+      "ciRun": "44422704220",
+      "mounts": [
+        {
+          "Type": "volume",
+          "Name": "crm-staging_uploads",
+          "Destination": "/app/apps/web/uploads"
+        }
+      ]
+    },
+    "renderer": {
+      "name": "/crm-staging-kp-renderer-1",
+      "id": "b07b05d39090fa58fc4636c74376bf156a41b46fca10dcf93b6748631fa8fa9f",
+      "startedAt": "2026-11-18T23:47:09.180720221Z",
+      "image": "sha256:89dd1ee6e714f492f7c677009a3b13b888de8f48495c5ff3024c21105fcd0559",
+      "running": true,
+      "health": "healthy",
+      "revision": "cbf498ec5586b847563a6fffd125e95b295a432a",
+      "ciRun": "44422704220",
+      "mounts": [
+        {
+          "Type": "volume",
+          "Name": "crm-staging_kp_render_spool",
+          "Destination": "/spool"
+        }
+      ]
+    },
+    "database": {
+      "name": "/crm-staging-db-1",
+      "id": "27b8f7342b9d722ab8788e137b37b03a3037442da038c5b8b98dbb30245b8b6a",
+      "startedAt": "2026-11-10T18:42:15.758341834Z",
+      "image": "sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73",
+      "running": true,
+      "health": "healthy",
+      "revision": null,
+      "ciRun": null,
+      "mounts": [
+        {
+          "Type": "volume",
+          "Name": "crm-staging_pgdata",
+          "Destination": "/var/lib/postgresql/data"
+        }
+      ]
+    },
+    "outerW07Sha256": "27e3bcd727d9e83170c76a254806fde42590da76cea30c9e1441d873df680139"
+  },
+  "migration": {
+    "migration_name": "20261118090000_project_contact_person",
+    "finished": true,
+    "active": true
+  },
+  "columns": [
+    {
+      "table_name": "Client",
+      "column_name": "isContactPerson",
+      "data_type": "boolean",
+      "is_nullable": "NO",
+      "column_default": "false"
+    },
+    {
+      "table_name": "Project",
+      "column_name": "contactPerson",
+      "data_type": "text",
+      "is_nullable": "YES",
+      "column_default": null
+    }
+  ],
+  "native": {
+    "status": "PASS",
+    "revision": "cbf498ec5586b847563a6fffd125e95b295a432a",
+    "checks": {
+      "creation": true,
+      "proposalCreation": true,
+      "fillEmptyOnly": true,
+      "preserveDeleted": true,
+      "manualClear": true,
+      "snapshotName": true,
+      "switchClient": true,
+      "noOpSelection": true,
+      "casAndReplay": true,
+      "roleBoundary": true,
+      "oldInputCompatibility": true,
+      "realAuditRollback": true
+    },
+    "rollbackVerified": true,
+    "snapshotDigest": "799493823c2681212b88906d6fcfab26a69b4bf4d7c5d0029388c17cc818a9df"
+  },
+  "browser": {
+    "status": "PASS",
+    "revision": "cbf498ec5586b847563a6fffd125e95b295a432a",
+    "results": [
+      {
+        "viewport": 1440,
+        "projectFieldEditable": true,
+        "phoneContactLayout": true,
+        "clientCheckboxEditable": true,
+        "unsavedToggleCancelled": true,
+        "actualProjectActionNoOp": true,
+        "actualClientActionNoOp": true
+      },
+      {
+        "viewport": 390,
+        "projectFieldEditable": true,
+        "phoneContactLayout": true,
+        "clientCheckboxEditable": true,
+        "unsavedToggleCancelled": true
+      },
+      {
+        "engineerWriteForbidden": true
+      }
+    ],
+    "errors": [],
+    "blocked": [],
+    "scope": "Actual staging browser; existing records unchanged, explicit server actions no-op only"
+  },
+  "preservation": {
+    "clients": {
+      "count": "307",
+      "hash": "2314c32a1dec8b9f30f801174cd52122",
+      "flagged": "0"
+    },
+    "projects": {
+      "count": "302",
+      "hash": "7a602bebb0c87ce8c919f84b1e564a18",
+      "withcontact": "0"
+    },
+    "journal": {
+      "count": "5529",
+      "hash": "985ebd440607089d19c8458254df223b"
+    }
+  },
+  "applicationSourcesMatchLocalAcceptance": true,
+  "mainUnchanged": "81ec6e8589a057afd00e8bf076fdd332ee7cc5e1",
+  "noProductionOperations": true,
+  "noDumpsOrRestic": true,
+  "httpHealth": 200
+}
