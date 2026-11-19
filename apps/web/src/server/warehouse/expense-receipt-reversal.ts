@@ -51,6 +51,12 @@ async function prepareUndo(ctx: Context, receipt: Awaited<ReturnType<typeof prep
     ids.push(line.movementId);
     rootsByMaterial.set(line.movement.materialId, ids);
   }
+  const movementIds = receipt.lines.map(line => line.movementId);
+  const issue = await tx.expenseReceiptIssueLine.findFirst({ where: {
+    sourceMovementId: { in: movementIds }, issue: { cancelledAt: null }, movement: activeStockMovementWhere,
+  }, select: { issue: { select: { productId: true } } } });
+  if (issue) throw new JournalReversalRefusal("Из строк чека выполнена выдача. Сначала отмените её в журнале",
+    `/products/${encodeURIComponent(issue.issue.productId)}`);
   const plans = [];
   for (const materialId of [...rootsByMaterial.keys()].sort()) {
     await tx.$queryRaw`SELECT id FROM "Material" WHERE id = ${materialId} FOR UPDATE`;

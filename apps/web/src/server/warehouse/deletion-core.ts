@@ -57,6 +57,10 @@ async function loadPlan(tx:Tx,actor:DomainActor,movementId:string){
   }
   const reasons=new Map(plan.deleted.map(row=>[row.id,row.reason]));
   const affected=rows.filter(row=>reasons.has(row.movementId));
+  const issueMovementIds=affected.map(row=>row.movementId);
+  const trackedIssue=await tx.expenseReceiptIssueLine.findFirst({where:{issue:{cancelledAt:null},movement:activeStockMovementWhere,
+    OR:[{sourceMovementId:{in:issueMovementIds}},{movementId:{in:issueMovementIds}}]},select:{movementId:true}});
+  if(trackedIssue)throw Error("Операция затрагивает выдачу по оплаченному чеку. Сначала отмените выдачу в журнале");
   const lineChanges=lines.map(line=>{
     const delta=affected.filter(row=>row.movement.productId===line.productId).reduce((sum,row)=>sum.plus(
       row.movement.type==='EXPENSE'?row.quantity.negated():row.movement.type==='RETURN'?row.quantity:0),new Prisma.Decimal(0));

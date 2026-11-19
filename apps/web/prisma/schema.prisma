@@ -844,6 +844,7 @@ model Payment {
   reportDocuments  PaymentReportDocument[]
   stockPurchase    StockPurchase?
   expenseReceipts  ExpenseReceipt[]
+  expenseReceiptIssues ExpenseReceiptIssue[]
   logisticsAllocationId String? @unique
   logisticsAllocation LogisticsPostingAllocation? @relation(fields: [logisticsAllocationId], references: [id], onDelete: Restrict)
   deletionId       String?
@@ -1238,6 +1239,34 @@ model ExpenseReceiptLine {
   @@unique([receiptId, position])
 }
 
+model ExpenseReceiptIssue {
+  id                 String                    @id
+  paymentId          String
+  payment            Payment                   @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  projectId          String
+  productId          String
+  clientMutationId   String                    @unique
+  requestFingerprint String
+  actorId            String
+  cancelledAt        DateTime?
+  createdAt          DateTime                  @default(now())
+  lines              ExpenseReceiptIssueLine[]
+
+  @@index([paymentId])
+}
+
+model ExpenseReceiptIssueLine {
+  issueId          String
+  issue            ExpenseReceiptIssue @relation(fields: [issueId], references: [id], onDelete: Restrict)
+  sourceMovementId String
+  sourceMovement   StockMovement       @relation("ExpenseReceiptIssueSource", fields: [sourceMovementId], references: [id], onDelete: Restrict)
+  movementId       String              @unique
+  movement         StockMovement       @relation("ExpenseReceiptIssueMovement", fields: [movementId], references: [id], onDelete: Restrict)
+
+  @@id([issueId, sourceMovementId])
+  @@index([sourceMovementId])
+}
+
 model WarehouseMovementDeletion {
   id String @id @default(uuid())
   clientMutationId String @unique
@@ -1259,6 +1288,8 @@ model StockMovement {
   receiptKind       StockReceiptKind? // NULL: исторический вид не подтверждён
   stockPurchase     StockPurchase?
   expenseReceiptLine ExpenseReceiptLine?
+  receiptIssuesAsSource ExpenseReceiptIssueLine[] @relation("ExpenseReceiptIssueSource")
+  expenseReceiptIssueLine ExpenseReceiptIssueLine? @relation("ExpenseReceiptIssueMovement")
   deletionId        String?
   deletion          WarehouseMovementDeletion? @relation("DeletedMovements", fields: [deletionId], references: [id], onDelete: Restrict)
   rootDeletion      WarehouseMovementDeletion? @relation("WarehouseDeletionRoot")

@@ -3,6 +3,7 @@ import { LogisticsReallocationButton } from "@/components/logistics/reallocation
 
 import { useId, useState, type FormEvent } from "react";
 import { ExpenseProjectAssignmentDialog } from "@/components/expense-project-assignment-dialog";
+import { ExpenseReceiptIssueDialog } from "@/components/expense-receipt-issue-dialog";
 import { ExpenseReceiptDialog } from "@/components/expense-receipt-dialog";
 import { OrganizationPaymentsView } from "@/components/organization-payments-view";
 import { ResponsiveFilterPanel } from "@/components/responsive-filter-panel";
@@ -109,6 +110,7 @@ export function OrganizationExpenseResults({ options, page, pageSize, total, tot
         <ExpenseProjectAssignmentDialog key={row.id} paymentId={row.id} currentProjectId={row.project?.id ?? null}
           expectedHead={row.lastActionId} projects={ledger.projects.filter(project => project.currency === INTERNAL_CURRENCY || project.id === row.project?.id)} onApplied={close}/>
       ) : null}
+      {canAssignProject && row.receiptLines?.length ? <ExpenseReceiptIssueDialog key={"issue:" + row.id} paymentId={row.id} onApplied={close}/> : null}
       {ledger.stockMaterials ? <ExpenseReceiptDialog key={"receipt:" + row.id} payment={row} stockMaterials={ledger.stockMaterials} onApplied={close}/> : null}
       {canRedistributeLogistics && row.logisticsTripId ? <LogisticsReallocationButton key={"logistics:" + row.id} paymentId={row.id} closeExpense={close}/> : null}
     </>}
