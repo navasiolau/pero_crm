@@ -15,7 +15,7 @@ export const project={id:'project-stable',number:'203',title:'Проект',clie
 export const product={id:'product-stable',projectId:project.id,number:'203.1',title:'Изделие',project,status:'PREPARATION',statusChangedAt:new Date('2026-11-16'),quantity:1,files:[],tasks:[],works:[],sketchFile:null,engineerId:null,canAccessDraft:true,technicalSpecifications:null};
 `;
 const boundaries = {
-  "next/navigation": "export const redirect=()=>{throw Error('UNEXPECTED_REDIRECT')}; export const notFound=()=>{throw Error('UNEXPECTED_NOT_FOUND')};",
+  "next/navigation": "export const useSearchParams=()=>new URLSearchParams(); export const redirect=()=>{throw Error('UNEXPECTED_REDIRECT')}; export const notFound=()=>{throw Error('UNEXPECTED_NOT_FOUND')};",
   "next/link": "export default function Link({href,children,...props}){return <a href={href} {...props}>{children}</a>}",
   "next/dynamic": "export default function dynamic(){return ()=> <div>Вкладка модуля</div>}",
   "@/auth": "import {state} from 'journal-page-fixture'; export async function auth(){return {user:{id:'actor',name:'Пользователь',roles:state.roles}}}",
