@@ -1,5 +1,7 @@
 "use server";
 
+import { financeSessionSource } from "@/server/telegram/finance-session";
+
 import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 
 import { revalidatePath } from "next/cache";
@@ -16,7 +18,7 @@ import { ADVANCE_ROLES, PAYROLL_MANAGE_ROLES } from "@/lib/roles";
 import { payoutJournalSnapshot } from "@/server/finance/journal";
 import { dispatchEvent } from "@/server/plugins/events";
 import { notifyOrg, notifyPerson } from "@/server/notifications/notify";
-import { requireAdmin, requireFinance, requirePayrollManagement, requireRole } from "@/server/require-role";
+import { requireAdmin, requireFinance, requirePayrollManagement, requireFinanceRole } from "@/server/require-role";
 import { withTaskTransaction } from "@/server/tasks/transaction";
 import { assertPayrollCurrencyChange } from "@/server/product-stage-pay/core";
 import { assertPercentagePayrollCurrencyChange } from "@/server/product-percentage-pay/core";
@@ -60,7 +62,7 @@ const payoutSchema = z.object({
 export async function addPayout(
   input: z.input<typeof payoutSchema>,
 ): Promise<Awaited<ReturnType<typeof executeCashPayout>>> {
-  const session = await requireRole(input?.kind === "ADVANCE" ? ADVANCE_ROLES : PAYROLL_MANAGE_ROLES);
+  const session = await requireFinanceRole(input?.kind === "ADVANCE" ? ADVANCE_ROLES : PAYROLL_MANAGE_ROLES);
   const parsed = payoutSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Ошибка данных" };
@@ -70,7 +72,7 @@ export async function addPayout(
   if (!data.expectedCashCurrency || !isCashCurrency(data.expectedCashCurrency)) return { ok: false, error: "Обновите выбранную кассу и валюту" };
   if (!data.requestId) return { ok: false, error: "Обновите форму выплаты перед подтверждением" };
   const cashAmount = data.cashAmount ?? (data.amount === undefined ? "" : data.amount.toFixed(2));
-  return executeCashPayout({ id: session.user.id, name: session.user.name ?? "", roles: session.user.roles, source: "web" }, {
+  return executeCashPayout({ id: session.user.id, name: session.user.name ?? "", roles: session.user.roles, source: financeSessionSource(session) }, {
     kind: data.kind, userId: data.userId, cashAccountId: data.cashAccountId, cashAmount,
     expectedCashCurrency: data.expectedCashCurrency,
     requestId: data.requestId, month: data.month, description: data.comment, comment: data.comment,
@@ -84,11 +86,11 @@ export async function deletePayout(
   const result = await withTaskTransaction(async (tx) => {
     const target = await tx.payout.findUnique({ where: { id: payoutId }, select: { kind: true } });
     if (!target) return { ok: false, error: "Выплата не найдена" };
-    assertPayoutRole({ id: session.user.id, name: session.user.name ?? "", roles: session.user.roles, source: "web" }, target.kind);
+    assertPayoutRole({ id: session.user.id, name: session.user.name ?? "", roles: session.user.roles, source: financeSessionSource(session) }, target.kind);
     const payout = await tx.payout.findUnique({ where: { id: payoutId, kind: target.kind }, include: { user: { select: { name: true } }, cashAccount: { select: { name: true } } } });
     if (!payout) return { ok: false, error: "Выплата не найдена" };
     await tx.payout.delete({ where: { id: payoutId, kind: target.kind } });
-    await writeChangeLogInTransaction(tx, { actorType: "user", actorId: session.user.id, actorName: session.user.name ?? undefined,
+    await writeChangeLogInTransaction(tx, { actorType: "user", actorId: session.user.id, actorName: session.user.name ?? undefined, source: financeSessionSource(session),
       entity: "payout", entityId: payoutId, action: "delete", oldValue: { user: payout.user.name,
         amount: payout.amount.toFixed(2), cashAmount: payout.cashAmount?.toFixed(2) ?? null,
         cashCurrency: payout.cashCurrency, month: payout.month } }, { entity: { label: `${payout.kind === "ADVANCE" ? "Аванс" : "Выплата зарплаты"}: ${payout.user.name}` },
@@ -120,7 +122,7 @@ export async function accrueTurnover(
 ): Promise<{ ok: boolean; error?: string; accruedCount?: number }> {
   const session = await requirePayrollManagement();
   const result = await accrueTurnoverCore({ id: session.user.id, name: session.user.name ?? "",
-    roles: session.user.roles, source: "web" }, month, withTaskTransaction).catch((error: unknown) => ({
+    roles: session.user.roles, source: financeSessionSource(session) }, month, withTaskTransaction).catch((error: unknown) => ({
       ok: false as const, error: error instanceof Error ? error.message : "Не удалось начислить процент от оборота",
     }));
   if (!result.ok) return { ok: false, error: result.error };
@@ -199,7 +201,7 @@ export async function settleAll(
       if (reduced.lte(0)) break;
       cashAmount = reduced.toFixed(2);
     }
-    const result = await executeCashPayout({ id: session.user.id, name: session.user.name ?? "", roles: session.user.roles, source: "web" },
+    const result = await executeCashPayout({ id: session.user.id, name: session.user.name ?? "", roles: session.user.roles, source: financeSessionSource(session) },
       { kind: "SALARY", userId: debtor.userId, cashAccountId, cashAmount, expectedCashCurrency: account.currency,
         requestId: randomUUID(), month,
         comment: `Выплата зарплаты от ${dateStr}` });

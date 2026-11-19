@@ -1,12 +1,15 @@
 import { auth } from "@/auth";
+import { scopedFinanceAuth } from "@/server/telegram/finance-session";
 import { getLogisticsOptionsCore, getLogisticsTripCore, listLogisticsTripsCore } from "./query-core";
 import { logisticsTransaction } from "./service";
 
 export async function listLogisticsTrips(input: unknown = {}) {
-  return listLogisticsTripsCore((await auth())?.user.id, input, logisticsTransaction);
+  const session = await scopedFinanceAuth();
+  return listLogisticsTripsCore(session?.user.id, input, logisticsTransaction, "documents", !!session && "telegramFinance" in session);
 }
 export async function getLogisticsTrip(id: string) {
-  return getLogisticsTripCore((await auth())?.user.id, id, logisticsTransaction);
+  const session = await scopedFinanceAuth();
+  return getLogisticsTripCore(session?.user.id, id, logisticsTransaction, !!session && "telegramFinance" in session);
 }
 export async function getLogisticsProjectTrips(projectId: string, input: Record<string, unknown> = {}) {
   return listLogisticsTripsCore((await auth())?.user.id, { ...input, projectId }, logisticsTransaction, "manage");

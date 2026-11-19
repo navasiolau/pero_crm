@@ -1,4 +1,4 @@
-import { auth } from "@/auth";
+import { scopedFinanceAuth } from "@/server/telegram/finance-session";
 import { PAYROLL_MANAGE_ROLES, hasAnyRole } from "@/lib/roles";
 import { paySchemeLabels } from "@/lib/labels";
 import {
@@ -11,7 +11,7 @@ import {
 // Экспорт сводки по зарплате за месяц в CSV (§10: закрытие месяца).
 // Разделитель «;» и BOM — чтобы русский Excel открывал корректно.
 export async function GET(request: Request) {
-  const session = await auth();
+  const session = await scopedFinanceAuth();
   if (!session?.user || !hasAnyRole(session.user.roles, PAYROLL_MANAGE_ROLES)) {
     return new Response("Недостаточно прав", { status: 403 });
   }

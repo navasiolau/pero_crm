@@ -1,5 +1,7 @@
 "use server";
 
+import { financeSessionSource } from "@/server/telegram/finance-session";
+
 import { revalidatePath } from "next/cache";
 
 import { prisma } from "@/lib/prisma";
@@ -31,7 +33,7 @@ export async function addPayment(
       id: session.user.id,
       name: session.user.name ?? "",
       roles: session.user.roles,
-      source: "web" as const,
+      source: financeSessionSource(session),
     },
     input,
   );
@@ -55,7 +57,7 @@ export async function deletePayment(
   let payment;
   try {
     payment = await withTaskTransaction(async (tx) => {
-      return deletePaymentInTransaction({id:session.user.id,name:session.user.name??'',roles:session.user.roles,source:'web'},paymentId,preview.direction,payrollCurrency,payrollRate,tx);
+      return deletePaymentInTransaction({id:session.user.id,name:session.user.name??'',roles:session.user.roles,source:financeSessionSource(session)},paymentId,preview.direction,payrollCurrency,payrollRate,tx);
     });
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "Не удалось удалить платёж" };
