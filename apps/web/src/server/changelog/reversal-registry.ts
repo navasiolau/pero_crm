@@ -28,6 +28,7 @@ import { telegramLinkReversal } from "@/server/telegram/link-reversal";
 import { savedListChoiceReversal } from "@/server/list-preference-reversal";
 import { warehouseCatalogReversal } from "@/server/warehouse/catalog-reversal";
 import { officeDirectoryReversal } from "./office-directory-reversal";
+import { signatureSettingsReversal } from "@/server/kp/signature-settings";
 
 export const journalReversals = [
   ...productFieldReversals,
@@ -62,4 +63,5 @@ export const journalReversals = [
   warehouseCatalogReversal,
   officeDirectoryReversal,
   productTitleReversal,
+  signatureSettingsReversal,
 ];
