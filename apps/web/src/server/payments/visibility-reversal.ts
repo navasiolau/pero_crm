@@ -65,6 +65,11 @@ export async function paymentVisibilityProblem(tx: Prisma.TransactionClient, pay
   if (Boolean(payment.deletedAt) !== visible) return visible ? "Платёж уже действует" : "Платёж уже удалён";
   if (command && (command.expectedHead !== payment.lastActionId || command.fingerprint !== fingerprint(payment, paymentVisibilityDocumentIds(payment))))
     return "Платёж изменился после этого действия. Откройте его историю";
+  if (visible) {
+    const ids = paymentVisibilityDocumentIds(payment);
+    if (ids.length && await tx.financeDocument.count({ where: { id: { in: ids }, state: "READY" } }) !== ids.length)
+      return "Сначала восстановите исходные отчётные документы платежа";
+  }
 
   const decreasesBalance = visible ? payment.direction === "EXPENSE" : payment.direction === "INCOME";
   if (!decreasesBalance) return null;
