@@ -1,3 +1,4 @@
+import { signatureSettingsReversal } from "@/server/kp/signature-settings";
 import { productTitleReversal } from "@/server/products/title-reversal";
 import { paymentVisibilityReversal } from "@/server/payments/visibility-reversal";
 import { retainedFileReversal } from "@/server/files/retained-file-reversal";
@@ -16,6 +17,7 @@ import { logisticsReallocationReversal } from "@/server/logistics/reallocation-r
 import { officeDirectoryReversal } from "./office-directory-reversal";
 
 export const journalReversals = [
+  signatureSettingsReversal,
   officeDirectoryReversal,
   productTitleReversal,
   paymentVisibilityReversal,

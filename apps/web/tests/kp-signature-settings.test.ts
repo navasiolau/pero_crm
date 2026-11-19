@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { randomUUID } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
-import { saveSignatureSettings } from '../src/server/kp/signature-settings';
-import { INITIAL_SIGNATURE } from '@/server/kp/signature-defaults';
+import { saveSignatureSettings, signatureSettingsReversal } from '../src/server/kp/signature-settings';
+import { INITIAL_SIGNATURE, SIGNATURE_DEFAULTS_KEY, readSignatureDefaults } from '@/server/kp/signature-defaults';
 import { canAccessSettingsPath } from '../src/lib/settings-access';
 
 test('настройки КП доступны только ADMIN, включая прямую ссылку', () => {
@@ -17,7 +17,7 @@ test('настройки КП доступны только ADMIN, включа�
 test('ADMIN: настройка, CAS, аудит, replay UUID и сохранность прежнего снимка', async () => {
   let row: { value: string } | null = null;
   const logs = new Map<string, Record<string, unknown>>();
-  const tx = { orgSetting: { findUnique: async () => row, upsert: async (input: { create: { value: string }; update: { value: string } }) => { row = { value: input.update.value }; } },
+  const tx = { $queryRaw: async () => [], orgSetting: { findUnique: async () => row, upsert: async (input: { create: { value: string }; update: { value: string } }) => { row = { value: input.update.value }; } },
     changeLog: { findUnique: async ({ where }: { where: { id: string } }) => logs.get(where.id) ?? null,
       create: async ({ data }: { data: Record<string, unknown> & { id: string } }) => { logs.set(data.id, data); } } } as unknown as Prisma.TransactionClient;
   const actor = { id: 'admin', name: 'Администратор', roles: ['ADMIN' as const], source: 'web' as const };
@@ -31,4 +31,15 @@ test('ADMIN: настройка, CAS, аудит, replay UUID и сохранн�
   assert.equal(conflict.ok, false); assert.equal(logs.size, 1);
   if (!conflict.ok) assert.equal(conflict.current?.revision, 1);
   assert.equal(INITIAL_SIGNATURE.values.warrantyMonths, 12);
+
+  const root = logs.get('kp-signature-defaults:' + command.operationId)!;
+  const handler = signatureSettingsReversal.read((root.reversal as { data: unknown }).data)!;
+  const ctx = { tx, actor: { ...actor, roles: ['DIRECTOR' as const] }, entryId: String(root.id), entityId: SIGNATURE_DEFAULTS_KEY };
+  assert.equal(await handler.preview(ctx), null);
+  const undone = await handler.apply(ctx);
+  assert.deepEqual(await readSignatureDefaults(tx), { revision: 2, values: INITIAL_SIGNATURE.values });
+  await assert.rejects(handler.apply(ctx), /изменились/);
+  await signatureSettingsReversal.read(undone.reversal.data)!.apply(ctx);
+  assert.deepEqual(await readSignatureDefaults(tx), { revision: 3, values: saved.snapshot.values });
+  assert.equal(logs.size, 1);
 });
