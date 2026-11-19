@@ -21,6 +21,28 @@ function fixture() {
   return { service, rows, login: (id: string | null) => { user = id; } };
 }
 
+test("separate finance session owns expense preferences while ordinary sections keep web identity", async () => {
+  const f = fixture();
+  const service = createListPreferenceService({
+    sessionUser: async section => section === "organizationExpenses" ? "mini-app" : "web",
+    store: {
+      get: async (user, key) => f.rows.get(user + "/" + key) ?? null,
+      compareAndSwap: async (user, key, expected, value) => {
+        const name = user + "/" + key;
+        if ((f.rows.get(name) ?? null) !== expected) return false;
+        f.rows.set(name, value);
+        return true;
+      },
+    },
+    revision: () => "test",
+  });
+  await service.save("organizationExpenses", "pageSize=all", null);
+  await service.save("products", "q=Кухня", null);
+  assert.ok(f.rows.has("mini-app/organizationExpenses.list"));
+  assert.ok(f.rows.has("web/products.list"));
+  assert.equal((await service.load("organizationExpenses", {})).query, "view=table&pageSize=all");
+});
+
 test("product V1 upgrade keeps raw CAS and a large V2 selection independently of projects", async () => {
   const f = fixture();
   const raw = '{ "version": 1, "revision": "2000-old", "query": "project=p1&status=DESIGN" }';
