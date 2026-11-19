@@ -847,6 +847,9 @@ model Payment {
   logisticsAllocation LogisticsPostingAllocation? @relation(fields: [logisticsAllocationId], references: [id], onDelete: Restrict)
   deletionId       String?
   deletion         WarehouseMovementDeletion? @relation(fields: [deletionId], references: [id], onDelete: Restrict)
+  deletedAt        DateTime?
+  deletedById      String?
+  lastActionId     String? // Действующее изменение платежа для проверки зависимостей при откате.
   paidAt           DateTime         @default(now())
   comment          String?
   createdById      String?

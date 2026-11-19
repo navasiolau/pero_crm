@@ -34,8 +34,8 @@ test("general income still cannot disguise an expense article", () => {
 
 test("common ledger cannot delete financial history of an archived project", async () => {
   let writes = 0;
-  const tx = { payment: { findUnique: async () => ({ project: { id: "archived", deletedAt: new Date() }, direction: "EXPENSE" }), delete: async () => { writes++; } } } as unknown as Prisma.TransactionClient;
-  await assert.rejects(deletePaymentInTransaction({ id: "actor", name: "Actor", roles: ["ACCOUNTANT"], source: "web" }, "payment", "EXPENSE", "BYN", "1", tx), /только для просмотра/);
+  const tx = { payment: { findUnique: async () => ({ project: { id: "archived", deletedAt: new Date() }, direction: "EXPENSE" }), updateMany: async () => { writes++; } } } as unknown as Prisma.TransactionClient;
+  await assert.rejects(deletePaymentInTransaction({ id: "actor", name: "Actor", roles: ["ACCOUNTANT"], source: "web" }, "payment", tx), /только для просмотра/);
   assert.equal(writes, 0);
 });
 
