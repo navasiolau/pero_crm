@@ -16,6 +16,8 @@ import { PERCENTAGE_STAGE_POLICY } from "./stage-policy";
 import { captureDirectPercentage, settleSkippedPercentage, type PercentageAccrualEffects } from "./direct-completion";
 import { isPermanentUnassignedCompletion } from "./skip-reason";
 import { writeChangeLogInTransaction } from "@/server/changelog/writer";
+import { payrollCompensationCommand } from "@/server/payroll/accrual-reversal";
+import type { PayrollEntry } from "@prisma/client";
 import { journalProductContext } from "@/server/finance/journal";
 
 type Tx = Prisma.TransactionClient;
@@ -127,17 +129,18 @@ export async function settlePendingProductPercentage(productId: string, kind: Pr
     const now = new Date();
     const eventIds: string[] = [];
     const earnings: Earning[] = [];
+    const payrollEntries: PayrollEntry[] = [];
     for (const row of current.shares) {
       const amount = amounts.find((item) => item.userId === row.userId)!.amount;
       const bynAmount = byn.find((item) => item.userId === row.userId)!.amount;
       const projectAmount = project.find((item) => item.userId === row.userId)!.amount;
       await tx.productPercentageCompletionShare.update({ where: { id: row.id }, data: { amount, bynAmount, projectAmount } });
       if (amount !== "0.00") {
-        await tx.payrollEntry.create({ data: { userId: row.userId, productId, projectId: pending.product.projectId,
+        payrollEntries.push(await tx.payrollEntry.create({ data: { userId: row.userId, productId, projectId: pending.product.projectId,
           percentageCompletionShareId: row.id, amount, bynAmount, projectAmount,
           projectCurrency: current.productCurrency, currency: current.payrollCurrency!,
           scheme: PERCENTAGE_STAGE_POLICY[kind].scheme,
-          month: payrollMonth(current.completedAt), comment: `${PERCENTAGE_STAGE_POLICY[kind].label} изделия ${pending.product.number}` } });
+          month: payrollMonth(current.completedAt), comment: `${PERCENTAGE_STAGE_POLICY[kind].label} изделия ${pending.product.number}` } }));
         const event = await tx.domainEvent.create({ data: { type: "payroll.accrued", actor: current.completedById ?? undefined,
           payload: { userId: row.userId, productId, projectId: pending.product.projectId, kind, amount: Number(amount) } } });
         eventIds.push(event.id);
@@ -150,7 +153,8 @@ export async function settlePendingProductPercentage(productId: string, kind: Pr
       sourceFundExact: fund.sourceFundExact, amount: fund.amount, bynAmount: fund.bynAmount, projectAmount: fund.projectAmount, settledAt: now,
     } });
     const initiator = dependencies.initiator ?? (current.completedById ? await tx.user.findUnique({ where: { id: current.completedById }, select: { id: true, name: true } }) : null);
-    await writeChangeLogInTransaction(tx, { id: `percentage-fx-settlement:${current.id}`, actorType: "system", actorId: "system",
+    await writeChangeLogInTransaction(tx, { id: `percentage-fx-settlement:${current.id}`,
+      ...(payrollEntries.length ? { reversal: payrollCompensationCommand(productId, payrollEntries) } : {}), actorType: "system", actorId: "system",
       actorName: "Система", source: "system", entity: "product", entityId: productId, action: "percentage.fxSettlement",
       oldValue: { completionId: current.id, kind, state: current.state }, newValue: { completionId: current.id, kind, state: "SETTLED", amount: fund.amount,
         bynAmount: fund.bynAmount, projectAmount: fund.projectAmount, earnings } },

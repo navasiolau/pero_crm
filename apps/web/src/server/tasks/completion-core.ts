@@ -1,4 +1,5 @@
 import { writeChangeLogInTransaction } from "@/server/changelog/writer";
+import { payrollCompensationCommand } from "@/server/payroll/accrual-reversal";
 import { isDeepStrictEqual } from "node:util";
 import { confirmMutation } from "@/server/operations/confirmation";
 import { normalizeTaskStatusRequest, readTaskStatusReceipt, recordTaskStatusReceipt, TaskStatusRequestError, type TaskStatusContext, type TaskStatusEffect } from "./status-receipts";
@@ -83,6 +84,7 @@ export async function changeTaskStatusCore(actor: DomainActor, taskId: string, t
             catch (error) { throw new CompletionError(error instanceof Error ? error.message : "Не определена валюта работы"); }
             const entry=await tx.payrollEntry.create({ data: { userId: task.assigneeId, taskId: task.id, workId: task.work.id, projectId: task.projectId, amount, bynAmount: amount, currency, scheme: "PIECE", month: payrollMonth(doneAt), comment: `${task.title} · ${task.project.number}` } });
             await writeChangeLogInTransaction(tx,{actorType:'user',actorId:actor.id,actorName:actor.name,source:actor.source,entity:'payrollEntry',entityId:entry.id,action:'accrue',
+              reversal: payrollCompensationCommand(entry.id, [entry]),
               newValue:journalSnapshot(entry,PAYROLL_JOURNAL_FIELDS)},
               {...await operationJournalContext(tx,{type:'payrollEntry',id:entry.id,label:`Начисление: ${task.title}`},[task],[{type:'user',id:task.assigneeId,label:assignee.name}]),
                 ...systemJournalActor(actor,'Выполнение задачи'),before:null,after:journalSnapshot(entry,PAYROLL_JOURNAL_FIELDS)});

@@ -1,3 +1,4 @@
+import { effectivePercentageAmount, percentageAmountInclude } from "./effective-amount";
 import { calculateWholeProductPercentage } from "@/lib/product-percentage-ceil";
 import {canViewProductMoney} from "@/lib/product-financial-access";
 import { Prisma, type PrismaClient, type Role } from "@prisma/client";
@@ -15,7 +16,7 @@ export async function getProductPercentageView(actor: { id: string; roles: Role[
   const product = await database.product.findFirst({ where: { AND: [{ id: productId }, productVisibilityWhere(visibilityActor)] },
     include: { project: { select: { currency: true } }, engineer: { select: { id:true, name: true, active:true, roles:true } }, mounter: { select: { id:true,name:true,active:true,roles:true } },assembler: { select: {id:true,name:true,active:true,roles:true} },
       percentageConfigs: { include: { participants: { include: { user: { select: { name: true } } } } } },
-      percentageCompletions: { include: { shares: { include: { adjustments: { orderBy: { configRevision: "desc" } } } } } },
+      percentageCompletions: { include: { shares: { include: percentageAmountInclude } } },
       stagePayPools: { where: { kind: "ENGINEERING" }, include: { settlement: true } },
       files: { where: { AND:[fileVisibilityWhere(visibilityActor),{ fileName: { endsWith: ".b3d", mode: "insensitive" } }] }, select: { id: true }, take: 1 },
     } });
@@ -54,7 +55,7 @@ export async function getProductPercentageView(actor: { id: string; roles: Role[
     // Назначенный специалист виден своей строкой всегда — даже при пустых долях (пропущенное
     // начисление): сумма ему показывается, в зарплату запишется только сменой статуса.
     // Доля без суммы добирает прогноз, если строка принадлежит текущему назначенному.
-    const members = completion && completion.shares.length ? completion.shares.map(row=>({userId:row.userId,name:row.userNameSnapshot,shareUnits:row.shareUnits,amount:row.adjustments?.at(0)?.amount.toString()??row.amount?.toString()??(row.userId===assignee?.userId?draftTotal:null)}))
+    const members = completion && completion.shares.length ? completion.shares.map(row=>({userId:row.userId,name:row.userNameSnapshot,shareUnits:row.shareUnits,amount:effectivePercentageAmount(row)??(row.userId===assignee?.userId?draftTotal:null)}))
       : assignee ? [{userId:assignee.userId,name:assignee.name,shareUnits:1000000,amount:draftTotal}] : [];
     // Текущий назначенный без доли виден своей строкой прогноза (но не пустой строкой).
     if (assignee && draftTotal !== null && !members.some((row) => row.userId === assignee.userId)) members.push({userId:assignee.userId,name:assignee.name,shareUnits:1000000,amount:draftTotal});
@@ -70,6 +71,10 @@ export async function getProductPercentageView(actor: { id: string; roles: Role[
     const ownMember = assignee?.userId===actor.id?members.find((row) => row.userId === actor.id) ?? null:null;
     // Поле видит только свою сумму; неназначенному sums нет вообще (прогноз только менеджерам).
     const fieldTotal = ownMember ? ownMember.amount : null;
+    const amounts = displayCompletion?.shares.map(row => effectivePercentageAmount(row)) ?? [];
+    const effectiveTotal = amounts.length && amounts.every(value => value !== null)
+      ? amounts.reduce<Prisma.Decimal>((sum, value) => sum.plus(value!), new Prisma.Decimal(0)).toString()
+      : null;
     const view: ProductPercentageSectionView = {
       hasConfiguration: Boolean(config),
       currentRatePercent: financeView ? config?.ratePercent?.toString()??null : null,
@@ -86,7 +91,7 @@ export async function getProductPercentageView(actor: { id: string; roles: Role[
       payrollCurrency: displayCompletion?.payrollCurrency ?? null,
       // Сумма: менеджерам — итог/прогноз как раньше; полю — только своя строка назначенного.
       // Не-финансы (не MANAGER/PROCUREMENT): members только своя строка, имена исполнителей оставлены через assignee.
-      total: financeView ? (currentAssigneeForecast?members.find(row=>row.userId===assignee!.userId)?.amount??null:latestAdjustment?.amount.toString()??displayCompletion?.amount?.toString() ?? draftTotal) : fieldTotal,
+      total: financeView ? (currentAssigneeForecast?members.find(row=>row.userId===assignee!.userId)?.amount??null:effectiveTotal??latestAdjustment?.amount.toString()??displayCompletion?.amount?.toString() ?? draftTotal) : fieldTotal,
       members: financeView ? members : ownMember ? [ownMember] : [], revision: config?.revision ?? 0,
       canManage: manager&&product.status!=="DONE",
       canTransfer: false,

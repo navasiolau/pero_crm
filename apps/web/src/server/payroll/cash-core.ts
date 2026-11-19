@@ -7,6 +7,8 @@ import { calculateCashPayout, cashMovementDelta, isCashCurrency, parseCashAmount
 import { requireHistoricalByn } from "@/lib/history-byn";
 import { ADVANCE_ROLES, PAYROLL_MANAGE_ROLES, hasAnyRole, type Role } from "@/lib/roles";
 import { payoutJournalSnapshot } from "@/server/finance/journal";
+import { activePayoutWhere } from "./active-records";
+import { payoutVisibilityCommand } from "./payout-reversal";
 
 export type PayoutActor = { id: string; name: string; roles: Role[]; source: "web" | "telegram" | "api" };
 export type CashPayoutInput = {
@@ -21,7 +23,8 @@ export type CashPayoutInput = {
   month?: string;
 };
 
-function fail(message: string): never { throw new Error(message); }
+export class PayoutValidationError extends Error {}
+function fail(message: string): never { throw new PayoutValidationError(message); }
 
 export function assertPayoutRole(actor: PayoutActor, kind: string): void {
   if (kind !== "ADVANCE" && kind !== "SALARY") fail("Неизвестный тип выплаты");
@@ -48,7 +51,7 @@ function normalizedInput(actor: PayoutActor, input: CashPayoutInput, now: Date) 
 export async function readCashBalance(tx: Prisma.TransactionClient, cashAccountId: string): Promise<Prisma.Decimal> {
   const [payments, payouts] = await Promise.all([
     tx.payment.groupBy({ by: ["direction"], where: { ...activePaymentWhere, cashAccountId }, _sum: { amount: true } }),
-    tx.payout.aggregate({ where: { cashAccountId }, _sum: { cashAmount: true } }),
+    tx.payout.aggregate({ where: { ...activePayoutWhere, cashAccountId }, _sum: { cashAmount: true } }),
   ]);
   const paymentBalance = payments.reduce((sum, row) => sum.add(cashMovementDelta(row.direction,row._sum.amount ?? 0)), new Prisma.Decimal(0));
   return paymentBalance.add(cashMovementDelta("EXPENSE",payouts._sum.cashAmount ?? 0));
@@ -58,13 +61,23 @@ export async function readOrgBalance(tx: Prisma.TransactionClient, _payrollRate:
   const [income, expense, payouts] = await Promise.all([
     tx.payment.aggregate({ where: { ...activePaymentWhere, direction: "INCOME" }, _sum: { bynAmount: true } }),
     tx.payment.aggregate({ where: { ...activePaymentWhere, direction: "EXPENSE" }, _sum: { bynAmount: true } }),
-    tx.payout.findMany({ select: { amount: true, payrollCurrency: true, bynAmount: true } }),
+    tx.payout.findMany({ where: activePayoutWhere, select: { amount: true, payrollCurrency: true, bynAmount: true } }),
   ]);
   return new Prisma.Decimal(income._sum.bynAmount ?? 0).minus(expense._sum.bynAmount ?? 0)
     .plus(paymentBynDelta).minus(requireHistoricalByn(payouts)).minus(newPayoutBynDelta);
 }
 
-export async function issuePayoutCore(actor: PayoutActor, input: CashPayoutInput, rates: CashRates, tx: Prisma.TransactionClient) {
+export async function readPayoutDebt(tx: Prisma.TransactionClient, userId: string, now = new Date()) {
+  const [accrued, paid] = await Promise.all([
+    tx.payrollEntry.findMany({ where: { userId, month: { lt: payrollMonth(now) } }, select: { amount: true, currency: true, bynAmount: true } }),
+    tx.payout.findMany({ where: { ...activePayoutWhere, userId }, select: { amount: true, payrollCurrency: true, bynAmount: true } }),
+  ]);
+  return requireHistoricalByn(accrued).sub(requireHistoricalByn(paid));
+}
+
+export async function issuePayoutCore(actor: PayoutActor, input: CashPayoutInput, rates: CashRates, tx: Prisma.TransactionClient,
+  batch?: { id: string; journalId: string },
+) {
   const now = new Date();
   const normalized = normalizedInput(actor, input, now); // role/input validation before any DB read
   const receiptId = `payout-issue:${input.requestId}`;
@@ -74,7 +87,8 @@ export async function issuePayoutCore(actor: PayoutActor, input: CashPayoutInput
     if (receipt.actorId !== actor.id || receipt.entity !== "payout" || receipt.action !== "issue" || !saved || typeof saved !== "object" || Array.isArray(saved)
       || saved.fingerprint !== normalized.fingerprint || typeof saved.payoutId !== "string") fail("Идентификатор запроса уже использован");
     const original = await tx.payout.findUnique({ where: { id: saved.payoutId } });
-    if (!original) fail("Операция отменена");
+    if (!original || original.deletedAt) fail("Операция отменена");
+    if ((original.batchId ?? null) !== (batch?.id ?? null)) fail("Идентификатор запроса уже использован");
     return { repeated: true as const, payoutId: original.id, amount: original.amount.toFixed(2),
       cashAmount: original.cashAmount?.toFixed(2) ?? normalized.cashAmount, currency: original.cashCurrency ?? rates.cash.currency,
       payrollCurrency: original.payrollCurrency ?? rates.payroll.currency,
@@ -97,21 +111,19 @@ export async function issuePayoutCore(actor: PayoutActor, input: CashPayoutInput
   if (cashBalance.lt(quote.cashAmount)) fail("Недостаточно средств в выбранной кассе");
   if (orgBalanceAfter.lt(0)) fail("Недостаточно средств на балансе организации");
   if (input.kind === "SALARY") {
-    const [accrued, paid] = await Promise.all([
-      tx.payrollEntry.findMany({ where: { userId: user.id, month: { lt: payrollMonth(now) } }, select: { amount: true, currency: true, bynAmount: true } }),
-      tx.payout.findMany({ where: { userId: user.id }, select: { amount: true, payrollCurrency: true, bynAmount: true } }),
-    ]);
-    const due = requireHistoricalByn(accrued).sub(requireHistoricalByn(paid));
+    const due = await readPayoutDebt(tx, user.id, now);
     if (due.lte(0) || due.lt(quote.amount)) fail("Выплата превышает долг за прошлые месяцы");
   }
   const payout = await tx.payout.create({ data: {
     userId: user.id, amount: quote.amount, month: normalized.month, kind: input.kind,
+    lastActionId: receiptId, batchId: batch?.id,
     comment: input.kind === "ADVANCE" ? normalized.description : normalized.comment || null, createdById: actor.id,
     cashAccountId: account.id, cashAmount: quote.cashAmount, cashCurrency: quote.cashCurrency, bynAmount: quote.bynAmount,
     cashRate: quote.cashRate, payrollRate: quote.payrollRate, cashRateDate: new Date(`${quote.cashRateDate}T00:00:00.000Z`),
     payrollRateDate: new Date(`${quote.payrollRateDate}T00:00:00.000Z`), payrollCurrency: quote.payrollCurrency,
   } });
-  await writeChangeLogInTransaction(tx, { id: receiptId, actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
+  await writeChangeLogInTransaction(tx, { id: receiptId, ...(batch ? { operationRootId: batch.journalId }
+    : { reversal: payoutVisibilityCommand([payout], false) }), actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
     entity: "payout", entityId: payout.id, action: "issue", newValue: { payoutId: payout.id, fingerprint: normalized.fingerprint,
       userId: user.id, userName: user.name, kind: input.kind, cashAccountId: account.id, cashAmount: quote.cashAmount,
       cashCurrency: quote.cashCurrency, amount: quote.amount, payrollCurrency: quote.payrollCurrency, month: normalized.month } },

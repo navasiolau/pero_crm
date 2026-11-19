@@ -1,4 +1,5 @@
 import {Prisma,type PrismaClient} from "@prisma/client";
+import { activePayoutWhere } from "@/server/payroll/active-records";
 import {activePaymentWhere} from "@/server/payments/active-records";
 import {prisma} from "@/lib/prisma";
 import {calendarDateRange} from "@/lib/calendar-dates";
@@ -122,7 +123,7 @@ async function readCashStatementFacts(actor:FinanceWorkspaceActor,query:CashStat
    stockPurchase:{select:{movement:{select:{material:{select:{name:true}}}}}},
    expenseReceipts:{where:{cancelledAt:null},take:1,select:{lines:{orderBy:{position:"asc"},select:{movement:{select:{material:{select:{name:true}}}}}}}}
   }}),
-  db.payout.findMany({where:{createdAt:{lt:range.end}},select:{id:true,cashAccountId:true,createdAt:true,kind:true,amount:true,payrollCurrency:true,
+  db.payout.findMany({where:{...activePayoutWhere,createdAt:{lt:range.end}},select:{id:true,cashAccountId:true,createdAt:true,kind:true,amount:true,payrollCurrency:true,
    cashAmount:true,cashCurrency:true,bynAmount:true,comment:true,user:{select:{name:true}}}}),
  ]);
  const facts:CashStatementFact[]=payments.map(row=>{const documents=row.logisticsAllocation?logisticsPaymentDocuments(row.logisticsAllocation):reportDocumentFiles(row);return {id:"payment:"+row.id,source:"PAYMENT",accountId:row.cashAccountId,at:row.paidAt.toISOString(),

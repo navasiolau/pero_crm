@@ -1,7 +1,9 @@
 import { writeChangeLogInTransaction } from "@/server/changelog/writer";
+import { payrollCompensationCommand } from "@/server/payroll/accrual-reversal";
+import { effectivePercentageAmount, percentageAmountInclude } from "./effective-amount";
 import { journalAutomatic, journalProductContext } from "@/server/finance/journal";
 import { payrollMonth } from "@/lib/payroll-month";
-import { Prisma, type ProductPercentageKind, type ProductStatus } from '@prisma/client';
+import { Prisma, type PayrollEntry, type ProductPercentageKind, type ProductStatus } from '@prisma/client';
 import { assertProjectMoneyCurrency } from "@/lib/internal-currency";
 import type { DomainActor } from '@/server/projects/core';
 import { PERCENTAGE_STAGE_POLICY } from './stage-policy';
@@ -120,6 +122,7 @@ export async function captureDirectPercentage(tx: Prisma.TransactionClient, acto
         ? calculated!.amount
         : null;
     const now = new Date();
+    const payrollEntries: PayrollEntry[] = [];
     const recipientSnapshot = eligible
         ? recipient!
         : null;
@@ -179,7 +182,7 @@ export async function captureDirectPercentage(tx: Prisma.TransactionClient, acto
             }
         });
         if (amount !== null && new Prisma.Decimal(amount).gt(0)) {
-            await tx.payrollEntry.create({
+            payrollEntries.push(await tx.payrollEntry.create({
                 data: {
                     userId: recipientSnapshot.id,
                     productId,
@@ -194,7 +197,7 @@ export async function captureDirectPercentage(tx: Prisma.TransactionClient, acto
                     month: payrollMonth(now),
                     comment: `${policy.label} изделия ${product.number}`
                 }
-            });
+            }));
             const event = await tx.domainEvent.create({
                 data: {
                     type: 'payroll.accrued',
@@ -218,6 +221,7 @@ export async function captureDirectPercentage(tx: Prisma.TransactionClient, acto
         }
     }
     await writeChangeLogInTransaction(tx, {
+            ...(payrollEntries.length ? { reversal: payrollCompensationCommand(productId, payrollEntries) } : {}),
             actorType: 'user',
             actorId: actor.id,
             actorName: actor.name,
@@ -368,6 +372,7 @@ export async function settleSkippedPercentage(tx: Prisma.TransactionClient, acto
         : null;
     const amount = calculated!.amount;
     const now = new Date();
+    const payrollEntries: PayrollEntry[] = [];
     const recipientSnapshot = eligible
         ? recipient!
         : null;
@@ -429,7 +434,7 @@ export async function settleSkippedPercentage(tx: Prisma.TransactionClient, acto
                 }
             });
         if (new Prisma.Decimal(amount).gt(0)) {
-            await tx.payrollEntry.create({
+            payrollEntries.push(await tx.payrollEntry.create({
                 data: {
                     userId: recipientSnapshot.id,
                     productId,
@@ -444,7 +449,7 @@ export async function settleSkippedPercentage(tx: Prisma.TransactionClient, acto
                     month: payrollMonth(now),
                     comment: `${policy.label} изделия ${product.number}`
                 }
-            });
+            }));
             const event = await tx.domainEvent.create({
                 data: {
                     type: 'payroll.accrued',
@@ -468,6 +473,7 @@ export async function settleSkippedPercentage(tx: Prisma.TransactionClient, acto
         }
     }
     await writeChangeLogInTransaction(tx, {
+            ...(payrollEntries.length ? { reversal: payrollCompensationCommand(productId, payrollEntries) } : {}),
             actorType: 'user',
             actorId: actor.id,
             actorName: actor.name,
@@ -533,7 +539,7 @@ export async function adjustSettledPercentage(tx: Prisma.TransactionClient, acto
             }
         },
         include: {
-            shares: true
+            shares: { include: percentageAmountInclude }
         }
     });
     if (!completion || completion.state !== 'SETTLED')
@@ -557,7 +563,7 @@ export async function adjustSettledPercentage(tx: Prisma.TransactionClient, acto
     if (newAmount === null)
         throw new Error('Не удалось пересчитать сумму этапа');
     const policy = PERCENTAGE_STAGE_POLICY[kind];
-    let share = completion.shares.at(0);
+    let share: import("@prisma/client").ProductPercentageCompletionShare | undefined = completion.shares.at(0);
     if (!share && completion.amount?.isZero()) {
         const recipientId = product[policy.assignment];
         const recipient = recipientId
@@ -600,7 +606,9 @@ export async function adjustSettledPercentage(tx: Prisma.TransactionClient, acto
             configRevision: 'desc'
         }
     });
-    const oldAmount = latest?.amount.toString() ?? share.amount?.toString() ?? completion.amount?.toString() ?? '0.00';
+    const previousShare = completion.shares.at(0);
+    const oldAmount = (previousShare?.adjustments ? effectivePercentageAmount(previousShare, completion.amount) : null)
+        ?? latest?.amount.toString() ?? share.amount?.toString() ?? completion.amount?.toString() ?? '0.00';
     const config = await tx.productPercentageConfig.findUnique({
         where: {
             productId_kind: {
@@ -613,6 +621,7 @@ export async function adjustSettledPercentage(tx: Prisma.TransactionClient, acto
         }
     });
     const now = new Date();
+    const payrollEntries: PayrollEntry[] = [];
     const delta = new Prisma.Decimal(newAmount).minus(oldAmount).toFixed(2);
     const adjustment = await tx.productPercentageAdjustment.create({
         data: {
@@ -632,7 +641,7 @@ export async function adjustSettledPercentage(tx: Prisma.TransactionClient, acto
         }
     });
     if (delta !== '0.00') {
-        await tx.payrollEntry.create({
+        payrollEntries.push(await tx.payrollEntry.create({
             data: {
                 userId: share.userId,
                 productId,
@@ -647,9 +656,10 @@ export async function adjustSettledPercentage(tx: Prisma.TransactionClient, acto
                 month: payrollMonth(now),
                 comment: `Корректировка ${policy.label} изделия ${product.number} (было ${oldAmount} → стало ${newAmount})`
             }
-        });
+        }));
     }
     await writeChangeLogInTransaction(tx, {
+            ...(payrollEntries.length ? { reversal: payrollCompensationCommand(productId, payrollEntries) } : {}),
             actorType: 'user',
             actorId: actor.id,
             actorName: actor.name,

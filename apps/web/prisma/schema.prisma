@@ -532,6 +532,11 @@ model PayrollEntry {
   workId     String?
   productId String?
   product Product? @relation(fields: [productId], references: [id], onDelete: Restrict)
+  compensatesId String?
+  compensates PayrollEntry? @relation("PayrollCompensation", fields: [compensatesId], references: [id], onDelete: Restrict)
+  compensations PayrollEntry[] @relation("PayrollCompensation")
+  compensationActionId String?
+  compensationRevision Int?
   settlementShareId String? @unique
   settlementShare ProductStageSettlementShare? @relation(fields: [settlementShareId], references: [id], onDelete: Restrict)
   percentageCompletionShareId String? @unique
@@ -553,6 +558,8 @@ model PayrollEntry {
   @@index([userId, month])
   @@index([projectId])
   @@index([productId])
+  @@unique([compensatesId, compensationActionId])
+  @@unique([compensatesId, compensationRevision])
 }
 
 // Новые прямые проценты. Старые Work/Task/settlement записи остаются нетронутыми.
@@ -767,6 +774,15 @@ model ProductStageSettlementShare {
 // kind: SALARY — обычная выплата по долгу за прошлые месяцы,
 // ADVANCE — аванс текущим месяцем (потолок — только баланс организации;
 // учитывается формулой долга автоматически: долг = начислено − ВСЕ выплаты).
+model PayrollPayoutBatch {
+  id        String   @id
+  actorId   String
+  selection Json
+  createdAt DateTime @default(now())
+  closedAt  DateTime?
+  payouts   Payout[]
+}
+
 model Payout {
   id          String   @id @default(cuid())
   userId      String
@@ -787,10 +803,17 @@ model Payout {
   cashRateDate    DateTime? @db.Date
   payrollRateDate DateTime? @db.Date
   payrollCurrency String?
+  deletedAt DateTime?
+  deletedById String?
+  lastActionId String?
+  batchId String?
+  batch PayrollPayoutBatch? @relation(fields: [batchId], references: [id], onDelete: Restrict)
 
   @@index([userId, month])
   @@index([month])
   @@index([cashAccountId])
+  @@index([batchId])
+  @@index([deletedAt])
 }
 
 // Направление платежа (§11): приход от клиента / расход на проект

@@ -5,7 +5,7 @@ import { after, before, test } from "node:test";
 import { Prisma } from "@prisma/client";
 import type { CashRates } from "../../src/lib/cash-ledger";
 import { guardedModuleCache } from "../helpers/guarded-module-cache";
-import { createPostgresFixture, moneyRows, savedOrgBalance, type PostgresRows } from "./postgres.fixture";
+import { createPostgresFixture, moneyRows, rejectedSql, savedOrgBalance, type PostgresRows } from "./postgres.fixture";
 
 let fixture: Awaited<ReturnType<typeof createPostgresFixture>>;
 let cash: typeof import("../../src/server/payroll/cash-core");
@@ -80,6 +80,95 @@ for (const vector of [
   for (const [index, beforeRows] of originalMoney.entries())
     assert.deepEqual(finalMoney[index].filter(row => beforeRows.some(before => before.id === row.id)), beforeRows, "FOREIGN_FIXED_HISTORY_MONEY_UNCHANGED");
 }));
+
+test("cash/journal-preserves-payout-and-restores-the-original-advance-with-its-cash-guard", async t => {
+  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-10-31T21:30:00.000Z").getTime() });
+  await fixture.rollback(async (tx, rows) => {
+    const c = await cashRows(tx, rows, "120");
+    const admin = await rows.user("advance-undo-admin", ["ADMIN"]);
+    const { deletePayoutInTransaction } = await import("../../src/server/payroll/payout-reversal");
+    const { reverseJournalActionInTransaction } = await import("../../src/server/changelog/reversal-core");
+    const issued = await cash.issuePayoutCore(c.actor, c.input, fixedRates, tx);
+    const before = await tx.payout.findUniqueOrThrow({ where: { id: issued.payoutId } });
+    await deletePayoutInTransaction(tx, c.actor, issued.payoutId);
+    assert.equal((await cash.readCashBalance(tx, c.account.id)).toFixed(2), "120.00");
+    await assert.rejects(cash.issuePayoutCore(c.actor, c.input, fixedRates, tx), /отменена/);
+    const hidden = await tx.payout.findUniqueOrThrow({ where: { id: issued.payoutId } });
+    assert.ok(hidden.deletedAt);
+    const expense = await tx.payment.create({ data: { direction: "EXPENSE", cashAccountId: c.account.id, amount: "1", bynAmount: "1" } });
+    const request = { entryId: hidden.lastActionId!, requestId: randomUUID(), scope: { kind: "global" } };
+    await assert.rejects(reverseJournalActionInTransaction(tx, admin.id, request), /Недостаточно средств в выбранной кассе/);
+    assert.ok((await tx.payout.findUniqueOrThrow({ where: { id: issued.payoutId } })).deletedAt);
+    await tx.payment.update({ where: { id: expense.id }, data: { deletedAt: new Date() } });
+    await reverseJournalActionInTransaction(tx, admin.id, request);
+    assert.deepEqual(await tx.payout.findUnique({ where: { id: issued.payoutId } }), before);
+    assert.equal((await cash.readCashBalance(tx, c.account.id)).toFixed(2), "0.00");
+    assert.equal(await tx.payout.count({ where: { userId: c.employee.id } }), 1);
+  });
+});
+
+test("cash/batch-reverses-exact-partial-membership-and-retains-accrual-snapshots", async t => {
+  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-10-31T21:30:00.000Z").getTime() });
+  await fixture.rollback(async (tx, rows) => {
+    const c = await cashRows(tx, rows, "30");
+    const second = await rows.user("batch-second", ["WORKER"]);
+    const skipped = await rows.user("batch-skipped", ["WORKER"]);
+    const admin = await rows.user("batch-undo-admin", ["ADMIN"]);
+    const debtors = [c.employee, second, skipped];
+    for (const [index, row] of debtors.entries()) await tx.payrollEntry.create({ data: { userId: row.id,
+      id: rows.id(`batch-accrual-${index}`), month: "2026-10", amount: "20", bynAmount: "20" } });
+    const { settlePayoutBatch } = await import("../../src/server/payroll/payout-batch");
+    const { reverseJournalActionInTransaction } = await import("../../src/server/changelog/reversal-core");
+    const input = { id: randomUUID(), month: "2026-10", cashAccountId: c.account.id };
+    const people = debtors.map(({ id: userId, name }) => ({ userId, name }));
+    const { result } = await settlePayoutBatch(tx, c.actor, input, people, fixedRates, "Пакет");
+    assert.equal(result.totalPaid, "30.00");
+    assert.equal(result.paidIds.length, 2);
+    assert.deepEqual(result.shortPaid, [second.name, skipped.name]);
+    const replay = await settlePayoutBatch(tx, c.actor, input, [], fixedRates, "Пакет");
+    assert.deepEqual(replay.result, result);
+    assert.equal(replay.effects.length, 0);
+    const request = { entryId: `payout-batch:${input.id}`, requestId: randomUUID(), scope: { kind: "global" } };
+    const undo = await reverseJournalActionInTransaction(tx, admin.id, request);
+    assert.equal((await cash.readCashBalance(tx, c.account.id)).toFixed(2), "30.00");
+    assert.equal(await tx.payout.count({ where: { batchId: input.id, deletedAt: { not: null } } }), 2);
+    assert.equal(await tx.payout.count({ where: { userId: skipped.id } }), 0);
+    await assert.rejects(settlePayoutBatch(tx, c.actor, input, people, fixedRates, "Пакет"), /уже изменён/);
+    await reverseJournalActionInTransaction(tx, admin.id, { ...request, entryId: undo.reversalId, requestId: randomUUID() });
+    assert.equal((await cash.readCashBalance(tx, c.account.id)).toFixed(2), "0.00");
+    assert.equal(await tx.payout.count({ where: { batchId: input.id, deletedAt: null } }), 2);
+    assert.equal(await tx.payrollEntry.count({ where: { userId: { in: debtors.map(row => row.id) } } }), 3);
+    await tx.$executeRaw`SET CONSTRAINTS ALL IMMEDIATE`;
+  });
+});
+
+test("cash/journal-accrual-adjustment-preserves-raw-entry-and-protects-paid-salary", async t => {
+  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-10-31T21:30:00.000Z").getTime() });
+  await fixture.rollback(async (tx, rows) => {
+    const c = await cashRows(tx, rows, "200");
+    const admin = await rows.user("accrual-undo-admin", ["ADMIN"]);
+    const source = await tx.payrollEntry.create({ data: { userId: c.employee.id, month: "2026-10", amount: "100", bynAmount: "100" } });
+    const { payrollCompensationCommand } = await import("../../src/server/payroll/accrual-reversal");
+    const { writeChangeLogInTransaction } = await import("../../src/server/changelog/writer");
+    const { reverseJournalActionInTransaction } = await import("../../src/server/changelog/reversal-core");
+    const audit = await writeChangeLogInTransaction(tx, { entity: "payrollEntry", entityId: source.id, action: "accrue",
+      actorType: "user", actorId: admin.id, actorName: admin.name, newValue: { amount: "100" },
+      reversal: payrollCompensationCommand(source.id, [source]) }, { entity: { label: "Синтетическое начисление" }, contexts: [] });
+    const command = { entryId: audit.id, requestId: randomUUID(), scope: { kind: "global" } };
+    const undo = await reverseJournalActionInTransaction(tx, admin.id, command);
+    const adjustment = await tx.payrollEntry.findFirstOrThrow({ where: { compensatesId: source.id } });
+    assert.equal(adjustment.amount.toFixed(2), "-100.00");
+    await rejectedSql(tx, () => tx.payrollEntry.update({ where: { id: adjustment.id }, data: { amount: "0" } }), /immutable/);
+    assert.equal((await cash.readPayoutDebt(tx, c.employee.id)).toFixed(2), "0.00");
+    const redo = await reverseJournalActionInTransaction(tx, admin.id, { ...command, entryId: undo.reversalId, requestId: randomUUID() });
+    assert.deepEqual(await tx.payrollEntry.findUnique({ where: { id: source.id } }), source);
+    await cash.issuePayoutCore(c.actor, { ...c.input, kind: "SALARY", cashAmount: "60", month: "2026-10" }, fixedRates, tx);
+    await assert.rejects(reverseJournalActionInTransaction(tx, admin.id,
+      { ...command, entryId: redo.reversalId, requestId: randomUUID() }), /проведённой выплаты/);
+    assert.equal((await cash.readPayoutDebt(tx, c.employee.id)).toFixed(2), "40.00");
+    assert.equal(await tx.payrollEntry.count({ where: { compensatesId: source.id } }), 2);
+  });
+});
 
 test("cash/advance-month-replay-and-rollback-outbox", async t => {
   t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-10-31T21:30:00.000Z").getTime() });

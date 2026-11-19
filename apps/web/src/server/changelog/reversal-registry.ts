@@ -9,6 +9,8 @@ import { expenseReceiptIssueReversal } from "@/server/warehouse/expense-issue-re
 import { workTaskLifecycleReversal } from "@/server/tasks/lifecycle-reversal";
 import { taskEditReversal } from "@/server/tasks/edit-reversal";
 import { workEditReversal } from "@/server/works/edit-reversal";
+import { payoutVisibilityReversal } from "@/server/payroll/payout-reversal";
+import { payrollAccrualReversal } from "@/server/payroll/accrual-reversal";
 
 export const journalReversals = [
   productTitleReversal,
@@ -22,4 +24,6 @@ export const journalReversals = [
   workTaskLifecycleReversal,
   taskEditReversal,
   workEditReversal,
+  payoutVisibilityReversal,
+  payrollAccrualReversal,
 ];

@@ -12,6 +12,7 @@ import type { CashRates } from "../../src/lib/cash-ledger";
 import type { CashPayoutInput, PayoutActor } from "../../src/server/payroll/cash-core";
 import type { PaymentInput } from "../../src/server/payments/contracts";
 import { stockPurchaseSchema } from "../../src/server/warehouse/contracts";
+import { activePayoutWhere } from "../../src/server/payroll/active-records";
 import { activePaymentWhere } from "../../src/server/payments/active-records";
 import { guardedModuleCache } from "../helpers/guarded-module-cache";
 import { nativeSnapshot } from "../helpers/native-acceptance-snapshot";
@@ -230,7 +231,11 @@ for (const mode of ["usd", "byn-fallback"] as const) test(`cash/operator-full-cy
   assert.deepEqual([await tx.notification.count(), await tx.domainEvent.count()], effectCounts);
   assert.equal((await on(tx, c.actor, () => actions.deletePayout(outcomes[2].payoutId))).ok, true);
   await assert.rejects(cash.issuePayoutCore(procurement, requests[2], rates(), tx), /отменена/);
-  assert.equal(await tx.payout.count({ where: { userId: { in: [c.employee.id, inactive.id] } } }), mode === "usd" ? 3 : 2);
+  assert.equal(await tx.payout.count({ where: { ...activePayoutWhere, userId: { in: [c.employee.id, inactive.id] } } }), mode === "usd" ? 3 : 2);
+  const removed = await tx.payout.findUniqueOrThrow({ where: { id: outcomes[2].payoutId } });
+  assert.ok(removed.deletedAt);
+  assert.equal(removed.amount.toFixed(2), requests[2].cashAmount);
+  assert.equal(await tx.payout.count({ where: { userId: { in: [c.employee.id, inactive.id] } } }), outcomes.length);
   assert.deepEqual(await tx.payrollEntry.findMany({ where: { userId: { in: [c.employee.id, inactive.id] } } }), [accrued]);
   const allNotifications = await tx.notification.findMany({ orderBy: { id: "asc" } });
   const notifications = allNotifications.filter(row => !previousNotifications.some(before => before.id === row.id));
@@ -249,8 +254,12 @@ for (const mode of ["usd", "byn-fallback"] as const) test(`cash/operator-full-cy
   assert.equal((await cash.readCashBalance(tx, usd.id)).toFixed(2), mode === "usd" ? "950.00" : "0.00");
   assert.equal((await on(tx, c.actor, () => payroll.getEmployeeDues())).find(row => row.userId === inactive.id)?.due, 300);
   // Реальный bulk consumer погашает оставшиеся 300, хотя сотрудник inactive/NONE; новых начислений нет.
-  const bulk = await on(tx, c.actor, () => actions.settleAll("2000-01", c.account.id));
-  assert.equal(bulk.ok, true); assert.equal(bulk.paidCount, 1); assert.equal(bulk.totalPaid, 300);
+  const batchId = randomUUID();
+  const bulk = await on(tx, c.actor, () => actions.settleAll("2000-01", c.account.id, batchId));
+  assert.equal(bulk.ok, true); assert.equal(bulk.batchId, batchId); assert.equal(bulk.paidCount, 1); assert.equal(bulk.totalPaid, 300);
+  assert.equal(await tx.payout.count({ where: { batchId, userId: inactive.id, ...activePayoutWhere } }), 1);
+  assert.equal(await tx.changeLog.count({ where: { operationRootId: `payout-batch:${batchId}`, entity: "payout", action: "issue" } }), 1);
+  assert.deepEqual(await on(tx, c.actor, () => actions.settleAll("2000-01", c.account.id, batchId)), bulk);
   assert.deepEqual(await tx.payrollEntry.findMany({ where: { userId: inactive.id } }), [accrued]);
   const afterMoney = await money(tx);
   for (const [index, beforeRows] of previousMoney.entries())
@@ -1501,10 +1510,13 @@ test("cash/actual-bulk-settlement-solo-and-held-expense-race", async () => {
       await started.promise; assert.notEqual(holderPid, waiterPid); await waitForMoneyLock(holder, waiterPid); assert.equal(complete, false);
       release.resolve(); await expense;
       const result = await bulk;
-      assert.equal(result.ok, true); assert.equal(result.paidCount, 0); assert.ok(result.shortPaid?.includes(c.employee.name));
-      assert.equal(await fixture.db.payout.count({ where: { userId: c.employee.id } }), 0);
+      assert.equal(result.ok, true); assert.equal(result.paidCount, 1); assert.equal(result.totalPaid, 500);
+      assert.ok(result.shortPaid?.includes(c.employee.name));
+      const payout = await fixture.db.payout.findFirstOrThrow({ where: { ...activePayoutWhere, userId: c.employee.id, batchId: result.batchId } });
+      assert.equal(payout.amount.toFixed(2), "500.00");
+      assert.equal(await fixture.db.payout.count({ where: { userId: c.employee.id } }), 1);
       assert.deepEqual(await fixture.db.payrollEntry.findUnique({ where: { id: accrued.id } }), accrued);
-      assert.equal((await cash.readCashBalance(fixture.db, c.account.id)).toFixed(2), "500.00");
+      assert.equal((await cash.readCashBalance(fixture.db, c.account.id)).toFixed(2), "0.00");
     } finally { release.resolve(); await Promise.allSettled([expense, ...(bulk ? [bulk] : [])]); }
   }
 });

@@ -2,7 +2,8 @@
 
 import { payrollMonth } from "@/lib/payroll-month";
 import { initialCashAccount } from "@/lib/cash-account-default";
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
+import { createRequestId } from "@/lib/request-id";
 import { toast } from "sonner";
 import { Download, HandCoins, Plus, Trash2, Calculator } from "lucide-react";
 
@@ -95,6 +96,7 @@ export function FinancePayrollView({
   const [salaryPayoutUncertain, setSalaryPayoutUncertain] = useState(false);
   const [deleting, setDeleting] = useState<PayoutView | null>(null);
   const [settleOpen, setSettleOpen] = useState(false);
+  const settleAttempt = useRef<{ id: string; accountId: string; month: string } | null>(null);
   const [settleCashAccountId, setSettleCashAccountId] = useState("");
   const activeCashAccounts = cashAccounts.filter((account) => account.active);
 
@@ -568,10 +570,25 @@ export function FinancePayrollView({
             </Button>
             <Button
               className="min-h-12 h-auto whitespace-normal"
-              disabled={settlementUnavailable || settlementConfirmationDisabled(settleCashAccount?.balance ?? 0, settleTotal, pending) || !settleCashAccountId}
+              disabled={pending || !settleCashAccountId || (!settleAttempt.current &&
+                (settlementUnavailable || settlementConfirmationDisabled(settleCashAccount?.balance ?? 0, settleTotal, false)))}
               onClick={() =>
                 startTransition(async () => {
-                  const result = await settleAll(month, settleCashAccountId);
+                  const saved = settleAttempt.current;
+                  if (saved && (saved.month !== month || saved.accountId !== settleCashAccountId)) {
+                    toast.error("Для проверки незавершённого расчёта выберите ту же кассу и месяц.");
+                    return;
+                  }
+                  const command = saved ?? { id: createRequestId(), accountId: settleCashAccountId, month };
+                  settleAttempt.current = command;
+                  let result: Awaited<ReturnType<typeof settleAll>>;
+                  try {
+                    result = await settleAll(command.month, command.accountId, command.id);
+                  } catch {
+                    toast.error("Не удалось подтвердить пакет выплат. Повторите тот же запрос.");
+                    return;
+                  }
+                  if (!result.retrySafe) settleAttempt.current = null;
                   if (result.ok) {
                     if (didSettleAnything(result)) {
                       toast.success(`Выплачено ${formatAmount(result.totalPaid ?? 0, currency)} (${result.paidCount} сотр.)`);
@@ -590,7 +607,7 @@ export function FinancePayrollView({
                 })
               }
             >
-              {pending ? "Расчёт…" : "Подтвердить выплаты"}
+              {pending ? "Расчёт…" : settleAttempt.current ? "Проверить результат выплат" : "Подтвердить выплаты"}
             </Button>
           </DialogFooter>
         </DialogContent>
