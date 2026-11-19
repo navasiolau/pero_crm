@@ -304,7 +304,8 @@ test("security.routes: credentials, Bearer, Telegram и команды чере�
   });
   await t.test("telegram/link-session-unlink: expiry/occupied/inactive/replay и разрешённая привязка ENGINEER", async () => {
     const engineer = await f.user("telegram-engineer", ["ENGINEER"]), disabled = await f.user("telegram-disabled", ["MANAGER"], { active: false });
-    const occupied = f.id("occupied-chat"), chatId = f.id("engineer-chat");
+    const chatId = String(1 + Number.parseInt(randomUUID().replaceAll("-", "").slice(0, 12), 16));
+    const occupied = String(Number(chatId) + 1);
     await f.db.telegramLink.create({ data: { userId: owner.id, chatId: occupied, linkedAt: new Date() } });
     const link = await f.db.telegramLink.create({ data: { userId: engineer.id, linkCode: f.id("valid-code"), linkCodeExpiresAt: new Date(Date.now() + 60_000) } });
     const expiredUser = await f.user("telegram-expired", ["MANAGER"]);
@@ -319,7 +320,7 @@ test("security.routes: credentials, Bearer, Telegram и команды чере�
       assert.equal((await api(path, undefined, method, body)).status, 401);
       assert.equal((await api(path, wrong.raw, method, body)).status, 403);
     }
-    for (const [code, target, status] of [[f.id("unknown-code"), chatId, 400], [expired.linkCode!, chatId, 400], [inactive.linkCode!, chatId, 403], [link.linkCode!, occupied, 400]] as const) {
+    for (const [code, target, status] of [[f.id("unknown-code"), chatId, 400], [expired.linkCode!, chatId, 400], [inactive.linkCode!, chatId, 403], [link.linkCode!, occupied, 400], [link.linkCode!, `-${chatId}`, 400]] as const) {
       assert.equal((await api("/api/v1/bot/link", write.raw, "POST", { code, chatId: target })).status, status);
       assert.deepEqual(await f.db.telegramLink.findMany({ orderBy: { id: "asc" } }), baseline);
     }
