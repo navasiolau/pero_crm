@@ -8,7 +8,7 @@ import { auth } from "@/auth";
 import { Badge } from "@/components/ui/badge";
 import { displayClientName } from "@/lib/labels";
 import { prisma } from "@/lib/prisma";
-import { FIELD_ROLES, MANAGER_ROLES, OFFICE_ROLES, WAREHOUSE_MANAGE_ROLES, WAREHOUSE_MONEY_ROLES, hasAnyRole } from "@/lib/roles";
+import { ADMIN_ROLES, FIELD_ROLES, MANAGER_ROLES, OFFICE_ROLES, WAREHOUSE_MANAGE_ROLES, WAREHOUSE_MONEY_ROLES, hasAnyRole } from "@/lib/roles";
 import {canViewProductMoney} from "@/lib/product-financial-access";
 import { canEditProductTechnicalBlock, resolveVisibilityActor } from "@/server/access/visibility";
 import { canManageProductFiles } from "@/lib/file-management";
@@ -66,7 +66,7 @@ export default async function ProductPage({
   const showMaterials = hasAnyRole(role, OFFICE_ROLES);
   const showMoney = hasAnyRole(role, WAREHOUSE_MONEY_ROLES);
   const canIssueReturn=hasAnyRole(role,WAREHOUSE_MANAGE_ROLES);
-  const showJournal = hasAnyRole(role, ["ADMIN"]);
+  const showJournal = hasAnyRole(role, ADMIN_ROLES);
 
 
   const [clients, workers, engineers, priceItems, materialsData, materialOptions, percentageView] =

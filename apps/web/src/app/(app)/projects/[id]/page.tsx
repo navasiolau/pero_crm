@@ -21,6 +21,7 @@ import {
   FINANCE_ROLES,
   MANAGER_ROLES,
   OFFICE_ROLES,
+  ADMIN_ROLES,
   hasAnyRole,
 } from "@/lib/roles";
 import { prisma } from "@/lib/prisma";
@@ -80,7 +81,7 @@ export default async function ProjectPage({
   // Склад (§12): вкладка «Материалы» — офисные роли (+ бухгалтер на просмотр)
   const showMaterials = hasAnyRole(role, OFFICE_ROLES);
   const showLogistics = canManageLogistics(role);
-  const showJournal = hasAnyRole(role, ["ADMIN"]);
+  const showJournal = hasAnyRole(role, ADMIN_ROLES);
 
   const stockExpenses = showFinance ? await loadProjectStockExpenses(session.user, project.id, prisma) : [];
 

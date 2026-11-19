@@ -5,6 +5,7 @@ import type { Prisma, Product } from "@prisma/client";
 import type { DomainActor } from "@/server/actor";
 import { createProductInTransaction } from "@/server/products/core";
 import { automationJournalContext, productJournalContext } from "@/server/projects/journal";
+import { titleReversalCommand } from '@/server/products/scalar-reversal';
 import { recalculateQuantity } from "@/server/products/quantity-core";
 import { stabilizeProductNumberLinks } from "@/server/products/numbering";
 import { lockWarehouseMetadata, assertWarehouseMetadataWritable } from "@/server/warehouse/gate";
@@ -22,6 +23,13 @@ const commercialSnapshot = (product: Product) => ({
 
 async function auditProductSync(tx: Prisma.TransactionClient, actor: DomainActor,
   proposalId: string, before: Product, after: Product) {
+  const reversal = titleReversalCommand(before, after);
+  if (reversal) await writeChangeLogInTransaction(tx, {
+    actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
+    entity: "product", entityId: after.id, action: "update", field: "title", reversal,
+    oldValue: before.title, newValue: after.title,
+  }, { ...productJournalContext(after), ...automationJournalContext(actor, "Обновление названия изделия из КП"),
+    links: [{ type: "commercialProposal", id: proposalId, label: "Коммерческое предложение" }] });
   await writeChangeLogInTransaction(tx, {
     actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
     entity: "product", entityId: after.id, action: "kp.synchronize",
