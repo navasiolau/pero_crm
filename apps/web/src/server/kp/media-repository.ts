@@ -220,8 +220,9 @@ export function createPrismaProposalMediaRepository(db: Pick<PrismaClient, "$tra
       } else {
         const references = input.scope.kind === "current"
           ? await tx.$queryRaw<{ mediaId: string }[]>`SELECT "mediaId" FROM "ProposalCurrentMedia" WHERE "proposalId" = ${input.proposalId} AND "mediaId" = ${input.mediaId} AND "detachedAt" IS NULL`
-          : await tx.$queryRaw<{ mediaId: string }[]>`SELECT "mediaId" FROM "ProposalVersionMedia" WHERE "proposalId" = ${input.proposalId}
-              AND "mediaId" = ${input.mediaId} AND "versionId" = ${input.scope.versionId}`;
+          : await tx.$queryRaw<{ mediaId: string }[]>`SELECT vm."mediaId" FROM "ProposalVersionMedia" vm JOIN "ProposalVersion" v ON v.id=vm."versionId"
+              WHERE vm."proposalId" = ${input.proposalId} AND vm."mediaId" = ${input.mediaId}
+                AND vm."versionId" = ${input.scope.versionId} AND v.trigger<>'EDIT'`;
         if (references.length !== 1) throw new ProposalMediaError("KP_MEDIA_NOT_FOUND");
       }
       return readableMedia(media, input.variant);

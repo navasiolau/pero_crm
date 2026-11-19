@@ -1624,6 +1624,7 @@ enum ProposalRateSource {
 }
 
 enum ProposalVersionTrigger {
+  EDIT
   PDF
   CONTRACT
   IMPORT

@@ -1,5 +1,6 @@
 import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 import { Prisma } from "@prisma/client";
+import { proposalExportRequestReversal } from "./export-request-reversal";
 import { hasAnyRole, MANAGER_ROLES } from "../../lib/roles";
 import { withTaskTransaction, type TaskTransaction } from "../tasks/transaction";
 import { contractFailure, type ContractActor, type ContractClient, type ContractObject, type ContractRecord, type ContractSource } from "./contract-types";
@@ -65,8 +66,13 @@ export function createPostgresContractTransaction(tx: Prisma.TransactionClient):
       return row?.newValue ? row.newValue as unknown as ContractReceipt : null;
     },
     async writeReceipt(operationId, primaryId, action, actor, receipt, journal) {
+      const jobId = action === "contract.export.request" && typeof receipt.result.id === "string" ? receipt.result.id : null;
+      const job = jobId ? await tx.proposalJob.findUnique({ where: { id: jobId }, select: { contractId: true, kind: true } }) : null;
+      const reversal = jobId && job?.kind === "CONTRACT" && job.contractId
+        ? proposalExportRequestReversal.command({ jobId, ownerId: job.contractId, kind: "CONTRACT", cancel: true })
+        : undefined;
       await writeChangeLogInTransaction(tx, { id: "kp-contract-operation:" + operationId, actorType: "user", actorId: actor.id, source: actor.source,
-        entity: "proposalContract", entityId: primaryId, action, newValue: receipt as unknown as Prisma.InputJsonValue },journal);
+        entity: "proposalContract", entityId: primaryId, action, reversal, newValue: receipt as unknown as Prisma.InputJsonValue },journal);
     },
     async writeEvent(actor,contractId,action,value,journal) {
       await writeChangeLogInTransaction(tx,{actorType:'user',actorId:actor.id,actorName:actor.name,source:actor.source,

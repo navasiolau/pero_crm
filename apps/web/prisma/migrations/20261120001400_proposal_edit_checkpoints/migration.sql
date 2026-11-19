@@ -1,0 +1,1 @@
+ALTER TYPE "ProposalVersionTrigger" ADD VALUE IF NOT EXISTS 'EDIT';
