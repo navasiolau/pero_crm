@@ -134,7 +134,7 @@ function pricingInput<T>(run: () => T): T {
 export function createApiSaveHooks(fx: ProposalFixedRate, preparedCopies?: PreparedProductMedia): ProposalSaveHooks {
   const media = createProposalMediaHooks({ storage: createProposalMediaS3Storage(), preparedCopies });
   return {
-    pricingFingerprint: apiDigest(rateDto(fx)), applyMedia: media.applyMedia,
+    pricingFingerprint: apiDigest(rateDto(fx)), journalCheckpoints: true, applyMedia: media.applyMedia,
     async applyPricing(tx, context) {
       const projection = pricingInput(() => projectProposalPricing(context.state, fx));
       const currentProject = await tx.project.findUniqueOrThrow({ where: { id: context.project.id } });

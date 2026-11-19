@@ -1,5 +1,7 @@
 import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 import { Prisma } from "@prisma/client";
+import { issuedProposalPdfReversal } from "./issued-pdf-reversal";
+import { proposalExportRequestReversal } from "./export-request-reversal";
 import type { DomainActor } from "../actor";
 import {automationJournalContext,proposalJournalContext} from '../projects/journal';
 import type {JournalPresentationHints} from '../changelog/contract';
@@ -16,7 +18,7 @@ const versionColumns = Prisma.sql`v."id",v."proposalId",v."revision",v."state",v
 const jobColumns = Prisma.sql`j."id",j."proposalId",j."contractId",j."createdById",j."kind"::text AS "kind",j."state"::text AS "state",j."dedupeKey",j."payload",j."result",j."attempts",j."maxAttempts",j."leaseOwner",j."lastErrorCode",j."leaseUntil" AT TIME ZONE 'UTC' AS "leaseUntil"`;
 
 /** Все методы получают уже открытую mutation-транзакцию; ни renderer, ни S3 здесь не вызываются. */
-export function createPrismaLifecycleStore(tx: Prisma.TransactionClient, security?: LifecycleSecurity, auditActor?:DomainActor): ProposalLifecycleStore {
+export function createPrismaLifecycleStore(tx: Prisma.TransactionClient, security?: LifecycleSecurity, auditActor?:DomainActor, operationRootId?: string): ProposalLifecycleStore {
   const one = async <T>(query: Prisma.Sql) => (await tx.$queryRaw<T[]>(query))[0] ?? null;
   const job = (id: string) => one<LifecycleJob>(Prisma.sql`SELECT ${jobColumns} FROM "ProposalJob" j WHERE j."id"=${id} FOR UPDATE`);
   const actors=new Map<string,DomainActor>();
@@ -51,17 +53,20 @@ export function createPrismaLifecycleStore(tx: Prisma.TransactionClient, securit
         : Prisma.sql`EXISTS(SELECT 1 FROM "ProposalVersionMedia" u WHERE u."proposalId"=m."proposalId" AND u."mediaId"=m."id" AND u."versionId"=${scope.versionId})`;
       return tx.$queryRaw<MediaRecord[]>(Prisma.sql`SELECT m."id",m."proposalId",m."storageBinding",m."optimizedKey",m."optimizedHash",m."optimizedSize",to_jsonb(m)->>'optimizedMimeType' AS "optimizedMimeType",m."mimeType",m."fileName",m."expiresAt" AT TIME ZONE 'UTC' AS "expiresAt",m."optimizedPurgedAt",m."retiringAt",to_jsonb(m)->>'uploadState' AS "uploadState" FROM "ProposalMedia" m WHERE m."proposalId"=${proposalId} AND m."deletedAt" IS NULL AND ${ownership} ORDER BY m."id" FOR UPDATE OF m`);
     },
-    version(proposalId, versionId) { return one<VersionRecord>(Prisma.sql`SELECT ${versionColumns} FROM "ProposalVersion" v WHERE v."proposalId"=${proposalId} AND v."id"=${versionId} FOR SHARE`); },
-    versions(proposalId) { return tx.$queryRaw<VersionRecord[]>(Prisma.sql`SELECT ${versionColumns} FROM "ProposalVersion" v WHERE v."proposalId"=${proposalId} ORDER BY v."createdAt" DESC,v."id" DESC`); },
-    currentReadyVersion(proposalId, revision) { return one<VersionRecord>(Prisma.sql`SELECT ${versionColumns} FROM "ProposalVersion" v JOIN "ProposalArtifact" a ON a."id"=v."pdfArtifactId" AND a."proposalId"=v."proposalId" WHERE v."proposalId"=${proposalId} AND v."revision"=${revision} AND a."state"='READY' AND a."kind"='PDF' ORDER BY v."createdAt" DESC,v."id" DESC LIMIT 1 FOR SHARE OF v,a`); },
-    artifact(id) { return one<ArtifactRecord>(Prisma.sql`SELECT "id","proposalId","contractId","kind"::text AS kind,"state"::text AS state,"storageBinding","key","sha256","size","fileName","mimeType" FROM "ProposalArtifact" WHERE "id"=${id} FOR UPDATE`); },
+    version(proposalId, versionId) { return one<VersionRecord>(Prisma.sql`SELECT ${versionColumns} FROM "ProposalVersion" v WHERE v."proposalId"=${proposalId} AND v."id"=${versionId} AND v.trigger<>'EDIT'
+      AND NOT EXISTS (SELECT 1 FROM "ProposalArtifact" a WHERE a.id=v."pdfArtifactId" AND a."deletedAt" IS NOT NULL) FOR SHARE`); },
+    versions(proposalId) { return tx.$queryRaw<VersionRecord[]>(Prisma.sql`SELECT ${versionColumns} FROM "ProposalVersion" v WHERE v."proposalId"=${proposalId} AND v.trigger<>'EDIT'
+      AND NOT EXISTS (SELECT 1 FROM "ProposalArtifact" a WHERE a.id=v."pdfArtifactId" AND a."deletedAt" IS NOT NULL) ORDER BY v."createdAt" DESC,v."id" DESC`); },
+    currentReadyVersion(proposalId, revision) { return one<VersionRecord>(Prisma.sql`SELECT ${versionColumns} FROM "ProposalVersion" v JOIN "ProposalArtifact" a ON a."id"=v."pdfArtifactId" AND a."proposalId"=v."proposalId" WHERE v."proposalId"=${proposalId} AND v."revision"=${revision} AND a."state"='READY' AND a."kind"='PDF' AND a."deletedAt" IS NULL ORDER BY v."createdAt" DESC,v."id" DESC LIMIT 1 FOR SHARE OF v,a`); },
+    artifact(id) { return one<ArtifactRecord>(Prisma.sql`SELECT "id","proposalId","contractId","kind"::text AS kind,"state"::text AS state,"storageBinding","key","sha256","size","fileName","mimeType" FROM "ProposalArtifact" WHERE "id"=${id} AND "deletedAt" IS NULL FOR UPDATE`); },
     job,
     jobByDedupe(dedupeKey) { return one<LifecycleJob>(Prisma.sql`SELECT ${jobColumns} FROM "ProposalJob" j WHERE j."dedupeKey"=${dedupeKey} FOR UPDATE`); },
     async createJob(input) {
       await tx.$executeRaw`INSERT INTO "ProposalJob"("id","proposalId","kind","state","dedupeKey","payload","createdById","createdAt","updatedAt") VALUES(${input.id},${input.proposalId},'PDF','PENDING',${input.dedupeKey},${JSON.stringify(input.payload)}::jsonb,${input.actorId},clock_timestamp() AT TIME ZONE 'UTC',clock_timestamp() AT TIME ZONE 'UTC')`;
       const actor=knownActor(input.actorId);
       await writeChangeLogInTransaction(tx,{id:`kp-pdf-request:${input.id}`,actorType:'user',actorId:actor.id,actorName:actor.name,source:actor.source,
-        entity:'commercialProposal',entityId:input.proposalId,action:'pdf.request',newValue:{jobId:input.id,state:'PENDING'}},
+        entity:'commercialProposal',entityId:input.proposalId,action:'pdf.request',
+        reversal:proposalExportRequestReversal.command({jobId:input.id,ownerId:input.proposalId,kind:'PDF',cancel:true}),newValue:{jobId:input.id,state:'PENDING'}},
         {...await journalContext(input.proposalId),before:null,after:{state:'PENDING',revision:input.payload.frozenSources[0]?.revision}});
     },
     async createPendingArtifact(a) {
@@ -82,7 +87,10 @@ export function createPrismaLifecycleStore(tx: Prisma.TransactionClient, securit
       if (!version) lifecycleFailure("KP_VERSION_NOT_FOUND", 500);
       const actor=knownActor(input.actorId);
       await writeChangeLogInTransaction(tx,{id:`kp-version-audit:${input.id}`,actorType:'user',actorId:actor.id,actorName:actor.name,source:actor.source,
-        entity:'commercialProposal',entityId:input.proposalId,action:'pdf.generated',newValue:{versionId:input.id,revision:input.revision,artifactId:input.pdfArtifactId}},
+        entity:'commercialProposal',entityId:input.proposalId,action:'pdf.generated',operationRootId,
+        ...(!operationRootId && input.trigger==='PDF' && input.pdfArtifactId ? {reversal:issuedProposalPdfReversal.command({
+          proposalId:input.proposalId,versionId:input.id,artifactId:input.pdfArtifactId,revision:input.revision,expectedDeletedAt:null,hide:true,
+        })} : {}),newValue:{versionId:input.id,revision:input.revision,artifactId:input.pdfArtifactId}},
         {...await journalContext(input.proposalId),...automationJournalContext(actor,'Фоновый выпуск PDF коммерческого предложения'),before:null,
           after:{revision:input.revision,state:input.state,pricingSnapshot:input.pricingSnapshot,artifactId:input.pdfArtifactId}});
       return version;
@@ -100,7 +108,7 @@ export function createPrismaLifecycleStore(tx: Prisma.TransactionClient, securit
       const after={acceptedVersionId:versionId,acceptedAt:at?.toISOString()??null,retentionEpoch:epoch};
       if(JSON.stringify(before)!==JSON.stringify(after))await writeChangeLogInTransaction(tx,
         {actorType:auditActor?'user':'system',actorId:auditActor?.id??'system',actorName:auditActor?.name??'Система',source:auditActor?.source??'api',
-          entity:'commercialProposal',entityId:proposalId,action:'version.accept',oldValue:before,newValue:after},
+          entity:'commercialProposal',entityId:proposalId,action:'version.accept',operationRootId,oldValue:before,newValue:after},
         {...await journalContext(proposalId),...(auditActor?automationJournalContext(auditActor,'Изменение этапа проекта'):{reason:'Изменение этапа проекта'})});
     },
     async cancelPruneJobs(proposalId) {
@@ -124,7 +132,7 @@ export const freezeSourcesInTransaction = (tx: Prisma.TransactionClient, binding
 export const requestProposalPdfInTransaction = (tx: Prisma.TransactionClient, binding: ActorBinding, input: unknown, ports: LifecyclePorts & LifecycleSecurity) => requestProposalPdf(createPrismaLifecycleStore(tx, ports), binding, input, ports);
 export const assertRenderJobClaimInTransaction = (tx: Prisma.TransactionClient, claim: RenderJobClaim, security: LifecycleSecurity) => assertRenderJobClaim(createPrismaLifecycleStore(tx, security), claim);
 export const recordPendingPdfArtifactInTransaction = (tx: Prisma.TransactionClient, input: { claim: RenderJobClaim; proposalId: string; artifact: Parameters<typeof recordPendingPdfArtifact>[3] }, ports: LifecyclePorts & LifecycleSecurity) => recordPendingPdfArtifact(createPrismaLifecycleStore(tx, ports), input.claim, input.proposalId, input.artifact, ports);
-export const publishSourcePdfInTransaction = (tx: Prisma.TransactionClient, input: Parameters<typeof publishSourcePdf>[1], ports: LifecyclePorts & LifecycleSecurity) => publishSourcePdf(createPrismaLifecycleStore(tx, ports), input, ports);
+export const publishSourcePdfInTransaction = (tx: Prisma.TransactionClient, input: Parameters<typeof publishSourcePdf>[1], ports: LifecyclePorts & LifecycleSecurity, operationRootId?: string) => publishSourcePdf(createPrismaLifecycleStore(tx, ports, undefined, operationRootId), input, ports);
 export const registerPendingArtifactCleanupInTransaction = (tx: Prisma.TransactionClient, input: { claim: RenderJobClaim; artifactId: string; proposalId: string }, security: LifecycleSecurity) => registerPendingArtifactCleanup(createPrismaLifecycleStore(tx, security), input.claim, input.artifactId, input.proposalId);
 export const completeRenderJobInTransaction = (tx: Prisma.TransactionClient, claim: RenderJobClaim, result: LifecycleObject, security: LifecycleSecurity) => completeRenderJob(createPrismaLifecycleStore(tx, security), claim, result);
 export const restoreProposalVersionInTransaction = (tx: Prisma.TransactionClient, binding: ActorBinding, input: unknown, ports: LifecyclePorts & LifecycleSecurity, save: RestoreSave) => restoreProposalVersion(createPrismaLifecycleStore(tx, ports), binding, input, ports, save);

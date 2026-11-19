@@ -1,3 +1,5 @@
+import { createdContractDraftReversal, savedContractDraftReversal } from "./contract-draft-reversal";
+import { issuedContractDocxReversal } from "./issued-docx-reversal";
 import { createHash, randomUUID } from "node:crypto";
 import { proposalPdfFileName } from "./pdf-filename";
 import { z } from "zod";
@@ -127,9 +129,19 @@ export function createContractWorkflow(ports: ContractWorkflowPorts) {
       const saved = await tx.saveDraft({ id: loaded.contract?.id ?? randomUUID(), primaryId: request.documentId, expectedRevision: request.expectedRevision,
         create: !loaded.contract, settings: json(stored), sourceIds: settings.proposalIds, actorId: actor.id });
       const result = json({ contractId: saved.id, revision: saved.revision, sourceRefs: request.sourceRefs, clientBaseline: contractClientBaseline(loaded.sources, loaded.clients) });
+      const affected = [...new Map([...loaded.oldSources, ...loaded.sources].map(source => [source.proposalId, source])).values()];
+      const checkpoint = affected.every(source => source.project && !source.deletedAt && !source.project.deletedAt)
+        ? { contractId: saved.id, primaryId: request.documentId, expectedRevision: saved.revision,
+          sources: affected.map(source => ({ proposalId: source.proposalId, projectId: source.project!.id,
+            revision: source.revision, stage: source.project!.stage, clientId: source.clientId })),
+          clients: loaded.clients.map(client => ({ id: client.id, updatedAt: client.updatedAt })),
+          versions: (await tx.history(saved.id)).map(version => version.id) } : undefined;
+      const reversal = checkpoint && (loaded.contract
+        ? savedContractDraftReversal.command({ ...checkpoint, settings: loaded.contract.settings, sourceIds: loaded.previousSettings.proposalIds })
+        : createdContractDraftReversal.command({ ...checkpoint, sourceIds: settings.proposalIds, expectedDeletedAt: null, hide: true }));
       await tx.writeReceipt(request.operationId, request.documentId, "contract.draft.save", actor, { actorId: actor.id, tokenId: actor.tokenId ?? null, fingerprint, result },
         {...contractJournalHints(saved.id,settings.number,[...loaded.oldSources,...loaded.sources]),actor:{type:'user',id:principal.id,name:principal.name},
-          before:loaded.contract?applyContractDefaults(loaded.previousSettings,loaded.defaults,loaded.primary.clientId,loaded.stored,true):null,after:settings});
+          before:loaded.contract?applyContractDefaults(loaded.previousSettings,loaded.defaults,loaded.primary.clientId,loaded.stored,true):null,after:settings},reversal);
       return result;
     });
   }
@@ -208,11 +220,13 @@ export function createContractWorkflow(ports: ContractWorkflowPorts) {
       if (!docx || docx.contractId !== extra.contractId || docx.proposalId !== null || docx.kind !== "DOCX" || docx.state !== "PENDING" ||
         docx.key !== claimArtifactKey(claim, "DOCX", extra.contractId, docx.id)) contractFailure("CONTRACT_ARTIFACT_INVALID", "Файл договора не принадлежит заданию");
       verifiedMatches(docx, output.docx);
+      const operationRootId = "kp-contract-release:" + claim.id;
+      const beforeStages = await ports.lifecycle.captureReleaseStages?.(tx, payload.frozenSources);
       const releases: ContractObject[] = [];
       for (const source of payload.frozenSources) {
         if (source.mode === "render") {
           const value = output.pdfs.find(pdf => pdf.proposalId === source.proposalId)!;
-          const published = await ports.lifecycle.publishSourcePdf(tx, claim, source.proposalId, value.artifact);
+          const published = await ports.lifecycle.publishSourcePdf(tx, claim, source.proposalId, value.artifact, operationRootId);
           releases.push(json({ proposalId: source.proposalId, versionId: published.versionId, pdfArtifactId: published.artifactId }));
         } else {
           const pdf = source.retainedPdfArtifactId ? await tx.artifact(source.retainedPdfArtifactId) : null;
@@ -227,13 +241,23 @@ export function createContractWorkflow(ports: ContractWorkflowPorts) {
         renderSnapshot: json({ template: extra.templateSnapshot, profile: extra.profile, releases, pageCounts: output.pageCounts }),
         templateVersion: extra.templateVersion, docxArtifactId: docx.id, actorId: actor.id });
       const eventIds: string[] = [];
-      for (const source of payload.frozenSources) if (source.projectStage === "LEAD" || source.projectStage === "ESTIMATE") eventIds.push(...await ports.lifecycle.advanceToContract(tx, actor, source, randomUUID()));
+      for (const source of payload.frozenSources) if (source.projectStage === "LEAD" || source.projectStage === "ESTIMATE") eventIds.push(...await ports.lifecycle.advanceToContract(tx, actor, source, randomUUID(), operationRootId));
       const result = json({ artifactId: docx.id, versionId, contractId: extra.contractId, fileName: docx.fileName, mimeType: docx.mimeType, releases, pageCounts: output.pageCounts });
+      await tx.completeJob(claim, result);
+      const independent = payload.frozenSources.every(source => source.mode === "retained" && source.projectStage !== "ESTIMATE");
+      const reversal = independent
+        ? issuedContractDocxReversal.command({ contractId: extra.contractId, versionId, artifactId: docx.id,
+          revision: extra.contractRevision, expectedDeletedAt: null, hide: true })
+        : beforeStages?.length ? await ports.lifecycle.makePublicationReversal?.(tx, {
+          contractId: extra.contractId, versionId, docxArtifactId: docx.id, revision: extra.contractRevision,
+          pdfs: releases.flatMap(release => typeof release.proposalId === "string" && typeof release.versionId === "string" &&
+            typeof release.pdfArtifactId === "string" && rendered.some(source => source.proposalId === release.proposalId)
+            ? [{ proposalId: release.proposalId, versionId: release.versionId, artifactId: release.pdfArtifactId }] : []),
+        }, payload.frozenSources, beforeStages) : undefined;
       await tx.writeEvent(actor,extra.contractId,'contract.generated',result,
         {...contractJournalHints(extra.contractId,extra.settingsSnapshot.number,payload.frozenSources),...automationJournalContext(actor,'Фоновый выпуск договора'),
-          before:null,after:{...result,settings:extra.settingsSnapshot,sourceRefs:extra.sourceRefs}});
+          before:null,after:{...result,settings:extra.settingsSnapshot,sourceRefs:extra.sourceRefs}}, reversal, operationRootId);
       eventIds.push(await tx.event(actor.id, "contract.generated", json({ contractId: extra.contractId, versionId, jobId: claim.id, artifactId: docx.id, tokenId: payload.actor.tokenId ?? null })));
-      await tx.completeJob(claim, result);
       return { result, eventIds };
     });
     if (committed.eventIds.length) await ports.dispatchAfterCommit(committed.eventIds).catch(() => undefined);

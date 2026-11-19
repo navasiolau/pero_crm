@@ -92,7 +92,7 @@ export async function createProductCore(actor: DomainActor, input: CreateProduct
 }
 
 /** Одинаковые defaults/history для обычного создания и состава КП. */
-export async function createProductInTransaction(tx: Prisma.TransactionClient, actor: DomainActor, input: CreateProductInput, numbering: "project" | "proposal" = "project") {
+export async function createProductInTransaction(tx: Prisma.TransactionClient, actor: DomainActor, input: CreateProductInput, numbering: "project" | "proposal" = "project", operationRootId?: string) {
   if (!hasAnyRole(actor.roles, MANAGER_ROLES)) throw new Error("Недостаточно прав");
   const parsed = createSchema.safeParse(input);
   if (!parsed.success) return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Ошибка данных" };
@@ -156,8 +156,8 @@ export async function createProductInTransaction(tx: Prisma.TransactionClient, a
     source: actor.source,
     entity: "product",
     entityId: product.id,
-    action: "create",
-    ...(createRoot ? { id: createRoot, reversal: await productVisibilityCommand(tx, project.id, false, product.updatedAt,
+    action: "create", operationRootId,
+    ...(createRoot && !operationRootId ? { id: createRoot, reversal: await productVisibilityCommand(tx, project.id, false, product.updatedAt,
       beforeNumbers, numberChanges, await cardDependencies(tx, "product", product.id)) } : {}),
     newValue: { number, title: data.title, quantity: data.quantity, project: project.number,
       percentageDefaultsRevision: defaults.revision, percentageRates: defaults.rates,

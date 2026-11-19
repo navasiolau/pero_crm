@@ -2,6 +2,7 @@ import type { Client, Prisma } from "@prisma/client";
 import { clientFields, updateClientInTransaction, type ClientBaseline, type ClientInput } from "@/server/clients/core";
 import type { DomainActor } from "@/server/actor";
 import type {JournalPresentationHints} from '@/server/changelog/contract';
+import { proposalClientEffectSchema, type ProposalClientEffect } from "./proposal-client-reversal";
 import {automationJournalContext} from '@/server/projects/journal';
 import { ProposalWriteError, proposalClientSnapshotSchema, proposalObject, type ProposalState, type ProposalClientSnapshotInput } from "./proposal-contract";
 
@@ -32,7 +33,7 @@ export function proposalClientLabel(client: Pick<Client, "name" | "lastName" | "
 export async function resolveProposalClientInTransaction(
   tx: Prisma.TransactionClient, actor: DomainActor, selection: ProposalClientSelection,
   state: ProposalState, fallbackClientId?: string, environment: ProposalEnvironment = process.env,
-  previousState?: Prisma.JsonValue, journal?: JournalPresentationHints,
+  previousState?: Prisma.JsonValue, journal?: JournalPresentationHints, operationRootId?: string,
 ) {
   const temporaryId = proposalTemporaryClientId(environment);
   const temporary = await tx.client.findUnique({ where: { id: temporaryId, deletedAt: null } });
@@ -48,7 +49,7 @@ export async function resolveProposalClientInTransaction(
   const snapshot = previous.id === clientId || source.id === clientId || selection.clientSnapshot
     ? { ...(previous.id === clientId ? fieldsOf(previous) : {}), ...(source.id === clientId ? fieldsOf(source) : {}), ...selection.clientSnapshot }
     : undefined;
-  let changed = false;
+  let changed = false, clientEffect: ProposalClientEffect | undefined;
   if (clientId === temporaryId && selection.clientSnapshot)
     throw new ProposalWriteError("validation", "Служебную карточку «Временный» нельзя изменять из КП");
   if (snapshot && clientId !== temporaryId) {
@@ -68,13 +69,16 @@ export async function resolveProposalClientInTransaction(
       passportNumber: desired.passportNumber ?? undefined, passportIssuedBy: desired.passportIssuedBy ?? undefined,
     };
     const updated = await updateClientInTransaction(tx, actor, clientId, input, baseline,
-      {...journal,...automationJournalContext(actor,'Обновление клиента из КП')});
+      {...journal,...automationJournalContext(actor,'Обновление клиента из КП')}, operationRootId ? { operationRootId } : undefined);
     if (!updated.ok) throw new ProposalWriteError("conflict", updated.error);
     changed = !updated.noOp;
+    if ("clientReversal" in updated && updated.clientReversal) {
+      clientEffect = proposalClientEffectSchema.parse({ clientId, command: updated.clientReversal });
+    }
     client = await tx.client.findUnique({ where: { id: clientId, deletedAt: null } });
     if (!client) throw new ProposalWriteError("not-found", "Клиент не найден");
   }
-  return { client, isTemporary: clientId === temporaryId, changed };
+  return { client, isTemporary: clientId === temporaryId, changed, clientEffect };
 }
 
 export function bindProposalClient(state: ProposalState, client: Client, isTemporary: boolean): ProposalState {

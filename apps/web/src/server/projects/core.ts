@@ -51,6 +51,7 @@ export async function createProjectInTransaction(
   actor: DomainActor,
   input: z.input<typeof createProjectSchema>,
   automationReason?: string,
+  operationRootId?: string,
 ) {
   requireActorRoles(actor, MANAGER_ROLES);
   const data = createProjectSchema.parse(input);
@@ -69,8 +70,8 @@ export async function createProjectInTransaction(
   } });
   await writeChangeLogInTransaction(tx, {
     actorType: "user", actorId: actor.id, actorName: actor.name || undefined,
-    entity: "project", entityId: project.id, action: "create",
-    ...(!automationReason ? { reversal: projectVisibilityCommand(false, project.updatedAt, [],
+    entity: "project", entityId: project.id, action: "create", operationRootId,
+    ...(!automationReason && !operationRootId ? { reversal: projectVisibilityCommand(false, project.updatedAt, [],
       await cardDependencies(tx, "project", project.id)) } : {}),
     newValue: { number, title: data.title }, source: actor.source,
   }, { ...projectJournalContext(project), ...(automationReason ? automationJournalContext(actor, automationReason) : {}),

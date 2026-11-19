@@ -8,7 +8,7 @@ import type { ProposalPricingProjection } from "./pricing-contract";
 import {automationJournalContext,businessSnapshot,productJournalContext,projectJournalContext} from '../projects/journal';
 
 type PricingTransaction = Pick<Prisma.TransactionClient, "$queryRaw" | "product" | "project" | "changeLog">;
-export type ProposalPricingContext = { proposalId: string; project: { id: string; number?: string; stage: string; currency: string };
+export type ProposalPricingContext = { proposalId: string; operationRootId?: string; project: { id: string; number?: string; stage: string; currency: string };
   items: readonly { id: string; productId: string }[]; actor: DomainActor };
 
 /** Вызывается pricing hook общего сохранения №181, в той же транзакции после синхронизации состава. */
@@ -44,7 +44,7 @@ export async function applyProjectionInTransaction(tx: PricingTransaction, conte
     const product=byId.get(productId)!;
     const before=businessSnapshot(product,['initialPrice','expectedPrice','initialPriceCaptureEligible']);
     const after={initialPrice:item.initialPrice.toString(),expectedPrice:item.expectedPrice.toString(),initialPriceCaptureEligible:false};
-    if (product.fieldRevisions && product.expectedPrice?.toString() !== after.expectedPrice) {
+    if (!context.operationRootId && product.fieldRevisions && product.expectedPrice?.toString() !== after.expectedPrice) {
       const version = (await tx.product.findUniqueOrThrow({ where: { id: productId }, select: { fieldRevisions: true } })).fieldRevisions;
       const reversal = fieldCommand("product.expectedPrice",
         { value: product.expectedPrice?.toString() ?? null, revision: cardFieldRevision(product.fieldRevisions, "expectedPrice") },
@@ -56,13 +56,13 @@ export async function applyProjectionInTransaction(tx: PricingTransaction, conte
       }, { ...productJournalContext(product), ...automationJournalContext(context.actor, "Обновление цены изделия из КП") });
     }
     if(JSON.stringify(before)!==JSON.stringify(after))await writeChangeLogInTransaction(tx,
-      {actorType:'user',actorId:context.actor.id,actorName:context.actor.name,source:context.actor.source,entity:'product',entityId:productId,action:'proposal.pricing.sync',
+      {actorType:'user',actorId:context.actor.id,actorName:context.actor.name,source:context.actor.source,operationRootId:context.operationRootId,entity:'product',entityId:productId,action:'proposal.pricing.sync',
         oldValue:before,newValue:{...after,proposalId:context.proposalId}},
       {...productJournalContext(product),...automationJournalContext(context.actor,'Обновление цены изделия из КП'),before,after});
   }
   const updated = await tx.project.updateMany({ where: { id: project.id, stage: "LEAD", deletedAt: null }, data: projection.project });
   if (updated.count !== 1) throw Error("Этап проекта изменился во время сохранения КП");
-  if (project.fieldRevisions) {
+  if (!context.operationRootId && project.fieldRevisions) {
     const before = projectServiceState(project);
     if (JSON.stringify(before.value) !== JSON.stringify(projectServiceState({ ...project, ...projection.project }).value)) {
       const after = projectServiceState(await tx.project.findUniqueOrThrow({ where: { id: project.id } }));
@@ -77,7 +77,7 @@ export async function applyProjectionInTransaction(tx: PricingTransaction, conte
   const { fieldRevisions: _versions, ...rawProject } = project;
   const json = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringify(value));
   await writeChangeLogInTransaction(tx, { actorType: "user", actorId: context.actor.id, actorName: context.actor.name,
-    source: context.actor.source, entity: "project", entityId: project.id, action: "proposal.pricing.sync",
+    source: context.actor.source, operationRootId: context.operationRootId, entity: "project", entityId: project.id, action: "proposal.pricing.sync",
     oldValue: json({ project: rawProject, products:products.map(product=>businessSnapshot(product,['id','quantity','initialPrice','expectedPrice','initialPriceCaptureEligible'])) }), newValue: json({ proposalId: context.proposalId, project: projection.project, items: projection.items,
       rate: { ...projection.rate, value: projection.rate.value.toString() } }) },
     {...projectJournalContext(context.project),...automationJournalContext(context.actor,'Обновление стоимости проекта из КП'),

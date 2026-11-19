@@ -23,12 +23,12 @@ const commercialSnapshot = (product: Product) => ({
 });
 
 async function auditProductSync(tx: Prisma.TransactionClient, actor: DomainActor,
-  proposalId: string, before: Product, after: Product, quantityRootId?: string) {
+  proposalId: string, before: Product, after: Product, operationRootId?: string, quantityRootId?: string) {
   const audit = { actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
     entity: "product", entityId: after.id, action: "update" };
   const context = { ...productJournalContext(after), ...automationJournalContext(actor, "Обновление изделия из КП"),
     links: [{ type: "commercialProposal", id: proposalId, label: "Коммерческое предложение" }] };
-  for (const field of ["title", "kind", "quantity", "technicalSpecifications"] as const) {
+  if (!operationRootId) for (const field of ["title", "kind", "quantity", "technicalSpecifications"] as const) {
     const reversal = field === "technicalSpecifications" ? technicalSpecificationsCommand(before, after) : productFieldCommand(field, before, after);
     if (reversal || (field === "quantity" && quantityRootId)) await writeChangeLogInTransaction(tx, {
       ...audit, id: field === "quantity" ? quantityRootId : undefined, field, reversal,
@@ -37,7 +37,7 @@ async function auditProductSync(tx: Prisma.TransactionClient, actor: DomainActor
   }
   await writeChangeLogInTransaction(tx, {
     actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
-    entity: "product", entityId: after.id, action: "kp.synchronize",
+    entity: "product", entityId: after.id, action: "kp.synchronize", operationRootId,
     oldValue: commercialSnapshot(before), newValue: { ...commercialSnapshot(after), proposalId },
   },{...productJournalContext(after),...automationJournalContext(actor,"Обновление изделия из КП"),
     before:commercialSnapshot(before),after:commercialSnapshot(after),
@@ -49,7 +49,7 @@ async function auditProductSync(tx: Prisma.TransactionClient, actor: DomainActor
 export async function synchronizeProposalItemsInTransaction(
   tx: Prisma.TransactionClient, actor: DomainActor,
   proposal: { id: string; projectId: string }, project: { number: string },
-  items: readonly ProposalItemState[], changedAt: Date,
+  items: readonly ProposalItemState[], changedAt: Date, operationRootId?: string,
 ) {
   const existingItems = await tx.proposalItem.findMany({ where: { proposalId: proposal.id } });
   const existingById = new Map(existingItems.map(item => [item.id, item]));
@@ -85,7 +85,7 @@ export async function synchronizeProposalItemsInTransaction(
     const after = await tx.product.update({ where: { id: product.id }, data: {
       deletedAt: changedAt, deletedById: actor.id,
     } });
-    await auditProductSync(tx, actor, proposal.id, product, after);
+    await auditProductSync(tx, actor, proposal.id, product, after, operationRootId);
     previousNumbers.set(product.id, product.number);
     changed = true;
   }
@@ -153,14 +153,14 @@ export async function synchronizeProposalItemsInTransaction(
       const result = await createProductInTransaction(tx, actor, {
         projectId: proposal.projectId, title: data.title, quantity: data.quantity,
         kind: data.kind ?? undefined, technicalSpecifications: data.technicalSpecifications,
-      }, "proposal");
+      }, "proposal", operationRootId);
       if (!result.ok) throw new ProposalWriteError("validation", result.error);
       before = result.product;
       created = true;
     }
     const previousQuantity = before.quantity;
-    const quantityRootId = before.quantity !== data.quantity ? randomUUID() : undefined;
-    if (quantityRootId) await recalculateQuantity(tx, {...before,number}, data.quantity, actor, quantityRootId);
+    const quantityRootId = !operationRootId && before.quantity !== data.quantity ? randomUUID() : undefined;
+    if (before.quantity !== data.quantity) await recalculateQuantity(tx, {...before,number}, data.quantity, actor, operationRootId ?? quantityRootId);
     const desiredSnapshot = { ...data, deletedAt: null };
     const commercialChanged = canonicalProposalJson(commercialSnapshot(before)) !== canonicalProposalJson({
       number: desiredSnapshot.number, suffixInt: desiredSnapshot.suffixInt, title: desiredSnapshot.title,
@@ -171,7 +171,7 @@ export async function synchronizeProposalItemsInTransaction(
     const after = commercialChanged || (needsRenumber && retained.has(before.id))
       ? await tx.product.update({ where: { id: before.id }, data }) : before;
     if (created || commercialChanged) {
-      await auditProductSync(tx, actor, proposal.id, before, after, quantityRootId);
+      await auditProductSync(tx, actor, proposal.id, before, after, operationRootId, quantityRootId);
       previousNumbers.set(before.id, before.number);
       changed = true;
     }

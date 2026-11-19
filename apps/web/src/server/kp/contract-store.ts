@@ -1,5 +1,6 @@
 import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 import { Prisma } from "@prisma/client";
+import { proposalExportRequestReversal } from "./export-request-reversal";
 import { hasAnyRole, MANAGER_ROLES } from "../../lib/roles";
 import { withTaskTransaction, type TaskTransaction } from "../tasks/transaction";
 import { contractFailure, type ContractActor, type ContractClient, type ContractObject, type ContractRecord, type ContractSource } from "./contract-types";
@@ -51,36 +52,43 @@ export function createPostgresContractTransaction(tx: Prisma.TransactionClient):
       return rows.map(row => ({ ...row, updatedAt: row.updatedAt.toISOString() })) satisfies ContractClient[];
     },
     async contract(primaryId) {
-      const rows = await tx.$queryRaw<ContractRecord[]>`SELECT id,"primaryProposalId",revision,settings FROM "ProposalContract" WHERE "primaryProposalId"=${primaryId}`;
+      const rows = await tx.$queryRaw<ContractRecord[]>`SELECT id,"primaryProposalId",revision,settings FROM "ProposalContract" WHERE "primaryProposalId"=${primaryId} AND "deletedAt" IS NULL`;
       return rows[0] ?? null;
     },
     async history(contractId) {
       const rows = await tx.$queryRaw<(Omit<ContractHistoryEntry, "createdAt"> & { createdAt: Date })[]>`SELECT v.id,v."createdAt",v."docxArtifactId",a."fileName"
         FROM "ProposalContractVersion" v JOIN "ProposalArtifact" a ON a.id=v."docxArtifactId" AND a."contractId"=v."contractId"
-        WHERE v."contractId"=${contractId} ORDER BY v."createdAt" DESC,v.id DESC`;
+        WHERE v."contractId"=${contractId} AND a."deletedAt" IS NULL ORDER BY v."createdAt" DESC,v.id DESC`;
       return rows.map(row => ({ ...row, createdAt: iso(row.createdAt) }));
     },
     async receipt(operationId) {
       const row = await tx.changeLog.findUnique({ where: { id: "kp-contract-operation:" + operationId }, select: { newValue: true } });
       return row?.newValue ? row.newValue as unknown as ContractReceipt : null;
     },
-    async writeReceipt(operationId, primaryId, action, actor, receipt, journal) {
+    async writeReceipt(operationId, primaryId, action, actor, receipt, journal, draftReversal) {
+      const jobId = action === "contract.export.request" && typeof receipt.result.id === "string" ? receipt.result.id : null;
+      const job = jobId ? await tx.proposalJob.findUnique({ where: { id: jobId }, select: { contractId: true, kind: true } }) : null;
+      const reversal = jobId && job?.kind === "CONTRACT" && job.contractId
+        ? proposalExportRequestReversal.command({ jobId, ownerId: job.contractId, kind: "CONTRACT", cancel: true })
+        : draftReversal;
       await writeChangeLogInTransaction(tx, { id: "kp-contract-operation:" + operationId, actorType: "user", actorId: actor.id, source: actor.source,
-        entity: "proposalContract", entityId: primaryId, action, newValue: receipt as unknown as Prisma.InputJsonValue },journal);
+        entity: "proposalContract", entityId: primaryId, action, reversal, newValue: receipt as unknown as Prisma.InputJsonValue },journal);
     },
-    async writeEvent(actor,contractId,action,value,journal) {
-      await writeChangeLogInTransaction(tx,{actorType:'user',actorId:actor.id,actorName:actor.name,source:actor.source,
-        entity:'proposalContract',entityId:contractId,action,newValue:value},journal);
+    async writeEvent(actor,contractId,action,value,journal,reversal,id) {
+      await writeChangeLogInTransaction(tx,{id,actorType:'user',actorId:actor.id,actorName:actor.name,source:actor.source,
+        entity:'proposalContract',entityId:contractId,action,reversal,newValue:value},journal);
     },
     async saveDraft(input) {
       let rows: ContractRecord[];
       if (input.create) {
         rows = await tx.$queryRaw<ContractRecord[]>`INSERT INTO "ProposalContract" (id,"primaryProposalId",settings,revision,"createdById","createdAt","updatedAt")
           VALUES (${input.id},${input.primaryId},${json(input.settings)}::jsonb,1,${input.actorId},NOW(),NOW())
-          ON CONFLICT ("primaryProposalId") DO NOTHING RETURNING id,"primaryProposalId",settings,revision`;
+          ON CONFLICT ("primaryProposalId") DO UPDATE SET settings=EXCLUDED.settings,"updatedAt"=NOW(),
+            revision="ProposalContract".revision+1,"deletedAt"=NULL,"deletedById"=NULL WHERE "ProposalContract"."deletedAt" IS NOT NULL
+          RETURNING id,"primaryProposalId",settings,revision`;
       } else {
         rows = await tx.$queryRaw<ContractRecord[]>`UPDATE "ProposalContract" SET settings=${json(input.settings)}::jsonb,revision=revision+1,"updatedAt"=NOW()
-          WHERE "primaryProposalId"=${input.primaryId} AND revision=${input.expectedRevision} RETURNING id,"primaryProposalId",settings,revision`;
+          WHERE "primaryProposalId"=${input.primaryId} AND revision=${input.expectedRevision} AND "deletedAt" IS NULL RETURNING id,"primaryProposalId",settings,revision`;
       }
       if (rows.length !== 1) contractFailure("CONTRACT_REVISION_CHANGED", "Договор изменён — обновите форму");
       await tx.$executeRaw`UPDATE "ProposalContractSource" SET "detachedAt"=NOW()
@@ -101,7 +109,7 @@ export function createPostgresContractTransaction(tx: Prisma.TransactionClient):
       return rows[0] ? { ...rows[0], leaseUntil: rows[0].leaseUntil?.toISOString() ?? null } : null;
     },
     async artifact(id) {
-      const rows = await tx.$queryRaw<ContractArtifact[]>`SELECT id,"proposalId","contractId",kind::text,state::text,"storageBinding",key,sha256,size,"fileName","mimeType" FROM "ProposalArtifact" WHERE id=${id} FOR UPDATE`;
+      const rows = await tx.$queryRaw<ContractArtifact[]>`SELECT id,"proposalId","contractId",kind::text,state::text,"storageBinding",key,sha256,size,"fileName","mimeType" FROM "ProposalArtifact" WHERE id=${id} AND "deletedAt" IS NULL FOR UPDATE`;
       return rows[0] ?? null;
     },
     async createPendingArtifact(artifact) {
