@@ -5,6 +5,7 @@ import { expenseReceiptReversal } from "@/server/warehouse/expense-receipt-rever
 import { ordinaryExpenseProjectReversal } from "@/server/payments/project-assignment-core";
 import { proposalMediaUploadReversal } from "@/server/kp/media-upload-reversal";
 import { logisticsReallocationReversal } from "@/server/logistics/reallocation-reversal";
+import { expenseReceiptIssueReversal } from "@/server/warehouse/expense-issue-reversal";
 
 export const journalReversals = [
   productTitleReversal,
@@ -14,4 +15,5 @@ export const journalReversals = [
   ordinaryExpenseProjectReversal,
   proposalMediaUploadReversal,
   logisticsReallocationReversal,
+  expenseReceiptIssueReversal,
 ];
