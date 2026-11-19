@@ -34,7 +34,7 @@ export async function readPaymentReceipt(actor: DomainActor, data: ReceiptInput,
     throw new PaymentReceiptError("Идентификатор платежа уже использован с другими данными");
   const payment = await db.payment.findUnique({ where: { id: receipt.entityId },
     include: { reportDocuments: { select: { documentId: true, position: true }, orderBy: { position: "asc" } } } });
-  if (!payment || payment.deletionId) throw new PaymentReceiptError("Операция удалена — повторное проведение запрещено", "removed", receipt.entityId);
+  if (!payment || payment.deletedAt || payment.deletionId) throw new PaymentReceiptError("Операция удалена — повторное проведение запрещено", "removed", receipt.entityId);
   if (data.reportDocumentIds !== undefined && !reportDocumentSetMatches(payment, data.reportDocumentIds))
     throw Error("Не удалось подтвердить полный комплект документов платежа");
   return payment;
