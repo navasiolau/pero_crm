@@ -6,5 +6,12 @@ import { viewPreferenceReversal } from "@/server/view-preference-reversal";
 import { telegramLinkReversal } from "@/server/telegram/link-reversal";
 import { userSettingsReversal } from "@/server/users/settings-reversal";
 import { productTitleReversal } from "@/server/products/title-reversal";
+import { paymentVisibilityReversal } from "@/server/payments/visibility-reversal";
+import { ordinaryExpenseProjectReversal } from "@/server/payments/project-assignment-core";
+import { expenseReceiptReversal } from "@/server/warehouse/expense-receipt-reversal";
 
-export const journalReversals = [productTitleReversal, userSettingsReversal, notificationPreferenceReversal, viewPreferenceReversal, telegramLinkReversal, savedListChoiceReversal, userCreationReversal, apiTokenCreationReversal];
+export const journalReversals = [
+  productTitleReversal, paymentVisibilityReversal, ordinaryExpenseProjectReversal, expenseReceiptReversal,
+  userSettingsReversal, notificationPreferenceReversal, viewPreferenceReversal, telegramLinkReversal,
+  savedListChoiceReversal, userCreationReversal, apiTokenCreationReversal,
+];

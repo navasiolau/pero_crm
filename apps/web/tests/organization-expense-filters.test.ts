@@ -29,8 +29,8 @@ test("условия отдельных полей соединяются чер
   assert.deepEqual(scalar.paidAt, { gte: new Date("2026-11-19T21:00:00Z"), lt: new Date("2026-11-20T21:00:00Z") });
   assert.deepEqual(scalar.bynAmount, { gte: "0.01", lte: undefined });
   assert.deepEqual(selectors[0], { OR: [
-    { projectId: null, stockPurchase: { is: null } },
-    { projectId: null, stockPurchase: { isNot: null } },
+    { projectId: null, stockPurchase: { is: null }, expenseReceipts: { none: { cancelledAt: null } } },
+    { projectId: null, OR: [{ stockPurchase: { isNot: null } }, { expenseReceipts: { some: { cancelledAt: null } } }] },
     { projectId: "p1" },
   ] });
   assert.deepEqual(selectors[1], { OR: [
@@ -40,11 +40,15 @@ test("условия отдельных полей соединяются чер
   assert.deepEqual(selectors[2], { OR: [{ cashAccountId: "a" }, { cashAccountId: "b" }] });
   assert.equal(selectors[3].OR?.length, 3);
   assert.match(JSON.stringify(selectors[3]), /READY/);
-  assert.deepEqual(selectors[4], { stockPurchase: {
+  const stockLine = {
     movementId: { contains: "movement-id", mode: "insensitive" }, unitPrice: { gte: undefined, lte: "17" },
     movement: { materialId: { in: ["m1", "m2"] }, material: { unitId: { in: ["unit"] } },
       quantity: { gte: "2.5", lte: undefined }, totalByn: { gte: "30", lte: undefined } },
-  } });
+  };
+  assert.deepEqual(selectors[4], { OR: [
+    { stockPurchase: stockLine },
+    { expenseReceipts: { some: { cancelledAt: null, lines: { some: stockLine } } } },
+  ] });
   assert.deepEqual(orderBy, [{ paidAt: "desc" }, { id: "desc" }]);
 });
 

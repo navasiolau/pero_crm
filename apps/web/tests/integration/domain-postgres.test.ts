@@ -269,7 +269,7 @@ before(async () => {
   // Child targets загружаются раньше родителей: guardedModuleCache сохраняет installed entry каждого target.
   const names = ["transactions/coordinator", "time/timers", "access/visibility", "access/notification-visibility", "tasks/workspace-contract", "prices/actions", "works/core", "works/update-core", "works/queries", "tasks/worker-allocation-core", "tasks/piecework-core", "tasks/task-reassignment-core",
     "tasks/queries", "warehouse/unit-core", "warehouse/norm-core", "warehouse/queries", "products/delete-core", "products/core", "projects/stage-core", "projects/delete-core",
-    "products/status-core", "products/queries", "projects/queries", "product-percentage-pay/queries", "changelog/queries", "calendar/core", "calendar/analytics", "tasks/completion-core", "tasks/actions", "warehouse/accounting", "warehouse/actions", "time/actions", "payments/service", "projects/core", "kp/proposal-core", "plugins/sync", "telegram/mutation-core"];
+    "products/status-core", "products/queries", "projects/queries", "product-percentage-pay/queries", "changelog/queries", "calendar/core", "calendar/analytics", "tasks/completion-core", "tasks/actions", "warehouse/accounting", "warehouse/expense-receipt-core", "changelog/reversal-core", "warehouse/actions", "time/actions", "payments/service", "projects/core", "kp/proposal-core", "plugins/sync", "telegram/mutation-core"];
   const effect = (name: string) => () => { const probe = current().mutation; if (probe) { probe.effects.push(name); throw Error("CI133_INJECTED_OPTIONAL_EFFECT"); } };
   const overrides = { "../src/auth": { auth: async () => current().unauthenticated ? null : ({ user: current().actor }) },
     "next/cache": { revalidatePath: effect("cache"), revalidateTag: effect("cache") },
@@ -281,6 +281,8 @@ before(async () => {
   coordinator = scope.load("../src/server/transactions/coordinator"); scope.load("../src/server/time/timers");
   visibility = scope.load("../src/server/access/visibility"); notifications = scope.load("../src/server/access/notification-visibility");
   stock = scope.load("../src/server/warehouse/accounting");
+  scope.load("../src/server/warehouse/expense-receipt-core");
+  scope.load("../src/server/changelog/reversal-core");
   priceActions = scope.load("../src/server/prices/actions");
   worksCore = scope.load("../src/server/works/core");
   workUpdate = scope.load("../src/server/works/update-core"); workQueries = scope.load("../src/server/works/queries");
@@ -390,6 +392,49 @@ async function tree(db: Db, rows: PostgresRows, tag: string, stage: ProjectStage
 async function warehouseState(tx: Prisma.TransactionClient, rows: PostgresRows, phase = "ACTIVE") {
   return tx.warehouseAccountingState.upsert({ where: { id: "main" }, create: { id: "main", phase, runId: rows.id("warehouse-run"), beforePrices: [], beforeBalances: [] }, update: { phase } });
 }
+test("warehouse/existing-expense-receipt-keeps-payment-and-checks-dependent-issues", async () => fixture.rollback(async (tx, rows) => {
+  const core = scope.load<typeof import("../../src/server/warehouse/expense-receipt-core")>("../src/server/warehouse/expense-receipt-core");
+  const reversal = scope.load<typeof import("../../src/server/changelog/reversal-core")>("../src/server/changelog/reversal-core");
+  const c = await tree(tx, rows, "existing-expense-receipt");
+  const accountant = actorOf(await rows.user("expense-receipt-accountant", ["ACCOUNTANT"]));
+  await warehouseState(tx, rows);
+  const cash = await tx.cashAccount.create({ data: { name: rows.id("receipt-cash"), currency: "USD" } });
+  const paidAt = new Date("2026-10-20T09:00:00Z");
+  const payment = await tx.payment.create({ data: { direction: "EXPENSE", amount: "3.00", bynAmount: "9.01",
+    currency: "USD", rate: "3.003333", paidAt, cashAccountId: cash.id, projectId: c.project.id, projectAmount: "9.01", comment: "Чек" } });
+  const input = { paymentId: payment.id, lines: ["1.00", "2.00"].map(amount => ({
+    materialId: c.material.id, quantity: "1.250", amount,
+  })) };
+  const preview = await core.loadExpenseReceiptPreview(tx, accountant, input);
+  assert.equal(preview.payment.projectId, c.project.id);
+  const request = { ...input, clientMutationId: randomUUID(), fingerprint: preview.fingerprint };
+  const result = await core.postExpenseReceiptInTransaction(tx, accountant, request);
+  assert.equal((await core.postExpenseReceiptInTransaction(tx, accountant, request)).receiptId, result.receiptId);
+  await assert.rejects(() => core.postExpenseReceiptInTransaction(tx, accountant, { ...request, clientMutationId: randomUUID() }), /связан со складом/);
+  const posted = await tx.payment.findUniqueOrThrow({ where: { id: payment.id } });
+  assert.equal(posted.projectId, null);
+  assert.equal(posted.amount.toFixed(2), "3.00");
+  assert.equal(posted.comment, "Чек");
+  assert.deepEqual(posted.paidAt, paidAt);
+  assert.equal(await tx.payment.count({ where: { cashAccountId: cash.id } }), 1);
+  assert.equal((await tx.warehouseBalance.findUniqueOrThrow({ where: { materialId: c.material.id } })).valueByn.toFixed(2), "9.01");
+  const undo = { entryId: posted.lastActionId!, requestId: randomUUID(), scope: { kind: "global" } };
+  await rejectedSql(tx, async () => {
+    await stock.warehouseMove(tx, c.admin, { kind: "EXPENSE", clientMutationId: randomUUID(),
+      materialId: c.material.id, productId: c.product.id, quantity: "1" });
+    await reversal.reverseJournalActionInTransaction(tx, c.admin.id, undo);
+  }, /последующую выдачу/);
+  const rolledBack = await reversal.reverseJournalActionInTransaction(tx, c.admin.id, undo);
+  assert.equal((await tx.payment.findUniqueOrThrow({ where: { id: payment.id } })).projectId, c.project.id);
+  assert.equal((await tx.warehouseBalance.findUniqueOrThrow({ where: { materialId: c.material.id } })).quantity.toFixed(3), "0.000");
+  assert.ok((await tx.expenseReceipt.findUniqueOrThrow({ where: { id: result.receiptId } })).cancelledAt);
+  await reversal.reverseJournalActionInTransaction(tx, c.admin.id, { ...undo, entryId: rolledBack.reversalId, requestId: randomUUID() });
+  assert.equal(await tx.expenseReceipt.count({ where: { paymentId: payment.id } }), 2);
+  assert.equal(await tx.expenseReceipt.count({ where: { paymentId: payment.id, cancelledAt: null } }), 1);
+  assert.equal(await tx.payment.count({ where: { cashAccountId: cash.id } }), 1);
+  await tx.$executeRaw`SET CONSTRAINTS ALL IMMEDIATE`;
+}));
+
 test("warehouse/real-weighted-movements-replay-return-rounding-and-SQL-rollback", async () => fixture.rollback(async (tx, rows) => {
   const c = await tree(tx, rows, "stock-writers"), originalMaterial = c.material;
   await warehouseState(tx, rows);
