@@ -37,4 +37,8 @@ export async function verifyExpenseProjectAssignmentNative(tx: Prisma.Transactio
   assert.ok(undo.cachePaths?.includes("/finance/projects/" + second.id));
   assert.deepEqual(await tx.payment.findUniqueOrThrow({ where: { id: expense.id } }), expense);
   assert.equal((await readCashBalance(tx, cash.id)).toFixed(2), balance);
+  const receipt = await tx.expenseReceipt.create({ data: { paymentId: expense.id, clientMutationId: randomUUID(), requestFingerprint: "native", actorId: actor.id } });
+  await assert.rejects(assignOrdinaryExpenseProjectInTransaction(actor, fromFirst, tx), /Складской расход/);
+  await tx.expenseReceipt.update({ where: { id: receipt.id }, data: { cancelledAt: new Date() } });
+  assert.ok((await assignOrdinaryExpenseProjectInTransaction(actor, fromFirst, tx)).changed);
 }

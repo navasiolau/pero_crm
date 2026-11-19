@@ -122,6 +122,9 @@ test("отказы по роли, источнику, текущему конт�
   state.stockPurchase = { id: "stock" };
   await assert.rejects(assign("a"), /Складской расход/);
   state.stockPurchase = null;
+  state.receiptActive = true;
+  await assert.rejects(assign("a"), /Складской расход/);
+  state.receiptActive = false;
   state.logisticsAllocationId = "logistics";
   await assert.rejects(assign("a"), /расхода по рейсу/);
   state.logisticsAllocationId = null;

@@ -20,7 +20,7 @@ import { parseListFilterValue } from "@/lib/list-filter-values";
 const rows = Array.from({ length: 101 }, (_, index) => ({
   id: "payment-real-id-" + String(index + 1), direction: "EXPENSE", paidAt: "2026-11-20T10:00:00.000Z",
   amount: 10, bynAmount: 10, rate: 1, rateDate: null, currency: "BYN", project: index === 1 ? { id: "source", number: "402", title: "Проект чека", archived: false } : null,
-  canPostExpenseReceipt: index === 1, reportDocuments: [], lastActionId: "fixture-head",
+  canPostExpenseReceipt: index === 1, reportDocuments: [], lastActionId: "fixture-head", hasActiveExpenseReceipt: index === 3,
   cashAccountName: ["Касса А", "Касса Б", "Касса В"][index % 3], expenseArticleName: index % 2 ? "Материалы" : "Прочее",
   comment: "fixture", cash: ["a", "b", "c"][index % 3], article: index % 2 ? "materials" : "other",
 }));
@@ -42,7 +42,8 @@ function App() {
     <ListParamsProvider section="organizationExpenses" initialQuery={query} preference={saved}>
       <OrganizationExpenseResults rows={shown} options={options} page={page} pageSize={pageSize} total={selection.length}
         totalByn={(selection.length * 10).toFixed(2)} sort="date" dir="desc" cashAccounts={[]} canAssignProject
-        projects={[{ id: "project-124", number: "124", title: "Действующий проект", currency: "BYN" },
+        projects={[{ id: "source", number: "402", title: "Проект чека", currency: "BYN" },
+          { id: "project-124", number: "124", title: "Действующий проект", currency: "BYN" },
           { id: "other-currency", number: "125", title: "Архивный курс", currency: "EUR" }]}
         stockMaterials={[{ id: "oak", name: "Дуб", unit: "шт." }, { id: "mdf", name: "МДФ", unit: "м²" }]}/>
     </ListParamsProvider>
@@ -159,6 +160,9 @@ test("реестр расходов в Chromium сохраняет фильтр�
       { materialId: "oak", quantity: "2", amount: "4" },
       { materialId: "mdf", quantity: "2", amount: "6" },
     ]);
+    await page.getByText("ID payment-real-id-4", { exact: true }).click();
+    await expect(page.getByRole("dialog").getByText("payment-real-id-4", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Назначить на проект", exact: true })).toHaveCount(0);
     assert.deepEqual(errors, []);
   } finally {
     await browser?.close();

@@ -25,6 +25,7 @@ function organizationPaymentView(row: LedgerRecord, actor: FinanceWorkspaceActor
     project: row.project ? { id: row.project.id, number: row.project.number, title: row.project.title, archived: row.project.deletedAt !== null } : null,
     cashName: row.cashAccount?.name ?? null, lastActionId: row.lastActionId ?? null,
     receiptLines: expenseReceiptLinesView(row.expenseReceipts?.[0], row.stockPurchase, row.amount),
+    hasActiveExpenseReceipt: Boolean(row.expenseReceipts?.length),
     canPostExpenseReceipt: row.direction === "EXPENSE" && Boolean(row.cashAccount) && Number(row.bynAmount) > 0 &&
       !row.stockPurchase && !row.expenseReceipts?.length && !row.logisticsAllocation &&
       (!row.project || (!row.project.deletedAt && hasAnyRole(actor.roles, EXPENSE_RECEIPT_PROJECT_ROLES))),

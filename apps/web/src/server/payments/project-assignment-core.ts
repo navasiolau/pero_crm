@@ -32,6 +32,7 @@ const paymentSelect = {
   id: true, direction: true, deletedAt: true, deletionId: true, lastActionId: true, amount: true, currency: true, bynAmount: true,
   projectId: true, projectAmount: true, project: { select: selectProject }, logisticsAllocationId: true,
   stockPurchase: { select: { id: true } },
+  expenseReceipts: { where: { cancelledAt: null }, take: 1, select: { id: true } },
 } satisfies Prisma.PaymentSelect;
 type AssignmentPayment = Prisma.PaymentGetPayload<{ select: typeof paymentSelect }>;
 type AssignmentProject = Prisma.ProjectGetPayload<{ select: typeof selectProject }>;
@@ -44,7 +45,7 @@ function expenseProblem(payment: AssignmentPayment | null) {
   if (!payment || payment.deletedAt || payment.deletionId || payment.direction !== "EXPENSE")
     return "Действующий расход не найден";
   if (payment.logisticsAllocationId) return "Проекты расхода по рейсу меняются в логистике";
-  if (payment.stockPurchase) return "Складской расход нельзя переназначить через эту операцию";
+  if (payment.stockPurchase || payment.expenseReceipts.length) return "Складской расход нельзя переназначить через эту операцию";
   if (payment.project?.deletedAt) return "Проект в архиве. Расход доступен для просмотра";
   return null;
 }
@@ -87,7 +88,8 @@ async function lockProjects(tx: Prisma.TransactionClient, from: string | null, t
 async function writeAssignment(tx: Prisma.TransactionClient, payment: AssignmentPayment, target: AssignmentContext, head: string | null) {
   const result = await tx.payment.updateMany({
     where: { id: payment.id, direction: "EXPENSE", deletedAt: null, deletionId: null, lastActionId: payment.lastActionId,
-      projectId: payment.projectId, projectAmount: payment.projectAmount, logisticsAllocationId: null, stockPurchase: { is: null } },
+      projectId: payment.projectId, projectAmount: payment.projectAmount, logisticsAllocationId: null, stockPurchase: { is: null },
+      expenseReceipts: { none: { cancelledAt: null } } },
     data: { projectId: target.projectId, projectAmount: target.projectAmount, lastActionId: head },
   });
   if (result.count !== 1) throw new JournalReversalRefusal("Расход изменился. Обновите карточку");
