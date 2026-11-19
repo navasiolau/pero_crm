@@ -1,4 +1,4 @@
-import { productFieldReversals, productTitleReversal } from "@/server/products/title-reversal";
+import { productFieldReversals } from "@/server/products/title-reversal";
 import { productSpecificationReversal } from "@/server/products/specification-reversal";
 import { projectFieldReversals } from "@/server/projects/field-reversal";
 import { paymentVisibilityReversal } from "@/server/payments/visibility-reversal";
@@ -35,6 +35,8 @@ import { projectStageReversal } from "@/server/projects/stage-reversal";
 import { productStatusReversal } from "@/server/products/status-reversal";
 import { productPercentageDefaultsReversal } from "@/server/product-percentage-defaults/reversal";
 import { productPercentageSettingsReversal } from "@/server/product-percentage-pay/settings-reversal";
+import { userCreationReversal } from "@/server/users/creation-reversal";
+import { apiTokenCreationReversal } from "@/server/plugins/token-creation-reversal";
 
 export const journalReversals = [
   ...productFieldReversals,
@@ -68,7 +70,6 @@ export const journalReversals = [
   savedListChoiceReversal,
   warehouseCatalogReversal,
   officeDirectoryReversal,
-  productTitleReversal,
   signatureSettingsReversal,
   warehouseMovementReversal,
   logisticsTripLifecycleReversal,
@@ -77,4 +78,6 @@ export const journalReversals = [
   productStatusReversal,
   productPercentageDefaultsReversal,
   productPercentageSettingsReversal,
+  userCreationReversal,
+  apiTokenCreationReversal,
 ];

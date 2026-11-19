@@ -22,6 +22,7 @@ export function defineJournalReversal<T extends Prisma.InputJsonValue>(definitio
   kind: string;
   version: number;
   schema: z.ZodType<T>;
+  confirmation?: string;
   preview(ctx: ReversalContext, data: T): Promise<string | null>;
   apply(ctx: ReversalContext, data: T): Promise<ReversalEffect & { inverse: T }>;
 }) {
@@ -33,6 +34,7 @@ export function defineJournalReversal<T extends Prisma.InputJsonValue>(definitio
       const parsed = schema.safeParse(data);
       if (!parsed.success) return null;
       return {
+        confirmation: definition.confirmation,
         preview: (ctx: ReversalContext) => definition.preview(ctx, parsed.data),
         async apply(ctx: ReversalContext) {
           const { inverse, ...effect } = await definition.apply(ctx, parsed.data);

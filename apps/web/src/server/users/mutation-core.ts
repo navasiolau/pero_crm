@@ -42,7 +42,9 @@ export async function createUserInTransaction(tx: Prisma.TransactionClient, acto
   requireActorRoles(actor, ADMIN_ROLES);
   if (await tx.user.findFirst({ where: { email: input.email }, select: { id: true } })) return { ok: false as const, error: "Email уже занят" };
   const user = await tx.user.create({ data: { ...normalized(input), passwordHash: input.passwordHash } });
-  await auditUser(tx, actor, user, "create", null, true);
+  await auditUser(tx, actor, user, "create", null, true, user.active ? {
+    kind: "account.user-creation", version: 1, data: { revision: user.accountRevision ?? 0, mode: "disable" },
+  } : undefined);
   return { ok: true as const, user };
 }
 
