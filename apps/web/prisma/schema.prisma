@@ -155,6 +155,8 @@ enum CounterpartyType {
 }
 
 model Counterparty {
+  officeFieldHeads Json @default("{}")
+  deletedAt DateTime?
   id        String           @id @default(cuid())
   type      CounterpartyType
   company   String
@@ -166,6 +168,8 @@ model Counterparty {
 }
 
 model Client {
+  officeFieldHeads Json @default("{}")
+  deletedAt DateTime?
   id             String          @id @default(cuid())
   name           String // Имя (или название для юрлица, напр. «ООО Альфа»)
   lastName       String? // Фамилия
@@ -191,6 +195,7 @@ model Client {
 // экономика — тоже на проекте (§11). Стоимость проекта = Σ цен изделий.
 model Project {
   fieldRevisions Json @default("{}")
+  officeFieldHeads Json @default("{}")
   deletedAt DateTime?
   deletedById String? // actor snapshot; no cascade or reassignment
   id                     String       @id @default(cuid())
@@ -448,6 +453,7 @@ model TaskDependency {
 // Расценка из прайса. Изменения — в журнал (§5); цена фиксируется
 // в работе на момент назначения (смена прайса не переписывает прошлое).
 model PriceItem {
+  officeFieldHeads Json @default("{}")
   id          String   @id @default(cuid())
   name        String
   unit        String // шт / м² / м.п. / компл / час
@@ -830,6 +836,7 @@ enum PaymentDirection {
 // операций (приходы − расходы); операция проводится по кассе только
 // в валюте кассы (конвертация фиксируется курсом в самой операции).
 model CashAccount {
+  officeFieldHeads Json @default("{}")
   id        String    @id @default(cuid())
   name      String
   currency  String    @default("BYN")
@@ -846,6 +853,7 @@ model CashAccount {
 // (Материалы, Логистика, Прочее…). ЗП в статьях нет — она считается
 // из PayrollEntry (§10).
 model ExpenseArticle {
+  officeFieldHeads Json @default("{}")
   id        String    @id @default(cuid())
   code      Int       @unique
   name      String
@@ -945,6 +953,7 @@ model PaymentReportDocument {
 // Настройки организации (§10): key-value, сейчас — payrollCurrency
 // (единая валюта зарплаты, по умолчанию BYN; задаёт администратор).
 model OrgSetting {
+  officeFieldHeads Json @default("{}")
   key       String   @id
   value     String
   updatedAt DateTime @updatedAt

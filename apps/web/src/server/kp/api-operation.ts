@@ -30,7 +30,7 @@ export async function readApiReceipt(db: ReceiptDb, context: KpApiContext, opera
   if (value.scope !== requiredScope) return apiFailure("KP_OPERATION_INVALID", 409, "Не совпало право сохранённой операции");
   await context.authorize(requiredScope, transaction);
   if (value.kind === "client.create") {
-    if (!await db.client.findUnique({ where: { id: row.entityId }, select: { id: true } })) return apiFailure("KP_NOT_FOUND", 404, "Клиент операции недоступен");
+    if (!await db.client.findUnique({ where: { id: row.entityId, deletedAt: null }, select: { id: true } })) return apiFailure("KP_NOT_FOUND", 404, "Клиент операции недоступен");
   } else if (!value.kind.startsWith("contract.")) {
     const proposal = await db.commercialProposal.findFirst({ where: { id: row.entityId, deletedAt: null,
       OR: [{ projectId: null }, { project: { deletedAt: null } }] }, select: { id: true } });

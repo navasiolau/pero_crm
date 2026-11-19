@@ -5,6 +5,7 @@ import { financeSessionSource } from "@/server/telegram/finance-session";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
+import { officeCreated } from "@/server/changelog/office-directory-reversal";
 import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 import { requireFinance, requireFinanceRole } from "@/server/require-role";
 import { withTaskTransaction } from "@/server/tasks/transaction";
@@ -73,6 +74,7 @@ export async function addCashAccount(
     entity: "cashAccount",
     entityId: account.id,
     action: "create",
+    reversal: officeCreated("cashAccount", account.id, account),
     newValue: { name: account.name, currency: account.currency },
   }, { entity: { label: `Касса ${account.name}`, href: "/finance/accounts" }, contexts: [], before: null,
     after: { name: account.name, currency: account.currency, comment: account.comment, active: account.active } });

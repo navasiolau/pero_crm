@@ -35,12 +35,12 @@ export async function resolveProposalClientInTransaction(
   previousState?: Prisma.JsonValue, journal?: JournalPresentationHints,
 ) {
   const temporaryId = proposalTemporaryClientId(environment);
-  const temporary = await tx.client.findUnique({ where: { id: temporaryId } });
+  const temporary = await tx.client.findUnique({ where: { id: temporaryId, deletedAt: null } });
   if (!temporary || temporary.name.trim() !== "Временный" || temporary.lastName?.trim() || temporary.middleName?.trim())
     throw new ProposalWriteError("validation", "Служебный клиент КП не прошёл проверку");
   const clientId = selection.clientId ?? fallbackClientId ?? temporaryId;
   await tx.$queryRaw`SELECT id FROM "Client" WHERE id = ${clientId} FOR UPDATE`;
-  let client = await tx.client.findUnique({ where: { id: clientId } });
+  let client = await tx.client.findUnique({ where: { id: clientId, deletedAt: null } });
   if (!client) throw new ProposalWriteError("not-found", "Клиент не найден");
   const source = proposalObject(proposalObject(state.client).crmSnapshot);
   const previous = proposalObject(proposalObject(proposalObject(previousState).client).crmSnapshot);
@@ -71,7 +71,7 @@ export async function resolveProposalClientInTransaction(
       {...journal,...automationJournalContext(actor,'Обновление клиента из КП')});
     if (!updated.ok) throw new ProposalWriteError("conflict", updated.error);
     changed = !updated.noOp;
-    client = await tx.client.findUnique({ where: { id: clientId } });
+    client = await tx.client.findUnique({ where: { id: clientId, deletedAt: null } });
     if (!client) throw new ProposalWriteError("not-found", "Клиент не найден");
   }
   return { client, isTemporary: clientId === temporaryId, changed };

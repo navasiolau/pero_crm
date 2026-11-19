@@ -142,6 +142,36 @@ test("cash/default-setting-roles-cas-audit-and-atomic-deactivation", async () =>
   assert.ok(await verifyDefaultCashAccountNative(tx, actor, account.id, other.id));
 }));
 
+test("office/cash-default-undo-uses-one-root-and-protects-referenced-office-data", async () => fixture.rollback(async (tx, rows) => {
+  const admin = actorFor(await rows.user("office-undo-admin", ["ADMIN"]));
+  const cash = await tx.cashAccount.create({ data: { name: rows.id("office-cash"), currency: "USD" } });
+  const { readDefaultCashAccount, saveDefaultCashAccount, toggleCashAccountCore } = await import("../../src/server/finance/default-cash-core");
+  const { reverseJournalActionInTransaction } = await import("../../src/server/changelog/reversal-core");
+  const { createExpenseArticleCore } = await import("../../src/server/finance/article-core");
+  const initial = await readDefaultCashAccount(tx);
+  assert.equal((await saveDefaultCashAccount(admin, { accountId: cash.id, expectedRevision: initial.revision }, tx)).ok, true);
+  assert.equal((await toggleCashAccountCore(admin, cash.id, tx)).ok, true);
+  const toggle = await tx.changeLog.findFirstOrThrow({ where: { entityId: cash.id, field: "active" } });
+  assert.equal(await tx.changeLog.count({ where: { operationRootId: toggle.id, action: "default-cash.update" } }), 1);
+  assert.equal((await readDefaultCashAccount(tx)).accountId, null);
+  const request = { entryId: toggle.id, requestId: randomUUID(), scope: { kind: "global" } };
+  const undone = await reverseJournalActionInTransaction(tx, admin.id, request);
+  assert.equal((await readDefaultCashAccount(tx)).accountId, cash.id);
+  const restored = await tx.cashAccount.findUniqueOrThrow({ where: { id: cash.id } });
+  assert.equal(restored.active, true);
+  assert.equal(restored.currency, "USD");
+  await reverseJournalActionInTransaction(tx, admin.id, { ...request, entryId: undone.reversalId, requestId: randomUUID() });
+  assert.equal((await readDefaultCashAccount(tx)).accountId, null);
+  const article = await createExpenseArticleCore(admin, { name: rows.id("article-undo") }, tx);
+  assert.ok(article.ok);
+  const created = await tx.changeLog.findFirstOrThrow({ where: { entityId: article.article.id, action: "create" } });
+  await tx.payment.create({ data: { direction: "EXPENSE", expenseArticleId: article.article.id, amount: "1", bynAmount: "1" } });
+  await assert.rejects(reverseJournalActionInTransaction(tx, admin.id,
+    { ...request, entryId: created.id, requestId: randomUUID() }), /связанные операции/);
+  assert.equal((await tx.expenseArticle.findUniqueOrThrow({ where: { id: article.article.id } })).active, true);
+  await tx.$executeRaw`SET CONSTRAINTS ALL IMMEDIATE`;
+}));
+
 test("article/inline-option-codes-audit-and-no-money", async () => fixture.rollback(async (tx, rows) => {
   const actor = actorFor(await rows.user("inline-article-owner", ["PROCUREMENT"]));
   assert.ok(await verifyInlineExpenseArticleNative(tx, actor));

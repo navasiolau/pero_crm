@@ -1,3 +1,6 @@
+import { randomUUID } from "node:crypto";
+import { officeCommand, officeCreated, officePatch } from "@/server/changelog/office-directory-reversal";
+import type { JournalReversalCommand } from "@/server/changelog/reversal-contract";
 import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 import { z } from 'zod';
 import { Prisma } from '@prisma/client';
@@ -23,8 +26,8 @@ export function mayManageContacts(actor:DomainActor) { return hasAnyRole(actor.r
 function normalized(input:ClientInput):ClientBaseline {
  return {name:input.name,phone:input.phone,lastName:input.lastName?.trim()||null,middleName:input.middleName?.trim()||null,email:input.email?.trim()||null,address:input.address?.trim()||null,comment:input.comment?.trim()||null,passportNumber:input.passportNumber?.trim()||null,passportIssuedBy:input.passportIssuedBy?.trim()||null,...(input.isContactPerson===undefined?{}:{isContactPerson:input.isContactPerson})};
 }
-async function auditClient(tx:Prisma.TransactionClient,actor:DomainActor,clientId:string,action:string,oldValue:Prisma.InputJsonValue,newValue:Prisma.InputJsonValue,field?:string,hints?:JournalPresentationHints) {
- await writeChangeLogInTransaction(tx, {actorType:'user',actorId:actor.id,actorName:actor.name,source:actor.source,entity:'client',entityId:clientId,action,field,oldValue,newValue},hints);
+async function auditClient(tx:Prisma.TransactionClient,actor:DomainActor,clientId:string,action:string,oldValue:Prisma.InputJsonValue,newValue:Prisma.InputJsonValue,field?:string,hints?:JournalPresentationHints,journal?:{id?:string;operationRootId?:string;reversal?:JournalReversalCommand}) {
+ await writeChangeLogInTransaction(tx, {actorType:'user',actorId:actor.id,actorName:actor.name,source:actor.source,entity:'client',entityId:clientId,action,field,oldValue,newValue,...journal},hints);
  await tx.domainEvent.create({data:{type:action==='create'?'client.created':'client.updated',actor:actor.id,payload:{clientId,...(field?{field}:{})}}});
 }
 export async function patchClientPhoneInTransaction(tx:Prisma.TransactionClient,actor:DomainActor,clientId:string,phone:string,expectedPhone:string,hints?:JournalPresentationHints):Promise<ContactResult> {
@@ -37,13 +40,15 @@ async function patchClientContactInTransaction(tx:Prisma.TransactionClient,actor
  if(!mayManageContacts(actor))return{ok:false,kind:'forbidden',error:'Недостаточно прав'};
  const value=input?.trim()||null;if(field==='phone'&&!value)return{ok:false,kind:'validation',error:'Укажите телефон'};
  await tx.$queryRaw`SELECT id FROM "Client" WHERE id = ${clientId} FOR UPDATE`;
- const client=await tx.client.findUnique({where:{id:clientId},select:{id:true,name:true,lastName:true,middleName:true,phone:true,address:true}});
+ const client=await tx.client.findUnique({where:{id:clientId,deletedAt:null},select:{id:true,name:true,lastName:true,middleName:true,phone:true,address:true,officeFieldHeads:true}});
  if(!client)return{ok:false,kind:'not-found',error:'Клиент не найден'};
  if(client[field]!==expectedValue)return{ok:false,kind:'conflict',error:field==='phone'?'Телефон изменён другим пользователем':'Адрес изменён другим пользователем',currentValue:client[field],currentClientId:client.id};
  if(client[field]===value)return{ok:true,value,changed:false,clientId};
- const update=await tx.client.updateMany({where:{id:clientId,[field]:expectedValue},data:{[field]:value}});
+ const update=await tx.client.updateMany({where:{id:clientId,deletedAt:null,[field]:expectedValue},data:{[field]:value}});
  if(update.count!==1)throw new Error('CLIENT_CONTACT_CAS_RACE');
- await auditClient(tx,actor,clientId,'update',{[field]:client[field]},{[field]:value},field,{...hints,entity:{type:'client',id:client.id,label:clientLabel(client)}});
+ const after = client.officeFieldHeads === undefined ? null : await tx.client.findUnique({where:{id:clientId}});
+ await auditClient(tx,actor,clientId,'update',{[field]:client[field]},{[field]:value},field,{...hints,entity:{type:'client',id:client.id,label:clientLabel(client)}},
+  {reversal:after ? officeCommand(clientId,[officePatch("client",clientId,client,after,[field])]) : undefined});
  return{ok:true,value,changed:true,clientId,...(field==='phone'?{phone:String(value)}:{clientAddress:value})};
 }
 export async function createClientInTransaction(tx:Prisma.TransactionClient,actor:DomainActor,input:ClientInput) {
@@ -51,10 +56,11 @@ export async function createClientInTransaction(tx:Prisma.TransactionClient,acto
  const parsed=clientSchema.safeParse(input);if(!parsed.success)return{ok:false as const,error:parsed.error.issues[0]?.message??'Ошибка данных'};
  const client=await tx.client.create({data:{...normalized(parsed.data),isContactPerson:parsed.data.isContactPerson??false}});
  await auditClient(tx,actor,client.id,'create',{}, {name:client.name,phone:client.phone,passportNumber:client.passportNumber,passportIssuedBy:client.passportIssuedBy,isContactPerson:client.isContactPerson},undefined,
-  {entity:{type:'client',id:client.id,label:clientLabel(client)},before:null,after:Object.fromEntries(clientFields.map(field=>[field,client[field]]))});
+  {entity:{type:'client',id:client.id,label:clientLabel(client)},before:null,after:Object.fromEntries(clientFields.map(field=>[field,client[field]]))},
+  {reversal:officeCreated("client",client.id,client)});
  return{ok:true as const,id:client.id};
 }
-export async function updateClientInTransaction(tx:Prisma.TransactionClient,actor:DomainActor,clientId:string,input:ClientInput,baseline:ClientBaseline,hints?:JournalPresentationHints) {
+export async function updateClientInTransaction(tx:Prisma.TransactionClient,actor:DomainActor,clientId:string,input:ClientInput,baseline:ClientBaseline,hints?:JournalPresentationHints,options?:{operationRootId:string}) {
  if(!mayManageContacts(actor))return{ok:false as const,error:'Недостаточно прав'};
  const parsed=clientSchema.safeParse(input);const expected=baselineSchema.safeParse(baseline);
  if(!parsed.success)return{ok:false as const,error:parsed.error.issues[0]?.message??'Ошибка данных'};
@@ -63,15 +69,23 @@ export async function updateClientInTransaction(tx:Prisma.TransactionClient,acto
  const desired=normalized(parsed.data);
  const changed=clientFields.filter(field=>(field!=='isContactPerson'||parsed.data.isContactPerson!==undefined)&&desired[field]!==expected.data[field]);
  await tx.$queryRaw`SELECT id FROM "Client" WHERE id = ${clientId} FOR UPDATE`;
- const current=await tx.client.findUnique({where:{id:clientId}});if(!current)return{ok:false as const,error:'Клиент не найден'};
+ const current=await tx.client.findUnique({where:{id:clientId,deletedAt:null}});if(!current)return{ok:false as const,error:'Клиент не найден'};
  if(changed.some(field=>current[field]!==expected.data[field]))return{ok:false as const,error:'Клиент изменён другим пользователем — обновите форму'};
- if(!changed.length)return{ok:true as const,noOp:true};
+ if(!changed.length)return{ok:true as const,noOp:true as const};
  const data=Object.fromEntries(changed.map(field=>[field,desired[field]]));
- const where={id:clientId,...Object.fromEntries(changed.map(field=>[field,expected.data[field]]))};
+ const where={id:clientId,deletedAt:null,...Object.fromEntries(changed.map(field=>[field,expected.data[field]]))};
  const result=await tx.client.updateMany({where,data});if(result.count!==1)throw new Error('CLIENT_CONTACT_CAS_RACE');
- await auditClient(tx,actor,clientId,'update',Object.fromEntries(changed.map(field=>[field,current[field]])),data,undefined,
-  {...hints,entity:{type:'client',id:clientId,label:clientLabel({...current,...data})}});
+ const after = current.officeFieldHeads === undefined ? null : await tx.client.findUnique({where:{id:clientId}});
+ const journalId = after && !options ? randomUUID() : undefined;
+ const operationRootId = options?.operationRootId ?? journalId;
+ const related: Parameters<typeof officeCommand>[1] = [];
  const affectedProjectIds=changed.includes('isContactPerson')&&desired.isContactPerson===true
-  ?await fillEmptyProjectContactPersons(tx,actor,{...current,...data}):[];
- return{ok:true as const,noOp:false,affectedProjectIds};
+  ?await fillEmptyProjectContactPersons(tx,actor,{...current,...data},operationRootId ? {
+    operationRootId,
+    onUpdated: (before, saved) => related.push(officePatch("projectContact",before.id,before,saved,["contactPerson","clientId"],["clientId"])),
+  } : undefined):[];
+ const reversal = after ? officeCommand(clientId,[officePatch("client",clientId,current,after,changed),...related]) : undefined;
+ await auditClient(tx,actor,clientId,'update',Object.fromEntries(changed.map(field=>[field,current[field]])),data,undefined,
+  {...hints,entity:{type:'client',id:clientId,label:clientLabel({...current,...data})}}, {id:journalId,operationRootId:options?.operationRootId,reversal:options ? undefined : reversal});
+ return{ok:true as const,noOp:false as const,affectedProjectIds,...(options && reversal ? {clientReversal:reversal} : {})};
 }

@@ -1,6 +1,6 @@
-import { productSpecificationReversal } from '@/server/products/specification-reversal';
-import { projectFieldReversals } from '@/server/projects/field-reversal';
-import { productFieldReversals } from "@/server/products/title-reversal";
+import { productFieldReversals, productTitleReversal } from "@/server/products/title-reversal";
+import { productSpecificationReversal } from "@/server/products/specification-reversal";
+import { projectFieldReversals } from "@/server/projects/field-reversal";
 import { paymentVisibilityReversal } from "@/server/payments/visibility-reversal";
 import { retainedFileReversal } from "@/server/files/retained-file-reversal";
 import { expenseReceiptReversal } from "@/server/warehouse/expense-receipt-reversal";
@@ -20,6 +20,7 @@ import { viewPreferenceReversal } from "@/server/view-preference-reversal";
 import { telegramLinkReversal } from "@/server/telegram/link-reversal";
 import { savedListChoiceReversal } from "@/server/list-preference-reversal";
 import { warehouseCatalogReversal } from "@/server/warehouse/catalog-reversal";
+import { officeDirectoryReversal } from "./office-directory-reversal";
 
 export const journalReversals = [
   ...productFieldReversals,
@@ -44,4 +45,6 @@ export const journalReversals = [
   telegramLinkReversal,
   savedListChoiceReversal,
   warehouseCatalogReversal,
+  officeDirectoryReversal,
+  productTitleReversal,
 ];
