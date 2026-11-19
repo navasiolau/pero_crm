@@ -166,7 +166,7 @@ test("internal explicit retry resets only exhausted budget without stealing acti
 test("internal events stay out of hooks and ordinary publishing keeps stable nested outbox delivery", async () => {
   f.rows.push({ ...memoryEvent(1), type: OBSOLETE_SKETCH_EVENT });
   let hooks = 0; hook = async () => { hooks++; };
-  await events.dispatchEvent(f.rows[0].id); assert.equal(hooks, 0); assert.equal(internalCalls, 1);
+  await events.dispatchEvent(f.rows[0].id); assert.equal(hooks, 0); assert.equal(internalCalls, 0); assert.ok(f.rows[0].processedAt);
   await events.emitDomainEvent("qa135.published", { index: 99 }); assert.equal(hooks, 1);
   assert.ok(f.rows[1].processedAt); assert.equal(f.rows[1].type, "qa135.published"); assert.deepEqual(f.rows[1].payload, { index: 99 });
 });

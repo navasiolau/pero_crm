@@ -20,7 +20,7 @@ export async function proposalRetentionSnapshot(tx: Prisma.TransactionClient, pr
   const versions = await tx.$queryRaw<RetentionSnapshot["versions"]>`SELECT v.id, v."pdfArtifactId",
     ARRAY(SELECT vm."mediaId" FROM "ProposalVersionMedia" vm WHERE vm."versionId" = v.id ORDER BY vm."mediaId") AS "mediaIds"
     FROM "ProposalVersion" v WHERE v."proposalId" = ${proposalId}`;
-  const current = await tx.$queryRaw<{ mediaId: string }[]>`SELECT "mediaId" FROM "ProposalCurrentMedia" WHERE "proposalId" = ${proposalId}`;
+  const current = await tx.$queryRaw<{ mediaId: string }[]>`SELECT "mediaId" FROM "ProposalCurrentMedia" WHERE "proposalId" = ${proposalId} AND "detachedAt" IS NULL`;
   const rawMedia = await tx.$queryRaw<MediaSql[]>`SELECT * FROM "ProposalMedia" WHERE "proposalId" = ${proposalId}`;
   const media: RetentionMedia[] = rawMedia.map(row => ({ id: row.id, uploadState: row.uploadState, uploadJobId: row.uploadJobId,
     binding: checkedBinding(row.storageBinding), original: row.originalKey && row.originalHash && row.originalSize

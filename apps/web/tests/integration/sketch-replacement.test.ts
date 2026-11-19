@@ -8,7 +8,7 @@ import { acceptedSketch, createHttpS3Fixture } from "./http-s3.fixture";
 
 // Текущий accepted spec engineer-sketch-replacement-regression: вытесненный sketch удаляется,
 // отдельные вложения, соседние ключи и редактируемые поля сохраняются.
-test("media.sketch: настоящие upload, receipts, CAS, аудит и exact-version cleanup", { timeout: 180_000 }, async t => {
+test("media.sketch: настоящие upload, receipts, CAS, аудит и сохранение всех версий", { timeout: 180_000 }, async t => {
   const f = await createHttpS3Fixture("sketch-replacement"); t.after(() => f.dispose());
   const manager = await f.user("manager", ["MANAGER"]), engineer = await f.user("engineer", ["ENGINEER"]);
   const participant = await f.user("participant", ["ENGINEER"]), foreign = await f.user("foreign", ["ENGINEER"]);
@@ -88,16 +88,14 @@ test("media.sketch: настоящие upload, receipts, CAS, аудит и exac
     await assertNotifications(upload.fileName, actor.id); return { upload, id: pointer };
   };
   let assigned!: Awaited<ReturnType<typeof replace>>;
-  await t.test("media.replacement: ENGINEER удаляет только старый sketch со всеми versions/markers; audit сохранён", async () => {
+  await t.test("media.replacement: ENGINEER скрывает старый эскиз и сохраняет версии и аудит", async () => {
     const page = await f.request(`/products/${product.number}`, engineer); assert.equal(page.status, 200); assert.match(await page.text(), /Заменить изображение/);
     assigned = await replace(engineer, "assigned");
-    assert.equal(await f.db.file.findUnique({ where: { id: old.id } }), null);
-    const versions = await f.versions(project.id); assert.ok(!versions.some(row => oldKeys.includes(row.key)));
+    assert.ok((await f.db.file.findUniqueOrThrow({ where: { id: old.id } })).deletedAt);
+    assert.equal((await f.request("/api/files/" + old.id, manager)).status, 404);
+    const versions = await f.versions(project.id); assert.deepEqual(versions.filter(row => oldKeys.includes(row.key)), oldVersions.filter(row => oldKeys.includes(row.key)));
     assert.deepEqual(versions.filter(row => neighbors.includes(row.key)), neighborVersions);
-    const event = await f.db.domainEvent.findUniqueOrThrow({ where: { id: `sketch-cleanup:${assigned.upload.clientMutationId}` } });
-    assert.equal(event.type, "file.sketch-obsolete"); assert.ok(event.processedAt); assert.equal(event.queueAttempts, 1);
-    assert.deepEqual(event.payload, { projectId: project.id, productId: product.id, fileId: old.id, storedName: old.storedName,
-      newFileId: assigned.id, clientMutationId: assigned.upload.clientMutationId });
+    assert.equal(await f.db.domainEvent.count({ where: { id: 'sketch-cleanup:' + assigned.upload.clientMutationId } }), 0);
     const logs = (await snapshot()).logs;
     assert.equal(logs.filter(row => row.entityId === old.id && row.action === "delete").length, 1);
     assert.equal(logs.filter(row => row.entityId === attachmentId && row.action === "delete").length, 0);
@@ -118,7 +116,7 @@ test("media.sketch: настоящие upload, receipts, CAS, аудит и exac
     await replace(engineer, "unassigned");
     await replace(participant, "participant"); await f.db.product.update({ where: { id: product.id }, data: { engineerId: engineer.id } });
     const legacy = pointer; await f.db.file.update({ where: { id: legacy }, data: { uploadedById: null } });
-    await replace(engineer, "legacy"); assert.equal(await f.db.file.findUnique({ where: { id: legacy } }), null);
+    await replace(engineer, "legacy"); assert.ok((await f.db.file.findUniqueOrThrow({ where: { id: legacy } })).deletedAt);
     await f.db.product.update({ where: { id: product.id }, data: { status: "PRODUCTION" } });
     const production = await snapshot(), read = await f.request(`/api/files/${pointer}`, engineer); assert.equal(read.status, 200); assert.deepEqual(Buffer.from(await read.arrayBuffer()), png);
     assert.deepEqual(await snapshot(), production); await replace(foreign, "production");
@@ -186,7 +184,7 @@ test("media.sketch: настоящие upload, receipts, CAS, аудит и exac
   assert.deepEqual(await f.db.userPreference.findUnique({ where: { userId_key: { userId: engineer.id, key: "product.tab" } } }), preference);
   assert.equal(after.logs.filter(row => row.action === "cover.upload").length, successfulCovers);
   assert.equal(after.logs.filter(row => row.action === "cover.change").length, successfulCovers);
-  assert.equal(after.events.length, successfulCovers - 1); assert.ok(after.events.every(row => row.processedAt && row.queueAttempts === 1));
+  assert.equal(after.events.length, 0);
   assert.ok(after.notifications.every(row => names.has(row.body!)));
   const expectedKeys = [...neighbors, ...after.files.flatMap(row => [`${project.id}/${row.storedName}`, ...(row.hasThumb ? [`${project.id}/thumbs/${row.storedName}.jpg`] : [])])].sort();
   assert.deepEqual(after.versions.filter(row => row.latest && !row.marker).map(row => row.key).sort(), expectedKeys, "Нет активных S3 orphan после конкуренции и replay");

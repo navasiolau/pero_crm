@@ -47,6 +47,13 @@ test('первая и заменяющая обложки из КП сохран
       if(text.includes('INSERT INTO "ProposalCurrentMedia"'))currentMedia.add(String(args[1]));
       return 1;
     },
+    proposalCurrentMedia:{updateMany:async({where}:{where:{mediaId:{in:string[]}}})=>{
+      for(const id of where.mediaId.in)currentMedia.delete(id);
+      return {count:where.mediaId.in.length};
+    }},
+    file:{update:async({where,data}:{where:{id:string};data:{proposalMediaRetiredAt:null}})=>{
+      const file=files.find(file=>file.id===where.id);assert.ok(file);Object.assign(file,data);return file;
+    }},
     product:{findUnique:async()=>({...product}),update:async({data}:{data:{sketchFileId:string|null}})=>Object.assign(product,data),
       updateMany:async({where,data}:{where:{sketchFileId:string};data:{sketchFileId:null}})=>{if(product.sketchFileId!==where.sketchFileId)return{count:0};Object.assign(product,data);return{count:1};}},
     changeLog:{create:async({data}:{data:Record<string,unknown>})=>{logs.push(data);return data;}},
@@ -63,4 +70,12 @@ test('первая и заменяющая обложки из КП сохран
     assert.equal(change.before,index?'Первое изображение.png':null,'Прежний файл должен иметь сохранённое имя');
     assert.deepEqual(log.newValue,{proposalId:owner.proposalId,previousFileId:oldId,sketchFileId:plan.fileId});
   }
+  const original=files[0];
+  assert.ok(original.proposalMediaRetiredAt);
+  await linkProposalProductMediaInTransaction(tx,{...context,state:{items:[{id:itemId,image:"kp-media:media-0"}]}},
+    {storage:{currentBinding:()=>binding},preparedCopies:{proposalId:owner.proposalId,expectedRevision:1,jobs:[]},now});
+  assert.equal(original.proposalMediaRetiredAt,null);
+  assert.equal(product.sketchFileId,original.id);
+  assert.equal(files.length,2);
+  assert.ok(logs.some(log=>log.action==="restore"&&log.entityId===original.id));
 });

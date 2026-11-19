@@ -114,7 +114,6 @@ export interface ProposalLifecycleStore {
   completeJob(claim: RenderJobClaim, result: LifecycleObject): Promise<void>;
   accept(proposalId: string, versionId: string | null, at: Date | null, epoch: number): Promise<void>;
   cancelPruneJobs(proposalId: string): Promise<void>;
-  enqueuePrune(input: { proposalId: string; versionId: string; epoch: number; at: Date }): Promise<void>;
   receipt(id: string, action?: "version.restore" | "pdf.retained"): Promise<RestoreReceipt | null>;
   createReceipt(id: string, value: RestoreReceipt, actor: DomainActor, action?: "version.restore" | "pdf.retained"): Promise<void>;
 }

@@ -1,5 +1,4 @@
 import { writeChangeLogInTransaction } from "@/server/changelog/writer";
-import { randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { assertWritableFileStorageKey } from "@/server/files/storage-binding-fence";
 import { ProposalMediaError, itemMediaReferences, sameMediaBinding, validateMediaPlan,
@@ -20,7 +19,7 @@ export type ProposalMediaSaveContext = {
 };
 type ManagedFile = { id: string; projectId: string; productId: string | null; storedName: string;
   fileName: string; proposalSourceItemId: string | null; proposalSourceMediaId: string | null;
-  proposalMediaCopyJobId: string | null; proposalMediaRetiredAt: Date | null; payload: unknown };
+  proposalMediaCopyJobId: string | null; proposalMediaRetiredAt: Date | null; storageAvailability: string | null; payload: unknown };
 type PreparedJob = { id: string; kind: string; state: string; proposalId: string | null;
   createdById: string | null; payload: unknown; result: unknown };
 
@@ -31,7 +30,9 @@ async function audit(tx: Tx, context: ProposalMediaSaveContext, entity: string, 
 }
 async function cancelUnattachedCleanup(tx: Tx, plan: MediaPlan, now: Date) {
   const [cleanup] = await tx.$queryRaw<{ state: string }[]>`SELECT state FROM "ProposalJob" WHERE id = ${plan.cleanupJobId} FOR UPDATE`;
-  if (!cleanup || ["PROCESSING", "SUCCEEDED"].includes(cleanup.state)) throw new ProposalMediaError("KP_MEDIA_OPERATION_CONFLICT");
+  if (!cleanup || (plan.kind === "COPY_PRODUCT_MEDIA" && ["PROCESSING", "SUCCEEDED"].includes(cleanup.state)))
+    throw new ProposalMediaError("KP_MEDIA_OPERATION_CONFLICT");
+  if (cleanup.state === "SUCCEEDED" || cleanup.state === "CANCELLED") return;
   await tx.$executeRaw`UPDATE "ProposalJob" SET state = 'CANCELLED', "leaseOwner" = NULL, "leaseUntil" = NULL,
     "updatedAt" = ${now} WHERE id = ${plan.cleanupJobId}`;
 }
@@ -68,9 +69,10 @@ export async function linkProposalProductMediaInTransaction(tx: Tx, context: Pro
     plans.set(`${plan.itemId}\0${plan.mediaId}`, plan);
   }
   const managed = await tx.$queryRaw<ManagedFile[]>`
-    SELECT f.*, j.payload FROM "File" f JOIN "ProposalJob" j ON j.id = f."proposalMediaCopyJobId"
-    WHERE f."projectId" = ${context.project.id} AND j."proposalId" = ${context.proposalId} FOR UPDATE OF f`;
-  const previous = await tx.$queryRaw<{ mediaId: string }[]>`SELECT "mediaId" FROM "ProposalCurrentMedia" WHERE "proposalId" = ${context.proposalId}`;
+    SELECT f.*, j.payload, j.result->>'storageAvailability' AS "storageAvailability" FROM "File" f JOIN "ProposalJob" j ON j.id = f."proposalMediaCopyJobId"
+    WHERE f."projectId" = ${context.project.id} AND j."proposalId" = ${context.proposalId} AND f."deletedAt" IS NULL
+    ORDER BY f."proposalMediaRetiredAt" NULLS FIRST, f."createdAt", f.id FOR UPDATE OF f`;
+  const previous = await tx.$queryRaw<{ mediaId: string }[]>`SELECT "mediaId" FROM "ProposalCurrentMedia" WHERE "proposalId" = ${context.proposalId} AND "detachedAt" IS NULL`;
   const previousMediaIds = new Set(previous.map(row => row.mediaId));
   const fileNames=new Map(managed.map(file=>[file.id,file.fileName]));
   const retained = new Set<string>(), mediaIds = new Set<string>(); let changed = false;
@@ -82,11 +84,13 @@ export async function linkProposalProductMediaInTransaction(tx: Tx, context: Pro
     let cover: string | null = null;
     for (const mediaId of item.mediaIds) {
       let file = managed.find(candidate => candidate.proposalSourceItemId === item.itemId && candidate.proposalSourceMediaId === mediaId &&
-        candidate.productId === productId && !candidate.proposalMediaRetiredAt);
+        candidate.productId === productId && candidate.storageAvailability !== "UNAVAILABLE" && candidate.storageAvailability !== "UNVERIFIED");
       let media: OwnedMediaRow, source: ReturnType<typeof readableMedia> | undefined;
-      if (file && previousMediaIds.has(mediaId)) {
+      if (file) {
         const [stored] = await tx.$queryRaw<OwnedMediaRow[]>`SELECT * FROM "ProposalMedia" WHERE id = ${mediaId} AND "proposalId" = ${context.proposalId}`;
-        if (!stored || stored.uploadState !== "READY") throw new ProposalMediaError("KP_MEDIA_NOT_FOUND");
+        if (!stored || stored.uploadState !== "READY" || stored.deletedAt ||
+          (!previousMediaIds.has(mediaId) && (stored.retiringAt || stored.optimizedPurgedAt)))
+          throw new ProposalMediaError("KP_MEDIA_NOT_FOUND");
         media = stored;
         const existingPlan = validateMediaPlan(file.payload);
         if (existingPlan.kind !== "COPY_PRODUCT_MEDIA" || existingPlan.fileId !== file.id || existingPlan.mediaId !== mediaId ||
@@ -94,7 +98,7 @@ export async function linkProposalProductMediaInTransaction(tx: Tx, context: Pro
           throw new ProposalMediaError("KP_MEDIA_INVALID");
         assertMediaStorageBinding(options.storage, existingPlan.binding);
       } else {
-        media = await ownedProposalMedia(tx, context.proposalId, mediaId, now); source = readableMedia(media, "optimized");
+        media = await ownedProposalMedia(tx, context.proposalId, mediaId); source = readableMedia(media, "optimized");
         assertMediaStorageBinding(options.storage, source.binding);
       }
       mediaIds.add(mediaId);
@@ -115,11 +119,20 @@ export async function linkProposalProductMediaInTransaction(tx: Tx, context: Pro
           "updatedAt" = ${now} WHERE id = ${plan.jobId}`;
         file = { id: plan.fileId, projectId: context.project.id, productId, storedName: plan.storedName, fileName,
           proposalSourceItemId: item.itemId, proposalSourceMediaId: mediaId, proposalMediaCopyJobId: plan.jobId,
-          proposalMediaRetiredAt: null, payload: plan };
+          proposalMediaRetiredAt: null, storageAvailability: null, payload: plan };
         await audit(tx, context, "file", file.id, "create", { proposalId: context.proposalId, sourceMediaId: mediaId,
           sourceItemId: item.itemId, fileName, section: "PRODUCTION", contentHash: plan.optimized.sha256 },
           {...productJournalContext(product),entity:{type:'file',id:file.id,label:fileName},before:null,
             after:{fileName,section:'PRODUCTION',mimeType:plan.optimized.mimeType,size:plan.optimized.size}});
+        changed = true;
+      } else if (file.proposalMediaRetiredAt) {
+        const retiredAt = file.proposalMediaRetiredAt;
+        await tx.file.update({ where: { id: file.id, deletedAt: null, proposalMediaRetiredAt: retiredAt },
+          data: { proposalMediaRetiredAt: null } });
+        await audit(tx, context, "file", file.id, "restore",
+          { proposalId: context.proposalId, sourceMediaId: mediaId, sourceItemId: item.itemId },
+          { ...productJournalContext(product), entity: { type: "file", id: file.id, label: file.fileName },
+            before: { retiredAt: retiredAt.toISOString() }, after: { retiredAt: null } });
         changed = true;
       }
       fileNames.set(file.id,file.fileName);
@@ -153,20 +166,22 @@ export async function linkProposalProductMediaInTransaction(tx: Tx, context: Pro
         {...productJournalContext(product??{id:file.productId}),before:{sketchFileId:file.id},after:{sketchFileId:null},links:[{type:'file',id:file.id,label:file.fileName}]});
     }
     await tx.$executeRaw`UPDATE "File" SET "proposalMediaRetiredAt" = ${now} WHERE id = ${file.id} AND "proposalMediaRetiredAt" IS NULL`;
-    const cleanupId = randomUUID();
-    await tx.$executeRaw`INSERT INTO "ProposalJob" (id, "proposalId", kind, "dedupeKey", payload, "createdById", "createdAt", "updatedAt")
-      VALUES (${cleanupId}, ${context.proposalId}, 'PURGE_MEDIA', ${"kp:managed-file-retire:" + file.id},
-      ${JSON.stringify({ schema: 1, kind: "RETIRED_PRODUCT_COPY", proposalId: context.proposalId, projectId: context.project.id,
-        fileId: file.id, storedName: file.storedName, sourceMediaId: file.proposalSourceMediaId, operationJobId: plan.jobId,
-        binding: plan.binding, objects: [plan.optimized] })}::jsonb, ${context.actor.id}, ${now}, ${now}) ON CONFLICT ("dedupeKey") DO NOTHING`;
     await audit(tx, context, "file", file.id, "kp.retire", { proposalId: context.proposalId, sourceItemId: file.proposalSourceItemId,
       sourceMediaId: file.proposalSourceMediaId, retiredAt: now.toISOString() },
       {...(file.productId?productJournalContext(product??{id:file.productId}):projectJournalContext(context.project)),entity:{type:'file',id:file.id,label:file.fileName},
         before:{fileName:file.fileName,retiredAt:null},after:{fileName:file.fileName,retiredAt:now.toISOString()}}); changed = true;
   }
   if (previous.length !== mediaIds.size || previous.some(row => !mediaIds.has(row.mediaId))) {
-    await tx.$executeRaw`DELETE FROM "ProposalCurrentMedia" WHERE "proposalId" = ${context.proposalId}`;
-    for (const mediaId of mediaIds) await tx.$executeRaw`INSERT INTO "ProposalCurrentMedia" ("proposalId", "mediaId") VALUES (${context.proposalId}, ${mediaId})`;
+    const detached = previous.map(row => row.mediaId).filter(id => !mediaIds.has(id));
+    if (detached.length) await tx.proposalCurrentMedia.updateMany({
+      where: { proposalId: context.proposalId, mediaId: { in: detached }, detachedAt: null },
+      data: { detachedAt: now },
+    });
+    for (const mediaId of mediaIds) {
+      if (previousMediaIds.has(mediaId)) continue;
+      await tx.$executeRaw`INSERT INTO "ProposalCurrentMedia" ("proposalId", "mediaId") VALUES (${context.proposalId}, ${mediaId})
+        ON CONFLICT ("proposalId", "mediaId") DO UPDATE SET "detachedAt"=NULL`;
+    }
     changed = true;
   }
   return { changed };

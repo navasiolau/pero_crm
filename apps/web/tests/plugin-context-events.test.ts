@@ -86,7 +86,7 @@ test("actual plugin context keeps explicit emitter, trusted actor/audit and nest
     await fixture.advance(fixture.settings.backoffBaseMs); hook = async () => { failureCalls++; };
     await events.dispatchEvent(failed.id); assert.equal(failureCalls, 2); assert.ok(failed.processedAt);
     await events.emitDomainEvent(OBSOLETE_SKETCH_EVENT, {});
-    assert.equal(internalCalls, 1); assert.equal(failureCalls, 2, "internal cleanup stays outside plugin hooks");
+    assert.equal(internalCalls, 0); assert.ok(fixture.rows.at(-1)?.processedAt); assert.equal(failureCalls, 2, "internal cleanup stays outside plugin hooks");
   } finally {
     for (const [filename, original] of originals) {
       if (original) require.cache[filename] = original; else delete require.cache[filename];

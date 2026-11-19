@@ -83,8 +83,13 @@ export function createPostgresContractTransaction(tx: Prisma.TransactionClient):
           WHERE "primaryProposalId"=${input.primaryId} AND revision=${input.expectedRevision} RETURNING id,"primaryProposalId",settings,revision`;
       }
       if (rows.length !== 1) contractFailure("CONTRACT_REVISION_CHANGED", "Договор изменён — обновите форму");
-      await tx.$executeRaw`DELETE FROM "ProposalContractSource" WHERE "contractId"=${rows[0].id}`;
-      for (const [index, proposalId] of input.sourceIds.entries()) await tx.$executeRaw`INSERT INTO "ProposalContractSource" ("contractId","proposalId",position) VALUES (${rows[0].id},${proposalId},${index + 1})`;
+      await tx.$executeRaw`UPDATE "ProposalContractSource" SET "detachedAt"=NOW()
+        WHERE "contractId"=${rows[0].id} AND "detachedAt" IS NULL`;
+      for (const [index, proposalId] of input.sourceIds.entries()) {
+        await tx.$executeRaw`INSERT INTO "ProposalContractSource" ("contractId","proposalId",position)
+          VALUES (${rows[0].id},${proposalId},${index + 1})
+          ON CONFLICT ("contractId","proposalId") DO UPDATE SET position=EXCLUDED.position,"detachedAt"=NULL`;
+      }
       return rows[0];
     },
     async createJob(input) {

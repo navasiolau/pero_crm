@@ -311,7 +311,7 @@ export function taskExecutionWhere(actor:VisibilityActor):Prisma.TaskWhereInput 
 export function workVisibilityWhere(actor:VisibilityActor):Prisma.WorkWhereInput {return {AND:[liveChildWhere,draftChildVisibilityWhere(actor),(hasAnyRole(actor.roles,FIELD_ROLES)||hasWorkCoordinator(actor.roles))&&!hasFullProjectVisibility(actor)
  ? {OR:[assignedWorkVisibilityWhere(actor),{paymentKind:"LEGACY",stagePayPoolId:null,poolWeightUnits:null,product:hasWorkCoordinator(actor.roles)?productVisibilityWhere(actor):{status:{in:fieldProductStatuses(actor.roles)}}}]} : assignedWorkVisibilityWhereGrants(actor)]};}
 
-export function fileVisibilityWhere(actor:VisibilityActor):Prisma.FileWhereInput {return {AND:[liveChildWhere,draftFileVisibilityWhere(actor),
+export function fileVisibilityWhere(actor:VisibilityActor):Prisma.FileWhereInput {return {AND:[{deletedAt:null},liveChildWhere,draftFileVisibilityWhere(actor),
   // Используемая другой обложкой управляемая копия сохраняет доступ до снятия последней ссылки.
   {OR:[{proposalMediaRetiredAt:null},{sketchForProduct:{isNot:null}},{coverForProject:{isNot:null}}]},fileVisibilityWhereGrants(actor)]};}
 

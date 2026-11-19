@@ -4,10 +4,11 @@ import { Prisma, type PrismaClient, type Role } from "@prisma/client";
 import { lockProjectRow } from "@/server/projects/lock";
 import { assertProposalMediaAccess } from "./media-access";
 import { KP_MEDIA_LEASE_MS, KP_MEDIA_ORPHAN_DELAY_MS, ProposalMediaError, parseMediaBinding, sameMediaBinding,
-  proposalMediaExpiry, validateMediaPlan, type MediaOperation, type MediaOwner, type MediaPlan,
+  validateMediaPlan, type MediaOperation, type MediaOwner, type MediaPlan,
   type MediaReservation, type ReadableMedia } from "./media-contract";
 import { createMediaUploadPlan, createProductMediaCopyPlan,
   type ProposalMediaRepository } from "./media-core";
+import { proposalMediaUploadReversal } from "./media-upload-reversal";
 import {projectJournalContext} from '../projects/journal';
 
 type Tx = Prisma.TransactionClient;
@@ -17,7 +18,7 @@ type JobRow = { id: string; proposalId: string | null; kind: string; state: stri
 export type OwnedMediaRow = { id: string; proposalId: string; storageBinding: unknown; originalKey: string | null;
   originalHash: string | null; originalSize: number | null; optimizedKey: string | null; optimizedHash: string | null;
   optimizedSize: number | null; mimeType: string; optimizedMimeType: string; fileName: string; width: number | null;
-  height: number | null; uploadState: string; uploadJobId: string | null; retiringAt: Date | null;
+  height: number | null; uploadState: string; uploadJobId: string | null; retiringAt: Date | null; deletedAt: Date | null;
   originalPurgedAt: Date | null; optimizedPurgedAt: Date | null; expiresAt: Date };
 
 /** Порядок lock совпадает с №181: Project → CommercialProposal → job/media. */
@@ -38,12 +39,11 @@ export async function lockProposalMediaOwner(tx: Tx, input: { actorId: string; p
   return {...owner,actorName:user.name};
 }
 
-export async function ownedProposalMedia(tx: Tx, proposalId: string, mediaId: string, now: Date): Promise<OwnedMediaRow> {
+export async function ownedProposalMedia(tx: Tx, proposalId: string, mediaId: string): Promise<OwnedMediaRow> {
   const [media] = await tx.$queryRaw<OwnedMediaRow[]>`
     SELECT * FROM "ProposalMedia" WHERE "proposalId" = ${proposalId} AND id = ${mediaId}`;
-  if (!media || media.uploadState !== "READY" || media.retiringAt)
+  if (!media || media.uploadState !== "READY" || media.retiringAt || media.deletedAt)
     throw new ProposalMediaError("KP_MEDIA_NOT_FOUND");
-  if (media.expiresAt <= now) throw new ProposalMediaError("KP_MEDIA_EXPIRED");
   return media;
 }
 export function readableMedia(media: OwnedMediaRow, variant: "original" | "optimized"): ReadableMedia {
@@ -126,12 +126,11 @@ export function createPrismaProposalMediaRepository(db: Pick<PrismaClient, "$tra
         const prior = validateMediaPlan(completed.payload), requested = createMediaUploadPlan(readableOwner, input);
         if (completed.kind !== "UPLOAD_MEDIA" || completed.createdById !== input.actorId || completed.proposalId !== input.proposalId ||
           prior.fingerprint !== requested.fingerprint) throw new ProposalMediaError("KP_MEDIA_OPERATION_CONFLICT");
-        await ownedProposalMedia(tx, prior.proposalId, prior.mediaId, time());
+        await ownedProposalMedia(tx, prior.proposalId, prior.mediaId);
         return { plan: prior, leaseOwner: "", repeated: true, ready: true };
       }
       const now = time(), owner = await lockProposalMediaOwner(tx, input, true);
-      if (proposalMediaExpiry(owner.createdAt) <= now) throw new ProposalMediaError("KP_MEDIA_EXPIRED");
-      const reservation = await reserveJob(tx, input, createMediaUploadPlan(owner, input), operationDedupe(input, "upload"), now);
+        const reservation = await reserveJob(tx, input, createMediaUploadPlan(owner, input), operationDedupe(input, "upload"), now);
       const plan = reservation.plan;
       if (!reservation.repeated) {
         if (!plan.original) throw new ProposalMediaError("KP_MEDIA_INVALID");
@@ -141,25 +140,26 @@ export function createPrismaProposalMediaRepository(db: Pick<PrismaClient, "$tra
           ${JSON.stringify(plan.binding)}::jsonb, ${plan.original.key}, ${plan.optimized.key}, ${plan.original.sha256}, ${plan.optimized.sha256},
           ${plan.original.size}, ${plan.optimized.size}, ${plan.original.mimeType}, ${plan.optimized.mimeType}, ${plan.fileName},
           ${plan.width}, ${plan.height}, ${new Date(plan.expiresAt)}, 'PENDING', ${plan.jobId}, ${now})`;
-      } else if (reservation.ready) await ownedProposalMedia(tx, plan.proposalId, plan.mediaId, now);
+      } else if (reservation.ready) await ownedProposalMedia(tx, plan.proposalId, plan.mediaId);
       return reservation;
     }),
     reserveCopy: input => db.$transaction(async tx => {
       const now = time(), owner = await lockProposalMediaOwner(tx, input, true);
-      // Текст старого КП сохраняется по независимой текущей копии File, даже после годового удаления источника.
+      // Прежняя копия изделия сохраняет ID при возврате фотографии в состав КП.
       const [existingFile] = await tx.$queryRaw<{ id: string; payload: unknown }[]>`
         SELECT f.id, j.payload FROM "File" f JOIN "ProposalJob" j ON j.id = f."proposalMediaCopyJobId"
-        JOIN "ProposalCurrentMedia" cm ON cm."proposalId" = j."proposalId" AND cm."mediaId" = f."proposalSourceMediaId"
         JOIN "ProposalItem" i ON i.id = f."proposalSourceItemId" AND i."productId" = f."productId"
         WHERE f."projectId" = ${owner.projectId} AND j."proposalId" = ${input.proposalId} AND f."proposalSourceItemId" = ${input.itemId}
-          AND f."proposalSourceMediaId" = ${input.mediaId} AND f."proposalMediaRetiredAt" IS NULL`;
+          AND f."proposalSourceMediaId" = ${input.mediaId} AND f."deletedAt" IS NULL AND j.result->>'storageAvailability' IS DISTINCT FROM 'UNAVAILABLE'
+          AND j.result->>'storageAvailability' IS DISTINCT FROM 'UNVERIFIED'
+        ORDER BY f."proposalMediaRetiredAt" NULLS FIRST, f."createdAt", f.id LIMIT 1`;
       if (existingFile) {
         const plan = validateMediaPlan(existingFile.payload);
         if (plan.kind !== "COPY_PRODUCT_MEDIA" || plan.fileId !== existingFile.id || !sameMediaBinding(plan.binding, input.binding))
           throw new ProposalMediaError("KP_MEDIA_STORAGE_CHANGED");
         return { existingFileId: existingFile.id };
       }
-      const media = await ownedProposalMedia(tx, input.proposalId, input.mediaId, now), source = readableMedia(media, "optimized");
+      const media = await ownedProposalMedia(tx, input.proposalId, input.mediaId), source = readableMedia(media, "optimized");
       if (!sameMediaBinding(source.binding, input.binding)) throw new ProposalMediaError("KP_MEDIA_STORAGE_CHANGED");
       const plan = createProductMediaCopyPlan(owner, input, { ...source, width: media.width ?? 1, height: media.height ?? 1 });
       return reserveJob(tx, input, plan, operationDedupe(input, "copy", `:${input.itemId}:${input.mediaId}`), now);
@@ -167,7 +167,7 @@ export function createPrismaProposalMediaRepository(db: Pick<PrismaClient, "$tra
     assertActive: reservation => db.$transaction(async tx => {
       const now = time(); await lockProposalMediaOwner(tx, reservation.plan, true);
       const plan = await ownedMediaJob(tx, reservation, now);
-      if (plan.kind === "COPY_PRODUCT_MEDIA") await ownedProposalMedia(tx, plan.proposalId, plan.mediaId, now);
+      if (plan.kind === "COPY_PRODUCT_MEDIA") await ownedProposalMedia(tx, plan.proposalId, plan.mediaId);
     }),
     publishUpload: reservation => db.$transaction(async tx => {
       const now = time(); const owner=await lockProposalMediaOwner(tx, reservation.plan, true);
@@ -181,8 +181,12 @@ export function createPrismaProposalMediaRepository(db: Pick<PrismaClient, "$tra
       if (changed !== 1) throw new ProposalMediaError("KP_MEDIA_OPERATION_CONFLICT");
       await tx.$executeRaw`UPDATE "ProposalJob" SET state = 'SUCCEEDED', "leaseOwner" = NULL, "leaseUntil" = NULL,
         result = ${JSON.stringify({ mediaId: plan.mediaId, ready: true })}::jsonb, "updatedAt" = ${now} WHERE id = ${plan.jobId}`;
+      await tx.$executeRaw`UPDATE "ProposalJob" SET state = 'CANCELLED', "leaseOwner" = NULL, "leaseUntil" = NULL, "updatedAt" = ${now}
+        WHERE id = ${plan.cleanupJobId} AND state IN ('PENDING', 'FAILED')`;
       await writeChangeLogInTransaction(tx, { actorType: "user", actorId: plan.actorId, entity: "proposalMedia", entityId: plan.mediaId,
-        action: "create", newValue: { proposalId: plan.proposalId, originalHash: plan.original.sha256, optimizedHash: plan.optimized.sha256 } },
+        action: "create", reversal: proposalMediaUploadReversal.command({
+          proposalId: plan.proposalId, mediaId: plan.mediaId, jobId: plan.jobId, expectedDeletedAt: null, deleted: true,
+        }), newValue: { proposalId: plan.proposalId, originalHash: plan.original.sha256, optimizedHash: plan.optimized.sha256 } },
         {...(owner.projectId?projectJournalContext({id:owner.projectId,number:owner.projectNumber}):{}),
           entity:{type:'proposalMedia',id:plan.mediaId,label:plan.fileName},actor:{type:'user',id:plan.actorId,name:owner.actorName??'Имя пользователя не сохранено'},
           before:null,after:{fileName:plan.fileName,mimeType:plan.original.mimeType,size:plan.original.size}});
@@ -191,7 +195,7 @@ export function createPrismaProposalMediaRepository(db: Pick<PrismaClient, "$tra
       const now = time(); await lockProposalMediaOwner(tx, reservation.plan, true);
       const plan = await ownedMediaJob(tx, reservation, now);
       if (plan.kind !== "COPY_PRODUCT_MEDIA") throw new ProposalMediaError("KP_MEDIA_INVALID");
-      await ownedProposalMedia(tx, plan.proposalId, plan.mediaId, now);
+      await ownedProposalMedia(tx, plan.proposalId, plan.mediaId);
       await tx.$executeRaw`UPDATE "ProposalJob" SET state = 'SUCCEEDED', "leaseOwner" = NULL, "leaseUntil" = NULL,
         result = ${JSON.stringify({ fileId: plan.fileId, copyReady: true, attached: false })}::jsonb, "updatedAt" = ${now} WHERE id = ${plan.jobId}`;
     }),
@@ -202,15 +206,20 @@ export function createPrismaProposalMediaRepository(db: Pick<PrismaClient, "$tra
     }),
     authorizeRead: input => db.$transaction(async tx => {
       const owner = await lockProposalMediaOwner(tx, input, false);
-      const media = await ownedProposalMedia(tx, input.proposalId, input.mediaId, time());
+      const media = await ownedProposalMedia(tx, input.proposalId, input.mediaId);
       if (input.scope.kind === "uploaded") {
         if (!owner.projectId || owner.stage !== "LEAD") throw new ProposalMediaError("KP_MEDIA_NOT_FOUND");
         const [upload] = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM "ProposalJob" WHERE id = ${media.uploadJobId}
-          AND "createdById" = ${input.actorId} AND "proposalId" = ${input.proposalId} AND kind = 'UPLOAD_MEDIA' AND state = 'SUCCEEDED'`;
+          AND "createdById" = ${input.actorId} AND "proposalId" = ${input.proposalId} AND kind = 'UPLOAD_MEDIA' AND state = 'SUCCEEDED'
+          AND (EXISTS (SELECT 1 FROM "ProposalCurrentMedia" cm WHERE cm."proposalId" = ${input.proposalId}
+                         AND cm."mediaId" = ${media.id} AND cm."detachedAt" IS NULL)
+            OR (NOT EXISTS (SELECT 1 FROM "ProposalCurrentMedia" cm WHERE cm."proposalId" = ${input.proposalId} AND cm."mediaId" = ${media.id})
+              AND NOT EXISTS (SELECT 1 FROM "ProposalVersionMedia" vm WHERE vm."proposalId" = ${input.proposalId} AND vm."mediaId" = ${media.id})
+              AND NOT EXISTS (SELECT 1 FROM "File" f WHERE f."proposalSourceMediaId" = ${media.id})))`;
         if (!upload) throw new ProposalMediaError("KP_MEDIA_NOT_FOUND");
       } else {
         const references = input.scope.kind === "current"
-          ? await tx.$queryRaw<{ mediaId: string }[]>`SELECT "mediaId" FROM "ProposalCurrentMedia" WHERE "proposalId" = ${input.proposalId} AND "mediaId" = ${input.mediaId}`
+          ? await tx.$queryRaw<{ mediaId: string }[]>`SELECT "mediaId" FROM "ProposalCurrentMedia" WHERE "proposalId" = ${input.proposalId} AND "mediaId" = ${input.mediaId} AND "detachedAt" IS NULL`
           : await tx.$queryRaw<{ mediaId: string }[]>`SELECT "mediaId" FROM "ProposalVersionMedia" WHERE "proposalId" = ${input.proposalId}
               AND "mediaId" = ${input.mediaId} AND "versionId" = ${input.scope.versionId}`;
         if (references.length !== 1) throw new ProposalMediaError("KP_MEDIA_NOT_FOUND");

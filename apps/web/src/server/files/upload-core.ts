@@ -2,6 +2,7 @@ import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 import {createHash} from 'node:crypto';
 import type {Prisma, FileSection} from '@prisma/client';
 import {UploadError} from './upload-result';
+import {retainedFileReversal,retainedFileReversalState} from "./retained-file-reversal";
 import {assertWritableFileStorageKey} from './storage-binding-fence';
 import {operationJournalContext,journalSnapshot,journalUserReferences,FILE_JOURNAL_FIELDS} from '../tasks/journal';
 
@@ -16,7 +17,7 @@ export async function readUploadReceipt(tx:Pick<Prisma.TransactionClient,'change
   const value=receipt.newValue as {uploadFingerprint?:string}|null;
   if(receipt.actorId!==actorId||receipt.entity!=='file'||receipt.action!=='create'||value?.uploadFingerprint!==fingerprint)
     throw new UploadError('UPLOAD_REPLAY_CONFLICT',409,'persist','Этот запрос загрузки уже использован с другим файлом.','conflict');
-  if(!await tx.file.findUnique({where:{id:receipt.entityId},select:{id:true}}))
+  if(!await tx.file.findUnique({where:{id:receipt.entityId,deletedAt:null},select:{id:true}}))
     throw new UploadError('UPLOAD_FILE_DELETED',409,'persist','Файл этого запроса уже удалён.','conflict');
   return{id:receipt.entityId,repeated:true,clientMutationId};
 }
@@ -26,7 +27,8 @@ export async function persistOrdinaryUpload(tx:Prisma.TransactionClient,actor:{i
   await assertWritableFileStorageKey(tx,input.data.projectId,input.data.storedName);
   const file=await tx.file.create({data:input.data});
   await writeChangeLogInTransaction(tx, {id:`file-upload:${input.clientMutationId}`,actorType:'user',actorId:actor.id,actorName:actor.name??undefined,
-    source:'web',entity:'file',entityId:file.id,action:'create',newValue:{project:input.projectNumber,fileName:file.fileName,section:file.section,
+    source:'web',entity:'file',entityId:file.id,action:'create',
+    reversal:retainedFileReversal.command({files:[retainedFileReversalState(file,null,true)]}),newValue:{project:input.projectNumber,fileName:file.fileName,section:file.section,
       uploadFingerprint:input.fingerprint,clientMutationId:input.clientMutationId}},
       {...await operationJournalContext(tx,{type:'file',id:file.id,label:file.fileName},[{...file,projectNumber:input.projectNumber}],await journalUserReferences(tx,[file.uploadedById])),
         before:null,after:journalSnapshot(file,FILE_JOURNAL_FIELDS)});

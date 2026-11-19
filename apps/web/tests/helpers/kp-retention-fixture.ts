@@ -31,8 +31,21 @@ export function retentionSnapshot(): RetentionSnapshot {
 }
 export const acceptedPayload: RetentionPayload = { schema: 1, kind: "ACCEPTED_RETENTION", proposalId: "proposal", acceptedVersionId: "accepted", retentionEpoch: 2 };
 
-export function retentionFixture(payload: RetentionPayload = acceptedPayload, snapshot = retentionSnapshot()) {
-  let currentPayload = payload, progress: RetentionProgress | null = null, state = "PENDING", owner = "", attempt = 0, binding = retentionBinding;
+export function technicalCleanup(snapshot: RetentionSnapshot): RetentionPayload {
+  const media = { ...snapshot.media[0], id: "unpublished", uploadState: "PENDING", uploadJobId: "unpublished-upload",
+    original: fact("kp/proposals/proposal/original/unpublished.jpg"),
+    optimized: fact("kp/proposals/proposal/optimized/unpublished.jpg") };
+  snapshot.media.push(media);
+  snapshot.jobs.push({ id: media.uploadJobId, kind: "UPLOAD_MEDIA", state: "FAILED", attempts: 1, maxAttempts: 3,
+    leaseUntil: null, result: null, payload: { proposalId: snapshot.proposal.id, mediaId: media.id, binding: media.binding,
+      original: media.original, optimized: media.optimized } });
+  return { schema: 1, kind: "UNATTACHED_MEDIA", proposalId: snapshot.proposal.id, mediaId: media.id,
+    operationJobId: media.uploadJobId, binding: media.binding, objects: [media.original, media.optimized] };
+}
+
+export function retentionFixture(payload?: RetentionPayload, snapshot = retentionSnapshot()) {
+  const initialPayload = payload ?? technicalCleanup(snapshot);
+  let currentPayload = initialPayload, progress: RetentionProgress | null = null, state = "PENDING", owner = "", attempt = 0, binding = retentionBinding;
   let now = new Date(retentionTime), enabled = true;
   const events: string[] = [], objects = new Map<string, { id: string; marker: boolean; bytes: Buffer }[]>(), unversioned = new Set<string>();
   const tombstones: { key: string; proof: unknown }[] = [];
@@ -94,7 +107,6 @@ export function retentionFixture(payload: RetentionPayload = acceptedPayload, sn
     async finish(value) {
       assertClaim(value);
       if (progress!.manifest.targets.some(target => !progress!.objects[target.id].absentAt && !progress!.objects[target.id].releasedAt)) throw new RetentionError("KP_RETENTION_INCOMPLETE");
-      if (currentPayload.kind === "ACCEPTED_RETENTION") snapshot.versions = snapshot.versions.filter(version => !progress!.manifest.pruneVersionIds.includes(version.id));
       state = "SUCCEEDED"; events.push("finished");
     },
     async fail(_claim, error) { if (state === "CANCELLED") return; state = error.retryable ? "PENDING" : "FAILED"; events.push("failed:" + error.code); },
@@ -129,7 +141,7 @@ export function retentionFixture(payload: RetentionPayload = acceptedPayload, sn
     objects.set(target.key, [...Array.from({ length: versions }, (_, i) => ({ id: `v${i}`, marker: false, bytes: data })),
       ...(marker ? [{ id: "marker", marker: true, bytes: Buffer.alloc(0) }] : [])]);
   };
-  return { snapshot, repository, storage, events, objects, unversioned, tombstones, control, seed,
+  return { snapshot, payload: initialPayload, repository, storage, events, objects, unversioned, tombstones, control, seed,
     dependencies: { repository, storage, enabled: () => enabled, now: () => now },
     get progress() { return progress; }, get state() { return state; },
     async acquire() { return (await repository.claim("owner", 120_000))!; },
