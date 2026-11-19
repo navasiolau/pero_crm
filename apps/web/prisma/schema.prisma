@@ -957,6 +957,7 @@ model LogisticsProjectShare {
   projectId String
   project Project @relation(fields: [projectId], references: [id], onDelete: Restrict)
   percentBps Int
+  removedAt DateTime?
   lines LogisticsShipmentLine[]
 
   @@unique([tripId, projectId])
@@ -978,6 +979,7 @@ model LogisticsShipmentLine {
   numberSnapshot String?
   unitSnapshot String
   quantity Decimal @db.Decimal(12, 3)
+  removedAt DateTime?
 
   @@unique([tripId, projectId, productId])
   @@unique([tripId, projectId, materialId])
@@ -1004,6 +1006,8 @@ model LogisticsDocument {
   ttnNumber String?
   createdAt DateTime @default(now())
   readyAt DateTime?
+  hiddenAt DateTime?
+  visibilityRevision Int @default(0)
   postingDocuments LogisticsPostingDocument[]
 
   @@unique([id, tripId])
@@ -1055,6 +1059,9 @@ model LogisticsPosting {
   paidAt DateTime
   manifestSnapshot Json
   reallocatedFromId String? @unique
+  restoredFromId String?
+  restoredFrom LogisticsPosting? @relation("LogisticsPostingRestore", fields: [restoredFromId], references: [id], onDelete: Restrict)
+  restorations LogisticsPosting[] @relation("LogisticsPostingRestore")
   reallocatedFrom LogisticsPosting? @relation("LogisticsPostingReallocation", fields: [reallocatedFromId], references: [id], onDelete: Restrict)
   reallocatedTo LogisticsPosting? @relation("LogisticsPostingReallocation")
   ttnNotRequired Boolean @default(false)

@@ -58,7 +58,7 @@ test("HTTP ТТН передаёт поток: retry, две печати и о�
       update: async () => { throw Error("TRIP_MUST_NOT_CHANGE"); } },
     logisticsDocument: {
       findUnique: async ({ where }: { where: { id?: string; clientMutationId?: string } }) => rows.find(row => where.id ? row.id === where.id : row.clientMutationId === where.clientMutationId) ?? null,
-      create: async ({ data }: { data: LogisticsDocument }) => { const row = { ...data, createdAt: new Date(), readyAt: null }; rows.push(row); return row; },
+      create: async ({ data }: { data: LogisticsDocument }) => { const row = { ...data, createdAt: new Date(), readyAt: null, hiddenAt: null, visibilityRevision: 0 }; rows.push(row); return row; },
       update: async ({ where, data }: { where: { id: string }; data: Partial<LogisticsDocument> }) => { const row = rows.find(row => row.id === where.id)!; Object.assign(row, data); return row; },
     }, changeLog: { create: async ({ data }: { data: unknown }) => { audits.push(data); return data; } },
   } as unknown as Prisma.TransactionClient;
@@ -89,4 +89,9 @@ test("HTTP ТТН передаёт поток: retry, две печати и о�
   revokeDuringStorage = true; assert.equal((await upload("SIGNED", signed)).status, 403); assert.equal(rows[1].state, "PENDING"); assert.equal(audits.length, 1);
   actor.active = true; revokeDuringStorage = false; assert.equal((await upload("SIGNED", signed)).status, 201);
   assert.deepEqual(rows.map(row => row.stage), ["ISSUED", "SIGNED"]); assert.ok(rows.every(row => row.state === "READY")); assert.equal(audits.length, 2); assert.equal(trip.revision, 7);
+  assert.deepEqual((audits[0] as { reversal: { data: unknown } }).reversal.data,
+    { documentId: id, tripId: trip.id, expectedRevision: 0, hide: true });
+  rows[0].hiddenAt = new Date();
+  assert.equal((await upload("ISSUED", mutation)).status, 409);
+  assert.equal(audits.length, 2);
 });
