@@ -5,7 +5,7 @@ import {FINANCE_ROLES,hasAnyRole} from '@/lib/roles';
 import {parseExpenseArticleCode,nextExpenseArticleCode} from '@/lib/expense-article-code';
 export const articleSchema=z.object({name:z.string().trim().min(1,'Укажите название статьи'),comment:z.string().optional(),code:z.string().optional()}).strict();
 export type ExpenseArticleInput=z.input<typeof articleSchema>;
-type Actor={id:string;name?:string|null;roles:readonly Role[];source?:"web"|"telegram"};
+type Actor={id:string;name?:string|null;roles:readonly Role[];source?:"web"|"telegram"|"api"};
 export async function createExpenseArticleCore(actor:Actor,input:unknown,tx:Prisma.TransactionClient){
  if(!hasAnyRole([...actor.roles],FINANCE_ROLES))return{ok:false as const,error:'Недостаточно прав'};
  const parsed=articleSchema.safeParse(input);if(!parsed.success)return{ok:false as const,error:parsed.error.issues[0]?.message??'Ошибка данных'};
