@@ -7,10 +7,15 @@ import { useKanbanScrollRestoration, type KanbanScrollContext } from "@/hooks/us
 import { reflectKanbanScroll, synchronizeKanbanScroll } from "@/lib/kanban-scroll-sync";
 
 type ScrollMetrics = { width: number; maximum: number; step: number };
-export function KanbanScrollArea({ children, label, searchFocus, restoration }: { children: ReactNode; label: string; searchFocus?: KanbanSearchFocus; restoration?: KanbanScrollContext }) {
+export function KanbanScrollArea({ children, label, searchFocus, restoration }: {
+  children: ReactNode | ((savePosition: (cardId: string) => void) => ReactNode);
+  label: string;
+  searchFocus?: KanbanSearchFocus;
+  restoration?: KanbanScrollContext;
+}) {
   const boardRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
-  const { handledSearch, onClickCapture } = useKanbanScrollRestoration(boardRef, restoration);
+  const { handledSearch, onClickCapture, savePosition } = useKanbanScrollRestoration(boardRef, restoration);
   useKanbanSearchFocus(boardRef, searchFocus, handledSearch);
   const scrollbarRef = useRef<HTMLDivElement>(null);
   const [metrics, setMetrics] = useState<ScrollMetrics>({ width: 0, maximum: 0, step: 256 });
@@ -49,10 +54,13 @@ export function KanbanScrollArea({ children, label, searchFocus, restoration }: 
     if (event.key === "ArrowLeft" || event.key === "ArrowRight") { event.preventDefault(); scrollByColumn(event.key === "ArrowLeft" ? -1 : 1); }
     else if (event.key === "Home" || event.key === "End") { event.preventDefault(); boardRef.current?.scrollTo({ left: event.key === "Home" ? 0 : metrics.maximum, behavior: "instant" }); }
   }
-  return <div className="min-w-0 max-w-full" data-kanban-scroll-area onClickCapture={onClickCapture}>
+  const explicitSave = typeof children === "function";
+  return <div className="min-w-0 max-w-full" data-kanban-scroll-area onClickCapture={explicitSave ? undefined : onClickCapture}>
     <div ref={boardRef} data-slot="kanban-scroll" role="region" aria-label={label} tabIndex={0} className="min-w-0 max-w-full overflow-x-auto pb-4"
       style={{ scrollbarWidth: "none" }} onScroll={event => synchronizeKanbanScroll(event.currentTarget, scrollbarRef.current)} onKeyDown={navigate}>
-      <div ref={contentRef} data-kanban-columns className="flex w-max min-w-full gap-3">{children}</div>
+      <div ref={contentRef} data-kanban-columns className="flex w-max min-w-full gap-3">
+        {explicitSave ? children(savePosition) : children}
+      </div>
     </div>
     {metrics.maximum > 0 ? <div ref={scrollbarRef} data-kanban-scrollbar role="region" aria-label={`${label}: горизонтальная прокрутка`} tabIndex={0}
       className="sticky bottom-0 z-20 min-w-0 max-w-full overflow-x-auto overflow-y-hidden bg-background"

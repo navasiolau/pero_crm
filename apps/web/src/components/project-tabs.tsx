@@ -1,9 +1,13 @@
 "use client";
 import type { ComponentProps, ReactNode } from "react";
+import { useSearchParams } from "next/navigation";
 import { Tabs, TabsList } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 export function ProjectTabs({ initialTab, children }: { initialTab: string; children: ReactNode }) {
-  return <Tabs key={initialTab} defaultValue={initialTab}>{children}</Tabs>;
+  // При возврате Next может использовать сохранённую страницу со старым initialTab.
+  const urlTabs = useSearchParams()?.getAll("tab");
+  const tab = urlTabs?.length === 1 && urlTabs[0] === "products" ? "products" : initialTab;
+  return <Tabs key={tab} defaultValue={tab}>{children}</Tabs>;
 }
 
 export function ProjectTabsList({ className, ...props }: ComponentProps<typeof TabsList>) {

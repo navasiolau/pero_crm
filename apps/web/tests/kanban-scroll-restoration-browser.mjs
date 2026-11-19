@@ -15,9 +15,14 @@ const entry = `
 import React from 'react';import {createRoot} from 'react-dom/client';
 import {ProjectsView} from '@/app/(app)/projects/projects-view';
 import {ProductsView} from '@/app/(app)/products/products-view';
+import {ProductsTab} from '@/app/(app)/projects/[id]/products-tab';
+import {ProjectTabs} from '@/components/project-tabs';
+import {TabsContent,TabsList,TabsTrigger} from '@/components/ui/tabs';
+import {resolveProductReturn,resolveProjectTab} from '@/lib/product-return-navigation';
 import {ListParamsProvider} from '@/lib/list-params';
 import {encodeListPreference,normalizeListQuery} from '@/lib/list-state';
 const section=location.pathname.split('/')[1],product=section==='products';
+const projectFixture=location.pathname.startsWith('/projects/');
 const base={title:'Карточка',stage:'IN_WORK',status:'INSTALLATION',stageChangedAt:'2026-10-01',statusChangedAt:'2026-10-01',
  expectedPrice:null,totalPrice:null,quantity:1,currency:'BYN',clientId:'client',clientName:'Клиент',managerName:null,
  projectId:'parent',projectStage:'IN_WORK',projectNumber:'199',projectTitle:'Заказ',engineerId:null,engineerName:null,
@@ -26,6 +31,7 @@ const cover={id:'qa212-cover',fileName:'cover.png',mimeType:'image/png',hasThumb
 const number=product?'199.5':'199';
 window.__rows=[...Array.from({length:24},(_,i)=>({...base,id:'row-'+i,number:number+String(i+1),title:'Карточка '+i})),
  {...base,id:'target',number,title:'Возврат к этой карточке',sketchFile:cover,coverFile:cover},
+ ...(projectFixture?Array.from({length:12},(_,i)=>({...base,id:'later-'+i,number:number+'-'+i,title:'Следующее изделие '+i})):[]),
  {...base,id:'first',number:'100',stage:'LEAD',status:'PREPARATION'},
  {...base,id:'last',number:'900',stage:'REFUSED',status:'DONE'}];
 window.__user='qa212-user';window.__hold=false;window.__errors=[];
@@ -34,6 +40,21 @@ function App(){const [route,setRoute]=React.useState(location.pathname+location.
  window.__navigate=href=>{history.pushState({},'',href);setRoute(href);window.scrollTo(0,0)};
  React.useEffect(()=>{const back=()=>{setRoute(location.pathname+location.search);window.scrollTo(0,0)};window.addEventListener('popstate',back);return()=>window.removeEventListener('popstate',back)},[]);
  const url=new URL(route,location.origin),query=normalizeListQuery(section,url.search.slice(1)),q=new URLSearchParams(query).get('q')||'';
+ if(projectFixture){
+  if(url.pathname.startsWith('/products/')){
+   const destination=resolveProductReturn(url.searchParams.get('returnTo'),'parent');
+   return <main><h1>Изделие проекта</h1><a href={destination.href} onClick={e=>{e.preventDefault();window.__navigate(destination.href)}}>{destination.label}</a></main>;
+  }
+  // Next может повторно использовать серверную вкладку из записи до replaceState.
+  const projectId=url.pathname.split('/')[2],tab=url.searchParams.has('returnTo')?'overview':resolveProjectTab(url.searchParams.get('tab'),['overview','products']);
+  return <main key={projectId} style={{padding:16,marginLeft:innerWidth>=768?240:0}}>
+   <ProjectTabs initialTab={tab}><TabsList><TabsTrigger value='overview'>Общее</TabsTrigger><TabsTrigger value='products'>Изделия</TabsTrigger></TabsList>
+   <TabsContent value='overview'>Общее о проекте</TabsContent>
+   <TabsContent value='products'><ProductsTab projectId={projectId} projectStage='IN_WORK' currency='BYN' initialProducts={window.__rows}
+    canManage actorRoles={['ADMIN']} actorUserId={window.__user} showAmount={false} engineerOptions={[]}/></TabsContent>
+   </ProjectTabs><div style={{height:1200}} data-revision={revision}/>
+  </main>;
+ }
  const rows=window.__rows.filter(r=>!q||r.number.includes(q)).map(r=>({...r}));
  const isBoard=url.pathname==='/'+section;window.__query=query;
  if(!isBoard)return <main><h1>Карточка</h1><a href={url.searchParams.get('returnTo')||'/'+section+'?view=kanban'} onClick={e=>{e.preventDefault();window.__navigate(e.currentTarget.getAttribute('href'))}}>Назад к доске</a><button onClick={()=>window.__navigate('/'+section+'?view=kanban')}>Меню раздела</button></main>;
@@ -44,11 +65,11 @@ function App(){const [route,setRoute]=React.useState(location.pathname+location.
 }createRoot(document.getElementById('root')).render(<App/>);
 `;
 const boundaries = {
-  'next/navigation': "export const useRouter=()=>({push:href=>window.__navigate(href),replace:href=>window.__navigate(href),refresh:()=>window.__refresh()});export const usePathname=()=>location.pathname;",
+  'next/navigation': "export const useRouter=()=>({push:href=>window.__navigate(href),replace:href=>window.__navigate(href),refresh:()=>window.__refresh()});export const usePathname=()=>location.pathname;export const useSearchParams=()=>new URLSearchParams(location.search);",
   'next/link': "import React from 'react';export default function Link({children,...props}){return <a {...props} onClick={e=>{e.preventDefault();window.__navigate(String(props.href))}}>{children}</a>}",
   '@/server/list-preferences-actions': "import {encodeListPreference} from '@/lib/list-state';export async function saveListPreference(section,query){if(window.__holdSave)await new Promise(resolve=>window.__releaseSave=resolve);return {ok:true,value:encodeListPreference(section,query,'qa212')}}",
   '@/server/projects/stage-actions': "export async function patchProjectStage(){throw Error('UNEXPECTED_WRITE')}",
-  '@/server/products/actions': "export async function changeProductStatus(){throw Error('UNEXPECTED_WRITE')}",
+  '@/server/products/actions': "export async function changeProductStatus(){throw Error('UNEXPECTED_WRITE')}export async function createProduct(){throw Error('UNEXPECTED_WRITE')}",
   '@/server/projects/actions': "export async function createProject(){throw Error('UNEXPECTED_WRITE')}",
   '@/server/clients/actions': "export async function clientSelectionOptions(){return []}export async function createClient(){throw Error('UNEXPECTED_WRITE')}",
 };
@@ -82,20 +103,23 @@ export async function runScrollRestorationBrowser({ smoke = false } = {}) {
   const browser = await chromium.launch({ headless: true });
   const checks = [], errors = [], screenshots = [];
   const measure = page => page.evaluate(() => {
-    const board = document.querySelector('[data-slot="kanban-scroll"]'), card = board?.querySelector('[data-kanban-card-id="target"]');
+    const board = document.querySelector('[data-slot="kanban-scroll"]');
+    const card = board?.querySelector('[data-kanban-card-id="target"], [data-slot="product-kanban-card"][data-has-image="true"]');
     const rect = card?.getBoundingClientRect();
     return { left: board?.scrollLeft, top: scrollY, bottom: document.querySelector('[data-kanban-scrollbar]')?.scrollLeft, x: rect?.x, y: rect?.y };
   });
   const settle = page => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(resolve)))));
-  async function arrange(page) {
-    await page.locator('[data-kanban-card-id="target"]').waitFor();
-    await page.evaluate(() => {
-      const board = document.querySelector('[data-slot="kanban-scroll"]'), card = board.querySelector('[data-kanban-card-id="target"]');
+  async function arrange(page, project = false, useScrollbar = false) {
+    const target = project ? '[data-slot="product-kanban-card"][data-has-image="true"]' : '[data-kanban-card-id="target"]';
+    await page.locator(target).waitFor();
+    await page.evaluate(({ selector, useScrollbar }) => {
+      const board = document.querySelector('[data-slot="kanban-scroll"]'), card = board.querySelector(selector);
       board.style.scrollSnapType = 'none';
       const b = board.getBoundingClientRect(), r = card.getBoundingClientRect();
-      board.scrollLeft += r.left - b.left - 25;
+      const horizontal = useScrollbar ? document.querySelector('[data-kanban-scrollbar]') : board;
+      horizontal.scrollLeft = board.scrollLeft + r.left - b.left - 25;
       window.scrollTo(0, scrollY + r.top - 110);
-    });
+    }, { selector: target, useScrollbar });
     await settle(page);
     const before = await measure(page);
     assert.ok(before.left > 100 && before.top > 100, 'Both axes must be nonzero');
@@ -105,11 +129,79 @@ export async function runScrollRestorationBrowser({ smoke = false } = {}) {
     await page.locator('[data-kanban-card-id="target"]').waitFor();
     await expect.poll(async () => {
       const after = await measure(page);
-      return Math.max(...['left', 'top', 'x', 'y'].map(key => Math.abs(after[key] - before[key])), Math.abs(after.left - (after.bottom ?? after.left)));
+      return Math.max(...['left', 'top', 'x', 'y'].map(key => Math.abs(after[key] - before[key])), Math.abs(after.left - (after.bottom ?? Infinity)));
     }, { message: label, timeout: 4000 }).toBeLessThanOrEqual(2);
     checks.push(label);
   }
   try {
+    for (const viewport of smoke ? [{ width: 1440, height: 900 }] : [{ width: 1440, height: 900 }, { width: 390, height: 844 }, { width: 360, height: 800 }]) {
+      const page = await browser.newPage({ viewport, hasTouch: viewport.width < 768, isMobile: viewport.width < 768 });
+      page.on('pageerror', error => errors.push(error.message));
+      await page.goto(origin + '/projects/parent?returnTo=%2Fprojects%3Fview%3Dkanban');
+      await page.getByRole('tab', { name: 'Изделия' }).click();
+      const card = page.locator('[data-slot="product-kanban-card"][data-has-image="true"]');
+      const before = await arrange(page, true);
+      await card.getByText('Возврат к этой карточке').click();
+      await page.getByRole('heading', { name: 'Изделие проекта' }).waitFor();
+      await page.goBack();
+      await expect(page.getByRole('tab', { name: 'Изделия' })).toHaveAttribute('aria-selected', 'true');
+      assert.equal(new URL(page.url()).searchParams.get('returnTo'), '/projects?view=kanban');
+      assert.equal(new URL(page.url()).searchParams.get('tab'), 'products');
+      assert.ok(Number.isFinite(before.bottom), 'The sticky scrollbar must be present');
+      await returned(page, before, 'project-products/' + viewport.width + '/back-from-body');
+
+      await page.evaluate(() => { document.querySelector('[data-kanban-scrollbar]').scrollLeft = 0; });
+      await settle(page);
+      const coverBefore = await arrange(page, true, true);
+      await card.getByRole('button', { name: 'Открыть изделие Возврат к этой карточке' }).click();
+      await page.getByRole('link', { name: 'Назад к изделиям проекта' }).click();
+      await expect(page).toHaveURL(origin + '/projects/parent?tab=products');
+      await returned(page, coverBefore, 'project-products/' + viewport.width + '/link-from-cover');
+      if (!smoke) {
+        const screenshot = path.join(directory, 'project-products-' + viewport.width + '.png');
+        await page.screenshot({ path: screenshot });
+        screenshots.push(screenshot);
+      }
+      if (viewport.width === 1440) {
+        const inspectOtherBoard = async href => {
+          await page.evaluate(destination => window.__navigate(destination), href);
+          await page.locator('[data-kanban-scrollbar]').waitFor();
+          await settle(page);
+          const position = await measure(page);
+          assert.equal(position.left, 0);
+          assert.equal(position.top, 0);
+        };
+        await inspectOtherBoard('/projects/second?tab=products');
+        await page.evaluate(() => { window.__user = 'another-user'; });
+        await inspectOtherBoard('/projects/parent?tab=products');
+        await page.evaluate(() => { window.__user = 'qa212-user'; window.__refresh(); });
+        await returned(page, coverBefore, 'project-products/isolation');
+        const anchorBefore = await arrange(page, true);
+        await card.getByText('Возврат к этой карточке').click();
+        await page.getByRole('heading', { name: 'Изделие проекта' }).waitFor();
+        await page.evaluate(() => {
+          window.__rows.unshift({ ...window.__rows[0], id: 'inserted-before-target' });
+        });
+        await page.goBack();
+        await card.waitFor();
+        await expect.poll(async () => Math.abs((await measure(page)).y - anchorBefore.y)).toBeLessThanOrEqual(2);
+        assert.ok((await measure(page)).top > anchorBefore.top, 'A shifted card adjusts the vertical position');
+        checks.push('project-products/moved-anchor');
+
+        const missingBefore = await arrange(page, true);
+        await card.getByText('Возврат к этой карточке').click();
+        await page.getByRole('heading', { name: 'Изделие проекта' }).waitFor();
+        await page.evaluate(() => { window.__rows = window.__rows.filter(row => row.id !== 'target'); });
+        await page.goBack();
+        await page.locator('[data-kanban-scrollbar]').waitFor();
+        await expect.poll(async () => {
+          const after = await measure(page);
+          return Math.max(Math.abs(after.left - missingBefore.left), Math.abs(after.top - missingBefore.top), Math.abs(after.left - after.bottom));
+        }).toBeLessThanOrEqual(2);
+        checks.push('project-products/missing-anchor');
+      }
+      await page.context().close();
+    }
     for (const section of ['projects', 'products']) for (const viewport of smoke ? [{ width: 1440, height: 900 }] : [{ width: 1440, height: 900 }, { width: 390, height: 844 }, { width: 360, height: 800 }]) {
       const context = await browser.newContext({ viewport }), page = await context.newPage();
       page.on('pageerror', error => errors.push(error.message));
