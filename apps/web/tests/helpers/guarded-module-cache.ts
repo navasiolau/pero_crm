@@ -64,16 +64,32 @@ export function guardedModuleCache(ownerUrl: string, options: Options) {
       return result && typeof result === "object" && Object.getPrototypeOf(result) === Object.prototype ? guarded(result) : result;
     },
   });
-  const collectOwned = () => {
-    // При setup throw у дочернего Module.parent остаётся ссылка на неудачный target.
+  const collectOwned = (allowTargetAdoption = false, failedTarget?: string) => {
+    const installed = new Set([...cache.values()].flatMap(({ installed }) => installed ? [installed] : []));
     for (const [file, entry] of Object.entries(require.cache)) {
-      if (!entry || initial.has(file) || cache.has(file)) continue;
-      const visited = new Set<NodeJS.Module>(); let parent: NodeJS.Module | null | undefined = entry;
-      while (parent && !visited.has(parent)) {
-        if ([...targets.values()].includes(parent.filename)) { cache.set(file, { before: undefined, installed: entry }); break; }
-        visited.add(parent); parent = parent.parent;
+      if (!entry?.loaded || entry.filename !== file) continue;
+      const captured = cache.get(file);
+      if (captured ? captured.installed || !allowTargetAdoption : initial.has(file)) continue;
+      // Зарезервированный target принимаем только из синхронного load. Связь
+      // loader подтверждает объектами Module, а не совпадением имени parent.
+      const visited = new Set<NodeJS.Module>();
+      let child = entry;
+      while (child.parent && !visited.has(child)) {
+        visited.add(child);
+        const parent = child.parent;
+        if (!parent.children.includes(child)) break;
+        const failedRoot = failedTarget === parent.filename && require.cache[parent.filename] === undefined;
+        if (installed.has(parent) || failedRoot) {
+          cache.set(file, { before: captured?.before, installed: entry });
+          break;
+        }
+        child = parent;
       }
     }
+  };
+  const assertCacheOwnership = () => {
+    for (const [file, captured] of cache)
+      if (require.cache[file] !== captured.installed) throw new Error("FIXTURE_CACHE_CONFLICT");
   };
   const restore = () => {
     if (closed) return;
@@ -108,13 +124,16 @@ export function guardedModuleCache(ownerUrl: string, options: Options) {
   return {
     load<T>(specifier: string): T {
       active(); const file = targets.get(specifier); if (!file) throw new Error("FIXTURE_TARGET_NOT_ALLOWED");
-      if (require.cache[file] !== cache.get(file)?.installed) throw new Error("FIXTURE_CACHE_CONFLICT");
-      const before = initial.get(file);
-      try {
-        const result: unknown = require(file), entry = require.cache[file];
-        if (!entry || entry.exports !== result) throw new Error("FIXTURE_TARGET_CACHE_CHANGED");
-        cache.set(file, { before, installed: entry }); return result as T;
-      } finally { collectOwned(); }
+      assertCacheOwnership();
+      let result: unknown;
+      try { result = require(file); }
+      catch (error) { collectOwned(true, file); throw error; }
+      const entry = require.cache[file];
+      if (!entry?.loaded || entry.filename !== file || entry.exports !== result) throw new Error("FIXTURE_TARGET_CACHE_CHANGED");
+      cache.set(file, { before: initial.get(file), installed: entry });
+      collectOwned(true);
+      assertCacheOwnership();
+      return result as T;
     },
     restore,
     async run<T>(operation: () => T | Promise<T>): Promise<T> {
