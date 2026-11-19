@@ -1,22 +1,18 @@
 import FurnitureSpecifications from "@pero/kp-template/furniture-specifications";
 import type {PrismaClient} from '@prisma/client';
-import {hasAnyRole,FIELD_ROLES} from '@/lib/roles';
 import {canViewProductMoney} from '@/lib/product-financial-access';
-import {assignedProductVisibilityWhere,engineeringGlobalReadWhere,hasFullProjectVisibility,type VisibilityActor} from './visibility';
-/** Стоимость закрыта всем исполнителям; неназначенному полю закрыт и техблок. */
-export async function maskProductionRead<T extends {id:string}>(db:Pick<PrismaClient,'product'>,actor:VisibilityActor,rows:T[]):Promise<(T & {canReadTechnicalSpecifications:boolean})[]> {
- if(!rows.length)return [];
- const money=canViewProductMoney(actor.roles);
- const restrictTechnical=hasAnyRole(actor.roles,FIELD_ROLES)&&!hasFullProjectVisibility(actor);
- const assigned=restrictTechnical?await db.product.findMany({where:{AND:[{id:{in:rows.map(row=>row.id)}},{OR:[assignedProductVisibilityWhere(actor),engineeringGlobalReadWhere(actor)]}]},select:{id:true}}):[];
- const ids=new Set(assigned.map(row=>row.id));
- return rows.map(row=>{
-  const canReadTechnicalSpecifications=!restrictTechnical||ids.has(row.id);
-  const technical = "technicalSpecifications" in row && row.technicalSpecifications != null
-   ? {technicalSpecifications:FurnitureSpecifications.normalizeProduct(row.technicalSpecifications)} : {};
-  return {...row,...technical,canReadTechnicalSpecifications,...(!money?{expectedPrice:null,initialPrice:null}:{}),
-   ...(!canReadTechnicalSpecifications?{description:null,technicalSpecifications:null}:{})};
- });
+import type { VisibilityActor } from './visibility';
+
+/** Запрос уже проверил видимость изделия. Его характеристики доступны вместе с карточкой. */
+export function maskProductionRead<T extends { id: string; technicalSpecifications?: unknown }>(
+  actor: VisibilityActor,
+  rows: T[],
+) {
+  const showMoney = canViewProductMoney(actor.roles);
+  return rows.map(({ technicalSpecifications, ...row }) => {
+    const product = { ...row, technicalSpecifications: FurnitureSpecifications.normalizeProduct(technicalSpecifications) };
+    return showMoney ? product : { ...product, expectedPrice: null, initialPrice: null };
+  });
 }
 
 export async function maskProductionWorkRead<T extends {id:string}>(db:Pick<PrismaClient,'work'>,actor:VisibilityActor,rows:T[]):Promise<T[]> {

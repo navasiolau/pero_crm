@@ -228,3 +228,9 @@ OpenSpec размещаем в `D:\Projects\pero_crm_v2\openspec`, схема `s
 | № | Ветка | OpenSpec | Результат |
 |---|---|---|---|
 | 235 | feature/235 | project-contact-person | ACCEPTED на staging `cbf498ec`: CI №401 7/7 SUCCESS, миграция применена, native 12/12 с rollback, настоящий HTTPS browser 1440/390 px и no-op Server Actions/forbidden проверены. 307 клиентов, 302 проекта и 5529 записей журнала сохранены. Local 1565/1565 PASS. Evidence — staging-acceptance.md/json и verification.md; production отдельно. |
+
+### Просмотр характеристик в производстве и монтаже от 19.11.2026
+
+| № | Ветка | OpenSpec | Результат |
+|---|---|---|---|
+| 237 | feature/237 | [worker-product-technical-specifications](openspec/changes/worker-product-technical-specifications/proposal.md) | Всем работникам и монтажникам доступны характеристики видимых изделий независимо от назначения. Производственные роли дают только просмотр. Локальная приёмка пройдена, 1569/1569 тестов. [Проверка](openspec/changes/worker-product-technical-specifications/verification.md) |

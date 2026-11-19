@@ -19,7 +19,7 @@ function TechnicalEntry({ rowId, number, canEdit, trailing }: { rowId: string; n
     onCommit={() => { if (canEdit) void (field.error ? field.retry() : field.commit()); }} autosave issue={field.error} />;
 }
 
-export function ProductTechnicalSpecifications({ canEdit }: { canEdit: boolean; canEditLegacy?: boolean }) {
+export function ProductTechnicalSpecifications({ canEdit }: { canEdit: boolean }) {
   const { technical } = useProductInline();
   const state = useSyncExternalStore(technical.subscribe, technical.getSnapshot, technical.getServerSnapshot);
   const rows = canEdit ? state.rows : state.rows.filter(key => { const row = technicalRowDraft(technical.section(key).getSnapshot().draft); return key !== state.trailing && (row.label !== "" || row.value !== ""); });

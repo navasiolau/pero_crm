@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
-import type { Prisma, ProductStatus } from "@prisma/client";
+import type { Prisma, ProductStatus, Role } from "@prisma/client";
 import type { FurnitureSection, TechnicalSpecifications } from "@pero/kp-template";
 import { patchProductCore, updateProductCore, createSchema } from "../src/server/products/core";
 import { productPatchSchema, type ProductPatch } from "../src/server/products/patch-contract";
 import type { TaskTransaction } from "../src/server/tasks/transaction";
 import { maskProductionRead } from "../src/server/access/production-read-projection";
-import { parseLegacyProductDescription } from "../src/lib/product-legacy-specifications";
+import { effectiveProductSpecifications, parseLegacyProductDescription } from "../src/lib/product-legacy-specifications";
 
 const manager = { id: "m", name: "Менеджер", roles: ["MANAGER" as const], source: "web" as const };
 const engineer = { ...manager, id: "e", roles: ["ENGINEER" as const] };
@@ -98,8 +98,7 @@ test("custom rows append, renamed labels and order persist, independent CAS merg
   const noop = await f.mutate(rowPatch(firstId, renamed, renamed));
   assert.equal(noop.kind === "saved" && noop.derived?.technicalSpecificationsEditRevision, 3);
   assert.equal(f.row.technicalSpecifications?.editRevision, 3);
-  const db = { product: { findMany: async () => [] } } as unknown as Parameters<typeof maskProductionRead>[0];
-  const [reloaded] = await maskProductionRead(db, manager, [f.row]);
+  const [reloaded] = maskProductionRead(manager, [f.row]);
   assert.deepEqual(reloaded.technicalSpecifications, f.row.technicalSpecifications);
   assert.deepEqual((f.logs.findLast(log => log.action === "inline.update")?.newValue as Record<string, unknown>).technicalSpecifications, f.row.technicalSpecifications);
 });
@@ -134,19 +133,47 @@ test("pair CAS rejects stale labels, deletion cannot resurrect by stale update o
   assert.deepEqual(f.row, baseline);
 });
 
-test("engineer rights are checked under lock before replay and field redaction masks both formats", async () => {
+test("инженер сохраняет своё изделие в проектировании, отзыв права действует и при совмещении ролей", async () => {
+  for (const roles of [["ENGINEER"], ["ENGINEER", "WORKER"]] as Role[][]) {
+    const f = fixture(), actor = { ...engineer, roles };
+    const request = rowPatch(randomUUID(), null, { label: "Личная строка", value: "Дуб" });
+    assert.equal((await patchProductCore(actor, request, f.transaction)).kind, "saved");
+    f.beforeLock(() => { f.row.engineerId = "replacement"; });
+    const revoked = await patchProductCore(actor, request, f.transaction);
+    assert.equal(revoked.kind, "forbidden");
+    assert.equal("currentValue" in revoked, false);
+    f.row.status = "PRODUCTION";
+    assert.equal((await patchProductCore(actor, request, f.transaction)).kind, "forbidden");
+  }
+});
+
+test("менеджер с ролью монтажника может править характеристики на монтаже без назначения", async () => {
   const f = fixture();
-  const request = rowPatch(randomUUID(), null, { label: "Личная строка", value: "Дуб" });
-  assert.equal((await patchProductCore(engineer, request, f.transaction)).kind, "saved");
-  f.beforeLock(() => { f.row.engineerId = "replacement"; });
-  const revoked = await patchProductCore(engineer, request, f.transaction);
-  assert.equal(revoked.kind, "forbidden");
-  assert.equal("currentValue" in revoked, false);
-  const db = { product: { findMany: async () => [] } } as unknown as Parameters<typeof maskProductionRead>[0];
-  const [masked] = await maskProductionRead(db, { id: "field", roles: ["WORKER"] }, [f.row]);
-  assert.equal(masked.description, null);
-  assert.equal(masked.technicalSpecifications, null);
-  assert.equal(masked.canReadTechnicalSpecifications, false);
+  f.row.status = "INSTALLATION";
+  const actor = { ...manager, roles: ["MANAGER", "MOUNTER"] as Role[] };
+  const request = rowPatch(randomUUID(), null, { label: "Фурнитура", value: "Петли с доводчиком" });
+  assert.equal((await patchProductCore(actor, request, f.transaction)).kind, "saved");
+  assert.equal(f.row.technicalSpecifications?.sections[0].value, "Петли с доводчиком");
+});
+
+test("производственные роли читают строки в сохранённом порядке и используют прежний текст только при отсутствии JSON", () => {
+  const description = "Корпус: берёза";
+  const empty: TechnicalSpecifications = { sections: [], description: null, size: null, note: null, sourceGeneration: 0 };
+  const saved = { ...empty, sections: [{ ...custom, label: "Петли", value: "С доводчиком" }, { ...body, value: "Дуб" }] };
+  const rows = [
+    { id: "current", description, technicalSpecifications: saved },
+    { id: "legacy", description, technicalSpecifications: null },
+    { id: "cleared", description, technicalSpecifications: empty },
+  ];
+  const before = structuredClone(rows);
+  for (const roles of [["WORKER"], ["MOUNTER"], ["WORKER", "MOUNTER"]] as Role[][]) {
+    const projected = maskProductionRead({ id: "field", roles }, rows);
+    assert.deepEqual(projected.map(row => effectiveProductSpecifications(row.technicalSpecifications, row.description)
+      ?.sections.map(section => [section.label, section.value])), [
+      [["Петли", "С доводчиком"], ["Корпус", "Дуб"]], [["Корпус", "берёза"]], [],
+    ]);
+  }
+  assert.deepEqual(rows, before);
 });
 
 test("source generation blocks stale pair edits while successful receipt replay returns original ACK", async () => {

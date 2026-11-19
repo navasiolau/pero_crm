@@ -198,11 +198,11 @@ test('bot financial channel does not grant operational manager writes',()=>{
 });
 
 // Источник: product-payment-privacy.test.ts
-test("стоимость назначенного изделия скрывается у всех трёх исполнителей",async()=>{
+test("стоимость назначенного изделия скрывается у всех трёх исполнителей",()=>{
  const fixture=engineerFixture();
  for(const roles of [["ENGINEER"],["WORKER"],["MOUNTER"],["ENGINEER","WORKER"]] as Role[][]){
   const row=fixture.products[0] as {id:string;expectedPrice:unknown;initialPrice?:unknown};
-  const masked=await maskProductionRead(fixture.db as unknown as PrismaClient,{id:"engineer",roles},[row]);
+  const masked=maskProductionRead({id:"engineer",roles},[row]);
   assert.equal(masked[0].expectedPrice,null);
   assert.equal(masked[0].initialPrice,null);
   assert.equal(row.expectedPrice,100,"исходные данные нельзя менять");

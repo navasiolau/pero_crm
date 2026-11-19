@@ -1,4 +1,3 @@
-import FurnitureSpecifications from "@pero/kp-template/furniture-specifications";
 import {maskProductionRead,maskProductionWorkRead,maskTaskPaymentRead} from "@/server/access/production-read-projection";
 import type { Prisma, ProductStatus, Role } from "@prisma/client";
 
@@ -180,7 +179,7 @@ async function fetchProductRows(
     skip,
     take,
   });
-  return (await maskProductionRead(prisma,actor,rows)).map((row) => ({ ...row, canAccessDraft: canAccessProductDraft(actor.roles, row), hasB3d: row.files.length > 0,
+  return maskProductionRead(actor, rows).map((row) => ({ ...row, canAccessDraft: canAccessProductDraft(actor.roles, row), hasB3d: row.files.length > 0,
     isEngineeringParticipant: row.percentageConfigs.some((config) => config.participants.length > 0) ||
       actor.engineeringParticipantProductIds?.includes(row.id) === true }));
 }
@@ -315,7 +314,15 @@ export async function getProductFor(
       files: { where: fileVisibilityWhere(actor), orderBy: { createdAt: "desc" } },
     },
   });
-  if(!product)return null;
-  const [masked] = await maskProductionRead(prisma,actor,[{...product,canAccessDraft:canAccessProductDraft(actor.roles,product),tasks:maskTaskPaymentRead(actor,product.tasks),works:await maskProductionWorkRead(prisma,actor,product.works.map(work => ({...work,canDistributePiecework:canManagePiecework(actor.roles)&&ordinaryPieceworkBinding(work)&&work.priceSnapshot!==null})))}]);
-  return { ...masked, technicalSpecifications: masked.technicalSpecifications === null ? null : FurnitureSpecifications.normalizeProduct(masked.technicalSpecifications) };
+  if (!product) return null;
+  const [visibleProduct] = maskProductionRead(actor, [product]);
+  return {
+    ...visibleProduct,
+    canAccessDraft: canAccessProductDraft(actor.roles, product),
+    tasks: maskTaskPaymentRead(actor, product.tasks),
+    works: await maskProductionWorkRead(prisma, actor, product.works.map(work => ({
+      ...work,
+      canDistributePiecework: canManagePiecework(actor.roles) && ordinaryPieceworkBinding(work) && work.priceSnapshot !== null,
+    }))),
+  };
 }

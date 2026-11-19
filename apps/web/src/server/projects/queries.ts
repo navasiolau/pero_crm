@@ -324,7 +324,7 @@ export async function getProjectFor(
     },
   });
   if (!project) return null;
-  return projectMoneyForRoles({ ...project,tasks:maskTaskPaymentRead(actor,project.tasks), works:await maskProductionWorkRead(prisma,actor,project.works.map(work => ({...work,canDistributePiecework:canManagePiecework(actor.roles)&&ordinaryPieceworkBinding(work)&&work.priceSnapshot!==null}))),communications: project.communications ?? [], products: (await maskProductionRead(prisma,actor,project.products)).map((product) => ({
+  return projectMoneyForRoles({ ...project,tasks:maskTaskPaymentRead(actor,project.tasks), works:await maskProductionWorkRead(prisma,actor,project.works.map(work => ({...work,canDistributePiecework:canManagePiecework(actor.roles)&&ordinaryPieceworkBinding(work)&&work.priceSnapshot!==null}))),communications: project.communications ?? [], products: maskProductionRead(actor, project.products).map((product) => ({
     ...product, canAccessDraft: canAccessProductDraft(actor.roles, product), statusHistory: product.statusHistory ?? [], hasB3d: product.files.length > 0,
     isEngineeringParticipant: product.percentageConfigs.some((config) => config.participants.length > 0) ||
       actor.engineeringParticipantProductIds?.includes(product.id) === true,
