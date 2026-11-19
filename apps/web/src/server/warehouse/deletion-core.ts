@@ -26,6 +26,8 @@ async function loadPlan(tx:Tx,actor:DomainActor,movementId:string){
   const state=await warehouseWriteGate(tx);
   const root=await tx.stockMovement.findUnique({where:{id:movementId},include:{warehouseValuation:true}});
   if(!root||root.deletionId)throw Error('Движение не найдено или уже удалено');
+  if(await tx.expenseReceiptLine.findUnique({where:{movementId},select:{id:true}}))
+    throw Error('Оприходование расхода отменяется целиком в журнале действий');
   if(root.warehouseValuation?.runId!==state.runId)throw incomplete();
   await tx.$queryRaw`SELECT id FROM "Material" WHERE id=${root.materialId} FOR UPDATE`;
   const [material,balance,rows]=await Promise.all([

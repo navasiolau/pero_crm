@@ -8,14 +8,14 @@ export interface ListPreferenceStore {
 export type SaveListPreferenceResult = { ok: boolean; value: string | null };
 
 export function createListPreferenceService(deps: {
-  sessionUser: () => Promise<string | null>;
+  sessionUser: (section: ListSection) => Promise<string | null>;
   store: ListPreferenceStore;
   revision: () => string;
 }) {
   async function owner(section: ListSection) {
-    const userId = await deps.sessionUser();
-    if (!userId) throw new Error("Не авторизован");
     if (!isListSection(section)) throw new Error("Неизвестный раздел списка");
+    const userId = await deps.sessionUser(section);
+    if (!userId) throw new Error("Не авторизован");
     return userId;
   }
 
