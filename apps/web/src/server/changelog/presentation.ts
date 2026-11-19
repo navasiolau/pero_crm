@@ -244,7 +244,7 @@ export function buildJournalPresentation(entry: JournalEntryInput, hints: Journa
   return { version: 1, kind, actor: { type: actor.type, id: safeText(actor.id), name: safeText(actor.name) },
     ...(hints.initiator ? { initiator: { id: safeText(hints.initiator.id), name: safeText(hints.initiator.name) } } : {}),
     ...(hints.reason ? { reason: safeText(hints.reason) } : {}), entity, contexts: safeContexts(contexts),
-    action: { code: safeText(entry.action), label: journalActionLabel(entry.action) },
+    action: { code: safeText(entry.action), label: entry.reversesId ? `Откат действия ${safeText(entry.reversesId)}` : journalActionLabel(entry.action) },
     source: { code: safeText(entry.source ?? "web"), label: journalSourceLabel(entry.source ?? "web") },
     changes, links, technical: sanitizeJournalValue(technical) as Record<string, JournalValue> };
 }

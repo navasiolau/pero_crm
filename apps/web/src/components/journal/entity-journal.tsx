@@ -7,7 +7,7 @@ import { Journal } from "@/components/journal/journal";
 
 type EntityScope = Exclude<JournalScope, { kind: "global" }>;
 
-/** Родительская server page создаёт этот компонент исключительно для ADMIN. */
+/** Родительская server page создаёт этот компонент для администратора или директора. */
 export function EntityJournal({ scope, whenVisible = false }: { scope: EntityScope; whenVisible?: boolean }) {
   return <JournalMount key={`${scope.kind}:${scope.id}:${whenVisible}`} scope={scope} whenVisible={whenVisible}/>;
 }

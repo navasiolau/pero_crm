@@ -11,14 +11,14 @@ test('real list/detail/options actions deny all non-admin roles before transacti
  inject('../src/lib/prisma',{prisma:{$transaction:async()=>{transactions++;throw Error('Unexpected database access');}}});
  inject('../src/server/changelog/sql-store',{createJournalReadStore:()=>{reads++;throw Error('Unexpected journal access');}});
  const actions=require('../src/server/changelog/actions') as typeof import('../src/server/changelog/actions');
- for(const denied of [['DIRECTOR'],['PROCUREMENT'],['ACCOUNTANT'],['MANAGER'],['ENGINEER'],['WORKER'],['MOUNTER'],['WORK_COORDINATOR'],['WORK_COORDINATOR','WORKER'],['MANAGER','ENGINEER'],['ACCOUNTANT','PROCUREMENT'],[]] as Role[][]){
+ for(const denied of [['PROCUREMENT'],['ACCOUNTANT'],['MANAGER'],['ENGINEER'],['WORKER'],['MOUNTER'],['WORK_COORDINATOR'],['WORK_COORDINATOR','WORKER'],['MANAGER','ENGINEER'],['ACCOUNTANT','PROCUREMENT'],[]] as Role[][]){
   roles=denied;
   await assert.rejects(()=>actions.listJournal({scope:{kind:'global'}}),/Недостаточно прав/);
   await assert.rejects(()=>actions.getJournalEntry('known-event',{kind:'product',id:'product'}),/Недостаточно прав/);
   await assert.rejects(()=>actions.listJournalFilterOptions({kind:'project',id:'project'}),/Недостаточно прав/);
  }
  assert.equal(transactions,0);assert.equal(reads,0);
- roles=['ADMIN'];
+ roles=['DIRECTOR'];
  await assert.rejects(()=>actions.listJournal({scope:{kind:'project',id:''}}),/контекст/);
  await assert.rejects(()=>actions.listJournalFilterOptions({kind:'client',id:'wrong'} as never),/контекст/);
  assert.equal(transactions,0);
