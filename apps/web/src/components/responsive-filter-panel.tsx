@@ -18,10 +18,12 @@ export function ResponsiveFilterPanel({
   active,
   pending,
   onModalActiveChange,
+  closeLabel = "Показать результаты",
 }: {
   children: ReactNode;
   active: boolean;
   pending?: boolean;
+  closeLabel?: string;
   onModalActiveChange?: (active: boolean) => void;
 }) {
   const isMobile = useIsMobile();
@@ -71,7 +73,7 @@ export function ResponsiveFilterPanel({
             {children}
           </div>
           <SheetFooter className="shrink-0 border-t bg-popover">
-            <Button onClick={() => changeOpen(false)}>Показать результаты</Button>
+            <Button onClick={() => changeOpen(false)}>{closeLabel}</Button>
           </SheetFooter>
         </SheetContent>
       </Sheet>
