@@ -282,7 +282,6 @@ before(async () => {
   visibility = scope.load("../src/server/access/visibility"); notifications = scope.load("../src/server/access/notification-visibility");
   stock = scope.load("../src/server/warehouse/accounting");
   scope.load("../src/server/warehouse/expense-receipt-core");
-  scope.load("../src/server/changelog/reversal-core");
   priceActions = scope.load("../src/server/prices/actions");
   worksCore = scope.load("../src/server/works/core");
   workUpdate = scope.load("../src/server/works/update-core"); workQueries = scope.load("../src/server/works/queries");
@@ -301,6 +300,8 @@ before(async () => {
   payments = scope.load("../src/server/payments/service");
   projectCore = scope.load("../src/server/projects/core"); proposals = scope.load("../src/server/kp/proposal-core");
   startupPlugins = scope.load("../src/server/plugins/sync"); telegramRegistration = scope.load("../src/server/telegram/mutation-core");
+  // Реестр отката импортирует доменные команды. Загружаем его после их установки в тестовую транзакцию.
+  scope.load("../src/server/changelog/reversal-core");
 });
 after(async () => { if (fixture) try { scope?.restore(); await fixture.verifyProtected(); } finally { await fixture.dispose(); } });
 
