@@ -1,6 +1,6 @@
 import type { NextAuthConfig } from "next-auth";
 
-import { ADVANCE_ROLES, FINANCE_ROLES, PAYROLL_MANAGE_ROLES, hasAnyRole } from "@/lib/roles";
+import { ADMIN_ROLES, ADVANCE_ROLES, FINANCE_ROLES, PAYROLL_MANAGE_ROLES, hasAnyRole } from "@/lib/roles";
 import { homePathForRoles } from "@/lib/home-route";
 import { canAccessSettingsPath } from "@/lib/settings-access";
 import {canAccessOperationalPath} from '@/lib/operational-access';
@@ -46,7 +46,7 @@ export const authConfig = {
       const isAdminOnly = adminOnlyPrefixes.some((prefix) =>
         pathname.startsWith(prefix),
       );
-      if (isAdminOnly && !hasAnyRole(roles, ["ADMIN"])) {
+      if (isAdminOnly && !hasAnyRole(roles, ADMIN_ROLES)) {
         return Response.redirect(new URL("/", request.nextUrl));
       }
 

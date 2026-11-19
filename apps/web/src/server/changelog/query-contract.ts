@@ -6,7 +6,7 @@ export type JournalQueryInput={scope?:JournalScope;q?:string;actorId?:string;ent
 export type JournalQuery={scope:JournalScope;q:string;actorId:string;entity:string;fromAt:Date|null;toBefore:Date|null;page:number;pageSize:number;sort:JournalSort;dir:'asc'|'desc'};
 export type JournalListRow={id:string;createdAt:string;actorName:string;entityLabel:string;actionLabel:string;changeCount:number;hasChanges:boolean};
 export type JournalPage={entries:JournalListRow[];total:number;page:number;pageSize:number;sort:JournalSort;dir:'asc'|'desc'};
-export type JournalEntryDetail={id:string;createdAt:string;presentation:JournalPresentation};
+export type JournalEntryDetail={id:string;createdAt:string;presentation:JournalPresentation;reversalAvailable?:boolean};
 export type JournalFilterOption={id:string;label:string};
 export type JournalFilterOptions={users:JournalFilterOption[];entities:JournalFilterOption[]};
 
