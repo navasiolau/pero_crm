@@ -8,7 +8,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 const web = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const require = createRequire(path.join(web, "package.json"));
 
-test("actual journal page checks ADMIN before rendering and passes only initial filters", async () => {
+test("actual journal page checks ADMIN or DIRECTOR before rendering and passes only initial filters", async () => {
   const boundaries = {
     "journal-page-fixture": "export const state={session:null,renders:0,props:null};",
     "@/auth": "import{state}from'journal-page-fixture';export const auth=async()=>state.session;",
@@ -29,12 +29,12 @@ test("actual journal page checks ADMIN before rendering and passes only initial 
   loaded._compile(built.outputFiles[0].text, filename);
   const { page, state } = loaded.exports;
   await assert.rejects(() => page({ searchParams: Promise.resolve({}) }), /LOGIN_REQUIRED/);
-  for (const roles of [["DIRECTOR"], ["MANAGER"], ["ENGINEER"], ["ACCOUNTANT"], ["PROCUREMENT"], ["WORKER"], ["MOUNTER"], ["WORK_COORDINATOR"], ["WORK_COORDINATOR", "WORKER"], ["MANAGER", "ENGINEER"], ["ACCOUNTANT", "PROCUREMENT"], []]) {
+  for (const roles of [["MANAGER"], ["ENGINEER"], ["ACCOUNTANT"], ["PROCUREMENT"], ["WORKER"], ["MOUNTER"], ["WORK_COORDINATOR"], ["WORK_COORDINATOR", "WORKER"], ["MANAGER", "ENGINEER"], ["ACCOUNTANT", "PROCUREMENT"], []]) {
     state.session = { user: { id: "actor", roles } };
     await assert.rejects(() => page({ searchParams: Promise.resolve({ q: "secret" }) }), /Недостаточно прав/);
   }
   assert.equal(state.renders, 0);
-  state.session = { user: { id: "actor", roles: ["ADMIN"] } };
+  state.session = { user: { id: "actor", roles: ["DIRECTOR"] } };
   const html = renderToStaticMarkup(await page({ searchParams: Promise.resolve({ q: "Полка", actorId: "archived-user", entity: "product", page: "2", pageSize: "50", sort: "actor", dir: "asc" }) }));
   assert.match(html, /Журнал изменений/);
   assert.equal(state.renders, 1);

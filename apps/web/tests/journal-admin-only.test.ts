@@ -6,10 +6,10 @@ import { NextRequest } from "next/server";
 import { navItemsForRole } from "../src/lib/nav";
 import { authConfig } from "../src/auth.config";
 
-const denied: Role[][] = [["DIRECTOR"], ["PROCUREMENT"], ["ACCOUNTANT"], ["MANAGER"], ["ENGINEER"], ["WORKER"], ["MOUNTER"], ["WORK_COORDINATOR"], ["WORK_COORDINATOR", "WORKER"], ["MANAGER", "ENGINEER"], ["ACCOUNTANT", "PROCUREMENT"], []];
-test("global Journal navigation and actual route callback grant ADMIN only", () => {
-  for (const roles of [["ADMIN"] as Role[], ...denied]) {
-    const allowed = roles.includes("ADMIN");
+const denied: Role[][] = [["PROCUREMENT"], ["ACCOUNTANT"], ["MANAGER"], ["ENGINEER"], ["WORKER"], ["MOUNTER"], ["WORK_COORDINATOR"], ["WORK_COORDINATOR", "WORKER"], ["MANAGER", "ENGINEER"], ["ACCOUNTANT", "PROCUREMENT"], []];
+test("global Journal navigation and actual route callback grant ADMIN and DIRECTOR only", () => {
+  for (const roles of [["ADMIN"] as Role[], ["DIRECTOR"] as Role[], ...denied]) {
+    const allowed = roles.includes("ADMIN") || roles.includes("DIRECTOR");
     assert.equal(navItemsForRole(roles).some(item => item.href === "/changelog"), allowed, `navigation ${roles}`);
     for (const path of ["/changelog", "/changelog/", "/changelog/export"]) {
       const result = authConfig.callbacks.authorized({ auth: { user: { id: "actor", roles, sessionVersion: 0 }, expires: "2099-01-01" }, request: new NextRequest(`http://example.invalid${path}`) });
@@ -36,7 +36,7 @@ test("real global Journal query and page reject non-admin before reading audit r
     await assert.rejects(() => page({ searchParams: Promise.resolve({}) }), /Недостаточно прав/);
   }
   assert.equal(reads, 0);
-  roles = ["ADMIN"];
+  roles = ["DIRECTOR"];
   assert.deepEqual(await listGlobalChangeLog({ actor: "Ivan", entity: "task", from: "2026-10-01", to: "2026-10-03" }), []);
   assert.equal(reads, 1);
   assert.deepEqual(lastInput, { where: { NOT: { OR: [

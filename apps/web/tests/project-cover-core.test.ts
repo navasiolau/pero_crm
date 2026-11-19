@@ -51,6 +51,11 @@ test('confirmed delete retains exact file identity and emits no storage purge',a
  assert.equal(f.events.size,0);assert.equal(f.project.coverFileId,null);
  assert.equal(f.files.get('file-0')?.storedName,'owned.png');assert.equal(f.files.get('file-0')?.deletedById,actor.id);
  assert.ok(f.files.get('file-0')?.deletedAt instanceof Date);
+ const rootId='file-delete:'+request.clientMutationId;
+ const root=f.logs.get(rootId)!;
+ assert.equal((root.reversal as {kind:string}).kind,'file.retained');
+ assert.equal([...f.logs.values()].find(row=>row.entity==='project'&&row.action==='cover.delete')?.operationRootId,rootId);
+
  const repeated=await deleteProjectCoverCore(f.tx,actor,request);assert.equal(repeated.ok,true);if(repeated.ok)assert.equal(repeated.repeated,true);
 });
 test('audit error rolls back new file and pointer in transaction',async()=>{const f=fixture();f.failAudit();await assert.rejects(f.transaction(()=>persistProjectCoverUpload(f.tx,actor,input,upload)),/AUDIT_FAILURE/);assert.equal(f.project.coverFileId,null);assert.equal(f.files.size,0);assert.equal(f.logs.size,0);});

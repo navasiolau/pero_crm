@@ -1,3 +1,5 @@
+import type { JournalReversalCommand } from './reversal-contract';
+
 /** Безопасные данные журнала, пригодные для передачи через RSC и Server Actions. */
 export type JournalValue = null | boolean | number | string | JournalValue[] | { [key: string]: JournalValue };
 
@@ -5,6 +7,9 @@ export type JournalScope = { kind: "global" } | { kind: "project" | "product"; i
 
 export interface JournalEntryInput {
   id?: string;
+  operationRootId?: string;
+  reversal?: JournalReversalCommand;
+  reversesId?: string;
   actorType: string;
   actorId: string;
   actorName?: string | null;

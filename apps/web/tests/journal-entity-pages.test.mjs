@@ -82,14 +82,14 @@ async function actualPages() {
   return loaded.exports;
 }
 
-test("actual project/product pages expose journal only to ADMIN and preserve stable entity context", async () => {
+test("actual project/product pages expose journal only to ADMIN or DIRECTOR and preserve stable entity context", async () => {
   const { projectPage, productPage, state } = await actualPages();
   const roles = [["ADMIN"], ["DIRECTOR"], ["MANAGER"], ["ENGINEER"], ["ACCOUNTANT"], ["PROCUREMENT"], ["WORKER"], ["MOUNTER"], ["WORK_COORDINATOR"], ["WORK_COORDINATOR", "WORKER"], ["MANAGER", "ENGINEER"], ["ACCOUNTANT", "PROCUREMENT"]];
   for (const combination of roles) {
     state.roles = combination; state.journalRenders = [];
     const project = renderToStaticMarkup(await projectPage({ params: Promise.resolve({ id: "203-alias" }), searchParams: Promise.resolve({ tab: "journal", returnTo: "/projects?view=table" }) }));
     const product = renderToStaticMarkup(await productPage({ params: Promise.resolve({ id: "203.1" }), searchParams: Promise.resolve({ returnTo: "/products?view=table" }) }));
-    if (combination.includes("ADMIN")) {
+    if (combination.includes("ADMIN") || combination.includes("DIRECTOR")) {
       assert.ok(project.slice(project.lastIndexOf('data-slot="tabs-trigger"')).split("</button>")[0].endsWith(">Журнал"), "Journal must be the final project tab");
       assert.deepEqual(state.journalRenders, [{ kind: "project", id: "project-stable" }]);
       assert.match(project, /data-scope-id="project-stable"/);

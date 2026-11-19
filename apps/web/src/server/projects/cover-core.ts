@@ -4,6 +4,7 @@ import {Prisma} from '@prisma/client';
 import {canManageProjectFiles} from '@/lib/file-management';
 import {isCoverImageMime} from '@/lib/product-cover';
 import {assertWritableFileStorageKey} from '@/server/files/storage-binding-fence';
+import {retainedFileReversal,retainedFileReversalState} from "@/server/files/retained-file-reversal";
 import {lockFileDeletionRequest,persistFileDeleteIntent} from '@/server/files/delete-intent';
 import {currentFileDeleteStorageIdentity} from '@/server/files/delete-storage';
 import type {FileDeleteStorageIdentity} from '@/server/files/delete-contract';
@@ -56,10 +57,15 @@ export async function persistProjectCoverUpload(tx:Tx,actor:Actor,input:ProjectC
  await assertWritableFileStorageKey(tx,input.projectId,file.storedName);
  const row=await tx.file.create({data:{projectId:input.projectId,productId:null,taskId:null,section:'GENERAL',fileName:file.fileName,storedName:file.storedName,mimeType:file.mimeType,size:file.size,hasThumb:file.hasThumb,uploadedById:actor.id}});
  if((await tx.project.updateMany({where:{id:input.projectId,coverFileId:null},data:{coverFileId:row.id}})).count!==1)throw Error('PROJECT_COVER_CAS_RACE');
- await writeChangeLogInTransaction(tx, {actorType:'user',actorId:actor.id,actorName:actor.name??undefined,entity:'file',entityId:row.id,action:'create',newValue:{project:project.number,fileName:file.fileName,section:'GENERAL'}},
-  {...projectJournalContext(project),entity:{type:'file',id:row.id,label:file.fileName},before:null,after:{fileName:file.fileName,section:'GENERAL',mimeType:file.mimeType,size:file.size}});
- await writeChangeLogInTransaction(tx, {actorType:'user',actorId:actor.id,actorName:actor.name??undefined,entity:'project',entityId:project.id,action:'cover.upload',field:'coverFileId',oldValue:{coverFileId:null},newValue:{coverFileId:row.id}},
+ const operationRootId = 'project-cover-upload:' + input.clientMutationId;
+ await writeChangeLogInTransaction(tx, {id:operationRootId,actorType:'user',actorId:actor.id,actorName:actor.name??undefined,
+  entity:'project',entityId:project.id,action:'cover.upload',field:'coverFileId',oldValue:{coverFileId:null},newValue:{coverFileId:row.id},
+  reversal:retainedFileReversal.command({files:[retainedFileReversalState(row,null,true)],
+   pointer:{kind:'project',id:project.id,expectedFileId:row.id,fileId:null}})},
   {...projectJournalContext(project),links:[{type:'file',id:row.id,label:file.fileName}]});
+ await writeChangeLogInTransaction(tx, {operationRootId,actorType:'user',actorId:actor.id,actorName:actor.name??undefined,
+  entity:'file',entityId:row.id,action:'create',newValue:{project:project.number,fileName:file.fileName,section:'GENERAL'}},
+  {...projectJournalContext(project),entity:{type:'file',id:row.id,label:file.fileName},before:null,after:{fileName:file.fileName,section:'GENERAL',mimeType:file.mimeType,size:file.size}});
  const result:ProjectCoverResult={ok:true,id:row.id,coverFileId:row.id,clientMutationId:input.clientMutationId};
  await receipt(tx,actor,project.id,input.clientMutationId,fingerprint,result);return result;
 }
@@ -75,10 +81,12 @@ export async function deleteProjectCoverCore(tx:Tx,actor:Actor,input:ProjectCove
  if(!file)return fail('not-found','Файл не найден');
  if(file.projectId!==project.id||file.productId!==null||file.taskId!==null||!isCoverImageMime(file.mimeType))return fail('validation','Файл не является обложкой этого проекта');
  const identity=storage??currentFileDeleteStorageIdentity();
- await persistFileDeleteIntent(tx,actor,file,input.clientMutationId,identity);
+ const deletedAt = new Date();
+ const {eventId:operationRootId}=await persistFileDeleteIntent(tx,actor,file,input.clientMutationId,identity,deletedAt,
+  {kind:"project",id:project.id,expectedFileId:null,fileId:file.id});
  if((await tx.project.updateMany({where:{id:project.id,coverFileId:file.id},data:{coverFileId:null}})).count!==1)throw Error('PROJECT_COVER_DELETE_CAS_RACE');
- await tx.file.update({where:{id:file.id},data:{deletedAt:new Date(),deletedById:actor.id}});
- await writeChangeLogInTransaction(tx, {actorType:'user',actorId:actor.id,actorName:actor.name??undefined,entity:'project',entityId:project.id,action:'cover.delete',field:'coverFileId',oldValue:{coverFileId:file.id},newValue:{coverFileId:null}},
+ await tx.file.update({where:{id:file.id},data:{deletedAt,deletedById:actor.id}});
+ await writeChangeLogInTransaction(tx, {operationRootId,actorType:'user',actorId:actor.id,actorName:actor.name??undefined,entity:'project',entityId:project.id,action:'cover.delete',field:'coverFileId',oldValue:{coverFileId:file.id},newValue:{coverFileId:null}},
   {...projectJournalContext(project),links:[{type:'file',id:file.id,label:file.fileName}]});
  const result:ProjectCoverResult={ok:true,coverFileId:null,clientMutationId:input.clientMutationId};
  await receipt(tx,actor,project.id,input.clientMutationId,fingerprint,result);return result;
