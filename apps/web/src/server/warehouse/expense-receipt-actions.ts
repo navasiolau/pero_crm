@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireFinance } from "@/server/require-role";
+import { financeSessionSource } from "@/server/telegram/finance-session";
 import { withMutationTransaction } from "@/server/transactions/coordinator";
 import { confirmMutation } from "@/server/operations/confirmation";
 import { deliverPostCommit } from "@/server/operations/post-commit";
@@ -12,8 +13,9 @@ import { ExpenseReceiptConflict, loadExpenseReceiptPreview, postExpenseReceiptIn
 import { expenseReceiptPreviewSchema, expenseReceiptSchema } from "./expense-receipt-contracts";
 
 async function currentActor() {
-  const { user } = await requireFinance();
-  return { id: user.id, name: user.name ?? "", roles: user.roles, source: "web" as const };
+  const session = await requireFinance();
+  const { user } = session;
+  return { id: user.id, name: user.name ?? "", roles: user.roles, source: financeSessionSource(session) };
 }
 
 export async function previewExpenseReceipt(input: unknown) {
