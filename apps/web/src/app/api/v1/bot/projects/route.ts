@@ -2,7 +2,7 @@ import {liveProjectWhere} from "@/server/access/live-entities";
 import { NextResponse } from "next/server";
 
 import { hasAnyRole, MANAGER_ROLES } from "@/lib/roles";
-import { listFinanceProjectRefs } from "@/server/finance/project-refs";
+import { financeProjectRefSelect, listFinanceProjectRefs } from "@/server/finance/project-refs";
 import { prisma } from "@/lib/prisma";
 
 import { authenticate, isErrorResponse } from "@/server/api/auth";
@@ -10,6 +10,7 @@ import { createProjectCore } from "@/server/projects/core";
 import {
   domainError,
   isActorError,
+  requireBotFinance,
   requireBotManager,
   resolveBotActor,
 } from "@/server/telegram/bot-api";
@@ -21,9 +22,17 @@ export async function GET(request: Request) {
   if (isErrorResponse(auth)) return auth;
   const actor = await resolveBotActor(request);
   if (isActorError(actor)) return actor;
-  const q = new URL(request.url).searchParams.get("q")?.trim() ?? "";
+  const query = new URL(request.url).searchParams;
+  const ref = query.get("ref");
+  if (ref !== null) {
+    const gate = requireBotFinance(actor);
+    if (gate) return gate;
+    if (!/^[A-Za-z0-9_-]{1,128}$/.test(ref)) return NextResponse.json({ ok: false, error: "Некорректный проект" }, { status: 400 });
+    const project = await prisma.project.findFirst({ where: { ...liveProjectWhere, id: ref }, select: financeProjectRefSelect });
+    return NextResponse.json({ ok: true, projects: project ? [project] : [] });
+  }
+  const q = query.get("q")?.trim() ?? "";
   if (!hasAnyRole(actor.roles, MANAGER_ROLES)) {
-    const { requireBotFinance } = await import("@/server/telegram/bot-api");
     const gate = requireBotFinance(actor);
     if (gate) return gate;
     return NextResponse.json({ ok: true, projects: await listFinanceProjectRefs(actor, q) });

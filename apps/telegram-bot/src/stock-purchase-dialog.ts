@@ -1,3 +1,4 @@
+import { submitFinanceCommand } from "./finance-checkpoint";
 import { randomUUID } from "node:crypto";
 import { crm, CrmError, type DirectoryItem, type StockReceiptQuote } from "./crm";
 import { dialogChoices, dialogChoice, positiveDecimalDraft, CANCEL_ROW as cancel, type DialogContext } from "./dialog-choices";
@@ -177,7 +178,7 @@ export async function stockPurchaseCallback(ctx: FlowContext, chatId: number, ac
     if (args[1] === "rate" && dialog.step === "quote" && dialog.input.currency !== "BYN") { dialog.step="rate"; dialog.retryRate=true; await ctx.reply(chatId,`Курс BYN за 1 ${dialog.input.currency}:`,[cancel]); return; }
     if (args[1] !== "ok" || dialog.step !== "confirm" || !dialog.quote) { await ctx.reply(chatId,"Сначала завершите ввод закупки."); return; }
     try {
-      const response = await crm.createStockReceipt(actorId,dialog.input);
+      const response = await submitFinanceCommand(chatId, { kind: "purchase", actorId, input: dialog.input });
       if (response.ok) {
         if (ctx.getDialog(chatId) === dialog) ctx.setDialog(chatId,null);
         await ctx.reply(chatId,`✅ Материал принят на склад. Из кассы списано ${formatMoney(dialog.quote.amount,dialog.quote.currency)}.`);
