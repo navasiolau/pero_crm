@@ -21,13 +21,34 @@ export async function deleteOrdinaryFileCore(tx:Prisma.TransactionClient,identit
   if(!context||typeof context!=="object"||Array.isArray(context)||typeof context.projectId!=="string"||(context.productId!==null&&typeof context.productId!=="string")||(context.taskId!==null&&typeof context.taskId!=="string")||(context.uploadedById!==null&&typeof context.uploadedById!=="string")||!result||typeof result!=="object"||Array.isArray(result)||result.ok!==true||result.fileId!==input.fileId||result.clientMutationId!==input.clientMutationId)throw Error("FILE_DELETE_RECEIPT_INVALID");
   const fileContext={projectId:context.projectId,productId:context.productId,taskId:context.taskId,uploadedById:context.uploadedById};
   if(!await tx.project.findFirst({where:{AND:[{id:context.projectId},projectVisibilityWhere(actor)]},select:{id:true}})||!await mayDeleteStoredFile(tx,actor,fileContext))return failure("Недостаточно прав");
+  if(await tx.file.findUnique({where:{id:input.fileId,deletedAt:null},select:{id:true}}))return failure("Удаление файла уже отменено");
   return{ok:true,fileId:input.fileId,clientMutationId:input.clientMutationId,projectId:context.projectId,productId:context.productId,repeated:true};
  }
+
+ const context = await tx.file.findFirst({ where: { AND: [{ id: input.fileId }, fileVisibilityWhere(actor)] },
+  select: { projectId: true, productId: true } });
+ if (!context) return failure("Файл не найден");
+ // Обложки и эскизы блокируют владельца указателя раньше самого файла.
+ await tx.$queryRaw(Prisma.sql`SELECT id FROM "Project" WHERE id=${context.projectId} FOR UPDATE`);
+ if (context.productId) await tx.$queryRaw(Prisma.sql`SELECT id FROM "Product" WHERE id=${context.productId} FOR UPDATE`);
  await tx.$queryRaw(Prisma.sql`SELECT id FROM "File" WHERE id=${input.fileId} FOR UPDATE`);
- const file=await tx.file.findFirst({where:{AND:[{id:input.fileId},fileVisibilityWhere(actor)]}});
+ const file=await tx.file.findFirst({where:{AND:[{id:input.fileId,projectId:context.projectId,productId:context.productId},fileVisibilityWhere(actor)]}, include:{coverForProject:{select:{id:true}},sketchForProduct:{select:{id:true}}}});
  if(!file)return failure("Файл не найден");
  if(!await mayDeleteStoredFile(tx,actor,file))return failure("Недостаточно прав");
  await lockFileStorageBinding(tx,file.projectId,file.storedName);
- await tx.file.delete({where:{id:file.id}});
- return(await persistFileDeleteIntent(tx,{id:actor.id,name:user.name},file,input.clientMutationId,storage)).result;
+ if ((file.coverForProject && file.sketchForProduct) ||
+  (file.coverForProject && file.coverForProject.id !== context.projectId) ||
+  (file.sketchForProduct && file.sketchForProduct.id !== context.productId))
+  return failure("Проверьте привязку файла в карточке проекта");
+ if (file.coverForProject)
+  await tx.project.update({ where: { id: file.coverForProject.id, coverFileId: file.id }, data: { coverFileId: null } });
+ if (file.sketchForProduct)
+  await tx.product.update({ where: { id: file.sketchForProduct.id, sketchFileId: file.id }, data: { sketchFileId: null } });
+
+ const deletedAt = new Date();
+ await tx.file.update({where:{id:file.id},data:{deletedAt,deletedById:actor.id}});
+ const owner = file.coverForProject ? { kind: "project" as const, id:file.coverForProject.id }
+  : file.sketchForProduct ? { kind: "product" as const, id:file.sketchForProduct.id } : undefined;
+ return(await persistFileDeleteIntent(tx,{id:actor.id,name:user.name},file,input.clientMutationId,storage,deletedAt,
+  owner && {...owner,expectedFileId:null,fileId:file.id})).result;
 }

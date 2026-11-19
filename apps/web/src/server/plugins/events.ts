@@ -1,8 +1,6 @@
 import { prisma } from "@/lib/prisma";
-import { executeObsoleteSketchCleanup } from "@/server/products/sketch-cleanup-core";
 import { OBSOLETE_SKETCH_EVENT } from "@/server/products/sketch-cleanup-contract";
 import { FILE_STORAGE_DELETE_EVENT } from "@/server/files/delete-contract";
-import { executeFileDeleteCleanup } from "@/server/files/delete-storage";
 import { buildPluginContext } from "./context";
 import { getManifest } from "./registry";
 import { createPostgresSubscriberStore } from "./event-subscriber-store";
@@ -17,14 +15,8 @@ export async function emitDomainEvent(type: string, payload: unknown, actor = "s
 }
 
 async function deliverEvent(event: OwnedDomainEvent, ownership: EventDeliveryContext): Promise<void> {
-  if (event.type === FILE_STORAGE_DELETE_EVENT) {
-    await executeFileDeleteCleanup(event, prisma, ownership);
-    return;
-  }
-  if (event.type === OBSOLETE_SKETCH_EVENT) {
-    await executeObsoleteSketchCleanup(event, prisma, ownership);
-    return;
-  }
+  // Старые задания относились к уже принятым файлам. Их байты сохраняются для восстановления.
+  if (event.type === FILE_STORAGE_DELETE_EVENT || event.type === OBSOLETE_SKETCH_EVENT) return;
   const enabledPlugins = await prisma.plugin.findMany({ where: { enabled: true } });
   if (!ownership.isActive() || !await ownership.ensureOwned()) throw new EventDeliveryError("EVENT_CLAIM_LOST");
   const store = createPostgresSubscriberStore(prisma, getEventQueueSettings());

@@ -6,11 +6,12 @@ import {MANAGER_ROLES,hasAnyRole,hasRole} from '@/lib/roles';
 import {fileVisibilityWhere,productVisibilityWhere,resolveVisibilityActor,type VisibilityActor} from '@/server/access/visibility';
 import {productDraftAccessSelect} from '@/server/access/product-draft-context';
 import {mayDeleteStoredFile} from '@/server/files/delete-permission';
-import {assertWritableFileStorageKey} from '@/server/files/storage-binding-fence';
+import {assertWritableFileStorageKey,lockFileStorageBinding} from '@/server/files/storage-binding-fence';
+import {retainedFileReversal,retainedFileReversalState} from "@/server/files/retained-file-reversal";
 import {lockFileDeletionRequest,persistFileDeleteIntent} from '@/server/files/delete-intent';
 import {currentFileDeleteStorageIdentity} from '@/server/files/delete-storage';
 import type {FileDeleteStorageIdentity} from '@/server/files/delete-contract';
-import {OBSOLETE_SKETCH_EVENT,obsoleteSketchEventId,obsoleteSketchIntentSchema} from './sketch-cleanup-contract';
+import {obsoleteSketchIntentSchema} from './sketch-cleanup-contract';
 import {sketchUploadTargetSchema,sketchBindSchema,sketchDeleteSchema,type SketchUploadTarget,type SketchBindInput,type SketchDeleteInput,type SketchResult} from './sketch-contract';
 import {productJournalContext} from '../projects/journal';
 type Tx=Prisma.TransactionClient;
@@ -31,7 +32,7 @@ async function replacementFile(tx:Tx,actor:VisibilityActor,product:CoverProduct,
  if(baseline===null)return {ok:true as const,file:null};
  if(lock)await tx.$queryRaw`SELECT id FROM "File" WHERE id=${baseline} FOR UPDATE`;
  const file=await tx.file.findFirst({where:{AND:[{id:baseline},fileVisibilityWhere(actor)]},select:{
-  id:true,projectId:true,productId:true,mimeType:true,fileName:true,storedName:true,size:true,section:true,
+  id:true,projectId:true,productId:true,taskId:true,mimeType:true,fileName:true,storedName:true,size:true,section:true,
   sketchForProduct:{select:{id:true}},coverForProject:{select:{id:true}}
  }});
  if(!file)return {ok:false as const,kind:'not-found' as const,error:'Исходный эскиз не найден'};
@@ -81,26 +82,35 @@ export async function persistUploadedProductCover(tx:Tx,actor:CoverMutationActor
  const created=await tx.file.create({data:{projectId:input.projectId,productId:input.productId,taskId:null,section:'PRODUCTION',fileName:file.fileName,storedName:file.storedName,mimeType:file.mimeType,size:file.size,hasThumb:file.hasThumb,uploadedById:actor.id},select:{id:true}});
  const changed=await tx.product.updateMany({where:{id:input.productId,sketchFileId:input.expectedSketchFileId},data:{sketchFileId:created.id}});
  if(changed.count!==1)throw Error('SKETCH_CAS_RACE');
- await writeChangeLogInTransaction(tx, {actorType:'user',actorId:actor.id,actorName:actor.name??undefined,entity:'file',entityId:created.id,action:'create',newValue:{projectId:input.projectId,productId:input.productId,fileName:file.fileName,section:'PRODUCTION'}},
-  {...productJournalContext(allowed.product),entity:{type:'file',id:created.id,label:file.fileName},before:null,after:{fileName:file.fileName,section:'PRODUCTION',mimeType:file.mimeType,size:file.size}});
- await writeChangeLogInTransaction(tx, {actorType:'user',actorId:actor.id,actorName:actor.name??undefined,entity:'product',entityId:input.productId,action:'cover.change',field:'sketchFileId',oldValue:{sketchFileId:input.expectedSketchFileId},newValue:{sketchFileId:created.id,uploaded:true}},
-  {...productJournalContext(allowed.product),before:{sketchFileId:input.expectedSketchFileId},after:{sketchFileId:created.id},
-   links:[{type:'file',id:created.id,label:file.fileName},...(baseline.file?[{type:'file',id:baseline.file.id,label:baseline.file.fileName}]:[])]});
- let cleanupEventId:string|undefined;
+ const operationRootId = 'product-sketch-upload:' + input.clientMutationId;
+ const deletedAt = new Date();
+ const states = [retainedFileReversalState({id:created.id,projectId:input.projectId,productId:input.productId,taskId:null,storedName:file.storedName},null,true)];
  if(baseline.file){
   const old=baseline.file;
-  cleanupEventId=obsoleteSketchEventId(input.clientMutationId);
-  const intent=obsoleteSketchIntentSchema.parse({projectId:old.projectId,productId:input.productId,fileId:old.id,storedName:old.storedName,newFileId:created.id,clientMutationId:input.clientMutationId});
-  await tx.file.delete({where:{id:old.id}});
-  await writeChangeLogInTransaction(tx, {actorType:'user',actorId:actor.id,actorName:actor.name??undefined,entity:'file',entityId:old.id,action:'delete',oldValue:{fileName:old.fileName,replacedById:created.id}},
-   {...productJournalContext(allowed.product),entity:{type:'file',id:old.id,label:old.fileName},before:{fileName:old.fileName,mimeType:old.mimeType,size:old.size,section:old.section},after:null});
-  await tx.domainEvent.create({data:{id:cleanupEventId,type:OBSOLETE_SKETCH_EVENT,actor:actor.id,payload:json(intent)}});
+  await lockFileStorageBinding(tx,old.projectId,old.storedName);
+  await tx.file.update({where:{id:old.id},data:{deletedAt,deletedById:actor.id}});
+  states.push(retainedFileReversalState(old,deletedAt,false));
  }
- const result:SketchResult={ok:true,id:created.id,sketchFileId:created.id,clientMutationId:input.clientMutationId,...(cleanupEventId?{cleanupEventId}:{})};
+ await writeChangeLogInTransaction(tx, {id:operationRootId,actorType:'user',actorId:actor.id,actorName:actor.name??undefined,
+  entity:'product',entityId:input.productId,action:'cover.change',field:'sketchFileId',oldValue:{sketchFileId:input.expectedSketchFileId},
+  newValue:{sketchFileId:created.id,uploaded:true},reversal:retainedFileReversal.command({files:states,
+   pointer:{kind:'product',id:input.productId,expectedFileId:created.id,fileId:input.expectedSketchFileId}})},
+  {...productJournalContext(allowed.product),before:{sketchFileId:input.expectedSketchFileId},after:{sketchFileId:created.id},
+   links:[{type:'file',id:created.id,label:file.fileName},...(baseline.file?[{type:'file',id:baseline.file.id,label:baseline.file.fileName}]:[])]});
+ await writeChangeLogInTransaction(tx, {operationRootId,actorType:'user',actorId:actor.id,actorName:actor.name??undefined,
+  entity:'file',entityId:created.id,action:'create',newValue:{projectId:input.projectId,productId:input.productId,fileName:file.fileName,section:'PRODUCTION'}},
+  {...productJournalContext(allowed.product),entity:{type:'file',id:created.id,label:file.fileName},before:null,after:{fileName:file.fileName,section:'PRODUCTION',mimeType:file.mimeType,size:file.size}});
+ if(baseline.file){
+  const old=baseline.file;
+  await writeChangeLogInTransaction(tx, {operationRootId,actorType:'user',actorId:actor.id,actorName:actor.name??undefined,
+   entity:'file',entityId:old.id,action:'delete',oldValue:{fileName:old.fileName,replacedById:created.id}},
+   {...productJournalContext(allowed.product),entity:{type:'file',id:old.id,label:old.fileName},before:{fileName:old.fileName,mimeType:old.mimeType,size:old.size,section:old.section},after:null});
+ }
+ const result:SketchResult={ok:true,id:created.id,sketchFileId:created.id,clientMutationId:input.clientMutationId};
  await receipt(tx,actor,input.productId,input.clientMutationId,'cover.upload',fingerprint,result);
  return result;
 }
-export async function bindProductSketchCore(tx:Tx,actor:CoverMutationActor,input:SketchBindInput):Promise<SketchResult>{const parsed=sketchBindSchema.safeParse(input);if(!parsed.success)return fail('validation','Обновите форму эскиза');await tx.$queryRaw`SELECT id FROM "Product" WHERE id=${input.productId} FOR UPDATE`;const allowed=await permission(tx,actor,input.productId);if(!allowed)return fail('forbidden','Недостаточно прав');const fingerprint=digest({operation:'bind',...input}),previous=await replay(tx,actor,input.productId,input.clientMutationId,fingerprint,allowed.product.sketchFileId);if(previous)return previous;if(allowed.product.sketchFileId!==null)return fail('conflict','Эскиз уже изменён другим пользователем',allowed.product.sketchFileId);const file=await tx.file.findFirst({where:{AND:[{id:input.fileId},fileVisibilityWhere(allowed.visibility)]},select:{id:true,projectId:true,productId:true,fileName:true,mimeType:true}});if(!file)return fail('not-found','Файл не найден');const invalid=validateProductCoverFile(allowed.product,file);if(invalid)return fail('validation',invalid);const changed=await tx.product.updateMany({where:{id:input.productId,sketchFileId:null},data:{sketchFileId:file.id}});if(changed.count!==1)throw Error('SKETCH_CAS_RACE');await writeChangeLogInTransaction(tx, {actorType:'user',actorId:actor.id,actorName:actor.name??undefined,entity:'product',entityId:input.productId,action:'cover.change',field:'sketchFileId',oldValue:{sketchFileId:null},newValue:{sketchFileId:file.id}},{...productJournalContext(allowed.product),links:[{type:'file',id:file.id,label:file.fileName}]});const result:SketchResult={ok:true,id:file.id,sketchFileId:file.id,clientMutationId:input.clientMutationId};await receipt(tx,actor,input.productId,input.clientMutationId,'cover.bind',fingerprint,result);return result;}
+export async function bindProductSketchCore(tx:Tx,actor:CoverMutationActor,input:SketchBindInput):Promise<SketchResult>{const parsed=sketchBindSchema.safeParse(input);if(!parsed.success)return fail('validation','Обновите форму эскиза');await tx.$queryRaw`SELECT id FROM "Product" WHERE id=${input.productId} FOR UPDATE`;const allowed=await permission(tx,actor,input.productId);if(!allowed)return fail('forbidden','Недостаточно прав');const fingerprint=digest({operation:'bind',...input}),previous=await replay(tx,actor,input.productId,input.clientMutationId,fingerprint,allowed.product.sketchFileId);if(previous)return previous;if(allowed.product.sketchFileId!==null)return fail('conflict','Эскиз уже изменён другим пользователем',allowed.product.sketchFileId);const file=await tx.file.findFirst({where:{AND:[{id:input.fileId},fileVisibilityWhere(allowed.visibility)]},select:{id:true,projectId:true,productId:true,fileName:true,mimeType:true}});if(!file)return fail('not-found','Файл не найден');const invalid=validateProductCoverFile(allowed.product,file);if(invalid)return fail('validation',invalid);const changed=await tx.product.updateMany({where:{id:input.productId,sketchFileId:null},data:{sketchFileId:file.id}});if(changed.count!==1)throw Error('SKETCH_CAS_RACE');await writeChangeLogInTransaction(tx, {actorType:'user',actorId:actor.id,actorName:actor.name??undefined,entity:'product',entityId:input.productId,action:'cover.change',field:'sketchFileId',oldValue:{sketchFileId:null},newValue:{sketchFileId:file.id},reversal:retainedFileReversal.command({files:[],pointer:{kind:'product',id:input.productId,expectedFileId:file.id,fileId:null}})},{...productJournalContext(allowed.product),links:[{type:'file',id:file.id,label:file.fileName}]});const result:SketchResult={ok:true,id:file.id,sketchFileId:file.id,clientMutationId:input.clientMutationId};await receipt(tx,actor,input.productId,input.clientMutationId,'cover.bind',fingerprint,result);return result;}
 export async function deleteProductSketchCore(tx:Tx,actor:CoverMutationActor,input:SketchDeleteInput,storage?:FileDeleteStorageIdentity):Promise<SketchResult>{
  const parsed=sketchDeleteSchema.safeParse(input);if(!parsed.success)return fail('validation','Подтвердите точный файл эскиза');
  await lockFileDeletionRequest(tx,input.clientMutationId);
@@ -112,12 +122,14 @@ export async function deleteProductSketchCore(tx:Tx,actor:CoverMutationActor,inp
  const file=await tx.file.findFirst({where:{AND:[{id:input.expectedSketchFileId},fileVisibilityWhere(allowed.visibility)]}});if(!file)return fail('not-found','Файл не найден');
  const invalid=validateProductCoverFile(allowed.product,file);if(invalid)return fail('validation',invalid);if(!await mayDeleteStoredFile(tx,allowed.visibility,file))return fail('forbidden','Недостаточно прав для удаления файла');
  const identity=storage??currentFileDeleteStorageIdentity();
- const cleanup=await persistFileDeleteIntent(tx,actor,file,input.clientMutationId,identity);
+ const deletedAt = new Date();
+ const {eventId:operationRootId}=await persistFileDeleteIntent(tx,actor,file,input.clientMutationId,identity,deletedAt,
+  {kind:"product",id:input.productId,expectedFileId:null,fileId:file.id});
  const changed=await tx.product.updateMany({where:{id:input.productId,sketchFileId:input.expectedSketchFileId},data:{sketchFileId:null}});if(changed.count!==1)throw Error('SKETCH_DELETE_CAS_RACE');
- await tx.file.delete({where:{id:file.id}});
- await writeChangeLogInTransaction(tx, {actorType:'user',actorId:actor.id,actorName:actor.name??undefined,entity:'product',entityId:input.productId,action:'cover.delete',field:'sketchFileId',oldValue:{sketchFileId:file.id},newValue:{sketchFileId:null}},
+ await tx.file.update({where:{id:file.id},data:{deletedAt,deletedById:actor.id}});
+ await writeChangeLogInTransaction(tx, {actorType:'user',actorId:actor.id,actorName:actor.name??undefined,operationRootId,entity:'product',entityId:input.productId,action:'cover.delete',field:'sketchFileId',oldValue:{sketchFileId:file.id},newValue:{sketchFileId:null}},
   {...productJournalContext(allowed.product),links:[{type:'file',id:file.id,label:file.fileName}]});
- const result:SketchResult={ok:true,sketchFileId:null,clientMutationId:input.clientMutationId,cleanupEventId:cleanup.eventId};
+ const result:SketchResult={ok:true,sketchFileId:null,clientMutationId:input.clientMutationId};
  await receipt(tx,actor,input.productId,input.clientMutationId,'cover.delete.receipt',fingerprint,result);return result;
 }
 /** Legacy callers must supply a real empty baseline/UUID; no gallery replacement bypass. */

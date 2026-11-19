@@ -5,10 +5,9 @@ import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { revalidateProductPaths } from "@/server/products/revalidate";
-import { fileDeleteRequestSchema, fileDeleteEventId, type FileDeleteResult } from "./delete-contract";
+import { fileDeleteRequestSchema, type FileDeleteResult } from "./delete-contract";
 import { deleteOrdinaryFileCore } from "./delete-core";
 import { currentFileDeleteStorageIdentity } from "./delete-storage";
-import { cleanupDeletedFile } from "./delete-cleanup";
 
 
 
@@ -25,8 +24,7 @@ export async function deleteFile(
   const storage = currentFileDeleteStorageIdentity();
   const result = await prisma.$transaction(tx => deleteOrdinaryFileCore(tx, actor, parsed.data, storage));
   if (!result.ok) return result;
-  const completed = await cleanupDeletedFile(fileDeleteEventId(clientMutationId));
   revalidatePath(`/projects/${result.projectId}`);
   await revalidateProductPaths(result.productId);
-  return { ...result, cleanupPending: !completed };
+  return { ...result, cleanupPending: false };
 }

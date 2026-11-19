@@ -12,6 +12,10 @@ export async function lockFileStorageBinding(tx:Pick<Prisma.TransactionClient,"$
 export async function assertWritableFileStorageKey(tx:Pick<Prisma.TransactionClient,"$queryRaw"|"changeLog">,projectId:string,storedName:string){
  await lockFileStorageBinding(tx,projectId,storedName);
  const [project,name]=canonical(projectId,storedName);
+ const tombstones=await tx.$queryRaw<{id:string}[]>(Prisma.sql`SELECT id FROM "File"
+  WHERE "deletedAt" IS NOT NULL AND lower("projectId")=${project} AND lower("storedName")=${name}
+  LIMIT 1`);
+ if(tombstones.length)throw new UploadError("FILE_STORAGE_KEY_RETIRED",409,"persist","Файл уже удалён. Загрузите его заново.","conflict");
  const retired=await tx.$queryRaw<{id:string;type:string;actor:string;payload:unknown}[]>(Prisma.sql`SELECT "id","type","actor","payload" FROM "DomainEvent"
   WHERE "type"=${FILE_STORAGE_DELETE_EVENT} AND lower("payload"->>'projectId')=${project} AND lower("payload"->>'storedName')=${name}`);
  for(const event of retired){
