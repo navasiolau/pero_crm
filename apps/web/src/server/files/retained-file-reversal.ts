@@ -92,9 +92,9 @@ export async function applyRetainedFileReversal(
     } });
   }
   if (data.pointer?.kind === "project")
-    await tx.project.update({ where: { id: data.pointer.id, coverFileId: data.pointer.expectedFileId }, data: { coverFileId: data.pointer.fileId } });
+    await tx.project.update({ where: { id: data.pointer.id, AND: [{ coverFileId: data.pointer.expectedFileId }] }, data: { coverFileId: data.pointer.fileId } });
   if (data.pointer?.kind === "product")
-    await tx.product.update({ where: { id: data.pointer.id, sketchFileId: data.pointer.expectedFileId }, data: { sketchFileId: data.pointer.fileId } });
+    await tx.product.update({ where: { id: data.pointer.id, AND: [{ sketchFileId: data.pointer.expectedFileId }] }, data: { sketchFileId: data.pointer.fileId } });
   return {
     files: data.files.map(file => retainedFileReversalState(file, file.deleted ? now : null, file.expectedDeletedAt !== null)),
     pointer: data.pointer && { ...data.pointer, fileId: data.pointer.expectedFileId, expectedFileId: data.pointer.fileId },
