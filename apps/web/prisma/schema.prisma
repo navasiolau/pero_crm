@@ -154,6 +154,8 @@ enum CounterpartyType {
 }
 
 model Counterparty {
+  officeFieldHeads Json @default("{}")
+  deletedAt DateTime?
   id        String           @id @default(cuid())
   type      CounterpartyType
   company   String
@@ -165,6 +167,8 @@ model Counterparty {
 }
 
 model Client {
+  officeFieldHeads Json @default("{}")
+  deletedAt DateTime?
   id             String          @id @default(cuid())
   name           String // Имя (или название для юрлица, напр. «ООО Альфа»)
   lastName       String? // Фамилия
@@ -189,6 +193,7 @@ model Client {
 // целого дома). Этапы воронки — на проекте (§6); платежи, маржа и
 // экономика — тоже на проекте (§11). Стоимость проекта = Σ цен изделий.
 model Project {
+  officeFieldHeads Json @default("{}")
   deletedAt DateTime?
   deletedById String? // actor snapshot; no cascade or reassignment
   id                     String       @id @default(cuid())
@@ -437,6 +442,7 @@ model TaskDependency {
 // Расценка из прайса. Изменения — в журнал (§5); цена фиксируется
 // в работе на момент назначения (смена прайса не переписывает прошлое).
 model PriceItem {
+  officeFieldHeads Json @default("{}")
   id          String   @id @default(cuid())
   name        String
   unit        String // шт / м² / м.п. / компл / час
@@ -790,6 +796,7 @@ enum PaymentDirection {
 // операций (приходы − расходы); операция проводится по кассе только
 // в валюте кассы (конвертация фиксируется курсом в самой операции).
 model CashAccount {
+  officeFieldHeads Json @default("{}")
   id        String    @id @default(cuid())
   name      String
   currency  String    @default("BYN")
@@ -806,6 +813,7 @@ model CashAccount {
 // (Материалы, Логистика, Прочее…). ЗП в статьях нет — она считается
 // из PayrollEntry (§10).
 model ExpenseArticle {
+  officeFieldHeads Json @default("{}")
   id        String    @id @default(cuid())
   code      Int       @unique
   name      String
@@ -843,10 +851,14 @@ model Payment {
   reportDocument   FinanceDocument? @relation(fields: [reportDocumentId], references: [id], onDelete: Restrict)
   reportDocuments  PaymentReportDocument[]
   stockPurchase    StockPurchase?
+  expenseReceipts  ExpenseReceipt[]
   logisticsAllocationId String? @unique
   logisticsAllocation LogisticsPostingAllocation? @relation(fields: [logisticsAllocationId], references: [id], onDelete: Restrict)
   deletionId       String?
   deletion         WarehouseMovementDeletion? @relation(fields: [deletionId], references: [id], onDelete: Restrict)
+  deletedAt        DateTime?
+  deletedById      String?
+  lastActionId     String? // Действующее изменение платежа для проверки зависимостей при откате.
   paidAt           DateTime         @default(now())
   comment          String?
   createdById      String?
@@ -900,6 +912,7 @@ model PaymentReportDocument {
 // Настройки организации (§10): key-value, сейчас — payrollCurrency
 // (единая валюта зарплаты, по умолчанию BYN; задаёт администратор).
 model OrgSetting {
+  officeFieldHeads Json @default("{}")
   key       String   @id
   value     String
   updatedAt DateTime @updatedAt
@@ -1049,6 +1062,9 @@ model LogisticsPosting {
   rateDate DateTime?
   paidAt DateTime
   manifestSnapshot Json
+  reallocatedFromId String? @unique
+  reallocatedFrom LogisticsPosting? @relation("LogisticsPostingReallocation", fields: [reallocatedFromId], references: [id], onDelete: Restrict)
+  reallocatedTo LogisticsPosting? @relation("LogisticsPostingReallocation")
   ttnNotRequired Boolean @default(false)
   createdAt DateTime @default(now())
   allocations LogisticsPostingAllocation[]
@@ -1193,6 +1209,33 @@ model StockPurchase {
   @@index([actorId])
 }
 
+model ExpenseReceipt {
+  id                 String   @id @default(cuid())
+  paymentId          String
+  payment            Payment @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  clientMutationId   String   @unique
+  requestFingerprint String
+  actorId            String
+  cancelledAt        DateTime?
+  createdAt          DateTime @default(now())
+  lines              ExpenseReceiptLine[]
+
+  @@index([paymentId])
+}
+
+model ExpenseReceiptLine {
+  id         String        @id @default(cuid())
+  receiptId  String
+  receipt    ExpenseReceipt @relation(fields: [receiptId], references: [id], onDelete: Restrict)
+  position   Int
+  movementId String        @unique
+  movement   StockMovement @relation(fields: [movementId], references: [id], onDelete: Restrict)
+  amount     Decimal       @db.Decimal(12, 2)
+  unitPrice  Decimal       @db.Decimal(27, 12)
+
+  @@unique([receiptId, position])
+}
+
 model WarehouseMovementDeletion {
   id String @id @default(uuid())
   clientMutationId String @unique
@@ -1213,6 +1256,7 @@ model StockMovement {
   type              StockMovementType
   receiptKind       StockReceiptKind? // NULL: исторический вид не подтверждён
   stockPurchase     StockPurchase?
+  expenseReceiptLine ExpenseReceiptLine?
   deletionId        String?
   deletion          WarehouseMovementDeletion? @relation("DeletedMovements", fields: [deletionId], references: [id], onDelete: Restrict)
   rootDeletion      WarehouseMovementDeletion? @relation("WarehouseDeletionRoot")

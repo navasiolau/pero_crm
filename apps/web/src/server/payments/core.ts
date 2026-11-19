@@ -68,7 +68,7 @@ export async function createPaymentScenario(
         } }),
         tx.domainEvent.findUnique({ where: { id: candidate.eventId } }),
       ]);
-      if (!payment || payment.deletionId || payment.createdById !== actor.id ||
+      if (!payment || payment.deletedAt || payment.deletionId || payment.createdById !== actor.id ||
         !event || event.actor !== actor.id || event.type !== (data.direction === "INCOME" ? "payment.created" : "expense.created")) return null;
       const fields = ["direction", "projectId", "cashAccountId", "expenseArticleId", "currency", "reportDocumentId"] as const;
       if (fields.some(field => (payment[field] ?? null) !== (candidate.payment[field] ?? null))) return null;

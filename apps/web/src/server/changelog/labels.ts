@@ -40,12 +40,13 @@ const actions: Record<string, string> = {
   "contract.export.complete": "Выпуск договора", "pdf.request": "Запрос выпуска PDF", "pdf.publish": "Выпуск PDF",
   "pdf.generated": "Выпуск PDF", "version.restore": "Восстановление версии", restore: "Восстановление", command: "Выполнение команды",
   "timer.retire": "Завершение учёта времени", retire: "Завершение учёта времени", taskTransfer: "Перенос начисления", "piecework.v1": "Распределение работы",
-  post: "Проведение", correct: "Изменение", reverse: "Сторнирование", cancel: "Отмена", upload: "Загрузка файла", generate: "Выпуск документа",
+  post: "Проведение", correct: "Изменение", redistribute: "Перераспределение рейса", reverse: "Сторнирование", cancel: "Отмена", upload: "Загрузка файла", generate: "Выпуск документа",
   "archive.reserve": "Подготовка импорта", "archive.publish": "Импорт данных", "archive.recovery.reserve": "Подготовка восстановления",
   "archive.recovery.publish": "Восстановление данных", "kp.import.normalize": "Изменение",
   noModel: "Изменение", "percentage.configure": "Изменение", "archive.document": "Импорт КП", "archive.settings": "Импорт настроек договора",
   "kp.api.media": "Подготовка изображения", "kp.api.command": "Запрос API", "kp.write.receipt": "Подтверждение сохранения КП",
   "cover.receipt": "Подтверждение изменения", "cover.delete.receipt": "Подтверждение удаления", "inline.receipt": "Подтверждение сохранения",
+  "payment.project-assignment": "Назначение расхода на проект",
   "worker-allocation.receipt": "Подтверждение распределения",
 };
 
@@ -86,7 +87,7 @@ const fields: Record<string, string> = {
   workId: "Работа", taskId: "Задача", tasks: "Задачи", works: "Работы", dependencies: "Зависимости", dependsOnId: "Предыдущая задача",
   taskIds: "Задачи", dependencyIds: "Предшествующие задачи", dependentIds: "Зависимые задачи", entries: "Начисления",
   doneAt: "Выполнено", executorShare: "Доля исполнителя", stoppedAt: "Остановлено", autoStopped: "Остановлено автоматически", cutoffAt: "Время завершения", closed: "Завершённые записи",
-  assignees: "Исполнители", members: "Участники", shares: "Доли", share: "Доля", shareUnits: "Доля", sharePercent: "Доля, %",
+  assignees: "Исполнители", members: "Участники", shares: "Доли", roundingAdjustment: "Поправка округления", share: "Доля", shareUnits: "Доля", sharePercent: "Доля, %",
   poolWeightUnits: "Доля работы", stageShareUnits: "Доля этапа", allocationGroupId: "Группа распределения", budgetSource: "Источник оплаты",
   requiresPhoto: "Нужна фотография", estimateMinutes: "Плановое время, мин", durationMinutes: "Время, мин", duration: "Длительность",
   dueAt: "Срок", startAt: "Начало", startedAt: "Начало", finishedAt: "Завершение", date: "Дата", createdAt: "Создано", updatedAt: "Изменено",

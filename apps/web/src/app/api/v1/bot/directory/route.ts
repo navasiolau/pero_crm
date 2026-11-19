@@ -35,15 +35,11 @@ export async function GET(request: Request) {
     }
     case "clients": {
       const clients = await prisma.client.findMany({
-        where: q
-          ? {
-              OR: [
-                { name: { contains: q, mode: "insensitive" } },
-                { lastName: { contains: q, mode: "insensitive" } },
-                { phone: { contains: q } },
-              ],
-            }
-          : undefined,
+        where: { deletedAt: null, ...(q ? { OR: [
+          { name: { contains: q, mode: "insensitive" } },
+          { lastName: { contains: q, mode: "insensitive" } },
+          { phone: { contains: q } },
+        ] } : {}) },
         select: { id: true, name: true, lastName: true, middleName: true, phone: true },
         orderBy: [{ lastName: "asc" }, { name: "asc" }],
         take: 8,

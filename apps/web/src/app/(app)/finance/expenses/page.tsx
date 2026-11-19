@@ -1,3 +1,6 @@
+import { canAssignExpenseProject } from "@/lib/expense-project-assignment";
+import { hasAnyRole } from "@/lib/roles";
+import { LOGISTICS_REALLOCATION_ROLES } from "@/server/logistics/reallocation-core";
 import { prisma } from "@/lib/prisma";
 import { ListParamsProvider } from "@/lib/list-params";
 import type { ListSearchParams } from "@/lib/list-state";
@@ -19,6 +22,6 @@ export default async function OrganizationExpensesPage({ searchParams }: { searc
     loadMaterialCreateOptions(session.user),
   ]);
   return <ListParamsProvider section="organizationExpenses" initialQuery={state.query} preference={state.value}>
-    <OrganizationExpenseResults {...data} expenseArticles={articles} stockMaterials={stockMaterials} materialCreateOptions={materialCreateOptions}/>
+    <OrganizationExpenseResults {...data} canAssignProject={canAssignExpenseProject(session.user.roles)} canRedistributeLogistics={hasAnyRole(session.user.roles, [...LOGISTICS_REALLOCATION_ROLES])} expenseArticles={articles} stockMaterials={stockMaterials} materialCreateOptions={materialCreateOptions}/>
   </ListParamsProvider>;
 }

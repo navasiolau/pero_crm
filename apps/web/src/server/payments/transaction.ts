@@ -1,4 +1,6 @@
 import { writeChangeLogInTransaction } from "@/server/changelog/writer";
+import { randomUUID } from "node:crypto";
+import { paymentVisibilityCommand } from "./visibility-reversal";
 import { Prisma, type Payment } from "@prisma/client";
 import { liveProjectWhere } from "@/server/access/live-entities";
 import { requireActorRoles, type DomainActor } from "@/server/actor";
@@ -47,10 +49,10 @@ export async function createPaymentInTransaction(actor: DomainActor, input: Paym
     // Server-only context, never taken from PaymentInput. The stock writer has
     // already created this owned PAID movement in the same outer transaction.
     const movement = await tx.stockMovement.findUnique({ where: { id: context.movementId },
-      select: { deletionId:true, type: true, receiptKind: true, productId: true, createdById: true, totalByn: true, stockPurchase: { select: { id: true } } } });
+      select: { deletionId:true, type: true, receiptKind: true, productId: true, createdById: true, totalByn: true, stockPurchase: { select: { id: true } }, expenseReceiptLine: { select: { id: true } } } });
     if (data.direction !== "EXPENSE" || data.projectId || prepared.project || !movement || movement.deletionId ||
         movement.type !== "INCOME" || movement.receiptKind !== "PAID" || movement.productId ||
-        movement.createdById !== actor.id || movement.stockPurchase || !movement.totalByn?.eq(prepared.bynAmount))
+        movement.createdById !== actor.id || movement.stockPurchase || movement.expenseReceiptLine || !movement.totalByn?.eq(prepared.bynAmount))
       throw Error("Нет соответствующего оплаченного прихода для расхода");
   } else if (!logisticsAllocationId) assertExpenseReportDocument(data);
 
@@ -94,7 +96,9 @@ export async function createPaymentInTransaction(actor: DomainActor, input: Paym
     if (org.lt(0)) throw Error("Недостаточно средств на балансе организации");
   }
 
+  const actionId = context ? undefined : randomUUID();
   const payment = await tx.payment.create({ data: {
+    ...(actionId ? { lastActionId: actionId } : {}),
     projectId: prepared.project?.id ?? null, direction: data.direction,
     amount: prepared.amount, currency: data.currency, rate: prepared.rate, rateDate: prepared.rateDate,
     bynAmount: prepared.bynAmount, projectAmount: prepared.project ? prepared.bynAmount : null,
@@ -113,6 +117,7 @@ export async function createPaymentInTransaction(actor: DomainActor, input: Paym
       throw Error("Не удалось подтвердить полный комплект документов платежа");
   }
   await writeChangeLogInTransaction(tx, {
+    ...(actionId ? { id: actionId, reversal: paymentVisibilityCommand(payment, documentIds, false, actionId, null) } : {}),
     actorType: "user", actorId: actor.id, actorName: actor.name || undefined, entity: "payment", entityId: payment.id,
     action: "create", source: actor.source, newValue: {
       project: prepared.project?.number ?? null, direction: data.direction, amount: prepared.amount,

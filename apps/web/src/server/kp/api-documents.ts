@@ -229,7 +229,7 @@ export async function readApiMedia(context: KpApiContext, input: Record<string, 
 
 export async function clientApiDetails(context: KpApiContext, clientId: string) {
   await context.authorize("kp:read");
-  const client = await prisma.client.findUnique({ where: { id: clientId } });
+  const client = await prisma.client.findUnique({ where: { id: clientId, deletedAt: null } });
   if (!client) return apiFailure("KP_CLIENT_NOT_FOUND", 404, "Клиент не найден");
   const temporaryId = proposalTemporaryClientId();
   const isTemporary = client.id === temporaryId;

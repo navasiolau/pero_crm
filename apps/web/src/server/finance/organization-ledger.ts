@@ -4,24 +4,32 @@ import {activePaymentWhere} from '@/server/payments/active-records';
 import { requireFinanceWorkspaceActor, listFinanceWorkspaceProjects, type FinanceWorkspaceActor } from "./project-refs";
 import { paymentView } from "./payment-view";
 import { reportDocumentSelect, paymentReportDocumentsSelect } from "@/server/finance-documents/view";
+import { expenseReceiptSelect, expenseReceiptLinesView } from "@/server/warehouse/expense-receipt-view";
+import { EXPENSE_RECEIPT_PROJECT_ROLES, hasAnyRole } from "@/lib/roles";
 import { stockPurchaseSelect } from "@/server/warehouse/stock-purchase-view";
 import { logisticsAllocationSelect } from "@/server/logistics/payment-view";
 import { listActiveCashAccountOptions } from "./default-cash-core";
 
 const organizationPaymentSelect = {
   id: true, direction: true, amount: true, currency: true, rate: true, rateDate: true,
-  bynAmount: true, projectAmount: true, paidAt: true, comment: true, createdById: true,
+  bynAmount: true, projectAmount: true, paidAt: true, comment: true, createdById: true, lastActionId: true,
   project: { select: { id: true, number: true, title: true, deletedAt: true } }, cashAccount: { select: { name: true } },
   expenseArticle: { select: { id: true, name: true } }, reportDocument: { select: reportDocumentSelect },
   reportDocuments: paymentReportDocumentsSelect, stockPurchase: { select: stockPurchaseSelect },
-  logisticsAllocation: { select: logisticsAllocationSelect },
+  logisticsAllocation: { select: logisticsAllocationSelect }, expenseReceipts: expenseReceiptSelect,
 } satisfies Prisma.PaymentSelect;
 
 type LedgerRecord = Prisma.PaymentGetPayload<{ select: typeof organizationPaymentSelect }>;
-function organizationPaymentView(row: LedgerRecord) {
+function organizationPaymentView(row: LedgerRecord, actor: FinanceWorkspaceActor) {
   return { ...paymentView(row, new Map()), rateDate: row.rateDate?.toISOString() ?? null,
     project: row.project ? { id: row.project.id, number: row.project.number, title: row.project.title, archived: row.project.deletedAt !== null } : null,
-    cashName: row.cashAccount?.name ?? null };
+    cashName: row.cashAccount?.name ?? null, lastActionId: row.lastActionId ?? null,
+    receiptLines: expenseReceiptLinesView(row.expenseReceipts?.[0], row.stockPurchase, row.amount),
+    hasActiveExpenseReceipt: Boolean(row.expenseReceipts?.length),
+    canPostExpenseReceipt: row.direction === "EXPENSE" && Boolean(row.cashAccount) && Number(row.bynAmount) > 0 &&
+      !row.stockPurchase && !row.expenseReceipts?.length && !row.logisticsAllocation &&
+      (!row.project || (!row.project.deletedAt && hasAnyRole(actor.roles, EXPENSE_RECEIPT_PROJECT_ROLES))),
+  };
 }
 
 export async function loadOrganizationPayments(actor: FinanceWorkspaceActor, direction: PaymentDirection,
@@ -32,7 +40,7 @@ export async function loadOrganizationPayments(actor: FinanceWorkspaceActor, dir
     listActiveCashAccountOptions(db),
     listFinanceWorkspaceProjects(actor, db),
   ]);
-  return { rows: records.map(organizationPaymentView), cashAccounts,
+  return { rows: records.map(row => organizationPaymentView(row, actor)), cashAccounts,
     projects: projects.map(({ id, number, title }) => ({ id, number, title })) };
 }
 export type OrganizationLedgerData = Awaited<ReturnType<typeof loadOrganizationPayments>>;
@@ -53,8 +61,8 @@ export async function loadOrganizationExpensePage(actor: FinanceWorkspaceActor, 
       listActiveCashAccountOptions(tx),
       listFinanceWorkspaceProjects(actor, tx),
     ]);
-    return { rows: records.map(organizationPaymentView), options, cashAccounts,
-      projects: projects.map(({ id, number, title }) => ({ id, number, title })),
+    return { rows: records.map(row => organizationPaymentView(row, actor)), options, cashAccounts,
+      projects: projects.map(({ id, number, title, currency }) => ({ id, number, title, currency })),
       total: _count, totalByn: _sum.bynAmount?.toFixed(2) ?? "0.00",
       page: currentPage, pageSize, sort, dir };
   }, { isolationLevel: "RepeatableRead" });
@@ -85,7 +93,10 @@ async function loadExpenseFilterOptions(db: Prisma.TransactionClient) {
     db.cashAccount.findMany({ where: { payments: { some: expenseBaseWhere } }, select: { id: true, name: true, currency: true }, orderBy: { name: "asc" } }),
     db.expenseArticle.findMany({ where: { payments: { some: { AND: [expenseBaseWhere, { logisticsAllocationId: null }] } } }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
     db.payment.groupBy({ where: expenseBaseWhere, by: ["currency"], orderBy: { currency: "asc" } }),
-    db.material.findMany({ where: { movements: { some: { stockPurchase: { payment: expenseBaseWhere } } } },
+    db.material.findMany({ where: { movements: { some: { OR: [
+      { stockPurchase: { payment: expenseBaseWhere } },
+      { expenseReceiptLine: { receipt: { cancelledAt: null, payment: expenseBaseWhere } } },
+    ] } } },
       select: { id: true, name: true, measurementUnit: { select: { id: true, name: true } } }, orderBy: { name: "asc" } }),
   ]);
   return {

@@ -4,6 +4,7 @@ import {createRequire} from 'node:module';
 import {randomUUID} from 'node:crypto';
 process.env.BOT_RECOVERY_TEST='1';process.env.TELEGRAM_API_ORIGIN='http://127.0.0.1:9080';
 process.env.TELEGRAM_BOT_TOKEN='fixture-token';process.env.CRM_BASE_URL='http://127.0.0.1:9081';process.env.CRM_API_TOKEN='fixture-crm-token';
+process.env.PERO_TELEGRAM_FINANCE_ORIGIN='https://crm.invalid';
 const sent=[],calls=[],uploads=new Map(),payments=new Map(),roles=new Map();
 let loseUpload=false,losePayment=false,unknownPayment=false;
 globalThis.fetch=async(input,options={})=>{
@@ -208,4 +209,16 @@ test('after restarting engine a lost payment acknowledgement is retried with the
  assert.match(sent.at(-1).text,/подтверждена/);
  const attempts=calls.filter(row=>row.path.endsWith('/payments')&&row.actor==='actor-'+chat);
  assert.equal(attempts.length,2);assert.deepEqual(attempts[1],first);
+});
+
+test('the Finance button uses a Mini App only for a linked financial user in a private chat', async () => {
+ const chat=8835;roles.set(String(chat),['ACCOUNTANT']);
+ await handleUpdate(message(chat,'/финансы'));
+ assert.deepEqual(sent.at(-1).reply_markup.inline_keyboard[0][0],{text:'Финансы',web_app:{url:'https://crm.invalid/telegram/finance'}});
+ const before=sent.length;
+ await handleUpdate(message(-chat,'/финансы',{from:{id:chat}}));
+ assert.equal(sent.length,before);
+ roles.set(String(chat),['MANAGER']);
+ await handleUpdate(message(chat,'/финансы'));
+ assert.equal(sent.at(-1).reply_markup,undefined);
 });

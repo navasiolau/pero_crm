@@ -2,6 +2,7 @@ import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 import { createHash, randomUUID } from "node:crypto";
 import type { FinanceDocument, Prisma } from "@prisma/client";
 import { FINANCE_ROLES, hasAnyRole } from "@/lib/roles";
+import { activePaymentWhere } from "@/server/payments/active-records";
 import { uploadSizeLimitError, uploadSizeLimitFor } from "@/server/files/upload-limits";
 import { UploadError, type UploadPhase } from "@/server/files/upload-result";
 import type { FileContentSource } from "@/server/files/document-storage";
@@ -32,6 +33,11 @@ export function financeDocumentView(row: FinanceDocument, paymentId: string | nu
   return { id: row.id, source: "finance", fileName: row.fileName, mimeType: row.mimeType,
     size: row.size, createdAt: row.createdAt.toISOString(), paymentId };
 }
+
+const visiblePaymentLinks = {
+  payment: { where: activePaymentWhere, select: { id: true } },
+  paymentReport: { where: { payment: activePaymentWhere }, select: { paymentId: true } },
+} satisfies Prisma.FinanceDocumentInclude;
 
 async function lockUpload(tx: Prisma.TransactionClient, mutationId: string) {
   await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(18438, hashtext(${mutationId}))`;
@@ -99,7 +105,7 @@ export function createFinanceDocumentService({ transaction, storage }: {
     async read(actorId: string, id: string) {
       const document = await transaction(async tx => {
         await requireFinanceDocumentActor(actorId, tx);
-        const row = await tx.financeDocument.findUnique({ where: { id }, include: { payment: { select: { id: true } }, paymentReport: { select: { paymentId: true } } } });
+        const row = await tx.financeDocument.findUnique({ where: { id }, include: visiblePaymentLinks });
         if (!row || row.state !== "READY" || (row.uploadedById !== actorId && !row.payment && !row.paymentReport)) return null;
         return row;
       });
@@ -113,11 +119,11 @@ export function createFinanceDocumentService({ transaction, storage }: {
       return transaction(async tx => {
         await requireFinanceDocumentActor(actorId, tx);
         const where: Prisma.FinanceDocumentWhereInput = { state: "READY",
-          OR: [{ uploadedById: actorId }, { payment: { isNot: null } }, { paymentReport: { isNot: null } }],
+          OR: [{ uploadedById: actorId }, { payment: { is: activePaymentWhere } }, { paymentReport: { is: { payment: activePaymentWhere } } }],
           ...(query.query ? { fileName: { contains: query.query, mode: "insensitive" } } : {}) };
         const total = await tx.financeDocument.count({ where });
         const page = Math.min(query.page, Math.max(1, Math.ceil(total / query.pageSize)));
-        const rows = await tx.financeDocument.findMany({ where, include: { payment: { select: { id: true } }, paymentReport: { select: { paymentId: true } } },
+        const rows = await tx.financeDocument.findMany({ where, include: visiblePaymentLinks,
           orderBy: [{ [query.sort]: query.direction }, { id: "asc" }], take: query.pageSize, skip: (page - 1) * query.pageSize });
         return { rows: rows.map(row => financeDocumentView(row, row.paymentReport?.paymentId ?? row.payment?.id ?? null)), total, query: { ...query, page } };
       });
