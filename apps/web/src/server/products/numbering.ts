@@ -6,6 +6,7 @@ import { automationJournalContext, productJournalContext } from "@/server/projec
 
 export type ProductNumberChange = { id: string; previousNumber: string; number: string };
 type NumberedProduct = { id: string; number: string; suffixInt: number | null; createdAt: Date };
+export type ProductNumberMove = { product: Pick<NumberedProduct, "id" | "number" | "suffixInt">; number: string; suffixInt: number | null };
 
 /** До переиспользования номера закрепляем внутреннюю ссылку за исходным изделием. */
 export async function stabilizeProductNumberLinks(tx: Prisma.TransactionClient, products: readonly { id: string; number: string }[]) {
@@ -20,6 +21,7 @@ export async function stabilizeProductNumberLinks(tx: Prisma.TransactionClient, 
 /** Project уже заблокирован вызывающей операцией; порядок не зависит от UI-фильтров. */
 export async function renumberActiveProductsInTransaction(
   tx: Prisma.TransactionClient, actor: DomainActor, project: { id: string; number: string },
+  operationRootId?: string,
 ): Promise<ProductNumberChange[]> {
   await tx.$queryRaw`SELECT id FROM "Product" WHERE "projectId" = ${project.id} AND "deletedAt" IS NULL ORDER BY id FOR UPDATE`;
   const products = await tx.product.findMany({
@@ -32,6 +34,12 @@ export async function renumberActiveProductsInTransaction(
     const suffixInt = index + 1, number = `${project.number}.${suffixInt}`;
     return product.number === number && product.suffixInt === suffixInt ? [] : [{ product, suffixInt, number }];
   });
+  return applyProductNumberMoves(tx, actor, changed, operationRootId);
+}
+
+/** Общий порядок записи для прямого сдвига и восстановления прежних номеров. */
+export async function applyProductNumberMoves(tx: Prisma.TransactionClient, actor: DomainActor,
+  changed: readonly ProductNumberMove[], operationRootId?: string): Promise<ProductNumberChange[]> {
   await stabilizeProductNumberLinks(tx, changed.map(({ product }) => product));
   const prefix = `__product_number_${randomUUID()}_`;
   // Partial UNIQUE проверяется сразу: освобождаем номера перед их новым назначением.
@@ -40,7 +48,7 @@ export async function renumberActiveProductsInTransaction(
     await tx.product.update({ where: { id: product.id }, data: { number, suffixInt } });
     await writeChangeLogInTransaction(tx, {
       actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
-      entity: "product", entityId: product.id, action: "number.change", field: "number",
+      entity: "product", entityId: product.id, action: "number.change", field: "number", operationRootId,
       oldValue: { number: product.number, suffixInt: product.suffixInt }, newValue: { number, suffixInt },
     },{...productJournalContext({...product,number}),...automationJournalContext(actor,"Последовательная нумерация изделий проекта")});
   }

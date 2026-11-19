@@ -1,4 +1,5 @@
 import { writeChangeLogInTransaction } from "@/server/changelog/writer";
+import { cardDependencies, projectVisibilityCommand } from "./card-visibility-reversal";
 import { updateProjectFieldsCore, type LegacyProjectUpdateInput } from "./project-field-core";
 import { patchProjectStageCore } from "./stage-service";
 import type { StageExtras } from "./stage-contract";
@@ -69,6 +70,8 @@ export async function createProjectInTransaction(
   await writeChangeLogInTransaction(tx, {
     actorType: "user", actorId: actor.id, actorName: actor.name || undefined,
     entity: "project", entityId: project.id, action: "create",
+    ...(!automationReason ? { reversal: projectVisibilityCommand(false, project.updatedAt, [],
+      await cardDependencies(tx, "project", project.id)) } : {}),
     newValue: { number, title: data.title }, source: actor.source,
   }, { ...projectJournalContext(project), ...(automationReason ? automationJournalContext(actor, automationReason) : {}),
     before: null, after: businessSnapshot(project, PROJECT_JOURNAL_FIELDS),

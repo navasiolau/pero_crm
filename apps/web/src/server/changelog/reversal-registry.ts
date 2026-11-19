@@ -11,6 +11,7 @@ import { taskEditReversal } from "@/server/tasks/edit-reversal";
 import { workEditReversal } from "@/server/works/edit-reversal";
 import { payoutVisibilityReversal } from "@/server/payroll/payout-reversal";
 import { payrollAccrualReversal } from "@/server/payroll/accrual-reversal";
+import { cardVisibilityReversal } from "@/server/projects/card-visibility-reversal";
 
 export const journalReversals = [
   productTitleReversal,
@@ -26,4 +27,5 @@ export const journalReversals = [
   workEditReversal,
   payoutVisibilityReversal,
   payrollAccrualReversal,
+  cardVisibilityReversal,
 ];

@@ -1,4 +1,5 @@
 import { writeChangeLogInTransaction } from "@/server/changelog/writer";
+import { productVisibilityCommand, readActiveNumbers } from "@/server/projects/card-visibility-reversal";
 import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { canAccessProductDraft } from "@/lib/product-drafts";
@@ -33,15 +34,17 @@ export async function softDeleteProductCore(tx: Prisma.TransactionClient, actor:
   }
   if (product.deletedAt !== null) return failure("conflict", "Изделие уже удалено");
   if (product.updatedAt.toISOString() !== data.expectedUpdatedAt) return failure("conflict", "Изделие изменилось. Обновите карточку и подтвердите удаление заново");
+  const before = await readActiveNumbers(tx, parent.id);
   const deletedAt = new Date();
-  const changed = await tx.product.updateMany({ where: { id: product.id, projectId: parent.id, deletedAt: null, updatedAt: new Date(data.expectedUpdatedAt) }, data: { deletedAt, deletedById: actor.id } });
+  const changed = await tx.product.updateMany({ where: { id: product.id, projectId: parent.id, deletedAt: null, updatedAt: new Date(data.expectedUpdatedAt) }, data: { deletedAt, updatedAt: deletedAt, deletedById: actor.id } });
   if (changed.count !== 1) throw Error("PRODUCT_SOFT_DELETE_CAS_RACE");
   // Ссылка скрытого изделия тоже должна остаться за его ID, когда номер займёт сосед.
   await stabilizeProductNumberLinks(tx, [product]);
-  const numberChanges = await renumberActiveProductsInTransaction(tx, actor, parent);
+  const numberChanges = await renumberActiveProductsInTransaction(tx, actor, parent, receiptId);
   const result: Extract<ProductDeleteResult, { ok: true }> = { ok: true, productId: product.id, projectId: parent.id, number: product.number, title: product.title, deletedAt: deletedAt.toISOString(), clientMutationId: data.clientMutationId };
   await writeChangeLogInTransaction(tx, { id: receiptId, actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
     entity: "product", entityId: product.id, action: "soft-delete", field: "deletedAt",
+    reversal: await productVisibilityCommand(tx, parent.id, true, deletedAt, before, numberChanges),
     oldValue: { number: product.number, title: product.title, updatedAt: data.expectedUpdatedAt },
     newValue: JSON.parse(JSON.stringify({ fingerprint, result, numberChanges })) as Prisma.InputJsonValue },
     {...productJournalContext(product),before:businessSnapshot(product,PRODUCT_JOURNAL_FIELDS),after:null});
