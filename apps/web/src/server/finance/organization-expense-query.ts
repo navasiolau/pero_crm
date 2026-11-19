@@ -51,8 +51,12 @@ function matchingDocument(name?: string): Prisma.PaymentWhereInput {
 }
 
 function purpose(value: string): Prisma.PaymentWhereInput {
-  if (value === "@stock") return { projectId: null, stockPurchase: { isNot: null } };
-  if (value === "@general") return { projectId: null, stockPurchase: { is: null } };
+  if (value === "@stock") return { projectId: null, OR: [
+    { stockPurchase: { isNot: null } }, { expenseReceipts: { some: { cancelledAt: null } } },
+  ] };
+  if (value === "@general") return {
+    projectId: null, stockPurchase: { is: null }, expenseReceipts: { none: { cancelledAt: null } },
+  };
   if (value === "@logistics") return { logisticsAllocationId: { not: null } };
   return { projectId: value };
 }
@@ -79,12 +83,16 @@ function matchingStockPurchase(params: URLSearchParams): Prisma.PaymentWhereInpu
   const unitPrice = moneyRange(params, "stockUnitPrice");
   const totalByn = moneyRange(params, "stockValueByn");
   if (!materials && !units && !movement && !quantity && !unitPrice && !totalByn) return undefined;
-  return { stockPurchase: {
+  const match = {
     movementId: movement ? contains(movement) : undefined,
     unitPrice,
     movement: { materialId: materials ? { in: materials } : undefined,
       material: units ? { unitId: { in: units } } : undefined, quantity, totalByn },
-  } };
+  };
+  return { OR: [
+    { stockPurchase: match },
+    { expenseReceipts: { some: { cancelledAt: null, lines: { some: match } } } },
+  ] };
 }
 
 export function organizationExpenseQuery(query: string) {
@@ -113,6 +121,9 @@ export function organizationExpenseQuery(query: string) {
       { logisticsAllocationId: null, expenseArticle: { name: term } },
       { project: { OR: [{ number: term }, { title: term }] } },
       { stockPurchase: { OR: [{ movementId: term }, { movement: { material: { name: term } } }] } },
+      { expenseReceipts: { some: { cancelledAt: null,
+        lines: { some: { OR: [{ movementId: term }, { movement: { material: { name: term } } }] } },
+      } } },
       matchingDocument(search),
       ...("общий расход организации".includes(search.toLowerCase()) ? [purpose("@general")] : []),
       ...("приход на склад".includes(search.toLowerCase()) ? [purpose("@stock")] : []),

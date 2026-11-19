@@ -19,8 +19,9 @@ import { parseListFilterValue } from "@/lib/list-filter-values";
 
 const rows = Array.from({ length: 101 }, (_, index) => ({
   id: "payment-real-id-" + String(index + 1), direction: "EXPENSE", paidAt: "2026-11-20T10:00:00.000Z",
-  amount: 10, bynAmount: 10, rate: 1, rateDate: null, currency: "BYN", project: null, reportDocuments: [],
-  cashAccountName: ["Касса А", "Касса Б", "Касса В"][index % 3], expenseArticleName: index % 2 ? "Материалы" : "Прочее", lastActionId: "fixture-head",
+  amount: 10, bynAmount: 10, rate: 1, rateDate: null, currency: "BYN", project: index === 1 ? { id: "source", number: "402", title: "Проект чека", archived: false } : null,
+  canPostExpenseReceipt: index === 1, reportDocuments: [], lastActionId: "fixture-head",
+  cashAccountName: ["Касса А", "Касса Б", "Касса В"][index % 3], expenseArticleName: index % 2 ? "Материалы" : "Прочее",
   comment: "fixture", cash: ["a", "b", "c"][index % 3], article: index % 2 ? "materials" : "other",
 }));
 const options = { purpose: [], cash: ["a", "b", "c"].map((value, index) => ({ value, label: rows[index].cashAccountName })),
@@ -42,7 +43,8 @@ function App() {
       <OrganizationExpenseResults rows={shown} options={options} page={page} pageSize={pageSize} total={selection.length}
         totalByn={(selection.length * 10).toFixed(2)} sort="date" dir="desc" cashAccounts={[]} canAssignProject
         projects={[{ id: "project-124", number: "124", title: "Действующий проект", currency: "BYN" },
-          { id: "other-currency", number: "125", title: "Архивный курс", currency: "EUR" }]}/>
+          { id: "other-currency", number: "125", title: "Архивный курс", currency: "EUR" }]}
+        stockMaterials={[{ id: "oak", name: "Дуб", unit: "шт." }, { id: "mdf", name: "МДФ", unit: "м²" }]}/>
     </ListParamsProvider>
   </main>;
 }
@@ -54,6 +56,7 @@ const boundaries = {
   "@/components/payment-dialog": "export function PaymentDialog() { return null; }",
   "@/components/report-document-button": "export function ReportDocumentButton() { return null; }",
   "@/server/payments/project-assignment-actions": 'export async function assignOrdinaryExpenseProject(input) { window.__fixtureAssignment = input; return { ok:true, changed:true }; }',
+  "@/server/warehouse/expense-receipt-actions": 'export async function previewExpenseReceipt(input) { window.previewInput = input; return { ok:true, fingerprint:"confirmed", actorId:"cashier", projectNumber:"402", lines:input.lines.map((row,index) => ({...row, materialName:index ? "МДФ" : "Дуб", unit:index ? "м²" : "шт.", bynAmount:row.amount})) }; } export async function applyExpenseReceipt(input,actor) { window.appliedReceipt = {input,actor}; return {ok:true,receiptId:"receipt"}; }',
   "@/server/payments/actions": 'export async function deletePayment() { throw Error("UNEXPECTED_DELETE"); }',
   "@/server/list-preferences-actions": 'export async function saveListPreference(section, query) { const value = JSON.stringify({version:2, engineerFilterInitialized:true, query}); localStorage.setItem("expense-fixture", value); return { ok:true, value }; }',
 };
@@ -121,8 +124,8 @@ test("реестр расходов в Chromium сохраняет фильтр�
     await expect(page.getByText("ID payment-real-id-2", { exact: true })).toBeVisible();
     await page.getByText("ID payment-real-id-2", { exact: true }).click();
     await expect(page.getByRole("dialog").getByText("payment-real-id-2", { exact: true })).toBeVisible();
-    await page.getByRole("button", { name: "Назначить на проект", exact: true }).click();
-    const assignment = page.getByRole("dialog", { name: "Назначить расход на проект" });
+    await page.getByRole("button", { name: "Изменить проект", exact: true }).click();
+    const assignment = page.getByRole("dialog", { name: "Изменить проект расхода" });
     await expect(assignment.getByRole("button", { name: "Сохранить", exact: true })).toBeDisabled();
     await assignment.getByLabel("Проект", { exact: true }).click();
     await page.getByPlaceholder("Поиск по номеру и названию").fill("124");
@@ -130,8 +133,32 @@ test("реестр расходов в Chromium сохраняет фильтр�
     await assignment.getByRole("button", { name: "Сохранить", exact: true }).click();
     await expect(assignment).toHaveCount(0);
     assert.deepEqual(await page.evaluate(() => window.__fixtureAssignment), {
-      paymentId: "payment-real-id-2", expectedProjectId: null, expectedHead: "fixture-head", projectId: "project-124",
+      paymentId: "payment-real-id-2", expectedProjectId: "source", expectedHead: "fixture-head", projectId: "project-124",
     });
+    await page.getByText("ID payment-real-id-2", { exact: true }).click();
+    await page.getByRole("button", { name: "Оприходовать на склад" }).click();
+    const dialog = page.getByRole("dialog", { name: "Оприходовать на склад" });
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole("button", { name: "Добавить материал" }).click();
+    const entries = dialog.locator("fieldset");
+    for (const [index, material] of ["Дуб", "МДФ"].entries()) {
+      const entry = entries.nth(index);
+      await entry.locator('button[id^="expense-material-"]').click();
+      await page.locator('[data-slot="popover-content"][data-open]').getByText(material, { exact: true }).click();
+      await entry.getByLabel("Количество").fill("2");
+      await entry.getByLabel("Сумма, BYN").fill(index ? "6" : "4");
+    }
+    await dialog.getByRole("button", { name: "Предпросмотр" }).click();
+    await expect(dialog.getByText(/будет снят с проекта 402/)).toBeVisible();
+    assert.equal(await page.evaluate(() => window.appliedReceipt), undefined);
+    await dialog.getByRole("button", { name: "Подтвердить оприходование" }).click();
+    await expect(dialog).toHaveCount(0);
+    const posted = await page.evaluate(() => window.appliedReceipt);
+    assert.equal(posted.actor, "cashier");
+    assert.deepEqual(posted.input.lines, [
+      { materialId: "oak", quantity: "2", amount: "4" },
+      { materialId: "mdf", quantity: "2", amount: "6" },
+    ]);
     assert.deepEqual(errors, []);
   } finally {
     await browser?.close();
