@@ -1,6 +1,8 @@
+import { randomUUID } from "node:crypto";
 import { writeChangeLogInTransaction } from "@/server/changelog/writer";
+import { payrollCompensationCommand } from "./accrual-reversal";
 import { journalAutomatic } from "@/server/finance/journal";
-import { Prisma } from "@prisma/client";
+import { Prisma, type PayrollEntry } from "@prisma/client";
 import { canAccrueOrdinarySalary } from "@/lib/compensation-policy";
 import { historicalByn, BYN_UNAVAILABLE_REASON } from "@/lib/history-byn";
 import { formatAmount } from "@/lib/format";
@@ -43,6 +45,8 @@ export async function accrueTurnoverCore(actor: DomainActor, month: string, tran
       accrued.set(row.userId, (accrued.get(row.userId) ?? new Prisma.Decimal(0)).plus(amount));
     }
     const earnings: TurnoverEarning[] = [];
+    const entries: PayrollEntry[] = [];
+    const journalId = randomUUID();
     for (const user of users) {
       const percent = new Prisma.Decimal(user.payPercent ?? 0);
       if (!percent.isFinite() || percent.lte(0)) throw new Error("Некорректная ставка процента от оборота");
@@ -58,8 +62,9 @@ export async function accrueTurnoverCore(actor: DomainActor, month: string, tran
           ? `${percent}% от оборота за ${month} · доначисление (оборот ${formatAmount(turnover.total.toFixed(2), turnover.currency)})`
           : `${percent}% от оборота за ${month} · оборот ${formatAmount(turnover.total.toFixed(2), turnover.currency)}`,
       } });
+      entries.push(payroll);
       await writeChangeLogInTransaction(tx, {
-        actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
+        operationRootId: journalId, actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
         entity: "payrollEntry", entityId: payroll.id, action: isTopUp ? "accrue-topup" : "accrue",
         newValue: { user: user.name, scheme: "PERCENT_TURNOVER", amount: delta.toNumber(), month,
           basis: { start: turnover.start.toISOString(), end: turnover.end.toISOString(), currency: turnover.currency,
@@ -77,6 +82,11 @@ export async function accrueTurnoverCore(actor: DomainActor, month: string, tran
       } });
       earnings.push({ userId: user.id, userName: user.name, percent: percent.toString(), amount, isTopUp, payrollEntryId: payroll.id, eventId: event.id });
     }
+    if (entries.length) await writeChangeLogInTransaction(tx, {
+      id: journalId, actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
+      entity: "payrollEntry", entityId: journalId, action: "accrue",
+      newValue: { month, payrollEntryIds: entries.map(row => row.id) }, reversal: payrollCompensationCommand(journalId, entries),
+    }, { entity: { label: `Начисления процента от оборота за ${month}` }, contexts: [] });
     return { ok: true, accruedCount: earnings.length, month, currency: turnover.currency, total: turnover.total.toFixed(2), earnings };
   });
 }

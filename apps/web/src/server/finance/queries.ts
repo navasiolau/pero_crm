@@ -1,4 +1,5 @@
 import { cashMovementDelta } from "@/lib/cash-ledger";
+import { activePayoutWhere } from "@/server/payroll/active-records";
 import {activePaymentWhere} from '@/server/payments/active-records';
 import {activeStockMovementWhere} from '@/server/warehouse/active-records';
 import { projectTotal as calculateProjectTotal } from "@/lib/product-quantity";
@@ -32,7 +33,7 @@ export async function listCashAccounts(database: Pick<PrismaClient, "cashAccount
       by: ["cashAccountId", "direction"],
       _sum: { amount: true },
     }),
-    database.payout.groupBy({ by: ["cashAccountId"], where: { cashAccountId: { not: null } }, _sum: { cashAmount: true } }),
+    database.payout.groupBy({ by: ["cashAccountId"], where: { ...activePayoutWhere, cashAccountId: { not: null } }, _sum: { cashAmount: true } }),
     readDefaultCashAccount(database),
   ]);
   const sums = new Map<string, Prisma.Decimal>();
