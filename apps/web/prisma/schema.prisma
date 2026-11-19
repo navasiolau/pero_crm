@@ -275,6 +275,7 @@ model Product {
   // «108.» без суффикса → NULL) — для серверной сортировки внутри проекта
   suffixInt        Int?
   title            String // название изделия
+  titleRevision    Int    @default(0)
   quantity         Int          @default(1) // одинаковых экземпляров в карточке
   kind             String? // вид изделия (текстовое поле, из legacy f2641)
   status           ProductStatus @default(DRAFT)
@@ -1485,6 +1486,15 @@ model ChangeLog {
   presentation Json? // Версионированное безопасное представление, исходные факты выше неизменны.
   searchText String? // Полный безопасный текст события; pg_trgm index в SQL migration.
 
+  operationRootId String?
+  operationRoot   ChangeLog? @relation("OperationEntries", fields: [operationRootId], references: [id], onDelete: Restrict)
+  operationEntries ChangeLog[] @relation("OperationEntries")
+  reversal Json?
+  reversesId String? @unique
+  reverses ChangeLog? @relation("JournalReversal", fields: [reversesId], references: [id], onDelete: Restrict)
+  reversedBy ChangeLog? @relation("JournalReversal")
+
+  @@index([operationRootId])
   @@index([entity, entityId, createdAt])
   @@index([createdAt])
 }

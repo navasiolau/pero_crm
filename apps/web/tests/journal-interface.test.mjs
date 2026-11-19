@@ -17,7 +17,7 @@ const entry = `
 import React from 'react';
 import {createRoot} from 'react-dom/client';
 import {Journal} from '@/components/journal/journal';
-window.__qa = {lists:[],details:[],options:[],heldLists:[],heldDetails:[],holdDetail:false,failDetail:false};
+window.__qa = {lists:[],details:[],options:[],heldLists:[],heldDetails:[],holdDetail:false,failDetail:false,previews:[],reversals:[]};
 createRoot(document.getElementById('root')).render(<main style={{padding:16}}><Journal scope={{kind:'global'}}/></main>);
 `;
 const transport = `
@@ -26,7 +26,7 @@ const rows = [
  {id:'event-two',createdAt:'2026-11-16T09:29:00.000Z',actorName:'Система',entityLabel:'Проект 203',actionLabel:'Изменение',changeCount:1,hasChanges:true},
 ];
 const clone=x=>JSON.parse(JSON.stringify(x));
-const data = id => ({id,createdAt:'2026-11-16T09:30:00.000Z',presentation:{version:1,kind:'event',
+const data = id => ({id,reversalAvailable:id==='event-one',createdAt:'2026-11-16T09:30:00.000Z',presentation:{version:1,kind:'event',
  actor:{type:id==='event-one'?'user':'system',id:'user-one',name:id==='event-one'?'Иван Петров':'Система'},
  initiator:{id:'user-one',name:'Иван Петров'},reason:'Обновление из КП',entity:{type:'product',id:'product-stable',label:id==='event-one'?'Изделие 203.1':'Проект 203',href:'/products/product-stable'},
  contexts:[{kind:'product',id:'product-stable',label:'Изделие 203.1',href:'/products/product-stable'}],
@@ -39,6 +39,8 @@ const data = id => ({id,createdAt:'2026-11-16T09:30:00.000Z',presentation:{versi
  ],links:[{type:'project',id:'project-stable',label:'Проект 203',href:'/projects/project-stable'}],technical:{eventId:id,field:'description',nested:{operationId:'request-123'}}}});
 export async function listJournal(input){window.__qa.lists.push(clone(input));const result={entries:input.q==='новый ответ'?[rows[1]]:rows,total:45,page:input.page??1,pageSize:input.pageSize??20,sort:input.sort??'time',dir:input.dir??'desc'};if(input.q==='медленный ответ')return new Promise(resolve=>window.__qa.heldLists.push(()=>resolve({...result,entries:[rows[0]],total:1})));return clone(result);}
 export async function getJournalEntry(id,scope){window.__qa.details.push({id,scope:clone(scope)});if(window.__qa.failDetail){window.__qa.failDetail=false;throw Error('PRIVATE_BACKEND_ERROR');}if(window.__qa.holdDetail){window.__qa.holdDetail=false;return new Promise(resolve=>window.__qa.heldDetails.push(()=>resolve(data(id))));}return data(id);}
+export async function previewJournalReversal(input){window.__qa.previews.push(clone(input));return{ok:true,entryId:input.entryId,entityLabel:'Изделие 203.1',actionLabel:'Изменение'};}
+export async function reverseJournalAction(input){window.__qa.reversals.push(clone(input));return window.__qa.reversals.length===1?{ok:false,message:'Не удалось подтвердить откат'}:{ok:true,reversalId:'undo-1'};}
 export async function listJournalFilterOptions(scope){window.__qa.options.push(clone(scope));return{users:[{id:'user-one',label:'Иван Петров'},{id:'old-user',label:'Архивный сотрудник'},{id:'__system__',label:'Система'}],entities:[{id:'project',label:'Проекты'},{id:'product',label:'Изделия'}]};}
 `;
 
@@ -49,7 +51,7 @@ async function bundle() {
     platform: "browser", format: "iife", jsx: "automatic", tsconfig: path.join(web, "tsconfig.json"),
     define: { "process.env.NODE_ENV": '"production"' }, logLevel: "silent",
     plugins: [{ name: "journal-memory-transport", setup(builder) {
-      builder.onResolve({ filter: /^@\/server\/changelog\/actions$/ }, () => ({ path: "actions", namespace: "journal-memory" }));
+      builder.onResolve({ filter: /^@\/server\/changelog\/(actions|reversal-actions)$/ }, () => ({ path: "actions", namespace: "journal-memory" }));
       builder.onLoad({ filter: /.*/, namespace: "journal-memory" }, () => ({ contents: transport, loader: "tsx", resolveDir: web }));
     } }],
   });
@@ -211,6 +213,21 @@ test("journal opens one complete event, preserves focus, filters on server and r
     assert.ok(await dialog.evaluate(node => node.scrollWidth <= node.clientWidth + 1));
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
     await page.screenshot({ path: path.join(screenshots, "mobile-event.png") });
+    const listCalls = await page.evaluate(() => window.__qa.lists.length);
+    await dialog.getByRole("button", { name: "Откат действия", exact: true }).click();
+    await expect(dialog.getByText("Отменить действие «Изменение» для «Изделие 203.1»?")).toBeVisible();
+    assert.deepEqual(await page.evaluate(() => window.__qa.previews), [{ entryId: "event-one", scope: { kind: "global" } }]);
+    assert.equal(await page.evaluate(() => window.__qa.reversals.length), 0);
+    const confirm = dialog.getByRole("button", { name: "Подтвердить откат", exact: true });
+    await confirm.click();
+    await expect(dialog.getByRole("alert")).toHaveText("Не удалось подтвердить откат");
+    await confirm.click();
+    await expect(dialog.getByText("Действие отменено")).toBeVisible();
+    const reversals = await page.evaluate(() => window.__qa.reversals);
+    assert.equal(reversals.length, 2);
+    assert.deepEqual(reversals[0], reversals[1]);
+    assert.match(reversals[0].requestId, /^[a-f0-9-]{36}$/);
+    await expect.poll(() => page.evaluate(() => window.__qa.lists.length)).toBe(listCalls + 1);
     await page.keyboard.press("Escape");
     await expect(page.locator('[data-slot="dialog-content"]')).toHaveCount(0);
     for (const width of [390, 360]) {

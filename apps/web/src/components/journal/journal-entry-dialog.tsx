@@ -8,6 +8,7 @@ import { getJournalEntry } from "@/server/changelog/actions";
 import type { JournalScope, JournalValue } from "@/server/changelog/contract";
 import { journalFieldLabel } from "@/server/changelog/labels";
 import type { JournalEntryDetail, JournalListRow } from "@/server/changelog/query-contract";
+import { JournalReversal } from './journal-reversal';
 import { journalTime, type JournalEntrySection } from "./journal-table";
 
 type Selection = { row: JournalListRow; section: JournalEntrySection };
@@ -30,12 +31,13 @@ function Value({ value }: { value: JournalValue }) {
   </dl> : <span className="italic">Нет полей</span>;
 }
 
-export function JournalEntryDialog({ selection, scope, returnFocus, fallbackFocus, onClose }: {
+export function JournalEntryDialog({ selection, scope, returnFocus, fallbackFocus, onClose, onReversed }: {
   selection: Selection | null;
   scope: JournalScope;
   returnFocus: RefObject<HTMLElement | null>;
   fallbackFocus: RefObject<HTMLElement | null>;
   onClose: () => void;
+  onReversed: () => void;
 }) {
   const [state, setState] = useState<DetailState | null>(null);
   const [retry, setRetry] = useState(0);
@@ -120,6 +122,7 @@ export function JournalEntryDialog({ selection, scope, returnFocus, fallbackFocu
               </div>
             </article>)}
           </section>
+          {detail.reversalAvailable ? <JournalReversal key={detail.id} entryId={detail.id} scope={scope} onReversed={onReversed}/> : null}
           <details className="min-w-0 rounded-lg border p-3">
             <summary className="cursor-pointer font-medium">Технические сведения</summary>
             <pre className="mt-3 min-w-0 whitespace-pre-wrap text-xs [overflow-wrap:anywhere]">{JSON.stringify({
