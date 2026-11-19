@@ -33,11 +33,11 @@ export async function verifyLogisticsLifecycleNative(tx: Prisma.TransactionClien
   ] };
   const single = { ...initial, lines: [a], shares: [{ projectId: a.projectId, percentBps: 10000 }] };
   const transaction = async <T>(operation: (db: Prisma.TransactionClient) => Promise<T>) => operation(tx);
-  const undo = (entryId: string, requestId = randomUUID()) => reverseJournalActionInTransaction(tx, director.id, { entryId, requestId });
+  const undo = (entryId: string, requestId = randomUUID()) => reverseJournalActionInTransaction(tx, director.id, { entryId, requestId, scope: { kind: "global" } });
   const trip = await createLogisticsTripCore(procurement.id, { ...initial, clientMutationId: randomUUID() }, transaction);
   const draft = await createLogisticsTripCore(procurement.id, { ...single, clientMutationId: randomUUID() }, transaction);
   const creation = await tx.changeLog.findFirstOrThrow({ where: { entityId: draft.tripId, action: "create" } });
-  await assert.rejects(() => reverseJournalActionInTransaction(tx, procurement.id, { entryId: creation.id, requestId: randomUUID() }), /Недостаточно прав/);
+  await assert.rejects(() => reverseJournalActionInTransaction(tx, procurement.id, { entryId: creation.id, requestId: randomUUID(), scope: { kind: "global" } }), /Недостаточно прав/);
   const cancelledDraft = await undo(creation.id);
   assert.equal(await getLogisticsTripCore(director.id, draft.tripId, transaction), null);
   await undo(cancelledDraft.reversalId);
@@ -83,7 +83,7 @@ export async function verifyLogisticsLifecycleNative(tx: Prisma.TransactionClien
     clientMutationId: postId, amount: "0.02", currency: "USD", rate: 1.5, rateDate: initial.date,
     cashAccountId: account.id, documentIds: [documentId] }, "post", { db: tx, transaction });
   const child = await tx.changeLog.findFirstOrThrow({ where: { operationRootId: `logistics-posting:${postId}`, entity: "payment" } });
-  await previewJournalReversalInTransaction(tx, director.id, { entryId: child.id });
+  await previewJournalReversalInTransaction(tx, director.id, { entryId: child.id, scope: { kind: "global" } });
   const undoPost = await undo(child.id);
   assert.equal((await getLogisticsTripMoneyCore(director.id, trip.tripId, tx)).current, null);
   assert.ok((await readOrgBalance(tx, "1")).eq(before));
@@ -98,7 +98,7 @@ export async function verifyLogisticsLifecycleNative(tx: Prisma.TransactionClien
     documentIds: [documentId], manifest: single }, "correct", { db: tx, transaction });
   const undoCorrection = `logistics-posting:${correctionId}`;
   await tx.payment.update({ where: { id: income.id }, data: { deletedAt: new Date() } });
-  await assert.rejects(() => previewJournalReversalInTransaction(tx, director.id, { entryId: undoCorrection }), /отрицательный остаток кассы/);
+  await assert.rejects(() => previewJournalReversalInTransaction(tx, director.id, { entryId: undoCorrection, scope: { kind: "global" } }), /отрицательный остаток кассы/);
   await assert.rejects(() => undo(undoCorrection), /отрицательный остаток кассы/);
   assert.equal((await getLogisticsTripMoneyCore(director.id, trip.tripId, tx)).current?.amount, "12.00");
   await tx.payment.update({ where: { id: income.id }, data: { deletedAt: null } });
