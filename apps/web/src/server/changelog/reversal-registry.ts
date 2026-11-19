@@ -1,3 +1,4 @@
+import { warehouseCatalogReversal } from "@/server/warehouse/catalog-reversal";
 import { productTitleReversal } from "@/server/products/title-reversal";
 import { paymentVisibilityReversal } from "@/server/payments/visibility-reversal";
 import { retainedFileReversal } from "@/server/files/retained-file-reversal";
@@ -7,6 +8,7 @@ import { proposalMediaUploadReversal } from "@/server/kp/media-upload-reversal";
 import { logisticsReallocationReversal } from "@/server/logistics/reallocation-reversal";
 
 export const journalReversals = [
+  warehouseCatalogReversal,
   productTitleReversal,
   paymentVisibilityReversal,
   retainedFileReversal,

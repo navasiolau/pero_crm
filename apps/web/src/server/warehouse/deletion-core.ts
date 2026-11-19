@@ -41,7 +41,7 @@ async function loadPlan(tx:Tx,actor:DomainActor,movementId:string){
   if(!balance||balance.runId!==state.runId)throw incomplete();
   const productIds=[...new Set(rows.flatMap(row=>row.movement.productId?[row.movement.productId]:[]))].sort();
   for(const id of productIds)await lockProductRow(tx,id);
-  const lines=await tx.projectMaterial.findMany({where:{materialId:root.materialId,productId:{in:productIds}},orderBy:{id:'asc'}});
+  const lines=await tx.projectMaterial.findMany({where:{materialId:root.materialId,deletedAt:null,productId:{in:productIds}},orderBy:{id:'asc'}});
   const facts:DeletionFact[]=rows.map(row=>{
     if(!row.quantity.eq(row.movement.quantity)||!row.moneyByn.eq(row.movement.totalByn??-1)||
       (row.accountingRevision!==null&&row.accountingRevision>balance.revision))throw incomplete();
