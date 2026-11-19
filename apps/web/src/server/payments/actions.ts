@@ -2,12 +2,9 @@
 
 import { revalidatePath } from "next/cache";
 
-import { prisma } from "@/lib/prisma";
 import { requireFinance } from "@/server/require-role";
 import { withTaskTransaction } from "@/server/tasks/transaction";
 import { deletePaymentInTransaction } from "./delete-core";
-import { getPayrollCurrency } from "@/server/payroll/queries";
-import { getNbrbRate } from "@/server/finance/nbrb";
 
 import type { PaymentMutationResult } from "./contracts";
 import { createPaymentCore } from "./service";
@@ -41,27 +38,19 @@ export async function deletePayment(
   paymentId: string,
 ): Promise<{ ok: boolean; error?: string }> {
   const session = await requireFinance();
-  const preview = await prisma.payment.findUnique({
-    where: { id: paymentId },
-    include: { project: { select: { id: true, number: true } } },
-  });
-  if (!preview) return { ok: false, error: "Платёж не найден" };
-  const payrollCurrency = preview.direction === "INCOME" ? await getPayrollCurrency() : "BYN";
-  let payrollRate = "1.000000";
-  if (preview.direction === "INCOME" && payrollCurrency !== "BYN") {
-    try { payrollRate = (await getNbrbRate(payrollCurrency)).rate.toFixed(6); }
-    catch { return { ok: false, error: "Не удалось получить курс для проверки баланса организации" }; }
-  }
   let payment;
   try {
     payment = await withTaskTransaction(async (tx) => {
-      return deletePaymentInTransaction({id:session.user.id,name:session.user.name??'',roles:session.user.roles,source:'web'},paymentId,preview.direction,payrollCurrency,payrollRate,tx);
+      return deletePaymentInTransaction({id:session.user.id,name:session.user.name??'',roles:session.user.roles,source:'web'}, paymentId, tx);
     });
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "Не удалось удалить платёж" };
   }
 
-  if (payment.project) revalidatePath(`/projects/${payment.project.id}`);
+  if (payment.project) {
+    revalidatePath(`/projects/${payment.project.id}`);
+    revalidatePath(`/finance/projects/${payment.project.id}`);
+  }
   revalidatePath("/finance/income");
   revalidatePath("/finance/expenses");
   revalidatePath("/finance/payroll");
