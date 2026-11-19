@@ -1814,6 +1814,8 @@ model ProposalArtifact {
 }
 
 model ProposalContract {
+  deletedAt DateTime?
+  deletedById String?
   id                String @id @default(cuid())
   primaryProposalId String @unique
   primaryProposal   CommercialProposal @relation(fields: [primaryProposalId], references: [id], onDelete: Restrict)

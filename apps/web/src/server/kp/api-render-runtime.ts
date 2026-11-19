@@ -1,3 +1,4 @@
+import { captureReleaseStages, makePublicationReversal } from "./contract-publication-reversal";
 import { readFile } from "node:fs/promises";
 import { getKpTemplateIdentity, assetPath, ContractModel, contractFileName, contractTemplateVersion, KP_RENDER_LIMITS, type SavedProposalRenderInput } from "@pero/kp-template";
 import { withMutationTransaction } from "@/server/transactions/coordinator";
@@ -112,13 +113,15 @@ export async function kpContractWorkflow(scope: ContractScope, context?: KpApiCo
       assertClaim: async (tx, value) => { await assertRenderJobClaimInTransaction(tx.native, value, security); },
       registerPendingPdf: async (tx, value, source, artifact) => contractArtifact(await recordPendingPdfArtifactInTransaction(tx.native, { claim: value, proposalId: source.proposalId, artifact }, ports)),
       registerPendingDocxCleanup: (tx, value, artifactId, primaryProposalId) => registerPendingArtifactCleanupInTransaction(tx.native, { claim: value, artifactId, proposalId: primaryProposalId }, security),
-      async publishSourcePdf(tx, value, proposalId, artifact) {
-        const version = await publishSourcePdfInTransaction(tx.native, { claim: value, proposalId, artifactId: artifact.id, verified: artifact }, ports);
+      async publishSourcePdf(tx, value, proposalId, artifact, operationRootId) {
+        const version = await publishSourcePdfInTransaction(tx.native, { claim: value, proposalId, artifactId: artifact.id, verified: artifact }, ports, operationRootId);
         return { versionId: version.id, artifactId: artifact.id };
       },
-      async advanceToContract(tx, actor, source, operationId) {
+      captureReleaseStages: (tx, sources) => captureReleaseStages(tx.native, sources),
+      makePublicationReversal: (tx, identity, sources, before) => makePublicationReversal(tx.native, identity, sources, before),
+      async advanceToContract(tx, actor, source, operationId, operationRootId) {
         const mutation = await patchProjectStageTransaction(actor, { projectId: source.projectId, expectedStage: source.projectStage as ProjectStage,
-          toStage: "CONTRACT", clientMutationId: operationId }, tx.native,automationJournalContext(actor,"Выпуск договора"));
+          toStage: "CONTRACT", clientMutationId: operationId }, tx.native,automationJournalContext(actor,"Выпуск договора"),operationRootId);
         if (!mutation.result.ok) return apiFailure("KP_STAGE_CHANGED", 409, "Этап проекта изменился во время генерации договора");
         return mutation.eventIds;
       },
@@ -133,7 +136,7 @@ export async function kpContractWorkflow(scope: ContractScope, context?: KpApiCo
         await guard();
         const artifact = await withMutationTransaction(async tx => {
           if (claim) await assertRenderJobClaimInTransaction(tx, claim, security);
-          const row = source.retainedPdfArtifactId ? await tx.proposalArtifact.findFirst({ where: { id: source.retainedPdfArtifactId, proposalId: source.proposalId, kind: "PDF", state: "READY" } }) : null;
+          const row = source.retainedPdfArtifactId ? await tx.proposalArtifact.findFirst({ where: { id: source.retainedPdfArtifactId, proposalId: source.proposalId, kind: "PDF", state: "READY", deletedAt: null } }) : null;
           if (!row) return apiFailure("KP_PDF_UNAVAILABLE", 410, "Принятый PDF КП недоступен"); return row;
         });
         return storage.read(artifact, guard, ownership?.signal);

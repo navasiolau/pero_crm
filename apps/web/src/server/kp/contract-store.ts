@@ -52,7 +52,7 @@ export function createPostgresContractTransaction(tx: Prisma.TransactionClient):
       return rows.map(row => ({ ...row, updatedAt: row.updatedAt.toISOString() })) satisfies ContractClient[];
     },
     async contract(primaryId) {
-      const rows = await tx.$queryRaw<ContractRecord[]>`SELECT id,"primaryProposalId",revision,settings FROM "ProposalContract" WHERE "primaryProposalId"=${primaryId}`;
+      const rows = await tx.$queryRaw<ContractRecord[]>`SELECT id,"primaryProposalId",revision,settings FROM "ProposalContract" WHERE "primaryProposalId"=${primaryId} AND "deletedAt" IS NULL`;
       return rows[0] ?? null;
     },
     async history(contractId) {
@@ -74,8 +74,8 @@ export function createPostgresContractTransaction(tx: Prisma.TransactionClient):
       await writeChangeLogInTransaction(tx, { id: "kp-contract-operation:" + operationId, actorType: "user", actorId: actor.id, source: actor.source,
         entity: "proposalContract", entityId: primaryId, action, reversal, newValue: receipt as unknown as Prisma.InputJsonValue },journal);
     },
-    async writeEvent(actor,contractId,action,value,journal,reversal) {
-      await writeChangeLogInTransaction(tx,{actorType:'user',actorId:actor.id,actorName:actor.name,source:actor.source,
+    async writeEvent(actor,contractId,action,value,journal,reversal,id) {
+      await writeChangeLogInTransaction(tx,{id,actorType:'user',actorId:actor.id,actorName:actor.name,source:actor.source,
         entity:'proposalContract',entityId:contractId,action,reversal,newValue:value},journal);
     },
     async saveDraft(input) {
@@ -83,10 +83,12 @@ export function createPostgresContractTransaction(tx: Prisma.TransactionClient):
       if (input.create) {
         rows = await tx.$queryRaw<ContractRecord[]>`INSERT INTO "ProposalContract" (id,"primaryProposalId",settings,revision,"createdById","createdAt","updatedAt")
           VALUES (${input.id},${input.primaryId},${json(input.settings)}::jsonb,1,${input.actorId},NOW(),NOW())
-          ON CONFLICT ("primaryProposalId") DO NOTHING RETURNING id,"primaryProposalId",settings,revision`;
+          ON CONFLICT ("primaryProposalId") DO UPDATE SET settings=EXCLUDED.settings,"updatedAt"=NOW(),
+            revision="ProposalContract".revision+1,"deletedAt"=NULL,"deletedById"=NULL WHERE "ProposalContract"."deletedAt" IS NOT NULL
+          RETURNING id,"primaryProposalId",settings,revision`;
       } else {
         rows = await tx.$queryRaw<ContractRecord[]>`UPDATE "ProposalContract" SET settings=${json(input.settings)}::jsonb,revision=revision+1,"updatedAt"=NOW()
-          WHERE "primaryProposalId"=${input.primaryId} AND revision=${input.expectedRevision} RETURNING id,"primaryProposalId",settings,revision`;
+          WHERE "primaryProposalId"=${input.primaryId} AND revision=${input.expectedRevision} AND "deletedAt" IS NULL RETURNING id,"primaryProposalId",settings,revision`;
       }
       if (rows.length !== 1) contractFailure("CONTRACT_REVISION_CHANGED", "Договор изменён — обновите форму");
       await tx.$executeRaw`UPDATE "ProposalContractSource" SET "detachedAt"=NOW()

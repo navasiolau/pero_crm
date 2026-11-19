@@ -1,3 +1,4 @@
+import type { PublicationIdentity, ReleaseStageBefore } from "./contract-publication-reversal";
 import type { JournalReversalCommand } from "@/server/changelog/reversal-contract";
 import type { Prisma } from "@prisma/client";
 import type { DomainActor } from "../actor";
@@ -36,7 +37,7 @@ export interface ContractTransaction {
   history(contractId: string): Promise<ContractHistoryEntry[]>;
   receipt(operationId: string): Promise<ContractReceipt | null>;
   writeReceipt(operationId: string, primaryId: string, action: string, actor: ContractActor, receipt: ContractReceipt, journal?: JournalPresentationHints, reversal?: JournalReversalCommand): Promise<void>;
-  writeEvent(actor: DomainActor, contractId: string, action: string, value: ContractObject, journal: JournalPresentationHints, reversal?: JournalReversalCommand): Promise<void>;
+  writeEvent(actor: DomainActor, contractId: string, action: string, value: ContractObject, journal: JournalPresentationHints, reversal?: JournalReversalCommand, id?: string): Promise<void>;
   saveDraft(input: { id: string; primaryId: string; expectedRevision: number; create: boolean; settings: ContractObject; sourceIds: string[]; actorId: string }): Promise<ContractRecord>;
   createJob(input: { id: string; contractId: string; dedupeKey: string; payload: ContractPayload; actorId: string }): Promise<void>;
   job(id: string): Promise<ContractJob | null>;
@@ -57,8 +58,11 @@ export type ContractLifecyclePort = {
   registerPendingPdf(tx: ContractTransaction, claim: ContractClaim, source: ContractFrozenSource,
     artifact: Pick<ContractArtifact, "storageBinding" | "sha256" | "size">): Promise<ContractArtifact>;
   registerPendingDocxCleanup(tx: ContractTransaction, claim: ContractClaim, artifactId: string, primaryProposalId: string): Promise<void>;
-  publishSourcePdf(tx: ContractTransaction, claim: ContractClaim, proposalId: string, artifact: ContractVerifiedArtifact): Promise<{ versionId: string; artifactId: string }>;
-  advanceToContract(tx: ContractTransaction, actor: DomainActor, source: ContractFrozenSource, operationId: string): Promise<string[]>;
+  publishSourcePdf(tx: ContractTransaction, claim: ContractClaim, proposalId: string, artifact: ContractVerifiedArtifact, rootId?: string): Promise<{ versionId: string; artifactId: string }>;
+  advanceToContract(tx: ContractTransaction, actor: DomainActor, source: ContractFrozenSource, operationId: string, rootId?: string): Promise<string[]>;
+  captureReleaseStages?(tx: ContractTransaction, sources: readonly ContractFrozenSource[]): Promise<ReleaseStageBefore[]>;
+  makePublicationReversal?(tx: ContractTransaction, identity: PublicationIdentity, sources: readonly ContractFrozenSource[],
+    before: readonly ReleaseStageBefore[]): Promise<JournalReversalCommand>;
 };
 export type ContractRenderIO = {
   renderPdf(source: ContractFrozenSource): Promise<{ bytes: Uint8Array; pages: Uint8Array[] }>;

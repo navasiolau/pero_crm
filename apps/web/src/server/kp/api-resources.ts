@@ -64,7 +64,7 @@ async function authorizeArtifact(context: KpApiContext, artifactId: string, tx?:
   await authorizeKpResource(context, artifact.kind, tx);
   if (artifact.kind === "PDF" && artifact.proposalId && !artifact.contractId) await loadApiDocument(db, artifact.proposalId);
   else if (artifact.kind === "DOCX" && artifact.contractId && !artifact.proposalId) {
-    const contract = await db.proposalContract.findUnique({ where: { id: artifact.contractId }, select: { primaryProposalId: true } });
+    const contract = await db.proposalContract.findUnique({ where: { id: artifact.contractId, deletedAt: null }, select: { primaryProposalId: true } });
     if (!contract) return apiFailure("KP_ARTIFACT_NOT_FOUND", 404, "История договора недоступна");
     await loadApiDocument(db, contract.primaryProposalId);
   } else return apiFailure("KP_ARTIFACT_NOT_FOUND", 404, "Не совпал источник документа");

@@ -15,17 +15,22 @@ const draft = z.object({
   versions: z.array(z.string()),
 }).strict();
 type DraftCommand = z.infer<typeof draft>;
+const draftPresence = draft.omit({ settings: true }).extend({
+  expectedDeletedAt: z.iso.datetime().nullable(), hide: z.boolean(),
+}).strict();
 const refusal = "Настройки договора, исходные КП, клиенты или выпуски изменились";
 
-async function readDraft(tx: Prisma.TransactionClient, data: DraftCommand) {
+async function readDraft(tx: Prisma.TransactionClient, data: Omit<DraftCommand, "settings">,
+  presence?: Pick<z.infer<typeof draftPresence>, "expectedDeletedAt">) {
   const current = await tx.proposalContract.findFirst({
-    where: { id: data.contractId, primaryProposalId: data.primaryId, revision: data.expectedRevision },
-    select: { revision: true, settings: true,
+    where: { id: data.contractId, primaryProposalId: data.primaryId, revision: data.expectedRevision,
+      deletedAt: presence?.expectedDeletedAt ? new Date(presence.expectedDeletedAt) : null },
+    select: { revision: true, settings: true, _count: { select: { jobs: true, versions: true } },
       sources: { where: { detachedAt: null }, orderBy: { position: "asc" }, select: { proposalId: true } },
       versions: { where: { docxArtifact: { deletedAt: null } }, select: { id: true } },
       jobs: { where: { state: { in: ["PENDING", "PROCESSING"] } }, select: { id: true }, take: 1 } },
   });
-  if (!current || current.jobs.length || JSON.stringify(current.versions.map(v => v.id).sort()) !== JSON.stringify([...data.versions].sort())
+  if (!current || current.jobs.length || presence && (current._count.jobs || current._count.versions) || JSON.stringify(current.versions.map(v => v.id).sort()) !== JSON.stringify([...data.versions].sort())
       || data.sourceIds[0] !== data.primaryId || new Set(data.sourceIds).size !== data.sourceIds.length) return null;
   const sources = await tx.commercialProposal.findMany({ where: { id: { in: data.sources.map(source => source.proposalId) }, deletedAt: null },
     select: { id: true, clientId: true, revision: true, project: { select: { id: true, stage: true, clientId: true, deletedAt: true } } } });
@@ -67,3 +72,27 @@ export const savedContractDraftReversal = defineJournalReversal({
   },
 });
 
+
+export const createdContractDraftReversal = defineJournalReversal({
+  kind: "proposal.contract.create",
+  version: 1,
+  schema: draftPresence,
+  async preview({ tx }, data) { return await readDraft(tx, data, data) ? null : refusal; },
+  async apply({ tx, actor }, data) {
+    await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(18435,55001)`;
+    const projectIds = [...new Set(data.sources.map(source => source.projectId))].sort();
+    for (const id of projectIds) await lockProjectRow(tx, id);
+    await tx.$queryRaw`SELECT id FROM "ProposalContract" WHERE id=${data.contractId} FOR UPDATE`;
+    for (const client of [...data.clients].sort((a, b) => a.id.localeCompare(b.id)))
+      await tx.$queryRaw`SELECT id FROM "Client" WHERE id=${client.id} FOR SHARE`;
+    if (!await readDraft(tx, data, data)) throw new JournalReversalRefusal(refusal);
+    const deletedAt = data.hide ? new Date() : null;
+    await tx.proposalContract.update({ where: { id: data.contractId },
+      data: { deletedAt, deletedById: data.hide ? actor.id : null } });
+    return {
+      inverse: { ...data, expectedDeletedAt: deletedAt?.toISOString() ?? null, hide: !data.hide },
+      oldValue: { deletedAt: data.expectedDeletedAt }, newValue: { deletedAt: deletedAt?.toISOString() ?? null },
+      cachePaths: ["/kp", ...projectIds.map(id => "/projects/" + encodeURIComponent(id))],
+    };
+  },
+});

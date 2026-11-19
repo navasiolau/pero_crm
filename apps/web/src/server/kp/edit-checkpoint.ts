@@ -110,6 +110,10 @@ export async function proposalEditFingerprint(tx: Prisma.TransactionClient, prop
     updatedAt: true, deletedAt: true, stage: true, clientId: true,
     _count: { select: { products: true, tasks: true, payments: true, files: true, works: true,
       communications: true, logisticsShares: true, stageHistory: true } },
+    tasks: { orderBy: { id: "asc" }, select: { id: true, updatedAt: true, status: true,
+      _count: { select: { timeEntries: true, payrollEntries: true } } } },
+    works: { orderBy: { id: "asc" }, select: { id: true, quantity: true, quantityPerUnit: true, total: true, paymentKind: true } },
+    payments: { orderBy: { id: "asc" }, select: { id: true, amount: true, bynAmount: true, deletionId: true, paidAt: true } },
   } });
   const proposal = await tx.commercialProposal.findUnique({ where: { id: proposalId }, select: {
     updatedAt: true, revision: true, clientId: true, deletedAt: true, acceptedVersionId: true, projectId: true,
@@ -117,7 +121,8 @@ export async function proposalEditFingerprint(tx: Prisma.TransactionClient, prop
   } });
   const products = await tx.product.findMany({ where: { projectId }, orderBy: { id: "asc" }, select: {
     id: true, updatedAt: true, deletedAt: true, sketchFileId: true,
-    _count: { select: { tasks: true, works: true, projectMaterials: true, files: true } },
+    _count: { select: { tasks: true, works: true, projectMaterials: true, files: true, stockMovements: true } },
+    projectMaterials: { orderBy: { id: "asc" }, select: { id: true, updatedAt: true } },
   } });
   const clients = await tx.client.findMany({ where: { id: { in: [...new Set([targetClientId, project?.clientId ?? targetClientId])] } },
     orderBy: { id: "asc" }, select: { id: true, updatedAt: true } });

@@ -14,7 +14,7 @@ import type {JournalPresentationHints} from '@/server/changelog/contract';
 import {projectJournalContext} from './journal';
 
 /** Одна транзакция для селекта, доски и бота; проценты изделий не начисляет. */
-export async function patchProjectStageTransaction(actor:DomainActor,input:unknown,tx:Prisma.TransactionClient,journalHints?:JournalPresentationHints):Promise<{result:ProjectStageResult;eventIds:string[];project?:{number:string;title:string};fromStage?:string;productIds?:string[]}>{
+export async function patchProjectStageTransaction(actor:DomainActor,input:unknown,tx:Prisma.TransactionClient,journalHints?:JournalPresentationHints, operationRootId?: string):Promise<{result:ProjectStageResult;eventIds:string[];project?:{number:string;title:string};fromStage?:string;productIds?:string[]}>{
  const parsed=archivedProjectStagePatchSchema.safeParse(input);
  if(!parsed.success)return{result:{ok:false,kind:'validation',error:'Обновите форму: необходимы исходный статус и идентификатор операции'},eventIds:[]};
  const request=parsed.data;
@@ -42,7 +42,7 @@ export async function patchProjectStageTransaction(actor:DomainActor,input:unkno
  if(Object.keys(errors).length)return fail('validation','Заполните обязательные сведения',{errors});
  const extras=patch.extras??{};
  const changedAt=new Date();
- try{await applyProposalStageGateInTransaction(tx,{projectId:patch.projectId,fromStage:project.stage,toStage:patch.toStage,at:changedAt},actor)}
+ try{await applyProposalStageGateInTransaction(tx,{projectId:patch.projectId,fromStage:project.stage,toStage:patch.toStage,at:changedAt},actor,operationRootId)}
  catch(error){if(error instanceof ProposalLifecycleError)return fail('validation',error.message);throw error}
  const data:Prisma.ProjectUpdateManyMutationInput={stage:patch.toStage,stageChangedAt:changedAt,
   ...(patch.toStage==='REFUSED'?{refusalReason:extras.refusalReason!.trim(),refusalComment:extras.refusalComment?.trim()||null}:{}),
@@ -50,10 +50,10 @@ export async function patchProjectStageTransaction(actor:DomainActor,input:unkno
  const updated=await tx.project.updateMany({where:{id:patch.projectId,stage:patch.expectedStage},data});
  if(updated.count!==1)throw new Error('Статус изменён другим пользователем');
  await tx.projectStageHistory.create({data:{projectId:patch.projectId,fromStage:project.stage,toStage:patch.toStage,changedById:actor.id,comment:patch.toStage==='REFUSED'?extras.refusalReason!.trim():undefined}});
- await writeChangeLogInTransaction(tx, {id:receiptId,actorType:'user',actorId:actor.id,actorName:actor.name,source:actor.source,entity:'project',entityId:patch.projectId,action:'stage',field:'stage',oldValue:project.stage,newValue:{fingerprint,stage:patch.toStage}},
+ await writeChangeLogInTransaction(tx, {id:receiptId,actorType:'user',actorId:actor.id,actorName:actor.name,source:actor.source,entity:'project',entityId:patch.projectId,action:'stage',operationRootId,field:'stage',oldValue:project.stage,newValue:{fingerprint,stage:patch.toStage}},
   {...projectJournalContext(project),...journalHints,before:{stage:project.stage,...(patch.toStage==='REFUSED'?{refusalReason:project.refusalReason,refusalComment:project.refusalComment}:{})},
    after:{stage:patch.toStage,...(patch.toStage==='REFUSED'?{refusalReason:data.refusalReason,refusalComment:data.refusalComment}:{})}});
- const promoted=patch.toStage==='CONTRACT'?await promoteProjectDrafts(tx,actor,patch.projectId,changedAt):{eventIds:[],productIds:[]};
+ const promoted=patch.toStage==='CONTRACT'?await promoteProjectDrafts(tx,actor,patch.projectId,changedAt,operationRootId):{eventIds:[],productIds:[]};
  const event=await tx.domainEvent.create({data:{type:'project.stageChanged',actor:actor.id,payload:{projectId:patch.projectId,number:project.number,from:project.stage,to:patch.toStage}}});
  return{result:{ok:true,kind:'saved',clientMutationId:patch.clientMutationId,stage:patch.toStage},eventIds:[event.id,...promoted.eventIds],project,fromStage:project.stage,productIds:promoted.productIds};
 }
