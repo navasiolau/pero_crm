@@ -1,14 +1,13 @@
 "use client";
 
 import { useCallback, useLayoutEffect, useRef, type MouseEvent, type RefObject } from "react";
-import { readKanbanPosition, writeKanbanPosition, type KanbanPosition } from "@/lib/kanban-position";
+import { readKanbanPosition, writeKanbanPosition, type KanbanPosition, type KanbanScope } from "@/lib/kanban-position";
 import { suspendKanbanSnap } from "@/lib/kanban-scroll-snap";
 import { reflectKanbanScroll } from "@/lib/kanban-scroll-sync";
-import type { ListSection } from "@/lib/list-state";
 
 export interface KanbanScrollContext {
   userId: string;
-  section: ListSection;
+  section: KanbanScope;
   query: string;
   searchText: string;
   searchRevision: number;
@@ -136,9 +135,10 @@ export function useKanbanScrollRestoration(boardRef: RefObject<HTMLDivElement | 
   }, [boardRef, userId, section]);
   useLayoutEffect(() => { lifecycle.current?.update(); });
 
+  const savePosition = useCallback((id: string) => { lifecycle.current?.open(id); }, []);
   const onClickCapture = useCallback((event: MouseEvent<HTMLDivElement>) => {
     const card = event.target instanceof Element ? event.target.closest<HTMLElement>("[data-kanban-card-id]") : null;
-    if (card?.dataset.kanbanCardId && boardRef.current?.contains(card)) lifecycle.current?.open(card.dataset.kanbanCardId);
-  }, [boardRef]);
-  return { handledSearch, onClickCapture };
+    if (card?.dataset.kanbanCardId && boardRef.current?.contains(card)) savePosition(card.dataset.kanbanCardId);
+  }, [boardRef, savePosition]);
+  return { handledSearch, onClickCapture, savePosition };
 }

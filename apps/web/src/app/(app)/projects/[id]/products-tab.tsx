@@ -73,6 +73,7 @@ function DraggableProduct({
   return (
     <div
       ref={setNodeRef}
+      data-kanban-card-id={product.id}
       style={{ transform: CSS.Translate.toString(transform) }}
       className={cn("relative", isDragging && "opacity-40")}
       onClick={() => onOpen(product)}
@@ -231,6 +232,18 @@ export function ProductsTab({
   }
 
   const activeProduct = products.find((product) => product.id === activeId);
+  const productsPath = projectProductsHref(projectId);
+
+  function openProduct(productId: string) {
+    const source = new URL(window.location.href);
+    const tabs = source.searchParams.getAll("tab");
+    if (tabs.length !== 1 || tabs[0] !== "products") {
+      // Возврат браузера должен открыть «Изделия» даже после выбора вкладки без изменения URL.
+      source.searchParams.set("tab", "products");
+      window.history.replaceState(null, "", source);
+    }
+    router.push(productDetailHref(productId, productsPath));
+  }
 
   return (
     <div className="flex flex-col gap-3">
@@ -254,8 +267,16 @@ export function ProductsTab({
         onDragEnd={onDragEnd}
         onDragCancel={() => setActiveId(null)}
       >
-        <KanbanScrollArea label="Изделия проекта">
-          {visibleStatuses.map((status) => (
+        <KanbanScrollArea label="Изделия проекта" restoration={{
+          userId: actorUserId,
+          section: `projects/${encodeURIComponent(projectId)}`,
+          query: "",
+          searchText: "",
+          searchRevision: 0,
+          ready: true,
+          cardIds: products.filter(product => visibleStatuses.some(status => status.id === product.status)).map(product => product.id),
+        }}>
+          {savePosition => visibleStatuses.map((status) => (
             <StatusColumn
               key={status.id}
               status={status}
@@ -264,7 +285,10 @@ export function ProductsTab({
               showAmount={showAmount}
               canDrag={(product) => currentProductStatusTargets(actorRoles, { ...product, projectStage }, actorUserId).some(target => target !== product.status)}
               canDrop={!!activeProduct && currentProductStatusTargets(actorRoles, { ...activeProduct, projectStage }, actorUserId).includes(status.id)}
-              onOpen={(product) => router.push(productDetailHref(product.id, projectProductsHref(projectId)))}
+              onOpen={(product) => {
+                savePosition(product.id);
+                openProduct(product.id);
+              }}
             />
           ))}
         </KanbanScrollArea>

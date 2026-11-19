@@ -10,7 +10,7 @@ import type {ProductDeleteInput} from '../src/server/products/delete-contract';
 const require=createRequire(import.meta.url);
 function inject(name:string,exports:Record<string,unknown>){const file=require.resolve(name),stub=new Module(file);stub.filename=file;stub.loaded=true;stub.exports=exports;require.cache[file]=stub;}
 const pushes:string[]=[];
-inject('next/navigation',{useRouter:()=>({push:(href:string)=>pushes.push(href),refresh(){throw Error('UNEXPECTED_REFRESH')}})});
+inject('next/navigation',{useSearchParams:()=>null,useRouter:()=>({push:(href:string)=>pushes.push(href),refresh(){throw Error('UNEXPECTED_REFRESH')}})});
 inject('../src/components/product-inline-provider',{useProductInline:()=>({flush:async()=>true}),useOptionalProductInline:()=>null});
 inject('../src/server/products/actions',{readProductDeleteBaseline(){throw Error('UNEXPECTED_BASELINE_READ')},deleteProductAction(){throw Error('UNEXPECTED_READONLY_DELETE')},changeProductStatus(){throw Error('UNEXPECTED_STATUS_WRITE')}});
 inject('../src/components/confirm-delete-dialog',{ConfirmDeleteDialog:()=>null});
