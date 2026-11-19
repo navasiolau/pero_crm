@@ -12,8 +12,8 @@ export async function getEngineeringFundView(db: Reader, productId: string, canM
   const product = await db.product.findUnique({ where: {...liveProductWhere, id: productId }, include: {
     project: { select: { currency: true } },
     stagePayPools: { where: { kind: "ENGINEERING" }, include: { settlement: { include: { shares: true } } } },
-    works: { orderBy: [{ createdAt: "asc" }, { id: "asc" }], include: {
-      tasks: { orderBy: [{ createdAt: "asc" }, { id: "asc" }], include: { assignee: { select: { name: true } } } },
+    works: { where: { deletedAt: null }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], include: {
+      tasks: { where: { deletedAt: null }, orderBy: [{ createdAt: "asc" }, { id: "asc" }], include: { assignee: { select: { name: true } } } },
     } },
   } });
   if (!product) throw new Error("Изделие не найдено");

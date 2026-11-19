@@ -5,7 +5,7 @@ import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { hasWorkCoordinator } from "@/lib/roles";
 import { productVisibilityWhere, resolveVisibilityActor } from "@/server/access/visibility";
-import { liveChildWhere, liveProductWhere } from "@/server/access/live-entities";
+import { liveTaskWhere, liveProductWhere } from "@/server/access/live-entities";
 import { lockProjectRow } from "@/server/projects/lock";
 import { lockProductRow } from "@/server/products/quantity-core";
 import type { DomainActor } from "@/server/actor";
@@ -39,7 +39,7 @@ async function context(tx: Prisma.TransactionClient, actorId: string, taskId: st
   const product = await tx.product.findFirst({ where: { ...liveProductWhere, id: reference.productId, projectId: reference.projectId, AND: [productVisibilityWhere(visibility)] },
     select: { id: true, projectId: true, engineerId: true, status: true } });
   if (!product) fail("Задача не найдена или недоступна", "forbidden");
-  const task = await tx.task.findFirst({ where: { ...liveChildWhere, id: taskId, productId: product.id, projectId: product.projectId, workId: reference.workId },
+  const task = await tx.task.findFirst({ where: { ...liveTaskWhere, id: taskId, productId: product.id, projectId: product.projectId, workId: reference.workId },
     include: { project: { select: { id: true, number: true } }, product: { select: { id: true, engineerId: true, status: true } },
       work: { include: { _count: { select: { paymentConversions: true, settlementShares: true } } } },
       allocationGroup: { select: { id: true, workId: true, budgetSource: true } }, _count: { select: { payrollEntries: true, stageSettlementShares: true } } } });

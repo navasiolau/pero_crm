@@ -8,10 +8,11 @@ import { inputNorm, scaleNorm, workBudget } from "@/lib/product-quantity";
 import { allocatedWorkQuantity, quantityAtoms } from "@/lib/work-shares";
 import { productAssignmentWriteWhere, resolveVisibilityActor } from "@/server/access/visibility";
 import { productDraftAccessSelect } from "@/server/access/product-draft-context";
-import { liveChildWhere, liveProductWhere, liveProjectWhere } from "@/server/access/live-entities";
+import { liveWorkWhere, liveProductWhere, liveProjectWhere } from "@/server/access/live-entities";
 import { lockProductRow } from "@/server/products/quantity-core";
 import type { DomainActor } from "@/server/projects/core";
 import { withTaskTransaction, type TaskTransaction } from "@/server/tasks/transaction";
+import { createWorkEditReversal, workEditReversalKind } from "./edit-reversal-contract";
 import { isOrdinaryWork, workPlanRevision } from "./plan";
 import {operationJournalContext,journalSnapshot,WORK_JOURNAL_FIELDS} from '../tasks/journal';
 
@@ -54,8 +55,8 @@ export async function updateWorkCore(actor: DomainActor, input: unknown, transac
       try { assertInternalCurrency(payrollCurrency); } catch { deny("Валюта расчёта работ должна быть BYN"); }
       await tx.$queryRaw`SELECT id FROM "Work" WHERE id=${data.workId} FOR UPDATE`;
       await tx.$queryRaw`SELECT id FROM "Task" WHERE "workId"=${data.workId} ORDER BY id FOR UPDATE`;
-      const work = await tx.work.findUnique({ where: { ...liveChildWhere, id: data.workId }, include: {
-        tasks: { select: { id: true, quantity: true, allocationGroupId: true } },
+      const work = await tx.work.findUnique({ where: { ...liveWorkWhere, id: data.workId }, include: {
+        tasks: { where: { deletedAt: null }, select: { id: true, quantity: true, allocationGroupId: true } },
         _count: { select: { paymentConversions: true, settlementShares: true } },
       } });
       if (!work || work.projectId !== data.projectId || work.productId !== data.productId) deny("Работа не найдена в этом изделии", "forbidden");
@@ -93,7 +94,9 @@ export async function updateWorkCore(actor: DomainActor, input: unknown, transac
         quantity, quantityPerUnit: norm, title, unitSnapshot: unit, priceItemId, priceSnapshot: price, total,
       } });
       const result = { ok: true as const, workId: work.id, quantity, revision: workPlanRevision({ ...updated, tasks: work.tasks }), clientMutationId: data.clientMutationId };
+      const inverse = createWorkEditReversal(work, updated);
       await writeChangeLogInTransaction(tx, { actorType: "user", actorId: current.id, actorName: current.name, source: actor.source,
+        ...(inverse ? { reversal: { kind: workEditReversalKind, version: 1, data: inverse } } : {}),
         entity: "work", entityId: work.id, action: "update", oldValue: { quantity: work.quantity.toString(), quantityPerUnit: work.quantityPerUnit?.toString() ?? null,
           priceItemId: work.priceItemId, priceSnapshot: work.priceSnapshot.toString(), unitSnapshot: work.unitSnapshot },
         newValue: { quantity, quantityPerUnit: norm, priceItemId, priceSnapshot: price.toString(), unitSnapshot: unit },

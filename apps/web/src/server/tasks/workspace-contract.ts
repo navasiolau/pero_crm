@@ -2,8 +2,8 @@ import type {Prisma,PrismaClient} from '@prisma/client';
 import {taskPieceAmount,type TaskAllocationValues} from '@/lib/work-shares';
 import {liveProductWhere} from '@/server/access/live-entities';
 export const taskWorkspaceBindings:Prisma.TaskWhereInput={
-  productId:{not:null},workId:{not:null},assigneeId:{not:null},
-  work:{is:{productId:{not:null},project:{deletedAt:null},product:{is:{deletedAt:null,project:{deletedAt:null}}}}},
+  deletedAt:null,productId:{not:null},workId:{not:null},assigneeId:{not:null},
+  work:{is:{deletedAt:null,productId:{not:null},project:{deletedAt:null},product:{is:{deletedAt:null,project:{deletedAt:null}}}}},
   OR:[{work:{is:{priceSnapshot:{not:null}}}},{allocationGroupId:{not:null},shareAmount:{not:null}}],
 };
 export type TaskWorkspaceScope =

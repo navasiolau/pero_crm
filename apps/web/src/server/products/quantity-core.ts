@@ -16,8 +16,8 @@ export async function lockProductRow(tx: Prisma.TransactionClient, id: string) {
 export async function recalculateQuantity(tx: Prisma.TransactionClient, product: { id: string; number:string; quantity: number }, count: number, actor:DomainActor) {
   await tx.$queryRaw`SELECT id FROM "Work" WHERE "productId" = ${product.id} ORDER BY id FOR UPDATE`;
   await tx.$queryRaw`SELECT id FROM "ProjectMaterial" WHERE "productId" = ${product.id} ORDER BY id FOR UPDATE`;
-  const works = await tx.work.findMany({ where: { productId: product.id },
-    include: { tasks: { select: { quantity: true, allocationGroupId: true } } } });
+  const works = await tx.work.findMany({ where: { productId: product.id, deletedAt: null },
+    include: { tasks: { where: { deletedAt: null }, select: { quantity: true, allocationGroupId: true } } } });
   const materials = await tx.projectMaterial.findMany({ where: { productId: product.id }, include: { material: { select: { name: true } } } });
   const plan = planQuantityChange(product.quantity, count, works, materials);
   const context=productJournalContext(product);

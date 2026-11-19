@@ -17,7 +17,7 @@ export function maskProductionRead<T extends { id: string; technicalSpecificatio
 
 export async function maskProductionWorkRead<T extends {id:string}>(db:Pick<PrismaClient,'work'>,actor:VisibilityActor,rows:T[]):Promise<T[]> {
  if(!rows.length||canViewProductMoney(actor.roles))return rows;
- const assigned=await db.work.findMany({where:{id:{in:rows.map(row=>row.id)},tasks:{some:{assigneeId:actor.id}}},select:{id:true}});
+ const assigned=await db.work.findMany({where:{id:{in:rows.map(row=>row.id)},deletedAt:null,tasks:{some:{deletedAt:null,assigneeId:actor.id}}},select:{id:true}});
  const ids=new Set(assigned.map(row=>row.id));
  return rows.map(row=>ids.has(row.id)?row:{...row,priceSnapshot:null,total:null,stagePayPoolId:null,poolWeightUnits:null});
 }

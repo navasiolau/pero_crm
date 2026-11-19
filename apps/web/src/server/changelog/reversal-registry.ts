@@ -6,6 +6,9 @@ import { ordinaryExpenseProjectReversal } from "@/server/payments/project-assign
 import { proposalMediaUploadReversal } from "@/server/kp/media-upload-reversal";
 import { logisticsReallocationReversal } from "@/server/logistics/reallocation-reversal";
 import { expenseReceiptIssueReversal } from "@/server/warehouse/expense-issue-reversal";
+import { workTaskLifecycleReversal } from "@/server/tasks/lifecycle-reversal";
+import { taskEditReversal } from "@/server/tasks/edit-reversal";
+import { workEditReversal } from "@/server/works/edit-reversal";
 
 export const journalReversals = [
   productTitleReversal,
@@ -16,4 +19,7 @@ export const journalReversals = [
   proposalMediaUploadReversal,
   logisticsReallocationReversal,
   expenseReceiptIssueReversal,
+  workTaskLifecycleReversal,
+  taskEditReversal,
+  workEditReversal,
 ];

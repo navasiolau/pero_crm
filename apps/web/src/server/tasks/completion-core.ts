@@ -39,7 +39,7 @@ export async function changeTaskStatusCore(actor: DomainActor, taskId: string, t
           project: { select: { id: true, number: true, currency: true } }, product: { select: { id: true, number: true, projectId: true, status: true } },
           work: { select: { id: true, projectId: true, productId: true, priceSnapshot: true, paymentKind: true, stagePayPoolId: true, stagePayPool: { select: { productId: true } } } }, allocationGroup: { select: { id:true,workId:true,budgetSource:true,budget:true,currency: true } },
           files: { where: fileVisibilityWhere(visibilityActor), select: { id: true } },
-          dependencies: { include: { dependsOn: { select: { id: true, title: true, status: true } } } },
+          dependencies: { where: { dependsOn: { deletedAt: null } }, include: { dependsOn: { select: { id: true, title: true, status: true } } } },
         },
       });
       if (!task) throw new CompletionError("Задача не найдена");

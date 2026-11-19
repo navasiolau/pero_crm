@@ -56,26 +56,25 @@ test('контексты переноса включают обоих владе
   assert.ok(ordinary.links?.some(link=>link.type==='project'));
 });
 
-test('удаление задачи атомарно с file detach аудитом и откатывается при отказе журнала',async()=>{
+test('мягкое удаление задачи сохраняет вложение и обе стороны зависимости, отказ журнала отменяет переход',async()=>{
   const task={id:'task',title:'Удаляемая задача',type:'Производство',projectId:'project',productId:'product',workId:null,assigneeId:'employee-id',status:'NEW',
-    allocationGroupId:null,project:{id:'project',number:'203'},product:{id:'product',number:'203.1'},work:null,dependencies:[],_count:{payrollEntries:0,timeEntries:0}};
-  const state={task:structuredClone(task) as typeof task|null,files:[{id:'file',fileName:'Файл задачи.b3d',mimeType:'application/octet-stream',size:123,section:'PRODUCTION',projectId:'project',productId:null,taskId:'task' as string|null,uploadedById:'actor'}],logs:[] as Record<string,unknown>[]};
+    deletedAt:null as Date|null,deletedById:null as string|null,journalRevision:0,allocationGroupId:null,
+    project:{id:'project',number:'203'},product:{id:'product',number:'203.1'},work:null,
+    dependencies:[{dependsOnId:'before'}],dependents:[{taskId:'after',task:{deletedAt:null,status:'NEW',_count:{payrollEntries:0,stageSettlementShares:0}}}],
+    _count:{payrollEntries:0,timeEntries:0,stageSettlementShares:0}};
+  const state={task:structuredClone(task),files:[{id:'file',taskId:'task'}],logs:[] as Record<string,unknown>[]};
   let failAudit=true;
-  const tx={$queryRaw:async(query:TemplateStringsArray|Prisma.Sql)=>{const text=Array.isArray(query)?query.join(''):(query as Prisma.Sql).strings.join('');
-    if(text.includes('FROM "User"'))return[{id:'employee-id',name:'Исполнитель до удаления'}];
-    return text.includes('FROM "Task" WHERE id=')&&state.task?[structuredClone(state.task)]:[];},
-    task:{findUnique:async()=>structuredClone(state.task),delete:async()=>{state.task=null;}},taskDependency:{deleteMany:async()=>({count:0})},
-    file:{findMany:async()=>structuredClone(state.files),updateMany:async()=>{state.files.forEach(file=>{file.taskId=null;});return{count:state.files.length};}},
-    changeLog:{create:async({data}:{data:Record<string,unknown>})=>{if(failAudit)throw Error('AUDIT_FAILED');state.logs.push(data);return data;}}} as unknown as Prisma.TransactionClient;
   const actor={id:'actor',name:'Администратор',roles:['ADMIN' as const],source:'web' as const};
+  const tx={$queryRaw:async()=>[],user:{findUnique:async()=>({...actor,active:true})},
+    task:{findUnique:async()=>structuredClone(state.task),update:async({data}:{data:{deletedAt:Date|null;deletedById:string|null}})=>{
+      state.task={...state.task,...data,journalRevision:state.task.journalRevision+1};return state.task;}},
+    changeLog:{create:async({data}:{data:Record<string,unknown>})=>{if(failAudit)throw Error('AUDIT_FAILED');state.logs.push(data);return data;}}} as unknown as Prisma.TransactionClient;
   const run=async()=>{const before=structuredClone(state);try{return await deleteTaskInTransaction(tx,actor,'task');}catch(error){Object.assign(state,before);throw error;}};
   const before=structuredClone(state);await assert.rejects(run,/AUDIT_FAILED/);assert.deepEqual(state,before);
-  failAudit=false;assert.equal((await run()).ok,true);assert.equal(state.task,null);assert.equal(state.files[0].taskId,null);assert.equal(state.logs.length,2);
-  const detach=state.logs.find(log=>log.entity==='file')!,view=parseJournalPresentation(detach.presentation);assert.equal(view?.actor.type,'system');
-  assert.deepEqual(view?.contexts.map(({kind,id})=>({kind,id})),[{kind:'product',id:'product'},{kind:'project',id:'project'}]);
-  const deletedView=parseJournalPresentation(state.logs.find(log=>log.entity==='task')!.presentation);
-  assert.equal(deletedView?.changes.find(change=>change.path==='assigneeId')?.before,'Исполнитель до удаления');
-  const count=state.logs.length;assert.equal((await run()).ok,false);assert.equal(state.logs.length,count);
+  failAudit=false;assert.equal((await run()).ok,true);assert.ok(state.task.deletedAt);assert.equal(state.files[0].taskId,'task');
+  assert.deepEqual(state.task.dependencies,before.task.dependencies);assert.deepEqual(state.task.dependents,before.task.dependents);
+  assert.equal(state.logs.length,1);assert.ok(state.logs[0].reversal);
+  assert.equal((await run()).ok,false);assert.equal(state.logs.length,1);
 });
 
 test('split журналирует добавленный blocker у другого изделия и общей задачи, replay не дублирует события',async()=>{

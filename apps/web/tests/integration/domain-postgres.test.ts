@@ -357,6 +357,11 @@ test("logistics/reallocate-preserved-rounding-replay-stale-roles-and-undo", asyn
   await verifyLogisticsReallocationNative(tx);
 }));
 
+test("journal/work-task-native-soft-delete-graph-file-create-and-independent-edit", async () => fixture.rollback(async tx => {
+  const { verifyWorkTaskReversalNative } = await import("../helpers/work-task-reversal-native");
+  await verifyWorkTaskReversalNative(tx);
+}));
+
 test("journal/startup-register-locks-native-types", async () => fixture.rollback(async (tx, rows) => {
   const actor = actorOf(await rows.user("journal-startup-admin", ["ADMIN"]));
   // Singleton использует уже открытый rollback-only tx; новая связь, сеть и worker loops не запускаются.

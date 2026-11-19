@@ -398,6 +398,14 @@ model Task {
   payrollEntries PayrollEntry[]
   stageSettlementShares ProductStageSettlementShare[]
 
+  deletedAt DateTime?
+  deletedById String?
+  journalRevision Int @default(0)
+  journalFieldRevisions Json @default("{}")
+
+  journalDependencyRevision Int @default(0)
+
+  @@index([deletedAt])
   @@index([assigneeId, status])
   @@index([productId])
   @@index([allocationGroupId])
@@ -479,6 +487,12 @@ model Work {
   paymentConversions WorkPaymentConversion[]
   settlementShares ProductStageSettlementShare[]
 
+  deletedAt DateTime?
+  deletedById String?
+  journalRevision Int @default(0)
+  journalFieldRevisions Json @default("{}")
+
+  @@index([deletedAt])
   @@index([projectId])
   @@index([productId])
   @@index([stagePayPoolId])

@@ -10,10 +10,10 @@ export type EngineeringTaskPreview = { amount: string; bynAmount: string; projec
 export async function getEngineeringPreview(db: Reader, productId: string) {
   const product = await db.product.findUnique({ where: { id: productId }, include: {
     project: { select: { currency: true } },
-    works: { select: { id: true, paymentKind: true, stagePayPoolId: true } },
+    works: { where: { deletedAt: null }, select: { id: true, paymentKind: true, stagePayPoolId: true } },
     stagePayPools: { where: { kind: "ENGINEERING" }, include: {
       settlement: { include: { shares: true } },
-      works: { include: { tasks: { select: { id: true, workId: true, projectId: true, productId: true,
+      works: { include: { tasks: { where: { deletedAt: null }, select: { id: true, workId: true, projectId: true, productId: true,
         assigneeId: true, stageShareUnits: true, createdAt: true } } } },
     } },
   } });

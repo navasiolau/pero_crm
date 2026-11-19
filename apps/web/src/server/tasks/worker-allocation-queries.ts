@@ -6,7 +6,7 @@ import {fieldProductStatuses} from '@/lib/field-product-visibility';
 import {productVisibilityWhere,resolveVisibilityActor} from '@/server/access/visibility';
 import {canViewProductMoney} from '@/lib/product-financial-access';
 import {allocatedWorkQuantity,quantityAtoms} from '@/lib/work-shares';
-import {liveProductWhere,liveChildWhere} from '@/server/access/live-entities';
+import {liveProductWhere,liveTaskWhere,liveWorkWhere} from '@/server/access/live-entities';
 export type WorkerAllocationData={workerOptions:{id:string;name:string}[];eligibleWorkIds:string[];createdAssignments:{id:string;title:string;assigneeName:string;quantity:string;status:TaskStatus;workId:string;dueAt:string|null;rewardAmount:string|null;rewardCurrency:string|null;rewardSource:'WORK_SNAPSHOT'|'FROZEN_TASK_SNAPSHOT'|'UNAVAILABLE'}[];dependencyOptions:{id:string;title:string;status:TaskStatus}[]};
 export async function listWorkerAllocationData(actorId:string,productId:string):Promise<WorkerAllocationData>{
  const empty:WorkerAllocationData={workerOptions:[],eligibleWorkIds:[],createdAssignments:[],dependencyOptions:[]};
@@ -16,9 +16,9 @@ export async function listWorkerAllocationData(actorId:string,productId:string):
  const workspace=await taskWorkspaceEligibility(prisma,{projectId:product.projectId,productId:product.id});
  const [workers,works,created,dependencies]=await Promise.all([
    prisma.user.findMany({where:{active:true,roles:{hasSome:['WORKER','MOUNTER']}},select:{id:true,name:true,roles:true},orderBy:{name:'asc'}}),
-  prisma.work.findMany({where:{...liveChildWhere,productId:product.id,projectId:product.projectId,paymentKind:'LEGACY',stagePayPoolId:null,poolWeightUnits:null,priceSnapshot:{not:null},paymentConversions:{none:{}},settlementShares:{none:{}}},select:{id:true,quantity:true,tasks:{select:{quantity:true,allocationGroupId:true}}}}),
-  prisma.task.findMany({where:{...liveChildWhere,productId:product.id,projectId:product.projectId,AND:[workspace],createdById:actorId,assigneeId:{not:actorId},work:{paymentKind:'LEGACY',stagePayPoolId:null}},select:{id:true,title:true,assignee:{select:{name:true}},quantity:true,status:true,workId:true,dueAt:true,executorShare:true,allocationGroupId:true,shareAmount:true,allocationGroup:{select:{currency:true}},work:{select:{priceSnapshot:true}}},orderBy:{createdAt:'desc'}}),
-  prisma.task.findMany({where:{...liveChildWhere,AND:[workspace],productId:product.id,projectId:product.projectId},select:{id:true,title:true,status:true},orderBy:{createdAt:'asc'}}),
+  prisma.work.findMany({where:{...liveWorkWhere,productId:product.id,projectId:product.projectId,paymentKind:'LEGACY',stagePayPoolId:null,poolWeightUnits:null,priceSnapshot:{not:null},paymentConversions:{none:{}},settlementShares:{none:{}}},select:{id:true,quantity:true,tasks:{where:{deletedAt:null},select:{quantity:true,allocationGroupId:true}}}}),
+  prisma.task.findMany({where:{...liveTaskWhere,productId:product.id,projectId:product.projectId,AND:[workspace],createdById:actorId,assigneeId:{not:actorId},work:{paymentKind:'LEGACY',stagePayPoolId:null}},select:{id:true,title:true,assignee:{select:{name:true}},quantity:true,status:true,workId:true,dueAt:true,executorShare:true,allocationGroupId:true,shareAmount:true,allocationGroup:{select:{currency:true}},work:{select:{priceSnapshot:true}}},orderBy:{createdAt:'desc'}}),
+  prisma.task.findMany({where:{...liveTaskWhere,AND:[workspace],productId:product.id,projectId:product.projectId},select:{id:true,title:true,status:true},orderBy:{createdAt:'asc'}}),
  ]);
  const payrollCurrency=(await prisma.orgSetting.findUnique({where:{key:'payrollCurrency'},select:{value:true}}))?.value??'BYN';
  const eligibleWorkIds=works.filter(work=>{if(work.tasks.some(task=>task.quantity===null))return false;try{return quantityAtoms(work.quantity)>quantityAtoms(allocatedWorkQuantity(work.tasks));}catch{return false;}}).map(work=>work.id);

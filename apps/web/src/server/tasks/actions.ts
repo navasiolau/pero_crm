@@ -1,7 +1,7 @@
 "use server";
 import { writeChangeLogInTransaction } from "@/server/changelog/writer";
-import { productVisibilityWhere, taskVisibilityWhere } from "@/server/access/visibility";
-import {liveChildWhere} from "@/server/access/live-entities";
+import { productVisibilityWhere } from "@/server/access/visibility";
+import { liveWorkWhere } from "@/server/access/live-entities";
 import {liveProductWhere,liveProjectWhere} from "@/server/access/live-entities";
 
 import { revalidatePath } from "next/cache";
@@ -16,7 +16,7 @@ import type { Prisma } from "@prisma/client";
 import { assertProjectMoneyCurrency } from "@/lib/internal-currency";
 import { auth } from "@/auth";
 import { formatAmount } from "@/lib/format";
-import { allocatedWorkQuantity, quantityAtoms, quantityFromAtoms } from "@/lib/work-shares";
+import { quantityAtoms } from "@/lib/work-shares";
 import { dispatchEvent, emitDomainEvent } from "@/server/plugins/events";
 import { notifyOrg, notifyPerson } from "@/server/notifications/notify";
 
@@ -24,10 +24,11 @@ import { MANAGER_ROLES, hasAnyRole } from "@/lib/roles";
 import { revalidateProductPaths } from "@/server/products/revalidate";
 import { withTaskTransaction } from "./transaction";
 import { changeTaskStatusCore } from "./completion-core";
-import { engineeringRecipientError, taskRecipientError } from "./share-policy";
-import { bumpEngineeringPoolRevision } from "@/server/product-stage-pay/core";
+import { taskRecipientError } from "./share-policy";
+import { checkWorkQuantity, expandDependencies, updateSchema, updateTaskInTransaction } from "./update-core";
+import { workTaskLifecycleCommand } from "./lifecycle-contract";
 import {deleteTaskInTransaction} from './delete-core';
-import {operationJournalContext,journalSnapshot,journalUserReferences,journalTaskReferences,systemJournalActor,TASK_JOURNAL_FIELDS} from './journal';
+import {operationJournalContext,journalSnapshot,journalUserReferences,journalTaskReferences,TASK_JOURNAL_FIELDS} from './journal';
 
 const createSchema = z.object({
   clientMutationId: z.uuid().transform(value => value.toLowerCase()),
@@ -61,35 +62,6 @@ async function requireUser() {
 // Работа делится между задачами по количеству (§9: расценка × количество ×
 // доля исполнителя). Проверка: сумма частей по задачам не превышает
 // количество работы. Возвращает остаток при успехе, иначе текст ошибки.
-async function checkWorkQuantity(
-  tx: Prisma.TransactionClient,
-  workId: string,
-  quantity: number | null,
-  excludeTaskId?: string,
-  context?: { projectId: string; productId: string | null },
-): Promise<{ error?: string; remaining?: string }> {
-  const work = await tx.work.findUnique({
-    where: {...liveChildWhere, id: workId },
-    include: { tasks: { select: { id: true, quantity: true, allocationGroupId: true } } },
-  });
-  if (!work) return { error: "Работа не найдена" };
-  if(!work.productId||!context?.productId)return {error:'Задача должна относиться к работе конкретного изделия'};
-  if(work.priceSnapshot===null)return {error:'У выбранной работы отсутствует снимок расценки'};
-  if (context && (work.projectId !== context.projectId || work.productId !== context.productId)) return { error: "Выберите работу этого проекта и изделия" };
-  const used = quantityAtoms(allocatedWorkQuantity(work.tasks.filter((task) => task.id !== excludeTaskId)));
-  const remaining = quantityAtoms(work.quantity) - used;
-  let qty: bigint;
-  try { qty = quantity === null ? remaining : quantityAtoms(quantity); }
-  catch { return { error: "Количество должно содержать не больше двух знаков после запятой" }; }
-  if (qty <= BigInt(0)) return { error: "Количество должно быть больше нуля" };
-  if (qty > remaining) {
-    return {
-      error: `В работе осталось ${quantityFromAtoms(remaining)} из ${work.quantity} — больше распределить нельзя`,
-    };
-  }
-  return { remaining: quantityFromAtoms(qty) };
-}
-
 // Создание задачи — админ/директор/менеджер (§4).
 export async function createTask(
   input: z.input<typeof createSchema>,
@@ -145,14 +117,14 @@ export async function createTask(
   if (data.workId) {
     try { assertProjectMoneyCurrency(project.currency); }
     catch (error) { return { ok: false as const, error: error instanceof Error ? error.message : "Валюта проекта не подготовлена" }; }
-    const work = await tx.work.findUnique({ where: {...liveChildWhere, id: data.workId }, select: { paymentKind: true } });
+    const work = await tx.work.findUnique({ where: {...liveWorkWhere, id: data.workId }, select: { paymentKind: true } });
     if (work?.paymentKind !== "LEGACY") return { ok: false as const, error: "Новая задача создаётся только для обычной работы со снимком расценки" };
     const check = await checkWorkQuantity(tx, data.workId, data.quantity ?? null, undefined, { projectId: data.projectId, productId: data.productId || null });
     if (check.error) return { ok: false as const, error: check.error };
     workQuantity = check.remaining!;
   }
 
-  const dependencies = await expandDependencies(tx, data.dependencyIds);
+  const dependencies = await expandDependencies(tx, user, data.projectId, data.dependencyIds);
   if (dependencies.error) return { ok: false as const, error: dependencies.error };
   const task = await tx.task.create({
     data: {
@@ -174,6 +146,7 @@ export async function createTask(
       },
     },
   });
+  const journalState = dependencies.ids.length ? await tx.task.findUniqueOrThrow({ where: { id: task.id }, select: { journalRevision: true } }) : task;
   await writeChangeLogInTransaction(tx, {
     actorType: "user",
     actorId: actor.id,
@@ -182,6 +155,7 @@ export async function createTask(
     entity: "task",
     entityId: task.id,
     action: "create",
+    reversal: workTaskLifecycleCommand({ entity: "task", id: task.id, revision: journalState.journalRevision, deleted: false }),
     newValue: { title: task.title, project: project.number },
   },{...await operationJournalContext(tx,{type:'task',id:task.id,label:task.title},[{...task,project}],
     [...await journalUserReferences(tx,[task.assigneeId]),...await journalTaskReferences(tx,dependencies.ids)]),
@@ -218,23 +192,6 @@ export async function createTask(
   return mutation.ack;
 }
 
-const updateSchema = z.object({
-  title: z.string().min(1, "Укажите название задачи").optional(),
-  type: z.string().min(1, "Укажите тип задачи").optional(),
-  assigneeId: z.string().nullable().optional(),
-  productId: z.string().nullable().optional(), // изделие проекта (можно очистить)
-  workId: z.string().nullable().optional(),
-  quantity: z.number().positive().nullable().optional(),
-  dueAt: z.string().min(1, "Укажите срок").optional(),
-  estimateMinutes: z.number().int().min(0).nullable().optional(),
-  dependencyIds: z.array(z.string()).optional(),
-}).strict().superRefine((data,ctx)=>{
-  for(const key of ['productId','workId','assigneeId'] as const)if(data[key]!==undefined&&!data[key]?.trim())ctx.addIssue({code:'custom',path:[key],message:'Нельзя очистить изделие, работу или исполнителя задачи'});
-});
-
-// Редактирование задачи — админ/директор/менеджер (§4).
-// Закрытая (выполненная) задача — только просмотр, правок не принимаем.
-// Назначение исполнителя черновику переводит его в «Новая» и шлёт уведомление.
 export async function updateTask(
   taskId: string,
   input: z.infer<typeof updateSchema>,
@@ -250,141 +207,8 @@ export async function updateTask(
   const data = parsed.data;
   if (data.estimateMinutes !== undefined) return { ok: false, error: "Оценка времени задач отключена. Обновите страницу" };
 
-  const mutation = await withTaskTransaction(async (tx) => {
-  const task = await tx.task.findUnique({
-    where: {...liveChildWhere, id: taskId, AND: [taskVisibilityWhere(session.user)] },
-    include: { project: { select: { id: true, number: true, currency: true } }, product: { select: { id:true,number:true,engineerId: true, status: true, projectId: true } },
-      work: { select: { paymentKind: true, projectId: true, productId: true, stagePayPoolId: true, stagePayPool: { select: { id: true, kind: true, state: true, productId: true } } } },
-      dependencies:{select:{dependsOnId:true}},_count: { select: { payrollEntries: true } } },
-  });
-  if (!task) return { ok: false as const, error: "Задача не найдена" };
-  if (task.work?.paymentKind === "LEGACY" && data.assigneeId !== undefined && data.assigneeId !== task.assigneeId)
-    return { ok: false as const, error: "Для смены исполнителя используйте действие «Переназначить»" };
-  if (data.workId !== undefined || data.quantity !== undefined) {
-    try { assertProjectMoneyCurrency(task.project.currency); }
-    catch (error) { return { ok: false as const, error: error instanceof Error ? error.message : "Валюта проекта не подготовлена" }; }
-  }
-  const engineering = task.work?.paymentKind === "ENGINEERING";
-  let engineeringPoolId: string | null = null;
-  if (engineering) {
-    if((data.assigneeId!==undefined&&data.assigneeId!==task.assigneeId)||(data.quantity!==undefined&&String(data.quantity)!==String(task.quantity)))return {ok:false as const,error:'Перераспределение исторической инженерной оплаты недоступно'};
-    const pool = task.work?.stagePayPool;
-    if (!task.productId || task.product?.status !== "DESIGN" || task.product.projectId !== task.projectId ||
-      task.work?.projectId !== task.projectId || task.work.productId !== task.productId ||
-      !pool || pool.kind !== "ENGINEERING" || pool.state !== "DRAFT" || pool.productId !== task.productId)
-      return { ok: false as const, error: "Инженерную задачу можно менять только на проектировании до начисления" };
-    if ((data.workId !== undefined && data.workId !== task.workId) || (data.productId !== undefined && data.productId !== task.productId))
-      return { ok: false as const, error: "Нельзя переносить задачу между инженерными фондами" };
-    if (await tx.payrollEntry.count({ where: { workId: task.workId } })) return { ok: false as const, error: "По инженерной работе уже есть начисление" };
-    engineeringPoolId = pool.id;
-  }
-  if (data.workId && data.workId !== task.workId) {
-    const targetWork = await tx.work.findUnique({ where: {...liveChildWhere, id: data.workId }, select: { paymentKind: true } });
-    if (targetWork?.paymentKind === "ENGINEERING") return { ok: false as const, error: "Инженерная работа требует настройки полного распределения долей" };
-  }
-  if (task.status === "DONE" || task._count.payrollEntries > 0) {
-    return { ok: false as const, error: "Выполненная или начисленная задача — только просмотр" };
-  }
-  if (task.allocationGroupId && (
-    (data.assigneeId !== undefined && data.assigneeId !== task.assigneeId) ||
-    (data.workId !== undefined && data.workId !== task.workId) ||
-    (data.productId !== undefined && data.productId !== task.productId) ||
-    (data.quantity !== undefined && String(data.quantity) !== String(task.quantity))
-  )) {
-    return { ok: false as const, error: "Исполнитель, объём, работа и изделие общей доли зафиксированы" };
-  }
-
-  // Изделие должно принадлежать проекту задачи
-  let product = data.productId === null ? null : task.product;
-  if (data.productId) {
-    product = await tx.product.findFirst({
-      where: {...liveProductWhere, id: data.productId, projectId: task.project.id, AND: [productVisibilityWhere(session.user)] },
-      select: { id:true,number:true,engineerId: true, status: true, projectId: true },
-    });
-    if (!product) return { ok: false as const, error: "Изделие не найдено в этом проекте" };
-  }
-  const nextAssigneeId = data.assigneeId === undefined ? task.assigneeId : data.assigneeId;
-  if (nextAssigneeId) {
-    const assignee = await tx.user.findUnique({ where: { id: nextAssigneeId }, select: { id: true, roles: true, active: true } });
-    const error = assignee ? (engineering ? engineeringRecipientError(assignee, product) : taskRecipientError(assignee, product)) : "Сотрудник не найден";
-    if (error) return { ok: false as const, error };
-  }
-
-  const nextProductId=data.productId===undefined?task.productId:data.productId;
-  const effectiveWorkId=data.workId===undefined?task.workId:data.workId;
-  if(!nextProductId||!effectiveWorkId||!nextAssigneeId)return {ok:false as const,error:'Выберите изделие, работу и одного исполнителя'};
-  if(!engineering){
-    const currentProduct=await tx.product.findFirst({where:{...liveProductWhere,id:nextProductId,projectId:task.projectId,AND:[productVisibilityWhere(session.user)]},select:{id:true}});
-    const currentWork=await tx.work.findUnique({where:{...liveChildWhere,id:effectiveWorkId},select:{projectId:true,productId:true,priceSnapshot:true,paymentKind:true}});
-    if(!currentProduct||!currentWork||currentWork.projectId!==task.projectId||currentWork.productId!==nextProductId)return {ok:false as const,error:'Выберите работу этого живого изделия'};
-    const frozenSnapshot=task.allocationGroupId&&effectiveWorkId===task.workId&&nextProductId===task.productId&&nextAssigneeId===task.assigneeId;
-    if(currentWork.priceSnapshot===null&&!frozenSnapshot)return {ok:false as const,error:'У выбранной работы отсутствует снимок расценки'};
-  }
-
-  const becameAssigned =
-    data.assigneeId && data.assigneeId !== task.assigneeId;
-  const reassignedEngineering = engineering && data.assigneeId !== undefined && data.assigneeId !== task.assigneeId;
-  const newStatus = reassignedEngineering ? (data.assigneeId ? "NEW" : "DRAFT")
-    : task.status === "DRAFT" && data.assigneeId ? "NEW" : task.status;
-
-  const newWorkId =
-    data.workId === undefined ? task.workId : data.workId;
-  let quantityValue: string | null | undefined = undefined;
-  if (!task.allocationGroupId && (data.workId !== undefined || data.quantity !== undefined || data.productId !== undefined)) {
-    if (newWorkId) {
-      const check = await checkWorkQuantity(
-        tx,
-        newWorkId,
-        data.quantity ?? (task.quantity ? Number(task.quantity) : null),
-        taskId,
-        { projectId: task.projectId, productId: data.productId === undefined ? task.productId : data.productId },
-      );
-      if (check.error) return { ok: false as const, error: check.error };
-      quantityValue = check.remaining!;
-    } else {
-      quantityValue = null;
-    }
-  }
-
-  const dependencies = data.dependencyIds === undefined ? null : await expandDependencies(tx, data.dependencyIds, taskId);
-  if (dependencies?.error) return { ok: false as const, error: dependencies.error };
-  const updated=await tx.task.update({
-    where: { id: taskId },
-    data: {
-      title: data.title,
-      type: data.type,
-      assigneeId: data.assigneeId === undefined ? undefined : data.assigneeId,
-      productId: data.productId === undefined ? undefined : data.productId,
-      workId: data.workId === undefined ? undefined : data.workId,
-      quantity: quantityValue,
-      dueAt: data.dueAt ? new Date(data.dueAt) : undefined,
-      status: newStatus,
-      splitRevision: { increment: 1 },
-    },
-  });
-
-  // Зависимости (DAG, §9): заменяем список, без самоссылок и циклов
-  if (dependencies) {
-    await tx.taskDependency.deleteMany({ where: { taskId } });
-    await tx.taskDependency.createMany({ data: dependencies.ids.map((dependsOnId) => ({ taskId, dependsOnId })) });
-  }
-  if (engineeringPoolId) await bumpEngineeringPoolRevision(tx, engineeringPoolId);
-  const journal=await operationJournalContext(tx,{type:'task',id:task.id,label:updated.title},[task,{...updated,project:task.project}],
-    [...await journalUserReferences(tx,[task.assigneeId,updated.assigneeId]),...await journalTaskReferences(tx,[...(task.dependencies??[]).map(edge=>edge.dependsOnId),...(dependencies?.ids??[])])]);
-  const beforeSnapshot={...journalSnapshot(task,TASK_JOURNAL_FIELDS),dependencyIds:(task.dependencies??[]).map(edge=>edge.dependsOnId).sort()};
-  const afterSnapshot={...journalSnapshot(updated,TASK_JOURNAL_FIELDS),status:task.status,dependencyIds:[...(dependencies?.ids??(task.dependencies??[]).map(edge=>edge.dependsOnId))].sort()};
-  await writeChangeLogInTransaction(tx, {
-    actorType: "user", actorId: session.user.id, actorName: session.user.name ?? undefined,
-    entity: "task", entityId: taskId, action: "update", source: "web",
-    oldValue: JSON.parse(JSON.stringify({ title: task.title, type: task.type, assigneeId: task.assigneeId,
-      dueAt: task.dueAt, status: task.status })) as Prisma.InputJsonValue,
-    newValue: JSON.parse(JSON.stringify({ ...data, status: newStatus })) as Prisma.InputJsonValue,
-  },{...journal,before:beforeSnapshot,after:afterSnapshot,kind:JSON.stringify(beforeSnapshot)===JSON.stringify(afterSnapshot)?'receipt':'event'});
-  if(newStatus!==task.status)await writeChangeLogInTransaction(tx,{actorType:'user',actorId:session.user.id,actorName:session.user.name,source:'web',entity:'task',entityId:task.id,
-    action:'status',field:'status',oldValue:task.status,newValue:newStatus},
-    {...journal,...systemJournalActor({id:session.user.id,name:session.user.name},'Назначение исполнителя задачи')});
-  return { ok: true as const, task, becameAssigned };
-  });
+  const actor: DomainActor = { id: session.user.id, name: session.user.name ?? "", roles: session.user.roles, source: "web" };
+  const mutation = await withTaskTransaction(tx => updateTaskInTransaction(tx, actor, taskId, data));
   if (!mutation.ok) return mutation;
   const { task, becameAssigned } = mutation;
 
@@ -414,35 +238,6 @@ export async function updateTask(
 
 // Проверка цикла: идём от новых предшественников по зависимостям —
 // если добрались до самой задачи, цикл есть.
-async function hasCycle(tx: Prisma.TransactionClient, taskId: string, dependencyIds: string[]) {
-  const seen = new Set<string>();
-  const queue = [...dependencyIds];
-  while (queue.length > 0) {
-    const current = queue.pop()!;
-    if (current === taskId) return true;
-    if (seen.has(current)) continue;
-    seen.add(current);
-    const next = await tx.taskDependency.findMany({
-      where: { taskId: current },
-      select: { dependsOnId: true },
-    });
-    queue.push(...next.map((edge) => edge.dependsOnId));
-  }
-  return false;
-}
-
-async function expandDependencies(tx: Prisma.TransactionClient, selectedIds: string[], taskId?: string): Promise<{ ids: string[]; error?: string }> {
-  const requested = [...new Set(selectedIds)];
-  if (!requested.length) return { ids: [] };
-  const selected = await tx.task.findMany({ where: { id: { in: requested } }, select: { id: true, allocationGroupId: true } });
-  if (selected.length !== requested.length) return { ids: [], error: "Одна из выбранных зависимостей не найдена" };
-  const groupIds = [...new Set(selected.map((task) => task.allocationGroupId).filter((id): id is string => !!id))];
-  const parts = groupIds.length ? await tx.task.findMany({ where: { allocationGroupId: { in: groupIds } }, select: { id: true } }) : [];
-  const ids = [...new Set([...selected, ...parts].map((task) => task.id))];
-  if (taskId && (ids.includes(taskId) || await hasCycle(tx, taskId, ids))) return { ids: [], error: "Зависимость образует цикл или включает собственную группу долей" };
-  return { ids };
-}
-
 // Смена статуса задачи (§4, §9): сам исполнитель — свои; любые — админ/директор/менеджер.
 // Для requiresPhoto-задачи (замер, §6.2) при «Выполнена» нужен хотя бы один файл.
 // Задача блокируется, пока предшественники не выполнены (§9).
@@ -488,7 +283,7 @@ export async function changeTaskStatus(
 }
 // Удаление задачи — админ/директор/менеджер (§4).
 // Выполненную удалять нельзя: там начисления, время и история.
-// Файлы остаются в проекте; исторические записи времени защищены от каскадного удаления.
+// Вложения и зависимости остаются связанными с исходной задачей для восстановления.
 export async function deleteTask(
   taskId: string,
 ): Promise<{ ok: boolean; error?: string }> {
