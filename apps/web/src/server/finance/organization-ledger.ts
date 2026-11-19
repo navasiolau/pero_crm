@@ -10,7 +10,7 @@ import { listActiveCashAccountOptions } from "./default-cash-core";
 
 const organizationPaymentSelect = {
   id: true, direction: true, amount: true, currency: true, rate: true, rateDate: true,
-  bynAmount: true, projectAmount: true, paidAt: true, comment: true, createdById: true,
+  bynAmount: true, projectAmount: true, paidAt: true, comment: true, createdById: true, lastActionId: true,
   project: { select: { id: true, number: true, title: true, deletedAt: true } }, cashAccount: { select: { name: true } },
   expenseArticle: { select: { id: true, name: true } }, reportDocument: { select: reportDocumentSelect },
   reportDocuments: paymentReportDocumentsSelect, stockPurchase: { select: stockPurchaseSelect },
@@ -21,7 +21,7 @@ type LedgerRecord = Prisma.PaymentGetPayload<{ select: typeof organizationPaymen
 function organizationPaymentView(row: LedgerRecord) {
   return { ...paymentView(row, new Map()), rateDate: row.rateDate?.toISOString() ?? null,
     project: row.project ? { id: row.project.id, number: row.project.number, title: row.project.title, archived: row.project.deletedAt !== null } : null,
-    cashName: row.cashAccount?.name ?? null };
+    cashName: row.cashAccount?.name ?? null, lastActionId: row.lastActionId ?? null };
 }
 
 export async function loadOrganizationPayments(actor: FinanceWorkspaceActor, direction: PaymentDirection,
@@ -54,7 +54,7 @@ export async function loadOrganizationExpensePage(actor: FinanceWorkspaceActor, 
       listFinanceWorkspaceProjects(actor, tx),
     ]);
     return { rows: records.map(organizationPaymentView), options, cashAccounts,
-      projects: projects.map(({ id, number, title }) => ({ id, number, title })),
+      projects: projects.map(({ id, number, title, currency }) => ({ id, number, title, currency })),
       total: _count, totalByn: _sum.bynAmount?.toFixed(2) ?? "0.00",
       page: currentPage, pageSize, sort, dir };
   }, { isolationLevel: "RepeatableRead" });

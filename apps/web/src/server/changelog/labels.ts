@@ -46,6 +46,7 @@ const actions: Record<string, string> = {
   noModel: "Изменение", "percentage.configure": "Изменение", "archive.document": "Импорт КП", "archive.settings": "Импорт настроек договора",
   "kp.api.media": "Подготовка изображения", "kp.api.command": "Запрос API", "kp.write.receipt": "Подтверждение сохранения КП",
   "cover.receipt": "Подтверждение изменения", "cover.delete.receipt": "Подтверждение удаления", "inline.receipt": "Подтверждение сохранения",
+  "payment.project-assignment": "Назначение расхода на проект",
   "worker-allocation.receipt": "Подтверждение распределения",
 };
 

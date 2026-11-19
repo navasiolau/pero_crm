@@ -51,6 +51,7 @@ const boundaries = {
   "next/link": 'export default function Link({ children, ...props }) { return <a {...props}>{children}</a>; }',
   "@/components/payment-dialog": "export function PaymentDialog() { return null; }",
   "@/components/report-document-button": "export function ReportDocumentButton() { return null; }",
+  "@/server/payments/project-assignment-actions": 'export async function assignOrdinaryExpenseProject() { throw Error("UNEXPECTED_ASSIGN"); }',
   "@/server/payments/actions": 'export async function deletePayment() { throw Error("UNEXPECTED_DELETE"); }',
   "@/server/list-preferences-actions": 'export async function saveListPreference(section, query) { const value = JSON.stringify({version:2, engineerFilterInitialized:true, query}); localStorage.setItem("expense-fixture", value); return { ok:true, value }; }',
 };

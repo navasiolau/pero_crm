@@ -1,11 +1,13 @@
 "use client";
 
 import { useId, useState, type FormEvent } from "react";
+import { ExpenseProjectAssignmentDialog } from "@/components/expense-project-assignment-dialog";
 import { OrganizationPaymentsView } from "@/components/organization-payments-view";
 import { ResponsiveFilterPanel } from "@/components/responsive-filter-panel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { MultiSelectFilter } from "@/components/ui/multi-select-filter";
+import { INTERNAL_CURRENCY } from "@/lib/internal-currency";
 import { formatExactMoney } from "@/lib/format";
 import { encodeListFilterValue, parseListFilterValue } from "@/lib/list-filter-values";
 import { useListParams } from "@/lib/list-params";
@@ -96,10 +98,14 @@ function ExpenseFilterForm({ options, onReset }: Pick<OrganizationExpensePageDat
     </form>;
 }
 
-export function OrganizationExpenseResults({ options, page, pageSize, total, totalByn, sort, dir, ...ledger }: OrganizationExpensePageData &
-  Pick<Parameters<typeof OrganizationPaymentsView>[0], "expenseArticles" | "stockMaterials" | "materialCreateOptions">) {
+export function OrganizationExpenseResults({ options, page, pageSize, total, totalByn, sort, dir, canAssignProject, ...ledger }: OrganizationExpensePageData &
+  Pick<Parameters<typeof OrganizationPaymentsView>[0], "expenseArticles" | "stockMaterials" | "materialCreateOptions"> & { canAssignProject?: boolean }) {
   const { set, pending } = useListParams();
   return <OrganizationPaymentsView direction="EXPENSE" {...ledger}
+    renderDetailActions={(row, close) => canAssignProject && !row.project?.archived && !row.stockPurchase && !row.logisticsTripId ? (
+      <ExpenseProjectAssignmentDialog key={row.id} paymentId={row.id} currentProjectId={row.project?.id ?? null}
+        expectedHead={row.lastActionId} projects={ledger.projects.filter(project => project.currency === INTERNAL_CURRENCY)} onApplied={close}/>
+    ) : null}
     beforeTable={<>
       <ExpenseFilters options={options}/>
       <p className="text-sm" aria-live="polite" aria-busy={pending}>Итого по выборке <strong className="ml-1 tabular-nums">{formatExactMoney(totalByn, "BYN")}</strong></p>
