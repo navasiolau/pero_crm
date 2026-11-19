@@ -3,6 +3,7 @@ import { Prisma, type CommercialProposal, type Project } from "@prisma/client";
 import { z } from "zod";
 import { canonicalProposalJson, proposalObject } from "./proposal-contract";
 import { itemMediaReferences } from "./media-contract";
+import { proposalClientEffectSchema } from "./proposal-client-reversal";
 import { proposalClientSnapshot } from "./proposal-client";
 import { fixedProposalRate, proposalCurrency } from "./pricing-contract";
 import { projectProposalPricing } from "./pricing";
@@ -14,6 +15,7 @@ export const proposalEditCommandSchema = z.object({
   checkpointId: z.string().min(1),
   expectedRevision: z.number().int().nonnegative(),
   expectedFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+  clientEffect: proposalClientEffectSchema.optional(),
 }).strict();
 export type ProposalEditCommand = z.infer<typeof proposalEditCommandSchema>;
 
@@ -47,7 +49,7 @@ export async function eligibleEditBaseline(tx: Prisma.TransactionClient, proposa
   const rate = checkpointRate(proposal);
   if (!rate || !proposal.clientId || proposal.clientId !== project.clientId) return null;
   const state = proposalObject(proposal.state), clientState = proposalObject(proposalObject(state.client).crmSnapshot);
-  const client = await tx.client.findUnique({ where: { id: project.clientId } });
+  const client = await tx.client.findUnique({ where: { id: project.clientId, deletedAt: null } });
   if (!client || canonicalProposalJson(clientState) !== canonicalProposalJson(proposalClientSnapshot(client))) return null;
   const order = proposalObject(state.order);
   if ((String(order.project ?? "").trim() || "Коммерческое предложение") !== project.title || (order.address ?? null) !== project.address) return null;
@@ -105,9 +107,24 @@ export async function rememberEditCheckpoint(tx: Prisma.TransactionClient, propo
   return created.id;
 }
 
-export async function proposalEditFingerprint(tx: Prisma.TransactionClient, proposalId: string, projectId: string, targetClientId: string) {
-  const project = await tx.project.findUnique({ where: { id: projectId }, select: {
-    updatedAt: true, deletedAt: true, stage: true, clientId: true,
+type FingerprintSource = { proposalId: string; projectId: string; clientId: string };
+
+function indexRows<Row>(rows: readonly Row[], keyFor: (row: Row) => string | null) {
+  const index = new Map<string, Row[]>();
+  for (const row of rows) {
+    const key = keyFor(row);
+    if (!key) continue;
+    const group = index.get(key);
+    if (group) group.push(row);
+    else index.set(key, [row]);
+  }
+  return index;
+}
+
+export async function proposalEditFingerprints(tx: Prisma.TransactionClient, scope: readonly FingerprintSource[]) {
+  const projectIds = [...new Set(scope.map(row => row.projectId))], proposalIds = [...new Set(scope.map(row => row.proposalId))];
+  const projects = await tx.project.findMany({ where: { id: { in: projectIds } }, select: {
+    id: true, updatedAt: true, deletedAt: true, stage: true, clientId: true,
     _count: { select: { products: true, tasks: true, payments: true, files: true, works: true,
       communications: true, logisticsShares: true, stageHistory: true } },
     tasks: { orderBy: { id: "asc" }, select: { id: true, updatedAt: true, status: true,
@@ -115,30 +132,46 @@ export async function proposalEditFingerprint(tx: Prisma.TransactionClient, prop
     works: { orderBy: { id: "asc" }, select: { id: true, quantity: true, quantityPerUnit: true, total: true, paymentKind: true } },
     payments: { orderBy: { id: "asc" }, select: { id: true, amount: true, bynAmount: true, deletionId: true, paidAt: true } },
   } });
-  const proposal = await tx.commercialProposal.findUnique({ where: { id: proposalId }, select: {
-    updatedAt: true, revision: true, clientId: true, deletedAt: true, acceptedVersionId: true, projectId: true,
+  const proposals = await tx.commercialProposal.findMany({ where: { id: { in: proposalIds } }, select: {
+    id: true, updatedAt: true, revision: true, clientId: true, deletedAt: true, acceptedVersionId: true, projectId: true,
     primaryContract: { select: { id: true, revision: true } },
   } });
-  const products = await tx.product.findMany({ where: { projectId }, orderBy: { id: "asc" }, select: {
-    id: true, updatedAt: true, deletedAt: true, sketchFileId: true,
+  const products = indexRows(await tx.product.findMany({ where: { projectId: { in: projectIds } }, orderBy: { id: "asc" }, select: {
+    id: true, projectId: true, updatedAt: true, deletedAt: true, sketchFileId: true,
     _count: { select: { tasks: true, works: true, projectMaterials: true, files: true, stockMovements: true } },
     projectMaterials: { orderBy: { id: "asc" }, select: { id: true, updatedAt: true } },
-  } });
-  const clients = await tx.client.findMany({ where: { id: { in: [...new Set([targetClientId, project?.clientId ?? targetClientId])] } },
-    orderBy: { id: "asc" }, select: { id: true, updatedAt: true } });
-  const files = await tx.file.findMany({ where: { projectId }, orderBy: { id: "asc" },
-    select: { id: true, deletedAt: true, proposalMediaRetiredAt: true, taskId: true, productId: true } });
-  const items = await tx.proposalItem.findMany({ where: { proposalId }, orderBy: { id: "asc" },
-    select: { id: true, productId: true, updatedAt: true, deletedAt: true, position: true } });
-  const media = await tx.proposalCurrentMedia.findMany({ where: { proposalId }, orderBy: { mediaId: "asc" },
-    select: { mediaId: true, detachedAt: true } });
-  const versions = await tx.proposalVersion.findMany({ where: { proposalId, trigger: { not: "EDIT" } },
-    orderBy: { id: "asc" }, select: { id: true, pdfArtifactId: true, pdfArtifact: { select: { deletedAt: true } } } });
-  const renderJobs = await tx.proposalJob.findMany({ where: { kind: { in: ["PDF", "CONTRACT"] },
-    OR: [{ proposalId }, { contract: { primaryProposalId: proposalId } }] },
-    orderBy: { id: "asc" }, select: { id: true, state: true, attempts: true } });
-  const draftPools = await tx.productStagePayPool.findMany({ where: { product: { projectId } }, orderBy: { id: "asc" },
-    select: { id: true, state: true, revision: true } });
-  return createHash("sha256").update(JSON.stringify({ project, proposal, products, clients, files, items, media, versions, renderJobs, draftPools })).digest("hex");
+  } }), row => row.projectId);
+  const clients = await tx.client.findMany({ where: { id: { in: [...new Set([
+    ...scope.map(row => row.clientId), ...projects.map(row => row.clientId),
+  ])] } }, orderBy: { id: "asc" }, select: { id: true, updatedAt: true, deletedAt: true } });
+  const files = indexRows(await tx.file.findMany({ where: { projectId: { in: projectIds } }, orderBy: { id: "asc" },
+    select: { id: true, projectId: true, deletedAt: true, proposalMediaRetiredAt: true, taskId: true, productId: true } }), row => row.projectId);
+  const items = indexRows(await tx.proposalItem.findMany({ where: { proposalId: { in: proposalIds } }, orderBy: { id: "asc" },
+    select: { id: true, proposalId: true, productId: true, updatedAt: true, deletedAt: true, position: true } }), row => row.proposalId);
+  const media = indexRows(await tx.proposalCurrentMedia.findMany({ where: { proposalId: { in: proposalIds } }, orderBy: { mediaId: "asc" },
+    select: { proposalId: true, mediaId: true, detachedAt: true } }), row => row.proposalId);
+  const versions = indexRows(await tx.proposalVersion.findMany({ where: { proposalId: { in: proposalIds }, trigger: { not: "EDIT" } },
+    orderBy: { id: "asc" }, select: { id: true, proposalId: true, pdfArtifactId: true, pdfArtifact: { select: { deletedAt: true } } } }), row => row.proposalId);
+  const renderJobs = indexRows(await tx.proposalJob.findMany({ where: { kind: { in: ["PDF", "CONTRACT"] },
+    OR: [{ proposalId: { in: proposalIds } }, { contract: { primaryProposalId: { in: proposalIds } } }] },
+    orderBy: { id: "asc" }, select: { id: true, state: true, attempts: true, proposalId: true,
+      contract: { select: { primaryProposalId: true } } } }), row => row.proposalId ?? row.contract?.primaryProposalId ?? null);
+  const draftPools = indexRows(await tx.productStagePayPool.findMany({ where: { product: { projectId: { in: projectIds } } }, orderBy: { id: "asc" },
+    select: { id: true, state: true, revision: true, product: { select: { projectId: true } } } }), row => row.product?.projectId ?? null);
+  const projectById = new Map(projects.map(row => [row.id, row])), proposalById = new Map(proposals.map(row => [row.id, row]));
+  return scope.map(source => {
+    const project = projectById.get(source.projectId);
+    const snapshot = { project, proposal: proposalById.get(source.proposalId),
+      products: products.get(source.projectId) ?? [],
+      clients: clients.filter(client => client.id === source.clientId || client.id === project?.clientId),
+      files: files.get(source.projectId) ?? [], items: items.get(source.proposalId) ?? [],
+      media: media.get(source.proposalId) ?? [], versions: versions.get(source.proposalId) ?? [],
+      renderJobs: renderJobs.get(source.proposalId) ?? [], draftPools: draftPools.get(source.projectId) ?? [] };
+    return { ...source, fingerprint: createHash("sha256").update(JSON.stringify(snapshot)).digest("hex") };
+  });
 }
 
+export async function proposalEditFingerprint(tx: Prisma.TransactionClient, proposalId: string, projectId: string, clientId: string) {
+  const [snapshot] = await proposalEditFingerprints(tx, [{ proposalId, projectId, clientId }]);
+  return snapshot.fingerprint;
+}

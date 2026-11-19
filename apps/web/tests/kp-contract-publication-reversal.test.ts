@@ -42,15 +42,15 @@ test("first combined publication reverts both project stages and promotion, keep
     pdf: { state: "READY", deletedAt: null as Date | null, key: "pdf-bytes" } };
   const history: unknown[] = [];
   const tx = { $queryRaw: async () => [],
-    project: { findUnique: async ({ where }: { where: { id: keyof typeof projects } }) => projects[where.id],
+    project: { findMany: async () => Object.entries(projects).map(([id, project]) => ({ id, ...project })),
       updateMany: async ({ where, data }: { where: { id: keyof typeof projects }; data: object }) => {
         Object.assign(projects[where.id], data); return { count: 1 };
       } },
-    commercialProposal: { findUnique: async ({ where }: { where: { id: keyof typeof proposals } }) => proposals[where.id],
+    commercialProposal: { findMany: async () => Object.entries(proposals).map(([id, proposal]) => ({ id, ...proposal })),
       updateMany: async ({ where, data }: { where: { id: keyof typeof proposals }; data: object }) => {
         Object.assign(proposals[where.id], data); return { count: 1 };
       } },
-    product: { findMany: async ({ where }: { where: { projectId: string } }) => where.projectId === "p1" ? Object.values(products) : [],
+    product: { findMany: async () => Object.entries(products).map(([id, product]) => ({ id, projectId: "p1", ...product })),
       updateMany: async ({ where, data }: { where: { id: keyof typeof products }; data: object }) => {
         Object.assign(products[where.id], data); return { count: 1 };
       } },
@@ -60,7 +60,7 @@ test("first combined publication reverts both project stages and promotion, keep
     } },
     proposalContractVersion: { count: async () => 0, findFirst: async () => ({ id: "version", docxArtifactId: "docx",
       docxArtifact: assets.docx, contract: { revision: 1, deletedAt: null } }) },
-    proposalVersion: { findFirst: async () => ({ id: "generated" }), findMany: async () => [assets.pdf] },
+    proposalVersion: { findMany: async () => [{ ...assets.pdf, id: "generated", proposalId: "c1", pdfArtifactId: "pdf" }] },
     projectStageHistory: { create: async (args: unknown) => history.push(args) },
     productStatusHistory: { create: async (args: unknown) => history.push(args) },
     client: empty, file: empty, proposalItem: empty, proposalCurrentMedia: empty, proposalJob: empty, productStagePayPool: empty,

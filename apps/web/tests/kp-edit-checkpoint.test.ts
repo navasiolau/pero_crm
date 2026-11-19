@@ -32,8 +32,9 @@ test("edit checkpoint references an exact existing version and creates only abse
 test("edit reversal detects a change to dependent storage bindings and a later proposal revision", async () => {
   let revision = proposal.revision, files: object[] = [];
   const tx = {
-    commercialProposal: { findUnique: async () => ({ ...proposal, revision }) },
-    project: { findUnique: async () => ({ id: "project", stage: "LEAD", clientId: "client", deletedAt: null }) },
+    commercialProposal: { findUnique: async () => ({ ...proposal, revision }), findMany: async () => [{ ...proposal, revision }] },
+    project: { findUnique: async () => ({ id: "project", stage: "LEAD", clientId: "client", deletedAt: null }),
+      findMany: async () => [{ id: "project", stage: "LEAD", clientId: "client", deletedAt: null }] },
     product: { findMany: async () => [] }, client: { findMany: async () => [] },
     file: { findMany: async () => files },
     proposalItem: { findMany: async () => [] }, proposalCurrentMedia: { findMany: async () => [] },
@@ -47,7 +48,7 @@ test("edit reversal detects a change to dependent storage bindings and a later p
   const handler = proposalEditReversal.read(cmd.data)!;
   const context = { tx, actor: { id: "admin", name: "Администратор", roles: ["ADMIN" as const], source: "web" as const },
     entityId: "proposal", entryId: "edit-entry" };
-  files = [{ id: "new-file" }];
+  files = [{ id: "new-file", projectId: "project" }];
   assert.match(await handler.preview(context) ?? "", /Связанные данные изменились/);
   revision++;
   assert.match(await handler.preview(context) ?? "", /КП уже изменено/);

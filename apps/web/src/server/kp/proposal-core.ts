@@ -1,9 +1,10 @@
 import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 import type { CommercialProposal, Prisma, Project } from "@prisma/client";
 import { proposalCreationReversal } from "./proposal-create-reversal";
+import type { ProposalClientEffect } from "./proposal-client-reversal";
 import type { JournalReversalCommand } from "@/server/changelog/reversal-contract";
 import { eligibleEditBaseline, proposalEditCommand, proposalEditFingerprint, rememberEditCheckpoint,
-  type ProposalEditCommand } from "./edit-checkpoint";
+  type EditBaseline, type ProposalEditCommand } from "./edit-checkpoint";
 import { initializeSignature, readSignatureDefaults } from './signature-defaults';
 import { MANAGER_ROLES, hasAnyRole, hasRole } from "@/lib/roles";
 import type { DomainActor } from "@/server/actor";
@@ -37,6 +38,8 @@ export type ProposalSaveHooks = {
   restoreVersion?: true;
   journalCheckpoints?: true;
   journalRootId?: string;
+  journalBaseline?: EditBaseline;
+  journalClientEffect?: ProposalClientEffect;
 };
 export type ProposalWriteMutation = {
   result: ProposalWriteResult;
@@ -142,8 +145,10 @@ export async function createProposalInTransaction(tx: Prisma.TransactionClient, 
   const replay = await readReceipt(tx, actor, identity);
   if (replay) return replay;
   const source = initializeSignature(canonicalizeProposalSpecifications(normalizeProposalState(data.state)), (await readSignatureDefaults(tx)).values);
-  const { client, isTemporary, changed:clientChanged } = await resolveProposalClientInTransaction(tx, actor, data, source, undefined, hooks.environment);
   const operationRootId = hooks.journalCheckpoints ? identity.receiptId + ":event" : undefined;
+  const { client, isTemporary, changed: clientChanged, clientEffect } =
+    await resolveProposalClientInTransaction(tx, actor, data, source, undefined, hooks.environment,
+      undefined, undefined, operationRootId);
   const initial = projectValues(source, data.address);
   const projectCreated = await createProjectInTransaction(tx, actor, {
     title: initial.title, clientId: client.id, address: initial.address ?? undefined,
@@ -167,8 +172,8 @@ export async function createProposalInTransaction(tx: Prisma.TransactionClient, 
     revision: proposal.revision, state,
     items: sync.items.map(({ id, productId, number }) => ({ id, productId, number })), noOp: false,
   };
-  const reversal = operationRootId && !clientChanged ? proposalCreationReversal.command({
-    proposalId: proposal.id, projectId: project.id, clientId: client.id, hide: true, expectedDeletedAt: null,
+  const reversal = operationRootId && (!clientChanged || clientEffect) ? proposalCreationReversal.command({
+    proposalId: proposal.id, projectId: project.id, clientId: client.id, hide: true, expectedDeletedAt: null, clientEffect,
     expectedFingerprint: await proposalEditFingerprint(tx, proposal.id, project.id, client.id),
   }) : undefined;
   const eventIds = await recordProposalMutation(tx, actor, identity, result, "create", null, null, false,
@@ -198,7 +203,7 @@ export async function saveProposalInTransaction(tx: Prisma.TransactionClient, ac
     await tx.$queryRaw`SELECT id FROM "Product" WHERE "projectId"=${project.id} ORDER BY id FOR UPDATE`;
     await tx.$queryRaw`SELECT id FROM "Client" WHERE id IN (${project.clientId},${data.clientId ?? project.clientId}) ORDER BY id FOR UPDATE`;
   }
-  const baseline = hooks.journalCheckpoints ? await eligibleEditBaseline(tx, proposal, project) : null;
+  const baseline = hooks.journalCheckpoints ? hooks.journalBaseline ?? await eligibleEditBaseline(tx, proposal, project) : null;
   const submitted = normalizeProposalState(data.state);
   if (!hooks.restoreVersion) assertCurrentProposalEditor(proposal.state, submitted);
   const source = canonicalizeProposalSpecifications(submitted);
@@ -237,13 +242,14 @@ export async function saveProposalInTransaction(tx: Prisma.TransactionClient, ac
     items: sync.items.map(({ id, productId, number }) => ({ id, productId, number })), noOp: !changed,
   };
   let undo: ProposalEditCommand | undefined;
-  if (changed && baseline && !selection.changed && proposal.clientId &&
+  const clientEffect = hooks.journalClientEffect ?? selection.clientEffect;
+  if (changed && baseline && (!selection.changed || clientEffect) && proposal.clientId &&
       sync.items.every(item => {
         const previous = baseline.products.get(item.id);
         return !previous || previous.quantity === item.state.qty || !previous._count.works && !previous._count.projectMaterials;
       })) {
     const checkpointId = await rememberEditCheckpoint(tx, proposal, baseline, actor.id);
-    undo = { proposalId: proposal.id, projectId: project.id, checkpointId, expectedRevision: revision,
+    undo = { proposalId: proposal.id, projectId: project.id, checkpointId, expectedRevision: revision, clientEffect,
       expectedFingerprint: await proposalEditFingerprint(tx, proposal.id, project.id, proposal.clientId) };
   }
   const eventIds = await recordProposalMutation(tx, actor, identity, result, "update", proposal.revision,

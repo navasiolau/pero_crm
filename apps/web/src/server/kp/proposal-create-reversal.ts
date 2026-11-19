@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 import { defineJournalReversal, JournalReversalRefusal } from "@/server/changelog/reversal-contract";
 import { lockProjectRow } from "@/server/projects/lock";
+import { applyProposalClientEffect, previewProposalClientEffect, proposalClientEffectSchema } from "./proposal-client-reversal";
 import { proposalEditFingerprint } from "./edit-checkpoint";
 
 const creation = z.object({
@@ -11,6 +12,7 @@ const creation = z.object({
   expectedFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
   expectedDeletedAt: z.iso.datetime().nullable(),
   hide: z.boolean(),
+  clientEffect: proposalClientEffectSchema.optional(),
 }).strict();
 type CreationVisibility = z.infer<typeof creation>;
 const refusal = "После создания изменились КП, связанный проект, его файлы или изделия";
@@ -28,24 +30,27 @@ export const proposalCreationReversal = defineJournalReversal({
   kind: "proposal.create",
   version: 1,
   schema: creation,
-  async preview({ tx }, data) { return await canReverseCreation(tx, data) ? null : refusal; },
-  async apply({ tx, actor }, data) {
+  async preview(ctx, data) { return await canReverseCreation(ctx.tx, data) ? previewProposalClientEffect(ctx, data.clientEffect) : refusal; },
+  async apply(ctx, data) {
+    const { tx, actor } = ctx;
     await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(18435,55001)`;
     await lockProjectRow(tx, data.projectId);
     await tx.$queryRaw`SELECT id FROM "CommercialProposal" WHERE id=${data.proposalId} FOR UPDATE`;
     await tx.$queryRaw`SELECT id FROM "Product" WHERE "projectId"=${data.projectId} ORDER BY id FOR UPDATE`;
     if (!await canReverseCreation(tx, data)) throw new JournalReversalRefusal(refusal);
+    const client = await applyProposalClientEffect(ctx, data.clientEffect);
     const deletedAt = data.hide ? new Date() : null;
     await tx.project.update({ where: { id: data.projectId }, data: {
       deletedAt, deletedById: data.hide ? actor.id : null,
     } });
     await tx.commercialProposal.update({ where: { id: data.proposalId }, data: { deletedAt } });
     return {
-      inverse: { ...data, hide: !data.hide, expectedDeletedAt: deletedAt?.toISOString() ?? null,
+      inverse: { ...data, clientEffect: client?.inverse, hide: !data.hide, expectedDeletedAt: deletedAt?.toISOString() ?? null,
         expectedFingerprint: await proposalEditFingerprint(tx, data.proposalId, data.projectId, data.clientId) },
       oldValue: { deletedAt: data.expectedDeletedAt },
       newValue: { deletedAt: deletedAt?.toISOString() ?? null, projectId: data.projectId },
-      cachePaths: ["/kp", "/kp/" + encodeURIComponent(data.proposalId), "/projects", "/products", "/projects/" + encodeURIComponent(data.projectId)],
+      eventIds: client?.eventIds,
+      cachePaths: [...client?.cachePaths ?? [], "/kp", "/kp/" + encodeURIComponent(data.proposalId), "/projects", "/products", "/projects/" + encodeURIComponent(data.projectId)],
     };
   },
 });

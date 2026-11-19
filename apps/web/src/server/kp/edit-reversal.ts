@@ -6,6 +6,7 @@ import { checkpointBinding, eligibleEditBaseline, proposalEditCommandSchema, pro
   proposalEditReversalKind, type ProposalEditCommand } from "./edit-checkpoint";
 import { saveProposalInTransaction } from "./proposal-core";
 import { canonicalProposalJson, ProposalWriteError } from "./proposal-contract";
+import { applyProposalClientEffect, previewProposalClientEffect } from "./proposal-client-reversal";
 import { ProposalMediaError } from "./media-contract";
 
 async function editTarget(tx: Prisma.TransactionClient, data: ProposalEditCommand) {
@@ -22,23 +23,25 @@ async function editTarget(tx: Prisma.TransactionClient, data: ProposalEditComman
     throw new JournalReversalRefusal("Не найдена полная прежняя редакция КП или её изображения недоступны");
   if (await proposalEditFingerprint(tx, proposal.id, project.id, binding.clientId) !== data.expectedFingerprint)
     throw new JournalReversalRefusal("Связанные данные изменились после сохранения КП");
-  if (!await eligibleEditBaseline(tx, proposal, project))
+  const baseline = await eligibleEditBaseline(tx, proposal, project);
+  if (!baseline)
     throw new JournalReversalRefusal("Текущая редакция КП содержит изменения, для которых требуется отдельный откат");
-  return { version, binding };
+  return { version, binding, baseline };
 }
 
 export const proposalEditReversal = defineJournalReversal({
   kind: proposalEditReversalKind,
   version: 1,
   schema: proposalEditCommandSchema,
-  async preview({ tx }, data) {
-    try { await editTarget(tx, data); return null; }
+  async preview(ctx, data) {
+    try { await editTarget(ctx.tx, data); return previewProposalClientEffect(ctx, data.clientEffect); }
     catch (error) {
       if (error instanceof JournalReversalRefusal) return error.message;
       throw error;
     }
   },
-  async apply({ tx, actor, reversalId }, data) {
+  async apply(ctx, data) {
+    const { tx, actor, reversalId } = ctx;
     await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(18435,55001)`;
     await lockProjectRow(tx, data.projectId);
     await tx.$queryRaw`SELECT id FROM "CommercialProposal" WHERE id=${data.proposalId} FOR UPDATE`;
@@ -49,22 +52,24 @@ export const proposalEditReversal = defineJournalReversal({
       UNION
       SELECT "renderSnapshot"->'binding'->>'clientId' FROM "ProposalVersion" WHERE id=${data.checkpointId}
     ) ORDER BY id FOR UPDATE`;
-    const { version, binding } = await editTarget(tx, data);
+    const { version, binding, baseline } = await editTarget(tx, data);
     if (!reversalId) throw new JournalReversalRefusal("Не подтверждён идентификатор отката КП");
     const { createApiSaveHooks } = await import("./api-documents");
     try {
+      const client = await applyProposalClientEffect(ctx, data.clientEffect);
       const mutation = await saveProposalInTransaction(tx, actor, {
         proposalId: data.proposalId, expectedRevision: data.expectedRevision, operationId: reversalId.split(":").at(-1),
         clientId: binding.clientId, state: version.state,
-      }, { ...createApiSaveHooks(binding.fx), restoreVersion: true, journalRootId: reversalId });
+      }, { ...createApiSaveHooks(binding.fx), restoreVersion: true, journalRootId: reversalId,
+        journalBaseline: baseline, journalClientEffect: client?.inverse });
       if (!mutation.undo || mutation.result.noOp || canonicalProposalJson(mutation.result.state) !== canonicalProposalJson(version.state))
         throw new JournalReversalRefusal("Не удалось точно восстановить прежнюю редакцию КП");
       return {
         inverse: mutation.undo,
         oldValue: { revision: data.expectedRevision },
         newValue: { revision: mutation.result.revision, versionId: version.id },
-        eventIds: mutation.eventIds,
-        cachePaths: ["/kp", "/kp/" + encodeURIComponent(data.proposalId), "/projects",
+        eventIds: [...mutation.eventIds, ...client?.eventIds ?? []],
+        cachePaths: [...client?.cachePaths ?? [], "/kp", "/kp/" + encodeURIComponent(data.proposalId), "/projects",
           "/projects/" + encodeURIComponent(data.projectId), "/products", "/finance", "/warehouse",
           ...mutation.result.items.map(item => "/products/" + encodeURIComponent(item.number)),
           ...mutation.changedProducts.flatMap(product => product.previousNumbers.map(number => "/products/" + encodeURIComponent(number)))],
