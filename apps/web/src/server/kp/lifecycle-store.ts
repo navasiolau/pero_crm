@@ -1,5 +1,6 @@
 import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 import { Prisma } from "@prisma/client";
+import { issuedProposalPdfReversal } from "./issued-pdf-reversal";
 import { proposalExportRequestReversal } from "./export-request-reversal";
 import type { DomainActor } from "../actor";
 import {automationJournalContext,proposalJournalContext} from '../projects/journal';
@@ -52,10 +53,12 @@ export function createPrismaLifecycleStore(tx: Prisma.TransactionClient, securit
         : Prisma.sql`EXISTS(SELECT 1 FROM "ProposalVersionMedia" u WHERE u."proposalId"=m."proposalId" AND u."mediaId"=m."id" AND u."versionId"=${scope.versionId})`;
       return tx.$queryRaw<MediaRecord[]>(Prisma.sql`SELECT m."id",m."proposalId",m."storageBinding",m."optimizedKey",m."optimizedHash",m."optimizedSize",to_jsonb(m)->>'optimizedMimeType' AS "optimizedMimeType",m."mimeType",m."fileName",m."expiresAt" AT TIME ZONE 'UTC' AS "expiresAt",m."optimizedPurgedAt",m."retiringAt",to_jsonb(m)->>'uploadState' AS "uploadState" FROM "ProposalMedia" m WHERE m."proposalId"=${proposalId} AND m."deletedAt" IS NULL AND ${ownership} ORDER BY m."id" FOR UPDATE OF m`);
     },
-    version(proposalId, versionId) { return one<VersionRecord>(Prisma.sql`SELECT ${versionColumns} FROM "ProposalVersion" v WHERE v."proposalId"=${proposalId} AND v."id"=${versionId} AND v.trigger<>'EDIT' FOR SHARE`); },
-    versions(proposalId) { return tx.$queryRaw<VersionRecord[]>(Prisma.sql`SELECT ${versionColumns} FROM "ProposalVersion" v WHERE v."proposalId"=${proposalId} AND v.trigger<>'EDIT' ORDER BY v."createdAt" DESC,v."id" DESC`); },
-    currentReadyVersion(proposalId, revision) { return one<VersionRecord>(Prisma.sql`SELECT ${versionColumns} FROM "ProposalVersion" v JOIN "ProposalArtifact" a ON a."id"=v."pdfArtifactId" AND a."proposalId"=v."proposalId" WHERE v."proposalId"=${proposalId} AND v."revision"=${revision} AND a."state"='READY' AND a."kind"='PDF' ORDER BY v."createdAt" DESC,v."id" DESC LIMIT 1 FOR SHARE OF v,a`); },
-    artifact(id) { return one<ArtifactRecord>(Prisma.sql`SELECT "id","proposalId","contractId","kind"::text AS kind,"state"::text AS state,"storageBinding","key","sha256","size","fileName","mimeType" FROM "ProposalArtifact" WHERE "id"=${id} FOR UPDATE`); },
+    version(proposalId, versionId) { return one<VersionRecord>(Prisma.sql`SELECT ${versionColumns} FROM "ProposalVersion" v WHERE v."proposalId"=${proposalId} AND v."id"=${versionId} AND v.trigger<>'EDIT'
+      AND NOT EXISTS (SELECT 1 FROM "ProposalArtifact" a WHERE a.id=v."pdfArtifactId" AND a."deletedAt" IS NOT NULL) FOR SHARE`); },
+    versions(proposalId) { return tx.$queryRaw<VersionRecord[]>(Prisma.sql`SELECT ${versionColumns} FROM "ProposalVersion" v WHERE v."proposalId"=${proposalId} AND v.trigger<>'EDIT'
+      AND NOT EXISTS (SELECT 1 FROM "ProposalArtifact" a WHERE a.id=v."pdfArtifactId" AND a."deletedAt" IS NOT NULL) ORDER BY v."createdAt" DESC,v."id" DESC`); },
+    currentReadyVersion(proposalId, revision) { return one<VersionRecord>(Prisma.sql`SELECT ${versionColumns} FROM "ProposalVersion" v JOIN "ProposalArtifact" a ON a."id"=v."pdfArtifactId" AND a."proposalId"=v."proposalId" WHERE v."proposalId"=${proposalId} AND v."revision"=${revision} AND a."state"='READY' AND a."kind"='PDF' AND a."deletedAt" IS NULL ORDER BY v."createdAt" DESC,v."id" DESC LIMIT 1 FOR SHARE OF v,a`); },
+    artifact(id) { return one<ArtifactRecord>(Prisma.sql`SELECT "id","proposalId","contractId","kind"::text AS kind,"state"::text AS state,"storageBinding","key","sha256","size","fileName","mimeType" FROM "ProposalArtifact" WHERE "id"=${id} AND "deletedAt" IS NULL FOR UPDATE`); },
     job,
     jobByDedupe(dedupeKey) { return one<LifecycleJob>(Prisma.sql`SELECT ${jobColumns} FROM "ProposalJob" j WHERE j."dedupeKey"=${dedupeKey} FOR UPDATE`); },
     async createJob(input) {
@@ -84,7 +87,10 @@ export function createPrismaLifecycleStore(tx: Prisma.TransactionClient, securit
       if (!version) lifecycleFailure("KP_VERSION_NOT_FOUND", 500);
       const actor=knownActor(input.actorId);
       await writeChangeLogInTransaction(tx,{id:`kp-version-audit:${input.id}`,actorType:'user',actorId:actor.id,actorName:actor.name,source:actor.source,
-        entity:'commercialProposal',entityId:input.proposalId,action:'pdf.generated',newValue:{versionId:input.id,revision:input.revision,artifactId:input.pdfArtifactId}},
+        entity:'commercialProposal',entityId:input.proposalId,action:'pdf.generated',
+        ...(input.trigger==='PDF' && input.pdfArtifactId ? {reversal:issuedProposalPdfReversal.command({
+          proposalId:input.proposalId,versionId:input.id,artifactId:input.pdfArtifactId,revision:input.revision,expectedDeletedAt:null,hide:true,
+        })} : {}),newValue:{versionId:input.id,revision:input.revision,artifactId:input.pdfArtifactId}},
         {...await journalContext(input.proposalId),...automationJournalContext(actor,'Фоновый выпуск PDF коммерческого предложения'),before:null,
           after:{revision:input.revision,state:input.state,pricingSnapshot:input.pricingSnapshot,artifactId:input.pdfArtifactId}});
       return version;

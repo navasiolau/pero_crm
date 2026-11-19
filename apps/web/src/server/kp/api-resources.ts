@@ -106,7 +106,7 @@ export async function getApiJob(context: KpApiContext, jobId: string) {
     const result = proposalObject(job.result);
     const artifactId = typeof result.artifactId === "string" ? result.artifactId : typeof result.pdfArtifactId === "string" ? result.pdfArtifactId : null;
     const artifact = artifactId ? await tx.proposalArtifact.findUnique({ where: { id: artifactId } }) : null;
-    if (!artifact || metadata.kind === "PDF" && (artifact.kind !== "PDF" || artifact.proposalId !== metadata.proposalId) ||
+    if (!artifact || artifact.state !== "READY" || artifact.deletedAt || metadata.kind === "PDF" && (artifact.kind !== "PDF" || artifact.proposalId !== metadata.proposalId) ||
       metadata.kind === "CONTRACT" && (artifact.kind !== "DOCX" || artifact.contractId !== metadata.contractId))
       return apiFailure("KP_JOB_RESULT_UNAVAILABLE", 410, "Результат задания недоступен");
     publishedProposalIds = metadata.kind === "PDF" && metadata.proposalId ? [metadata.proposalId] :

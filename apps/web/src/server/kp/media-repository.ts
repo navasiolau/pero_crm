@@ -222,7 +222,8 @@ export function createPrismaProposalMediaRepository(db: Pick<PrismaClient, "$tra
           ? await tx.$queryRaw<{ mediaId: string }[]>`SELECT "mediaId" FROM "ProposalCurrentMedia" WHERE "proposalId" = ${input.proposalId} AND "mediaId" = ${input.mediaId} AND "detachedAt" IS NULL`
           : await tx.$queryRaw<{ mediaId: string }[]>`SELECT vm."mediaId" FROM "ProposalVersionMedia" vm JOIN "ProposalVersion" v ON v.id=vm."versionId"
               WHERE vm."proposalId" = ${input.proposalId} AND vm."mediaId" = ${input.mediaId}
-                AND vm."versionId" = ${input.scope.versionId} AND v.trigger<>'EDIT'`;
+                AND vm."versionId" = ${input.scope.versionId} AND v.trigger<>'EDIT'
+                AND NOT EXISTS (SELECT 1 FROM "ProposalArtifact" a WHERE a.id=v."pdfArtifactId" AND a."deletedAt" IS NOT NULL)`;
         if (references.length !== 1) throw new ProposalMediaError("KP_MEDIA_NOT_FOUND");
       }
       return readableMedia(media, input.variant);

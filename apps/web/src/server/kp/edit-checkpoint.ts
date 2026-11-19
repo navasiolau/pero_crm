@@ -108,7 +108,8 @@ export async function rememberEditCheckpoint(tx: Prisma.TransactionClient, propo
 export async function proposalEditFingerprint(tx: Prisma.TransactionClient, proposalId: string, projectId: string, targetClientId: string) {
   const project = await tx.project.findUnique({ where: { id: projectId }, select: {
     updatedAt: true, deletedAt: true, stage: true, clientId: true,
-    _count: { select: { products: true, tasks: true, payments: true, files: true } },
+    _count: { select: { products: true, tasks: true, payments: true, files: true, works: true,
+      communications: true, logisticsShares: true, stageHistory: true } },
   } });
   const proposal = await tx.commercialProposal.findUnique({ where: { id: proposalId }, select: {
     updatedAt: true, revision: true, clientId: true, deletedAt: true, acceptedVersionId: true, projectId: true,
@@ -127,9 +128,12 @@ export async function proposalEditFingerprint(tx: Prisma.TransactionClient, prop
   const media = await tx.proposalCurrentMedia.findMany({ where: { proposalId }, orderBy: { mediaId: "asc" },
     select: { mediaId: true, detachedAt: true } });
   const versions = await tx.proposalVersion.findMany({ where: { proposalId, trigger: { not: "EDIT" } },
-    orderBy: { id: "asc" }, select: { id: true, pdfArtifactId: true } });
+    orderBy: { id: "asc" }, select: { id: true, pdfArtifactId: true, pdfArtifact: { select: { deletedAt: true } } } });
+  const renderJobs = await tx.proposalJob.findMany({ where: { kind: { in: ["PDF", "CONTRACT"] },
+    OR: [{ proposalId }, { contract: { primaryProposalId: proposalId } }] },
+    orderBy: { id: "asc" }, select: { id: true, state: true, attempts: true } });
   const draftPools = await tx.productStagePayPool.findMany({ where: { product: { projectId } }, orderBy: { id: "asc" },
     select: { id: true, state: true, revision: true } });
-  return createHash("sha256").update(JSON.stringify({ project, proposal, products, clients, files, items, media, versions, draftPools })).digest("hex");
+  return createHash("sha256").update(JSON.stringify({ project, proposal, products, clients, files, items, media, versions, renderJobs, draftPools })).digest("hex");
 }
 

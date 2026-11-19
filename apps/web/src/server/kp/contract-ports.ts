@@ -1,3 +1,4 @@
+import type { JournalReversalCommand } from "@/server/changelog/reversal-contract";
 import type { Prisma } from "@prisma/client";
 import type { DomainActor } from "../actor";
 import type { JournalPresentationHints } from "../changelog/contract";
@@ -34,8 +35,8 @@ export interface ContractTransaction {
   contract(primaryId: string): Promise<ContractRecord | null>;
   history(contractId: string): Promise<ContractHistoryEntry[]>;
   receipt(operationId: string): Promise<ContractReceipt | null>;
-  writeReceipt(operationId: string, primaryId: string, action: string, actor: ContractActor, receipt: ContractReceipt, journal?: JournalPresentationHints): Promise<void>;
-  writeEvent(actor: DomainActor, contractId: string, action: string, value: ContractObject, journal: JournalPresentationHints): Promise<void>;
+  writeReceipt(operationId: string, primaryId: string, action: string, actor: ContractActor, receipt: ContractReceipt, journal?: JournalPresentationHints, reversal?: JournalReversalCommand): Promise<void>;
+  writeEvent(actor: DomainActor, contractId: string, action: string, value: ContractObject, journal: JournalPresentationHints, reversal?: JournalReversalCommand): Promise<void>;
   saveDraft(input: { id: string; primaryId: string; expectedRevision: number; create: boolean; settings: ContractObject; sourceIds: string[]; actorId: string }): Promise<ContractRecord>;
   createJob(input: { id: string; contractId: string; dedupeKey: string; payload: ContractPayload; actorId: string }): Promise<void>;
   job(id: string): Promise<ContractJob | null>;

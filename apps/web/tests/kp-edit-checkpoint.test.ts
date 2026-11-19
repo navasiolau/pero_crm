@@ -40,7 +40,7 @@ test("edit reversal detects a change to dependent storage bindings and a later p
     proposalVersion: { findMany: async () => [], findFirst: async () => ({
       id: "published", media: [], renderSnapshot: { binding: { clientId: "client" }, ...fx },
     }) },
-    productStagePayPool: { findMany: async () => [] },
+    proposalJob: { findMany: async () => [] }, productStagePayPool: { findMany: async () => [] },
   } as unknown as Prisma.TransactionClient;
   const cmd = proposalEditCommand({ proposalId: "proposal", projectId: "project", checkpointId: "published",
     expectedRevision: revision, expectedFingerprint: await proposalEditFingerprint(tx, "proposal", "project", "client") });

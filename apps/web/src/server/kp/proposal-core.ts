@@ -1,5 +1,7 @@
 import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 import type { CommercialProposal, Prisma, Project } from "@prisma/client";
+import { proposalCreationReversal } from "./proposal-create-reversal";
+import type { JournalReversalCommand } from "@/server/changelog/reversal-contract";
 import { eligibleEditBaseline, proposalEditCommand, proposalEditFingerprint, rememberEditCheckpoint,
   type ProposalEditCommand } from "./edit-checkpoint";
 import { initializeSignature, readSignatureDefaults } from './signature-defaults';
@@ -7,6 +9,7 @@ import { MANAGER_ROLES, hasAnyRole, hasRole } from "@/lib/roles";
 import type { DomainActor } from "@/server/actor";
 import { createProjectInTransaction } from "@/server/projects/core";
 import { lockProjectRow } from "@/server/projects/lock";
+import { lockWarehouseMetadata } from "@/server/warehouse/gate";
 import { automationJournalContext, businessSnapshot, projectJournalContext, proposalJournalContext } from "@/server/projects/journal";
 import { bindProposalClient, resolveProposalClientInTransaction, type ProposalEnvironment } from "./proposal-client";
 import { synchronizeProposalItemsInTransaction, type SynchronizedProposalItem } from "./proposal-item-sync";
@@ -98,7 +101,7 @@ function canonicalState(state: ProposalState, project: { number: string; address
 async function recordProposalMutation(tx: Prisma.TransactionClient, actor: DomainActor,
   identity: { receiptId: string; fingerprint: string }, result: ProposalWriteResult,
   action: "create" | "update", oldRevision: number | null, beforeSnapshot: unknown, restored = false,
-  journal?: { id: string; parentId?: string; undo?: ProposalEditCommand }) {
+  journal?: { id: string; parentId?: string; reversal?: JournalReversalCommand }) {
   const eventIds: string[] = [];
   if (!result.noOp) {
     const current=await tx.commercialProposal.findUnique({where:{id:result.proposalId}});
@@ -107,7 +110,7 @@ async function recordProposalMutation(tx: Prisma.TransactionClient, actor: Domai
       actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
       entity: "commercialProposal", entityId: result.proposalId, action,
       ...(journal ? { id: journal.id, operationRootId: journal.parentId } : {}),
-      ...(journal?.undo && !journal.parentId ? { reversal: proposalEditCommand(journal.undo) } : {}),
+      ...(journal?.reversal && !journal.parentId ? { reversal: journal.reversal } : {}),
       oldValue: { revision: oldRevision },
       newValue: { revision: result.revision, projectId: result.projectId, itemIds: result.items.map(item => item.id) },
     },{...proposalJournalContext(result.proposalId,{id:result.projectId,number:result.number}),...(restored?automationJournalContext(actor,'Восстановление сохранённой версии КП'):{}),
@@ -139,12 +142,13 @@ export async function createProposalInTransaction(tx: Prisma.TransactionClient, 
   const replay = await readReceipt(tx, actor, identity);
   if (replay) return replay;
   const source = initializeSignature(canonicalizeProposalSpecifications(normalizeProposalState(data.state)), (await readSignatureDefaults(tx)).values);
-  const { client, isTemporary } = await resolveProposalClientInTransaction(tx, actor, data, source, undefined, hooks.environment);
+  const { client, isTemporary, changed:clientChanged } = await resolveProposalClientInTransaction(tx, actor, data, source, undefined, hooks.environment);
+  const operationRootId = hooks.journalCheckpoints ? identity.receiptId + ":event" : undefined;
   const initial = projectValues(source, data.address);
   const projectCreated = await createProjectInTransaction(tx, actor, {
     title: initial.title, clientId: client.id, address: initial.address ?? undefined,
     ...(hasRole(actor.roles, "MANAGER") ? { managerId: actor.id } : {}),
-  },"Создание проекта из КП");
+  },"Создание проекта из КП",operationRootId);
   const { project } = projectCreated;
   const values = projectValues(source, data.address);
   if (project.title !== values.title)
@@ -154,8 +158,8 @@ export async function createProposalInTransaction(tx: Prisma.TransactionClient, 
     projectId: project.id, clientId: client.id, state, createdById: actor.id,
   } });
   const sync = await synchronizeProposalItemsInTransaction(tx, actor, { id: proposal.id, projectId: project.id }, project,
-    state.items, hooks.now?.() ?? new Date());
-  const context = { actor, proposalId: proposal.id, proposal, project, state, items: sync.items };
+    state.items, hooks.now?.() ?? new Date(), operationRootId);
+  const context = { actor, operationRootId, proposalId: proposal.id, proposal, project, state, items: sync.items };
   await hooks.applyPricing(tx, context);
   await hooks.applyMedia?.(tx, context);
   const result: ProposalWriteResult = {
@@ -163,7 +167,12 @@ export async function createProposalInTransaction(tx: Prisma.TransactionClient, 
     revision: proposal.revision, state,
     items: sync.items.map(({ id, productId, number }) => ({ id, productId, number })), noOp: false,
   };
-  const eventIds = await recordProposalMutation(tx, actor, identity, result, "create", null, null);
+  const reversal = operationRootId && !clientChanged ? proposalCreationReversal.command({
+    proposalId: proposal.id, projectId: project.id, clientId: client.id, hide: true, expectedDeletedAt: null,
+    expectedFingerprint: await proposalEditFingerprint(tx, proposal.id, project.id, client.id),
+  }) : undefined;
+  const eventIds = await recordProposalMutation(tx, actor, identity, result, "create", null, null, false,
+    operationRootId ? { id: operationRootId, reversal } : undefined);
   return { result, projectCreated, eventIds, changedProducts: [...sync.previousNumbers].map(([id, number]) => ({ id, previousNumbers: [number] })) };
 }
 
@@ -184,6 +193,11 @@ export async function saveProposalInTransaction(tx: Prisma.TransactionClient, ac
     throw new ProposalWriteError("conflict", "КП изменено другим пользователем — обновите редактор");
   const journalId = hooks.journalCheckpoints ? identity.receiptId + ":event" : undefined;
   const operationRootId = hooks.journalRootId ?? journalId;
+  if (hooks.journalCheckpoints) {
+    await lockWarehouseMetadata(tx);
+    await tx.$queryRaw`SELECT id FROM "Product" WHERE "projectId"=${project.id} ORDER BY id FOR UPDATE`;
+    await tx.$queryRaw`SELECT id FROM "Client" WHERE id IN (${project.clientId},${data.clientId ?? project.clientId}) ORDER BY id FOR UPDATE`;
+  }
   const baseline = hooks.journalCheckpoints ? await eligibleEditBaseline(tx, proposal, project) : null;
   const submitted = normalizeProposalState(data.state);
   if (!hooks.restoreVersion) assertCurrentProposalEditor(proposal.state, submitted);
@@ -234,6 +248,7 @@ export async function saveProposalInTransaction(tx: Prisma.TransactionClient, ac
   }
   const eventIds = await recordProposalMutation(tx, actor, identity, result, "update", proposal.revision,
     businessSnapshot(proposal,['revision','state','clientId','currency','rate','rateDate','rateSource']),hooks.restoreVersion===true,
-    journalId ? { id: journalId, parentId: hooks.journalRootId, undo } : undefined);
+    journalId ? { id: journalId, parentId: hooks.journalRootId,
+      reversal: undo ? proposalEditCommand(undo) : undefined } : undefined);
   return { result, undo, eventIds, changedProducts: [...sync.previousNumbers].map(([id, number]) => ({ id, previousNumbers: [number] })) };
 }
