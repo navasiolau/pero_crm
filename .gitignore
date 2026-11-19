@@ -50,3 +50,6 @@ b_plus_creds.md
 HANDOVER-NEXT-AGENT.md
 docs/INFRA_RECOVERY_HANDOFF.md
 docs/NETBIRD_SETUP_OWNER.md
+
+# Неопределённые подтверждения Telegram (содержат данные CRM)
+/apps/telegram-bot/.finance-state/

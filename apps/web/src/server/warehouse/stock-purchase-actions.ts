@@ -1,4 +1,6 @@
 "use server";
+
+import { financeSessionSource } from "@/server/telegram/finance-session";
 import { requireFinance } from "@/server/require-role";
 import { uuid } from "zod";
 import { createStockPurchaseCore } from "./stock-purchase-service";
@@ -14,5 +16,5 @@ export async function addPaidStockReceipt(input: StockPurchaseInput, expectedAct
   const data = parsed.data;
   if (!expectedActorId || expectedActorId !== session.user.id) return {ok: false as const, outcome: "ROLLED_BACK" as const,
     kind: "actor-changed" as const, clientMutationId: data.clientMutationId, error: "Учётная запись изменилась — обновите страницу"};
-  return createStockPurchaseCore({ id: session.user.id, name: session.user.name ?? "", roles: session.user.roles, source: "web" }, data);
+  return createStockPurchaseCore({ id: session.user.id, name: session.user.name ?? "", roles: session.user.roles, source: financeSessionSource(session) }, data);
 }

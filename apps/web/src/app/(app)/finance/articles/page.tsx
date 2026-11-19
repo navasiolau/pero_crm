@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 
-import { auth } from "@/auth";
+import { scopedFinanceAuth } from "@/server/telegram/finance-session";
 import { FINANCE_ROLES, hasAnyRole } from "@/lib/roles";
 import { listExpenseArticles } from "@/server/finance/queries";
 
@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 // «Финансы → Статьи расходов» (§8/§11, админ/директор): справочник
 // статей для расходов по проектам (материалы, логистика, прочее).
 export default async function FinanceArticlesPage() {
-  const session = await auth();
+  const session = await scopedFinanceAuth();
   if (!session?.user) redirect("/login");
   if (!hasAnyRole(session.user.roles, FINANCE_ROLES)) redirect("/");
 

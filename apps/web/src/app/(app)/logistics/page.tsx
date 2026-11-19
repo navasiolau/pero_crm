@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { auth } from "@/auth";
+import { scopedFinanceAuth } from "@/server/telegram/finance-session";
 import { canReadLogisticsDocuments } from "@/lib/logistics-access";
 import { homePathForRoles } from "@/lib/home-route";
 import { LogisticsWorkspace } from "@/components/logistics/workspace";
@@ -9,7 +9,7 @@ import { loadLogisticsWorkspace } from "./workspace-data";
 export const dynamic = "force-dynamic";
 
 export default async function LogisticsPage({ searchParams }: { searchParams: Promise<SearchValues> }) {
-  const session = await auth();
+  const session = await scopedFinanceAuth();
   if (!session?.user) redirect("/login");
   if (!canReadLogisticsDocuments(session.user.roles)) redirect(homePathForRoles(session.user.roles));
   const params = await searchParams;

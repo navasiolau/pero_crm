@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import {createRequire} from 'node:module';
 import {randomUUID} from 'node:crypto';
 process.env.BOT_RECOVERY_TEST='1';process.env.TELEGRAM_API_ORIGIN='http://127.0.0.1:9080';
 process.env.TELEGRAM_BOT_TOKEN='fixture-token';process.env.CRM_BASE_URL='http://127.0.0.1:9081';process.env.CRM_API_TOKEN='fixture-crm-token';
+process.env.PERO_TELEGRAM_FINANCE_ORIGIN='https://crm.invalid';
 const sent=[],calls=[],uploads=new Map(),payments=new Map(),roles=new Map();
 let loseUpload=false,losePayment=false,unknownPayment=false;
 globalThis.fetch=async(input,options={})=>{
@@ -17,8 +19,11 @@ globalThis.fetch=async(input,options={})=>{
  else if(url.pathname.endsWith('/getFile'))result={ok:true,result:{file_path:'documents/file.pdf',file_size:4}};
  else if(url.pathname.startsWith('/file/'))return new Response('%PDF',{headers:{'content-length':'4'}});
  else if(url.pathname==='/api/v1/bot/session'){const id=url.searchParams.get('chatId');result={ok:true,found:true,user:{id:'actor-'+id,name:'Actor',roles:roles.get(id)??['PROCUREMENT'],botAllowed:true}};}
- else if(url.pathname==='/api/v1/bot/projects')result={ok:true,projects:[{id:'project',number:'205',title:'Order',currency:'BYN'}]};
- else if(url.pathname==='/api/v1/bot/directory'){result={ok:true,items:url.searchParams.get('type')==='cash'?[{id:'cash',label:'Касса',currency:'BYN'}]:[{id:'article',label:'Материалы'}]};}
+ else if(url.pathname==='/api/v1/bot/projects'){
+  const q=url.searchParams.get('q');
+  result={ok:true,projects:q==='Шкаф'?[{id:'older',number:'204',title:'Шкаф в холл',currency:'BYN'},{id:'newer',number:'206',title:'Шкаф в спальню',currency:'BYN'}]:[{id:'project',number:'205',title:'Order',currency:'BYN'}]};
+ }
+ else if(url.pathname==='/api/v1/bot/directory'){result={ok:true,items:url.searchParams.get('type')==='cash'?[{id:'cash',label:'Касса',currency:'BYN'},{id:'usd',label:'USD',currency:'USD'}]:[{id:'article',label:'Материалы'}]};}
  else if(url.pathname==='/api/v1/bot/documents/upload'){
   if(!uploads.has(body.clientMutationId))uploads.set(body.clientMutationId,{id:randomUUID(),fileName:body.fileName,mimeType:body.mimeType});
   result={ok:true,document:uploads.get(body.clientMutationId)};if(loseUpload){loseUpload=false;throw Error('lost upload ACK');}
@@ -147,4 +152,73 @@ test('legacy READY single-file state keeps its old UNKNOWN payload despite a ret
  assert.equal((await crm.createPayment('legacy-actor',restored)).ok,true);
  const sends=calls.filter(row=>row.path.endsWith('/payments')&&row.actor==='legacy-actor');assert.equal(sends.length,2);assert.deepEqual(sends[0].body,original);assert.deepEqual(sends[1].body,original);
  assert.equal(hasUnresolvedDocumentAttempt({...legacy,reportDocument:undefined}),true);
+});
+
+
+test('ACCOUNTANT selects an ambiguous project explicitly and supplies date and manual rate', async () => {
+ const chat=8832;roles.set(String(chat),['ACCOUNTANT']);
+ await handleUpdate(message(chat,'/приход'));
+ await handleUpdate(message(chat,'Шкаф'));
+ const choices=sent.at(-1).reply_markup.inline_keyboard.flat().filter(button=>button.callback_data.startsWith('payproj:'));
+ assert.equal(choices.length,2);
+ await handleUpdate(callback(chat,choices[1].callback_data));
+ assert.match(sent.at(-1).text,/П-206/);
+ await handleUpdate(message(chat,'55'));
+ await handleUpdate(callback(chat,'cur:USD'));
+ await handleUpdate(callback(chat,'cash:usd'));
+ await handleUpdate(message(chat,'—'));
+ const options=sent.at(-1).reply_markup.inline_keyboard.flat().filter(button=>button.callback_data.startsWith('payoptions:'));
+ await handleUpdate(callback(chat,options[0].callback_data));
+ await handleUpdate(message(chat,'2026-02-31'));
+ assert.match(sent.at(-1).text,/календарную дату/);
+ await handleUpdate(message(chat,'2026-02-28'));
+ await handleUpdate(callback(chat,options[1].callback_data));
+ await handleUpdate(message(chat,'3,25'));
+ await handleUpdate(callback(chat,latestButton(chat,'payok:')));
+ const payment=calls.filter(row=>row.path.endsWith('/payments')&&row.actor==='actor-'+chat).at(-1).body;
+ assert.equal(payment.projectId,'newer');assert.equal(payment.paidAt,'2026-02-28');assert.equal(payment.rate,3.25);
+});
+
+test('private project list opens an accountant payment without a manager card and group link never reaches CRM', async () => {
+ const chat=8833;roles.set(String(chat),['ACCOUNTANT']);
+ const before=calls.length;
+ await handleUpdate(message(-chat,'/start Secret',{from:{id:chat}}));
+ await handleUpdate(message(-chat,'/проекты',{from:{id:chat}}));
+ assert.equal(calls.length,before);
+ await handleUpdate(message(chat,'/проекты'));
+ await handleUpdate(callback(chat,latestButton(chat,'paylist:')));
+ const income=sent.at(-1).reply_markup.inline_keyboard.flat().find(button=>button.callback_data.endsWith(':income'));
+ await handleUpdate(callback(chat,income.callback_data));
+ assert.match(sent.at(-1).text,/П-205/);
+ assert.equal(calls.some(row=>row.actor==='actor-'+chat&&row.path.endsWith('/projects/project')),false);
+});
+
+test('after restarting engine a lost payment acknowledgement is retried with the stored payload',async()=>{
+ const chat=8834;roles.set(String(chat),['ACCOUNTANT']);
+ await handleUpdate(message(chat,'/приход 205 100'));
+ await handleUpdate(callback(chat,'cur:BYN'));await handleUpdate(callback(chat,'cash:cash'));
+ await handleUpdate(message(chat,'—'));losePayment=true;
+ await handleUpdate(callback(chat,latestButton(chat,'payok:')));
+ const first=calls.filter(row=>row.path.endsWith('/payments')&&row.actor==='actor-'+chat).at(-1);
+ const require=createRequire(import.meta.url);
+ for(const module of ['../dist/engine.js','../dist/finance-checkpoint.js'])delete require.cache[require.resolve(module)];
+ const restarted=require('../dist/engine.js').handleUpdate;
+ await restarted(message(chat,'/приход 205 100'));
+ assert.match(sent.at(-1).text,/повтор/);
+ await restarted(message(chat,'/повтор'));
+ assert.match(sent.at(-1).text,/подтверждена/);
+ const attempts=calls.filter(row=>row.path.endsWith('/payments')&&row.actor==='actor-'+chat);
+ assert.equal(attempts.length,2);assert.deepEqual(attempts[1],first);
+});
+
+test('the Finance button uses a Mini App only for a linked financial user in a private chat', async () => {
+ const chat=8835;roles.set(String(chat),['ACCOUNTANT']);
+ await handleUpdate(message(chat,'/финансы'));
+ assert.deepEqual(sent.at(-1).reply_markup.inline_keyboard[0][0],{text:'Финансы',web_app:{url:'https://crm.invalid/telegram/finance'}});
+ const before=sent.length;
+ await handleUpdate(message(-chat,'/финансы',{from:{id:chat}}));
+ assert.equal(sent.length,before);
+ roles.set(String(chat),['MANAGER']);
+ await handleUpdate(message(chat,'/финансы'));
+ assert.equal(sent.at(-1).reply_markup,undefined);
 });

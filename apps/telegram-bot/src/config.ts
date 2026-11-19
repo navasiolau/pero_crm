@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { isIP } from "node:net";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 // Минимальная загрузка .env (zero-dep): cwd → каталог пакета. В docker
@@ -84,6 +85,13 @@ function required(name: string): string {
   return value;
 }
 
+export function resolveFinanceWorkspaceUrl(origin?: string): string | undefined {
+  if (!origin) return undefined;
+  const url = new URL(origin);
+  if (url.protocol !== "https:" || origin !== url.origin) throw new Error("PERO_TELEGRAM_FINANCE_ORIGIN требует HTTPS origin без пути");
+  return `${url.origin}/telegram/finance`;
+}
+
 const recoveryTest = process.env.BOT_RECOVERY_TEST === "1";
 export const config = {
   token: required("TELEGRAM_BOT_TOKEN"),
@@ -94,5 +102,7 @@ export const config = {
     process.env.TELEGRAM_API_ORIGIN,
     recoveryTest,
   ),
+  financeStateDir: process.env.BOT_FINANCE_STATE_DIR ?? (recoveryTest ? join(tmpdir(), `pero-bot-test-${process.pid}`) : join(__dirname, "../.finance-state")),
+  financeWorkspaceUrl: resolveFinanceWorkspaceUrl(process.env.PERO_TELEGRAM_FINANCE_ORIGIN),
   healthFile: process.env.BOT_HEALTH_FILE ?? "/tmp/pero-telegram-bot-health.json",
 };

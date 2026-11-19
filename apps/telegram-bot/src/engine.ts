@@ -1,3 +1,6 @@
+import { config } from "./config";
+import { pendingFinanceCommand, submitFinanceCommand } from "./finance-checkpoint";
+import { dialogChoices, dialogChoice } from "./dialog-choices";
 import {randomUUID} from "node:crypto";
 import { crm, CrmError, type ProjectRef,type ProjectBaseline } from "./crm";
 import { tg, TgError, type InlineButton, type TgCallbackQuery, type TgMessage, type TgUpdate } from "./tg";
@@ -42,9 +45,13 @@ type Dialog =
   | {
       kind: "payment";
       direction: "INCOME" | "EXPENSE";
-      step: "project" | "amount" | "currency" | "cash" | "article" | "comment" | "document" | "confirm";
+      step: "project" | "amount" | "currency" | "cash" | "article" | "comment" | "document" | "confirm" | "paidAt" | "rate";
       clientMutationId: string;
       projectSelected: boolean;
+      choices?: ProjectRef[];
+      choiceToken?: string;
+      paidAt?: string;
+      rate?: number;
       reportDocument?: ReportDocument;
       reportDocuments?: ReportDocument[];
       documentAttempt?: DocumentAttempt;
@@ -81,11 +88,11 @@ type Dialog =
     };
 
 const stageMenus=new Map<string,{projectId:string;projectNumber:string;expectedStage:string;token:string;mutations:Record<string,string>}>();
+const financeProjectMenus = new Map<number, { token: string; projects: ProjectRef[] }>();
 const dialogs = new Map<string, Dialog>();
-const sessionCache = new Map<string, Session & { at: number }>();
+const observedActor = new Map<string, string>();
 const noticeAt = new Map<string, number>();
-const SESSION_TTL_MS = 60_000;
-const FINANCE_CALLBACK_ACTIONS = new Set(["payin", "payout", "payproj", "paygeneral", "cur", "cash", "art", "nocomment", "payok", "docretry", "doccontinue", "docexclude", "sp"]);
+const FINANCE_CALLBACK_ACTIONS = new Set(["payin", "payout", "payproj", "paygeneral", "paylist", "payoptions", "cur", "cash", "art", "nocomment", "payok", "docretry", "doccontinue", "docexclude", "sp"]);
 
 function getDialog(chatId: number): Dialog | undefined {
   return dialogs.get(String(chatId));
@@ -95,23 +102,27 @@ function setDialog(chatId: number, dialog: Dialog | null): void {
   else dialogs.delete(String(chatId));
 }
 
-async function getSession(chatId: string, fresh = false): Promise<Session | null> {
-  const cached = sessionCache.get(chatId);
-  if (!fresh && cached && Date.now() - cached.at < SESSION_TTL_MS) return cached;
+async function getSession(chatId: string): Promise<Session | null> {
   const response = await crm.session(chatId);
-  if (!response.found || !response.user) return null;
+  if (!response.found || !response.user) {
+    dropSession(chatId);
+    return null;
+  }
+  if (observedActor.get(chatId) !== response.user.id) dropSession(chatId);
   const session: Session = {
     userId: response.user.id,
     name: response.user.name,
     roles: response.user.roles,
     botAllowed: response.user.botAllowed,
   };
-  sessionCache.set(chatId, { ...session, at: Date.now() });
+  observedActor.set(chatId, session.userId);
   return session;
 }
 
 function dropSession(chatId: string): void {
-  sessionCache.delete(chatId);
+  observedActor.delete(chatId);
+  dialogs.delete(chatId);
+  financeProjectMenus.delete(Number(chatId));
 }
 
 const CANCEL_BUTTON: InlineButton = { text: "❌ Отмена", callback_data: "cancel" };
@@ -156,6 +167,7 @@ export async function handleUpdate(update: TgUpdate): Promise<void> {
   if (!message) return;
 
   const chatId = message.chat.id;
+  if (chatId <= 0 || message.from?.id !== chatId) return;
   const text = message.text?.trim() ?? "";
   const { cmd, args } = parseCommand(text);
 
@@ -232,7 +244,7 @@ async function handleLinkCode(
     );
     return;
   }
-  await reply(chatId, `✅ Привязано: ${who}\n\nСписок команд — /help`);
+  await reply(chatId, `✅ Привязано: ${who}\n\nСписок команд — /help`, financeWorkspaceButtons(result.user.roles));
 }
 
 // ─── Команды ─────────────────────────────────────────────────────────────────
@@ -244,21 +256,45 @@ async function handleCommand(
   args: string[],
 ): Promise<void> {
   switch (cmd) {
+    case "/повтор":
+    case "/retry": {
+      if (!hasAny(session.roles, FINANCE_ROLES)) return;
+      const pending = pendingFinanceCommand(chatId, session.userId);
+      if (!pending) {
+        await reply(chatId, "Нет ожидающей подтверждения операции для вашего аккаунта.");
+        return;
+      }
+      try {
+        const result = await submitFinanceCommand(chatId, pending);
+        if (result.ok) setDialog(chatId, null);
+        await reply(chatId, result.ok ? "✅ Операция подтверждена в CRM." : `❌ ${result.error ?? "Результат неизвестен"}`);
+      } catch {
+        await reply(chatId, "Подтверждение недоступно. Позже повторите /повтор.");
+      }
+      return;
+    }
     case "/выдача": case "/stockout": case "/возврат": case "/stockreturn": case "/инвприход": case "/stockinventory": {
-      const current=await getSession(String(chatId),true);
+      const current=await getSession(String(chatId));
       if(chatId<=0||!current?.botAllowed||!hasAny(current.roles,WAREHOUSE_ROLES)){await reply(chatId,"Складские операции доступны складским ролям в личном чате.");return;}
       const kind=["/выдача","/stockout"].includes(cmd)?"EXPENSE":["/возврат","/stockreturn"].includes(cmd)?"RETURN":"INCOME";
       await startStockMovement({reply,getDialog,setDialog},chatId,kind);return;
     }
     case "/закупка":
     case "/stockin": {
-      const current = await getSession(String(chatId),true);
+      const current = await getSession(String(chatId));
       if (chatId <= 0 || !current?.botAllowed || !hasAny(current.roles,FINANCE_ROLES)) { await reply(chatId,"Закупки доступны финансовым ролям в личном чате с ботом."); return; }
+      if (await blockPendingFinance(chatId, current)) return;
       await startStockPurchase({ reply, getDialog, setDialog },chatId); return;
+    }
+    case "/финансы":
+    case "/finance": {
+      const buttons = financeWorkspaceButtons(session.roles);
+      await reply(chatId, buttons ? "Рабочее пространство CRM" : "Финансы в Telegram недоступны.", buttons);
+      return;
     }
     case "/start":
     case "/help": {
-      await reply(chatId, helpText(session));
+      await reply(chatId, helpText(session), financeWorkspaceButtons(session.roles));
       return;
     }
     case "/новый":
@@ -278,10 +314,18 @@ async function handleCommand(
     }
     case "/проекты":
     case "/projects": {
-      const result = await crm.projects(session.userId);
+      const result = await crm.projects(session.userId, args.join(" ") || undefined);
       const projects = result.projects ?? [];
       if (projects.length === 0) {
         await reply(chatId, "Проектов не найдено.");
+        return;
+      }
+      if (!hasAny(session.roles, ["ADMIN", "DIRECTOR", "MANAGER"])) {
+        const token = randomUUID();
+        financeProjectMenus.set(chatId, { token, projects: projects.slice(0, 10) });
+        await reply(chatId, "Последние проекты. Чтобы найти другой, используйте /приход или /расход.", projects.slice(0, 10).map((project, index) => [
+          { text: `П-${project.number} ${project.title}`.slice(0, 40), callback_data: `paylist:${token}:${index}` },
+        ]));
         return;
       }
       await reply(
@@ -290,7 +334,7 @@ async function handleCommand(
         buttonsRow(
           projects.map((project) => ({
             text: `П-${project.number} ${project.title}`.slice(0, 64),
-            callback_data: hasAny(session.roles, ["ADMIN", "DIRECTOR", "MANAGER"]) ? `proj:${project.id}` : `payin:${project.id}`,
+            callback_data: `proj:${project.id}`,
           })),
         ),
       );
@@ -326,6 +370,11 @@ async function handleCommand(
   }
 }
 
+function financeWorkspaceButtons(roles: string[]): InlineButton[][] | undefined {
+  const url = config.financeWorkspaceUrl;
+  return url && hasAny(roles, FINANCE_ROLES) ? [[{ text: "Финансы", web_app: { url } }]] : undefined;
+}
+
 function helpText(session: Session): string {
   const lines = ["Команды бота:"];
   if (hasAny(session.roles, ["ADMIN", "DIRECTOR", "MANAGER"])) lines.push(
@@ -334,12 +383,15 @@ function helpText(session: Session): string {
     "/проекты — последние проекты",
   );
   if (hasAny(session.roles, FINANCE_ROLES)) {
+    if (config.financeWorkspaceUrl) lines.push("/финансы — открыть рабочее пространство");
     lines.push(
-      "/приход [номер] [сумма] — приход по проекту",
-      "/расход [номер] [сумма] — расход по проекту",
+      "/приход [номер] [сумма] — приход по проекту или организации",
+      "/расход [номер] [сумма] — расход по проекту или организации",
       "/закупка — приход материала с оплатой из кассы",
+      "/повтор — проверить незавершённое подтверждение",
     );
   }
+  if (hasAny(session.roles, FINANCE_ROLES) && !hasAny(session.roles, ["ADMIN", "DIRECTOR", "MANAGER"])) lines.push("/проекты [поиск] — найти проект для платежа");
   if(hasAny(session.roles,WAREHOUSE_ROLES))lines.push("/выдача — выдать материал на изделие","/возврат — вернуть материал по исходной выдаче","/инвприход — инвентарный приход без кассы");
   lines.push("Отвязать бота — в CRM: меню профиля → Telegram");
   return lines.join("\n");
@@ -392,12 +444,12 @@ async function handleDialogText(
   text: string,
 ): Promise<void> {
   if(dialog.kind==="stockMovement"){
-    const current=await getSession(String(chatId),true);
+    const current=await getSession(String(chatId));
     if(chatId<=0||!current?.botAllowed||!hasAny(current.roles,WAREHOUSE_ROLES)){await reply(chatId,"Недостаточно прав для склада");return;}
     await stockMovementText({reply,getDialog,setDialog},chatId,current.userId,dialog,text);return;
   }
   if (dialog.kind === "stockPurchase") {
-    const current = await getSession(String(chatId),true);
+    const current = await getSession(String(chatId));
     if (chatId <= 0 || !current?.botAllowed || !hasAny(current.roles,FINANCE_ROLES)) { await reply(chatId,"Недостаточно прав для закупки"); return; }
     await stockPurchaseText({ reply, getDialog, setDialog },chatId,current.userId,dialog,text); return;
   }
@@ -462,6 +514,13 @@ async function newProjectText(
 
 // — Платёж (приход/расход) —
 
+async function blockPendingFinance(chatId: number, session: Session) {
+  const pending = pendingFinanceCommand(chatId, session.userId);
+  if (!pending) return false;
+  await reply(chatId, "Сначала проверьте незавершённую операцию командой /повтор.");
+  return true;
+}
+
 async function startPayment(
   chatId: number,
   session: Session,
@@ -476,6 +535,7 @@ async function startPayment(
     );
     return;
   }
+  if (await blockPendingFinance(chatId, session)) return;
   const dialog: Extract<Dialog, { kind: "payment" }> = {
     kind: "payment",
     direction,
@@ -485,19 +545,8 @@ async function startPayment(
     ...(direction === "EXPENSE" ? { reportDocuments: [] } : {}),
   };
   const label = direction === "INCOME" ? "Приход" : "Расход";
-  // /расход 205 4000 — номер и сумму можно указать сразу
-  if (args[0]) {
-    const project = await findProject(session.userId, args[0]);
-    if (!project) {
-      await reply(chatId, `Проект «${args[0]}» не найден.`);
-      return;
-    }
-    dialog.projectId = project.id;
-    dialog.projectSelected = true;
-    dialog.projectNumber = project.number;
-    dialog.projectCurrency = project.currency;
-  }
-  if (args[1] && dialog.projectId) {
+  setDialog(chatId, dialog);
+  if (args[1]) {
     const amount = parseAmount(args[1]);
     if (amount === null) {
       await reply(chatId, "Сумма не распознана (пример: 4000 или 4000,50)");
@@ -505,23 +554,43 @@ async function startPayment(
     }
     dialog.amount = amount;
   }
-  if (dialog.projectId && dialog.amount) {
-    await nextPaymentStep(chatId, session, dialog, true);
+  if (args[0]) {
+    await searchPaymentProject(chatId, session, dialog, args[0]);
     return;
   }
-  if (dialog.projectId) {
-    dialog.step = "amount";
-    setDialog(chatId, dialog);
-    await reply(chatId, `${label} · ${paymentContext(dialog)}. Сумма:`, [
-      [CANCEL_BUTTON],
-    ]);
-    return;
-  }
-  setDialog(chatId, dialog);
   await reply(chatId, `${label}. Укажите проект (номер или название) либо выберите общий ${label.toLowerCase()}:`, [
     [{ text: "Без проекта", callback_data: `paygeneral:${dialog.clientMutationId}` }],
     [CANCEL_BUTTON],
   ]);
+}
+
+async function selectPaymentProject(chatId: number, session: Session, dialog: Extract<Dialog, { kind: "payment" }>, project: ProjectRef) {
+  dialog.projectId = project.id;
+  dialog.projectSelected = true;
+  dialog.projectNumber = project.number;
+  dialog.projectCurrency = project.currency;
+  await nextPaymentStep(chatId, session, dialog, false);
+}
+
+async function searchPaymentProject(chatId: number, session: Session, dialog: Extract<Dialog, { kind: "payment" }>, text: string) {
+  dialog.choiceToken = undefined;
+  const input = text.replace(/^[пП][- ](?=\d)/, "");
+  const { projects = [] } = await crm.projects(session.userId, input);
+  const exact = projects.find(project => project.number === input);
+  if (exact || projects.length === 1) {
+    await selectPaymentProject(chatId, session, dialog, exact ?? projects[0]);
+    return;
+  }
+  if (!projects.length) {
+    await reply(chatId, "Проект не найден. Уточните номер или название:", [[CANCEL_BUTTON]]);
+    return;
+  }
+  dialog.choices = projects.slice(0, 8);
+  const choices = dialogChoices("payproj", dialog.clientMutationId, dialog.choices.map(project => ({
+    label: `П-${project.number} ${project.title}`.slice(0, 64),
+  })));
+  dialog.choiceToken = choices.token;
+  await reply(chatId, "Выберите проект или уточните поиск:", [...choices.buttons, [CANCEL_BUTTON]]);
 }
 
 function paymentContext(dialog: Extract<Dialog, { kind: "payment" }>): string {
@@ -535,16 +604,35 @@ async function paymentText(
   text: string,
 ): Promise<void> {
   if (dialog.step === "project") {
-    const found = await findProject(session.userId, text);
-    if (!found) {
-      await reply(chatId, "Не найдено — уточните номер или название:");
+    await searchPaymentProject(chatId, session, dialog, text);
+    return;
+  }
+  if (dialog.step === "paidAt") {
+    if (!/^(?:\d{4}-\d{2}-\d{2}|авто)$/i.test(text)) {
+      await reply(chatId, "Введите дату в формате ГГГГ-ММ-ДД или «авто».");
       return;
     }
-    dialog.projectId = found.id;
-    dialog.projectSelected = true;
-    dialog.projectNumber = found.number;
-    dialog.projectCurrency = found.currency;
-    await nextPaymentStep(chatId, session, dialog, false);
+    const automatic = text.toLowerCase() === "авто";
+    if (!automatic) {
+      const date = new Date(text);
+      if (!Number.isFinite(date.valueOf()) || date.toISOString().slice(0, 10) !== text) {
+        await reply(chatId, "Проверьте календарную дату.");
+        return;
+      }
+    }
+    dialog.paidAt = automatic ? undefined : text;
+    await confirmPayment(chatId, session, dialog);
+    return;
+  }
+  if (dialog.step === "rate") {
+    const automatic = text.toLowerCase() === "авто";
+    const rate = Number(text.replace(",", "."));
+    if (!automatic && (!/^\d+(?:[.,]\d+)?$/.test(text) || !Number.isFinite(rate) || rate <= 0)) {
+      await reply(chatId, "Введите положительный курс в BYN или «авто».");
+      return;
+    }
+    dialog.rate = automatic ? undefined : rate;
+    await confirmPayment(chatId, session, dialog);
     return;
   }
   if (dialog.step === "amount") {
@@ -568,7 +656,7 @@ async function paymentText(
 
 async function paymentDocumentMessage(chatId: number, message: TgMessage) {
   if (!message.from || message.from.id !== chatId || chatId <= 0) return;
-  const session = await getSession(String(chatId), true);
+  const session = await getSession(String(chatId));
   const dialog = getDialog(chatId);
   if (!session || !hasAny(session.roles, FINANCE_ROLES)) { await reply(chatId, "Недостаточно прав для финансовых документов"); return; }
   if (dialog?.kind === "stockPurchase") {
@@ -682,9 +770,15 @@ async function confirmPayment(
     lines.push(`Статья: ${dialog.articleLabel ?? "—"}`);
     lines.push(`Отчетные документы: ${paymentDocuments(dialog).map(file => file.fileName).join(", ") || "—"}`);
   }
+  lines.push(`Дата оплаты: ${dialog.paidAt ?? "сегодня"}`);
+  if (dialog.currency !== "BYN") lines.push(`Курс BYN: ${dialog.rate ?? "НБ РБ"}`);
   lines.push(`Комментарий: ${dialog.comment ?? "—"}`);
   setDialog(chatId, dialog);
   await reply(chatId, lines.join("\n"), [
+    [
+      { text: "Дата оплаты", callback_data: `payoptions:${dialog.clientMutationId}:date` },
+      ...(dialog.currency === "BYN" ? [] : [{ text: "Курс", callback_data: `payoptions:${dialog.clientMutationId}:rate` }]),
+    ],
     [
       { text: "✅ Создать", callback_data: `payok:${dialog.clientMutationId}` },
       { text: "❌ Отмена", callback_data: "cancel" },
@@ -773,6 +867,7 @@ async function saveProjectEdit(session:Session,dialog:Extract<Dialog,{kind:"edit
 
 async function handleCallback(query: TgCallbackQuery): Promise<void> {
   const chatId = query.message.chat.id;
+  if (chatId <= 0 || query.from.id !== chatId) return;
   try {
     await tg.answerCallbackQuery(query.id);
   } catch {
@@ -781,9 +876,8 @@ async function handleCallback(query: TgCallbackQuery): Promise<void> {
   const data = query.data ?? "";
   const [action, ...rest] = data.split(":");
 
-  const financial = FINANCE_CALLBACK_ACTIONS.has(action), warehouse = action === "sw", guarded=financial||warehouse;
-  if (guarded && (chatId <= 0 || query.from.id !== chatId)) return;
-  const session = await getSession(String(chatId), guarded);
+  const financial = FINANCE_CALLBACK_ACTIONS.has(action), warehouse = action === "sw";
+  const session = await getSession(String(chatId));
   if (!session) return;
   if (!session.botAllowed) return;
   if(warehouse&&!hasAny(session.roles,WAREHOUSE_ROLES)){await reply(chatId,"Недостаточно прав для склада");return;}
@@ -989,27 +1083,18 @@ async function dispatchCallback(
 
   // Платёж
   if (action === "payin" || action === "payout") {
-    const projectId = rest[0];
-    const card = await crm.project(session.userId, projectId);
-    if (!card.ok || !card.project) {
-      await reply(chatId, card.error ?? "Проект не найден");
+    if (await blockPendingFinance(chatId, session)) return;
+    const result = await crm.paymentProject(session.userId, rest[0] ?? "");
+    const project = result.projects?.[0];
+    if (!result.ok || !project) {
+      await reply(chatId, result.error ?? "Проект не найден");
       return;
     }
-    const dialog: Extract<Dialog, { kind: "payment" }> = {
-      kind: "payment",
-      direction: action === "payin" ? "INCOME" : "EXPENSE",
-      step: "amount",
-      clientMutationId: randomUUID(),
-      projectSelected: true,
-      ...(action === "payout" ? { reportDocuments: [] } : {}),
-      projectId: card.project.id,
-      projectNumber: card.project.number,
-      projectCurrency: card.project.currency,
-    };
-    setDialog(chatId, dialog);
-    await reply(chatId, `${action === "payin" ? "Приход" : "Расход"} · П-${card.project.number}. Сумма:`, [
-      [CANCEL_BUTTON],
-    ]);
+    const expense = action === "payout";
+    await selectPaymentProject(chatId, session, {
+      kind: "payment", direction: expense ? "EXPENSE" : "INCOME", step: "project", clientMutationId: randomUUID(),
+      projectSelected: false, ...(expense ? { reportDocuments: [] } : {}),
+    }, project);
     return;
   }
   if (action === "paygeneral") {
@@ -1020,22 +1105,44 @@ async function dispatchCallback(
     dialog.projectSelected = true; dialog.projectId = null; dialog.projectNumber = undefined; dialog.projectCurrency = "BYN";
     await nextPaymentStep(chatId, session, dialog, false); return;
   }
+  if (action === "paylist") {
+    const menu = financeProjectMenus.get(chatId);
+    const project = dialogChoice(menu?.token, menu?.projects, rest[0], rest[1]);
+    if (!project) { await reply(chatId, "Обновите список командой /проекты"); return; }
+    if (rest[2] !== "income" && rest[2] !== "expense") {
+      await reply(chatId, `П-${project.number} ${project.title}`, [[
+        { text: "Приход", callback_data: `paylist:${rest[0]}:${rest[1]}:income` },
+        { text: "Расход", callback_data: `paylist:${rest[0]}:${rest[1]}:expense` },
+      ]]);
+      return;
+    }
+    if (await blockPendingFinance(chatId, session)) return;
+    const expense = rest[2] === "expense";
+    financeProjectMenus.delete(chatId);
+    await selectPaymentProject(chatId, session, {
+      kind: "payment", direction: expense ? "EXPENSE" : "INCOME", step: "project", clientMutationId: randomUUID(),
+      projectSelected: false, ...(expense ? { reportDocuments: [] } : {}),
+    }, project);
+    return;
+  }
   if (action === "payproj") {
     const dialog = getDialog(chatId);
-    if (dialog?.kind !== "payment" || dialog.step !== "project") {
-      await reply(chatId, "Сессия устарела — начните заново");
-      return;
+    const project = dialog?.kind === "payment" && dialog.step === "project" && rest[0] === dialog.clientMutationId
+      ? dialogChoice(dialog.choiceToken, dialog.choices, rest[2], rest[3]) : undefined;
+    if (dialog?.kind !== "payment" || !project) { await reply(chatId, "Выбор устарел. Уточните проект."); return; }
+    await selectPaymentProject(chatId, session, dialog, project);
+    return;
+  }
+  if (action === "payoptions") {
+    const dialog = getDialog(chatId);
+    if (dialog?.kind !== "payment" || dialog.step !== "confirm" || dialog.busy || rest[0] !== dialog.clientMutationId) return;
+    if (rest[1] === "date") {
+      dialog.step = "paidAt";
+      await reply(chatId, "Введите дату оплаты ГГГГ-ММ-ДД или «авто» для текущей даты.", [[CANCEL_BUTTON]]);
+    } else if (rest[1] === "rate" && dialog.currency !== "BYN") {
+      dialog.step = "rate";
+      await reply(chatId, `Введите курс BYN за 1 ${dialog.currency} или «авто» для НБ РБ.`, [[CANCEL_BUTTON]]);
     }
-    const project = await crm.project(session.userId, rest[0]);
-    if (!project.ok || !project.project) {
-      await reply(chatId, project.error ?? "Проект не найден");
-      return;
-    }
-    dialog.projectId = project.project.id;
-    dialog.projectSelected = true;
-    dialog.projectNumber = project.project.number;
-    dialog.projectCurrency = project.project.currency;
-    await nextPaymentStep(chatId, session, dialog, false);
     return;
   }
   if (action === "cur") {
@@ -1137,17 +1244,19 @@ async function dispatchCallback(
     if (dialog.busy) return;
     dialog.busy = true;
     try {
-    const result = await crm.createPayment(session.userId, {
+    const result = await submitFinanceCommand(chatId, { kind: "payment", actorId: session.userId, input: {
       clientMutationId: dialog.clientMutationId,
       projectId: dialog.projectId ?? null,
       direction: dialog.direction,
       amount: dialog.amount,
       currency: dialog.currency,
+      ...(dialog.paidAt ? { paidAt: dialog.paidAt } : {}),
+      ...(dialog.rate ? { rate: dialog.rate } : {}),
       cashAccountId: dialog.cashAccountId,
       ...(dialog.direction === "EXPENSE" ? { expenseArticleId: dialog.articleId } : {}),
       ...paymentReportDocumentInput(dialog),
       ...(dialog.comment ? { comment: dialog.comment } : {}),
-    });
+    } });
     if (result.ok && getDialog(chatId) === dialog) setDialog(chatId, null);
     const label = dialog.direction === "INCOME" ? "Приход" : "Расход";
     await reply(
@@ -1174,7 +1283,7 @@ async function dispatchCallback(
     dialog.documentAttempt = undefined; await paymentDocumentList(chatId, dialog); return;
   }
   if (action === "docretry") {
-    const dialog = getDialog(chatId), current = await getSession(String(chatId), true);
+    const dialog = getDialog(chatId), current = await getSession(String(chatId));
     if (!current || !hasAny(current.roles, FINANCE_ROLES) ||
         dialog?.kind !== "payment" || dialog.step !== "document" || rest[0] !== dialog.documentAttempt?.clientMutationId) {
       await reply(chatId, "Загрузка недоступна — начните оформление расхода заново"); return;

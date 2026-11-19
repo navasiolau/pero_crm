@@ -103,7 +103,7 @@ export const crm = {
     return request<{ ok: boolean; error?: string; quote?: StockReceiptQuote }>("POST", "/stock-receipts/quote", input, actorId);
   },
   createStockReceipt(actorId: string, input: Record<string, unknown>) {
-    return request<{ ok: boolean; error?: string; receiptId?: string; repeated?: boolean }>("POST", "/stock-receipts", input, actorId);
+    return request<{ ok: boolean; error?: string; receiptId?: string; repeated?: boolean; outcome?: "COMMITTED" | "ROLLED_BACK" | "UNKNOWN" }>("POST", "/stock-receipts", input, actorId);
   },
   uploadFinanceDocument(actorId: string, input: { clientMutationId: string; fileName: string; mimeType: string; bytes: Buffer }) {
     const form = new FormData();
@@ -148,6 +148,9 @@ export const crm = {
       error?: string;
       user?: { name: string; roles: string[]; botAllowed: boolean };
     }>("POST", "/link", { code, chatId, username });
+  },
+  paymentProject(actorId: string, ref: string) {
+    return request<{ ok: boolean; projects?: ProjectRef[]; error?: string }>("GET", `/projects?ref=${encodeURIComponent(ref)}`, undefined, actorId);
   },
   projects(actorId: string, q?: string) {
     return request<{ ok: boolean; error?: string; projects?: ProjectRef[] }>(
@@ -199,7 +202,7 @@ export const crm = {
     );
   },
   createPayment(actorId: string, input: Record<string, unknown>) {
-    return request<{ ok: boolean; error?: string }>(
+    return request<{ ok: boolean; error?: string; outcome?: "COMMITTED" | "ROLLED_BACK" | "UNKNOWN" }>(
       "POST",
       "/payments",
       input,

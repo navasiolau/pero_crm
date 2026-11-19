@@ -1,8 +1,11 @@
 "use server";
 
+import { financeSessionSource } from "@/server/telegram/finance-session";
+
 import { randomBytes } from "crypto";
 
 import { auth } from "@/auth";
+import { scopedFinanceAuth } from "./finance-session";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/server/require-role";
 import { requestTelegramLinkInTransaction, unlinkTelegramInTransaction } from "./mutation-core";
@@ -27,10 +30,10 @@ function generateCode(): string {
   return code;
 }
 
-async function getSessionUser() {
-  const session = await auth();
+async function getSessionUser(allowFinance = false) {
+  const session = await (allowFinance ? scopedFinanceAuth() : auth());
   if (!session?.user) throw new Error("Не авторизован");
-  return session.user;
+  return { user: session.user, source: financeSessionSource(session) };
 }
 
 export async function getTelegramLinkStatus(): Promise<{
@@ -39,7 +42,7 @@ export async function getTelegramLinkStatus(): Promise<{
   linked: boolean;
   username: string | null;
 }> {
-  const user = await getSessionUser();
+  const { user } = await getSessionUser(true);
   const setting = await prisma.orgSetting.findUnique({
     where: { key: "telegram.botUsername" },
   });
@@ -60,10 +63,10 @@ export async function requestTelegramLink(): Promise<{
   code?: string;
   error?: string;
 }> {
-  const user = await getSessionUser();
+  const { user, source } = await getSessionUser();
   const code = generateCode();
   const result = await prisma.$transaction(tx => requestTelegramLinkInTransaction(tx,
-    { id: user.id, name: user.name ?? "", roles: user.roles, source: "web" }, code, new Date(Date.now() + CODE_TTL_MS)));
+    { id: user.id, name: user.name ?? "", roles: user.roles, source }, code, new Date(Date.now() + CODE_TTL_MS)));
   if (!result.ok) return { ok: false, error: result.error };
 
   return {
@@ -74,8 +77,8 @@ export async function requestTelegramLink(): Promise<{
 }
 
 export async function unlinkTelegram(): Promise<{ ok: boolean }> {
-  const user = await getSessionUser();
-  await prisma.$transaction(tx => unlinkTelegramInTransaction(tx, { id: user.id, name: user.name ?? "", roles: user.roles, source: "web" }, user.id));
+  const { user, source } = await getSessionUser(true);
+  await prisma.$transaction(tx => unlinkTelegramInTransaction(tx, { id: user.id, name: user.name ?? "", roles: user.roles, source }, user.id));
   return { ok: true };
 }
 
