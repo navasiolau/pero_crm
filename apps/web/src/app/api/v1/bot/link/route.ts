@@ -12,7 +12,7 @@ import { confirmTelegramLinkInTransaction } from "@/server/telegram/mutation-cor
 // (решение владельца); использование бота ограничивается отдельно (session.botAllowed).
 // Scope: write.
 const schema = z.object({
-  code: z.string().min(1),
+  code: z.string().regex(/^[A-Za-z0-9_-]{24}$/),
   chatId: z.string().regex(/^[1-9]\d{0,15}$/),
   username: z.string().max(64).optional(),
 });
@@ -37,5 +37,6 @@ export async function POST(request: Request) {
       botAllowed: botAllowed(result.user.roles),
     },
     linkedAt: result.linkedAt,
+    binding: result.binding,
   });
 }

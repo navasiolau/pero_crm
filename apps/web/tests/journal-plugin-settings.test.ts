@@ -3,6 +3,7 @@ import { test } from "node:test";
 import type { Prisma } from "@prisma/client";
 import type { PluginManifest } from "@pero/plugin-sdk";
 import { togglePluginInTransaction, savePluginSettingsInTransaction, createApiTokenInTransaction, revokeApiTokenInTransaction } from "../src/server/plugins/mutation-core";
+import { notificationPreferenceReversal } from "../src/server/notifications/preference-reversal";
 import { setNotificationPreferenceInTransaction } from "../src/server/notifications/preference-core";
 import { parseJournalPresentation } from "../src/server/changelog/presentation";
 import { refreshJournalPresentation } from "../src/server/changelog/refresh";
@@ -15,15 +16,22 @@ const manifest: PluginManifest = { id: "demo", name: "Демо", version: "1", a
 function fixture() {
   let plugin = { id: "demo", name: "Демо", enabled: false }, token: Record<string, unknown> | null = null, fail = false;
   const settings = new Map<string, unknown>([["greeting", "Привет"], ["accessToken", "old-secret"]]);
-  const preferences = new Map<string, boolean>(), audits: Prisma.ChangeLogCreateInput[] = [], events: unknown[] = [];
+  const preferences = new Map<string, { enabled: boolean; revision: number }>(), audits: Prisma.ChangeLogCreateInput[] = [], events: unknown[] = [];
   const tx = { $queryRaw: async () => [], plugin: { findUnique: async () => plugin, update: async ({ data }: { data: { enabled: boolean } }) => plugin = { ...plugin, ...data } },
     user: { findUnique: async ({ where }: { where: { id: string } }) => ({ id: where.id, name: "Владелец интеграции" }) },
     pluginSetting: { findMany: async () => [...settings].map(([key, value]) => ({ key, value })), upsert: async ({ where, update }: { where: { pluginId_key: { key: string } }; update: { value: unknown } }) => { settings.set(where.pluginId_key.key, update.value); return update; } },
     apiToken: { create: async ({ data }: { data: Record<string, unknown> }) => token = { id: "token-id", createdAt: new Date(), revokedAt: null, ...data }, findUnique: async () => token,
       update: async ({ data }: { data: Record<string, unknown> }) => token = { ...token, ...data } },
-    notificationPreference: { findMany: async () => [...preferences].map(([type, enabled]) => ({ type, enabled })),
-      findUnique: async ({ where }: { where: { userId_type: { type: string } } }) => preferences.has(where.userId_type.type) ? { type: where.userId_type.type, enabled: preferences.get(where.userId_type.type) } : null,
-      upsert: async ({ create }: { create: { type: string; enabled: boolean } }) => { preferences.set(create.type, create.enabled); return create; } },
+    notificationPreference: { findMany: async () => [...preferences].map(([type, data]) => ({ type, ...data })),
+      findUnique: async ({ where }: { where: { userId_type: { type: string } } }) => preferences.get(where.userId_type.type) ?? null,
+      upsert: async ({ create }: { create: { type: string; enabled: boolean } }) => {
+        const result = { enabled: create.enabled, revision: (preferences.get(create.type)?.revision ?? -1) + 1 };
+        preferences.set(create.type, result); return result;
+      },
+      update: async ({ where, data }: { where: { userId_type: { type: string } }; data: { enabled: boolean } }) => {
+        const type = where.userId_type.type, result = { enabled: data.enabled, revision: preferences.get(type)!.revision + 1 };
+        preferences.set(type, result); return result;
+      } },
     changeLog: { create: async ({ data }: { data: Prisma.ChangeLogCreateInput }) => { if (fail) throw new Error("AUDIT_FAILED"); audits.push(data); return data; } },
     domainEvent: { create: async (input: unknown) => { events.push(input); return { id: "event-id" }; } },
   };
@@ -92,4 +100,17 @@ test("mandatory plugin/settings/token/preference audit failures propagate", asyn
     (tx: Prisma.TransactionClient) => createApiTokenInTransaction(tx, user, { name: "API", scopes: [] }, "pero_secret"),
     (tx: Prisma.TransactionClient) => setNotificationPreferenceInTransaction(tx, user, "task.assigned", false, "Задачи"),
   ]) { const f = fixture(); f.fail(); await assert.rejects(() => operation(f.tx), /AUDIT_FAILED/); }
+});
+
+
+test("notification rollback restores the effective value and rejects an old revision", async () => {
+  const f = fixture(), user = { ...actor, roles: [...actor.roles] };
+  await setNotificationPreferenceInTransaction(f.tx, user, "task.assigned", false, "Задачи");
+  const command = f.audits[0]!.reversal as { data: unknown };
+  const handler = notificationPreferenceReversal.read(command.data); assert.ok(handler);
+  const ctx = { tx: f.tx, actor: user, entryId: "root", entityId: "admin:task.assigned" };
+  assert.equal(await handler.preview(ctx), null);
+  const outcome = await handler.apply(ctx); assert.equal(outcome.newValue, true);
+  await assert.rejects(() => handler.apply(ctx), /изменилась/);
+  assert.equal(notificationPreferenceReversal.read({ ...command.data as object, type: "plan.reminder" }), null);
 });

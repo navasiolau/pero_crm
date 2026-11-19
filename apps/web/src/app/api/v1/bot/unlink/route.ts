@@ -7,7 +7,7 @@ import { authenticate, isErrorResponse } from "@/server/api/auth";
 import { unlinkTelegramChatInTransaction } from "@/server/telegram/mutation-core";
 
 // DELETE /api/v1/bot/link — отвязка чата (команда /стоп в боте). Scope: write.
-const schema = z.object({ chatId: z.string().min(1).max(64) });
+const schema = z.object({ chatId: z.string().regex(/^[1-9]\d{0,15}$/) });
 
 export async function DELETE(request: Request) {
   const auth = await authenticate(request, "write");
@@ -18,6 +18,10 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ ok: false, error: "Укажите chatId" }, { status: 400 });
   }
 
-  const result = await prisma.$transaction(tx => unlinkTelegramChatInTransaction(tx, parsed.data.chatId));
+  const binding = request.headers.get("x-telegram-binding");
+  if (!binding && process.env.PERO_REQUIRE_TELEGRAM_BINDING_GENERATION === "1") {
+    return NextResponse.json({ ok: false, error: "Не указано поколение привязки" }, { status: 403 });
+  }
+  const result = await prisma.$transaction(tx => unlinkTelegramChatInTransaction(tx, parsed.data.chatId, binding ?? undefined));
   return NextResponse.json({ ok: true, deleted: result.deleted });
 }

@@ -75,6 +75,7 @@ model User {
   telegram        String? // @username
   passwordHash    String
   sessionVersion  Int            @default(0)
+  accountRevision Int            @default(0)
   calendarEnabled Boolean?
   roles           Role[] // комбинированные роли (§4): права = объединение
   payScheme       PayScheme      @default(NONE)
@@ -1456,6 +1457,7 @@ model NotificationPreference {
   userId  String
   type    String
   enabled Boolean @default(true)
+  revision Int @default(0)
 
   @@id([userId, type])
 }
@@ -1465,8 +1467,22 @@ model UserPreference {
   userId String
   key    String
   value  String
+  revision Int @default(0)
 
   @@id([userId, key])
+}
+
+// Прежний нормализованный выбор списка. В журнале хранится только ссылка.
+model SavedListChoiceRevision {
+  id                        String @id
+  userId                    String
+  section                   String
+  beforeQuery               String
+  beforeEngineerInitialized Boolean
+  afterRevision             String
+  createdAt                 DateTime @default(now())
+
+  @@index([userId, section])
 }
 
 // ─── Плагинное ядро (§14) ────────────────────────────────────────────────────
@@ -1619,8 +1635,20 @@ model TelegramLink {
   linkCode          String?   @unique // одноразовый код до подтверждения ботом
   linkCodeExpiresAt DateTime?
   linkedAt          DateTime?
+  generation        Int @default(0)
+  revokedAt         DateTime?
+  challenges        TelegramLinkChallenge[]
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
+}
+
+model TelegramLinkChallenge {
+  digest    String @id
+  linkId    String
+  link      TelegramLink @relation(fields: [linkId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  createdAt DateTime @default(now())
+
+  @@index([linkId])
 }
 
 // Личный план: owner всегда текущий session actor.
@@ -1699,6 +1727,7 @@ model TelegramReminderOutbox {
  chatIdSnapshot String
  linkIdSnapshot String
  linkedAtSnapshot DateTime @db.Timestamptz(3)
+ linkGenerationSnapshot Int @default(0)
  state TelegramReminderState @default(READY)
  attempts Int @default(0)
  claimId String? @unique

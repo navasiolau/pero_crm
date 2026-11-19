@@ -5,6 +5,7 @@ import { config } from "./config";
 
 export interface SessionInfo {
   found: boolean;
+  binding?: string;
   user?: { id: string; name: string; roles: string[]; botAllowed: boolean };
 }
 
@@ -58,6 +59,8 @@ export interface StockChoice extends DirectoryItem { available?: number; unitPri
 
 export class CrmError extends Error {}
 
+const bindingByActor = new Map<string, string>();
+
 async function request<T>(
   method: string,
   path: string,
@@ -72,6 +75,7 @@ async function request<T>(
         ...(body instanceof FormData ? {} : { "content-type": "application/json" }),
         authorization: `Bearer ${config.crmApiToken}`,
         ...(actorId ? { "x-acting-user": actorId } : {}),
+        ...(actorId && bindingByActor.has(actorId) ? { "x-telegram-binding": bindingByActor.get(actorId)! } : {}),
       },
       body: body === undefined ? undefined : body instanceof FormData ? body : JSON.stringify(body),
       signal: AbortSignal.timeout(30000),
@@ -139,8 +143,10 @@ export const crm = {
   register(username: string) {
     return request<{ ok: boolean }>("POST", "/register", { username });
   },
-  session(chatId: string) {
-    return request<SessionInfo>("GET", `/session?chatId=${encodeURIComponent(chatId)}`);
+  async session(chatId: string) {
+    const session = await request<SessionInfo>("GET", `/session?chatId=${encodeURIComponent(chatId)}`);
+    if (session.user && session.binding) bindingByActor.set(session.user.id, session.binding);
+    return session;
   },
   link(code: string, chatId: string, username?: string) {
     return request<{

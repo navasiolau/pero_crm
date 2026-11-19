@@ -12,6 +12,11 @@ export async function writeChangeLogInTransaction(
   entry: JournalEntryInput,
   hints: JournalPresentationHints = {},
 ) {
+  if (["calendarEntry", "calendarReminderFact", "telegramReminderOutbox", "personalPlan"].includes(entry.entity) ||
+      entry.field === "calendarEnabled" ||
+      (entry.entity === "notificationPreference" && entry.entityId.endsWith(":plan.reminder"))) {
+    throw new Error("События личного плана исключены из журнала");
+  }
   const createdAt = entry.createdAt ?? new Date();
   const source = entry.source ?? "web";
   const normalized = { ...entry, createdAt, source,

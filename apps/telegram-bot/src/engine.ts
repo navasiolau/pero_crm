@@ -30,6 +30,7 @@ interface Session {
   name: string;
   roles: string[];
   botAllowed: boolean;
+  binding?: string;
 }
 
 type Dialog =
@@ -90,7 +91,8 @@ type Dialog =
 const stageMenus=new Map<string,{projectId:string;projectNumber:string;expectedStage:string;token:string;mutations:Record<string,string>}>();
 const financeProjectMenus = new Map<number, { token: string; projects: ProjectRef[] }>();
 const dialogs = new Map<string, Dialog>();
-const observedActor = new Map<string, string>();
+const observedActor = new Map<string, { userId: string; binding?: string }>();
+const callbackMessages = new Map<string, Map<number, Set<string>>>();
 const noticeAt = new Map<string, number>();
 const FINANCE_CALLBACK_ACTIONS = new Set(["payin", "payout", "payproj", "paygeneral", "paylist", "payoptions", "cur", "cash", "art", "nocomment", "payok", "docretry", "doccontinue", "docexclude", "sp"]);
 
@@ -108,19 +110,22 @@ async function getSession(chatId: string): Promise<Session | null> {
     dropSession(chatId);
     return null;
   }
-  if (observedActor.get(chatId) !== response.user.id) dropSession(chatId);
+  const previous = observedActor.get(chatId);
+  if (previous?.userId !== response.user.id || previous?.binding !== response.binding) dropSession(chatId);
   const session: Session = {
     userId: response.user.id,
     name: response.user.name,
     roles: response.user.roles,
     botAllowed: response.user.botAllowed,
+    binding: response.binding,
   };
-  observedActor.set(chatId, session.userId);
+  observedActor.set(chatId, { userId: session.userId, binding: session.binding });
   return session;
 }
 
 function dropSession(chatId: string): void {
   observedActor.delete(chatId);
+  callbackMessages.delete(chatId);
   dialogs.delete(chatId);
   financeProjectMenus.delete(Number(chatId));
 }
@@ -133,7 +138,18 @@ async function reply(
   buttons?: InlineButton[][],
 ): Promise<void> {
   try {
-    await tg.sendMessage(chatId, text, buttons);
+    const key = String(chatId);
+    const observed = observedActor.get(key);
+    const sent = await tg.sendMessage(chatId, text, buttons);
+    if (observed?.binding && buttons && observedActor.get(key) === observed) {
+      const callbacks = buttons.flat().flatMap(button => button.callback_data ? [button.callback_data] : []);
+      if (callbacks.length) {
+        const messages = callbackMessages.get(key) ?? new Map<number, Set<string>>();
+        messages.set(sent.message_id, new Set(callbacks));
+        if (messages.size > 100) messages.delete(messages.keys().next().value!);
+        callbackMessages.set(key, messages);
+      }
+    }
   } catch (e) {
     // Клавиатура не прошла (например, битая кнопка) — повторяем без неё,
     // чтобы пользователь не оставался без ответа
@@ -880,6 +896,10 @@ async function handleCallback(query: TgCallbackQuery): Promise<void> {
   const session = await getSession(String(chatId));
   if (!session) return;
   if (!session.botAllowed) return;
+  if (session.binding && !callbackMessages.get(String(chatId))?.get(query.message.message_id)?.has(data)) {
+    await reply(chatId, "Кнопка устарела. Откройте меню командой /help.");
+    return;
+  }
   if(warehouse&&!hasAny(session.roles,WAREHOUSE_ROLES)){await reply(chatId,"Недостаточно прав для склада");return;}
   if (financial && !hasAny(session.roles, FINANCE_ROLES)) { await reply(chatId, "Недостаточно прав для финансовой операции"); return; }
 

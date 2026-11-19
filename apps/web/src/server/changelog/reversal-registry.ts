@@ -12,6 +12,11 @@ import { workEditReversal } from "@/server/works/edit-reversal";
 import { payoutVisibilityReversal } from "@/server/payroll/payout-reversal";
 import { payrollAccrualReversal } from "@/server/payroll/accrual-reversal";
 import { cardVisibilityReversal } from "@/server/projects/card-visibility-reversal";
+import { userSettingsReversal } from "@/server/users/settings-reversal";
+import { notificationPreferenceReversal } from "@/server/notifications/preference-reversal";
+import { viewPreferenceReversal } from "@/server/view-preference-reversal";
+import { telegramLinkReversal } from "@/server/telegram/link-reversal";
+import { savedListChoiceReversal } from "@/server/list-preference-reversal";
 
 export const journalReversals = [
   productTitleReversal,
@@ -28,4 +33,9 @@ export const journalReversals = [
   payoutVisibilityReversal,
   payrollAccrualReversal,
   cardVisibilityReversal,
+  userSettingsReversal,
+  notificationPreferenceReversal,
+  viewPreferenceReversal,
+  telegramLinkReversal,
+  savedListChoiceReversal,
 ];

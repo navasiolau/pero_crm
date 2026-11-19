@@ -70,5 +70,6 @@ export async function reverseJournalActionInTransaction(tx: Prisma.TransactionCl
     entity: root.entity, entityId: root.entityId, field: root.field, action: "journal.reverse",
     oldValue: effect.oldValue, newValue: effect.newValue,
   }, { entity: presentation.entity, contexts: presentation.contexts, ...effect.hints, kind: "event" });
+  await effect.afterWrite?.(reversalId);
   return { reversalId, contexts: presentation.contexts, cachePaths: effect.cachePaths, eventIds: effect.eventIds };
 }

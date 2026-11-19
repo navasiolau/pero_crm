@@ -7,7 +7,7 @@ export const TELEGRAM_FINANCE_LAYOUT_HEADER = "x-pero-telegram-finance-layout";
 
 const sameBytes = (a: Uint8Array, b: Uint8Array) => a.length === b.length && timingSafeEqual(a, b);
 
-export function verifiedTelegramIdentity(raw: string, token: string, now = Math.floor(Date.now() / 1000)): string | null {
+export function verifiedTelegramIdentity(raw: string, token: string, now = Math.floor(Date.now() / 1000)): { chatId: string; authenticatedAt: number } | null {
   if (!token || !raw || raw.length > 8192) return null;
   const fields = new URLSearchParams(raw);
   const names = [...fields.keys()];
@@ -25,7 +25,7 @@ export function verifiedTelegramIdentity(raw: string, token: string, now = Math.
   if ((chatType && chatType !== "private" && chatType !== "sender") || fields.has("chat") || fields.has("receiver")) return null;
   try {
     const user: { id?: unknown; is_bot?: boolean } | null = JSON.parse(fields.get("user") ?? "null");
-    return typeof user?.id === "number" && Number.isSafeInteger(user.id) && user.id > 0 && !user.is_bot ? String(user.id) : null;
+    return typeof user?.id === "number" && Number.isSafeInteger(user.id) && user.id > 0 && !user.is_bot ? { chatId: String(user.id), authenticatedAt: authDate * 1000 } : null;
   } catch {
     return null;
   }
@@ -35,6 +35,7 @@ export type FinanceGrant = {
   chatId: string;
   linkId: string;
   linkedAt: string;
+  generation: number;
   userId: string;
   version: number;
   expires: number;
@@ -55,7 +56,7 @@ export function readFinanceGrant(raw: string, secret: string, now = Math.floor(D
   try {
     const value: Partial<FinanceGrant> | null = JSON.parse(Buffer.from(data, "base64url").toString("utf8"));
     if (typeof value?.chatId !== "string" || typeof value.linkId !== "string" || typeof value.linkedAt !== "string" ||
-        typeof value.userId !== "string" || !Number.isSafeInteger(value.version) || typeof value.expires !== "number" ||
+        typeof value.userId !== "string" || !Number.isSafeInteger(value.generation) || !Number.isSafeInteger(value.version) || typeof value.expires !== "number" ||
         value.expires <= now || value.expires > now + TELEGRAM_FINANCE_TTL_SECONDS) return null;
     return value as FinanceGrant;
   } catch {

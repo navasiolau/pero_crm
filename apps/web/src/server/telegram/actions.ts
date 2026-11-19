@@ -17,17 +17,10 @@ import { requestTelegramLinkInTransaction, unlinkTelegramInTransaction } from ".
 // Отвязка через бота НЕ предусмотрена (решение владельца): пользователь —
 // из профиля, администратор — отсюда (управление пользователями).
 
-const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // без похожих 0/O/1/I
-const CODE_LENGTH = 8;
 const CODE_TTL_MS = 15 * 60 * 1000;
 
 function generateCode(): string {
-  const bytes = randomBytes(CODE_LENGTH);
-  let code = "";
-  for (let i = 0; i < CODE_LENGTH; i++) {
-    code += CODE_ALPHABET[bytes[i] % CODE_ALPHABET.length];
-  }
-  return code;
+  return randomBytes(18).toString("base64url");
 }
 
 async function getSessionUser(allowFinance = false) {
@@ -52,7 +45,7 @@ export async function getTelegramLinkStatus(): Promise<{
   return {
     deployed: !!setting?.value,
     botUsername: setting?.value ?? null,
-    linked: !!link?.chatId,
+    linked: !!link?.chatId && !link.revokedAt,
     username: link?.username ?? null,
   };
 }
@@ -89,7 +82,7 @@ export async function getTelegramLinkStatusFor(
 ): Promise<{ linked: boolean; username: string | null }> {
   await requireAdmin();
   const link = await prisma.telegramLink.findUnique({ where: { userId } });
-  return { linked: !!link?.chatId, username: link?.username ?? null };
+  return { linked: !!link?.chatId && !link.revokedAt, username: link?.username ?? null };
 }
 
 export async function unlinkTelegramFor(userId: string): Promise<{ ok: boolean }> {

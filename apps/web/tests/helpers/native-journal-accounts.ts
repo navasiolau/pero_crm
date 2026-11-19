@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import type { PluginManifest } from "@pero/plugin-sdk";
 import { createUserInTransaction, updateUserInTransaction, revokeUserSessionsInTransaction } from "../../src/server/users/mutation-core";
@@ -24,8 +25,9 @@ export async function exerciseJournalAccountNative(tx: Prisma.TransactionClient,
   if (await tx.user.count({ where: { OR: [{ id: actorId }, { email: { startsWith: prefix } }] } }) || await tx.plugin.findUnique({ where: { id: pluginId } }) ||
       await tx.counterparty.count({ where: { company: { startsWith: prefix } } }) || await tx.changeLog.count({ where: { id: { in: [`auth-login:${input.runId}`, `auth-logout:${input.runId}`] } } }))
     throw new Error("JOURNAL228_NATIVE_OWNERSHIP_CONFLICT");
-  const fixtureHash = `fixture-hash-${input.runId}`, token = `pero_fixture_${input.runId.replaceAll("-", "")}`, linkCode = "TEST228A";
-  if (await tx.telegramLink.findUnique({ where: { linkCode } })) throw new Error("JOURNAL228_NATIVE_CODE_CONFLICT");
+  const fixtureHash = `fixture-hash-${input.runId}`, token = `pero_fixture_${input.runId.replaceAll("-", "")}`, linkCode = input.runId.replaceAll("-", "").slice(0, 24);
+  const digest = createHash("sha256").update("telegram-link:").update(linkCode).digest("hex");
+  if (await tx.telegramLinkChallenge.findUnique({ where: { digest } })) throw new Error("JOURNAL228_NATIVE_CODE_CONFLICT");
   await tx.user.create({ data: { id: actorId, email: `${prefix}-admin@example.invalid`, name: `${prefix} администратор`, passwordHash: fixtureHash, roles: ["ADMIN"], payScheme: "NONE" } });
   const actor = { id: actorId, name: `${prefix} администратор`, roles: ["ADMIN"] as const, source: "web" as const };
   const administrator = { ...actor, roles: [...actor.roles] };
@@ -55,9 +57,10 @@ export async function exerciseJournalAccountNative(tx: Prisma.TransactionClient,
   const registeredBot = await tx.orgSetting.findUnique({ where: { key: "telegram.botUsername" } });
   if (!registeredBot?.value) throw new Error("JOURNAL228_NATIVE_BOT_REGISTRATION_REQUIRED");
   assert.ok((await requestTelegramLinkInTransaction(tx, employee, linkCode, new Date(Date.now() + 60000))).ok);
-  assert.ok((await confirmTelegramLinkInTransaction(tx, { code: linkCode, chatId: prefix, username: "qa228" })).ok);
+  assert.ok((await confirmTelegramLinkInTransaction(tx, { code: linkCode, chatId: String(1 + Number.parseInt(input.runId.replaceAll("-", "").slice(0, 12), 16)), username: "qa228" })).ok);
   await unlinkTelegramInTransaction(tx, employee, employeeId);
-  assert.equal(await tx.telegramLink.count({ where: { userId: employeeId } }), 0);
+  const link = await tx.telegramLink.findUniqueOrThrow({ where: { userId: employeeId } });
+  assert.ok(link.revokedAt); assert.equal(link.chatId, null);
   await tx.plugin.create({ data: { id: pluginId, name: prefix, version: "1", apiVersion: 1, permissions: [], enabled: false } });
   const manifest: PluginManifest = { id: pluginId, name: prefix, version: "1", apiVersion: 1, permissions: [],
     settingsSchema: [{ key: "greeting", label: "Приветствие", type: "string", default: "Привет" }, { key: "accessToken", label: "Токен", type: "string" }] };

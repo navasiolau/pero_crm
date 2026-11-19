@@ -3,11 +3,12 @@ import { test } from "node:test";
 import { Prisma, type User } from "@prisma/client";
 import type { DomainActor } from "../src/server/actor";
 import { createUserInTransaction, updateUserInTransaction, revokeUserSessionsInTransaction } from "../src/server/users/mutation-core";
+import { userSettingsReversal } from "../src/server/users/settings-reversal";
 import { parseJournalPresentation } from "../src/server/changelog/presentation";
 
 const admin: DomainActor = { id: "admin", name: "Администратор", roles: ["ADMIN"], source: "web" };
 const initial = { id: "employee", email: "worker@example.invalid", name: "Иван", position: "Работник", phone: "123", telegram: "ivan",
-  roles: ["WORKER"], payScheme: "PIECE", payPercent: new Prisma.Decimal(5), active: true, calendarEnabled: null, passwordHash: "hash-secret", sessionVersion: 0 } as unknown as User;
+  roles: ["WORKER"], payScheme: "PIECE", payPercent: new Prisma.Decimal(5), active: true, calendarEnabled: null, passwordHash: "hash-secret", sessionVersion: 0, accountRevision: 0 } as unknown as User;
 const settings = { email: initial.email, name: "Иван Новый", position: "Сборщик", phone: "456", telegram: "ivan-new", roles: ["ENGINEER"] as User["roles"],
   payScheme: "PERCENT_PROJECT" as const, payPercent: 7, active: false, calendarEnabled: true };
 
@@ -19,7 +20,8 @@ function fixture() {
     findUnique: async () => row,
     findFirst: async () => null,
     create: async ({ data }: { data: Record<string, unknown> }) => { writes++; row = { ...row, ...data } as typeof row; return row; },
-    update: async ({ data }: { data: Record<string, unknown> }) => { writes++; row = { ...row, ...data, sessionVersion: typeof data.sessionVersion === "object" ? row.sessionVersion + 1 : row.sessionVersion } as typeof row; return row; },
+    update: async ({ data }: { data: Record<string, unknown> }) => { writes++; const changed = Object.entries(data).some(([key, value]) => key !== "calendarEnabled" && JSON.stringify(row[key as keyof typeof row]) !== JSON.stringify(value));
+      row = { ...row, ...data, accountRevision: row.accountRevision + Number(changed), sessionVersion: typeof data.sessionVersion === "object" ? row.sessionVersion + 1 : row.sessionVersion } as typeof row; return row; },
   }, apiToken: { findMany: async () => [] }, changeLog: { create: async ({ data }: { data: Prisma.ChangeLogCreateInput }) => { if (rejectAudit) throw new Error("AUDIT_FAILED"); audits.push(data); return { id: `audit-${audits.length}`, ...data }; } } };
   return { tx: tx as unknown as Prisma.TransactionClient, audits, get row() { return row; }, get writes() { return writes; }, fail: () => { rejectAudit = true; } };
 }
@@ -29,9 +31,11 @@ test("all changed employee fields appear with safe before/after and unchanged ra
   assert.equal(result.ok, true); assert.equal(f.audits.length, 1);
   const audit = f.audits[0]!, view = parseJournalPresentation(audit.presentation)!;
   assert.equal(view.entity.label, "Пользователь Иван Новый");
-  for (const field of ["name", "position", "phone", "telegram", "roles", "payScheme", "payPercent", "active", "calendarEnabled", "passwordChanged"])
+  for (const field of ["name", "position", "phone", "telegram", "roles", "payScheme", "payPercent", "active", "passwordChanged"])
     assert.ok(view.changes.some(change => change.path === field), field);
   assert.equal(audit.actorId, "admin");
+  assert.ok(!JSON.stringify(audit).includes("calendarEnabled"));
+  assert.equal((audit.reversal as { kind: string }).kind, "account.settings");
   assert.ok(!JSON.stringify(audit).includes("hash-secret"));
   assert.equal(f.row.passwordHash, "new-hash-secret");
 });
@@ -78,4 +82,28 @@ test("actual trigger consequences are attributed to System without altering role
   assert.equal(automatic.initiator?.id, admin.id); assert.equal(automatic.actor.name, "Система");
   assert.ok(automatic.changes.some(change => change.path === "revokedAt" && change.before === null));
   assert.ok(!JSON.stringify(audits).includes("private-token-hash"));
+});
+
+
+test("personal calendar setting writes only the user row and emits zero journal entries", async () => {
+  const f = fixture();
+  const result = await updateUserInTransaction(f.tx, admin, initial.id, { email: initial.email, name: initial.name,
+    position: initial.position!, phone: initial.phone!, telegram: initial.telegram!, roles: initial.roles, payScheme: initial.payScheme,
+    payPercent: 5, active: true, calendarEnabled: false });
+  assert.ok(result.ok); assert.equal(f.row.calendarEnabled, false);
+  assert.equal(f.writes, 1); assert.equal(f.audits.length, 0);
+});
+
+test("account reversal restores allowed settings once and leaves the issued password unchanged", async () => {
+  const f = fixture();
+  assert.ok((await updateUserInTransaction(f.tx, admin, initial.id, { ...settings, passwordHash: "new-hash-secret" })).ok);
+  const root = f.audits[0]!.reversal as { data: unknown };
+  const handler = userSettingsReversal.read(root.data);
+  assert.ok(handler);
+  const ctx = { tx: f.tx, actor: admin, entryId: "audit-1", entityId: initial.id };
+  assert.equal(await handler.preview(ctx), null);
+  await handler.apply(ctx);
+  assert.equal(f.row.name, initial.name); assert.deepEqual(f.row.roles, initial.roles); assert.equal(f.row.active, true);
+  assert.equal(f.row.passwordHash, "new-hash-secret"); assert.equal(f.row.calendarEnabled, true);
+  await assert.rejects(() => handler.apply(ctx), /после записи/);
 });
