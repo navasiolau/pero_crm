@@ -19,18 +19,18 @@ inject("next/cache",{revalidatePath:()=>{}});
 inject("../src/lib/s3",{s3Enabled:()=>true,s3Delete:async()=>{physical++;throw Error("QA138_STORAGE_UNAVAILABLE");},fileKey:()=>"key",thumbKey:()=>"thumb"});
 const {deleteProductSketchAction}=require("../src/server/products/cover-actions") as typeof import("../src/server/products/cover-actions");
 const {deleteProjectCoverAction}=require("../src/server/projects/cover-actions") as typeof import("../src/server/projects/cover-actions");
-test("both new manual endpoints keep confirmed metadata success and report pending durable cleanup",async()=>{
+test("both new manual endpoints keep confirmed metadata success and skip legacy durable cleanup",async()=>{
  legacy=false;physical=cleanup=0;
  for(const result of [await deleteProductSketchAction({productId:"product",expectedSketchFileId:"file",clientMutationId:mutation}),await deleteProjectCoverAction({projectId:"project",expectedCoverFileId:"file",clientMutationId:mutation})]){
-  assert.equal(result.ok,true);if(!result.ok)throw Error("COMMITTED_RESULT_REQUIRED");assert.equal(result.clientMutationId,mutation);assert.equal(result.cleanupPending,true);
+  assert.equal(result.ok,true);if(!result.ok)throw Error("COMMITTED_RESULT_REQUIRED");assert.equal(result.clientMutationId,mutation);assert.equal(result.cleanupPending,undefined);
  }
- assert.equal(cleanup,2);assert.equal(physical,0);
+ assert.equal(cleanup,0);assert.equal(physical,0);
 });
-test("compatible legacy success keeps its UUID and needs reconciliation without physical delete",async()=>{
+test("compatible legacy success keeps its UUID and does not invoke physical delete",async()=>{
  legacy=true;physical=cleanup=0;
  const before=structuredClone(intent);
  for(const result of [await deleteProductSketchAction({productId:"product",expectedSketchFileId:"file",clientMutationId:mutation}),await deleteProjectCoverAction({projectId:"project",expectedCoverFileId:"file",clientMutationId:mutation})]){
-  assert.equal(result.ok,true);if(!result.ok)throw Error("COMMITTED_RESULT_REQUIRED");assert.equal(result.clientMutationId,mutation);assert.equal(result.cleanupPending,true);assert.equal(result.cleanupReconciliation,true);
+  assert.equal(result.ok,true);if(!result.ok)throw Error("COMMITTED_RESULT_REQUIRED");assert.equal(result.clientMutationId,mutation);assert.equal(result.cleanupPending,undefined);assert.equal(result.cleanupReconciliation,undefined);
  }
  assert.equal(cleanup,0);assert.equal(physical,0);assert.deepEqual(intent,before);
 });

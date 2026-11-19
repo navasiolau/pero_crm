@@ -11,13 +11,9 @@ import type { ProjectStageResult } from "../../src/server/projects/stage-contrac
 import type { FileDeleteResult } from "../../src/server/files/delete-contract";
 import { Prisma } from "@prisma/client";
 import { deleteOrdinaryFileCore } from "../../src/server/files/delete-core";
-import { executeFileDeleteCleanup } from "../../src/server/files/delete-storage";
 import { persistOrdinaryUpload } from "../../src/server/files/upload-core";
 import { deleteProductSketchCore } from "../../src/server/products/cover-core";
 import { deleteProjectCoverCore } from "../../src/server/projects/cover-core";
-import { DEFAULT_EVENT_QUEUE_SETTINGS } from "../../src/server/plugins/event-queue-contract";
-import { createEventQueueProcessor } from "../../src/server/plugins/event-queue-core";
-import { createPostgresEventQueueStore } from "../../src/server/plugins/event-queue-store";
 import { nativeSnapshot } from "../helpers/native-acceptance-snapshot";
 import { rejectedSql } from "./postgres.fixture";
 import { assertPrivateFileHeaders, createHttpS3Fixture, type HttpActor } from "./http-s3.fixture";
@@ -71,22 +67,18 @@ test("files.crud: file113, документы, attachment ACL и inline-дейс
     assert.deepEqual(await nativeSnapshot(f.db), before); assert.deepEqual(await f.versions(project.id), versions);
     const deleted = await f.action<FileDeleteResult>("deleteFile", productPage, engineer, [file.id, nonce]); assert.equal(deleted.ok, true);
     if (deleted.ok) { assert.equal(deleted.fileId, file.id); assert.equal(deleted.cleanupPending, false); }
-    assert.equal(await f.db.file.findUnique({ where: { id: file.id } }), null);
-    // Ordinary DeleteObject скрывает текущий ключ и сохраняет историю; purge относится к obsolete sketch.
-    const after = await f.versions(project.id);
-    for (const key of keys) {
-      const previous = versions.filter(row => row.key === key), current = after.filter(row => row.key === key);
-      assert.equal(current.length, previous.length + 1);
-      assert.deepEqual(current.filter(row => previous.some(old => old.versionId === row.versionId)), previous.map(row => ({ ...row, latest: false })));
-      assert.equal(current.filter(row => row.latest && row.marker).length, 1); assert.ok(!current.some(row => row.latest && !row.marker));
-      await assert.rejects(() => f.get(key), error => error instanceof Error && error.name === "NoSuchKey");
+    const retained = await f.db.file.findUniqueOrThrow({ where: { id: file.id } });
+    assert.equal(retained.deletedById, engineer.id); assert.ok(retained.deletedAt);
+    assert.deepEqual(await f.versions(project.id), versions);
+    for (const key of keys) assert.ok((await f.get(key)).length);
+    assert.deepEqual(await f.get(neighbor), cad);
+    for (const actor of [engineer, manager]) {
+      assert.equal((await f.request('/api/files/' + file.id, actor)).status, 404);
+      assert.equal((await f.request('/api/files/' + file.id + '?thumb=1', actor)).status, 404);
     }
-    assert.deepEqual(after.filter(row => row.key === neighbor), versions.filter(row => row.key === neighbor)); assert.deepEqual(await f.get(neighbor), cad);
     const audit = await f.db.changeLog.findUniqueOrThrow({ where: { id: `file-delete:${nonce}` } });
     assert.equal(audit.actorId, engineer.id); assert.equal(audit.entityId, file.id); assert.equal(audit.action, "delete");
-    const event = await f.db.domainEvent.findUniqueOrThrow({ where: { id: `file-delete:${nonce}` } });
-    assert.equal(event.type, "file.storage-delete"); assert.ok(event.processedAt);
-    assert.deepEqual((event.payload as { keys: string[] }).keys, keys);
+    assert.equal(await f.db.domainEvent.count({ where: { id: 'file-delete:' + nonce } }), 0);
     const replayBefore = await nativeSnapshot(f.db), replay = await f.action<FileDeleteResult>("deleteFile", productPage, engineer, [file.id, nonce]);
     assert.equal(replay.ok, true); if (replay.ok) assert.equal(replay.repeated, true); assert.deepEqual(await nativeSnapshot(f.db), replayBefore);
     assert.equal((await f.action<FileDeleteResult>("deleteFile", productPage, manager, [file.id, nonce])).ok, false);
@@ -100,20 +92,19 @@ test("files.crud: file113, документы, attachment ACL и inline-дейс
     await f.db.product.update({ where: { id: product.id }, data: { status: "DESIGN" } });
   });
 
-  await t.test("file/native-durable-UUID-pending-rebind-new-processor-and-cover-CAS-rollback", async () => {
+  await t.test("file/native-retained-UUID-rebind-and-cover-CAS-rollback", async () => {
     const identity = { mode: "s3" as const, endpoint: f.target.s3.endpoint, bucket: f.target.s3.bucket };
-    const settings = { ...DEFAULT_EVENT_QUEUE_SETTINGS, leaseMs: 3000, heartbeatMs: 500, deliveryTimeoutMs: 2000, backoffBaseMs: 100, backoffMaxMs: 400 };
     const own = await f.file("durable-delete", { projectId: project.id, productId: product.id }, cad, cadMime, { uploadedById: engineer.id, hasThumb: true });
     const key = `${project.id}/${own.storedName}`, thumb = `${project.id}/thumbs/${own.storedName}.jpg`, neighbor = `${key}.neighbor`;
     await f.put(thumb, png, "image/jpeg"); await f.put(neighbor, cad, cadMime);
     const collision = await f.db.changeLog.create({ data: { id: f.id("durable-collision"), actorType: "user", actorId: engineer.id, entity: "test", entityId: own.id, action: "fixture" } });
-    for (const table of ["changeLog", "domainEvent"] as const) {
+    for (const table of ["changeLog"] as const) {
       const before = await nativeSnapshot(f.db);
       await assert.rejects(f.db.$transaction(tx => deleteOrdinaryFileCore(new Proxy(tx, { get(target, key) {
         if (key === table) return new Proxy(Reflect.get(target, key), { get(model, method) {
           if (method === "create") return async (...args: unknown[]) => {
             const row = await Reflect.apply(Reflect.get(model, method), model, args);
-            assert.equal(await tx.file.count({ where: { id: own.id } }), 0, "ACTUAL_METADATA_DELETE_BEFORE_FAULT");
+            assert.ok((await tx.file.findUniqueOrThrow({ where: { id: own.id } })).deletedAt);
             await tx.changeLog.create({ data: { id: collision.id, actorType: "user", actorId: engineer.id, entity: "test", entityId: own.id, action: "collision" } }); return row;
           };
           const value = Reflect.get(model, method); return typeof value === "function" ? value.bind(model) : value;
@@ -127,27 +118,15 @@ test("files.crud: file113, документы, attachment ACL и inline-дейс
       pids.add((await tx.$queryRaw<{ pid: number }[]>`SELECT pg_backend_pid() AS pid`)[0].pid); return deleteOrdinaryFileCore(tx, engineer, input, identity);
     })));
     assert.equal(pids.size, 2); assert.ok(replies.every(row => row.ok)); assert.equal(replies.filter(row => row.ok && row.repeated).length, 1);
-    assert.equal(await f.db.changeLog.count({ where: { id: eventId } }), 1); assert.equal(await f.db.domainEvent.count({ where: { id: eventId } }), 1);
-    let unavailable = true, criticalCreator = false;
+    assert.equal(await f.db.changeLog.count({ where: { id: eventId } }), 1); assert.equal(await f.db.domainEvent.count({ where: { id: eventId } }), 0);
     const data = { ...own, id: f.id("durable-rebound") }, retired = (error: unknown) => (error as { code?: string }).code === "FILE_STORAGE_KEY_RETIRED";
     const cannotUpload = (db: typeof f.db) => assert.rejects(db.$transaction(tx => persistOrdinaryUpload(tx, engineer, {
       clientMutationId: randomUUID(), fingerprint: "b".repeat(64), projectNumber: project.number, data,
     })), retired);
-    const processor = (db: typeof f.db) => createEventQueueProcessor({ settings, store: createPostgresEventQueueStore(db, settings, [eventId]),
-      deliver: (event, ownership) => executeFileDeleteCleanup(event, db, ownership, async (_storage, exactKey) => {
-        assert.ok([key, thumb].includes(exactKey)); if (unavailable) throw Error("CI169_STORAGE_UNAVAILABLE");
-        if (exactKey === key && !criticalCreator) { await cannotUpload(db === f.db ? f.peer : f.db); criticalCreator = true; }
-        await f.deleteMarker(exactKey);
-      }, () => identity) });
-    assert.equal(await processor(f.db).dispatchOne(eventId), false); assert.equal((await f.db.domainEvent.findUniqueOrThrow({ where: { id: eventId } })).processedAt, null);
-    assert.deepEqual(await f.get(key), cad); await cannotUpload(f.peer);
-    unavailable = false; await f.db.file.create({ data });
-    assert.equal(await processor(f.db).dispatchOne(eventId, true), false); assert.deepEqual(await f.get(key), cad);
-    await f.db.file.delete({ where: { id: data.id } });
-    assert.equal(await processor(f.peer).dispatchOne(eventId, true), true); assert.equal(criticalCreator, true); await cannotUpload(f.db);
-    assert.ok((await f.db.domainEvent.findUniqueOrThrow({ where: { id: eventId } })).processedAt);
-    assert.equal(await f.db.changeLog.count({ where: { id: eventId } }), 1); assert.deepEqual(await f.get(neighbor), cad);
-    for (const exactKey of [key, thumb]) await assert.rejects(f.get(exactKey), error => error instanceof Error && error.name === "NoSuchKey");
+    await cannotUpload(f.peer);
+    assert.deepEqual(await f.get(key), cad);
+    assert.deepEqual(await f.get(thumb), png);
+    assert.deepEqual(await f.get(neighbor), cad);
 
     for (const kind of ["product", "project"] as const) {
       const cover = await f.file(`manual-cover-${kind}`, { projectId: project.id, productId: kind === "product" ? product.id : null }, png, "image/png", { uploadedById: manager.id });
@@ -161,8 +140,8 @@ test("files.crud: file113, документы, attachment ACL и inline-дейс
       const faultId = f.id(`cover-collision-${kind}`); await f.db.changeLog.create({ data: { id: faultId, actorType: "user", actorId: manager.id, entity: "test", entityId: cover.id, action: "fixture" } });
       const stable = await nativeSnapshot(f.db); let inserted = false;
       await assert.rejects(f.db.$transaction(tx => call(new Proxy(tx, { get(target, key) {
-        if (key === "domainEvent") return new Proxy(target.domainEvent, { get(model, method) {
-          if (method === "create") return async (args: Prisma.DomainEventCreateArgs) => {
+        if (key === "changeLog") return new Proxy(target.changeLog, { get(model, method) {
+          if (method === "create") return async (args: Prisma.ChangeLogCreateArgs) => {
             const row = await model.create(args); inserted = true;
             await tx.changeLog.create({ data: { id: faultId, actorType: "user", actorId: manager.id, entity: "test", entityId: cover.id, action: "collision" } }); return row;
           };
@@ -173,16 +152,12 @@ test("files.crud: file113, документы, attachment ACL и inline-дейс
       assert.equal(inserted, true); assert.deepEqual(await nativeSnapshot(f.db), stable, "COVER_REAL_INTENT_SQL_FAILURE_ROLLBACK");
       const removed = await f.db.$transaction(call); assert.equal(removed.ok, true);
       const committed = await nativeSnapshot(f.db), replay = await f.peer.$transaction(call); assert.ok(replay.ok && replay.repeated);
-      assert.deepEqual(await nativeSnapshot(f.db), committed); assert.equal(await f.db.file.count({ where: { id: cover.id } }), 0);
-      const coverEvent = `file-delete:${nonce}`, coverKey = `${project.id}/${cover.storedName}`; let storageFailed = true;
-      const cleanup = () => createEventQueueProcessor({ settings, store: createPostgresEventQueueStore(f.db, settings, [coverEvent]),
-        deliver: (event, ownership) => executeFileDeleteCleanup(event, f.db, ownership, async (_storage, exactKey) => {
-          assert.equal(exactKey, coverKey); if (storageFailed) throw Error("CI169_STORAGE_UNAVAILABLE"); await f.deleteMarker(exactKey);
-        }, () => identity) });
-      assert.equal(await cleanup().dispatchOne(coverEvent), false); assert.deepEqual(await f.get(coverKey), png);
-      storageFailed = false; assert.equal(await cleanup().dispatchOne(coverEvent, true), true);
+      assert.deepEqual(await nativeSnapshot(f.db), committed);
+      assert.ok((await f.db.file.findUniqueOrThrow({ where: { id: cover.id } })).deletedAt);
+      const coverEvent = 'file-delete:' + nonce, coverKey = project.id + '/' + cover.storedName;
       assert.equal(await f.db.changeLog.count({ where: { id: coverEvent } }), 1);
-      await assert.rejects(f.get(coverKey), error => error instanceof Error && error.name === "NoSuchKey");
+      assert.equal(await f.db.domainEvent.count({ where: { id: coverEvent } }), 0);
+      assert.deepEqual(await f.get(coverKey), png);
     }
   });
 

@@ -113,7 +113,7 @@ test('оба cover-delete caller передают полные тип, разм�
       const text=Array.isArray(query)?query.join(''):(query as Prisma.Sql).strings.join('');
       if(text.includes('FROM "Product"'))return[product];if(text.includes('FROM "Project"'))return[project];if(text.includes('FROM "User"'))return[{id:'actor',name:'Менеджер'}];return[];
     },project:{findFirst:async()=>project,updateMany:async()=>({count:1})},product:{findFirst:async()=>product,updateMany:async()=>({count:1})},
-      file:{findFirst:async()=>file,findUnique:async()=>file,delete:async()=>file},domainEvent:{create:async()=>({id:'event'})},
+      file:{findFirst:async()=>file,findUnique:async()=>file,update:async()=>file},domainEvent:{create:async()=>({id:'event'})},
       changeLog:{findUnique:async({where}:{where:{id:string}})=>logs.find(log=>log.id===where.id)??null,create:async({data}:{data:Record<string,unknown>})=>{logs.push(data);return data;}}} as unknown as Prisma.TransactionClient;
     const actor={id:'actor',name:'Менеджер',roles:['MANAGER' as const]},storage={mode:'s3' as const,endpoint:'https://fixture.invalid',bucket:'fixture'};
     const result=kind==='project'?await deleteProjectCoverCore(tx,actor,{projectId:'project',expectedCoverFileId:'file',clientMutationId:randomUUID()},storage):

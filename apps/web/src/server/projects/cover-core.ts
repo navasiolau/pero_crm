@@ -71,15 +71,15 @@ export async function deleteProjectCoverCore(tx:Tx,actor:Actor,input:ProjectCove
  const fingerprint=digest({operation:'delete',...input}),previous=await replay(tx,actor,project.id,input.clientMutationId,fingerprint,project.coverFileId);if(previous)return previous;
  if(project.coverFileId!==input.expectedCoverFileId)return fail('conflict','Обложка проекта уже изменена',project.coverFileId);
  await tx.$queryRaw`SELECT id FROM "File" WHERE id=${input.expectedCoverFileId} FOR UPDATE`;
- const file=await tx.file.findUnique({where:{id:input.expectedCoverFileId}});
+ const file=await tx.file.findUnique({where:{id:input.expectedCoverFileId,deletedAt:null}});
  if(!file)return fail('not-found','Файл не найден');
  if(file.projectId!==project.id||file.productId!==null||file.taskId!==null||!isCoverImageMime(file.mimeType))return fail('validation','Файл не является обложкой этого проекта');
  const identity=storage??currentFileDeleteStorageIdentity();
- const cleanup=await persistFileDeleteIntent(tx,actor,file,input.clientMutationId,identity);
+ await persistFileDeleteIntent(tx,actor,file,input.clientMutationId,identity);
  if((await tx.project.updateMany({where:{id:project.id,coverFileId:file.id},data:{coverFileId:null}})).count!==1)throw Error('PROJECT_COVER_DELETE_CAS_RACE');
- await tx.file.delete({where:{id:file.id}});
+ await tx.file.update({where:{id:file.id},data:{deletedAt:new Date(),deletedById:actor.id}});
  await writeChangeLogInTransaction(tx, {actorType:'user',actorId:actor.id,actorName:actor.name??undefined,entity:'project',entityId:project.id,action:'cover.delete',field:'coverFileId',oldValue:{coverFileId:file.id},newValue:{coverFileId:null}},
   {...projectJournalContext(project),links:[{type:'file',id:file.id,label:file.fileName}]});
- const result:ProjectCoverResult={ok:true,coverFileId:null,clientMutationId:input.clientMutationId,cleanupEventId:cleanup.eventId};
+ const result:ProjectCoverResult={ok:true,coverFileId:null,clientMutationId:input.clientMutationId};
  await receipt(tx,actor,project.id,input.clientMutationId,fingerprint,result);return result;
 }

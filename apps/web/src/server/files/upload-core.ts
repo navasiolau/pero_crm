@@ -16,7 +16,7 @@ export async function readUploadReceipt(tx:Pick<Prisma.TransactionClient,'change
   const value=receipt.newValue as {uploadFingerprint?:string}|null;
   if(receipt.actorId!==actorId||receipt.entity!=='file'||receipt.action!=='create'||value?.uploadFingerprint!==fingerprint)
     throw new UploadError('UPLOAD_REPLAY_CONFLICT',409,'persist','Этот запрос загрузки уже использован с другим файлом.','conflict');
-  if(!await tx.file.findUnique({where:{id:receipt.entityId},select:{id:true}}))
+  if(!await tx.file.findUnique({where:{id:receipt.entityId,deletedAt:null},select:{id:true}}))
     throw new UploadError('UPLOAD_FILE_DELETED',409,'persist','Файл этого запроса уже удалён.','conflict');
   return{id:receipt.entityId,repeated:true,clientMutationId};
 }

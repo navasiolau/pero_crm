@@ -6,11 +6,11 @@ import {MANAGER_ROLES,hasAnyRole,hasRole} from '@/lib/roles';
 import {fileVisibilityWhere,productVisibilityWhere,resolveVisibilityActor,type VisibilityActor} from '@/server/access/visibility';
 import {productDraftAccessSelect} from '@/server/access/product-draft-context';
 import {mayDeleteStoredFile} from '@/server/files/delete-permission';
-import {assertWritableFileStorageKey} from '@/server/files/storage-binding-fence';
+import {assertWritableFileStorageKey,lockFileStorageBinding} from '@/server/files/storage-binding-fence';
 import {lockFileDeletionRequest,persistFileDeleteIntent} from '@/server/files/delete-intent';
 import {currentFileDeleteStorageIdentity} from '@/server/files/delete-storage';
 import type {FileDeleteStorageIdentity} from '@/server/files/delete-contract';
-import {OBSOLETE_SKETCH_EVENT,obsoleteSketchEventId,obsoleteSketchIntentSchema} from './sketch-cleanup-contract';
+import {obsoleteSketchIntentSchema} from './sketch-cleanup-contract';
 import {sketchUploadTargetSchema,sketchBindSchema,sketchDeleteSchema,type SketchUploadTarget,type SketchBindInput,type SketchDeleteInput,type SketchResult} from './sketch-contract';
 import {productJournalContext} from '../projects/journal';
 type Tx=Prisma.TransactionClient;
@@ -86,17 +86,14 @@ export async function persistUploadedProductCover(tx:Tx,actor:CoverMutationActor
  await writeChangeLogInTransaction(tx, {actorType:'user',actorId:actor.id,actorName:actor.name??undefined,entity:'product',entityId:input.productId,action:'cover.change',field:'sketchFileId',oldValue:{sketchFileId:input.expectedSketchFileId},newValue:{sketchFileId:created.id,uploaded:true}},
   {...productJournalContext(allowed.product),before:{sketchFileId:input.expectedSketchFileId},after:{sketchFileId:created.id},
    links:[{type:'file',id:created.id,label:file.fileName},...(baseline.file?[{type:'file',id:baseline.file.id,label:baseline.file.fileName}]:[])]});
- let cleanupEventId:string|undefined;
  if(baseline.file){
   const old=baseline.file;
-  cleanupEventId=obsoleteSketchEventId(input.clientMutationId);
-  const intent=obsoleteSketchIntentSchema.parse({projectId:old.projectId,productId:input.productId,fileId:old.id,storedName:old.storedName,newFileId:created.id,clientMutationId:input.clientMutationId});
-  await tx.file.delete({where:{id:old.id}});
+  await lockFileStorageBinding(tx,old.projectId,old.storedName);
+  await tx.file.update({where:{id:old.id},data:{deletedAt:new Date(),deletedById:actor.id}});
   await writeChangeLogInTransaction(tx, {actorType:'user',actorId:actor.id,actorName:actor.name??undefined,entity:'file',entityId:old.id,action:'delete',oldValue:{fileName:old.fileName,replacedById:created.id}},
    {...productJournalContext(allowed.product),entity:{type:'file',id:old.id,label:old.fileName},before:{fileName:old.fileName,mimeType:old.mimeType,size:old.size,section:old.section},after:null});
-  await tx.domainEvent.create({data:{id:cleanupEventId,type:OBSOLETE_SKETCH_EVENT,actor:actor.id,payload:json(intent)}});
  }
- const result:SketchResult={ok:true,id:created.id,sketchFileId:created.id,clientMutationId:input.clientMutationId,...(cleanupEventId?{cleanupEventId}:{})};
+ const result:SketchResult={ok:true,id:created.id,sketchFileId:created.id,clientMutationId:input.clientMutationId};
  await receipt(tx,actor,input.productId,input.clientMutationId,'cover.upload',fingerprint,result);
  return result;
 }
@@ -112,12 +109,12 @@ export async function deleteProductSketchCore(tx:Tx,actor:CoverMutationActor,inp
  const file=await tx.file.findFirst({where:{AND:[{id:input.expectedSketchFileId},fileVisibilityWhere(allowed.visibility)]}});if(!file)return fail('not-found','Файл не найден');
  const invalid=validateProductCoverFile(allowed.product,file);if(invalid)return fail('validation',invalid);if(!await mayDeleteStoredFile(tx,allowed.visibility,file))return fail('forbidden','Недостаточно прав для удаления файла');
  const identity=storage??currentFileDeleteStorageIdentity();
- const cleanup=await persistFileDeleteIntent(tx,actor,file,input.clientMutationId,identity);
+ await persistFileDeleteIntent(tx,actor,file,input.clientMutationId,identity);
  const changed=await tx.product.updateMany({where:{id:input.productId,sketchFileId:input.expectedSketchFileId},data:{sketchFileId:null}});if(changed.count!==1)throw Error('SKETCH_DELETE_CAS_RACE');
- await tx.file.delete({where:{id:file.id}});
+ await tx.file.update({where:{id:file.id},data:{deletedAt:new Date(),deletedById:actor.id}});
  await writeChangeLogInTransaction(tx, {actorType:'user',actorId:actor.id,actorName:actor.name??undefined,entity:'product',entityId:input.productId,action:'cover.delete',field:'sketchFileId',oldValue:{sketchFileId:file.id},newValue:{sketchFileId:null}},
   {...productJournalContext(allowed.product),links:[{type:'file',id:file.id,label:file.fileName}]});
- const result:SketchResult={ok:true,sketchFileId:null,clientMutationId:input.clientMutationId,cleanupEventId:cleanup.eventId};
+ const result:SketchResult={ok:true,sketchFileId:null,clientMutationId:input.clientMutationId};
  await receipt(tx,actor,input.productId,input.clientMutationId,'cover.delete.receipt',fingerprint,result);return result;
 }
 /** Legacy callers must supply a real empty baseline/UUID; no gallery replacement bypass. */
