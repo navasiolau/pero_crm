@@ -104,7 +104,7 @@ export function OrganizationExpenseResults({ options, page, pageSize, total, tot
   return <OrganizationPaymentsView direction="EXPENSE" {...ledger}
     renderDetailActions={(row, close) => canAssignProject && !row.project?.archived && !row.stockPurchase && !row.logisticsTripId ? (
       <ExpenseProjectAssignmentDialog key={row.id} paymentId={row.id} currentProjectId={row.project?.id ?? null}
-        expectedHead={row.lastActionId} projects={ledger.projects.filter(project => project.currency === INTERNAL_CURRENCY)} onApplied={close}/>
+        expectedHead={row.lastActionId} projects={ledger.projects.filter(project => project.currency === INTERNAL_CURRENCY || project.id === row.project?.id)} onApplied={close}/>
     ) : null}
     beforeTable={<>
       <ExpenseFilters options={options}/>

@@ -16,7 +16,7 @@ function fixture() {
     stockPurchase: null as { id: string } | null, direction: "EXPENSE", receiptActive: false,
     bynAmount: decimal("1234567890.09"), amount: decimal("39.30"), currency: "EUR",
   };
-  const projects = new Map([
+  const projects = new Map<string, { id: string; number: string; currency: string; deletedAt: Date | null }>([
     ["a", { id: "a", number: "11", currency: "BYN", deletedAt: null }],
     ["b", { id: "b", number: "12", currency: "BYN", deletedAt: null }],
     ["foreign", { id: "foreign", number: "13", currency: "RUB", deletedAt: null }],
@@ -29,7 +29,10 @@ function fixture() {
   const tx = {
     async $queryRaw() { return []; },
     user: { async findUnique() { return { active: true, roles, name: actor.name }; } },
-    project: { async findUnique(input: { where: { id: string } }) { return projects.get(input.where.id) ?? null; } },
+    project: { async findUnique(input: { where: { id: string } }) {
+      const project = projects.get(input.where.id);
+      return project && !project.deletedAt ? project : null;
+    } },
     payment: {
       async findUnique() {
         readCount++;
@@ -99,7 +102,7 @@ test("откат отказывает при более новом действ�
 });
 
 test("отказы по роли, источнику, текущему контексту и проекту не пишут аудит", async () => {
-  const { state, edits, audits, assign, readCount, setRoles, disableUpdate } = fixture();
+  const { state, edits, audits, projects, assign, readCount, setRoles, disableUpdate } = fixture();
   await assert.rejects(assign("a", null, "initial", { ...actor, roles: ["PROCUREMENT"] }), /Недостаточно прав/);
   setRoles(["PROCUREMENT"]);
   await assert.rejects(assign("a"), /Недостаточно прав/);
@@ -108,6 +111,14 @@ test("отказы по роли, источнику, текущему конт�
   await assert.rejects(assign("a", null, "stale"), /Расход изменился/);
   await assert.rejects(assign("missing"), /Выбранный проект недоступен/);
   await assert.rejects(assign("foreign"), /валюту проекта в BYN/);
+  const archive = projects.get("b")!;
+  archive.deletedAt = new Date();
+  await assert.rejects(assign("b"), /Выбранный проект недоступен/);
+  state.projectId = "b";
+  state.projectAmount = decimal("7.05");
+  await assert.rejects(assign("a"), /Проект в архиве/);
+  state.projectId = null;
+  state.projectAmount = null;
   state.stockPurchase = { id: "stock" };
   await assert.rejects(assign("a"), /Складской расход/);
   state.stockPurchase = null;
