@@ -11,7 +11,12 @@ import { expenseReceiptIssueReversal } from "@/server/warehouse/expense-issue-re
 
 import { payrollAccrualReversal } from '@/server/payroll/accrual-reversal';
 import { payoutVisibilityReversal } from '@/server/payroll/payout-reversal';
+import { projectStageReversal } from "@/server/projects/stage-reversal";
+import { productStatusReversal } from "@/server/products/status-reversal";
+import { productPercentageDefaultsReversal } from "@/server/product-percentage-defaults/reversal";
+import { productPercentageSettingsReversal } from "@/server/product-percentage-pay/settings-reversal";
 export const journalReversals = [
+  projectStageReversal, productStatusReversal, productPercentageDefaultsReversal, productPercentageSettingsReversal,
   payrollAccrualReversal, payoutVisibilityReversal,
   ...productFieldReversals,
   productSpecificationReversal,

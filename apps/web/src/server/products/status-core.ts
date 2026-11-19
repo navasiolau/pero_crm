@@ -1,3 +1,7 @@
+import { randomUUID } from "node:crypto";
+import { payrollCompensationCommand } from "@/server/payroll/accrual-reversal";
+import { workflowDependencies } from "@/server/changelog/workflow-dependencies";
+import { productWorkflowCommand } from "./status-reversal";
 import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 import {liveProductWhere,liveProjectWhere} from "@/server/access/live-entities";
 import {lockProjectRow} from "@/server/projects/lock";
@@ -35,17 +39,25 @@ export async function changeProductStatusTransaction(tx: Prisma.TransactionClien
     if (isProductDraftLocked(product.status,project.stage)) return {ok:false as const,error:"Переведите проект в статус «Договор», чтобы вывести изделие из черновика"};
   }
   const fromStatus = product.status;
-  await tx.product.update({ where: { id: productId }, data: { status: toStatus, statusChangedAt: new Date() } });
+  const changedAt = new Date();
+  const rootId = typeof product.workflowRevision === "number" && isActiveProductStatus(fromStatus) ? randomUUID() : undefined;
+  await tx.product.update({ where: { id: productId }, data: { status: toStatus, statusChangedAt: changedAt } });
   const kinds = percentageCompletionKinds(fromStatus, toStatus, hasAnyRole(actor.roles, MANAGER_ROLES));
   const captured: ("ENGINEERING" | "ASSEMBLY" | "INSTALLATION")[] = [];
-  const percentageEffects: PercentageAccrualEffects = {eventIds:[],earnings:[]};
+  const percentageEffects: PercentageAccrualEffects = {eventIds:[],earnings:[],
+    ...(rootId ? { operationRootId: rootId, payrollRows: [] } : {}) };
+  let pending = false;
   for (const kind of kinds) {
     const state=await captureProductPercentageCompletion(tx, actor, productId, kind, toStatus, percentageEffects, fromStatus);
+    if (state === "PENDING_FX") pending = true;
     if(state === "PENDING_FX" || state === "SETTLED") captured.push(kind);
   }
   await tx.productStatusHistory.create({ data: { productId, fromStatus, toStatus,
     comment: comment?.trim() || null, changedById: actor.id } });
-  await writeChangeLogInTransaction(tx, { actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
+  const money = percentageEffects.payrollRows ?? [];
+  const reversal = rootId ? productWorkflowCommand(product, toStatus, changedAt,
+    await workflowDependencies(tx, product.projectId, product.id), money.length ? payrollCompensationCommand(product.id, money).data : null, pending) : undefined;
+  await writeChangeLogInTransaction(tx, { id: rootId, reversal, actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
     entity: "product", entityId: productId, action: "status", field: "status", oldValue: fromStatus, newValue: toStatus },
     {...productJournalContext(product),...(comment?.trim()?{reason:comment.trim()}:{})});
   const event = await tx.domainEvent.create({ data: { type: "product.statusChanged", actor: actor.id,

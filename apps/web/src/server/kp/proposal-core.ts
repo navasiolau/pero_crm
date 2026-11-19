@@ -209,7 +209,7 @@ export async function saveProposalInTransaction(tx: Prisma.TransactionClient, ac
   const projectChanged = project.title !== values.title || project.address !== values.address || project.clientId !== selection.client.id;
   if (projectChanged) {
     const after = await tx.project.update({ where: { id: project.id }, data: { ...values, clientId: selection.client.id } });
-    for (const field of ["title", "address", "contactBinding"] as const) {
+    if (!operationRootId) for (const field of ["title", "address", "contactBinding"] as const) {
       const reversal = projectFieldCommand(field, project, after);
       if (reversal) await writeChangeLogInTransaction(tx, {
         actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,

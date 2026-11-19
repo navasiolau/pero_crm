@@ -11,6 +11,8 @@ import { calculateWholeProductPercentage } from '@/lib/product-percentage-ceil';
 import { parseProductPercentageRate } from '@/lib/product-percentage-rate-limit';
 import { NO_ASSIGNEE_COMPLETION_REASON, isPermanentUnassignedCompletion } from './skip-reason';
 export type PercentageAccrualEffects = {
+    operationRootId?: string;
+    payrollRows?: PayrollEntry[];
     eventIds: string[];
     earnings: {
         userId: string;
@@ -20,6 +22,7 @@ export type PercentageAccrualEffects = {
     }[];
 };
 export async function captureDirectPercentage(tx: Prisma.TransactionClient, actor: DomainActor, productId: string, kind: ProductPercentageKind, statusAtCompletion: ProductStatus, effects?: PercentageAccrualEffects) {
+    const operationRootId = effects?.operationRootId;
     const product = await tx.product.findUnique({
         where: {
             id: productId
@@ -221,7 +224,7 @@ export async function captureDirectPercentage(tx: Prisma.TransactionClient, acto
         }
     }
     await writeChangeLogInTransaction(tx, {
-            ...(payrollEntries.length ? { reversal: payrollCompensationCommand(productId, payrollEntries) } : {}),
+            ...(operationRootId ? { operationRootId } : payrollEntries.length ? { reversal: payrollCompensationCommand(productId, payrollEntries) } : {}),
             actorType: 'user',
             actorId: actor.id,
             actorName: actor.name,
@@ -242,11 +245,13 @@ export async function captureDirectPercentage(tx: Prisma.TransactionClient, acto
                 ratePercent: completion.ratePercentSnapshot?.toString() ?? null, total: total?.toString() ?? null,
                 amount, bynAmount: amount, currency: 'BYN', recipientId: recipientSnapshot?.id ?? null, recipient: recipientSnapshot?.name ?? null,
                 reason: completion.reason, completedAt: now.toISOString(), calculationVersion: 4 } });
+    effects?.payrollRows?.push(...payrollEntries);
     return state;
 }
 /** Добирание пропущенного начисления: ставка задана позже, следующий переход этапа доначисляет.
  * Обновляет существующее SKIPPED-завершение вместо создания (уникальность productId+kind). */
 export async function settleSkippedPercentage(tx: Prisma.TransactionClient, actor: DomainActor, productId: string, kind: ProductPercentageKind, statusAtCompletion: ProductStatus, effects?: PercentageAccrualEffects) {
+    const operationRootId = effects?.operationRootId;
     const product = await tx.product.findUnique({
         where: {
             id: productId
@@ -473,7 +478,7 @@ export async function settleSkippedPercentage(tx: Prisma.TransactionClient, acto
         }
     }
     await writeChangeLogInTransaction(tx, {
-            ...(payrollEntries.length ? { reversal: payrollCompensationCommand(productId, payrollEntries) } : {}),
+            ...(operationRootId ? { operationRootId } : payrollEntries.length ? { reversal: payrollCompensationCommand(productId, payrollEntries) } : {}),
             actorType: 'user',
             actorId: actor.id,
             actorName: actor.name,
@@ -497,6 +502,7 @@ export async function settleSkippedPercentage(tx: Prisma.TransactionClient, acto
             after: { kind, state: 'SETTLED', statusAtCompletion, quantity: product.quantity, unitPrice: price.toString(),
                 ratePercent: rate.toString(), amount, bynAmount: amount, currency: 'BYN', recipientId: recipientSnapshot?.id ?? null,
                 recipient: recipientSnapshot?.name ?? null, reason: null } });
+    effects?.payrollRows?.push(...payrollEntries);
     return 'SETTLED';
 }
 /** Новая ставка добавляет корректировку текущим месяцем; исходный снимок неизменен. */
@@ -508,10 +514,12 @@ export type PercentageAdjustmentNotice = {
     newAmount: string;
     delta: string;
 };
-export async function adjustSettledPercentage(tx: Prisma.TransactionClient, actor: DomainActor, productId: string, kind: ProductPercentageKind, newRate: string, clientMutationId: string): Promise<{
+export async function adjustSettledPercentage(tx: Prisma.TransactionClient, actor: DomainActor, productId: string, kind: ProductPercentageKind, newRate: string, clientMutationId: string, operationRootId?: string): Promise<{
     adjusted: boolean;
     delta: string;
     notice?: PercentageAdjustmentNotice;
+    payrollRows?: PayrollEntry[];
+    adjustmentId?: string;
 }> {
     const product = await tx.product.findUnique({
         where: {
@@ -547,6 +555,8 @@ export async function adjustSettledPercentage(tx: Prisma.TransactionClient, acto
             adjusted: false,
             delta: '0.00'
         };
+    if (completion.shares.some(share => (share.payrollEntry?.compensations?.length ?? 0) % 2 === 1))
+        throw Error("Начисление этого этапа отменено. Сначала восстановите переход из Журнала");
     const rate = parseProductPercentageRate(newRate);
     if (rate === null)
         throw new Error('Укажите процент (0 — без оплаты)');
@@ -659,7 +669,7 @@ export async function adjustSettledPercentage(tx: Prisma.TransactionClient, acto
         }));
     }
     await writeChangeLogInTransaction(tx, {
-            ...(payrollEntries.length ? { reversal: payrollCompensationCommand(productId, payrollEntries) } : {}),
+            ...(operationRootId ? { operationRootId } : payrollEntries.length ? { reversal: payrollCompensationCommand(productId, payrollEntries) } : {}),
             actorType: 'user',
             actorId: actor.id,
             actorName: actor.name,
@@ -682,6 +692,8 @@ export async function adjustSettledPercentage(tx: Prisma.TransactionClient, acto
                 delta, currency: 'BYN', unitPrice: product.expectedPrice.toString(), quantity: product.quantity, month: payrollMonth(now) } });
     return {
         adjusted: true,
+        payrollRows: payrollEntries,
+        adjustmentId: adjustment.id,
         delta,
         ...(delta !== '0.00'
             ? {

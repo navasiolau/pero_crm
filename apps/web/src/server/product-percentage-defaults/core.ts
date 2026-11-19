@@ -1,3 +1,4 @@
+import { fieldCommand } from "@/server/changelog/field-reversal";
 import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 import {createHash} from 'node:crypto';
 import type {Prisma} from '@prisma/client';
@@ -9,6 +10,12 @@ export async function readProductPercentageDefaults(tx:Pick<Prisma.TransactionCl
  if(!row)return structuredClone(EMPTY_DEFAULTS);
  try{return defaultsSnapshotSchema.parse(JSON.parse(row.value));}catch{throw Error('Проверьте стандартные процентные настройки организации');}
 }
+export async function writeProductPercentageDefaultsInTransaction(tx:Prisma.TransactionClient, revision:number, rates:DefaultsSnapshot["rates"]){
+ const snapshot={revision:revision+1,rates},value=JSON.stringify(snapshot);
+ await tx.orgSetting.upsert({where:{key:DEFAULT_PERCENTAGE_KEY},create:{key:DEFAULT_PERCENTAGE_KEY,value},update:{value}});
+ return snapshot;
+}
+
 export async function saveProductPercentageDefaults(actor:DomainActor,input:unknown,tx:Prisma.TransactionClient):Promise<DefaultsResult>{
  if(!hasAnyRole(actor.roles,MANAGER_ROLES))return{ok:false,kind:'forbidden',error:'Недостаточно прав'};
  const parsed=defaultsPatchSchema.safeParse(input);if(!parsed.success)return{ok:false,kind:'validation',error:parsed.error.issues[0]?.message??'Проверьте проценты'};
@@ -18,10 +25,10 @@ export async function saveProductPercentageDefaults(actor:DomainActor,input:unkn
  const current=await readProductPercentageDefaults(tx);
  if(data.expectedRevision!==current.revision||JSON.stringify(data.expectedRates)!==JSON.stringify(current.rates))return{ok:false,kind:'conflict',error:'Настройки изменены другим пользователем',current};
  if(JSON.stringify(data.rates)===JSON.stringify(current.rates))return{ok:true,kind:'saved',snapshot:current,noOp:true,repeated:false};
- const snapshot={revision:current.revision+1,rates:data.rates},value=JSON.stringify(snapshot);
- await tx.orgSetting.upsert({where:{key:DEFAULT_PERCENTAGE_KEY},create:{key:DEFAULT_PERCENTAGE_KEY,value},update:{value}});
+ const snapshot=await writeProductPercentageDefaultsInTransaction(tx,current.revision,data.rates);
+ const reversal=fieldCommand("orgSetting.percentageDefaults",{value:current.rates,revision:current.revision},{value:snapshot.rates,revision:snapshot.revision});
  const result:DefaultsResult={ok:true,kind:'saved',snapshot,noOp:false,repeated:false};
- await writeChangeLogInTransaction(tx, {id,actorType:'user',actorId:actor.id,actorName:actor.name,source:actor.source,entity:'orgSetting',entityId:DEFAULT_PERCENTAGE_KEY,action:'percentage-defaults.update',oldValue:current,newValue:{fingerprint,result}},
+ await writeChangeLogInTransaction(tx, {id,actorType:'user',actorId:actor.id,actorName:actor.name,source:actor.source,entity:'orgSetting',entityId:DEFAULT_PERCENTAGE_KEY,action:'percentage-defaults.update',reversal,oldValue:current,newValue:{fingerprint,result}},
   {entity:{label:'Стандартные проценты оплаты',href:'/settings/product-percentages'},contexts:[],before:current,after:snapshot});
  return result;
 }

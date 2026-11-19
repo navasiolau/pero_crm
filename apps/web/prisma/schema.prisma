@@ -189,6 +189,7 @@ model Client {
 // целого дома). Этапы воронки — на проекте (§6); платежи, маржа и
 // экономика — тоже на проекте (§11). Стоимость проекта = Σ цен изделий.
 model Project {
+  workflowRevision Int @default(0)
   fieldRevisions Json @default("{}")
   deletedAt DateTime?
   deletedById String? // actor snapshot; no cascade or reassignment
@@ -266,6 +267,7 @@ enum ProductStatus {
 // Данные клиента (ФИО, адрес, телефон) подтягиваются из проекта —
 // на уровне проекта они и вносятся.
 model Product {
+  workflowRevision Int @default(0)
   deletedAt DateTime?
   deletedById String? // actor snapshot; no cascade or reassignment
   id               String       @id @default(cuid())

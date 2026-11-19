@@ -1,3 +1,5 @@
+import { workflowDependencies } from "@/server/changelog/workflow-dependencies";
+import { projectProposalAcceptance, projectStageReversal, projectWorkflowSelect, projectWorkflowState } from "./stage-reversal";
 import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 import {liveProjectWhere} from "@/server/access/live-entities";
 import {createHash} from 'node:crypto';
@@ -22,7 +24,7 @@ export async function patchProjectStageTransaction(actor:DomainActor,input:unkno
  if(!hasAnyRole(actor.roles,MANAGER_ROLES))return fail('forbidden','Недостаточно прав');
  await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(18435,55001)`;
  await lockProjectRow(tx,request.projectId);
- const project=await tx.project.findUnique({where:{...liveProjectWhere,id:request.projectId},select:{id:true,stage:true,number:true,title:true,refusalReason:true,refusalComment:true}});
+ const project=await tx.project.findUnique({where:{...liveProjectWhere,id:request.projectId},select:{...projectWorkflowSelect,title:true}});
  if(!project)return fail('not-found','Проект не найден');
  const receiptId=`project-stage:${request.clientMutationId}`;
  const fingerprint=createHash('sha256').update(JSON.stringify(request)).digest('hex');
@@ -42,7 +44,13 @@ export async function patchProjectStageTransaction(actor:DomainActor,input:unkno
  if(Object.keys(errors).length)return fail('validation','Заполните обязательные сведения',{errors});
  const extras=patch.extras??{};
  const changedAt=new Date();
- try{await applyProposalStageGateInTransaction(tx,{projectId:patch.projectId,fromStage:project.stage,toStage:patch.toStage,at:changedAt},actor,operationRootId)}
+ const reversible=!operationRootId && typeof project.workflowRevision==="number" && isActiveProjectStage(project.stage);
+ const rootId=operationRootId??(reversible?receiptId:undefined);
+ const previous=reversible?projectWorkflowState(project,await projectProposalAcceptance(tx,project.id)):null;
+ const drafts=reversible&&patch.toStage==="CONTRACT"?await tx.product.findMany({
+  where:{projectId:project.id,deletedAt:null,status:"DRAFT"},select:{id:true,statusChangedAt:true},orderBy:{id:"asc"},
+ }):[];
+ try{await applyProposalStageGateInTransaction(tx,{projectId:patch.projectId,fromStage:project.stage,toStage:patch.toStage,at:changedAt},actor,rootId)}
  catch(error){if(error instanceof ProposalLifecycleError)return fail('validation',error.message);throw error}
  const data:Prisma.ProjectUpdateManyMutationInput={stage:patch.toStage,stageChangedAt:changedAt,
   ...(patch.toStage==='REFUSED'?{refusalReason:extras.refusalReason!.trim(),refusalComment:extras.refusalComment?.trim()||null}:{}),
@@ -50,10 +58,17 @@ export async function patchProjectStageTransaction(actor:DomainActor,input:unkno
  const updated=await tx.project.updateMany({where:{id:patch.projectId,stage:patch.expectedStage},data});
  if(updated.count!==1)throw new Error('Статус изменён другим пользователем');
  await tx.projectStageHistory.create({data:{projectId:patch.projectId,fromStage:project.stage,toStage:patch.toStage,changedById:actor.id,comment:patch.toStage==='REFUSED'?extras.refusalReason!.trim():undefined}});
- await writeChangeLogInTransaction(tx, {id:receiptId,actorType:'user',actorId:actor.id,actorName:actor.name,source:actor.source,entity:'project',entityId:patch.projectId,action:'stage',operationRootId,field:'stage',oldValue:project.stage,newValue:{fingerprint,stage:patch.toStage}},
+ const promoted=patch.toStage==='CONTRACT'?await promoteProjectDrafts(tx,actor,patch.projectId,changedAt,rootId):{eventIds:[],productIds:[]};
+ const reversal=previous?projectStageReversal.command({previous,
+  expected:projectWorkflowState({...project,...(patch.toStage==="REFUSED"?{refusalReason:extras.refusalReason!.trim(),refusalComment:extras.refusalComment?.trim()||null}:{}),
+   stage:patch.toStage,stageChangedAt:changedAt},
+   await projectProposalAcceptance(tx,project.id)),
+  revision:project.workflowRevision+1,dependency:await workflowDependencies(tx,project.id),
+  promotedNow:true,promoted:drafts.map(draft=>({id:draft.id,oldAt:draft.statusChangedAt.toISOString(),newAt:changedAt.toISOString()}))}):undefined;
+ await writeChangeLogInTransaction(tx, {id:receiptId,reversal,actorType:'user',actorId:actor.id,actorName:actor.name,source:actor.source,entity:'project',entityId:patch.projectId,action:'stage',operationRootId,field:'stage',oldValue:project.stage,newValue:{fingerprint,stage:patch.toStage}},
   {...projectJournalContext(project),...journalHints,before:{stage:project.stage,...(patch.toStage==='REFUSED'?{refusalReason:project.refusalReason,refusalComment:project.refusalComment}:{})},
    after:{stage:patch.toStage,...(patch.toStage==='REFUSED'?{refusalReason:data.refusalReason,refusalComment:data.refusalComment}:{})}});
- const promoted=patch.toStage==='CONTRACT'?await promoteProjectDrafts(tx,actor,patch.projectId,changedAt,operationRootId):{eventIds:[],productIds:[]};
+
  const event=await tx.domainEvent.create({data:{type:'project.stageChanged',actor:actor.id,payload:{projectId:patch.projectId,number:project.number,from:project.stage,to:patch.toStage}}});
  return{result:{ok:true,kind:'saved',clientMutationId:patch.clientMutationId,stage:patch.toStage},eventIds:[event.id,...promoted.eventIds],project,fromStage:project.stage,productIds:promoted.productIds};
 }
