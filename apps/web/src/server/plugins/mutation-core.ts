@@ -1,6 +1,7 @@
 import { Prisma, type ApiToken } from "@prisma/client";
 import type { PluginManifest } from "@pero/plugin-sdk";
 import { ADMIN_ROLES } from "@/lib/roles";
+import { isWorkRatesOnly, WORK_RATES_SCOPE } from "@/lib/estimate-rates";
 import { requireActorRoles, type DomainActor } from "@/server/actor";
 import type { JournalChange } from "@/server/changelog/contract";
 import { sanitizeJournalValue } from "@/server/changelog/presentation";
@@ -67,6 +68,9 @@ export const apiTokenAuditSnapshot = (row: Pick<ApiToken, "name" | "prefix" | "s
 
 export async function createApiTokenInTransaction(tx: Prisma.TransactionClient, actor: DomainActor, input: ApiTokenCreationInput, token: string) {
   requireActorRoles(actor, ADMIN_ROLES);
+  if (input.scopes.includes(WORK_RATES_SCOPE) && (!isWorkRatesOnly(input.scopes) || input.pluginId)) {
+    throw new Error("Ключ оценщика должен иметь только право чтения сдельного прайса");
+  }
   if (input.createdById) await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${input.createdById} FOR UPDATE`;
   const row = await tx.apiToken.create({ data: { ...input, prefix: token.slice(0, TOKEN_PREFIX.length + 6), tokenHash: hashToken(token) } });
   const after = apiTokenAuditSnapshot(row);

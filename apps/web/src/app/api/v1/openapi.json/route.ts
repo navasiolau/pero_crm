@@ -51,6 +51,25 @@ const document = {
   security: [{ bearerAuth: [] }],
   paths: {
     ...kpApiPaths,
+    "/estimate/work-rates": {
+      get: {
+        summary: "Действующие сдельные расценки в BYN",
+        description: "Только отдельный отзываемый токен с единственным правом work-rates:read.",
+        responses: {
+          "200": { description: "Актуальный прайс", content: { "application/json": { schema: {
+            type: "object", required: ["currency", "fetchedAt", "rates"],
+            properties: {
+              currency: { const: "BYN" }, fetchedAt: { type: "string", format: "date-time" },
+              rates: { type: "array", items: { type: "object", required: ["id", "name", "category", "unit", "price", "updatedAt"],
+                properties: { id: { type: "string" }, name: { type: "string" }, category: { type: ["string", "null"] },
+                  unit: { type: "string" }, price: { type: "string" }, updatedAt: { type: "string", format: "date-time" } } } },
+            },
+          } } } },
+          "401": { description: "Токен отсутствует или отозван" },
+          "403": { description: "Токен имеет другие права" },
+        },
+      },
+    },
     "/": {
       get: {
         summary: "Информация о сервисе",

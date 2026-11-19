@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/table";
 import { createToken, revokeToken } from "@/server/plugins/actions";
 import { KP_AGENT_SCOPES, KP_SCOPE_LABELS } from "@/lib/kp-api-scopes";
+import { WORK_RATES_SCOPE } from "@/lib/estimate-rates";
 
 interface TokenRow {
   id: string;
@@ -36,6 +37,7 @@ const AVAILABLE_SCOPES = [
   { id: "write", label: "write — команды и операции" },
   { id: "admin", label: "admin — остальные API" },
   ...KP_AGENT_SCOPES.map(id => ({ id, label: KP_SCOPE_LABELS[id] })),
+  { id: WORK_RATES_SCOPE, label: "Оценщик мебели — чтение сдельных расценок" },
 ];
 
 export function TokenManager({ tokens }: { tokens: TokenRow[] }) {
@@ -45,8 +47,12 @@ export function TokenManager({ tokens }: { tokens: TokenRow[] }) {
   const [pending, startTransition] = useTransition();
 
   function toggleScope(scope: string, checked: boolean) {
+    if (checked && scope === WORK_RATES_SCOPE) {
+      setScopes([WORK_RATES_SCOPE]);
+      return;
+    }
     setScopes((prev) =>
-      checked ? [...prev, scope] : prev.filter((s) => s !== scope),
+      checked ? [...prev.filter((s) => s !== WORK_RATES_SCOPE), scope] : prev.filter((s) => s !== scope),
     );
   }
 
