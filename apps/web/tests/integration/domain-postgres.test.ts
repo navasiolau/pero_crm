@@ -1463,10 +1463,15 @@ test("task/create-ten-identical-receipts-collisions-revocation-deleted-ACK-and-S
   await fixture.db.task.create({ data: { projectId: w.project.id, productId: w.product.id, workId: measuredWork.id, title: "Неизвестный старый объём", quantity: null } });
   const unknown = await run(w.worker, fixture.db, () => workerAllocation.createWorkerTaskAllocationCore(w.worker, { ...measure, quantity: "0.01", clientMutationId: randomUUID() }, realTransaction(fixture.db)));
   assert.ok(!unknown.ok); assert.match(unknown.error, /не определён объём/);
-  await fixture.db.taskDependency.deleteMany({ where: { taskId: allocation.id } });
-  await fixture.db.task.delete({ where: { id: allocation.id } });
+  const reversal = scope.load<typeof import("../../src/server/changelog/reversal-core")>("../src/server/changelog/reversal-core");
+  const allocationAudit = await fixture.db.changeLog.findFirstOrThrow({ where: { entityId: allocation.id, action: "create" } });
+  await fixture.db.$transaction(tx => reversal.reverseJournalActionInTransaction(tx, w.admin.id, {
+    entryId: allocationAudit.id, requestId: randomUUID(), scope: { kind: "global" },
+  }));
   const missing = await run(w.worker, fixture.db, () => workerAllocation.createWorkerTaskAllocationCore(w.worker, request, realTransaction(fixture.db)));
-  assert.ok(!missing.ok && missing.kind === "conflict"); assert.equal(await fixture.db.task.count({ where: { id: allocation.id } }), 0);
+  assert.ok(!missing.ok && missing.kind === "conflict");
+  assert.equal(await fixture.db.task.count({ where: { id: allocation.id, deletedAt: null } }), 0);
+  assert.equal(await fixture.db.taskDependency.count({ where: { taskId: allocation.id } }), 2);
   const reader = actorOf(await fixture.user("journal-reader", ["ADMIN"])), businessId = fixture.id("journal-business"), stamp = new Date();
   await fixture.db.changeLog.createMany({ data: [
     ...Array.from({ length: 205 }, (_, index) => ({ id: `${index % 2 ? "task-create:" : "task-status:"}${randomUUID()}`, actorType: "user", actorId: reader.id,
@@ -1858,4 +1863,55 @@ test("materials/frozen-501-costs-batch-scalar-positional-ACL-1-5-20-real-SQL-bud
   await tx.stockMovement.update({ where: { id: rows.id("expense-001") }, data: { unitPrice: "1", totalByn: "1" } });
   assert.equal((await warehouse.getProjectMaterialsBatch([ids[0]], c.users.admin, tx))[0].materialsTotalByn, 501);
   await tx.stockMovement.update({ where: { id: rows.id("expense-001") }, data: { unitPrice: null, totalByn: null } });
+}));
+
+test("task/native grouped undo retains budget and task IDs", async () => fixture.rollback(async (tx, rows) => {
+  const c = await tree(tx, rows, "piecework-undo");
+  const other = await rows.user("piecework-undo-second", ["WORKER"], { payScheme: "PIECE" });
+  const work = await tx.work.findUniqueOrThrow({ where: { id: c.work.id },
+    include: { tasks: { select: { id: true, quantity: true, allocationGroupId: true } } } });
+  const requestId = randomUUID();
+  const transaction = async <T>(operation: (db: Prisma.TransactionClient) => Promise<T>) => operation(tx);
+  const result = await pieceworkAllocation.createPieceworkAllocationCore(c.manager, {
+    projectId: c.project.id, productId: c.product.id, workId: work.id, title: work.title, type: "Производство", quantity: "5",
+    expectedRevision: pieceworkPlanRevision(work), clientMutationId: requestId,
+    participants: [{ userId: c.worker.id, percent: "50" }, { userId: other.id, percent: "50" }],
+  }, transaction);
+  assert.ok(result.ok);
+  const before = await tx.task.findMany({ where: { allocationGroupId: result.groupId }, orderBy: { id: "asc" } });
+  const reversal = scope.load<typeof import("../../src/server/changelog/reversal-core")>("../src/server/changelog/reversal-core");
+  const undo = (entryId: string) => reversal.reverseJournalActionInTransaction(tx, c.admin.id, {
+    entryId, requestId: randomUUID(), scope: { kind: "global" },
+  });
+  const reversed = await undo("piecework-v1:" + requestId);
+  assert.equal(await tx.task.count({ where: { allocationGroupId: result.groupId, deletedAt: { not: null } } }), 2);
+  await undo(reversed.reversalId);
+  const after = await tx.task.findMany({ where: { allocationGroupId: result.groupId, deletedAt: null }, orderBy: { id: "asc" } });
+  assert.deepEqual(after.map(row => [row.id, row.assigneeId, row.shareAmount]),
+    before.map(row => [row.id, row.assigneeId, row.shareAmount]));
+  assert.equal((await tx.taskAllocationGroup.findUniqueOrThrow({ where: { id: result.groupId } })).budget?.toFixed(2), "150.00");
+  await tx.$executeRawUnsafe("SET CONSTRAINTS ALL IMMEDIATE");
+}));
+
+test("task/native dependency edit and undo retain pair and both revisions", async () => fixture.rollback(async (tx, rows) => {
+  const c = await tree(tx, rows, "dependency-undo");
+  const owner = { projectId: c.project.id, productId: c.product.id, workId: c.work.id,
+    status: "NEW" as const, assigneeId: c.worker.id, quantity: "1" };
+  const predecessor = await tx.task.create({ data: { ...owner, title: "Предшественник" } });
+  const task = await tx.task.create({ data: { ...owner, title: "Зависимая", dependencies: { create: { dependsOnId: predecessor.id } } } });
+  const where = { taskId_dependsOnId: { taskId: task.id, dependsOnId: predecessor.id } };
+  const revisions = async () => Promise.all([task.id, predecessor.id].map(async id =>
+    (await tx.task.findUniqueOrThrow({ where: { id } })).journalDependencyRevision));
+  assert.deepEqual(await revisions(), [1, 1]);
+  const { updateTaskInTransaction } = await import("../../src/server/tasks/update-core");
+  const edited = await updateTaskInTransaction(tx, c.manager, task.id, { dependencyIds: [] });
+  assert.ok(edited.ok);
+  assert.ok((await tx.taskDependency.findUniqueOrThrow({ where })).deletedAt);
+  assert.deepEqual(await revisions(), [2, 2]);
+  const audit = await tx.changeLog.findFirstOrThrow({ where: { entity: "task", entityId: task.id, action: "update" } });
+  const reversal = scope.load<typeof import("../../src/server/changelog/reversal-core")>("../src/server/changelog/reversal-core");
+  await reversal.reverseJournalActionInTransaction(tx, c.admin.id, { entryId: audit.id, requestId: randomUUID(), scope: { kind: "global" } });
+  assert.equal((await tx.taskDependency.findUniqueOrThrow({ where })).deletedAt, null);
+  assert.deepEqual(await revisions(), [3, 3]);
+  await tx.$executeRawUnsafe("SET CONSTRAINTS ALL IMMEDIATE");
 }));

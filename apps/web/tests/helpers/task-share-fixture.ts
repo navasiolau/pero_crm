@@ -12,7 +12,7 @@ export function taskShareFixture(productStatus: "DESIGN" | "PRODUCTION" = "PRODU
       assigneeId: "worker", quantity: id === "source" ? "10" : null, executorShare: "1",
       estimateMinutes: 100, dueAt: now, requiresPhoto: true, createdById: "manager",
       allocationGroupId: null, shareUnits: null, shareAmount: null, splitRevision: 0,
-      physicalOnlyShare: false, stageShareUnits: null,
+      physicalOnlyShare: false, stageShareUnits: null, journalRevision: 0, journalDependencyRevision: 0, journalFieldRevisions: {}, deletedAt: null,
       createdAt: now, updatedAt: now, doneAt: null, doneById: null,
     })),
     users: [["worker", "WORKER"], ["recipient", "WORKER"], ["manager", "MANAGER"], ["engineer", "ENGINEER"], ["accountant", "ACCOUNTANT"], ["admin", "ADMIN"], ["director", "DIRECTOR"], ["mounter", "MOUNTER"]].map(([id, role]): Row => ({ id, name: id, roles: [role], active: true, payScheme: "PIECE" })),
@@ -20,7 +20,7 @@ export function taskShareFixture(productStatus: "DESIGN" | "PRODUCTION" = "PRODU
     pools: [{ id: "pool", productId: "product", kind: "ENGINEERING", state: "DRAFT", revision: 0 }] as Row[],
     works: [{ id: "work", projectId: "project", productId: "product", title: "work", quantity: "10", quantityPerUnit: null, priceItemId: null, unitSnapshot: "м²", priceSnapshot: "100", total: "1000", paymentKind: "LEGACY", stagePayPoolId: null, poolWeightUnits: null, _count: { paymentConversions: 0, settlementShares: 0 } }] as Row[],
     groups: [] as Row[], entries: [] as Row[], payouts: [] as Row[], logs: [] as Row[], events: [] as Row[], history: [] as Row[],
-    dependencies: [{ taskId: "source", dependsOnId: "predecessor" }, { taskId: "dependent", dependsOnId: "source" }] as Row[],
+    dependencies: [{ taskId: "source", dependsOnId: "predecessor", deletedAt: null }, { taskId: "dependent", dependsOnId: "source", deletedAt: null }] as Row[],
     times: [{ id: "timer", taskId: "source", userId: "worker", source: "timer", minutes: 20, stoppedAt: null, startedAt: now, autoStopped: false }] as Row[],
     files: [{ id: "photo", taskId: "source", projectId: "project", productId: "product" }] as Row[],
     sequence: 0, currency: "BYN", projectCurrency: "BYN",
@@ -38,15 +38,18 @@ export function taskShareFixture(productStatus: "DESIGN" | "PRODUCTION" = "PRODU
   function hydrate(row: Row): Row {
     return {
       ...row,
-      project: { id: "project", number: "1", currency: state.projectCurrency },
+      project: projectRow(),
       product: productRow(row.productId),
       assignee: state.users.find((user) => user.id === row.assigneeId) ?? null,
       work: (() => { const work = state.works.find((item) => item.id === row.workId); const pool = state.pools.find((item) => item.id === work?.stagePayPoolId); return work ? { ...work, stagePayPool: work.stagePayPool ?? (pool ? { ...pool, product: state.products.find((item) => item.id === pool.productId) } : null) } : null; })(),
       allocationGroup: state.groups.find((group) => group.id === row.allocationGroupId) ?? null,
       payrollEntries: state.entries.filter(entry => entry.taskId === row.id),
       _count: { payrollEntries: state.entries.filter((entry) => entry.taskId === row.id).length, timeEntries: state.times.filter((entry) => entry.taskId === row.id).length, stageSettlementShares: 0 },
-      dependencies: state.dependencies.filter((edge) => edge.taskId === row.id).map((edge) => ({ ...edge, dependsOn: state.tasks.find((task) => task.id === edge.dependsOnId) })),
-      dependents: state.dependencies.filter((edge) => edge.dependsOnId === row.id),
+      dependencies: state.dependencies.filter((edge) => edge.taskId === row.id && !edge.deletedAt).map((edge) => ({ ...edge, dependsOn: state.tasks.find((task) => task.id === edge.dependsOnId) })),
+      dependents: state.dependencies.filter((edge) => edge.dependsOnId === row.id && !edge.deletedAt && state.tasks.some(task => task.id === edge.taskId && !task.deletedAt))
+        .map(edge => { const task = state.tasks.find(task => task.id === edge.taskId)!; return { ...edge, task: {
+          ...task, _count: { payrollEntries: state.entries.filter(entry => entry.taskId === task.id).length,
+            timeEntries: state.times.filter(entry => entry.taskId === task.id).length, stageSettlementShares: 0 } } }; }),
       files: state.files.filter((file) => file.taskId === row.id),
     };
   }
@@ -55,8 +58,22 @@ export function taskShareFixture(productStatus: "DESIGN" | "PRODUCTION" = "PRODU
       if (value === undefined) continue;
       row[key] = value && typeof value === "object" && "increment" in value ? Number(row[key]) + Number(value.increment) : value;
     }
+    if ("journalRevision" in row) row.journalRevision = Number(row.journalRevision) + 1;
     row.updatedAt = now;
     return hydrate(row);
+  }
+  const edgeEndpoint = (id: unknown) => {
+    const row = state.tasks.find(task => task.id === id);
+    return row && { ...row, project: projectRow(), product: productRow(row.productId) };
+  };
+  function bumpDependencyRevision(edge: Row) {
+    for (const id of [edge.taskId, edge.dependsOnId]) {
+      const task = state.tasks.find(row => row.id === id);
+      if (task) {
+        task.journalDependencyRevision = Number(task.journalDependencyRevision) + 1;
+        task.journalRevision = Number(task.journalRevision) + 1;
+      }
+    }
   }
   const tx = {
     $queryRaw: async () => [{ locked: 1 }],
@@ -64,6 +81,11 @@ export function taskShareFixture(productStatus: "DESIGN" | "PRODUCTION" = "PRODU
     task: {
       findFirst: async ({ where }: { where?: Row }) => filtered(state.tasks.map(hydrate), where)[0] ?? null,
       findUnique: async ({ where }: { where?: Row }) => filtered(state.tasks.map(hydrate), where)[0] ?? null,
+      findUniqueOrThrow: async ({ where }: { where?: Row }) => {
+        const row = filtered(state.tasks.map(hydrate), where)[0];
+        if (!row) throw new Error("Task not found");
+        return row;
+      },
       findMany: async ({ where }: { where?: Row } = {}) => filtered(state.tasks.map(hydrate), where),
       count: async ({ where }: { where?: Row }) => filtered(state.tasks, where).length,
       update: async ({ where, data }: { where: Row; data: Row }) => {
@@ -73,15 +95,20 @@ export function taskShareFixture(productStatus: "DESIGN" | "PRODUCTION" = "PRODU
         write("task.updateMany"); const rows = filtered(state.tasks, where); for (const row of rows) updateRow(row, data); return { count: rows.length };
       },
       create: async ({ data }: { data: Row }) => {
-        write("task.create"); const row: Row = { id: `child-${++state.sequence}`, createdAt: now, updatedAt: now, doneAt: null, doneById: null, executorShare: "1", allocationGroupId: null, shareUnits: null, shareAmount: null, splitRevision: 0, physicalOnlyShare: false, stageShareUnits: null, ...data };
+        write("task.create"); const row: Row = { id: `child-${++state.sequence}`, createdAt: now, updatedAt: now, doneAt: null, doneById: null, executorShare: "1", allocationGroupId: null, shareUnits: null, shareAmount: null, splitRevision: 0, physicalOnlyShare: false, stageShareUnits: null, journalRevision: 0, journalDependencyRevision: 0, journalFieldRevisions: {}, deletedAt: null, ...data };
         state.tasks.push(row);
         const dependencies = data.dependencies as { create?: Row[] } | undefined;
-        for (const edge of dependencies?.create ?? []) state.dependencies.push({ taskId: row.id, dependsOnId: edge.dependsOnId });
+        for (const edge of dependencies?.create ?? []) {
+          const relation = { taskId: row.id, dependsOnId: edge.dependsOnId, deletedAt: null };
+          state.dependencies.push(relation);
+          bumpDependencyRevision(relation);
+        }
         return hydrate(row);
       },
       delete: async ({ where }: { where: Row }) => { write("task.delete"); const row = filtered(state.tasks, where)[0]; state.tasks = state.tasks.filter((task) => task !== row); return row; },
     },
     taskAllocationGroup: {
+      findUnique: async ({ where }: { where: Row }) => filtered(state.groups, where)[0] ?? null,
       create: async ({ data }: { data: Row }) => { write("group.create"); const row = { id: `group-${++state.sequence}`, createdAt: now, ...data }; state.groups.push(row); return row; },
     },
     user: {
@@ -95,7 +122,7 @@ export function taskShareFixture(productStatus: "DESIGN" | "PRODUCTION" = "PRODU
       create: async ({ data }: { data: Row }) => { write("history.create"); const row = { id: `history-${++state.sequence}`, ...data }; state.history.push(row); return row; },
     },
     work: {
-      findUnique: async ({ where }: { where: Row }) => { const row = filtered(state.works, where)[0]; return row ? { ...row, tasks: state.tasks.filter((task) => task.workId === row.id) } : null; },
+      findUnique: async ({ where }: { where: Row }) => { const row = filtered(state.works, where)[0]; return row ? { ...row, product: productRow(row.productId), project: projectRow(), tasks: state.tasks.filter((task) => task.workId === row.id && !task.deletedAt).map(hydrate) } : null; },
       findMany: async ({ where }: { where?: Row }) => filtered(state.works, where).map(row => ({ ...row, tasks: state.tasks.filter(task => task.workId === row.id) })),
       update: async ({ where, data }: { where: Row; data: Row }) => {
         write("work.update"); const row = filtered(state.works, where)[0];
@@ -141,18 +168,35 @@ export function taskShareFixture(productStatus: "DESIGN" | "PRODUCTION" = "PRODU
     },
     taskDependency: {
       findMany: async ({ where }: { where?: Row }) => state.dependencies.filter(edge => matches({ ...edge,
-        task: state.tasks.find(task => task.id === edge.taskId),
-        dependsOn: state.tasks.find(task => task.id === edge.dependsOnId),
+        task: edgeEndpoint(edge.taskId),
+        dependsOn: edgeEndpoint(edge.dependsOnId),
       }, where)),
+      updateMany: async ({ where, data }: { where: Row; data: Row }) => {
+        write("dependencies.update");
+        const edges = state.dependencies.filter(edge => matches(edge, where));
+        for (const edge of edges) { Object.assign(edge, data); bumpDependencyRevision(edge); }
+        return { count: edges.length };
+      },
       deleteMany: async ({ where }: { where: Row }) => { write("dependencies.delete"); state.dependencies = state.dependencies.filter((edge) => !matches(edge, where)); return { count: 0 }; },
       createMany: async ({ data }: { data: Row[] }) => {
-        write("dependencies.create"); for (const edge of data) if (!state.dependencies.some((old) => old.taskId === edge.taskId && old.dependsOnId === edge.dependsOnId)) state.dependencies.push(edge);
+        write("dependencies.create");
+        for (const edge of data) {
+          if (state.dependencies.some(old => old.taskId === edge.taskId && old.dependsOnId === edge.dependsOnId)) continue;
+          const relation = { deletedAt: null, ...edge };
+          state.dependencies.push(relation);
+          bumpDependencyRevision(relation);
+        }
         return { count: data.length };
       },
     },
     changeLog: {
       findUnique: async ({ where }: { where: Row }) => filtered(state.logs, where)[0] ?? null,
-      create: async ({ data }: { data: Row }) => { write("log.create"); state.logs.push(data); return data; },
+      findUniqueOrThrow: async ({ where }: { where: Row }) => {
+        const row = filtered(state.logs, where)[0];
+        if (!row) throw new Error("Audit entry not found");
+        return row;
+      },
+      create: async ({ data }: { data: Row }) => { write("log.create"); const row = { id: `log-${state.logs.length + 1}`, ...data }; state.logs.push(row); return row; },
     },
     domainEvent: { create: async ({ data }: { data: Row }) => { write("event.create"); const row = { id: `event-${++state.sequence}`, ...data }; state.events.push(row); return row; } },
   };
@@ -176,6 +220,6 @@ export function historicalTaskAllocation(f: ReturnType<typeof taskShareFixture>,
   Object.assign(source, { allocationGroupId: 'historic-group', shareUnits: 700000, shareAmount: physicalOnly ? null : '700.00', physicalOnlyShare: physicalOnly, splitRevision: 1, estimateMinutes: 70 });
   state.groups.push({ id: 'historic-group', workId: 'work', quantity: '10', budget: physicalOnly ? null : '1000.00', currency: physicalOnly ? null : 'BYN', budgetSource: physicalOnly ? 'PHYSICAL_ONLY' : 'TASK_FIXED' });
   state.tasks.push({ ...source, id: 'historic-child', status: 'NEW', assigneeId: 'recipient', shareUnits: 300000, shareAmount: physicalOnly ? null : '300.00', estimateMinutes: 30 });
-  state.dependencies.push({ taskId: 'historic-child', dependsOnId: 'predecessor' }, { taskId: 'dependent', dependsOnId: 'historic-child' });
+  state.dependencies.push({ taskId: 'historic-child', dependsOnId: 'predecessor', deletedAt: null }, { taskId: 'dependent', dependsOnId: 'historic-child', deletedAt: null });
   return { ok: true as const, childTaskId: 'historic-child' };
 }

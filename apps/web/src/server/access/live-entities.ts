@@ -6,4 +6,4 @@ export const liveChildWhere = {project:liveProjectWhere,OR:[{productId:null},{pr
 
 export const liveTaskWhere = { ...liveChildWhere, deletedAt: null } satisfies Prisma.TaskWhereInput;
 export const liveWorkWhere = { ...liveChildWhere, deletedAt: null } satisfies Prisma.WorkWhereInput;
-export const activeTaskDependencyWhere = { task: { deletedAt: null }, dependsOn: { deletedAt: null } } satisfies Prisma.TaskDependencyWhereInput;
+export const activeTaskDependencyWhere = { deletedAt: null, task: liveTaskWhere, dependsOn: liveTaskWhere } satisfies Prisma.TaskDependencyWhereInput;

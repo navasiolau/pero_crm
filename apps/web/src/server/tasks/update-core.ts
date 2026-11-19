@@ -50,7 +50,7 @@ async function hasCycle(tx: Prisma.TransactionClient, taskId: string, dependency
     if (seen.has(current)) continue;
     seen.add(current);
     const next = await tx.taskDependency.findMany({
-      where: { taskId: current },
+      where: { ...activeTaskDependencyWhere, taskId: current },
       select: { dependsOnId: true },
     });
     queue.push(...next.map((edge) => edge.dependsOnId));
@@ -251,8 +251,20 @@ export async function updateTaskInTransaction(tx: Prisma.TransactionClient, acto
   const newDependencyIds = [...(dependencies?.ids ?? oldDependencyIds)].sort();
   const removed = oldDependencyIds.filter(id => !newDependencyIds.includes(id));
   const added = newDependencyIds.filter(id => !oldDependencyIds.includes(id));
-  if (removed.length) await tx.taskDependency.deleteMany({ where: { taskId, dependsOnId: { in: removed } } });
-  if (added.length) await tx.taskDependency.createMany({ data: added.map(dependsOnId => ({ taskId, dependsOnId })) });
+  if (removed.length) await tx.taskDependency.updateMany({
+    where: { taskId, dependsOnId: { in: removed }, deletedAt: null }, data: { deletedAt: new Date() },
+  });
+  if (added.length) {
+    const retained = await tx.taskDependency.findMany({
+      where: { taskId, dependsOnId: { in: added }, deletedAt: { not: null } }, select: { dependsOnId: true },
+    });
+    const retainedIds = new Set(retained.map(row => row.dependsOnId));
+    if (retained.length) await tx.taskDependency.updateMany({
+      where: { taskId, dependsOnId: { in: [...retainedIds] }, deletedAt: { not: null } }, data: { deletedAt: null },
+    });
+    const newEdges = added.filter(dependsOnId => !retainedIds.has(dependsOnId));
+    if (newEdges.length) await tx.taskDependency.createMany({ data: newEdges.map(dependsOnId => ({ taskId, dependsOnId })) });
+  }
   const afterTask = added.length || removed.length ? await tx.task.findUniqueOrThrow({ where: { id: task.id } }) : updated;
   const inverse = !engineering && !task.allocationGroupId && !task._count.timeEntries && !task._count.stageSettlementShares
     ? editInverse(task, afterTask, oldDependencyIds, newDependencyIds) : null;
