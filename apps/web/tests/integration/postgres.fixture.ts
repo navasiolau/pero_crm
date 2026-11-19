@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { PrismaClient, Prisma, type Role } from "@prisma/client";
+import { activePayoutWhere } from "../../src/server/payroll/active-records";
 import { activePaymentWhere } from "../../src/server/payments/active-records";
 import { nativeSnapshot, verifiedRollback } from "../helpers/native-acceptance-snapshot";
 import { assertCiPostgresTarget, assertCiRuntimeTarget } from "./runtime/target.mjs";
@@ -96,7 +97,7 @@ export function fixedBynTotal(history: readonly { amount: Prisma.Decimal; bynAmo
   return total.toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
 }
 export async function savedOrgBalance(tx: Prisma.TransactionClient) {
-  const [records, payouts] = await Promise.all([tx.payment.findMany({ where: activePaymentWhere }), tx.payout.findMany()]);
+  const [records, payouts] = await Promise.all([tx.payment.findMany({ where: activePaymentWhere }), tx.payout.findMany({ where: activePayoutWhere })]);
   const paid = fixedBynTotal(payouts);
   assert.notEqual(paid, null, "SYNTHETIC_BASELINE_BYN_UNAVAILABLE");
   return records.reduce((total, row) => row.direction === "INCOME" ? total.plus(row.bynAmount) : total.minus(row.bynAmount), new Prisma.Decimal(0)).minus(paid!);
