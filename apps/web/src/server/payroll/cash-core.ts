@@ -24,11 +24,14 @@ export type CashPayoutInput = {
 };
 
 export class PayoutValidationError extends Error {}
+export class PayoutPermissionError extends PayoutValidationError {}
 function fail(message: string): never { throw new PayoutValidationError(message); }
 
 export function assertPayoutRole(actor: PayoutActor, kind: string): void {
   if (kind !== "ADVANCE" && kind !== "SALARY") fail("Неизвестный тип выплаты");
-  if (!hasAnyRole(actor.roles, kind === "ADVANCE" ? ADVANCE_ROLES : PAYROLL_MANAGE_ROLES)) fail("Недостаточно прав");
+  if (!hasAnyRole(actor.roles, kind === "ADVANCE" ? ADVANCE_ROLES : PAYROLL_MANAGE_ROLES)) {
+    throw new PayoutPermissionError("Недостаточно прав");
+  }
 }
 
 function normalizedInput(actor: PayoutActor, input: CashPayoutInput, now: Date) {
