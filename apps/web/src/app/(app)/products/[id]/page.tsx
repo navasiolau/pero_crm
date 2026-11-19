@@ -56,7 +56,7 @@ export default async function ProductPage({
 
   const canManage = hasAnyRole(role, MANAGER_ROLES);
   const canViewAllPercentage = canViewProductMoney(role);
-  const canEditTech = canEditProductTechnicalBlock(actor, product);
+  const canEditTech = canEditProductTechnicalBlock(actor, product) && (canManage || product.engineerId === actor.id);
   const canManageFiles = canManageProductFiles(role, product);
   const canAllocateWork=hasAnyRole(role,FIELD_ROLES)&&fieldProductStatuses(role).includes(product.status)&&!canManage;
   const allocationData=canAllocateWork?await listWorkerAllocationData(session.user.id,product.id):undefined;
@@ -86,7 +86,7 @@ export default async function ProductPage({
   const percentagePeople = workers.map(user => ({ id: user.id, name: user.name, active: true, roles: user.roles }));
   const percentageProps = { productId: product.id, canManage, canViewAll: canViewAllPercentage };
   return (
-    <ProductInlineProvider key={`${product.id}:${product.canReadTechnicalSpecifications}`} productId={product.id} technicalSpecifications={product.technicalSpecifications} initial={{
+    <ProductInlineProvider key={product.id} productId={product.id} technicalSpecifications={product.technicalSpecifications} initial={{
       title: product.title, kind: product.kind, quantity: product.quantity, expectedPrice: showAmount ? product.expectedPrice?.toString() ?? null : null, engineerId: product.engineerId, description: product.description, "project.clientId": product.project.client.id,
     }}>
       <ProductSinglePage
@@ -104,8 +104,7 @@ export default async function ProductPage({
             <ProductInlineContacts canManage={canManage} clients={(canManage?clients:[product.project.client]).map(client=>({id:client.id,label:displayClientName(client),phone:client.phone,address:client.address}))}/>
           </div>}
           details={<ProductInlineDetails canManage={canManage} canEditTech={canEditTech}
-            canReadTechnical={product.canReadTechnicalSpecifications}
-            canEditStructured={canEditTech && (canManage || product.engineerId === actor.id)} showAmount={showAmount} currency={product.project.currency}
+            showAmount={showAmount} currency={product.project.currency}
             notice={showMaterials&&materialsData?.hasShortage?<Badge variant="destructive"><TriangleAlert/>Нехватка материалов</Badge>:null}
             measurement={<ProductMeasurement projectId={product.project.id} productId={product.id} files={attachments.measurement} canEdit={canManageFiles} />}
             engineer={<SinglePercentageRow {...percentageProps} kind="ENGINEERING" section={percentageView.sections.ENGINEERING} assignedEngineerId={product.engineerId} editEngineer candidates={engineers.map(user => ({ id: user.id, name: user.name, active: true, roles: user.roles }))} />}

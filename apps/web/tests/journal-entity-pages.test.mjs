@@ -12,7 +12,7 @@ const pages = ["src/app/(app)/projects/[id]/page.tsx", "src/app/(app)/products/[
 const common = `
 export const state={roles:['ADMIN'],journalRenders:[]};
 export const project={id:'project-stable',number:'203',title:'Проект',clientId:'client',client:{id:'client',name:'Клиент'},stage:'LEAD',currency:'BYN',createdAt:new Date('2026-11-16'),stageChangedAt:new Date('2026-11-16'),createdById:null,products:[],tasks:[],works:[],payments:[],files:[],stageHistory:[],managerId:null};
-export const product={id:'product-stable',projectId:project.id,number:'203.1',title:'Изделие',project,status:'PREPARATION',statusChangedAt:new Date('2026-11-16'),quantity:1,files:[],tasks:[],works:[],sketchFile:null,engineerId:null,canReadTechnicalSpecifications:true,canAccessDraft:true,technicalSpecifications:null};
+export const product={id:'product-stable',projectId:project.id,number:'203.1',title:'Изделие',project,status:'PREPARATION',statusChangedAt:new Date('2026-11-16'),quantity:1,files:[],tasks:[],works:[],sketchFile:null,engineerId:null,canAccessDraft:true,technicalSpecifications:null};
 `;
 const boundaries = {
   "next/navigation": "export const redirect=()=>{throw Error('UNEXPECTED_REDIRECT')}; export const notFound=()=>{throw Error('UNEXPECTED_NOT_FOUND')};",

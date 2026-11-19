@@ -38,8 +38,8 @@ function ProductLiveTotal({ price, quantity, currency }: {
   const total = productDraftTotal(p, q);
   return <div className="min-w-0 break-words pt-6" aria-live="polite">Сумма: {formatAmount(total,currency)}</div>;
 }
-export function ProductInlineDetails({ canManage, canEditTech, canEditStructured = canEditTech, canReadTechnical = true, showAmount, currency, measurement, engineer, notice }: {
-  canManage: boolean; canEditTech: boolean; canEditStructured?: boolean; canReadTechnical?: boolean; showAmount: boolean; currency: string;
+export function ProductInlineDetails({ canManage, canEditTech, showAmount, currency, measurement, engineer, notice }: {
+  canManage: boolean; canEditTech: boolean; showAmount: boolean; currency: string;
   notice?: ReactNode; measurement: ReactNode; engineer: ReactNode;
 }) {
   const { controller } = useProductInline();
@@ -52,7 +52,7 @@ export function ProductInlineDetails({ canManage, canEditTech, canEditStructured
       <InlineQuantityField controller={quantity} readOnly={!canManage}/>
       {showAmount?<ProductLiveTotal price={price} quantity={quantity} currency={currency}/>:null}
     </CardContent></Card>
-    {canReadTechnical && <Card className="min-w-0"><CardContent className="min-w-0 p-4"><ProductTechnicalSpecifications canEditLegacy={canEditTech} canEdit={canEditStructured} /></CardContent></Card>}
+    <Card className="min-w-0"><CardContent className="min-w-0 p-4"><ProductTechnicalSpecifications canEdit={canEditTech} /></CardContent></Card>
     {measurement}
     {engineer}
   </div>;

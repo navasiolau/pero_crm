@@ -19,10 +19,10 @@ const { ProductInlineProvider } = require("../src/components/product-inline-prov
 const { ProductInlineContacts, ProductInlineDetails } = require("../src/components/product-inline-fields") as typeof import("../src/components/product-inline-fields");
 
 const initial = { title: "Шкаф", kind: null, quantity: 3, expectedPrice: "12.50", engineerId: "engineer", description: "Описание", "project.clientId": "client", "project.address": "Адрес", "client.phone": "+375290000000" };
-function details(canManage: boolean, canEditTech: boolean, showAmount: boolean, expectedPrice: string | null = initial.expectedPrice, technicalSpecifications?: TechnicalSpecifications, canReadTechnical = true) {
+function details(canManage: boolean, canEditTech: boolean, showAmount: boolean, expectedPrice: string | null = initial.expectedPrice, technicalSpecifications?: TechnicalSpecifications) {
   // eslint-disable-next-line react/no-children-prop -- provider requires children in its typed props
   return renderToStaticMarkup(createElement(ProductInlineProvider, { productId: "product", initial: { ...initial, expectedPrice }, technicalSpecifications, children: createElement(ProductInlineDetails, {
-    canManage, canEditTech, canReadTechnical, showAmount, currency: "BYN", notice: createElement("p", null, "Нехватка материалов"),
+    canManage, canEditTech, showAmount, currency: "BYN", notice: createElement("p", null, "Нехватка материалов"),
     measurement: createElement("p", null, "Замер"), engineer: createElement("p", null, "Инженер и процент"),
   }) }));
 }
@@ -42,7 +42,9 @@ test("техническое описание показывает исходн�
   assert.match(html, /Фурнитура/);
   assert.doesNotMatch(html, /1800 мм|Модель|Исходное описание|<details|Добавить раздел|Удалить раздел|<script>|<textarea/);
   assert.equal((details(false, true, false, null, specs).match(/<textarea\b/g) ?? []).length, 8);
-  assert.doesNotMatch(details(false, false, false, null, specs, false), /Корпус|Исходное описание|Техническое описание/);
+  const cleared = details(false, false, false, null, { ...specs, sections: [] });
+  assert.match(cleared, /data-product-technical-specifications/);
+  assert.doesNotMatch(cleared, /<li\b|<textarea\b|data-technical-trailing="true"|>Описание<\/span>/);
 });
 test("длинный многострочный материал сохранён целиком и защищён от HTML в редакторе и чтении", () => {
   const value = "Дуб натуральный\n".repeat(500) + "<script>текст</script>";
