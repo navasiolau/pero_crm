@@ -54,7 +54,7 @@ export async function createProjectInTransaction(
   requireActorRoles(actor, MANAGER_ROLES);
   const data = createProjectSchema.parse(input);
   const { number, numberInt } = await allocateProjectNumberInTransaction(tx);
-  const client = await tx.client.findUnique({ where: { id: data.clientId }, select: { id: true, name: true, lastName: true, middleName: true, isContactPerson: true } });
+  const client = await tx.client.findUnique({ where: { id: data.clientId, deletedAt: null }, select: { id: true, name: true, lastName: true, middleName: true, isContactPerson: true } });
   if (!client)
     throw new Error("Клиент не найден");
   const project = await tx.project.create({ data: {

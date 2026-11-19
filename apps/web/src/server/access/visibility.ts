@@ -260,7 +260,7 @@ function fileVisibilityWhereGrants(actor: VisibilityActor): Prisma.FileWhereInpu
 }
 
 export function clientVisibilityWhere(actor: VisibilityActor): Prisma.ClientWhereInput {
-  return hasFullProjectVisibility(actor) ? {} : { projects: { some: projectVisibilityWhere(actor) } };
+  return { deletedAt: null, ...(hasFullProjectVisibility(actor) ? {} : { projects: { some: projectVisibilityWhere(actor) } }) };
 }
 
 /** Дополнительное ограничение, не заменяющее обычные grants или soft-delete. */

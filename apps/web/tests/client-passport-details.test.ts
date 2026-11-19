@@ -70,7 +70,7 @@ test("full client editor keeps an independently changed passport and rejects two
   assert.equal((await updateClientInTransaction(f.tx, actor(), id, { ...inputFor(initial), phone: "300" }, initial)).ok, true);
   assert.equal(f.current().phone, "300");
   assert.equal(f.current().passportNumber, "QA 000004");
-  assert.deepEqual(f.writes[0], { where: { id, phone: "100" }, data: { phone: "300" } });
+  assert.deepEqual(f.writes[0], { where: { id, deletedAt: null, phone: "100" }, data: { phone: "300" } });
   const conflict = await updateClientInTransaction(f.tx, actor(), id, { ...inputFor(initial), passportNumber: "QA 000005" }, initial);
   assert.equal(conflict.ok, false);
   assert.match(conflict.error ?? "", /другим пользователем/);

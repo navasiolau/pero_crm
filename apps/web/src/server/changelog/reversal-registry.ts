@@ -6,7 +6,10 @@ import { ordinaryExpenseProjectReversal } from "@/server/payments/project-assign
 import { proposalMediaUploadReversal } from "@/server/kp/media-upload-reversal";
 import { logisticsReallocationReversal } from "@/server/logistics/reallocation-reversal";
 
+import { officeDirectoryReversal } from "./office-directory-reversal";
+
 export const journalReversals = [
+  officeDirectoryReversal,
   productTitleReversal,
   paymentVisibilityReversal,
   retainedFileReversal,

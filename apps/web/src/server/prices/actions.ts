@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { auth } from "@/auth";
+import { officeCommand, officeCreated, officePatch } from "@/server/changelog/office-directory-reversal";
 import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 import { withTaskTransaction } from "@/server/tasks/transaction";
 import { canManagePrices } from "@/lib/roles";
@@ -42,6 +43,7 @@ export async function createPriceItem(
     entity: "priceItem",
     entityId: item.id,
     action: "create",
+    reversal: officeCreated("priceItem", item.id, item),
     newValue: { name: item.name, price: item.price.toString(), unit: item.unit },
   }, { entity: { label: `Расценка ${item.name}`, href: "/prices" }, contexts: [], before: null,
     after: { name: item.name, price: item.price.toString(), unit: item.unit, category: item.category, active: item.active } });
@@ -69,6 +71,7 @@ export async function updatePriceItem(
     entity: "priceItem",
     entityId: itemId,
     action: "update",
+    reversal: officeCommand(itemId, [officePatch("priceItem", itemId, before, after, ["name", "unit", "price", "category"])]),
     oldValue: {
       name: before.name,
       price: before.price.toString(),
@@ -98,7 +101,7 @@ export async function togglePriceItem(
   const before = await tx.priceItem.findUnique({ where: { id: itemId } });
   if (!before) return { ok: false as const, error: "Расценка не найдена" };
   if (before.active === active) return { ok: true as const };
-  await tx.priceItem.update({ where: { id: itemId }, data: { active } });
+  const after = await tx.priceItem.update({ where: { id: itemId }, data: { active } });
   await writeChangeLogInTransaction(tx, {
     actorType: "user",
     actorId: session.user.id,
@@ -106,6 +109,7 @@ export async function togglePriceItem(
     entity: "priceItem",
     entityId: itemId,
     action: "toggle",
+    reversal: after ? officeCommand(itemId, [officePatch("priceItem", itemId, before, after, ["active"])]) : undefined,
     field: "active",
     oldValue: !active,
     newValue: active,

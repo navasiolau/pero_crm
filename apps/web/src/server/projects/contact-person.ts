@@ -4,6 +4,9 @@ import { liveProjectWhere } from '@/server/access/live-entities';
 import { writeChangeLogInTransaction } from '@/server/changelog/writer';
 import { automationJournalContext, projectJournalContext } from './journal';
 
+type ContactSnapshot = { id: string; contactPerson: string | null; clientId: string; officeFieldHeads: Prisma.JsonValue };
+type Group = { operationRootId: string; onUpdated(before: ContactSnapshot, after: ContactSnapshot): void };
+
 type ContactPersonClient = Pick<Client, 'id' | 'name' | 'lastName' | 'middleName'> & { isContactPerson?: boolean };
 
 export function projectContactPersonForClient(client: Omit<ContactPersonClient, 'id'>): string | null {
@@ -13,12 +16,12 @@ export function projectContactPersonForClient(client: Omit<ContactPersonClient, 
 }
 
 /** Вызывается только при включении галочки, внутри общего координатора мутаций. */
-export async function fillEmptyProjectContactPersons(tx: Prisma.TransactionClient, actor: DomainActor, client: ContactPersonClient) {
+export async function fillEmptyProjectContactPersons(tx: Prisma.TransactionClient, actor: DomainActor, client: ContactPersonClient, group?: Group) {
   const contactPerson = projectContactPersonForClient(client);
   if (!contactPerson) return [];
   const projects = await tx.project.findMany({
     where: { ...liveProjectWhere, clientId: client.id, contactPerson: null },
-    select: { id: true, number: true }, orderBy: { id: 'asc' },
+    select: { id: true, number: true, clientId: true, contactPerson: true, officeFieldHeads: true }, orderBy: { id: 'asc' },
   });
   const affectedProjectIds: string[] = [];
   for (const project of projects) {
@@ -26,9 +29,12 @@ export async function fillEmptyProjectContactPersons(tx: Prisma.TransactionClien
       where: { ...liveProjectWhere, id: project.id, clientId: client.id, contactPerson: null }, data: { contactPerson },
     });
     if (!updated.count) continue;
+    if (group) group.onUpdated(project, await tx.project.findUniqueOrThrow({ where: { id: project.id },
+      select: { id: true, clientId: true, contactPerson: true, officeFieldHeads: true },
+    }));
     await writeChangeLogInTransaction(tx, {
       actorType: 'user', actorId: actor.id, actorName: actor.name, source: actor.source,
-      entity: 'project', entityId: project.id, action: 'update', field: 'contactPerson',
+      operationRootId: group?.operationRootId, entity: 'project', entityId: project.id, action: 'update', field: 'contactPerson',
       oldValue: { contactPerson: null }, newValue: { contactPerson },
     }, { ...projectJournalContext(project), ...automationJournalContext(actor, 'Клиент отмечен контактным лицом'),
       links: [{ type: 'client', id: client.id, label: contactPerson }] });
