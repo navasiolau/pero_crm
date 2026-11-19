@@ -70,9 +70,12 @@ export async function verifyProductNumberingNative(tx: Prisma.TransactionClient,
   assert.equal((await applyProductNumberRepairInTransaction(tx, baseline)).repeated, true);
   const unchanged = await tx.product.findMany({ where: { projectId: repair.id }, orderBy: { id: "asc" } });
   await assert.rejects(rollbackProductNumberRepairInTransaction(tx, { ...baseline, protectedHash: "0".repeat(64) }), /RECEIPT_PAYLOAD/);
+  await tx.$executeRawUnsafe("SAVEPOINT qa211_later_title");
   await tx.product.update({ where: { id: baseline.productId }, data: { title: "Изменено после правки211" } });
   await assert.rejects(rollbackProductNumberRepairInTransaction(tx, baseline), /POST_STATE_CHANGED/);
-  await tx.product.update({ where: { id: baseline.productId }, data: { title: "Коррекция211", updatedAt: new Date(applied.updatedAt) } });
+  // Возвращаем весь тестовый эксперимент, включая версию поля, перед проверкой исходной операции.
+  await tx.$executeRawUnsafe("ROLLBACK TO SAVEPOINT qa211_later_title");
+  await tx.$executeRawUnsafe("RELEASE SAVEPOINT qa211_later_title");
   assert.deepEqual(await tx.product.findMany({ where: { projectId: repair.id }, orderBy: { id: "asc" } }), unchanged);
   const rollback = await rollbackProductNumberRepairInTransaction(tx, baseline); assert.equal(rollback.to, `${repair.number}.64`);
   assert.equal((await rollbackProductNumberRepairInTransaction(tx, baseline)).repeated, true);
