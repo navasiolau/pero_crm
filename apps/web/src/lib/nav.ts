@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 
 import {
+  ADMIN_ROLES,
   ASSIGNEE_ROLES,
   COUNTERPARTY_ROLES,
   FIELD_ROLES,
@@ -62,7 +63,7 @@ export const navItems: NavItem[] = [
   { href: "/warehouse", label: "Склад", icon: Warehouse, roles: OFFICE_ROLES, group: "manage" },
   { href: "/finance", label: "Финансы", icon: Banknote, roles: FINANCE_ROLES, group: "manage" },
   { href: "/logistics", label: "Логистика", icon: Truck, roles: LOGISTICS_DOCUMENT_ROLES, group: "manage" },
-  { href: "/changelog", label: "Журнал", icon: History, roles: ["ADMIN"], group: "manage" },
+  { href: "/changelog", label: "Журнал", icon: History, roles: ADMIN_ROLES, group: "manage" },
   { href: "/settings", label: "Настройки", icon: Settings, roles: MANAGER_ROLES, group: "manage" },
 ];
 

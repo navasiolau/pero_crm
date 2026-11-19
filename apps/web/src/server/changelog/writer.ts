@@ -26,6 +26,9 @@ export async function writeChangeLogInTransaction(
     ...(entry.id === undefined ? {} : { id: entry.id }), actorType: entry.actorType, actorId: entry.actorId, actorName: entry.actorName,
     entity: entry.entity, entityId: entry.entityId, action: entry.action, field: entry.field,
     oldValue: rawJson(entry.oldValue), newValue: rawJson(entry.newValue), source, createdAt,
+    ...(entry.operationRootId ? { operationRootId: entry.operationRootId } : {}),
+    ...(entry.reversal ? { reversal: entry.reversal } : {}),
+    ...(entry.reversesId ? { reversesId: entry.reversesId } : {}),
     presentation: JSON.parse(JSON.stringify(presentation)) as Prisma.InputJsonValue,
     searchText: buildJournalSearchText(normalized, presentation),
   } });
