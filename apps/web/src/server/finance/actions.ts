@@ -1,10 +1,12 @@
 "use server";
 
+import { financeSessionSource } from "@/server/telegram/finance-session";
+
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { writeChangeLogInTransaction } from "@/server/changelog/writer";
-import { requireFinance, requireRole } from "@/server/require-role";
+import { requireFinance, requireFinanceRole } from "@/server/require-role";
 import { withTaskTransaction } from "@/server/tasks/transaction";
 import { DEFAULT_CASH_ACCOUNT_MANAGE_ROLES } from "@/lib/cash-account-default";
 import { saveDefaultCashAccount, toggleCashAccountCore } from "./default-cash-core";
@@ -67,6 +69,7 @@ export async function addCashAccount(
     actorType: "user",
     actorId: session.user.id,
     actorName: session.user.name ?? undefined,
+    source: financeSessionSource(session),
     entity: "cashAccount",
     entityId: account.id,
     action: "create",
@@ -85,16 +88,16 @@ export async function toggleCashAccount(
 ): Promise<{ ok: boolean; error?: string }> {
   const session = await requireFinance();
   try {
-    const result = await withTaskTransaction(tx => toggleCashAccountCore({ id: session.user.id, name: session.user.name ?? "", roles: session.user.roles, source: "web" }, accountId, tx));
+    const result = await withTaskTransaction(tx => toggleCashAccountCore({ id: session.user.id, name: session.user.name ?? "", roles: session.user.roles, source: financeSessionSource(session) }, accountId, tx));
     if (result.ok) revalidatePath("/", "layout");
     return result;
   } catch { return { ok: false, error: "Не удалось изменить активность кассы" }; }
 }
 
 export async function setDefaultCashAccount(input: DefaultCashAccountPatch): Promise<DefaultCashAccountResult> {
-  const session = await requireRole(DEFAULT_CASH_ACCOUNT_MANAGE_ROLES);
+  const session = await requireFinanceRole(DEFAULT_CASH_ACCOUNT_MANAGE_ROLES);
   try {
-    const result = await withTaskTransaction(tx => saveDefaultCashAccount({ id: session.user.id, name: session.user.name ?? "", roles: session.user.roles, source: "web" }, input, tx));
+    const result = await withTaskTransaction(tx => saveDefaultCashAccount({ id: session.user.id, name: session.user.name ?? "", roles: session.user.roles, source: financeSessionSource(session) }, input, tx));
     if (result.ok) revalidatePath("/", "layout");
     return result;
   } catch { return { ok: false, kind: "failure", error: "Не удалось сохранить кассу по умолчанию" }; }
@@ -105,13 +108,13 @@ export async function setDefaultCashAccount(input: DefaultCashAccountPatch): Pro
 export async function addExpenseArticle(input: ExpenseArticleInput): Promise<ExpenseArticleCreateResult> {
   const session=await requireFinance();
   try{
-    const result=await withTaskTransaction(tx=>createExpenseArticleCore(session.user,input,tx));
+    const result=await withTaskTransaction(tx=>createExpenseArticleCore({ ...session.user, source: financeSessionSource(session) },input,tx));
     if(result.ok)revalidatePath('/finance/articles');
     return result.ok?{ok:true,article:{id:result.article.id,name:result.article.name}}:result;
   }catch(error){return{ok:false,error:expenseArticleCreateError(error)};}
 }
 export async function toggleExpenseArticle(articleId:string):Promise<{ok:boolean;error?:string}>{
   const session=await requireFinance();
-  try{const result=await withTaskTransaction(tx=>toggleExpenseArticleCore(session.user,articleId,tx));if(result.ok)revalidatePath('/finance/articles');return result;}
+  try{const result=await withTaskTransaction(tx=>toggleExpenseArticleCore({ ...session.user, source: financeSessionSource(session) },articleId,tx));if(result.ok)revalidatePath('/finance/articles');return result;}
   catch{return{ok:false,error:'Не удалось изменить активность статьи'};}
 }
