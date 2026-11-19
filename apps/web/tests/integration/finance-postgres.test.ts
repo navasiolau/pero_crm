@@ -435,17 +435,22 @@ test("payment/foreign-preflight-decimal-snapshots-article-fences-and-delete-caps
   await assert.rejects(payments.createPaymentInTransaction(c.actor, c.input, prepared, tx), /Реквизиты платежа/);
   assert.deepEqual(await money(tx), baseline);
   const income = await tx.payment.create({ data: { cashAccountId: c.account.id, amount: "100", bynAmount: "100" } });
-  await assert.rejects(paymentDelete.deletePaymentInTransaction({ ...c.actor, roles: ["MANAGER"] }, income.id, "INCOME", "BYN", "1", tx), /прав/);
+  await assert.rejects(paymentDelete.deletePaymentInTransaction({ ...c.actor, roles: ["MANAGER"] }, income.id, tx), /прав/);
   const spent = await tx.payment.create({ data: { cashAccountId: c.account.id, direction: "EXPENSE", amount: "1000.01", bynAmount: "1000.01" } });
-  await assert.rejects(paymentDelete.deletePaymentInTransaction(c.actor, income.id, "INCOME", "BYN", "1", tx), /остаток кассы/);
+  await assert.rejects(paymentDelete.deletePaymentInTransaction(c.actor, income.id, tx), /остаток кассы/);
   await tx.payment.delete({ where: { id: spent.id } });
-  assert.equal((await paymentDelete.deletePaymentInTransaction(c.actor, income.id, "INCOME", "BYN", "1", tx)).id, income.id);
+  assert.equal((await paymentDelete.deletePaymentInTransaction(c.actor, income.id, tx)).id, income.id);
   const audit = await tx.changeLog.findFirstOrThrow({ where: { entity: "payment", entityId: income.id, action: "delete" } });
   assert.equal((audit.oldValue as { project: unknown }).project, null);
   assert.equal(await tx.changeLog.count({ where: { entity: "payment", entityId: income.id, action: "delete" } }), 1);
   const archived = await tx.payment.create({ data: { projectId: c.project!.id, projectAmount: "1", direction: "EXPENSE", amount: "1", bynAmount: "1" } });
   await tx.project.update({ where: { id: c.project!.id }, data: { deletedAt: new Date() } });
-  await assert.rejects(paymentDelete.deletePaymentInTransaction(c.actor, archived.id, "EXPENSE", "BYN", "1", tx), /только для просмотра/);
+  await assert.rejects(paymentDelete.deletePaymentInTransaction(c.actor, archived.id, tx), /только для просмотра/);
+}));
+
+test("payment/reversal-uses-original-financial-facts-and-ordered-documents", async () => fixture.rollback(async tx => {
+  const { verifyPaymentVisibility } = await import("../helpers/native-payment-visibility");
+  await verifyPaymentVisibility(tx);
 }));
 
 test("payment/scenario-minimal-effects-replay-skips-fx", async () => fixture.rollback(async (tx, rows) => {
@@ -555,7 +560,7 @@ for (const currency of ["BYN", "USD"] as const) test(`warehouse/paid-receipt-cas
       assert.deepEqual(await nativeSnapshot(tx), beforeDocument, "COMPOSITE_DOCUMENT_DENIAL_ROLLS_BACK_WAREHOUSE_MONEY_AUDIT_OUTBOX");
     }
   }
-  await assert.rejects(paymentDelete.deletePaymentInTransaction(actor, receipt.paymentId, "EXPENSE", currency, "1", tx), /связан/);
+  await assert.rejects(paymentDelete.deletePaymentInTransaction(actor, receipt.paymentId, tx), /связан/);
   await rejectedSql(tx, () => tx.payment.delete({ where: { id: receipt.paymentId } }), /constraint/i);
   const line = await tx.projectMaterial.create({ data: { productId: product.id, materialId: material.id, quantity: "40", quantityPerUnit: "40" } });
   const issued = await stock.warehouseMove(tx, actor, { kind: "EXPENSE", projectMaterialId: line.id, quantity: currency === "BYN" ? "10" : "1", clientMutationId: randomUUID() });
@@ -742,7 +747,7 @@ test("logistics/real-posting-correction-CAS-history-budget-and-SQL-rollback", as
   await assert.rejects(logistics.createLogisticsPostingCore(actor.id, { ...input, amount: "1001" }, "post", dependencies), /другими данными/);
   await assert.rejects(logistics.createLogisticsPostingCore(c.actor.id, { ...input, clientMutationId: randomUUID() }, "correct", dependencies), /Недостаточно прав/);
   await assert.rejects(trips.updateLogisticsTripCore(actor.id, { ...manifest, tripId: trip.tripId, expectedRevision: posted.revision, clientMutationId: randomUUID() }, transaction), /Рейс оплачен/);
-  await assert.rejects(paymentDelete.deletePaymentInTransaction(actor, oldPayments[0].id, "EXPENSE", "BYN", "1", tx), /общий рейс/);
+  await assert.rejects(paymentDelete.deletePaymentInTransaction(actor, oldPayments[0].id, tx), /общий рейс/);
   await rejectedSql(tx, () => tx.payment.update({ where: { id: oldPayments[0].id }, data: { amount: "1" } }), /IMMUTABLE/);
   await rejectedSql(tx, () => tx.logisticsDocument.delete({ where: { id: document.id } }), /IMMUTABLE/);
   const budget = await logisticsQueries.getLogisticsProjectBudgetCore(actor.id, a.id, tx);
