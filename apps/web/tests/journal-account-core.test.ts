@@ -3,6 +3,8 @@ import { test } from "node:test";
 import { Prisma, type User } from "@prisma/client";
 import type { DomainActor } from "../src/server/actor";
 import { createUserInTransaction, updateUserInTransaction, revokeUserSessionsInTransaction } from "../src/server/users/mutation-core";
+import { verifyPassword } from "../src/lib/password";
+import { userCreationReversal } from "../src/server/users/creation-reversal";
 import { userSettingsReversal } from "../src/server/users/settings-reversal";
 import { parseJournalPresentation } from "../src/server/changelog/presentation";
 
@@ -12,18 +14,26 @@ const initial = { id: "employee", email: "worker@example.invalid", name: "Ива
 const settings = { email: initial.email, name: "Иван Новый", position: "Сборщик", phone: "456", telegram: "ivan-new", roles: ["ENGINEER"] as User["roles"],
   payScheme: "PERCENT_PROJECT" as const, payPercent: 7, active: false, calendarEnabled: true };
 
-function fixture() {
+function fixture({ securityTrigger = false } = {}) {
   let row = structuredClone({ ...initial, payPercent: "5" });
   const audits: Prisma.ChangeLogCreateInput[] = [];
-  let rejectAudit = false, writes = 0;
-  const tx = { $queryRaw: async () => [{ id: "employee" }], user: {
+  let rejectAudit = false, writes = 0, dependency: string | null = null, otherAdmins = 1;
+  const tx = { $queryRaw: async () => [{ id: "employee", acquired: true }],
+    task: { findFirst: async () => dependency === "task" ? { id: "open-task" } : null },
+    project: { findFirst: async () => dependency === "project" ? { id: "open-project" } : null },
+    product: { findFirst: async () => dependency === "product" ? { id: "open-product" } : null },
+    productPercentageParticipant: { findFirst: async () => dependency === "percentage" ? { id: "open-participation" } : null },
+    timeEntry: { findFirst: async () => dependency === "timer" ? { id: "running" } : null },
+    telegramLink: { findUnique: async () => null },
+    user: {
     findUnique: async () => row,
+    count: async () => otherAdmins,
     findFirst: async () => null,
     create: async ({ data }: { data: Record<string, unknown> }) => { writes++; row = { ...row, ...data } as typeof row; return row; },
     update: async ({ data }: { data: Record<string, unknown> }) => { writes++; const changed = Object.entries(data).some(([key, value]) => key !== "calendarEnabled" && JSON.stringify(row[key as keyof typeof row]) !== JSON.stringify(value));
-      row = { ...row, ...data, accountRevision: row.accountRevision + Number(changed), sessionVersion: typeof data.sessionVersion === "object" ? row.sessionVersion + 1 : row.sessionVersion } as typeof row; return row; },
+      row = { ...row, ...data, accountRevision: row.accountRevision + Number(changed), sessionVersion: typeof data.sessionVersion === "object" || (securityTrigger && (data.active !== row.active || data.passwordHash)) ? row.sessionVersion + 1 : row.sessionVersion } as typeof row; return row; },
   }, apiToken: { findMany: async () => [] }, changeLog: { create: async ({ data }: { data: Prisma.ChangeLogCreateInput }) => { if (rejectAudit) throw new Error("AUDIT_FAILED"); audits.push(data); return { id: `audit-${audits.length}`, ...data }; } } };
-  return { tx: tx as unknown as Prisma.TransactionClient, audits, get row() { return row; }, get writes() { return writes; }, fail: () => { rejectAudit = true; } };
+  return { tx: tx as unknown as Prisma.TransactionClient, audits, get row() { return row; }, get writes() { return writes; }, setDependency: (value: string | null) => { dependency = value; }, setOtherAdmins: (value: number) => { otherAdmins = value; }, fail: () => { rejectAudit = true; } };
 }
 
 test("all changed employee fields appear with safe before/after and unchanged raw identity", async () => {
@@ -106,4 +116,43 @@ test("account reversal restores allowed settings once and leaves the issued pass
   assert.equal(f.row.name, initial.name); assert.deepEqual(f.row.roles, initial.roles); assert.equal(f.row.active, true);
   assert.equal(f.row.passwordHash, "new-hash-secret"); assert.equal(f.row.calendarEnabled, true);
   await assert.rejects(() => handler.apply(ctx), /после записи/);
+});
+
+
+test("user creation compensation refuses self, the last administrator and current operational dependencies", async () => {
+  const f = fixture();
+  const result = await createUserInTransaction(f.tx, admin, { ...settings, active: true, roles: ["ADMIN"], passwordHash: "old-secret" });
+  assert.ok(result.ok);
+  const root = f.audits[0]!.reversal as { data: unknown };
+  const handler = userCreationReversal.read(root.data); assert.ok(handler);
+  const ctx = { tx: f.tx, actor: admin, entryId: "entry", entityId: result.user.id };
+  await assert.rejects(() => handler.apply({ ...ctx, actor: { ...admin, id: result.user.id } }), /собственную/);
+  f.setOtherAdmins(0);
+  await assert.rejects(() => handler.apply(ctx), /администратор/);
+  f.setOtherAdmins(1);
+  for (const dependency of ["task", "project", "product", "percentage", "timer"]) {
+    f.setDependency(dependency);
+    await assert.rejects(() => handler.apply(ctx), /Переназначьте/);
+  }
+  assert.equal(f.writes, 1);
+  assert.equal(f.row.active, true);
+});
+
+test("compensating account creation keeps its ID, rotates credentials and forbids redo from the journal", async () => {
+  const f = fixture({ securityTrigger: true });
+  const result = await createUserInTransaction(f.tx, admin, { ...settings, active: true, passwordHash: "old-password" });
+  assert.ok(result.ok);
+  const handler = userCreationReversal.read((f.audits[0]!.reversal as { data: unknown }).data); assert.ok(handler);
+  const ctx = { tx: f.tx, actor: admin, entryId: "entry", entityId: result.user.id };
+  assert.match(handler.confirmation ?? "", /перестанут действовать/);
+  const effect = await handler.apply(ctx);
+  assert.equal(f.row.id, result.user.id);
+  assert.equal(f.row.active, false);
+  assert.ok(f.row.sessionVersion > result.user.sessionVersion);
+  assert.equal(await verifyPassword(f.row.passwordHash, "old-password"), false);
+  await effect.afterWrite?.("new-journal-root");
+  assert.equal(f.audits.at(-1)?.operationRootId, "new-journal-root");
+  assert.ok(!JSON.stringify([effect, ...f.audits]).includes(f.row.passwordHash));
+  const terminal = userCreationReversal.read(effect.reversal.data); assert.ok(terminal);
+  await assert.rejects(() => terminal.apply(ctx), /выдача нового пароля/);
 });

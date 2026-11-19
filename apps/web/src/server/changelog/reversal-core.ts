@@ -46,7 +46,8 @@ export async function previewJournalReversalInTransaction(tx: Prisma.Transaction
     throw new JournalReversalRefusal("Действие уже отменено");
   const reason = await handler.preview(ctx);
   if (reason) throw new JournalReversalRefusal(reason);
-  return { entryId: root.id, entityLabel: presentation.entity.label, actionLabel: presentation.action.label };
+  return { entryId: root.id, entityLabel: presentation.entity.label, actionLabel: presentation.action.label,
+    ...(handler.confirmation ? { confirmation: handler.confirmation } : {}) };
 }
 
 export async function reverseJournalActionInTransaction(tx: Prisma.TransactionClient, actorId: string, input: unknown) {

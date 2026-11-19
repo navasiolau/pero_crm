@@ -45,7 +45,7 @@ export function JournalReversal({ entryId, scope, onReversed }: { entryId: strin
 
   if (done) return <p role="status">Действие отменено</p>;
   return <div className="space-y-2">
-    {preview ? <p>Отменить действие «{preview.actionLabel}» для «{preview.entityLabel}»?</p> : null}
+    {preview ? <p>{preview.confirmation ?? <>Отменить действие «{preview.actionLabel}» для «{preview.entityLabel}»?</>}</p> : null}
     <div className="flex flex-wrap gap-2">
       <Button type="button" variant={preview ? "destructive" : "outline"} disabled={pending} onClick={() => void run(Boolean(preview))}>
         {preview ? "Подтвердить откат" : "Откат действия"}

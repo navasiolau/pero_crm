@@ -3,6 +3,7 @@ import { test } from "node:test";
 import type { Prisma } from "@prisma/client";
 import type { PluginManifest } from "@pero/plugin-sdk";
 import { togglePluginInTransaction, savePluginSettingsInTransaction, createApiTokenInTransaction, revokeApiTokenInTransaction } from "../src/server/plugins/mutation-core";
+import { apiTokenCreationReversal } from "../src/server/plugins/token-creation-reversal";
 import { notificationPreferenceReversal } from "../src/server/notifications/preference-reversal";
 import { setNotificationPreferenceInTransaction } from "../src/server/notifications/preference-core";
 import { parseJournalPresentation } from "../src/server/changelog/presentation";
@@ -113,4 +114,21 @@ test("notification rollback restores the effective value and rejects an old revi
   const outcome = await handler.apply(ctx); assert.equal(outcome.newValue, true);
   await assert.rejects(() => handler.apply(ctx), /изменилась/);
   assert.equal(notificationPreferenceReversal.read({ ...command.data as object, type: "plan.reminder" }), null);
+});
+
+
+test("compensating API-token issuance revokes only that credential and refuses to reconstruct it", async () => {
+  const f = fixture(), user = { ...actor, roles: [...actor.roles] };
+  const id = (await createApiTokenInTransaction(f.tx, user, { name: "Integration", scopes: ["read"] }, "sensitive-issued-token")).id;
+  const root = f.audits[0]!.reversal as { data: unknown };
+  const handler = apiTokenCreationReversal.read(root.data); assert.ok(handler);
+  const ctx = { tx: f.tx, actor: user, entryId: "entry", entityId: id };
+  assert.match(handler.confirmation ?? "", /новый ключ/);
+  const effect = await handler.apply(ctx);
+  assert.ok(f.token?.revokedAt);
+  assert.ok(!JSON.stringify([effect, ...f.audits]).includes("sensitive-issued-token"));
+  assert.ok(!JSON.stringify(effect).includes("tokenHash"));
+  await assert.rejects(() => handler.apply(ctx), /уже отозван/);
+  const terminal = apiTokenCreationReversal.read(effect.reversal.data); assert.ok(terminal);
+  await assert.rejects(() => terminal.apply(ctx), /Выпустите новый/);
 });
