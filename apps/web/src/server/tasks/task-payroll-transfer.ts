@@ -10,6 +10,9 @@ type TaskBinding = { id: string; assigneeId: string | null; projectId: string; p
 /** Переносится только сохранённое обычное начисление самой задачи. */
 export async function readTaskPayroll(tx: Prisma.TransactionClient, task: TaskBinding): Promise<PayrollEntry[]> {
   const entries = await tx.payrollEntry.findMany({ where: { taskId: task.id }, orderBy: { id: "asc" } });
+  if (entries.some(row => row.compensatesId)) {
+    throw Error("У начисления задачи есть компенсация. Проверьте историю в Журнале.");
+  }
   if (entries.some(entry => entry.scheme !== "PIECE" || entry.userId !== task.assigneeId ||
     entry.workId !== null && entry.workId !== task.workId || entry.projectId !== null && entry.projectId !== task.projectId ||
     entry.productId !== null && entry.productId !== task.productId || entry.settlementShareId !== null ||

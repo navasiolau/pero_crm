@@ -7,7 +7,10 @@ import { proposalMediaUploadReversal } from "@/server/kp/media-upload-reversal";
 import { logisticsReallocationReversal } from "@/server/logistics/reallocation-reversal";
 import { expenseReceiptIssueReversal } from "@/server/warehouse/expense-issue-reversal";
 
+import { payrollAccrualReversal } from '@/server/payroll/accrual-reversal';
+import { payoutVisibilityReversal } from '@/server/payroll/payout-reversal';
 export const journalReversals = [
+  payrollAccrualReversal, payoutVisibilityReversal,
   productTitleReversal,
   paymentVisibilityReversal,
   retainedFileReversal,

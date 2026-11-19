@@ -10,10 +10,10 @@ let due: number | null = 10;
 let balance: number | null = 100;
 type Due = {userId:string;name:string;due:number|null};
 type Preview = {month:string;userScope:string|null;dues:Due[];orgBalance:number|null};
-let debtorRows:Due[]|null=null, cashBalance=100, rateReads=0;
-let afterFirst:'lower-next'|'unknown-next'|null=null;
-const previews:Preview[]=[], payoutWrites:{userId:string;cashAmount:string}[]=[];
-const savedPayouts=new Map<string,Prisma.Decimal>();
+let debtorRows: Due[] | null = null, rateReads = 0;
+const previews: Preview[] = [], payoutWrites: { userId: string; cashAmount: string }[] = [];
+type Batch = { month: string; cashAccountId: string; paidIds: string[]; shortPaid: string[]; totalPaid: string };
+const savedBatches = new Map<string, Batch>();
 const writes: { amount: string; bynAmount: string; currency: string }[] = [];
 const actor = { id: "accountant", name: "Бухгалтер", roles: ["ACCOUNTANT"] };
 let actions: typeof import("../src/server/payroll/actions");
@@ -21,7 +21,6 @@ function makeScope() {
   const prisma = {
     user: { findMany: async () => [{ id: "u", name: "U", roles: ["MANAGER"], payPercent: "5" }] },
     payrollEntry: { findMany: async () => history, create: async ({ data }: { data: typeof writes[number] }) => { writes.push(data); return { id: "payroll" }; } },
-    payout:{findUnique:async({where}:{where:{id:string}})=>savedPayouts.has(where.id)?{amount:savedPayouts.get(where.id)}:null},
     payment: { aggregate: async () => ({ _sum: { bynAmount: new Prisma.Decimal(1000) }, _count: { _all: 1 } }) },
     changeLog: { create: async () => ({ id: "audit" }) }, domainEvent: { create: async () => ({ id: "event" }) },
   } as unknown as PrismaClient;
@@ -32,17 +31,19 @@ function makeScope() {
     "../src/server/plugins/changelog": { writeChangeLog: async () => {} },
     "../src/server/plugins/events": { emitDomainEvent: async () => {}, dispatchEvent: async () => {} },
     "../src/server/notifications/notify": { notifyOrg: async () => {}, notifyPerson: async () => {} },
-    "../src/server/finance/queries": { listCashAccounts: async () => [{ id: "cash", active: true, currency: "BYN", balance: cashBalance }] },
-    "../src/server/finance/nbrb":{getNbrbRate:async(currency:string,date:Date)=>{rateReads++;return{currency,rate:1,date:date.toISOString().slice(0,10)};}},
-    "../src/server/payroll/cash-service":{executeCashPayout:async(_actor:unknown,input:{userId:string;cashAmount:string})=>{
-      const id='saved-'+payoutWrites.length;payoutWrites.push({userId:input.userId,cashAmount:input.cashAmount});
-      savedPayouts.set(id,new Prisma.Decimal(input.cashAmount));
-      if(payoutWrites.length===1&&afterFirst&&debtorRows){
-        debtorRows=debtorRows.map(row=>row.userId==='v'?{...row,due:afterFirst==='unknown-next'?null:4}:row);
-        balance=afterFirst==='unknown-next'?null:4;cashBalance=5;
-      }
-      return{ok:true,payoutId:id};
-    }},
+    "../src/server/payroll/cash-service": { preparedRates: async () => { rateReads++; return {}; } },
+    "../src/server/payroll/payout-batch": {
+      readPayoutBatch: async (_db: unknown, _actor: unknown, { id }: { id: string }) => savedBatches.get(id) ?? null,
+      settlePayoutBatch: async (_tx: unknown, _actor: unknown, input: { id: string; month: string; cashAccountId: string },
+        debtors: { userId: string; name: string }[]) => {
+        assert.deepEqual(debtors.map(row => row.userId), ["u", "v"]);
+        payoutWrites.push({ userId: "u", cashAmount: "10.00" }, { userId: "v", cashAmount: "4.00" });
+        const result = { month: input.month, cashAccountId: input.cashAccountId, paidIds: ["one", "two"],
+          totalPaid: "14.00", shortPaid: ["V"] };
+        savedBatches.set(input.id, result);
+        return { result, effects: [] };
+      },
+    },
     "../src/server/payroll/queries": {
       currentMonth: () => "2026-10", isValidMonth: () => true,
       getMonthTurnover: async () => ({ total: 1000, currency: "BYN" }),
@@ -64,7 +65,7 @@ let priorPrisma: PropertyDescriptor | undefined;
 beforeEach(() => {
   priorCache = new Map(Object.entries(require.cache)); priorPrisma = Object.getOwnPropertyDescriptor(globalThis, "prisma");
   history = []; due = 10; balance = 100; writes.length = 0;
-  debtorRows=null;cashBalance=100;rateReads=0;afterFirst=null;previews.length=0;payoutWrites.length=0;savedPayouts.clear();
+  debtorRows = null; rateReads = 0; previews.length = 0; payoutWrites.length = 0; savedBatches.clear();
   scope = makeScope(); actions = scope.load("../src/server/payroll/actions");
 });
 afterEach(() => scope?.restore());
@@ -93,23 +94,17 @@ test("unknown debt or organization balance stops settleAll before rates or money
   assert.equal(rateReads,0);assert.equal(payoutWrites.length,0);
 });
 
-test('settleAll discards each preview and sees changed next-employee debt, org funds and cash',async()=>{
-  debtorRows=[{userId:'u',name:'U',due:10},{userId:'v',name:'V',due:10}];afterFirst='lower-next';
-  assert.deepEqual(await actions.settleAll('2026-09','cash'),{ok:true,paidCount:2,totalPaid:14,shortPaid:[]});
-  assert.deepEqual(previews.map(row=>row.userScope),[null,'u','v']);
-  assert.deepEqual(payoutWrites,[{userId:'u',cashAmount:'10.00'},{userId:'v',cashAmount:'4.00'}]);
-  assert.equal(previews[0].dues.find(row=>row.userId==='v')!.due,10);
-  assert.equal(previews[2].dues[0].due,4);assert.equal(previews[2].orgBalance,4);
-  assert.notEqual(previews[1],previews[2]);assert.equal(writes.length,0);
-});
-
-test('unknown next preview preserves partial result and prevents another financial writer',async()=>{
-  debtorRows=[{userId:'u',name:'U',due:10},{userId:'v',name:'V',due:10}];afterFirst='unknown-next';
-  const result=await actions.settleAll('2026-09','cash');
-  assert.equal(result.ok,false);assert.match(result.error!,/BYN/);
-  assert.equal(result.paidCount,1);assert.equal(result.totalPaid,10);assert.deepEqual(result.shortPaid,[]);
-  assert.deepEqual(previews.map(row=>row.userScope),[null,'u','v']);
-  assert.equal(payoutWrites.length,1);assert.equal(previews[2].dues[0].due,null);
+test("settleAll sends the candidate list once and replays the same partial package without rates or writes", async () => {
+  debtorRows = [{ userId: "u", name: "U", due: 10 }, { userId: "v", name: "V", due: 10 }];
+  const batchId = "7aaf191e-0a73-4c68-a058-f03c88f823fe";
+  const expected = { ok: true, batchId, paidCount: 2, totalPaid: 14, shortPaid: ["V"] };
+  assert.deepEqual(await actions.settleAll("2026-09", "cash", batchId), expected);
+  debtorRows = [{ userId: "different", name: "Другой", due: null }];
+  assert.deepEqual(await actions.settleAll("2026-09", "cash", batchId), expected);
+  assert.deepEqual(previews.map(row => row.userScope), [null]);
+  assert.deepEqual(payoutWrites, [{ userId: "u", cashAmount: "10.00" }, { userId: "v", cashAmount: "4.00" }]);
+  assert.equal(rateReads, 1);
+  assert.equal(writes.length, 0);
 });
 
 // Общая guard-матрица только здесь; остальные suites сохраняют доменные сценарии.

@@ -1,4 +1,5 @@
 import {canAccrueOrdinarySalary} from "@/lib/compensation-policy";
+import { activePayoutWhere } from "./active-records";
 import {activePaymentWhere} from '@/server/payments/active-records';
 import { readMonthTurnoverSnapshot } from "./turnover-query";
 import type { PayScheme } from "@prisma/client";
@@ -27,7 +28,7 @@ async function groupPayroll(args: { where?: Prisma.PayrollEntryWhereInput; by: s
   return [...groupHistoricalByn(rows)].map(([userId, amount]) => ({ userId, _sum: { amount } }));
 }
 async function groupPayout(args: { where?: Prisma.PayoutWhereInput; by: string[]; _sum: { amount: true } }) {
-  const rows = await prisma.payout.findMany({ where: args.where, select: { userId: true, amount: true, payrollCurrency: true, bynAmount: true } });
+  const rows = await prisma.payout.findMany({ where: { ...activePayoutWhere, ...args.where }, select: { userId: true, amount: true, payrollCurrency: true, bynAmount: true } });
   return [...groupHistoricalByn(rows)].map(([userId, amount]) => ({ userId, _sum: { amount } }));
 }
 // Один снимок для текущей сводки или одной preview-итерации выплаты.
@@ -38,7 +39,7 @@ export async function readPayrollSummary(month: string, userScope: string | null
     prisma.payrollEntry.findMany({ where: userScope === null ? undefined : { userId: userScope },
       select: { userId: true, month: true, scheme: true, amount: true, currency: true, bynAmount: true } }),
     // Организационный баланс требует выплаты ВСЕХ сотрудников.
-    prisma.payout.findMany({ select: { userId: true, month: true, kind: true, amount: true, payrollCurrency: true, bynAmount: true } }),
+    prisma.payout.findMany({ where: activePayoutWhere, select: { userId: true, month: true, kind: true, amount: true, payrollCurrency: true, bynAmount: true } }),
   ]);
   return summarizePayrollHistory(entries, payouts, month, now, userScope);
 }
@@ -77,10 +78,10 @@ export async function getMyPayroll(userId: string, month: string) {
   const now = currentMonth();
   const [entries, payouts, payrollHistory, payoutHistory] = await Promise.all([
     prisma.payrollEntry.findMany({ where: { userId, month }, orderBy: { createdAt: "desc" } }),
-    prisma.payout.findMany({ where: { userId, month }, include: { cashAccount: { select: { name: true } } }, orderBy: { createdAt: "desc" } }),
+    prisma.payout.findMany({ where: { ...activePayoutWhere, userId, month }, include: { cashAccount: { select: { name: true } } }, orderBy: { createdAt: "desc" } }),
     prisma.payrollEntry.findMany({ where: { userId, month: { lte: now } },
       select: { month: true, amount: true, currency: true, bynAmount: true } }),
-    prisma.payout.findMany({ where: { userId }, select: { amount: true, payrollCurrency: true, bynAmount: true } }),
+    prisma.payout.findMany({ where: { ...activePayoutWhere, userId }, select: { amount: true, payrollCurrency: true, bynAmount: true } }),
   ]);
 
   const creatorIds = [
@@ -153,7 +154,7 @@ export async function getPayrollSummary(month: string, snapshot?: PayrollReadMod
   const [schemeUsers, payouts] = await Promise.all([
     prisma.user.findMany({ where: { active: true, payScheme: { not: "NONE" } },
       select: { id: true, name: true, payScheme: true, payPercent: true }, orderBy: { name: "asc" } }),
-    prisma.payout.findMany({ where: { month },
+    prisma.payout.findMany({ where: { ...activePayoutWhere, month },
       include: { user: { select: { id: true, name: true } }, cashAccount: { select: { name: true } } }, orderBy: { createdAt: "desc" } }),
   ]);
   const pastAccruedMap = model.pastAccrued;
@@ -291,7 +292,7 @@ export async function getOrgBalance(snapshot?: PayrollReadModel): Promise<number
   const [income, expense, payouts] = await Promise.all([
     prisma.payment.aggregate({ where: { ...activePaymentWhere, direction: "INCOME" }, _sum: { bynAmount: true } }),
     prisma.payment.aggregate({ where: { ...activePaymentWhere, direction: "EXPENSE" }, _sum: { bynAmount: true } }),
-    snapshot ? Promise.resolve(snapshot.allPaid) : prisma.payout.findMany({ select: { amount: true, payrollCurrency: true, bynAmount: true } }).then(sumHistoricalByn),
+    snapshot ? Promise.resolve(snapshot.allPaid) : prisma.payout.findMany({ where: activePayoutWhere, select: { amount: true, payrollCurrency: true, bynAmount: true } }).then(sumHistoricalByn),
   ]);
   const payments = new Prisma.Decimal(income._sum.bynAmount ?? 0).minus(expense._sum.bynAmount ?? 0).toNumber();
   return subtractByn(payments, payouts);
