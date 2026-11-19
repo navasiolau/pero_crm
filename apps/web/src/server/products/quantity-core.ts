@@ -13,7 +13,7 @@ export async function lockProductRow(tx: Prisma.TransactionClient, id: string) {
   await tx.$queryRaw`SELECT id FROM "Product" WHERE id = ${id} FOR UPDATE`;
 }
 
-export async function recalculateQuantity(tx: Prisma.TransactionClient, product: { id: string; number:string; quantity: number }, count: number, actor:DomainActor) {
+export async function recalculateQuantity(tx: Prisma.TransactionClient, product: { id: string; number:string; quantity: number }, count: number, actor:DomainActor, operationRootId?: string) {
   await tx.$queryRaw`SELECT id FROM "Work" WHERE "productId" = ${product.id} ORDER BY id FOR UPDATE`;
   await tx.$queryRaw`SELECT id FROM "ProjectMaterial" WHERE "productId" = ${product.id} ORDER BY id FOR UPDATE`;
   const works = await tx.work.findMany({ where: { productId: product.id },
@@ -28,14 +28,14 @@ export async function recalculateQuantity(tx: Prisma.TransactionClient, product:
     const work=worksById.get(id)!;const before=workValues(work),after=workValues(data);
     await tx.work.update({ where: { id }, data });
     if(JSON.stringify(before)!==JSON.stringify(after))await writeChangeLogInTransaction(tx,
-      {actorType:'user',actorId:actor.id,actorName:actor.name,source:actor.source,entity:'work',entityId:id,action:'update',oldValue:before,newValue:after},
+      {operationRootId,actorType:'user',actorId:actor.id,actorName:actor.name,source:actor.source,entity:'work',entityId:id,action:'update',oldValue:before,newValue:after},
       {...context,...system,entity:{type:'work',id,label:work.title},links,before,after});
   }
   for (const { id, ...data } of plan.materials) {
     const line=materialsById.get(id)!;const before=materialValues(line),after=materialValues(data);
     await tx.projectMaterial.update({ where: { id }, data });
     if(JSON.stringify(before)!==JSON.stringify(after))await writeChangeLogInTransaction(tx,
-      {actorType:'user',actorId:actor.id,actorName:actor.name,source:actor.source,entity:'projectMaterial',entityId:id,action:'update',oldValue:before,newValue:after},
+      {operationRootId,actorType:'user',actorId:actor.id,actorName:actor.name,source:actor.source,entity:'projectMaterial',entityId:id,action:'update',oldValue:before,newValue:after},
       {...context,...system,entity:{type:'projectMaterial',id,label:line.material.name},links,before,after});
   }
   return plan;

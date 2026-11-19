@@ -4,6 +4,7 @@ import { test } from "node:test";
 import type { Prisma, Role } from "@prisma/client";
 import { previewJournalReversalInTransaction, reverseJournalActionInTransaction } from "../src/server/changelog/reversal-core";
 import { writeChangeLogInTransaction } from "../src/server/changelog/writer";
+import { patchProjectCore } from '../src/server/projects/project-field-core';
 import { patchProductCore, updateProductCore } from "../src/server/products/core";
 
 const actor = { id: "admin", name: "Тест", roles: ["ADMIN"] as Role[], source: "web" as const };
@@ -12,14 +13,31 @@ type Log = Prisma.ChangeLogUncheckedCreateInput;
 function fixture() {
   const product = { id: "product", projectId: "project", number: "1.1", title: "А", titleRevision: 0, kind: null,
     status: "DESIGN", quantity: 1, expectedPrice: null, deletedAt: null };
+  const project = { id: "project", title: "До", currency: "BYN", number: "1", servicesTotal: null as string | null,
+    delivery: "12.00" as string | null, unloading: null as string | null, installation: null as string | null,
+    fieldRevisions: {} as Record<string, number>, clientId: "client", managerId: null, address: null, contactPerson: null };
   const rows = new Map<string, Log>();
   let role: Role = "DIRECTOR";
   let failAudit = false;
   const tx = {
-    $queryRaw: async () => [],
+    $queryRaw: async (query: TemplateStringsArray) => query.join("").includes("pricingVersion") ? [{ pricingVersion: "1" }] : [],
+    domainEvent: { create: async () => ({ id: randomUUID() }) },
+    project: {
+      findUnique: async () => ({ ...project }),
+      findUniqueOrThrow: async () => ({ ...project }),
+      update: async ({ data }: { data: Partial<typeof project> }) => {
+        const serviceKeys = ["servicesTotal", "delivery", "unloading", "installation"] as const;
+        const key = serviceKeys.join(",");
+        const next = { ...project.fieldRevisions };
+        if (serviceKeys.some(field => field in data && project[field] !== data[field])) next[key] = (next[key] ?? 0) + 1;
+        if (data.title !== undefined && data.title !== project.title) next.title = (next.title ?? 0) + 1;
+        return { ...Object.assign(project, data, { fieldRevisions: next }) };
+      },
+    },
     user: { findUnique: async () => ({ ...actor, roles: [role], active: true }) },
     product: {
       findFirst: async () => product.deletedAt ? null : { ...product },
+      findMany: async () => [{ ...product }],
       findUnique: async () => ({ ...product }),
       update: async ({ data }: { data: Partial<typeof product> }) => {
         if (data.title !== undefined && data.title !== product.title) product.titleRevision++;
@@ -27,6 +45,12 @@ function fixture() {
       },
     },
     changeLog: {
+      findMany: async ({ where }: { where: { entity: string; entityId: string; AND: { reversal: { equals: unknown } }[] } }) =>
+        [...rows.values()].filter(row => {
+          const payload = row.reversal as { kind?: string; data?: { revision?: number } } | undefined;
+          return row.entity === where.entity && row.entityId === where.entityId &&
+            payload?.kind === where.AND[0].reversal.equals && payload?.data?.revision === where.AND[1].reversal.equals;
+        }),
       findUnique: async ({ where }: { where: { id?: string; reversesId?: string } }) =>
         where.id ? rows.get(where.id) : [...rows.values()].find(row => row.reversesId === where.reversesId),
       findUniqueOrThrow: async ({ where }: { where: { id: string } }) => {
@@ -43,10 +67,12 @@ function fixture() {
 
   async function transaction<T>(run: (client: Prisma.TransactionClient) => Promise<T>) {
     const before = { ...product };
+    const beforeProject = { ...project };
     const oldRows = new Map(rows);
     try { return await run(tx); }
     catch (error) {
       Object.assign(product, before);
+      Object.assign(project, beforeProject);
       rows.clear();
       for (const [id, row] of oldRows) rows.set(id, row);
       throw error;
@@ -60,7 +86,7 @@ function fixture() {
     return `product-inline:${clientMutationId}`;
   }
   const request = (entryId: string) => ({ entryId, scope: { kind: "product", id: product.id }, requestId: randomUUID() });
-  return { tx, product, rows, rename, request, transaction, changeRole: (next: Role) => { role = next; }, failAudit: () => { failAudit = true; } };
+  return { tx, product, project, rows, rename, request, transaction, changeRole: (next: Role) => { role = next; }, failAudit: () => { failAudit = true; } };
 }
 
 test("undo/redo preserves independent edits and replay returns the same ACK", async () => {
@@ -87,14 +113,53 @@ test("undo/redo preserves independent edits and replay returns the same ACK", as
   assert.equal(f.product.titleRevision, 3);
 });
 
-test("ABA, including a newer undo returning identical text, leaves older actions unavailable", async () => {
+test("later recorded reversals enable undo and redo in order with original title payloads", async () => {
   const f = fixture();
+  const reverse = (id: string) => f.transaction(tx => reverseJournalActionInTransaction(tx, actor.id, f.request(id)));
   const first = await f.rename("А", "Б");
   const second = await f.rename("Б", "В");
-  await f.transaction(tx => reverseJournalActionInTransaction(tx, actor.id, f.request(second)));
+  await assert.rejects(() => reverse(first), /поле изменилось/);
+  const undoSecond = await reverse(second);
+  const old = f.rows.get(undoSecond.reversalId)!;
+  // Предыдущий релиз не сохранял логическую версию результата.
+  old.reversal = { kind: "product.title", version: 1, data: { previous: "В", expected: "Б", revision: 3 } };
   assert.equal(f.product.title, "Б");
-  await assert.rejects(() => previewJournalReversalInTransaction(f.tx, actor.id, f.request(first)), /поле изменилось/);
-  await assert.rejects(() => f.transaction(tx => reverseJournalActionInTransaction(tx, actor.id, f.request(first))), /поле изменилось/);
+  const undoFirst = await reverse(first);
+  assert.equal(f.product.title, "А");
+  await assert.rejects(() => reverse(undoSecond.reversalId), /поле изменилось/);
+  await reverse(undoFirst.reversalId);
+  assert.equal(f.product.title, "Б");
+  await reverse(undoSecond.reversalId);
+  assert.equal(f.product.title, "В");
+  assert.equal(f.product.titleRevision, 6);
+});
+
+test("ordinary ABA edits leave earlier actions unavailable and name the blocking event", async () => {
+  const f = fixture();
+  const first = await f.rename("А", "Б");
+  await f.rename("Б", "В");
+  const last = await f.rename("В", "Б");
+  await assert.rejects(() => previewJournalReversalInTransaction(f.tx, actor.id, f.request(first)),
+    { message: "После этого действия поле изменилось", href: `/changelog?q=${encodeURIComponent(last)}` });
+  assert.equal(f.product.title, "Б");
+});
+
+test("service-mode reversal restores the split without overwriting an independently changed project title", async () => {
+  const f = fixture();
+  const clientMutationId = randomUUID();
+  assert.equal((await patchProjectCore(actor, { projectId: f.project.id, field: "servicesTotal",
+    value: "30.00", expectedValue: null, clientMutationId,
+    expectedServices: { servicesTotal: null, delivery: "12.00", unloading: null, installation: null },
+  }, f.transaction)).kind, "saved");
+  assert.equal(f.project.delivery, null);
+  await patchProjectCore(actor, { projectId: f.project.id, field: "title", value: "После", expectedValue: "До", clientMutationId: randomUUID() }, f.transaction);
+  const result = await f.transaction(tx => reverseJournalActionInTransaction(tx, actor.id, {
+    entryId: `project-inline:${clientMutationId}`, requestId: randomUUID(), scope: { kind: "project", id: f.project.id },
+  }));
+  assert.equal(f.project.title, "После");
+  assert.equal(f.project.servicesTotal, null);
+  assert.equal(f.project.delivery, "12.00");
+  assert.equal(result.eventIds?.length, 1);
 });
 
 test("child resolves its root, scoped and live role checks precede changes, audit faults roll back", async () => {
