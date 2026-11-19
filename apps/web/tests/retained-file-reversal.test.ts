@@ -55,4 +55,3 @@ test("sketch reversal detects a newer binding before changing any row", async ()
   assert.deepEqual(rows, before);
   assert.equal(product.sketchFileId, "third");
 });
-
