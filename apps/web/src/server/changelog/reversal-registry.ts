@@ -29,6 +29,7 @@ import { savedListChoiceReversal } from "@/server/list-preference-reversal";
 import { warehouseCatalogReversal } from "@/server/warehouse/catalog-reversal";
 import { officeDirectoryReversal } from "./office-directory-reversal";
 import { signatureSettingsReversal } from "@/server/kp/signature-settings";
+import { warehouseMovementReversal } from "@/server/warehouse/movement-reversal";
 
 export const journalReversals = [
   ...productFieldReversals,
@@ -64,4 +65,5 @@ export const journalReversals = [
   officeDirectoryReversal,
   productTitleReversal,
   signatureSettingsReversal,
+  warehouseMovementReversal,
 ];

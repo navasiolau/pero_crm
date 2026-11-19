@@ -551,6 +551,12 @@ test("warehouse/paid-receipt-three-files-one-stock-one-payment-and-legacy-finger
   assert.notEqual(purchase.stockPurchaseFingerprint(c.actor.id, data), oldHash);
 }));
 
+test("warehouse/journal-native-stock-restores-ids-value-returns-and-paid-documents", async () => fixture.rollback(async (tx, rows) => {
+  await tx.warehouseAccountingState.upsert({ where: { id: "main" },
+    create: { id: "main", phase: "ACTIVE", runId: rows.id("journal-stock-run"), beforePrices: [], beforeBalances: [] }, update: {} });
+  const { verifyStandardWarehouseReversalNative } = await import("../helpers/standard-warehouse-reversal-native");
+  await verifyStandardWarehouseReversalNative(tx);
+}));
 for (const currency of ["BYN", "USD"] as const) test(`warehouse/paid-receipt-cascade-delete-history-and-rollback/${currency}`, async () => fixture.rollback(async (tx, rows) => {
   const originalMoney = await money(tx), c = await cashContext(tx, rows, "10000");
   const actor = actorFor(await rows.user("stock-admin", ["ADMIN"]));

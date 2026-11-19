@@ -28,7 +28,7 @@ export type PreparedPayment = {
 };
 
 /** Вызывается под общей денежной блокировкой; сеть и уведомления выполняются после commit. */
-type InternalPaymentContext = {movementId: string} | {logisticsAllocationId: string};
+type InternalPaymentContext = {movementId: string; operationRootId?: string} | {logisticsAllocationId: string};
 type PaymentTransactionResult = {payment: Payment; eventId: string | null; repeated: boolean};
 export function createPaymentInTransaction(actor: DomainActor, input: PaymentInput, prepared: PreparedPayment,
   tx: Prisma.TransactionClient): Promise<PaymentTransactionResult>;
@@ -37,7 +37,9 @@ export function createPaymentInTransaction(actor: DomainActor, input: InternalPa
 export async function createPaymentInTransaction(actor: DomainActor, input: PaymentInput | InternalPaymentInput,
   prepared: PreparedPayment, tx: Prisma.TransactionClient, context?: InternalPaymentContext) {
   requireActorRoles(actor, FINANCE_ROLES);
-  if (context && (Object.keys(context).length !== 1 || !("movementId" in context || "logisticsAllocationId" in context) ||
+  if (context && (Object.keys(context).some(key => !("movementId" in context ? ["movementId", "operationRootId"] : ["logisticsAllocationId"]).includes(key)) ||
+    !("movementId" in context || "logisticsAllocationId" in context) ||
+    ("movementId" in context && context.operationRootId !== undefined && (typeof context.operationRootId !== "string" || !/^warehouse94-[0-9a-f-]{36}$/.test(context.operationRootId))) ||
     typeof ("movementId" in context ? context.movementId : context.logisticsAllocationId) !== "string" ||
     !("movementId" in context ? context.movementId : context.logisticsAllocationId))) throw Error("Некорректный внутренний контекст платежа");
   const data: InternalPaymentInput & {clientMutationId?: string} = context ? paymentDetailsSchema.parse(input) : paymentSchema.parse(input);
@@ -118,6 +120,7 @@ export async function createPaymentInTransaction(actor: DomainActor, input: Paym
   }
   await writeChangeLogInTransaction(tx, {
     ...(actionId ? { id: actionId, reversal: paymentVisibilityCommand(payment, documentIds, false, actionId, null) } : {}),
+    ...(context && "movementId" in context && context.operationRootId && { operationRootId: context.operationRootId }),
     actorType: "user", actorId: actor.id, actorName: actor.name || undefined, entity: "payment", entityId: payment.id,
     action: "create", source: actor.source, newValue: {
       project: prepared.project?.number ?? null, direction: data.direction, amount: prepared.amount,
