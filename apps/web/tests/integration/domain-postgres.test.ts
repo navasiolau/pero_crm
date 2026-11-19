@@ -315,6 +315,40 @@ test("counterparties/native-create-revision-CAS-audit-rollback", async () => fix
   assert.equal(checks.realSqlRollback, true); assert.equal(checks.revisionCas, true);
 }));
 
+test("journal/native-title-reversal-ABA-and-audit-atomicity", async () => fixture.rollback(async (tx, rows) => {
+  const reversal = scope.load<typeof import("../../src/server/changelog/reversal-core")>("../src/server/changelog/reversal-core");
+  const director = actorOf(await rows.user("undo-director", ["DIRECTOR"]));
+  const project = await rows.project("undo-project");
+  const product = await rows.product("undo-product", project.id);
+  const input = { productId: product.id, field: "title" as const, value: "Переименовано", expectedValue: product.title, clientMutationId: randomUUID() };
+  assert.equal((await products.patchProductCore(director, input, transactionIn(tx))).kind, "saved");
+  const request = { entryId: `product-inline:${input.clientMutationId}`, requestId: randomUUID(), scope: { kind: "product", id: product.id } };
+  await tx.product.update({ where: { id: product.id }, data: { kind: "Отдельная правка" } });
+  assert.equal((await tx.product.findUniqueOrThrow({ where: { id: product.id } })).titleRevision, 1);
+
+  const failAudit = new Proxy(tx, { get(target, property) {
+    if (property === "changeLog") return new Proxy(target.changeLog, { get(delegate, method) {
+      if (method === "create") return () => { throw Error("CI_JOURNAL_REVERSAL_AUDIT_FAULT"); };
+      return Reflect.get(delegate, method);
+    } });
+    return Reflect.get(target, property);
+  } });
+  await rejectedSql(tx, () => reversal.reverseJournalActionInTransaction(failAudit, director.id, request), /AUDIT_FAULT/);
+  assert.equal((await tx.product.findUniqueOrThrow({ where: { id: product.id } })).title, input.value);
+  assert.equal(await tx.changeLog.count({ where: { reversesId: request.entryId } }), 0);
+
+  const result = await reversal.reverseJournalActionInTransaction(tx, director.id, request);
+  assert.deepEqual(await reversal.reverseJournalActionInTransaction(tx, director.id, request), result);
+  const restored = await tx.product.findUniqueOrThrow({ where: { id: product.id } });
+  assert.equal(restored.title, product.title);
+  assert.equal(restored.kind, "Отдельная правка");
+  await tx.product.update({ where: { id: product.id }, data: { title: "Другая правка" } });
+  await tx.product.update({ where: { id: product.id }, data: { title: product.title } });
+  await assert.rejects(() => reversal.reverseJournalActionInTransaction(tx, director.id,
+    { ...request, entryId: result.reversalId, requestId: randomUUID() }), /поле изменилось/);
+  await tx.$executeRaw`SET CONSTRAINTS ALL IMMEDIATE`;
+}));
+
 test("journal/startup-register-locks-native-types", async () => fixture.rollback(async (tx, rows) => {
   const actor = actorOf(await rows.user("journal-startup-admin", ["ADMIN"]));
   // Singleton использует уже открытый rollback-only tx; новая связь, сеть и worker loops не запускаются.
