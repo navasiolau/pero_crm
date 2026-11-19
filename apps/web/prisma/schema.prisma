@@ -1514,8 +1514,20 @@ model TelegramLink {
   linkCode          String?   @unique // одноразовый код до подтверждения ботом
   linkCodeExpiresAt DateTime?
   linkedAt          DateTime?
+  generation        Int @default(0)
+  revokedAt         DateTime?
+  challenges        TelegramLinkChallenge[]
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
+}
+
+model TelegramLinkChallenge {
+  digest    String @id
+  linkId    String
+  link      TelegramLink @relation(fields: [linkId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  createdAt DateTime @default(now())
+
+  @@index([linkId])
 }
 
 // Личный план: owner всегда текущий session actor.
@@ -1594,6 +1606,7 @@ model TelegramReminderOutbox {
  chatIdSnapshot String
  linkIdSnapshot String
  linkedAtSnapshot DateTime @db.Timestamptz(3)
+ linkGenerationSnapshot Int @default(0)
  state TelegramReminderState @default(READY)
  attempts Int @default(0)
  claimId String? @unique

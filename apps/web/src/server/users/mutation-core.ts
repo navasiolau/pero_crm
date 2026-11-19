@@ -9,10 +9,10 @@ export interface UserSettingsInput {
   payScheme: PayScheme; payPercent?: number | null; active: boolean; calendarEnabled?: boolean | null; passwordHash?: string;
 }
 
-export function userAuditSnapshot(user: Pick<User, "email" | "name" | "position" | "phone" | "telegram" | "roles" | "payScheme" | "payPercent" | "active" | "calendarEnabled" | "sessionVersion">, passwordChanged = false) {
+export function userAuditSnapshot(user: Pick<User, "email" | "name" | "position" | "phone" | "telegram" | "roles" | "payScheme" | "payPercent" | "active" | "sessionVersion">, passwordChanged = false) {
   return { email: user.email, name: user.name, position: user.position ?? null, phone: user.phone ?? null, telegram: user.telegram ?? null,
     roles: user.roles, payScheme: user.payScheme, payPercent: user.payPercent == null ? null : String(user.payPercent), active: user.active,
-    calendarEnabled: user.calendarEnabled ?? null, sessionVersion: user.sessionVersion, passwordChanged };
+    sessionVersion: user.sessionVersion, passwordChanged };
 }
 
 function normalized(input: UserSettingsInput) {
@@ -53,12 +53,16 @@ export async function updateUserInTransaction(tx: Prisma.TransactionClient, acto
   const data = normalized(input), oldSnapshot = userAuditSnapshot(before);
   const desired = { ...oldSnapshot, ...data, payPercent: data.payPercent == null ? null : String(data.payPercent), passwordChanged: !!input.passwordHash };
   // Хэш не входит ни в сравнение пользовательских полей, ни в аудиторские данные.
-  const { passwordHash: ignoredPassword, ...safeDesired } = { passwordHash: input.passwordHash, ...desired }; void ignoredPassword;
-  if (!input.passwordHash && JSON.stringify(oldSnapshot) === JSON.stringify(safeDesired)) return { ok: true as const, user: before, before, noOp: true };
+  const { passwordHash: ignoredPassword, calendarEnabled: privateCalendar, ...safeDesired } = desired;
+  void ignoredPassword; void privateCalendar;
+  const unchangedPublicSettings = JSON.stringify(oldSnapshot) === JSON.stringify(safeDesired);
+  const changedCalendar = input.calendarEnabled !== undefined && before.calendarEnabled !== input.calendarEnabled;
+  if (!input.passwordHash && unchangedPublicSettings && !changedCalendar) return { ok: true as const, user: before, before, noOp: true };
   const revokesTokens = before.active && !data.active || JSON.stringify(before.roles) !== JSON.stringify(data.roles);
   if (revokesTokens) await tx.$queryRaw`SELECT id FROM "ApiToken" WHERE "createdById" = ${userId} AND "revokedAt" IS NULL ORDER BY id FOR UPDATE`;
   const previousTokens = revokesTokens ? await tx.apiToken.findMany({ where: { createdById: userId, revokedAt: null }, orderBy: { id: "asc" } }) : [];
   const user = await tx.user.update({ where: { id: userId }, data });
+  if (unchangedPublicSettings && changedCalendar) return { ok: true as const, user, before, noOp: false };
   const parent = await auditUser(tx, actor, user, "update", oldSnapshot, !!input.passwordHash);
   const automatic = { actor: { type: "system" as const, id: "system:user-security", name: "Система" }, initiator: { id: actor.id, name: actor.name } };
   if (user.sessionVersion !== before.sessionVersion) await writeChangeLogInTransaction(tx, {

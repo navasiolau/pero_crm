@@ -175,11 +175,11 @@ export async function createHttpS3Fixture(scenarioId: string) {
     const response = await request("/api/files/upload", actor, { method: "POST", body: form });
     return { response, body: await response.json() as UploadReply["body"] };
   }
-  async function financeUpload(actor: HttpActor | undefined, input: { fileName: string; mimeType: string; bytes: Uint8Array; clientMutationId: string }, bot?: { token: string; actorId?: string }) {
+  async function financeUpload(actor: HttpActor | undefined, input: { fileName: string; mimeType: string; bytes: Uint8Array; clientMutationId: string }, bot?: { token: string; actorId?: string; binding?: string }) {
     const form = new FormData(); form.append("file", new File([new Uint8Array(input.bytes)], input.fileName, { type: input.mimeType }));
     form.append("clientMutationId", input.clientMutationId);
     const response = await request(bot ? "/api/v1/bot/documents/upload" : "/api/finance/documents/upload", bot ? undefined : actor,
-      { method: "POST", body: form, headers: bot ? { Authorization: "Bearer " + bot.token, "x-acting-user": bot.actorId ?? actor?.id ?? "" } : undefined });
+      { method: "POST", body: form, headers: bot ? { Authorization: "Bearer " + bot.token, "x-acting-user": bot.actorId ?? actor?.id ?? "", ...(bot.binding ? { "x-telegram-binding": bot.binding } : {}) } : undefined });
     const row = await pg.db.financeDocument.findUnique({ where: { clientMutationId: input.clientMutationId } });
     if (row) { assert.ok(row.uploadedById.startsWith(`ci169-${target.runId}-${target.attempt}-${scenarioId}-`)); assert.match(row.storageKey, /^finance-documents\/[0-9a-f-]{36}\/[a-f0-9]{64}$/); documents.add(row.storageKey); }
     return { response, body: await response.json() as { ok?: boolean; document?: FinanceDocumentView; repeated?: boolean; code?: string } };

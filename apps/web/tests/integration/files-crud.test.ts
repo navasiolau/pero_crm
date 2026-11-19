@@ -317,9 +317,15 @@ test("files.crud: file113, документы, attachment ACL и inline-дейс
     assert.equal((await f.financeUpload(procurement, botInput, { token: "pero_unknown" })).response.status, 401);
     assert.equal((await f.financeUpload(manager, botInput, { token: rawToken })).response.status, 403);
     assert.equal((await f.financeUpload(procurement, botInput, { token: rawToken, actorId: f.id("absent-bot-actor") })).response.status, 403);
-    const botUpload = await f.financeUpload(procurement, botInput, { token: rawToken }); assert.equal(botUpload.response.status, 201);
+    assert.equal((await f.financeUpload(procurement, botInput, { token: rawToken })).response.status, 403);
+    const wireChat = () => String(1 + Number.parseInt(randomUUID().replaceAll("-", "").slice(0, 12), 16));
+    const bound = await f.db.telegramLink.create({ data: { userId: procurement.id, chatId: wireChat(), linkedAt: new Date() } });
+    await f.db.telegramLink.create({ data: { userId: manager.id, chatId: wireChat(), linkedAt: new Date() } });
+    const freshProof = `${bound.id}:${bound.generation}:${procurement.sessionVersion}`;
+    assert.equal((await f.financeUpload(procurement, botInput, { token: rawToken, binding: `${bound.id}:999:${procurement.sessionVersion}` })).response.status, 403);
+    const botUpload = await f.financeUpload(procurement, botInput, { token: rawToken, binding: freshProof }); assert.equal(botUpload.response.status, 201);
     const botId = botUpload.body.document!.id;
-    const botReplay = await f.financeUpload(procurement, botInput, { token: rawToken });
+    const botReplay = await f.financeUpload(procurement, botInput, { token: rawToken, binding: freshProof });
     assert.equal(botReplay.response.status, 200); assert.equal(botReplay.body.document?.id, botId); assert.equal(botReplay.body.repeated, true);
     assert.equal(await f.db.financeDocument.count({ where: { clientMutationId: botInput.clientMutationId } }), 1);
     const botAudit = await f.db.changeLog.findUniqueOrThrow({ where: { id: "finance-document:" + botId } });

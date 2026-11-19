@@ -5,7 +5,7 @@ import {randomUUID} from 'node:crypto';
 process.env.BOT_RECOVERY_TEST='1';process.env.TELEGRAM_API_ORIGIN='http://127.0.0.1:9080';
 process.env.TELEGRAM_BOT_TOKEN='fixture-token';process.env.CRM_BASE_URL='http://127.0.0.1:9081';process.env.CRM_API_TOKEN='fixture-crm-token';
 process.env.PERO_TELEGRAM_FINANCE_ORIGIN='https://crm.invalid';
-const sent=[],calls=[],uploads=new Map(),payments=new Map(),roles=new Map();
+const sent=[],calls=[],uploads=new Map(),payments=new Map(),roles=new Map(),bindings=new Map();
 let loseUpload=false,losePayment=false,unknownPayment=false;
 globalThis.fetch=async(input,options={})=>{
  const url=new URL(String(input));
@@ -18,7 +18,7 @@ globalThis.fetch=async(input,options={})=>{
  else if(url.pathname.endsWith('/answerCallbackQuery'))result={ok:true,result:true};
  else if(url.pathname.endsWith('/getFile'))result={ok:true,result:{file_path:'documents/file.pdf',file_size:4}};
  else if(url.pathname.startsWith('/file/'))return new Response('%PDF',{headers:{'content-length':'4'}});
- else if(url.pathname==='/api/v1/bot/session'){const id=url.searchParams.get('chatId');result={ok:true,found:true,user:{id:'actor-'+id,name:'Actor',roles:roles.get(id)??['PROCUREMENT'],botAllowed:true}};}
+ else if(url.pathname==='/api/v1/bot/session'){const id=url.searchParams.get('chatId');result={ok:true,found:true,binding:bindings.get(id),user:{id:'actor-'+id,name:'Actor',roles:roles.get(id)??['PROCUREMENT'],botAllowed:true}};}
  else if(url.pathname==='/api/v1/bot/projects'){
   const q=url.searchParams.get('q');
   result={ok:true,projects:q==='Шкаф'?[{id:'older',number:'204',title:'Шкаф в холл',currency:'BYN'},{id:'newer',number:'206',title:'Шкаф в спальню',currency:'BYN'}]:[{id:'project',number:'205',title:'Order',currency:'BYN'}]};
@@ -221,4 +221,22 @@ test('the Finance button uses a Mini App only for a linked financial user in a p
  roles.set(String(chat),['MANAGER']);
  await handleUpdate(message(chat,'/финансы'));
  assert.equal(sent.at(-1).reply_markup,undefined);
+});
+
+
+test('native bot rejects callbacks from an older binding even for the same CRM actor and chat', async () => {
+ const chat=8836;roles.set(String(chat),['ACCOUNTANT']);bindings.set(String(chat),'link:1:0');
+ await handleUpdate(message(chat,'/приход'));
+ const first=latestButton(chat,'paygeneral:');assert.ok(first);
+ const firstMessage=sent.length;
+ const boundCallback=(data,id)=>{const update=callback(chat,data);update.callback_query.message.message_id=id;return update;};
+ await handleUpdate(boundCallback(first,firstMessage));
+ assert.match(sent.at(-1).text,/Сумма/);
+ bindings.set(String(chat),'link:3:0');
+ await handleUpdate(boundCallback(first,firstMessage));
+ assert.match(sent.at(-1).text,/Кнопка устарела/);
+ await handleUpdate(message(chat,'/приход'));
+ const second=latestButton(chat,'paygeneral:');assert.notEqual(second,first);
+ await handleUpdate(boundCallback(second,sent.length));
+ assert.match(sent.at(-1).text,/Сумма/);
 });

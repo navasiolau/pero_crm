@@ -28,7 +28,7 @@ export async function POST(request: NextRequest) {
   }
   const actor = verifiedTelegramIdentity(Buffer.concat(chunks).toString("utf8"), config.telegramToken);
   if (!actor) return deny(403, "Откройте финансы заново из личного чата с ботом.");
-  const proof = await startTelegramFinanceSession(actor, config.secret);
+  const proof = await startTelegramFinanceSession(actor.chatId, config.secret, actor.authenticatedAt);
   if (!proof) return deny(403, "Нет действующей привязки Telegram к финансовому аккаунту CRM.");
   const response = NextResponse.json({ ok: true }, { headers: privateHeaders });
   response.cookies.set(TELEGRAM_FINANCE_COOKIE, proof, {
