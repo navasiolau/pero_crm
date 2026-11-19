@@ -1,7 +1,7 @@
 import { writeChangeLogInTransaction } from "@/server/changelog/writer";
 import {createHash} from "node:crypto";
 import {Prisma,type File} from "@prisma/client";
-import {FILE_STORAGE_DELETE_EVENT,fileDeleteEventId,fileDeleteIntentSchema,fileDeleteKeys,fileDeleteIntentHash,type FileDeleteStorageIdentity,type FileDeleteResult} from "./delete-contract";
+import {fileDeleteEventId,fileDeleteIntentSchema,fileDeleteKeys,fileDeleteIntentHash,type FileDeleteStorageIdentity,type FileDeleteResult} from "./delete-contract";
 import {lockFileStorageBinding} from "./storage-binding-fence";
 import {operationJournalContext,journalSnapshot,journalUserReferences,systemJournalActor,FILE_JOURNAL_FIELDS} from '../tasks/journal';
 type DeletedFile=Pick<File,"id"|"projectId"|"productId"|"taskId"|"uploadedById"|"storedName"|"hasThumb"|"fileName">&Partial<Pick<File,'mimeType'|'size'|'section'>>;
@@ -20,6 +20,5 @@ export async function persistFileDeleteIntent(tx:Prisma.TransactionClient,actor:
  await writeChangeLogInTransaction(tx, {id:eventId,actorType:"user",actorId:actor.id,actorName:actor.name??undefined,source:"web",entity:"file",entityId:file.id,action:"delete",oldValue:{fileName:file.fileName},newValue:JSON.parse(JSON.stringify({requestFingerprint:fileDeleteFingerprint(actor.id,file.id),intentHash:fileDeleteIntentHash(intent),context:{projectId:file.projectId,productId:file.productId,taskId:file.taskId,uploadedById:file.uploadedById},result}))},
   {...await operationJournalContext(tx,{type:'file',id:file.id,label:file.fileName},[file],await journalUserReferences(tx,[file.uploadedById])),before:journalSnapshot(file,FILE_JOURNAL_FIELDS),after:null,
     ...(actor.id==='kp-retention'?{...systemJournalActor(actor,'Очистка файлов по сроку хранения'),initiator:undefined}:{})});
- await tx.domainEvent.create({data:{id:eventId,type:FILE_STORAGE_DELETE_EVENT,actor:"user:"+actor.id,payload:JSON.parse(JSON.stringify(intent))}});
  return{eventId,result};
 }

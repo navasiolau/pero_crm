@@ -11,7 +11,6 @@ import { prisma } from "@/lib/prisma";
 import { UPLOADS_ROOT, s3Enabled, s3Put, s3Delete, fileKey, thumbKey } from "@/lib/s3";
 import { type SketchResult } from "@/server/products/sketch-contract";
 import { persistUploadedProductCover } from "@/server/products/cover-core";
-import { cleanupObsoleteSketch } from "@/server/products/sketch-cleanup";
 import { revalidateProductPaths } from "@/server/products/revalidate";
 import { resolveUploadContext } from "@/server/files/upload-context";
 import { persistOrdinaryUpload, readUploadReceipt, uploadFingerprint } from "@/server/files/upload-core";
@@ -30,14 +29,11 @@ function sanitizeFileName(name: string): string {
 
 async function committedSketchReply(result:Extract<SketchResult,{ok:true}>,productId:string,requestId:string){
   await afterUploadCommit(()=>revalidateProductPaths(productId),requestId);
-  if(result.cleanupEventId&&!await cleanupObsoleteSketch(result.cleanupEventId))
-    throw new UploadError("SKETCH_CLEANUP_PENDING",503,"confirmation",
-      "Новый эскиз сохранён. Удаление прежнего эскиза не завершено; повторите тот же запрос.","failure","committed");
   const current=await withTaskTransaction(async tx=>{
     await tx.$queryRaw`SELECT id FROM "Product" WHERE id=${productId} FOR UPDATE`;
     const product=await tx.product.findUnique({where:{id:productId},select:{sketchFileId:true}});
     if(!product||product.sketchFileId!==result.id)return{sketch:null,currentSketchFileId:product?.sketchFileId??null};
-    const sketch=await tx.file.findUnique({where:{id:result.id},select:{id:true,fileName:true,mimeType:true,size:true,hasThumb:true,section:true,uploadedById:true}});
+    const sketch=await tx.file.findUnique({where:{id:result.id,deletedAt:null},select:{id:true,fileName:true,mimeType:true,size:true,hasThumb:true,section:true,uploadedById:true}});
     return{sketch,currentSketchFileId:product.sketchFileId};
   });
   if(!current.sketch)return NextResponse.json({ok:false,kind:"conflict",error:"Эскиз уже изменён другим пользователем",currentSketchFileId:current.currentSketchFileId},{status:409});
@@ -132,7 +128,7 @@ async function upload(request:Request,state:{phase:UploadPhase;commitState:Commi
     const result=await transaction((tx,freshActor)=>persistProjectCoverUpload(tx,freshActor,projectCoverTarget!,{fileName:file.name,storedName,mimeType:file.type,size:file.size,hasThumb:false,contentHash}));
     if(!result.ok)return NextResponse.json(result,{status:result.kind==="conflict"?409:422});
     state.commitState="committed";
-    const cover=await prisma.file.findUnique({where:{id:result.id},select:{id:true,fileName:true,mimeType:true,hasThumb:true}});
+    const cover=await prisma.file.findUnique({where:{id:result.id,deletedAt:null},select:{id:true,fileName:true,mimeType:true,hasThumb:true}});
     if(!cover)return NextResponse.json({error:"Обложка этого запроса уже удалена",kind:"conflict"},{status:409});
     return NextResponse.json({...result,cover});
   }
@@ -209,7 +205,7 @@ async function upload(request:Request,state:{phase:UploadPhase;commitState:Commi
     state.commitState="committed";state.phase="confirmation";
     await afterUploadCommit(async()=>{revalidatePath(`/projects/${projectId}`);},requestId);
     if(!result.repeated)await afterUploadCommit(()=>notifyOrg({type:"file.added",title:`Обложка проекта ${project.number}`,body:file.name,link:`/projects/${projectId}`,exceptUserId:actor.id}),requestId);
-    const cover=await prisma.file.findUnique({where:{id:result.id},select:{id:true,fileName:true,mimeType:true,hasThumb:true}});
+    const cover=await prisma.file.findUnique({where:{id:result.id,deletedAt:null},select:{id:true,fileName:true,mimeType:true,hasThumb:true}});
     return NextResponse.json({...result,cover});
   }
   if (assignCover && requestedProductId) {
