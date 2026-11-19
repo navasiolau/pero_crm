@@ -26,8 +26,10 @@ type Status = Awaited<ReturnType<typeof getTelegramLinkStatus>>;
 export function TelegramLinkDialog({
   open,
   onOpenChange,
+  onUnlinked,
 }: {
   open: boolean;
+  onUnlinked?: () => void;
   onOpenChange: (open: boolean) => void;
 }) {
   const [pending, startTransition] = useTransition();
@@ -49,8 +51,7 @@ export function TelegramLinkDialog({
         <DialogHeader>
           <DialogTitle>Telegram</DialogTitle>
           <DialogDescription>
-            Привязка аккаунта к боту CRM. Бот доступен менеджерам, администраторам
-            и директору.
+            Привязка аккаунта к боту CRM.
           </DialogDescription>
         </DialogHeader>
 
@@ -97,6 +98,7 @@ export function TelegramLinkDialog({
               onClick={() =>
                 startTransition(async () => {
                   await unlinkTelegram();
+                  onUnlinked?.();
                   setStatus((prev) => (prev ? { ...prev, linked: false, username: null } : prev));
                   toast.success("Telegram отвязан");
                 })
