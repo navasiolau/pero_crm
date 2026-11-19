@@ -9,7 +9,6 @@ import { DataTable, type DataColumn, type DataTableServerState } from "@/compone
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { ConfirmDeleteDialog } from "@/components/confirm-delete-dialog";
 import { PaymentDialog } from "@/components/payment-dialog";
-import { ExpenseReceiptDialog } from "@/components/expense-receipt-dialog";
 import {reportDocumentNames} from "@/lib/report-document-names";
 import {ReportDocumentButton} from '@/components/report-document-button';
 import { formatAmount, formatDate, formatQty, formatMoneyTotal } from "@/lib/format";
@@ -39,8 +38,8 @@ export function OrganizationPaymentsView({ direction, rows, cashAccounts, projec
     ...(!income ? [{ id: "id", header: "ID", sortable: true, sortValue: (row: OrganizationPaymentRow) => row.id,
       cell: (row: OrganizationPaymentRow) => <span className="inline-block max-w-36 select-text break-all whitespace-normal font-mono text-xs">{row.id}</span> }] : []),
     { id: "date", header: "Дата", sortable: true, sortValue: row => row.paidAt, cell: row => formatDate(row.paidAt) },
-    { id: "project", header: "Проект / назначение", searchValue: row => row.receiptLines?.length ? `Приход на склад ${row.receiptLines.map(line => line.materialName).join(" ")}` : row.project ? `${row.project.number} ${row.project.title}` : general,
-      cell: row => row.project ? <Link className="hover:underline" onClick={event => event.stopPropagation()} href={`/finance/projects/${row.project.id}`}>{row.project.number} · {row.project.title}</Link> : row.receiptLines?.length ? "Приход на склад" : general },
+    { id: "project", header: "Проект / назначение", searchValue: row => (row.stockPurchase || row.receiptLines?.length) ? `Приход на склад ${row.receiptLines?.map(line => line.materialName).join(" ") || row.stockPurchase?.materialName}` : row.project ? `${row.project.number} ${row.project.title}` : general,
+      cell: row => row.project ? <Link className="hover:underline" onClick={event => event.stopPropagation()} href={`/finance/projects/${row.project.id}`}>{row.project.number} · {row.project.title}</Link> : (row.stockPurchase || row.receiptLines?.length) ? "Приход на склад" : general },
     { id: "cash", header: "Касса", sortable: true, sortValue: row => row.cashAccountName ?? "", cell: row => row.cashAccountName ?? "—" },
     ...(!income ? [{ id: "article", header: "Статья", sortable: true, sortValue: (row: OrganizationPaymentRow) => row.expenseArticleName ?? "", cell: (row: OrganizationPaymentRow) => row.expenseArticleName ?? "—" }] : []),
     { id: "amount", header: "Сумма", sortable: true, sortValue: row => row.amount, className: "text-right", cell: row => formatAmount(row.amount, row.currency) },
@@ -49,7 +48,7 @@ export function OrganizationPaymentsView({ direction, rows, cashAccounts, projec
     { id: "comment", header: "Комментарий", searchValue: row => row.comment ?? "", cell: row => row.comment ?? "—" },
     ...(!income ? [{ id: "document", header: "Отчетный документ", searchValue: (row: OrganizationPaymentRow) => reportDocumentNames(row),
       cell: (row: OrganizationPaymentRow) => <ReportDocumentButton document={row.reportDocument} documents={row.reportDocuments}/> }] : []),
-    { id: "actions", header: "", cell: row => <Button variant="ghost" disabled={row.project?.archived || Boolean(row.receiptLines?.length) || Boolean(row.logisticsTripId)} onClick={event => { event.stopPropagation(); setDeleting(row); }}>Удалить</Button> },
+    { id: "actions", header: "", cell: row => <Button variant="ghost" disabled={row.project?.archived || Boolean(row.stockPurchase || row.receiptLines?.length) || Boolean(row.logisticsTripId)} onClick={event => { event.stopPropagation(); setDeleting(row); }}>Удалить</Button> },
   ];
   return <section className="flex min-w-0 flex-col gap-5">
     <Link href="/finance" className="text-sm text-muted-foreground">Назад к финансам</Link>
@@ -58,11 +57,11 @@ export function OrganizationPaymentsView({ direction, rows, cashAccounts, projec
     {beforeTable}
     <DataTable columns={columns} rows={rows} server={tableServer} searchPlaceholder={income ? "Поиск по приходам…" : "Поиск по расходам…"}
       emptyText={income ? "Приходов пока нет" : "Расходы не найдены"} onRowClick={setViewing}
-      renderMobileCard={row => <div className="space-y-2">{!income && <p className="break-all font-mono text-xs">ID {row.id}</p>}<div className="flex justify-between gap-2"><b>{formatAmount(row.amount, row.currency)}</b><span>{formatDate(row.paidAt)}</span></div><p>{row.receiptLines?.length ? `Приход на склад · ${row.receiptLines.map(line => line.materialName).join(", ")}` : row.project ? `${row.project.number} · ${row.project.title}` : general}</p><p className="text-sm text-muted-foreground">{row.cashAccountName ?? "—"}{row.expenseArticleName ? ` · ${row.expenseArticleName}` : ""}</p>{!income?<ReportDocumentButton document={row.reportDocument} documents={row.reportDocuments}/>:null}</div>} />
+      renderMobileCard={row => <div className="space-y-2">{!income && <p className="break-all font-mono text-xs">ID {row.id}</p>}<div className="flex justify-between gap-2"><b>{formatAmount(row.amount, row.currency)}</b><span>{formatDate(row.paidAt)}</span></div><p>{(row.stockPurchase || row.receiptLines?.length) ? `Приход на склад · ${row.receiptLines?.map(line => line.materialName).join(", ") || row.stockPurchase?.materialName}` : row.project ? `${row.project.number} · ${row.project.title}` : general}</p><p className="text-sm text-muted-foreground">{row.cashAccountName ?? "—"}{row.expenseArticleName ? ` · ${row.expenseArticleName}` : ""}</p>{!income?<ReportDocumentButton document={row.reportDocument} documents={row.reportDocuments}/>:null}</div>} />
     <PaymentDialog direction={direction} open={open} onOpenChange={setOpen} projectCurrency="BYN" projectOptions={projects} cashAccounts={cashAccounts} expenseArticles={expenseArticles} />
     {stockMaterials ? <PaymentDialog direction="EXPENSE" open={purchaseOpen} onOpenChange={setPurchaseOpen} projectCurrency="BYN" stockMaterials={stockMaterials} cashAccounts={cashAccounts} expenseArticles={expenseArticles} materialCreateOptions={materialCreateOptions} /> : null}
     <Dialog open={viewing !== null} onOpenChange={next => { if (!next) setViewing(null); }}>
-      <DialogContent initialFocus={detailHeading}><DialogHeader><DialogTitle ref={detailHeading} tabIndex={-1} className="outline-none">{income ? "Приход" : "Расход"}</DialogTitle><DialogDescription>{viewing?.receiptLines?.length ? "Оплаченный приход материалов" : viewing?.project ? `${viewing.project.number} · ${viewing.project.title}` : general}</DialogDescription></DialogHeader>
+      <DialogContent initialFocus={detailHeading}><DialogHeader><DialogTitle ref={detailHeading} tabIndex={-1} className="outline-none">{income ? "Приход" : "Расход"}</DialogTitle><DialogDescription>{(viewing?.stockPurchase || viewing?.receiptLines?.length) ? "Оплаченный приход материалов" : viewing?.project ? `${viewing.project.number} · ${viewing.project.title}` : general}</DialogDescription></DialogHeader>
         {viewing ? <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-3 text-sm">
           {!income && <><dt>ID</dt><dd className="select-text break-all font-mono text-xs">{viewing.id}</dd></>}
           <dt>Дата</dt><dd>{formatDate(viewing.paidAt)}</dd><dt>Сумма</dt><dd>{formatAmount(viewing.amount, viewing.currency)}</dd>
@@ -89,8 +88,7 @@ export function OrganizationPaymentsView({ direction, rows, cashAccounts, projec
         </dl> : null}
         <DialogFooter>
           {viewing && renderDetailActions?.(viewing, () => setViewing(null))}
-          {viewing && stockMaterials ? <ExpenseReceiptDialog key={viewing.id} payment={viewing} stockMaterials={stockMaterials} onApplied={() => setViewing(null)} /> : null}
-          <Button variant="outline" onClick={() => setViewing(null)}>Закрыть</Button><Button variant="destructive" disabled={viewing?.project?.archived || Boolean(viewing?.receiptLines?.length) || Boolean(viewing?.logisticsTripId)}
+          <Button variant="outline" onClick={() => setViewing(null)}>Закрыть</Button><Button variant="destructive" disabled={viewing?.project?.archived || Boolean(viewing?.stockPurchase || viewing?.receiptLines?.length) || Boolean(viewing?.logisticsTripId)}
           onClick={() => { setDeleting(viewing); setViewing(null); }}>Удалить</Button></DialogFooter>
       </DialogContent>
     </Dialog>

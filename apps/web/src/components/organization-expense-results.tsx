@@ -1,6 +1,7 @@
 "use client";
 
 import { useId, useState, type FormEvent } from "react";
+import { ExpenseReceiptDialog } from "@/components/expense-receipt-dialog";
 import { OrganizationPaymentsView } from "@/components/organization-payments-view";
 import { ResponsiveFilterPanel } from "@/components/responsive-filter-panel";
 import { Button } from "@/components/ui/button";
@@ -100,6 +101,9 @@ export function OrganizationExpenseResults({ options, page, pageSize, total, tot
   Pick<Parameters<typeof OrganizationPaymentsView>[0], "expenseArticles" | "stockMaterials" | "materialCreateOptions">) {
   const { set, pending } = useListParams();
   return <OrganizationPaymentsView direction="EXPENSE" {...ledger}
+    renderDetailActions={(payment, close) => ledger.stockMaterials
+      ? <ExpenseReceiptDialog key={payment.id} payment={payment} stockMaterials={ledger.stockMaterials} onApplied={close} />
+      : null}
     beforeTable={<>
       <ExpenseFilters options={options}/>
       <p className="text-sm" aria-live="polite" aria-busy={pending}>Итого по выборке <strong className="ml-1 tabular-nums">{formatExactMoney(totalByn, "BYN")}</strong></p>
