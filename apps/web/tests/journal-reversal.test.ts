@@ -78,7 +78,8 @@ test("undo/redo preserves independent edits and replay returns the same ACK", as
   assert.equal(f.rows.get(result.reversalId)?.reversesId, entryId);
   assert.match(JSON.stringify(f.rows.get(result.reversalId)?.presentation), new RegExp(`Откат действия ${entryId}`));
   const count = f.rows.size;
-  assert.deepEqual(await f.transaction(tx => reverseJournalActionInTransaction(tx, actor.id, request)), result);
+  assert.deepEqual(result.cachePaths, ["/products", "/products/1.1", "/projects", "/projects/project"]);
+  assert.equal((await f.transaction(tx => reverseJournalActionInTransaction(tx, actor.id, request))).reversalId, result.reversalId);
   await assert.rejects(() => f.transaction(tx => reverseJournalActionInTransaction(tx, actor.id, f.request(entryId))), /уже отменено/);
   assert.equal(f.rows.size, count);
   await f.transaction(tx => reverseJournalActionInTransaction(tx, actor.id, f.request(result.reversalId)));

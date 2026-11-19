@@ -14,6 +14,10 @@ export const productTitleReversal = productScalarReversal({
     const result = await updateProductValues(ctx.actor, ctx.entityId, { title: value }, { title: previous }, ctx.tx);
     if (!result.ok || result.noOp)
       throw new JournalReversalRefusal(result.ok ? "Название не изменилось" : result.error);
-    return { value: result.after.title, revision: result.after.titleRevision };
+    const { title, titleRevision, number, projectId } = result.after;
+    return {
+      value: title, revision: titleRevision,
+      cachePaths: ["/products", `/products/${encodeURIComponent(number)}`, "/projects", `/projects/${encodeURIComponent(projectId)}`],
+    };
   },
 });

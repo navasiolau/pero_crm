@@ -20,7 +20,7 @@ export function productScalarReversal<T extends string | null>(options: {
   value: z.ZodType<T>;
   read(tx: Prisma.TransactionClient, productId: string): Promise<ScalarState<T> | null>;
   update(ctx: { tx: Prisma.TransactionClient; actor: DomainActor; entityId: string },
-    previous: T, value: T): Promise<ScalarState<T>>;
+    previous: T, value: T): Promise<ScalarState<T> & { cachePaths?: string[] }>;
 }) {
   const schema = z.object({ previous: options.value, expected: options.value, revision: z.number().int().positive() });
   type Payload = { previous: T; expected: T; revision: number };
@@ -42,7 +42,7 @@ export function productScalarReversal<T extends string | null>(options: {
       const result = await options.update(ctx, data.expected, data.previous);
       return {
         inverse: { previous: data.expected, expected: result.value, revision: result.revision },
-        oldValue: data.expected, newValue: result.value,
+        oldValue: data.expected, newValue: result.value, cachePaths: result.cachePaths,
       };
     },
   });

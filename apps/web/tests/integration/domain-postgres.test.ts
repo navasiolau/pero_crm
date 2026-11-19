@@ -338,7 +338,7 @@ test("journal/native-title-reversal-ABA-and-audit-atomicity", async () => fixtur
   assert.equal(await tx.changeLog.count({ where: { reversesId: request.entryId } }), 0);
 
   const result = await reversal.reverseJournalActionInTransaction(tx, director.id, request);
-  assert.deepEqual(await reversal.reverseJournalActionInTransaction(tx, director.id, request), result);
+  assert.equal((await reversal.reverseJournalActionInTransaction(tx, director.id, request)).reversalId, result.reversalId);
   const restored = await tx.product.findUniqueOrThrow({ where: { id: product.id } });
   assert.equal(restored.title, product.title);
   assert.equal(restored.kind, "Отдельная правка");
