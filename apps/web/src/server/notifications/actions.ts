@@ -12,6 +12,7 @@ import {NOTIFICATION_TYPES,receivableTypesFor} from './notify';
 import {canReceiveNotificationContent} from '@/lib/notification-access';
 import {notificationPreferenceEnabled,notificationPreferenceTypes} from './preferences';
 import {setNotificationPreferenceInTransaction} from './preference-core';
+import {markNotificationsReadInTransaction} from './read-reversal';
 import {deliverPostCommit} from '@/server/operations/post-commit';
 const NOTIFICATIONS_PAGE_SIZE=20;
 async function notificationScope(actor:{id:string;roles:Role[]},telegram:boolean):Promise<Prisma.NotificationWhereInput>{
@@ -33,11 +34,14 @@ export async function listMyNotifications(page:number){
 }
 export async function markAllRead():Promise<{ok:boolean}>{
  const session=await scopedFinanceAuth();if(!session?.user)throw new Error('Не авторизован');const scope=await notificationScope(session.user,"telegramFinance" in session);
- await prisma.notification.updateMany({where:{...scope,readAt:null},data:{readAt:new Date()}});revalidatePath('/notifications');return {ok:true};
+ await prisma.$transaction(tx=>markNotificationsReadInTransaction(tx,{id:session.user.id,name:session.user.name??'',roles:session.user.roles,source:financeSessionSource(session)},scope));
+ revalidatePath('/notifications');return {ok:true};
 }
 export async function markRead(id:string):Promise<{ok:boolean}>{
  const session=await scopedFinanceAuth();if(!session?.user)throw new Error('Не авторизован');
- const scope=await notificationScope(session.user,"telegramFinance" in session);await prisma.notification.updateMany({where:{...scope,id},data:{readAt:new Date()}});revalidatePath('/notifications');return {ok:true};
+ const scope=await notificationScope(session.user,"telegramFinance" in session);
+ await prisma.$transaction(tx=>markNotificationsReadInTransaction(tx,{id:session.user.id,name:session.user.name??'',roles:session.user.roles,source:financeSessionSource(session)},{...scope,id}));
+ revalidatePath('/notifications');return {ok:true};
 }
 export async function getMyPreferences(){
  const session=await scopedFinanceAuth();if(!session?.user)throw new Error('Не авторизован');const namespace="telegramFinance" in session?null:await currentReminderNamespace(session.user.id,prisma);

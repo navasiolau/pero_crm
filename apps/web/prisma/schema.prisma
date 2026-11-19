@@ -916,6 +916,7 @@ model Payment {
 enum FinanceDocumentState {
   PENDING
   READY
+  RETAINED
 }
 
 model FinanceDocument {
@@ -931,6 +932,7 @@ model FinanceDocument {
   storageKey         String               @unique
   storageMode        String
   state              FinanceDocumentState @default(PENDING)
+  visibilityRevision Int                  @default(0)
   createdAt          DateTime             @default(now())
   readyAt            DateTime?
   payment            Payment?
@@ -1473,6 +1475,7 @@ model Communication {
 // ─── Уведомления (§6.1) ──────────────────────────────────────────────────────
 
 model Notification {
+  readRevision Int @default(0)
   calendarReminderFact CalendarReminderFact?
   id        String    @id @default(cuid())
   userId    String
@@ -1526,6 +1529,7 @@ model SavedListChoiceRevision {
 // Установленный модуль. Строка синхронизируется с манифестом пакета
 // packages/plugins/<id> при старте приложения; enabled переключается из UI.
 model Plugin {
+  settingsRevision Int @default(0)
   id          String          @id // = id из манифеста, напр. "demo"
   name        String
   version     String
@@ -1542,6 +1546,7 @@ model Plugin {
 
 // Настройки модуля (key-value, значения по settingsSchema манифеста).
 model PluginSetting {
+  configured Boolean @default(true)
   pluginId String
   key      String
   value    Json

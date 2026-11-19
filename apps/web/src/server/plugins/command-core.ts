@@ -35,7 +35,7 @@ async function executeCommand(tx: Prisma.TransactionClient, actor: JournalActor,
   if (!plugin?.enabled) throw new Error("PLUGIN_DISABLED");
   const settings = Object.fromEntries([
     ...(manifest.settingsSchema ?? []).filter(field => field.default !== undefined).map(field => [field.key, field.default]),
-    ...(await tx.pluginSetting.findMany({ where: { pluginId: manifest.id } })).map(row => [row.key, row.value]),
+    ...(await tx.pluginSetting.findMany({ where: { pluginId: manifest.id, configured: true } })).map(row => [row.key, row.value]),
   ]);
   const eventIds: string[] = [], logs: { status: "ok" | "error"; message: string }[] = [], pluginActor = `plugin:${manifest.id}`;
   const context: PluginContext = {

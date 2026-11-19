@@ -6,6 +6,7 @@ import { requireActorRoles, type DomainActor } from "@/server/actor";
 import type { JournalChange } from "@/server/changelog/contract";
 import { sanitizeJournalValue } from "@/server/changelog/presentation";
 import { writeChangeLogInTransaction } from "@/server/changelog/writer";
+import { pluginMutationReversal, pluginSettingsUndoFields } from "./settings-reversal";
 import { hashToken, TOKEN_PREFIX } from "./token-verification";
 
 const json = (value: unknown): Prisma.JsonValue => value == null ? null : JSON.parse(JSON.stringify(value)) as Prisma.JsonValue;
@@ -22,9 +23,10 @@ export async function togglePluginInTransaction(tx: Prisma.TransactionClient, ac
   const before = await tx.plugin.findUnique({ where: { id: manifest.id } });
   if (!before) return { ok: false as const, error: "Модуль не найден" };
   if (before.enabled === enabled) return { ok: true as const, noOp: true, eventId: null };
-  await tx.plugin.update({ where: { id: manifest.id }, data: { enabled } });
+  const saved = await tx.plugin.update({ where: { id: manifest.id }, data: { enabled, settingsRevision: { increment: 1 } } });
   await writeChangeLogInTransaction(tx, { actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
-    entity: "plugin", entityId: manifest.id, action: "toggle", field: "enabled", oldValue: before.enabled, newValue: enabled }, {
+    entity: "plugin", entityId: manifest.id, action: "toggle", field: "enabled", oldValue: before.enabled, newValue: enabled,
+    reversal: pluginMutationReversal.command({ operation: "toggle", revision: saved.settingsRevision, enabled: before.enabled }) }, {
     before: before.enabled, after: enabled, entity: { label: `Модуль ${manifest.name}`, href: `/settings/modules/${encodeURIComponent(manifest.id)}` },
   });
   const event = await tx.domainEvent.create({ data: { type: "plugin.toggled", payload: { pluginId: manifest.id, enabled }, actor: actor.id } });
@@ -34,7 +36,7 @@ export async function togglePluginInTransaction(tx: Prisma.TransactionClient, ac
 export async function savePluginSettingsInTransaction(tx: Prisma.TransactionClient, actor: DomainActor, manifest: PluginManifest, values: Record<string, unknown>) {
   requireActorRoles(actor, ADMIN_ROLES);
   await tx.$queryRaw`SELECT id FROM "Plugin" WHERE id = ${manifest.id} FOR UPDATE`;
-  const fields = manifest.settingsSchema ?? [], rows = await tx.pluginSetting.findMany({ where: { pluginId: manifest.id } });
+  const fields = manifest.settingsSchema ?? [], rows = await tx.pluginSetting.findMany({ where: { pluginId: manifest.id, configured: true } });
   const stored = new Map(rows.map(row => [row.key, row.value]));
   const before = Object.fromEntries([...fields.filter(field => field.default !== undefined).map(field => [field.key, field.default]), ...rows.map(row => [row.key, row.value])]);
   const accepted = Object.fromEntries(fields.filter(field => Object.prototype.hasOwnProperty.call(values, field.key)).map(field => [field.key, json(values[field.key])]));
@@ -43,8 +45,11 @@ export async function savePluginSettingsInTransaction(tx: Prisma.TransactionClie
   const after = { ...before, ...accepted };
   for (const key of changedKeys) {
     const value = accepted[key] === null ? Prisma.JsonNull : accepted[key] as Prisma.InputJsonValue;
-    await tx.pluginSetting.upsert({ where: { pluginId_key: { pluginId: manifest.id, key } }, create: { pluginId: manifest.id, key, value }, update: { value } });
+    await tx.pluginSetting.upsert({ where: { pluginId_key: { pluginId: manifest.id, key } }, create: { pluginId: manifest.id, key, value }, update: { value, configured: true } });
   }
+  const saved = await tx.plugin.update({ where: { id: manifest.id }, data: { settingsRevision: { increment: 1 } } });
+  // Снимок отката разрешён только для известных публичных полей демо-модуля.
+  const prior = manifest.id === "demo" ? pluginSettingsUndoFields(stored, changedKeys) : null;
   const changes: JournalChange[] = [];
   for (const key of changedKeys) {
     const field = fields.find(candidate => candidate.key === key)!;
@@ -54,7 +59,9 @@ export async function savePluginSettingsInTransaction(tx: Prisma.TransactionClie
     else if (!stored.has(key)) changes.push({ path: `${key}.configured`, label: `Задано явно: ${field.label}`, before: false, after: true, beforeKnown: true, afterKnown: true });
   }
   await writeChangeLogInTransaction(tx, { actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source, entity: "plugin", entityId: manifest.id,
-    action: "update", field: "settings", oldValue: sanitizeJournalValue(before), newValue: sanitizeJournalValue(after) }, {
+    action: "update", field: "settings",
+    ...(prior ? { reversal: pluginMutationReversal.command({ operation: "settings", revision: saved.settingsRevision, version: manifest.version, fields: prior }) } : {}),
+    oldValue: sanitizeJournalValue(before), newValue: sanitizeJournalValue(after) }, {
     before, after, changes, entity: { label: `Модуль ${manifest.name}`, href: `/settings/modules/${encodeURIComponent(manifest.id)}` },
   });
   return { ok: true as const, noOp: false };

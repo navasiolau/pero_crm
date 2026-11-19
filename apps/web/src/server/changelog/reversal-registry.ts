@@ -37,6 +37,9 @@ import { productPercentageDefaultsReversal } from "@/server/product-percentage-d
 import { productPercentageSettingsReversal } from "@/server/product-percentage-pay/settings-reversal";
 import { userCreationReversal } from "@/server/users/creation-reversal";
 import { apiTokenCreationReversal } from "@/server/plugins/token-creation-reversal";
+import { financeDocumentUploadReversal } from "@/server/finance-documents/upload-reversal";
+import { pluginMutationReversal } from "@/server/plugins/settings-reversal";
+import { notificationReadReversal } from "@/server/notifications/read-reversal";
 
 export const journalReversals = [
   ...productFieldReversals,
@@ -80,4 +83,7 @@ export const journalReversals = [
   productPercentageSettingsReversal,
   userCreationReversal,
   apiTokenCreationReversal,
+  financeDocumentUploadReversal,
+  pluginMutationReversal,
+  notificationReadReversal,
 ];

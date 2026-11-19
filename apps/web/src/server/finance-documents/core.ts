@@ -8,6 +8,8 @@ import { UploadError, type UploadPhase } from "@/server/files/upload-result";
 import type { FileContentSource } from "@/server/files/document-storage";
 import { financeDocumentUploadSchema, financeDocumentListSchema, type FinanceDocumentView } from "./contracts";
 
+import { financeDocumentUploadReversal } from "./upload-reversal";
+
 export type FinanceDocumentTransaction = <T>(operation: (tx: Prisma.TransactionClient) => Promise<T>) => Promise<T>;
 export type FinanceDocumentStorage = {
   mode(): "local" | "s3";
@@ -43,6 +45,11 @@ async function lockUpload(tx: Prisma.TransactionClient, mutationId: string) {
   await tx.$queryRaw`SELECT 1 AS locked FROM pg_advisory_xact_lock(18438, hashtext(${mutationId}))`;
 }
 
+function requireUploadNotRetained(document: FinanceDocument) {
+  if (document.state === "RETAINED")
+    throw new UploadError("FINANCE_DOCUMENT_RETAINED", 409, "persist", "Загрузка отменена в журнале", "conflict");
+}
+
 export function createFinanceDocumentService({ transaction, storage }: {
   transaction: FinanceDocumentTransaction;
   storage: FinanceDocumentStorage;
@@ -72,6 +79,7 @@ export function createFinanceDocumentService({ transaction, storage }: {
         if (previous) {
           if (previous.uploadedById !== actorId || previous.requestFingerprint !== requestFingerprint)
             throw new UploadError("FINANCE_DOCUMENT_CONFLICT", 409, "persist", "Идентификатор загрузки уже использован с другими данными", "conflict");
+          requireUploadNotRetained(previous);
           return { document: previous, paymentId: previous.paymentReport?.paymentId ?? previous.payment?.id ?? null };
         }
         const id = randomUUID();
@@ -90,11 +98,13 @@ export function createFinanceDocumentService({ transaction, storage }: {
         const row = await tx.financeDocument.findUnique({ where: { id: reserved.document.id }, include: { payment: { select: { id: true } }, paymentReport: { select: { paymentId: true } } } });
         if (!row || row.requestFingerprint !== requestFingerprint)
           throw new UploadError("FINANCE_DOCUMENT_CONFLICT", 409, "persist", "Документ изменился — повторите загрузку", "conflict");
+        requireUploadNotRetained(row);
         if (row.state === "READY") return { document: financeDocumentView(row, row.paymentReport?.paymentId ?? row.payment?.id ?? null), repeated: true };
         const ready = await tx.financeDocument.update({ where: { id: row.id }, data: { state: "READY", readyAt: new Date() } });
         await writeChangeLogInTransaction(tx, { id: `finance-document:${row.id}`, actorType: "user", actorId,
           actorName: actor.name, source: options.source ?? "web", entity: "financeDocument", entityId: row.id,
-          action: "create", newValue: { fileName: row.fileName, mimeType: row.mimeType, size: row.size, contentHash } },
+          action: "create", reversal: financeDocumentUploadReversal.command({ expectedRevision: ready.visibilityRevision, visible: false }),
+          newValue: { fileName: row.fileName, mimeType: row.mimeType, size: row.size, contentHash } },
           { entity: { label: `Финансовый документ ${row.fileName}` }, contexts: [], before: null,
             after: { fileName: ready.fileName, mimeType: ready.mimeType, size: ready.size, state: ready.state,
               contentHash, uploadedById: actorId, readyAt: ready.readyAt?.toISOString() ?? null } });
