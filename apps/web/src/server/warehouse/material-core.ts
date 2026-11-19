@@ -3,16 +3,18 @@ import type { Prisma } from "@prisma/client";
 import { hasAnyRole, WAREHOUSE_MANAGE_ROLES } from "@/lib/roles";
 import type { DomainActor } from "@/server/actor";
 import { materialSchema, type MaterialCreateResult } from "./material-contracts";
+import { catalogCommand } from "./catalog-reversal-contract";
 import { materialJournalSnapshot } from "@/server/finance/journal";
 
 export async function requireMaterialUnit(tx: Prisma.TransactionClient, unitId: string) {
-  const unit = await tx.materialUnit.findUnique({ where: { id: unitId }, select: { id: true, name: true } });
+  await tx.$queryRaw`SELECT id FROM "MaterialUnit" WHERE id=${unitId} FOR SHARE`;
+  const unit = await tx.materialUnit.findUnique({ where: { id: unitId, deletedAt: null }, select: { id: true, name: true } });
   if (!unit) throw Error("Единица измерения не найдена. Обновите список единиц.");
   return unit;
 }
 
 export function materialCatalogError(error: unknown): string {
-  if (typeof error === "object" && error !== null && "code" in error && error.code === "P2003") {
+  if (typeof error === "object" && error !== null && "code" in error && (error.code === "P2003" || error.code === "P2004")) {
     return "Выбранная единица или категория больше недоступна. Обновите справочник.";
   }
   return error instanceof Error ? error.message : "Не удалось сохранить материал";
@@ -27,6 +29,7 @@ export async function createMaterialInTransaction(actor: DomainActor, input: unk
   const unit = await requireMaterialUnit(tx, data.unitId);
   let categoryName: string | null = null;
   if (data.categoryId) {
+    await tx.$queryRaw`SELECT id FROM "MaterialCategory" WHERE id=${data.categoryId} FOR SHARE`;
     const category = await tx.materialCategory.findUnique({ where: { id: data.categoryId }, select: { active: true, name: true } });
     if (!category?.active) return { ok: false, error: "Категория не найдена" };
     categoryName = category.name;
@@ -38,6 +41,7 @@ export async function createMaterialInTransaction(actor: DomainActor, input: unk
   }, include: { measurementUnit: { select: { name: true } } } });
   await writeChangeLogInTransaction(tx, { actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
     entity: "material", entityId: material.id, action: "create",
+    reversal: await catalogCommand(tx, { entity: "material", before: null, after: material }),
     newValue: { name: material.name, sku: material.sku, unitId: material.unitId, unit: material.measurementUnit.name, purchasePrice: 0 },
   }, { entity: { label: `Материал ${material.name}`, href: "/warehouse/materials" }, contexts: [],
     links: [{ type: "materialUnit", id: unit.id, label: unit.name }, ...(data.categoryId && categoryName ? [{ type: "materialCategory", id: data.categoryId, label: categoryName }] : [])],

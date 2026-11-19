@@ -17,6 +17,7 @@ import { notificationPreferenceReversal } from "@/server/notifications/preferenc
 import { viewPreferenceReversal } from "@/server/view-preference-reversal";
 import { telegramLinkReversal } from "@/server/telegram/link-reversal";
 import { savedListChoiceReversal } from "@/server/list-preference-reversal";
+import { warehouseCatalogReversal } from "@/server/warehouse/catalog-reversal";
 
 export const journalReversals = [
   productTitleReversal,
@@ -38,4 +39,5 @@ export const journalReversals = [
   viewPreferenceReversal,
   telegramLinkReversal,
   savedListChoiceReversal,
+  warehouseCatalogReversal,
 ];

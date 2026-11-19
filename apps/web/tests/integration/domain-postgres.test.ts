@@ -1240,6 +1240,11 @@ test("task/workspace-31-scope-ACL-counts-10000-foreign-constant-SQL-and-EXPLAIN"
   t.diagnostic(JSON.stringify({ matrixCases, dashboardCount, foreignTasks: [1, 10000], profile: { ...large.profile, rows: large.profile.rows.length }, plans }));
 }));
 
+test("warehouse/catalog-native-stable-archive-keys-and-dependent-movements", async () => fixture.rollback(async tx => {
+  const { verifyWarehouseCatalogNative } = await import("../helpers/warehouse-catalog-reversal-native");
+  await verifyWarehouseCatalogNative(tx);
+}));
+
 test("warehouse/unit-catalog-CRUD-current-admin-inactive-usage-and-unchanged-numbers", async () => {
  await fixture.rollback(async (tx, rows) => {
   const c = await tree(tx, rows, "units"), before = await tx.material.update({ where: { id: c.material.id }, data: { active: false, purchasePrice: "15.55" } });
@@ -1263,10 +1268,10 @@ test("warehouse/unit-catalog-CRUD-current-admin-inactive-usage-and-unchanged-num
   await tx.user.update({ where: { id: c.admin.id }, data: { active: true } });
   await tx.material.update({ where: { id: c.material.id }, data: { unitId: created.id } });
   await units.deleteMaterialUnitInTransaction(tx, c.admin, c.unit.id);
-  assert.equal(await tx.materialUnit.findUnique({ where: { id: c.unit.id } }), null);
+  assert.ok((await tx.materialUnit.findUniqueOrThrow({ where: { id: c.unit.id } })).deletedAt);
   await assert.rejects(units.renameMaterialUnitInTransaction(tx, c.admin, rows.id("missing"), { name: "л" }), /не найдена/);
   await assert.rejects(units.createMaterialUnitInTransaction(tx, c.admin, { name: "  " }));
-  await rejectedSql(tx, () => tx.material.update({ where: { id: c.material.id }, data: { unitId: c.unit.id } }), /Foreign key constraint/);
+  await rejectedSql(tx, () => tx.material.update({ where: { id: c.material.id }, data: { unitId: c.unit.id } }), /WAREHOUSE_UNIT_ARCHIVED|check constraint/);
   const collision = await tx.changeLog.create({ data: { actorType: "user", actorId: c.admin.id, entity: "test", entityId: created.id, action: "fixture" } });
   const snapshot = await nativeSnapshot(tx);
   await rejectedSql(tx, () => units.renameMaterialUnitInTransaction(commandTx(tx, { actor: c.admin, db: tx, failAuditId: collision.id }), c.admin, created.id, { name: "audit rollback" }), /Unique constraint/);

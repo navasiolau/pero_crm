@@ -1,7 +1,8 @@
 import { writeChangeLogInTransaction } from "@/server/changelog/writer";
-import type { Prisma } from "@prisma/client";
+import type { MaterialUnit, Prisma } from "@prisma/client";
 import { hasAnyRole, WAREHOUSE_UNIT_ADMIN_ROLES } from "@/lib/roles";
 import type { DomainActor } from "@/server/actor";
+import { catalogCommand, unitSnapshot } from "./catalog-reversal-contract";
 import { materialUnitSchema, type MaterialUnitInput } from "./unit-contracts";
 
 type Tx = Prisma.TransactionClient;
@@ -11,37 +12,45 @@ async function requireUnitAdministrator(tx: Tx, actor: DomainActor) {
   const current = await tx.user.findUnique({ where: { id: actor.id }, select: { roles: true, active: true } });
   if (!current?.active || !hasAnyRole(current.roles, WAREHOUSE_UNIT_ADMIN_ROLES)) throw forbidden();
 }
-async function audit(tx: Tx, actor: DomainActor, id: string, action: string, oldName?: string, newName?: string) {
+async function audit(tx: Tx, actor: DomainActor, action: string,
+  before: MaterialUnit | null, after: MaterialUnit) {
+  const id = after.id, oldName = before?.name, newName = after.name;
   await writeChangeLogInTransaction(tx, {
     actorType: "user", actorId: actor.id, actorName: actor.name, entity: "materialUnit", entityId: id, action,
+    reversal: await catalogCommand(tx, { entity: "materialUnit", before, after }),
     oldValue: oldName === undefined ? undefined : { name: oldName },
-    newValue: newName === undefined ? undefined : { name: newName }, source: actor.source,
-  }, { entity: { label: `Единица измерения ${newName ?? oldName ?? ""}`.trim(), href: "/settings/warehouse-units" }, contexts: [] });
+    newValue: { name: newName }, source: actor.source,
+  }, { entity: { label: `Единица измерения ${newName ?? oldName ?? ""}`.trim(), href: "/settings/warehouse-units" }, contexts: [], before: before ? unitSnapshot(before) : null, after: unitSnapshot(after) });
 }
 export async function createMaterialUnitInTransaction(tx: Tx, actor: DomainActor, input: MaterialUnitInput) {
   await requireUnitAdministrator(tx, actor);
   const data = materialUnitSchema.parse(input);
-  const unit = await tx.materialUnit.create({ data });
-  await audit(tx, actor, unit.id, "create", undefined, unit.name);
+  const previous = await tx.materialUnit.findUnique({ where: { name: data.name } });
+  const unit = previous?.deletedAt
+    ? await tx.materialUnit.update({ where: { id: previous.id, deletedAt: { not: null } }, data: { deletedAt: null, deletedById: null } })
+    : await tx.materialUnit.create({ data });
+  await audit(tx, actor, "create", previous, unit);
   return unit;
 }
 export async function renameMaterialUnitInTransaction(tx: Tx, actor: DomainActor, id: string, input: MaterialUnitInput) {
   await requireUnitAdministrator(tx, actor);
   const data = materialUnitSchema.parse(input);
-  const previous = await tx.materialUnit.findUnique({ where: { id } });
+  await tx.$queryRaw`SELECT id FROM "MaterialUnit" WHERE id=${id} FOR UPDATE`;
+  const previous = await tx.materialUnit.findUnique({ where: { id, deletedAt: null } });
   if (!previous) throw Error("Единица измерения не найдена");
   if (previous.name === data.name) return previous;
   const unit = await tx.materialUnit.update({ where: { id }, data });
-  await audit(tx, actor, unit.id, "update", previous.name, unit.name);
+  await audit(tx, actor, "update", previous, unit);
   return unit;
 }
 export async function deleteMaterialUnitInTransaction(tx: Tx, actor: DomainActor, id: string) {
   await requireUnitAdministrator(tx, actor);
-  const unit = await tx.materialUnit.findUnique({ where: { id } });
+  await tx.$queryRaw`SELECT id FROM "MaterialUnit" WHERE id=${id} FOR UPDATE`;
+  const unit = await tx.materialUnit.findUnique({ where: { id, deletedAt: null } });
   if (!unit) throw Error("Единица измерения не найдена");
   if (await tx.material.count({ where: { unitId: id } })) throw Error("Единица используется в номенклатуре. Сначала выберите другую единицу во всех материалах, включая неактивные.");
-  await tx.materialUnit.delete({ where: { id } });
-  await audit(tx, actor, id, "delete", unit.name);
+  const after = await tx.materialUnit.update({ where: { id }, data: { deletedAt: new Date(), deletedById: actor.id } });
+  await audit(tx, actor, "delete", unit, after);
 }
 export function materialUnitError(error: unknown): string {
   if (typeof error === "object" && error !== null && "code" in error) {

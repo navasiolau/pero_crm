@@ -69,7 +69,7 @@ export async function warehouseMove(tx:Tx,actor:WarehouseActor,input:WarehouseMo
   const product=historicalProduct?{id:historicalProduct.id,number:historicalProduct.number,projectId:historicalProduct.projectId}:null;
   return {movement:previous.movement,repeated:true,line:null,material:null,product};
  }
- const initial=input.projectMaterialId?await tx.projectMaterial.findFirst({where:{id:input.projectMaterialId,product:productVisibilityWhere(actor)},select:{materialId:true,productId:true}}):null;
+ const initial=input.projectMaterialId?await tx.projectMaterial.findFirst({where:{id:input.projectMaterialId,deletedAt:null,product:productVisibilityWhere(actor)},select:{materialId:true,productId:true}}):null;
  if(input.projectMaterialId&&!initial)throw Error('Строка потребности не найдена');
  const initialSource=input.kind==='RETURN'&&input.sourceMovementId?await tx.warehouseMovementValuation.findUnique({where:{movementId:input.sourceMovementId},include:{movement:true}}):null;
  const materialId=input.kind==='INCOME'?input.materialId:initial?.materialId??(input.kind==='RETURN'?initialSource?.movement.materialId:input.materialId);
@@ -81,8 +81,8 @@ export async function warehouseMove(tx:Tx,actor:WarehouseActor,input:WarehouseMo
  const product=productId?await tx.product.findUnique({where:{id:productId,AND:[expenseIssue?expenseIssueProductWhere(actor,expenseIssue.projectId):productVisibilityWhere(actor)]},select:{id:true,number:true,projectId:true}}):null;
  if(productId&&!product)throw Error('Изделие не найдено');
  const material=await tx.material.findUnique({where:{id:materialId}});
- if(!material||(input.kind==='INCOME'&&!material.active))throw Error('Материал не найден');
- const line=product?await tx.projectMaterial.findUnique({where:{productId_materialId:{productId:product.id,materialId}},include:{product:{select:{id:true,number:true,projectId:true}}}}):null;
+ if(!material||(input.kind!=='RETURN'&&!material.active))throw Error('Материал не найден');
+ const line=product?await tx.projectMaterial.findUnique({where:{productId_materialId:{productId:product.id,materialId},deletedAt:null},include:{product:{select:{id:true,number:true,projectId:true}}}}):null;
  if(initial&&line?.id!==input.projectMaterialId)throw Error('Строка потребности изменилась');
  const balance=await tx.warehouseBalance.findUnique({where:{materialId}});
  if(balance&&balance.runId!==state.runId)throw Error('Состояние складского учёта изменилось');
