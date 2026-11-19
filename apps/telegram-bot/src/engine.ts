@@ -1,3 +1,4 @@
+import { config } from "./config";
 import { pendingFinanceCommand, submitFinanceCommand } from "./finance-checkpoint";
 import { dialogChoices, dialogChoice } from "./dialog-choices";
 import {randomUUID} from "node:crypto";
@@ -243,7 +244,7 @@ async function handleLinkCode(
     );
     return;
   }
-  await reply(chatId, `✅ Привязано: ${who}\n\nСписок команд — /help`);
+  await reply(chatId, `✅ Привязано: ${who}\n\nСписок команд — /help`, financeWorkspaceButtons(result.user.roles));
 }
 
 // ─── Команды ─────────────────────────────────────────────────────────────────
@@ -285,9 +286,15 @@ async function handleCommand(
       if (await blockPendingFinance(chatId, current)) return;
       await startStockPurchase({ reply, getDialog, setDialog },chatId); return;
     }
+    case "/финансы":
+    case "/finance": {
+      const buttons = financeWorkspaceButtons(session.roles);
+      await reply(chatId, buttons ? "Рабочее пространство CRM" : "Финансы в Telegram недоступны.", buttons);
+      return;
+    }
     case "/start":
     case "/help": {
-      await reply(chatId, helpText(session));
+      await reply(chatId, helpText(session), financeWorkspaceButtons(session.roles));
       return;
     }
     case "/новый":
@@ -363,6 +370,11 @@ async function handleCommand(
   }
 }
 
+function financeWorkspaceButtons(roles: string[]): InlineButton[][] | undefined {
+  const url = config.financeWorkspaceUrl;
+  return url && hasAny(roles, FINANCE_ROLES) ? [[{ text: "Финансы", web_app: { url } }]] : undefined;
+}
+
 function helpText(session: Session): string {
   const lines = ["Команды бота:"];
   if (hasAny(session.roles, ["ADMIN", "DIRECTOR", "MANAGER"])) lines.push(
@@ -371,6 +383,7 @@ function helpText(session: Session): string {
     "/проекты — последние проекты",
   );
   if (hasAny(session.roles, FINANCE_ROLES)) {
+    if (config.financeWorkspaceUrl) lines.push("/финансы — открыть рабочее пространство");
     lines.push(
       "/приход [номер] [сумма] — приход по проекту или организации",
       "/расход [номер] [сумма] — расход по проекту или организации",

@@ -1,8 +1,8 @@
-import { auth } from "@/auth";
+import { scopedFinanceAuth } from "@/server/telegram/finance-session";
 import { prisma } from "@/lib/prisma";
 import { requireFinanceDocumentActor } from "./core";
 
-export async function financeDocumentWebActorId() {
-  const session = await auth();
-  return (await requireFinanceDocumentActor(session?.user.id, prisma)).id;
+export async function financeDocumentWebActorId(actorId?: string | null) {
+  const userId = actorId === undefined ? (await scopedFinanceAuth())?.user.id : actorId;
+  return (await requireFinanceDocumentActor(userId, prisma)).id;
 }

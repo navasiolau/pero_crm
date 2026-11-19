@@ -1,3 +1,8 @@
+import Link from "next/link";
+import { headers } from "next/headers";
+import { TelegramFinanceLinkSettings } from "@/components/telegram-finance-link-settings";
+import { scopedFinanceAuth } from "@/server/telegram/finance-session";
+import { TELEGRAM_FINANCE_LAYOUT_HEADER } from "@/server/telegram/finance-security";
 import { redirect } from "next/navigation";
 
 import {prisma} from "@/lib/prisma";
@@ -12,9 +17,27 @@ export default async function AppLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const session = await auth();
+  const scoped = (await headers()).get(TELEGRAM_FINANCE_LAYOUT_HEADER) === "active";
+  const session = scoped ? await scopedFinanceAuth() : await auth();
+  const telegram = !!session && "telegramFinance" in session;
   if (!session?.user) {
-    redirect("/login");
+    redirect(scoped ? "/telegram/finance" : "/login");
+  }
+
+  if (telegram) {
+    return (
+      <div className="min-h-dvh">
+        <header className="border-b">
+          <nav aria-label="Финансовое пространство" className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 text-sm">
+            <Link href="/finance" className="font-semibold">Финансы</Link>
+            <Link href="/logistics">ТТН</Link>
+            <Link href="/notifications">Уведомления</Link>
+            <TelegramFinanceLinkSettings />
+          </nav>
+        </header>
+        <main className="mx-auto min-w-0 max-w-7xl px-4 py-5">{children}</main>
+      </div>
+    );
   }
 
   const actor = await prisma.user.findUnique({where:{id:session.user.id},select:{active:true,roles:true,calendarEnabled:true}});
