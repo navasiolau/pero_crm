@@ -30,7 +30,7 @@ async function auditProductSync(tx: Prisma.TransactionClient, actor: DomainActor
     links: [{ type: "commercialProposal", id: proposalId, label: "Коммерческое предложение" }] };
   if (!operationRootId) for (const field of ["title", "kind", "quantity", "technicalSpecifications"] as const) {
     const reversal = field === "technicalSpecifications" ? technicalSpecificationsCommand(before, after) : productFieldCommand(field, before, after);
-    if (reversal || (field === "quantity" && quantityRootId)) await writeChangeLogInTransaction(tx, {
+    if (!operationRootId && (reversal || (field === "quantity" && quantityRootId))) await writeChangeLogInTransaction(tx, {
       ...audit, id: field === "quantity" ? quantityRootId : undefined, field, reversal,
       oldValue: before[field], newValue: after[field],
     }, context);
@@ -85,7 +85,7 @@ export async function synchronizeProposalItemsInTransaction(
     const after = await tx.product.update({ where: { id: product.id }, data: {
       deletedAt: changedAt, deletedById: actor.id,
     } });
-    await auditProductSync(tx, actor, proposal.id, product, after, operationRootId);
+    await auditProductSync(tx, actor, proposal.id, product, after, undefined, operationRootId);
     previousNumbers.set(product.id, product.number);
     changed = true;
   }

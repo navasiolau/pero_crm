@@ -31,6 +31,10 @@ import { officeDirectoryReversal } from "./office-directory-reversal";
 import { signatureSettingsReversal } from "@/server/kp/signature-settings";
 import { warehouseMovementReversal } from "@/server/warehouse/movement-reversal";
 import { logisticsTripLifecycleReversal, logisticsDocumentVisibilityReversal } from "@/server/logistics/lifecycle-reversal";
+import { projectStageReversal } from "@/server/projects/stage-reversal";
+import { productStatusReversal } from "@/server/products/status-reversal";
+import { productPercentageDefaultsReversal } from "@/server/product-percentage-defaults/reversal";
+import { productPercentageSettingsReversal } from "@/server/product-percentage-pay/settings-reversal";
 
 export const journalReversals = [
   ...productFieldReversals,
@@ -69,4 +73,8 @@ export const journalReversals = [
   warehouseMovementReversal,
   logisticsTripLifecycleReversal,
   logisticsDocumentVisibilityReversal,
+  projectStageReversal,
+  productStatusReversal,
+  productPercentageDefaultsReversal,
+  productPercentageSettingsReversal,
 ];

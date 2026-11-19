@@ -415,6 +415,56 @@ test("journal/native-card-quantity-price-and-service-reversals", async () => fix
   await tx.$executeRaw`SET CONSTRAINTS ALL IMMEDIATE`;
 }));
 
+test("journal/native-project-stage-restores-promoted-draft-date-and-history", async () => fixture.rollback(async (tx, rows) => {
+  const reversal = scope.load<typeof import("../../src/server/changelog/reversal-core")>("../src/server/changelog/reversal-core");
+  const director = actorOf(await rows.user("stage-undo-director", ["DIRECTOR"]));
+  const project = await rows.project("stage-undo-project", { stage: "LEAD", stageChangedAt: new Date("2026-01-10T10:00:00Z") });
+  const product = await rows.product("stage-undo-product", project.id, { status: "DRAFT", statusChangedAt: new Date("2026-01-11T10:00:00Z") });
+  const clientMutationId = randomUUID();
+  const applied = await stages.patchProjectStageTransaction(director, { projectId: project.id, expectedStage: "LEAD",
+    toStage: "CONTRACT", clientMutationId }, tx);
+  assert.equal(applied.result.ok, true);
+  const entryId = `project-stage:${clientMutationId}`;
+  assert.equal(await tx.changeLog.count({ where: { operationRootId: entryId, entityId: product.id } }), 1);
+  const canUndo = { entryId, scope: { kind: "project", id: project.id }, requestId: randomUUID() };
+  const undo = await reversal.reverseJournalActionInTransaction(tx, director.id, canUndo);
+  assert.equal((await tx.project.findUniqueOrThrow({ where: { id: project.id } })).stageChangedAt.toISOString(), project.stageChangedAt.toISOString());
+  const restored = await tx.product.findUniqueOrThrow({ where: { id: product.id } });
+  assert.equal(restored.status, "DRAFT");
+  assert.equal(restored.statusChangedAt.toISOString(), product.statusChangedAt.toISOString());
+  assert.equal(await tx.projectStageHistory.count({ where: { projectId: project.id } }), 2);
+  await reversal.reverseJournalActionInTransaction(tx, director.id, { ...canUndo, entryId: undo.reversalId, requestId: randomUUID() });
+  assert.equal((await tx.product.findUniqueOrThrow({ where: { id: product.id } })).status, "PREPARATION");
+  await tx.$executeRaw`SET CONSTRAINTS ALL IMMEDIATE`;
+}));
+
+test("journal/native-product-status-compensates-frozen-completion-and-replays", async () => fixture.rollback(async (tx, rows) => {
+  const reversal = scope.load<typeof import("../../src/server/changelog/reversal-core")>("../src/server/changelog/reversal-core");
+  const engineer = actorOf(await rows.user("status-undo-engineer", ["ENGINEER"]));
+  const director = actorOf(await rows.user("status-undo-director", ["DIRECTOR"]));
+  const project = await rows.project("status-undo-project", { stage: "CONTRACT", currency: "BYN" });
+  const product = await rows.product("status-undo-product", project.id, { status: "DESIGN", engineerId: engineer.id,
+    expectedPrice: "100.00", statusChangedAt: new Date("2026-01-12T10:00:00Z") });
+  await tx.productPercentageConfig.create({ data: { productId: product.id, kind: "ENGINEERING", ratePercent: "5.00", revision: 1 } });
+  const transition = await statuses.changeProductStatusTransaction(tx, engineer, product.id, "PRODUCTION");
+  assert.equal(transition.ok, true);
+  const stage = await tx.changeLog.findFirstOrThrow({ where: { entityId: product.id, action: "status" } });
+  const original = await tx.productPercentageCompletion.findFirstOrThrow({ where: { productId: product.id } });
+  const entry = await tx.payrollEntry.findFirstOrThrow({ where: { productId: product.id, compensatesId: null } });
+  assert.equal(entry.bynAmount?.toFixed(2), "5.00");
+  const request = { entryId: stage.id, scope: { kind: "product", id: product.id }, requestId: randomUUID() };
+  const undo = await reversal.reverseJournalActionInTransaction(tx, director.id, request);
+  const restored = await tx.product.findUniqueOrThrow({ where: { id: product.id } });
+  assert.equal(restored.status, "DESIGN");
+  assert.equal(restored.statusChangedAt.toISOString(), product.statusChangedAt.toISOString());
+  assert.equal((await tx.payrollEntry.findFirstOrThrow({ where: { compensatesId: entry.id } })).bynAmount?.toFixed(2), "-5.00");
+  assert.deepEqual(await tx.productPercentageCompletion.findUnique({ where: { id: original.id } }), original);
+  assert.equal((await reversal.reverseJournalActionInTransaction(tx, director.id, request)).reversalId, undo.reversalId);
+  await reversal.reverseJournalActionInTransaction(tx, director.id, { ...request, entryId: undo.reversalId, requestId: randomUUID() });
+  assert.equal((await tx.payrollEntry.aggregate({ where: { productId: product.id }, _sum: { amount: true } }))._sum.amount?.toFixed(2), "5.00");
+  await tx.$executeRaw`SET CONSTRAINTS ALL IMMEDIATE`;
+}));
+
 test("journal/startup-register-locks-native-types", async () => fixture.rollback(async (tx, rows) => {
   const actor = actorOf(await rows.user("journal-startup-admin", ["ADMIN"]));
   // Singleton использует уже открытый rollback-only tx; новая связь, сеть и worker loops не запускаются.

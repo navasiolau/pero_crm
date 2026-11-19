@@ -64,7 +64,17 @@ export async function captureProductPercentageCompletion(tx: Tx, actor: DomainAc
   assertKind(kind);
   const existing = await tx.productPercentageCompletion.findUnique({ where: { productId_kind: { productId, kind } }, select: { state: true, reason: true } });
   // Состоявшееся/защищённое не трогаем; пропущенное со ставкой добирается поздним переходом.
-  if (existing && existing.state !== "SKIPPED_ONCE") return existing.state;
+  if (existing && existing.state !== "SKIPPED_ONCE") {
+    if (effects?.operationRootId && existing.state === "SETTLED") {
+      const sources = await tx.payrollEntry.findMany({ where: {
+        percentageCompletionShare: { completion: { productId, kind } },
+        compensations: { some: {} },
+      }, select: { _count: { select: { compensations: true } } } });
+      if (sources.some(row => row._count.compensations % 2 === 1))
+        throw Error("Начисление этого перехода отменено. Повторите переход из записи отката в Журнале");
+    }
+    return existing.state;
+  }
   if (existing && isPermanentUnassignedCompletion(existing)) return existing.state;
   if (existing) return settleSkippedPercentage(tx, actor, productId, kind, statusAtCompletion, effects);
   // Read the original status before the new transition, never its already-written target.
