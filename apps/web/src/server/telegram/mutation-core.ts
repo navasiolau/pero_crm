@@ -16,7 +16,11 @@ const rejected = (error: string, status: 400 | 403 = 400) => ({ ok: false as con
 async function recordLink(tx: Prisma.TransactionClient, actor: DomainActor, userId: string, userName: string, action: string, before: TelegramLink | null, after: TelegramLink | null) {
   const oldValue = snapshot(before), newValue = snapshot(after);
   await writeChangeLogInTransaction(tx, { actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
-    entity: "telegramLink", entityId: userId, action, oldValue, newValue }, {
+    entity: "telegramLink", entityId: userId, action, oldValue, newValue,
+    ...(action === "link" && after ? { reversal: { kind: "account.telegram-link", version: 1, data: {
+      linkId: after.id, generation: after.generation, mode: "revoke",
+    } } } : {}),
+  }, {
     before: oldValue, after: newValue, entity: { label: `Telegram — ${userName || "пользователь"}` },
     links: [{ type: "user", id: userId, label: userName || "Имя не сохранено", href: "/settings/users" }],
   });
@@ -60,7 +64,7 @@ export async function confirmTelegramLinkInTransaction(tx: Prisma.TransactionCli
   return { ok: true as const, user: link.user, linkedAt: updated.linkedAt, binding: `${updated.id}:${updated.generation}:${link.user.sessionVersion}` };
 }
 
-export async function unlinkTelegramInTransaction(tx: Prisma.TransactionClient, actor: DomainActor, userId: string) {
+export async function unlinkTelegramInTransaction(tx: Prisma.TransactionClient, actor: DomainActor, userId: string, options?: { reversal: true }) {
   if (actor.id !== userId) requireActorRoles(actor, ADMIN_ROLES);
   await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${userId} FOR UPDATE`;
   const before = await tx.telegramLink.findUnique({ where: { userId }, include: { user: { select: userSelection } } });
@@ -69,7 +73,7 @@ export async function unlinkTelegramInTransaction(tx: Prisma.TransactionClient, 
     generation: { increment: 1 }, revokedAt: new Date(Math.max(Date.now(), (before.revokedAt?.getTime() ?? 0) + 1, (before.linkedAt?.getTime() ?? 0) + 1)), chatId: null, username: null,
     linkedAt: null, linkCode: null, linkCodeExpiresAt: null,
   } });
-  await recordLink(tx, actor, userId, before.user.name, "unlink", before, after);
+  if (!options?.reversal) await recordLink(tx, actor, userId, before.user.name, "unlink", before, after);
   return { ok: true as const, deleted: 1 };
 
 }

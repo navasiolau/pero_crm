@@ -17,7 +17,7 @@ function fixture() {
       return true;
     },
   };
-  const service = createListPreferenceService({ sessionUser: async () => user, store, revision: () => String(++revision) });
+  const service = createListPreferenceService({ sessionUser: async () => user ? { id: user, name: user, source: "web" } : null, store, revision: () => String(++revision) });
   return { service, rows, login: (id: string | null) => { user = id; } };
 }
 

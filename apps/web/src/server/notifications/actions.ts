@@ -49,7 +49,9 @@ export async function getMyPreferences(){
 export async function setPreference(type:string,enabled:boolean):Promise<{ok:boolean;error?:string}>{
  const session=await scopedFinanceAuth();if(!session?.user)throw new Error('Не авторизован');
  if(type==='plan.reminder'&&("telegramFinance" in session||!await currentReminderNamespace(session.user.id,prisma)))return {ok:false,error:'Личный план недоступен'};
+ const preference=receivableTypesFor(session.user.roles).find(item=>item.id===type);
+ if(type!=='plan.reminder'&&!preference)return {ok:false,error:'Тип уведомлений недоступен'};
  if(type==='plan.reminder')await prisma.notificationPreference.upsert({where:{userId_type:{userId:session.user.id,type}},create:{userId:session.user.id,type,enabled},update:{enabled}});
- else await prisma.$transaction(tx=>setNotificationPreferenceInTransaction(tx,{id:session.user.id,name:session.user.name??'',roles:session.user.roles,source:financeSessionSource(session)},type,enabled,NOTIFICATION_TYPES.find(item=>item.id===type)?.label??type));
+ else await prisma.$transaction(tx=>setNotificationPreferenceInTransaction(tx,{id:session.user.id,name:session.user.name??'',roles:session.user.roles,source:financeSessionSource(session)},type,enabled,preference?.label??type));
  await deliverPostCommit('notification-preference',session.user.id,[{kind:'cache',run:()=>revalidatePath('/notifications')}]);return {ok:true};
 }

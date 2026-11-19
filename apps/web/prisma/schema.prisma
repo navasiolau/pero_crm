@@ -75,6 +75,7 @@ model User {
   telegram        String? // @username
   passwordHash    String
   sessionVersion  Int            @default(0)
+  accountRevision Int            @default(0)
   calendarEnabled Boolean?
   roles           Role[] // комбинированные роли (§4): права = объединение
   payScheme       PayScheme      @default(NONE)
@@ -1351,6 +1352,7 @@ model NotificationPreference {
   userId  String
   type    String
   enabled Boolean @default(true)
+  revision Int @default(0)
 
   @@id([userId, type])
 }
@@ -1360,8 +1362,22 @@ model UserPreference {
   userId String
   key    String
   value  String
+  revision Int @default(0)
 
   @@id([userId, key])
+}
+
+// Прежний нормализованный выбор списка. В журнале хранится только ссылка.
+model SavedListChoiceRevision {
+  id                        String @id
+  userId                    String
+  section                   String
+  beforeQuery               String
+  beforeEngineerInitialized Boolean
+  afterRevision             String
+  createdAt                 DateTime @default(now())
+
+  @@index([userId, section])
 }
 
 // ─── Плагинное ядро (§14) ────────────────────────────────────────────────────

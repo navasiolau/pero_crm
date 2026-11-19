@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Prisma } from "@prisma/client";
 import { requestTelegramLinkInTransaction, confirmTelegramLinkInTransaction, unlinkTelegramInTransaction, unlinkTelegramChatInTransaction, registerTelegramBotInTransaction } from "../src/server/telegram/mutation-core";
+import { telegramLinkReversal } from "../src/server/telegram/link-reversal";
 import { parseJournalPresentation } from "../src/server/changelog/presentation";
 
 const actor = { id: "user-telegram", name: "Иван", roles: ["WORKER"] as const, source: "web" as const };
@@ -65,4 +66,34 @@ test("Telegram mandatory audit failure propagates and other user's link needs pr
   const f = fixture(); f.fail();
   await assert.rejects(() => requestTelegramLinkInTransaction(f.tx, { ...actor, roles: [...actor.roles] }, "SECRET22", new Date(Date.now() + 60000)), /AUDIT_FAILED/);
   await assert.rejects(() => unlinkTelegramInTransaction(f.tx, { ...actor, roles: [...actor.roles] }, "another-user"), /Недостаточно прав/);
+});
+
+
+test("undoing a live Telegram link revokes it and redo requires fresh code", async () => {
+  const f = fixture(), human = { ...actor, roles: [...actor.roles] };
+  await requestTelegramLinkInTransaction(f.tx, human, "ONE-USE-CODE", new Date(Date.now() + 60000));
+  assert.ok((await confirmTelegramLinkInTransaction(f.tx, { code: "ONE-USE-CODE", chatId: "555123" })).ok);
+  const command = f.audits.at(-1)!.reversal as { data: unknown };
+  const handler = telegramLinkReversal.read(command.data); assert.ok(handler);
+  const ctx = { tx: f.tx, actor: { ...human, roles: ["ADMIN" as const] }, entryId: "audit-1", entityId: actor.id };
+  assert.equal(await handler.preview(ctx), null);
+  const result = await handler.apply(ctx);
+  assert.equal(f.link?.id, "link-id"); assert.equal(f.link?.chatId, null); assert.ok(f.link?.revokedAt);
+  const future = telegramLinkReversal.read(result.reversal.data); assert.ok(future);
+  await assert.rejects(() => future.apply(ctx), /одноразовый код/);
+  assert.equal(f.audits.length, 2, "reversal engine creates the only root");
+});
+
+
+test("an old link reversal cannot touch another chat after rebind", async () => {
+  const f = fixture(), human = { ...actor, roles: [...actor.roles] };
+  await requestTelegramLinkInTransaction(f.tx, human, "OLD-CODE", new Date(Date.now() + 60000));
+  assert.ok((await confirmTelegramLinkInTransaction(f.tx, { code: "OLD-CODE", chatId: "555123" })).ok);
+  const handler = telegramLinkReversal.read((f.audits.at(-1)!.reversal as { data: unknown }).data); assert.ok(handler);
+  await unlinkTelegramInTransaction(f.tx, human, actor.id);
+  await requestTelegramLinkInTransaction(f.tx, human, "OTHER-CODE", new Date(Date.now() + 60000));
+  assert.ok((await confirmTelegramLinkInTransaction(f.tx, { code: "OTHER-CODE", chatId: "555456" })).ok);
+  const ctx = { tx: f.tx, actor: { ...human, roles: ["ADMIN" as const] }, entryId: "audit-old", entityId: actor.id };
+  await assert.rejects(() => handler.apply(ctx), /изменилась/);
+  assert.equal(f.link?.chatId, "555456");
 });

@@ -97,8 +97,8 @@ export function updateListQuery(section: ListSection, query: string, updates: Re
   return normalizeListQuery(section, params.toString());
 }
 
-export function encodeListPreference(section: ListSection, query: string, revision: string) {
-  return JSON.stringify({ version: 2, revision, engineerFilterInitialized: true, query: normalizeListQuery(section, query) });
+export function encodeListPreference(section: ListSection, query: string, revision: string, engineerFilterInitialized = true) {
+  return JSON.stringify({ version: 2, revision, engineerFilterInitialized, query: normalizeListQuery(section, query) });
 }
 
 export function isEngineerFilterInitialized(value: string | null): boolean {

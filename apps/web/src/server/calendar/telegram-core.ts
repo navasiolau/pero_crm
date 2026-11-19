@@ -16,7 +16,7 @@ async function eligibleFact(tx:Prisma.TransactionClient,context:TelegramReminder
  await tx.$queryRaw`SELECT id FROM "User" WHERE id=${fact.ownerId} FOR SHARE`;
  const owner=await tx.user.findUnique({where:{id:fact.ownerId},select:{id:true,active:true,roles:true,calendarEnabled:true}});if(!owner?.active||!isCalendarEnabled(owner))return null;
  await tx.$queryRaw`SELECT id FROM "TelegramLink" WHERE "userId"=${fact.ownerId} FOR SHARE`;
- const link=await tx.telegramLink.findUnique({where:{userId:fact.ownerId}});if(!link?.chatId||!link.linkedAt||link.revokedAt||fact.confirmedAt<link.linkedAt||!telegramRecipientAllowed(context,fact.ownerId,link.chatId))return null;
+ const link=await tx.telegramLink.findUnique({where:{userId:fact.ownerId}});if(!link?.chatId||!link.linkedAt||link.revokedAt||fact.confirmedAt<=link.linkedAt||!telegramRecipientAllowed(context,fact.ownerId,link.chatId))return null;
  const pref=await tx.notificationPreference.findUnique({where:{userId_type:{userId:fact.ownerId,type:'plan.reminder'}}});if(pref?.enabled===false)return null;
  return {fact,entry,link};
 }
@@ -30,7 +30,7 @@ export async function queueTelegramRemindersCore(context:TelegramReminderContext
  WHERE f.namespace=${context.reminder.namespace} AND f."webState"='DELIVERED' AND f."confirmedAt"<=${now}
  AND e."reminderNamespace"=${context.reminder.namespace} AND e."ownerId"=f."ownerId" AND e.revision=f."entryRevision" AND e.state='PLANNED' AND e."reminderOffsetMinutes" IS NOT NULL
  AND u.active AND (u."calendarEnabled" IS TRUE OR (u."calendarEnabled" IS NULL AND 'PROCUREMENT'=ANY(u.roles)))
- AND l."revokedAt" IS NULL AND l."linkedAt" IS NOT NULL AND f."confirmedAt">=l."linkedAt" AND l."chatId" ~ '^[1-9][0-9]{0,15}$' ${recipients}
+ AND l."revokedAt" IS NULL AND l."linkedAt" IS NOT NULL AND f."confirmedAt"> (l."linkedAt" AT TIME ZONE 'UTC') AND l."chatId" ~ '^[1-9][0-9]{0,15}$' ${recipients}
  AND NOT EXISTS(SELECT 1 FROM "NotificationPreference" p WHERE p."userId"=u.id AND p.type='plan.reminder' AND p.enabled=FALSE)
  AND NOT EXISTS(SELECT 1 FROM "TelegramReminderOutbox" o WHERE o.namespace=${context.reminder.namespace} AND o."factId"=f.id)
  ORDER BY f."confirmedAt",f.id LIMIT 100`));

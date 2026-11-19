@@ -242,7 +242,7 @@ const namespace='local:00000000-0000-4000-8000-000000000001',now=new Date('2026-
 const context:TelegramReminderContext={reminder:{environment:'local',namespace,testOwnerIds:['own'],enabled:true},botId:'123',serviceTokenId:'service',testRecipients:[{ownerId:'own',chatId:'456'}]};
 type Row=Record<string,unknown>;
 function fixture(){
- let state={facts:[{id:'fact',namespace,ownerId:'own',entryId:'entry',entryRevision:0,webState:'DELIVERED',confirmedAt:now,titleSnapshot:'Personal',startsAtSnapshot:now}],entry:{id:'entry',ownerId:'own',state:'PLANNED',revision:0,reminderNamespace:namespace,reminderOffsetMinutes:15},owner:{id:'own',active:true,roles:['ACCOUNTANT'],calendarEnabled:true},link:{id:'link',userId:'own',chatId:'456',linkedAt:now},preference:true,outboxes:[] as Row[]};let reads=0,tail=Promise.resolve();
+ let state={facts:[{id:'fact',namespace,ownerId:'own',entryId:'entry',entryRevision:0,webState:'DELIVERED',confirmedAt:now,titleSnapshot:'Personal',startsAtSnapshot:now}],entry:{id:'entry',ownerId:'own',state:'PLANNED',revision:0,reminderNamespace:namespace,reminderOffsetMinutes:15},owner:{id:'own',active:true,roles:['ACCOUNTANT'],calendarEnabled:true},link:{id:'link',userId:'own',chatId:'456',linkedAt:new Date(now.getTime()-1000),generation:0,revokedAt:null as Date|null},preference:true,outboxes:[] as Row[]};let reads=0,tail=Promise.resolve();
  function match(row:Row,where:Row):boolean{return Object.entries(where).every(([key,value])=>key==='AND'?(value as Row[]).every(w=>match(row,w)):key==='OR'?(value as Row[]).some(w=>match(row,w)):value&&typeof value==='object'&&'lt' in value?row[key] instanceof Date&&(row[key] as Date)<(value as {lt:Date}).lt:row[key]===value);}
  function update(row:Row,data:Row){for(const [key,value] of Object.entries(data))row[key]=value&&typeof value==='object'&&'increment' in value?Number(row[key])+Number(value.increment):value;return row;}
  const tx={
@@ -262,11 +262,16 @@ test('queue uses confirmed own fact once; claim/preflight gives a single grant; 
  assert.equal((await acknowledgeTelegramReminderCore(context,{...identity(c),outcome:'sent',messageId:'42'},now,f.transaction)).ok,true);assert.equal((await acknowledgeTelegramReminderCore(context,{...identity(c),outcome:'sent',messageId:'42'},now,f.transaction)).ok,true);assert.equal(f.state().outboxes[0].state,'SENT');assert.equal((await acknowledgeTelegramReminderCore(context,{...identity(c),outcome:'sent',messageId:'43'},now,f.transaction)).ok,false);
 });
 test('cancel/revision/flag/unlink/relink and testrecipient changes revoke preflight without redirecting snapshots',async()=>{
- for(const mode of ['cancel','revision','off','inactive','chat','link-id','linked-at']){
+ for(const mode of ['cancel','revision','off','inactive','chat','link-id','linked-at','generation','revoked-at']){
  const f=fixture();await queueTelegramRemindersCore(context,now,f.transaction);const claimed=await claimTelegramReminderCore(context,{namespace,botId:'123',requestId:randomUUID()},now,f.transaction);assert.ok(claimed.ok&&claimed.claim);
- if(mode==='cancel')f.state().entry.state='CANCELLED';if(mode==='revision')f.state().entry.revision=1;if(mode==='off')f.state().owner.calendarEnabled=false;if(mode==='inactive')f.state().owner.active=false;if(mode==='chat')f.state().link.chatId='999';if(mode==='link-id')f.state().link.id='relinked';if(mode==='linked-at')f.state().link.linkedAt=new Date(now.getTime()+1);
+ if(mode==='cancel')f.state().entry.state='CANCELLED';if(mode==='revision')f.state().entry.revision=1;if(mode==='off')f.state().owner.calendarEnabled=false;if(mode==='inactive')f.state().owner.active=false;if(mode==='chat')f.state().link.chatId='999';if(mode==='link-id')f.state().link.id='relinked';if(mode==='linked-at')f.state().link.linkedAt=new Date(now.getTime()+1);if(mode==='generation')f.state().link.generation++;if(mode==='revoked-at')f.state().link.revokedAt=now;
  assert.equal((await authorizeTelegramReminderCore(context,identity(claimed.claim),now,f.transaction)).ok,false,mode);assert.equal(f.state().outboxes[0].state,'CANCELLED',mode);assert.equal(f.state().outboxes[0].chatIdSnapshot,'456',mode);assert.equal(f.state().outboxes[0].attempts,0,mode);
  }
+});
+test('old unqueued Telegram reminder is not attached to a newly linked generation', async()=>{
+ const f=fixture();f.state().link.generation=5;f.state().link.linkedAt=now;
+ assert.equal(await queueTelegramRemindersCore(context,now,f.transaction),0);
+ assert.equal(f.state().outboxes.length,0);
 });
 test('UNKNOWN send/expired SENDING never reclaims; CLAIMED expiry before grant safely resets',async()=>{
  for(const mode of ['ack-unknown','sending-expired','claimed-expired']){

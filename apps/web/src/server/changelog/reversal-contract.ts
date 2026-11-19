@@ -11,6 +11,7 @@ type ReversalEffect = {
   newValue?: unknown;
   cachePaths?: string[];
   eventIds?: string[];
+  afterWrite?: (reversalId: string) => Promise<void>;
 };
 
 export class JournalReversalRefusal extends Error {
