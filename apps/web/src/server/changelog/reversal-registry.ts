@@ -1,3 +1,5 @@
 import { productTitleReversal } from "@/server/products/title-reversal";
 
-export const journalReversals = [productTitleReversal];
+import { expenseReceiptReversal } from "@/server/warehouse/expense-receipt-reversal";
+
+export const journalReversals = [productTitleReversal, expenseReceiptReversal];

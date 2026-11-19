@@ -843,6 +843,7 @@ model Payment {
   reportDocument   FinanceDocument? @relation(fields: [reportDocumentId], references: [id], onDelete: Restrict)
   reportDocuments  PaymentReportDocument[]
   stockPurchase    StockPurchase?
+  expenseReceipts  ExpenseReceipt[]
   logisticsAllocationId String? @unique
   logisticsAllocation LogisticsPostingAllocation? @relation(fields: [logisticsAllocationId], references: [id], onDelete: Restrict)
   deletionId       String?
@@ -1193,6 +1194,33 @@ model StockPurchase {
   @@index([actorId])
 }
 
+model ExpenseReceipt {
+  id                 String   @id @default(cuid())
+  paymentId          String
+  payment            Payment @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  clientMutationId   String   @unique
+  requestFingerprint String
+  actorId            String
+  cancelledAt        DateTime?
+  createdAt          DateTime @default(now())
+  lines              ExpenseReceiptLine[]
+
+  @@index([paymentId])
+}
+
+model ExpenseReceiptLine {
+  id         String        @id @default(cuid())
+  receiptId  String
+  receipt    ExpenseReceipt @relation(fields: [receiptId], references: [id], onDelete: Restrict)
+  position   Int
+  movementId String        @unique
+  movement   StockMovement @relation(fields: [movementId], references: [id], onDelete: Restrict)
+  amount     Decimal       @db.Decimal(12, 2)
+  unitPrice  Decimal       @db.Decimal(27, 12)
+
+  @@unique([receiptId, position])
+}
+
 model WarehouseMovementDeletion {
   id String @id @default(uuid())
   clientMutationId String @unique
@@ -1213,6 +1241,7 @@ model StockMovement {
   type              StockMovementType
   receiptKind       StockReceiptKind? // NULL: исторический вид не подтверждён
   stockPurchase     StockPurchase?
+  expenseReceiptLine ExpenseReceiptLine?
   deletionId        String?
   deletion          WarehouseMovementDeletion? @relation("DeletedMovements", fields: [deletionId], references: [id], onDelete: Restrict)
   rootDeletion      WarehouseMovementDeletion? @relation("WarehouseDeletionRoot")
