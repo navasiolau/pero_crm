@@ -47,6 +47,7 @@ function App() {
 createRoot(document.getElementById("root")).render(<App/>);
 `;
 const boundaries = {
+  "@/server/logistics/reallocation-actions": 'export const readTripReallocation=async()=>({ok:false}); export const readTripReallocationProducts=readTripReallocation; export const previewTripReallocation=readTripReallocation; export const saveTripReallocation=readTripReallocation;',
   "next/navigation": 'export const useRouter = () => ({ replace(href) { history.replaceState(null, "", href); dispatchEvent(new Event("expense-fixture-route")); } });',
   "next/link": 'export default function Link({ children, ...props }) { return <a {...props}>{children}</a>; }',
   "@/components/payment-dialog": "export function PaymentDialog() { return null; }",

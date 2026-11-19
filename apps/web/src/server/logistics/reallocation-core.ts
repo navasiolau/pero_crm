@@ -65,7 +65,7 @@ export function reallocationPaths(tripId: string, projectIds: string[]) {
 }
 
 export async function redistributeTripInTransaction(
-  tx: Prisma.TransactionClient, actorId: string, rawInput: ReallocationInput, reversal = false,
+  tx: Prisma.TransactionClient, actorId: string, rawInput: ReallocationInput, reversal = false, source: "web" | "telegram" | "api" = "web",
 ) {
   const input = reallocationInputSchema.parse(rawInput);
   await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${actorId} FOR SHARE`;
@@ -128,7 +128,7 @@ export async function redistributeTripInTransaction(
     ({ projectId, percentBps, amount: amount.toFixed(2), bynAmount: bynAmount.toFixed(2) })) };
   const after = { postingId: next.id, revision, manifest: next.manifestSnapshot, shares: split.allocations };
   if (!reversal) await writeChangeLogInTransaction(tx, {
-    actorType: "user", actorId, actorName: actor.name, source: "web", entity: "logisticsPosting", entityId: next.id, action: "redistribute",
+    actorType: "user", actorId, actorName: actor.name, source, entity: "logisticsPosting", entityId: next.id, action: "redistribute",
     oldValue: before, newValue: after, reversal: { kind: reallocationReversalKind, version: 1,
       data: { tripId: trip.id, postingId: next.id, revision, restorePostingId: posting.id } },
   }, { ...hints, before, after, kind: "event" });
