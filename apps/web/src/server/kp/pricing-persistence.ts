@@ -6,7 +6,7 @@ import type { ProposalPricingProjection } from "./pricing-contract";
 import {automationJournalContext,businessSnapshot,productJournalContext,projectJournalContext} from '../projects/journal';
 
 type PricingTransaction = Pick<Prisma.TransactionClient, "$queryRaw" | "product" | "project" | "changeLog">;
-export type ProposalPricingContext = { proposalId: string; project: { id: string; number?: string; stage: string; currency: string };
+export type ProposalPricingContext = { proposalId: string; operationRootId?: string; project: { id: string; number?: string; stage: string; currency: string };
   items: readonly { id: string; productId: string }[]; actor: DomainActor };
 
 /** Вызывается pricing hook общего сохранения №181, в той же транзакции после синхронизации состава. */
@@ -43,7 +43,7 @@ export async function applyProjectionInTransaction(tx: PricingTransaction, conte
     const before=businessSnapshot(product,['initialPrice','expectedPrice','initialPriceCaptureEligible']);
     const after={initialPrice:item.initialPrice.toString(),expectedPrice:item.expectedPrice.toString(),initialPriceCaptureEligible:false};
     if(JSON.stringify(before)!==JSON.stringify(after))await writeChangeLogInTransaction(tx,
-      {actorType:'user',actorId:context.actor.id,actorName:context.actor.name,source:context.actor.source,entity:'product',entityId:productId,action:'proposal.pricing.sync',
+      {actorType:'user',actorId:context.actor.id,actorName:context.actor.name,source:context.actor.source,operationRootId:context.operationRootId,entity:'product',entityId:productId,action:'proposal.pricing.sync',
         oldValue:before,newValue:{...after,proposalId:context.proposalId}},
       {...productJournalContext(product),...automationJournalContext(context.actor,'Обновление цены изделия из КП'),before,after});
   }
@@ -51,7 +51,7 @@ export async function applyProjectionInTransaction(tx: PricingTransaction, conte
   if (updated.count !== 1) throw Error("Этап проекта изменился во время сохранения КП");
   const json = (value: unknown): Prisma.InputJsonValue => JSON.parse(JSON.stringify(value));
   await writeChangeLogInTransaction(tx, { actorType: "user", actorId: context.actor.id, actorName: context.actor.name,
-    source: context.actor.source, entity: "project", entityId: project.id, action: "proposal.pricing.sync",
+    source: context.actor.source, operationRootId: context.operationRootId, entity: "project", entityId: project.id, action: "proposal.pricing.sync",
     oldValue: json({ project, products:products.map(product=>businessSnapshot(product,['id','quantity','initialPrice','expectedPrice','initialPriceCaptureEligible'])) }), newValue: json({ proposalId: context.proposalId, project: projection.project, items: projection.items,
       rate: { ...projection.rate, value: projection.rate.value.toString() } }) },
     {...projectJournalContext(context.project),...automationJournalContext(context.actor,'Обновление стоимости проекта из КП'),

@@ -12,6 +12,7 @@ type Tx = Prisma.TransactionClient;
 export type ProposalMediaSaveContext = {
   actor: { id: string; name: string; source: "web" | "telegram" | "api" };
   proposalId: string;
+  operationRootId?: string;
   proposal: { revision: number };
   project: { id: string };
   state: { items: readonly { id: string; image?: unknown; image2?: unknown }[] };
@@ -25,7 +26,7 @@ type PreparedJob = { id: string; kind: string; state: string; proposalId: string
 
 async function audit(tx: Tx, context: ProposalMediaSaveContext, entity: string, entityId: string, action: string, newValue: Prisma.InputJsonObject,hints:JournalPresentationHints) {
   await writeChangeLogInTransaction(tx, { actorType: "user", actorId: context.actor.id, actorName: context.actor.name,
-    source: context.actor.source, entity, entityId, action, newValue },
+    source: context.actor.source, operationRootId: context.operationRootId, entity, entityId, action, newValue },
     {...hints,...automationJournalContext(context.actor,'Синхронизация изображений из КП')});
 }
 async function cancelUnattachedCleanup(tx: Tx, plan: MediaPlan, now: Date) {

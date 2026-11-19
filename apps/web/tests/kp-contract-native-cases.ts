@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { createContractWorkflow } from "../src/server/kp/contract-workflow";
+import { captureReleaseStages, contractPublicationReversal, makePublicationReversal } from "../src/server/kp/contract-publication-reversal";
 import { createPostgresContractTransaction } from "../src/server/kp/contract-store";
 import type { ContractPreparedOutput } from "../src/server/kp/contract-workflow";
 import type { ContractClaim, ContractArtifact, ContractStore, ContractWorkflowPorts } from "../src/server/kp/contract-ports";
@@ -75,7 +76,11 @@ export async function runContractDatabaseNativeCases(tx: Prisma.TransactionClien
       catch (error) { await tx.$executeRawUnsafe("ROLLBACK TO SAVEPOINT qa186_contract_command"); await tx.$executeRawUnsafe("RELEASE SAVEPOINT qa186_contract_command"); throw error; }
     } };
     // Внешняя транзакция ещё не завершена; тестовые outbox-события никуда не отправляются.
-    const ports: ContractWorkflowPorts = { ...configuration, store, dispatchAfterCommit: async () => undefined }, workflow = createContractWorkflow(ports);
+    const ports: ContractWorkflowPorts = { ...configuration, store, dispatchAfterCommit: async () => undefined, lifecycle: {
+      ...configuration.lifecycle,
+      captureReleaseStages: (native, sources) => captureReleaseStages(native.native, sources),
+      makePublicationReversal: (native, identity, sources, before) => makePublicationReversal(native.native, identity, sources, before),
+    } }, workflow = createContractWorkflow(ports);
     const form = await workflow.form(actor, ids[0]); form.settings.proposalIds = ids;
     const refs = ids.map(proposalId => ({ proposalId, expectedRevision: 1 }));
     const request = { documentId: ids[0], expectedRevision: 0, operationId: randomUUID(), clientBaseline: form.clientBaseline, sourceRefs: refs, settings: form.settings };
@@ -127,12 +132,27 @@ export async function runContractDatabaseNativeCases(tx: Prisma.TransactionClien
     assert.equal((await tx.product.findMany({ where: { id: { in: products } } })).every(row => row.status === "PREPARATION"), true);
     const accepted = await tx.$queryRaw<{ acceptedVersionId: string | null }[]>`SELECT "acceptedVersionId" FROM "CommercialProposal" WHERE id IN (${ids[0]},${ids[1]})`;
     assert.equal(accepted.every(row => row.acceptedVersionId !== null), true);
+    const journal = await tx.changeLog.findUniqueOrThrow({ where: { id: "kp-contract-release:" + jobId } });
+    const action = journal.reversal as { data?: unknown } | null;
+    const reversal = contractPublicationReversal.read(action?.data);
+    assert.ok(reversal, "QA186_CONTRACT_REVERSAL_REQUIRED");
+    const context = { tx, actor: { id: userId, name: "Проверка", roles: ["ADMIN" as const], source: "web" as const },
+      entryId: journal.id, entityId: contractId };
+    assert.equal(await reversal.preview(context), null);
+    const reverted = await reversal.apply(context);
+    assert.equal((await tx.project.findMany({ where: { id: { in: projects } } })).every(row => row.stage === "LEAD"), true);
+    assert.equal((await tx.product.findMany({ where: { id: { in: products } } })).every(row => row.status === "DRAFT"), true);
+    assert.equal((await tx.commercialProposal.findMany({ where: { id: { in: ids } } })).every(row => row.acceptedVersionId === null), true);
+    assert.equal((await tx.proposalArtifact.findUniqueOrThrow({ where: { id: String(result.artifactId) } })).deletedAt instanceof Date, true);
+    await contractPublicationReversal.read(reverted.reversal.data)!.apply(context);
+    assert.equal((await tx.project.findMany({ where: { id: { in: projects } } })).every(row => row.stage === "CONTRACT"), true);
+    assert.equal((await tx.proposalArtifact.findUniqueOrThrow({ where: { id: String(result.artifactId) } })).deletedAt, null);
     const versions = await tx.$queryRaw<{ clientSnapshot: ContractObject }[]>`SELECT "clientSnapshot" FROM "ProposalContractVersion" WHERE id=${String(result.versionId)}`;
     await tx.$executeRaw`UPDATE "Client" SET name='Изменение после выпуска',"updatedAt"=NOW() WHERE id=${clientId}`;
     const after = await tx.$queryRaw<{ clientSnapshot: ContractObject }[]>`SELECT "clientSnapshot" FROM "ProposalContractVersion" WHERE id=${String(result.versionId)}`;
     assert.deepEqual(after, versions);
     assert.deepEqual(await workflow.finalize(second.claim, second.output), result);
-    return { databaseCases: 8, physicalDocumentAcceptance: false };
+    return { databaseCases: 9, physicalDocumentAcceptance: false };
   } finally {
     await tx.$executeRawUnsafe("ROLLBACK TO SAVEPOINT qa186_contract_workflow");
     await tx.$executeRawUnsafe("RELEASE SAVEPOINT qa186_contract_workflow");

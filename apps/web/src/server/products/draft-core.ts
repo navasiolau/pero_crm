@@ -32,7 +32,7 @@ export async function productInitialStatus(tx: Prisma.TransactionClient, project
 
 /** Подтверждение заказа не завершает процентный этап и не создаёт начислений. */
 export async function promoteProjectDrafts(tx: Prisma.TransactionClient, actor: DomainActor,
-  projectId: string, changedAt: Date) {
+  projectId: string, changedAt: Date, operationRootId?: string) {
   const drafts = await tx.product.findMany({
     where: { projectId, status: "DRAFT", deletedAt: null },
     select: { id: true, number: true }, orderBy: { id: "asc" },
@@ -49,7 +49,7 @@ export async function promoteProjectDrafts(tx: Prisma.TransactionClient, actor: 
     } });
     await writeChangeLogInTransaction(tx, {
       actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
-      entity: "product", entityId: product.id, action: "status", field: "status",
+      entity: "product", entityId: product.id, action: "status", operationRootId, field: "status",
       oldValue: "DRAFT", newValue: "PREPARATION", createdAt: changedAt,
     },{...productJournalContext(product),...automationJournalContext(actor,"Подтверждение договора проекта")});
     const event = await tx.domainEvent.create({ data: {
