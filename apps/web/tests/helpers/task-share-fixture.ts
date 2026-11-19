@@ -97,6 +97,10 @@ export function taskShareFixture(productStatus: "DESIGN" | "PRODUCTION" = "PRODU
     work: {
       findUnique: async ({ where }: { where: Row }) => { const row = filtered(state.works, where)[0]; return row ? { ...row, tasks: state.tasks.filter((task) => task.workId === row.id) } : null; },
       findMany: async ({ where }: { where?: Row }) => filtered(state.works, where).map(row => ({ ...row, tasks: state.tasks.filter(task => task.workId === row.id) })),
+      update: async ({ where, data }: { where: Row; data: Row }) => {
+        write("work.update"); const row = filtered(state.works, where)[0];
+        Object.assign(row, data, { journalRevision: Number(row.journalRevision ?? 0) + 1 }); return row;
+      },
       delete: async ({ where }: { where: Row }) => { write("work.delete"); const row = filtered(state.works, where)[0]; state.works = state.works.filter((work) => work !== row); return row; },
     },
     project: { findUnique: async () => ({ id: "project", number: "1", currency: state.projectCurrency }) },
@@ -136,7 +140,10 @@ export function taskShareFixture(productStatus: "DESIGN" | "PRODUCTION" = "PRODU
       update: async () => { throw new Error("Task transfer must not change payouts"); },
     },
     taskDependency: {
-      findMany: async ({ where }: { where?: Row }) => filtered(state.dependencies, where),
+      findMany: async ({ where }: { where?: Row }) => state.dependencies.filter(edge => matches({ ...edge,
+        task: state.tasks.find(task => task.id === edge.taskId),
+        dependsOn: state.tasks.find(task => task.id === edge.dependsOnId),
+      }, where)),
       deleteMany: async ({ where }: { where: Row }) => { write("dependencies.delete"); state.dependencies = state.dependencies.filter((edge) => !matches(edge, where)); return { count: 0 }; },
       createMany: async ({ data }: { data: Row[] }) => {
         write("dependencies.create"); for (const edge of data) if (!state.dependencies.some((old) => old.taskId === edge.taskId && old.dependsOnId === edge.dependsOnId)) state.dependencies.push(edge);

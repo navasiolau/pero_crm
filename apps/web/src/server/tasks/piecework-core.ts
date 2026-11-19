@@ -6,7 +6,7 @@ import { hasWorkCoordinator } from "@/lib/roles";
 import { assertInternalCurrency, assertProjectMoneyCurrency } from "@/lib/internal-currency";
 import { canManagePiecework, canTransferPiecework } from "@/lib/piecework-policy";
 import { allocatePiecework, allocatedWorkQuantity, FULL_SHARE_UNITS, moneyAtoms, quantityAtoms, quantityFromAtoms, splitAllocation, taskPieceAmount } from "@/lib/work-shares";
-import { liveChildWhere, liveProductWhere } from "@/server/access/live-entities";
+import { liveTaskWhere, liveProductWhere, liveWorkWhere, activeTaskDependencyWhere } from "@/server/access/live-entities";
 import { productVisibilityWhere, resolveVisibilityActor } from "@/server/access/visibility";
 import type { DomainActor } from "@/server/projects/core";
 import { withTaskTransaction, type TaskTransaction } from "./transaction";
@@ -60,10 +60,10 @@ async function accessibleProduct(tx: Prisma.TransactionClient, actor: { id: stri
   return product;
 }
 
-const ordinaryWorkInclude = { tasks: { select: { id: true, quantity: true, allocationGroupId: true } }, _count: { select: { paymentConversions: true, settlementShares: true } } } as const;
+const ordinaryWorkInclude = { tasks: { where: { deletedAt: null }, select: { id: true, quantity: true, allocationGroupId: true } }, _count: { select: { paymentConversions: true, settlementShares: true } } } as const;
 async function ordinaryWork(tx: Prisma.TransactionClient, workId: string, projectId: string, productId: string) {
   await tx.$queryRaw`SELECT id FROM "Work" WHERE id=${workId} FOR UPDATE`;
-  const work = await tx.work.findUnique({ where: { ...liveChildWhere, id: workId }, include: ordinaryWorkInclude });
+  const work = await tx.work.findUnique({ where: { ...liveWorkWhere, id: workId }, include: ordinaryWorkInclude });
   if (!work || work.projectId !== projectId || work.productId !== productId || work.paymentKind !== "LEGACY" ||
     work.stagePayPoolId !== null || work.poolWeightUnits !== null || work._count.paymentConversions || work._count.settlementShares)
     deny("Распределять можно только обычную работу этого изделия без фондов и расчётов этапов");
@@ -100,7 +100,7 @@ async function validateRecipients(tx: Prisma.TransactionClient, ids: string[], p
 
 async function dependenciesFor(tx: Prisma.TransactionClient, ids: string[], projectId: string, productId: string) {
   if (!ids.length) return [];
-  const selected = await tx.task.findMany({ where: { ...liveChildWhere, id: { in: ids }, projectId, productId }, select: { id: true, allocationGroupId: true } });
+  const selected = await tx.task.findMany({ where: { ...liveTaskWhere, id: { in: ids }, projectId, productId }, select: { id: true, allocationGroupId: true } });
   if (selected.length !== ids.length) deny("Одна из зависимостей недоступна");
   const groups = [...new Set(selected.flatMap(task => task.allocationGroupId ? [task.allocationGroupId] : []))];
   const parts = groups.length ? await tx.task.findMany({ where: { allocationGroupId: { in: groups } }, select: { id: true, projectId: true, productId: true } }) : [];
@@ -187,7 +187,7 @@ export async function transferPieceworkShareCore(actor: DomainActor, input: unkn
   return run(() => transaction(async tx => {
     const current = await activeActor(tx, actor);
     await tx.$queryRaw`SELECT id FROM "Task" WHERE id=${data.taskId} FOR UPDATE`;
-    const task = await tx.task.findFirst({ where: { ...liveChildWhere, id: data.taskId }, include: { allocationGroup: true, _count: { select: { payrollEntries: true, stageSettlementShares: true } } } });
+    const task = await tx.task.findFirst({ where: { ...liveTaskWhere, id: data.taskId }, include: { allocationGroup: true, _count: { select: { payrollEntries: true, stageSettlementShares: true } } } });
     if (!task?.productId || !task.workId) deny("Задача не найдена или недоступна", "forbidden");
     const product = await accessibleProduct(tx, current, task.productId, task.projectId);
     if (!canManagePiecework(current.roles) && task.assigneeId !== current.id) deny("Можно передать только свою задачу", "forbidden");
@@ -227,14 +227,14 @@ export async function transferPieceworkShareCore(actor: DomainActor, input: unkn
     const payroll = hasWorkCoordinator(current.roles) && task._count.payrollEntries > 0 ? await readTaskPayroll(tx, task) : [];
     const allocationGroup = group ?? await tx.taskAllocationGroup.create({ data: { workId: task.workId, quantity: task.quantity, budget, currency, budgetSource: "TASK_FIXED", createdById: current.id } });
     const [predecessors, dependents] = await Promise.all([
-      tx.taskDependency.findMany({ where: { taskId: task.id }, select: { dependsOnId: true } }),
-      tx.taskDependency.findMany({ where: { dependsOnId: task.id }, select: { taskId: true } }),
+      tx.taskDependency.findMany({ where: { taskId: task.id, ...activeTaskDependencyWhere }, select: { dependsOnId: true } }),
+      tx.taskDependency.findMany({ where: { dependsOnId: task.id, ...activeTaskDependencyWhere }, select: { taskId: true } }),
     ]);
     // Общий task mutex уже удерживается; снимки не добавляют иной порядок row locks.
     const dependentIds=[...new Set(dependents.map(edge=>edge.taskId))];
     const dependentSnapshots=dependentIds.length?await tx.task.findMany({where:{id:{in:dependentIds}},orderBy:{id:'asc'},select:{
       id:true,title:true,projectId:true,productId:true,project:{select:{id:true,number:true}},product:{select:{id:true,number:true}},
-      dependencies:{select:{dependsOnId:true,dependsOn:{select:{title:true}}}},
+      dependencies:{where:activeTaskDependencyWhere,select:{dependsOnId:true,dependsOn:{select:{title:true}}}},
     }}):[];
     const updated=await tx.task.update({ where: { id: task.id, splitRevision: data.expectedRevision }, data: {
       allocationGroupId: allocationGroup.id, shareUnits: allocation.remainingUnits, shareAmount: allocation.remainingAmount, splitRevision: { increment: 1 },
@@ -249,7 +249,7 @@ export async function transferPieceworkShareCore(actor: DomainActor, input: unkn
     await splitTaskPayroll(tx, { ...actor, name: current.name }, payroll, data.recipientId, child.id, percent, data.clientMutationId);
     const edges = [...predecessors.map(edge => ({ taskId: child.id, dependsOnId: edge.dependsOnId })), ...dependents.map(edge => ({ taskId: edge.taskId, dependsOnId: child.id }))];
     if (edges.length) await tx.taskDependency.createMany({ data: edges, skipDuplicates: true });
-    const currentDependencies=dependentSnapshots.length?await tx.taskDependency.findMany({where:{taskId:{in:dependentSnapshots.map(row=>row.id)}},select:{taskId:true,dependsOnId:true}}):[];
+    const currentDependencies=dependentSnapshots.length?await tx.taskDependency.findMany({where:{...activeTaskDependencyWhere,taskId:{in:dependentSnapshots.map(row=>row.id)}},select:{taskId:true,dependsOnId:true}}):[];
     for(const dependent of dependentSnapshots){
       const beforeIds=[...new Set(dependent.dependencies.map(edge=>edge.dependsOnId))].sort();
       const afterIds=[...new Set(currentDependencies.filter(edge=>edge.taskId===dependent.id).map(edge=>edge.dependsOnId))].sort();

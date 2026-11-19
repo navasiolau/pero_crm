@@ -21,10 +21,10 @@ const assertUuid = (value: string) => {
 const includeEngineering = {
   project: { select: { id: true, number: true, currency: true } },
   engineer: { select: { id: true, name: true } },
-  works: { select: { id: true, projectId: true, productId: true, paymentKind: true, stagePayPoolId: true } },
+  works: { where: { deletedAt: null }, select: { id: true, projectId: true, productId: true, paymentKind: true, stagePayPoolId: true } },
   stagePayPools: {
     where: { kind: "ENGINEERING" as const },
-    include: { works: { include: { tasks: { include: { assignee: { select: { id: true, name: true } }, allocationGroup: { select: { id: true, workId: true, quantity: true } } } } } } },
+    include: { works: { include: { tasks: { where: { deletedAt: null }, include: { assignee: { select: { id: true, name: true } }, allocationGroup: { select: { id: true, workId: true, quantity: true } } } } } } },
   },
 } satisfies Prisma.ProductInclude;
 

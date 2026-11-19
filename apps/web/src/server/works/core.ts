@@ -9,11 +9,12 @@ import {canCreateOrdinaryWork} from '@/lib/ordinary-work-access';
 import {canAddProductWork} from './access';
 import {assertInternalCurrency,assertProjectMoneyCurrency} from '@/lib/internal-currency';
 import {inputNorm,scaleNorm,workBudget} from '@/lib/product-quantity';
-import {liveProductWhere,liveProjectWhere,liveChildWhere} from '@/server/access/live-entities';
+import {liveProductWhere,liveProjectWhere,liveWorkWhere} from '@/server/access/live-entities';
 import {lockProductRow} from '@/server/products/quantity-core';
 import {withTaskTransaction,type TaskTransaction} from '@/server/tasks/transaction';
 import type {DomainActor} from '@/server/projects/core';
 import {operationJournalContext,journalSnapshot,WORK_JOURNAL_FIELDS} from '../tasks/journal';
+import { workTaskLifecycleCommand } from "@/server/tasks/lifecycle-contract";
 export const addWorkSchema=z.object({projectId:z.string().min(1),productId:z.string().min(1).optional(),priceItemId:z.string().min(1,'Выберите расценку'),quantity:z.number().positive('Количество должно быть больше нуля').optional(),quantityPerUnit:z.number().positive('Количество должно быть больше нуля').optional(),clientMutationId:z.uuid().optional()}).strict();
 export type AddWorkInput=z.input<typeof addWorkSchema>;
 export async function addWorkCore(actor:DomainActor,input:unknown,transaction:TaskTransaction=withTaskTransaction):Promise<{ok:true;workId:string;repeated?:boolean}|{ok:false;error:string}> {
@@ -38,7 +39,7 @@ export async function addWorkCore(actor:DomainActor,input:unknown,transaction:Ta
    if(receipt){
     const saved=receipt.newValue as Record<string,unknown>|null;
     if(receipt.actorId!==current.id||receipt.entity!=='work'||saved?.fingerprint!==fingerprint||typeof saved.workId!=='string')throw Error('Идентификатор операции уже использован');
-    const existing=await tx.work.findUnique({where:{...liveChildWhere,id:saved.workId},select:{id:true,projectId:true,productId:true}});
+    const existing=await tx.work.findUnique({where:{...liveWorkWhere,id:saved.workId},select:{id:true,projectId:true,productId:true}});
     if(!existing||existing.projectId!==project.id||existing.productId!==(product?.id??null))throw Error('Подтверждённая работа изменилась — обновите карточку');
     return{ok:true as const,workId:existing.id,repeated:true};
    }
@@ -50,7 +51,7 @@ export async function addWorkCore(actor:DomainActor,input:unknown,transaction:Ta
   const norm=inputNorm(data,product?.quantity??1,2,10),quantity=scaleNorm(norm,product?.quantity??1,2,10);
   const work=await tx.work.create({data:{projectId:project.id,productId:product?.id??null,priceItemId:price.id,title:price.name,unitSnapshot:price.unit,quantity,quantityPerUnit:product?norm:null,priceSnapshot:price.price,total:workBudget(price.price,quantity),createdById:current.id}});
   const journal=await operationJournalContext(tx,{type:'work',id:work.id,label:work.title},[{...work,project,product}]);
-  await writeChangeLogInTransaction(tx, {actorType:'user',actorId:current.id,actorName:current.name,source:actor.source,entity:'work',entityId:work.id,action:'create',newValue:{project:project.number,title:work.title,quantity:work.quantity.toString(),quantityPerUnit:work.quantityPerUnit?.toString()??null,unitSnapshot:price.unit,price:price.price.toString(),total:work.total?.toString()??null}},
+  await writeChangeLogInTransaction(tx, {actorType:'user',actorId:current.id,actorName:current.name,source:actor.source,entity:'work',entityId:work.id,action:'create',reversal:workTaskLifecycleCommand({entity:'work',id:work.id,revision:work.journalRevision,deleted:false}),newValue:{project:project.number,title:work.title,quantity:work.quantity.toString(),quantityPerUnit:work.quantityPerUnit?.toString()??null,unitSnapshot:price.unit,price:price.price.toString(),total:work.total?.toString()??null}},
     {...journal,before:null,after:journalSnapshot(work,WORK_JOURNAL_FIELDS),links:[...(journal.links??[]),{type:'priceItem',id:price.id,label:price.name}]});
   if(data.clientMutationId)await writeChangeLogInTransaction(tx, {id:`work-create:${data.clientMutationId}`,actorType:'user',actorId:current.id,actorName:current.name,source:actor.source,entity:'work',entityId:work.id,action:'work-create.receipt',newValue:{fingerprint,workId:work.id} as Prisma.InputJsonValue},{kind:'receipt'});
   return{ok:true as const,workId:work.id};

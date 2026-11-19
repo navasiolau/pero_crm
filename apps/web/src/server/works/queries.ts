@@ -29,7 +29,7 @@ export async function listProductWorkOperations(actor: { id: string; roles: Role
   const product = await db.product.findFirst({ where: { id: productId, AND: [productVisibilityWhere(visibility)] }, select: { ...productDraftAccessSelect, id: true, status: true } });
   if (!product) return {};
   const works = await db.work.findMany({ where: { productId, AND: [workVisibilityWhere(visibility)] }, include: {
-    tasks: { select: { id: true, quantity: true, allocationGroupId: true } },
+    tasks: { where: { deletedAt: null }, select: { id: true, quantity: true, allocationGroupId: true } },
     _count: { select: { paymentConversions: true, settlementShares: true } },
   } });
   const entries = await db.payrollEntry.findMany({ where: { workId: { in: works.map(work => work.id) } }, select: { workId: true } });

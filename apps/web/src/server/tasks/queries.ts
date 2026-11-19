@@ -7,6 +7,7 @@ export async function taskWorkspaceWhere(actor:VisibilityActor,scope:TaskWorkspa
   const visibility=taskVisibilityWhere(actor);
   return{AND:[visibility,await taskWorkspaceEligibility(prisma,scope,visibility)]};
 }
+import { activeTaskDependencyWhere } from "@/server/access/live-entities";
 import { prisma } from "@/lib/prisma";
 import type { TaskDetails } from "@/lib/task-details";
 import type { ProductStatus } from "@prisma/client";
@@ -30,6 +31,7 @@ export const taskDetailsInclude = {
   _count: { select: { payrollEntries: true, stageSettlementShares: true } },
   files: { select: { id: true, fileName: true, mimeType: true, section: true, uploadedById: true, projectId: true, productId: true, taskId: true } },
   dependencies: {
+    where: activeTaskDependencyWhere,
     include: {
       dependsOn: { select: { id: true, title: true, status: true } },
     },

@@ -3,7 +3,7 @@ import { hasWorkCoordinator } from "@/lib/roles";
 import { canManagePiecework, canTransferPiecework } from "@/lib/piecework-policy";
 import { allocatedWorkQuantity, FULL_SHARE_UNITS, quantityAtoms, quantityFromAtoms, taskPieceAmount } from "@/lib/work-shares";
 import { productVisibilityWhere, resolveVisibilityActor } from "@/server/access/visibility";
-import { liveChildWhere, liveProductWhere } from "@/server/access/live-entities";
+import { liveTaskWhere, liveProductWhere, liveWorkWhere } from "@/server/access/live-entities";
 import { pieceworkRecipientError } from "./piecework-policy";
 import { pieceworkPlanRevision } from "./piecework-revision";
 
@@ -16,7 +16,7 @@ export async function listPieceworkOptions(actorId: string, productId: string, t
   const visibility = await resolveVisibilityActor(prisma, actor);
   const product = await prisma.product.findFirst({ where: { ...liveProductWhere, id: productId, AND: [productVisibilityWhere(visibility)] }, select: { id: true, projectId: true, engineerId: true, status: true } });
   if (!product) return null;
-  const task = taskId ? await prisma.task.findFirst({ where: { ...liveChildWhere, id: taskId, productId: product.id, projectId: product.projectId,
+  const task = taskId ? await prisma.task.findFirst({ where: { ...liveTaskWhere, id: taskId, productId: product.id, projectId: product.projectId,
     work: { is: { productId: product.id, projectId: product.projectId, paymentKind: "LEGACY", stagePayPoolId: null, poolWeightUnits: null, paymentConversions: { none: {} }, settlementShares: { none: {} } } },
     physicalOnlyShare: false, stageShareUnits: null, ...(!hasWorkCoordinator(actor.roles) ? { payrollEntries: { none: {} } } : {}), stageSettlementShares: { none: {} },
   }, select: { assigneeId: true, status: true, allocationGroupId: true, quantity: true, executorShare: true, shareUnits: true, shareAmount: true, splitRevision: true,
@@ -33,7 +33,7 @@ export async function listPieceworkOptions(actorId: string, productId: string, t
   if (!canCreate && !transferable) return null;
   const [users, works] = await Promise.all([
     prisma.user.findMany({ where: { active: true, payScheme: "PIECE" }, select: { id: true, name: true, active: true, roles: true, payScheme: true }, orderBy: { name: "asc" } }),
-    canCreate ? prisma.work.findMany({ where: { ...liveChildWhere, projectId: product.projectId, productId: product.id, paymentKind: "LEGACY", stagePayPoolId: null, poolWeightUnits: null, priceSnapshot: { not: null }, paymentConversions: { none: {} }, settlementShares: { none: {} } }, include: { tasks: { select: { id: true, quantity: true, allocationGroupId: true } } } }) : [],
+    canCreate ? prisma.work.findMany({ where: { ...liveWorkWhere, projectId: product.projectId, productId: product.id, paymentKind: "LEGACY", stagePayPoolId: null, poolWeightUnits: null, priceSnapshot: { not: null }, paymentConversions: { none: {} }, settlementShares: { none: {} } }, include: { tasks: { where: { deletedAt: null }, select: { id: true, quantity: true, allocationGroupId: true } } } }) : [],
   ]);
   return {
     recipients: users.filter(user => user.id !== task?.assigneeId && pieceworkRecipientError(user, product) === null).map(({ id, name }) => ({ id, name })),

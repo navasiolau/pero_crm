@@ -50,7 +50,7 @@ const input = (): PaymentInput => ({ direction: "INCOME", amount: 100, currency:
 after(() => { for (const [file, prior] of originals) if (prior) require.cache[file] = prior; else delete require.cache[file]; });
 
 
-test("mandatory removeWork audit failure rolls back the deleted work", async () => {
+test("mandatory removeWork audit failure rolls back the work deletion mark", async () => {
   reset(); workFixture = taskShareFixture();
   for (const task of workFixture.state().tasks) task.workId = null;
   workFixture.failOn("log.create");
@@ -59,7 +59,8 @@ test("mandatory removeWork audit failure rolls back the deleted work", async () 
   inject("../src/server/products/revalidate", { revalidateProductPaths: async () => effect("cache:product") });
   const { removeWork } = require("../src/server/works/actions") as typeof import("../src/server/works/actions");
   await assert.rejects(removeWork("work"), /Injected/);
-  assert.equal(workFixture.state().works.length, 1); assert.equal(workFixture.state().logs.length, 0); assert.equal(calls.length, 0);
+  assert.equal(workFixture.state().works.length, 1); assert.equal(workFixture.state().works[0].deletedAt ?? null, null);
+  assert.equal(workFixture.state().logs.length, 0); assert.equal(calls.length, 0);
 });
 
 test("preflight IO is UNKNOWN while typed changed-payload and deleted receipt remain rejections", async () => {

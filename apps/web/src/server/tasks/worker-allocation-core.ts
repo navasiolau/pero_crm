@@ -7,7 +7,7 @@ import {fieldProductStatuses} from '@/lib/field-product-visibility';
 import {productVisibilityWhere,resolveVisibilityActor} from '@/server/access/visibility';
 import {assertProjectMoneyCurrency} from '@/lib/internal-currency';
 import {allocatedWorkQuantity,quantityAtoms,quantityFromAtoms} from '@/lib/work-shares';
-import {liveProductWhere,liveProjectWhere,liveChildWhere} from '@/server/access/live-entities';
+import {liveProductWhere,liveProjectWhere,liveWorkWhere} from '@/server/access/live-entities';
 import type {DomainActor} from '@/server/projects/core';
 import {withTaskTransaction,type TaskTransaction} from './transaction';
 import {operationJournalContext,journalSnapshot,journalUserReferences,journalTaskReferences,TASK_JOURNAL_FIELDS} from './journal';
@@ -42,13 +42,13 @@ export async function createWorkerTaskAllocationCore(actor:DomainActor,input:unk
   if(!project)deny('Проект недоступен','forbidden');
   try{assertProjectMoneyCurrency(project.currency);}catch{deny('Цены проекта должны быть подготовлены в BYN');}
   await tx.$queryRaw`SELECT id FROM "Work" WHERE id=${data.workId} FOR UPDATE`;
-  const work=await tx.work.findUnique({where:{...liveChildWhere,id:data.workId},include:{tasks:{select:{id:true,quantity:true,allocationGroupId:true}},_count:{select:{paymentConversions:true,settlementShares:true}}}});
+  const work=await tx.work.findUnique({where:{...liveWorkWhere,id:data.workId},include:{tasks:{where:{deletedAt:null},select:{id:true,quantity:true,allocationGroupId:true}},_count:{select:{paymentConversions:true,settlementShares:true}}}});
   if(!work||work.projectId!==data.projectId||work.productId!==data.productId||work.paymentKind!=='LEGACY'||work.stagePayPoolId!==null||work.poolWeightUnits!=null||work._count?.paymentConversions||work._count?.settlementShares||work.priceSnapshot===null)deny('Выберите обычную работу этого изделия со снимком цены');
   const previous=await tx.changeLog.findUnique({where:{id:`worker-task:${data.clientMutationId}`}});
   if(previous){
    const saved=record(previous.newValue),result=record(saved?.result);
    if(previous.actorId!==current.id||previous.entity!=='task'||saved?.fingerprint!==fingerprint||result?.ok!==true||typeof result.id!=='string'||typeof result.quantity!=='string'||typeof result.assigneeId!=='string')deny('Идентификатор операции уже использован');
-   const task=await tx.task.findUnique({where:{id:result.id},select:{id:true,projectId:true,productId:true,workId:true,quantity:true,assigneeId:true,createdById:true}});
+   const task=await tx.task.findUnique({where:{id:result.id,deletedAt:null},select:{id:true,projectId:true,productId:true,workId:true,quantity:true,assigneeId:true,createdById:true}});
    if(!task||task.projectId!==data.projectId||task.productId!==data.productId||task.workId!==data.workId||task.createdById!==current.id||task.assigneeId!==result.assigneeId||quantityFromAtoms(quantityAtoms(task.quantity??0))!==result.quantity)deny('Назначение уже изменено; обновите карточку','conflict');
    return{ok:true as const,id:task.id,quantity:result.quantity,assigneeId:result.assigneeId,clientMutationId:data.clientMutationId,repeated:true};
   }
@@ -61,7 +61,7 @@ export async function createWorkerTaskAllocationCore(actor:DomainActor,input:unk
   if(amount>remaining)deny(`В работе осталось ${quantityFromAtoms(remaining>BigInt(0)?remaining:BigInt(0))}; больше распределить нельзя`,'conflict');
   let dependencies:string[]=[];
   if(dependencyIds.length){
-   const selected=await tx.task.findMany({where:{id:{in:dependencyIds},projectId:data.projectId,productId:data.productId},select:{id:true,projectId:true,productId:true,allocationGroupId:true}});
+   const selected=await tx.task.findMany({where:{deletedAt:null,id:{in:dependencyIds},projectId:data.projectId,productId:data.productId},select:{id:true,projectId:true,productId:true,allocationGroupId:true}});
    if(selected.length!==dependencyIds.length)deny('Одна из зависимостей недоступна');
    const groups=[...new Set(selected.flatMap(task=>task.allocationGroupId?[task.allocationGroupId]:[]))];
    const parts=groups.length?await tx.task.findMany({where:{allocationGroupId:{in:groups}},select:{id:true,projectId:true,productId:true}}):[];

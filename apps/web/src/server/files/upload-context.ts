@@ -1,7 +1,7 @@
 import type { PrismaClient, ProjectStage } from "@prisma/client";
 import { FIELD_ROLES, MANAGER_ROLES, hasAnyRole, hasRole } from "@/lib/roles";
 import { canManageProductFiles, canManageProjectFiles } from "@/lib/file-management";
-import { liveChildWhere } from "@/server/access/live-entities";
+import { liveTaskWhere } from "@/server/access/live-entities";
 import { projectVisibilityWhere, productVisibilityWhere, productAssignmentWriteWhere, resolveVisibilityActor, taskVisibilityWhere, type VisibilityActor } from "@/server/access/visibility";
 
 /** Validate every foreign key before any storage write; task-only uploads inherit its product. */
@@ -29,7 +29,7 @@ export async function resolveUploadContext(
       where: { AND: [
         { id: input.taskId, projectId: input.projectId },
         { OR: [taskVisibilityWhere(actor), ...(hasRole(actor.roles, "ENGINEER") ? [{ AND: [
-          liveChildWhere,
+          liveTaskWhere,
           { project: projectVisibilityWhere(actor), OR: [{ productId: null }, { product: productVisibilityWhere(actor) }] },
         ] }] : [])] },
       ] },

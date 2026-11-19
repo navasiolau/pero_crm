@@ -1,6 +1,5 @@
 "use server";
-import { writeChangeLogInTransaction } from "@/server/changelog/writer";
-import { workVisibilityWhere } from "@/server/access/visibility";
+import { changeWorkTaskLifecycle, WorkTaskLifecycleRefusal } from "@/server/tasks/lifecycle-core";
 
 import { revalidatePath } from "next/cache";
 import { deliverPostCommit } from "@/server/operations/post-commit";
@@ -12,7 +11,6 @@ import { revalidateProductPaths } from "@/server/products/revalidate";
 import { withTaskTransaction } from "@/server/tasks/transaction";
 
 import { MANAGER_ROLES, hasAnyRole } from "@/lib/roles";
-import {operationJournalContext,journalSnapshot,WORK_JOURNAL_FIELDS} from '../tasks/journal';
 
 // Server-owned tariff/unit snapshot and audit live in the atomic domain core.
 export async function addWork(input:AddWorkInput):Promise<{ok:boolean;error?:string}> {
@@ -29,38 +27,16 @@ export async function updateWork(input:UpdateWorkInput) {
  return result;
 }
 
-export async function removeWork(
-  workId: string,
-): Promise<{ ok: boolean; error?: string }> {
+export async function removeWork(workId: string): Promise<{ ok: boolean; error?: string }> {
   const session = await auth();
-  if (!session?.user) throw new Error("Не авторизован");
-  if (!hasAnyRole(session.user.roles, MANAGER_ROLES)) throw new Error("Недостаточно прав");
-
-  const mutation = await withTaskTransaction(async (tx) => {
-  const work = await tx.work.findUnique({ where: { id: workId, AND: [workVisibilityWhere(session.user)] } });
-  if (!work) return { ok: false as const, error: "Работа не найдена" };
-  if (work.paymentKind === "ENGINEERING") return { ok: false as const, error: "Работа включена в инженерный фонд — используйте настройку его распределения" };
-  if (work.paymentKind === "INSTALLATION") return { ok: false as const, error: "Работа отмечена как монтажная; её история сохраняется вместе с настройкой процента изделия" };
-  const linked = await tx.task.count({ where: { workId } });
-  if (linked > 0) {
-    return { ok: false as const, error: "К работе привязаны задачи — сначала удалите их" };
+  if (!session?.user || !hasAnyRole(session.user.roles, MANAGER_ROLES)) throw Error("Недостаточно прав");
+  const actor = { id: session.user.id, name: session.user.name ?? "", roles: session.user.roles, source: "web" as const };
+  try {
+    const { cachePaths } = await withTaskTransaction(tx => changeWorkTaskLifecycle(tx, actor, "work", workId));
+    await deliverPostCommit("work-delete", workId, cachePaths.map(path => ({ kind: "cache", run: () => revalidatePath(path) })));
+    return { ok: true };
+  } catch (error) {
+    if (error instanceof WorkTaskLifecycleRefusal) return { ok: false, error: error.message };
+    throw error;
   }
-
-  await tx.work.delete({ where: { id: workId } });
-  await writeChangeLogInTransaction(tx, {
-    actorType: "user", source: "web",
-    actorId: session.user.id,
-    actorName: session.user.name ?? undefined,
-    entity: "work",
-    entityId: workId,
-    action: "delete",
-    oldValue: { title: work.title, total: work.total?.toString() ?? null },
-  },{...await operationJournalContext(tx,{type:'work',id:work.id,label:work.title},[work]),before:journalSnapshot(work,WORK_JOURNAL_FIELDS),after:null});
-  return { ok: true as const, work };
-  });
-  if (!mutation.ok) return mutation;
-  const { work } = mutation;
-
-  await deliverPostCommit("work-delete", workId, [{kind:"cache",run:()=>revalidatePath(`/projects/${work.projectId}`)},{kind:"cache",run:()=>revalidateProductPaths(work.productId)}]);
-  return { ok: true };
 }
