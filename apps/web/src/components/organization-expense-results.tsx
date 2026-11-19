@@ -66,7 +66,7 @@ function ExpenseFilterForm({ options, onReset }: Pick<OrganizationExpensePageDat
         </div>)}
       </div>
       <details open={Object.keys(expenseRangeFields).some(key => Boolean(get(key + "From") || get(key + "To"))) || undefined}>
-        <summary className="w-fit cursor-pointer text-sm font-medium">Диапазоны дат, сумм и курса</summary>
+        <summary className="w-fit cursor-pointer text-sm font-medium">Диапазоны дат, сумм, курса и складских значений</summary>
         <div className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
           {Object.entries(expenseRangeFields).map(([key, meta]) => <fieldset key={key} className="min-w-0 rounded-md border px-2 pb-2">
             <legend className="px-1 text-xs text-muted-foreground">{meta.label}</legend>

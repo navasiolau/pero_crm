@@ -6,12 +6,15 @@ export const expenseChoiceFields = {
   article: "Статья",
   currency: "Валюта",
   documentPresence: "Наличие документа",
+  material: "Материал на складе",
+  stockUnit: "Единица материала",
 } as const;
 
 export const expenseTextFields = {
   id: "ID расхода",
   comment: "Комментарий",
   document: "Имя документа",
+  movement: "ID складского движения",
 } as const;
 
 export const expenseRangeFields = {
@@ -20,6 +23,9 @@ export const expenseRangeFields = {
   amount: { label: "Сумма в валюте", type: "number" },
   byn: { label: "Эквивалент BYN", type: "number" },
   rate: { label: "Курс", type: "number" },
+  stockQty: { label: "Количество на складе", type: "number" },
+  stockUnitPrice: { label: "Цена единицы в валюте", type: "number" },
+  stockValueByn: { label: "Стоимость запаса BYN", type: "number" },
 } as const;
 
 export const expenseSortFields = ["id", "date", "cash", "article", "amount", "byn"] as const;

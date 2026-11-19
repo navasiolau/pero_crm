@@ -24,7 +24,7 @@ const rows = Array.from({ length: 101 }, (_, index) => ({
   comment: "fixture", cash: ["a", "b", "c"][index % 3], article: index % 2 ? "materials" : "other",
 }));
 const options = { purpose: [], cash: ["a", "b", "c"].map((value, index) => ({ value, label: rows[index].cashAccountName })),
-  article: [{ value: "materials", label: "Материалы" }, { value: "other", label: "Прочее" }], currency: [{ value: "BYN", label: "BYN" }], documentPresence: [] };
+  article: [{ value: "materials", label: "Материалы" }, { value: "other", label: "Прочее" }], currency: [{ value: "BYN", label: "BYN" }], documentPresence: [], material: [], stockUnit: [] };
 const subscribe = listener => { window.addEventListener("expense-fixture-route", listener); return () => window.removeEventListener("expense-fixture-route", listener); };
 const getLocation = () => location.search;
 function App() {

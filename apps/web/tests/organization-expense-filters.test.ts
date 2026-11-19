@@ -20,7 +20,8 @@ test("условия отдельных полей соединяются чер
   const params = new URLSearchParams({
     cash: '["a","b"]', article: '["@logistics","other"]', purpose: '["@general","@stock","p1"]',
     dateFrom: "2026-11-20", dateTo: "2026-11-20", document: "Рейс_10",
-    bynFrom: "0.01",
+    bynFrom: "0.01", material: '["m1","m2"]', stockUnit: "unit",
+    stockQtyFrom: "2.5", stockUnitPriceTo: "17", stockValueBynFrom: "30", movement: "movement-id",
   });
   const { where, orderBy } = organizationExpenseQuery(params.toString());
   const [base, scalar, ...selectors] = where.AND;
@@ -39,6 +40,11 @@ test("условия отдельных полей соединяются чер
   assert.deepEqual(selectors[2], { OR: [{ cashAccountId: "a" }, { cashAccountId: "b" }] });
   assert.equal(selectors[3].OR?.length, 3);
   assert.match(JSON.stringify(selectors[3]), /READY/);
+  assert.deepEqual(selectors[4], { stockPurchase: {
+    movementId: { contains: "movement-id", mode: "insensitive" }, unitPrice: { gte: undefined, lte: "17" },
+    movement: { materialId: { in: ["m1", "m2"] }, material: { unitId: { in: ["unit"] } },
+      quantity: { gte: "2.5", lte: undefined }, totalByn: { gte: "30", lte: undefined } },
+  } });
   assert.deepEqual(orderBy, [{ paidAt: "desc" }, { id: "desc" }]);
 });
 
@@ -57,6 +63,7 @@ test("итог и количество независимы от размера,
     project: { async findMany() { return []; } },
     cashAccount: { async findMany() { return []; } },
     expenseArticle: { async findMany() { return []; } },
+    material: { async findMany() { return []; } },
     orgSetting: { async findUnique() { return null; } },
   };
   const db = { async $transaction(fn: (tx: typeof reads) => unknown, options: unknown) {

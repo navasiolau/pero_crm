@@ -79,12 +79,14 @@ async function loadByDisplayedArticle(db: Prisma.TransactionClient, where: Prism
 }
 
 async function loadExpenseFilterOptions(db: Prisma.TransactionClient) {
-  const [projects, cashAccounts, articles, currencies] = await Promise.all([
+  const [projects, cashAccounts, articles, currencies, materials] = await Promise.all([
     db.project.findMany({ where: { payments: { some: expenseBaseWhere } },
       select: { id: true, number: true, title: true }, orderBy: { numberInt: "desc" } }),
     db.cashAccount.findMany({ where: { payments: { some: expenseBaseWhere } }, select: { id: true, name: true, currency: true }, orderBy: { name: "asc" } }),
     db.expenseArticle.findMany({ where: { payments: { some: { AND: [expenseBaseWhere, { logisticsAllocationId: null }] } } }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
     db.payment.groupBy({ where: expenseBaseWhere, by: ["currency"], orderBy: { currency: "asc" } }),
+    db.material.findMany({ where: { movements: { some: { stockPurchase: { payment: expenseBaseWhere } } } },
+      select: { id: true, name: true, measurementUnit: { select: { id: true, name: true } } }, orderBy: { name: "asc" } }),
   ]);
   return {
     purpose: [
@@ -96,6 +98,8 @@ async function loadExpenseFilterOptions(db: Prisma.TransactionClient) {
     article: [...articles.map(({ id, name }) => ({ value: id, label: name })), { value: "@logistics", label: "Логистика" }, { value: "@none", label: "Без статьи" }],
     currency: currencies.map(({ currency }) => ({ value: currency, label: currency })),
     documentPresence: [{ value: "yes", label: "Есть документ" }, { value: "no", label: "Без документа" }],
+    material: materials.map(({ id, name }) => ({ value: id, label: name })),
+    stockUnit: [...new Map(materials.map(({ measurementUnit }) => [measurementUnit.id, { value: measurementUnit.id, label: measurementUnit.name }])).values()],
   };
 }
 

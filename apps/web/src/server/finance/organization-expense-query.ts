@@ -70,6 +70,23 @@ const choicePredicates = {
   documentPresence: (value: string) => value === "yes" ? matchingDocument() : { NOT: matchingDocument() },
 } satisfies Record<string, (value: string) => Prisma.PaymentWhereInput>;
 
+// Все складские условия должны совпасть на одной строке закупки.
+function matchingStockPurchase(params: URLSearchParams): Prisma.PaymentWhereInput | undefined {
+  const materials = parseListFilterValue(params.get("material") ?? undefined);
+  const units = parseListFilterValue(params.get("stockUnit") ?? undefined);
+  const movement = params.get("movement");
+  const quantity = moneyRange(params, "stockQty");
+  const unitPrice = moneyRange(params, "stockUnitPrice");
+  const totalByn = moneyRange(params, "stockValueByn");
+  if (!materials && !units && !movement && !quantity && !unitPrice && !totalByn) return undefined;
+  return { stockPurchase: {
+    movementId: movement ? contains(movement) : undefined,
+    unitPrice,
+    movement: { materialId: materials ? { in: materials } : undefined,
+      material: units ? { unitId: { in: units } } : undefined, quantity, totalByn },
+  } };
+}
+
 export function organizationExpenseQuery(query: string) {
   const params = new URLSearchParams(normalizeListQuery("organizationExpenses", query));
   const id = params.get("id"), comment = params.get("comment"), document = params.get("document"), search = params.get("q");
@@ -87,13 +104,15 @@ export function organizationExpenseQuery(query: string) {
     if (values?.length) and.push({ OR: values.map(choicePredicates[key]) });
   }
   if (document) and.push(matchingDocument(document));
+  const stockPurchase = matchingStockPurchase(params);
+  if (stockPurchase) and.push(stockPurchase);
   if (search) {
     const term = contains(search);
     and.push({ OR: [
       { id: term }, { comment: term }, { currency: term }, { cashAccount: { name: term } },
       { logisticsAllocationId: null, expenseArticle: { name: term } },
       { project: { OR: [{ number: term }, { title: term }] } },
-      { stockPurchase: { movement: { material: { name: term } } } },
+      { stockPurchase: { OR: [{ movementId: term }, { movement: { material: { name: term } } }] } },
       matchingDocument(search),
       ...("общий расход организации".includes(search.toLowerCase()) ? [purpose("@general")] : []),
       ...("приход на склад".includes(search.toLowerCase()) ? [purpose("@stock")] : []),
