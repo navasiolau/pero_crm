@@ -49,4 +49,3 @@ test("reversal refuses a media upload already used by a subsequent action", asyn
   await assert.rejects(handler.apply(context), /уже используется/);
   assert.equal(media.deletedAt, null);
 });
-
