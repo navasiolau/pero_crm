@@ -35,4 +35,3 @@ export const proposalExportRequestReversal = defineJournalReversal({
       cachePaths: ["/kp"] };
   },
 });
-

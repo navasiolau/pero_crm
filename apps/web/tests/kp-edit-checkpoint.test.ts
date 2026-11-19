@@ -53,4 +53,3 @@ test("edit reversal detects a change to dependent storage bindings and a later p
   revision++;
   assert.match(await handler.preview(context) ?? "", /КП уже изменено/);
 });
-

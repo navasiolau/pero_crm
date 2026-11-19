@@ -119,4 +119,3 @@ test("contract draft reversal refuses once a newer export started", async () => 
       stage: "LEAD", clientId: "client" }], clients: [], versions: [] });
   assert.match(await savedContractDraftReversal.read(command.data)!.preview(context(tx)) ?? "", /выпуски изменились/);
 });
-

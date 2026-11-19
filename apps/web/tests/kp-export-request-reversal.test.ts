@@ -28,4 +28,3 @@ test("generating leases block reversal and an untouched PDF request can be cance
   await proposalExportRequestReversal.read(cancelled.reversal.data)!.apply(ctx);
   assert.equal(row.state, "PENDING");
 });
-
