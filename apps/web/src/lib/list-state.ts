@@ -1,24 +1,27 @@
 import { PRODUCT_STATUSES } from "./product-statuses";
 import { STAGES } from "./stages";
+import { expenseSortFields, normalizeExpenseFilters } from "./organization-expense-filters";
 import { activeListStatusValues, ALL_LIST_FILTER_VALUE, encodeListFilterValue, isAllListFilterValue, parseListFilterValue } from "./list-filter-values";
 
-export type ListSection = "projects" | "products";
+export type ListSection = "projects" | "products" | "organizationExpenses";
 export type ListSearchParams = Record<string, string | string[] | undefined>;
 export const DEFAULT_LIST_QUERY = "view=kanban";
+export const listDefaultQuery = (section: ListSection) => section === "organizationExpenses" ? "view=table" : DEFAULT_LIST_QUERY;
 export const MAX_LIST_QUERY_LENGTH = 16_384;
 
 const sortFields: Record<ListSection, readonly string[]> = {
   projects: ["number", "title", "client", "stage", "manager", "products"],
   products: ["number", "title", "project", "client", "status", "price", "quantity"],
+  organizationExpenses: expenseSortFields,
 };
 
-const filterConfig: Record<ListSection, { keys: readonly string[]; statusKey: string; statuses: readonly { id: string }[] }> = {
+const filterConfig: Record<Exclude<ListSection, "organizationExpenses">, { keys: readonly string[]; statusKey: string; statuses: readonly { id: string }[] }> = {
   projects: { keys: ["client", "manager", "engineer", "stage"], statusKey: "stage", statuses: STAGES },
   products: { keys: ["project", "client", "engineer", "status"], statusKey: "status", statuses: PRODUCT_STATUSES },
 };
 
 export function isListSection(section: unknown): section is ListSection {
-  return section === "projects" || section === "products";
+  return section === "projects" || section === "products" || section === "organizationExpenses";
 }
 
 export function searchParamsQuery(params: ListSearchParams) {
@@ -41,8 +44,8 @@ export function resolveListState(
   if (Object.keys(params).length > 0) {
     return normalizeListQuery(section, searchParamsQuery(params));
   }
-  const query = saved !== null ? decodeListPreference(section, saved) ?? DEFAULT_LIST_QUERY
-    : legacyView === "table" ? "view=table" : DEFAULT_LIST_QUERY;
+  const query = saved !== null ? decodeListPreference(section, saved) ?? listDefaultQuery(section)
+    : legacyView === "table" ? "view=table" : listDefaultQuery(section);
   const state = new URLSearchParams(query);
   // Старый пустой скрытый фильтр не является осознанным выбором «Все инженеры».
   if (defaultEngineerId && !state.has("engineer") && !isEngineerFilterInitialized(saved)) {
@@ -54,27 +57,32 @@ export function resolveListState(
 export function normalizeListQuery(section: ListSection, query: string) {
   const source = new URLSearchParams(query);
   const get = (key: string) => source.get(key)?.trim() ?? "";
-  const result = new URLSearchParams({ view: get("view") === "table" ? "table" : "kanban" });
+  const result = new URLSearchParams({ view: section === "organizationExpenses" || get("view") === "table" ? "table" : "kanban" });
   const q = get("q").slice(0, 100);
   if (q) result.set("q", q);
-  const config = filterConfig[section];
-  for (const key of config.keys) {
-    if (isAllListFilterValue(source.get(key) ?? undefined)) {
-      result.set(key, ALL_LIST_FILTER_VALUE);
-      continue;
+  if (section === "organizationExpenses") normalizeExpenseFilters(source, result);
+  else {
+    const config = filterConfig[section];
+    for (const key of config.keys) {
+      if (isAllListFilterValue(source.get(key) ?? undefined)) {
+        result.set(key, ALL_LIST_FILTER_VALUE);
+        continue;
+      }
+      let values = parseListFilterValue(source.get(key) ?? undefined);
+      if (key === config.statusKey) values = activeListStatusValues(values, config.statuses, section === "projects" ? ["PAUSED", "RECLAMATION"] : ["RECLAMATION"]);
+      const encoded = encodeListFilterValue(values);
+      if (encoded !== null) result.set(key, encoded);
     }
-    let values = parseListFilterValue(source.get(key) ?? undefined);
-    if (key === config.statusKey) values = activeListStatusValues(values, config.statuses, section === "projects" ? ["PAUSED", "RECLAMATION"] : ["RECLAMATION"]);
-    const encoded = encodeListFilterValue(values);
-    if (encoded !== null) result.set(key, encoded);
+    if (get("active") === "1" || get("active") === "0") result.set("active", get("active"));
   }
-  if (get("active") === "1" || get("active") === "0") result.set("active", get("active"));
   if (sortFields[section].includes(get("sort"))) result.set("sort", get("sort"));
   if (get("dir") === "asc" || get("dir") === "desc") result.set("dir", get("dir"));
+  const all = section === "organizationExpenses" && get("pageSize") === "all";
   const page = Number(get("page"));
-  if (Number.isSafeInteger(page) && page > 1 && page <= 2_147_483_647) result.set("page", String(page));
+  if (!all && Number.isSafeInteger(page) && page > 1 && page <= 2_147_483_647) result.set("page", String(page));
   const pageSize = Number(get("pageSize"));
-  if ([10, 20, 50, 100].includes(pageSize)) result.set("pageSize", String(pageSize));
+  if (all) result.set("pageSize", "all");
+  else if ([10, 20, 50, 100].includes(pageSize)) result.set("pageSize", String(pageSize));
   return result.toString();
 }
 

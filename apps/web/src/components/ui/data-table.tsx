@@ -45,6 +45,8 @@ export interface DataTableServerState {
   onPageChange: (page: number) => void;
   onSortChange: (columnId: string, dir: "asc" | "desc") => void;
   onPageSizeChange?: (size: number) => void;
+  onShowAll?: () => void;
+  allRows?: boolean;
 }
 
 // Универсальная таблица: поиск по строкам, сортировка по клику на заголовок,
@@ -118,6 +120,7 @@ export function DataTable<TRow extends { id: string }>({
 
   const totalCount = server ? server.total : filtered.length;
   const activePageSize = server ? server.pageSize : pageSize;
+  const allRows = server?.allRows === true;
   const pageCount = Math.max(1, Math.ceil(totalCount / activePageSize));
   const localSafePage = Math.min(page, pageCount - 1);
   const safePage = server ? server.page - 1 : localSafePage;
@@ -285,8 +288,12 @@ export function DataTable<TRow extends { id: string }>({
         <div className="flex flex-wrap items-center gap-2">
           <span>На странице:</span>
           <Select
-            value={String(activePageSize)}
+            value={allRows ? "all" : String(activePageSize)}
             onValueChange={(value) => {
+              if (value === "all") {
+                server?.onShowAll?.();
+                return;
+              }
               const size = Number(value ?? 10);
               if (server?.onPageSizeChange) {
                 server.onPageSizeChange(size);
@@ -297,7 +304,7 @@ export function DataTable<TRow extends { id: string }>({
             }}
           >
             <SelectTrigger className="h-8 w-20">
-              <SelectValue>{activePageSize}</SelectValue>
+              <SelectValue>{allRows ? "Все" : activePageSize}</SelectValue>
             </SelectTrigger>
             <SelectContent>
               {[10, 20, 50, 100].map((size) => (
@@ -305,13 +312,14 @@ export function DataTable<TRow extends { id: string }>({
                   {size}
                 </SelectItem>
               ))}
+              {server?.onShowAll ? <SelectItem value="all">Все</SelectItem> : null}
             </SelectContent>
           </Select>
           <span>
             · {totalCount} {totalCount === 1 ? "запись" : "записей"}
           </span>
         </div>
-        <div className="flex items-center gap-2">
+        {!allRows && <div className="flex items-center gap-2">
           <Button
             variant="outline"
             size="sm"
@@ -335,7 +343,7 @@ export function DataTable<TRow extends { id: string }>({
           >
             Вперёд
           </Button>
-        </div>
+        </div>}
       </div>
     </div>
   );
