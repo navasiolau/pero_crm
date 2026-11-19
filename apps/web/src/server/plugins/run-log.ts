@@ -28,7 +28,7 @@ export async function getPluginSettings(
   for (const field of manifest?.settingsSchema ?? []) {
     if (field.default !== undefined) settings[field.key] = field.default;
   }
-  const rows = await prisma.pluginSetting.findMany({ where: { pluginId } });
+  const rows = await prisma.pluginSetting.findMany({ where: { pluginId, configured: true } });
   for (const row of rows) {
     settings[row.key] = row.value;
   }

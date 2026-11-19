@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import test from "node:test";
 import { createFinanceDocumentService, type FinanceDocumentStorage } from "../../src/server/finance-documents/core";
+import { reverseJournalActionInTransaction } from "../../src/server/changelog/reversal-core";
 import { loadMovementReportDocuments } from "../../src/server/warehouse/report-documents";
 import sharp from "sharp";
 import type { ProductPatchResult, ProductPatch } from "../../src/server/products/patch-contract";
@@ -299,6 +300,34 @@ test("files.crud: file113, документы, attachment ACL и inline-дейс
     assert.equal(await f.db.financeDocument.count({ where: { clientMutationId: botInput.clientMutationId } }), 1);
     const botAudit = await f.db.changeLog.findUniqueOrThrow({ where: { id: "finance-document:" + botId } });
     assert.equal(botAudit.source, "telegram"); assert.equal(botAudit.actorId, procurement.id);
+
+    const journalAdmin = await f.user("document-journal-admin", ["ADMIN"]);
+    const linkedPaymentId = f.id("retained-ordered-payment");
+    const request = { entryId: "finance-document:" + parallelId, requestId: randomUUID() };
+    await f.rollback(async tx => {
+      await tx.payment.create({ data: { id: linkedPaymentId, projectId: project.id, cashAccountId: cash.id,
+        expenseArticleId: article.id, createdById: accountant.id, direction: "EXPENSE", amount: "0.01",
+        bynAmount: "0.01", currency: "BYN", reportDocumentId: docs[2].id } });
+      await tx.paymentReportDocument.create({ data: { paymentId: linkedPaymentId, documentId: parallelId, position: 1 } });
+      const journalService = createFinanceDocumentService({ transaction: operation => operation(tx), storage });
+      await assert.rejects(() => reverseJournalActionInTransaction(tx, accountant.id, request), /Недостаточно прав/);
+      await assert.rejects(() => reverseJournalActionInTransaction(tx, journalAdmin.id, request), /действующим платежом/);
+      await tx.payment.update({ where: { id: linkedPaymentId }, data: { deletedAt: new Date(), deletedById: journalAdmin.id } });
+      const reverse = await reverseJournalActionInTransaction(tx, journalAdmin.id, request);
+      assert.equal((await reverseJournalActionInTransaction(tx, journalAdmin.id, request)).reversalId, reverse.reversalId);
+      assert.equal(await journalService.read(accountant.id, parallelId), null);
+      assert.equal((await journalService.list(accountant.id)).rows.some(row => row.id === parallelId), false);
+      await assert.rejects(() => journalService.upload(accountant.id, concurrentInput), /отменена в журнале/);
+      await rejectedSql(tx, () => tx.payment.update({ where: { id: linkedPaymentId }, data: { deletedAt: null, deletedById: null } }));
+      const preserved = await tx.paymentReportDocument.findMany({ where: { paymentId: linkedPaymentId }, orderBy: { position: "asc" } });
+      assert.deepEqual(preserved.map(row => row.documentId), [docs[2].id, parallelId]);
+      await reverseJournalActionInTransaction(tx, journalAdmin.id, { entryId: reverse.reversalId, requestId: randomUUID() });
+      await tx.payment.update({ where: { id: linkedPaymentId }, data: { deletedAt: null, deletedById: null } });
+      const restored = await journalService.read(accountant.id, parallelId);
+      assert.ok(restored);
+      assert.deepEqual(Buffer.from(await new Response(restored.body).arrayBuffer()), pdf);
+    });
+
     for (const state of ["PENDING", "READY"] as const) {
       const id = randomUUID(); await f.db.financeDocument.create({ data: { id, uploadedById: accountant.id, clientMutationId: randomUUID(),
         fileName: "missing.pdf", mimeType: "application/pdf", size: pdf.length, contentHash: hash(pdf), requestFingerprint: hash(pdf),

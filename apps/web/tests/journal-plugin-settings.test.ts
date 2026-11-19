@@ -13,10 +13,10 @@ const manifest: PluginManifest = { id: "demo", name: "Демо", version: "1", a
   { key: "greeting", label: "Приветствие", type: "string", default: "Привет" }, { key: "accessToken", label: "Токен", type: "string" },
 ] };
 function fixture() {
-  let plugin = { id: "demo", name: "Демо", enabled: false }, token: Record<string, unknown> | null = null, fail = false;
+  let plugin = { id: "demo", name: "Демо", enabled: false, settingsRevision: 0 }, token: Record<string, unknown> | null = null, fail = false;
   const settings = new Map<string, unknown>([["greeting", "Привет"], ["accessToken", "old-secret"]]);
   const preferences = new Map<string, boolean>(), audits: Prisma.ChangeLogCreateInput[] = [], events: unknown[] = [];
-  const tx = { $queryRaw: async () => [], plugin: { findUnique: async () => plugin, update: async ({ data }: { data: { enabled: boolean } }) => plugin = { ...plugin, ...data } },
+  const tx = { $queryRaw: async () => [], plugin: { findUnique: async () => plugin, update: async ({ data }: { data: { enabled?: boolean } }) => plugin = { ...plugin, enabled: data.enabled ?? plugin.enabled, settingsRevision: plugin.settingsRevision + 1 } },
     user: { findUnique: async ({ where }: { where: { id: string } }) => ({ id: where.id, name: "Владелец интеграции" }) },
     pluginSetting: { findMany: async () => [...settings].map(([key, value]) => ({ key, value })), upsert: async ({ where, update }: { where: { pluginId_key: { key: string } }; update: { value: unknown } }) => { settings.set(where.pluginId_key.key, update.value); return update; } },
     apiToken: { create: async ({ data }: { data: Record<string, unknown> }) => token = { id: "token-id", createdAt: new Date(), revokedAt: null, ...data }, findUnique: async () => token,

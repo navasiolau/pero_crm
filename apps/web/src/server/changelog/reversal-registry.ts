@@ -1,3 +1,6 @@
+import { notificationReadReversal } from "@/server/notifications/read-reversal";
+import { pluginMutationReversal } from "@/server/plugins/settings-reversal";
+import { financeDocumentUploadReversal } from "@/server/finance-documents/upload-reversal";
 import { productTitleReversal } from "@/server/products/title-reversal";
 import { paymentVisibilityReversal } from "@/server/payments/visibility-reversal";
 import { retainedFileReversal } from "@/server/files/retained-file-reversal";
@@ -16,4 +19,7 @@ export const journalReversals = [
   proposalMediaUploadReversal,
   logisticsReallocationReversal,
   expenseReceiptIssueReversal,
+  financeDocumentUploadReversal,
+  pluginMutationReversal,
+  notificationReadReversal,
 ];
