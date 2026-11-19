@@ -1,4 +1,5 @@
 "use client";
+import { LogisticsReallocationButton } from "@/components/logistics/reallocation-dialog";
 
 import { useId, useState, type FormEvent } from "react";
 import { OrganizationPaymentsView } from "@/components/organization-payments-view";
@@ -96,10 +97,12 @@ function ExpenseFilterForm({ options, onReset }: Pick<OrganizationExpensePageDat
     </form>;
 }
 
-export function OrganizationExpenseResults({ options, page, pageSize, total, totalByn, sort, dir, ...ledger }: OrganizationExpensePageData &
+export function OrganizationExpenseResults({ canRedistributeLogistics, options, page, pageSize, total, totalByn, sort, dir, ...ledger }: OrganizationExpensePageData & { canRedistributeLogistics?: boolean } &
   Pick<Parameters<typeof OrganizationPaymentsView>[0], "expenseArticles" | "stockMaterials" | "materialCreateOptions">) {
   const { set, pending } = useListParams();
   return <OrganizationPaymentsView direction="EXPENSE" {...ledger}
+    renderDetailActions={(row, close) => canRedistributeLogistics && row.logisticsTripId
+      ? <LogisticsReallocationButton key={row.id} paymentId={row.id} closeExpense={close}/> : null}
     beforeTable={<>
       <ExpenseFilters options={options}/>
       <p className="text-sm" aria-live="polite" aria-busy={pending}>Итого по выборке <strong className="ml-1 tabular-nums">{formatExactMoney(totalByn, "BYN")}</strong></p>
