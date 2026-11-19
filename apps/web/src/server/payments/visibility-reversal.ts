@@ -8,6 +8,7 @@ import { readCashBalance, readOrgBalance } from "@/server/payroll/cash-core";
 const paymentInclude = {
   project: { select: { id: true, number: true, deletedAt: true } },
   stockPurchase: { select: { id: true } },
+  expenseReceipts: { where: { cancelledAt: null }, select: { id: true }, take: 1 },
   cashAccount: { select: { name: true } },
   expenseArticle: { select: { name: true } },
   reportDocuments: { select: { documentId: true, document: { select: { fileName: true } } }, orderBy: { position: "asc" } },
@@ -58,7 +59,8 @@ export async function paymentVisibilityProblem(tx: Prisma.TransactionClient, pay
   visible: boolean, command?: VisibilityCommand): Promise<string | null> {
   if (!payment || payment.deletionId) return "Платёж не найден или отменён вместе со складской операцией";
   if (payment.logisticsAllocationId) return "Расход связан с рейсом — исправьте общий рейс в логистике";
-  if (payment.stockPurchase) return "Платёж связан с приходом на склад — отдельно изменить его нельзя";
+  if (payment.stockPurchase || payment.expenseReceipts?.length)
+    return "Платёж связан с приходом на склад — отдельно изменить его нельзя";
   if (payment.project?.deletedAt) return "Проект в корзине: финансовая история доступна только для просмотра";
   if (Boolean(payment.deletedAt) !== visible) return visible ? "Платёж уже действует" : "Платёж уже удалён";
   if (command && (command.expectedHead !== payment.lastActionId || command.fingerprint !== fingerprint(payment, paymentVisibilityDocumentIds(payment))))
@@ -75,7 +77,8 @@ export async function paymentVisibilityProblem(tx: Prisma.TransactionClient, pay
 export async function setPaymentVisibility(tx: Prisma.TransactionClient, payment: StoredPayment, visible: boolean,
   actorId: string, nextHead: string | null) {
   const changed = await tx.payment.updateMany({
-    where: { id: payment.id, deletionId: null, deletedAt: payment.deletedAt, lastActionId: payment.lastActionId },
+    where: { id: payment.id, deletionId: null, deletedAt: payment.deletedAt, lastActionId: payment.lastActionId,
+      expenseReceipts: { none: { cancelledAt: null } } },
     data: { deletedAt: visible ? null : new Date(), deletedById: visible ? null : actorId, lastActionId: nextHead },
   });
   if (changed.count !== 1) throw new JournalReversalRefusal("Платёж уже изменён — обновите карточку");

@@ -53,6 +53,8 @@ export const COUNTERPARTY_ROLES: Role[] = [...MANAGER_ROLES, "PROCUREMENT"];
 export const FINANCE_ROLES: Role[] = ["ADMIN", "DIRECTOR", "ACCOUNTANT", "PROCUREMENT"];
 // Управление зарплатой других сотрудников не следует из общего финансового доступа.
 export const PAYROLL_MANAGE_ROLES: Role[] = ["ADMIN", "DIRECTOR", "ACCOUNTANT"];
+// Изменение проектного назначения проведённого расхода.
+export const EXPENSE_RECEIPT_PROJECT_ROLES: Role[] = ["ADMIN", "DIRECTOR", "ACCOUNTANT"];
 // Авансы — финансовая операция, отдельного права менеджера больше нет.
 export const ADVANCE_ROLES: Role[] = [...FINANCE_ROLES];
 export const WAREHOUSE_MANAGE_ROLES: Role[] = ["ADMIN", "DIRECTOR", "MANAGER", "PROCUREMENT"];

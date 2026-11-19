@@ -14,8 +14,9 @@ function sameCost(row:DeletionFact,result:{cost:string;value:string;money:string
 }
 
 /** Каскад сохраняет снимки выживших движений; порядок не выводится из случайного UUID. */
-export function planWarehouseDeletion(facts:readonly DeletionFact[],current:WarehousePosition,rootId:string) {
-  if(!facts.some(row=>row.id===rootId))throw Error('Движение не найдено в текущем учёте');
+export function planWarehouseDeletion(facts:readonly DeletionFact[],current:WarehousePosition,rootId:string | readonly string[]) {
+  const roots=new Set(typeof rootId==='string'?[rootId]:rootId);
+  if(!roots.size||[...roots].some(id=>!facts.some(row=>row.id===id)))throw Error('Движение не найдено в текущем учёте');
   if(new Set(facts.map(row=>row.id)).size!==facts.length)throw Error('Повтор движения в учёте');
   const legacy=facts.filter(row=>row.revision===null).sort((a,b)=>a.createdAt.localeCompare(b.createdAt));
   if(legacy.some((row,i)=>!Number.isFinite(Date.parse(row.createdAt))||(i>0&&row.createdAt===legacy[i-1].createdAt)))
@@ -31,7 +32,7 @@ export function planWarehouseDeletion(facts:readonly DeletionFact[],current:Ware
     let position:WarehousePosition={quantity:'0.000',value:'0.000000000'};
     const sources=new Map<string,DeletionFact>(),returns=new Map<string,ReturnCounter>(),deleted:{id:string;reason:DeletionReason}[]=[];
     for(const row of rows){
-      if(deleting&&row.id===rootId){deleted.push({id:row.id,reason:'ROOT'});continue;}
+      if(deleting&&roots.has(row.id)){deleted.push({id:row.id,reason:'ROOT'});continue;}
       let result:{position:WarehousePosition;cost:string;value:string;money:string};
       let reason:DeletionReason|undefined;
       const source=row.sourceId?sources.get(row.sourceId):undefined;

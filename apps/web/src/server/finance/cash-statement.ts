@@ -119,14 +119,15 @@ async function readCashStatementFacts(actor:FinanceWorkspaceActor,query:CashStat
   db.cashAccount.findMany({select:{id:true,name:true,currency:true,active:true},orderBy:{createdAt:"asc"}}),
   db.payment.findMany({where:{...activePaymentWhere,paidAt:{lt:range.end}},select:{id:true,cashAccountId:true,paidAt:true,direction:true,amount:true,currency:true,bynAmount:true,comment:true,
    project:{select:{id:true,number:true}},expenseArticle:{select:{name:true}},reportDocument:{select:reportDocumentSelect},reportDocuments:paymentReportDocumentsSelect,logisticsAllocation:{select:logisticsAllocationSelect},
-   stockPurchase:{select:{movement:{select:{material:{select:{name:true}}}}}}
+   stockPurchase:{select:{movement:{select:{material:{select:{name:true}}}}}},
+   expenseReceipts:{where:{cancelledAt:null},take:1,select:{lines:{orderBy:{position:"asc"},select:{movement:{select:{material:{select:{name:true}}}}}}}}
   }}),
   db.payout.findMany({where:{createdAt:{lt:range.end}},select:{id:true,cashAccountId:true,createdAt:true,kind:true,amount:true,payrollCurrency:true,
    cashAmount:true,cashCurrency:true,bynAmount:true,comment:true,user:{select:{name:true}}}}),
  ]);
  const facts:CashStatementFact[]=payments.map(row=>{const documents=row.logisticsAllocation?logisticsPaymentDocuments(row.logisticsAllocation):reportDocumentFiles(row);return {id:"payment:"+row.id,source:"PAYMENT",accountId:row.cashAccountId,at:row.paidAt.toISOString(),
   direction:row.direction,nativeAmount:exact(row.amount),nativeCurrency:row.currency,bynAmount:exact(row.bynAmount),
-  label:row.logisticsAllocation?"Логистика":row.stockPurchase?"Закупка · "+row.stockPurchase.movement.material.name:row.direction==="INCOME"?"Приход":row.expenseArticle?.name??"Расход",
+  label:row.logisticsAllocation?"Логистика":row.stockPurchase?"Закупка · "+row.stockPurchase.movement.material.name:row.expenseReceipts?.[0]?`Закупка · ${row.expenseReceipts[0].lines.map(line=>line.movement.material.name).join(", ")}`:row.direction==="INCOME"?"Приход":row.expenseArticle?.name??"Расход",
   comment:row.comment,project:row.project?{id:row.project.id,number:row.project.number}:null,document:documents[0]??null,documents};});
  for(const row of payouts)facts.push({id:"payout:"+row.id,source:row.kind==="ADVANCE"?"ADVANCE":"SALARY",accountId:row.cashAccountId,at:row.createdAt.toISOString(),
   direction:"EXPENSE",nativeAmount:exact(row.cashAmount),nativeCurrency:row.cashCurrency,bynAmount:exact(historicalByn(row)),
