@@ -5,6 +5,7 @@ import {softDeleteProductCore} from './delete-core';
 import type {ProductDeleteInput,ProductDeleteMutationResult} from './delete-contract';
 import { renumberActiveProductsInTransaction } from "./numbering";
 import { patchProductContactInTransaction } from "../projects/contact-core";
+import { titleReversalCommand } from './scalar-reversal';
 import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
@@ -162,7 +163,7 @@ export async function createProductInTransaction(tx: Prisma.TransactionClient, a
   return { ok: true as const, product, numberChanges };
 }
 
-async function updateProductValues(actor: DomainActor, productId: string, data: ProductValues, baseline: ProductUpdateBaseline, tx: Prisma.TransactionClient) {
+export async function updateProductValues(actor: DomainActor, productId: string, data: ProductValues, baseline: ProductUpdateBaseline, tx: Prisma.TransactionClient) {
     if(data.quantity!==undefined)await warehouseMetadataGate(tx);
     await lockProductRow(tx, productId);
     const visibilityActor = hasAnyRole(actor.roles, MANAGER_ROLES) ? actor : await resolveVisibilityActor(tx, actor);
@@ -183,7 +184,7 @@ async function updateProductValues(actor: DomainActor, productId: string, data: 
     if (data.description !== undefined && !isProductDescriptionUnchanged(data.description, before.description))
       data.description = normalizeProductDescription(data.description);
     const changed = Object.keys(data).some((key) => canonical(key, before[key as keyof typeof before]) !== canonical(key, data[key as keyof UpdateProductInput]));
-    if (!changed) return { ok: true as const, before, noOp: true };
+    if (!changed) return { ok: true as const, before, noOp: true as const };
     const oldCount = before.quantity ?? 1;
     const count = data.quantity ?? oldCount;
     productLineTotal(data.expectedPrice === undefined ? before.expectedPrice ?? null : data.expectedPrice, count);
@@ -191,7 +192,7 @@ async function updateProductValues(actor: DomainActor, productId: string, data: 
       return { ok: false as const, error: "Выберите активного сотрудника с ролью инженера" };
     if (count !== oldCount) await recalculateQuantity(tx, { ...before, quantity: oldCount }, count, actor);
     const capture = initialPriceCapture(before, data.expectedPrice);
-    await tx.product.update({ where: { id: productId }, data: { ...data, ...capture } });
+    const after = await tx.product.update({ where: { id: productId }, data: { ...data, ...capture } });
     if ("initialPrice" in capture) await writeChangeLogInTransaction(tx, {
       actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
       entity: "product", entityId: productId, action: "initialPrice.capture",
@@ -202,7 +203,7 @@ async function updateProductValues(actor: DomainActor, productId: string, data: 
         (data.engineerId !== undefined && data.engineerId !== before.engineerId)) await tx.productStagePayPool.updateMany({
       where: { productId, kind: "ENGINEERING", state: "DRAFT" }, data: { revision: { increment: 1 } },
     });
-    return { ok: true as const, before, noOp: false };
+    return { ok: true as const, before, after, noOp: false as const };
   }
 
 export async function updateProductCore(actor: DomainActor, productId: string, input: UpdateProductInput, baseline?: ProductUpdateBaseline, transaction: TaskTransaction = withTaskTransaction) {
@@ -215,9 +216,22 @@ export async function updateProductCore(actor: DomainActor, productId: string, i
   try { return await transaction(async tx=> {
     const result=await updateProductValues(actor,productId,data,baseline,tx);
     if (!result.ok) return result;
-    if (!result.noOp) await writeChangeLogInTransaction(tx, {actorType:"user",actorId:actor.id,actorName:actor.name,source:actor.source,entity:"product",entityId:productId,action:"update",oldValue:json(baseline),newValue:json(data)},
-      {...productJournalContext(result.before),before:businessSnapshot(result.before,Object.keys(data)),after:json(data),
-        links:'engineerId'in data?await journalPersonLinks(tx,[result.before.engineerId,data.engineerId],actor):[]});
+    if (!result.noOp) {
+      const reversal = data.title === undefined ? undefined : titleReversalCommand(result.before, result.after);
+      const audit = { actorType: "user", actorId: actor.id, actorName: actor.name, source: actor.source,
+        entity: "product", entityId: productId, action: "update" };
+      const context = productJournalContext(reversal ? result.after : result.before);
+      const { title: _title, ...otherFields } = data;
+      if (reversal) await writeChangeLogInTransaction(tx, {
+        ...audit, field: "title", reversal, oldValue: result.before.title, newValue: result.after.title,
+      }, context);
+      const fields = reversal ? otherFields : data;
+      const fieldKeys = Object.keys(fields) as (keyof UpdateProductInput)[];
+      if (fieldKeys.some(key => canonical(key, result.before[key]) !== canonical(key, data[key]))) await writeChangeLogInTransaction(tx,
+        { ...audit, oldValue: json(baseline), newValue: json(fields) },
+        { ...context, before: businessSnapshot(result.before, fieldKeys), after: json(fields),
+          links: "engineerId" in fields ? await journalPersonLinks(tx, [result.before.engineerId, fields.engineerId], actor) : [] });
+    }
     return result;
   }); } catch(error) { return {ok:false as const,error:error instanceof Error?error.message:"Не удалось изменить изделие"}; }
 }
@@ -274,7 +288,8 @@ export async function patchProductCore(actor: DomainActor, input: ProductPatch, 
     }
     if (legacy && current?.technicalSpecifications != null)
       return {...identity,kind:"conflict",error:"Технические характеристики уже обновлены. Откройте карточку заново"};
-    let result: Extract<ProductPatchResult,{kind:"saved"}>;
+    let reversal: ReturnType<typeof titleReversalCommand>;
+    let result: Extract<ProductPatchResult,{kind:'saved'}>;
     if(patch.field==="client.phone"||patch.field==="project.address"||patch.field==="project.clientId") {
       const shared=await patchProductContactInTransaction(actor,{productId:patch.productId,
         field:patch.field==="client.phone"?"phone":patch.field==="project.address"?"address":"clientId",
@@ -319,6 +334,7 @@ export async function patchProductCore(actor: DomainActor, input: ProductPatch, 
       const data = {[patch.field]:value} as ProductValues;
       const mutation=await updateProductValues(actor,patch.productId,data,{[patch.field]:patch.expectedValue},tx);
       if(!mutation.ok)return {...identity,kind:"validation",error:mutation.error};
+      if (patch.field === 'title' && !mutation.noOp) reversal = titleReversalCommand(mutation.before, mutation.after);
       const derived:ProductPatchDerived={};
       if(patch.field==="quantity"||patch.field==="expectedPrice") {
         const quantity=patch.field==="quantity"?Number(value):current.quantity;
@@ -332,7 +348,7 @@ export async function patchProductCore(actor: DomainActor, input: ProductPatch, 
       throw new Error("Не удалось прочитать изделие");
     }
     if(!result.noOp && "expectedValue" in patch)await writeChangeLogInTransaction(tx, {id:receiptId,actorType:"user",actorId:actor.id,actorName:actor.name,source:actor.source,
-      entity:"product",entityId:patch.productId,action:"inline.update",field:patch.field,oldValue:json({value:patch.expectedValue}),newValue:json({fingerprint,result})},
+      entity:"product",entityId:patch.productId,action:"inline.update",field:patch.field,reversal,oldValue:json({value:patch.expectedValue}),newValue:json({fingerprint,result})},
       {...productJournalContext(current??permitted),kind:contact?'receipt':'event',before:{[patch.field]:patch.expectedValue},after:{[patch.field]:result.value},
         links:patch.field==='engineerId'?await journalPersonLinks(tx,[current?.engineerId,result.value===null?null:String(result.value)],actor):[]});
     return result;

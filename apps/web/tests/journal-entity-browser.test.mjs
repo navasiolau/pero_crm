@@ -27,6 +27,8 @@ const transport = `
 export async function listJournal(input){window.__qa.lists.push(input);return{entries:[],total:0,page:input.page??1,pageSize:input.pageSize??20,sort:input.sort??'time',dir:input.dir??'desc'}}
 export async function listJournalFilterOptions(scope){window.__qa.options.push(scope);return{users:[{id:'__system__',label:'Система'}],entities:[{id:'file',label:'Файлы'}]}}
 export async function getJournalEntry(){throw Error('UNEXPECTED_DETAIL_REQUEST')}
+export async function previewJournalReversal(){throw Error('UNEXPECTED_REVERSAL_PREVIEW')}
+export async function reverseJournalAction(){throw Error('UNEXPECTED_REVERSAL')}
 `;
 
 test("context journal makes no request before project tab or product viewport and retains scope on reset", { timeout: 90000 }, async () => {
@@ -34,7 +36,7 @@ test("context journal makes no request before project tab or product viewport an
   const built = await build({ stdin: { contents: entry, loader: "tsx", resolveDir: web }, bundle: true, write: false, platform: "browser", format: "iife", jsx: "automatic",
     tsconfig: path.join(web, "tsconfig.json"), define: { "process.env.NODE_ENV": '"production"' }, logLevel: "silent",
     plugins: [{ name: "entity-journal-transport", setup(builder) {
-      builder.onResolve({ filter: /^@\/server\/changelog\/actions$/ }, () => ({ path: "actions", namespace: "entity-transport" }));
+      builder.onResolve({ filter: /^@\/server\/changelog\/(actions|reversal-actions)$/ }, () => ({ path: "actions", namespace: "entity-transport" }));
       builder.onLoad({ filter: /.*/, namespace: "entity-transport" }, () => ({ contents: transport, loader: "tsx", resolveDir: web }));
     } }],
   });

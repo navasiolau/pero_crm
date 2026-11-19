@@ -54,7 +54,7 @@ function searchMatchesSql(query:string):Prisma.Sql{
    OR to_char(s."createdAt"+interval '3 hours','DD.MM.YYYY HH24:MI:SS') ILIKE ${pattern} ESCAPE '\\'`;
 }
 
-const rawColumns=Prisma.sql`c.id,c."actorType",c."actorId",c."actorName",c.entity,c."entityId",c.action,c.field,c."oldValue",c."newValue",c.source,c."createdAt",c.presentation,c."searchText"`;
+const rawColumns=Prisma.sql`c.id,c."actorType",c."actorId",c."actorName",c.entity,c."entityId",c.action,c.field,c."oldValue",c."newValue",c.source,c."createdAt",c.presentation,c."searchText",c."reversesId"`;
 type PageSnapshot={total:bigint;offset:bigint;entries:JournalListRow[];pendingIds:string[]};
 function classification(query:JournalQuery){
  const dates=dateSql(query);
