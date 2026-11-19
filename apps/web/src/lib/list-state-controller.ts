@@ -1,4 +1,4 @@
-import { DEFAULT_LIST_QUERY, decodeListPreference, isEngineerFilterInitialized, normalizeListQuery, updateListQuery, type ListSection } from "./list-state";
+import { listDefaultQuery, decodeListPreference, isEngineerFilterInitialized, normalizeListQuery, updateListQuery, type ListSection } from "./list-state";
 import type { SaveListPreferenceResult } from "../server/list-preference-service";
 
 export interface ListStateSnapshot { query: string; pending: boolean; revision: number; searchRevision: number }
@@ -25,6 +25,7 @@ export class ListStateController {
     this.snapshot = { query: normalizeListQuery(options.section, options.query), pending: false, revision: 0, searchRevision: 0 };
     this.preference = options.preference;
   }
+  defaultQuery = () => listDefaultQuery(this.options.section);
   getSnapshot = () => this.snapshot;
 
   start() {
@@ -70,7 +71,7 @@ export class ListStateController {
 
   reset() {
     this.snapshot = { ...this.snapshot, searchRevision: this.snapshot.searchRevision + 1 };
-    this.schedule(DEFAULT_LIST_QUERY, true);
+    this.schedule(this.defaultQuery(), true);
   }
 
   private schedule(query: string, navigate: boolean) {
