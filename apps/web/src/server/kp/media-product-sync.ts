@@ -88,7 +88,7 @@ export async function linkProposalProductMediaInTransaction(tx: Tx, context: Pro
       let media: OwnedMediaRow, source: ReturnType<typeof readableMedia> | undefined;
       if (file) {
         const [stored] = await tx.$queryRaw<OwnedMediaRow[]>`SELECT * FROM "ProposalMedia" WHERE id = ${mediaId} AND "proposalId" = ${context.proposalId}`;
-        if (!stored || stored.uploadState !== "READY" ||
+        if (!stored || stored.uploadState !== "READY" || stored.deletedAt ||
           (!previousMediaIds.has(mediaId) && (stored.retiringAt || stored.optimizedPurgedAt)))
           throw new ProposalMediaError("KP_MEDIA_NOT_FOUND");
         media = stored;

@@ -1733,6 +1733,8 @@ model ProposalVersion {
 }
 
 model ProposalMedia {
+  deletedAt DateTime?
+  deletedById String?
   id            String @id @default(cuid())
   proposalId    String
   proposal      CommercialProposal @relation(fields: [proposalId], references: [id], onDelete: Restrict)

@@ -8,6 +8,7 @@ import { KP_MEDIA_LEASE_MS, KP_MEDIA_ORPHAN_DELAY_MS, ProposalMediaError, parseM
   type MediaReservation, type ReadableMedia } from "./media-contract";
 import { createMediaUploadPlan, createProductMediaCopyPlan,
   type ProposalMediaRepository } from "./media-core";
+import { proposalMediaUploadReversal } from "./media-upload-reversal";
 import {projectJournalContext} from '../projects/journal';
 
 type Tx = Prisma.TransactionClient;
@@ -17,7 +18,7 @@ type JobRow = { id: string; proposalId: string | null; kind: string; state: stri
 export type OwnedMediaRow = { id: string; proposalId: string; storageBinding: unknown; originalKey: string | null;
   originalHash: string | null; originalSize: number | null; optimizedKey: string | null; optimizedHash: string | null;
   optimizedSize: number | null; mimeType: string; optimizedMimeType: string; fileName: string; width: number | null;
-  height: number | null; uploadState: string; uploadJobId: string | null; retiringAt: Date | null;
+  height: number | null; uploadState: string; uploadJobId: string | null; retiringAt: Date | null; deletedAt: Date | null;
   originalPurgedAt: Date | null; optimizedPurgedAt: Date | null; expiresAt: Date };
 
 /** Порядок lock совпадает с №181: Project → CommercialProposal → job/media. */
@@ -41,7 +42,7 @@ export async function lockProposalMediaOwner(tx: Tx, input: { actorId: string; p
 export async function ownedProposalMedia(tx: Tx, proposalId: string, mediaId: string): Promise<OwnedMediaRow> {
   const [media] = await tx.$queryRaw<OwnedMediaRow[]>`
     SELECT * FROM "ProposalMedia" WHERE "proposalId" = ${proposalId} AND id = ${mediaId}`;
-  if (!media || media.uploadState !== "READY" || media.retiringAt)
+  if (!media || media.uploadState !== "READY" || media.retiringAt || media.deletedAt)
     throw new ProposalMediaError("KP_MEDIA_NOT_FOUND");
   return media;
 }
@@ -183,7 +184,9 @@ export function createPrismaProposalMediaRepository(db: Pick<PrismaClient, "$tra
       await tx.$executeRaw`UPDATE "ProposalJob" SET state = 'CANCELLED', "leaseOwner" = NULL, "leaseUntil" = NULL, "updatedAt" = ${now}
         WHERE id = ${plan.cleanupJobId} AND state IN ('PENDING', 'FAILED')`;
       await writeChangeLogInTransaction(tx, { actorType: "user", actorId: plan.actorId, entity: "proposalMedia", entityId: plan.mediaId,
-        action: "create", newValue: { proposalId: plan.proposalId, originalHash: plan.original.sha256, optimizedHash: plan.optimized.sha256 } },
+        action: "create", reversal: proposalMediaUploadReversal.command({
+          proposalId: plan.proposalId, mediaId: plan.mediaId, jobId: plan.jobId, expectedDeletedAt: null, deleted: true,
+        }), newValue: { proposalId: plan.proposalId, originalHash: plan.original.sha256, optimizedHash: plan.optimized.sha256 } },
         {...(owner.projectId?projectJournalContext({id:owner.projectId,number:owner.projectNumber}):{}),
           entity:{type:'proposalMedia',id:plan.mediaId,label:plan.fileName},actor:{type:'user',id:plan.actorId,name:owner.actorName??'Имя пользователя не сохранено'},
           before:null,after:{fileName:plan.fileName,mimeType:plan.original.mimeType,size:plan.original.size}});

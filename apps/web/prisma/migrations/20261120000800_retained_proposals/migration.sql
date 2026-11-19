@@ -35,3 +35,5 @@ WHERE cleanup.kind = 'PURGE_MEDIA' AND cleanup.payload->>'kind' = 'RETIRED_PRODU
   AND copy.id = cleanup.payload->>'operationJobId' AND copy.id = f."proposalMediaCopyJobId"
   AND copy.kind = 'COPY_PRODUCT_MEDIA'
   AND jsonb_path_exists(cleanup.result, '$.objects.*.versions[*] ? (@.phase == "INTENT" || @.phase == "DELETED")');
+
+ALTER TABLE "ProposalMedia" ADD COLUMN "deletedAt" TIMESTAMP(3), ADD COLUMN "deletedById" TEXT;
